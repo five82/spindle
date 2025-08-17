@@ -60,7 +60,7 @@ class NtfyNotifier:
         return self.send_notification(
             f"Detected {disc_type} disc: {disc_title}",
             title="💿 Disc Detected",
-            tags="cd,disc",
+            tags="spindle,disc,detected",
         )
 
     def notify_rip_started(self, disc_title: str) -> bool:
@@ -68,7 +68,7 @@ class NtfyNotifier:
         return self.send_notification(
             f"Started ripping: {disc_title}",
             title="🎬 Ripping Started",
-            tags="rip,start",
+            tags="spindle,rip,started",
         )
 
     def notify_rip_completed(self, disc_title: str, duration: str) -> bool:
@@ -76,31 +76,16 @@ class NtfyNotifier:
         return self.send_notification(
             f"Completed ripping: {disc_title} (took {duration})",
             title="✅ Ripping Complete",
-            tags="rip,complete",
+            tags="spindle,rip,completed",
         )
 
-    def notify_encode_started(self, title: str) -> bool:
-        """Send notification when encoding starts."""
-        return self.send_notification(
-            f"Started encoding: {title}",
-            title="⚙️ Encoding Started",
-            tags="encode,start",
-        )
-
-    def notify_encode_completed(self, title: str, size_reduction: float) -> bool:
-        """Send notification when encoding completes."""
-        return self.send_notification(
-            f"Completed encoding: {title} ({size_reduction:.1f}% size reduction)",
-            title="✅ Encoding Complete",
-            tags="encode,complete",
-        )
 
     def notify_media_added(self, title: str, media_type: str) -> bool:
         """Send notification when media is added to Plex."""
         return self.send_notification(
             f"Added to Plex: {title}",
             title=f"📚 {media_type.title()} Added",
-            tags="plex,library",
+            tags="spindle,plex,added",
         )
 
     def notify_queue_started(self, count: int) -> bool:
@@ -108,7 +93,7 @@ class NtfyNotifier:
         return self.send_notification(
             f"Started processing queue with {count} items",
             title="🔄 Queue Processing Started",
-            tags="queue,start",
+            tags="spindle,queue,started",
         )
 
     def notify_queue_completed(self, processed: int, failed: int, duration: str) -> bool:
@@ -123,7 +108,7 @@ class NtfyNotifier:
         return self.send_notification(
             message,
             title=title,
-            tags="queue,complete",
+            tags="spindle,queue,completed",
         )
 
     def notify_error(self, error_message: str, context: str | None = None) -> bool:
@@ -136,7 +121,7 @@ class NtfyNotifier:
             message,
             title="❌ Spindle Error",
             priority="high",
-            tags="error,alert",
+            tags="spindle,error,alert",
         )
 
     def notify_unidentified_media(self, filename: str) -> bool:
@@ -144,7 +129,7 @@ class NtfyNotifier:
         return self.send_notification(
             f"Could not identify: {filename}\nMoved to review directory",
             title="❓ Unidentified Media",
-            tags="unidentified,review",
+            tags="spindle,unidentified,review",
         )
 
     def test_notification(self) -> bool:
@@ -152,5 +137,5 @@ class NtfyNotifier:
         return self.send_notification(
             "Spindle notification system is working correctly!",
             title="🧪 Test Notification",
-            tags="test",
+            tags="spindle,test",
         )

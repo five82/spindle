@@ -211,7 +211,7 @@ class ContinuousProcessor:
     async def _encode_item(self, item) -> None:
         """Encode a identified item."""
         logger.info(f"Encoding: {item.media_info}")
-        self.notifier.notify_encode_started(str(item.media_info))
+        # Drapto handles encoding notifications, so spindle doesn't send duplicates
 
         item.status = QueueItemStatus.ENCODING
         self.queue_manager.update_item(item)
@@ -225,10 +225,7 @@ class ContinuousProcessor:
         if result.success:
             item.encoded_file = result.output_file
             item.status = QueueItemStatus.ENCODED
-            self.notifier.notify_encode_completed(
-                str(item.media_info),
-                result.size_reduction_percent,
-            )
+            # Drapto already sent encoding completion notification
             logger.info(f"Encoded: {result.output_file}")
         else:
             item.status = QueueItemStatus.FAILED

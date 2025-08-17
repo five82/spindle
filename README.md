@@ -64,7 +64,7 @@ uv pip install -e .
    ```toml
    # Directory paths (edit for your setup)
    staging_dir = "~/.local/share/spindle/staging"  # Temporary processing
-   library_dir = "~/your-media-library"            # Your media library directory  
+   library_dir = "~/your-media-library"            # Your media library directory
    log_dir = "~/.local/share/spindle/logs"         # Log files
    review_dir = "~/your-review-directory"          # Unidentified media
 
@@ -253,11 +253,3 @@ Spindle sends notifications for:
 - Media added to Plex
 - Queue status updates
 - Errors and failures
-
-## License
-
-[License information]
-
-## Contributing
-
-[Contributing guidelines]
