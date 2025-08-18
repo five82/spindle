@@ -147,8 +147,8 @@ def status(ctx: click.Context) -> None:
 
 
 @cli.command()
-@click.option("--daemon", "-d", is_flag=True, help="Run as background daemon")
-@click.option("--foreground", "-f", is_flag=True, help="Run in foreground (default)")
+@click.option("--daemon", "-d", is_flag=True, help="Run as background daemon (default)")
+@click.option("--foreground", "-f", is_flag=True, help="Run in foreground")
 @click.pass_context
 def start(ctx: click.Context, daemon: bool, foreground: bool) -> None:
     """Start continuous processing mode - auto-rip discs and process queue."""

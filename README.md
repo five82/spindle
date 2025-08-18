@@ -91,27 +91,28 @@ uv pip install -e .
 
 ### Main Workflow - Continuous Processing
 ```bash
-# Start Spindle as background daemon (recommended)
+# Start Spindle (runs as background daemon by default)
 uv run spindle start
 
-# Or run in foreground for testing
+# Or run in foreground for testing/debugging
 uv run spindle start --foreground
 
 # Stop daemon when needed
 uv run spindle stop
 ```
 
-This starts continuous processing mode as a background daemon:
+By default, `spindle start` runs as a background daemon:
 1. **Insert a disc** → Automatically ripped and added to queue
 2. **Background processing** → Identify → Encode → Import to Plex
 3. **Disc ejected** → Ready for next disc
 4. **Repeat** → Each movie or TV show becomes available in Plex as soon as it's done
 
-**Daemon Benefits:**
+**Default Daemon Mode Benefits:**
 - Runs independently of your terminal session
-- Survives SSH disconnections and reboots (with systemd service)
+- Survives SSH disconnections (but not reboots unless using systemd service)
 - Logs activity to `log_dir/spindle.log`
 - Can insert discs anytime, processing happens automatically
+- Use `--foreground` flag only for testing/debugging
 
 ### Install as User Service
 ```bash
