@@ -1,9 +1,12 @@
 """Wrapper for drapto encoding functionality."""
 
+import json
 import logging
 import subprocess
+import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from ..config import SpindleConfig
 
@@ -46,7 +49,7 @@ class DraptoEncoder:
         self.drapto_binary = config.drapto_binary
 
     def encode_file(self, input_file: Path, output_dir: Path,
-                   progress_callback: Callable[[str], None] | None = None) -> EncodeResult:
+                   progress_callback: Callable[[dict[str, Any]], None] | None = None) -> EncodeResult:
         """Encode a single video file using drapto."""
 
         if not input_file.exists():
@@ -69,15 +72,14 @@ class DraptoEncoder:
             cmd = self._build_drapto_command(input_file, output_dir)
 
             if progress_callback:
-                progress_callback(f"Starting encode: {input_file.name}")
+                progress_callback({
+                    "type": "initialization",
+                    "message": f"Starting encode: {input_file.name}",
+                    "input_file": str(input_file)
+                })
 
-            # Run drapto
-            result = subprocess.run(
-                cmd,
-                check=False, capture_output=True,
-                text=True,
-                timeout=None,  # No timeout for encoding (can take hours)
-            )
+            # Run drapto with streaming JSON progress
+            result = self._run_drapto_with_progress(cmd, progress_callback)
 
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "Unknown error"
@@ -104,7 +106,12 @@ class DraptoEncoder:
             logger.info(f"Successfully encoded {input_file.name} -> {output_file.name}")
 
             if progress_callback:
-                progress_callback(f"Completed encode: {output_file.name}")
+                progress_callback({
+                    "type": "completed",
+                    "message": f"Completed encode: {output_file.name}",
+                    "output_file": str(output_file),
+                    "size_reduction_percent": ((input_size - output_size) / input_size * 100) if input_size > 0 else 0
+                })
 
             return EncodeResult(
                 success=True,
@@ -141,6 +148,7 @@ class DraptoEncoder:
             "-i", str(input_file),
             "-o", str(output_dir),
             "--verbose",  # Enable verbose output for better logging
+            "--json-progress",  # Enable structured JSON progress output
         ]
 
         # Add quality settings based on resolution detection
@@ -176,14 +184,72 @@ class DraptoEncoder:
 
         return None
 
+    def _run_drapto_with_progress(self, cmd: list[str], 
+                                  progress_callback: Callable[[dict[str, Any]], None] | None = None) -> subprocess.CompletedProcess:
+        """Run drapto command and parse JSON progress output in real-time."""
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,  # Line buffered
+            universal_newlines=True
+        )
+        
+        stdout_lines = []
+        
+        def read_output():
+            """Read and parse JSON progress from stdout."""
+            while True:
+                line = process.stdout.readline()
+                if not line:
+                    break
+                    
+                line = line.strip()
+                stdout_lines.append(line)
+                
+                # Try to parse as JSON progress event
+                if line.startswith('{') and progress_callback:
+                    try:
+                        progress_data = json.loads(line)
+                        if isinstance(progress_data, dict) and 'type' in progress_data:
+                            progress_callback(progress_data)
+                    except json.JSONDecodeError:
+                        # Not a JSON progress line, ignore
+                        pass
+        
+        # Start reading output in background thread
+        output_thread = threading.Thread(target=read_output)
+        output_thread.start()
+        
+        # Wait for process to complete
+        returncode = process.wait()
+        output_thread.join()
+        
+        # Return a CompletedProcess-like object
+        class CompletedProcessResult:
+            def __init__(self, returncode: int, stdout_lines: list[str]):
+                self.returncode = returncode
+                self.stdout = '\n'.join(stdout_lines)
+                self.stderr = ''
+        
+        return CompletedProcessResult(returncode, stdout_lines)
+
     def encode_batch(self, input_files: list[Path], output_dir: Path,
-                    progress_callback: Callable[[str], None] | None = None) -> list[EncodeResult]:
+                    progress_callback: Callable[[dict[str, Any]], None] | None = None) -> list[EncodeResult]:
         """Encode multiple files in sequence."""
         results = []
 
         for i, input_file in enumerate(input_files, 1):
             if progress_callback:
-                progress_callback(f"Processing file {i}/{len(input_files)}: {input_file.name}")
+                progress_callback({
+                    "type": "batch_progress",
+                    "message": f"Processing file {i}/{len(input_files)}: {input_file.name}",
+                    "current_file": i,
+                    "total_files": len(input_files),
+                    "filename": input_file.name
+                })
 
             result = self.encode_file(input_file, output_dir, progress_callback)
             results.append(result)

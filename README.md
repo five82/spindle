@@ -40,16 +40,22 @@ spindle automates the complete workflow from physical disc to organized media li
    cargo install --git https://github.com/five82/drapto
    ```
 
-3. **Python 3.11+** with uv package manager
+3. **uv** - Python package manager (REQUIRED)
+   ```bash
+   # Install uv first (https://docs.astral.sh/uv/getting-started/installation/)
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
 
 ### Install Spindle
+
+**⚠️ IMPORTANT: Spindle requires uv package manager. Standard pip will not work.**
 
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd spindle
 
-# Install with uv
+# Install with uv (REQUIRED - pip will not work)
 uv pip install -e .
 ```
 
@@ -57,7 +63,7 @@ uv pip install -e .
 
 1. **Create configuration file**:
    ```bash
-   spindle init-config
+   uv run spindle init-config
    ```
 
 2. **Edit configuration** at `~/.config/spindle/config.toml`:
@@ -86,13 +92,13 @@ uv pip install -e .
 ### Main Workflow - Continuous Processing
 ```bash
 # Start Spindle as background daemon (recommended)
-spindle start
+uv run spindle start
 
 # Or run in foreground for testing
-spindle start --foreground
+uv run spindle start --foreground
 
 # Stop daemon when needed
-spindle stop
+uv run spindle stop
 ```
 
 This starts continuous processing mode as a background daemon:
@@ -137,22 +143,22 @@ sudo loginctl enable-linger $(whoami)
 ### System Management
 ```bash
 # Check system status and queue
-spindle status
+uv run spindle status
 
 # View queue contents
-spindle queue-list
+uv run spindle queue-list
 
 # Clear completed items
-spindle queue-clear --completed
+uv run spindle queue-clear --completed
 
 # Test notifications
-spindle test-notify
+uv run spindle test-notify
 ```
 
 ### Manual File Processing
 ```bash
 # Add existing video files to queue (processed automatically by continuous mode)
-spindle add-file /path/to/video.mkv
+uv run spindle add-file /path/to/video.mkv
 ```
 
 ## Workflow Details
@@ -201,6 +207,7 @@ review_dir/
 ## Requirements
 
 ### Software Dependencies
+- **uv** - Python package manager (REQUIRED)
 - Python 3.11+
 - MakeMKV (makemkvcon)
 - drapto (Rust-based encoder)
@@ -219,22 +226,22 @@ review_dir/
 uv pip install -e ".[dev]"
 
 # Run tests
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=spindle
+uv run pytest --cov=spindle
 ```
 
 ### Code Quality
 ```bash
 # Format code
-black src/
+uv run black src/
 
 # Lint code
-ruff check src/
+uv run ruff check src/
 
 # Type checking
-mypy src/
+uv run mypy src/
 ```
 
 ## Error Handling

@@ -36,7 +36,8 @@ class QueueItem:
                  media_info: MediaInfo | None = None, ripped_file: Path | None = None,
                  encoded_file: Path | None = None, final_file: Path | None = None,
                  error_message: str | None = None, created_at: datetime | None = None,
-                 updated_at: datetime | None = None):
+                 updated_at: datetime | None = None, progress_stage: str | None = None,
+                 progress_percent: float = 0.0, progress_message: str | None = None):
         self.item_id = item_id
         self.source_path = source_path
         self.disc_title = disc_title
@@ -48,6 +49,9 @@ class QueueItem:
         self.error_message = error_message
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
+        self.progress_stage = progress_stage
+        self.progress_percent = progress_percent
+        self.progress_message = progress_message
 
     def __str__(self) -> str:
         if self.media_info:
@@ -84,7 +88,10 @@ class QueueManager:
                     final_file TEXT,
                     error_message TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    progress_stage TEXT,
+                    progress_percent REAL DEFAULT 0.0,
+                    progress_message TEXT
                 )
             """)
 
@@ -92,6 +99,22 @@ class QueueManager:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status)
             """)
+            
+            # Migrate existing databases to add progress columns
+            try:
+                conn.execute("ALTER TABLE queue_items ADD COLUMN progress_stage TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
+            try:
+                conn.execute("ALTER TABLE queue_items ADD COLUMN progress_percent REAL DEFAULT 0.0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+                
+            try:
+                conn.execute("ALTER TABLE queue_items ADD COLUMN progress_message TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     def add_disc(self, disc_title: str) -> QueueItem:
         """Add a disc to the queue."""
@@ -102,9 +125,11 @@ class QueueManager:
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
-                INSERT INTO queue_items (disc_title, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
-            """, (disc_title, item.status.value, item.created_at, item.updated_at))
+                INSERT INTO queue_items (disc_title, status, created_at, updated_at, 
+                                        progress_stage, progress_percent, progress_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (disc_title, item.status.value, item.created_at, item.updated_at,
+                  item.progress_stage, item.progress_percent, item.progress_message))
 
             item.item_id = cursor.lastrowid
 
@@ -120,10 +145,12 @@ class QueueManager:
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
-                INSERT INTO queue_items (source_path, status, ripped_file, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO queue_items (source_path, status, ripped_file, created_at, updated_at,
+                                        progress_stage, progress_percent, progress_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (str(source_path), item.status.value, str(source_path),
-                  item.created_at, item.updated_at))
+                  item.created_at, item.updated_at, item.progress_stage, 
+                  item.progress_percent, item.progress_message))
 
             item.item_id = cursor.lastrowid
             item.ripped_file = source_path
@@ -155,7 +182,8 @@ class QueueManager:
                 UPDATE queue_items 
                 SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
                     ripped_file = ?, encoded_file = ?, final_file = ?, 
-                    error_message = ?, updated_at = ?
+                    error_message = ?, updated_at = ?, progress_stage = ?,
+                    progress_percent = ?, progress_message = ?
                 WHERE id = ?
             """, (
                 str(item.source_path) if item.source_path else None,
@@ -167,6 +195,9 @@ class QueueManager:
                 str(item.final_file) if item.final_file else None,
                 item.error_message,
                 item.updated_at,
+                item.progress_stage,
+                item.progress_percent,
+                item.progress_message,
                 item.item_id,
             ))
 
@@ -298,4 +329,7 @@ class QueueManager:
             error_message=row["error_message"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
+            progress_stage=row["progress_stage"] if "progress_stage" in row.keys() else None,
+            progress_percent=row["progress_percent"] if "progress_percent" in row.keys() else 0.0,
+            progress_message=row["progress_message"] if "progress_message" in row.keys() else None,
         )

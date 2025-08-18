@@ -4,6 +4,7 @@ import logging
 import re
 import subprocess
 from pathlib import Path
+from typing import Callable, Union
 
 from ..config import SpindleConfig
 
@@ -15,7 +16,7 @@ class Track:
 
     def __init__(self, track_id: str, track_type: str, codec: str,
                  language: str, duration: int, size: int,
-                 title: str | None = None, is_default: bool = False):
+                 title: Union[str, None] = None, is_default: bool = False):
         self.track_id = track_id
         self.track_type = track_type  # "video", "audio", "subtitle"
         self.codec = codec
@@ -34,7 +35,7 @@ class Title:
 
     def __init__(self, title_id: str, duration: int, size: int,
                  chapters: int, tracks: list[Track],
-                 name: str | None = None):
+                 name: Union[str, None] = None):
         self.title_id = title_id
         self.duration = duration  # in seconds
         self.size = size  # in bytes
@@ -73,7 +74,7 @@ class MakeMKVRipper:
         self.config = config
         self.makemkv_con = config.makemkv_con
 
-    def scan_disc(self, device: str | None = None) -> list[Title]:
+    def scan_disc(self, device: Union[str, None] = None) -> list[Title]:
         """Scan disc and return available titles."""
         if device is None:
             device = self.config.optical_drive
@@ -257,8 +258,8 @@ class MakeMKVRipper:
         return main_title
 
     def rip_title(self, title: Title, output_dir: Path,
-                  device: str | None = None,
-                  progress_callback: callable | None = None) -> Path:
+                  device: Union[str, None] = None,
+                  progress_callback: Union[Callable, None] = None) -> Path:
         """Rip a specific title to the output directory."""
         if device is None:
             device = self.config.optical_drive
@@ -313,7 +314,7 @@ class MakeMKVRipper:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"MakeMKV rip failed: {e}")
 
-    def rip_disc(self, output_dir: Path, device: str | None = None) -> Path:
+    def rip_disc(self, output_dir: Path, device: Union[str, None] = None) -> Path:
         """Scan disc and rip the main title."""
         titles = self.scan_disc(device)
         main_title = self.select_main_title(titles)

@@ -216,10 +216,62 @@ class ContinuousProcessor:
         item.status = QueueItemStatus.ENCODING
         self.queue_manager.update_item(item)
 
-        # Encode the file
+        # Encode the file with progress callback
+        def encoding_progress_callback(progress_data: dict) -> None:
+            """Handle progress updates from drapto encoding."""
+            progress_type = progress_data.get("type", "")
+            
+            if progress_type == "stage_progress":
+                stage = progress_data.get("stage", "")
+                percent = progress_data.get("percent", 0)
+                message = progress_data.get("message", "")
+                eta_seconds = progress_data.get("eta_seconds")
+                
+                logger.info(f"Encoding {stage}: {percent:.1f}% - {message}")
+                
+                # Update item with current progress
+                item.progress_stage = stage
+                item.progress_percent = percent
+                item.progress_message = message
+                self.queue_manager.update_item(item)
+                
+            elif progress_type == "encoding_progress":
+                percent = progress_data.get("percent", 0)
+                speed = progress_data.get("speed", 0)
+                fps = progress_data.get("fps", 0)
+                eta_seconds = progress_data.get("eta_seconds", 0)
+                
+                logger.info(f"Encoding: {percent:.1f}% (speed: {speed:.1f}x, fps: {fps:.1f}, ETA: {eta_seconds}s)")
+                
+                # Update item with encoding progress
+                item.progress_stage = "encoding"
+                item.progress_percent = percent
+                item.progress_message = f"Speed: {speed:.1f}x, FPS: {fps:.1f}"
+                self.queue_manager.update_item(item)
+                
+            elif progress_type == "encoding_complete":
+                size_reduction = progress_data.get("size_reduction_percent", 0)
+                logger.info(f"Encoding complete - size reduction: {size_reduction:.1f}%")
+                
+            elif progress_type == "validation_complete":
+                validation_passed = progress_data.get("validation_passed", False)
+                if validation_passed:
+                    logger.info("Encoding validation passed")
+                else:
+                    logger.warning("Encoding validation failed")
+                    
+            elif progress_type == "error":
+                error_msg = progress_data.get("message", "Unknown error")
+                logger.error(f"Drapto error: {error_msg}")
+                
+            elif progress_type == "warning":
+                warning_msg = progress_data.get("message", "Unknown warning")
+                logger.warning(f"Drapto warning: {warning_msg}")
+
         result = self.encoder.encode_file(
             item.ripped_file,
             self.config.staging_dir / "encoded",
+            progress_callback=encoding_progress_callback,
         )
 
         if result.success:

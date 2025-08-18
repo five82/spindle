@@ -1,6 +1,8 @@
 """Command-line interface for Spindle."""
 
 import logging
+import os
+import shutil
 import signal
 import sys
 import time
@@ -22,6 +24,27 @@ from .queue.manager import QueueItemStatus, QueueManager
 console = Console()
 
 
+def check_uv_requirement() -> None:
+    """Check if uv is available and recommend proper usage."""
+    # Check if uv is installed
+    if not shutil.which("uv"):
+        console.print("[red]ERROR: uv package manager is required but not found![/red]")
+        console.print("Spindle uses uv for dependency management.")
+        console.print("Install uv first:")
+        console.print("  curl -LsSf https://astral.sh/uv/install.sh | sh")
+        console.print("  source ~/.bashrc  # or restart terminal")
+        console.print()
+        console.print("Then install and run spindle with:")
+        console.print("  uv pip install -e .")
+        console.print("  uv run spindle [command]")
+        sys.exit(1)
+    
+    # Check if we're running through uv (recommended)
+    if not os.environ.get("UV_RUN_RECURSION_DEPTH"):
+        console.print("[yellow]TIP: For best results, use 'uv run spindle [command]'[/yellow]")
+        console.print("This ensures proper dependency management.")
+
+
 def setup_logging(verbose: bool = False) -> None:
     """Set up logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
@@ -40,6 +63,7 @@ def setup_logging(verbose: bool = False) -> None:
 @click.pass_context
 def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
     """Spindle - Automated disc ripping, encoding, and media library management."""
+    check_uv_requirement()
     setup_logging(verbose)
 
     try:

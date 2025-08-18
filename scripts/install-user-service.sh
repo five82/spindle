@@ -2,6 +2,7 @@
 
 # Install Spindle as a user systemd service
 # Run as the user who will operate Spindle (NOT as root)
+# REQUIRES: uv package manager
 
 set -e
 
@@ -20,6 +21,17 @@ SPINDLE_DIR="$USER_HOME/.local/share/spindle"
 
 echo "Installing Spindle as user service for: $(whoami)"
 echo "Home directory: $USER_HOME"
+
+# Check for uv
+echo "Checking for uv package manager..."
+if ! command -v uv >/dev/null 2>&1; then
+    echo "ERROR: uv package manager is required but not found!"
+    echo "Install uv first:"
+    echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+    echo "  source ~/.bashrc  # or restart terminal"
+    exit 1
+fi
+echo "✓ uv found at: $(which uv)"
 
 # Create directories
 echo "Creating directories..."
@@ -45,7 +57,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/spindle start --foreground
+ExecStart=/usr/bin/env bash -c 'cd %h && uv run spindle start --foreground'
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=300
@@ -71,8 +83,8 @@ if [ ! -f "$CONFIG_DIR/config.toml" ]; then
     echo "Creating sample configuration..."
     
     # Try to use spindle to create config
-    if command -v spindle >/dev/null 2>&1; then
-        spindle init-config --path "$CONFIG_DIR/config.toml" 2>/dev/null || create_fallback_config
+    if command -v uv >/dev/null 2>&1; then
+        uv run spindle init-config --path "$CONFIG_DIR/config.toml" 2>/dev/null || create_fallback_config
     else
         create_fallback_config
     fi
