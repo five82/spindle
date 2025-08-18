@@ -6,7 +6,7 @@ Automated disc ripping, encoding, and media library management system.
 
 spindle automates the complete workflow from physical disc to organized media library:
 
-1. **Disc Detection** - Automatically detects inserted Blu-ray, 4K Blu-ray, or DVD discs
+1. **Disc Detection** - Automatically detects inserted physical discs
 2. **Ripping** - Uses MakeMKV to extract main content with English audio tracks
 3. **Identification** - Identifies content using TMDB API
 4. **Encoding** - Processes video through drapto for efficient AV1 encoding
@@ -214,7 +214,7 @@ review_dir/
 - Optional: Plex Media Server
 
 ### Hardware Requirements
-- Optical drive (Blu-ray/DVD)
+- Optical drive
 - Sufficient storage for staging and final library
 - Network access for TMDB API and Plex
 
