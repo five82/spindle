@@ -51,12 +51,8 @@ spindle automates the complete workflow from physical disc to organized media li
 **⚠️ IMPORTANT: Spindle requires uv package manager. Standard pip will not work.**
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd spindle
-
-# Install with uv (REQUIRED - pip will not work)
-uv pip install -e .
+# Install directly from GitHub repository
+uv pip install git+https://github.com/five82/spindle.git
 ```
 
 ## Configuration
@@ -221,29 +217,7 @@ review_dir/
 
 ## Development
 
-### Running Tests
-```bash
-# Install development dependencies
-uv pip install -e ".[dev]"
-
-# Run tests
-uv run pytest
-
-# Run with coverage
-uv run pytest --cov=spindle
-```
-
-### Code Quality
-```bash
-# Format code
-uv run black src/
-
-# Lint code
-uv run ruff check src/
-
-# Type checking
-uv run mypy src/
-```
+For development setup, testing, and contribution guidelines, see [docs/development.md](docs/development.md).
 
 ## Error Handling
 
