@@ -105,7 +105,7 @@ This starts continuous processing mode as a background daemon:
 1. **Insert a disc** → Automatically ripped and added to queue
 2. **Background processing** → Identify → Encode → Import to Plex
 3. **Disc ejected** → Ready for next disc
-4. **Repeat** → Each movie becomes available in Plex as soon as it's done
+4. **Repeat** → Each movie or TV show becomes available in Plex as soon as it's done
 
 **Daemon Benefits:**
 - Runs independently of your terminal session
@@ -178,7 +178,7 @@ Disc 2 Insert → Rip → Eject → Ready for Disc 3
 
 **Key Benefits:**
 - Minimal disc handling time (just rip and eject)
-- Movies appear in Plex as soon as they're done encoding
+- Movies and TV shows appear in Plex as soon as they're done encoding
 - Can process many discs in a ripping session
 - Background processing continues overnight
 
