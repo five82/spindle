@@ -64,12 +64,12 @@ class MediaInfo:
             return f"{safe_title} - {episode_part}"
         return f"{safe_title} ({self.year})"
 
-    def get_library_path(self, library_root: Path) -> Path:
+    def get_library_path(self, library_root: Path, movies_dir: str = "movies", tv_dir: str = "tv") -> Path:
         """Generate library directory path for this media."""
         if self.is_movie:
-            return library_root / "Movies" / f"{self.get_filename()}"
+            return library_root / movies_dir / f"{self.get_filename()}"
         if self.is_tv_show:
-            show_dir = library_root / "TV Shows" / f"{self.title} ({self.year})"
+            show_dir = library_root / tv_dir / f"{self.title} ({self.year})"
             if self.season is not None:
                 return show_dir / f"Season {self.season:02d}"
             return show_dir

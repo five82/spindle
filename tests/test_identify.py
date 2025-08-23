@@ -48,12 +48,12 @@ def test_media_info_library_paths():
     # Movie
     movie = MediaInfo("The Matrix", 1999, "movie", 603)
     movie_path = movie.get_library_path(library_root)
-    assert movie_path == library_root / "Movies" / "The Matrix (1999)"
+    assert movie_path == library_root / "movies" / "The Matrix (1999)"
 
     # TV Show
     tv = MediaInfo("Breaking Bad", 2008, "tv", 1396, season=1, episode=1)
     tv_path = tv.get_library_path(library_root)
-    assert tv_path == library_root / "TV Shows" / "Breaking Bad (2008)" / "Season 01"
+    assert tv_path == library_root / "tv" / "Breaking Bad (2008)" / "Season 01"
 
 
 def test_filename_parsing():

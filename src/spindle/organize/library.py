@@ -34,7 +34,11 @@ class LibraryOrganizer:
         """Organize a video file into the library structure."""
 
         # Generate target directory based on media type
-        target_dir = media_info.get_library_path(self.config.library_dir)
+        target_dir = media_info.get_library_path(
+            self.config.library_dir, 
+            self.config.movies_dir, 
+            self.config.tv_dir
+        )
 
         # Ensure target directory exists
         target_dir.mkdir(parents=True, exist_ok=True)

@@ -34,6 +34,10 @@ class SpindleConfig(BaseModel):
     drapto_quality_uhd: int = Field(default=27)
     drapto_preset: int = Field(default=4)
 
+    # Library organization
+    movies_dir: str = Field(default="movies")
+    tv_dir: str = Field(default="tv")
+    
     # Plex settings
     plex_url: str | None = None
     plex_token: str | None = None
@@ -149,6 +153,10 @@ drapto_quality_sd = 23   # Standard Definition (<1920px width) - CRF value 0-63
 drapto_quality_hd = 25   # High Definition (1920-3839px width) - CRF value 0-63  
 drapto_quality_uhd = 27  # Ultra High Definition (>=3840px width) - CRF value 0-63
 drapto_preset = 4        # SVT-AV1 preset 0-13 (lower = slower/better quality)
+
+# Library organization
+movies_dir = "movies"    # Subdirectory name for movies within library_dir
+tv_dir = "tv"           # Subdirectory name for TV shows within library_dir
 
 # Plex settings (optional - remove if not using Plex)
 plex_url = "http://localhost:32400"
