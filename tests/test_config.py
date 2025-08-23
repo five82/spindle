@@ -17,6 +17,7 @@ def test_spindle_config_defaults():
     assert config.min_title_duration == 3600
     assert config.tmdb_language == "en-US"
     assert config.drapto_binary == "drapto"
+    assert config.drapto_quality_sd == 23
     assert config.drapto_quality_hd == 25
     assert config.drapto_quality_uhd == 27
     assert config.drapto_preset == 4

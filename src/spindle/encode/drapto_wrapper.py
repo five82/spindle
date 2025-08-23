@@ -153,6 +153,7 @@ class DraptoEncoder:
 
         # Add quality settings based on resolution detection
         # We'll let drapto auto-detect resolution and apply appropriate settings
+        cmd.extend(["--quality-sd", str(self.config.drapto_quality_sd)])
         cmd.extend(["--quality-hd", str(self.config.drapto_quality_hd)])
         cmd.extend(["--quality-uhd", str(self.config.drapto_quality_uhd)])
 

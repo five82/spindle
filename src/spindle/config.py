@@ -29,6 +29,7 @@ class SpindleConfig(BaseModel):
 
     # Drapto integration
     drapto_binary: str = Field(default="drapto")
+    drapto_quality_sd: int = Field(default=23)
     drapto_quality_hd: int = Field(default=25)
     drapto_quality_uhd: int = Field(default=27)
     drapto_preset: int = Field(default=4)
@@ -96,10 +97,10 @@ def create_sample_config(path: Path) -> None:
     sample_config = """# Spindle Configuration
 
 # Directory paths (REQUIRED - edit for your setup)
-staging_dir = "~/.local/share/spindle/staging"  # Temporary files during processing
-library_dir = "~/your-media-library"            # Your media library directory  
-log_dir = "~/.local/share/spindle/logs"         # Log files
-review_dir = "~/your-review-directory"          # Unidentified media
+staging_dir = "~/.local/share/spindle/staging"  # Auto-created: Temporary files during processing
+library_dir = "~/your-media-library"            # MUST EXIST: Your media library directory  
+log_dir = "~/.local/share/spindle/logs"         # Auto-created: Log files
+review_dir = "~/your-review-directory"          # Auto-created: Unidentified media
 
 # Hardware
 optical_drive = "/dev/sr0"
@@ -114,9 +115,10 @@ tmdb_language = "en-US"
 
 # Drapto encoding settings
 drapto_binary = "drapto"
-drapto_quality_hd = 25
-drapto_quality_uhd = 27
-drapto_preset = 4
+drapto_quality_sd = 23   # Standard Definition (<1920px width) - CRF value 0-63
+drapto_quality_hd = 25   # High Definition (1920-3839px width) - CRF value 0-63  
+drapto_quality_uhd = 27  # Ultra High Definition (>=3840px width) - CRF value 0-63
+drapto_preset = 4        # SVT-AV1 preset 0-13 (lower = slower/better quality)
 
 # Plex settings (optional - remove if not using Plex)
 plex_url = "http://localhost:32400"
