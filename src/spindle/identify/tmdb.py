@@ -14,12 +14,18 @@ logger = logging.getLogger(__name__)
 class MediaInfo:
     """Represents identified media information."""
 
-    def __init__(self, title: str, year: int, media_type: str,
-                 tmdb_id: int, overview: str = "",
-                 genres: list[str] | None = None,
-                 season: int | None = None,
-                 episode: int | None = None,
-                 episode_title: str | None = None):
+    def __init__(
+        self,
+        title: str,
+        year: int,
+        media_type: str,
+        tmdb_id: int,
+        overview: str = "",
+        genres: list[str] | None = None,
+        season: int | None = None,
+        episode: int | None = None,
+        episode_title: str | None = None,
+    ):
         self.title = title
         self.year = year
         self.media_type = media_type  # "movie" or "tv"
@@ -139,7 +145,9 @@ class TMDBClient:
         }
 
         try:
-            response = self.client.get(f"{self.base_url}/movie/{movie_id}", params=params)
+            response = self.client.get(
+                f"{self.base_url}/movie/{movie_id}", params=params
+            )
             response.raise_for_status()
             return response.json()
         except httpx.RequestError as e:
@@ -167,7 +175,9 @@ class TMDBClient:
             logger.error(f"TMDB API error {e.response.status_code}: {e.response.text}")
             return None
 
-    async def get_tv_episode_details(self, tv_id: int, season: int, episode: int) -> dict | None:
+    async def get_tv_episode_details(
+        self, tv_id: int, season: int, episode: int
+    ) -> dict | None:
         """Get detailed TV episode information."""
         params = {
             "api_key": self.api_key,
@@ -196,18 +206,34 @@ class MediaIdentifier:
         self.config = config
         self.tmdb = TMDBClient(config)
 
-    def parse_filename(self, filepath: str | Path) -> tuple[str, int | None, int | None, int | None]:
+    def parse_filename(
+        self, filepath: str | Path
+    ) -> tuple[str, int | None, int | None, int | None]:
         """Parse filename to extract title, year, season, and episode."""
         path = Path(filepath)
         # Only use stem if there's a common video extension, otherwise use the full name
-        common_extensions = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".flv", ".webm"}
+        common_extensions = {
+            ".mkv",
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".m4v",
+            ".wmv",
+            ".flv",
+            ".webm",
+        }
         if path.suffix.lower() in common_extensions:
             filename = path.stem
         else:
             filename = path.name
 
         # Remove common disc indicators
-        filename = re.sub(r"\b(disc|disk|cd|dvd|bluray|blu-ray)\s*\d*\b", "", filename, flags=re.IGNORECASE)
+        filename = re.sub(
+            r"\b(disc|disk|cd|dvd|bluray|blu-ray)\s*\d*\b",
+            "",
+            filename,
+            flags=re.IGNORECASE,
+        )
 
         # Try to extract year - check parentheses first, then standalone
         year = None
@@ -252,7 +278,7 @@ class MediaIdentifier:
 
         # Clean up title
         title = re.sub(r"[._]", " ", title)  # Replace dots and underscores with spaces
-        title = re.sub(r"-", " ", title)     # Replace hyphens with spaces for parsing
+        title = re.sub(r"-", " ", title)  # Replace hyphens with spaces for parsing
         title = re.sub(r"\s+", " ", title).strip()
 
         return title, year, season, episode
@@ -292,7 +318,9 @@ class MediaIdentifier:
 
         # Extract year from release date
         release_date = detailed_data.get("release_date", "")
-        movie_year = int(release_date[:4]) if release_date and len(release_date) >= 4 else year
+        movie_year = (
+            int(release_date[:4]) if release_date and len(release_date) >= 4 else year
+        )
 
         genres = [g["name"] for g in detailed_data.get("genres", [])]
 
@@ -305,8 +333,9 @@ class MediaIdentifier:
             genres=genres,
         )
 
-    async def _identify_tv_episode(self, title: str, year: int | None,
-                                   season: int, episode: int) -> MediaInfo | None:
+    async def _identify_tv_episode(
+        self, title: str, year: int | None, season: int, episode: int
+    ) -> MediaInfo | None:
         """Identify a TV episode."""
         results = await self.tmdb.search_tv(title, year)
 
@@ -324,12 +353,18 @@ class MediaIdentifier:
 
         # Get episode details
         episode_details = await self.tmdb.get_tv_episode_details(
-            tv_data["id"], season, episode,
+            tv_data["id"],
+            season,
+            episode,
         )
 
         # Extract year from first air date
         first_air_date = show_details.get("first_air_date", "")
-        show_year = int(first_air_date[:4]) if first_air_date and len(first_air_date) >= 4 else year
+        show_year = (
+            int(first_air_date[:4])
+            if first_air_date and len(first_air_date) >= 4
+            else year
+        )
 
         genres = [g["name"] for g in show_details.get("genres", [])]
         episode_title = episode_details.get("name") if episode_details else None

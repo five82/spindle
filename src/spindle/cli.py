@@ -38,11 +38,17 @@ def check_uv_requirement() -> None:
         console.print("  uv tool install git+https://github.com/five82/spindle.git")
         console.print("  spindle [command]")
         sys.exit(1)
-    
+
     # Check if we're running through uv for development
-    if not os.environ.get("UV_RUN_RECURSION_DEPTH") and "site-packages" in str(Path(__file__)):
-        console.print("[yellow]TIP: For development, use 'uv run spindle [command]'[/yellow]")
-        console.print("For end users, install with: uv tool install git+https://github.com/five82/spindle.git")
+    if not os.environ.get("UV_RUN_RECURSION_DEPTH") and "site-packages" in str(
+        Path(__file__)
+    ):
+        console.print(
+            "[yellow]TIP: For development, use 'uv run spindle [command]'[/yellow]"
+        )
+        console.print(
+            "For end users, install with: uv tool install git+https://github.com/five82/spindle.git"
+        )
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -58,7 +64,12 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 @click.group()
-@click.option("--config", "-c", type=click.Path(exists=True, path_type=Path), help="Configuration file path")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True, path_type=Path),
+    help="Configuration file path",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
 @click.pass_context
 def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
@@ -76,9 +87,13 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
 
 
 @cli.command()
-@click.option("--path", "-p", type=click.Path(path_type=Path),
-              default=Path.home() / ".config" / "spindle" / "config.toml",
-              help="Path for the configuration file")
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(path_type=Path),
+    default=Path.home() / ".config" / "spindle" / "config.toml",
+    help="Path for the configuration file",
+)
 def init_config(path: Path) -> None:
     """Create a sample configuration file."""
     try:
@@ -157,6 +172,7 @@ def start(ctx: click.Context, daemon: bool, foreground: bool) -> None:
     # Default to daemon mode unless explicitly foreground
     # Exception: if running as systemd service, always run in foreground
     import os
+
     is_systemd = os.getenv("INVOCATION_ID") is not None
 
     if is_systemd:
@@ -188,6 +204,7 @@ def start_daemon(config: SpindleConfig) -> None:
                 pid = int(f.read().strip())
             # Check if process is actually running
             import os
+
             os.kill(pid, 0)  # This will raise an exception if process doesn't exist
             console.print(f"[yellow]Spindle is already running with PID {pid}[/yellow]")
             console.print("Use 'spindle stop' to stop it first")
@@ -211,13 +228,16 @@ def start_daemon(config: SpindleConfig) -> None:
     # Set up logging for daemon
     def setup_daemon_logging():
         import logging
+
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
 
         # File handler
         file_handler = logging.FileHandler(log_file_path)
         file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
@@ -280,7 +300,9 @@ def start_foreground(config: SpindleConfig) -> None:
             time.sleep(30)  # Show status every 30 seconds
             status = processor.get_status()
             if status["total_items"] > 0:
-                console.print(f"[dim]Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}[/dim]")
+                console.print(
+                    f"[dim]Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}[/dim]"
+                )
 
     except Exception as e:
         console.print(f"[red]Error in processor: {e}[/red]")
@@ -306,6 +328,7 @@ def stop(ctx: click.Context) -> None:
 
         # Check if process is running
         import os
+
         try:
             os.kill(pid, 0)  # Check if process exists
             console.print(f"[blue]Stopping Spindle daemon (PID {pid})...[/blue]")
@@ -315,6 +338,7 @@ def stop(ctx: click.Context) -> None:
 
             # Wait for process to stop
             import time
+
             for _ in range(10):  # Wait up to 10 seconds
                 try:
                     os.kill(pid, 0)
@@ -323,7 +347,9 @@ def stop(ctx: click.Context) -> None:
                     break
             else:
                 # If still running, force kill
-                console.print("[yellow]Process didn't stop gracefully, force killing...[/yellow]")
+                console.print(
+                    "[yellow]Process didn't stop gracefully, force killing...[/yellow]"
+                )
                 os.kill(pid, signal.SIGKILL)
 
             # Clean up PID file
@@ -333,13 +359,13 @@ def stop(ctx: click.Context) -> None:
         except ProcessLookupError:
             # Process not running, clean up stale PID file
             pid_file_path.unlink(missing_ok=True)
-            console.print("[yellow]Spindle was not running (cleaned up stale PID file)[/yellow]")
+            console.print(
+                "[yellow]Spindle was not running (cleaned up stale PID file)[/yellow]"
+            )
 
     except (ValueError, FileNotFoundError, PermissionError) as e:
         console.print(f"[red]Error stopping Spindle: {e}[/red]")
         sys.exit(1)
-
-
 
 
 @cli.command("add-file")
@@ -356,8 +382,6 @@ def add_file(ctx: click.Context, file_path: Path) -> None:
 
     item = queue_manager.add_file(file_path)
     console.print(f"[green]Added to queue: {item}[/green]")
-
-
 
 
 @cli.command("queue-list")
@@ -380,7 +404,9 @@ def queue_list(ctx: click.Context) -> None:
     table.add_column("Created")
 
     for item in items:
-        title = item.disc_title or (item.source_path.name if item.source_path else "Unknown")
+        title = item.disc_title or (
+            item.source_path.name if item.source_path else "Unknown"
+        )
         if item.media_info:
             title = str(item.media_info)
 
@@ -449,7 +475,11 @@ async def process_queue_manual(config: SpindleConfig) -> None:
             console.print(f"\n[blue]Processing: {item}[/blue]")
 
             # Skip if not in correct state
-            if item.status not in [QueueItemStatus.RIPPED, QueueItemStatus.IDENTIFIED, QueueItemStatus.ENCODED]:
+            if item.status not in [
+                QueueItemStatus.RIPPED,
+                QueueItemStatus.IDENTIFIED,
+                QueueItemStatus.ENCODED,
+            ]:
                 continue
 
             # Identify media if needed
@@ -468,7 +498,9 @@ async def process_queue_manual(config: SpindleConfig) -> None:
                     organizer.create_review_directory(item.ripped_file, "unidentified")
                     item.status = QueueItemStatus.REVIEW
                     notifier.notify_unidentified_media(item.ripped_file.name)
-                    console.print("[yellow]Could not identify, moved to review[/yellow]")
+                    console.print(
+                        "[yellow]Could not identify, moved to review[/yellow]"
+                    )
 
                 queue_manager.update_item(item)
                 continue
@@ -480,12 +512,16 @@ async def process_queue_manual(config: SpindleConfig) -> None:
                 item.status = QueueItemStatus.ENCODING
                 queue_manager.update_item(item)
 
-                result = encoder.encode_file(item.ripped_file, config.staging_dir / "encoded")
+                result = encoder.encode_file(
+                    item.ripped_file, config.staging_dir / "encoded"
+                )
 
                 if result.success:
                     item.encoded_file = result.output_file
                     item.status = QueueItemStatus.ENCODED
-                    notifier.notify_encode_completed(str(item.media_info), result.size_reduction_percent)
+                    notifier.notify_encode_completed(
+                        str(item.media_info), result.size_reduction_percent
+                    )
                     console.print(f"[green]Encoded: {result.output_file}[/green]")
                 else:
                     item.status = QueueItemStatus.FAILED
@@ -505,7 +541,9 @@ async def process_queue_manual(config: SpindleConfig) -> None:
 
                 if organizer.add_to_plex(item.encoded_file, item.media_info):
                     item.status = QueueItemStatus.COMPLETED
-                    notifier.notify_media_added(str(item.media_info), item.media_info.media_type)
+                    notifier.notify_media_added(
+                        str(item.media_info), item.media_info.media_type
+                    )
                     console.print(f"[green]Added to Plex: {item.media_info}[/green]")
                     processed += 1
                 else:
@@ -526,9 +564,9 @@ async def process_queue_manual(config: SpindleConfig) -> None:
     duration = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
     notifier.notify_queue_completed(processed, failed, duration)
 
-    console.print(f"\n[green]Queue processing complete: {processed} processed, {failed} failed[/green]")
-
-
+    console.print(
+        f"\n[green]Queue processing complete: {processed} processed, {failed} failed[/green]"
+    )
 
 
 def main() -> None:

@@ -7,6 +7,8 @@ import time
 from .config import SpindleConfig
 from .disc.monitor import DiscMonitor, detect_disc, eject_disc
 from .disc.ripper import MakeMKVRipper
+from .disc.analyzer import IntelligentDiscAnalyzer
+from .disc.tv_analyzer import TVSeriesDiscAnalyzer
 from .encode.drapto_wrapper import DraptoEncoder
 from .identify.tmdb import MediaIdentifier
 from .notify.ntfy import NtfyNotifier
@@ -27,6 +29,10 @@ class ContinuousProcessor:
         self.encoder = DraptoEncoder(config)
         self.organizer = LibraryOrganizer(config)
         self.notifier = NtfyNotifier(config)
+
+        # Enhanced analysis components
+        self.disc_analyzer = IntelligentDiscAnalyzer(config)
+        self.tv_analyzer = TVSeriesDiscAnalyzer(config)
 
         self.disc_monitor: DiscMonitor | None = None
         self.processing_task: asyncio.Task | None = None
@@ -154,9 +160,9 @@ class ContinuousProcessor:
         """Get the next item that needs processing."""
         # Get items that are ready for the next step
         processable_statuses = [
-            QueueItemStatus.RIPPED,      # Ready for identification
+            QueueItemStatus.RIPPED,  # Ready for identification
             QueueItemStatus.IDENTIFIED,  # Ready for encoding
-            QueueItemStatus.ENCODED,      # Ready for organization
+            QueueItemStatus.ENCODED,  # Ready for organization
         ]
 
         for status in processable_statuses:
@@ -220,50 +226,54 @@ class ContinuousProcessor:
         def encoding_progress_callback(progress_data: dict) -> None:
             """Handle progress updates from drapto encoding."""
             progress_type = progress_data.get("type", "")
-            
+
             if progress_type == "stage_progress":
                 stage = progress_data.get("stage", "")
                 percent = progress_data.get("percent", 0)
                 message = progress_data.get("message", "")
                 eta_seconds = progress_data.get("eta_seconds")
-                
+
                 logger.info(f"Encoding {stage}: {percent:.1f}% - {message}")
-                
+
                 # Update item with current progress
                 item.progress_stage = stage
                 item.progress_percent = percent
                 item.progress_message = message
                 self.queue_manager.update_item(item)
-                
+
             elif progress_type == "encoding_progress":
                 percent = progress_data.get("percent", 0)
                 speed = progress_data.get("speed", 0)
                 fps = progress_data.get("fps", 0)
                 eta_seconds = progress_data.get("eta_seconds", 0)
-                
-                logger.info(f"Encoding: {percent:.1f}% (speed: {speed:.1f}x, fps: {fps:.1f}, ETA: {eta_seconds}s)")
-                
+
+                logger.info(
+                    f"Encoding: {percent:.1f}% (speed: {speed:.1f}x, fps: {fps:.1f}, ETA: {eta_seconds}s)"
+                )
+
                 # Update item with encoding progress
                 item.progress_stage = "encoding"
                 item.progress_percent = percent
                 item.progress_message = f"Speed: {speed:.1f}x, FPS: {fps:.1f}"
                 self.queue_manager.update_item(item)
-                
+
             elif progress_type == "encoding_complete":
                 size_reduction = progress_data.get("size_reduction_percent", 0)
-                logger.info(f"Encoding complete - size reduction: {size_reduction:.1f}%")
-                
+                logger.info(
+                    f"Encoding complete - size reduction: {size_reduction:.1f}%"
+                )
+
             elif progress_type == "validation_complete":
                 validation_passed = progress_data.get("validation_passed", False)
                 if validation_passed:
                     logger.info("Encoding validation passed")
                 else:
                     logger.warning("Encoding validation failed")
-                    
+
             elif progress_type == "error":
                 error_msg = progress_data.get("message", "Unknown error")
                 logger.error(f"Drapto error: {error_msg}")
-                
+
             elif progress_type == "warning":
                 warning_msg = progress_data.get("message", "Unknown warning")
                 logger.warning(f"Drapto warning: {warning_msg}")

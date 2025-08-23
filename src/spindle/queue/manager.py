@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 class QueueItemStatus(Enum):
     """Status of items in the processing queue."""
+
     PENDING = "pending"
     RIPPING = "ripping"
     RIPPED = "ripped"
@@ -31,13 +32,23 @@ class QueueItemStatus(Enum):
 class QueueItem:
     """Represents an item in the processing queue."""
 
-    def __init__(self, item_id: int | None = None, source_path: Path | None = None,
-                 disc_title: str | None = None, status: QueueItemStatus = QueueItemStatus.PENDING,
-                 media_info: MediaInfo | None = None, ripped_file: Path | None = None,
-                 encoded_file: Path | None = None, final_file: Path | None = None,
-                 error_message: str | None = None, created_at: datetime | None = None,
-                 updated_at: datetime | None = None, progress_stage: str | None = None,
-                 progress_percent: float = 0.0, progress_message: str | None = None):
+    def __init__(
+        self,
+        item_id: int | None = None,
+        source_path: Path | None = None,
+        disc_title: str | None = None,
+        status: QueueItemStatus = QueueItemStatus.PENDING,
+        media_info: MediaInfo | None = None,
+        ripped_file: Path | None = None,
+        encoded_file: Path | None = None,
+        final_file: Path | None = None,
+        error_message: str | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        progress_stage: str | None = None,
+        progress_percent: float = 0.0,
+        progress_message: str | None = None,
+    ):
         self.item_id = item_id
         self.source_path = source_path
         self.disc_title = disc_title
@@ -99,18 +110,20 @@ class QueueManager:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status)
             """)
-            
+
             # Migrate existing databases to add progress columns
             try:
                 conn.execute("ALTER TABLE queue_items ADD COLUMN progress_stage TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            
+
             try:
-                conn.execute("ALTER TABLE queue_items ADD COLUMN progress_percent REAL DEFAULT 0.0")
+                conn.execute(
+                    "ALTER TABLE queue_items ADD COLUMN progress_percent REAL DEFAULT 0.0"
+                )
             except sqlite3.OperationalError:
                 pass  # Column already exists
-                
+
             try:
                 conn.execute("ALTER TABLE queue_items ADD COLUMN progress_message TEXT")
             except sqlite3.OperationalError:
@@ -124,12 +137,22 @@ class QueueManager:
         )
 
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 INSERT INTO queue_items (disc_title, status, created_at, updated_at, 
                                         progress_stage, progress_percent, progress_message)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (disc_title, item.status.value, item.created_at, item.updated_at,
-                  item.progress_stage, item.progress_percent, item.progress_message))
+            """,
+                (
+                    disc_title,
+                    item.status.value,
+                    item.created_at,
+                    item.updated_at,
+                    item.progress_stage,
+                    item.progress_percent,
+                    item.progress_message,
+                ),
+            )
 
             item.item_id = cursor.lastrowid
 
@@ -144,13 +167,23 @@ class QueueManager:
         )
 
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 INSERT INTO queue_items (source_path, status, ripped_file, created_at, updated_at,
                                         progress_stage, progress_percent, progress_message)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (str(source_path), item.status.value, str(source_path),
-                  item.created_at, item.updated_at, item.progress_stage, 
-                  item.progress_percent, item.progress_message))
+            """,
+                (
+                    str(source_path),
+                    item.status.value,
+                    str(source_path),
+                    item.created_at,
+                    item.updated_at,
+                    item.progress_stage,
+                    item.progress_percent,
+                    item.progress_message,
+                ),
+            )
 
             item.item_id = cursor.lastrowid
             item.ripped_file = source_path
@@ -165,41 +198,46 @@ class QueueManager:
         media_info_json = None
         if item.media_info:
             # Serialize media info to JSON
-            media_info_json = json.dumps({
-                "title": item.media_info.title,
-                "year": item.media_info.year,
-                "media_type": item.media_info.media_type,
-                "tmdb_id": item.media_info.tmdb_id,
-                "overview": item.media_info.overview,
-                "genres": item.media_info.genres,
-                "season": item.media_info.season,
-                "episode": item.media_info.episode,
-                "episode_title": item.media_info.episode_title,
-            })
+            media_info_json = json.dumps(
+                {
+                    "title": item.media_info.title,
+                    "year": item.media_info.year,
+                    "media_type": item.media_info.media_type,
+                    "tmdb_id": item.media_info.tmdb_id,
+                    "overview": item.media_info.overview,
+                    "genres": item.media_info.genres,
+                    "season": item.media_info.season,
+                    "episode": item.media_info.episode,
+                    "episode_title": item.media_info.episode_title,
+                }
+            )
 
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE queue_items 
                 SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
                     ripped_file = ?, encoded_file = ?, final_file = ?, 
                     error_message = ?, updated_at = ?, progress_stage = ?,
                     progress_percent = ?, progress_message = ?
                 WHERE id = ?
-            """, (
-                str(item.source_path) if item.source_path else None,
-                item.disc_title,
-                item.status.value,
-                media_info_json,
-                str(item.ripped_file) if item.ripped_file else None,
-                str(item.encoded_file) if item.encoded_file else None,
-                str(item.final_file) if item.final_file else None,
-                item.error_message,
-                item.updated_at,
-                item.progress_stage,
-                item.progress_percent,
-                item.progress_message,
-                item.item_id,
-            ))
+            """,
+                (
+                    str(item.source_path) if item.source_path else None,
+                    item.disc_title,
+                    item.status.value,
+                    media_info_json,
+                    str(item.ripped_file) if item.ripped_file else None,
+                    str(item.encoded_file) if item.encoded_file else None,
+                    str(item.final_file) if item.final_file else None,
+                    item.error_message,
+                    item.updated_at,
+                    item.progress_stage,
+                    item.progress_percent,
+                    item.progress_message,
+                    item.item_id,
+                ),
+            )
 
         logger.debug(f"Updated queue item: {item}")
 
@@ -207,9 +245,12 @@ class QueueManager:
         """Get a specific queue item by ID."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT * FROM queue_items WHERE id = ?
-            """, (item_id,))
+            """,
+                (item_id,),
+            )
 
             row = cursor.fetchone()
             if not row:
@@ -221,9 +262,12 @@ class QueueManager:
         """Get all items with a specific status."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT * FROM queue_items WHERE status = ? ORDER BY created_at
-            """, (status.value,))
+            """,
+                (status.value,),
+            )
 
             return [self._row_to_item(row) for row in cursor.fetchall()]
 
@@ -239,11 +283,14 @@ class QueueManager:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             placeholders = ",".join("?" * len(statuses))
-            cursor = conn.execute(f"""
+            cursor = conn.execute(
+                f"""
                 SELECT * FROM queue_items 
                 WHERE status IN ({placeholders}) 
                 ORDER BY created_at
-            """, [s.value for s in statuses])
+            """,
+                [s.value for s in statuses],
+            )
 
             return [self._row_to_item(row) for row in cursor.fetchall()]
 
@@ -260,9 +307,12 @@ class QueueManager:
     def remove_item(self, item_id: int) -> bool:
         """Remove an item from the queue."""
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 DELETE FROM queue_items WHERE id = ?
-            """, (item_id,))
+            """,
+                (item_id,),
+            )
 
             if cursor.rowcount > 0:
                 logger.info(f"Removed item {item_id} from queue")
@@ -273,9 +323,12 @@ class QueueManager:
     def clear_completed(self) -> int:
         """Remove all completed items from the queue."""
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 DELETE FROM queue_items WHERE status IN (?, ?)
-            """, (QueueItemStatus.COMPLETED.value, QueueItemStatus.FAILED.value))
+            """,
+                (QueueItemStatus.COMPLETED.value, QueueItemStatus.FAILED.value),
+            )
 
             count = cursor.rowcount
             logger.info(f"Cleared {count} completed items from queue")
@@ -329,7 +382,13 @@ class QueueManager:
             error_message=row["error_message"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
-            progress_stage=row["progress_stage"] if "progress_stage" in row.keys() else None,
-            progress_percent=row["progress_percent"] if "progress_percent" in row.keys() else 0.0,
-            progress_message=row["progress_message"] if "progress_message" in row.keys() else None,
+            progress_stage=row["progress_stage"]
+            if "progress_stage" in row.keys()
+            else None,
+            progress_percent=row["progress_percent"]
+            if "progress_percent" in row.keys()
+            else 0.0,
+            progress_message=row["progress_message"]
+            if "progress_message" in row.keys()
+            else None,
         )

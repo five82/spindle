@@ -23,7 +23,9 @@ class LibraryOrganizer:
         if config.plex_url and config.plex_token:
             try:
                 self.plex_server = PlexServer(config.plex_url, config.plex_token)
-                logger.info(f"Connected to Plex server: {self.plex_server.friendlyName}")
+                logger.info(
+                    f"Connected to Plex server: {self.plex_server.friendlyName}"
+                )
             except Exception as e:
                 logger.warning(f"Failed to connect to Plex server: {e}")
                 self.plex_server = None
@@ -72,7 +74,8 @@ class LibraryOrganizer:
         try:
             # Determine which library to scan
             library_name = (
-                self.config.movies_library if media_info.is_movie
+                self.config.movies_library
+                if media_info.is_movie
                 else self.config.tv_library
             )
 
@@ -105,7 +108,9 @@ class LibraryOrganizer:
             logger.error(f"Failed to add {media_info.title} to library: {e}")
             return False
 
-    def create_review_directory(self, video_file: Path, reason: str = "unidentified") -> Path:
+    def create_review_directory(
+        self, video_file: Path, reason: str = "unidentified"
+    ) -> Path:
         """Move unidentified media to review directory."""
         review_dir = self.config.review_dir / reason
         review_dir.mkdir(parents=True, exist_ok=True)
@@ -163,7 +168,8 @@ class LibraryOrganizer:
 
         try:
             library_name = (
-                self.config.movies_library if media_info.is_movie
+                self.config.movies_library
+                if media_info.is_movie
                 else self.config.tv_library
             )
 
@@ -172,12 +178,15 @@ class LibraryOrganizer:
             # Simple check - try to find the media by title
             # This is a basic implementation, could be enhanced
             import time
+
             start_time = time.time()
 
             while time.time() - start_time < timeout:
                 try:
                     if media_info.is_movie:
-                        results = library.search(title=media_info.title, year=media_info.year)
+                        results = library.search(
+                            title=media_info.title, year=media_info.year
+                        )
                     else:
                         results = library.search(title=media_info.title)
 

@@ -3,8 +3,8 @@
 import logging
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Union
 
 from ..config import SpindleConfig
 
@@ -14,9 +14,17 @@ logger = logging.getLogger(__name__)
 class Track:
     """Represents a track on the disc."""
 
-    def __init__(self, track_id: str, track_type: str, codec: str,
-                 language: str, duration: int, size: int,
-                 title: Union[str, None] = None, is_default: bool = False):
+    def __init__(
+        self,
+        track_id: str,
+        track_type: str,
+        codec: str,
+        language: str,
+        duration: int,
+        size: int,
+        title: str | None = None,
+        is_default: bool = False,
+    ):
         self.track_id = track_id
         self.track_type = track_type  # "video", "audio", "subtitle"
         self.codec = codec
@@ -27,15 +35,23 @@ class Track:
         self.is_default = is_default
 
     def __str__(self) -> str:
-        return f"{self.track_type} track {self.track_id}: {self.codec} ({self.language})"
+        return (
+            f"{self.track_type} track {self.track_id}: {self.codec} ({self.language})"
+        )
 
 
 class Title:
     """Represents a title on the disc."""
 
-    def __init__(self, title_id: str, duration: int, size: int,
-                 chapters: int, tracks: list[Track],
-                 name: Union[str, None] = None):
+    def __init__(
+        self,
+        title_id: str,
+        duration: int,
+        size: int,
+        chapters: int,
+        tracks: list[Track],
+        name: str | None = None,
+    ):
         self.title_id = title_id
         self.duration = duration  # in seconds
         self.size = size  # in bytes
@@ -62,6 +78,54 @@ class Title:
         """Get English audio tracks."""
         return [t for t in self.audio_tracks if t.language.lower().startswith("en")]
 
+    def get_commentary_tracks(self) -> list[Track]:
+        """Get commentary audio tracks."""
+        commentary_indicators = [
+            "commentary",
+            "director",
+            "cast",
+            "crew",
+            "behind",
+            "making",
+            "deleted",
+            "alternate",
+            "producer",
+            "writer",
+            "audio commentary",
+            "filmmakers",
+            "actors",
+            "director's",
+            "cast and crew",
+        ]
+
+        commentary_tracks = []
+        for track in self.audio_tracks:
+            if track.title and track.language.lower().startswith("en"):
+                track_title_lower = track.title.lower()
+                if any(
+                    indicator in track_title_lower
+                    for indicator in commentary_indicators
+                ):
+                    commentary_tracks.append(track)
+
+        return commentary_tracks
+
+    def get_main_audio_tracks(self) -> list[Track]:
+        """Get main (non-commentary) English audio tracks."""
+        english_tracks = self.get_english_audio_tracks()
+        commentary_tracks = self.get_commentary_tracks()
+
+        # Return English tracks that aren't commentaries
+        return [t for t in english_tracks if t not in commentary_tracks]
+
+    def get_all_english_audio_tracks(self) -> list[Track]:
+        """Get all English audio tracks including main audio + commentaries."""
+        return [
+            track
+            for track in self.audio_tracks
+            if track.language.lower().startswith("en")
+        ]
+
     def __str__(self) -> str:
         duration_str = f"{self.duration // 3600:02d}:{(self.duration % 3600) // 60:02d}:{self.duration % 60:02d}"
         return f"{self.name}: {duration_str}, {len(self.tracks)} tracks"
@@ -74,7 +138,7 @@ class MakeMKVRipper:
         self.config = config
         self.makemkv_con = config.makemkv_con
 
-    def scan_disc(self, device: Union[str, None] = None) -> list[Title]:
+    def scan_disc(self, device: str | None = None) -> list[Title]:
         """Scan disc and return available titles."""
         if device is None:
             device = self.config.optical_drive
@@ -87,7 +151,8 @@ class MakeMKVRipper:
 
             result = subprocess.run(
                 cmd,
-                check=False, capture_output=True,
+                check=False,
+                capture_output=True,
                 text=True,
                 timeout=60,
             )
@@ -241,8 +306,7 @@ class MakeMKVRipper:
 
         # Filter by minimum duration
         valid_titles = [
-            t for t in titles
-            if t.duration >= self.config.min_title_duration
+            t for t in titles if t.duration >= self.config.min_title_duration
         ]
 
         if not valid_titles:
@@ -257,9 +321,13 @@ class MakeMKVRipper:
 
         return main_title
 
-    def rip_title(self, title: Title, output_dir: Path,
-                  device: Union[str, None] = None,
-                  progress_callback: Union[Callable, None] = None) -> Path:
+    def rip_title(
+        self,
+        title: Title,
+        output_dir: Path,
+        device: str | None = None,
+        progress_callback: Callable | None = None,
+    ) -> Path:
         """Rip a specific title to the output directory."""
         if device is None:
             device = self.config.optical_drive
@@ -275,7 +343,8 @@ class MakeMKVRipper:
 
         # Build MakeMKV command with track selection
         cmd = [
-            self.makemkv_con, "mkv",
+            self.makemkv_con,
+            "mkv",
             f"dev:{device}",
             title.title_id,
             str(output_dir),
@@ -283,14 +352,18 @@ class MakeMKVRipper:
 
         # Add track selection based on requirements:
         # - Video track (main)
-        # - English audio tracks (primary + commentary)
-        # - No subtitles
+        # - All English audio tracks (primary + commentary)
+        # - No subtitles by default
         # - Chapters included by default
+
+        # TODO: Add proper track selection logic here based on config
+        # For now, MakeMKV will include all tracks by default
 
         try:
             result = subprocess.run(
                 cmd,
-                check=False, capture_output=True,
+                check=False,
+                capture_output=True,
                 text=True,
                 timeout=3600,  # 1 hour timeout
             )
@@ -314,7 +387,7 @@ class MakeMKVRipper:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"MakeMKV rip failed: {e}")
 
-    def rip_disc(self, output_dir: Path, device: Union[str, None] = None) -> Path:
+    def rip_disc(self, output_dir: Path, device: str | None = None) -> Path:
         """Scan disc and rip the main title."""
         titles = self.scan_disc(device)
         main_title = self.select_main_title(titles)

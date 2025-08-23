@@ -1,6 +1,5 @@
 """Tests for media identification."""
 
-
 from spindle.config import SpindleConfig
 from spindle.identify.tmdb import MediaIdentifier, MediaInfo
 
@@ -70,24 +69,32 @@ def test_filename_parsing():
     assert episode is None
 
     # Test TV show filename
-    title, year, season, episode = identifier.parse_filename("Breaking.Bad.S01E01.Pilot.mkv")
+    title, year, season, episode = identifier.parse_filename(
+        "Breaking.Bad.S01E01.Pilot.mkv"
+    )
     assert title == "Breaking Bad"
     assert season == 1
     assert episode == 1
 
     # Test with different format
-    title, year, season, episode = identifier.parse_filename("Game.of.Thrones.1x01.Winter.Is.Coming.mkv")
+    title, year, season, episode = identifier.parse_filename(
+        "Game.of.Thrones.1x01.Winter.Is.Coming.mkv"
+    )
     assert title == "Game of Thrones"
     assert season == 1
     assert episode == 1
 
     # Test with parentheses year
-    title, year, season, episode = identifier.parse_filename("Inception (2010) BluRay.mkv")
+    title, year, season, episode = identifier.parse_filename(
+        "Inception (2010) BluRay.mkv"
+    )
     assert title == "Inception"
     assert year == 2010
 
     # Test cleaning
-    title, year, season, episode = identifier.parse_filename("The_Dark_Knight-2008.DISC1.mkv")
+    title, year, season, episode = identifier.parse_filename(
+        "The_Dark_Knight-2008.DISC1.mkv"
+    )
     assert title == "The Dark Knight"
     assert year == 2008
 
@@ -120,7 +127,14 @@ def test_safe_filename_generation():
     assert filename == "Spider-Man Into the Spider-Verse (2018)"
 
     # TV show with special characters
-    media = MediaInfo("Marvel's Agents of S.H.I.E.L.D.", 2013, "tv", 1403,
-                     season=1, episode=1, episode_title="Pilot")
+    media = MediaInfo(
+        "Marvel's Agents of S.H.I.E.L.D.",
+        2013,
+        "tv",
+        1403,
+        season=1,
+        episode=1,
+        episode_title="Pilot",
+    )
     filename = media.get_filename()
     assert filename == "Marvels Agents of SHIELD - S01E01 - Pilot"

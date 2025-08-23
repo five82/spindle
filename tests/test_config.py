@@ -24,6 +24,15 @@ def test_spindle_config_defaults():
     assert config.movies_library == "Movies"
     assert config.tv_library == "TV Shows"
 
+    # Content detection defaults
+    assert config.use_intelligent_disc_analysis is True
+    assert config.confidence_threshold == 0.7
+    assert config.include_all_english_audio is True
+    assert config.include_commentary_tracks is True
+    assert config.tv_episode_min_duration == 18
+    assert config.allow_short_content is True
+    assert config.cartoon_max_duration == 20
+
 
 def test_config_path_expansion():
     """Test that paths are properly expanded."""

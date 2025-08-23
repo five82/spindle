@@ -43,8 +43,38 @@ class SpindleConfig(BaseModel):
     # Notifications
     ntfy_topic: str | None = None
 
+    # Content Detection & Analysis
+    use_intelligent_disc_analysis: bool = Field(default=True)
+    confidence_threshold: float = Field(default=0.7)
+    prefer_api_over_heuristics: bool = Field(default=True)
 
-    @field_validator("staging_dir", "library_dir", "log_dir", "review_dir", mode="before")
+    # Audio Track Selection
+    include_all_english_audio: bool = Field(default=True)
+    include_commentary_tracks: bool = Field(default=True)
+    include_alternate_audio: bool = Field(default=False)
+
+    # TV Series Detection
+    tv_episode_min_duration: int = Field(default=18)  # minutes
+    tv_episode_max_duration: int = Field(default=90)  # minutes
+    rip_all_episodes: bool = Field(default=True)
+    episode_mapping_strategy: str = Field(
+        default="sequential"
+    )  # "sequential", "duration", "hybrid"
+
+    # Movie Detection
+    movie_min_duration: int = Field(default=70)  # minutes
+    include_movie_extras: bool = Field(default=False)
+    max_extras_duration: int = Field(default=30)  # minutes
+
+    # Cartoon/Short Content Detection
+    allow_short_content: bool = Field(default=True)
+    cartoon_min_duration: int = Field(default=2)  # minutes
+    cartoon_max_duration: int = Field(default=20)  # minutes
+    detect_cartoon_collections: bool = Field(default=True)
+
+    @field_validator(
+        "staging_dir", "library_dir", "log_dir", "review_dir", mode="before"
+    )
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:
         """Expand user home directory in paths."""
@@ -128,6 +158,33 @@ tv_library = "TV Shows"
 
 # Notifications
 ntfy_topic = "https://ntfy.sh/your_topic"
+
+# Content Detection & Analysis
+use_intelligent_disc_analysis = true
+confidence_threshold = 0.7
+prefer_api_over_heuristics = true
+
+# Audio Track Selection
+include_all_english_audio = true          # Include main audio + commentaries
+include_commentary_tracks = true          # Include director/cast commentaries
+include_alternate_audio = false           # Include non-English audio tracks
+
+# TV Series Detection
+tv_episode_min_duration = 18              # Minimum episode length (minutes)
+tv_episode_max_duration = 90              # Maximum episode length (minutes)  
+rip_all_episodes = true                   # Rip all episodes on disc
+episode_mapping_strategy = "sequential"   # How to map titles to episodes
+
+# Movie Detection  
+movie_min_duration = 70                   # Minimum movie length (minutes)
+include_movie_extras = false              # Include extras/deleted scenes
+max_extras_duration = 30                  # Maximum extra content length (minutes)
+
+# Cartoon/Short Content Detection
+allow_short_content = true                # Allow content < 20 minutes (cartoons)
+cartoon_min_duration = 2                  # Minimum cartoon length (minutes)
+cartoon_max_duration = 20                 # Maximum cartoon length (minutes)
+detect_cartoon_collections = true         # Detect Looney Tunes style collections
 """
 
     path.parent.mkdir(parents=True, exist_ok=True)

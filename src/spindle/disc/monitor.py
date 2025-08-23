@@ -28,7 +28,11 @@ class DiscInfo:
 class DiscMonitor:
     """Monitor for disc insertion events."""
 
-    def __init__(self, device: str = "/dev/sr0", callback: Callable[[DiscInfo], None] | None = None):
+    def __init__(
+        self,
+        device: str = "/dev/sr0",
+        callback: Callable[[DiscInfo], None] | None = None,
+    ):
         self.device = device
         self.callback = callback
         self.observer: Observer | None = None
@@ -98,7 +102,8 @@ def detect_disc(device: str = "/dev/sr0") -> DiscInfo | None:
         # Use lsblk to check if the device has media
         result = subprocess.run(
             ["lsblk", "-no", "LABEL,FSTYPE", device],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=5,
         )
@@ -132,7 +137,8 @@ def determine_disc_type(device: str, fstype: str) -> str:
         # Try to use blkid for more detailed information
         result = subprocess.run(
             ["blkid", "-p", "-s", "TYPE", device],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=5,
         )
@@ -166,7 +172,8 @@ def detect_bluray_vs_dvd(device: str) -> str:
         # more sophisticated detection methods
         result = subprocess.run(
             ["file", "-s", device],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=5,
         )
@@ -189,7 +196,8 @@ def eject_disc(device: str = "/dev/sr0") -> bool:
     try:
         result = subprocess.run(
             ["eject", device],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=10,
         )

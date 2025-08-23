@@ -17,8 +17,13 @@ class NtfyNotifier:
         self.topic_url = config.ntfy_topic
         self.client = httpx.Client(timeout=10.0)
 
-    def send_notification(self, message: str, title: str | None = None,
-                         priority: str = "default", tags: str | None = None) -> bool:
+    def send_notification(
+        self,
+        message: str,
+        title: str | None = None,
+        priority: str = "default",
+        tags: str | None = None,
+    ) -> bool:
         """Send a notification via ntfy."""
         if not self.topic_url:
             logger.debug("No ntfy topic configured, skipping notification")
@@ -52,7 +57,9 @@ class NtfyNotifier:
             logger.error(f"Failed to send notification: {e}")
             return False
         except httpx.HTTPStatusError as e:
-            logger.error(f"Notification service error {e.response.status_code}: {e.response.text}")
+            logger.error(
+                f"Notification service error {e.response.status_code}: {e.response.text}"
+            )
             return False
 
     def notify_disc_detected(self, disc_title: str, disc_type: str) -> bool:
@@ -79,7 +86,6 @@ class NtfyNotifier:
             tags="spindle,rip,completed",
         )
 
-
     def notify_media_added(self, title: str, media_type: str) -> bool:
         """Send notification when media is added to Plex."""
         return self.send_notification(
@@ -96,10 +102,14 @@ class NtfyNotifier:
             tags="spindle,queue,started",
         )
 
-    def notify_queue_completed(self, processed: int, failed: int, duration: str) -> bool:
+    def notify_queue_completed(
+        self, processed: int, failed: int, duration: str
+    ) -> bool:
         """Send notification when queue processing completes."""
         if failed == 0:
-            message = f"Queue processing complete: {processed} items processed in {duration}"
+            message = (
+                f"Queue processing complete: {processed} items processed in {duration}"
+            )
             title = "✅ Queue Complete"
         else:
             message = f"Queue processing complete: {processed} succeeded, {failed} failed in {duration}"
