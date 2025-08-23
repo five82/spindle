@@ -51,7 +51,10 @@ spindle automates the complete workflow from physical disc to organized media li
 **⚠️ IMPORTANT: Spindle requires uv package manager. Standard pip will not work.**
 
 ```bash
-# Install directly from GitHub repository
+# Install as a global tool (recommended for end users)
+uv tool install git+https://github.com/five82/spindle.git
+
+# Or install in current environment
 uv pip install git+https://github.com/five82/spindle.git
 ```
 
@@ -59,7 +62,7 @@ uv pip install git+https://github.com/five82/spindle.git
 
 1. **Create configuration file**:
    ```bash
-   uv run spindle init-config
+   spindle init-config
    ```
 
 2. **Edit configuration** at `~/.config/spindle/config.toml`:
@@ -88,13 +91,13 @@ uv pip install git+https://github.com/five82/spindle.git
 ### Main Workflow - Continuous Processing
 ```bash
 # Start Spindle (runs as background daemon by default)
-uv run spindle start
+spindle start
 
 # Or run in foreground for testing/debugging
-uv run spindle start --foreground
+spindle start --foreground
 
 # Stop daemon when needed
-uv run spindle stop
+spindle stop
 ```
 
 By default, `spindle start` runs as a background daemon:
@@ -140,22 +143,22 @@ sudo loginctl enable-linger $(whoami)
 ### System Management
 ```bash
 # Check system status and queue
-uv run spindle status
+spindle status
 
 # View queue contents
-uv run spindle queue-list
+spindle queue-list
 
 # Clear completed items
-uv run spindle queue-clear --completed
+spindle queue-clear --completed
 
 # Test notifications
-uv run spindle test-notify
+spindle test-notify
 ```
 
 ### Manual File Processing
 ```bash
 # Add existing video files to queue (processed automatically by continuous mode)
-uv run spindle add-file /path/to/video.mkv
+spindle add-file /path/to/video.mkv
 ```
 
 ## Workflow Details

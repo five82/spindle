@@ -4,7 +4,7 @@ Integration test for drapto progress callback feature.
 This script demonstrates how spindle now integrates with drapto's JSON progress output.
 
 REQUIRES: uv package manager
-Usage: uv run python test_progress_integration.py
+Usage: uv run python test_progress_integration.py (development install)
 """
 
 import shutil

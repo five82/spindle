@@ -28,14 +28,22 @@ The project is a Python application using uv package manager with modular compon
 # Install uv first (REQUIRED)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install project in development mode
+# For end users - install as global tool (recommended)
+uv tool install git+https://github.com/five82/spindle.git
+
+# For development - install in development mode
 uv pip install -e ".[dev]"
 ```
 
 ### Running Commands
 
-Use `uv run` for all commands - uv automatically manages the virtual environment:
+For end users with `uv tool install`:
+```bash
+# Run the application directly
+spindle start
+```
 
+For development with `uv pip install -e ".[dev]"`, use `uv run`:
 ```bash
 # Run the application
 uv run spindle start

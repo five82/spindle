@@ -42,9 +42,6 @@ class SpindleConfig(BaseModel):
     # Notifications
     ntfy_topic: str | None = None
 
-    # Processing
-    auto_process: bool = Field(default=False)
-    batch_size: int = Field(default=10)
 
     @field_validator("staging_dir", "library_dir", "log_dir", "review_dir", mode="before")
     @classmethod
@@ -129,10 +126,6 @@ tv_library = "TV Shows"
 
 # Notifications
 ntfy_topic = "https://ntfy.sh/your_topic"
-
-# Processing options
-auto_process = false
-batch_size = 10
 """
 
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -22,8 +22,6 @@ def test_spindle_config_defaults():
     assert config.drapto_preset == 4
     assert config.movies_library == "Movies"
     assert config.tv_library == "TV Shows"
-    assert config.auto_process is False
-    assert config.batch_size == 10
 
 
 def test_config_path_expansion():

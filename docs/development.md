@@ -32,7 +32,7 @@ The `".[dev]"` syntax means:
 
 ### Running Commands
 
-Always use `uv run` for commands - uv automatically manages the virtual environment:
+For development with editable install, use `uv run` - uv automatically manages the virtual environment:
 
 ```bash
 # Run the application
@@ -49,6 +49,8 @@ uv run mypy src/
 # Run any Python script
 uv run python script.py
 ```
+
+Note: End users who install with `uv tool install` can run `spindle` directly without `uv run`.
 
 ### Testing
 
@@ -136,7 +138,7 @@ Queue manager handles schema migrations automatically:
 
 ## Code Guidelines
 
-1. **Always use `uv run` for commands** - uv manages virtual environments automatically
+1. **Use `uv run` for development commands** - uv manages virtual environments automatically for editable installs
 2. Use type hints throughout the codebase
 3. Handle errors gracefully with proper logging
 4. Use pathlib.Path for file operations

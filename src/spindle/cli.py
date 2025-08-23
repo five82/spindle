@@ -35,14 +35,14 @@ def check_uv_requirement() -> None:
         console.print("  source ~/.bashrc  # or restart terminal")
         console.print()
         console.print("Then install and run spindle with:")
-        console.print("  uv pip install -e .")
-        console.print("  uv run spindle [command]")
+        console.print("  uv tool install git+https://github.com/five82/spindle.git")
+        console.print("  spindle [command]")
         sys.exit(1)
     
-    # Check if we're running through uv (recommended)
-    if not os.environ.get("UV_RUN_RECURSION_DEPTH"):
-        console.print("[yellow]TIP: For best results, use 'uv run spindle [command]'[/yellow]")
-        console.print("This ensures proper dependency management.")
+    # Check if we're running through uv for development
+    if not os.environ.get("UV_RUN_RECURSION_DEPTH") and "site-packages" in str(Path(__file__)):
+        console.print("[yellow]TIP: For development, use 'uv run spindle [command]'[/yellow]")
+        console.print("For end users, install with: uv tool install git+https://github.com/five82/spindle.git")
 
 
 def setup_logging(verbose: bool = False) -> None:
