@@ -19,15 +19,11 @@ class SpindleConfig(BaseModel):
     # Hardware
     optical_drive: str = Field(default="/dev/sr0")
 
-    # MakeMKV settings
-    makemkv_con: str = Field(default="makemkvcon")
-
     # TMDB API
     tmdb_api_key: str | None = None
     tmdb_language: str = Field(default="en-US")
 
     # Drapto integration
-    drapto_binary: str = Field(default="drapto")
     drapto_quality_sd: int = Field(default=23)
     drapto_quality_hd: int = Field(default=25)
     drapto_quality_uhd: int = Field(default=27)
@@ -116,6 +112,16 @@ class SpindleConfig(BaseModel):
             raise ValueError(msg)
         return v
 
+    @property
+    def makemkv_con(self) -> str:
+        """MakeMKV command-line tool executable name."""
+        return "makemkvcon"
+
+    @property
+    def drapto_binary(self) -> str:
+        """Drapto video encoder executable name."""
+        return "drapto"
+
     def ensure_directories(self) -> None:
         """Create required directories if they don't exist."""
         for dir_path in [self.staging_dir, self.log_dir, self.review_dir]:
@@ -148,44 +154,87 @@ def load_config(config_path: Path | None = None) -> SpindleConfig:
 def create_sample_config(path: Path) -> None:
     """Create a sample configuration file."""
     sample_config = """# Spindle Configuration
+# ====================
+# Edit the REQUIRED settings below, then customize optional settings as needed.
 
-# Directory paths (REQUIRED - edit for your setup)
+# ============================================================================
+# REQUIRED SETTINGS - You MUST change these before running Spindle
+# ============================================================================
+
+# TMDB API (required for media identification)
+tmdb_api_key = "your_tmdb_api_key_here"           # Get from themoviedb.org/settings/api
+
+# Directory paths - CRITICAL: Update these for your system
+library_dir = "~/your-media-library"              # MUST EXIST: Your final media library directory
+review_dir = "~/your-review-directory"            # Auto-created: Unidentified media for manual review
+
+# Library Organization
+movies_dir = "movies"                             # MUST EXIST: Subdirectory name for movies within library_dir
+tv_dir = "tv"                                     # MUST EXIST: Subdirectory name for TV shows within library_dir
+
+# ============================================================================
+# COMMONLY CUSTOMIZED SETTINGS
+# ============================================================================
+
+# Directory paths
 staging_dir = "~/.local/share/spindle/staging"    # Auto-created: Temporary files during processing
-library_dir = "~/your-media-library"              # MUST EXIST: Your media library directory
-log_dir = "~/.local/share/spindle/logs"           # Auto-created: Log files
-review_dir = "~/your-review-directory"            # Auto-created: Unidentified media
+log_dir = "~/.local/share/spindle/logs"           # Auto-created: Log files and queue database
 
 # Hardware
-optical_drive = "/dev/sr0"                        # Device path for optical drive
+optical_drive = "/dev/sr0"                        # Device path for optical drive (may be /dev/sr1, etc.)
 
-# MakeMKV settings
-makemkv_con = "makemkvcon"                        # MakeMKV command-line tool executable name
+# Plex Integration (optional - remove section if not using Plex)
+plex_url = "http://localhost:32400"               # Plex server URL
+plex_token = "your_plex_token_here"               # Get from Plex Settings > Account > Authorized Devices
+movies_library = "Movies"                         # Name of your Plex movie library
+tv_library = "TV Shows"                           # Name of your Plex TV shows library
 
-# TMDB API (required)
-tmdb_api_key = "your_tmdb_api_key_here"           # Required API key from themoviedb.org
-tmdb_language = "en-US"                           # Language code for TMDB metadata (ISO 639-1)
+# Notifications (optional)
+ntfy_topic = "https://ntfy.sh/your_topic"         # Notification service URL (create at ntfy.sh)
 
-# Drapto encoding settings
-drapto_binary = "drapto"                          # Drapto video encoder executable name
+# ============================================================================
+# OPTIONAL CUSTOMIZATION
+# ============================================================================
+
+# Metadata & Language
+tmdb_language = "en-US"                           # Language for TMDB metadata (ISO 639-1)
+
+# ============================================================================
+# ADVANCED SETTINGS - Most users can leave these as defaults
+# ============================================================================
+
+# Content Detection & Analysis
+use_intelligent_disc_analysis = true              # Enable AI-powered content detection
+confidence_threshold = 0.7                        # Minimum confidence for automatic classification (0.0-1.0)
+prefer_api_over_heuristics = true                 # Prioritize TMDB data over pattern analysis
+
+# Media Duration Filtering (minutes)
+tv_episode_min_duration = 18                      # Minimum episode length
+tv_episode_max_duration = 90                      # Maximum episode length
+movie_min_duration = 70                           # Minimum movie length
+cartoon_min_duration = 2                          # Minimum cartoon length
+cartoon_max_duration = 20                         # Maximum cartoon length
+max_extras_duration = 30                          # Maximum extra content length
+
+# Content Processing Behavior
+rip_all_episodes = true                           # Rip all episodes on disc
+episode_mapping_strategy = "hybrid"               # How to map titles to episodes: "duration", "sequential", "hybrid"
+include_movie_extras = false                      # Include extras/deleted scenes
+allow_short_content = true                        # Allow content < 20 minutes (cartoons)
+detect_cartoon_collections = true                 # Detect Looney Tunes style collections
+
+# Audio Track Selection
+include_all_english_audio = true                  # Include main audio + commentaries
+include_commentary_tracks = true                  # Include director/cast commentaries
+include_alternate_audio = false                   # Include non-English audio tracks
+
+# Video Encoding Quality (CRF values: lower = higher quality/larger files)
 drapto_quality_sd = 23                            # Standard Definition (<1920px width) - CRF value 0-63
 drapto_quality_hd = 25                            # High Definition (1920-3839px width) - CRF value 0-63
 drapto_quality_uhd = 27                           # Ultra High Definition (>=3840px width) - CRF value 0-63
 drapto_preset = 4                                 # SVT-AV1 preset 0-13 (lower = slower/better quality)
 
-# Library organization
-movies_dir = "movies"                             # Subdirectory name for movies within library_dir
-tv_dir = "tv"                                     # Subdirectory name for TV shows within library_dir
-
-# Plex settings (optional - remove if not using Plex)
-plex_url = "http://localhost:32400"               # Plex server URL (e.g., http://localhost:32400)
-plex_token = "your_plex_token_here"               # Plex authentication token
-movies_library = "Movies"                         # Name of Plex movie library
-tv_library = "TV Shows"                           # Name of Plex TV shows library
-
-# Notifications
-ntfy_topic = "https://ntfy.sh/your_topic"         # Notification service URL (ntfy.sh topic)
-
-# Timeout Settings (seconds)
+# Operation Timeouts (seconds)
 makemkv_rip_timeout = 3600                        # MakeMKV ripping timeout (1 hour)
 makemkv_info_timeout = 60                         # MakeMKV disc info timeout (1 minute)
 makemkv_eject_timeout = 30                        # Disc eject timeout (30 seconds)
@@ -199,33 +248,6 @@ queue_poll_interval = 5                           # How often to check processin
 error_retry_interval = 10                         # Wait time before retrying failed operations
 status_display_interval = 30                      # How often to display status updates
 plex_scan_interval = 5                            # How often to check Plex scan progress
-
-# Content Detection & Analysis
-use_intelligent_disc_analysis = true              # Enable AI-powered content detection
-confidence_threshold = 0.7                        # Minimum confidence for automatic classification (0.0-1.0)
-prefer_api_over_heuristics = true                 # Prioritize TMDB data over pattern analysis
-
-# Audio Track Selection
-include_all_english_audio = true                  # Include main audio + commentaries
-include_commentary_tracks = true                  # Include director/cast commentaries
-include_alternate_audio = false                   # Include non-English audio tracks
-
-# TV Series Detection
-tv_episode_min_duration = 18                      # Minimum episode length (minutes)
-tv_episode_max_duration = 90                      # Maximum episode length (minutes)
-rip_all_episodes = true                           # Rip all episodes on disc
-episode_mapping_strategy = "hybrid"               # How to map titles to episodes: "duration", "sequential", "hybrid"
-
-# Movie Detection
-movie_min_duration = 70                           # Minimum movie length (minutes)
-include_movie_extras = false                      # Include extras/deleted scenes
-max_extras_duration = 30                          # Maximum extra content length (minutes)
-
-# Cartoon/Short Content Detection
-allow_short_content = true                        # Allow content < 20 minutes (cartoons)
-cartoon_min_duration = 2                          # Minimum cartoon length (minutes)
-cartoon_max_duration = 20                         # Maximum cartoon length (minutes)
-detect_cartoon_collections = true                 # Detect Looney Tunes style collections
 """
 
     path.parent.mkdir(parents=True, exist_ok=True)
