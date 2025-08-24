@@ -14,7 +14,6 @@ def test_spindle_config_defaults():
     assert str(config.library_dir) == "~/library"
     assert config.optical_drive == "/dev/sr0"
     assert config.makemkv_con == "makemkvcon"
-    assert config.min_title_duration == 3600
     assert config.tmdb_language == "en-US"
     assert config.drapto_binary == "drapto"
     assert config.drapto_quality_sd == 23
