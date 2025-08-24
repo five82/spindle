@@ -166,7 +166,6 @@ tmdb_api_key = "your_tmdb_api_key_here"           # Get from themoviedb.org/sett
 
 # Directory paths - CRITICAL: Update these for your system
 library_dir = "~/your-media-library"              # MUST EXIST: Your final media library directory
-review_dir = "~/your-review-directory"            # Auto-created: Unidentified media for manual review
 
 # Library Organization
 movies_dir = "movies"                             # MUST EXIST: Subdirectory name for movies within library_dir
@@ -177,6 +176,7 @@ tv_dir = "tv"                                     # MUST EXIST: Subdirectory nam
 # ============================================================================
 
 # Directory paths
+review_dir = "~/review"                           # Auto-created: Unidentified media for manual review
 staging_dir = "~/.local/share/spindle/staging"    # Auto-created: Temporary files during processing
 log_dir = "~/.local/share/spindle/logs"           # Auto-created: Log files and queue database
 
