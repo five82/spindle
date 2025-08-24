@@ -8,6 +8,12 @@ import sys
 import time
 from pathlib import Path
 
+try:
+    import daemon  # type: ignore[import-untyped]
+    import daemon.pidfile  # type: ignore[import-untyped]
+except ImportError:
+    daemon = None
+
 import click
 from rich.console import Console
 from rich.logging import RichHandler
@@ -16,6 +22,7 @@ from rich.table import Table
 from .config import SpindleConfig, create_sample_config, load_config
 from .disc.monitor import detect_disc
 from .encode.drapto_wrapper import DraptoEncoder
+from .identify.tmdb import MediaIdentifier
 from .notify.ntfy import NtfyNotifier
 from .organize.library import LibraryOrganizer
 from .processor import ContinuousProcessor
@@ -41,13 +48,13 @@ def check_uv_requirement() -> None:
 
     # Check if we're running through uv for development
     if not os.environ.get("UV_RUN_RECURSION_DEPTH") and "site-packages" in str(
-        Path(__file__)
+        Path(__file__),
     ):
         console.print(
-            "[yellow]TIP: For development, use 'uv run spindle [command]'[/yellow]"
+            "[yellow]TIP: For development, use 'uv run spindle [command]'[/yellow]",
         )
         console.print(
-            "For end users, install with: uv tool install git+https://github.com/five82/spindle.git"
+            "For end users, install with: uv tool install git+https://github.com/five82/spindle.git",
         )
 
 
@@ -81,7 +88,7 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
         ctx.ensure_object(dict)
         ctx.obj["config"] = load_config(config)
         ctx.obj["verbose"] = verbose
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, Exception) as e:
         console.print(f"[red]Error loading configuration: {e}[/red]")
         sys.exit(1)
 
@@ -100,7 +107,7 @@ def init_config(path: Path) -> None:
         create_sample_config(path)
         console.print(f"[green]Created sample configuration at {path}[/green]")
         console.print("Please edit the configuration file with your settings.")
-    except Exception as e:
+    except (OSError, Exception) as e:
         console.print(f"[red]Error creating configuration: {e}[/red]")
         sys.exit(1)
 
@@ -137,7 +144,7 @@ def status(ctx: click.Context) -> None:
         console.print("📚 Plex: [yellow]Not configured or unreachable[/yellow]")
 
     # Check notifications
-    notifier = NtfyNotifier(config)
+    NtfyNotifier(config)
     if config.ntfy_topic:
         console.print("📱 Notifications: Configured")
     else:
@@ -156,7 +163,13 @@ def status(ctx: click.Context) -> None:
         table.add_column("Count", justify="right")
 
         for status, count in stats.items():
-            table.add_row(status.title(), str(count))
+            if hasattr(status, "value"):
+                # Enum object
+                status_str = status.value.replace("_", " ").title()
+            else:
+                # String key
+                status_str = status.replace("_", " ").title()
+            table.add_row(status_str, str(count))
 
         console.print(table)
 
@@ -171,14 +184,8 @@ def start(ctx: click.Context, daemon: bool, foreground: bool) -> None:
 
     # Default to daemon mode unless explicitly foreground
     # Exception: if running as systemd service, always run in foreground
-    import os
-
     is_systemd = os.getenv("INVOCATION_ID") is not None
-
-    if is_systemd:
-        run_as_daemon = False  # systemd manages the daemon aspect
-    else:
-        run_as_daemon = daemon or not foreground
+    run_as_daemon = False if is_systemd else daemon or not foreground
 
     if run_as_daemon:
         start_daemon(config)
@@ -188,8 +195,10 @@ def start(ctx: click.Context, daemon: bool, foreground: bool) -> None:
 
 def start_daemon(config: SpindleConfig) -> None:
     """Start Spindle as a background daemon."""
-    import daemon
-    import daemon.pidfile
+    if daemon is None:
+        console.print("[red]ERROR: python-daemon package not installed[/red]")
+        console.print("Install with: uv pip install python-daemon")
+        sys.exit(1)
 
     # Set up paths
     pid_file_path = config.log_dir / "spindle.pid"
@@ -200,11 +209,9 @@ def start_daemon(config: SpindleConfig) -> None:
     # Check if already running
     if pid_file_path.exists():
         try:
-            with open(pid_file_path) as f:
+            with pid_file_path.open() as f:
                 pid = int(f.read().strip())
             # Check if process is actually running
-            import os
-
             os.kill(pid, 0)  # This will raise an exception if process doesn't exist
             console.print(f"[yellow]Spindle is already running with PID {pid}[/yellow]")
             console.print("Use 'spindle stop' to stop it first")
@@ -226,7 +233,7 @@ def start_daemon(config: SpindleConfig) -> None:
     )
 
     # Set up logging for daemon
-    def setup_daemon_logging():
+    def setup_daemon_logging() -> None:
         import logging
 
         logger = logging.getLogger()
@@ -236,16 +243,16 @@ def start_daemon(config: SpindleConfig) -> None:
         file_handler = logging.FileHandler(log_file_path)
         file_handler.setLevel(logging.INFO)
         formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    def run_daemon():
+    def run_daemon() -> None:
         setup_daemon_logging()
         processor = ContinuousProcessor(config)
 
-        def signal_handler(signum, frame):
+        def signal_handler(signum: int, frame: object) -> None:
             logging.info("Received signal %s, stopping processor", signum)
             processor.stop()
             sys.exit(0)
@@ -259,7 +266,7 @@ def start_daemon(config: SpindleConfig) -> None:
 
             # Keep daemon alive
             while processor.is_running:
-                time.sleep(30)
+                time.sleep(config.status_display_interval)
 
         except Exception as e:
             logging.exception("Error in processor: %s", e)
@@ -283,7 +290,7 @@ def start_foreground(config: SpindleConfig) -> None:
 
     processor = ContinuousProcessor(config)
 
-    def signal_handler(signum, frame):
+    def signal_handler(signum: int, frame: object) -> None:
         console.print("\n[yellow]Stopping Spindle processor...[/yellow]")
         processor.stop()
         sys.exit(0)
@@ -297,11 +304,11 @@ def start_foreground(config: SpindleConfig) -> None:
 
         # Keep main thread alive and show periodic status
         while processor.is_running:
-            time.sleep(30)  # Show status every 30 seconds
+            time.sleep(config.status_display_interval)  # Show status based on config
             status = processor.get_status()
             if status["total_items"] > 0:
                 console.print(
-                    f"[dim]Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}[/dim]"
+                    f"[dim]Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}[/dim]",
                 )
 
     except Exception as e:
@@ -342,13 +349,13 @@ def stop(ctx: click.Context) -> None:
             for _ in range(10):  # Wait up to 10 seconds
                 try:
                     os.kill(pid, 0)
-                    time.sleep(1)
+                    time.sleep(1)  # Keep this as 1 second for process termination check
                 except ProcessLookupError:
                     break
             else:
                 # If still running, force kill
                 console.print(
-                    "[yellow]Process didn't stop gracefully, force killing...[/yellow]"
+                    "[yellow]Process didn't stop gracefully, force killing...[/yellow]",
                 )
                 os.kill(pid, signal.SIGKILL)
 
@@ -360,7 +367,7 @@ def stop(ctx: click.Context) -> None:
             # Process not running, clean up stale PID file
             pid_file_path.unlink(missing_ok=True)
             console.print(
-                "[yellow]Spindle was not running (cleaned up stale PID file)[/yellow]"
+                "[yellow]Spindle was not running (cleaned up stale PID file)[/yellow]",
             )
 
     except (ValueError, FileNotFoundError, PermissionError) as e:
@@ -422,18 +429,85 @@ def queue_list(ctx: click.Context) -> None:
 
 @cli.command("queue-clear")
 @click.option("--completed", is_flag=True, help="Only clear completed items")
+@click.option("--failed", is_flag=True, help="Only clear failed items")
 @click.pass_context
-def queue_clear(ctx: click.Context, completed: bool) -> None:
+def queue_clear(ctx: click.Context, completed: bool, failed: bool) -> None:
     """Clear items from the queue."""
     config: SpindleConfig = ctx.obj["config"]
     queue_manager = QueueManager(config)
 
+    if completed and failed:
+        console.print("[red]Error: Cannot specify both --completed and --failed[/red]")
+        return
+
     if completed:
         count = queue_manager.clear_completed()
         console.print(f"[green]Cleared {count} completed items[/green]")
+    elif failed:
+        count = queue_manager.clear_failed()
+        console.print(f"[green]Cleared {count} failed items[/green]")
     elif click.confirm("Are you sure you want to clear the entire queue?"):
-        # This would need to be implemented in QueueManager
-        console.print("[yellow]Full queue clearing not implemented yet[/yellow]")
+        try:
+            count = queue_manager.clear_all()
+            console.print(f"[green]Cleared {count} items from queue[/green]")
+        except RuntimeError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            console.print(
+                "[yellow]Wait for processing items to complete or use --completed to clear only finished items[/yellow]",
+            )
+
+
+@cli.command("queue-health")
+@click.pass_context
+def queue_health(ctx: click.Context) -> None:
+    """Check database health and schema integrity."""
+    config: SpindleConfig = ctx.obj["config"]
+    queue_manager = QueueManager(config)
+
+    console.print("[bold blue]Database Health Check[/bold blue]")
+    console.print()
+
+    health = queue_manager.check_database_health()
+
+    # Display health status
+    if health["database_exists"]:
+        console.print(f"[green]✓[/green] Database file exists: {queue_manager.db_path}")
+    else:
+        console.print(f"[red]✗[/red] Database file missing: {queue_manager.db_path}")
+        return
+
+    if health["database_readable"]:
+        console.print("[green]✓[/green] Database is readable")
+    else:
+        console.print("[red]✗[/red] Database is not readable")
+        if "error" in health:
+            console.print(f"[red]Error: {health['error']}[/red]")
+        return
+
+    console.print(f"[blue]Schema Version:[/blue] {health['schema_version']}")
+
+    if health["table_exists"]:
+        console.print("[green]✓[/green] Main queue_items table exists")
+    else:
+        console.print("[red]✗[/red] Main queue_items table missing")
+
+    if health["integrity_check"]:
+        console.print("[green]✓[/green] Database integrity check passed")
+    else:
+        console.print("[red]✗[/red] Database integrity check failed")
+
+    console.print(f"[blue]Total Items:[/blue] {health['total_items']}")
+
+    # Show column status
+    if health["missing_columns"]:
+        console.print(
+            f"[yellow]⚠[/yellow] Missing columns: {', '.join(health['missing_columns'])}",
+        )
+    else:
+        console.print("[green]✓[/green] All expected columns present")
+
+    if "error" in health:
+        console.print(f"[red]Error during health check: {health['error']}[/red]")
 
 
 @cli.command("test-notify")
@@ -484,6 +558,9 @@ async def process_queue_manual(config: SpindleConfig) -> None:
 
             # Identify media if needed
             if item.status == QueueItemStatus.RIPPED and not item.media_info:
+                if not item.ripped_file:
+                    console.print("[red]Error: No ripped file to identify[/red]")
+                    continue
                 console.print("Identifying media...")
                 item.status = QueueItemStatus.IDENTIFYING
                 queue_manager.update_item(item)
@@ -495,11 +572,15 @@ async def process_queue_manual(config: SpindleConfig) -> None:
                     console.print(f"[green]Identified: {item.media_info}[/green]")
                 else:
                     # Move to review
-                    organizer.create_review_directory(item.ripped_file, "unidentified")
+                    if item.ripped_file:
+                        organizer.create_review_directory(
+                            item.ripped_file,
+                            "unidentified",
+                        )
+                        notifier.notify_unidentified_media(item.ripped_file.name)
                     item.status = QueueItemStatus.REVIEW
-                    notifier.notify_unidentified_media(item.ripped_file.name)
                     console.print(
-                        "[yellow]Could not identify, moved to review[/yellow]"
+                        "[yellow]Could not identify, moved to review[/yellow]",
                     )
 
                 queue_manager.update_item(item)
@@ -507,21 +588,25 @@ async def process_queue_manual(config: SpindleConfig) -> None:
 
             # Encode if needed
             if item.status == QueueItemStatus.IDENTIFIED and not item.encoded_file:
+                if not item.ripped_file:
+                    console.print("[red]Error: No ripped file to encode[/red]")
+                    continue
                 console.print("Encoding...")
-                notifier.notify_encode_started(str(item.media_info))
+                # Use generic queue started notification for encoding
+                notifier.notify_queue_started(1)
                 item.status = QueueItemStatus.ENCODING
                 queue_manager.update_item(item)
 
                 result = encoder.encode_file(
-                    item.ripped_file, config.staging_dir / "encoded"
+                    item.ripped_file,
+                    config.staging_dir / "encoded",
                 )
 
                 if result.success:
                     item.encoded_file = result.output_file
                     item.status = QueueItemStatus.ENCODED
-                    notifier.notify_encode_completed(
-                        str(item.media_info), result.size_reduction_percent
-                    )
+                    # Use generic queue completed notification for encoding
+                    notifier.notify_queue_completed(1, 0, "unknown")
                     console.print(f"[green]Encoded: {result.output_file}[/green]")
                 else:
                     item.status = QueueItemStatus.FAILED
@@ -535,6 +620,9 @@ async def process_queue_manual(config: SpindleConfig) -> None:
 
             # Organize and import to Plex
             if item.status == QueueItemStatus.ENCODED and item.encoded_file:
+                if not item.media_info:
+                    console.print("[red]Error: No media info for organization[/red]")
+                    continue
                 console.print("Organizing and importing to Plex...")
                 item.status = QueueItemStatus.ORGANIZING
                 queue_manager.update_item(item)
@@ -542,7 +630,8 @@ async def process_queue_manual(config: SpindleConfig) -> None:
                 if organizer.add_to_plex(item.encoded_file, item.media_info):
                     item.status = QueueItemStatus.COMPLETED
                     notifier.notify_media_added(
-                        str(item.media_info), item.media_info.media_type
+                        str(item.media_info),
+                        item.media_info.media_type,
                     )
                     console.print(f"[green]Added to Plex: {item.media_info}[/green]")
                     processed += 1
@@ -565,7 +654,7 @@ async def process_queue_manual(config: SpindleConfig) -> None:
     notifier.notify_queue_completed(processed, failed, duration)
 
     console.print(
-        f"\n[green]Queue processing complete: {processed} processed, {failed} failed[/green]"
+        f"\n[green]Queue processing complete: {processed} processed, {failed} failed[/green]",
     )
 
 

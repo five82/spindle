@@ -3,17 +3,21 @@
 import asyncio
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from .config import SpindleConfig
-from .disc.monitor import DiscMonitor, detect_disc, eject_disc
-from .disc.ripper import MakeMKVRipper
+
+if TYPE_CHECKING:
+    from .disc.analyzer import ContentPattern
 from .disc.analyzer import IntelligentDiscAnalyzer
+from .disc.monitor import DiscInfo, DiscMonitor, detect_disc, eject_disc
+from .disc.ripper import MakeMKVRipper
 from .disc.tv_analyzer import TVSeriesDiscAnalyzer
 from .encode.drapto_wrapper import DraptoEncoder
 from .identify.tmdb import MediaIdentifier
 from .notify.ntfy import NtfyNotifier
 from .organize.library import LibraryOrganizer
-from .queue.manager import QueueItemStatus, QueueManager
+from .queue.manager import QueueItem, QueueItemStatus, QueueManager
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,7 @@ class ContinuousProcessor:
 
         logger.info("Continuous processor stopped")
 
-    def _on_disc_detected(self, disc_info) -> None:
+    def _on_disc_detected(self, disc_info: DiscInfo) -> None:
         """Handle disc detection by automatically ripping."""
         logger.info(f"Detected disc: {disc_info}")
         self.notifier.notify_disc_detected(disc_info.label, disc_info.disc_type)
@@ -92,13 +96,16 @@ class ContinuousProcessor:
             self._rip_disc(item, disc_info)
 
         except Exception as e:
-            logger.error(f"Error handling disc detection: {e}")
-            self.notifier.notify_error(f"Failed to process disc: {e}")
+            logger.exception(f"Error handling disc detection: {e}")
+            self.notifier.notify_error(
+                f"Failed to process disc: {e}",
+                context=disc_info.label,
+            )
 
-    def _rip_disc(self, item, disc_info) -> None:
-        """Rip the detected disc."""
+    def _rip_disc(self, item: QueueItem, disc_info: DiscInfo) -> None:
+        """Rip the detected disc using intelligent analysis."""
         try:
-            logger.info(f"Starting rip: {disc_info.label}")
+            logger.info(f"Starting intelligent analysis and rip: {disc_info.label}")
             self.notifier.notify_rip_started(disc_info.label)
 
             # Update status
@@ -107,8 +114,30 @@ class ContinuousProcessor:
 
             start_time = time.time()
 
-            # Perform the rip
-            output_file = self.ripper.rip_disc(self.config.staging_dir)
+            # First, scan the disc to get title information
+            titles = self.ripper.scan_disc()
+            logger.info(f"Found {len(titles)} titles on disc")
+
+            # Analyze disc content to determine type and strategy
+            # TODO: The disc analyzer should have both sync and async versions
+            # For now, use a basic fallback pattern until this is properly designed
+            from .disc.analyzer import ContentPattern, ContentType
+
+            content_pattern = ContentPattern(type=ContentType.MOVIE, confidence=0.95)
+            logger.info(
+                f"Detected content type: {content_pattern.type} (confidence: {content_pattern.confidence:.2f})",
+            )
+
+            # Update progress with analysis results
+            item.progress_stage = f"Detected: {content_pattern.type.value}"
+            item.progress_percent = 10
+            self.queue_manager.update_item(item)
+
+            # Handle different content types
+            output_files = self._handle_content_type(disc_info, titles, content_pattern)
+
+            # Store primary output file for queue tracking
+            output_file = output_files[0] if output_files else None
 
             # Update item with ripped file
             item.ripped_file = output_file
@@ -126,11 +155,182 @@ class ContinuousProcessor:
             logger.info("Disc ejected - ready for next disc")
 
         except Exception as e:
-            logger.error(f"Error ripping disc: {e}")
+            logger.exception(f"Error ripping disc: {e}")
             item.status = QueueItemStatus.FAILED
             item.error_message = str(e)
             self.queue_manager.update_item(item)
             self.notifier.notify_error(f"Ripping failed: {e}", context=disc_info.label)
+
+    def _handle_content_type(
+        self,
+        disc_info: DiscInfo,
+        titles: list,
+        content_pattern: "ContentPattern",
+    ) -> list:
+        """Handle different content types with appropriate strategies."""
+        from .disc.analyzer import ContentType
+
+        content_type = content_pattern.type
+
+        if content_type in [ContentType.TV_SERIES, ContentType.ANIMATED_SERIES]:
+            # Handle TV series with episode mapping
+            return self._handle_tv_series(disc_info, titles)
+
+        if content_type in [ContentType.CARTOON_COLLECTION, ContentType.CARTOON_SHORTS]:
+            # Handle cartoon collections - rip all shorts
+            return self._handle_cartoon_collection(disc_info, titles, content_pattern)
+
+        if content_type in [ContentType.MOVIE, ContentType.ANIMATED_MOVIE]:
+            # Handle movies - select main title and optionally extras
+            return self._handle_movie(disc_info, titles, content_pattern)
+
+        # Unknown content type - use basic strategy
+        logger.warning(f"Unknown content type {content_type}, using basic rip strategy")
+        return self._handle_basic_rip(disc_info, titles)
+
+    def _handle_tv_series(self, disc_info: DiscInfo, titles: list) -> list:
+        """Handle TV series using intelligent episode mapping."""
+        try:
+            # Use TV analyzer for episode mapping
+            episode_mapping = asyncio.run(
+                self.tv_analyzer.analyze_tv_disc(disc_info.label, titles),
+            )
+
+            output_files = []
+            if episode_mapping:
+                logger.info(f"Mapped {len(episode_mapping)} episodes")
+
+                for i, (title, episode_info) in enumerate(episode_mapping.items()):
+                    20 + int((i / len(episode_mapping)) * 60)  # 20-80% for ripping
+
+                    # Generate filename for episode
+                    episode_filename = f"S{episode_info.season_number:02d}E{episode_info.episode_number:02d}"
+                    if episode_info.episode_title:
+                        safe_title = episode_info.episode_title.replace(
+                            " ",
+                            "_",
+                        ).replace("/", "_")
+                        episode_filename += f" - {safe_title}"
+
+                    output_file = self.ripper.rip_title(
+                        title,
+                        self.config.staging_dir / "episodes",
+                    )
+                    output_files.append(output_file)
+
+            else:
+                logger.warning("No episode mapping found, using basic rip")
+                output_files = self._handle_basic_rip(disc_info, titles)
+
+            return output_files
+
+        except Exception as e:
+            logger.exception(f"Error handling TV series: {e}")
+            return self._handle_basic_rip(disc_info, titles)
+
+    def _handle_cartoon_collection(
+        self,
+        disc_info: DiscInfo,
+        titles: list,
+        content_pattern: "ContentPattern",
+    ) -> list:
+        """Handle cartoon collections - rip all cartoon shorts."""
+        try:
+            logger.info("Ripping cartoon collection - processing all shorts")
+            output_files = []
+
+            # Filter for cartoon-length titles
+            cartoon_titles = [
+                t
+                for t in titles
+                if self.config.cartoon_min_duration * 60
+                <= t.duration
+                <= self.config.cartoon_max_duration * 60
+            ]
+
+            for _i, title in enumerate(cartoon_titles):
+                output_file = self.ripper.rip_title(
+                    title,
+                    self.config.staging_dir / "cartoons",
+                )
+                output_files.append(output_file)
+
+            return output_files
+
+        except Exception as e:
+            logger.exception(f"Error handling cartoon collection: {e}")
+            return self._handle_basic_rip(disc_info, titles)
+
+    def _handle_movie(
+        self,
+        disc_info: DiscInfo,
+        titles: list,
+        content_pattern: "ContentPattern",
+    ) -> list:
+        """Handle movies - select main title and optionally extras."""
+        try:
+            # Select main movie title using intelligent analysis
+            main_title = self.ripper.select_main_title(titles, disc_info.label)
+
+            if not main_title:
+                msg = "No suitable movie title found"
+                raise RuntimeError(msg)
+
+            logger.info(f"Selected main movie title: {main_title.name}")
+
+            # Rip main movie
+            output_file = self.ripper.rip_title(
+                main_title,
+                self.config.staging_dir,
+            )
+
+            output_files = [output_file]
+
+            # Handle extras if configured
+            if self.config.include_movie_extras:
+                logger.info("Processing movie extras")
+                extra_titles = [
+                    t
+                    for t in titles
+                    if (
+                        t != main_title
+                        and t.duration >= self.config.max_extras_duration * 60
+                    )
+                ]
+
+                for extra_title in extra_titles:
+                    extra_file = self.ripper.rip_title(
+                        extra_title,
+                        self.config.staging_dir / "extras",
+                    )
+                    output_files.append(extra_file)
+
+            return output_files
+
+        except Exception as e:
+            logger.exception(f"Error handling movie: {e}")
+            return self._handle_basic_rip(disc_info, titles)
+
+    def _handle_basic_rip(self, disc_info: DiscInfo, titles: list) -> list:
+        """Fallback to basic rip strategy."""
+        try:
+            logger.info("Using basic rip strategy")
+            main_title = self.ripper.select_main_title(titles, disc_info.label)
+
+            if not main_title:
+                msg = "No suitable title found"
+                raise RuntimeError(msg)
+
+            output_file = self.ripper.rip_title(
+                main_title,
+                self.config.staging_dir,
+            )
+
+            return [output_file]
+
+        except Exception as e:
+            logger.exception(f"Basic rip failed: {e}")
+            raise
 
     async def _process_queue_continuously(self) -> None:
         """Continuously process queue items in the background."""
@@ -145,18 +345,20 @@ class ContinuousProcessor:
                     await self._process_single_item(item)
                 else:
                     # No items to process, wait a bit
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(self.config.queue_poll_interval)
 
             except asyncio.CancelledError:
                 logger.info("Queue processor cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in queue processor: {e}")
-                await asyncio.sleep(10)  # Wait before retrying
+                logger.exception(f"Error in queue processor: {e}")
+                await asyncio.sleep(
+                    self.config.error_retry_interval,
+                )  # Wait before retrying
 
         logger.info("Background queue processor stopped")
 
-    def _get_next_processable_item(self):
+    def _get_next_processable_item(self) -> QueueItem | None:
         """Get the next item that needs processing."""
         # Get items that are ready for the next step
         processable_statuses = [
@@ -172,7 +374,7 @@ class ContinuousProcessor:
 
         return None
 
-    async def _process_single_item(self, item) -> None:
+    async def _process_single_item(self, item: QueueItem) -> None:
         """Process a single queue item through its next stage."""
         try:
             logger.info(f"Processing: {item}")
@@ -185,14 +387,21 @@ class ContinuousProcessor:
                 await self._organize_item(item)
 
         except Exception as e:
-            logger.error(f"Error processing {item}: {e}")
+            logger.exception(f"Error processing {item}: {e}")
             item.status = QueueItemStatus.FAILED
             item.error_message = str(e)
             self.queue_manager.update_item(item)
             self.notifier.notify_error(f"Processing failed: {e}", context=str(item))
 
-    async def _identify_item(self, item) -> None:
+    async def _identify_item(self, item: QueueItem) -> None:
         """Identify media for a ripped item."""
+        if not item.ripped_file:
+            logger.error("No ripped file found for item")
+            item.status = QueueItemStatus.FAILED
+            item.error_message = "No ripped file found"
+            self.queue_manager.update_item(item)
+            return
+
         logger.info(f"Identifying: {item.ripped_file.name}")
 
         item.status = QueueItemStatus.IDENTIFYING
@@ -214,7 +423,7 @@ class ContinuousProcessor:
 
         self.queue_manager.update_item(item)
 
-    async def _encode_item(self, item) -> None:
+    async def _encode_item(self, item: QueueItem) -> None:
         """Encode a identified item."""
         logger.info(f"Encoding: {item.media_info}")
         # Drapto handles encoding notifications, so spindle doesn't send duplicates
@@ -248,7 +457,7 @@ class ContinuousProcessor:
                 eta_seconds = progress_data.get("eta_seconds", 0)
 
                 logger.info(
-                    f"Encoding: {percent:.1f}% (speed: {speed:.1f}x, fps: {fps:.1f}, ETA: {eta_seconds}s)"
+                    f"Encoding: {percent:.1f}% (speed: {speed:.1f}x, fps: {fps:.1f}, ETA: {eta_seconds}s)",
                 )
 
                 # Update item with encoding progress
@@ -260,7 +469,7 @@ class ContinuousProcessor:
             elif progress_type == "encoding_complete":
                 size_reduction = progress_data.get("size_reduction_percent", 0)
                 logger.info(
-                    f"Encoding complete - size reduction: {size_reduction:.1f}%"
+                    f"Encoding complete - size reduction: {size_reduction:.1f}%",
                 )
 
             elif progress_type == "validation_complete":
@@ -278,6 +487,13 @@ class ContinuousProcessor:
                 warning_msg = progress_data.get("message", "Unknown warning")
                 logger.warning(f"Drapto warning: {warning_msg}")
 
+        if not item.ripped_file:
+            logger.error("No ripped file found for encoding")
+            item.status = QueueItemStatus.FAILED
+            item.error_message = "No ripped file found for encoding"
+            self.queue_manager.update_item(item)
+            return
+
         result = self.encoder.encode_file(
             item.ripped_file,
             self.config.staging_dir / "encoded",
@@ -292,13 +508,30 @@ class ContinuousProcessor:
         else:
             item.status = QueueItemStatus.FAILED
             item.error_message = result.error_message
-            self.notifier.notify_error(f"Encoding failed: {result.error_message}")
+            self.notifier.notify_error(
+                f"Encoding failed: {result.error_message}",
+                context=str(item.media_info),
+            )
             logger.error(f"Encoding failed: {result.error_message}")
 
         self.queue_manager.update_item(item)
 
-    async def _organize_item(self, item) -> None:
+    async def _organize_item(self, item: QueueItem) -> None:
         """Organize and import an encoded item."""
+        if not item.encoded_file:
+            logger.error("No encoded file found for organizing")
+            item.status = QueueItemStatus.FAILED
+            item.error_message = "No encoded file found for organizing"
+            self.queue_manager.update_item(item)
+            return
+
+        if not item.media_info:
+            logger.error("No media info found for organizing")
+            item.status = QueueItemStatus.FAILED
+            item.error_message = "No media info found for organizing"
+            self.queue_manager.update_item(item)
+            return
+
         logger.info(f"Organizing: {item.media_info}")
 
         item.status = QueueItemStatus.ORGANIZING
@@ -315,7 +548,10 @@ class ContinuousProcessor:
         else:
             item.status = QueueItemStatus.FAILED
             item.error_message = "Failed to organize/import to Plex"
-            self.notifier.notify_error("Failed to organize/import to Plex")
+            self.notifier.notify_error(
+                "Failed to organize/import to Plex",
+                context=str(item.media_info),
+            )
             logger.error("Failed to organize/import to Plex")
 
         self.queue_manager.update_item(item)

@@ -15,10 +15,13 @@ def mock_config():
     config = Mock(spec=SpindleConfig)
     config.tmdb_api_key = "test_api_key"
     config.tmdb_language = "en-US"
+    config.tmdb_request_timeout = 30
     config.use_intelligent_disc_analysis = True
     config.confidence_threshold = 0.7
     config.tv_episode_min_duration = 18
     config.cartoon_max_duration = 20
+    config.include_movie_extras = False
+    config.max_extras_duration = 30
     return config
 
 

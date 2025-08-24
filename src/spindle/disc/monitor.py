@@ -5,9 +5,13 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+
+if TYPE_CHECKING:
+    from watchdog.observers.api import BaseObserver
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +39,7 @@ class DiscMonitor:
     ):
         self.device = device
         self.callback = callback
-        self.observer: Observer | None = None
+        self.observer: BaseObserver | None = None
         self.is_monitoring = False
 
     def start_monitoring(self) -> None:
@@ -56,6 +60,7 @@ class DiscMonitor:
             self.is_monitoring = True
         else:
             logger.error(f"Device path {device_path} does not exist")
+            return
 
     def stop_monitoring(self) -> None:
         """Stop monitoring for disc events."""
@@ -82,9 +87,9 @@ class DiscEventHandler(FileSystemEventHandler):
     def __init__(self, device: str, callback: Callable[[DiscInfo], None]):
         self.device = device
         self.callback = callback
-        self.last_check = 0
+        self.last_check = 0.0
 
-    def on_modified(self, event) -> None:
+    def on_modified(self, event: Any) -> None:
         """Handle file system modification events."""
         if event.src_path == self.device:
             # Debounce events - only check once per 2 seconds
@@ -96,7 +101,7 @@ class DiscEventHandler(FileSystemEventHandler):
                     self.callback(disc_info)
 
 
-def detect_disc(device: str = "/dev/sr0") -> DiscInfo | None:
+def detect_disc(device: str = "/dev/sr0", timeout: int = 10) -> DiscInfo | None:
     """Detect if a disc is present and get its information."""
     try:
         # Use lsblk to check if the device has media
@@ -105,7 +110,7 @@ def detect_disc(device: str = "/dev/sr0") -> DiscInfo | None:
             check=False,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=timeout,
         )
 
         if result.returncode == 0 and result.stdout.strip():
@@ -117,7 +122,7 @@ def detect_disc(device: str = "/dev/sr0") -> DiscInfo | None:
                 fstype = parts[1] if len(parts) > 1 else "unknown"
 
                 # Determine disc type based on filesystem or other detection
-                disc_type = determine_disc_type(device, fstype)
+                disc_type = determine_disc_type(device, fstype, timeout)
 
                 return DiscInfo(device, disc_type, label)
 
@@ -126,12 +131,12 @@ def detect_disc(device: str = "/dev/sr0") -> DiscInfo | None:
     except subprocess.CalledProcessError as e:
         logger.debug(f"No disc detected on {device}: {e}")
     except Exception as e:
-        logger.error(f"Error detecting disc on {device}: {e}")
+        logger.exception(f"Error detecting disc on {device}: {e}")
 
     return None
 
 
-def determine_disc_type(device: str, fstype: str) -> str:
+def determine_disc_type(device: str, fstype: str, timeout: int = 10) -> str:
     """Determine the type of disc (DVD, Blu-ray, etc.)."""
     try:
         # Try to use blkid for more detailed information
@@ -140,7 +145,7 @@ def determine_disc_type(device: str, fstype: str) -> str:
             check=False,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=timeout,
         )
 
         if result.returncode == 0:
@@ -148,7 +153,7 @@ def determine_disc_type(device: str, fstype: str) -> str:
             if "udf" in output:
                 # UDF is common for Blu-ray and modern DVDs
                 # Try to detect Blu-ray vs DVD by checking for specific files
-                return detect_bluray_vs_dvd(device)
+                return detect_bluray_vs_dvd(device, timeout)
             if "iso9660" in output:
                 return "DVD"
 
@@ -157,14 +162,14 @@ def determine_disc_type(device: str, fstype: str) -> str:
 
     # Fallback to filesystem type
     if fstype.lower() == "udf":
-        return detect_bluray_vs_dvd(device)
+        return detect_bluray_vs_dvd(device, timeout)
     if fstype.lower() == "iso9660":
         return "DVD"
 
     return "Unknown"
 
 
-def detect_bluray_vs_dvd(device: str) -> str:
+def detect_bluray_vs_dvd(device: str, timeout: int = 10) -> str:
     """Attempt to distinguish between Blu-ray and DVD."""
     try:
         # Try to mount and check for Blu-ray structure
@@ -175,7 +180,7 @@ def detect_bluray_vs_dvd(device: str) -> str:
             check=False,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=timeout,
         )
 
         if result.returncode == 0:
@@ -191,7 +196,7 @@ def detect_bluray_vs_dvd(device: str) -> str:
     return "DVD"
 
 
-def eject_disc(device: str = "/dev/sr0") -> bool:
+def eject_disc(device: str = "/dev/sr0", timeout: int = 20) -> bool:
     """Eject the disc from the drive."""
     try:
         result = subprocess.run(
@@ -199,7 +204,7 @@ def eject_disc(device: str = "/dev/sr0") -> bool:
             check=False,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout,
         )
 
         if result.returncode == 0:
@@ -209,7 +214,7 @@ def eject_disc(device: str = "/dev/sr0") -> bool:
         return False
 
     except Exception as e:
-        logger.error(f"Error ejecting disc: {e}")
+        logger.exception(f"Error ejecting disc: {e}")
         return False
 
 
@@ -220,6 +225,6 @@ def wait_for_disc_removal(device: str = "/dev/sr0", timeout: int = 30) -> bool:
     while time.time() - start_time < timeout:
         if detect_disc(device) is None:
             return True
-        time.sleep(1)
+        time.sleep(1)  # Keep this as 1 second for disc eject polling
 
     return False

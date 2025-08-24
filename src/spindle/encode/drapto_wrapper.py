@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..config import SpindleConfig
+from spindle.config import SpindleConfig
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class EncodeResult:
         return ((self.input_size - self.output_size) / self.input_size) * 100
 
     def __str__(self) -> str:
-        if self.success:
+        if self.success and self.output_file:
             return f"Encoded {self.input_file.name} -> {self.output_file.name} ({self.size_reduction_percent:.1f}% reduction)"
         return f"Failed to encode {self.input_file.name}: {self.error_message}"
 
@@ -87,7 +87,7 @@ class DraptoEncoder:
                         "type": "initialization",
                         "message": f"Starting encode: {input_file.name}",
                         "input_file": str(input_file),
-                    }
+                    },
                 )
 
             # Run drapto with streaming JSON progress
@@ -124,11 +124,11 @@ class DraptoEncoder:
                         "message": f"Completed encode: {output_file.name}",
                         "output_file": str(output_file),
                         "size_reduction_percent": (
-                            (input_size - output_size) / input_size * 100
-                        )
-                        if input_size > 0
-                        else 0,
-                    }
+                            ((input_size - output_size) / input_size * 100)
+                            if input_size > 0
+                            else 0
+                        ),
+                    },
                 )
 
             return EncodeResult(
@@ -141,7 +141,7 @@ class DraptoEncoder:
 
         except subprocess.CalledProcessError as e:
             error_msg = f"Drapto process failed: {e}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return EncodeResult(
                 success=False,
                 input_file=input_file,
@@ -150,7 +150,7 @@ class DraptoEncoder:
             )
         except Exception as e:
             error_msg = f"Unexpected error during encoding: {e}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return EncodeResult(
                 success=False,
                 input_file=input_file,
@@ -209,7 +209,7 @@ class DraptoEncoder:
         self,
         cmd: list[str],
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
-    ) -> subprocess.CompletedProcess:
+    ) -> Any:
         """Run drapto command and parse JSON progress output in real-time."""
 
         process = subprocess.Popen(
@@ -223,8 +223,10 @@ class DraptoEncoder:
 
         stdout_lines = []
 
-        def read_output():
+        def read_output() -> None:
             """Read and parse JSON progress from stdout."""
+            if process.stdout is None:
+                return
             while True:
                 line = process.stdout.readline()
                 if not line:
@@ -239,9 +241,11 @@ class DraptoEncoder:
                         progress_data = json.loads(line)
                         if isinstance(progress_data, dict) and "type" in progress_data:
                             progress_callback(progress_data)
-                    except json.JSONDecodeError:
-                        # Not a JSON progress line, ignore
-                        pass
+                    except json.JSONDecodeError as e:
+                        # Line starts with { but isn't valid JSON - could be malformed progress
+                        logger.debug(
+                            f"Malformed JSON progress line from drapto: {line[:100]}... Error: {e}",
+                        )
 
         # Start reading output in background thread
         output_thread = threading.Thread(target=read_output)
@@ -278,7 +282,7 @@ class DraptoEncoder:
                         "current_file": i,
                         "total_files": len(input_files),
                         "filename": input_file.name,
-                    }
+                    },
                 )
 
             result = self.encode_file(input_file, output_dir, progress_callback)
@@ -286,7 +290,7 @@ class DraptoEncoder:
 
             if not result.success:
                 logger.warning(
-                    f"Failed to encode {input_file.name}: {result.error_message}"
+                    f"Failed to encode {input_file.name}: {result.error_message}",
                 )
             else:
                 logger.info(f"Successfully encoded {input_file.name}")
@@ -301,7 +305,7 @@ class DraptoEncoder:
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=self.config.drapto_version_timeout,
             )
 
             if result.returncode == 0:
@@ -319,10 +323,10 @@ class DraptoEncoder:
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=self.config.drapto_version_timeout,
             )
 
             return result.returncode == 0
         except Exception as e:
-            logger.error(f"Drapto not available: {e}")
+            logger.exception(f"Drapto not available: {e}")
             return False

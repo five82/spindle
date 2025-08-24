@@ -2,9 +2,11 @@
 
 import logging
 import re
+from typing import Any, cast
 
-from ..config import SpindleConfig
-from ..identify.tmdb import TMDBClient
+from spindle.config import SpindleConfig
+from spindle.identify.tmdb import TMDBClient
+
 from .analyzer import EpisodeInfo, SeriesInfo
 from .ripper import Title
 
@@ -19,7 +21,9 @@ class TVSeriesDiscAnalyzer:
         self.tmdb = TMDBClient(config)
 
     async def analyze_tv_disc(
-        self, disc_label: str, titles: list[Title],
+        self,
+        disc_label: str,
+        titles: list[Title],
     ) -> dict[Title, EpisodeInfo] | None:
         """Identify TV series from disc and map episodes."""
 
@@ -42,13 +46,11 @@ class TVSeriesDiscAnalyzer:
         logger.info(f"Detected season: {season_number}")
 
         # Step 3: Map disc titles to specific episodes
-        episode_mapping = await self.map_titles_to_episodes(
+        return await self.map_titles_to_episodes(
             titles,
             series_info,
             season_number,
         )
-
-        return episode_mapping
 
     async def identify_series_from_disc(self, disc_label: str) -> SeriesInfo | None:
         """Extract series name from disc label."""
@@ -113,21 +115,22 @@ class TVSeriesDiscAnalyzer:
 
         # Remove special characters and normalize spaces
         cleaned = re.sub(r"[._-]", " ", cleaned)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-
-        return cleaned
+        return re.sub(r"\s+", " ", cleaned).strip()
 
     def extract_year_from_date(self, date_str: str | None) -> int | None:
         """Extract year from TMDB date string."""
         if date_str and len(date_str) >= 4:
             try:
                 return int(date_str[:4])
-            except ValueError:
-                pass
+            except ValueError as e:
+                logger.debug(f"Failed to extract year from date '{date_str}': {e}")
         return None
 
     async def map_titles_to_episodes(
-        self, titles: list[Title], series_info: SeriesInfo, season_num: int,
+        self,
+        titles: list[Title],
+        series_info: SeriesInfo,
+        season_num: int,
     ) -> dict[Title, EpisodeInfo]:
         """Map MakeMKV titles to specific episodes using TMDB data."""
 
@@ -148,19 +151,27 @@ class TVSeriesDiscAnalyzer:
         episode_titles = self.filter_episode_titles(titles)
         logger.info(f"Filtered to {len(episode_titles)} likely episode titles")
 
-        # Strategy 1: Duration matching
-        mapping = self.map_by_duration(episode_titles, episodes)
+        # Use configured mapping strategy
+        strategy = self.config.episode_mapping_strategy.lower()
 
-        # Strategy 2: Sequential mapping (most reliable for TV)
-        if not mapping or len(mapping) < len(episode_titles) * 0.8:
-            logger.info("Duration mapping insufficient, using sequential mapping")
+        if strategy == "duration":
+            mapping = self.map_by_duration(episode_titles, episodes)
+        elif strategy == "sequential":
             mapping = self.map_sequentially(episode_titles, episodes)
+        elif strategy == "hybrid":
+            mapping = self.map_hybrid(episode_titles, episodes)
+        else:
+            # Default to hybrid if strategy is unknown
+            logger.warning(f"Unknown mapping strategy '{strategy}', using hybrid")
+            mapping = self.map_hybrid(episode_titles, episodes)
 
         logger.info(f"Successfully mapped {len(mapping)} titles to episodes")
         return mapping
 
     async def get_tv_season_details(
-        self, tv_id: int, season_number: int,
+        self,
+        tv_id: int,
+        season_number: int,
     ) -> dict | None:
         """Get TV season details from TMDB."""
         try:
@@ -174,13 +185,18 @@ class TVSeriesDiscAnalyzer:
                 params=params,
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            return cast(dict[Any, Any], data)
         except Exception as e:
-            logger.error(f"Failed to get season {season_number} for TV ID {tv_id}: {e}")
+            logger.exception(
+                f"Failed to get season {season_number} for TV ID {tv_id}: {e}",
+            )
             return None
 
     def map_by_duration(
-        self, titles: list[Title], episodes: list[dict],
+        self,
+        titles: list[Title],
+        episodes: list[dict],
     ) -> dict[Title, EpisodeInfo]:
         """Map titles to episodes by matching durations."""
 
@@ -203,8 +219,9 @@ class TVSeriesDiscAnalyzer:
                 episode_duration = episode_runtime * 60
                 duration_diff = abs(title.duration - episode_duration)
 
-                # Allow 10% tolerance
-                tolerance = episode_duration * 0.1
+                # Use flexible tolerance: 10% but at least 1 minute, max 5 minutes
+                base_tolerance = episode_duration * 0.1
+                tolerance = max(60, min(300, base_tolerance))  # 1-5 minute range
 
                 if duration_diff <= tolerance and duration_diff < best_diff:
                     best_match = (i, episode)
@@ -217,7 +234,8 @@ class TVSeriesDiscAnalyzer:
                 mapping[title] = EpisodeInfo(
                     season_number=episode_data.get("season_number", 1),
                     episode_number=episode_data.get(
-                        "episode_number", episode_index + 1,
+                        "episode_number",
+                        episode_index + 1,
                     ),
                     episode_title=episode_data.get("name", ""),
                     air_date=episode_data.get("air_date"),
@@ -227,14 +245,85 @@ class TVSeriesDiscAnalyzer:
 
         return mapping
 
+    def map_hybrid(
+        self,
+        titles: list[Title],
+        episodes: list[dict],
+    ) -> dict[Title, EpisodeInfo]:
+        """Hybrid mapping: try duration matching first, fall back to sequential."""
+
+        # First try duration matching
+        duration_mapping = self.map_by_duration(titles, episodes)
+
+        # Check if duration mapping was successful enough (80% of titles mapped)
+        success_rate = len(duration_mapping) / len(titles) if titles else 0
+
+        if success_rate >= 0.8:
+            logger.info(
+                f"Duration mapping successful ({success_rate:.1%}), using duration results",
+            )
+            return duration_mapping
+
+        # If duration mapping wasn't good enough, try sequential mapping
+        logger.info(
+            f"Duration mapping only mapped {success_rate:.1%} of titles, falling back to sequential",
+        )
+        sequential_mapping = self.map_sequentially(titles, episodes)
+
+        # If sequential mapping is better, use it
+        if len(sequential_mapping) > len(duration_mapping):
+            return sequential_mapping
+
+        # Otherwise, combine both strategies for best results
+        logger.info("Combining duration and sequential mapping results")
+        combined_mapping = {}
+
+        # Start with duration mapping results (more accurate when it works)
+        combined_mapping.update(duration_mapping)
+
+        # Fill gaps with sequential mapping for unmapped titles
+        unmapped_titles = [t for t in titles if t not in combined_mapping]
+        unused_episodes = [
+            ep
+            for i, ep in enumerate(episodes)
+            if i
+            not in [
+                self._find_episode_index(ep, episodes)
+                for ep in duration_mapping.values()
+            ]
+        ]
+
+        if unmapped_titles and unused_episodes:
+            gap_mapping = self.map_sequentially(unmapped_titles, unused_episodes)
+            combined_mapping.update(gap_mapping)
+
+        return combined_mapping
+
+    def _find_episode_index(
+        self,
+        target_episode_info: EpisodeInfo,
+        episodes: list[dict],
+    ) -> int:
+        """Find the index of an episode in the episodes list."""
+        for i, ep in enumerate(episodes):
+            if (
+                ep.get("episode_number") == target_episode_info.episode_number
+                and ep.get("season_number") == target_episode_info.season_number
+            ):
+                return i
+        return -1
+
     def map_sequentially(
-        self, titles: list[Title], episodes: list[dict],
+        self,
+        titles: list[Title],
+        episodes: list[dict],
     ) -> dict[Title, EpisodeInfo]:
         """Map titles to episodes in sequential order."""
 
         # Sort titles by title ID to get disc order
         sorted_titles = sorted(
-            titles, key=lambda t: int(t.title_id) if t.title_id.isdigit() else 999,
+            titles,
+            key=lambda t: int(t.title_id) if t.title_id.isdigit() else 999,
         )
 
         # Take the first N titles matching episode count

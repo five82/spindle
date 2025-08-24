@@ -37,7 +37,7 @@ class SpindleConfig(BaseModel):
     # Library organization
     movies_dir: str = Field(default="movies")
     tv_dir: str = Field(default="tv")
-    
+
     # Plex settings
     plex_url: str | None = None
     plex_token: str | None = None
@@ -46,6 +46,21 @@ class SpindleConfig(BaseModel):
 
     # Notifications
     ntfy_topic: str | None = None
+
+    # Timeout Settings (seconds)
+    makemkv_rip_timeout: int = Field(default=3600)  # 1 hour
+    makemkv_info_timeout: int = Field(default=60)  # 1 minute
+    makemkv_eject_timeout: int = Field(default=30)  # 30 seconds
+    drapto_version_timeout: int = Field(default=10)  # 10 seconds
+    tmdb_request_timeout: int = Field(default=30)  # 30 seconds
+    ntfy_request_timeout: int = Field(default=10)  # 10 seconds
+    disc_monitor_timeout: int = Field(default=5)  # 5 seconds
+
+    # Processing Intervals (seconds)
+    queue_poll_interval: int = Field(default=5)  # Check queue every 5 seconds
+    error_retry_interval: int = Field(default=10)  # Wait 10 seconds before retry
+    status_display_interval: int = Field(default=30)  # Show status every 30 seconds
+    plex_scan_interval: int = Field(default=5)  # Check Plex scan status
 
     # Content Detection & Analysis
     use_intelligent_disc_analysis: bool = Field(default=True)
@@ -62,7 +77,7 @@ class SpindleConfig(BaseModel):
     tv_episode_max_duration: int = Field(default=90)  # minutes
     rip_all_episodes: bool = Field(default=True)
     episode_mapping_strategy: str = Field(
-        default="sequential"
+        default="hybrid",
     )  # "sequential", "duration", "hybrid"
 
     # Movie Detection
@@ -77,7 +92,11 @@ class SpindleConfig(BaseModel):
     detect_cartoon_collections: bool = Field(default=True)
 
     @field_validator(
-        "staging_dir", "library_dir", "log_dir", "review_dir", mode="before"
+        "staging_dir",
+        "library_dir",
+        "log_dir",
+        "review_dir",
+        mode="before",
     )
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:
@@ -94,7 +113,8 @@ class SpindleConfig(BaseModel):
             # Try to get from environment
             v = os.getenv("TMDB_API_KEY")
         if not v:
-            raise ValueError("TMDB API key is required")
+            msg = "TMDB API key is required"
+            raise ValueError(msg)
         return v
 
     def ensure_directories(self) -> None:
@@ -132,7 +152,7 @@ def create_sample_config(path: Path) -> None:
 
 # Directory paths (REQUIRED - edit for your setup)
 staging_dir = "~/.local/share/spindle/staging"  # Auto-created: Temporary files during processing
-library_dir = "~/your-media-library"            # MUST EXIST: Your media library directory  
+library_dir = "~/your-media-library"            # MUST EXIST: Your media library directory
 log_dir = "~/.local/share/spindle/logs"         # Auto-created: Log files
 review_dir = "~/your-review-directory"          # Auto-created: Unidentified media
 
@@ -150,7 +170,7 @@ tmdb_language = "en-US"
 # Drapto encoding settings
 drapto_binary = "drapto"
 drapto_quality_sd = 23   # Standard Definition (<1920px width) - CRF value 0-63
-drapto_quality_hd = 25   # High Definition (1920-3839px width) - CRF value 0-63  
+drapto_quality_hd = 25   # High Definition (1920-3839px width) - CRF value 0-63
 drapto_quality_uhd = 27  # Ultra High Definition (>=3840px width) - CRF value 0-63
 drapto_preset = 4        # SVT-AV1 preset 0-13 (lower = slower/better quality)
 
@@ -167,6 +187,21 @@ tv_library = "TV Shows"
 # Notifications
 ntfy_topic = "https://ntfy.sh/your_topic"
 
+# Timeout Settings (seconds)
+makemkv_rip_timeout = 3600      # MakeMKV ripping timeout (1 hour)
+makemkv_info_timeout = 60       # MakeMKV disc info timeout (1 minute)
+makemkv_eject_timeout = 30      # Disc eject timeout (30 seconds)
+drapto_version_timeout = 10     # Drapto version check timeout
+tmdb_request_timeout = 30       # TMDB API request timeout
+ntfy_request_timeout = 10       # Notification request timeout
+disc_monitor_timeout = 5        # Disc monitoring timeout
+
+# Processing Intervals (seconds)
+queue_poll_interval = 5         # How often to check processing queue
+error_retry_interval = 10       # Wait time before retrying failed operations
+status_display_interval = 30    # How often to display status updates
+plex_scan_interval = 5          # How often to check Plex scan progress
+
 # Content Detection & Analysis
 use_intelligent_disc_analysis = true
 confidence_threshold = 0.7
@@ -179,11 +214,11 @@ include_alternate_audio = false           # Include non-English audio tracks
 
 # TV Series Detection
 tv_episode_min_duration = 18              # Minimum episode length (minutes)
-tv_episode_max_duration = 90              # Maximum episode length (minutes)  
+tv_episode_max_duration = 90              # Maximum episode length (minutes)
 rip_all_episodes = true                   # Rip all episodes on disc
-episode_mapping_strategy = "sequential"   # How to map titles to episodes
+episode_mapping_strategy = "hybrid"       # How to map titles to episodes: "duration", "sequential", "hybrid"
 
-# Movie Detection  
+# Movie Detection
 movie_min_duration = 70                   # Minimum movie length (minutes)
 include_movie_extras = false              # Include extras/deleted scenes
 max_extras_duration = 30                  # Maximum extra content length (minutes)

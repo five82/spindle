@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from ..config import SpindleConfig
-from ..identify.tmdb import TMDBClient
+from spindle.config import SpindleConfig
+from spindle.identify.tmdb import TMDBClient
+
 from .monitor import DiscInfo
 from .ripper import Title
 
@@ -85,7 +86,9 @@ class IntelligentDiscAnalyzer:
         self.tmdb = TMDBClient(config)
 
     async def analyze_disc(
-        self, disc_info: DiscInfo, titles: list[Title],
+        self,
+        disc_info: DiscInfo,
+        titles: list[Title],
     ) -> DiscAnalysisResult:
         """Complete disc analysis workflow."""
 
@@ -118,7 +121,10 @@ class IntelligentDiscAnalyzer:
         )
 
     async def identify_content_multi_api(
-        self, disc_label: str, titles: list[Title], disc_type: str,
+        self,
+        disc_label: str,
+        titles: list[Title],
+        disc_type: str,
     ) -> ContentPattern | None:
         """Use multiple APIs for robust identification."""
 
@@ -148,9 +154,7 @@ class IntelligentDiscAnalyzer:
 
         # Remove special characters and normalize spaces
         cleaned = re.sub(r"[._-]", " ", cleaned)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-
-        return cleaned
+        return re.sub(r"\s+", " ", cleaned).strip()
 
     async def query_tmdb(self, label: str) -> dict[str, Any] | None:
         """Query TMDB for content identification."""
@@ -179,7 +183,9 @@ class IntelligentDiscAnalyzer:
         return None
 
     def combine_api_and_pattern_results(
-        self, api_result: dict | None, pattern_result: ContentPattern,
+        self,
+        api_result: dict | None,
+        pattern_result: ContentPattern,
     ) -> ContentPattern:
         """Combine API data with pattern analysis."""
 
@@ -243,7 +249,9 @@ class IntelligentDiscAnalyzer:
         return pattern_result
 
     def analyze_title_patterns(
-        self, titles: list[Title], disc_label: str,
+        self,
+        titles: list[Title],
+        disc_label: str,
     ) -> ContentPattern:
         """Analyze title durations/structure to infer content type."""
 
@@ -258,11 +266,15 @@ class IntelligentDiscAnalyzer:
                 type=ContentType.CARTOON_COLLECTION,
                 confidence=0.8,
                 episode_count=len([d for d in durations if 3 * 60 <= d <= 15 * 60]),
-                episode_duration=int(
-                    statistics.median([d for d in durations if 3 * 60 <= d <= 15 * 60]),
-                )
-                if durations
-                else 0,
+                episode_duration=(
+                    int(
+                        statistics.median(
+                            [d for d in durations if 3 * 60 <= d <= 15 * 60],
+                        ),
+                    )
+                    if durations
+                    else 0
+                ),
             )
 
         # TV Show patterns
@@ -307,42 +319,89 @@ class IntelligentDiscAnalyzer:
         return ContentPattern(type=ContentType.UNKNOWN, confidence=0.3)
 
     def has_cartoon_collection_pattern(
-        self, durations: list[int], disc_label: str,
+        self,
+        durations: list[int],
+        disc_label: str,
     ) -> bool:
         """Detect cartoon collections like Looney Tunes."""
 
         # Label indicators
         cartoon_labels = [
+            # Classic Warner Bros. cartoons
             "looney tunes",
-            "tom and jerry",
-            "betty boop",
-            "popeye",
+            "merrie melodies",
             "bugs bunny",
             "daffy duck",
-            "cartoon",
-            "animation collection",
-            "merrie melodies",
+            "porky pig",
+            "tweety",
+            "sylvester",
+            "pepe le pew",
+            "foghorn leghorn",
+            # MGM/Hanna-Barbera classics
+            "tom and jerry",
+            "tom & jerry",
+            "droopy",
+            # Disney classics
             "mickey mouse",
             "donald duck",
+            "goofy",
+            "pluto",
+            "chip and dale",
+            "chip 'n dale",
+            # Other classic studios
+            "betty boop",
+            "popeye",
+            "woody woodpecker",
+            "casper",
+            "felix the cat",
+            # Collection indicators
+            "cartoon",
+            "cartoons",
+            "animation collection",
+            "classic cartoons",
+            "golden age",
+            "theatrical shorts",
+            "animated shorts",
         ]
 
         label_indicates_cartoons = any(
             indicator in disc_label.lower() for indicator in cartoon_labels
         )
 
-        # Duration patterns: many short titles (3-15 minutes)
-        short_titles = [d for d in durations if 3 * 60 <= d <= 15 * 60]
+        # Duration patterns: classic theatrical cartoons are typically 3-15 minutes
+        classic_shorts = [d for d in durations if 3 * 60 <= d <= 15 * 60]  # 3-15 min
+        longer_cartoons = [
+            d for d in durations if 15 * 60 < d <= 30 * 60
+        ]  # 15-30 min (some specials)
 
-        # Cartoon collection criteria:
-        # - 70%+ of titles are short (3-15 min)
-        # - At least 5 titles
-        # - Label suggests cartoons OR consistent short durations
+        # Cartoon collection criteria (multiple patterns):
 
-        if len(durations) >= 5 and len(short_titles) >= len(durations) * 0.7:
+        # Pattern 1: Classic short cartoon collection (Tom & Jerry, Looney Tunes style)
+        # - 70%+ titles are 3-15 minutes
+        # - At least 4 titles
+        if len(durations) >= 4 and len(classic_shorts) >= len(durations) * 0.7:
             return True
 
-        if label_indicates_cartoons and len(short_titles) >= 3:
-            return True
+        # Pattern 2: Label-based detection with fewer titles
+        # - Disc label suggests cartoons
+        # - At least 3 short titles OR mix of short/medium cartoons
+        if label_indicates_cartoons:
+            total_cartoon_length = len(classic_shorts) + len(longer_cartoons)
+            if len(classic_shorts) >= 3 or total_cartoon_length >= len(durations) * 0.6:
+                return True
+
+        # Pattern 3: Very consistent short durations (even without label hints)
+        # - 80%+ are classic short length
+        # - Low duration variance suggests intentional shorts collection
+        if len(durations) >= 6 and len(classic_shorts) >= len(durations) * 0.8:
+            # Check for low variance in the short titles (consistent cartoon length)
+            if len(classic_shorts) > 1:
+                import statistics
+
+                short_variance = statistics.pvariance(classic_shorts)
+                # Low variance suggests consistent cartoon episodes
+                if short_variance < (2 * 60) ** 2:  # Less than 2 min variance
+                    return True
 
         return False
 
@@ -408,7 +467,10 @@ class IntelligentDiscAnalyzer:
         return len(medium_segments) >= 2
 
     async def select_titles_intelligently(
-        self, titles: list[Title], content_pattern: ContentPattern, disc_label: str,
+        self,
+        titles: list[Title],
+        content_pattern: ContentPattern,
+        disc_label: str,
     ) -> list[Title]:
         """Select appropriate titles based on detected content type."""
 
@@ -434,7 +496,9 @@ class IntelligentDiscAnalyzer:
         return self.select_titles_by_heuristics(titles)
 
     def select_tv_episode_titles(
-        self, titles: list[Title], content_pattern: ContentPattern,
+        self,
+        titles: list[Title],
+        content_pattern: ContentPattern,
     ) -> list[Title]:
         """Select all episode-length titles for TV series."""
 
@@ -456,36 +520,55 @@ class IntelligentDiscAnalyzer:
         ]
 
     def select_movie_titles(
-        self, titles: list[Title], content_pattern: ContentPattern,
+        self,
+        titles: list[Title],
+        content_pattern: ContentPattern,
     ) -> list[Title]:
         """Select main feature + any requested extras."""
 
         # Main feature: longest title that matches expected movie length
         main_candidates = [
-            t
-            for t in titles
-            if t.duration >= 70 * 60  # Minimum movie length
+            t for t in titles if t.duration >= 70 * 60  # Minimum movie length
         ]
 
         if not main_candidates:
             return []
 
         main_feature = max(main_candidates, key=lambda t: t.duration)
+        selected_titles = [main_feature]
 
-        # For now, just return main feature
-        # TODO: Add config option for including extras
-        return [main_feature]
+        # Include extras if configured
+        if self.config.include_movie_extras:
+            # Find potential extras: shorter titles that could be bonus content
+            extra_candidates = [
+                t
+                for t in titles
+                if (
+                    t != main_feature
+                    and t.duration >= self.config.max_extras_duration * 60
+                    and t.duration < main_feature.duration * 0.8
+                )  # Less than 80% of main movie
+            ]
+
+            # Sort extras by duration (longest first, likely more important)
+            extra_candidates.sort(key=lambda t: t.duration, reverse=True)
+            selected_titles.extend(extra_candidates)
+
+            if extra_candidates:
+                logger.info(f"Including {len(extra_candidates)} movie extras")
+
+        return selected_titles
 
     def select_documentary_titles(
-        self, titles: list[Title], content_pattern: ContentPattern,
+        self,
+        titles: list[Title],
+        content_pattern: ContentPattern,
     ) -> list[Title]:
         """Select documentary segments."""
 
         # Select medium-length segments (likely documentary parts)
         return [
-            t
-            for t in titles
-            if 20 * 60 <= t.duration <= 120 * 60  # 20-120 minutes
+            t for t in titles if 20 * 60 <= t.duration <= 120 * 60  # 20-120 minutes
         ]
 
     def select_titles_by_heuristics(self, titles: list[Title]) -> list[Title]:

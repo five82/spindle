@@ -79,6 +79,8 @@ The encoder wrapper integrates with drapto's JSON progress output system:
 - Handles errors and validation results from drapto
 - Uses `--json-progress` flag for structured output
 
+**Note on Subtitles**: Subtitle handling is intentionally not implemented in the current version. An AI-generated subtitle feature will be added in a future release.
+
 ### Queue Management (queue/manager.py)
 
 SQLite-based queue system with:

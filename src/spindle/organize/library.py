@@ -4,10 +4,10 @@ import logging
 import shutil
 from pathlib import Path
 
-from plexapi.server import PlexServer
+from plexapi.server import PlexServer  # type: ignore[import-untyped]
 
-from ..config import SpindleConfig
-from ..identify.tmdb import MediaInfo
+from spindle.config import SpindleConfig
+from spindle.identify.tmdb import MediaInfo
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class LibraryOrganizer:
             try:
                 self.plex_server = PlexServer(config.plex_url, config.plex_token)
                 logger.info(
-                    f"Connected to Plex server: {self.plex_server.friendlyName}"
+                    f"Connected to Plex server: {self.plex_server.friendlyName}",
                 )
             except Exception as e:
                 logger.warning(f"Failed to connect to Plex server: {e}")
@@ -35,9 +35,9 @@ class LibraryOrganizer:
 
         # Generate target directory based on media type
         target_dir = media_info.get_library_path(
-            self.config.library_dir, 
-            self.config.movies_dir, 
-            self.config.tv_dir
+            self.config.library_dir,
+            self.config.movies_dir,
+            self.config.tv_dir,
         )
 
         # Ensure target directory exists
@@ -66,7 +66,7 @@ class LibraryOrganizer:
             return target_file
 
         except Exception as e:
-            logger.error(f"Failed to move file: {e}")
+            logger.exception(f"Failed to move file: {e}")
             raise
 
     def scan_plex_library(self, media_info: MediaInfo) -> bool:
@@ -93,27 +93,29 @@ class LibraryOrganizer:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to trigger Plex library scan: {e}")
+            logger.exception(f"Failed to trigger Plex library scan: {e}")
             return False
 
     def add_to_plex(self, video_file: Path, media_info: MediaInfo) -> bool:
         """Add media to Plex library (organize + scan)."""
         try:
             # Organize the file
-            organized_file = self.organize_media(video_file, media_info)
+            self.organize_media(video_file, media_info)
 
             # Trigger Plex scan
-            scan_success = self.scan_plex_library(media_info)
+            self.scan_plex_library(media_info)
 
             logger.info(f"Successfully added {media_info.title} to library")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to add {media_info.title} to library: {e}")
+            logger.exception(f"Failed to add {media_info.title} to library: {e}")
             return False
 
     def create_review_directory(
-        self, video_file: Path, reason: str = "unidentified"
+        self,
+        video_file: Path,
+        reason: str = "unidentified",
     ) -> Path:
         """Move unidentified media to review directory."""
         review_dir = self.config.review_dir / reason
@@ -135,7 +137,7 @@ class LibraryOrganizer:
             shutil.move(str(video_file), str(target_file))
             return target_file
         except Exception as e:
-            logger.error(f"Failed to move file to review directory: {e}")
+            logger.exception(f"Failed to move file to review directory: {e}")
             raise
 
     def verify_plex_connection(self) -> bool:
@@ -148,7 +150,7 @@ class LibraryOrganizer:
             _ = self.plex_server.friendlyName
             return True
         except Exception as e:
-            logger.error(f"Plex connection verification failed: {e}")
+            logger.exception(f"Plex connection verification failed: {e}")
             return False
 
     def get_plex_libraries(self) -> list[str]:
@@ -162,7 +164,7 @@ class LibraryOrganizer:
                 libraries.append(section.title)
             return libraries
         except Exception as e:
-            logger.error(f"Failed to get Plex libraries: {e}")
+            logger.exception(f"Failed to get Plex libraries: {e}")
             return []
 
     def wait_for_plex_scan(self, media_info: MediaInfo, timeout: int = 60) -> bool:
@@ -189,7 +191,8 @@ class LibraryOrganizer:
                 try:
                     if media_info.is_movie:
                         results = library.search(
-                            title=media_info.title, year=media_info.year
+                            title=media_info.title,
+                            year=media_info.year,
                         )
                     else:
                         results = library.search(title=media_info.title)
@@ -198,14 +201,15 @@ class LibraryOrganizer:
                         logger.info(f"Found {media_info.title} in Plex library")
                         return True
 
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Plex search failed for {media_info.title}: {e}")
+                    # Continue polling - might be temporary connection issue
 
-                time.sleep(5)  # Check every 5 seconds
+                time.sleep(self.config.plex_scan_interval)  # Check based on config
 
             logger.warning(f"Timeout waiting for {media_info.title} to appear in Plex")
             return False
 
         except Exception as e:
-            logger.error(f"Error waiting for Plex scan: {e}")
+            logger.exception(f"Error waiting for Plex scan: {e}")
             return False

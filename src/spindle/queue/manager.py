@@ -3,12 +3,13 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
-from ..config import SpindleConfig
-from ..identify.tmdb import MediaInfo
+from spindle.config import SpindleConfig
+from spindle.identify.tmdb import MediaInfo
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +59,8 @@ class QueueItem:
         self.encoded_file = encoded_file
         self.final_file = final_file
         self.error_message = error_message
-        self.created_at = created_at or datetime.now()
-        self.updated_at = updated_at or datetime.now()
+        self.created_at = created_at or datetime.now(timezone.utc)
+        self.updated_at = updated_at or datetime.now(timezone.utc)
         self.progress_stage = progress_stage
         self.progress_percent = progress_percent
         self.progress_message = progress_message
@@ -82,12 +83,19 @@ class QueueManager:
         self.db_path = config.log_dir / "queue.db"
         self._init_database()
 
+    def _datetime_to_str(self, dt: datetime | None) -> str | None:
+        """Convert datetime to string for SQLite storage."""
+        if dt is None:
+            return None
+        return dt.isoformat()
+
     def _init_database(self) -> None:
         """Initialize the SQLite database."""
         self.config.log_dir.mkdir(parents=True, exist_ok=True)
 
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS queue_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source_path TEXT,
@@ -104,30 +112,105 @@ class QueueManager:
                     progress_percent REAL DEFAULT 0.0,
                     progress_message TEXT
                 )
-            """)
+            """,
+            )
 
             # Create index on status for faster queries
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status)
-            """)
+            """,
+            )
 
-            # Migrate existing databases to add progress columns
-            try:
-                conn.execute("ALTER TABLE queue_items ADD COLUMN progress_stage TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+            # Apply database migrations
+            self._apply_migrations(conn)
 
-            try:
-                conn.execute(
-                    "ALTER TABLE queue_items ADD COLUMN progress_percent REAL DEFAULT 0.0"
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        """Apply database schema migrations with proper verification."""
+
+        # Get current schema version
+        current_version = self._get_schema_version(conn)
+        logger.info("Current database schema version: %s", current_version)
+
+        # Apply migrations in order
+        migrations = [
+            (1, self._migration_001_add_progress_columns),
+            # Future migrations go here
+        ]
+
+        for version, migration_func in migrations:
+            if current_version < version:
+                logger.info("Applying database migration %s", version)
+                try:
+                    migration_func(conn)
+                    self._set_schema_version(conn, version)
+                    logger.info("Successfully applied migration %s", version)
+                except Exception as e:
+                    logger.exception(f"Migration {version} failed: {e}")
+                    msg = f"Database migration {version} failed: {e}"
+                    raise RuntimeError(msg)
+
+    def _get_schema_version(self, conn: sqlite3.Connection) -> int:
+        """Get the current schema version from the database."""
+        try:
+            # Create schema_version table if it doesn't exist
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY
                 )
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+            """,
+            )
 
+            cursor = conn.execute(
+                "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1",
+            )
+            result = cursor.fetchone()
+            return result[0] if result else 0
+
+        except sqlite3.Error as e:
+            logger.exception(f"Failed to get schema version: {e}")
+            return 0
+
+    def _set_schema_version(self, conn: sqlite3.Connection, version: int) -> None:
+        """Set the schema version in the database."""
+        conn.execute("DELETE FROM schema_version")  # Keep only the latest version
+        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+
+    def _migration_001_add_progress_columns(self, conn: sqlite3.Connection) -> None:
+        """Migration 1: Add progress tracking columns."""
+
+        # Check if columns already exist by trying to select from them
+        columns_to_add = [
+            ("progress_stage", "TEXT"),
+            ("progress_percent", "REAL DEFAULT 0.0"),
+            ("progress_message", "TEXT"),
+        ]
+
+        for column_name, column_def in columns_to_add:
             try:
-                conn.execute("ALTER TABLE queue_items ADD COLUMN progress_message TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+                # Test if column exists by selecting from it
+                conn.execute(f"SELECT {column_name} FROM queue_items LIMIT 1")
+                logger.debug("Column %s already exists", column_name)
+            except sqlite3.OperationalError as e:
+                if "no such column" in str(e).lower():
+                    # Column doesn't exist, add it
+                    logger.info("Adding column %s", column_name)
+                    conn.execute(
+                        f"ALTER TABLE queue_items ADD COLUMN {column_name} {column_def}",
+                    )
+
+                    # Verify the column was added
+                    try:
+                        conn.execute(f"SELECT {column_name} FROM queue_items LIMIT 1")
+                        logger.debug("Successfully verified column %s", column_name)
+                    except sqlite3.OperationalError:
+                        msg = f"Failed to add column {column_name}"
+                        raise RuntimeError(msg)
+                else:
+                    # Unexpected error
+                    msg = f"Unexpected error checking column {column_name}: {e}"
+                    raise RuntimeError(msg)
 
     def add_disc(self, disc_title: str) -> QueueItem:
         """Add a disc to the queue."""
@@ -139,15 +222,15 @@ class QueueManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO queue_items (disc_title, status, created_at, updated_at, 
+                INSERT INTO queue_items (disc_title, status, created_at, updated_at,
                                         progress_stage, progress_percent, progress_message)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     disc_title,
                     item.status.value,
-                    item.created_at,
-                    item.updated_at,
+                    self._datetime_to_str(item.created_at),
+                    self._datetime_to_str(item.updated_at),
                     item.progress_stage,
                     item.progress_percent,
                     item.progress_message,
@@ -156,7 +239,7 @@ class QueueManager:
 
             item.item_id = cursor.lastrowid
 
-        logger.info(f"Added disc to queue: {item}")
+        logger.info("Added disc to queue: %s", item)
         return item
 
     def add_file(self, source_path: Path) -> QueueItem:
@@ -169,16 +252,18 @@ class QueueManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO queue_items (source_path, status, ripped_file, created_at, updated_at,
-                                        progress_stage, progress_percent, progress_message)
+                INSERT INTO queue_items (
+                    source_path, status, ripped_file, created_at, updated_at,
+                    progress_stage, progress_percent, progress_message
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     str(source_path),
                     item.status.value,
                     str(source_path),
-                    item.created_at,
-                    item.updated_at,
+                    self._datetime_to_str(item.created_at),
+                    self._datetime_to_str(item.updated_at),
                     item.progress_stage,
                     item.progress_percent,
                     item.progress_message,
@@ -188,12 +273,12 @@ class QueueManager:
             item.item_id = cursor.lastrowid
             item.ripped_file = source_path
 
-        logger.info(f"Added file to queue: {item}")
+        logger.info("Added file to queue: %s", item)
         return item
 
     def update_item(self, item: QueueItem) -> None:
         """Update an existing queue item."""
-        item.updated_at = datetime.now()
+        item.updated_at = datetime.now(timezone.utc)
 
         media_info_json = None
         if item.media_info:
@@ -209,15 +294,15 @@ class QueueManager:
                     "season": item.media_info.season,
                     "episode": item.media_info.episode,
                     "episode_title": item.media_info.episode_title,
-                }
+                },
             )
 
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
-                UPDATE queue_items 
+                UPDATE queue_items
                 SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
-                    ripped_file = ?, encoded_file = ?, final_file = ?, 
+                    ripped_file = ?, encoded_file = ?, final_file = ?,
                     error_message = ?, updated_at = ?, progress_stage = ?,
                     progress_percent = ?, progress_message = ?
                 WHERE id = ?
@@ -231,7 +316,7 @@ class QueueManager:
                     str(item.encoded_file) if item.encoded_file else None,
                     str(item.final_file) if item.final_file else None,
                     item.error_message,
-                    item.updated_at,
+                    self._datetime_to_str(item.updated_at),
                     item.progress_stage,
                     item.progress_percent,
                     item.progress_message,
@@ -239,7 +324,7 @@ class QueueManager:
                 ),
             )
 
-        logger.debug(f"Updated queue item: {item}")
+        logger.debug("Updated queue item: %s", item)
 
     def get_item(self, item_id: int) -> QueueItem | None:
         """Get a specific queue item by ID."""
@@ -283,14 +368,12 @@ class QueueManager:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             placeholders = ",".join("?" * len(statuses))
-            cursor = conn.execute(
-                f"""
-                SELECT * FROM queue_items 
-                WHERE status IN ({placeholders}) 
+            query = f"""
+                SELECT * FROM queue_items
+                WHERE status IN ({placeholders})
                 ORDER BY created_at
-            """,
-                [s.value for s in statuses],
-            )
+            """
+            cursor = conn.execute(query, [s.value for s in statuses])
 
             return [self._row_to_item(row) for row in cursor.fetchall()]
 
@@ -298,9 +381,11 @@ class QueueManager:
         """Get all queue items."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT * FROM queue_items ORDER BY created_at DESC
-            """)
+            """,
+            )
 
             return [self._row_to_item(row) for row in cursor.fetchall()]
 
@@ -315,7 +400,7 @@ class QueueManager:
             )
 
             if cursor.rowcount > 0:
-                logger.info(f"Removed item {item_id} from queue")
+                logger.info("Removed item %s from queue", item_id)
                 return True
 
             return False
@@ -331,17 +416,136 @@ class QueueManager:
             )
 
             count = cursor.rowcount
-            logger.info(f"Cleared {count} completed items from queue")
+            logger.info("Cleared %s completed items from queue", count)
             return count
+
+    def clear_all(self) -> int:
+        """Remove all items from the queue."""
+        with sqlite3.connect(self.db_path) as conn:
+            # Check for items currently being processed
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM queue_items WHERE status IN (?, ?, ?)",
+                (
+                    QueueItemStatus.RIPPING.value,
+                    QueueItemStatus.IDENTIFYING.value,
+                    QueueItemStatus.ENCODING.value,
+                ),
+            )
+            processing_count = cursor.fetchone()[0]
+
+            if processing_count > 0:
+                msg = (
+                    f"Cannot clear queue: {processing_count} items are "
+                    "currently being processed"
+                )
+                logger.warning(msg)
+                raise RuntimeError(msg)
+
+            cursor = conn.execute("DELETE FROM queue_items")
+            count = cursor.rowcount
+            logger.info("Cleared %s items from queue (full clear)", count)
+            return count
+
+    def clear_failed(self) -> int:
+        """Remove only failed items from the queue."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM queue_items WHERE status = ?",
+                (QueueItemStatus.FAILED.value,),
+            )
+            count = cursor.rowcount
+            logger.info("Cleared %s failed items from queue", count)
+            return count
+
+    def check_database_health(self) -> dict[str, Any]:
+        """Check database health and return diagnostic information."""
+        health_info: dict[str, Any] = {
+            "database_exists": self.db_path.exists(),
+            "database_readable": False,
+            "schema_version": None,
+            "table_exists": False,
+            "columns_present": [],
+            "missing_columns": [],
+            "integrity_check": False,
+            "total_items": 0,
+        }
+
+        if not health_info["database_exists"]:
+            return health_info
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                health_info["database_readable"] = True
+
+                # Check schema version
+                try:
+                    health_info["schema_version"] = self._get_schema_version(conn)
+                except (sqlite3.Error, ValueError):
+                    health_info["schema_version"] = "unknown"
+
+                # Check if main table exists
+                cursor = conn.execute(
+                    """
+                    SELECT name FROM sqlite_master
+                    WHERE type='table' AND name='queue_items'
+                """,
+                )
+                health_info["table_exists"] = cursor.fetchone() is not None
+
+                if health_info["table_exists"]:
+                    # Check column structure
+                    cursor = conn.execute("PRAGMA table_info(queue_items)")
+                    existing_columns = {
+                        row[1] for row in cursor.fetchall()
+                    }  # row[1] is column name
+
+                    expected_columns = {
+                        "id",
+                        "source_path",
+                        "disc_title",
+                        "status",
+                        "media_info_json",
+                        "ripped_file",
+                        "encoded_file",
+                        "final_file",
+                        "error_message",
+                        "created_at",
+                        "updated_at",
+                        "progress_stage",
+                        "progress_percent",
+                        "progress_message",
+                    }
+
+                    health_info["columns_present"] = list(existing_columns)
+                    health_info["missing_columns"] = list(
+                        expected_columns - existing_columns,
+                    )
+
+                    # Get item count
+                    cursor = conn.execute("SELECT COUNT(*) FROM queue_items")
+                    health_info["total_items"] = cursor.fetchone()[0]
+
+                # Run integrity check
+                cursor = conn.execute("PRAGMA integrity_check")
+                result = cursor.fetchone()
+                health_info["integrity_check"] = result[0] == "ok" if result else False
+
+        except Exception as e:
+            health_info["error"] = str(e)
+            logger.exception("Database health check failed")
+
+        return health_info
 
     def get_queue_stats(self) -> dict[str, int]:
         """Get statistics about the queue."""
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT status, COUNT(*) as count
-                FROM queue_items 
+                FROM queue_items
                 GROUP BY status
-            """)
+            """,
+            )
 
             stats = {}
             for row in cursor.fetchall():
@@ -368,7 +572,23 @@ class QueueManager:
                     episode_title=data.get("episode_title"),
                 )
             except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Failed to deserialize media info: {e}")
+                logger.warning("Failed to deserialize media info: %s", e)
+
+        # Handle progress fields with fallbacks for older database schemas
+        try:
+            progress_stage = row["progress_stage"]
+        except (KeyError, IndexError):
+            progress_stage = None
+
+        try:
+            progress_percent = row["progress_percent"]
+        except (KeyError, IndexError):
+            progress_percent = 0.0
+
+        try:
+            progress_message = row["progress_message"]
+        except (KeyError, IndexError):
+            progress_message = None
 
         return QueueItem(
             item_id=row["id"],
@@ -382,13 +602,7 @@ class QueueManager:
             error_message=row["error_message"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
-            progress_stage=row["progress_stage"]
-            if "progress_stage" in row.keys()
-            else None,
-            progress_percent=row["progress_percent"]
-            if "progress_percent" in row.keys()
-            else 0.0,
-            progress_message=row["progress_message"]
-            if "progress_message" in row.keys()
-            else None,
+            progress_stage=progress_stage,
+            progress_percent=progress_percent,
+            progress_message=progress_message,
         )

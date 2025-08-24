@@ -4,7 +4,7 @@ import logging
 
 import httpx
 
-from ..config import SpindleConfig
+from spindle.config import SpindleConfig
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ class NtfyNotifier:
     def __init__(self, config: SpindleConfig):
         self.config = config
         self.topic_url = config.ntfy_topic
-        self.client = httpx.Client(timeout=10.0)
+        self.client = httpx.Client(timeout=config.ntfy_request_timeout)
 
     def send_notification(
         self,
@@ -54,11 +54,11 @@ class NtfyNotifier:
             return True
 
         except httpx.RequestError as e:
-            logger.error(f"Failed to send notification: {e}")
+            logger.exception(f"Failed to send notification: {e}")
             return False
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Notification service error {e.response.status_code}: {e.response.text}"
+            logger.exception(
+                f"Notification service error {e.response.status_code}: {e.response.text}",
             )
             return False
 
@@ -103,7 +103,10 @@ class NtfyNotifier:
         )
 
     def notify_queue_completed(
-        self, processed: int, failed: int, duration: str
+        self,
+        processed: int,
+        failed: int,
+        duration: str,
     ) -> bool:
         """Send notification when queue processing completes."""
         if failed == 0:
