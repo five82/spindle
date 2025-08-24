@@ -25,6 +25,10 @@ spindle automates the complete workflow from physical disc to organized media li
 - **Error Handling** - Unidentified media moved to review directory
 - **Manual Processing** - Process existing video files when needed
 
+## Content detection
+
+Content detection provided by the TMDB API: https://www.themoviedb.org
+
 ## Installation
 
 ### Prerequisites
