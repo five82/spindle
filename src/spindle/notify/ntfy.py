@@ -15,7 +15,10 @@ class NtfyNotifier:
     def __init__(self, config: SpindleConfig):
         self.config = config
         self.topic_url = config.ntfy_topic
-        self.client = httpx.Client(timeout=config.ntfy_request_timeout)
+        self.client = httpx.Client(
+            timeout=config.ntfy_request_timeout,
+            headers={"User-Agent": "Spindle/0.1.0"}
+        )
 
     def send_notification(
         self,
@@ -30,12 +33,15 @@ class NtfyNotifier:
             return False
 
         try:
-            headers = {
-                "User-Agent": "Spindle/0.1.0",
-            }
+            headers = {}
 
             if title:
-                headers["Title"] = title
+                # Encode header value to handle unicode characters
+                try:
+                    headers["Title"] = title.encode('latin1').decode('latin1')
+                except UnicodeEncodeError:
+                    # If latin1 fails, use a fallback without emojis
+                    headers["Title"] = title.encode('ascii', errors='ignore').decode('ascii')
 
             if priority != "default":
                 headers["Priority"] = priority
@@ -45,7 +51,7 @@ class NtfyNotifier:
 
             response = self.client.post(
                 self.topic_url,
-                content=message,
+                data=message.encode('utf-8'),
                 headers=headers,
             )
 

@@ -79,8 +79,8 @@ class TestSendNotification:
         assert result is True
         mock_client.post.assert_called_once_with(
             "https://ntfy.sh/test-topic",
-            content="Test message",
-            headers={"User-Agent": "Spindle/0.1.0"},
+            data=b"Test message",
+            headers={},
         )
 
     @patch("spindle.notify.ntfy.httpx.Client")
@@ -103,9 +103,8 @@ class TestSendNotification:
         assert result is True
         mock_client.post.assert_called_once_with(
             "https://ntfy.sh/test-topic",
-            content="Test message",
+            data=b"Test message",
             headers={
-                "User-Agent": "Spindle/0.1.0",
                 "Title": "Test Title",
                 "Priority": "high",
                 "Tags": "test,notification",
@@ -125,10 +124,10 @@ class TestSendNotification:
         result = notifier.send_notification(message="Test message", priority="default")
 
         assert result is True
-        expected_headers = {"User-Agent": "Spindle/0.1.0"}
+        expected_headers = {}
         mock_client.post.assert_called_once_with(
             "https://ntfy.sh/test-topic",
-            content="Test message",
+            data=b"Test message",
             headers=expected_headers,
         )
 
@@ -348,7 +347,10 @@ class TestErrorScenarios:
         """Test that client is configured with proper timeout."""
         NtfyNotifier(mock_config)
 
-        mock_client_class.assert_called_once_with(timeout=30.0)
+        mock_client_class.assert_called_once_with(
+            timeout=30.0,
+            headers={"User-Agent": "Spindle/0.1.0"}
+        )
 
 
 class TestIntegration:
@@ -366,6 +368,50 @@ class TestIntegration:
         assert result is True
         mock_post.assert_called_once_with(
             "https://ntfy.sh/test-topic",
-            content="Integration test",
-            headers={"User-Agent": "Spindle/0.1.0"},
+            data=b"Integration test",
+            headers={},
+        )
+
+    @patch("httpx.Client.post")
+    def test_unicode_emoji_handling(self, mock_post, notifier):
+        """Test handling of Unicode emojis in title and message."""
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        # Test with emoji in title - should handle encoding gracefully
+        result = notifier.send_notification(
+            "Disc detected successfully",
+            title="💿 Disc Detected",
+            tags="test"
+        )
+
+        assert result is True
+        mock_post.assert_called_once()
+        
+        call_args = mock_post.call_args
+        assert call_args[1]["data"] == b"Disc detected successfully"
+        
+        # Check that title header was set (either with emoji or fallback)
+        headers = call_args[1]["headers"]
+        assert "Title" in headers
+        assert "Tags" in headers
+        assert headers["Tags"] == "test"
+
+    @patch("httpx.Client.post")
+    def test_unicode_message_encoding(self, mock_post, notifier):
+        """Test proper UTF-8 encoding of message content."""
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_response
+
+        # Test with Unicode characters in message
+        message_with_unicode = "Movie: 《Amélie》 - 电影"
+        result = notifier.send_notification(message_with_unicode)
+
+        assert result is True
+        mock_post.assert_called_once_with(
+            "https://ntfy.sh/test-topic",
+            data=message_with_unicode.encode('utf-8'),
+            headers={},
         )
