@@ -179,7 +179,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Detected Blu-ray disc: Test Movie",
-            title="💿 Disc Detected",
+            title="Disc Detected",
             tags="spindle,disc,detected",
         )
 
@@ -193,7 +193,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Started ripping: Test Movie",
-            title="🎬 Ripping Started",
+            title="Ripping Started",
             tags="spindle,rip,started",
         )
 
@@ -207,7 +207,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Completed ripping: Test Movie (took 1h 30m)",
-            title="✅ Ripping Complete",
+            title="Ripping Complete",
             tags="spindle,rip,completed",
         )
 
@@ -221,7 +221,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Added to Plex: Test Movie",
-            title="📚 Movie Added",
+            title="Movie Added",
             tags="spindle,plex,added",
         )
 
@@ -235,7 +235,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Started processing queue with 5 items",
-            title="🔄 Queue Processing Started",
+            title="Queue Processing Started",
             tags="spindle,queue,started",
         )
 
@@ -249,7 +249,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Queue processing complete: 5 items processed in 2h 15m",
-            title="✅ Queue Complete",
+            title="Queue Complete",
             tags="spindle,queue,completed",
         )
 
@@ -263,7 +263,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Queue processing complete: 3 succeeded, 2 failed in 2h 15m",
-            title="⚠️ Queue Complete (with errors)",
+            title="Queue Complete (with errors)",
             tags="spindle,queue,completed",
         )
 
@@ -277,7 +277,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Error: Something went wrong\nContext: During ripping",
-            title="❌ Spindle Error",
+            title="Spindle Error",
             priority="high",
             tags="spindle,error,alert",
         )
@@ -292,7 +292,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Error: Something went wrong",
-            title="❌ Spindle Error",
+            title="Spindle Error",
             priority="high",
             tags="spindle,error,alert",
         )
@@ -307,7 +307,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Could not identify: unknown_movie.mkv\nMoved to review directory",
-            title="❓ Unidentified Media",
+            title="Unidentified Media",
             tags="spindle,unidentified,review",
         )
 
@@ -321,7 +321,7 @@ class TestNotificationMethods:
         assert result is True
         mock_send.assert_called_once_with(
             "Spindle notification system is working correctly!",
-            title="🧪 Test Notification",
+            title="Test Notification",
             tags="spindle,test",
         )
 
@@ -373,30 +373,25 @@ class TestIntegration:
         )
 
     @patch("httpx.Client.post")
-    def test_unicode_emoji_handling(self, mock_post, notifier):
-        """Test handling of Unicode emojis in title and message."""
+    def test_ascii_title_handling(self, mock_post, notifier):
+        """Test handling of ASCII titles without emojis."""
         mock_response = Mock()
         mock_response.raise_for_status.return_value = None
         mock_post.return_value = mock_response
 
-        # Test with emoji in title - should handle encoding gracefully
+        # Test with ASCII title - should work without issues
         result = notifier.send_notification(
             "Disc detected successfully",
-            title="💿 Disc Detected",
+            title="Disc Detected",
             tags="test"
         )
 
         assert result is True
-        mock_post.assert_called_once()
-        
-        call_args = mock_post.call_args
-        assert call_args[1]["data"] == b"Disc detected successfully"
-        
-        # Check that title header was set (either with emoji or fallback)
-        headers = call_args[1]["headers"]
-        assert "Title" in headers
-        assert "Tags" in headers
-        assert headers["Tags"] == "test"
+        mock_post.assert_called_once_with(
+            "https://ntfy.sh/test-topic",
+            data=b"Disc detected successfully",
+            headers={"Title": "Disc Detected", "Tags": "test"},
+        )
 
     @patch("httpx.Client.post")
     def test_unicode_message_encoding(self, mock_post, notifier):

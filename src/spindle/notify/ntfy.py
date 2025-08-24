@@ -36,12 +36,7 @@ class NtfyNotifier:
             headers = {}
 
             if title:
-                # Encode header value to handle unicode characters
-                try:
-                    headers["Title"] = title.encode('latin1').decode('latin1')
-                except UnicodeEncodeError:
-                    # If latin1 fails, use a fallback without emojis
-                    headers["Title"] = title.encode('ascii', errors='ignore').decode('ascii')
+                headers["Title"] = title
 
             if priority != "default":
                 headers["Priority"] = priority
@@ -72,7 +67,7 @@ class NtfyNotifier:
         """Send notification when a disc is detected."""
         return self.send_notification(
             f"Detected {disc_type} disc: {disc_title}",
-            title="💿 Disc Detected",
+            title="Disc Detected",
             tags="spindle,disc,detected",
         )
 
@@ -80,7 +75,7 @@ class NtfyNotifier:
         """Send notification when ripping starts."""
         return self.send_notification(
             f"Started ripping: {disc_title}",
-            title="🎬 Ripping Started",
+            title="Ripping Started",
             tags="spindle,rip,started",
         )
 
@@ -88,7 +83,7 @@ class NtfyNotifier:
         """Send notification when ripping completes."""
         return self.send_notification(
             f"Completed ripping: {disc_title} (took {duration})",
-            title="✅ Ripping Complete",
+            title="Ripping Complete",
             tags="spindle,rip,completed",
         )
 
@@ -96,7 +91,7 @@ class NtfyNotifier:
         """Send notification when media is added to Plex."""
         return self.send_notification(
             f"Added to Plex: {title}",
-            title=f"📚 {media_type.title()} Added",
+            title=f"{media_type.title()} Added",
             tags="spindle,plex,added",
         )
 
@@ -104,7 +99,7 @@ class NtfyNotifier:
         """Send notification when queue processing starts."""
         return self.send_notification(
             f"Started processing queue with {count} items",
-            title="🔄 Queue Processing Started",
+            title="Queue Processing Started",
             tags="spindle,queue,started",
         )
 
@@ -119,10 +114,10 @@ class NtfyNotifier:
             message = (
                 f"Queue processing complete: {processed} items processed in {duration}"
             )
-            title = "✅ Queue Complete"
+            title = "Queue Complete"
         else:
             message = f"Queue processing complete: {processed} succeeded, {failed} failed in {duration}"
-            title = "⚠️ Queue Complete (with errors)"
+            title = "Queue Complete (with errors)"
 
         return self.send_notification(
             message,
@@ -138,7 +133,7 @@ class NtfyNotifier:
 
         return self.send_notification(
             message,
-            title="❌ Spindle Error",
+            title="Spindle Error",
             priority="high",
             tags="spindle,error,alert",
         )
@@ -147,7 +142,7 @@ class NtfyNotifier:
         """Send notification for unidentified media."""
         return self.send_notification(
             f"Could not identify: {filename}\nMoved to review directory",
-            title="❓ Unidentified Media",
+            title="Unidentified Media",
             tags="spindle,unidentified,review",
         )
 
@@ -155,6 +150,6 @@ class NtfyNotifier:
         """Send a test notification."""
         return self.send_notification(
             "Spindle notification system is working correctly!",
-            title="🧪 Test Notification",
+            title="Test Notification",
             tags="spindle,test",
         )
