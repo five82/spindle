@@ -204,7 +204,7 @@ tmdb_language = "en-US"                           # Language for TMDB metadata (
 # ============================================================================
 
 # Content Detection & Analysis
-use_intelligent_disc_analysis = true              # Enable AI-powered content detection
+use_intelligent_disc_analysis = true              # Enable AI-powered content detection (only disable for troubleshooting)
 confidence_threshold = 0.7                        # Minimum confidence for automatic classification (0.0-1.0)
 prefer_api_over_heuristics = true                 # Prioritize TMDB data over pattern analysis
 
