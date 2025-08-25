@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .config import SpindleConfig
@@ -50,6 +51,11 @@ class ContinuousProcessor:
 
         logger.info("Starting continuous processor")
         self.is_running = True
+        
+        # Reset any items stuck in processing status from previous run
+        reset_count = self.queue_manager.reset_stuck_processing_items()
+        if reset_count > 0:
+            logger.info(f"Reset {reset_count} stuck items to pending status")
 
         # Start disc monitoring
         self.disc_monitor = DiscMonitor(
@@ -58,11 +64,20 @@ class ContinuousProcessor:
         )
         self.disc_monitor.start_monitoring()
 
+        # Check for existing disc in drive
+        existing_disc = detect_disc(self.config.optical_drive)
+        if existing_disc:
+            logger.info(f"Found existing disc: {existing_disc}")
+            self._on_disc_detected(existing_disc)
+
         # Start background queue processing
         loop = asyncio.get_event_loop()
         self.processing_task = loop.create_task(self._process_queue_continuously())
 
-        logger.info("Continuous processor started - insert discs to begin")
+        if existing_disc:
+            logger.info("Continuous processor started - processing existing disc")
+        else:
+            logger.info("Continuous processor started - insert discs to begin")
 
     def stop(self) -> None:
         """Stop the continuous processor."""
@@ -92,8 +107,8 @@ class ContinuousProcessor:
             item = self.queue_manager.add_disc(disc_info.label)
             logger.info(f"Added to queue: {item}")
 
-            # Start ripping immediately
-            self._rip_disc(item, disc_info)
+            # Start ripping immediately (run async method in event loop)
+            asyncio.run(self._rip_disc(item, disc_info))
 
         except Exception as e:
             logger.exception(f"Error handling disc detection: {e}")
@@ -102,7 +117,7 @@ class ContinuousProcessor:
                 context=disc_info.label,
             )
 
-    def _rip_disc(self, item: QueueItem, disc_info: DiscInfo) -> None:
+    async def _rip_disc(self, item: QueueItem, disc_info: DiscInfo) -> None:
         """Rip the detected disc using intelligent analysis."""
         try:
             logger.info(f"Starting intelligent analysis and rip: {disc_info.label}")
@@ -118,23 +133,58 @@ class ContinuousProcessor:
             titles = self.ripper.scan_disc()
             logger.info(f"Found {len(titles)} titles on disc")
 
-            # Analyze disc content to determine type and strategy
-            # TODO: The disc analyzer should have both sync and async versions
-            # For now, use a basic fallback pattern until this is properly designed
-            from .disc.analyzer import ContentPattern, ContentType
-
-            content_pattern = ContentPattern(type=ContentType.MOVIE, confidence=0.95)
+            # Analyze disc content using TMDB and intelligent pattern analysis
+            logger.info("Running intelligent disc analysis with TMDB lookup...")
+            analysis_result = await self.disc_analyzer.analyze_disc(disc_info, titles)
+            
             logger.info(
-                f"Detected content type: {content_pattern.type} (confidence: {content_pattern.confidence:.2f})",
+                f"Analysis complete - Content type: {analysis_result.content_type.value} "
+                f"(confidence: {analysis_result.confidence:.2f})"
             )
-
+            
+            # Log metadata if found
+            if analysis_result.metadata:
+                if hasattr(analysis_result.metadata, 'title'):
+                    logger.info(f"Identified as: {analysis_result.metadata.title}")
+                    if hasattr(analysis_result.metadata, 'year'):
+                        logger.info(f"Year: {analysis_result.metadata.year}")
+                    if hasattr(analysis_result.metadata, 'overview'):
+                        logger.info(f"Overview: {analysis_result.metadata.overview[:200]}...")
+            
             # Update progress with analysis results
-            item.progress_stage = f"Detected: {content_pattern.type.value}"
+            item.progress_stage = f"Identified: {analysis_result.content_type.value}"
             item.progress_percent = 10
             self.queue_manager.update_item(item)
 
-            # Handle different content types
-            output_files = self._handle_content_type(disc_info, titles, content_pattern)
+            # Create progress callback for ripping
+            def ripping_progress_callback(progress_data: dict) -> None:
+                """Handle progress updates from MakeMKV ripping."""
+                if progress_data.get("type") == "ripping_progress":
+                    stage = progress_data.get("stage", "Ripping")
+                    percentage = progress_data.get("percentage", 0)
+                    current = progress_data.get("current", 0)
+                    maximum = progress_data.get("maximum", 1)
+
+                    # Only log significant progress updates
+                    logger.info(f"Ripping progress: {percentage:.0f}%")
+
+                    # Update queue item progress (add base progress from analysis)
+                    item.progress_stage = f"Ripping - {percentage:.0f}%"
+                    item.progress_percent = 10 + (
+                        percentage * 0.8
+                    )  # 10-90% for ripping
+                    item.progress_message = f"{percentage:.0f}% complete"
+                    self.queue_manager.update_item(item)
+
+                elif progress_data.get("type") == "ripping_status":
+                    message = progress_data.get("message", "")
+                    logger.debug(f"MakeMKV: {message}")
+
+            # Handle different content types with progress callback
+            # Use the analysis result which contains selected titles and content type
+            output_files = self._handle_content_type_with_analysis(
+                disc_info, analysis_result, ripping_progress_callback
+            )
 
             # Store primary output file for queue tracking
             output_file = output_files[0] if output_files else None
@@ -155,17 +205,71 @@ class ContinuousProcessor:
             logger.info("Disc ejected - ready for next disc")
 
         except Exception as e:
-            logger.exception(f"Error ripping disc: {e}")
+            # Check if this is a user-facing error (like license issues) or a technical error
+            error_str = str(e)
+            if (
+                "license" in error_str.lower()
+                or "registration key" in error_str.lower()
+                or "too old" in error_str.lower()
+            ):
+                # User-facing error - don't show traceback
+                logger.error(f"Error ripping disc: {e}")
+            else:
+                # Technical error - show traceback for debugging
+                logger.exception(f"Error ripping disc: {e}")
+
             item.status = QueueItemStatus.FAILED
             item.error_message = str(e)
             self.queue_manager.update_item(item)
             self.notifier.notify_error(f"Ripping failed: {e}", context=disc_info.label)
+
+    def _handle_content_type_with_analysis(
+        self,
+        disc_info: DiscInfo,
+        analysis_result,  # DiscAnalysisResult from analyzer
+        progress_callback: Callable | None = None,
+    ) -> list:
+        """Handle content based on disc analysis result."""
+        from .disc.analyzer import ContentType
+        
+        content_type = analysis_result.content_type
+        
+        # Store metadata if available for later identification
+        if analysis_result.metadata:
+            logger.info(f"Using pre-identified metadata from disc analysis")
+        
+        # Use the intelligently selected titles from the analysis
+        titles_to_rip = analysis_result.titles_to_rip
+        logger.info(f"Ripping {len(titles_to_rip)} intelligently selected titles")
+        
+        output_files = []
+        for title in titles_to_rip:
+            logger.info(f"Ripping: {title}")
+            
+            # Check for episode mapping for TV shows
+            if analysis_result.episode_mappings and title in analysis_result.episode_mappings:
+                episode_info = analysis_result.episode_mappings[title]
+                logger.info(
+                    f"Title mapped to: S{episode_info.season_number:02d}E{episode_info.episode_number:02d} - "
+                    f"{episode_info.episode_title}"
+                )
+            
+            output_path = self.ripper.rip_title(
+                title,
+                self.config.staging_dir / "ripped",
+                progress_callback=progress_callback,
+            )
+            output_files.append(output_path)
+            logger.info(f"Ripped to: {output_path}")
+        
+        return output_files
 
     def _handle_content_type(
         self,
         disc_info: DiscInfo,
         titles: list,
         content_pattern: "ContentPattern",
+        progress_callback: Callable | None = None,
     ) -> list:
         """Handle different content types with appropriate strategies."""
         from .disc.analyzer import ContentType
@@ -174,21 +278,27 @@ class ContinuousProcessor:
 
         if content_type in [ContentType.TV_SERIES, ContentType.ANIMATED_SERIES]:
             # Handle TV series with episode mapping
-            return self._handle_tv_series(disc_info, titles)
+            return self._handle_tv_series(disc_info, titles, progress_callback)
 
         if content_type in [ContentType.CARTOON_COLLECTION, ContentType.CARTOON_SHORTS]:
             # Handle cartoon collections - rip all shorts
-            return self._handle_cartoon_collection(disc_info, titles, content_pattern)
+            return self._handle_cartoon_collection(
+                disc_info, titles, content_pattern, progress_callback
+            )
 
         if content_type in [ContentType.MOVIE, ContentType.ANIMATED_MOVIE]:
             # Handle movies - select main title and optionally extras
-            return self._handle_movie(disc_info, titles, content_pattern)
+            return self._handle_movie(
+                disc_info, titles, content_pattern, progress_callback
+            )
 
         # Unknown content type - use basic strategy
         logger.warning(f"Unknown content type {content_type}, using basic rip strategy")
-        return self._handle_basic_rip(disc_info, titles)
+        return self._handle_basic_rip(disc_info, titles, progress_callback)
 
-    def _handle_tv_series(self, disc_info: DiscInfo, titles: list) -> list:
+    def _handle_tv_series(
+        self, disc_info: DiscInfo, titles: list, progress_callback: Callable | None = None
+    ) -> list:
         """Handle TV series using intelligent episode mapping."""
         try:
             # Use TV analyzer for episode mapping
@@ -215,24 +325,28 @@ class ContinuousProcessor:
                     output_file = self.ripper.rip_title(
                         title,
                         self.config.staging_dir / "episodes",
+                        progress_callback=progress_callback,
                     )
                     output_files.append(output_file)
 
             else:
                 logger.warning("No episode mapping found, using basic rip")
-                output_files = self._handle_basic_rip(disc_info, titles)
+                output_files = self._handle_basic_rip(
+                    disc_info, titles, progress_callback
+                )
 
             return output_files
 
         except Exception as e:
             logger.exception(f"Error handling TV series: {e}")
-            return self._handle_basic_rip(disc_info, titles)
+            return self._handle_basic_rip(disc_info, titles, progress_callback)
 
     def _handle_cartoon_collection(
         self,
         disc_info: DiscInfo,
         titles: list,
         content_pattern: "ContentPattern",
+        progress_callback: Callable | None = None,
     ) -> list:
         """Handle cartoon collections - rip all cartoon shorts."""
         try:
@@ -252,6 +366,7 @@ class ContinuousProcessor:
                 output_file = self.ripper.rip_title(
                     title,
                     self.config.staging_dir / "cartoons",
+                    progress_callback=progress_callback,
                 )
                 output_files.append(output_file)
 
@@ -259,13 +374,14 @@ class ContinuousProcessor:
 
         except Exception as e:
             logger.exception(f"Error handling cartoon collection: {e}")
-            return self._handle_basic_rip(disc_info, titles)
+            return self._handle_basic_rip(disc_info, titles, progress_callback)
 
     def _handle_movie(
         self,
         disc_info: DiscInfo,
         titles: list,
         content_pattern: "ContentPattern",
+        progress_callback: Callable | None = None,
     ) -> list:
         """Handle movies - select main title and optionally extras."""
         try:
@@ -282,6 +398,7 @@ class ContinuousProcessor:
             output_file = self.ripper.rip_title(
                 main_title,
                 self.config.staging_dir,
+                progress_callback=progress_callback,
             )
 
             output_files = [output_file]
@@ -302,6 +419,7 @@ class ContinuousProcessor:
                     extra_file = self.ripper.rip_title(
                         extra_title,
                         self.config.staging_dir / "extras",
+                        progress_callback=progress_callback,
                     )
                     output_files.append(extra_file)
 
@@ -309,9 +427,11 @@ class ContinuousProcessor:
 
         except Exception as e:
             logger.exception(f"Error handling movie: {e}")
-            return self._handle_basic_rip(disc_info, titles)
+            return self._handle_basic_rip(disc_info, titles, progress_callback)
 
-    def _handle_basic_rip(self, disc_info: DiscInfo, titles: list) -> list:
+    def _handle_basic_rip(
+        self, disc_info: DiscInfo, titles: list, progress_callback: Callable | None = None
+    ) -> list:
         """Fallback to basic rip strategy."""
         try:
             logger.info("Using basic rip strategy")
@@ -324,6 +444,7 @@ class ContinuousProcessor:
             output_file = self.ripper.rip_title(
                 main_title,
                 self.config.staging_dir,
+                progress_callback=progress_callback,
             )
 
             return [output_file]

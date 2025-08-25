@@ -93,6 +93,7 @@ class TestCliCommands:
     @patch("spindle.cli.load_config")
     def test_cli_main_group_success(self, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         result = self.runner.invoke(cli, ["--help"])
@@ -152,6 +153,7 @@ class TestCliCommands:
         mock_config = Mock(spec=SpindleConfig)
         mock_config.optical_drive = "/dev/cdrom"
         mock_config.ntfy_topic = "test"
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         # Mock disc detection
@@ -190,6 +192,7 @@ class TestCliCommands:
     @patch("spindle.cli.QueueManager")
     def test_add_file_command_success(self, mock_queue_manager_class, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         mock_queue_manager = Mock()
@@ -233,6 +236,7 @@ class TestCliCommands:
     @patch("spindle.cli.QueueManager")
     def test_queue_list_empty(self, mock_queue_manager_class, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         mock_queue_manager = Mock()
@@ -249,6 +253,7 @@ class TestCliCommands:
     @patch("spindle.cli.QueueManager")
     def test_queue_clear_all_confirm(self, mock_queue_manager_class, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         mock_queue_manager = Mock()
@@ -265,6 +270,7 @@ class TestCliCommands:
     @patch("spindle.cli.QueueManager")
     def test_queue_clear_completed(self, mock_queue_manager_class, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         mock_queue_manager = Mock()
@@ -281,6 +287,7 @@ class TestCliCommands:
     @patch("spindle.cli.QueueManager")
     def test_queue_clear_runtime_error(self, mock_queue_manager_class, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         mock_queue_manager = Mock()
@@ -291,12 +298,31 @@ class TestCliCommands:
         
         assert result.exit_code == 0
         assert "Error: Items in progress" in result.output
+    
+    @patch("spindle.cli.check_uv_requirement")
+    @patch("spindle.cli.load_config")
+    @patch("spindle.cli.QueueManager")
+    def test_queue_clear_force(self, mock_queue_manager_class, mock_load_config, mock_check_uv):
+        mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
+        mock_load_config.return_value = mock_config
+        
+        mock_queue_manager = Mock()
+        mock_queue_manager.clear_all.return_value = 6
+        mock_queue_manager_class.return_value = mock_queue_manager
+        
+        result = self.runner.invoke(cli, ["queue-clear", "--force"], input="y\n")
+        
+        assert result.exit_code == 0
+        assert "Force cleared 6 items" in result.output
+        mock_queue_manager.clear_all.assert_called_once_with(force=True)
 
     @patch("spindle.cli.check_uv_requirement")
     @patch("spindle.cli.load_config") 
     @patch("spindle.cli.NtfyNotifier")
     def test_test_notify_success(self, mock_notifier_class, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         mock_notifier = Mock()
@@ -313,6 +339,7 @@ class TestCliCommands:
     @patch("spindle.cli.NtfyNotifier") 
     def test_test_notify_failure(self, mock_notifier_class, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         
         mock_notifier = Mock()
@@ -337,6 +364,7 @@ class TestStartCommand:
     @patch("spindle.cli.os.getenv")
     def test_start_command_daemon_default(self, mock_getenv, mock_start_daemon, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         mock_getenv.return_value = None  # Not systemd
         
@@ -351,6 +379,7 @@ class TestStartCommand:
     @patch("spindle.cli.os.getenv")
     def test_start_command_foreground_flag(self, mock_getenv, mock_start_foreground, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         mock_getenv.return_value = None  # Not systemd
         
@@ -365,6 +394,7 @@ class TestStartCommand:
     @patch("spindle.cli.os.getenv")
     def test_start_command_systemd_override(self, mock_getenv, mock_start_foreground, mock_load_config, mock_check_uv):
         mock_config = Mock(spec=SpindleConfig)
+        mock_config.log_dir = Path("/tmp/test")
         mock_load_config.return_value = mock_config
         mock_getenv.return_value = "test-invocation-id"  # systemd service
         

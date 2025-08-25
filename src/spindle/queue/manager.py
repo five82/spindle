@@ -3,7 +3,7 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -59,8 +59,8 @@ class QueueItem:
         self.encoded_file = encoded_file
         self.final_file = final_file
         self.error_message = error_message
-        self.created_at = created_at or datetime.now(timezone.utc)
-        self.updated_at = updated_at or datetime.now(timezone.utc)
+        self.created_at = created_at or datetime.now(UTC)
+        self.updated_at = updated_at or datetime.now(UTC)
         self.progress_stage = progress_stage
         self.progress_percent = progress_percent
         self.progress_message = progress_message
@@ -278,7 +278,7 @@ class QueueManager:
 
     def update_item(self, item: QueueItem) -> None:
         """Update an existing queue item."""
-        item.updated_at = datetime.now(timezone.utc)
+        item.updated_at = datetime.now(UTC)
 
         media_info_json = None
         if item.media_info:
@@ -419,31 +419,42 @@ class QueueManager:
             logger.info("Cleared %s completed items from queue", count)
             return count
 
-    def clear_all(self) -> int:
-        """Remove all items from the queue."""
+    def clear_all(self, force: bool = False) -> int:
+        """Remove all items from the queue.
+        
+        Args:
+            force: If True, clear all items including those in processing status.
+        
+        Raises:
+            RuntimeError: If items are currently being processed and force is False.
+        """
         with sqlite3.connect(self.db_path) as conn:
-            # Check for items currently being processed
-            cursor = conn.execute(
-                "SELECT COUNT(*) FROM queue_items WHERE status IN (?, ?, ?)",
-                (
-                    QueueItemStatus.RIPPING.value,
-                    QueueItemStatus.IDENTIFYING.value,
-                    QueueItemStatus.ENCODING.value,
-                ),
-            )
-            processing_count = cursor.fetchone()[0]
-
-            if processing_count > 0:
-                msg = (
-                    f"Cannot clear queue: {processing_count} items are "
-                    "currently being processed"
+            if not force:
+                # Check for items currently being processed
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM queue_items WHERE status IN (?, ?, ?)",
+                    (
+                        QueueItemStatus.RIPPING.value,
+                        QueueItemStatus.IDENTIFYING.value,
+                        QueueItemStatus.ENCODING.value,
+                    ),
                 )
-                logger.warning(msg)
-                raise RuntimeError(msg)
+                processing_count = cursor.fetchone()[0]
+
+                if processing_count > 0:
+                    msg = (
+                        f"Cannot clear queue: {processing_count} items are "
+                        "currently being processed"
+                    )
+                    logger.warning(msg)
+                    raise RuntimeError(msg)
 
             cursor = conn.execute("DELETE FROM queue_items")
             count = cursor.rowcount
-            logger.info("Cleared %s items from queue (full clear)", count)
+            if force:
+                logger.info("Force cleared %s items from queue (including processing)", count)
+            else:
+                logger.info("Cleared %s items from queue (full clear)", count)
             return count
 
     def clear_failed(self) -> int:
@@ -455,6 +466,35 @@ class QueueManager:
             )
             count = cursor.rowcount
             logger.info("Cleared %s failed items from queue", count)
+            return count
+    
+    def reset_stuck_processing_items(self) -> int:
+        """Reset items stuck in processing status back to pending.
+        
+        This is useful when Spindle was stopped unexpectedly and items
+        remain in processing states (ripping, identifying, encoding).
+        
+        Returns:
+            Number of items reset.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """UPDATE queue_items 
+                   SET status = ?, 
+                       progress_stage = 'Reset from stuck processing',
+                       progress_percent = 0,
+                       progress_message = NULL
+                   WHERE status IN (?, ?, ?)""",
+                (
+                    QueueItemStatus.PENDING.value,
+                    QueueItemStatus.RIPPING.value,
+                    QueueItemStatus.IDENTIFYING.value,
+                    QueueItemStatus.ENCODING.value,
+                ),
+            )
+            count = cursor.rowcount
+            if count > 0:
+                logger.info("Reset %s stuck processing items to pending status", count)
             return count
 
     def check_database_health(self) -> dict[str, Any]:

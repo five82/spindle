@@ -357,7 +357,10 @@ class TestDiscScanning:
 
     @patch("subprocess.run")
     def test_scan_disc_success(
-        self, mock_subprocess, mock_config, sample_makemkv_output,
+        self,
+        mock_subprocess,
+        mock_config,
+        sample_makemkv_output,
     ):
         """Test successful disc scanning."""
         mock_result = Mock()
@@ -381,7 +384,10 @@ class TestDiscScanning:
 
     @patch("subprocess.run")
     def test_scan_disc_custom_device(
-        self, mock_subprocess, mock_config, sample_makemkv_output,
+        self,
+        mock_subprocess,
+        mock_config,
+        sample_makemkv_output,
     ):
         """Test disc scanning with custom device."""
         mock_result = Mock()
@@ -541,7 +547,11 @@ class TestRipping:
 
     @patch("subprocess.run")
     def test_rip_title_success(
-        self, mock_subprocess, mock_config, sample_titles, temp_dirs,
+        self,
+        mock_subprocess,
+        mock_config,
+        sample_titles,
+        temp_dirs,
     ):
         """Test successful title ripping."""
         mock_result = Mock()
@@ -565,12 +575,18 @@ class TestRipping:
         call_args = mock_subprocess.call_args[0][0]
         assert call_args[0] == "makemkvcon"
         assert call_args[1] == "mkv"
+        assert "--robot" in call_args
         assert "dev:/dev/sr0" in call_args
         assert "0" in call_args  # title ID
+        # No progress flag when no callback provided
 
     @patch("subprocess.run")
     def test_rip_title_failure(
-        self, mock_subprocess, mock_config, sample_titles, temp_dirs,
+        self,
+        mock_subprocess,
+        mock_config,
+        sample_titles,
+        temp_dirs,
     ):
         """Test title ripping failure."""
         mock_result = Mock()
@@ -586,7 +602,11 @@ class TestRipping:
 
     @patch("subprocess.run")
     def test_rip_title_timeout(
-        self, mock_subprocess, mock_config, sample_titles, temp_dirs,
+        self,
+        mock_subprocess,
+        mock_config,
+        sample_titles,
+        temp_dirs,
     ):
         """Test title ripping timeout."""
         mock_subprocess.side_effect = subprocess.TimeoutExpired("cmd", 3600)
@@ -599,7 +619,11 @@ class TestRipping:
 
     @patch("subprocess.run")
     def test_rip_title_no_output_file(
-        self, mock_subprocess, mock_config, sample_titles, temp_dirs,
+        self,
+        mock_subprocess,
+        mock_config,
+        sample_titles,
+        temp_dirs,
     ):
         """Test title ripping when no output file is created."""
         mock_result = Mock()
@@ -614,7 +638,11 @@ class TestRipping:
 
     @patch("subprocess.run")
     def test_rip_title_multiple_output_files(
-        self, mock_subprocess, mock_config, sample_titles, temp_dirs,
+        self,
+        mock_subprocess,
+        mock_config,
+        sample_titles,
+        temp_dirs,
     ):
         """Test title ripping with multiple output files (selects newest)."""
         mock_result = Mock()
@@ -641,7 +669,11 @@ class TestRipping:
 
     @patch("subprocess.run")
     def test_rip_title_custom_device(
-        self, mock_subprocess, mock_config, sample_titles, temp_dirs,
+        self,
+        mock_subprocess,
+        mock_config,
+        sample_titles,
+        temp_dirs,
     ):
         """Test title ripping with custom device."""
         mock_result = Mock()
@@ -723,7 +755,12 @@ class TestFullDiscRipping:
     @patch.object(MakeMKVRipper, "_get_disc_label")
     @patch.object(MakeMKVRipper, "scan_disc")
     def test_rip_disc_no_title(
-        self, mock_scan, mock_get_label, mock_select, mock_config, temp_dirs,
+        self,
+        mock_scan,
+        mock_get_label,
+        mock_select,
+        mock_config,
+        temp_dirs,
     ):
         """Test disc ripping when no suitable title found."""
         mock_scan.return_value = []
@@ -763,7 +800,9 @@ class TestFullDiscRipping:
         mock_scan.assert_called_once_with("/dev/sr3")
         mock_get_label.assert_called_once_with("/dev/sr3")
         mock_rip.assert_called_once_with(
-            sample_titles[0], temp_dirs["output"], "/dev/sr3",
+            sample_titles[0],
+            temp_dirs["output"],
+            "/dev/sr3",
         )
 
 
@@ -830,7 +869,12 @@ class TestEdgeCases:
 
         # Create title with special characters
         special_title = Title(
-            "0", 3600, 1000000, 10, [], name="Test: Movie & More! [2023]",
+            "0",
+            3600,
+            1000000,
+            10,
+            [],
+            name="Test: Movie & More! [2023]",
         )
 
         with patch("subprocess.run") as mock_subprocess:
@@ -863,6 +907,59 @@ class TestEdgeCases:
         selected = ripper._select_tracks_for_rip(subtitle_only_title)
         assert len(selected) == 0  # Subtitles not selected by default
 
+    def test_parse_makemkv_progress_formats(self, mock_config):
+        """Test parsing various MakeMKV progress output formats."""
+        ripper = MakeMKVRipper(mock_config)
+        
+        # Test regular progress format
+        result = ripper._parse_makemkv_progress("Current progress - 25% , Total progress - 30%")
+        assert result is not None
+        assert result["type"] == "ripping_progress"
+        assert result["percentage"] == 30  # Uses total progress
+        assert result["current"] == 25
+        assert result["stage"] == "Saving to MKV file"
+        
+        # Test robot progress format (PRGV) with significant change
+        # PRGV format is PRGV:current,total,max where max is always 65536
+        result = ripper._parse_makemkv_progress('PRGV:32768,32768,65536')
+        assert result is not None  # First call should report (50% is > 5% threshold from -1)
+        assert result["type"] == "ripping_progress" 
+        assert result["percentage"] == 50.0
+        assert result["current"] == 32768
+        assert result["maximum"] == 65536
+        assert result["stage"] == "Saving to MKV file"
+        
+        # Test filtering of minor progress updates
+        result = ripper._parse_makemkv_progress('PRGV:33000,33000,65536')
+        assert result is None  # Should be filtered (50.3% is < 5% change from 50%)
+        
+        # Test filtering of track completion when total is 0
+        result = ripper._parse_makemkv_progress('PRGV:65536,0,65536')
+        assert result is None  # Should be filtered (individual track complete but total not started)
+        
+        # Test significant progress update
+        result = ripper._parse_makemkv_progress('PRGV:36045,36045,65536')
+        assert result is not None  # Should report (55.0% is >= 5% change from 50%)
+        
+        # Test action messages
+        result = ripper._parse_makemkv_progress("Current action: Processing BD+ code")
+        assert result is not None
+        assert result["type"] == "ripping_status"
+        assert result["message"] == "Processing BD+ code"
+        
+        # Test operation messages
+        result = ripper._parse_makemkv_progress("Current operation: Opening Blu-ray disc")
+        assert result is not None
+        assert result["type"] == "ripping_status"
+        assert result["message"] == "Opening Blu-ray disc"
+        
+        # Test non-progress lines
+        result = ripper._parse_makemkv_progress("File 00002.mpls was added as title #0")
+        assert result is None
+        
+        result = ripper._parse_makemkv_progress("Using LibreDrive mode")
+        assert result is None
+
     def test_parse_duration_edge_cases(self, mock_config):
         """Test duration parsing with edge cases."""
         ripper = MakeMKVRipper(mock_config)
@@ -881,6 +978,11 @@ class TestEdgeCases:
         # (25 hours * 3600) + (61 minutes * 60) + 70 seconds = 93730
         assert ripper._parse_duration("25:61:70") == 93730
 
+        # Test MakeMKV format with prefix
+        assert ripper._parse_duration('0,"1:39:03') == 5943  # 1*3600 + 39*60 + 3
+        assert ripper._parse_duration('0,"0:07:05') == 425  # 7*60 + 5
+        assert ripper._parse_duration('0,"0:04:55') == 295  # 4*60 + 55
+
     def test_makemkv_command_generation(self, mock_config, sample_titles, temp_dirs):
         """Test MakeMKV command generation with various track selections."""
         ripper = MakeMKVRipper(mock_config)
@@ -896,18 +998,17 @@ class TestEdgeCases:
 
             ripper.rip_title(title, temp_dirs["output"])
 
-            # Check that track selection flags are properly added
+            # Check that command is properly formed
             call_args = mock_subprocess.call_args[0][0]
 
-            # Should contain track on/off flags
-            track_flags = [arg for arg in call_args if arg.startswith("--track")]
-            assert len(track_flags) > 0
-
-            # Should have pairs of --track and track_id:on/off
-            for i in range(0, len(track_flags), 2):
-                assert call_args[call_args.index(track_flags[i]) + 1].endswith(
-                    ":on",
-                ) or call_args[call_args.index(track_flags[i]) + 1].endswith(":off")
+            # Should contain the basic makemkv command structure
+            assert call_args[0] == "makemkvcon"
+            assert call_args[1] == "mkv"
+            assert call_args[2] == "--noscan"  # Skip scan flag
+            assert call_args[3] == "--robot"  # Robot mode for structured output
+            assert call_args[4].startswith("dev:")  # Device specification
+            assert call_args[5] == title.title_id  # Title ID
+            assert str(temp_dirs["output"]) in call_args[6]  # Output directory
 
 
 class TestIntegration:
@@ -915,7 +1016,11 @@ class TestIntegration:
 
     @patch("subprocess.run")
     def test_full_workflow_integration(
-        self, mock_subprocess, mock_config, temp_dirs, sample_makemkv_output,
+        self,
+        mock_subprocess,
+        mock_config,
+        temp_dirs,
+        sample_makemkv_output,
     ):
         """Test complete workflow from scan to rip."""
 
@@ -947,3 +1052,69 @@ class TestIntegration:
         assert result.name == "Test-Movie-2023.mkv"
         # We expect at least scan + rip calls, but may have additional calls for disc label
         assert mock_subprocess.call_count >= 2
+
+
+    @patch("subprocess.Popen")
+    def test_rip_title_with_progress_callback(self, mock_popen, mock_config, sample_titles, temp_dirs):
+        """Test ripping with progress callback uses Popen and progress flag."""
+        # Mock the Popen process
+        mock_process = Mock()
+        
+        # Create an iterator that returns progress lines then empty strings
+        def readline_generator():
+            lines = [
+                """PRGV:0,32768,65536""",  # 50% progress
+                """PRGV:0,65536,65536""",  # 100% progress
+            ]
+            for line in lines:
+                yield line
+            # After the lines, return empty strings indefinitely
+            while True:
+                yield ""
+        
+        readline_iter = readline_generator()
+        mock_process.stdout.readline.side_effect = lambda: next(readline_iter)
+        
+        # poll() should return None while running, then 0 when done
+        poll_calls = 0
+        def poll_side_effect():
+            nonlocal poll_calls
+            poll_calls += 1
+            if poll_calls <= 2:  # First two calls return None (still running)
+                return None
+            return 0  # Process finished successfully
+        
+        mock_process.poll.side_effect = poll_side_effect
+        mock_popen.return_value = mock_process
+        
+        # Create a fake output file
+        output_file = temp_dirs["output"] / "Test-Movie-2023.mkv"
+        output_file.write_text("fake video content")
+        
+        ripper = MakeMKVRipper(mock_config)
+        title = sample_titles[0]
+        
+        # Track progress calls
+        progress_calls = []
+        def progress_callback(data):
+            progress_calls.append(data)
+        
+        result = ripper.rip_title(title, temp_dirs["output"], progress_callback=progress_callback)
+        
+        assert result == output_file
+        
+        # Check that Popen was used instead of run when progress callback provided
+        mock_popen.assert_called_once()
+        call_args, call_kwargs = mock_popen.call_args
+        cmd = call_args[0]
+        
+        # Should contain progress flag and robot mode
+        assert "--progress=-same" in cmd
+        assert "--robot" in cmd
+        
+        # Should have received progress updates
+        assert len(progress_calls) == 2
+        assert progress_calls[0]["type"] == "ripping_progress"
+        assert progress_calls[0]["percentage"] == 50.0
+        assert progress_calls[1]["percentage"] == 100.0
+

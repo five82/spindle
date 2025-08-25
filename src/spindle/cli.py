@@ -58,15 +58,31 @@ def check_uv_requirement() -> None:
         )
 
 
-def setup_logging(verbose: bool = False) -> None:
+def setup_logging(verbose: bool = False, config: SpindleConfig | None = None) -> None:
     """Set up logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
+
+    handlers: list[logging.Handler] = [
+        RichHandler(console=console, rich_tracebacks=True)
+    ]
+
+    # Add file handler if config is available
+    if config and config.log_dir:
+        config.log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = config.log_dir / "spindle.log"
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            ),
+        )
+        handlers.append(file_handler)
 
     logging.basicConfig(
         level=level,
         format="%(message)s",
         datefmt="[%X]",
-        handlers=[RichHandler(console=console, rich_tracebacks=True)],
+        handlers=handlers,
     )
 
 
@@ -82,12 +98,15 @@ def setup_logging(verbose: bool = False) -> None:
 def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
     """Spindle - Automated disc ripping, encoding, and media library management."""
     check_uv_requirement()
-    setup_logging(verbose)
 
     try:
         ctx.ensure_object(dict)
-        ctx.obj["config"] = load_config(config)
+        loaded_config = load_config(config)
+        ctx.obj["config"] = loaded_config
         ctx.obj["verbose"] = verbose
+
+        # Setup logging with the loaded config for file logging
+        setup_logging(verbose, loaded_config)
     except (OSError, ValueError, RuntimeError, Exception) as e:
         console.print(f"[red]Error loading configuration: {e}[/red]")
         sys.exit(1)
@@ -430,14 +449,15 @@ def queue_list(ctx: click.Context) -> None:
 @cli.command("queue-clear")
 @click.option("--completed", is_flag=True, help="Only clear completed items")
 @click.option("--failed", is_flag=True, help="Only clear failed items")
+@click.option("--force", is_flag=True, help="Force clear all items including those in processing")
 @click.pass_context
-def queue_clear(ctx: click.Context, completed: bool, failed: bool) -> None:
+def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) -> None:
     """Clear items from the queue."""
     config: SpindleConfig = ctx.obj["config"]
     queue_manager = QueueManager(config)
 
-    if completed and failed:
-        console.print("[red]Error: Cannot specify both --completed and --failed[/red]")
+    if sum([completed, failed, force]) > 1:
+        console.print("[red]Error: Cannot specify multiple clear options[/red]")
         return
 
     if completed:
@@ -446,6 +466,10 @@ def queue_clear(ctx: click.Context, completed: bool, failed: bool) -> None:
     elif failed:
         count = queue_manager.clear_failed()
         console.print(f"[green]Cleared {count} failed items[/green]")
+    elif force:
+        if click.confirm("Are you sure you want to FORCE clear the entire queue (including processing items)?"):
+            count = queue_manager.clear_all(force=True)
+            console.print(f"[green]Force cleared {count} items from queue[/green]")
     elif click.confirm("Are you sure you want to clear the entire queue?"):
         try:
             count = queue_manager.clear_all()
@@ -453,7 +477,7 @@ def queue_clear(ctx: click.Context, completed: bool, failed: bool) -> None:
         except RuntimeError as e:
             console.print(f"[red]Error: {e}[/red]")
             console.print(
-                "[yellow]Wait for processing items to complete or use --completed to clear only finished items[/yellow]",
+                "[yellow]Wait for processing items to complete or use --force to clear all items[/yellow]",
             )
 
 

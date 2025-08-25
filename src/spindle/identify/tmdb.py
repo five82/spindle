@@ -113,7 +113,7 @@ class TMDBClient:
             response.raise_for_status()
             data = response.json()
             results = data.get("results", [])
-            return cast(list[dict[Any, Any]], results)
+            return cast("list[dict[Any, Any]]", results)
         except httpx.RequestError as e:
             logger.exception(f"TMDB API request failed: {e}")
             return []
@@ -139,7 +139,7 @@ class TMDBClient:
             response.raise_for_status()
             data = response.json()
             results = data.get("results", [])
-            return cast(list[dict[Any, Any]], results)
+            return cast("list[dict[Any, Any]]", results)
         except httpx.RequestError as e:
             logger.exception(f"TMDB API request failed: {e}")
             return []
@@ -163,7 +163,7 @@ class TMDBClient:
             )
             response.raise_for_status()
             data = response.json()
-            return cast(dict[Any, Any], data)
+            return cast("dict[Any, Any]", data)
         except httpx.RequestError as e:
             logger.exception(f"TMDB API request failed: {e}")
             return None
@@ -184,7 +184,7 @@ class TMDBClient:
             response = self.client.get(f"{self.base_url}/tv/{tv_id}", params=params)
             response.raise_for_status()
             data = response.json()
-            return cast(dict[Any, Any], data)
+            return cast("dict[Any, Any]", data)
         except httpx.RequestError as e:
             logger.exception(f"TMDB API request failed: {e}")
             return None
@@ -213,7 +213,7 @@ class TMDBClient:
             )
             response.raise_for_status()
             data = response.json()
-            return cast(dict[Any, Any], data)
+            return cast("dict[Any, Any]", data)
         except httpx.RequestError as e:
             logger.exception(f"TMDB API request failed: {e}")
             return None

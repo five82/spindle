@@ -186,7 +186,7 @@ class TVSeriesDiscAnalyzer:
             )
             response.raise_for_status()
             data = response.json()
-            return cast(dict[Any, Any], data)
+            return cast("dict[Any, Any]", data)
         except Exception as e:
             logger.exception(
                 f"Failed to get season {season_number} for TV ID {tv_id}: {e}",

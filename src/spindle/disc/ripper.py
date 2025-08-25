@@ -141,6 +141,8 @@ class MakeMKVRipper:
     def __init__(self, config: SpindleConfig):
         self.config = config
         self.makemkv_con = config.makemkv_con
+        self._last_progress_percent = -1  # Track last reported progress
+        self._progress_report_threshold = 5  # Only report every 5% change
 
     def scan_disc(self, device: str | None = None) -> list[Title]:
         """Scan disc and return available titles."""
@@ -162,7 +164,10 @@ class MakeMKVRipper:
             )
 
             if result.returncode != 0:
-                msg = f"MakeMKV scan failed: {result.stderr}"
+                error_msg = result.stderr or result.stdout
+                # Try to extract a clean error message from MakeMKV output
+                clean_error = self._extract_makemkv_error(error_msg)
+                msg = f"MakeMKV scan failed: {clean_error}"
                 raise RuntimeError(msg)
 
             return self._parse_makemkv_output(result.stdout)
@@ -174,8 +179,99 @@ class MakeMKVRipper:
             msg = f"MakeMKV scan failed: {e}"
             raise RuntimeError(msg)
 
+    def _extract_makemkv_error(self, output: str) -> str:
+        """Extract a clean error message from MakeMKV MSG output."""
+        for line in output.strip().split("\n"):
+            if line.startswith("MSG:"):
+                # Parse MSG lines: MSG:code,flags,count,"text",...
+                parts = line.split(",", 4)
+                if len(parts) >= 4:
+                    text = parts[3].strip('"')
+                    # Return the first meaningful error message
+                    if (
+                        "too old" in text.lower()
+                        or "registration key" in text.lower()
+                        or "failed" in text.lower()
+                        or "error" in text.lower()
+                    ):
+                        return text
+        # If no specific error found, return the original output
+        return output.strip()
+
+    def _build_selection_rule(self) -> str:
+        """Build MakeMKV selection rule based on configuration."""
+        rules = [
+            "-sel:all",  # Deselect everything first
+            "+sel:video",  # Always include video tracks
+        ]
+
+        # Audio track selection based on config
+        if self.config.include_all_english_audio:
+            rules.append("+sel:audio&(eng)")  # All English audio
+
+            if not self.config.include_commentary_tracks:
+                # Try to exclude commentary tracks
+                rules.append("-sel:audio&(commentary)")
+                # Also try common commentary indicators
+                rules.append("-sel:audio&(director)")
+                rules.append("-sel:audio&(cast)")
+        else:
+            # Just main English audio (try to exclude commentary)
+            rules.append("+sel:audio&(eng)&(!commentary)")
+
+        # Include alternate audio if requested
+        if self.config.include_alternate_audio:
+            rules.append("+sel:audio&(!eng)")  # Non-English audio
+
+        # No subtitles by default (matches current logic)
+        rules.append("-sel:subtitle")
+
+        return ",".join(rules)
+
+    def _configure_makemkv_selection(self, selection_rule: str) -> None:
+        """Configure MakeMKV selection rule via settings file."""
+        # MakeMKV settings file location
+        settings_file = Path.home() / ".MakeMKV" / "settings.conf"
+
+        # Ensure directory exists
+        settings_file.parent.mkdir(exist_ok=True)
+
+        # Read existing settings
+        settings = {}
+        if settings_file.exists():
+            with open(settings_file) as f:
+                for line in f:
+                    if "=" in line and not line.strip().startswith("#"):
+                        key, value = line.strip().split("=", 1)
+                        settings[key.strip()] = value.strip().strip('"')
+
+        # Update selection rule
+        settings["app_DefaultSelectionString"] = selection_rule
+
+        # Write settings back
+        with open(settings_file, "w") as f:
+            f.write("# MakeMKV settings file (managed by Spindle)\n")
+            for key, value in settings.items():
+                f.write(f'{key} = "{value}"\n')
+
+        logger.debug(f"Configured MakeMKV selection rule: {selection_rule}")
+
     def _parse_makemkv_output(self, output: str) -> list[Title]:
         """Parse MakeMKV robot output to extract title information."""
+        # Check for MakeMKV error messages first
+        for line in output.strip().split("\n"):
+            if line.startswith("MSG:"):
+                # Parse MSG lines: MSG:code,flags,count,"text",...
+                parts = line.split(",", 4)
+                if len(parts) >= 4:
+                    code = parts[0].split(":")[1]  # Extract code after MSG:
+                    text = parts[3].strip('"')
+                    # Check for common error conditions
+                    if "too old" in text.lower() or "registration key" in text.lower():
+                        raise RuntimeError(f"MakeMKV license issue: {text}")
+                    if "failed" in text.lower() or "error" in text.lower():
+                        raise RuntimeError(f"MakeMKV error: {text}")
+
         titles: dict[int, dict] = {}
 
         for line in output.strip().split("\n"):
@@ -298,12 +394,22 @@ class MakeMKVRipper:
     def _parse_duration(self, duration_str: str) -> int:
         """Parse duration string (HH:MM:SS) to seconds."""
         try:
-            parts = duration_str.split(":")
+            # Clean up the duration string - remove any leading numbers and quotes
+            # MakeMKV sometimes returns format like '0,"1:39:03' instead of '1:39:03'
+            clean_duration = duration_str
+            if ',"' in clean_duration:
+                # Extract the time part after the ',"' prefix
+                clean_duration = clean_duration.split(',"')[1]
+
+            # Remove any remaining quotes
+            clean_duration = clean_duration.strip('"')
+
+            parts = clean_duration.split(":")
             if len(parts) == 3:
                 hours, minutes, seconds = map(int, parts)
                 return hours * 3600 + minutes * 60 + seconds
             logger.warning(
-                f"Invalid duration format: '{duration_str}' (expected HH:MM:SS)",
+                f"Invalid duration format: '{duration_str}' -> '{clean_duration}' (expected HH:MM:SS)",
             )
         except ValueError as e:
             logger.warning(f"Failed to parse duration '{duration_str}': {e}")
@@ -491,66 +597,140 @@ class MakeMKVRipper:
         return ""
 
     def _select_tracks_for_rip(self, title: Title) -> list[Track]:
-        """Select tracks to include in the rip based on configuration."""
+        """Select tracks to include in ripping based on configuration."""
         selected_tracks = []
 
-        # Always include video tracks
-        video_tracks = [t for t in title.tracks if t.track_type == "video"]
-        selected_tracks.extend(video_tracks)
+        # Always include all video tracks
+        selected_tracks.extend(title.video_tracks)
 
-        # Audio track selection based on config
+        # Handle audio track selection based on configuration
         if self.config.include_all_english_audio:
-            # Include all English audio (main + commentary)
-            english_tracks = title.get_english_audio_tracks()
-            commentary_tracks = title.get_commentary_tracks()
+            # Include all English audio tracks
+            english_audio = title.get_all_english_audio_tracks()
 
-            # Add main English audio tracks
-            selected_tracks.extend(english_tracks)
-
-            # Add commentary tracks if enabled
             if self.config.include_commentary_tracks:
-                # Commentary tracks that are also English
-                english_commentary = [
-                    t
-                    for t in commentary_tracks
-                    if t.language.lower() in ["eng", "english", "en"]
-                ]
-                selected_tracks.extend(english_commentary)
+                # Include all English audio (main + commentary)
+                selected_tracks.extend(english_audio)
+            else:
+                # Include only main English audio, exclude commentary
+                main_audio = title.get_main_audio_tracks()
+                selected_tracks.extend(main_audio)
         else:
-            # Just include main English audio tracks (no commentary)
-            main_tracks = title.get_main_audio_tracks()
-            selected_tracks.extend(main_tracks)
+            # Include only main English audio tracks
+            main_audio = title.get_main_audio_tracks()
+            selected_tracks.extend(main_audio)
 
-            # Add commentary if specifically enabled
-            if self.config.include_commentary_tracks:
-                commentary_tracks = title.get_commentary_tracks()
-                english_commentary = [
-                    t
-                    for t in commentary_tracks
-                    if t.language.lower() in ["eng", "english", "en"]
-                ]
-                selected_tracks.extend(english_commentary)
-
-        # Include alternate audio languages if enabled
+        # Include alternate language audio if requested
         if self.config.include_alternate_audio:
-            # Include all audio tracks, not just English
-            all_audio = [t for t in title.tracks if t.track_type == "audio"]
-            for track in all_audio:
-                if track not in selected_tracks:
+            # Add non-English audio tracks
+            for track in title.audio_tracks:
+                if (
+                    not track.language.lower().startswith("en")
+                    and track not in selected_tracks
+                ):
                     selected_tracks.append(track)
 
-        # For now, don't include subtitle tracks by default
-        # This could be made configurable in the future
-
         # Remove duplicates while preserving order
-        unique_tracks = []
         seen_ids = set()
+        deduplicated_tracks = []
         for track in selected_tracks:
             if track.track_id not in seen_ids:
-                unique_tracks.append(track)
                 seen_ids.add(track.track_id)
+                deduplicated_tracks.append(track)
 
-        return unique_tracks
+        return deduplicated_tracks
+
+    def _parse_makemkv_progress(self, line: str) -> dict | None:
+        """Parse MakeMKV progress output lines."""
+        # MakeMKV has two progress formats:
+        # 1. Robot mode: PRGV:current,total,max
+        # 2. Regular mode: Current progress - X% , Total progress - Y%
+        
+        # Try robot format first
+        if line.startswith("PRGV:"):
+            try:
+                # Parse PRGV line: PRGV:current,total,max
+                # current: current file progress (0-65536)
+                # total: total progress (0-65536)
+                # max: maximum value (always 65536)
+                parts = line[5:].split(",", 2)  # Skip "PRGV:" prefix
+                if len(parts) >= 3:
+                    current = int(parts[0]) if parts[0].isdigit() else 0
+                    total = int(parts[1]) if parts[1].isdigit() else 0
+                    maximum = int(parts[2]) if parts[2].isdigit() else 65536
+
+                    if maximum > 0:
+                        # Use total progress for overall percentage
+                        # Ignore lines where current is complete but total hasn't started
+                        # This happens when MakeMKV reports individual track completion
+                        if current == maximum and total == 0:
+                            return None
+                            
+                        percentage = (total / maximum) * 100
+                        
+                        # Filter out duplicate/minor updates
+                        # Only report if progress changed significantly and moving forward
+                        if percentage >= self._last_progress_percent and \
+                           percentage - self._last_progress_percent >= self._progress_report_threshold:
+                            self._last_progress_percent = percentage
+                            return {
+                                "type": "ripping_progress",
+                                "stage": "Saving to MKV file",
+                                "current": total,
+                                "maximum": maximum,
+                                "percentage": percentage,
+                            }
+            except (ValueError, IndexError) as e:
+                logger.debug(f"Failed to parse PRGV line '{line}': {e}")
+        
+        # Try regular progress format
+        elif "Current progress" in line and "Total progress" in line:
+            try:
+                # Parse: Current progress - 17% , Total progress - 17%
+                match = re.search(r"Current progress - (\d+)%.*Total progress - (\d+)%", line)
+                if match:
+                    current_percent = int(match.group(1))
+                    total_percent = int(match.group(2))
+                    return {
+                        "type": "ripping_progress",
+                        "stage": "Saving to MKV file",
+                        "current": current_percent,
+                        "maximum": 100,
+                        "percentage": total_percent,  # Use total progress
+                    }
+            except (ValueError, IndexError) as e:
+                logger.debug(f"Failed to parse progress line '{line}': {e}")
+        
+        # Parse action messages
+        elif line.startswith("Current action:"):
+            action = line.replace("Current action:", "").strip()
+            return {
+                "type": "ripping_status",
+                "message": action,
+            }
+        elif line.startswith("Current operation:"):
+            operation = line.replace("Current operation:", "").strip()
+            return {
+                "type": "ripping_status", 
+                "message": operation,
+            }
+
+        # MakeMKV status messages: MSG:code,flags,count,message,...
+        elif line.startswith("MSG:"):
+            try:
+                parts = line.split(",", 4)
+                if len(parts) >= 4:
+                    code = parts[0].split(":")[1]
+                    message = parts[3].strip('"')
+                    return {
+                        "type": "ripping_status",
+                        "code": code,
+                        "message": message,
+                    }
+            except (ValueError, IndexError) as e:
+                logger.debug(f"Failed to parse message line '{line}': {e}")
+
+        return None
 
     def rip_title(
         self,
@@ -569,46 +749,82 @@ class MakeMKVRipper:
         safe_name = re.sub(r"[^\w\s-]", "", title.name).strip()
         safe_name = re.sub(r"[-\s]+", "-", safe_name)
         output_file = output_dir / f"{safe_name}.mkv"
+        
+        # Clean up any existing MakeMKV output files to avoid overwrite prompts
+        # MakeMKV creates files like title_t00.mkv, title_t01.mkv, etc.
+        for existing_file in output_dir.glob("title_t*.mkv"):
+            logger.debug(f"Removing existing MakeMKV output file: {existing_file}")
+            existing_file.unlink()
 
         logger.info(f"Ripping {title.name} to {output_file}")
+        
+        # Reset progress tracking for new rip
+        self._last_progress_percent = -1
 
-        # Build MakeMKV command with track selection
+        # Configure MakeMKV selection rules based on our config
+        selection_rule = self._build_selection_rule()
+        self._configure_makemkv_selection(selection_rule)
+        logger.debug(f"Using selection rule: {selection_rule}")
+
+        # Build MakeMKV command
         cmd = [
             self.makemkv_con,
             "mkv",
+            "--noscan",  # Skip initial scan since we already did that
+            "--robot",  # Use robot mode for structured PRGV output
             f"dev:{device}",
             title.title_id,
             str(output_dir),
         ]
 
-        # Add track selection based on requirements:
-        # - Video track (main)
-        # - All English audio tracks (primary + commentary)
-        # - No subtitles by default
-        # - Chapters included by default
-
-        # Select tracks based on configuration
-        selected_tracks = self._select_tracks_for_rip(title)
-
-        # Add track selection flags to MakeMKV command
-        for track in title.tracks:
-            if track in selected_tracks:
-                cmd.extend(["--track", f"{track.track_id}:on"])
-            else:
-                cmd.extend(["--track", f"{track.track_id}:off"])
+        # Add progress flag if callback is provided
+        if progress_callback:
+            cmd.append("--progress=-same")
 
         try:
-            result = subprocess.run(
-                cmd,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=self.config.makemkv_rip_timeout,
-            )
+            if progress_callback:
+                # Use Popen for real-time progress monitoring
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    universal_newlines=True,
+                )
 
-            if result.returncode != 0:
-                msg = f"MakeMKV rip failed: {result.stderr}"
-                raise RuntimeError(msg)
+                # Monitor progress in real-time
+                stdout_lines = []
+                while True:
+                    output = process.stdout.readline() if process.stdout else ""
+                    if output == "" and process.poll() is not None:
+                        break
+                    if output:
+                        stdout_lines.append(output.strip())
+                        # Parse progress information
+                        progress_data = self._parse_makemkv_progress(output.strip())
+                        if progress_data:
+                            progress_callback(progress_data)
+
+                # Wait for process to complete
+                return_code = process.poll()
+                stdout_output = "\n".join(stdout_lines)
+
+                if return_code != 0:
+                    msg = f"MakeMKV rip failed: {stdout_output}"
+                    raise RuntimeError(msg)
+            else:
+                # Use subprocess.run for compatibility (tests)
+                result = subprocess.run(
+                    cmd,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.config.makemkv_rip_timeout,
+                )
+
+                if result.returncode != 0:
+                    msg = f"MakeMKV rip failed: {result.stderr}"
+                    raise RuntimeError(msg)
 
             # Find the actual output file (MakeMKV may change the name)
             ripped_files = list(output_dir.glob("*.mkv"))

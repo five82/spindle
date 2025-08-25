@@ -17,7 +17,7 @@ class NtfyNotifier:
         self.topic_url = config.ntfy_topic
         self.client = httpx.Client(
             timeout=config.ntfy_request_timeout,
-            headers={"User-Agent": "Spindle/0.1.0"}
+            headers={"User-Agent": "Spindle/0.1.0"},
         )
 
     def send_notification(
@@ -46,7 +46,7 @@ class NtfyNotifier:
 
             response = self.client.post(
                 self.topic_url,
-                data=message.encode('utf-8'),
+                data=message.encode("utf-8"),  # type: ignore[arg-type]
                 headers=headers,
             )
 

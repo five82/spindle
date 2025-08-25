@@ -245,3 +245,60 @@ def test_media_info_serialization(queue_manager, sample_media_info):
     assert retrieved.media_info.tmdb_id == 12345
     assert retrieved.media_info.overview == "A test movie"
     assert retrieved.media_info.genres == ["Action", "Drama"]
+
+
+def test_clear_all_with_force(queue_manager):
+    """Test force clearing all items including processing ones."""
+    # Add items in various states
+    item1 = queue_manager.add_disc("PENDING")
+    
+    item2 = queue_manager.add_disc("RIPPING")
+    item2.status = QueueItemStatus.RIPPING
+    queue_manager.update_item(item2)
+    
+    item3 = queue_manager.add_disc("COMPLETED")
+    item3.status = QueueItemStatus.COMPLETED
+    queue_manager.update_item(item3)
+    
+    # Try normal clear - should fail
+    with pytest.raises(RuntimeError, match="Cannot clear queue"):
+        queue_manager.clear_all()
+    
+    # Force clear should work
+    count = queue_manager.clear_all(force=True)
+    assert count == 3
+    assert len(queue_manager.get_all_items()) == 0
+
+
+def test_reset_stuck_processing_items(queue_manager):
+    """Test resetting stuck processing items to pending."""
+    # Add items in various states
+    item1 = queue_manager.add_disc("PENDING")
+    
+    item2 = queue_manager.add_disc("RIPPING") 
+    item2.status = QueueItemStatus.RIPPING
+    queue_manager.update_item(item2)
+    
+    item3 = queue_manager.add_disc("ENCODING")
+    item3.status = QueueItemStatus.ENCODING
+    queue_manager.update_item(item3)
+    
+    item4 = queue_manager.add_disc("COMPLETED")
+    item4.status = QueueItemStatus.COMPLETED
+    queue_manager.update_item(item4)
+    
+    # Reset stuck items
+    count = queue_manager.reset_stuck_processing_items()
+    assert count == 2  # Should reset RIPPING and ENCODING items
+    
+    # Check items are now pending
+    item2_updated = queue_manager.get_item(item2.item_id)
+    assert item2_updated.status == QueueItemStatus.PENDING
+    assert item2_updated.progress_stage == "Reset from stuck processing"
+    
+    item3_updated = queue_manager.get_item(item3.item_id)
+    assert item3_updated.status == QueueItemStatus.PENDING
+    
+    # Completed item should be unchanged
+    item4_updated = queue_manager.get_item(item4.item_id)
+    assert item4_updated.status == QueueItemStatus.COMPLETED
