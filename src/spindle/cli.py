@@ -449,7 +449,9 @@ def queue_list(ctx: click.Context) -> None:
 @cli.command("queue-clear")
 @click.option("--completed", is_flag=True, help="Only clear completed items")
 @click.option("--failed", is_flag=True, help="Only clear failed items")
-@click.option("--force", is_flag=True, help="Force clear all items including those in processing")
+@click.option(
+    "--force", is_flag=True, help="Force clear all items including those in processing"
+)
 @click.pass_context
 def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) -> None:
     """Clear items from the queue."""
@@ -467,7 +469,9 @@ def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) 
         count = queue_manager.clear_failed()
         console.print(f"[green]Cleared {count} failed items[/green]")
     elif force:
-        if click.confirm("Are you sure you want to FORCE clear the entire queue (including processing items)?"):
+        if click.confirm(
+            "Are you sure you want to FORCE clear the entire queue (including processing items)?"
+        ):
             count = queue_manager.clear_all(force=True)
             console.print(f"[green]Force cleared {count} items from queue[/green]")
     elif click.confirm("Are you sure you want to clear the entire queue?"):

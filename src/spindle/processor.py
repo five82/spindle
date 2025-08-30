@@ -51,7 +51,7 @@ class ContinuousProcessor:
 
         logger.info("Starting continuous processor")
         self.is_running = True
-        
+
         # Reset any items stuck in processing status from previous run
         reset_count = self.queue_manager.reset_stuck_processing_items()
         if reset_count > 0:
@@ -136,21 +136,23 @@ class ContinuousProcessor:
             # Analyze disc content using TMDB and intelligent pattern analysis
             logger.info("Running intelligent disc analysis with TMDB lookup...")
             analysis_result = await self.disc_analyzer.analyze_disc(disc_info, titles)
-            
+
             logger.info(
                 f"Analysis complete - Content type: {analysis_result.content_type.value} "
                 f"(confidence: {analysis_result.confidence:.2f})"
             )
-            
+
             # Log metadata if found
             if analysis_result.metadata:
-                if hasattr(analysis_result.metadata, 'title'):
+                if hasattr(analysis_result.metadata, "title"):
                     logger.info(f"Identified as: {analysis_result.metadata.title}")
-                    if hasattr(analysis_result.metadata, 'year'):
+                    if hasattr(analysis_result.metadata, "year"):
                         logger.info(f"Year: {analysis_result.metadata.year}")
-                    if hasattr(analysis_result.metadata, 'overview'):
-                        logger.info(f"Overview: {analysis_result.metadata.overview[:200]}...")
-            
+                    if hasattr(analysis_result.metadata, "overview"):
+                        logger.info(
+                            f"Overview: {analysis_result.metadata.overview[:200]}..."
+                        )
+
             # Update progress with analysis results
             item.progress_stage = f"Identified: {analysis_result.content_type.value}"
             item.progress_percent = 10
@@ -231,29 +233,32 @@ class ContinuousProcessor:
     ) -> list:
         """Handle content based on disc analysis result."""
         from .disc.analyzer import ContentType
-        
+
         content_type = analysis_result.content_type
-        
+
         # Store metadata if available for later identification
         if analysis_result.metadata:
             logger.info(f"Using pre-identified metadata from disc analysis")
-        
+
         # Use the intelligently selected titles from the analysis
         titles_to_rip = analysis_result.titles_to_rip
         logger.info(f"Ripping {len(titles_to_rip)} intelligently selected titles")
-        
+
         output_files = []
         for title in titles_to_rip:
             logger.info(f"Ripping: {title}")
-            
+
             # Check for episode mapping for TV shows
-            if analysis_result.episode_mappings and title in analysis_result.episode_mappings:
+            if (
+                analysis_result.episode_mappings
+                and title in analysis_result.episode_mappings
+            ):
                 episode_info = analysis_result.episode_mappings[title]
                 logger.info(
                     f"Title mapped to: S{episode_info.season_number:02d}E{episode_info.episode_number:02d} - "
                     f"{episode_info.episode_title}"
                 )
-            
+
             output_path = self.ripper.rip_title(
                 title,
                 self.config.staging_dir / "ripped",
@@ -261,7 +266,7 @@ class ContinuousProcessor:
             )
             output_files.append(output_path)
             logger.info(f"Ripped to: {output_path}")
-        
+
         return output_files
 
     def _handle_content_type(
@@ -297,7 +302,10 @@ class ContinuousProcessor:
         return self._handle_basic_rip(disc_info, titles, progress_callback)
 
     def _handle_tv_series(
-        self, disc_info: DiscInfo, titles: list, progress_callback: Callable | None = None
+        self,
+        disc_info: DiscInfo,
+        titles: list,
+        progress_callback: Callable | None = None,
     ) -> list:
         """Handle TV series using intelligent episode mapping."""
         try:
@@ -430,7 +438,10 @@ class ContinuousProcessor:
             return self._handle_basic_rip(disc_info, titles, progress_callback)
 
     def _handle_basic_rip(
-        self, disc_info: DiscInfo, titles: list, progress_callback: Callable | None = None
+        self,
+        disc_info: DiscInfo,
+        titles: list,
+        progress_callback: Callable | None = None,
     ) -> list:
         """Fallback to basic rip strategy."""
         try:

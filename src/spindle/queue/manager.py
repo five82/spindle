@@ -421,10 +421,10 @@ class QueueManager:
 
     def clear_all(self, force: bool = False) -> int:
         """Remove all items from the queue.
-        
+
         Args:
             force: If True, clear all items including those in processing status.
-        
+
         Raises:
             RuntimeError: If items are currently being processed and force is False.
         """
@@ -452,7 +452,9 @@ class QueueManager:
             cursor = conn.execute("DELETE FROM queue_items")
             count = cursor.rowcount
             if force:
-                logger.info("Force cleared %s items from queue (including processing)", count)
+                logger.info(
+                    "Force cleared %s items from queue (including processing)", count
+                )
             else:
                 logger.info("Cleared %s items from queue (full clear)", count)
             return count
@@ -467,13 +469,13 @@ class QueueManager:
             count = cursor.rowcount
             logger.info("Cleared %s failed items from queue", count)
             return count
-    
+
     def reset_stuck_processing_items(self) -> int:
         """Reset items stuck in processing status back to pending.
-        
+
         This is useful when Spindle was stopped unexpectedly and items
         remain in processing states (ripping, identifying, encoding).
-        
+
         Returns:
             Number of items reset.
         """

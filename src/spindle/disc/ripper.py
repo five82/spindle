@@ -645,7 +645,7 @@ class MakeMKVRipper:
         # MakeMKV has two progress formats:
         # 1. Robot mode: PRGV:current,total,max
         # 2. Regular mode: Current progress - X% , Total progress - Y%
-        
+
         # Try robot format first
         if line.startswith("PRGV:"):
             try:
@@ -665,13 +665,16 @@ class MakeMKVRipper:
                         # This happens when MakeMKV reports individual track completion
                         if current == maximum and total == 0:
                             return None
-                            
+
                         percentage = (total / maximum) * 100
-                        
+
                         # Filter out duplicate/minor updates
                         # Only report if progress changed significantly and moving forward
-                        if percentage >= self._last_progress_percent and \
-                           percentage - self._last_progress_percent >= self._progress_report_threshold:
+                        if (
+                            percentage >= self._last_progress_percent
+                            and percentage - self._last_progress_percent
+                            >= self._progress_report_threshold
+                        ):
                             self._last_progress_percent = percentage
                             return {
                                 "type": "ripping_progress",
@@ -682,12 +685,14 @@ class MakeMKVRipper:
                             }
             except (ValueError, IndexError) as e:
                 logger.debug(f"Failed to parse PRGV line '{line}': {e}")
-        
+
         # Try regular progress format
         elif "Current progress" in line and "Total progress" in line:
             try:
                 # Parse: Current progress - 17% , Total progress - 17%
-                match = re.search(r"Current progress - (\d+)%.*Total progress - (\d+)%", line)
+                match = re.search(
+                    r"Current progress - (\d+)%.*Total progress - (\d+)%", line
+                )
                 if match:
                     current_percent = int(match.group(1))
                     total_percent = int(match.group(2))
@@ -700,7 +705,7 @@ class MakeMKVRipper:
                     }
             except (ValueError, IndexError) as e:
                 logger.debug(f"Failed to parse progress line '{line}': {e}")
-        
+
         # Parse action messages
         elif line.startswith("Current action:"):
             action = line.replace("Current action:", "").strip()
@@ -711,7 +716,7 @@ class MakeMKVRipper:
         elif line.startswith("Current operation:"):
             operation = line.replace("Current operation:", "").strip()
             return {
-                "type": "ripping_status", 
+                "type": "ripping_status",
                 "message": operation,
             }
 
@@ -749,7 +754,7 @@ class MakeMKVRipper:
         safe_name = re.sub(r"[^\w\s-]", "", title.name).strip()
         safe_name = re.sub(r"[-\s]+", "-", safe_name)
         output_file = output_dir / f"{safe_name}.mkv"
-        
+
         # Clean up any existing MakeMKV output files to avoid overwrite prompts
         # MakeMKV creates files like title_t00.mkv, title_t01.mkv, etc.
         for existing_file in output_dir.glob("title_t*.mkv"):
@@ -757,7 +762,7 @@ class MakeMKVRipper:
             existing_file.unlink()
 
         logger.info(f"Ripping {title.name} to {output_file}")
-        
+
         # Reset progress tracking for new rip
         self._last_progress_percent = -1
 
