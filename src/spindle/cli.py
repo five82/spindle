@@ -58,12 +58,12 @@ def check_uv_requirement() -> None:
         )
 
 
-def setup_logging(verbose: bool = False, config: SpindleConfig | None = None) -> None:
+def setup_logging(*, verbose: bool = False, config: SpindleConfig | None = None) -> None:
     """Set up logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
 
     handlers: list[logging.Handler] = [
-        RichHandler(console=console, rich_tracebacks=True)
+        RichHandler(console=console, rich_tracebacks=True),
     ]
 
     # Add file handler if config is available
@@ -106,8 +106,8 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
         ctx.obj["verbose"] = verbose
 
         # Setup logging with the loaded config for file logging
-        setup_logging(verbose, loaded_config)
-    except (OSError, ValueError, RuntimeError, Exception) as e:
+        setup_logging(verbose=verbose, config=loaded_config)
+    except (OSError, ValueError, RuntimeError) as e:
         console.print(f"[red]Error loading configuration: {e}[/red]")
         sys.exit(1)
 
@@ -126,7 +126,7 @@ def init_config(path: Path) -> None:
         create_sample_config(path)
         console.print(f"[green]Created sample configuration at {path}[/green]")
         console.print("Please edit the configuration file with your settings.")
-    except (OSError, Exception) as e:
+    except OSError as e:
         console.print(f"[red]Error creating configuration: {e}[/red]")
         sys.exit(1)
 
@@ -253,8 +253,6 @@ def start_daemon(config: SpindleConfig) -> None:
 
     # Set up logging for daemon
     def setup_daemon_logging() -> None:
-        import logging
-
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
 
@@ -272,7 +270,8 @@ def start_daemon(config: SpindleConfig) -> None:
         processor = ContinuousProcessor(config)
 
         def signal_handler(signum: int, frame: object) -> None:
-            logging.info("Received signal %s, stopping processor", signum)
+            logger = logging.getLogger(__name__)
+            logger.info("Received signal %s, stopping processor", signum)
             processor.stop()
             sys.exit(0)
 
@@ -280,7 +279,8 @@ def start_daemon(config: SpindleConfig) -> None:
         signal.signal(signal.SIGINT, signal_handler)
 
         try:
-            logging.info("Starting Spindle continuous processor")
+            logger = logging.getLogger(__name__)
+            logger.info("Starting Spindle continuous processor")
             processor.start()
 
             # Keep daemon alive
@@ -288,7 +288,8 @@ def start_daemon(config: SpindleConfig) -> None:
                 time.sleep(config.status_display_interval)
 
         except Exception as e:
-            logging.exception("Error in processor: %s", e)
+            logger = logging.getLogger(__name__)
+            logger.exception("Error in processor: %s", e)
             processor.stop()
             sys.exit(1)
 
@@ -450,7 +451,7 @@ def queue_list(ctx: click.Context) -> None:
 @click.option("--completed", is_flag=True, help="Only clear completed items")
 @click.option("--failed", is_flag=True, help="Only clear failed items")
 @click.option(
-    "--force", is_flag=True, help="Force clear all items including those in processing"
+    "--force", is_flag=True, help="Force clear all items including those in processing",
 )
 @click.pass_context
 def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) -> None:
@@ -470,7 +471,7 @@ def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) 
         console.print(f"[green]Cleared {count} failed items[/green]")
     elif force:
         if click.confirm(
-            "Are you sure you want to FORCE clear the entire queue (including processing items)?"
+            "Are you sure you want to FORCE clear the entire queue (including processing items)?",
         ):
             count = queue_manager.clear_all(force=True)
             console.print(f"[green]Force cleared {count} items from queue[/green]")

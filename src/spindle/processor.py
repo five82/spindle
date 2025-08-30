@@ -55,7 +55,7 @@ class ContinuousProcessor:
         # Reset any items stuck in processing status from previous run
         reset_count = self.queue_manager.reset_stuck_processing_items()
         if reset_count > 0:
-            logger.info(f"Reset {reset_count} stuck items to pending status")
+            logger.info("Reset %s stuck items to pending status", reset_count)
 
         # Start disc monitoring
         self.disc_monitor = DiscMonitor(
@@ -67,7 +67,7 @@ class ContinuousProcessor:
         # Check for existing disc in drive
         existing_disc = detect_disc(self.config.optical_drive)
         if existing_disc:
-            logger.info(f"Found existing disc: {existing_disc}")
+            logger.info("Found existing disc: %s", existing_disc)
             self._on_disc_detected(existing_disc)
 
         # Start background queue processing
@@ -99,19 +99,19 @@ class ContinuousProcessor:
 
     def _on_disc_detected(self, disc_info: DiscInfo) -> None:
         """Handle disc detection by automatically ripping."""
-        logger.info(f"Detected disc: {disc_info}")
+        logger.info("Detected disc: %s", disc_info)
         self.notifier.notify_disc_detected(disc_info.label, disc_info.disc_type)
 
         try:
             # Add to queue
             item = self.queue_manager.add_disc(disc_info.label)
-            logger.info(f"Added to queue: {item}")
+            logger.info("Added to queue: %s", item)
 
             # Start ripping immediately (run async method in event loop)
             asyncio.run(self._rip_disc(item, disc_info))
 
         except Exception as e:
-            logger.exception(f"Error handling disc detection: {e}")
+            logger.exception("Error handling disc detection")
             self.notifier.notify_error(
                 f"Failed to process disc: {e}",
                 context=disc_info.label,
@@ -120,7 +120,7 @@ class ContinuousProcessor:
     async def _rip_disc(self, item: QueueItem, disc_info: DiscInfo) -> None:
         """Rip the detected disc using intelligent analysis."""
         try:
-            logger.info(f"Starting intelligent analysis and rip: {disc_info.label}")
+            logger.info("Starting intelligent analysis and rip: %s", disc_info.label)
             self.notifier.notify_rip_started(disc_info.label)
 
             # Update status
@@ -131,27 +131,27 @@ class ContinuousProcessor:
 
             # First, scan the disc to get title information
             titles = self.ripper.scan_disc()
-            logger.info(f"Found {len(titles)} titles on disc")
+            logger.info("Found %s titles on disc", len(titles))
 
             # Analyze disc content using TMDB and intelligent pattern analysis
             logger.info("Running intelligent disc analysis with TMDB lookup...")
             analysis_result = await self.disc_analyzer.analyze_disc(disc_info, titles)
 
             logger.info(
-                f"Analysis complete - Content type: {analysis_result.content_type.value} "
-                f"(confidence: {analysis_result.confidence:.2f})"
+                "Analysis complete - Content type: %s (confidence: %.2f)",
+                analysis_result.content_type.value,
+                analysis_result.confidence,
             )
 
             # Log metadata if found
-            if analysis_result.metadata:
-                if hasattr(analysis_result.metadata, "title"):
-                    logger.info(f"Identified as: {analysis_result.metadata.title}")
-                    if hasattr(analysis_result.metadata, "year"):
-                        logger.info(f"Year: {analysis_result.metadata.year}")
-                    if hasattr(analysis_result.metadata, "overview"):
-                        logger.info(
-                            f"Overview: {analysis_result.metadata.overview[:200]}..."
-                        )
+            if analysis_result.metadata and hasattr(analysis_result.metadata, "title"):
+                logger.info("Identified as: %s", analysis_result.metadata.title)
+                if hasattr(analysis_result.metadata, "year"):
+                    logger.info(f"Year: {analysis_result.metadata.year}")
+                if hasattr(analysis_result.metadata, "overview"):
+                    logger.info(
+                        f"Overview: {analysis_result.metadata.overview[:200]}...",
+                    )
 
             # Update progress with analysis results
             item.progress_stage = f"Identified: {analysis_result.content_type.value}"
@@ -162,10 +162,10 @@ class ContinuousProcessor:
             def ripping_progress_callback(progress_data: dict) -> None:
                 """Handle progress updates from MakeMKV ripping."""
                 if progress_data.get("type") == "ripping_progress":
-                    stage = progress_data.get("stage", "Ripping")
+                    progress_data.get("stage", "Ripping")
                     percentage = progress_data.get("percentage", 0)
-                    current = progress_data.get("current", 0)
-                    maximum = progress_data.get("maximum", 1)
+                    progress_data.get("current", 0)
+                    progress_data.get("maximum", 1)
 
                     # Only log significant progress updates
                     logger.info(f"Ripping progress: {percentage:.0f}%")
@@ -185,7 +185,7 @@ class ContinuousProcessor:
             # Handle different content types with progress callback
             # Use the analysis result which contains selected titles and content type
             output_files = self._handle_content_type_with_analysis(
-                disc_info, analysis_result, ripping_progress_callback
+                disc_info, analysis_result, ripping_progress_callback,
             )
 
             # Store primary output file for queue tracking
@@ -215,7 +215,7 @@ class ContinuousProcessor:
                 or "too old" in error_str.lower()
             ):
                 # User-facing error - don't show traceback
-                logger.error(f"Error ripping disc: {e}")
+                logger.exception(f"Error ripping disc: {e}")
             else:
                 # Technical error - show traceback for debugging
                 logger.exception(f"Error ripping disc: {e}")
@@ -232,13 +232,11 @@ class ContinuousProcessor:
         progress_callback: Callable | None = None,
     ) -> list:
         """Handle content based on disc analysis result."""
-        from .disc.analyzer import ContentType
 
-        content_type = analysis_result.content_type
 
         # Store metadata if available for later identification
         if analysis_result.metadata:
-            logger.info(f"Using pre-identified metadata from disc analysis")
+            logger.info("Using pre-identified metadata from disc analysis")
 
         # Use the intelligently selected titles from the analysis
         titles_to_rip = analysis_result.titles_to_rip
@@ -256,7 +254,7 @@ class ContinuousProcessor:
                 episode_info = analysis_result.episode_mappings[title]
                 logger.info(
                     f"Title mapped to: S{episode_info.season_number:02d}E{episode_info.episode_number:02d} - "
-                    f"{episode_info.episode_title}"
+                    f"{episode_info.episode_title}",
                 )
 
             output_path = self.ripper.rip_title(
@@ -288,13 +286,13 @@ class ContinuousProcessor:
         if content_type in [ContentType.CARTOON_COLLECTION, ContentType.CARTOON_SHORTS]:
             # Handle cartoon collections - rip all shorts
             return self._handle_cartoon_collection(
-                disc_info, titles, content_pattern, progress_callback
+                disc_info, titles, content_pattern, progress_callback,
             )
 
         if content_type in [ContentType.MOVIE, ContentType.ANIMATED_MOVIE]:
             # Handle movies - select main title and optionally extras
             return self._handle_movie(
-                disc_info, titles, content_pattern, progress_callback
+                disc_info, titles, content_pattern, progress_callback,
             )
 
         # Unknown content type - use basic strategy
@@ -340,7 +338,7 @@ class ContinuousProcessor:
             else:
                 logger.warning("No episode mapping found, using basic rip")
                 output_files = self._handle_basic_rip(
-                    disc_info, titles, progress_callback
+                    disc_info, titles, progress_callback,
                 )
 
             return output_files
@@ -557,7 +555,7 @@ class ContinuousProcessor:
 
     async def _encode_item(self, item: QueueItem) -> None:
         """Encode a identified item."""
-        logger.info(f"Encoding: {item.media_info}")
+        logger.info("Encoding: %s", item.media_info)
         # Drapto handles encoding notifications, so spindle doesn't send duplicates
 
         item.status = QueueItemStatus.ENCODING
@@ -574,7 +572,7 @@ class ContinuousProcessor:
                 message = progress_data.get("message", "")
                 eta_seconds = progress_data.get("eta_seconds")
 
-                logger.info(f"Encoding {stage}: {percent:.1f}% - {message}")
+                logger.info("Encoding %s: %.1f%% - %s", stage, percent, message)
 
                 # Update item with current progress
                 item.progress_stage = stage
@@ -589,7 +587,8 @@ class ContinuousProcessor:
                 eta_seconds = progress_data.get("eta_seconds", 0)
 
                 logger.info(
-                    f"Encoding: {percent:.1f}% (speed: {speed:.1f}x, fps: {fps:.1f}, ETA: {eta_seconds}s)",
+                    "Encoding: %.1f%% (speed: %.1fx, fps: %.1f, ETA: %ss)",
+                    percent, speed, fps, eta_seconds,
                 )
 
                 # Update item with encoding progress
@@ -601,7 +600,8 @@ class ContinuousProcessor:
             elif progress_type == "encoding_complete":
                 size_reduction = progress_data.get("size_reduction_percent", 0)
                 logger.info(
-                    f"Encoding complete - size reduction: {size_reduction:.1f}%",
+                    "Encoding complete - size reduction: %.1f%%",
+                    size_reduction,
                 )
 
             elif progress_type == "validation_complete":
@@ -613,11 +613,11 @@ class ContinuousProcessor:
 
             elif progress_type == "error":
                 error_msg = progress_data.get("message", "Unknown error")
-                logger.error(f"Drapto error: {error_msg}")
+                logger.error("Drapto error: %s", error_msg)
 
             elif progress_type == "warning":
                 warning_msg = progress_data.get("message", "Unknown warning")
-                logger.warning(f"Drapto warning: {warning_msg}")
+                logger.warning("Drapto warning: %s", warning_msg)
 
         if not item.ripped_file:
             logger.error("No ripped file found for encoding")
@@ -636,7 +636,7 @@ class ContinuousProcessor:
             item.encoded_file = result.output_file
             item.status = QueueItemStatus.ENCODED
             # Drapto already sent encoding completion notification
-            logger.info(f"Encoded: {result.output_file}")
+            logger.info("Encoded: %s", result.output_file)
         else:
             item.status = QueueItemStatus.FAILED
             item.error_message = result.error_message
@@ -644,7 +644,7 @@ class ContinuousProcessor:
                 f"Encoding failed: {result.error_message}",
                 context=str(item.media_info),
             )
-            logger.error(f"Encoding failed: {result.error_message}")
+            logger.error("Encoding failed: %s", result.error_message)
 
         self.queue_manager.update_item(item)
 
@@ -664,7 +664,7 @@ class ContinuousProcessor:
             self.queue_manager.update_item(item)
             return
 
-        logger.info(f"Organizing: {item.media_info}")
+        logger.info("Organizing: %s", item.media_info)
 
         item.status = QueueItemStatus.ORGANIZING
         self.queue_manager.update_item(item)
@@ -676,7 +676,7 @@ class ContinuousProcessor:
                 str(item.media_info),
                 item.media_info.media_type,
             )
-            logger.info(f"Added to Plex: {item.media_info}")
+            logger.info("Added to Plex: %s", item.media_info)
         else:
             item.status = QueueItemStatus.FAILED
             item.error_message = "Failed to organize/import to Plex"

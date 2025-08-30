@@ -27,6 +27,7 @@ class Track:
         duration: int,
         size: int,
         title: str | None = None,
+        *,
         is_default: bool = False,
     ):
         self.track_id = track_id
@@ -131,7 +132,10 @@ class Title:
         ]
 
     def __str__(self) -> str:
-        duration_str = f"{self.duration // 3600:02d}:{(self.duration % 3600) // 60:02d}:{self.duration % 60:02d}"
+        hours = self.duration // 3600
+        minutes = (self.duration % 3600) // 60
+        seconds = self.duration % 60
+        duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         return f"{self.name}: {duration_str}, {len(self.tracks)} tracks"
 
 
@@ -264,13 +268,15 @@ class MakeMKVRipper:
                 # Parse MSG lines: MSG:code,flags,count,"text",...
                 parts = line.split(",", 4)
                 if len(parts) >= 4:
-                    code = parts[0].split(":")[1]  # Extract code after MSG:
+                    parts[0].split(":")[1]  # Extract code after MSG:
                     text = parts[3].strip('"')
                     # Check for common error conditions
                     if "too old" in text.lower() or "registration key" in text.lower():
-                        raise RuntimeError(f"MakeMKV license issue: {text}")
+                        msg = f"MakeMKV license issue: {text}"
+                        raise RuntimeError(msg)
                     if "failed" in text.lower() or "error" in text.lower():
-                        raise RuntimeError(f"MakeMKV error: {text}")
+                        msg = f"MakeMKV error: {text}"
+                        raise RuntimeError(msg)
 
         titles: dict[int, dict] = {}
 
@@ -428,12 +434,12 @@ class MakeMKVRipper:
         if disc_label:
             from .analyzer import IntelligentDiscAnalyzer
 
-            analyzer = IntelligentDiscAnalyzer(self.config)
+            IntelligentDiscAnalyzer(self.config)
 
             # Create a simple DiscInfo for analysis
             from .monitor import DiscInfo
 
-            disc_info = DiscInfo(
+            DiscInfo(
                 device=self.config.optical_drive,
                 disc_type="unknown",  # Don't have type info here
                 label=disc_label,
@@ -442,7 +448,6 @@ class MakeMKVRipper:
             # Note: analyze_disc is async, but we can't await here since this is sync
             # This is a design issue that needs to be resolved
             # For now, we'll handle this differently
-            content_pattern = None
 
             # Since we can't use async analysis here, use basic duration filtering
             valid_titles = titles
@@ -691,7 +696,7 @@ class MakeMKVRipper:
             try:
                 # Parse: Current progress - 17% , Total progress - 17%
                 match = re.search(
-                    r"Current progress - (\d+)%.*Total progress - (\d+)%", line
+                    r"Current progress - (\d+)%.*Total progress - (\d+)%", line,
                 )
                 if match:
                     current_percent = int(match.group(1))

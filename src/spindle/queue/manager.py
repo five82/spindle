@@ -206,11 +206,11 @@ class QueueManager:
                         logger.debug("Successfully verified column %s", column_name)
                     except sqlite3.OperationalError:
                         msg = f"Failed to add column {column_name}"
-                        raise RuntimeError(msg)
+                        raise RuntimeError(msg) from None
                 else:
                     # Unexpected error
                     msg = f"Unexpected error checking column {column_name}: {e}"
-                    raise RuntimeError(msg)
+                    raise RuntimeError(msg) from e
 
     def add_disc(self, disc_title: str) -> QueueItem:
         """Add a disc to the queue."""
@@ -223,7 +223,7 @@ class QueueManager:
             cursor = conn.execute(
                 """
                 INSERT INTO queue_items (disc_title, status, created_at, updated_at,
-                                        progress_stage, progress_percent, progress_message)
+                    progress_stage, progress_percent, progress_message)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 (
@@ -419,7 +419,7 @@ class QueueManager:
             logger.info("Cleared %s completed items from queue", count)
             return count
 
-    def clear_all(self, force: bool = False) -> int:
+    def clear_all(self, *, force: bool = False) -> int:
         """Remove all items from the queue.
 
         Args:
@@ -453,7 +453,7 @@ class QueueManager:
             count = cursor.rowcount
             if force:
                 logger.info(
-                    "Force cleared %s items from queue (including processing)", count
+                    "Force cleared %s items from queue (including processing)", count,
                 )
             else:
                 logger.info("Cleared %s items from queue (full clear)", count)
@@ -481,8 +481,8 @@ class QueueManager:
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                """UPDATE queue_items 
-                   SET status = ?, 
+                """UPDATE queue_items
+                   SET status = ?,
                        progress_stage = 'Reset from stuck processing',
                        progress_percent = 0,
                        progress_message = NULL

@@ -24,10 +24,10 @@ class LibraryOrganizer:
             try:
                 self.plex_server = PlexServer(config.plex_url, config.plex_token)
                 logger.info(
-                    f"Connected to Plex server: {self.plex_server.friendlyName}",
+                    "Connected to Plex server: %s", self.plex_server.friendlyName,
                 )
             except Exception as e:
-                logger.warning(f"Failed to connect to Plex server: {e}")
+                logger.warning("Failed to connect to Plex server: %s", e)
                 self.plex_server = None
 
     def organize_media(self, video_file: Path, media_info: MediaInfo) -> Path:
@@ -56,12 +56,12 @@ class LibraryOrganizer:
                 target_file = target_dir / filename
                 counter += 1
 
-        logger.info(f"Moving {video_file} -> {target_file}")
+        logger.info("Moving %s -> %s", video_file, target_file)
 
         try:
             # Move the file to the target location
             shutil.move(str(video_file), str(target_file))
-            logger.info(f"Successfully organized: {target_file}")
+            logger.info("Successfully organized: %s", target_file)
 
             return target_file
 
