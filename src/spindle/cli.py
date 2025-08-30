@@ -59,7 +59,7 @@ def check_uv_requirement() -> None:
 
 
 def setup_logging(
-    *, verbose: bool = False, config: SpindleConfig | None = None
+    *, verbose: bool = False, config: SpindleConfig | None = None,
 ) -> None:
     """Set up logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
