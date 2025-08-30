@@ -453,7 +453,8 @@ class QueueManager:
             count = cursor.rowcount
             if force:
                 logger.info(
-                    "Force cleared %s items from queue (including processing)", count,
+                    "Force cleared %s items from queue (including processing)",
+                    count,
                 )
             else:
                 logger.info("Cleared %s items from queue (full clear)", count)

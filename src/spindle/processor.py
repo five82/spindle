@@ -185,7 +185,9 @@ class ContinuousProcessor:
             # Handle different content types with progress callback
             # Use the analysis result which contains selected titles and content type
             output_files = self._handle_content_type_with_analysis(
-                disc_info, analysis_result, ripping_progress_callback,
+                disc_info,
+                analysis_result,
+                ripping_progress_callback,
             )
 
             # Store primary output file for queue tracking
@@ -232,7 +234,6 @@ class ContinuousProcessor:
         progress_callback: Callable | None = None,
     ) -> list:
         """Handle content based on disc analysis result."""
-
 
         # Store metadata if available for later identification
         if analysis_result.metadata:
@@ -286,13 +287,19 @@ class ContinuousProcessor:
         if content_type in [ContentType.CARTOON_COLLECTION, ContentType.CARTOON_SHORTS]:
             # Handle cartoon collections - rip all shorts
             return self._handle_cartoon_collection(
-                disc_info, titles, content_pattern, progress_callback,
+                disc_info,
+                titles,
+                content_pattern,
+                progress_callback,
             )
 
         if content_type in [ContentType.MOVIE, ContentType.ANIMATED_MOVIE]:
             # Handle movies - select main title and optionally extras
             return self._handle_movie(
-                disc_info, titles, content_pattern, progress_callback,
+                disc_info,
+                titles,
+                content_pattern,
+                progress_callback,
             )
 
         # Unknown content type - use basic strategy
@@ -338,7 +345,9 @@ class ContinuousProcessor:
             else:
                 logger.warning("No episode mapping found, using basic rip")
                 output_files = self._handle_basic_rip(
-                    disc_info, titles, progress_callback,
+                    disc_info,
+                    titles,
+                    progress_callback,
                 )
 
             return output_files
@@ -588,7 +597,10 @@ class ContinuousProcessor:
 
                 logger.info(
                     "Encoding: %.1f%% (speed: %.1fx, fps: %.1f, ETA: %ss)",
-                    percent, speed, fps, eta_seconds,
+                    percent,
+                    speed,
+                    fps,
+                    eta_seconds,
                 )
 
                 # Update item with encoding progress

@@ -104,7 +104,7 @@ class TestCliCommands:
     @patch("spindle.cli.check_uv_requirement")
     @patch("spindle.cli.load_config")
     def test_cli_config_load_error(self, mock_load_config, mock_check_uv):
-        mock_load_config.side_effect = Exception("Config error")
+        mock_load_config.side_effect = ValueError("Config error")
         
         result = self.runner.invoke(cli, ["status"])
         
@@ -126,7 +126,7 @@ class TestCliCommands:
     @patch("spindle.cli.check_uv_requirement")
     @patch("spindle.cli.create_sample_config")
     def test_init_config_error(self, mock_create_config, mock_check_uv):
-        mock_create_config.side_effect = Exception("Creation failed")
+        mock_create_config.side_effect = OSError("Creation failed")
         
         result = self.runner.invoke(cli, ["init-config"])
         

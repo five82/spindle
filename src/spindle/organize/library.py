@@ -24,7 +24,8 @@ class LibraryOrganizer:
             try:
                 self.plex_server = PlexServer(config.plex_url, config.plex_token)
                 logger.info(
-                    "Connected to Plex server: %s", self.plex_server.friendlyName,
+                    "Connected to Plex server: %s",
+                    self.plex_server.friendlyName,
                 )
             except Exception as e:
                 logger.warning("Failed to connect to Plex server: %s", e)

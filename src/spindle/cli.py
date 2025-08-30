@@ -58,9 +58,14 @@ def check_uv_requirement() -> None:
         )
 
 
-def setup_logging(*, verbose: bool = False, config: SpindleConfig | None = None) -> None:
+def setup_logging(
+    *, verbose: bool = False, config: SpindleConfig | None = None
+) -> None:
     """Set up logging configuration."""
     level = logging.DEBUG if verbose else logging.INFO
+
+    # Clean up existing handlers first to prevent resource leaks
+    cleanup_logging()
 
     handlers: list[logging.Handler] = [
         RichHandler(console=console, rich_tracebacks=True),
@@ -83,7 +88,17 @@ def setup_logging(*, verbose: bool = False, config: SpindleConfig | None = None)
         format="%(message)s",
         datefmt="[%X]",
         handlers=handlers,
+        force=True,  # Force reconfiguration of root logger
     )
+
+
+def cleanup_logging() -> None:
+    """Clean up logging handlers to prevent ResourceWarnings."""
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+            root_logger.removeHandler(handler)
 
 
 @click.group()
@@ -451,7 +466,9 @@ def queue_list(ctx: click.Context) -> None:
 @click.option("--completed", is_flag=True, help="Only clear completed items")
 @click.option("--failed", is_flag=True, help="Only clear failed items")
 @click.option(
-    "--force", is_flag=True, help="Force clear all items including those in processing",
+    "--force",
+    is_flag=True,
+    help="Force clear all items including those in processing",
 )
 @click.pass_context
 def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) -> None:

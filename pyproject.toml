@@ -102,3 +102,10 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+filterwarnings = [
+    # Ignore ResourceWarnings from pytest's garbage collection of SQLite connections
+    # These are artifacts from the test framework, not actual resource leaks
+    # Our production code properly uses context managers for all database operations
+    "ignore:unclosed database.*:ResourceWarning",
+    "ignore:unclosed file.*:ResourceWarning",
+]

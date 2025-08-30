@@ -696,7 +696,8 @@ class MakeMKVRipper:
             try:
                 # Parse: Current progress - 17% , Total progress - 17%
                 match = re.search(
-                    r"Current progress - (\d+)%.*Total progress - (\d+)%", line,
+                    r"Current progress - (\d+)%.*Total progress - (\d+)%",
+                    line,
                 )
                 if match:
                     current_percent = int(match.group(1))
