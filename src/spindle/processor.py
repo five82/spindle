@@ -10,7 +10,7 @@ from .config import SpindleConfig
 
 if TYPE_CHECKING:
     from .disc.analyzer import ContentPattern
-from .disc.analyzer import IntelligentDiscAnalyzer
+from .disc.analyzer import DiscAnalysisResult, IntelligentDiscAnalyzer
 from .disc.monitor import DiscInfo, DiscMonitor, detect_disc, eject_disc
 from .disc.ripper import MakeMKVRipper
 from .disc.tv_analyzer import TVSeriesDiscAnalyzer
@@ -230,7 +230,7 @@ class ContinuousProcessor:
     def _handle_content_type_with_analysis(
         self,
         disc_info: DiscInfo,
-        analysis_result,  # DiscAnalysisResult from analyzer
+        analysis_result: DiscAnalysisResult,
         progress_callback: Callable | None = None,
     ) -> list:
         """Handle content based on disc analysis result."""

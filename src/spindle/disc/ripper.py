@@ -145,7 +145,7 @@ class MakeMKVRipper:
     def __init__(self, config: SpindleConfig):
         self.config = config
         self.makemkv_con = config.makemkv_con
-        self._last_progress_percent = -1  # Track last reported progress
+        self._last_progress_percent = -1.0  # Track last reported progress
         self._progress_report_threshold = 5  # Only report every 5% change
 
     def scan_disc(self, device: str | None = None) -> list[Title]:
@@ -770,7 +770,7 @@ class MakeMKVRipper:
         logger.info(f"Ripping {title.name} to {output_file}")
 
         # Reset progress tracking for new rip
-        self._last_progress_percent = -1
+        self._last_progress_percent = -1.0
 
         # Configure MakeMKV selection rules based on our config
         selection_rule = self._build_selection_rule()
