@@ -1,35 +1,13 @@
-"""Shared test configuration and fixtures."""
+"""Integration tests combining multiple components."""
 
-import logging
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
-from spindle.cli import cleanup_logging
 from spindle.config import SpindleConfig
-from spindle.disc.ripper import Title, Track
-
-
-@pytest.fixture(scope="function", autouse=True)
-def cleanup_logging_handlers():
-    """Automatically cleanup logging handlers after each test to prevent ResourceWarnings."""
-    yield
-    cleanup_logging()
-
-
-@pytest.fixture(scope="function", autouse=True) 
-def reset_logging():
-    """Reset logging configuration after each test."""
-    yield
-    # Clear all handlers and reset to default
-    root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        handler.close()
-        root_logger.removeHandler(handler)
-    # Reset logging level
-    root_logger.setLevel(logging.WARNING)
+from spindle.disc.ripper import MakeMKVRipper
 
 
 @pytest.fixture
@@ -111,65 +89,44 @@ MSG:1005,0,1,"Operation successfully completed","Operation successfully complete
 """
 
 
-@pytest.fixture
-def sample_titles():
-    """Create sample Title objects for testing."""
-    video_track = Track(
-        track_id="0",
-        track_type="video",
-        codec="MPEG-4 AVC",
-        language="English",
-        duration=8130,  # 2:15:30
-        size=25769803776,
-        title="Main Video",
-    )
+class TestIntegration:
+    """Integration tests combining multiple components."""
 
-    audio_track = Track(
-        track_id="1",
-        track_type="audio",
-        codec="DTS-HD Master Audio",
-        language="English",
-        duration=8130,
-        size=0,
-        title="Main Audio",
-    )
+    @patch("subprocess.run")
+    def test_full_workflow_integration(
+        self,
+        mock_subprocess,
+        mock_config,
+        temp_dirs,
+        sample_makemkv_output,
+    ):
+        """Test complete workflow from scan to rip."""
 
-    commentary_track = Track(
-        track_id="2",
-        track_type="audio",
-        codec="DTS",
-        language="English",
-        duration=8130,
-        size=0,
-        title="Director's Commentary",
-    )
+        # Mock subprocess calls
+        def subprocess_side_effect(*args, **kwargs):
+            cmd = args[0]
+            if "info" in cmd:
+                # Return sample output for disc scan
+                result = Mock()
+                result.returncode = 0
+                result.stdout = sample_makemkv_output
+                return result
+            if "mkv" in cmd:
+                # Simulate ripping process
+                result = Mock()
+                result.returncode = 0
+                # Create output file
+                output_file = temp_dirs["output"] / "Test-Movie-2023.mkv"
+                output_file.write_text("ripped content")
+                return result
+            return Mock(returncode=1)
 
-    subtitle_track = Track(
-        track_id="3",
-        track_type="subtitle",
-        codec="PGS",
-        language="English",
-        duration=0,
-        size=0,
-        title="Full Subtitles",
-    )
+        mock_subprocess.side_effect = subprocess_side_effect
 
-    main_title = Title(
-        title_id="0",
-        duration=8130,  # 2:15:30
-        size=25769803776,
-        chapters=21,
-        tracks=[video_track, audio_track, commentary_track, subtitle_track],
-        name="Test Movie (2023)",
-    )
+        ripper = MakeMKVRipper(mock_config)
+        result = ripper.rip_disc(temp_dirs["output"])
 
-    short_title = Title(
-        title_id="1",
-        duration=343,  # 5:43
-        size=1073741824,
-        chapters=8,
-        tracks=[Track("0", "video", "MPEG-4 AVC", "English", 343, 1073741824)],
-        name="Chapter 01",
-    )
-
-    return [main_title, short_title]
+        assert result.exists()
+        assert result.name == "Test-Movie-2023.mkv"
+        # We expect at least scan + rip calls, but may have additional calls for disc label
+        assert mock_subprocess.call_count >= 2
