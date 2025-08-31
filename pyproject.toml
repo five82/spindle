@@ -22,6 +22,7 @@ dependencies = [
     "plexapi>=4.15.0",
     "sqlite-utils>=3.35.0",
     "python-daemon>=3.0.0",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]

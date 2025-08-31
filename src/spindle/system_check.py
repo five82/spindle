@@ -226,7 +226,9 @@ class SystemDependencyChecker:
         return info
 
     def _log_install_instructions(
-        self, dep: SystemDependency, level: str = "warning"
+        self,
+        dep: SystemDependency,
+        level: str = "warning",
     ) -> None:
         """Log platform-specific installation instructions."""
         log_func = getattr(logger, level)

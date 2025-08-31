@@ -2,9 +2,11 @@
 
 import logging
 import re
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,7 @@ class BDMVMetadataParser:
     def _parse_xml_metadata(self, xml_file: Path) -> DiscMetadata | None:
         """Parse individual XML metadata file."""
         try:
-            tree = ET.parse(xml_file)
+            tree = ElementTree.parse(xml_file)
             root = tree.getroot()
 
             metadata = DiscMetadata()
@@ -107,14 +109,14 @@ class BDMVMetadataParser:
 
             return metadata
 
-        except ET.ParseError as e:
+        except ElementTree.ParseError as e:
             self.logger.warning(f"Failed to parse XML file {xml_file}: {e}")
             return None
         except Exception as e:
             self.logger.warning(f"Unexpected error parsing {xml_file}: {e}")
             return None
 
-    def _extract_upc_ean(self, root: ET.Element) -> str | None:
+    def _extract_upc_ean(self, root: Element) -> str | None:
         """Extract UPC or EAN code from XML element tree."""
         # Common UPC/EAN tag names and patterns
         upc_patterns = [
@@ -146,7 +148,7 @@ class BDMVMetadataParser:
             if "/" in pattern:
                 # Handle nested paths
                 parts = pattern.split("/")
-                element: ET.Element | None = root
+                element: Element | None = root
                 for part in parts:
                     if element is not None:
                         element = element.find(part)
@@ -189,13 +191,17 @@ class BDMVMetadataParser:
 
         return None
 
-    def _extract_text_value(self, root: ET.Element, tag_names: list[str]) -> str | None:
+    def _extract_text_value(
+        self,
+        root: Element,
+        tag_names: list[str],
+    ) -> str | None:
         """Extract text value from first matching tag."""
         for tag_name in tag_names:
             if "/" in tag_name:
                 # Handle nested paths
                 parts = tag_name.split("/")
-                element: ET.Element | None = root
+                element: Element | None = root
                 for part in parts:
                     if element is not None:
                         element = element.find(part)
