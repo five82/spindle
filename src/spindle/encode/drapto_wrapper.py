@@ -277,11 +277,8 @@ class DraptoEncoder:
                 if not line:
                     break
 
-                # Handle both text and binary output
-                if isinstance(line, bytes):
-                    line_str = line.decode("utf-8").strip()
-                else:
-                    line_str = line.strip()
+                # Process text output (subprocess configured with text=True)
+                line_str = line.strip()
                 stdout_lines.append(line_str)
 
                 # Try to parse as JSON progress event

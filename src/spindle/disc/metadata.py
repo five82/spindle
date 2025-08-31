@@ -85,6 +85,10 @@ class BDMVMetadataParser:
             tree = ElementTree.parse(xml_file)
             root = tree.getroot()
 
+            if root is None:
+                self.logger.warning(f"XML file {xml_file} has no root element")
+                return None
+
             metadata = DiscMetadata()
 
             # Search for UPC/EAN in various XML structures

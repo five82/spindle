@@ -272,3 +272,55 @@ The project uses a focused, essential test suite designed to validate user-facin
 4. **Resource cleanup** - Proper subprocess and file handle management
 
 Remember: Always use `uv run` for all commands (e.g., `uv run spindle start`, `uv run pytest`). uv handles virtual environment management automatically.
+
+## Pre-Commit CI Validation
+
+**⚠️ CRITICAL: Always run local CI checks before committing to prevent GitHub Actions failures.**
+
+### Quick CI Check
+
+Use the provided script that mirrors the exact CI pipeline:
+
+```bash
+# Run all CI checks locally (same as GitHub Actions)
+./check-ci.sh
+```
+
+This script runs the exact same checks as `.github/workflows/ci.yml`:
+
+1. **Tests with Coverage**: `pytest tests/ -v --cov=spindle --cov-report=xml --cov-report=term`
+2. **Code Formatting**: `black --check src/`
+3. **Linting**: `ruff check src/`
+4. **Type Checking**: `mypy src/`
+5. **Import Sorting**: `isort --check-only src/`
+6. **Security Scan**: `bandit -r src/ -ll` (warnings continue on error)
+7. **Vulnerability Check**: `pip-audit` (warnings continue on error)
+8. **Package Build**: `uv build` + `twine check dist/*`
+
+### Individual Commands
+
+If you need to run specific checks:
+
+```bash
+# Fix formatting issues
+uv run black src/
+uv run isort src/
+
+# Fix linting issues  
+uv run ruff check src/ --fix
+
+# Check type errors
+uv run mypy src/
+
+# Run tests
+uv run pytest tests/ -v
+```
+
+### Workflow
+
+1. Make code changes
+2. Run `./check-ci.sh` to verify all CI checks pass
+3. Fix any issues reported by the script
+4. Only commit and push when script shows "🎉 All CI checks passed!"
+
+This prevents GitHub Actions CI failures and ensures consistent code quality.

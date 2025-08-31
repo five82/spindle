@@ -190,7 +190,9 @@ class QueueManager:
         for column_name, column_def in columns_to_add:
             try:
                 # Test if column exists by selecting from it
-                conn.execute(f"SELECT {column_name} FROM queue_items LIMIT 1")
+                conn.execute(
+                    f"SELECT {column_name} FROM queue_items LIMIT 1",  # nosec B608
+                )
                 logger.debug("Column %s already exists", column_name)
             except sqlite3.OperationalError as e:
                 if "no such column" in str(e).lower():
@@ -202,7 +204,9 @@ class QueueManager:
 
                     # Verify the column was added
                     try:
-                        conn.execute(f"SELECT {column_name} FROM queue_items LIMIT 1")
+                        conn.execute(
+                            f"SELECT {column_name} FROM queue_items LIMIT 1",  # nosec B608
+                        )
                         logger.debug("Successfully verified column %s", column_name)
                     except sqlite3.OperationalError:
                         msg = f"Failed to add column {column_name}"
@@ -372,7 +376,7 @@ class QueueManager:
                 SELECT * FROM queue_items
                 WHERE status IN ({placeholders})
                 ORDER BY created_at
-            """
+            """  # nosec B608 - placeholders safely constructed from ? chars
             cursor = conn.execute(query, [s.value for s in statuses])
 
             return [self._row_to_item(row) for row in cursor.fetchall()]

@@ -137,9 +137,9 @@ class TestEncodingExecution:
         mock_process = Mock()
         mock_process.poll.return_value = None
         mock_process.stdout.readline.side_effect = [
-            b'{"type": "progress", "percent": 50.0, "fps": 25.0, "eta": "00:10:00"}\n',
-            b'{"type": "complete", "success": true}\n',
-            b'',
+            '{"type": "progress", "percent": 50.0, "fps": 25.0, "eta": "00:10:00"}\n',
+            '{"type": "complete", "success": true}\n',
+            '',
         ]
         mock_process.wait.return_value = 0
         mock_popen.return_value = mock_process
@@ -168,8 +168,8 @@ class TestEncodingExecution:
         mock_process = Mock()
         mock_process.poll.return_value = None
         mock_process.stdout.readline.side_effect = [
-            b'{"type": "error", "message": "encoding failed"}\n',
-            b'',
+            '{"type": "error", "message": "encoding failed"}\n',
+            '',
         ]
         mock_process.wait.return_value = 1
         mock_popen.return_value = mock_process
@@ -250,8 +250,8 @@ class TestEncodingWorkflow:
         mock_process = Mock()
         mock_process.poll.return_value = None
         mock_process.stdout.readline.side_effect = [
-            b'{"type": "progress", "percent": 100.0, "fps": 25.0}\n',
-            b'',
+            '{"type": "progress", "percent": 100.0, "fps": 25.0}\n',
+            '',
         ]
         mock_process.wait.return_value = 0
         mock_popen.return_value = mock_process
