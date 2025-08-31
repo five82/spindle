@@ -2,9 +2,7 @@
 
 import asyncio
 import logging
-import os
 import shutil
-import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -742,75 +740,23 @@ class ContinuousProcessor:
     def _get_disc_path(self, disc_info: DiscInfo) -> Path | None:
         """Get the disc path for metadata parsing."""
         try:
-            # First, try to find if the disc is mounted
-            mount_result = subprocess.run(
-                ["mount"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            for line in mount_result.stdout.splitlines():
-                if disc_info.device in line:
-                    # Parse mount line: "/dev/sr0 on /media/disc type udf (ro,nosuid,nodev)"
-                    parts = line.split(" on ")
-                    if len(parts) >= 2:
-                        mount_point = parts[1].split(" type ")[0]
-                        mount_path = Path(mount_point)
-                        if mount_path.exists():
-                            logger.debug(f"Found mounted disc at: {mount_path}")
-                            return mount_path
-
-            # If not mounted, try common mount points
-            common_mount_points = [
-                f"/media/{os.getenv('USER', 'user')}/disc",
-                "/media/disc",
-                "/mnt/disc",
+            # Check standard automounting locations
+            standard_mount_points = [
                 "/media/cdrom",
-                "/media/bluray",
+                "/media/cdrom0",
             ]
 
-            for mount_point in common_mount_points:
+            for mount_point in standard_mount_points:
                 mount_path = Path(mount_point)
                 if mount_path.exists() and any(mount_path.iterdir()):
                     logger.debug(f"Found disc content at: {mount_path}")
                     return mount_path
 
-            # Try mounting the optical drive using fstab entry (user-mountable)
-            optical_mount_point = f"/media/{os.getenv('USER', 'user')}/optical"
-            optical_mount_path = Path(optical_mount_point)
-
-            try:
-                logger.info(f"Attempting to mount disc at {optical_mount_point}...")
-                mount_result = subprocess.run(
-                    ["mount", disc_info.device],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-
-                if mount_result.returncode == 0:
-                    if optical_mount_path.exists() and any(
-                        optical_mount_path.iterdir(),
-                    ):
-                        logger.info(
-                            f"Successfully mounted disc at: {optical_mount_path}",
-                        )
-                        return optical_mount_path
-                else:
-                    logger.warning(
-                        f"Failed to mount disc via fstab: {mount_result.stderr.strip()}",
-                    )
-
-            except Exception as e:
-                logger.warning(f"Mount attempt failed: {e}")
-
-            logger.info("Could not mount disc - UPC identification will be skipped")
-
-            # If disc is not mounted and udisksctl is not available,
-            # UPC identification cannot be performed
+            logger.info(
+                "Disc not found at standard mount points - UPC identification will be skipped",
+            )
             logger.debug(
-                f"Could not determine disc path for {disc_info.device} - UPC identification disabled",
+                "Ensure your system has automounting configured (desktop) or fstab entry (server)",
             )
             return None
 

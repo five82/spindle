@@ -266,12 +266,15 @@ class SystemDependencyChecker:
         elif dep.name == "MakeMKV":
             log_func("    Note: MakeMKV requires manual installation and license key")
         elif dep.name == "udisks2":
-            log_func("    Note: For automatic disc mounting, add fstab entry:")
             log_func(
-                "      echo '/dev/sr0 /media/$USER/optical udf,iso9660 ro,user,noauto 0 0' | sudo tee -a /etc/fstab",
+                "    Note: For automatic disc mounting on servers, add fstab entry:",
+            )
+            log_func("      sudo mkdir -p /media/cdrom")
+            log_func(
+                "      echo '/dev/sr0 /media/cdrom udf,iso9660 ro,auto 0 0' | sudo tee -a /etc/fstab",
             )
             log_func(
-                "      sudo mkdir -p /media/$USER/optical && sudo chown $USER:$USER /media/$USER/optical",
+                "    Desktop systems: Automounting handled by desktop environment (no fstab needed)",
             )
 
 

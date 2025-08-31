@@ -22,6 +22,18 @@ The project is a Python application using uv package manager with modular compon
 
 **⚠️ CRITICAL: This project REQUIRES uv package manager. Standard pip will NOT work.**
 
+### Disc Mounting Requirements
+
+**Desktop Systems**: Automatic disc mounting is handled by desktop environments (GNOME, KDE, etc.) - no additional configuration needed.
+
+**Server Systems**: Configure automounting via fstab:
+```bash
+sudo mkdir -p /media/cdrom
+echo '/dev/sr0 /media/cdrom udf,iso9660 ro,auto 0 0' | sudo tee -a /etc/fstab
+```
+
+Spindle expects mounted discs at standard locations (`/media/cdrom` or `/media/cdrom0`).
+
 ### Installation & Setup
 
 ```bash
@@ -162,6 +174,7 @@ Queue manager handles schema migrations automatically:
 3. **TMDB API** - Media identification
 4. **Plex API** - Library management
 5. **ntfy.sh** - Notifications
+6. **Automounting** - System-level disc mounting (desktop environment or fstab)
 
 ### File System Structure
 

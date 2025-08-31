@@ -187,35 +187,21 @@ def detect_bluray_vs_dvd(device: str, timeout: int = 10) -> str:
             if "blu-ray" in output or "bdav" in output or "bdmv" in output:
                 return "Blu-ray"
 
-        # Try mounting the disc to check directory structure
-        import os
+        # Check standard automounting locations for directory structure
+        standard_mount_points = [
+            "/media/cdrom",
+            "/media/cdrom0",
+        ]
 
-        username = os.getenv("USER", "user")
-        mount_point = f"/media/{username}/optical"
-
-        # Try to mount the disc
-        mount_result = subprocess.run(
-            ["mount", device],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
-
-        if mount_result.returncode == 0:
-            try:
-                # Check for Blu-ray directory structure
-                mount_path = Path(mount_point)
-                if mount_path.exists():
-                    # Look for BDMV directory (Blu-ray indicator)
-                    if (mount_path / "BDMV").exists():
-                        return "Blu-ray"
-                    # Look for VIDEO_TS directory (DVD indicator)
-                    if (mount_path / "VIDEO_TS").exists():
-                        return "DVD"
-            finally:
-                # Always unmount
-                subprocess.run(["umount", device], capture_output=True, check=False)
+        for mount_point in standard_mount_points:
+            mount_path = Path(mount_point)
+            if mount_path.exists() and any(mount_path.iterdir()):
+                # Look for BDMV directory (Blu-ray indicator)
+                if (mount_path / "BDMV").exists():
+                    return "Blu-ray"
+                # Look for VIDEO_TS directory (DVD indicator)
+                if (mount_path / "VIDEO_TS").exists():
+                    return "DVD"
 
     except Exception as e:
         logger.debug(f"Error detecting Blu-ray vs DVD: {e}")

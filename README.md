@@ -80,20 +80,14 @@ Spindle automatically checks for these on startup and will exit if missing:
 #### Optional Dependencies
 These enhance functionality but are not required to run:
 
-4. **udisks2** - For automatic disc mounting (enables UPC identification)
+4. **Disc Mounting** - For UPC identification (requires mounted discs)
+   
+   **Desktop Systems**: Automatic disc mounting is handled by desktop environments (GNOME, KDE, etc.) - no additional configuration needed.
+   
+   **Server Systems**: Configure automounting via fstab:
    ```bash
-   # Debian/Ubuntu
-   sudo apt install udisks2
-
-   # RHEL/CentOS/Fedora
-   sudo dnf install udisks2
-
-   # Arch Linux
-   sudo pacman -S udisks2
-
-   # Configure user-mountable optical drive
-   echo '/dev/sr0 /media/$USER/optical udf,iso9660 ro,user,noauto 0 0' | sudo tee -a /etc/fstab
-   sudo mkdir -p /media/$USER/optical && sudo chown $USER:$USER /media/$USER/optical
+   sudo mkdir -p /media/cdrom
+   echo '/dev/sr0 /media/cdrom udf,iso9660 ro,auto 0 0' | sudo tee -a /etc/fstab
    ```
 
 5. **eject utility** - For automatic disc ejection
@@ -111,7 +105,7 @@ These enhance functionality but are not required to run:
 
 > **💡 Tip**: Run `spindle start` to see which dependencies are missing with platform-specific install instructions.
 
-> **⚠️ Important**: For UPC identification to work, the optical drive must be configured as user-mountable in `/etc/fstab`. Spindle will automatically detect configuration issues and show the exact commands needed to fix them.
+> **💡 Disc Mounting**: UPC identification requires mounted discs. Desktop systems handle this automatically. Server systems need fstab configuration (see dependency section above).
 
 ### Install Spindle
 
@@ -293,7 +287,7 @@ review_dir/
 - **drapto** - AV1 video encoder (Rust-based)
 
 **Optional** (gracefully disabled if missing):
-- **udisks2** (`udisksctl`) - Auto-mounting for UPC identification
+- **Disc automounting** - For UPC identification (desktop environment or fstab)
 - **eject utility** (`eject`) - Automatic disc ejection
 - **Plex Media Server** - For automatic library imports
 
@@ -315,57 +309,27 @@ For development setup, testing, and contribution guidelines, see [docs/developme
 
 ### UPC Identification Not Working
 
-If you see "Phase 1 SKIPPED: Disc not mounted - UPC identification unavailable":
+If you see "Disc not found at standard mount points - UPC identification will be skipped":
 
-1. **Check dependency status:**
-   ```bash
-   spindle start  # Will show detailed dependency status and fstab configuration commands
-   ```
+1. **Desktop Systems:** Check that your desktop environment is automounting discs (insert disc and verify it appears in file manager)
 
-2. **Configure fstab for user mounting:**
+2. **Server Systems:** Configure automounting via fstab:
    ```bash
-   echo '/dev/sr0 /media/$USER/optical udf,iso9660 ro,user,noauto 0 0' | sudo tee -a /etc/fstab
-   sudo mkdir -p /media/$USER/optical && sudo chown $USER:$USER /media/$USER/optical
+   sudo mkdir -p /media/cdrom
+   echo '/dev/sr0 /media/cdrom udf,iso9660 ro,auto 0 0' | sudo tee -a /etc/fstab
    ```
 
 3. **Verify mounting works:**
    ```bash
-   mount /dev/sr0  # Should mount without sudo
-   umount /dev/sr0  # Clean up
+   # Check if disc is mounted at standard locations
+   ls -la /media/cdrom /media/cdrom0
    ```
 
 ### Content Identification Issues
 
-- **Phase 1 (UPC)**: Requires disc to be mounted - configure fstab for user mounting
-- **Phase 2 (Runtime)**: Requires meaningful disc names - "LOGICAL_VOLUME_ID" won't match anything
+- **Phase 1 (UPC)**: Requires disc to be mounted at standard locations (`/media/cdrom`)
+- **Phase 2 (Runtime)**: Requires meaningful disc names - "LOGICAL_VOLUME_ID" won't match anything  
 - **Phase 3 (Pattern)**: Fallback method - works with any disc but lower accuracy
-
-### Permission Errors
-
-If you see `Phase 1 SKIPPED: Disc not mounted - UPC identification unavailable`, you need to configure user-mountable optical drives:
-
-#### Configure fstab for User Mounting
-
-Add the optical drive to `/etc/fstab` to allow regular users to mount it:
-
-```bash
-# Add fstab entry for user-mountable optical drive
-echo '/dev/sr0 /media/$USER/optical udf,iso9660 ro,user,noauto 0 0' | sudo tee -a /etc/fstab
-
-# Create mount point with correct ownership
-sudo mkdir -p /media/$USER/optical && sudo chown $USER:$USER /media/$USER/optical
-
-# Test that it works
-mount /dev/sr0  # Should mount without sudo
-umount /dev/sr0  # Clean up
-```
-
-#### Troubleshooting
-
-If `mount /dev/sr0` fails:
-1. Check the fstab entry: `grep sr0 /etc/fstab`
-2. Verify mount point exists: `ls -la /media/$USER/optical`
-3. Check disc is detected: `lsblk | grep sr0`
 
 ## Error Handling
 
