@@ -97,6 +97,14 @@ Orchestrates the complete workflow:
 - Real-time progress updates and logging
 - Error handling and recovery
 
+**Disc Ejection Behavior**: Discs are only ejected upon successful completion of ripping. Failed rips do NOT eject the disc, allowing users to retry or investigate the issue without having to reinsert the disc. This provides clear feedback that ejection = success, no ejection = needs attention.
+
+**"Insert and Forget" Workflow**: The combination of disc ejection behavior and ntfy notifications creates an optimal unattended processing experience:
+- **Success**: Disc auto-ejects + notification confirms completion → ready for next disc
+- **Failure**: Disc remains in drive + ntfy alert explains what went wrong → can retry remotely or investigate later
+- Users maintain context about which disc failed without needing to reinsert for retry
+- Remote notifications eliminate the need to manually check status, enabling true "insert and forget" operation
+
 ## Development Workflow
 
 ### Testing
@@ -184,11 +192,38 @@ review_dir/
 
 ## Testing Strategy
 
-1. **Unit Tests** - Individual component testing
-2. **Integration Tests** - Cross-component functionality
-3. **Database Tests** - Queue management and migrations
-4. **Mock External Services** - TMDB, Plex, drapto for testing
-5. **Progress Callback Tests** - Verify JSON progress handling
+**Essential Test Suite (Clean Slate Approach)**
+
+The project uses a focused, essential test suite designed to validate user-facing behavior rather than implementation details:
+
+- **Test-to-Source Ratio**: 0.30:1 (~2,080 test lines vs 6,933 source lines)
+- **7 Focused Files**: Each covering a distinct functional area
+- **95+ Essential Tests**: Concentrated on critical workflow paths
+
+### Test File Structure
+
+1. **test_config.py** (129 lines, 8 tests) - Configuration loading, validation, directory creation
+2. **test_queue.py** (179 lines, 8 tests) - Complete workflow lifecycle (PENDING → COMPLETED)
+3. **test_disc_processing.py** (287 lines, 18 tests) - Disc detection to ripped files workflow
+4. **test_identification.py** (265 lines, 17 tests) - TMDB integration and metadata handling
+5. **test_encoding.py** (225 lines, 15 tests) - drapto wrapper and progress tracking
+6. **test_organization.py** (275 lines, 18 tests) - Library organization and Plex integration
+7. **test_cli.py** (280 lines, 18 tests) - Command-line interface and workflow coordination
+
+### Testing Philosophy
+
+- **User Behavior Focus** - Test what users experience, not internal implementation
+- **Essential Coverage Only** - Critical paths and error conditions, avoiding redundant edge cases
+- **Integration Over Units** - Validate component interactions rather than isolated functions
+- **Mock External Services** - TMDB, Plex, drapto, MakeMKV for testing
+- **Real Database Operations** - Use actual SQLite for queue testing with temp directories
+
+### Test Maintenance
+
+- **Clean Slate Design** - Right-sized from the start, avoiding over-engineering
+- **Focused Scope** - Each test validates specific user-facing functionality
+- **Minimal Redundancy** - No duplicate coverage of the same behavior patterns
+- **Fast Execution** - Essential tests run quickly for rapid development feedback
 
 ## Common Tasks
 

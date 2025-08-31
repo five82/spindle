@@ -25,8 +25,9 @@ from .encode.drapto_wrapper import DraptoEncoder
 from .identify.tmdb import MediaIdentifier
 from .notify.ntfy import NtfyNotifier
 from .organize.library import LibraryOrganizer
-from .processor import ContinuousProcessor
+from .processor import SpindleProcessor
 from .queue.manager import QueueItemStatus, QueueManager
+from .system_check import check_system_dependencies
 
 console = Console()
 
@@ -129,6 +130,101 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
         sys.exit(1)
 
 
+@cli.group()
+@click.pass_context
+def config_cmd(ctx: click.Context) -> None:
+    """Configuration management commands."""
+    pass
+
+
+@config_cmd.command("show")
+@click.pass_context
+def config_show(ctx: click.Context) -> None:
+    """Show current configuration."""
+    config: SpindleConfig = ctx.obj["config"]
+
+    table = Table()
+    table.add_column("Setting")
+    table.add_column("Value")
+
+    # Show key configuration values
+    table.add_row("Library Directory", str(config.library_dir))
+    table.add_row("Staging Directory", str(config.staging_dir))
+    table.add_row("Log Directory", str(config.log_dir))
+    table.add_row("Review Directory", str(config.review_dir))
+    table.add_row("Optical Drive", config.optical_drive)
+    table.add_row("TMDB API Key", "***" if config.tmdb_api_key else "Not configured")
+    table.add_row("Plex URL", config.plex_url or "Not configured")
+    table.add_row("Ntfy Topic", config.ntfy_topic or "Not configured")
+
+    console.print(table)
+
+
+@config_cmd.command("validate")
+@click.pass_context
+def config_validate(ctx: click.Context) -> None:
+    """Validate current configuration."""
+    config: SpindleConfig = ctx.obj["config"]
+
+    console.print("[bold]Configuration Validation[/bold]")
+
+    # Check directories
+    errors = []
+
+    for name, path in [
+        ("Library", config.library_dir),
+        ("Staging", config.staging_dir),
+        ("Log", config.log_dir),
+        ("Review", config.review_dir),
+    ]:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            console.print(f"[green]✓[/green] {name} directory: {path}")
+        except Exception as e:
+            console.print(f"[red]✗[/red] {name} directory: {e}")
+            errors.append(f"{name} directory: {e}")
+
+    # Check required settings
+    if not config.tmdb_api_key:
+        console.print("[red]✗[/red] TMDB API key not configured")
+        errors.append("TMDB API key not configured")
+    else:
+        console.print("[green]✓[/green] TMDB API key configured")
+
+    # Check optical drive
+    if Path(config.optical_drive).exists():
+        console.print(f"[green]✓[/green] Optical drive: {config.optical_drive}")
+    else:
+        console.print(
+            f"[yellow]⚠[/yellow] Optical drive not found: {config.optical_drive}"
+        )
+
+    if errors:
+        console.print(f"\n[red]Found {len(errors)} configuration errors[/red]")
+        sys.exit(1)
+    else:
+        console.print("\n[green]Configuration is valid[/green]")
+
+
+@config_cmd.command("init")
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(path_type=Path),
+    default=Path.home() / ".config" / "spindle" / "config.toml",
+    help="Path for the configuration file",
+)
+def config_init(path: Path) -> None:
+    """Create a sample configuration file."""
+    try:
+        create_sample_config(path)
+        console.print(f"[green]Created sample configuration at {path}[/green]")
+        console.print("Please edit the configuration file with your settings.")
+    except OSError as e:
+        console.print(f"[red]Error creating configuration: {e}[/red]")
+        sys.exit(1)
+
+
 @cli.command()
 @click.option(
     "--path",
@@ -138,7 +234,7 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
     help="Path for the configuration file",
 )
 def init_config(path: Path) -> None:
-    """Create a sample configuration file."""
+    """Create a sample configuration file (deprecated - use 'config init')."""
     try:
         create_sample_config(path)
         console.print(f"[green]Created sample configuration at {path}[/green]")
@@ -218,6 +314,10 @@ def start(ctx: click.Context, daemon: bool, foreground: bool) -> None:
     """Start continuous processing mode - auto-rip discs and process queue."""
     config: SpindleConfig = ctx.obj["config"]
 
+    # Check system dependencies before starting - validate required only
+    console.print("Checking system dependencies...")
+    check_system_dependencies(validate_required=True)
+
     # Default to daemon mode unless explicitly foreground
     # Exception: if running as systemd service, always run in foreground
     is_systemd = os.getenv("INVOCATION_ID") is not None
@@ -284,7 +384,7 @@ def start_daemon(config: SpindleConfig) -> None:
 
     def run_daemon() -> None:
         setup_daemon_logging()
-        processor = ContinuousProcessor(config)
+        processor = SpindleProcessor(config)
 
         def signal_handler(signum: int, frame: object) -> None:
             logger = logging.getLogger(__name__)
@@ -325,7 +425,7 @@ def start_foreground(config: SpindleConfig) -> None:
     console.print("Insert discs to begin automatic ripping and processing")
     console.print("Press Ctrl+C to stop")
 
-    processor = ContinuousProcessor(config)
+    processor = SpindleProcessor(config)
 
     def signal_handler(signum: int, frame: object) -> None:
         console.print("\n[yellow]Stopping Spindle processor...[/yellow]")
@@ -428,7 +528,41 @@ def add_file(ctx: click.Context, file_path: Path) -> None:
     console.print(f"[green]Added to queue: {item}[/green]")
 
 
-@cli.command("queue-list")
+@cli.group()
+@click.pass_context
+def queue(ctx: click.Context) -> None:
+    """Queue management commands."""
+    pass
+
+
+@queue.command("status")
+@click.pass_context
+def queue_status(ctx: click.Context) -> None:
+    """Show queue status information."""
+    config: SpindleConfig = ctx.obj["config"]
+    queue_manager = QueueManager(config)
+    stats = queue_manager.get_queue_stats()
+
+    if not stats:
+        console.print("Queue is empty")
+    else:
+        table = Table()
+        table.add_column("Status")
+        table.add_column("Count", justify="right")
+
+        for status, count in stats.items():
+            if hasattr(status, "value"):
+                # Enum object
+                status_str = status.value.replace("_", " ").title()
+            else:
+                # String key
+                status_str = status.replace("_", " ").title()
+            table.add_row(status_str, str(count))
+
+        console.print(table)
+
+
+@queue.command("list")
 @click.pass_context
 def queue_list(ctx: click.Context) -> None:
     """List all items in the queue."""
@@ -464,7 +598,7 @@ def queue_list(ctx: click.Context) -> None:
     console.print(table)
 
 
-@cli.command("queue-clear")
+@queue.command("clear")
 @click.option("--completed", is_flag=True, help="Only clear completed items")
 @click.option("--failed", is_flag=True, help="Only clear failed items")
 @click.option(
@@ -503,6 +637,59 @@ def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) 
             console.print(
                 "[yellow]Wait for processing items to complete or use --force to clear all items[/yellow]",
             )
+
+
+@queue.command("retry")
+@click.argument("item_id", type=int)
+@click.pass_context
+def queue_retry(ctx: click.Context, item_id: int) -> None:
+    """Retry a failed queue item."""
+    config: SpindleConfig = ctx.obj["config"]
+    queue_manager = QueueManager(config)
+
+    try:
+        item = queue_manager.get_item_by_id(item_id)
+        if not item:
+            console.print(f"[red]Item {item_id} not found[/red]")
+            return
+
+        if item.status != QueueItemStatus.FAILED:
+            console.print(f"[yellow]Item {item_id} is not in failed state[/yellow]")
+            return
+
+        # Reset to pending for retry
+        item.status = QueueItemStatus.PENDING
+        item.error_message = None
+        queue_manager.update_item(item)
+
+        console.print(f"[green]Item {item_id} reset for retry[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Error retrying item: {e}[/red]")
+
+
+# Keep the old commands for backwards compatibility
+@cli.command("queue-list")
+@click.pass_context
+def queue_list_old(ctx: click.Context) -> None:
+    """List all items in the queue (deprecated - use 'queue list')."""
+    ctx.forward(queue_list)
+
+
+@cli.command("queue-clear")
+@click.option("--completed", is_flag=True, help="Only clear completed items")
+@click.option("--failed", is_flag=True, help="Only clear failed items")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Force clear all items including those in processing",
+)
+@click.pass_context
+def queue_clear_old(
+    ctx: click.Context, completed: bool, failed: bool, force: bool
+) -> None:
+    """Clear items from the queue (deprecated - use 'queue clear')."""
+    ctx.forward(queue_clear, completed=completed, failed=failed, force=force)
 
 
 @cli.command("queue-health")
@@ -704,6 +891,94 @@ async def process_queue_manual(config: SpindleConfig) -> None:
     console.print(
         f"\n[green]Queue processing complete: {processed} processed, {failed} failed[/green]",
     )
+
+
+# CLI utility functions
+def format_duration(seconds: int) -> str:
+    """Format duration in seconds to human readable format."""
+    if seconds < 60:
+        return f"0:00:{seconds:02d}"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        secs = seconds % 60
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+
+
+def format_file_size(size_bytes: int) -> str:
+    """Format file size in bytes to human readable format."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+
+
+def get_status_color(status) -> str:
+    """Get color code for status display."""
+    status_colors = {
+        "pending": "yellow",
+        "processing": "blue",
+        "completed": "green",
+        "failed": "red",
+        "ripping": "blue",
+        "ripped": "green",
+        "identifying": "blue",
+        "identified": "green",
+        "encoding": "blue",
+        "encoded": "green",
+        "organizing": "blue",
+        "review": "yellow",
+    }
+
+    # Handle enum objects
+    if hasattr(status, "value"):
+        status_str = status.value
+    else:
+        status_str = str(status)
+
+    return status_colors.get(status_str.lower(), "white")
+
+
+def format_table_data(data: list[dict], columns: list[str]) -> Table:
+    """Format data into a rich table."""
+    table = Table()
+
+    for column in columns:
+        table.add_column(column.title())
+
+    for row in data:
+        table.add_row(*[str(row.get(col, "")) for col in columns])
+
+    return table
+
+
+def format_queue_table(queue_items: list) -> Table:
+    """Format queue items into a table."""
+    table = Table()
+    table.add_column("ID", justify="right")
+    table.add_column("Title")
+    table.add_column("Status")
+    table.add_column("Created")
+
+    for item in queue_items:
+        title = item.disc_title or (
+            item.source_path.name if item.source_path else "Unknown"
+        )
+        if item.media_info:
+            title = str(item.media_info)
+
+        table.add_row(
+            str(item.item_id),
+            title,
+            item.status.value.title(),
+            item.created_at.strftime("%Y-%m-%d %H:%M"),
+        )
+
+    return table
 
 
 def main() -> None:

@@ -54,6 +54,11 @@ class DraptoEncoder:
         self.config = config
         self.drapto_binary = config.drapto_binary
 
+    @property
+    def quality(self) -> int:
+        """Get the drapto quality setting for HD content."""
+        return self.config.drapto_quality_hd
+
     def encode_file(
         self,
         input_file: Path,
@@ -62,7 +67,17 @@ class DraptoEncoder:
     ) -> EncodeResult:
         """Encode a single video file using drapto."""
 
-        if not input_file.exists():
+        try:
+            input_exists = input_file.exists()
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to check if input file exists {input_file}: {e}")
+            return EncodeResult(
+                success=False,
+                input_file=input_file,
+                error_message=f"Failed to access input file: {e}",
+            )
+
+        if not input_exists:
             return EncodeResult(
                 success=False,
                 input_file=input_file,
@@ -70,10 +85,26 @@ class DraptoEncoder:
             )
 
         # Ensure output directory exists
-        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to create output directory {output_dir}: {e}")
+            return EncodeResult(
+                success=False,
+                input_file=input_file,
+                error_message=f"Failed to create output directory: {e}",
+            )
 
         # Get input file size
-        input_size = input_file.stat().st_size
+        try:
+            input_size = input_file.stat().st_size
+        except (OSError, FileNotFoundError) as e:
+            logger.error(f"Failed to get input file size for {input_file}: {e}")
+            return EncodeResult(
+                success=False,
+                input_file=input_file,
+                error_message=f"Failed to access input file: {e}",
+            )
 
         logger.info(f"Starting encode of {input_file.name}")
 
@@ -158,6 +189,21 @@ class DraptoEncoder:
                 input_size=input_size,
             )
 
+    def build_command(self, input_file: Path, output_file: Path) -> list[str]:
+        """Build drapto command for single file output."""
+        cmd = [
+            self.config.drapto_binary,
+            "encode",
+            "-i",
+            str(input_file),
+            "-o",
+            str(output_file),
+            "--quality",
+            str(self.quality),
+            "--json-progress",
+        ]
+        return cmd
+
     def _build_drapto_command(self, input_file: Path, output_dir: Path) -> list[str]:
         """Build the drapto command line."""
         cmd = [
@@ -232,20 +278,24 @@ class DraptoEncoder:
                 if not line:
                     break
 
-                line = line.strip()
-                stdout_lines.append(line)
+                # Decode bytes to string and strip
+                line_str = line.decode("utf-8").strip()
+                stdout_lines.append(line_str)
 
                 # Try to parse as JSON progress event
-                if line.startswith("{") and progress_callback:
+                if line_str.startswith("{") and progress_callback:
                     try:
-                        progress_data = json.loads(line)
+                        progress_data = json.loads(line_str)
                         if isinstance(progress_data, dict) and "type" in progress_data:
                             progress_callback(progress_data)
                     except json.JSONDecodeError as e:
                         # Line starts with { but isn't valid JSON - could be malformed progress
                         logger.debug(
-                            f"Malformed JSON progress line from drapto: {line[:100]}... Error: {e}",
+                            f"Malformed JSON progress line from drapto: {line_str[:100]}... Error: {e}",
                         )
+                    except Exception as e:
+                        # Progress callback raised an exception - log but continue processing
+                        logger.warning(f"Progress callback failed: {e}")
 
         # Start reading output in background thread
         output_thread = threading.Thread(target=read_output)

@@ -493,7 +493,7 @@ class MakeMKVRipper:
         content_type = content_pattern.type
         valid_titles = []
 
-        if content_type in [ContentType.MOVIE, ContentType.ANIMATED_MOVIE]:
+        if content_type == ContentType.MOVIE:
             # Movies: Use movie_min_duration, allow extras if configured
             min_duration = self.config.movie_min_duration * 60  # Convert to seconds
             max_extra_duration = (
@@ -509,34 +509,24 @@ class MakeMKVRipper:
                 ):
                     valid_titles.append(title)
 
-        elif content_type in [ContentType.TV_SERIES, ContentType.ANIMATED_SERIES]:
-            # TV Series: Use episode duration range
-            min_duration = self.config.tv_episode_min_duration * 60
-            max_duration = self.config.tv_episode_max_duration * 60
+        elif content_type == ContentType.TV_SERIES:
+            # TV Series: Handle both regular episodes and cartoon shorts
+            # Use broader range to accommodate both TV episodes and cartoon shorts
+            if self.config.allow_short_content:
+                # Allow cartoon shorts (2-15 min) and regular episodes (15-90 min)
+                min_duration = self.config.cartoon_min_duration * 60
+                max_duration = max(
+                    self.config.cartoon_max_duration * 60,
+                    self.config.tv_episode_max_duration * 60,
+                )
+            else:
+                # Standard TV episode duration only
+                min_duration = self.config.tv_episode_min_duration * 60
+                max_duration = self.config.tv_episode_max_duration * 60
 
             valid_titles = [
                 t for t in titles if min_duration <= t.duration <= max_duration
             ]
-
-        elif content_type in [
-            ContentType.CARTOON_COLLECTION,
-            ContentType.CARTOON_SHORTS,
-        ]:
-            # Cartoons: Use cartoon duration range
-            if self.config.allow_short_content:
-                min_duration = self.config.cartoon_min_duration * 60
-                max_duration = self.config.cartoon_max_duration * 60
-
-                valid_titles = [
-                    t for t in titles if min_duration <= t.duration <= max_duration
-                ]
-            else:
-                # Fall back to TV episode duration if short content not allowed
-                min_duration = self.config.tv_episode_min_duration * 60
-                max_duration = self.config.tv_episode_max_duration * 60
-                valid_titles = [
-                    t for t in titles if min_duration <= t.duration <= max_duration
-                ]
 
         else:
             # Unknown content type: use most permissive settings
@@ -672,6 +662,11 @@ class MakeMKVRipper:
                             return None
 
                         percentage = (total / maximum) * 100
+
+                        # Filter out early 100% reports - these are often initialization artifacts
+                        # Only allow 100% if we've seen some incremental progress first
+                        if percentage == 100.0 and self._last_progress_percent < 50.0:
+                            return None
 
                         # Filter out duplicate/minor updates
                         # Only report if progress changed significantly and moving forward

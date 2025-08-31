@@ -23,6 +23,9 @@ class SpindleConfig(BaseModel):
     tmdb_api_key: str | None = None
     tmdb_language: str = Field(default="en-US")
 
+    # UPC Lookup (optional - for enhanced disc identification)
+    upcitemdb_api_key: str | None = None
+
     # Drapto integration
     drapto_quality_sd: int = Field(default=23)
     drapto_quality_hd: int = Field(default=25)
@@ -124,7 +127,12 @@ class SpindleConfig(BaseModel):
 
     def ensure_directories(self) -> None:
         """Create required directories if they don't exist."""
-        for dir_path in [self.staging_dir, self.log_dir, self.review_dir]:
+        for dir_path in [
+            self.staging_dir,
+            self.library_dir,
+            self.log_dir,
+            self.review_dir,
+        ]:
             dir_path.mkdir(parents=True, exist_ok=True)
             # No ownership changes needed - user owns their own directories
 
@@ -163,6 +171,7 @@ def create_sample_config(path: Path) -> None:
 
 # TMDB API (required for media identification)
 tmdb_api_key = "your_tmdb_api_key_here"           # Get from themoviedb.org/settings/api
+# upcitemdb_api_key = "your_upc_api_key_here"     # Optional: Get from devs.upcitemdb.com for enhanced UPC lookups
 
 # Directory paths - CRITICAL: Update these for your system
 library_dir = "~/your-media-library"              # MUST EXIST: Your final media library directory

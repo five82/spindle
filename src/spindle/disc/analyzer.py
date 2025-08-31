@@ -1,14 +1,17 @@
 """Intelligent disc content analysis and classification."""
 
 import logging
+import re
 import statistics
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from spindle.config import SpindleConfig
-from spindle.identify.tmdb import TMDBClient
+from spindle.identify.tmdb import MediaIdentifier, TMDBClient
 
+from .metadata import BDMVMetadataParser
 from .monitor import DiscInfo
 from .ripper import Title
 
@@ -16,18 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 class ContentType(Enum):
-    """Types of content that can be on a disc."""
+    """Types of content that can be on a disc - aligned with Plex classification."""
 
     MOVIE = "movie"
     TV_SERIES = "tv_series"
-    CARTOON_COLLECTION = "cartoon_collection"
-    CARTOON_SHORTS = "cartoon_shorts"
-    CARTOON_SERIES = "cartoon_series"
-    ANIMATED_MOVIE = "animated_movie"
-    ANIMATED_SERIES = "animated_series"
-    DOCUMENTARY = "documentary"
-    MUSIC_VIDEO = "music_video"
-    CONCERT = "concert"
     UNKNOWN = "unknown"
 
 
@@ -84,28 +79,117 @@ class IntelligentDiscAnalyzer:
     def __init__(self, config: SpindleConfig):
         self.config = config
         self.tmdb = TMDBClient(config)
+        self.media_identifier = MediaIdentifier(config)
+        self.metadata_parser = BDMVMetadataParser()
+        # Cache for TMDB search results to avoid redundant API calls
+        self._tmdb_search_cache: dict[str, dict[str, list[dict]]] = {}
 
     async def analyze_disc(
         self,
         disc_info: DiscInfo,
         titles: list[Title],
+        disc_path: Path | None = None,
     ) -> DiscAnalysisResult:
-        """Complete disc analysis workflow."""
+        """Complete disc analysis workflow with multi-tier identification."""
 
         logger.info(f"Analyzing disc: {disc_info}")
+        logger.info("Starting multi-tier content identification process...")
 
-        # Phase 1: Multi-API content identification
-        content_candidates = await self.identify_content_multi_api(
-            disc_label=disc_info.label,
-            titles=titles,
-            disc_type=disc_info.disc_type,
-        )
+        # Phase 1: Try UPC/barcode identification (highest confidence)
+        identified_media = None
+        if disc_path:
+            logger.info(
+                "Phase 1: Attempting UPC/barcode identification (highest confidence)",
+            )
+            identified_media = await self.try_upc_identification(disc_path)
+            if identified_media:
+                logger.info(
+                    f"✓ Phase 1 SUCCESS: Identified as '{identified_media.title}' ({identified_media.year}) via UPC lookup",
+                )
+            else:
+                logger.info("✗ Phase 1 FAILED: UPC identification unsuccessful")
+        else:
+            logger.info(
+                "Phase 1 SKIPPED: Disc not mounted - UPC identification unavailable",
+            )
 
-        # Phase 2: Pattern analysis fallback
-        if not content_candidates:
-            content_candidates = self.analyze_title_patterns(titles, disc_info.label)
+        if not identified_media:
+            # Phase 2: Try runtime-verified search (high confidence)
+            main_title = self.get_main_title(titles)
+            if main_title:
+                # Check if disc label is too generic to search
+                if self.is_generic_disc_label(disc_info.label):
+                    logger.info(
+                        f"Phase 2 SKIPPED: Disc label '{disc_info.label}' is too generic for meaningful search",
+                    )
+                else:
+                    logger.info(
+                        "Phase 2: Attempting runtime-verified search (high confidence)",
+                    )
+                    logger.info(
+                        f"Searching for '{disc_info.label}' with runtime {main_title.duration}",
+                    )
+                    identified_media, search_cache = (
+                        await self.try_runtime_verification(
+                            disc_info.label,
+                            main_title.duration,
+                        )
+                    )
+                    # Cache search results for potential reuse in Phase 3
+                    if search_cache:
+                        cache_key = self.clean_disc_label(disc_info.label)
+                        self._tmdb_search_cache[cache_key] = search_cache
+                    if identified_media:
+                        logger.info(
+                            f"✓ Phase 2 SUCCESS: Identified as '{identified_media.title}' ({identified_media.year}) via runtime verification",
+                        )
+                    else:
+                        logger.info(
+                            "✗ Phase 2 FAILED: No runtime-verified matches found",
+                        )
+            else:
+                logger.info(
+                    "Phase 2 SKIPPED: No main title found for runtime verification",
+                )
 
-        # Phase 3: Intelligent title selection
+        if not identified_media:
+            # Phase 3: Fallback to original multi-API identification
+            if self.is_generic_disc_label(disc_info.label):
+                logger.info(
+                    f"Phase 3 SKIPPED: Disc label '{disc_info.label}' is too generic for API search",
+                )
+                content_candidates = None
+            else:
+                logger.info(
+                    "Phase 3: Attempting pattern analysis fallback (medium confidence)",
+                )
+                content_candidates = await self.identify_content_multi_api(
+                    disc_label=disc_info.label,
+                    titles=titles,
+                    disc_type=disc_info.disc_type,
+                )
+                if content_candidates:
+                    logger.info(
+                        f"✓ Phase 3 SUCCESS: Found match via pattern analysis - {content_candidates.type.value} (confidence: {content_candidates.confidence:.2f})",
+                    )
+                else:
+                    logger.info(
+                        "✗ Phase 3 FAILED: No matches found - content will be marked unidentified",
+                    )
+        else:
+            # Convert identified media to content pattern
+            content_candidates = self.media_info_to_content_pattern(identified_media)
+
+        # Phase 4: Pattern analysis fallback if still no identification
+        if not content_candidates or content_candidates.confidence < 0.5:
+            pattern_analysis = self.analyze_title_patterns(titles, disc_info.label)
+            if (
+                not content_candidates
+                or pattern_analysis.confidence > content_candidates.confidence
+            ):
+                content_candidates = pattern_analysis
+
+        # Phase 5: Intelligent title selection
         selected_titles = await self.select_titles_intelligently(
             titles=titles,
             content_pattern=content_candidates,
@@ -117,7 +201,7 @@ class IntelligentDiscAnalyzer:
             content_type=content_candidates.type,
             confidence=content_candidates.confidence,
             titles_to_rip=selected_titles,
-            metadata=content_candidates,
+            metadata=identified_media or content_candidates,
         )
 
     async def identify_content_multi_api(
@@ -157,11 +241,22 @@ class IntelligentDiscAnalyzer:
         return re.sub(r"\s+", " ", cleaned).strip()
 
     async def query_tmdb(self, label: str) -> dict[str, Any] | None:
-        """Query TMDB for content identification."""
+        """Query TMDB for content identification, using cache if available."""
         try:
-            # Try both movie and TV searches
-            movie_results = await self.tmdb.search_movie(label)
-            tv_results = await self.tmdb.search_tv(label)
+            cache_key = self.clean_disc_label(label)
+            cached_results = self._tmdb_search_cache.get(cache_key)
+
+            if cached_results:
+                logger.info(
+                    f"Using cached TMDB results for '{label}' (avoiding redundant API calls)",
+                )
+                movie_results = cached_results.get("movie", [])
+                tv_results = cached_results.get("tv", [])
+            else:
+                # Make fresh API calls
+                logger.debug(f"Making fresh TMDB API calls for '{label}'")
+                movie_results = await self.tmdb.search_movie(label)
+                tv_results = await self.tmdb.search_tv(label)
 
             # Return the best match
             if movie_results and tv_results:
@@ -201,7 +296,7 @@ class IntelligentDiscAnalyzer:
 
             if "animation" in genres:
                 return ContentPattern(
-                    type=ContentType.ANIMATED_MOVIE,
+                    type=ContentType.MOVIE,
                     confidence=0.9,
                 )
             return ContentPattern(
@@ -220,24 +315,24 @@ class IntelligentDiscAnalyzer:
 
                     if avg_runtime <= 12:
                         return ContentPattern(
-                            type=ContentType.CARTOON_SHORTS,
+                            type=ContentType.TV_SERIES,
                             confidence=0.9,
                             episode_duration=int(avg_runtime * 60),
                         )
                     if avg_runtime <= 25:
                         return ContentPattern(
-                            type=ContentType.CARTOON_SERIES,
+                            type=ContentType.TV_SERIES,
                             confidence=0.9,
                             episode_duration=int(avg_runtime * 60),
                         )
                     return ContentPattern(
-                        type=ContentType.ANIMATED_SERIES,
+                        type=ContentType.TV_SERIES,
                         confidence=0.9,
                         episode_duration=int(avg_runtime * 60),
                     )
 
                 return ContentPattern(
-                    type=ContentType.ANIMATED_SERIES,
+                    type=ContentType.TV_SERIES,
                     confidence=0.8,
                 )
             return ContentPattern(
@@ -260,44 +355,20 @@ class IntelligentDiscAnalyzer:
 
         durations = [t.duration for t in titles]
 
-        # Check for cartoon collection patterns first
-        if self.has_cartoon_collection_pattern(durations, disc_label):
-            return ContentPattern(
-                type=ContentType.CARTOON_COLLECTION,
-                confidence=0.8,
-                episode_count=len([d for d in durations if 3 * 60 <= d <= 15 * 60]),
-                episode_duration=(
-                    int(
-                        statistics.median(
-                            [d for d in durations if 3 * 60 <= d <= 15 * 60],
-                        ),
-                    )
-                    if durations
-                    else 0
-                ),
-            )
-
         # TV Show patterns
         if self.has_consistent_episode_durations(durations):
             # Filter to episode-length titles for analysis
             episode_durations = [d for d in durations if d >= 10 * 60]
-            median_duration = int(statistics.median(episode_durations))
 
-            # Short episodes = likely cartoons
-            if median_duration <= 15 * 60:
+            # Standard TV episodes
+            if episode_durations:
+                median_duration = int(statistics.median(episode_durations))
                 return ContentPattern(
-                    type=ContentType.CARTOON_SHORTS,
-                    confidence=0.7,
+                    type=ContentType.TV_SERIES,
+                    confidence=0.8,
                     episode_count=len(episode_durations),
                     episode_duration=median_duration,
                 )
-            # Standard TV episodes
-            return ContentPattern(
-                type=ContentType.TV_SERIES,
-                confidence=0.8,
-                episode_count=len(episode_durations),
-                episode_duration=median_duration,
-            )
 
         # Movie patterns
         if self.has_single_long_title(durations):
@@ -308,102 +379,7 @@ class IntelligentDiscAnalyzer:
                 extras_count=len([d for d in durations if d < 3600]),
             )
 
-        # Documentary/Special patterns
-        if self.has_documentary_pattern(durations):
-            return ContentPattern(
-                type=ContentType.DOCUMENTARY,
-                confidence=0.7,
-                segments=len(durations),
-            )
-
         return ContentPattern(type=ContentType.UNKNOWN, confidence=0.3)
-
-    def has_cartoon_collection_pattern(
-        self,
-        durations: list[int],
-        disc_label: str,
-    ) -> bool:
-        """Detect cartoon collections like Looney Tunes."""
-
-        # Label indicators
-        cartoon_labels = [
-            # Classic Warner Bros. cartoons
-            "looney tunes",
-            "merrie melodies",
-            "bugs bunny",
-            "daffy duck",
-            "porky pig",
-            "tweety",
-            "sylvester",
-            "pepe le pew",
-            "foghorn leghorn",
-            # MGM/Hanna-Barbera classics
-            "tom and jerry",
-            "tom & jerry",
-            "droopy",
-            # Disney classics
-            "mickey mouse",
-            "donald duck",
-            "goofy",
-            "pluto",
-            "chip and dale",
-            "chip 'n dale",
-            # Other classic studios
-            "betty boop",
-            "popeye",
-            "woody woodpecker",
-            "casper",
-            "felix the cat",
-            # Collection indicators
-            "cartoon",
-            "cartoons",
-            "animation collection",
-            "classic cartoons",
-            "golden age",
-            "theatrical shorts",
-            "animated shorts",
-        ]
-
-        label_indicates_cartoons = any(
-            indicator in disc_label.lower() for indicator in cartoon_labels
-        )
-
-        # Duration patterns: classic theatrical cartoons are typically 3-15 minutes
-        classic_shorts = [d for d in durations if 3 * 60 <= d <= 15 * 60]  # 3-15 min
-        longer_cartoons = [
-            d for d in durations if 15 * 60 < d <= 30 * 60
-        ]  # 15-30 min (some specials)
-
-        # Cartoon collection criteria (multiple patterns):
-
-        # Pattern 1: Classic short cartoon collection (Tom & Jerry, Looney Tunes style)
-        # - 70%+ titles are 3-15 minutes
-        # - At least 4 titles
-        if len(durations) >= 4 and len(classic_shorts) >= len(durations) * 0.7:
-            return True
-
-        # Pattern 2: Label-based detection with fewer titles
-        # - Disc label suggests cartoons
-        # - At least 3 short titles OR mix of short/medium cartoons
-        if label_indicates_cartoons:
-            total_cartoon_length = len(classic_shorts) + len(longer_cartoons)
-            if len(classic_shorts) >= 3 or total_cartoon_length >= len(durations) * 0.6:
-                return True
-
-        # Pattern 3: Very consistent short durations (even without label hints)
-        # - 80%+ are classic short length
-        # - Low duration variance suggests intentional shorts collection
-        if len(durations) >= 6 and len(classic_shorts) >= len(durations) * 0.8:
-            # Check for low variance in the short titles (consistent cartoon length)
-            if len(classic_shorts) > 1:
-                import statistics
-
-                short_variance = statistics.pvariance(classic_shorts)
-                # Low variance suggests consistent cartoon episodes
-                if short_variance < (2 * 60) ** 2:  # Less than 2 min variance
-                    return True
-
-        return False
 
     def has_consistent_episode_durations(self, durations: list[int]) -> bool:
         """Check if durations suggest consistent TV episodes."""
@@ -450,21 +426,8 @@ class IntelligentDiscAnalyzer:
         second_longest = sorted_durations[1]
         ratio = longest / second_longest
 
-        return ratio >= 2.0  # Main feature is at least 2x longer than extras
-
-    def has_documentary_pattern(self, durations: list[int]) -> bool:
-        """Check if pattern suggests documentary content."""
-
-        # Documentary patterns are harder to detect
-        # For now, use broad criteria
-
-        if len(durations) < 2:
-            return False
-
-        # Multiple medium-length segments
-        medium_segments = [d for d in durations if 20 * 60 <= d <= 90 * 60]
-
-        return len(medium_segments) >= 2
+        # Main feature should be at least 2.5x longer than extras for clear movie pattern
+        return ratio >= 2.5
 
     async def select_titles_intelligently(
         self,
@@ -476,22 +439,12 @@ class IntelligentDiscAnalyzer:
 
         content_type = content_pattern.type
 
-        if content_type in [ContentType.CARTOON_COLLECTION, ContentType.CARTOON_SHORTS]:
-            # Rip all cartoon shorts
-            return [t for t in titles if 2 * 60 <= t.duration <= 20 * 60]
-
-        if content_type in [
-            ContentType.TV_SERIES,
-            ContentType.CARTOON_SERIES,
-            ContentType.ANIMATED_SERIES,
-        ]:
+        if content_type == ContentType.TV_SERIES:
             return self.select_tv_episode_titles(titles, content_pattern)
 
-        if content_type in [ContentType.MOVIE, ContentType.ANIMATED_MOVIE]:
+        if content_type == ContentType.MOVIE:
             return self.select_movie_titles(titles, content_pattern)
 
-        if content_type == ContentType.DOCUMENTARY:
-            return self.select_documentary_titles(titles, content_pattern)
         # Unknown - use intelligent heuristics
         return self.select_titles_by_heuristics(titles)
 
@@ -512,11 +465,13 @@ class IntelligentDiscAnalyzer:
                 if abs(title.duration - episode_duration) <= tolerance
             ]
 
-        # Fallback: select titles in reasonable episode range
+        # Fallback: select titles in reasonable episode range (includes cartoon shorts)
         return [
             title
             for title in titles
-            if 15 * 60 <= title.duration <= 90 * 60  # 15-90 minutes
+            if 2 * 60
+            <= title.duration
+            <= 90 * 60  # 2-90 minutes (includes cartoon shorts)
         ]
 
     def select_movie_titles(
@@ -559,18 +514,6 @@ class IntelligentDiscAnalyzer:
 
         return selected_titles
 
-    def select_documentary_titles(
-        self,
-        titles: list[Title],
-        content_pattern: ContentPattern,
-    ) -> list[Title]:
-        """Select documentary segments."""
-
-        # Select medium-length segments (likely documentary parts)
-        return [
-            t for t in titles if 20 * 60 <= t.duration <= 120 * 60  # 20-120 minutes
-        ]
-
     def select_titles_by_heuristics(self, titles: list[Title]) -> list[Title]:
         """Fallback selection using basic heuristics."""
 
@@ -596,3 +539,122 @@ class IntelligentDiscAnalyzer:
 
         # Otherwise return all reasonable-length titles
         return filtered
+
+    async def try_upc_identification(self, disc_path: Path) -> Any | None:
+        """Try to identify content using UPC/barcode from BDMV metadata."""
+        try:
+            metadata = self.metadata_parser.parse_disc_metadata(disc_path)
+            if not metadata:
+                logger.info("No BDMV metadata structure found on disc")
+                return None
+
+            upc_code = metadata.upc or metadata.ean
+            if not upc_code:
+                logger.info("BDMV metadata found but no UPC/EAN codes present")
+                return None
+
+            logger.info(
+                f"Found UPC/EAN: {upc_code} - looking up product information...",
+            )
+            identified_media = await self.media_identifier.identify_from_upc(upc_code)
+
+            if not identified_media:
+                logger.info(
+                    f"UPC {upc_code} lookup failed - either no product found or not a media product",
+                )
+
+            return identified_media
+
+        except Exception as e:
+            logger.warning(f"UPC identification failed with error: {e}")
+            return None
+
+    async def try_runtime_verification(
+        self,
+        disc_label: str,
+        main_title_duration: int,
+    ) -> tuple[Any | None, dict[str, list[dict]] | None]:
+        """Try to identify content using disc label and runtime verification."""
+        try:
+            return await self.media_identifier.identify_with_runtime_verification(
+                disc_title=disc_label,
+                main_title_runtime_seconds=main_title_duration,
+            )
+        except Exception as e:
+            logger.warning(f"Runtime verification failed: {e}")
+            return None, None
+
+    def get_main_title(self, titles: list[Title]) -> Title | None:
+        """Get the main title (longest duration) from the titles list."""
+        if not titles:
+            return None
+        return max(titles, key=lambda t: t.duration)
+
+    def is_generic_disc_label(self, label: str) -> bool:
+        """Check if disc label is too generic for meaningful TMDB search."""
+        if not label:
+            return True
+
+        label_lower = label.lower().strip()
+
+        # Common generic disc labels that won't match anything in TMDB
+        generic_labels = [
+            "logical_volume_id",
+            "untitled",
+            "no_name",
+            "unnamed",
+            "disc",
+            "disk",
+            "dvd",
+            "bluray",
+            "blu-ray",
+            "bd",
+            "volume",
+            "data",
+            "audio_ts",
+            "video_ts",
+            "bdmv",
+            "dvd_video",
+            "movie",
+            "film",
+            "title",
+            "content",
+            "media",
+            "unknown",
+            "",
+        ]
+
+        # Check exact matches
+        if label_lower in generic_labels:
+            return True
+
+        # Check patterns that are clearly generic
+        # Single letters or numbers
+        if len(label_lower) <= 2:
+            return True
+
+        # All digits
+        if label_lower.isdigit():
+            return True
+
+        # Common timestamp/ID patterns
+        if re.match(r"^(disc|disk|volume)\d+$", label_lower):
+            return True
+
+        # Date patterns (YYYY-MM-DD, YYYYMMDD, etc.)
+        if re.match(r"^\d{4}[-_]?\d{2}[-_]?\d{2}$", label_lower):
+            return True
+
+        return False
+
+    def media_info_to_content_pattern(self, media_info: Any) -> ContentPattern:
+        """Convert MediaInfo to ContentPattern."""
+        # Check if this is a MediaInfo object (from tmdb.py)
+        if hasattr(media_info, "is_movie") and hasattr(media_info, "is_tv_show"):
+            if media_info.is_movie:
+                return ContentPattern(type=ContentType.MOVIE, confidence=0.95)
+            if media_info.is_tv_show:
+                return ContentPattern(type=ContentType.TV_SERIES, confidence=0.95)
+
+        # Fallback for unknown media info types
+        return ContentPattern(type=ContentType.UNKNOWN, confidence=0.3)

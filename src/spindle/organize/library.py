@@ -17,6 +17,9 @@ class LibraryOrganizer:
 
     def __init__(self, config: SpindleConfig):
         self.config = config
+        self.library_dir = config.library_dir
+        self.plex_url = config.plex_url
+        self.plex_token = config.plex_token
         self.plex_server: PlexServer | None = None
 
         # Initialize Plex connection if configured
@@ -30,6 +33,61 @@ class LibraryOrganizer:
             except Exception as e:
                 logger.warning("Failed to connect to Plex server: %s", e)
                 self.plex_server = None
+
+    def organize_file(self, video_file: Path, media_info: MediaInfo) -> Path:
+        """Organize a video file into the library structure (alias for organize_media)."""
+        return self.organize_media(video_file, media_info)
+
+    def generate_filename(self, media_info: MediaInfo) -> str:
+        """Generate filename for media (wrapper for MediaInfo.get_filename)."""
+        return media_info.get_filename()
+
+    def get_target_directory(self, media_info: MediaInfo) -> Path:
+        """Get target directory for media (wrapper for MediaInfo.get_library_path)."""
+        return media_info.get_library_path(
+            self.config.library_dir,
+            self.config.movies_dir,
+            self.config.tv_dir,
+        )
+
+    def sanitize_filename(self, filename: str) -> str:
+        """Sanitize filename for filesystem compatibility."""
+        import re
+
+        # Remove or replace problematic characters
+        safe_name = re.sub(r'[<>:"/\\|?*]', "_", filename)
+        # Remove control characters
+        safe_name = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", safe_name)
+        # Trim whitespace and dots
+        safe_name = safe_name.strip(" .")
+        return safe_name
+
+    def trigger_library_scan(self) -> bool:
+        """Trigger a general Plex library scan."""
+        if not self.plex_server:
+            logger.warning("Plex server not configured, skipping library scan")
+            return False
+
+        try:
+            # Scan all libraries
+            for section in self.plex_server.library.sections():
+                section.update()
+            logger.info("Triggered Plex library scan for all sections")
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to trigger Plex library scan: {e}")
+            return False
+
+    def verify_connection(self) -> bool:
+        """Verify connection (alias for verify_plex_connection)."""
+        return self.verify_plex_connection()
+
+    def ensure_library_structure(self) -> None:
+        """Ensure basic library directory structure exists."""
+        # Create base directories
+        self.config.library_dir.mkdir(parents=True, exist_ok=True)
+        (self.config.library_dir / self.config.movies_dir).mkdir(exist_ok=True)
+        (self.config.library_dir / self.config.tv_dir).mkdir(exist_ok=True)
 
     def organize_media(self, video_file: Path, media_info: MediaInfo) -> Path:
         """Organize a video file into the library structure."""

@@ -2,8 +2,12 @@
 
 import asyncio
 import logging
+import os
+import shutil
+import subprocess
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .config import SpindleConfig
@@ -38,6 +42,9 @@ class ContinuousProcessor:
         # Enhanced analysis components
         self.disc_analyzer = IntelligentDiscAnalyzer(config)
         self.tv_analyzer = TVSeriesDiscAnalyzer(config)
+
+        # Check if udisksctl is available for disc mounting
+        self.udisks_available = shutil.which("udisksctl") is not None
 
         self.disc_monitor: DiscMonitor | None = None
         self.processing_task: asyncio.Task | None = None
@@ -107,8 +114,13 @@ class ContinuousProcessor:
             item = self.queue_manager.add_disc(disc_info.label)
             logger.info("Added to queue: %s", item)
 
-            # Start ripping immediately (run async method in event loop)
-            asyncio.run(self._rip_disc(item, disc_info))
+            # Start ripping immediately (schedule on existing event loop)
+            loop = asyncio.get_event_loop()
+            task = loop.create_task(self._rip_disc(item, disc_info))
+            # Store reference to prevent "never awaited" warnings and handle exceptions
+            task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
 
         except Exception as e:
             logger.exception("Error handling disc detection")
@@ -135,7 +147,14 @@ class ContinuousProcessor:
 
             # Analyze disc content using TMDB and intelligent pattern analysis
             logger.info("Running intelligent disc analysis with TMDB lookup...")
-            analysis_result = await self.disc_analyzer.analyze_disc(disc_info, titles)
+
+            # Try to determine disc mount path or use device path for metadata parsing
+            disc_path = self._get_disc_path(disc_info)
+            analysis_result = await self.disc_analyzer.analyze_disc(
+                disc_info,
+                titles,
+                disc_path,
+            )
 
             logger.info(
                 "Analysis complete - Content type: %s (confidence: %.2f)",
@@ -159,16 +178,21 @@ class ContinuousProcessor:
             self.queue_manager.update_item(item)
 
             # Create progress callback for ripping
+            last_logged_percent = -1
+
             def ripping_progress_callback(progress_data: dict) -> None:
                 """Handle progress updates from MakeMKV ripping."""
+                nonlocal last_logged_percent
                 if progress_data.get("type") == "ripping_progress":
-                    progress_data.get("stage", "Ripping")
+                    stage = progress_data.get("stage", "Ripping")
                     percentage = progress_data.get("percentage", 0)
-                    progress_data.get("current", 0)
-                    progress_data.get("maximum", 1)
+                    current = progress_data.get("current", 0)
+                    maximum = progress_data.get("maximum", 1)
 
-                    # Only log significant progress updates
-                    logger.info(f"Ripping progress: {percentage:.0f}%")
+                    # Only log if percentage changed significantly
+                    if abs(percentage - last_logged_percent) >= 5:
+                        logger.info(f"Ripping progress: {percentage:.0f}%")
+                        last_logged_percent = percentage
 
                     # Update queue item progress (add base progress from analysis)
                     item.progress_stage = f"Ripping - {percentage:.0f}%"
@@ -184,7 +208,7 @@ class ContinuousProcessor:
 
             # Handle different content types with progress callback
             # Use the analysis result which contains selected titles and content type
-            output_files = self._handle_content_type_with_analysis(
+            output_files = await self._handle_content_type_with_analysis(
                 disc_info,
                 analysis_result,
                 ripping_progress_callback,
@@ -227,7 +251,7 @@ class ContinuousProcessor:
             self.queue_manager.update_item(item)
             self.notifier.notify_error(f"Ripping failed: {e}", context=disc_info.label)
 
-    def _handle_content_type_with_analysis(
+    async def _handle_content_type_with_analysis(
         self,
         disc_info: DiscInfo,
         analysis_result: DiscAnalysisResult,
@@ -268,7 +292,7 @@ class ContinuousProcessor:
 
         return output_files
 
-    def _handle_content_type(
+    async def _handle_content_type(
         self,
         disc_info: DiscInfo,
         titles: list,
@@ -280,20 +304,11 @@ class ContinuousProcessor:
 
         content_type = content_pattern.type
 
-        if content_type in [ContentType.TV_SERIES, ContentType.ANIMATED_SERIES]:
-            # Handle TV series with episode mapping
-            return self._handle_tv_series(disc_info, titles, progress_callback)
+        if content_type == ContentType.TV_SERIES:
+            # Handle TV series (includes cartoon shorts since Plex organizes them as TV shows)
+            return await self._handle_tv_series(disc_info, titles, progress_callback)
 
-        if content_type in [ContentType.CARTOON_COLLECTION, ContentType.CARTOON_SHORTS]:
-            # Handle cartoon collections - rip all shorts
-            return self._handle_cartoon_collection(
-                disc_info,
-                titles,
-                content_pattern,
-                progress_callback,
-            )
-
-        if content_type in [ContentType.MOVIE, ContentType.ANIMATED_MOVIE]:
+        if content_type == ContentType.MOVIE:
             # Handle movies - select main title and optionally extras
             return self._handle_movie(
                 disc_info,
@@ -306,7 +321,7 @@ class ContinuousProcessor:
         logger.warning(f"Unknown content type {content_type}, using basic rip strategy")
         return self._handle_basic_rip(disc_info, titles, progress_callback)
 
-    def _handle_tv_series(
+    async def _handle_tv_series(
         self,
         disc_info: DiscInfo,
         titles: list,
@@ -315,8 +330,9 @@ class ContinuousProcessor:
         """Handle TV series using intelligent episode mapping."""
         try:
             # Use TV analyzer for episode mapping
-            episode_mapping = asyncio.run(
-                self.tv_analyzer.analyze_tv_disc(disc_info.label, titles),
+            episode_mapping = await self.tv_analyzer.analyze_tv_disc(
+                disc_info.label,
+                titles,
             )
 
             output_files = []
@@ -682,21 +698,30 @@ class ContinuousProcessor:
         self.queue_manager.update_item(item)
 
         # Organize and import to Plex
-        if self.organizer.add_to_plex(item.encoded_file, item.media_info):
-            item.status = QueueItemStatus.COMPLETED
-            self.notifier.notify_media_added(
-                str(item.media_info),
-                item.media_info.media_type,
-            )
-            logger.info("Added to Plex: %s", item.media_info)
-        else:
+        try:
+            if self.organizer.add_to_plex(item.encoded_file, item.media_info):
+                item.status = QueueItemStatus.COMPLETED
+                self.notifier.notify_media_added(
+                    str(item.media_info),
+                    item.media_info.media_type,
+                )
+                logger.info("Added to Plex: %s", item.media_info)
+            else:
+                item.status = QueueItemStatus.FAILED
+                item.error_message = "Failed to organize/import to Plex"
+                self.notifier.notify_error(
+                    "Failed to organize/import to Plex",
+                    context=str(item.media_info),
+                )
+                logger.error("Failed to organize/import to Plex")
+        except Exception as e:
+            logger.exception(f"Error organizing item: {e}")
             item.status = QueueItemStatus.FAILED
-            item.error_message = "Failed to organize/import to Plex"
+            item.error_message = str(e)
             self.notifier.notify_error(
-                "Failed to organize/import to Plex",
+                f"Organization failed: {e}",
                 context=str(item.media_info),
             )
-            logger.error("Failed to organize/import to Plex")
 
         self.queue_manager.update_item(item)
 
@@ -713,3 +738,86 @@ class ContinuousProcessor:
             "queue_stats": stats,
             "total_items": sum(stats.values()) if stats else 0,
         }
+
+    def _get_disc_path(self, disc_info: DiscInfo) -> Path | None:
+        """Get the disc path for metadata parsing."""
+        try:
+            # First, try to find if the disc is mounted
+            mount_result = subprocess.run(
+                ["mount"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            for line in mount_result.stdout.splitlines():
+                if disc_info.device in line:
+                    # Parse mount line: "/dev/sr0 on /media/disc type udf (ro,nosuid,nodev)"
+                    parts = line.split(" on ")
+                    if len(parts) >= 2:
+                        mount_point = parts[1].split(" type ")[0]
+                        mount_path = Path(mount_point)
+                        if mount_path.exists():
+                            logger.debug(f"Found mounted disc at: {mount_path}")
+                            return mount_path
+
+            # If not mounted, try common mount points
+            common_mount_points = [
+                f"/media/{os.getenv('USER', 'user')}/disc",
+                "/media/disc",
+                "/mnt/disc",
+                "/media/cdrom",
+                "/media/bluray",
+            ]
+
+            for mount_point in common_mount_points:
+                mount_path = Path(mount_point)
+                if mount_path.exists() and any(mount_path.iterdir()):
+                    logger.debug(f"Found disc content at: {mount_path}")
+                    return mount_path
+
+            # Try mounting the optical drive using fstab entry (user-mountable)
+            optical_mount_point = f"/media/{os.getenv('USER', 'user')}/optical"
+            optical_mount_path = Path(optical_mount_point)
+
+            try:
+                logger.info(f"Attempting to mount disc at {optical_mount_point}...")
+                mount_result = subprocess.run(
+                    ["mount", disc_info.device],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                if mount_result.returncode == 0:
+                    if optical_mount_path.exists() and any(
+                        optical_mount_path.iterdir(),
+                    ):
+                        logger.info(
+                            f"Successfully mounted disc at: {optical_mount_path}",
+                        )
+                        return optical_mount_path
+                else:
+                    logger.warning(
+                        f"Failed to mount disc via fstab: {mount_result.stderr.strip()}",
+                    )
+
+            except Exception as e:
+                logger.warning(f"Mount attempt failed: {e}")
+
+            logger.info("Could not mount disc - UPC identification will be skipped")
+
+            # If disc is not mounted and udisksctl is not available,
+            # UPC identification cannot be performed
+            logger.debug(
+                f"Could not determine disc path for {disc_info.device} - UPC identification disabled",
+            )
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error determining disc path: {e}")
+            return None
+
+
+# Alias for backward compatibility with tests
+SpindleProcessor = ContinuousProcessor

@@ -172,9 +172,7 @@ def determine_disc_type(device: str, fstype: str, timeout: int = 10) -> str:
 def detect_bluray_vs_dvd(device: str, timeout: int = 10) -> str:
     """Attempt to distinguish between Blu-ray and DVD."""
     try:
-        # Try to mount and check for Blu-ray structure
-        # This is a simplified check - in practice, you might want to use
-        # more sophisticated detection methods
+        # First try file command to check for Blu-ray indicators
         result = subprocess.run(
             ["file", "-s", device],
             check=False,
@@ -189,11 +187,42 @@ def detect_bluray_vs_dvd(device: str, timeout: int = 10) -> str:
             if "blu-ray" in output or "bdav" in output or "bdmv" in output:
                 return "Blu-ray"
 
+        # Try mounting the disc to check directory structure
+        import os
+
+        username = os.getenv("USER", "user")
+        mount_point = f"/media/{username}/optical"
+
+        # Try to mount the disc
+        mount_result = subprocess.run(
+            ["mount", device],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+
+        if mount_result.returncode == 0:
+            try:
+                # Check for Blu-ray directory structure
+                mount_path = Path(mount_point)
+                if mount_path.exists():
+                    # Look for BDMV directory (Blu-ray indicator)
+                    if (mount_path / "BDMV").exists():
+                        return "Blu-ray"
+                    # Look for VIDEO_TS directory (DVD indicator)
+                    if (mount_path / "VIDEO_TS").exists():
+                        return "DVD"
+            finally:
+                # Always unmount
+                subprocess.run(["umount", device], capture_output=True, check=False)
+
     except Exception as e:
         logger.debug(f"Error detecting Blu-ray vs DVD: {e}")
 
-    # Default to DVD if we can't determine
-    return "DVD"
+    # If UDF filesystem but can't determine structure, likely Blu-ray
+    # (most modern UDF discs are Blu-ray)
+    return "Blu-ray"
 
 
 def eject_disc(device: str = "/dev/sr0", timeout: int = 20) -> bool:
