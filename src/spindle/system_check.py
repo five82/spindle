@@ -79,7 +79,7 @@ class SystemDependencyChecker:
         ),
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.platform_info = self._detect_platform()
 
     def check_all_dependencies(self) -> DependencyStatus:
@@ -116,7 +116,7 @@ class SystemDependencyChecker:
         self,
         status: DependencyStatus,
         show_available: bool = False,
-    ):
+    ) -> None:
         """Log dependency status with helpful messages."""
         if show_available:
             available_deps = [name for name, avail in status.available.items() if avail]
@@ -225,7 +225,9 @@ class SystemDependencyChecker:
 
         return info
 
-    def _log_install_instructions(self, dep: SystemDependency, level: str = "warning"):
+    def _log_install_instructions(
+        self, dep: SystemDependency, level: str = "warning"
+    ) -> None:
         """Log platform-specific installation instructions."""
         log_func = getattr(logger, level)
 

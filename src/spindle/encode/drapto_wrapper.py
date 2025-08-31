@@ -70,7 +70,7 @@ class DraptoEncoder:
         try:
             input_exists = input_file.exists()
         except (OSError, PermissionError) as e:
-            logger.error(f"Failed to check if input file exists {input_file}: {e}")
+            logger.exception(f"Failed to check if input file exists {input_file}: {e}")
             return EncodeResult(
                 success=False,
                 input_file=input_file,
@@ -88,7 +88,7 @@ class DraptoEncoder:
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            logger.error(f"Failed to create output directory {output_dir}: {e}")
+            logger.exception(f"Failed to create output directory {output_dir}: {e}")
             return EncodeResult(
                 success=False,
                 input_file=input_file,
@@ -99,7 +99,7 @@ class DraptoEncoder:
         try:
             input_size = input_file.stat().st_size
         except (OSError, FileNotFoundError) as e:
-            logger.error(f"Failed to get input file size for {input_file}: {e}")
+            logger.exception(f"Failed to get input file size for {input_file}: {e}")
             return EncodeResult(
                 success=False,
                 input_file=input_file,
@@ -191,7 +191,7 @@ class DraptoEncoder:
 
     def build_command(self, input_file: Path, output_file: Path) -> list[str]:
         """Build drapto command for single file output."""
-        cmd = [
+        return [
             self.config.drapto_binary,
             "encode",
             "-i",
@@ -202,7 +202,6 @@ class DraptoEncoder:
             str(self.quality),
             "--json-progress",
         ]
-        return cmd
 
     def _build_drapto_command(self, input_file: Path, output_dir: Path) -> list[str]:
         """Build the drapto command line."""
@@ -278,8 +277,11 @@ class DraptoEncoder:
                 if not line:
                     break
 
-                # Decode bytes to string and strip
-                line_str = line.decode("utf-8").strip()
+                # Handle both text and binary output
+                if isinstance(line, bytes):
+                    line_str = line.decode("utf-8").strip()
+                else:
+                    line_str = line.strip()
                 stdout_lines.append(line_str)
 
                 # Try to parse as JSON progress event

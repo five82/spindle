@@ -234,7 +234,7 @@ class TestQueueCommands:
         )
         
         mock_manager_instance = Mock()
-        mock_manager_instance.get_item_by_id.return_value = mock_item
+        mock_manager_instance.get_item.return_value = mock_item
         mock_manager_instance.update_item.return_value = None
         mock_queue_manager.return_value = mock_manager_instance
         
@@ -243,7 +243,7 @@ class TestQueueCommands:
         result = cli_runner.invoke(cli, ['queue', 'retry', '1'])
         
         # Should attempt to retry item
-        mock_manager_instance.get_item_by_id.assert_called_with(1)
+        mock_manager_instance.get_item.assert_called_with(1)
         mock_manager_instance.update_item.assert_called_once()
 
 

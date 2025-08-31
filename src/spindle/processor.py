@@ -119,7 +119,7 @@ class ContinuousProcessor:
             task = loop.create_task(self._rip_disc(item, disc_info))
             # Store reference to prevent "never awaited" warnings and handle exceptions
             task.add_done_callback(
-                lambda t: t.exception() if not t.cancelled() else None
+                lambda t: t.exception() if not t.cancelled() else None,
             )
 
         except Exception as e:
@@ -184,10 +184,10 @@ class ContinuousProcessor:
                 """Handle progress updates from MakeMKV ripping."""
                 nonlocal last_logged_percent
                 if progress_data.get("type") == "ripping_progress":
-                    stage = progress_data.get("stage", "Ripping")
+                    progress_data.get("stage", "Ripping")
                     percentage = progress_data.get("percentage", 0)
-                    current = progress_data.get("current", 0)
-                    maximum = progress_data.get("maximum", 1)
+                    progress_data.get("current", 0)
+                    progress_data.get("maximum", 1)
 
                     # Only log if percentage changed significantly
                     if abs(percentage - last_logged_percent) >= 5:

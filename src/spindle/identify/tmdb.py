@@ -351,9 +351,7 @@ class MediaIdentifier:
         # Clean up title
         title = re.sub(r"[._]", " ", title)  # Replace dots and underscores with spaces
         title = re.sub(r"-", " ", title)  # Replace hyphens with spaces for parsing
-        title = re.sub(r"\s+", " ", title).strip()
-
-        return title
+        return re.sub(r"\s+", " ", title).strip()
 
     def build_poster_url(self, poster_path: str | None) -> str | None:
         """Build full poster URL from TMDB poster path."""

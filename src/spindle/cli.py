@@ -135,7 +135,6 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
 @click.pass_context
 def config_cmd(ctx: click.Context) -> None:
     """Configuration management commands."""
-    pass
 
 
 @config_cmd.command("show")
@@ -197,7 +196,7 @@ def config_validate(ctx: click.Context) -> None:
         console.print(f"[green]✓[/green] Optical drive: {config.optical_drive}")
     else:
         console.print(
-            f"[yellow]⚠[/yellow] Optical drive not found: {config.optical_drive}"
+            f"[yellow]⚠[/yellow] Optical drive not found: {config.optical_drive}",
         )
 
     if errors:
@@ -253,11 +252,11 @@ def status(ctx: click.Context) -> None:
 
     # Check system components
     console.print("[bold]System Status[/bold]")
-    
+
     # Check if Spindle is running using modern process discovery
     spindle_running = False
     process_info = ProcessLock.find_spindle_process()
-    
+
     if process_info:
         pid, mode = process_info
         console.print(f"🟢 Spindle: [green]Running in {mode} mode (PID {pid})[/green]")
@@ -359,7 +358,9 @@ def start_daemon(config: SpindleConfig) -> None:
     process_info = ProcessLock.find_spindle_process()
     if process_info:
         pid, mode = process_info
-        console.print(f"[yellow]Spindle is already running in {mode} mode (PID {pid})[/yellow]")
+        console.print(
+            f"[yellow]Spindle is already running in {mode} mode (PID {pid})[/yellow]",
+        )
         console.print("Use 'spindle stop' to stop it first")
         sys.exit(1)
 
@@ -369,7 +370,7 @@ def start_daemon(config: SpindleConfig) -> None:
 
     # Create process lock
     lock = ProcessLock(config)
-    
+
     # Set up daemon context (without PID file)
     daemon_context = daemon.DaemonContext(
         working_directory=Path.cwd(),
@@ -392,13 +393,15 @@ def start_daemon(config: SpindleConfig) -> None:
 
     def run_daemon() -> None:
         setup_daemon_logging()
-        
+
         # Acquire the process lock
         if not lock.acquire():
             logger = logging.getLogger(__name__)
-            logger.error("Failed to acquire process lock - another instance may be running")
+            logger.error(
+                "Failed to acquire process lock - another instance may be running",
+            )
             sys.exit(1)
-        
+
         processor = SpindleProcessor(config)
 
         def signal_handler(signum: int, frame: object) -> None:
@@ -443,10 +446,12 @@ def start_foreground(config: SpindleConfig) -> None:
     process_info = ProcessLock.find_spindle_process()
     if process_info:
         pid, mode = process_info
-        console.print(f"[yellow]Spindle is already running in {mode} mode (PID {pid})[/yellow]")
+        console.print(
+            f"[yellow]Spindle is already running in {mode} mode (PID {pid})[/yellow]",
+        )
         console.print("Use 'spindle stop' to stop it first")
         sys.exit(1)
-    
+
     console.print("[green]Starting Spindle continuous processor (foreground)[/green]")
     console.print(f"Monitoring: {config.optical_drive}")
     console.print("Insert discs to begin automatic ripping and processing")
@@ -455,7 +460,9 @@ def start_foreground(config: SpindleConfig) -> None:
     # Create process lock
     lock = ProcessLock(config)
     if not lock.acquire():
-        console.print("[red]Failed to acquire process lock - another instance may be running[/red]")
+        console.print(
+            "[red]Failed to acquire process lock - another instance may be running[/red]",
+        )
         sys.exit(1)
 
     processor = SpindleProcessor(config)
@@ -499,7 +506,7 @@ def stop(ctx: click.Context) -> None:
 
     # Find running spindle process
     process_info = ProcessLock.find_spindle_process()
-    
+
     if not process_info:
         console.print("[yellow]Spindle is not running[/yellow]")
         # Clean up any stale lock files
@@ -542,7 +549,6 @@ def add_file(ctx: click.Context, file_path: Path) -> None:
 @click.pass_context
 def queue(ctx: click.Context) -> None:
     """Queue management commands."""
-    pass
 
 
 @queue.command("status")
@@ -658,7 +664,7 @@ def queue_retry(ctx: click.Context, item_id: int) -> None:
     queue_manager = QueueManager(config)
 
     try:
-        item = queue_manager.get_item_by_id(item_id)
+        item = queue_manager.get_item(item_id)
         if not item:
             console.print(f"[red]Item {item_id} not found[/red]")
             return
@@ -696,7 +702,10 @@ def queue_list_old(ctx: click.Context) -> None:
 )
 @click.pass_context
 def queue_clear_old(
-    ctx: click.Context, completed: bool, failed: bool, force: bool
+    ctx: click.Context,
+    completed: bool,
+    failed: bool,
+    force: bool,
 ) -> None:
     """Clear items from the queue (deprecated - use 'queue clear')."""
     ctx.forward(queue_clear, completed=completed, failed=failed, force=force)
@@ -908,26 +917,24 @@ def format_duration(seconds: int) -> str:
     """Format duration in seconds to human readable format."""
     if seconds < 60:
         return f"0:00:{seconds:02d}"
-    else:
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        secs = seconds % 60
-        return f"{hours}:{minutes:02d}:{secs:02d}"
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    return f"{hours}:{minutes:02d}:{secs:02d}"
 
 
 def format_file_size(size_bytes: int) -> str:
     """Format file size in bytes to human readable format."""
     if size_bytes < 1024:
         return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
+    if size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
-    elif size_bytes < 1024 * 1024 * 1024:
+    if size_bytes < 1024 * 1024 * 1024:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
-    else:
-        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+    return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
 
-def get_status_color(status) -> str:
+def get_status_color(status: object) -> str:
     """Get color code for status display."""
     status_colors = {
         "pending": "yellow",
@@ -945,10 +952,7 @@ def get_status_color(status) -> str:
     }
 
     # Handle enum objects
-    if hasattr(status, "value"):
-        status_str = status.value
-    else:
-        status_str = str(status)
+    status_str = status.value if hasattr(status, "value") else str(status)
 
     return status_colors.get(status_str.lower(), "white")
 

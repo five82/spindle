@@ -642,10 +642,7 @@ class IntelligentDiscAnalyzer:
             return True
 
         # Date patterns (YYYY-MM-DD, YYYYMMDD, etc.)
-        if re.match(r"^\d{4}[-_]?\d{2}[-_]?\d{2}$", label_lower):
-            return True
-
-        return False
+        return bool(re.match(r"^\d{4}[-_]?\d{2}[-_]?\d{2}$", label_lower))
 
     def media_info_to_content_pattern(self, media_info: Any) -> ContentPattern:
         """Convert MediaInfo to ContentPattern."""

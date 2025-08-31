@@ -23,7 +23,7 @@ class DiscMetadata:
 class BDMVMetadataParser:
     """Parser for BDMV metadata files containing UPC/EAN codes."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
     def parse_disc_metadata(self, disc_path: Path) -> DiscMetadata | None:
@@ -146,15 +146,18 @@ class BDMVMetadataParser:
             if "/" in pattern:
                 # Handle nested paths
                 parts = pattern.split("/")
-                element = root
+                element: ET.Element | None = root
                 for part in parts:
-                    element = element.find(part)
+                    if element is not None:
+                        element = element.find(part)
                     if element is None:
                         break
-                if element is not None and element.text:
-                    code = self._clean_code(element.text)
-                    if self._is_valid_upc_ean(code):
-                        return code
+                else:
+                    # Only reached if we didn't break out of the loop
+                    if element is not None and element.text:
+                        code = self._clean_code(element.text)
+                        if self._is_valid_upc_ean(code):
+                            return code
             else:
                 # Direct tag search
                 elements = root.findall(f".//{pattern}")
@@ -182,7 +185,7 @@ class BDMVMetadataParser:
                 matches = re.findall(r"\b\d{12,13}\b", element.text)
                 for match in matches:
                     if self._is_valid_upc_ean(match):
-                        return match
+                        return str(match)
 
         return None
 
@@ -192,13 +195,16 @@ class BDMVMetadataParser:
             if "/" in tag_name:
                 # Handle nested paths
                 parts = tag_name.split("/")
-                element = root
+                element: ET.Element | None = root
                 for part in parts:
-                    element = element.find(part)
+                    if element is not None:
+                        element = element.find(part)
                     if element is None:
                         break
-                if element is not None and element.text:
-                    return element.text.strip()
+                else:
+                    # Only reached if we didn't break out of the loop
+                    if element is not None and element.text:
+                        return element.text.strip()
             else:
                 # Direct tag search
                 element = root.find(f".//{tag_name}")

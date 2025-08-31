@@ -95,7 +95,7 @@ class UPCCache:
         self.db_path = cache_dir / "upc_cache.db"
         self._init_database()
 
-    def _init_database(self):
+    def _init_database(self) -> None:
         """Initialize the UPC cache database."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -161,7 +161,7 @@ class UPCCache:
                 raw_response=raw_response,
             )
 
-    def set(self, upc: str, product: UPCProduct):
+    def set(self, upc: str, product: UPCProduct) -> None:
         """Cache UPC product information."""
         with sqlite3.connect(self.db_path) as conn:
             raw_response_json = (
@@ -186,7 +186,7 @@ class UPCCache:
                 ),
             )
 
-    def cleanup_old_entries(self, max_age_days: int = 30):
+    def cleanup_old_entries(self, max_age_days: int = 30) -> None:
         """Remove old cache entries."""
         cutoff_time = int(time.time()) - (max_age_days * 24 * 60 * 60)
 

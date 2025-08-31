@@ -59,8 +59,7 @@ class LibraryOrganizer:
         # Remove control characters
         safe_name = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", safe_name)
         # Trim whitespace and dots
-        safe_name = safe_name.strip(" .")
-        return safe_name
+        return safe_name.strip(" .")
 
     def trigger_library_scan(self) -> bool:
         """Trigger a general Plex library scan."""
