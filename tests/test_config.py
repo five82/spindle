@@ -127,3 +127,51 @@ class TestConfigIntegration:
         from spindle.disc.ripper import MakeMKVRipper
         ripper = MakeMKVRipper(config)
         assert ripper.makemkv_con == config.makemkv_con
+
+
+class TestConfigErrorHandling:
+    """Test configuration error handling and validation."""
+    
+    def test_load_config_missing_file(self):
+        """Test loading non-existent config file."""
+        non_existent = Path("/tmp/nonexistent_config.toml")
+        
+        # Should use defaults when config file doesn't exist
+        config = load_config(non_existent)
+        assert isinstance(config, SpindleConfig)
+        assert config.optical_drive == "/dev/sr0"  # Default value
+    
+    def test_load_config_invalid_toml(self, temp_dir):
+        """Test loading invalid TOML file."""
+        config_file = temp_dir / "invalid.toml"
+        config_file.write_text("invalid toml content [[[")
+        
+        # Should raise TOMLDecodeError for invalid TOML
+        import tomli
+        with pytest.raises(tomli.TOMLDecodeError):
+            load_config(config_file)
+    
+    def test_load_config_permission_error(self, temp_dir):
+        """Test loading config file with permission issues."""
+        config_file = temp_dir / "no_permissions.toml"
+        config_file.write_text("[spindle]\noptical_drive = '/dev/sr1'")
+        config_file.chmod(0o000)  # Remove all permissions
+        
+        try:
+            # Should raise OSError for permission issues
+            with pytest.raises(OSError):
+                load_config(config_file)
+        finally:
+            # Restore permissions for cleanup
+            config_file.chmod(0o644)
+    
+    def test_config_validation_errors(self):
+        """Test configuration validation for invalid values."""
+        # Test TMDB API key validation - should raise ValueError when empty
+        with pytest.raises(ValueError, match="TMDB API key is required"):
+            SpindleConfig(tmdb_api_key="")  # Empty TMDB key
+        
+        # Test that invalid types raise Pydantic ValidationError
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            SpindleConfig(makemkv_info_timeout="not_an_integer")  # Wrong type

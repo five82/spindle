@@ -25,6 +25,7 @@ from .encode.drapto_wrapper import DraptoEncoder
 from .identify.tmdb import MediaIdentifier
 from .notify.ntfy import NtfyNotifier
 from .organize.library import LibraryOrganizer
+from .process_lock import ProcessLock
 from .processor import SpindleProcessor
 from .queue.manager import QueueItemStatus, QueueManager
 from .system_check import check_system_dependencies
@@ -252,6 +253,17 @@ def status(ctx: click.Context) -> None:
 
     # Check system components
     console.print("[bold]System Status[/bold]")
+    
+    # Check if Spindle is running using modern process discovery
+    spindle_running = False
+    process_info = ProcessLock.find_spindle_process()
+    
+    if process_info:
+        pid, mode = process_info
+        console.print(f"🟢 Spindle: [green]Running in {mode} mode (PID {pid})[/green]")
+        spindle_running = True
+    else:
+        console.print("🔴 Spindle: [red]Not running[/red]")
 
     # Check disc drive
     disc_info = detect_disc(config.optical_drive)
@@ -268,10 +280,13 @@ def status(ctx: click.Context) -> None:
     else:
         console.print("⚙️ Drapto: [red]Not available[/red]")
 
-    # Check Plex
+    # Check Plex - show different status based on whether Spindle is running
     organizer = LibraryOrganizer(config)
     if organizer.verify_plex_connection():
-        console.print("📚 Plex: Connected")
+        if spindle_running:
+            console.print("📚 Plex: Connected")
+        else:
+            console.print("📚 Plex: Available")
     else:
         console.print("📚 Plex: [yellow]Not configured or unreachable[/yellow]")
 
@@ -337,33 +352,26 @@ def start_daemon(config: SpindleConfig) -> None:
         sys.exit(1)
 
     # Set up paths
-    pid_file_path = config.log_dir / "spindle.pid"
     log_file_path = config.log_dir / "spindle.log"
-
     config.ensure_directories()
 
-    # Check if already running
-    if pid_file_path.exists():
-        try:
-            with pid_file_path.open() as f:
-                pid = int(f.read().strip())
-            # Check if process is actually running
-            os.kill(pid, 0)  # This will raise an exception if process doesn't exist
-            console.print(f"[yellow]Spindle is already running with PID {pid}[/yellow]")
-            console.print("Use 'spindle stop' to stop it first")
-            sys.exit(1)
-        except (OSError, ProcessLookupError, ValueError):
-            # Process not running, remove stale PID file
-            pid_file_path.unlink(missing_ok=True)
+    # Check if already running using modern process discovery
+    process_info = ProcessLock.find_spindle_process()
+    if process_info:
+        pid, mode = process_info
+        console.print(f"[yellow]Spindle is already running in {mode} mode (PID {pid})[/yellow]")
+        console.print("Use 'spindle stop' to stop it first")
+        sys.exit(1)
 
     console.print("[green]Starting Spindle daemon...[/green]")
-    console.print(f"PID file: {pid_file_path}")
     console.print(f"Log file: {log_file_path}")
     console.print(f"Monitoring: {config.optical_drive}")
 
-    # Set up daemon context
+    # Create process lock
+    lock = ProcessLock(config)
+    
+    # Set up daemon context (without PID file)
     daemon_context = daemon.DaemonContext(
-        pidfile=daemon.pidfile.PIDLockFile(pid_file_path),
         working_directory=Path.cwd(),
         umask=0o002,
     )
@@ -384,12 +392,20 @@ def start_daemon(config: SpindleConfig) -> None:
 
     def run_daemon() -> None:
         setup_daemon_logging()
+        
+        # Acquire the process lock
+        if not lock.acquire():
+            logger = logging.getLogger(__name__)
+            logger.error("Failed to acquire process lock - another instance may be running")
+            sys.exit(1)
+        
         processor = SpindleProcessor(config)
 
         def signal_handler(signum: int, frame: object) -> None:
             logger = logging.getLogger(__name__)
             logger.info("Received signal %s, stopping processor", signum)
             processor.stop()
+            lock.release()
             sys.exit(0)
 
         signal.signal(signal.SIGTERM, signal_handler)
@@ -408,7 +424,10 @@ def start_daemon(config: SpindleConfig) -> None:
             logger = logging.getLogger(__name__)
             logger.exception("Error in processor: %s", e)
             processor.stop()
+            lock.release()
             sys.exit(1)
+        finally:
+            lock.release()
 
     try:
         with daemon_context:
@@ -420,16 +439,31 @@ def start_daemon(config: SpindleConfig) -> None:
 
 def start_foreground(config: SpindleConfig) -> None:
     """Start Spindle in foreground mode."""
+    # Check if already running
+    process_info = ProcessLock.find_spindle_process()
+    if process_info:
+        pid, mode = process_info
+        console.print(f"[yellow]Spindle is already running in {mode} mode (PID {pid})[/yellow]")
+        console.print("Use 'spindle stop' to stop it first")
+        sys.exit(1)
+    
     console.print("[green]Starting Spindle continuous processor (foreground)[/green]")
     console.print(f"Monitoring: {config.optical_drive}")
     console.print("Insert discs to begin automatic ripping and processing")
     console.print("Press Ctrl+C to stop")
+
+    # Create process lock
+    lock = ProcessLock(config)
+    if not lock.acquire():
+        console.print("[red]Failed to acquire process lock - another instance may be running[/red]")
+        sys.exit(1)
 
     processor = SpindleProcessor(config)
 
     def signal_handler(signum: int, frame: object) -> None:
         console.print("\n[yellow]Stopping Spindle processor...[/yellow]")
         processor.stop()
+        lock.release()
         sys.exit(0)
 
     # Set up signal handlers
@@ -451,64 +485,40 @@ def start_foreground(config: SpindleConfig) -> None:
     except Exception as e:
         console.print(f"[red]Error in processor: {e}[/red]")
         processor.stop()
+        lock.release()
         sys.exit(1)
+    finally:
+        lock.release()
 
 
 @cli.command()
 @click.pass_context
 def stop(ctx: click.Context) -> None:
-    """Stop running Spindle daemon."""
+    """Stop running Spindle process."""
     config: SpindleConfig = ctx.obj["config"]
 
-    pid_file_path = config.log_dir / "spindle.pid"
-
-    if not pid_file_path.exists():
-        console.print("[yellow]Spindle is not running (no PID file found)[/yellow]")
+    # Find running spindle process
+    process_info = ProcessLock.find_spindle_process()
+    
+    if not process_info:
+        console.print("[yellow]Spindle is not running[/yellow]")
+        # Clean up any stale lock files
+        lock_file = config.log_dir / "spindle.lock"
+        if lock_file.exists():
+            lock_file.unlink(missing_ok=True)
         return
 
-    try:
-        with open(pid_file_path) as f:
-            pid = int(f.read().strip())
+    pid, mode = process_info
+    console.print(f"[blue]Stopping Spindle {mode} mode (PID {pid})...[/blue]")
 
-        # Check if process is running
-        import os
-
-        try:
-            os.kill(pid, 0)  # Check if process exists
-            console.print(f"[blue]Stopping Spindle daemon (PID {pid})...[/blue]")
-
-            # Send SIGTERM
-            os.kill(pid, signal.SIGTERM)
-
-            # Wait for process to stop
-            import time
-
-            for _ in range(10):  # Wait up to 10 seconds
-                try:
-                    os.kill(pid, 0)
-                    time.sleep(1)  # Keep this as 1 second for process termination check
-                except ProcessLookupError:
-                    break
-            else:
-                # If still running, force kill
-                console.print(
-                    "[yellow]Process didn't stop gracefully, force killing...[/yellow]",
-                )
-                os.kill(pid, signal.SIGKILL)
-
-            # Clean up PID file
-            pid_file_path.unlink(missing_ok=True)
-            console.print("[green]Spindle stopped[/green]")
-
-        except ProcessLookupError:
-            # Process not running, clean up stale PID file
-            pid_file_path.unlink(missing_ok=True)
-            console.print(
-                "[yellow]Spindle was not running (cleaned up stale PID file)[/yellow]",
-            )
-
-    except (ValueError, FileNotFoundError, PermissionError) as e:
-        console.print(f"[red]Error stopping Spindle: {e}[/red]")
+    if ProcessLock.stop_process(pid):
+        console.print("[green]Spindle stopped[/green]")
+        # Clean up lock file
+        lock_file = config.log_dir / "spindle.lock"
+        if lock_file.exists():
+            lock_file.unlink(missing_ok=True)
+    else:
+        console.print(f"[red]Failed to stop Spindle process {pid}[/red]")
         sys.exit(1)
 
 
