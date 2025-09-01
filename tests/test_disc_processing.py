@@ -193,7 +193,8 @@ MSG:1005,0,1,"Completed","Done"'''
         
         ripper = MakeMKVRipper(temp_config)
         
-        with pytest.raises(RuntimeError, match="MakeMKV scan failed"):
+        from spindle.error_handling import ExternalToolError
+        with pytest.raises(ExternalToolError):
             ripper.scan_disc()
 
     @patch('subprocess.run')

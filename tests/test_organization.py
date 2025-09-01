@@ -140,7 +140,7 @@ class TestFileOrganization:
         organizer = LibraryOrganizer(temp_config)
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
-        target_path = organizer.organize_file(sample_encoded_file, sample_movie_info)
+        target_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         
         # Should move file to correct location
         assert target_path.exists()
@@ -153,7 +153,7 @@ class TestFileOrganization:
         organizer = LibraryOrganizer(temp_config)
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
-        target_path = organizer.organize_file(sample_encoded_file, sample_tv_info)
+        target_path = organizer.organize_media(sample_encoded_file, sample_tv_info)
         
         # Should move file to correct TV location
         assert target_path.exists()
@@ -166,7 +166,7 @@ class TestFileOrganization:
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
         # Create target file that already exists
-        target_path = organizer.organize_file(sample_encoded_file, sample_movie_info)
+        target_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         
         # Try to organize another file with same name
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
@@ -174,7 +174,7 @@ class TestFileOrganization:
             second_file = Path(f.name)
         
         # Should handle conflict (rename or skip)
-        result_path = organizer.organize_file(second_file, sample_movie_info)
+        result_path = organizer.organize_media(second_file, sample_movie_info)
         
         # Either same path (overwrote) or different path (renamed)
         assert result_path.exists()
@@ -235,7 +235,7 @@ class TestPlexIntegration:
         mock_plex_server.return_value = mock_server_instance
         
         organizer = LibraryOrganizer(temp_config)
-        connected = organizer.verify_connection()
+        connected = organizer.verify_plex_connection()
         
         assert connected is True
 
@@ -245,7 +245,7 @@ class TestPlexIntegration:
         mock_get.side_effect = Exception("Connection failed")
         
         organizer = LibraryOrganizer(temp_config)
-        connected = organizer.verify_connection()
+        connected = organizer.verify_plex_connection()
         
         assert connected is False
 
@@ -269,7 +269,7 @@ class TestWorkflowIntegration:
         organizer = LibraryOrganizer(temp_config)
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
-        organized_path = organizer.organize_file(sample_encoded_file, sample_movie_info)
+        organized_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         
         # Update queue item
         item.status = QueueItemStatus.COMPLETED
@@ -296,7 +296,7 @@ class TestWorkflowIntegration:
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
         # Organize file and trigger Plex scan
-        organized_path = organizer.organize_file(sample_encoded_file, sample_movie_info)
+        organized_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         plex_success = organizer.trigger_library_scan()
         
         assert organized_path.exists()
@@ -310,7 +310,7 @@ class TestWorkflowIntegration:
         missing_file = Path("/tmp/nonexistent.mp4")
         
         with pytest.raises((FileNotFoundError, OSError)):
-            organizer.organize_file(missing_file, sample_movie_info)
+            organizer.organize_media(missing_file, sample_movie_info)
         
         # Test with invalid target directory (read-only)
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
@@ -319,7 +319,7 @@ class TestWorkflowIntegration:
         
         # Should handle permission errors gracefully
         try:
-            result = organizer.organize_file(source_file, sample_movie_info)
+            result = organizer.organize_media(source_file, sample_movie_info)
             # If no exception, organization succeeded
             assert result.exists() or result is None
         except PermissionError:
@@ -351,7 +351,7 @@ class TestMetadataHandling:
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
         # Organize file
-        organized_path = organizer.organize_file(sample_encoded_file, sample_movie_info)
+        organized_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         
         # Basic info should be recoverable from filename/path
         assert "Test Movie" in str(organized_path)
@@ -382,7 +382,7 @@ class TestMetadataHandling:
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
         try:
-            organized_path = organizer.organize_file(test_file, special_media_info)
+            organized_path = organizer.organize_media(test_file, special_media_info)
             assert organized_path.exists()
         except UnicodeError:
             # If filesystem doesn't support unicode, should fallback gracefully

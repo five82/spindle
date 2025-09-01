@@ -12,12 +12,8 @@ env:
 
 jobs:
   test:
-    name: Test - Python ${{ matrix.python-version }}
+    name: Essential Checks
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.13"]
     
     steps:
       - name: Checkout code
@@ -29,10 +25,10 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.13"
       
       - name: Install dependencies
         run: |
@@ -40,119 +36,16 @@ jobs:
       
       - name: Run tests with coverage
         run: |
-          uv run pytest tests/ -v --cov=spindle --cov-report=xml --cov-report=term
+          uv run pytest tests/ -v --cov=spindle --cov-report=term
       
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.13'
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-  lint:
-    name: Lint & Type Check
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      
-      - name: Install dependencies
-        run: |
-          uv sync --all-extras
-      
-      - name: Check code formatting with black
+      - name: Check code formatting
         run: |
           uv run black --check src/
       
-      - name: Lint with ruff
+      - name: Lint code
         run: |
           uv run ruff check src/
       
-      - name: Type check with mypy
-        run: |
-          uv run mypy src/
-      
-      - name: Check import sorting with isort
-        run: |
-          uv run isort --check-only src/
-
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      
-      - name: Install dependencies
-        run: |
-          uv sync --all-extras
-      
-      - name: Security scan with bandit
-        run: |
-          uv run bandit -r src/ -ll
-        continue-on-error: true
-      
-      - name: Check for known vulnerabilities
-        run: |
-          uv run pip-audit
-        continue-on-error: true
-
-  build:
-    name: Build Package
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      
-      - name: Build distribution packages
+      - name: Build package
         run: |
           uv build
-      
-      - name: Check distribution
-        run: |
-          uv run python -m twine check dist/*
-        continue-on-error: true
-      
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/

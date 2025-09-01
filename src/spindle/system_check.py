@@ -63,7 +63,7 @@ class SystemDependencyChecker:
             name="udisks2",
             binary="udisksctl",
             required=False,
-            description="Automatic disc mounting (enables UPC identification)",
+            description="Automatic disc mounting",
             debian_package="udisks2",
             rhel_package="udisks2",
             arch_package="udisks2",

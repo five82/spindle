@@ -23,8 +23,9 @@ class SpindleConfig(BaseModel):
     tmdb_api_key: str | None = None
     tmdb_language: str = Field(default="en-US")
 
-    # UPC Lookup (optional - for enhanced disc identification)
-    upcitemdb_api_key: str | None = None
+    # TMDB Cache Settings
+    tmdb_cache_ttl_days: int = Field(default=30)
+    tmdb_runtime_tolerance_minutes: int = Field(default=5)
 
     # Drapto integration
     drapto_quality_sd: int = Field(default=23)
@@ -80,8 +81,24 @@ class SpindleConfig(BaseModel):
 
     # Movie Detection
     movie_min_duration: int = Field(default=70)  # minutes
-    include_movie_extras: bool = Field(default=False)
+    include_movie_extras: bool = Field(default=True)
+    max_extras_to_rip: int = Field(default=3)
     max_extras_duration: int = Field(default=30)  # minutes
+    prefer_extended_versions: bool = Field(default=True)
+    max_versions_to_rip: int = Field(default=2)
+    version_duration_tolerance: float = Field(default=0.40)  # 40% duration variance
+
+    # Enhanced Track Selection
+    preferred_audio_codecs: list[str] = Field(
+        default=["DTS-HD", "TrueHD", "AC3", "AAC"],
+    )
+    max_commentary_tracks: int = Field(default=2)
+    include_subtitles: bool = Field(default=False)  # Future enhancement
+
+    # Multi-Disc Set Handling
+    multi_disc_timeout_minutes: int = Field(default=15)  # Wait time for next disc
+    multi_disc_session_timeout_minutes: int = Field(default=60)  # Session expiry
+    auto_detect_multi_disc: bool = Field(default=True)
 
     # Cartoon/Short Content Detection
     allow_short_content: bool = Field(default=True)
@@ -171,7 +188,6 @@ def create_sample_config(path: Path) -> None:
 
 # TMDB API (required for media identification)
 tmdb_api_key = "your_tmdb_api_key_here"           # Get from themoviedb.org/settings/api
-# upcitemdb_api_key = "your_upc_api_key_here"     # Optional: Get from devs.upcitemdb.com for enhanced UPC lookups
 
 # Directory paths - CRITICAL: Update these for your system
 library_dir = "~/your-media-library"              # MUST EXIST: Your final media library directory

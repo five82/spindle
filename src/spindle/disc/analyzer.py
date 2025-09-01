@@ -4,26 +4,22 @@ import logging
 import re
 import statistics
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from spindle.config import SpindleConfig
 from spindle.identify.tmdb import MediaIdentifier, TMDBClient
 
-from .metadata import BDMVMetadataParser
+from .metadata_extractor import EnhancedDiscMetadataExtractor
 from .monitor import DiscInfo
 from .ripper import Title
+from .title_selector import ContentType, IntelligentTitleSelector, SelectionCriteria
 
 logger = logging.getLogger(__name__)
 
 
-class ContentType(Enum):
-    """Types of content that can be on a disc - aligned with Plex classification."""
-
-    MOVIE = "movie"
-    TV_SERIES = "tv_series"
-    UNKNOWN = "unknown"
+# ContentType is imported from title_selector
+# class ContentType definition removed to avoid duplicate
 
 
 @dataclass
@@ -80,7 +76,20 @@ class IntelligentDiscAnalyzer:
         self.config = config
         self.tmdb = TMDBClient(config)
         self.media_identifier = MediaIdentifier(config)
-        self.metadata_parser = BDMVMetadataParser()
+        # New enhanced metadata extractor
+        self.metadata_extractor = EnhancedDiscMetadataExtractor()
+        # Intelligent title selector
+        selection_criteria = SelectionCriteria(
+            max_extras=config.max_extras_to_rip,
+            include_commentary=config.include_commentary_tracks,
+            prefer_extended_versions=config.prefer_extended_versions,
+            max_versions_to_rip=config.max_versions_to_rip,
+            version_duration_tolerance=config.version_duration_tolerance,
+            max_commentary_tracks=config.max_commentary_tracks,
+            preferred_audio_codecs=config.preferred_audio_codecs,
+            include_subtitles=config.include_subtitles,
+        )
+        self.title_selector = IntelligentTitleSelector(selection_criteria)
         # Cache for TMDB search results to avoid redundant API calls
         self._tmdb_search_cache: dict[str, dict[str, list[dict]]] = {}
 
@@ -89,119 +98,116 @@ class IntelligentDiscAnalyzer:
         disc_info: DiscInfo,
         titles: list[Title],
         disc_path: Path | None = None,
+        makemkv_output: str | None = None,
     ) -> DiscAnalysisResult:
-        """Complete disc analysis workflow with multi-tier identification."""
+        """Complete disc analysis workflow with enhanced multi-source identification."""
 
         logger.info(f"Analyzing disc: {disc_info}")
-        logger.info("Starting multi-tier content identification process...")
+        logger.info("Starting enhanced multi-tier content identification process...")
 
-        # Phase 1: Try UPC/barcode identification (highest confidence)
-        identified_media = None
+        # Phase 1: Enhanced metadata extraction from all sources
+        enhanced_metadata = None
         if disc_path:
-            logger.info(
-                "Phase 1: Attempting UPC/barcode identification (highest confidence)",
-            )
-            identified_media = await self.try_upc_identification(disc_path)
-            if identified_media:
-                logger.info(
-                    f"✓ Phase 1 SUCCESS: Identified as '{identified_media.title}' ({identified_media.year}) via UPC lookup",
+            logger.info("Phase 1: Extracting metadata from all available sources")
+            enhanced_metadata = self.metadata_extractor.extract_all_metadata(disc_path)
+            # Populate MakeMKV data with raw output for enhanced CINFO parsing
+            if makemkv_output:
+                enhanced_metadata = (
+                    self.metadata_extractor.populate_makemkv_data_from_output(
+                        enhanced_metadata,
+                        makemkv_output,
+                        titles,
+                    )
                 )
             else:
-                logger.info("✗ Phase 1 FAILED: UPC identification unsuccessful")
+                # Fallback to basic method if raw output not available
+                enhanced_metadata = self.metadata_extractor.populate_makemkv_data(
+                    enhanced_metadata,
+                    disc_info.label,
+                    titles,
+                )
+            logger.info(f"Enhanced metadata extracted: {enhanced_metadata}")
         else:
             logger.info(
-                "Phase 1 SKIPPED: Disc not mounted - UPC identification unavailable",
+                "Phase 1 SKIPPED: Disc not mounted - using basic disc info only",
             )
 
-        if not identified_media:
-            # Phase 2: Try runtime-verified search (high confidence)
+        # Phase 2: Intelligent content identification using enhanced metadata
+        identified_media = None
+        title_candidates = []
+
+        if enhanced_metadata:
+            title_candidates = enhanced_metadata.get_best_title_candidates()
+            logger.info(f"Title candidates from enhanced metadata: {title_candidates}")
+        # Fallback to basic disc info
+        elif not self.is_generic_disc_label(disc_info.label):
+            title_candidates = [disc_info.label]
+
+        if title_candidates:
+            logger.info("Phase 2: Attempting intelligent content identification")
+            runtime_minutes = None
             main_title = self.get_main_title(titles)
             if main_title:
-                # Check if disc label is too generic to search
-                if self.is_generic_disc_label(disc_info.label):
-                    logger.info(
-                        f"Phase 2 SKIPPED: Disc label '{disc_info.label}' is too generic for meaningful search",
-                    )
-                else:
-                    logger.info(
-                        "Phase 2: Attempting runtime-verified search (high confidence)",
-                    )
-                    logger.info(
-                        f"Searching for '{disc_info.label}' with runtime {main_title.duration}",
-                    )
-                    identified_media, search_cache = (
-                        await self.try_runtime_verification(
-                            disc_info.label,
-                            main_title.duration,
-                        )
-                    )
-                    # Cache search results for potential reuse in Phase 3
-                    if search_cache:
-                        cache_key = self.clean_disc_label(disc_info.label)
-                        self._tmdb_search_cache[cache_key] = search_cache
-                    if identified_media:
-                        logger.info(
-                            f"✓ Phase 2 SUCCESS: Identified as '{identified_media.title}' ({identified_media.year}) via runtime verification",
-                        )
-                    else:
-                        logger.info(
-                            "✗ Phase 2 FAILED: No runtime-verified matches found",
-                        )
-            else:
-                logger.info(
-                    "Phase 2 SKIPPED: No main title found for runtime verification",
-                )
+                runtime_minutes = main_title.duration // 60
 
-        if not identified_media:
-            # Phase 3: Fallback to original multi-API identification
-            if self.is_generic_disc_label(disc_info.label):
+            identified_media = await self.media_identifier.identify_disc_content(
+                title_candidates,
+                runtime_minutes,
+            )
+
+            if identified_media:
                 logger.info(
-                    f"Phase 3 SKIPPED: Disc label '{disc_info.label}' is too generic for API search",
+                    f"✓ Phase 2 SUCCESS: Identified as '{identified_media.title}' ({identified_media.year})",
                 )
-                content_candidates = None
             else:
                 logger.info(
-                    "Phase 3: Attempting pattern analysis fallback (medium confidence)",
+                    "✗ Phase 2 FAILED: No matches found via intelligent identification",
                 )
-                content_candidates = await self.identify_content_multi_api(
-                    disc_label=disc_info.label,
-                    titles=titles,
-                    disc_type=disc_info.disc_type,
-                )
-                if content_candidates:
-                    logger.info(
-                        f"✓ Phase 3 SUCCESS: Found match via pattern analysis - {content_candidates.type.value} (confidence: {content_candidates.confidence:.2f})",
-                    )
-                else:
-                    logger.info(
-                        "✗ Phase 3 FAILED: No matches found - content will be marked unidentified",
-                    )
         else:
-            # Convert identified media to content pattern
-            content_candidates = self.media_info_to_content_pattern(identified_media)
+            logger.info("Phase 2 SKIPPED: No usable title candidates found")
 
-        # Phase 4: Pattern analysis fallback if still no identification
-        if not content_candidates or content_candidates.confidence < 0.5:
+        # Phase 3: Determine content type for intelligent selection
+        content_type = ContentType.UNKNOWN
+        if identified_media:
+            if identified_media.is_movie:
+                content_type = ContentType.MOVIE
+            elif identified_media.is_tv_show:
+                content_type = ContentType.TV_SERIES
+        elif enhanced_metadata and enhanced_metadata.is_tv_series():
+            content_type = ContentType.TV_SERIES
+        else:
+            # Try pattern analysis fallback
             pattern_analysis = self.analyze_title_patterns(titles, disc_info.label)
-            if (
-                not content_candidates
-                or pattern_analysis.confidence > content_candidates.confidence
-            ):
-                content_candidates = pattern_analysis
+            if pattern_analysis.type == ContentType.TV_SERIES:
+                content_type = ContentType.TV_SERIES
+            elif pattern_analysis.type == ContentType.MOVIE:
+                content_type = ContentType.MOVIE
 
-        # Phase 5: Intelligent title selection
-        selected_titles = await self.select_titles_intelligently(
-            titles=titles,
-            content_pattern=content_candidates,
-            disc_label=disc_info.label,
+        logger.info(f"Determined content type: {content_type.value}")
+
+        # Phase 4: Intelligent title and track selection
+        logger.info("Phase 4: Performing intelligent title and track selection")
+        selection = self.title_selector.select_content(
+            titles,
+            identified_media,
+            content_type,
         )
+
+        logger.info(
+            f"Selected {len(selection.main_titles)} main titles, "
+            f"{len(selection.extra_titles)} extras (confidence: {selection.confidence:.2f})",
+        )
+
+        # Convert selection to title list
+        selected_titles = selection.main_titles + selection.extra_titles
 
         return DiscAnalysisResult(
             disc_info=disc_info,
-            content_type=content_candidates.type,
-            confidence=content_candidates.confidence,
+            content_type=content_type,
+            confidence=selection.confidence,
             titles_to_rip=selected_titles,
-            metadata=identified_media or content_candidates,
+            metadata=identified_media,
+            episode_mappings=None,
         )
 
     async def identify_content_multi_api(
@@ -539,35 +545,6 @@ class IntelligentDiscAnalyzer:
 
         # Otherwise return all reasonable-length titles
         return filtered
-
-    async def try_upc_identification(self, disc_path: Path) -> Any | None:
-        """Try to identify content using UPC/barcode from BDMV metadata."""
-        try:
-            metadata = self.metadata_parser.parse_disc_metadata(disc_path)
-            if not metadata:
-                logger.info("No BDMV metadata structure found on disc")
-                return None
-
-            upc_code = metadata.upc or metadata.ean
-            if not upc_code:
-                logger.info("BDMV metadata found but no UPC/EAN codes present")
-                return None
-
-            logger.info(
-                f"Found UPC/EAN: {upc_code} - looking up product information...",
-            )
-            identified_media = await self.media_identifier.identify_from_upc(upc_code)
-
-            if not identified_media:
-                logger.info(
-                    f"UPC {upc_code} lookup failed - either no product found or not a media product",
-                )
-
-            return identified_media
-
-        except Exception as e:
-            logger.warning(f"UPC identification failed with error: {e}")
-            return None
 
     async def try_runtime_verification(
         self,

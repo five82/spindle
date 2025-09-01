@@ -37,7 +37,7 @@ def mock_config_load():
 @pytest.fixture(autouse=True)
 def mock_process_lock():
     """Mock ProcessLock for all CLI tests to prevent hanging."""
-    with patch('spindle.cli.ProcessLock') as mock_lock_class:
+    with patch('spindle.process_lock.ProcessLock') as mock_lock_class:
         # Mock the class methods
         mock_lock_class.find_spindle_process.return_value = None
         
@@ -104,7 +104,7 @@ class TestStartCommand:
         
         # Mock all the components the start command needs
         with patch('spindle.cli.check_system_dependencies') as mock_check, \
-             patch('spindle.cli.SpindleProcessor') as mock_processor, \
+             patch('spindle.cli.ContinuousProcessor') as mock_processor, \
              patch('spindle.cli.console.print') as mock_print:
             
             mock_check.return_value = None
@@ -130,7 +130,7 @@ class TestStartCommand:
         
         # Mock all the components the start command needs
         with patch('spindle.cli.check_system_dependencies') as mock_check, \
-             patch('spindle.cli.SpindleProcessor') as mock_processor:
+             patch('spindle.cli.ContinuousProcessor') as mock_processor:
             
             mock_check.return_value = None
             
@@ -297,7 +297,7 @@ class TestWorkflowIntegration:
         
         # Test start processor command
         with patch('spindle.cli.check_system_dependencies') as mock_check, \
-             patch('spindle.cli.SpindleProcessor') as mock_processor:
+             patch('spindle.cli.ContinuousProcessor') as mock_processor:
             
             mock_check.return_value = None
             

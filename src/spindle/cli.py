@@ -2,7 +2,6 @@
 
 import logging
 import os
-import shutil
 import signal
 import sys
 import time
@@ -22,11 +21,16 @@ from rich.table import Table
 from .config import SpindleConfig, create_sample_config, load_config
 from .disc.monitor import detect_disc
 from .encode.drapto_wrapper import DraptoEncoder
+from .error_handling import (
+    ConfigurationError,
+    check_dependencies,
+    graceful_exit,
+)
 from .identify.tmdb import MediaIdentifier
 from .notify.ntfy import NtfyNotifier
 from .organize.library import LibraryOrganizer
 from .process_lock import ProcessLock
-from .processor import SpindleProcessor
+from .processor import ContinuousProcessor
 from .queue.manager import QueueItemStatus, QueueManager
 from .system_check import check_system_dependencies
 
@@ -35,18 +39,14 @@ console = Console()
 
 def check_uv_requirement() -> None:
     """Check if uv is available and recommend proper usage."""
-    # Check if uv is installed
-    if not shutil.which("uv"):
-        console.print("[red]ERROR: uv package manager is required but not found![/red]")
-        console.print("Spindle uses uv for dependency management.")
-        console.print("Install uv first:")
-        console.print("  curl -LsSf https://astral.sh/uv/install.sh | sh")
-        console.print("  source ~/.bashrc  # or restart terminal")
-        console.print()
-        console.print("Then install and run spindle with:")
-        console.print("  uv tool install git+https://github.com/five82/spindle.git")
-        console.print("  spindle [command]")
-        sys.exit(1)
+    # Check for dependencies and display errors nicely
+    dependency_errors = check_dependencies()
+    if dependency_errors:
+        console.print("[red bold]🚫 Missing Dependencies[/red bold]")
+        console.print("Spindle requires the following dependencies:\n")
+        for error in dependency_errors:
+            error.display_to_user()
+        graceful_exit(1)
 
     # Check if we're running through uv for development
     if not os.environ.get("UV_RUN_RECURSION_DEPTH") and "site-packages" in str(
@@ -127,8 +127,13 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
         # Setup logging with the loaded config for file logging
         setup_logging(verbose=verbose, config=loaded_config)
     except (OSError, ValueError, RuntimeError) as e:
-        console.print(f"[red]Error loading configuration: {e}[/red]")
-        sys.exit(1)
+        config_error = ConfigurationError(
+            f"Failed to load configuration: {e}",
+            config_path=config,
+            solution="Run 'spindle config validate' to check your configuration file",
+        )
+        config_error.display_to_user()
+        graceful_exit(1)
 
 
 @cli.group()
@@ -234,7 +239,7 @@ def config_init(path: Path) -> None:
     help="Path for the configuration file",
 )
 def init_config(path: Path) -> None:
-    """Create a sample configuration file (deprecated - use 'config init')."""
+    """Create a sample configuration file."""
     try:
         create_sample_config(path)
         console.print(f"[green]Created sample configuration at {path}[/green]")
@@ -402,7 +407,7 @@ def start_daemon(config: SpindleConfig) -> None:
             )
             sys.exit(1)
 
-        processor = SpindleProcessor(config)
+        processor = ContinuousProcessor(config)
 
         def signal_handler(signum: int, frame: object) -> None:
             logger = logging.getLogger(__name__)
@@ -465,7 +470,7 @@ def start_foreground(config: SpindleConfig) -> None:
         )
         sys.exit(1)
 
-    processor = SpindleProcessor(config)
+    processor = ContinuousProcessor(config)
 
     def signal_handler(signum: int, frame: object) -> None:
         console.print("\n[yellow]Stopping Spindle processor...[/yellow]")
@@ -682,33 +687,6 @@ def queue_retry(ctx: click.Context, item_id: int) -> None:
 
     except Exception as e:
         console.print(f"[red]Error retrying item: {e}[/red]")
-
-
-# Keep the old commands for backwards compatibility
-@cli.command("queue-list")
-@click.pass_context
-def queue_list_old(ctx: click.Context) -> None:
-    """List all items in the queue (deprecated - use 'queue list')."""
-    ctx.forward(queue_list)
-
-
-@cli.command("queue-clear")
-@click.option("--completed", is_flag=True, help="Only clear completed items")
-@click.option("--failed", is_flag=True, help="Only clear failed items")
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Force clear all items including those in processing",
-)
-@click.pass_context
-def queue_clear_old(
-    ctx: click.Context,
-    completed: bool,
-    failed: bool,
-    force: bool,
-) -> None:
-    """Clear items from the queue (deprecated - use 'queue clear')."""
-    ctx.forward(queue_clear, completed=completed, failed=failed, force=force)
 
 
 @cli.command("queue-health")

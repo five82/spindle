@@ -17,12 +17,12 @@ spindle automates the complete workflow from physical disc to organized media li
 
 - **Continuous Processing** - Insert disc → auto-rip → auto-process → ready for next disc
 - **Background Queue Processing** - Each item processed as soon as previous stage completes
-- **Enhanced Content Identification** - Multi-tier identification with UPC/barcode support
+- **Enhanced Content Identification** - Multi-tier identification system
 - **Quality Encoding** - Integration with drapto for optimized AV1 compression
 - **Immediate Plex Import** - Movies available as soon as encoded (no waiting for batch)
 - **Progress Tracking** - SQLite-based queue management with status tracking
 - **Notifications** - Real-time updates via ntfy.sh for each stage
-- **Error Handling** - Unidentified media moved to review directory
+- **Enhanced Error Handling** - User-friendly error messages with actionable solutions
 - **Manual Processing** - Process existing video files when needed
 - **System Dependency Checking** - Automatic validation with helpful install guidance
 
@@ -30,26 +30,20 @@ spindle automates the complete workflow from physical disc to organized media li
 
 Spindle uses a **multi-tier identification system** for maximum accuracy:
 
-### Tier 1: UPC/Barcode Identification (Highest Confidence)
-- **Extracts UPC codes** from Blu-ray disc metadata (`/BDMV/META/DL/*.xml`)
-- **UPCitemdb.com integration** - Converts barcode to product information
-- **TMDB verification** - Cross-references product data with movie database
-- **Perfect accuracy** for commercial releases with embedded UPC codes
-
-### Tier 2: Runtime-Verified Search (High Confidence)
+### Tier 1: Runtime-Verified Search (High Confidence)
 - **Disc name analysis** - Cleans and searches disc labels
 - **Duration matching** - Compares disc runtime with TMDB data
 - **Edition detection** - Distinguishes theatrical vs extended cuts automatically
 - **High reliability** for discs with meaningful names
 
-### Tier 3: Intelligent Pattern Analysis (Medium Confidence)
+### Tier 2: Intelligent Pattern Analysis (Medium Confidence)
 - **TMDB API integration** - Powered by https://www.themoviedb.org
 - **Content type detection** - Movies, TV series, cartoon collections, documentaries
 - **Smart title selection** - Automatically selects main content vs extras
 - **Fallback reliability** when other methods fail
 
 ### Special Features
-- **Local caching** - Stores UPC lookups to minimize API usage
+- **Local caching** - Stores TMDB lookups to minimize API usage
 - **Graceful degradation** - Works even with missing optional dependencies
 - **Multi-format support** - Handles various disc structures and metadata formats
 
@@ -80,7 +74,14 @@ Spindle automatically checks for these on startup and will exit if missing:
 #### Optional Dependencies
 These enhance functionality but are not required to run:
 
-4. **Disc Mounting** - For UPC identification (requires mounted discs)
+4. **Disc Automounting** - For enhanced metadata extraction (HIGHLY RECOMMENDED)
+   
+   **What it does**: Allows Spindle to read disc metadata files (bdmt_eng.xml, mcmf.xml) for better content identification
+   
+   **Without automounting**: 
+   - ✅ Disc ripping still works (MakeMKV accesses device directly)
+   - ⚠️ Reduced identification accuracy (Phase 1 metadata extraction skipped)
+   - ⚠️ Falls back to basic disc label and runtime matching only
    
    **Desktop Systems**: Automatic disc mounting is handled by desktop environments (GNOME, KDE, etc.) - no additional configuration needed.
    
@@ -88,6 +89,7 @@ These enhance functionality but are not required to run:
    ```bash
    sudo mkdir -p /media/cdrom
    echo '/dev/sr0 /media/cdrom udf,iso9660 ro,auto 0 0' | sudo tee -a /etc/fstab
+   sudo mount -a  # Apply changes
    ```
 
 5. **eject utility** - For automatic disc ejection
@@ -105,7 +107,8 @@ These enhance functionality but are not required to run:
 
 > **💡 Tip**: Run `spindle start` to see which dependencies are missing with platform-specific install instructions.
 
-> **💡 Disc Mounting**: UPC identification requires mounted discs. Desktop systems handle this automatically. Server systems need fstab configuration (see dependency section above).
+> **💡 Disc Automounting**: While not required for ripping, automounting significantly improves content identification accuracy by allowing access to disc metadata files. Desktop systems handle this automatically. Server systems need the fstab configuration shown above.
+
 
 ### Install Spindle
 
@@ -139,8 +142,6 @@ uv pip install git+https://github.com/five82/spindle.git
    plex_url = "http://localhost:32400"
    plex_token = "your_plex_token"
 
-   # Optional: Enhanced content identification (for UPC/barcode lookups)
-   # upcitemdb_api_key = "your_upc_api_key"        # Get from devs.upcitemdb.com
 
    # Optional: Notifications
    ntfy_topic = "https://ntfy.sh/your_topic"
@@ -150,7 +151,6 @@ uv pip install git+https://github.com/five82/spindle.git
 
 4. **Get Plex token** - see Plex documentation
 
-5. **Optional: Get UPC API key** from https://devs.upcitemdb.com for enhanced disc identification
 
 ## Usage
 
@@ -162,7 +162,7 @@ spindle start
 # Checking system dependencies...
 # Available dependencies: MakeMKV, drapto
 # Missing optional dependencies (features will be disabled):
-#   • udisks2: Automatic disc mounting (enables UPC identification)
+#   • udisks2: Automatic disc mounting
 #     Debian/Ubuntu: sudo apt install udisks2
 
 # Or run in foreground for testing/debugging
@@ -218,10 +218,10 @@ sudo loginctl enable-linger $(whoami)
 spindle status
 
 # View queue contents
-spindle queue-list
+spindle queue list
 
 # Clear completed items
-spindle queue-clear --completed
+spindle queue clear --completed
 
 # Test notifications
 spindle test-notify
@@ -287,18 +287,17 @@ review_dir/
 - **drapto** - AV1 video encoder (Rust-based)
 
 **Optional** (gracefully disabled if missing):
-- **Disc automounting** - For UPC identification (desktop environment or fstab)
+- **Disc automounting** - Highly recommended for enhanced metadata extraction (not required for ripping)
 - **eject utility** (`eject`) - Automatic disc ejection
 - **Plex Media Server** - For automatic library imports
 
 ### Hardware Requirements
 - Optical drive (DVD/Blu-ray)
 - Sufficient storage for staging and final library
-- Network access for TMDB API, optional UPC lookups, and Plex
+- Network access for TMDB API and Plex
 
 ### API Services
 - **TMDB API** - Movie/TV identification (required, free)
-- **UPCitemdb.com** - Enhanced barcode identification (optional, free tier: 100 lookups/day)
 - **ntfy.sh** - Push notifications (optional, free)
 
 ## Development
@@ -307,9 +306,13 @@ For development setup, testing, and contribution guidelines, see [docs/developme
 
 ## Troubleshooting
 
-### UPC Identification Not Working
+### Disc Not Found at Standard Mount Points
 
-If you see "Disc not found at standard mount points - UPC identification will be skipped":
+If you see "Disc not found at standard mount points" in the logs:
+
+**This is NOT an error** - it just means enhanced metadata extraction is disabled. The disc will still be ripped successfully.
+
+To enable enhanced metadata extraction:
 
 1. **Desktop Systems:** Check that your desktop environment is automounting discs (insert disc and verify it appears in file manager)
 
@@ -317,21 +320,32 @@ If you see "Disc not found at standard mount points - UPC identification will be
    ```bash
    sudo mkdir -p /media/cdrom
    echo '/dev/sr0 /media/cdrom udf,iso9660 ro,auto 0 0' | sudo tee -a /etc/fstab
+   sudo mount -a  # Apply changes
    ```
 
 3. **Verify mounting works:**
    ```bash
-   # Check if disc is mounted at standard locations
+   # Insert a disc, then check if it's mounted
    ls -la /media/cdrom /media/cdrom0
+   # You should see disc contents (BDMV, VIDEO_TS, etc.)
    ```
 
 ### Content Identification Issues
 
-- **Phase 1 (UPC)**: Requires disc to be mounted at standard locations (`/media/cdrom`)
-- **Phase 2 (Runtime)**: Requires meaningful disc names - "LOGICAL_VOLUME_ID" won't match anything  
-- **Phase 3 (Pattern)**: Fallback method - works with any disc but lower accuracy
+- **Phase 1 (Runtime)**: Requires meaningful disc names - "LOGICAL_VOLUME_ID" won't match anything  
+- **Phase 2 (Pattern)**: Fallback method - works with any disc but lower accuracy
 
-## Error Handling
+## Enhanced Error Handling
+
+Spindle features a comprehensive user-friendly error handling system:
+
+- **Categorized Errors**: Configuration, dependency, hardware, media, and system errors
+- **Rich Console Display**: Color-coded messages with emojis and clear guidance  
+- **Actionable Solutions**: Specific steps to resolve each type of error
+- **Smart Classification**: Automatically identifies common issues and provides targeted help
+- **Recovery Guidance**: Clear distinction between recoverable and critical errors
+
+### Automatic Error Recovery
 
 - **Unidentified Media**: Moved to `review_dir/unidentified/` (configurable)
 - **Failed Encoding**: Marked as failed in queue, notifications sent

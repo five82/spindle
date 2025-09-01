@@ -9,7 +9,7 @@ import httpx
 
 from spindle.config import SpindleConfig
 
-from .upc_client import UPCItemDBClient
+from .tmdb_cache import TMDBCache
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ class TMDBClient:
         external_id: str,
         source: str = "imdb_id",
     ) -> dict | None:
-        """Find movie/TV show by external ID (UPC, IMDB, etc.)."""
+        """Find movie/TV show by external ID (IMDB, etc.)."""
         params = {
             "api_key": self.api_key,
             "language": self.language,
@@ -332,11 +332,9 @@ class MediaIdentifier:
     def __init__(self, config: SpindleConfig):
         self.config = config
         self.tmdb = TMDBClient(config)
-        self.upc_client = UPCItemDBClient(config)
-
-    async def identify(self, filepath: str | Path) -> MediaInfo | None:
-        """Identify media from filepath (alias for identify_media)."""
-        return await self.identify_media(filepath)
+        # Initialize TMDB cache
+        cache_dir = config.log_dir / "tmdb_cache"
+        self.cache = TMDBCache(cache_dir, ttl_days=config.tmdb_cache_ttl_days)
 
     def clean_title(self, title: str) -> str:
         """Clean and normalize a title for searching."""
@@ -554,97 +552,6 @@ class MediaIdentifier:
         # Try movie first (most common for discs)
         return await self._identify_movie(title, year)
 
-    async def identify_from_upc(self, upc_code: str) -> MediaInfo | None:
-        """Identify media from UPC/EAN barcode using UPCitemdb.com API."""
-        logger.info(f"Attempting UPC identification: {upc_code}")
-
-        try:
-            # Step 1: Look up product information from UPC
-            product = await self.upc_client.lookup_product(upc_code)
-            if not product:
-                logger.info(f"No product found for UPC: {upc_code}")
-                return None
-
-            if not product.is_media_product:
-                logger.info(
-                    f"UPC {upc_code} is not a media product: {product.category}",
-                )
-                return None
-
-            # Step 2: Extract media title and year
-            media_title, media_year = product.extract_media_info()
-            if not media_title:
-                logger.info(
-                    f"Could not extract media info from UPC product: {product.title}",
-                )
-                return None
-
-            logger.info(f"UPC {upc_code} identified as: '{media_title}' ({media_year})")
-
-            # Step 3: Search TMDB using extracted information
-            # Try movie first (most common for physical discs)
-            movie_results = await self.tmdb.search_movie(media_title, media_year)
-            if movie_results:
-                movie_data = movie_results[0]
-                details = await self.tmdb.get_movie_details(movie_data["id"])
-                if details:
-                    # Extract year from release date
-                    release_date = details.get("release_date", "")
-                    movie_year = (
-                        int(release_date[:4])
-                        if release_date and len(release_date) >= 4
-                        else media_year
-                    )
-                    genres = [g["name"] for g in details.get("genres", [])]
-
-                    logger.info(
-                        f"UPC {upc_code} successfully identified as movie: {details.get('title')}",
-                    )
-                    return MediaInfo(
-                        title=details.get("title", media_title),
-                        year=movie_year or 0,
-                        media_type="movie",
-                        tmdb_id=details["id"],
-                        overview=details.get("overview", ""),
-                        genres=genres,
-                    )
-
-            # Try TV series if movie search failed
-            tv_results = await self.tmdb.search_tv(media_title, media_year)
-            if tv_results:
-                tv_data = tv_results[0]
-                details = await self.tmdb.get_tv_details(tv_data["id"])
-                if details:
-                    # Extract year from first air date
-                    first_air_date = details.get("first_air_date", "")
-                    show_year = (
-                        int(first_air_date[:4])
-                        if first_air_date and len(first_air_date) >= 4
-                        else media_year
-                    )
-                    genres = [g["name"] for g in details.get("genres", [])]
-
-                    logger.info(
-                        f"UPC {upc_code} successfully identified as TV series: {details.get('name')}",
-                    )
-                    return MediaInfo(
-                        title=details.get("name", media_title),
-                        year=show_year or 0,
-                        media_type="tv",
-                        tmdb_id=details["id"],
-                        overview=details.get("overview", ""),
-                        genres=genres,
-                    )
-
-            logger.warning(
-                f"UPC {upc_code} product found but no TMDB match: '{media_title}' ({media_year})",
-            )
-            return None
-
-        except Exception as e:
-            logger.exception(f"UPC identification failed for {upc_code}: {e}")
-            return None
-
     async def identify_with_runtime_verification(
         self,
         disc_title: str,
@@ -757,3 +664,179 @@ class MediaIdentifier:
             "tv": tv_search_results or [],
         }
         return None, search_cache
+
+    def extract_best_title(self, title_candidates: list[str]) -> str | None:
+        """Extract the best available title from multiple sources."""
+        for title in title_candidates:
+            if title and not self.is_generic_label(title):
+                return self.normalize_title(title)
+
+        # If all sources are generic, return None for manual identification
+        return None
+
+    def normalize_title(self, title: str) -> str:
+        """Clean and normalize a title for searching."""
+        if not title:
+            return ""
+
+        # Remove common disc indicators
+        title = re.sub(
+            r"\b(disc|disk|cd|dvd|bluray|blu-ray)\s*\d*\b",
+            "",
+            title,
+            flags=re.IGNORECASE,
+        )
+
+        # Clean up title
+        title = re.sub(r"[._]", " ", title)  # Replace dots and underscores with spaces
+        title = re.sub(r"-", " ", title)  # Replace hyphens with spaces for parsing
+        return re.sub(r"\s+", " ", title).strip()
+
+    def is_generic_label(self, label: str) -> bool:
+        """Check if disc label is too generic for identification."""
+        if not label:
+            return True
+
+        generic_patterns = [
+            "LOGICAL_VOLUME_ID",
+            "DVD_VIDEO",
+            "BLURAY",
+            "BD_ROM",
+            "UNTITLED",
+            r"^\d+$",  # Just numbers
+            r"^[A-Z0-9_]{1,3}$",  # Very short codes
+        ]
+
+        for pattern in generic_patterns:
+            if re.match(pattern, label, re.IGNORECASE):
+                return True
+
+        return False
+
+    async def identify_disc_content(
+        self,
+        title_candidates: list[str],
+        runtime_minutes: int | None = None,
+    ) -> MediaInfo | None:
+        """Identify disc content using multiple title sources and caching."""
+        # Step 1: Extract best title from all sources
+        clean_title = self.extract_best_title(title_candidates)
+
+        if not clean_title:
+            logger.warning("No usable title found in disc metadata")
+            return None
+
+        logger.info(f"Identifying disc content with title: '{clean_title}'")
+
+        # Step 2: Check cache first
+        cached = self.cache.search_cache(clean_title, "movie")
+        if cached and cached.is_valid():
+            logger.info(f"Using cached TMDB results for '{clean_title}'")
+            # Use cached detailed info if available, otherwise use first search result
+            if cached.detailed_info:
+                return self._convert_tmdb_to_media_info(cached.detailed_info, "movie")
+            if cached.results:
+                # Get detailed info for first result
+                detailed_info = await self.tmdb.get_movie_details(
+                    cached.results[0]["id"],
+                )
+                if detailed_info:
+                    # Cache the detailed info for future use
+                    self.cache.cache_results(
+                        clean_title,
+                        cached.results,
+                        "movie",
+                        detailed_info,
+                    )
+                    return self._convert_tmdb_to_media_info(detailed_info, "movie")
+
+        # Step 3: Perform TMDB search with runtime verification if available
+        if runtime_minutes:
+            movie_result, movie_search_results = (
+                await self.tmdb.search_with_runtime_verification(
+                    title=clean_title,
+                    disc_runtime_minutes=runtime_minutes,
+                    media_type="movie",
+                    tolerance_minutes=5,
+                )
+            )
+
+            if movie_result:
+                # Cache search results
+                if movie_search_results:
+                    self.cache.cache_results(
+                        clean_title,
+                        movie_search_results,
+                        "movie",
+                        movie_result,
+                    )
+                return self._convert_tmdb_to_media_info(movie_result, "movie")
+
+        # Step 4: Fallback to regular search without runtime verification
+        movie_results = await self.tmdb.search_movie(clean_title)
+        if movie_results:
+            # Get detailed info for best match
+            detailed_info = await self.tmdb.get_movie_details(movie_results[0]["id"])
+            if detailed_info:
+                # Cache results
+                self.cache.cache_results(
+                    clean_title,
+                    movie_results,
+                    "movie",
+                    detailed_info,
+                )
+                return self._convert_tmdb_to_media_info(detailed_info, "movie")
+
+        # Step 5: Try TV search as fallback
+        tv_results = await self.tmdb.search_tv(clean_title)
+        if tv_results:
+            detailed_info = await self.tmdb.get_tv_details(tv_results[0]["id"])
+            if detailed_info:
+                # Cache results
+                self.cache.cache_results(clean_title, tv_results, "tv", detailed_info)
+                return self._convert_tmdb_to_media_info(detailed_info, "tv")
+
+        logger.warning(f"No TMDB matches found for '{clean_title}'")
+        return None
+
+    def _convert_tmdb_to_media_info(
+        self,
+        tmdb_data: dict,
+        media_type: str,
+    ) -> MediaInfo:
+        """Convert TMDB API response to MediaInfo object."""
+        if media_type == "movie":
+            # Extract year from release date
+            release_date = tmdb_data.get("release_date", "")
+            year = (
+                int(release_date[:4]) if release_date and len(release_date) >= 4 else 0
+            )
+            genres = [g["name"] for g in tmdb_data.get("genres", [])]
+
+            return MediaInfo(
+                title=tmdb_data.get("title", "Unknown"),
+                year=year,
+                media_type="movie",
+                tmdb_id=tmdb_data["id"],
+                overview=tmdb_data.get("overview", ""),
+                genres=genres,
+            )
+        # TV show
+        # Extract year from first air date
+        first_air_date = tmdb_data.get("first_air_date", "")
+        year = (
+            int(first_air_date[:4])
+            if first_air_date and len(first_air_date) >= 4
+            else 0
+        )
+        genres = [g["name"] for g in tmdb_data.get("genres", [])]
+
+        return MediaInfo(
+            title=tmdb_data.get("name", "Unknown"),
+            year=year,
+            media_type="tv",
+            tmdb_id=tmdb_data["id"],
+            overview=tmdb_data.get("overview", ""),
+            genres=genres,
+            seasons=tmdb_data.get("number_of_seasons"),
+        )

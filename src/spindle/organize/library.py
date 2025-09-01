@@ -34,10 +34,6 @@ class LibraryOrganizer:
                 logger.warning("Failed to connect to Plex server: %s", e)
                 self.plex_server = None
 
-    def organize_file(self, video_file: Path, media_info: MediaInfo) -> Path:
-        """Organize a video file into the library structure (alias for organize_media)."""
-        return self.organize_media(video_file, media_info)
-
     def generate_filename(self, media_info: MediaInfo) -> str:
         """Generate filename for media (wrapper for MediaInfo.get_filename)."""
         return media_info.get_filename()
@@ -76,10 +72,6 @@ class LibraryOrganizer:
         except Exception as e:
             logger.exception(f"Failed to trigger Plex library scan: {e}")
             return False
-
-    def verify_connection(self) -> bool:
-        """Verify connection (alias for verify_plex_connection)."""
-        return self.verify_plex_connection()
 
     def ensure_library_structure(self) -> None:
         """Ensure basic library directory structure exists."""

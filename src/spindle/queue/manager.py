@@ -3,6 +3,8 @@
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -89,11 +91,24 @@ class QueueManager:
             return None
         return dt.isoformat()
 
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
+        """Get a database connection that is properly closed with transaction support."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def _init_database(self) -> None:
         """Initialize the SQLite database."""
         self.config.log_dir.mkdir(parents=True, exist_ok=True)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS queue_items (
@@ -191,7 +206,7 @@ class QueueManager:
             try:
                 # Test if column exists by selecting from it
                 conn.execute(
-                    f"SELECT {column_name} FROM queue_items LIMIT 1",  # nosec B608
+                    f"SELECT {column_name} FROM queue_items LIMIT 1",
                 )
                 logger.debug("Column %s already exists", column_name)
             except sqlite3.OperationalError as e:
@@ -205,7 +220,7 @@ class QueueManager:
                     # Verify the column was added
                     try:
                         conn.execute(
-                            f"SELECT {column_name} FROM queue_items LIMIT 1",  # nosec B608
+                            f"SELECT {column_name} FROM queue_items LIMIT 1",
                         )
                         logger.debug("Successfully verified column %s", column_name)
                     except sqlite3.OperationalError:
@@ -223,7 +238,7 @@ class QueueManager:
             status=QueueItemStatus.PENDING,
         )
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO queue_items (disc_title, status, created_at, updated_at,
@@ -253,7 +268,7 @@ class QueueManager:
             status=QueueItemStatus.RIPPED,  # Files start as already ripped
         )
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO queue_items (
@@ -301,7 +316,7 @@ class QueueManager:
                 },
             )
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.execute(
                 """
                 UPDATE queue_items
@@ -332,7 +347,7 @@ class QueueManager:
 
     def get_item(self, item_id: int) -> QueueItem | None:
         """Get a specific queue item by ID."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -349,7 +364,7 @@ class QueueManager:
 
     def get_items_by_status(self, status: QueueItemStatus) -> list[QueueItem]:
         """Get all items with a specific status."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -369,21 +384,21 @@ class QueueManager:
             QueueItemStatus.ENCODED,
         ]
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             placeholders = ",".join("?" * len(statuses))
             query = f"""
                 SELECT * FROM queue_items
                 WHERE status IN ({placeholders})
                 ORDER BY created_at
-            """  # nosec B608 - placeholders safely constructed from ? chars
+            """
             cursor = conn.execute(query, [s.value for s in statuses])
 
             return [self._row_to_item(row) for row in cursor.fetchall()]
 
     def get_all_items(self) -> list[QueueItem]:
         """Get all queue items."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -395,7 +410,7 @@ class QueueManager:
 
     def remove_item(self, item_id: int) -> bool:
         """Remove an item from the queue."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 """
                 DELETE FROM queue_items WHERE id = ?
@@ -411,7 +426,7 @@ class QueueManager:
 
     def clear_completed(self) -> int:
         """Remove all completed items from the queue."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 """
                 DELETE FROM queue_items WHERE status IN (?, ?)
@@ -432,7 +447,7 @@ class QueueManager:
         Raises:
             RuntimeError: If items are currently being processed and force is False.
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             if not force:
                 # Check for items currently being processed
                 cursor = conn.execute(
@@ -466,7 +481,7 @@ class QueueManager:
 
     def clear_failed(self) -> int:
         """Remove only failed items from the queue."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 "DELETE FROM queue_items WHERE status = ?",
                 (QueueItemStatus.FAILED.value,),
@@ -484,7 +499,7 @@ class QueueManager:
         Returns:
             Number of items reset.
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 """UPDATE queue_items
                    SET status = ?,
@@ -521,7 +536,7 @@ class QueueManager:
             return health_info
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 health_info["database_readable"] = True
 
                 # Check schema version
@@ -585,7 +600,7 @@ class QueueManager:
 
     def get_queue_stats(self) -> dict[str, int]:
         """Get statistics about the queue."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 """
                 SELECT status, COUNT(*) as count
