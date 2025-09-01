@@ -190,3 +190,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Other files
+media-examples/
