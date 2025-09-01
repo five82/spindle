@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import shutil
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -50,9 +49,6 @@ class ContinuousProcessor:
         self.disc_analyzer = IntelligentDiscAnalyzer(config)
         self.tv_analyzer = TVSeriesDiscAnalyzer(config)
         self.multi_disc_manager = SimpleMultiDiscManager(config)
-
-        # Check if udisksctl is available for disc mounting
-        self.udisks_available = shutil.which("udisksctl") is not None
 
         self.disc_monitor: DiscMonitor | None = None
         self.processing_task: asyncio.Task | None = None

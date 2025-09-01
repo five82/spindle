@@ -1,10 +1,8 @@
 """System dependency checking and platform detection."""
 
 import logging
-import os
 import platform
 import shutil
-import subprocess
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -60,15 +58,6 @@ class SystemDependencyChecker:
             arch_package=None,
         ),
         SystemDependency(
-            name="udisks2",
-            binary="udisksctl",
-            required=False,
-            description="Automatic disc mounting",
-            debian_package="udisks2",
-            rhel_package="udisks2",
-            arch_package="udisks2",
-        ),
-        SystemDependency(
             name="eject utility",
             binary="eject",
             required=False,
@@ -90,12 +79,6 @@ class SystemDependencyChecker:
 
         for dep in self.DEPENDENCIES:
             is_available = self._check_binary_available(dep.binary)
-
-            # For udisks2, also check if mounting is properly configured
-            if is_available and dep.name == "udisks2":
-                has_permissions = self._check_permissions(dep)
-                if not has_permissions:
-                    is_available = False
 
             available[dep.name] = is_available
 
@@ -163,36 +146,8 @@ class SystemDependencyChecker:
 
     def _check_permissions(self, dep: SystemDependency) -> bool:
         """Check if user has required permissions for the dependency."""
-        try:
-            # For udisks2, test if fstab mounting is configured
-            if dep.name == "udisks2" and os.path.exists("/dev/sr0"):
-                # Test if user can mount via fstab entry
-                mount_result = subprocess.run(
-                    ["mount", "/dev/sr0"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=5,
-                )
-
-                if mount_result.returncode == 0:
-                    # Clean up - unmount it
-                    subprocess.run(
-                        ["umount", "/dev/sr0"],
-                        capture_output=True,
-                        check=False,
-                    )
-                    logger.debug("fstab mounting is properly configured")
-                    return True
-                logger.debug(f"fstab mount test failed: {mount_result.stderr}")
-                return False
-
-            # For other dependencies, just return True since the binary exists
-            return True
-
-        except Exception as e:
-            logger.debug(f"Permission check failed for {dep.name}: {e}")
-            return False
+        # For all dependencies, just return True since the binary exists
+        return True
 
     def _get_dependency(self, name: str) -> SystemDependency | None:
         """Get dependency info by name."""
@@ -265,17 +220,6 @@ class SystemDependencyChecker:
             log_func("    Install with Rust: cargo install drapto")
         elif dep.name == "MakeMKV":
             log_func("    Note: MakeMKV requires manual installation and license key")
-        elif dep.name == "udisks2":
-            log_func(
-                "    Note: For automatic disc mounting on servers, add fstab entry:",
-            )
-            log_func("      sudo mkdir -p /media/cdrom")
-            log_func(
-                "      echo '/dev/sr0 /media/cdrom udf,iso9660 ro,auto 0 0' | sudo tee -a /etc/fstab",
-            )
-            log_func(
-                "    Desktop systems: Automounting handled by desktop environment (no fstab needed)",
-            )
 
 
 def check_system_dependencies(

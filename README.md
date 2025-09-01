@@ -160,10 +160,7 @@ uv pip install git+https://github.com/five82/spindle.git
 spindle start
 # Output:
 # Checking system dependencies...
-# Available dependencies: MakeMKV, drapto
-# Missing optional dependencies (features will be disabled):
-#   • udisks2: Automatic disc mounting
-#     Debian/Ubuntu: sudo apt install udisks2
+# Available dependencies: MakeMKV, drapto, eject utility
 
 # Or run in foreground for testing/debugging
 spindle start --foreground
