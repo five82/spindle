@@ -38,7 +38,7 @@ Spindle uses a **multi-tier identification system** for maximum accuracy:
 
 ### Tier 2: Intelligent Pattern Analysis (Medium Confidence)
 - **TMDB API integration** - Powered by https://www.themoviedb.org
-- **Content type detection** - Movies, TV series, cartoon collections, documentaries
+- **Content type detection** - Movies vs TV series (based on disc structure, not genre)
 - **Smart title selection** - Automatically selects main content vs extras
 - **Fallback reliability** when other methods fail
 

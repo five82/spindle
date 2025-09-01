@@ -71,12 +71,13 @@ def get_best_title_candidates(self) -> list[str]:
 
 The `IntelligentTitleSelector` uses sophisticated criteria to identify main content:
 
-#### Content Type Detection
-- **Movies**: Single long title (>= 60 minutes)
-- **TV Episodes**: Multiple similar-length titles
-- **TV Seasons**: Multiple titles with episode patterns
-- **Documentaries**: Educational content markers
-- **Concerts**: Performance indicators
+#### Content Type Detection for Plex Organization
+- **Movies**: Single long title (>= 60 minutes) - includes feature films, documentary films, concerts
+  - Will be organized as: `/Movies/Title (Year)/Title (Year).mkv`
+- **TV Shows**: Multiple similar-length titles or episode patterns - includes TV series, documentary series, miniseries
+  - Will be organized as: `/TV Shows/Show Name (Year)/Season XX/Show Name (Year) - sXXeXX.mkv`
+
+Note: Plex only recognizes Movies and TV Shows as primary video content types. Content is organized based on structure (single film vs episodic series) rather than genre.
 
 #### Selection Algorithm
 1. **Duration Analysis**: Identifies titles by length patterns
@@ -233,7 +234,6 @@ auto_review_mode = false                 # Manual vs automatic review
 - **Metadata caching**: Reduces redundant disc reads
 - **TMDB result caching**: Minimizes API calls
 - **Intelligent fallback**: Avoids unnecessary processing steps
-- **Parallel processing**: Concurrent metadata extraction where possible
 
 ### Resource Usage
 - **Disk I/O**: Metadata extraction requires disc access
@@ -241,10 +241,3 @@ auto_review_mode = false                 # Manual vs automatic review
 - **Memory**: Caching uses SQLite databases (minimal impact)
 - **CPU**: Text processing and pattern matching (lightweight)
 
-## Future Enhancements
-
-### Planned Improvements
-- **Machine Learning**: Content type classification using title patterns
-- **Enhanced Caching**: Predictive caching for popular content
-- **Alternative APIs**: Additional identification sources beyond TMDB
-- **User Feedback**: Learning from manual corrections to improve accuracy
