@@ -75,15 +75,15 @@ class ContinuousProcessor:
         )
         self.disc_monitor.start_monitoring()
 
-        # Check for existing disc in drive
+        # Start background queue processing
+        loop = asyncio.get_event_loop()
+        self.processing_task = loop.create_task(self._process_queue_continuously())
+
+        # Check for existing disc in drive after event loop is set up
         existing_disc = detect_disc(self.config.optical_drive)
         if existing_disc:
             logger.info("Found existing disc: %s", existing_disc)
             self._on_disc_detected(existing_disc)
-
-        # Start background queue processing
-        loop = asyncio.get_event_loop()
-        self.processing_task = loop.create_task(self._process_queue_continuously())
 
         if existing_disc:
             logger.info("Continuous processor started - processing existing disc")
@@ -118,13 +118,28 @@ class ContinuousProcessor:
             item = self.queue_manager.add_disc(disc_info.label)
             logger.info("Added to queue: %s", item)
 
-            # Start ripping immediately (schedule on existing event loop)
+            # Start identification immediately (schedule on existing event loop)
+            logger.info("Creating identification task for %s", disc_info.label)
             loop = asyncio.get_event_loop()
-            task = loop.create_task(self._rip_disc(item, disc_info))
+            task = loop.create_task(self._identify_disc(item, disc_info))
+            logger.info("Identification task created: %s", task)
+
             # Store reference to prevent "never awaited" warnings and handle exceptions
-            task.add_done_callback(
-                lambda t: t.exception() if not t.cancelled() else None,
-            )
+            def handle_task_completion(t):
+                logger.info("Identification task completed: %s", t)
+                if not t.cancelled() and t.exception():
+                    logger.exception(
+                        "Identification task failed",
+                        exc_info=t.exception(),
+                    )
+                    self.notifier.notify_error(
+                        f"Failed to identify disc: {t.exception()}",
+                        context=disc_info.label,
+                    )
+                else:
+                    logger.info("Identification task succeeded")
+
+            task.add_done_callback(handle_task_completion)
 
         except Exception as e:
             logger.exception("Error handling disc detection")
@@ -133,19 +148,32 @@ class ContinuousProcessor:
                 context=disc_info.label,
             )
 
-    async def _rip_disc(self, item: QueueItem, disc_info: DiscInfo) -> None:
-        """Rip the detected disc using intelligent analysis with multi-disc support."""
+    async def _identify_disc(self, item: QueueItem, disc_info: DiscInfo) -> None:
+        """Identify the disc content and determine what to rip."""
+        logger.info("=== _identify_disc CALLED for %s ===", disc_info.label)
         try:
-            logger.info("Starting intelligent analysis and rip: %s", disc_info.label)
-            self.notifier.notify_rip_started(disc_info.label)
+            logger.info("Starting disc identification: %s", disc_info.label)
 
-            # Update status
-            item.status = QueueItemStatus.RIPPING
+            # Update status to IDENTIFYING
+            item.status = QueueItemStatus.IDENTIFYING
+            item.progress_stage = "Scanning disc"
+            item.progress_percent = 0.0
+            item.progress_message = f"Analyzing {disc_info.label}"
             self.queue_manager.update_item(item)
 
             # First, scan the disc to get title information with raw MakeMKV output
+            item.progress_stage = "MakeMKV scanning disc"
+            item.progress_message = (
+                "Reading disc structure with MakeMKV... (this may take 1-3 minutes)"
+            )
+            self.queue_manager.update_item(item)
+
             titles, makemkv_output = self.ripper.scan_disc_with_output()
             logger.info("Found %s titles on disc", len(titles))
+
+            item.progress_percent = 25.0
+            item.progress_message = f"Found {len(titles)} titles, analyzing content..."
+            self.queue_manager.update_item(item)
 
             # Create RipSpec to organize all disc processing data
             rip_spec = RipSpec(
@@ -159,6 +187,10 @@ class ContinuousProcessor:
 
             # Analyze disc content using TMDB and intelligent pattern analysis
             logger.info("Running intelligent disc analysis with TMDB lookup...")
+            item.progress_percent = 50.0
+            item.progress_message = "Identifying content with TMDB..."
+            self.queue_manager.update_item(item)
+
             rip_spec.analysis_result = await self.disc_analyzer.analyze_disc(
                 rip_spec.disc_info,
                 rip_spec.titles,
@@ -172,15 +204,25 @@ class ContinuousProcessor:
                 rip_spec.analysis_result.confidence,
             )
 
+            item.progress_percent = 75.0
+            item.progress_message = (
+                f"Identified as {rip_spec.analysis_result.content_type.value}"
+            )
+            self.queue_manager.update_item(item)
+
             # Check for multi-disc set handling
             if self.config.auto_detect_multi_disc:
-                rip_spec.enhanced_metadata = (
-                    self.disc_analyzer.metadata_extractor.extract_all_metadata(
-                        rip_spec.disc_path,
-                    )
-                    if rip_spec.disc_path
-                    else None
+                item.progress_stage = "Analyzing multi-disc sets"
+                item.progress_message = (
+                    "Using cached disc metadata for multi-disc detection"
                 )
+                item.progress_percent = 50.0
+                self.queue_manager.update_item(item)
+
+                # Use enhanced_metadata from analysis result instead of re-scanning
+                rip_spec.enhanced_metadata = rip_spec.analysis_result.enhanced_metadata
+
+                # Only populate MakeMKV data if we have both enhanced metadata and makemkv output
                 if rip_spec.enhanced_metadata and rip_spec.makemkv_output:
                     rip_spec.enhanced_metadata = self.disc_analyzer.metadata_extractor.populate_makemkv_data_from_output(
                         rip_spec.enhanced_metadata,
@@ -200,14 +242,20 @@ class ContinuousProcessor:
                         logger.info("Multi-disc set detected, managing session")
                         rip_spec.is_multi_disc = True
                         rip_spec.disc_set_info = disc_set_info
-                        return await self._handle_multi_disc_processing(rip_spec)
+                        return await self._handle_multi_disc_identification(rip_spec)
 
-            # Single disc processing
-            await self._process_single_disc(rip_spec)
+            # Update progress after metadata extraction
+            item.progress_stage = "Finalizing identification"
+            item.progress_message = "Completing content analysis..."
+            item.progress_percent = 90.0
+            self.queue_manager.update_item(item)
+
+            # Store the analysis result in the queue item for the ripping phase
+            await self._complete_disc_identification(rip_spec)
 
         except Exception as e:
             # Classify and handle the error appropriately
-            self._handle_rip_error(e, item, disc_info.label)
+            self._handle_identification_error(e, item, disc_info.label)
 
     async def _process_single_disc(self, rip_spec: RipSpec) -> None:
         """Process a single disc (non-multi-disc)."""
@@ -659,7 +707,7 @@ class ContinuousProcessor:
             output_files = [output_file]
 
             # Handle extras if configured
-            if self.config.include_movie_extras:
+            if self.config.include_extras:
                 logger.info("Processing movie extras")
                 extra_titles = [
                     t
@@ -741,9 +789,9 @@ class ContinuousProcessor:
         """Get the next item that needs processing."""
         # Get items that are ready for the next step
         processable_statuses = [
-            QueueItemStatus.RIPPED,  # Ready for identification
-            QueueItemStatus.IDENTIFIED,  # Ready for encoding
-            QueueItemStatus.ENCODED,  # Ready for organization
+            QueueItemStatus.IDENTIFIED,  # Ready for ripping
+            QueueItemStatus.RIPPED,  # Ready for encoding (background)
+            QueueItemStatus.ENCODED,  # Ready for organization (background)
         ]
 
         for status in processable_statuses:
@@ -758,9 +806,9 @@ class ContinuousProcessor:
         try:
             logger.info(f"Processing: {item}")
 
-            if item.status == QueueItemStatus.RIPPED:
-                await self._identify_item(item)
-            elif item.status == QueueItemStatus.IDENTIFIED:
+            if item.status == QueueItemStatus.IDENTIFIED:
+                await self._rip_identified_item(item)
+            elif item.status == QueueItemStatus.RIPPED:
                 await self._encode_item(item)
             elif item.status == QueueItemStatus.ENCODED:
                 await self._organize_item(item)
@@ -770,7 +818,39 @@ class ContinuousProcessor:
             item.status = QueueItemStatus.FAILED
             item.error_message = str(e)
             self.queue_manager.update_item(item)
-            self.notifier.notify_error(f"Processing failed: {e}", context=str(item))
+
+    async def _rip_identified_item(self, item: QueueItem) -> None:
+        """Rip an identified disc item."""
+        logger.info("Starting rip phase for %s", item.disc_title)
+
+        # Reconstruct RipSpec from stored data
+        rip_spec = self._reconstruct_rip_spec_from_item(item)
+        if not rip_spec:
+            error_msg = f"Could not reconstruct rip specification for {item.disc_title}"
+            raise RuntimeError(error_msg)
+
+        # Update status to RIPPING
+        item.status = QueueItemStatus.RIPPING
+        item.progress_stage = "Ripping"
+        item.progress_percent = 0.0
+        item.progress_message = "Starting disc rip"
+        self.queue_manager.update_item(item)
+
+        # Execute the ripping
+        await self._rip_single_disc_titles(rip_spec)
+
+        # Update item with results
+        if rip_spec.ripped_files:
+            item.ripped_file = rip_spec.ripped_files[0]
+            item.status = QueueItemStatus.RIPPED
+            item.progress_stage = "Ripping complete"
+            item.progress_percent = 100.0
+            item.progress_message = f"Ripped {len(rip_spec.ripped_files)} files"
+            self.queue_manager.update_item(item)
+            logger.info("Rip phase complete for %s", item.disc_title)
+        else:
+            error_msg = f"No files were ripped for {item.disc_title}"
+            raise RuntimeError(error_msg)
 
     async def _identify_item(self, item: QueueItem) -> None:
         """Identify media for a ripped item."""
@@ -949,16 +1029,348 @@ class ContinuousProcessor:
 
         self.queue_manager.update_item(item)
 
+    async def _complete_disc_identification(self, rip_spec: RipSpec) -> None:
+        """Complete the disc identification phase and prepare for ripping."""
+        item = rip_spec.queue_item
+
+        try:
+            # Extract media information from analysis result
+            if rip_spec.analysis_result.metadata:
+                item.media_info = rip_spec.analysis_result.metadata
+
+            # Store the analysis result data for the ripping phase
+            # We'll serialize key data to the queue item for persistence
+            rip_spec_data = {
+                "analysis_result": {
+                    "content_type": rip_spec.analysis_result.content_type.value,
+                    "confidence": rip_spec.analysis_result.confidence,
+                    "titles_to_rip": (
+                        [
+                            {
+                                "index": t.title_id,
+                                "name": t.name,
+                                "duration": t.duration,
+                                "size": t.size,
+                                "chapters": t.chapters,
+                                "tracks": (
+                                    [
+                                        {"id": tr.track_id, "type": tr.track_type}
+                                        for tr in t.tracks
+                                    ]
+                                    if t.tracks
+                                    else []
+                                ),
+                            }
+                            for t in rip_spec.analysis_result.titles_to_rip
+                        ]
+                        if rip_spec.analysis_result.titles_to_rip
+                        else []
+                    ),
+                    "episode_mappings": (
+                        {
+                            str(k.index): {
+                                "season_number": v.season_number,
+                                "episode_number": v.episode_number,
+                                "episode_title": v.episode_title,
+                                "air_date": v.air_date,
+                                "overview": v.overview,
+                                "runtime": v.runtime,
+                            }
+                            for k, v in rip_spec.analysis_result.episode_mappings.items()
+                        }
+                        if rip_spec.analysis_result.episode_mappings
+                        else {}
+                    ),
+                },
+                "disc_info": {
+                    "label": rip_spec.disc_info.label,
+                    "device": rip_spec.disc_info.device,
+                },
+                "is_multi_disc": rip_spec.is_multi_disc,
+                "disc_set_info": (
+                    rip_spec.disc_set_info.__dict__ if rip_spec.disc_set_info else None
+                ),
+            }
+
+            # Store in a field we'll add to QueueItem (we'll need to update the schema)
+            item.rip_spec_data = rip_spec_data
+
+            # Mark as identified and ready for ripping
+            item.status = QueueItemStatus.IDENTIFIED
+            item.progress_stage = "Content identified"
+            item.progress_percent = 100.0
+
+            # Update disc title to use the identified media name
+            if item.media_info and item.media_info.title:
+                item.disc_title = item.media_info.title
+                item.progress_message = f"Ready to rip: {item.media_info.title}"
+            else:
+                item.progress_message = (
+                    f"Ready to rip: {rip_spec.analysis_result.content_type.value}"
+                )
+
+            self.queue_manager.update_item(item)
+
+            logger.info("Disc identification complete: %s", item)
+
+        except Exception as e:
+            self._handle_identification_error(e, item, rip_spec.disc_info.label)
+
+    async def _handle_multi_disc_identification(self, rip_spec: RipSpec) -> None:
+        """Handle multi-disc set identification (placeholder for now)."""
+        # For now, treat as single disc - multi-disc handling can be enhanced later
+        logger.info("Multi-disc identification - treating as single disc for now")
+        await self._complete_disc_identification(rip_spec)
+
+    def _reconstruct_rip_spec_from_item(self, item: QueueItem) -> "RipSpec":
+        """Reconstruct a RipSpec from stored queue item data."""
+        if not item.rip_spec_data:
+            logger.error(f"No rip_spec_data found for item {item.disc_title}")
+            return None
+
+        try:
+            from .disc.analyzer import ContentType, DiscAnalysisResult
+            from .disc.monitor import DiscInfo
+            from .disc.rip_spec import RipSpec
+            from .disc.ripper import Title
+
+            # Reconstruct DiscInfo
+            disc_data = item.rip_spec_data["disc_info"]
+            disc_info = DiscInfo(
+                device=disc_data["device"],
+                disc_type="Blu-ray",  # Could store this if needed
+                label=disc_data["label"],
+            )
+
+            # Reconstruct titles from analysis result
+            analysis_data = item.rip_spec_data["analysis_result"]
+            titles = []
+            for title_data in analysis_data["titles_to_rip"]:
+                from .disc.ripper import Track
+
+                # Reconstruct tracks if available
+                tracks = []
+                for track_data in title_data.get("tracks", []):
+                    # Create minimal track objects with default values
+                    track = Track(
+                        track_id=track_data["id"],
+                        track_type=track_data["type"],
+                        codec="Unknown",  # Default codec
+                        language="Unknown",  # Default language
+                        duration=title_data["duration"],  # Use title duration
+                        size=0,  # Default size
+                        title=f"Track {track_data['id']}",  # Default title
+                    )
+                    tracks.append(track)
+
+                title = Title(
+                    title_id=title_data["index"],
+                    duration=title_data["duration"],
+                    size=title_data.get("size", 0),  # Default to 0 if missing
+                    chapters=title_data.get("chapters", 1),  # Default to 1 if missing
+                    tracks=tracks,
+                    name=title_data["name"],
+                )
+                titles.append(title)
+
+            # Reconstruct DiscAnalysisResult
+            content_type = ContentType(analysis_data["content_type"])
+            analysis_result = DiscAnalysisResult(
+                disc_info=disc_info,
+                content_type=content_type,
+                confidence=analysis_data["confidence"],
+                titles_to_rip=titles,
+                metadata=item.media_info,
+                episode_mappings=None,  # Will be reconstructed if needed for TV series
+                enhanced_metadata=None,  # Will be populated later if needed
+            )
+
+            # Create RipSpec
+            rip_spec = RipSpec(
+                disc_info=disc_info,
+                titles=titles,
+                queue_item=item,
+                analysis_result=analysis_result,
+                disc_path=self._get_disc_path(disc_info),
+                device=self.config.optical_drive,
+                is_multi_disc=item.rip_spec_data.get("is_multi_disc", False),
+            )
+
+            logger.info(f"Successfully reconstructed RipSpec for {item.disc_title}")
+            return rip_spec
+
+        except Exception as e:
+            logger.exception(
+                f"Failed to reconstruct RipSpec for {item.disc_title}: {e}",
+            )
+            return None
+
+    async def _rip_single_disc_titles(self, rip_spec: RipSpec) -> None:
+        """Rip the selected titles for a single disc."""
+        if not rip_spec.analysis_result or not rip_spec.analysis_result.titles_to_rip:
+            msg = "No titles selected for ripping"
+            raise RuntimeError(msg)
+
+        # Create output directory for this disc
+        output_dir = self.config.staging_dir / "ripped"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            f"Starting to rip {len(rip_spec.analysis_result.titles_to_rip)} titles",
+        )
+
+        # Progress tracking
+        total_titles = len(rip_spec.analysis_result.titles_to_rip)
+        completed_titles = 0
+
+        def update_progress(progress_data: dict):
+            """Update queue item progress during ripping."""
+            try:
+                # Only show progress for actual ripping progress, not status messages
+                if progress_data.get("type") == "ripping_progress":
+                    title_progress = progress_data.get(
+                        "percentage",
+                        progress_data.get("percent", 0.0),
+                    )
+                    overall_progress = (completed_titles / total_titles * 100) + (
+                        title_progress / total_titles
+                    )
+
+                    # Only show meaningful progress updates (> 0%)
+                    if title_progress > 0:
+                        operation = progress_data.get(
+                            "stage",
+                            progress_data.get("operation", "Ripping"),
+                        )
+                        print(f"[RIPPING] {title_progress:.1f}% - {operation}")
+                        logger.info(
+                            f"Ripping progress: {title_progress:.1f}% - {operation}",
+                        )
+
+                    if rip_spec.queue_item:
+                        rip_spec.queue_item.progress_percent = min(
+                            overall_progress,
+                            100.0,
+                        )
+                        rip_spec.queue_item.progress_message = (
+                            f"Ripping title {completed_titles + 1}/{total_titles}: {operation} ({title_progress:.1f}%)"
+                            if title_progress > 0
+                            else f"Ripping title {completed_titles + 1}/{total_titles}: Starting..."
+                        )
+
+                        # Simple direct update - queue manager should be thread-safe
+                        try:
+                            self.queue_manager.update_item(rip_spec.queue_item)
+                        except Exception as update_error:
+                            logger.debug(f"Queue update error: {update_error}")
+
+            except Exception as e:
+                logger.exception(f"Error in progress callback: {e}")
+
+        # Rip each selected title
+        for title in rip_spec.analysis_result.titles_to_rip:
+            logger.info(f"Ripping title: {title.name} ({title.duration//60}min)")
+
+            try:
+                output_file = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    self.ripper.rip_title,
+                    title,
+                    output_dir,
+                    rip_spec.device,
+                    update_progress,
+                )
+
+                rip_spec.ripped_files.append(output_file)
+                completed_titles += 1
+
+                logger.info(f"Successfully ripped: {output_file}")
+
+            except Exception as e:
+                logger.exception(f"Failed to rip title {title.name}: {e}")
+                # Could implement retry logic or mark as failed
+                raise
+
+        logger.info(
+            f"Successfully ripped {len(rip_spec.ripped_files)} titles to {output_dir}",
+        )
+
+        # Update rip spec with final output directory
+        rip_spec.output_dir = output_dir
+
+    async def _update_queue_item_async(self, item: QueueItem):
+        """Thread-safe async queue item update."""
+        self.queue_manager.update_item(item)
+
+    async def _handle_multi_disc_ripping(self, rip_spec: RipSpec) -> None:
+        """Handle ripping for multi-disc sets."""
+        logger.warning("Multi-disc ripping not fully implemented yet")
+
+    def _handle_identification_error(
+        self,
+        error: Exception,
+        item: QueueItem,
+        disc_label: str,
+    ) -> None:
+        """Handle identification errors."""
+
+        # Use enhanced error handling for user-friendly messages
+        logger.exception(f"Identification failed for {disc_label}: {error}")
+
+        # Get user-friendly error message and solution
+        if hasattr(error, "solution"):
+            # ExternalToolError with solution
+            user_message = str(error)
+            progress_message = getattr(error, "solution", "See logs for details")
+        else:
+            # Generic error
+            user_message = f"Identification failed: {error!s}"
+            progress_message = "Check disc and try again"
+
+        item.status = QueueItemStatus.FAILED
+        item.error_message = user_message
+        item.progress_stage = "Identification failed"
+        item.progress_percent = 0.0
+        item.progress_message = progress_message
+        self.queue_manager.update_item(item)
+
+        # Enhanced error display for user (removed unused call)
+
+        self.notifier.notify_error(
+            f"Failed to identify disc: {user_message}",
+            context=disc_label,
+        )
+
     def get_status(self) -> dict:
         """Get current processor status."""
         stats = self.queue_manager.get_queue_stats()
 
-        # Check for current disc
+        # Check for current disc - prefer identified title if available
+        current_disc_name = None
         current_disc = detect_disc(self.config.optical_drive)
+        if current_disc:
+            # Check if we have a current processing item with identified title
+            processing_items = self.queue_manager.get_items_by_status(
+                [
+                    QueueItemStatus.PENDING,
+                    QueueItemStatus.IDENTIFYING,
+                    QueueItemStatus.IDENTIFIED,
+                    QueueItemStatus.RIPPING,
+                ],
+            )
+            for item in processing_items:
+                if item.disc_title != current_disc.label and item.media_info:
+                    # This item has been identified with a different title
+                    current_disc_name = item.disc_title
+                    break
+
+            # Fall back to raw disc label if no identified name found
+            if not current_disc_name:
+                current_disc_name = str(current_disc)
 
         return {
             "running": self.is_running,
-            "current_disc": str(current_disc) if current_disc else None,
+            "current_disc": current_disc_name,
             "queue_stats": stats,
             "total_items": sum(stats.values()) if stats else 0,
         }

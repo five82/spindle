@@ -1,5 +1,6 @@
 """Command-line interface for Spindle."""
 
+import asyncio
 import logging
 import os
 import signal
@@ -482,18 +483,26 @@ def start_foreground(config: SpindleConfig) -> None:
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    try:
+    async def run_foreground():
         processor.start()
 
         # Keep main thread alive and show periodic status
-        while processor.is_running:
-            time.sleep(config.status_display_interval)  # Show status based on config
-            status = processor.get_status()
-            if status["total_items"] > 0:
-                console.print(
-                    f"[dim]Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}[/dim]",
-                )
+        try:
+            while processor.is_running:
+                await asyncio.sleep(
+                    config.status_display_interval,
+                )  # Show status based on config
+                status = processor.get_status()
+                if status["total_items"] > 0:
+                    console.print(
+                        f"[dim]Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}[/dim]",
+                    )
+        except asyncio.CancelledError:
+            processor.stop()
+            raise
 
+    try:
+        asyncio.run(run_foreground())
     except Exception as e:
         console.print(f"[red]Error in processor: {e}[/red]")
         processor.stop()
@@ -627,8 +636,20 @@ def queue_list(ctx: click.Context) -> None:
     is_flag=True,
     help="Force clear all items including those in processing",
 )
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Skip confirmation prompt",
+)
 @click.pass_context
-def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) -> None:
+def queue_clear(
+    ctx: click.Context,
+    completed: bool,
+    failed: bool,
+    force: bool,
+    yes: bool,
+) -> None:
     """Clear items from the queue."""
     config: SpindleConfig = ctx.obj["config"]
     queue_manager = QueueManager(config)
@@ -644,12 +665,12 @@ def queue_clear(ctx: click.Context, completed: bool, failed: bool, force: bool) 
         count = queue_manager.clear_failed()
         console.print(f"[green]Cleared {count} failed items[/green]")
     elif force:
-        if click.confirm(
+        if yes or click.confirm(
             "Are you sure you want to FORCE clear the entire queue (including processing items)?",
         ):
             count = queue_manager.clear_all(force=True)
             console.print(f"[green]Force cleared {count} items from queue[/green]")
-    elif click.confirm("Are you sure you want to clear the entire queue?"):
+    elif yes or click.confirm("Are you sure you want to clear the entire queue?"):
         try:
             count = queue_manager.clear_all()
             console.print(f"[green]Cleared {count} items from queue[/green]")

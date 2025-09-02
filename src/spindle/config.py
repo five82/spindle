@@ -26,6 +26,7 @@ class SpindleConfig(BaseModel):
     # TMDB Cache Settings
     tmdb_cache_ttl_days: int = Field(default=30)
     tmdb_runtime_tolerance_minutes: int = Field(default=5)
+    tmdb_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
 
     # Drapto integration
     drapto_quality_sd: int = Field(default=23)
@@ -48,8 +49,9 @@ class SpindleConfig(BaseModel):
 
     # Timeout Settings (seconds)
     makemkv_rip_timeout: int = Field(default=3600)  # 1 hour
-    makemkv_info_timeout: int = Field(default=60)  # 1 minute
+    makemkv_info_timeout: int = Field(default=300)  # 5 minutes
     makemkv_eject_timeout: int = Field(default=30)  # 30 seconds
+    bd_info_timeout: int = Field(default=300)  # 5 minutes
     drapto_version_timeout: int = Field(default=10)  # 10 seconds
     tmdb_request_timeout: int = Field(default=30)  # 30 seconds
     ntfy_request_timeout: int = Field(default=10)  # 10 seconds
@@ -81,7 +83,9 @@ class SpindleConfig(BaseModel):
 
     # Movie Detection
     movie_min_duration: int = Field(default=70)  # minutes
-    include_movie_extras: bool = Field(default=True)
+    include_extras: bool = Field(
+        default=False,
+    )  # Include extras/special features (movies and TV)
     max_extras_to_rip: int = Field(default=3)
     max_extras_duration: int = Field(default=30)  # minutes
     prefer_extended_versions: bool = Field(default=True)
@@ -231,6 +235,7 @@ tmdb_language = "en-US"                           # Language for TMDB metadata (
 # Content Detection & Analysis
 use_intelligent_disc_analysis = true              # Enable AI-powered content detection (only disable for troubleshooting)
 confidence_threshold = 0.7                        # Minimum confidence for automatic classification (0.0-1.0)
+tmdb_confidence_threshold = 0.8                   # Minimum confidence for TMDB disambiguation (0.0-1.0)
 prefer_api_over_heuristics = true                 # Prioritize TMDB data over pattern analysis
 
 # Media Duration Filtering (minutes)
@@ -244,7 +249,7 @@ max_extras_duration = 30                          # Maximum extra content length
 # Content Processing Behavior
 rip_all_episodes = true                           # Rip all episodes on disc
 episode_mapping_strategy = "hybrid"               # How to map titles to episodes: "duration", "sequential", "hybrid"
-include_movie_extras = false                      # Include extras/deleted scenes
+include_extras = false                            # Include extras/special features
 allow_short_content = true                        # Allow content < 20 minutes (cartoons)
 detect_cartoon_collections = true                 # Detect Looney Tunes style collections
 
@@ -261,8 +266,9 @@ drapto_preset = 4                                 # SVT-AV1 preset 0-13 (lower =
 
 # Operation Timeouts (seconds)
 makemkv_rip_timeout = 3600                        # MakeMKV ripping timeout (1 hour)
-makemkv_info_timeout = 60                         # MakeMKV disc info timeout (1 minute)
+makemkv_info_timeout = 300                        # MakeMKV disc info timeout (5 minutes)
 makemkv_eject_timeout = 30                        # Disc eject timeout (30 seconds)
+bd_info_timeout = 300                             # bd_info disc scan timeout (5 minutes)
 drapto_version_timeout = 10                       # Drapto version check timeout
 tmdb_request_timeout = 30                         # TMDB API request timeout
 ntfy_request_timeout = 10                         # Notification request timeout

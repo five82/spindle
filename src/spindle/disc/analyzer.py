@@ -67,6 +67,7 @@ class DiscAnalysisResult:
     titles_to_rip: list[Title]
     metadata: Any | None = None
     episode_mappings: dict[Title, EpisodeInfo] | None = None
+    enhanced_metadata: Any | None = None  # Enhanced metadata from bd_info/bdmt/mcmf
 
 
 class IntelligentDiscAnalyzer:
@@ -77,9 +78,10 @@ class IntelligentDiscAnalyzer:
         self.tmdb = TMDBClient(config)
         self.media_identifier = MediaIdentifier(config)
         # New enhanced metadata extractor
-        self.metadata_extractor = EnhancedDiscMetadataExtractor()
+        self.metadata_extractor = EnhancedDiscMetadataExtractor(config)
         # Intelligent title selector
         selection_criteria = SelectionCriteria(
+            include_extras=config.include_extras,
             max_extras=config.max_extras_to_rip,
             include_commentary=config.include_commentary_tracks,
             prefer_extended_versions=config.prefer_extended_versions,
@@ -109,7 +111,10 @@ class IntelligentDiscAnalyzer:
         enhanced_metadata = None
         if disc_path:
             logger.info("Phase 1: Extracting metadata from all available sources")
-            enhanced_metadata = self.metadata_extractor.extract_all_metadata(disc_path)
+            enhanced_metadata = self.metadata_extractor.extract_all_metadata(
+                disc_path,
+                disc_info.device,
+            )
             # Populate MakeMKV data with raw output for enhanced CINFO parsing
             if makemkv_output:
                 enhanced_metadata = (
@@ -143,8 +148,39 @@ class IntelligentDiscAnalyzer:
         elif not self.is_generic_disc_label(disc_info.label):
             title_candidates = [disc_info.label]
 
+        # Phase 2: Determine content type for intelligent TMDB search
+        logger.info("Phase 2: Determining content type from disc structure")
+        content_type = ContentType.UNKNOWN
+
+        # Try enhanced metadata first (volume ID patterns, etc.)
+        if enhanced_metadata and enhanced_metadata.is_tv_series():
+            content_type = ContentType.TV_SERIES
+            logger.info("Content type determined from volume ID/metadata: TV series")
+        else:
+            # Use title pattern analysis (duration patterns, etc.)
+            pattern_analysis = self.analyze_title_patterns(titles, disc_info.label)
+            if pattern_analysis.type == ContentType.TV_SERIES:
+                content_type = ContentType.TV_SERIES
+                logger.info(
+                    f"Content type determined from title patterns: TV series ({pattern_analysis.episode_count} episodes)",
+                )
+            elif pattern_analysis.type == ContentType.MOVIE:
+                content_type = ContentType.MOVIE
+                logger.info(
+                    f"Content type determined from title patterns: Movie (main: {pattern_analysis.main_feature_duration//60}min)",
+                )
+            else:
+                content_type = ContentType.MOVIE  # Default fallback
+                logger.info("Content type undetermined, defaulting to movie")
+
+        logger.info(f"Determined content type: {content_type.value}")
+
+        # Phase 3: Targeted TMDB identification based on content type
+        identified_media = None
         if title_candidates:
-            logger.info("Phase 2: Attempting intelligent content identification")
+            logger.info(
+                "Phase 3: Attempting intelligent content identification with targeted search",
+            )
             runtime_minutes = None
             main_title = self.get_main_title(titles)
             if main_title:
@@ -153,37 +189,25 @@ class IntelligentDiscAnalyzer:
             identified_media = await self.media_identifier.identify_disc_content(
                 title_candidates,
                 runtime_minutes,
+                content_type.value,  # Pass content type for targeted search
             )
 
             if identified_media:
                 logger.info(
-                    f"✓ Phase 2 SUCCESS: Identified as '{identified_media.title}' ({identified_media.year})",
+                    f"✓ Phase 3 SUCCESS: Identified as '{identified_media.title}' ({identified_media.year})",
                 )
+                # Update content type based on TMDB result if it was unknown
+                if content_type == ContentType.UNKNOWN:
+                    if identified_media.is_movie:
+                        content_type = ContentType.MOVIE
+                    elif identified_media.is_tv_show:
+                        content_type = ContentType.TV_SERIES
             else:
                 logger.info(
-                    "✗ Phase 2 FAILED: No matches found via intelligent identification",
+                    "✗ Phase 3 FAILED: No matches found via intelligent identification",
                 )
         else:
-            logger.info("Phase 2 SKIPPED: No usable title candidates found")
-
-        # Phase 3: Determine content type for intelligent selection
-        content_type = ContentType.UNKNOWN
-        if identified_media:
-            if identified_media.is_movie:
-                content_type = ContentType.MOVIE
-            elif identified_media.is_tv_show:
-                content_type = ContentType.TV_SERIES
-        elif enhanced_metadata and enhanced_metadata.is_tv_series():
-            content_type = ContentType.TV_SERIES
-        else:
-            # Try pattern analysis fallback
-            pattern_analysis = self.analyze_title_patterns(titles, disc_info.label)
-            if pattern_analysis.type == ContentType.TV_SERIES:
-                content_type = ContentType.TV_SERIES
-            elif pattern_analysis.type == ContentType.MOVIE:
-                content_type = ContentType.MOVIE
-
-        logger.info(f"Determined content type: {content_type.value}")
+            logger.info("Phase 3 SKIPPED: No usable title candidates found")
 
         # Phase 4: Intelligent title and track selection
         logger.info("Phase 4: Performing intelligent title and track selection")
@@ -208,6 +232,7 @@ class IntelligentDiscAnalyzer:
             titles_to_rip=selected_titles,
             metadata=identified_media,
             episode_mappings=None,
+            enhanced_metadata=enhanced_metadata,  # Include enhanced metadata from bd_info
         )
 
     async def identify_content_multi_api(
@@ -499,7 +524,7 @@ class IntelligentDiscAnalyzer:
         selected_titles = [main_feature]
 
         # Include extras if configured
-        if self.config.include_movie_extras:
+        if self.config.include_extras:
             # Find potential extras: shorter titles that could be bonus content
             extra_candidates = [
                 t

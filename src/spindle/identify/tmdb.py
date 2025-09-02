@@ -271,6 +271,57 @@ class TMDBClient:
             )
             return None
 
+    def _calculate_confidence_score(
+        self,
+        disc_runtime_minutes: int,
+        api_runtime_minutes: float,
+        popularity: float,
+        vote_average: float,
+        result_position: int,
+        tolerance_minutes: int = 5,
+    ) -> tuple[float, dict[str, float]]:
+        """Calculate confidence score for TMDB result disambiguation.
+
+        Returns:
+            Tuple of (confidence_score, score_breakdown)
+            - confidence_score: 0.0-1.0 confidence rating
+            - score_breakdown: Dict with individual scoring factors
+        """
+        scores = {}
+
+        # Runtime match score (0.0-0.5, most important factor)
+        runtime_diff = abs(api_runtime_minutes - disc_runtime_minutes)
+        if runtime_diff <= tolerance_minutes:
+            scores["runtime"] = 0.5  # Perfect runtime match
+        elif runtime_diff <= tolerance_minutes * 2:
+            scores["runtime"] = 0.3  # Close runtime match
+        elif runtime_diff <= tolerance_minutes * 4:
+            scores["runtime"] = 0.1  # Distant runtime match
+        else:
+            scores["runtime"] = 0.0  # No runtime match
+
+        # Popularity score (0.0-0.2)
+        # Scale popularity logarithmically (popular movies can have 1000+ popularity)
+        if popularity > 0:
+            normalized_popularity = min(1.0, popularity / 100.0)  # Cap at 100
+            scores["popularity"] = normalized_popularity * 0.2
+        else:
+            scores["popularity"] = 0.0
+
+        # Quality score (0.0-0.15)
+        if vote_average > 0:
+            scores["quality"] = (vote_average / 10.0) * 0.15
+        else:
+            scores["quality"] = 0.0
+
+        # Search position penalty (0.0-0.15)
+        # First result gets full points, subsequent results get less
+        position_score = max(0.0, 0.15 - (result_position * 0.03))
+        scores["position"] = position_score
+
+        total_confidence = sum(scores.values())
+        return total_confidence, scores
+
     async def search_with_runtime_verification(
         self,
         title: str,
@@ -278,13 +329,15 @@ class TMDBClient:
         year: int | None = None,
         media_type: str = "movie",
         tolerance_minutes: int = 5,
-    ) -> tuple[dict | None, list[dict] | None]:
-        """Search and verify results against disc runtime.
+        confidence_threshold: float = 0.8,
+    ) -> tuple[dict | None, list[dict] | None, float]:
+        """Search and verify results against disc runtime with confidence scoring.
 
         Returns:
-            Tuple of (verified_result, all_search_results)
-            - verified_result: The result that passed runtime verification, or None
+            Tuple of (verified_result, all_search_results, confidence_score)
+            - verified_result: The best result, or None if below confidence threshold
             - all_search_results: All search results from TMDB (for caching)
+            - confidence_score: 0.0-1.0 confidence rating for the selected result
         """
         if media_type == "movie":
             results = await self.search_movie(title, year)
@@ -292,38 +345,97 @@ class TMDBClient:
             results = await self.search_tv(title, year)
 
         if not results:
-            return None, None
+            return None, None, 0.0
 
-        # Check each result for runtime match
-        for result in results:
+        best_result = None
+        best_confidence = 0.0
+
+        # Evaluate each result with confidence scoring
+        for i, result in enumerate(results):
             if media_type == "movie":
                 details = await self.get_movie_details(result["id"])
                 if details and details.get("runtime"):
-                    api_runtime = details["runtime"]
-                    if abs(api_runtime - disc_runtime_minutes) <= tolerance_minutes:
-                        logger.info(
-                            f"Runtime match: disc={disc_runtime_minutes}m, "
-                            f"TMDB={api_runtime}m for '{details.get('title')}'",
-                        )
-                        return details, results
+                    api_runtime = float(details["runtime"])
+                    popularity = details.get("popularity", 0.0)
+                    vote_average = details.get("vote_average", 0.0)
+
+                    confidence, breakdown = self._calculate_confidence_score(
+                        disc_runtime_minutes=disc_runtime_minutes,
+                        api_runtime_minutes=api_runtime,
+                        popularity=popularity,
+                        vote_average=vote_average,
+                        result_position=i,
+                        tolerance_minutes=tolerance_minutes,
+                    )
+
+                    logger.info(
+                        f"Movie candidate #{i+1}: '{details.get('title')}' "
+                        f"({details.get('release_date', 'Unknown')[:4]}) - "
+                        f"Runtime: {api_runtime}m (disc: {disc_runtime_minutes}m), "
+                        f"Confidence: {confidence:.2f} "
+                        f"(runtime:{breakdown['runtime']:.2f}, pop:{breakdown['popularity']:.2f}, "
+                        f"quality:{breakdown['quality']:.2f}, pos:{breakdown['position']:.2f})",
+                    )
+
+                    if confidence > best_confidence:
+                        best_result = details
+                        best_confidence = confidence
             else:
                 details = await self.get_tv_details(result["id"])
                 if details and details.get("episode_run_time"):
-                    # TV shows have episode runtime arrays
                     runtimes = details["episode_run_time"]
                     if runtimes:
-                        avg_runtime = sum(runtimes) / len(runtimes)
-                        if abs(avg_runtime - disc_runtime_minutes) <= tolerance_minutes:
-                            logger.info(
-                                f"Runtime match: disc={disc_runtime_minutes}m, "
-                                f"TMDB={avg_runtime}m for '{details.get('name')}'",
-                            )
-                            return details, results
+                        api_runtime = sum(runtimes) / len(runtimes)
+                        popularity = details.get("popularity", 0.0)
+                        vote_average = details.get("vote_average", 0.0)
 
-        logger.info(f"No runtime matches found for '{title}' ({disc_runtime_minutes}m)")
-        return (
-            results[0] if results else None
-        ), results  # Return best match even without runtime verification
+                        confidence, breakdown = self._calculate_confidence_score(
+                            disc_runtime_minutes=disc_runtime_minutes,
+                            api_runtime_minutes=api_runtime,
+                            popularity=popularity,
+                            vote_average=vote_average,
+                            result_position=i,
+                            tolerance_minutes=tolerance_minutes,
+                        )
+
+                        logger.info(
+                            f"TV candidate #{i+1}: '{details.get('name')}' "
+                            f"({details.get('first_air_date', 'Unknown')[:4]}) - "
+                            f"Runtime: {api_runtime:.1f}m (disc: {disc_runtime_minutes}m), "
+                            f"Confidence: {confidence:.2f} "
+                            f"(runtime:{breakdown['runtime']:.2f}, pop:{breakdown['popularity']:.2f}, "
+                            f"quality:{breakdown['quality']:.2f}, pos:{breakdown['position']:.2f})",
+                        )
+
+                        if confidence > best_confidence:
+                            best_result = details
+                            best_confidence = confidence
+
+        # Log final decision
+        if best_result:
+            result_title = best_result.get("title" if media_type == "movie" else "name")
+            if best_confidence >= confidence_threshold:
+                logger.info(
+                    f"✓ High confidence match: '{result_title}' "
+                    f"(confidence: {best_confidence:.2f} >= {confidence_threshold})",
+                )
+            else:
+                logger.warning(
+                    f"⚠ Low confidence match: '{result_title}' "
+                    f"(confidence: {best_confidence:.2f} < {confidence_threshold}) - "
+                    f"Consider manual review",
+                )
+        else:
+            logger.warning(
+                f"No viable candidates found for '{title}' ({disc_runtime_minutes}m)",
+            )
+            return results[0] if results else None, results, 0.0
+
+        # Return best result only if confidence meets threshold
+        if best_confidence >= confidence_threshold:
+            return best_result, results, best_confidence
+        # Return None to trigger manual review, but keep results for caching
+        return None, results, best_confidence
 
 
 class MediaIdentifier:
@@ -583,13 +695,14 @@ class MediaIdentifier:
             title = title.replace(year_pattern, "").strip()
 
         # Try runtime-verified search
-        movie_result, movie_search_results = (
+        movie_result, movie_search_results, movie_confidence = (
             await self.tmdb.search_with_runtime_verification(
                 title=title,
                 disc_runtime_minutes=runtime_minutes,
                 year=year,
                 media_type="movie",
-                tolerance_minutes=5,
+                tolerance_minutes=self.config.tmdb_runtime_tolerance_minutes,
+                confidence_threshold=self.config.tmdb_confidence_threshold,
             )
         )
 
@@ -619,12 +732,15 @@ class MediaIdentifier:
             )
 
         # Try TV show if movie search failed
-        tv_result, tv_search_results = await self.tmdb.search_with_runtime_verification(
-            title=title,
-            disc_runtime_minutes=runtime_minutes,
-            year=year,
-            media_type="tv",
-            tolerance_minutes=5,
+        tv_result, tv_search_results, tv_confidence = (
+            await self.tmdb.search_with_runtime_verification(
+                title=title,
+                disc_runtime_minutes=runtime_minutes,
+                year=year,
+                media_type="tv",
+                tolerance_minutes=5,
+                confidence_threshold=0.8,
+            )
         )
 
         if tv_result:
@@ -654,6 +770,17 @@ class MediaIdentifier:
                 ),
                 search_cache,
             )
+        if tv_search_results:
+            # Low confidence - cache results but return None for manual review
+            logger.warning(
+                f"Low confidence TV identification for '{disc_title}' - "
+                f"marking for manual review (confidence: {tv_confidence:.2f})",
+            )
+            search_cache = {
+                "movie": movie_search_results or [],
+                "tv": tv_search_results or [],
+            }
+            return None, search_cache
 
         # No matches found, but return search results for caching
         logger.warning(
@@ -717,6 +844,7 @@ class MediaIdentifier:
         self,
         title_candidates: list[str],
         runtime_minutes: int | None = None,
+        content_type: str | None = None,
     ) -> MediaInfo | None:
         """Identify disc content using multiple title sources and caching."""
         # Step 1: Extract best title from all sources
@@ -726,78 +854,192 @@ class MediaIdentifier:
             logger.warning("No usable title found in disc metadata")
             return None
 
-        logger.info(f"Identifying disc content with title: '{clean_title}'")
+        # Check if title is too generic for TMDB search
+        if self._is_generic_title(clean_title):
+            logger.info(f"Skipping TMDB search for generic title: '{clean_title}'")
+            return None
+
+        # Determine target media type for focused search
+        target_media_type = "movie"  # Default fallback
+        if content_type:
+            if content_type.lower() in ["tv_series", "tv", "television"]:
+                target_media_type = "tv"
+            elif content_type.lower() in ["movie", "film"]:
+                target_media_type = "movie"
+
+        logger.info(
+            f"Identifying disc content with title: '{clean_title}' (target: {target_media_type})",
+        )
 
         # Step 2: Check cache first
-        cached = self.cache.search_cache(clean_title, "movie")
+        cached = self.cache.search_cache(clean_title, target_media_type)
         if cached and cached.is_valid():
-            logger.info(f"Using cached TMDB results for '{clean_title}'")
+            logger.info(
+                f"Using cached TMDB results for '{clean_title}' ({target_media_type})",
+            )
             # Use cached detailed info if available, otherwise use first search result
             if cached.detailed_info:
-                return self._convert_tmdb_to_media_info(cached.detailed_info, "movie")
+                return self._convert_tmdb_to_media_info(
+                    cached.detailed_info,
+                    target_media_type,
+                )
             if cached.results:
                 # Get detailed info for first result
-                detailed_info = await self.tmdb.get_movie_details(
-                    cached.results[0]["id"],
-                )
+                if target_media_type == "movie":
+                    detailed_info = await self.tmdb.get_movie_details(
+                        cached.results[0]["id"],
+                    )
+                else:
+                    detailed_info = await self.tmdb.get_tv_details(
+                        cached.results[0]["id"],
+                    )
                 if detailed_info:
                     # Cache the detailed info for future use
                     self.cache.cache_results(
                         clean_title,
                         cached.results,
+                        target_media_type,
+                        detailed_info,
+                    )
+                    return self._convert_tmdb_to_media_info(
+                        detailed_info,
+                        target_media_type,
+                    )
+
+        # Step 3: Make targeted TMDB search based on content type
+        if target_media_type == "movie":
+            # Movie search with optional runtime verification
+            if runtime_minutes:
+                logger.info(
+                    f"Searching TMDB movies with runtime verification ({runtime_minutes} min)",
+                )
+                movie_result, movie_search_results, movie_confidence = (
+                    await self.tmdb.search_with_runtime_verification(
+                        title=clean_title,
+                        disc_runtime_minutes=runtime_minutes,
+                        media_type="movie",
+                        tolerance_minutes=self.config.tmdb_runtime_tolerance_minutes,
+                        confidence_threshold=self.config.tmdb_confidence_threshold,
+                    )
+                )
+                if movie_result:
+                    # Cache search results
+                    if movie_search_results:
+                        self.cache.cache_results(
+                            clean_title,
+                            movie_search_results,
+                            "movie",
+                            movie_result,
+                        )
+                    return self._convert_tmdb_to_media_info(movie_result, "movie")
+                if movie_search_results:
+                    # Low confidence - cache results but return None for manual review
+                    logger.warning(
+                        f"Low confidence identification for '{clean_title}' - "
+                        f"marking for manual review (confidence: {movie_confidence:.2f})",
+                    )
+                    self.cache.cache_results(clean_title, movie_search_results, "movie")
+                    return None
+
+            # Fallback to regular movie search
+            logger.info("Searching TMDB movies")
+            movie_results = await self.tmdb.search_movie(clean_title)
+            if movie_results:
+                detailed_info = await self.tmdb.get_movie_details(
+                    movie_results[0]["id"],
+                )
+                if detailed_info:
+                    self.cache.cache_results(
+                        clean_title,
+                        movie_results,
                         "movie",
                         detailed_info,
                     )
                     return self._convert_tmdb_to_media_info(detailed_info, "movie")
 
-        # Step 3: Perform TMDB search with runtime verification if available
-        if runtime_minutes:
-            movie_result, movie_search_results = (
-                await self.tmdb.search_with_runtime_verification(
-                    title=clean_title,
-                    disc_runtime_minutes=runtime_minutes,
-                    media_type="movie",
-                    tolerance_minutes=5,
-                )
-            )
-
-            if movie_result:
-                # Cache search results
-                if movie_search_results:
+        else:
+            # TV search
+            logger.info("Searching TMDB TV shows")
+            tv_results = await self.tmdb.search_tv(clean_title)
+            if tv_results:
+                detailed_info = await self.tmdb.get_tv_details(tv_results[0]["id"])
+                if detailed_info:
                     self.cache.cache_results(
                         clean_title,
-                        movie_search_results,
-                        "movie",
-                        movie_result,
+                        tv_results,
+                        "tv",
+                        detailed_info,
                     )
-                return self._convert_tmdb_to_media_info(movie_result, "movie")
+                    return self._convert_tmdb_to_media_info(detailed_info, "tv")
 
-        # Step 4: Fallback to regular search without runtime verification
-        movie_results = await self.tmdb.search_movie(clean_title)
-        if movie_results:
-            # Get detailed info for best match
-            detailed_info = await self.tmdb.get_movie_details(movie_results[0]["id"])
-            if detailed_info:
-                # Cache results
-                self.cache.cache_results(
-                    clean_title,
-                    movie_results,
-                    "movie",
-                    detailed_info,
+        # Step 4: If targeted search failed, try the opposite type as fallback
+        fallback_type = "tv" if target_media_type == "movie" else "movie"
+        logger.info(f"Targeted search failed, trying fallback: {fallback_type}")
+
+        if fallback_type == "movie":
+            movie_results = await self.tmdb.search_movie(clean_title)
+            if movie_results:
+                detailed_info = await self.tmdb.get_movie_details(
+                    movie_results[0]["id"],
                 )
-                return self._convert_tmdb_to_media_info(detailed_info, "movie")
+                if detailed_info:
+                    self.cache.cache_results(
+                        clean_title,
+                        movie_results,
+                        "movie",
+                        detailed_info,
+                    )
+                    return self._convert_tmdb_to_media_info(detailed_info, "movie")
+        else:
+            tv_results = await self.tmdb.search_tv(clean_title)
+            if tv_results:
+                detailed_info = await self.tmdb.get_tv_details(tv_results[0]["id"])
+                if detailed_info:
+                    self.cache.cache_results(
+                        clean_title,
+                        tv_results,
+                        "tv",
+                        detailed_info,
+                    )
+                    return self._convert_tmdb_to_media_info(detailed_info, "tv")
 
-        # Step 5: Try TV search as fallback
-        tv_results = await self.tmdb.search_tv(clean_title)
-        if tv_results:
-            detailed_info = await self.tmdb.get_tv_details(tv_results[0]["id"])
-            if detailed_info:
-                # Cache results
-                self.cache.cache_results(clean_title, tv_results, "tv", detailed_info)
-                return self._convert_tmdb_to_media_info(detailed_info, "tv")
-
-        logger.warning(f"No TMDB matches found for '{clean_title}'")
+        logger.warning(
+            f"No TMDB matches found for '{clean_title}' in either {target_media_type} or {fallback_type}",
+        )
         return None
+
+    def _is_generic_title(self, title: str) -> bool:
+        """Check if title is too generic for TMDB search."""
+        if not title or len(title.strip()) < 3:
+            return True
+
+        title_upper = title.upper().strip()
+
+        generic_patterns = [
+            "LOGICAL VOLUME ID",
+            "LOGICAL_VOLUME_ID",
+            "DVD VIDEO",
+            "DVD_VIDEO",
+            "BLURAY",
+            "BLU RAY",
+            "BD ROM",
+            "BD_ROM",
+            "UNTITLED",
+            "DISC",
+            "MOVIE",
+            "FILM",
+            "VIDEO",
+            r"^\d+$",  # Just numbers
+            r"^[A-Z0-9_\s]{1,4}$",  # Very short codes/labels
+            r"^DISC\s*\d*$",  # DISC, DISC1, etc.
+            r"^TITLE\s*\d*$",  # TITLE, TITLE1, etc.
+        ]
+
+        for pattern in generic_patterns:
+            if re.match(pattern, title_upper) or pattern == title_upper:
+                return True
+
+        return False
 
     def _convert_tmdb_to_media_info(
         self,

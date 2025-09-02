@@ -23,6 +23,7 @@ class SelectionCriteria:
     """Criteria for title and track selection."""
 
     # Title selection
+    include_extras: bool = False  # Whether to include extras/special features
     max_extras: int = 3
     min_extra_duration: int = 300  # 5 minutes
     max_extra_duration: int = 1800  # 30 minutes
@@ -107,15 +108,23 @@ class IntelligentTitleSelector:
         # Detect multiple versions (theatrical, director's cut, extended)
         main_titles = self._detect_movie_versions(movie_candidates)
 
-        # Select extras (special features)
-        extra_titles = self._select_extras(
-            titles,
-            exclude_titles=main_titles,
-            min_duration=self.criteria.min_extra_duration,
-            max_duration=self.criteria.max_extra_duration,
-        )
+        # Select extras (special features) only if enabled
+        extra_titles = []
+        if self.criteria.include_extras:
+            self.logger.info("include_extras is True, selecting extras")
+            extra_titles = self._select_extras(
+                titles,
+                exclude_titles=main_titles,
+                min_duration=self.criteria.min_extra_duration,
+                max_duration=self.criteria.max_extra_duration,
+            )
+        else:
+            self.logger.info("include_extras is False, skipping extras")
+
+        self.logger.info(f"Selected {len(extra_titles)} extras from title selector")
 
         # Select tracks for each title
+        self.logger.info("Track selection for selected titles:")
         selected_tracks = {}
         for title in main_titles + extra_titles:
             selected_tracks[title] = self._select_tracks_for_title(
@@ -323,6 +332,7 @@ class IntelligentTitleSelector:
         extra_titles = extra_titles[: self.criteria.max_extras]
 
         # Select tracks
+        self.logger.info("Track selection for selected titles:")
         selected_tracks = {}
         for title in main_titles + extra_titles:
             selected_tracks[title] = self._select_tracks_for_title(
@@ -393,6 +403,7 @@ class IntelligentTitleSelector:
         extra_titles: list[Title] = []
 
         # Select tracks
+        self.logger.info("Track selection for selected titles:")
         selected_tracks = {}
         for title in main_titles:
             selected_tracks[title] = self._select_tracks_for_title(
@@ -418,6 +429,10 @@ class IntelligentTitleSelector:
 
         # Always include all video tracks
         selected.extend(title.video_tracks)
+        if title.video_tracks:
+            self.logger.info(
+                f"  Including {len(title.video_tracks)} video track(s) for {title.name}",
+            )
 
         # Select audio tracks
         audio_tracks = self._select_audio_tracks(title, is_main_content)
@@ -427,27 +442,62 @@ class IntelligentTitleSelector:
         if self.criteria.include_subtitles:
             subtitle_tracks = self._select_subtitle_tracks(title)
             selected.extend(subtitle_tracks)
+            if subtitle_tracks:
+                self.logger.info(
+                    f"  Including {len(subtitle_tracks)} subtitle track(s) for {title.name}",
+                )
 
         return selected
 
     def _select_audio_tracks(self, title: Title, is_main_content: bool) -> list[Track]:
         """Select audio tracks based on criteria."""
         selected = []
+        all_audio = title.audio_tracks
+
+        self.logger.info(
+            f"  Analyzing {len(all_audio)} audio track(s) for {title.name}",
+        )
+        for track in all_audio:
+            self.logger.info(
+                f"    Available: {track.codec} {track.language} - {track.title or 'No title'}",
+            )
 
         # Get main audio tracks (non-commentary)
         main_audio = title.get_main_audio_tracks()
+        self.logger.info(
+            f"  Found {len(main_audio)} main audio track(s) (non-commentary)",
+        )
 
         if main_audio:
             # Select highest quality main audio
             best_main = self._get_highest_quality_audio(main_audio)
             if best_main:
                 selected.append(best_main)
+                self.logger.info(
+                    f"  ✓ Selected main audio: {best_main.codec} {best_main.language} - {best_main.title or 'Primary audio'}",
+                )
 
         # Include commentary tracks if enabled and this is main content
         if self.criteria.include_commentary and is_main_content:
             commentary_tracks = title.get_commentary_tracks()
-            # Limit commentary tracks
-            selected.extend(commentary_tracks[: self.criteria.max_commentary_tracks])
+            if commentary_tracks:
+                # Limit commentary tracks
+                selected_commentary = commentary_tracks[
+                    : self.criteria.max_commentary_tracks
+                ]
+                selected.extend(selected_commentary)
+                self.logger.info(
+                    f"  ✓ Selected {len(selected_commentary)} commentary track(s)",
+                )
+                for track in selected_commentary:
+                    self.logger.info(
+                        f"    Commentary: {track.codec} {track.language} - {track.title or 'Commentary'}",
+                    )
+        elif self.criteria.include_commentary:
+            self.logger.info("  Commentary tracks disabled for extras")
+
+        if not selected:
+            self.logger.warning(f"  ⚠ No audio tracks selected for {title.name}")
 
         return selected
 

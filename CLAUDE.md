@@ -106,36 +106,74 @@ The encoder wrapper integrates with drapto's JSON progress output system:
 
 ### Queue Management (queue/manager.py)
 
-SQLite-based queue system with:
-- Status tracking through processing stages
-- Real-time progress field updates (stage, percent, message)
-- Database migration support for schema changes
-- Thread-safe operations for concurrent access
+SQLite-based queue system with clean workflow separation:
+- **Two-Phase Processing**: Identification phase followed by ripping phase
+- **Status tracking**: `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED`
+- **Analysis Result Storage**: Persists identification results between phases using `rip_spec_data` field
+- **Real-time progress tracking**: Stage, percentage, and detailed messages
+- **Database migrations**: Automatic schema evolution with version management
+- **Thread-safe operations**: Concurrent access support
 
 ### Enhanced Error Handling (error_handling.py)
 
 Comprehensive user-friendly error management system:
-- Categorized error types with specific solutions (Configuration, Dependency, Hardware, Media, etc.)
-- Rich console display with emojis, colors, and actionable guidance
-- Smart error classification based on error patterns
-- Integration with all major components (ripper, encoder, processor)
-- Distinguishes between recoverable and non-recoverable errors
+- **Phase-specific errors**: Separate handling for identification vs ripping failures
+- **Categorized error types**: Configuration, Dependency, Hardware, Media, etc. with specific solutions
+- **Rich console display**: Emojis, colors, and actionable guidance
+- **Smart error classification**: Pattern-based error detection
+- **Recovery guidance**: Clear next steps for common issues
+- **Integration across components**: Consistent error handling throughout the system
 
-### Continuous Processing (processor.py)
+### Workflow Processor (processor.py)
 
-Orchestrates the complete workflow:
-- Disc monitoring and automatic ripping
-- Background queue processing
-- Real-time progress updates and logging
+Clean separation of concerns with optimal resource usage:
+- **Identification Phase**: Pure content analysis and rip planning
+  - Disc scanning and title analysis
+  - TMDB-based content identification  
+  - Intelligent title selection and filename planning
+  - Episode mapping for TV shows
+- **Ripping Phase**: Execution of predetermined rip plan
+  - Rips only selected titles with correct names
+  - **Disc ejection on completion** - frees drive for next disc
+- **Background Processing**: Non-blocking encoding and organization
+  - Encoding, organizing, and Plex import happen in background
+  - Multiple discs can be in various processing stages simultaneously
 - Enhanced error handling with user-friendly messages
 
-**Disc Ejection Behavior**: Discs are only ejected upon successful completion of ripping. Failed rips do NOT eject the disc, allowing users to retry or investigate the issue without having to reinsert the disc. This provides clear feedback that ejection = success, no ejection = needs attention.
+## Optimized Workflow Design
 
-**"Insert and Forget" Workflow**: The combination of disc ejection behavior and ntfy notifications creates an optimal unattended processing experience:
-- **Success**: Disc auto-ejects + notification confirms completion → ready for next disc
-- **Failure**: Disc remains in drive + ntfy alert explains what went wrong → can retry remotely or investigate later
-- Users maintain context about which disc failed without needing to reinsert for retry
-- Remote notifications eliminate the need to manually check status, enabling true "insert and forget" operation
+### Complete Processing Pipeline
+```
+PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED (disc ejected) → ENCODING (background) → ENCODED (background) → ORGANIZING (background) → COMPLETED (ready in Plex)
+```
+
+### Workflow Phase Separation
+
+**Phase 1: Disc-Dependent Operations (Blocking)**
+- **PENDING**: Disc detected and queued
+- **IDENTIFYING**: Content analysis, TMDB lookup, title selection, filename planning
+- **IDENTIFIED**: Rip plan determined, ready to execute
+- **RIPPING**: Extract selected titles with predetermined names
+- **RIPPED**: ✅ **Disc ejected** - optical drive freed for next disc
+
+**Phase 2: Background Processing (Non-Blocking)**
+- **ENCODING**: AV1 encoding with drapto (CPU-intensive, concurrent)
+- **ENCODED**: Video compression complete  
+- **ORGANIZING**: Move to Plex library structure, trigger scan
+- **COMPLETED**: ✅ **Media ready to watch in Plex**
+
+### Optimal Resource Usage
+
+**Disc Ejection Behavior**: Discs are ejected immediately after successful ripping completion. This provides:
+- **Clear feedback**: Ejection = ready for next disc, no ejection = needs attention
+- **Optimal throughput**: Drive freed ASAP for continuous processing
+- **Error context**: Failed rips keep disc inserted for retry without reinsertion
+
+**True "Insert and Forget" Experience**:
+- **Multiple concurrent workflows**: Several discs can be in different background stages
+- **Unattended operation**: ntfy notifications for key milestones (ripped, completed, errors)
+- **Maximum efficiency**: Expensive optical drive resource used minimally
+- **Remote monitoring**: Full status visibility without physical presence
 
 ## Development Workflow
 
@@ -197,12 +235,34 @@ Development configuration at `~/.config/spindle/config.toml`:
 - Set test TMDB API key
 - Configure test Plex instance
 
-### Database Migrations
+### Database Schema & Migrations
 
-Queue manager handles schema migrations automatically:
-- New columns added with ALTER TABLE statements
-- Graceful handling of existing databases
-- Progress fields: progress_stage, progress_percent, progress_message
+Queue manager handles schema evolution automatically with version-controlled migrations:
+
+**Current Schema (Version 2)**:
+- **Core fields**: id, source_path, disc_title, status, media_info_json, ripped_file, encoded_file, final_file
+- **Progress tracking**: progress_stage, progress_percent, progress_message (Migration 1)
+- **Workflow separation**: rip_spec_data (Migration 2) - stores identification results between phases
+
+**Migration System**:
+- **Version tracking**: schema_version table maintains current database version
+- **Automatic upgrades**: New columns added via ALTER TABLE statements on startup
+- **Graceful fallbacks**: Older databases work seamlessly with missing column handling
+- **Data preservation**: All existing queue items and progress retained during upgrades
+
+**Rip Specification Storage** (`rip_spec_data` field):
+```json
+{
+  "analysis_result": {
+    "content_type": "movie|tv_series", 
+    "confidence": 0.95,
+    "titles_to_rip": [{"index": 1, "name": "Main Feature", "duration": 7200}],
+    "episode_mappings": {"1": {"season_number": 1, "episode_number": 1, "episode_title": "Pilot"}}
+  },
+  "disc_info": {"label": "MOVIE_TITLE", "device": "/dev/sr0"},
+  "is_multi_disc": false
+}
+```
 
 ## Integration Points
 
@@ -281,28 +341,47 @@ The project uses a focused, essential test suite designed to validate user-facin
 - **Minimal Redundancy** - No duplicate coverage of the same behavior patterns
 - **Fast Execution** - Essential tests run quickly for rapid development feedback
 
-## Common Tasks
+## Common Development Tasks
 
-### Adding New Progress Event Types
+### Adding New Workflow Phases
+
+When extending the processing pipeline:
+
+1. **Add new status** to `QueueItemStatus` enum in `queue/manager.py`
+2. **Update processor logic** in `processor.py`:
+   - Add new method for phase (e.g., `_new_phase_item()`)
+   - Update `_get_next_processable_item()` to include new status
+   - Update `_process_single_item()` workflow routing
+3. **Database migration** (if storing new data):
+   - Add migration method `_migration_00X_add_new_field()`
+   - Update migration list in `_apply_migrations()`
+   - Update `update_item()` and `_row_to_item()` methods
+4. **Update CLI display** in `cli.py` for new status visualization
+5. **Add tests** covering the new workflow stage
+
+### Modifying Identification Logic
+
+For changes to content analysis and title selection:
+
+1. **Update `disc/analyzer.py`** for new identification patterns
+2. **Modify `rip_spec_data` structure** in `_complete_disc_identification()`
+3. **Update database schema** if storing additional analysis data
+4. **Extend `_reconstruct_rip_spec_from_item()`** to handle new data
+5. **Add TMDB API integration** if new metadata fields needed
+
+### Adding Progress Event Types
 
 1. Update drapto_wrapper.py progress callback handling
-2. Add new progress fields to queue/manager.py if needed
-3. Update database schema with migration
+2. Add new progress fields to queue/manager.py if needed  
+3. Update database schema with migration if persistent storage needed
 4. Add tests for new event handling
 
 ### Configuration Changes
 
-1. Update config.py with new fields
-2. Add validation and defaults
-3. Update config.toml sample
-4. Document in README.md
-
-### New Queue Status Types
-
-1. Add to QueueItemStatus enum
-2. Update processor workflow logic
-3. Add database handling
-4. Update status display in CLI
+1. Update config.py with new fields and validation
+2. Add defaults and documentation
+3. Update sample config.toml
+4. Test configuration loading and validation
 
 ## Debugging
 
@@ -315,18 +394,40 @@ The project uses a focused, essential test suite designed to validate user-facin
 ### Common Issues
 
 1. **uv not found** - Install uv package manager first
-2. **Permission errors** - Check file/directory ownership
+2. **Permission errors** - Check file/directory ownership  
 3. **Drapto not found** - Install from GitHub with cargo
 4. **Database lock** - Ensure single spindle instance
 5. **Progress not updating** - Verify JSON progress flag and parsing
+6. **Disc not ejecting** - Check if ripping completed successfully (only successful rips eject disc)
+7. **Stuck in IDENTIFYING** - TMDB API issues or disc not properly mounted
+8. **Missing rip_spec_data** - Database migration may not have run; restart application
+
+### Workflow Debugging
+
+**Phase-specific debugging**:
+- **IDENTIFYING phase**: Check TMDB connectivity, disc mount points, and MakeMKV scan results
+- **RIPPING phase**: Verify `rip_spec_data` contains valid title selection and analysis results  
+- **Background phases**: Monitor separate encoding/organization processes, check drapto availability
+
+**Database inspection**:
+```bash
+# View queue items with all fields
+sqlite3 ~/.local/share/spindle/logs/queue.db "SELECT id, disc_title, status, progress_stage, progress_percent FROM queue_items;"
+
+# Check rip specification data
+sqlite3 ~/.local/share/spindle/logs/queue.db "SELECT disc_title, rip_spec_data FROM queue_items WHERE rip_spec_data IS NOT NULL;"
+
+# Monitor workflow transitions
+sqlite3 ~/.local/share/spindle/logs/queue.db "SELECT disc_title, status, updated_at FROM queue_items ORDER BY updated_at DESC LIMIT 10;"
+```
 
 ### Error Handling
 
-The enhanced error handling system provides user-friendly messages with:
-- Categorized error types with specific solutions
-- Rich console display with emojis and colors
-- Smart error classification for common issues
-- Clear guidance for recovery steps
+Phase-aware error handling with user-friendly messages:
+- **Identification errors**: TMDB connectivity, disc mounting, content recognition
+- **Ripping errors**: MakeMKV issues, disc read problems, storage space
+- **Background errors**: drapto failures, Plex connectivity, file organization issues
+- **Rich console display**: Categorized errors with emojis, colors, and specific recovery guidance
 
 ## Performance Considerations
 

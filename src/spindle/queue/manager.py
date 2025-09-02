@@ -51,6 +51,7 @@ class QueueItem:
         progress_stage: str | None = None,
         progress_percent: float = 0.0,
         progress_message: str | None = None,
+        rip_spec_data: dict | None = None,
     ):
         self.item_id = item_id
         self.source_path = source_path
@@ -66,6 +67,7 @@ class QueueItem:
         self.progress_stage = progress_stage
         self.progress_percent = progress_percent
         self.progress_message = progress_message
+        self.rip_spec_data = rip_spec_data
 
     def __str__(self) -> str:
         if self.media_info:
@@ -150,6 +152,7 @@ class QueueManager:
         # Apply migrations in order
         migrations = [
             (1, self._migration_001_add_progress_columns),
+            (2, self._migration_002_add_rip_spec_data),
             # Future migrations go here
         ]
 
@@ -230,6 +233,32 @@ class QueueManager:
                     # Unexpected error
                     msg = f"Unexpected error checking column {column_name}: {e}"
                     raise RuntimeError(msg) from e
+
+    def _migration_002_add_rip_spec_data(self, conn: sqlite3.Connection) -> None:
+        """Migration 2: Add rip specification data column."""
+
+        # Check if column already exists
+        try:
+            # Test if column exists by selecting from it
+            conn.execute("SELECT rip_spec_data FROM queue_items LIMIT 1")
+            logger.debug("Column rip_spec_data already exists")
+        except sqlite3.OperationalError as e:
+            if "no such column" in str(e).lower():
+                # Column doesn't exist, add it
+                logger.info("Adding column rip_spec_data")
+                conn.execute("ALTER TABLE queue_items ADD COLUMN rip_spec_data TEXT")
+
+                # Verify the column was added
+                try:
+                    conn.execute("SELECT rip_spec_data FROM queue_items LIMIT 1")
+                    logger.debug("Successfully verified column rip_spec_data")
+                except sqlite3.OperationalError:
+                    msg = "Failed to add column rip_spec_data"
+                    raise RuntimeError(msg) from None
+            else:
+                # Unexpected error
+                msg = f"Unexpected error checking column rip_spec_data: {e}"
+                raise RuntimeError(msg) from e
 
     def add_disc(self, disc_title: str) -> QueueItem:
         """Add a disc to the queue."""
@@ -316,6 +345,11 @@ class QueueManager:
                 },
             )
 
+        rip_spec_json = None
+        if item.rip_spec_data:
+            # Serialize rip spec data to JSON
+            rip_spec_json = json.dumps(item.rip_spec_data)
+
         with self._get_connection() as conn:
             conn.execute(
                 """
@@ -323,7 +357,7 @@ class QueueManager:
                 SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
                     ripped_file = ?, encoded_file = ?, final_file = ?,
                     error_message = ?, updated_at = ?, progress_stage = ?,
-                    progress_percent = ?, progress_message = ?
+                    progress_percent = ?, progress_message = ?, rip_spec_data = ?
                 WHERE id = ?
             """,
                 (
@@ -339,6 +373,7 @@ class QueueManager:
                     item.progress_stage,
                     item.progress_percent,
                     item.progress_message,
+                    rip_spec_json,
                     item.item_id,
                 ),
             )
@@ -576,6 +611,7 @@ class QueueManager:
                         "progress_stage",
                         "progress_percent",
                         "progress_message",
+                        "rip_spec_data",
                     }
 
                     health_info["columns_present"] = list(existing_columns)
@@ -652,6 +688,16 @@ class QueueManager:
         except (KeyError, IndexError):
             progress_message = None
 
+        # Handle rip spec data field with fallbacks for older database schemas
+        rip_spec_data = None
+        try:
+            if row["rip_spec_data"]:
+                rip_spec_data = json.loads(row["rip_spec_data"])
+        except (KeyError, IndexError, json.JSONDecodeError) as e:
+            if not isinstance(e, KeyError | IndexError):
+                logger.warning("Failed to deserialize rip spec data: %s", e)
+            rip_spec_data = None
+
         return QueueItem(
             item_id=row["id"],
             source_path=Path(row["source_path"]) if row["source_path"] else None,
@@ -667,4 +713,5 @@ class QueueManager:
             progress_stage=progress_stage,
             progress_percent=progress_percent,
             progress_message=progress_message,
+            rip_spec_data=rip_spec_data,
         )

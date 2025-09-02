@@ -3,6 +3,7 @@
 import logging
 import re
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -148,6 +149,7 @@ class MakeMKVRipper:
         self.makemkv_con = config.makemkv_con
         self._last_progress_percent = -1.0  # Track last reported progress
         self._progress_report_threshold = 5  # Only report every 5% change
+        self._ripping_started = False  # Track when actual ripping begins
 
     def scan_disc(self, device: str | None = None) -> list[Title]:
         """Scan disc and return available titles."""
@@ -168,6 +170,9 @@ class MakeMKVRipper:
             # Run makemkvcon to get disc info
             cmd = [self.makemkv_con, "info", f"dev:{device}", "--robot"]
 
+            # Show progress during long scan
+            start_time = time.time()
+
             result = subprocess.run(
                 cmd,
                 check=False,
@@ -175,6 +180,9 @@ class MakeMKVRipper:
                 text=True,
                 timeout=self.config.makemkv_info_timeout,
             )
+
+            scan_duration = time.time() - start_time
+            logger.info(f"MakeMKV scan completed in {scan_duration:.1f}s")
 
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout
@@ -305,11 +313,29 @@ class MakeMKVRipper:
                             recoverable=True,
                         )
                     if "failed" in text.lower() or "error" in text.lower():
-                        msg = "MakeMKV"
+                        # Provide user-friendly error messages based on common issues
+                        if "copy protection" in text.lower() or "aacs" in text.lower():
+                            msg = "Disc is copy protected and cannot be read"
+                            solution = "This disc has copy protection that MakeMKV cannot bypass. Try a different disc or update your MakeMKV license."
+                        elif "no disc" in text.lower() or "not found" in text.lower():
+                            msg = "No readable disc found in drive"
+                            solution = "Make sure the disc is properly inserted and the drive door is closed. Try ejecting and reinserting the disc."
+                        elif (
+                            "read error" in text.lower() or "i/o error" in text.lower()
+                        ):
+                            msg = "Disc read error - disc may be damaged or dirty"
+                            solution = "Clean the disc with a soft cloth. If the problem persists, the disc may be damaged."
+                        elif "timeout" in text.lower():
+                            msg = "Disc scanning timed out - drive may be slow or disc is complex"
+                            solution = "Try again, or increase the makemkv_info_timeout setting in your config."
+                        else:
+                            msg = "MakeMKV could not read this disc"
+                            solution = "Check disc quality, drive compatibility, and ensure MakeMKV is up to date. See logs for technical details."
+
                         raise ExternalToolError(
                             msg,
                             details=text,
-                            solution="Check disc quality and drive compatibility",
+                            solution=solution,
                         )
 
         titles: dict[int, dict] = {}
@@ -352,12 +378,12 @@ class MakeMKVRipper:
             if not line.startswith("SINFO:"):
                 continue
 
-            # Parse SINFO lines: SINFO:title_id,stream_id,attr_id,value
-            match = re.match(r"SINFO:(\d+),(\d+),(\d+),(.+)", line)
+            # Parse SINFO lines: SINFO:title_id,stream_id,attr_id,type_code,"type_name"
+            match = re.match(r"SINFO:(\d+),(\d+),(\d+),(\d+),(.+)", line)
             if not match:
                 continue
 
-            title_id, stream_id, attr_id, value = match.groups()
+            title_id, stream_id, attr_id, type_code, value = match.groups()
             title_id = int(title_id)
             stream_id = int(stream_id)
             attr_id = int(attr_id)
@@ -395,6 +421,10 @@ class MakeMKVRipper:
                     track_info["track_type"] = "audio"
                 elif value == "Subtitles":
                     track_info["track_type"] = "subtitle"
+                else:
+                    logger.warning(
+                        f"Unknown track type: '{value}' for title {title_id}, stream {stream_id}",
+                    )
             elif attr_id == 6:  # Codec
                 track_info["codec"] = value.strip('"')
             elif attr_id == 3:  # Language
@@ -428,6 +458,12 @@ class MakeMKVRipper:
                 name=title_data["name"],
             )
             title_objects.append(title)
+
+            # Log track parsing summary at debug level
+            audio_tracks = [t for t in tracks if t.track_type == "audio"]
+            logger.debug(
+                f"Parsed title {title_data['title_id']}: {len(tracks)} total tracks, {len(audio_tracks)} audio tracks",
+            )
 
         return title_objects
 
@@ -532,14 +568,13 @@ class MakeMKVRipper:
             min_duration = self.config.movie_min_duration * 60  # Convert to seconds
             max_extra_duration = (
                 self.config.max_extras_duration * 60
-                if self.config.include_movie_extras
+                if self.config.include_extras
                 else 0
             )
 
             for title in titles:
                 if title.duration >= min_duration or (
-                    self.config.include_movie_extras
-                    and title.duration >= max_extra_duration
+                    self.config.include_extras and title.duration >= max_extra_duration
                 ):
                     valid_titles.append(title)
 
@@ -697,9 +732,13 @@ class MakeMKVRipper:
 
                         percentage = (total / maximum) * 100
 
+                        # Filter out progress reports before actual ripping starts
+                        if not self._ripping_started:
+                            return None
+
                         # Filter out early 100% reports - these are often initialization artifacts
                         # Only allow 100% if we've seen some incremental progress first
-                        if percentage == 100.0 and self._last_progress_percent < 50.0:
+                        if percentage == 100.0 and self._last_progress_percent < 95.0:
                             return None
 
                         # Filter out duplicate/minor updates
@@ -800,6 +839,7 @@ class MakeMKVRipper:
 
         # Reset progress tracking for new rip
         self._last_progress_percent = -1.0
+        self._ripping_started = False  # Reset ripping flag
 
         # Configure MakeMKV selection rules based on our config
         selection_rule = self._build_selection_rule()
@@ -840,9 +880,17 @@ class MakeMKVRipper:
                         break
                     if output:
                         stdout_lines.append(output.strip())
+                        # Log all MakeMKV output for debugging
+                        if output.strip():
+                            logger.debug(f"MakeMKV output: {output.strip()}")
+                            # Check if actual ripping has started
+                            if "Saving" in output and "titles into directory" in output:
+                                self._ripping_started = True
+                                logger.debug("Actual ripping has started")
                         # Parse progress information
                         progress_data = self._parse_makemkv_progress(output.strip())
                         if progress_data:
+                            logger.debug(f"Parsed progress: {progress_data}")
                             progress_callback(progress_data)
 
                 # Wait for process to complete

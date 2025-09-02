@@ -4,25 +4,26 @@ Automated disc ripping, encoding, and media library management system.
 
 ## Overview
 
-spindle automates the complete workflow from physical disc to organized media library:
+spindle automates the complete workflow from physical disc to organized media library with optimal resource usage:
 
 1. **Disc Detection** - Automatically detects inserted physical discs
-2. **Ripping** - Uses MakeMKV to extract main content with English audio tracks
-3. **Identification** - Identifies content using TMDB API
-4. **Encoding** - Processes video through drapto for efficient AV1 encoding
-5. **Organization** - Organizes files in Plex-compatible structure
-6. **Import** - Triggers Plex library scans and sends notifications
+2. **Content Identification** - Analyzes disc content and identifies media using TMDB API
+3. **Intelligent Ripping** - Uses MakeMKV to extract only selected titles with proper naming
+4. **Disc Ejection** - Frees optical drive immediately after ripping for next disc
+5. **Background Encoding** - Processes video through drapto for efficient AV1 encoding (non-blocking)
+6. **Organization & Import** - Organizes files in Plex-compatible structure and triggers library scans
 
 ## Features
 
-- **Continuous Processing** - Insert disc → auto-rip → auto-process → ready for next disc
-- **Background Queue Processing** - Each item processed as soon as previous stage completes
-- **Enhanced Content Identification** - Multi-tier identification system
-- **Quality Encoding** - Integration with drapto for optimized AV1 compression
-- **Immediate Plex Import** - Movies available as soon as encoded (no waiting for batch)
-- **Progress Tracking** - SQLite-based queue management with status tracking
-- **Notifications** - Real-time updates via ntfy.sh for each stage
-- **Enhanced Error Handling** - User-friendly error messages with actionable solutions
+- **Optimized Workflow** - Clean separation of identification and ripping phases for maximum efficiency
+- **True "Insert and Forget"** - Disc ejected immediately after ripping, multiple discs can be in background processing
+- **Background Queue Processing** - Encoding and organization happen in background while you process more discs
+- **Enhanced Content Identification** - Multi-tier identification system with episode mapping for TV shows  
+- **Quality Encoding** - Integration with drapto for optimized AV1 compression (concurrent processing)
+- **Immediate Plex Availability** - Movies/shows available as soon as encoding completes
+- **Real-time Progress Tracking** - SQLite-based queue with detailed status and progress updates
+- **Smart Notifications** - Real-time updates via ntfy.sh for key milestones (ripped, completed, errors)
+- **Phase-aware Error Handling** - Separate error handling for identification vs ripping with actionable solutions
 - **Manual Processing** - Process existing video files when needed
 - **System Dependency Checking** - Automatic validation with helpful install guidance
 
@@ -169,11 +170,11 @@ spindle start --foreground
 spindle stop
 ```
 
-By default, `spindle start` runs as a background daemon:
-1. **Insert a disc** → Automatically ripped and added to queue
-2. **Background processing** → Identify → Encode → Import to Plex
-3. **Disc ejected** → Ready for next disc
-4. **Repeat** → Each movie or TV show becomes available in Plex as soon as it's done
+By default, `spindle start` runs as a background daemon with optimized workflow:
+1. **Insert a disc** → Automatically identified and ripped with intelligent title selection
+2. **Disc ejected immediately** → Ready for next disc (drive freed for continuous processing)
+3. **Background processing** → Encode → Organize → Import to Plex (concurrent with new disc processing)
+4. **Repeat** → Each movie or TV show becomes available in Plex as soon as encoding completes
 
 **Default Daemon Mode Benefits:**
 - Runs independently of your terminal session
@@ -232,24 +233,26 @@ spindle add-file /path/to/video.mkv
 
 ## Workflow Details
 
-### Continuous Processing (Default)
+### Optimized Workflow (Default)
 ```
-Disc 1 Insert → Rip → Eject → Ready for Disc 2
-    ↓ (background processing)
-    Identify → Encode → Organize → Import → Available in Plex
+Disc 1: Insert → Identify → Rip → Eject (Ready for Disc 2)
+           ↓ (background processing - non-blocking)
+           Encode → Organize → Import → Available in Plex
 
-Disc 2 Insert → Rip → Eject → Ready for Disc 3
-    ↓ (background processing)
-    Identify → Encode → Organize → Import → Available in Plex
+Disc 2: Insert → Identify → Rip → Eject (Ready for Disc 3)
+           ↓ (background processing - concurrent with Disc 1)
+           Encode → Organize → Import → Available in Plex
 
-... and so on
+... and so on (multiple discs in various background stages)
 ```
 
-**Key Benefits:**
-- Minimal disc handling time (just rip and eject)
-- Movies and TV shows appear in Plex as soon as they're done encoding
-- Can process many discs in a ripping session
-- Background processing continues overnight
+**Phase Separation Benefits:**
+- **Identification first** - Determines what to rip and how to name files
+- **Intelligent ripping** - Only extracts selected titles with proper filenames  
+- **Immediate disc ejection** - Drive freed as soon as ripping completes
+- **Concurrent background processing** - Multiple items encoding simultaneously
+- **Maximum throughput** - Can process many discs while previous ones encode
+- **Optimal resource usage** - Expensive optical drive used minimally
 
 ### Manual Processing
 ```
@@ -327,18 +330,31 @@ To enable enhanced metadata extraction:
    # You should see disc contents (BDMV, VIDEO_TS, etc.)
    ```
 
-### Content Identification Issues
+### Workflow Issues
 
-- **Phase 1 (Runtime)**: Requires meaningful disc names - "LOGICAL_VOLUME_ID" won't match anything  
-- **Phase 2 (Pattern)**: Fallback method - works with any disc but lower accuracy
+**Disc Not Ejecting:**
+- Only successful rips eject the disc automatically
+- If disc stays in drive, check logs for identification or ripping errors
+- Failed identification or ripping keeps disc inserted for retry
+
+**Stuck in IDENTIFYING Status:**
+- Check TMDB API connectivity and API key
+- Verify disc is properly mounted (if using enhanced identification)
+- Check logs for specific identification errors
+
+**Content Identification Issues:**
+- **Tier 1 (Runtime-Verified)**: Requires meaningful disc names - generic labels won't match
+- **Tier 2 (Pattern Analysis)**: Fallback method - works with any disc but lower accuracy
+- **Episode Mapping**: TV shows get individual episode titles and proper S##E## formatting
 
 ## Enhanced Error Handling
 
-Spindle features a comprehensive user-friendly error handling system:
+Spindle features a comprehensive phase-aware error handling system:
 
-- **Categorized Errors**: Configuration, dependency, hardware, media, and system errors
+- **Phase-specific Errors**: Separate handling for identification, ripping, encoding, and organization failures
+- **Categorized Error Types**: Configuration, dependency, hardware, media, and system errors
 - **Rich Console Display**: Color-coded messages with emojis and clear guidance  
-- **Actionable Solutions**: Specific steps to resolve each type of error
+- **Actionable Solutions**: Specific steps to resolve each type of error with phase context
 - **Smart Classification**: Automatically identifies common issues and provides targeted help
 - **Recovery Guidance**: Clear distinction between recoverable and critical errors
 
@@ -351,10 +367,10 @@ Spindle features a comprehensive user-friendly error handling system:
 
 ## Notifications
 
-Spindle sends notifications for:
-- Disc detection
-- Rip completion
-- Encoding progress
-- Media added to Plex
-- Queue status updates
-- Errors and failures
+Spindle sends notifications for key workflow milestones:
+- **Disc detection** - New disc inserted and identified
+- **Rip completion & disc ejection** - Ready for next disc
+- **Encoding progress** - Background processing updates  
+- **Media added to Plex** - Available for viewing
+- **Queue status changes** - Phase transitions and progress
+- **Errors and failures** - Phase-specific error details with recovery guidance

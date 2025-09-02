@@ -25,7 +25,7 @@ class TestConfigBasics:
         assert config.optical_drive == "/dev/sr0"
         assert config.makemkv_con == "makemkvcon"
         assert config.drapto_binary == "drapto"
-        assert config.makemkv_info_timeout == 60  # Actual default
+        assert config.makemkv_info_timeout == 300  # Updated default (5 minutes)
         assert config.makemkv_rip_timeout == 3600  # Actual default
 
     def test_config_with_custom_paths(self, temp_dir):

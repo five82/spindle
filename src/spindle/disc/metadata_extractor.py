@@ -3,6 +3,7 @@
 import logging
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -153,15 +154,20 @@ class EnhancedDiscMetadata:
 class EnhancedDiscMetadataExtractor:
     """Extract metadata from multiple disc sources with bd_info integration."""
 
-    def __init__(self) -> None:
+    def __init__(self, config=None) -> None:
         self.logger = logging.getLogger(__name__)
+        self.config = config
 
-    def extract_all_metadata(self, disc_path: Path) -> EnhancedDiscMetadata:
+    def extract_all_metadata(
+        self,
+        disc_path: Path,
+        device_path: str | None = None,
+    ) -> EnhancedDiscMetadata:
         """Extract metadata from all available sources."""
         metadata = EnhancedDiscMetadata()
 
         # PRIORITY 1: bd_info command (most reliable for Blu-ray)
-        bd_info_data = self.run_bd_info(disc_path)
+        bd_info_data = self.run_bd_info(disc_path, device_path)
         if bd_info_data:
             metadata.volume_id = bd_info_data.get("volume_identifier")
             metadata.disc_name = bd_info_data.get("disc_name")
@@ -194,16 +200,25 @@ class EnhancedDiscMetadataExtractor:
 
         return metadata
 
-    def run_bd_info(self, disc_path: Path) -> dict:
+    def run_bd_info(self, disc_path: Path, device_path: str | None = None) -> dict:
         """Run bd_info command and parse output."""
         try:
+            # Use raw device path if provided (better for volume identifier),
+            # otherwise fall back to mount path
+            bd_info_path = device_path if device_path else str(disc_path)
+            self.logger.info(f"Running bd_info scan on {bd_info_path}")
+
+            start_time = time.time()
             result = subprocess.run(
-                ["bd_info", str(disc_path)],
+                ["bd_info", bd_info_path],
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=self.config.bd_info_timeout if self.config else 300,
             )
+
+            scan_duration = time.time() - start_time
+            self.logger.info(f"bd_info scan completed in {scan_duration:.1f}s")
             if result.returncode == 0:
                 return self.parse_bd_info_output(result.stdout)
             self.logger.warning(f"bd_info command failed: {result.stderr}")
