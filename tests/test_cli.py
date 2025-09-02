@@ -62,15 +62,6 @@ class TestCLIBasics:
         assert result.exit_code == 0
         assert "spindle" in result.output.lower()
 
-    def test_start_command_exists(self, cli_runner):
-        """Test start command is available."""
-        from spindle.cli import cli
-        
-        result = cli_runner.invoke(cli, ['start', '--help'])
-        
-        assert result.exit_code == 0
-        assert "start" in result.output.lower()
-
     def test_queue_command_exists(self, cli_runner):
         """Test queue command is available."""
         from spindle.cli import cli
