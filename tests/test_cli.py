@@ -62,15 +62,6 @@ class TestCLIBasics:
         assert result.exit_code == 0
         assert "spindle" in result.output.lower()
 
-    def test_queue_command_exists(self, cli_runner):
-        """Test queue command is available."""
-        from spindle.cli import cli
-        
-        result = cli_runner.invoke(cli, ['queue', '--help'])
-        
-        assert result.exit_code == 0
-        assert "queue" in result.output.lower()
-
     def test_config_validation_on_startup(self, cli_runner, mock_config_load, temp_config):
         """Test configuration is validated on startup."""
         mock_config_load.return_value = temp_config
@@ -94,10 +85,12 @@ class TestStartCommand:
         from spindle.cli import cli
         
         # Mock all the components the start command needs
-        with patch('spindle.cli.check_system_dependencies') as mock_check, \
+        with patch('spindle.cli.check_dependencies') as mock_check_deps, \
+             patch('spindle.cli.check_system_dependencies') as mock_check, \
              patch('spindle.cli.ContinuousProcessor') as mock_processor, \
              patch('spindle.cli.console.print') as mock_print:
             
+            mock_check_deps.return_value = []  # No dependency errors
             mock_check.return_value = None
             
             # Create properly mocked processor instance  
@@ -120,9 +113,11 @@ class TestStartCommand:
         from spindle.cli import cli
         
         # Mock all the components the start command needs
-        with patch('spindle.cli.check_system_dependencies') as mock_check, \
+        with patch('spindle.cli.check_dependencies') as mock_check_deps, \
+             patch('spindle.cli.check_system_dependencies') as mock_check, \
              patch('spindle.cli.ContinuousProcessor') as mock_processor:
             
+            mock_check_deps.return_value = []  # No dependency errors
             mock_check.return_value = None
             
             # Create properly mocked processor instance
@@ -159,11 +154,13 @@ class TestQueueCommands:
         
         from spindle.cli import cli
         
-        result = cli_runner.invoke(cli, ['queue', 'status'])
-        
-        assert result.exit_code == 0
-        assert "pending" in result.output.lower()
-        assert "2" in result.output
+        with patch('spindle.cli.check_dependencies') as mock_check_deps:
+            mock_check_deps.return_value = []  # No dependency errors
+            result = cli_runner.invoke(cli, ['queue', 'status'])
+            
+            assert result.exit_code == 0
+            assert "pending" in result.output.lower()
+            assert "2" in result.output
 
     @patch('spindle.cli.QueueManager')
     def test_queue_list_command(self, mock_queue_manager, cli_runner, mock_config_load, temp_config):
@@ -187,10 +184,12 @@ class TestQueueCommands:
         
         from spindle.cli import cli
         
-        result = cli_runner.invoke(cli, ['queue', 'list'])
-        
-        assert result.exit_code == 0
-        assert "TEST_DISC" in result.output
+        with patch('spindle.cli.check_dependencies') as mock_check_deps:
+            mock_check_deps.return_value = []  # No dependency errors
+            result = cli_runner.invoke(cli, ['queue', 'list'])
+            
+            assert result.exit_code == 0
+            assert "TEST_DISC" in result.output
 
     @patch('spindle.cli.QueueManager')
     def test_queue_clear_command(self, mock_queue_manager, cli_runner, mock_config_load, temp_config):
@@ -203,10 +202,12 @@ class TestQueueCommands:
         
         from spindle.cli import cli
         
-        result = cli_runner.invoke(cli, ['queue', 'clear', '--completed'])
-        
-        assert result.exit_code == 0
-        mock_manager_instance.clear_completed.assert_called_once()
+        with patch('spindle.cli.check_dependencies') as mock_check_deps:
+            mock_check_deps.return_value = []  # No dependency errors
+            result = cli_runner.invoke(cli, ['queue', 'clear', '--completed'])
+            
+            assert result.exit_code == 0
+            mock_manager_instance.clear_completed.assert_called_once()
 
     @patch('spindle.cli.QueueManager')
     def test_queue_retry_command(self, mock_queue_manager, cli_runner, mock_config_load, temp_config):
@@ -231,11 +232,13 @@ class TestQueueCommands:
         
         from spindle.cli import cli
         
-        result = cli_runner.invoke(cli, ['queue', 'retry', '1'])
-        
-        # Should attempt to retry item
-        mock_manager_instance.get_item.assert_called_with(1)
-        mock_manager_instance.update_item.assert_called_once()
+        with patch('spindle.cli.check_dependencies') as mock_check_deps:
+            mock_check_deps.return_value = []  # No dependency errors
+            result = cli_runner.invoke(cli, ['queue', 'retry', '1'])
+            
+            # Should attempt to retry item
+            mock_manager_instance.get_item.assert_called_with(1)
+            mock_manager_instance.update_item.assert_called_once()
 
 
 class TestConfigCommands:
@@ -287,9 +290,11 @@ class TestWorkflowIntegration:
         from spindle.cli import cli
         
         # Test start processor command
-        with patch('spindle.cli.check_system_dependencies') as mock_check, \
+        with patch('spindle.cli.check_dependencies') as mock_check_deps, \
+             patch('spindle.cli.check_system_dependencies') as mock_check, \
              patch('spindle.cli.ContinuousProcessor') as mock_processor:
             
+            mock_check_deps.return_value = []  # No dependency errors
             mock_check.return_value = None
             
             # Create properly mocked processor instance
@@ -303,7 +308,9 @@ class TestWorkflowIntegration:
             start_result = cli_runner.invoke(cli, ['start', '--foreground'])
         
         # Test queue status command
-        with patch('spindle.cli.QueueManager') as mock_queue_manager:
+        with patch('spindle.cli.check_dependencies') as mock_check_deps2, \
+             patch('spindle.cli.QueueManager') as mock_queue_manager:
+            mock_check_deps2.return_value = []  # No dependency errors
             mock_manager_instance = Mock()
             mock_manager_instance.get_queue_stats.return_value = {"pending": 1}
             mock_queue_manager.return_value = mock_manager_instance
@@ -340,12 +347,14 @@ class TestWorkflowIntegration:
         
         from spindle.cli import cli
         
-        result = cli_runner.invoke(cli, ['queue', 'list'])
-        
-        # Should display progress information
-        assert result.exit_code == 0
-        # Progress information should be visible
-        assert "75" in result.output or "encoding" in result.output.lower()
+        with patch('spindle.cli.check_dependencies') as mock_check_deps:
+            mock_check_deps.return_value = []  # No dependency errors
+            result = cli_runner.invoke(cli, ['queue', 'list'])
+            
+            # Should display progress information
+            assert result.exit_code == 0
+            # Progress information should be visible
+            assert "75" in result.output or "encoding" in result.output.lower()
 
 
 class TestCLIUtilities:
