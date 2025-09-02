@@ -672,31 +672,18 @@ class QueueManager:
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning("Failed to deserialize media info: %s", e)
 
-        # Handle progress fields with fallbacks for older database schemas
-        try:
-            progress_stage = row["progress_stage"]
-        except (KeyError, IndexError):
-            progress_stage = None
+        # Handle progress fields
+        progress_stage = row["progress_stage"]
+        progress_percent = row["progress_percent"]
+        progress_message = row["progress_message"]
 
-        try:
-            progress_percent = row["progress_percent"]
-        except (KeyError, IndexError):
-            progress_percent = 0.0
-
-        try:
-            progress_message = row["progress_message"]
-        except (KeyError, IndexError):
-            progress_message = None
-
-        # Handle rip spec data field with fallbacks for older database schemas
+        # Handle rip spec data field
         rip_spec_data = None
-        try:
-            if row["rip_spec_data"]:
+        if row["rip_spec_data"]:
+            try:
                 rip_spec_data = json.loads(row["rip_spec_data"])
-        except (KeyError, IndexError, json.JSONDecodeError) as e:
-            if not isinstance(e, KeyError | IndexError):
+            except json.JSONDecodeError as e:
                 logger.warning("Failed to deserialize rip spec data: %s", e)
-            rip_spec_data = None
 
         return QueueItem(
             item_id=row["id"],

@@ -535,11 +535,6 @@ class IntelligentTitleSelector:
 
         return score
 
-    def _select_subtitle_tracks(self, title: Title) -> list[Track]:
-        """Select subtitle tracks (placeholder for future implementation)."""
-        # For now, return empty list as subtitle handling is not implemented
-        return []
-
     def _calculate_movie_confidence(
         self,
         main_titles: list[Title],

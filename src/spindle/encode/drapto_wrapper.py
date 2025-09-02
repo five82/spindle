@@ -200,7 +200,7 @@ class DraptoEncoder:
             str(output_file),
             "--quality",
             str(self.quality),
-            "--json-progress",
+            "--progress-json",
         ]
 
     def _build_drapto_command(self, input_file: Path, output_dir: Path) -> list[str]:
@@ -213,7 +213,7 @@ class DraptoEncoder:
             "-o",
             str(output_dir),
             "--verbose",  # Enable verbose output for better logging
-            "--json-progress",  # Enable structured JSON progress output
+            "--progress-json",  # Enable structured JSON progress output
         ]
 
         # Add quality settings based on resolution detection

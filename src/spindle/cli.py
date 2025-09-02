@@ -448,6 +448,8 @@ def start_daemon(config: SpindleConfig) -> None:
 
 def start_foreground(config: SpindleConfig) -> None:
     """Start Spindle in foreground mode."""
+    logger = logging.getLogger(__name__)
+
     # Check if already running
     process_info = ProcessLock.find_spindle_process()
     if process_info:
@@ -486,17 +488,22 @@ def start_foreground(config: SpindleConfig) -> None:
     async def run_foreground():
         processor.start()
 
-        # Keep main thread alive and show periodic status
+        # Keep main thread alive and show status changes
+        last_status = None
         try:
             while processor.is_running:
                 await asyncio.sleep(
                     config.status_display_interval,
-                )  # Show status based on config
+                )  # Check status based on config interval
                 status = processor.get_status()
-                if status["total_items"] > 0:
-                    console.print(
-                        f"[dim]Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}[/dim]",
+
+                # Only show status if it has changed
+                current_status_key = (status["total_items"], status["current_disc"])
+                if status["total_items"] > 0 and current_status_key != last_status:
+                    logger.info(
+                        f"Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}",
                     )
+                    last_status = current_status_key
         except asyncio.CancelledError:
             processor.stop()
             raise

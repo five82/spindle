@@ -2,49 +2,15 @@
 
 import logging
 import re
-import time
 from dataclasses import dataclass
-from typing import Any
 
 from spindle.config import SpindleConfig
 from spindle.disc.metadata_extractor import EnhancedDiscMetadata
 from spindle.disc.monitor import DiscInfo
-from spindle.disc.ripper import Title
 from spindle.disc.series_cache import SeriesCache
 from spindle.identify.tmdb import MediaInfo
 
 logger = logging.getLogger(__name__)
-
-
-# Compatibility classes for existing processor code
-@dataclass
-class DiscSetInfo:
-    """Compatibility class for existing processor code."""
-
-    series_title: str
-    season_number: int | None = None
-    disc_timeout_minutes: int = 15
-
-
-@dataclass
-class MultiDiscSession:
-    """Compatibility class for existing processor code."""
-
-    session_id: str
-    disc_set: Any
-    last_activity: float | None = None
-
-    def __post_init__(self) -> None:
-        if self.last_activity is None:
-            self.last_activity = time.time()
-
-    def update_activity(self) -> None:
-        self.last_activity = time.time()
-
-    def is_expired(self, timeout_minutes: int) -> bool:
-        if self.last_activity is None:
-            return True
-        return (time.time() - self.last_activity) > (timeout_minutes * 60)
 
 
 @dataclass
@@ -223,63 +189,3 @@ class SimpleMultiDiscManager:
     def get_cache_stats(self) -> dict:
         """Get series cache statistics."""
         return self.series_cache.get_cache_stats()
-
-    # ========================================
-    # SESSION MANAGEMENT METHODS
-    # ========================================
-
-    def detect_multi_disc_set(
-        self,
-        disc_info: DiscInfo,
-        enhanced_metadata: EnhancedDiscMetadata,
-    ) -> tuple[bool, DiscSetInfo | None]:
-        """Compatibility method - detects TV series discs only."""
-        tv_info = self.detect_tv_series_disc(disc_info, enhanced_metadata)
-        if tv_info:
-            disc_set = DiscSetInfo(
-                series_title=tv_info.series_title,
-                season_number=tv_info.season_number,
-            )
-            return True, disc_set
-        return False, None
-
-    def find_or_create_session(
-        self,
-        disc_set: DiscSetInfo,
-        disc_info: DiscInfo,
-        enhanced_metadata: EnhancedDiscMetadata,
-    ) -> MultiDiscSession:
-        """Compatibility method - creates simple session."""
-        session_id = f"{disc_set.series_title}_S{disc_set.season_number or 0}"
-        return MultiDiscSession(session_id, disc_set)
-
-    def add_disc_to_session(
-        self,
-        session: MultiDiscSession,
-        disc_info: DiscInfo,
-        enhanced_metadata: EnhancedDiscMetadata,
-        titles: list[Title],
-    ) -> int:
-        """Compatibility method - returns disc number."""
-        _, disc_num = enhanced_metadata.get_season_disc_info()
-        return disc_num or 1
-
-    def should_wait_for_next_disc(self, session: MultiDiscSession) -> bool:
-        """Compatibility method - always returns False (no waiting in simple approach)."""
-        return False
-
-    def is_waiting_timeout_expired(self, session: MultiDiscSession) -> bool:
-        """Compatibility method - always returns True."""
-        return True
-
-    def finalize_session(
-        self,
-        session: MultiDiscSession,
-    ) -> tuple[list[Title], dict[str, Any]]:
-        """Finalize session and return collected titles."""
-        return [], {}
-
-    @property
-    def active_sessions(self) -> dict[str, MultiDiscSession]:
-        """Get all active multi-disc sessions."""
-        return {}

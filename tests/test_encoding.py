@@ -61,7 +61,7 @@ class TestDraptoEncoder:
         assert str(sample_output_file) in command
         assert "--quality" in command
         assert "26" in command
-        assert "--json-progress" in command
+        assert "--progress-json" in command
 
     def test_quality_mapping(self, temp_config):
         """Test quality parameter mapping."""

@@ -5,7 +5,7 @@ import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .config import SpindleConfig
 from .error_handling import (
@@ -231,17 +231,15 @@ class ContinuousProcessor:
                     )
 
                 if rip_spec.enhanced_metadata:
-                    is_multi_disc, disc_set_info = (
-                        self.multi_disc_manager.detect_multi_disc_set(
-                            rip_spec.disc_info,
-                            rip_spec.enhanced_metadata,
-                        )
+                    tv_info = self.multi_disc_manager.detect_tv_series_disc(
+                        rip_spec.disc_info,
+                        rip_spec.enhanced_metadata,
                     )
 
-                    if is_multi_disc:
-                        logger.info("Multi-disc set detected, managing session")
+                    if tv_info:
+                        logger.info("TV series disc detected, caching metadata")
                         rip_spec.is_multi_disc = True
-                        rip_spec.disc_set_info = disc_set_info
+                        rip_spec.tv_series_info = tv_info
                         return await self._handle_multi_disc_identification(rip_spec)
 
             # Update progress after metadata extraction
@@ -341,187 +339,30 @@ class ContinuousProcessor:
         logger.info("Disc ejected - ready for next disc")
 
     async def _handle_multi_disc_processing(self, rip_spec: RipSpec) -> None:
-        """Handle processing of a multi-disc set."""
+        """Handle processing of a TV series disc with metadata caching."""
 
-        # Find or create session for this disc set
-        session = self.multi_disc_manager.find_or_create_session(
-            rip_spec.disc_set_info,
-            rip_spec.disc_info,
-            rip_spec.enhanced_metadata,
-        )
+        if hasattr(rip_spec, "tv_series_info") and rip_spec.tv_series_info:
+            tv_info = rip_spec.tv_series_info
 
-        # Add this disc to the session
-        disc_num = self.multi_disc_manager.add_disc_to_session(
-            session,
-            rip_spec.disc_info,
-            rip_spec.enhanced_metadata,
-            rip_spec.titles,
-        )
-
-        # Update progress
-        rip_spec.update_progress(
-            stage=f"Multi-disc set: {session.session_id} (Disc {disc_num})",
-            percent=5,
-        )
-        self.queue_manager.update_item(rip_spec.queue_item)
-
-        # Determine if we should wait for more discs
-        if self.multi_disc_manager.should_wait_for_next_disc(session):
-            logger.info(
-                f"Waiting {self.config.multi_disc_timeout_minutes} minutes for next disc...",
+            # Process TV series disc individually with metadata caching
+            tv_info, cached_media_info = self.multi_disc_manager.process_tv_series_disc(
+                rip_spec.disc_info,
+                rip_spec.enhanced_metadata,
+                rip_spec.media_info,
             )
 
+            if cached_media_info:
+                rip_spec.media_info = cached_media_info
+
+            # Update progress
             rip_spec.update_progress(
-                stage=f"Waiting for next disc (Disc {disc_num + 1})",
-                percent=15,
-                message=f"Insert next disc within {self.config.multi_disc_timeout_minutes} minutes",
+                stage=f"TV series disc: {tv_info.series_title} S{tv_info.season_number} D{tv_info.disc_number}",
+                percent=10,
             )
             self.queue_manager.update_item(rip_spec.queue_item)
 
-            # Notify user to insert next disc
-            self.notifier.notify_multi_disc_waiting(
-                session.session_id,
-                disc_num,
-                self.config.multi_disc_timeout_minutes,
-            )
-
-            # Wait for timeout or next disc
-            await self._wait_for_next_disc_or_timeout(session, rip_spec.queue_item)
-
-        # Check if waiting timeout expired - if so, process what we have
-        if self.multi_disc_manager.is_waiting_timeout_expired(session):
-            logger.info("Multi-disc wait timeout expired, processing collected discs")
-
-        # Finalize the session and get all titles
-        all_titles, disc_map = self.multi_disc_manager.finalize_session(session)
-
-        # Create enhanced analysis result for the complete set
-        enhanced_analysis = DiscAnalysisResult(
-            disc_info=rip_spec.disc_info,  # Use disc info from RipSpec
-            content_type=rip_spec.analysis_result.content_type,
-            confidence=rip_spec.analysis_result.confidence,
-            titles_to_rip=all_titles,
-            metadata=rip_spec.analysis_result.metadata,
-            episode_mappings=None,
-        )
-
-        # Process the complete multi-disc set
-        await self._process_complete_disc_set(
-            rip_spec.queue_item,
-            session,
-            enhanced_analysis,
-        )
-
-    async def _wait_for_next_disc_or_timeout(
-        self,
-        session: Any,
-        item: QueueItem,
-    ) -> None:
-        """Wait for next disc insertion or timeout."""
-        import asyncio
-
-        timeout_seconds = self.config.multi_disc_timeout_minutes * 60
-        start_time = time.time()
-
-        while time.time() - start_time < timeout_seconds:
-            # Check if a new disc has been inserted
-            current_disc = detect_disc(self.config.optical_drive)
-
-            if current_disc and current_disc.label != item.disc_title:
-                logger.info(f"New disc detected: {current_disc.label}")
-                # New disc detected, break out of waiting
-                return
-
-            # Update progress countdown
-            elapsed = time.time() - start_time
-            remaining_minutes = (timeout_seconds - elapsed) / 60
-            item.progress_message = (
-                f"Waiting for next disc ({remaining_minutes:.1f}min remaining)"
-            )
-            self.queue_manager.update_item(item)
-
-            # Wait 10 seconds before checking again
-            await asyncio.sleep(10)
-
-        logger.info("Multi-disc timeout reached")
-
-    async def _process_complete_disc_set(
-        self,
-        item: QueueItem,
-        session: Any,
-        enhanced_analysis: DiscAnalysisResult,
-    ) -> None:
-        """Process the complete multi-disc set."""
-
-        start_time = time.time()
-
-        # Update status
-        item.progress_stage = (
-            f"Processing {len(session.disc_set.processed_discs)} disc set"
-        )
-        item.progress_percent = 20
-        self.queue_manager.update_item(item)
-
-        # Create progress callback for multi-disc ripping
-        total_titles = len(enhanced_analysis.titles_to_rip)
-        processed_titles = 0
-
-        def multi_disc_progress_callback(progress_data: dict) -> None:
-            nonlocal processed_titles
-            if progress_data.get("type") == "ripping_progress":
-                percentage = progress_data.get("percentage", 0)
-                # Calculate overall progress across all discs
-                title_progress = (
-                    processed_titles / total_titles
-                ) * 80  # 80% for all titles
-                current_title_progress = (percentage / 100) * (80 / total_titles)
-                overall_progress = 20 + title_progress + current_title_progress
-
-                item.progress_stage = (
-                    f"Ripping disc set ({processed_titles + 1}/{total_titles})"
-                )
-                item.progress_percent = min(overall_progress, 90)
-                item.progress_message = (
-                    f"Title {processed_titles + 1}/{total_titles}: {percentage:.0f}%"
-                )
-                self.queue_manager.update_item(item)
-
-            elif progress_data.get("type") == "title_completed":
-                processed_titles += 1
-                logger.info(f"Completed title {processed_titles}/{total_titles}")
-
-        # Process the enhanced analysis result
-        output_files = await self._handle_content_type_with_analysis(
-            session.disc_set.processed_discs[1],  # Use first disc info
-            enhanced_analysis,
-            multi_disc_progress_callback,
-        )
-
-        # Store primary output file for queue tracking
-        output_file = output_files[0] if output_files else None
-
-        # Update item with ripped file
-        item.ripped_file = output_file
-        item.status = QueueItemStatus.RIPPED
-        self.queue_manager.update_item(item)
-
-        # Calculate duration
-        duration = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
-
-        logger.info(f"Multi-disc set completed: {output_file}")
-        self.notifier.notify_multi_disc_completed(
-            session.session_id,
-            len(session.disc_set.processed_discs),
-            duration,
-        )
-
-        # Clean up session
-        if session.session_id in self.multi_disc_manager.active_sessions:
-            del self.multi_disc_manager.active_sessions[session.session_id]
-
-        # Eject final disc
-        eject_disc(self.config.optical_drive)
-        logger.info("Final disc ejected - multi-disc set complete")
+        # For the simplified approach, just proceed with single disc completion
+        await self._complete_disc_identification(rip_spec)
 
     async def _handle_content_type_with_analysis(
         self,
@@ -1117,9 +958,7 @@ class ContinuousProcessor:
             self._handle_identification_error(e, item, rip_spec.disc_info.label)
 
     async def _handle_multi_disc_identification(self, rip_spec: RipSpec) -> None:
-        """Handle multi-disc set identification (placeholder for now)."""
-        # For now, treat as single disc - multi-disc handling can be enhanced later
-        logger.info("Multi-disc identification - treating as single disc for now")
+        """Handle multi-disc set identification."""
         await self._complete_disc_identification(rip_spec)
 
     def _reconstruct_rip_spec_from_item(self, item: QueueItem) -> "RipSpec":
@@ -1242,7 +1081,6 @@ class ContinuousProcessor:
                             "stage",
                             progress_data.get("operation", "Ripping"),
                         )
-                        print(f"[RIPPING] {title_progress:.1f}% - {operation}")
                         logger.info(
                             f"Ripping progress: {title_progress:.1f}% - {operation}",
                         )
@@ -1334,8 +1172,6 @@ class ContinuousProcessor:
         item.progress_message = progress_message
         self.queue_manager.update_item(item)
 
-        # Enhanced error display for user (removed unused call)
-
         self.notifier.notify_error(
             f"Failed to identify disc: {user_message}",
             context=disc_label,
@@ -1350,14 +1186,14 @@ class ContinuousProcessor:
         current_disc = detect_disc(self.config.optical_drive)
         if current_disc:
             # Check if we have a current processing item with identified title
-            processing_items = self.queue_manager.get_items_by_status(
-                [
-                    QueueItemStatus.PENDING,
-                    QueueItemStatus.IDENTIFYING,
-                    QueueItemStatus.IDENTIFIED,
-                    QueueItemStatus.RIPPING,
-                ],
-            )
+            processing_items = []
+            for status in [
+                QueueItemStatus.PENDING,
+                QueueItemStatus.IDENTIFYING,
+                QueueItemStatus.IDENTIFIED,
+                QueueItemStatus.RIPPING,
+            ]:
+                processing_items.extend(self.queue_manager.get_items_by_status(status))
             for item in processing_items:
                 if item.disc_title != current_disc.label and item.media_info:
                     # This item has been identified with a different title

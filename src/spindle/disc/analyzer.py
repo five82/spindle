@@ -18,10 +18,6 @@ from .title_selector import ContentType, IntelligentTitleSelector, SelectionCrit
 logger = logging.getLogger(__name__)
 
 
-# ContentType is imported from title_selector
-# class ContentType definition removed to avoid duplicate
-
-
 @dataclass
 class ContentPattern:
     """Pattern analysis result for disc titles."""
