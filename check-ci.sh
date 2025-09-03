@@ -35,8 +35,13 @@ fi
 
 # Install dependencies
 print_step "Installing dependencies"
-uv sync --all-extras
-print_success "Dependencies installed"
+if uv sync --all-extras; then
+    print_success "Dependencies installed"
+else
+    print_error "Dependency installation failed"
+    echo "Check your uv installation and network connection"
+    exit 1
+fi
 
 # Run tests
 print_step "Running tests with coverage"

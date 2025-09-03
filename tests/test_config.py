@@ -175,3 +175,5 @@ class TestConfigErrorHandling:
         from pydantic import ValidationError
         with pytest.raises(ValidationError):
             SpindleConfig(makemkv_info_timeout="not_an_integer")  # Wrong type
+
+
