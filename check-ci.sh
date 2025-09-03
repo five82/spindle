@@ -40,8 +40,13 @@ print_success "Dependencies installed"
 
 # Run tests
 print_step "Running tests with coverage"
-uv run pytest tests/ -v --cov=spindle --cov-report=term
-print_success "Tests passed"
+if uv run pytest tests/ -v --cov=spindle --cov-report=term; then
+    print_success "Tests passed"
+else
+    print_error "Tests failed"
+    echo "Fix failing tests before committing"
+    exit 1
+fi
 
 # Check formatting
 print_step "Checking code formatting"

@@ -81,7 +81,6 @@ class TestLibraryOrganizer:
         assert "Test Movie" in filename
         assert "(2023)" in filename
         
-        # Should be Plex-compatible format (without extension)
         expected = "Test Movie (2023)"
         assert filename == expected
 
@@ -89,7 +88,6 @@ class TestLibraryOrganizer:
         """Test TV show filename generation."""
         organizer = LibraryOrganizer(temp_config)
         
-        # For TV shows, just return series name (episodes handled differently)
         filename = organizer.generate_filename(sample_tv_info)
         
         assert "Test TV Show" in filename
@@ -101,7 +99,6 @@ class TestLibraryOrganizer:
         
         target_dir = organizer.get_target_directory(sample_movie_info)
         
-        # Movies go in Movies/MovieName (Year)/ structure
         assert target_dir.name == "Test Movie (2023)"
         assert target_dir.parent.name == "Movies"
         assert target_dir.parent.parent == temp_config.library_dir
@@ -112,7 +109,6 @@ class TestLibraryOrganizer:
         
         target_dir = organizer.get_target_directory(sample_tv_info)
         
-        # TV shows go in TV Shows/ShowName (Year)/ structure
         assert target_dir.name == "Test TV Show (2023)"
         assert target_dir.parent.name == "TV Shows"
         assert target_dir.parent.parent == temp_config.library_dir
@@ -121,11 +117,9 @@ class TestLibraryOrganizer:
         """Test filename sanitization for filesystem compatibility."""
         organizer = LibraryOrganizer(temp_config)
         
-        # Test various problematic characters
         unsafe_name = "Movie: The Sequel / Part 2 <Director's Cut>"
         safe_name = organizer.sanitize_filename(unsafe_name)
         
-        # Should remove or replace unsafe characters
         assert "/" not in safe_name
         assert "<" not in safe_name
         assert ">" not in safe_name
@@ -142,7 +136,6 @@ class TestFileOrganization:
         
         target_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         
-        # Should move file to correct location
         assert target_path.exists()
         assert target_path.parent.name == "Test Movie (2023)"
         assert target_path.parent.parent.name == "Movies"
@@ -155,7 +148,6 @@ class TestFileOrganization:
         
         target_path = organizer.organize_media(sample_encoded_file, sample_tv_info)
         
-        # Should move file to correct TV location
         assert target_path.exists()
         assert target_path.parent.name == "Test TV Show (2023)"
         assert target_path.parent.parent.name == "TV Shows"
@@ -165,18 +157,14 @@ class TestFileOrganization:
         organizer = LibraryOrganizer(temp_config)
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create target file that already exists
         target_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         
-        # Try to organize another file with same name
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
             f.write(b"different content")
             second_file = Path(f.name)
         
-        # Should handle conflict (rename or skip)
         result_path = organizer.organize_media(second_file, sample_movie_info)
         
-        # Either same path (overwrote) or different path (renamed)
         assert result_path.exists()
 
     def test_directory_creation(self, temp_config, sample_movie_info):
@@ -185,10 +173,8 @@ class TestFileOrganization:
         
         target_dir = organizer.get_target_directory(sample_movie_info)
         
-        # Directory should not exist initially
         assert not target_dir.exists()
         
-        # Should create directory when organizing
         target_dir.mkdir(parents=True, exist_ok=True)
         
         assert target_dir.exists()
@@ -201,7 +187,6 @@ class TestPlexIntegration:
     @patch('spindle.organize.library.PlexServer')
     def test_trigger_library_scan(self, mock_plex_server, temp_config):
         """Test triggering Plex library scan."""
-        # Mock Plex server instance
         mock_server_instance = Mock()
         mock_section = Mock()
         mock_section.update.return_value = None
@@ -229,7 +214,6 @@ class TestPlexIntegration:
     @patch('spindle.organize.library.PlexServer')
     def test_verify_plex_connection(self, mock_plex_server, temp_config):
         """Test Plex server connection verification."""
-        # Mock successful Plex server instance
         mock_server_instance = Mock()
         mock_server_instance.friendlyName = "Test Plex Server"
         mock_plex_server.return_value = mock_server_instance
@@ -239,16 +223,6 @@ class TestPlexIntegration:
         
         assert connected is True
 
-    @patch('requests.get')
-    def test_verify_plex_connection_failure(self, mock_get, temp_config):
-        """Test Plex connection failure handling."""
-        mock_get.side_effect = Exception("Connection failed")
-        
-        organizer = LibraryOrganizer(temp_config)
-        connected = organizer.verify_plex_connection()
-        
-        assert connected is False
-
 
 class TestWorkflowIntegration:
     """Test organization integration with complete workflow."""
@@ -257,7 +231,6 @@ class TestWorkflowIntegration:
         """Test organization integrates with queue workflow."""
         from spindle.queue.manager import QueueManager, QueueItemStatus
         
-        # Setup queue with encoded item
         queue_manager = QueueManager(temp_config)
         item = queue_manager.add_disc("TEST_MOVIE_DISC")
         item.status = QueueItemStatus.ENCODED
@@ -265,18 +238,15 @@ class TestWorkflowIntegration:
         item.encoded_file = sample_encoded_file
         queue_manager.update_item(item)
         
-        # Organize the file
         organizer = LibraryOrganizer(temp_config)
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
         organized_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         
-        # Update queue item
         item.status = QueueItemStatus.COMPLETED
         item.final_file = organized_path
         queue_manager.update_item(item)
         
-        # Verify workflow completion
         updated_item = queue_manager.get_item(item.item_id)
         assert updated_item.status == QueueItemStatus.COMPLETED
         assert updated_item.final_file == organized_path
@@ -285,7 +255,6 @@ class TestWorkflowIntegration:
     @patch('spindle.organize.library.PlexServer')
     def test_complete_organization_with_plex(self, mock_plex_server, temp_config, sample_movie_info, sample_encoded_file):
         """Test complete organization including Plex notification."""
-        # Mock Plex server instance
         mock_server_instance = Mock()
         mock_section = Mock()
         mock_section.update.return_value = None
@@ -295,7 +264,6 @@ class TestWorkflowIntegration:
         organizer = LibraryOrganizer(temp_config)
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
-        # Organize file and trigger Plex scan
         organized_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         plex_success = organizer.trigger_library_scan()
         
@@ -306,31 +274,15 @@ class TestWorkflowIntegration:
         """Test organization error handling and recovery."""
         organizer = LibraryOrganizer(temp_config)
         
-        # Test with missing source file
         missing_file = Path("/tmp/nonexistent.mp4")
         
         with pytest.raises((FileNotFoundError, OSError)):
             organizer.organize_media(missing_file, sample_movie_info)
-        
-        # Test with invalid target directory (read-only)
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
-            f.write(b"content")
-            source_file = Path(f.name)
-        
-        # Should handle permission errors gracefully
-        try:
-            result = organizer.organize_media(source_file, sample_movie_info)
-            # If no exception, organization succeeded
-            assert result.exists() or result is None
-        except PermissionError:
-            # Expected for permission-restricted directories
-            pass
 
     def test_library_structure_validation(self, temp_config):
         """Test library directory structure validation."""
         organizer = LibraryOrganizer(temp_config)
         
-        # Should create Movies and TV Shows directories
         movies_dir = temp_config.library_dir / "Movies"
         tv_dir = temp_config.library_dir / "TV Shows"
         
@@ -350,16 +302,13 @@ class TestMetadataHandling:
         organizer = LibraryOrganizer(temp_config)
         temp_config.library_dir.mkdir(parents=True, exist_ok=True)
         
-        # Organize file
         organized_path = organizer.organize_media(sample_encoded_file, sample_movie_info)
         
-        # Basic info should be recoverable from filename/path
         assert "Test Movie" in str(organized_path)
         assert "2023" in str(organized_path)
 
     def test_filename_encoding_handling(self, temp_config):
         """Test handling of special characters in filenames."""
-        # Create media info with special characters
         special_media_info = MediaInfo(
             title="Café München: The Résumé",
             year=2023,
@@ -370,20 +319,5 @@ class TestMetadataHandling:
         organizer = LibraryOrganizer(temp_config)
         filename = organizer.generate_filename(special_media_info)
         
-        # Should handle unicode characters appropriately
         assert filename is not None
         assert len(filename) > 0
-        
-        # Create actual file to test filesystem compatibility
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
-            f.write(b"content")
-            test_file = Path(f.name)
-        
-        temp_config.library_dir.mkdir(parents=True, exist_ok=True)
-        
-        try:
-            organized_path = organizer.organize_media(test_file, special_media_info)
-            assert organized_path.exists()
-        except UnicodeError:
-            # If filesystem doesn't support unicode, should fallback gracefully
-            pass

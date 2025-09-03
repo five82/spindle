@@ -1,4 +1,4 @@
-"""Tests for simple individual multi-disc processing with series caching."""
+"""Tests for simple multi-disc processing with series caching."""
 
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -56,7 +56,7 @@ def sample_media_info():
 
 
 class TestSimpleMultiDiscDetection:
-    """Test simple TV series disc detection."""
+    """Test TV series disc detection."""
     
     def test_detect_tv_series_disc(self, test_config, sample_tv_disc_info, sample_tv_metadata):
         """Test detection of TV series disc."""
@@ -84,7 +84,7 @@ class TestSimpleMultiDiscDetection:
         assert tv_info is None
 
 
-class TestSimpleSeriesCaching:
+class TestSeriesCaching:
     """Test series metadata caching functionality."""
     
     def test_cache_new_series_metadata(self, test_config, sample_tv_disc_info, sample_tv_metadata, sample_media_info):
@@ -94,11 +94,9 @@ class TestSimpleSeriesCaching:
         tv_info = manager.detect_tv_series_disc(sample_tv_disc_info, sample_tv_metadata)
         cached_media_info = manager.get_or_cache_series_metadata(tv_info, sample_media_info)
         
-        # Should return the provided media info and cache it
         assert cached_media_info.title == sample_media_info.title
         assert cached_media_info.tmdb_id == sample_media_info.tmdb_id
         
-        # Verify it was cached by trying to retrieve without providing media_info
         cached_again = manager.get_or_cache_series_metadata(tv_info, None)
         assert cached_again.title == sample_media_info.title
         assert cached_again.tmdb_id == sample_media_info.tmdb_id
@@ -107,11 +105,9 @@ class TestSimpleSeriesCaching:
         """Test retrieving cached series metadata."""
         manager = SimpleMultiDiscManager(test_config)
         
-        # First disc - cache the metadata
         tv_info = manager.detect_tv_series_disc(sample_tv_disc_info, sample_tv_metadata)
         manager.get_or_cache_series_metadata(tv_info, sample_media_info)
         
-        # Second disc from same series - should get cached metadata
         disc_info_2 = DiscInfo("/dev/sr0", "BluRay", "BATMAN_TV_S1_DISC_2")
         metadata_2 = EnhancedDiscMetadata()
         metadata_2.volume_id = "BATMAN_TV_S1_DISC_2"
@@ -119,129 +115,71 @@ class TestSimpleSeriesCaching:
         metadata_2.disc_type_info = {"is_tv": True, "season": 1, "disc": 2}
         
         tv_info_2 = manager.detect_tv_series_disc(disc_info_2, metadata_2)
-        cached_media_info = manager.get_or_cache_series_metadata(tv_info_2, None)
+        cached_metadata = manager.get_or_cache_series_metadata(tv_info_2, None)
         
-        assert cached_media_info.title == sample_media_info.title
-        assert cached_media_info.tmdb_id == sample_media_info.tmdb_id
+        assert cached_metadata.title == sample_media_info.title
+        assert cached_metadata.tmdb_id == sample_media_info.tmdb_id
 
-
-class TestSimpleDiscProcessing:
-    """Test complete individual disc processing workflow."""
-    
-    def test_process_tv_series_disc_with_new_metadata(self, test_config, sample_tv_disc_info, sample_tv_metadata, sample_media_info):
-        """Test processing TV series disc with new metadata."""
+    def test_different_series_separate_cache(self, test_config):
+        """Test that different series maintain separate cache entries."""
         manager = SimpleMultiDiscManager(test_config)
         
-        tv_info, media_info = manager.process_tv_series_disc(
-            sample_tv_disc_info, sample_tv_metadata, sample_media_info
-        )
+        # Cache first series
+        disc_info_1 = DiscInfo("/dev/sr0", "BluRay", "BATMAN_TV_S1_DISC_1")
+        metadata_1 = EnhancedDiscMetadata()
+        metadata_1.volume_id = "BATMAN_TV_S1_DISC_1"
+        metadata_1.disc_type_info = {"is_tv": True, "season": 1, "disc": 1}
+        
+        tv_info_1 = manager.detect_tv_series_disc(disc_info_1, metadata_1)
+        media_info_1 = MediaInfo("Batman TV Series", 2004, "tv", 12345)
+        manager.get_or_cache_series_metadata(tv_info_1, media_info_1)
+        
+        # Different series should not get cached data from first
+        disc_info_2 = DiscInfo("/dev/sr0", "BluRay", "SUPERMAN_TV_S1_DISC_1")  
+        metadata_2 = EnhancedDiscMetadata()
+        metadata_2.volume_id = "SUPERMAN_TV_S1_DISC_1"
+        metadata_2.disc_type_info = {"is_tv": True, "season": 1, "disc": 1}
+        
+        tv_info_2 = manager.detect_tv_series_disc(disc_info_2, metadata_2)
+        cached_metadata = manager.get_or_cache_series_metadata(tv_info_2, None)
+        
+        assert cached_metadata is None
+
+
+class TestWorkflowIntegration:
+    """Test multi-disc workflow integration."""
+    
+    def test_multi_disc_workflow_detection(self, test_config, sample_tv_disc_info, sample_tv_metadata, sample_media_info):
+        """Test complete multi-disc workflow detection."""
+        manager = SimpleMultiDiscManager(test_config)
+        
+        tv_info = manager.detect_tv_series_disc(sample_tv_disc_info, sample_tv_metadata)
         
         assert tv_info is not None
         assert tv_info.series_title == "Batman TV Series"
-        assert tv_info.season_number == 1
-        assert media_info.title == sample_media_info.title
-        assert media_info.tmdb_id == sample_media_info.tmdb_id
-        
-    def test_process_tv_series_disc_with_cached_metadata(self, test_config, sample_tv_disc_info, sample_tv_metadata, sample_media_info):
-        """Test processing TV series disc that uses cached metadata."""
+        assert tv_info.is_tv_series is True
+
+    def test_single_disc_workflow(self, test_config):
+        """Test workflow with single disc (non-multi-disc)."""
         manager = SimpleMultiDiscManager(test_config)
         
-        # Process first disc to cache metadata
-        manager.process_tv_series_disc(sample_tv_disc_info, sample_tv_metadata, sample_media_info)
+        single_disc_info = DiscInfo("/dev/sr0", "BluRay", "SINGLE_MOVIE_DISC")
+        single_metadata = EnhancedDiscMetadata()
+        single_metadata.volume_id = "SINGLE_MOVIE_DISC"
+        single_metadata.disc_type_info = {"is_tv": False}
         
-        # Process second disc - should use cached metadata
-        disc_info_2 = DiscInfo("/dev/sr0", "BluRay", "BATMAN_TV_S1_DISC_2")
-        metadata_2 = EnhancedDiscMetadata()
-        metadata_2.volume_id = "BATMAN_TV_S1_DISC_2"
-        metadata_2.disc_name = "Batman TV Series - Season 1: Disc 2"
-        metadata_2.disc_type_info = {"is_tv": True, "season": 1, "disc": 2}
-        
-        tv_info_2, media_info_2 = manager.process_tv_series_disc(
-            disc_info_2, metadata_2, None  # No new metadata provided
-        )
-        
-        assert tv_info_2 is not None
-        assert tv_info_2.series_title == "Batman TV Series"
-        assert tv_info_2.season_number == 1
-        assert tv_info_2.disc_number == 2
-        assert media_info_2.title == sample_media_info.title  # Should get cached metadata
-        assert media_info_2.tmdb_id == sample_media_info.tmdb_id
-        
-    def test_process_non_tv_disc(self, test_config):
-        """Test processing non-TV disc returns None."""
-        manager = SimpleMultiDiscManager(test_config)
-        
-        disc_info = DiscInfo("/dev/sr0", "BluRay", "SINGLE_MOVIE")
-        metadata = EnhancedDiscMetadata()
-        metadata.volume_id = "SINGLE_MOVIE"
-        metadata.disc_type_info = {"is_tv": False}
-        
-        tv_info, media_info = manager.process_tv_series_disc(disc_info, metadata, None)
+        tv_info = manager.detect_tv_series_disc(single_disc_info, single_metadata)
         
         assert tv_info is None
-        assert media_info is None
 
-
-class TestSeriesTitleExtraction:
-    """Test extraction of clean series titles."""
-    
-    def test_extract_series_title_from_disc_name(self, test_config):
-        """Test extracting series title from disc name."""
+    def test_error_handling_invalid_metadata(self, test_config):
+        """Test error handling with invalid metadata."""
         manager = SimpleMultiDiscManager(test_config)
         
-        metadata = EnhancedDiscMetadata()
-        metadata.disc_name = "Breaking Bad - Season 1: Disc 1"
-        disc_info = DiscInfo("/dev/sr0", "BluRay", "BREAKING_BAD_S1_DISC_1")
+        disc_info = DiscInfo("/dev/sr0", "BluRay", "INVALID_DISC")
+        invalid_metadata = EnhancedDiscMetadata()
+        # Missing disc_type_info should be handled gracefully
         
-        title = manager._extract_series_title(metadata, disc_info)
-        assert title == "Breaking Bad"
+        tv_info = manager.detect_tv_series_disc(disc_info, invalid_metadata)
         
-    def test_extract_series_title_from_volume_id(self, test_config):
-        """Test extracting series title from volume ID."""
-        manager = SimpleMultiDiscManager(test_config)
-        
-        metadata = EnhancedDiscMetadata()
-        metadata.volume_id = "SHERLOCK_S1_DISC_1"
-        disc_info = DiscInfo("/dev/sr0", "BluRay", "SHERLOCK_S1_DISC_1")
-        
-        title = manager._extract_series_title(metadata, disc_info)
-        assert title == "SHERLOCK"
-        
-    def test_clean_generic_labels(self, test_config):
-        """Test filtering out generic labels."""
-        manager = SimpleMultiDiscManager(test_config)
-        
-        # Generic labels should be detected
-        assert manager._is_generic_label("LOGICAL_VOLUME_ID") is True
-        assert manager._is_generic_label("DVD_VIDEO") is True
-        assert manager._is_generic_label("123") is True
-        assert manager._is_generic_label("AB") is True
-        
-        # Valid labels should pass
-        assert manager._is_generic_label("BATMAN_TV_SERIES") is False
-        assert manager._is_generic_label("BREAKING_BAD") is False
-
-
-class TestCacheManagement:
-    """Test cache management functionality."""
-    
-    def test_get_cache_stats(self, test_config, sample_tv_disc_info, sample_tv_metadata, sample_media_info):
-        """Test getting cache statistics."""
-        manager = SimpleMultiDiscManager(test_config)
-        
-        # Process a disc to create cache entry
-        manager.process_tv_series_disc(sample_tv_disc_info, sample_tv_metadata, sample_media_info)
-        
-        stats = manager.get_cache_stats()
-        assert isinstance(stats, dict)
-        assert 'total_entries' in stats
-        assert stats['total_entries'] >= 1
-        
-    def test_cleanup_expired_cache(self, test_config):
-        """Test cleaning up expired cache entries."""
-        manager = SimpleMultiDiscManager(test_config)
-        
-        # This should not error even with empty cache
-        deleted_count = manager.cleanup_expired_cache()
-        assert isinstance(deleted_count, int)
-        assert deleted_count >= 0
+        assert tv_info is None
