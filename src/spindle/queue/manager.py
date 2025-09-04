@@ -109,8 +109,36 @@ class QueueManager:
     def _init_database(self) -> None:
         """Initialize the SQLite database."""
         self.config.log_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_schema()
 
+    def _ensure_schema(self) -> None:
+        """Ensure database has current schema, recreating if necessary."""
         with self._get_connection() as conn:
+            # Check if current schema exists
+            needs_recreation = False
+
+            try:
+                # Try to query all expected columns
+                conn.execute(
+                    """SELECT id, source_path, disc_title, status, media_info_json,
+                       ripped_file, encoded_file, final_file, error_message,
+                       created_at, updated_at, progress_stage, progress_percent,
+                       progress_message, rip_spec_data
+                       FROM queue_items LIMIT 0""",
+                )
+            except sqlite3.OperationalError:
+                # Schema is outdated or missing
+                needs_recreation = True
+                logger.info("Queue schema outdated or missing, recreating...")
+
+            if needs_recreation:
+                # Drop old table and recreate
+                conn.execute("DROP TABLE IF EXISTS queue_items")
+                conn.execute(
+                    "DROP TABLE IF EXISTS schema_version",
+                )  # Clean up old migration table
+
+            # Create current schema
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS queue_items (
@@ -127,138 +155,27 @@ class QueueManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     progress_stage TEXT,
                     progress_percent REAL DEFAULT 0.0,
-                    progress_message TEXT
+                    progress_message TEXT,
+                    rip_spec_data TEXT
                 )
-            """,
+                """,
             )
 
             # Create index on status for faster queries
             conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status)
-            """,
+                "CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status)",
             )
 
-            # Apply database migrations
-            self._apply_migrations(conn)
+            conn.commit()
 
-    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
-        """Apply database schema migrations with proper verification."""
-
-        # Get current schema version
-        current_version = self._get_schema_version(conn)
-        logger.info("Current database schema version: %s", current_version)
-
-        # Apply migrations in order
-        migrations = [
-            (1, self._migration_001_add_progress_columns),
-            (2, self._migration_002_add_rip_spec_data),
-            # Future migrations go here
-        ]
-
-        for version, migration_func in migrations:
-            if current_version < version:
-                logger.info("Applying database migration %s", version)
-                try:
-                    migration_func(conn)
-                    self._set_schema_version(conn, version)
-                    logger.info("Successfully applied migration %s", version)
-                except Exception as e:
-                    logger.exception(f"Migration {version} failed: {e}")
-                    msg = f"Database migration {version} failed: {e}"
-                    raise RuntimeError(msg)
-
-    def _get_schema_version(self, conn: sqlite3.Connection) -> int:
-        """Get the current schema version from the database."""
-        try:
-            # Create schema_version table if it doesn't exist
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS schema_version (
-                    version INTEGER PRIMARY KEY
-                )
-            """,
-            )
-
-            cursor = conn.execute(
-                "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1",
-            )
-            result = cursor.fetchone()
-            return result[0] if result else 0
-
-        except sqlite3.Error as e:
-            logger.exception(f"Failed to get schema version: {e}")
-            return 0
-
-    def _set_schema_version(self, conn: sqlite3.Connection, version: int) -> None:
-        """Set the schema version in the database."""
-        conn.execute("DELETE FROM schema_version")  # Keep only the latest version
-        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
-
-    def _migration_001_add_progress_columns(self, conn: sqlite3.Connection) -> None:
-        """Migration 1: Add progress tracking columns."""
-
-        # Check if columns already exist by trying to select from them
-        columns_to_add = [
-            ("progress_stage", "TEXT"),
-            ("progress_percent", "REAL DEFAULT 0.0"),
-            ("progress_message", "TEXT"),
-        ]
-
-        for column_name, column_def in columns_to_add:
-            try:
-                # Test if column exists by selecting from it
-                conn.execute(
-                    f"SELECT {column_name} FROM queue_items LIMIT 1",
-                )
-                logger.debug("Column %s already exists", column_name)
-            except sqlite3.OperationalError as e:
-                if "no such column" in str(e).lower():
-                    # Column doesn't exist, add it
-                    logger.info("Adding column %s", column_name)
-                    conn.execute(
-                        f"ALTER TABLE queue_items ADD COLUMN {column_name} {column_def}",
-                    )
-
-                    # Verify the column was added
-                    try:
-                        conn.execute(
-                            f"SELECT {column_name} FROM queue_items LIMIT 1",
-                        )
-                        logger.debug("Successfully verified column %s", column_name)
-                    except sqlite3.OperationalError:
-                        msg = f"Failed to add column {column_name}"
-                        raise RuntimeError(msg) from None
-                else:
-                    # Unexpected error
-                    msg = f"Unexpected error checking column {column_name}: {e}"
-                    raise RuntimeError(msg) from e
-
-    def _migration_002_add_rip_spec_data(self, conn: sqlite3.Connection) -> None:
-        """Migration 2: Add rip specification data column."""
-
-        # Check if column already exists
-        try:
-            # Test if column exists by selecting from it
-            conn.execute("SELECT rip_spec_data FROM queue_items LIMIT 1")
-            logger.debug("Column rip_spec_data already exists")
-        except sqlite3.OperationalError as e:
-            if "no such column" in str(e).lower():
-                # Column doesn't exist, add it
-                logger.info("Adding column rip_spec_data")
-                conn.execute("ALTER TABLE queue_items ADD COLUMN rip_spec_data TEXT")
-
-                # Verify the column was added
-                try:
-                    conn.execute("SELECT rip_spec_data FROM queue_items LIMIT 1")
-                    logger.debug("Successfully verified column rip_spec_data")
-                except sqlite3.OperationalError:
-                    msg = "Failed to add column rip_spec_data"
-                    raise RuntimeError(msg) from None
-            else:
-                # Unexpected error
-                msg = f"Unexpected error checking column rip_spec_data: {e}"
-                raise RuntimeError(msg) from e
+    def reset_queue(self) -> None:
+        """Clear and recreate the queue database."""
+        with self._get_connection() as conn:
+            conn.execute("DROP TABLE IF EXISTS queue_items")
+            conn.execute("DROP TABLE IF EXISTS schema_version")
+            conn.commit()
+        self._ensure_schema()
+        logger.info("Queue database reset")
 
     def add_disc(self, disc_title: str) -> QueueItem:
         """Add a disc to the queue."""
@@ -574,11 +491,8 @@ class QueueManager:
             with self._get_connection() as conn:
                 health_info["database_readable"] = True
 
-                # Check schema version
-                try:
-                    health_info["schema_version"] = self._get_schema_version(conn)
-                except (sqlite3.Error, ValueError):
-                    health_info["schema_version"] = "unknown"
+                # Schema version no longer tracked
+                health_info["schema_version"] = "current"
 
                 # Check if main table exists
                 cursor = conn.execute(
