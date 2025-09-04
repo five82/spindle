@@ -22,11 +22,7 @@ from rich.table import Table
 from .config import SpindleConfig, create_sample_config, load_config
 from .disc.monitor import detect_disc
 from .encode.drapto_wrapper import DraptoEncoder
-from .error_handling import (
-    ConfigurationError,
-    check_dependencies,
-    graceful_exit,
-)
+from .error_handling import ConfigurationError, check_dependencies
 from .identify.tmdb import MediaIdentifier
 from .notify.ntfy import NtfyNotifier
 from .organize.library import LibraryOrganizer
@@ -41,13 +37,14 @@ console = Console()
 def check_uv_requirement() -> None:
     """Check if uv is available and recommend proper usage."""
     # Check for dependencies and display errors nicely
-    dependency_errors = check_dependencies()
-    if dependency_errors:
+    missing_deps = check_dependencies()
+    if missing_deps:
         console.print("[red bold]🚫 Missing Dependencies[/red bold]")
         console.print("Spindle requires the following dependencies:\n")
-        for error in dependency_errors:
-            error.display_to_user()
-        graceful_exit(1)
+        for dep in missing_deps:
+            console.print(f"  • {dep}")
+        console.print("\n[dim]Install the missing dependencies and try again[/dim]")
+        sys.exit(1)
 
     # Check if we're running through uv for development
     if not os.environ.get("UV_RUN_RECURSION_DEPTH") and "site-packages" in str(
@@ -72,8 +69,10 @@ def setup_logging(
     # Clean up existing handlers first to prevent resource leaks
     cleanup_logging()
 
+    # Configure RichHandler to show path only at DEBUG level
+    show_path = level == logging.DEBUG
     handlers: list[logging.Handler] = [
-        RichHandler(console=console, rich_tracebacks=True),
+        RichHandler(console=console, rich_tracebacks=True, show_path=show_path),
     ]
 
     # Add file handler if config is available
@@ -133,8 +132,8 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
             config_path=config,
             solution="Run 'spindle config validate' to check your configuration file",
         )
-        config_error.display_to_user()
-        graceful_exit(1)
+        console.print(f"[red]Configuration Error:[/red] {config_error}")
+        sys.exit(1)
 
 
 @cli.group()

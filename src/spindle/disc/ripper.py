@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from spindle.config import SpindleConfig
-from spindle.error_handling import ExternalToolError, MediaError
+from spindle.error_handling import MediaError, ToolError
 
 if TYPE_CHECKING:
     from .analyzer import ContentPattern
@@ -189,11 +189,9 @@ class MakeMKVRipper:
                 # Try to extract a clean error message from MakeMKV output
                 clean_error = self._extract_makemkv_error(error_msg)
                 msg = "MakeMKV"
-                raise ExternalToolError(
+                msg = f"{msg} failed with exit code {result.returncode}: {clean_error}"
+                raise ToolError(
                     msg,
-                    exit_code=result.returncode,
-                    stderr=clean_error,
-                    solution="Check disc is readable and MakeMKV is properly configured",
                 )
 
             raw_output = result.stdout
@@ -202,19 +200,12 @@ class MakeMKVRipper:
 
         except subprocess.TimeoutExpired:
             msg = "MakeMKV"
-            raise ExternalToolError(
-                msg,
-                details="Disc scan operation timed out",
-                solution="Try a different disc or check drive performance",
-            )
+            msg = f"{msg} disc scan operation timed out"
+            raise ToolError(msg)
         except subprocess.CalledProcessError as e:
             msg = "MakeMKV"
-            raise ExternalToolError(
-                msg,
-                exit_code=e.returncode,
-                stderr=str(e),
-                solution="Check MakeMKV installation and disc compatibility",
-            )
+            msg = f"{msg} failed with exit code {e.returncode}: {e}"
+            raise ToolError(msg)
 
     def _extract_makemkv_error(self, output: str) -> str:
         """Extract a clean error message from MakeMKV MSG output."""
@@ -306,11 +297,9 @@ class MakeMKVRipper:
                     # Check for common error conditions
                     if "too old" in text.lower() or "registration key" in text.lower():
                         msg = "MakeMKV"
-                        raise ExternalToolError(
+                        msg = f"{msg} license error: {text}. Update MakeMKV or purchase a license key from makemkv.com"
+                        raise ToolError(
                             msg,
-                            details=text,
-                            solution="Update MakeMKV license key or install the latest beta version",
-                            recoverable=True,
                         )
                     if "failed" in text.lower() or "error" in text.lower():
                         # Provide user-friendly error messages based on common issues
@@ -332,11 +321,8 @@ class MakeMKVRipper:
                             msg = "MakeMKV could not read this disc"
                             solution = "Check disc quality, drive compatibility, and ensure MakeMKV is up to date. See logs for technical details."
 
-                        raise ExternalToolError(
-                            msg,
-                            details=text,
-                            solution=solution,
-                        )
+                        msg = f"{msg}: {text}. {solution}"
+                        raise ToolError(msg)
 
         titles: dict[int, dict] = {}
 
@@ -899,11 +885,9 @@ class MakeMKVRipper:
 
                 if return_code != 0:
                     msg = "MakeMKV"
-                    raise ExternalToolError(
+                    msg = f"{msg} failed with exit code {return_code}: {stdout_output}"
+                    raise ToolError(
                         msg,
-                        exit_code=return_code,
-                        stderr=stdout_output,
-                        solution="Check disc quality and available disk space",
                     )
             else:
                 # Use subprocess.run for compatibility (tests)
@@ -917,21 +901,16 @@ class MakeMKVRipper:
 
                 if result.returncode != 0:
                     msg = "MakeMKV"
-                    raise ExternalToolError(
+                    msg = f"{msg} failed with exit code {result.returncode}: {result.stderr}"
+                    raise ToolError(
                         msg,
-                        exit_code=result.returncode,
-                        stderr=result.stderr,
-                        solution="Check disc quality and available disk space",
                     )
 
             # Find the actual output file (MakeMKV may change the name)
             ripped_files = list(output_dir.glob("*.mkv"))
             if not ripped_files:
                 msg = "No files were ripped from the disc"
-                raise MediaError(
-                    msg,
-                    solution="Check disc has readable content and sufficient disk space available",
-                )
+                raise MediaError(msg)
 
             # Return the most recently created file
             output_file = max(ripped_files, key=lambda f: f.stat().st_mtime)
@@ -941,19 +920,14 @@ class MakeMKVRipper:
 
         except subprocess.TimeoutExpired:
             msg = "MakeMKV"
-            raise ExternalToolError(
+            msg = f"{msg} ripping operation timed out after {self.config.makemkv_rip_timeout}s"
+            raise ToolError(
                 msg,
-                details="Ripping operation timed out",
-                solution=f"Large discs may require longer than {self.config.makemkv_rip_timeout}s. Consider increasing the timeout in config.",
             )
         except subprocess.CalledProcessError as e:
             msg = "MakeMKV"
-            raise ExternalToolError(
-                msg,
-                exit_code=e.returncode,
-                stderr=str(e),
-                solution="Check MakeMKV installation and disc compatibility",
-            )
+            msg = f"{msg} failed with exit code {e.returncode}: {e}"
+            raise ToolError(msg)
 
     def rip_disc(self, output_dir: Path, device: str | None = None) -> Path:
         """Scan disc and rip the main title."""
@@ -964,9 +938,6 @@ class MakeMKVRipper:
 
         if not main_title:
             msg = "No suitable main title found on disc"
-            raise MediaError(
-                msg,
-                solution="Check if disc contains valid video content or try manual title selection",
-            )
+            raise MediaError(msg)
 
         return self.rip_title(main_title, output_dir, device)

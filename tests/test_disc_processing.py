@@ -127,8 +127,8 @@ MSG:1005,0,1,"Completed","Done"'''
         
         ripper = MakeMKVRipper(temp_config)
         
-        from spindle.error_handling import ExternalToolError
-        with pytest.raises(ExternalToolError):
+        from spindle.error_handling import ToolError
+        with pytest.raises(ToolError):
             ripper.scan_disc()
 
 

@@ -8,13 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .config import SpindleConfig
-from .error_handling import (
-    ErrorCategory,
-    ExternalToolError,
-    HardwareError,
-    MediaError,
-    SpindleError,
-)
+from .error_handling import HardwareError, MediaError, SpindleError, ToolError
 
 if TYPE_CHECKING:
     from .disc.analyzer import ContentPattern
@@ -1155,15 +1149,9 @@ class ContinuousProcessor:
         # Use enhanced error handling for user-friendly messages
         logger.exception(f"Identification failed for {disc_label}: {error}")
 
-        # Get user-friendly error message and solution
-        if hasattr(error, "solution"):
-            # ExternalToolError with solution
-            user_message = str(error)
-            progress_message = getattr(error, "solution", "See logs for details")
-        else:
-            # Generic error
-            user_message = f"Identification failed: {error!s}"
-            progress_message = "Check disc and try again"
+        # Get user-friendly error message
+        user_message = f"Identification failed: {error!s}"
+        progress_message = "Check disc and try again"
 
         item.status = QueueItemStatus.FAILED
         item.error_message = user_message
@@ -1253,11 +1241,8 @@ class ContinuousProcessor:
             for keyword in ["license", "registration key", "too old", "expired"]
         ):
             # MakeMKV license issues
-            enhanced_error = ExternalToolError(
-                "MakeMKV",
-                details=str(error),
-                solution="Check MakeMKV license status. Free version has limitations on disc types and may require beta key updates.",
-                recoverable=True,
+            enhanced_error = ToolError(
+                f"MakeMKV license error: {error}. Check MakeMKV license status. Free version has limitations on disc types.",
             )
         elif any(
             keyword in error_str
@@ -1265,8 +1250,7 @@ class ContinuousProcessor:
         ):
             # Hardware/media issues
             enhanced_error = HardwareError(
-                "No disc detected or drive not ready",
-                solution="Ensure disc is properly inserted and drive is accessible",
+                f"No disc detected or drive not ready: {error}. Ensure disc is properly inserted and drive is accessible",
             )
         elif any(
             keyword in error_str
@@ -1274,35 +1258,28 @@ class ContinuousProcessor:
         ):
             # Media quality issues
             enhanced_error = MediaError(
-                "Disc reading failed due to media quality issues",
-                solution="Try cleaning the disc, checking for scratches, or using a different copy",
+                f"Disc reading failed due to media quality issues: {error}. Try cleaning the disc or using a different copy",
             )
         elif "permission denied" in error_str:
             # Filesystem permissions
 
             enhanced_error = SpindleError(
-                str(error),
-                ErrorCategory.FILESYSTEM,
-                solution=f"Check file permissions for staging directory: {self.config.staging_dir}",
-                recoverable=True,
+                f"File permission error: {error}. Check permissions for staging directory: {self.config.staging_dir}",
             )
         else:
             # Generic system error
             enhanced_error = SpindleError(
-                str(error),
-                ErrorCategory.SYSTEM,
-                solution="Check system resources and disc drive status",
-                recoverable=True,
+                f"System error: {error}. Check system resources and disc drive status",
             )
 
         # Update queue item with enhanced error info
         item.status = QueueItemStatus.FAILED
-        item.error_message = enhanced_error.message
-        item.progress_message = f"Failed: {enhanced_error.category.value.title()} error"
+        item.error_message = str(enhanced_error)
+        item.progress_message = "Failed: See error message for details"
         self.queue_manager.update_item(item)
 
-        # Display user-friendly error
-        enhanced_error.display_to_user()
+        # Log the error
+        logger.error("Enhanced error: %s", enhanced_error)
 
         # Send notification with category context
         self.notifier.notify_error(
