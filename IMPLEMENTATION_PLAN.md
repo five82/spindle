@@ -2377,11 +2377,37 @@ find tests/ -name "*.py" -exec sed -i 's/from spindle\.processor/from spindle.co
 
 **⚠️ CRITICAL:** Only execute this phase after Phase 2.2-2.6 are fully complete and tested. This phase makes irreversible changes to the codebase.
 
-#### 2.7.1 Pre-Cleanup Validation
+**Logical Sequence:** Test cleanup must happen first, then validation, then code cleanup. This ensures we validate only the new architecture tests, not the old ones we're about to remove.
 
-**Before any cleanup, verify:**
+#### 2.7.1 Test Cleanup (Execute First)
+
+**Remove old test files that reference legacy architecture:**
 ```bash
-# All tests must pass with new architecture
+# Remove tests that import old monolithic modules
+rm -f tests/test_queue.py  # Uses spindle.queue.manager (replaced by tests/storage/test_queue.py)
+rm -f tests/test_disc_processing.py  # Uses spindle.disc.* (replaced by tests/components/test_disc_handler.py)
+rm -f tests/test_encoding.py  # Uses spindle.encode.drapto_wrapper (replaced by tests/services/test_drapto.py)
+rm -f tests/test_organization.py  # Uses spindle.organize.library (replaced by tests/services/test_plex.py)
+rm -f tests/test_enhanced_identification.py  # Uses spindle.identify.* (replaced by tests/services/test_tmdb.py)
+rm -f tests/test_simple_multi_disc.py  # Uses old component structure
+
+# Update test imports in remaining files
+find tests/ -name "*.py" -exec grep -l "from spindle\.queue\.manager\|from spindle\.processor\|from spindle\.disc\.\|from spindle\.encode\.\|from spindle\.organize\.\|from spindle\.identify\." {} \; | \
+  xargs sed -i '/from spindle\.\(queue\.manager\|processor\|disc\.\|encode\.\|organize\.\|identify\.\)/d' 2>/dev/null || true
+```
+
+#### 2.7.2 Pre-Cleanup Validation (Execute After Test Cleanup)
+
+**Create backup branch:**
+```bash
+git checkout -b pre-cleanup-backup
+git commit -am "Backup before legacy cleanup - Phase 2.6 complete"
+git checkout main
+```
+
+**Verify new architecture works with cleaned test suite:**
+```bash
+# All NEW tests must pass with new architecture
 uv run pytest tests/ -v
 
 # CLI functionality verification
@@ -2393,14 +2419,7 @@ uv run spindle stop    # Should cleanly stop new orchestrator
 # Insert disc -> verify identification -> ripping -> encoding -> organization
 ```
 
-**Create backup branch:**
-```bash
-git checkout -b pre-cleanup-backup
-git commit -am "Backup before legacy cleanup - Phase 2.6 complete"
-git checkout main
-```
-
-#### 2.7.2 Remove Legacy Processor Module
+#### 2.7.3 Remove Legacy Processor Module
 
 **Files to delete:**
 ```bash
@@ -2417,7 +2436,7 @@ grep -r "import.*processor" src/
 - `src/spindle/cli.py` - Remove any remaining processor imports
 - Any test files still referencing old processor
 
-#### 2.7.3 Service Module Cleanup
+#### 2.7.4 Service Module Cleanup
 
 **Move and replace existing service files:**
 ```bash
@@ -2450,7 +2469,7 @@ find src/ -name "*.py" -exec grep -l "from spindle.notify.ntfy" {} \; | \
   xargs sed -i 's/from spindle\.notify\.ntfy/from spindle.services.ntfy/g'
 ```
 
-#### 2.7.4 Queue Module Migration
+#### 2.7.5 Queue Module Migration
 
 **Move queue management:**
 ```bash
@@ -2465,7 +2484,7 @@ find src/ -name "*.py" -exec grep -l "from spindle.queue.manager" {} \; | \
   xargs sed -i 's/from spindle\.queue\.manager/from spindle.storage.queue/g'
 ```
 
-#### 2.7.5 CLI Simplification Cleanup
+#### 2.7.6 CLI Simplification Cleanup
 
 **Remove deprecated CLI functions from `cli.py`:**
 ```python
@@ -2477,24 +2496,6 @@ find src/ -name "*.py" -exec grep -l "from spindle.queue.manager" {} \; | \
 # - Any processor imports
 # - Any old service imports
 # - Unused asyncio imports (if daemon handles async)
-```
-
-#### 2.7.6 Test Cleanup
-
-**Remove old test files:**
-```bash
-# Remove tests for deleted modules
-rm -f tests/test_processor.py 2>/dev/null || true
-rm -f tests/queue/test_manager.py 2>/dev/null || true
-rm -rf tests/queue/ 2>/dev/null || true
-rm -rf tests/identify/ 2>/dev/null || true
-rm -rf tests/encode/ 2>/dev/null || true
-rm -rf tests/organize/ 2>/dev/null || true
-rm -rf tests/notify/ 2>/dev/null || true
-
-# Update test imports in remaining files
-find tests/ -name "*.py" -exec grep -l "from spindle.processor" {} \; | \
-  xargs sed -i '/from spindle\.processor/d'
 ```
 
 #### 2.7.7 Final Verification

@@ -1,10 +1,9 @@
 """TMDB API integration service."""
 
 import logging
-from typing import Any
 
-from ..config import SpindleConfig
-from ..identify.tmdb import MediaIdentifier, MediaInfo
+from spindle.config import SpindleConfig
+from spindle.identify.tmdb import MediaIdentifier, MediaInfo
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class TMDBService:
         self,
         title: str,
         content_type: str = "movie",
-        year: int | None = None
+        year: int | None = None,
     ) -> MediaInfo | None:
         """Identify media via TMDB API."""
         try:
@@ -28,11 +27,10 @@ class TMDBService:
 
             if content_type == "movie":
                 return await self.identifier.identify_movie(title, year)
-            elif content_type == "tv_series":
+            if content_type == "tv_series":
                 return await self.identifier.identify_tv_series(title, year)
-            else:
-                logger.warning(f"Unknown content type: {content_type}")
-                return None
+            logger.warning(f"Unknown content type: {content_type}")
+            return None
 
         except Exception as e:
             logger.exception(f"TMDB identification failed: {e}")

@@ -5,9 +5,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..config import SpindleConfig
-from ..identify.tmdb import MediaInfo
-from ..organize.library import LibraryOrganizer
+from spindle.config import SpindleConfig
+from spindle.identify.tmdb import MediaInfo
+from spindle.organize.library import LibraryOrganizer
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class PlexService:
         self,
         source_file: Path,
         media_info: MediaInfo,
-        progress_callback: Callable[[str, int, str], None] | None = None
+        progress_callback: Callable[[str, int, str], None] | None = None,
     ) -> Path:
         """Organize media file into Plex library structure."""
         try:
@@ -36,7 +36,7 @@ class PlexService:
             final_path = await self.organizer.organize_media_file(
                 source_file=source_file,
                 media_info=media_info,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
             logger.info(f"Media organized to: {final_path}")

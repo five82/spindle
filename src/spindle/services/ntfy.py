@@ -1,10 +1,9 @@
 """Notification service via ntfy.sh."""
 
 import logging
-from typing import Any
 
-from ..config import SpindleConfig
-from ..notify.ntfy import NtfyNotifier
+from spindle.config import SpindleConfig
+from spindle.notify.ntfy import NtfyNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ class NotificationService:
             self.notifier.send_notification(
                 title="Spindle - Disc Detected",
                 message=message,
-                priority="default"
+                priority="default",
             )
         except Exception as e:
             logger.warning(f"Failed to send disc detection notification: {e}")
@@ -35,7 +34,7 @@ class NotificationService:
             self.notifier.send_notification(
                 title="Spindle - Identified",
                 message=message,
-                priority="default"
+                priority="default",
             )
         except Exception as e:
             logger.warning(f"Failed to send identification notification: {e}")
@@ -47,7 +46,7 @@ class NotificationService:
             self.notifier.send_notification(
                 title="Spindle - Rip Complete",
                 message=message,
-                priority="default"
+                priority="default",
             )
         except Exception as e:
             logger.warning(f"Failed to send rip notification: {e}")
@@ -59,7 +58,7 @@ class NotificationService:
             self.notifier.send_notification(
                 title="Spindle - Encoded",
                 message=message,
-                priority="default"
+                priority="default",
             )
         except Exception as e:
             logger.warning(f"Failed to send encoding notification: {e}")
@@ -71,7 +70,7 @@ class NotificationService:
             self.notifier.send_notification(
                 title="Spindle - Complete",
                 message=message,
-                priority="high"
+                priority="high",
             )
         except Exception as e:
             logger.warning(f"Failed to send completion notification: {e}")
@@ -88,10 +87,10 @@ class NotificationService:
             self.notifier.send_notification(
                 title=title,
                 message=message,
-                priority="high"
+                priority="high",
             )
         except Exception as e:
-            logger.error(f"Failed to send error notification: {e}")
+            logger.exception(f"Failed to send error notification: {e}")
 
     def test_notifications(self) -> bool:
         """Test notification system."""
@@ -99,9 +98,9 @@ class NotificationService:
             self.notifier.send_notification(
                 title="Spindle - Test",
                 message="🧪 Notification system test",
-                priority="low"
+                priority="low",
             )
             return True
         except Exception as e:
-            logger.error(f"Notification test failed: {e}")
+            logger.exception(f"Notification test failed: {e}")
             return False

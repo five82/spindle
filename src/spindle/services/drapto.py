@@ -5,8 +5,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..config import SpindleConfig
-from ..encode.drapto_wrapper import DraptoEncoder, EncodeResult
+from spindle.config import SpindleConfig
+from spindle.encode.drapto_wrapper import DraptoEncoder, EncodeResult
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class DraptoService:
         self,
         input_file: Path,
         output_file: Path,
-        progress_callback: Callable[[str, int, str], None] | None = None
+        progress_callback: Callable[[str, int, str], None] | None = None,
     ) -> EncodeResult:
         """Encode video file with AV1."""
         try:
@@ -30,7 +30,8 @@ class DraptoService:
 
             # Validate input
             if not input_file.exists():
-                raise FileNotFoundError(f"Input file not found: {input_file}")
+                msg = f"Input file not found: {input_file}"
+                raise FileNotFoundError(msg)
 
             # Ensure output directory exists
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -39,7 +40,7 @@ class DraptoService:
             result = await self.encoder.encode_file(
                 input_file=input_file,
                 output_file=output_file,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
             if result.success:
@@ -55,7 +56,7 @@ class DraptoService:
                 success=False,
                 input_file=input_file,
                 output_file=output_file,
-                error_message=str(e)
+                error_message=str(e),
             )
 
     def validate_drapto_available(self) -> bool:
@@ -69,5 +70,5 @@ class DraptoService:
             "config": {
                 "quality": self.config.drapto_quality,
                 "preset": self.config.drapto_preset,
-            }
+            },
         }

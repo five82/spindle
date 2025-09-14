@@ -2,7 +2,6 @@
 
 import logging
 import os
-import signal
 import sys
 import time
 from pathlib import Path
@@ -311,12 +310,12 @@ def status(ctx: click.Context) -> None:
             console.print(f"Current disc: {status_info.get('current_disc') or 'None'}")
             console.print(f"Total items: {status_info.get('total_items', 0)}")
 
-            if status_info.get('queue_stats'):
+            if status_info.get("queue_stats"):
                 table = Table()
                 table.add_column("Status")
                 table.add_column("Count", justify="right")
 
-                for status, count in status_info['queue_stats'].items():
+                for status, count in status_info["queue_stats"].items():
                     status_str = status.replace("_", " ").title()
                     table.add_row(status_str, str(count))
 

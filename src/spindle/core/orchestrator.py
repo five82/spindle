@@ -2,17 +2,17 @@
 
 import asyncio
 import logging
-from pathlib import Path
 
-from ..config import SpindleConfig
-from ..disc.monitor import DiscInfo, DiscMonitor, detect_disc
-from ..storage.queue import QueueManager, QueueItem, QueueItemStatus
-from ..components.disc_handler import DiscHandler
-from ..components.encoder import EncoderComponent
-from ..components.organizer import OrganizerComponent
-from ..services.ntfy import NotificationService
+from spindle.components.disc_handler import DiscHandler
+from spindle.components.encoder import EncoderComponent
+from spindle.components.organizer import OrganizerComponent
+from spindle.config import SpindleConfig
+from spindle.disc.monitor import DiscInfo, DiscMonitor, detect_disc
+from spindle.services.ntfy import NotificationService
+from spindle.storage.queue import QueueItem, QueueItemStatus, QueueManager
 
 logger = logging.getLogger(__name__)
+
 
 class SpindleOrchestrator:
     """Orchestrates the complete Spindle workflow."""
@@ -97,14 +97,23 @@ class SpindleOrchestrator:
 
             def handle_completion(t):
                 if not t.cancelled() and t.exception():
-                    logger.exception("Disc identification failed", exc_info=t.exception())
-                    self.notifier.notify_error(f"Failed to identify disc: {t.exception()}", context=disc_info.label)
+                    logger.exception(
+                        "Disc identification failed",
+                        exc_info=t.exception(),
+                    )
+                    self.notifier.notify_error(
+                        f"Failed to identify disc: {t.exception()}",
+                        context=disc_info.label,
+                    )
 
             task.add_done_callback(handle_completion)
 
         except Exception as e:
             logger.exception("Error handling disc detection")
-            self.notifier.notify_error(f"Failed to process disc: {e}", context=disc_info.label)
+            self.notifier.notify_error(
+                f"Failed to process disc: {e}",
+                context=disc_info.label,
+            )
 
     async def _process_queue_continuously(self) -> None:
         """Continuously process queue items."""
@@ -132,8 +141,8 @@ class SpindleOrchestrator:
         """Get the next item that needs processing."""
         processable_statuses = [
             QueueItemStatus.IDENTIFIED,  # Ready for ripping
-            QueueItemStatus.RIPPED,      # Ready for encoding
-            QueueItemStatus.ENCODED,     # Ready for organization
+            QueueItemStatus.RIPPED,  # Ready for encoding
+            QueueItemStatus.ENCODED,  # Ready for organization
         ]
 
         for status in processable_statuses:
@@ -170,8 +179,12 @@ class SpindleOrchestrator:
         if current_disc:
             # Try to find identified name from processing items
             processing_items = []
-            for status in [QueueItemStatus.PENDING, QueueItemStatus.IDENTIFYING,
-                          QueueItemStatus.IDENTIFIED, QueueItemStatus.RIPPING]:
+            for status in [
+                QueueItemStatus.PENDING,
+                QueueItemStatus.IDENTIFYING,
+                QueueItemStatus.IDENTIFIED,
+                QueueItemStatus.RIPPING,
+            ]:
                 processing_items.extend(self.queue_manager.get_items_by_status(status))
 
             for item in processing_items:

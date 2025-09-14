@@ -2,20 +2,20 @@
 
 import json
 import logging
-from typing import Any
 
-from ..config import SpindleConfig
-from ..disc.analyzer import IntelligentDiscAnalyzer, DiscAnalysisResult
-from ..disc.monitor import DiscInfo, eject_disc
-from ..disc.multi_disc import SimpleMultiDiscManager
-from ..disc.ripper import MakeMKVRipper
-from ..disc.rip_spec import RipSpec
-from ..disc.tv_analyzer import TVSeriesDiscAnalyzer
-from ..error_handling import MediaError, ToolError
-from ..services.tmdb import TMDBService
-from ..storage.queue import QueueItem, QueueItemStatus
+from spindle.config import SpindleConfig
+from spindle.disc.analyzer import IntelligentDiscAnalyzer
+from spindle.disc.monitor import DiscInfo, eject_disc
+from spindle.disc.multi_disc import SimpleMultiDiscManager
+from spindle.disc.rip_spec import RipSpec
+from spindle.disc.ripper import MakeMKVRipper
+from spindle.disc.tv_analyzer import TVSeriesDiscAnalyzer
+from spindle.error_handling import MediaError, ToolError
+from spindle.services.tmdb import TMDBService
+from spindle.storage.queue import QueueItem, QueueItemStatus
 
 logger = logging.getLogger(__name__)
+
 
 class DiscHandler:
     """Coordinates disc identification and ripping operations."""
@@ -49,7 +49,8 @@ class DiscHandler:
             analysis_result = await self.disc_analyzer.analyze_disc(disc_info.device)
 
             if not analysis_result:
-                raise MediaError("Failed to analyze disc content")
+                msg = "Failed to analyze disc content"
+                raise MediaError(msg)
 
             logger.info(f"Analysis result: {analysis_result}")
 
@@ -60,7 +61,10 @@ class DiscHandler:
 
             if analysis_result.content_type == "tv_series":
                 logger.info("TV series detected, performing enhanced analysis")
-                enhanced_result = await self.tv_analyzer.analyze_tv_disc(disc_info.device, analysis_result)
+                enhanced_result = await self.tv_analyzer.analyze_tv_disc(
+                    disc_info.device,
+                    analysis_result,
+                )
                 if enhanced_result:
                     analysis_result = enhanced_result
 
@@ -72,11 +76,13 @@ class DiscHandler:
             media_info = await self.tmdb_service.identify_media(
                 analysis_result.primary_title,
                 analysis_result.content_type,
-                year=analysis_result.year
+                year=analysis_result.year,
             )
 
             if not media_info:
-                logger.warning(f"Could not identify disc: {analysis_result.primary_title}")
+                logger.warning(
+                    f"Could not identify disc: {analysis_result.primary_title}",
+                )
                 item.status = QueueItemStatus.REVIEW
                 item.error_message = "Could not identify content via TMDB"
                 self.queue_manager.update_item(item)
@@ -114,7 +120,8 @@ class DiscHandler:
 
             # Multi-disc detection
             is_multi_disc = await self.multi_disc_manager.detect_multi_disc_series(
-                media_info, analysis_result
+                media_info,
+                analysis_result,
             )
             rip_spec_data["is_multi_disc"] = is_multi_disc
 
@@ -149,7 +156,8 @@ class DiscHandler:
 
             # Reconstruct rip specification
             if not item.rip_spec_data:
-                raise MediaError("No rip specification data found")
+                msg = "No rip specification data found"
+                raise MediaError(msg)
 
             rip_spec = self._reconstruct_rip_spec_from_item(item)
 
@@ -164,11 +172,12 @@ class DiscHandler:
             logger.info("Starting MakeMKV rip...")
             ripped_files = await self.ripper.rip_disc(
                 rip_spec,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
             if not ripped_files:
-                raise ToolError("MakeMKV ripping failed - no files produced")
+                msg = "MakeMKV ripping failed - no files produced"
+                raise ToolError(msg)
 
             # Store ripped file paths
             if len(ripped_files) == 1:
@@ -206,12 +215,38 @@ class DiscHandler:
         """Reconstruct RipSpec from stored queue item data."""
         spec_data = json.loads(item.rip_spec_data)
 
+        # Create DiscInfo from stored data
+        from spindle.disc.monitor import DiscInfo
+
+        disc_info = DiscInfo(
+            device=spec_data["disc_info"]["device"],
+            disc_type="dvd",  # Default disc type
+            label=spec_data["disc_info"].get("label", "Unknown"),
+        )
+
+        # Create Title objects from stored titles_to_rip data
+        from spindle.disc.ripper import Title
+
+        titles = []
+        for title_data in spec_data["analysis_result"]["titles_to_rip"]:
+            title = Title(
+                title_id=str(title_data["index"]),
+                duration=title_data.get("duration", 0),
+                size=title_data.get("size", 0),
+                chapters=title_data.get("chapters", 1),
+                tracks=[],  # Empty tracks list for test
+                name=title_data.get("name", f"Title {title_data['index']}"),
+            )
+            titles.append(title)
+
         return RipSpec(
-            disc_device=spec_data["disc_info"]["device"],
-            titles_to_rip=spec_data["analysis_result"]["titles_to_rip"],
-            output_directory=self.config.staging_dir / "ripped",
+            disc_info=disc_info,
+            titles=titles,
+            queue_item=item,
+            device=spec_data["disc_info"]["device"],
+            output_dir=self.config.staging_dir / "ripped",
             media_info=item.media_info,
-            episode_mappings=spec_data["analysis_result"]["episode_mappings"],
+            analysis_result=spec_data["analysis_result"],
         )
 
     def set_queue_manager(self, queue_manager):

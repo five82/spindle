@@ -6,8 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..config import SpindleConfig
-from ..disc.ripper import MakeMKVRipper
+from spindle.config import SpindleConfig
+from spindle.disc.ripper import MakeMKVRipper
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,8 @@ class MakeMKVService:
             scan_result = await self.ripper.scan_disc(device)
 
             if not scan_result:
-                raise RuntimeError("MakeMKV disc scan failed")
+                msg = "MakeMKV disc scan failed"
+                raise RuntimeError(msg)
 
             return {
                 "device": device,
@@ -44,7 +45,7 @@ class MakeMKVService:
         device: str,
         titles: list[dict],
         output_directory: Path,
-        progress_callback: Callable[[str, int, str], None] | None = None
+        progress_callback: Callable[[str, int, str], None] | None = None,
     ) -> list[Path]:
         """Rip specified titles from disc."""
         try:
@@ -57,7 +58,7 @@ class MakeMKVService:
                 device=device,
                 titles=titles,
                 output_directory=output_directory,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
             logger.info(f"Ripped {len(ripped_files)} files")
@@ -72,9 +73,10 @@ class MakeMKVService:
         try:
             result = subprocess.run(
                 ["makemkvcon", "--version"],
+                check=False,
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
             )
             return result.returncode == 0
         except (subprocess.SubprocessError, FileNotFoundError):

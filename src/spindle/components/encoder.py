@@ -1,14 +1,14 @@
 """Encoding component coordination."""
 
 import logging
-from pathlib import Path
 
-from ..config import SpindleConfig
-from ..error_handling import ToolError
-from ..services.drapto import DraptoService
-from ..storage.queue import QueueItem, QueueItemStatus
+from spindle.config import SpindleConfig
+from spindle.error_handling import ToolError
+from spindle.services.drapto import DraptoService
+from spindle.storage.queue import QueueItem, QueueItemStatus
 
 logger = logging.getLogger(__name__)
+
 
 class EncoderComponent:
     """Coordinates video encoding operations."""
@@ -24,7 +24,8 @@ class EncoderComponent:
             logger.info(f"Starting encoding for: {item}")
 
             if not item.ripped_file or not item.ripped_file.exists():
-                raise ToolError(f"Ripped file not found: {item.ripped_file}")
+                msg = f"Ripped file not found: {item.ripped_file}"
+                raise ToolError(msg)
 
             # Update status to encoding
             item.status = QueueItemStatus.ENCODING
@@ -51,11 +52,12 @@ class EncoderComponent:
             encode_result = await self.drapto_service.encode_file(
                 input_file=item.ripped_file,
                 output_file=output_file,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
             if not encode_result.success:
-                raise ToolError(f"Encoding failed: {encode_result.error_message}")
+                msg = f"Encoding failed: {encode_result.error_message}"
+                raise ToolError(msg)
 
             # Store encoded file path
             item.encoded_file = output_file

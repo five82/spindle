@@ -10,8 +10,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from ..config import SpindleConfig
-from ..identify.tmdb import MediaInfo
+from spindle.config import SpindleConfig
+from spindle.identify.tmdb import MediaInfo
 
 logger = logging.getLogger(__name__)
 

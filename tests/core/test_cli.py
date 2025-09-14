@@ -64,29 +64,41 @@ class TestStartCommand:
         assert "--daemon" not in result.output
     
     @patch('spindle.cli.check_system_dependencies')
-    @patch('spindle.cli.start_daemon')
-    def test_start_daemon_mode(self, mock_start_daemon, mock_check_deps, test_config):
-        """Test start command runs in daemon mode by default."""
+    @patch('spindle.cli.SpindleDaemon')
+    def test_start_daemon_mode(self, mock_spindle_daemon, mock_check_deps, test_config):
+        """Test start command creates SpindleDaemon and runs in daemon mode by default."""
         runner = CliRunner()
-        
+
+        # Mock daemon instance
+        mock_daemon_instance = Mock()
+        mock_spindle_daemon.return_value = mock_daemon_instance
+
         with patch('spindle.cli.load_config', return_value=test_config):
             result = runner.invoke(cli, ["start"])
-            
+
         mock_check_deps.assert_called_once_with(validate_required=True)
-        mock_start_daemon.assert_called_once_with(test_config)
+        mock_spindle_daemon.assert_called_once_with(test_config)
+        mock_daemon_instance.start_daemon.assert_called_once()
+        mock_daemon_instance.start_systemd_mode.assert_not_called()
         assert result.exit_code == 0
-    
+
     @patch('spindle.cli.check_system_dependencies')
-    @patch('spindle.cli.start_systemd_mode')
-    def test_start_systemd_mode(self, mock_start_systemd, mock_check_deps, test_config):
-        """Test start command with --systemd flag."""
+    @patch('spindle.cli.SpindleDaemon')
+    def test_start_systemd_mode(self, mock_spindle_daemon, mock_check_deps, test_config):
+        """Test start command with --systemd flag calls start_systemd_mode."""
         runner = CliRunner()
-        
+
+        # Mock daemon instance
+        mock_daemon_instance = Mock()
+        mock_spindle_daemon.return_value = mock_daemon_instance
+
         with patch('spindle.cli.load_config', return_value=test_config):
             result = runner.invoke(cli, ["start", "--systemd"])
-            
+
         mock_check_deps.assert_called_once_with(validate_required=True)
-        mock_start_systemd.assert_called_once_with(test_config)
+        mock_spindle_daemon.assert_called_once_with(test_config)
+        mock_daemon_instance.start_systemd_mode.assert_called_once()
+        mock_daemon_instance.start_daemon.assert_not_called()
         assert result.exit_code == 0
 
 

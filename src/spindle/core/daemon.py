@@ -1,7 +1,6 @@
 """Daemon management for Spindle."""
 
 import logging
-import os
 import signal
 import sys
 import time
@@ -13,11 +12,13 @@ try:
 except ImportError:
     daemon = None
 
-from ..config import SpindleConfig
-from ..process_lock import ProcessLock
+from spindle.config import SpindleConfig
+from spindle.process_lock import ProcessLock
+
 from .orchestrator import SpindleOrchestrator
 
 logger = logging.getLogger(__name__)
+
 
 class SpindleDaemon:
     """Manages Spindle daemon lifecycle."""
@@ -30,7 +31,8 @@ class SpindleDaemon:
     def start_daemon(self) -> None:
         """Start Spindle as a background daemon."""
         if daemon is None:
-            raise RuntimeError("python-daemon package not installed")
+            msg = "python-daemon package not installed"
+            raise RuntimeError(msg)
 
         # Set up paths
         log_file_path = self.config.log_dir / "spindle.log"
@@ -40,7 +42,8 @@ class SpindleDaemon:
         process_info = ProcessLock.find_spindle_process()
         if process_info:
             pid, mode = process_info
-            raise RuntimeError(f"Spindle is already running in {mode} mode (PID {pid})")
+            msg = f"Spindle is already running in {mode} mode (PID {pid})"
+            raise RuntimeError(msg)
 
         logger.info("Starting Spindle daemon...")
         logger.info(f"Log file: {log_file_path}")
@@ -67,7 +70,9 @@ class SpindleDaemon:
         # Acquire the process lock
         self.lock = ProcessLock(self.config)
         if not self.lock.acquire():
-            logger.error("Failed to acquire process lock - another instance may be running")
+            logger.error(
+                "Failed to acquire process lock - another instance may be running",
+            )
             sys.exit(1)
 
         # Create and start orchestrator

@@ -1,12 +1,11 @@
 """Library organization component coordination."""
 
 import logging
-from pathlib import Path
 
-from ..config import SpindleConfig
-from ..error_handling import ToolError
-from ..services.plex import PlexService
-from ..storage.queue import QueueItem, QueueItemStatus
+from spindle.config import SpindleConfig
+from spindle.error_handling import ToolError
+from spindle.services.plex import PlexService
+from spindle.storage.queue import QueueItem, QueueItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,8 @@ class OrganizerComponent:
             logger.info(f"Starting organization for: {item}")
 
             if not item.encoded_file or not item.encoded_file.exists():
-                raise ToolError(f"Encoded file not found: {item.encoded_file}")
+                msg = f"Encoded file not found: {item.encoded_file}"
+                raise ToolError(msg)
 
             # Update status to organizing
             item.status = QueueItemStatus.ORGANIZING
@@ -35,7 +35,8 @@ class OrganizerComponent:
 
             # Determine library organization structure
             if not item.media_info:
-                raise ToolError("No media info available for organization")
+                msg = "No media info available for organization"
+                raise ToolError(msg)
 
             item.progress_percent = 20
             item.progress_message = "Creating library structure"
@@ -45,7 +46,7 @@ class OrganizerComponent:
             final_file_path = await self.plex_service.organize_media(
                 source_file=item.encoded_file,
                 media_info=item.media_info,
-                progress_callback=self._create_progress_callback(item)
+                progress_callback=self._create_progress_callback(item),
             )
 
             # Store final file path
@@ -76,6 +77,7 @@ class OrganizerComponent:
 
     def _create_progress_callback(self, item: QueueItem):
         """Create progress callback for organization operations."""
+
         def progress_callback(stage: str, percent: int, message: str) -> None:
             # Scale progress to 20-80% range (organization portion)
             scaled_percent = 20 + int(percent * 0.6)

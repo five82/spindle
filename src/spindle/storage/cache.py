@@ -3,9 +3,9 @@
 import logging
 from typing import Any
 
-from ..config import SpindleConfig
-from ..disc.series_cache import SeriesCache
-from ..identify.tmdb_cache import TMDBCache
+from spindle.config import SpindleConfig
+from spindle.disc.series_cache import SeriesCache
+from spindle.identify.tmdb_cache import TMDBCache
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class SpindleCache:
             self.series.clear()
             logger.info("All caches cleared successfully")
         except Exception as e:
-            logger.error(f"Error clearing caches: {e}")
+            logger.exception(f"Error clearing caches: {e}")
             raise
 
     def get_cache_stats(self) -> dict[str, Any]:
@@ -43,9 +43,11 @@ class SpindleCache:
             tmdb_removed = self.tmdb.cleanup_expired()
             series_removed = self.series.cleanup_expired()
 
-            logger.info(f"Cleanup complete: {tmdb_removed} TMDB entries, {series_removed} series entries removed")
+            logger.info(
+                f"Cleanup complete: {tmdb_removed} TMDB entries, {series_removed} series entries removed",
+            )
         except Exception as e:
-            logger.error(f"Error during cache cleanup: {e}")
+            logger.exception(f"Error during cache cleanup: {e}")
             raise
 
     def get_total_size(self) -> dict[str, int]:
@@ -53,7 +55,8 @@ class SpindleCache:
         return {
             "tmdb_entries": self.tmdb.get_entry_count(),
             "series_entries": self.series.get_entry_count(),
-            "total_size_bytes": self.tmdb.get_size_bytes() + self.series.get_size_bytes(),
+            "total_size_bytes": self.tmdb.get_size_bytes()
+            + self.series.get_size_bytes(),
         }
 
     def validate_integrity(self) -> dict[str, bool]:

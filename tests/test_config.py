@@ -117,16 +117,16 @@ class TestConfigIntegration:
             optical_drive="/dev/sr0",
             makemkv_con="makemkvcon"
         )
-        
-        # Should work with queue manager
-        from spindle.queue.manager import QueueManager
+
+        # Should work with new storage queue manager
+        from spindle.storage.queue import QueueManager
         queue_manager = QueueManager(config)
         assert queue_manager.db_path.parent == config.log_dir
-        
-        # Should work with ripper
-        from spindle.disc.ripper import MakeMKVRipper
-        ripper = MakeMKVRipper(config)
-        assert ripper.makemkv_con == config.makemkv_con
+
+        # Should work with new service wrappers
+        from spindle.services.makemkv import MakeMKVService
+        makemkv_service = MakeMKVService(config)
+        assert makemkv_service.config == config
 
 
 class TestConfigErrorHandling:
