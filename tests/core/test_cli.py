@@ -35,8 +35,8 @@ def test_config(temp_dir):
 class TestCLIBasics:
     """Test essential CLI functionality."""
 
-    @patch('spindle.cli.check_uv_requirement')
-    def test_cli_help(self, mock_check_uv):
+    @patch('spindle.cli.check_dependencies', return_value=[])
+    def test_cli_help(self, mock_check_deps):
         """Test main CLI help displays correctly."""
         runner = CliRunner()
         result = runner.invoke(cli, ["--help"])
@@ -52,8 +52,8 @@ class TestCLIBasics:
 class TestStartCommand:
     """Test start command (daemon-only operation)."""
 
-    @patch('spindle.cli.check_uv_requirement')
-    def test_start_help(self, mock_check_uv):
+    @patch('spindle.cli.check_dependencies', return_value=[])
+    def test_start_help(self, mock_check_deps):
         """Test start command help text."""
         runner = CliRunner()
         result = runner.invoke(cli, ["start", "--help"])
@@ -65,10 +65,10 @@ class TestStartCommand:
         assert "--foreground" not in result.output
         assert "--daemon" not in result.output
     
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('spindle.cli.check_system_dependencies')
     @patch('spindle.cli.SpindleDaemon')
-    def test_start_daemon_mode(self, mock_spindle_daemon, mock_check_deps, mock_check_uv, test_config):
+    def test_start_daemon_mode(self, mock_spindle_daemon, mock_check_system_deps, mock_check_deps, test_config):
         """Test start command creates SpindleDaemon and runs in daemon mode by default."""
         runner = CliRunner()
 
@@ -79,16 +79,16 @@ class TestStartCommand:
         with patch('spindle.cli.load_config', return_value=test_config):
             result = runner.invoke(cli, ["start"])
 
-        mock_check_deps.assert_called_once_with(validate_required=True)
+        mock_check_system_deps.assert_called_once_with(validate_required=True)
         mock_spindle_daemon.assert_called_once_with(test_config)
         mock_daemon_instance.start_daemon.assert_called_once()
         mock_daemon_instance.start_systemd_mode.assert_not_called()
         assert result.exit_code == 0
 
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('spindle.cli.check_system_dependencies')
     @patch('spindle.cli.SpindleDaemon')
-    def test_start_systemd_mode(self, mock_spindle_daemon, mock_check_deps, mock_check_uv, test_config):
+    def test_start_systemd_mode(self, mock_spindle_daemon, mock_check_system_deps, mock_check_deps, test_config):
         """Test start command with --systemd flag calls start_systemd_mode."""
         runner = CliRunner()
 
@@ -99,7 +99,7 @@ class TestStartCommand:
         with patch('spindle.cli.load_config', return_value=test_config):
             result = runner.invoke(cli, ["start", "--systemd"])
 
-        mock_check_deps.assert_called_once_with(validate_required=True)
+        mock_check_system_deps.assert_called_once_with(validate_required=True)
         mock_spindle_daemon.assert_called_once_with(test_config)
         mock_daemon_instance.start_systemd_mode.assert_called_once()
         mock_daemon_instance.start_daemon.assert_not_called()
@@ -109,8 +109,8 @@ class TestStartCommand:
 class TestShowCommand:
     """Test show command (log monitoring)."""
     
-    @patch('spindle.cli.check_uv_requirement')
-    def test_show_help(self, mock_check_uv):
+    @patch('spindle.cli.check_dependencies', return_value=[])
+    def test_show_help(self, mock_check_deps):
         """Test show command help text."""
         runner = CliRunner()
         result = runner.invoke(cli, ["show", "--help"])
@@ -120,8 +120,8 @@ class TestShowCommand:
         assert "--follow" in result.output
         assert "--lines" in result.output
     
-    @patch('spindle.cli.check_uv_requirement')
-    def test_show_missing_log_file(self, mock_check_uv, test_config):
+    @patch('spindle.cli.check_dependencies', return_value=[])
+    def test_show_missing_log_file(self, mock_check_deps, test_config):
         """Test show command behavior when log file doesn't exist."""
         runner = CliRunner()
         
@@ -133,9 +133,9 @@ class TestShowCommand:
                     # Should call sys.exit(1) for missing log file
                     assert any(call.args == (1,) for call in mock_exit.call_args_list)
     
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('subprocess.Popen')
-    def test_show_default_behavior(self, mock_popen, mock_check_uv, test_config):
+    def test_show_default_behavior(self, mock_popen, mock_check_deps, test_config):
         """Test show command default behavior (last 10 lines)."""
         # Create log file
         test_config.log_dir.mkdir(parents=True)
@@ -157,9 +157,9 @@ class TestShowCommand:
         args = mock_popen.call_args[0][0]
         assert args == ["tail", "-n", "10", str(log_file)]
     
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('subprocess.Popen')
-    def test_show_follow_mode(self, mock_popen, mock_check_uv, test_config):
+    def test_show_follow_mode(self, mock_popen, mock_check_deps, test_config):
         """Test show command with --follow flag."""
         # Create log file
         test_config.log_dir.mkdir(parents=True)
@@ -181,9 +181,9 @@ class TestShowCommand:
         args = mock_popen.call_args[0][0]
         assert args == ["tail", "-f", str(log_file)]
     
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('subprocess.Popen')
-    def test_show_custom_lines(self, mock_popen, mock_check_uv, test_config):
+    def test_show_custom_lines(self, mock_popen, mock_check_deps, test_config):
         """Test show command with custom line count."""
         # Create log file
         test_config.log_dir.mkdir(parents=True)
@@ -205,8 +205,8 @@ class TestShowCommand:
         args = mock_popen.call_args[0][0]
         assert args == ["tail", "-n", "50", str(log_file)]
     
-    @patch('spindle.cli.check_uv_requirement')
-    def test_show_tail_command_not_found(self, mock_check_uv, test_config):
+    @patch('spindle.cli.check_dependencies', return_value=[])
+    def test_show_tail_command_not_found(self, mock_check_deps, test_config):
         """Test show command when tail command is not available."""
         # Create log file
         test_config.log_dir.mkdir(parents=True)
@@ -225,8 +225,8 @@ class TestShowCommand:
 class TestStopCommand:
     """Test stop command functionality."""
     
-    @patch('spindle.cli.check_uv_requirement')
-    def test_stop_help(self, mock_check_uv):
+    @patch('spindle.cli.check_dependencies', return_value=[])
+    def test_stop_help(self, mock_check_deps):
         """Test stop command help text."""
         runner = CliRunner()
         result = runner.invoke(cli, ["stop", "--help"])
@@ -234,9 +234,9 @@ class TestStopCommand:
         assert result.exit_code == 0
         assert "Stop running Spindle process" in result.output
     
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('spindle.cli.ProcessLock.find_spindle_process')
-    def test_stop_no_running_process(self, mock_find_process, mock_check_uv, test_config):
+    def test_stop_no_running_process(self, mock_find_process, mock_check_deps, test_config):
         """Test stop command when no process is running."""
         mock_find_process.return_value = None
         
@@ -247,10 +247,10 @@ class TestStopCommand:
         assert result.exit_code == 0
         assert "Spindle is not running" in result.output
     
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('spindle.cli.ProcessLock.find_spindle_process')
     @patch('spindle.cli.ProcessLock.stop_process')
-    def test_stop_running_process(self, mock_stop_process, mock_find_process, mock_check_uv, test_config):
+    def test_stop_running_process(self, mock_stop_process, mock_find_process, mock_check_deps, test_config):
         """Test stop command with running process."""
         mock_find_process.return_value = (1234, "daemon")
         mock_stop_process.return_value = True
@@ -267,8 +267,8 @@ class TestStopCommand:
 class TestStatusCommand:
     """Test status command functionality."""
     
-    @patch('spindle.cli.check_uv_requirement')
-    def test_status_help(self, mock_check_uv):
+    @patch('spindle.cli.check_dependencies', return_value=[])
+    def test_status_help(self, mock_check_deps):
         """Test status command help text."""
         runner = CliRunner()
         result = runner.invoke(cli, ["status", "--help"])
@@ -276,10 +276,10 @@ class TestStatusCommand:
         assert result.exit_code == 0
         assert "Show system status and queue information" in result.output
     
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('spindle.cli.QueueManager')
     @patch('spindle.cli.ProcessLock.find_spindle_process')
-    def test_status_display(self, mock_find_process, mock_queue_manager, mock_check_uv, test_config):
+    def test_status_display(self, mock_find_process, mock_queue_manager, mock_check_deps, test_config):
         """Test status command displays system information."""
         mock_find_process.return_value = (1234, "daemon")
         
@@ -304,8 +304,8 @@ class TestStatusCommand:
 class TestCLIIntegration:
     """Test CLI integration scenarios."""
     
-    @patch('spindle.cli.check_uv_requirement')
-    def test_daemon_only_operation(self, mock_check_uv):
+    @patch('spindle.cli.check_dependencies', return_value=[])
+    def test_daemon_only_operation(self, mock_check_deps):
         """Test that CLI only supports daemon-only operation (no foreground mode)."""
         runner = CliRunner()
         
@@ -316,9 +316,9 @@ class TestCLIIntegration:
         result = runner.invoke(cli, ["start", "--daemon"])
         assert result.exit_code != 0  # Should fail - option doesn't exist
     
-    @patch('spindle.cli.check_uv_requirement')
+    @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('spindle.cli.load_config')
-    def test_config_loading_integration(self, mock_load_config, mock_check_uv):
+    def test_config_loading_integration(self, mock_load_config, mock_check_deps):
         """Test that commands properly load configuration."""
         test_config = SpindleConfig()
         mock_load_config.return_value = test_config
