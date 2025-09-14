@@ -2597,8 +2597,8 @@ python -c "import spindle.services.tmdb; import spindle.services.drapto; print('
 
 **Integration testing:**
 ```bash
-# Start daemon with new architecture
-uv run spindle start --systemd &
+# Start spindle with new architecture
+uv run spindle start &
 SPINDLE_PID=$!
 
 # Verify status works
