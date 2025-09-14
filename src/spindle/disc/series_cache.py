@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from spindle.config import SpindleConfig
-from spindle.identify.tmdb import MediaInfo
+from spindle.services.tmdb_impl import MediaInfo
 
 logger = logging.getLogger(__name__)
 

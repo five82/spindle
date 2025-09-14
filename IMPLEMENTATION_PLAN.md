@@ -2429,38 +2429,125 @@ grep -r "import.*processor" src/
 - `src/spindle/cli.py` - Remove any remaining processor imports
 - Any test files still referencing old processor
 
-#### 2.7.4 Service Module Cleanup
+#### 2.7.4 Service Module Consolidation (Corrective Action)
 
-**Move and replace existing service files:**
+**⚠️ CRITICAL:** Phase 2.3 implementation was incorrect. The services directory contains wrapper classes that delegate to old modules instead of consolidated implementations. This creates unnecessary indirection and maintains unwanted dependencies.
+
+**Current Problem Analysis:**
 ```bash
-# These moves should have been done in Phase 2.3, but verify:
-# identify/tmdb.py -> services/tmdb.py (if not already moved)
-# encode/drapto_wrapper.py -> services/drapto.py (if not already moved)
-# organize/library.py -> services/plex.py (if not already moved)
-# notify/ntfy.py -> services/ntfy.py (if not already moved)
+# Current incorrect structure:
+src/spindle/services/tmdb.py      # 1.7k wrapper class
+src/spindle/identify/tmdb.py      # 40k actual implementation (still exists)
 
-# Remove empty directories
-rmdir src/spindle/identify/ 2>/dev/null || true
-rmdir src/spindle/encode/ 2>/dev/null || true
-rmdir src/spindle/organize/ 2>/dev/null || true
-rmdir src/spindle/notify/ 2>/dev/null || true
+# Wrapper pattern (incorrect):
+class TMDBService:
+    def __init__(self, config):
+        self.identifier = MediaIdentifier(config)  # Delegates to old module
 ```
 
-**Update all import statements:**
+**Correct Consolidation Strategy:**
+
+**Phase 2.7.4.1: Replace Service Wrappers with Actual Implementations**
+
+1. **Replace TMDB Service:**
+   ```bash
+   # Move actual implementation (keep class names that work with tests)
+   cp src/spindle/identify/tmdb.py src/spindle/services/tmdb_impl.py
+
+   # Edit services/tmdb.py to import from local implementation instead of old module
+   # Replace: from spindle.identify.tmdb import MediaIdentifier
+   # With: from .tmdb_impl import MediaIdentifier
+   ```
+
+2. **Replace Drapto Service:**
+   ```bash
+   # Move actual implementation
+   cp src/spindle/encode/drapto_wrapper.py src/spindle/services/drapto_impl.py
+
+   # Edit services/drapto.py to import from local implementation
+   # Replace: from spindle.encode.drapto_wrapper import DraptoEncoder
+   # With: from .drapto_impl import DraptoEncoder
+   ```
+
+3. **Replace Plex Service:**
+   ```bash
+   # Move actual implementation
+   cp src/spindle/organize/library.py src/spindle/services/plex_impl.py
+
+   # Edit services/plex.py to import from local implementation
+   # Replace: from spindle.organize.library import LibraryOrganizer
+   # With: from .plex_impl import LibraryOrganizer
+   ```
+
+4. **Replace Notification Service:**
+   ```bash
+   # Move actual implementation
+   cp src/spindle/notify/ntfy.py src/spindle/services/ntfy_impl.py
+
+   # Edit services/ntfy.py to import from local implementation
+   # Replace: from spindle.notify.ntfy import NtfyNotifier
+   # With: from .ntfy_impl import NtfyNotifier
+   ```
+
+**Phase 2.7.4.2: Migrate Supporting Files**
+
+1. **TMDB Cache and Supporting Files:**
+   ```bash
+   # Move supporting files to services directory
+   cp src/spindle/identify/tmdb_cache.py src/spindle/services/
+
+   # Update imports in tmdb_impl.py to use local cache
+   ```
+
+2. **Update Internal Service Imports:**
+   ```bash
+   # Fix imports within services directory to be self-contained
+   # Update any cross-references between service implementations
+   ```
+
+**Phase 2.7.4.3: Validation and Testing**
+
+1. **Verify Service Isolation:**
+   ```bash
+   # Services should not import from old module directories
+   grep -r "from spindle.identify\|from spindle.encode\|from spindle.organize\|from spindle.notify" src/spindle/services/
+   # Should return no results after consolidation
+   ```
+
+2. **Test Suite Validation:**
+   ```bash
+   # All tests must still pass with consolidated services
+   uv run pytest tests/ -v
+   ```
+
+3. **Functional Testing:**
+   ```bash
+   # Verify CLI still works with consolidated services
+   uv run spindle status
+   ```
+
+**Phase 2.7.4.4: Remove Old Service Directories (Only After Validation)**
+
 ```bash
-# Search and replace imports throughout codebase
-find src/ -name "*.py" -exec grep -l "from spindle.identify.tmdb" {} \; | \
-  xargs sed -i 's/from spindle\.identify\.tmdb/from spindle.services.tmdb/g'
-
-find src/ -name "*.py" -exec grep -l "from spindle.encode.drapto_wrapper" {} \; | \
-  xargs sed -i 's/from spindle\.encode\.drapto_wrapper/from spindle.services.drapto/g'
-
-find src/ -name "*.py" -exec grep -l "from spindle.organize.library" {} \; | \
-  xargs sed -i 's/from spindle\.organize\.library/from spindle.services.plex/g'
-
-find src/ -name "*.py" -exec grep -l "from spindle.notify.ntfy" {} \; | \
-  xargs sed -i 's/from spindle\.notify\.ntfy/from spindle.services.ntfy/g'
+# ONLY execute after complete validation and testing
+rm -rf src/spindle/identify/
+rm -rf src/spindle/encode/
+rm -rf src/spindle/organize/
+rm -rf src/spindle/notify/
 ```
+
+**Success Criteria:**
+- ✅ Services directory contains actual implementations, not wrappers
+- ✅ No imports from old service directories in services/
+- ✅ All 60 tests pass
+- ✅ CLI functionality intact
+- ✅ Service functionality consolidated without indirection layers
+
+**Why This Approach:**
+- **Maintains API compatibility** with existing component usage
+- **Eliminates wrapper indirection** for better performance and clarity
+- **Consolidates related functionality** in single service modules
+- **Preserves all functionality** while improving architecture
 
 #### 2.7.5 Queue Module Migration
 

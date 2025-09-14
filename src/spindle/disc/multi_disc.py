@@ -8,7 +8,7 @@ from spindle.config import SpindleConfig
 from spindle.disc.metadata_extractor import EnhancedDiscMetadata
 from spindle.disc.monitor import DiscInfo
 from spindle.disc.series_cache import SeriesCache
-from spindle.identify.tmdb import MediaInfo
+from spindle.services.tmdb_impl import MediaInfo
 
 logger = logging.getLogger(__name__)
 

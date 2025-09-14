@@ -3,7 +3,8 @@
 import logging
 
 from spindle.config import SpindleConfig
-from spindle.identify.tmdb import MediaIdentifier, MediaInfo
+
+from .tmdb_impl import MediaIdentifier, MediaInfo
 
 logger = logging.getLogger(__name__)
 

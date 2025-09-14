@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from spindle.config import SpindleConfig
-from spindle.identify.tmdb import MediaInfo
-from spindle.organize.library import LibraryOrganizer
+
+from .plex_impl import LibraryOrganizer
+from .tmdb_impl import MediaInfo
 
 logger = logging.getLogger(__name__)
 

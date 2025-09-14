@@ -5,7 +5,7 @@ from typing import Any
 
 from spindle.config import SpindleConfig
 from spindle.disc.series_cache import SeriesCache
-from spindle.identify.tmdb_cache import TMDBCache
+from spindle.services.tmdb_cache import TMDBCache
 
 logger = logging.getLogger(__name__)
 

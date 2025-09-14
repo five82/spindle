@@ -1,1 +1,0 @@
-"""Media identification functionality."""

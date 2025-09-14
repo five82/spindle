@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from spindle.disc.ripper import Title, Track
-from spindle.identify.tmdb import MediaInfo
+from spindle.services.tmdb_impl import MediaInfo
 
 logger = logging.getLogger(__name__)
 

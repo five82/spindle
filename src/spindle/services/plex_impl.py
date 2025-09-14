@@ -7,7 +7,8 @@ from pathlib import Path
 from plexapi.server import PlexServer  # type: ignore[import-untyped]
 
 from spindle.config import SpindleConfig
-from spindle.identify.tmdb import MediaInfo
+
+from .tmdb_impl import MediaInfo
 
 logger = logging.getLogger(__name__)
 

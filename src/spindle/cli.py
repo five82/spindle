@@ -21,12 +21,12 @@ from .config import SpindleConfig, create_sample_config, load_config
 from .core.daemon import SpindleDaemon
 from .core.orchestrator import SpindleOrchestrator
 from .disc.monitor import detect_disc
-from .encode.drapto_wrapper import DraptoEncoder
 from .error_handling import ConfigurationError, check_dependencies
-from .identify.tmdb import MediaIdentifier
-from .notify.ntfy import NtfyNotifier
-from .organize.library import LibraryOrganizer
 from .process_lock import ProcessLock
+from .services.drapto_impl import DraptoEncoder
+from .services.ntfy_impl import NtfyNotifier
+from .services.plex_impl import LibraryOrganizer
+from .services.tmdb_impl import MediaIdentifier
 from .storage.queue import QueueItemStatus, QueueManager
 from .system_check import check_system_dependencies
 

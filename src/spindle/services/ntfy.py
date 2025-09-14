@@ -3,7 +3,8 @@
 import logging
 
 from spindle.config import SpindleConfig
-from spindle.notify.ntfy import NtfyNotifier
+
+from .ntfy_impl import NtfyNotifier
 
 logger = logging.getLogger(__name__)
 

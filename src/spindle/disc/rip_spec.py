@@ -8,8 +8,8 @@ from typing import Any
 from spindle.disc.metadata_extractor import EnhancedDiscMetadata
 from spindle.disc.monitor import DiscInfo
 from spindle.disc.ripper import Title
-from spindle.identify.tmdb import MediaInfo
 from spindle.queue.manager import QueueItem
+from spindle.services.tmdb_impl import MediaInfo
 
 
 @dataclass

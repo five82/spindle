@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from spindle.config import SpindleConfig
-from spindle.encode.drapto_wrapper import DraptoEncoder, EncodeResult
+
+from .drapto_impl import DraptoEncoder, EncodeResult
 
 logger = logging.getLogger(__name__)
 
