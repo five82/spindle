@@ -77,7 +77,9 @@ class TestStartCommand:
         mock_spindle_daemon.return_value = mock_daemon_instance
 
         with patch('spindle.cli.load_config', return_value=test_config):
-            result = runner.invoke(cli, ["start"])
+            # Ensure INVOCATION_ID is not set (GitHub Actions might set this)
+            with patch.dict('os.environ', {'UV_SYSTEM_PYTHON': '1'}, clear=True):
+                result = runner.invoke(cli, ["start"])
 
         mock_check_system_deps.assert_called_once_with(validate_required=True)
         mock_spindle_daemon.assert_called_once_with(test_config)
@@ -97,7 +99,8 @@ class TestStartCommand:
         mock_spindle_daemon.return_value = mock_daemon_instance
 
         with patch('spindle.cli.load_config', return_value=test_config):
-            result = runner.invoke(cli, ["start", "--systemd"])
+            with patch.dict('os.environ', {'UV_SYSTEM_PYTHON': '1'}, clear=True):
+                result = runner.invoke(cli, ["start", "--systemd"])
 
         mock_check_system_deps.assert_called_once_with(validate_required=True)
         mock_spindle_daemon.assert_called_once_with(test_config)

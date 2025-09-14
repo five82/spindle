@@ -4,12 +4,21 @@
 
 set -e  # Exit on any error
 
-# Simulate GitHub Actions environment by overriding system dependencies
+# Simulate GitHub Actions environment by hiding system dependencies from PATH
 echo "🧹 Simulating GitHub Actions environment (no system dependencies)"
-# Create shell functions that override the real commands to simulate missing dependencies
-makemkvcon() { echo "makemkvcon: command not found" >&2; return 127; }
-drapto() { echo "drapto: command not found" >&2; return 127; }
-export -f makemkvcon drapto
+# Create empty directory and copy only essential tools needed for CI
+TEMP_BIN=$(mktemp -d)
+cp "$(which uv)" "$TEMP_BIN/" 2>/dev/null || { echo "❌ uv not found"; exit 1; }
+cp "$(which python3)" "$TEMP_BIN/" 2>/dev/null || { echo "❌ python3 not found"; exit 1; }
+cp "$(which rm)" "$TEMP_BIN/" 2>/dev/null || true  # For cleanup
+# Set GitHub Actions environment variables
+export UV_SYSTEM_PYTHON=1
+# GitHub Actions might set systemd-related env vars that affect CLI behavior
+export INVOCATION_ID="test-github-actions"
+# Use minimal PATH so shutil.which() won't find system dependencies
+export PATH="$TEMP_BIN"
+# Clean up on exit
+trap "rm -rf $TEMP_BIN" EXIT
 
 echo "🔍 Essential CI Checks"
 echo "======================"
