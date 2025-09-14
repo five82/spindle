@@ -20,15 +20,34 @@ Spindle is an automated disc ripping, encoding, and media library management sys
 
 ## Architecture
 
-The project is a Python application using uv package manager with modular components:
+The project is a Python application using uv package manager with a clean modular architecture:
 
-1. **disc/**: Optical disc detection, monitoring, and MakeMKV ripping
-2. **identify/**: TMDB-based media identification and metadata handling
-3. **encode/**: drapto wrapper for AV1 video encoding with real-time progress
-4. **organize/**: Plex-compatible file organization and library import
-5. **queue/**: SQLite-based processing queue with status tracking
-6. **notify/**: ntfy.sh integration for real-time notifications
-7. **config/**: TOML-based configuration management
+### Core Orchestration
+1. **core/daemon.py**: Daemon lifecycle management and process control
+2. **core/orchestrator.py**: Main workflow orchestration and component coordination
+3. **core/workflow.py**: Workflow state management
+
+### Component Layer
+4. **components/disc_handler.py**: Disc processing coordination (identification and ripping)
+5. **components/encoder.py**: Video encoding coordination
+6. **components/organizer.py**: Library organization coordination
+
+### Service Layer
+7. **services/tmdb.py**: TMDB API integration for media identification
+8. **services/drapto.py**: Drapto AV1 encoding service wrapper
+9. **services/plex.py**: Plex media server integration
+10. **services/makemkv.py**: MakeMKV disc ripping service wrapper
+11. **services/ntfy.py**: Notification service via ntfy.sh
+
+### Storage Layer
+12. **storage/queue.py**: SQLite-based processing queue management
+13. **storage/cache.py**: Unified caching system
+
+### Legacy Modules (Preserved)
+14. **disc/**: Low-level disc analysis and processing modules
+15. **cli.py**: Simplified command-line interface using new core modules
+16. **config.py**: TOML-based configuration management
+17. **error_handling.py**: Enhanced error handling system
 
 ## Development Requirements
 
@@ -121,7 +140,7 @@ Spindle uses uv for:
 
 ## Key Components
 
-### Drapto Integration (encode/drapto_wrapper.py)
+### Drapto Integration (services/drapto.py)
 
 The encoder wrapper integrates with drapto's JSON progress output system:
 - Streams real-time progress events during encoding
@@ -131,7 +150,7 @@ The encoder wrapper integrates with drapto's JSON progress output system:
 
 **Note on Subtitles**: Subtitle handling is intentionally not implemented in the current version. An AI-generated subtitle feature will be added in a future release.
 
-### Queue Management (queue/manager.py)
+### Queue Management (storage/queue.py)
 
 SQLite-based queue system with clean workflow separation:
 - **Two-Phase Processing**: Identification phase followed by ripping phase
@@ -151,7 +170,7 @@ Comprehensive user-friendly error management system:
 - **Recovery guidance**: Clear next steps for common issues
 - **Integration across components**: Consistent error handling throughout the system
 
-### Workflow Processor (processor.py)
+### Workflow Orchestrator (core/orchestrator.py)
 
 Clean separation of concerns with optimal resource usage:
 - **Identification Phase**: Pure content analysis and rip planning
@@ -374,8 +393,8 @@ The project uses a focused, essential test suite designed to validate user-facin
 
 When extending the processing pipeline:
 
-1. **Add new status** to `QueueItemStatus` enum in `queue/manager.py`
-2. **Update processor logic** in `processor.py`:
+1. **Add new status** to `QueueItemStatus` enum in `storage/queue.py`
+2. **Update orchestrator logic** in `core/orchestrator.py`:
    - Add new method for phase (e.g., `_new_phase_item()`)
    - Update `_get_next_processable_item()` to include new status
    - Update `_process_single_item()` workflow routing
@@ -398,8 +417,8 @@ For changes to content analysis and title selection:
 
 ### Adding Progress Event Types
 
-1. Update drapto_wrapper.py progress callback handling
-2. Add new progress fields to queue/manager.py if needed
+1. Update services/drapto.py progress callback handling
+2. Add new progress fields to storage/queue.py if needed
 3. Update database schema with migration if persistent storage needed
 4. Add tests for new event handling
 
