@@ -212,9 +212,8 @@ class DraptoEncoder:
             str(input_file),
             "-o",
             str(output_dir),
-            "--foreground",  # Run in foreground to wait for completion
             "--verbose",  # Enable verbose output for better logging
-            "--progress-json",  # Enable structured JSON progress output
+            "--progress-json",  # Enable structured JSON progress output (automatically runs in foreground)
         ]
 
         # Add quality settings based on resolution detection
