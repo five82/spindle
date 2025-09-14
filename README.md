@@ -157,14 +157,14 @@ uv pip install git+https://github.com/five82/spindle.git
 
 ### Main Workflow - Continuous Processing
 ```bash
-# Start Spindle (runs as background daemon by default)
+# Start Spindle (runs as background daemon)
 spindle start
 # Output:
 # Checking system dependencies...
 # Available dependencies: MakeMKV, drapto, eject utility
 
-# Or run in foreground for testing/debugging
-spindle start --foreground
+# Monitor daemon output with colors  
+spindle show --follow
 
 # Stop daemon when needed
 spindle stop
@@ -176,12 +176,12 @@ By default, `spindle start` runs as a background daemon with optimized workflow:
 3. **Background processing** → Encode → Organize → Import to Plex (concurrent with new disc processing)
 4. **Repeat** → Each movie or TV show becomes available in Plex as soon as encoding completes
 
-**Default Daemon Mode Benefits:**
+**Daemon Mode Benefits:**
 - Runs independently of your terminal session
 - Survives SSH disconnections (but not reboots unless using systemd service)
 - Logs activity to `log_dir/spindle.log`
 - Can insert discs anytime, processing happens automatically
-- Use `--foreground` flag only for testing/debugging
+- Use `spindle show --follow` to monitor activity in real-time with color-coded log levels
 
 ### Install as User Service
 ```bash
@@ -214,6 +214,11 @@ sudo loginctl enable-linger $(whoami)
 ```bash
 # Check system status and queue
 spindle status
+
+# Monitor daemon logs with colored output
+spindle show               # Show last 10 log lines  
+spindle show --follow      # Real-time log monitoring (like tail -f with colors)
+spindle show --lines 50    # Show last 50 log lines
 
 # View queue contents
 spindle queue list

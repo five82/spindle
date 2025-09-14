@@ -86,11 +86,9 @@ class ProcessLock:
                             continue
 
                         # Determine mode from command line
-                        if "-f" in cmdline or "--foreground" in cmdline:
-                            return (pid, "foreground")
-                        if "-d" in cmdline or "--daemon" in cmdline:
-                            return (pid, "daemon")
-                        return (pid, "daemon")  # Default assumption
+                        if "--systemd" in cmdline:
+                            return (pid, "systemd")
+                        return (pid, "daemon")  # Default for new daemon-only mode
 
         except (subprocess.SubprocessError, ValueError, FileNotFoundError):
             pass

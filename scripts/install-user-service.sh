@@ -57,7 +57,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env bash -c 'cd %h && uv run spindle start --foreground'
+ExecStart=/usr/bin/env bash -c 'cd %h && uv run spindle start --systemd'
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=300

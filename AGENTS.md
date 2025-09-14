@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance when working with code in this repository.
 
 ## Project Overview
 
@@ -83,6 +83,33 @@ uv run ruff check src/
 uv run python script.py
 ```
 
+### CLI Operation and Monitoring
+
+**Daemon-Only Operation:**
+Spindle operates exclusively as a daemon - there is no foreground mode. This simplifies the architecture and provides consistent behavior across all environments.
+
+```bash
+# Start daemon (runs in background)
+uv run spindle start
+
+# Monitor daemon output with colors
+uv run spindle show --follow    # Real-time monitoring (like tail -f with colors)
+uv run spindle show --lines 50  # Show last 50 log lines
+
+# Check system status
+uv run spindle status
+
+# Stop daemon
+uv run spindle stop
+```
+
+**Log Monitoring:**
+The `spindle show` command provides a hybrid approach combining Unix reliability with enhanced UX:
+- Uses system `tail` command for robust file streaming
+- Adds real-time colorization: ERROR (red), WARNING (yellow), INFO (blue), DEBUG (dim)
+- Supports standard tail options: `--follow/-f` and `--lines/-n`
+- Handles missing files and commands gracefully
+
 ### Why uv is Required
 
 Spindle uses uv for:
@@ -129,7 +156,7 @@ Comprehensive user-friendly error management system:
 Clean separation of concerns with optimal resource usage:
 - **Identification Phase**: Pure content analysis and rip planning
   - Disc scanning and title analysis
-  - TMDB-based content identification  
+  - TMDB-based content identification
   - Intelligent title selection and filename planning
   - Episode mapping for TV shows
 - **Ripping Phase**: Execution of predetermined rip plan
@@ -158,7 +185,7 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED (disc ejected) →
 
 **Phase 2: Background Processing (Non-Blocking)**
 - **ENCODING**: AV1 encoding with drapto (CPU-intensive, concurrent)
-- **ENCODED**: Video compression complete  
+- **ENCODED**: Video compression complete
 - **ORGANIZING**: Move to Plex library structure, trigger scan
 - **COMPLETED**: ✅ **Media ready to watch in Plex**
 
@@ -191,7 +218,7 @@ When implementing features or fixes, Claude Code must:
 
 **Acceptable Exceptions:**
 - User explicitly requests partial implementation
-- User specifies something as a "future enhancement"  
+- User specifies something as a "future enhancement"
 - User provides explicit approval to defer specific steps
 
 **Not Acceptable:**
@@ -254,7 +281,7 @@ Queue manager handles schema evolution automatically with version-controlled mig
 ```json
 {
   "analysis_result": {
-    "content_type": "movie|tv_series", 
+    "content_type": "movie|tv_series",
     "confidence": 0.95,
     "titles_to_rip": [{"index": 1, "name": "Main Feature", "duration": 7200}],
     "episode_mappings": {"1": {"season_number": 1, "episode_number": 1, "episode_title": "Pilot"}}
@@ -309,7 +336,7 @@ review_dir/
 The project uses a focused, essential test suite designed to validate user-facing behavior rather than implementation details:
 
 - **Comprehensive Test Files**: Each covering a distinct functional area including error handling
-- **Essential Test Coverage**: Concentrated on critical workflow paths and user experience  
+- **Essential Test Coverage**: Concentrated on critical workflow paths and user experience
 - **Integration-Focused**: All major components tested with focus on integration over units
 
 ### Test File Structure
@@ -321,7 +348,7 @@ The project uses a focused, essential test suite designed to validate user-facin
 5. **test_enhanced_identification.py** - Advanced identification with caching and title selection
 6. **test_encoding.py** - drapto wrapper and progress tracking
 7. **test_organization.py** - Library organization and Plex integration
-8. **test_cli.py** - Command-line interface and workflow coordination
+8. **test_cli.py** - Command-line interface, daemon-only operation, and show command functionality
 9. **test_error_handling.py** - Enhanced error system with user-friendly messages
 10. **test_rip_spec.py** - Disc processing specifications and data structures
 11. **test_simple_multi_disc.py** - Multi-disc handling and series detection
@@ -372,7 +399,7 @@ For changes to content analysis and title selection:
 ### Adding Progress Event Types
 
 1. Update drapto_wrapper.py progress callback handling
-2. Add new progress fields to queue/manager.py if needed  
+2. Add new progress fields to queue/manager.py if needed
 3. Update database schema with migration if persistent storage needed
 4. Add tests for new event handling
 
@@ -383,6 +410,29 @@ For changes to content analysis and title selection:
 3. Update sample config.toml
 4. Test configuration loading and validation
 
+### CLI Development Patterns
+
+**Daemon-Only Architecture:**
+- All CLI commands assume daemon operation (no foreground mode)
+- Use `--systemd` flag for systemd service compatibility only
+- Commands either start/stop daemon or interact with running daemon
+
+**Adding New CLI Commands:**
+1. **Add command to `cli.py`** with proper Click decorators
+2. **Follow daemon interaction pattern** - commands should work with running daemon
+3. **Add comprehensive tests to `test_cli.py`**:
+   - Help text verification
+   - Option parsing and validation
+   - Error handling (missing files, dependencies)
+   - Integration with configuration system
+   - Mock external dependencies (subprocess, file system)
+
+**CLI Testing Best Practices:**
+- **User behavior focus**: Test what users experience, not implementation details
+- **Mock external calls**: subprocess, file operations, system dependencies
+- **Integration testing**: Configuration loading, error handling, command coordination
+- **Error scenarios**: Missing files, failed dependencies, invalid options
+
 ## Debugging
 
 ### Logs
@@ -391,10 +441,22 @@ For changes to content analysis and title selection:
 - Queue database: `log_dir/queue.db`
 - Drapto output: Captured and parsed as JSON
 
+**Log Monitoring Commands:**
+```bash
+# Real-time log monitoring with colors
+uv run spindle show --follow
+
+# View last 50 log lines
+uv run spindle show --lines 50
+
+# Check daemon status
+uv run spindle status
+```
+
 ### Common Issues
 
 1. **uv not found** - Install uv package manager first
-2. **Permission errors** - Check file/directory ownership  
+2. **Permission errors** - Check file/directory ownership
 3. **Drapto not found** - Install from GitHub with cargo
 4. **Database lock** - Ensure single spindle instance
 5. **Progress not updating** - Verify JSON progress flag and parsing
@@ -406,7 +468,7 @@ For changes to content analysis and title selection:
 
 **Phase-specific debugging**:
 - **IDENTIFYING phase**: Check TMDB connectivity, disc mount points, and MakeMKV scan results
-- **RIPPING phase**: Verify `rip_spec_data` contains valid title selection and analysis results  
+- **RIPPING phase**: Verify `rip_spec_data` contains valid title selection and analysis results
 - **Background phases**: Monitor separate encoding/organization processes, check drapto availability
 
 **Database inspection**:
@@ -470,7 +532,7 @@ If you need to run specific checks:
 # Fix formatting issues
 uv run black src/
 
-# Fix linting issues  
+# Fix linting issues
 uv run ruff check src/ --fix
 
 # Run tests

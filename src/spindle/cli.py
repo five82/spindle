@@ -1,6 +1,5 @@
 """Command-line interface for Spindle."""
 
-import asyncio
 import logging
 import os
 import signal
@@ -20,6 +19,8 @@ from rich.logging import RichHandler
 from rich.table import Table
 
 from .config import SpindleConfig, create_sample_config, load_config
+from .core.daemon import SpindleDaemon
+from .core.orchestrator import SpindleOrchestrator
 from .disc.monitor import detect_disc
 from .encode.drapto_wrapper import DraptoEncoder
 from .error_handling import ConfigurationError, check_dependencies
@@ -27,8 +28,7 @@ from .identify.tmdb import MediaIdentifier
 from .notify.ntfy import NtfyNotifier
 from .organize.library import LibraryOrganizer
 from .process_lock import ProcessLock
-from .processor import ContinuousProcessor
-from .queue.manager import QueueItemStatus, QueueManager
+from .storage.queue import QueueItemStatus, QueueManager
 from .system_check import check_system_dependencies
 
 console = Console()
@@ -301,221 +301,66 @@ def status(ctx: click.Context) -> None:
     else:
         console.print("📱 Notifications: [yellow]Not configured[/yellow]")
 
-    # Show queue status
+    # Show queue status via orchestrator
     console.print("\n[bold]Queue Status[/bold]")
-    queue_manager = QueueManager(config)
-    stats = queue_manager.get_queue_stats()
+    if spindle_running:
+        try:
+            orchestrator = SpindleOrchestrator(config)
+            status_info = orchestrator.get_status()
 
-    if not stats:
-        console.print("Queue is empty")
-    else:
-        table = Table()
-        table.add_column("Status")
-        table.add_column("Count", justify="right")
+            console.print(f"Current disc: {status_info.get('current_disc') or 'None'}")
+            console.print(f"Total items: {status_info.get('total_items', 0)}")
 
-        for status, count in stats.items():
-            if hasattr(status, "value"):
-                # Enum object
-                status_str = status.value.replace("_", " ").title()
+            if status_info.get('queue_stats'):
+                table = Table()
+                table.add_column("Status")
+                table.add_column("Count", justify="right")
+
+                for status, count in status_info['queue_stats'].items():
+                    status_str = status.replace("_", " ").title()
+                    table.add_row(status_str, str(count))
+
+                console.print(table)
             else:
-                # String key
-                status_str = status.replace("_", " ").title()
-            table.add_row(status_str, str(count))
+                console.print("Queue is empty")
 
-        console.print(table)
+        except Exception as e:
+            console.print(f"[yellow]Could not get detailed status: {e}[/yellow]")
+    else:
+        queue_manager = QueueManager(config)
+        stats = queue_manager.get_queue_stats()
+
+        if not stats:
+            console.print("Queue is empty")
+        else:
+            table = Table()
+            table.add_column("Status")
+            table.add_column("Count", justify="right")
+
+            for status, count in stats.items():
+                status_str = status.replace("_", " ").title()
+                table.add_row(status_str, str(count))
+
+            console.print(table)
 
 
 @cli.command()
-@click.option("--daemon", "-d", is_flag=True, help="Run as background daemon (default)")
-@click.option("--foreground", "-f", is_flag=True, help="Run in foreground")
+@click.option("--systemd", is_flag=True, help="Running under systemd (internal)")
 @click.pass_context
-def start(ctx: click.Context, daemon: bool, foreground: bool) -> None:
-    """Start continuous processing mode - auto-rip discs and process queue."""
+def start(ctx: click.Context, systemd: bool) -> None:
+    """Start continuous processing daemon - auto-rip discs and process queue."""
     config: SpindleConfig = ctx.obj["config"]
 
     # Check system dependencies before starting - validate required only
     console.print("Checking system dependencies...")
     check_system_dependencies(validate_required=True)
 
-    # Default to daemon mode unless explicitly foreground
-    # Exception: if running as systemd service, always run in foreground
-    is_systemd = os.getenv("INVOCATION_ID") is not None
-    run_as_daemon = False if is_systemd else daemon or not foreground
+    daemon = SpindleDaemon(config)
 
-    if run_as_daemon:
-        start_daemon(config)
+    if systemd or os.getenv("INVOCATION_ID"):
+        daemon.start_systemd_mode()
     else:
-        start_foreground(config)
-
-
-def start_daemon(config: SpindleConfig) -> None:
-    """Start Spindle as a background daemon."""
-    if daemon is None:
-        console.print("[red]ERROR: python-daemon package not installed[/red]")
-        console.print("Install with: uv pip install python-daemon")
-        sys.exit(1)
-
-    # Set up paths
-    log_file_path = config.log_dir / "spindle.log"
-    config.ensure_directories()
-
-    # Check if already running using modern process discovery
-    process_info = ProcessLock.find_spindle_process()
-    if process_info:
-        pid, mode = process_info
-        console.print(
-            f"[yellow]Spindle is already running in {mode} mode (PID {pid})[/yellow]",
-        )
-        console.print("Use 'spindle stop' to stop it first")
-        sys.exit(1)
-
-    console.print("[green]Starting Spindle daemon...[/green]")
-    console.print(f"Log file: {log_file_path}")
-    console.print(f"Monitoring: {config.optical_drive}")
-
-    # Create process lock
-    lock = ProcessLock(config)
-
-    # Set up daemon context (without PID file)
-    daemon_context = daemon.DaemonContext(
-        working_directory=Path.cwd(),
-        umask=0o002,
-    )
-
-    # Set up logging for daemon
-    def setup_daemon_logging() -> None:
-        logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
-
-        # File handler
-        file_handler = logging.FileHandler(log_file_path)
-        file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-    def run_daemon() -> None:
-        setup_daemon_logging()
-
-        # Acquire the process lock
-        if not lock.acquire():
-            logger = logging.getLogger(__name__)
-            logger.error(
-                "Failed to acquire process lock - another instance may be running",
-            )
-            sys.exit(1)
-
-        processor = ContinuousProcessor(config)
-
-        def signal_handler(signum: int, frame: object) -> None:
-            logger = logging.getLogger(__name__)
-            logger.info("Received signal %s, stopping processor", signum)
-            processor.stop()
-            lock.release()
-            sys.exit(0)
-
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-
-        try:
-            logger = logging.getLogger(__name__)
-            logger.info("Starting Spindle continuous processor")
-            processor.start()
-
-            # Keep daemon alive
-            while processor.is_running:
-                time.sleep(config.status_display_interval)
-
-        except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.exception("Error in processor: %s", e)
-            processor.stop()
-            lock.release()
-            sys.exit(1)
-        finally:
-            lock.release()
-
-    try:
-        with daemon_context:
-            run_daemon()
-    except Exception as e:
-        console.print(f"[red]Failed to start daemon: {e}[/red]")
-        sys.exit(1)
-
-
-def start_foreground(config: SpindleConfig) -> None:
-    """Start Spindle in foreground mode."""
-    logger = logging.getLogger(__name__)
-
-    # Check if already running
-    process_info = ProcessLock.find_spindle_process()
-    if process_info:
-        pid, mode = process_info
-        console.print(
-            f"[yellow]Spindle is already running in {mode} mode (PID {pid})[/yellow]",
-        )
-        console.print("Use 'spindle stop' to stop it first")
-        sys.exit(1)
-
-    console.print("[green]Starting Spindle continuous processor (foreground)[/green]")
-    console.print(f"Monitoring: {config.optical_drive}")
-    console.print("Insert discs to begin automatic ripping and processing")
-    console.print("Press Ctrl+C to stop")
-
-    # Create process lock
-    lock = ProcessLock(config)
-    if not lock.acquire():
-        console.print(
-            "[red]Failed to acquire process lock - another instance may be running[/red]",
-        )
-        sys.exit(1)
-
-    processor = ContinuousProcessor(config)
-
-    def signal_handler(signum: int, frame: object) -> None:
-        console.print("\n[yellow]Stopping Spindle processor...[/yellow]")
-        processor.stop()
-        lock.release()
-        sys.exit(0)
-
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    async def run_foreground():
-        processor.start()
-
-        # Keep main thread alive and show status changes
-        last_status = None
-        try:
-            while processor.is_running:
-                await asyncio.sleep(
-                    config.status_display_interval,
-                )  # Check status based on config interval
-                status = processor.get_status()
-
-                # Only show status if it has changed
-                current_status_key = (status["total_items"], status["current_disc"])
-                if status["total_items"] > 0 and current_status_key != last_status:
-                    logger.info(
-                        f"Queue: {status['total_items']} items | Current disc: {status['current_disc'] or 'None'}",
-                    )
-                    last_status = current_status_key
-        except asyncio.CancelledError:
-            processor.stop()
-            raise
-
-    try:
-        asyncio.run(run_foreground())
-    except Exception as e:
-        console.print(f"[red]Error in processor: {e}[/red]")
-        processor.stop()
-        lock.release()
-        sys.exit(1)
-    finally:
-        lock.release()
+        daemon.start_daemon()
 
 
 @cli.command()
@@ -546,6 +391,54 @@ def stop(ctx: click.Context) -> None:
             lock_file.unlink(missing_ok=True)
     else:
         console.print(f"[red]Failed to stop Spindle process {pid}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--follow", "-f", is_flag=True, help="Follow log output")
+@click.option("--lines", "-n", type=int, default=10, help="Number of lines to show")
+@click.pass_context
+def show(ctx: click.Context, follow: bool, lines: int) -> None:
+    """Show Spindle daemon log output with colors."""
+    config: SpindleConfig = ctx.obj["config"]
+    log_file = config.log_dir / "spindle.log"
+
+    if not log_file.exists():
+        console.print("[yellow]No log file found[/yellow]")
+        console.print(f"Expected location: {log_file}")
+        sys.exit(1)
+
+    # Use subprocess to stream tail output with real-time coloring
+    import subprocess
+
+    try:
+        if follow:
+            cmd = ["tail", "-f", str(log_file)]
+        else:
+            cmd = ["tail", "-n", str(lines), str(log_file)]
+
+        # Stream output and colorize in real-time
+        with subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+        ) as proc:
+            try:
+                for line in proc.stdout:
+                    _colorize_log_line(line.rstrip())
+            except KeyboardInterrupt:
+                proc.terminate()
+                sys.exit(0)
+
+        if proc.returncode != 0:
+            console.print("[red]Error running tail command[/red]")
+            sys.exit(1)
+
+    except FileNotFoundError:
+        console.print("[red]tail command not found - install coreutils[/red]")
         sys.exit(1)
 
 
@@ -998,6 +891,21 @@ def format_queue_table(queue_items: list) -> Table:
         )
 
     return table
+
+
+def _colorize_log_line(line: str) -> None:
+    """Colorize a single log line based on log level."""
+    if " ERROR " in line:
+        console.print(f"[red]{line}[/red]")
+    elif " WARNING " in line:
+        console.print(f"[yellow]{line}[/yellow]")
+    elif " INFO " in line:
+        console.print(f"[blue]{line}[/blue]")
+    elif " DEBUG " in line:
+        console.print(f"[dim]{line}[/dim]")
+    else:
+        # Default color for unrecognized log lines
+        console.print(line)
 
 
 def main() -> None:
