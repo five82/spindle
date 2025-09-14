@@ -4,6 +4,13 @@
 
 set -e  # Exit on any error
 
+# Simulate GitHub Actions environment by overriding system dependencies
+echo "🧹 Simulating GitHub Actions environment (no system dependencies)"
+# Create shell functions that override the real commands to simulate missing dependencies
+makemkvcon() { echo "makemkvcon: command not found" >&2; return 127; }
+drapto() { echo "drapto: command not found" >&2; return 127; }
+export -f makemkvcon drapto
+
 echo "🔍 Essential CI Checks"
 echo "======================"
 

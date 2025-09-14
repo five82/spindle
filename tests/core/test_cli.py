@@ -66,7 +66,7 @@ class TestStartCommand:
         assert "--daemon" not in result.output
     
     @patch('spindle.cli.check_dependencies', return_value=[])
-    @patch('spindle.cli.check_system_dependencies')
+    @patch('spindle.cli.check_system_dependencies', return_value=None)
     @patch('spindle.cli.SpindleDaemon')
     def test_start_daemon_mode(self, mock_spindle_daemon, mock_check_system_deps, mock_check_deps, test_config):
         """Test start command creates SpindleDaemon and runs in daemon mode by default."""
@@ -86,7 +86,7 @@ class TestStartCommand:
         assert result.exit_code == 0
 
     @patch('spindle.cli.check_dependencies', return_value=[])
-    @patch('spindle.cli.check_system_dependencies')
+    @patch('spindle.cli.check_system_dependencies', return_value=None)
     @patch('spindle.cli.SpindleDaemon')
     def test_start_systemd_mode(self, mock_spindle_daemon, mock_check_system_deps, mock_check_deps, test_config):
         """Test start command with --systemd flag calls start_systemd_mode."""
