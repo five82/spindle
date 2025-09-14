@@ -3,7 +3,6 @@
 import logging
 import os
 import sys
-import time
 from pathlib import Path
 
 try:
@@ -23,10 +22,9 @@ from .core.orchestrator import SpindleOrchestrator
 from .disc.monitor import detect_disc
 from .error_handling import ConfigurationError, check_dependencies
 from .process_lock import ProcessLock
-from .services.drapto_impl import DraptoEncoder
-from .services.ntfy_impl import NtfyNotifier
-from .services.plex_impl import LibraryOrganizer
-from .services.tmdb_impl import MediaIdentifier
+from .services.drapto import DraptoService
+from .services.ntfy import NotificationService
+from .services.plex import PlexService
 from .storage.queue import QueueItemStatus, QueueManager
 from .system_check import check_system_dependencies
 
@@ -276,16 +274,15 @@ def status(ctx: click.Context) -> None:
         console.print("📀 Disc: No disc detected")
 
     # Check drapto
-    encoder = DraptoEncoder(config)
-    if encoder.check_drapto_availability():
-        version = encoder.get_drapto_version()
-        console.print(f"⚙️ Drapto: Available ({version or 'unknown version'})")
+    drapto_service = DraptoService(config)
+    if drapto_service.validate_drapto_available():
+        console.print("⚙️ Drapto: Available")
     else:
         console.print("⚙️ Drapto: [red]Not available[/red]")
 
     # Check Plex - show different status based on whether Spindle is running
-    organizer = LibraryOrganizer(config)
-    if organizer.verify_plex_connection():
+    plex_service = PlexService(config)
+    if plex_service.test_connection():
         if spindle_running:
             console.print("📚 Plex: Connected")
         else:
@@ -294,7 +291,6 @@ def status(ctx: click.Context) -> None:
         console.print("📚 Plex: [yellow]Not configured or unreachable[/yellow]")
 
     # Check notifications
-    NtfyNotifier(config)
     if config.ntfy_topic:
         console.print("📱 Notifications: Configured")
     else:
@@ -666,147 +662,12 @@ def queue_health(ctx: click.Context) -> None:
 def test_notify(ctx: click.Context) -> None:
     """Send a test notification."""
     config: SpindleConfig = ctx.obj["config"]
-    notifier = NtfyNotifier(config)
+    notification_service = NotificationService(config)
 
-    if notifier.test_notification():
+    if notification_service.test_notifications():
         console.print("[green]Test notification sent successfully[/green]")
     else:
         console.print("[red]Failed to send test notification[/red]")
-
-
-async def process_queue_manual(config: SpindleConfig) -> None:
-    """Process all pending items in the queue."""
-    queue_manager = QueueManager(config)
-    identifier = MediaIdentifier(config)
-    encoder = DraptoEncoder(config)
-    organizer = LibraryOrganizer(config)
-    notifier = NtfyNotifier(config)
-
-    pending_items = queue_manager.get_pending_items()
-
-    if not pending_items:
-        console.print("No items to process")
-        return
-
-    notifier.notify_queue_started(len(pending_items))
-    console.print(f"[green]Processing {len(pending_items)} items[/green]")
-
-    start_time = time.time()
-    processed = 0
-    failed = 0
-
-    for item in pending_items:
-        try:
-            console.print(f"\n[blue]Processing: {item}[/blue]")
-
-            # Skip if not in correct state
-            if item.status not in [
-                QueueItemStatus.RIPPED,
-                QueueItemStatus.IDENTIFIED,
-                QueueItemStatus.ENCODED,
-            ]:
-                continue
-
-            # Identify media if needed
-            if item.status == QueueItemStatus.RIPPED and not item.media_info:
-                if not item.ripped_file:
-                    console.print("[red]Error: No ripped file to identify[/red]")
-                    continue
-                console.print("Identifying media...")
-                item.status = QueueItemStatus.IDENTIFYING
-                queue_manager.update_item(item)
-
-                item.media_info = await identifier.identify_media(item.ripped_file)
-
-                if item.media_info:
-                    item.status = QueueItemStatus.IDENTIFIED
-                    console.print(f"[green]Identified: {item.media_info}[/green]")
-                else:
-                    # Move to review
-                    if item.ripped_file:
-                        organizer.create_review_directory(
-                            item.ripped_file,
-                            "unidentified",
-                        )
-                        notifier.notify_unidentified_media(item.ripped_file.name)
-                    item.status = QueueItemStatus.REVIEW
-                    console.print(
-                        "[yellow]Could not identify, moved to review[/yellow]",
-                    )
-
-                queue_manager.update_item(item)
-                continue
-
-            # Encode if needed
-            if item.status == QueueItemStatus.IDENTIFIED and not item.encoded_file:
-                if not item.ripped_file:
-                    console.print("[red]Error: No ripped file to encode[/red]")
-                    continue
-                console.print("Encoding...")
-                # Use generic queue started notification for encoding
-                notifier.notify_queue_started(1)
-                item.status = QueueItemStatus.ENCODING
-                queue_manager.update_item(item)
-
-                result = encoder.encode_file(
-                    item.ripped_file,
-                    config.staging_dir / "encoded",
-                )
-
-                if result.success:
-                    item.encoded_file = result.output_file
-                    item.status = QueueItemStatus.ENCODED
-                    # Use generic queue completed notification for encoding
-                    notifier.notify_queue_completed(1, 0, "unknown")
-                    console.print(f"[green]Encoded: {result.output_file}[/green]")
-                else:
-                    item.status = QueueItemStatus.FAILED
-                    item.error_message = result.error_message
-                    notifier.notify_error(f"Encoding failed: {result.error_message}")
-                    console.print(f"[red]Encoding failed: {result.error_message}[/red]")
-                    failed += 1
-
-                queue_manager.update_item(item)
-                continue
-
-            # Organize and import to Plex
-            if item.status == QueueItemStatus.ENCODED and item.encoded_file:
-                if not item.media_info:
-                    console.print("[red]Error: No media info for organization[/red]")
-                    continue
-                console.print("Organizing and importing to Plex...")
-                item.status = QueueItemStatus.ORGANIZING
-                queue_manager.update_item(item)
-
-                if organizer.add_to_plex(item.encoded_file, item.media_info):
-                    item.status = QueueItemStatus.COMPLETED
-                    notifier.notify_media_added(
-                        str(item.media_info),
-                        item.media_info.media_type,
-                    )
-                    console.print(f"[green]Added to Plex: {item.media_info}[/green]")
-                    processed += 1
-                else:
-                    item.status = QueueItemStatus.FAILED
-                    item.error_message = "Failed to organize/import to Plex"
-                    failed += 1
-
-                queue_manager.update_item(item)
-
-        except Exception as e:
-            console.print(f"[red]Error processing {item}: {e}[/red]")
-            item.status = QueueItemStatus.FAILED
-            item.error_message = str(e)
-            queue_manager.update_item(item)
-            failed += 1
-
-    # Send completion notification
-    duration = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
-    notifier.notify_queue_completed(processed, failed, duration)
-
-    console.print(
-        f"\n[green]Queue processing complete: {processed} processed, {failed} failed[/green]",
-    )
 
 
 # CLI utility functions

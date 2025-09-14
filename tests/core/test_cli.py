@@ -282,10 +282,28 @@ class TestStatusCommand:
     @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('spindle.cli.QueueManager')
     @patch('spindle.cli.ProcessLock.find_spindle_process')
-    def test_status_display(self, mock_find_process, mock_queue_manager, mock_check_deps, test_config):
+    @patch('spindle.cli.DraptoService')
+    @patch('spindle.cli.PlexService')
+    @patch('spindle.cli.detect_disc')
+    @patch('spindle.cli.SpindleOrchestrator')
+    def test_status_display(self, mock_orchestrator, mock_detect_disc, mock_plex_service,
+                          mock_drapto_service, mock_find_process, mock_queue_manager, mock_check_deps, test_config):
         """Test status command displays system information."""
         mock_find_process.return_value = (1234, "daemon")
-        
+        mock_detect_disc.return_value = None
+
+        # Mock services
+        mock_drapto_service.return_value.validate_drapto_available.return_value = True
+        mock_plex_service.return_value.test_connection.return_value = True
+
+        # Mock orchestrator
+        mock_orchestrator.return_value.get_status.return_value = {
+            'running': True,
+            'current_disc': None,
+            'total_items': 7,
+            'queue_stats': {"PENDING": 1, "RIPPING": 1, "COMPLETED": 5}
+        }
+
         # Mock queue manager
         mock_queue = Mock()
         mock_queue.get_queue_stats.return_value = {
@@ -331,12 +349,19 @@ class TestCLIIntegration:
         # Test that status command loads config
         with patch('spindle.cli.QueueManager') as mock_queue_manager:
             with patch('spindle.cli.ProcessLock.find_spindle_process', return_value=None):
-                # Mock queue manager properly
-                mock_queue = Mock()
-                mock_queue.get_queue_stats.return_value = {"PENDING": 0}
-                mock_queue_manager.return_value = mock_queue
-                
-                result = runner.invoke(cli, ["status"])
+                with patch('spindle.cli.DraptoService') as mock_drapto_service:
+                    with patch('spindle.cli.PlexService') as mock_plex_service:
+                        with patch('spindle.cli.detect_disc', return_value=None):
+                            # Mock services
+                            mock_drapto_service.return_value.validate_drapto_available.return_value = True
+                            mock_plex_service.return_value.test_connection.return_value = True
+
+                            # Mock queue manager properly
+                            mock_queue = Mock()
+                            mock_queue.get_queue_stats.return_value = {"PENDING": 0}
+                            mock_queue_manager.return_value = mock_queue
+
+                            result = runner.invoke(cli, ["status"])
             
         mock_load_config.assert_called_once()
         assert result.exit_code == 0
