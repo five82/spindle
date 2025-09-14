@@ -1,47 +1,11 @@
-"""Modern process management without PID files."""
+"""Modern process management using process discovery."""
 
-import fcntl
 import os
 import subprocess
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from spindle.config import SpindleConfig
 
 
-class ProcessLock:
-    """Manages single instance locking and process discovery."""
-
-    def __init__(self, config: "SpindleConfig") -> None:
-        self.lock_file = config.log_dir / "spindle.lock"
-        self.lock_fd: int | None = None
-
-    def acquire(self) -> bool:
-        """Try to acquire exclusive lock. Returns True if successful."""
-        try:
-            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
-            self.lock_fd = os.open(str(self.lock_file), os.O_CREAT | os.O_WRONLY)
-            fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # Write our PID to the lock file for informational purposes
-            os.write(self.lock_fd, str(os.getpid()).encode())
-            os.fsync(self.lock_fd)
-            return True
-        except OSError:
-            if self.lock_fd is not None:
-                os.close(self.lock_fd)
-                self.lock_fd = None
-            return False
-
-    def release(self) -> None:
-        """Release the lock."""
-        if self.lock_fd is not None:
-            try:
-                fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
-                os.close(self.lock_fd)
-            except OSError:
-                pass
-            finally:
-                self.lock_fd = None
+class ProcessManager:
+    """Manages process discovery and control for single instance enforcement."""
 
     @staticmethod
     def find_spindle_process() -> tuple[int, str] | None:
@@ -116,14 +80,14 @@ class ProcessLock:
 
             # Wait up to 10 seconds for graceful shutdown
             for _ in range(10):
-                if not ProcessLock.is_process_running(pid):
+                if not ProcessManager.is_process_running(pid):
                     return True
                 time.sleep(1)
 
             # Force kill if still running
             os.kill(pid, signal.SIGKILL)
             time.sleep(0.5)
-            return not ProcessLock.is_process_running(pid)
+            return not ProcessManager.is_process_running(pid)
 
         except (OSError, ProcessLookupError):
             return True  # Process already stopped

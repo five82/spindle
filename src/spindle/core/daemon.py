@@ -13,7 +13,7 @@ except ImportError:
     daemon = None
 
 from spindle.config import SpindleConfig
-from spindle.process_lock import ProcessLock
+from spindle.process_manager import ProcessManager
 
 from .orchestrator import SpindleOrchestrator
 
@@ -26,7 +26,6 @@ class SpindleDaemon:
     def __init__(self, config: SpindleConfig):
         self.config = config
         self.orchestrator: SpindleOrchestrator | None = None
-        self.lock: ProcessLock | None = None
 
     def start_daemon(self) -> None:
         """Start Spindle as a background daemon."""
@@ -39,7 +38,7 @@ class SpindleDaemon:
         self.config.ensure_directories()
 
         # Check if already running
-        process_info = ProcessLock.find_spindle_process()
+        process_info = ProcessManager.find_spindle_process()
         if process_info:
             pid, mode = process_info
             msg = f"Spindle is already running in {mode} mode (PID {pid})"
@@ -67,11 +66,14 @@ class SpindleDaemon:
         if log_file_path:
             self._setup_daemon_logging(log_file_path)
 
-        # Acquire the process lock
-        self.lock = ProcessLock(self.config)
-        if not self.lock.acquire():
+        # Check if another instance is already running
+        process_info = ProcessManager.find_spindle_process()
+        if process_info:
+            pid, mode = process_info
             logger.error(
-                "Failed to acquire process lock - another instance may be running",
+                "Another Spindle instance is already running in %s mode (PID %s)",
+                mode,
+                pid,
             )
             sys.exit(1)
 
@@ -99,16 +101,11 @@ class SpindleDaemon:
             logger.exception("Error in daemon: %s", e)
             self.stop()
             sys.exit(1)
-        finally:
-            if self.lock:
-                self.lock.release()
 
     def stop(self) -> None:
         """Stop the daemon."""
         if self.orchestrator:
             self.orchestrator.stop()
-        if self.lock:
-            self.lock.release()
 
     def _setup_daemon_logging(self, log_file_path: Path) -> None:
         """Set up logging for daemon mode."""

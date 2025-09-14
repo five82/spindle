@@ -29,16 +29,12 @@ class TestSpindleDaemon:
         """Test daemon initializes correctly."""
         assert daemon.config == config
         assert daemon.orchestrator is None
-        assert daemon.lock is None
 
     @patch('spindle.core.daemon.daemon')
-    @patch('spindle.core.daemon.ProcessLock')
-    def test_start_daemon_creates_context(self, mock_lock, mock_daemon_module, daemon):
+    @patch('spindle.core.daemon.ProcessManager')
+    def test_start_daemon_creates_context(self, mock_process_manager, mock_daemon_module, daemon):
         """Test daemon creates proper daemon context."""
-        mock_lock.find_spindle_process.return_value = None
-        mock_process_lock = Mock()
-        mock_process_lock.acquire.return_value = True
-        mock_lock.return_value = mock_process_lock
+        mock_process_manager.find_spindle_process.return_value = None
 
         mock_daemon_context = Mock()
         mock_daemon_context.__enter__ = Mock(return_value=mock_daemon_context)
@@ -51,26 +47,18 @@ class TestSpindleDaemon:
         mock_daemon_module.DaemonContext.assert_called_once()
         mock_daemon_context.__enter__.assert_called_once()
 
-    @patch('spindle.core.daemon.ProcessLock')
-    def test_start_systemd_mode(self, mock_lock, daemon):
+    def test_start_systemd_mode(self, daemon):
         """Test systemd mode starts without daemon context."""
-        mock_process_lock = Mock()
-        mock_process_lock.acquire.return_value = True
-        mock_lock.return_value = mock_process_lock
-
         with patch.object(daemon, '_run_daemon') as mock_run:
             daemon.start_systemd_mode()
 
         mock_run.assert_called_once_with(None)
 
     def test_stop_cleans_up_resources(self, daemon):
-        """Test stop method cleans up orchestrator and lock."""
+        """Test stop method cleans up orchestrator."""
         mock_orchestrator = Mock()
-        mock_lock = Mock()
         daemon.orchestrator = mock_orchestrator
-        daemon.lock = mock_lock
 
         daemon.stop()
 
         mock_orchestrator.stop.assert_called_once()
-        mock_lock.release.assert_called_once()

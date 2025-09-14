@@ -238,7 +238,7 @@ class TestStopCommand:
         assert "Stop running Spindle process" in result.output
     
     @patch('spindle.cli.check_dependencies', return_value=[])
-    @patch('spindle.cli.ProcessLock.find_spindle_process')
+    @patch('spindle.cli.ProcessManager.find_spindle_process')
     def test_stop_no_running_process(self, mock_find_process, mock_check_deps, test_config):
         """Test stop command when no process is running."""
         mock_find_process.return_value = None
@@ -251,8 +251,8 @@ class TestStopCommand:
         assert "Spindle is not running" in result.output
     
     @patch('spindle.cli.check_dependencies', return_value=[])
-    @patch('spindle.cli.ProcessLock.find_spindle_process')
-    @patch('spindle.cli.ProcessLock.stop_process')
+    @patch('spindle.cli.ProcessManager.find_spindle_process')
+    @patch('spindle.cli.ProcessManager.stop_process')
     def test_stop_running_process(self, mock_stop_process, mock_find_process, mock_check_deps, test_config):
         """Test stop command with running process."""
         mock_find_process.return_value = (1234, "daemon")
@@ -281,7 +281,7 @@ class TestStatusCommand:
     
     @patch('spindle.cli.check_dependencies', return_value=[])
     @patch('spindle.cli.QueueManager')
-    @patch('spindle.cli.ProcessLock.find_spindle_process')
+    @patch('spindle.cli.ProcessManager.find_spindle_process')
     @patch('spindle.cli.DraptoService')
     @patch('spindle.cli.PlexService')
     @patch('spindle.cli.detect_disc')
@@ -348,7 +348,7 @@ class TestCLIIntegration:
         
         # Test that status command loads config
         with patch('spindle.cli.QueueManager') as mock_queue_manager:
-            with patch('spindle.cli.ProcessLock.find_spindle_process', return_value=None):
+            with patch('spindle.cli.ProcessManager.find_spindle_process', return_value=None):
                 with patch('spindle.cli.DraptoService') as mock_drapto_service:
                     with patch('spindle.cli.PlexService') as mock_plex_service:
                         with patch('spindle.cli.detect_disc', return_value=None):

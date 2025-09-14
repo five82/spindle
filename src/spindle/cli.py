@@ -21,7 +21,7 @@ from .core.daemon import SpindleDaemon
 from .core.orchestrator import SpindleOrchestrator
 from .disc.monitor import detect_disc
 from .error_handling import ConfigurationError, check_dependencies
-from .process_lock import ProcessLock
+from .process_manager import ProcessManager
 from .services.drapto import DraptoService
 from .services.ntfy import NotificationService
 from .services.plex import PlexService
@@ -257,7 +257,7 @@ def status(ctx: click.Context) -> None:
 
     # Check if Spindle is running using modern process discovery
     spindle_running = False
-    process_info = ProcessLock.find_spindle_process()
+    process_info = ProcessManager.find_spindle_process()
 
     if process_info:
         pid, mode = process_info
@@ -362,28 +362,18 @@ def start(ctx: click.Context, systemd: bool) -> None:
 @click.pass_context
 def stop(ctx: click.Context) -> None:
     """Stop running Spindle process."""
-    config: SpindleConfig = ctx.obj["config"]
-
     # Find running spindle process
-    process_info = ProcessLock.find_spindle_process()
+    process_info = ProcessManager.find_spindle_process()
 
     if not process_info:
         console.print("[yellow]Spindle is not running[/yellow]")
-        # Clean up any stale lock files
-        lock_file = config.log_dir / "spindle.lock"
-        if lock_file.exists():
-            lock_file.unlink(missing_ok=True)
         return
 
     pid, mode = process_info
     console.print(f"[blue]Stopping Spindle {mode} mode (PID {pid})...[/blue]")
 
-    if ProcessLock.stop_process(pid):
+    if ProcessManager.stop_process(pid):
         console.print("[green]Spindle stopped[/green]")
-        # Clean up lock file
-        lock_file = config.log_dir / "spindle.lock"
-        if lock_file.exists():
-            lock_file.unlink(missing_ok=True)
     else:
         console.print(f"[red]Failed to stop Spindle process {pid}[/red]")
         sys.exit(1)
