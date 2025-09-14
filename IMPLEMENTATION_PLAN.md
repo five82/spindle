@@ -56,14 +56,14 @@ src/spindle/
    def start(ctx: click.Context, systemd: bool) -> None:
        """Start continuous processing daemon - auto-rip discs and process queue."""
        config: SpindleConfig = ctx.obj["config"]
-       
+
        # Check system dependencies before starting
        console.print("Checking system dependencies...")
        check_system_dependencies(validate_required=True)
-       
+
        # Always run as daemon unless systemd (which needs foreground for logging)
        is_systemd = systemd or os.getenv("INVOCATION_ID") is not None
-       
+
        if is_systemd:
            start_systemd_mode(config)
        else:
@@ -86,23 +86,23 @@ def show(ctx: click.Context, follow: bool, lines: int) -> None:
     """Show Spindle daemon log output with colors."""
     config: SpindleConfig = ctx.obj["config"]
     log_file = config.log_dir / "spindle.log"
-    
+
     if not log_file.exists():
         console.print("[yellow]No log file found[/yellow]")
         console.print(f"Expected location: {log_file}")
         sys.exit(1)
-    
+
     # Use subprocess to stream tail output with real-time coloring
     import subprocess
-    
+
     try:
         if follow:
             cmd = ["tail", "-f", str(log_file)]
         else:
             cmd = ["tail", "-n", str(lines), str(log_file)]
-            
+
         # Stream output and colorize in real-time
-        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              text=True, bufsize=1, universal_newlines=True) as proc:
             try:
                 for line in proc.stdout:
@@ -110,11 +110,11 @@ def show(ctx: click.Context, follow: bool, lines: int) -> None:
             except KeyboardInterrupt:
                 proc.terminate()
                 sys.exit(0)
-                
+
         if proc.returncode != 0:
             console.print("[red]Error running tail command[/red]")
             sys.exit(1)
-            
+
     except FileNotFoundError:
         console.print("[red]tail command not found - install coreutils[/red]")
         sys.exit(1)
@@ -2398,13 +2398,6 @@ find tests/ -name "*.py" -exec grep -l "from spindle\.queue\.manager\|from spind
 
 #### 2.7.2 Pre-Cleanup Validation (Execute After Test Cleanup)
 
-**Create backup branch:**
-```bash
-git checkout -b pre-cleanup-backup
-git commit -am "Backup before legacy cleanup - Phase 2.6 complete"
-git checkout main
-```
-
 **Verify new architecture works with cleaned test suite:**
 ```bash
 # All NEW tests must pass with new architecture
@@ -2538,31 +2531,6 @@ wait $SPINDLE_PID
 - Update any code examples in README.md that reference old modules
 - Update CLAUDE.md with new module structure
 - Update any inline documentation or docstrings referencing old paths
-
-#### 2.7.9 Commit Cleanup Changes
-
-**Create cleanup commit:**
-```bash
-git add -A
-git commit -m "Phase 2.7: Remove legacy architecture
-
-- Deleted processor.py (replaced by core/orchestrator.py)
-- Moved all services to services/ directory
-- Updated all import statements
-- Cleaned up old test files
-- Verified all functionality works with new architecture
-
-🤖 Generated with [Claude Code](https://claude.ai/code)
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
-```
-
-**Safety verification:**
-```bash
-# Verify the commit doesn't break anything
-git show --name-status  # Review all changed files
-uv run pytest tests/ -v  # Verify tests still pass
-```
 
 ## Future Evolution Path
 
