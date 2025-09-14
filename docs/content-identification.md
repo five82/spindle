@@ -24,23 +24,23 @@ The `EnhancedDiscMetadataExtractor` collects metadata from multiple sources:
 - **Location**: Executed against mounted disc path
 - **Reliability**: Very high for Blu-ray discs
 
-#### 2. bdmt_eng.xml (High Priority)  
+#### 2. bdmt_eng.xml (High Priority)
 - **Purpose**: Official disc title and localization info
 - **Location**: `/BDMV/META/DL/bdmt_eng.xml`
 - **Extracts**: Official title, language, thumbnails
 - **Reliability**: High when present
 
-#### 3. MakeMKV Output (Medium Priority)
+#### 3. Cleaned Volume ID (Medium Priority)
+- **Purpose**: Processed volume identifier with cleanup
+- **Extracts**: Cleaned and normalized volume labels
+- **Processing**: Removes generic identifiers and formatting artifacts
+- **Reliability**: Medium - depends on disc labeling quality
+
+#### 4. MakeMKV Output (Lower Priority)
 - **Purpose**: Track information and alternative disc labels
 - **Extracts**: Title list, track details, disc label
 - **Integration**: Populated by ripper during scan
-- **Reliability**: Good for all disc types
-
-#### 4. mcmf.xml (Low Priority)
-- **Purpose**: Studio and content provider information
-- **Location**: `/BDMV/META/DL/mcmf.xml`  
-- **Extracts**: Studio URL, content ID
-- **Reliability**: Limited availability
+- **Reliability**: Good for all disc types (but often generic labels)
 
 ### Title Candidate Generation
 
@@ -48,20 +48,27 @@ The system generates title candidates using:
 
 ```python
 def get_best_title_candidates(self) -> list[str]:
+    """Get title candidates in priority order."""
     candidates = []
-    
-    # Priority 1: Official BDMT title
-    if self.bdmt_title:
-        candidates.append(self.bdmt_title)
-        
-    # Priority 2: bd_info disc name
-    if self.disc_name:
+
+    # Priority 1: bd_info disc library metadata
+    if self.disc_name and not self._is_generic_label(self.disc_name):
         candidates.append(self.disc_name)
-        
-    # Priority 3: MakeMKV label (if meaningful)
-    if self.makemkv_label and not self.is_generic_label(self.makemkv_label):
+
+    # Priority 2: bdmt_eng.xml title
+    if self.bdmt_title and not self._is_generic_label(self.bdmt_title):
+        candidates.append(self.bdmt_title)
+
+    # Priority 3: cleaned volume ID
+    if self.volume_id:
+        cleaned = self._clean_volume_id(self.volume_id)
+        if cleaned and not self._is_generic_label(cleaned):
+            candidates.append(cleaned)
+
+    # Priority 4: MakeMKV label (often generic)
+    if self.makemkv_label and not self._is_generic_label(self.makemkv_label):
         candidates.append(self.makemkv_label)
-        
+
     return candidates
 ```
 
@@ -110,25 +117,41 @@ Note: Plex only recognizes Movies and TV Shows as primary video content types. C
 ```python
 async def identify_disc_content(
     self,
-    title_candidates: list[str], 
-    runtime_minutes: int | None = None
+    title_candidates: list[str],
+    runtime_minutes: int | None = None,
+    content_type: str | None = None,
 ) -> MediaInfo | None:
-    
-    for candidate in title_candidates:
-        # Phase 3a: Runtime verification
-        if runtime_minutes:
-            result = await self.search_with_runtime_verification(
-                candidate, runtime_minutes
-            )
-            if result:
-                return result
-        
-        # Phase 3b: Pattern matching
-        result = await self.search_by_title_patterns(candidate)
+    """Identify disc content using multiple title sources and caching."""
+    # Step 1: Extract best title from all sources
+    clean_title = self.extract_best_title(title_candidates)
+
+    if not clean_title:
+        logger.warning("No usable title found in disc metadata")
+        return None
+
+    # Check if title is too generic for TMDB search
+    if self._is_generic_title(clean_title):
+        logger.info(f"Skipping TMDB search for generic title: '{clean_title}'")
+        return None
+
+    # Determine target media type for focused search
+    target_media_type = "movie"  # Default fallback
+    if content_type and content_type.lower() in ["tv_series", "tv", "television"]:
+        target_media_type = "tv"
+
+    # Step 2: Check cache first
+    cached = self.cache.search_cache(clean_title, target_media_type)
+    if cached and cached.is_valid():
+        return self._convert_cached_result(cached, target_media_type)
+
+    # Step 3: Perform TMDB search with runtime verification if available
+    if runtime_minutes and target_media_type == "movie":
+        result = await self._search_movie_with_runtime(clean_title, runtime_minutes)
         if result:
             return result
-    
-    return None  # Requires manual review
+
+    # Step 4: Standard search without runtime verification
+    return await self._search_by_title_patterns(clean_title, target_media_type)
 ```
 
 ## Multi-Disc Handling

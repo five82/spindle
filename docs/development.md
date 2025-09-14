@@ -62,7 +62,7 @@ uv pip install -e ".[dev]"
 uv run pytest
 
 # Run specific test file
-uv run pytest tests/test_queue.py
+uv run pytest tests/storage/test_queue.py
 
 # Run with coverage
 uv run pytest --cov=spindle
@@ -93,19 +93,38 @@ Development configuration at `~/.config/spindle/config.toml`:
 
 ## Architecture Overview
 
-The project uses a modular Python architecture with these components:
+The project uses a clean modular Python architecture with layered components:
 
-1. **disc/**: Optical disc detection, monitoring, and MakeMKV ripping
-2. **identify/**: TMDB-based media identification and metadata handling
-3. **encode/**: drapto wrapper for AV1 video encoding with real-time progress
-4. **organize/**: Plex-compatible file organization and library import
-5. **queue/**: SQLite-based processing queue with status tracking
-6. **notify/**: ntfy.sh integration for real-time notifications
-7. **config/**: TOML-based configuration management
+### Core Orchestration
+1. **core/daemon.py**: Daemon lifecycle management and process control
+2. **core/orchestrator.py**: Main workflow orchestration and component coordination
+3. **core/workflow.py**: Workflow state management
+
+### Component Layer
+4. **components/disc_handler.py**: Disc processing coordination (identification and ripping)
+5. **components/encoder.py**: Video encoding coordination
+6. **components/organizer.py**: Library organization coordination
+
+### Service Layer
+7. **services/tmdb.py**: TMDB API integration for media identification
+8. **services/drapto.py**: Drapto AV1 encoding service wrapper
+9. **services/plex.py**: Plex media server integration
+10. **services/makemkv.py**: MakeMKV disc ripping service wrapper
+11. **services/ntfy.py**: Notification service via ntfy.sh
+
+### Storage Layer
+12. **storage/queue.py**: SQLite-based processing queue management
+13. **storage/cache.py**: Unified caching system
+
+### Legacy Modules (Preserved)
+14. **disc/**: Low-level disc analysis and processing modules
+15. **cli.py**: Simplified command-line interface using new core modules
+16. **config.py**: TOML-based configuration management
+17. **error_handling.py**: Enhanced error handling system
 
 ### Key Components
 
-#### Drapto Integration (encode/drapto_wrapper.py)
+#### Drapto Integration (services/drapto.py)
 
 The encoder wrapper integrates with drapto's JSON progress output system:
 - Streams real-time progress events during encoding
@@ -113,7 +132,7 @@ The encoder wrapper integrates with drapto's JSON progress output system:
 - Handles errors and validation results from drapto
 - Uses `--json-progress` flag for structured output
 
-#### Queue Management (queue/manager.py)
+#### Queue Management (storage/queue.py)
 
 SQLite-based queue system with:
 - Status tracking through processing stages
@@ -121,7 +140,7 @@ SQLite-based queue system with:
 - Database migration support for schema changes
 - Thread-safe operations for concurrent access
 
-#### Continuous Processing (processor.py)
+#### Workflow Orchestration (core/orchestrator.py)
 
 Orchestrates the complete workflow:
 - Disc monitoring and automatic ripping
@@ -159,8 +178,8 @@ Queue manager handles schema migrations automatically:
 
 ### Adding New Progress Event Types
 
-1. Update drapto_wrapper.py progress callback handling
-2. Add new progress fields to queue/manager.py if needed
+1. Update services/drapto.py progress callback handling
+2. Add new progress fields to storage/queue.py if needed
 3. Update database schema with migration
 4. Add tests for new event handling
 
@@ -174,7 +193,7 @@ Queue manager handles schema migrations automatically:
 ### New Queue Status Types
 
 1. Add to QueueItemStatus enum
-2. Update processor workflow logic
+2. Update orchestrator workflow logic
 3. Add database handling
 4. Update status display in CLI
 
