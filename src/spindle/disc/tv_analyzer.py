@@ -5,7 +5,7 @@ import re
 from typing import Any, cast
 
 from spindle.config import SpindleConfig
-from spindle.services.tmdb_impl import TMDBClient
+from spindle.services.tmdb import TMDBClient
 
 from .analyzer import EpisodeInfo, SeriesInfo
 from .ripper import Title

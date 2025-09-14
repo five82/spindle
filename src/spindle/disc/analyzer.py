@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from spindle.config import SpindleConfig
-from spindle.services.tmdb_impl import MediaIdentifier, TMDBClient
+from spindle.services.tmdb import MediaIdentifier, TMDBClient
 
 from .metadata_extractor import EnhancedDiscMetadataExtractor
 from .monitor import DiscInfo

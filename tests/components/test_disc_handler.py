@@ -24,7 +24,7 @@ class TestDiscHandler:
         with patch('spindle.components.disc_handler.IntelligentDiscAnalyzer') as mock_analyzer, \
              patch('spindle.components.disc_handler.TVSeriesDiscAnalyzer') as mock_tv, \
              patch('spindle.components.disc_handler.SimpleMultiDiscManager') as mock_multi, \
-             patch('spindle.components.disc_handler.MakeMKVRipper') as mock_ripper, \
+             patch('spindle.components.disc_handler.MakeMKVService') as mock_ripper, \
              patch('spindle.components.disc_handler.TMDBService') as mock_tmdb:
 
             handler = DiscHandler(config)

@@ -8,9 +8,9 @@ from spindle.disc.analyzer import IntelligentDiscAnalyzer
 from spindle.disc.monitor import DiscInfo, eject_disc
 from spindle.disc.multi_disc import SimpleMultiDiscManager
 from spindle.disc.rip_spec import RipSpec
-from spindle.disc.ripper import MakeMKVRipper
 from spindle.disc.tv_analyzer import TVSeriesDiscAnalyzer
 from spindle.error_handling import MediaError, ToolError
+from spindle.services.makemkv import MakeMKVService
 from spindle.services.tmdb import TMDBService
 from spindle.storage.queue import QueueItem, QueueItemStatus
 
@@ -25,7 +25,7 @@ class DiscHandler:
         self.disc_analyzer = IntelligentDiscAnalyzer(config)
         self.tv_analyzer = TVSeriesDiscAnalyzer(config)
         self.multi_disc_manager = SimpleMultiDiscManager(config)
-        self.ripper = MakeMKVRipper(config)
+        self.ripper = MakeMKVService(config)
         self.tmdb_service = TMDBService(config)
         self.queue_manager = None  # Will be injected by orchestrator
 

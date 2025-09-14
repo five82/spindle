@@ -123,7 +123,7 @@ class TestConfigIntegration:
         queue_manager = QueueManager(config)
         assert queue_manager.db_path.parent == config.log_dir
 
-        # Should work with new service wrappers
+        # Should work with service wrappers
         from spindle.services.makemkv import MakeMKVService
         makemkv_service = MakeMKVService(config)
         assert makemkv_service.config == config

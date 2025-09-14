@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from spindle.config import SpindleConfig
-from spindle.services.tmdb_impl import MediaInfo
+from spindle.services.tmdb import MediaInfo
 
 logger = logging.getLogger(__name__)
 
