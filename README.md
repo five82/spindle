@@ -2,7 +2,39 @@
 
 **Spindle is an automated disc ripping and media library management system.** Insert a Blu-ray or DVD, and Spindle handles everything: identifies the content using TMDB, rips selected titles with MakeMKV, encodes to efficient AV1 format with drapto, organizes files in Plex-compatible structure, and sends notifications when complete.
 
+> **Early-stage project**: Expect breaking changes.
+
 **Workflow**: Insert disc → Auto-identify → Rip → **Eject** (drive freed) → Background encode/organize → Available in Plex
+
+## Quick Start
+
+```bash
+# Install Spindle as a tool (uv manages the environment)
+uv tool install git+https://github.com/five82/spindle.git
+
+# Create initial config
+spindle init-config
+
+# Edit required settings
+nano ~/.config/spindle/config.toml
+```
+
+Minimal config example:
+
+```toml
+library_dir = "~/Media/Library"
+staging_dir = "~/Media/Staging"
+tmdb_api_key = "tmdb-key-here"
+plex_url = "https://plex.example.com"
+plex_token = "plex-token"
+ntfy_topic = "spindle"
+```
+
+```bash
+# Start and monitor the daemon
+spindle start
+spindle show --follow
+```
 
 
 ## Installation
@@ -10,9 +42,9 @@
 ### Prerequisites
 
 **Required:**
-- **uv** - `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **MakeMKV** - Download from https://www.makemkv.com/download/
-- **drapto** - `cargo install --git https://github.com/five82/drapto`
+- **uv** (latest stable) - `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- **MakeMKV** ≥ 1.17 - https://www.makemkv.com/download/
+- **drapto** (requires Rust toolchain) - `cargo install --git https://github.com/five82/drapto`
 
 **Optional (for better identification):**
 - **Disc Automounting**:
@@ -20,27 +52,34 @@
   - **Server**: Add to `/etc/fstab`: `/dev/sr0 /media/cdrom udf,iso9660 ro,noauto,x-systemd.automount,x-systemd.device-timeout=10 0 0`
 - **eject utility** - Usually pre-installed (`util-linux` package)
 
-> Run `spindle start` to check missing dependencies with install instructions.
+Start the daemon once to verify dependencies—missing tools are reported with installation hints.
 
 
 ### Install
+
+Global tool (recommended for daily use):
 
 ```bash
 uv tool install git+https://github.com/five82/spindle.git
 ```
 
-### Configuration
+Local development clone:
 
 ```bash
-# Create and edit config
-spindle init-config
-nano ~/.config/spindle/config.toml
+git clone https://github.com/five82/spindle.git
+cd spindle
+uv pip install -e ".[dev]"
 ```
 
-Required settings:
-- `tmdb_api_key` - Get from https://www.themoviedb.org/settings/api
-- `plex_url` and `plex_token` - See Plex documentation
-- `library_dir` - Your media library path
+### Configuration
+
+Use `spindle init-config` to generate `~/.config/spindle/config.toml`, then edit the following keys:
+
+- `library_dir` – Final Plex-ready library location (must exist)
+- `staging_dir` – Working directory for ripped/encoded files
+- `tmdb_api_key` – https://www.themoviedb.org/settings/api
+- `plex_url` / `plex_token` – Plex server + token for library scans
+- `ntfy_topic` (optional) – Channel for notifications
 
 
 ## Usage
@@ -49,7 +88,7 @@ Required settings:
 # Start daemon
 spindle start
 
-# Monitor logs
+# Monitor live logs (color-coded)
 spindle show --follow
 
 # Check status
@@ -72,17 +111,27 @@ sudo loginctl enable-linger $(whoami)
 
 ### Additional Commands
 
-```bash
-# View queue
-spindle queue list
-spindle queue clear --completed
+- `spindle queue status` / `spindle queue list`
+- `spindle queue clear --completed` (also `--failed` / `--force`)
+- `spindle queue retry <item_id>`
+- `spindle queue-health`
+- `spindle add-file /path/to/video.mkv`
+- `spindle config validate`
+- `spindle test-notify`
 
-# Process existing files
-spindle add-file /path/to/video.mkv
 
-# Test notifications
-spindle test-notify
+### Workflow Lifecycle
+
+Spindle runs as a daemon and moves each disc through the queue:
+
 ```
+PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED
+```
+
+- `FAILED`: unrecoverable issue (inspect logs / notifications)
+- `REVIEW`: manual intervention required, files moved to `review_dir`
+- Drives eject automatically at `RIPPED`; encoding/organization continues in background
+- Notifications (ntfy) fire at major milestones (`RIPPED`, `COMPLETED`, errors)
 
 
 ## Troubleshooting
@@ -103,6 +152,10 @@ ls -la /media/cdrom /media/cdrom0
 - **Disc not ejecting**: Check logs for ripping errors (only successful rips eject)
 - **Stuck identifying**: Verify TMDB API key and disc mounting
 - **Poor identification**: Generic disc labels reduce accuracy
+- **TMDB rate limits**: Retry later or delete cached entries (`rm ~/.local/share/spindle/logs/tmdb_cache.db`)
+- **Cache confusion**: Inspect cache DBs under `~/.local/share/spindle/logs/`
+
+See [docs/content-identification.md](docs/content-identification.md) for deeper analyzer diagnostics.
 
 ## Features
 
@@ -113,4 +166,10 @@ ls -la /media/cdrom /media/cdrom0
 
 ## Development
 
-For development setup, testing, and contribution guidelines, see [docs/development.md](docs/development.md).
+Run `uv pip install -e ".[dev]"` once, then rely on `uv run` for tooling. Before committing, execute:
+
+```bash
+./check-ci.sh
+```
+
+It runs pytest with coverage, `black --check`, `ruff`, `uv build`, and `twine check`. See [docs/development.md](docs/development.md) for maintainer notes.
