@@ -1,115 +1,148 @@
-"""Test disc processing coordination."""
+"""Tests for the simplified disc handler."""
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import ANY, AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from spindle.components.disc_handler import DiscHandler
+from spindle.disc.analyzer import DiscAnalysisResult
+from spindle.disc.monitor import DiscInfo
+from spindle.services.tmdb import MediaInfo
 from spindle.storage.queue import QueueItem, QueueItemStatus
 from spindle.config import SpindleConfig
 
 
-class TestDiscHandler:
-    """Test DiscHandler functionality."""
+@pytest.fixture
+def config(tmp_path: Path) -> SpindleConfig:
+    return SpindleConfig(
+        staging_dir=tmp_path / "staging",
+        tmdb_api_key="test",
+        enable_enhanced_disc_metadata=False,
+    )
 
-    @pytest.fixture
-    def config(self, tmp_path):
-        """Create test configuration."""
-        return SpindleConfig(staging_dir=tmp_path / "staging")
 
-    @pytest.fixture
-    def handler(self, config):
-        """Create disc handler instance."""
-        with patch('spindle.components.disc_handler.IntelligentDiscAnalyzer') as mock_analyzer, \
-             patch('spindle.components.disc_handler.TVSeriesDiscAnalyzer') as mock_tv, \
-             patch('spindle.components.disc_handler.SimpleMultiDiscManager') as mock_multi, \
-             patch('spindle.components.disc_handler.MakeMKVService') as mock_ripper, \
-             patch('spindle.components.disc_handler.TMDBService') as mock_tmdb:
+@pytest.fixture
+def handler(config: SpindleConfig) -> DiscHandler:
+    with patch("spindle.components.disc_handler.IntelligentDiscAnalyzer") as analyzer_cls, \
+         patch("spindle.components.disc_handler.MakeMKVService") as makemkv_cls:
 
-            handler = DiscHandler(config)
-            handler.queue_manager = Mock()
+        analyzer = analyzer_cls.return_value
+        analyzer.analyze_disc = AsyncMock()
 
-            # Configure the mock instances
-            handler.disc_analyzer.analyze_disc = AsyncMock()
-            handler.tv_analyzer.analyze_tv_disc = AsyncMock()
-            handler.multi_disc_manager.detect_multi_disc_series = AsyncMock()
-            handler.ripper.rip_disc = AsyncMock()
-            handler.ripper.scan_disc = AsyncMock(
-                return_value={
-                    "titles": [Mock()],
-                    "fingerprint": "ABCDEF1234567890",
-                    "makemkv_output": 'CINFO:32,0,"ABCDEF1234567890"',
+        ripper = makemkv_cls.return_value
+        ripper.scan_disc = AsyncMock(
+            return_value={
+                "titles": [],
+                "fingerprint": "f1",
+                "makemkv_output": "",
+            },
+        )
+        ripper.rip_disc = AsyncMock(return_value=[Path("/tmp/output.mkv")])
+
+        disc_handler = DiscHandler(config)
+        disc_handler.queue_manager = Mock()
+
+        return disc_handler
+
+
+@pytest.mark.asyncio
+async def test_identify_disc_sets_review_when_unmatched(handler: DiscHandler):
+    item = QueueItem(item_id=1, disc_title="Unknown Disc")
+    disc_info = DiscInfo(device="/dev/sr0", disc_type="blu-ray", label="UNKNOWN")
+
+    handler.disc_analyzer.analyze_disc.return_value = DiscAnalysisResult(
+        disc_info=disc_info,
+        primary_title="UNKNOWN",
+        content_type="movie",
+        confidence=0.5,
+        titles_to_rip=[],
+        commentary_tracks={},
+        episode_mappings={},
+        media_info=None,
+        runtime_hint=None,
+    )
+
+    await handler.identify_disc(item, disc_info)
+
+    assert item.status == QueueItemStatus.REVIEW
+    assert item.error_message == "Identification requires manual review"
+
+
+@pytest.mark.asyncio
+async def test_identify_disc_success(handler: DiscHandler):
+    item = QueueItem(item_id=1, disc_title="Test Disc")
+    disc_info = DiscInfo(device="/dev/sr0", disc_type="blu-ray", label="TEST_DISC")
+
+    media_info = MediaInfo(title="Test Movie", year=2020, media_type="movie", tmdb_id=1)
+    analysis_result = DiscAnalysisResult(
+        disc_info=disc_info,
+        primary_title="Test Movie",
+        content_type="movie",
+        confidence=0.8,
+        titles_to_rip=[],
+        commentary_tracks={},
+        episode_mappings={},
+        media_info=media_info,
+        runtime_hint=120,
+    )
+
+    handler.disc_analyzer.analyze_disc.return_value = analysis_result
+
+    await handler.identify_disc(item, disc_info)
+
+    assert item.status == QueueItemStatus.IDENTIFIED
+    assert item.media_info.title == "Test Movie"
+
+
+@pytest.mark.asyncio
+async def test_rip_identified_item(handler: DiscHandler, tmp_path: Path):
+    rip_spec_data = {
+        "analysis_result": {
+            "content_type": "movie",
+            "confidence": 0.8,
+            "primary_title": "Test",
+            "titles_to_rip": [
+                {
+                    "title_id": "1",
+                    "name": "Title 1",
+                    "duration": 3600,
+                    "chapters": 20,
+                    "commentary_track_ids": [],
                 },
-            )
-            handler.tmdb_service.identify_media = AsyncMock()
+            ],
+            "episode_mappings": {},
+        },
+        "disc_info": {
+            "label": "TEST",
+            "device": "/dev/sr0",
+            "disc_type": "blu-ray",
+            "fingerprint": "f1",
+        },
+        "media_info": {
+            "title": "Test Movie",
+            "year": 2020,
+            "media_type": "movie",
+            "tmdb_id": 1,
+        },
+        "commentary_tracks": {},
+        "is_multi_disc": False,
+    }
 
-            return handler
+    item = QueueItem(
+        item_id=1,
+        disc_title="Test",
+        rip_spec_data=json.dumps(rip_spec_data),
+    )
 
-    @pytest.mark.asyncio
-    async def test_identify_disc_calls_components(self, handler):
-        """Test disc identification calls required components."""
-        item = QueueItem(item_id=1, disc_title="Test Movie")
-        disc_info = Mock(device="/dev/sr0", label="MOVIE_DISC")
+    handler.queue_manager = Mock()
 
-        # Mock analysis to return None (analysis failed)
-        handler.disc_analyzer.analyze_disc.return_value = None
+    with patch("spindle.components.disc_handler.eject_disc") as eject_mock:
+        await handler.rip_identified_item(item)
 
-        # This should cause the function to raise an exception
-        with pytest.raises(Exception):
-            await handler.identify_disc(item, disc_info)
-
-        # Verify the analyzer was called
-        handler.disc_analyzer.analyze_disc.assert_called_once_with(
-            disc_info,
-            ANY,
-            makemkv_output=ANY,
-        )
-
-        # Verify item status was set to failed
-        assert item.status == QueueItemStatus.FAILED
-
-    @pytest.mark.asyncio
-    async def test_identify_disc_failure(self, handler):
-        """Test disc identification failure handling."""
-        item = QueueItem(item_id=1, disc_title="Test Movie")
-        disc_info = Mock(device="/dev/sr0")
-
-        handler.disc_analyzer.analyze_disc.side_effect = Exception("Analysis failed")
-
-        with pytest.raises(Exception):
-            await handler.identify_disc(item, disc_info)
-
-        assert item.status == QueueItemStatus.FAILED
-        assert "Analysis failed" in item.error_message
-
-    @pytest.mark.asyncio
-    async def test_rip_calls_ripper(self, handler):
-        """Test rip calls MakeMKV ripper."""
-        # Create simple valid JSON for rip spec
-        rip_spec_data = {
-            "disc_info": {"device": "/dev/sr0", "label": "TEST"},
-            "analysis_result": {"titles_to_rip": [{"index": 1}], "episode_mappings": {}},
-            "media_info": {"title": "Test Movie"},
-        }
-        item = QueueItem(
-            item_id=1,
-            disc_title="Test Movie",
-            rip_spec_data=json.dumps(rip_spec_data)
-        )
-        item.media_info = Mock()
-
-        mock_files = [Path("/tmp/test.mkv")]
-        handler.ripper.rip_disc.return_value = mock_files
-
-        with patch('spindle.components.disc_handler.eject_disc') as mock_eject:
-            await handler.rip_identified_item(item)
-
-        # Verify ripper was called
-        handler.ripper.rip_disc.assert_called_once()
-        mock_eject.assert_called_once_with("/dev/sr0")
-
-        # Verify final status
-        assert item.status == QueueItemStatus.RIPPED
-        assert item.ripped_file == mock_files[0]
+    handler.ripper.rip_disc.assert_awaited_once()
+    eject_mock.assert_called_once()
+    assert item.status == QueueItemStatus.RIPPED

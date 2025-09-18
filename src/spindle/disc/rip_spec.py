@@ -36,6 +36,9 @@ class RipSpec:
     # Media identification
     media_info: MediaInfo | None = None
 
+    # Commentary selection
+    commentary_tracks: dict[str, list[str]] = field(default_factory=dict)
+
     # Processing configuration
     disc_path: Path | None = None
     device: str | None = None
@@ -81,6 +84,16 @@ class RipSpec:
     def processing_duration(self) -> float:
         """Get processing duration in seconds."""
         return time.time() - self.start_time
+
+    @property
+    def commentary_track_map(self) -> dict[str, list[str]]:
+        """Convenience accessor for commentary tracks selected during analysis."""
+        if self.commentary_tracks:
+            return self.commentary_tracks
+
+        if isinstance(self.analysis_result, dict):
+            return self.analysis_result.get("commentary_tracks", {})
+        return {}
 
     def get_title_candidates(self) -> list[str]:
         """Get title candidates for identification."""

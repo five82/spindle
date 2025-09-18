@@ -1,60 +1,96 @@
-"""Test TMDB service wrapper."""
+"""Tests for the simplified TMDB service."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
 
 import pytest
-from unittest.mock import Mock, AsyncMock
 
-from spindle.services.tmdb import TMDBService
 from spindle.config import SpindleConfig
+from spindle.services.tmdb import TMDBService
 
 
-class TestTMDBService:
-    """Test TMDBService functionality."""
+@pytest.fixture
+def config(tmp_path):
+    return SpindleConfig(
+        staging_dir=tmp_path / "staging",
+        tmdb_api_key="dummy",
+        enable_enhanced_disc_metadata=False,
+    )
 
-    @pytest.fixture
-    def config(self, tmp_path):
-        """Create test configuration."""
-        return SpindleConfig(
-            staging_dir=tmp_path / "staging",
-            tmdb_api_key="test_api_key"
-        )
 
-    @pytest.fixture
-    def service(self, config):
-        """Create TMDB service instance."""
-        return TMDBService(config)
+@pytest.mark.asyncio
+async def test_identify_media_movie(config):
+    service = TMDBService(config)
 
-    @pytest.mark.asyncio
-    async def test_identify_media_calls_tmdb_api(self, service):
-        """Test media identification calls TMDB API."""
-        # Should call underlying MediaIdentifier but may fail with test config
-        try:
-            result = await service.identify_media("Test Movie", "movie")
-            # If successful, result should be MediaInfo or None
-            assert result is None or hasattr(result, 'title')
-        except Exception as e:
-            # Expected to fail with test config - verify it's trying to call identifier
-            assert "identify_movie" in str(e) or "API" in str(e)
+    async def fake_request(endpoint, params):
+        if endpoint == "/search/movie":
+            return {"results": [{"id": 1, "title": "Example"}]}
+        if endpoint == "/movie/1":
+            return {
+                "title": "Example",
+                "release_date": "2020-01-01",
+                "overview": "",
+                "genres": [],
+                "runtime": 110,
+            }
+        return {}
 
-    @pytest.mark.asyncio
-    async def test_identify_media_with_year(self, service):
-        """Test media identification with year parameter."""
-        # Should call underlying MediaIdentifier but may fail with test config
-        try:
-            result = await service.identify_media("Test Movie", "movie", year=2023)
-            assert result is None or hasattr(result, 'title')
-        except Exception as e:
-            # Expected to fail with test config - verify it's trying to call identifier
-            assert "identify_movie" in str(e) or "API" in str(e)
+    service._request = AsyncMock(side_effect=fake_request)
 
-    @pytest.mark.asyncio
-    async def test_identify_tv_series(self, service):
-        """Test TV series identification."""
-        # Should handle TV content type (may log warning for unknown type)
-        result = await service.identify_media("Test Series", "tv")
-        # Currently returns None for unknown content types
-        assert result is None
+    media_info = await service.identify_media("Example", "movie")
+    assert media_info is not None
+    assert media_info.title == "Example"
+    assert media_info.media_type == "movie"
+    assert media_info.confidence > 0
 
-    def test_service_initialization(self, service, config):
-        """Test service initializes with config."""
-        assert service.config == config
-        assert service.config.tmdb_api_key == "test_api_key"
+
+@pytest.mark.asyncio
+async def test_identify_media_tv(config):
+    service = TMDBService(config)
+
+    async def fake_request(endpoint, params):
+        if endpoint == "/search/tv":
+            return {"results": [{"id": 5, "name": "Example Show"}]}
+        if endpoint == "/tv/5":
+            return {
+                "name": "Example Show",
+                "first_air_date": "2010-01-01",
+                "overview": "",
+                "episode_run_time": [45],
+                "genres": [],
+                "number_of_seasons": 2,
+                "seasons": [
+                    {"season_number": 1},
+                    {"season_number": 2},
+                ],
+            }
+        if endpoint == "/tv/5/season/1":
+            return {
+                "episodes": [
+                    {
+                        "season_number": 1,
+                        "episode_number": 1,
+                        "name": "Pilot",
+                        "runtime": 44,
+                    },
+                ],
+            }
+        return {}
+
+    service._request = AsyncMock(side_effect=fake_request)
+
+    media_info = await service.identify_media("Example Show", "tv", season_hint=1)
+    assert media_info is not None
+    assert media_info.media_type == "tv"
+    assert media_info.season == 1
+    assert media_info.episodes
+
+
+@pytest.mark.asyncio
+async def test_identify_media_empty_results(config):
+    service = TMDBService(config)
+    service._request = AsyncMock(return_value={"results": []})
+
+    media_info = await service.identify_media("Missing", "movie")
+    assert media_info is None

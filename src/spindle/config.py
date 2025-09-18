@@ -67,6 +67,7 @@ class SpindleConfig(BaseModel):
     use_intelligent_disc_analysis: bool = Field(default=True)
     confidence_threshold: float = Field(default=0.7)
     prefer_api_over_heuristics: bool = Field(default=True)
+    enable_enhanced_disc_metadata: bool = Field(default=True)
 
     # Audio Track Selection
     include_all_english_audio: bool = Field(default=True)
@@ -237,6 +238,7 @@ use_intelligent_disc_analysis = true              # Enable AI-powered content de
 confidence_threshold = 0.7                        # Minimum confidence for automatic classification (0.0-1.0)
 tmdb_confidence_threshold = 0.8                   # Minimum confidence for TMDB disambiguation (0.0-1.0)
 prefer_api_over_heuristics = true                 # Prioritize TMDB data over pattern analysis
+enable_enhanced_disc_metadata = true              # Run bd_info/bdmt metadata extraction when titles look generic
 
 # Media Duration Filtering (minutes)
 tv_episode_min_duration = 18                      # Minimum episode length
