@@ -207,6 +207,39 @@ class MakeMKVRipper:
             msg = f"{msg} failed with exit code {e.returncode}: {e}"
             raise ToolError(msg)
 
+    def extract_disc_fingerprint(self, output: str) -> str | None:
+        """Extract MakeMKV's disc fingerprint from raw scan output."""
+        if not output:
+            return None
+
+        fingerprint_pattern = re.compile(r"[0-9A-Fa-f]{16,}")
+
+        for line in output.splitlines():
+            if "fingerprint" in line.lower():
+                match = fingerprint_pattern.search(line)
+                if match:
+                    return match.group(0).upper()
+
+        for line in output.splitlines():
+            if not line.startswith("CINFO:"):
+                continue
+
+            parts = line.split(",", 2)
+            if len(parts) < 3:
+                continue
+
+            try:
+                cinfo_type = parts[0].split(":", 1)[1]
+            except IndexError:
+                continue
+
+            value = parts[2].strip().strip('"')
+
+            if cinfo_type == "32" and fingerprint_pattern.fullmatch(value):
+                return value.upper()
+
+        return None
+
     def _extract_makemkv_error(self, output: str) -> str:
         """Extract a clean error message from MakeMKV MSG output."""
         for line in output.strip().split("\n"):

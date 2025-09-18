@@ -26,21 +26,32 @@ class MakeMKVService:
         try:
             logger.info(f"Scanning disc: {device}")
 
-            # Fix: MakeMKVRipper.scan_disc is synchronous, run in executor
-            scan_result = await asyncio.get_running_loop().run_in_executor(
+            loop = asyncio.get_running_loop()
+            titles, raw_output = await loop.run_in_executor(
                 None,
-                self.ripper.scan_disc,
+                self.ripper.scan_disc_with_output,
                 device,
             )
 
-            if not scan_result:
+            if not titles:
                 msg = "MakeMKV disc scan failed"
+                raise RuntimeError(msg)
+
+            fingerprint = self.ripper.extract_disc_fingerprint(raw_output)
+            if not fingerprint:
+                logger.critical(
+                    "MakeMKV did not return a disc fingerprint for %s",
+                    device,
+                )
+                msg = "MakeMKV did not provide a disc fingerprint"
                 raise RuntimeError(msg)
 
             return {
                 "device": device,
-                "titles": scan_result,  # scan_result is already a list of Title objects
+                "titles": titles,
                 "disc_info": {"device": device},
+                "fingerprint": fingerprint,
+                "makemkv_output": raw_output,
             }
 
         except Exception as e:

@@ -159,6 +159,7 @@ SQLite-based queue system with clean workflow separation:
 - **Real-time progress tracking**: Stage, percentage, and detailed messages
 - **Database migrations**: Automatic schema evolution with version management
 - **Thread-safe operations**: Concurrent access support
+- **Disc fingerprinting**: Stores a MakeMKV-provided fingerprint per queue item for duplicate detection and resume groundwork
 
 ### Enhanced Error Handling (error_handling.py)
 

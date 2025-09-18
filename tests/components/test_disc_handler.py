@@ -1,9 +1,10 @@
 """Test disc processing coordination."""
 
 import json
-import pytest
 from pathlib import Path
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
+
+import pytest
 
 from spindle.components.disc_handler import DiscHandler
 from spindle.storage.queue import QueueItem, QueueItemStatus
@@ -35,6 +36,13 @@ class TestDiscHandler:
             handler.tv_analyzer.analyze_tv_disc = AsyncMock()
             handler.multi_disc_manager.detect_multi_disc_series = AsyncMock()
             handler.ripper.rip_disc = AsyncMock()
+            handler.ripper.scan_disc = AsyncMock(
+                return_value={
+                    "titles": [Mock()],
+                    "fingerprint": "ABCDEF1234567890",
+                    "makemkv_output": 'CINFO:32,0,"ABCDEF1234567890"',
+                },
+            )
             handler.tmdb_service.identify_media = AsyncMock()
 
             return handler
@@ -53,7 +61,11 @@ class TestDiscHandler:
             await handler.identify_disc(item, disc_info)
 
         # Verify the analyzer was called
-        handler.disc_analyzer.analyze_disc.assert_called_once_with("/dev/sr0")
+        handler.disc_analyzer.analyze_disc.assert_called_once_with(
+            disc_info,
+            ANY,
+            makemkv_output=ANY,
+        )
 
         # Verify item status was set to failed
         assert item.status == QueueItemStatus.FAILED

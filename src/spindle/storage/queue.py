@@ -4,7 +4,7 @@ import json
 import logging
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -52,6 +52,7 @@ class QueueItem:
         progress_percent: float = 0.0,
         progress_message: str | None = None,
         rip_spec_data: dict | None = None,
+        disc_fingerprint: str | None = None,
     ):
         self.item_id = item_id
         self.source_path = source_path
@@ -68,6 +69,7 @@ class QueueItem:
         self.progress_percent = progress_percent
         self.progress_message = progress_message
         self.rip_spec_data = rip_spec_data
+        self.disc_fingerprint = disc_fingerprint
 
     def __str__(self) -> str:
         if self.media_info:
@@ -123,7 +125,7 @@ class QueueManager:
                     """SELECT id, source_path, disc_title, status, media_info_json,
                        ripped_file, encoded_file, final_file, error_message,
                        created_at, updated_at, progress_stage, progress_percent,
-                       progress_message, rip_spec_data
+                       progress_message, rip_spec_data, disc_fingerprint
                        FROM queue_items LIMIT 0""",
                 )
             except sqlite3.OperationalError:
@@ -156,7 +158,8 @@ class QueueManager:
                     progress_stage TEXT,
                     progress_percent REAL DEFAULT 0.0,
                     progress_message TEXT,
-                    rip_spec_data TEXT
+                    rip_spec_data TEXT,
+                    disc_fingerprint TEXT
                 )
                 """,
             )
@@ -164,6 +167,20 @@ class QueueManager:
             # Create index on status for faster queries
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status)",
+            )
+
+            # Ensure fingerprint column exists on legacy databases
+            with suppress(sqlite3.OperationalError):
+                conn.execute(
+                    "ALTER TABLE queue_items ADD COLUMN disc_fingerprint TEXT",
+                )
+
+            # Create index for fingerprint lookups
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_queue_disc_fingerprint
+                ON queue_items(disc_fingerprint)
+                """,
             )
 
             conn.commit()
@@ -177,19 +194,25 @@ class QueueManager:
         self._ensure_schema()
         logger.info("Queue database reset")
 
-    def add_disc(self, disc_title: str) -> QueueItem:
+    def add_disc(
+        self,
+        disc_title: str,
+        *,
+        disc_fingerprint: str | None = None,
+    ) -> QueueItem:
         """Add a disc to the queue."""
         item = QueueItem(
             disc_title=disc_title,
             status=QueueItemStatus.PENDING,
+            disc_fingerprint=disc_fingerprint,
         )
 
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO queue_items (disc_title, status, created_at, updated_at,
-                    progress_stage, progress_percent, progress_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    progress_stage, progress_percent, progress_message, disc_fingerprint)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     disc_title,
@@ -199,6 +222,7 @@ class QueueManager:
                     item.progress_stage,
                     item.progress_percent,
                     item.progress_message,
+                    disc_fingerprint,
                 ),
             )
 
@@ -219,9 +243,9 @@ class QueueManager:
                 """
                 INSERT INTO queue_items (
                     source_path, status, ripped_file, created_at, updated_at,
-                    progress_stage, progress_percent, progress_message
+                    progress_stage, progress_percent, progress_message, disc_fingerprint
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     str(source_path),
@@ -232,6 +256,7 @@ class QueueManager:
                     item.progress_stage,
                     item.progress_percent,
                     item.progress_message,
+                    None,
                 ),
             )
 
@@ -274,7 +299,8 @@ class QueueManager:
                 SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
                     ripped_file = ?, encoded_file = ?, final_file = ?,
                     error_message = ?, updated_at = ?, progress_stage = ?,
-                    progress_percent = ?, progress_message = ?, rip_spec_data = ?
+                    progress_percent = ?, progress_message = ?, rip_spec_data = ?,
+                    disc_fingerprint = ?
                 WHERE id = ?
             """,
                 (
@@ -291,6 +317,7 @@ class QueueManager:
                     item.progress_percent,
                     item.progress_message,
                     rip_spec_json,
+                    item.disc_fingerprint,
                     item.item_id,
                 ),
             )
@@ -374,7 +401,30 @@ class QueueManager:
                 logger.info("Removed item %s from queue", item_id)
                 return True
 
-            return False
+        return False
+
+    def find_by_fingerprint(self, fingerprint: str) -> QueueItem | None:
+        """Find the most recent queue item matching the given fingerprint."""
+        if not fingerprint:
+            return None
+
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT * FROM queue_items
+                WHERE disc_fingerprint = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (fingerprint,),
+            )
+
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            return self._row_to_item(row)
 
     def clear_completed(self) -> int:
         """Remove all completed items from the queue."""
@@ -526,6 +576,7 @@ class QueueManager:
                         "progress_percent",
                         "progress_message",
                         "rip_spec_data",
+                        "disc_fingerprint",
                     }
 
                     health_info["columns_present"] = list(existing_columns)
@@ -615,4 +666,5 @@ class QueueManager:
             progress_percent=progress_percent,
             progress_message=progress_message,
             rip_spec_data=rip_spec_data,
+            disc_fingerprint=row["disc_fingerprint"],
         )

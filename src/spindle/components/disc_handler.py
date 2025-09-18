@@ -29,7 +29,13 @@ class DiscHandler:
         self.tmdb_service = TMDBService(config)
         self.queue_manager = None  # Will be injected by orchestrator
 
-    async def identify_disc(self, item: QueueItem, disc_info: DiscInfo) -> None:
+    async def identify_disc(
+        self,
+        item: QueueItem,
+        disc_info: DiscInfo,
+        *,
+        scan_result: dict | None = None,
+    ) -> None:
         """Identify disc content and prepare rip specification."""
         try:
             logger.info(f"Starting identification for: {item}")
@@ -40,13 +46,37 @@ class DiscHandler:
             item.progress_percent = 0
             self.queue_manager.update_item(item)
 
+            if scan_result is None:
+                item.progress_message = "Scanning disc with MakeMKV"
+                self.queue_manager.update_item(item)
+                scan_result = await self.ripper.scan_disc(disc_info.device)
+
+            titles = scan_result.get("titles", [])
+            fingerprint = scan_result.get("fingerprint")
+
+            if not fingerprint:
+                logger.critical(
+                    "MakeMKV did not provide a disc fingerprint for %s",
+                    disc_info.device,
+                )
+                msg = "MakeMKV did not provide a disc fingerprint"
+                raise MediaError(msg)
+
+            if item.disc_fingerprint != fingerprint:
+                item.disc_fingerprint = fingerprint
+                self.queue_manager.update_item(item)
+
             # Analyze disc content
             logger.info("Analyzing disc content...")
             item.progress_percent = 20
             item.progress_message = "Scanning disc titles"
             self.queue_manager.update_item(item)
 
-            analysis_result = await self.disc_analyzer.analyze_disc(disc_info.device)
+            analysis_result = await self.disc_analyzer.analyze_disc(
+                disc_info,
+                titles,
+                makemkv_output=scan_result.get("makemkv_output"),
+            )
 
             if not analysis_result:
                 msg = "Failed to analyze disc content"
@@ -113,6 +143,7 @@ class DiscHandler:
                     "label": disc_info.label,
                     "device": disc_info.device,
                     "disc_type": disc_info.disc_type,
+                    "fingerprint": fingerprint,
                 },
                 "media_info": media_info.to_dict(),
                 "is_multi_disc": False,  # Will be updated by multi-disc manager

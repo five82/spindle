@@ -48,6 +48,21 @@ class TestQueueManager:
         assert stats["pending"] == 1
         assert stats["completed"] == 1
 
+    def test_add_disc_with_fingerprint(self, manager):
+        """Adding a disc stores the fingerprint for future lookups."""
+        fingerprint = "ABCDEF1234567890"
+        item = manager.add_disc("Fingerprint Test", disc_fingerprint=fingerprint)
+
+        assert item.disc_fingerprint == fingerprint
+
+        fetched = manager.find_by_fingerprint(fingerprint)
+        assert fetched is not None
+        assert fetched.item_id == item.item_id
+
+    def test_find_by_fingerprint_handles_missing(self, manager):
+        """Unknown fingerprints return no queue item."""
+        assert manager.find_by_fingerprint("UNKNOWN") is None
+
     def test_reset_stuck_items(self, manager):
         """Test resetting stuck processing items."""
         item = manager.add_disc("Test Movie")

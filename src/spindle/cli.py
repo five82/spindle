@@ -494,6 +494,7 @@ def queue_list(ctx: click.Context) -> None:
     table.add_column("Title")
     table.add_column("Status")
     table.add_column("Created")
+    table.add_column("Fingerprint")
 
     for item in items:
         title = item.disc_title or (
@@ -502,11 +503,16 @@ def queue_list(ctx: click.Context) -> None:
         if item.media_info:
             title = str(item.media_info)
 
+        fingerprint = item.disc_fingerprint or "-"
+        if fingerprint != "-":
+            fingerprint = fingerprint[:12]
+
         table.add_row(
             str(item.item_id),
             title,
             item.status.value.title(),
             item.created_at.strftime("%Y-%m-%d %H:%M"),
+            fingerprint,
         )
 
     console.print(table)
@@ -725,6 +731,7 @@ def format_queue_table(queue_items: list) -> Table:
     table.add_column("Title")
     table.add_column("Status")
     table.add_column("Created")
+    table.add_column("Fingerprint")
 
     for item in queue_items:
         title = item.disc_title or (
@@ -733,11 +740,16 @@ def format_queue_table(queue_items: list) -> Table:
         if item.media_info:
             title = str(item.media_info)
 
+        fingerprint = item.disc_fingerprint or "-"
+        if fingerprint != "-":
+            fingerprint = fingerprint[:12]
+
         table.add_row(
             str(item.item_id),
             title,
             item.status.value.title(),
             item.created_at.strftime("%Y-%m-%d %H:%M"),
+            fingerprint,
         )
 
     return table
