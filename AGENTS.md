@@ -38,8 +38,8 @@ High-level modules you will touch most often:
 - **Core orchestration**: `core/daemon.py`, `core/orchestrator.py`, `core/workflow.py`
 - **Process guardrails**: `process_manager.py` (single-instance enforcement) and `system_check.py` (dependency validation)
 - **Components**: `components/disc_handler.py`, `components/encoder.py`, `components/organizer.py`
-- **Services**: `services/makemkv.py`, `services/drapto.py`, `services/tmdb.py`, `services/tmdb_cache.py`, `services/plex.py`, `services/ntfy.py`
-- **Storage**: `storage/queue.py` (SQLite queue, schema auto-heals) and `storage/cache.py`
+- **Services**: `services/makemkv.py`, `services/drapto.py`, `services/tmdb.py`, `services/plex.py`, `services/ntfy.py`
+- **Storage**: `storage/queue.py` (SQLite queue, schema auto-heals)
 - **Legacy layer kept for low-level operations**: `disc/`
 - **CLI and config**: `cli.py`, `config.py`
 - **Error surface**: `error_handling.py`
@@ -87,7 +87,7 @@ Formatting (`black`) and linting (`ruff`) are enforced by `./check-ci.sh`; let t
 ## Debugging & Troubleshooting
 
 - **Disc issues**: Verify mounts and MakeMKV availability. `disc/` helpers and `components/disc_handler.py` give visibility.
-- **Identification stalls**: Inspect TMDB configuration and cached state (`services/tmdb_cache.py`).
+- **Identification stalls**: Inspect TMDB configuration and recent analyzer logs.
 - **Encoding hiccups**: Drapto integration streams JSON progress (`services/drapto.py`). Capture progress logs before retrying.
 - **Queue visibility**: `sqlite3 path/to/queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'` is often faster than adding debug prints.
 - **Single instance conflicts**: `process_manager.py` prevents duplicate daemons; ensure you do not spawn workarounds that bypass it.

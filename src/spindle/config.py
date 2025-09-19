@@ -23,8 +23,7 @@ class SpindleConfig(BaseModel):
     tmdb_api_key: str | None = None
     tmdb_language: str = Field(default="en-US")
 
-    # TMDB Cache Settings
-    tmdb_cache_ttl_days: int = Field(default=30)
+    # TMDB identification tuning
     tmdb_runtime_tolerance_minutes: int = Field(default=5)
     tmdb_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
 

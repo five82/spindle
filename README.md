@@ -153,8 +153,7 @@ ls -la /media/cdrom /media/cdrom0
 - **Disc not ejecting**: Check logs for ripping errors (only successful rips eject)
 - **Stuck identifying**: Verify TMDB API key and disc mounting
 - **Poor identification**: Generic disc labels reduce accuracy
-- **TMDB rate limits**: Retry later or delete cached entries (`rm ~/.local/share/spindle/logs/tmdb_cache.db`)
-- **Cache confusion**: Inspect cache DBs under `~/.local/share/spindle/logs/`
+- **TMDB rate limits**: Retry later; the daemon will back off and recover on its own
 
 See [docs/content-identification.md](docs/content-identification.md) for deeper analyzer diagnostics.
 

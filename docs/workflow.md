@@ -90,7 +90,7 @@ Logs also live in `<log_dir>/spindle.log` and `<log_dir>/queue.db` (the queue da
 - **Staging**: `<staging_dir>/ripped/` for MakeMKV output, `<staging_dir>/encoded/` for Drapto output while waiting on organization.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in the config.
 - **Review**: `<review_dir>/` holds items that need manual intervention.
-- **Logs & caches**: `<log_dir>/` keeps `spindle.log`, the queue database, and metadata caches (TMDB, series cache).
+- **Logs & diagnostics**: `<log_dir>/` keeps `spindle.log`, the queue database, and analyzer/debug artifacts.
 
 ## Notifications
 

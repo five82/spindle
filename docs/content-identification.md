@@ -8,7 +8,7 @@ Reference notes for how Spindle currently classifies discs and prepares metadata
 2. **IntelligentDiscAnalyzer** (`disc/analyzer.py`) infers whether the disc is a movie or TV set, selects titles to rip, and estimates confidence.
 3. **Optional enhanced metadata** from `EnhancedDiscMetadataExtractor` overlays extra hints when disc labels look generic and a mounted filesystem is available.
 4. **TMDB lookup** (`services/tmdb.py`) runs once per disc with runtime/season hints to return `MediaInfo` for naming and library organization.
-5. **Series metadata cache** (`disc/series_cache.py`) can reuse TMDB matches across discs but does not require any particular order or timing.
+5. A lightweight in-memory cache inside `services/tmdb.py` prevents duplicate lookups during a daemon session.
 
 ## Disc Analysis Details
 
@@ -29,7 +29,7 @@ Enabled when `enable_enhanced_disc_metadata` is true and we have a mounted `disc
 - Single async call via `TMDBService.identify_media(query, content_type, runtime_hint, season_hint)`.
 - Query uses the cleaned label from MakeMKV/enhanced metadata; runtime and season hints narrow results.
 - Results populate `DiscAnalysisResult.media_info` (title/year/season/episode) and bump confidence.
-- Local in-memory cache handles duplicate lookups inside a run; persistent caching lives in `services/tmdb_cache.py` (see below).
+- Local in-memory cache handles duplicate lookups inside a run; there is no persistent cache on disk.
 
 ### Output (`DiscAnalysisResult`)
 Returned to the orchestrator and persisted in `rip_spec_data`:
@@ -43,27 +43,6 @@ Returned to the orchestrator and persisted in `rip_spec_data`:
 - `runtime_hint`: minutes, used later for TMDB refinements
 - `enhanced_metadata`: raw metadata object for downstream consumers
 
-## Series Metadata Notes
-
-`disc/series_cache.py` stores optional TMDB metadata so later discs from the same show can reuse naming hints. The cache never blocks the pipeline: every disc is scanned, identified, and processed independently, even if other discs arrive out of order or days apart.
-
-## Caching Overview
-
-`storage/cache.py` exposes a single `SpindleCache` that owns two SQLite-backed stores:
-
-- **TMDB cache** (`services/tmdb_cache.py`)
-  - Keyed by query + media type hash.
-  - Stores both search payloads and detailed media info.
-  - TTL defaults to `tmdb_cache_ttl_days`; `cleanup_expired()` prunes stale rows.
-  - Use `tmdb_cache.get_stats()` for counts and size.
-
-- **Series cache** (`disc/series_cache.py`)
-  - Tracks show/season metadata for optional naming reuse.
-  - TTL defaults to `series_cache_ttl_days` (configurable).
-  - Provides `get_series_metadata`, `cache_series_metadata`, and maintenance helpers.
-
-When caches drift, call `SpindleCache.clear_all()` or use the CLI command once exposed. Document any new cache fields here.
-
 ## Configuration Knobs
 
 All settings live in `config.py`; key fields affecting identification:
@@ -72,7 +51,6 @@ All settings live in `config.py`; key fields affecting identification:
 - `tv_episode_min_duration` / `tv_episode_max_duration`: seconds bounds for TV clustering.
 - `include_extras`, `max_extras_to_rip`, `max_extras_duration`: movie/TV extras policy.
 - `include_commentary_tracks`, `max_commentary_tracks`: commentary behavior.
-- `tmdb_cache_ttl_days`, `series_cache_ttl_days`: cache retention.
 - `tmdb_runtime_tolerance_minutes`, `tmdb_confidence_threshold`: heuristics for TMDB matches.
 
 Keep the table in sync when adding new config fields so future changes are discoverable.
@@ -89,7 +67,6 @@ Keep the table in sync when adding new config fields so future changes are disco
 - **Generic titles**: Check enhanced metadata output (logged at debug level) to confirm the disc is mounted and bd_info ran. Configure `enable_enhanced_disc_metadata` and ensure the binary is in PATH.
 - **TV detection misses**: Adjust `tv_episode_min/max_duration` or inspect durations in the log (look for clustered lengths). TV mode requires ≥3 candidates by default.
 - **Bad TMDB matches**: Inspect `DiscAnalysisResult.primary_title` and the hint data; consider adding custom cleaning rules or forcing year hints.
-- **Cache confusion**: `sqlite3 ~/.local/share/spindle/logs/tmdb_cache.db "SELECT query FROM tmdb_cache;"` and the equivalent `series_cache.db` commands help diagnose stale entries.
 
 ## Future Notes
 
