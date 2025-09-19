@@ -8,7 +8,7 @@ Reference notes for how Spindle currently classifies discs and prepares metadata
 2. **IntelligentDiscAnalyzer** (`disc/analyzer.py`) infers whether the disc is a movie or TV set, selects titles to rip, and estimates confidence.
 3. **Optional enhanced metadata** from `EnhancedDiscMetadataExtractor` overlays extra hints when disc labels look generic and a mounted filesystem is available.
 4. **TMDB lookup** (`services/tmdb.py`) runs once per disc with runtime/season hints to return `MediaInfo` for naming and library organization.
-5. **Series/multi-disc context** is cached so later discs in the same set inherit the same mapping (`disc/multi_disc.py`, `disc/series_cache.py`).
+5. **Series metadata cache** (`disc/series_cache.py`) can reuse TMDB matches across discs but does not require any particular order or timing.
 
 ## Disc Analysis Details
 
@@ -43,18 +43,9 @@ Returned to the orchestrator and persisted in `rip_spec_data`:
 - `runtime_hint`: minutes, used later for TMDB refinements
 - `enhanced_metadata`: raw metadata object for downstream consumers
 
-## Multi-Disc & Series Handling
+## Series Metadata Notes
 
-`disc/multi_disc.py` coordinates multi-disc sets:
-- Uses `SeriesCache` (SQLite) to pin TMDB ids, show names, and season numbers across discs.
-- Watches for season/disc hints from enhanced metadata and MakeMKV labels.
-- Keeps a short-lived session window (`multi_disc_timeout_minutes`) so discs inserted back-to-back join the same workflow.
-- Provides CLI-friendly stats and cleanup helpers via `SeriesCache.get_stats()` and `.cleanup_expired()`.
-
-When adding new detection rules (e.g., mini-series), update:
-1. `SeriesCache` schema/fields if persistence changes.
-2. `DiscAnalysisResult.episode_mappings` format.
-3. `tests/test_simple_multi_disc.py` and related suites.
+`disc/series_cache.py` stores optional TMDB metadata so later discs from the same show can reuse naming hints. The cache never blocks the pipeline: every disc is scanned, identified, and processed independently, even if other discs arrive out of order or days apart.
 
 ## Caching Overview
 
@@ -67,7 +58,7 @@ When adding new detection rules (e.g., mini-series), update:
   - Use `tmdb_cache.get_stats()` for counts and size.
 
 - **Series cache** (`disc/series_cache.py`)
-  - Tracks show/season metadata to keep multi-disc runs consistent.
+  - Tracks show/season metadata for optional naming reuse.
   - TTL defaults to `series_cache_ttl_days` (configurable).
   - Provides `get_series_metadata`, `cache_series_metadata`, and maintenance helpers.
 
@@ -83,7 +74,6 @@ All settings live in `config.py`; key fields affecting identification:
 - `include_commentary_tracks`, `max_commentary_tracks`: commentary behavior.
 - `tmdb_cache_ttl_days`, `series_cache_ttl_days`: cache retention.
 - `tmdb_runtime_tolerance_minutes`, `tmdb_confidence_threshold`: heuristics for TMDB matches.
-- `multi_disc_timeout_minutes`, `multi_disc_session_timeout_minutes`: control session grouping.
 
 Keep the table in sync when adding new config fields so future changes are discoverable.
 
@@ -100,7 +90,6 @@ Keep the table in sync when adding new config fields so future changes are disco
 - **TV detection misses**: Adjust `tv_episode_min/max_duration` or inspect durations in the log (look for clustered lengths). TV mode requires ≥3 candidates by default.
 - **Bad TMDB matches**: Inspect `DiscAnalysisResult.primary_title` and the hint data; consider adding custom cleaning rules or forcing year hints.
 - **Cache confusion**: `sqlite3 ~/.local/share/spindle/logs/tmdb_cache.db "SELECT query FROM tmdb_cache;"` and the equivalent `series_cache.db` commands help diagnose stale entries.
-- **Multi-disc mismatch**: Run `SeriesCache.clear()` or `cleanup_expired()` to reset old sessions before retrying.
 
 ## Future Notes
 

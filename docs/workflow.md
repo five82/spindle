@@ -72,7 +72,7 @@ Use `spindle queue list` (filter with tools like `grep FAILED`) or `spindle queu
 
 ## Multi-Disc Sets & Manual Files
 
-- **TV box sets**: When enhanced disc metadata is enabled (default), Spindle detects season/disc numbers, caches TMDB matches, and notifies you when it is waiting for the next disc in a set. Insert the next disc within the configured timeout (15 minutes by default) to keep the session intact.
+- **TV box sets**: Each disc is processed on its own. Enhanced metadata still helps label episodes, and cached TMDB matches keep naming consistent, but there is no waiting period or required order.
 - **Manual files**: You can queue already-ripped videos with `spindle add-file /path/to/video.mkv`. These items start at `RIPPED`, skip the optical stages, and go straight to encoding and organization.
 
 ## Monitoring & Control Tips
@@ -90,11 +90,11 @@ Logs also live in `<log_dir>/spindle.log` and `<log_dir>/queue.db` (the queue da
 - **Staging**: `<staging_dir>/ripped/` for MakeMKV output, `<staging_dir>/encoded/` for Drapto output while waiting on organization.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in the config.
 - **Review**: `<review_dir>/` holds items that need manual intervention.
-- **Logs & caches**: `<log_dir>/` keeps `spindle.log`, the queue database, and metadata caches (TMDB, multi-disc series cache).
+- **Logs & caches**: `<log_dir>/` keeps `spindle.log`, the queue database, and metadata caches (TMDB, series cache).
 
 ## Notifications
 
-If `ntfy_topic` is set, Spindle posts rich notifications at key steps: disc detected, ripping started/completed, encoding completed, Plex added, errors, and multi-disc prompts. You can test the channel any time with `spindle test-notify`.
+If `ntfy_topic` is set, Spindle posts rich notifications at key steps: disc detected, ripping started/completed, encoding completed, Plex added, and errors. You can test the channel any time with `spindle test-notify`.
 
 ## Need More Detail?
 

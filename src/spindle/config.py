@@ -100,11 +100,6 @@ class SpindleConfig(BaseModel):
     max_commentary_tracks: int = Field(default=2)
     include_subtitles: bool = Field(default=False)  # Future enhancement
 
-    # Multi-Disc Set Handling
-    multi_disc_timeout_minutes: int = Field(default=15)  # Wait time for next disc
-    multi_disc_session_timeout_minutes: int = Field(default=60)  # Session expiry
-    auto_detect_multi_disc: bool = Field(default=True)
-
     # Cartoon/Short Content Detection
     allow_short_content: bool = Field(default=True)
     cartoon_min_duration: int = Field(default=2)  # minutes

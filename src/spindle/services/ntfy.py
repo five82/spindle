@@ -154,34 +154,6 @@ class NtfyNotifier:
             tags="spindle,test",
         )
 
-    def notify_multi_disc_waiting(
-        self,
-        series_title: str,
-        disc_num: int,
-        timeout_minutes: int,
-    ) -> bool:
-        """Notify that the system is waiting for the next disc in a multi-disc set."""
-        return self.send_notification(
-            f"Insert disc {disc_num + 1} of {series_title} within {timeout_minutes} minutes to continue.",
-            title="💿 Multi-Disc Set - Waiting",
-            priority="default",
-            tags="multi-disc,waiting",
-        )
-
-    def notify_multi_disc_completed(
-        self,
-        series_title: str,
-        disc_count: int,
-        duration: str,
-    ) -> bool:
-        """Notify that a multi-disc set has been completed."""
-        return self.send_notification(
-            f"Completed {disc_count}-disc set: {series_title} in {duration}",
-            title="✅ Multi-Disc Set Complete",
-            priority="default",
-            tags="success,multi-disc,complete",
-        )
-
 
 class NotificationService:
     """Consolidated notification service combining wrapper and implementation."""
