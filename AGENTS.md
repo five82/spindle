@@ -1,10 +1,12 @@
 # AGENTS.md
 
+This file provides guidance when working with code in this repository.
+
 CLAUDE.md and QWEN.md are symbolic links to this file so all agent guidance stays in one place.
-This file provides guidance when working with code in this repository. It teaches agents how to collaborate effectively without duplicating the full README.
 
 ## TL;DR
 
+- Do not run `git commit` or `git push` unless the user explicitly asks for them.
 - Use `uv` for everything (install, run, test). Never reach for `pip` or ad-hoc virtualenvs.
 - Finish the work you start. Ask the user before dropping scope or leaving TODOs.
 - Keep the daemon-only model intact; commands interact with a running background process.
