@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 import pytest
 
@@ -19,11 +19,10 @@ def config(tmp_path):
     )
 
 
-@pytest.mark.asyncio
-async def test_identify_media_movie(config):
+def test_identify_media_movie(config):
     service = TMDBService(config)
 
-    async def fake_request(endpoint, params):
+    def fake_request(endpoint, params):
         if endpoint == "/search/movie":
             return {"results": [{"id": 1, "title": "Example"}]}
         if endpoint == "/movie/1":
@@ -36,20 +35,19 @@ async def test_identify_media_movie(config):
             }
         return {}
 
-    service._request = AsyncMock(side_effect=fake_request)
+    service._request = Mock(side_effect=fake_request)
 
-    media_info = await service.identify_media("Example", "movie")
+    media_info = service.identify_media("Example", "movie")
     assert media_info is not None
     assert media_info.title == "Example"
     assert media_info.media_type == "movie"
     assert media_info.confidence > 0
 
 
-@pytest.mark.asyncio
-async def test_identify_media_tv(config):
+def test_identify_media_tv(config):
     service = TMDBService(config)
 
-    async def fake_request(endpoint, params):
+    def fake_request(endpoint, params):
         if endpoint == "/search/tv":
             return {"results": [{"id": 5, "name": "Example Show"}]}
         if endpoint == "/tv/5":
@@ -78,19 +76,18 @@ async def test_identify_media_tv(config):
             }
         return {}
 
-    service._request = AsyncMock(side_effect=fake_request)
+    service._request = Mock(side_effect=fake_request)
 
-    media_info = await service.identify_media("Example Show", "tv", season_hint=1)
+    media_info = service.identify_media("Example Show", "tv", season_hint=1)
     assert media_info is not None
     assert media_info.media_type == "tv"
     assert media_info.season == 1
     assert media_info.episodes
 
 
-@pytest.mark.asyncio
-async def test_identify_media_empty_results(config):
+def test_identify_media_empty_results(config):
     service = TMDBService(config)
-    service._request = AsyncMock(return_value={"results": []})
+    service._request = Mock(return_value={"results": []})
 
-    media_info = await service.identify_media("Missing", "movie")
+    media_info = service.identify_media("Missing", "movie")
     assert media_info is None

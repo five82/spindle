@@ -388,7 +388,7 @@ class DraptoService:
         self.config = config
         self.encoder = DraptoEncoder(config)
 
-    async def encode_file(
+    def encode_file(
         self,
         input_file: Path,
         output_file: Path,

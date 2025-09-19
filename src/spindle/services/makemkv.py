@@ -1,6 +1,5 @@
 """MakeMKV service wrapper."""
 
-import asyncio
 import logging
 import subprocess
 from collections.abc import Callable
@@ -15,23 +14,18 @@ logger = logging.getLogger(__name__)
 
 
 class MakeMKVService:
-    """Async wrapper for MakeMKV disc ripping."""
+    """Synchronous wrapper for MakeMKV disc ripping."""
 
     def __init__(self, config: SpindleConfig):
         self.config = config
         self.ripper = MakeMKVRipper(config)
 
-    async def scan_disc(self, device: str) -> dict[str, Any]:
+    def scan_disc(self, device: str) -> dict[str, Any]:
         """Scan disc and return title information."""
         try:
             logger.info(f"Scanning disc: {device}")
 
-            loop = asyncio.get_running_loop()
-            titles, raw_output = await loop.run_in_executor(
-                None,
-                self.ripper.scan_disc_with_output,
-                device,
-            )
+            titles, raw_output = self.ripper.scan_disc_with_output(device)
 
             if not titles:
                 msg = "MakeMKV disc scan failed"
@@ -58,7 +52,7 @@ class MakeMKVService:
             logger.exception(f"Disc scan failed: {e}")
             raise
 
-    async def rip_disc(
+    def rip_disc(
         self,
         rip_spec: RipSpec,
         progress_callback: Callable[[str, int, str], None] | None = None,
@@ -73,10 +67,7 @@ class MakeMKVService:
             # Ensure output directory exists
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            # The ripper's rip_disc method is synchronous, run in executor
-            ripped_file = await asyncio.get_running_loop().run_in_executor(
-                None,
-                self.ripper.rip_disc,
+            ripped_file = self.ripper.rip_disc(
                 output_dir,
                 device,
             )
@@ -88,7 +79,7 @@ class MakeMKVService:
             logger.exception(f"Disc ripping failed: {e}")
             raise
 
-    async def rip_titles(
+    def rip_titles(
         self,
         device: str,
         titles: list[dict],
@@ -104,9 +95,7 @@ class MakeMKVService:
 
             # If no specific titles provided, rip main title
             if not titles:
-                ripped_file = await asyncio.get_running_loop().run_in_executor(
-                    None,
-                    self.ripper.rip_disc,
+                ripped_file = self.ripper.rip_disc(
                     output_directory,
                     device,
                 )
@@ -121,9 +110,7 @@ class MakeMKVService:
 
                 # Note: This assumes the ripper can handle individual titles
                 # The actual implementation would depend on how titles are structured
-                ripped_file = await asyncio.get_running_loop().run_in_executor(
-                    None,
-                    self.ripper.rip_title,
+                ripped_file = self.ripper.rip_title(
                     title_info,
                     output_directory,
                     device,

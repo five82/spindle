@@ -108,7 +108,7 @@ class MediaInfo:
 
 
 class TMDBService:
-    """Minimal async TMDB client with a small in-memory cache."""
+    """Minimal synchronous TMDB client with a small in-memory cache."""
 
     _BASE_URL = "https://api.themoviedb.org/3"
 
@@ -116,7 +116,7 @@ class TMDBService:
         self.config = config
         self._cache: dict[tuple[str, str, int | None], MediaInfo | None] = {}
 
-    async def identify_media(
+    def identify_media(
         self,
         query: str,
         content_type: str = "movie",
@@ -134,7 +134,7 @@ class TMDBService:
             return self._cache[cache_key]
 
         try:
-            results = await self._search(query, normalized_type, year)
+            results = self._search(query, normalized_type, year)
         except httpx.HTTPError as exc:  # pragma: no cover - network failure path
             logger.warning("TMDB search failed for %s: %s", query, exc)
             self._cache[cache_key] = None
@@ -146,9 +146,9 @@ class TMDBService:
 
         best = results[0]
         if normalized_type == "movie":
-            media_info = await self._build_movie_info(best, runtime_hint)
+            media_info = self._build_movie_info(best, runtime_hint)
         else:
-            media_info = await self._build_tv_info(best, runtime_hint, season_hint)
+            media_info = self._build_tv_info(best, runtime_hint, season_hint)
 
         if media_info:
             media_info.confidence = self._score_match(media_info, runtime_hint, year)
@@ -156,13 +156,13 @@ class TMDBService:
         self._cache[cache_key] = media_info
         return media_info
 
-    async def search_movies(self, query: str, year: int | None = None) -> list[dict]:
-        return await self._search(query, "movie", year)
+    def search_movies(self, query: str, year: int | None = None) -> list[dict]:
+        return self._search(query, "movie", year)
 
-    async def search_tv_series(self, query: str, year: int | None = None) -> list[dict]:
-        return await self._search(query, "tv", year)
+    def search_tv_series(self, query: str, year: int | None = None) -> list[dict]:
+        return self._search(query, "tv", year)
 
-    async def _search(
+    def _search(
         self,
         query: str,
         content_type: str,
@@ -179,15 +179,15 @@ class TMDBService:
         if year:
             params["year" if content_type == "movie" else "first_air_date_year"] = year
 
-        data = await self._request(endpoint, params)
+        data = self._request(endpoint, params)
         return data.get("results", []) if data else []
 
-    async def _build_movie_info(
+    def _build_movie_info(
         self,
         payload: dict[str, Any],
         runtime_hint: int | None,
     ) -> MediaInfo | None:
-        details = await self._request(
+        details = self._request(
             f"/movie/{payload['id']}",
             {
                 "api_key": self.config.tmdb_api_key,
@@ -222,13 +222,13 @@ class TMDBService:
 
         return media_info
 
-    async def _build_tv_info(
+    def _build_tv_info(
         self,
         payload: dict[str, Any],
         runtime_hint: int | None,
         season_hint: int | None,
     ) -> MediaInfo | None:
-        details = await self._request(
+        details = self._request(
             f"/tv/{payload['id']}",
             {
                 "api_key": self.config.tmdb_api_key,
@@ -255,7 +255,7 @@ class TMDBService:
 
         episodes = None
         if season_number:
-            episodes = await self._fetch_episodes(payload["id"], season_number)
+            episodes = self._fetch_episodes(payload["id"], season_number)
 
         return MediaInfo(
             title=details.get("name") or payload.get("name") or query_fallback(payload),
@@ -274,12 +274,12 @@ class TMDBService:
             episodes=episodes,
         )
 
-    async def _fetch_episodes(
+    def _fetch_episodes(
         self,
         tmdb_id: int,
         season_number: int,
     ) -> list[dict[str, Any]]:
-        data = await self._request(
+        data = self._request(
             f"/tv/{tmdb_id}/season/{season_number}",
             {
                 "api_key": self.config.tmdb_api_key,
@@ -301,17 +301,17 @@ class TMDBService:
             )
         return episodes
 
-    async def _request(
+    def _request(
         self,
         endpoint: str,
         params: dict[str, Any],
     ) -> dict[str, Any] | None:
         url = f"{self._BASE_URL}{endpoint}"
         try:
-            async with httpx.AsyncClient(
+            with httpx.Client(
                 timeout=self.config.tmdb_request_timeout,
             ) as client:
-                response = await client.get(url, params=params)
+                response = client.get(url, params=params)
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPError as exc:  # pragma: no cover - network failure path

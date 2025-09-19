@@ -534,9 +534,9 @@ class MakeMKVRipper:
                 label=disc_label,
             )
 
-            # Note: analyze_disc is async, but we can't await here since this is sync
-            # This is a design issue that needs to be resolved
-            # For now, we'll handle this differently
+            # IntelligentDiscAnalyzer expects richer context than we have here
+            # (full MakeMKV scan output, disc fingerprint, etc.), so defer to
+            # the orchestrated identification workflow instead of duplicating it.
 
             # Since we can't use async analysis here, use basic duration filtering
             valid_titles = titles

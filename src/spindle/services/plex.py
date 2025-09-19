@@ -328,7 +328,7 @@ class PlexService:
         self.config = config
         self.organizer = LibraryOrganizer(config)
 
-    async def organize_media(
+    def organize_media(
         self,
         source_file: Path,
         media_info: MediaInfo,
@@ -355,7 +355,7 @@ class PlexService:
             logger.exception(f"Library organization failed: {e}")
             raise
 
-    async def refresh_library(self, content_type: str) -> None:
+    def refresh_library(self, content_type: str) -> None:
         """Trigger Plex library refresh for content type."""
         try:
             logger.info(f"Refreshing Plex library for: {content_type}")

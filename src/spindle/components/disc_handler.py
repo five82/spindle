@@ -31,7 +31,7 @@ class DiscHandler:
         self.ripper = MakeMKVService(config)
         self.queue_manager = None  # Injected by orchestrator
 
-    async def identify_disc(
+    def identify_disc(
         self,
         item: QueueItem,
         disc_info: DiscInfo,
@@ -51,7 +51,7 @@ class DiscHandler:
             if scan_result is None:
                 item.progress_message = "Scanning disc with MakeMKV"
                 self.queue_manager.update_item(item)
-                scan_result = await self.ripper.scan_disc(disc_info.device)
+                scan_result = self.ripper.scan_disc(disc_info.device)
 
             titles = scan_result.get("titles") or []
             fingerprint = scan_result.get("fingerprint")
@@ -72,7 +72,7 @@ class DiscHandler:
                 disc_info.device,
             )
 
-            analysis_result = await self.disc_analyzer.analyze_disc(
+            analysis_result = self.disc_analyzer.analyze_disc(
                 disc_info,
                 titles,
                 disc_path=disc_path,
@@ -166,7 +166,7 @@ class DiscHandler:
             media_info.title,
         )
 
-    async def rip_identified_item(self, item: QueueItem) -> None:
+    def rip_identified_item(self, item: QueueItem) -> None:
         """Rip an identified disc item."""
         try:
             if not item.rip_spec_data:
@@ -189,7 +189,7 @@ class DiscHandler:
                 item.progress_message = message
                 self.queue_manager.update_item(item)
 
-            ripped_files = await self.ripper.rip_disc(
+            ripped_files = self.ripper.rip_disc(
                 rip_spec,
                 progress_callback=progress_callback,
             )

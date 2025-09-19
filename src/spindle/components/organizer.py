@@ -18,7 +18,7 @@ class OrganizerComponent:
         self.plex_service = PlexService(config)
         self.queue_manager = None  # Will be injected by orchestrator
 
-    async def organize_item(self, item: QueueItem) -> None:
+    def organize_item(self, item: QueueItem) -> None:
         """Organize an encoded item into the library."""
         try:
             logger.info(f"Starting organization for: {item}")
@@ -43,7 +43,7 @@ class OrganizerComponent:
             self.queue_manager.update_item(item)
 
             # Organize into library
-            final_file_path = await self.plex_service.organize_media(
+            final_file_path = self.plex_service.organize_media(
                 source_file=item.encoded_file,
                 media_info=item.media_info,
                 progress_callback=self._create_progress_callback(item),
@@ -57,7 +57,7 @@ class OrganizerComponent:
             item.progress_message = "Updating Plex library"
             self.queue_manager.update_item(item)
 
-            await self.plex_service.refresh_library(item.media_info.content_type)
+            self.plex_service.refresh_library(item.media_info.content_type)
 
             # Mark as completed
             item.status = QueueItemStatus.COMPLETED

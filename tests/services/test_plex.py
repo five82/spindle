@@ -20,12 +20,11 @@ class TestPlexService:
         """Create Plex service instance."""
         return PlexService(config)
 
-    @pytest.mark.asyncio
-    async def test_refresh_library_calls_plex_api(self, service):
+    def test_refresh_library_calls_plex_api(self, service):
         """Test library refresh calls Plex API."""
         # Should call underlying PlexAPI but may fail with test config
         try:
-            await service.refresh_library("movie")
+            service.refresh_library("movie")
         except Exception as e:
             # Expected to fail without proper Plex config - verify it's trying
             assert "plex" in str(e).lower() or "url" in str(e).lower() or "token" in str(e).lower()

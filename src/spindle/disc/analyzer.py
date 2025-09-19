@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import statistics
@@ -59,7 +58,7 @@ class IntelligentDiscAnalyzer:
             True,
         )
 
-    async def analyze_disc(
+    def analyze_disc(
         self,
         disc_info: DiscInfo,
         titles: list[Title],
@@ -102,7 +101,7 @@ class IntelligentDiscAnalyzer:
             and self._needs_enhanced_metadata(cleaned_label)
             and disc_path
         ):
-            enhanced_metadata = await self._run_enhanced_metadata_async(
+            enhanced_metadata = self._run_enhanced_metadata(
                 disc_path,
                 disc_info,
                 titles,
@@ -119,7 +118,7 @@ class IntelligentDiscAnalyzer:
         season_hint = self._detect_season_hint(cleaned_label, enhanced_metadata)
 
         content_type = "tv" if is_tv else "movie"
-        media_info = await self.tmdb_service.identify_media(
+        media_info = self.tmdb_service.identify_media(
             query=cleaned_label or main_title.name,
             content_type="tv" if is_tv else "movie",
             runtime_hint=runtime_hint,
@@ -220,17 +219,14 @@ class IntelligentDiscAnalyzer:
         candidates = metadata.get_best_title_candidates()
         return candidates[0] if candidates else None
 
-    async def _run_enhanced_metadata_async(
+    def _run_enhanced_metadata(
         self,
         disc_path: Path,
         disc_info: DiscInfo,
         titles: list[Title],
         makemkv_output: str | None,
     ) -> EnhancedDiscMetadata | None:
-        loop = asyncio.get_running_loop()
-        metadata = await loop.run_in_executor(
-            None,
-            self.metadata_extractor.extract_all_metadata,
+        metadata = self.metadata_extractor.extract_all_metadata(
             disc_path,
             disc_info.device,
         )

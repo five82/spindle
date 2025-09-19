@@ -20,7 +20,7 @@ class TVSeriesDiscAnalyzer:
         self.config = config
         self.tmdb = TMDBClient(config)
 
-    async def analyze_tv_disc(
+    def analyze_tv_disc(
         self,
         disc_label: str,
         titles: list[Title],
@@ -30,7 +30,7 @@ class TVSeriesDiscAnalyzer:
         logger.info(f"Analyzing TV disc: {disc_label}")
 
         # Step 1: Identify the series from disc label
-        series_info = await self.identify_series_from_disc(disc_label)
+        series_info = self.identify_series_from_disc(disc_label)
         if not series_info:
             logger.warning(
                 f"Could not identify TV series from disc label: {disc_label}",
@@ -46,13 +46,13 @@ class TVSeriesDiscAnalyzer:
         logger.info(f"Detected season: {season_number}")
 
         # Step 3: Map disc titles to specific episodes
-        return await self.map_titles_to_episodes(
+        return self.map_titles_to_episodes(
             titles,
             series_info,
             season_number,
         )
 
-    async def identify_series_from_disc(self, disc_label: str) -> SeriesInfo | None:
+    def identify_series_from_disc(self, disc_label: str) -> SeriesInfo | None:
         """Extract series name from disc label."""
 
         # Extract series name from common disc label patterns
@@ -76,7 +76,7 @@ class TVSeriesDiscAnalyzer:
                 series_name = self.clean_series_name(series_name)
 
                 # Validate series with TMDB
-                tmdb_series = await self.tmdb.search_tv(series_name)
+                tmdb_series = self.tmdb.search_tv(series_name)
                 if tmdb_series:
                     series_data = tmdb_series[0]
                     return SeriesInfo(
@@ -90,7 +90,7 @@ class TVSeriesDiscAnalyzer:
 
         # Fallback: try entire disc label as series name
         cleaned_label = self.clean_series_name(disc_label)
-        tmdb_results = await self.tmdb.search_tv(cleaned_label)
+        tmdb_results = self.tmdb.search_tv(cleaned_label)
         if tmdb_results:
             series_data = tmdb_results[0]
             return SeriesInfo(
@@ -126,7 +126,7 @@ class TVSeriesDiscAnalyzer:
                 logger.debug(f"Failed to extract year from date '{date_str}': {e}")
         return None
 
-    async def map_titles_to_episodes(
+    def map_titles_to_episodes(
         self,
         titles: list[Title],
         series_info: SeriesInfo,
@@ -139,7 +139,7 @@ class TVSeriesDiscAnalyzer:
         )
 
         # Get complete season data from TMDB
-        season_data = await self.get_tv_season_details(series_info.tmdb_id, season_num)
+        season_data = self.get_tv_season_details(series_info.tmdb_id, season_num)
         if not season_data:
             logger.warning(f"Could not get season {season_num} data from TMDB")
             return {}
@@ -168,7 +168,7 @@ class TVSeriesDiscAnalyzer:
         logger.info(f"Successfully mapped {len(mapping)} titles to episodes")
         return mapping
 
-    async def get_tv_season_details(
+    def get_tv_season_details(
         self,
         tv_id: int,
         season_number: int,

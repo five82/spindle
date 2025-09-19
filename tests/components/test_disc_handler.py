@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -31,17 +31,17 @@ def handler(config: SpindleConfig) -> DiscHandler:
          patch("spindle.components.disc_handler.MakeMKVService") as makemkv_cls:
 
         analyzer = analyzer_cls.return_value
-        analyzer.analyze_disc = AsyncMock()
+        analyzer.analyze_disc = Mock()
 
         ripper = makemkv_cls.return_value
-        ripper.scan_disc = AsyncMock(
+        ripper.scan_disc = Mock(
             return_value={
                 "titles": [],
                 "fingerprint": "f1",
                 "makemkv_output": "",
             },
         )
-        ripper.rip_disc = AsyncMock(return_value=[Path("/tmp/output.mkv")])
+        ripper.rip_disc = Mock(return_value=[Path("/tmp/output.mkv")])
 
         disc_handler = DiscHandler(config)
         disc_handler.queue_manager = Mock()
@@ -49,8 +49,7 @@ def handler(config: SpindleConfig) -> DiscHandler:
         return disc_handler
 
 
-@pytest.mark.asyncio
-async def test_identify_disc_sets_review_when_unmatched(handler: DiscHandler):
+def test_identify_disc_sets_review_when_unmatched(handler: DiscHandler):
     item = QueueItem(item_id=1, disc_title="Unknown Disc")
     disc_info = DiscInfo(device="/dev/sr0", disc_type="blu-ray", label="UNKNOWN")
 
@@ -66,14 +65,13 @@ async def test_identify_disc_sets_review_when_unmatched(handler: DiscHandler):
         runtime_hint=None,
     )
 
-    await handler.identify_disc(item, disc_info)
+    handler.identify_disc(item, disc_info)
 
     assert item.status == QueueItemStatus.REVIEW
     assert item.error_message == "Identification requires manual review"
 
 
-@pytest.mark.asyncio
-async def test_identify_disc_success(handler: DiscHandler):
+def test_identify_disc_success(handler: DiscHandler):
     item = QueueItem(item_id=1, disc_title="Test Disc")
     disc_info = DiscInfo(device="/dev/sr0", disc_type="blu-ray", label="TEST_DISC")
 
@@ -92,14 +90,13 @@ async def test_identify_disc_success(handler: DiscHandler):
 
     handler.disc_analyzer.analyze_disc.return_value = analysis_result
 
-    await handler.identify_disc(item, disc_info)
+    handler.identify_disc(item, disc_info)
 
     assert item.status == QueueItemStatus.IDENTIFIED
     assert item.media_info.title == "Test Movie"
 
 
-@pytest.mark.asyncio
-async def test_rip_identified_item(handler: DiscHandler, tmp_path: Path):
+def test_rip_identified_item(handler: DiscHandler, tmp_path: Path):
     rip_spec_data = {
         "analysis_result": {
             "content_type": "movie",
@@ -141,8 +138,8 @@ async def test_rip_identified_item(handler: DiscHandler, tmp_path: Path):
     handler.queue_manager = Mock()
 
     with patch("spindle.components.disc_handler.eject_disc") as eject_mock:
-        await handler.rip_identified_item(item)
+        handler.rip_identified_item(item)
 
-    handler.ripper.rip_disc.assert_awaited_once()
+    handler.ripper.rip_disc.assert_called_once()
     eject_mock.assert_called_once()
     assert item.status == QueueItemStatus.RIPPED

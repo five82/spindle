@@ -31,8 +31,7 @@ class TestMakeMKVService:
         """Test service has MakeMKVRipper instance."""
         assert service.ripper is not None
 
-    @pytest.mark.asyncio
-    async def test_scan_disc_includes_fingerprint(self, service, monkeypatch):
+    def test_scan_disc_includes_fingerprint(self, service, monkeypatch):
         """scan_disc returns the MakeMKV fingerprint in the payload."""
 
         sample_titles = [object()]
@@ -49,13 +48,12 @@ class TestMakeMKVService:
             lambda output: "ABCDEF1234567890",
         )
 
-        result = await service.scan_disc("/dev/sr0")
+        result = service.scan_disc("/dev/sr0")
 
         assert result["fingerprint"] == "ABCDEF1234567890"
         assert result["titles"] == sample_titles
 
-    @pytest.mark.asyncio
-    async def test_scan_disc_raises_when_fingerprint_missing(
+    def test_scan_disc_raises_when_fingerprint_missing(
         self,
         service,
         monkeypatch,
@@ -76,4 +74,4 @@ class TestMakeMKVService:
         )
 
         with pytest.raises(RuntimeError):
-            await service.scan_disc("/dev/sr0")
+            service.scan_disc("/dev/sr0")

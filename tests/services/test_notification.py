@@ -1,7 +1,7 @@
 """Test notification service wrapper."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
 from spindle.services.ntfy import NotificationService
 from spindle.config import SpindleConfig

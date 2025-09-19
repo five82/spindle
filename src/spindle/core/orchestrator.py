@@ -1,7 +1,8 @@
 """Main workflow orchestration for Spindle."""
 
-import asyncio
 import logging
+import threading
+import time
 
 from spindle.components.disc_handler import DiscHandler
 from spindle.components.encoder import EncoderComponent
@@ -32,12 +33,12 @@ class SpindleOrchestrator:
         self.encoder.set_queue_manager(self.queue_manager)
         self.organizer.set_queue_manager(self.queue_manager)
 
-        # Track async tasks spawned from callbacks so we can clean them up
-        self._pending_disc_tasks: set[asyncio.Task] = set()
+        # Track background threads spawned from callbacks so we can clean them up
+        self._pending_disc_threads: set[threading.Thread] = set()
 
         # Monitoring
         self.disc_monitor: DiscMonitor | None = None
-        self.processing_task: asyncio.Task | None = None
+        self.processing_thread: threading.Thread | None = None
         self.is_running = False
 
     def start(self) -> None:
@@ -62,8 +63,12 @@ class SpindleOrchestrator:
         self.disc_monitor.start_monitoring()
 
         # Start background processing
-        loop = asyncio.get_event_loop()
-        self.processing_task = loop.create_task(self._process_queue_continuously())
+        self.processing_thread = threading.Thread(
+            target=self._process_queue_continuously,
+            name="spindle-queue-processor",
+            daemon=True,
+        )
+        self.processing_thread.start()
 
         # Check for existing disc
         existing_disc = detect_disc(self.config.optical_drive)
@@ -84,12 +89,14 @@ class SpindleOrchestrator:
         if self.disc_monitor:
             self.disc_monitor.stop_monitoring()
 
-        if self.processing_task:
-            self.processing_task.cancel()
+        if self.processing_thread and self.processing_thread.is_alive():
+            self.processing_thread.join(timeout=self.config.queue_poll_interval)
+        self.processing_thread = None
 
-        for task in list(self._pending_disc_tasks):
-            task.cancel()
-        self._pending_disc_tasks.clear()
+        for thread in list(self._pending_disc_threads):
+            if thread.is_alive():
+                thread.join(timeout=1)
+        self._pending_disc_threads.clear()
 
         logger.info("Orchestrator stopped")
 
@@ -98,15 +105,24 @@ class SpindleOrchestrator:
         logger.info("Detected disc: %s", disc_info)
         self.notifier.notify_disc_detected(disc_info.label, disc_info.disc_type)
 
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(self._process_detected_disc(disc_info))
-        self._pending_disc_tasks.add(task)
-        task.add_done_callback(self._pending_disc_tasks.discard)
+        def run_detection() -> None:
+            try:
+                self._process_detected_disc(disc_info)
+            finally:
+                self._pending_disc_threads.discard(threading.current_thread())
 
-    async def _process_detected_disc(self, disc_info: DiscInfo) -> None:
+        thread = threading.Thread(
+            target=run_detection,
+            name="spindle-disc-detector",
+            daemon=True,
+        )
+        self._pending_disc_threads.add(thread)
+        thread.start()
+
+    def _process_detected_disc(self, disc_info: DiscInfo) -> None:
         """Process a detected disc, applying fingerprint-based deduplication."""
         try:
-            scan_result = await self.disc_handler.ripper.scan_disc(disc_info.device)
+            scan_result = self.disc_handler.ripper.scan_disc(disc_info.device)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception("Error scanning disc during detection")
             self.notifier.notify_error(
@@ -192,29 +208,20 @@ class SpindleOrchestrator:
                 item.item_id,
             )
 
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(
+        try:
             self.disc_handler.identify_disc(
                 item,
                 disc_info,
                 scan_result=scan_result,
-            ),
-        )
+            )
+        except Exception as exception:  # pragma: no cover - defensive logging
+            logger.exception("Disc identification failed", exc_info=exception)
+            self.notifier.notify_error(
+                f"Failed to identify disc: {exception}",
+                context=disc_info.label or fingerprint,
+            )
 
-        def handle_completion(t: asyncio.Task) -> None:
-            if t.cancelled():
-                return
-            exception = t.exception()
-            if exception:
-                logger.exception("Disc identification failed", exc_info=exception)
-                self.notifier.notify_error(
-                    f"Failed to identify disc: {exception}",
-                    context=disc_info.label or fingerprint,
-                )
-
-        task.add_done_callback(handle_completion)
-
-    async def _process_queue_continuously(self) -> None:
+    def _process_queue_continuously(self) -> None:
         """Continuously process queue items."""
         logger.info("Started background queue processor")
 
@@ -223,16 +230,13 @@ class SpindleOrchestrator:
                 item = self._get_next_processable_item()
 
                 if item:
-                    await self._process_single_item(item)
+                    self._process_single_item(item)
                 else:
-                    await asyncio.sleep(self.config.queue_poll_interval)
+                    time.sleep(self.config.queue_poll_interval)
 
-            except asyncio.CancelledError:
-                logger.info("Queue processor cancelled")
-                break
             except Exception as e:
                 logger.exception(f"Error in queue processor: {e}")
-                await asyncio.sleep(self.config.error_retry_interval)
+                time.sleep(self.config.error_retry_interval)
 
         logger.info("Background queue processor stopped")
 
@@ -251,17 +255,17 @@ class SpindleOrchestrator:
 
         return None
 
-    async def _process_single_item(self, item: QueueItem) -> None:
+    def _process_single_item(self, item: QueueItem) -> None:
         """Process a single queue item through its next stage."""
         try:
             logger.info(f"Processing: {item}")
 
             if item.status == QueueItemStatus.IDENTIFIED:
-                await self.disc_handler.rip_identified_item(item)
+                self.disc_handler.rip_identified_item(item)
             elif item.status == QueueItemStatus.RIPPED:
-                await self.encoder.encode_item(item)
+                self.encoder.encode_item(item)
             elif item.status == QueueItemStatus.ENCODED:
-                await self.organizer.organize_item(item)
+                self.organizer.organize_item(item)
 
         except Exception as e:
             logger.exception(f"Error processing {item}: {e}")

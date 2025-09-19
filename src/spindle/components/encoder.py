@@ -18,7 +18,7 @@ class EncoderComponent:
         self.drapto_service = DraptoService(config)
         self.queue_manager = None  # Will be injected by orchestrator
 
-    async def encode_item(self, item: QueueItem) -> None:
+    def encode_item(self, item: QueueItem) -> None:
         """Encode a ripped item."""
         try:
             logger.info(f"Starting encoding for: {item}")
@@ -49,7 +49,7 @@ class EncoderComponent:
 
             # Perform encoding
             logger.info(f"Encoding {item.ripped_file} -> {output_file}")
-            encode_result = await self.drapto_service.encode_file(
+            encode_result = self.drapto_service.encode_file(
                 input_file=item.ripped_file,
                 output_file=output_file,
                 progress_callback=progress_callback,

@@ -18,13 +18,13 @@ class IdentifierComponent:
         """Initialize identifier component with configuration."""
         self.config = config
 
-    async def identify_content(self, item) -> None:
+    def identify_content(self, item) -> None:
         """Identify content using available services."""
         # Stub implementation - full implementation in Phase 2.2
         msg = "Implementation pending Phase 2.2"
         raise NotImplementedError(msg)
 
-    async def enhance_metadata(self, item) -> None:
+    def enhance_metadata(self, item) -> None:
         """Enhance existing metadata with additional information."""
         # Stub implementation - full implementation in Phase 2.2
         msg = "Implementation pending Phase 2.2"
