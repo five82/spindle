@@ -132,6 +132,7 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → E
 - `REVIEW`: manual intervention required, files moved to `review_dir`
 - Drives eject automatically at `RIPPED`; encoding/organization continues in background
 - Notifications (ntfy) fire at major milestones (`RIPPED`, `COMPLETED`, errors)
+- Read `docs/workflow.md` for a detailed walkthrough
 
 
 ## Troubleshooting
