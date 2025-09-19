@@ -70,10 +70,12 @@ class TestConfigLoading:
     
     def test_load_config_defaults(self, temp_dir):
         """Test loading configuration with defaults."""
-        config = load_config()
+        config, config_path, exists = load_config()
         
         # Should load with reasonable defaults
         assert config is not None
+        assert isinstance(config_path, Path)
+        assert exists in (True, False)
         assert config.optical_drive is not None
         assert config.makemkv_con is not None
 
@@ -86,11 +88,11 @@ makemkv_con = "custom_makemkv"
 drapto_quality_hd = 26
 ''')
         
-        config = load_config(config_file)
+        config, config_path, exists = load_config(config_file)
         
+        assert config_path == config_file
+        assert exists is True
         assert config.optical_drive == "/dev/sr1"
-        # Config loading may use defaults for unspecified values
-        assert config.optical_drive == "/dev/sr1"  # This should work
         assert config.drapto_quality_hd == 26
 
     def test_path_expansion(self, temp_dir):
@@ -137,8 +139,10 @@ class TestConfigErrorHandling:
         non_existent = Path("/tmp/nonexistent_config.toml")
         
         # Should use defaults when config file doesn't exist
-        config = load_config(non_existent)
+        config, config_path, exists = load_config(non_existent)
         assert isinstance(config, SpindleConfig)
+        assert config_path == non_existent
+        assert exists is False
         assert config.optical_drive == "/dev/sr0"  # Default value
     
     def test_load_config_invalid_toml(self, temp_dir):

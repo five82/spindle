@@ -117,8 +117,10 @@ def cli(ctx: click.Context, config: Path | None, verbose: bool) -> None:
 
     try:
         ctx.ensure_object(dict)
-        loaded_config = load_config(config)
+        loaded_config, config_path, config_exists = load_config(config)
         ctx.obj["config"] = loaded_config
+        ctx.obj["config_path"] = config_path
+        ctx.obj["config_path_exists"] = config_exists
         ctx.obj["verbose"] = verbose
 
         # Setup logging with the loaded config for file logging
@@ -144,6 +146,14 @@ def config_cmd(ctx: click.Context) -> None:
 def config_show(ctx: click.Context) -> None:
     """Show current configuration."""
     config: SpindleConfig = ctx.obj["config"]
+    config_path: Path = ctx.obj.get("config_path")
+    config_exists: bool = ctx.obj.get("config_path_exists", False)
+
+    if config_path:
+        status = "" if config_exists else " (not found; using defaults)"
+        console.print(f"[dim]Config file: {config_path}{status}[/dim]")
+    else:
+        console.print("[dim]Config file: not set (using defaults)[/dim]")
 
     table = Table()
     table.add_column("Setting")
@@ -169,6 +179,14 @@ def config_validate(ctx: click.Context) -> None:
     config: SpindleConfig = ctx.obj["config"]
 
     console.print("[bold]Configuration Validation[/bold]")
+
+    config_path: Path = ctx.obj.get("config_path")
+    config_exists: bool = ctx.obj.get("config_path_exists", False)
+    if config_path:
+        status = "" if config_exists else " (not found; using defaults)"
+        console.print(f"[dim]Config file: {config_path}{status}[/dim]")
+    else:
+        console.print("[dim]Config file: not set (using defaults)[/dim]")
 
     # Check directories
     errors = []

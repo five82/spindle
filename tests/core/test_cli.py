@@ -76,7 +76,7 @@ class TestStartCommand:
         mock_daemon_instance = Mock()
         mock_spindle_daemon.return_value = mock_daemon_instance
 
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             # Ensure INVOCATION_ID is not set (GitHub Actions might set this)
             with patch.dict('os.environ', {'UV_SYSTEM_PYTHON': '1'}, clear=True):
                 result = runner.invoke(cli, ["start"])
@@ -98,7 +98,7 @@ class TestStartCommand:
         mock_daemon_instance = Mock()
         mock_spindle_daemon.return_value = mock_daemon_instance
 
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             with patch.dict('os.environ', {'UV_SYSTEM_PYTHON': '1'}, clear=True):
                 result = runner.invoke(cli, ["start", "--systemd"])
 
@@ -129,7 +129,7 @@ class TestShowCommand:
         runner = CliRunner()
         
         # Ensure log file doesn't exist by not creating the directory
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             with patch('pathlib.Path.exists', return_value=False):
                 with patch('spindle.cli.sys.exit') as mock_exit:
                     runner.invoke(cli, ["show"])
@@ -152,7 +152,7 @@ class TestShowCommand:
         mock_popen.return_value.__enter__.return_value = mock_proc
         
         runner = CliRunner()
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             result = runner.invoke(cli, ["show"])
             
         assert result.exit_code == 0
@@ -176,7 +176,7 @@ class TestShowCommand:
         mock_popen.return_value.__enter__.return_value = mock_proc
         
         runner = CliRunner()
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             result = runner.invoke(cli, ["show", "--follow"])
             
         assert result.exit_code == 0
@@ -200,7 +200,7 @@ class TestShowCommand:
         mock_popen.return_value.__enter__.return_value = mock_proc
         
         runner = CliRunner()
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             result = runner.invoke(cli, ["show", "--lines", "50"])
             
         assert result.exit_code == 0
@@ -217,7 +217,7 @@ class TestShowCommand:
         log_file.write_text("test log content")
         
         runner = CliRunner()
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             with patch('subprocess.Popen', side_effect=FileNotFoundError):
                 result = runner.invoke(cli, ["show"])
                 
@@ -244,7 +244,7 @@ class TestStopCommand:
         mock_find_process.return_value = None
         
         runner = CliRunner()
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             result = runner.invoke(cli, ["stop"])
             
         assert result.exit_code == 0
@@ -259,7 +259,7 @@ class TestStopCommand:
         mock_stop_process.return_value = True
         
         runner = CliRunner()
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             result = runner.invoke(cli, ["stop"])
             
         assert result.exit_code == 0
@@ -314,7 +314,7 @@ class TestStatusCommand:
         mock_queue_manager.return_value = mock_queue
         
         runner = CliRunner()
-        with patch('spindle.cli.load_config', return_value=test_config):
+        with patch('spindle.cli.load_config', return_value=(test_config, Path('/tmp/spindle-config.toml'), True)):
             result = runner.invoke(cli, ["status"])
             
         assert result.exit_code == 0
@@ -342,7 +342,7 @@ class TestCLIIntegration:
     def test_config_loading_integration(self, mock_load_config, mock_check_deps):
         """Test that commands properly load configuration."""
         test_config = SpindleConfig()
-        mock_load_config.return_value = test_config
+        mock_load_config.return_value = (test_config, Path('/tmp/spindle-config.toml'), True)
         
         runner = CliRunner()
         

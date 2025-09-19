@@ -153,26 +153,29 @@ class SpindleConfig(BaseModel):
             # No ownership changes needed - user owns their own directories
 
 
-def load_config(config_path: Path | None = None) -> SpindleConfig:
-    """Load configuration from file or defaults."""
-    if config_path is None:
-        # Check common config locations (user config first)
-        possible_paths = [
-            Path.home() / ".config" / "spindle" / "config.toml",  # User config
-            Path.cwd() / "spindle.toml",  # Current directory
-        ]
-
-        for path in possible_paths:
-            if path.exists():
-                config_path = path
+def load_config(config_path: Path | None = None) -> tuple[SpindleConfig, Path, bool]:
+    """Load configuration, returning the model, resolved path, and existence flag."""
+    if config_path is not None:
+        resolved_path = config_path.expanduser()
+    else:
+        default_path = Path.home() / ".config" / "spindle" / "config.toml"
+        project_path = Path.cwd() / "spindle.toml"
+        resolved_path = default_path
+        for candidate in (default_path, project_path):
+            if candidate.exists():
+                resolved_path = candidate
                 break
 
-    if config_path and config_path.exists():
-        with open(config_path, "rb") as f:
+    exists = resolved_path.exists()
+
+    if exists:
+        with open(resolved_path, "rb") as f:
             config_data = tomli.load(f)
-        return SpindleConfig(**config_data)
-    # Use defaults
-    return SpindleConfig()
+        config = SpindleConfig(**config_data)
+    else:
+        config = SpindleConfig()
+
+    return config, resolved_path, exists
 
 
 def create_sample_config(path: Path) -> None:
