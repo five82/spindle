@@ -1,5 +1,6 @@
 # AGENTS.md
 
+CLAUDE.md and QWEN.md are symbolic links to this file so all agent guidance stays in one place.
 This file provides guidance when working with code in this repository. It teaches agents how to collaborate effectively without duplicating the full README.
 
 ## TL;DR
