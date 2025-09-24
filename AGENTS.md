@@ -104,3 +104,8 @@ Surface recurring issues in `docs/` so future agents know the resolution path.
 - `docs/`: Additional design notes and deep dives (extend when you introduce new subsystems).
 
 Keep AGENTS.md short enough for a fast read. When the workflow evolves, trim obsolete guidance instead of stacking new paragraphs on top.
+
+## GitHub Repositories
+
+spindle - https://github.com/five82/spindle
+drapto - https://github.com/five82/drapto
