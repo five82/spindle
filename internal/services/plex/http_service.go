@@ -13,14 +13,27 @@ import (
 	"spindle/internal/config"
 )
 
+// TokenProvider returns a Plex access token, refreshing it as needed.
+type TokenProvider interface {
+	Token(ctx context.Context) (string, error)
+}
+
 // NewConfiguredService returns a Plex service that moves files into the library
 // and triggers Plex scans when credentials are available.
 func NewConfiguredService(cfg *config.Config) Service {
 	simple := NewSimpleService(cfg.LibraryDir, cfg.MoviesDir, cfg.TVDir, cfg.MoviesLibrary, cfg.TVLibrary)
 
+	if !cfg.PlexRefreshEnabled {
+		return simple
+	}
+
 	plexURL := strings.TrimRight(strings.TrimSpace(cfg.PlexURL), "/")
-	plexToken := strings.TrimSpace(cfg.PlexToken)
-	if plexURL == "" || plexToken == "" {
+	if plexURL == "" {
+		return simple
+	}
+
+	manager, err := NewTokenManager(cfg)
+	if err != nil {
 		return simple
 	}
 
@@ -28,23 +41,24 @@ func NewConfiguredService(cfg *config.Config) Service {
 	return &httpService{
 		simple:        simple,
 		plexURL:       plexURL,
-		plexToken:     plexToken,
 		moviesLibrary: cfg.MoviesLibrary,
 		tvLibrary:     cfg.TVLibrary,
 		client:        client,
+		tokenProvider: manager,
 	}
 }
 
 type httpService struct {
 	simple        *SimpleService
 	plexURL       string
-	plexToken     string
 	moviesLibrary string
 	tvLibrary     string
 	client        *http.Client
 
 	mu       sync.Mutex
 	sections map[string]string
+
+	tokenProvider TokenProvider
 }
 
 func (s *httpService) Organize(ctx context.Context, sourcePath string, meta MediaMetadata) (string, error) {
@@ -56,7 +70,7 @@ func (s *httpService) Refresh(ctx context.Context, meta MediaMetadata) error {
 		return err
 	}
 
-	if s.client == nil {
+	if s.client == nil || s.tokenProvider == nil {
 		return nil
 	}
 
@@ -81,7 +95,11 @@ func (s *httpService) Refresh(ctx context.Context, meta MediaMetadata) error {
 	if err != nil {
 		return fmt.Errorf("build plex refresh request: %w", err)
 	}
-	req.Header.Set("X-Plex-Token", s.plexToken)
+	token, err := s.tokenProvider.Token(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve plex token: %w", err)
+	}
+	req.Header.Set("X-Plex-Token", token)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
 
@@ -111,7 +129,11 @@ func (s *httpService) ensureSections(ctx context.Context) (map[string]string, er
 	if err != nil {
 		return nil, fmt.Errorf("build plex sections request: %w", err)
 	}
-	req.Header.Set("X-Plex-Token", s.plexToken)
+	token, err := s.tokenProvider.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("resolve plex token: %w", err)
+	}
+	req.Header.Set("X-Plex-Token", token)
 	req.Header.Set("Accept", "application/xml")
 	req.Header.Set("User-Agent", userAgent)
 

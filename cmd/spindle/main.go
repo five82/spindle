@@ -18,6 +18,7 @@ import (
 	"spindle/internal/config"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
+	"spindle/internal/services/plex"
 )
 
 var manualFileExtensions = map[string]struct{}{
@@ -168,11 +169,7 @@ func newRootCommand() *cobra.Command {
 				} else {
 					fmt.Fprintln(stdout, "⚙️ Drapto: Not available")
 				}
-				if strings.TrimSpace(loadedConfig.PlexURL) != "" {
-					fmt.Fprintln(stdout, "📚 Plex: Available")
-				} else {
-					fmt.Fprintln(stdout, "📚 Plex: Not configured or unreachable")
-				}
+				fmt.Fprintln(stdout, plexStatusLine(loadedConfig))
 				if strings.TrimSpace(loadedConfig.NtfyTopic) != "" {
 					fmt.Fprintln(stdout, "📱 Notifications: Configured")
 				} else {
@@ -193,6 +190,10 @@ func newRootCommand() *cobra.Command {
 			},
 		},
 	)
+
+	rootCmd.AddCommand(newPlexCommand(func() *config.Config {
+		return loadedConfig
+	}))
 
 	queueCmd := &cobra.Command{
 		Use:   "queue",
@@ -647,6 +648,26 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(configCmd)
 
 	return rootCmd
+}
+
+func plexStatusLine(cfg *config.Config) string {
+	if cfg == nil {
+		return "📚 Plex: Unknown"
+	}
+	if strings.TrimSpace(cfg.PlexURL) == "" {
+		return "📚 Plex: Not configured or unreachable"
+	}
+	if !cfg.PlexRefreshEnabled {
+		return "📚 Plex: Refresh disabled"
+	}
+	manager, err := plex.NewTokenManager(cfg)
+	if err != nil {
+		return fmt.Sprintf("📚 Plex: Auth error (%v)", err)
+	}
+	if manager.HasAuthorization() {
+		return "📚 Plex: Linked"
+	}
+	return "📚 Plex: Link required (run spindle plex link)"
 }
 
 func shouldSkipConfig(cmd *cobra.Command) bool {

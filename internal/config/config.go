@@ -30,7 +30,7 @@ type Config struct {
 	MoviesDir                   string  `toml:"movies_dir"`
 	TVDir                       string  `toml:"tv_dir"`
 	PlexURL                     string  `toml:"plex_url"`
-	PlexToken                   string  `toml:"plex_token"`
+	PlexRefreshEnabled          bool    `toml:"plex_refresh_enabled"`
 	MoviesLibrary               string  `toml:"movies_library"`
 	TVLibrary                   string  `toml:"tv_library"`
 	NtfyTopic                   string  `toml:"ntfy_topic"`
@@ -115,6 +115,7 @@ func Default() Config {
 		TVDir:                       defaultTVDir,
 		MoviesLibrary:               "Movies",
 		TVLibrary:                   "TV Shows",
+		PlexRefreshEnabled:          true,
 		MakeMKVRipTimeout:           3600,
 		MakeMKVInfoTimeout:          300,
 		MakeMKVEjectTimeout:         30,
@@ -444,61 +445,61 @@ func CreateSample(path string) error {
 # ============================================================================
 
 # TMDB API (required for media identification)
-tmdb_api_key = "your_tmdb_api_key_here"           # Get from themoviedb.org/settings/api
+tmdb_api_key = "your_tmdb_api_key_here"              # Get from themoviedb.org/settings/api
 
 # Directory paths - adjust for your environment
-library_dir = "~/your-media-library"              # MUST EXIST: Final media library directory
-movies_dir = "movies"                             # Subdirectory inside library_dir for movies
-tv_dir = "tv"                                     # Subdirectory inside library_dir for TV
+library_dir = "~/your-media-library"                 # MUST EXIST: Final media library directory
+movies_dir = "movies"                                # Subdirectory inside library_dir for movies
+tv_dir = "tv"                                        # Subdirectory inside library_dir for TV
 
 # ============================================================================
 # PATHS & HARDWARE
 # ============================================================================
 
-staging_dir = "~/.local/share/spindle/staging"    # Working directory for rips/encodes
-log_dir = "~/.local/share/spindle/logs"           # Logs and queue database
-review_dir = "~/review"                          # Encoded files awaiting manual identification
-optical_drive = "/dev/sr0"                        # Optical drive device path
+staging_dir = "~/.local/share/spindle/staging"       # Working directory for rips/encodes
+log_dir = "~/.local/share/spindle/logs"              # Logs and queue database
+review_dir = "~/review"                              # Encoded files awaiting manual identification
+optical_drive = "/dev/sr0"                           # Optical drive device path
 
 # ============================================================================
 # OPTIONAL SERVICES
 # ============================================================================
 
 # Plex integration
-plex_url = "http://localhost:32400"               # Plex server URL (omit to disable)
-plex_token = "your_plex_token_here"               # Plex token (Plex Web > Account)
-movies_library = "Movies"                         # Plex movie library name
-tv_library = "TV Shows"                           # Plex TV library name
+plex_url = "http://localhost:32400"                  # Plex server URL (omit to disable)
+movies_library = "Movies"                            # Plex movie library name
+tv_library = "TV Shows"                              # Plex TV library name
+plex_refresh_enabled = true                          # If false, Spindle will not trigger Plex scans automatically
 
 # Notifications
-ntfy_topic = "https://ntfy.sh/your_topic"         # ntfy topic for push notifications (optional)
-ntfy_request_timeout = 10                         # ntfy HTTP client timeout (seconds)
+ntfy_topic = "https://ntfy.sh/your_topic"            # ntfy topic for push notifications (optional)
+ntfy_request_timeout = 10                            # ntfy HTTP client timeout (seconds)
 
 # ============================================================================
 # TMDB & METADATA
 # ============================================================================
 
-tmdb_language = "en-US"                           # ISO 639-1 language for TMDB metadata
-tmdb_base_url = "https://api.themoviedb.org/3"    # Override when using a TMDB proxy
-tmdb_confidence_threshold = 0.8                    # Match confidence (0.0-1.0)
+tmdb_language = "en-US"                              # ISO 639-1 language for TMDB metadata
+tmdb_base_url = "https://api.themoviedb.org/3"       # Override when using a TMDB proxy
+tmdb_confidence_threshold = 0.8                      # Match confidence (0.0-1.0)
 
 # ============================================================================
 # WORKFLOW TUNING (ADVANCED)
 # ============================================================================
 
-makemkv_rip_timeout = 3600                        # MakeMKV ripping timeout (seconds)
-queue_poll_interval = 5                           # Queue polling cadence (seconds)
-error_retry_interval = 10                         # Delay before retrying failures (seconds)
-workflow_worker_count = 2                         # Number of concurrent workflow workers
-workflow_heartbeat_interval = 15                  # Worker heartbeat interval (seconds)
-workflow_heartbeat_timeout = 120                  # Worker heartbeat timeout (seconds)
+makemkv_rip_timeout = 3600                           # MakeMKV ripping timeout (seconds)
+queue_poll_interval = 5                              # Queue polling cadence (seconds)
+error_retry_interval = 10                            # Delay before retrying failures (seconds)
+workflow_worker_count = 2                            # Number of concurrent workflow workers
+workflow_heartbeat_interval = 15                     # Worker heartbeat interval (seconds)
+workflow_heartbeat_timeout = 120                     # Worker heartbeat timeout (seconds)
 
 # ============================================================================
 # LOGGING
 # ============================================================================
 
-log_format = "console"                           # "console" or "json"
-log_level = "info"                               # info, debug, warn, error
+log_format = "console"                              # "console" or "json"
+log_level = "info"                                  # info, debug, warn, error
 `
 
 	if dir := filepath.Dir(path); dir != "" {

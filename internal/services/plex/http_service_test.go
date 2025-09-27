@@ -2,10 +2,13 @@ package plex
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"spindle/internal/config"
 )
@@ -31,12 +34,31 @@ func TestHTTPServiceRefreshTriggersPlex(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.LibraryDir = t.TempDir()
+	cfg.LogDir = t.TempDir()
 	cfg.MoviesDir = "Movies"
 	cfg.TVDir = "TV"
 	cfg.MoviesLibrary = "Movies"
 	cfg.TVLibrary = "TV Shows"
 	cfg.PlexURL = server.URL
-	cfg.PlexToken = "token"
+	cfg.PlexRefreshEnabled = true
+
+	statePath := filepath.Join(cfg.LogDir, stateFileName)
+	state := map[string]any{
+		"client_identifier":   "test-client",
+		"authorization_token": "auth-token",
+		"token":               "token",
+		"token_expires_at":    time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	if err := os.WriteFile(statePath, data, 0o600); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
 
 	service := NewConfiguredService(&cfg)
 	hs, ok := service.(*httpService)

@@ -109,7 +109,6 @@ tmdb_api_key = "your_tmdb_api_key_here"
 
 # REQUIRED: Plex settings (edit for your Plex server)
 plex_url = "http://localhost:32400"                # Edit: Your Plex server URL
-plex_token = "your_plex_token_here"                # Edit: Your Plex token
 
 # Optional: Notifications
 ntfy_topic = "https://ntfy.sh/your_topic"          # Edit or remove
@@ -130,7 +129,8 @@ echo
 echo "Next steps:"
 echo "1. Edit configuration: nano $CONFIG_DIR/config.toml"
 echo "   - Set correct paths for your media library and review directories"
-echo "   - Add your TMDB API key and Plex token"
+echo "   - Add your TMDB API key"
+echo "   - Run 'spindle plex link' once the service is running to authorize Plex"
 echo "2. Enable user service: systemctl --user enable spindle"
 echo "3. Start service: systemctl --user start spindle"
 echo "4. Check status: systemctl --user status spindle"

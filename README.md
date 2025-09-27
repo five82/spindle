@@ -33,7 +33,6 @@ library_dir = "~/Media/Library"
 staging_dir = "~/Media/Staging"
 tmdb_api_key = "tmdb-key-here"
 plex_url = "https://plex.example.com"
-plex_token = "plex-token"
 ntfy_topic = "spindle"
 ```
 
@@ -90,7 +89,8 @@ Use `spindle init-config` to generate `~/.config/spindle/config.toml`, then edit
 - `library_dir` – Final Plex-ready library location (must exist)
 - `staging_dir` – Working directory for ripped/encoded files
 - `tmdb_api_key` – https://www.themoviedb.org/settings/api
-- `plex_url` / `plex_token` – Plex server + token for library scans
+- `plex_url` – Plex server address used for library refreshes
+- `plex_refresh_enabled` – If `true`, Spindle links to Plex and triggers library scans automatically
 - `ntfy_topic` (optional) – Channel for notifications
 
 
@@ -108,6 +108,9 @@ spindle status
 
 # Stop daemon
 spindle stop
+
+# Authorize Plex (run once, prompts for link code)
+spindle plex link
 ```
 
 ### System Service (Optional)
