@@ -29,8 +29,8 @@ type Config struct {
 	DraptoPreset                int     `toml:"drapto_preset"`
 	MoviesDir                   string  `toml:"movies_dir"`
 	TVDir                       string  `toml:"tv_dir"`
+	PlexLinkEnabled             bool    `toml:"plex_link_enabled"`
 	PlexURL                     string  `toml:"plex_url"`
-	PlexRefreshEnabled          bool    `toml:"plex_refresh_enabled"`
 	MoviesLibrary               string  `toml:"movies_library"`
 	TVLibrary                   string  `toml:"tv_library"`
 	NtfyTopic                   string  `toml:"ntfy_topic"`
@@ -113,9 +113,9 @@ func Default() Config {
 		DraptoPreset:                4,
 		MoviesDir:                   defaultMoviesDir,
 		TVDir:                       defaultTVDir,
+		PlexLinkEnabled:             true,
 		MoviesLibrary:               "Movies",
 		TVLibrary:                   "TV Shows",
-		PlexRefreshEnabled:          true,
 		MakeMKVRipTimeout:           3600,
 		MakeMKVInfoTimeout:          300,
 		MakeMKVEjectTimeout:         30,
@@ -465,11 +465,11 @@ optical_drive = "/dev/sr0"                           # Optical drive device path
 # OPTIONAL SERVICES
 # ============================================================================
 
-# Plex integration
+# Plex link (Plex library scanning)
+plex_link_enabled = true                             # If false, Spindle will not trigger Plex scans automatically
 plex_url = "http://localhost:32400"                  # Plex server URL (omit to disable)
 movies_library = "Movies"                            # Plex movie library name
 tv_library = "TV Shows"                              # Plex TV library name
-plex_refresh_enabled = true                          # If false, Spindle will not trigger Plex scans automatically
 
 # Notifications
 ntfy_topic = "https://ntfy.sh/your_topic"            # ntfy topic for push notifications (optional)

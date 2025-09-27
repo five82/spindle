@@ -23,7 +23,7 @@ type TokenProvider interface {
 func NewConfiguredService(cfg *config.Config) Service {
 	simple := NewSimpleService(cfg.LibraryDir, cfg.MoviesDir, cfg.TVDir, cfg.MoviesLibrary, cfg.TVLibrary)
 
-	if !cfg.PlexRefreshEnabled {
+	if !cfg.PlexLinkEnabled {
 		return simple
 	}
 

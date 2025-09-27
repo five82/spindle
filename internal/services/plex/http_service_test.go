@@ -40,7 +40,7 @@ func TestHTTPServiceRefreshTriggersPlex(t *testing.T) {
 	cfg.MoviesLibrary = "Movies"
 	cfg.TVLibrary = "TV Shows"
 	cfg.PlexURL = server.URL
-	cfg.PlexRefreshEnabled = true
+	cfg.PlexLinkEnabled = true
 
 	statePath := filepath.Join(cfg.LogDir, stateFileName)
 	state := map[string]any{

@@ -657,8 +657,8 @@ func plexStatusLine(cfg *config.Config) string {
 	if strings.TrimSpace(cfg.PlexURL) == "" {
 		return "📚 Plex: Not configured or unreachable"
 	}
-	if !cfg.PlexRefreshEnabled {
-		return "📚 Plex: Refresh disabled"
+	if !cfg.PlexLinkEnabled {
+		return "📚 Plex: Link disabled"
 	}
 	manager, err := plex.NewTokenManager(cfg)
 	if err != nil {

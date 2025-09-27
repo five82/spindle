@@ -5,7 +5,7 @@ This guide walks through what happens after you start the Spindle daemon and ins
 ## Before You Start
 
 - Install Spindle with `go install github.com/five82/spindle/cmd/spindle@latest` and create your config with `spindle init-config` (see the README for full setup).
-- Edit `~/.config/spindle/config.toml` so `library_dir`, `staging_dir`, `tmdb_api_key`, `plex_url`, `plex_refresh_enabled`, and `ntfy_topic` (optional) are filled out. Run `spindle plex link` once to authorize Plex when automatic refreshes are enabled.
+- Edit `~/.config/spindle/config.toml` so `library_dir`, `staging_dir`, `tmdb_api_key`, `plex_url`, `plex_link_enabled`, and `ntfy_topic` (optional) are filled out. Run `spindle plex link` once to authorize Plex when automatic refreshes are enabled.
 - Run `spindle config validate` to confirm the configuration and directories are ready.
 - Start the background process with `spindle start`, then monitor logs with `spindle show --follow` (add `--lines N` for a snapshot without following).
 

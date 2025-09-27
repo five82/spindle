@@ -90,7 +90,7 @@ Use `spindle init-config` to generate `~/.config/spindle/config.toml`, then edit
 - `staging_dir` – Working directory for ripped/encoded files
 - `tmdb_api_key` – https://www.themoviedb.org/settings/api
 - `plex_url` – Plex server address used for library refreshes
-- `plex_refresh_enabled` – If `true`, Spindle links to Plex and triggers library scans automatically
+- `plex_link_enabled` – If `true`, Spindle links to Plex and triggers library scans automatically
 - `ntfy_topic` (optional) – Channel for notifications
 
 
