@@ -2,22 +2,29 @@
 
 **Spindle is an automated disc ripping and media library management system.** Insert a Blu-ray or DVD, and Spindle handles everything: identifies the content using TMDB, rips selected titles with MakeMKV, encodes to efficient AV1 format with drapto, organizes files in Plex-compatible structure, and sends notifications when complete.
 
+> ⚙️ **Go stack** – Spindle ships as a Go CLI (`spindle`) and daemon (`spindled`). Install the CLI with `go install github.com/five82/spindle/cmd/spindle@latest` to get started.
+
 > **Early-stage project**: Expect breaking changes.
 
 **Workflow**: Insert disc → Auto-identify → Rip → **Eject** (drive freed) → Background encode/organize → Available in Plex
 
 ## Quick Start
 
-```bash
-# Install Spindle as a tool (uv manages the environment)
-uv tool install git+https://github.com/five82/spindle.git
+1. Install Go 1.22 or newer.
+2. Install the CLI:
 
-# Create initial config
-spindle init-config
+   ```bash
+   go install github.com/five82/spindle/cmd/spindle@latest
+   ```
 
-# Edit required settings
-nano ~/.config/spindle/config.toml
-```
+   Ensure `$(go env GOPATH)/bin` (or `GOBIN` if set) is on your `PATH` so the `spindle` binary is discoverable.
+
+3. Create your initial configuration:
+
+   ```bash
+   spindle init-config
+   nano ~/.config/spindle/config.toml
+   ```
 
 Minimal config example:
 
@@ -42,34 +49,39 @@ spindle show --follow
 ### Prerequisites
 
 **Required:**
-- **uv** (latest stable) - `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **MakeMKV** ≥ 1.17 - https://www.makemkv.com/download/
-- **drapto** (requires Rust toolchain) - `cargo install --git https://github.com/five82/drapto`
+- **Go** ≥ 1.22 – https://go.dev/dl/
+- **MakeMKV** ≥ 1.17 – https://www.makemkv.com/download/
+- **drapto** (requires Rust toolchain) – `cargo install --git https://github.com/five82/drapto`
 
 **Optional (for better identification):**
 - **Disc Automounting**:
   - **Desktop**: Handled automatically by desktop environment
   - **Server**: Add to `/etc/fstab`: `/dev/sr0 /media/cdrom udf,iso9660 ro,noauto,x-systemd.automount,x-systemd.device-timeout=10 0 0`
-- **eject utility** - Usually pre-installed (`util-linux` package)
+- **eject utility** – Usually pre-installed (`util-linux` package)
 
 Start the daemon once to verify dependencies—missing tools are reported with installation hints.
 
 
 ### Install
 
-Global tool (recommended for daily use):
+Install the CLI directly from source (recommended for daily use):
 
 ```bash
-uv tool install git+https://github.com/five82/spindle.git
+go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Local development clone:
+The binary lands in `$(go env GOBIN)` or `$(go env GOPATH)/bin`. Add that directory to your `PATH` if needed.
+
+For local development:
 
 ```bash
 git clone https://github.com/five82/spindle.git
 cd spindle
-uv pip install -e ".[dev]"
+go install ./cmd/spindle
+go build ./cmd/spindled
 ```
+
+Run `go test ./...` from the repo root to ensure your toolchain is healthy.
 
 ### Configuration
 
@@ -111,13 +123,18 @@ sudo loginctl enable-linger $(whoami)
 
 ### Additional Commands
 
-- `spindle queue status` / `spindle queue list`
-- `spindle queue clear --completed` (also `--failed` / `--force`)
-- `spindle queue retry <item_id>`
-- `spindle queue-health`
+- `spindle queue list` (use `--status` filters to narrow by state)
+- `spindle queue status` for a status-by-status summary
+- `spindle queue clear` (add `--completed`, `--failed`, or `--force` for targeted removal)
+- `spindle queue clear-failed`
+- `spindle queue reset-stuck`
+- `spindle queue retry [item_id ...]`
+- `spindle queue health` for lifecycle counts
+- `spindle queue-health` for database diagnostics
 - `spindle add-file /path/to/video.mkv`
-- `spindle config validate`
 - `spindle test-notify`
+- `spindle config validate`
+- `spindle show --lines 50 --follow` for live tailing
 
 
 ### Workflow Lifecycle
@@ -129,9 +146,9 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → E
 ```
 
 - `FAILED`: unrecoverable issue (inspect logs / notifications)
-- `REVIEW`: manual intervention required, files moved to `review_dir`
+- `REVIEW`: manual intervention required. When Spindle cannot identify a disc, it still rips/encodes the content, drops the final file into the `review_dir` (default `~/review`) with a unique name (for example `unidentified-1.mkv`), and marks the queue item complete so the pipeline keeps moving.
 - Drives eject automatically at `RIPPED`; encoding/organization continues in background
-- Notifications (ntfy) fire at major milestones (`RIPPED`, `COMPLETED`, errors)
+- Notifications (ntfy) fire when discs are detected, identification resolves (or needs review), queue runs start/finish, and at major stage milestones (`RIPPED`, `ENCODED`, `COMPLETED`, errors)
 - Read `docs/workflow.md` for a detailed walkthrough
 
 
@@ -166,10 +183,12 @@ See [docs/content-identification.md](docs/content-identification.md) for deeper 
 
 ## Development
 
-Run `uv pip install -e ".[dev]"` once, then rely on `uv run` for tooling. Before committing, execute:
+- Install the CLI and daemon from source during active development: `go install ./cmd/spindle` and `go build ./cmd/spindled`.
+- Run `go test ./...` for fast feedback and `golangci-lint run` to catch style issues.
+- Before committing, execute:
 
 ```bash
 ./check-ci.sh
 ```
 
-It runs pytest with coverage, `black --check`, `ruff`, `uv build`, and `twine check`. See [docs/development.md](docs/development.md) for maintainer notes.
+The script verifies Go version, runs `go test ./...`, and executes `golangci-lint run`. See [docs/development.md](docs/development.md) for deeper workflow notes.

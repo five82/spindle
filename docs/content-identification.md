@@ -1,76 +1,69 @@
 # Content Identification
 
-Reference notes for how Spindle currently classifies discs and prepares metadata. Keep this in sync with `disc/analyzer.py`, `disc/metadata_extractor.py`, and TMDB service changes.
+Reference notes for how the Go daemon classifies discs and prepares metadata. Keep this in sync with `internal/identification`, `internal/disc`, and `internal/identification/tmdb`.
 
 ## Pipeline Summary
 
-1. **MakeMKV scan** supplies the canonical list of titles, durations, and audio/subtitle metadata.
-2. **IntelligentDiscAnalyzer** (`disc/analyzer.py`) infers whether the disc is a movie or TV set, selects titles to rip, and estimates confidence.
-3. **Optional enhanced metadata** from `EnhancedDiscMetadataExtractor` overlays extra hints when disc labels look generic and a mounted filesystem is available.
-4. **TMDB lookup** (`services/tmdb.py`) runs once per disc with runtime/season hints to return `MediaInfo` for naming and library organization.
-5. A lightweight in-memory cache inside `services/tmdb.py` prevents duplicate lookups during a daemon session.
+1. **MakeMKV scan** – `internal/disc.Scanner` calls `makemkvcon info` to capture the disc fingerprint and title list.
+2. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups.
+3. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
+4. The stage writes `MetadataJSON` and `RipSpecData` back to the queue so downstream stages can pick title selections and user-facing details.
 
-## Disc Analysis Details
+## Disc Scan Details
 
-### MakeMKV-first heuristics
-- Main title: longest duration track (movie) or clustered TV episodes (3+ titles within `tv_episode_min/max_duration`).
-- Extras: pulled in when `include_extras` is enabled, bounded by `max_extras_to_rip` and `max_extras_duration`.
-- Commentary: discovered per-title when `include_commentary_tracks` is true (`DiscAnalysisResult.commentary_tracks`).
-- Confidence starts at `MOVIE_CONFIDENCE_BASE`/`TV_CONFIDENCE_BASE` and is raised by TMDB matches.
+- MakeMKV output is parsed into `disc.ScanResult`, preserving the fingerprint and a normalized list of titles (id, name, duration in seconds).
+- Missing fingerprints abort the stage (`ErrFingerprintMissing`). Make sure the drive is reachable (`optical_drive` config) and MakeMKV is on the PATH.
+- Raw JSON is stored alongside parsed data to help with later diagnostics (`rip_spec_data` contains the structured payload).
 
-### Enhanced metadata overlay
-Enabled when `enable_enhanced_disc_metadata` is true and we have a mounted `disc_path`:
-- Runs `bd_info` (if installed) plus parses `bdmt_eng.xml` and `mcmf.xml` when present (`disc/metadata_extractor.py`).
-- Supplies candidate titles in priority order (disc library name → bdmt title → cleaned volume id → MakeMKV label).
-- Detects season/disc numbers for TV sets and flags likely TV discs (`EnhancedDiscMetadata.is_tv_series`).
-- Analyzer uses these hints to rename the primary title and to force TV handling if MakeMKV heuristics were inconclusive.
+## Duplicate Detection & Review Flow
 
-### TMDB identification
-- Single async call via `TMDBService.identify_media(query, content_type, runtime_hint, season_hint)`.
-- Query uses the cleaned label from MakeMKV/enhanced metadata; runtime and season hints narrow results.
-- Results populate `DiscAnalysisResult.media_info` (title/year/season/episode) and bump confidence.
-- Local in-memory cache handles duplicate lookups inside a run; there is no persistent cache on disk.
+- The identifier checks `queue.Store.FindByFingerprint`. If another item already claimed the fingerprint, the current disc is moved straight to `REVIEW` with the message “Duplicate disc fingerprint”.
+- When TMDB lookup fails or produces no confident match, the identifier now flags the queue item for manual review but still allows ripping and Drapto encoding to complete. The organizer stage then relocates the encoded file into `<review_dir>` and marks the queue item `COMPLETED` once the artifact is safely staged, so automation continues uninterrupted.
+- Review filenames are generated from the review reason whenever possible (for example `no-confident-tmdb-match-1.mkv`); if you prefer a different scheme, adjust the prefix logic in `internal/organizer/organizer.go`.
+- Notifications fire through `notifications.Service` (`NotifyDiscDetected`, `NotifyIdentificationComplete`, `NotifyUnidentifiedMedia`) so operators know when a manual follow-up is required and when the encoded asset is ready in the review directory.
 
-### Output (`DiscAnalysisResult`)
-Returned to the orchestrator and persisted in `rip_spec_data`:
-- `primary_title`: normalized display name
-- `content_type`: `movie` or `tv_series`
-- `confidence`: 0.0–0.99
-- `titles_to_rip`: list of MakeMKV `Title` objects selected for processing
-- `commentary_tracks`: map of title id → commentary track ids
-- `episode_mappings`: when TV, maps MakeMKV title ids to season/episode info
-- `media_info`: TMDB metadata (or `None` on failure)
-- `runtime_hint`: minutes, used later for TMDB refinements
-- `enhanced_metadata`: raw metadata object for downstream consumers
+## TMDB Matching
+
+- All lookups route through `tmdb.Client.SearchMovie`. The identifier keeps an in-memory cache keyed by the normalized query to avoid hammering the API.
+- A simple rate limiter (250 ms minimum gap) protects against short bursts when multiple discs enter the same stage.
+- Candidate scoring favors:
+  - Title substring match against the cleaned query.
+  - Higher `vote_average` (scaled 0–1) and `vote_count`.
+- The first candidate above `tmdb_confidence_threshold` wins. The chosen title is written into `MetadataJSON` and echoed in the progress message (“Identified as: …”).
+
+## Output Shape
+
+The identifier persists two JSON blobs on the queue item:
+
+- `MetadataJSON` – compact TMDB fields (`id`, canonical title/name, overview, media_type, vote stats).
+- `RipSpecData` – map containing `fingerprint`, `titles` (the MakeMKV list), and `metadata` (same structure as `MetadataJSON`).
+
+Downstream stages rely on these fields for logging, rip configuration, and Plex naming.
 
 ## Configuration Knobs
 
-All settings live in `config.py`; key fields affecting identification:
+Relevant settings live in `internal/config`:
 
-- `enable_enhanced_disc_metadata`: toggle bd_info/bdmt overlays.
-- `tv_episode_min_duration` / `tv_episode_max_duration`: seconds bounds for TV clustering.
-- `include_extras`, `max_extras_to_rip`, `max_extras_duration`: movie/TV extras policy.
-- `include_commentary_tracks`, `max_commentary_tracks`: commentary behavior.
-- `tmdb_runtime_tolerance_minutes`, `tmdb_confidence_threshold`: heuristics for TMDB matches.
+- `tmdb_api_key`, `tmdb_base_url`, `tmdb_language` – TMDB connectivity.
+- `tmdb_confidence_threshold` – minimum acceptable normalized vote score.
+- `optical_drive` – MakeMKV device path (defaults to `/dev/sr0`).
+- Logging hints: `log_dir` determines where queue snapshots and structured logs land for inspection.
 
-Keep the table in sync when adding new config fields so future changes are discoverable.
+Update this list when the identifier begins consuming additional config (runtime hints, enhanced metadata, etc.).
 
-## Failure & Review Flow
+## Failure Modes & Mitigation
 
-- Analyzer raises on empty MakeMKV results or inability to pick a main title; orchestrator treats this as a `FAILED` queue state with the raw MakeMKV log attached.
-- TMDB lookup failures simply yield `media_info=None` and lower confidence; discs continue through ripping with filesystem-safe titles.
-- Manual review uses the `review_dir` and queue `REVIEW` status; populate `rip_spec_data` with the partial analysis to aid follow-up tooling.
-- Notify via ntfy on identification failures so you can intervene quickly.
+- **MakeMKV scan failure** – surfaces as `FAILED` with `MakeMKV disc scan failed`. Verify the binary location and drive permissions.
+- **Missing TMDB matches** – item is flagged for review, finishes rip/encode, and then is marked complete with the encoded file parked under `review_dir`. Adjust the metadata manually and rerun `spindle queue retry <id>` (if you want Spindle to reorganize the file after you update metadata) or simply leave the queue entry as-is once you’ve handled it.
+- **Notification errors** – logged as warnings; they do not fail the stage but keep an eye on ntfy credentials.
 
-## Troubleshooting
+## Troubleshooting Tips
 
-- **Generic titles**: Check enhanced metadata output (logged at debug level) to confirm the disc is mounted and bd_info ran. Configure `enable_enhanced_disc_metadata` and ensure the binary is in PATH.
-- **TV detection misses**: Adjust `tv_episode_min/max_duration` or inspect durations in the log (look for clustered lengths). TV mode requires ≥3 candidates by default.
-- **Bad TMDB matches**: Inspect `DiscAnalysisResult.primary_title` and the hint data; consider adding custom cleaning rules or forcing year hints.
+- Inspect cached responses by tailing the daemon logs; identifier logs the raw query and any TMDB errors at warn level.
+- For ambiguous discs, update `progress_message` via manual queue edits only after taking a snapshot; otherwise prefer retrying with better metadata.
+- If TMDB throttles requests, widen the rate limit window in code or improve the caching strategy before considering retries.
 
 ## Future Notes
 
-- Subtitle analysis is intentionally omitted; revisit once the AI-generated subtitle workflow is ready.
-- Consider exposing analyzer debug dumps via CLI for faster manual review.
-- Review heuristics periodically with real discs to keep the TV/movie split accurate.
-
+- Enhanced metadata overlay (bd_info, BDMT parsing) is a planned addition—document it here once implemented in `internal/disc`.
+- Consider persisting TMDB caches on disk if repeated scans of box sets become common.

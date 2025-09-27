@@ -4,9 +4,10 @@ This guide walks through what happens after you start the Spindle daemon and ins
 
 ## Before You Start
 
-- Install Spindle with `uv tool install ...` and create your config with `spindle init-config` (see the README for full setup).
+- Install Spindle with `go install github.com/five82/spindle/cmd/spindle@latest` and create your config with `spindle init-config` (see the README for full setup).
 - Edit `~/.config/spindle/config.toml` so `library_dir`, `staging_dir`, `tmdb_api_key`, `plex_url`/`plex_token`, and `ntfy_topic` (optional) are filled out.
-- Start the background process with `spindle start`, then monitor logs with `spindle show --follow`.
+- Run `spindle config validate` to confirm the configuration and directories are ready.
+- Start the background process with `spindle start`, then monitor logs with `spindle show --follow` (add `--lines N` for a snapshot without following).
 
 Spindle only runs as a daemon. All commands talk to that background process.
 
@@ -22,7 +23,7 @@ Every item moves through the queue in order. The statuses you will see are:
 - `REVIEW` - manual attention required (no confident match found)
 - `FAILED` - an error stopped progress; inspect logs and retry when ready
 
-View the queue with `spindle queue list` and overall counts with `spindle queue status`.
+Use `spindle queue list` to inspect items and `spindle queue health` for lifecycle totals.
 
 ## Stage 1: Disc Detection & Queueing (PENDING)
 
@@ -68,7 +69,7 @@ Encoding happens in the background, so you can insert the next disc while previo
 - **Review queue** (`REVIEW`): Spindle could not confidently identify the disc. Files are not ripped yet. Inspect the logs, update metadata manually if needed, then retry from the CLI when ready (`spindle queue retry <id>`).
 - **Failed items** (`FAILED`): Something went wrong (missing dependency, read error, encoding failure). Fix the root cause, then use `spindle queue retry <id>` to resume; Spindle resets progress to `PENDING` and walks the item back through the pipeline.
 
-Use `spindle queue list` (filter with tools like `grep FAILED`) or `spindle queue status` to keep an eye on troublesome items.
+Use `spindle queue list` (filter with tools like `grep FAILED`), `spindle queue status` for a tally per lifecycle state, or `spindle queue health` for condensed diagnostics.
 
 ## Multi-Disc Sets & Manual Files
 
@@ -80,7 +81,8 @@ Use `spindle queue list` (filter with tools like `grep FAILED`) or `spindle queu
 - `spindle show --follow` - tails the daemon log with color formatting.
 - `spindle status` - quick summary (daemon running, current disc, queue totals).
 - `spindle queue list` - see every item, its status, and fingerprint.
-- `spindle queue clear --completed` - prune finished entries without touching active work.
+- `spindle queue status` - table of lifecycle counts (pending, ripping, encoding, etc.).
+- `spindle queue clear` - prune finished entries without touching active work; add `spindle queue clear-failed` to drop only failed items.
 - `spindle stop` - cleanly stop the daemon (planned maintenance, shutdown).
 
 Logs also live in `<log_dir>/spindle.log` and `<log_dir>/queue.db` (the queue database). Use standard SQLite tools to inspect the queue if you prefer raw SQL.
@@ -89,12 +91,12 @@ Logs also live in `<log_dir>/spindle.log` and `<log_dir>/queue.db` (the queue da
 
 - **Staging**: `<staging_dir>/ripped/` for MakeMKV output, `<staging_dir>/encoded/` for Drapto output while waiting on organization.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in the config.
-- **Review**: `<review_dir>/` holds items that need manual intervention.
+- **Review**: `<review_dir>/` holds encoded files that still need manual identification. Each unidentified disc is stored with a unique filename (for example `unidentified-1.mkv`), and the queue item is marked complete so it doesn’t block subsequent work.
 - **Logs & diagnostics**: `<log_dir>/` keeps `spindle.log`, the queue database, and analyzer/debug artifacts.
 
 ## Notifications
 
-If `ntfy_topic` is set, Spindle posts rich notifications at key steps: disc detected, ripping started/completed, encoding completed, Plex added, and errors. You can test the channel any time with `spindle test-notify`.
+If `ntfy_topic` is set, Spindle posts rich notifications at key steps: disc detected, identification resolved (or flagged for review), ripping started/completed, encoding completed, Plex added, queue runs started/completed, and any errors. You can test the channel any time with `spindle test-notify`.
 
 ## Need More Detail?
 

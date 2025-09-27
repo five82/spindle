@@ -7,45 +7,26 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  UV_SYSTEM_PYTHON: 1
-
 jobs:
   test:
-    name: Essential Checks
+    name: Go Checks
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+          go-version: '1.22.x'
+          cache: true
+
+      - name: Run unit tests
+        run: go test ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
         with:
-          python-version: "3.13"
-      
-      - name: Install dependencies
-        run: |
-          uv sync --all-extras
-      
-      - name: Run tests with coverage
-        run: |
-          uv run pytest tests/ -v --cov=spindle --cov-report=term
-      
-      - name: Check code formatting
-        run: |
-          uv run black --check src/
-      
-      - name: Lint code
-        run: |
-          uv run ruff check src/
-      
-      - name: Build package
-        run: |
-          uv build
+          version: v1.59.1
+          args: --timeout=5m

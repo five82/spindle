@@ -6,6 +6,24 @@ __pycache__/
 # C extensions
 *.so
 
+# Go build artifacts
+/spindle
+/spindled
+bin/
+*.exe
+*.exe~
+*.dll
+*.dylib
+*.test
+*.out
+
+# Go tooling outputs
+cover.out
+coverage.out
+profile.out
+*.pprof
+go.work
+
 # Distribution / packaging
 .Python
 build/

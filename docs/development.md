@@ -4,51 +4,51 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 
 ## Environment & Tooling
 
-- Install/update tooling with `uv`; never touch `pip` directly.
-- Keep MakeMKV and Drapto binaries on the PATH (`/usr/local/bin` for the lab machine).
-- Primary staging/library roots (override in `~/.config/spindle/config.toml` when needed):
+- Install Go 1.22 or newer (`go version` should confirm) and keep `GOBIN`/`GOPATH` on your `PATH` so the `spindle` binary is discoverable during iteration.
+- Install lint tooling with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
+- Keep MakeMKV and Drapto binaries on the PATH (`/usr/local/bin` on the lab machine by convention).
+- Default staging/library roots (override in `~/.config/spindle/config.toml` when needed):
   - `~/media/spindle/staging`
   - `~/media/spindle/library`
-- Test TMDB API key: stored in `.env.dev` next to the config; rotate yearly.
-- ntfy topic used for notifications: `spindle-dev`.
+- Shared TMDB API key for development lives in `.env.dev`; rotate annually.
+- ntfy topic used for internal notifications: `spindle-dev`.
 
 ## Daily Workflow
 
-1. `uv pip install -e ".[dev]"` after dependency bumps (mostly redundant but keeps local env fresh).
-2. Drive work through `uv run` entry points:
-   - `uv run spindle start|status|stop`
-   - `uv run spindle show --follow` during manual runs
-   - `uv run pytest` for ad-hoc verification
-3. Queue database reset when experimenting: `uv run python -m spindle.storage.queue reset` (or delete the file in `~/.local/share/spindle/logs`).
-4. Keep logs handy: `tail -f ~/.local/share/spindle/logs/spindle.log` while testing daemon changes.
+1. After dependency or API updates, run `go mod tidy` to keep `go.mod`/`go.sum` focused and reproducible.
+2. Build the CLI and daemon locally: `go install ./cmd/spindle` and `go build ./cmd/spindled`.
+3. Drive manual runs through the Go binaries:
+   - `spindle start|status|stop`
+   - `spindle show --follow` for live logs
+4. Reset queue state with first-class commands instead of direct DB edits: `spindle queue reset-stuck`, `spindle queue clear --completed`, etc.
+5. Logs live under `<log_dir>/spindle.log`; follow with `spindle show --follow` or `tail -f` during debugging.
 
 ## Testing & Quality
 
-- Canonical pre-commit check is `./check-ci.sh`; it runs pytest (with coverage), `black --check`, `ruff`, `uv build`, and `twine check`.
-- When `check-ci.sh` fails, fix formatting first (`uv run black src/`), then lint (`uv run ruff check src/ --fix`), rerun targeted pytest files as needed.
-- Integration-heavy suites worth running individually:
-  - `uv run pytest tests/test_queue.py`
-  - `uv run pytest tests/test_disc_processing.py`
-  - `uv run pytest tests/test_cli.py`
-- Capture expectations for new workflow stages or services inside the relevant test modules.
+- Canonical pre-commit check is `./check-ci.sh`; it verifies Go version, runs `go test ./...`, and executes `golangci-lint run`.
+- If `check-ci.sh` fails, fix lint findings first (`golangci-lint run --fix` when safe), then rerun targeted packages with `go test ./internal/queue ./internal/workflow`, etc.
+- Useful focused test runs:
+  - `go test ./internal/queue`
+  - `go test ./internal/workflow`
+  - `go test ./internal/identification -run TestIdentifier`
+- Stage-level integration tests live alongside packages; keep new behavior observable via public interfaces so tests remain table-driven.
 
 ## Database & Workflow Notes
 
-- `storage/queue.py` now recreates the schema if it detects a mismatch—no separate migration scripts.
-- Use SQLite CLI for quick inspections:
+- `internal/queue` owns schema migrations and recovery logic; the SQLite database is `<log_dir>/queue.db` by default.
+- Inspect state directly when needed with SQLite:
   - `sqlite3 ~/.local/share/spindle/logs/queue.db "SELECT id, disc_title, status, progress_stage FROM queue_items;"`
   - `sqlite3 ~/.local/share/spindle/logs/queue.db ".schema queue_items"`
-- Remember the full status set includes `FAILED` and `REVIEW`; orchestrator and CLI need updates when adding new transitions.
+- Status progression remains `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED` with `FAILED`/`REVIEW` detours. Update the enums, orchestrator routing, CLI output, docs, and tests together when making changes.
 
 ## Release Checklist
 
-1. Ensure `uv.lock` is up to date (`uv lock --upgrade` if dependencies changed).
-2. Run `./check-ci.sh` and confirm all green.
-3. Sanity-test daemon start/stop on the target machine and confirm ntfy notifications fire.
+1. Ensure `go.mod` and `go.sum` capture the intended dependency graph (`go mod tidy`).
+2. Run `./check-ci.sh` and confirm a clean pass.
+3. Sanity-test daemon start/stop on the target machine and confirm ntfy notifications.
 4. Update `CHANGELOG.md` (or release notes draft) with user-visible changes.
-5. Tag release and publish (
-   `git tag -a vX.Y.Z -m "Spindle vX.Y.Z"` → `git push --tags`).
-6. Build artifacts with `uv build`; upload via `twine` if distributing.
+5. Tag the release (`git tag -a vX.Y.Z -m "Spindle vX.Y.Z"`; `git push --tags`).
+6. Build distributable binaries as needed with `go build ./cmd/spindle ./cmd/spindled`.
 
 ## Parking Lot / Ideas
 

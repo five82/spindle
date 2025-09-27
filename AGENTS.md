@@ -7,11 +7,12 @@ CLAUDE.md and QWEN.md are symbolic links to this file so all agent guidance stay
 ## TL;DR
 
 - Do not run `git commit` or `git push` unless the user explicitly asks for them.
-- Use `uv` for everything (install, run, test). Never reach for `pip` or ad-hoc virtualenvs.
+- Use the Go toolchain (`go build`, `go test`, `golangci-lint`); avoid introducing alternate build systems.
 - Finish the work you start. Ask the user before dropping scope or leaving TODOs.
 - Keep the daemon-only model intact; commands interact with a running background process.
 - Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED`, and be ready for `FAILED` or `REVIEW` detours.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn’t.
+- Treat the Python reference tree (`src/spindle/**`) as read-only; only edit it if the user explicitly tells you to.
 
 ## Critical Expectations
 
@@ -27,7 +28,7 @@ CLAUDE.md and QWEN.md are symbolic links to this file so all agent guidance stay
 
 Spindle automates the journey from optical disc to organized Plex library. It coordinates disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata lookup (TMDB), Plex library updates, and notifications (ntfy).
 
-- **Environment**: Python managed exclusively via `uv`.
+- **Environment**: Go 1.22 toolchain plus MakeMKV/Drapto binaries.
 - **Operation mode**: Daemon only. The CLI controls a background process.
 - **Inputs**: Mounted discs at `/media/cdrom` or `/media/cdrom0`, or files dropped into watch folders.
 - **Outputs**: Structured library tree plus ntfy progress.
@@ -38,20 +39,17 @@ See `README.md` for install details, disc mounting notes, and end-user usage.
 
 High-level modules you will touch most often:
 
-- **Core orchestration**: `core/daemon.py`, `core/orchestrator.py`, `core/workflow.py`
-- **Process guardrails**: `process_manager.py` (single-instance enforcement) and `system_check.py` (dependency validation)
-- **Components**: `components/disc_handler.py`, `components/encoder.py`, `components/organizer.py`
-- **Services**: `services/makemkv.py`, `services/drapto.py`, `services/tmdb.py`, `services/plex.py`, `services/ntfy.py`
-- **Storage**: `storage/queue.py` (SQLite queue, schema auto-heals)
-- **Legacy layer kept for low-level operations**: `disc/`
-- **CLI and config**: `cli.py`, `config.py`
-- **Error surface**: `error_handling.py`
+- **Core orchestration**: `internal/workflow`, `internal/daemon`, and `internal/queue`
+- **Stage handlers**: `internal/identification`, `internal/ripping`, `internal/encoding`, `internal/organizer`
+- **External services**: `internal/services`, `internal/notifications`, `internal/identification/tmdb`, `internal/disc`
+- **CLI and daemon entry points**: `cmd/spindle`, `cmd/spindled`
+- **Configuration & logging**: `internal/config`, `internal/logging`
 
 When new capabilities land, update this map and the README together so future agents know where to look.
 
 ## Workflow Lifecycle
 
-`storage/queue.py` defines the lifecycle and is the source of truth. Items typically advance:
+`internal/queue` defines the lifecycle and is the source of truth. Items typically advance:
 
 ```
 PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED
@@ -61,39 +59,39 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → E
 - **REVIEW** is for manual intervention (for example, uncertain identification).
 - Disc ejection is tied to a successful transition to `RIPPED`.
 
-If you add or reorder phases, update the enum, orchestrator routing, CLI presentation, docs, and tests in one pull.
+If you add or reorder phases, update the enums, workflow routing, CLI presentation, docs, and tests in one pull.
 
 ## Development Workflow
 
-- Install dev dependencies once with `uv pip install -e ".[dev]"` (documented in `README.md`).
-- Use `uv run` for every Python entry point (`uv run spindle start`, `uv run pytest`, etc.).
-- Configuration lives at `~/.config/spindle/config.toml`. Use test staging/library dirs and a test TMDB key when running integration flows.
-- Before committing, execute `./check-ci.sh` (runs pytest with coverage, `black --check`, `ruff`, package build). If you cannot run it, state why in your handoff.
+- Install Go 1.22+ locally and keep `golangci-lint` up to date via `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
+- Build binaries from source while iterating: `go install ./cmd/spindle` and `go build ./cmd/spindled`.
+- Configuration lives at `~/.config/spindle/config.toml`. Use dedicated staging/library directories and a test TMDB key for integration flows.
+- Before handing off, execute `./check-ci.sh` (runs `go test ./...` and `golangci-lint run`). If you cannot run it, state why.
 
 ## Testing & Quality
 
-The test suite is intentionally integration-heavy and mirrors user behavior:
+The Go tests lean heavily on integration-style coverage:
 
-- Key files: `tests/test_queue.py`, `tests/test_disc_processing.py`, `tests/test_identification.py`, `tests/test_encoding.py`, `tests/test_cli.py`, plus supporting suites for configuration, error handling, organization, and rip specs.
-- Use mocks for external services (TMDB, Plex, Drapto, MakeMKV) and real SQLite databases in temporary directories.
-- Add tests alongside features. Keep coverage focused on observable behavior rather than private helpers.
+- Key packages: `internal/queue`, `internal/workflow`, `internal/identification`, `internal/ripping`, `internal/encoding`, `internal/organizer`, and `cmd/spindle` integration tests.
+- Use interfaces to stub external services (TMDB, Plex, Drapto, MakeMKV) and temporary SQLite databases for queue tests.
+- Add tests alongside features and keep assertions at observable boundaries.
 
-Formatting (`black`) and linting (`ruff`) are enforced by `./check-ci.sh`; let the script highlight anything you missed.
+Formatting and linting are enforced by `golangci-lint`; run it directly or via `./check-ci.sh`.
 
 ## Operations Reference
 
-- Daemon control: `uv run spindle start|stop|status`.
-- Logs: `uv run spindle show --follow` for live tails with color, `--lines N` for snapshots.
-- Queue resets, health checks, and other maintenance live in `storage/queue.py` and `system_check.py`. Consult function docstrings before invoking from the CLI.
+- Daemon control: `spindle start|stop|status`.
+- Logs: `spindle show --follow` for live tails with color, `--lines N` for snapshots.
+- Queue resets, health checks, and other maintenance flow through `spindle queue` subcommands (`reset-stuck`, `health`, `clear`, etc.).
 - For day-to-day command syntax, rely on `README.md` to avoid duplicating authority here.
 
 ## Debugging & Troubleshooting
 
-- **Disc issues**: Verify mounts and MakeMKV availability. `disc/` helpers and `components/disc_handler.py` give visibility.
-- **Identification stalls**: Inspect TMDB configuration and recent analyzer logs.
-- **Encoding hiccups**: Drapto integration streams JSON progress (`services/drapto.py`). Capture progress logs before retrying.
+- **Disc issues**: Verify mounts and MakeMKV availability. `internal/disc` helpers expose scan failures clearly in logs.
+- **Identification stalls**: Inspect TMDB configuration, confirm the API key, and review identifier warnings for cache/HTTP issues.
+- **Encoding hiccups**: Drapto integration streams JSON progress from `internal/encoding`; capture the log payload before retrying.
 - **Queue visibility**: `sqlite3 path/to/queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'` is often faster than adding debug prints.
-- **Single instance conflicts**: `process_manager.py` prevents duplicate daemons; ensure you do not spawn workarounds that bypass it.
+- **Single instance conflicts**: `internal/daemon` enforces single-instance operation; avoid bypassing it with ad-hoc process launches.
 
 Surface recurring issues in `docs/` so future agents know the resolution path.
 

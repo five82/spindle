@@ -1,7 +1,7 @@
 # Spindle - Automated disc ripping, encoding, and media library management
 # REQUIRES: uv package manager (https://docs.astral.sh/uv/)
 # Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh
-# End users: uv tool install git+https://github.com/five82/spindle.git
+# Legacy Python CLI (deprecated): uv tool install git+https://github.com/five82/spindle.git
 # Development: uv pip install -e ".[dev]"
 # Usage: spindle [command] (tool install) or uv run spindle [command] (dev)
 

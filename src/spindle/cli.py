@@ -51,7 +51,7 @@ def check_uv_requirement() -> None:
             "[yellow]TIP: For development, use 'uv run spindle [command]'[/yellow]",
         )
         console.print(
-            "For end users, install with: uv tool install git+https://github.com/five82/spindle.git",
+            "Default Go CLI: go install github.com/five82/spindle/cmd/spindle@latest",
         )
 
 
