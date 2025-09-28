@@ -309,6 +309,7 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) {
 	}
 
 	results := deps.CheckBinaries(requirements)
+	results = append(results, deps.CheckFFmpegForDrapto(d.cfg.DraptoBinary()))
 	d.depsMu.Lock()
 	d.dependencies = make([]DependencyStatus, len(results))
 	for i, result := range results {

@@ -37,7 +37,7 @@ func testConfig(t *testing.T) *config.Config {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("mkdir bin: %v", err)
 	}
-	for _, name := range []string{"makemkvcon", "drapto"} {
+	for _, name := range []string{"makemkvcon", "drapto", "ffmpeg"} {
 		path := filepath.Join(binDir, name)
 		script := []byte("#!/bin/sh\nexit 0\n")
 		if err := os.WriteFile(path, script, 0o755); err != nil {

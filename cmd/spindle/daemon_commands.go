@@ -230,6 +230,7 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 		},
 	}
 	checks := deps.CheckBinaries(requirements)
+	checks = append(checks, deps.CheckFFmpegForDrapto(cfg.DraptoBinary()))
 	statuses := make([]ipc.DependencyStatus, 0, len(checks))
 	for _, check := range checks {
 		statuses = append(statuses, ipc.DependencyStatus{
