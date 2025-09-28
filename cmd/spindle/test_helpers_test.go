@@ -34,6 +34,11 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 	t.Helper()
 
 	base := t.TempDir()
+	homeDir := filepath.Join(base, "home")
+	if err := os.MkdirAll(homeDir, 0o755); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
+	t.Setenv("HOME", homeDir)
 	cfgVal := config.Default()
 	cfgVal.TMDBAPIKey = "test"
 	cfgVal.StagingDir = filepath.Join(base, "staging")
@@ -44,7 +49,10 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 
 	cfg := &cfgVal
 
-	configPath := filepath.Join(base, "config.toml")
+	configPath := filepath.Join(homeDir, ".config", "spindle", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
 	writeTestConfig(t, configPath, cfg)
 
 	store, err := queue.Open(cfg)
