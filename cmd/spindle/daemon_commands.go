@@ -131,26 +131,28 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				statusResp.Dependencies = resolveDependencies(cfg)
 			}
 
+			colorize := shouldColorize(stdout)
+
 			fmt.Fprintln(stdout, "System Status")
 			if statusResp.Running {
-				fmt.Fprintln(stdout, "🟢 Spindle: Running")
+				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusOK, "Running", colorize))
 			} else {
-				fmt.Fprintln(stdout, "🔴 Spindle: Not running")
+				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusWarn, "Not running (run `spindle start`)", colorize))
 			}
-			fmt.Fprintln(stdout, detectDiscLine(cfg.OpticalDrive))
+			fmt.Fprintln(stdout, detectDiscLine(cfg.OpticalDrive, colorize))
 			if executableAvailable("drapto") {
-				fmt.Fprintln(stdout, "⚙️ Drapto: Available")
+				fmt.Fprintln(stdout, renderStatusLine("Drapto", statusOK, "Available", colorize))
 			} else {
-				fmt.Fprintln(stdout, "⚙️ Drapto: Not available")
+				fmt.Fprintln(stdout, renderStatusLine("Drapto", statusError, "Not available", colorize))
 			}
-			fmt.Fprintln(stdout, plexStatusLine(cfg))
+			fmt.Fprintln(stdout, plexStatusLine(cfg, colorize))
 			if strings.TrimSpace(cfg.NtfyTopic) != "" {
-				fmt.Fprintln(stdout, "📱 Notifications: Configured")
+				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusOK, "Configured", colorize))
 			} else {
-				fmt.Fprintln(stdout, "📱 Notifications: Not configured")
+				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusWarn, "Not configured", colorize))
 			}
 
-			for _, line := range dependencyLines(statusResp.Dependencies) {
+			for _, line := range dependencyLines(statusResp.Dependencies, colorize) {
 				fmt.Fprintln(stdout, line)
 			}
 
@@ -162,7 +164,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				{label: "Movies", path: librarySubdirPath(cfg.LibraryDir, cfg.MoviesDir)},
 				{label: "TV", path: librarySubdirPath(cfg.LibraryDir, cfg.TVDir)},
 			} {
-				fmt.Fprintln(stdout, directoryStatusLine(dir.label, dir.path))
+				fmt.Fprintln(stdout, directoryStatusLine(dir.label, dir.path, colorize))
 			}
 
 			fmt.Fprintln(stdout)
@@ -183,30 +185,30 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 	return []*cobra.Command{startCmd, stopCmd, statusCmd}
 }
 
-func dependencyLines(deps []ipc.DependencyStatus) []string {
+func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
 	if len(deps) == 0 {
 		return nil
 	}
 	lines := make([]string, 0, len(deps))
 	for _, dep := range deps {
 		if dep.Available {
-			text := fmt.Sprintf("🛠️ %s: Ready", dep.Name)
+			message := "Ready"
 			if dep.Command != "" {
-				text = fmt.Sprintf("%s (command: %s)", text, dep.Command)
+				message = fmt.Sprintf("Ready (command: %s)", dep.Command)
 			}
-			lines = append(lines, text)
+			lines = append(lines, renderStatusLine(dep.Name, statusOK, message, colorize))
 			continue
 		}
 
-		indicator := "❌"
-		if dep.Optional {
-			indicator = "⚠️"
-		}
 		detail := strings.TrimSpace(dep.Detail)
 		if detail == "" {
 			detail = "not available"
 		}
-		lines = append(lines, fmt.Sprintf("%s %s: %s", indicator, dep.Name, detail))
+		kind := statusError
+		if dep.Optional {
+			kind = statusWarn
+		}
+		lines = append(lines, renderStatusLine(dep.Name, kind, detail, colorize))
 	}
 	return lines
 }

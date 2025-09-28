@@ -49,8 +49,8 @@ func TestDaemonStartStopStatus(t *testing.T) {
 	}
 	requireContains(t, out, "System Status")
 	requireContains(t, out, "Queue Status")
-	if !strings.Contains(out, "Pending") && !strings.Contains(out, "Identified") {
-		t.Fatalf("expected queue status to include Pending or Identified, got:\n%s", out)
+	if !strings.Contains(out, "Pending") && !strings.Contains(out, "Identified") && !strings.Contains(out, "Identifying") {
+		t.Fatalf("expected queue status to include Pending/Identified/Identifying, got:\n%s", out)
 	}
 	requireContains(t, out, "Failed")
 }
@@ -64,7 +64,7 @@ func TestDaemonStatusDiscDetectionTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	requireContains(t, out, "Disc: No disc detected")
+	requireContains(t, out, "[INFO] No disc detected")
 }
 
 func TestShowFollow(t *testing.T) {

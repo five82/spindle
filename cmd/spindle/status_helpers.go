@@ -15,33 +15,33 @@ import (
 	"spindle/internal/services/plex"
 )
 
-func plexStatusLine(cfg *config.Config) string {
+func plexStatusLine(cfg *config.Config, colorize bool) string {
 	if cfg == nil {
-		return "📚 Plex: Unknown"
+		return renderStatusLine("Plex", statusInfo, "Unknown", colorize)
 	}
 	if strings.TrimSpace(cfg.PlexURL) == "" {
-		return "📚 Plex: Not configured or unreachable"
+		return renderStatusLine("Plex", statusWarn, "Not configured or unreachable", colorize)
 	}
 	if !cfg.PlexLinkEnabled {
-		return "📚 Plex: Link disabled"
+		return renderStatusLine("Plex", statusWarn, "Link disabled", colorize)
 	}
 	manager, err := plex.NewTokenManager(cfg)
 	if err != nil {
-		return fmt.Sprintf("📚 Plex: Auth error (%v)", err)
+		return renderStatusLine("Plex", statusError, fmt.Sprintf("Auth error (%v)", err), colorize)
 	}
 	if manager.HasAuthorization() {
-		return "📚 Plex: Linked"
+		return renderStatusLine("Plex", statusOK, "Linked", colorize)
 	}
-	return "📚 Plex: Link required (run spindle plex link)"
+	return renderStatusLine("Plex", statusWarn, "Link required (run spindle plex link)", colorize)
 }
 
-func detectDiscLine(device string) string {
+func detectDiscLine(device string, colorize bool) string {
 	device = strings.TrimSpace(device)
 	if device == "" {
 		device = "/dev/sr0"
 	}
 	if _, err := exec.LookPath("lsblk"); err != nil {
-		return "📀 Disc: No disc detected"
+		return renderStatusLine("Disc", statusInfo, "No disc detected", colorize)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -49,11 +49,11 @@ func detectDiscLine(device string) string {
 	cmd := exec.CommandContext(ctx, "lsblk", "-no", "LABEL,FSTYPE", device)
 	output, err := cmd.Output()
 	if err != nil {
-		return "📀 Disc: No disc detected"
+		return renderStatusLine("Disc", statusInfo, "No disc detected", colorize)
 	}
 	text := strings.TrimSpace(string(output))
 	if text == "" {
-		return "📀 Disc: No disc detected"
+		return renderStatusLine("Disc", statusInfo, "No disc detected", colorize)
 	}
 	fields := strings.Fields(text)
 	label := "Unknown"
@@ -65,7 +65,7 @@ func detectDiscLine(device string) string {
 		fstype = strings.ToLower(fields[1])
 	}
 	discType := classifyDiscType(device, fstype)
-	return fmt.Sprintf("📀 Disc: %s disc '%s' on %s", discType, label, device)
+	return renderStatusLine("Disc", statusOK, fmt.Sprintf("%s disc '%s' on %s", discType, label, device), colorize)
 }
 
 func classifyDiscType(device, fstype string) string {
@@ -85,11 +85,11 @@ func executableAvailable(name string) bool {
 	return err == nil
 }
 
-func directoryStatusLine(label, path string) string {
+func directoryStatusLine(label, path string, colorize bool) string {
 	if err := checkDirectoryAccess(path); err != nil {
-		return fmt.Sprintf("📂 %s: %s (error: %v)", label, path, err)
+		return renderStatusLine(label, statusError, fmt.Sprintf("%s (error: %v)", path, err), colorize)
 	}
-	return fmt.Sprintf("📂 %s: %s (read/write ok)", label, path)
+	return renderStatusLine(label, statusOK, fmt.Sprintf("%s (read/write ok)", path), colorize)
 }
 
 func checkDirectoryAccess(path string) error {
