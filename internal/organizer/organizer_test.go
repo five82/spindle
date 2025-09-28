@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 
 	"spindle/internal/config"
+	"spindle/internal/notifications"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/services/plex"
@@ -217,53 +217,25 @@ type stubNotifier struct {
 	reviewed  []string
 }
 
-func (s *stubNotifier) NotifyDiscDetected(ctx context.Context, discTitle, discType string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyIdentificationComplete(ctx context.Context, title, mediaType string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyRipStarted(ctx context.Context, discTitle string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyRipCompleted(ctx context.Context, discTitle string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyEncodingCompleted(ctx context.Context, discTitle string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyProcessingCompleted(ctx context.Context, title string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyOrganizationCompleted(ctx context.Context, mediaTitle, finalFile string) error {
-	s.completed = append(s.completed, mediaTitle)
-	return nil
-}
-
-func (s *stubNotifier) NotifyQueueStarted(ctx context.Context, count int) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyQueueCompleted(ctx context.Context, processed, failed int, duration time.Duration) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyError(ctx context.Context, err error, contextLabel string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyUnidentifiedMedia(ctx context.Context, filename string) error {
-	s.reviewed = append(s.reviewed, filename)
-	return nil
-}
-
-func (s *stubNotifier) TestNotification(ctx context.Context) error {
+func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, payload notifications.Payload) error {
+	switch event {
+	case notifications.EventOrganizationCompleted:
+		if payload != nil {
+			if title, _ := payload["mediaTitle"].(string); title != "" {
+				s.completed = append(s.completed, title)
+			}
+		}
+	case notifications.EventUnidentifiedMedia:
+		var label string
+		if payload != nil {
+			if name, ok := payload["filename"].(string); ok {
+				label = name
+			} else if name, ok := payload["label"].(string); ok {
+				label = name
+			}
+		}
+		s.reviewed = append(s.reviewed, label)
+	}
 	return nil
 }
 

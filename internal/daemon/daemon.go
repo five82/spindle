@@ -215,7 +215,7 @@ func (d *Daemon) TestNotification(ctx context.Context) (bool, string, error) {
 		return false, "ntfy topic not configured", nil
 	}
 	notifier := notifications.NewService(d.cfg)
-	if err := notifier.TestNotification(ctx); err != nil {
+	if err := notifier.Publish(ctx, notifications.EventTestNotification, nil); err != nil {
 		return false, "failed to send notification", err
 	}
 	return true, "test notification sent", nil

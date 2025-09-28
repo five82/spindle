@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 
 	"spindle/internal/config"
 	"spindle/internal/encoding"
+	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services/drapto"
 )
@@ -217,52 +217,14 @@ type stubNotifier struct {
 	completed []string
 }
 
-func (s *stubNotifier) NotifyDiscDetected(ctx context.Context, discTitle, discType string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyIdentificationComplete(ctx context.Context, title, mediaType string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyRipStarted(ctx context.Context, discTitle string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyRipCompleted(ctx context.Context, discTitle string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyEncodingCompleted(ctx context.Context, discTitle string) error {
-	s.completed = append(s.completed, discTitle)
-	return nil
-}
-
-func (s *stubNotifier) NotifyProcessingCompleted(ctx context.Context, title string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyOrganizationCompleted(ctx context.Context, mediaTitle, finalFile string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyQueueStarted(ctx context.Context, count int) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyQueueCompleted(ctx context.Context, processed, failed int, duration time.Duration) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyError(ctx context.Context, err error, contextLabel string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyUnidentifiedMedia(ctx context.Context, filename string) error {
-	return nil
-}
-
-func (s *stubNotifier) TestNotification(ctx context.Context) error {
+func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, payload notifications.Payload) error {
+	if event == notifications.EventEncodingCompleted {
+		if payload != nil {
+			if title, _ := payload["discTitle"].(string); title != "" {
+				s.completed = append(s.completed, title)
+			}
+		}
+	}
 	return nil
 }
 

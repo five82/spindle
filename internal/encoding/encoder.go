@@ -113,7 +113,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	if e.client != nil {
 		item.ProgressMessage = "Encoding completed"
 		if e.notifier != nil {
-			if err := e.notifier.NotifyEncodingCompleted(ctx, item.DiscTitle); err != nil {
+			if err := e.notifier.Publish(ctx, notifications.EventEncodingCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
 				logger.Warn("encoding notification failed", zap.Error(err))
 			}
 		}

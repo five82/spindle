@@ -16,7 +16,7 @@ func TestNewServiceReturnsNoopWhenTopicMissing(t *testing.T) {
 	cfg := config.Default()
 	cfg.NtfyTopic = ""
 	svc := notifications.NewService(&cfg)
-	if err := svc.NotifyRipCompleted(context.Background(), "Example"); err != nil {
+	if err := svc.Publish(context.Background(), notifications.EventRipCompleted, notifications.Payload{"discTitle": "Example"}); err != nil {
 		t.Fatalf("expected noop notifier to return nil, got %v", err)
 	}
 }
@@ -24,25 +24,28 @@ func TestNewServiceReturnsNoopWhenTopicMissing(t *testing.T) {
 func TestNtfyServiceFormatsPayloads(t *testing.T) {
 	tests := []struct {
 		name           string
-		invoke         func(notifications.Service) error
+		event          notifications.Event
+		payload        notifications.Payload
 		expectTitle    string
 		expectMessage  string
 		expectTags     string
 		expectPriority string
 	}{
 		{
-			name: "rip completed",
-			invoke: func(s notifications.Service) error {
-				return s.NotifyRipCompleted(context.Background(), "Jurassic Park")
+			name:  "rip completed",
+			event: notifications.EventRipCompleted,
+			payload: notifications.Payload{
+				"discTitle": "Jurassic Park",
 			},
 			expectTitle:   "Spindle - Rip Complete",
 			expectMessage: "💿 Rip complete: Jurassic Park",
 			expectTags:    "spindle,rip,completed",
 		},
 		{
-			name: "processing complete",
-			invoke: func(s notifications.Service) error {
-				return s.NotifyProcessingCompleted(context.Background(), "The Matrix")
+			name:  "processing complete",
+			event: notifications.EventProcessingCompleted,
+			payload: notifications.Payload{
+				"title": "The Matrix",
 			},
 			expectTitle:    "Spindle - Complete",
 			expectMessage:  "✅ Ready to watch: The Matrix",
@@ -50,9 +53,12 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			expectPriority: "high",
 		},
 		{
-			name: "queue completed with failures",
-			invoke: func(s notifications.Service) error {
-				return s.NotifyQueueCompleted(context.Background(), 3, 1, 5*time.Minute+3*time.Second)
+			name:  "queue completed with failures",
+			event: notifications.EventQueueCompleted,
+			payload: notifications.Payload{
+				"processed": 3,
+				"failed":    1,
+				"duration":  5*time.Minute + 3*time.Second,
 			},
 			expectTitle:   "Spindle - Queue Complete (with errors)",
 			expectMessage: "Queue processing complete: 3 succeeded, 1 failed in 5m3s",
@@ -91,7 +97,7 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			cfg.NtfyRequestTimeout = 5
 
 			svc := notifications.NewService(&cfg)
-			if err := tc.invoke(svc); err != nil {
+			if err := svc.Publish(context.Background(), tc.event, tc.payload); err != nil {
 				t.Fatalf("notification returned error: %v", err)
 			}
 

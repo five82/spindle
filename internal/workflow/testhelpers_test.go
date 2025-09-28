@@ -4,10 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"time"
 
 	"spindle/internal/disc"
 	"spindle/internal/identification/tmdb"
+	"spindle/internal/notifications"
 	"spindle/internal/services/drapto"
 	"spindle/internal/services/makemkv"
 	"spindle/internal/services/plex"
@@ -21,56 +21,29 @@ type stubNotifier struct {
 	processingCompletes []string
 }
 
-func (s *stubNotifier) NotifyDiscDetected(ctx context.Context, discTitle, discType string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyIdentificationComplete(ctx context.Context, title, mediaType string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyRipStarted(ctx context.Context, discTitle string) error {
-	s.ripStarts = append(s.ripStarts, discTitle)
-	return nil
-}
-
-func (s *stubNotifier) NotifyRipCompleted(ctx context.Context, discTitle string) error {
-	s.ripCompletes = append(s.ripCompletes, discTitle)
-	return nil
-}
-
-func (s *stubNotifier) NotifyEncodingCompleted(ctx context.Context, discTitle string) error {
-	s.encodeCompletes = append(s.encodeCompletes, discTitle)
-	return nil
-}
-
-func (s *stubNotifier) NotifyProcessingCompleted(ctx context.Context, title string) error {
-	s.processingCompletes = append(s.processingCompletes, title)
-	return nil
-}
-
-func (s *stubNotifier) NotifyOrganizationCompleted(ctx context.Context, mediaTitle, finalFile string) error {
-	s.organizeCompletes = append(s.organizeCompletes, mediaTitle)
-	return nil
-}
-
-func (s *stubNotifier) NotifyQueueStarted(ctx context.Context, count int) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyQueueCompleted(ctx context.Context, processed, failed int, duration time.Duration) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyError(ctx context.Context, err error, contextLabel string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyUnidentifiedMedia(ctx context.Context, filename string) error {
-	return nil
-}
-
-func (s *stubNotifier) TestNotification(ctx context.Context) error {
+func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, payload notifications.Payload) error {
+	var title string
+	if payload != nil {
+		if v, ok := payload["discTitle"].(string); ok {
+			title = v
+		} else if v, ok := payload["title"].(string); ok {
+			title = v
+		} else if v, ok := payload["mediaTitle"].(string); ok {
+			title = v
+		}
+	}
+	switch event {
+	case notifications.EventRipStarted:
+		s.ripStarts = append(s.ripStarts, title)
+	case notifications.EventRipCompleted:
+		s.ripCompletes = append(s.ripCompletes, title)
+	case notifications.EventEncodingCompleted:
+		s.encodeCompletes = append(s.encodeCompletes, title)
+	case notifications.EventOrganizationCompleted:
+		s.organizeCompletes = append(s.organizeCompletes, title)
+	case notifications.EventProcessingCompleted:
+		s.processingCompletes = append(s.processingCompletes, title)
+	}
 	return nil
 }
 

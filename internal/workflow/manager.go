@@ -498,7 +498,10 @@ func (m *Manager) notifyStageError(ctx context.Context, stageName string, item *
 	}
 	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-manager")))
 	contextLabel := fmt.Sprintf("%s (item #%d)", stageName, item.ID)
-	if err := m.notifier.NotifyError(ctx, stageErr, contextLabel); err != nil {
+	if err := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
+		"error":   stageErr,
+		"context": contextLabel,
+	}); err != nil {
 		logger.Warn("stage error notification failed", zap.Error(err))
 	}
 }
@@ -522,7 +525,7 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 	m.mu.Unlock()
 
 	count := countWorkItems(stats)
-	if err := m.notifier.NotifyQueueStarted(ctx, count); err != nil {
+	if err := m.notifier.Publish(ctx, notifications.EventQueueStarted, notifications.Payload{"count": count}); err != nil {
 		m.logger.Warn("queue start notification failed", zap.Error(err))
 	}
 }
@@ -556,7 +559,11 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 	}
 	processed := stats[queue.StatusCompleted]
 	failed := stats[queue.StatusFailed]
-	if err := m.notifier.NotifyQueueCompleted(ctx, processed, failed, duration); err != nil {
+	if err := m.notifier.Publish(ctx, notifications.EventQueueCompleted, notifications.Payload{
+		"processed": processed,
+		"failed":    failed,
+		"duration":  duration,
+	}); err != nil {
 		m.logger.Warn("queue completion notification failed", zap.Error(err))
 	}
 }

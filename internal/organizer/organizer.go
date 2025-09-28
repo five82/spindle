@@ -88,7 +88,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		if o.notifier != nil {
 			label := filepath.Base(reviewPath)
-			if err := o.notifier.NotifyUnidentifiedMedia(ctx, label); err != nil {
+			if err := o.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{"filename": label}); err != nil {
 				logger.Warn("review notification failed", zap.Error(err))
 			}
 		}
@@ -137,10 +137,13 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		if title == "" {
 			title = filepath.Base(targetPath)
 		}
-		if err := o.notifier.NotifyOrganizationCompleted(ctx, title, filepath.Base(targetPath)); err != nil {
+		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
+			"mediaTitle": title,
+			"finalFile":  filepath.Base(targetPath),
+		}); err != nil {
 			logger.Warn("organization notifier failed", zap.Error(err))
 		}
-		if err := o.notifier.NotifyProcessingCompleted(ctx, title); err != nil {
+		if err := o.notifier.Publish(ctx, notifications.EventProcessingCompleted, notifications.Payload{"title": title}); err != nil {
 			logger.Warn("processing completion notifier failed", zap.Error(err))
 		}
 	}

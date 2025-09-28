@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 
 	"spindle/internal/config"
+	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
 	"spindle/internal/services/makemkv"
@@ -209,53 +209,21 @@ type stubNotifier struct {
 	completions []string
 }
 
-func (s *stubNotifier) NotifyDiscDetected(ctx context.Context, discTitle, discType string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyIdentificationComplete(ctx context.Context, title, mediaType string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyRipStarted(ctx context.Context, discTitle string) error {
-	s.starts = append(s.starts, discTitle)
-	return nil
-}
-
-func (s *stubNotifier) NotifyRipCompleted(ctx context.Context, discTitle string) error {
-	s.completions = append(s.completions, discTitle)
-	return nil
-}
-
-func (s *stubNotifier) NotifyEncodingCompleted(ctx context.Context, discTitle string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyProcessingCompleted(ctx context.Context, title string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyOrganizationCompleted(ctx context.Context, mediaTitle, finalFile string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyQueueStarted(ctx context.Context, count int) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyQueueCompleted(ctx context.Context, processed, failed int, duration time.Duration) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyError(ctx context.Context, err error, contextLabel string) error {
-	return nil
-}
-
-func (s *stubNotifier) NotifyUnidentifiedMedia(ctx context.Context, filename string) error {
-	return nil
-}
-
-func (s *stubNotifier) TestNotification(ctx context.Context) error {
+func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, payload notifications.Payload) error {
+	switch event {
+	case notifications.EventRipStarted:
+		if payload != nil {
+			if title, _ := payload["discTitle"].(string); title != "" {
+				s.starts = append(s.starts, title)
+			}
+		}
+	case notifications.EventRipCompleted:
+		if payload != nil {
+			if title, _ := payload["discTitle"].(string); title != "" {
+				s.completions = append(s.completions, title)
+			}
+		}
+	}
 	return nil
 }
 

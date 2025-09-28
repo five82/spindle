@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -13,6 +12,7 @@ import (
 	"spindle/internal/disc"
 	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
+	"spindle/internal/notifications"
 	"spindle/internal/queue"
 )
 
@@ -225,32 +225,42 @@ type recordingNotifier struct {
 	unidentified []string
 }
 
-func (r *recordingNotifier) NotifyDiscDetected(ctx context.Context, discTitle, discType string) error {
-	r.detected = append(r.detected, struct{ title, discType string }{strings.TrimSpace(discTitle), strings.TrimSpace(discType)})
+func (r *recordingNotifier) Publish(ctx context.Context, event notifications.Event, payload notifications.Payload) error {
+	switch event {
+	case notifications.EventDiscDetected:
+		title := ""
+		discType := ""
+		if payload != nil {
+			if v, ok := payload["discTitle"].(string); ok {
+				title = v
+			}
+			if v, ok := payload["discType"].(string); ok {
+				discType = v
+			}
+		}
+		r.detected = append(r.detected, struct{ title, discType string }{strings.TrimSpace(title), strings.TrimSpace(discType)})
+	case notifications.EventIdentificationCompleted:
+		title := ""
+		mediaType := ""
+		if payload != nil {
+			if v, ok := payload["title"].(string); ok {
+				title = v
+			}
+			if v, ok := payload["mediaType"].(string); ok {
+				mediaType = v
+			}
+		}
+		r.identified = append(r.identified, struct{ title, mediaType string }{strings.TrimSpace(title), strings.TrimSpace(mediaType)})
+	case notifications.EventUnidentifiedMedia:
+		label := ""
+		if payload != nil {
+			if v, ok := payload["filename"].(string); ok {
+				label = v
+			} else if v, ok := payload["label"].(string); ok {
+				label = v
+			}
+		}
+		r.unidentified = append(r.unidentified, strings.TrimSpace(label))
+	}
 	return nil
 }
-
-func (r *recordingNotifier) NotifyIdentificationComplete(ctx context.Context, title, mediaType string) error {
-	r.identified = append(r.identified, struct{ title, mediaType string }{strings.TrimSpace(title), strings.TrimSpace(mediaType)})
-	return nil
-}
-
-func (r *recordingNotifier) NotifyRipStarted(context.Context, string) error          { return nil }
-func (r *recordingNotifier) NotifyRipCompleted(context.Context, string) error        { return nil }
-func (r *recordingNotifier) NotifyEncodingCompleted(context.Context, string) error   { return nil }
-func (r *recordingNotifier) NotifyProcessingCompleted(context.Context, string) error { return nil }
-func (r *recordingNotifier) NotifyOrganizationCompleted(context.Context, string, string) error {
-	return nil
-}
-func (r *recordingNotifier) NotifyQueueStarted(context.Context, int) error { return nil }
-func (r *recordingNotifier) NotifyQueueCompleted(context.Context, int, int, time.Duration) error {
-	return nil
-}
-func (r *recordingNotifier) NotifyError(context.Context, error, string) error { return nil }
-
-func (r *recordingNotifier) NotifyUnidentifiedMedia(ctx context.Context, filename string) error {
-	r.unidentified = append(r.unidentified, strings.TrimSpace(filename))
-	return nil
-}
-
-func (r *recordingNotifier) TestNotification(context.Context) error { return nil }

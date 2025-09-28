@@ -106,7 +106,10 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 		if title == "" {
 			title = "Unknown Disc"
 		}
-		if err := i.notifier.NotifyDiscDetected(ctx, title, "unknown"); err != nil {
+		if err := i.notifier.Publish(ctx, notifications.EventDiscDetected, notifications.Payload{
+			"discTitle": title,
+			"discType":  "unknown",
+		}); err != nil {
 			logger.Warn("disc detected notification failed", zap.Error(err))
 		}
 	}
@@ -190,7 +193,10 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		if mediaType == "" {
 			mediaType = "unknown"
 		}
-		if err := i.notifier.NotifyIdentificationComplete(ctx, identifiedTitle, mediaType); err != nil {
+		if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, notifications.Payload{
+			"title":     identifiedTitle,
+			"mediaType": mediaType,
+		}); err != nil {
 			logger.Warn("identification notification failed", zap.Error(err))
 		}
 	}
@@ -273,7 +279,7 @@ func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message s
 			if label == "" {
 				label = "Unidentified Disc"
 			}
-			if err := i.notifier.NotifyUnidentifiedMedia(ctx, label); err != nil {
+			if err := i.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{"label": label}); err != nil {
 				logger.Warn("unidentified media notification failed", zap.Error(err))
 			}
 		}

@@ -61,7 +61,7 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
 	if r.notifier != nil {
-		if err := r.notifier.NotifyRipStarted(ctx, item.DiscTitle); err != nil {
+		if err := r.notifier.Publish(ctx, notifications.EventRipStarted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
 			logger.Warn("failed to send rip start notification", zap.Error(err))
 		}
 	}
@@ -119,7 +119,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 	if r.notifier != nil {
-		if err := r.notifier.NotifyRipCompleted(ctx, item.DiscTitle); err != nil {
+		if err := r.notifier.Publish(ctx, notifications.EventRipCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
 			logger.Warn("rip completion notification failed", zap.Error(err))
 		}
 	}

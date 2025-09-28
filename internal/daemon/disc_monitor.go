@@ -233,7 +233,10 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 	if err != nil {
 		logger.Error("disc scan failed", zap.Error(err))
 		if m.notifier != nil {
-			if notifyErr := m.notifier.NotifyError(ctx, err, info.Label); notifyErr != nil {
+			if notifyErr := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
+				"error":   err,
+				"context": info.Label,
+			}); notifyErr != nil {
 				logger.Warn("failed to send scan error notification", zap.Error(notifyErr))
 			}
 		}
@@ -245,7 +248,10 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		err := errors.New("makemkv scan returned empty fingerprint")
 		logger.Error("invalid scan result", zap.Error(err))
 		if m.notifier != nil {
-			if notifyErr := m.notifier.NotifyError(ctx, err, info.Label); notifyErr != nil {
+			if notifyErr := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
+				"error":   err,
+				"context": info.Label,
+			}); notifyErr != nil {
 				logger.Warn("failed to send fingerprint error notification", zap.Error(notifyErr))
 			}
 		}

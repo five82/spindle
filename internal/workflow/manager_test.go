@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"spindle/internal/config"
+	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
 	"spindle/internal/stage"
@@ -275,28 +276,26 @@ type managerNotifier struct {
 	queueCompletes []struct{ processed, failed int }
 }
 
-func (m *managerNotifier) NotifyDiscDetected(context.Context, string, string) error { return nil }
-func (m *managerNotifier) NotifyIdentificationComplete(context.Context, string, string) error {
+func (m *managerNotifier) Publish(ctx context.Context, event notifications.Event, payload notifications.Payload) error {
+	switch event {
+	case notifications.EventQueueStarted:
+		if payload != nil {
+			if count, ok := payload["count"].(int); ok {
+				m.queueStarts = append(m.queueStarts, count)
+			}
+		}
+	case notifications.EventQueueCompleted:
+		processed := 0
+		failed := 0
+		if payload != nil {
+			if val, ok := payload["processed"].(int); ok {
+				processed = val
+			}
+			if val, ok := payload["failed"].(int); ok {
+				failed = val
+			}
+		}
+		m.queueCompletes = append(m.queueCompletes, struct{ processed, failed int }{processed: processed, failed: failed})
+	}
 	return nil
 }
-func (m *managerNotifier) NotifyRipStarted(context.Context, string) error          { return nil }
-func (m *managerNotifier) NotifyRipCompleted(context.Context, string) error        { return nil }
-func (m *managerNotifier) NotifyEncodingCompleted(context.Context, string) error   { return nil }
-func (m *managerNotifier) NotifyProcessingCompleted(context.Context, string) error { return nil }
-func (m *managerNotifier) NotifyOrganizationCompleted(context.Context, string, string) error {
-	return nil
-}
-
-func (m *managerNotifier) NotifyQueueStarted(ctx context.Context, count int) error {
-	m.queueStarts = append(m.queueStarts, count)
-	return nil
-}
-
-func (m *managerNotifier) NotifyQueueCompleted(ctx context.Context, processed, failed int, _ time.Duration) error {
-	m.queueCompletes = append(m.queueCompletes, struct{ processed, failed int }{processed: processed, failed: failed})
-	return nil
-}
-
-func (m *managerNotifier) NotifyError(context.Context, error, string) error      { return nil }
-func (m *managerNotifier) NotifyUnidentifiedMedia(context.Context, string) error { return nil }
-func (m *managerNotifier) TestNotification(context.Context) error                { return nil }
