@@ -13,39 +13,32 @@ import (
 
 // Config encapsulates all configuration values for the Go implementation of Spindle.
 type Config struct {
-	StagingDir                  string  `toml:"staging_dir"`
-	LibraryDir                  string  `toml:"library_dir"`
-	LogDir                      string  `toml:"log_dir"`
-	ReviewDir                   string  `toml:"review_dir"`
-	OpticalDrive                string  `toml:"optical_drive"`
-	TMDBAPIKey                  string  `toml:"tmdb_api_key"`
-	TMDBBaseURL                 string  `toml:"tmdb_base_url"`
-	TMDBLanguage                string  `toml:"tmdb_language"`
-	TMDBRuntimeToleranceMinutes int     `toml:"tmdb_runtime_tolerance_minutes"`
-	TMDBConfidenceThreshold     float64 `toml:"tmdb_confidence_threshold"`
-	MoviesDir                   string  `toml:"movies_dir"`
-	TVDir                       string  `toml:"tv_dir"`
-	PlexLinkEnabled             bool    `toml:"plex_link_enabled"`
-	PlexURL                     string  `toml:"plex_url"`
-	MoviesLibrary               string  `toml:"movies_library"`
-	TVLibrary                   string  `toml:"tv_library"`
-	NtfyTopic                   string  `toml:"ntfy_topic"`
-	MakeMKVRipTimeout           int     `toml:"makemkv_rip_timeout"`
-	MakeMKVInfoTimeout          int     `toml:"makemkv_info_timeout"`
-	MakeMKVEjectTimeout         int     `toml:"makemkv_eject_timeout"`
-	BDInfoTimeout               int     `toml:"bd_info_timeout"`
-	DraptoVersionTimeout        int     `toml:"drapto_version_timeout"`
-	TMDBRequestTimeout          int     `toml:"tmdb_request_timeout"`
-	NtfyRequestTimeout          int     `toml:"ntfy_request_timeout"`
-	DiscMonitorTimeout          int     `toml:"disc_monitor_timeout"`
-	QueuePollInterval           int     `toml:"queue_poll_interval"`
-	ErrorRetryInterval          int     `toml:"error_retry_interval"`
-	StatusDisplayInterval       int     `toml:"status_display_interval"`
-	PlexScanInterval            int     `toml:"plex_scan_interval"`
-	WorkflowHeartbeatInterval   int     `toml:"workflow_heartbeat_interval"`
-	WorkflowHeartbeatTimeout    int     `toml:"workflow_heartbeat_timeout"`
-	LogFormat                   string  `toml:"log_format"`
-	LogLevel                    string  `toml:"log_level"`
+	StagingDir                string  `toml:"staging_dir"`
+	LibraryDir                string  `toml:"library_dir"`
+	LogDir                    string  `toml:"log_dir"`
+	ReviewDir                 string  `toml:"review_dir"`
+	OpticalDrive              string  `toml:"optical_drive"`
+	TMDBAPIKey                string  `toml:"tmdb_api_key"`
+	TMDBBaseURL               string  `toml:"tmdb_base_url"`
+	TMDBLanguage              string  `toml:"tmdb_language"`
+	TMDBConfidenceThreshold   float64 `toml:"tmdb_confidence_threshold"`
+	MoviesDir                 string  `toml:"movies_dir"`
+	TVDir                     string  `toml:"tv_dir"`
+	PlexLinkEnabled           bool    `toml:"plex_link_enabled"`
+	PlexURL                   string  `toml:"plex_url"`
+	MoviesLibrary             string  `toml:"movies_library"`
+	TVLibrary                 string  `toml:"tv_library"`
+	NtfyTopic                 string  `toml:"ntfy_topic"`
+	MakeMKVRipTimeout         int     `toml:"makemkv_rip_timeout"`
+	MakeMKVInfoTimeout        int     `toml:"makemkv_info_timeout"`
+	NtfyRequestTimeout        int     `toml:"ntfy_request_timeout"`
+	DiscMonitorTimeout        int     `toml:"disc_monitor_timeout"`
+	QueuePollInterval         int     `toml:"queue_poll_interval"`
+	ErrorRetryInterval        int     `toml:"error_retry_interval"`
+	WorkflowHeartbeatInterval int     `toml:"workflow_heartbeat_interval"`
+	WorkflowHeartbeatTimeout  int     `toml:"workflow_heartbeat_timeout"`
+	LogFormat                 string  `toml:"log_format"`
+	LogLevel                  string  `toml:"log_level"`
 }
 
 const (
@@ -67,36 +60,29 @@ const (
 // Default returns a Config populated with repository defaults.
 func Default() Config {
 	return Config{
-		StagingDir:                  defaultStagingDir,
-		LibraryDir:                  defaultLibraryDir,
-		LogDir:                      defaultLogDir,
-		ReviewDir:                   defaultReviewDir,
-		OpticalDrive:                defaultOpticalDrive,
-		TMDBLanguage:                defaultTMDBLanguage,
-		TMDBBaseURL:                 defaultTMDBBaseURL,
-		TMDBRuntimeToleranceMinutes: 5,
-		TMDBConfidenceThreshold:     0.8,
-		MoviesDir:                   defaultMoviesDir,
-		TVDir:                       defaultTVDir,
-		PlexLinkEnabled:             true,
-		MoviesLibrary:               "Movies",
-		TVLibrary:                   "TV Shows",
-		MakeMKVRipTimeout:           3600,
-		MakeMKVInfoTimeout:          300,
-		MakeMKVEjectTimeout:         30,
-		BDInfoTimeout:               300,
-		DraptoVersionTimeout:        10,
-		TMDBRequestTimeout:          30,
-		NtfyRequestTimeout:          10,
-		DiscMonitorTimeout:          5,
-		QueuePollInterval:           5,
-		ErrorRetryInterval:          10,
-		StatusDisplayInterval:       30,
-		PlexScanInterval:            5,
-		WorkflowHeartbeatInterval:   defaultWorkflowHeartbeatInterval,
-		WorkflowHeartbeatTimeout:    defaultWorkflowHeartbeatTimeout,
-		LogFormat:                   defaultLogFormat,
-		LogLevel:                    defaultLogLevel,
+		StagingDir:                defaultStagingDir,
+		LibraryDir:                defaultLibraryDir,
+		LogDir:                    defaultLogDir,
+		ReviewDir:                 defaultReviewDir,
+		OpticalDrive:              defaultOpticalDrive,
+		TMDBLanguage:              defaultTMDBLanguage,
+		TMDBBaseURL:               defaultTMDBBaseURL,
+		TMDBConfidenceThreshold:   0.8,
+		MoviesDir:                 defaultMoviesDir,
+		TVDir:                     defaultTVDir,
+		PlexLinkEnabled:           true,
+		MoviesLibrary:             "Movies",
+		TVLibrary:                 "TV Shows",
+		MakeMKVRipTimeout:         3600,
+		MakeMKVInfoTimeout:        300,
+		NtfyRequestTimeout:        10,
+		DiscMonitorTimeout:        5,
+		QueuePollInterval:         5,
+		ErrorRetryInterval:        10,
+		WorkflowHeartbeatInterval: defaultWorkflowHeartbeatInterval,
+		WorkflowHeartbeatTimeout:  defaultWorkflowHeartbeatTimeout,
+		LogFormat:                 defaultLogFormat,
+		LogLevel:                  defaultLogLevel,
 	}
 }
 
@@ -242,18 +228,12 @@ func (c *Config) Validate() error {
 		return errors.New("tv_library must be set")
 	}
 	if err := ensurePositiveMap(map[string]int{
-		"makemkv_rip_timeout":     c.MakeMKVRipTimeout,
-		"makemkv_info_timeout":    c.MakeMKVInfoTimeout,
-		"makemkv_eject_timeout":   c.MakeMKVEjectTimeout,
-		"bd_info_timeout":         c.BDInfoTimeout,
-		"drapto_version_timeout":  c.DraptoVersionTimeout,
-		"tmdb_request_timeout":    c.TMDBRequestTimeout,
-		"ntfy_request_timeout":    c.NtfyRequestTimeout,
-		"disc_monitor_timeout":    c.DiscMonitorTimeout,
-		"queue_poll_interval":     c.QueuePollInterval,
-		"error_retry_interval":    c.ErrorRetryInterval,
-		"status_display_interval": c.StatusDisplayInterval,
-		"plex_scan_interval":      c.PlexScanInterval,
+		"makemkv_rip_timeout":  c.MakeMKVRipTimeout,
+		"makemkv_info_timeout": c.MakeMKVInfoTimeout,
+		"ntfy_request_timeout": c.NtfyRequestTimeout,
+		"disc_monitor_timeout": c.DiscMonitorTimeout,
+		"queue_poll_interval":  c.QueuePollInterval,
+		"error_retry_interval": c.ErrorRetryInterval,
 	}); err != nil {
 		return err
 	}
@@ -265,9 +245,6 @@ func (c *Config) Validate() error {
 	}
 	if c.WorkflowHeartbeatTimeout <= c.WorkflowHeartbeatInterval {
 		return errors.New("workflow_heartbeat_timeout must be greater than workflow_heartbeat_interval")
-	}
-	if c.TMDBRuntimeToleranceMinutes < 0 {
-		return errors.New("tmdb_runtime_tolerance_minutes cannot be negative")
 	}
 	if c.TMDBConfidenceThreshold < 0 || c.TMDBConfidenceThreshold > 1 {
 		return errors.New("tmdb_confidence_threshold must be between 0 and 1")
