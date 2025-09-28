@@ -181,7 +181,10 @@ cython_debug/
 *.db
 *.sqlite
 *.sqlite3
+# Runtime log outputs
 logs/
+!internal/logs/
+!internal/logs/**
 staging/
 queue.db
 config.toml
