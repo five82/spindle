@@ -140,6 +140,10 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				fmt.Fprintln(stdout, "📱 Notifications: Not configured")
 			}
 
+			for _, line := range dependencyLines(statusResp.Dependencies) {
+				fmt.Fprintln(stdout, line)
+			}
+
 			for _, dir := range []struct {
 				label string
 				path  string
@@ -167,6 +171,34 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 	}
 
 	return []*cobra.Command{startCmd, stopCmd, statusCmd}
+}
+
+func dependencyLines(deps []ipc.DependencyStatus) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		if dep.Available {
+			text := fmt.Sprintf("🛠️ %s: Ready", dep.Name)
+			if dep.Command != "" {
+				text = fmt.Sprintf("%s (command: %s)", text, dep.Command)
+			}
+			lines = append(lines, text)
+			continue
+		}
+
+		indicator := "❌"
+		if dep.Optional {
+			indicator = "⚠️"
+		}
+		detail := strings.TrimSpace(dep.Detail)
+		if detail == "" {
+			detail = "not available"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s: %s", indicator, dep.Name, detail))
+	}
+	return lines
 }
 
 func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext) error {

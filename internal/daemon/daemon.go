@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/gofrs/flock"
 	"go.uber.org/zap"
 
 	"spindle/internal/config"
+	"spindle/internal/deps"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -40,6 +42,10 @@ type Daemon struct {
 	running atomic.Bool
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	depsMu       sync.RWMutex
+	dependencies []DependencyStatus
+	notifier     notifications.Service
 }
 
 // Status represents daemon runtime information.
@@ -48,6 +54,17 @@ type Status struct {
 	Workflow     workflow.StatusSummary
 	QueueDBPath  string
 	LockFilePath string
+	Dependencies []DependencyStatus
+}
+
+// DependencyStatus reports the availability of an external requirement.
+type DependencyStatus struct {
+	Name        string
+	Command     string
+	Description string
+	Optional    bool
+	Available   bool
+	Detail      string
 }
 
 // New constructs a daemon with initialized dependencies.
@@ -67,6 +84,7 @@ func New(cfg *config.Config, store *queue.Store, logger *zap.Logger, wf *workflo
 		lockPath: lockPath,
 		lock:     flock.New(lockPath),
 		monitor:  monitor,
+		notifier: notifications.NewService(cfg),
 	}, nil
 }
 
@@ -105,6 +123,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	d.running.Store(true)
 	d.logger.Info("spindle daemon started", zap.String("lock", d.lockPath))
+	d.runDependencyChecks(ctx)
 	return nil
 }
 
@@ -261,10 +280,71 @@ func (d *Daemon) LogPath() string {
 // Status returns the current daemon status.
 func (d *Daemon) Status(ctx context.Context) Status {
 	summary := d.workflow.Status(ctx)
+
+	d.depsMu.RLock()
+	dependencies := make([]DependencyStatus, len(d.dependencies))
+	copy(dependencies, d.dependencies)
+	d.depsMu.RUnlock()
 	return Status{
 		Running:      d.running.Load(),
 		Workflow:     summary,
 		QueueDBPath:  filepath.Join(d.cfg.LogDir, "queue.db"),
 		LockFilePath: d.lockPath,
+		Dependencies: dependencies,
+	}
+}
+
+func (d *Daemon) runDependencyChecks(ctx context.Context) {
+	requirements := []deps.Requirement{
+		{
+			Name:        "MakeMKV",
+			Command:     d.cfg.MakemkvBinary(),
+			Description: "Required for disc ripping",
+		},
+		{
+			Name:        "Drapto",
+			Command:     d.cfg.DraptoBinary(),
+			Description: "Required for encoding",
+		},
+	}
+
+	results := deps.CheckBinaries(requirements)
+	d.depsMu.Lock()
+	d.dependencies = make([]DependencyStatus, len(results))
+	for i, result := range results {
+		d.dependencies[i] = DependencyStatus{
+			Name:        result.Name,
+			Command:     result.Command,
+			Description: result.Description,
+			Optional:    result.Optional,
+			Available:   result.Available,
+			Detail:      result.Detail,
+		}
+	}
+	d.depsMu.Unlock()
+
+	for _, status := range results {
+		if status.Available {
+			continue
+		}
+		fields := []zap.Field{
+			zap.String("dependency", status.Name),
+			zap.String("command", status.Command),
+		}
+		if status.Detail != "" {
+			fields = append(fields, zap.String("detail", status.Detail))
+		}
+		if status.Optional {
+			fields = append(fields, zap.Bool("optional", true))
+			d.logger.Warn("optional dependency unavailable", fields...)
+		} else {
+			d.logger.Error("required dependency unavailable", fields...)
+			if d.notifier != nil {
+				_ = d.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
+					"context": fmt.Sprintf("dependency %s", status.Name),
+					"error":   status.Detail,
+				})
+			}
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -147,6 +148,13 @@ func (r *Ripper) HealthCheck(ctx context.Context) stage.Health {
 	}
 	if r.client == nil {
 		return stage.Unhealthy(name, "makemkv client unavailable")
+	}
+	binary := strings.TrimSpace(r.cfg.MakemkvBinary())
+	if binary == "" {
+		return stage.Unhealthy(name, "makemkv binary not configured")
+	}
+	if _, err := exec.LookPath(binary); err != nil {
+		return stage.Unhealthy(name, fmt.Sprintf("makemkv binary %q not found", binary))
 	}
 	if r.ejector == nil {
 		return stage.Unhealthy(name, "disc ejector unavailable")

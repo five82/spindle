@@ -2,8 +2,10 @@ package encoding
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -142,6 +144,13 @@ func (e *Encoder) HealthCheck(ctx context.Context) stage.Health {
 	}
 	if e.client == nil {
 		return stage.Unhealthy(name, "drapto client unavailable")
+	}
+	binary := strings.TrimSpace(e.cfg.DraptoBinary())
+	if binary == "" {
+		return stage.Unhealthy(name, "drapto binary not configured")
+	}
+	if _, err := exec.LookPath(binary); err != nil {
+		return stage.Unhealthy(name, fmt.Sprintf("drapto binary %q not found", binary))
 	}
 	return stage.Healthy(name)
 }

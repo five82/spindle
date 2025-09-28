@@ -185,6 +185,19 @@ func (s *service) Status(_ StatusRequest, resp *StatusResponse) error {
 			})
 		}
 	}
+	if len(status.Dependencies) > 0 {
+		resp.Dependencies = make([]DependencyStatus, 0, len(status.Dependencies))
+		for _, dep := range status.Dependencies {
+			resp.Dependencies = append(resp.Dependencies, DependencyStatus{
+				Name:        dep.Name,
+				Command:     dep.Command,
+				Description: dep.Description,
+				Optional:    dep.Optional,
+				Available:   dep.Available,
+				Detail:      dep.Detail,
+			})
+		}
+	}
 	return nil
 }
 

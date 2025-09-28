@@ -42,15 +42,26 @@ type StageHealth struct {
 	Detail string `json:"detail"`
 }
 
+// DependencyStatus describes availability of an external dependency.
+type DependencyStatus struct {
+	Name        string `json:"name"`
+	Command     string `json:"command"`
+	Description string `json:"description"`
+	Optional    bool   `json:"optional"`
+	Available   bool   `json:"available"`
+	Detail      string `json:"detail"`
+}
+
 // StatusResponse represents combined daemon/workflow status information.
 type StatusResponse struct {
-	Running     bool           `json:"running"`
-	QueueStats  map[string]int `json:"queue_stats"`
-	LastError   string         `json:"last_error"`
-	LastItem    *QueueItem     `json:"last_item"`
-	LockPath    string         `json:"lock_path"`
-	QueueDBPath string         `json:"queue_db_path"`
-	StageHealth []StageHealth  `json:"stage_health"`
+	Running      bool               `json:"running"`
+	QueueStats   map[string]int     `json:"queue_stats"`
+	LastError    string             `json:"last_error"`
+	LastItem     *QueueItem         `json:"last_item"`
+	LockPath     string             `json:"lock_path"`
+	QueueDBPath  string             `json:"queue_db_path"`
+	StageHealth  []StageHealth      `json:"stage_health"`
+	Dependencies []DependencyStatus `json:"dependencies"`
 }
 
 // QueueListRequest filters queue listing by status.
