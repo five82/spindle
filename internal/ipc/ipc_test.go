@@ -130,10 +130,6 @@ func TestIPCServerClient(t *testing.T) {
 	if addResp.Item.Status != string(queue.StatusRipped) {
 		t.Fatalf("expected manual item to be ripped, got %s", addResp.Item.Status)
 	}
-	discA.Status = queue.StatusCompleted
-	if err := store.Update(ctx, discA); err != nil {
-		t.Fatalf("Update discA: %v", err)
-	}
 	logPath := filepath.Join(cfg.LogDir, "spindle.log")
 	if err := os.WriteFile(logPath, []byte("first\nsecond\nthird\n"), 0o644); err != nil {
 		t.Fatalf("write log file: %v", err)
@@ -183,6 +179,11 @@ func TestIPCServerClient(t *testing.T) {
 	}
 	if !stopDuring.Stopped {
 		t.Fatalf("expected Stop to report stopped, got: %#v", stopDuring)
+	}
+
+	discA.Status = queue.StatusCompleted
+	if err := store.Update(ctx, discA); err != nil {
+		t.Fatalf("Update discA: %v", err)
 	}
 
 	if err := store.Update(ctx, discC); err != nil {
