@@ -359,11 +359,30 @@ func TestCLIContractParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("go CLI %v failed: %v", tc.goArgs, err)
 			}
+			if tc.name == "status" {
+				if !strings.Contains(goOut, "📂 Library:") {
+					t.Fatalf("expected directory status lines in go output, got: %s", goOut)
+				}
+				goOut = stripDirectoryStatusLines(goOut)
+				pyOut = stripDirectoryStatusLines(pyOut)
+			}
 			if strings.TrimSpace(goOut) != strings.TrimSpace(pyOut) {
 				t.Fatalf("output mismatch for %s\nGo:\n%s\nPython:\n%s", tc.name, goOut, pyOut)
 			}
 		})
 	}
+}
+
+func stripDirectoryStatusLines(output string) string {
+	lines := strings.Split(output, "\n")
+	filtered := lines[:0]
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "📂 ") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.Join(filtered, "\n")
 }
 
 func appendLine(path, line string) error {

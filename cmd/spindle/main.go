@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 
 	"spindle/internal/config"
 	"spindle/internal/ipc"
@@ -174,6 +175,17 @@ func newRootCommand() *cobra.Command {
 					fmt.Fprintln(stdout, "📱 Notifications: Configured")
 				} else {
 					fmt.Fprintln(stdout, "📱 Notifications: Not configured")
+				}
+
+				for _, dir := range []struct {
+					label string
+					path  string
+				}{
+					{label: "Library", path: loadedConfig.LibraryDir},
+					{label: "Movies", path: librarySubdirPath(loadedConfig.LibraryDir, loadedConfig.MoviesDir)},
+					{label: "TV", path: librarySubdirPath(loadedConfig.LibraryDir, loadedConfig.TVDir)},
+				} {
+					fmt.Fprintln(stdout, directoryStatusLine(dir.label, dir.path))
 				}
 
 				fmt.Fprintln(stdout)
@@ -969,4 +981,39 @@ func classifyDiscType(device, fstype string) string {
 func executableAvailable(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+func directoryStatusLine(label, path string) string {
+	if err := checkDirectoryAccess(path); err != nil {
+		return fmt.Sprintf("📂 %s: %s (error: %v)", label, path, err)
+	}
+	return fmt.Sprintf("📂 %s: %s (read/write ok)", label, path)
+}
+
+func checkDirectoryAccess(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("does not exist")
+		}
+		return fmt.Errorf("stat: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("is not a directory")
+	}
+	if err := unix.Access(path, unix.R_OK|unix.W_OK|unix.X_OK); err != nil {
+		return fmt.Errorf("insufficient permissions: %w", err)
+	}
+	return nil
+}
+
+func librarySubdirPath(root, child string) string {
+	child = strings.TrimSpace(child)
+	if child == "" {
+		return root
+	}
+	if filepath.IsAbs(child) {
+		return child
+	}
+	return filepath.Join(root, child)
 }
