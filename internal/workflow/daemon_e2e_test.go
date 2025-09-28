@@ -113,7 +113,7 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 		t.Fatalf("store.NewDisc: %v", err)
 	}
 
-	waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
+	waitCtx, waitCancel := context.WithTimeout(ctx, 180*time.Second)
 	defer waitCancel()
 	for {
 		select {

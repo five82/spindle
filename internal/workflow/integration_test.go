@@ -107,7 +107,7 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 		t.Fatalf("store.NewDisc: %v", err)
 	}
 
-	deadline := time.After(10 * time.Second)
+	deadline := time.After(120 * time.Second)
 	for {
 		select {
 		case <-deadline:

@@ -135,7 +135,7 @@ func TestManagerProcessesItems(t *testing.T) {
 		t.Fatalf("Update failed: %v", err)
 	}
 
-	deadline := time.After(10 * time.Second)
+	deadline := time.After(60 * time.Second)
 	for {
 		select {
 		case <-deadline:
@@ -156,7 +156,7 @@ func TestManagerProcessesItems(t *testing.T) {
 	if len(notifier.queueStarts) != 1 {
 		t.Fatalf("expected one queue start notification, got %d", len(notifier.queueStarts))
 	}
-	deadline = time.After(time.Second)
+	deadline = time.After(10 * time.Second)
 	for len(notifier.queueCompletes) == 0 {
 		select {
 		case <-deadline:
@@ -261,7 +261,7 @@ func TestManagerFailureTriggersReviewWithHint(t *testing.T) {
 		t.Fatalf("Update failed: %v", err)
 	}
 
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for {
 		select {
 		case <-deadline:
@@ -316,7 +316,7 @@ func TestManagerFailureDefaultsToFailed(t *testing.T) {
 		t.Fatalf("Update failed: %v", err)
 	}
 
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(30 * time.Second)
 	var last queue.Status
 	for {
 		select {

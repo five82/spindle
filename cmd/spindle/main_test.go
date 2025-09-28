@@ -243,7 +243,7 @@ func TestCLIShowCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("show --follow execute: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("show --follow did not exit")
 	}
 

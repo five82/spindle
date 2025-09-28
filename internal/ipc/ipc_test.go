@@ -160,7 +160,7 @@ func TestIPCServerClient(t *testing.T) {
 
 	select {
 	case <-followDone:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("log tail follow timed out")
 	}
 

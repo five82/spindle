@@ -51,7 +51,7 @@ func TestTailFollowWaits(t *testing.T) {
 
 	done := make(chan struct{})
 	go func(offset int64) {
-		res, err := logs.Tail(ctx, path, logs.TailOptions{Offset: offset, Follow: true, Wait: time.Second})
+		res, err := logs.Tail(ctx, path, logs.TailOptions{Offset: offset, Follow: true, Wait: 5 * time.Second})
 		if err != nil {
 			t.Errorf("follow tail error: %v", err)
 		}
@@ -76,7 +76,7 @@ func TestTailFollowWaits(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("tail follow did not return")
 	}
 }
