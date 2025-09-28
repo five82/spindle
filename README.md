@@ -22,7 +22,7 @@
 3. Create your initial configuration:
 
    ```bash
-   spindle init-config
+   spindle config init
    nano ~/.config/spindle/config.toml
    ```
 
@@ -84,7 +84,7 @@ Run `go test ./...` from the repo root to ensure your toolchain is healthy.
 
 ### Configuration
 
-Use `spindle init-config` to generate `~/.config/spindle/config.toml`, then edit the following keys:
+Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit the following keys:
 
 - `library_dir` – Final Plex-ready library location (must exist)
 - `staging_dir` – Working directory for ripped/encoded files
