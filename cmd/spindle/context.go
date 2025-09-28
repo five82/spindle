@@ -65,12 +65,16 @@ func (c *commandContext) socketPath() string {
 }
 
 func (c *commandContext) withClient(fn func(*ipc.Client) error) error {
-	client, err := ipc.Dial(c.socketPath())
+	client, err := c.dialClient()
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}
 	defer client.Close()
 	return fn(client)
+}
+
+func (c *commandContext) dialClient() (*ipc.Client, error) {
+	return ipc.Dial(c.socketPath())
 }
 
 func defaultSocketPath() string {

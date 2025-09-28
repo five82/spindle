@@ -4,7 +4,7 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 
 ## Environment & Tooling
 
-- Install Go 1.22 or newer (`go version` should confirm) and keep `GOBIN`/`GOPATH` on your `PATH` so the `spindle` binary is discoverable during iteration.
+- Install Go 1.25 or newer (`go version` should confirm) and keep `GOBIN`/`GOPATH` on your `PATH` so the `spindle` binary is discoverable during iteration.
 - Install lint tooling with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
 - Keep MakeMKV and Drapto binaries on the PATH (`/usr/local/bin` on the lab machine by convention).
 - Default staging/library roots (override in `~/.config/spindle/config.toml` when needed):
@@ -16,7 +16,7 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 ## Daily Workflow
 
 1. After dependency or API updates, run `go mod tidy` to keep `go.mod`/`go.sum` focused and reproducible.
-2. Build the CLI and daemon locally: `go install ./cmd/spindle` and `go build ./cmd/spindled`.
+2. Build the binary locally: `go install ./cmd/spindle`.
 3. Drive manual runs through the Go binaries:
    - `spindle start|status|stop`
    - `spindle show --follow` for live logs
@@ -48,7 +48,7 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 3. Sanity-test daemon start/stop on the target machine and confirm ntfy notifications.
 4. Update `CHANGELOG.md` (or release notes draft) with user-visible changes.
 5. Tag the release (`git tag -a vX.Y.Z -m "Spindle vX.Y.Z"`; `git push --tags`).
-6. Build distributable binaries as needed with `go build ./cmd/spindle ./cmd/spindled`.
+6. Build distributable binaries as needed with `go build ./cmd/spindle`.
 
 ## Parking Lot / Ideas
 

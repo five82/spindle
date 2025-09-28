@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -18,21 +20,34 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		Use:   "start",
 		Short: "Start the spindle daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withClient(func(client *ipc.Client) error {
-				resp, err := client.Start()
+			stdout := cmd.OutOrStdout()
+			client, err := ctx.dialClient()
+			if err != nil {
+				fmt.Fprintln(stdout, "Daemon not running, launching...")
+				if launchErr := launchDaemonProcess(cmd, ctx); launchErr != nil {
+					return launchErr
+				}
+				client, err = waitForDaemonClient(ctx.socketPath(), 10*time.Second)
 				if err != nil {
 					return err
 				}
-				switch {
-				case resp.Started:
-					fmt.Fprintln(cmd.OutOrStdout(), "Daemon started")
-				case resp.Message != "":
-					fmt.Fprintln(cmd.OutOrStdout(), resp.Message)
-				default:
-					fmt.Fprintln(cmd.OutOrStdout(), "Daemon already running")
-				}
-				return nil
-			})
+			} else {
+				defer client.Close()
+			}
+			defer client.Close()
+			resp, err := client.Start()
+			if err != nil {
+				return err
+			}
+			switch {
+			case resp.Started:
+				fmt.Fprintln(stdout, "Daemon started")
+			case resp.Message != "":
+				fmt.Fprintln(stdout, resp.Message)
+			default:
+				fmt.Fprintln(stdout, "Daemon already running")
+			}
+			return nil
 		},
 	}
 
@@ -40,16 +55,27 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		Use:   "stop",
 		Short: "Stop the spindle daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withClient(func(client *ipc.Client) error {
-				resp, err := client.Stop()
-				if err != nil {
-					return err
-				}
-				if resp.Stopped {
-					fmt.Fprintln(cmd.OutOrStdout(), "Daemon stopped")
-				}
+			stdout := cmd.OutOrStdout()
+			client, err := ctx.dialClient()
+			if err != nil {
+				fmt.Fprintln(stdout, "Daemon is not running")
 				return nil
-			})
+			}
+			resp, err := client.Stop()
+			_ = client.Close()
+			if err != nil {
+				return err
+			}
+			if !resp.Stopped {
+				fmt.Fprintln(stdout, "Stop request sent")
+			} else {
+				fmt.Fprintln(stdout, "Stopping daemon...")
+			}
+			if err := waitForDaemonShutdown(ctx.socketPath(), 5*time.Second); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, "Daemon stopped")
+			return nil
 		},
 	}
 
@@ -141,4 +167,75 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 	}
 
 	return []*cobra.Command{startCmd, stopCmd, statusCmd}
+}
+
+func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	args := []string{"daemon"}
+	if ctx.socketFlag != nil {
+		if socket := strings.TrimSpace(*ctx.socketFlag); socket != "" {
+			args = append(args, "--socket", socket)
+		}
+	}
+	if ctx.configFlag != nil {
+		if config := strings.TrimSpace(*ctx.configFlag); config != "" {
+			args = append(args, "--config", config)
+		}
+	}
+	proc := exec.Command(exe, args...)
+	if err := proc.Start(); err != nil {
+		return fmt.Errorf("launch daemon: %w", err)
+	}
+	return proc.Process.Release()
+}
+
+func waitForDaemonClient(socketPath string, timeout time.Duration) (*ipc.Client, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		client, err := ipc.Dial(socketPath)
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
+		time.Sleep(200 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("timeout waiting for daemon")
+	}
+	return nil, fmt.Errorf("daemon failed to start: %w", lastErr)
+}
+
+func waitForDaemonShutdown(socketPath string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		client, err := ipc.Dial(socketPath)
+		if err != nil {
+			if os.IsNotExist(err) || errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			lastErr = err
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		status, statusErr := client.Status()
+		_ = client.Close()
+		if statusErr == nil && !status.Running {
+			return nil
+		}
+		if statusErr != nil {
+			lastErr = statusErr
+		} else {
+			lastErr = fmt.Errorf("daemon still running")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("timeout waiting for shutdown")
+	}
+	return fmt.Errorf("daemon did not stop: %w", lastErr)
 }

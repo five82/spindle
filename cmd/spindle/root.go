@@ -35,6 +35,7 @@ func newRootCommand() *cobra.Command {
 	}
 
 	rootCmd.AddCommand(newQueueCommand(ctx))
+	rootCmd.AddCommand(newDaemonRunCommand(ctx))
 	rootCmd.AddCommand(newQueueHealthCommand(ctx))
 	rootCmd.AddCommand(newShowCommand(ctx))
 	rootCmd.AddCommand(newAddFileCommand(ctx))

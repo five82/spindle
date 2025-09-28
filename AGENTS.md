@@ -42,7 +42,7 @@ High-level modules you will touch most often:
 - **Core orchestration**: `internal/workflow`, `internal/daemon`, and `internal/queue`
 - **Stage handlers**: `internal/identification`, `internal/ripping`, `internal/encoding`, `internal/organizer`
 - **External services**: `internal/services`, `internal/notifications`, `internal/identification/tmdb`, `internal/disc`
-- **CLI and daemon entry points**: `cmd/spindle`, `cmd/spindled`
+- **CLI and daemon entry point**: `cmd/spindle`
 - **Configuration & logging**: `internal/config`, `internal/logging`
 
 When new capabilities land, update this map and the README together so future agents know where to look.
@@ -63,8 +63,8 @@ If you add or reorder phases, update the enums, workflow routing, CLI presentati
 
 ## Development Workflow
 
-- Install Go 1.22+ locally and keep `golangci-lint` up to date via `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
-- Build binaries from source while iterating: `go install ./cmd/spindle` and `go build ./cmd/spindled`.
+- Install Go 1.25+ locally and keep `golangci-lint` up to date via `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
+- Build the binary from source while iterating: `go install ./cmd/spindle`.
 - Configuration lives at `~/.config/spindle/config.toml`. Use dedicated staging/library directories and a test TMDB key for integration flows.
 - Before handing off, execute `./check-ci.sh` (runs `go test ./...` and `golangci-lint run`). If you cannot run it, state why.
 

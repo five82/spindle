@@ -55,7 +55,7 @@ func New(cfg *config.Config, store *queue.Store, logger *zap.Logger, wf *workflo
 		return nil, errors.New("daemon requires config, store, logger, and workflow manager")
 	}
 
-	lockPath := filepath.Join(cfg.LogDir, "spindled.lock")
+	lockPath := filepath.Join(cfg.LogDir, "spindle.lock")
 	return &Daemon{
 		cfg:      cfg,
 		logger:   logger,

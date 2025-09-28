@@ -2,7 +2,7 @@
 
 **Spindle is an automated disc ripping and media library management system.** Insert a Blu-ray or DVD, and Spindle handles everything: identifies the content using TMDB, rips selected titles with MakeMKV, encodes to efficient AV1 format with drapto, organizes files in Plex-compatible structure, and sends notifications when complete.
 
-> ⚙️ **Go stack** – Spindle ships as a Go CLI (`spindle`) and daemon (`spindled`). Install the CLI with `go install github.com/five82/spindle/cmd/spindle@latest` to get started.
+> ⚙️ **Go stack** – Spindle ships as a single Go binary (`spindle`) that runs both the CLI and daemon. Install it with `go install github.com/five82/spindle/cmd/spindle@latest` to get started.
 
 > **Early-stage project**: Expect breaking changes.
 
@@ -77,7 +77,6 @@ For local development:
 git clone https://github.com/five82/spindle.git
 cd spindle
 go install ./cmd/spindle
-go build ./cmd/spindled
 ```
 
 Run `go test ./...` from the repo root to ensure your toolchain is healthy.
@@ -111,17 +110,6 @@ spindle stop
 
 # Authorize Plex (run once, prompts for link code)
 spindle plex link
-```
-
-### System Service (Optional)
-
-```bash
-# Install user service (no root needed)
-./scripts/install-user-service.sh
-systemctl --user enable --now spindle
-
-# Enable autostart on boot
-sudo loginctl enable-linger $(whoami)
 ```
 
 ### Additional Commands
@@ -186,7 +174,7 @@ See [docs/content-identification.md](docs/content-identification.md) for deeper 
 
 ## Development
 
-- Install the CLI and daemon from source during active development: `go install ./cmd/spindle` and `go build ./cmd/spindled`.
+- Install the CLI/daemon binary from source during active development: `go install ./cmd/spindle`.
 - Run `go test ./...` for fast feedback and `golangci-lint run` to catch style issues.
 - Before committing, execute:
 
