@@ -35,14 +35,12 @@ type StageSet struct {
 	Organizer  StageHandler
 }
 
-type stageDefinition struct {
-	name       string
-	trigger    queue.Status
-	processing queue.Status
-	next       queue.Status
-	prepare    func(context.Context, *queue.Item) error
-	execute    func(context.Context, *queue.Item) error
-	health     func(context.Context) stage.Health
+type pipelineStage struct {
+	name             string
+	handler          StageHandler
+	startStatus      queue.Status
+	processingStatus queue.Status
+	doneStatus       queue.Status
 }
 
 // Manager coordinates queue processing using registered stage functions.
@@ -55,9 +53,8 @@ type Manager struct {
 	heartbeatTimeout  time.Duration
 	notifier          notifications.Service
 
-	statusOrder     []queue.Status
-	stageDefs       []*stageDefinition
-	stagesByTrigger map[queue.Status]*stageDefinition
+	statusOrder []queue.Status
+	stages      []pipelineStage
 
 	mu       sync.RWMutex
 	running  bool
@@ -85,72 +82,59 @@ func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *zap.
 		pollInterval:      time.Duration(cfg.QueuePollInterval) * time.Second,
 		heartbeatInterval: time.Duration(cfg.WorkflowHeartbeatInterval) * time.Second,
 		heartbeatTimeout:  time.Duration(cfg.WorkflowHeartbeatTimeout) * time.Second,
-		statusOrder: []queue.Status{
-			queue.StatusPending,
-			queue.StatusIdentified,
-			queue.StatusRipped,
-			queue.StatusEncoded,
-		},
-		stagesByTrigger: make(map[queue.Status]*stageDefinition),
 	}
 }
 
 // ConfigureStages registers the concrete stage handlers the workflow will run.
 
 func (m *Manager) ConfigureStages(set StageSet) {
-	defs := make([]*stageDefinition, 0, 4)
+	stages := make([]pipelineStage, 0, 4)
+	order := make([]queue.Status, 0, 4)
 
 	if set.Identifier != nil {
-		defs = append(defs, &stageDefinition{
-			name:       "identifier",
-			trigger:    queue.StatusPending,
-			processing: queue.StatusIdentifying,
-			next:       queue.StatusIdentified,
-			prepare:    set.Identifier.Prepare,
-			execute:    set.Identifier.Execute,
-			health:     set.Identifier.HealthCheck,
+		stages = append(stages, pipelineStage{
+			name:             "identifier",
+			handler:          set.Identifier,
+			startStatus:      queue.StatusPending,
+			processingStatus: queue.StatusIdentifying,
+			doneStatus:       queue.StatusIdentified,
 		})
+		order = append(order, queue.StatusPending)
 	}
 	if set.Ripper != nil {
-		defs = append(defs, &stageDefinition{
-			name:       "ripper",
-			trigger:    queue.StatusIdentified,
-			processing: queue.StatusRipping,
-			next:       queue.StatusRipped,
-			prepare:    set.Ripper.Prepare,
-			execute:    set.Ripper.Execute,
-			health:     set.Ripper.HealthCheck,
+		stages = append(stages, pipelineStage{
+			name:             "ripper",
+			handler:          set.Ripper,
+			startStatus:      queue.StatusIdentified,
+			processingStatus: queue.StatusRipping,
+			doneStatus:       queue.StatusRipped,
 		})
+		order = append(order, queue.StatusIdentified)
 	}
 	if set.Encoder != nil {
-		defs = append(defs, &stageDefinition{
-			name:       "encoder",
-			trigger:    queue.StatusRipped,
-			processing: queue.StatusEncoding,
-			next:       queue.StatusEncoded,
-			prepare:    set.Encoder.Prepare,
-			execute:    set.Encoder.Execute,
-			health:     set.Encoder.HealthCheck,
+		stages = append(stages, pipelineStage{
+			name:             "encoder",
+			handler:          set.Encoder,
+			startStatus:      queue.StatusRipped,
+			processingStatus: queue.StatusEncoding,
+			doneStatus:       queue.StatusEncoded,
 		})
+		order = append(order, queue.StatusRipped)
 	}
 	if set.Organizer != nil {
-		defs = append(defs, &stageDefinition{
-			name:       "organizer",
-			trigger:    queue.StatusEncoded,
-			processing: queue.StatusOrganizing,
-			next:       queue.StatusCompleted,
-			prepare:    set.Organizer.Prepare,
-			execute:    set.Organizer.Execute,
-			health:     set.Organizer.HealthCheck,
+		stages = append(stages, pipelineStage{
+			name:             "organizer",
+			handler:          set.Organizer,
+			startStatus:      queue.StatusEncoded,
+			processingStatus: queue.StatusOrganizing,
+			doneStatus:       queue.StatusCompleted,
 		})
+		order = append(order, queue.StatusEncoded)
 	}
 
 	m.mu.Lock()
-	m.stageDefs = defs
-	m.stagesByTrigger = make(map[queue.Status]*stageDefinition, len(defs))
-	for _, def := range defs {
-		m.stagesByTrigger[def.trigger] = def
-	}
+	m.stages = stages
+	m.statusOrder = order
 	m.mu.Unlock()
 }
 
@@ -161,7 +145,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	if m.running {
 		return errors.New("workflow already running")
 	}
-	if len(m.stageDefs) == 0 {
+	if len(m.stages) == 0 {
 		return errors.New("workflow stages not configured")
 	}
 
@@ -231,8 +215,8 @@ func (m *Manager) run(ctx context.Context) {
 			continue
 		}
 
-		def := m.definitionFor(item.Status)
-		if def == nil {
+		stage, ok := m.stageForStatus(item.Status)
+		if !ok {
 			logger.Warn("no stage configured for status", zap.String("status", string(item.Status)))
 			select {
 			case <-ctx.Done():
@@ -243,27 +227,37 @@ func (m *Manager) run(ctx context.Context) {
 		}
 
 		requestID := uuid.NewString()
-		stageCtx := withStageContext(ctx, def.name, item, requestID)
+		stageCtx := withStageContext(ctx, stage.name, item, requestID)
 		stageLogger := logging.WithContext(stageCtx, logger)
 
-		if err := m.transitionToProcessing(stageCtx, def.processing, def.name, item); err != nil {
+		if err := m.transitionToProcessing(stageCtx, stage.processingStatus, stage.name, item); err != nil {
 			stageLogger.Error("failed to transition item to processing", zap.Error(err))
 			m.setLastError(err)
 			continue
 		}
 
-		if def.prepare != nil {
-			if err := def.prepare(stageCtx, item); err != nil {
-				m.handleStageFailure(stageCtx, def.name, item, err)
-				m.setLastError(err)
-				continue
-			}
+		handler := stage.handler
+		if handler == nil {
+			stageLogger.Warn("missing stage handler", zap.String("stage", stage.name))
+			item.Status = queue.StatusFailed
+			item.ErrorMessage = fmt.Sprintf("stage %s missing handler", stage.name)
 			if err := m.store.Update(stageCtx, item); err != nil {
-				wrapped := fmt.Errorf("persist stage preparation: %w", err)
-				stageLogger.Error("failed to persist stage preparation", zap.Error(wrapped))
-				m.setLastError(wrapped)
-				continue
+				stageLogger.Error("failed to persist missing handler failure", zap.Error(err))
 			}
+			m.setLastError(errors.New("stage handler unavailable"))
+			continue
+		}
+
+		if err := handler.Prepare(stageCtx, item); err != nil {
+			m.handleStageFailure(stageCtx, stage.name, item, err)
+			m.setLastError(err)
+			continue
+		}
+		if err := m.store.Update(stageCtx, item); err != nil {
+			wrapped := fmt.Errorf("persist stage preparation: %w", err)
+			stageLogger.Error("failed to persist stage preparation", zap.Error(wrapped))
+			m.setLastError(wrapped)
+			continue
 		}
 
 		hbCtx, hbCancel := context.WithCancel(stageCtx)
@@ -271,18 +265,18 @@ func (m *Manager) run(ctx context.Context) {
 		hbWG.Add(1)
 		go m.heartbeatLoop(hbCtx, &hbWG, item.ID)
 
-		execErr := def.execute(stageCtx, item)
+		execErr := handler.Execute(stageCtx, item)
 		hbCancel()
 		hbWG.Wait()
 
 		if execErr != nil {
-			m.handleStageFailure(stageCtx, def.name, item, execErr)
+			m.handleStageFailure(stageCtx, stage.name, item, execErr)
 			m.setLastError(execErr)
 			continue
 		}
 
-		if item.Status == def.processing || item.Status == "" {
-			item.Status = def.next
+		if item.Status == stage.processingStatus || item.Status == "" {
+			item.Status = stage.doneStatus
 		}
 		item.LastHeartbeat = nil
 		if err := m.store.Update(stageCtx, item); err != nil {
@@ -296,11 +290,15 @@ func (m *Manager) run(ctx context.Context) {
 	}
 }
 
-func (m *Manager) definitionFor(status queue.Status) *stageDefinition {
+func (m *Manager) stageForStatus(status queue.Status) (pipelineStage, bool) {
 	m.mu.RLock()
-	def := m.stagesByTrigger[status]
-	m.mu.RUnlock()
-	return def
+	defer m.mu.RUnlock()
+	for _, stg := range m.stages {
+		if stg.startStatus == status {
+			return stg, true
+		}
+	}
+	return pipelineStage{}, false
 }
 
 func (m *Manager) transitionToProcessing(ctx context.Context, processing queue.Status, stageName string, item *queue.Item) error {
@@ -444,8 +442,8 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 	running := m.running
 	lastErr := m.lastErr
 	lastItem := m.lastItem
-	defs := make([]*stageDefinition, len(m.stageDefs))
-	copy(defs, m.stageDefs)
+	stages := make([]pipelineStage, len(m.stages))
+	copy(stages, m.stages)
 	m.mu.RUnlock()
 
 	stats, err := m.store.Stats(ctx)
@@ -453,12 +451,13 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 		m.logger.Warn("failed to read queue stats", zap.Error(err))
 	}
 
-	health := make(map[string]stage.Health, len(defs))
-	for _, def := range defs {
-		if def == nil || def.health == nil {
+	health := make(map[string]stage.Health, len(stages))
+	for _, stg := range stages {
+		handler := stg.handler
+		if handler == nil {
 			continue
 		}
-		health[def.name] = def.health(ctx)
+		health[stg.name] = handler.HealthCheck(ctx)
 	}
 
 	summary := StatusSummary{Running: running, QueueStats: stats, StageHealth: health}
