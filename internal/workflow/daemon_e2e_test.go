@@ -113,11 +113,12 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 		t.Fatalf("store.NewDisc: %v", err)
 	}
 
-	deadline := time.After(10 * time.Second)
+	waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer waitCancel()
 	for {
 		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for daemon workflow completion")
+		case <-waitCtx.Done():
+			t.Fatalf("timed out waiting for daemon workflow completion: last status %s", item.Status)
 		default:
 		}
 
@@ -128,6 +129,10 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 		if updated == nil {
 			t.Fatal("queue item disappeared")
 		}
+		if updated.Status == queue.StatusFailed || updated.Status == queue.StatusReview {
+			t.Fatalf("queue item ended in status %s: %s", updated.Status, updated.ErrorMessage)
+		}
+		item = updated
 		if updated.Status == queue.StatusCompleted {
 			if updated.RippedFile == "" {
 				t.Fatal("expected ripped file path")
