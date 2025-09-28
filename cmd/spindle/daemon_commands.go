@@ -11,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/config"
+	"spindle/internal/deps"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
 )
@@ -119,6 +121,14 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 						}
 					}
 				}
+
+				if len(statusResp.Dependencies) == 0 {
+					statusResp.Dependencies = resolveDependencies(cfg)
+				}
+			}
+
+			if len(statusResp.Dependencies) == 0 {
+				statusResp.Dependencies = resolveDependencies(cfg)
 			}
 
 			fmt.Fprintln(stdout, "System Status")
@@ -199,6 +209,37 @@ func dependencyLines(deps []ipc.DependencyStatus) []string {
 		lines = append(lines, fmt.Sprintf("%s %s: %s", indicator, dep.Name, detail))
 	}
 	return lines
+}
+
+func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
+	if cfg == nil {
+		return nil
+	}
+	requirements := []deps.Requirement{
+		{
+			Name:        "MakeMKV",
+			Command:     cfg.MakemkvBinary(),
+			Description: "Required for disc ripping",
+		},
+		{
+			Name:        "Drapto",
+			Command:     cfg.DraptoBinary(),
+			Description: "Required for encoding",
+		},
+	}
+	checks := deps.CheckBinaries(requirements)
+	statuses := make([]ipc.DependencyStatus, 0, len(checks))
+	for _, check := range checks {
+		statuses = append(statuses, ipc.DependencyStatus{
+			Name:        check.Name,
+			Command:     check.Command,
+			Description: check.Description,
+			Optional:    check.Optional,
+			Available:   check.Available,
+			Detail:      check.Detail,
+		})
+	}
+	return statuses
 }
 
 func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext) error {
