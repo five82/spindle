@@ -18,12 +18,12 @@ func TestHTTPServiceRefreshTriggersPlex(t *testing.T) {
 	refreshCalled := false
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/library/sections":
+		switch r.URL.Path {
+		case "/library/sections":
 			sectionsCalled = true
 			w.Header().Set("Content-Type", "application/xml")
 			_, _ = w.Write([]byte(`<MediaContainer><Directory key="1" title="Movies"/><Directory key="2" title="TV Shows"/></MediaContainer>`))
-		case r.URL.Path == "/library/sections/1/refresh":
+		case "/library/sections/1/refresh":
 			refreshCalled = true
 			w.WriteHeader(http.StatusOK)
 		default:

@@ -30,7 +30,7 @@ print_step "Checking Go toolchain"
 
 GO_BINARY=$(command -v go || true)
 if [ -z "$GO_BINARY" ]; then
-    print_error "Go is not installed. Install Go 1.22 or newer."
+    print_error "Go is not installed. Install Go 1.25 or newer."
     exit 1
 fi
 
@@ -39,7 +39,7 @@ if [ -z "$GO_VERSION" ]; then
     GO_VERSION=$("$GO_BINARY" version | awk '{print $3}' | sed 's/^go//')
 fi
 
-MIN_GO_VERSION="1.22"
+MIN_GO_VERSION="1.25"
 if version_lt "$GO_VERSION" "$MIN_GO_VERSION"; then
     print_error "Go $MIN_GO_VERSION or newer required (found $GO_VERSION)."
     exit 1
@@ -67,7 +67,19 @@ if [ -z "$GOLANGCI_BINARY" ]; then
     exit 1
 fi
 
-print_success "Go toolchain ready (Go $GO_VERSION)"
+GOLANGCI_VERSION=$("$GOLANGCI_BINARY" version --format short 2>/dev/null || "$GOLANGCI_BINARY" version 2>/dev/null | head -n1 | sed 's/.*version //; s/ .*//')
+MIN_GOLANGCI_VERSION="2.0.0"
+if [ -z "$GOLANGCI_VERSION" ]; then
+    print_error "Unable to determine golangci-lint version; ensure v$MIN_GOLANGCI_VERSION or newer is installed."
+    exit 1
+fi
+
+if version_lt "$GOLANGCI_VERSION" "$MIN_GOLANGCI_VERSION"; then
+    print_error "golangci-lint $MIN_GOLANGCI_VERSION or newer required (found $GOLANGCI_VERSION). Upgrade via: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+    exit 1
+fi
+
+print_success "Go toolchain ready (Go $GO_VERSION, golangci-lint $GOLANGCI_VERSION)"
 
 echo "\n🧹 Simulating GitHub Actions environment (minimal PATH)"
 TEMP_BIN=$(mktemp -d)

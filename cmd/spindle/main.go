@@ -257,7 +257,7 @@ func newRootCommand() *cobra.Command {
 		Short: "Remove queue items",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clearCompleted && clearFailed {
-				return errors.New("Specify only one of --completed or --failed")
+				return errors.New("specify only one of --completed or --failed")
 			}
 			return withClient(socketFlag, func(client *ipc.Client) error {
 				if clearForce {
