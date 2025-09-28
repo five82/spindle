@@ -32,6 +32,7 @@ type Daemon struct {
 	store    *queue.Store
 	workflow *workflow.Manager
 	logPath  string
+	monitor  *discMonitor
 
 	lockPath string
 	lock     *flock.Flock
@@ -56,6 +57,7 @@ func New(cfg *config.Config, store *queue.Store, logger *zap.Logger, wf *workflo
 	}
 
 	lockPath := filepath.Join(cfg.LogDir, "spindle.lock")
+	monitor := newDiscMonitor(cfg, store, logger)
 	return &Daemon{
 		cfg:      cfg,
 		logger:   logger,
@@ -64,6 +66,7 @@ func New(cfg *config.Config, store *queue.Store, logger *zap.Logger, wf *workflo
 		logPath:  filepath.Join(cfg.LogDir, "spindle.log"),
 		lockPath: lockPath,
 		lock:     flock.New(lockPath),
+		monitor:  monitor,
 	}, nil
 }
 
@@ -89,6 +92,16 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.cancel = nil
 		return fmt.Errorf("start workflow: %w", err)
 	}
+	if d.monitor != nil {
+		if err := d.monitor.Start(d.ctx); err != nil {
+			d.workflow.Stop()
+			d.cancel()
+			d.ctx = nil
+			d.cancel = nil
+			_ = d.lock.Unlock()
+			return fmt.Errorf("start disc monitor: %w", err)
+		}
+	}
 
 	d.running.Store(true)
 	d.logger.Info("spindle daemon started", zap.String("lock", d.lockPath))
@@ -104,6 +117,9 @@ func (d *Daemon) Stop() {
 	if d.cancel != nil {
 		d.cancel()
 		d.cancel = nil
+	}
+	if d.monitor != nil {
+		d.monitor.Stop()
 	}
 	d.workflow.Stop()
 	if err := d.lock.Unlock(); err != nil {

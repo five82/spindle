@@ -13,78 +13,39 @@ import (
 	"spindle/internal/config"
 	"spindle/internal/queue"
 	"spindle/internal/services"
+	"spindle/internal/stage"
 	"spindle/internal/workflow"
 )
 
-type stubHandler struct {
-	healthReady  bool
-	healthDetail string
+type stubStage struct {
+	name        string
+	prepareHook func(*queue.Item)
+	executeHook func(*queue.Item)
+	prepareErr  error
+	executeErr  error
+	health      stage.Health
 }
 
-type failingStage struct {
-	err error
+func newStubStage(name string) *stubStage {
+	return &stubStage{name: name, health: stage.Healthy(name)}
 }
 
-func newStubHandler() *stubHandler {
-	return &stubHandler{healthReady: true}
-}
-
-func (h *stubHandler) Name() string                { return "stub" }
-func (h *stubHandler) TriggerStatus() queue.Status { return queue.StatusIdentified }
-func (h *stubHandler) ProcessingStatus() queue.Status {
-	return queue.StatusRipping
-}
-func (h *stubHandler) NextStatus() queue.Status { return queue.StatusCompleted }
-func (h *stubHandler) Prepare(ctx context.Context, item *queue.Item) error {
-	item.ProgressStage = "preparing"
-	return nil
-}
-func (h *stubHandler) Execute(ctx context.Context, item *queue.Item) error {
-	item.ProgressStage = "done"
-	item.ProgressPercent = 100
-	item.ProgressMessage = "Stage complete"
-	return nil
-}
-func (h *stubHandler) Rollback(ctx context.Context, item *queue.Item, stageErr error) error {
-	return nil
-}
-
-func (h *stubHandler) HealthCheck(ctx context.Context) workflow.StageHealth {
-	if h.healthReady {
-		health := workflow.HealthyStage(h.Name())
-		health.Detail = h.healthDetail
-		return health
+func (s *stubStage) Prepare(_ context.Context, item *queue.Item) error {
+	if s.prepareHook != nil {
+		s.prepareHook(item)
 	}
-	detail := h.healthDetail
-	if detail == "" {
-		detail = "not ready"
+	return s.prepareErr
+}
+
+func (s *stubStage) Execute(_ context.Context, item *queue.Item) error {
+	if s.executeHook != nil {
+		s.executeHook(item)
 	}
-	return workflow.UnhealthyStage(h.Name(), detail)
+	return s.executeErr
 }
 
-func (f *failingStage) Name() string { return "failing" }
-
-func (f *failingStage) TriggerStatus() queue.Status { return queue.StatusIdentified }
-
-func (f *failingStage) ProcessingStatus() queue.Status { return queue.StatusRipping }
-
-func (f *failingStage) NextStatus() queue.Status { return queue.StatusCompleted }
-
-func (f *failingStage) Prepare(ctx context.Context, item *queue.Item) error {
-	item.ProgressStage = "starting"
-	return nil
-}
-
-func (f *failingStage) Execute(ctx context.Context, item *queue.Item) error {
-	return f.err
-}
-
-func (f *failingStage) Rollback(ctx context.Context, item *queue.Item, stageErr error) error {
-	return nil
-}
-
-func (f *failingStage) HealthCheck(ctx context.Context) workflow.StageHealth {
-	return workflow.HealthyStage(f.Name())
+func (s *stubStage) HealthCheck(context.Context) stage.Health {
+	return s.health
 }
 
 func testConfig(t *testing.T) *config.Config {
@@ -107,14 +68,21 @@ func TestManagerProcessesItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	t.Cleanup(func() { store.Close() })
 
-	logger := zap.NewNop()
+	identifier := newStubStage("identifier")
+	ripper := newStubStage("ripper")
+	encoder := newStubStage("encoder")
+	organizer := newStubStage("organizer")
+
 	notifier := &managerNotifier{}
-	mgr := workflow.NewManagerWithNotifier(cfg, store, logger, notifier)
-	mgr.Register(newStubHandler())
+	mgr := workflow.NewManagerWithNotifier(cfg, store, zap.NewNop(), notifier)
+	mgr.ConfigureStages(workflow.StageSet{
+		Identifier: identifier,
+		Ripper:     ripper,
+		Encoder:    encoder,
+		Organizer:  organizer,
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -122,27 +90,20 @@ func TestManagerProcessesItems(t *testing.T) {
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	t.Cleanup(func() {
-		mgr.Stop()
-	})
+	t.Cleanup(func() { mgr.Stop() })
 
-	item, err := store.NewDisc(ctx, "Disc", "fp-123")
+	item, err := store.NewDisc(ctx, "Disc", "fp-success")
 	if err != nil {
 		t.Fatalf("NewDisc failed: %v", err)
-	}
-	item.Status = queue.StatusIdentified
-	if err := store.Update(ctx, item); err != nil {
-		t.Fatalf("Update failed: %v", err)
 	}
 
 	deadline := time.After(60 * time.Second)
 	for {
 		select {
 		case <-deadline:
-			t.Fatal("timed out waiting for item processing")
+			t.Fatal("timed out waiting for completion")
 		default:
 		}
-
 		updated, err := store.GetByID(ctx, item.ID)
 		if err != nil {
 			t.Fatalf("GetByID failed: %v", err)
@@ -150,7 +111,7 @@ func TestManagerProcessesItems(t *testing.T) {
 		if updated.Status == queue.StatusCompleted {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 
 	if len(notifier.queueStarts) != 1 {
@@ -167,64 +128,30 @@ func TestManagerProcessesItems(t *testing.T) {
 	}
 }
 
-type managerNotifier struct {
-	queueStarts    []int
-	queueCompletes []struct{ processed, failed int }
-}
-
-func (m *managerNotifier) NotifyDiscDetected(context.Context, string, string) error { return nil }
-func (m *managerNotifier) NotifyIdentificationComplete(context.Context, string, string) error {
-	return nil
-}
-func (m *managerNotifier) NotifyRipStarted(context.Context, string) error          { return nil }
-func (m *managerNotifier) NotifyRipCompleted(context.Context, string) error        { return nil }
-func (m *managerNotifier) NotifyEncodingCompleted(context.Context, string) error   { return nil }
-func (m *managerNotifier) NotifyProcessingCompleted(context.Context, string) error { return nil }
-func (m *managerNotifier) NotifyOrganizationCompleted(context.Context, string, string) error {
-	return nil
-}
-
-func (m *managerNotifier) NotifyQueueStarted(ctx context.Context, count int) error {
-	m.queueStarts = append(m.queueStarts, count)
-	return nil
-}
-
-func (m *managerNotifier) NotifyQueueCompleted(ctx context.Context, processed, failed int, _ time.Duration) error {
-	m.queueCompletes = append(m.queueCompletes, struct{ processed, failed int }{processed: processed, failed: failed})
-	return nil
-}
-
-func (m *managerNotifier) NotifyError(context.Context, error, string) error      { return nil }
-func (m *managerNotifier) NotifyUnidentifiedMedia(context.Context, string) error { return nil }
-func (m *managerNotifier) TestNotification(context.Context) error                { return nil }
-
 func TestManagerStatusIncludesStageHealth(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := queue.Open(cfg)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	t.Cleanup(func() { store.Close() })
 
-	logger := zap.NewNop()
-	stage := newStubHandler()
-	stage.healthReady = false
-	stage.healthDetail = "dependency missing"
-	mgr := workflow.NewManager(cfg, store, logger)
-	mgr.Register(stage)
+	handler := newStubStage("identifier")
+	handler.health = stage.Unhealthy(handler.name, "dependency missing")
+
+	mgr := workflow.NewManager(cfg, store, zap.NewNop())
+	mgr.ConfigureStages(workflow.StageSet{Identifier: handler})
 
 	status := mgr.Status(context.Background())
-	health, ok := status.StageHealth[stage.Name()]
+	health, ok := status.StageHealth[handler.name]
 	if !ok {
-		t.Fatalf("expected stage health entry for %s", stage.Name())
+		t.Fatalf("expected stage health entry for %s", handler.name)
 	}
 	if health.Ready {
 		t.Fatalf("expected not ready health, got %+v", health)
 	}
-	if health.Detail != stage.healthDetail {
-		t.Fatalf("expected detail %q, got %q", stage.healthDetail, health.Detail)
+	if health.Detail != handler.health.Detail {
+		t.Fatalf("expected detail %q, got %q", handler.health.Detail, health.Detail)
 	}
 }
 
@@ -241,9 +168,11 @@ func TestManagerFailureTriggersReviewWithHint(t *testing.T) {
 		services.Wrap(services.ErrorValidation, "failing", "execute", "validation failed", nil),
 		hint,
 	)
-	stage := &failingStage{err: stageErr}
+	failing := newStubStage("ripper")
+	failing.executeErr = stageErr
+
 	mgr := workflow.NewManager(cfg, store, zap.NewNop())
-	mgr.Register(stage)
+	mgr.ConfigureStages(workflow.StageSet{Ripper: failing})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -284,7 +213,7 @@ func TestManagerFailureTriggersReviewWithHint(t *testing.T) {
 			}
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
@@ -296,9 +225,11 @@ func TestManagerFailureDefaultsToFailed(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	stage := &failingStage{err: fmt.Errorf("boom")}
+	failing := newStubStage("ripper")
+	failing.executeErr = fmt.Errorf("boom")
+
 	mgr := workflow.NewManager(cfg, store, zap.NewNop())
-	mgr.Register(stage)
+	mgr.ConfigureStages(workflow.StageSet{Ripper: failing})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -317,7 +248,6 @@ func TestManagerFailureDefaultsToFailed(t *testing.T) {
 	}
 
 	deadline := time.After(30 * time.Second)
-	var last queue.Status
 	for {
 		select {
 		case <-deadline:
@@ -328,10 +258,6 @@ func TestManagerFailureDefaultsToFailed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetByID failed: %v", err)
 		}
-		if updated.Status != last {
-			t.Logf("item status transitioned to %s", updated.Status)
-			last = updated.Status
-		}
 		if updated.Status == queue.StatusFailed {
 			if updated.ProgressStage != "Failed" {
 				t.Fatalf("expected progress stage 'Failed', got %s", updated.ProgressStage)
@@ -341,6 +267,37 @@ func TestManagerFailureDefaultsToFailed(t *testing.T) {
 			}
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 }
+
+type managerNotifier struct {
+	queueStarts    []int
+	queueCompletes []struct{ processed, failed int }
+}
+
+func (m *managerNotifier) NotifyDiscDetected(context.Context, string, string) error { return nil }
+func (m *managerNotifier) NotifyIdentificationComplete(context.Context, string, string) error {
+	return nil
+}
+func (m *managerNotifier) NotifyRipStarted(context.Context, string) error          { return nil }
+func (m *managerNotifier) NotifyRipCompleted(context.Context, string) error        { return nil }
+func (m *managerNotifier) NotifyEncodingCompleted(context.Context, string) error   { return nil }
+func (m *managerNotifier) NotifyProcessingCompleted(context.Context, string) error { return nil }
+func (m *managerNotifier) NotifyOrganizationCompleted(context.Context, string, string) error {
+	return nil
+}
+
+func (m *managerNotifier) NotifyQueueStarted(ctx context.Context, count int) error {
+	m.queueStarts = append(m.queueStarts, count)
+	return nil
+}
+
+func (m *managerNotifier) NotifyQueueCompleted(ctx context.Context, processed, failed int, _ time.Duration) error {
+	m.queueCompletes = append(m.queueCompletes, struct{ processed, failed int }{processed: processed, failed: failed})
+	return nil
+}
+
+func (m *managerNotifier) NotifyError(context.Context, error, string) error      { return nil }
+func (m *managerNotifier) NotifyUnidentifiedMedia(context.Context, string) error { return nil }
+func (m *managerNotifier) TestNotification(context.Context) error                { return nil }

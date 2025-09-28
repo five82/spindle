@@ -51,7 +51,7 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 	if err := handler.Execute(context.Background(), item); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	item.Status = handler.NextStatus()
+	item.Status = queue.StatusIdentified
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}

@@ -19,7 +19,7 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/services"
 	"spindle/internal/services/plex"
-	"spindle/internal/workflow"
+	"spindle/internal/stage"
 )
 
 // MetadataProvider describes the media metadata used for organization.
@@ -53,14 +53,6 @@ func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger
 	}
 	return &Organizer{store: store, cfg: cfg, logger: stageLogger, plex: plexClient, notifier: notifier}
 }
-
-func (o *Organizer) Name() string { return "organizer" }
-
-func (o *Organizer) TriggerStatus() queue.Status { return queue.StatusEncoded }
-
-func (o *Organizer) ProcessingStatus() queue.Status { return queue.StatusOrganizing }
-
-func (o *Organizer) NextStatus() queue.Status { return queue.StatusCompleted }
 
 func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 	if item.ProgressStage == "" {
@@ -299,28 +291,22 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-func (o *Organizer) Rollback(ctx context.Context, item *queue.Item, stageErr error) error {
-	return nil
-}
-
-var _ workflow.Stage = (*Organizer)(nil)
-
 // HealthCheck verifies organizer prerequisites such as library paths and Plex connectivity configuration.
-func (o *Organizer) HealthCheck(ctx context.Context) workflow.StageHealth {
-	name := o.Name()
+func (o *Organizer) HealthCheck(ctx context.Context) stage.Health {
+	const name = "organizer"
 	if o.cfg == nil {
-		return workflow.UnhealthyStage(name, "configuration unavailable")
+		return stage.Unhealthy(name, "configuration unavailable")
 	}
 	if strings.TrimSpace(o.cfg.LibraryDir) == "" {
-		return workflow.UnhealthyStage(name, "library directory not configured")
+		return stage.Unhealthy(name, "library directory not configured")
 	}
 	if strings.TrimSpace(o.cfg.MoviesDir) == "" && strings.TrimSpace(o.cfg.TVDir) == "" {
-		return workflow.UnhealthyStage(name, "library subdirectories not configured")
+		return stage.Unhealthy(name, "library subdirectories not configured")
 	}
 	if o.plex == nil {
-		return workflow.UnhealthyStage(name, "plex client unavailable")
+		return stage.Unhealthy(name, "plex client unavailable")
 	}
-	return workflow.HealthyStage(name)
+	return stage.Healthy(name)
 }
 
 func (o *Organizer) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) {

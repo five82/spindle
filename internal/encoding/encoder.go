@@ -15,7 +15,7 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/services"
 	"spindle/internal/services/drapto"
-	"spindle/internal/workflow"
+	"spindle/internal/stage"
 )
 
 // Encoder manages Drapto encoding of ripped files.
@@ -41,14 +41,6 @@ func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *
 	}
 	return &Encoder{store: store, cfg: cfg, logger: stageLogger, client: client, notifier: notifier}
 }
-
-func (e *Encoder) Name() string { return "encoder" }
-
-func (e *Encoder) TriggerStatus() queue.Status { return queue.StatusRipped }
-
-func (e *Encoder) ProcessingStatus() queue.Status { return queue.StatusEncoding }
-
-func (e *Encoder) NextStatus() queue.Status { return queue.StatusEncoded }
 
 func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 	if item.ProgressStage == "" {
@@ -130,25 +122,19 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-func (e *Encoder) Rollback(ctx context.Context, item *queue.Item, stageErr error) error {
-	return nil
-}
-
-var _ workflow.Stage = (*Encoder)(nil)
-
 // HealthCheck verifies encoding dependencies for Drapto.
-func (e *Encoder) HealthCheck(ctx context.Context) workflow.StageHealth {
-	name := e.Name()
+func (e *Encoder) HealthCheck(ctx context.Context) stage.Health {
+	const name = "encoder"
 	if e.cfg == nil {
-		return workflow.UnhealthyStage(name, "configuration unavailable")
+		return stage.Unhealthy(name, "configuration unavailable")
 	}
 	if strings.TrimSpace(e.cfg.StagingDir) == "" {
-		return workflow.UnhealthyStage(name, "staging directory not configured")
+		return stage.Unhealthy(name, "staging directory not configured")
 	}
 	if e.client == nil {
-		return workflow.UnhealthyStage(name, "drapto client unavailable")
+		return stage.Unhealthy(name, "drapto client unavailable")
 	}
-	return workflow.HealthyStage(name)
+	return stage.Healthy(name)
 }
 
 func copyFile(src, dst string) error {

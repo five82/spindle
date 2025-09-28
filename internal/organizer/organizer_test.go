@@ -58,7 +58,7 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 	stubPlex := &stubPlexService{}
 	notifier := &stubNotifier{}
 	handler := organizer.NewOrganizerWithDependencies(cfg, store, zap.NewNop(), stubPlex, notifier)
-	item.Status = handler.ProcessingStatus()
+	item.Status = queue.StatusOrganizing
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 	if err := handler.Execute(context.Background(), item); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	item.Status = handler.NextStatus()
+	item.Status = queue.StatusCompleted
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Final update: %v", err)
 	}

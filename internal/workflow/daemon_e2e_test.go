@@ -86,10 +86,12 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 	organizerStage := organizer.NewOrganizerWithDependencies(cfg, store, logger, plexClient, notifier)
 
 	mgr := workflow.NewManagerWithNotifier(cfg, store, logger, notifier)
-	mgr.Register(identifier)
-	mgr.Register(ripper)
-	mgr.Register(encoder)
-	mgr.Register(organizerStage)
+	mgr.ConfigureStages(workflow.StageSet{
+		Identifier: identifier,
+		Ripper:     ripper,
+		Encoder:    encoder,
+		Organizer:  organizerStage,
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -16,8 +16,17 @@ import (
 	"spindle/internal/daemon"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
+	"spindle/internal/stage"
 	"spindle/internal/workflow"
 )
+
+type noopStage struct{}
+
+func (noopStage) Prepare(context.Context, *queue.Item) error { return nil }
+func (noopStage) Execute(context.Context, *queue.Item) error { return nil }
+func (noopStage) HealthCheck(context.Context) stage.Health {
+	return stage.Healthy("noop")
+}
 
 type cliTestEnv struct {
 	cfg        *config.Config
@@ -62,6 +71,7 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 
 	logger := zap.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
+	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
 
 	d, err := daemon.New(cfg, store, logger, mgr)
 	if err != nil {

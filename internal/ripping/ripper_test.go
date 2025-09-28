@@ -52,7 +52,7 @@ func TestRipperCreatesRippedFile(t *testing.T) {
 	stubEject := &stubEjector{}
 	stubNotifier := &stubNotifier{}
 	handler := ripping.NewRipperWithDependencies(cfg, store, zap.NewNop(), stubClient, stubEject, stubNotifier)
-	item.Status = handler.ProcessingStatus()
+	item.Status = queue.StatusRipping
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestRipperCreatesRippedFile(t *testing.T) {
 	if err := handler.Execute(context.Background(), item); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	item.Status = handler.NextStatus()
+	item.Status = queue.StatusRipped
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Final update: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestRipperFallsBackWithoutClient(t *testing.T) {
 	}
 
 	handler := ripping.NewRipperWithDependencies(cfg, store, zap.NewNop(), nil, &stubEjector{}, &stubNotifier{})
-	item.Status = handler.ProcessingStatus()
+	item.Status = queue.StatusRipping
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRipperFallsBackWithoutClient(t *testing.T) {
 	if err := handler.Execute(context.Background(), item); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	item.Status = handler.NextStatus()
+	item.Status = queue.StatusRipped
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Final update: %v", err)
 	}

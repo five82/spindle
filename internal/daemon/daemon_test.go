@@ -11,8 +11,17 @@ import (
 	"spindle/internal/config"
 	"spindle/internal/daemon"
 	"spindle/internal/queue"
+	"spindle/internal/stage"
 	"spindle/internal/workflow"
 )
+
+type noopStage struct{}
+
+func (noopStage) Prepare(context.Context, *queue.Item) error { return nil }
+func (noopStage) Execute(context.Context, *queue.Item) error { return nil }
+func (noopStage) HealthCheck(context.Context) stage.Health {
+	return stage.Healthy("noop")
+}
 
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
@@ -34,6 +43,7 @@ func TestDaemonStartStop(t *testing.T) {
 	}
 	logger := zap.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
+	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
 	d, err := daemon.New(cfg, store, logger, mgr)
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)

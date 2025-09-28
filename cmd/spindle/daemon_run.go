@@ -21,10 +21,6 @@ import (
 	"spindle/internal/workflow"
 )
 
-type stageRegistrar interface {
-	Register(workflow.Stage)
-}
-
 func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	if ctx == nil {
 		return fmt.Errorf("command context is required")
@@ -77,15 +73,17 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	return nil
 }
 
-func registerStages(reg stageRegistrar, cfg *config.Config, store *queue.Store, logger *zap.Logger) {
-	if reg == nil || cfg == nil {
+func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Store, logger *zap.Logger) {
+	if mgr == nil || cfg == nil {
 		return
 	}
 
-	reg.Register(identification.NewIdentifier(cfg, store, logger))
-	reg.Register(ripping.NewRipper(cfg, store, logger))
-	reg.Register(encoding.NewEncoder(cfg, store, logger))
-	reg.Register(organizer.NewOrganizer(cfg, store, logger))
+	mgr.ConfigureStages(workflow.StageSet{
+		Identifier: identification.NewIdentifier(cfg, store, logger),
+		Ripper:     ripping.NewRipper(cfg, store, logger),
+		Encoder:    encoding.NewEncoder(cfg, store, logger),
+		Organizer:  organizer.NewOrganizer(cfg, store, logger),
+	})
 }
 
 func buildSocketPath(cfg *config.Config) string {

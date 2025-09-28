@@ -16,7 +16,7 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/services"
 	"spindle/internal/services/makemkv"
-	"spindle/internal/workflow"
+	"spindle/internal/stage"
 )
 
 // Ripper manages the MakeMKV ripping workflow.
@@ -51,14 +51,6 @@ func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *z
 	}
 	return &Ripper{store: store, cfg: cfg, logger: stageLogger, client: client, ejector: ejector, notifier: notifier}
 }
-
-func (r *Ripper) Name() string { return "ripper" }
-
-func (r *Ripper) TriggerStatus() queue.Status { return queue.StatusIdentified }
-
-func (r *Ripper) ProcessingStatus() queue.Status { return queue.StatusRipping }
-
-func (r *Ripper) NextStatus() queue.Status { return queue.StatusRipped }
 
 func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, r.logger)
@@ -135,31 +127,25 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-func (r *Ripper) Rollback(ctx context.Context, item *queue.Item, stageErr error) error {
-	return nil
-}
-
-var _ workflow.Stage = (*Ripper)(nil)
-
 // HealthCheck verifies MakeMKV ripping dependencies.
-func (r *Ripper) HealthCheck(ctx context.Context) workflow.StageHealth {
-	name := r.Name()
+func (r *Ripper) HealthCheck(ctx context.Context) stage.Health {
+	const name = "ripper"
 	if r.cfg == nil {
-		return workflow.UnhealthyStage(name, "configuration unavailable")
+		return stage.Unhealthy(name, "configuration unavailable")
 	}
 	if strings.TrimSpace(r.cfg.StagingDir) == "" {
-		return workflow.UnhealthyStage(name, "staging directory not configured")
+		return stage.Unhealthy(name, "staging directory not configured")
 	}
 	if strings.TrimSpace(r.cfg.OpticalDrive) == "" {
-		return workflow.UnhealthyStage(name, "optical drive not configured")
+		return stage.Unhealthy(name, "optical drive not configured")
 	}
 	if r.client == nil {
-		return workflow.UnhealthyStage(name, "makemkv client unavailable")
+		return stage.Unhealthy(name, "makemkv client unavailable")
 	}
 	if r.ejector == nil {
-		return workflow.UnhealthyStage(name, "disc ejector unavailable")
+		return stage.Unhealthy(name, "disc ejector unavailable")
 	}
-	return workflow.HealthyStage(name)
+	return stage.Healthy(name)
 }
 
 func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update makemkv.ProgressUpdate) {

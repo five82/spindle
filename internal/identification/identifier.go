@@ -23,7 +23,7 @@ import (
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
-	"spindle/internal/workflow"
+	"spindle/internal/stage"
 )
 
 // Identifier performs disc identification using MakeMKV scanning and TMDB metadata.
@@ -91,18 +91,6 @@ func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logge
 		notifier:    notifier,
 	}
 }
-
-// Name identifies the handler for logging.
-func (i *Identifier) Name() string { return "identifier" }
-
-// TriggerStatus indicates this handler processes pending items.
-func (i *Identifier) TriggerStatus() queue.Status { return queue.StatusPending }
-
-// ProcessingStatus returns the in-flight status while identification runs.
-func (i *Identifier) ProcessingStatus() queue.Status { return queue.StatusIdentifying }
-
-// NextStatus indicates the status after successful identification.
-func (i *Identifier) NextStatus() queue.Status { return queue.StatusIdentified }
 
 // Prepare initializes progress messaging prior to Execute.
 func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
@@ -210,29 +198,22 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-// Rollback performs no additional work on failure.
-func (i *Identifier) Rollback(ctx context.Context, item *queue.Item, stageErr error) error {
-	return nil
-}
-
-var _ workflow.Stage = (*Identifier)(nil)
-
 // HealthCheck verifies identifier dependencies required for successful execution.
-func (i *Identifier) HealthCheck(ctx context.Context) workflow.StageHealth {
-	name := i.Name()
+func (i *Identifier) HealthCheck(ctx context.Context) stage.Health {
+	const name = "identifier"
 	if i.cfg == nil {
-		return workflow.UnhealthyStage(name, "configuration unavailable")
+		return stage.Unhealthy(name, "configuration unavailable")
 	}
 	if strings.TrimSpace(i.cfg.TMDBAPIKey) == "" {
-		return workflow.UnhealthyStage(name, "tmdb api key missing")
+		return stage.Unhealthy(name, "tmdb api key missing")
 	}
 	if i.tmdb == nil {
-		return workflow.UnhealthyStage(name, "tmdb client unavailable")
+		return stage.Unhealthy(name, "tmdb client unavailable")
 	}
 	if i.scanner == nil {
-		return workflow.UnhealthyStage(name, "disc scanner unavailable")
+		return stage.Unhealthy(name, "disc scanner unavailable")
 	}
-	return workflow.HealthyStage(name)
+	return stage.Healthy(name)
 }
 
 func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
@@ -414,5 +395,3 @@ func deriveTitle(sourcePath string) string {
 	}
 	return cases.Title(language.Und).String(title)
 }
-
-// Rollback is intentionally a no-op today but kept for interface completeness.

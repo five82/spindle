@@ -17,41 +17,47 @@ import (
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
+	"spindle/internal/stage"
 )
 
-// Stage defines the contract for workflow steps handled by the manager.
-type Stage interface {
-	Name() string
-	TriggerStatus() queue.Status
-	ProcessingStatus() queue.Status
-	NextStatus() queue.Status
-	Prepare(ctx context.Context, item *queue.Item) error
-	Execute(ctx context.Context, item *queue.Item) error
-	Rollback(ctx context.Context, item *queue.Item, stageErr error) error
-	HealthCheck(ctx context.Context) StageHealth
+// StageHandler describes the narrow contract the manager needs from each stage.
+type StageHandler interface {
+	Prepare(context.Context, *queue.Item) error
+	Execute(context.Context, *queue.Item) error
+	HealthCheck(context.Context) stage.Health
 }
 
-type workItem struct {
-	stage     Stage
-	item      *queue.Item
-	requestID string
+// StageSet bundles the concrete workflow handlers the manager orchestrates.
+type StageSet struct {
+	Identifier StageHandler
+	Ripper     StageHandler
+	Encoder    StageHandler
+	Organizer  StageHandler
 }
 
-// Manager coordinates queue processing using registered stages.
+type stageDefinition struct {
+	name       string
+	trigger    queue.Status
+	processing queue.Status
+	next       queue.Status
+	prepare    func(context.Context, *queue.Item) error
+	execute    func(context.Context, *queue.Item) error
+	health     func(context.Context) stage.Health
+}
+
+// Manager coordinates queue processing using registered stage functions.
 type Manager struct {
 	cfg               *config.Config
 	store             *queue.Store
 	logger            *zap.Logger
 	pollInterval      time.Duration
-	workerCount       int
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
 	notifier          notifications.Service
 
-	statusOrder []queue.Status
-	stages      map[queue.Status]Stage
-
-	jobCh chan workItem
+	statusOrder     []queue.Status
+	stageDefs       []*stageDefinition
+	stagesByTrigger map[queue.Status]*stageDefinition
 
 	mu       sync.RWMutex
 	running  bool
@@ -77,7 +83,6 @@ func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *zap.
 		logger:            logger,
 		notifier:          notifier,
 		pollInterval:      time.Duration(cfg.QueuePollInterval) * time.Second,
-		workerCount:       cfg.WorkflowWorkerCount,
 		heartbeatInterval: time.Duration(cfg.WorkflowHeartbeatInterval) * time.Second,
 		heartbeatTimeout:  time.Duration(cfg.WorkflowHeartbeatTimeout) * time.Second,
 		statusOrder: []queue.Status{
@@ -86,17 +91,67 @@ func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *zap.
 			queue.StatusRipped,
 			queue.StatusEncoded,
 		},
-		stages: make(map[queue.Status]Stage),
+		stagesByTrigger: make(map[queue.Status]*stageDefinition),
 	}
 }
 
-// Register registers a stage for a given trigger status.
-func (m *Manager) Register(stage Stage) {
-	if stage == nil {
-		return
+// ConfigureStages registers the concrete stage handlers the workflow will run.
+
+func (m *Manager) ConfigureStages(set StageSet) {
+	defs := make([]*stageDefinition, 0, 4)
+
+	if set.Identifier != nil {
+		defs = append(defs, &stageDefinition{
+			name:       "identifier",
+			trigger:    queue.StatusPending,
+			processing: queue.StatusIdentifying,
+			next:       queue.StatusIdentified,
+			prepare:    set.Identifier.Prepare,
+			execute:    set.Identifier.Execute,
+			health:     set.Identifier.HealthCheck,
+		})
 	}
-	status := stage.TriggerStatus()
-	m.stages[status] = stage
+	if set.Ripper != nil {
+		defs = append(defs, &stageDefinition{
+			name:       "ripper",
+			trigger:    queue.StatusIdentified,
+			processing: queue.StatusRipping,
+			next:       queue.StatusRipped,
+			prepare:    set.Ripper.Prepare,
+			execute:    set.Ripper.Execute,
+			health:     set.Ripper.HealthCheck,
+		})
+	}
+	if set.Encoder != nil {
+		defs = append(defs, &stageDefinition{
+			name:       "encoder",
+			trigger:    queue.StatusRipped,
+			processing: queue.StatusEncoding,
+			next:       queue.StatusEncoded,
+			prepare:    set.Encoder.Prepare,
+			execute:    set.Encoder.Execute,
+			health:     set.Encoder.HealthCheck,
+		})
+	}
+	if set.Organizer != nil {
+		defs = append(defs, &stageDefinition{
+			name:       "organizer",
+			trigger:    queue.StatusEncoded,
+			processing: queue.StatusOrganizing,
+			next:       queue.StatusCompleted,
+			prepare:    set.Organizer.Prepare,
+			execute:    set.Organizer.Execute,
+			health:     set.Organizer.HealthCheck,
+		})
+	}
+
+	m.mu.Lock()
+	m.stageDefs = defs
+	m.stagesByTrigger = make(map[queue.Status]*stageDefinition, len(defs))
+	for _, def := range defs {
+		m.stagesByTrigger[def.trigger] = def
+	}
+	m.mu.Unlock()
 }
 
 // Start begins background processing.
@@ -106,25 +161,16 @@ func (m *Manager) Start(ctx context.Context) error {
 	if m.running {
 		return errors.New("workflow already running")
 	}
-
-	if m.workerCount <= 0 {
-		return errors.New("invalid worker count configured for workflow manager")
+	if len(m.stageDefs) == 0 {
+		return errors.New("workflow stages not configured")
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
 	m.running = true
-	m.jobCh = make(chan workItem, m.workerCount)
 
-	// Worker goroutines
-	for i := 0; i < m.workerCount; i++ {
-		m.wg.Add(1)
-		go m.workerLoop(runCtx)
-	}
-
-	// Dispatcher goroutine
 	m.wg.Add(1)
-	go m.dispatchLoop(runCtx)
+	go m.run(runCtx)
 
 	return nil
 }
@@ -145,11 +191,9 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
-func (m *Manager) dispatchLoop(ctx context.Context) {
+func (m *Manager) run(ctx context.Context) {
 	defer m.wg.Done()
-	defer close(m.jobCh)
-
-	logger := m.logger.With(zap.String("component", "workflow-dispatch"))
+	logger := m.logger.With(zap.String("component", "workflow-runner"))
 
 	for {
 		select {
@@ -158,7 +202,6 @@ func (m *Manager) dispatchLoop(ctx context.Context) {
 		default:
 		}
 
-		// Reclaim stale processing items based on heartbeat timeout.
 		if m.heartbeatTimeout > 0 {
 			cutoff := time.Now().Add(-m.heartbeatTimeout)
 			if reclaimed, err := m.store.ReclaimStaleProcessing(ctx, cutoff); err != nil {
@@ -188,9 +231,9 @@ func (m *Manager) dispatchLoop(ctx context.Context) {
 			continue
 		}
 
-		stage := m.stages[item.Status]
-		if stage == nil {
-			logger.Warn("no stage registered for status", zap.String("status", string(item.Status)))
+		def := m.definitionFor(item.Status)
+		if def == nil {
+			logger.Warn("no stage configured for status", zap.String("status", string(item.Status)))
 			select {
 			case <-ctx.Done():
 				return
@@ -200,106 +243,78 @@ func (m *Manager) dispatchLoop(ctx context.Context) {
 		}
 
 		requestID := uuid.NewString()
-		stageCtx := withStageContext(ctx, stage, item, requestID)
+		stageCtx := withStageContext(ctx, def.name, item, requestID)
 		stageLogger := logging.WithContext(stageCtx, logger)
 
-		if err := m.transitionToProcessing(stageCtx, stage, item); err != nil {
+		if err := m.transitionToProcessing(stageCtx, def.processing, def.name, item); err != nil {
 			stageLogger.Error("failed to transition item to processing", zap.Error(err))
 			m.setLastError(err)
 			continue
 		}
 
-		work := workItem{stage: stage, item: item, requestID: requestID}
-		select {
-		case <-ctx.Done():
-			return
-		case m.jobCh <- work:
-		}
-	}
-}
-
-func (m *Manager) workerLoop(ctx context.Context) {
-	defer m.wg.Done()
-	baseLogger := m.logger.With(zap.String("component", "workflow-worker"))
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case work, ok := <-m.jobCh:
-			if !ok {
-				return
-			}
-			jobCtx := withStageContext(ctx, work.stage, work.item, work.requestID)
-			logger := logging.WithContext(jobCtx, baseLogger)
-
-			if err := m.processJob(jobCtx, work); err != nil {
-				logger.Error("stage execution failed", zap.Error(err))
+		if def.prepare != nil {
+			if err := def.prepare(stageCtx, item); err != nil {
+				m.handleStageFailure(stageCtx, def.name, item, err)
 				m.setLastError(err)
+				continue
+			}
+			if err := m.store.Update(stageCtx, item); err != nil {
+				wrapped := fmt.Errorf("persist stage preparation: %w", err)
+				stageLogger.Error("failed to persist stage preparation", zap.Error(wrapped))
+				m.setLastError(wrapped)
+				continue
 			}
 		}
-	}
-}
 
-func (m *Manager) processJob(ctx context.Context, work workItem) error {
-	stage := work.stage
-	item := work.item
+		hbCtx, hbCancel := context.WithCancel(stageCtx)
+		var hbWG sync.WaitGroup
+		hbWG.Add(1)
+		go m.heartbeatLoop(hbCtx, &hbWG, item.ID)
 
-	ctx = withStageContext(ctx, stage, item, work.requestID)
-	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-manager")))
+		execErr := def.execute(stageCtx, item)
+		hbCancel()
+		hbWG.Wait()
 
-	if err := stage.Prepare(ctx, item); err != nil {
-		m.handleStageFailure(ctx, stage, item, err)
-		return err
-	}
-	if err := m.store.Update(ctx, item); err != nil {
-		return fmt.Errorf("persist stage preparation: %w", err)
-	}
-
-	hbCtx, hbCancel := context.WithCancel(ctx)
-	var hbWG sync.WaitGroup
-	hbWG.Add(1)
-	go m.heartbeatLoop(hbCtx, &hbWG, item.ID)
-
-	execErr := stage.Execute(ctx, item)
-	hbCancel()
-	hbWG.Wait()
-
-	if execErr != nil {
-		if rbErr := stage.Rollback(ctx, item, execErr); rbErr != nil {
-			logger.Warn("stage rollback failed", zap.Error(rbErr))
+		if execErr != nil {
+			m.handleStageFailure(stageCtx, def.name, item, execErr)
+			m.setLastError(execErr)
+			continue
 		}
-		m.handleStageFailure(ctx, stage, item, execErr)
-		return execErr
-	}
 
-	finalStatus := stage.NextStatus()
-	if item.Status == stage.ProcessingStatus() || item.Status == "" {
-		item.Status = finalStatus
+		if item.Status == def.processing || item.Status == "" {
+			item.Status = def.next
+		}
+		item.LastHeartbeat = nil
+		if err := m.store.Update(stageCtx, item); err != nil {
+			wrapped := fmt.Errorf("persist stage result: %w", err)
+			stageLogger.Error("failed to persist stage result", zap.Error(wrapped))
+			m.setLastError(wrapped)
+			continue
+		}
+		m.setLastItem(item)
+		m.checkQueueCompletion(stageCtx)
 	}
-	item.LastHeartbeat = nil
-	if err := m.store.Update(ctx, item); err != nil {
-		return fmt.Errorf("persist stage result: %w", err)
-	}
-	m.setLastItem(item)
-	m.checkQueueCompletion(ctx)
-	return nil
 }
 
-func (m *Manager) transitionToProcessing(ctx context.Context, stage Stage, item *queue.Item) error {
-	ctx = withStageContext(ctx, stage, item, "")
+func (m *Manager) definitionFor(status queue.Status) *stageDefinition {
+	m.mu.RLock()
+	def := m.stagesByTrigger[status]
+	m.mu.RUnlock()
+	return def
+}
+
+func (m *Manager) transitionToProcessing(ctx context.Context, processing queue.Status, stageName string, item *queue.Item) error {
 	now := time.Now().UTC()
-	processingStatus := stage.ProcessingStatus()
-	if processingStatus == "" {
+	if processing == "" {
 		return errors.New("processing status must not be empty")
 	}
 
-	item.Status = processingStatus
+	item.Status = processing
 	if item.ProgressStage == "" {
-		item.ProgressStage = deriveStageLabel(processingStatus)
+		item.ProgressStage = deriveStageLabel(processing)
 	}
 	if item.ProgressMessage == "" {
-		item.ProgressMessage = fmt.Sprintf("%s started", stage.Name())
+		item.ProgressMessage = fmt.Sprintf("%s started", deriveStageLabel(processing))
 	}
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
@@ -332,9 +347,9 @@ func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID 
 	}
 }
 
-func (m *Manager) handleStageFailure(ctx context.Context, stage Stage, item *queue.Item, stageErr error) {
+func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item *queue.Item, stageErr error) {
 	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-manager")))
-	status, errorMessage, progressMessage := classifyStageFailure(stage, stageErr)
+	status, errorMessage, progressMessage := classifyStageFailure(stageName, stageErr)
 	item.Status = status
 	if strings.TrimSpace(errorMessage) == "" {
 		errorMessage = "workflow stage failed"
@@ -355,16 +370,16 @@ func (m *Manager) handleStageFailure(ctx context.Context, stage Stage, item *que
 		logger.Error("failed to persist stage failure", zap.Error(err))
 	}
 	m.setLastItem(item)
-	m.notifyStageError(ctx, stage, item, stageErr)
+	m.notifyStageError(ctx, stageName, item, stageErr)
 	m.checkQueueCompletion(ctx)
 }
 
-func classifyStageFailure(stage Stage, stageErr error) (queue.Status, string, string) {
+func classifyStageFailure(stageName string, stageErr error) (queue.Status, string, string) {
 	var se *services.ServiceError
 	if stageErr == nil {
 		msg := "stage failed without error detail"
-		if stage != nil {
-			msg = fmt.Sprintf("%s failed without error detail", stage.Name())
+		if stageName != "" {
+			msg = fmt.Sprintf("%s failed without error detail", stageName)
 		}
 		return queue.StatusFailed, msg, msg
 	}
@@ -385,15 +400,15 @@ func (m *Manager) nextItem(ctx context.Context) (*queue.Item, error) {
 	return m.store.NextForStatuses(ctx, m.statusOrder...)
 }
 
-func withStageContext(ctx context.Context, stage Stage, item *queue.Item, requestID string) context.Context {
+func withStageContext(ctx context.Context, stageName string, item *queue.Item, requestID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if item != nil {
 		ctx = services.WithItemID(ctx, item.ID)
 	}
-	if stage != nil {
-		ctx = services.WithStage(ctx, stage.Name())
+	if stageName != "" {
+		ctx = services.WithStage(ctx, stageName)
 	}
 	if requestID != "" {
 		ctx = services.WithRequestID(ctx, requestID)
@@ -423,7 +438,7 @@ type StatusSummary struct {
 	LastError   string
 	LastItem    *queue.Item
 	QueueStats  map[queue.Status]int
-	StageHealth map[string]StageHealth
+	StageHealth map[string]stage.Health
 }
 
 // Status returns the latest workflow information.
@@ -432,12 +447,8 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 	running := m.running
 	lastErr := m.lastErr
 	lastItem := m.lastItem
-	stages := make([]Stage, 0, len(m.stages))
-	for _, stage := range m.stages {
-		if stage != nil {
-			stages = append(stages, stage)
-		}
-	}
+	defs := make([]*stageDefinition, len(m.stageDefs))
+	copy(defs, m.stageDefs)
 	m.mu.RUnlock()
 
 	stats, err := m.store.Stats(ctx)
@@ -445,10 +456,12 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 		m.logger.Warn("failed to read queue stats", zap.Error(err))
 	}
 
-	health := make(map[string]StageHealth, len(stages))
-	for _, stage := range stages {
-		// Run health checks in the provided context so logging retains caller metadata.
-		health[stage.Name()] = stage.HealthCheck(ctx)
+	health := make(map[string]stage.Health, len(defs))
+	for _, def := range defs {
+		if def == nil || def.health == nil {
+			continue
+		}
+		health[def.name] = def.health(ctx)
 	}
 
 	summary := StatusSummary{Running: running, QueueStats: stats, StageHealth: health}
@@ -479,12 +492,12 @@ func (m *Manager) setLastItem(item *queue.Item) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) notifyStageError(ctx context.Context, stage Stage, item *queue.Item, stageErr error) {
+func (m *Manager) notifyStageError(ctx context.Context, stageName string, item *queue.Item, stageErr error) {
 	if m.notifier == nil || stageErr == nil {
 		return
 	}
 	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-manager")))
-	contextLabel := fmt.Sprintf("%s (item #%d)", stage.Name(), item.ID)
+	contextLabel := fmt.Sprintf("%s (item #%d)", stageName, item.ID)
 	if err := m.notifier.NotifyError(ctx, stageErr, contextLabel); err != nil {
 		logger.Warn("stage error notification failed", zap.Error(err))
 	}

@@ -57,7 +57,7 @@ func TestManualFileIngestionCompletes(t *testing.T) {
 	encoder := encoding.NewEncoderWithDependencies(cfg, store, logger, encClient, encNotifier)
 
 	// Transition to encoding stage
-	item.Status = encoder.ProcessingStatus()
+	item.Status = queue.StatusEncoding
 	if err := store.Update(ctx, item); err != nil {
 		t.Fatalf("Update to encoding: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestManualFileIngestionCompletes(t *testing.T) {
 	if err := encoder.Execute(ctx, item); err != nil {
 		t.Fatalf("Encoder execute: %v", err)
 	}
-	item.Status = encoder.NextStatus()
+	item.Status = queue.StatusEncoded
 	item.LastHeartbeat = nil
 	if err := store.Update(ctx, item); err != nil {
 		t.Fatalf("Persist encode result: %v", err)
@@ -88,7 +88,7 @@ func TestManualFileIngestionCompletes(t *testing.T) {
 		t.Fatalf("expected encoded status, got %s", item.Status)
 	}
 
-	item.Status = organizerStage.ProcessingStatus()
+	item.Status = queue.StatusOrganizing
 	if err := store.Update(ctx, item); err != nil {
 		t.Fatalf("Update to organizing: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestManualFileIngestionCompletes(t *testing.T) {
 	if err := organizerStage.Execute(ctx, item); err != nil {
 		t.Fatalf("Organizer execute: %v", err)
 	}
-	item.Status = organizerStage.NextStatus()
+	item.Status = queue.StatusCompleted
 	item.LastHeartbeat = nil
 	if err := store.Update(ctx, item); err != nil {
 		t.Fatalf("Persist organizer result: %v", err)

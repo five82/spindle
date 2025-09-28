@@ -56,7 +56,7 @@ func TestEncoderUsesDraptoClient(t *testing.T) {
 	stubClient := &stubDraptoClient{}
 	notifier := &stubNotifier{}
 	handler := encoding.NewEncoderWithDependencies(cfg, store, zap.NewNop(), stubClient, notifier)
-	item.Status = handler.ProcessingStatus()
+	item.Status = queue.StatusEncoding
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestEncoderUsesDraptoClient(t *testing.T) {
 	if err := handler.Execute(context.Background(), item); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	item.Status = handler.NextStatus()
+	item.Status = queue.StatusEncoded
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Final update: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestEncoderFallsBackWithoutClient(t *testing.T) {
 	}
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, zap.NewNop(), nil, nil)
-	item.Status = handler.ProcessingStatus()
+	item.Status = queue.StatusEncoding
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestEncoderFallsBackWithoutClient(t *testing.T) {
 	if err := handler.Execute(context.Background(), item); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	item.Status = handler.NextStatus()
+	item.Status = queue.StatusEncoded
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Final update: %v", err)
 	}

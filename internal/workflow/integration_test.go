@@ -87,10 +87,12 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 	organizer := organizer.NewOrganizerWithDependencies(cfg, store, logger, plexClient, notifier)
 
 	mgr := workflow.NewManagerWithNotifier(cfg, store, logger, notifier)
-	mgr.Register(identifier)
-	mgr.Register(ripper)
-	mgr.Register(encoder)
-	mgr.Register(organizer)
+	mgr.ConfigureStages(workflow.StageSet{
+		Identifier: identifier,
+		Ripper:     ripper,
+		Encoder:    encoder,
+		Organizer:  organizer,
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
