@@ -55,17 +55,23 @@ func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
 	if item.RippedFile == "" {
-		return services.WithHint(
-			services.Wrap(services.ErrorValidation, "encoding", "validate inputs", "No ripped file available for encoding", nil),
-			"Ensure the ripping stage completed successfully before encoding",
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate inputs",
+			"No ripped file available for encoding; ensure the ripping stage completed successfully",
+			nil,
 		)
 	}
 
 	encodedDir := filepath.Join(e.cfg.StagingDir, "encoded")
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
-		return services.WithHint(
-			services.Wrap(services.ErrorConfiguration, "encoding", "ensure encoded dir", "Failed to create encoded directory", err),
-			"Set staging_dir to a writable path",
+		return services.Wrap(
+			services.ErrConfiguration,
+			"encoding",
+			"ensure encoded dir",
+			"Failed to create encoded directory; set staging_dir to a writable path",
+			err,
 		)
 	}
 
@@ -90,9 +96,12 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 
 		path, err := e.client.Encode(ctx, item.RippedFile, encodedDir, progress)
 		if err != nil {
-			return services.WithHint(
-				services.Wrap(services.ErrorExternalTool, "encoding", "drapto encode", "Drapto encoding failed", err),
-				"Inspect Drapto logs and confirm the binary path in config",
+			return services.Wrap(
+				services.ErrExternalTool,
+				"encoding",
+				"drapto encode",
+				"Drapto encoding failed; inspect Drapto logs and confirm the binary path in config",
+				err,
 			)
 		}
 		encodedPath = path
@@ -102,7 +111,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		base := filepath.Base(item.RippedFile)
 		encodedPath = filepath.Join(encodedDir, strings.TrimSuffix(base, filepath.Ext(base))+".encoded.mkv")
 		if err := copyFile(item.RippedFile, encodedPath); err != nil {
-			return services.Wrap(services.ErrorTransient, "encoding", "copy ripped file", "Failed to stage encoded artifact", err)
+			return services.Wrap(services.ErrTransient, "encoding", "copy ripped file", "Failed to stage encoded artifact", err)
 		}
 	}
 

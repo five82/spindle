@@ -169,7 +169,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	encodedMetadata, err := json.Marshal(metadata)
 	if err != nil {
-		return services.Wrap(services.ErrorTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", err)
+		return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", err)
 	}
 	item.MetadataJSON = string(encodedMetadata)
 	item.ProgressStage = "Identified"
@@ -183,7 +183,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	encodedSpec, err := json.Marshal(ripSpec)
 	if err != nil {
-		return services.Wrap(services.ErrorTransient, "identification", "encode rip spec", "Failed to serialize rip specification", err)
+		return services.Wrap(services.ErrTransient, "identification", "encode rip spec", "Failed to serialize rip specification", err)
 	}
 	item.RipSpecData = string(encodedSpec)
 
@@ -224,21 +224,27 @@ func (i *Identifier) HealthCheck(ctx context.Context) stage.Health {
 
 func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 	if i.scanner == nil {
-		return nil, services.WithHint(
-			services.Wrap(services.ErrorConfiguration, "identification", "initialize scanner", "Disc scanner unavailable", nil),
-			"Install MakeMKV and ensure it is in PATH",
+		return nil, services.Wrap(
+			services.ErrConfiguration,
+			"identification",
+			"initialize scanner",
+			"Disc scanner unavailable; install MakeMKV and ensure it is in PATH",
+			nil,
 		)
 	}
 	device := strings.TrimSpace(i.cfg.OpticalDrive)
 	if device == "" {
-		return nil, services.WithHint(
-			services.Wrap(services.ErrorConfiguration, "identification", "resolve optical drive", "Optical drive path not configured", nil),
-			"Set optical_drive in spindle config to your MakeMKV drive identifier",
+		return nil, services.Wrap(
+			services.ErrConfiguration,
+			"identification",
+			"resolve optical drive",
+			"Optical drive path not configured; set optical_drive in spindle config to your MakeMKV drive identifier",
+			nil,
 		)
 	}
 	result, err := i.scanner.Scan(ctx, device)
 	if err != nil {
-		return nil, services.Wrap(services.ErrorExternalTool, "identification", "makemkv scan", "MakeMKV disc scan failed", err)
+		return nil, services.Wrap(services.ErrExternalTool, "identification", "makemkv scan", "MakeMKV disc scan failed", err)
 	}
 	return result, nil
 }
@@ -246,7 +252,7 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 func (i *Identifier) handleDuplicateFingerprint(ctx context.Context, item *queue.Item) error {
 	found, err := i.store.FindByFingerprint(ctx, item.DiscFingerprint)
 	if err != nil {
-		return services.Wrap(services.ErrorTransient, "identification", "lookup fingerprint", "Failed to query existing disc fingerprint", err)
+		return services.Wrap(services.ErrTransient, "identification", "lookup fingerprint", "Failed to query existing disc fingerprint", err)
 	}
 	if found != nil && found.ID != item.ID {
 		i.flagReview(ctx, item, "Duplicate disc fingerprint", true)

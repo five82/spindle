@@ -79,9 +79,12 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 		destDir := filepath.Join(r.cfg.StagingDir, "rips")
 		path, err := r.client.Rip(ctx, item.DiscTitle, item.SourcePath, destDir, progressCB)
 		if err != nil {
-			return services.WithHint(
-				services.Wrap(services.ErrorExternalTool, "ripping", "makemkv rip", "MakeMKV rip failed", err),
-				"Check MakeMKV installation and disc readability",
+			return services.Wrap(
+				services.ErrExternalTool,
+				"ripping",
+				"makemkv rip",
+				"MakeMKV rip failed; check MakeMKV installation and disc readability",
+				err,
 			)
 		}
 		target = path
@@ -89,9 +92,12 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 
 	if target == "" {
 		if err := os.MkdirAll(r.cfg.StagingDir, 0o755); err != nil {
-			return services.WithHint(
-				services.Wrap(services.ErrorConfiguration, "ripping", "ensure staging dir", "Failed to create staging directory", err),
-				"Set staging_dir to a writable location",
+			return services.Wrap(
+				services.ErrConfiguration,
+				"ripping",
+				"ensure staging dir",
+				"Failed to create staging directory; set staging_dir to a writable location",
+				err,
 			)
 		}
 		cleaned := sanitizeFileName(item.DiscTitle)
@@ -101,10 +107,10 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 		target = filepath.Join(r.cfg.StagingDir, cleaned+".mkv")
 		if item.SourcePath != "" {
 			if err := copyPlaceholder(item.SourcePath, target); err != nil {
-				return services.Wrap(services.ErrorTransient, "ripping", "prepare placeholder", "Failed to copy source into staging", err)
+				return services.Wrap(services.ErrTransient, "ripping", "prepare placeholder", "Failed to copy source into staging", err)
 			}
 		} else if err := os.WriteFile(target, []byte("placeholder rip"), 0o644); err != nil {
-			return services.Wrap(services.ErrorTransient, "ripping", "write placeholder", "Failed to write placeholder rip", err)
+			return services.Wrap(services.ErrTransient, "ripping", "write placeholder", "Failed to write placeholder rip", err)
 		}
 	}
 

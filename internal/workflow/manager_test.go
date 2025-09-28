@@ -155,7 +155,7 @@ func TestManagerStatusIncludesStageHealth(t *testing.T) {
 	}
 }
 
-func TestManagerFailureTriggersReviewWithHint(t *testing.T) {
+func TestManagerValidationErrorTriggersReview(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := queue.Open(cfg)
 	if err != nil {
@@ -163,10 +163,12 @@ func TestManagerFailureTriggersReviewWithHint(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	hint := "Ensure TMDB API key is set"
-	stageErr := services.WithHint(
-		services.Wrap(services.ErrorValidation, "failing", "execute", "validation failed", nil),
-		hint,
+	stageErr := services.Wrap(
+		services.ErrValidation,
+		"failing",
+		"execute",
+		"validation failed; ensure TMDB API key is set",
+		nil,
 	)
 	failing := newStubStage("ripper")
 	failing.executeErr = stageErr
@@ -205,11 +207,12 @@ func TestManagerFailureTriggersReviewWithHint(t *testing.T) {
 			if updated.ProgressStage != "Needs review" {
 				t.Fatalf("expected progress stage 'Needs review', got %s", updated.ProgressStage)
 			}
-			if !strings.Contains(updated.ErrorMessage, "[validation]") {
-				t.Fatalf("expected validation code in error message, got %s", updated.ErrorMessage)
+			if !strings.Contains(strings.ToLower(updated.ErrorMessage), "validation error") {
+				t.Fatalf("expected validation marker in error message, got %s", updated.ErrorMessage)
 			}
-			if updated.ProgressMessage != hint {
-				t.Fatalf("expected hint in progress message, got %s", updated.ProgressMessage)
+			expected := stageErr.Error()
+			if updated.ProgressMessage != expected {
+				t.Fatalf("expected progress message %q, got %q", expected, updated.ProgressMessage)
 			}
 			break
 		}

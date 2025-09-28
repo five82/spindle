@@ -67,9 +67,12 @@ func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, o.logger)
 	if item.EncodedFile == "" {
-		return services.WithHint(
-			services.Wrap(services.ErrorValidation, "organizing", "validate inputs", "No encoded file present for organization", nil),
-			"Run encoding before organizing or check staging_dir permissions",
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"validate inputs",
+			"No encoded file present for organization; run encoding before organizing or check staging_dir permissions",
+			nil,
 		)
 	}
 	if item.NeedsReview {
@@ -105,7 +108,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		basic := queue.NewBasicMetadata(fallbackTitle, true)
 		encoded, err := json.Marshal(basic)
 		if err != nil {
-			return services.Wrap(services.ErrorTransient, "organizing", "encode metadata", "Failed to encode fallback metadata", err)
+			return services.Wrap(services.ErrTransient, "organizing", "encode metadata", "Failed to encode fallback metadata", err)
 		}
 		item.MetadataJSON = string(encoded)
 		meta = basic
@@ -117,7 +120,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	o.updateProgress(ctx, item, "Organizing library structure", 20)
 	targetPath, err := o.plex.Organize(ctx, item.EncodedFile, meta)
 	if err != nil {
-		return services.Wrap(services.ErrorExternalTool, "organizing", "move to library", "Failed to move media into library", err)
+		return services.Wrap(services.ErrExternalTool, "organizing", "move to library", "Failed to move media into library", err)
 	}
 	item.FinalFile = targetPath
 
@@ -155,13 +158,16 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 	logger := logging.WithContext(ctx, o.logger)
 	reviewDir := strings.TrimSpace(o.cfg.ReviewDir)
 	if reviewDir == "" {
-		return "", services.WithHint(
-			services.Wrap(services.ErrorConfiguration, "organizing", "resolve review dir", "Review directory not configured", nil),
-			"Set review_dir in your spindle config.toml",
+		return "", services.Wrap(
+			services.ErrConfiguration,
+			"organizing",
+			"resolve review dir",
+			"Review directory not configured; set review_dir in your spindle config.toml",
+			nil,
 		)
 	}
 	if err := os.MkdirAll(reviewDir, 0o755); err != nil {
-		return "", services.Wrap(services.ErrorConfiguration, "organizing", "ensure review dir", "Failed to create review directory", err)
+		return "", services.Wrap(services.ErrConfiguration, "organizing", "ensure review dir", "Failed to create review directory", err)
 	}
 	ext := filepath.Ext(item.EncodedFile)
 	if ext == "" {
@@ -170,13 +176,13 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 	prefix := reviewFilenamePrefix(item)
 	target, err := o.nextReviewPath(reviewDir, prefix, ext)
 	if err != nil {
-		return "", services.Wrap(services.ErrorTransient, "organizing", "allocate review filename", "Unable to allocate review filename", err)
+		return "", services.Wrap(services.ErrTransient, "organizing", "allocate review filename", "Unable to allocate review filename", err)
 	}
 	if renameErr := os.Rename(item.EncodedFile, target); renameErr != nil {
 		if errors.Is(renameErr, os.ErrExist) {
 			retryTarget, retryErr := o.nextReviewPath(reviewDir, prefix, ext)
 			if retryErr != nil {
-				return "", services.Wrap(services.ErrorTransient, "organizing", "allocate review filename", "Unable to allocate review filename", retryErr)
+				return "", services.Wrap(services.ErrTransient, "organizing", "allocate review filename", "Unable to allocate review filename", retryErr)
 			}
 			target = retryTarget
 			renameErr = os.Rename(item.EncodedFile, target)
@@ -185,13 +191,13 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 			var linkErr *os.LinkError
 			if errors.As(renameErr, &linkErr) && errors.Is(linkErr.Err, syscall.EXDEV) {
 				if copyErr := copyFile(item.EncodedFile, target); copyErr != nil {
-					return "", services.Wrap(services.ErrorTransient, "organizing", "copy review file", "Failed to copy file into review directory", copyErr)
+					return "", services.Wrap(services.ErrTransient, "organizing", "copy review file", "Failed to copy file into review directory", copyErr)
 				}
 				if err := os.Remove(item.EncodedFile); err != nil {
 					logger.Warn("failed to remove source file after copy", zap.Error(err))
 				}
 			} else {
-				return "", services.Wrap(services.ErrorTransient, "organizing", "move review file", "Failed to move file into review directory", renameErr)
+				return "", services.Wrap(services.ErrTransient, "organizing", "move review file", "Failed to move file into review directory", renameErr)
 			}
 		}
 	}

@@ -9,63 +9,38 @@ import (
 	"spindle/internal/services"
 )
 
-func TestWrapAndUnwrap(t *testing.T) {
+func TestWrapIncludesContext(t *testing.T) {
 	base := errors.New("boom")
-	err := services.Wrap(services.ErrorExternalTool, "encoding", "mux", "failed", base)
+	err := services.Wrap(services.ErrExternalTool, "encoding", "mux", "failed", base)
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	se, ok := err.(*services.ServiceError)
-	if !ok {
-		t.Fatalf("expected ServiceError, got %T", err)
-	}
-	if se.Code != services.ErrorExternalTool {
-		t.Fatalf("unexpected code %q", se.Code)
-	}
-	if se.FailureStatus() != queue.StatusFailed {
-		t.Fatalf("expected failed outcome, got %s", se.FailureStatus())
+	if !errors.Is(err, services.ErrExternalTool) {
+		t.Fatalf("expected marker to be retained, got %v", err)
 	}
 	if !errors.Is(err, base) {
-		t.Fatalf("expected errors.Is to match wrapped error")
+		t.Fatalf("expected wrapped error to contain base error, got %v", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "[external_tool]") || !strings.Contains(got, "cause=boom") {
-		t.Fatalf("unexpected error message: %s", got)
-	}
-}
-
-func TestWithMessageClonesError(t *testing.T) {
-	base := services.Wrap(services.ErrorValidation, "organizer", "prepare", "original", nil)
-	updated := services.WithMessage(base, "updated message")
-	if got := updated.Error(); !strings.Contains(got, "updated message") || !strings.Contains(got, "stage=organizer") {
-		t.Fatalf("unexpected message: %s", got)
-	}
-	if base.Error() == updated.Error() {
-		t.Fatal("expected messages to differ")
+	msg := err.Error()
+	for _, fragment := range []string{"external tool error", "encoding", "mux", "failed"} {
+		if !strings.Contains(msg, fragment) {
+			t.Fatalf("expected %q in error string %q", fragment, msg)
+		}
 	}
 }
 
-func TestWithHintAndOutcome(t *testing.T) {
-	err := services.Wrap(services.ErrorValidation, "identifier", "validate", "validation failed", nil)
-	withHint := services.WithHint(err, "fix metadata")
-	se, ok := withHint.(*services.ServiceError)
-	if !ok {
-		t.Fatalf("expected ServiceError, got %T", withHint)
+func TestFailureStatusMapping(t *testing.T) {
+	validationErr := services.Wrap(services.ErrValidation, "identifier", "prepare", "invalid", nil)
+	if status := services.FailureStatus(validationErr); status != queue.StatusReview {
+		t.Fatalf("expected review for validation error, got %s", status)
 	}
-	if se.Hint != "fix metadata" {
-		t.Fatalf("expected hint to be set, got %q", se.Hint)
+
+	transientErr := services.Wrap(services.ErrTransient, "encoding", "copy", "copy failed", errors.New("io"))
+	if status := services.FailureStatus(transientErr); status != queue.StatusFailed {
+		t.Fatalf("expected failed for transient error, got %s", status)
 	}
-	if se.FailureStatus() != queue.StatusReview {
-		t.Fatalf("expected review outcome, got %s", se.FailureStatus())
-	}
-	withOutcome := services.WithOutcome(withHint, queue.StatusFailed)
-	se2, ok := withOutcome.(*services.ServiceError)
-	if !ok {
-		t.Fatalf("expected ServiceError, got %T", withOutcome)
-	}
-	if se2.FailureStatus() != queue.StatusFailed {
-		t.Fatalf("expected overridden outcome failed, got %s", se2.FailureStatus())
-	}
-	if !strings.Contains(se2.Error(), "hint=fix metadata") {
-		t.Fatalf("expected hint in error string, got %s", se2.Error())
+
+	if status := services.FailureStatus(nil); status != queue.StatusFailed {
+		t.Fatalf("expected failed for nil error, got %s", status)
 	}
 }

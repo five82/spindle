@@ -375,7 +375,6 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 }
 
 func classifyStageFailure(stageName string, stageErr error) (queue.Status, string, string) {
-	var se *services.ServiceError
 	if stageErr == nil {
 		msg := "stage failed without error detail"
 		if stageName != "" {
@@ -383,17 +382,15 @@ func classifyStageFailure(stageName string, stageErr error) (queue.Status, strin
 		}
 		return queue.StatusFailed, msg, msg
 	}
-	if errors.As(stageErr, &se) {
-		status := se.FailureStatus()
-		message := se.Error()
-		progress := message
-		if hint := strings.TrimSpace(se.Hint); hint != "" {
-			progress = hint
+	status := services.FailureStatus(stageErr)
+	message := strings.TrimSpace(stageErr.Error())
+	if message == "" {
+		message = "workflow stage failed"
+		if stageName != "" {
+			message = fmt.Sprintf("%s failed", stageName)
 		}
-		return status, message, progress
 	}
-	message := stageErr.Error()
-	return queue.StatusFailed, message, message
+	return status, message, message
 }
 
 func (m *Manager) nextItem(ctx context.Context) (*queue.Item, error) {
