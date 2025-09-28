@@ -1,0 +1,150 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"go.uber.org/zap"
+
+	"spindle/internal/config"
+	"spindle/internal/daemon"
+	"spindle/internal/ipc"
+	"spindle/internal/queue"
+	"spindle/internal/workflow"
+)
+
+type cliTestEnv struct {
+	cfg        *config.Config
+	store      *queue.Store
+	daemon     *daemon.Daemon
+	server     *ipc.Server
+	socketPath string
+	configPath string
+	baseDir    string
+	cancel     context.CancelFunc
+}
+
+func setupCLITestEnv(t *testing.T) *cliTestEnv {
+	t.Helper()
+
+	base := t.TempDir()
+	cfgVal := config.Default()
+	cfgVal.TMDBAPIKey = "test"
+	cfgVal.StagingDir = filepath.Join(base, "staging")
+	cfgVal.LibraryDir = filepath.Join(base, "library")
+	cfgVal.LogDir = filepath.Join(base, "logs")
+	cfgVal.ReviewDir = filepath.Join(base, "review")
+	cfgVal.OpticalDrive = filepath.Join(base, "fake-drive")
+
+	cfg := &cfgVal
+
+	configPath := filepath.Join(base, "config.toml")
+	writeTestConfig(t, configPath, cfg)
+
+	store, err := queue.Open(cfg)
+	if err != nil {
+		t.Fatalf("queue.Open: %v", err)
+	}
+
+	logger := zap.NewNop()
+	mgr := workflow.NewManager(cfg, store, logger)
+
+	d, err := daemon.New(cfg, store, logger, mgr)
+	if err != nil {
+		t.Fatalf("daemon.New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	socketPath := filepath.Join(cfg.LogDir, "cli.sock")
+	srv, err := ipc.NewServer(ctx, socketPath, d, logger)
+	if err != nil {
+		t.Fatalf("ipc.NewServer: %v", err)
+	}
+	srv.Serve()
+
+	env := &cliTestEnv{
+		cfg:        cfg,
+		store:      store,
+		daemon:     d,
+		server:     srv,
+		socketPath: socketPath,
+		configPath: configPath,
+		baseDir:    base,
+		cancel:     cancel,
+	}
+
+	t.Cleanup(func() {
+		cancel()
+		srv.Close()
+		d.Close()
+		store.Close()
+	})
+
+	return env
+}
+
+func runCLI(t *testing.T, args []string, socket, configPath string) (string, string, error) {
+	t.Helper()
+	cmd := newRootCommand()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	flags := []string{"--socket", socket}
+	if configPath != "" {
+		flags = append(flags, "--config", configPath)
+	}
+	cmd.SetArgs(append(flags, args...))
+	err := cmd.Execute()
+	return stdout.String(), stderr.String(), err
+}
+
+func appendLine(path, line string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(line + "\n")
+	return err
+}
+
+func writeTestConfig(t *testing.T, path string, cfg *config.Config) {
+	t.Helper()
+	content := fmt.Sprintf(
+		"staging_dir = %q\nlibrary_dir = %q\nlog_dir = %q\nreview_dir = %q\ntmdb_api_key = %q\noptical_drive = %q\n",
+		cfg.StagingDir,
+		cfg.LibraryDir,
+		cfg.LogDir,
+		cfg.ReviewDir,
+		cfg.TMDBAPIKey,
+		cfg.OpticalDrive,
+	)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+func waitFor(t *testing.T, duration time.Duration, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(duration)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("condition not met within %s", duration)
+}
+
+func requireContains(t *testing.T, output, substr string) {
+	t.Helper()
+	if !strings.Contains(output, substr) {
+		t.Fatalf("expected %q to contain %q", output, substr)
+	}
+}
