@@ -10,7 +10,7 @@
 
 ## Quick Start
 
-1. Install Go 1.22 or newer.
+1. Install Go 1.25 or newer.
 2. Install the CLI:
 
    ```bash
@@ -48,7 +48,7 @@ spindle show --follow
 ### Prerequisites
 
 **Required:**
-- **Go** ≥ 1.22 – https://go.dev/dl/
+- **Go** ≥ 1.25 – https://go.dev/dl/
 - **MakeMKV** ≥ 1.17 – https://www.makemkv.com/download/
 - **drapto** (requires Rust toolchain) – `cargo install --git https://github.com/five82/drapto`
 
