@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -67,14 +69,30 @@ func (c *commandContext) socketPath() string {
 func (c *commandContext) withClient(fn func(*ipc.Client) error) error {
 	client, err := c.dialClient()
 	if err != nil {
-		return fmt.Errorf("connect to daemon: %w", err)
+		return err
 	}
 	defer client.Close()
 	return fn(client)
 }
 
 func (c *commandContext) dialClient() (*ipc.Client, error) {
-	return ipc.Dial(c.socketPath())
+	socket := c.socketPath()
+	client, err := ipc.Dial(socket)
+	if err != nil {
+		return nil, wrapDialError(err, socket)
+	}
+	return client, nil
+}
+
+func wrapDialError(err error, socket string) error {
+	switch {
+	case errors.Is(err, syscall.ENOENT) || os.IsNotExist(err):
+		return fmt.Errorf("connect to daemon: socket %s not found; start the daemon with `spindle start`", socket)
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return fmt.Errorf("connect to daemon: socket %s refused the connection; verify the daemon is running", socket)
+	default:
+		return fmt.Errorf("connect to daemon: %w", err)
+	}
 }
 
 func defaultSocketPath() string {

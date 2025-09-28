@@ -22,6 +22,78 @@ type Store struct {
 	path string
 }
 
+const (
+	sqliteBusyCode          = 5
+	busyRetryAttempts       = 5
+	busyRetryInitialBackoff = 10 * time.Millisecond
+	busyRetryMaxBackoff     = 200 * time.Millisecond
+)
+
+func ensureContext(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	var coder interface{ Code() int }
+	if errors.As(err, &coder) && coder.Code() == sqliteBusyCode {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
+}
+
+func retryOnBusy(ctx context.Context, op func() error) error {
+	ctx = ensureContext(ctx)
+	delay := busyRetryInitialBackoff
+	for attempt := 0; attempt < busyRetryAttempts; attempt++ {
+		err := op()
+		if err == nil {
+			return nil
+		}
+		if !isSQLiteBusy(err) || attempt == busyRetryAttempts-1 {
+			return err
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if next := delay * 2; next <= busyRetryMaxBackoff {
+			delay = next
+		}
+	}
+	return nil
+}
+
+func (s *Store) execWithRetry(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	ctx = ensureContext(ctx)
+	var (
+		res     sql.Result
+		execErr error
+	)
+	if err := retryOnBusy(ctx, func() error {
+		res, execErr = s.db.ExecContext(ctx, query, args...)
+		return execErr
+	}); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (s *Store) execWithoutResultRetry(ctx context.Context, query string, args ...any) error {
+	ctx = ensureContext(ctx)
+	return retryOnBusy(ctx, func() error {
+		_, err := s.db.ExecContext(ctx, query, args...)
+		return err
+	})
+}
+
 // Open initializes or connects to the queue database and applies migrations.
 func Open(cfg *config.Config) (*Store, error) {
 	if err := cfg.EnsureDirectories(); err != nil {
@@ -68,7 +140,7 @@ func (s *Store) NewDisc(ctx context.Context, discTitle, fingerprint string) (*It
 	now := time.Now().UTC()
 	timestamp := now.Format(time.RFC3339Nano)
 
-	res, err := s.db.ExecContext(
+	res, err := s.execWithRetry(
 		ctx,
 		`INSERT INTO queue_items (
             disc_title, status, created_at, updated_at,
@@ -108,7 +180,7 @@ func (s *Store) NewFile(ctx context.Context, sourcePath string) (*Item, error) {
 		return nil, fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	res, err := s.db.ExecContext(
+	res, err := s.execWithRetry(
 		ctx,
 		`INSERT INTO queue_items (
             source_path, disc_title, status, ripped_file, created_at, updated_at,
@@ -173,7 +245,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		return errors.New("item is nil")
 	}
 	item.UpdatedAt = time.Now().UTC()
-	_, err := s.db.ExecContext(
+	if err := s.execWithoutResultRetry(
 		ctx,
 		`UPDATE queue_items
          SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
@@ -201,8 +273,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		boolToInt(item.NeedsReview),
 		nullableString(item.ReviewReason),
 		item.ID,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("update item: %w", err)
 	}
 	return nil
@@ -289,7 +360,7 @@ func (s *Store) NextForStatuses(ctx context.Context, statuses ...Status) (*Item,
 
 // ResetStuckProcessing resets items in processing states back to pending.
 func (s *Store) ResetStuckProcessing(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(
+	res, err := s.execWithRetry(
 		ctx,
 		`UPDATE queue_items
          SET status = ?, progress_stage = 'Reset from stuck processing',
@@ -310,14 +381,13 @@ func (s *Store) ResetStuckProcessing(ctx context.Context) (int64, error) {
 // UpdateHeartbeat updates the last heartbeat timestamp for an in-flight item.
 func (s *Store) UpdateHeartbeat(ctx context.Context, id int64) error {
 	now := time.Now().UTC()
-	_, err := s.db.ExecContext(
+	if err := s.execWithoutResultRetry(
 		ctx,
 		`UPDATE queue_items SET last_heartbeat = ?, updated_at = ? WHERE id = ?`,
 		now.Format(time.RFC3339Nano),
 		now.Format(time.RFC3339Nano),
 		id,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("update heartbeat: %w", err)
 	}
 	return nil
@@ -326,7 +396,7 @@ func (s *Store) UpdateHeartbeat(ctx context.Context, id int64) error {
 // ReclaimStaleProcessing returns items stuck in processing back to pending when heartbeats expire.
 func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time) (int64, error) {
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(
+	res, err := s.execWithRetry(
 		ctx,
 		`UPDATE queue_items
         SET status = ?, progress_stage = 'Reclaimed from stale processing',
@@ -349,7 +419,7 @@ func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time) (i
 // RetryFailed moves failed items back to pending for reprocessing.
 func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	if len(ids) == 0 {
-		res, err := s.db.ExecContext(
+		res, err := s.execWithRetry(
 			ctx,
 			`UPDATE queue_items
             SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
@@ -375,7 +445,7 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
         SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
             progress_message = NULL, error_message = NULL, updated_at = ?
         WHERE id IN (` + placeholders + `) AND status = '` + string(StatusFailed) + `'`
-	res, err := s.db.ExecContext(ctx, query, args...)
+	res, err := s.execWithRetry(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("retry selected items: %w", err)
 	}
@@ -541,7 +611,7 @@ func (s *Store) CheckHealth(ctx context.Context) (DatabaseHealth, error) {
 
 // Remove deletes an item by identifier.
 func (s *Store) Remove(ctx context.Context, id int64) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM queue_items WHERE id = ?`, id)
+	res, err := s.execWithRetry(ctx, `DELETE FROM queue_items WHERE id = ?`, id)
 	if err != nil {
 		return false, fmt.Errorf("delete item: %w", err)
 	}
@@ -554,7 +624,7 @@ func (s *Store) Remove(ctx context.Context, id int64) (bool, error) {
 
 // ClearCompleted removes only completed items from the queue.
 func (s *Store) ClearCompleted(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM queue_items WHERE status = ?`, StatusCompleted)
+	res, err := s.execWithRetry(ctx, `DELETE FROM queue_items WHERE status = ?`, StatusCompleted)
 	if err != nil {
 		return 0, fmt.Errorf("clear completed: %w", err)
 	}
@@ -563,7 +633,7 @@ func (s *Store) ClearCompleted(ctx context.Context) (int64, error) {
 
 // Clear removes all items from the queue.
 func (s *Store) Clear(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM queue_items`)
+	res, err := s.execWithRetry(ctx, `DELETE FROM queue_items`)
 	if err != nil {
 		return 0, fmt.Errorf("clear queue: %w", err)
 	}
@@ -572,7 +642,7 @@ func (s *Store) Clear(ctx context.Context) (int64, error) {
 
 // ClearFailed removes only failed items from the queue.
 func (s *Store) ClearFailed(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM queue_items WHERE status = ?`, StatusFailed)
+	res, err := s.execWithRetry(ctx, `DELETE FROM queue_items WHERE status = ?`, StatusFailed)
 	if err != nil {
 		return 0, fmt.Errorf("clear failed: %w", err)
 	}
