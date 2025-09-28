@@ -58,7 +58,6 @@ func testConfig(t *testing.T) *config.Config {
 	cfg.LogDir = filepath.Join(base, "logs")
 	cfg.ReviewDir = filepath.Join(base, "review")
 	cfg.QueuePollInterval = 0
-	cfg.WorkflowWorkerCount = 1
 	return &cfg
 }
 

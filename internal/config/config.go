@@ -23,10 +23,6 @@ type Config struct {
 	TMDBLanguage                string  `toml:"tmdb_language"`
 	TMDBRuntimeToleranceMinutes int     `toml:"tmdb_runtime_tolerance_minutes"`
 	TMDBConfidenceThreshold     float64 `toml:"tmdb_confidence_threshold"`
-	DraptoQualitySD             int     `toml:"drapto_quality_sd"`
-	DraptoQualityHD             int     `toml:"drapto_quality_hd"`
-	DraptoQualityUHD            int     `toml:"drapto_quality_uhd"`
-	DraptoPreset                int     `toml:"drapto_preset"`
 	MoviesDir                   string  `toml:"movies_dir"`
 	TVDir                       string  `toml:"tv_dir"`
 	PlexLinkEnabled             bool    `toml:"plex_link_enabled"`
@@ -46,33 +42,8 @@ type Config struct {
 	ErrorRetryInterval          int     `toml:"error_retry_interval"`
 	StatusDisplayInterval       int     `toml:"status_display_interval"`
 	PlexScanInterval            int     `toml:"plex_scan_interval"`
-	WorkflowWorkerCount         int     `toml:"workflow_worker_count"`
 	WorkflowHeartbeatInterval   int     `toml:"workflow_heartbeat_interval"`
 	WorkflowHeartbeatTimeout    int     `toml:"workflow_heartbeat_timeout"`
-	UseIntelligentDiscAnalysis  bool    `toml:"use_intelligent_disc_analysis"`
-	ConfidenceThreshold         float64 `toml:"confidence_threshold"`
-	PreferAPIOverHeuristics     bool    `toml:"prefer_api_over_heuristics"`
-	EnableEnhancedDiscMetadata  bool    `toml:"enable_enhanced_disc_metadata"`
-	IncludeAllEnglishAudio      bool    `toml:"include_all_english_audio"`
-	IncludeCommentaryTracks     bool    `toml:"include_commentary_tracks"`
-	IncludeAlternateAudio       bool    `toml:"include_alternate_audio"`
-	TVEpisodeMinDuration        int     `toml:"tv_episode_min_duration"`
-	TVEpisodeMaxDuration        int     `toml:"tv_episode_max_duration"`
-	RipAllEpisodes              bool    `toml:"rip_all_episodes"`
-	EpisodeMappingStrategy      string  `toml:"episode_mapping_strategy"`
-	MovieMinDuration            int     `toml:"movie_min_duration"`
-	IncludeExtras               bool    `toml:"include_extras"`
-	MaxExtrasToRip              int     `toml:"max_extras_to_rip"`
-	MaxExtrasDuration           int     `toml:"max_extras_duration"`
-	PreferExtendedVersions      bool    `toml:"prefer_extended_versions"`
-	MaxVersionsToRip            int     `toml:"max_versions_to_rip"`
-	VersionDurationTolerance    float64 `toml:"version_duration_tolerance"`
-	MaxCommentaryTracks         int     `toml:"max_commentary_tracks"`
-	IncludeSubtitles            bool    `toml:"include_subtitles"`
-	AllowShortContent           bool    `toml:"allow_short_content"`
-	CartoonMinDuration          int     `toml:"cartoon_min_duration"`
-	CartoonMaxDuration          int     `toml:"cartoon_max_duration"`
-	DetectCartoonCollections    bool    `toml:"detect_cartoon_collections"`
 	LogFormat                   string  `toml:"log_format"`
 	LogLevel                    string  `toml:"log_level"`
 }
@@ -87,10 +58,8 @@ const (
 	defaultTVDir                     = "tv"
 	defaultTMDBLanguage              = "en-US"
 	defaultTMDBBaseURL               = "https://api.themoviedb.org/3"
-	defaultEpisodeMappingStrategy    = "hybrid"
 	defaultLogFormat                 = "console"
 	defaultLogLevel                  = "info"
-	defaultWorkflowWorkerCount       = 2
 	defaultWorkflowHeartbeatInterval = 15
 	defaultWorkflowHeartbeatTimeout  = 120
 )
@@ -107,10 +76,6 @@ func Default() Config {
 		TMDBBaseURL:                 defaultTMDBBaseURL,
 		TMDBRuntimeToleranceMinutes: 5,
 		TMDBConfidenceThreshold:     0.8,
-		DraptoQualitySD:             23,
-		DraptoQualityHD:             25,
-		DraptoQualityUHD:            27,
-		DraptoPreset:                4,
 		MoviesDir:                   defaultMoviesDir,
 		TVDir:                       defaultTVDir,
 		PlexLinkEnabled:             true,
@@ -128,33 +93,8 @@ func Default() Config {
 		ErrorRetryInterval:          10,
 		StatusDisplayInterval:       30,
 		PlexScanInterval:            5,
-		WorkflowWorkerCount:         defaultWorkflowWorkerCount,
 		WorkflowHeartbeatInterval:   defaultWorkflowHeartbeatInterval,
 		WorkflowHeartbeatTimeout:    defaultWorkflowHeartbeatTimeout,
-		UseIntelligentDiscAnalysis:  true,
-		ConfidenceThreshold:         0.7,
-		PreferAPIOverHeuristics:     true,
-		EnableEnhancedDiscMetadata:  true,
-		IncludeAllEnglishAudio:      true,
-		IncludeCommentaryTracks:     true,
-		IncludeAlternateAudio:       false,
-		TVEpisodeMinDuration:        18,
-		TVEpisodeMaxDuration:        90,
-		RipAllEpisodes:              true,
-		EpisodeMappingStrategy:      defaultEpisodeMappingStrategy,
-		MovieMinDuration:            70,
-		IncludeExtras:               false,
-		MaxExtrasToRip:              3,
-		MaxExtrasDuration:           30,
-		PreferExtendedVersions:      true,
-		MaxVersionsToRip:            2,
-		VersionDurationTolerance:    0.40,
-		MaxCommentaryTracks:         2,
-		IncludeSubtitles:            false,
-		AllowShortContent:           true,
-		CartoonMinDuration:          2,
-		CartoonMaxDuration:          20,
-		DetectCartoonCollections:    true,
 		LogFormat:                   defaultLogFormat,
 		LogLevel:                    defaultLogLevel,
 	}
@@ -301,18 +241,6 @@ func (c *Config) Validate() error {
 	if c.TVLibrary == "" {
 		return errors.New("tv_library must be set")
 	}
-	if c.MaxExtrasToRip < 0 {
-		return errors.New("max_extras_to_rip cannot be negative")
-	}
-	if c.MaxExtrasDuration < 0 {
-		return errors.New("max_extras_duration cannot be negative")
-	}
-	if c.MaxVersionsToRip <= 0 {
-		return errors.New("max_versions_to_rip must be positive")
-	}
-	if c.VersionDurationTolerance < 0 {
-		return errors.New("version_duration_tolerance cannot be negative")
-	}
 	if err := ensurePositiveMap(map[string]int{
 		"makemkv_rip_timeout":     c.MakeMKVRipTimeout,
 		"makemkv_info_timeout":    c.MakeMKVInfoTimeout,
@@ -329,9 +257,6 @@ func (c *Config) Validate() error {
 	}); err != nil {
 		return err
 	}
-	if c.WorkflowWorkerCount <= 0 {
-		return errors.New("workflow_worker_count must be positive")
-	}
 	if c.WorkflowHeartbeatInterval <= 0 {
 		return errors.New("workflow_heartbeat_interval must be positive")
 	}
@@ -341,47 +266,11 @@ func (c *Config) Validate() error {
 	if c.WorkflowHeartbeatTimeout <= c.WorkflowHeartbeatInterval {
 		return errors.New("workflow_heartbeat_timeout must be greater than workflow_heartbeat_interval")
 	}
-	if c.TVEpisodeMinDuration <= 0 {
-		return errors.New("tv_episode_min_duration must be positive")
-	}
-	if c.TVEpisodeMaxDuration <= 0 {
-		return errors.New("tv_episode_max_duration must be positive")
-	}
-	if c.TVEpisodeMaxDuration < c.TVEpisodeMinDuration {
-		return errors.New("tv_episode_max_duration must be greater than or equal to tv_episode_min_duration")
-	}
-	if c.MovieMinDuration <= 0 {
-		return errors.New("movie_min_duration must be positive")
-	}
-	if c.CartoonMinDuration < 0 {
-		return errors.New("cartoon_min_duration cannot be negative")
-	}
-	if c.CartoonMaxDuration < 0 {
-		return errors.New("cartoon_max_duration cannot be negative")
-	}
-	if c.CartoonMaxDuration < c.CartoonMinDuration {
-		return errors.New("cartoon_max_duration must be greater than or equal to cartoon_min_duration")
-	}
-	if c.MaxCommentaryTracks < 0 {
-		return errors.New("max_commentary_tracks cannot be negative")
-	}
 	if c.TMDBRuntimeToleranceMinutes < 0 {
 		return errors.New("tmdb_runtime_tolerance_minutes cannot be negative")
 	}
 	if c.TMDBConfidenceThreshold < 0 || c.TMDBConfidenceThreshold > 1 {
 		return errors.New("tmdb_confidence_threshold must be between 0 and 1")
-	}
-	if c.ConfidenceThreshold < 0 || c.ConfidenceThreshold > 1 {
-		return errors.New("confidence_threshold must be between 0 and 1")
-	}
-	if c.VersionDurationTolerance > 1 {
-		return errors.New("version_duration_tolerance cannot exceed 1.0")
-	}
-	switch strings.ToLower(strings.TrimSpace(c.EpisodeMappingStrategy)) {
-	case "sequential", "duration", "hybrid":
-		// ok
-	default:
-		return fmt.Errorf("episode_mapping_strategy must be one of sequential, duration, hybrid")
 	}
 	return nil
 }
@@ -490,7 +379,6 @@ tmdb_confidence_threshold = 0.8                      # Match confidence (0.0-1.0
 makemkv_rip_timeout = 3600                           # MakeMKV ripping timeout (seconds)
 queue_poll_interval = 5                              # Queue polling cadence (seconds)
 error_retry_interval = 10                            # Delay before retrying failures (seconds)
-workflow_worker_count = 2                            # Number of concurrent workflow workers
 workflow_heartbeat_interval = 15                     # Worker heartbeat interval (seconds)
 workflow_heartbeat_timeout = 120                     # Worker heartbeat timeout (seconds)
 

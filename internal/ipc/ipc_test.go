@@ -177,6 +177,13 @@ func TestIPCServerClient(t *testing.T) {
 	if addResp.Item.SourcePath == "" {
 		t.Fatal("expected manual item to include source path")
 	}
+	stopDuring, err := client.Stop()
+	if err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+	if !stopDuring.Stopped {
+		t.Fatalf("expected Stop to report stopped, got: %#v", stopDuring)
+	}
 
 	if err := store.Update(ctx, discC); err != nil {
 		t.Fatalf("Update discC: %v", err)

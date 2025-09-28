@@ -41,9 +41,6 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	if cfg.TMDBBaseURL != config.Default().TMDBBaseURL {
 		t.Fatalf("unexpected TMDB base url: %q", cfg.TMDBBaseURL)
 	}
-	if cfg.WorkflowWorkerCount != config.Default().WorkflowWorkerCount {
-		t.Fatalf("unexpected worker count: %d", cfg.WorkflowWorkerCount)
-	}
 	if cfg.WorkflowHeartbeatInterval != config.Default().WorkflowHeartbeatInterval {
 		t.Fatalf("unexpected heartbeat interval: %d", cfg.WorkflowHeartbeatInterval)
 	}
@@ -75,7 +72,6 @@ func TestLoadCustomPath(t *testing.T) {
 		TMDBAPIKey                string `toml:"tmdb_api_key"`
 		TMDBBaseURL               string `toml:"tmdb_base_url"`
 		MoviesDir                 string `toml:"movies_dir"`
-		WorkflowWorkerCount       int    `toml:"workflow_worker_count"`
 		WorkflowHeartbeatInterval int    `toml:"workflow_heartbeat_interval"`
 		WorkflowHeartbeatTimeout  int    `toml:"workflow_heartbeat_timeout"`
 	}
@@ -83,7 +79,6 @@ func TestLoadCustomPath(t *testing.T) {
 		TMDBAPIKey:                "abc123",
 		TMDBBaseURL:               "https://example.com/tmdb",
 		MoviesDir:                 "custom",
-		WorkflowWorkerCount:       4,
 		WorkflowHeartbeatInterval: 20,
 		WorkflowHeartbeatTimeout:  200,
 	})
@@ -112,9 +107,6 @@ func TestLoadCustomPath(t *testing.T) {
 	}
 	if cfg.TMDBBaseURL != "https://example.com/tmdb" {
 		t.Fatalf("expected TMDB base url override, got %q", cfg.TMDBBaseURL)
-	}
-	if cfg.WorkflowWorkerCount != 4 {
-		t.Fatalf("expected worker count 4, got %d", cfg.WorkflowWorkerCount)
 	}
 	if cfg.WorkflowHeartbeatInterval != 20 {
 		t.Fatalf("expected heartbeat interval 20, got %d", cfg.WorkflowHeartbeatInterval)
@@ -156,13 +148,6 @@ func TestCreateSample(t *testing.T) {
 func TestValidateDetectsInvalidValues(t *testing.T) {
 	cfg := config.Default()
 	cfg.TMDBAPIKey = "key"
-	cfg.MaxVersionsToRip = 0
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error for max_versions_to_rip <= 0")
-	}
-
-	cfg = config.Default()
-	cfg.TMDBAPIKey = "key"
 	cfg.MakeMKVRipTimeout = 0
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for non-positive timeout")
@@ -170,15 +155,22 @@ func TestValidateDetectsInvalidValues(t *testing.T) {
 
 	cfg = config.Default()
 	cfg.TMDBAPIKey = "key"
-	cfg.TMDBConfidenceThreshold = 1.5
+	cfg.WorkflowHeartbeatInterval = 0
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error for tmdb confidence threshold")
+		t.Fatal("expected error for heartbeat interval")
 	}
 
 	cfg = config.Default()
 	cfg.TMDBAPIKey = "key"
-	cfg.EpisodeMappingStrategy = "invalid"
+	cfg.WorkflowHeartbeatTimeout = cfg.WorkflowHeartbeatInterval
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error for invalid episode mapping strategy")
+		t.Fatal("expected error when timeout <= interval")
+	}
+
+	cfg = config.Default()
+	cfg.TMDBAPIKey = "key"
+	cfg.TMDBConfidenceThreshold = 1.5
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for tmdb confidence threshold")
 	}
 }

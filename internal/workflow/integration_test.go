@@ -32,7 +32,6 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 	cfg.OpticalDrive = filepath.Join(base, "devices", "sr0")
 	cfg.MoviesDir = "movies"
 	cfg.TVDir = "tv"
-	cfg.WorkflowWorkerCount = 1
 	cfg.QueuePollInterval = 0
 	cfg.ErrorRetryInterval = 1
 	cfg.WorkflowHeartbeatInterval = 1

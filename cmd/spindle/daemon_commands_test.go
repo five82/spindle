@@ -49,7 +49,9 @@ func TestDaemonStartStopStatus(t *testing.T) {
 	}
 	requireContains(t, out, "System Status")
 	requireContains(t, out, "Queue Status")
-	requireContains(t, out, "Pending")
+	if !strings.Contains(out, "Pending") && !strings.Contains(out, "Identified") {
+		t.Fatalf("expected queue status to include Pending or Identified, got:\n%s", out)
+	}
 	requireContains(t, out, "Failed")
 }
 
