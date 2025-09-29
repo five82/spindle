@@ -24,6 +24,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stdout := cmd.OutOrStdout()
 			client, err := ctx.dialClient()
+			launched := false
 			if err != nil {
 				fmt.Fprintln(stdout, "Daemon not running, launching...")
 				if launchErr := launchDaemonProcess(cmd, ctx); launchErr != nil {
@@ -33,10 +34,20 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				if err != nil {
 					return err
 				}
-			} else {
-				defer client.Close()
+				launched = true
 			}
 			defer client.Close()
+
+			statusResp, statusErr := client.Status()
+			if statusErr == nil && statusResp != nil && statusResp.Running {
+				if launched {
+					fmt.Fprintln(stdout, "Daemon started")
+				} else {
+					fmt.Fprintln(stdout, "Daemon already running")
+				}
+				return nil
+			}
+
 			resp, err := client.Start()
 			if err != nil {
 				return err
@@ -44,7 +55,9 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			switch {
 			case resp.Started:
 				fmt.Fprintln(stdout, "Daemon started")
-			case resp.Message != "":
+			case launched && strings.EqualFold(strings.TrimSpace(resp.Message), "daemon already running"):
+				fmt.Fprintln(stdout, "Daemon started")
+			case strings.TrimSpace(resp.Message) != "":
 				fmt.Fprintln(stdout, resp.Message)
 			default:
 				fmt.Fprintln(stdout, "Daemon already running")
