@@ -48,6 +48,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				return nil
 			}
 
+			fmt.Fprintln(stdout, "Starting daemon...")
 			resp, err := client.Start()
 			if err != nil {
 				return err
@@ -60,7 +61,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			case strings.TrimSpace(resp.Message) != "":
 				fmt.Fprintln(stdout, resp.Message)
 			default:
-				fmt.Fprintln(stdout, "Daemon already running")
+				fmt.Fprintln(stdout, "Start request sent")
 			}
 			return nil
 		},
