@@ -161,6 +161,7 @@ func (s *service) Status(_ StatusRequest, resp *StatusResponse) error {
 	resp.QueueDBPath = status.QueueDBPath
 	resp.LockPath = status.LockFilePath
 	resp.QueueStats = make(map[string]int, len(status.Workflow.QueueStats))
+	resp.PID = status.PID
 	for k, v := range status.Workflow.QueueStats {
 		resp.QueueStats[string(k)] = v
 	}

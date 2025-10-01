@@ -62,6 +62,7 @@ type StatusResponse struct {
 	QueueDBPath  string             `json:"queue_db_path"`
 	StageHealth  []StageHealth      `json:"stage_health"`
 	Dependencies []DependencyStatus `json:"dependencies"`
+	PID          int                `json:"pid"`
 }
 
 // QueueListRequest filters queue listing by status.

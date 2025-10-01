@@ -55,6 +55,7 @@ type Status struct {
 	QueueDBPath  string
 	LockFilePath string
 	Dependencies []DependencyStatus
+	PID          int
 }
 
 // DependencyStatus reports the availability of an external requirement.
@@ -294,6 +295,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		QueueDBPath:  filepath.Join(d.cfg.LogDir, "queue.db"),
 		LockFilePath: d.lockPath,
 		Dependencies: dependencies,
+		PID:          os.Getpid(),
 	}
 }
 

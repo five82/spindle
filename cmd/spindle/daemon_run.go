@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -52,6 +53,11 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	if err := ensureCurrentLogPointer(cfg.LogDir, logPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: unable to update spindle.log link: %v\n", err)
 	}
+	pidPath := filepath.Join(cfg.LogDir, "spindle.pid")
+	if err := writePIDFile(pidPath); err != nil {
+		return fmt.Errorf("write pid file: %w", err)
+	}
+	defer os.Remove(pidPath)
 
 	store, err := queue.Open(cfg)
 	if err != nil {
@@ -122,4 +128,12 @@ func ensureCurrentLogPointer(logDir, target string) error {
 		}
 		return fmt.Errorf("link log pointer: %w", err)
 	}
+}
+
+func writePIDFile(path string) error {
+	if path == "" {
+		return nil
+	}
+	value := strconv.Itoa(os.Getpid()) + "\n"
+	return os.WriteFile(path, []byte(value), 0o644)
 }
