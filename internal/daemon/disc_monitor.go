@@ -243,30 +243,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		}
 		return false
 	}
-
-	var scanResult *disc.ScanResult
-	var err error
-	if m.scanner != nil {
-		scanResult, err = m.scanner.Scan(scanCtx, info.Device)
-	} else {
-		err = errors.New("disc scanner unavailable")
-	}
-	if err != nil {
-		logger.Error("disc scan failed", zap.Error(err))
-		if m.notifier != nil {
-			if notifyErr := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
-				"error":   err,
-				"context": info.Label,
-			}); notifyErr != nil {
-				logger.Warn("failed to send scan error notification", zap.Error(notifyErr))
-			}
-		}
-		return false
-	}
-
-	if scanResult != nil {
-		scanResult.Fingerprint = discFingerprint
-	}
+	logger.Info("computed fingerprint", zap.String("fingerprint", discFingerprint))
 
 	existing, err := m.store.FindByFingerprint(ctx, discFingerprint)
 	if err != nil {

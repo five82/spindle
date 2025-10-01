@@ -26,7 +26,13 @@ var errMountNotFound = errors.New("optical drive mount point not found")
 func Compute(ctx context.Context, device, discType string) (string, error) {
 	mountPoint, err := resolveMountPoint(device)
 	if err != nil {
-		return "", err
+		if !errors.Is(err, errMountNotFound) {
+			return "", err
+		}
+		mountPoint = fallbackMountPoint()
+	}
+	if mountPoint == "" {
+		mountPoint = fallbackMountPoint()
 	}
 	if mountPoint == "" {
 		return "", errMountNotFound
@@ -289,6 +295,32 @@ func resolveMountPoint(device string) (string, error) {
 		return "", fmt.Errorf("scan mounts: %w", err)
 	}
 	return "", errMountNotFound
+}
+
+func fallbackMountPoint() string {
+	candidates := []string{
+		"/media/cdrom",
+		"/media/cdrom0",
+	}
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(candidate)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				name := strings.ToUpper(entry.Name())
+				if name == "BDMV" || name == "VIDEO_TS" || name == "AACS" || name == "CERTIFICATE" {
+					return candidate
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func decodeMountField(field string) string {

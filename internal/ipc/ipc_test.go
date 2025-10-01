@@ -35,6 +35,7 @@ func testConfig(t *testing.T) *config.Config {
 	cfg.LibraryDir = filepath.Join(base, "library")
 	cfg.LogDir = filepath.Join(base, "logs")
 	cfg.ReviewDir = filepath.Join(base, "review")
+	cfg.OpticalDrive = ""
 	return &cfg
 }
 
