@@ -235,6 +235,13 @@ func (m *Manager) run(ctx context.Context) {
 			m.setLastError(err)
 			continue
 		}
+		stageStart := time.Now()
+		stageLogger.Info(
+			"stage started",
+			zap.String("processing_status", string(stage.processingStatus)),
+			zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+			zap.String("source_path", strings.TrimSpace(item.SourcePath)),
+		)
 
 		handler := stage.handler
 		if handler == nil {
@@ -285,6 +292,13 @@ func (m *Manager) run(ctx context.Context) {
 			m.setLastError(wrapped)
 			continue
 		}
+		stageLogger.Info(
+			"stage completed",
+			zap.String("next_status", string(item.Status)),
+			zap.String("progress_stage", strings.TrimSpace(item.ProgressStage)),
+			zap.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
+			zap.Duration("elapsed", time.Since(stageStart)),
+		)
 		m.setLastItem(item)
 		m.checkQueueCompletion(stageCtx)
 	}
@@ -348,6 +362,12 @@ func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID 
 func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item *queue.Item, stageErr error) {
 	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-manager")))
 	status, errorMessage, progressMessage := classifyStageFailure(stageName, stageErr)
+	logger.Error(
+		"stage failed",
+		zap.String("resolved_status", string(status)),
+		zap.String("error_message", strings.TrimSpace(errorMessage)),
+		zap.Error(stageErr),
+	)
 	item.Status = status
 	if strings.TrimSpace(errorMessage) == "" {
 		errorMessage = "workflow stage failed"

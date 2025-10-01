@@ -55,17 +55,28 @@ func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger
 }
 
 func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
+	logger := logging.WithContext(ctx, o.logger)
 	if item.ProgressStage == "" {
 		item.ProgressStage = "Organizing"
 	}
 	item.ProgressMessage = "Preparing library organization"
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
+	logger.Info(
+		"starting organization preparation",
+		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		zap.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
+	)
 	return nil
 }
 
 func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, o.logger)
+	logger.Info(
+		"starting organization",
+		zap.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
+		zap.Bool("needs_review", item.NeedsReview),
+	)
 	if item.EncodedFile == "" {
 		return services.Wrap(
 			services.ErrValidation,
@@ -76,6 +87,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 	if item.NeedsReview {
+		logger.Info("routing item to manual review", zap.String("reason", strings.TrimSpace(item.ReviewReason)))
 		reviewPath, err := o.moveToReview(ctx, item)
 		if err != nil {
 			return err
@@ -118,19 +130,28 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	o.updateProgress(ctx, item, "Organizing library structure", 20)
+	logger.Info("organizing encoded file into library", zap.String("encoded_file", item.EncodedFile))
 	targetPath, err := o.plex.Organize(ctx, item.EncodedFile, meta)
 	if err != nil {
 		return services.Wrap(services.ErrExternalTool, "organizing", "move to library", "Failed to move media into library", err)
 	}
 	item.FinalFile = targetPath
+	logger.Info("library move completed", zap.String("final_file", targetPath))
 
 	o.updateProgress(ctx, item, "Refreshing Plex library", 80)
 	if err := o.plex.Refresh(ctx, meta); err != nil {
 		logger.Warn("plex refresh failed", zap.Error(err))
+	} else {
+		logger.Info("plex library refresh requested", zap.String("title", strings.TrimSpace(meta.Title())))
 	}
 
 	o.updateProgress(ctx, item, "Organization completed", 100)
 	item.ProgressMessage = fmt.Sprintf("Available in library: %s", filepath.Base(targetPath))
+	logger.Info(
+		"organization completed",
+		zap.String("final_file", targetPath),
+		zap.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
+	)
 
 	if o.notifier != nil {
 		title := strings.TrimSpace(meta.Title())
@@ -156,6 +177,11 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 
 func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string, error) {
 	logger := logging.WithContext(ctx, o.logger)
+	logger.Info(
+		"moving encoded file to review",
+		zap.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
+		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+	)
 	reviewDir := strings.TrimSpace(o.cfg.ReviewDir)
 	if reviewDir == "" {
 		return "", services.Wrap(

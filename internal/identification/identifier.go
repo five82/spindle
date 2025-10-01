@@ -101,6 +101,16 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Fetching metadata"
 	item.ProgressPercent = 0
 
+	displayTitle := strings.TrimSpace(item.DiscTitle)
+	if displayTitle == "" {
+		displayTitle = deriveTitle(item.SourcePath)
+	}
+	logger.Info(
+		"starting disc identification",
+		zap.String("disc_title", displayTitle),
+		zap.String("source_path", strings.TrimSpace(item.SourcePath)),
+	)
+
 	if i.notifier != nil && strings.TrimSpace(item.SourcePath) == "" {
 		title := strings.TrimSpace(item.DiscTitle)
 		if title == "" {
@@ -119,12 +129,19 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 // Execute performs disc scanning and TMDB identification.
 func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, i.logger)
+	device := strings.TrimSpace(i.cfg.OpticalDrive)
+	logger.Info("scanning disc with makemkv", zap.String("device", device))
 	scanResult, err := i.scanDisc(ctx)
 	if err != nil {
 		return err
 	}
+	if scanResult != nil {
+		titleCount := len(scanResult.Titles)
+		logger.Info("disc scan completed", zap.Int("title_count", titleCount))
+	}
 
 	if scanResult.Fingerprint != "" {
+		logger.Info("disc fingerprint captured", zap.String("fingerprint", scanResult.Fingerprint))
 		item.DiscFingerprint = scanResult.Fingerprint
 		if err := i.handleDuplicateFingerprint(ctx, item); err != nil {
 			return err
@@ -146,15 +163,20 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		title = "Unknown Disc"
 	}
 
+	logger.Info("searching tmdb for match", zap.String("query", title))
 	response, err := i.searchTMDB(ctx, title)
 	if err != nil {
 		logger.Warn("tmdb search failed", zap.String("title", title), zap.Error(err))
 		i.scheduleReview(ctx, item, "TMDB lookup failed")
 		return nil
 	}
+	if response != nil {
+		logger.Info("tmdb search completed", zap.Int("result_count", len(response.Results)))
+	}
 
 	best := selectBestResult(title, response, i.cfg)
 	if best == nil {
+		logger.Info("tmdb search lacked confident match", zap.String("title", title))
 		i.scheduleReview(ctx, item, "No confident TMDB match")
 		return nil
 	}
@@ -188,6 +210,12 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	item.RipSpecData = string(encodedSpec)
 
 	identifiedTitle := pickTitle(*best)
+	logger.Info(
+		"disc identified",
+		zap.Int64("tmdb_id", best.ID),
+		zap.String("identified_title", identifiedTitle),
+		zap.String("media_type", strings.TrimSpace(best.MediaType)),
+	)
 	if i.notifier != nil {
 		mediaType := strings.ToLower(strings.TrimSpace(best.MediaType))
 		if mediaType == "" {
@@ -250,11 +278,17 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 }
 
 func (i *Identifier) handleDuplicateFingerprint(ctx context.Context, item *queue.Item) error {
+	logger := logging.WithContext(ctx, i.logger)
 	found, err := i.store.FindByFingerprint(ctx, item.DiscFingerprint)
 	if err != nil {
 		return services.Wrap(services.ErrTransient, "identification", "lookup fingerprint", "Failed to query existing disc fingerprint", err)
 	}
 	if found != nil && found.ID != item.ID {
+		logger.Info(
+			"duplicate disc fingerprint detected",
+			zap.Int64("existing_item_id", found.ID),
+			zap.String("fingerprint", item.DiscFingerprint),
+		)
 		i.flagReview(ctx, item, "Duplicate disc fingerprint", true)
 		item.ErrorMessage = "Duplicate disc fingerprint"
 	}
@@ -267,6 +301,11 @@ func (i *Identifier) scheduleReview(ctx context.Context, item *queue.Item, messa
 
 func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message string, immediate bool) {
 	logger := logging.WithContext(ctx, i.logger)
+	logger.Info(
+		"flagging queue item for review",
+		zap.String("reason", message),
+		zap.Bool("immediate", immediate),
+	)
 	item.NeedsReview = true
 	item.ReviewReason = message
 	if strings.TrimSpace(item.ProgressStage) == "" || item.ProgressStage == "Identifying" {

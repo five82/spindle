@@ -61,6 +61,11 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Starting rip"
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
+	logger.Info(
+		"starting rip preparation",
+		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		zap.String("source_path", strings.TrimSpace(item.SourcePath)),
+	)
 	if r.notifier != nil {
 		if err := r.notifier.Publish(ctx, notifications.EventRipStarted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
 			logger.Warn("failed to send rip start notification", zap.Error(err))
@@ -75,9 +80,16 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	progressCB := func(update makemkv.ProgressUpdate) {
 		r.applyProgress(ctx, item, update)
 	}
+	destDir := filepath.Join(r.cfg.StagingDir, "rips")
+	logger.Info(
+		"starting rip execution",
+		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		zap.String("destination_dir", destDir),
+		zap.Bool("makemkv_enabled", r.client != nil),
+	)
 
 	if r.client != nil {
-		destDir := filepath.Join(r.cfg.StagingDir, "rips")
+		logger.Info("launching makemkv rip", zap.String("destination_dir", destDir))
 		path, err := r.client.Rip(ctx, item.DiscTitle, item.SourcePath, destDir, progressCB)
 		if err != nil {
 			return services.Wrap(
@@ -89,6 +101,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 			)
 		}
 		target = path
+		logger.Info("makemkv rip finished", zap.String("ripped_file", target))
 	}
 
 	if target == "" {
@@ -113,14 +126,17 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 		} else if err := os.WriteFile(target, []byte("placeholder rip"), 0o644); err != nil {
 			return services.Wrap(services.ErrTransient, "ripping", "write placeholder", "Failed to write placeholder rip", err)
 		}
+		logger.Info("created placeholder rip output", zap.String("ripped_file", target))
 	}
 
 	item.RippedFile = target
 	item.ProgressStage = "Ripped"
 	item.ProgressPercent = 100
 	item.ProgressMessage = "Disc content ripped"
+	logger.Info("ripping completed", zap.String("ripped_file", target))
 
 	if r.ejector != nil {
+		logger.Info("ejecting disc", zap.String("device", strings.TrimSpace(r.cfg.OpticalDrive)))
 		if err := r.ejector.Eject(ctx, r.cfg.OpticalDrive); err != nil {
 			logger.Warn("failed to eject disc", zap.Error(err))
 		}
