@@ -2,6 +2,9 @@ package logging_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -27,6 +30,64 @@ func TestNewFromConfigConsole(t *testing.T) {
 	}
 	logger.Debug("debug message")
 	logger.Sync() //nolint:errcheck // ignore sync errors on stdout
+}
+
+func TestConsoleLoggerOmitsCallerForInfo(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "console-info.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "info",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	logger.Info("message without caller")
+	logger.Sync() //nolint:errcheck
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+
+	if strings.Contains(string(content), ".go:") {
+		t.Fatalf("expected no caller information in info logs, got %q", content)
+	}
+}
+
+func TestConsoleLoggerIncludesCallerForDebug(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "console-debug.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "debug",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	logger.Info("message with caller")
+	logger.Sync() //nolint:errcheck
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+
+	if !strings.Contains(string(content), ".go:") {
+		t.Fatalf("expected caller information in debug logs, got %q", content)
+	}
 }
 
 func TestNewJSONLogger(t *testing.T) {

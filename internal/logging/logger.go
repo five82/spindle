@@ -23,10 +23,12 @@ type Options struct {
 
 // New constructs a zap logger using the provided options.
 func New(opts Options) (*zap.Logger, error) {
+	level := normalizeLevel(opts.Level)
+
 	cfg := zap.Config{
 		Level:             zap.NewAtomicLevel(),
 		Development:       opts.Development,
-		DisableCaller:     false,
+		DisableCaller:     level != "debug",
 		DisableStacktrace: false,
 		Sampling:          nil,
 		Encoding:          sanitizeEncoding(opts.Format),
@@ -35,7 +37,7 @@ func New(opts Options) (*zap.Logger, error) {
 		EncoderConfig:     encoderConfig(opts.Format),
 	}
 
-	if err := cfg.Level.UnmarshalText([]byte(normalizeLevel(opts.Level))); err != nil {
+	if err := cfg.Level.UnmarshalText([]byte(level)); err != nil {
 		return nil, fmt.Errorf("parse log level: %w", err)
 	}
 
