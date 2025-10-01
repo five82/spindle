@@ -4,7 +4,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 
 ## Pipeline Summary
 
-1. **MakeMKV scan** – `internal/disc.Scanner` calls `makemkvcon info` to capture the disc fingerprint and title list.
+1. **MakeMKV scan** – `internal/disc.Scanner` calls `makemkvcon info` to capture the title list; Spindle now computes its own fingerprint from disc metadata before the scan runs.
 2. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups.
 3. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
 4. The stage writes `MetadataJSON` and `RipSpecData` back to the queue so downstream stages can pick title selections and user-facing details.
@@ -12,7 +12,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 ## Disc Scan Details
 
 - MakeMKV output is parsed into `disc.ScanResult`, preserving the fingerprint and a normalized list of titles (id, name, duration in seconds).
-- Missing fingerprints abort the stage (`ErrFingerprintMissing`). Make sure the drive is reachable (`optical_drive` config) and MakeMKV is on the PATH.
+- Fingerprints come from hashing the disc's unencrypted metadata (BDMV structures for Blu-ray, IFO files for DVD). If hashing fails, treat it as a mount/drive issue.
 - Raw JSON is stored alongside parsed data to help with later diagnostics (`rip_spec_data` contains the structured payload).
 
 ## Duplicate Detection & Review Flow

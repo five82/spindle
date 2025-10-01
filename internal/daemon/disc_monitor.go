@@ -15,6 +15,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
+	"spindle/internal/disc/fingerprint"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -49,6 +50,7 @@ type discMonitor struct {
 	logger   *zap.Logger
 	notifier notifications.Service
 	scanner  discScanner
+	fp       func(ctx context.Context, device, discType string, timeout time.Duration) (string, error)
 
 	device       string
 	scanTimeout  time.Duration
@@ -103,6 +105,7 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *zap.Logger) 
 		scanTimeout:  scanTimeout,
 		pollInterval: poll,
 		detect:       detect,
+		fp:           fingerprint.ComputeTimeout,
 	}
 }
 
@@ -223,6 +226,24 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		defer cancel()
 	}
 
+	fingerprinter := m.fp
+	if fingerprinter == nil {
+		fingerprinter = fingerprint.ComputeTimeout
+	}
+	discFingerprint, fpErr := fingerprinter(scanCtx, info.Device, info.Type, m.scanTimeout)
+	if fpErr != nil {
+		logger.Error("generate fingerprint failed", zap.Error(fpErr))
+		if m.notifier != nil {
+			if notifyErr := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
+				"error":   fpErr,
+				"context": info.Label,
+			}); notifyErr != nil {
+				logger.Warn("failed to send fingerprint error notification", zap.Error(notifyErr))
+			}
+		}
+		return false
+	}
+
 	var scanResult *disc.ScanResult
 	var err error
 	if m.scanner != nil {
@@ -243,22 +264,11 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		return false
 	}
 
-	fingerprint := strings.TrimSpace(scanResult.Fingerprint)
-	if fingerprint == "" {
-		err := errors.New("makemkv scan returned empty fingerprint")
-		logger.Error("invalid scan result", zap.Error(err))
-		if m.notifier != nil {
-			if notifyErr := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
-				"error":   err,
-				"context": info.Label,
-			}); notifyErr != nil {
-				logger.Warn("failed to send fingerprint error notification", zap.Error(notifyErr))
-			}
-		}
-		return false
+	if scanResult != nil {
+		scanResult.Fingerprint = discFingerprint
 	}
 
-	existing, err := m.store.FindByFingerprint(ctx, fingerprint)
+	existing, err := m.store.FindByFingerprint(ctx, discFingerprint)
 	if err != nil {
 		logger.Error("lookup existing disc", zap.Error(err))
 		return false
@@ -271,8 +281,8 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 			existing.DiscTitle = label
 			updated = true
 		}
-		if existing.DiscFingerprint != fingerprint {
-			existing.DiscFingerprint = fingerprint
+		if existing.DiscFingerprint != discFingerprint {
+			existing.DiscFingerprint = discFingerprint
 			updated = true
 		}
 
@@ -304,7 +314,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		existing.ProgressMessage = ""
 		existing.NeedsReview = false
 		existing.ReviewReason = ""
-		existing.DiscFingerprint = fingerprint
+		existing.DiscFingerprint = discFingerprint
 		if label != "" {
 			existing.DiscTitle = label
 		}
@@ -323,7 +333,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		title = "Unknown Disc"
 	}
 
-	item, err := m.store.NewDisc(ctx, title, fingerprint)
+	item, err := m.store.NewDisc(ctx, title, discFingerprint)
 	if err != nil {
 		logger.Error("failed to enqueue disc", zap.Error(err))
 		return false
