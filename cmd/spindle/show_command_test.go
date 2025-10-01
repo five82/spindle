@@ -2,14 +2,13 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 )
 
 func TestShowLines(t *testing.T) {
 	env := setupCLITestEnv(t)
 
-	logPath := filepath.Join(env.cfg.LogDir, "spindle.log")
+	logPath := env.logPath
 	if err := os.WriteFile(logPath, []byte("first\nsecond\nthird\n"), 0o644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}

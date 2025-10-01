@@ -68,9 +68,12 @@ type DependencyStatus struct {
 }
 
 // New constructs a daemon with initialized dependencies.
-func New(cfg *config.Config, store *queue.Store, logger *zap.Logger, wf *workflow.Manager) (*Daemon, error) {
+func New(cfg *config.Config, store *queue.Store, logger *zap.Logger, wf *workflow.Manager, logPath string) (*Daemon, error) {
 	if cfg == nil || store == nil || logger == nil || wf == nil {
 		return nil, errors.New("daemon requires config, store, logger, and workflow manager")
+	}
+	if strings.TrimSpace(logPath) == "" {
+		return nil, errors.New("daemon requires log path")
 	}
 
 	lockPath := filepath.Join(cfg.LogDir, "spindle.lock")
@@ -80,7 +83,7 @@ func New(cfg *config.Config, store *queue.Store, logger *zap.Logger, wf *workflo
 		logger:   logger,
 		store:    store,
 		workflow: wf,
-		logPath:  filepath.Join(cfg.LogDir, "spindle.log"),
+		logPath:  logPath,
 		lockPath: lockPath,
 		lock:     flock.New(lockPath),
 		monitor:  monitor,

@@ -60,10 +60,11 @@ func TestDaemonStartStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("queue.Open: %v", err)
 	}
+	logPath := filepath.Join(cfg.LogDir, "daemon-test.log")
 	logger := zap.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
-	d, err := daemon.New(cfg, store, logger, mgr)
+	d, err := daemon.New(cfg, store, logger, mgr, logPath)
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}

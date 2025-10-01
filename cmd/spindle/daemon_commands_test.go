@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +37,7 @@ func TestDaemonStartStopStatus(t *testing.T) {
 		t.Fatalf("update status: %v", err)
 	}
 
-	logPath := filepath.Join(env.cfg.LogDir, "spindle.log")
+	logPath := env.logPath
 	if err := appendLine(logPath, "seed"); err != nil {
 		t.Fatalf("seed log: %v", err)
 	}
@@ -70,7 +69,7 @@ func TestDaemonStatusDiscDetectionTimeout(t *testing.T) {
 func TestShowFollow(t *testing.T) {
 	env := setupCLITestEnv(t)
 
-	logPath := filepath.Join(env.cfg.LogDir, "spindle.log")
+	logPath := env.logPath
 	if err := appendLine(logPath, "first"); err != nil {
 		t.Fatalf("append first: %v", err)
 	}

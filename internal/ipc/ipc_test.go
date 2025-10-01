@@ -45,10 +45,11 @@ func TestIPCServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("queue.Open: %v", err)
 	}
+	logPath := filepath.Join(cfg.LogDir, "ipc-test.log")
 	logger := zap.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
-	d, err := daemon.New(cfg, store, logger, mgr)
+	d, err := daemon.New(cfg, store, logger, mgr, logPath)
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}
@@ -131,7 +132,6 @@ func TestIPCServerClient(t *testing.T) {
 	if addResp.Item.Status != string(queue.StatusRipped) {
 		t.Fatalf("expected manual item to be ripped, got %s", addResp.Item.Status)
 	}
-	logPath := filepath.Join(cfg.LogDir, "spindle.log")
 	if err := os.WriteFile(logPath, []byte("first\nsecond\nthird\n"), 0o644); err != nil {
 		t.Fatalf("write log file: %v", err)
 	}

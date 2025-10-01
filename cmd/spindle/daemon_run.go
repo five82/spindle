@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -34,11 +36,22 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	logger, err := logging.NewFromConfig(cfg)
+	runID := time.Now().UTC().Format("20060102T150405Z")
+	logPath := filepath.Join(cfg.LogDir, fmt.Sprintf("spindle-%s.log", runID))
+	logger, err := logging.New(logging.Options{
+		Level:            cfg.LogLevel,
+		Format:           cfg.LogFormat,
+		OutputPaths:      []string{"stdout", logPath},
+		ErrorOutputPaths: []string{"stderr", logPath},
+		Development:      false,
+	})
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
 	defer logger.Sync() //nolint:errcheck
+	if err := ensureCurrentLogPointer(cfg.LogDir, logPath); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: unable to update spindle.log link: %v\n", err)
+	}
 
 	store, err := queue.Open(cfg)
 	if err != nil {
@@ -50,7 +63,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	workflowManager := workflow.NewManager(cfg, store, logger)
 	registerStages(workflowManager, cfg, store, logger)
 
-	d, err := daemon.New(cfg, store, logger, workflowManager)
+	d, err := daemon.New(cfg, store, logger, workflowManager, logPath)
 	if err != nil {
 		return fmt.Errorf("create daemon: %w", err)
 	}
@@ -91,4 +104,22 @@ func buildSocketPath(cfg *config.Config) string {
 		return filepath.Join("", "spindle.sock")
 	}
 	return filepath.Join(cfg.LogDir, "spindle.sock")
+}
+
+func ensureCurrentLogPointer(logDir, target string) error {
+	if logDir == "" || target == "" {
+		return nil
+	}
+	current := filepath.Join(logDir, "spindle.log")
+	if err := os.Remove(current); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove existing log pointer: %w", err)
+	}
+	if err := os.Symlink(target, current); err == nil {
+		return nil
+	} else {
+		if err := os.Link(target, current); err == nil {
+			return nil
+		}
+		return fmt.Errorf("link log pointer: %w", err)
+	}
 }

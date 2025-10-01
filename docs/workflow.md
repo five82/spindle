@@ -85,14 +85,14 @@ Use `spindle queue list` (filter with tools like `grep FAILED`), `spindle queue 
 - `spindle queue clear` - prune finished entries without touching active work; add `spindle queue clear-failed` to drop only failed items.
 - `spindle stop` - cleanly stop the daemon (planned maintenance, shutdown).
 
-Logs also live in `<log_dir>/spindle.log` and `<log_dir>/queue.db` (the queue database). Use standard SQLite tools to inspect the queue if you prefer raw SQL.
+Logs also live in `<log_dir>/spindle-<timestamp>.log` (one file per daemon start) and `<log_dir>/queue.db` (the queue database). Most systems expose a `spindle.log` symlink that points to the latest run. Use standard SQLite tools to inspect the queue if you prefer raw SQL.
 
 ## Where Files Live
 
 - **Staging**: `<staging_dir>/ripped/` for MakeMKV output, `<staging_dir>/encoded/` for Drapto output while waiting on organization.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in the config.
 - **Review**: `<review_dir>/` holds encoded files that still need manual identification. Each unidentified disc is stored with a unique filename (for example `unidentified-1.mkv`), and the queue item is marked complete so it doesn’t block subsequent work.
-- **Logs & diagnostics**: `<log_dir>/` keeps `spindle.log`, the queue database, and analyzer/debug artifacts.
+- **Logs & diagnostics**: `<log_dir>/` keeps `spindle-*.log` files for each run, the queue database, and analyzer/debug artifacts.
 
 ## Notifications
 

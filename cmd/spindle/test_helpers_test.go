@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,6 +37,7 @@ type cliTestEnv struct {
 	socketPath string
 	configPath string
 	baseDir    string
+	logPath    string
 	cancel     context.CancelFunc
 }
 
@@ -75,6 +77,15 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 	})
 
 	cfg := &cfgVal
+	logPath := filepath.Join(cfg.LogDir, "spindle-test.log")
+	if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
+		t.Fatalf("mkdir log dir: %v", err)
+	}
+	if _, err := os.Stat(logPath); errors.Is(err, os.ErrNotExist) {
+		if err := os.WriteFile(logPath, nil, 0o644); err != nil {
+			t.Fatalf("create log file: %v", err)
+		}
+	}
 
 	configPath := filepath.Join(homeDir, ".config", "spindle", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
@@ -91,7 +102,7 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
 
-	d, err := daemon.New(cfg, store, logger, mgr)
+	d, err := daemon.New(cfg, store, logger, mgr, logPath)
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}
@@ -112,6 +123,7 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 		socketPath: socketPath,
 		configPath: configPath,
 		baseDir:    base,
+		logPath:    logPath,
 		cancel:     cancel,
 	}
 

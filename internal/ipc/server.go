@@ -52,7 +52,7 @@ func NewServer(ctx context.Context, path string, d *daemon.Daemon, logger *zap.L
 	}
 
 	rpcServer := rpc.NewServer()
-	srv := &service{daemon: d, logger: logger, ctx: ctx, logPath: d.LogPath()}
+	srv := &service{daemon: d, logger: logger, ctx: ctx}
 	if err := rpcServer.RegisterName("Spindle", srv); err != nil {
 		listener.Close()
 		return nil, fmt.Errorf("register rpc service: %w", err)
@@ -109,10 +109,9 @@ func (s *Server) Close() {
 }
 
 type service struct {
-	daemon  *daemon.Daemon
-	logger  *zap.Logger
-	ctx     context.Context
-	logPath string
+	daemon *daemon.Daemon
+	logger *zap.Logger
+	ctx    context.Context
 }
 
 func convertQueueItem(item *queue.Item) *QueueItem {
@@ -284,7 +283,8 @@ func (s *service) QueueRetry(req QueueRetryRequest, resp *QueueRetryResponse) er
 }
 
 func (s *service) LogTail(req LogTailRequest, resp *LogTailResponse) error {
-	if s.logPath == "" {
+	logPath := s.daemon.LogPath()
+	if logPath == "" {
 		resp.Offset = 0
 		return nil
 	}
@@ -304,7 +304,7 @@ func (s *service) LogTail(req LogTailRequest, resp *LogTailResponse) error {
 		ctx, cancel = context.WithTimeout(s.ctx, wait+500*time.Millisecond)
 		defer cancel()
 	}
-	result, err := logs.Tail(ctx, s.logPath, options)
+	result, err := logs.Tail(ctx, logPath, options)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			resp.Offset = result.Offset

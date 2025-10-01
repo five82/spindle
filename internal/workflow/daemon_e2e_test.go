@@ -42,6 +42,7 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 	if err := cfg.EnsureDirectories(); err != nil {
 		t.Fatalf("EnsureDirectories: %v", err)
 	}
+	logPath := filepath.Join(cfg.LogDir, "daemon-e2e.log")
 
 	store, err := queue.Open(cfg)
 	if err != nil {
@@ -95,7 +96,7 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d, err := daemon.New(cfg, store, logger, mgr)
+	d, err := daemon.New(cfg, store, logger, mgr, logPath)
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}
