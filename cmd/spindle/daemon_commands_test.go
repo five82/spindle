@@ -13,7 +13,7 @@ import (
 func TestDaemonStartStopStatus(t *testing.T) {
 	env := setupCLITestEnv(t)
 
-	_, _, err := runCLI(t, []string{"stop"}, env.socketPath, env.configPath)
+	_, _, err := runCLI(t, []string{"stop", "--workflow-only"}, env.socketPath, env.configPath)
 	if err != nil {
 		t.Fatalf("stop: %v", err)
 	}

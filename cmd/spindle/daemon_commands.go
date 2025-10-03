@@ -69,10 +69,10 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		},
 	}
 
-	var forceKill bool
+	var workflowOnly bool
 	stopCmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the spindle daemon",
+		Short: "Stop the spindle daemon (completely terminates the process)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stdout := cmd.OutOrStdout()
 			client, err := ctx.dialClient()
@@ -98,50 +98,53 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			} else {
 				fmt.Fprintln(stdout, "Stopping daemon workflow...")
 			}
+
+			// Wait for graceful shutdown
 			err = waitForDaemonShutdown(ctx.socketPath(), 5*time.Second)
 			alive, livePID, aliveErr := daemonProcessInfo(ctx.socketPath())
 			if aliveErr != nil {
-				if !forceKill {
-					return aliveErr
-				}
 				alive = false
 			}
-			if forceKill {
-				if !alive {
-					fmt.Fprintln(stdout, "Daemon already fully stopped")
-					return nil
+
+			// If workflow-only mode, don't terminate the process
+			if workflowOnly {
+				if err != nil {
+					return fmt.Errorf("workflow stop failed: %w", err)
 				}
+				if alive {
+					fmt.Fprintln(stdout, "Daemon workflow stopped (daemon process still running for IPC)")
+				} else {
+					fmt.Fprintln(stdout, "Daemon workflow stopped")
+				}
+				return nil
+			}
+
+			// Default behavior: terminate the process completely
+			if alive {
 				currentPID := livePID
 				if currentPID == 0 {
 					currentPID = pid
 				}
 				logDir := deriveLogDir(lockPath, queueDBPath, ctx)
 				if logDir == "" {
-					return fmt.Errorf("unable to determine daemon log directory for force kill")
+					return fmt.Errorf("unable to determine daemon log directory")
 				}
 				pidPath := filepath.Join(logDir, "spindle.pid")
 				lockFile := filepath.Join(logDir, "spindle.lock")
-				fmt.Fprintf(stdout, "Force killing daemon service (pid %d)...\n", currentPID)
-				killedPID, killErr := forceKillDaemonProcess(pidPath, lockFile, currentPID)
+				fmt.Fprintf(stdout, "Stopping daemon process (pid %d)...\n", currentPID)
+				_, killErr := forceKillDaemonProcess(pidPath, lockFile, currentPID)
 				if killErr != nil {
-					return killErr
+					return fmt.Errorf("failed to stop daemon process: %w", killErr)
 				}
 				_ = os.Remove(ctx.socketPath())
-				fmt.Fprintf(stdout, "Daemon service (pid %d) killed\n", killedPID)
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if alive {
+				fmt.Fprintf(stdout, "Daemon stopped\n")
+			} else {
 				fmt.Fprintln(stdout, "Daemon stopped")
-				return nil
 			}
-			fmt.Fprintln(stdout, "Daemon workflow and service stopped")
 			return nil
 		},
 	}
-	stopCmd.Flags().BoolVar(&forceKill, "kill", false, "Forcefully terminate the daemon if it does not stop")
+	stopCmd.Flags().BoolVar(&workflowOnly, "workflow-only", false, "Stop only the workflow, keep daemon process running for IPC commands")
 
 	statusCmd := &cobra.Command{
 		Use:   "status",
