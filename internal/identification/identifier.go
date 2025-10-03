@@ -262,9 +262,17 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", err)
 	}
 	item.MetadataJSON = string(encodedMetadata)
+	// Update DiscTitle to the proper TMDB title with year for use in subsequent stages
+	identifiedTitle := pickTitle(*best)
+	titleWithYear := identifiedTitle
+	if best.ReleaseDate != "" && len(best.ReleaseDate) >= 4 {
+		year := best.ReleaseDate[:4] // Extract YYYY from YYYY-MM-DD
+		titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
+	}
+	item.DiscTitle = titleWithYear
 	item.ProgressStage = "Identified"
 	item.ProgressPercent = 100
-	item.ProgressMessage = fmt.Sprintf("Identified as: %s", pickTitle(*best))
+	item.ProgressMessage = fmt.Sprintf("Identified as: %s", titleWithYear)
 
 	ripSpec := map[string]any{
 		"fingerprint": scanResult.Fingerprint,
@@ -277,7 +285,6 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	item.RipSpecData = string(encodedSpec)
 
-	identifiedTitle := pickTitle(*best)
 	logger.Info(
 		"disc identified",
 		zap.Int64("tmdb_id", best.ID),
