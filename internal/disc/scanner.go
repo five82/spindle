@@ -302,6 +302,7 @@ func IsGenericLabel(label string) bool {
 		"BLURAY",
 		"BD_ROM",
 		"UNTITLED",
+		"UNKNOWN DISC",
 	}
 
 	lowerLabel := strings.ToUpper(label)

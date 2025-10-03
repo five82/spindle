@@ -123,7 +123,7 @@ Examples:
 				fmt.Fprintf(cmd.OutOrStdout(), "  Review Required: ✅ No\n")
 			}
 
-			if item.Status == queue.StatusIdentified && item.MetadataJSON != "" {
+			if item.MetadataJSON != "" && !item.NeedsReview {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n🎬 Identification successful! Disc would proceed to ripping stage.\n")
 			} else if item.NeedsReview {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n⚠️  Identification requires manual review. Check the logs above for details.\n")
