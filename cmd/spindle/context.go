@@ -112,7 +112,7 @@ func (c *commandContext) dialClient() (*ipc.Client, error) {
 func wrapDialError(err error, socket string) error {
 	switch {
 	case errors.Is(err, syscall.ENOENT) || os.IsNotExist(err):
-		return fmt.Errorf("connect to daemon: socket %s not found; start the daemon with `spindle start`", socket)
+		return fmt.Errorf("spindle daemon is not running. Start it with: spindle start")
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return fmt.Errorf("connect to daemon: socket %s refused the connection; verify the daemon is running", socket)
 	default:
