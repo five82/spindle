@@ -25,16 +25,41 @@ type Options struct {
 func New(opts Options) (*zap.Logger, error) {
 	level := normalizeLevel(opts.Level)
 
+	if strings.ToLower(strings.TrimSpace(opts.Format)) == "json" {
+		cfg := zap.Config{
+			Level:             zap.NewAtomicLevel(),
+			Development:       opts.Development,
+			DisableCaller:     level != "debug",
+			DisableStacktrace: false,
+			Sampling:          nil,
+			Encoding:          "json",
+			OutputPaths:       defaultSlice(opts.OutputPaths, []string{"stdout"}),
+			ErrorOutputPaths:  defaultSlice(opts.ErrorOutputPaths, []string{"stderr"}),
+			EncoderConfig:     encoderConfig("json"),
+		}
+
+		if err := cfg.Level.UnmarshalText([]byte(level)); err != nil {
+			return nil, fmt.Errorf("parse log level: %w", err)
+		}
+
+		logger, err := cfg.Build()
+		if err != nil {
+			return nil, fmt.Errorf("build logger: %w", err)
+		}
+		return logger, nil
+	}
+
+	// For console format, use a simplified approach for better readability
 	cfg := zap.Config{
 		Level:             zap.NewAtomicLevel(),
 		Development:       opts.Development,
-		DisableCaller:     level != "debug",
-		DisableStacktrace: false,
+		DisableCaller:     level != "debug", // Only show caller for debug level
+		DisableStacktrace: level != "debug", // Only show stacktrace for debug level
 		Sampling:          nil,
-		Encoding:          sanitizeEncoding(opts.Format),
+		Encoding:          "console",
 		OutputPaths:       defaultSlice(opts.OutputPaths, []string{"stdout"}),
 		ErrorOutputPaths:  defaultSlice(opts.ErrorOutputPaths, []string{"stderr"}),
-		EncoderConfig:     encoderConfig(opts.Format),
+		EncoderConfig:     simpleConsoleConfig(),
 	}
 
 	if err := cfg.Level.UnmarshalText([]byte(level)); err != nil {
@@ -47,6 +72,23 @@ func New(opts Options) (*zap.Logger, error) {
 	}
 
 	return logger, nil
+}
+
+// simpleConsoleConfig returns a clean console encoder configuration
+func simpleConsoleConfig() zapcore.EncoderConfig {
+	cfg := zap.NewDevelopmentEncoderConfig()
+	cfg.EncodeTime = zapcore.ISO8601TimeEncoder
+	cfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	cfg.EncodeDuration = zapcore.StringDurationEncoder
+	cfg.EncodeCaller = zapcore.ShortCallerEncoder
+
+	// Remove some noise for cleaner output
+	cfg.TimeKey = "time"
+	cfg.LevelKey = "level"
+	cfg.MessageKey = "msg"
+	cfg.CallerKey = "caller"
+
+	return cfg
 }
 
 // NewFromConfig creates a logger using application config defaults.
@@ -74,15 +116,6 @@ func NewFromConfig(cfg *config.Config) (*zap.Logger, error) {
 		Development:      false,
 	}
 	return New(opts)
-}
-
-func sanitizeEncoding(format string) string {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "json":
-		return "json"
-	default:
-		return "console"
-	}
 }
 
 func normalizeLevel(level string) string {
@@ -123,11 +156,39 @@ func encoderConfig(format string) zapcore.EncoderConfig {
 		return cfg
 	}
 
-	cfg := zap.NewDevelopmentEncoderConfig()
-	cfg.EncodeTime = zapcore.RFC3339TimeEncoder
-	cfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	cfg.TimeKey = "ts"
-	cfg.MessageKey = "msg"
-	cfg.LevelKey = "level"
-	return cfg
+	// Console encoder configuration for human-readable output
+	return zapcore.EncoderConfig{
+		TimeKey:        "",
+		LevelKey:       "",
+		NameKey:        "component",
+		CallerKey:      "",
+		FunctionKey:    zapcore.OmitKey,
+		MessageKey:     "msg",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    customLevelEncoder,
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+}
+
+// customLevelEncoder provides cleaner level output for console
+func customLevelEncoder(level zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
+	switch level {
+	case zapcore.DebugLevel:
+		enc.AppendString("[DEBUG] ")
+	case zapcore.InfoLevel:
+		// No prefix for info level to reduce noise
+	case zapcore.WarnLevel:
+		enc.AppendString("[WARN] ")
+	case zapcore.ErrorLevel:
+		enc.AppendString("[ERROR] ")
+	case zapcore.FatalLevel:
+		enc.AppendString("[FATAL] ")
+	case zapcore.PanicLevel:
+		enc.AppendString("[PANIC] ")
+	default:
+		enc.AppendString("[" + level.CapitalString() + "] ")
+	}
 }
