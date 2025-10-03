@@ -137,7 +137,16 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	if scanResult != nil {
 		titleCount := len(scanResult.Titles)
-		logger.Info("disc scan completed", zap.Int("title_count", titleCount))
+		logger.Info("disc scan completed",
+			zap.Int("title_count", titleCount),
+			zap.Bool("bd_info_available", scanResult.BDInfo != nil))
+		if scanResult.BDInfo != nil {
+			logger.Info("bd_info details",
+				zap.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier),
+				zap.String("disc_name", scanResult.BDInfo.DiscName),
+				zap.Bool("is_blu_ray", scanResult.BDInfo.IsBluRay),
+				zap.Bool("has_aacs", scanResult.BDInfo.HasAACS))
+		}
 	}
 
 	if scanResult.Fingerprint != "" {
@@ -158,6 +167,13 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	if title == "" && len(scanResult.Titles) > 0 {
 		title = scanResult.Titles[0].Name
+	}
+	// Fallback to bd_info disc name if still empty
+	if title == "" && scanResult.BDInfo != nil && scanResult.BDInfo.DiscName != "" {
+		title = scanResult.BDInfo.DiscName
+		logger.Info("using bd_info disc name for identification",
+			zap.String("bd_info_title", scanResult.BDInfo.DiscName),
+			zap.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier))
 	}
 	if title == "" {
 		title = "Unknown Disc"

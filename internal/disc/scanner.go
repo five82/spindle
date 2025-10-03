@@ -19,10 +19,20 @@ type Title struct {
 	Duration int    `json:"duration"`
 }
 
+// BDInfoResult captures bd_info command output for enhanced disc identification.
+type BDInfoResult struct {
+	VolumeIdentifier string `json:"volume_identifier"`
+	DiscName         string `json:"disc_name"`
+	Provider         string `json:"provider"`
+	IsBluRay         bool   `json:"is_blu_ray"`
+	HasAACS          bool   `json:"has_aacs"`
+}
+
 // ScanResult captures MakeMKV scan output used for identification.
 type ScanResult struct {
-	Fingerprint string  `json:"fingerprint"`
-	Titles      []Title `json:"titles"`
+	Fingerprint string        `json:"fingerprint"`
+	Titles      []Title       `json:"titles"`
+	BDInfo      *BDInfoResult `json:"bd_info,omitempty"`
 	RawOutput   string
 }
 
@@ -61,7 +71,7 @@ func NewScannerWithExecutor(binary string, exec Executor) *Scanner {
 	return &Scanner{binary: strings.TrimSpace(binary), exec: exec}
 }
 
-// Scan executes MakeMKV to gather disc details.
+// Scan executes MakeMKV to gather disc details, with bd_info fallback for title identification.
 func (s *Scanner) Scan(ctx context.Context, device string) (*ScanResult, error) {
 	if s.binary == "" {
 		return nil, errors.New("makemkv binary not configured")
@@ -89,7 +99,162 @@ func (s *Scanner) Scan(ctx context.Context, device string) (*ScanResult, error) 
 		return nil, err
 	}
 	result.RawOutput = string(output)
+
+	// If no titles found or the main title is generic/empty, try bd_info for better identification
+	if len(result.Titles) == 0 || (len(result.Titles) > 0 && IsGenericLabel(result.Titles[0].Name)) {
+		bdInfo := s.scanBDInfo(ctx, device)
+		if bdInfo != nil {
+			result.BDInfo = bdInfo
+			// Update the first title with bd_info disc name if available
+			if len(result.Titles) > 0 && bdInfo.DiscName != "" {
+				result.Titles[0].Name = bdInfo.DiscName
+			}
+		}
+	}
+
 	return result, nil
+}
+
+// scanBDInfo runs bd_info command for enhanced disc identification.
+func (s *Scanner) scanBDInfo(ctx context.Context, device string) *BDInfoResult {
+	// Use raw device path if available, otherwise use the MakeMKV target format
+	bdInfoDevice := extractDevicePath(device)
+	if bdInfoDevice == "" {
+		bdInfoDevice = normalizeDeviceArg(device)
+		bdInfoDevice = strings.TrimPrefix(bdInfoDevice, "dev:")
+	}
+
+	output, err := s.exec.Run(ctx, "bd_info", []string{bdInfoDevice})
+	if err != nil {
+		// bd_info not available or failed - this is not a fatal error
+		return nil
+	}
+
+	return parseBDInfoOutput(output)
+}
+
+// extractDevicePath extracts the raw device path from various device formats.
+func extractDevicePath(device string) string {
+	trimmed := strings.TrimSpace(device)
+	if strings.HasPrefix(trimmed, "/dev/") {
+		return trimmed
+	}
+	if strings.HasPrefix(trimmed, "dev:") {
+		return strings.TrimPrefix(trimmed, "dev:")
+	}
+	if strings.HasPrefix(trimmed, "disc:") {
+		// For disc: format, we can't easily extract the raw device
+		// This would require additional system-specific logic
+		return ""
+	}
+	return trimmed
+}
+
+// parseBDInfoOutput parses bd_info command output for disc metadata.
+func parseBDInfoOutput(output []byte) *BDInfoResult {
+	if len(output) == 0 {
+		return nil
+	}
+
+	result := &BDInfoResult{}
+	lines := strings.Split(string(output), "\n")
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		switch {
+		case strings.Contains(trimmed, "Volume Identifier") && strings.Contains(trimmed, ":"):
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				result.VolumeIdentifier = strings.TrimSpace(parts[1])
+			}
+		case strings.Contains(trimmed, "BluRay detected") && strings.Contains(trimmed, ":"):
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				result.IsBluRay = strings.TrimSpace(strings.ToLower(parts[1])) == "yes"
+			}
+		case strings.Contains(trimmed, "AACS detected") && strings.Contains(trimmed, ":"):
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				result.HasAACS = strings.TrimSpace(strings.ToLower(parts[1])) == "yes"
+			}
+		case strings.Contains(trimmed, "provider data") && strings.Contains(trimmed, ":"):
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				provider := strings.TrimSpace(strings.Trim(parts[1], " \"'"))
+				if provider != "" {
+					result.Provider = provider
+				}
+			}
+		}
+	}
+
+	// Extract disc name from volume identifier if not directly provided
+	if result.DiscName == "" && result.VolumeIdentifier != "" {
+		result.DiscName = ExtractDiscNameFromVolumeID(result.VolumeIdentifier)
+	}
+
+	return result
+}
+
+// ExtractDiscNameFromVolumeID cleans volume identifier to extract disc name.
+func ExtractDiscNameFromVolumeID(volumeID string) string {
+	if volumeID == "" {
+		return ""
+	}
+
+	// Remove common prefixes and patterns
+	title := volumeID
+	title = regexp.MustCompile(`^\d+_`).ReplaceAllString(title, "")               // Remove leading numbers (00000095_)
+	title = regexp.MustCompile(`(?i)_S\d+_DISC_\d+$`).ReplaceAllString(title, "") // Remove season/disc suffix
+	title = regexp.MustCompile(`(?i)_TV$`).ReplaceAllString(title, "")            // Remove TV suffix
+	title = strings.ReplaceAll(title, "_", " ")
+
+	title = strings.TrimSpace(title)
+
+	// Return empty string if result is just numbers or generic
+	if title == "" || regexp.MustCompile(`^\d+$`).MatchString(title) {
+		return ""
+	}
+
+	return title
+}
+
+// IsGenericLabel checks if a disc label is too generic for reliable identification.
+func IsGenericLabel(label string) bool {
+	if label == "" {
+		return true
+	}
+
+	genericPatterns := []string{
+		"LOGICAL_VOLUME_ID",
+		"DVD_VIDEO",
+		"BLURAY",
+		"BD_ROM",
+		"UNTITLED",
+	}
+
+	lowerLabel := strings.ToUpper(label)
+	for _, pattern := range genericPatterns {
+		if strings.Contains(lowerLabel, pattern) {
+			return true
+		}
+	}
+
+	// Check for labels that are just numbers
+	if regexp.MustCompile(`^\d+$`).MatchString(label) {
+		return true
+	}
+
+	// Check for very short alphanumeric codes (1-3 characters)
+	if regexp.MustCompile(`^[A-Z0-9_]{1,3}$`).MatchString(label) {
+		return true
+	}
+
+	return false
 }
 
 func extractMakemkvStderr(err error) []byte {

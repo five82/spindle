@@ -5,13 +5,21 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 ## Pipeline Summary
 
 1. **MakeMKV scan** – `internal/disc.Scanner` calls `makemkvcon info` to capture the title list; Spindle now computes its own fingerprint from disc metadata before the scan runs.
-2. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups.
-3. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
-4. The stage writes `MetadataJSON` and `RipSpecData` back to the queue so downstream stages can pick title selections and user-facing details.
+2. **bd_info fallback** – When MakeMKV returns empty or generic titles (e.g., "LOGICAL_VOLUME_ID"), the scanner automatically runs `bd_info` to extract the actual disc name from the volume identifier.
+3. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups using the enhanced title data.
+4. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
+5. The stage writes `MetadataJSON` and `RipSpecData` back to the queue so downstream stages can pick title selections and user-facing details.
 
 ## Disc Scan Details
 
 - MakeMKV output is parsed into `disc.ScanResult`, preserving the fingerprint and a normalized list of titles (id, name, duration in seconds).
+- **bd_info integration**: When MakeMKV titles are empty or generic (LOGICAL_VOLUME_ID, DVD_VIDEO, BLURAY, etc.), the scanner automatically runs `bd_info` to extract enhanced metadata:
+  - Volume identifier (e.g., "00000095_50_FIRST_DATES")
+  - Disc name parsed from volume identifier
+  - Blu-ray and AACS detection flags
+  - Provider information when available
+- Generic label detection uses patterns like `LOGICAL_VOLUME_ID`, `DVD_VIDEO`, `BLURAY`, `BD_ROM`, `UNTITLED`, numeric-only, and short alphanumeric codes.
+- Enhanced titles from bd_info replace generic MakeMKV titles before TMDB lookup.
 - Fingerprints come from hashing the disc's unencrypted metadata (BDMV structures for Blu-ray, IFO files for DVD). If hashing fails, treat it as a mount/drive issue.
 - Raw JSON is stored alongside parsed data to help with later diagnostics (`rip_spec_data` contains the structured payload).
 
@@ -54,7 +62,8 @@ Update this list when the identifier begins consuming additional config (runtime
 ## Failure Modes & Mitigation
 
 - **MakeMKV scan failure** – surfaces as `FAILED` with `MakeMKV disc scan failed`. Verify the binary location and drive permissions.
-- **Missing TMDB matches** – item is flagged for review, finishes rip/encode, and then is marked complete with the encoded file parked under `review_dir`. Adjust the metadata manually and rerun `spindle queue retry <id>` (if you want Spindle to reorganize the file after you update metadata) or simply leave the queue entry as-is once you’ve handled it.
+- **bd_info unavailability** – If `bd_info` command is not found (libbluray-utils not installed), the scanner continues with MakeMKV data only and logs at info level. Install `libbluray-utils` for enhanced disc identification.
+- **Missing TMDB matches** – item is flagged for review, finishes rip/encode, and then is marked complete with the encoded file parked under `review_dir`. Adjust the metadata manually and rerun `spindle queue retry <id>` (if you want Spindle to reorganize the file after you update metadata) or simply leave the queue entry as-is once you've handled it.
 - **Notification errors** – logged as warnings; they do not fail the stage but keep an eye on ntfy credentials.
 
 ## Troubleshooting Tips
@@ -65,5 +74,6 @@ Update this list when the identifier begins consuming additional config (runtime
 
 ## Future Notes
 
-- Enhanced metadata overlay (bd_info, BDMT parsing) is a planned addition—document it here once implemented in `internal/disc`.
+- Enhanced metadata overlay (BDMT parsing, additional XML metadata) could further improve identification accuracy.
 - Consider persisting TMDB caches on disk if repeated scans of box sets become common.
+- Volume identifier parsing patterns can be extended to handle more studio-specific naming schemes.
