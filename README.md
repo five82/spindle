@@ -53,6 +53,10 @@ spindle show --follow
 - **drapto** (requires Rust toolchain) – `cargo install --git https://github.com/five82/drapto`
 
 **Optional (for better identification):**
+- **bd_info** – For enhanced disc identification when MakeMKV returns generic titles:
+  - Ubuntu/Debian: `sudo apt install libbluray-utils`
+  - Fedora/CentOS: `sudo dnf install libbluray-utils`
+  - Arch: `sudo pacman -S libbluray`
 - **Disc Automounting**:
   - **Desktop**: Handled automatically by desktop environment
   - **Server**: Add to `/etc/fstab`: `/dev/sr0 /media/cdrom udf,iso9660 ro,noauto,x-systemd.automount,x-systemd.device-timeout=10 0 0`
@@ -160,7 +164,7 @@ ls -la /media/cdrom /media/cdrom0
 
 - **Disc not ejecting**: Check logs for ripping errors (only successful rips eject)
 - **Stuck identifying**: Verify TMDB API key and disc mounting
-- **Poor identification**: Generic disc labels reduce accuracy
+- **Poor identification**: Generic disc labels reduce accuracy - install `libbluray-utils` for bd_info fallback
 - **TMDB rate limits**: Retry later; the daemon will back off and recover on its own
 
 See [docs/content-identification.md](docs/content-identification.md) for deeper analyzer diagnostics.
