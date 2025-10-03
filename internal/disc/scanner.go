@@ -26,6 +26,8 @@ type BDInfoResult struct {
 	Provider         string `json:"provider"`
 	IsBluRay         bool   `json:"is_blu_ray"`
 	HasAACS          bool   `json:"has_aacs"`
+	Year             int    `json:"year,omitempty"`
+	Studio           string `json:"studio,omitempty"`
 }
 
 // ScanResult captures MakeMKV scan output used for identification.
@@ -187,6 +189,8 @@ func parseBDInfoOutput(output []byte) *BDInfoResult {
 				provider := strings.TrimSpace(strings.Trim(parts[1], " \"'"))
 				if provider != "" {
 					result.Provider = provider
+					// Try to extract studio from provider data
+					result.Studio = extractStudioFromProvider(provider)
 				}
 			}
 		}
@@ -195,6 +199,8 @@ func parseBDInfoOutput(output []byte) *BDInfoResult {
 	// Extract disc name from volume identifier if not directly provided
 	if result.DiscName == "" && result.VolumeIdentifier != "" {
 		result.DiscName = ExtractDiscNameFromVolumeID(result.VolumeIdentifier)
+		// Try to extract year from disc name or volume identifier
+		result.Year = extractYearFromIdentifier(result.DiscName, result.VolumeIdentifier)
 	}
 
 	return result
@@ -221,6 +227,67 @@ func ExtractDiscNameFromVolumeID(volumeID string) string {
 	}
 
 	return title
+}
+
+// extractStudioFromProvider extracts studio name from provider data.
+func extractStudioFromProvider(provider string) string {
+	if provider == "" {
+		return ""
+	}
+
+	// Known studio mappings from provider data
+	studioMappings := map[string]string{
+		"sony":          "Sony Pictures",
+		"sony pictures": "Sony Pictures",
+		"warner":        "Warner Bros",
+		"warner bros":   "Warner Bros",
+		"universal":     "Universal Pictures",
+		"disney":        "Walt Disney Pictures",
+		"paramount":     "Paramount Pictures",
+		"mgm":           "Metro-Goldwyn-Mayer",
+		"fox":           "20th Century Fox",
+		"lionsgate":     "Lionsgate",
+	}
+
+	lowerProvider := strings.ToLower(provider)
+	for studio, fullName := range studioMappings {
+		if strings.Contains(lowerProvider, studio) {
+			return fullName
+		}
+	}
+
+	// If no mapping found, return cleaned provider name
+	cleaned := strings.TrimSpace(provider)
+	if len(cleaned) <= 3 {
+		return "" // Too short to be meaningful
+	}
+	return cleaned
+}
+
+// extractYearFromIdentifier attempts to extract a 4-digit year from disc identifiers.
+func extractYearFromIdentifier(discName, volumeID string) int {
+	// Common year patterns
+	yearPattern := regexp.MustCompile(`\b(19|20)\d{2}\b`)
+
+	// Try disc name first
+	if discName != "" {
+		if match := yearPattern.FindString(discName); match != "" {
+			if year, err := strconv.Atoi(match); err == nil {
+				return year
+			}
+		}
+	}
+
+	// Try volume identifier
+	if volumeID != "" {
+		if match := yearPattern.FindString(volumeID); match != "" {
+			if year, err := strconv.Atoi(match); err == nil {
+				return year
+			}
+		}
+	}
+
+	return 0
 }
 
 // IsGenericLabel checks if a disc label is too generic for reliable identification.

@@ -207,6 +207,10 @@ func (s *stubSearcher) SearchMovie(ctx context.Context, query string) (*tmdb.Res
 	return s.resp, nil
 }
 
+func (s *stubSearcher) SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	return s.SearchMovie(ctx, query)
+}
+
 type stubDiscScanner struct {
 	result *disc.ScanResult
 	err    error

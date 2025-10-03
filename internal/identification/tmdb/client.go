@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -78,6 +79,18 @@ func New(apiKey, baseURL, language string, opts ...Option) (*Client, error) {
 
 // SearchMovie searches TMDB for the supplied title.
 func (c *Client) SearchMovie(ctx context.Context, query string) (*Response, error) {
+	return c.SearchMovieWithOptions(ctx, query, SearchOptions{})
+}
+
+// SearchOptions contains optional parameters for TMDB movie search.
+type SearchOptions struct {
+	Year    int    `json:"year,omitempty"`
+	Studio  string `json:"studio,omitempty"`
+	Runtime int    `json:"runtime,omitempty"` // in minutes
+}
+
+// SearchMovieWithOptions performs a TMDB movie search with optional filters.
+func (c *Client) SearchMovieWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, errors.New("query must not be empty")
@@ -91,6 +104,19 @@ func (c *Client) SearchMovie(ctx context.Context, query string) (*Response, erro
 	params.Set("api_key", c.apiKey)
 	if c.language != "" {
 		params.Set("language", c.language)
+	}
+
+	// Add optional search parameters
+	if opts.Year > 0 {
+		params.Set("primary_release_year", strconv.Itoa(opts.Year))
+	}
+	// Note: Studio filtering is not yet implemented.
+	// Future enhancement: TMDB uses company IDs, not names, so we would need
+	// an additional API call to convert studio names to TMDB company IDs.
+	if opts.Runtime > 0 {
+		// Add runtime range filter (±10 minutes)
+		params.Set("runtime.gte", strconv.Itoa(opts.Runtime-10))
+		params.Set("runtime.lte", strconv.Itoa(opts.Runtime+10))
 	}
 	endpoint.RawQuery = params.Encode()
 

@@ -111,6 +111,10 @@ func (f *fakeTMDB) SearchMovie(ctx context.Context, query string) (*tmdb.Respons
 	return &tmdb.Response{}, nil
 }
 
+func (f *fakeTMDB) SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	return f.SearchMovie(ctx, query)
+}
+
 type fakeDiscScanner struct {
 	result     *disc.ScanResult
 	calls      int

@@ -49,6 +49,7 @@ type cacheEntry struct {
 // TMDBSearcher defines the subset of TMDB client functionality used by the identifier.
 type TMDBSearcher interface {
 	SearchMovie(ctx context.Context, query string) (*tmdb.Response, error)
+	SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error)
 }
 
 // DiscScanner defines disc scanning operations.
@@ -182,15 +183,44 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		title = "Unknown Disc"
 	}
 
-	logger.Info("searching tmdb for match", zap.String("query", title))
-	response, err := i.searchTMDB(ctx, title)
+	// Prepare enhanced search options using bd_info data
+	searchOpts := tmdb.SearchOptions{}
+
+	if scanResult.BDInfo != nil {
+		if scanResult.BDInfo.Year > 0 {
+			searchOpts.Year = scanResult.BDInfo.Year
+			logger.Info("using bd_info year for TMDB search",
+				zap.Int("year", scanResult.BDInfo.Year))
+		}
+		if scanResult.BDInfo.Studio != "" {
+			logger.Info("detected studio from bd_info",
+				zap.String("studio", scanResult.BDInfo.Studio))
+			// Note: Studio filtering would require company lookup API call
+		}
+		// Calculate runtime from main title duration
+		if len(scanResult.Titles) > 0 && scanResult.Titles[0].Duration > 0 {
+			searchOpts.Runtime = scanResult.Titles[0].Duration / 60 // Convert seconds to minutes
+			logger.Info("using title runtime for TMDB search",
+				zap.Int("runtime_minutes", searchOpts.Runtime))
+		}
+	}
+
+	logger.Info("searching tmdb for match",
+		zap.String("query", title),
+		zap.Int("year", searchOpts.Year),
+		zap.Int("runtime_minutes", searchOpts.Runtime))
+
+	response, err := i.searchTMDBWithOptions(ctx, title, searchOpts)
 	if err != nil {
 		logger.Warn("tmdb search failed", zap.String("title", title), zap.Error(err))
 		i.scheduleReview(ctx, item, "TMDB lookup failed")
 		return nil
 	}
 	if response != nil {
-		logger.Info("tmdb search completed", zap.Int("result_count", len(response.Results)))
+		logger.Info("tmdb search completed",
+			zap.Int("result_count", len(response.Results)),
+			zap.Int("search_year", searchOpts.Year),
+			zap.Int("search_runtime", searchOpts.Runtime))
 	}
 
 	best := selectBestResult(title, response, i.cfg)
@@ -359,7 +389,7 @@ func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message s
 	}
 }
 
-func (i *Identifier) searchTMDB(ctx context.Context, title string) (*tmdb.Response, error) {
+func (i *Identifier) searchTMDBWithOptions(ctx context.Context, title string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
 	if i.tmdb == nil {
 		return nil, errors.New("tmdb client unavailable")
 	}
@@ -384,7 +414,7 @@ func (i *Identifier) searchTMDB(ctx context.Context, title string) (*tmdb.Respon
 	i.lastRequest = time.Now()
 	i.mu.Unlock()
 
-	resp, err := i.tmdb.SearchMovie(ctx, title)
+	resp, err := i.tmdb.SearchMovieWithOptions(ctx, title, opts)
 	if err != nil {
 		return nil, err
 	}
