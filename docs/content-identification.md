@@ -16,9 +16,11 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 - **bd_info integration**: When MakeMKV titles are empty or generic (LOGICAL_VOLUME_ID, DVD_VIDEO, BLURAY, etc.), the scanner automatically runs `bd_info` to extract enhanced metadata:
   - Volume identifier (e.g., "00000095_50_FIRST_DATES")
   - Disc name parsed from volume identifier
+  - Year extraction from volume identifier when available
+  - Studio information extraction from provider data (e.g., "Sony Pictures")
   - Blu-ray and AACS detection flags
   - Provider information when available
-- Generic label detection uses patterns like `LOGICAL_VOLUME_ID`, `DVD_VIDEO`, `BLURAY`, `BD_ROM`, `UNTITLED`, numeric-only, and short alphanumeric codes.
+- Generic label detection uses patterns like `LOGICAL_VOLUME_ID`, `DVD_VIDEO`, `BLURAY`, `BD_ROM`, `UNTITLED`, `UNKNOWN DISC`, numeric-only, and short alphanumeric codes.
 - Enhanced titles from bd_info replace generic MakeMKV titles before TMDB lookup.
 - Fingerprints come from hashing the disc's unencrypted metadata (BDMV structures for Blu-ray, IFO files for DVD). If hashing fails, treat it as a mount/drive issue.
 - Raw JSON is stored alongside parsed data to help with later diagnostics (`rip_spec_data` contains the structured payload).
@@ -32,19 +34,27 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 
 ## TMDB Matching
 
-- All lookups route through `tmdb.Client.SearchMovie`. The identifier keeps an in-memory cache keyed by the normalized query to avoid hammering the API.
+- All lookups route through `tmdb.Client.SearchMovieWithOptions` with enhanced search parameters. The identifier keeps an in-memory cache keyed by the normalized query to avoid hammering the API.
 - A simple rate limiter (250 ms minimum gap) protects against short bursts when multiple discs enter the same stage.
-- Candidate scoring favors:
-  - Title substring match against the cleaned query.
-  - Higher `vote_average` (scaled 0–1) and `vote_count`.
-- The first candidate above `tmdb_confidence_threshold` wins. The chosen title is written into `MetadataJSON` and echoed in the progress message (“Identified as: …”).
+- **Enhanced search parameters** from bd_info and MakeMKV data:
+  - Year filtering via `primary_release_year` (extracted from bd_info)
+  - Runtime range filtering (±10 minutes from main title duration)
+  - Studio information extraction (available for future filtering)
+- **Confidence scoring logic**:
+  - Exact title matches: Accept if vote_average ≥ 2.0 (lenient for perfect matches)
+  - Partial matches: Require vote_average ≥ 3.0 and minimum calculated score
+  - Score formula: title_match + (vote_average/10) + (vote_count/1000)
+- The first candidate above the confidence threshold wins. The chosen title is written into `MetadataJSON`, the DiscTitle is updated to "Title (Year)" format, and echoed in the progress message ("Identified as: …").
+- **Enhanced logging**: All TMDB queries, responses, and confidence scoring are logged for transparency.
 
 ## Output Shape
 
 The identifier persists two JSON blobs on the queue item:
 
-- `MetadataJSON` – compact TMDB fields (`id`, canonical title/name, overview, media_type, vote stats).
+- `MetadataJSON` – enhanced TMDB fields (`id`, canonical title/name, `release_date`, overview, media_type, vote stats). The release_date enables proper year extraction for Plex filename generation.
 - `RipSpecData` – map containing `fingerprint`, `titles` (the MakeMKV list), and `metadata` (same structure as `MetadataJSON`).
+
+**Title Propagation**: After successful identification, `item.DiscTitle` is updated from the raw disc title to the proper TMDB title with year format (e.g., "50 First Dates (2004)"), ensuring all subsequent stages use the clean, properly formatted title.
 
 Downstream stages rely on these fields for logging, rip configuration, and Plex naming.
 
@@ -68,6 +78,12 @@ Update this list when the identifier begins consuming additional config (runtime
 
 ## Troubleshooting Tips
 
+- **Enhanced logging**: The identifier now provides comprehensive logging of the entire TMDB process:
+  - Complete query details (title, year, runtime range)
+  - All TMDB results with scores and metadata
+  - Confidence scoring analysis and threshold decisions
+  - Clear explanations of why matches are accepted or rejected
+- **spindle identify command**: Use `spindle identify` or `spindle identify --verbose` to troubleshoot disc identification without affecting the queue. This command shows all enhanced logging and expected Plex filename format.
 - Inspect cached responses by tailing the daemon logs; identifier logs the raw query and any TMDB errors at warn level.
 - For ambiguous discs, update `progress_message` via manual queue edits only after taking a snapshot; otherwise prefer retrying with better metadata.
 - If TMDB throttles requests, widen the rate limit window in code or improve the caching strategy before considering retries.
@@ -77,3 +93,5 @@ Update this list when the identifier begins consuming additional config (runtime
 - Enhanced metadata overlay (BDMT parsing, additional XML metadata) could further improve identification accuracy.
 - Consider persisting TMDB caches on disk if repeated scans of box sets become common.
 - Volume identifier parsing patterns can be extended to handle more studio-specific naming schemes.
+- Studio filtering: TMDB studio filtering could be implemented by adding company lookup API calls to convert studio names to TMDB company IDs.
+- Additional TMDB search parameters: Consider adding language filtering, genre filtering, or other TMDB API parameters for even more precise matching.
