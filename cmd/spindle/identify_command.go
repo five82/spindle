@@ -109,16 +109,18 @@ Examples:
 
 			// Display results
 			year := extractYearFromMetadata(item.MetadataJSON)
+			tmdbTitle := extractTitleFromMetadata(item.MetadataJSON)
 			fmt.Fprintf(cmd.OutOrStdout(), "\n📊 Identification Results:\n")
 			fmt.Fprintf(cmd.OutOrStdout(), "  Disc Title: %s\n", item.DiscTitle)
+			fmt.Fprintf(cmd.OutOrStdout(), "  TMDB Title: %s\n", tmdbTitle)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Year: %s\n", year)
 			if item.ProgressMessage != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Message: %s\n", item.ProgressMessage)
 			}
 			if item.MetadataJSON != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ✅ Available\n")
-				if year != "Unknown" {
-					fmt.Fprintf(cmd.OutOrStdout(), "  Plex Filename: %s (%s).mkv\n", strings.ReplaceAll(item.DiscTitle, " ", "_"), year)
+				if year != "Unknown" && tmdbTitle != "Unknown" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Plex Filename: %s (%s).mkv\n", tmdbTitle, year)
 				}
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ❌ None found\n")
@@ -170,4 +172,23 @@ func extractYearFromMetadata(metadataJSON string) string {
 	}
 
 	return "Unknown"
+}
+
+// extractTitleFromMetadata extracts the title from TMDB metadata
+func extractTitleFromMetadata(metadataJSON string) string {
+	if metadataJSON == "" {
+		return "Unknown"
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return "Unknown"
+	}
+
+	title, ok := metadata["title"].(string)
+	if !ok || title == "" {
+		return "Unknown"
+	}
+
+	return title
 }
