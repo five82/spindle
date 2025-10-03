@@ -253,6 +253,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		"title":        pickTitle(*best),
 		"overview":     best.Overview,
 		"media_type":   best.MediaType,
+		"release_date": best.ReleaseDate,
 		"vote_average": best.VoteAverage,
 		"vote_count":   best.VoteCount,
 	}

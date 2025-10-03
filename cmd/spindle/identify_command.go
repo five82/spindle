@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -106,14 +108,18 @@ Examples:
 			}
 
 			// Display results
+			year := extractYearFromMetadata(item.MetadataJSON)
 			fmt.Fprintf(cmd.OutOrStdout(), "\n📊 Identification Results:\n")
 			fmt.Fprintf(cmd.OutOrStdout(), "  Disc Title: %s\n", item.DiscTitle)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Status: %s\n", item.Status)
+			fmt.Fprintf(cmd.OutOrStdout(), "  Year: %s\n", year)
 			if item.ProgressMessage != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Message: %s\n", item.ProgressMessage)
 			}
 			if item.MetadataJSON != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ✅ Available\n")
+				if year != "Unknown" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Plex Filename: %s (%s).mkv\n", strings.ReplaceAll(item.DiscTitle, " ", "_"), year)
+				}
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ❌ None found\n")
 			}
@@ -139,4 +145,29 @@ Examples:
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose debug output")
 
 	return cmd
+}
+
+// extractYearFromMetadata extracts the year from TMDB metadata
+func extractYearFromMetadata(metadataJSON string) string {
+	if metadataJSON == "" {
+		return "Unknown"
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return "Unknown"
+	}
+
+	releaseDate, ok := metadata["release_date"].(string)
+	if !ok || releaseDate == "" {
+		return "Unknown"
+	}
+
+	// Extract year from YYYY-MM-DD format
+	yearPattern := regexp.MustCompile(`^\d{4}`)
+	if match := yearPattern.FindString(releaseDate); match != "" {
+		return match
+	}
+
+	return "Unknown"
 }
