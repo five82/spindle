@@ -168,10 +168,13 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if title == "" && len(scanResult.Titles) > 0 {
 		title = scanResult.Titles[0].Name
 	}
-	// Fallback to bd_info disc name if still empty
-	if title == "" && scanResult.BDInfo != nil && scanResult.BDInfo.DiscName != "" {
+	// Use bd_info disc name if title is empty or generic
+	if (title == "" || disc.IsGenericLabel(title)) && scanResult.BDInfo != nil && scanResult.BDInfo.DiscName != "" {
+		originalTitle := title
 		title = scanResult.BDInfo.DiscName
+		item.DiscTitle = title
 		logger.Info("using bd_info disc name for identification",
+			zap.String("original_title", originalTitle),
 			zap.String("bd_info_title", scanResult.BDInfo.DiscName),
 			zap.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier))
 	}
