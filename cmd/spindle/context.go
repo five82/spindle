@@ -13,6 +13,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/ipc"
+	"spindle/internal/queue"
 )
 
 type commandContext struct {
@@ -73,6 +74,30 @@ func (c *commandContext) withClient(fn func(*ipc.Client) error) error {
 	}
 	defer client.Close()
 	return fn(client)
+}
+
+// withStore attempts to use IPC if available, falls back to direct store access
+func (c *commandContext) withStore(fn func(*ipc.Client, *queue.Store) error) error {
+	// Try IPC first
+	client, err := c.dialClient()
+	if err == nil {
+		defer client.Close()
+		return fn(client, nil)
+	}
+
+	// If daemon is not running, use direct store access
+	cfg, err := c.ensureConfig()
+	if err != nil {
+		return fmt.Errorf("load config for direct store access: %w", err)
+	}
+
+	store, err := queue.Open(cfg)
+	if err != nil {
+		return fmt.Errorf("open queue store: %w", err)
+	}
+	defer store.Close()
+
+	return fn(nil, store)
 }
 
 func (c *commandContext) dialClient() (*ipc.Client, error) {

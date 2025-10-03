@@ -9,8 +9,8 @@ CLAUDE.md and QWEN.md are symbolic links to this file so all agent guidance stay
 - Do not run `git commit` or `git push` unless the user explicitly asks for them.
 - Use the Go toolchain (`go build`, `go test`, `golangci-lint`); avoid introducing alternate build systems.
 - Finish the work you start. Ask the user before dropping scope or leaving TODOs.
-- Keep the daemon-only model intact; commands interact with a running background process.
-- Use `spindle stop` to completely stop the daemon; use `spindle stop --workflow-only` to stop just the workflow while keeping IPC available.
+- Most commands work with or without a running daemon; queue commands access the database directly when the daemon is stopped.
+- Use `spindle stop` to completely stop the daemon.
 - Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED`, and be ready for `FAILED` or `REVIEW` detours.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn’t.
 - Treat the Python reference tree (`src/spindle/**`) as read-only; only edit it if the user explicitly tells you to.
@@ -30,7 +30,7 @@ CLAUDE.md and QWEN.md are symbolic links to this file so all agent guidance stay
 Spindle automates the journey from optical disc to organized Plex library. It coordinates disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata lookup (TMDB), Plex library updates, and notifications (ntfy).
 
 - **Environment**: Go 1.22 toolchain plus MakeMKV/Drapto binaries.
-- **Operation mode**: Daemon only. The CLI controls a background process.
+- **Operation mode**: Daemon with optional direct database access. Queue commands work without a running daemon.
 - **Inputs**: Mounted discs at `/media/cdrom` or `/media/cdrom0`, or files dropped into watch folders.
 - **Outputs**: Structured library tree plus ntfy progress.
 
@@ -81,9 +81,10 @@ Formatting and linting are enforced by `golangci-lint`; run it directly or via `
 
 ## Operations Reference
 
-- Daemon control: `spindle start|stop|status`. Use `spindle stop --workflow-only` to stop workflow while keeping IPC available.
-- Logs: `spindle show --follow` for live tails with color, `--lines N` for snapshots.
-- Queue resets, health checks, and other maintenance flow through `spindle queue` subcommands (`reset-stuck`, `health`, `clear`, etc.).
+- Daemon control: `spindle start|stop|status`. `spindle stop` completely terminates the daemon.
+- Logs: `spindle show --follow` for live tails with color, `--lines N` for snapshots (requires running daemon).
+- Queue operations: `spindle queue` subcommands (`status`, `list`, `clear`, `reset-stuck`, `health`, etc.) work with or without a running daemon.
+- File operations: `spindle add-file` works with or without a running daemon.
 - For day-to-day command syntax, rely on `README.md` to avoid duplicating authority here.
 
 ## Debugging & Troubleshooting
@@ -93,7 +94,7 @@ Formatting and linting are enforced by `golangci-lint`; run it directly or via `
 - **Encoding hiccups**: Drapto integration streams JSON progress from `internal/encoding`; capture the log payload before retrying.
 - **Queue visibility**: `sqlite3 path/to/queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'` is often faster than adding debug prints.
 - **Single instance conflicts**: `internal/daemon` enforces single-instance operation; avoid bypassing it with ad-hoc process launches.
-- **Daemon persistence**: `spindle stop` now completely terminates the daemon. Use `spindle stop --workflow-only` to keep the process running for queue commands after workflow stops.
+- **Daemon persistence**: `spindle stop` completely terminates the daemon. Queue commands continue to work by accessing the database directly.
 
 Surface recurring issues in `docs/` so future agents know the resolution path.
 

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/ipc"
+	"spindle/internal/queue"
 )
 
 var manualFileExtensions = map[string]struct{}{
@@ -45,15 +46,25 @@ func newAddFileCommand(ctx *commandContext) *cobra.Command {
 				return fmt.Errorf("unsupported file extension %q", ext)
 			}
 
-			return ctx.withClient(func(client *ipc.Client) error {
-				resp, err := client.AddFile(absPath)
-				if err != nil {
-					return err
+			return ctx.withStore(func(client *ipc.Client, store *queue.Store) error {
+				if client != nil {
+					// Use IPC if daemon is running
+					resp, err := client.AddFile(absPath)
+					if err != nil {
+						return err
+					}
+					if resp == nil {
+						return errors.New("empty response from daemon")
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "Queued manual file as item #%d (%s)\n", resp.Item.ID, filepath.Base(absPath))
+				} else {
+					// Use direct store access
+					item, err := store.NewFile(cmd.Context(), absPath)
+					if err != nil {
+						return err
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "Queued manual file as item #%d (%s)\n", item.ID, filepath.Base(absPath))
 				}
-				if resp == nil {
-					return errors.New("empty response from daemon")
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Queued manual file as item #%d (%s)\n", resp.Item.ID, filepath.Base(absPath))
 				return nil
 			})
 		},

@@ -69,7 +69,6 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		},
 	}
 
-	var workflowOnly bool
 	stopCmd := &cobra.Command{
 		Use:   "stop",
 		Short: "Stop the spindle daemon (completely terminates the process)",
@@ -100,26 +99,13 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			}
 
 			// Wait for graceful shutdown
-			err = waitForDaemonShutdown(ctx.socketPath(), 5*time.Second)
+			_ = waitForDaemonShutdown(ctx.socketPath(), 5*time.Second)
 			alive, livePID, aliveErr := daemonProcessInfo(ctx.socketPath())
 			if aliveErr != nil {
 				alive = false
 			}
 
-			// If workflow-only mode, don't terminate the process
-			if workflowOnly {
-				if err != nil {
-					return fmt.Errorf("workflow stop failed: %w", err)
-				}
-				if alive {
-					fmt.Fprintln(stdout, "Daemon workflow stopped (daemon process still running for IPC)")
-				} else {
-					fmt.Fprintln(stdout, "Daemon workflow stopped")
-				}
-				return nil
-			}
-
-			// Default behavior: terminate the process completely
+			// Always terminate the process completely
 			if alive {
 				currentPID := livePID
 				if currentPID == 0 {
@@ -144,7 +130,6 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			return nil
 		},
 	}
-	stopCmd.Flags().BoolVar(&workflowOnly, "workflow-only", false, "Stop only the workflow, keep daemon process running for IPC commands")
 
 	statusCmd := &cobra.Command{
 		Use:   "status",
