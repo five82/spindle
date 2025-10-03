@@ -39,6 +39,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newQueueHealthCommand(ctx))
 	rootCmd.AddCommand(newShowCommand(ctx))
 	rootCmd.AddCommand(newAddFileCommand(ctx))
+	rootCmd.AddCommand(newIdentifyCommand(ctx))
 	rootCmd.AddCommand(newTestNotifyCommand(ctx))
 	rootCmd.AddCommand(newConfigCommand(ctx))
 	rootCmd.AddCommand(newPlexCommand(ctx.configValue))

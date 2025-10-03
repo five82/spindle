@@ -205,10 +205,13 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	logger.Info("searching tmdb for match",
+	// Log the complete TMDB query details
+	logger.Info("tmdb query details",
 		zap.String("query", title),
 		zap.Int("year", searchOpts.Year),
-		zap.Int("runtime_minutes", searchOpts.Runtime))
+		zap.String("studio", searchOpts.Studio),
+		zap.Int("runtime_minutes", searchOpts.Runtime),
+		zap.String("runtime_range", fmt.Sprintf("%d-%d", searchOpts.Runtime-10, searchOpts.Runtime+10)))
 
 	response, err := i.searchTMDBWithOptions(ctx, title, searchOpts)
 	if err != nil {
@@ -217,15 +220,30 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		return nil
 	}
 	if response != nil {
-		logger.Info("tmdb search completed",
+		logger.Info("tmdb response received",
 			zap.Int("result_count", len(response.Results)),
 			zap.Int("search_year", searchOpts.Year),
 			zap.Int("search_runtime", searchOpts.Runtime))
+
+		// Log detailed results for debugging
+		for i, result := range response.Results {
+			logger.Info("tmdb search result",
+				zap.Int("index", i),
+				zap.Int64("tmdb_id", result.ID),
+				zap.String("title", result.Title),
+				zap.String("release_date", result.ReleaseDate),
+				zap.Float64("vote_average", result.VoteAverage),
+				zap.Int64("vote_count", result.VoteCount),
+				zap.Float64("popularity", result.Popularity),
+				zap.String("media_type", result.MediaType))
+		}
 	}
 
-	best := selectBestResult(title, response, i.cfg)
+	best := selectBestResult(logger, title, response, i.cfg)
 	if best == nil {
-		logger.Info("tmdb search lacked confident match", zap.String("title", title))
+		logger.Warn("tmdb confidence scoring failed",
+			zap.String("query", title),
+			zap.String("reason", "No result met confidence threshold"))
 		i.scheduleReview(ctx, item, "No confident TMDB match")
 		return nil
 	}
@@ -424,7 +442,7 @@ func (i *Identifier) searchTMDBWithOptions(ctx context.Context, title string, op
 	return resp, nil
 }
 
-func selectBestResult(query string, response *tmdb.Response, cfg *config.Config) *tmdb.Result {
+func selectBestResult(logger *zap.Logger, query string, response *tmdb.Response, cfg *config.Config) *tmdb.Result {
 	if response == nil || len(response.Results) == 0 {
 		return nil
 	}
@@ -432,9 +450,36 @@ func selectBestResult(query string, response *tmdb.Response, cfg *config.Config)
 	var best *tmdb.Result
 	bestScore := -1.0
 
+	logger.Info("confidence scoring analysis",
+		zap.String("query", query),
+		zap.Int("total_results", len(response.Results)))
+
 	for idx := range response.Results {
 		res := response.Results[idx]
 		score := scoreResult(queryLower, res)
+
+		title := pickTitle(res)
+		titleLower := strings.ToLower(title)
+		exactMatch := titleLower == queryLower
+
+		logger.Info("calculating confidence score",
+			zap.Int("result_index", idx),
+			zap.Int64("tmdb_id", res.ID),
+			zap.String("title", title),
+			zap.Float64("calculated_score", score),
+			zap.Float64("vote_average", res.VoteAverage),
+			zap.Int64("vote_count", res.VoteCount),
+			zap.Bool("exact_title_match", exactMatch),
+			zap.String("match_type", func() string {
+				if exactMatch {
+					return "exact"
+				}
+				if strings.Contains(titleLower, queryLower) {
+					return "contains"
+				}
+				return "partial"
+			}()))
+
 		if score > bestScore {
 			best = &response.Results[idx]
 			bestScore = score
@@ -446,22 +491,40 @@ func selectBestResult(query string, response *tmdb.Response, cfg *config.Config)
 		return nil
 	}
 
-	// For exact title matches, be more lenient with the threshold
+	// Log the best result before applying thresholds
 	title := pickTitle(*best)
 	titleLower := strings.ToLower(title)
+	exactMatch := titleLower == queryLower
 
-	if titleLower == queryLower {
+	logger.Info("best result before confidence thresholds",
+		zap.Int64("tmdb_id", best.ID),
+		zap.String("title", title),
+		zap.Float64("best_score", bestScore),
+		zap.Float64("vote_average", best.VoteAverage),
+		zap.Int64("vote_count", best.VoteCount),
+		zap.Bool("exact_title_match", exactMatch))
+
+	if exactMatch {
 		// Exact title match - accept even with lower vote scores
 		// Only filter out extremely low-rated content (vote_average < 2.0)
 		if best.VoteAverage < 2.0 {
+			logger.Warn("exact match rejected: vote average too low",
+				zap.Float64("vote_average", best.VoteAverage),
+				zap.Float64("threshold", 2.0))
 			return nil
 		}
+		logger.Info("exact match accepted: confidence passed",
+			zap.Float64("vote_average", best.VoteAverage),
+			zap.Float64("threshold", 2.0))
 		return best
 	}
 
 	// For partial matches, use the original threshold logic but be more reasonable
 	// Check if vote average is reasonable (not extremely low)
 	if best.VoteAverage < 3.0 {
+		logger.Warn("partial match rejected: vote average too low",
+			zap.Float64("vote_average", best.VoteAverage),
+			zap.Float64("threshold", 3.0))
 		return nil
 	}
 
@@ -469,8 +532,16 @@ func selectBestResult(query string, response *tmdb.Response, cfg *config.Config)
 	// Minimum score of: 1.0 (title match) + 0.3 (reasonable vote avg) + vote_count bonus
 	minExpectedScore := 1.3 + float64(best.VoteCount)/1000.0
 	if bestScore < minExpectedScore {
+		logger.Warn("partial match rejected: confidence score too low",
+			zap.Float64("best_score", bestScore),
+			zap.Float64("min_expected_score", minExpectedScore),
+			zap.String("formula", "1.3 + (vote_count/1000.0)"))
 		return nil
 	}
+
+	logger.Info("partial match accepted: confidence passed",
+		zap.Float64("best_score", bestScore),
+		zap.Float64("min_expected_score", minExpectedScore))
 
 	return best
 }
