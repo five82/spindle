@@ -398,21 +398,50 @@ func selectBestResult(query string, response *tmdb.Response, cfg *config.Config)
 	if response == nil || len(response.Results) == 0 {
 		return nil
 	}
-	threshold := cfg.TMDBConfidenceThreshold
 	queryLower := strings.ToLower(query)
 	var best *tmdb.Result
 	bestScore := -1.0
+
 	for idx := range response.Results {
 		res := response.Results[idx]
-		if res.VoteAverage/10 < threshold {
-			continue
-		}
 		score := scoreResult(queryLower, res)
 		if score > bestScore {
 			best = &response.Results[idx]
 			bestScore = score
 		}
 	}
+
+	// If we have no results, return nil
+	if best == nil {
+		return nil
+	}
+
+	// For exact title matches, be more lenient with the threshold
+	title := pickTitle(*best)
+	titleLower := strings.ToLower(title)
+
+	if titleLower == queryLower {
+		// Exact title match - accept even with lower vote scores
+		// Only filter out extremely low-rated content (vote_average < 2.0)
+		if best.VoteAverage < 2.0 {
+			return nil
+		}
+		return best
+	}
+
+	// For partial matches, use the original threshold logic but be more reasonable
+	// Check if vote average is reasonable (not extremely low)
+	if best.VoteAverage < 3.0 {
+		return nil
+	}
+
+	// Apply a more lenient score threshold that accounts for the scoring formula
+	// Minimum score of: 1.0 (title match) + 0.3 (reasonable vote avg) + vote_count bonus
+	minExpectedScore := 1.3 + float64(best.VoteCount)/1000.0
+	if bestScore < minExpectedScore {
+		return nil
+	}
+
 	return best
 }
 
