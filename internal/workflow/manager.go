@@ -186,128 +186,158 @@ func (m *Manager) run(ctx context.Context) {
 		default:
 		}
 
-		if m.heartbeatTimeout > 0 {
-			cutoff := time.Now().Add(-m.heartbeatTimeout)
-			if reclaimed, err := m.store.ReclaimStaleProcessing(ctx, cutoff); err != nil {
-				logger.Warn("reclaim stale processing failed", zap.Error(err))
-			} else if reclaimed > 0 {
-				logger.Info("reclaimed stale items", zap.Int64("count", reclaimed))
-			}
+		if err := m.reclaimStaleItems(ctx, logger); err != nil {
+			logger.Warn("reclaim stale processing failed", zap.Error(err))
 		}
 
 		item, err := m.nextItem(ctx)
 		if err != nil {
-			m.setLastError(err)
-			logger.Error("failed to fetch next queue item", zap.Error(err))
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Duration(m.cfg.ErrorRetryInterval) * time.Second):
-			}
+			m.handleNextItemError(ctx, logger, err)
 			continue
 		}
 		if item == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(m.pollInterval):
-			}
+			m.waitForItemOrShutdown(ctx)
 			continue
 		}
 
-		stage, ok := m.stageForStatus(item.Status)
-		if !ok {
-			logger.Warn("no stage configured for status", zap.String("status", string(item.Status)))
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(m.pollInterval):
-			}
-			continue
-		}
-
-		requestID := uuid.NewString()
-		stageCtx := withStageContext(ctx, stage.name, item, requestID)
-		stageLogger := logging.WithContext(stageCtx, logger)
-
-		if err := m.transitionToProcessing(stageCtx, stage.processingStatus, stage.name, item); err != nil {
-			stageLogger.Error("failed to transition item to processing", zap.Error(err))
-			m.setLastError(err)
-			continue
-		}
-		stageStart := time.Now()
-		stageLogger.Info(
-			"stage started",
-			zap.String("processing_status", string(stage.processingStatus)),
-			zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-			zap.String("source_path", strings.TrimSpace(item.SourcePath)),
-		)
-
-		handler := stage.handler
-		if handler == nil {
-			stageLogger.Warn("missing stage handler", zap.String("stage", stage.name))
-			item.Status = queue.StatusFailed
-			item.ErrorMessage = fmt.Sprintf("stage %s missing handler", stage.name)
-			if err := m.store.Update(stageCtx, item); err != nil {
-				stageLogger.Error("failed to persist missing handler failure", zap.Error(err))
-			}
-			m.setLastError(errors.New("stage handler unavailable"))
-			continue
-		}
-
-		if err := handler.Prepare(stageCtx, item); err != nil {
-			m.handleStageFailure(stageCtx, stage.name, item, err)
-			m.setLastError(err)
-			continue
-		}
-		if err := m.store.Update(stageCtx, item); err != nil {
-			wrapped := fmt.Errorf("persist stage preparation: %w", err)
-			stageLogger.Error("failed to persist stage preparation", zap.Error(wrapped))
-			m.setLastError(wrapped)
-			continue
-		}
-
-		hbCtx, hbCancel := context.WithCancel(stageCtx)
-		var hbWG sync.WaitGroup
-		hbWG.Add(1)
-		go m.heartbeatLoop(hbCtx, &hbWG, item.ID)
-
-		execErr := handler.Execute(stageCtx, item)
-		hbCancel()
-		hbWG.Wait()
-
-		if execErr != nil {
-			// Check if this is a context cancellation (normal shutdown)
-			if errors.Is(execErr, context.Canceled) {
-				stageLogger.Info("stage interrupted by shutdown")
-				// Don't treat as a failure - just continue to next iteration
+		if err := m.processItem(ctx, logger, item); err != nil {
+			if errors.Is(err, context.Canceled) {
 				return
 			}
-			m.handleStageFailure(stageCtx, stage.name, item, execErr)
-			m.setLastError(execErr)
-			continue
 		}
-
-		if item.Status == stage.processingStatus || item.Status == "" {
-			item.Status = stage.doneStatus
-		}
-		item.LastHeartbeat = nil
-		if err := m.store.Update(stageCtx, item); err != nil {
-			wrapped := fmt.Errorf("persist stage result: %w", err)
-			stageLogger.Error("failed to persist stage result", zap.Error(wrapped))
-			m.setLastError(wrapped)
-			continue
-		}
-		stageLogger.Info(
-			"stage completed",
-			zap.String("next_status", string(item.Status)),
-			zap.String("progress_stage", strings.TrimSpace(item.ProgressStage)),
-			zap.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
-			zap.Duration("elapsed", time.Since(stageStart)),
-		)
-		m.setLastItem(item)
-		m.checkQueueCompletion(stageCtx)
 	}
+}
+
+func (m *Manager) reclaimStaleItems(ctx context.Context, logger *zap.Logger) error {
+	if m.heartbeatTimeout <= 0 {
+		return nil
+	}
+	cutoff := time.Now().Add(-m.heartbeatTimeout)
+	reclaimed, err := m.store.ReclaimStaleProcessing(ctx, cutoff)
+	if err != nil {
+		return err
+	}
+	if reclaimed > 0 {
+		logger.Info("reclaimed stale items", zap.Int64("count", reclaimed))
+	}
+	return nil
+}
+
+func (m *Manager) handleNextItemError(ctx context.Context, logger *zap.Logger, err error) {
+	m.setLastError(err)
+	logger.Error("failed to fetch next queue item", zap.Error(err))
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(time.Duration(m.cfg.ErrorRetryInterval) * time.Second):
+	}
+}
+
+func (m *Manager) waitForItemOrShutdown(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(m.pollInterval):
+	}
+}
+
+func (m *Manager) processItem(ctx context.Context, logger *zap.Logger, item *queue.Item) error {
+	stage, ok := m.stageForStatus(item.Status)
+	if !ok {
+		logger.Warn("no stage configured for status", zap.String("status", string(item.Status)))
+		m.waitForItemOrShutdown(ctx)
+		return nil
+	}
+
+	requestID := uuid.NewString()
+	stageCtx := withStageContext(ctx, stage.name, item, requestID)
+	stageLogger := logging.WithContext(stageCtx, logger)
+
+	if err := m.transitionToProcessing(stageCtx, stage.processingStatus, stage.name, item); err != nil {
+		stageLogger.Error("failed to transition item to processing", zap.Error(err))
+		m.setLastError(err)
+		return err
+	}
+
+	return m.executeStage(stageCtx, stageLogger, stage, item)
+}
+
+func (m *Manager) executeStage(ctx context.Context, stageLogger *zap.Logger, stage pipelineStage, item *queue.Item) error {
+	stageStart := time.Now()
+	stageLogger.Info(
+		"stage started",
+		zap.String("processing_status", string(stage.processingStatus)),
+		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		zap.String("source_path", strings.TrimSpace(item.SourcePath)),
+	)
+
+	handler := stage.handler
+	if handler == nil {
+		stageLogger.Warn("missing stage handler", zap.String("stage", stage.name))
+		item.Status = queue.StatusFailed
+		item.ErrorMessage = fmt.Sprintf("stage %s missing handler", stage.name)
+		if err := m.store.Update(ctx, item); err != nil {
+			stageLogger.Error("failed to persist missing handler failure", zap.Error(err))
+		}
+		m.setLastError(errors.New("stage handler unavailable"))
+		return errors.New("stage handler unavailable")
+	}
+
+	if err := handler.Prepare(ctx, item); err != nil {
+		m.handleStageFailure(ctx, stage.name, item, err)
+		m.setLastError(err)
+		return err
+	}
+	if err := m.store.Update(ctx, item); err != nil {
+		wrapped := fmt.Errorf("persist stage preparation: %w", err)
+		stageLogger.Error("failed to persist stage preparation", zap.Error(wrapped))
+		m.setLastError(wrapped)
+		return wrapped
+	}
+
+	execErr := m.executeWithHeartbeat(ctx, handler, item)
+	if execErr != nil {
+		if errors.Is(execErr, context.Canceled) {
+			stageLogger.Info("stage interrupted by shutdown")
+			return execErr
+		}
+		m.handleStageFailure(ctx, stage.name, item, execErr)
+		m.setLastError(execErr)
+		return execErr
+	}
+
+	if item.Status == stage.processingStatus || item.Status == "" {
+		item.Status = stage.doneStatus
+	}
+	item.LastHeartbeat = nil
+	if err := m.store.Update(ctx, item); err != nil {
+		wrapped := fmt.Errorf("persist stage result: %w", err)
+		stageLogger.Error("failed to persist stage result", zap.Error(wrapped))
+		m.setLastError(wrapped)
+		return wrapped
+	}
+	stageLogger.Info(
+		"stage completed",
+		zap.String("next_status", string(item.Status)),
+		zap.String("progress_stage", strings.TrimSpace(item.ProgressStage)),
+		zap.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
+		zap.Duration("elapsed", time.Since(stageStart)),
+	)
+	m.setLastItem(item)
+	m.checkQueueCompletion(ctx)
+	return nil
+}
+
+func (m *Manager) executeWithHeartbeat(ctx context.Context, handler StageHandler, item *queue.Item) error {
+	hbCtx, hbCancel := context.WithCancel(ctx)
+	var hbWG sync.WaitGroup
+	hbWG.Add(1)
+	go m.heartbeatLoop(hbCtx, &hbWG, item.ID)
+
+	execErr := handler.Execute(ctx, item)
+	hbCancel()
+	hbWG.Wait()
+	return execErr
 }
 
 func (m *Manager) stageForStatus(status queue.Status) (pipelineStage, bool) {
@@ -322,11 +352,21 @@ func (m *Manager) stageForStatus(status queue.Status) (pipelineStage, bool) {
 }
 
 func (m *Manager) transitionToProcessing(ctx context.Context, processing queue.Status, stageName string, item *queue.Item) error {
-	now := time.Now().UTC()
 	if processing == "" {
 		return errors.New("processing status must not be empty")
 	}
 
+	m.setItemProcessingState(item, processing)
+	if err := m.store.Update(ctx, item); err != nil {
+		return fmt.Errorf("persist processing transition: %w", err)
+	}
+	m.setLastItem(item)
+	m.onItemStarted(ctx)
+	return nil
+}
+
+func (m *Manager) setItemProcessingState(item *queue.Item, processing queue.Status) {
+	now := time.Now().UTC()
 	item.Status = processing
 	if item.ProgressStage == "" {
 		item.ProgressStage = deriveStageLabel(processing)
@@ -337,13 +377,6 @@ func (m *Manager) transitionToProcessing(ctx context.Context, processing queue.S
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
 	item.LastHeartbeat = &now
-
-	if err := m.store.Update(ctx, item); err != nil {
-		return fmt.Errorf("persist processing transition: %w", err)
-	}
-	m.setLastItem(item)
-	m.onItemStarted(ctx)
-	return nil
 }
 
 func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID int64) {
@@ -372,59 +405,63 @@ func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID 
 
 func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item *queue.Item, stageErr error) {
 	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-manager")))
-	status, errorMessage, progressMessage := classifyStageFailure(stageName, stageErr)
-	logger.Error(
-		"stage failed",
+
+	status, message := m.classifyStageFailure(stageName, stageErr)
+	m.setItemFailureState(item, status, message)
+
+	logger.Error("stage failed",
 		zap.String("resolved_status", string(status)),
-		zap.String("error_message", strings.TrimSpace(errorMessage)),
+		zap.String("error_message", strings.TrimSpace(message)),
 		zap.Error(stageErr),
 	)
-	item.Status = status
-	if strings.TrimSpace(errorMessage) == "" {
-		errorMessage = "workflow stage failed"
-	}
-	item.ErrorMessage = errorMessage
-	if status == queue.StatusReview {
-		item.ProgressStage = "Needs review"
-	} else {
-		item.ProgressStage = "Failed"
-	}
-	if strings.TrimSpace(progressMessage) == "" {
-		progressMessage = errorMessage
-	}
-	item.ProgressMessage = progressMessage
-	item.ProgressPercent = 0
-	item.LastHeartbeat = nil
+
 	if err := m.store.Update(ctx, item); err != nil {
-		// Check if this is a context cancellation (normal shutdown)
 		if errors.Is(err, context.Canceled) {
 			logger.Info("daemon shutting down, could not update stage failure")
 		} else {
 			logger.Error("failed to persist stage failure", zap.Error(err))
 		}
 	}
+
 	m.setLastItem(item)
 	m.notifyStageError(ctx, stageName, item, stageErr)
 	m.checkQueueCompletion(ctx)
 }
 
-func classifyStageFailure(stageName string, stageErr error) (queue.Status, string, string) {
+func (m *Manager) classifyStageFailure(stageName string, stageErr error) (queue.Status, string) {
 	if stageErr == nil {
-		msg := "stage failed without error detail"
-		if stageName != "" {
-			msg = fmt.Sprintf("%s failed without error detail", stageName)
-		}
-		return queue.StatusFailed, msg, msg
+		msg := m.getStageFailureMessage(stageName, "failed without error detail")
+		return queue.StatusFailed, msg
 	}
+
 	status := services.FailureStatus(stageErr)
 	message := strings.TrimSpace(stageErr.Error())
 	if message == "" {
-		message = "workflow stage failed"
-		if stageName != "" {
-			message = fmt.Sprintf("%s failed", stageName)
-		}
+		message = m.getStageFailureMessage(stageName, "failed")
 	}
-	return status, message, message
+	return status, message
+}
+
+func (m *Manager) getStageFailureMessage(stageName, defaultMsg string) string {
+	if stageName != "" {
+		return fmt.Sprintf("%s %s", stageName, defaultMsg)
+	}
+	return fmt.Sprintf("workflow %s", defaultMsg)
+}
+
+func (m *Manager) setItemFailureState(item *queue.Item, status queue.Status, message string) {
+	item.Status = status
+	item.ErrorMessage = message
+
+	if status == queue.StatusReview {
+		item.ProgressStage = "Needs review"
+	} else {
+		item.ProgressStage = "Failed"
+	}
+
+	item.ProgressMessage = message
+	item.ProgressPercent = 0
+	item.LastHeartbeat = nil
 }
 
 func (m *Manager) nextItem(ctx context.Context) (*queue.Item, error) {
