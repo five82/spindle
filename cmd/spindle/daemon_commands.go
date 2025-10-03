@@ -134,14 +134,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				return err
 			}
 			if alive {
-				message := "Daemon workflow stopped but background service is still running"
-				if livePID == 0 {
-					livePID = pid
-				}
-				if livePID > 0 {
-					message = fmt.Sprintf("%s (pid %d)", message, livePID)
-				}
-				fmt.Fprintf(stdout, "%s. Run `spindle stop --kill` to terminate it.\n", message)
+				fmt.Fprintln(stdout, "Daemon stopped")
 				return nil
 			}
 			fmt.Fprintln(stdout, "Daemon workflow and service stopped")
