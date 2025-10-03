@@ -277,6 +277,12 @@ func (m *Manager) run(ctx context.Context) {
 		hbWG.Wait()
 
 		if execErr != nil {
+			// Check if this is a context cancellation (normal shutdown)
+			if errors.Is(execErr, context.Canceled) {
+				stageLogger.Info("stage interrupted by shutdown")
+				// Don't treat as a failure - just continue to next iteration
+				return
+			}
 			m.handleStageFailure(stageCtx, stage.name, item, execErr)
 			m.setLastError(execErr)
 			continue
@@ -385,7 +391,12 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 	item.ProgressPercent = 0
 	item.LastHeartbeat = nil
 	if err := m.store.Update(ctx, item); err != nil {
-		logger.Error("failed to persist stage failure", zap.Error(err))
+		// Check if this is a context cancellation (normal shutdown)
+		if errors.Is(err, context.Canceled) {
+			logger.Info("daemon shutting down, could not update stage failure")
+		} else {
+			logger.Error("failed to persist stage failure", zap.Error(err))
+		}
 	}
 	m.setLastItem(item)
 	m.notifyStageError(ctx, stageName, item, stageErr)
@@ -518,7 +529,12 @@ func (m *Manager) notifyStageError(ctx context.Context, stageName string, item *
 		"error":   stageErr,
 		"context": contextLabel,
 	}); err != nil {
-		logger.Warn("stage error notification failed", zap.Error(err))
+		// Check if this is a context cancellation (normal shutdown)
+		if errors.Is(err, context.Canceled) {
+			logger.Info("daemon shutting down, could not send error notification")
+		} else {
+			logger.Warn("stage error notification failed", zap.Error(err))
+		}
 	}
 }
 
@@ -552,7 +568,12 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 	}
 	stats, err := m.store.Stats(ctx)
 	if err != nil {
-		m.logger.Warn("queue stats unavailable for completion notification", zap.Error(err))
+		// Check if this is a context cancellation (normal shutdown)
+		if errors.Is(err, context.Canceled) {
+			m.logger.Info("daemon shutting down, could not check queue completion")
+		} else {
+			m.logger.Warn("queue stats unavailable for completion notification", zap.Error(err))
+		}
 		return
 	}
 	if active := countActiveItems(stats); active > 0 {
