@@ -37,7 +37,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	runID := time.Now().UTC().Format("20060102T150405Z")
+	runID := time.Now().UTC().Format("20060102T150405.000Z")
 	logPath := filepath.Join(cfg.LogDir, fmt.Sprintf("spindle-%s.log", runID))
 	logger, err := logging.New(logging.Options{
 		Level:            cfg.LogLevel,

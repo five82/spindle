@@ -10,6 +10,7 @@ CLAUDE.md and QWEN.md are symbolic links to this file so all agent guidance stay
 - Use the Go toolchain (`go build`, `go test`, `golangci-lint`); avoid introducing alternate build systems.
 - Finish the work you start. Ask the user before dropping scope or leaving TODOs.
 - Keep the daemon-only model intact; commands interact with a running background process.
+- Use `spindle stop --kill` to force-terminate stuck daemons; regular `spindle stop` may leave processes running.
 - Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED`, and be ready for `FAILED` or `REVIEW` detours.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn’t.
 - Treat the Python reference tree (`src/spindle/**`) as read-only; only edit it if the user explicitly tells you to.
@@ -80,7 +81,7 @@ Formatting and linting are enforced by `golangci-lint`; run it directly or via `
 
 ## Operations Reference
 
-- Daemon control: `spindle start|stop|status`.
+- Daemon control: `spindle start|stop|status`. Use `spindle stop --kill` to force-terminate a stuck daemon.
 - Logs: `spindle show --follow` for live tails with color, `--lines N` for snapshots.
 - Queue resets, health checks, and other maintenance flow through `spindle queue` subcommands (`reset-stuck`, `health`, `clear`, etc.).
 - For day-to-day command syntax, rely on `README.md` to avoid duplicating authority here.
@@ -92,6 +93,7 @@ Formatting and linting are enforced by `golangci-lint`; run it directly or via `
 - **Encoding hiccups**: Drapto integration streams JSON progress from `internal/encoding`; capture the log payload before retrying.
 - **Queue visibility**: `sqlite3 path/to/queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'` is often faster than adding debug prints.
 - **Single instance conflicts**: `internal/daemon` enforces single-instance operation; avoid bypassing it with ad-hoc process launches.
+- **Daemon persistence**: The daemon continues running in the background after `spindle stop` if processes are still active. Use `spindle stop --kill` to force termination.
 
 Surface recurring issues in `docs/` so future agents know the resolution path.
 

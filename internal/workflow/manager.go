@@ -359,7 +359,12 @@ func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID 
 			return
 		case <-ticker.C:
 			if err := m.store.UpdateHeartbeat(ctx, itemID); err != nil {
-				logger.Warn("heartbeat update failed", zap.Error(err))
+				// Check if this is a context cancellation (normal shutdown)
+				if errors.Is(err, context.Canceled) {
+					logger.Info("daemon shutting down, heartbeat update cancelled")
+				} else {
+					logger.Warn("heartbeat update failed", zap.Error(err))
+				}
 			}
 		}
 	}
@@ -544,7 +549,12 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 	}
 	stats, err := m.store.Stats(ctx)
 	if err != nil {
-		m.logger.Warn("queue stats unavailable for start notification", zap.Error(err))
+		// Check if this is a context cancellation (normal shutdown)
+		if errors.Is(err, context.Canceled) {
+			m.logger.Info("daemon shutting down, could not get queue stats for start notification")
+		} else {
+			m.logger.Warn("queue stats unavailable for start notification", zap.Error(err))
+		}
 		return
 	}
 	m.mu.Lock()
@@ -558,7 +568,12 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 
 	count := countWorkItems(stats)
 	if err := m.notifier.Publish(ctx, notifications.EventQueueStarted, notifications.Payload{"count": count}); err != nil {
-		m.logger.Warn("queue start notification failed", zap.Error(err))
+		// Check if this is a context cancellation (normal shutdown)
+		if errors.Is(err, context.Canceled) {
+			m.logger.Info("daemon shutting down, could not send queue start notification")
+		} else {
+			m.logger.Warn("queue start notification failed", zap.Error(err))
+		}
 	}
 }
 
@@ -601,7 +616,12 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 		"failed":    failed,
 		"duration":  duration,
 	}); err != nil {
-		m.logger.Warn("queue completion notification failed", zap.Error(err))
+		// Check if this is a context cancellation (normal shutdown)
+		if errors.Is(err, context.Canceled) {
+			m.logger.Info("daemon shutting down, could not send queue completion notification")
+		} else {
+			m.logger.Warn("queue completion notification failed", zap.Error(err))
+		}
 	}
 }
 
