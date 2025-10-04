@@ -41,11 +41,6 @@ func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Rip
 	return NewRipperWithDependencies(cfg, store, logger, client, disc.NewEjector(), notifications.NewService(cfg))
 }
 
-// NewRipperWithClient keeps backwards compatibility for tests using only a client override.
-func NewRipperWithClient(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper) *Ripper {
-	return NewRipperWithDependencies(cfg, store, logger, client, disc.NewEjector(), notifications.NewService(cfg))
-}
-
 // NewRipperWithDependencies allows injecting all collaborators (used in tests).
 func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper, ejector disc.Ejector, notifier notifications.Service) *Ripper {
 	stageLogger := logger
