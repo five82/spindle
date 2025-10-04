@@ -277,15 +277,10 @@ func (h *prettyHandler) writeInfo(buf *bytes.Buffer, ts time.Time, level slog.Le
 	writeLogHeader(buf, ts, level, component, itemID, stage, message, h.addSource, src)
 	fields, hidden := selectInfoFields(attrs)
 	summaryKey := infoSummaryKey(component, itemID, stage, attrs)
-	fields, hidden = h.filterRepeatedInfo(summaryKey, fields, hidden, level)
+	fields, _ = h.filterRepeatedInfo(summaryKey, fields, hidden, level)
 	if len(fields) == 0 {
 		buf.WriteByte('\n')
 		return
-	}
-	if hidden > 0 {
-		buf.WriteString(" (+")
-		buf.WriteString(strconv.Itoa(hidden))
-		buf.WriteString(" details)")
 	}
 	buf.WriteByte('\n')
 	for _, field := range fields {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -90,7 +91,11 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 		defer cancel()
 	}
 
-	args := []string{"mkv", "disc:0", "all", destDir}
+	args := []string{"--robot"}
+	if progress != nil {
+		args = append(args, "--progress=-same")
+	}
+	args = append(args, "mkv", "disc:0", "all", destDir)
 	if err := c.exec.Run(ripCtx, c.binary, args, func(line string) {
 		if progress == nil {
 			return
@@ -127,13 +132,42 @@ func parseProgress(line string) (ProgressUpdate, bool) {
 	if len(parts) < 3 {
 		return ProgressUpdate{}, false
 	}
-	percent, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	first := strings.TrimSpace(parts[0])
+	second := strings.TrimSpace(parts[1])
+	third := strings.TrimSpace(parts[2])
+
+	var update ProgressUpdate
+
+	if _, err := strconv.Atoi(first); err == nil {
+		// Robot format: PRGV:current,total,max[,message]
+		total, totalErr := strconv.ParseFloat(second, 64)
+		maximum, err := strconv.ParseFloat(third, 64)
+		if err != nil || maximum <= 0 {
+			return ProgressUpdate{}, false
+		}
+		if totalErr != nil {
+			total = 0
+		}
+		percent := (total / maximum) * 100
+		update = ProgressUpdate{Stage: "Ripping", Percent: percent}
+		if len(parts) > 3 {
+			update.Message = strings.TrimSpace(strings.Join(parts[3:], ","))
+		}
+		// Preserve the raw totals in the message if no message present to aid debugging.
+		if update.Message == "" {
+			update.Message = fmt.Sprintf("Progress %.2f%% (%0.f/%0.f)", percent, total, maximum)
+		}
+		return update, true
+	}
+
+	percent, err := strconv.ParseFloat(second, 64)
 	if err != nil {
 		percent = 0
 	}
 	message := strings.TrimSpace(strings.Join(parts[2:], ","))
-	stage := strings.TrimSpace(parts[0])
-	return ProgressUpdate{Stage: stage, Percent: percent, Message: message}, true
+	stage := first
+	update = ProgressUpdate{Stage: stage, Percent: percent, Message: message}
+	return update, true
 }
 
 type commandExecutor struct{}
@@ -144,19 +178,47 @@ func (commandExecutor) Run(ctx context.Context, binary string, args []string, on
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = os.Stderr
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start command: %w", err)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		if onStdout != nil {
-			onStdout(scanner.Text())
+	var wg sync.WaitGroup
+	var scanErr error
+	var once sync.Once
+
+	scan := func(r io.Reader, forward func(string)) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			forward(scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			once.Do(func() {
+				scanErr = err
+			})
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan output: %w", err)
+
+	forward := func(line string) {
+		if onStdout != nil {
+			onStdout(line)
+			return
+		}
+		fmt.Fprintln(os.Stderr, line)
+	}
+
+	wg.Add(2)
+	go scan(stdout, forward)
+	go scan(stderr, forward)
+
+	wg.Wait()
+	if scanErr != nil {
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("scan output: %w", scanErr)
 	}
 
 	if err := cmd.Wait(); err != nil {

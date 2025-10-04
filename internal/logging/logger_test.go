@@ -221,8 +221,11 @@ func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("unexpected line count: %v", lines)
 	}
-	if !strings.Contains(lines[0], "INFO [workflow-runner] Item #9 (ripper) – stage started (+1 details)") {
-		t.Fatalf("first header missing details notice: %q", lines[0])
+	if !strings.Contains(lines[0], "INFO [workflow-runner] Item #9 (ripper) – stage started") {
+		t.Fatalf("first header missing stage context: %q", lines[0])
+	}
+	if strings.Contains(lines[0], "details") {
+		t.Fatalf("first header should omit hidden count, got %q", lines[0])
 	}
 	if !strings.Contains(lines[1], "- Disc: \"50 First Dates\"") {
 		t.Fatalf("expected disc bullet, got %q", lines[1])

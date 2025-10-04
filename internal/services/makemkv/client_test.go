@@ -14,10 +14,13 @@ type stubExecutor struct {
 	lines []string
 	err   error
 	calls int
+	args  [][]string
 }
 
 func (s *stubExecutor) Run(ctx context.Context, binary string, args []string, onStdout func(string)) error {
 	s.calls++
+	cloned := append([]string(nil), args...)
+	s.args = append(s.args, cloned)
 	for _, line := range s.lines {
 		onStdout(line)
 	}
@@ -26,7 +29,8 @@ func (s *stubExecutor) Run(ctx context.Context, binary string, args []string, on
 
 func TestRipCreatesPlaceholderWhenOutputMissing(t *testing.T) {
 	tmp := t.TempDir()
-	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(&stubExecutor{lines: []string{"PRGV:1,10,starting", "PRGV:1,80,ripping"}}))
+	exec := &stubExecutor{lines: []string{"PRGV:0,10,100", "PRGV:0,80,100"}}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
@@ -43,6 +47,14 @@ func TestRipCreatesPlaceholderWhenOutputMissing(t *testing.T) {
 	}
 	if len(progress) != 2 || progress[0].Percent != 10 || progress[1].Percent != 80 {
 		t.Fatalf("unexpected progress: %#v", progress)
+	}
+	if len(exec.args) != 1 {
+		t.Fatalf("expected makemkv invocation recorded")
+	}
+	gotArgs := exec.args[0]
+	expectedArgs := []string{"--robot", "--progress=-same", "mkv", "disc:0", "all", tmp}
+	if !equalStrings(gotArgs, expectedArgs) {
+		t.Fatalf("unexpected makemkv args: got %v want %v", gotArgs, expectedArgs)
 	}
 }
 
@@ -80,4 +92,16 @@ func TestRipCopiesSourceWhenProvided(t *testing.T) {
 	if string(contents) != "data" {
 		t.Fatalf("expected copied data, got %q", contents)
 	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -3,10 +3,12 @@ package ripping
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"log/slog"
 
@@ -77,8 +79,39 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, r.logger)
 	var target string
+	const progressInterval = 2 * time.Minute
+	var lastPersisted time.Time
+	lastStage := item.ProgressStage
+	lastMessage := item.ProgressMessage
+	lastPercent := item.ProgressPercent
 	progressCB := func(update makemkv.ProgressUpdate) {
+		now := time.Now()
+		if update.Percent >= 100 && lastPercent < 95 {
+			return
+		}
+		stageChanged := update.Stage != "" && update.Stage != lastStage
+		messageChanged := update.Message != "" && update.Message != lastMessage
+		percentReached := update.Percent >= 100 && lastPercent < 100
+		intervalElapsed := lastPersisted.IsZero() || now.Sub(lastPersisted) >= progressInterval
+		isProgressMessage := strings.HasPrefix(update.Message, "Progress ")
+		allow := stageChanged || percentReached || intervalElapsed
+		if messageChanged && !isProgressMessage {
+			allow = true
+		}
+		if !allow {
+			return
+		}
 		r.applyProgress(ctx, item, update)
+		lastPersisted = now
+		if update.Stage != "" {
+			lastStage = update.Stage
+		}
+		if update.Message != "" {
+			lastMessage = update.Message
+		}
+		if update.Percent >= 0 {
+			lastPercent = update.Percent
+		}
 	}
 	destDir := filepath.Join(r.cfg.StagingDir, "rips")
 	logger.Info(
@@ -194,6 +227,14 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 		logger.Warn("failed to persist progress", logging.Error(err))
 		return
 	}
+	fields := []any{logging.Int("percent", int(math.Round(copy.ProgressPercent)))}
+	if stage := strings.TrimSpace(copy.ProgressStage); stage != "" {
+		fields = append(fields, logging.String("stage", stage))
+	}
+	if message := strings.TrimSpace(copy.ProgressMessage); message != "" && !strings.HasPrefix(message, "Progress ") {
+		fields = append(fields, logging.String("message", message))
+	}
+	logger.Info("makemkv progress", fields...)
 	*item = copy
 }
 
