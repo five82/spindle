@@ -69,6 +69,14 @@ If you add or reorder phases, update the enums, workflow routing, CLI presentati
 - Configuration lives at `~/.config/spindle/config.toml`. Use dedicated staging/library directories and a test TMDB key for integration flows.
 - Before handing off, execute `./check-ci.sh` (runs `go test ./...` and `golangci-lint run`). If you cannot run it, state why.
 
+## Package Documentation
+
+- Every Go package has a `doc.go` with a concise, high-signal overview. Keep it in sync when you touch the package.
+- Cover: the package’s role in the workflow, its primary collaborators/entry points, notable invariants or side effects, and where to look for deeper docs.
+- Favour short paragraphs over exhaustive prose; the goal is to orient future contributors and coding agents quickly.
+- When adding stages or new behaviour, update the relevant `doc.go` in the same change so downstream readers do not need to skim history.
+- If you discover an undocumented package and cannot author a useful summary immediately, coordinate with the maintainer rather than committing an empty placeholder.
+
 ## Testing & Quality
 
 The Go tests lean heavily on integration-style coverage:
