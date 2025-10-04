@@ -31,6 +31,51 @@ func TestCLIEncodeRequiresOutputDir(t *testing.T) {
 	}
 }
 
+func TestCLIEncodeIncludesLogDir(t *testing.T) {
+	var capturedArgs []string
+	original := commandContext
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		capturedArgs = append([]string(nil), args...)
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestHelperProcess")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "DRAPTO_HELPER_MODE=success")
+		return cmd
+	}
+	t.Cleanup(func() {
+		commandContext = original
+	})
+
+	cli := NewCLI(WithLogDir("/var/log/spindle/drapto"))
+	tempDir := t.TempDir()
+	input := filepath.Join(tempDir, "movie.mkv")
+	outputDir := filepath.Join(tempDir, "encoded")
+
+	if _, err := cli.Encode(context.Background(), input, outputDir, nil); err != nil {
+		t.Fatalf("Encode returned error: %v", err)
+	}
+
+	if len(capturedArgs) == 0 {
+		t.Fatalf("expected Drapto command arguments to be captured")
+	}
+
+	expectedFlag := "--log-dir"
+	found := false
+	for i, arg := range capturedArgs {
+		if arg == expectedFlag {
+			if i+1 >= len(capturedArgs) {
+				t.Fatalf("log dir flag present without accompanying value")
+			}
+			if capturedArgs[i+1] != "/var/log/spindle/drapto" {
+				t.Fatalf("expected log dir %q, got %q", "/var/log/spindle/drapto", capturedArgs[i+1])
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected Drapto command to include %s flag, got args %v", expectedFlag, capturedArgs)
+	}
+}
+
 func TestCLIEncodeSuccess(t *testing.T) {
 	setHelperCommand(t, "success")
 

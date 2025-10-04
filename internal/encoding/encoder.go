@@ -39,7 +39,10 @@ var encodeProbe = ffprobe.Inspect
 
 // NewEncoder constructs the encoding handler.
 func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Encoder {
-	client := drapto.NewCLI(drapto.WithBinary(cfg.DraptoBinary()))
+	client := drapto.NewCLI(
+		drapto.WithBinary(cfg.DraptoBinary()),
+		drapto.WithLogDir(draptoLogDirFromConfig(cfg)),
+	)
 	return NewEncoderWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
 
@@ -97,6 +100,19 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 	logger.Info("prepared encoding directory", logging.String("encoded_dir", encodedDir))
+
+	if draptoLogDir := e.draptoLogDir(); draptoLogDir != "" {
+		if err := os.MkdirAll(draptoLogDir, 0o755); err != nil {
+			return services.Wrap(
+				services.ErrConfiguration,
+				"encoding",
+				"ensure drapto log dir",
+				"Failed to create Drapto log directory; set log_dir to a writable path",
+				err,
+			)
+		}
+		logger.Info("prepared drapto log directory", logging.String("drapto_log_dir", draptoLogDir))
+	}
 
 	var encodedPath string
 	if e.client != nil {
@@ -374,10 +390,35 @@ func (e *Encoder) draptoBinaryName() string {
 
 func (e *Encoder) draptoCommand(inputPath, outputDir string) string {
 	binary := e.draptoBinaryName()
+	logDir := strings.TrimSpace(e.draptoLogDir())
+	if logDir != "" {
+		return fmt.Sprintf(
+			"%s encode --input %q --output %q --log-dir %q --progress-json",
+			binary,
+			strings.TrimSpace(inputPath),
+			strings.TrimSpace(outputDir),
+			logDir,
+		)
+	}
 	return fmt.Sprintf(
 		"%s encode --input %q --output %q --progress-json",
 		binary,
 		strings.TrimSpace(inputPath),
 		strings.TrimSpace(outputDir),
 	)
+}
+
+func (e *Encoder) draptoLogDir() string {
+	return draptoLogDirFromConfig(e.cfg)
+}
+
+func draptoLogDirFromConfig(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(cfg.LogDir)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.Join(trimmed, "drapto")
 }

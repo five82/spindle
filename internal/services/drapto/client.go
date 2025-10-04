@@ -40,6 +40,7 @@ func WithBinary(binary string) Option {
 // CLI wraps the drapto command-line encoder.
 type CLI struct {
 	binary string
+	logDir string
 }
 
 // NewCLI constructs a CLI client using defaults.
@@ -49,6 +50,16 @@ func NewCLI(opts ...Option) *CLI {
 		opt(cli)
 	}
 	return cli
+}
+
+// WithLogDir configures the directory where Drapto should write log files.
+func WithLogDir(dir string) Option {
+	return func(c *CLI) {
+		trimmed := strings.TrimSpace(dir)
+		if trimmed != "" {
+			c.logDir = trimmed
+		}
+	}
 }
 
 // Encode launches drapto encode and returns the output path.
@@ -72,7 +83,11 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 	}
 	outputPath := filepath.Join(cleanOutputDir, stem+".mkv")
 
-	args := []string{"encode", "--input", inputPath, "--output", cleanOutputDir, "--progress-json"}
+	args := []string{"encode", "--input", inputPath, "--output", cleanOutputDir}
+	if logDir := strings.TrimSpace(c.logDir); logDir != "" {
+		args = append(args, "--log-dir", logDir)
+	}
+	args = append(args, "--progress-json")
 	cmd := commandContext(ctx, c.binary, args...) //nolint:gosec
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
