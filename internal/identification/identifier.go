@@ -243,8 +243,19 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	item.ProgressPercent = 100
 	item.ProgressMessage = fmt.Sprintf("Identified as: %s", titleWithYear)
 
+	ripFingerprint := strings.TrimSpace(scanResult.Fingerprint)
+	if ripFingerprint == "" {
+		fallback := strings.TrimSpace(item.DiscFingerprint)
+		if fallback != "" {
+			logger.Warn(
+				"scanner fingerprint missing; using queue fingerprint",
+				logging.String("fallback_fingerprint", fallback),
+			)
+			ripFingerprint = fallback
+		}
+	}
 	ripSpec := map[string]any{
-		"fingerprint": scanResult.Fingerprint,
+		"fingerprint": ripFingerprint,
 		"titles":      scanResult.Titles,
 		"metadata":    metadata,
 	}

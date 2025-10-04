@@ -2,6 +2,7 @@ package identification_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -59,6 +60,39 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 	}
 	if notifier.identified[0].year != "2001" {
 		t.Fatalf("unexpected identification year %q", notifier.identified[0].year)
+	}
+}
+
+func TestIdentifierFallsBackToQueueFingerprint(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+
+	item, err := store.NewDisc(context.Background(), "Fallback Disc", "fp-fallback")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+
+	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{{ID: 42, Title: "Fallback Disc", VoteAverage: 7.0, VoteCount: 100, ReleaseDate: "2010-01-01"}}, TotalResults: 1}}
+	stubScanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "", Titles: []disc.Title{{ID: 1, Name: "Fallback Disc", Duration: 7200}}}}
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), stubTMDB, stubScanner, nil)
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if strings.TrimSpace(item.RipSpecData) == "" {
+		t.Fatal("expected rip spec data to be populated")
+	}
+	var spec struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal([]byte(item.RipSpecData), &spec); err != nil {
+		t.Fatalf("Unmarshal rip spec: %v", err)
+	}
+	if spec.Fingerprint != item.DiscFingerprint {
+		t.Fatalf("expected fallback fingerprint %q, got %q", item.DiscFingerprint, spec.Fingerprint)
 	}
 }
 
