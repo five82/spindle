@@ -26,6 +26,22 @@ var processingStatuses = map[Status]struct{}{
 	StatusOrganizing:  {},
 }
 
+type statusTransition struct {
+	from Status
+	to   Status
+}
+
+var stageRollbackTransitions = []statusTransition{
+	{from: StatusIdentifying, to: StatusPending},
+	{from: StatusRipping, to: StatusIdentified},
+	{from: StatusEncoding, to: StatusRipped},
+	{from: StatusOrganizing, to: StatusEncoded},
+}
+
+func processingRollbackTransitions() []statusTransition {
+	return stageRollbackTransitions
+}
+
 // DatabaseHealth captures diagnostic information about the queue database.
 type DatabaseHealth struct {
 	DBPath           string
