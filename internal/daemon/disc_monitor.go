@@ -45,12 +45,13 @@ func (execCommandRunner) Output(ctx context.Context, name string, args ...string
 }
 
 type discMonitor struct {
-	cfg      *config.Config
-	store    *queue.Store
-	logger   *slog.Logger
-	notifier notifications.Service
-	scanner  discScanner
-	fp       func(ctx context.Context, device, discType string, timeout time.Duration) (string, error)
+	cfg     *config.Config
+	logger  *slog.Logger
+	scanner discScanner
+
+	queueHandler  queueProcessor
+	fingerprints  fingerprintService
+	errorNotifier fingerprintErrorNotifier
 
 	device       string
 	scanTimeout  time.Duration
@@ -95,17 +96,20 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger)
 	runner := execCommandRunner{}
 	detect := buildDetectFunc(runner, poll)
 
+	fingerprintService := fingerprint.ComputeTimeout
 	return &discMonitor{
 		cfg:          cfg,
-		store:        store,
 		logger:       monitorLogger,
-		notifier:     notifications.NewService(cfg),
 		scanner:      disc.NewScanner(cfg.MakemkvBinary()),
-		device:       device,
-		scanTimeout:  scanTimeout,
-		pollInterval: poll,
-		detect:       detect,
-		fp:           fingerprint.ComputeTimeout,
+		queueHandler: newQueueStoreProcessor(store),
+		fingerprints: fingerprintFunc(func(ctx context.Context, info discInfo, timeout time.Duration) (string, error) {
+			return fingerprintService(ctx, info.Device, info.Type, timeout)
+		}),
+		errorNotifier: newNotifierAdapter(notifications.NewService(cfg)),
+		device:        device,
+		scanTimeout:   scanTimeout,
+		pollInterval:  poll,
+		detect:        detect,
 	}
 }
 
@@ -226,122 +230,36 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		defer cancel()
 	}
 
-	fingerprinter := m.fp
-	if fingerprinter == nil {
-		fingerprinter = fingerprint.ComputeTimeout
+	fpSvc := m.fingerprints
+	if fpSvc == nil {
+		fingerprintService := fingerprint.ComputeTimeout
+		fpSvc = fingerprintFunc(func(ctx context.Context, info discInfo, timeout time.Duration) (string, error) {
+			return fingerprintService(ctx, info.Device, info.Type, timeout)
+		})
 	}
 	logger.Info("computing disc fingerprint", logging.Duration("timeout", m.scanTimeout))
-	discFingerprint, fpErr := fingerprinter(scanCtx, info.Device, info.Type, m.scanTimeout)
+	discFingerprint, fpErr := fpSvc.Compute(scanCtx, info, m.scanTimeout)
 	if fpErr != nil {
 		logger.Error("generate fingerprint failed", logging.Error(fpErr))
-		if m.notifier != nil {
-			if notifyErr := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
-				"error":   fpErr,
-				"context": info.Label,
-			}); notifyErr != nil {
-				logger.Warn("failed to send fingerprint error notification", logging.Error(notifyErr))
-			}
+		if m.errorNotifier != nil {
+			m.errorNotifier.FingerprintFailed(ctx, info, fpErr, logger)
 		}
 		return false
 	}
 	logger.Info("computed fingerprint", logging.String("fingerprint", discFingerprint))
 
-	existing, err := m.store.FindByFingerprint(ctx, discFingerprint)
-	if err != nil {
-		logger.Error("lookup existing disc", logging.Error(err))
+	queueHandler := m.queueHandler
+	if queueHandler == nil {
+		logger.Error("queue handler unavailable")
 		return false
 	}
 
-	if existing != nil {
-		updated := false
-		label := strings.TrimSpace(info.Label)
-		if label != "" && label != strings.TrimSpace(existing.DiscTitle) {
-			existing.DiscTitle = label
-			updated = true
-		}
-		if existing.DiscFingerprint != discFingerprint {
-			existing.DiscFingerprint = discFingerprint
-			updated = true
-		}
-
-		status := existing.Status
-		if status == queue.StatusCompleted {
-			if updated {
-				if err := m.store.Update(ctx, existing); err != nil {
-					logger.Warn("failed to update completed item", logging.Error(err))
-				}
-				logger.Info(
-					"refreshed completed disc metadata",
-					logging.Int64(logging.FieldItemID, existing.ID),
-					logging.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
-				)
-			}
-			logger.Info(
-				"disc already completed",
-				logging.Int64(logging.FieldItemID, existing.ID),
-				logging.String("status", string(existing.Status)),
-			)
-			return true
-		}
-
-		if status == queue.StatusIdentified || status == queue.StatusRipped || status == queue.StatusEncoded || status == queue.StatusOrganizing || existing.IsProcessing() {
-			if updated {
-				if err := m.store.Update(ctx, existing); err != nil {
-					logger.Warn("failed to update in-flight item", logging.Error(err))
-				}
-			}
-			logger.Info(
-				"disc already in workflow",
-				logging.Int64(logging.FieldItemID, existing.ID),
-				logging.String("status", string(existing.Status)),
-				logging.String("progress_stage", strings.TrimSpace(existing.ProgressStage)),
-			)
-			return true
-		}
-
-		existing.Status = queue.StatusPending
-		existing.ErrorMessage = ""
-		existing.ProgressStage = "Awaiting identification"
-		existing.ProgressPercent = 0
-		existing.ProgressMessage = ""
-		existing.NeedsReview = false
-		existing.ReviewReason = ""
-		existing.DiscFingerprint = discFingerprint
-		if label != "" {
-			existing.DiscTitle = label
-		}
-
-		if err := m.store.Update(ctx, existing); err != nil {
-			logger.Error("failed to reset existing item", logging.Error(err))
-			return false
-		}
-
-		logger.Info(
-			"reset existing disc for processing",
-			logging.Int64(logging.FieldItemID, existing.ID),
-			logging.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
-		)
-		return true
-	}
-
-	title := strings.TrimSpace(info.Label)
-	if title == "" {
-		title = "Unknown Disc"
-	}
-
-	item, err := m.store.NewDisc(ctx, title, discFingerprint)
+	success, err := queueHandler.Process(ctx, info, discFingerprint, logger)
 	if err != nil {
-		logger.Error("failed to enqueue disc", logging.Error(err))
+		logger.Error("queue processing failed", logging.Error(err))
 		return false
 	}
-
-	logger.Info(
-		"queued new disc",
-		logging.Int64(logging.FieldItemID, item.ID),
-		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		logging.String("fingerprint", discFingerprint),
-	)
-	return true
+	return success
 }
 
 func buildDetectFunc(runner commandRunner, timeout time.Duration) detectFunc {
