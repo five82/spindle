@@ -120,7 +120,7 @@ spindle plex link
 
 - `spindle queue list` (use `--status` filters to narrow by state)
 - `spindle queue status` for a status-by-status summary
-- `spindle queue clear` (add `--completed`, `--failed`, or `--force` for targeted removal)
+- `spindle queue clear` (add `--completed` or `--failed` for targeted removal)
 - `spindle queue clear-failed`
 - `spindle queue reset-stuck`
 - `spindle queue retry [item_id ...]`
