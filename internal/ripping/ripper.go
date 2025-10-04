@@ -74,7 +74,7 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, r.logger)
 	var target string
-	const progressInterval = 2 * time.Minute
+	const progressInterval = time.Minute
 	var lastPersisted time.Time
 	lastStage := item.ProgressStage
 	lastMessage := item.ProgressMessage
