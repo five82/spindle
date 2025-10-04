@@ -287,7 +287,11 @@ func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir stri
 	if progress != nil {
 		progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 50, Message: "Halfway"})
 	}
-	path := filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv")
+	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+	if stem == "" {
+		stem = filepath.Base(inputPath)
+	}
+	path := filepath.Join(outputDir, stem+".mkv")
 	if err := os.WriteFile(path, []byte("encoded"), 0o644); err != nil {
 		return "", err
 	}
@@ -318,13 +322,21 @@ func (failingClient) Encode(ctx context.Context, inputPath, outputDir string, pr
 type missingArtifactClient struct{}
 
 func (missingArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
-	return filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv"), nil
+	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+	if stem == "" {
+		stem = filepath.Base(inputPath)
+	}
+	return filepath.Join(outputDir, stem+".mkv"), nil
 }
 
 type emptyArtifactClient struct{}
 
 func (emptyArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
-	path := filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv")
+	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+	if stem == "" {
+		stem = filepath.Base(inputPath)
+	}
+	path := filepath.Join(outputDir, stem+".mkv")
 	file, err := os.Create(path)
 	if err != nil {
 		return "", err

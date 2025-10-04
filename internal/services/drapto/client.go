@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 var commandContext = exec.CommandContext
@@ -59,9 +60,19 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 		return "", errors.New("output directory required")
 	}
 
-	outputPath := filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv")
+	cleanOutputDir := strings.TrimSpace(outputDir)
+	if cleanOutputDir == "" {
+		return "", errors.New("output directory required")
+	}
 
-	args := []string{"encode", "--input", inputPath, "--output", outputPath, "--progress-json"}
+	base := filepath.Base(inputPath)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	if stem == "" {
+		stem = base
+	}
+	outputPath := filepath.Join(cleanOutputDir, stem+".mkv")
+
+	args := []string{"encode", "--input", inputPath, "--output", cleanOutputDir, "--progress-json"}
 	cmd := commandContext(ctx, c.binary, args...) //nolint:gosec
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

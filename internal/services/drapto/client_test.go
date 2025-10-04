@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,7 +47,8 @@ func TestCLIEncodeSuccess(t *testing.T) {
 		t.Fatalf("Encode returned error: %v", err)
 	}
 
-	expected := filepath.Join(outputDir, filepath.Base(input)+".av1.mkv")
+	stem := strings.TrimSuffix(filepath.Base(input), filepath.Ext(input))
+	expected := filepath.Join(outputDir, stem+".mkv")
 	if path != expected {
 		t.Fatalf("expected output path %q, got %q", expected, path)
 	}

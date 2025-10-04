@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"spindle/internal/disc"
 	"spindle/internal/identification/tmdb"
@@ -56,7 +57,11 @@ func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir stri
 	if progress != nil {
 		progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 10, Message: "starting"})
 	}
-	dest := filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv")
+	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+	if stem == "" {
+		stem = filepath.Base(inputPath)
+	}
+	dest := filepath.Join(outputDir, stem+".mkv")
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return "", err

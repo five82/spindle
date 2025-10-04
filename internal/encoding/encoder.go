@@ -87,12 +87,17 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 
 	var encodedPath string
 	if e.client != nil {
-		expectedOutput := filepath.Join(encodedDir, filepath.Base(item.RippedFile)+".av1.mkv")
+		base := filepath.Base(item.RippedFile)
+		stem := strings.TrimSuffix(base, filepath.Ext(base))
+		if stem == "" {
+			stem = base
+		}
+		expectedOutput := filepath.Join(encodedDir, stem+".mkv")
 		logger.Info(
 			"launching drapto encode",
-			logging.String("command", e.draptoCommand(item.RippedFile, expectedOutput)),
+			logging.String("command", e.draptoCommand(item.RippedFile, encodedDir)),
 			logging.String("input", item.RippedFile),
-			logging.String("output", expectedOutput),
+			logging.String("expected_output", expectedOutput),
 		)
 
 		progress := func(update drapto.ProgressUpdate) {
@@ -276,7 +281,12 @@ func (e *Encoder) draptoBinaryName() string {
 	return binary
 }
 
-func (e *Encoder) draptoCommand(inputPath, outputPath string) string {
+func (e *Encoder) draptoCommand(inputPath, outputDir string) string {
 	binary := e.draptoBinaryName()
-	return fmt.Sprintf("%s encode --input %q --output %q --progress-json", binary, strings.TrimSpace(inputPath), strings.TrimSpace(outputPath))
+	return fmt.Sprintf(
+		"%s encode --input %q --output %q --progress-json",
+		binary,
+		strings.TrimSpace(inputPath),
+		strings.TrimSpace(outputDir),
+	)
 }
