@@ -64,18 +64,17 @@ func detectDiscLine(device string, colorize bool) string {
 	if len(fields) > 1 {
 		fstype = strings.ToLower(fields[1])
 	}
-	discType := classifyDiscType(device, fstype)
+	discType := classifyDiscType(fstype)
 	return renderStatusLine("Disc", statusOK, fmt.Sprintf("%s disc '%s' on %s", discType, label, device), colorize)
 }
 
-func classifyDiscType(device, fstype string) string {
+func classifyDiscType(fstype string) string {
 	switch strings.ToLower(strings.TrimSpace(fstype)) {
 	case "udf":
 		return "Blu-ray"
 	case "iso9660":
 		return "DVD"
 	default:
-		_ = device
 		return "Unknown"
 	}
 }
