@@ -62,7 +62,6 @@ func NewService(cfg *config.Config) Service {
 type payload struct {
 	title    string
 	message  string
-	tags     []string
 	priority string
 }
 
@@ -82,7 +81,6 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 		return n.send(ctx, payload{
 			title:   "Spindle - Disc Detected",
 			message: fmt.Sprintf("📀 Disc detected: %s (%s)", discTitle, discType),
-			tags:    []string{"spindle", "disc", "detected"},
 		})
 	case EventIdentificationCompleted:
 		title := strings.TrimSpace(payloadString(data, "title"))
@@ -94,28 +92,21 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 		if display == "" {
 			display = fmt.Sprintf("%s (%s)", title, year)
 		}
-		mediaType := strings.TrimSpace(payloadString(data, "mediaType"))
-		if mediaType == "" {
-			mediaType = "unknown"
-		}
 		return n.send(ctx, payload{
 			title:   "Spindle - Identified",
 			message: fmt.Sprintf("🎬 Identified: %s", display),
-			tags:    []string{"spindle", "identify", mediaType},
 		})
 	case EventRipCompleted:
 		discTitle := strings.TrimSpace(payloadString(data, "discTitle"))
 		return n.send(ctx, payload{
 			title:   "Spindle - Rip Complete",
 			message: fmt.Sprintf("💿 Rip complete: %s", discTitle),
-			tags:    []string{"spindle", "rip", "completed"},
 		})
 	case EventEncodingCompleted:
 		discTitle := strings.TrimSpace(payloadString(data, "discTitle"))
 		return n.send(ctx, payload{
 			title:   "Spindle - Encoded",
 			message: fmt.Sprintf("🎞️ Encoding complete: %s", discTitle),
-			tags:    []string{"spindle", "encode", "completed"},
 		})
 	case EventOrganizationCompleted:
 		mediaTitle := strings.TrimSpace(payloadString(data, "mediaTitle"))
@@ -127,7 +118,6 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 		return n.send(ctx, payload{
 			title:   "Spindle - Library Updated",
 			message: message,
-			tags:    []string{"spindle", "plex", "added"},
 		})
 	case EventError:
 		contextLabel := strings.TrimSpace(payloadString(data, "context"))
@@ -147,14 +137,12 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 		return n.send(ctx, payload{
 			title:    "Spindle - Error",
 			message:  builder.String(),
-			tags:     []string{"spindle", "error", "alert"},
 			priority: "high",
 		})
 	case EventTestNotification:
 		return n.send(ctx, payload{
 			title:    "Spindle - Test",
 			message:  "🧪 Notification system test",
-			tags:     []string{"spindle", "test"},
 			priority: "low",
 		})
 	case EventRipStarted,
@@ -181,9 +169,6 @@ func (n *ntfyService) send(ctx context.Context, data payload) error {
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
 	if data.title != "" {
 		req.Header.Set("Title", data.title)
-	}
-	if len(data.tags) > 0 {
-		req.Header.Set("Tags", strings.Join(data.tags, ","))
 	}
 	if data.priority != "" && data.priority != "default" {
 		req.Header.Set("Priority", data.priority)

@@ -27,7 +27,6 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 		payload        notifications.Payload
 		expectTitle    string
 		expectMessage  string
-		expectTags     string
 		expectPriority string
 	}{
 		{
@@ -41,7 +40,6 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			},
 			expectTitle:   "Spindle - Identified",
 			expectMessage: "🎬 Identified: Interstellar (2014)",
-			expectTags:    "spindle,identify,movie",
 		},
 		{
 			name:  "disc detected",
@@ -52,7 +50,6 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			},
 			expectTitle:   "Spindle - Disc Detected",
 			expectMessage: "📀 Disc detected: Blade Runner (bluray)",
-			expectTags:    "spindle,disc,detected",
 		},
 		{
 			name:  "rip completed",
@@ -62,7 +59,6 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			},
 			expectTitle:   "Spindle - Rip Complete",
 			expectMessage: "💿 Rip complete: Jurassic Park",
-			expectTags:    "spindle,rip,completed",
 		},
 		{
 			name:  "encoding completed",
@@ -72,7 +68,6 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			},
 			expectTitle:   "Spindle - Encoded",
 			expectMessage: "🎞️ Encoding complete: The Matrix",
-			expectTags:    "spindle,encode,completed",
 		},
 		{
 			name:  "organization completed",
@@ -83,7 +78,6 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			},
 			expectTitle:   "Spindle - Library Updated",
 			expectMessage: "Added to Plex: Arrival\nFile: Arrival (2016).mkv",
-			expectTags:    "spindle,plex,added",
 		},
 		{
 			name:  "error",
@@ -94,7 +88,6 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			},
 			expectTitle:    "Spindle - Error",
 			expectMessage:  "❌ Error with rip: failed to read disc",
-			expectTags:     "spindle,error,alert",
 			expectPriority: "high",
 		},
 	}
@@ -140,8 +133,8 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			if captured.body != tc.expectMessage {
 				t.Fatalf("expected message %q, got %q", tc.expectMessage, captured.body)
 			}
-			if captured.tags != tc.expectTags {
-				t.Fatalf("expected tags %q, got %q", tc.expectTags, captured.tags)
+			if captured.tags != "" {
+				t.Fatalf("expected no tags header, got %q", captured.tags)
 			}
 			if captured.priority != tc.expectPriority {
 				t.Fatalf("expected priority %q, got %q", tc.expectPriority, captured.priority)
