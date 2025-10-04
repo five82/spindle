@@ -43,12 +43,6 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) 
 	return NewIdentifierWithDependencies(cfg, store, logger, client, scanner, notifications.NewService(cfg))
 }
 
-// NewIdentifierWithClient creates a new identifier with an injected TMDB client (used for testing).
-func NewIdentifierWithClient(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher TMDBSearcher) *Identifier {
-	scanner := disc.NewScanner(cfg.MakemkvBinary())
-	return NewIdentifierWithDependencies(cfg, store, logger, searcher, scanner, notifications.NewService(cfg))
-}
-
 // NewIdentifierWithDependencies allows injecting TMDB searcher and disc scanner (used in tests).
 func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher TMDBSearcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
 	stageLogger := logger
