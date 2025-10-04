@@ -184,3 +184,156 @@ func TestWithContextAddsFields(t *testing.T) {
 		t.Fatalf("correlation_id = %v, want req-xyz", payload[logging.FieldCorrelationID])
 	}
 }
+
+func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "info-readable.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "info",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	logger = logger.With(
+		logging.String("component", "workflow-runner"),
+		logging.Int("item_id", 9),
+		logging.String("stage", "ripper"),
+		logging.String("disc_title", "50 First Dates"),
+		logging.String("processing_status", "ripping"),
+		logging.String("correlation_id", "abc-123"),
+	)
+
+	logger.Info("stage started")
+	logger.Info("stage started")
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("unexpected line count: %v", lines)
+	}
+	if !strings.Contains(lines[0], "INFO [workflow-runner] Item #9 (ripper) – stage started (+1 details)") {
+		t.Fatalf("first header missing details notice: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "- Disc: \"50 First Dates\"") {
+		t.Fatalf("expected disc bullet, got %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "- Status: ripping") {
+		t.Fatalf("expected status bullet, got %q", lines[2])
+	}
+	if !strings.Contains(lines[3], "INFO [workflow-runner] Item #9 (ripper) – stage started") || strings.Contains(lines[3], "details") {
+		t.Fatalf("second header should be clean, got %q", lines[3])
+	}
+}
+
+func TestConsoleInfoFormattingResetsPerStage(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "info-stage.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "info",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	baseLogger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	identifierLogger := baseLogger.With(
+		logging.String("component", "workflow-runner"),
+		logging.Int("item_id", 12),
+		logging.String("stage", "identifier"),
+		logging.String("disc_title", "Sample Disc"),
+		logging.String("processing_status", "identifying"),
+	)
+
+	ripperLogger := baseLogger.With(
+		logging.String("component", "workflow-runner"),
+		logging.Int("item_id", 12),
+		logging.String("stage", "ripper"),
+		logging.String("disc_title", "Sample Disc"),
+		logging.String("processing_status", "ripping"),
+	)
+
+	identifierLogger.Info("stage started")
+	ripperLogger.Info("stage started")
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	output := strings.TrimSpace(string(content))
+	if strings.Count(output, "- Disc: \"Sample Disc\"") != 1 {
+		t.Fatalf("disc line should appear once, got %q", output)
+	}
+	if !strings.Contains(output, "- Status: identifying") || !strings.Contains(output, "- Status: ripping") {
+		t.Fatalf("status updates missing, got %q", output)
+	}
+}
+
+func TestConsoleDebugFormattingEmitsDetailedContext(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "debug-details.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "debug",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	logger = logger.With(
+		logging.String("component", "identifier"),
+		logging.Int("item_id", 42),
+		logging.String("stage", "identifier"),
+		logging.String("disc_title", "Example Disc"),
+		logging.String("correlation_id", "debug-xyz"),
+	)
+
+	logger.Debug("scanning disc")
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected multi-line debug output, got %q", content)
+	}
+	if !strings.Contains(lines[0], "DEBUG [identifier] Item #42 (identifier) – scanning disc") {
+		t.Fatalf("expected detailed prefix in first line, got %q", lines[0])
+	}
+	var hasCorrelation bool
+	var hasDisc bool
+	for _, line := range lines[1:] {
+		if strings.Contains(line, "correlation_id: debug-xyz") {
+			hasCorrelation = true
+		}
+		if strings.Contains(line, "disc_title: \"Example Disc\"") {
+			hasDisc = true
+		}
+	}
+	if !hasCorrelation {
+		t.Fatalf("expected correlation_id in debug details, got %q", content)
+	}
+	if !hasDisc {
+		t.Fatalf("expected disc title in debug details, got %q", content)
+	}
+}
