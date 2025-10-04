@@ -58,7 +58,7 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → E
 
 - **FAILED** marks irrecoverable runs. Surface the root cause and keep progress context.
 - **REVIEW** is for manual intervention (for example, uncertain identification).
-- Disc ejection is tied to a successful transition to `RIPPED`.
+- Rip completion triggers an ntfy notification at `RIPPED`; users eject the disc manually when convenient.
 
 If you add or reorder phases, update the enums, workflow routing, CLI presentation, docs, and tests in one pull.
 

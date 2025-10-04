@@ -150,14 +150,3 @@ func (f *fakeMakemkvClient) Rip(ctx context.Context, discTitle, sourcePath, dest
 	}
 	return target, nil
 }
-
-type fakeEjector struct {
-	calls int
-}
-
-func (f *fakeEjector) Eject(ctx context.Context, device string) error {
-	f.calls++
-	return nil
-}
-
-var _ disc.Ejector = (*fakeEjector)(nil)

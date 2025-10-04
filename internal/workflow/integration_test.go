@@ -75,12 +75,11 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 	}
 
 	ripperClient := &fakeMakemkvClient{}
-	ejector := &fakeEjector{}
 	draptoClient := &stubDraptoClient{}
 	plexClient := &stubPlexService{root: cfg.LibraryDir, moviesDir: cfg.MoviesDir, tvDir: cfg.TVDir}
 
 	identifier := identification.NewIdentifierWithDependencies(cfg, store, logger, tmdbClient, scanner, notifier)
-	ripper := ripping.NewRipperWithDependencies(cfg, store, logger, ripperClient, ejector, notifier)
+	ripper := ripping.NewRipperWithDependencies(cfg, store, logger, ripperClient, notifier)
 	encoder := encoding.NewEncoderWithDependencies(cfg, store, logger, draptoClient, notifier)
 	organizer := organizer.NewOrganizerWithDependencies(cfg, store, logger, plexClient, notifier)
 
@@ -150,9 +149,6 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 			}
 			if ripperClient.calls == 0 {
 				t.Fatal("expected MakeMKV ripper to be invoked")
-			}
-			if ejector.calls == 0 {
-				t.Fatal("expected ejector to run")
 			}
 			if len(notifier.encodeCompletes) == 0 {
 				t.Fatal("expected encoding notification")

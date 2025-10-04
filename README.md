@@ -142,7 +142,7 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → E
 
 - `FAILED`: unrecoverable issue (inspect logs / notifications)
 - `REVIEW`: manual intervention required. When Spindle cannot identify a disc, it still rips/encodes the content, drops the final file into the `review_dir` (default `~/review`) with a unique name (for example `unidentified-1.mkv`), and marks the queue item complete so the pipeline keeps moving.
-- Drives eject automatically at `RIPPED`; encoding/organization continues in background
+- Rip completion is marked at `RIPPED`; you'll receive a notification and can eject the disc manually while encoding/organization continue in the background
 - Notifications (ntfy) fire when discs are detected, a disc is identified with title/year, rips finish, encodes complete, the library import succeeds, and whenever an error occurs
 - Read `docs/workflow.md` for a detailed walkthrough
 
@@ -162,7 +162,7 @@ ls -la /media/cdrom /media/cdrom0
 
 ### Common Issues
 
-- **Disc not ejecting**: Check logs for ripping errors (only successful rips eject)
+- **Disc not ejecting**: Manually run `eject /dev/sr0` (or your configured drive) after the rip notification; adjust udev/fstab permissions if the command refuses to unmount
 - **Stuck identifying**: Verify TMDB API key and disc mounting
 - **Poor identification**: Generic disc labels reduce accuracy - install `libbluray-utils` for bd_info fallback
 - **TMDB rate limits**: Retry later; the daemon will back off and recover on its own

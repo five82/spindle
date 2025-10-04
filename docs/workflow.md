@@ -17,7 +17,7 @@ Every item moves through the queue in order. The statuses you will see are:
 
 - `PENDING` - disc noticed, waiting for identification
 - `IDENTIFYING` -> `IDENTIFIED` - MakeMKV scan + TMDB lookup completed
-- `RIPPING` -> `RIPPED` - video copied to the staging area, drive automatically ejects
+- `RIPPING` -> `RIPPED` - video copied to the staging area; you’ll get a notification so the disc can be ejected manually
 - `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
 - `ORGANIZING` -> `COMPLETED` - file moved into your library, Plex refresh triggered
 - `REVIEW` - manual attention required (no confident match found)
@@ -46,7 +46,7 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 
 1. Identified items flow into the MakeMKV ripper. Spindle updates the queue to `RIPPING` and streams progress ("Ripping disc", percentage updates) as Makemkvcon runs.
 2. Video files are written to `<staging_dir>/rips/`.
-3. When the rip succeeds, Spindle ejects the disc and marks the item `RIPPED`. An ntfy notification confirms the drive is free.
+3. When the rip succeeds, the item is marked `RIPPED` and an ntfy notification fires so you know the drive is free to eject manually.
 4. If MakeMKV fails or a disc defect is detected, the item becomes `FAILED` with the error message recorded in the queue. You can retry after addressing the issue with `spindle queue retry <id>`.
 
 ## Stage 4: Encoding to AV1 (ENCODING -> ENCODED)

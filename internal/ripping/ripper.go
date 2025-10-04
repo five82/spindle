@@ -13,7 +13,6 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
-	"spindle/internal/disc"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -28,7 +27,6 @@ type Ripper struct {
 	cfg      *config.Config
 	logger   *slog.Logger
 	client   makemkv.Ripper
-	ejector  disc.Ejector
 	notifier notifications.Service
 }
 
@@ -38,16 +36,16 @@ func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Rip
 	if err != nil {
 		logger.Warn("makemkv client unavailable", logging.Error(err))
 	}
-	return NewRipperWithDependencies(cfg, store, logger, client, disc.NewEjector(), notifications.NewService(cfg))
+	return NewRipperWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
 
 // NewRipperWithDependencies allows injecting all collaborators (used in tests).
-func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper, ejector disc.Ejector, notifier notifications.Service) *Ripper {
+func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper, notifier notifications.Service) *Ripper {
 	stageLogger := logger
 	if stageLogger != nil {
 		stageLogger = stageLogger.With(logging.String("component", "ripper"))
 	}
-	return &Ripper{store: store, cfg: cfg, logger: stageLogger, client: client, ejector: ejector, notifier: notifier}
+	return &Ripper{store: store, cfg: cfg, logger: stageLogger, client: client, notifier: notifier}
 }
 
 func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
@@ -163,12 +161,6 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Disc content ripped"
 	logger.Info("ripping completed", logging.String("ripped_file", target))
 
-	if r.ejector != nil {
-		logger.Info("ejecting disc", logging.String("device", strings.TrimSpace(r.cfg.OpticalDrive)))
-		if err := r.ejector.Eject(ctx, r.cfg.OpticalDrive); err != nil {
-			logger.Warn("failed to eject disc", logging.Error(err))
-		}
-	}
 	if r.notifier != nil {
 		if err := r.notifier.Publish(ctx, notifications.EventRipCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
 			logger.Warn("rip completion notification failed", logging.Error(err))
@@ -199,9 +191,6 @@ func (r *Ripper) HealthCheck(ctx context.Context) stage.Health {
 	}
 	if _, err := exec.LookPath(binary); err != nil {
 		return stage.Unhealthy(name, fmt.Sprintf("makemkv binary %q not found", binary))
-	}
-	if r.ejector == nil {
-		return stage.Unhealthy(name, "disc ejector unavailable")
 	}
 	return stage.Healthy(name)
 }
