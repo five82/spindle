@@ -15,6 +15,7 @@ var infoHighlightKeys = []string{
 	"processing_status",
 	"progress_stage",
 	"progress_message",
+	"command",
 	"error_message",
 	"status",
 	"disc_type",
@@ -140,7 +141,7 @@ func isDebugOnlyKey(key string) bool {
 
 func shouldHideInfoValue(key, value string) bool {
 	switch key {
-	case "error_message", "error":
+	case "error_message", "error", "command":
 		return false
 	}
 	return len(value) > 120
