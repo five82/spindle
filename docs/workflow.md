@@ -38,14 +38,14 @@ You can keep inserting discs back-to-back; each one lands in the queue.
 1. Spindle triggers a MakeMKV scan to read every title on the disc.
 2. The intelligent analyzer classifies the disc (movie vs TV set, extras, commentary tracks) and calls TMDB to find the best metadata match.
 3. Success: the queue item is marked `IDENTIFIED`, media details (title, year, season/episode) are stored, and the rip specification is written to the queue database.
-4. No confident match: the item moves to `REVIEW` with guidance in the logs and ntfy; the disc stays in the drive for you to decide next steps.
+4. No confident match: the item stays at `IDENTIFIED` but is flagged with `NeedsReview = true`, and you receive guidance in logs/ntfy. The pipeline keeps moving so downstream stages can finish while you decide how to handle the unknown metadata.
 
 Progress messages in `spindle show --follow` tell you what the analyzer is doing ("Analyzing disc content", "Classifying disc contents", etc.).
 
 ## Stage 3: Ripping the Disc (RIPPING -> RIPPED)
 
 1. Identified items flow into the MakeMKV ripper. Spindle updates the queue to `RIPPING` and streams progress ("Ripping disc", percentage updates) as Makemkvcon runs.
-2. Video files are written to `<staging_dir>/ripped/`.
+2. Video files are written to `<staging_dir>/rips/`.
 3. When the rip succeeds, Spindle ejects the disc and marks the item `RIPPED`. An ntfy notification confirms the drive is free.
 4. If MakeMKV fails or a disc defect is detected, the item becomes `FAILED` with the error message recorded in the queue. You can retry after addressing the issue with `spindle queue retry <id>`.
 
@@ -62,11 +62,12 @@ Encoding happens in the background, so you can insert the next disc while previo
 1. Spindle moves the encoded file into your library, building a Plex-friendly path based on the TMDB metadata. Movies go under `library_dir/movies`, TV episodes go under `library_dir/tv/<Show Name>/Season XX/`.
 2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Plex.
 3. Plex scans are triggered for the appropriate library section (Movies vs TV Shows) when credentials are supplied.
-4. The final status `COMPLETED` means the media is on disk and Plex has been asked to rescan. A notification confirms the title is ready.
+4. The final status `COMPLETED` means the media is on disk and Plex has been asked to rescan. Items flagged for review land in your configured `review_dir`; otherwise titles appear in the main library. A notification confirms the outcome.
 
 ## Special Paths: REVIEW and FAILED
 
-- **Review queue** (`REVIEW`): Spindle could not confidently identify the disc. Files are not ripped yet. Inspect the logs, update metadata manually if needed, then retry from the CLI when ready (`spindle queue retry <id>`).
+- **Review queue** (`REVIEW`): Configuration or validation issues (for example, missing TMDB credentials or duplicate fingerprints) halt the workflow and require manual fixes before retrying (`spindle queue retry <id>`).
+- **Needs review flag**: Low-confidence identification keeps the status at `IDENTIFIED` but sets `NeedsReview = true`. Ripping/encoding/organizing still run, and the organizer drops the finished file into `review_dir` while marking the queue `COMPLETED` so the pipeline stays unblocked.
 - **Failed items** (`FAILED`): Something went wrong (missing dependency, read error, encoding failure). Fix the root cause, then use `spindle queue retry <id>` to resume; Spindle resets progress to `PENDING` and walks the item back through the pipeline.
 
 Use `spindle queue list` (filter with tools like `grep FAILED`), `spindle queue status` for a tally per lifecycle state, or `spindle queue health` for condensed diagnostics.
@@ -89,7 +90,7 @@ Logs also live in `<log_dir>/spindle-<timestamp>.log` (one file per daemon start
 
 ## Where Files Live
 
-- **Staging**: `<staging_dir>/ripped/` for MakeMKV output, `<staging_dir>/encoded/` for Drapto output while waiting on organization.
+- **Staging**: `<staging_dir>/rips/` for MakeMKV output, `<staging_dir>/encoded/` for Drapto output while waiting on organization.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in the config.
 - **Review**: `<review_dir>/` holds encoded files that still need manual identification. Each unidentified disc is stored with a unique filename (for example `unidentified-1.mkv`), and the queue item is marked complete so it doesn’t block subsequent work.
 - **Logs & diagnostics**: `<log_dir>/` keeps `spindle-*.log` files for each run, the queue database, and analyzer/debug artifacts.
