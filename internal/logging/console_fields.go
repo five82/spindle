@@ -15,6 +15,7 @@ var infoHighlightKeys = []string{
 	"processing_status",
 	"progress_stage",
 	"progress_message",
+	"error_message",
 	"status",
 	"disc_type",
 	"runtime_minutes",
@@ -55,7 +56,7 @@ func selectInfoFields(attrs []kv) ([]infoField, int) {
 				break
 			}
 			val := ensureValue(idx)
-			if shouldHideInfoValue(val) {
+			if shouldHideInfoValue(attr.key, val) {
 				hidden++
 				break
 			}
@@ -77,7 +78,7 @@ func selectInfoFields(attrs []kv) ([]infoField, int) {
 			continue
 		}
 		val := ensureValue(idx)
-		if shouldHideInfoValue(val) {
+		if shouldHideInfoValue(attr.key, val) {
 			hidden++
 			continue
 		}
@@ -137,7 +138,11 @@ func isDebugOnlyKey(key string) bool {
 	return false
 }
 
-func shouldHideInfoValue(value string) bool {
+func shouldHideInfoValue(key, value string) bool {
+	switch key {
+	case "error_message", "error":
+		return false
+	}
 	return len(value) > 120
 }
 
