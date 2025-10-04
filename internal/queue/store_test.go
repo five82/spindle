@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -105,30 +106,49 @@ func TestResetStuckProcessing(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	item, err := store.NewDisc(ctx, "Another Disc", "fingerprint-2")
-	if err != nil {
-		t.Fatalf("NewDisc failed: %v", err)
+	cases := []struct {
+		name          string
+		initialStatus queue.Status
+		expected      queue.Status
+	}{
+		{"identifying", queue.StatusIdentifying, queue.StatusPending},
+		{"ripping", queue.StatusRipping, queue.StatusIdentified},
+		{"encoding", queue.StatusEncoding, queue.StatusRipped},
+		{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
 	}
-	item.Status = queue.StatusRipping
-	item.ProgressStage = "Ripping"
-	if err := store.Update(ctx, item); err != nil {
-		t.Fatalf("Update failed: %v", err)
+	var ids []int64
+	for i, tc := range cases {
+		item, err := store.NewDisc(ctx, fmt.Sprintf("Disc-%s", tc.name), fmt.Sprintf("fingerprint-reset-%d", i))
+		if err != nil {
+			t.Fatalf("NewDisc failed: %v", err)
+		}
+		item.Status = tc.initialStatus
+		item.ProgressStage = tc.name
+		if err := store.Update(ctx, item); err != nil {
+			t.Fatalf("Update failed: %v", err)
+		}
+		ids = append(ids, item.ID)
 	}
 
 	count, err := store.ResetStuckProcessing(ctx)
 	if err != nil {
 		t.Fatalf("ResetStuckProcessing failed: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("expected 1 item reset, got %d", count)
+	if int(count) != len(cases) {
+		t.Fatalf("expected %d items reset, got %d", len(cases), count)
 	}
 
-	updated, err := store.GetByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("GetByID failed: %v", err)
-	}
-	if updated.Status != queue.StatusPending {
-		t.Fatalf("expected status pending, got %s", updated.Status)
+	for idx, tc := range cases {
+		updated, err := store.GetByID(ctx, ids[idx])
+		if err != nil {
+			t.Fatalf("GetByID failed: %v", err)
+		}
+		if updated.Status != tc.expected {
+			t.Fatalf("%s: expected status %s, got %s", tc.name, tc.expected, updated.Status)
+		}
+		if updated.LastHeartbeat != nil {
+			t.Fatalf("%s: expected heartbeat cleared", tc.name)
+		}
 	}
 }
 
@@ -325,33 +345,49 @@ func TestReclaimStaleProcessing(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	item, err := store.NewDisc(ctx, "Stale", "stale")
-	if err != nil {
-		t.Fatalf("NewDisc: %v", err)
-	}
-	item.Status = queue.StatusRipping
 	past := time.Now().Add(-2 * time.Hour).UTC()
-	item.LastHeartbeat = &past
-	if err := store.Update(ctx, item); err != nil {
-		t.Fatalf("Update: %v", err)
+	cases := []struct {
+		name       string
+		processing queue.Status
+		expected   queue.Status
+	}{
+		{"identifying", queue.StatusIdentifying, queue.StatusPending},
+		{"ripping", queue.StatusRipping, queue.StatusIdentified},
+		{"encoding", queue.StatusEncoding, queue.StatusRipped},
+		{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
+	}
+	var ids []int64
+	for i, tc := range cases {
+		item, err := store.NewDisc(ctx, fmt.Sprintf("Stale-%s", tc.name), fmt.Sprintf("stale-%d", i))
+		if err != nil {
+			t.Fatalf("NewDisc: %v", err)
+		}
+		item.Status = tc.processing
+		item.LastHeartbeat = &past
+		if err := store.Update(ctx, item); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		ids = append(ids, item.ID)
 	}
 
 	count, err := store.ReclaimStaleProcessing(ctx, time.Now().Add(-1*time.Hour))
 	if err != nil {
 		t.Fatalf("ReclaimStaleProcessing: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("expected 1 item reclaimed, got %d", count)
+	if int(count) != len(cases) {
+		t.Fatalf("expected %d items reclaimed, got %d", len(cases), count)
 	}
 
-	updated, err := store.GetByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if updated.Status != queue.StatusPending {
-		t.Fatalf("expected status pending after reclaim, got %s", updated.Status)
-	}
-	if updated.LastHeartbeat != nil {
-		t.Fatalf("expected heartbeat cleared, got %v", updated.LastHeartbeat)
+	for idx, tc := range cases {
+		updated, err := store.GetByID(ctx, ids[idx])
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if updated.Status != tc.expected {
+			t.Fatalf("%s: expected status %s after reclaim, got %s", tc.name, tc.expected, updated.Status)
+		}
+		if updated.LastHeartbeat != nil {
+			t.Fatalf("%s: expected heartbeat cleared, got %v", tc.name, updated.LastHeartbeat)
+		}
 	}
 }

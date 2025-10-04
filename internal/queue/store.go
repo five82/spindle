@@ -358,19 +358,30 @@ func (s *Store) NextForStatuses(ctx context.Context, statuses ...Status) (*Item,
 	return item, nil
 }
 
-// ResetStuckProcessing resets items in processing states back to pending.
+// ResetStuckProcessing resets items in processing states back to the start of their current stage.
 func (s *Store) ResetStuckProcessing(ctx context.Context) (int64, error) {
 	res, err := s.execWithRetry(
 		ctx,
 		`UPDATE queue_items
-         SET status = ?, progress_stage = 'Reset from stuck processing',
-             progress_percent = 0, progress_message = NULL, updated_at = ?
-         WHERE status IN (?, ?, ?)`,
-		StatusPending,
+         SET status = CASE status
+             WHEN ? THEN ?
+             WHEN ? THEN ?
+             WHEN ? THEN ?
+             WHEN ? THEN ?
+             ELSE status
+         END,
+             progress_stage = 'Reset from stuck processing',
+             progress_percent = 0, progress_message = NULL, last_heartbeat = NULL, updated_at = ?
+         WHERE status IN (?, ?, ?, ?)`,
+		StatusIdentifying, StatusPending,
+		StatusRipping, StatusIdentified,
+		StatusEncoding, StatusRipped,
+		StatusOrganizing, StatusEncoded,
 		time.Now().UTC().Format(time.RFC3339Nano),
 		StatusRipping,
 		StatusIdentifying,
 		StatusEncoding,
+		StatusOrganizing,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("reset stuck items: %w", err)
@@ -393,16 +404,26 @@ func (s *Store) UpdateHeartbeat(ctx context.Context, id int64) error {
 	return nil
 }
 
-// ReclaimStaleProcessing returns items stuck in processing back to pending when heartbeats expire.
+// ReclaimStaleProcessing returns items stuck in processing back to the start of their current stage when heartbeats expire.
 func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time) (int64, error) {
 	now := time.Now().UTC()
 	res, err := s.execWithRetry(
 		ctx,
 		`UPDATE queue_items
-        SET status = ?, progress_stage = 'Reclaimed from stale processing',
+        SET status = CASE status
+            WHEN ? THEN ?
+            WHEN ? THEN ?
+            WHEN ? THEN ?
+            WHEN ? THEN ?
+            ELSE status
+        END,
+            progress_stage = 'Reclaimed from stale processing',
             progress_percent = 0, progress_message = NULL, last_heartbeat = NULL, updated_at = ?
         WHERE status IN (?, ?, ?, ?) AND last_heartbeat IS NOT NULL AND last_heartbeat < ?`,
-		StatusPending,
+		StatusIdentifying, StatusPending,
+		StatusRipping, StatusIdentified,
+		StatusEncoding, StatusRipped,
+		StatusOrganizing, StatusEncoded,
 		now.Format(time.RFC3339Nano),
 		StatusIdentifying,
 		StatusRipping,

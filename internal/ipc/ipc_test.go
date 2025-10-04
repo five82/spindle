@@ -217,8 +217,8 @@ func TestIPCServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID discC: %v", err)
 	}
-	if updatedC.Status != queue.StatusPending {
-		t.Fatalf("expected discC to be pending after reset, got %s", updatedC.Status)
+	if updatedC.Status != queue.StatusIdentified {
+		t.Fatalf("expected discC to resume at identification stage after reset, got %s", updatedC.Status)
 	}
 
 	clearFailedResp, err := client.QueueClearFailed()
