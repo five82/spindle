@@ -272,6 +272,11 @@ func (c *Config) DraptoBinary() string {
 	return "drapto"
 }
 
+// FFprobeBinary returns the ffprobe executable name used for media validation.
+func (c *Config) FFprobeBinary() string {
+	return "ffprobe"
+}
+
 func expandPath(pathValue string) (string, error) {
 	if pathValue == "" {
 		return pathValue, nil

@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
@@ -38,6 +40,12 @@ type Organizer struct {
 	plex     plex.Service
 	notifier notifications.Service
 }
+
+const (
+	minOrganizedFileSizeBytes = 5 * 1024 * 1024
+)
+
+var organizerProbe = ffprobe.Inspect
 
 // NewOrganizer constructs the organizer stage handler using default dependencies.
 func NewOrganizer(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Organizer {
@@ -72,6 +80,7 @@ func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 
 func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, o.logger)
+	stageStarted := time.Now()
 	logger.Info(
 		"starting organization",
 		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
@@ -107,6 +116,9 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logger.Warn("review notification failed", logging.Error(err))
 			}
 		}
+		if err := o.validateOrganizedArtifact(ctx, reviewPath, stageStarted); err != nil {
+			return err
+		}
 		o.cleanupStaging(ctx, item)
 		return nil
 	}
@@ -138,6 +150,9 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	item.FinalFile = targetPath
 	logger.Info("library move completed", logging.String("final_file", targetPath))
+	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted); err != nil {
+		return err
+	}
 
 	o.updateProgress(ctx, item, "Refreshing Plex library", 80)
 	if err := o.plex.Refresh(ctx, meta); err != nil {
@@ -174,6 +189,118 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	o.cleanupStaging(ctx, item)
+	return nil
+}
+
+func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, startedAt time.Time) error {
+	logger := logging.WithContext(ctx, o.logger)
+	clean := strings.TrimSpace(path)
+	if clean == "" {
+		logger.Error("organizer validation failed", logging.String("reason", "empty path"))
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"validate output",
+			"Organization produced an empty target path",
+			nil,
+		)
+	}
+	info, err := os.Stat(clean)
+	if err != nil {
+		logger.Error("organizer validation failed", logging.String("reason", "stat failure"), logging.Error(err))
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"validate output",
+			"Failed to stat organized file",
+			err,
+		)
+	}
+	if info.IsDir() {
+		logger.Error("organizer validation failed", logging.String("reason", "path is directory"), logging.String("final_path", clean))
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"validate output",
+			"Organized artifact points to a directory",
+			nil,
+		)
+	}
+	if info.Size() < minOrganizedFileSizeBytes {
+		logger.Error(
+			"organizer validation failed",
+			logging.String("reason", "file too small"),
+			logging.Int64("size_bytes", info.Size()),
+		)
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"validate output",
+			fmt.Sprintf("Organized file %q is unexpectedly small (%d bytes)", clean, info.Size()),
+			nil,
+		)
+	}
+
+	binary := "ffprobe"
+	if o.cfg != nil {
+		binary = o.cfg.FFprobeBinary()
+	}
+	probe, err := organizerProbe(ctx, binary, clean)
+	if err != nil {
+		logger.Error("organizer validation failed", logging.String("reason", "ffprobe"), logging.Error(err))
+		return services.Wrap(
+			services.ErrExternalTool,
+			"organizing",
+			"ffprobe validation",
+			"Failed to inspect organized file with ffprobe",
+			err,
+		)
+	}
+	if probe.VideoStreamCount() == 0 {
+		logger.Error("organizer validation failed", logging.String("reason", "no video stream"))
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"validate video stream",
+			"Organized file does not contain a video stream",
+			nil,
+		)
+	}
+	if probe.AudioStreamCount() == 0 {
+		logger.Error("organizer validation failed", logging.String("reason", "no audio stream"))
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"validate audio stream",
+			"Organized file does not contain an audio stream",
+			nil,
+		)
+	}
+	duration := probe.DurationSeconds()
+	if duration <= 0 {
+		logger.Error("organizer validation failed", logging.String("reason", "invalid duration"))
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"validate duration",
+			"Organized file duration could not be determined",
+			nil,
+		)
+	}
+
+	logger.Info(
+		"organizer validation succeeded",
+		logging.String("final_file", clean),
+		logging.Duration("elapsed", time.Since(startedAt)),
+		logging.String("ffprobe_binary", binary),
+		logging.Group("ffprobe",
+			logging.Float64("duration_seconds", duration),
+			logging.Int("video_streams", probe.VideoStreamCount()),
+			logging.Int("audio_streams", probe.AudioStreamCount()),
+			logging.Int64("size_bytes", info.Size()),
+			logging.Int64("bitrate_bps", probe.BitRate()),
+		),
+	)
 	return nil
 }
 

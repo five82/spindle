@@ -8,11 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
@@ -28,6 +30,12 @@ type Encoder struct {
 	client   drapto.Client
 	notifier notifications.Service
 }
+
+const (
+	minEncodedFileSizeBytes = 5 * 1024 * 1024
+)
+
+var encodeProbe = ffprobe.Inspect
 
 // NewEncoder constructs the encoding handler.
 func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Encoder {
@@ -62,6 +70,7 @@ func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 
 func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
+	startedAt := time.Now()
 	logger.Info("starting encoding", logging.String("ripped_file", strings.TrimSpace(item.RippedFile)))
 	if item.RippedFile == "" {
 		return services.Wrap(
@@ -163,15 +172,6 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			)
 		}
 		encodedPath = path
-		if err := validateEncodedArtifact(encodedPath); err != nil {
-			return services.Wrap(
-				services.ErrExternalTool,
-				"encoding",
-				"validate output",
-				"Drapto reported success but produced an invalid encoded file",
-				err,
-			)
-		}
 		logger.Info("drapto encode completed", logging.String("encoded_file", encodedPath))
 	}
 
@@ -183,15 +183,8 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		logger.Info("created placeholder encoded copy", logging.String("encoded_file", encodedPath))
 	}
-
-	if err := validateEncodedArtifact(encodedPath); err != nil {
-		return services.Wrap(
-			services.ErrExternalTool,
-			"encoding",
-			"validate output",
-			"Encoded artifact missing or empty after encoding",
-			err,
-		)
+	if err := e.validateEncodedArtifact(ctx, encodedPath, startedAt); err != nil {
+		return err
 	}
 
 	item.EncodedFile = encodedPath
@@ -256,21 +249,115 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func validateEncodedArtifact(path string) error {
+func (e *Encoder) validateEncodedArtifact(ctx context.Context, path string, startedAt time.Time) error {
+	logger := logging.WithContext(ctx, e.logger)
 	clean := strings.TrimSpace(path)
 	if clean == "" {
-		return fmt.Errorf("encoded artifact path is empty")
+		logger.Error("encoding validation failed", logging.String("reason", "empty path"))
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate output",
+			"Encoding produced an empty file path",
+			nil,
+		)
 	}
 	info, err := os.Stat(clean)
 	if err != nil {
-		return fmt.Errorf("stat encoded artifact: %w", err)
+		logger.Error("encoding validation failed", logging.String("reason", "stat failure"), logging.Error(err))
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate output",
+			"Failed to stat encoded file",
+			err,
+		)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("encoded artifact %q is a directory", clean)
+		logger.Error("encoding validation failed", logging.String("reason", "path is directory"), logging.String("encoded_path", clean))
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate output",
+			"Encoded artifact points to a directory",
+			nil,
+		)
 	}
-	if info.Size() == 0 {
-		return fmt.Errorf("encoded artifact %q is empty", clean)
+	if info.Size() < minEncodedFileSizeBytes {
+		logger.Error(
+			"encoding validation failed",
+			logging.String("reason", "file too small"),
+			logging.Int64("size_bytes", info.Size()),
+		)
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate output",
+			fmt.Sprintf("Encoded file %q is unexpectedly small (%d bytes)", clean, info.Size()),
+			nil,
+		)
 	}
+
+	binary := "ffprobe"
+	if e.cfg != nil {
+		binary = e.cfg.FFprobeBinary()
+	}
+	probe, err := encodeProbe(ctx, binary, clean)
+	if err != nil {
+		logger.Error("encoding validation failed", logging.String("reason", "ffprobe"), logging.Error(err))
+		return services.Wrap(
+			services.ErrExternalTool,
+			"encoding",
+			"ffprobe validation",
+			"Failed to inspect encoded file with ffprobe",
+			err,
+		)
+	}
+	if probe.VideoStreamCount() == 0 {
+		logger.Error("encoding validation failed", logging.String("reason", "no video stream"))
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate video stream",
+			"Encoded file does not contain a video stream",
+			nil,
+		)
+	}
+	if probe.AudioStreamCount() == 0 {
+		logger.Error("encoding validation failed", logging.String("reason", "no audio stream"))
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate audio stream",
+			"Encoded file does not contain an audio stream",
+			nil,
+		)
+	}
+	duration := probe.DurationSeconds()
+	if duration <= 0 {
+		logger.Error("encoding validation failed", logging.String("reason", "invalid duration"))
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate duration",
+			"Encoded file duration could not be determined",
+			nil,
+		)
+	}
+
+	logger.Info(
+		"encoding validation succeeded",
+		logging.String("encoded_file", clean),
+		logging.Duration("elapsed", time.Since(startedAt)),
+		logging.String("ffprobe_binary", binary),
+		logging.Group("ffprobe",
+			logging.Float64("duration_seconds", duration),
+			logging.Int("video_streams", probe.VideoStreamCount()),
+			logging.Int("audio_streams", probe.AudioStreamCount()),
+			logging.Int64("size_bytes", info.Size()),
+			logging.Int64("bitrate_bps", probe.BitRate()),
+		),
+	)
 	return nil
 }
 

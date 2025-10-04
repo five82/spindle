@@ -1,6 +1,7 @@
 package ripping_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,11 +12,41 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
 	"spindle/internal/services/makemkv"
 )
+
+func stubRipperProbe(t *testing.T) {
+	t.Helper()
+	restore := ripping.SetProbeForTests(func(ctx context.Context, binary, path string) (ffprobe.Result, error) {
+		return ffprobe.Result{
+			Streams: []ffprobe.Stream{
+				{CodecType: "video"},
+				{CodecType: "audio"},
+			},
+			Format: ffprobe.Format{
+				Duration: "600",
+				Size:     "12582912",
+				BitRate:  "5000000",
+			},
+		}, nil
+	})
+	t.Cleanup(restore)
+}
+
+func writeLargeFile(t *testing.T, path string, size int) {
+	t.Helper()
+	if size <= 0 {
+		size = 1
+	}
+	payload := bytes.Repeat([]byte{0xAB}, size)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("writeLargeFile: %v", err)
+	}
+}
 
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
@@ -56,6 +87,8 @@ func TestRipperCreatesRippedFile(t *testing.T) {
 	t.Cleanup(func() {
 		store.Close()
 	})
+
+	stubRipperProbe(t)
 
 	item, err := store.NewDisc(context.Background(), "Demo", "fp")
 	if err != nil {
@@ -113,6 +146,8 @@ func TestRipperSelectsPrimaryTitleFromRipSpec(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubRipperProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Main Feature", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
@@ -161,11 +196,19 @@ func TestRipperFallsBackWithoutClient(t *testing.T) {
 		store.Close()
 	})
 
+	stubRipperProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Fallback", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusIdentified
+	sourcePath := filepath.Join(cfg.StagingDir, "incoming", "fallback-source.mkv")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	writeLargeFile(t, sourcePath, 12*1024*1024)
+	item.SourcePath = sourcePath
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -244,7 +287,8 @@ func (s *stubRipperClient) Rip(ctx context.Context, discTitle, sourcePath, destD
 		progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 25, Message: "starting"})
 	}
 	path := filepath.Join(destDir, sanitizeTestFileName(discTitle)+".mkv")
-	if err := os.WriteFile(path, []byte("stub"), 0o644); err != nil {
+	payload := bytes.Repeat([]byte{0xCD}, 12*1024*1024)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return "", err
 	}
 	if progress != nil {

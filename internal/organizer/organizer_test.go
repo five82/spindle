@@ -1,6 +1,7 @@
 package organizer_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,11 +13,44 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/services/plex"
 )
+
+func stubOrganizerProbe(t *testing.T) {
+	t.Helper()
+	restore := organizer.SetProbeForTests(func(ctx context.Context, binary, path string) (ffprobe.Result, error) {
+		return ffprobe.Result{
+			Streams: []ffprobe.Stream{
+				{CodecType: "video"},
+				{CodecType: "audio"},
+			},
+			Format: ffprobe.Format{
+				Duration: "3600",
+				Size:     "20000000",
+				BitRate:  "4500000",
+			},
+		}, nil
+	})
+	t.Cleanup(restore)
+}
+
+func writeLargeFile(t *testing.T, path string, size int) {
+	t.Helper()
+	if size <= 0 {
+		size = 1
+	}
+	payload := bytes.Repeat([]byte{0x33}, size)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir large file: %v", err)
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("write large file: %v", err)
+	}
+}
 
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
@@ -38,6 +72,8 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubOrganizerProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Demo", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
@@ -50,15 +86,13 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 		t.Fatalf("mkdir encoded: %v", err)
 	}
 	item.EncodedFile = filepath.Join(encodedDir, "demo.encoded.mkv")
-	if err := os.WriteFile(item.EncodedFile, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write encoded file: %v", err)
-	}
+	writeLargeFile(t, item.EncodedFile, 12*1024*1024)
 	item.MetadataJSON = `{"title":"Demo", "filename":"Demo", " library_path":"` + filepath.Join(cfg.LibraryDir, cfg.MoviesDir) + `", "movie":true}`
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 
-	stubPlex := &stubPlexService{}
+	stubPlex := &stubPlexService{targetDir: filepath.Join(cfg.LibraryDir, cfg.MoviesDir)}
 	notifier := &stubNotifier{}
 	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, notifier)
 	item.Status = queue.StatusOrganizing
@@ -99,6 +133,8 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubOrganizerProbe(t)
+
 	notifier := &stubNotifier{}
 	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), &stubPlexService{}, notifier)
 
@@ -116,9 +152,7 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 			t.Fatalf("mkdir encoded: %v", err)
 		}
 		item.EncodedFile = filepath.Join(encodedDir, "unknown"+strconv.Itoa(i)+".mkv")
-		if err := os.WriteFile(item.EncodedFile, []byte("data"), 0o644); err != nil {
-			t.Fatalf("write encoded file: %v", err)
-		}
+		writeLargeFile(t, item.EncodedFile, 10*1024*1024)
 		item.NeedsReview = true
 		item.ReviewReason = "No confident TMDB match"
 		if err := handler.Prepare(context.Background(), item); err != nil {
@@ -165,6 +199,8 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubOrganizerProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Fail", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
@@ -176,9 +212,7 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 		t.Fatalf("mkdir encoded: %v", err)
 	}
 	item.EncodedFile = filepath.Join(encodedDir, "fail.mkv")
-	if err := os.WriteFile(item.EncodedFile, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write encoded file: %v", err)
-	}
+	writeLargeFile(t, item.EncodedFile, 9*1024*1024)
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -254,11 +288,23 @@ func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, p
 
 type stubPlexService struct {
 	organized string
+	targetDir string
 }
 
 func (s *stubPlexService) Organize(ctx context.Context, sourcePath string, meta plex.MediaMetadata) (string, error) {
-	s.organized = sourcePath
-	return filepath.Join("/library", filepath.Base(sourcePath)), nil
+	destDir := s.targetDir
+	if destDir == "" {
+		destDir = filepath.Join(filepath.Dir(sourcePath), "library")
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(destDir, filepath.Base(sourcePath))
+	if err := os.Rename(sourcePath, targetPath); err != nil {
+		return "", err
+	}
+	s.organized = targetPath
+	return targetPath, nil
 }
 
 func (s *stubPlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {

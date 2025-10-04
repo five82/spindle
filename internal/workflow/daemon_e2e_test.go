@@ -24,6 +24,8 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 	cfgValue := config.Default()
 	cfg := &cfgValue
 
+	stubValidationProbes(t)
+
 	base := t.TempDir()
 	cfg.StagingDir = filepath.Join(base, "staging")
 	cfg.LibraryDir = filepath.Join(base, "library")

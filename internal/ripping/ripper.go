@@ -16,6 +16,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
@@ -31,6 +32,12 @@ type Ripper struct {
 	client   makemkv.Ripper
 	notifier notifications.Service
 }
+
+const (
+	minRipFileSizeBytes = 10 * 1024 * 1024
+)
+
+var probeVideo = ffprobe.Inspect
 
 // NewRipper constructs the ripping handler using default dependencies.
 func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Ripper {
@@ -73,6 +80,7 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 
 func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, r.logger)
+	startedAt := time.Now()
 	var target string
 	const progressInterval = time.Minute
 	var lastPersisted time.Time
@@ -144,6 +152,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	if target == "" {
+		sourcePath := strings.TrimSpace(item.SourcePath)
 		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			return services.Wrap(
 				services.ErrConfiguration,
@@ -153,19 +162,44 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 				err,
 			)
 		}
+		if sourcePath == "" {
+			logger.Error(
+				"ripping validation failed",
+				logging.String("reason", "no rip output"),
+				logging.Bool("makemkv_available", r.client != nil),
+			)
+			return services.Wrap(
+				services.ErrValidation,
+				"ripping",
+				"resolve rip output",
+				"No ripped artifact produced and no source path available for fallback",
+				nil,
+			)
+		}
 		cleaned := sanitizeFileName(item.DiscTitle)
 		if cleaned == "" {
-			cleaned = "spindle-disc"
-		}
-		target = filepath.Join(destDir, cleaned+".mkv")
-		if item.SourcePath != "" {
-			if err := copyPlaceholder(item.SourcePath, target); err != nil {
-				return services.Wrap(services.ErrTransient, "ripping", "prepare placeholder", "Failed to copy source into staging", err)
+			cleaned = strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))
+			if cleaned == "" {
+				cleaned = "spindle-disc"
 			}
-		} else if err := os.WriteFile(target, []byte("placeholder rip"), 0o644); err != nil {
-			return services.Wrap(services.ErrTransient, "ripping", "write placeholder", "Failed to write placeholder rip", err)
 		}
-		logger.Info("created placeholder rip output", logging.String("ripped_file", target))
+		ext := filepath.Ext(sourcePath)
+		if ext == "" {
+			ext = ".mkv"
+		}
+		target = filepath.Join(destDir, cleaned+ext)
+		if err := copyPlaceholder(sourcePath, target); err != nil {
+			return services.Wrap(services.ErrTransient, "ripping", "stage source", "Failed to copy source into staging", err)
+		}
+		logger.Info(
+			"copied source into rip staging",
+			logging.String("source_path", sourcePath),
+			logging.String("ripped_file", target),
+		)
+	}
+
+	if err := r.validateRippedArtifact(ctx, item, target, startedAt); err != nil {
+		return err
 	}
 
 	item.RippedFile = target
@@ -179,6 +213,119 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 			logger.Warn("rip completion notification failed", logging.Error(err))
 		}
 	}
+
+	return nil
+}
+
+func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, path string, startedAt time.Time) error {
+	logger := logging.WithContext(ctx, r.logger)
+	clean := strings.TrimSpace(path)
+	if clean == "" {
+		logger.Error("ripping validation failed", logging.String("reason", "empty path"))
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"validate output",
+			"Ripping produced an empty file path",
+			nil,
+		)
+	}
+	info, err := os.Stat(clean)
+	if err != nil {
+		logger.Error("ripping validation failed", logging.String("reason", "stat failure"), logging.Error(err))
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"validate output",
+			"Failed to stat ripped file",
+			err,
+		)
+	}
+	if info.IsDir() {
+		logger.Error("ripping validation failed", logging.String("reason", "path is directory"), logging.String("ripped_path", clean))
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"validate output",
+			"Ripped artifact points to a directory",
+			nil,
+		)
+	}
+	if info.Size() < minRipFileSizeBytes {
+		logger.Error(
+			"ripping validation failed",
+			logging.String("reason", "file too small"),
+			logging.Int64("size_bytes", info.Size()),
+		)
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"validate output",
+			fmt.Sprintf("Ripped file %q is unexpectedly small (%d bytes)", clean, info.Size()),
+			nil,
+		)
+	}
+
+	binary := "ffprobe"
+	if r.cfg != nil {
+		binary = r.cfg.FFprobeBinary()
+	}
+	probe, err := probeVideo(ctx, binary, clean)
+	if err != nil {
+		logger.Error("ripping validation failed", logging.String("reason", "ffprobe"), logging.Error(err))
+		return services.Wrap(
+			services.ErrExternalTool,
+			"ripping",
+			"ffprobe validation",
+			"Failed to inspect ripped file with ffprobe",
+			err,
+		)
+	}
+	if probe.VideoStreamCount() == 0 {
+		logger.Error("ripping validation failed", logging.String("reason", "no video stream"))
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"validate video stream",
+			"Ripped file does not contain a video stream",
+			nil,
+		)
+	}
+	if probe.AudioStreamCount() == 0 {
+		logger.Error("ripping validation failed", logging.String("reason", "no audio stream"))
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"validate audio stream",
+			"Ripped file does not contain an audio stream",
+			nil,
+		)
+	}
+	duration := probe.DurationSeconds()
+	if duration <= 0 {
+		logger.Error("ripping validation failed", logging.String("reason", "invalid duration"))
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"validate duration",
+			"Ripped file duration could not be determined",
+			nil,
+		)
+	}
+
+	logger.Info(
+		"ripping validation succeeded",
+		logging.String("ripped_file", clean),
+		logging.Duration("elapsed", time.Since(startedAt)),
+		logging.String("ffprobe_binary", binary),
+		logging.Group("ffprobe",
+			logging.Float64("duration_seconds", duration),
+			logging.Int("video_streams", probe.VideoStreamCount()),
+			logging.Int("audio_streams", probe.AudioStreamCount()),
+			logging.Int64("size_bytes", info.Size()),
+			logging.Int64("bitrate_bps", probe.BitRate()),
+		),
+	)
 
 	return nil
 }

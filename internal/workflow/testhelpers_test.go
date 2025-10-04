@@ -1,14 +1,20 @@
 package workflow_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 
 	"spindle/internal/disc"
+	"spindle/internal/encoding"
 	"spindle/internal/identification/tmdb"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
+	"spindle/internal/organizer"
+	"spindle/internal/ripping"
 	"spindle/internal/services/drapto"
 	"spindle/internal/services/makemkv"
 	"spindle/internal/services/plex"
@@ -46,6 +52,35 @@ func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, p
 		s.processingCompletes = append(s.processingCompletes, title)
 	}
 	return nil
+}
+
+func stubValidationProbes(t *testing.T) {
+	t.Helper()
+	probeResult := ffprobe.Result{
+		Streams: []ffprobe.Stream{
+			{CodecType: "video"},
+			{CodecType: "audio"},
+		},
+		Format: ffprobe.Format{
+			Duration: "5400",
+			Size:     "20971520",
+			BitRate:  "6000000",
+		},
+	}
+	restoreRipper := ripping.SetProbeForTests(func(ctx context.Context, binary, path string) (ffprobe.Result, error) {
+		return probeResult, nil
+	})
+	restoreEncoder := encoding.SetProbeForTests(func(ctx context.Context, binary, path string) (ffprobe.Result, error) {
+		return probeResult, nil
+	})
+	restoreOrganizer := organizer.SetProbeForTests(func(ctx context.Context, binary, path string) (ffprobe.Result, error) {
+		return probeResult, nil
+	})
+	t.Cleanup(func() {
+		restoreOrganizer()
+		restoreEncoder()
+		restoreRipper()
+	})
 }
 
 type stubDraptoClient struct{}
@@ -146,7 +181,8 @@ func (f *fakeMakemkvClient) Rip(ctx context.Context, discTitle, sourcePath, dest
 	}
 	filename := "integration-disc.mkv"
 	target := filepath.Join(destDir, filename)
-	if err := os.WriteFile(target, []byte("ripped-data"), 0o644); err != nil {
+	data := bytes.Repeat([]byte{0xAF}, 20*1024*1024)
+	if err := os.WriteFile(target, data, 0o644); err != nil {
 		return "", err
 	}
 	if progress != nil {
@@ -154,4 +190,18 @@ func (f *fakeMakemkvClient) Rip(ctx context.Context, discTitle, sourcePath, dest
 		progress(makemkv.ProgressUpdate{Stage: "Ripped", Percent: 100, Message: "done"})
 	}
 	return target, nil
+}
+
+func writeLargeTempFile(t *testing.T, path string, size int) {
+	t.Helper()
+	if size <= 0 {
+		size = 1
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir temp file: %v", err)
+	}
+	payload := bytes.Repeat([]byte{0xBC}, size)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
 }

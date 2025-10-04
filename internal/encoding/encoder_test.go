@@ -1,6 +1,7 @@
 package encoding_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -11,10 +12,43 @@ import (
 	"spindle/internal/config"
 	"spindle/internal/encoding"
 	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services/drapto"
 )
+
+func stubEncoderProbe(t *testing.T) {
+	t.Helper()
+	restore := encoding.SetProbeForTests(func(ctx context.Context, binary, path string) (ffprobe.Result, error) {
+		return ffprobe.Result{
+			Streams: []ffprobe.Stream{
+				{CodecType: "video"},
+				{CodecType: "audio"},
+			},
+			Format: ffprobe.Format{
+				Duration: "5400",
+				Size:     "15000000",
+				BitRate:  "5000000",
+			},
+		}, nil
+	})
+	t.Cleanup(restore)
+}
+
+func writeLargeFile(t *testing.T, path string, size int) {
+	t.Helper()
+	if size <= 0 {
+		size = 1
+	}
+	payload := bytes.Repeat([]byte{0x42}, size)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir large file: %v", err)
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("write large file: %v", err)
+	}
+}
 
 func testConfig(t *testing.T) *config.Config {
 	t.Helper()
@@ -54,6 +88,8 @@ func TestEncoderUsesDraptoClient(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubEncoderProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Demo", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
@@ -66,9 +102,7 @@ func TestEncoderUsesDraptoClient(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write ripped file: %v", err)
-	}
+	writeLargeFile(t, item.RippedFile, 8*1024*1024)
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -117,6 +151,8 @@ func TestEncoderFallsBackWithoutClient(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubEncoderProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Fallback", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
@@ -129,9 +165,7 @@ func TestEncoderFallsBackWithoutClient(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write ripped file: %v", err)
-	}
+	writeLargeFile(t, item.RippedFile, 8*1024*1024)
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -169,6 +203,8 @@ func TestEncoderWrapsErrors(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubEncoderProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Fail", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
@@ -181,9 +217,7 @@ func TestEncoderWrapsErrors(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write ripped file: %v", err)
-	}
+	writeLargeFile(t, item.RippedFile, 8*1024*1024)
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), failingClient{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
@@ -202,6 +236,8 @@ func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubEncoderProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Missing", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
@@ -214,9 +250,7 @@ func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write ripped file: %v", err)
-	}
+	writeLargeFile(t, item.RippedFile, 8*1024*1024)
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), missingArtifactClient{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
@@ -235,6 +269,8 @@ func TestEncoderFailsWhenEncodedArtifactEmpty(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	stubEncoderProbe(t)
+
 	item, err := store.NewDisc(context.Background(), "Empty", "fp")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
@@ -247,9 +283,7 @@ func TestEncoderFailsWhenEncodedArtifactEmpty(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write ripped file: %v", err)
-	}
+	writeLargeFile(t, item.RippedFile, 8*1024*1024)
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), emptyArtifactClient{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
@@ -307,7 +341,8 @@ func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir stri
 		stem = filepath.Base(inputPath)
 	}
 	path := filepath.Join(outputDir, stem+".mkv")
-	if err := os.WriteFile(path, []byte("encoded"), 0o644); err != nil {
+	payload := bytes.Repeat([]byte{0xEC}, 10*1024*1024)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return "", err
 	}
 	return path, nil

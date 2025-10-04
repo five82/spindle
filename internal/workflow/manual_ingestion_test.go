@@ -35,15 +35,15 @@ func TestManualFileIngestionCompletes(t *testing.T) {
 		store.Close()
 	})
 
+	stubValidationProbes(t)
+
 	ctx := context.Background()
 	manualDir := filepath.Join(cfg.StagingDir, "manual")
 	if err := os.MkdirAll(manualDir, 0o755); err != nil {
 		t.Fatalf("mkdir manual: %v", err)
 	}
 	manualPath := filepath.Join(manualDir, "Manual Movie.mkv")
-	if err := os.WriteFile(manualPath, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write manual file: %v", err)
-	}
+	writeLargeTempFile(t, manualPath, 16*1024*1024)
 
 	item, err := store.NewFile(ctx, manualPath)
 	if err != nil {

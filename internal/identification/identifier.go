@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"log/slog"
@@ -276,6 +278,10 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
+	if err := i.validateIdentification(ctx, item); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -322,4 +328,120 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 		return nil, services.Wrap(services.ErrExternalTool, "identification", "makemkv scan", "MakeMKV disc scan failed", err)
 	}
 	return result, nil
+}
+
+func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Item) error {
+	logger := logging.WithContext(ctx, i.logger)
+	fingerprint := strings.TrimSpace(item.DiscFingerprint)
+	if fingerprint == "" {
+		logger.Error("identification validation failed", logging.String("reason", "missing fingerprint"))
+		return services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"validate fingerprint",
+			"Disc fingerprint missing after identification; rerun identification to capture MakeMKV scan results",
+			nil,
+		)
+	}
+
+	ripSpecRaw := strings.TrimSpace(item.RipSpecData)
+	if ripSpecRaw == "" {
+		logger.Error("identification validation failed", logging.String("reason", "missing rip spec"))
+		return services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"validate rip spec",
+			"Rip specification missing after identification; unable to determine ripping instructions",
+			nil,
+		)
+	}
+
+	var ripSpec struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal([]byte(ripSpecRaw), &ripSpec); err != nil {
+		logger.Error("identification validation failed", logging.String("reason", "invalid rip spec"), logging.Error(err))
+		return services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"parse rip spec",
+			"Rip specification is invalid JSON; cannot continue",
+			err,
+		)
+	}
+	if specFingerprint := strings.TrimSpace(ripSpec.Fingerprint); !strings.EqualFold(specFingerprint, fingerprint) {
+		logger.Error(
+			"identification validation failed",
+			logging.String("reason", "fingerprint mismatch"),
+			logging.String("item_fingerprint", fingerprint),
+			logging.String("spec_fingerprint", specFingerprint),
+		)
+		return services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"validate rip spec fingerprint",
+			"Rip specification fingerprint does not match queue item fingerprint",
+			nil,
+		)
+	}
+
+	if err := i.ensureStagingSkeleton(item); err != nil {
+		return err
+	}
+
+	logger.Info(
+		"identification validation succeeded",
+		logging.String("fingerprint", fingerprint),
+		logging.String("staging_root", item.StagingRoot(i.cfg.StagingDir)),
+	)
+
+	return nil
+}
+
+func (i *Identifier) ensureStagingSkeleton(item *queue.Item) error {
+	if i.cfg == nil {
+		return services.Wrap(
+			services.ErrConfiguration,
+			"identification",
+			"resolve configuration",
+			"Configuration unavailable; cannot allocate staging directory",
+			nil,
+		)
+	}
+	base := strings.TrimSpace(i.cfg.StagingDir)
+	if base == "" {
+		return services.Wrap(
+			services.ErrConfiguration,
+			"identification",
+			"resolve staging dir",
+			"staging_dir is empty; configure staging directories before ripping",
+			nil,
+		)
+	}
+	root := strings.TrimSpace(item.StagingRoot(base))
+	if root == "" {
+		return services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"determine staging root",
+			"Unable to determine staging directory for fingerprint",
+			nil,
+		)
+	}
+	for _, sub := range []string{"", "rips", "encoded", "organizing"} {
+		path := root
+		if sub != "" {
+			path = filepath.Join(root, sub)
+		}
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return services.Wrap(
+				services.ErrConfiguration,
+				"identification",
+				"create staging directories",
+				fmt.Sprintf("Failed to create staging directory %q", path),
+				err,
+			)
+		}
+	}
+	return nil
 }
