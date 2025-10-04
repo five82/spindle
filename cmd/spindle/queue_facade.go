@@ -1,0 +1,273 @@
+package main
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"spindle/internal/ipc"
+	"spindle/internal/queue"
+)
+
+type queueAPI interface {
+	Stats(ctx context.Context) (map[string]int, error)
+	List(ctx context.Context, statuses []string) ([]queueItemView, error)
+	ClearAll(ctx context.Context) (int64, error)
+	ClearCompleted(ctx context.Context) (int64, error)
+	ClearFailed(ctx context.Context) (int64, error)
+	ResetStuck(ctx context.Context) (int64, error)
+	RetryAll(ctx context.Context) (int64, error)
+	RetryIDs(ctx context.Context, ids []int64) (queueRetryResult, error)
+	Health(ctx context.Context) (queueHealthView, error)
+}
+
+type queueIPCFacade struct {
+	client *ipc.Client
+}
+
+type queueStoreFacade struct {
+	store *queue.Store
+}
+
+func (f *queueIPCFacade) Stats(_ context.Context) (map[string]int, error) {
+	resp, err := f.client.Status()
+	if err != nil {
+		return nil, err
+	}
+	stats := make(map[string]int, len(resp.QueueStats))
+	for key, value := range resp.QueueStats {
+		stats[key] = value
+	}
+	return stats, nil
+}
+
+func (f *queueIPCFacade) List(_ context.Context, statuses []string) ([]queueItemView, error) {
+	resp, err := f.client.QueueList(statuses)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]queueItemView, 0, len(resp.Items))
+	for _, item := range resp.Items {
+		items = append(items, queueItemView{
+			ID:              item.ID,
+			DiscTitle:       item.DiscTitle,
+			SourcePath:      item.SourcePath,
+			Status:          item.Status,
+			CreatedAt:       item.CreatedAt,
+			DiscFingerprint: item.DiscFingerprint,
+		})
+	}
+	return items, nil
+}
+
+func (f *queueIPCFacade) ClearAll(_ context.Context) (int64, error) {
+	resp, err := f.client.QueueClear()
+	if err != nil {
+		return 0, err
+	}
+	return resp.Removed, nil
+}
+
+func (f *queueIPCFacade) ClearCompleted(_ context.Context) (int64, error) {
+	resp, err := f.client.QueueClearCompleted()
+	if err != nil {
+		return 0, err
+	}
+	return resp.Removed, nil
+}
+
+func (f *queueIPCFacade) ClearFailed(_ context.Context) (int64, error) {
+	resp, err := f.client.QueueClearFailed()
+	if err != nil {
+		return 0, err
+	}
+	return resp.Removed, nil
+}
+
+func (f *queueIPCFacade) ResetStuck(_ context.Context) (int64, error) {
+	resp, err := f.client.QueueReset()
+	if err != nil {
+		return 0, err
+	}
+	return resp.Updated, nil
+}
+
+func (f *queueIPCFacade) RetryAll(_ context.Context) (int64, error) {
+	resp, err := f.client.QueueRetry(nil)
+	if err != nil {
+		return 0, err
+	}
+	return resp.Updated, nil
+}
+
+func (f *queueIPCFacade) RetryIDs(_ context.Context, ids []int64) (queueRetryResult, error) {
+	result := queueRetryResult{
+		Items: make([]queueRetryItemResult, 0, len(ids)),
+	}
+
+	resp, err := f.client.QueueList(nil)
+	if err != nil {
+		return queueRetryResult{}, err
+	}
+
+	itemsByID := make(map[int64]ipc.QueueItem, len(resp.Items))
+	for _, item := range resp.Items {
+		itemsByID[item.ID] = item
+	}
+
+	for _, id := range ids {
+		item, ok := itemsByID[id]
+		if !ok {
+			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFound})
+			continue
+		}
+		if !statusIsFailed(item.Status) {
+			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFailed})
+			continue
+		}
+
+		retryResp, err := f.client.QueueRetry([]int64{id})
+		if err != nil {
+			return queueRetryResult{}, err
+		}
+		if retryResp != nil && retryResp.Updated > 0 {
+			result.UpdatedCount += retryResp.Updated
+			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeUpdated})
+			continue
+		}
+
+		result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFailed})
+	}
+
+	return result, nil
+}
+
+func (f *queueIPCFacade) Health(_ context.Context) (queueHealthView, error) {
+	resp, err := f.client.QueueHealth()
+	if err != nil {
+		return queueHealthView{}, err
+	}
+	return queueHealthView{
+		Total:      resp.Total,
+		Pending:    resp.Pending,
+		Processing: resp.Processing,
+		Failed:     resp.Failed,
+		Review:     resp.Review,
+		Completed:  resp.Completed,
+	}, nil
+}
+
+func (f *queueStoreFacade) Stats(ctx context.Context) (map[string]int, error) {
+	stats, err := f.store.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int, len(stats))
+	for status, count := range stats {
+		result[string(status)] = count
+	}
+	return result, nil
+}
+
+func (f *queueStoreFacade) List(ctx context.Context, statuses []string) ([]queueItemView, error) {
+	var filters []queue.Status
+	for _, status := range statuses {
+		filters = append(filters, queue.Status(status))
+	}
+
+	items, err := f.store.List(ctx, filters...)
+	if err != nil {
+		return nil, err
+	}
+
+	views := make([]queueItemView, 0, len(items))
+	for _, item := range items {
+		created := ""
+		if !item.CreatedAt.IsZero() {
+			created = item.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		views = append(views, queueItemView{
+			ID:              item.ID,
+			DiscTitle:       item.DiscTitle,
+			SourcePath:      item.SourcePath,
+			Status:          string(item.Status),
+			CreatedAt:       created,
+			DiscFingerprint: item.DiscFingerprint,
+		})
+	}
+	return views, nil
+}
+
+func (f *queueStoreFacade) ClearAll(ctx context.Context) (int64, error) {
+	return f.store.Clear(ctx)
+}
+
+func (f *queueStoreFacade) ClearCompleted(ctx context.Context) (int64, error) {
+	return f.store.ClearCompleted(ctx)
+}
+
+func (f *queueStoreFacade) ClearFailed(ctx context.Context) (int64, error) {
+	return f.store.ClearFailed(ctx)
+}
+
+func (f *queueStoreFacade) ResetStuck(ctx context.Context) (int64, error) {
+	return f.store.ResetStuckProcessing(ctx)
+}
+
+func (f *queueStoreFacade) RetryAll(ctx context.Context) (int64, error) {
+	return f.store.RetryFailed(ctx)
+}
+
+func (f *queueStoreFacade) RetryIDs(ctx context.Context, ids []int64) (queueRetryResult, error) {
+	result := queueRetryResult{
+		Items: make([]queueRetryItemResult, 0, len(ids)),
+	}
+
+	for _, id := range ids {
+		item, err := f.store.GetByID(ctx, id)
+		if err != nil {
+			return queueRetryResult{}, err
+		}
+		if item == nil {
+			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFound})
+			continue
+		}
+		if item.Status != queue.StatusFailed {
+			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFailed})
+			continue
+		}
+
+		updated, err := f.store.RetryFailed(ctx, id)
+		if err != nil {
+			return queueRetryResult{}, err
+		}
+		if updated > 0 {
+			result.UpdatedCount += updated
+			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeUpdated})
+			continue
+		}
+
+		result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFailed})
+	}
+
+	return result, nil
+}
+
+func (f *queueStoreFacade) Health(ctx context.Context) (queueHealthView, error) {
+	summary, err := f.store.Health(ctx)
+	if err != nil {
+		return queueHealthView{}, err
+	}
+	return queueHealthView{
+		Total:      summary.Total,
+		Pending:    summary.Pending,
+		Processing: summary.Processing,
+		Failed:     summary.Failed,
+		Review:     summary.Review,
+		Completed:  summary.Completed,
+	}, nil
+}
+
+func statusIsFailed(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), string(queue.StatusFailed))
+}

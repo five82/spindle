@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"spindle/internal/ipc"
 )
 
 func buildQueueStatusRows(stats map[string]int) [][]string {
@@ -27,11 +25,11 @@ func buildQueueStatusRows(stats map[string]int) [][]string {
 	return rows
 }
 
-func buildQueueListRows(items []ipc.QueueItem) [][]string {
+func buildQueueListRows(items []queueItemView) [][]string {
 	if len(items) == 0 {
 		return nil
 	}
-	sorted := make([]ipc.QueueItem, len(items))
+	sorted := make([]queueItemView, len(items))
 	copy(sorted, items)
 
 	sort.Slice(sorted, func(i, j int) bool {

@@ -100,6 +100,18 @@ func (c *commandContext) withStore(fn func(*ipc.Client, *queue.Store) error) err
 	return fn(nil, store)
 }
 
+func (c *commandContext) withQueueAPI(fn func(queueAPI) error) error {
+	return c.withStore(func(client *ipc.Client, store *queue.Store) error {
+		var api queueAPI
+		if client != nil {
+			api = &queueIPCFacade{client: client}
+		} else {
+			api = &queueStoreFacade{store: store}
+		}
+		return fn(api)
+	})
+}
+
 func (c *commandContext) dialClient() (*ipc.Client, error) {
 	socket := c.socketPath()
 	client, err := ipc.Dial(socket)
