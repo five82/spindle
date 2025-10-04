@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"spindle/internal/config"
 	"spindle/internal/daemon"
 	"spindle/internal/ipc"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/stage"
+	"spindle/internal/testsupport"
 	"spindle/internal/workflow"
 )
 
@@ -25,25 +25,10 @@ func (noopStage) HealthCheck(context.Context) stage.Health {
 	return stage.Healthy("noop")
 }
 
-func testConfig(t *testing.T) *config.Config {
-	t.Helper()
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	cfg.OpticalDrive = ""
-	return &cfg
-}
-
 func TestIPCServerClient(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
+	cfg := testsupport.NewConfig(t)
+	cfg.OpticalDrive = ""
+	store := testsupport.MustOpenStore(t, cfg)
 	logPath := filepath.Join(cfg.LogDir, "ipc-test.log")
 	logger := logging.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)

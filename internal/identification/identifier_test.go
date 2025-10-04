@@ -2,38 +2,21 @@ package identification_test
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"spindle/internal/config"
 	"spindle/internal/disc"
 	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/testsupport"
 )
 
-func testConfig(t *testing.T) *config.Config {
-	t.Helper()
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	return &cfg
-}
-
 func TestIdentifierTransitionsToIdentified(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	item, err := store.NewDisc(context.Background(), "Demo Disc", "fp-demo")
 	if err != nil {
@@ -80,12 +63,8 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 }
 
 func TestIdentifierMarksDuplicateForReview(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
 	first, err := store.NewDisc(ctx, "Existing", "fp-existing")
@@ -124,12 +103,8 @@ func TestIdentifierMarksDuplicateForReview(t *testing.T) {
 }
 
 func TestIdentifierMarksReviewWhenNoResults(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	item, err := store.NewDisc(context.Background(), "Unknown", "fp-unknown")
 	if err != nil {
@@ -161,12 +136,8 @@ func TestIdentifierMarksReviewWhenNoResults(t *testing.T) {
 }
 
 func TestIdentifierHealthReady(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), &stubSearcher{}, &stubDiscScanner{}, nil)
 	health := handler.HealthCheck(context.Background())
@@ -179,13 +150,9 @@ func TestIdentifierHealthReady(t *testing.T) {
 }
 
 func TestIdentifierHealthMissingAPIKey(t *testing.T) {
-	cfg := testConfig(t)
+	cfg := testsupport.NewConfig(t)
 	cfg.TMDBAPIKey = ""
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), &stubSearcher{}, &stubDiscScanner{}, nil)
 	health := handler.HealthCheck(context.Background())

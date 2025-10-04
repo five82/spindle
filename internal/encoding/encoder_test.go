@@ -9,14 +9,16 @@ import (
 	"strings"
 	"testing"
 
-	"spindle/internal/config"
 	"spindle/internal/encoding"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services/drapto"
+	"spindle/internal/testsupport"
 )
+
+const encodedFixtureSize = 6 * 1024 * 1024
 
 func stubEncoderProbe(t *testing.T) {
 	t.Helper()
@@ -36,57 +38,9 @@ func stubEncoderProbe(t *testing.T) {
 	t.Cleanup(restore)
 }
 
-func writeLargeFile(t *testing.T, path string, size int) {
-	t.Helper()
-	if size <= 0 {
-		size = 1
-	}
-	payload := bytes.Repeat([]byte{0x42}, size)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir large file: %v", err)
-	}
-	if err := os.WriteFile(path, payload, 0o644); err != nil {
-		t.Fatalf("write large file: %v", err)
-	}
-}
-
-func testConfig(t *testing.T) *config.Config {
-	t.Helper()
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	binDir := filepath.Join(base, "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatalf("mkdir bin: %v", err)
-	}
-	for _, name := range []string{"makemkvcon", "drapto"} {
-		path := filepath.Join(binDir, name)
-		script := []byte("#!/bin/sh\nexit 0\n")
-		if err := os.WriteFile(path, script, 0o755); err != nil {
-			t.Fatalf("write stub %s: %v", name, err)
-		}
-	}
-	oldPath := os.Getenv("PATH")
-	if err := os.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath); err != nil {
-		t.Fatalf("set PATH: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("PATH", oldPath)
-	})
-	return &cfg
-}
-
 func TestEncoderUsesDraptoClient(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubEncoderProbe(t)
 
@@ -98,11 +52,8 @@ func TestEncoderUsesDraptoClient(t *testing.T) {
 	item.DiscFingerprint = "ENCODERTESTFP1"
 	stagingRoot := item.StagingRoot(cfg.StagingDir)
 	ripsDir := filepath.Join(stagingRoot, "rips")
-	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
-		t.Fatalf("mkdir rips: %v", err)
-	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	writeLargeFile(t, item.RippedFile, 8*1024*1024)
+	testsupport.WriteFile(t, item.RippedFile, encodedFixtureSize)
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -144,12 +95,8 @@ func TestEncoderUsesDraptoClient(t *testing.T) {
 }
 
 func TestEncoderFallsBackWithoutClient(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubEncoderProbe(t)
 
@@ -165,7 +112,7 @@ func TestEncoderFallsBackWithoutClient(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	writeLargeFile(t, item.RippedFile, 8*1024*1024)
+	testsupport.WriteFile(t, item.RippedFile, encodedFixtureSize)
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -196,12 +143,8 @@ func TestEncoderFallsBackWithoutClient(t *testing.T) {
 }
 
 func TestEncoderWrapsErrors(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubEncoderProbe(t)
 
@@ -217,7 +160,7 @@ func TestEncoderWrapsErrors(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	writeLargeFile(t, item.RippedFile, 8*1024*1024)
+	testsupport.WriteFile(t, item.RippedFile, encodedFixtureSize)
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), failingClient{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
@@ -229,12 +172,8 @@ func TestEncoderWrapsErrors(t *testing.T) {
 }
 
 func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubEncoderProbe(t)
 
@@ -250,7 +189,7 @@ func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	writeLargeFile(t, item.RippedFile, 8*1024*1024)
+	testsupport.WriteFile(t, item.RippedFile, encodedFixtureSize)
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), missingArtifactClient{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
@@ -262,12 +201,8 @@ func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
 }
 
 func TestEncoderFailsWhenEncodedArtifactEmpty(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubEncoderProbe(t)
 
@@ -283,7 +218,7 @@ func TestEncoderFailsWhenEncodedArtifactEmpty(t *testing.T) {
 		t.Fatalf("mkdir rips: %v", err)
 	}
 	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	writeLargeFile(t, item.RippedFile, 8*1024*1024)
+	testsupport.WriteFile(t, item.RippedFile, encodedFixtureSize)
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), emptyArtifactClient{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
@@ -295,12 +230,8 @@ func TestEncoderFailsWhenEncodedArtifactEmpty(t *testing.T) {
 }
 
 func TestEncoderHealthReady(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), &stubDraptoClient{}, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
@@ -310,12 +241,8 @@ func TestEncoderHealthReady(t *testing.T) {
 }
 
 func TestEncoderHealthMissingClient(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), nil, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
@@ -341,7 +268,7 @@ func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir stri
 		stem = filepath.Base(inputPath)
 	}
 	path := filepath.Join(outputDir, stem+".mkv")
-	payload := bytes.Repeat([]byte{0xEC}, 10*1024*1024)
+	payload := bytes.Repeat([]byte{0xEC}, encodedFixtureSize)
 	if err := os.WriteFile(path, payload, 0o644); err != nil {
 		return "", err
 	}

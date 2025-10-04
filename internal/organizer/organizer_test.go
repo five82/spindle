@@ -1,7 +1,6 @@
 package organizer_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,14 +10,16 @@ import (
 	"strings"
 	"testing"
 
-	"spindle/internal/config"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/services/plex"
+	"spindle/internal/testsupport"
 )
+
+const organizedFixtureSize = 6 * 1024 * 1024
 
 func stubOrganizerProbe(t *testing.T) {
 	t.Helper()
@@ -38,39 +39,9 @@ func stubOrganizerProbe(t *testing.T) {
 	t.Cleanup(restore)
 }
 
-func writeLargeFile(t *testing.T, path string, size int) {
-	t.Helper()
-	if size <= 0 {
-		size = 1
-	}
-	payload := bytes.Repeat([]byte{0x33}, size)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir large file: %v", err)
-	}
-	if err := os.WriteFile(path, payload, 0o644); err != nil {
-		t.Fatalf("write large file: %v", err)
-	}
-}
-
-func testConfig(t *testing.T) *config.Config {
-	t.Helper()
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	return &cfg
-}
-
 func TestOrganizerMovesFileToLibrary(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubOrganizerProbe(t)
 
@@ -86,7 +57,7 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 		t.Fatalf("mkdir encoded: %v", err)
 	}
 	item.EncodedFile = filepath.Join(encodedDir, "demo.encoded.mkv")
-	writeLargeFile(t, item.EncodedFile, 12*1024*1024)
+	testsupport.WriteFile(t, item.EncodedFile, organizedFixtureSize)
 	item.MetadataJSON = `{"title":"Demo", "filename":"Demo", " library_path":"` + filepath.Join(cfg.LibraryDir, cfg.MoviesDir) + `", "movie":true}`
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -126,12 +97,8 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 }
 
 func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubOrganizerProbe(t)
 
@@ -152,7 +119,7 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 			t.Fatalf("mkdir encoded: %v", err)
 		}
 		item.EncodedFile = filepath.Join(encodedDir, "unknown"+strconv.Itoa(i)+".mkv")
-		writeLargeFile(t, item.EncodedFile, 10*1024*1024)
+		testsupport.WriteFile(t, item.EncodedFile, organizedFixtureSize)
 		item.NeedsReview = true
 		item.ReviewReason = "No confident TMDB match"
 		if err := handler.Prepare(context.Background(), item); err != nil {
@@ -192,12 +159,8 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 }
 
 func TestOrganizerWrapsErrors(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubOrganizerProbe(t)
 
@@ -212,7 +175,7 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 		t.Fatalf("mkdir encoded: %v", err)
 	}
 	item.EncodedFile = filepath.Join(encodedDir, "fail.mkv")
-	writeLargeFile(t, item.EncodedFile, 9*1024*1024)
+	testsupport.WriteFile(t, item.EncodedFile, organizedFixtureSize)
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -227,12 +190,8 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 }
 
 func TestOrganizerHealthReady(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), &stubPlexService{}, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
@@ -242,12 +201,8 @@ func TestOrganizerHealthReady(t *testing.T) {
 }
 
 func TestOrganizerHealthMissingPlex(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), nil, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())

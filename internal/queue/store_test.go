@@ -7,31 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"spindle/internal/config"
 	"spindle/internal/queue"
+	"spindle/internal/testsupport"
 )
 
-func testConfig(t *testing.T) *config.Config {
-	t.Helper()
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	return &cfg
-}
-
 func TestOpenAppliesMigrations(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
 	item, err := store.NewDisc(ctx, "Sample Disc", "fingerprint-1")
@@ -60,12 +42,8 @@ func TestOpenAppliesMigrations(t *testing.T) {
 }
 
 func TestNewFileSetsDefaults(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
 	manualPath := filepath.Join(cfg.StagingDir, "manual", "Sample Movie.mkv")
@@ -96,14 +74,8 @@ func TestNewFileSetsDefaults(t *testing.T) {
 }
 
 func TestResetStuckProcessing(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
 	cases := []struct {
@@ -153,18 +125,11 @@ func TestResetStuckProcessing(t *testing.T) {
 }
 
 func TestItemsByStatusOrdering(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
-	_, err = store.NewDisc(ctx, "Disc A", "fp-a")
-	if err != nil {
+	if _, err := store.NewDisc(ctx, "Disc A", "fp-a"); err != nil {
 		t.Fatalf("NewDisc failed: %v", err)
 	}
 	b, err := store.NewDisc(ctx, "Disc B", "fp-b")
@@ -189,14 +154,8 @@ func TestItemsByStatusOrdering(t *testing.T) {
 }
 
 func TestListSupportsStatusFilter(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
 	a, err := store.NewDisc(ctx, "Disc A", "fp-a")
@@ -245,14 +204,8 @@ func TestListSupportsStatusFilter(t *testing.T) {
 }
 
 func TestRetryFailed(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
 	a, err := store.NewDisc(ctx, "ItemA", "fp-a")
@@ -302,14 +255,8 @@ func TestRetryFailed(t *testing.T) {
 }
 
 func TestUpdateHeartbeat(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
 	item, err := store.NewDisc(ctx, "Heartbeat", "hb")
@@ -335,14 +282,8 @@ func TestUpdateHeartbeat(t *testing.T) {
 }
 
 func TestReclaimStaleProcessing(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
 	past := time.Now().Add(-2 * time.Hour).UTC()

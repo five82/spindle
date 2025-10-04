@@ -1,7 +1,6 @@
 package ripping_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,14 +9,38 @@ import (
 	"strings"
 	"testing"
 
-	"spindle/internal/config"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
 	"spindle/internal/services/makemkv"
+	"spindle/internal/testsupport"
 )
+
+const ripFixtureSize = 11 * 1024 * 1024
+
+func writeStubFile(path string, size int64) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	buf := make([]byte, 64*1024)
+	var written int64
+	for written < size {
+		chunk := buf
+		remaining := size - written
+		if remaining < int64(len(buf)) {
+			chunk = buf[:remaining]
+		}
+		if _, err := f.Write(chunk); err != nil {
+			return err
+		}
+		written += int64(len(chunk))
+	}
+	return nil
+}
 
 func stubRipperProbe(t *testing.T) {
 	t.Helper()
@@ -37,56 +60,9 @@ func stubRipperProbe(t *testing.T) {
 	t.Cleanup(restore)
 }
 
-func writeLargeFile(t *testing.T, path string, size int) {
-	t.Helper()
-	if size <= 0 {
-		size = 1
-	}
-	payload := bytes.Repeat([]byte{0xAB}, size)
-	if err := os.WriteFile(path, payload, 0o644); err != nil {
-		t.Fatalf("writeLargeFile: %v", err)
-	}
-}
-
-func testConfig(t *testing.T) *config.Config {
-	t.Helper()
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	binDir := filepath.Join(base, "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatalf("mkdir bin: %v", err)
-	}
-	for _, name := range []string{"makemkvcon", "drapto"} {
-		path := filepath.Join(binDir, name)
-		script := []byte("#!/bin/sh\nexit 0\n")
-		if err := os.WriteFile(path, script, 0o755); err != nil {
-			t.Fatalf("write stub %s: %v", name, err)
-		}
-	}
-	oldPath := os.Getenv("PATH")
-	if err := os.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath); err != nil {
-		t.Fatalf("set PATH: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("PATH", oldPath)
-	})
-	return &cfg
-}
-
 func TestRipperCreatesRippedFile(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubRipperProbe(t)
 
@@ -139,12 +115,8 @@ func TestRipperCreatesRippedFile(t *testing.T) {
 }
 
 func TestRipperSelectsPrimaryTitleFromRipSpec(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubRipperProbe(t)
 
@@ -187,14 +159,8 @@ func TestRipperSelectsPrimaryTitleFromRipSpec(t *testing.T) {
 }
 
 func TestRipperFallsBackWithoutClient(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() {
-		store.Close()
-	})
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stubRipperProbe(t)
 
@@ -207,7 +173,7 @@ func TestRipperFallsBackWithoutClient(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
 		t.Fatalf("mkdir source: %v", err)
 	}
-	writeLargeFile(t, sourcePath, 12*1024*1024)
+	testsupport.WriteFile(t, sourcePath, ripFixtureSize)
 	item.SourcePath = sourcePath
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -242,12 +208,8 @@ func TestRipperFallsBackWithoutClient(t *testing.T) {
 }
 
 func TestRipperHealthReady(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), &stubRipperClient{}, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
@@ -257,12 +219,8 @@ func TestRipperHealthReady(t *testing.T) {
 }
 
 func TestRipperHealthMissingClient(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), nil, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
@@ -287,8 +245,7 @@ func (s *stubRipperClient) Rip(ctx context.Context, discTitle, sourcePath, destD
 		progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 25, Message: "starting"})
 	}
 	path := filepath.Join(destDir, sanitizeTestFileName(discTitle)+".mkv")
-	payload := bytes.Repeat([]byte{0xCD}, 12*1024*1024)
-	if err := os.WriteFile(path, payload, 0o644); err != nil {
+	if err := writeStubFile(path, ripFixtureSize); err != nil {
 		return "", err
 	}
 	if progress != nil {
@@ -332,12 +289,8 @@ func (f failingRipper) Rip(ctx context.Context, discTitle, sourcePath, destDir s
 }
 
 func TestRipperWrapsErrors(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
 
 	item, err := store.NewDisc(context.Background(), "Fail", "fp")
 	if err != nil {

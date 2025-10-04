@@ -17,6 +17,7 @@ import (
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/stage"
+	"spindle/internal/testsupport"
 	"spindle/internal/workflow"
 )
 
@@ -49,33 +50,8 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 		t.Fatalf("mkdir home: %v", err)
 	}
 	t.Setenv("HOME", homeDir)
-	cfgVal := config.Default()
-	cfgVal.TMDBAPIKey = "test"
-	cfgVal.StagingDir = filepath.Join(base, "staging")
-	cfgVal.LibraryDir = filepath.Join(base, "library")
-	cfgVal.LogDir = filepath.Join(base, "logs")
-	cfgVal.ReviewDir = filepath.Join(base, "review")
-	cfgVal.OpticalDrive = filepath.Join(base, "fake-drive")
-	binDir := filepath.Join(base, "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatalf("mkdir bin: %v", err)
-	}
-	for _, name := range []string{"makemkvcon", "drapto"} {
-		path := filepath.Join(binDir, name)
-		script := []byte("#!/bin/sh\nexit 0\n")
-		if err := os.WriteFile(path, script, 0o755); err != nil {
-			t.Fatalf("write stub %s: %v", name, err)
-		}
-	}
-	oldPath := os.Getenv("PATH")
-	if err := os.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath); err != nil {
-		t.Fatalf("set PATH: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("PATH", oldPath)
-	})
-
-	cfg := &cfgVal
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	cfg.OpticalDrive = filepath.Join(base, "fake-drive")
 	logPath := filepath.Join(cfg.LogDir, "spindle-test.log")
 	if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
 		t.Fatalf("mkdir log dir: %v", err)
@@ -92,10 +68,7 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 	}
 	writeTestConfig(t, configPath, cfg)
 
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
+	store := testsupport.MustOpenStore(t, cfg)
 
 	logger := logging.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
@@ -130,7 +103,6 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 		cancel()
 		srv.Close()
 		d.Close()
-		store.Close()
 	})
 
 	return env

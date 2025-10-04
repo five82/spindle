@@ -3,17 +3,16 @@ package workflow_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"spindle/internal/config"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
 	"spindle/internal/stage"
+	"spindle/internal/testsupport"
 	"spindle/internal/workflow"
 )
 
@@ -48,26 +47,10 @@ func (s *stubStage) HealthCheck(context.Context) stage.Health {
 	return s.health
 }
 
-func testConfig(t *testing.T) *config.Config {
-	t.Helper()
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	cfg.QueuePollInterval = 0
-	return &cfg
-}
-
 func TestManagerProcessesItems(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	cfg.QueuePollInterval = 0
+	store := testsupport.MustOpenStore(t, cfg)
 
 	identifier := newStubStage("identifier")
 	ripper := newStubStage("ripper")
@@ -128,12 +111,9 @@ func TestManagerProcessesItems(t *testing.T) {
 }
 
 func TestManagerStatusIncludesStageHealth(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	cfg.QueuePollInterval = 0
+	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := newStubStage("identifier")
 	handler.health = stage.Unhealthy(handler.name, "dependency missing")
@@ -155,12 +135,9 @@ func TestManagerStatusIncludesStageHealth(t *testing.T) {
 }
 
 func TestManagerValidationErrorTriggersReview(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	cfg.QueuePollInterval = 0
+	store := testsupport.MustOpenStore(t, cfg)
 
 	stageErr := services.Wrap(
 		services.ErrValidation,
@@ -220,12 +197,9 @@ func TestManagerValidationErrorTriggersReview(t *testing.T) {
 }
 
 func TestManagerFailureDefaultsToFailed(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
+	cfg := testsupport.NewConfig(t)
+	cfg.QueuePollInterval = 0
+	store := testsupport.MustOpenStore(t, cfg)
 
 	failing := newStubStage("ripper")
 	failing.executeErr = fmt.Errorf("boom")

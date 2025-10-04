@@ -2,16 +2,15 @@ package daemon_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"spindle/internal/config"
 	"spindle/internal/daemon"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/stage"
+	"spindle/internal/testsupport"
 	"spindle/internal/workflow"
 )
 
@@ -23,42 +22,9 @@ func (noopStage) HealthCheck(context.Context) stage.Health {
 	return stage.Healthy("noop")
 }
 
-func testConfig(t *testing.T) *config.Config {
-	t.Helper()
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	binDir := filepath.Join(base, "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatalf("mkdir bin: %v", err)
-	}
-	for _, name := range []string{"makemkvcon", "drapto", "ffmpeg"} {
-		path := filepath.Join(binDir, name)
-		script := []byte("#!/bin/sh\nexit 0\n")
-		if err := os.WriteFile(path, script, 0o755); err != nil {
-			t.Fatalf("write stub %s: %v", name, err)
-		}
-	}
-	oldPath := os.Getenv("PATH")
-	if err := os.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath); err != nil {
-		t.Fatalf("set PATH: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("PATH", oldPath)
-	})
-	return &cfg
-}
-
 func TestDaemonStartStop(t *testing.T) {
-	cfg := testConfig(t)
-	store, err := queue.Open(cfg)
-	if err != nil {
-		t.Fatalf("queue.Open: %v", err)
-	}
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries("makemkvcon", "drapto", "ffmpeg"))
+	store := testsupport.MustOpenStore(t, cfg)
 	logPath := filepath.Join(cfg.LogDir, "daemon-test.log")
 	logger := logging.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
