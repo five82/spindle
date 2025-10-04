@@ -84,7 +84,6 @@ func newQueueListCommand(ctx *commandContext) *cobra.Command {
 func newQueueClearCommand(ctx *commandContext) *cobra.Command {
 	var clearCompleted bool
 	var clearFailed bool
-	var clearForce bool
 
 	cmd := &cobra.Command{
 		Use:   "clear",
@@ -95,9 +94,6 @@ func newQueueClearCommand(ctx *commandContext) *cobra.Command {
 			}
 			return ctx.withQueueAPI(func(api queueAPI) error {
 				out := cmd.OutOrStdout()
-				if clearForce {
-					fmt.Fprintln(out, "Clearing queue without confirmation (--force)")
-				}
 
 				var (
 					removed int64
@@ -130,7 +126,6 @@ func newQueueClearCommand(ctx *commandContext) *cobra.Command {
 
 	cmd.Flags().BoolVar(&clearCompleted, "completed", false, "Remove only completed items")
 	cmd.Flags().BoolVar(&clearFailed, "failed", false, "Remove only failed items")
-	cmd.Flags().BoolVar(&clearForce, "force", false, "No-op flag for compatibility; removal always proceeds")
 	return cmd
 }
 
