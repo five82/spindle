@@ -48,8 +48,8 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 				"discTitle": "Blade Runner",
 				"discType":  "bluray",
 			},
-			expectTitle:   "Spindle - Disc Detected",
-			expectMessage: "📀 Disc detected: Blade Runner (bluray)",
+			expectTitle:   "Spindle - Processing Disc",
+			expectMessage: "📀 Processing new disc: Blade Runner (bluray)",
 		},
 		{
 			name:  "rip completed",

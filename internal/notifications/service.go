@@ -79,8 +79,8 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			discType = "unknown"
 		}
 		return n.send(ctx, payload{
-			title:   "Spindle - Disc Detected",
-			message: fmt.Sprintf("📀 Disc detected: %s (%s)", discTitle, discType),
+			title:   "Spindle - Processing Disc",
+			message: fmt.Sprintf("📀 Processing new disc: %s (%s)", discTitle, discType),
 		})
 	case EventIdentificationCompleted:
 		title := strings.TrimSpace(payloadString(data, "title"))
