@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"spindle/internal/config"
 	"spindle/internal/notifications"
@@ -32,6 +31,30 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 		expectPriority string
 	}{
 		{
+			name:  "identification completed",
+			event: notifications.EventIdentificationCompleted,
+			payload: notifications.Payload{
+				"title":        "Interstellar",
+				"year":         "2014",
+				"mediaType":    "movie",
+				"displayTitle": "Interstellar (2014)",
+			},
+			expectTitle:   "Spindle - Identified",
+			expectMessage: "🎬 Identified: Interstellar (2014)",
+			expectTags:    "spindle,identify,movie",
+		},
+		{
+			name:  "disc detected",
+			event: notifications.EventDiscDetected,
+			payload: notifications.Payload{
+				"discTitle": "Blade Runner",
+				"discType":  "bluray",
+			},
+			expectTitle:   "Spindle - Disc Detected",
+			expectMessage: "📀 Disc detected: Blade Runner (bluray)",
+			expectTags:    "spindle,disc,detected",
+		},
+		{
 			name:  "rip completed",
 			event: notifications.EventRipCompleted,
 			payload: notifications.Payload{
@@ -42,27 +65,37 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			expectTags:    "spindle,rip,completed",
 		},
 		{
-			name:  "processing complete",
-			event: notifications.EventProcessingCompleted,
+			name:  "encoding completed",
+			event: notifications.EventEncodingCompleted,
 			payload: notifications.Payload{
-				"title": "The Matrix",
+				"discTitle": "The Matrix",
 			},
-			expectTitle:    "Spindle - Complete",
-			expectMessage:  "✅ Ready to watch: The Matrix",
-			expectTags:     "spindle,workflow,completed",
-			expectPriority: "high",
+			expectTitle:   "Spindle - Encoded",
+			expectMessage: "🎞️ Encoding complete: The Matrix",
+			expectTags:    "spindle,encode,completed",
 		},
 		{
-			name:  "queue completed with failures",
-			event: notifications.EventQueueCompleted,
+			name:  "organization completed",
+			event: notifications.EventOrganizationCompleted,
 			payload: notifications.Payload{
-				"processed": 3,
-				"failed":    1,
-				"duration":  5*time.Minute + 3*time.Second,
+				"mediaTitle": "Arrival",
+				"finalFile":  "Arrival (2016).mkv",
 			},
-			expectTitle:   "Spindle - Queue Complete (with errors)",
-			expectMessage: "Queue processing complete: 3 succeeded, 1 failed in 5m3s",
-			expectTags:    "spindle,queue,completed",
+			expectTitle:   "Spindle - Library Updated",
+			expectMessage: "Added to Plex: Arrival\nFile: Arrival (2016).mkv",
+			expectTags:    "spindle,plex,added",
+		},
+		{
+			name:  "error",
+			event: notifications.EventError,
+			payload: notifications.Payload{
+				"context": "rip",
+				"error":   "failed to read disc",
+			},
+			expectTitle:    "Spindle - Error",
+			expectMessage:  "❌ Error with rip: failed to read disc",
+			expectTags:     "spindle,error,alert",
+			expectPriority: "high",
 		},
 	}
 
@@ -114,5 +147,30 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 				t.Fatalf("expected priority %q, got %q", tc.expectPriority, captured.priority)
 			}
 		})
+	}
+}
+
+func TestNtfyServiceIgnoresSuppressedEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected call for suppressed event: %s", r.URL.String())
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.NtfyTopic = server.URL
+
+	svc := notifications.NewService(&cfg)
+	suppressed := []notifications.Event{
+		notifications.EventRipStarted,
+		notifications.EventProcessingCompleted,
+		notifications.EventQueueStarted,
+		notifications.EventQueueCompleted,
+		notifications.EventUnidentifiedMedia,
+	}
+
+	for _, event := range suppressed {
+		if err := svc.Publish(context.Background(), event, notifications.Payload{"value": "ignored"}); err != nil {
+			t.Fatalf("expected no error for suppressed event %s, got %v", event, err)
+		}
 	}
 }

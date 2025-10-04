@@ -30,7 +30,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 - The identifier checks `queue.Store.FindByFingerprint`. If another item already claimed the fingerprint, the current disc is moved straight to `REVIEW` with the message “Duplicate disc fingerprint”.
 - When TMDB lookup fails or produces no confident match, the identifier now flags the queue item for manual review but still allows ripping and Drapto encoding to complete. The organizer stage then relocates the encoded file into `<review_dir>` and marks the queue item `COMPLETED` once the artifact is safely staged, so automation continues uninterrupted.
 - Review filenames are generated from the review reason whenever possible (for example `no-confident-tmdb-match-1.mkv`); if you prefer a different scheme, adjust the prefix logic in `internal/organizer/organizer.go`.
-- Notifications fire through `notifications.Service.Publish` using events such as `EventDiscDetected`, `EventIdentificationCompleted`, and `EventUnidentifiedMedia` so operators know when a manual follow-up is required and when the encoded asset is ready in the review directory.
+- Notifications fire through `notifications.Service.Publish` to announce newly detected discs and confirmed matches when a release year is known; identification guidance and review prompts stay in the logs to reduce notification noise.
 
 ## TMDB Matching
 

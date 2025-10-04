@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -87,21 +86,22 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 		})
 	case EventIdentificationCompleted:
 		title := strings.TrimSpace(payloadString(data, "title"))
+		year := strings.TrimSpace(payloadString(data, "year"))
+		if title == "" || year == "" {
+			return nil
+		}
+		display := strings.TrimSpace(payloadString(data, "displayTitle"))
+		if display == "" {
+			display = fmt.Sprintf("%s (%s)", title, year)
+		}
 		mediaType := strings.TrimSpace(payloadString(data, "mediaType"))
 		if mediaType == "" {
 			mediaType = "unknown"
 		}
 		return n.send(ctx, payload{
 			title:   "Spindle - Identified",
-			message: fmt.Sprintf("🎬 Identified: %s (%s)", title, mediaType),
-			tags:    []string{"spindle", "identify", "completed"},
-		})
-	case EventRipStarted:
-		discTitle := strings.TrimSpace(payloadString(data, "discTitle"))
-		return n.send(ctx, payload{
-			title:   "Spindle - Rip Started",
-			message: fmt.Sprintf("Started ripping: %s", discTitle),
-			tags:    []string{"spindle", "rip", "started"},
+			message: fmt.Sprintf("🎬 Identified: %s", display),
+			tags:    []string{"spindle", "identify", mediaType},
 		})
 	case EventRipCompleted:
 		discTitle := strings.TrimSpace(payloadString(data, "discTitle"))
@@ -117,14 +117,6 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			message: fmt.Sprintf("🎞️ Encoding complete: %s", discTitle),
 			tags:    []string{"spindle", "encode", "completed"},
 		})
-	case EventProcessingCompleted:
-		title := strings.TrimSpace(payloadString(data, "title"))
-		return n.send(ctx, payload{
-			title:    "Spindle - Complete",
-			message:  fmt.Sprintf("✅ Ready to watch: %s", title),
-			tags:     []string{"spindle", "workflow", "completed"},
-			priority: "high",
-		})
 	case EventOrganizationCompleted:
 		mediaTitle := strings.TrimSpace(payloadString(data, "mediaTitle"))
 		finalFile := strings.TrimSpace(payloadString(data, "finalFile"))
@@ -136,39 +128,6 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			title:   "Spindle - Library Updated",
 			message: message,
 			tags:    []string{"spindle", "plex", "added"},
-		})
-	case EventQueueStarted:
-		count := payloadInt(data, "count")
-		return n.send(ctx, payload{
-			title:   "Spindle - Queue Started",
-			message: fmt.Sprintf("Started processing queue with %d items", count),
-			tags:    []string{"spindle", "queue", "started"},
-		})
-	case EventQueueCompleted:
-		processed := payloadInt(data, "processed")
-		failed := payloadInt(data, "failed")
-		duration := payloadDuration(data, "duration").Round(time.Second)
-		if duration < 0 {
-			duration = 0
-		}
-		durationText := duration.String()
-		if duration == 0 {
-			durationText = "0s"
-		}
-
-		var title string
-		var message string
-		if failed == 0 {
-			title = "Spindle - Queue Complete"
-			message = fmt.Sprintf("Queue processing complete: %d items processed in %s", processed, durationText)
-		} else {
-			title = "Spindle - Queue Complete (with errors)"
-			message = fmt.Sprintf("Queue processing complete: %d succeeded, %d failed in %s", processed, failed, durationText)
-		}
-		return n.send(ctx, payload{
-			title:   title,
-			message: message,
-			tags:    []string{"spindle", "queue", "completed"},
 		})
 	case EventError:
 		contextLabel := strings.TrimSpace(payloadString(data, "context"))
@@ -191,16 +150,6 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			tags:     []string{"spindle", "error", "alert"},
 			priority: "high",
 		})
-	case EventUnidentifiedMedia:
-		filename := strings.TrimSpace(payloadString(data, "filename"))
-		if filename == "" {
-			filename = strings.TrimSpace(payloadString(data, "label"))
-		}
-		return n.send(ctx, payload{
-			title:   "Spindle - Unidentified Media",
-			message: fmt.Sprintf("Could not identify: %s\nManual review required", filename),
-			tags:    []string{"spindle", "unidentified", "review"},
-		})
 	case EventTestNotification:
 		return n.send(ctx, payload{
 			title:    "Spindle - Test",
@@ -208,6 +157,12 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			tags:     []string{"spindle", "test"},
 			priority: "low",
 		})
+	case EventRipStarted,
+		EventProcessingCompleted,
+		EventQueueStarted,
+		EventQueueCompleted,
+		EventUnidentifiedMedia:
+		return nil
 	default:
 		return fmt.Errorf("unsupported notification event: %s", event)
 	}
@@ -267,60 +222,6 @@ func payloadString(data Payload, key string) string {
 		}
 	}
 	return ""
-}
-
-func payloadInt(data Payload, key string) int {
-	if data == nil {
-		return 0
-	}
-	if value, ok := data[key]; ok && value != nil {
-		switch typed := value.(type) {
-		case int:
-			return typed
-		case int32:
-			return int(typed)
-		case int64:
-			return int(typed)
-		case uint:
-			return int(typed)
-		case uint32:
-			return int(typed)
-		case uint64:
-			return int(typed)
-		case fmt.Stringer:
-			if parsed, err := strconv.Atoi(typed.String()); err == nil {
-				return parsed
-			}
-		case string:
-			if parsed, err := strconv.Atoi(typed); err == nil {
-				return parsed
-			}
-		}
-	}
-	return 0
-}
-
-func payloadDuration(data Payload, key string) time.Duration {
-	if data == nil {
-		return 0
-	}
-	if value, ok := data[key]; ok && value != nil {
-		switch typed := value.(type) {
-		case time.Duration:
-			return typed
-		case int64:
-			return time.Duration(typed)
-		case int:
-			return time.Duration(typed)
-		case float64:
-			return time.Duration(typed)
-		case string:
-			if parsed, err := time.ParseDuration(typed); err == nil {
-				return parsed
-			}
-		}
-	}
-	return 0
 }
 
 func payloadError(data Payload, key string) string {

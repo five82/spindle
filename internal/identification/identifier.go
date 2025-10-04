@@ -230,9 +230,10 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	item.MetadataJSON = string(encodedMetadata)
 	// Update DiscTitle to the proper TMDB title with year for use in subsequent stages
 	identifiedTitle := pickTitle(*best)
+	year := ""
 	titleWithYear := identifiedTitle
 	if best.ReleaseDate != "" && len(best.ReleaseDate) >= 4 {
-		year := best.ReleaseDate[:4] // Extract YYYY from YYYY-MM-DD
+		year = best.ReleaseDate[:4] // Extract YYYY from YYYY-MM-DD
 		titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
 	}
 	item.DiscTitle = titleWithYear
@@ -262,11 +263,16 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		if mediaType == "" {
 			mediaType = "unknown"
 		}
-		if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, notifications.Payload{
-			"title":     identifiedTitle,
-			"mediaType": mediaType,
-		}); err != nil {
-			logger.Warn("identification notification failed", logging.Error(err))
+		if strings.TrimSpace(year) != "" {
+			payload := notifications.Payload{
+				"title":        identifiedTitle,
+				"year":         strings.TrimSpace(year),
+				"mediaType":    mediaType,
+				"displayTitle": titleWithYear,
+			}
+			if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
+				logger.Warn("identification notification failed", logging.Error(err))
+			}
 		}
 	}
 

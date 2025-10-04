@@ -40,7 +40,7 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 
-	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{{ID: 1, Title: "Demo Disc", VoteAverage: 8.5, VoteCount: 200}}, TotalResults: 1}}
+	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{{ID: 1, Title: "Demo Disc", VoteAverage: 8.5, VoteCount: 200, ReleaseDate: "2001-05-20"}}, TotalResults: 1}}
 	stubScanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-demo", Titles: []disc.Title{{ID: 1, Name: "Demo Disc", Duration: 7000}}}}
 	notifier := &recordingNotifier{}
 	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), stubTMDB, stubScanner, notifier)
@@ -73,6 +73,9 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 	}
 	if notifier.identified[0].title != "Demo Disc" {
 		t.Fatalf("unexpected identification title %q", notifier.identified[0].title)
+	}
+	if notifier.identified[0].year != "2001" {
+		t.Fatalf("unexpected identification year %q", notifier.identified[0].year)
 	}
 }
 
@@ -224,7 +227,7 @@ func (s *stubDiscScanner) Scan(ctx context.Context, device string) (*disc.ScanRe
 
 type recordingNotifier struct {
 	detected     []struct{ title, discType string }
-	identified   []struct{ title, mediaType string }
+	identified   []struct{ title, mediaType, year string }
 	unidentified []string
 }
 
@@ -245,6 +248,7 @@ func (r *recordingNotifier) Publish(ctx context.Context, event notifications.Eve
 	case notifications.EventIdentificationCompleted:
 		title := ""
 		mediaType := ""
+		year := ""
 		if payload != nil {
 			if v, ok := payload["title"].(string); ok {
 				title = v
@@ -252,8 +256,11 @@ func (r *recordingNotifier) Publish(ctx context.Context, event notifications.Eve
 			if v, ok := payload["mediaType"].(string); ok {
 				mediaType = v
 			}
+			if v, ok := payload["year"].(string); ok {
+				year = v
+			}
 		}
-		r.identified = append(r.identified, struct{ title, mediaType string }{strings.TrimSpace(title), strings.TrimSpace(mediaType)})
+		r.identified = append(r.identified, struct{ title, mediaType, year string }{strings.TrimSpace(title), strings.TrimSpace(mediaType), strings.TrimSpace(year)})
 	case notifications.EventUnidentifiedMedia:
 		label := ""
 		if payload != nil {

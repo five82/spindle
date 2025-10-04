@@ -37,8 +37,8 @@ You can keep inserting discs back-to-back; each one lands in the queue.
 
 1. Spindle triggers a MakeMKV scan to read every title on the disc.
 2. The intelligent analyzer classifies the disc (movie vs TV set, extras, commentary tracks) and calls TMDB to find the best metadata match.
-3. Success: the queue item is marked `IDENTIFIED`, media details (title, year, season/episode) are stored, and the rip specification is written to the queue database.
-4. No confident match: the item stays at `IDENTIFIED` but is flagged with `NeedsReview = true`, and you receive guidance in logs/ntfy. The pipeline keeps moving so downstream stages can finish while you decide how to handle the unknown metadata.
+3. Success: the queue item is marked `IDENTIFIED`, media details (title, year, season/episode) are stored, and the rip specification is written to the queue database. When a release year is available, an ntfy notification announces the match so you know the daemon has the correct metadata before ripping starts.
+4. No confident match: the item stays at `IDENTIFIED` but is flagged with `NeedsReview = true`, and you receive guidance in the logs. The pipeline keeps moving so downstream stages can finish while you decide how to handle the unknown metadata.
 
 Progress messages in `spindle show --follow` tell you what the analyzer is doing ("Analyzing disc content", "Classifying disc contents", etc.).
 
@@ -62,7 +62,7 @@ Encoding happens in the background, so you can insert the next disc while previo
 1. Spindle moves the encoded file into your library, building a Plex-friendly path based on the TMDB metadata. Movies go under `library_dir/movies`, TV episodes go under `library_dir/tv/<Show Name>/Season XX/`.
 2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Plex.
 3. Plex scans are triggered for the appropriate library section (Movies vs TV Shows) when credentials are supplied.
-4. The final status `COMPLETED` means the media is on disk and Plex has been asked to rescan. Items flagged for review land in your configured `review_dir`; otherwise titles appear in the main library. A notification confirms the outcome.
+4. The final status `COMPLETED` means the media is on disk and Plex has been asked to rescan. Items flagged for review land in your configured `review_dir`; otherwise titles appear in the main library. An ntfy notification confirms the import when the library update succeeds.
 
 ## Special Paths: REVIEW and FAILED
 
@@ -97,7 +97,7 @@ Logs also live in `<log_dir>/spindle-<timestamp>.log` (one file per daemon start
 
 ## Notifications
 
-If `ntfy_topic` is set, Spindle posts rich notifications at key steps: disc detected, identification resolved (or flagged for review), ripping started/completed, encoding completed, Plex added, queue runs started/completed, and any errors. You can test the channel any time with `spindle test-notify`.
+If `ntfy_topic` is set, Spindle posts compact notifications at key steps: disc detected, disc identified with title/year, rip completed, encoding completed, library import completed, and any errors. You can test the channel any time with `spindle test-notify`.
 
 ## Need More Detail?
 

@@ -143,7 +143,7 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → E
 - `FAILED`: unrecoverable issue (inspect logs / notifications)
 - `REVIEW`: manual intervention required. When Spindle cannot identify a disc, it still rips/encodes the content, drops the final file into the `review_dir` (default `~/review`) with a unique name (for example `unidentified-1.mkv`), and marks the queue item complete so the pipeline keeps moving.
 - Drives eject automatically at `RIPPED`; encoding/organization continues in background
-- Notifications (ntfy) fire when discs are detected, identification resolves (or needs review), queue runs start/finish, and at major stage milestones (`RIPPED`, `ENCODED`, `COMPLETED`, errors)
+- Notifications (ntfy) fire when discs are detected, a disc is identified with title/year, rips finish, encodes complete, the library import succeeds, and whenever an error occurs
 - Read `docs/workflow.md` for a detailed walkthrough
 
 
