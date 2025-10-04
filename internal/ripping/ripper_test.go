@@ -2,6 +2,7 @@ package ripping_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -104,6 +105,52 @@ func TestRipperCreatesRippedFile(t *testing.T) {
 	}
 }
 
+func TestRipperSelectsPrimaryTitleFromRipSpec(t *testing.T) {
+	cfg := testConfig(t)
+	store, err := queue.Open(cfg)
+	if err != nil {
+		t.Fatalf("queue.Open: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	item, err := store.NewDisc(context.Background(), "Main Feature", "fp")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusIdentified
+	spec := map[string]any{
+		"titles": []map[string]any{
+			{"id": 0, "name": "Main Feature", "duration": 7200},
+			{"id": 1, "name": "Bonus", "duration": 900},
+		},
+		"metadata": map[string]any{"media_type": "movie"},
+	}
+	encodedSpec, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+	item.RipSpecData = string(encodedSpec)
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	stubClient := &stubRipperClient{}
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), stubClient, &stubNotifier{})
+	item.Status = queue.StatusRipping
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update processing: %v", err)
+	}
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(stubClient.lastTitleIDs) != 1 || stubClient.lastTitleIDs[0] != 0 {
+		t.Fatalf("expected makemkv to target main title, got %v", stubClient.lastTitleIDs)
+	}
+}
+
 func TestRipperFallsBackWithoutClient(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := queue.Open(cfg)
@@ -184,9 +231,12 @@ func TestRipperHealthMissingClient(t *testing.T) {
 	}
 }
 
-type stubRipperClient struct{}
+type stubRipperClient struct {
+	lastTitleIDs []int
+}
 
-func (s *stubRipperClient) Rip(ctx context.Context, discTitle, sourcePath, destDir string, progress func(makemkv.ProgressUpdate)) (string, error) {
+func (s *stubRipperClient) Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
+	s.lastTitleIDs = append([]int(nil), titleIDs...)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", err
 	}
@@ -233,7 +283,7 @@ func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, p
 
 type failingRipper struct{}
 
-func (f failingRipper) Rip(ctx context.Context, discTitle, sourcePath, destDir string, progress func(makemkv.ProgressUpdate)) (string, error) {
+func (f failingRipper) Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
 	return "", errors.New("rip failed")
 }
 

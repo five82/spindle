@@ -3,6 +3,7 @@ package organizer_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,10 +43,13 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusEncoded
-	item.EncodedFile = filepath.Join(cfg.StagingDir, "demo.encoded.mkv")
-	if err := os.MkdirAll(filepath.Dir(item.EncodedFile), 0o755); err != nil {
+	item.DiscFingerprint = "ORGANIZERTESTFP1"
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	encodedDir := filepath.Join(stagingRoot, "encoded")
+	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		t.Fatalf("mkdir encoded: %v", err)
 	}
+	item.EncodedFile = filepath.Join(encodedDir, "demo.encoded.mkv")
 	if err := os.WriteFile(item.EncodedFile, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write encoded file: %v", err)
 	}
@@ -82,6 +86,9 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 	if len(notifier.completed) == 0 {
 		t.Fatal("expected library updated notification")
 	}
+	if _, err := os.Stat(stagingRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected staging root cleanup, err=%v", err)
+	}
 }
 
 func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
@@ -102,14 +109,16 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 			t.Fatalf("NewDisc: %v", err)
 		}
 		item.Status = queue.StatusEncoded
-		item.EncodedFile = filepath.Join(cfg.StagingDir, "encoded", "unknown"+strconv.Itoa(i)+".mkv")
-		if err := os.MkdirAll(filepath.Dir(item.EncodedFile), 0o755); err != nil {
+		item.DiscFingerprint = fmt.Sprintf("FPREVIEW%02dABCDEFG", i)
+		stagingRoot := item.StagingRoot(cfg.StagingDir)
+		encodedDir := filepath.Join(stagingRoot, "encoded")
+		if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 			t.Fatalf("mkdir encoded: %v", err)
 		}
+		item.EncodedFile = filepath.Join(encodedDir, "unknown"+strconv.Itoa(i)+".mkv")
 		if err := os.WriteFile(item.EncodedFile, []byte("data"), 0o644); err != nil {
 			t.Fatalf("write encoded file: %v", err)
 		}
-		item.DiscFingerprint = "fp-review-abcdef123456"
 		item.NeedsReview = true
 		item.ReviewReason = "No confident TMDB match"
 		if err := handler.Prepare(context.Background(), item); err != nil {
@@ -126,6 +135,9 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 		}
 		if _, err := os.Stat(item.FinalFile); err != nil {
 			t.Fatalf("expected review file to exist: %v", err)
+		}
+		if _, err := os.Stat(stagingRoot); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected staging root cleanup for review, err=%v", err)
 		}
 		if _, exists := seenTargets[item.FinalFile]; exists {
 			t.Fatalf("duplicate review target generated: %s", item.FinalFile)
@@ -158,10 +170,12 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusEncoded
-	item.EncodedFile = filepath.Join(cfg.StagingDir, "fail.mkv")
-	if err := os.MkdirAll(filepath.Dir(item.EncodedFile), 0o755); err != nil {
+	item.DiscFingerprint = "ORGANIZERTESTFPFAIL"
+	encodedDir := filepath.Join(item.StagingRoot(cfg.StagingDir), "encoded")
+	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		t.Fatalf("mkdir encoded: %v", err)
 	}
+	item.EncodedFile = filepath.Join(encodedDir, "fail.mkv")
 	if err := os.WriteFile(item.EncodedFile, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write encoded file: %v", err)
 	}

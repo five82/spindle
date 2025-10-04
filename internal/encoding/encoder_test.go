@@ -59,10 +59,13 @@ func TestEncoderUsesDraptoClient(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusRipped
-	item.RippedFile = filepath.Join(cfg.StagingDir, "demo.mkv")
-	if err := os.MkdirAll(cfg.StagingDir, 0o755); err != nil {
-		t.Fatalf("mkdir staging: %v", err)
+	item.DiscFingerprint = "ENCODERTESTFP1"
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	ripsDir := filepath.Join(stagingRoot, "rips")
+	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
+		t.Fatalf("mkdir rips: %v", err)
 	}
+	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
 	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write ripped file: %v", err)
 	}
@@ -119,10 +122,13 @@ func TestEncoderFallsBackWithoutClient(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusRipped
-	item.RippedFile = filepath.Join(cfg.StagingDir, "demo.mkv")
-	if err := os.MkdirAll(cfg.StagingDir, 0o755); err != nil {
-		t.Fatalf("mkdir staging: %v", err)
+	item.DiscFingerprint = "ENCODERTESTFP2"
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	ripsDir := filepath.Join(stagingRoot, "rips")
+	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
+		t.Fatalf("mkdir rips: %v", err)
 	}
+	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
 	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write ripped file: %v", err)
 	}
@@ -168,10 +174,13 @@ func TestEncoderWrapsErrors(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusRipped
-	item.RippedFile = filepath.Join(cfg.StagingDir, "demo.mkv")
-	if err := os.MkdirAll(cfg.StagingDir, 0o755); err != nil {
-		t.Fatalf("mkdir staging: %v", err)
+	item.DiscFingerprint = "ENCODERTESTFP3"
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	ripsDir := filepath.Join(stagingRoot, "rips")
+	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
+		t.Fatalf("mkdir rips: %v", err)
 	}
+	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
 	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write ripped file: %v", err)
 	}
@@ -198,10 +207,13 @@ func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusRipped
-	item.RippedFile = filepath.Join(cfg.StagingDir, "demo.mkv")
-	if err := os.MkdirAll(cfg.StagingDir, 0o755); err != nil {
-		t.Fatalf("mkdir staging: %v", err)
+	item.DiscFingerprint = "ENCODERTESTFP4"
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	ripsDir := filepath.Join(stagingRoot, "rips")
+	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
+		t.Fatalf("mkdir rips: %v", err)
 	}
+	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
 	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write ripped file: %v", err)
 	}
@@ -228,10 +240,13 @@ func TestEncoderFailsWhenEncodedArtifactEmpty(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusRipped
-	item.RippedFile = filepath.Join(cfg.StagingDir, "demo.mkv")
-	if err := os.MkdirAll(cfg.StagingDir, 0o755); err != nil {
-		t.Fatalf("mkdir staging: %v", err)
+	item.DiscFingerprint = "ENCODERTESTFP5"
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	ripsDir := filepath.Join(stagingRoot, "rips")
+	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
+		t.Fatalf("mkdir rips: %v", err)
 	}
+	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
 	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write ripped file: %v", err)
 	}

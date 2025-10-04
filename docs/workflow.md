@@ -45,14 +45,14 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 ## Stage 3: Ripping the Disc (RIPPING -> RIPPED)
 
 1. Identified items flow into the MakeMKV ripper. Spindle updates the queue to `RIPPING` and streams progress ("Ripping disc", percentage updates) as Makemkvcon runs.
-2. Video files are written to `<staging_dir>/rips/`.
+2. Video files are written to `<staging_dir>/<fingerprint>/rips/`, isolating each disc’s artifacts.
 3. When the rip succeeds, the item is marked `RIPPED` and an ntfy notification fires so you know the drive is free to eject manually.
 4. If MakeMKV fails or a disc defect is detected, the item becomes `FAILED` with the error message recorded in the queue. You can retry after addressing the issue with `spindle queue retry <id>`.
 
 ## Stage 4: Encoding to AV1 (ENCODING -> ENCODED)
 
 1. Ripped items are picked up by the Drapto encoder. The queue shows `ENCODING` with live progress updates as Drapto emits JSON status.
-2. Encoded output is written to `<staging_dir>/encoded/`, typically ending in `_encoded.mkv`.
+2. Encoded output is written to `<staging_dir>/<fingerprint>/encoded/`, typically ending in `_encoded.mkv`.
 3. When encoding completes, the item flips to `ENCODED`. Failures surface as `FAILED` with the Drapto error text.
 
 Encoding happens in the background, so you can insert the next disc while previous titles encode.
@@ -90,7 +90,7 @@ Logs also live in `<log_dir>/spindle-<timestamp>.log` (one file per daemon start
 
 ## Where Files Live
 
-- **Staging**: `<staging_dir>/rips/` for MakeMKV output, `<staging_dir>/encoded/` for Drapto output while waiting on organization.
+- **Staging**: `<staging_dir>/<fingerprint>/rips/` for MakeMKV output, `<staging_dir>/<fingerprint>/encoded/` for Drapto output while waiting on organization.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in the config.
 - **Review**: `<review_dir>/` holds encoded files that still need manual identification. Each unidentified disc is stored with a unique filename (for example `unidentified-1.mkv`), and the queue item is marked complete so it doesn’t block subsequent work.
 - **Logs & diagnostics**: `<log_dir>/` keeps `spindle-*.log` files for each run, the queue database, and analyzer/debug artifacts.

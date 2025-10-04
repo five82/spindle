@@ -73,7 +73,11 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
-	encodedDir := filepath.Join(e.cfg.StagingDir, "encoded")
+	stagingRoot := item.StagingRoot(e.cfg.StagingDir)
+	if stagingRoot == "" {
+		stagingRoot = filepath.Join(strings.TrimSpace(e.cfg.StagingDir), fmt.Sprintf("queue-%d", item.ID))
+	}
+	encodedDir := filepath.Join(stagingRoot, "encoded")
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		return services.Wrap(
 			services.ErrConfiguration,

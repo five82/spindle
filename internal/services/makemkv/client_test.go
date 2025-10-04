@@ -36,7 +36,7 @@ func TestRipCreatesPlaceholderWhenOutputMissing(t *testing.T) {
 	}
 
 	var progress []makemkv.ProgressUpdate
-	path, err := client.Rip(context.Background(), "Sample", "", tmp, func(update makemkv.ProgressUpdate) {
+	path, err := client.Rip(context.Background(), "Sample", "", tmp, nil, func(update makemkv.ProgressUpdate) {
 		progress = append(progress, update)
 	})
 	if err != nil {
@@ -63,7 +63,7 @@ func TestRipReturnsExecutorError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
-	if _, err := client.Rip(context.Background(), "Sample", "", t.TempDir(), nil); err == nil {
+	if _, err := client.Rip(context.Background(), "Sample", "", t.TempDir(), nil, nil); err == nil {
 		t.Fatal("expected error from executor")
 	}
 }
@@ -81,7 +81,7 @@ func TestRipCopiesSourceWhenProvided(t *testing.T) {
 	}
 
 	destDir := filepath.Join(tmp, "dest")
-	path, err := client.Rip(context.Background(), "Movie", src, destDir, nil)
+	path, err := client.Rip(context.Background(), "Movie", src, destDir, nil, nil)
 	if err != nil {
 		t.Fatalf("Rip returned error: %v", err)
 	}
@@ -92,6 +92,53 @@ func TestRipCopiesSourceWhenProvided(t *testing.T) {
 	if string(contents) != "data" {
 		t.Fatalf("expected copied data, got %q", contents)
 	}
+}
+
+func TestRipSelectsSpecificTitleAndRenamesOutput(t *testing.T) {
+	tmp := t.TempDir()
+	destDir := filepath.Join(tmp, "dest")
+	exec := &fileCreatingExecutor{}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	path, err := client.Rip(context.Background(), "Sample Movie", "", destDir, []int{0}, nil)
+	if err != nil {
+		t.Fatalf("Rip returned error: %v", err)
+	}
+	if filepath.Base(path) != "Sample Movie.mkv" {
+		t.Fatalf("expected sanitized filename, got %q", filepath.Base(path))
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected renamed output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "title_t00.mkv")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected intermediate title removal, got err=%v", err)
+	}
+	if len(exec.args) != 1 {
+		t.Fatalf("expected executor invocation recorded")
+	}
+	gotArgs := exec.args[0]
+	expectedArgs := []string{"--robot", "mkv", "disc:0", "0", destDir}
+	if !equalStrings(gotArgs, expectedArgs) {
+		t.Fatalf("unexpected makemkv args: got %v want %v", gotArgs, expectedArgs)
+	}
+}
+
+type fileCreatingExecutor struct {
+	args [][]string
+}
+
+func (f *fileCreatingExecutor) Run(ctx context.Context, binary string, args []string, onStdout func(string)) error {
+	clone := append([]string(nil), args...)
+	f.args = append(f.args, clone)
+	destDir := args[len(args)-1]
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	filePath := filepath.Join(destDir, "title_t00.mkv")
+	return os.WriteFile(filePath, []byte("rip"), 0o644)
 }
 
 func equalStrings(a, b []string) bool {

@@ -2,11 +2,13 @@ package ripping
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -106,17 +108,28 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 			lastPercent = update.Percent
 		}
 	}
-	destDir := filepath.Join(r.cfg.StagingDir, "rips")
+	stagingRoot := item.StagingRoot(r.cfg.StagingDir)
+	if stagingRoot == "" {
+		stagingRoot = filepath.Join(strings.TrimSpace(r.cfg.StagingDir), fmt.Sprintf("queue-%d", item.ID))
+	}
+	destDir := filepath.Join(stagingRoot, "rips")
 	logger.Info(
 		"starting rip execution",
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("staging_root", stagingRoot),
 		logging.String("destination_dir", destDir),
 		logging.Bool("makemkv_enabled", r.client != nil),
 	)
 
+	var titleIDs []int
 	if r.client != nil {
-		logger.Info("launching makemkv rip", logging.String("destination_dir", destDir))
-		path, err := r.client.Rip(ctx, item.DiscTitle, item.SourcePath, destDir, progressCB)
+		titleIDs = r.selectTitleIDs(item, logger)
+		logger.Info(
+			"launching makemkv rip",
+			logging.String("destination_dir", destDir),
+			logging.Any("title_ids", titleIDs),
+		)
+		path, err := r.client.Rip(ctx, item.DiscTitle, item.SourcePath, destDir, titleIDs, progressCB)
 		if err != nil {
 			return services.Wrap(
 				services.ErrExternalTool,
@@ -131,7 +144,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	if target == "" {
-		if err := os.MkdirAll(r.cfg.StagingDir, 0o755); err != nil {
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
 			return services.Wrap(
 				services.ErrConfiguration,
 				"ripping",
@@ -144,7 +157,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 		if cleaned == "" {
 			cleaned = "spindle-disc"
 		}
-		target = filepath.Join(r.cfg.StagingDir, cleaned+".mkv")
+		target = filepath.Join(destDir, cleaned+".mkv")
 		if item.SourcePath != "" {
 			if err := copyPlaceholder(item.SourcePath, target); err != nil {
 				return services.Wrap(services.ErrTransient, "ripping", "prepare placeholder", "Failed to copy source into staging", err)
@@ -220,6 +233,99 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 	}
 	logger.Info("makemkv progress", fields...)
 	*item = copy
+}
+
+const minPrimaryRuntimeSeconds = 20 * 60
+
+type ripSpecPayload struct {
+	Titles   []ripSpecTitle `json:"titles"`
+	Metadata struct {
+		MediaType string `json:"media_type"`
+	} `json:"metadata"`
+}
+
+type ripSpecTitle struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Duration int    `json:"duration"`
+}
+
+func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
+	if item == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(item.RipSpecData)
+	if raw == "" {
+		return nil
+	}
+	var payload ripSpecPayload
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		if logger != nil {
+			logger.Debug("failed to parse rip spec", logging.Error(err))
+		}
+		return nil
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(payload.Metadata.MediaType))
+	if mediaType == "tv" {
+		return nil
+	}
+	if selection, ok := choosePrimaryTitle(payload.Titles); ok {
+		if logger != nil {
+			logger.Info(
+				"selecting primary title",
+				logging.Int("title_id", selection.ID),
+				logging.Int("duration_seconds", selection.Duration),
+				logging.String("title_name", strings.TrimSpace(selection.Name)),
+			)
+		}
+		return []int{selection.ID}
+	}
+	return nil
+}
+
+func choosePrimaryTitle(titles []ripSpecTitle) (ripSpecTitle, bool) {
+	if len(titles) == 0 {
+		return ripSpecTitle{}, false
+	}
+	indices := make([]int, 0, len(titles))
+	for idx := range titles {
+		if titles[idx].ID < 0 {
+			continue
+		}
+		indices = append(indices, idx)
+	}
+	if len(indices) == 0 {
+		return ripSpecTitle{}, false
+	}
+	sort.Slice(indices, func(i, j int) bool {
+		left := titles[indices[i]]
+		right := titles[indices[j]]
+		if left.Duration == right.Duration {
+			return left.ID < right.ID
+		}
+		return left.Duration > right.Duration
+	})
+	primaryIdx := -1
+	for _, idx := range indices {
+		title := titles[idx]
+		if title.Duration >= minPrimaryRuntimeSeconds {
+			primaryIdx = idx
+			break
+		}
+	}
+	if primaryIdx == -1 {
+		for _, idx := range indices {
+			title := titles[idx]
+			if title.Duration > 0 {
+				primaryIdx = idx
+				break
+			}
+		}
+	}
+	if primaryIdx == -1 {
+		return ripSpecTitle{}, false
+	}
+	return titles[primaryIdx], true
 }
 
 func sanitizeFileName(name string) string {

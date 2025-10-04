@@ -107,6 +107,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logger.Warn("review notification failed", logging.Error(err))
 			}
 		}
+		o.cleanupStaging(ctx, item)
 		return nil
 	}
 	var meta MetadataProvider
@@ -172,7 +173,28 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
+	o.cleanupStaging(ctx, item)
 	return nil
+}
+
+func (o *Organizer) cleanupStaging(ctx context.Context, item *queue.Item) {
+	if item == nil || o.cfg == nil {
+		return
+	}
+	base := strings.TrimSpace(o.cfg.StagingDir)
+	if base == "" {
+		return
+	}
+	root := strings.TrimSpace(item.StagingRoot(base))
+	if root == "" {
+		return
+	}
+	logger := logging.WithContext(ctx, o.logger)
+	if err := os.RemoveAll(root); err != nil {
+		logger.Warn("failed to clean staging directory", logging.String("staging_root", root), logging.Error(err))
+		return
+	}
+	logger.Info("cleaned staging directory", logging.String("staging_root", root))
 }
 
 func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string, error) {

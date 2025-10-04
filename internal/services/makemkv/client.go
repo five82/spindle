@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,7 +25,7 @@ type ProgressUpdate struct {
 
 // Ripper defines the behaviour required by the ripping handler.
 type Ripper interface {
-	Rip(ctx context.Context, discTitle, sourcePath, destDir string, progress func(ProgressUpdate)) (string, error)
+	Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error)
 }
 
 // Executor abstracts command execution for testability.
@@ -70,9 +71,12 @@ func New(binary string, ripTimeoutSeconds int, opts ...Option) (*Client, error) 
 }
 
 // Rip executes MakeMKV, returning the resulting file path.
-func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string, progress func(ProgressUpdate)) (string, error) {
+func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error) {
 	if destDir == "" {
 		return "", errors.New("destination directory required")
+	}
+	if err := os.RemoveAll(destDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("prepare destination: %w", err)
 	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", fmt.Errorf("create destination: %w", err)
@@ -83,7 +87,6 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 		sanitized = "spindle-disc"
 	}
 	destPath := filepath.Join(destDir, sanitized+".mkv")
-
 	ripCtx := ctx
 	if c.ripTimeout > 0 {
 		var cancel context.CancelFunc
@@ -95,7 +98,16 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 	if progress != nil {
 		args = append(args, "--progress=-same")
 	}
-	args = append(args, "mkv", "disc:0", "all", destDir)
+	args = append(args, "mkv", "disc:0")
+	titleIDs = normalizeTitleIDs(titleIDs)
+	if len(titleIDs) == 0 {
+		args = append(args, "all")
+	} else {
+		for _, id := range titleIDs {
+			args = append(args, strconv.Itoa(id))
+		}
+	}
+	args = append(args, destDir)
 	if err := c.exec.Run(ripCtx, c.binary, args, func(line string) {
 		if progress == nil {
 			return
@@ -105,6 +117,28 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 		}
 	}); err != nil {
 		return "", fmt.Errorf("makemkv rip: %w", err)
+	}
+
+	candidates, err := gatherMKVEntries(destDir)
+	if err != nil {
+		return "", fmt.Errorf("inspect rip outputs: %w", err)
+	}
+	if len(candidates) > 0 {
+		best := selectPreferredMKV(candidates, titleIDs)
+		if best != nil {
+			if err := replaceFile(best.path, destPath); err != nil {
+				return "", err
+			}
+			// Remove any other newly created MKV artefacts to avoid clutter when only one title was requested.
+			if len(titleIDs) <= 1 {
+				for _, file := range candidates {
+					if file.path == best.path {
+						continue
+					}
+					_ = os.Remove(file.path)
+				}
+			}
+		}
 	}
 
 	if _, err := os.Stat(destPath); errors.Is(err, os.ErrNotExist) {
@@ -120,6 +154,102 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 	}
 
 	return destPath, nil
+}
+
+type mkvEntry struct {
+	path    string
+	size    int64
+	modTime time.Time
+}
+
+func gatherMKVEntries(dir string) ([]mkvEntry, error) {
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	result := make([]mkvEntry, 0, len(items))
+	for _, item := range items {
+		if item.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(strings.ToLower(item.Name()), ".mkv") {
+			continue
+		}
+		info, err := item.Info()
+		if err != nil {
+			continue
+		}
+		result = append(result, mkvEntry{
+			path:    filepath.Join(dir, item.Name()),
+			size:    info.Size(),
+			modTime: info.ModTime(),
+		})
+	}
+	return result, nil
+}
+
+func selectPreferredMKV(files []mkvEntry, titleIDs []int) *mkvEntry {
+	if len(files) == 0 {
+		return nil
+	}
+	if len(titleIDs) == 1 {
+		expected := strings.ToLower(fmt.Sprintf("title_t%02d.mkv", titleIDs[0]))
+		for i := range files {
+			if strings.ToLower(filepath.Base(files[i].path)) == expected {
+				return &files[i]
+			}
+		}
+	}
+	bestIdx := 0
+	for i := 1; i < len(files); i++ {
+		if files[i].size > files[bestIdx].size {
+			bestIdx = i
+			continue
+		}
+		if files[i].size == files[bestIdx].size && files[i].modTime.After(files[bestIdx].modTime) {
+			bestIdx = i
+		}
+	}
+	return &files[bestIdx]
+}
+
+func replaceFile(src, dest string) error {
+	if src == dest {
+		return nil
+	}
+	if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove existing rip target: %w", err)
+	}
+	if err := os.Rename(src, dest); err != nil {
+		return fmt.Errorf("rename rip output: %w", err)
+	}
+	return nil
+}
+
+func normalizeTitleIDs(ids []int) []int {
+	if len(ids) == 0 {
+		return nil
+	}
+	uniq := make([]int, 0, len(ids))
+	seen := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		if id < 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	if len(uniq) == 0 {
+		return nil
+	}
+	sort.Ints(uniq)
+	return uniq
 }
 
 func parseProgress(line string) (ProgressUpdate, bool) {
