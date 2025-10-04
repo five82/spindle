@@ -6,12 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
 	"spindle/internal/disc"
 	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
+	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 )
@@ -44,7 +43,7 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{{ID: 1, Title: "Demo Disc", VoteAverage: 8.5, VoteCount: 200}}, TotalResults: 1}}
 	stubScanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-demo", Titles: []disc.Title{{ID: 1, Name: "Demo Disc", Duration: 7000}}}}
 	notifier := &recordingNotifier{}
-	handler := identification.NewIdentifierWithDependencies(cfg, store, zap.NewNop(), stubTMDB, stubScanner, notifier)
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), stubTMDB, stubScanner, notifier)
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -103,7 +102,7 @@ func TestIdentifierMarksDuplicateForReview(t *testing.T) {
 	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{{ID: 2, Title: "Duplicate", VoteAverage: 9.0, VoteCount: 500}}, TotalResults: 1}}
 	stubScanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: first.DiscFingerprint}}
 	notifier := &recordingNotifier{}
-	handler := identification.NewIdentifierWithDependencies(cfg, store, zap.NewNop(), stubTMDB, stubScanner, notifier)
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), stubTMDB, stubScanner, notifier)
 	if err := handler.Prepare(ctx, second); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -137,7 +136,7 @@ func TestIdentifierMarksReviewWhenNoResults(t *testing.T) {
 	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{}, TotalResults: 0}}
 	stubScanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-unknown"}}
 	notifier := &recordingNotifier{}
-	handler := identification.NewIdentifierWithDependencies(cfg, store, zap.NewNop(), stubTMDB, stubScanner, notifier)
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), stubTMDB, stubScanner, notifier)
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -166,7 +165,7 @@ func TestIdentifierHealthReady(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	handler := identification.NewIdentifierWithDependencies(cfg, store, zap.NewNop(), &stubSearcher{}, &stubDiscScanner{}, nil)
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), &stubSearcher{}, &stubDiscScanner{}, nil)
 	health := handler.HealthCheck(context.Background())
 	if !health.Ready {
 		t.Fatalf("expected health ready, got %+v", health)
@@ -185,7 +184,7 @@ func TestIdentifierHealthMissingAPIKey(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	handler := identification.NewIdentifierWithDependencies(cfg, store, zap.NewNop(), &stubSearcher{}, &stubDiscScanner{}, nil)
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), &stubSearcher{}, &stubDiscScanner{}, nil)
 	health := handler.HealthCheck(context.Background())
 	if health.Ready {
 		t.Fatalf("expected health not ready, got %+v", health)

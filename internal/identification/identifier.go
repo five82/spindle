@@ -14,7 +14,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
@@ -30,7 +30,7 @@ import (
 type Identifier struct {
 	store       *queue.Store
 	cfg         *config.Config
-	logger      *zap.Logger
+	logger      *slog.Logger
 	tmdb        TMDBSearcher
 	scanner     DiscScanner
 	cache       map[string]cacheEntry
@@ -58,26 +58,26 @@ type DiscScanner interface {
 }
 
 // NewIdentifier creates a new stage handler.
-func NewIdentifier(cfg *config.Config, store *queue.Store, logger *zap.Logger) *Identifier {
+func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Identifier {
 	client, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
 	if err != nil {
-		logger.Warn("tmdb client initialization failed", zap.Error(err))
+		logger.Warn("tmdb client initialization failed", logging.Error(err))
 	}
 	scanner := disc.NewScanner(cfg.MakemkvBinary())
 	return NewIdentifierWithDependencies(cfg, store, logger, client, scanner, notifications.NewService(cfg))
 }
 
 // NewIdentifierWithClient creates a new identifier with an injected TMDB client (used for testing).
-func NewIdentifierWithClient(cfg *config.Config, store *queue.Store, logger *zap.Logger, searcher TMDBSearcher) *Identifier {
+func NewIdentifierWithClient(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher TMDBSearcher) *Identifier {
 	scanner := disc.NewScanner(cfg.MakemkvBinary())
 	return NewIdentifierWithDependencies(cfg, store, logger, searcher, scanner, notifications.NewService(cfg))
 }
 
 // NewIdentifierWithDependencies allows injecting TMDB searcher and disc scanner (used in tests).
-func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *zap.Logger, searcher TMDBSearcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
+func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher TMDBSearcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
 	stageLogger := logger
 	if stageLogger != nil {
-		stageLogger = stageLogger.With(zap.String("component", "identifier"))
+		stageLogger = stageLogger.With(logging.String("component", "identifier"))
 	}
 	return &Identifier{
 		store:       store,
@@ -108,8 +108,8 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	}
 	logger.Info(
 		"starting disc identification",
-		zap.String("disc_title", displayTitle),
-		zap.String("source_path", strings.TrimSpace(item.SourcePath)),
+		logging.String("disc_title", displayTitle),
+		logging.String("source_path", strings.TrimSpace(item.SourcePath)),
 	)
 
 	if i.notifier != nil && strings.TrimSpace(item.SourcePath) == "" {
@@ -121,7 +121,7 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 			"discTitle": title,
 			"discType":  "unknown",
 		}); err != nil {
-			logger.Warn("disc detected notification failed", zap.Error(err))
+			logger.Warn("disc detected notification failed", logging.Error(err))
 		}
 	}
 	return nil
@@ -131,7 +131,7 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, i.logger)
 	device := strings.TrimSpace(i.cfg.OpticalDrive)
-	logger.Info("scanning disc with makemkv", zap.String("device", device))
+	logger.Info("scanning disc with makemkv", logging.String("device", device))
 	scanResult, err := i.scanDisc(ctx)
 	if err != nil {
 		return err
@@ -139,19 +139,19 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if scanResult != nil {
 		titleCount := len(scanResult.Titles)
 		logger.Info("disc scan completed",
-			zap.Int("title_count", titleCount),
-			zap.Bool("bd_info_available", scanResult.BDInfo != nil))
+			logging.Int("title_count", titleCount),
+			logging.Bool("bd_info_available", scanResult.BDInfo != nil))
 		if scanResult.BDInfo != nil {
 			logger.Info("bd_info details",
-				zap.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier),
-				zap.String("disc_name", scanResult.BDInfo.DiscName),
-				zap.Bool("is_blu_ray", scanResult.BDInfo.IsBluRay),
-				zap.Bool("has_aacs", scanResult.BDInfo.HasAACS))
+				logging.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier),
+				logging.String("disc_name", scanResult.BDInfo.DiscName),
+				logging.Bool("is_blu_ray", scanResult.BDInfo.IsBluRay),
+				logging.Bool("has_aacs", scanResult.BDInfo.HasAACS))
 		}
 	}
 
 	if scanResult.Fingerprint != "" {
-		logger.Info("disc fingerprint captured", zap.String("fingerprint", scanResult.Fingerprint))
+		logger.Info("disc fingerprint captured", logging.String("fingerprint", scanResult.Fingerprint))
 		item.DiscFingerprint = scanResult.Fingerprint
 		if err := i.handleDuplicateFingerprint(ctx, item); err != nil {
 			return err
@@ -175,9 +175,9 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		title = scanResult.BDInfo.DiscName
 		item.DiscTitle = title
 		logger.Info("using bd_info disc name for identification",
-			zap.String("original_title", originalTitle),
-			zap.String("bd_info_title", scanResult.BDInfo.DiscName),
-			zap.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier))
+			logging.String("original_title", originalTitle),
+			logging.String("bd_info_title", scanResult.BDInfo.DiscName),
+			logging.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier))
 	}
 	if title == "" {
 		title = "Unknown Disc"
@@ -190,60 +190,60 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		if scanResult.BDInfo.Year > 0 {
 			searchOpts.Year = scanResult.BDInfo.Year
 			logger.Info("using bd_info year for TMDB search",
-				zap.Int("year", scanResult.BDInfo.Year))
+				logging.Int("year", scanResult.BDInfo.Year))
 		}
 		if scanResult.BDInfo.Studio != "" {
 			logger.Info("detected studio from bd_info",
-				zap.String("studio", scanResult.BDInfo.Studio))
+				logging.String("studio", scanResult.BDInfo.Studio))
 			// Note: Studio filtering would require company lookup API call
 		}
 		// Calculate runtime from main title duration
 		if len(scanResult.Titles) > 0 && scanResult.Titles[0].Duration > 0 {
 			searchOpts.Runtime = scanResult.Titles[0].Duration / 60 // Convert seconds to minutes
 			logger.Info("using title runtime for TMDB search",
-				zap.Int("runtime_minutes", searchOpts.Runtime))
+				logging.Int("runtime_minutes", searchOpts.Runtime))
 		}
 	}
 
 	// Log the complete TMDB query details
 	logger.Info("tmdb query details",
-		zap.String("query", title),
-		zap.Int("year", searchOpts.Year),
-		zap.String("studio", searchOpts.Studio),
-		zap.Int("runtime_minutes", searchOpts.Runtime),
-		zap.String("runtime_range", fmt.Sprintf("%d-%d", searchOpts.Runtime-10, searchOpts.Runtime+10)))
+		logging.String("query", title),
+		logging.Int("year", searchOpts.Year),
+		logging.String("studio", searchOpts.Studio),
+		logging.Int("runtime_minutes", searchOpts.Runtime),
+		logging.String("runtime_range", fmt.Sprintf("%d-%d", searchOpts.Runtime-10, searchOpts.Runtime+10)))
 
 	response, err := i.searchTMDBWithOptions(ctx, title, searchOpts)
 	if err != nil {
-		logger.Warn("tmdb search failed", zap.String("title", title), zap.Error(err))
+		logger.Warn("tmdb search failed", logging.String("title", title), logging.Error(err))
 		i.scheduleReview(ctx, item, "TMDB lookup failed")
 		return nil
 	}
 	if response != nil {
 		logger.Info("tmdb response received",
-			zap.Int("result_count", len(response.Results)),
-			zap.Int("search_year", searchOpts.Year),
-			zap.Int("search_runtime", searchOpts.Runtime))
+			logging.Int("result_count", len(response.Results)),
+			logging.Int("search_year", searchOpts.Year),
+			logging.Int("search_runtime", searchOpts.Runtime))
 
 		// Log detailed results for debugging
 		for i, result := range response.Results {
 			logger.Info("tmdb search result",
-				zap.Int("index", i),
-				zap.Int64("tmdb_id", result.ID),
-				zap.String("title", result.Title),
-				zap.String("release_date", result.ReleaseDate),
-				zap.Float64("vote_average", result.VoteAverage),
-				zap.Int64("vote_count", result.VoteCount),
-				zap.Float64("popularity", result.Popularity),
-				zap.String("media_type", result.MediaType))
+				logging.Int("index", i),
+				logging.Int64("tmdb_id", result.ID),
+				logging.String("title", result.Title),
+				logging.String("release_date", result.ReleaseDate),
+				logging.Float64("vote_average", result.VoteAverage),
+				logging.Int64("vote_count", result.VoteCount),
+				logging.Float64("popularity", result.Popularity),
+				logging.String("media_type", result.MediaType))
 		}
 	}
 
 	best := selectBestResult(logger, title, response, i.cfg)
 	if best == nil {
 		logger.Warn("tmdb confidence scoring failed",
-			zap.String("query", title),
-			zap.String("reason", "No result met confidence threshold"))
+			logging.String("query", title),
+			logging.String("reason", "No result met confidence threshold"))
 		i.scheduleReview(ctx, item, "No confident TMDB match")
 		return nil
 	}
@@ -287,9 +287,9 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 
 	logger.Info(
 		"disc identified",
-		zap.Int64("tmdb_id", best.ID),
-		zap.String("identified_title", identifiedTitle),
-		zap.String("media_type", strings.TrimSpace(best.MediaType)),
+		logging.Int64("tmdb_id", best.ID),
+		logging.String("identified_title", identifiedTitle),
+		logging.String("media_type", strings.TrimSpace(best.MediaType)),
 	)
 	if i.notifier != nil {
 		mediaType := strings.ToLower(strings.TrimSpace(best.MediaType))
@@ -300,7 +300,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			"title":     identifiedTitle,
 			"mediaType": mediaType,
 		}); err != nil {
-			logger.Warn("identification notification failed", zap.Error(err))
+			logger.Warn("identification notification failed", logging.Error(err))
 		}
 	}
 
@@ -361,8 +361,8 @@ func (i *Identifier) handleDuplicateFingerprint(ctx context.Context, item *queue
 	if found != nil && found.ID != item.ID {
 		logger.Info(
 			"duplicate disc fingerprint detected",
-			zap.Int64("existing_item_id", found.ID),
-			zap.String("fingerprint", item.DiscFingerprint),
+			logging.Int64("existing_item_id", found.ID),
+			logging.String("fingerprint", item.DiscFingerprint),
 		)
 		i.flagReview(ctx, item, "Duplicate disc fingerprint", true)
 		item.ErrorMessage = "Duplicate disc fingerprint"
@@ -378,8 +378,8 @@ func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message s
 	logger := logging.WithContext(ctx, i.logger)
 	logger.Info(
 		"flagging queue item for review",
-		zap.String("reason", message),
-		zap.Bool("immediate", immediate),
+		logging.String("reason", message),
+		logging.Bool("immediate", immediate),
 	)
 	item.NeedsReview = true
 	item.ReviewReason = message
@@ -400,7 +400,7 @@ func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message s
 				label = "Unidentified Disc"
 			}
 			if err := i.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{"label": label}); err != nil {
-				logger.Warn("unidentified media notification failed", zap.Error(err))
+				logger.Warn("unidentified media notification failed", logging.Error(err))
 			}
 		}
 	} else {
@@ -450,7 +450,7 @@ func (i *Identifier) searchTMDBWithOptions(ctx context.Context, title string, op
 	return resp, nil
 }
 
-func selectBestResult(logger *zap.Logger, query string, response *tmdb.Response, cfg *config.Config) *tmdb.Result {
+func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response, cfg *config.Config) *tmdb.Result {
 	if response == nil || len(response.Results) == 0 {
 		return nil
 	}
@@ -459,8 +459,8 @@ func selectBestResult(logger *zap.Logger, query string, response *tmdb.Response,
 	bestScore := -1.0
 
 	logger.Info("confidence scoring analysis",
-		zap.String("query", query),
-		zap.Int("total_results", len(response.Results)))
+		logging.String("query", query),
+		logging.Int("total_results", len(response.Results)))
 
 	for idx := range response.Results {
 		res := response.Results[idx]
@@ -471,14 +471,14 @@ func selectBestResult(logger *zap.Logger, query string, response *tmdb.Response,
 		exactMatch := titleLower == queryLower
 
 		logger.Info("calculating confidence score",
-			zap.Int("result_index", idx),
-			zap.Int64("tmdb_id", res.ID),
-			zap.String("title", title),
-			zap.Float64("calculated_score", score),
-			zap.Float64("vote_average", res.VoteAverage),
-			zap.Int64("vote_count", res.VoteCount),
-			zap.Bool("exact_title_match", exactMatch),
-			zap.String("match_type", func() string {
+			logging.Int("result_index", idx),
+			logging.Int64("tmdb_id", res.ID),
+			logging.String("title", title),
+			logging.Float64("calculated_score", score),
+			logging.Float64("vote_average", res.VoteAverage),
+			logging.Int64("vote_count", res.VoteCount),
+			logging.Bool("exact_title_match", exactMatch),
+			logging.String("match_type", func() string {
 				if exactMatch {
 					return "exact"
 				}
@@ -505,25 +505,25 @@ func selectBestResult(logger *zap.Logger, query string, response *tmdb.Response,
 	exactMatch := titleLower == queryLower
 
 	logger.Info("best result before confidence thresholds",
-		zap.Int64("tmdb_id", best.ID),
-		zap.String("title", title),
-		zap.Float64("best_score", bestScore),
-		zap.Float64("vote_average", best.VoteAverage),
-		zap.Int64("vote_count", best.VoteCount),
-		zap.Bool("exact_title_match", exactMatch))
+		logging.Int64("tmdb_id", best.ID),
+		logging.String("title", title),
+		logging.Float64("best_score", bestScore),
+		logging.Float64("vote_average", best.VoteAverage),
+		logging.Int64("vote_count", best.VoteCount),
+		logging.Bool("exact_title_match", exactMatch))
 
 	if exactMatch {
 		// Exact title match - accept even with lower vote scores
 		// Only filter out extremely low-rated content (vote_average < 2.0)
 		if best.VoteAverage < 2.0 {
 			logger.Warn("exact match rejected: vote average too low",
-				zap.Float64("vote_average", best.VoteAverage),
-				zap.Float64("threshold", 2.0))
+				logging.Float64("vote_average", best.VoteAverage),
+				logging.Float64("threshold", 2.0))
 			return nil
 		}
 		logger.Info("exact match accepted: confidence passed",
-			zap.Float64("vote_average", best.VoteAverage),
-			zap.Float64("threshold", 2.0))
+			logging.Float64("vote_average", best.VoteAverage),
+			logging.Float64("threshold", 2.0))
 		return best
 	}
 
@@ -531,8 +531,8 @@ func selectBestResult(logger *zap.Logger, query string, response *tmdb.Response,
 	// Check if vote average is reasonable (not extremely low)
 	if best.VoteAverage < 3.0 {
 		logger.Warn("partial match rejected: vote average too low",
-			zap.Float64("vote_average", best.VoteAverage),
-			zap.Float64("threshold", 3.0))
+			logging.Float64("vote_average", best.VoteAverage),
+			logging.Float64("threshold", 3.0))
 		return nil
 	}
 
@@ -541,15 +541,15 @@ func selectBestResult(logger *zap.Logger, query string, response *tmdb.Response,
 	minExpectedScore := 1.3 + float64(best.VoteCount)/1000.0
 	if bestScore < minExpectedScore {
 		logger.Warn("partial match rejected: confidence score too low",
-			zap.Float64("best_score", bestScore),
-			zap.Float64("min_expected_score", minExpectedScore),
-			zap.String("formula", "1.3 + (vote_count/1000.0)"))
+			logging.Float64("best_score", bestScore),
+			logging.Float64("min_expected_score", minExpectedScore),
+			logging.String("formula", "1.3 + (vote_count/1000.0)"))
 		return nil
 	}
 
 	logger.Info("partial match accepted: confidence passed",
-		zap.Float64("best_score", bestScore),
-		zap.Float64("min_expected_score", minExpectedScore))
+		logging.Float64("best_score", bestScore),
+		logging.Float64("min_expected_score", minExpectedScore))
 
 	return best
 }

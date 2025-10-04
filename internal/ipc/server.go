@@ -13,9 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"spindle/internal/daemon"
+	"spindle/internal/logging"
 	"spindle/internal/logs"
 	"spindle/internal/queue"
 )
@@ -24,7 +25,7 @@ import (
 type Server struct {
 	path      string
 	daemon    *daemon.Daemon
-	logger    *zap.Logger
+	logger    *slog.Logger
 	listener  net.Listener
 	rpcServer *rpc.Server
 
@@ -34,12 +35,12 @@ type Server struct {
 }
 
 // NewServer configures the IPC server at the given socket path.
-func NewServer(ctx context.Context, path string, d *daemon.Daemon, logger *zap.Logger) (*Server, error) {
+func NewServer(ctx context.Context, path string, d *daemon.Daemon, logger *slog.Logger) (*Server, error) {
 	if d == nil {
 		return nil, errors.New("ipc server requires daemon")
 	}
 	if logger == nil {
-		logger = zap.NewNop()
+		logger = logging.NewNop()
 	}
 
 	if err := os.RemoveAll(path); err != nil {
@@ -72,7 +73,7 @@ func NewServer(ctx context.Context, path string, d *daemon.Daemon, logger *zap.L
 
 // Serve starts accepting RPC connections until the context is canceled.
 func (s *Server) Serve() {
-	s.logger.Info("IPC server listening", zap.String("socket", s.path))
+	s.logger.Info("IPC server listening", logging.String("socket", s.path))
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -84,7 +85,7 @@ func (s *Server) Serve() {
 					return
 				default:
 				}
-				s.logger.Warn("accept failed", zap.Error(err))
+				s.logger.Warn("accept failed", logging.Error(err))
 				continue
 			}
 			s.wg.Add(1)
@@ -104,13 +105,13 @@ func (s *Server) Close() {
 	}
 	s.wg.Wait()
 	if err := os.RemoveAll(s.path); err != nil {
-		s.logger.Warn("failed to remove socket", zap.String("socket", s.path), zap.Error(err))
+		s.logger.Warn("failed to remove socket", logging.String("socket", s.path), logging.Error(err))
 	}
 }
 
 type service struct {
 	daemon *daemon.Daemon
-	logger *zap.Logger
+	logger *slog.Logger
 	ctx    context.Context
 }
 

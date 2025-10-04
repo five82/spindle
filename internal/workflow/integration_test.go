@@ -7,13 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
 	"spindle/internal/disc"
 	"spindle/internal/encoding"
 	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
+	"spindle/internal/logging"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
@@ -49,7 +48,7 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 		store.Close()
 	})
 
-	logger := zap.NewNop()
+	logger := logging.NewNop()
 	notifier := &stubNotifier{}
 
 	tmdbClient := &fakeTMDB{

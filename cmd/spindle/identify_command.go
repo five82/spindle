@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 
 	"spindle/internal/disc"
 	"spindle/internal/identification"
@@ -67,12 +66,11 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("setup logging: %w", err)
 			}
-			defer func() { _ = logger.Sync() }()
 
 			// Create components for identification
 			tmdbClient, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
 			if err != nil {
-				logger.Warn("tmdb client initialization failed", zap.Error(err))
+				logger.Warn("tmdb client initialization failed", logging.Error(err))
 				return fmt.Errorf("create TMDB client: %w", err)
 			}
 

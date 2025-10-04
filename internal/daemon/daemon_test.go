@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
 	"spindle/internal/daemon"
+	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/stage"
 	"spindle/internal/workflow"
@@ -61,7 +60,7 @@ func TestDaemonStartStop(t *testing.T) {
 		t.Fatalf("queue.Open: %v", err)
 	}
 	logPath := filepath.Join(cfg.LogDir, "daemon-test.log")
-	logger := zap.NewNop()
+	logger := logging.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
 	d, err := daemon.New(cfg, store, logger, mgr, logPath)

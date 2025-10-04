@@ -9,9 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
+	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
@@ -57,7 +56,7 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 
 	stubPlex := &stubPlexService{}
 	notifier := &stubNotifier{}
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, zap.NewNop(), stubPlex, notifier)
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, notifier)
 	item.Status = queue.StatusOrganizing
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
@@ -94,7 +93,7 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 
 	notifier := &stubNotifier{}
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, zap.NewNop(), &stubPlexService{}, notifier)
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), &stubPlexService{}, notifier)
 
 	seenTargets := map[string]struct{}{}
 	for i := 0; i < 2; i++ {
@@ -170,7 +169,7 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, zap.NewNop(), failingPlexService{}, nil)
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), failingPlexService{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -187,7 +186,7 @@ func TestOrganizerHealthReady(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, zap.NewNop(), &stubPlexService{}, &stubNotifier{})
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), &stubPlexService{}, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
 	if !health.Ready {
 		t.Fatalf("expected ready health, got %+v", health)
@@ -202,7 +201,7 @@ func TestOrganizerHealthMissingPlex(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, zap.NewNop(), nil, &stubNotifier{})
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), nil, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
 	if health.Ready {
 		t.Fatalf("expected not ready health, got %+v", health)

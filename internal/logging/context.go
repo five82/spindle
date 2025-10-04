@@ -2,8 +2,7 @@ package logging
 
 import (
 	"context"
-
-	"go.uber.org/zap"
+	"log/slog"
 
 	"spindle/internal/services"
 )
@@ -17,32 +16,32 @@ const (
 	FieldCorrelationID = "correlation_id"
 )
 
-// ContextFields extracts standardized zap fields from the provided context.
-func ContextFields(ctx context.Context) []zap.Field {
+// ContextFields extracts standardized slog attributes from the provided context.
+func ContextFields(ctx context.Context) []slog.Attr {
 	if ctx == nil {
 		return nil
 	}
-	fields := make([]zap.Field, 0, 3)
+	fields := make([]slog.Attr, 0, 3)
 	if id, ok := services.ItemIDFromContext(ctx); ok {
-		fields = append(fields, zap.Int64(FieldItemID, id))
+		fields = append(fields, slog.Int64(FieldItemID, id))
 	}
 	if stage, ok := services.StageFromContext(ctx); ok {
-		fields = append(fields, zap.String(FieldStage, stage))
+		fields = append(fields, slog.String(FieldStage, stage))
 	}
 	if rid, ok := services.RequestIDFromContext(ctx); ok {
-		fields = append(fields, zap.String(FieldCorrelationID, rid))
+		fields = append(fields, slog.String(FieldCorrelationID, rid))
 	}
 	return fields
 }
 
 // WithContext returns a logger augmented with structured fields derived from the supplied context.
-func WithContext(ctx context.Context, logger *zap.Logger) *zap.Logger {
+func WithContext(ctx context.Context, logger *slog.Logger) *slog.Logger {
 	if logger == nil {
-		logger = zap.NewNop()
+		logger = NewNop()
 	}
 	fields := ContextFields(ctx)
 	if len(fields) == 0 {
 		return logger
 	}
-	return logger.With(fields...)
+	return logger.With(attrsToArgs(fields)...)
 }

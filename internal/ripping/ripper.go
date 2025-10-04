@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
@@ -24,31 +24,31 @@ import (
 type Ripper struct {
 	store    *queue.Store
 	cfg      *config.Config
-	logger   *zap.Logger
+	logger   *slog.Logger
 	client   makemkv.Ripper
 	ejector  disc.Ejector
 	notifier notifications.Service
 }
 
 // NewRipper constructs the ripping handler using default dependencies.
-func NewRipper(cfg *config.Config, store *queue.Store, logger *zap.Logger) *Ripper {
+func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Ripper {
 	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKVRipTimeout)
 	if err != nil {
-		logger.Warn("makemkv client unavailable", zap.Error(err))
+		logger.Warn("makemkv client unavailable", logging.Error(err))
 	}
 	return NewRipperWithDependencies(cfg, store, logger, client, disc.NewEjector(), notifications.NewService(cfg))
 }
 
 // NewRipperWithClient keeps backwards compatibility for tests using only a client override.
-func NewRipperWithClient(cfg *config.Config, store *queue.Store, logger *zap.Logger, client makemkv.Ripper) *Ripper {
+func NewRipperWithClient(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper) *Ripper {
 	return NewRipperWithDependencies(cfg, store, logger, client, disc.NewEjector(), notifications.NewService(cfg))
 }
 
 // NewRipperWithDependencies allows injecting all collaborators (used in tests).
-func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *zap.Logger, client makemkv.Ripper, ejector disc.Ejector, notifier notifications.Service) *Ripper {
+func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper, ejector disc.Ejector, notifier notifications.Service) *Ripper {
 	stageLogger := logger
 	if stageLogger != nil {
-		stageLogger = stageLogger.With(zap.String("component", "ripper"))
+		stageLogger = stageLogger.With(logging.String("component", "ripper"))
 	}
 	return &Ripper{store: store, cfg: cfg, logger: stageLogger, client: client, ejector: ejector, notifier: notifier}
 }
@@ -63,12 +63,12 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ErrorMessage = ""
 	logger.Info(
 		"starting rip preparation",
-		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		zap.String("source_path", strings.TrimSpace(item.SourcePath)),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("source_path", strings.TrimSpace(item.SourcePath)),
 	)
 	if r.notifier != nil {
 		if err := r.notifier.Publish(ctx, notifications.EventRipStarted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
-			logger.Warn("failed to send rip start notification", zap.Error(err))
+			logger.Warn("failed to send rip start notification", logging.Error(err))
 		}
 	}
 	return nil
@@ -83,13 +83,13 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	destDir := filepath.Join(r.cfg.StagingDir, "rips")
 	logger.Info(
 		"starting rip execution",
-		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		zap.String("destination_dir", destDir),
-		zap.Bool("makemkv_enabled", r.client != nil),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("destination_dir", destDir),
+		logging.Bool("makemkv_enabled", r.client != nil),
 	)
 
 	if r.client != nil {
-		logger.Info("launching makemkv rip", zap.String("destination_dir", destDir))
+		logger.Info("launching makemkv rip", logging.String("destination_dir", destDir))
 		path, err := r.client.Rip(ctx, item.DiscTitle, item.SourcePath, destDir, progressCB)
 		if err != nil {
 			return services.Wrap(
@@ -101,7 +101,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 			)
 		}
 		target = path
-		logger.Info("makemkv rip finished", zap.String("ripped_file", target))
+		logger.Info("makemkv rip finished", logging.String("ripped_file", target))
 	}
 
 	if target == "" {
@@ -126,24 +126,24 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 		} else if err := os.WriteFile(target, []byte("placeholder rip"), 0o644); err != nil {
 			return services.Wrap(services.ErrTransient, "ripping", "write placeholder", "Failed to write placeholder rip", err)
 		}
-		logger.Info("created placeholder rip output", zap.String("ripped_file", target))
+		logger.Info("created placeholder rip output", logging.String("ripped_file", target))
 	}
 
 	item.RippedFile = target
 	item.ProgressStage = "Ripped"
 	item.ProgressPercent = 100
 	item.ProgressMessage = "Disc content ripped"
-	logger.Info("ripping completed", zap.String("ripped_file", target))
+	logger.Info("ripping completed", logging.String("ripped_file", target))
 
 	if r.ejector != nil {
-		logger.Info("ejecting disc", zap.String("device", strings.TrimSpace(r.cfg.OpticalDrive)))
+		logger.Info("ejecting disc", logging.String("device", strings.TrimSpace(r.cfg.OpticalDrive)))
 		if err := r.ejector.Eject(ctx, r.cfg.OpticalDrive); err != nil {
-			logger.Warn("failed to eject disc", zap.Error(err))
+			logger.Warn("failed to eject disc", logging.Error(err))
 		}
 	}
 	if r.notifier != nil {
 		if err := r.notifier.Publish(ctx, notifications.EventRipCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
-			logger.Warn("rip completion notification failed", zap.Error(err))
+			logger.Warn("rip completion notification failed", logging.Error(err))
 		}
 	}
 
@@ -191,7 +191,7 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 		copy.ProgressMessage = update.Message
 	}
 	if err := r.store.Update(ctx, &copy); err != nil {
-		logger.Warn("failed to persist progress", zap.Error(err))
+		logger.Warn("failed to persist progress", logging.Error(err))
 		return
 	}
 	*item = copy

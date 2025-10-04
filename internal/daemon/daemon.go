@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"sync/atomic"
 
 	"github.com/gofrs/flock"
-	"go.uber.org/zap"
 
 	"spindle/internal/config"
 	"spindle/internal/deps"
@@ -30,7 +30,7 @@ var manualFileExtensions = map[string]struct{}{
 
 type Daemon struct {
 	cfg      *config.Config
-	logger   *zap.Logger
+	logger   *slog.Logger
 	store    *queue.Store
 	workflow *workflow.Manager
 	logPath  string
@@ -69,7 +69,7 @@ type DependencyStatus struct {
 }
 
 // New constructs a daemon with initialized dependencies.
-func New(cfg *config.Config, store *queue.Store, logger *zap.Logger, wf *workflow.Manager, logPath string) (*Daemon, error) {
+func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workflow.Manager, logPath string) (*Daemon, error) {
 	if cfg == nil || store == nil || logger == nil || wf == nil {
 		return nil, errors.New("daemon requires config, store, logger, and workflow manager")
 	}
@@ -126,7 +126,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}
 
 	d.running.Store(true)
-	d.logger.Info("spindle daemon started", zap.String("lock", d.lockPath))
+	d.logger.Info("spindle daemon started", logging.String("lock", d.lockPath))
 	d.runDependencyChecks(ctx)
 	return nil
 }
@@ -146,7 +146,7 @@ func (d *Daemon) Stop() {
 	}
 	d.workflow.Stop()
 	if err := d.lock.Unlock(); err != nil {
-		d.logger.Warn("failed to release daemon lock", zap.Error(err))
+		d.logger.Warn("failed to release daemon lock", logging.Error(err))
 	}
 	d.ctx = nil
 	d.running.Store(false)
@@ -272,7 +272,7 @@ func (d *Daemon) AddFile(ctx context.Context, sourcePath string) (*queue.Item, e
 	if err != nil {
 		return nil, fmt.Errorf("enqueue manual file: %w", err)
 	}
-	d.logger.Info("manual file queued", zap.Int64(logging.FieldItemID, item.ID), zap.String("source", absPath))
+	d.logger.Info("manual file queued", logging.Int64(logging.FieldItemID, item.ID), logging.String("source", absPath))
 	return item, nil
 }
 
@@ -333,18 +333,18 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) {
 		if status.Available {
 			continue
 		}
-		fields := []zap.Field{
-			zap.String("dependency", status.Name),
-			zap.String("command", status.Command),
+		fields := []logging.Attr{
+			logging.String("dependency", status.Name),
+			logging.String("command", status.Command),
 		}
 		if status.Detail != "" {
-			fields = append(fields, zap.String("detail", status.Detail))
+			fields = append(fields, logging.String("detail", status.Detail))
 		}
 		if status.Optional {
-			fields = append(fields, zap.Bool("optional", true))
-			d.logger.Warn("optional dependency unavailable", fields...)
+			fields = append(fields, logging.Bool("optional", true))
+			d.logger.Warn("optional dependency unavailable", logging.Args(fields...)...)
 		} else {
-			d.logger.Error("required dependency unavailable", fields...)
+			d.logger.Error("required dependency unavailable", logging.Args(fields...)...)
 			if d.notifier != nil {
 				_ = d.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
 					"context": fmt.Sprintf("dependency %s", status.Name),

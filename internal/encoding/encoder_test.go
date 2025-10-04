@@ -8,10 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
 	"spindle/internal/encoding"
+	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services/drapto"
@@ -73,7 +72,7 @@ func TestEncoderUsesDraptoClient(t *testing.T) {
 
 	stubClient := &stubDraptoClient{}
 	notifier := &stubNotifier{}
-	handler := encoding.NewEncoderWithDependencies(cfg, store, zap.NewNop(), stubClient, notifier)
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), stubClient, notifier)
 	item.Status = queue.StatusEncoding
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
@@ -131,7 +130,7 @@ func TestEncoderFallsBackWithoutClient(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	handler := encoding.NewEncoderWithDependencies(cfg, store, zap.NewNop(), nil, nil)
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), nil, nil)
 	item.Status = queue.StatusEncoding
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
@@ -177,7 +176,7 @@ func TestEncoderWrapsErrors(t *testing.T) {
 		t.Fatalf("write ripped file: %v", err)
 	}
 
-	handler := encoding.NewEncoderWithDependencies(cfg, store, zap.NewNop(), failingClient{}, nil)
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), failingClient{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -194,7 +193,7 @@ func TestEncoderHealthReady(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	handler := encoding.NewEncoderWithDependencies(cfg, store, zap.NewNop(), &stubDraptoClient{}, &stubNotifier{})
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), &stubDraptoClient{}, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
 	if !health.Ready {
 		t.Fatalf("expected ready health, got %+v", health)
@@ -209,7 +208,7 @@ func TestEncoderHealthMissingClient(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	handler := encoding.NewEncoderWithDependencies(cfg, store, zap.NewNop(), nil, &stubNotifier{})
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), nil, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
 	if health.Ready {
 		t.Fatalf("expected not ready health, got %+v", health)

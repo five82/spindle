@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
@@ -47,7 +47,7 @@ type pipelineStage struct {
 type Manager struct {
 	cfg               *config.Config
 	store             *queue.Store
-	logger            *zap.Logger
+	logger            *slog.Logger
 	pollInterval      time.Duration
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
@@ -68,12 +68,12 @@ type Manager struct {
 }
 
 // NewManager constructs a new workflow manager.
-func NewManager(cfg *config.Config, store *queue.Store, logger *zap.Logger) *Manager {
+func NewManager(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Manager {
 	return NewManagerWithNotifier(cfg, store, logger, notifications.NewService(cfg))
 }
 
 // NewManagerWithNotifier constructs a workflow manager with a custom notifier (used in tests).
-func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *zap.Logger, notifier notifications.Service) *Manager {
+func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Manager {
 	return &Manager{
 		cfg:               cfg,
 		store:             store,
@@ -177,7 +177,7 @@ func (m *Manager) Stop() {
 
 func (m *Manager) run(ctx context.Context) {
 	defer m.wg.Done()
-	logger := m.logger.With(zap.String("component", "workflow-runner"))
+	logger := m.logger.With(logging.String("component", "workflow-runner"))
 
 	for {
 		select {
@@ -187,7 +187,7 @@ func (m *Manager) run(ctx context.Context) {
 		}
 
 		if err := m.reclaimStaleItems(ctx, logger); err != nil {
-			logger.Warn("reclaim stale processing failed", zap.Error(err))
+			logger.Warn("reclaim stale processing failed", logging.Error(err))
 		}
 
 		item, err := m.nextItem(ctx)
@@ -208,7 +208,7 @@ func (m *Manager) run(ctx context.Context) {
 	}
 }
 
-func (m *Manager) reclaimStaleItems(ctx context.Context, logger *zap.Logger) error {
+func (m *Manager) reclaimStaleItems(ctx context.Context, logger *slog.Logger) error {
 	if m.heartbeatTimeout <= 0 {
 		return nil
 	}
@@ -218,14 +218,14 @@ func (m *Manager) reclaimStaleItems(ctx context.Context, logger *zap.Logger) err
 		return err
 	}
 	if reclaimed > 0 {
-		logger.Info("reclaimed stale items", zap.Int64("count", reclaimed))
+		logger.Info("reclaimed stale items", logging.Int64("count", reclaimed))
 	}
 	return nil
 }
 
-func (m *Manager) handleNextItemError(ctx context.Context, logger *zap.Logger, err error) {
+func (m *Manager) handleNextItemError(ctx context.Context, logger *slog.Logger, err error) {
 	m.setLastError(err)
-	logger.Error("failed to fetch next queue item", zap.Error(err))
+	logger.Error("failed to fetch next queue item", logging.Error(err))
 	select {
 	case <-ctx.Done():
 		return
@@ -241,10 +241,10 @@ func (m *Manager) waitForItemOrShutdown(ctx context.Context) {
 	}
 }
 
-func (m *Manager) processItem(ctx context.Context, logger *zap.Logger, item *queue.Item) error {
+func (m *Manager) processItem(ctx context.Context, logger *slog.Logger, item *queue.Item) error {
 	stage, ok := m.stageForStatus(item.Status)
 	if !ok {
-		logger.Warn("no stage configured for status", zap.String("status", string(item.Status)))
+		logger.Warn("no stage configured for status", logging.String("status", string(item.Status)))
 		m.waitForItemOrShutdown(ctx)
 		return nil
 	}
@@ -254,7 +254,7 @@ func (m *Manager) processItem(ctx context.Context, logger *zap.Logger, item *que
 	stageLogger := logging.WithContext(stageCtx, logger)
 
 	if err := m.transitionToProcessing(stageCtx, stage.processingStatus, stage.name, item); err != nil {
-		stageLogger.Error("failed to transition item to processing", zap.Error(err))
+		stageLogger.Error("failed to transition item to processing", logging.Error(err))
 		m.setLastError(err)
 		return err
 	}
@@ -262,22 +262,22 @@ func (m *Manager) processItem(ctx context.Context, logger *zap.Logger, item *que
 	return m.executeStage(stageCtx, stageLogger, stage, item)
 }
 
-func (m *Manager) executeStage(ctx context.Context, stageLogger *zap.Logger, stage pipelineStage, item *queue.Item) error {
+func (m *Manager) executeStage(ctx context.Context, stageLogger *slog.Logger, stage pipelineStage, item *queue.Item) error {
 	stageStart := time.Now()
 	stageLogger.Info(
 		"stage started",
-		zap.String("processing_status", string(stage.processingStatus)),
-		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		zap.String("source_path", strings.TrimSpace(item.SourcePath)),
+		logging.String("processing_status", string(stage.processingStatus)),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("source_path", strings.TrimSpace(item.SourcePath)),
 	)
 
 	handler := stage.handler
 	if handler == nil {
-		stageLogger.Warn("missing stage handler", zap.String("stage", stage.name))
+		stageLogger.Warn("missing stage handler", logging.String("stage", stage.name))
 		item.Status = queue.StatusFailed
 		item.ErrorMessage = fmt.Sprintf("stage %s missing handler", stage.name)
 		if err := m.store.Update(ctx, item); err != nil {
-			stageLogger.Error("failed to persist missing handler failure", zap.Error(err))
+			stageLogger.Error("failed to persist missing handler failure", logging.Error(err))
 		}
 		m.setLastError(errors.New("stage handler unavailable"))
 		return errors.New("stage handler unavailable")
@@ -290,7 +290,7 @@ func (m *Manager) executeStage(ctx context.Context, stageLogger *zap.Logger, sta
 	}
 	if err := m.store.Update(ctx, item); err != nil {
 		wrapped := fmt.Errorf("persist stage preparation: %w", err)
-		stageLogger.Error("failed to persist stage preparation", zap.Error(wrapped))
+		stageLogger.Error("failed to persist stage preparation", logging.Error(wrapped))
 		m.setLastError(wrapped)
 		return wrapped
 	}
@@ -312,16 +312,16 @@ func (m *Manager) executeStage(ctx context.Context, stageLogger *zap.Logger, sta
 	item.LastHeartbeat = nil
 	if err := m.store.Update(ctx, item); err != nil {
 		wrapped := fmt.Errorf("persist stage result: %w", err)
-		stageLogger.Error("failed to persist stage result", zap.Error(wrapped))
+		stageLogger.Error("failed to persist stage result", logging.Error(wrapped))
 		m.setLastError(wrapped)
 		return wrapped
 	}
 	stageLogger.Info(
 		"stage completed",
-		zap.String("next_status", string(item.Status)),
-		zap.String("progress_stage", strings.TrimSpace(item.ProgressStage)),
-		zap.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
-		zap.Duration("elapsed", time.Since(stageStart)),
+		logging.String("next_status", string(item.Status)),
+		logging.String("progress_stage", strings.TrimSpace(item.ProgressStage)),
+		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
+		logging.Duration("elapsed", time.Since(stageStart)),
 	)
 	m.setLastItem(item)
 	m.checkQueueCompletion(ctx)
@@ -384,7 +384,7 @@ func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID 
 	ticker := time.NewTicker(m.heartbeatInterval)
 	defer ticker.Stop()
 
-	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-heartbeat")))
+	logger := logging.WithContext(ctx, m.logger.With(logging.String("component", "workflow-heartbeat")))
 
 	for {
 		select {
@@ -396,7 +396,7 @@ func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID 
 				if errors.Is(err, context.Canceled) {
 					logger.Info("daemon shutting down, heartbeat update cancelled")
 				} else {
-					logger.Warn("heartbeat update failed", zap.Error(err))
+					logger.Warn("heartbeat update failed", logging.Error(err))
 				}
 			}
 		}
@@ -404,22 +404,22 @@ func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID 
 }
 
 func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item *queue.Item, stageErr error) {
-	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-manager")))
+	logger := logging.WithContext(ctx, m.logger.With(logging.String("component", "workflow-manager")))
 
 	status, message := m.classifyStageFailure(stageName, stageErr)
 	m.setItemFailureState(item, status, message)
 
 	logger.Error("stage failed",
-		zap.String("resolved_status", string(status)),
-		zap.String("error_message", strings.TrimSpace(message)),
-		zap.Error(stageErr),
+		logging.String("resolved_status", string(status)),
+		logging.String("error_message", strings.TrimSpace(message)),
+		logging.Error(stageErr),
 	)
 
 	if err := m.store.Update(ctx, item); err != nil {
 		if errors.Is(err, context.Canceled) {
 			logger.Info("daemon shutting down, could not update stage failure")
 		} else {
-			logger.Error("failed to persist stage failure", zap.Error(err))
+			logger.Error("failed to persist stage failure", logging.Error(err))
 		}
 	}
 
@@ -521,7 +521,7 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 
 	stats, err := m.store.Stats(ctx)
 	if err != nil {
-		m.logger.Warn("failed to read queue stats", zap.Error(err))
+		m.logger.Warn("failed to read queue stats", logging.Error(err))
 	}
 
 	health := make(map[string]stage.Health, len(stages))
@@ -565,7 +565,7 @@ func (m *Manager) notifyStageError(ctx context.Context, stageName string, item *
 	if m.notifier == nil || stageErr == nil {
 		return
 	}
-	logger := logging.WithContext(ctx, m.logger.With(zap.String("component", "workflow-manager")))
+	logger := logging.WithContext(ctx, m.logger.With(logging.String("component", "workflow-manager")))
 	contextLabel := fmt.Sprintf("%s (item #%d)", stageName, item.ID)
 	if err := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
 		"error":   stageErr,
@@ -575,7 +575,7 @@ func (m *Manager) notifyStageError(ctx context.Context, stageName string, item *
 		if errors.Is(err, context.Canceled) {
 			logger.Info("daemon shutting down, could not send error notification")
 		} else {
-			logger.Warn("stage error notification failed", zap.Error(err))
+			logger.Warn("stage error notification failed", logging.Error(err))
 		}
 	}
 }
@@ -590,7 +590,7 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 		if errors.Is(err, context.Canceled) {
 			m.logger.Info("daemon shutting down, could not get queue stats for start notification")
 		} else {
-			m.logger.Warn("queue stats unavailable for start notification", zap.Error(err))
+			m.logger.Warn("queue stats unavailable for start notification", logging.Error(err))
 		}
 		return
 	}
@@ -609,7 +609,7 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 		if errors.Is(err, context.Canceled) {
 			m.logger.Info("daemon shutting down, could not send queue start notification")
 		} else {
-			m.logger.Warn("queue start notification failed", zap.Error(err))
+			m.logger.Warn("queue start notification failed", logging.Error(err))
 		}
 	}
 }
@@ -624,7 +624,7 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 		if errors.Is(err, context.Canceled) {
 			m.logger.Info("daemon shutting down, could not check queue completion")
 		} else {
-			m.logger.Warn("queue stats unavailable for completion notification", zap.Error(err))
+			m.logger.Warn("queue stats unavailable for completion notification", logging.Error(err))
 		}
 		return
 	}
@@ -657,7 +657,7 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 		if errors.Is(err, context.Canceled) {
 			m.logger.Info("daemon shutting down, could not send queue completion notification")
 		} else {
-			m.logger.Warn("queue completion notification failed", zap.Error(err))
+			m.logger.Warn("queue completion notification failed", logging.Error(err))
 		}
 	}
 }

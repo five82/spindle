@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
-
-	"go.uber.org/zap"
 
 	"spindle/internal/config"
 	"spindle/internal/daemon"
@@ -49,7 +48,6 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
-	defer logger.Sync() //nolint:errcheck
 	if err := ensureCurrentLogPointer(cfg.LogDir, logPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: unable to update spindle.log link: %v\n", err)
 	}
@@ -61,7 +59,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 
 	store, err := queue.Open(cfg)
 	if err != nil {
-		logger.Fatal("open queue store", zap.Error(err))
+		logger.Error("open queue store", logging.Error(err))
 		return err
 	}
 	defer store.Close()
@@ -84,7 +82,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	ipcServer.Serve()
 
 	if err := d.Start(signalCtx); err != nil {
-		logger.Warn("daemon start", zap.Error(err))
+		logger.Warn("daemon start", logging.Error(err))
 	}
 
 	<-signalCtx.Done()
@@ -92,7 +90,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	return nil
 }
 
-func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Store, logger *zap.Logger) {
+func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Store, logger *slog.Logger) {
 	if mgr == nil || cfg == nil {
 		return
 	}

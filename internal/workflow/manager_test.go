@@ -8,9 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
+	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
@@ -76,7 +75,7 @@ func TestManagerProcessesItems(t *testing.T) {
 	organizer := newStubStage("organizer")
 
 	notifier := &managerNotifier{}
-	mgr := workflow.NewManagerWithNotifier(cfg, store, zap.NewNop(), notifier)
+	mgr := workflow.NewManagerWithNotifier(cfg, store, logging.NewNop(), notifier)
 	mgr.ConfigureStages(workflow.StageSet{
 		Identifier: identifier,
 		Ripper:     ripper,
@@ -139,7 +138,7 @@ func TestManagerStatusIncludesStageHealth(t *testing.T) {
 	handler := newStubStage("identifier")
 	handler.health = stage.Unhealthy(handler.name, "dependency missing")
 
-	mgr := workflow.NewManager(cfg, store, zap.NewNop())
+	mgr := workflow.NewManager(cfg, store, logging.NewNop())
 	mgr.ConfigureStages(workflow.StageSet{Identifier: handler})
 
 	status := mgr.Status(context.Background())
@@ -173,7 +172,7 @@ func TestManagerValidationErrorTriggersReview(t *testing.T) {
 	failing := newStubStage("ripper")
 	failing.executeErr = stageErr
 
-	mgr := workflow.NewManager(cfg, store, zap.NewNop())
+	mgr := workflow.NewManager(cfg, store, logging.NewNop())
 	mgr.ConfigureStages(workflow.StageSet{Ripper: failing})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -231,7 +230,7 @@ func TestManagerFailureDefaultsToFailed(t *testing.T) {
 	failing := newStubStage("ripper")
 	failing.executeErr = fmt.Errorf("boom")
 
-	mgr := workflow.NewManager(cfg, store, zap.NewNop())
+	mgr := workflow.NewManager(cfg, store, logging.NewNop())
 	mgr.ConfigureStages(workflow.StageSet{Ripper: failing})
 
 	ctx, cancel := context.WithCancel(context.Background())

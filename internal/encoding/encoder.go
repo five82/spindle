@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
@@ -24,22 +24,22 @@ import (
 type Encoder struct {
 	store    *queue.Store
 	cfg      *config.Config
-	logger   *zap.Logger
+	logger   *slog.Logger
 	client   drapto.Client
 	notifier notifications.Service
 }
 
 // NewEncoder constructs the encoding handler.
-func NewEncoder(cfg *config.Config, store *queue.Store, logger *zap.Logger) *Encoder {
+func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Encoder {
 	client := drapto.NewCLI(drapto.WithBinary(cfg.DraptoBinary()))
 	return NewEncoderWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
 
 // NewEncoderWithDependencies allows injecting custom dependencies (used for tests).
-func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *zap.Logger, client drapto.Client, notifier notifications.Service) *Encoder {
+func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client drapto.Client, notifier notifications.Service) *Encoder {
 	stageLogger := logger
 	if stageLogger != nil {
-		stageLogger = stageLogger.With(zap.String("component", "encoder"))
+		stageLogger = stageLogger.With(logging.String("component", "encoder"))
 	}
 	return &Encoder{store: store, cfg: cfg, logger: stageLogger, client: client, notifier: notifier}
 }
@@ -54,15 +54,15 @@ func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ErrorMessage = ""
 	logger.Info(
 		"starting encoding preparation",
-		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		zap.String("ripped_file", strings.TrimSpace(item.RippedFile)),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("ripped_file", strings.TrimSpace(item.RippedFile)),
 	)
 	return nil
 }
 
 func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
-	logger.Info("starting encoding", zap.String("ripped_file", strings.TrimSpace(item.RippedFile)))
+	logger.Info("starting encoding", logging.String("ripped_file", strings.TrimSpace(item.RippedFile)))
 	if item.RippedFile == "" {
 		return services.Wrap(
 			services.ErrValidation,
@@ -83,7 +83,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			err,
 		)
 	}
-	logger.Info("prepared encoding directory", zap.String("encoded_dir", encodedDir))
+	logger.Info("prepared encoding directory", logging.String("encoded_dir", encodedDir))
 
 	var encodedPath string
 	if e.client != nil {
@@ -99,15 +99,15 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 				copy.ProgressPercent = update.Percent
 			}
 			if err := e.store.Update(ctx, &copy); err != nil {
-				logger.Warn("failed to persist encoding progress", zap.Error(err))
+				logger.Warn("failed to persist encoding progress", logging.Error(err))
 			}
 			*item = copy
 		}
 
 		logger.Info(
 			"launching drapto encode",
-			zap.String("input", item.RippedFile),
-			zap.String("output_dir", encodedDir),
+			logging.String("input", item.RippedFile),
+			logging.String("output_dir", encodedDir),
 		)
 		path, err := e.client.Encode(ctx, item.RippedFile, encodedDir, progress)
 		if err != nil {
@@ -120,7 +120,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			)
 		}
 		encodedPath = path
-		logger.Info("drapto encode completed", zap.String("encoded_file", encodedPath))
+		logger.Info("drapto encode completed", logging.String("encoded_file", encodedPath))
 	}
 
 	if encodedPath == "" {
@@ -129,7 +129,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		if err := copyFile(item.RippedFile, encodedPath); err != nil {
 			return services.Wrap(services.ErrTransient, "encoding", "copy ripped file", "Failed to stage encoded artifact", err)
 		}
-		logger.Info("created placeholder encoded copy", zap.String("encoded_file", encodedPath))
+		logger.Info("created placeholder encoded copy", logging.String("encoded_file", encodedPath))
 	}
 
 	item.EncodedFile = encodedPath
@@ -140,14 +140,14 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		item.ProgressMessage = "Encoding completed"
 		if e.notifier != nil {
 			if err := e.notifier.Publish(ctx, notifications.EventEncodingCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
-				logger.Warn("encoding notification failed", zap.Error(err))
+				logger.Warn("encoding notification failed", logging.Error(err))
 			}
 		}
 	}
 	logger.Info(
 		"encoding stage completed",
-		zap.String("encoded_file", encodedPath),
-		zap.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
+		logging.String("encoded_file", encodedPath),
+		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
 	)
 
 	return nil

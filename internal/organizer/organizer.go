@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
@@ -34,22 +34,22 @@ type MetadataProvider interface {
 type Organizer struct {
 	store    *queue.Store
 	cfg      *config.Config
-	logger   *zap.Logger
+	logger   *slog.Logger
 	plex     plex.Service
 	notifier notifications.Service
 }
 
 // NewOrganizer constructs the organizer stage handler using default dependencies.
-func NewOrganizer(cfg *config.Config, store *queue.Store, logger *zap.Logger) *Organizer {
+func NewOrganizer(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Organizer {
 	plexService := plex.NewConfiguredService(cfg)
 	return NewOrganizerWithDependencies(cfg, store, logger, plexService, notifications.NewService(cfg))
 }
 
 // NewOrganizerWithDependencies allows injecting collaborators (used in tests).
-func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger *zap.Logger, plexClient plex.Service, notifier notifications.Service) *Organizer {
+func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, plexClient plex.Service, notifier notifications.Service) *Organizer {
 	stageLogger := logger
 	if stageLogger != nil {
-		stageLogger = stageLogger.With(zap.String("component", "organizer"))
+		stageLogger = stageLogger.With(logging.String("component", "organizer"))
 	}
 	return &Organizer{store: store, cfg: cfg, logger: stageLogger, plex: plexClient, notifier: notifier}
 }
@@ -64,8 +64,8 @@ func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ErrorMessage = ""
 	logger.Info(
 		"starting organization preparation",
-		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		zap.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
 	)
 	return nil
 }
@@ -74,8 +74,8 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, o.logger)
 	logger.Info(
 		"starting organization",
-		zap.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
-		zap.Bool("needs_review", item.NeedsReview),
+		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
+		logging.Bool("needs_review", item.NeedsReview),
 	)
 	if item.EncodedFile == "" {
 		return services.Wrap(
@@ -87,7 +87,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 	if item.NeedsReview {
-		logger.Info("routing item to manual review", zap.String("reason", strings.TrimSpace(item.ReviewReason)))
+		logger.Info("routing item to manual review", logging.String("reason", strings.TrimSpace(item.ReviewReason)))
 		reviewPath, err := o.moveToReview(ctx, item)
 		if err != nil {
 			return err
@@ -104,7 +104,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		if o.notifier != nil {
 			label := filepath.Base(reviewPath)
 			if err := o.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{"filename": label}); err != nil {
-				logger.Warn("review notification failed", zap.Error(err))
+				logger.Warn("review notification failed", logging.Error(err))
 			}
 		}
 		return nil
@@ -125,32 +125,32 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		item.MetadataJSON = string(encoded)
 		meta = basic
 		if err := o.store.Update(ctx, item); err != nil {
-			o.logger.Warn("failed to persist fallback metadata", zap.Error(err))
+			o.logger.Warn("failed to persist fallback metadata", logging.Error(err))
 		}
 	}
 
 	o.updateProgress(ctx, item, "Organizing library structure", 20)
-	logger.Info("organizing encoded file into library", zap.String("encoded_file", item.EncodedFile))
+	logger.Info("organizing encoded file into library", logging.String("encoded_file", item.EncodedFile))
 	targetPath, err := o.plex.Organize(ctx, item.EncodedFile, meta)
 	if err != nil {
 		return services.Wrap(services.ErrExternalTool, "organizing", "move to library", "Failed to move media into library", err)
 	}
 	item.FinalFile = targetPath
-	logger.Info("library move completed", zap.String("final_file", targetPath))
+	logger.Info("library move completed", logging.String("final_file", targetPath))
 
 	o.updateProgress(ctx, item, "Refreshing Plex library", 80)
 	if err := o.plex.Refresh(ctx, meta); err != nil {
-		logger.Warn("plex refresh failed", zap.Error(err))
+		logger.Warn("plex refresh failed", logging.Error(err))
 	} else {
-		logger.Info("plex library refresh requested", zap.String("title", strings.TrimSpace(meta.Title())))
+		logger.Info("plex library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
 	}
 
 	o.updateProgress(ctx, item, "Organization completed", 100)
 	item.ProgressMessage = fmt.Sprintf("Available in library: %s", filepath.Base(targetPath))
 	logger.Info(
 		"organization completed",
-		zap.String("final_file", targetPath),
-		zap.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
+		logging.String("final_file", targetPath),
+		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
 	)
 
 	if o.notifier != nil {
@@ -165,10 +165,10 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			"mediaTitle": title,
 			"finalFile":  filepath.Base(targetPath),
 		}); err != nil {
-			logger.Warn("organization notifier failed", zap.Error(err))
+			logger.Warn("organization notifier failed", logging.Error(err))
 		}
 		if err := o.notifier.Publish(ctx, notifications.EventProcessingCompleted, notifications.Payload{"title": title}); err != nil {
-			logger.Warn("processing completion notifier failed", zap.Error(err))
+			logger.Warn("processing completion notifier failed", logging.Error(err))
 		}
 	}
 
@@ -179,8 +179,8 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 	logger := logging.WithContext(ctx, o.logger)
 	logger.Info(
 		"moving encoded file to review",
-		zap.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
-		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
 	)
 	reviewDir := strings.TrimSpace(o.cfg.ReviewDir)
 	if reviewDir == "" {
@@ -220,7 +220,7 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 					return "", services.Wrap(services.ErrTransient, "organizing", "copy review file", "Failed to copy file into review directory", copyErr)
 				}
 				if err := os.Remove(item.EncodedFile); err != nil {
-					logger.Warn("failed to remove source file after copy", zap.Error(err))
+					logger.Warn("failed to remove source file after copy", logging.Error(err))
 				}
 			} else {
 				return "", services.Wrap(services.ErrTransient, "organizing", "move review file", "Failed to move file into review directory", renameErr)
@@ -350,7 +350,7 @@ func (o *Organizer) updateProgress(ctx context.Context, item *queue.Item, messag
 	copy.ProgressMessage = message
 	copy.ProgressPercent = percent
 	if err := o.store.Update(ctx, &copy); err != nil {
-		logger.Warn("failed to persist organizer progress", zap.Error(err))
+		logger.Warn("failed to persist organizer progress", logging.Error(err))
 		return
 	}
 	*item = copy

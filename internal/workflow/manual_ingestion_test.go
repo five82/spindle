@@ -6,10 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
 	"spindle/internal/encoding"
+	"spindle/internal/logging"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 )
@@ -51,7 +50,7 @@ func TestManualFileIngestionCompletes(t *testing.T) {
 		t.Fatalf("NewFile: %v", err)
 	}
 
-	logger := zap.NewNop()
+	logger := logging.NewNop()
 	encNotifier := &stubNotifier{}
 	encClient := &stubDraptoClient{}
 	encoder := encoding.NewEncoderWithDependencies(cfg, store, logger, encClient, encNotifier)

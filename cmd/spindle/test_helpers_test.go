@@ -11,11 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
 	"spindle/internal/daemon"
 	"spindle/internal/ipc"
+	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/stage"
 	"spindle/internal/workflow"
@@ -98,7 +97,7 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 		t.Fatalf("queue.Open: %v", err)
 	}
 
-	logger := zap.NewNop()
+	logger := logging.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
 

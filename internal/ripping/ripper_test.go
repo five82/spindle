@@ -8,9 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
+	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
@@ -69,7 +68,7 @@ func TestRipperCreatesRippedFile(t *testing.T) {
 	stubClient := &stubRipperClient{}
 	stubEject := &stubEjector{}
 	stubNotifier := &stubNotifier{}
-	handler := ripping.NewRipperWithDependencies(cfg, store, zap.NewNop(), stubClient, stubEject, stubNotifier)
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), stubClient, stubEject, stubNotifier)
 	item.Status = queue.StatusRipping
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
@@ -128,7 +127,7 @@ func TestRipperFallsBackWithoutClient(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	handler := ripping.NewRipperWithDependencies(cfg, store, zap.NewNop(), nil, &stubEjector{}, &stubNotifier{})
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), nil, &stubEjector{}, &stubNotifier{})
 	item.Status = queue.StatusRipping
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
@@ -164,7 +163,7 @@ func TestRipperHealthReady(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	handler := ripping.NewRipperWithDependencies(cfg, store, zap.NewNop(), &stubRipperClient{}, &stubEjector{}, &stubNotifier{})
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), &stubRipperClient{}, &stubEjector{}, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
 	if !health.Ready {
 		t.Fatalf("expected ready health, got %+v", health)
@@ -179,7 +178,7 @@ func TestRipperHealthMissingClient(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	handler := ripping.NewRipperWithDependencies(cfg, store, zap.NewNop(), nil, &stubEjector{}, &stubNotifier{})
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), nil, &stubEjector{}, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
 	if health.Ready {
 		t.Fatalf("expected not ready health, got %+v", health)
@@ -264,7 +263,7 @@ func TestRipperWrapsErrors(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 
-	handler := ripping.NewRipperWithDependencies(cfg, store, zap.NewNop(), failingRipper{}, &stubEjector{}, &stubNotifier{})
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), failingRipper{}, &stubEjector{}, &stubNotifier{})
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}

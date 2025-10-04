@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
@@ -47,7 +47,7 @@ func (execCommandRunner) Output(ctx context.Context, name string, args ...string
 type discMonitor struct {
 	cfg      *config.Config
 	store    *queue.Store
-	logger   *zap.Logger
+	logger   *slog.Logger
 	notifier notifications.Service
 	scanner  discScanner
 	fp       func(ctx context.Context, device, discType string, timeout time.Duration) (string, error)
@@ -67,7 +67,7 @@ type discMonitor struct {
 	wg     sync.WaitGroup
 }
 
-func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *zap.Logger) *discMonitor {
+func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger) *discMonitor {
 	if cfg == nil || store == nil {
 		return nil
 	}
@@ -89,7 +89,7 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *zap.Logger) 
 
 	monitorLogger := logger
 	if monitorLogger != nil {
-		monitorLogger = monitorLogger.With(zap.String("component", "disc-monitor"))
+		monitorLogger = monitorLogger.With(logging.String("component", "disc-monitor"))
 	}
 
 	runner := execCommandRunner{}
@@ -175,9 +175,9 @@ func (m *discMonitor) poll() {
 	if err != nil {
 		logger := m.logger
 		if logger == nil {
-			logger = zap.NewNop()
+			logger = logging.NewNop()
 		}
-		logger.Warn("disc detection failed", zap.Error(err))
+		logger.Warn("disc detection failed", logging.Error(err))
 		return
 	}
 
@@ -213,9 +213,9 @@ func (m *discMonitor) poll() {
 
 func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) bool {
 	logger := logging.WithContext(ctx, m.logger).With(
-		zap.String("device", info.Device),
-		zap.String("disc_label", info.Label),
-		zap.String("disc_type", info.Type),
+		logging.String("device", info.Device),
+		logging.String("disc_label", info.Label),
+		logging.String("disc_type", info.Type),
 	)
 	logger.Info("detected disc")
 
@@ -230,25 +230,25 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 	if fingerprinter == nil {
 		fingerprinter = fingerprint.ComputeTimeout
 	}
-	logger.Info("computing disc fingerprint", zap.Duration("timeout", m.scanTimeout))
+	logger.Info("computing disc fingerprint", logging.Duration("timeout", m.scanTimeout))
 	discFingerprint, fpErr := fingerprinter(scanCtx, info.Device, info.Type, m.scanTimeout)
 	if fpErr != nil {
-		logger.Error("generate fingerprint failed", zap.Error(fpErr))
+		logger.Error("generate fingerprint failed", logging.Error(fpErr))
 		if m.notifier != nil {
 			if notifyErr := m.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
 				"error":   fpErr,
 				"context": info.Label,
 			}); notifyErr != nil {
-				logger.Warn("failed to send fingerprint error notification", zap.Error(notifyErr))
+				logger.Warn("failed to send fingerprint error notification", logging.Error(notifyErr))
 			}
 		}
 		return false
 	}
-	logger.Info("computed fingerprint", zap.String("fingerprint", discFingerprint))
+	logger.Info("computed fingerprint", logging.String("fingerprint", discFingerprint))
 
 	existing, err := m.store.FindByFingerprint(ctx, discFingerprint)
 	if err != nil {
-		logger.Error("lookup existing disc", zap.Error(err))
+		logger.Error("lookup existing disc", logging.Error(err))
 		return false
 	}
 
@@ -268,18 +268,18 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		if status == queue.StatusCompleted {
 			if updated {
 				if err := m.store.Update(ctx, existing); err != nil {
-					logger.Warn("failed to update completed item", zap.Error(err))
+					logger.Warn("failed to update completed item", logging.Error(err))
 				}
 				logger.Info(
 					"refreshed completed disc metadata",
-					zap.Int64(logging.FieldItemID, existing.ID),
-					zap.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
+					logging.Int64(logging.FieldItemID, existing.ID),
+					logging.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
 				)
 			}
 			logger.Info(
 				"disc already completed",
-				zap.Int64(logging.FieldItemID, existing.ID),
-				zap.String("status", string(existing.Status)),
+				logging.Int64(logging.FieldItemID, existing.ID),
+				logging.String("status", string(existing.Status)),
 			)
 			return true
 		}
@@ -287,14 +287,14 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		if status == queue.StatusIdentified || status == queue.StatusRipped || status == queue.StatusEncoded || status == queue.StatusOrganizing || existing.IsProcessing() {
 			if updated {
 				if err := m.store.Update(ctx, existing); err != nil {
-					logger.Warn("failed to update in-flight item", zap.Error(err))
+					logger.Warn("failed to update in-flight item", logging.Error(err))
 				}
 			}
 			logger.Info(
 				"disc already in workflow",
-				zap.Int64(logging.FieldItemID, existing.ID),
-				zap.String("status", string(existing.Status)),
-				zap.String("progress_stage", strings.TrimSpace(existing.ProgressStage)),
+				logging.Int64(logging.FieldItemID, existing.ID),
+				logging.String("status", string(existing.Status)),
+				logging.String("progress_stage", strings.TrimSpace(existing.ProgressStage)),
 			)
 			return true
 		}
@@ -312,14 +312,14 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		}
 
 		if err := m.store.Update(ctx, existing); err != nil {
-			logger.Error("failed to reset existing item", zap.Error(err))
+			logger.Error("failed to reset existing item", logging.Error(err))
 			return false
 		}
 
 		logger.Info(
 			"reset existing disc for processing",
-			zap.Int64(logging.FieldItemID, existing.ID),
-			zap.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
+			logging.Int64(logging.FieldItemID, existing.ID),
+			logging.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
 		)
 		return true
 	}
@@ -331,15 +331,15 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 
 	item, err := m.store.NewDisc(ctx, title, discFingerprint)
 	if err != nil {
-		logger.Error("failed to enqueue disc", zap.Error(err))
+		logger.Error("failed to enqueue disc", logging.Error(err))
 		return false
 	}
 
 	logger.Info(
 		"queued new disc",
-		zap.Int64(logging.FieldItemID, item.ID),
-		zap.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		zap.String("fingerprint", discFingerprint),
+		logging.Int64(logging.FieldItemID, item.ID),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("fingerprint", discFingerprint),
 	)
 	return true
 }

@@ -6,10 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"spindle/internal/config"
 	"spindle/internal/disc"
+	"spindle/internal/logging"
 	"spindle/internal/queue"
 )
 
@@ -91,7 +90,7 @@ func TestDiscMonitorQueuesNewDisc(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	monitor := newDiscMonitor(cfg, store, zap.NewNop())
+	monitor := newDiscMonitor(cfg, store, logging.NewNop())
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 	}
@@ -155,7 +154,7 @@ func TestDiscMonitorResetsExistingItem(t *testing.T) {
 		t.Fatalf("store.Update: %v", err)
 	}
 
-	monitor := newDiscMonitor(cfg, store, zap.NewNop())
+	monitor := newDiscMonitor(cfg, store, logging.NewNop())
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 	}
@@ -215,7 +214,7 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 		t.Fatalf("store.Update: %v", err)
 	}
 
-	monitor := newDiscMonitor(cfg, store, zap.NewNop())
+	monitor := newDiscMonitor(cfg, store, logging.NewNop())
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 	}
