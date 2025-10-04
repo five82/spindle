@@ -61,7 +61,7 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 
 	outputPath := filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv")
 
-	args := []string{"encode", "--input", inputPath, "--output", outputPath, "--json"}
+	args := []string{"encode", "--input", inputPath, "--output", outputPath, "--progress-json"}
 	cmd := commandContext(ctx, c.binary, args...) //nolint:gosec
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
