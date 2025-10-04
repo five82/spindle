@@ -185,6 +185,66 @@ func TestEncoderWrapsErrors(t *testing.T) {
 	}
 }
 
+func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
+	cfg := testConfig(t)
+	store, err := queue.Open(cfg)
+	if err != nil {
+		t.Fatalf("queue.Open: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	item, err := store.NewDisc(context.Background(), "Missing", "fp")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusRipped
+	item.RippedFile = filepath.Join(cfg.StagingDir, "demo.mkv")
+	if err := os.MkdirAll(cfg.StagingDir, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write ripped file: %v", err)
+	}
+
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), missingArtifactClient{}, nil)
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err == nil {
+		t.Fatal("expected execute error when encoded artifact missing")
+	}
+}
+
+func TestEncoderFailsWhenEncodedArtifactEmpty(t *testing.T) {
+	cfg := testConfig(t)
+	store, err := queue.Open(cfg)
+	if err != nil {
+		t.Fatalf("queue.Open: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	item, err := store.NewDisc(context.Background(), "Empty", "fp")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusRipped
+	item.RippedFile = filepath.Join(cfg.StagingDir, "demo.mkv")
+	if err := os.MkdirAll(cfg.StagingDir, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+	if err := os.WriteFile(item.RippedFile, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write ripped file: %v", err)
+	}
+
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), emptyArtifactClient{}, nil)
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err == nil {
+		t.Fatal("expected execute error when encoded artifact empty")
+	}
+}
+
 func TestEncoderHealthReady(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := queue.Open(cfg)
@@ -227,7 +287,11 @@ func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir stri
 	if progress != nil {
 		progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 50, Message: "Halfway"})
 	}
-	return filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv"), nil
+	path := filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv")
+	if err := os.WriteFile(path, []byte("encoded"), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 type stubNotifier struct {
@@ -249,4 +313,21 @@ type failingClient struct{}
 
 func (failingClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
 	return "", errors.New("encode failed")
+}
+
+type missingArtifactClient struct{}
+
+func (missingArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
+	return filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv"), nil
+}
+
+type emptyArtifactClient struct{}
+
+func (emptyArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
+	path := filepath.Join(outputDir, filepath.Base(inputPath)+".av1.mkv")
+	file, err := os.Create(path)
+	if err != nil {
+		return "", err
+	}
+	return path, file.Close()
 }

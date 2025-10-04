@@ -87,6 +87,14 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 
 	var encodedPath string
 	if e.client != nil {
+		expectedOutput := filepath.Join(encodedDir, filepath.Base(item.RippedFile)+".av1.mkv")
+		logger.Info(
+			"launching drapto encode",
+			logging.String("command", e.draptoCommand(item.RippedFile, expectedOutput)),
+			logging.String("input", item.RippedFile),
+			logging.String("output", expectedOutput),
+		)
+
 		progress := func(update drapto.ProgressUpdate) {
 			copy := *item
 			if update.Stage != "" {
@@ -104,12 +112,38 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			*item = copy
 		}
 
-		logger.Info(
-			"launching drapto encode",
-			logging.String("input", item.RippedFile),
-			logging.String("output_dir", encodedDir),
+		var (
+			lastLoggedPercent float64 = -1
+			lastLoggedStage   string
+			lastLoggedMsg     string
 		)
-		path, err := e.client.Encode(ctx, item.RippedFile, encodedDir, progress)
+		progressLogger := func(update drapto.ProgressUpdate) {
+			shouldLog := false
+			stage := strings.TrimSpace(update.Stage)
+			msg := strings.TrimSpace(update.Message)
+			if stage != "" && stage != lastLoggedStage {
+				lastLoggedStage = stage
+				shouldLog = true
+			}
+			if msg != "" && msg != lastLoggedMsg {
+				lastLoggedMsg = msg
+				shouldLog = true
+			}
+			if update.Percent >= 0 && (lastLoggedPercent < 0 || update.Percent-lastLoggedPercent >= 5 || update.Percent >= 100) {
+				lastLoggedPercent = update.Percent
+				shouldLog = true
+			}
+			if shouldLog {
+				logger.Info(
+					"drapto progress",
+					logging.Float64("percent", update.Percent),
+					logging.String("stage", stage),
+					logging.String("message", msg),
+				)
+			}
+			progress(update)
+		}
+		path, err := e.client.Encode(ctx, item.RippedFile, encodedDir, progressLogger)
 		if err != nil {
 			return services.Wrap(
 				services.ErrExternalTool,
@@ -120,6 +154,15 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			)
 		}
 		encodedPath = path
+		if err := validateEncodedArtifact(encodedPath); err != nil {
+			return services.Wrap(
+				services.ErrExternalTool,
+				"encoding",
+				"validate output",
+				"Drapto reported success but produced an invalid encoded file",
+				err,
+			)
+		}
 		logger.Info("drapto encode completed", logging.String("encoded_file", encodedPath))
 	}
 
@@ -130,6 +173,16 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			return services.Wrap(services.ErrTransient, "encoding", "copy ripped file", "Failed to stage encoded artifact", err)
 		}
 		logger.Info("created placeholder encoded copy", logging.String("encoded_file", encodedPath))
+	}
+
+	if err := validateEncodedArtifact(encodedPath); err != nil {
+		return services.Wrap(
+			services.ErrExternalTool,
+			"encoding",
+			"validate output",
+			"Encoded artifact missing or empty after encoding",
+			err,
+		)
 	}
 
 	item.EncodedFile = encodedPath
@@ -192,4 +245,38 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func validateEncodedArtifact(path string) error {
+	clean := strings.TrimSpace(path)
+	if clean == "" {
+		return fmt.Errorf("encoded artifact path is empty")
+	}
+	info, err := os.Stat(clean)
+	if err != nil {
+		return fmt.Errorf("stat encoded artifact: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("encoded artifact %q is a directory", clean)
+	}
+	if info.Size() == 0 {
+		return fmt.Errorf("encoded artifact %q is empty", clean)
+	}
+	return nil
+}
+
+func (e *Encoder) draptoBinaryName() string {
+	if e == nil || e.cfg == nil {
+		return "drapto"
+	}
+	binary := strings.TrimSpace(e.cfg.DraptoBinary())
+	if binary == "" {
+		return "drapto"
+	}
+	return binary
+}
+
+func (e *Encoder) draptoCommand(inputPath, outputPath string) string {
+	binary := e.draptoBinaryName()
+	return fmt.Sprintf("%s encode --input %q --output %q --progress-json", binary, strings.TrimSpace(inputPath), strings.TrimSpace(outputPath))
 }
