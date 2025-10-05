@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var commandContext = exec.CommandContext
@@ -18,6 +19,10 @@ type ProgressUpdate struct {
 	Percent float64
 	Stage   string
 	Message string
+	ETA     time.Duration
+	Speed   float64
+	FPS     float64
+	Bitrate string
 }
 
 // Client defines Drapto encoding behaviour.
@@ -102,15 +107,35 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var payload struct {
-			Percent float64 `json:"percent"`
-			Stage   string  `json:"stage"`
-			Message string  `json:"message"`
+			Type    string   `json:"type"`
+			Percent float64  `json:"percent"`
+			Stage   string   `json:"stage"`
+			Message string   `json:"message"`
+			ETA     *float64 `json:"eta_seconds"`
+			Speed   *float64 `json:"speed"`
+			FPS     *float64 `json:"fps"`
+			Bitrate string   `json:"bitrate"`
 		}
 		if err := json.Unmarshal(line, &payload); err != nil {
 			continue
 		}
 		if progress != nil {
-			progress(ProgressUpdate{Percent: payload.Percent, Stage: payload.Stage, Message: payload.Message})
+			update := ProgressUpdate{
+				Percent: payload.Percent,
+				Stage:   payload.Stage,
+				Message: payload.Message,
+				Bitrate: payload.Bitrate,
+			}
+			if payload.ETA != nil {
+				update.ETA = time.Duration(*payload.ETA) * time.Second
+			}
+			if payload.Speed != nil {
+				update.Speed = *payload.Speed
+			}
+			if payload.FPS != nil {
+				update.FPS = *payload.FPS
+			}
+			progress(update)
 		}
 	}
 	if err := scanner.Err(); err != nil {

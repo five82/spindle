@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewCLIWithBinary(t *testing.T) {
@@ -103,6 +104,19 @@ func TestCLIEncodeSuccess(t *testing.T) {
 	if updates[len(updates)-1].Percent != 100 {
 		t.Fatalf("expected final update to report 100 percent, got %f", updates[len(updates)-1].Percent)
 	}
+	middle := updates[1]
+	if middle.Stage != "encoding" {
+		t.Fatalf("expected encoding stage, got %q", middle.Stage)
+	}
+	if middle.ETA != 5*time.Minute {
+		t.Fatalf("expected eta 5m, got %s", middle.ETA)
+	}
+	if middle.Speed != 3.0 {
+		t.Fatalf("expected speed 3.0x, got %f", middle.Speed)
+	}
+	if middle.FPS != 72.0 {
+		t.Fatalf("expected fps 72, got %f", middle.FPS)
+	}
 }
 
 func TestCLIEncodeFailure(t *testing.T) {
@@ -160,16 +174,16 @@ func TestHelperProcess(t *testing.T) {
 
 	switch os.Getenv("DRAPTO_HELPER_MODE") {
 	case "success":
-		fmt.Println(`{"percent":0,"stage":"start","message":"begin"}`)
-		fmt.Println(`{"percent":50,"stage":"encoding","message":"halfway"}`)
-		fmt.Println(`{"percent":100,"stage":"complete","message":"done"}`)
+		fmt.Println(`{"type":"stage_progress","percent":0,"stage":"start","message":"begin"}`)
+		fmt.Println(`{"type":"encoding_progress","percent":50,"stage":"encoding","eta_seconds":300,"speed":3.0,"fps":72.0,"bitrate":"3400kbps"}`)
+		fmt.Println(`{"type":"stage_progress","percent":100,"stage":"complete","message":"done"}`)
 		os.Exit(0)
 	case "failure":
 		fmt.Fprintln(os.Stderr, "encode failed")
 		os.Exit(1)
 	case "badjson":
 		fmt.Println("not-json")
-		fmt.Println(`{"percent":75,"stage":"encoding","message":"progress"}`)
+		fmt.Println(`{"type":"encoding_progress","percent":75,"stage":"encoding","eta_seconds":120}`)
 		os.Exit(0)
 	default:
 		os.Exit(0)

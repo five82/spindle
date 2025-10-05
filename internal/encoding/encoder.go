@@ -134,11 +134,11 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			if update.Stage != "" {
 				copy.ProgressStage = update.Stage
 			}
-			if update.Message != "" {
-				copy.ProgressMessage = update.Message
-			}
 			if update.Percent >= 0 {
 				copy.ProgressPercent = update.Percent
+			}
+			if message := progressMessageText(update); message != "" {
+				copy.ProgressMessage = message
 			}
 			if err := e.store.Update(ctx, &copy); err != nil {
 				logger.Warn("failed to persist encoding progress", logging.Error(err))
@@ -150,11 +150,13 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			lastLoggedPercent float64 = -1
 			lastLoggedStage   string
 			lastLoggedMsg     string
+			lastLoggedETA     time.Duration
+			loggedETA         bool
 		)
 		progressLogger := func(update drapto.ProgressUpdate) {
-			shouldLog := false
 			stage := strings.TrimSpace(update.Stage)
-			msg := strings.TrimSpace(update.Message)
+			msg := progressMessageText(update)
+			shouldLog := false
 			if stage != "" && stage != lastLoggedStage {
 				lastLoggedStage = stage
 				shouldLog = true
@@ -167,13 +169,46 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 				lastLoggedPercent = update.Percent
 				shouldLog = true
 			}
+			if update.ETA > 0 {
+				if !loggedETA {
+					loggedETA = true
+					lastLoggedETA = update.ETA
+					shouldLog = true
+				} else {
+					diff := update.ETA - lastLoggedETA
+					if diff < 0 {
+						diff = -diff
+					}
+					if diff >= 15*time.Second {
+						lastLoggedETA = update.ETA
+						shouldLog = true
+					}
+				}
+			}
 			if shouldLog {
-				logger.Info(
-					"drapto progress",
-					logging.Float64("percent", update.Percent),
-					logging.String("stage", stage),
-					logging.String("message", msg),
-				)
+				attrs := []logging.Attr{}
+				if update.Percent >= 0 {
+					attrs = append(attrs, logging.Float64("progress_percent", update.Percent))
+				}
+				if stage != "" {
+					attrs = append(attrs, logging.String("progress_stage", stage))
+				}
+				if msg != "" {
+					attrs = append(attrs, logging.String("progress_message", msg))
+				}
+				if update.ETA > 0 {
+					attrs = append(attrs, logging.Duration("progress_eta", update.ETA))
+				}
+				if update.Speed > 0 {
+					attrs = append(attrs, logging.Float64("speed_x", update.Speed))
+				}
+				if update.FPS > 0 {
+					attrs = append(attrs, logging.Float64("fps", update.FPS))
+				}
+				if update.Bitrate != "" {
+					attrs = append(attrs, logging.String("bitrate", update.Bitrate))
+				}
+				logger.Info("drapto progress", logging.Args(attrs...)...)
 			}
 			progress(update)
 		}
@@ -244,6 +279,80 @@ func (e *Encoder) HealthCheck(ctx context.Context) stage.Health {
 		return stage.Unhealthy(name, fmt.Sprintf("drapto binary %q not found", binary))
 	}
 	return stage.Healthy(name)
+}
+
+func progressMessageText(update drapto.ProgressUpdate) string {
+	message := strings.TrimSpace(update.Message)
+	if message != "" {
+		return message
+	}
+	if update.Percent < 0 {
+		return ""
+	}
+	label := formatStageLabel(update.Stage)
+	base := fmt.Sprintf("%s %.1f%%", label, update.Percent)
+	extras := make([]string, 0, 2)
+	if update.ETA > 0 {
+		if formatted := formatETA(update.ETA); formatted != "" {
+			extras = append(extras, fmt.Sprintf("ETA %s", formatted))
+		}
+	}
+	if update.Speed > 0 {
+		extras = append(extras, fmt.Sprintf("@ %.1fx", update.Speed))
+	}
+	if len(extras) == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s (%s)", base, strings.Join(extras, ", "))
+}
+
+func formatStageLabel(stage string) string {
+	stage = strings.TrimSpace(stage)
+	if stage == "" {
+		return "Progress"
+	}
+	parts := strings.FieldsFunc(stage, func(r rune) bool {
+		return r == '_' || r == '-' || r == ' '
+	})
+	if len(parts) == 0 {
+		return capitalizeASCII(stage)
+	}
+	for i, part := range parts {
+		parts[i] = capitalizeASCII(part)
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatETA(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	d = d.Round(time.Second)
+	hours := d / time.Hour
+	d -= hours * time.Hour
+	minutes := d / time.Minute
+	d -= minutes * time.Minute
+	seconds := d / time.Second
+	parts := make([]string, 0, 3)
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 || hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if seconds > 0 || (hours == 0 && minutes == 0) {
+		parts = append(parts, fmt.Sprintf("%ds", seconds))
+	}
+	return strings.Join(parts, "")
+}
+
+func capitalizeASCII(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	return strings.ToUpper(lower[:1]) + lower[1:]
 }
 
 func copyFile(src, dst string) error {
