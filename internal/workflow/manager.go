@@ -45,6 +45,10 @@ type pipelineStage struct {
 	doneStatus       queue.Status
 }
 
+type loggerAware interface {
+	SetLogger(*slog.Logger)
+}
+
 type laneKind string
 
 const (
@@ -381,6 +385,9 @@ func (m *Manager) processItem(ctx context.Context, lane *laneState, laneLogger *
 	requestID := uuid.NewString()
 	stageCtx := withStageContext(ctx, stage.name, item, requestID)
 	stageLogger := m.stageLoggerForLane(stageCtx, lane, laneLogger, item)
+	if aware, ok := stage.handler.(loggerAware); ok {
+		aware.SetLogger(stageLogger)
+	}
 
 	if err := m.transitionToProcessing(stageCtx, lane, stage.processingStatus, stage.name, item); err != nil {
 		stageLogger.Error("failed to transition item to processing", logging.Error(err))

@@ -54,11 +54,18 @@ func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Rip
 
 // NewRipperWithDependencies allows injecting all collaborators (used in tests).
 func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper, notifier notifications.Service) *Ripper {
+	rip := &Ripper{store: store, cfg: cfg, client: client, notifier: notifier}
+	rip.SetLogger(logger)
+	return rip
+}
+
+// SetLogger updates the ripper's logging destination while preserving component labeling.
+func (r *Ripper) SetLogger(logger *slog.Logger) {
 	stageLogger := logger
-	if stageLogger != nil {
-		stageLogger = stageLogger.With(logging.String("component", "ripper"))
+	if stageLogger == nil {
+		stageLogger = logging.NewNop()
 	}
-	return &Ripper{store: store, cfg: cfg, logger: stageLogger, client: client, notifier: notifier}
+	r.logger = stageLogger.With(logging.String("component", "ripper"))
 }
 
 func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {

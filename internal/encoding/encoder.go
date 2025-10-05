@@ -48,11 +48,18 @@ func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *En
 
 // NewEncoderWithDependencies allows injecting custom dependencies (used for tests).
 func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client drapto.Client, notifier notifications.Service) *Encoder {
+	enc := &Encoder{store: store, cfg: cfg, client: client, notifier: notifier}
+	enc.SetLogger(logger)
+	return enc
+}
+
+// SetLogger updates the encoder's logging destination while preserving component labeling.
+func (e *Encoder) SetLogger(logger *slog.Logger) {
 	stageLogger := logger
-	if stageLogger != nil {
-		stageLogger = stageLogger.With(logging.String("component", "encoder"))
+	if stageLogger == nil {
+		stageLogger = logging.NewNop()
 	}
-	return &Encoder{store: store, cfg: cfg, logger: stageLogger, client: client, notifier: notifier}
+	e.logger = stageLogger.With(logging.String("component", "encoder"))
 }
 
 func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {

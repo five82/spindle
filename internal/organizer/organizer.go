@@ -55,11 +55,18 @@ func NewOrganizer(cfg *config.Config, store *queue.Store, logger *slog.Logger) *
 
 // NewOrganizerWithDependencies allows injecting collaborators (used in tests).
 func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, plexClient plex.Service, notifier notifications.Service) *Organizer {
+	org := &Organizer{store: store, cfg: cfg, plex: plexClient, notifier: notifier}
+	org.SetLogger(logger)
+	return org
+}
+
+// SetLogger updates the organizer's logging destination while preserving component labeling.
+func (o *Organizer) SetLogger(logger *slog.Logger) {
 	stageLogger := logger
-	if stageLogger != nil {
-		stageLogger = stageLogger.With(logging.String("component", "organizer"))
+	if stageLogger == nil {
+		stageLogger = logging.NewNop()
 	}
-	return &Organizer{store: store, cfg: cfg, logger: stageLogger, plex: plexClient, notifier: notifier}
+	o.logger = stageLogger.With(logging.String("component", "organizer"))
 }
 
 func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {

@@ -48,18 +48,24 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) 
 
 // NewIdentifierWithDependencies allows injecting TMDB searcher and disc scanner (used in tests).
 func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher TMDBSearcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
-	stageLogger := logger
-	if stageLogger != nil {
-		stageLogger = stageLogger.With(logging.String("component", "identifier"))
-	}
-	return &Identifier{
+	id := &Identifier{
 		store:    store,
 		cfg:      cfg,
-		logger:   stageLogger,
 		tmdb:     newTMDBSearch(searcher),
 		scanner:  scanner,
 		notifier: notifier,
 	}
+	id.SetLogger(logger)
+	return id
+}
+
+// SetLogger updates the identifier's logging destination while preserving component labeling.
+func (i *Identifier) SetLogger(logger *slog.Logger) {
+	stageLogger := logger
+	if stageLogger == nil {
+		stageLogger = logging.NewNop()
+	}
+	i.logger = stageLogger.With(logging.String("component", "identifier"))
 }
 
 // Prepare initializes progress messaging prior to Execute.
