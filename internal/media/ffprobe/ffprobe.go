@@ -20,16 +20,21 @@ type Result struct {
 
 // Stream describes a single stream in the media container.
 type Stream struct {
-	Index      int    `json:"index"`
-	CodecName  string `json:"codec_name"`
-	CodecType  string `json:"codec_type"`
-	CodecTag   string `json:"codec_tag_string"`
-	Duration   string `json:"duration"`
-	BitRate    string `json:"bit_rate"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
-	SampleRate string `json:"sample_rate"`
-	Channels   int    `json:"channels"`
+	Index         int               `json:"index"`
+	CodecName     string            `json:"codec_name"`
+	CodecType     string            `json:"codec_type"`
+	CodecTag      string            `json:"codec_tag_string"`
+	CodecLong     string            `json:"codec_long_name"`
+	Duration      string            `json:"duration"`
+	BitRate       string            `json:"bit_rate"`
+	Width         int               `json:"width"`
+	Height        int               `json:"height"`
+	SampleRate    string            `json:"sample_rate"`
+	Channels      int               `json:"channels"`
+	ChannelLayout string            `json:"channel_layout"`
+	Profile       string            `json:"profile"`
+	Tags          map[string]string `json:"tags"`
+	Disposition   map[string]int    `json:"disposition"`
 }
 
 // Format captures container-level metadata extracted by ffprobe.

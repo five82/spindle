@@ -1,14 +1,17 @@
 package ripping
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
+	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -161,6 +165,15 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 			)
 		}
 		target = path
+		if err := r.refineAudioTracks(ctx, target); err != nil {
+			return services.Wrap(
+				services.ErrExternalTool,
+				"ripping",
+				"refine audio tracks",
+				"Failed to optimize ripped audio tracks with ffmpeg",
+				err,
+			)
+		}
 		logger.Info("makemkv rip finished", logging.String("ripped_file", target))
 	}
 
@@ -228,6 +241,95 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	return nil
+}
+
+func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {
+	logger := logging.WithContext(ctx, r.logger)
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("refine audio: empty path")
+	}
+	ffprobeBinary := "ffprobe"
+	if r.cfg != nil {
+		ffprobeBinary = r.cfg.FFprobeBinary()
+	}
+	probe, err := probeVideo(ctx, ffprobeBinary, path)
+	if err != nil {
+		return fmt.Errorf("inspect ripped audio: %w", err)
+	}
+	totalAudio := countAudioStreams(probe.Streams)
+	if totalAudio <= 1 {
+		return nil
+	}
+	selection := audio.Select(probe.Streams)
+	if !selection.Changed(totalAudio) {
+		return nil
+	}
+	if len(selection.KeepIndices) == 0 {
+		return fmt.Errorf("refine audio: selection produced no audio streams")
+	}
+	tmpPath := path + ".spindle-audio.tmp"
+	if err := r.remuxAudioSelection(ctx, path, tmpPath, selection); err != nil {
+		return err
+	}
+	// Replace the original rip with the remuxed variant.
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("refine audio: remove original rip: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("refine audio: finalize remux: %w", err)
+	}
+	if logger != nil {
+		fields := []any{
+			logging.String("primary_audio", selection.PrimaryLabel()),
+			logging.Int("kept_audio_streams", len(selection.KeepIndices)),
+		}
+		if labels := selection.CommentaryLabels(); len(labels) > 0 {
+			fields = append(fields, logging.Any("commentary_audio", labels))
+		}
+		if len(selection.RemovedIndices) > 0 {
+			fields = append(fields, logging.Any("removed_audio_indices", selection.RemovedIndices))
+		}
+		logger.Info("refined ripped audio tracks", fields...)
+	}
+	return nil
+}
+
+func (r *Ripper) remuxAudioSelection(ctx context.Context, src, dst string, selection audio.Selection) error {
+	if strings.TrimSpace(src) == "" || strings.TrimSpace(dst) == "" {
+		return fmt.Errorf("remux audio: invalid path")
+	}
+	ffmpegBinary := "ffmpeg"
+	args := []string{"-y", "-hide_banner", "-loglevel", "error", "-i", src, "-map", "0:v?", "-map", "0:s?", "-map", "0:d?", "-map", "0:t?"}
+	for _, idx := range selection.KeepIndices {
+		args = append(args, "-map", fmt.Sprintf("0:%d", idx))
+	}
+	args = append(args, "-c", "copy")
+	if len(selection.KeepIndices) > 0 {
+		args = append(args, "-disposition:a:0", "default")
+		for i := 1; i < len(selection.KeepIndices); i++ {
+			args = append(args, "-disposition:a:"+strconv.Itoa(i), "none")
+		}
+	}
+	args = append(args, dst)
+	cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ffmpeg remux: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func countAudioStreams(streams []ffprobe.Stream) int {
+	count := 0
+	for _, stream := range streams {
+		if strings.EqualFold(stream.CodecType, "audio") {
+			count++
+		}
+	}
+	return count
 }
 
 func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, path string, startedAt time.Time) error {

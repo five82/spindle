@@ -10,9 +10,10 @@ import (
 
 // Title represents a MakeMKV title entry.
 type Title struct {
-	ID       int    `json:"id"`
-	Name     string `json:"name"`
-	Duration int    `json:"duration"`
+	ID       int     `json:"id"`
+	Name     string  `json:"name"`
+	Duration int     `json:"duration"`
+	Tracks   []Track `json:"tracks,omitempty"`
 }
 
 // BDInfoResult captures bd_info command output for enhanced disc identification.
