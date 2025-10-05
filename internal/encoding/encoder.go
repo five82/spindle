@@ -149,41 +149,24 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		var (
 			lastLoggedPercent float64 = -1
 			lastLoggedStage   string
-			lastLoggedMsg     string
-			lastLoggedETA     time.Duration
-			loggedETA         bool
+			lastLoggedRawMsg  string
 		)
 		progressLogger := func(update drapto.ProgressUpdate) {
 			stage := strings.TrimSpace(update.Stage)
-			msg := progressMessageText(update)
+			rawMsg := strings.TrimSpace(update.Message)
+			summary := progressMessageText(update)
 			shouldLog := false
 			if stage != "" && stage != lastLoggedStage {
 				lastLoggedStage = stage
 				shouldLog = true
 			}
-			if msg != "" && msg != lastLoggedMsg {
-				lastLoggedMsg = msg
+			if rawMsg != "" && rawMsg != lastLoggedRawMsg {
+				lastLoggedRawMsg = rawMsg
 				shouldLog = true
 			}
 			if update.Percent >= 0 && (lastLoggedPercent < 0 || update.Percent-lastLoggedPercent >= 5 || update.Percent >= 100) {
 				lastLoggedPercent = update.Percent
 				shouldLog = true
-			}
-			if update.ETA > 0 {
-				if !loggedETA {
-					loggedETA = true
-					lastLoggedETA = update.ETA
-					shouldLog = true
-				} else {
-					diff := update.ETA - lastLoggedETA
-					if diff < 0 {
-						diff = -diff
-					}
-					if diff >= 15*time.Second {
-						lastLoggedETA = update.ETA
-						shouldLog = true
-					}
-				}
 			}
 			if shouldLog {
 				attrs := []logging.Attr{}
@@ -193,8 +176,8 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 				if stage != "" {
 					attrs = append(attrs, logging.String("progress_stage", stage))
 				}
-				if msg != "" {
-					attrs = append(attrs, logging.String("progress_message", msg))
+				if summary != "" {
+					attrs = append(attrs, logging.String("progress_message", summary))
 				}
 				if update.ETA > 0 {
 					attrs = append(attrs, logging.Duration("progress_eta", update.ETA))
