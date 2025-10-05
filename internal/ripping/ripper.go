@@ -267,7 +267,7 @@ func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {
 	if len(selection.KeepIndices) == 0 {
 		return fmt.Errorf("refine audio: selection produced no audio streams")
 	}
-	tmpPath := path + ".spindle-audio.tmp"
+	tmpPath := deriveTempAudioPath(path)
 	if err := r.remuxAudioSelection(ctx, path, tmpPath, selection); err != nil {
 		return err
 	}
@@ -312,6 +312,9 @@ func (r *Ripper) remuxAudioSelection(ctx context.Context, src, dst string, selec
 			args = append(args, "-disposition:a:"+strconv.Itoa(i), "none")
 		}
 	}
+	if format := outputFormatForPath(dst); format != "" {
+		args = append(args, "-f", format)
+	}
 	args = append(args, dst)
 	cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
 	var stderr bytes.Buffer
@@ -330,6 +333,36 @@ func countAudioStreams(streams []ffprobe.Stream) int {
 		}
 	}
 	return count
+}
+
+func deriveTempAudioPath(path string) string {
+	clean := strings.TrimSpace(path)
+	if clean == "" {
+		return path + ".spindle-audio"
+	}
+	ext := filepath.Ext(clean)
+	base := strings.TrimSuffix(clean, ext)
+	if ext == "" {
+		ext = ".mkv"
+	}
+	return fmt.Sprintf("%s.spindle-audio%s", base, ext)
+}
+
+func outputFormatForPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mkv", ".mk3d":
+		return "matroska"
+	case ".mp4", ".m4v":
+		return "mp4"
+	case ".mov":
+		return "mov"
+	case ".ts", ".m2ts":
+		return "mpegts"
+	case ".mka":
+		return "matroska"
+	default:
+		return ""
+	}
 }
 
 func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, path string, startedAt time.Time) error {
