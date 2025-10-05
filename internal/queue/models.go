@@ -68,30 +68,59 @@ type HealthSummary struct {
 
 // Item represents a queue item persisted in SQLite.
 type Item struct {
-	ID              int64
-	SourcePath      string
-	DiscTitle       string
-	Status          Status
-	MediaInfoJSON   string
-	RippedFile      string
-	EncodedFile     string
-	FinalFile       string
-	ErrorMessage    string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ProgressStage   string
-	ProgressPercent float64
-	ProgressMessage string
-	RipSpecData     string
-	DiscFingerprint string
-	MetadataJSON    string
-	LastHeartbeat   *time.Time
-	NeedsReview     bool
-	ReviewReason    string
+	ID                int64
+	SourcePath        string
+	DiscTitle         string
+	Status            Status
+	MediaInfoJSON     string
+	RippedFile        string
+	EncodedFile       string
+	FinalFile         string
+	BackgroundLogPath string
+	ErrorMessage      string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	ProgressStage     string
+	ProgressPercent   float64
+	ProgressMessage   string
+	RipSpecData       string
+	DiscFingerprint   string
+	MetadataJSON      string
+	LastHeartbeat     *time.Time
+	NeedsReview       bool
+	ReviewReason      string
 }
 
 // IsProcessing returns true when the status reflects an in-flight operation.
 func (i Item) IsProcessing() bool {
 	_, ok := processingStatuses[i.Status]
 	return ok
+}
+
+// ProcessingLane partitions workflow into user-facing foreground stages and background work.
+type ProcessingLane string
+
+const (
+	LaneForeground ProcessingLane = "foreground"
+	LaneBackground ProcessingLane = "background"
+)
+
+// LaneForItem maps a queue item to its processing lane for observability purposes.
+func LaneForItem(item *Item) ProcessingLane {
+	if item == nil {
+		return LaneForeground
+	}
+	switch item.Status {
+	case StatusPending, StatusIdentifying, StatusIdentified, StatusRipping:
+		return LaneForeground
+	case StatusRipped, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted:
+		return LaneBackground
+	case StatusFailed, StatusReview:
+		if item.BackgroundLogPath != "" {
+			return LaneBackground
+		}
+		return LaneForeground
+	default:
+		return LaneForeground
+	}
 }

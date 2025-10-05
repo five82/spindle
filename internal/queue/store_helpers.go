@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const itemColumns = "id, source_path, disc_title, status, media_info_json, ripped_file, encoded_file, final_file, error_message, created_at, updated_at, progress_stage, progress_percent, progress_message, rip_spec_data, disc_fingerprint, metadata_json, last_heartbeat, needs_review, review_reason"
+const itemColumns = "id, source_path, disc_title, status, media_info_json, ripped_file, encoded_file, final_file, background_log_path, error_message, created_at, updated_at, progress_stage, progress_percent, progress_message, rip_spec_data, disc_fingerprint, metadata_json, last_heartbeat, needs_review, review_reason"
 
 func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 	var (
@@ -20,6 +20,7 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		rippedFile       sql.NullString
 		encodedFile      sql.NullString
 		finalFile        sql.NullString
+		backgroundLog    sql.NullString
 		errorMessage     sql.NullString
 		createdRaw       sql.NullString
 		updatedRaw       sql.NullString
@@ -43,6 +44,7 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		&rippedFile,
 		&encodedFile,
 		&finalFile,
+		&backgroundLog,
 		&errorMessage,
 		&createdRaw,
 		&updatedRaw,
@@ -60,21 +62,22 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 	}
 
 	item := &Item{
-		ID:              id,
-		SourcePath:      sourcePath.String,
-		DiscTitle:       discTitle.String,
-		Status:          Status(statusStr),
-		MediaInfoJSON:   mediaInfo.String,
-		RippedFile:      rippedFile.String,
-		EncodedFile:     encodedFile.String,
-		FinalFile:       finalFile.String,
-		ErrorMessage:    errorMessage.String,
-		ProgressStage:   progressStage.String,
-		ProgressPercent: progressPercent.Float64,
-		ProgressMessage: progressMessage.String,
-		RipSpecData:     ripSpec.String,
-		DiscFingerprint: fingerprint.String,
-		MetadataJSON:    metadata.String,
+		ID:                id,
+		SourcePath:        sourcePath.String,
+		DiscTitle:         discTitle.String,
+		Status:            Status(statusStr),
+		MediaInfoJSON:     mediaInfo.String,
+		RippedFile:        rippedFile.String,
+		EncodedFile:       encodedFile.String,
+		FinalFile:         finalFile.String,
+		BackgroundLogPath: backgroundLog.String,
+		ErrorMessage:      errorMessage.String,
+		ProgressStage:     progressStage.String,
+		ProgressPercent:   progressPercent.Float64,
+		ProgressMessage:   progressMessage.String,
+		RipSpecData:       ripSpec.String,
+		DiscFingerprint:   fingerprint.String,
+		MetadataJSON:      metadata.String,
 	}
 	if needsReview.Valid {
 		item.NeedsReview = needsReview.Int64 != 0

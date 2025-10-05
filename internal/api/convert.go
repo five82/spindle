@@ -17,22 +17,24 @@ func FromQueueItem(item *queue.Item) QueueItem {
 	}
 
 	dto := QueueItem{
-		ID:         item.ID,
-		DiscTitle:  item.DiscTitle,
-		SourcePath: item.SourcePath,
-		Status:     string(item.Status),
+		ID:             item.ID,
+		DiscTitle:      item.DiscTitle,
+		SourcePath:     item.SourcePath,
+		Status:         string(item.Status),
+		ProcessingLane: string(queue.LaneForItem(item)),
 		Progress: QueueProgress{
 			Stage:   item.ProgressStage,
 			Percent: item.ProgressPercent,
 			Message: item.ProgressMessage,
 		},
-		ErrorMessage:    item.ErrorMessage,
-		DiscFingerprint: item.DiscFingerprint,
-		RippedFile:      item.RippedFile,
-		EncodedFile:     item.EncodedFile,
-		FinalFile:       item.FinalFile,
-		NeedsReview:     item.NeedsReview,
-		ReviewReason:    item.ReviewReason,
+		ErrorMessage:      item.ErrorMessage,
+		DiscFingerprint:   item.DiscFingerprint,
+		RippedFile:        item.RippedFile,
+		EncodedFile:       item.EncodedFile,
+		FinalFile:         item.FinalFile,
+		BackgroundLogPath: item.BackgroundLogPath,
+		NeedsReview:       item.NeedsReview,
+		ReviewReason:      item.ReviewReason,
 	}
 
 	if !item.CreatedAt.IsZero() {

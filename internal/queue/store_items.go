@@ -121,11 +121,11 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 	if err := s.execWithoutResultRetry(
 		ctx,
 		`UPDATE queue_items
-         SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
-             ripped_file = ?, encoded_file = ?, final_file = ?, error_message = ?,
-             updated_at = ?, progress_stage = ?, progress_percent = ?, progress_message = ?,
-             rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?, last_heartbeat = ?,
-             needs_review = ?, review_reason = ?
+        SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
+            ripped_file = ?, encoded_file = ?, final_file = ?, background_log_path = ?, error_message = ?,
+            updated_at = ?, progress_stage = ?, progress_percent = ?, progress_message = ?,
+            rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?, last_heartbeat = ?,
+            needs_review = ?, review_reason = ?
          WHERE id = ?`,
 		nullableString(item.SourcePath),
 		nullableString(item.DiscTitle),
@@ -134,6 +134,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		nullableString(item.RippedFile),
 		nullableString(item.EncodedFile),
 		nullableString(item.FinalFile),
+		nullableString(item.BackgroundLogPath),
 		nullableString(item.ErrorMessage),
 		item.UpdatedAt.Format(time.RFC3339Nano),
 		nullableString(item.ProgressStage),

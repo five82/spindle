@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +45,44 @@ type pipelineStage struct {
 	doneStatus       queue.Status
 }
 
+type laneKind string
+
+const (
+	laneForeground laneKind = "foreground"
+	laneBackground laneKind = "background"
+)
+
+type laneState struct {
+	kind                 laneKind
+	name                 string
+	stages               []pipelineStage
+	statusOrder          []queue.Status
+	stageByStart         map[queue.Status]pipelineStage
+	logger               *slog.Logger
+	notificationsEnabled bool
+	runReclaimer         bool
+}
+
+func (l *laneState) finalize() {
+	if l == nil {
+		return
+	}
+	l.stageByStart = make(map[queue.Status]pipelineStage, len(l.stages))
+	l.statusOrder = make([]queue.Status, 0, len(l.stages))
+	for _, stg := range l.stages {
+		l.stageByStart[stg.startStatus] = stg
+		l.statusOrder = append(l.statusOrder, stg.startStatus)
+	}
+}
+
+func (l *laneState) stageForStatus(status queue.Status) (pipelineStage, bool) {
+	if l == nil {
+		return pipelineStage{}, false
+	}
+	stg, ok := l.stageByStart[status]
+	return stg, ok
+}
+
 // Manager coordinates queue processing using registered stage functions.
 type Manager struct {
 	cfg               *config.Config
@@ -53,8 +93,9 @@ type Manager struct {
 	heartbeatTimeout  time.Duration
 	notifier          notifications.Service
 
-	statusOrder []queue.Status
-	stages      []pipelineStage
+	lanes            map[laneKind]*laneState
+	laneOrder        []laneKind
+	backgroundLogDir string
 
 	mu       sync.RWMutex
 	running  bool
@@ -74,6 +115,10 @@ func NewManager(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Ma
 
 // NewManagerWithNotifier constructs a workflow manager with a custom notifier (used in tests).
 func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Manager {
+	backgroundDir := ""
+	if cfg != nil && cfg.LogDir != "" {
+		backgroundDir = filepath.Join(cfg.LogDir, "background")
+	}
 	return &Manager{
 		cfg:               cfg,
 		store:             store,
@@ -82,70 +127,99 @@ func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *slog
 		pollInterval:      time.Duration(cfg.QueuePollInterval) * time.Second,
 		heartbeatInterval: time.Duration(cfg.WorkflowHeartbeatInterval) * time.Second,
 		heartbeatTimeout:  time.Duration(cfg.WorkflowHeartbeatTimeout) * time.Second,
+		lanes:             make(map[laneKind]*laneState),
+		backgroundLogDir:  backgroundDir,
 	}
 }
 
 // ConfigureStages registers the concrete stage handlers the workflow will run.
 
 func (m *Manager) ConfigureStages(set StageSet) {
-	stages := make([]pipelineStage, 0, 4)
-	order := make([]queue.Status, 0, 4)
+	foreground := &laneState{kind: laneForeground, name: "foreground", notificationsEnabled: true}
+	background := &laneState{kind: laneBackground, name: "background", notificationsEnabled: false}
 
 	if set.Identifier != nil {
-		stages = append(stages, pipelineStage{
+		foreground.stages = append(foreground.stages, pipelineStage{
 			name:             "identifier",
 			handler:          set.Identifier,
 			startStatus:      queue.StatusPending,
 			processingStatus: queue.StatusIdentifying,
 			doneStatus:       queue.StatusIdentified,
 		})
-		order = append(order, queue.StatusPending)
 	}
 	if set.Ripper != nil {
-		stages = append(stages, pipelineStage{
+		foreground.stages = append(foreground.stages, pipelineStage{
 			name:             "ripper",
 			handler:          set.Ripper,
 			startStatus:      queue.StatusIdentified,
 			processingStatus: queue.StatusRipping,
 			doneStatus:       queue.StatusRipped,
 		})
-		order = append(order, queue.StatusIdentified)
 	}
 	if set.Encoder != nil {
-		stages = append(stages, pipelineStage{
+		background.stages = append(background.stages, pipelineStage{
 			name:             "encoder",
 			handler:          set.Encoder,
 			startStatus:      queue.StatusRipped,
 			processingStatus: queue.StatusEncoding,
 			doneStatus:       queue.StatusEncoded,
 		})
-		order = append(order, queue.StatusRipped)
 	}
 	if set.Organizer != nil {
-		stages = append(stages, pipelineStage{
+		background.stages = append(background.stages, pipelineStage{
 			name:             "organizer",
 			handler:          set.Organizer,
 			startStatus:      queue.StatusEncoded,
 			processingStatus: queue.StatusOrganizing,
 			doneStatus:       queue.StatusCompleted,
 		})
-		order = append(order, queue.StatusEncoded)
+	}
+
+	lanes := make(map[laneKind]*laneState)
+	order := make([]laneKind, 0, 2)
+
+	if len(foreground.stages) > 0 {
+		foreground.finalize()
+		lanes[foreground.kind] = foreground
+		order = append(order, foreground.kind)
+	}
+	if len(background.stages) > 0 {
+		background.finalize()
+		lanes[background.kind] = background
+		order = append(order, background.kind)
+	}
+
+	if fg, ok := lanes[laneForeground]; ok {
+		fg.runReclaimer = true
+	} else if len(order) > 0 {
+		if lane := lanes[order[0]]; lane != nil {
+			lane.runReclaimer = true
+		}
 	}
 
 	m.mu.Lock()
-	m.stages = stages
-	m.statusOrder = order
+	m.lanes = lanes
+	m.laneOrder = order
 	m.mu.Unlock()
 }
 
 // Start begins background processing.
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.running {
+		m.mu.Unlock()
 		return errors.New("workflow already running")
 	}
-	if len(m.stages) == 0 {
+	lanes := make([]*laneState, 0, len(m.laneOrder))
+	for _, kind := range m.laneOrder {
+		lane := m.lanes[kind]
+		if lane == nil || len(lane.statusOrder) == 0 {
+			continue
+		}
+		lanes = append(lanes, lane)
+	}
+	if len(lanes) == 0 {
+		m.mu.Unlock()
 		return errors.New("workflow stages not configured")
 	}
 
@@ -153,10 +227,31 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.cancel = cancel
 	m.running = true
 
-	m.wg.Add(1)
-	go m.run(runCtx)
+	for _, lane := range lanes {
+		lane.logger = m.laneLogger(lane)
+	}
+	m.wg.Add(len(lanes))
+	m.mu.Unlock()
+
+	for _, lane := range lanes {
+		go m.runLane(runCtx, lane)
+	}
 
 	return nil
+}
+
+func (m *Manager) laneLogger(lane *laneState) *slog.Logger {
+	if m.logger == nil {
+		return logging.NewNop()
+	}
+	name := lane.name
+	if name == "" {
+		name = string(lane.kind)
+	}
+	return m.logger.With(
+		logging.String("component", fmt.Sprintf("workflow-%s-runner", name)),
+		logging.String("lane", name),
+	)
 }
 
 // Stop terminates background processing and waits for completion.
@@ -175,9 +270,18 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
-func (m *Manager) run(ctx context.Context) {
+func (m *Manager) runLane(ctx context.Context, lane *laneState) {
 	defer m.wg.Done()
-	logger := m.logger.With(logging.String("component", "workflow-runner"))
+	if lane == nil {
+		return
+	}
+	logger := lane.logger
+	if logger == nil {
+		logger = m.logger
+	}
+	if logger == nil {
+		logger = logging.NewNop()
+	}
 
 	for {
 		select {
@@ -186,11 +290,13 @@ func (m *Manager) run(ctx context.Context) {
 		default:
 		}
 
-		if err := m.reclaimStaleItems(ctx, logger); err != nil {
-			logger.Warn("reclaim stale processing failed", logging.Error(err))
+		if lane.runReclaimer {
+			if err := m.reclaimStaleItems(ctx, logger); err != nil {
+				logger.Warn("reclaim stale processing failed", logging.Error(err))
+			}
 		}
 
-		item, err := m.nextItem(ctx)
+		item, err := m.nextItemForLane(ctx, lane)
 		if err != nil {
 			m.handleNextItemError(ctx, logger, err)
 			continue
@@ -200,7 +306,7 @@ func (m *Manager) run(ctx context.Context) {
 			continue
 		}
 
-		if err := m.processItem(ctx, logger, item); err != nil {
+		if err := m.processItem(ctx, lane, logger, item); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
@@ -223,6 +329,13 @@ func (m *Manager) reclaimStaleItems(ctx context.Context, logger *slog.Logger) er
 	return nil
 }
 
+func (m *Manager) nextItemForLane(ctx context.Context, lane *laneState) (*queue.Item, error) {
+	if lane == nil || len(lane.statusOrder) == 0 {
+		return nil, nil
+	}
+	return m.store.NextForStatuses(ctx, lane.statusOrder...)
+}
+
 func (m *Manager) handleNextItemError(ctx context.Context, logger *slog.Logger, err error) {
 	m.setLastError(err)
 	logger.Error("failed to fetch next queue item", logging.Error(err))
@@ -241,28 +354,155 @@ func (m *Manager) waitForItemOrShutdown(ctx context.Context) {
 	}
 }
 
-func (m *Manager) processItem(ctx context.Context, logger *slog.Logger, item *queue.Item) error {
-	stage, ok := m.stageForStatus(item.Status)
+func (m *Manager) processItem(ctx context.Context, lane *laneState, laneLogger *slog.Logger, item *queue.Item) error {
+	stage, ok := lane.stageForStatus(item.Status)
 	if !ok {
-		logger.Warn("no stage configured for status", logging.String("status", string(item.Status)))
+		if laneLogger == nil {
+			laneLogger = m.logger
+		}
+		if laneLogger == nil {
+			laneLogger = logging.NewNop()
+		}
+		laneLogger.Warn("no stage configured for status", logging.String("status", string(item.Status)))
 		m.waitForItemOrShutdown(ctx)
 		return nil
 	}
 
 	requestID := uuid.NewString()
 	stageCtx := withStageContext(ctx, stage.name, item, requestID)
-	stageLogger := logging.WithContext(stageCtx, logger)
+	stageLogger := m.stageLoggerForLane(stageCtx, lane, laneLogger, item)
 
-	if err := m.transitionToProcessing(stageCtx, stage.processingStatus, stage.name, item); err != nil {
+	if err := m.transitionToProcessing(stageCtx, lane, stage.processingStatus, stage.name, item); err != nil {
 		stageLogger.Error("failed to transition item to processing", logging.Error(err))
 		m.setLastError(err)
 		return err
 	}
 
-	return m.executeStage(stageCtx, stageLogger, stage, item)
+	return m.executeStage(stageCtx, lane, stageLogger, stage, item)
 }
 
-func (m *Manager) executeStage(ctx context.Context, stageLogger *slog.Logger, stage pipelineStage, item *queue.Item) error {
+func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneLogger *slog.Logger, item *queue.Item) *slog.Logger {
+	base := laneLogger
+	if base == nil {
+		base = m.logger
+	}
+	if base == nil {
+		base = logging.NewNop()
+	}
+
+	if lane != nil && lane.kind == laneBackground {
+		path, created, err := m.ensureBackgroundLog(item)
+		if err != nil {
+			base.Warn("background log unavailable", logging.Error(err))
+		} else {
+			logger, logErr := m.newBackgroundLogger(path)
+			if logErr != nil {
+				base.Warn("failed to create background log writer", logging.Error(logErr))
+			} else {
+				base = logger
+				if created && laneLogger != nil {
+					laneLogger.Info(
+						"background log created",
+						logging.String("path", path),
+						logging.Int64("item_id", item.ID),
+					)
+				}
+			}
+		}
+	}
+
+	return logging.WithContext(ctx, base)
+}
+
+func (m *Manager) ensureBackgroundLog(item *queue.Item) (string, bool, error) {
+	if item == nil {
+		return "", false, errors.New("queue item is nil")
+	}
+	if strings.TrimSpace(m.backgroundLogDir) == "" {
+		return "", false, errors.New("background log directory not configured")
+	}
+	created := false
+	if strings.TrimSpace(item.BackgroundLogPath) == "" {
+		filename := m.backgroundLogFilename(item)
+		if filename == "" {
+			filename = fmt.Sprintf("item-%d.log", item.ID)
+		}
+		item.BackgroundLogPath = filepath.Join(m.backgroundLogDir, filename)
+		created = true
+	}
+	if err := os.MkdirAll(filepath.Dir(item.BackgroundLogPath), 0o755); err != nil {
+		return "", false, fmt.Errorf("ensure background log directory: %w", err)
+	}
+	return item.BackgroundLogPath, created, nil
+}
+
+func (m *Manager) newBackgroundLogger(path string) (*slog.Logger, error) {
+	level := "info"
+	format := "json"
+	if m.cfg != nil {
+		if strings.TrimSpace(m.cfg.LogLevel) != "" {
+			level = m.cfg.LogLevel
+		}
+		if strings.TrimSpace(m.cfg.LogFormat) != "" {
+			format = m.cfg.LogFormat
+		}
+	}
+	return logging.New(logging.Options{
+		Level:            level,
+		Format:           format,
+		OutputPaths:      []string{path},
+		ErrorOutputPaths: []string{path},
+		Development:      false,
+	})
+}
+
+func (m *Manager) backgroundLogFilename(item *queue.Item) string {
+	timestamp := time.Now().UTC().Format("20060102T150405")
+	fingerprint := strings.TrimSpace(item.DiscFingerprint)
+	if fingerprint == "" {
+		fingerprint = fmt.Sprintf("item-%d", item.ID)
+	}
+	title := sanitizeSlug(item.DiscTitle)
+	if title == "" {
+		title = "untitled"
+	}
+	return fmt.Sprintf("%s-%s-%s.log", timestamp, fingerprint, title)
+}
+
+func sanitizeSlug(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	builder.Grow(len(value))
+	lastDash := false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastDash = false
+		case r >= 'A' && r <= 'Z':
+			builder.WriteRune(unicode.ToLower(r))
+			lastDash = false
+		case unicode.IsDigit(r):
+			builder.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				builder.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	slug := strings.Trim(builder.String(), "-")
+	if slug == "" {
+		return ""
+	}
+	return slug
+}
+
+func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger *slog.Logger, stage pipelineStage, item *queue.Item) error {
 	stageStart := time.Now()
 	stageLogger.Info(
 		"stage started",
@@ -270,6 +510,14 @@ func (m *Manager) executeStage(ctx context.Context, stageLogger *slog.Logger, st
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
 		logging.String("source_path", strings.TrimSpace(item.SourcePath)),
 	)
+	if lane != nil && lane.kind == laneBackground && lane.logger != nil {
+		logging.WithContext(ctx, lane.logger).Info(
+			"background stage started",
+			logging.String("stage", stage.name),
+			logging.Int64("item_id", item.ID),
+			logging.String("log_path", strings.TrimSpace(item.BackgroundLogPath)),
+		)
+	}
 
 	handler := stage.handler
 	if handler == nil {
@@ -323,6 +571,14 @@ func (m *Manager) executeStage(ctx context.Context, stageLogger *slog.Logger, st
 		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
 		logging.Duration("elapsed", time.Since(stageStart)),
 	)
+	if lane != nil && lane.kind == laneBackground && lane.logger != nil {
+		logging.WithContext(ctx, lane.logger).Info(
+			"background stage completed",
+			logging.String("stage", stage.name),
+			logging.Int64("item_id", item.ID),
+			logging.Duration("elapsed", time.Since(stageStart)),
+		)
+	}
 	m.setLastItem(item)
 	m.checkQueueCompletion(ctx)
 	return nil
@@ -340,18 +596,7 @@ func (m *Manager) executeWithHeartbeat(ctx context.Context, handler StageHandler
 	return execErr
 }
 
-func (m *Manager) stageForStatus(status queue.Status) (pipelineStage, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, stg := range m.stages {
-		if stg.startStatus == status {
-			return stg, true
-		}
-	}
-	return pipelineStage{}, false
-}
-
-func (m *Manager) transitionToProcessing(ctx context.Context, processing queue.Status, stageName string, item *queue.Item) error {
+func (m *Manager) transitionToProcessing(ctx context.Context, lane *laneState, processing queue.Status, stageName string, item *queue.Item) error {
 	if processing == "" {
 		return errors.New("processing status must not be empty")
 	}
@@ -361,7 +606,9 @@ func (m *Manager) transitionToProcessing(ctx context.Context, processing queue.S
 		return fmt.Errorf("persist processing transition: %w", err)
 	}
 	m.setLastItem(item)
-	m.onItemStarted(ctx)
+	if lane == nil || lane.notificationsEnabled {
+		m.onItemStarted(ctx)
+	}
 	return nil
 }
 
@@ -464,10 +711,6 @@ func (m *Manager) setItemFailureState(item *queue.Item, status queue.Status, mes
 	item.LastHeartbeat = nil
 }
 
-func (m *Manager) nextItem(ctx context.Context) (*queue.Item, error) {
-	return m.store.NextForStatuses(ctx, m.statusOrder...)
-}
-
 func withStageContext(ctx context.Context, stageName string, item *queue.Item, requestID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -515,8 +758,14 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 	running := m.running
 	lastErr := m.lastErr
 	lastItem := m.lastItem
-	stages := make([]pipelineStage, len(m.stages))
-	copy(stages, m.stages)
+	stageSet := make([]pipelineStage, 0)
+	for _, kind := range m.laneOrder {
+		lane := m.lanes[kind]
+		if lane == nil {
+			continue
+		}
+		stageSet = append(stageSet, lane.stages...)
+	}
 	m.mu.RUnlock()
 
 	stats, err := m.store.Stats(ctx)
@@ -524,8 +773,8 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 		m.logger.Warn("failed to read queue stats", logging.Error(err))
 	}
 
-	health := make(map[string]stage.Health, len(stages))
-	for _, stg := range stages {
+	health := make(map[string]stage.Health, len(stageSet))
+	for _, stg := range stageSet {
 		handler := stg.handler
 		if handler == nil {
 			continue
