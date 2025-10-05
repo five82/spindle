@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"log/slog"
 
@@ -137,11 +138,18 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			item.DiscTitle = title
 		}
 	}
-	if (title == "" || disc.IsGenericLabel(title)) && len(scanResult.Titles) > 0 {
+	if len(scanResult.Titles) > 0 {
 		primaryTitle := strings.TrimSpace(scanResult.Titles[0].Name)
 		if primaryTitle != "" {
-			title = primaryTitle
-			item.DiscTitle = title
+			normalizedPrimary := normalizeComparableTitle(primaryTitle)
+			normalizedExisting := normalizeComparableTitle(title)
+			if title == "" || disc.IsGenericLabel(title) {
+				title = primaryTitle
+				item.DiscTitle = title
+			} else if normalizedPrimary != "" && normalizedPrimary == normalizedExisting && title != primaryTitle {
+				title = primaryTitle
+				item.DiscTitle = title
+			}
 		}
 	}
 	// Use bd_info disc name if title is empty or generic
@@ -471,4 +479,18 @@ func (i *Identifier) ensureStagingSkeleton(item *queue.Item) error {
 		}
 	}
 	return nil
+}
+
+func normalizeComparableTitle(input string) string {
+	if strings.TrimSpace(input) == "" {
+		return ""
+	}
+	var builder strings.Builder
+	for _, r := range input {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			builder.WriteRune(unicode.ToLower(r))
+		}
+	}
+	return builder.String()
 }
