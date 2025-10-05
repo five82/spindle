@@ -35,6 +35,7 @@ type Daemon struct {
 	workflow *workflow.Manager
 	logPath  string
 	monitor  *discMonitor
+	apiSrv   *apiServer
 
 	lockPath string
 	lock     *flock.Flock
@@ -79,7 +80,7 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 
 	lockPath := filepath.Join(cfg.LogDir, "spindle.lock")
 	monitor := newDiscMonitor(cfg, store, logger)
-	return &Daemon{
+	daemon := &Daemon{
 		cfg:      cfg,
 		logger:   logger,
 		store:    store,
@@ -89,7 +90,13 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 		lock:     flock.New(lockPath),
 		monitor:  monitor,
 		notifier: notifications.NewService(cfg),
-	}, nil
+	}
+	apiSrv, err := newAPIServer(cfg, daemon, logger)
+	if err != nil {
+		return nil, err
+	}
+	daemon.apiSrv = apiSrv
+	return daemon, nil
 }
 
 // Start launches the workflow manager and acquires the daemon lock.
@@ -124,6 +131,19 @@ func (d *Daemon) Start(ctx context.Context) error {
 			return fmt.Errorf("start disc monitor: %w", err)
 		}
 	}
+	if d.apiSrv != nil {
+		if err := d.apiSrv.start(d.ctx); err != nil {
+			if d.monitor != nil {
+				d.monitor.Stop()
+			}
+			d.workflow.Stop()
+			d.cancel()
+			d.ctx = nil
+			d.cancel = nil
+			_ = d.lock.Unlock()
+			return fmt.Errorf("start api server: %w", err)
+		}
+	}
 
 	d.running.Store(true)
 	d.logger.Info("spindle daemon started", logging.String("lock", d.lockPath))
@@ -143,6 +163,9 @@ func (d *Daemon) Stop() {
 	}
 	if d.monitor != nil {
 		d.monitor.Stop()
+	}
+	if d.apiSrv != nil {
+		d.apiSrv.stop()
 	}
 	d.workflow.Stop()
 	if err := d.lock.Unlock(); err != nil {

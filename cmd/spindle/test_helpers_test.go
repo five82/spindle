@@ -52,6 +52,7 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 	t.Setenv("HOME", homeDir)
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 	cfg.OpticalDrive = filepath.Join(base, "fake-drive")
+	cfg.APIBind = "127.0.0.1:0"
 	logPath := filepath.Join(cfg.LogDir, "spindle-test.log")
 	if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
 		t.Fatalf("mkdir log dir: %v", err)
@@ -136,13 +137,14 @@ func appendLine(path, line string) error {
 func writeTestConfig(t *testing.T, path string, cfg *config.Config) {
 	t.Helper()
 	content := fmt.Sprintf(
-		"staging_dir = %q\nlibrary_dir = %q\nlog_dir = %q\nreview_dir = %q\ntmdb_api_key = %q\noptical_drive = %q\n",
+		"staging_dir = %q\nlibrary_dir = %q\nlog_dir = %q\nreview_dir = %q\ntmdb_api_key = %q\noptical_drive = %q\napi_bind = %q\n",
 		cfg.StagingDir,
 		cfg.LibraryDir,
 		cfg.LogDir,
 		cfg.ReviewDir,
 		cfg.TMDBAPIKey,
 		cfg.OpticalDrive,
+		cfg.APIBind,
 	)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)

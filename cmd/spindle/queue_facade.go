@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"strings"
-	"time"
 
+	"spindle/internal/api"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
 )
@@ -26,7 +26,15 @@ type queueIPCFacade struct {
 }
 
 type queueStoreFacade struct {
-	store *queue.Store
+	store   *queue.Store
+	service *api.QueueService
+}
+
+func (f *queueStoreFacade) queueService() *api.QueueService {
+	if f.service == nil && f.store != nil {
+		f.service = api.NewQueueService(f.store)
+	}
+	return f.service
 }
 
 func (f *queueIPCFacade) Stats(_ context.Context) (map[string]int, error) {
@@ -158,15 +166,15 @@ func (f *queueIPCFacade) Health(_ context.Context) (queueHealthView, error) {
 }
 
 func (f *queueStoreFacade) Stats(ctx context.Context) (map[string]int, error) {
-	stats, err := f.store.Stats(ctx)
+	svc := f.queueService()
+	if svc == nil {
+		return nil, nil
+	}
+	stats, err := svc.Stats(ctx)
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]int, len(stats))
-	for status, count := range stats {
-		result[string(status)] = count
-	}
-	return result, nil
+	return stats, nil
 }
 
 func (f *queueStoreFacade) List(ctx context.Context, statuses []string) ([]queueItemView, error) {
@@ -175,23 +183,23 @@ func (f *queueStoreFacade) List(ctx context.Context, statuses []string) ([]queue
 		filters = append(filters, queue.Status(status))
 	}
 
-	items, err := f.store.List(ctx, filters...)
+	svc := f.queueService()
+	if svc == nil {
+		return nil, nil
+	}
+	items, err := svc.List(ctx, filters...)
 	if err != nil {
 		return nil, err
 	}
 
 	views := make([]queueItemView, 0, len(items))
 	for _, item := range items {
-		created := ""
-		if !item.CreatedAt.IsZero() {
-			created = item.CreatedAt.UTC().Format(time.RFC3339)
-		}
 		views = append(views, queueItemView{
 			ID:              item.ID,
 			DiscTitle:       item.DiscTitle,
 			SourcePath:      item.SourcePath,
-			Status:          string(item.Status),
-			CreatedAt:       created,
+			Status:          item.Status,
+			CreatedAt:       item.CreatedAt,
 			DiscFingerprint: item.DiscFingerprint,
 		})
 	}

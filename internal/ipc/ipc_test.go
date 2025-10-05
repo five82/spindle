@@ -28,6 +28,7 @@ func (noopStage) HealthCheck(context.Context) stage.Health {
 func TestIPCServerClient(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	cfg.OpticalDrive = ""
+	cfg.APIBind = "127.0.0.1:0"
 	store := testsupport.MustOpenStore(t, cfg)
 	logPath := filepath.Join(cfg.LogDir, "ipc-test.log")
 	logger := logging.NewNop()

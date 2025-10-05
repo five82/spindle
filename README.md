@@ -95,6 +95,7 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `plex_url` – Plex server address used for library refreshes
 - `plex_link_enabled` – If `true`, Spindle links to Plex and triggers library scans automatically
 - `ntfy_topic` (optional) – Channel for notifications
+- `api_bind` – Host:port for the built-in JSON API (defaults to `127.0.0.1:7487`)
 
 
 ## Usage
@@ -130,6 +131,16 @@ spindle plex link
 - `spindle test-notify`
 - `spindle config validate`
 - `spindle show --lines 50 --follow` for live tailing
+
+### HTTP API
+
+When the daemon is running, Spindle exposes a read-only JSON API (default `http://127.0.0.1:7487`).
+
+- `GET /api/status` – Daemon runtime information, dependency health, and workflow status.
+- `GET /api/queue` – List queue items; filter with repeated `status` query parameters.
+- `GET /api/queue/{id}` – Inspect a single queue item.
+
+Adjust the bind address with the `api_bind` configuration key. The API is intended for dashboards and TUIs on trusted networks.
 
 
 ### Workflow Lifecycle

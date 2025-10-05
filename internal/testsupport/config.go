@@ -29,6 +29,7 @@ func NewConfig(t testing.TB, opts ...ConfigOption) *config.Config {
 	cfgVal.LibraryDir = filepath.Join(base, "library")
 	cfgVal.LogDir = filepath.Join(base, "logs")
 	cfgVal.ReviewDir = filepath.Join(base, "review")
+	cfgVal.APIBind = "127.0.0.1:0"
 
 	builder := &configBuilder{
 		t:       t,

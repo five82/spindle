@@ -35,6 +35,9 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	if cfg.LibraryDir != filepath.Join(tempHome, "library") {
 		t.Fatalf("unexpected library dir: %q", cfg.LibraryDir)
 	}
+	if cfg.APIBind != "127.0.0.1:7487" {
+		t.Fatalf("unexpected api bind: %q", cfg.APIBind)
+	}
 	if cfg.TMDBAPIKey != "test-key" {
 		t.Fatalf("expected TMDB key from env, got %q", cfg.TMDBAPIKey)
 	}
