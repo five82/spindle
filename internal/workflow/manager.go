@@ -58,6 +58,7 @@ type laneState struct {
 	stages               []pipelineStage
 	statusOrder          []queue.Status
 	stageByStart         map[queue.Status]pipelineStage
+	processingStatuses   []queue.Status
 	logger               *slog.Logger
 	notificationsEnabled bool
 	runReclaimer         bool
@@ -69,9 +70,16 @@ func (l *laneState) finalize() {
 	}
 	l.stageByStart = make(map[queue.Status]pipelineStage, len(l.stages))
 	l.statusOrder = make([]queue.Status, 0, len(l.stages))
+	seenProcessing := make(map[queue.Status]struct{})
 	for _, stg := range l.stages {
 		l.stageByStart[stg.startStatus] = stg
 		l.statusOrder = append(l.statusOrder, stg.startStatus)
+		if stg.processingStatus != "" {
+			if _, ok := seenProcessing[stg.processingStatus]; !ok {
+				l.processingStatuses = append(l.processingStatuses, stg.processingStatus)
+				seenProcessing[stg.processingStatus] = struct{}{}
+			}
+		}
 	}
 }
 
@@ -189,12 +197,11 @@ func (m *Manager) ConfigureStages(set StageSet) {
 		order = append(order, background.kind)
 	}
 
-	if fg, ok := lanes[laneForeground]; ok {
-		fg.runReclaimer = true
-	} else if len(order) > 0 {
-		if lane := lanes[order[0]]; lane != nil {
-			lane.runReclaimer = true
+	for _, lane := range lanes {
+		if lane == nil {
+			continue
 		}
+		lane.runReclaimer = len(lane.processingStatuses) > 0
 	}
 
 	m.mu.Lock()
@@ -291,7 +298,7 @@ func (m *Manager) runLane(ctx context.Context, lane *laneState) {
 		}
 
 		if lane.runReclaimer {
-			if err := m.reclaimStaleItems(ctx, logger); err != nil {
+			if err := m.reclaimStaleItems(ctx, logger, lane.processingStatuses); err != nil {
 				logger.Warn("reclaim stale processing failed", logging.Error(err))
 			}
 		}
@@ -314,12 +321,15 @@ func (m *Manager) runLane(ctx context.Context, lane *laneState) {
 	}
 }
 
-func (m *Manager) reclaimStaleItems(ctx context.Context, logger *slog.Logger) error {
+func (m *Manager) reclaimStaleItems(ctx context.Context, logger *slog.Logger, statuses []queue.Status) error {
 	if m.heartbeatTimeout <= 0 {
 		return nil
 	}
+	if len(statuses) == 0 {
+		return nil
+	}
 	cutoff := time.Now().Add(-m.heartbeatTimeout)
-	reclaimed, err := m.store.ReclaimStaleProcessing(ctx, cutoff)
+	reclaimed, err := m.store.ReclaimStaleProcessing(ctx, cutoff, statuses...)
 	if err != nil {
 		return err
 	}

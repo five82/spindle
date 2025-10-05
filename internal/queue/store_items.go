@@ -153,6 +153,28 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 	return nil
 }
 
+// UpdateProgress persists progress fields without altering heartbeat metadata.
+func (s *Store) UpdateProgress(ctx context.Context, item *Item) error {
+	if item == nil {
+		return errors.New("item is nil")
+	}
+	item.UpdatedAt = time.Now().UTC()
+	if err := s.execWithoutResultRetry(
+		ctx,
+		`UPDATE queue_items
+        SET progress_stage = ?, progress_percent = ?, progress_message = ?, updated_at = ?
+        WHERE id = ?`,
+		nullableString(item.ProgressStage),
+		item.ProgressPercent,
+		nullableString(item.ProgressMessage),
+		item.UpdatedAt.Format(time.RFC3339Nano),
+		item.ID,
+	); err != nil {
+		return fmt.Errorf("update progress: %w", err)
+	}
+	return nil
+}
+
 // ItemsByStatus returns items matching a status ordered by creation time.
 func (s *Store) ItemsByStatus(ctx context.Context, status Status) ([]*Item, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+itemColumns+` FROM queue_items WHERE status = ? ORDER BY created_at`, status)

@@ -515,7 +515,7 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 	if update.Message != "" {
 		copy.ProgressMessage = update.Message
 	}
-	if err := r.store.Update(ctx, &copy); err != nil {
+	if err := r.store.UpdateProgress(ctx, &copy); err != nil {
 		logger.Warn("failed to persist progress", logging.Error(err))
 		return
 	}

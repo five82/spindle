@@ -498,7 +498,7 @@ func (o *Organizer) updateProgress(ctx context.Context, item *queue.Item, messag
 	copy := *item
 	copy.ProgressMessage = message
 	copy.ProgressPercent = percent
-	if err := o.store.Update(ctx, &copy); err != nil {
+	if err := o.store.UpdateProgress(ctx, &copy); err != nil {
 		logger.Warn("failed to persist organizer progress", logging.Error(err))
 		return
 	}

@@ -27,6 +27,23 @@ func rollbackStatuses(pairs []statusTransition) []any {
 	return args
 }
 
+func transitionsForStatuses(pairs []statusTransition, statuses ...Status) []statusTransition {
+	if len(statuses) == 0 {
+		return pairs
+	}
+	allowed := make(map[Status]struct{}, len(statuses))
+	for _, status := range statuses {
+		allowed[status] = struct{}{}
+	}
+	filtered := make([]statusTransition, 0, len(pairs))
+	for _, pair := range pairs {
+		if _, ok := allowed[pair.from]; ok {
+			filtered = append(filtered, pair)
+		}
+	}
+	return filtered
+}
+
 // ResetStuckProcessing resets items in processing states back to the start of their current stage.
 func (s *Store) ResetStuckProcessing(ctx context.Context) (int64, error) {
 	pairs := processingRollbackTransitions()
@@ -61,10 +78,14 @@ func (s *Store) UpdateHeartbeat(ctx context.Context, id int64) error {
 	return nil
 }
 
-// ReclaimStaleProcessing returns items stuck in processing back to the start of their current stage when heartbeats expire.
-func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time) (int64, error) {
+// ReclaimStaleProcessing returns items stuck in the provided processing statuses (or all processing statuses when none are specified)
+// back to the start of their current stage when heartbeats expire.
+func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time, statuses ...Status) (int64, error) {
 	now := time.Now().UTC()
-	pairs := processingRollbackTransitions()
+	pairs := transitionsForStatuses(processingRollbackTransitions(), statuses...)
+	if len(pairs) == 0 {
+		return 0, nil
+	}
 	caseExpr, caseArgs := rollbackCaseClause(pairs)
 	statusArgs := rollbackStatuses(pairs)
 	query := fmt.Sprintf(`UPDATE queue_items

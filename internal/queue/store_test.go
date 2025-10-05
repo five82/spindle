@@ -282,53 +282,174 @@ func TestUpdateHeartbeat(t *testing.T) {
 }
 
 func TestReclaimStaleProcessing(t *testing.T) {
+	t.Run("all statuses", func(t *testing.T) {
+		cfg := testsupport.NewConfig(t)
+		store := testsupport.MustOpenStore(t, cfg)
+
+		ctx := context.Background()
+		past := time.Now().Add(-2 * time.Hour).UTC()
+		cases := []struct {
+			name       string
+			processing queue.Status
+			expected   queue.Status
+		}{
+			{"identifying", queue.StatusIdentifying, queue.StatusPending},
+			{"ripping", queue.StatusRipping, queue.StatusIdentified},
+			{"encoding", queue.StatusEncoding, queue.StatusRipped},
+			{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
+		}
+		var ids []int64
+		for i, tc := range cases {
+			item, err := store.NewDisc(ctx, fmt.Sprintf("Stale-%s", tc.name), fmt.Sprintf("stale-%d", i))
+			if err != nil {
+				t.Fatalf("NewDisc: %v", err)
+			}
+			item.Status = tc.processing
+			item.LastHeartbeat = &past
+			if err := store.Update(ctx, item); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			ids = append(ids, item.ID)
+		}
+
+		count, err := store.ReclaimStaleProcessing(
+			ctx,
+			time.Now().Add(-1*time.Hour),
+			queue.StatusIdentifying,
+			queue.StatusRipping,
+			queue.StatusEncoding,
+			queue.StatusOrganizing,
+		)
+		if err != nil {
+			t.Fatalf("ReclaimStaleProcessing: %v", err)
+		}
+		if int(count) != len(cases) {
+			t.Fatalf("expected %d items reclaimed, got %d", len(cases), count)
+		}
+
+		for idx, tc := range cases {
+			updated, err := store.GetByID(ctx, ids[idx])
+			if err != nil {
+				t.Fatalf("GetByID: %v", err)
+			}
+			if updated.Status != tc.expected {
+				t.Fatalf("%s: expected status %s after reclaim, got %s", tc.name, tc.expected, updated.Status)
+			}
+			if updated.LastHeartbeat != nil {
+				t.Fatalf("%s: expected heartbeat cleared, got %v", tc.name, updated.LastHeartbeat)
+			}
+		}
+	})
+
+	t.Run("filtered statuses", func(t *testing.T) {
+		cfg := testsupport.NewConfig(t)
+		store := testsupport.MustOpenStore(t, cfg)
+
+		ctx := context.Background()
+		past := time.Now().Add(-2 * time.Hour).UTC()
+
+		ripping, err := store.NewDisc(ctx, "Stale-Ripping", "stale-ripping")
+		if err != nil {
+			t.Fatalf("NewDisc ripping: %v", err)
+		}
+		ripping.Status = queue.StatusRipping
+		ripping.LastHeartbeat = &past
+		if err := store.Update(ctx, ripping); err != nil {
+			t.Fatalf("Update ripping: %v", err)
+		}
+
+		encoding, err := store.NewDisc(ctx, "Stale-Encoding", "stale-encoding")
+		if err != nil {
+			t.Fatalf("NewDisc encoding: %v", err)
+		}
+		encoding.Status = queue.StatusEncoding
+		encoding.LastHeartbeat = &past
+		if err := store.Update(ctx, encoding); err != nil {
+			t.Fatalf("Update encoding: %v", err)
+		}
+
+		count, err := store.ReclaimStaleProcessing(ctx, time.Now().Add(-1*time.Hour), queue.StatusEncoding)
+		if err != nil {
+			t.Fatalf("ReclaimStaleProcessing filtered: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("expected 1 item reclaimed, got %d", count)
+		}
+
+		reclaimed, err := store.GetByID(ctx, encoding.ID)
+		if err != nil {
+			t.Fatalf("GetByID encoding: %v", err)
+		}
+		if reclaimed.Status != queue.StatusRipped {
+			t.Fatalf("expected encoding item rolled back to ripped, got %s", reclaimed.Status)
+		}
+		if reclaimed.LastHeartbeat != nil {
+			t.Fatalf("expected encoding heartbeat cleared, got %v", reclaimed.LastHeartbeat)
+		}
+
+		unchanged, err := store.GetByID(ctx, ripping.ID)
+		if err != nil {
+			t.Fatalf("GetByID ripping: %v", err)
+		}
+		if unchanged.Status != queue.StatusRipping {
+			t.Fatalf("expected ripping item untouched, got %s", unchanged.Status)
+		}
+		if unchanged.LastHeartbeat == nil || !unchanged.LastHeartbeat.Equal(past) {
+			t.Fatalf("expected ripping heartbeat unchanged, got %v", unchanged.LastHeartbeat)
+		}
+	})
+}
+
+func TestUpdateProgressPreservesHeartbeat(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
-	past := time.Now().Add(-2 * time.Hour).UTC()
-	cases := []struct {
-		name       string
-		processing queue.Status
-		expected   queue.Status
-	}{
-		{"identifying", queue.StatusIdentifying, queue.StatusPending},
-		{"ripping", queue.StatusRipping, queue.StatusIdentified},
-		{"encoding", queue.StatusEncoding, queue.StatusRipped},
-		{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
-	}
-	var ids []int64
-	for i, tc := range cases {
-		item, err := store.NewDisc(ctx, fmt.Sprintf("Stale-%s", tc.name), fmt.Sprintf("stale-%d", i))
-		if err != nil {
-			t.Fatalf("NewDisc: %v", err)
-		}
-		item.Status = tc.processing
-		item.LastHeartbeat = &past
-		if err := store.Update(ctx, item); err != nil {
-			t.Fatalf("Update: %v", err)
-		}
-		ids = append(ids, item.ID)
-	}
-
-	count, err := store.ReclaimStaleProcessing(ctx, time.Now().Add(-1*time.Hour))
+	item, err := store.NewDisc(ctx, "Heartbeat Progress", "hb-progress")
 	if err != nil {
-		t.Fatalf("ReclaimStaleProcessing: %v", err)
+		t.Fatalf("NewDisc: %v", err)
 	}
-	if int(count) != len(cases) {
-		t.Fatalf("expected %d items reclaimed, got %d", len(cases), count)
+	item.Status = queue.StatusIdentifying
+	past := time.Now().Add(-5 * time.Minute).UTC()
+	item.LastHeartbeat = &past
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("Update: %v", err)
 	}
 
-	for idx, tc := range cases {
-		updated, err := store.GetByID(ctx, ids[idx])
-		if err != nil {
-			t.Fatalf("GetByID: %v", err)
-		}
-		if updated.Status != tc.expected {
-			t.Fatalf("%s: expected status %s after reclaim, got %s", tc.name, tc.expected, updated.Status)
-		}
-		if updated.LastHeartbeat != nil {
-			t.Fatalf("%s: expected heartbeat cleared, got %v", tc.name, updated.LastHeartbeat)
-		}
+	if err := store.UpdateHeartbeat(ctx, item.ID); err != nil {
+		t.Fatalf("UpdateHeartbeat: %v", err)
+	}
+
+	before, err := store.GetByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetByID before progress: %v", err)
+	}
+	if before.LastHeartbeat == nil {
+		t.Fatal("expected heartbeat set before progress update")
+	}
+	origHeartbeat := *before.LastHeartbeat
+
+	before.ProgressStage = "Identify"
+	before.ProgressPercent = 42.5
+	before.ProgressMessage = "Scanning"
+	if err := store.UpdateProgress(ctx, before); err != nil {
+		t.Fatalf("UpdateProgress: %v", err)
+	}
+
+	after, err := store.GetByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetByID after progress: %v", err)
+	}
+	if after.LastHeartbeat == nil {
+		t.Fatal("expected heartbeat preserved after progress update")
+	}
+	if !after.LastHeartbeat.Equal(origHeartbeat) {
+		t.Fatalf("expected heartbeat unchanged, before %v after %v", origHeartbeat, after.LastHeartbeat)
+	}
+	if after.ProgressStage != "Identify" || after.ProgressMessage != "Scanning" {
+		t.Fatalf("expected progress fields persisted, got stage=%q message=%q", after.ProgressStage, after.ProgressMessage)
+	}
+	if after.ProgressPercent != 42.5 {
+		t.Fatalf("expected progress percent 42.5, got %f", after.ProgressPercent)
 	}
 }

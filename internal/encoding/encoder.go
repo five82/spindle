@@ -140,7 +140,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			if message := progressMessageText(update); message != "" {
 				copy.ProgressMessage = message
 			}
-			if err := e.store.Update(ctx, &copy); err != nil {
+			if err := e.store.UpdateProgress(ctx, &copy); err != nil {
 				logger.Warn("failed to persist encoding progress", logging.Error(err))
 			}
 			*item = copy
