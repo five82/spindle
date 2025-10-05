@@ -147,9 +147,9 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		}
 
 		var (
-			lastLoggedPercent float64 = -1
-			lastLoggedStage   string
-			lastLoggedRawMsg  string
+			lastLoggedStage  string
+			lastLoggedRawMsg string
+			lastLoggedBucket = -1
 		)
 		progressLogger := func(update drapto.ProgressUpdate) {
 			stage := strings.TrimSpace(update.Stage)
@@ -159,13 +159,25 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			if stage != "" && stage != lastLoggedStage {
 				lastLoggedStage = stage
 				shouldLog = true
+				lastLoggedBucket = -1
 			}
 			if rawMsg != "" && rawMsg != lastLoggedRawMsg {
 				lastLoggedRawMsg = rawMsg
 				shouldLog = true
 			}
-			if update.Percent >= 0 && (lastLoggedPercent < 0 || update.Percent-lastLoggedPercent >= 5 || update.Percent >= 100) {
-				lastLoggedPercent = update.Percent
+			if update.Percent >= 1 && lastLoggedBucket < 0 {
+				lastLoggedBucket = 0
+				shouldLog = true
+			}
+			if update.Percent >= 5 {
+				bucket := int(update.Percent / 5)
+				if bucket > lastLoggedBucket {
+					lastLoggedBucket = bucket
+					shouldLog = true
+				}
+			}
+			if update.Percent >= 100 && lastLoggedBucket < 20 {
+				lastLoggedBucket = 20
 				shouldLog = true
 			}
 			if shouldLog {
