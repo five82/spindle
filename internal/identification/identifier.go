@@ -129,13 +129,20 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	title := item.DiscTitle
-	if title == "" {
-		title = deriveTitle(item.SourcePath)
-		item.DiscTitle = title
+	title := strings.TrimSpace(item.DiscTitle)
+	if title == "" || disc.IsGenericLabel(title) {
+		derived := strings.TrimSpace(deriveTitle(item.SourcePath))
+		if derived != "" && !disc.IsGenericLabel(derived) {
+			title = derived
+			item.DiscTitle = title
+		}
 	}
-	if title == "" && len(scanResult.Titles) > 0 {
-		title = scanResult.Titles[0].Name
+	if (title == "" || disc.IsGenericLabel(title)) && len(scanResult.Titles) > 0 {
+		primaryTitle := strings.TrimSpace(scanResult.Titles[0].Name)
+		if primaryTitle != "" {
+			title = primaryTitle
+			item.DiscTitle = title
+		}
 	}
 	// Use bd_info disc name if title is empty or generic
 	if (title == "" || disc.IsGenericLabel(title)) && scanResult.BDInfo != nil && scanResult.BDInfo.DiscName != "" {
@@ -149,6 +156,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	if title == "" {
 		title = "Unknown Disc"
+		item.DiscTitle = title
 	}
 
 	// Prepare enhanced search options using bd_info data

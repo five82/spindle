@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/disc"
+	"spindle/internal/disc/fingerprint"
 	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
@@ -51,6 +52,7 @@ Examples:
 			if device == "" {
 				return fmt.Errorf("no device specified and no optical_drive configured")
 			}
+			cfg.OpticalDrive = device
 
 			// Setup logging
 			logLevel := "info"
@@ -94,6 +96,16 @@ Examples:
 			// Set up context with timeout
 			identifyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
+
+			// Pre-compute fingerprint so validation can pass even if MakeMKV omits it
+			fingerprintTimeout := 2 * time.Minute
+			computedFingerprint, fpErr := fingerprint.ComputeTimeout(identifyCtx, device, "", fingerprintTimeout)
+			if fpErr != nil {
+				logger.Warn("fingerprint computation failed", logging.Error(fpErr))
+			} else if strings.TrimSpace(computedFingerprint) != "" {
+				item.DiscFingerprint = strings.TrimSpace(computedFingerprint)
+				logger.Info("fingerprint computed", logging.String("fingerprint", item.DiscFingerprint))
+			}
 
 			// Run preparation
 			if err := identifier.Prepare(identifyCtx, item); err != nil {
