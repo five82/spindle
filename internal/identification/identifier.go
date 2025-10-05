@@ -216,21 +216,11 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		return nil
 	}
 
-	metadata := map[string]any{
-		"id":           best.ID,
-		"title":        pickTitle(*best),
-		"overview":     best.Overview,
-		"media_type":   best.MediaType,
-		"release_date": best.ReleaseDate,
-		"vote_average": best.VoteAverage,
-		"vote_count":   best.VoteCount,
+	mediaType := strings.ToLower(strings.TrimSpace(best.MediaType))
+	if mediaType == "" {
+		mediaType = "movie"
 	}
-	encodedMetadata, err := json.Marshal(metadata)
-	if err != nil {
-		return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", err)
-	}
-	item.MetadataJSON = string(encodedMetadata)
-	// Update DiscTitle to the proper TMDB title with year for use in subsequent stages
+	isMovie := mediaType != "tv"
 	identifiedTitle := pickTitle(*best)
 	year := ""
 	titleWithYear := identifiedTitle
@@ -238,6 +228,24 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		year = best.ReleaseDate[:4] // Extract YYYY from YYYY-MM-DD
 		titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
 	}
+	filenameMeta := queue.NewBasicMetadata(titleWithYear, isMovie)
+	metadata := map[string]any{
+		"id":           best.ID,
+		"title":        identifiedTitle,
+		"overview":     best.Overview,
+		"media_type":   mediaType,
+		"release_date": best.ReleaseDate,
+		"vote_average": best.VoteAverage,
+		"vote_count":   best.VoteCount,
+		"movie":        isMovie,
+		"filename":     filenameMeta.GetFilename(),
+	}
+	encodedMetadata, err := json.Marshal(metadata)
+	if err != nil {
+		return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", err)
+	}
+	item.MetadataJSON = string(encodedMetadata)
+	// Update DiscTitle to the proper TMDB title with year for use in subsequent stages
 	item.DiscTitle = titleWithYear
 	item.ProgressStage = "Identified"
 	item.ProgressPercent = 100

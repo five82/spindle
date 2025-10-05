@@ -2,9 +2,12 @@ package plex
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // MediaMetadata represents the subset of media info needed for organization.
@@ -27,7 +30,48 @@ func FileMover(sourcePath, targetPath string) error {
 		return fmt.Errorf("create target directory: %w", err)
 	}
 	if err := os.Rename(sourcePath, targetPath); err != nil {
+		var linkErr *os.LinkError
+		if errors.As(err, &linkErr) && errors.Is(linkErr.Err, syscall.EXDEV) {
+			if err := copyFileContents(sourcePath, targetPath); err != nil {
+				return fmt.Errorf("copy file across devices: %w", err)
+			}
+			if err := os.Remove(sourcePath); err != nil {
+				return fmt.Errorf("remove source after copy: %w", err)
+			}
+			return nil
+		}
 		return fmt.Errorf("move file: %w", err)
+	}
+	return nil
+}
+
+func copyFileContents(sourcePath, targetPath string) error {
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer source.Close()
+
+	info, err := source.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source: %w", err)
+	}
+
+	dest, err := os.OpenFile(targetPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		return fmt.Errorf("create destination: %w", err)
+	}
+
+	if _, err := io.Copy(dest, source); err != nil {
+		dest.Close()
+		return fmt.Errorf("copy data: %w", err)
+	}
+	if err := dest.Sync(); err != nil {
+		dest.Close()
+		return fmt.Errorf("sync destination: %w", err)
+	}
+	if err := dest.Close(); err != nil {
+		return fmt.Errorf("close destination: %w", err)
 	}
 	return nil
 }
