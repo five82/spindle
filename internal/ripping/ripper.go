@@ -131,6 +131,19 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 
 	var titleIDs []int
 	if r.client != nil {
+		if err := ensureMakeMKVSelectionRule(); err != nil {
+			logger.Error(
+				"failed to configure makemkv selection",
+				logging.Error(err),
+			)
+			return services.Wrap(
+				services.ErrConfiguration,
+				"ripping",
+				"configure makemkv",
+				"Failed to configure MakeMKV audio selection; ensure Spindle can write to ~/.MakeMKV",
+				err,
+			)
+		}
 		titleIDs = r.selectTitleIDs(item, logger)
 		logger.Info(
 			"launching makemkv rip",
