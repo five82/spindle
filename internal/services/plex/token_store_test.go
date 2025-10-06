@@ -28,7 +28,6 @@ func TestFileTokenStoreRoundTrip(t *testing.T) {
 		PrivateKey:         "priv",
 		PublicKey:          "pub",
 		KeyID:              "key",
-		KeyExpiresAt:       time.Now().Add(time.Hour).Round(time.Second),
 		Token:              "token",
 		TokenExpiresAt:     time.Now().Add(2 * time.Hour).Round(time.Second),
 	}
@@ -53,9 +52,6 @@ func TestFileTokenStoreRoundTrip(t *testing.T) {
 	}
 	if got.KeyID != expected.KeyID {
 		t.Fatalf("key id mismatch: got %q want %q", got.KeyID, expected.KeyID)
-	}
-	if !got.KeyExpiresAt.Equal(expected.KeyExpiresAt) {
-		t.Fatalf("key expiry mismatch: got %v want %v", got.KeyExpiresAt, expected.KeyExpiresAt)
 	}
 	if got.Token != expected.Token {
 		t.Fatalf("token mismatch: got %q want %q", got.Token, expected.Token)

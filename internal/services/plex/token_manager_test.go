@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,14 +47,44 @@ func TestTokenManagerRefreshesExpiredToken(t *testing.T) {
 	cfg := config.Default()
 	cfg.LogDir = t.TempDir()
 
+	nonceCalls := 0
+	tokenCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v2/auth/keys":
+		case "/api/v2/auth/nonce":
+			nonceCalls++
+			if r.Method != http.MethodGet {
+				t.Fatalf("unexpected method for nonce: %s", r.Method)
+			}
+			if got := r.Header.Get("X-Plex-Client-Identifier"); got != "refresh-client" {
+				t.Fatalf("unexpected client id header: %q", got)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"key_id":"key-123","expires_in":604800}`))
+			_, _ = w.Write([]byte(`{"nonce":"abc-123"}`))
 		case "/api/v2/auth/token":
+			tokenCalls++
+			if r.Method != http.MethodPost {
+				t.Fatalf("unexpected method for token: %s", r.Method)
+			}
+			if got := r.Header.Get("X-Plex-Client-Identifier"); got != "refresh-client" {
+				t.Fatalf("unexpected client id header on token: %q", got)
+			}
+			if got := r.Header.Get("X-Plex-Token"); got != "auth-token" {
+				t.Fatalf("unexpected plex token header: %q", got)
+			}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read token request: %v", err)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("decode token request: %v", err)
+			}
+			if payload["jwt"] == "" {
+				t.Fatalf("expected device jwt in request, got %#v", payload)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"token":"fresh-token","expires_in":604800}`))
+			_, _ = w.Write([]byte(`{"auth_token":"fresh-token","expires_in":604800}`))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -93,6 +124,12 @@ func TestTokenManagerRefreshesExpiredToken(t *testing.T) {
 	}
 	if stored["token"].(string) != "fresh-token" {
 		t.Fatalf("state token not updated: %v", stored["token"])
+	}
+	if stored["authorization_token"].(string) != "fresh-token" {
+		t.Fatalf("authorization token not updated: %v", stored["authorization_token"])
+	}
+	if nonceCalls != 1 || tokenCalls != 1 {
+		t.Fatalf("unexpected call counts: nonce=%d token=%d", nonceCalls, tokenCalls)
 	}
 }
 

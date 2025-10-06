@@ -2,8 +2,15 @@ package plex
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -20,10 +27,9 @@ var (
 )
 
 const (
-	defaultBaseURL        = "https://plex.tv"
+	defaultBaseURL        = "https://clients.plex.tv"
 	stateFileName         = "plex_auth.json"
 	tokenRefreshLeeway    = time.Hour
-	keyRefreshLeeway      = 24 * time.Hour
 	managedProductName    = "Spindle"
 	managedProductVersion = "1.0.0"
 )
@@ -61,13 +67,6 @@ func WithPlexClient(client PlexClient) TokenManagerOption {
 	}
 }
 
-// WithKeyManager injects custom key management behaviour.
-func WithKeyManager(manager KeyManager) TokenManagerOption {
-	return func(m *TokenManager) {
-		m.keyManager = manager
-	}
-}
-
 // TokenManager persists Plex authentication state and refreshes the 7-day JWT.
 type TokenManager struct {
 	cfg *config.Config
@@ -76,7 +75,6 @@ type TokenManager struct {
 	baseURL    string
 	store      TokenStore
 	plexClient PlexClient
-	keyManager KeyManager
 
 	stateMu sync.RWMutex
 	state   tokenState
@@ -88,7 +86,6 @@ type tokenState struct {
 	PrivateKey         string    `json:"private_key"`
 	PublicKey          string    `json:"public_key"`
 	KeyID              string    `json:"key_id"`
-	KeyExpiresAt       time.Time `json:"key_expires_at"`
 	Token              string    `json:"token"`
 	TokenExpiresAt     time.Time `json:"token_expires_at"`
 }
@@ -119,9 +116,6 @@ func NewTokenManager(cfg *config.Config, opts ...TokenManagerOption) (*TokenMana
 	}
 	if mgr.plexClient == nil {
 		mgr.plexClient = NewHTTPPlexClient(mgr.baseURL, mgr.httpClient)
-	}
-	if mgr.keyManager == nil {
-		mgr.keyManager = NewDefaultKeyManager(mgr.plexClient)
 	}
 
 	if err := mgr.loadInitialState(); err != nil {
@@ -177,41 +171,38 @@ func (m *TokenManager) cachedToken() (string, bool) {
 }
 
 func (m *TokenManager) refreshToken(ctx context.Context) (string, error) {
-	m.stateMu.Lock()
-	defer m.stateMu.Unlock()
-
-	if m.state.Token != "" && time.Until(m.state.TokenExpiresAt) > tokenRefreshLeeway {
-		return m.state.Token, nil
+	material, cached, err := m.prepareRefresh()
+	if err != nil {
+		return "", err
+	}
+	if cached != "" {
+		return cached, nil
 	}
 
-	state := m.state
-	if strings.TrimSpace(state.AuthorizationToken) == "" {
-		if err := m.reloadLocked(); err != nil {
-			return "", err
-		}
-		state = m.state
-		if strings.TrimSpace(state.AuthorizationToken) == "" {
-			return "", ErrAuthorizationMissing
-		}
-	}
-
-	updatedState, err := m.keyManager.Ensure(ctx, state, state.AuthorizationToken, state.ClientIdentifier)
+	nonce, err := m.plexClient.RequestNonce(ctx, material.clientID)
 	if err != nil {
 		return "", err
 	}
 
-	token, expiresAt, err := m.plexClient.ExchangeToken(ctx, updatedState.ClientIdentifier, updatedState.AuthorizationToken, updatedState.KeyID)
+	claims := deviceJWTClaims{
+		Audience: "plex.tv",
+		Issuer:   material.clientID,
+		Nonce:    nonce,
+		TTL:      5 * time.Minute,
+	}
+	deviceJWT, err := signDeviceJWT(material.privateKey, material.keyID, claims)
 	if err != nil {
 		return "", err
 	}
-	updatedState.Token = token
-	updatedState.TokenExpiresAt = expiresAt
 
-	if err := m.store.Save(updatedState); err != nil {
+	token, expiresAt, err := m.plexClient.ExchangeToken(ctx, material.clientID, material.authorizationToken, deviceJWT)
+	if err != nil {
 		return "", err
 	}
-	m.state = updatedState
-	return updatedState.Token, nil
+	if expiresAt.IsZero() {
+		expiresAt = time.Now().Add(7 * 24 * time.Hour)
+	}
+	return m.persistRefreshedToken(token, expiresAt)
 }
 
 // SetAuthorizationToken stores the long-lived authorization token from Plex link flow.
@@ -226,10 +217,8 @@ func (m *TokenManager) SetAuthorizationToken(token string) error {
 
 	updated := m.state
 	updated.AuthorizationToken = trimmed
-	updated.KeyID = ""
-	updated.KeyExpiresAt = time.Time{}
-	updated.Token = ""
-	updated.TokenExpiresAt = time.Time{}
+	updated.Token = trimmed
+	updated.TokenExpiresAt = time.Now().Add(7 * 24 * time.Hour)
 
 	if err := m.store.Save(updated); err != nil {
 		return err
@@ -240,26 +229,59 @@ func (m *TokenManager) SetAuthorizationToken(token string) error {
 
 // RequestPin starts the Plex device linking flow.
 func (m *TokenManager) RequestPin(ctx context.Context) (*Pin, error) {
-	m.stateMu.RLock()
-	clientID := m.state.ClientIdentifier
-	m.stateMu.RUnlock()
+	m.stateMu.Lock()
+	if err := m.ensureKeyMaterialLocked(); err != nil {
+		m.stateMu.Unlock()
+		return nil, err
+	}
+	state := m.state
+	m.stateMu.Unlock()
 
-	return m.plexClient.RequestPin(ctx, clientID)
+	jwk, err := buildDeviceJWK(state.PublicKey, state.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	req := PinRequest{
+		JWK:    jwk,
+		Strong: true,
+	}
+	pin, err := m.plexClient.RequestPin(ctx, state.ClientIdentifier, req)
+	if err != nil {
+		return nil, err
+	}
+	if pin != nil {
+		pin.AuthURL = buildAuthURL(state.ClientIdentifier, pin.Code)
+	}
+	return pin, nil
 }
 
 // PollPin checks whether the user has approved the Plex link code.
 func (m *TokenManager) PollPin(ctx context.Context, id int64) (*PinStatus, error) {
-	m.stateMu.RLock()
-	clientID := m.state.ClientIdentifier
-	m.stateMu.RUnlock()
+	m.stateMu.Lock()
+	if err := m.ensureKeyMaterialLocked(); err != nil {
+		m.stateMu.Unlock()
+		return nil, err
+	}
+	state := m.state
+	m.stateMu.Unlock()
 
-	return m.plexClient.PollPin(ctx, clientID, id)
+	claims := deviceJWTClaims{
+		Audience: "plex.tv",
+		Issuer:   state.ClientIdentifier,
+		TTL:      5 * time.Minute,
+	}
+	deviceJWT, err := signDeviceJWT(state.PrivateKey, state.KeyID, claims)
+	if err != nil {
+		return nil, err
+	}
+	return m.plexClient.PollPin(ctx, state.ClientIdentifier, id, deviceJWT)
 }
 
 type Pin struct {
 	ID        int64
 	Code      string
 	ExpiresAt time.Time
+	AuthURL   string
 }
 
 type PinStatus struct {
@@ -268,10 +290,208 @@ type PinStatus struct {
 	ExpiresAt          time.Time
 }
 
+type refreshMaterial struct {
+	clientID           string
+	authorizationToken string
+	privateKey         string
+	keyID              string
+}
+
+type deviceJWTClaims struct {
+	Audience string
+	Issuer   string
+	Nonce    string
+	Scope    []string
+	TTL      time.Duration
+}
+
+func (m *TokenManager) prepareRefresh() (refreshMaterial, string, error) {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+
+	if m.state.Token != "" && time.Until(m.state.TokenExpiresAt) > tokenRefreshLeeway {
+		return refreshMaterial{}, m.state.Token, nil
+	}
+
+	if err := m.reloadLocked(); err != nil {
+		return refreshMaterial{}, "", err
+	}
+	if m.state.Token != "" && time.Until(m.state.TokenExpiresAt) > tokenRefreshLeeway {
+		return refreshMaterial{}, m.state.Token, nil
+	}
+
+	if err := m.ensureKeyMaterialLocked(); err != nil {
+		return refreshMaterial{}, "", err
+	}
+
+	authToken := strings.TrimSpace(m.state.AuthorizationToken)
+	if authToken == "" {
+		return refreshMaterial{}, "", ErrAuthorizationMissing
+	}
+
+	material := refreshMaterial{
+		clientID:           m.state.ClientIdentifier,
+		authorizationToken: authToken,
+		privateKey:         m.state.PrivateKey,
+		keyID:              m.state.KeyID,
+	}
+	return material, "", nil
+}
+
+func (m *TokenManager) persistRefreshedToken(token string, expiresAt time.Time) (string, error) {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "" {
+		return "", errors.New("plex auth: refreshed token is empty")
+	}
+	if expiresAt.IsZero() {
+		expiresAt = time.Now().Add(7 * 24 * time.Hour)
+	}
+
+	m.state.AuthorizationToken = trimmed
+	m.state.Token = trimmed
+	m.state.TokenExpiresAt = expiresAt
+
+	if err := m.store.Save(m.state); err != nil {
+		return "", err
+	}
+	return m.state.Token, nil
+}
+
+func (m *TokenManager) ensureKeyMaterialLocked() error {
+	state := m.state
+	dirty := false
+
+	if strings.TrimSpace(state.PrivateKey) == "" || strings.TrimSpace(state.PublicKey) == "" {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return fmt.Errorf("generate ed25519 key: %w", err)
+		}
+		state.PrivateKey = base64.StdEncoding.EncodeToString(priv)
+		state.PublicKey = base64.StdEncoding.EncodeToString(pub)
+		dirty = true
+	}
+
+	if strings.TrimSpace(state.KeyID) == "" {
+		pubBytes, err := base64.StdEncoding.DecodeString(state.PublicKey)
+		if err != nil {
+			return fmt.Errorf("decode stored public key: %w", err)
+		}
+		hash := sha256.Sum256(pubBytes)
+		state.KeyID = base64.RawURLEncoding.EncodeToString(hash[:])
+		dirty = true
+	}
+
+	if dirty {
+		m.state = state
+		if err := m.store.Save(m.state); err != nil {
+			return err
+		}
+	} else {
+		m.state = state
+	}
+	return nil
+}
+
+func buildDeviceJWK(publicKeyB64, keyID string) (DeviceJWK, error) {
+	pubBytes, err := base64.StdEncoding.DecodeString(strings.TrimSpace(publicKeyB64))
+	if err != nil {
+		return DeviceJWK{}, fmt.Errorf("decode stored public key: %w", err)
+	}
+	return DeviceJWK{
+		Kty: "OKP",
+		Crv: "Ed25519",
+		X:   base64.RawURLEncoding.EncodeToString(pubBytes),
+		Use: "sig",
+		Alg: "EdDSA",
+		Kid: strings.TrimSpace(keyID),
+	}, nil
+}
+
+func signDeviceJWT(privateKeyB64, keyID string, claims deviceJWTClaims) (string, error) {
+	privBytes, err := base64.StdEncoding.DecodeString(strings.TrimSpace(privateKeyB64))
+	if err != nil {
+		return "", fmt.Errorf("decode private key: %w", err)
+	}
+	if len(privBytes) != ed25519.PrivateKeySize {
+		return "", fmt.Errorf("invalid ed25519 private key length: %d", len(privBytes))
+	}
+
+	headers := map[string]any{
+		"alg": "EdDSA",
+		"typ": "JWT",
+	}
+	if kid := strings.TrimSpace(keyID); kid != "" {
+		headers["kid"] = kid
+	}
+
+	audience := strings.TrimSpace(claims.Audience)
+	if audience == "" {
+		audience = "plex.tv"
+	}
+	issuer := strings.TrimSpace(claims.Issuer)
+	if issuer == "" {
+		return "", errors.New("plex auth: device JWT issuer is empty")
+	}
+
+	now := time.Now().UTC()
+	ttl := claims.TTL
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+
+	payload := map[string]any{
+		"aud": audience,
+		"iss": issuer,
+		"iat": now.Unix(),
+		"exp": now.Add(ttl).Unix(),
+	}
+	if claims.Nonce != "" {
+		payload["nonce"] = claims.Nonce
+	}
+	if len(claims.Scope) > 0 {
+		payload["scope"] = strings.Join(claims.Scope, ",")
+	}
+
+	headJSON, err := json.Marshal(headers)
+	if err != nil {
+		return "", fmt.Errorf("encode jwt header: %w", err)
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("encode jwt payload: %w", err)
+	}
+
+	headSegment := base64.RawURLEncoding.EncodeToString(headJSON)
+	payloadSegment := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	message := headSegment + "." + payloadSegment
+
+	signature := ed25519.Sign(ed25519.PrivateKey(privBytes), []byte(message))
+	sigSegment := base64.RawURLEncoding.EncodeToString(signature)
+
+	return message + "." + sigSegment, nil
+}
+
+func buildAuthURL(clientID, code string) string {
+	clientID = strings.TrimSpace(clientID)
+	code = strings.TrimSpace(code)
+	if clientID == "" || code == "" {
+		return ""
+	}
+	values := url.Values{}
+	values.Set("clientID", clientID)
+	values.Set("code", code)
+	values.Set("context[device][product]", managedProductName)
+	return "https://app.plex.tv/auth#?" + values.Encode()
+}
+
 type pinResponse struct {
 	ID        int64   `json:"id"`
 	Code      string  `json:"code"`
 	AuthToken string  `json:"authToken"`
+	JWTToken  string  `json:"auth_token"`
 	ExpiresIn float64 `json:"expires_in"`
 	ExpiresAt string  `json:"expires_at"`
 }

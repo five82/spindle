@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"time"
@@ -15,10 +16,26 @@ import (
 
 // PlexClient handles HTTP communication with Plex APIs required for auth.
 type PlexClient interface {
-	RequestPin(ctx context.Context, clientIdentifier string) (*Pin, error)
-	PollPin(ctx context.Context, clientIdentifier string, id int64) (*PinStatus, error)
-	RegisterKey(ctx context.Context, clientIdentifier, authorizationToken, publicKey string) (string, time.Time, error)
-	ExchangeToken(ctx context.Context, clientIdentifier, authorizationToken, keyID string) (string, time.Time, error)
+	RequestPin(ctx context.Context, clientIdentifier string, req PinRequest) (*Pin, error)
+	PollPin(ctx context.Context, clientIdentifier string, id int64, deviceJWT string) (*PinStatus, error)
+	RequestNonce(ctx context.Context, clientIdentifier string) (string, error)
+	ExchangeToken(ctx context.Context, clientIdentifier, authorizationToken, deviceJWT string) (string, time.Time, error)
+}
+
+// PinRequest describes the payload for creating a Plex PIN.
+type PinRequest struct {
+	JWK    DeviceJWK `json:"jwk"`
+	Strong bool      `json:"strong"`
+}
+
+// DeviceJWK models the Ed25519 public key shared with Plex.
+type DeviceJWK struct {
+	Kty string `json:"kty"`
+	Crv string `json:"crv"`
+	X   string `json:"x"`
+	Use string `json:"use,omitempty"`
+	Alg string `json:"alg,omitempty"`
+	Kid string `json:"kid,omitempty"`
 }
 
 // HTTPDoer abstracts http.Client.Do for testing.
@@ -38,9 +55,9 @@ func NewHTTPPlexClient(baseURL string, client HTTPDoer) PlexClient {
 	return &httpPlexClient{baseURL: trimmed, client: client}
 }
 
-func (c *httpPlexClient) RequestPin(ctx context.Context, clientIdentifier string) (*Pin, error) {
+func (c *httpPlexClient) RequestPin(ctx context.Context, clientIdentifier string, req PinRequest) (*Pin, error) {
 	var resp pinResponse
-	if err := c.doJSONRequest(ctx, http.MethodPost, "/api/v2/pins", nil, nil, clientIdentifier, "", &resp); err != nil {
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/api/v2/pins", req, nil, clientIdentifier, "", &resp); err != nil {
 		return nil, err
 	}
 
@@ -51,8 +68,11 @@ func (c *httpPlexClient) RequestPin(ctx context.Context, clientIdentifier string
 	}, nil
 }
 
-func (c *httpPlexClient) PollPin(ctx context.Context, clientIdentifier string, id int64) (*PinStatus, error) {
+func (c *httpPlexClient) PollPin(ctx context.Context, clientIdentifier string, id int64, deviceJWT string) (*PinStatus, error) {
 	path := fmt.Sprintf("/api/v2/pins/%d", id)
+	if strings.TrimSpace(deviceJWT) != "" {
+		path = fmt.Sprintf("/api/v2/pins/%d?deviceJWT=%s", id, url.QueryEscape(deviceJWT))
+	}
 	var resp pinResponse
 	if err := c.doJSONRequest(ctx, http.MethodGet, path, nil, nil, clientIdentifier, "", &resp); err != nil {
 		return nil, err
@@ -61,59 +81,57 @@ func (c *httpPlexClient) PollPin(ctx context.Context, clientIdentifier string, i
 	status := &PinStatus{
 		ExpiresAt: resp.expirationTime(),
 	}
-	if token := strings.TrimSpace(resp.AuthToken); token != "" {
+	token := strings.TrimSpace(resp.AuthToken)
+	if token == "" {
+		token = strings.TrimSpace(resp.JWTToken)
+	}
+	if token != "" {
 		status.Authorized = true
 		status.AuthorizationToken = token
 	}
 	return status, nil
 }
 
-func (c *httpPlexClient) RegisterKey(ctx context.Context, clientIdentifier, authorizationToken, publicKey string) (string, time.Time, error) {
-	var reqBody = map[string]string{
-		"public_key": publicKey,
-	}
+func (c *httpPlexClient) RequestNonce(ctx context.Context, clientIdentifier string) (string, error) {
 	var resp struct {
-		KeyID     string  `json:"key_id"`
-		ExpiresIn float64 `json:"expires_in"`
-		ExpiresAt string  `json:"expires_at"`
+		Nonce string `json:"nonce"`
 	}
-
-	headers := map[string]string{
-		"X-Plex-Token": authorizationToken,
+	if err := c.doJSONRequest(ctx, http.MethodGet, "/api/v2/auth/nonce", nil, nil, clientIdentifier, "", &resp); err != nil {
+		return "", err
 	}
-	if err := c.doJSONRequest(ctx, http.MethodPost, "/api/v2/auth/keys", reqBody, headers, clientIdentifier, authorizationToken, &resp); err != nil {
-		return "", time.Time{}, err
-	}
-
-	if resp.KeyID == "" {
-		return "", time.Time{}, errors.New("plex auth: missing key_id in response")
-	}
-	return resp.KeyID, deriveExpiration(resp.ExpiresAt, resp.ExpiresIn), nil
+	return strings.TrimSpace(resp.Nonce), nil
 }
 
-func (c *httpPlexClient) ExchangeToken(ctx context.Context, clientIdentifier, authorizationToken, keyID string) (string, time.Time, error) {
+func (c *httpPlexClient) ExchangeToken(ctx context.Context, clientIdentifier, authorizationToken, deviceJWT string) (string, time.Time, error) {
+	if strings.TrimSpace(deviceJWT) == "" {
+		return "", time.Time{}, errors.New("plex auth: device JWT is empty")
+	}
 	var reqBody = map[string]string{
-		"client_identifier":   clientIdentifier,
-		"key_id":              keyID,
-		"authorization_token": authorizationToken,
+		"jwt": deviceJWT,
 	}
 	var resp struct {
 		Token     string  `json:"token"`
+		AuthToken string  `json:"auth_token"`
 		ExpiresIn float64 `json:"expires_in"`
 		ExpiresAt string  `json:"expires_at"`
 	}
 
-	headers := map[string]string{
-		"X-Plex-Token": authorizationToken,
+	headers := map[string]string{}
+	if strings.TrimSpace(authorizationToken) != "" {
+		headers["X-Plex-Token"] = authorizationToken
 	}
 	if err := c.doJSONRequest(ctx, http.MethodPost, "/api/v2/auth/token", reqBody, headers, clientIdentifier, authorizationToken, &resp); err != nil {
 		return "", time.Time{}, err
 	}
 
-	if resp.Token == "" {
+	token := strings.TrimSpace(resp.AuthToken)
+	if token == "" {
+		token = strings.TrimSpace(resp.Token)
+	}
+	if token == "" {
 		return "", time.Time{}, errors.New("plex auth: missing token in response")
 	}
-	return resp.Token, deriveExpiration(resp.ExpiresAt, resp.ExpiresIn), nil
+	return token, deriveExpiration(resp.ExpiresAt, resp.ExpiresIn), nil
 }
 
 func (c *httpPlexClient) doJSONRequest(ctx context.Context, method, path string, body any, headers map[string]string, clientIdentifier, authorizationToken string, out any) error {
