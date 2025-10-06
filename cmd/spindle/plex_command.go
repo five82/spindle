@@ -56,7 +56,7 @@ func newPlexLinkCommand(cfgFn func() *config.Config) *cobra.Command {
 			if strings.TrimSpace(pin.AuthURL) != "" {
 				fmt.Fprintln(out, "Open the following URL to authorize Spindle with Plex:")
 				fmt.Fprintf(out, "\n    %s\n\n", pin.AuthURL)
-				fmt.Fprintf(out, "PIN code: %s\n\n", pin.Code)
+				fmt.Fprintf(out, "If Plex asks for a PIN, enter: %s\n\n", pin.Code)
 			} else {
 				fmt.Fprintln(out, "Open https://plex.tv/link and enter the code:")
 				fmt.Fprintf(out, "\n    %s\n\n", pin.Code)
