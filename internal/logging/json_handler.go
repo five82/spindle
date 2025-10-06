@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 func newJSONHandler(w io.Writer, lvl *slog.LevelVar, addSource bool) (slog.Handler, error) {
@@ -18,7 +17,7 @@ func newJSONHandler(w io.Writer, lvl *slog.LevelVar, addSource bool) (slog.Handl
 			case slog.TimeKey:
 				attr.Key = "ts"
 				if attr.Value.Kind() == slog.KindTime {
-					attr.Value = slog.StringValue(attr.Value.Time().UTC().Format(time.RFC3339))
+					attr.Value = slog.StringValue(formatTimestamp(attr.Value.Time()))
 				}
 			case slog.LevelKey:
 				attr.Key = "level"

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"time"
 )
 
 func attrString(v slog.Value) string {
@@ -42,7 +41,7 @@ func formatValue(v slog.Value) string {
 	case slog.KindDuration:
 		return v.Duration().String()
 	case slog.KindTime:
-		return v.Time().UTC().Format(time.RFC3339)
+		return formatTimestamp(v.Time())
 	case slog.KindAny:
 		if err, ok := v.Any().(error); ok {
 			msg := err.Error()

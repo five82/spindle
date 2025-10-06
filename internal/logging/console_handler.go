@@ -128,7 +128,7 @@ func (h *prettyHandler) writeDebug(buf *bytes.Buffer, ts time.Time, level slog.L
 }
 
 func writeLogHeader(buf *bytes.Buffer, ts time.Time, level slog.Level, component, itemID, stage, message string, addSource bool, src *slog.Source) {
-	buf.WriteString(ts.UTC().Format(time.RFC3339))
+	buf.WriteString(formatTimestamp(ts))
 	buf.WriteByte(' ')
 	buf.WriteString(levelLabel(level))
 	if component != "" {
