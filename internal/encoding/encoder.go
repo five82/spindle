@@ -42,6 +42,8 @@ func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *En
 	client := drapto.NewCLI(
 		drapto.WithBinary(cfg.DraptoBinary()),
 		drapto.WithLogDir(draptoLogDirFromConfig(cfg)),
+		drapto.WithPreset(cfg.DraptoPreset),
+		drapto.WithDisableDenoise(cfg.DraptoDisableDenoise),
 	)
 	return NewEncoderWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
@@ -502,25 +504,44 @@ func (e *Encoder) draptoBinaryName() string {
 func (e *Encoder) draptoCommand(inputPath, outputDir string) string {
 	binary := e.draptoBinaryName()
 	logDir := strings.TrimSpace(e.draptoLogDir())
-	if logDir != "" {
-		return fmt.Sprintf(
-			"%s encode --input %q --output %q --log-dir %q --progress-json",
-			binary,
-			strings.TrimSpace(inputPath),
-			strings.TrimSpace(outputDir),
-			logDir,
-		)
+	parts := []string{
+		fmt.Sprintf("%s encode", binary),
+		fmt.Sprintf("--input %q", strings.TrimSpace(inputPath)),
+		fmt.Sprintf("--output %q", strings.TrimSpace(outputDir)),
+		"--responsive",
+		fmt.Sprintf("--preset %d", e.draptoPreset()),
 	}
-	return fmt.Sprintf(
-		"%s encode --input %q --output %q --progress-json",
-		binary,
-		strings.TrimSpace(inputPath),
-		strings.TrimSpace(outputDir),
-	)
+	if logDir != "" {
+		parts = append(parts, fmt.Sprintf("--log-dir %q", logDir))
+	}
+	if e.draptoDisableDenoise() {
+		parts = append(parts, "--no-denoise")
+	}
+	parts = append(parts, "--progress-json")
+	return strings.Join(parts, " ")
 }
 
 func (e *Encoder) draptoLogDir() string {
 	return draptoLogDirFromConfig(e.cfg)
+}
+
+func (e *Encoder) draptoPreset() int {
+	if e == nil || e.cfg == nil {
+		cfg := config.Default()
+		return cfg.DraptoPreset
+	}
+	if e.cfg.DraptoPreset < 0 {
+		cfg := config.Default()
+		return cfg.DraptoPreset
+	}
+	return e.cfg.DraptoPreset
+}
+
+func (e *Encoder) draptoDisableDenoise() bool {
+	if e == nil || e.cfg == nil {
+		return false
+	}
+	return e.cfg.DraptoDisableDenoise
 }
 
 func draptoLogDirFromConfig(cfg *config.Config) string {

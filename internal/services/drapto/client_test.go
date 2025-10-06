@@ -77,6 +77,56 @@ func TestCLIEncodeIncludesLogDir(t *testing.T) {
 	}
 }
 
+func TestCLIEncodeIncludesEncodingFlags(t *testing.T) {
+	var capturedArgs []string
+	original := commandContext
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		capturedArgs = append([]string(nil), args...)
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestHelperProcess")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "DRAPTO_HELPER_MODE=success")
+		return cmd
+	}
+	t.Cleanup(func() {
+		commandContext = original
+	})
+
+	cli := NewCLI(WithPreset(6), WithDisableDenoise(true))
+	tempDir := t.TempDir()
+	input := filepath.Join(tempDir, "movie.mkv")
+	outputDir := filepath.Join(tempDir, "encoded")
+
+	if _, err := cli.Encode(context.Background(), input, outputDir, nil); err != nil {
+		t.Fatalf("Encode returned error: %v", err)
+	}
+
+	if len(capturedArgs) == 0 {
+		t.Fatalf("expected Drapto command arguments to be captured")
+	}
+
+	if idx := findArg(capturedArgs, "--responsive"); idx == -1 {
+		t.Fatalf("expected Drapto command to include --responsive, got %v", capturedArgs)
+	}
+
+	idx := findArg(capturedArgs, "--preset")
+	if idx == -1 {
+		t.Fatalf("expected Drapto command to include --preset, got %v", capturedArgs)
+	}
+	if idx+1 >= len(capturedArgs) {
+		t.Fatalf("--preset flag missing value in args %v", capturedArgs)
+	}
+	if capturedArgs[idx+1] != "6" {
+		t.Fatalf("expected preset value 6, got %q", capturedArgs[idx+1])
+	}
+
+	if findArg(capturedArgs, "--no-denoise") == -1 {
+		t.Fatalf("expected Drapto command to include --no-denoise, got %v", capturedArgs)
+	}
+
+	if findArg(capturedArgs, "--progress-json") == -1 {
+		t.Fatalf("expected Drapto command to include --progress-json, got %v", capturedArgs)
+	}
+}
+
 func TestCLIEncodeSuccess(t *testing.T) {
 	setHelperCommand(t, "success")
 
@@ -188,4 +238,13 @@ func TestHelperProcess(t *testing.T) {
 	default:
 		os.Exit(0)
 	}
+}
+
+func findArg(args []string, target string) int {
+	for i, arg := range args {
+		if arg == target {
+			return i
+		}
+	}
+	return -1
 }

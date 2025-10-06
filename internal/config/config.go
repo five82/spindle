@@ -40,6 +40,8 @@ type Config struct {
 	WorkflowHeartbeatTimeout  int     `toml:"workflow_heartbeat_timeout"`
 	LogFormat                 string  `toml:"log_format"`
 	LogLevel                  string  `toml:"log_level"`
+	DraptoPreset              int     `toml:"drapto_preset"`
+	DraptoDisableDenoise      bool    `toml:"drapto_disable_denoise"`
 }
 
 const (
@@ -57,6 +59,7 @@ const (
 	defaultWorkflowHeartbeatInterval = 15
 	defaultWorkflowHeartbeatTimeout  = 120
 	defaultAPIBind                   = "127.0.0.1:7487"
+	defaultDraptoPreset              = 4
 )
 
 // Default returns a Config populated with repository defaults.
@@ -86,6 +89,7 @@ func Default() Config {
 		WorkflowHeartbeatTimeout:  defaultWorkflowHeartbeatTimeout,
 		LogFormat:                 defaultLogFormat,
 		LogLevel:                  defaultLogLevel,
+		DraptoPreset:              defaultDraptoPreset,
 	}
 }
 
@@ -257,6 +261,9 @@ func (c *Config) Validate() error {
 	if c.TMDBConfidenceThreshold < 0 || c.TMDBConfidenceThreshold > 1 {
 		return errors.New("tmdb_confidence_threshold must be between 0 and 1")
 	}
+	if c.DraptoPreset < 0 {
+		return errors.New("drapto_preset must be zero or positive")
+	}
 	return nil
 }
 
@@ -362,6 +369,13 @@ ntfy_request_timeout = 10                            # ntfy HTTP client timeout 
 tmdb_language = "en-US"                              # ISO 639-1 language for TMDB metadata
 tmdb_base_url = "https://api.themoviedb.org/3"       # Override when using a TMDB proxy
 tmdb_confidence_threshold = 0.8                      # Match confidence (0.0-1.0)
+
+# ============================================================================
+# ENCODING
+# ============================================================================
+
+drapto_preset = 4                                    # Drapto SVT-AV1 preset (lower is faster, higher is higher quality)
+drapto_disable_denoise = false                       # Set true to pass --no-denoise to Drapto
 
 # ============================================================================
 # WORKFLOW TUNING (ADVANCED)

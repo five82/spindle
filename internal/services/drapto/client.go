@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 var commandContext = exec.CommandContext
+
+const defaultPreset = 4
 
 // ProgressUpdate captures Drapto progress events.
 type ProgressUpdate struct {
@@ -44,13 +47,15 @@ func WithBinary(binary string) Option {
 
 // CLI wraps the drapto command-line encoder.
 type CLI struct {
-	binary string
-	logDir string
+	binary         string
+	logDir         string
+	preset         int
+	disableDenoise bool
 }
 
 // NewCLI constructs a CLI client using defaults.
 func NewCLI(opts ...Option) *CLI {
-	cli := &CLI{binary: "drapto"}
+	cli := &CLI{binary: "drapto", preset: defaultPreset}
 	for _, opt := range opts {
 		opt(cli)
 	}
@@ -64,6 +69,22 @@ func WithLogDir(dir string) Option {
 		if trimmed != "" {
 			c.logDir = trimmed
 		}
+	}
+}
+
+// WithPreset configures the Drapto SVT-AV1 preset number.
+func WithPreset(preset int) Option {
+	return func(c *CLI) {
+		if preset >= 0 {
+			c.preset = preset
+		}
+	}
+}
+
+// WithDisableDenoise toggles passing --no-denoise to Drapto.
+func WithDisableDenoise(disable bool) Option {
+	return func(c *CLI) {
+		c.disableDenoise = disable
 	}
 }
 
@@ -88,9 +109,18 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 	}
 	outputPath := filepath.Join(cleanOutputDir, stem+".mkv")
 
-	args := []string{"encode", "--input", inputPath, "--output", cleanOutputDir}
+	args := []string{
+		"encode",
+		"--input", inputPath,
+		"--output", cleanOutputDir,
+		"--responsive",
+		"--preset", strconv.Itoa(c.preset),
+	}
 	if logDir := strings.TrimSpace(c.logDir); logDir != "" {
 		args = append(args, "--log-dir", logDir)
+	}
+	if c.disableDenoise {
+		args = append(args, "--no-denoise")
 	}
 	args = append(args, "--progress-json")
 	cmd := commandContext(ctx, c.binary, args...) //nolint:gosec
