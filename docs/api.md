@@ -27,6 +27,7 @@ Returns daemon runtime information and workflow diagnostics.
   "pid": 12345,
   "queueDbPath": "/home/user/.local/share/spindle/logs/queue.db",
   "lockFilePath": "/home/user/.local/share/spindle/logs/spindle.lock",
+  "draptoLogPath": "/home/user/.local/share/spindle/logs/drapto.log",
   "workflow": {
     "running": true,
     "queueStats": {
@@ -117,6 +118,7 @@ Returns metadata for a single queue entry.
 | Field | Description |
 | --- | --- |
 | `queueDbPath` | Full path to the SQLite queue database used by the daemon. |
+| `draptoLogPath` | Pointer to the latest Drapto encoder log (symlink or copy). |
 | `workflow.queueStats` | Map keyed by lifecycle status -> item count. Matches `internal/queue.Status` values. |
 | `workflow.stageHealth` | Stage readiness results from `StageHandler.HealthCheck`. Useful for dependency dashboards. |
 | `items[].progress` | Stage name, percent 0-100, and last message recorded for the item. |
@@ -138,4 +140,3 @@ Returns metadata for a single queue entry.
   sub-second polling unless you control both ends.
 - The API runs inside the daemon process; querying it when the daemon is not
   running will fail with a connection error.
-

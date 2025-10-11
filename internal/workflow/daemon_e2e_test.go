@@ -31,6 +31,7 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 	cfg.LibraryDir = filepath.Join(base, "library")
 	cfg.LogDir = filepath.Join(base, "logs")
 	cfg.ReviewDir = filepath.Join(base, "review")
+	cfg.APIBind = "127.0.0.1:0"
 	cfg.TMDBAPIKey = "daemon-e2e-key"
 	cfg.OpticalDrive = filepath.Join(base, "devices", "sr0")
 	cfg.MoviesDir = "movies"

@@ -16,6 +16,7 @@ type Config struct {
 	StagingDir                string  `toml:"staging_dir"`
 	LibraryDir                string  `toml:"library_dir"`
 	LogDir                    string  `toml:"log_dir"`
+	DraptoLogDir              string  `toml:"drapto_log_dir"`
 	ReviewDir                 string  `toml:"review_dir"`
 	OpticalDrive              string  `toml:"optical_drive"`
 	APIBind                   string  `toml:"api_bind"`
@@ -60,6 +61,7 @@ const (
 	defaultWorkflowHeartbeatTimeout  = 120
 	defaultAPIBind                   = "127.0.0.1:7487"
 	defaultDraptoPreset              = 4
+	defaultDraptoLogDir              = "~/.local/share/spindle/logs/drapto"
 )
 
 // Default returns a Config populated with repository defaults.
@@ -68,6 +70,7 @@ func Default() Config {
 		StagingDir:                defaultStagingDir,
 		LibraryDir:                defaultLibraryDir,
 		LogDir:                    defaultLogDir,
+		DraptoLogDir:              defaultDraptoLogDir,
 		ReviewDir:                 defaultReviewDir,
 		OpticalDrive:              defaultOpticalDrive,
 		APIBind:                   defaultAPIBind,
@@ -182,6 +185,16 @@ func (c *Config) normalize() error {
 	if c.ReviewDir, err = expandPath(c.ReviewDir); err != nil {
 		return fmt.Errorf("review_dir: %w", err)
 	}
+	if c.DraptoLogDir, err = expandPath(c.DraptoLogDir); err != nil {
+		return fmt.Errorf("drapto_log_dir: %w", err)
+	}
+	if strings.TrimSpace(c.DraptoLogDir) == "" {
+		if strings.TrimSpace(c.LogDir) == "" {
+			c.DraptoLogDir = ""
+		} else {
+			c.DraptoLogDir = filepath.Join(c.LogDir, "drapto")
+		}
+	}
 
 	c.APIBind = strings.TrimSpace(c.APIBind)
 	if c.APIBind == "" {
@@ -264,12 +277,15 @@ func (c *Config) Validate() error {
 	if c.DraptoPreset < 0 {
 		return errors.New("drapto_preset must be zero or positive")
 	}
+	if strings.TrimSpace(c.DraptoLogDir) == "" {
+		return errors.New("drapto_log_dir must be set")
+	}
 	return nil
 }
 
 // EnsureDirectories creates required directories for daemon operation.
 func (c *Config) EnsureDirectories() error {
-	for _, dir := range []string{c.StagingDir, c.LibraryDir, c.LogDir, c.ReviewDir} {
+	for _, dir := range []string{c.StagingDir, c.LibraryDir, c.LogDir, c.ReviewDir, c.DraptoLogDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory %q: %w", dir, err)
 		}
@@ -290,6 +306,18 @@ func (c *Config) DraptoBinary() string {
 // FFprobeBinary returns the ffprobe executable name used for media validation.
 func (c *Config) FFprobeBinary() string {
 	return "ffprobe"
+}
+
+// DraptoCurrentLogPath returns the pointer file used for the most recent Drapto log.
+func (c *Config) DraptoCurrentLogPath() string {
+	if c == nil {
+		return ""
+	}
+	base := strings.TrimSpace(c.LogDir)
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "drapto.log")
 }
 
 func expandPath(pathValue string) (string, error) {
@@ -344,6 +372,7 @@ tv_dir = "tv"                                        # Subdirectory inside libra
 
 staging_dir = "~/.local/share/spindle/staging"       # Working directory for rips/encodes
 log_dir = "~/.local/share/spindle/logs"              # Logs and queue database
+drapto_log_dir = "~/.local/share/spindle/logs/drapto" # Drapto encoder log files
 review_dir = "~/review"                              # Encoded files awaiting manual identification
 optical_drive = "/dev/sr0"                           # Optical drive device path
 api_bind = "127.0.0.1:7487"                          # HTTP API bind address (host:port)

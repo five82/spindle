@@ -50,12 +50,16 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	if cfg.WorkflowHeartbeatTimeout != config.Default().WorkflowHeartbeatTimeout {
 		t.Fatalf("unexpected heartbeat timeout: %d", cfg.WorkflowHeartbeatTimeout)
 	}
+	wantDraptoLogDir := filepath.Join(tempHome, ".local", "share", "spindle", "logs", "drapto")
+	if cfg.DraptoLogDir != wantDraptoLogDir {
+		t.Fatalf("unexpected drapto log dir: got %q want %q", cfg.DraptoLogDir, wantDraptoLogDir)
+	}
 
 	if err := cfg.EnsureDirectories(); err != nil {
 		t.Fatalf("EnsureDirectories failed: %v", err)
 	}
 
-	for _, dir := range []string{cfg.StagingDir, cfg.LibraryDir, cfg.LogDir, cfg.ReviewDir} {
+	for _, dir := range []string{cfg.StagingDir, cfg.LibraryDir, cfg.LogDir, cfg.ReviewDir, cfg.DraptoLogDir} {
 		info, err := os.Stat(dir)
 		if err != nil {
 			t.Fatalf("expected directory %q to exist: %v", dir, err)

@@ -125,6 +125,7 @@ func (s *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		PID:          status.PID,
 		QueueDBPath:  status.QueueDBPath,
 		LockFilePath: status.LockFilePath,
+		DraptoLog:    status.DraptoLog,
 		Workflow:     api.FromStatusSummary(status.Workflow),
 		Dependencies: deps,
 	}

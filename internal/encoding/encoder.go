@@ -2,8 +2,10 @@ package encoding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -218,6 +220,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		path, err := e.client.Encode(ctx, item.RippedFile, encodedDir, progressLogger)
 		if err != nil {
+			e.updateDraptoLogPointer(logger)
 			return services.Wrap(
 				services.ErrExternalTool,
 				"encoding",
@@ -227,6 +230,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			)
 		}
 		encodedPath = path
+		e.updateDraptoLogPointer(logger)
 		logger.Info("drapto encode completed", logging.String("encoded_file", encodedPath))
 	}
 
@@ -521,6 +525,34 @@ func (e *Encoder) draptoCommand(inputPath, outputDir string) string {
 	return strings.Join(parts, " ")
 }
 
+func (e *Encoder) updateDraptoLogPointer(logger *slog.Logger) {
+	if e == nil || e.cfg == nil {
+		return
+	}
+	logDir := strings.TrimSpace(e.draptoLogDir())
+	pointer := strings.TrimSpace(e.cfg.DraptoCurrentLogPath())
+	if logDir == "" || pointer == "" {
+		return
+	}
+	if err := updateDraptoLogPointer(logDir, pointer); err != nil {
+		if logger != nil {
+			logger.Warn(
+				"failed to update drapto log pointer",
+				logging.String("log_dir", logDir),
+				logging.String("pointer", pointer),
+				logging.Error(err),
+			)
+		}
+		return
+	}
+	if logger != nil {
+		logger.Debug(
+			"updated drapto log pointer",
+			logging.String("pointer", pointer),
+		)
+	}
+}
+
 func (e *Encoder) draptoLogDir() string {
 	return draptoLogDirFromConfig(e.cfg)
 }
@@ -548,9 +580,71 @@ func draptoLogDirFromConfig(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	trimmed := strings.TrimSpace(cfg.LogDir)
-	if trimmed == "" {
-		return ""
+	return strings.TrimSpace(cfg.DraptoLogDir)
+}
+
+func updateDraptoLogPointer(logDir, pointer string) error {
+	if strings.TrimSpace(logDir) == "" || strings.TrimSpace(pointer) == "" {
+		return nil
 	}
-	return filepath.Join(trimmed, "drapto")
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read drapto log directory: %w", err)
+	}
+
+	var (
+		latestPath string
+		latestMod  time.Time
+		latestName string
+	)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(strings.ToLower(name), ".log") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		mod := info.ModTime()
+		switch {
+		case latestPath == "":
+		case mod.After(latestMod):
+		case mod.Equal(latestMod) && name > latestName:
+		default:
+			continue
+		}
+		latestPath = filepath.Join(logDir, name)
+		latestMod = mod
+		latestName = name
+	}
+	if latestPath == "" {
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(pointer), 0o755); err != nil {
+		return fmt.Errorf("ensure drapto pointer directory: %w", err)
+	}
+	if err := os.Remove(pointer); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove existing drapto log pointer: %w", err)
+	}
+	if latestPath == pointer {
+		return nil
+	}
+	if err := os.Symlink(latestPath, pointer); err == nil {
+		return nil
+	}
+	if err := os.Link(latestPath, pointer); err == nil {
+		return nil
+	}
+	if err := copyFile(latestPath, pointer); err != nil {
+		return fmt.Errorf("copy drapto log pointer: %w", err)
+	}
+	return nil
 }

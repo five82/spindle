@@ -65,6 +65,7 @@ type DaemonStatus struct {
 	PID          int                `json:"pid"`
 	QueueDBPath  string             `json:"queueDbPath"`
 	LockFilePath string             `json:"lockFilePath"`
+	DraptoLog    string             `json:"draptoLogPath,omitempty"`
 	Workflow     WorkflowStatus     `json:"workflow"`
 	Dependencies []DependencyStatus `json:"dependencies"`
 }
