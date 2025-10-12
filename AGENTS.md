@@ -2,7 +2,7 @@
 
 This file provides guidance when working with code in this repository.
 
-CLAUDE.md and QWEN.md are symbolic links to this file so all agent guidance stays in one place.
+CLAUDE.md is a symbolic link to this file so all agent guidance stays in one place.
 
 ## TL;DR
 
