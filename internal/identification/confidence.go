@@ -2,6 +2,7 @@ package identification
 
 import (
 	"strings"
+	"unicode"
 
 	"log/slog"
 
@@ -14,11 +15,13 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		return nil
 	}
 	queryLower := strings.ToLower(query)
+	queryNormalized := normalizeForComparison(query)
 	var best *tmdb.Result
 	bestScore := -1.0
 
 	logger.Info("confidence scoring analysis",
 		logging.String("query", query),
+		logging.String("query_normalized", queryNormalized),
 		logging.Int("total_results", len(response.Results)))
 
 	for idx := range response.Results {
@@ -27,12 +30,14 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 
 		title := pickTitle(res)
 		titleLower := strings.ToLower(title)
-		exactMatch := titleLower == queryLower
+		titleNormalized := normalizeForComparison(title)
+		exactMatch := titleLower == queryLower || titleNormalized == queryNormalized
 
 		logger.Info("calculating confidence score",
 			logging.Int("result_index", idx),
 			logging.Int64("tmdb_id", res.ID),
 			logging.String("title", title),
+			logging.String("title_normalized", titleNormalized),
 			logging.Float64("calculated_score", score),
 			logging.Float64("vote_average", res.VoteAverage),
 			logging.Int64("vote_count", res.VoteCount),
@@ -51,11 +56,13 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 
 	title := pickTitle(*best)
 	titleLower := strings.ToLower(title)
-	exactMatch := titleLower == queryLower
+	titleNormalized := normalizeForComparison(title)
+	exactMatch := titleLower == queryLower || titleNormalized == queryNormalized
 
 	logger.Info("best result before confidence thresholds",
 		logging.Int64("tmdb_id", best.ID),
 		logging.String("title", title),
+		logging.String("title_normalized", titleNormalized),
 		logging.Float64("best_score", bestScore),
 		logging.Float64("vote_average", best.VoteAverage),
 		logging.Int64("vote_count", best.VoteCount),
@@ -128,4 +135,23 @@ func pickTitle(result tmdb.Result) string {
 		return result.Name
 	}
 	return ""
+}
+
+func normalizeForComparison(input string) string {
+	if strings.TrimSpace(input) == "" {
+		return ""
+	}
+	// Replace common symbols with word equivalents first
+	normalized := strings.ToLower(input)
+	normalized = strings.ReplaceAll(normalized, "&", "and")
+	normalized = strings.ReplaceAll(normalized, "+", "and")
+
+	var builder strings.Builder
+	for _, r := range normalized {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
