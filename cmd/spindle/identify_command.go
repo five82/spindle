@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -84,14 +85,30 @@ Examples:
 				cfg, nil, logger, tmdbClient, scanner, nil,
 			)
 
-			// Create a mock queue item for identification
+			// Get disc label like the daemon does
+			fmt.Printf("DEBUG: Getting disc label for device: %s\n", device)
+			discLabel, err := getDiscLabel(device)
+			if err != nil {
+				logger.Warn("failed to get disc label", logging.Error(err))
+				fmt.Printf("DEBUG: Error getting disc label: %v\n", err)
+				discLabel = ""
+			}
+			fmt.Printf("DEBUG: Got disc label: '%s'\n", discLabel)
+			logger.Info("detected disc label", logging.String("label", discLabel))
+
+			// Create a mock queue item for identification with the same disc label as daemon
 			item := &queue.Item{
-				DiscTitle:  "",
+				DiscTitle:  discLabel,
 				SourcePath: "",
 				Status:     queue.StatusPending,
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "🔍 Identifying disc on device: %s\n\n", device)
+			fmt.Fprintf(cmd.OutOrStdout(), "🔍 Identifying disc on device: %s\n", device)
+			if discLabel != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "📀 Disc Label: %s\n\n", discLabel)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "\n")
+			}
 
 			// Set up context with timeout
 			identifyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -201,4 +218,47 @@ func extractTitleFromMetadata(metadataJSON string) string {
 	}
 
 	return title
+}
+
+// getDiscLabel gets the disc label using lsblk, same as the daemon
+func getDiscLabel(device string) (string, error) {
+	if device == "" {
+		return "", fmt.Errorf("no device specified")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	output, err := exec.CommandContext(ctx, "lsblk", "-P", "-o", "LABEL,FSTYPE", device).Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to run lsblk: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Parse lsblk output format: LABEL="label" FSTYPE="filesystem"
+		parts := strings.Fields(line)
+		var label string
+		var fstype string
+
+		for _, part := range parts {
+			if strings.HasPrefix(part, "LABEL=") {
+				label = strings.Trim(part[6:], `"`)
+			} else if strings.HasPrefix(part, "FSTYPE=") {
+				fstype = strings.Trim(part[7:], `"`)
+			}
+		}
+
+		// Return the first non-empty label with a filesystem type
+		if label != "" && fstype != "" {
+			return label, nil
+		}
+	}
+
+	return "", fmt.Errorf("no disc label found")
 }

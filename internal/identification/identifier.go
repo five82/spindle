@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -137,37 +138,32 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	title := strings.TrimSpace(item.DiscTitle)
-	if title == "" || disc.IsGenericLabel(title) {
-		derived := strings.TrimSpace(deriveTitle(item.SourcePath))
-		if derived != "" && !disc.IsGenericLabel(derived) {
-			title = derived
-			item.DiscTitle = title
-		}
-	}
+
+	// Determine best title using priority-based approach
+	logger.Info("determining best title",
+		logging.String("current_title", title),
+		logging.Int("makemkv_titles", len(scanResult.Titles)))
+
 	if len(scanResult.Titles) > 0 {
-		primaryTitle := strings.TrimSpace(scanResult.Titles[0].Name)
-		if primaryTitle != "" {
-			normalizedPrimary := normalizeComparableTitle(primaryTitle)
-			normalizedExisting := normalizeComparableTitle(title)
-			if title == "" || disc.IsGenericLabel(title) {
-				title = primaryTitle
-				item.DiscTitle = title
-			} else if normalizedPrimary != "" && normalizedPrimary == normalizedExisting && title != primaryTitle {
-				title = primaryTitle
-				item.DiscTitle = title
-			}
-		}
+		logger.Info("makemkv title available",
+			logging.String("makemkv_title", scanResult.Titles[0].Name))
 	}
-	// Use bd_info disc name if title is empty or generic
-	if (title == "" || disc.IsGenericLabel(title)) && scanResult.BDInfo != nil && scanResult.BDInfo.DiscName != "" {
-		originalTitle := title
-		title = scanResult.BDInfo.DiscName
+
+	if scanResult.BDInfo != nil {
+		logger.Info("bdinfo available",
+			logging.String("bdinfo_name", scanResult.BDInfo.DiscName))
+	}
+
+	bestTitle := determineBestTitle(title, scanResult)
+	if bestTitle != title {
+		logger.Info("title updated based on priority sources",
+			logging.String("original_title", title),
+			logging.String("new_title", bestTitle),
+			logging.String("source", detectTitleSource(bestTitle, scanResult)))
+		title = bestTitle
 		item.DiscTitle = title
-		logger.Info("using bd_info disc name for identification",
-			logging.String("original_title", originalTitle),
-			logging.String("bd_info_title", scanResult.BDInfo.DiscName),
-			logging.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier))
 	}
+
 	if title == "" {
 		title = "Unknown Disc"
 		item.DiscTitle = title
@@ -499,4 +495,96 @@ func normalizeComparableTitle(input string) string {
 		}
 	}
 	return builder.String()
+}
+
+func determineBestTitle(currentTitle string, scanResult *disc.ScanResult) string {
+	// Priority 1: MakeMKV title (highest quality - reads actual disc metadata)
+	if len(scanResult.Titles) > 0 {
+		makemkvTitle := strings.TrimSpace(scanResult.Titles[0].Name)
+		if makemkvTitle != "" && !isTechnicalLabel(makemkvTitle) {
+			return makemkvTitle
+		}
+	}
+
+	// Priority 2: BDInfo disc name (Blu-ray specific, good quality)
+	if scanResult.BDInfo != nil {
+		bdName := strings.TrimSpace(scanResult.BDInfo.DiscName)
+		if bdName != "" && !isTechnicalLabel(bdName) {
+			return bdName
+		}
+	}
+
+	// Priority 3: Current title (usually raw disc label, lowest quality)
+	if currentTitle != "" && !isTechnicalLabel(currentTitle) {
+		return currentTitle
+	}
+
+	// Priority 4: Try to derive from source path (file-based identification)
+	derived := strings.TrimSpace(deriveTitle(""))
+	if derived != "" && !disc.IsGenericLabel(derived) {
+		return derived
+	}
+
+	return "Unknown Disc"
+}
+
+func isTechnicalLabel(title string) bool {
+	if strings.TrimSpace(title) == "" {
+		return true
+	}
+
+	upper := strings.ToUpper(title)
+
+	// Common technical/generic patterns
+	technicalPatterns := []string{
+		"LOGICAL_VOLUME_ID",
+		"DVD_VIDEO",
+		"BLURAY",
+		"BD_ROM",
+		"UNTITLED",
+		"UNKNOWN DISC",
+		"VOLUME_",
+		"DISK_",
+		"TRACK_",
+	}
+
+	for _, pattern := range technicalPatterns {
+		if strings.Contains(upper, pattern) {
+			return true
+		}
+	}
+
+	// All uppercase with underscores (likely technical label)
+	if strings.Contains(title, "_") && title == strings.ToUpper(title) && len(title) > 8 {
+		return true
+	}
+
+	// All numbers or very short uppercase codes
+	if regexp.MustCompile(`^\d+$`).MatchString(title) || regexp.MustCompile(`^[A-Z0-9_]{1,4}$`).MatchString(title) {
+		return true
+	}
+
+	return false
+}
+
+func detectTitleSource(title string, scanResult *disc.ScanResult) string {
+	if len(scanResult.Titles) > 0 {
+		makemkvTitle := strings.TrimSpace(scanResult.Titles[0].Name)
+		if makemkvTitle == title {
+			return "MakeMKV"
+		}
+	}
+
+	if scanResult.BDInfo != nil {
+		bdName := strings.TrimSpace(scanResult.BDInfo.DiscName)
+		if bdName == title {
+			return "BDInfo"
+		}
+	}
+
+	if title == "Unknown Disc" {
+		return "Default"
+	}
+
+	return "Original"
 }
