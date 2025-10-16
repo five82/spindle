@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode"
 
 	"log/slog"
 
@@ -481,20 +480,6 @@ func (i *Identifier) ensureStagingSkeleton(item *queue.Item) error {
 		}
 	}
 	return nil
-}
-
-func normalizeComparableTitle(input string) string {
-	if strings.TrimSpace(input) == "" {
-		return ""
-	}
-	var builder strings.Builder
-	for _, r := range input {
-		switch {
-		case unicode.IsLetter(r), unicode.IsDigit(r):
-			builder.WriteRune(unicode.ToLower(r))
-		}
-	}
-	return builder.String()
 }
 
 func determineBestTitle(currentTitle string, scanResult *disc.ScanResult) string {
