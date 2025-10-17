@@ -23,6 +23,11 @@ func (bdInfoParser) Parse(output []byte) *BDInfoResult {
 		}
 
 		switch {
+		case strings.Contains(trimmed, "Disc ID") && strings.Contains(trimmed, ":"):
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) == 2 {
+				result.DiscID = strings.ToUpper(strings.TrimSpace(parts[1]))
+			}
 		case strings.Contains(trimmed, "Volume Identifier") && strings.Contains(trimmed, ":"):
 			parts := strings.SplitN(trimmed, ":", 2)
 			if len(parts) == 2 {

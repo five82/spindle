@@ -6,7 +6,8 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 
 1. **MakeMKV scan** – `internal/disc.Scanner` calls `makemkvcon info` to capture the title list; Spindle now computes its own fingerprint from disc metadata before the scan runs.
 2. **bd_info fallback** – When MakeMKV returns empty or generic titles (e.g., "LOGICAL_VOLUME_ID"), the scanner automatically runs `bd_info` to extract the actual disc name from the volume identifier.
-3. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups using the enhanced title data.
+3. **KEYDB lookup** – When `bd_info` captures an AACS Disc ID, the identifier consults the KEYDB catalog (automatically refreshed weekly) to fetch curated titles/aliases before doing any string heuristics.
+4. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups using the enhanced title OR KEYDB alias data.
 4. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
 5. The stage writes `MetadataJSON` and `RipSpecData` back to the queue so downstream stages can pick title selections and user-facing details.
 
@@ -22,6 +23,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
   - Provider information when available
 - Generic label detection uses patterns like `LOGICAL_VOLUME_ID`, `DVD_VIDEO`, `BLURAY`, `BD_ROM`, `UNTITLED`, `UNKNOWN DISC`, numeric-only, and short alphanumeric codes.
 - Enhanced titles from bd_info replace generic MakeMKV titles before TMDB lookup.
+- KEYDB aliases override both MakeMKV and bd_info names when a Disc ID match exists (e.g., translating `VOLUME_ID [Michael Clayton]` to “Michael Clayton”).
 - Fingerprints come from hashing the disc's unencrypted metadata (BDMV structures for Blu-ray, IFO files for DVD). If hashing fails, treat it as a mount/drive issue.
 - Raw JSON is stored alongside parsed data to help with later diagnostics (`rip_spec_data` contains the structured payload).
 
@@ -65,6 +67,7 @@ Relevant settings live in `internal/config`:
 - `tmdb_api_key`, `tmdb_base_url`, `tmdb_language` – TMDB connectivity.
 - `tmdb_confidence_threshold` – minimum acceptable normalized vote score.
 - `optical_drive` – MakeMKV device path (defaults to `/dev/sr0`).
+- `keydb_path`, `keydb_download_url`, `keydb_download_timeout` – KEYDB cache location and refresh behaviour.
 - Logging hints: `log_dir` determines where queue snapshots and structured logs land for inspection.
 
 Update this list when the identifier begins consuming additional config (runtime hints, enhanced metadata, etc.).

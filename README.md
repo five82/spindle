@@ -61,6 +61,7 @@ spindle show --follow
   - **Desktop**: Handled automatically by desktop environment
   - **Server**: Add to `/etc/fstab`: `/dev/sr0 /media/cdrom udf,iso9660 ro,noauto,x-systemd.automount,x-systemd.device-timeout=10 0 0`
 - **eject utility** – Usually pre-installed (`util-linux` package)
+- **KEYDB.cfg cache** – Spindle automatically refreshes the AACS key database when Disc IDs are stale. If you want to seed the cache manually, drop a current `KEYDB.cfg` at `~/.config/spindle/keydb/KEYDB.cfg` (or change `keydb_path` in your config).
 
 Start the daemon once to verify dependencies—missing tools are reported with installation hints.
 
@@ -96,6 +97,9 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `plex_link_enabled` – If `true`, Spindle links to Plex and triggers library scans automatically
 - `ntfy_topic` (optional) – Channel for notifications
 - `api_bind` – Host:port for the built-in JSON API (defaults to `127.0.0.1:7487`)
+- `keydb_path` – Location where Spindle stores/reads `KEYDB.cfg` for Disc ID lookups (defaults to `~/.config/spindle/keydb/KEYDB.cfg`)
+- `keydb_download_url` – Mirror URL Spindle uses when auto-refreshing `KEYDB.cfg`
+- `keydb_download_timeout` – Download timeout (seconds) for the KEYDB refresh
 
 
 ## Usage

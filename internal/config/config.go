@@ -31,6 +31,9 @@ type Config struct {
 	MoviesLibrary             string  `toml:"movies_library"`
 	TVLibrary                 string  `toml:"tv_library"`
 	NtfyTopic                 string  `toml:"ntfy_topic"`
+	KeyDBPath                 string  `toml:"keydb_path"`
+	KeyDBDownloadURL          string  `toml:"keydb_download_url"`
+	KeyDBDownloadTimeout      int     `toml:"keydb_download_timeout"`
 	MakeMKVRipTimeout         int     `toml:"makemkv_rip_timeout"`
 	MakeMKVInfoTimeout        int     `toml:"makemkv_info_timeout"`
 	NtfyRequestTimeout        int     `toml:"ntfy_request_timeout"`
@@ -62,6 +65,9 @@ const (
 	defaultAPIBind                   = "127.0.0.1:7487"
 	defaultDraptoPreset              = 4
 	defaultDraptoLogDir              = "~/.local/share/spindle/logs/drapto"
+	defaultKeyDBPath                 = "~/.config/spindle/keydb/KEYDB.cfg"
+	defaultKeyDBDownloadURL          = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
+	defaultKeyDBDownloadTimeout      = 300
 )
 
 // Default returns a Config populated with repository defaults.
@@ -82,6 +88,9 @@ func Default() Config {
 		PlexLinkEnabled:           true,
 		MoviesLibrary:             "Movies",
 		TVLibrary:                 "TV Shows",
+		KeyDBPath:                 defaultKeyDBPath,
+		KeyDBDownloadURL:          defaultKeyDBDownloadURL,
+		KeyDBDownloadTimeout:      defaultKeyDBDownloadTimeout,
 		MakeMKVRipTimeout:         3600,
 		MakeMKVInfoTimeout:        300,
 		NtfyRequestTimeout:        10,
@@ -188,6 +197,16 @@ func (c *Config) normalize() error {
 	if c.DraptoLogDir, err = expandPath(c.DraptoLogDir); err != nil {
 		return fmt.Errorf("drapto_log_dir: %w", err)
 	}
+	if c.KeyDBPath, err = expandPath(c.KeyDBPath); err != nil {
+		return fmt.Errorf("keydb_path: %w", err)
+	}
+	if strings.TrimSpace(c.KeyDBDownloadURL) == "" {
+		c.KeyDBDownloadURL = defaultKeyDBDownloadURL
+	}
+	c.KeyDBDownloadURL = strings.TrimSpace(c.KeyDBDownloadURL)
+	if c.KeyDBDownloadTimeout <= 0 {
+		c.KeyDBDownloadTimeout = defaultKeyDBDownloadTimeout
+	}
 	if strings.TrimSpace(c.DraptoLogDir) == "" {
 		if strings.TrimSpace(c.LogDir) == "" {
 			c.DraptoLogDir = ""
@@ -276,6 +295,12 @@ func (c *Config) Validate() error {
 	}
 	if c.DraptoPreset < 0 {
 		return errors.New("drapto_preset must be zero or positive")
+	}
+	if strings.TrimSpace(c.KeyDBDownloadURL) == "" {
+		return errors.New("keydb_download_url must be set")
+	}
+	if c.KeyDBDownloadTimeout <= 0 {
+		return errors.New("keydb_download_timeout must be positive (seconds)")
 	}
 	if strings.TrimSpace(c.DraptoLogDir) == "" {
 		return errors.New("drapto_log_dir must be set")
@@ -398,6 +423,9 @@ ntfy_request_timeout = 10                            # ntfy HTTP client timeout 
 tmdb_language = "en-US"                              # ISO 639-1 language for TMDB metadata
 tmdb_base_url = "https://api.themoviedb.org/3"       # Override when using a TMDB proxy
 tmdb_confidence_threshold = 0.8                      # Match confidence (0.0-1.0)
+keydb_path = "~/.config/spindle/keydb/KEYDB.cfg"     # Optional KEYDB.cfg for Disc ID lookups (leave empty to disable)
+keydb_download_url = "http://fvonline-db.bplaced.net/export/keydb_eng.zip" # Mirror for automatic KEYDB refreshes
+keydb_download_timeout = 300                         # Download timeout in seconds when refreshing KEYDB
 
 # ============================================================================
 # ENCODING

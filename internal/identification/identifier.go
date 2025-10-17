@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
+	"spindle/internal/identification/keydb"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
@@ -27,6 +29,7 @@ type Identifier struct {
 	cfg      *config.Config
 	logger   *slog.Logger
 	tmdb     *tmdbSearch
+	keydb    *keydb.Catalog
 	scanner  DiscScanner
 	notifier notifications.Service
 }
@@ -48,10 +51,16 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) 
 
 // NewIdentifierWithDependencies allows injecting TMDB searcher and disc scanner (used in tests).
 func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher TMDBSearcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
+	var catalog *keydb.Catalog
+	if cfg != nil {
+		timeout := time.Duration(cfg.KeyDBDownloadTimeout) * time.Second
+		catalog = keydb.NewCatalog(cfg.KeyDBPath, logger, cfg.KeyDBDownloadURL, timeout)
+	}
 	id := &Identifier{
 		store:    store,
 		cfg:      cfg,
 		tmdb:     newTMDBSearch(searcher),
+		keydb:    catalog,
 		scanner:  scanner,
 		notifier: notifier,
 	}
@@ -118,6 +127,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			logging.Bool("bd_info_available", scanResult.BDInfo != nil))
 		if scanResult.BDInfo != nil {
 			logger.Info("bd_info details",
+				logging.String("disc_id", strings.TrimSpace(scanResult.BDInfo.DiscID)),
 				logging.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier),
 				logging.String("disc_name", scanResult.BDInfo.DiscName),
 				logging.Bool("is_blu_ray", scanResult.BDInfo.IsBluRay),
@@ -137,30 +147,55 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	title := strings.TrimSpace(item.DiscTitle)
+	titleFromKeyDB := false
 
-	// Determine best title using priority-based approach
-	logger.Info("determining best title",
-		logging.String("current_title", title),
-		logging.Int("makemkv_titles", len(scanResult.Titles)))
-
-	if len(scanResult.Titles) > 0 {
-		logger.Info("makemkv title available",
-			logging.String("makemkv_title", scanResult.Titles[0].Name))
+	if scanResult != nil && scanResult.BDInfo != nil {
+		discID := strings.TrimSpace(scanResult.BDInfo.DiscID)
+		if discID != "" && i.keydb != nil {
+			entry, found, err := i.keydb.Lookup(discID)
+			if err != nil {
+				logger.Warn("keydb lookup failed",
+					logging.String("disc_id", discID),
+					logging.Error(err))
+			} else if found {
+				keydbTitle := strings.TrimSpace(entry.Title)
+				if keydbTitle != "" {
+					logger.Info("title updated from keydb",
+						logging.String("disc_id", discID),
+						logging.String("new_title", keydbTitle))
+					title = keydbTitle
+					item.DiscTitle = title
+					titleFromKeyDB = true
+				}
+			}
+		}
 	}
 
-	if scanResult.BDInfo != nil {
-		logger.Info("bdinfo available",
-			logging.String("bdinfo_name", scanResult.BDInfo.DiscName))
-	}
+	if !titleFromKeyDB {
+		// Determine best title using priority-based approach
+		logger.Info("determining best title",
+			logging.String("current_title", title),
+			logging.Int("makemkv_titles", len(scanResult.Titles)))
 
-	bestTitle := determineBestTitle(title, scanResult)
-	if bestTitle != title {
-		logger.Info("title updated based on priority sources",
-			logging.String("original_title", title),
-			logging.String("new_title", bestTitle),
-			logging.String("source", detectTitleSource(bestTitle, scanResult)))
-		title = bestTitle
-		item.DiscTitle = title
+		if len(scanResult.Titles) > 0 {
+			logger.Info("makemkv title available",
+				logging.String("makemkv_title", scanResult.Titles[0].Name))
+		}
+
+		if scanResult.BDInfo != nil {
+			logger.Info("bdinfo available",
+				logging.String("bdinfo_name", scanResult.BDInfo.DiscName))
+		}
+
+		bestTitle := determineBestTitle(title, scanResult)
+		if bestTitle != title {
+			logger.Info("title updated based on priority sources",
+				logging.String("original_title", title),
+				logging.String("new_title", bestTitle),
+				logging.String("source", detectTitleSource(bestTitle, scanResult)))
+			title = bestTitle
+			item.DiscTitle = title
+		}
 	}
 
 	if title == "" {
@@ -529,6 +564,7 @@ func isTechnicalLabel(title string) bool {
 		"UNTITLED",
 		"UNKNOWN DISC",
 		"VOLUME_",
+		"VOLUME ID",
 		"DISK_",
 		"TRACK_",
 	}

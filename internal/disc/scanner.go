@@ -21,6 +21,7 @@ type BDInfoResult struct {
 	VolumeIdentifier string `json:"volume_identifier"`
 	DiscName         string `json:"disc_name"`
 	Provider         string `json:"provider"`
+	DiscID           string `json:"disc_id"`
 	IsBluRay         bool   `json:"is_blu_ray"`
 	HasAACS          bool   `json:"has_aacs"`
 	Year             int    `json:"year,omitempty"`
