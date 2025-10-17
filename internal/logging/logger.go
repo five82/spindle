@@ -113,8 +113,16 @@ func defaultSlice(value []string, fallback []string) []string {
 }
 
 func openWriters(outputPaths []string, errorPaths []string) (io.Writer, error) {
+	type writerEntry struct {
+		key    string
+		writer io.Writer
+	}
+
 	seen := map[string]struct{}{}
-	var writers []io.Writer
+	var entries []writerEntry
+	var hasStdout bool
+	var hasStderr bool
+
 	combined := append([]string{}, outputPaths...)
 	combined = append(combined, errorPaths...)
 
@@ -130,9 +138,11 @@ func openWriters(outputPaths []string, errorPaths []string) (io.Writer, error) {
 
 		switch trimmed {
 		case "stdout":
-			writers = append(writers, os.Stdout)
+			hasStdout = true
+			entries = append(entries, writerEntry{key: "stdout", writer: os.Stdout})
 		case "stderr":
-			writers = append(writers, os.Stderr)
+			hasStderr = true
+			entries = append(entries, writerEntry{key: "stderr", writer: os.Stderr})
 		default:
 			if err := ensureLogDir(trimmed); err != nil {
 				return nil, err
@@ -141,16 +151,31 @@ func openWriters(outputPaths []string, errorPaths []string) (io.Writer, error) {
 			if err != nil {
 				return nil, fmt.Errorf("open log file %s: %w", trimmed, err)
 			}
-			writers = append(writers, file)
+			entries = append(entries, writerEntry{key: trimmed, writer: file})
 		}
 	}
 
-	if len(writers) == 0 {
-		return os.Stdout, nil
+	if hasStdout && hasStderr {
+		filtered := entries[:0]
+		for _, entry := range entries {
+			if entry.key == "stderr" {
+				continue
+			}
+			filtered = append(filtered, entry)
+		}
+		entries = filtered
 	}
 
-	if len(writers) == 1 {
-		return writers[0], nil
+	if len(entries) == 0 {
+		return os.Stdout, nil
+	}
+	if len(entries) == 1 {
+		return entries[0].writer, nil
+	}
+
+	writers := make([]io.Writer, 0, len(entries))
+	for _, entry := range entries {
+		writers = append(writers, entry.writer)
 	}
 	return io.MultiWriter(writers...), nil
 }

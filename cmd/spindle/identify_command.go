@@ -86,14 +86,14 @@ Examples:
 			)
 
 			// Get disc label like the daemon does
-			fmt.Printf("DEBUG: Getting disc label for device: %s\n", device)
+			logger.Debug("getting disc label", logging.String("device", device))
 			discLabel, err := getDiscLabel(device)
 			if err != nil {
 				logger.Warn("failed to get disc label", logging.Error(err))
-				fmt.Printf("DEBUG: Error getting disc label: %v\n", err)
 				discLabel = ""
+			} else {
+				logger.Debug("disc label retrieved", logging.String("device", device), logging.String("label", discLabel))
 			}
-			fmt.Printf("DEBUG: Got disc label: '%s'\n", discLabel)
 			logger.Info("detected disc label", logging.String("label", discLabel))
 
 			// Create a mock queue item for identification with the same disc label as daemon

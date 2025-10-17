@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +57,69 @@ func TestConsoleLoggerOmitsCallerForInfo(t *testing.T) {
 
 	if strings.Contains(string(content), ".go:") {
 		t.Fatalf("expected no caller information in info logs, got %q", content)
+	}
+}
+
+func TestConsoleLoggerAvoidsDuplicateStdStreams(t *testing.T) {
+	origStdout := os.Stdout
+	origStderr := os.Stderr
+
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+
+	t.Cleanup(func() {
+		os.Stdout = origStdout
+		os.Stderr = origStderr
+		stdoutW.Close()
+		stderrW.Close()
+		stdoutR.Close()
+		stderrR.Close()
+	})
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "info",
+		OutputPaths:      []string{"stdout"},
+		ErrorOutputPaths: []string{"stderr"},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	logger.Info("single stream")
+
+	if err := stdoutW.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	if err := stderrW.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+
+	stdoutBytes, err := io.ReadAll(stdoutR)
+	if err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
+	stderrBytes, err := io.ReadAll(stderrR)
+	if err != nil {
+		t.Fatalf("read stderr pipe: %v", err)
+	}
+
+	if len(stdoutBytes) == 0 {
+		t.Fatal("expected stdout output, got none")
+	}
+	if len(stderrBytes) != 0 {
+		t.Fatalf("expected no stderr output, got %q", string(stderrBytes))
 	}
 }
 
