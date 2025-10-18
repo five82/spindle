@@ -65,7 +65,7 @@ Downstream stages rely on these fields for logging, rip configuration, and Plex 
 Relevant settings live in `internal/config`:
 
 - `tmdb_api_key`, `tmdb_base_url`, `tmdb_language` – TMDB connectivity.
-- `tmdb_confidence_threshold` – minimum acceptable normalized vote score.
+- `tmdb_confidence_threshold` – defined for future tuning but the current confidence logic still uses hard-coded vote/score thresholds.
 - `optical_drive` – MakeMKV device path (defaults to `/dev/sr0`).
 - `keydb_path`, `keydb_download_url`, `keydb_download_timeout` – KEYDB cache location and refresh behaviour.
 - Logging hints: `log_dir` determines where queue snapshots and structured logs land for inspection.
@@ -75,7 +75,7 @@ Update this list when the identifier begins consuming additional config (runtime
 ## Failure Modes & Mitigation
 
 - **MakeMKV scan failure** – surfaces as `FAILED` with `MakeMKV disc scan failed`. Verify the binary location and drive permissions.
-- **bd_info unavailability** – If `bd_info` command is not found (libbluray-utils not installed), the scanner continues with MakeMKV data only and logs at info level. Install `libbluray-utils` for enhanced disc identification.
+- **bd_info unavailability** – If `bd_info` isn’t on PATH (libbluray-utils not installed), the scanner logs at info level (“bd_info command not found; skipping enhanced disc metadata”) and continues with MakeMKV data only. Install `libbluray-utils` for enhanced disc identification.
 - **Missing TMDB matches** – item is flagged for review, finishes rip/encode, and then is marked complete with the encoded file parked under `review_dir`. Adjust the metadata manually and rerun `spindle queue retry <id>` (if you want Spindle to reorganize the file after you update metadata) or simply leave the queue entry as-is once you've handled it.
 - **Unknown discs** – even when TMDB search fails, the identifier now emits a rip spec with `content_key` `unknown:<fingerprint>` and per-title `content_fingerprint` values so manual annotations can stick across retries.
 - **Notification errors** – logged as warnings; they do not fail the stage but keep an eye on ntfy credentials.

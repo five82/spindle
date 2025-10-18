@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 )
@@ -143,7 +144,14 @@ func (s *Scanner) lookupBDInfo(ctx context.Context, device string) *BDInfoResult
 	}
 
 	output, err := s.bdInfoCmd.Inspect(ctx, device)
-	if err != nil || len(output) == 0 {
+	if err != nil {
+		var execErr *exec.Error
+		if errors.As(err, &execErr) && execErr.Err == exec.ErrNotFound {
+			slog.Default().Info("bd_info command not found; skipping enhanced disc metadata")
+		}
+		return nil
+	}
+	if len(output) == 0 {
 		return nil
 	}
 

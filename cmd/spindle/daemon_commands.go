@@ -278,6 +278,12 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Command:     cfg.DraptoBinary(),
 			Description: "Required for encoding",
 		},
+		{
+			Name:        "bd_info",
+			Command:     "bd_info",
+			Description: "Enhances disc metadata when MakeMKV titles are generic",
+			Optional:    true,
+		},
 	}
 	checks := deps.CheckBinaries(requirements)
 	checks = append(checks, deps.CheckFFmpegForDrapto(cfg.DraptoBinary()))
