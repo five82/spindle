@@ -1,6 +1,6 @@
 # Content Identification
 
-Reference notes for how the Go daemon classifies discs and prepares metadata. Keep this in sync with `internal/identification`, `internal/disc`, and `internal/identification/tmdb`.
+Reference notes for how the Go daemon classifies discs and prepares metadata so Plex receives the right title and release year for every rip. Keep this in sync with `internal/identification`, `internal/disc`, and `internal/identification/tmdb`.
 
 ## Pipeline Summary
 
