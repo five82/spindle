@@ -146,3 +146,28 @@ func TestQueueRetryInvalidID(t *testing.T) {
 		t.Fatalf("expected invalid id error, got %v", err)
 	}
 }
+
+func TestQueueShowDisplaysFingerprints(t *testing.T) {
+	env := setupCLITestEnv(t)
+	ctx := context.Background()
+
+	item, err := env.store.NewDisc(ctx, "Showcase", "fp-showcase")
+	if err != nil {
+		t.Fatalf("new disc: %v", err)
+	}
+	item.Status = queue.StatusIdentified
+	item.ProgressStage = "Identified"
+	item.ProgressPercent = 100
+	item.RipSpecData = `{"content_key":"tmdb:tv:123","titles":[{"id":1,"name":"Episode 1","duration":1800,"content_fingerprint":"abc123"}]}`
+	item.MetadataJSON = `{"title":"Showcase"}`
+	if err := env.store.Update(ctx, item); err != nil {
+		t.Fatalf("update item: %v", err)
+	}
+
+	out, _, err := runCLI(t, []string{"queue", "show", fmt.Sprintf("%d", item.ID)}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue show: %v", err)
+	}
+	requireContains(t, out, "Content Key: tmdb:tv:123")
+	requireContains(t, out, "Fingerprint abc123")
+}

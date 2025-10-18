@@ -108,6 +108,16 @@ func (c *Client) QueueList(statuses []string) (*QueueListResponse, error) {
 	return &resp, nil
 }
 
+// QueueDescribe returns details for a single queue item.
+func (c *Client) QueueDescribe(id int64) (*QueueDescribeResponse, error) {
+	var resp QueueDescribeResponse
+	req := QueueDescribeRequest{ID: id}
+	if err := c.client.Call("Spindle.QueueDescribe", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // QueueClear removes all items from the queue.
 func (c *Client) QueueClear() (*QueueClearResponse, error) {
 	var resp QueueClearResponse

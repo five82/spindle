@@ -24,6 +24,7 @@ type QueueItem struct {
 	NeedsReview       bool            `json:"needsReview"`
 	ReviewReason      string          `json:"reviewReason,omitempty"`
 	Metadata          json.RawMessage `json:"metadata,omitempty"`
+	RipSpec           json.RawMessage `json:"ripSpec,omitempty"`
 }
 
 // QueueProgress captures stage progress information for a queue entry.

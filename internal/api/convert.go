@@ -46,6 +46,9 @@ func FromQueueItem(item *queue.Item) QueueItem {
 	if raw := item.MetadataJSON; raw != "" {
 		dto.Metadata = json.RawMessage(raw)
 	}
+	if raw := item.RipSpecData; raw != "" {
+		dto.RipSpec = json.RawMessage(raw)
+	}
 	return dto
 }
 

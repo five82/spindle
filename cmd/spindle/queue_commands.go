@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -16,6 +17,7 @@ func newQueueCommand(ctx *commandContext) *cobra.Command {
 
 	queueCmd.AddCommand(newQueueStatusCommand(ctx))
 	queueCmd.AddCommand(newQueueListCommand(ctx))
+	queueCmd.AddCommand(newQueueShowCommand(ctx))
 	queueCmd.AddCommand(newQueueClearCommand(ctx))
 	queueCmd.AddCommand(newQueueClearFailedCommand(ctx))
 	queueCmd.AddCommand(newQueueResetCommand(ctx))
@@ -79,6 +81,32 @@ func newQueueListCommand(ctx *commandContext) *cobra.Command {
 
 	cmd.Flags().StringSliceVarP(&listStatuses, "status", "s", nil, "Filter by queue status (repeatable)")
 	return cmd
+}
+
+func newQueueShowCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "show <id>",
+		Short: "Show detailed information for a queue item",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := strconv.ParseInt(strings.TrimSpace(args[0]), 10, 64)
+			if err != nil || id <= 0 {
+				return fmt.Errorf("invalid item id %q", args[0])
+			}
+			return ctx.withQueueAPI(func(api queueAPI) error {
+				details, err := api.Describe(cmd.Context(), id)
+				if err != nil {
+					return err
+				}
+				if details == nil || details.ID == 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "Queue item %d not found\n", id)
+					return nil
+				}
+				printQueueItemDetails(cmd, *details)
+				return nil
+			})
+		},
+	}
 }
 
 func newQueueClearCommand(ctx *commandContext) *cobra.Command {
@@ -208,6 +236,74 @@ func newQueueRetryCommand(ctx *commandContext) *cobra.Command {
 			})
 		},
 	}
+}
+
+func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
+	out := cmd.OutOrStdout()
+	title := strings.TrimSpace(item.DiscTitle)
+	if title == "" {
+		title = "(untitled)"
+	}
+	fmt.Fprintf(out, "ID: %d\n", item.ID)
+	fmt.Fprintf(out, "Title: %s\n", title)
+	fmt.Fprintf(out, "Status: %s\n", formatStatusLabel(item.Status))
+	if created := formatDisplayTime(item.CreatedAt); created != "" {
+		fmt.Fprintf(out, "Created: %s\n", created)
+	}
+	if updated := formatDisplayTime(item.UpdatedAt); updated != "" {
+		fmt.Fprintf(out, "Updated: %s\n", updated)
+	}
+	if trimmed := strings.TrimSpace(item.SourcePath); trimmed != "" {
+		fmt.Fprintf(out, "Source: %s\n", trimmed)
+	}
+	if trimmed := formatFingerprint(item.DiscFingerprint); trimmed != "-" {
+		fmt.Fprintf(out, "Disc Fingerprint: %s\n", trimmed)
+	}
+	progressStage := strings.TrimSpace(item.ProgressStage)
+	if progressStage != "" || item.ProgressPercent > 0 {
+		fmt.Fprintf(out, "Progress: %s (%.0f%%)\n", progressStage, item.ProgressPercent)
+	}
+	if msg := strings.TrimSpace(item.ProgressMessage); msg != "" {
+		fmt.Fprintf(out, "Progress Message: %s\n", msg)
+	}
+	if item.NeedsReview {
+		reason := strings.TrimSpace(item.ReviewReason)
+		if reason == "" {
+			reason = "(no reason provided)"
+		}
+		fmt.Fprintf(out, "Needs Review: yes (%s)\n", reason)
+	} else if reason := strings.TrimSpace(item.ReviewReason); reason != "" {
+		fmt.Fprintf(out, "Needs Review: no (previous reason %s)\n", reason)
+	} else {
+		fmt.Fprintln(out, "Needs Review: no")
+	}
+	if errMsg := strings.TrimSpace(item.ErrorMessage); errMsg != "" {
+		fmt.Fprintf(out, "Last Error: %s\n", errMsg)
+	}
+	if value := strings.TrimSpace(item.RippedFile); value != "" {
+		fmt.Fprintf(out, "Ripped File: %s\n", value)
+	}
+	if value := strings.TrimSpace(item.EncodedFile); value != "" {
+		fmt.Fprintf(out, "Encoded File: %s\n", value)
+	}
+	if value := strings.TrimSpace(item.FinalFile); value != "" {
+		fmt.Fprintf(out, "Final File: %s\n", value)
+	}
+	if value := strings.TrimSpace(item.BackgroundLogPath); value != "" {
+		fmt.Fprintf(out, "Background Log: %s\n", value)
+	}
+	if strings.TrimSpace(item.MetadataJSON) != "" {
+		fmt.Fprintln(out, "Metadata: present")
+	} else {
+		fmt.Fprintln(out, "Metadata: none")
+	}
+
+	summary, err := parseRipSpecSummary(item.RipSpecJSON)
+	if err != nil {
+		fmt.Fprintf(out, "\n⚠️  Unable to parse rip specification: %v\n", err)
+		return
+	}
+	printRipSpecFingerprints(out, summary)
 }
 
 func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {

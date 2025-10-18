@@ -197,6 +197,14 @@ func (d *Daemon) ListQueue(ctx context.Context, statuses []queue.Status) ([]*que
 	return d.store.List(ctx, statuses...)
 }
 
+// GetQueueItem fetches a single queue item by identifier.
+func (d *Daemon) GetQueueItem(ctx context.Context, id int64) (*queue.Item, error) {
+	if d.store == nil {
+		return nil, errors.New("queue store unavailable")
+	}
+	return d.store.GetByID(ctx, id)
+}
+
 // ClearQueue removes all queue items.
 func (d *Daemon) ClearQueue(ctx context.Context) (int64, error) {
 	if d.store == nil {

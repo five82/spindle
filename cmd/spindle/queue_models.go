@@ -9,6 +9,23 @@ type queueItemView struct {
 	DiscFingerprint string
 }
 
+type queueItemDetailsView struct {
+	queueItemView
+	UpdatedAt         string
+	ProgressStage     string
+	ProgressPercent   float64
+	ProgressMessage   string
+	ErrorMessage      string
+	NeedsReview       bool
+	ReviewReason      string
+	MetadataJSON      string
+	RipSpecJSON       string
+	RippedFile        string
+	EncodedFile       string
+	FinalFile         string
+	BackgroundLogPath string
+}
+
 type queueHealthView struct {
 	Total      int
 	Pending    int

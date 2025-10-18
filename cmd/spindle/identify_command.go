@@ -166,6 +166,12 @@ Examples:
 				fmt.Fprintf(cmd.OutOrStdout(), "\n❌ Identification failed. Check the logs above for details.\n")
 			}
 
+			if summary, err := parseRipSpecSummary(item.RipSpecData); err != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "\n⚠️  Unable to parse rip specification for title fingerprints: %v\n", err)
+			} else {
+				printRipSpecFingerprints(cmd.OutOrStdout(), summary)
+			}
+
 			return nil
 		},
 	}

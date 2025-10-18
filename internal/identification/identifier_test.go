@@ -61,6 +61,22 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 	if notifier.identified[0].year != "2001" {
 		t.Fatalf("unexpected identification year %q", notifier.identified[0].year)
 	}
+
+	var spec struct {
+		ContentKey string `json:"content_key"`
+		Titles     []struct {
+			ContentFingerprint string `json:"content_fingerprint"`
+		} `json:"titles"`
+	}
+	if err := json.Unmarshal([]byte(updated.RipSpecData), &spec); err != nil {
+		t.Fatalf("decode rip spec: %v", err)
+	}
+	if spec.ContentKey != "tmdb:movie:1" {
+		t.Fatalf("expected content key tmdb:movie:1, got %q", spec.ContentKey)
+	}
+	if len(spec.Titles) == 0 || spec.Titles[0].ContentFingerprint == "" {
+		t.Fatal("expected per-title content fingerprint")
+	}
 }
 
 func TestIdentifierFallsBackToQueueFingerprint(t *testing.T) {
@@ -87,12 +103,16 @@ func TestIdentifierFallsBackToQueueFingerprint(t *testing.T) {
 	}
 	var spec struct {
 		Fingerprint string `json:"fingerprint"`
+		ContentKey  string `json:"content_key"`
 	}
 	if err := json.Unmarshal([]byte(item.RipSpecData), &spec); err != nil {
 		t.Fatalf("Unmarshal rip spec: %v", err)
 	}
 	if spec.Fingerprint != item.DiscFingerprint {
 		t.Fatalf("expected fallback fingerprint %q, got %q", item.DiscFingerprint, spec.Fingerprint)
+	}
+	if spec.ContentKey != "tmdb:movie:42" {
+		t.Fatalf("expected tmdb content key, got %q", spec.ContentKey)
 	}
 }
 
@@ -166,6 +186,9 @@ func TestIdentifierMarksReviewWhenNoResults(t *testing.T) {
 	}
 	if len(notifier.unidentified) != 0 {
 		t.Fatalf("expected no immediate notification, got %d", len(notifier.unidentified))
+	}
+	if strings.TrimSpace(item.RipSpecData) == "" {
+		t.Fatal("expected rip spec data for unidentified content")
 	}
 }
 

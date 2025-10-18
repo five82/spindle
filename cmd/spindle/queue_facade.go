@@ -12,6 +12,7 @@ import (
 type queueAPI interface {
 	Stats(ctx context.Context) (map[string]int, error)
 	List(ctx context.Context, statuses []string) ([]queueItemView, error)
+	Describe(ctx context.Context, id int64) (*queueItemDetailsView, error)
 	ClearAll(ctx context.Context) (int64, error)
 	ClearCompleted(ctx context.Context) (int64, error)
 	ClearFailed(ctx context.Context) (int64, error)
@@ -66,6 +67,20 @@ func (f *queueIPCFacade) List(_ context.Context, statuses []string) ([]queueItem
 		})
 	}
 	return items, nil
+}
+
+func (f *queueIPCFacade) Describe(_ context.Context, id int64) (*queueItemDetailsView, error) {
+	resp, err := f.client.QueueDescribe(id)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	return convertIPCQueueItem(resp.Item), nil
 }
 
 func (f *queueIPCFacade) ClearAll(_ context.Context) (int64, error) {
@@ -206,6 +221,19 @@ func (f *queueStoreFacade) List(ctx context.Context, statuses []string) ([]queue
 	return views, nil
 }
 
+func (f *queueStoreFacade) Describe(ctx context.Context, id int64) (*queueItemDetailsView, error) {
+	svc := f.queueService()
+	if svc == nil {
+		return nil, nil
+	}
+	item, err := svc.Describe(ctx, id)
+	if err != nil || item == nil {
+		return nil, err
+	}
+	view := convertAPIQueueItem(*item)
+	return &view, nil
+}
+
 func (f *queueStoreFacade) ClearAll(ctx context.Context) (int64, error) {
 	return f.store.Clear(ctx)
 }
@@ -278,4 +306,58 @@ func (f *queueStoreFacade) Health(ctx context.Context) (queueHealthView, error) 
 
 func statusIsFailed(value string) bool {
 	return strings.EqualFold(strings.TrimSpace(value), string(queue.StatusFailed))
+}
+
+func convertAPIQueueItem(item api.QueueItem) queueItemDetailsView {
+	base := queueItemView{
+		ID:              item.ID,
+		DiscTitle:       item.DiscTitle,
+		SourcePath:      item.SourcePath,
+		Status:          item.Status,
+		CreatedAt:       item.CreatedAt,
+		DiscFingerprint: item.DiscFingerprint,
+	}
+	return queueItemDetailsView{
+		queueItemView:     base,
+		UpdatedAt:         item.UpdatedAt,
+		ProgressStage:     item.Progress.Stage,
+		ProgressPercent:   item.Progress.Percent,
+		ProgressMessage:   item.Progress.Message,
+		ErrorMessage:      item.ErrorMessage,
+		NeedsReview:       item.NeedsReview,
+		ReviewReason:      item.ReviewReason,
+		MetadataJSON:      string(item.Metadata),
+		RipSpecJSON:       string(item.RipSpec),
+		RippedFile:        item.RippedFile,
+		EncodedFile:       item.EncodedFile,
+		FinalFile:         item.FinalFile,
+		BackgroundLogPath: item.BackgroundLogPath,
+	}
+}
+
+func convertIPCQueueItem(item ipc.QueueItem) *queueItemDetailsView {
+	base := queueItemView{
+		ID:              item.ID,
+		DiscTitle:       item.DiscTitle,
+		SourcePath:      item.SourcePath,
+		Status:          item.Status,
+		CreatedAt:       item.CreatedAt,
+		DiscFingerprint: item.DiscFingerprint,
+	}
+	return &queueItemDetailsView{
+		queueItemView:     base,
+		UpdatedAt:         item.UpdatedAt,
+		ProgressStage:     item.ProgressStage,
+		ProgressPercent:   item.ProgressPercent,
+		ProgressMessage:   item.ProgressMessage,
+		ErrorMessage:      item.ErrorMessage,
+		NeedsReview:       item.NeedsReview,
+		ReviewReason:      item.ReviewReason,
+		MetadataJSON:      item.MetadataJSON,
+		RipSpecJSON:       item.RipSpecData,
+		RippedFile:        item.RippedFile,
+		EncodedFile:       item.EncodedFile,
+		FinalFile:         item.FinalFile,
+		BackgroundLogPath: item.BackgroundLogPath,
+	}
 }

@@ -22,17 +22,25 @@ type StatusRequest struct{}
 
 // QueueItem summarizes a queue entry for CLI presentation.
 type QueueItem struct {
-	ID              int64   `json:"id"`
-	DiscTitle       string  `json:"disc_title"`
-	SourcePath      string  `json:"source_path"`
-	Status          string  `json:"status"`
-	ProgressStage   string  `json:"progress_stage"`
-	ProgressPercent float64 `json:"progress_percent"`
-	ProgressMessage string  `json:"progress_message"`
-	ErrorMessage    string  `json:"error_message"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	DiscFingerprint string  `json:"disc_fingerprint"`
+	ID                int64   `json:"id"`
+	DiscTitle         string  `json:"disc_title"`
+	SourcePath        string  `json:"source_path"`
+	Status            string  `json:"status"`
+	ProgressStage     string  `json:"progress_stage"`
+	ProgressPercent   float64 `json:"progress_percent"`
+	ProgressMessage   string  `json:"progress_message"`
+	ErrorMessage      string  `json:"error_message"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	DiscFingerprint   string  `json:"disc_fingerprint"`
+	NeedsReview       bool    `json:"needs_review"`
+	ReviewReason      string  `json:"review_reason"`
+	MetadataJSON      string  `json:"metadata_json"`
+	RipSpecData       string  `json:"rip_spec_data"`
+	RippedFile        string  `json:"ripped_file"`
+	EncodedFile       string  `json:"encoded_file"`
+	FinalFile         string  `json:"final_file"`
+	BackgroundLogPath string  `json:"background_log_path"`
 }
 
 // StageHealth describes readiness of a workflow stage.
@@ -73,6 +81,16 @@ type QueueListRequest struct {
 // QueueListResponse contains queue entries.
 type QueueListResponse struct {
 	Items []QueueItem `json:"items"`
+}
+
+// QueueDescribeRequest fetches a single queue item by id.
+type QueueDescribeRequest struct {
+	ID int64 `json:"id"`
+}
+
+// QueueDescribeResponse contains a single queue entry.
+type QueueDescribeResponse struct {
+	Item QueueItem `json:"item"`
 }
 
 // QueueClearRequest removes all items.

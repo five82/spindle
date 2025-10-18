@@ -120,15 +120,23 @@ func convertQueueItem(item *queue.Item) *QueueItem {
 		return nil
 	}
 	qi := &QueueItem{
-		ID:              item.ID,
-		DiscTitle:       item.DiscTitle,
-		SourcePath:      item.SourcePath,
-		Status:          string(item.Status),
-		ProgressStage:   item.ProgressStage,
-		ProgressPercent: item.ProgressPercent,
-		ProgressMessage: item.ProgressMessage,
-		ErrorMessage:    item.ErrorMessage,
-		DiscFingerprint: item.DiscFingerprint,
+		ID:                item.ID,
+		DiscTitle:         item.DiscTitle,
+		SourcePath:        item.SourcePath,
+		Status:            string(item.Status),
+		ProgressStage:     item.ProgressStage,
+		ProgressPercent:   item.ProgressPercent,
+		ProgressMessage:   item.ProgressMessage,
+		ErrorMessage:      item.ErrorMessage,
+		DiscFingerprint:   item.DiscFingerprint,
+		NeedsReview:       item.NeedsReview,
+		ReviewReason:      item.ReviewReason,
+		MetadataJSON:      item.MetadataJSON,
+		RipSpecData:       item.RipSpecData,
+		RippedFile:        item.RippedFile,
+		EncodedFile:       item.EncodedFile,
+		FinalFile:         item.FinalFile,
+		BackgroundLogPath: item.BackgroundLogPath,
 	}
 	if !item.CreatedAt.IsZero() {
 		qi.CreatedAt = item.CreatedAt.Format(time.RFC3339)
@@ -235,6 +243,23 @@ func (s *service) QueueList(req QueueListRequest, resp *QueueListResponse) error
 		if qi := convertQueueItem(item); qi != nil {
 			resp.Items = append(resp.Items, *qi)
 		}
+	}
+	return nil
+}
+
+func (s *service) QueueDescribe(req QueueDescribeRequest, resp *QueueDescribeResponse) error {
+	if req.ID <= 0 {
+		return fmt.Errorf("invalid queue item id %d", req.ID)
+	}
+	item, err := s.daemon.GetQueueItem(s.ctx, req.ID)
+	if err != nil {
+		return err
+	}
+	if item == nil {
+		return fmt.Errorf("queue item %d not found", req.ID)
+	}
+	if qi := convertQueueItem(item); qi != nil {
+		resp.Item = *qi
 	}
 	return nil
 }

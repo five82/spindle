@@ -544,12 +544,14 @@ type ripSpecPayload struct {
 	Metadata struct {
 		MediaType string `json:"media_type"`
 	} `json:"metadata"`
+	ContentKey string `json:"content_key"`
 }
 
 type ripSpecTitle struct {
-	ID       int    `json:"id"`
-	Name     string `json:"name"`
-	Duration int    `json:"duration"`
+	ID                 int    `json:"id"`
+	Name               string `json:"name"`
+	Duration           int    `json:"duration"`
+	ContentFingerprint string `json:"content_fingerprint"`
 }
 
 func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {

@@ -14,6 +14,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
+	discfingerprint "spindle/internal/disc/fingerprint"
 	"spindle/internal/identification/keydb"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
@@ -37,6 +38,20 @@ type Identifier struct {
 // DiscScanner defines disc scanning operations.
 type DiscScanner interface {
 	Scan(ctx context.Context, device string) (*disc.ScanResult, error)
+}
+
+type ripSpecEnvelope struct {
+	Fingerprint string         `json:"fingerprint"`
+	ContentKey  string         `json:"content_key"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	Titles      []ripSpecTitle `json:"titles"`
+}
+
+type ripSpecTitle struct {
+	ID                 int    `json:"id"`
+	Name               string `json:"name"`
+	Duration           int    `json:"duration"`
+	ContentFingerprint string `json:"content_fingerprint"`
 }
 
 // NewIdentifier creates a new stage handler.
@@ -225,6 +240,19 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
+	// Default metadata assumes unidentified content until TMDB lookup succeeds.
+	metadata := map[string]any{
+		"title": strings.TrimSpace(title),
+	}
+	mediaType := "unknown"
+	contentKey := unknownContentKey(item.DiscFingerprint)
+	identified := false
+	var (
+		identifiedTitle string
+		year            string
+		tmdbID          int64
+	)
+
 	// Log the complete TMDB query details
 	logger.Info("tmdb query details",
 		logging.String("query", title),
@@ -237,71 +265,103 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if err != nil {
 		logger.Warn("tmdb search failed", logging.String("title", title), logging.Error(err))
 		i.scheduleReview(ctx, item, "TMDB lookup failed")
-		return nil
-	}
-	if response != nil {
-		logger.Info("tmdb response received",
-			logging.Int("result_count", len(response.Results)),
-			logging.Int("search_year", searchOpts.Year),
-			logging.Int("search_runtime", searchOpts.Runtime))
+	} else {
+		if response != nil {
+			logger.Info("tmdb response received",
+				logging.Int("result_count", len(response.Results)),
+				logging.Int("search_year", searchOpts.Year),
+				logging.Int("search_runtime", searchOpts.Runtime))
 
-		// Log detailed results for debugging
-		for i, result := range response.Results {
-			logger.Info("tmdb search result",
-				logging.Int("index", i),
-				logging.Int64("tmdb_id", result.ID),
-				logging.String("title", result.Title),
-				logging.String("release_date", result.ReleaseDate),
-				logging.Float64("vote_average", result.VoteAverage),
-				logging.Int64("vote_count", result.VoteCount),
-				logging.Float64("popularity", result.Popularity),
-				logging.String("media_type", result.MediaType))
+			// Log detailed results for debugging
+			for idx, result := range response.Results {
+				logger.Info("tmdb search result",
+					logging.Int("index", idx),
+					logging.Int64("tmdb_id", result.ID),
+					logging.String("title", result.Title),
+					logging.String("release_date", result.ReleaseDate),
+					logging.Float64("vote_average", result.VoteAverage),
+					logging.Int64("vote_count", result.VoteCount),
+					logging.Float64("popularity", result.Popularity),
+					logging.String("media_type", result.MediaType))
+			}
+		}
+
+		best := selectBestResult(logger, title, response)
+		if best == nil {
+			logger.Warn("tmdb confidence scoring failed",
+				logging.String("query", title),
+				logging.String("reason", "No result met confidence threshold"))
+			i.scheduleReview(ctx, item, "No confident TMDB match")
+		} else {
+			identified = true
+			mediaType = strings.ToLower(strings.TrimSpace(best.MediaType))
+			if mediaType == "" {
+				mediaType = "movie"
+			}
+			isMovie := mediaType != "tv"
+			identifiedTitle = pickTitle(*best)
+			year = ""
+			titleWithYear := identifiedTitle
+			if best.ReleaseDate != "" && len(best.ReleaseDate) >= 4 {
+				year = best.ReleaseDate[:4] // Extract YYYY from YYYY-MM-DD
+				titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
+			}
+			filenameMeta := queue.NewBasicMetadata(titleWithYear, isMovie)
+			metadata = map[string]any{
+				"id":           best.ID,
+				"title":        identifiedTitle,
+				"overview":     best.Overview,
+				"media_type":   mediaType,
+				"release_date": best.ReleaseDate,
+				"vote_average": best.VoteAverage,
+				"vote_count":   best.VoteCount,
+				"movie":        isMovie,
+				"filename":     filenameMeta.GetFilename(),
+			}
+
+			encodedMetadata, encodeErr := json.Marshal(metadata)
+			if encodeErr != nil {
+				return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", encodeErr)
+			}
+			item.MetadataJSON = string(encodedMetadata)
+			// Update DiscTitle to the proper TMDB title with year for use in subsequent stages
+			item.DiscTitle = titleWithYear
+			item.ProgressStage = "Identified"
+			item.ProgressPercent = 100
+			item.ProgressMessage = fmt.Sprintf("Identified as: %s", titleWithYear)
+			tmdbID = best.ID
+			contentKey = fmt.Sprintf("tmdb:%s:%d", mediaType, tmdbID)
+
+			logger.Info(
+				"disc identified",
+				logging.Int64("tmdb_id", best.ID),
+				logging.String("identified_title", identifiedTitle),
+				logging.String("media_type", strings.TrimSpace(best.MediaType)),
+			)
+			if i.notifier != nil {
+				notifyType := mediaType
+				if notifyType == "" {
+					notifyType = "unknown"
+				}
+				if strings.TrimSpace(year) != "" {
+					payload := notifications.Payload{
+						"title":        identifiedTitle,
+						"year":         strings.TrimSpace(year),
+						"mediaType":    notifyType,
+						"displayTitle": titleWithYear,
+					}
+					if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
+						logger.Warn("identification notification failed", logging.Error(err))
+					}
+				}
+			}
 		}
 	}
 
-	best := selectBestResult(logger, title, response)
-	if best == nil {
-		logger.Warn("tmdb confidence scoring failed",
-			logging.String("query", title),
-			logging.String("reason", "No result met confidence threshold"))
-		i.scheduleReview(ctx, item, "No confident TMDB match")
-		return nil
+	if contentKey == "" {
+		contentKey = unknownContentKey(item.DiscFingerprint)
 	}
-
-	mediaType := strings.ToLower(strings.TrimSpace(best.MediaType))
-	if mediaType == "" {
-		mediaType = "movie"
-	}
-	isMovie := mediaType != "tv"
-	identifiedTitle := pickTitle(*best)
-	year := ""
-	titleWithYear := identifiedTitle
-	if best.ReleaseDate != "" && len(best.ReleaseDate) >= 4 {
-		year = best.ReleaseDate[:4] // Extract YYYY from YYYY-MM-DD
-		titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
-	}
-	filenameMeta := queue.NewBasicMetadata(titleWithYear, isMovie)
-	metadata := map[string]any{
-		"id":           best.ID,
-		"title":        identifiedTitle,
-		"overview":     best.Overview,
-		"media_type":   mediaType,
-		"release_date": best.ReleaseDate,
-		"vote_average": best.VoteAverage,
-		"vote_count":   best.VoteCount,
-		"movie":        isMovie,
-		"filename":     filenameMeta.GetFilename(),
-	}
-	encodedMetadata, err := json.Marshal(metadata)
-	if err != nil {
-		return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", err)
-	}
-	item.MetadataJSON = string(encodedMetadata)
-	// Update DiscTitle to the proper TMDB title with year for use in subsequent stages
-	item.DiscTitle = titleWithYear
-	item.ProgressStage = "Identified"
-	item.ProgressPercent = 100
-	item.ProgressMessage = fmt.Sprintf("Identified as: %s", titleWithYear)
+	metadata["media_type"] = mediaType
 
 	ripFingerprint := strings.TrimSpace(scanResult.Fingerprint)
 	if ripFingerprint == "" {
@@ -314,39 +374,44 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			ripFingerprint = fallback
 		}
 	}
-	ripSpec := map[string]any{
-		"fingerprint": ripFingerprint,
-		"titles":      scanResult.Titles,
-		"metadata":    metadata,
+
+	titleSpecs := make([]ripSpecTitle, 0, len(scanResult.Titles))
+	for _, t := range scanResult.Titles {
+		fp := discfingerprint.TitleFingerprint(t)
+		titleSpecs = append(titleSpecs, ripSpecTitle{
+			ID:                 t.ID,
+			Name:               t.Name,
+			Duration:           t.Duration,
+			ContentFingerprint: fp,
+		})
+		logger.Info(
+			"prepared title fingerprint",
+			logging.Int("title_id", t.ID),
+			logging.Int("duration_seconds", t.Duration),
+			logging.String("title_name", strings.TrimSpace(t.Name)),
+			logging.String("content_fingerprint", truncateFingerprint(fp)),
+		)
 	}
+
+	ripSpec := ripSpecEnvelope{
+		Fingerprint: ripFingerprint,
+		ContentKey:  contentKey,
+		Metadata:    metadata,
+		Titles:      titleSpecs,
+	}
+
 	encodedSpec, err := json.Marshal(ripSpec)
 	if err != nil {
 		return services.Wrap(services.ErrTransient, "identification", "encode rip spec", "Failed to serialize rip specification", err)
 	}
 	item.RipSpecData = string(encodedSpec)
 
-	logger.Info(
-		"disc identified",
-		logging.Int64("tmdb_id", best.ID),
-		logging.String("identified_title", identifiedTitle),
-		logging.String("media_type", strings.TrimSpace(best.MediaType)),
-	)
-	if i.notifier != nil {
-		mediaType := strings.ToLower(strings.TrimSpace(best.MediaType))
-		if mediaType == "" {
-			mediaType = "unknown"
-		}
-		if strings.TrimSpace(year) != "" {
-			payload := notifications.Payload{
-				"title":        identifiedTitle,
-				"year":         strings.TrimSpace(year),
-				"mediaType":    mediaType,
-				"displayTitle": titleWithYear,
-			}
-			if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
-				logger.Warn("identification notification failed", logging.Error(err))
-			}
-		}
+	if !identified {
+		logger.Info(
+			"prepared unidentified rip specification",
+			logging.Int("title_count", len(titleSpecs)),
+			logging.String("content_key", contentKey),
+		)
 	}
 
 	if err := i.validateIdentification(ctx, item); err != nil {
@@ -515,6 +580,25 @@ func (i *Identifier) ensureStagingSkeleton(item *queue.Item) error {
 		}
 	}
 	return nil
+}
+
+func unknownContentKey(fingerprint string) string {
+	fp := strings.TrimSpace(fingerprint)
+	if fp == "" {
+		return "unknown:pending"
+	}
+	if len(fp) > 16 {
+		fp = fp[:16]
+	}
+	return fmt.Sprintf("unknown:%s", strings.ToLower(fp))
+}
+
+func truncateFingerprint(value string) string {
+	v := strings.TrimSpace(value)
+	if len(v) <= 12 {
+		return v
+	}
+	return v[:12]
 }
 
 func determineBestTitle(currentTitle string, scanResult *disc.ScanResult) string {
