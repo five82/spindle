@@ -14,17 +14,10 @@ type stubExec struct {
 }
 
 func (s stubExec) Run(ctx context.Context, binary string, args []string) ([]byte, error) {
+	if binary == "bd_info" {
+		return []byte{}, nil
+	}
 	return s.output, s.err
-}
-
-type captureExec struct {
-	output   []byte
-	lastArgs []string
-}
-
-func (c *captureExec) Run(ctx context.Context, binary string, args []string) ([]byte, error) {
-	c.lastArgs = append([]string(nil), args...)
-	return c.output, nil
 }
 
 func TestScannerParsesFingerprint(t *testing.T) {
@@ -69,25 +62,29 @@ func TestScannerNeedsBinary(t *testing.T) {
 }
 
 func TestScannerNormalizesDevicePath(t *testing.T) {
-	// Include a title so bd_info doesn't get called (which would overwrite lastArgs)
-	output := `CINFO:32,0,"ABCDEF0123456789"
+	makemkvOutput := `CINFO:32,0,"ABCDEF0123456789"
 TINFO:0,2,0,"Movie Title"
 `
-	capture := &captureExec{output: []byte(output)}
-	scanner := disc.NewScannerWithExecutor("makemkvcon", capture)
+
+	executor := &mockExecutor{
+		responses: map[string][]byte{
+			"makemkvcon -r --cache=1 info dev:/dev/sr0 --robot": []byte(makemkvOutput),
+		},
+	}
+
+	scanner := disc.NewScannerWithExecutor("makemkvcon", executor)
 	if _, err := scanner.Scan(context.Background(), "/dev/sr0"); err != nil {
 		t.Fatalf("Scan returned error: %v", err)
 	}
-	if len(capture.lastArgs) == 0 {
-		t.Fatalf("expected arguments to be recorded")
+
+	args, ok := executor.lastCmd["makemkvcon"]
+	if !ok {
+		t.Fatalf("expected makemkvcon to be invoked")
 	}
-	// The target device should be normalized to dev:/dev/sr0 format
-	// This should be the 4th argument in the command: ["-r", "--cache=1", "info", target, "--robot"]
-	if len(capture.lastArgs) < 4 {
-		t.Fatalf("expected at least 4 arguments, got %d", len(capture.lastArgs))
+	if len(args) < 4 {
+		t.Fatalf("expected at least 4 arguments, got %d", len(args))
 	}
-	targetArg := capture.lastArgs[3]
-	if targetArg != "dev:/dev/sr0" {
+	if targetArg := args[3]; targetArg != "dev:/dev/sr0" {
 		t.Fatalf("expected device argument to be dev:/dev/sr0, got %q", targetArg)
 	}
 }

@@ -116,12 +116,11 @@ func (s *Scanner) Scan(ctx context.Context, device string) (*ScanResult, error) 
 	}
 	result.RawOutput = string(output)
 
-	if shouldQueryBDInfo(result) {
-		if info := s.lookupBDInfo(ctx, device); info != nil {
-			result.BDInfo = info
-			if len(result.Titles) > 0 && info.DiscName != "" {
-				result.Titles[0].Name = info.DiscName
-			}
+	needsBDInfo := shouldQueryBDInfo(result)
+	if info := s.lookupBDInfo(ctx, device); info != nil {
+		result.BDInfo = info
+		if len(result.Titles) > 0 && info.DiscName != "" && needsBDInfo {
+			result.Titles[0].Name = info.DiscName
 		}
 	}
 

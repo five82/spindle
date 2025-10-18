@@ -5,7 +5,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 ## Pipeline Summary
 
 1. **MakeMKV scan** – `internal/disc.Scanner` calls `makemkvcon info` to capture the title list; Spindle now computes its own fingerprint from disc metadata before the scan runs.
-2. **bd_info fallback** – When MakeMKV returns empty or generic titles (e.g., "LOGICAL_VOLUME_ID"), the scanner automatically runs `bd_info` to extract the actual disc name from the volume identifier.
+2. **bd_info enrichment** – The scanner always runs `bd_info` when the binary is available, harvesting Blu-ray disc IDs, studio hints, and a cleaned disc name. It still only overwrites the MakeMKV title when the original metadata is empty or generic.
 3. **KEYDB lookup** – When `bd_info` captures an AACS Disc ID, the identifier consults the KEYDB catalog (automatically refreshed weekly) to fetch curated titles/aliases before doing any string heuristics.
 4. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups using the enhanced title OR KEYDB alias data.
 4. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
@@ -14,7 +14,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 ## Disc Scan Details
 
 - MakeMKV output is parsed into `disc.ScanResult`, preserving the fingerprint and a normalized list of titles (id, name, duration in seconds).
-- **bd_info integration**: When MakeMKV titles are empty or generic (LOGICAL_VOLUME_ID, DVD_VIDEO, BLURAY, etc.), the scanner automatically runs `bd_info` to extract enhanced metadata:
+- **bd_info integration**: The scanner always executes `bd_info` when present so that Blu-ray discs expose their unique Disc ID for downstream lookups. The richer metadata includes:
   - Volume identifier (e.g., "00000095_50_FIRST_DATES")
   - Disc name parsed from volume identifier
   - Year extraction from volume identifier when available
@@ -24,6 +24,14 @@ Reference notes for how the Go daemon classifies discs and prepares metadata. Ke
 - Generic label detection uses patterns like `LOGICAL_VOLUME_ID`, `DVD_VIDEO`, `BLURAY`, `BD_ROM`, `UNTITLED`, `UNKNOWN DISC`, numeric-only, and short alphanumeric codes.
 - Enhanced titles from bd_info replace generic MakeMKV titles before TMDB lookup.
 - KEYDB aliases override both MakeMKV and bd_info names when a Disc ID match exists (e.g., translating `VOLUME_ID [Michael Clayton]` to “Michael Clayton”).
+
+### Title Source Priority
+
+1. **KEYDB match** – If the Disc ID is known, the curated KEYDB title wins immediately.
+2. **MakeMKV main title** – The first MakeMKV title is preferred when it looks like a real title.
+3. **bd_info disc name** – Used when the MakeMKV title is missing or technical noise.
+4. **Queue item title** – Falls back to whatever label the user originally queued.
+5. **Derived path / Unknown** – Ultimately `deriveTitle` or `"Unknown Disc"` keep the pipeline moving when no metadata is available.
 - Fingerprints come from hashing the disc's unencrypted metadata (BDMV structures for Blu-ray, IFO files for DVD). If hashing fails, treat it as a mount/drive issue.
 - Raw JSON is stored alongside parsed data to help with later diagnostics (`rip_spec_data` contains the structured payload).
 
