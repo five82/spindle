@@ -19,6 +19,7 @@ Every item moves through the queue in order. The statuses you will see are:
 - `IDENTIFYING` -> `IDENTIFIED` - MakeMKV scan + TMDB lookup completed
 - `RIPPING` -> `RIPPED` - video copied to the staging area; you’ll get a notification so the disc can be ejected manually
 - `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
+- `SUBTITLING` -> `SUBTITLED` *(optional)* - Voxtral generates AI subtitles when enabled
 - `ORGANIZING` -> `COMPLETED` - file moved into your library, Plex refresh triggered
 - `REVIEW` - manual attention required (no confident match found)
 - `FAILED` - an error stopped progress; inspect logs and retry when ready
@@ -57,7 +58,18 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 
 Encoding happens in the background, so you can insert the next disc while previous titles encode.
 
-## Stage 5: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
+## Stage 5: AI Subtitle Generation (SUBTITLING -> SUBTITLED)
+
+When `subtitles_enabled = true` in `config.toml`, Spindle generates a Plex-compatible `.srt` using the Mistral Voxtral Mini Transcribe 2507 model before organizing begins.
+
+1. After encoding, the queue updates to `SUBTITLING` and Spindle demuxes the primary audio track to `.opus`.
+2. Audio is split into ≤15 minute chunks with small overlaps, then uploaded sequentially to the Mistral API using your `mistral_api_key`.
+3. Returned segments are merged into a single SRT with timestamp smoothing and line wrapping. The subtitle lands next to the encoded file in the staging directory with the naming format `<basename>.<lang>.srt` (for example, `Movie.en.srt`).
+4. On success the queue status becomes `SUBTITLED`. If transcription fails, the stage logs a warning and the organizer still runs; the queue item is marked `FAILED` only when subtitles are enabled but no API key is configured.
+
+You can also generate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI stores the SRT beside your media and cleans up temporary audio extracts automatically.
+
+## Stage 6: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
 
 1. Spindle moves the encoded file into your library, building a Plex-friendly path based on the TMDB metadata. Movies go under `library_dir/movies`, TV episodes go under `library_dir/tv/<Show Name>/Season XX/`.
 2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Plex.
@@ -90,7 +102,7 @@ Logs also live in `<log_dir>/spindle-<timestamp>.log` (one file per daemon start
 
 ## Where Files Live
 
-- **Staging**: `<staging_dir>/<fingerprint>/rips/` for MakeMKV output, `<staging_dir>/<fingerprint>/encoded/` for Drapto output while waiting on organization.
+- **Staging**: `<staging_dir>/<fingerprint>/rips/` for MakeMKV output, `<staging_dir>/<fingerprint>/encoded/` for Drapto output while waiting on organization. AI subtitles land in the encoded folder as `<basename>.<lang>.srt` until the organizer moves them alongside the final media.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in the config.
 - **Review**: `<review_dir>/` holds encoded files that still need manual identification. Each unidentified disc is stored with a unique filename (for example `unidentified-1.mkv`), and the queue item is marked complete so it doesn’t block subsequent work.
 - **Logs & diagnostics**: `<log_dir>/` keeps `spindle-*.log` files for each run, the queue database, and analyzer/debug artifacts.

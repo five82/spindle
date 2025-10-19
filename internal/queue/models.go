@@ -13,6 +13,8 @@ const (
 	StatusRipped      Status = "ripped"
 	StatusEncoding    Status = "encoding"
 	StatusEncoded     Status = "encoded"
+	StatusSubtitling  Status = "subtitling"
+	StatusSubtitled   Status = "subtitled"
 	StatusOrganizing  Status = "organizing"
 	StatusCompleted   Status = "completed"
 	StatusFailed      Status = "failed"
@@ -23,6 +25,7 @@ var processingStatuses = map[Status]struct{}{
 	StatusIdentifying: {},
 	StatusRipping:     {},
 	StatusEncoding:    {},
+	StatusSubtitling:  {},
 	StatusOrganizing:  {},
 }
 
@@ -35,6 +38,7 @@ var stageRollbackTransitions = []statusTransition{
 	{from: StatusIdentifying, to: StatusPending},
 	{from: StatusRipping, to: StatusIdentified},
 	{from: StatusEncoding, to: StatusRipped},
+	{from: StatusSubtitling, to: StatusEncoded},
 	{from: StatusOrganizing, to: StatusEncoded},
 }
 
@@ -113,7 +117,7 @@ func LaneForItem(item *Item) ProcessingLane {
 	switch item.Status {
 	case StatusPending, StatusIdentifying, StatusIdentified, StatusRipping:
 		return LaneForeground
-	case StatusRipped, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted:
+	case StatusRipped, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted, StatusSubtitling, StatusSubtitled:
 		return LaneBackground
 	case StatusFailed, StatusReview:
 		if item.BackgroundLogPath != "" {

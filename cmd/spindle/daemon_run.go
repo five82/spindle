@@ -20,6 +20,7 @@ import (
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
+	"spindle/internal/subtitles"
 	"spindle/internal/workflow"
 )
 
@@ -95,10 +96,18 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 		return
 	}
 
+	var subtitleStage workflow.StageHandler
+	if cfg.SubtitlesEnabled {
+		client := subtitles.NewMistralClient(cfg.MistralAPIKey)
+		service := subtitles.NewService(cfg, client, logger)
+		subtitleStage = subtitles.NewStage(store, service, logger)
+	}
+
 	mgr.ConfigureStages(workflow.StageSet{
 		Identifier: identification.NewIdentifier(cfg, store, logger),
 		Ripper:     ripping.NewRipper(cfg, store, logger),
 		Encoder:    encoding.NewEncoder(cfg, store, logger),
+		Subtitles:  subtitleStage,
 		Organizer:  organizer.NewOrganizer(cfg, store, logger),
 	})
 }

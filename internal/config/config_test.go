@@ -14,6 +14,7 @@ import (
 
 func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	t.Setenv("TMDB_API_KEY", "test-key")
+	t.Setenv("MISTRAL_API_KEY", "mistral-key")
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 
@@ -40,6 +41,9 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	}
 	if cfg.TMDBAPIKey != "test-key" {
 		t.Fatalf("expected TMDB key from env, got %q", cfg.TMDBAPIKey)
+	}
+	if cfg.MistralAPIKey != "mistral-key" {
+		t.Fatalf("expected Mistral key from env, got %q", cfg.MistralAPIKey)
 	}
 	if cfg.TMDBBaseURL != config.Default().TMDBBaseURL {
 		t.Fatalf("unexpected TMDB base url: %q", cfg.TMDBBaseURL)

@@ -39,7 +39,7 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 - Inspect state directly when needed with SQLite:
   - `sqlite3 ~/.local/share/spindle/logs/queue.db "SELECT id, disc_title, status, progress_stage FROM queue_items;"`
   - `sqlite3 ~/.local/share/spindle/logs/queue.db ".schema queue_items"`
-- Status progression remains `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED` with `FAILED`/`REVIEW` detours. Update the enums, orchestrator routing, CLI output, docs, and tests together when making changes.
+- Status progression remains `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED` with `FAILED`/`REVIEW` detours. When introducing new stages, update enums, orchestrator routing, CLI output, docs, and tests together.
 
 ## Release Checklist
 
@@ -52,4 +52,4 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 
 ## Parking Lot / Ideas
 
-- Future experiment: integrate subtitle workflow once the AI-generated flow is ready.
+- Evaluate parallelized subtitle chunk uploads once sequential Voxtral flow proves reliable.

@@ -157,6 +157,9 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	item.FinalFile = targetPath
 	logger.Info("library move completed", logging.String("final_file", targetPath))
+	if err := o.moveGeneratedSubtitles(ctx, item, targetPath); err != nil {
+		logger.Warn("subtitle sidecar move failed", logging.Error(err))
+	}
 	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted); err != nil {
 		return err
 	}
@@ -196,6 +199,61 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	o.cleanupStaging(ctx, item)
+	return nil
+}
+
+func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item, targetPath string) error {
+	if item == nil {
+		return nil
+	}
+	encodedPath := strings.TrimSpace(item.EncodedFile)
+	if encodedPath == "" {
+		return nil
+	}
+	stagingDir := filepath.Dir(encodedPath)
+	entries, err := os.ReadDir(stagingDir)
+	if err != nil {
+		return fmt.Errorf("enumerate staging dir: %w", err)
+	}
+	base := strings.TrimSuffix(filepath.Base(encodedPath), filepath.Ext(encodedPath))
+	if base == "" {
+		base = strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
+	}
+	destBase := strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
+	destDir := filepath.Dir(targetPath)
+
+	moved := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		lower := strings.ToLower(name)
+		if !strings.HasSuffix(lower, ".srt") {
+			continue
+		}
+		prefix := base + "."
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		suffix := name[len(prefix):]
+		if suffix == "" {
+			continue
+		}
+		source := filepath.Join(stagingDir, name)
+		destination := filepath.Join(destDir, fmt.Sprintf("%s.%s", destBase, suffix))
+		if err := plex.FileMover(source, destination); err != nil {
+			return fmt.Errorf("move subtitle %q: %w", name, err)
+		}
+		moved++
+	}
+	if moved > 0 && o.logger != nil {
+		o.logger.Info(
+			"moved subtitle sidecars",
+			logging.Int("count", moved),
+			logging.String("destination_dir", destDir),
+		)
+	}
 	return nil
 }
 

@@ -40,6 +40,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newShowCommand(ctx))
 	rootCmd.AddCommand(newAddFileCommand(ctx))
 	rootCmd.AddCommand(newIdentifyCommand(ctx))
+	rootCmd.AddCommand(newGenerateSubtitleCommand(ctx))
 	rootCmd.AddCommand(newTestNotifyCommand(ctx))
 	rootCmd.AddCommand(newConfigCommand(ctx))
 	rootCmd.AddCommand(newPlexCommand(ctx.configValue))

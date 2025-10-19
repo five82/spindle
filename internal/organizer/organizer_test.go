@@ -96,6 +96,53 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 	}
 }
 
+func TestOrganizerMovesGeneratedSubtitles(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubOrganizerProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "Demo", "fp-subtitles")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusEncoded
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	encodedDir := filepath.Join(stagingRoot, "encoded")
+	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
+		t.Fatalf("mkdir encoded: %v", err)
+	}
+	item.EncodedFile = filepath.Join(encodedDir, "demo.encoded.mkv")
+	testsupport.WriteFile(t, item.EncodedFile, organizedFixtureSize)
+	subtitlePath := filepath.Join(encodedDir, "demo.encoded.en.srt")
+	if err := os.WriteFile(subtitlePath, []byte("1\n00:00:00,000 --> 00:00:01,000\nHello\n"), 0o644); err != nil {
+		t.Fatalf("write subtitle: %v", err)
+	}
+	item.MetadataJSON = `{"title":"Demo","filename":"Demo"}`
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	targetDir := filepath.Join(cfg.LibraryDir, cfg.MoviesDir)
+	stubPlex := &stubPlexService{targetDir: targetDir}
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, nil)
+	item.Status = queue.StatusOrganizing
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	expectedSubtitle := filepath.Join(targetDir, "demo.encoded.en.srt")
+	if _, err := os.Stat(expectedSubtitle); err != nil {
+		t.Fatalf("expected subtitle at %s: %v", expectedSubtitle, err)
+	}
+	if _, err := os.Stat(subtitlePath); !os.IsNotExist(err) {
+		t.Fatalf("expected subtitle removed from staging, err=%v", err)
+	}
+}
+
 func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)

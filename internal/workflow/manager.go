@@ -34,6 +34,7 @@ type StageSet struct {
 	Identifier StageHandler
 	Ripper     StageHandler
 	Encoder    StageHandler
+	Subtitles  StageHandler
 	Organizer  StageHandler
 }
 
@@ -168,6 +169,7 @@ func (m *Manager) ConfigureStages(set StageSet) {
 			doneStatus:       queue.StatusRipped,
 		})
 	}
+	organizerStart := queue.StatusEncoded
 	if set.Encoder != nil {
 		background.stages = append(background.stages, pipelineStage{
 			name:             "encoder",
@@ -177,11 +179,21 @@ func (m *Manager) ConfigureStages(set StageSet) {
 			doneStatus:       queue.StatusEncoded,
 		})
 	}
+	if set.Subtitles != nil {
+		background.stages = append(background.stages, pipelineStage{
+			name:             "subtitles",
+			handler:          set.Subtitles,
+			startStatus:      queue.StatusEncoded,
+			processingStatus: queue.StatusSubtitling,
+			doneStatus:       queue.StatusSubtitled,
+		})
+		organizerStart = queue.StatusSubtitled
+	}
 	if set.Organizer != nil {
 		background.stages = append(background.stages, pipelineStage{
 			name:             "organizer",
 			handler:          set.Organizer,
-			startStatus:      queue.StatusEncoded,
+			startStatus:      organizerStart,
 			processingStatus: queue.StatusOrganizing,
 			doneStatus:       queue.StatusCompleted,
 		})

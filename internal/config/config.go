@@ -46,6 +46,8 @@ type Config struct {
 	LogLevel                  string  `toml:"log_level"`
 	DraptoPreset              int     `toml:"drapto_preset"`
 	DraptoDisableDenoise      bool    `toml:"drapto_disable_denoise"`
+	SubtitlesEnabled          bool    `toml:"subtitles_enabled"`
+	MistralAPIKey             string  `toml:"mistral_api_key"`
 }
 
 const (
@@ -212,6 +214,13 @@ func (c *Config) normalize() error {
 			c.DraptoLogDir = ""
 		} else {
 			c.DraptoLogDir = filepath.Join(c.LogDir, "drapto")
+		}
+	}
+
+	c.MistralAPIKey = strings.TrimSpace(c.MistralAPIKey)
+	if c.MistralAPIKey == "" {
+		if value, ok := os.LookupEnv("MISTRAL_API_KEY"); ok {
+			c.MistralAPIKey = strings.TrimSpace(value)
 		}
 	}
 
@@ -415,6 +424,10 @@ tv_library = "TV Shows"                              # Plex TV library name
 # Notifications
 ntfy_topic = "https://ntfy.sh/your_topic"            # ntfy topic for push notifications (optional)
 ntfy_request_timeout = 10                            # ntfy HTTP client timeout (seconds)
+
+# AI-generated subtitles (optional)
+subtitles_enabled = false                            # Enable Voxtral subtitle generation after encoding
+mistral_api_key = ""                                 # Required when subtitles_enabled=true (or set MISTRAL_API_KEY env var)
 
 # ============================================================================
 # TMDB & METADATA

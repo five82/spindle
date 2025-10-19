@@ -98,7 +98,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 		return true, nil
 	}
 
-	if status == queue.StatusIdentified || status == queue.StatusRipped || status == queue.StatusEncoded || status == queue.StatusOrganizing || existing.IsProcessing() {
+	if status == queue.StatusIdentified || status == queue.StatusRipped || status == queue.StatusEncoded || status == queue.StatusSubtitled || status == queue.StatusOrganizing || existing.IsProcessing() {
 		if updated {
 			if err := p.store.Update(ctx, existing); err != nil {
 				if logger != nil {

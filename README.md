@@ -96,6 +96,8 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `plex_url` – Plex server address used for library refreshes
 - `plex_link_enabled` – If `true`, Spindle links to Plex and triggers library scans automatically
 - `ntfy_topic` (optional) – Channel for notifications
+- `subtitles_enabled` (optional) – Enable Voxtral AI subtitle generation after encoding
+- `mistral_api_key` (optional) – Required when subtitles are enabled; can also be supplied via `MISTRAL_API_KEY`
 - `api_bind` – Host:port for the built-in JSON API (defaults to `127.0.0.1:7487`)
 - `keydb_path` – Location where Spindle stores/reads `KEYDB.cfg` for Disc ID lookups (defaults to `~/.config/spindle/keydb/KEYDB.cfg`)
 - `keydb_download_url` – Mirror URL Spindle uses when auto-refreshing `KEYDB.cfg`
@@ -132,6 +134,7 @@ spindle plex link
 - `spindle queue health` for lifecycle counts
 - `spindle queue-health` for database diagnostics
 - `spindle add-file /path/to/video.mkv`
+- `spindle gensubtitle /path/to/video.mkv`
 - `spindle test-notify`
 - `spindle config validate`
 - `spindle show --lines 50 --follow` for live tailing
@@ -152,8 +155,10 @@ Adjust the bind address with the `api_bind` configuration key. The API is intend
 Spindle runs as a daemon and moves each disc through the queue:
 
 ```
-PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED
+PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED
 ```
+
+*(The subtitle stage runs only when `subtitles_enabled = true` in your config.)*
 
 - `FAILED`: unrecoverable issue (inspect logs / notifications)
 - `REVIEW`: manual intervention required. When Spindle cannot identify a disc, it still rips/encodes the content, drops the final file into the `review_dir` (default `~/review`) with a unique name (for example `unidentified-1.mkv`), and marks the queue item complete so the pipeline keeps moving.
