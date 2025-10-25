@@ -54,7 +54,7 @@ spindle show --follow
 
 **Optional (for better identification):**
 - **bd_info** – For enhanced disc identification when MakeMKV returns generic titles:
-  - Ubuntu/Debian: `sudo apt install libbluray-utils`
+  - Ubuntu/Debian: `sudo apt install libbluray-bin`
   - Fedora/CentOS: `sudo dnf install libbluray-utils`
   - Arch: `sudo pacman -S libbluray`
 - **Disc Automounting**:
