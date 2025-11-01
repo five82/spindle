@@ -47,7 +47,7 @@ type Config struct {
 	DraptoPreset              int     `toml:"drapto_preset"`
 	DraptoDisableDenoise      bool    `toml:"drapto_disable_denoise"`
 	SubtitlesEnabled          bool    `toml:"subtitles_enabled"`
-	MistralAPIKey             string  `toml:"mistral_api_key"`
+	WhisperXCUDAEnabled       bool    `toml:"whisperx_cuda_enabled"`
 }
 
 const (
@@ -216,14 +216,6 @@ func (c *Config) normalize() error {
 			c.DraptoLogDir = filepath.Join(c.LogDir, "drapto")
 		}
 	}
-
-	c.MistralAPIKey = strings.TrimSpace(c.MistralAPIKey)
-	if c.MistralAPIKey == "" {
-		if value, ok := os.LookupEnv("MISTRAL_API_KEY"); ok {
-			c.MistralAPIKey = strings.TrimSpace(value)
-		}
-	}
-
 	c.APIBind = strings.TrimSpace(c.APIBind)
 	if c.APIBind == "" {
 		c.APIBind = defaultAPIBind
@@ -426,8 +418,8 @@ ntfy_topic = "https://ntfy.sh/your_topic"            # ntfy topic for push notif
 ntfy_request_timeout = 10                            # ntfy HTTP client timeout (seconds)
 
 # AI-generated subtitles (optional)
-subtitles_enabled = false                            # Enable Voxtral subtitle generation after encoding
-mistral_api_key = ""                                 # Required when subtitles_enabled=true (or set MISTRAL_API_KEY env var)
+subtitles_enabled = false                            # Enable WhisperX subtitle generation after encoding
+whisperx_cuda_enabled = false                        # Run WhisperX with CUDA; set true when GPU + CUDA/cuDNN are installed
 
 # ============================================================================
 # TMDB & METADATA

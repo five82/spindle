@@ -2,12 +2,10 @@ package subtitles
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
-	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,86 +14,176 @@ import (
 	"spindle/internal/media/ffprobe"
 )
 
-func TestBuildChunksRespectsOverlap(t *testing.T) {
-	svc := &Service{chunkDuration: 15 * time.Minute, chunkOverlap: 2 * time.Second}
-	chunks, err := svc.buildChunks(3600) // one hour
-	if err != nil {
-		t.Fatalf("buildChunks returned error: %v", err)
+func TestBuildNetflixCuesRespectsLimits(t *testing.T) {
+	words := []word{
+		{Text: "Hello", Start: 0.0, End: 0.6},
+		{Text: "there", Start: 0.6, End: 1.1},
+		{Text: "general", Start: 1.1, End: 1.6},
+		{Text: "Kenobi.", Start: 1.6, End: 2.2},
+		{Text: "You", Start: 3.0, End: 3.5},
+		{Text: "are", Start: 3.5, End: 4.0},
+		{Text: "a", Start: 4.0, End: 4.2},
+		{Text: "bold", Start: 4.2, End: 4.7},
+		{Text: "one.", Start: 4.7, End: 5.2},
 	}
-	if len(chunks) != 4 {
-		t.Fatalf("expected 4 chunks for 60m duration, got %d", len(chunks))
+	segment := whisperSegment{Start: words[0].Start, End: words[len(words)-1].End}
+	segment.Words = make([]whisperWordJSON, len(words))
+	for i, w := range words {
+		segment.Words[i] = whisperWordJSON{Word: w.Text, Start: w.Start, End: w.End}
 	}
-	if chunks[1].Start >= chunks[1].End {
-		t.Fatalf("chunk start >= end: %+v", chunks[1])
+
+	groups := buildCueWordGroups([]whisperSegment{segment})
+	if len(groups) == 0 {
+		t.Fatal("expected cue groups to be produced")
 	}
-	if chunks[1].Start >= chunks[0].End {
-		t.Fatalf("expected overlap between chunks: %+v %+v", chunks[0], chunks[1])
+	cues := convertCueWordsToCues(groups)
+	cues = enforceCueDurations(cues)
+	if len(cues) == 0 {
+		t.Fatal("expected cues to be produced")
 	}
-	if diff := math.Abs(chunks[1].Base - chunks[0].End); diff > 0.5 {
-		t.Fatalf("expected chunk1 base to align with chunk0 end: base=%f end=%f", chunks[1].Base, chunks[0].End)
+	for _, cue := range cues {
+		lines := strings.Split(cue.Text, "\n")
+		if len(lines) > netflixMaxLines {
+			t.Fatalf("expected <=%d lines, got %d (%q)", netflixMaxLines, len(lines), cue.Text)
+		}
+		for _, line := range lines {
+			if len([]rune(line)) > netflixMaxLineChars {
+				t.Fatalf("line exceeds %d chars: %q", netflixMaxLineChars, line)
+			}
+		}
+		duration := cue.End - cue.Start
+		if duration > netflixMaxCueDuration.Seconds()+0.01 {
+			t.Fatalf("duration exceeds max: %.2f", duration)
+		}
+		if duration < netflixMinCueDuration.Seconds()-0.02 {
+			t.Fatalf("duration below min: %.2f", duration)
+		}
+		cps := float64(countCharacters(strings.ReplaceAll(cue.Text, "\n", ""))) / duration
+		if cps > netflixMaxCharsPerSec+0.1 {
+			t.Fatalf("CPS exceeds limit: %.2f", cps)
+		}
 	}
 }
 
-func TestAppendCueMergesDuplicates(t *testing.T) {
-	cues := []Cue{}
-	cues = appendCue(cues, Cue{Start: 0, End: 1, Text: "Hello"})
-	cues = appendCue(cues, Cue{Start: 0.05, End: 1.2, Text: "hello"})
-	if len(cues) != 1 {
-		t.Fatalf("expected merged cues, got %d", len(cues))
-	}
-	if cues[0].End <= 1.1 {
-		t.Fatalf("expected extended cue end, got %f", cues[0].End)
-	}
-
-	prev := Cue{Start: 9.8, End: 10.2, Text: "Hello"}
-	next := Cue{Start: 10.25, End: 10.6, Text: "hello"}
-	if _, ok := mergeCue(prev, next); !ok {
-		t.Fatalf("expected cues to merge by end gap")
-	}
-
-	prev = Cue{Start: 59.0, End: 60.0, Text: "Mrs. Potato Head."}
-	next = Cue{Start: 60.0, End: 61.5, Text: "Mrs. Potato Head, Mrs. Potato Head, Mrs. Potato Head."}
-	merged, ok := mergeCue(prev, next)
-	if !ok {
-		t.Fatalf("expected cues to merge when next text extends previous")
-	}
-	if !strings.Contains(merged.Text, ",") {
-		t.Fatalf("expected merged text to prefer extended phrase, got %q", merged.Text)
-	}
-}
-
-func TestWriteSRT(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sample.srt")
-	cues := []Cue{{Start: 0, End: 1.5, Text: "Hello world"}}
-	if err := writeSRT(path, cues); err != nil {
-		t.Fatalf("writeSRT returned error: %v", err)
-	}
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read srt: %v", err)
-	}
-	if len(contents) == 0 || string(contents[:1]) != "1" {
-		t.Fatalf("unexpected srt contents: %q", string(contents))
-	}
-}
-
-func TestChooseDemuxPlan(t *testing.T) {
-	expect := demuxPlan{Extension: ".opus", Format: "opus", AudioCodec: "libopus", ExtraArgs: []string{"-ac", "1", "-ar", "16000", "-b:a", "64000"}}
-	plan := chooseDemuxPlan()
-	if plan.Extension != expect.Extension || plan.Format != expect.Format || plan.AudioCodec != expect.AudioCodec || !reflect.DeepEqual(plan.ExtraArgs, expect.ExtraArgs) {
-		t.Fatalf("unexpected plan %+v", plan)
-	}
-}
-
-func TestGenerateUsesChunkStartForOffsets(t *testing.T) {
-	t.Helper()
-
+func TestServiceGenerateProducesNetflixSRT_CPUMode(t *testing.T) {
 	tmp := t.TempDir()
-	source := filepath.Join(tmp, "source.mkv")
-	if err := os.WriteFile(source, []byte("fake-video"), 0o644); err != nil {
+	source := filepath.Join(tmp, "movie.mkv")
+	if err := os.WriteFile(source, []byte("fake video"), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
 
+	stub := setupInspectAndStub(t, 120, false)
+
+	cfg := config.Default()
+	cfg.SubtitlesEnabled = true
+	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner))
+
+	result, err := service.Generate(context.Background(), GenerateRequest{
+		SourcePath: source,
+		WorkDir:    filepath.Join(tmp, "work"),
+		OutputDir:  filepath.Join(tmp, "out"),
+		BaseName:   "movie",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if !stub.called {
+		t.Fatalf("expected command runner to be called")
+	}
+	if result.SegmentCount == 0 {
+		t.Fatalf("expected non-zero segments")
+	}
+	if _, err := os.Stat(result.SubtitlePath); err != nil {
+		t.Fatalf("expected subtitle file to exist: %v", err)
+	}
+	contents, err := os.ReadFile(result.SubtitlePath)
+	if err != nil {
+		t.Fatalf("read srt: %v", err)
+	}
+	t.Logf("\n%s", string(contents))
+	lines := strings.Split(string(contents), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, "-->") || strings.HasPrefix(line, "1") || strings.HasPrefix(line, "2") {
+			continue
+		}
+		if len([]rune(line)) > netflixMaxLineChars {
+			t.Fatalf("line exceeds limit: %q", line)
+		}
+	}
+	if result.Duration != 120*time.Second {
+		t.Fatalf("unexpected duration: %s", result.Duration)
+	}
+	if !strings.Contains(string(contents), "<i>") {
+		t.Fatalf("expected italicized lyric cue in output")
+	}
+	if !strings.Contains(string(contents), "\u266A") {
+		t.Fatalf("expected lyric cue to include music note")
+	}
+	if strings.Contains(string(contents), "\nThank\n") {
+		t.Fatalf("expected lyric fragments to merge, found isolated 'Thank'")
+	}
+	if strings.Contains(string(contents), "Somebody do\n") {
+		t.Fatalf("expected 'Somebody do something' to stay in a single cue")
+	}
+}
+
+func TestServiceGenerateUsesCUDAArgsWhenEnabled(t *testing.T) {
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "movie.mkv")
+	if err := os.WriteFile(source, []byte("fake video"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	stub := setupInspectAndStub(t, 60, true)
+
+	cfg := config.Default()
+	cfg.SubtitlesEnabled = true
+	cfg.WhisperXCUDAEnabled = true
+	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner))
+
+	if _, err := service.Generate(context.Background(), GenerateRequest{
+		SourcePath: source,
+		WorkDir:    filepath.Join(tmp, "work"),
+		OutputDir:  filepath.Join(tmp, "out"),
+		BaseName:   "movie",
+	}); err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if !stub.called {
+		t.Fatalf("expected command runner to be called")
+	}
+}
+
+func TestMergeShortCueWordsCombinesAdjacentWords(t *testing.T) {
+	groups := []cueWordGroup{
+		{Words: []word{{Text: "Stop", Start: 0.0, End: 0.1}}},
+		{Words: []word{{Text: "it,", Start: 0.12, End: 0.22}}},
+		{Words: []word{{Text: "stop", Start: 0.23, End: 0.33}}},
+		{Words: []word{{Text: "it,", Start: 0.34, End: 0.44}}},
+		{Words: []word{{Text: "you", Start: 0.45, End: 0.55}}},
+		{Words: []word{{Text: "mean", Start: 0.56, End: 0.66}}},
+		{Words: []word{{Text: "old", Start: 0.67, End: 0.77}}},
+		{Words: []word{{Text: "potato.", Start: 0.78, End: 1.20}}},
+	}
+	merged := mergeShortCueWords(groups)
+	if len(merged) > 2 {
+		t.Fatalf("expected merged cues to be compact, got %d", len(merged))
+	}
+	first := strings.Join(wrapText(joinWords(merged[0].Words)), " ")
+	if len(strings.Fields(first)) < 3 {
+		t.Fatalf("expected first cue to contain multiple words, got %q", first)
+	}
+}
+
+type whisperXStub struct {
+	t          *testing.T
+	expectCUDA bool
+	called     bool
+	duration   float64
+}
+
+func setupInspectAndStub(t *testing.T, durationSeconds float64, expectCUDA bool) *whisperXStub {
 	origInspect := inspectMedia
 	t.Cleanup(func() {
 		inspectMedia = origInspect
@@ -105,137 +193,179 @@ func TestGenerateUsesChunkStartForOffsets(t *testing.T) {
 			Streams: []ffprobe.Stream{
 				{Index: 0, CodecType: "audio", CodecName: "aac", Tags: map[string]string{"language": "eng"}},
 			},
-			Format: ffprobe.Format{Duration: "40"},
+			Format: ffprobe.Format{Duration: formatDurationSeconds(durationSeconds)},
 		}, nil
 	}
+	return &whisperXStub{
+		t:          t,
+		expectCUDA: expectCUDA,
+		duration:   durationSeconds,
+	}
+}
 
-	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
+func (s *whisperXStub) Runner(_ context.Context, _ string, args ...string) error {
+	s.called = true
 
-	var responses []TranscriptionResponse
-	client := &stubClient{}
-	runner := func(_ context.Context, _ string, args ...string) error {
-		target := args[len(args)-1]
-		return os.WriteFile(target, []byte("audio"), 0o644)
+	var outputDir, sourcePath, indexURL, extraIndexURL, device, computeType string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--output_dir":
+			if i+1 < len(args) {
+				outputDir = args[i+1]
+			}
+		case "--index-url":
+			if i+1 < len(args) {
+				indexURL = args[i+1]
+			}
+		case "--extra-index-url":
+			if i+1 < len(args) {
+				extraIndexURL = args[i+1]
+			}
+		case "--device":
+			if i+1 < len(args) {
+				device = args[i+1]
+			}
+		case "--compute_type":
+			if i+1 < len(args) {
+				computeType = args[i+1]
+			}
+		default:
+			if strings.HasSuffix(args[i], ".mkv") {
+				sourcePath = args[i]
+			}
+		}
 	}
 
-	service := NewService(&cfg, client, nil,
-		WithChunkDuration(10*time.Second),
-		WithChunkOverlap(2*time.Second),
-		WithCommandRunner(runner),
-	)
+	if outputDir == "" {
+		s.t.Fatal("command missing --output_dir")
+	}
+	if sourcePath == "" {
+		s.t.Fatal("command missing source path")
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		s.t.Fatalf("mkdir output: %v", err)
+	}
 
-	chunks, err := service.buildChunks(40)
+	switch {
+	case s.expectCUDA:
+		if device != whisperXCUDADevice {
+			s.t.Fatalf("expected cuda device, got %q", device)
+		}
+		if indexURL != whisperXCUDAIndexURL {
+			s.t.Fatalf("expected cuda index url %q, got %q", whisperXCUDAIndexURL, indexURL)
+		}
+		if extraIndexURL != whisperXPypiIndexURL {
+			s.t.Fatalf("expected extra index url %q, got %q", whisperXPypiIndexURL, extraIndexURL)
+		}
+		if computeType != "" {
+			s.t.Fatalf("unexpected compute type in CUDA mode: %q", computeType)
+		}
+	default:
+		if device != whisperXCPUDevice {
+			s.t.Fatalf("expected cpu device, got %q", device)
+		}
+		if computeType != whisperXCPUComputeType {
+			s.t.Fatalf("expected compute type %q, got %q", whisperXCPUComputeType, computeType)
+		}
+		if indexURL != whisperXPypiIndexURL {
+			s.t.Fatalf("expected cpu index url %q, got %q", whisperXPypiIndexURL, indexURL)
+		}
+		if extraIndexURL != "" {
+			s.t.Fatalf("unexpected extra index url in CPU mode: %q", extraIndexURL)
+		}
+	}
+
+	base := strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))
+	payload := whisperJSON{
+		Segments: []whisperSegment{
+			{
+				Start: 0.0,
+				End:   0.7,
+				Text:  "Thank",
+				Words: []whisperWordJSON{{Word: "Thank", Start: 0.0, End: 0.7}},
+			},
+			{
+				Start: 0.8,
+				End:   1.4,
+				Text:  "you",
+				Words: []whisperWordJSON{{Word: "you", Start: 0.8, End: 1.4}},
+			},
+			{
+				Start: 1.5,
+				End:   2.2,
+				Text:  "Thank",
+				Words: []whisperWordJSON{{Word: "Thank", Start: 1.5, End: 2.2}},
+			},
+			{
+				Start: 2.3,
+				End:   3.0,
+				Text:  "you",
+				Words: []whisperWordJSON{{Word: "you", Start: 2.3, End: 3.0}},
+			},
+			{
+				Start: 3.5,
+				End:   6.0,
+				Text:  "Hello there.",
+				Words: []whisperWordJSON{
+					{Word: "Hello", Start: 3.5, End: 4.1},
+					{Word: "there.", Start: 4.1, End: 6.0},
+				},
+			},
+			{
+				Start: 7.0,
+				End:   9.5,
+				Text:  "General Kenobi, you are a bold one.",
+				Words: []whisperWordJSON{
+					{Word: "General", Start: 7.0, End: 7.6},
+					{Word: "Kenobi,", Start: 7.6, End: 8.2},
+					{Word: "you", Start: 8.2, End: 8.6},
+					{Word: "are", Start: 8.6, End: 9.0},
+					{Word: "a", Start: 9.0, End: 9.2},
+					{Word: "bold", Start: 9.2, End: 9.4},
+					{Word: "one.", Start: 9.4, End: 9.5},
+				},
+			},
+			{
+				Start: 10.0,
+				End:   13.0,
+				Text:  "You got a friend in me",
+				Words: []whisperWordJSON{
+					{Word: "You", Start: 10.0, End: 10.8},
+					{Word: "got", Start: 10.8, End: 11.3},
+					{Word: "a", Start: 11.3, End: 11.5},
+					{Word: "friend", Start: 11.5, End: 12.1},
+					{Word: "in", Start: 12.1, End: 12.4},
+					{Word: "me", Start: 12.4, End: 13.0},
+				},
+			},
+			{
+				Start: 13.5,
+				End:   14.8,
+				Text:  "Somebody do",
+				Words: []whisperWordJSON{
+					{Word: "Somebody", Start: 13.5, End: 14.2},
+					{Word: "do", Start: 14.2, End: 14.8},
+				},
+			},
+			{
+				Start: 14.8,
+				End:   15.6,
+				Text:  "something.",
+				Words: []whisperWordJSON{{Word: "something.", Start: 14.8, End: 15.6}},
+			},
+		},
+	}
+	data, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("buildChunks: %v", err)
+		s.t.Fatalf("marshal payload: %v", err)
 	}
-	responses = make([]TranscriptionResponse, len(chunks))
-	for i, chunk := range chunks {
-		span := chunk.End - chunk.Start
-		overlap := math.Min(2, span)
-		mainEnd := span
-		segments := []TranscribedSpan{
-			{Start: 0, End: overlap, Text: fmt.Sprintf("chunk%d-overlap", i)},
-		}
-		if mainEnd > overlap+0.05 {
-			segments = append(segments, TranscribedSpan{
-				Start: overlap,
-				End:   mainEnd,
-				Text:  fmt.Sprintf("chunk%d-main", i),
-			})
-		}
-		responses[i] = TranscriptionResponse{Segments: segments}
+	jsonPath := filepath.Join(outputDir, base+".json")
+	if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
+		s.t.Fatalf("write json: %v", err)
 	}
-	client.responses = responses
-
-	workDir := filepath.Join(tmp, "work")
-	outputDir := filepath.Join(tmp, "out")
-	result, err := service.Generate(context.Background(), GenerateRequest{
-		SourcePath: source,
-		WorkDir:    workDir,
-		OutputDir:  outputDir,
-		BaseName:   "example",
-	})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
-	}
-
-	data, err := os.ReadFile(result.SubtitlePath)
-	if err != nil {
-		t.Fatalf("read subtitle: %v", err)
-	}
-	starts := parseCueStarts(string(data))
-	if _, ok := starts["chunk1-overlap"]; ok {
-		t.Fatalf("expected chunk1-overlap cue to be trimmed, subtitles:\n%s", string(data))
-	}
-
-	got, ok := starts["chunk1-main"]
-	if !ok {
-		t.Fatalf("expected chunk1-main cue, subtitles:\n%s", string(data))
-	}
-	if math.Abs(got-10.0) > 0.05 {
-		t.Fatalf("expected chunk1-main at ~10s, got %.3f", got)
-	}
-
-	got, ok = starts["chunk2-main"]
-	if !ok {
-		t.Fatalf("expected chunk2-main cue, subtitles:\n%s", string(data))
-	}
-	if math.Abs(got-20.0) > 0.05 {
-		t.Fatalf("expected chunk2-main at ~20s, got %.3f", got)
-	}
+	return nil
 }
 
-type stubClient struct {
-	responses []TranscriptionResponse
-	calls     int
-}
-
-func (s *stubClient) Transcribe(ctx context.Context, req TranscriptionRequest) (TranscriptionResponse, error) {
-	if s.calls >= len(s.responses) {
-		return TranscriptionResponse{}, fmt.Errorf("unexpected transcription call %d", s.calls)
-	}
-	resp := s.responses[s.calls]
-	s.calls++
-	return resp, nil
-}
-
-func parseCueStarts(contents string) map[string]float64 {
-	result := make(map[string]float64)
-	blocks := strings.Split(strings.TrimSpace(contents), "\n\n")
-	for _, block := range blocks {
-		lines := strings.Split(strings.TrimSpace(block), "\n")
-		if len(lines) < 3 {
-			continue
-		}
-		timeParts := strings.Split(lines[1], " --> ")
-		if len(timeParts) != 2 {
-			continue
-		}
-		start := parseTimestampToSeconds(timeParts[0])
-		text := strings.TrimSpace(strings.Join(lines[2:], " "))
-		if text != "" {
-			result[text] = start
-		}
-	}
-	return result
-}
-
-func parseTimestampToSeconds(value string) float64 {
-	parts := strings.Split(value, ",")
-	if len(parts) != 2 {
-		return 0
-	}
-	main := parts[0]
-	msPart := parts[1]
-	timePieces := strings.Split(main, ":")
-	if len(timePieces) != 3 {
-		return 0
-	}
-	hours, _ := strconv.Atoi(timePieces[0])
-	minutes, _ := strconv.Atoi(timePieces[1])
-	seconds, _ := strconv.Atoi(timePieces[2])
-	millis, _ := strconv.Atoi(msPart)
-	total := hours*3600 + minutes*60 + seconds
-	return float64(total) + float64(millis)/1000.0
+func formatDurationSeconds(value float64) string {
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", value), "0"), ".")
 }

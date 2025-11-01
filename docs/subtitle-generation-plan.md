@@ -1,63 +1,72 @@
-# AI-Generated Subtitles Implementation Plan
+# WhisperX Subtitle Generation Plan
 
 ## Summary
-Introduce optional AI transcription using the Voxtral Mini Transcribe 2507 model via the Mistral API to generate Plex-compatible external `.srt` subtitles for the primary audio track of encoded outputs.
+Enable optional, fully local subtitle generation by invoking WhisperX with CUDA acceleration. After transcription/alignment, reshape the output to satisfy Netflix best practices (42 characters per line, ≤2 lines, 1–7 second cues, ≤17 CPS) before handing the `.srt` file to Plex/organizer.
 
 ## Goals
-- Keep the feature opt-in with clear configuration toggles and an API key entry.
-- Generate high-quality SRT subtitles without blocking the main ripping/encoding pipeline.
-- Align subtitle naming and placement with Plex expectations so the organizer stage moves them automatically.
+- Keep the feature opt-in (`subtitles_enabled` in `config.toml`).
+- Produce high-quality, Netflix-compliant SRT files without blocking the primary workflow.
+- Avoid external APIs or recurring costs; depend only on installed CUDA drivers, `uv`, and WhisperX.
 
 ## Configuration
-- Add `SubtitlesEnabled bool` (default `false`) and `MistralAPIKey string` to `internal/config.Config` and TOML parsing.
-- Document new keys in `README.md` and sample config snippets.
-- Ensure the API key never appears in logs; restrict it to the subtitle module via dependency injection.
+- Retain `SubtitlesEnabled bool` (default `false`) in `internal/config.Config` and add `WhisperXCUDAEnabled bool` (default `false`) to opt into GPU acceleration when CUDA/cuDNN are present.
+- Document prerequisites: CUDA 12.8+, cuDNN 9.1 (matching PyTorch wheels), `uv` CLI providing `uvx` when GPU mode is desired; CPU mode works without CUDA.
+- Update README/sample config to highlight WhisperX requirements (GPU, disk, temp space).
 
 ## Workflow Placement
-- Hook a new subtitle stage immediately after encoding completes and before organizer runs in the background lane.
-- Pass queue item metadata (encoded file path, primary language) to the subtitle module.
-- On failure, log a warning, skip subtitle generation, and proceed unless a future `subtitle_required` flag is enabled.
+- Subtitle stage still runs immediately after encoding and before organizer.
+- Queue item supplies encoded file path and language metadata (when available).
+- Failures log a warning and let the pipeline continue; no hard failure unless future config demands it.
 
 ## Standalone CLI Command
-- Add a new CLI entry (working name `spindle gensubtitle`) that accepts a path to an already encoded MKV/MP4 file.
-- Reuse the subtitle module to demux the primary audio, submit it to Voxtral, and drop the resulting `basename.<lang>.srt` alongside the source file.
-- Allow overriding the output directory via a flag; exit non-zero when the API key is missing or transcription fails.
-- Share implementation with the workflow stage to avoid duplicate logic and keep unit tests consistent.
+- `spindle gensubtitle` now shells out to WhisperX instead of Voxtral.
+- Options:
+  - Source path (required).
+  - Optional `--output` and `--work-dir`.
+- Command writes Netflix-shaped SRT alongside the source (or requested directory).
 
-## Audio Extraction & Chunking
-- Reuse `ffprobe` results from encoding to confirm the primary audio stream (fall back to stream index 0 if metadata missing).
-- Use `ffmpeg` to demux the primary audio into an `.opus` (Ogg) file via `-c copy`; run end-to-end tests to confirm Voxtral accepts it before adding any transcode fallback.
-- Slice the demuxed audio into ≤5 minute segments with small (1–2 s) overlaps to satisfy Mistral limits and preserve dialogue continuity.
+## WhisperX Invocation
+- Use `uvx` to run WhisperX in an isolated environment:
+  ```
+  uvx --index-url https://download.pytorch.org/whl/cu128 \
+      --extra-index-url https://pypi.org/simple \
+      whisperx <source> \
+      --model large-v3 \
+      --align_model WAV2VEC2_ASR_LARGE_LV60K_960H \
+      --segment_resolution chunk \
+      --chunk_size 15 \
+      --vad_method pyannote --vad_onset 0.08 --vad_offset 0.07 \
+      --beam_size 10 --best_of 10 --temperature 0.0 --patience 1.0 \
+      --batch_size 4 --output_format all --language <iso639-1 when known>
+  ```
+- When CPU mode is requested, drop the CUDA wheel indices and append `--device cpu --compute_type float32`.
+- Output directory is a staging subfolder; we parse the resulting JSON for word timings.
 
-## Mistral API Integration
-- Create `internal/subtitles` with a `Client` interface so tests can stub responses.
-- Call `POST /v1/audio/transcriptions` with multipart form data (`file`, `model=voxtral-mini-2507`, `language` when detected, `timestamp_granularities=segment`).
-- Serialize requests sequentially to respect rate limits; add exponential backoff for `429` or transient errors.
-- Track cumulative offsets per chunk so returned segment timestamps translate to absolute positions.
-
-## Post-Processing & SRT Output
-- Build cue list by adjusting each segment’s `start`/`end` with the chunk offset and clamping negatives.
-- Deduplicate overlapping cues from chunk overlaps (prefer longer span, merge ellipses when needed).
-- Normalize whitespace, wrap at ~42 characters, and NFC-normalize text to avoid mixed forms.
-- Emit `basename.<lang>.srt` (e.g., `Movie.en.srt`) alongside the encoded MKV in staging; organizer will move both.
-- Optionally store a JSON summary (counts, duration, API metrics) in logs for debugging.
+## Netflix Formatting
+- Flatten WhisperX word-level timings and group them into cues respecting:
+  - ≤2 lines, ≤42 characters per line.
+  - Duration between 1s and 7s.
+  - Reading speed ≤17 characters/second.
+  - ≥120 ms gap between consecutive cues.
+- Split/merge cues greedily while evaluating those constraints.
+- Write `basename.<lang>.srt` using normalized whitespace and newline-wrapped lines.
 
 ## Error Handling & Observability
-- Update queue progress messages (e.g., "Generating AI subtitles") and percentages while transcription runs.
-- Capture API latency, chunk count, and total cost estimate in debug logs.
-- If the API key is missing and subtitles are enabled, surface a configuration error and mark the queue item `failed` with a clear message.
+- Update progress messages to “Running WhisperX transcription”.
+- Log WhisperX command parameters, segment counts, and duration.
+- Keep intermediate WhisperX outputs in a temp directory; remove after SRT is generated.
 
-## Testing Strategy
-- Unit tests for chunking, timestamp adjustments, and SRT formatting using fixture JSON.
-- Integration test with a fake Mistral client returning deterministic segments; ensure files land in staging and organizer picks them up.
-- Manual smoke test script to hit the real API with a short audio clip (documented in `docs/development.md`).
+## Testing
+- Unit tests cover cue grouping, line wrapping, CPS checks, and duration adjustments.
+- Integration test stubs WhisperX execution (providing JSON fixtures) to exercise `Service.Generate`.
+- Manual smoke test script (documented in `docs/development.md`) runs WhisperX on a short clip to validate CUDA setup.
 
-## Documentation & Tooling Updates
-- Extend `docs/workflow.md` with a section explaining the subtitle stage.
-- Add a configuration snippet and cost warning to `README.md`.
-- Provide a CLI how-to in `docs/development.md` describing testing and environment variables for the API key.
+## Documentation Updates
+- Refresh `docs/workflow.md` and README to describe WhisperX-based subtitles.
+- Provide troubleshooting tips for CUDA/cuDNN mismatches and WhisperX installation.
+- Remove references to Voxtral/Mistral API keys.
 
 ## Future Enhancements
-- Optional parallel segment uploads once sequential flow proves stable.
-- Language overrides per queue item or via CLI flags.
-- Forced/SDH subtitle variants if Voxtral metadata exposes the distinction.
+- Allow user overrides for max CPS/line length per language.
+- Support diarization for multi-speaker captioning when WhisperX adds stable APIs.
+- Cache WhisperX downloads between runs (shared `uv` cache) and expose metrics (GPU time, VRAM usage).

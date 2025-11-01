@@ -98,8 +98,7 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 
 	var subtitleStage workflow.StageHandler
 	if cfg.SubtitlesEnabled {
-		client := subtitles.NewMistralClient(cfg.MistralAPIKey)
-		service := subtitles.NewService(cfg, client, logger)
+		service := subtitles.NewService(cfg, logger)
 		subtitleStage = subtitles.NewStage(store, service, logger)
 	}
 

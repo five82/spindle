@@ -19,7 +19,7 @@ Every item moves through the queue in order. The statuses you will see are:
 - `IDENTIFYING` -> `IDENTIFIED` - MakeMKV scan + TMDB lookup completed
 - `RIPPING` -> `RIPPED` - video copied to the staging area; you’ll get a notification so the disc can be ejected manually
 - `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
-- `SUBTITLING` -> `SUBTITLED` *(optional)* - Voxtral generates AI subtitles when enabled
+- `SUBTITLING` -> `SUBTITLED` *(optional)* - WhisperX generates Netflix-compliant AI subtitles when enabled
 - `ORGANIZING` -> `COMPLETED` - file moved into your library, Plex refresh triggered
 - `REVIEW` - manual attention required (no confident match found)
 - `FAILED` - an error stopped progress; inspect logs and retry when ready
@@ -60,14 +60,14 @@ Encoding happens in the background, so you can insert the next disc while previo
 
 ## Stage 5: AI Subtitle Generation (SUBTITLING -> SUBTITLED)
 
-When `subtitles_enabled = true` in `config.toml`, Spindle generates a Plex-compatible `.srt` using the Mistral Voxtral Mini Transcribe 2507 model before organizing begins.
+When `subtitles_enabled = true` in `config.toml`, Spindle shells out to WhisperX (via `uvx`) to transcribe and align subtitles locally, then reshapes the results to follow Netflix timing/formatting rules before organizing begins. Set `whisperx_cuda_enabled = true` to run WhisperX on the GPU; leave it `false` to use CPU-only mode for environments without CUDA.
 
-1. After encoding, the queue updates to `SUBTITLING` and Spindle demuxes the primary audio track to `.opus`.
-2. Audio is split into ≤15 minute chunks with small overlaps, then uploaded sequentially to the Mistral API using your `mistral_api_key`.
-3. Returned segments are merged into a single SRT with timestamp smoothing and line wrapping. The subtitle lands next to the encoded file in the staging directory with the naming format `<basename>.<lang>.srt` (for example, `Movie.en.srt`).
-4. On success the queue status becomes `SUBTITLED`. If transcription fails, the stage logs a warning and the organizer still runs; the queue item is marked `FAILED` only when subtitles are enabled but no API key is configured.
+1. After encoding, the queue updates to `SUBTITLING` and Spindle runs WhisperX with the `large-v3` model, wav2vec2 alignment, and CUDA enabled.
+2. WhisperX writes aligned JSON/TSV/SRT files into a staging subdirectory. Spindle parses the word-level timings and groups them into cues that respect 42-character line limits, ≤2 lines, 1–7 second durations, and ≤17 characters-per-second reading speed.
+3. The Netflix-compliant SRT lands next to the encoded file in staging as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). Intermediate WhisperX artifacts are cleaned up automatically.
+4. On success the queue status flips to `SUBTITLED`. If WhisperX fails (missing CUDA, model download issues, etc.) the stage logs a warning and the organizer still runs so the rest of the workflow is unaffected.
 
-You can also generate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI stores the SRT beside your media and cleans up temporary audio extracts automatically.
+You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI uses the same WhisperX pipeline and drops the finished SRT beside your media.
 
 ## Stage 6: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
 

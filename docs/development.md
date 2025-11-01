@@ -52,4 +52,4 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 
 ## Parking Lot / Ideas
 
-- Evaluate parallelized subtitle chunk uploads once sequential Voxtral flow proves reliable.
+- Explore WhisperX diarization or parallel chunk tuning once the current CUDA pipeline proves stable.

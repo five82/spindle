@@ -96,8 +96,8 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `plex_url` – Plex server address used for library refreshes
 - `plex_link_enabled` – If `true`, Spindle links to Plex and triggers library scans automatically
 - `ntfy_topic` (optional) – Channel for notifications
-- `subtitles_enabled` (optional) – Enable Voxtral AI subtitle generation after encoding
-- `mistral_api_key` (optional) – Required when subtitles are enabled; can also be supplied via `MISTRAL_API_KEY`
+- `subtitles_enabled` (optional) – Enable WhisperX subtitle generation after encoding (requires `uv`/`uvx`)
+- `whisperx_cuda_enabled` (optional) – Set `true` to run WhisperX with CUDA (requires CUDA 12.8+ and cuDNN 9.1); leave `false` to fall back to CPU
 - `api_bind` – Host:port for the built-in JSON API (defaults to `127.0.0.1:7487`)
 - `keydb_path` – Location where Spindle stores/reads `KEYDB.cfg` for Disc ID lookups (defaults to `~/.config/spindle/keydb/KEYDB.cfg`)
 - `keydb_download_url` – Mirror URL Spindle uses when auto-refreshing `KEYDB.cfg`

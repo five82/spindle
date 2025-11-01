@@ -42,10 +42,6 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load configuration: %w", err)
 			}
-			if strings.TrimSpace(cfg.MistralAPIKey) == "" {
-				return fmt.Errorf("mistral_api_key is not configured; set it in config.toml or export MISTRAL_API_KEY")
-			}
-
 			outDir := strings.TrimSpace(outputDir)
 			if outDir == "" {
 				outDir = filepath.Dir(source)
@@ -87,8 +83,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("init subtitle logger: %w", err)
 			}
-			client := subtitles.NewMistralClient(cfg.MistralAPIKey)
-			service := subtitles.NewService(cfg, client, logger)
+			service := subtitles.NewService(cfg, logger)
 
 			result, err := service.Generate(cmd.Context(), subtitles.GenerateRequest{
 				SourcePath: source,
