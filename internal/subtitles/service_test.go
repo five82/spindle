@@ -1,6 +1,7 @@
 package subtitles
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,63 +10,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"spindle/internal/config"
 	"spindle/internal/media/ffprobe"
 )
 
-func TestBuildNetflixCuesRespectsLimits(t *testing.T) {
-	words := []word{
-		{Text: "Hello", Start: 0.0, End: 0.6},
-		{Text: "there", Start: 0.6, End: 1.1},
-		{Text: "general", Start: 1.1, End: 1.6},
-		{Text: "Kenobi.", Start: 1.6, End: 2.2},
-		{Text: "You", Start: 3.0, End: 3.5},
-		{Text: "are", Start: 3.5, End: 4.0},
-		{Text: "a", Start: 4.0, End: 4.2},
-		{Text: "bold", Start: 4.2, End: 4.7},
-		{Text: "one.", Start: 4.7, End: 5.2},
-	}
-	segment := whisperSegment{Start: words[0].Start, End: words[len(words)-1].End}
-	segment.Words = make([]whisperWordJSON, len(words))
-	for i, w := range words {
-		segment.Words[i] = whisperWordJSON{Word: w.Text, Start: w.Start, End: w.End}
-	}
-
-	groups := buildCueWordGroups([]whisperSegment{segment})
-	if len(groups) == 0 {
-		t.Fatal("expected cue groups to be produced")
-	}
-	cues := convertCueWordsToCues(groups)
-	cues = enforceCueDurations(cues)
-	if len(cues) == 0 {
-		t.Fatal("expected cues to be produced")
-	}
-	for _, cue := range cues {
-		lines := strings.Split(cue.Text, "\n")
-		if len(lines) > netflixMaxLines {
-			t.Fatalf("expected <=%d lines, got %d (%q)", netflixMaxLines, len(lines), cue.Text)
-		}
-		for _, line := range lines {
-			if len([]rune(line)) > netflixMaxLineChars {
-				t.Fatalf("line exceeds %d chars: %q", netflixMaxLineChars, line)
-			}
-		}
-		duration := cue.End - cue.Start
-		if duration > netflixMaxCueDuration.Seconds()+0.01 {
-			t.Fatalf("duration exceeds max: %.2f", duration)
-		}
-		if duration < netflixMinCueDuration.Seconds()-0.02 {
-			t.Fatalf("duration below min: %.2f", duration)
-		}
-		cps := float64(countCharacters(strings.ReplaceAll(cue.Text, "\n", ""))) / duration
-		if cps > netflixMaxCharsPerSec+0.1 {
-			t.Fatalf("CPS exceeds limit: %.2f", cps)
-		}
-	}
-}
-
-func TestServiceGenerateProducesNetflixSRT_CPUMode(t *testing.T) {
+func TestServiceGenerateProducesStableTSSRT_CPUMode(t *testing.T) {
 	tmp := t.TempDir()
 	source := filepath.Join(tmp, "movie.mkv")
 	if err := os.WriteFile(source, []byte("fake video"), 0o644); err != nil {
@@ -76,7 +27,7 @@ func TestServiceGenerateProducesNetflixSRT_CPUMode(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.SubtitlesEnabled = true
-	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner))
+	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
 
 	result, err := service.Generate(context.Background(), GenerateRequest{
 		SourcePath: source,
@@ -87,8 +38,14 @@ func TestServiceGenerateProducesNetflixSRT_CPUMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
-	if !stub.called {
-		t.Fatalf("expected command runner to be called")
+	if !stub.calledWhisper {
+		t.Fatalf("expected whisperx command to run")
+	}
+	if !stub.calledStableTS {
+		t.Fatalf("expected stable-ts formatter to run")
+	}
+	if !stub.calledFFmpeg {
+		t.Fatalf("expected ffmpeg extraction to run")
 	}
 	if result.SegmentCount == 0 {
 		t.Fatalf("expected non-zero segments")
@@ -100,31 +57,20 @@ func TestServiceGenerateProducesNetflixSRT_CPUMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read srt: %v", err)
 	}
-	t.Logf("\n%s", string(contents))
-	lines := strings.Split(string(contents), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.Contains(line, "-->") || strings.HasPrefix(line, "1") || strings.HasPrefix(line, "2") {
-			continue
-		}
-		if len([]rune(line)) > netflixMaxLineChars {
-			t.Fatalf("line exceeds limit: %q", line)
+	for _, raw := range strings.Split(string(contents), "\n") {
+		if strings.HasPrefix(raw, " ") && strings.TrimSpace(raw) != "" && !strings.Contains(raw, "-->") {
+			t.Fatalf("unexpected leading space: %q", raw)
 		}
 	}
+	t.Logf("\n%s", string(contents))
 	if result.Duration != 120*time.Second {
 		t.Fatalf("unexpected duration: %s", result.Duration)
 	}
-	if !strings.Contains(string(contents), "<i>") {
-		t.Fatalf("expected italicized lyric cue in output")
+	if !strings.Contains(string(contents), "General Kenobi") {
+		t.Fatalf("expected subtitle content to include segment text")
 	}
-	if !strings.Contains(string(contents), "\u266A") {
-		t.Fatalf("expected lyric cue to include music note")
-	}
-	if strings.Contains(string(contents), "\nThank\n") {
-		t.Fatalf("expected lyric fragments to merge, found isolated 'Thank'")
-	}
-	if strings.Contains(string(contents), "Somebody do\n") {
-		t.Fatalf("expected 'Somebody do something' to stay in a single cue")
+	if strings.Contains(string(contents), "<i>") || strings.Contains(string(contents), "\u266A") {
+		t.Fatalf("unexpected lyric styling in output")
 	}
 }
 
@@ -140,7 +86,7 @@ func TestServiceGenerateUsesCUDAArgsWhenEnabled(t *testing.T) {
 	cfg := config.Default()
 	cfg.SubtitlesEnabled = true
 	cfg.WhisperXCUDAEnabled = true
-	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner))
+	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
 
 	if _, err := service.Generate(context.Background(), GenerateRequest{
 		SourcePath: source,
@@ -150,37 +96,203 @@ func TestServiceGenerateUsesCUDAArgsWhenEnabled(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
-	if !stub.called {
-		t.Fatalf("expected command runner to be called")
+	if !stub.calledWhisper {
+		t.Fatalf("expected whisperx command to run")
+	}
+	if !stub.calledStableTS {
+		t.Fatalf("expected stable-ts formatter to run")
+	}
+	if !stub.calledFFmpeg {
+		t.Fatalf("expected ffmpeg extraction to run")
 	}
 }
 
-func TestMergeShortCueWordsCombinesAdjacentWords(t *testing.T) {
-	groups := []cueWordGroup{
-		{Words: []word{{Text: "Stop", Start: 0.0, End: 0.1}}},
-		{Words: []word{{Text: "it,", Start: 0.12, End: 0.22}}},
-		{Words: []word{{Text: "stop", Start: 0.23, End: 0.33}}},
-		{Words: []word{{Text: "it,", Start: 0.34, End: 0.44}}},
-		{Words: []word{{Text: "you", Start: 0.45, End: 0.55}}},
-		{Words: []word{{Text: "mean", Start: 0.56, End: 0.66}}},
-		{Words: []word{{Text: "old", Start: 0.67, End: 0.77}}},
-		{Words: []word{{Text: "potato.", Start: 0.78, End: 1.20}}},
+func TestServiceGenerateRequiresTokenForPyannote(t *testing.T) {
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "movie.mkv")
+	if err := os.WriteFile(source, []byte("fake video"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
 	}
-	merged := mergeShortCueWords(groups)
-	if len(merged) > 2 {
-		t.Fatalf("expected merged cues to be compact, got %d", len(merged))
+
+	stub := setupInspectAndStub(t, 30, false)
+
+	cfg := config.Default()
+	cfg.SubtitlesEnabled = true
+	cfg.WhisperXVADMethod = "pyannote"
+	cfg.WhisperXHuggingFaceToken = ""
+	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
+
+	if _, err := service.Generate(context.Background(), GenerateRequest{
+		SourcePath: source,
+		WorkDir:    filepath.Join(tmp, "work"),
+		OutputDir:  filepath.Join(tmp, "out"),
+		BaseName:   "movie",
+	}); err == nil || !strings.Contains(err.Error(), "Hugging Face token") {
+		t.Fatalf("expected configuration error about Hugging Face token, got %v", err)
 	}
-	first := strings.Join(wrapText(joinWords(merged[0].Words)), " ")
-	if len(strings.Fields(first)) < 3 {
-		t.Fatalf("expected first cue to contain multiple words, got %q", first)
+}
+
+func TestServiceGeneratePyannoteWithToken(t *testing.T) {
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "movie.mkv")
+	if err := os.WriteFile(source, []byte("fake video"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	stub := setupInspectAndStub(t, 45, false)
+
+	cfg := config.Default()
+	cfg.SubtitlesEnabled = true
+	cfg.WhisperXVADMethod = "pyannote"
+	cfg.WhisperXHuggingFaceToken = "token"
+	validator := func(ctx context.Context, token string) (tokenValidationResult, error) {
+		if token != "token" {
+			return tokenValidationResult{}, fmt.Errorf("unexpected token: %s", token)
+		}
+		return tokenValidationResult{Account: "pixar-studios"}, nil
+	}
+	service := NewService(&cfg, nil,
+		WithCommandRunner(stub.Runner),
+		WithTokenValidator(validator),
+		WithoutDependencyCheck(),
+	)
+
+	result, err := service.Generate(context.Background(), GenerateRequest{
+		SourcePath: source,
+		WorkDir:    filepath.Join(tmp, "work"),
+		OutputDir:  filepath.Join(tmp, "out"),
+		BaseName:   "movie",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if !stub.calledWhisper {
+		t.Fatalf("expected whisperx command to run")
+	}
+	if !stub.calledStableTS {
+		t.Fatalf("expected stable-ts formatter to run")
+	}
+	if !stub.calledFFmpeg {
+		t.Fatalf("expected ffmpeg extraction to run")
+	}
+	if result.SegmentCount == 0 {
+		t.Fatalf("expected non-zero segments")
+	}
+	if stub.lastVAD != whisperXVADMethodPyannote {
+		t.Fatalf("expected VAD %q, got %q", whisperXVADMethodPyannote, stub.lastVAD)
+	}
+	if stub.lastHFToken != "token" {
+		t.Fatalf("expected hf token to be passed to whisperx")
+	}
+}
+
+func TestServiceGeneratePyannoteTokenFallbackToSilero(t *testing.T) {
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "movie.mkv")
+	if err := os.WriteFile(source, []byte("fake video"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	stub := setupInspectAndStub(t, 45, false)
+
+	cfg := config.Default()
+	cfg.SubtitlesEnabled = true
+	cfg.WhisperXVADMethod = "pyannote"
+	cfg.WhisperXHuggingFaceToken = "bad-token"
+	validator := func(ctx context.Context, token string) (tokenValidationResult, error) {
+		if token != "bad-token" {
+			return tokenValidationResult{}, fmt.Errorf("unexpected token: %s", token)
+		}
+		return tokenValidationResult{}, fmt.Errorf("%w: test rejection", errPyannoteUnauthorized)
+	}
+	service := NewService(&cfg, nil,
+		WithCommandRunner(stub.Runner),
+		WithTokenValidator(validator),
+		WithoutDependencyCheck(),
+	)
+
+	result, err := service.Generate(context.Background(), GenerateRequest{
+		SourcePath: source,
+		WorkDir:    filepath.Join(tmp, "work"),
+		OutputDir:  filepath.Join(tmp, "out"),
+		BaseName:   "movie",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if result.SegmentCount == 0 {
+		t.Fatalf("expected fallback subtitles to contain segments")
+	}
+	if !stub.calledStableTS {
+		t.Fatalf("expected stable-ts formatter to run")
+	}
+	if stub.lastVAD != whisperXVADMethodSilero {
+		t.Fatalf("expected fallback VAD %q, got %q", whisperXVADMethodSilero, stub.lastVAD)
+	}
+	if stub.lastHFToken != "" {
+		t.Fatalf("expected no HF token when falling back, got %q", stub.lastHFToken)
+	}
+}
+
+func TestServiceGenerateFallsBackToWhisperSRT(t *testing.T) {
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "movie.mkv")
+	if err := os.WriteFile(source, []byte("fake video"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	stub := setupInspectAndStub(t, 75, false)
+	stub.stableTSError = fmt.Errorf("stable-ts boom")
+
+	cfg := config.Default()
+	cfg.SubtitlesEnabled = true
+	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
+
+	t.Setenv("SPD_DEBUG_SUBTITLES_KEEP", "1")
+
+	result, err := service.Generate(context.Background(), GenerateRequest{
+		SourcePath: source,
+		WorkDir:    filepath.Join(tmp, "work"),
+		OutputDir:  filepath.Join(tmp, "out"),
+		BaseName:   "movie",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if !stub.calledWhisper {
+		t.Fatalf("expected whisperx command to run")
+	}
+	if !stub.calledStableTS {
+		t.Fatalf("expected stable-ts command to be attempted")
+	}
+	if !stub.calledFFmpeg {
+		t.Fatalf("expected ffmpeg extraction to run")
+	}
+
+	whisperSRT := filepath.Join(tmp, "work", "whisperx", "primary_audio.srt")
+	raw, err := os.ReadFile(whisperSRT)
+	if err != nil {
+		t.Fatalf("read whisper srt: %v", err)
+	}
+	final, err := os.ReadFile(result.SubtitlePath)
+	if err != nil {
+		t.Fatalf("read output srt: %v", err)
+	}
+	if !bytes.Equal(raw, final) {
+		t.Fatalf("expected fallback output to match whisper srt")
 	}
 }
 
 type whisperXStub struct {
-	t          *testing.T
-	expectCUDA bool
-	called     bool
-	duration   float64
+	t              *testing.T
+	expectCUDA     bool
+	calledWhisper  bool
+	calledStableTS bool
+	calledFFmpeg   bool
+	duration       float64
+	lastVAD        string
+	lastHFToken    string
+	stableTSError  error
 }
 
 func setupInspectAndStub(t *testing.T, durationSeconds float64, expectCUDA bool) *whisperXStub {
@@ -203,169 +315,305 @@ func setupInspectAndStub(t *testing.T, durationSeconds float64, expectCUDA bool)
 	}
 }
 
-func (s *whisperXStub) Runner(_ context.Context, _ string, args ...string) error {
-	s.called = true
+func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) error {
+	if name == ffmpegCommand {
+		s.calledFFmpeg = true
+		if len(args) == 0 {
+			s.t.Fatalf("ffmpeg called without arguments")
+		}
+		dest := args[len(args)-1]
+		if !strings.HasSuffix(dest, ".wav") {
+			s.t.Fatalf("expected ffmpeg output to be .wav, got %q", dest)
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			s.t.Fatalf("mkdir audio dir: %v", err)
+		}
+		if err := os.WriteFile(dest, []byte("fake-wav"), 0o644); err != nil {
+			s.t.Fatalf("write wav: %v", err)
+		}
+		return nil
+	}
 
-	var outputDir, sourcePath, indexURL, extraIndexURL, device, computeType string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--output_dir":
-			if i+1 < len(args) {
-				outputDir = args[i+1]
+	if containsArg(args, "whisperx") {
+		if containsArg(args, "--download-models") || containsArg(args, "--model_cache_only") {
+			return nil
+		}
+		s.calledWhisper = true
+
+		var outputDir, sourcePath, indexURL, extraIndexURL, device, computeType, hfToken, vadMethod string
+		for i := 0; i < len(args); i++ {
+			switch args[i] {
+			case "--output_dir":
+				if i+1 < len(args) {
+					outputDir = args[i+1]
+				}
+			case "--index-url":
+				if i+1 < len(args) {
+					indexURL = args[i+1]
+				}
+			case "--extra-index-url":
+				if i+1 < len(args) {
+					extraIndexURL = args[i+1]
+				}
+			case "--device":
+				if i+1 < len(args) {
+					device = args[i+1]
+				}
+			case "--compute_type":
+				if i+1 < len(args) {
+					computeType = args[i+1]
+				}
+			case "--hf_token":
+				if i+1 < len(args) {
+					hfToken = args[i+1]
+				}
+			case "--vad_method":
+				if i+1 < len(args) {
+					vadMethod = args[i+1]
+				}
+			default:
+				if strings.HasSuffix(args[i], ".wav") {
+					sourcePath = args[i]
+				}
 			}
-		case "--index-url":
-			if i+1 < len(args) {
-				indexURL = args[i+1]
+		}
+
+		if outputDir == "" {
+			s.t.Fatal("command missing --output_dir")
+		}
+		if sourcePath == "" || !strings.HasSuffix(sourcePath, ".wav") {
+			s.t.Fatalf("command missing audio source path, got %q", sourcePath)
+		}
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			s.t.Fatalf("mkdir output: %v", err)
+		}
+
+		switch {
+		case s.expectCUDA:
+			if device != whisperXCUDADevice {
+				s.t.Fatalf("expected cuda device, got %q", device)
 			}
-		case "--extra-index-url":
-			if i+1 < len(args) {
-				extraIndexURL = args[i+1]
+			if indexURL != whisperXCUDAIndexURL {
+				s.t.Fatalf("expected cuda index url %q, got %q", whisperXCUDAIndexURL, indexURL)
 			}
-		case "--device":
-			if i+1 < len(args) {
-				device = args[i+1]
+			if extraIndexURL != whisperXPypiIndexURL {
+				s.t.Fatalf("expected extra index url %q, got %q", whisperXPypiIndexURL, extraIndexURL)
 			}
-		case "--compute_type":
-			if i+1 < len(args) {
-				computeType = args[i+1]
+			if computeType != "" {
+				s.t.Fatalf("unexpected compute type in CUDA mode: %q", computeType)
 			}
 		default:
-			if strings.HasSuffix(args[i], ".mkv") {
-				sourcePath = args[i]
+			if device != whisperXCPUDevice {
+				s.t.Fatalf("expected cpu device, got %q", device)
+			}
+			if computeType != whisperXCPUComputeType {
+				s.t.Fatalf("expected compute type %q, got %q", whisperXCPUComputeType, computeType)
+			}
+			if indexURL != whisperXPypiIndexURL {
+				s.t.Fatalf("expected cpu index url %q, got %q", whisperXPypiIndexURL, indexURL)
+			}
+			if extraIndexURL != "" {
+				s.t.Fatalf("unexpected extra index url in CPU mode: %q", extraIndexURL)
 			}
 		}
+
+		if vadMethod == "" {
+			s.t.Fatal("expected --vad_method to be provided")
+		}
+		switch vadMethod {
+		case whisperXVADMethodPyannote:
+			if hfToken == "" {
+				s.t.Fatal("expected --hf_token to be provided for pyannote VAD")
+			}
+		default:
+			if hfToken != "" {
+				s.t.Fatalf("did not expect --hf_token for VAD method %q", vadMethod)
+			}
+		}
+		s.lastVAD = vadMethod
+		s.lastHFToken = hfToken
+
+		base := strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))
+		if err := s.writeWhisperOutputs(outputDir, base); err != nil {
+			s.t.Fatalf("write whisper outputs: %v", err)
+		}
+		return nil
 	}
 
-	if outputDir == "" {
-		s.t.Fatal("command missing --output_dir")
+	var pkg string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--from" && i+1 < len(args) {
+			pkg = args[i+1]
+			break
+		}
 	}
-	if sourcePath == "" {
-		s.t.Fatal("command missing source path")
-	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		s.t.Fatalf("mkdir output: %v", err)
-	}
-
-	switch {
-	case s.expectCUDA:
-		if device != whisperXCUDADevice {
-			s.t.Fatalf("expected cuda device, got %q", device)
+	if pkg == stableTSPackage {
+		s.calledStableTS = true
+		if s.stableTSError != nil {
+			return s.stableTSError
 		}
-		if indexURL != whisperXCUDAIndexURL {
-			s.t.Fatalf("expected cuda index url %q, got %q", whisperXCUDAIndexURL, indexURL)
+		idxScript := -1
+		for i := 0; i < len(args); i++ {
+			if args[i] == "-c" {
+				idxScript = i
+				break
+			}
 		}
-		if extraIndexURL != whisperXPypiIndexURL {
-			s.t.Fatalf("expected extra index url %q, got %q", whisperXPypiIndexURL, extraIndexURL)
+		if idxScript < 0 || idxScript+3 >= len(args) {
+			s.t.Fatalf("unexpected stable-ts formatter args: %v", args)
 		}
-		if computeType != "" {
-			s.t.Fatalf("unexpected compute type in CUDA mode: %q", computeType)
+		jsonPath := args[idxScript+2]
+		tmpOutput := args[idxScript+3]
+		language := "en"
+		for j := idxScript + 4; j < len(args)-1; j++ {
+			if args[j] == "--language" && j+1 < len(args) {
+				language = args[j+1]
+				break
+			}
 		}
-	default:
-		if device != whisperXCPUDevice {
-			s.t.Fatalf("expected cpu device, got %q", device)
+		if err := s.simulateStableTSFormatter(jsonPath, tmpOutput, language); err != nil {
+			return err
 		}
-		if computeType != whisperXCPUComputeType {
-			s.t.Fatalf("expected compute type %q, got %q", whisperXCPUComputeType, computeType)
-		}
-		if indexURL != whisperXPypiIndexURL {
-			s.t.Fatalf("expected cpu index url %q, got %q", whisperXPypiIndexURL, indexURL)
-		}
-		if extraIndexURL != "" {
-			s.t.Fatalf("unexpected extra index url in CPU mode: %q", extraIndexURL)
-		}
+		return nil
 	}
 
-	base := strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))
-	payload := whisperJSON{
-		Segments: []whisperSegment{
+	s.t.Fatalf("unexpected command: %s %v", name, args)
+	return nil
+}
+
+func (s *whisperXStub) simulateStableTSFormatter(jsonPath, outputPath, language string) error {
+	segments, err := loadWhisperSegments(jsonPath)
+	if err != nil {
+		return fmt.Errorf("load whisper segments: %w", err)
+	}
+	var builder strings.Builder
+	index := 1
+	for _, seg := range segments {
+		text := buildSentence(seg.Words)
+		if text == "" {
+			text = strings.TrimSpace(seg.Text)
+		}
+		if text == "" {
+			continue
+		}
+		start := formatSRTTimestamp(seg.Start)
+		end := formatSRTTimestamp(seg.End)
+		fmt.Fprintf(&builder, "%d\n%s --> %s\n%s\n\n", index, start, end, text)
+		index++
+	}
+	if index == 1 {
+		return fmt.Errorf("no cues generated for stable-ts formatter")
+	}
+	return os.WriteFile(outputPath, []byte(builder.String()), 0o644)
+}
+
+func (s *whisperXStub) writeWhisperOutputs(outputDir, base string) error {
+	srtPath := filepath.Join(outputDir, base+".srt")
+	content := `1
+00:00:00,000 --> 00:00:02,000
+Thank you.
+
+2
+00:00:02,500 --> 00:00:04,500
+General Kenobi, you are a bold one.
+
+3
+00:00:05,000 --> 00:00:07,000
+Somebody stop that force field.
+
+`
+	if err := os.WriteFile(srtPath, []byte(content), 0o644); err != nil {
+		return err
+	}
+
+	payload := whisperXPayload{
+		Segments: []whisperXSegment{
 			{
+				Text:  "Thank you.",
 				Start: 0.0,
-				End:   0.7,
-				Text:  "Thank",
-				Words: []whisperWordJSON{{Word: "Thank", Start: 0.0, End: 0.7}},
-			},
-			{
-				Start: 0.8,
-				End:   1.4,
-				Text:  "you",
-				Words: []whisperWordJSON{{Word: "you", Start: 0.8, End: 1.4}},
-			},
-			{
-				Start: 1.5,
-				End:   2.2,
-				Text:  "Thank",
-				Words: []whisperWordJSON{{Word: "Thank", Start: 1.5, End: 2.2}},
-			},
-			{
-				Start: 2.3,
-				End:   3.0,
-				Text:  "you",
-				Words: []whisperWordJSON{{Word: "you", Start: 2.3, End: 3.0}},
-			},
-			{
-				Start: 3.5,
-				End:   6.0,
-				Text:  "Hello there.",
-				Words: []whisperWordJSON{
-					{Word: "Hello", Start: 3.5, End: 4.1},
-					{Word: "there.", Start: 4.1, End: 6.0},
+				End:   2.0,
+				Words: []whisperXWord{
+					{Word: "Thank", Start: 0.0, End: 1.0},
+					{Word: "you.", Start: 1.0, End: 2.0},
 				},
 			},
 			{
-				Start: 7.0,
-				End:   9.5,
 				Text:  "General Kenobi, you are a bold one.",
-				Words: []whisperWordJSON{
-					{Word: "General", Start: 7.0, End: 7.6},
-					{Word: "Kenobi,", Start: 7.6, End: 8.2},
-					{Word: "you", Start: 8.2, End: 8.6},
-					{Word: "are", Start: 8.6, End: 9.0},
-					{Word: "a", Start: 9.0, End: 9.2},
-					{Word: "bold", Start: 9.2, End: 9.4},
-					{Word: "one.", Start: 9.4, End: 9.5},
+				Start: 2.5,
+				End:   4.5,
+				Words: []whisperXWord{
+					{Word: "General", Start: 2.5, End: 3.0},
+					{Word: "Kenobi,", Start: 3.0, End: 3.3},
+					{Word: "you", Start: 3.3, End: 3.7},
+					{Word: "are", Start: 3.7, End: 3.9},
+					{Word: "a", Start: 3.9, End: 4.0},
+					{Word: "bold", Start: 4.0, End: 4.2},
+					{Word: "one.", Start: 4.2, End: 4.5},
 				},
 			},
 			{
-				Start: 10.0,
-				End:   13.0,
-				Text:  "You got a friend in me",
-				Words: []whisperWordJSON{
-					{Word: "You", Start: 10.0, End: 10.8},
-					{Word: "got", Start: 10.8, End: 11.3},
-					{Word: "a", Start: 11.3, End: 11.5},
-					{Word: "friend", Start: 11.5, End: 12.1},
-					{Word: "in", Start: 12.1, End: 12.4},
-					{Word: "me", Start: 12.4, End: 13.0},
+				Text:  "Somebody stop that force field.",
+				Start: 5.0,
+				End:   7.0,
+				Words: []whisperXWord{
+					{Word: "Somebody", Start: 5.0, End: 5.6},
+					{Word: "stop", Start: 5.6, End: 6.0},
+					{Word: "that", Start: 6.0, End: 6.3},
+					{Word: "force", Start: 6.3, End: 6.6},
+					{Word: "field.", Start: 6.6, End: 7.0},
 				},
-			},
-			{
-				Start: 13.5,
-				End:   14.8,
-				Text:  "Somebody do",
-				Words: []whisperWordJSON{
-					{Word: "Somebody", Start: 13.5, End: 14.2},
-					{Word: "do", Start: 14.2, End: 14.8},
-				},
-			},
-			{
-				Start: 14.8,
-				End:   15.6,
-				Text:  "something.",
-				Words: []whisperWordJSON{{Word: "something.", Start: 14.8, End: 15.6}},
 			},
 		},
 	}
-	data, err := json.Marshal(payload)
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		s.t.Fatalf("marshal payload: %v", err)
+		return err
 	}
 	jsonPath := filepath.Join(outputDir, base+".json")
-	if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
-		s.t.Fatalf("write json: %v", err)
-	}
-	return nil
+	return os.WriteFile(jsonPath, jsonData, 0o644)
 }
 
 func formatDurationSeconds(value float64) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", value), "0"), ".")
+}
+
+func buildSentence(words []whisperXWord) string {
+	var builder strings.Builder
+	for _, word := range words {
+		token := strings.TrimSpace(word.Word)
+		if token == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			r, _ := utf8.DecodeRuneInString(token)
+			if r != 0 && !strings.ContainsRune("',’).,!?:;", r) {
+				builder.WriteByte(' ')
+			}
+		}
+		builder.WriteString(token)
+	}
+	return builder.String()
+}
+
+func formatSRTTimestamp(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	msTotal := int(seconds*1000 + 0.5)
+	hours := msTotal / 3_600_000
+	msTotal %= 3_600_000
+	minutes := msTotal / 60_000
+	msTotal %= 60_000
+	secs := msTotal / 1_000
+	millis := msTotal % 1_000
+	return fmt.Sprintf("%02d:%02d:%02d,%03d", hours, minutes, secs, millis)
+}
+
+func containsArg(args []string, needle string) bool {
+	for _, a := range args {
+		if a == needle {
+			return true
+		}
+	}
+	return false
 }

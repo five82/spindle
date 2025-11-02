@@ -48,6 +48,8 @@ type Config struct {
 	DraptoDisableDenoise      bool    `toml:"drapto_disable_denoise"`
 	SubtitlesEnabled          bool    `toml:"subtitles_enabled"`
 	WhisperXCUDAEnabled       bool    `toml:"whisperx_cuda_enabled"`
+	WhisperXVADMethod         string  `toml:"whisperx_vad_method"`
+	WhisperXHuggingFaceToken  string  `toml:"whisperx_hf_token"`
 }
 
 const (
@@ -104,6 +106,7 @@ func Default() Config {
 		LogFormat:                 defaultLogFormat,
 		LogLevel:                  defaultLogLevel,
 		DraptoPreset:              defaultDraptoPreset,
+		WhisperXVADMethod:         "silero",
 	}
 }
 
@@ -240,6 +243,19 @@ func (c *Config) normalize() error {
 	if c.TMDBAPIKey == "" {
 		if value, ok := os.LookupEnv("TMDB_API_KEY"); ok {
 			c.TMDBAPIKey = value
+		}
+	}
+
+	c.WhisperXVADMethod = strings.ToLower(strings.TrimSpace(c.WhisperXVADMethod))
+	if c.WhisperXVADMethod == "" {
+		c.WhisperXVADMethod = "silero"
+	}
+	c.WhisperXHuggingFaceToken = strings.TrimSpace(c.WhisperXHuggingFaceToken)
+	if c.WhisperXHuggingFaceToken == "" {
+		if value, ok := os.LookupEnv("HUGGING_FACE_HUB_TOKEN"); ok {
+			c.WhisperXHuggingFaceToken = strings.TrimSpace(value)
+		} else if value, ok := os.LookupEnv("HF_TOKEN"); ok {
+			c.WhisperXHuggingFaceToken = strings.TrimSpace(value)
 		}
 	}
 
@@ -420,6 +436,8 @@ ntfy_request_timeout = 10                            # ntfy HTTP client timeout 
 # AI-generated subtitles (optional)
 subtitles_enabled = false                            # Enable WhisperX subtitle generation after encoding
 whisperx_cuda_enabled = false                        # Run WhisperX with CUDA; set true when GPU + CUDA/cuDNN are installed
+whisperx_vad_method = "silero"                       # Voice activity detector: "silero" (default, no token) or "pyannote" (requires Hugging Face token)
+whisperx_hf_token = ""                               # Hugging Face access token for pyannote VAD (leave empty when using silero)
 
 # ============================================================================
 # TMDB & METADATA

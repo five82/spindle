@@ -98,6 +98,8 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `ntfy_topic` (optional) – Channel for notifications
 - `subtitles_enabled` (optional) – Enable WhisperX subtitle generation after encoding (requires `uv`/`uvx`)
 - `whisperx_cuda_enabled` (optional) – Set `true` to run WhisperX with CUDA (requires CUDA 12.8+ and cuDNN 9.1); leave `false` to fall back to CPU
+- `whisperx_vad_method` (optional) – Voice activity detector for WhisperX; `silero` (default) runs fully offline, `pyannote` offers tighter alignment but needs a Hugging Face token. Spindle validates the token before each run and drops back to `silero` if Hugging Face rejects it (check the subtitle logs for the authentication message).
+- `whisperx_hf_token` (optional) – Hugging Face access token required when using `whisperx_vad_method = "pyannote"`; create one at https://huggingface.co/settings/tokens. The subtitle stage logs whether authentication succeeded or if it fell back to `silero`.
 - `api_bind` – Host:port for the built-in JSON API (defaults to `127.0.0.1:7487`)
 - `keydb_path` – Location where Spindle stores/reads `KEYDB.cfg` for Disc ID lookups (defaults to `~/.config/spindle/keydb/KEYDB.cfg`)
 - `keydb_download_url` – Mirror URL Spindle uses when auto-refreshing `KEYDB.cfg`

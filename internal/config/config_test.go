@@ -50,6 +50,12 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	if cfg.WhisperXCUDAEnabled {
 		t.Fatal("expected WhisperX CUDA disabled by default")
 	}
+	if cfg.WhisperXVADMethod != "silero" {
+		t.Fatalf("expected WhisperX VAD default to silero, got %q", cfg.WhisperXVADMethod)
+	}
+	if cfg.WhisperXHuggingFaceToken != "" {
+		t.Fatalf("expected WhisperX Hugging Face token to be empty by default, got %q", cfg.WhisperXHuggingFaceToken)
+	}
 	if cfg.WorkflowHeartbeatInterval != config.Default().WorkflowHeartbeatInterval {
 		t.Fatalf("unexpected heartbeat interval: %d", cfg.WorkflowHeartbeatInterval)
 	}

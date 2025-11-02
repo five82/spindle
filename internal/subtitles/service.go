@@ -6,63 +6,36 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"log/slog"
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
-	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
-	"spindle/internal/queue"
 	"spindle/internal/services"
-	"spindle/internal/stage"
-)
-
-const (
-	progressStageGenerating = "Generating AI subtitles"
-
-	whisperXCommand        = "uvx"
-	whisperXCUDAIndexURL   = "https://download.pytorch.org/whl/cu128"
-	whisperXPypiIndexURL   = "https://pypi.org/simple"
-	whisperXModel          = "large-v3"
-	whisperXAlignModel     = "WAV2VEC2_ASR_LARGE_LV60K_960H"
-	whisperXBatchSize      = "4"
-	whisperXChunkSize      = "15"
-	whisperXVADMethod      = "pyannote"
-	whisperXVADOnset       = "0.08"
-	whisperXVADOffset      = "0.07"
-	whisperXBeamSize       = "10"
-	whisperXBestOf         = "10"
-	whisperXTemperature    = "0.0"
-	whisperXPatience       = "1.0"
-	whisperXSegmentRes     = "sentence"
-	whisperXOutputFormat   = "all"
-	whisperXCPUDevice      = "cpu"
-	whisperXCUDADevice     = "cuda"
-	whisperXCPUComputeType = "float32"
-	netflixMaxLineChars    = 42
-	lyricLineCharLimit     = 28
-	netflixMaxLines        = 2
-	netflixMaxCharsPerSec  = 17.0
-	netflixMaxCueDuration  = 7 * time.Second
-	netflixMinCueDuration  = 500 * time.Millisecond
-	netflixMinCueGap       = 120 * time.Millisecond
-	durationEpsilon        = 5 * time.Millisecond
 )
 
 var (
-	inspectMedia = ffprobe.Inspect
+	inspectMedia            = ffprobe.Inspect
+	defaultHTTPClient       = &http.Client{Timeout: 10 * time.Second}
+	errPyannoteUnauthorized = errors.New("pyannote token unauthorized")
 )
 
 type commandRunner func(ctx context.Context, name string, args ...string) error
+type tokenValidator func(ctx context.Context, token string) (tokenValidationResult, error)
+
+const huggingFaceWhoAmIEndpoint = "https://huggingface.co/api/whoami-v2"
+
+type tokenValidationResult struct {
+	Account string
+}
 
 // GenerateRequest describes the inputs for subtitle generation.
 type GenerateRequest struct {
@@ -80,11 +53,23 @@ type GenerateResult struct {
 	Duration     time.Duration
 }
 
-// Service orchestrates WhisperX execution and Netflix-compliant subtitle output.
+// Service orchestrates WhisperX execution and Stable-TS formatted subtitle output.
 type Service struct {
-	config *config.Config
-	logger *slog.Logger
-	run    commandRunner
+	config      *config.Config
+	logger      *slog.Logger
+	run         commandRunner
+	hfToken     string
+	hfCheck     tokenValidator
+	skipCheck   bool
+	vadOverride string
+
+	tokenOnce           sync.Once
+	tokenErr            error
+	tokenResult         *tokenValidationResult
+	tokenSuccessLogged  bool
+	tokenFallbackLogged bool
+	readyOnce           sync.Once
+	readyErr            error
 }
 
 // ServiceOption customizes a Service.
@@ -99,21 +84,70 @@ func WithCommandRunner(r commandRunner) ServiceOption {
 	}
 }
 
+// WithTokenValidator overrides the Hugging Face token validator (used in tests).
+func WithTokenValidator(v tokenValidator) ServiceOption {
+	return func(s *Service) {
+		if v != nil {
+			s.hfCheck = v
+		}
+	}
+}
+
+// WithoutDependencyCheck disables external binary detection (used in tests).
+func WithoutDependencyCheck() ServiceOption {
+	return func(s *Service) {
+		s.skipCheck = true
+	}
+}
+
 // NewService constructs a subtitle generation service.
 func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) *Service {
 	serviceLogger := logger
 	if serviceLogger != nil {
 		serviceLogger = serviceLogger.With(logging.String("component", "subtitles"))
 	}
+	token := ""
+	if cfg != nil {
+		token = strings.TrimSpace(cfg.WhisperXHuggingFaceToken)
+	}
 	svc := &Service{
-		config: cfg,
-		logger: serviceLogger,
-		run:    defaultCommandRunner,
+		config:  cfg,
+		logger:  serviceLogger,
+		run:     defaultCommandRunner,
+		hfToken: token,
+		hfCheck: defaultTokenValidator,
 	}
 	for _, opt := range opts {
 		opt(svc)
 	}
 	return svc
+}
+
+func (s *Service) ensureReady() error {
+	if s == nil {
+		return services.Wrap(services.ErrConfiguration, "subtitles", "init", "Subtitle service unavailable", nil)
+	}
+	s.readyOnce.Do(func() {
+		if s.skipCheck {
+			return
+		}
+		if _, err := exec.LookPath(whisperXCommand); err != nil {
+			s.readyErr = services.Wrap(services.ErrConfiguration, "subtitles", "locate whisperx", fmt.Sprintf("Could not find %q on PATH", whisperXCommand), err)
+			return
+		}
+		if _, err := exec.LookPath(ffmpegCommand); err != nil {
+			s.readyErr = services.Wrap(services.ErrConfiguration, "subtitles", "locate ffmpeg", fmt.Sprintf("Could not find %q on PATH", ffmpegCommand), err)
+			return
+		}
+	})
+	if s.readyErr != nil {
+		return s.readyErr
+	}
+	vadMethod := strings.ToLower(strings.TrimSpace(s.configuredVADMethod()))
+	if vadMethod == whisperXVADMethodPyannote && strings.TrimSpace(s.hfToken) == "" {
+		return services.Wrap(services.ErrConfiguration, "subtitles", "validate vad", "pyannote VAD selected but no Hugging Face token configured (set whisperx_hf_token)", nil)
+	}
+	return nil
 }
 
 // Generate produces an SRT file for the provided source.
@@ -122,125 +156,61 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "init", "Subtitle service unavailable", nil)
 	}
 
-	source := strings.TrimSpace(req.SourcePath)
-	if source == "" {
-		return GenerateResult{}, services.Wrap(services.ErrValidation, "subtitles", "validate input", "Source path is empty", nil)
-	}
-	if _, err := os.Stat(source); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return GenerateResult{}, services.Wrap(services.ErrNotFound, "subtitles", "stat source", "Source file not found", err)
-		}
-		return GenerateResult{}, services.Wrap(services.ErrValidation, "subtitles", "stat source", "Failed to inspect source file", err)
+	if err := s.ensureReady(); err != nil {
+		return GenerateResult{}, err
 	}
 
-	workDir := strings.TrimSpace(req.WorkDir)
-	if workDir == "" {
-		if req.OutputDir != "" {
-			workDir = req.OutputDir
-		} else {
-			workDir = filepath.Dir(source)
-		}
-	}
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "ensure workdir", "Failed to create subtitle work directory", err)
+	if err := s.ensureTokenReady(ctx); err != nil {
+		return GenerateResult{}, err
 	}
 
-	outputDir := strings.TrimSpace(req.OutputDir)
-	if outputDir == "" {
-		outputDir = filepath.Dir(source)
-	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "ensure output", "Failed to create subtitle output directory", err)
-	}
-
-	probe, err := inspectMedia(ctx, s.ffprobeBinary(), source)
+	plan, err := s.prepareGenerationPlan(ctx, req)
 	if err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrExternalTool, "subtitles", "ffprobe", "Failed to probe media", err)
+		return GenerateResult{}, err
 	}
-	selection := audio.Select(probe.Streams)
-	if selection.PrimaryIndex < 0 {
-		return GenerateResult{}, services.Wrap(services.ErrValidation, "subtitles", "select audio", "No primary audio track available for subtitles", nil)
-	}
-	if s.logger != nil {
-		s.logger.Info("selected primary audio stream",
-			logging.String("codec", selection.Primary.CodecName),
-			logging.Int("index", selection.Primary.Index),
-		)
+	if plan.cleanup != nil {
+		defer plan.cleanup()
 	}
 
-	language := strings.TrimSpace(req.Language)
-	if language == "" {
-		language = inferLanguage(selection.Primary.Tags)
-	}
-	if language == "" {
-		language = "en"
-	}
-	baseName := strings.TrimSpace(req.BaseName)
-	if baseName == "" {
-		filename := filepath.Base(source)
-		baseName = strings.TrimSuffix(filename, filepath.Ext(filename))
+	if err := s.extractPrimaryAudio(ctx, plan.source, plan.audioIndex, plan.audioPath); err != nil {
+		return GenerateResult{}, err
 	}
 
-	runDir := filepath.Join(workDir, "whisperx")
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "ensure whisperx dir", "Failed to create WhisperX directory", err)
-	}
-	defer func() {
-		_ = os.RemoveAll(runDir)
-	}()
-
-	sourceBase := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
-	args := s.buildWhisperXArgs(source, runDir, language)
-	if s.logger != nil {
-		s.logger.Info("running whisperx",
-			logging.String("model", whisperXModel),
-			logging.String("align_model", whisperXAlignModel),
-			logging.String("language", language),
-			logging.Bool("cuda", s.config != nil && s.config.WhisperXCUDAEnabled),
-		)
-	}
-	if err := s.run(ctx, whisperXCommand, args...); err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrExternalTool, "subtitles", "whisperx", "WhisperX execution failed", err)
+	if err := s.invokeWhisperX(ctx, plan); err != nil {
+		return GenerateResult{}, err
 	}
 
-	jsonPath := filepath.Join(runDir, sourceBase+".json")
-	segments, err := loadWhisperSegments(jsonPath)
+	if err := s.reshapeSubtitles(ctx, plan.whisperSRT, plan.whisperJSON, plan.outputFile, plan.language, plan.totalSeconds); err != nil {
+		return GenerateResult{}, err
+	}
+
+	segmentCount, err := countSRTCues(plan.outputFile)
 	if err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "parse whisperx", "Failed to parse WhisperX output", err)
+		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "analyze srt", "Failed to inspect formatted subtitles", err)
 	}
-	cueGroups := buildCueWordGroups(segments)
-	if len(cueGroups) == 0 {
-		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "whisperx output", "WhisperX returned no aligned words", nil)
-	}
-
-	cues := convertCueWordsToCues(cueGroups)
-	if len(cues) == 0 {
-		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "format", "No cues produced after Netflix formatting", nil)
-	}
-	cues = enforceCueDurations(cues)
-
-	outputFile := filepath.Join(outputDir, fmt.Sprintf("%s.%s.srt", baseName, language))
-	if err := writeSRT(outputFile, cues); err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "write srt", "Failed to write subtitle file", err)
+	if segmentCount == 0 {
+		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "format", "Subtitle formatter produced no cues", nil)
 	}
 
-	totalDuration := probe.DurationSeconds()
-	if totalDuration <= 0 {
-		totalDuration = cues[len(cues)-1].End
+	finalDuration := plan.totalSeconds
+	if finalDuration <= 0 {
+		if last, err := lastSRTTimestamp(plan.outputFile); err == nil && last > 0 {
+			finalDuration = last
+		}
 	}
 
 	if s.logger != nil {
 		s.logger.Info("subtitle generation complete",
-			logging.String("output", outputFile),
-			logging.Int("segments", len(cues)),
-			logging.Float64("duration_seconds", totalDuration),
+			logging.String("output", plan.outputFile),
+			logging.Int("segments", segmentCount),
+			logging.Float64("duration_seconds", finalDuration),
 		)
 	}
 
 	result := GenerateResult{
-		SubtitlePath: outputFile,
-		SegmentCount: len(cues),
-		Duration:     time.Duration(totalDuration * float64(time.Second)),
+		SubtitlePath: plan.outputFile,
+		SegmentCount: segmentCount,
+		Duration:     time.Duration(finalDuration * float64(time.Second)),
 	}
 	return result, nil
 }
@@ -277,7 +247,6 @@ func (s *Service) buildWhisperXArgs(source, outputDir, language string) []string
 		"--output_format", whisperXOutputFormat,
 		"--segment_resolution", whisperXSegmentRes,
 		"--chunk_size", whisperXChunkSize,
-		"--vad_method", whisperXVADMethod,
 		"--vad_onset", whisperXVADOnset,
 		"--vad_offset", whisperXVADOffset,
 		"--beam_size", whisperXBeamSize,
@@ -285,6 +254,15 @@ func (s *Service) buildWhisperXArgs(source, outputDir, language string) []string
 		"--temperature", whisperXTemperature,
 		"--patience", whisperXPatience,
 	)
+
+	vadMethod := s.activeVADMethod()
+	args = append(args, "--vad_method", vadMethod)
+	if vadMethod == whisperXVADMethodPyannote && s != nil {
+		token := strings.TrimSpace(s.hfToken)
+		if token != "" {
+			args = append(args, "--hf_token", token)
+		}
+	}
 
 	if lang := normalizeWhisperLanguage(language); lang != "" {
 		args = append(args, "--language", lang)
@@ -298,570 +276,73 @@ func (s *Service) buildWhisperXArgs(source, outputDir, language string) []string
 	return args
 }
 
-type whisperJSON struct {
-	Segments []whisperSegment `json:"segments"`
-}
-
-type whisperSegment struct {
-	Start float64           `json:"start"`
-	End   float64           `json:"end"`
-	Text  string            `json:"text"`
-	Words []whisperWordJSON `json:"words"`
-}
-
-type whisperWordJSON struct {
-	Word  string  `json:"word"`
-	Start float64 `json:"start"`
-	End   float64 `json:"end"`
-}
-
-type word struct {
-	Text  string
-	Start float64
-	End   float64
-}
-
-func loadWhisperSegments(path string) ([]whisperSegment, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read whisperx json: %w", err)
+func (s *Service) extractPrimaryAudio(ctx context.Context, source string, audioIndex int, destination string) error {
+	if audioIndex < 0 {
+		return services.Wrap(services.ErrValidation, "subtitles", "extract audio", "Invalid audio track index", nil)
 	}
-	var parsed whisperJSON
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return nil, fmt.Errorf("decode whisperx json: %w", err)
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", source,
+		"-map", fmt.Sprintf("0:%d", audioIndex),
+		"-vn",
+		"-sn",
+		"-dn",
+		"-ac", "1",
+		"-ar", "16000",
+		"-c:a", "pcm_s16le",
+		destination,
 	}
-	return parsed.Segments, nil
+	if err := s.run(ctx, ffmpegCommand, args...); err != nil {
+		return services.Wrap(services.ErrExternalTool, "subtitles", "extract audio", "Failed to extract primary audio track with ffmpeg", err)
+	}
+	return nil
 }
 
-type cueWordGroup struct {
-	Words   []word
-	IsLyric bool
+func (s *Service) formatWithStableTS(ctx context.Context, whisperJSON, outputPath, language string) error {
+	if strings.TrimSpace(whisperJSON) == "" {
+		return os.ErrNotExist
+	}
+
+	tmpPath := outputPath + ".tmp"
+	defer os.Remove(tmpPath)
+
+	args := []string{
+		"--from", stableTSPackage,
+		"python", "-c", stableTSFormatterScript,
+		whisperJSON,
+		tmpPath,
+	}
+	if trimmed := strings.TrimSpace(language); trimmed != "" {
+		args = append(args, "--language", trimmed)
+	}
+	if err := s.run(ctx, stableTSCommand, args...); err != nil {
+		return services.Wrap(services.ErrExternalTool, "subtitles", "stable_ts_formatter", "StableTS formatter failed", err)
+	}
+	if err := os.Rename(tmpPath, outputPath); err != nil {
+		return services.Wrap(services.ErrTransient, "subtitles", "finalize stablets formatter", "Failed to finalize formatted subtitles", err)
+	}
+	return nil
 }
 
-func buildCueWordGroups(segments []whisperSegment) []cueWordGroup {
-	groups := make([]cueWordGroup, 0, len(segments))
-	for _, seg := range segments {
-		words := segmentWords(seg)
-		if len(words) == 0 {
-			continue
+func (s *Service) reshapeSubtitles(ctx context.Context, whisperSRT, whisperJSON, outputPath, language string, totalDuration float64) error {
+	if err := s.formatWithStableTS(ctx, whisperJSON, outputPath, normalizeWhisperLanguage(language)); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("stable-ts formatter failed, delivering raw whisper subtitles", logging.Error(err))
 		}
-		isLyric := isLikelyLyricSegment(seg, words)
-		groups = append(groups, splitWordsIntoCues(words, isLyric)...)
-	}
-	groups = mergeShortCueWords(groups)
-	groups = promoteLyricClusters(groups)
-	return mergeLyricGroups(groups)
-}
-
-func segmentWords(seg whisperSegment) []word {
-	if len(seg.Words) == 0 {
-		text := normalizeWhitespace(seg.Text)
-		if text == "" || seg.End <= seg.Start {
-			return nil
+		if strings.TrimSpace(whisperSRT) == "" {
+			return err
 		}
-		return []word{{Text: text, Start: seg.Start, End: seg.End}}
-	}
-	words := make([]word, 0, len(seg.Words))
-	for _, w := range seg.Words {
-		text := normalizeWhitespace(w.Word)
-		if text == "" {
-			continue
+		data, readErr := os.ReadFile(whisperSRT)
+		if readErr != nil {
+			return services.Wrap(services.ErrTransient, "subtitles", "fallback copy", "Failed to read WhisperX subtitles after Stable-TS failure", readErr)
 		}
-		start := w.Start
-		end := w.End
-		if end <= start {
-			end = start + 0.05
-		}
-		words = append(words, word{Text: text, Start: start, End: end})
-	}
-	return words
-}
-
-func splitWordsIntoCues(words []word, isLyric bool) []cueWordGroup {
-	if len(words) == 0 {
-		return nil
-	}
-	current := make([]word, 0, len(words))
-	cues := make([]cueWordGroup, 0, len(words)/3+1)
-
-	for _, w := range words {
-		for {
-			candidate := append(copyWords(current), w)
-			if violatesNetflixRules(candidate) {
-				if len(current) == 0 {
-					current = candidate
-					break
-				}
-				if idx := findSplitIndex(current); idx >= 0 {
-					cues = append(cues, cueWordGroup{Words: copyWords(current[:idx+1]), IsLyric: isLyric})
-					current = copyWords(current[idx+1:])
-					continue
-				}
-				cues = append(cues, cueWordGroup{Words: copyWords(current), IsLyric: isLyric})
-				current = current[:0]
-				continue
-			}
-			current = candidate
-			break
+		if writeErr := os.WriteFile(outputPath, data, 0o644); writeErr != nil {
+			return services.Wrap(services.ErrTransient, "subtitles", "fallback copy", "Failed to write WhisperX subtitles after Stable-TS failure", writeErr)
 		}
 	}
-	if len(current) > 0 {
-		cues = append(cues, cueWordGroup{Words: copyWords(current), IsLyric: isLyric})
-	}
-	return cues
-}
-
-func findSplitIndex(words []word) int {
-	if len(words) == 0 {
-		return -1
-	}
-	punct := ".!?…;:,—-\""
-	for i := len(words) - 1; i >= 0; i-- {
-		trimmed := strings.TrimSpace(words[i].Text)
-		if trimmed == "" {
-			continue
-		}
-		runes := []rune(trimmed)
-		if strings.ContainsRune(punct, runes[len(runes)-1]) {
-			return i
-		}
-	}
-	if len(words) > 1 {
-		return len(words)/2 - 1
-	}
-	return -1
-}
-
-func mergeShortCueWords(groups []cueWordGroup) []cueWordGroup {
-	if len(groups) == 0 {
-		return groups
-	}
-	result := make([]cueWordGroup, 0, len(groups))
-	for i := 0; i < len(groups); i++ {
-		current := groups[i]
-		for i+1 < len(groups) && current.IsLyric == groups[i+1].IsLyric && shouldMergeWithNext(current, groups[i+1]) {
-			candidateWords := append(copyWords(current.Words), groups[i+1].Words...)
-			if violatesNetflixRules(candidateWords) {
-				break
-			}
-			current = cueWordGroup{Words: candidateWords, IsLyric: current.IsLyric}
-			i++
-		}
-		result = append(result, current)
-	}
-	return result
-}
-
-func shouldMergeWithNext(current, next cueWordGroup) bool {
-	if len(current.Words) == 0 || len(next.Words) == 0 {
-		return false
-	}
-	if current.IsLyric {
-		return true
-	}
-	if len(current.Words) <= 2 || cueDuration(current.Words) < 0.8 {
-		return true
-	}
-	lastText := strings.TrimSpace(current.Words[len(current.Words)-1].Text)
-	if lastText == "" {
-		return true
-	}
-	lastRune := []rune(lastText)[len([]rune(lastText))-1]
-	if strings.ContainsRune(".!?…", lastRune) {
-		return false
-	}
-	return len(current.Words) <= 6
-}
-
-func cueDuration(words []word) float64 {
-	if len(words) == 0 {
-		return 0
-	}
-	return words[len(words)-1].End - words[0].Start
-}
-
-func convertCueWordsToCues(groups []cueWordGroup) []Cue {
-	if len(groups) == 0 {
-		return nil
-	}
-	cues := make([]Cue, 0, len(groups))
-	for _, group := range groups {
-		if len(group.Words) == 0 {
-			continue
-		}
-		var lines []string
-		if group.IsLyric {
-			lines = wrapLyricText(joinWords(group.Words))
-		} else {
-			lines = wrapText(joinWords(group.Words))
-		}
-		if len(lines) == 0 {
-			continue
-		}
-		start := group.Words[0].Start
-		end := group.Words[len(group.Words)-1].End
-		if end <= start {
-			end = start + 0.1
-		}
-		var text string
-		if group.IsLyric {
-			text = formatLyric(lines)
-		} else {
-			text = strings.Join(lines, "\n")
-		}
-		cues = append(cues, Cue{Start: start, End: end, Text: text})
-	}
-	return cues
-}
-
-func copyWords(words []word) []word {
-	result := make([]word, len(words))
-	copy(result, words)
-	return result
-}
-
-func violatesNetflixRules(words []word) bool {
-	if len(words) == 0 {
-		return false
-	}
-	text := joinWords(words)
-	lines := wrapText(text)
-	if len(lines) > netflixMaxLines {
-		return true
-	}
-	for _, line := range lines {
-		if utf8.RuneCountInString(line) > netflixMaxLineChars {
-			return true
-		}
-	}
-	start := words[0].Start
-	end := words[len(words)-1].End
-	if end-start > netflixMaxCueDuration.Seconds()+durationEpsilon.Seconds() {
-		return true
-	}
-	duration := end - start
-	if duration <= 0 {
-		duration = 0.1
-	}
-	charCount := float64(countCharacters(strings.Join(lines, "")))
-	if duration >= 1.0 {
-		ratio := charCount / duration
-		if ratio > netflixMaxCharsPerSec {
-			return true
-		}
-	}
-	return false
-}
-
-func enforceCueDurations(cues []Cue) []Cue {
-	if len(cues) == 0 {
-		return cues
-	}
-	for i := range cues {
-		if cues[i].End <= cues[i].Start {
-			cues[i].End = cues[i].Start + 0.1
-		}
-		duration := cues[i].End - cues[i].Start
-		if duration > netflixMaxCueDuration.Seconds() {
-			cues[i].End = cues[i].Start + netflixMaxCueDuration.Seconds()
-		}
-	}
-	for i := range cues {
-		duration := cues[i].End - cues[i].Start
-		if duration < netflixMinCueDuration.Seconds() {
-			desiredEnd := cues[i].Start + netflixMinCueDuration.Seconds()
-			if i+1 < len(cues) {
-				limit := cues[i+1].Start - netflixMinCueGap.Seconds()
-				if desiredEnd > limit {
-					desiredEnd = math.Max(limit, cues[i].Start+0.1)
-				}
-			}
-			cues[i].End = math.Min(desiredEnd, cues[i].Start+netflixMaxCueDuration.Seconds())
-		}
-	}
-	for i := 1; i < len(cues); i++ {
-		minStart := cues[i-1].End + netflixMinCueGap.Seconds()
-		if cues[i].Start < minStart {
-			shift := minStart - cues[i].Start
-			cues[i].Start += shift
-			if cues[i].End <= cues[i].Start {
-				cues[i].End = cues[i].Start + 0.1
-			}
-		}
-	}
-	return cues
-}
-
-func joinWords(words []word) string {
-	if len(words) == 0 {
-		return ""
-	}
-	tokens := make([]string, 0, len(words))
-	for _, w := range words {
-		tokens = append(tokens, sanitizeWord(w.Text))
-	}
-	return normalizeWhitespace(strings.Join(tokens, " "))
-}
-
-func sanitizeWord(text string) string {
-	return strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
-}
-
-func normalizeWhitespace(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return text
-	}
-	fields := strings.Fields(text)
-	return strings.Join(fields, " ")
-}
-
-func wrapText(text string) []string {
-	return wrapTextWithLimit(text, netflixMaxLineChars)
-}
-
-func wrapLyricText(text string) []string {
-	lines := wrapTextWithLimit(text, lyricLineCharLimit)
-	if len(lines) > 2 {
-		lines = lines[:2]
-	}
-	return lines
-}
-
-func wrapTextWithLimit(text string, limit int) []string {
-	if text == "" {
-		return nil
-	}
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return nil
-	}
-	lines := make([]string, 0, 2)
-	current := ""
-	for _, token := range words {
-		parts := splitLongWord(token, limit)
-		for _, part := range parts {
-			if current == "" {
-				current = part
-				continue
-			}
-			if utf8.RuneCountInString(current)+1+utf8.RuneCountInString(part) <= limit {
-				current = current + " " + part
-				continue
-			}
-			lines = append(lines, current)
-			current = part
-		}
-	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	return lines
-}
-
-func isLikelyLyricSegment(seg whisperSegment, words []word) bool {
-	if len(words) == 0 {
-		return false
-	}
-	text := strings.TrimSpace(seg.Text)
-	if text == "" {
-		text = joinWords(words)
-	}
-	if strings.ContainsAny(text, ".!?") {
-		return false
-	}
-	letters := 0
-	other := 0
-	for _, r := range text {
-		switch {
-		case unicode.IsLetter(r):
-			letters++
-		case unicode.IsSpace(r), r == '\'', r == ',':
-		default:
-			other++
-		}
-	}
-	if other > 0 {
-		return false
-	}
-	totalDuration := words[len(words)-1].End - words[0].Start
-	if totalDuration < 0.4 {
-		return false
-	}
-	average := totalDuration / float64(len(words))
-	return average >= 0.45
-}
-
-func mergeLyricGroups(groups []cueWordGroup) []cueWordGroup {
-	if len(groups) == 0 {
-		return groups
-	}
-	result := make([]cueWordGroup, 0, len(groups))
-	current := groups[0]
-	for i := 1; i < len(groups); i++ {
-		next := groups[i]
-		if current.IsLyric && next.IsLyric {
-			gap := next.Words[0].Start - current.Words[len(current.Words)-1].End
-			if gap <= 1.5 {
-				combined := append(copyWords(current.Words), next.Words...)
-				if !violatesNetflixRules(combined) {
-					current.Words = combined
-					continue
-				}
-			}
-		}
-		result = append(result, current)
-		current = next
-	}
-	result = append(result, current)
-	return result
-}
-
-func promoteLyricClusters(groups []cueWordGroup) []cueWordGroup {
-	if len(groups) == 0 {
-		return groups
-	}
-	result := make([]cueWordGroup, 0, len(groups))
-	for i := 0; i < len(groups); {
-		if isLyricFragment(groups[i]) {
-			j := i + 1
-			combined := copyWords(groups[i].Words)
-			for j < len(groups) && isLyricFragment(groups[j]) {
-				candidate := append(copyWords(combined), groups[j].Words...)
-				if cueDuration(candidate) > 6.5 {
-					break
-				}
-				combined = candidate
-				j++
-			}
-			if j-i > 1 {
-				result = append(result, cueWordGroup{Words: combined, IsLyric: true})
-				i = j
-				continue
-			}
-		}
-		if groups[i].IsLyric {
-			j := i + 1
-			combined := copyWords(groups[i].Words)
-			merged := false
-			for j < len(groups) && isLyricFragment(groups[j]) {
-				candidate := append(copyWords(combined), groups[j].Words...)
-				if cueDuration(candidate) > 6.5 {
-					break
-				}
-				combined = candidate
-				merged = true
-				j++
-			}
-			if merged {
-				result = append(result, cueWordGroup{Words: combined, IsLyric: true})
-				i = j
-				continue
-			}
-		}
-		if isLyricFragment(groups[i]) && len(result) > 0 && result[len(result)-1].IsLyric {
-			prev := &result[len(result)-1]
-			gap := groups[i].Words[0].Start - prev.Words[len(prev.Words)-1].End
-			candidate := append(copyWords(prev.Words), groups[i].Words...)
-			if gap <= 1.5 && cueDuration(candidate) <= 6.5 {
-				prev.Words = candidate
-				i++
-				continue
-			}
-		}
-		result = append(result, groups[i])
-		i++
-	}
-	return result
-}
-
-func isLyricFragment(group cueWordGroup) bool {
-	if len(group.Words) == 0 {
-		return false
-	}
-	if cueDuration(group.Words) > 1.6 {
-		return false
-	}
-	if len(group.Words) > 6 {
-		return false
-	}
-	text := joinWords(group.Words)
-	trimmed := strings.TrimRight(text, ",.!?…")
-	if trimmed == "" {
-		trimmed = text
-	}
-	if strings.ContainsAny(trimmed, ".!?…") {
-		return false
-	}
-	return true
-}
-
-func formatLyric(lines []string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	for i := range lines {
-		lines[i] = strings.TrimSpace(lines[i])
-		if lines[i] == "" {
-			continue
-		}
-		lines[i] = normalizeLyricLine(lines[i])
-	}
-	note := "\u266A"
-	lines[0] = fmt.Sprintf("%s %s", note, lines[0])
-	if len(lines) == 1 {
-		lines[0] = strings.TrimSpace(lines[0]) + " " + note
-	} else {
-		last := len(lines) - 1
-		lines[last] = strings.TrimSpace(lines[last]) + " " + note
-	}
-	return "<i>" + strings.Join(lines, "\n") + "</i>"
-}
-
-func normalizeLyricLine(line string) string {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return line
-	}
-	runes := []rune(line)
-	// Uppercase first rune if letter
-	first := runes[0]
-	if unicode.IsLetter(first) {
-		runes[0] = unicode.ToUpper(first)
-	}
-	// remove forbidden end punctuation
-	for len(runes) > 0 {
-		last := runes[len(runes)-1]
-		if last == '!' || last == '?' {
-			break
-		}
-		if last == '.' || last == ',' || last == ';' || last == ':' {
-			runes = runes[:len(runes)-1]
-			continue
-		}
-		break
-	}
-	return strings.TrimSpace(string(runes))
-}
-
-func splitLongWord(word string, limit int) []string {
-	if utf8.RuneCountInString(word) <= limit {
-		return []string{word}
-	}
-	runes := []rune(word)
-	var parts []string
-	for len(runes) > limit {
-		parts = append(parts, string(runes[:limit]))
-		runes = runes[limit:]
-	}
-	if len(runes) > 0 {
-		parts = append(parts, string(runes))
-	}
-	return parts
-}
-
-func countCharacters(text string) int {
-	return utf8.RuneCountInString(strings.ReplaceAll(text, "\n", ""))
+	return nil
 }
 
 func normalizeWhisperLanguage(language string) string {
@@ -907,103 +388,115 @@ func defaultCommandRunner(ctx context.Context, name string, args ...string) erro
 	return nil
 }
 
-// Stage integrates subtitle generation with the workflow manager.
-type Stage struct {
-	store   *queue.Store
-	service *Service
-	logger  *slog.Logger
+func (s *Service) configuredVADMethod() string {
+	if s == nil || s.config == nil {
+		return whisperXVADMethodSilero
+	}
+	method := strings.ToLower(strings.TrimSpace(s.config.WhisperXVADMethod))
+	switch method {
+	case whisperXVADMethodPyannote, whisperXVADMethodSilero:
+		return method
+	case "":
+		return whisperXVADMethodSilero
+	default:
+		return whisperXVADMethodSilero
+	}
 }
 
-// NewStage constructs a workflow stage that generates subtitles for queue items.
-func NewStage(store *queue.Store, service *Service, logger *slog.Logger) *Stage {
-	stageLogger := logger
-	if stageLogger != nil {
-		stageLogger = stageLogger.With(logging.String("component", "subtitle-stage"))
+func (s *Service) activeVADMethod() string {
+	if s == nil {
+		return whisperXVADMethodSilero
 	}
-	return &Stage{store: store, service: service, logger: stageLogger}
+	if s.vadOverride != "" {
+		return s.vadOverride
+	}
+	return s.configuredVADMethod()
 }
 
-// Prepare primes queue progress fields before executing the stage.
-func (s *Stage) Prepare(ctx context.Context, item *queue.Item) error {
-	if s == nil || s.service == nil {
-		return services.Wrap(services.ErrConfiguration, "subtitles", "prepare", "Subtitle stage is not configured", nil)
+func (s *Service) ensureTokenReady(ctx context.Context) error {
+	if s == nil {
+		return services.Wrap(services.ErrConfiguration, "subtitles", "token", "Subtitle service unavailable", nil)
 	}
-	if !s.service.config.SubtitlesEnabled {
+	if s.configuredVADMethod() != whisperXVADMethodPyannote {
 		return nil
 	}
-	if s.store == nil {
-		return services.Wrap(services.ErrConfiguration, "subtitles", "prepare", "Queue store unavailable", nil)
-	}
-	item.ProgressStage = progressStageGenerating
-	item.ProgressMessage = "Preparing audio for transcription"
-	item.ProgressPercent = 0
-	item.ErrorMessage = ""
-	return s.store.UpdateProgress(ctx, item)
-}
-
-// Execute performs subtitle generation for the queue item.
-func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
-	if s == nil || s.service == nil {
-		return services.Wrap(services.ErrConfiguration, "subtitles", "execute", "Subtitle stage is not configured", nil)
-	}
-	if item == nil {
-		return services.Wrap(services.ErrValidation, "subtitles", "execute", "Queue item is nil", nil)
-	}
-	if s.store == nil {
-		return services.Wrap(services.ErrConfiguration, "subtitles", "execute", "Queue store unavailable", nil)
-	}
-	if strings.TrimSpace(item.EncodedFile) == "" {
-		return services.Wrap(services.ErrValidation, "subtitles", "execute", "No encoded file available for subtitles", nil)
-	}
-	if !s.service.config.SubtitlesEnabled {
-		return nil
+	if strings.TrimSpace(s.hfToken) == "" {
+		return services.Wrap(services.ErrConfiguration, "subtitles", "validate vad", "pyannote VAD selected but no Hugging Face token configured (set whisperx_hf_token)", nil)
 	}
 
-	if err := s.updateProgress(ctx, item, "Running WhisperX transcription", 5); err != nil {
-		return err
-	}
-	workDir := item.StagingRoot(s.service.config.StagingDir)
-	outputDir := filepath.Dir(strings.TrimSpace(item.EncodedFile))
-	result, err := s.service.Generate(ctx, GenerateRequest{
-		SourcePath: item.EncodedFile,
-		WorkDir:    filepath.Join(workDir, "subtitles"),
-		OutputDir:  outputDir,
-		BaseName:   baseNameWithoutExt(item.EncodedFile),
+	s.tokenOnce.Do(func() {
+		if s.hfCheck == nil {
+			s.tokenErr = services.Wrap(services.ErrConfiguration, "subtitles", "pyannote auth", "Token validator unavailable", nil)
+			return
+		}
+		result, err := s.hfCheck(ctx, s.hfToken)
+		if err != nil {
+			s.tokenErr = err
+			s.vadOverride = whisperXVADMethodSilero
+			return
+		}
+		s.tokenResult = &result
 	})
+
+	if s.tokenErr != nil {
+		if !s.tokenFallbackLogged && s.logger != nil {
+			s.logger.Warn("pyannote authentication failed, falling back to silero", logging.Error(s.tokenErr))
+			s.tokenFallbackLogged = true
+		}
+		return nil
+	}
+
+	if !s.tokenSuccessLogged && s.tokenResult != nil && s.logger != nil {
+		account := strings.TrimSpace(s.tokenResult.Account)
+		if account == "" {
+			account = "huggingface"
+		}
+		s.logger.Info("pyannote authentication verified", logging.String("account", account))
+		s.tokenSuccessLogged = true
+	}
+
+	return nil
+}
+
+func defaultTokenValidator(ctx context.Context, token string) (tokenValidationResult, error) {
+	if strings.TrimSpace(token) == "" {
+		return tokenValidationResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "pyannote auth", "Empty Hugging Face token", nil)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, huggingFaceWhoAmIEndpoint, nil)
 	if err != nil {
-		return err
+		return tokenValidationResult{}, services.Wrap(services.ErrTransient, "subtitles", "pyannote auth", "Failed to build validation request", err)
 	}
-	item.ProgressMessage = fmt.Sprintf("Generated subtitles: %s", filepath.Base(result.SubtitlePath))
-	item.ProgressPercent = 100
-	if err := s.store.UpdateProgress(ctx, item); err != nil {
-		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := defaultHTTPClient.Do(req)
+	if err != nil {
+		return tokenValidationResult{}, services.Wrap(services.ErrTransient, "subtitles", "pyannote auth", "Failed to contact Hugging Face", err)
 	}
-	return nil
-}
+	defer resp.Body.Close()
 
-func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) error {
-	item.ProgressStage = progressStageGenerating
-	if strings.TrimSpace(message) != "" {
-		item.ProgressMessage = message
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var payload struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			return tokenValidationResult{}, services.Wrap(services.ErrTransient, "subtitles", "pyannote auth", "Failed to parse Hugging Face response", err)
+		}
+		account := strings.TrimSpace(payload.Name)
+		if account == "" {
+			account = "huggingface"
+		}
+		return tokenValidationResult{Account: account}, nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		base := services.Wrap(services.ErrValidation, "subtitles", "pyannote auth", fmt.Sprintf("Hugging Face rejected token (%s)", resp.Status), nil)
+		return tokenValidationResult{}, fmt.Errorf("%w: %w", errPyannoteUnauthorized, base)
+	default:
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = resp.Status
+		}
+		return tokenValidationResult{}, services.Wrap(services.ErrTransient, "subtitles", "pyannote auth", fmt.Sprintf("Unexpected Hugging Face response: %s", msg), nil)
 	}
-	if percent >= 0 {
-		item.ProgressPercent = percent
-	}
-	if err := s.store.UpdateProgress(ctx, item); err != nil {
-		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
-	}
-	return nil
-}
-
-// HealthCheck reports readiness for the subtitle stage.
-func (s *Stage) HealthCheck(ctx context.Context) stage.Health {
-	if s == nil || s.service == nil {
-		return stage.Unhealthy("subtitles", "stage not configured")
-	}
-	if !s.service.config.SubtitlesEnabled {
-		return stage.Healthy("subtitles")
-	}
-	return stage.Healthy("subtitles")
 }
 
 func baseNameWithoutExt(path string) string {
@@ -1012,39 +505,6 @@ func baseNameWithoutExt(path string) string {
 		return "subtitle"
 	}
 	return strings.TrimSuffix(filename, filepath.Ext(filename))
-}
-
-// Cue represents a single subtitle cue in seconds.
-type Cue struct {
-	Start float64
-	End   float64
-	Text  string
-}
-
-func writeSRT(path string, cues []Cue) error {
-	var b strings.Builder
-	for i, cue := range cues {
-		start := formatSRTTimestamp(cue.Start)
-		end := formatSRTTimestamp(cue.End)
-		if _, err := fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", i+1, start, end, cue.Text); err != nil {
-			return fmt.Errorf("write cue %d: %w", i+1, err)
-		}
-	}
-	return os.WriteFile(path, []byte(b.String()), 0o644)
-}
-
-func formatSRTTimestamp(seconds float64) string {
-	if seconds < 0 {
-		seconds = 0
-	}
-	totalMillis := int(math.Round(seconds * 1000))
-	hours := totalMillis / (60 * 60 * 1000)
-	remainder := totalMillis % (60 * 60 * 1000)
-	minutes := remainder / (60 * 1000)
-	remainder %= 60 * 1000
-	secs := remainder / 1000
-	millis := remainder % 1000
-	return fmt.Sprintf("%02d:%02d:%02d,%03d", hours, minutes, secs, millis)
 }
 
 func inferLanguage(tags map[string]string) string {
