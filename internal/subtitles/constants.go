@@ -24,6 +24,7 @@ const (
 	whisperXCPUComputeType = "float32"
 	stableTSCommand        = "uvx"
 	stableTSPackage        = "stable-ts"
+	whisperXPackage        = "whisperx"
 )
 
 const (

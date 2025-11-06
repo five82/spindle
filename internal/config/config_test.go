@@ -56,6 +56,24 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	if cfg.WhisperXHuggingFaceToken != "" {
 		t.Fatalf("expected WhisperX Hugging Face token to be empty by default, got %q", cfg.WhisperXHuggingFaceToken)
 	}
+	if cfg.OpenSubtitlesEnabled {
+		t.Fatal("expected OpenSubtitles integration disabled by default")
+	}
+	if cfg.OpenSubtitlesAPIKey != "" {
+		t.Fatalf("expected OpenSubtitles API key to be empty by default, got %q", cfg.OpenSubtitlesAPIKey)
+	}
+	if cfg.OpenSubtitlesUserToken != "" {
+		t.Fatalf("expected OpenSubtitles user token to be empty by default, got %q", cfg.OpenSubtitlesUserToken)
+	}
+	if cfg.OpenSubtitlesUserAgent == "" {
+		t.Fatalf("expected OpenSubtitles user agent to have default value")
+	}
+	if len(cfg.OpenSubtitlesLanguages) == 0 {
+		t.Fatalf("expected OpenSubtitles languages to include defaults")
+	}
+	if cfg.OpenSubtitlesLanguages[0] != "en" {
+		t.Fatalf("expected OpenSubtitles default language to be en, got %v", cfg.OpenSubtitlesLanguages)
+	}
 	if cfg.WorkflowHeartbeatInterval != config.Default().WorkflowHeartbeatInterval {
 		t.Fatalf("unexpected heartbeat interval: %d", cfg.WorkflowHeartbeatInterval)
 	}
@@ -191,5 +209,32 @@ func TestValidateDetectsInvalidValues(t *testing.T) {
 	cfg.TMDBConfidenceThreshold = 1.5
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for tmdb confidence threshold")
+	}
+
+	cfg = config.Default()
+	cfg.TMDBAPIKey = "key"
+	cfg.OpenSubtitlesEnabled = true
+	cfg.OpenSubtitlesAPIKey = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error when OpenSubtitles enabled without API key")
+	}
+
+	cfg = config.Default()
+	cfg.TMDBAPIKey = "key"
+	cfg.OpenSubtitlesEnabled = true
+	cfg.OpenSubtitlesAPIKey = "abc"
+	cfg.OpenSubtitlesUserAgent = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error when OpenSubtitles enabled without user agent")
+	}
+
+	cfg = config.Default()
+	cfg.TMDBAPIKey = "key"
+	cfg.OpenSubtitlesEnabled = true
+	cfg.OpenSubtitlesAPIKey = "abc"
+	cfg.OpenSubtitlesUserAgent = "Spindle/test"
+	cfg.OpenSubtitlesLanguages = nil
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error when OpenSubtitles enabled without languages")
 	}
 }

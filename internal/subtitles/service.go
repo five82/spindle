@@ -20,6 +20,7 @@ import (
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/services"
+	"spindle/internal/subtitles/opensubtitles"
 )
 
 var (
@@ -27,6 +28,11 @@ var (
 	defaultHTTPClient       = &http.Client{Timeout: 10 * time.Second}
 	errPyannoteUnauthorized = errors.New("pyannote token unauthorized")
 )
+
+type openSubtitlesClient interface {
+	Search(ctx context.Context, req opensubtitles.SearchRequest) (opensubtitles.SearchResponse, error)
+	Download(ctx context.Context, fileID int64, opts opensubtitles.DownloadOptions) (opensubtitles.DownloadResult, error)
+}
 
 type commandRunner func(ctx context.Context, name string, args ...string) error
 type tokenValidator func(ctx context.Context, token string) (tokenValidationResult, error)
@@ -44,6 +50,8 @@ type GenerateRequest struct {
 	OutputDir  string
 	Language   string
 	BaseName   string
+	Context    SubtitleContext
+	Languages  []string
 }
 
 // GenerateResult reports the generated subtitle file and summary stats.
@@ -70,6 +78,11 @@ type Service struct {
 	tokenFallbackLogged bool
 	readyOnce           sync.Once
 	readyErr            error
+	openSubsOnce        sync.Once
+	openSubsErr         error
+	openSubs            openSubtitlesClient
+	openSubsReadyLogged bool
+	languages           []string
 }
 
 // ServiceOption customizes a Service.
@@ -100,6 +113,15 @@ func WithoutDependencyCheck() ServiceOption {
 	}
 }
 
+// WithOpenSubtitlesClient injects a custom OpenSubtitles client (used in tests).
+func WithOpenSubtitlesClient(client openSubtitlesClient) ServiceOption {
+	return func(s *Service) {
+		if client != nil {
+			s.openSubs = client
+		}
+	}
+}
+
 // NewService constructs a subtitle generation service.
 func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) *Service {
 	serviceLogger := logger
@@ -110,12 +132,17 @@ func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) 
 	if cfg != nil {
 		token = strings.TrimSpace(cfg.WhisperXHuggingFaceToken)
 	}
+	languages := []string{"en"}
+	if cfg != nil && len(cfg.OpenSubtitlesLanguages) > 0 {
+		languages = append([]string(nil), cfg.OpenSubtitlesLanguages...)
+	}
 	svc := &Service{
-		config:  cfg,
-		logger:  serviceLogger,
-		run:     defaultCommandRunner,
-		hfToken: token,
-		hfCheck: defaultTokenValidator,
+		config:    cfg,
+		logger:    serviceLogger,
+		run:       defaultCommandRunner,
+		hfToken:   token,
+		hfCheck:   defaultTokenValidator,
+		languages: languages,
 	}
 	for _, opt := range opts {
 		opt(svc)
@@ -156,6 +183,15 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "init", "Subtitle service unavailable", nil)
 	}
 
+	if len(req.Languages) == 0 {
+		req.Languages = append([]string(nil), s.languages...)
+	} else {
+		req.Languages = normalizeLanguageList(req.Languages)
+	}
+	if req.Language == "" && len(req.Languages) > 0 {
+		req.Language = req.Languages[0]
+	}
+
 	if err := s.ensureReady(); err != nil {
 		return GenerateResult{}, err
 	}
@@ -172,8 +208,63 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		defer plan.cleanup()
 	}
 
+	if req.Context.Language == "" {
+		req.Context.Language = plan.language
+	}
+	if req.Language == "" {
+		req.Language = plan.language
+	}
+	if len(req.Languages) == 0 {
+		req.Languages = []string{plan.language}
+	}
+
 	if err := s.extractPrimaryAudio(ctx, plan.source, plan.audioIndex, plan.audioPath); err != nil {
 		return GenerateResult{}, err
+	}
+
+	if s.shouldUseOpenSubtitles() {
+		title := strings.TrimSpace(req.Context.Title)
+		if s.logger != nil {
+			s.logger.Info("attempting opensubtitles fetch",
+				logging.String("title", title),
+				logging.Int64("tmdb_id", req.Context.TMDBID),
+				logging.String("imdb_id", strings.TrimSpace(req.Context.IMDBID)),
+				logging.String("languages", strings.Join(req.Languages, ",")),
+			)
+		}
+		if result, ok, err := s.tryOpenSubtitles(ctx, plan, req); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("opensubtitles fetch failed",
+					logging.Error(err),
+					logging.String("title", title),
+					logging.Int64("tmdb_id", req.Context.TMDBID),
+				)
+			}
+		} else if ok {
+			if s.logger != nil {
+				s.logger.Info("using opensubtitles subtitles",
+					logging.String("subtitle_path", result.SubtitlePath),
+					logging.Int("segment_count", result.SegmentCount),
+				)
+			}
+			return result, nil
+		} else if s.logger != nil {
+			s.logger.Info("opensubtitles match not found",
+				logging.String("title", title),
+				logging.Int64("tmdb_id", req.Context.TMDBID),
+				logging.String("languages", strings.Join(req.Languages, ",")),
+			)
+		}
+	} else if s.logger != nil {
+		reason := "opensubtitles disabled"
+		if s.config == nil {
+			reason = "configuration unavailable"
+		} else if !s.config.OpenSubtitlesEnabled {
+			reason = "opensubtitles_enabled is false"
+		} else if strings.TrimSpace(s.config.OpenSubtitlesAPIKey) == "" {
+			reason = "opensubtitles_api_key not set"
+		}
+		s.logger.Info("opensubtitles download skipped", logging.String("reason", reason))
 	}
 
 	if err := s.invokeWhisperX(ctx, plan); err != nil {
@@ -375,6 +466,31 @@ func normalizeWhisperLanguage(language string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeLanguageList(languages []string) []string {
+	if len(languages) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(languages))
+	seen := make(map[string]struct{}, len(languages))
+	for _, lang := range languages {
+		trimmed := strings.ToLower(strings.TrimSpace(lang))
+		if trimmed == "" {
+			continue
+		}
+		if len(trimmed) > 2 {
+			if mapped := normalizeWhisperLanguage(trimmed); mapped != "" {
+				trimmed = mapped
+			}
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
 }
 
 func defaultCommandRunner(ctx context.Context, name string, args ...string) error {

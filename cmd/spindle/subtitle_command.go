@@ -1,14 +1,22 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
+	"log/slog"
+
+	"spindle/internal/config"
+	"spindle/internal/identification"
+	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/subtitles"
 )
@@ -85,10 +93,49 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			}
 			service := subtitles.NewService(cfg, logger)
 
+			baseName := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
+			inferredTitle, inferredYear := splitTitleAndYear(baseName)
+			if inferredTitle == "" {
+				inferredTitle = baseName
+			}
+			ctxMeta := subtitles.SubtitleContext{Title: inferredTitle, MediaType: "movie", Year: inferredYear}
+			if lang := strings.TrimSpace(cfg.TMDBLanguage); lang != "" {
+				ctxMeta.Language = strings.ToLower(strings.SplitN(lang, "-", 2)[0])
+			}
+
+			openSubsReady, disabledReason := openSubtitlesReady(cfg)
+			if openSubsReady {
+				if match := lookupTMDBMetadata(cmd.Context(), cfg, logger, inferredTitle, inferredYear); match != nil {
+					ctxMeta.TMDBID = match.TMDBID
+					ctxMeta.MediaType = match.MediaType
+					if match.Title != "" {
+						ctxMeta.Title = match.Title
+					}
+					if match.Year != "" {
+						ctxMeta.Year = match.Year
+					}
+					if logger != nil {
+						logger.Info("tmdb metadata attached",
+							logging.Int64("tmdb_id", match.TMDBID),
+							logging.String("title", ctxMeta.Title),
+							logging.String("year", ctxMeta.Year),
+							logging.String("media_type", ctxMeta.MediaType),
+						)
+					}
+				} else if logger != nil {
+					logger.Info("tmdb lookup skipped: no confident match", logging.String("title", inferredTitle))
+				}
+			} else if logger != nil {
+				logger.Info("opensubtitles download disabled", logging.String("reason", disabledReason))
+			}
+			languages := append([]string(nil), cfg.OpenSubtitlesLanguages...)
 			result, err := service.Generate(cmd.Context(), subtitles.GenerateRequest{
 				SourcePath: source,
 				WorkDir:    filepath.Join(workRoot, "work"),
 				OutputDir:  outDir,
+				BaseName:   baseName,
+				Context:    ctxMeta,
+				Languages:  languages,
 			})
 			if err != nil {
 				return fmt.Errorf("subtitle generation failed: %w", err)
@@ -104,4 +151,71 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory for intermediate files (default: temporary directory under staging_dir)")
 
 	return cmd
+}
+
+func lookupTMDBMetadata(ctx context.Context, cfg *config.Config, logger *slog.Logger, title, year string) *identification.LookupMatch {
+	if cfg == nil || strings.TrimSpace(cfg.TMDBAPIKey) == "" {
+		return nil
+	}
+	client, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("tmdb client init failed", logging.Error(err))
+		}
+		return nil
+	}
+	opts := tmdb.SearchOptions{}
+	if year != "" {
+		if parsed, parseErr := strconv.Atoi(year); parseErr == nil {
+			opts.Year = parsed
+		}
+	}
+	match, err := identification.LookupTMDBByTitle(ctx, client, logger, title, opts)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("tmdb lookup failed", logging.Error(err), logging.String("title", title))
+		}
+		return nil
+	}
+	if match == nil && logger != nil {
+		logger.Info("tmdb lookup returned no confident match", logging.String("title", title))
+	}
+	return match
+}
+
+func splitTitleAndYear(base string) (string, string) {
+	trimmed := strings.TrimSpace(base)
+	if trimmed == "" {
+		return "", ""
+	}
+	if idx := strings.LastIndex(trimmed, "("); idx != -1 && strings.HasSuffix(trimmed, ")") {
+		candidate := strings.TrimSpace(trimmed[idx+1 : len(trimmed)-1])
+		if len(candidate) == 4 {
+			allDigits := true
+			for _, r := range candidate {
+				if !unicode.IsDigit(r) {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				title := strings.TrimSpace(trimmed[:idx])
+				return title, candidate
+			}
+		}
+	}
+	return trimmed, ""
+}
+
+func openSubtitlesReady(cfg *config.Config) (bool, string) {
+	if cfg == nil {
+		return false, "configuration unavailable"
+	}
+	if !cfg.OpenSubtitlesEnabled {
+		return false, "opensubtitles_enabled is false"
+	}
+	if strings.TrimSpace(cfg.OpenSubtitlesAPIKey) == "" {
+		return false, "opensubtitles_api_key not set"
+	}
+	return true, ""
 }

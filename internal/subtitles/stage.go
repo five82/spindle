@@ -71,11 +71,14 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	workDir := item.StagingRoot(s.service.config.StagingDir)
 	outputDir := filepath.Dir(strings.TrimSpace(item.EncodedFile))
+	ctxMeta := BuildSubtitleContext(item)
 	result, err := s.service.Generate(ctx, GenerateRequest{
 		SourcePath: item.EncodedFile,
 		WorkDir:    filepath.Join(workDir, "subtitles"),
 		OutputDir:  outputDir,
 		BaseName:   baseNameWithoutExt(item.EncodedFile),
+		Context:    ctxMeta,
+		Languages:  append([]string(nil), s.service.languages...),
 	})
 	if err != nil {
 		message := strings.TrimSpace(err.Error())

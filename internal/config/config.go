@@ -13,43 +13,48 @@ import (
 
 // Config encapsulates all configuration values for the Go implementation of Spindle.
 type Config struct {
-	StagingDir                string  `toml:"staging_dir"`
-	LibraryDir                string  `toml:"library_dir"`
-	LogDir                    string  `toml:"log_dir"`
-	DraptoLogDir              string  `toml:"drapto_log_dir"`
-	ReviewDir                 string  `toml:"review_dir"`
-	OpticalDrive              string  `toml:"optical_drive"`
-	APIBind                   string  `toml:"api_bind"`
-	TMDBAPIKey                string  `toml:"tmdb_api_key"`
-	TMDBBaseURL               string  `toml:"tmdb_base_url"`
-	TMDBLanguage              string  `toml:"tmdb_language"`
-	TMDBConfidenceThreshold   float64 `toml:"tmdb_confidence_threshold"`
-	MoviesDir                 string  `toml:"movies_dir"`
-	TVDir                     string  `toml:"tv_dir"`
-	PlexLinkEnabled           bool    `toml:"plex_link_enabled"`
-	PlexURL                   string  `toml:"plex_url"`
-	MoviesLibrary             string  `toml:"movies_library"`
-	TVLibrary                 string  `toml:"tv_library"`
-	NtfyTopic                 string  `toml:"ntfy_topic"`
-	KeyDBPath                 string  `toml:"keydb_path"`
-	KeyDBDownloadURL          string  `toml:"keydb_download_url"`
-	KeyDBDownloadTimeout      int     `toml:"keydb_download_timeout"`
-	MakeMKVRipTimeout         int     `toml:"makemkv_rip_timeout"`
-	MakeMKVInfoTimeout        int     `toml:"makemkv_info_timeout"`
-	NtfyRequestTimeout        int     `toml:"ntfy_request_timeout"`
-	DiscMonitorTimeout        int     `toml:"disc_monitor_timeout"`
-	QueuePollInterval         int     `toml:"queue_poll_interval"`
-	ErrorRetryInterval        int     `toml:"error_retry_interval"`
-	WorkflowHeartbeatInterval int     `toml:"workflow_heartbeat_interval"`
-	WorkflowHeartbeatTimeout  int     `toml:"workflow_heartbeat_timeout"`
-	LogFormat                 string  `toml:"log_format"`
-	LogLevel                  string  `toml:"log_level"`
-	DraptoPreset              int     `toml:"drapto_preset"`
-	DraptoDisableDenoise      bool    `toml:"drapto_disable_denoise"`
-	SubtitlesEnabled          bool    `toml:"subtitles_enabled"`
-	WhisperXCUDAEnabled       bool    `toml:"whisperx_cuda_enabled"`
-	WhisperXVADMethod         string  `toml:"whisperx_vad_method"`
-	WhisperXHuggingFaceToken  string  `toml:"whisperx_hf_token"`
+	StagingDir                string   `toml:"staging_dir"`
+	LibraryDir                string   `toml:"library_dir"`
+	LogDir                    string   `toml:"log_dir"`
+	DraptoLogDir              string   `toml:"drapto_log_dir"`
+	ReviewDir                 string   `toml:"review_dir"`
+	OpticalDrive              string   `toml:"optical_drive"`
+	APIBind                   string   `toml:"api_bind"`
+	TMDBAPIKey                string   `toml:"tmdb_api_key"`
+	TMDBBaseURL               string   `toml:"tmdb_base_url"`
+	TMDBLanguage              string   `toml:"tmdb_language"`
+	TMDBConfidenceThreshold   float64  `toml:"tmdb_confidence_threshold"`
+	MoviesDir                 string   `toml:"movies_dir"`
+	TVDir                     string   `toml:"tv_dir"`
+	PlexLinkEnabled           bool     `toml:"plex_link_enabled"`
+	PlexURL                   string   `toml:"plex_url"`
+	MoviesLibrary             string   `toml:"movies_library"`
+	TVLibrary                 string   `toml:"tv_library"`
+	NtfyTopic                 string   `toml:"ntfy_topic"`
+	KeyDBPath                 string   `toml:"keydb_path"`
+	KeyDBDownloadURL          string   `toml:"keydb_download_url"`
+	KeyDBDownloadTimeout      int      `toml:"keydb_download_timeout"`
+	MakeMKVRipTimeout         int      `toml:"makemkv_rip_timeout"`
+	MakeMKVInfoTimeout        int      `toml:"makemkv_info_timeout"`
+	NtfyRequestTimeout        int      `toml:"ntfy_request_timeout"`
+	DiscMonitorTimeout        int      `toml:"disc_monitor_timeout"`
+	QueuePollInterval         int      `toml:"queue_poll_interval"`
+	ErrorRetryInterval        int      `toml:"error_retry_interval"`
+	WorkflowHeartbeatInterval int      `toml:"workflow_heartbeat_interval"`
+	WorkflowHeartbeatTimeout  int      `toml:"workflow_heartbeat_timeout"`
+	LogFormat                 string   `toml:"log_format"`
+	LogLevel                  string   `toml:"log_level"`
+	DraptoPreset              int      `toml:"drapto_preset"`
+	DraptoDisableDenoise      bool     `toml:"drapto_disable_denoise"`
+	SubtitlesEnabled          bool     `toml:"subtitles_enabled"`
+	WhisperXCUDAEnabled       bool     `toml:"whisperx_cuda_enabled"`
+	WhisperXVADMethod         string   `toml:"whisperx_vad_method"`
+	WhisperXHuggingFaceToken  string   `toml:"whisperx_hf_token"`
+	OpenSubtitlesEnabled      bool     `toml:"opensubtitles_enabled"`
+	OpenSubtitlesAPIKey       string   `toml:"opensubtitles_api_key"`
+	OpenSubtitlesUserAgent    string   `toml:"opensubtitles_user_agent"`
+	OpenSubtitlesUserToken    string   `toml:"opensubtitles_user_token"`
+	OpenSubtitlesLanguages    []string `toml:"opensubtitles_languages"`
 }
 
 const (
@@ -72,6 +77,7 @@ const (
 	defaultKeyDBPath                 = "~/.config/spindle/keydb/KEYDB.cfg"
 	defaultKeyDBDownloadURL          = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
 	defaultKeyDBDownloadTimeout      = 300
+	defaultOpenSubtitlesUserAgent    = "Spindle/dev"
 )
 
 // Default returns a Config populated with repository defaults.
@@ -107,6 +113,8 @@ func Default() Config {
 		LogLevel:                  defaultLogLevel,
 		DraptoPreset:              defaultDraptoPreset,
 		WhisperXVADMethod:         "silero",
+		OpenSubtitlesLanguages:    []string{"en"},
+		OpenSubtitlesUserAgent:    defaultOpenSubtitlesUserAgent,
 	}
 }
 
@@ -259,6 +267,44 @@ func (c *Config) normalize() error {
 		}
 	}
 
+	c.OpenSubtitlesAPIKey = strings.TrimSpace(c.OpenSubtitlesAPIKey)
+	if c.OpenSubtitlesAPIKey == "" {
+		if value, ok := os.LookupEnv("OPENSUBTITLES_API_KEY"); ok {
+			c.OpenSubtitlesAPIKey = strings.TrimSpace(value)
+		}
+	}
+	c.OpenSubtitlesUserAgent = strings.TrimSpace(c.OpenSubtitlesUserAgent)
+	if c.OpenSubtitlesUserAgent == "" {
+		c.OpenSubtitlesUserAgent = defaultOpenSubtitlesUserAgent
+	}
+	c.OpenSubtitlesUserToken = strings.TrimSpace(c.OpenSubtitlesUserToken)
+	if c.OpenSubtitlesUserToken == "" {
+		if value, ok := os.LookupEnv("OPENSUBTITLES_USER_TOKEN"); ok {
+			c.OpenSubtitlesUserToken = strings.TrimSpace(value)
+		}
+	}
+	if len(c.OpenSubtitlesLanguages) == 0 {
+		c.OpenSubtitlesLanguages = []string{"en"}
+	} else {
+		langs := make([]string, 0, len(c.OpenSubtitlesLanguages))
+		seen := make(map[string]struct{}, len(c.OpenSubtitlesLanguages))
+		for _, lang := range c.OpenSubtitlesLanguages {
+			normalized := strings.ToLower(strings.TrimSpace(lang))
+			if normalized == "" {
+				continue
+			}
+			if _, exists := seen[normalized]; exists {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			langs = append(langs, normalized)
+		}
+		if len(langs) == 0 {
+			langs = []string{"en"}
+		}
+		c.OpenSubtitlesLanguages = langs
+	}
+
 	c.TMDBBaseURL = strings.TrimSpace(c.TMDBBaseURL)
 	if c.TMDBBaseURL == "" {
 		c.TMDBBaseURL = defaultTMDBBaseURL
@@ -321,6 +367,17 @@ func (c *Config) Validate() error {
 	}
 	if strings.TrimSpace(c.DraptoLogDir) == "" {
 		return errors.New("drapto_log_dir must be set")
+	}
+	if c.OpenSubtitlesEnabled {
+		if strings.TrimSpace(c.OpenSubtitlesAPIKey) == "" {
+			return errors.New("opensubtitles_api_key must be set when opensubtitles_enabled is true")
+		}
+		if strings.TrimSpace(c.OpenSubtitlesUserAgent) == "" {
+			return errors.New("opensubtitles_user_agent must be set when opensubtitles_enabled is true")
+		}
+		if len(c.OpenSubtitlesLanguages) == 0 {
+			return errors.New("opensubtitles_languages must include at least one language when opensubtitles_enabled is true")
+		}
 	}
 	return nil
 }
@@ -438,6 +495,11 @@ subtitles_enabled = false                            # Enable WhisperX subtitle 
 whisperx_cuda_enabled = false                        # Run WhisperX with CUDA; set true when GPU + CUDA/cuDNN are installed
 whisperx_vad_method = "silero"                       # Voice activity detector: "silero" (default, no token) or "pyannote" (requires Hugging Face token)
 whisperx_hf_token = ""                               # Hugging Face access token for pyannote VAD (leave empty when using silero)
+opensubtitles_enabled = false                        # Set true to fetch subtitles from OpenSubtitles before falling back to WhisperX
+opensubtitles_api_key = "your_opensubtitles_api_key_here" # Required when opensubtitles_enabled is true; create at opensubtitles.com/consumers
+opensubtitles_user_agent = "Spindle/<version>"       # Custom User-Agent header registered with OpenSubtitles
+opensubtitles_languages = ["en"]                     # Preferred subtitle languages (ISO 639-1 codes, e.g., ["en","es"])
+opensubtitles_user_token = ""                        # Optional OpenSubtitles user JWT for higher download limits
 
 # ============================================================================
 # TMDB & METADATA
@@ -448,7 +510,7 @@ tmdb_base_url = "https://api.themoviedb.org/3"       # Override when using a TMD
 tmdb_confidence_threshold = 0.8                      # Match confidence (0.0-1.0)
 keydb_path = "~/.config/spindle/keydb/KEYDB.cfg"     # Optional KEYDB.cfg for Disc ID lookups (leave empty to disable)
 keydb_download_url = "http://fvonline-db.bplaced.net/export/keydb_eng.zip" # Mirror for automatic KEYDB refreshes
-keydb_download_timeout = 300                         # Download timeout in seconds when refreshing KEYDB
+keydb_download_timeout = 1500                        # Download timeout in seconds when refreshing KEYDB
 
 # ============================================================================
 # ENCODING

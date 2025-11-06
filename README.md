@@ -100,6 +100,11 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `whisperx_cuda_enabled` (optional) – Set `true` to run WhisperX with CUDA (requires CUDA 12.8+ and cuDNN 9.1); leave `false` to fall back to CPU
 - `whisperx_vad_method` (optional) – Voice activity detector for WhisperX; `silero` (default) runs fully offline, `pyannote` offers tighter alignment but needs a Hugging Face token. Spindle validates the token before each run and drops back to `silero` if Hugging Face rejects it (check the subtitle logs for the authentication message).
 - `whisperx_hf_token` (optional) – Hugging Face access token required when using `whisperx_vad_method = "pyannote"`; create one at https://huggingface.co/settings/tokens. The subtitle stage logs whether authentication succeeded or if it fell back to `silero`.
+- `opensubtitles_enabled` (optional) – When true, Spindle downloads subtitles from OpenSubtitles before falling back to WhisperX transcription.
+- `opensubtitles_api_key` (optional) – API key for OpenSubtitles. Required when `opensubtitles_enabled = true`. Create one from your OpenSubtitles profile under **API consumers**.
+- `opensubtitles_user_agent` (optional) – Custom user agent string registered with OpenSubtitles. Required when `opensubtitles_enabled = true`.
+- `opensubtitles_languages` (optional) – Preferred subtitle languages (ISO 639-1 codes, for example `['en','es']`). Used for OpenSubtitles searches.
+- `opensubtitles_user_token` (optional) – OpenSubtitles JWT for authenticated downloads. Provides higher daily download limits than anonymous mode.
 - `api_bind` – Host:port for the built-in JSON API (defaults to `127.0.0.1:7487`)
 - `keydb_path` – Location where Spindle stores/reads `KEYDB.cfg` for Disc ID lookups (defaults to `~/.config/spindle/keydb/KEYDB.cfg`)
 - `keydb_download_url` – Mirror URL Spindle uses when auto-refreshing `KEYDB.cfg`

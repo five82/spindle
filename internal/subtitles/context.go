@@ -1,0 +1,218 @@
+package subtitles
+
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+
+	"spindle/internal/queue"
+)
+
+// SubtitleContext captures metadata required to discover subtitles from external services.
+type SubtitleContext struct {
+	TMDBID     int64
+	IMDBID     string
+	MediaType  string
+	Title      string
+	Year       string
+	ContentKey string
+	Language   string
+}
+
+// HasTMDBID reports whether a TMDB identifier is available.
+func (c SubtitleContext) HasTMDBID() bool {
+	return c.TMDBID > 0
+}
+
+// IsMovie indicates whether the content represents a movie title.
+func (c SubtitleContext) IsMovie() bool {
+	mediaType := strings.ToLower(strings.TrimSpace(c.MediaType))
+	switch mediaType {
+	case "movie", "film":
+		return true
+	case "tv", "tv_show", "television", "series", "episode":
+		return false
+	}
+	return false
+}
+
+// BuildSubtitleContext extracts high-signal metadata about the queue item to aid subtitle lookups.
+func BuildSubtitleContext(item *queue.Item) SubtitleContext {
+	var ctx SubtitleContext
+	if item == nil {
+		return ctx
+	}
+
+	meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
+	ctx.Title = strings.TrimSpace(meta.Title())
+	if ctx.Title == "" {
+		ctx.Title = strings.TrimSpace(item.DiscTitle)
+	}
+	if ctx.Title == "" {
+		ctx.Title = strings.TrimSpace(item.SourcePath)
+	}
+
+	if meta.IsMovie() {
+		ctx.MediaType = "movie"
+	} else if strings.TrimSpace(meta.MediaType) != "" {
+		ctx.MediaType = strings.ToLower(strings.TrimSpace(meta.MediaType))
+	} else {
+		ctx.MediaType = "tv"
+	}
+
+	parseMetadataJSON(item.MetadataJSON, &ctx)
+	parseRipSpecData(item.RipSpecData, &ctx)
+
+	if ctx.Year == "" {
+		ctx.Year = extractYearFromTitle(ctx.Title)
+	}
+
+	return ctx
+}
+
+func parseMetadataJSON(raw string, ctx *SubtitleContext) {
+	if strings.TrimSpace(raw) == "" || ctx == nil {
+		return
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return
+	}
+	if ctx.TMDBID == 0 {
+		ctx.TMDBID = asInt(payload["id"])
+	}
+	if ctx.IMDBID == "" {
+		if value, ok := payload["imdb_id"].(string); ok {
+			ctx.IMDBID = strings.TrimSpace(value)
+		}
+	}
+	if ctx.MediaType == "" {
+		if value, ok := payload["media_type"].(string); ok {
+			ctx.MediaType = strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	if ctx.Language == "" {
+		if value, ok := payload["language"].(string); ok {
+			ctx.Language = strings.ToLower(strings.TrimSpace(value))
+		} else if value, ok := payload["original_language"].(string); ok {
+			ctx.Language = strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	if ctx.Year == "" {
+		if value, ok := payload["release_date"].(string); ok {
+			ctx.Year = extractYear(value)
+		} else if value, ok := payload["year"].(string); ok {
+			ctx.Year = extractYear(value)
+		}
+	}
+}
+
+func parseRipSpecData(raw string, ctx *SubtitleContext) {
+	if strings.TrimSpace(raw) == "" || ctx == nil {
+		return
+	}
+	var spec struct {
+		ContentKey string           `json:"content_key"`
+		Metadata   map[string]any   `json:"metadata"`
+		Titles     []map[string]any `json:"titles"`
+		Extras     map[string]any   `json:"extras"`
+		Attributes map[string]any   `json:"attributes"`
+	}
+	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+		return
+	}
+	if ctx.ContentKey == "" {
+		ctx.ContentKey = strings.TrimSpace(spec.ContentKey)
+	}
+	if ctx.TMDBID == 0 {
+		ctx.TMDBID = parseTMDBFromContentKey(ctx.ContentKey)
+	}
+	if ctx.MediaType == "" {
+		ctx.MediaType = parseMediaTypeFromContentKey(ctx.ContentKey)
+	}
+	if ctx.Year == "" && len(spec.Metadata) > 0 {
+		if release, ok := spec.Metadata["release_date"].(string); ok {
+			ctx.Year = extractYear(release)
+		} else if year, ok := spec.Metadata["year"].(string); ok {
+			ctx.Year = extractYear(year)
+		}
+	}
+	if ctx.IMDBID == "" && len(spec.Metadata) > 0 {
+		if imdb, ok := spec.Metadata["imdb_id"].(string); ok {
+			ctx.IMDBID = strings.TrimSpace(imdb)
+		}
+	}
+	if ctx.Language == "" && len(spec.Metadata) > 0 {
+		if lang, ok := spec.Metadata["language"].(string); ok {
+			ctx.Language = strings.ToLower(strings.TrimSpace(lang))
+		}
+	}
+}
+
+func parseTMDBFromContentKey(value string) int64 {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) < 3 {
+		return 0
+	}
+	id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+func parseMediaTypeFromContentKey(value string) string {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(parts[1]))
+}
+
+func asInt(value any) int64 {
+	switch v := value.(type) {
+	case float64:
+		return int64(v)
+	case float32:
+		return int64(v)
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return i
+		}
+	case string:
+		if i, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func extractYear(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 4 {
+		return value[:4]
+	}
+	return ""
+}
+
+func extractYearFromTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	open := strings.LastIndex(title, "(")
+	closeIdx := strings.LastIndex(title, ")")
+	if open >= 0 && closeIdx > open {
+		candidate := strings.TrimSpace(title[open+1 : closeIdx])
+		if len(candidate) == 4 {
+			if _, err := strconv.Atoi(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+	return ""
+}

@@ -14,6 +14,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/media/ffprobe"
+	"spindle/internal/subtitles/opensubtitles"
 )
 
 func TestServiceGenerateProducesStableTSSRT_CPUMode(t *testing.T) {
@@ -283,16 +284,91 @@ func TestServiceGenerateFallsBackToWhisperSRT(t *testing.T) {
 	}
 }
 
+func TestServiceGenerateUsesOpenSubtitlesWhenAvailable(t *testing.T) {
+	tmp := t.TempDir()
+	source := filepath.Join(tmp, "movie.mkv")
+	if err := os.WriteFile(source, bytes.Repeat([]byte{0x01, 0x02, 0x03, 0x04}, 1024), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	stub := setupInspectAndStub(t, 120, false)
+	osStub := &openSubtitlesStub{
+		data: []byte(`1
+00:00:01,000 --> 00:00:03,000
+www.opensubtitles.org
+
+2
+00:00:04,000 --> 00:00:06,000
+Aligned text
+`),
+	}
+
+	cfg := config.Default()
+	cfg.SubtitlesEnabled = true
+	cfg.OpenSubtitlesEnabled = true
+	cfg.OpenSubtitlesAPIKey = "k"
+	cfg.OpenSubtitlesUserAgent = "Spindle/test"
+	cfg.OpenSubtitlesLanguages = []string{"en"}
+
+	service := NewService(&cfg, nil,
+		WithCommandRunner(stub.Runner),
+		WithOpenSubtitlesClient(osStub),
+		WithoutDependencyCheck(),
+	)
+
+	result, err := service.Generate(context.Background(), GenerateRequest{
+		SourcePath: source,
+		WorkDir:    filepath.Join(tmp, "work"),
+		OutputDir:  filepath.Join(tmp, "out"),
+		BaseName:   "movie",
+		Context: SubtitleContext{
+			Title:     "Example Movie",
+			MediaType: "movie",
+			TMDBID:    123,
+			Year:      "2024",
+		},
+		Languages: []string{"en"},
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if stub.calledWhisper {
+		t.Fatalf("expected whisper transcription to be skipped")
+	}
+	if !stub.calledAlignment {
+		t.Fatalf("expected alignment pass to run")
+	}
+	if stub.calledStableTS {
+		t.Fatalf("did not expect stable-ts for downloaded subtitles")
+	}
+
+	contents, err := os.ReadFile(result.SubtitlePath)
+	if err != nil {
+		t.Fatalf("read subtitles: %v", err)
+	}
+	output := string(contents)
+	if strings.Contains(strings.ToLower(output), "opensubtitles") {
+		t.Fatalf("expected advertisement to be removed, got %q", output)
+	}
+	if !strings.Contains(output, "Aligned text") {
+		t.Fatalf("expected aligned text to remain, got %q", output)
+	}
+	if result.SegmentCount != 1 {
+		t.Fatalf("expected segment count 1, got %d", result.SegmentCount)
+	}
+}
+
 type whisperXStub struct {
-	t              *testing.T
-	expectCUDA     bool
-	calledWhisper  bool
-	calledStableTS bool
-	calledFFmpeg   bool
-	duration       float64
-	lastVAD        string
-	lastHFToken    string
-	stableTSError  error
+	t               *testing.T
+	expectCUDA      bool
+	calledWhisper   bool
+	calledStableTS  bool
+	calledFFmpeg    bool
+	calledAlignment bool
+	duration        float64
+	lastVAD         string
+	lastHFToken     string
+	stableTSError   error
 }
 
 func setupInspectAndStub(t *testing.T, durationSeconds float64, expectCUDA bool) *whisperXStub {
@@ -334,7 +410,7 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 		return nil
 	}
 
-	if containsArg(args, "whisperx") {
+	if name == whisperXCommand && containsArg(args, "--output_dir") {
 		if containsArg(args, "--download-models") || containsArg(args, "--model_cache_only") {
 			return nil
 		}
@@ -446,6 +522,29 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 			pkg = args[i+1]
 			break
 		}
+	}
+	if pkg == whisperXPackage {
+		s.calledAlignment = true
+		idxScript := -1
+		for i := 0; i < len(args); i++ {
+			if args[i] == "-c" {
+				idxScript = i
+				break
+			}
+		}
+		if idxScript < 0 || idxScript+5 >= len(args) {
+			s.t.Fatalf("unexpected whisperx align args: %v", args)
+		}
+		inputPath := args[idxScript+3]
+		outputPath := args[idxScript+4]
+		data, err := os.ReadFile(inputPath)
+		if err != nil {
+			s.t.Fatalf("read align input: %v", err)
+		}
+		if err := os.WriteFile(outputPath, data, 0o644); err != nil {
+			s.t.Fatalf("write align output: %v", err)
+		}
+		return nil
 	}
 	if pkg == stableTSPackage {
 		s.calledStableTS = true
@@ -616,4 +715,37 @@ func containsArg(args []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+type openSubtitlesStub struct {
+	data []byte
+}
+
+func (s *openSubtitlesStub) Search(ctx context.Context, req opensubtitles.SearchRequest) (opensubtitles.SearchResponse, error) {
+	return opensubtitles.SearchResponse{
+		Subtitles: []opensubtitles.Subtitle{
+			{
+				ID:              "candidate-1",
+				FileID:          42,
+				Language:        "en",
+				Downloads:       100,
+				FeatureTitle:    req.Query,
+				FeatureType:     req.MediaType,
+				HearingImpaired: false,
+				AITranslated:    false,
+			},
+		},
+		Total: 1,
+	}, nil
+}
+
+func (s *openSubtitlesStub) Download(ctx context.Context, fileID int64, opts opensubtitles.DownloadOptions) (opensubtitles.DownloadResult, error) {
+	if fileID != 42 {
+		return opensubtitles.DownloadResult{}, fmt.Errorf("unexpected file id %d", fileID)
+	}
+	return opensubtitles.DownloadResult{
+		Data:     append([]byte(nil), s.data...),
+		FileName: "movie.en.srt",
+		Language: "en",
+	}, nil
 }

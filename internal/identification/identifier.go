@@ -54,6 +54,20 @@ type ripSpecTitle struct {
 	ContentFingerprint string `json:"content_fingerprint"`
 }
 
+func isPlaceholderTitle(title, discLabel string) bool {
+	t := strings.ToLower(strings.TrimSpace(title))
+	if t == "" {
+		return true
+	}
+	if t == "unknown disc" || strings.HasPrefix(t, "unknown disc") {
+		return true
+	}
+	if strings.TrimSpace(discLabel) != "" && strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(discLabel)) {
+		return true
+	}
+	return false
+}
+
 // NewIdentifier creates a new stage handler.
 func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Identifier {
 	client, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
@@ -166,7 +180,12 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 
 	if scanResult != nil && scanResult.BDInfo != nil {
 		discID := strings.TrimSpace(scanResult.BDInfo.DiscID)
-		if discID != "" && i.keydb != nil {
+		switch {
+		case discID == "" && i.keydb != nil:
+			logger.Info("keydb lookup skipped", logging.String("reason", "disc id missing in bdinfo"))
+		case i.keydb == nil:
+			logger.Info("keydb lookup skipped", logging.String("reason", "keydb catalog unavailable"))
+		case discID != "" && i.keydb != nil:
 			entry, found, err := i.keydb.Lookup(discID)
 			if err != nil {
 				logger.Warn("keydb lookup failed",
@@ -182,8 +201,13 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 					item.DiscTitle = title
 					titleFromKeyDB = true
 				}
+			} else {
+				logger.Info("keydb lookup produced no match",
+					logging.String("disc_id", discID))
 			}
 		}
+	} else if i.keydb != nil {
+		logger.Info("keydb lookup skipped", logging.String("reason", "bdinfo unavailable"))
 	}
 
 	if !titleFromKeyDB {
@@ -253,105 +277,117 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		tmdbID          int64
 	)
 
-	// Log the complete TMDB query details
-	logger.Info("tmdb query details",
-		logging.String("query", title),
-		logging.Int("year", searchOpts.Year),
-		logging.String("studio", searchOpts.Studio),
-		logging.Int("runtime_minutes", searchOpts.Runtime),
-		logging.String("runtime_range", fmt.Sprintf("%d-%d", searchOpts.Runtime-10, searchOpts.Runtime+10)))
+	discLabel := ""
+	if scanResult != nil && scanResult.BDInfo != nil {
+		discLabel = scanResult.BDInfo.VolumeIdentifier
+	}
 
-	response, err := i.tmdb.search(ctx, title, searchOpts)
-	if err != nil {
-		logger.Warn("tmdb search failed", logging.String("title", title), logging.Error(err))
-		i.scheduleReview(ctx, item, "TMDB lookup failed")
+	if isPlaceholderTitle(title, discLabel) {
+		logger.Info("tmdb lookup skipped for placeholder title",
+			logging.String("title", title),
+			logging.String("disc_label", discLabel))
+		i.scheduleReview(ctx, item, "Disc title placeholder; manual identification required")
 	} else {
-		if response != nil {
-			logger.Info("tmdb response received",
-				logging.Int("result_count", len(response.Results)),
-				logging.Int("search_year", searchOpts.Year),
-				logging.Int("search_runtime", searchOpts.Runtime))
+		// Log the complete TMDB query details
+		logger.Info("tmdb query details",
+			logging.String("query", title),
+			logging.Int("year", searchOpts.Year),
+			logging.String("studio", searchOpts.Studio),
+			logging.Int("runtime_minutes", searchOpts.Runtime),
+			logging.String("runtime_range", fmt.Sprintf("%d-%d", searchOpts.Runtime-10, searchOpts.Runtime+10)))
 
-			// Log detailed results for debugging
-			for idx, result := range response.Results {
-				logger.Info("tmdb search result",
-					logging.Int("index", idx),
-					logging.Int64("tmdb_id", result.ID),
-					logging.String("title", result.Title),
-					logging.String("release_date", result.ReleaseDate),
-					logging.Float64("vote_average", result.VoteAverage),
-					logging.Int64("vote_count", result.VoteCount),
-					logging.Float64("popularity", result.Popularity),
-					logging.String("media_type", result.MediaType))
-			}
-		}
-
-		best := selectBestResult(logger, title, response)
-		if best == nil {
-			logger.Warn("tmdb confidence scoring failed",
-				logging.String("query", title),
-				logging.String("reason", "No result met confidence threshold"))
-			i.scheduleReview(ctx, item, "No confident TMDB match")
+		response, err := i.tmdb.search(ctx, title, searchOpts)
+		if err != nil {
+			logger.Warn("tmdb search failed", logging.String("title", title), logging.Error(err))
+			i.scheduleReview(ctx, item, "TMDB lookup failed")
 		} else {
-			identified = true
-			mediaType = strings.ToLower(strings.TrimSpace(best.MediaType))
-			if mediaType == "" {
-				mediaType = "movie"
-			}
-			isMovie := mediaType != "tv"
-			identifiedTitle = pickTitle(*best)
-			year = ""
-			titleWithYear := identifiedTitle
-			if best.ReleaseDate != "" && len(best.ReleaseDate) >= 4 {
-				year = best.ReleaseDate[:4] // Extract YYYY from YYYY-MM-DD
-				titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
-			}
-			filenameMeta := queue.NewBasicMetadata(titleWithYear, isMovie)
-			metadata = map[string]any{
-				"id":           best.ID,
-				"title":        identifiedTitle,
-				"overview":     best.Overview,
-				"media_type":   mediaType,
-				"release_date": best.ReleaseDate,
-				"vote_average": best.VoteAverage,
-				"vote_count":   best.VoteCount,
-				"movie":        isMovie,
-				"filename":     filenameMeta.GetFilename(),
-			}
+			if response != nil {
+				logger.Info("tmdb response received",
+					logging.Int("result_count", len(response.Results)),
+					logging.Int("search_year", searchOpts.Year),
+					logging.Int("search_runtime", searchOpts.Runtime))
 
-			encodedMetadata, encodeErr := json.Marshal(metadata)
-			if encodeErr != nil {
-				return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", encodeErr)
-			}
-			item.MetadataJSON = string(encodedMetadata)
-			// Update DiscTitle to the proper TMDB title with year for use in subsequent stages
-			item.DiscTitle = titleWithYear
-			item.ProgressStage = "Identified"
-			item.ProgressPercent = 100
-			item.ProgressMessage = fmt.Sprintf("Identified as: %s", titleWithYear)
-			tmdbID = best.ID
-			contentKey = fmt.Sprintf("tmdb:%s:%d", mediaType, tmdbID)
-
-			logger.Info(
-				"disc identified",
-				logging.Int64("tmdb_id", best.ID),
-				logging.String("identified_title", identifiedTitle),
-				logging.String("media_type", strings.TrimSpace(best.MediaType)),
-			)
-			if i.notifier != nil {
-				notifyType := mediaType
-				if notifyType == "" {
-					notifyType = "unknown"
+				// Log detailed results for debugging
+				for idx, result := range response.Results {
+					logger.Info("tmdb search result",
+						logging.Int("index", idx),
+						logging.Int64("tmdb_id", result.ID),
+						logging.String("title", result.Title),
+						logging.String("release_date", result.ReleaseDate),
+						logging.Float64("vote_average", result.VoteAverage),
+						logging.Int64("vote_count", result.VoteCount),
+						logging.Float64("popularity", result.Popularity),
+						logging.String("media_type", result.MediaType))
 				}
-				if strings.TrimSpace(year) != "" {
-					payload := notifications.Payload{
-						"title":        identifiedTitle,
-						"year":         strings.TrimSpace(year),
-						"mediaType":    notifyType,
-						"displayTitle": titleWithYear,
+			}
+
+			best := selectBestResult(logger, title, response)
+			if best == nil {
+				logger.Warn("tmdb confidence scoring failed",
+					logging.String("query", title),
+					logging.String("reason", "No result met confidence threshold"))
+				i.scheduleReview(ctx, item, "No confident TMDB match")
+			} else {
+				identified = true
+				mediaType = strings.ToLower(strings.TrimSpace(best.MediaType))
+				if mediaType == "" {
+					mediaType = "movie"
+				}
+				isMovie := mediaType != "tv"
+				identifiedTitle = pickTitle(*best)
+				year = ""
+				titleWithYear := identifiedTitle
+				if best.ReleaseDate != "" && len(best.ReleaseDate) >= 4 {
+					year = best.ReleaseDate[:4] // Extract YYYY from YYYY-MM-DD
+					titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
+				}
+				filenameMeta := queue.NewBasicMetadata(titleWithYear, isMovie)
+				metadata = map[string]any{
+					"id":           best.ID,
+					"title":        identifiedTitle,
+					"overview":     best.Overview,
+					"media_type":   mediaType,
+					"release_date": best.ReleaseDate,
+					"vote_average": best.VoteAverage,
+					"vote_count":   best.VoteCount,
+					"movie":        isMovie,
+					"filename":     filenameMeta.GetFilename(),
+				}
+
+				encodedMetadata, encodeErr := json.Marshal(metadata)
+				if encodeErr != nil {
+					return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", encodeErr)
+				}
+				item.MetadataJSON = string(encodedMetadata)
+				// Update DiscTitle to the proper TMDB title with year for use in subsequent stages
+				item.DiscTitle = titleWithYear
+				item.ProgressStage = "Identified"
+				item.ProgressPercent = 100
+				item.ProgressMessage = fmt.Sprintf("Identified as: %s", titleWithYear)
+				tmdbID = best.ID
+				contentKey = fmt.Sprintf("tmdb:%s:%d", mediaType, tmdbID)
+
+				logger.Info(
+					"disc identified",
+					logging.Int64("tmdb_id", best.ID),
+					logging.String("identified_title", identifiedTitle),
+					logging.String("media_type", strings.TrimSpace(best.MediaType)),
+				)
+				if i.notifier != nil {
+					notifyType := mediaType
+					if notifyType == "" {
+						notifyType = "unknown"
 					}
-					if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
-						logger.Warn("identification notification failed", logging.Error(err))
+					if strings.TrimSpace(year) != "" {
+						payload := notifications.Payload{
+							"title":        identifiedTitle,
+							"year":         strings.TrimSpace(year),
+							"mediaType":    notifyType,
+							"displayTitle": titleWithYear,
+						}
+						if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
+							logger.Warn("identification notification failed", logging.Error(err))
+						}
 					}
 				}
 			}

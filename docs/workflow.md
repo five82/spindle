@@ -60,14 +60,14 @@ Encoding happens in the background, so you can insert the next disc while previo
 
 ## Stage 5: AI Subtitle Generation (SUBTITLING -> SUBTITLED)
 
-When `subtitles_enabled = true` in `config.toml`, Spindle shells out to WhisperX (via `uvx`) to transcribe and align subtitles locally, then feeds the alignment JSON to Stable-TS for sentence regrouping before organizing begins. Set `whisperx_cuda_enabled = true` to run WhisperX on the GPU; leave it `false` to use CPU-only mode for environments without CUDA. Choose the voice-activity detector with `whisperx_vad_method` (`silero` is the default and requires no token; `pyannote` offers tighter diarization but needs a Hugging Face access token in `whisperx_hf_token`). When `pyannote` is selected Spindle validates the token up front, logging the authenticated Hugging Face account on success or warning and falling back to `silero` automatically if the token is rejected.
+When `subtitles_enabled = true`, Spindle now prefers human-curated subtitles before generating them locally. If `opensubtitles_enabled = true`, the subtitle stage searches OpenSubtitles using the TMDB/IMDB identifiers, textual title, and the languages configured in `opensubtitles_languages`. Matches are cleaned to strip sponsor/advertisement cues, then aligned against the encoded audio using a lightweight WhisperX alignment pass so the downloaded dialogue snaps to the actual rip.
 
-1. After encoding, the queue updates to `SUBTITLING` and Spindle runs WhisperX with the `large-v3` model, wav2vec2 alignment, and CUDA enabled when configured.
-2. WhisperX writes aligned JSON/TSV/SRT files into a staging subdirectory. Spindle invokes Stable-TS against the JSON to rebuild readable cues and timings.
-3. The Stable-TS SRT lands next to the encoded file in staging as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). If Stable-TS exits with an error, we fall back to copying WhisperX’s raw SRT so subtitles are still produced. Intermediate WhisperX artifacts are cleaned up automatically unless `SPD_DEBUG_SUBTITLES_KEEP` is set.
-4. On success the queue status flips to `SUBTITLED`. If WhisperX fails outright (missing CUDA, model download issues, etc.) the stage logs a warning and the organizer still runs so the rest of the workflow is unaffected.
+1. After encoding, the queue updates to `SUBTITLING`. Spindle extracts the primary audio track and, when configured, downloads and cleans an SRT file from OpenSubtitles.
+2. The cleaned subtitles are aligned with WhisperX (via `uvx --from whisperx python ...`) so cue timings match the rip even when the upstream file came from another release.
+3. If OpenSubtitles has no suitable match or the download/alignment fails, Spindle falls back to the previous WhisperX transcription pipeline: it transcribes with the `large-v3` model, aligns with wav2vec2, and feeds the JSON into Stable-TS for sentence regrouping. Stable-TS failures still fall back to WhisperX’s raw SRT so the pipeline never ends empty-handed. CUDA can be enabled with `whisperx_cuda_enabled`, and `whisperx_vad_method` controls the VAD (`silero` by default, `pyannote` requires `whisperx_hf_token`).
+4. The finished SRT lands beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). Intermediate artifacts are cleaned up unless `SPD_DEBUG_SUBTITLES_KEEP` is set. The queue advances to `SUBTITLED`, and any errors are logged before the organizer continues so the rest of the workflow remains unblocked.
 
-You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI uses the same WhisperX pipeline and drops the finished SRT beside your media.
+You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI now performs a TMDB lookup based on the filename, feeds that identifier into the OpenSubtitles search, and falls back to WhisperX when no curated subtitles are available, dropping the finished SRT beside your media.
 
 ## Stage 6: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
 
