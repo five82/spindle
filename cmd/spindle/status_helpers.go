@@ -39,7 +39,7 @@ func plexStatusLine(cfg *config.Config, colorize bool) string {
 		if err := plex.CheckAuth(ctx, cfg, client, manager); err != nil {
 			switch {
 			case errors.Is(err, plex.ErrAuthorizationMissing):
-				return renderStatusLine("Plex", statusWarn, "Link required (run spindle plex link)", colorize)
+				return renderStatusLine("Plex", statusWarn, "Stored token rejected by Plex (run spindle plex link)", colorize)
 			case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 				return renderStatusLine("Plex", statusWarn, "Auth check timed out", colorize)
 			default:
