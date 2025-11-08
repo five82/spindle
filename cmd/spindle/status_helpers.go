@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +32,20 @@ func plexStatusLine(cfg *config.Config, colorize bool) string {
 		return renderStatusLine("Plex", statusError, fmt.Sprintf("Auth error (%v)", err), colorize)
 	}
 	if manager.HasAuthorization() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		if err := plex.CheckAuth(ctx, cfg, client, manager); err != nil {
+			switch {
+			case errors.Is(err, plex.ErrAuthorizationMissing):
+				return renderStatusLine("Plex", statusWarn, "Link required (run spindle plex link)", colorize)
+			case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+				return renderStatusLine("Plex", statusWarn, "Auth check timed out", colorize)
+			default:
+				return renderStatusLine("Plex", statusWarn, fmt.Sprintf("Auth check failed (%v)", err), colorize)
+			}
+		}
 		return renderStatusLine("Plex", statusOK, "Linked", colorize)
 	}
 	return renderStatusLine("Plex", statusWarn, "Link required (run spindle plex link)", colorize)
