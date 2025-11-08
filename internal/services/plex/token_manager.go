@@ -148,6 +148,13 @@ func (m *TokenManager) loadInitialState() error {
 	return nil
 }
 
+// ClientIdentifier returns the Plex client identifier associated with this manager.
+func (m *TokenManager) ClientIdentifier() string {
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+	return m.state.ClientIdentifier
+}
+
 // HasAuthorization reports whether a long-lived Plex authorization token is available.
 func (m *TokenManager) HasAuthorization() bool {
 	m.stateMu.RLock()

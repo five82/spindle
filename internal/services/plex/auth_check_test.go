@@ -12,6 +12,7 @@ import (
 type stubTokenProvider struct {
 	token string
 	err   error
+	id    string
 }
 
 func (s *stubTokenProvider) Token(ctx context.Context) (string, error) {
@@ -19,6 +20,10 @@ func (s *stubTokenProvider) Token(ctx context.Context) (string, error) {
 		return "", s.err
 	}
 	return s.token, nil
+}
+
+func (s *stubTokenProvider) ClientIdentifier() string {
+	return s.id
 }
 
 func TestCheckAuthSuccess(t *testing.T) {
@@ -31,6 +36,9 @@ func TestCheckAuthSuccess(t *testing.T) {
 		if got := r.Header.Get("X-Plex-Token"); got != "token-123" {
 			t.Fatalf("expected token header token-123, got %q", got)
 		}
+		if got := r.Header.Get("X-Plex-Client-Identifier"); got != "client-123" {
+			t.Fatalf("expected client identifier header client-123, got %q", got)
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -38,7 +46,7 @@ func TestCheckAuthSuccess(t *testing.T) {
 	cfg := config.Default()
 	cfg.PlexURL = server.URL
 
-	err := CheckAuth(context.Background(), &cfg, server.Client(), &stubTokenProvider{token: "token-123"})
+	err := CheckAuth(context.Background(), &cfg, server.Client(), &stubTokenProvider{token: "token-123", id: "client-123"})
 	if err != nil {
 		t.Fatalf("CheckAuth returned error: %v", err)
 	}

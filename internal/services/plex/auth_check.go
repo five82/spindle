@@ -46,6 +46,14 @@ func CheckAuth(ctx context.Context, cfg *config.Config, client HTTPDoer, provide
 	req.Header.Set("Accept", "application/xml")
 	req.Header.Set("User-Agent", userAgent)
 
+	clientID := ""
+	if providerWithID, ok := provider.(interface {
+		ClientIdentifier() string
+	}); ok {
+		clientID = providerWithID.ClientIdentifier()
+	}
+	applyStandardHeaders(req, clientID)
+
 	resp, err := requester.Do(req)
 	if err != nil {
 		return fmt.Errorf("plex auth request failed: %w", err)
