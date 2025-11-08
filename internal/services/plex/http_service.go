@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,14 @@ func NewConfiguredService(cfg *config.Config) Service {
 	manager, err := NewTokenManager(cfg)
 	if err != nil {
 		return simple
+	}
+
+	if parsed, err := url.Parse(plexURL); err == nil && strings.EqualFold(parsed.Scheme, "http") {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if resolved, err := manager.EnsureResolvedPlexURL(ctx); err == nil && strings.TrimSpace(resolved) != "" {
+			plexURL = strings.TrimRight(resolved, "/")
+		}
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}

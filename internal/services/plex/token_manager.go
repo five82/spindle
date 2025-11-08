@@ -88,6 +88,7 @@ type tokenState struct {
 	KeyID              string    `json:"key_id"`
 	Token              string    `json:"token"`
 	TokenExpiresAt     time.Time `json:"token_expires_at"`
+	ResolvedPlexURL    string    `json:"resolved_plex_url,omitempty"`
 }
 
 // NewTokenManager builds a TokenManager using the provided configuration.
@@ -153,6 +154,83 @@ func (m *TokenManager) ClientIdentifier() string {
 	m.stateMu.RLock()
 	defer m.stateMu.RUnlock()
 	return m.state.ClientIdentifier
+}
+
+// AuthorizationToken returns the stored long-lived Plex authorization token.
+func (m *TokenManager) AuthorizationToken() string {
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+	return m.state.AuthorizationToken
+}
+
+// ResolvedPlexURL returns the cached resolved Plex base URL, if available.
+func (m *TokenManager) ResolvedPlexURL() string {
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+	return m.state.ResolvedPlexURL
+}
+
+// SaveResolvedPlexURL stores the resolved Plex base URL for future reuse.
+func (m *TokenManager) SaveResolvedPlexURL(resolved string) error {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+
+	trimmed := strings.TrimSpace(strings.TrimRight(resolved, "/"))
+	if trimmed == m.state.ResolvedPlexURL {
+		return nil
+	}
+	m.state.ResolvedPlexURL = trimmed
+	if err := m.store.Save(m.state); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ClearResolvedPlexURL removes any cached resolved Plex base URL.
+func (m *TokenManager) ClearResolvedPlexURL() error {
+	m.stateMu.Lock()
+	defer m.stateMu.Unlock()
+
+	if m.state.ResolvedPlexURL == "" {
+		return nil
+	}
+	m.state.ResolvedPlexURL = ""
+	if err := m.store.Save(m.state); err != nil {
+		return err
+	}
+	return nil
+}
+
+// EnsureResolvedPlexURL resolves and caches a compatible Plex base URL.
+func (m *TokenManager) EnsureResolvedPlexURL(ctx context.Context) (string, error) {
+	if strings.TrimSpace(m.cfg.PlexURL) == "" {
+		return "", errors.New("plex_url not configured")
+	}
+
+	m.stateMu.RLock()
+	cached := m.state.ResolvedPlexURL
+	m.stateMu.RUnlock()
+	if strings.TrimSpace(cached) != "" {
+		return cached, nil
+	}
+
+	token, err := m.Token(ctx)
+	if err != nil {
+		return "", err
+	}
+	authToken := strings.TrimSpace(m.AuthorizationToken())
+	if authToken == "" {
+		authToken = token
+	}
+
+	resolved, err := resolvePlexServerURL(ctx, authToken, m.ClientIdentifier(), token)
+	if err != nil {
+		return "", err
+	}
+	if err := m.SaveResolvedPlexURL(resolved); err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
 // HasAuthorization reports whether a long-lived Plex authorization token is available.
@@ -229,6 +307,7 @@ func (m *TokenManager) SetAuthorizationToken(token string) error {
 	updated.AuthorizationToken = trimmed
 	updated.Token = ""
 	updated.TokenExpiresAt = time.Time{}
+	updated.ResolvedPlexURL = ""
 
 	if err := m.store.Save(updated); err != nil {
 		return err
@@ -363,6 +442,7 @@ func (m *TokenManager) persistRefreshedToken(token string, expiresAt time.Time) 
 	m.state.AuthorizationToken = trimmed
 	m.state.Token = trimmed
 	m.state.TokenExpiresAt = expiresAt
+	m.state.ResolvedPlexURL = ""
 
 	if err := m.store.Save(m.state); err != nil {
 		return "", err
@@ -537,6 +617,9 @@ func (m *TokenManager) reloadLocked() error {
 	}
 	if loaded.ClientIdentifier == "" {
 		loaded.ClientIdentifier = m.state.ClientIdentifier
+	}
+	if loaded.ResolvedPlexURL == "" {
+		loaded.ResolvedPlexURL = m.state.ResolvedPlexURL
 	}
 	m.state = loaded
 	return nil
