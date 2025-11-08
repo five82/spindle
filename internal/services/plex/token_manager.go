@@ -227,8 +227,8 @@ func (m *TokenManager) SetAuthorizationToken(token string) error {
 
 	updated := m.state
 	updated.AuthorizationToken = trimmed
-	updated.Token = trimmed
-	updated.TokenExpiresAt = time.Now().Add(7 * 24 * time.Hour)
+	updated.Token = ""
+	updated.TokenExpiresAt = time.Time{}
 
 	if err := m.store.Save(updated); err != nil {
 		return err
