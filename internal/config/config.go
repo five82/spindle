@@ -28,6 +28,7 @@ type Config struct {
 	TVDir                     string   `toml:"tv_dir"`
 	PlexLinkEnabled           bool     `toml:"plex_link_enabled"`
 	PlexURL                   string   `toml:"plex_url"`
+	PlexAuthPath              string   `toml:"plex_auth_path"`
 	MoviesLibrary             string   `toml:"movies_library"`
 	TVLibrary                 string   `toml:"tv_library"`
 	NtfyTopic                 string   `toml:"ntfy_topic"`
@@ -73,6 +74,7 @@ const (
 	defaultWorkflowHeartbeatTimeout  = 120
 	defaultAPIBind                   = "127.0.0.1:7487"
 	defaultDraptoPreset              = 4
+	defaultPlexAuthPath              = "~/.config/spindle/plex_auth.json"
 	defaultDraptoLogDir              = "~/.local/share/spindle/logs/drapto"
 	defaultKeyDBPath                 = "~/.config/spindle/keydb/KEYDB.cfg"
 	defaultKeyDBDownloadURL          = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
@@ -98,6 +100,7 @@ func Default() Config {
 		PlexLinkEnabled:           true,
 		MoviesLibrary:             "Movies",
 		TVLibrary:                 "TV Shows",
+		PlexAuthPath:              defaultPlexAuthPath,
 		KeyDBPath:                 defaultKeyDBPath,
 		KeyDBDownloadURL:          defaultKeyDBDownloadURL,
 		KeyDBDownloadTimeout:      defaultKeyDBDownloadTimeout,
@@ -209,6 +212,9 @@ func (c *Config) normalize() error {
 	}
 	if c.DraptoLogDir, err = expandPath(c.DraptoLogDir); err != nil {
 		return fmt.Errorf("drapto_log_dir: %w", err)
+	}
+	if c.PlexAuthPath, err = expandPath(c.PlexAuthPath); err != nil {
+		return fmt.Errorf("plex_auth_path: %w", err)
 	}
 	if c.KeyDBPath, err = expandPath(c.KeyDBPath); err != nil {
 		return fmt.Errorf("keydb_path: %w", err)
@@ -389,6 +395,12 @@ func (c *Config) EnsureDirectories() error {
 			return fmt.Errorf("create directory %q: %w", dir, err)
 		}
 	}
+	if strings.TrimSpace(c.PlexAuthPath) != "" {
+		authDir := filepath.Dir(c.PlexAuthPath)
+		if err := os.MkdirAll(authDir, 0o755); err != nil {
+			return fmt.Errorf("create directory %q: %w", authDir, err)
+		}
+	}
 	return nil
 }
 
@@ -483,6 +495,7 @@ api_bind = "127.0.0.1:7487"                          # HTTP API bind address (ho
 # Plex link (Plex library scanning)
 plex_link_enabled = true                             # If false, Spindle will not trigger Plex scans automatically
 plex_url = "http://localhost:32400"                  # Plex server URL (omit to disable)
+plex_auth_path = "~/.config/spindle/plex_auth.json"  # Location for stored Plex authorization tokens
 movies_library = "Movies"                            # Plex movie library name
 tv_library = "TV Shows"                              # Plex TV library name
 

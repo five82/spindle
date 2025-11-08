@@ -35,6 +35,10 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	if cfg.LibraryDir != filepath.Join(tempHome, "library") {
 		t.Fatalf("unexpected library dir: %q", cfg.LibraryDir)
 	}
+	wantPlexAuth := filepath.Join(tempHome, ".config", "spindle", "plex_auth.json")
+	if cfg.PlexAuthPath != wantPlexAuth {
+		t.Fatalf("unexpected plex auth path: got %q want %q", cfg.PlexAuthPath, wantPlexAuth)
+	}
 	if cfg.APIBind != "127.0.0.1:7487" {
 		t.Fatalf("unexpected api bind: %q", cfg.APIBind)
 	}
@@ -89,7 +93,8 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 		t.Fatalf("EnsureDirectories failed: %v", err)
 	}
 
-	for _, dir := range []string{cfg.StagingDir, cfg.LibraryDir, cfg.LogDir, cfg.ReviewDir, cfg.DraptoLogDir} {
+	authDir := filepath.Dir(cfg.PlexAuthPath)
+	for _, dir := range []string{cfg.StagingDir, cfg.LibraryDir, cfg.LogDir, cfg.ReviewDir, cfg.DraptoLogDir, authDir} {
 		info, err := os.Stat(dir)
 		if err != nil {
 			t.Fatalf("expected directory %q to exist: %v", dir, err)

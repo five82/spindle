@@ -94,6 +94,7 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `staging_dir` – Working directory for ripped/encoded files
 - `tmdb_api_key` – https://www.themoviedb.org/settings/api
 - `plex_url` – Plex server address used for library refreshes
+- `plex_auth_path` – Path where Spindle stores the Plex authorization token (defaults to `~/.config/spindle/plex_auth.json`)
 - `plex_link_enabled` – If `true`, Spindle links to Plex and triggers library scans automatically
 - `ntfy_topic` (optional) – Channel for notifications
 - `subtitles_enabled` (optional) – Enable WhisperX subtitle generation after encoding (requires `uv`/`uvx`)

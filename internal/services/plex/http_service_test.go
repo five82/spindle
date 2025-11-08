@@ -41,8 +41,9 @@ func TestHTTPServiceRefreshTriggersPlex(t *testing.T) {
 	cfg.TVLibrary = "TV Shows"
 	cfg.PlexURL = server.URL
 	cfg.PlexLinkEnabled = true
+	cfg.PlexAuthPath = filepath.Join(cfg.LogDir, "plex_auth.json")
 
-	statePath := filepath.Join(cfg.LogDir, stateFileName)
+	statePath := cfg.PlexAuthPath
 	state := map[string]any{
 		"client_identifier":   "test-client",
 		"authorization_token": "auth-token",

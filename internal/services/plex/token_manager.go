@@ -96,7 +96,10 @@ func NewTokenManager(cfg *config.Config, opts ...TokenManagerOption) (*TokenMana
 		return nil, errors.New("config is nil")
 	}
 
-	statePath := filepath.Join(cfg.LogDir, stateFileName)
+	statePath := strings.TrimSpace(cfg.PlexAuthPath)
+	if statePath == "" {
+		statePath = filepath.Join(cfg.LogDir, stateFileName)
+	}
 	mgr := &TokenManager{
 		cfg:        cfg,
 		baseURL:    defaultBaseURL,
