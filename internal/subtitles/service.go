@@ -52,6 +52,7 @@ type GenerateRequest struct {
 	BaseName   string
 	Context    SubtitleContext
 	Languages  []string
+	ForceAI    bool
 }
 
 // GenerateResult reports the generated subtitle file and summary stats.
@@ -222,7 +223,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, err
 	}
 
-	if s.shouldUseOpenSubtitles() {
+	if !req.ForceAI && s.shouldUseOpenSubtitles() {
 		title := strings.TrimSpace(req.Context.Title)
 		if s.logger != nil {
 			s.logger.Info("attempting opensubtitles fetch",
@@ -256,13 +257,16 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			)
 		}
 	} else if s.logger != nil {
-		reason := "opensubtitles disabled"
-		if s.config == nil {
-			reason = "configuration unavailable"
-		} else if !s.config.OpenSubtitlesEnabled {
-			reason = "opensubtitles_enabled is false"
-		} else if strings.TrimSpace(s.config.OpenSubtitlesAPIKey) == "" {
-			reason = "opensubtitles_api_key not set"
+		reason := "forceai flag enabled"
+		if !req.ForceAI {
+			reason = "opensubtitles disabled"
+			if s.config == nil {
+				reason = "configuration unavailable"
+			} else if !s.config.OpenSubtitlesEnabled {
+				reason = "opensubtitles_enabled is false"
+			} else if strings.TrimSpace(s.config.OpenSubtitlesAPIKey) == "" {
+				reason = "opensubtitles_api_key not set"
+			}
 		}
 		s.logger.Info("opensubtitles download skipped", logging.String("reason", reason))
 	}

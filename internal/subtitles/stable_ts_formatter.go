@@ -44,6 +44,8 @@ def _sanitize_segments(raw_segments):
         if not isinstance(entry, dict):
             continue
         segment = dict(entry)
+        # WhisperX v5+ includes 'chars' span metadata that Stable-TS does not accept.
+        segment.pop("chars", None)
         # Stable-TS cares about these keys and ignores unknown segment metadata.
         words = segment.get("words")
         if isinstance(words, list):
@@ -61,6 +63,7 @@ def _sanitize_segments(raw_segments):
                 # Strip noisy metadata that Stable-TS does not understand.
                 word.pop("speaker", None)
                 word.pop("case", None)
+                word.pop("chars", None)
                 token = word.get("word")
                 if isinstance(token, str):
                     trimmed = token.strip()

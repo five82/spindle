@@ -24,11 +24,17 @@ import (
 func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	var outputDir string
 	var workDir string
+	var forceAI bool
 
 	cmd := &cobra.Command{
 		Use:   "gensubtitle <encoded-file>",
 		Short: "Generate AI subtitles for an encoded media file",
-		Args:  cobra.ExactArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("provide the path to the encoded media file. Example: spindle gensubtitle /path/to/video.mkv\nRun spindle gensubtitle --help for more details")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			source := strings.TrimSpace(args[0])
 			if source == "" {
@@ -103,30 +109,36 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 				ctxMeta.Language = strings.ToLower(strings.SplitN(lang, "-", 2)[0])
 			}
 
-			openSubsReady, disabledReason := openSubtitlesReady(cfg)
-			if openSubsReady {
-				if match := lookupTMDBMetadata(cmd.Context(), cfg, logger, inferredTitle, inferredYear); match != nil {
-					ctxMeta.TMDBID = match.TMDBID
-					ctxMeta.MediaType = match.MediaType
-					if match.Title != "" {
-						ctxMeta.Title = match.Title
-					}
-					if match.Year != "" {
-						ctxMeta.Year = match.Year
-					}
-					if logger != nil {
-						logger.Info("tmdb metadata attached",
-							logging.Int64("tmdb_id", match.TMDBID),
-							logging.String("title", ctxMeta.Title),
-							logging.String("year", ctxMeta.Year),
-							logging.String("media_type", ctxMeta.MediaType),
-						)
+			if forceAI {
+				if logger != nil {
+					logger.Info("forceai flag enabled; skipping opensubtitles lookup and tmdb identification")
+				}
+			} else {
+				openSubsReady, disabledReason := openSubtitlesReady(cfg)
+				if openSubsReady {
+					if match := lookupTMDBMetadata(cmd.Context(), cfg, logger, inferredTitle, inferredYear); match != nil {
+						ctxMeta.TMDBID = match.TMDBID
+						ctxMeta.MediaType = match.MediaType
+						if match.Title != "" {
+							ctxMeta.Title = match.Title
+						}
+						if match.Year != "" {
+							ctxMeta.Year = match.Year
+						}
+						if logger != nil {
+							logger.Info("tmdb metadata attached",
+								logging.Int64("tmdb_id", match.TMDBID),
+								logging.String("title", ctxMeta.Title),
+								logging.String("year", ctxMeta.Year),
+								logging.String("media_type", ctxMeta.MediaType),
+							)
+						}
+					} else if logger != nil {
+						logger.Info("tmdb lookup skipped: no confident match", logging.String("title", inferredTitle))
 					}
 				} else if logger != nil {
-					logger.Info("tmdb lookup skipped: no confident match", logging.String("title", inferredTitle))
+					logger.Info("opensubtitles download disabled", logging.String("reason", disabledReason))
 				}
-			} else if logger != nil {
-				logger.Info("opensubtitles download disabled", logging.String("reason", disabledReason))
 			}
 			languages := append([]string(nil), cfg.OpenSubtitlesLanguages...)
 			result, err := service.Generate(cmd.Context(), subtitles.GenerateRequest{
@@ -134,6 +146,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 				WorkDir:    filepath.Join(workRoot, "work"),
 				OutputDir:  outDir,
 				BaseName:   baseName,
+				ForceAI:    forceAI,
 				Context:    ctxMeta,
 				Languages:  languages,
 			})
@@ -149,6 +162,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "Output directory for the generated subtitle (default: alongside source file)")
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory for intermediate files (default: temporary directory under staging_dir)")
+	cmd.Flags().BoolVar(&forceAI, "forceai", false, "Force WhisperX transcription and skip OpenSubtitles downloads")
 
 	return cmd
 }

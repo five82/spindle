@@ -67,7 +67,7 @@ When `subtitles_enabled = true`, Spindle now prefers human-curated subtitles bef
 3. If OpenSubtitles has no suitable match or the download/alignment fails, Spindle falls back to the previous WhisperX transcription pipeline: it transcribes with the `large-v3` model, aligns with wav2vec2, and feeds the JSON into Stable-TS for sentence regrouping. Stable-TS failures still fall back to WhisperX’s raw SRT so the pipeline never ends empty-handed. CUDA can be enabled with `whisperx_cuda_enabled`, and `whisperx_vad_method` controls the VAD (`silero` by default, `pyannote` requires `whisperx_hf_token`).
 4. The finished SRT lands beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). Intermediate artifacts are cleaned up unless `SPD_DEBUG_SUBTITLES_KEEP` is set. The queue advances to `SUBTITLED`, and any errors are logged before the organizer continues so the rest of the workflow remains unblocked.
 
-You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI now performs a TMDB lookup based on the filename, feeds that identifier into the OpenSubtitles search, and falls back to WhisperX when no curated subtitles are available, dropping the finished SRT beside your media.
+You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI now performs a TMDB lookup based on the filename, feeds that identifier into the OpenSubtitles search, and falls back to WhisperX when no curated subtitles are available. Pass `--forceai` to skip OpenSubtitles entirely and always run the WhisperX transcription pipeline, which drops the finished SRT beside your media.
 
 ## Stage 6: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
 

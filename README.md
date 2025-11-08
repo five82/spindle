@@ -142,7 +142,7 @@ spindle plex link
 - `spindle queue health` for lifecycle counts
 - `spindle queue-health` for database diagnostics
 - `spindle add-file /path/to/video.mkv`
-- `spindle gensubtitle /path/to/video.mkv`
+- `spindle gensubtitle /path/to/video.mkv` (add `--forceai` to skip OpenSubtitles downloads)
 - `spindle test-notify`
 - `spindle config validate`
 - `spindle show --lines 50 --follow` for live tailing
