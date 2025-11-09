@@ -11,6 +11,16 @@ func TestSanitizeQueryCandidatePreservesParenthesesContent(t *testing.T) {
 	}
 }
 
+func TestDeriveShowHintStripsNoiseAndKeepsSeason(t *testing.T) {
+	hint, season := deriveShowHint("SOUTHPARK5_DISC1 (South Park Season 5 - Disc 1)")
+	if hint != "South Park" {
+		t.Fatalf("expected hint to be 'South Park', got %q", hint)
+	}
+	if season != 5 {
+		t.Fatalf("expected season 5, got %d", season)
+	}
+}
+
 func TestBuildQueryListDeduplicatesSanitizedVariants(t *testing.T) {
 	queries := buildQueryList("South Park Season 5 (Disc 1)", "South Park Season 5 Disc 1", "  South Park  ")
 	if len(queries) != 2 {

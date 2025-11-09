@@ -3,6 +3,7 @@ package identification
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var (
@@ -10,6 +11,7 @@ var (
 )
 
 var parenthesesStripper = strings.NewReplacer("(", " ", ")", " ")
+var discNoisePattern = regexp.MustCompile(`(?i)\b(?:disc|dvd|blu[- ]?ray|bd)\s*[0-9ivxlcdm]*\b`)
 
 func sanitizeQueryCandidate(value string) string {
 	value = strings.TrimSpace(value)
@@ -17,6 +19,8 @@ func sanitizeQueryCandidate(value string) string {
 		return ""
 	}
 	cleaned := strings.ReplaceAll(value, "_", " ")
+	cleaned = strings.ReplaceAll(cleaned, "-", " ")
+	cleaned = strings.ReplaceAll(cleaned, "–", " ")
 	cleaned = parenthesesStripper.Replace(cleaned)
 	cleaned = strings.ReplaceAll(cleaned, "-", " ")
 	cleaned = whitespacePattern.ReplaceAllString(cleaned, " ")
@@ -56,9 +60,62 @@ func splitShowSeason(value string) (string, int) {
 	}
 	cleaned = seasonPattern.ReplaceAllString(cleaned, " ")
 	cleaned = sPattern.ReplaceAllString(cleaned, " ")
+	cleaned = discNoisePattern.ReplaceAllString(cleaned, " ")
 	cleaned = whitespacePattern.ReplaceAllString(cleaned, " ")
 	cleaned = strings.TrimSpace(cleaned)
+	cleaned = trimLeadingNoise(cleaned)
+	cleaned = stripPunctuationTokens(cleaned)
 	return cleaned, season
+}
+
+func trimLeadingNoise(value string) string {
+	if value == "" {
+		return ""
+	}
+	tokens := strings.Fields(value)
+	start := 0
+	for start < len(tokens) {
+		if hasLower(tokens[start]) {
+			break
+		}
+		start++
+	}
+	if start >= len(tokens) {
+		return value
+	}
+	return strings.Join(tokens[start:], " ")
+}
+
+func hasLower(value string) bool {
+	for _, r := range value {
+		if unicode.IsLower(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func stripPunctuationTokens(value string) string {
+	if value == "" {
+		return ""
+	}
+	tokens := strings.Fields(value)
+	filtered := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if hasAlphaNumeric(token) {
+			filtered = append(filtered, token)
+		}
+	}
+	return strings.Join(filtered, " ")
+}
+
+func hasAlphaNumeric(value string) bool {
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildQueryList(candidates ...string) []string {

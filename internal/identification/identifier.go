@@ -362,6 +362,13 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if discLabel != "" {
 		queryInputs = append(queryInputs, discLabel)
 	}
+	seasonQuerySource := strings.TrimSpace(showHint)
+	if seasonQuerySource == "" {
+		seasonQuerySource = strings.TrimSpace(title)
+	}
+	if seasonNumber > 0 && seasonQuerySource != "" {
+		queryInputs = append(queryInputs, fmt.Sprintf("%s Season %d", seasonQuerySource, seasonNumber))
+	}
 	queries := buildQueryList(queryInputs...)
 	if len(queries) == 0 {
 		queries = []string{strings.TrimSpace(title)}
