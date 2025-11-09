@@ -76,25 +76,44 @@ func copyFileContents(sourcePath, targetPath string) error {
 	return nil
 }
 
+func removeExistingTarget(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat existing target: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("existing library path %q is a directory", path)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove existing target %q: %w", path, err)
+	}
+	return nil
+}
+
 // SimpleService is a placeholder organiser; a real implementation would call Plex APIs.
 type SimpleService struct {
-	LibraryDir    string
-	MoviesDir     string
-	TVDir         string
-	MoviesLibrary string
-	TVLibrary     string
-	MoveFunc      func(string, string) error
+	LibraryDir        string
+	MoviesDir         string
+	TVDir             string
+	MoviesLibrary     string
+	TVLibrary         string
+	MoveFunc          func(string, string) error
+	OverwriteExisting bool
 }
 
 // NewSimpleService constructs a simple Plex organizer.
-func NewSimpleService(libraryDir, moviesDir, tvDir, moviesLibrary, tvLibrary string) *SimpleService {
+func NewSimpleService(libraryDir, moviesDir, tvDir, moviesLibrary, tvLibrary string, overwriteExisting bool) *SimpleService {
 	return &SimpleService{
-		LibraryDir:    libraryDir,
-		MoviesDir:     moviesDir,
-		TVDir:         tvDir,
-		MoviesLibrary: moviesLibrary,
-		TVLibrary:     tvLibrary,
-		MoveFunc:      FileMover,
+		LibraryDir:        libraryDir,
+		MoviesDir:         moviesDir,
+		TVDir:             tvDir,
+		MoviesLibrary:     moviesLibrary,
+		TVLibrary:         tvLibrary,
+		MoveFunc:          FileMover,
+		OverwriteExisting: overwriteExisting,
 	}
 }
 
@@ -104,13 +123,26 @@ func (s *SimpleService) Organize(ctx context.Context, sourcePath string, meta Me
 	targetPath := filepath.Join(targetDir, filename)
 
 	finalPath := targetPath
-	counter := 1
-	for {
-		if _, err := os.Stat(finalPath); os.IsNotExist(err) {
-			break
+	if s.OverwriteExisting {
+		if err := removeExistingTarget(finalPath); err != nil {
+			return "", err
 		}
-		finalPath = filepath.Join(targetDir, fmt.Sprintf("%s (%d)%s", meta.GetFilename(), counter, filepath.Ext(sourcePath)))
-		counter++
+	} else {
+		counter := 1
+		for {
+			info, err := os.Stat(finalPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					break
+				}
+				return "", fmt.Errorf("stat candidate path: %w", err)
+			}
+			if info.IsDir() {
+				return "", fmt.Errorf("library target %q already exists as directory", finalPath)
+			}
+			finalPath = filepath.Join(targetDir, fmt.Sprintf("%s (%d)%s", meta.GetFilename(), counter, filepath.Ext(sourcePath)))
+			counter++
+		}
 	}
 
 	if err := s.MoveFunc(sourcePath, finalPath); err != nil {

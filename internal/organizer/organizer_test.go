@@ -143,6 +143,62 @@ func TestOrganizerMovesGeneratedSubtitles(t *testing.T) {
 	}
 }
 
+func TestOrganizerOverwritesExistingSubtitles(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	cfg.OverwriteExistingLibraryFiles = true
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubOrganizerProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "Demo", "fp-subtitles-overwrite")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusEncoded
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	encodedDir := filepath.Join(stagingRoot, "encoded")
+	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
+		t.Fatalf("mkdir encoded: %v", err)
+	}
+	item.EncodedFile = filepath.Join(encodedDir, "demo.encoded.mkv")
+	testsupport.WriteFile(t, item.EncodedFile, organizedFixtureSize)
+	subtitlePath := filepath.Join(encodedDir, "demo.encoded.en.srt")
+	if err := os.WriteFile(subtitlePath, []byte("new subtitle"), 0o644); err != nil {
+		t.Fatalf("write subtitle: %v", err)
+	}
+	item.MetadataJSON = `{"title":"Demo","filename":"Demo"}`
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	targetDir := filepath.Join(cfg.LibraryDir, cfg.MoviesDir)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir library: %v", err)
+	}
+	existingSubtitle := filepath.Join(targetDir, "demo.encoded.en.srt")
+	if err := os.WriteFile(existingSubtitle, []byte("old subtitle"), 0o644); err != nil {
+		t.Fatalf("seed existing subtitle: %v", err)
+	}
+
+	stubPlex := &stubPlexService{targetDir: targetDir}
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, nil)
+	item.Status = queue.StatusOrganizing
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	data, err := os.ReadFile(existingSubtitle)
+	if err != nil {
+		t.Fatalf("read overwritten subtitle: %v", err)
+	}
+	if string(data) != "new subtitle" {
+		t.Fatalf("expected subtitle to be overwritten, got %q", string(data))
+	}
+}
+
 func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)

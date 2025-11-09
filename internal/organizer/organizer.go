@@ -242,6 +242,11 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 		}
 		source := filepath.Join(stagingDir, name)
 		destination := filepath.Join(destDir, fmt.Sprintf("%s.%s", destBase, suffix))
+		if o.cfg != nil && o.cfg.OverwriteExistingLibraryFiles {
+			if err := os.Remove(destination); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("remove existing subtitle %q: %w", destination, err)
+			}
+		}
 		if err := plex.FileMover(source, destination); err != nil {
 			return fmt.Errorf("move subtitle %q: %w", name, err)
 		}

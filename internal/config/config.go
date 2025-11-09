@@ -13,49 +13,50 @@ import (
 
 // Config encapsulates all configuration values for the Go implementation of Spindle.
 type Config struct {
-	StagingDir                string   `toml:"staging_dir"`
-	LibraryDir                string   `toml:"library_dir"`
-	LogDir                    string   `toml:"log_dir"`
-	DraptoLogDir              string   `toml:"drapto_log_dir"`
-	ReviewDir                 string   `toml:"review_dir"`
-	OpticalDrive              string   `toml:"optical_drive"`
-	APIBind                   string   `toml:"api_bind"`
-	TMDBAPIKey                string   `toml:"tmdb_api_key"`
-	TMDBBaseURL               string   `toml:"tmdb_base_url"`
-	TMDBLanguage              string   `toml:"tmdb_language"`
-	TMDBConfidenceThreshold   float64  `toml:"tmdb_confidence_threshold"`
-	MoviesDir                 string   `toml:"movies_dir"`
-	TVDir                     string   `toml:"tv_dir"`
-	PlexLinkEnabled           bool     `toml:"plex_link_enabled"`
-	PlexURL                   string   `toml:"plex_url"`
-	PlexAuthPath              string   `toml:"plex_auth_path"`
-	MoviesLibrary             string   `toml:"movies_library"`
-	TVLibrary                 string   `toml:"tv_library"`
-	NtfyTopic                 string   `toml:"ntfy_topic"`
-	KeyDBPath                 string   `toml:"keydb_path"`
-	KeyDBDownloadURL          string   `toml:"keydb_download_url"`
-	KeyDBDownloadTimeout      int      `toml:"keydb_download_timeout"`
-	MakeMKVRipTimeout         int      `toml:"makemkv_rip_timeout"`
-	MakeMKVInfoTimeout        int      `toml:"makemkv_info_timeout"`
-	NtfyRequestTimeout        int      `toml:"ntfy_request_timeout"`
-	DiscMonitorTimeout        int      `toml:"disc_monitor_timeout"`
-	QueuePollInterval         int      `toml:"queue_poll_interval"`
-	ErrorRetryInterval        int      `toml:"error_retry_interval"`
-	WorkflowHeartbeatInterval int      `toml:"workflow_heartbeat_interval"`
-	WorkflowHeartbeatTimeout  int      `toml:"workflow_heartbeat_timeout"`
-	LogFormat                 string   `toml:"log_format"`
-	LogLevel                  string   `toml:"log_level"`
-	DraptoPreset              int      `toml:"drapto_preset"`
-	DraptoDisableDenoise      bool     `toml:"drapto_disable_denoise"`
-	SubtitlesEnabled          bool     `toml:"subtitles_enabled"`
-	WhisperXCUDAEnabled       bool     `toml:"whisperx_cuda_enabled"`
-	WhisperXVADMethod         string   `toml:"whisperx_vad_method"`
-	WhisperXHuggingFaceToken  string   `toml:"whisperx_hf_token"`
-	OpenSubtitlesEnabled      bool     `toml:"opensubtitles_enabled"`
-	OpenSubtitlesAPIKey       string   `toml:"opensubtitles_api_key"`
-	OpenSubtitlesUserAgent    string   `toml:"opensubtitles_user_agent"`
-	OpenSubtitlesUserToken    string   `toml:"opensubtitles_user_token"`
-	OpenSubtitlesLanguages    []string `toml:"opensubtitles_languages"`
+	StagingDir                    string   `toml:"staging_dir"`
+	LibraryDir                    string   `toml:"library_dir"`
+	LogDir                        string   `toml:"log_dir"`
+	DraptoLogDir                  string   `toml:"drapto_log_dir"`
+	ReviewDir                     string   `toml:"review_dir"`
+	OpticalDrive                  string   `toml:"optical_drive"`
+	APIBind                       string   `toml:"api_bind"`
+	TMDBAPIKey                    string   `toml:"tmdb_api_key"`
+	TMDBBaseURL                   string   `toml:"tmdb_base_url"`
+	TMDBLanguage                  string   `toml:"tmdb_language"`
+	TMDBConfidenceThreshold       float64  `toml:"tmdb_confidence_threshold"`
+	MoviesDir                     string   `toml:"movies_dir"`
+	TVDir                         string   `toml:"tv_dir"`
+	PlexLinkEnabled               bool     `toml:"plex_link_enabled"`
+	PlexURL                       string   `toml:"plex_url"`
+	PlexAuthPath                  string   `toml:"plex_auth_path"`
+	OverwriteExistingLibraryFiles bool     `toml:"overwrite_existing_library_files"`
+	MoviesLibrary                 string   `toml:"movies_library"`
+	TVLibrary                     string   `toml:"tv_library"`
+	NtfyTopic                     string   `toml:"ntfy_topic"`
+	KeyDBPath                     string   `toml:"keydb_path"`
+	KeyDBDownloadURL              string   `toml:"keydb_download_url"`
+	KeyDBDownloadTimeout          int      `toml:"keydb_download_timeout"`
+	MakeMKVRipTimeout             int      `toml:"makemkv_rip_timeout"`
+	MakeMKVInfoTimeout            int      `toml:"makemkv_info_timeout"`
+	NtfyRequestTimeout            int      `toml:"ntfy_request_timeout"`
+	DiscMonitorTimeout            int      `toml:"disc_monitor_timeout"`
+	QueuePollInterval             int      `toml:"queue_poll_interval"`
+	ErrorRetryInterval            int      `toml:"error_retry_interval"`
+	WorkflowHeartbeatInterval     int      `toml:"workflow_heartbeat_interval"`
+	WorkflowHeartbeatTimeout      int      `toml:"workflow_heartbeat_timeout"`
+	LogFormat                     string   `toml:"log_format"`
+	LogLevel                      string   `toml:"log_level"`
+	DraptoPreset                  int      `toml:"drapto_preset"`
+	DraptoDisableDenoise          bool     `toml:"drapto_disable_denoise"`
+	SubtitlesEnabled              bool     `toml:"subtitles_enabled"`
+	WhisperXCUDAEnabled           bool     `toml:"whisperx_cuda_enabled"`
+	WhisperXVADMethod             string   `toml:"whisperx_vad_method"`
+	WhisperXHuggingFaceToken      string   `toml:"whisperx_hf_token"`
+	OpenSubtitlesEnabled          bool     `toml:"opensubtitles_enabled"`
+	OpenSubtitlesAPIKey           string   `toml:"opensubtitles_api_key"`
+	OpenSubtitlesUserAgent        string   `toml:"opensubtitles_user_agent"`
+	OpenSubtitlesUserToken        string   `toml:"opensubtitles_user_token"`
+	OpenSubtitlesLanguages        []string `toml:"opensubtitles_languages"`
 }
 
 const (
@@ -476,6 +477,9 @@ tmdb_api_key = "your_tmdb_api_key_here"              # Get from themoviedb.org/s
 library_dir = "~/your-media-library"                 # MUST EXIST: Final media library directory
 movies_dir = "movies"                                # Subdirectory inside library_dir for movies
 tv_dir = "tv"                                        # Subdirectory inside library_dir for TV
+
+# Library import behavior
+overwrite_existing_library_files = false             # Set true to replace existing MKV/SRT files in the library
 
 # ============================================================================
 # PATHS & HARDWARE

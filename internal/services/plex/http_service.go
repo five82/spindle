@@ -22,7 +22,7 @@ type TokenProvider interface {
 // NewConfiguredService returns a Plex service that moves files into the library
 // and triggers Plex scans when credentials are available.
 func NewConfiguredService(cfg *config.Config) Service {
-	simple := NewSimpleService(cfg.LibraryDir, cfg.MoviesDir, cfg.TVDir, cfg.MoviesLibrary, cfg.TVLibrary)
+	simple := NewSimpleService(cfg.LibraryDir, cfg.MoviesDir, cfg.TVDir, cfg.MoviesLibrary, cfg.TVLibrary, cfg.OverwriteExistingLibraryFiles)
 
 	if !cfg.PlexLinkEnabled {
 		return simple
