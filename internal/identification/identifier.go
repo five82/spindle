@@ -279,9 +279,32 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		discLabel = scanResult.BDInfo.VolumeIdentifier
 	}
 
+	discNumber := 0
+	discSources := []string{title, discLabel}
+	if scanResult != nil && scanResult.BDInfo != nil {
+		if scanResult.BDInfo.DiscName != "" {
+			discSources = append(discSources, scanResult.BDInfo.DiscName)
+		}
+		if scanResult.BDInfo.VolumeIdentifier != "" {
+			discSources = append(discSources, scanResult.BDInfo.VolumeIdentifier)
+		}
+	}
+	if overrideMatch != nil && strings.TrimSpace(overrideMatch.Title) != "" {
+		discSources = append(discSources, overrideMatch.Title)
+	}
+	if n, ok := extractDiscNumber(discSources...); ok {
+		discNumber = n
+		logger.Info("disc number detected", logging.Int("disc_number", discNumber))
+	}
+
 	// Default metadata assumes unidentified content until TMDB lookup succeeds.
 	metadata := map[string]any{
 		"title": strings.TrimSpace(title),
+	}
+	var attributes map[string]any
+	if discNumber > 0 {
+		metadata["disc_number"] = discNumber
+		attributes = map[string]any{"disc_number": discNumber}
 	}
 	mediaHint := detectMediaKind(title, discLabel, scanResult)
 	if hint := mediaHint.String(); hint != "unknown" {
@@ -438,7 +461,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 				if seasonNumber == 0 {
 					seasonNumber = 1
 				}
-				matches, episodes := i.annotateEpisodes(ctx, logger, tmdbID, seasonNumber, scanResult)
+				matches, episodes := i.annotateEpisodes(ctx, logger, tmdbID, seasonNumber, discNumber, scanResult)
 				episodeMatches = matches
 				matchedEpisodes = episodes
 			}
@@ -607,6 +630,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		Fingerprint: ripFingerprint,
 		ContentKey:  contentKey,
 		Metadata:    metadata,
+		Attributes:  attributes,
 		Titles:      titleSpecs,
 		Episodes:    episodeSpecs,
 	}
@@ -791,7 +815,7 @@ type episodeAnnotation struct {
 	Air     string
 }
 
-func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, tmdbID int64, seasonNumber int, scanResult *disc.ScanResult) (map[int]episodeAnnotation, []int) {
+func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, tmdbID int64, seasonNumber int, discNumber int, scanResult *disc.ScanResult) (map[int]episodeAnnotation, []int) {
 	if tmdbID == 0 || seasonNumber <= 0 || scanResult == nil || len(scanResult.Titles) == 0 {
 		return nil, nil
 	}
@@ -813,18 +837,28 @@ func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, 
 			logging.Int("season", seasonNumber))
 		return nil, nil
 	}
-	matches, numbers := mapEpisodesToTitles(scanResult.Titles, season.Episodes)
+	matches, numbers := mapEpisodesToTitles(scanResult.Titles, season.Episodes, discNumber)
 	return matches, numbers
 }
 
-func mapEpisodesToTitles(titles []disc.Title, episodes []tmdb.Episode) (map[int]episodeAnnotation, []int) {
+func mapEpisodesToTitles(titles []disc.Title, episodes []tmdb.Episode, discNumber int) (map[int]episodeAnnotation, []int) {
 	if len(titles) == 0 || len(episodes) == 0 {
 		return nil, nil
 	}
 	assigned := make(map[int]episodeAnnotation)
 	used := make([]bool, len(episodes))
+	epTitles := make([]disc.Title, 0, len(titles))
 	for _, title := range titles {
-		idx := chooseEpisodeForTitle(title.Duration, episodes, used)
+		if isEpisodeRuntime(title.Duration) {
+			epTitles = append(epTitles, title)
+		}
+	}
+	if len(epTitles) == 0 {
+		return nil, nil
+	}
+	start := estimateEpisodeStart(discNumber, len(epTitles), len(episodes))
+	for _, title := range epTitles {
+		idx := chooseEpisodeForTitle(title.Duration, episodes, used, start)
 		if idx == -1 {
 			continue
 		}
@@ -850,13 +884,34 @@ func mapEpisodesToTitles(titles []disc.Title, episodes []tmdb.Episode) (map[int]
 	return assigned, numbers
 }
 
-func chooseEpisodeForTitle(durationSeconds int, episodes []tmdb.Episode, used []bool) int {
+func estimateEpisodeStart(discNumber int, discEpisodes int, totalEpisodes int) int {
+	if discNumber <= 1 || discEpisodes <= 0 || totalEpisodes == 0 {
+		return 0
+	}
+	start := (discNumber - 1) * discEpisodes
+	if start >= totalEpisodes {
+		start = totalEpisodes - discEpisodes
+		if start < 0 {
+			start = 0
+		}
+	}
+	return start
+}
+
+func chooseEpisodeForTitle(durationSeconds int, episodes []tmdb.Episode, used []bool, startIndex int) int {
 	if len(episodes) == 0 {
 		return -1
 	}
 	bestIdx := -1
 	bestDelta := int(^uint(0) >> 1)
-	for idx, ep := range episodes {
+	if startIndex < 0 {
+		startIndex = 0
+	}
+	if startIndex > len(episodes) {
+		startIndex = len(episodes)
+	}
+	for idx := startIndex; idx < len(episodes); idx++ {
+		ep := episodes[idx]
 		if idx < len(used) && used[idx] {
 			continue
 		}
@@ -880,6 +935,22 @@ func chooseEpisodeForTitle(durationSeconds int, episodes []tmdb.Episode, used []
 	if bestIdx != -1 && bestDelta <= maxAcceptableDelta {
 		return bestIdx
 	}
+	for idx := 0; idx < len(episodes); idx++ {
+		if idx < startIndex {
+			if idx < len(used) && used[idx] {
+				continue
+			}
+			ep := episodes[idx]
+			delta := episodeDurationDelta(durationSeconds, ep)
+			if delta < bestDelta {
+				bestDelta = delta
+				bestIdx = idx
+			}
+		}
+	}
+	if bestIdx != -1 && bestDelta <= maxAcceptableDelta {
+		return bestIdx
+	}
 	for idx := range episodes {
 		if idx < len(used) && used[idx] {
 			continue
@@ -887,6 +958,17 @@ func chooseEpisodeForTitle(durationSeconds int, episodes []tmdb.Episode, used []
 		return idx
 	}
 	return -1
+}
+
+func episodeDurationDelta(durationSeconds int, ep tmdb.Episode) int {
+	runtime := ep.Runtime
+	if runtime <= 0 {
+		runtime = durationSeconds / 60
+		if runtime == 0 {
+			runtime = 22
+		}
+	}
+	return absInt(runtime*60 - durationSeconds)
 }
 
 func absInt(value int) int {

@@ -28,9 +28,10 @@ func (k mediaKind) String() string {
 }
 
 var (
-	seasonPattern = regexp.MustCompile(`(?i)season\s*(\d{1,2})`)
-	sPattern      = regexp.MustCompile(`(?i)\bS(\d{1,2})\b`)
-	seasonWordPat = regexp.MustCompile(`(?i)\bseason\b`)
+	seasonPattern     = regexp.MustCompile(`(?i)season\s*(\d{1,2})`)
+	sPattern          = regexp.MustCompile(`(?i)\bS(\d{1,2})\b`)
+	seasonWordPat     = regexp.MustCompile(`(?i)\bseason\b`)
+	discNumberPattern = regexp.MustCompile(`(?i)\b(?:disc|dvd|blu[- ]?ray|bd)\s*([0-9]{1,2}|[ivxlcdm]{1,4})\b`)
 )
 
 func detectMediaKind(title, label string, scan *disc.ScanResult) mediaKind {
@@ -101,4 +102,76 @@ func findSeason(value string) int {
 		}
 	}
 	return 0
+}
+
+func extractDiscNumber(candidates ...string) (int, bool) {
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if disc := findDiscNumber(candidate); disc > 0 {
+			return disc, true
+		}
+	}
+	return 0, false
+}
+
+func findDiscNumber(value string) int {
+	normalized := strings.ReplaceAll(value, "_", " ")
+	normalized = strings.ReplaceAll(normalized, "-", " ")
+	match := discNumberPattern.FindStringSubmatch(normalized)
+	if len(match) != 2 {
+		return 0
+	}
+	token := strings.TrimSpace(match[1])
+	if token == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(token); err == nil {
+		return n
+	}
+	return romanToInt(token)
+}
+
+func romanToInt(input string) int {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return 0
+	}
+	value := 0
+	prev := 0
+	for i := len(input) - 1; i >= 0; i-- {
+		digit := romanDigitValue(rune(input[i]))
+		if digit == 0 {
+			return 0
+		}
+		if digit < prev {
+			value -= digit
+		} else {
+			value += digit
+			prev = digit
+		}
+	}
+	return value
+}
+
+func romanDigitValue(r rune) int {
+	switch r {
+	case 'i':
+		return 1
+	case 'v':
+		return 5
+	case 'x':
+		return 10
+	case 'l':
+		return 50
+	case 'c':
+		return 100
+	case 'd':
+		return 500
+	case 'm':
+		return 1000
+	default:
+		return 0
+	}
 }

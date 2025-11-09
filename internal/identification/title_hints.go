@@ -6,10 +6,10 @@ import (
 )
 
 var (
-	discTokenPattern  = regexp.MustCompile(`(?i)\b(?:disc|dvd|blu[- ]?ray|bd|season)\s*[0-9ivx]+\b`)
-	parenthesesNoise  = regexp.MustCompile(`\([^)]*\)`)
 	whitespacePattern = regexp.MustCompile(`\s+`)
 )
+
+var parenthesesStripper = strings.NewReplacer("(", " ", ")", " ")
 
 func sanitizeQueryCandidate(value string) string {
 	value = strings.TrimSpace(value)
@@ -17,8 +17,7 @@ func sanitizeQueryCandidate(value string) string {
 		return ""
 	}
 	cleaned := strings.ReplaceAll(value, "_", " ")
-	cleaned = parenthesesNoise.ReplaceAllString(cleaned, " ")
-	cleaned = discTokenPattern.ReplaceAllString(cleaned, " ")
+	cleaned = parenthesesStripper.Replace(cleaned)
 	cleaned = strings.ReplaceAll(cleaned, "-", " ")
 	cleaned = whitespacePattern.ReplaceAllString(cleaned, " ")
 	return strings.TrimSpace(cleaned)
@@ -50,7 +49,7 @@ func splitShowSeason(value string) (string, int) {
 		return "", 0
 	}
 	cleaned := strings.ReplaceAll(value, "_", " ")
-	cleaned = parenthesesNoise.ReplaceAllString(cleaned, " ")
+	cleaned = parenthesesStripper.Replace(cleaned)
 	season := 0
 	if s, ok := extractSeasonNumber(cleaned); ok {
 		season = s
