@@ -82,11 +82,9 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 		return "", fmt.Errorf("create destination: %w", err)
 	}
 
-	sanitized := sanitizeFileName(discTitle)
-	if sanitized == "" {
-		sanitized = "spindle-disc"
-	}
-	destPath := filepath.Join(destDir, sanitized+".mkv")
+	titleIDs = normalizeTitleIDs(titleIDs)
+	multiTitle := len(titleIDs) > 1
+
 	ripCtx := ctx
 	if c.ripTimeout > 0 {
 		var cancel context.CancelFunc
@@ -94,21 +92,41 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 		defer cancel()
 	}
 
+	if len(titleIDs) == 0 {
+		return c.executeRip(ripCtx, discTitle, sourcePath, destDir, nil, false, progress)
+	}
+
+	var lastPath string
+	for _, id := range titleIDs {
+		path, err := c.executeRip(ripCtx, discTitle, sourcePath, destDir, []int{id}, multiTitle, progress)
+		if err != nil {
+			return "", fmt.Errorf("makemkv rip title %d: %w", id, err)
+		}
+		lastPath = path
+	}
+	return lastPath, nil
+}
+
+func (c *Client) executeRip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, skipRename bool, progress func(ProgressUpdate)) (string, error) {
+	sanitized := sanitizeFileName(discTitle)
+	if sanitized == "" {
+		sanitized = "spindle-disc"
+	}
+	destPath := filepath.Join(destDir, sanitized+".mkv")
+
 	args := []string{"--robot"}
 	if progress != nil {
 		args = append(args, "--progress=-same")
 	}
 	args = append(args, "mkv", "disc:0")
-	titleIDs = normalizeTitleIDs(titleIDs)
 	if len(titleIDs) == 0 {
 		args = append(args, "all")
 	} else {
-		for _, id := range titleIDs {
-			args = append(args, strconv.Itoa(id))
-		}
+		args = append(args, strconv.Itoa(titleIDs[0]))
 	}
 	args = append(args, destDir)
-	if err := c.exec.Run(ripCtx, c.binary, args, func(line string) {
+
+	if err := c.exec.Run(ctx, c.binary, args, func(line string) {
 		if progress == nil {
 			return
 		}
@@ -125,13 +143,18 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 	}
 	if len(candidates) > 0 {
 		best := selectPreferredMKV(candidates, titleIDs)
+		if best == nil {
+			best = newestEntry(candidates)
+		}
 		if best != nil {
-			if len(titleIDs) <= 1 {
+			if skipRename {
+				destPath = best.path
+			} else if len(titleIDs) <= 1 {
 				if err := replaceFile(best.path, destPath); err != nil {
 					return "", err
 				}
 				for _, file := range candidates {
-					if file.path == best.path {
+					if file.path == destPath {
 						continue
 					}
 					_ = os.Remove(file.path)
@@ -155,6 +178,19 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 	}
 
 	return destPath, nil
+}
+
+func newestEntry(entries []mkvEntry) *mkvEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	newest := 0
+	for i := 1; i < len(entries); i++ {
+		if entries[i].modTime.After(entries[newest].modTime) {
+			newest = i
+		}
+	}
+	return &entries[newest]
 }
 
 type mkvEntry struct {
