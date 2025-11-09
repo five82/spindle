@@ -25,6 +25,8 @@ const (
 	stableTSCommand        = "uvx"
 	stableTSPackage        = "stable-ts"
 	whisperXPackage        = "whisperx"
+	ffsubsyncCommand       = "uvx"
+	ffsubsyncPackage       = "ffsubsync"
 )
 
 const (

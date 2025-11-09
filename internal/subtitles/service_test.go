@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,6 +236,74 @@ func TestServiceGeneratePyannoteTokenFallbackToSilero(t *testing.T) {
 	}
 }
 
+func TestRankSubtitleCandidatesPrefersBluRayOverWeb(t *testing.T) {
+	subs := []opensubtitles.Subtitle{
+		{FileID: 1, Language: "en", Release: "Michael.Clayton.2007.1080p.BluRay.x264", Downloads: 600, FeatureYear: 2007},
+		{FileID: 2, Language: "en", Release: "Michael.Clayton.2007.WEB-DL.x264", Downloads: 6000, FeatureYear: 2007},
+	}
+	ordered := rankSubtitleCandidates(subs, []string{"en"}, SubtitleContext{MediaType: "movie", Year: "2007"})
+	if len(ordered) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(ordered))
+	}
+	if ordered[0].subtitle.FileID != 1 {
+		t.Fatalf("expected BluRay release to rank first, got file id %d", ordered[0].subtitle.FileID)
+	}
+}
+
+func TestRankSubtitleCandidatesRespectsLanguageBuckets(t *testing.T) {
+	subs := []opensubtitles.Subtitle{
+		{FileID: 1, Language: "es", Release: "Movie.1080p.BluRay", Downloads: 200},
+		{FileID: 2, Language: "en", Release: "Movie.1080p.BluRay", Downloads: 50},
+		{FileID: 3, Language: "en", Release: "Movie.WEB-DL", Downloads: 150, AITranslated: true},
+	}
+	ordered := rankSubtitleCandidates(subs, []string{"en"}, SubtitleContext{MediaType: "movie"})
+	if len(ordered) != 3 {
+		t.Fatalf("expected 3 candidates, got %d", len(ordered))
+	}
+	if ordered[0].subtitle.FileID != 2 {
+		t.Fatalf("expected human preferred language first, got %d", ordered[0].subtitle.FileID)
+	}
+	if ordered[1].subtitle.FileID != 3 {
+		t.Fatalf("expected AI preferred language second, got %d", ordered[1].subtitle.FileID)
+	}
+	if ordered[2].subtitle.FileID != 1 {
+		t.Fatalf("expected fallback language last, got %d", ordered[2].subtitle.FileID)
+	}
+}
+
+func TestCheckSubtitleDurationRejectsLargeDelta(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sample.srt")
+	contents := "1\n00:00:00,000 --> 00:00:30,000\nHello\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write srt: %v", err)
+	}
+	delta, mismatch, err := checkSubtitleDuration(path, 60)
+	if err != nil {
+		t.Fatalf("checkSubtitleDuration returned error: %v", err)
+	}
+	if !mismatch {
+		t.Fatalf("expected mismatch, got none")
+	}
+	if math.Abs(delta-30) > 0.1 {
+		t.Fatalf("expected delta about 30, got %.2f", delta)
+	}
+}
+
+func TestCheckSubtitleDurationAllowsSmallDelta(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sample.srt")
+	contents := "1\n00:00:00,000 --> 01:00:05,000\nHello\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write srt: %v", err)
+	}
+	delta, mismatch, err := checkSubtitleDuration(path, 3600)
+	if err != nil {
+		t.Fatalf("checkSubtitleDuration returned error: %v", err)
+	}
+	if mismatch {
+		t.Fatalf("expected no mismatch, got delta %.2f", delta)
+	}
+}
+
 func TestServiceGenerateFallsBackToWhisperSRT(t *testing.T) {
 	tmp := t.TempDir()
 	source := filepath.Join(tmp, "movie.mkv")
@@ -298,7 +367,7 @@ func TestServiceGenerateUsesOpenSubtitlesWhenAvailable(t *testing.T) {
 www.opensubtitles.org
 
 2
-00:00:04,000 --> 00:00:06,000
+00:01:54,000 --> 00:02:00,000
 Aligned text
 `),
 	}
@@ -334,6 +403,9 @@ Aligned text
 	}
 	if stub.calledWhisper {
 		t.Fatalf("expected whisper transcription to be skipped")
+	}
+	if !stub.calledFFSubsync {
+		t.Fatalf("expected ffsubsync to run before WhisperX alignment")
 	}
 	if !stub.calledAlignment {
 		t.Fatalf("expected alignment pass to run")
@@ -430,6 +502,7 @@ type whisperXStub struct {
 	calledStableTS  bool
 	calledFFmpeg    bool
 	calledAlignment bool
+	calledFFSubsync bool
 	duration        float64
 	lastVAD         string
 	lastHFToken     string
@@ -587,6 +660,44 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 			pkg = args[i+1]
 			break
 		}
+	}
+	if pkg == ffsubsyncPackage {
+		s.calledFFSubsync = true
+		var (
+			reference  string
+			inputPath  string
+			outputPath string
+		)
+		seenCommand := false
+		for i := 0; i < len(args); i++ {
+			switch args[i] {
+			case "ffsubsync":
+				seenCommand = true
+			case "-i", "--input", "--srtin":
+				if i+1 < len(args) {
+					inputPath = args[i+1]
+				}
+			case "-o", "--output", "--srtout":
+				if i+1 < len(args) {
+					outputPath = args[i+1]
+				}
+			default:
+				if seenCommand && reference == "" && !strings.HasPrefix(args[i], "-") {
+					reference = args[i]
+				}
+			}
+		}
+		if reference == "" {
+			s.t.Fatalf("ffsubsync missing reference media: %v", args)
+		}
+		if inputPath == "" || outputPath == "" {
+			s.t.Fatalf("ffsubsync missing input/output: %v", args)
+		}
+		data, err := os.ReadFile(inputPath)
+		if err != nil {
+			return fmt.Errorf("read ffsubsync input: %w", err)
+		}
+		return os.WriteFile(outputPath, data, 0o644)
 	}
 	if pkg == whisperXPackage {
 		s.calledAlignment = true
