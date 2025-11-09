@@ -707,7 +707,7 @@ func uniqueEpisodeTitleIDs(env ripspec.Envelope) []int {
 	return ids
 }
 
-var titleFilePattern = regexp.MustCompile(`(?i)title_t?(\d{2,3})`)
+var titleFilePattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:title_)?t(\d{2,3})`)
 
 func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger) int {
 	if env == nil || len(env.Episodes) == 0 {
