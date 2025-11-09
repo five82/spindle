@@ -6,8 +6,8 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
 
 1. **MakeMKV scan** – `internal/disc.Scanner` calls `makemkvcon info` to capture the title list; Spindle now computes its own fingerprint from disc metadata before the scan runs.
 2. **bd_info enrichment** – The scanner always runs `bd_info` when the binary is available, harvesting Blu-ray disc IDs, studio hints, and a cleaned disc name. It still only overwrites the MakeMKV title when the original metadata is empty or generic.
-3. **KEYDB lookup** – When `bd_info` captures an AACS Disc ID, the identifier consults the KEYDB catalog (automatically refreshed weekly) to fetch curated titles/aliases before doing any string heuristics.
-4. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups using the enhanced title OR KEYDB alias data.
+3. **KEYDB lookup** – When `bd_info` captures an AACS Disc ID, the identifier consults the KEYDB catalog (automatically refreshed weekly) to fetch curated titles/aliases before doing any string heuristics. KEYDB is also the earliest hint that a disc is episodic (for example “Season 05 Disc 1”).
+4. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups using the enhanced title OR KEYDB alias data. Episode-heavy discs automatically switch to the TV lookup flow before falling back to movies or TMDB’s multi-type search endpoint.
 4. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
 5. The stage writes `MetadataJSON` and `RipSpecData` back to the queue so downstream stages can pick title selections and user-facing details.
 
@@ -27,7 +27,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
 
 ### Title Source Priority
 
-1. **KEYDB match** – If the Disc ID is known, the curated KEYDB title wins immediately.
+1. **KEYDB match** – If the Disc ID is known, the curated KEYDB title wins immediately (and feeds the TV heuristics).
 2. **MakeMKV main title** – The first MakeMKV title is preferred when it looks like a real title.
 3. **bd_info disc name** – Used when the MakeMKV title is missing or technical noise.
 4. **Queue item title** – Falls back to whatever label the user originally queued.
@@ -44,12 +44,13 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
 
 ## TMDB Matching
 
-- All lookups route through `tmdb.Client.SearchMovieWithOptions` with enhanced search parameters. The identifier keeps an in-memory cache keyed by the normalized query to avoid hammering the API.
+- All lookups route through TMDB with enhanced search parameters. Movie discs still call `/search/movie`, but episodic candidates are tried against `/search/tv` first and `/search/multi` last. The identifier keeps an in-memory cache keyed by the normalized query plus the search mode to avoid re-querying TMDB when several discs share aliases.
 - A simple rate limiter (250 ms minimum gap) protects against short bursts when multiple discs enter the same stage.
 - **Enhanced search parameters** from bd_info and MakeMKV data:
   - Year filtering via `primary_release_year` (extracted from bd_info)
   - Runtime range filtering (±10 minutes from main title duration)
   - Studio information extraction (available for future filtering)
+- **TV heuristics**: multiple 20–30 minute titles, KEYDB aliases containing “Season XX”, or BDInfo volume identifiers matching `Sxx` all tip the search order toward `/search/tv`. If that fails, the identifier falls back to movie search and finally `/search/multi` before punting to manual review.
 - **Confidence scoring logic**:
   - Exact title matches: Accept if vote_average ≥ 2.0 (lenient for perfect matches)
   - Partial matches: Require vote_average ≥ 3.0 and minimum calculated score
@@ -61,10 +62,10 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
 
 The identifier persists two JSON blobs on the queue item:
 
-- `MetadataJSON` – enhanced TMDB fields (`id`, canonical title/name, `release_date`, overview, media_type, vote stats). The release_date enables proper year extraction for Plex filename generation.
-- `RipSpecData` – structured payload with `fingerprint`, `content_key`, `metadata`, and `titles`. Each title carries a stable `content_fingerprint` derived from duration/track metadata so episodes or bonus features can be tracked independently of the disc hash.
+- `MetadataJSON` – enhanced TMDB fields (`id`, canonical title/name, `release_date` or `first_air_date`, overview, media_type, vote stats). TV matches also record `show_title`, `season_number`, and the list of matched `episode_numbers` so Plex filenames can include `SxxEyy` ranges.
+- `RipSpecData` – structured payload with `fingerprint`, `content_key`, `metadata`, and `titles`. Each title carries a stable `content_fingerprint` derived from duration/track metadata so episodes or bonus features can be tracked independently of the disc hash. TV entries now include per-title `season`, `episode`, `episode_title`, and `episode_air_date` values taken from the TMDB season API.
 
-**Title Propagation**: After successful identification, `item.DiscTitle` is updated from the raw disc title to the proper TMDB title with year format (e.g., "50 First Dates (2004)"), ensuring all subsequent stages use the clean, properly formatted title.
+**Title Propagation**: After successful identification, `item.DiscTitle` is updated from the raw disc title to the proper TMDB value (movies keep the "Title (Year)" format, while TV discs become `Show Name Season XX (Year)`), ensuring all subsequent stages use the clean, properly formatted title.
 
 Downstream stages rely on these fields for logging, rip configuration, and Plex naming.
 

@@ -192,6 +192,62 @@ func TestIdentifierMarksReviewWhenNoResults(t *testing.T) {
 	}
 }
 
+func TestIdentifierAnnotatesTVEpisodes(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+
+	item, err := store.NewDisc(context.Background(), "South Park", "fp-southpark")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+
+	seasonDetails := &tmdb.SeasonDetails{
+		SeasonNumber: 5,
+		Episodes: []tmdb.Episode{
+			{ID: 1, Name: "Scott Tenorman Must Die", SeasonNumber: 5, EpisodeNumber: 1, Runtime: 22, AirDate: "2001-07-11"},
+			{ID: 2, Name: "It Hits the Fan", SeasonNumber: 5, EpisodeNumber: 2, Runtime: 22, AirDate: "2001-06-20"},
+			{ID: 3, Name: "Cripple Fight", SeasonNumber: 5, EpisodeNumber: 3, Runtime: 22, AirDate: "2001-06-27"},
+			{ID: 4, Name: "Super Best Friends", SeasonNumber: 5, EpisodeNumber: 4, Runtime: 22, AirDate: "2001-07-04"},
+		},
+	}
+	resp := &tmdb.Response{Results: []tmdb.Result{{ID: 123, Title: "South Park Season 5 - Disc 1", Name: "South Park", MediaType: "tv", FirstAirDate: "1997-08-13", VoteAverage: 8.4, VoteCount: 200}}}
+	stubTMDB := &stubSearcher{
+		resp:   resp,
+		tvResp: resp,
+		season: seasonDetails,
+	}
+	stubScanner := &stubDiscScanner{result: &disc.ScanResult{
+		Fingerprint: "fp-southpark",
+		Titles: []disc.Title{
+			{ID: 0, Name: "", Duration: 1320},
+			{ID: 1, Name: "", Duration: 1320},
+			{ID: 2, Name: "", Duration: 1320},
+			{ID: 3, Name: "", Duration: 1320},
+		},
+		BDInfo: &disc.BDInfoResult{DiscID: "ABC123", DiscName: "South Park Season 5 Disc 1", VolumeIdentifier: "SOUTHPARK5_DISC1"},
+	}}
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), stubTMDB, stubScanner, nil)
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	t.Logf("tmdb calls movie=%d tv=%d multi=%d season=%d", stubTMDB.movieCalls, stubTMDB.tvCalls, stubTMDB.multiCalls, stubTMDB.seasonCalls)
+	if !strings.Contains(item.MetadataJSON, "\"media_type\":\"tv\"") {
+		t.Fatalf("expected tv media type in metadata, status=%s review=%v reason=%s json=%s", item.Status, item.NeedsReview, item.ReviewReason, item.MetadataJSON)
+	}
+	if !strings.Contains(item.MetadataJSON, "season_number") {
+		t.Fatalf("expected season metadata, got %s", item.MetadataJSON)
+	}
+	if !strings.Contains(item.RipSpecData, "\"season\":5") {
+		t.Fatalf("expected rip spec to include season annotations, got %s", item.RipSpecData)
+	}
+	if !strings.Contains(item.RipSpecData, "\"episode\":1") {
+		t.Fatalf("expected rip spec to include episode mapping, got %s", item.RipSpecData)
+	}
+}
+
 func TestIdentifierHealthReady(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
@@ -222,19 +278,59 @@ func TestIdentifierHealthMissingAPIKey(t *testing.T) {
 }
 
 type stubSearcher struct {
-	resp *tmdb.Response
-	err  error
-}
-
-func (s *stubSearcher) SearchMovie(ctx context.Context, query string) (*tmdb.Response, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.resp, nil
+	resp        *tmdb.Response
+	tvResp      *tmdb.Response
+	multiResp   *tmdb.Response
+	season      *tmdb.SeasonDetails
+	err         error
+	movieCalls  int
+	tvCalls     int
+	multiCalls  int
+	seasonCalls int
 }
 
 func (s *stubSearcher) SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
-	return s.SearchMovie(ctx, query)
+	s.movieCalls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.resp != nil {
+		return s.resp, nil
+	}
+	return &tmdb.Response{}, nil
+}
+
+func (s *stubSearcher) SearchTVWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	s.tvCalls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.tvResp != nil {
+		return s.tvResp, nil
+	}
+	return &tmdb.Response{}, nil
+}
+
+func (s *stubSearcher) SearchMultiWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	s.multiCalls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.multiResp != nil {
+		return s.multiResp, nil
+	}
+	return &tmdb.Response{}, nil
+}
+
+func (s *stubSearcher) GetSeasonDetails(ctx context.Context, showID int64, seasonNumber int) (*tmdb.SeasonDetails, error) {
+	s.seasonCalls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.season != nil {
+		return s.season, nil
+	}
+	return &tmdb.SeasonDetails{}, nil
 }
 
 type stubDiscScanner struct {

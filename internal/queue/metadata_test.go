@@ -21,15 +21,14 @@ func TestMetadataGetLibraryPathMovieUsesTitleFolder(t *testing.T) {
 	}
 }
 
-func TestMetadataGetLibraryPathTvUsesTvRoot(t *testing.T) {
-	payload := map[string]any{"media_type": "tv"}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal tv metadata: %v", err)
+func TestMetadataGetLibraryPathTvBuildsHierarchy(t *testing.T) {
+	meta := Metadata{
+		MediaType:    "tv",
+		ShowTitle:    "South Park",
+		SeasonNumber: 5,
 	}
-	meta := MetadataFromJSON(string(data), "Example Show")
 	got := meta.GetLibraryPath("/library", "movies", "tv")
-	want := filepath.Join("/library", "tv")
+	want := filepath.Join("/library", "tv", "South Park", "Season 05")
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
@@ -40,6 +39,21 @@ func TestMetadataGetFilenameSanitizes(t *testing.T) {
 	want := "Batman- The Long - Short"
 	if meta.GetFilename() != want {
 		t.Fatalf("expected sanitized filename %q, got %q", want, meta.GetFilename())
+	}
+}
+
+func TestNewTVMetadataSetsEpisodeRange(t *testing.T) {
+	meta := NewTVMetadata("South Park", 5, []int{3, 4}, "South Park Season 5 - Disc 1")
+	if meta.MediaType != "tv" {
+		t.Fatalf("expected tv media type, got %q", meta.MediaType)
+	}
+	if got := meta.GetFilename(); got != "South Park - S05E03-E04" {
+		t.Fatalf("unexpected filename %q", got)
+	}
+	gotPath := meta.GetLibraryPath("/library", "movies", "tv")
+	wantPath := filepath.Join("/library", "tv", "South Park", "Season 05")
+	if gotPath != wantPath {
+		t.Fatalf("expected path %q, got %q", wantPath, gotPath)
 	}
 }
 

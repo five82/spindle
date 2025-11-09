@@ -552,6 +552,10 @@ type ripSpecTitle struct {
 	Name               string `json:"name"`
 	Duration           int    `json:"duration"`
 	ContentFingerprint string `json:"content_fingerprint"`
+	Season             int    `json:"season"`
+	Episode            int    `json:"episode"`
+	EpisodeTitle       string `json:"episode_title"`
+	EpisodeAirDate     string `json:"episode_air_date"`
 }
 
 func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {

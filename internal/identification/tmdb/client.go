@@ -34,6 +34,25 @@ type Response struct {
 	TotalResults int      `json:"total_results"`
 }
 
+// Episode describes a single TMDB episode entry.
+type Episode struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Overview      string `json:"overview"`
+	SeasonNumber  int    `json:"season_number"`
+	EpisodeNumber int    `json:"episode_number"`
+	Runtime       int    `json:"runtime"`
+	AirDate       string `json:"air_date"`
+}
+
+// SeasonDetails captures the full TMDB season payload (episodes included).
+type SeasonDetails struct {
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	SeasonNumber int       `json:"season_number"`
+	Episodes     []Episode `json:"episodes"`
+}
+
 // Client provides access to the TMDB API for searches.
 type Client struct {
 	apiKey     string
@@ -89,6 +108,18 @@ type SearchOptions struct {
 	Runtime int    `json:"runtime,omitempty"` // in minutes
 }
 
+// CacheKey returns a stable string representation for caching.
+func (c SearchOptions) CacheKey() string {
+	var builder strings.Builder
+	builder.WriteString("y=")
+	builder.WriteString(strconv.Itoa(c.Year))
+	builder.WriteString("|r=")
+	builder.WriteString(strconv.Itoa(c.Runtime))
+	builder.WriteString("|s=")
+	builder.WriteString(strings.ToLower(strings.TrimSpace(c.Studio)))
+	return builder.String()
+}
+
 // SearchMovieWithOptions performs a TMDB movie search with optional filters.
 func (c *Client) SearchMovieWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error) {
 	query = strings.TrimSpace(query)
@@ -138,6 +169,132 @@ func (c *Client) SearchMovieWithOptions(ctx context.Context, query string, opts 
 	var payload Response
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode tmdb response: %w", err)
+	}
+	return &payload, nil
+}
+
+// SearchTVWithOptions performs a TMDB TV search with optional filters.
+func (c *Client) SearchTVWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("query must not be empty")
+	}
+	endpoint, err := url.Parse(c.baseURL + "/search/tv")
+	if err != nil {
+		return nil, fmt.Errorf("parse tmdb url: %w", err)
+	}
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("api_key", c.apiKey)
+	if c.language != "" {
+		params.Set("language", c.language)
+	}
+	if opts.Year > 0 {
+		params.Set("first_air_date_year", strconv.Itoa(opts.Year))
+	}
+	endpoint.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tmdb tv search returned %d", resp.StatusCode)
+	}
+
+	var payload Response
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode tmdb response: %w", err)
+	}
+	return &payload, nil
+}
+
+// SearchMultiWithOptions performs a TMDB multi search, falling back to any media type.
+func (c *Client) SearchMultiWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("query must not be empty")
+	}
+	endpoint, err := url.Parse(c.baseURL + "/search/multi")
+	if err != nil {
+		return nil, fmt.Errorf("parse tmdb url: %w", err)
+	}
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("api_key", c.apiKey)
+	if c.language != "" {
+		params.Set("language", c.language)
+	}
+	if opts.Year > 0 {
+		params.Set("year", strconv.Itoa(opts.Year))
+	}
+	endpoint.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tmdb multi search returned %d", resp.StatusCode)
+	}
+
+	var payload Response
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode tmdb response: %w", err)
+	}
+	return &payload, nil
+}
+
+// GetSeasonDetails fetches the full season metadata for a TV show, including episodes.
+func (c *Client) GetSeasonDetails(ctx context.Context, showID int64, seasonNumber int) (*SeasonDetails, error) {
+	if showID <= 0 {
+		return nil, errors.New("show id must be positive")
+	}
+	if seasonNumber <= 0 {
+		return nil, errors.New("season number must be positive")
+	}
+	endpoint, err := url.Parse(fmt.Sprintf("%s/tv/%d/season/%d", c.baseURL, showID, seasonNumber))
+	if err != nil {
+		return nil, fmt.Errorf("parse tmdb url: %w", err)
+	}
+	params := url.Values{}
+	params.Set("api_key", c.apiKey)
+	if c.language != "" {
+		params.Set("language", c.language)
+	}
+	endpoint.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tmdb season fetch returned %d", resp.StatusCode)
+	}
+
+	var payload SeasonDetails
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode season response: %w", err)
 	}
 	return &payload, nil
 }

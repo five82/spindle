@@ -155,6 +155,18 @@ func (f *fakeTMDB) SearchMovieWithOptions(ctx context.Context, query string, opt
 	return f.SearchMovie(ctx, query)
 }
 
+func (f *fakeTMDB) SearchTVWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	return f.SearchMovie(ctx, query)
+}
+
+func (f *fakeTMDB) SearchMultiWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	return f.SearchMovie(ctx, query)
+}
+
+func (f *fakeTMDB) GetSeasonDetails(ctx context.Context, showID int64, seasonNumber int) (*tmdb.SeasonDetails, error) {
+	return &tmdb.SeasonDetails{}, nil
+}
+
 type fakeDiscScanner struct {
 	result     *disc.ScanResult
 	calls      int

@@ -37,8 +37,8 @@ You can keep inserting discs back-to-back; each one lands in the queue.
 ## Stage 2: Content Identification (IDENTIFYING -> IDENTIFIED)
 
 1. Spindle triggers a MakeMKV scan to read every title on the disc.
-2. The intelligent analyzer classifies the disc (movie vs TV set, extras, commentary tracks) and calls TMDB to find the best metadata match.
-3. Success: the queue item is marked `IDENTIFIED`, media details (title, year, season/episode) are stored, and the rip specification is written to the queue database. When a release year is available, an ntfy notification announces the match so you know the daemon has the correct metadata before ripping starts.
+2. The intelligent analyzer classifies the disc (movie vs TV set, extras, commentary tracks) and calls TMDB to find the best metadata match. Multiple 20–30 minute titles or KEYDB labels like “Season 05 Disc 1” force a TV lookup, and TMDB season endpoints supply official episode names once a show is identified.
+3. Success: the queue item is marked `IDENTIFIED`, media details (title, year, season, matched episode numbers) are stored, and the rip specification is written to the queue database (each title now records `SxxEyy` info when available). When a release year or first-air year is available, an ntfy notification announces the match so you know the daemon has the correct metadata before ripping starts.
 4. No confident match: the item stays at `IDENTIFIED` but is flagged with `NeedsReview = true`, and you receive guidance in the logs. The pipeline keeps moving so downstream stages can finish while you decide how to handle the unknown metadata.
 
 Progress messages in `spindle show --follow` tell you what the analyzer is doing ("Analyzing disc content", "Classifying disc contents", etc.).
@@ -71,7 +71,7 @@ You can also regenerate subtitles for historic encodes with `spindle gensubtitle
 
 ## Stage 6: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
 
-1. Spindle moves the encoded file into your library, building a Plex-friendly path based on the TMDB metadata. Movies go under `library_dir/movies`, TV episodes go under `library_dir/tv/<Show Name>/Season XX/`.
+1. Spindle moves the encoded file into your library, building a Plex-friendly path based on the TMDB metadata. Movies go under `library_dir/movies`, TV episodes go under `library_dir/tv/<Show Name>/Season XX/` with filenames such as `Show Name - S05E01-E04.mkv` when multiple episodes share the disc.
 2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Plex.
 3. Plex scans are triggered for the appropriate library section (Movies vs TV Shows) when credentials are supplied.
 4. The final status `COMPLETED` means the media is on disk and Plex has been asked to rescan. Items flagged for review land in your configured `review_dir`; otherwise titles appear in the main library. An ntfy notification confirms the import when the library update succeeds.

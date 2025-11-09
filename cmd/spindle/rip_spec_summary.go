@@ -18,6 +18,9 @@ type ripSpecTitleSummary struct {
 	Name               string `json:"name"`
 	Duration           int    `json:"duration"`
 	ContentFingerprint string `json:"content_fingerprint"`
+	Season             int    `json:"season"`
+	Episode            int    `json:"episode"`
+	EpisodeTitle       string `json:"episode_title"`
 }
 
 func parseRipSpecSummary(raw string) (ripSpecSummary, error) {
@@ -48,6 +51,14 @@ func printRipSpecFingerprints(out io.Writer, summary ripSpecSummary) {
 		name := strings.TrimSpace(title.Name)
 		if name == "" {
 			name = "(untitled)"
+		}
+		if title.Season > 0 && title.Episode > 0 {
+			episodeTitle := strings.TrimSpace(title.EpisodeTitle)
+			if episodeTitle != "" {
+				name = fmt.Sprintf("S%02dE%02d – %s", title.Season, title.Episode, episodeTitle)
+			} else {
+				name = fmt.Sprintf("S%02dE%02d", title.Season, title.Episode)
+			}
 		}
 		fp := strings.TrimSpace(title.ContentFingerprint)
 		if len(fp) > 24 {

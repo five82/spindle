@@ -3,6 +3,7 @@ package identification
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -12,9 +13,19 @@ import (
 
 // TMDBSearcher defines the subset of TMDB client functionality used by the identifier.
 type TMDBSearcher interface {
-	SearchMovie(ctx context.Context, query string) (*tmdb.Response, error)
 	SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error)
+	SearchTVWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error)
+	SearchMultiWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error)
+	GetSeasonDetails(ctx context.Context, showID int64, seasonNumber int) (*tmdb.SeasonDetails, error)
 }
+
+type searchMode string
+
+const (
+	searchModeMovie searchMode = "movie"
+	searchModeTV    searchMode = "tv"
+	searchModeMulti searchMode = "multi"
+)
 
 type tmdbCacheEntry struct {
 	resp    *tmdb.Response
@@ -43,12 +54,12 @@ func newTMDBSearch(client TMDBSearcher) *tmdbSearch {
 	}
 }
 
-func (s *tmdbSearch) search(ctx context.Context, title string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+func (s *tmdbSearch) search(ctx context.Context, title string, opts tmdb.SearchOptions, mode searchMode) (*tmdb.Response, error) {
 	if s == nil || s.client == nil {
 		return nil, errors.New("tmdb client unavailable")
 	}
 
-	key := strings.ToLower(strings.TrimSpace(title))
+	key := fmt.Sprintf("%s|%s|%s", mode, strings.ToLower(strings.TrimSpace(title)), opts.CacheKey())
 	now := time.Now()
 
 	s.mu.Lock()
@@ -71,7 +82,18 @@ func (s *tmdbSearch) search(ctx context.Context, title string, opts tmdb.SearchO
 	s.lastLookup = time.Now()
 	s.mu.Unlock()
 
-	resp, err := s.client.SearchMovieWithOptions(ctx, title, opts)
+	var (
+		resp *tmdb.Response
+		err  error
+	)
+	switch mode {
+	case searchModeTV:
+		resp, err = s.client.SearchTVWithOptions(ctx, title, opts)
+	case searchModeMulti:
+		resp, err = s.client.SearchMultiWithOptions(ctx, title, opts)
+	default:
+		resp, err = s.client.SearchMovieWithOptions(ctx, title, opts)
+	}
 	if err != nil {
 		return nil, err
 	}
