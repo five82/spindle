@@ -17,47 +17,32 @@ import (
 	"spindle/internal/disc"
 	discfingerprint "spindle/internal/disc/fingerprint"
 	"spindle/internal/identification/keydb"
+	"spindle/internal/identification/overrides"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/stage"
 )
 
 // Identifier performs disc identification using MakeMKV scanning and TMDB metadata.
 type Identifier struct {
-	store    *queue.Store
-	cfg      *config.Config
-	logger   *slog.Logger
-	tmdb     *tmdbSearch
-	tmdbInfo TMDBSearcher
-	keydb    *keydb.Catalog
-	scanner  DiscScanner
-	notifier notifications.Service
+	store     *queue.Store
+	cfg       *config.Config
+	logger    *slog.Logger
+	tmdb      *tmdbSearch
+	tmdbInfo  TMDBSearcher
+	keydb     *keydb.Catalog
+	overrides *overrides.Catalog
+	scanner   DiscScanner
+	notifier  notifications.Service
 }
 
 // DiscScanner defines disc scanning operations.
 type DiscScanner interface {
 	Scan(ctx context.Context, device string) (*disc.ScanResult, error)
-}
-
-type ripSpecEnvelope struct {
-	Fingerprint string         `json:"fingerprint"`
-	ContentKey  string         `json:"content_key"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Titles      []ripSpecTitle `json:"titles"`
-}
-
-type ripSpecTitle struct {
-	ID                 int    `json:"id"`
-	Name               string `json:"name"`
-	Duration           int    `json:"duration"`
-	ContentFingerprint string `json:"content_fingerprint"`
-	Season             int    `json:"season,omitempty"`
-	Episode            int    `json:"episode,omitempty"`
-	EpisodeTitle       string `json:"episode_title,omitempty"`
-	EpisodeAirDate     string `json:"episode_air_date,omitempty"`
 }
 
 func isPlaceholderTitle(title, discLabel string) bool {
@@ -91,14 +76,19 @@ func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logge
 		timeout := time.Duration(cfg.KeyDBDownloadTimeout) * time.Second
 		catalog = keydb.NewCatalog(cfg.KeyDBPath, logger, cfg.KeyDBDownloadURL, timeout)
 	}
+	var overrideCatalog *overrides.Catalog
+	if cfg != nil {
+		overrideCatalog = overrides.NewCatalog(cfg.IdentificationOverridesPath, logger)
+	}
 	id := &Identifier{
-		store:    store,
-		cfg:      cfg,
-		tmdb:     newTMDBSearch(searcher),
-		tmdbInfo: searcher,
-		keydb:    catalog,
-		scanner:  scanner,
-		notifier: notifier,
+		store:     store,
+		cfg:       cfg,
+		tmdb:      newTMDBSearch(searcher),
+		tmdbInfo:  searcher,
+		keydb:     catalog,
+		overrides: overrideCatalog,
+		scanner:   scanner,
+		notifier:  notifier,
 	}
 	id.SetLogger(logger)
 	return id
@@ -182,11 +172,24 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
+	discID := ""
+	if scanResult != nil && scanResult.BDInfo != nil {
+		discID = strings.TrimSpace(scanResult.BDInfo.DiscID)
+	}
+	var overrideMatch *overrides.Override
+	if i.overrides != nil {
+		if match, ok, err := i.overrides.Lookup(item.DiscFingerprint, discID); err != nil {
+			logger.Warn("override lookup failed", logging.Error(err))
+		} else if ok {
+			overrideMatch = &match
+			logger.Info("identification override matched", logging.String("override_title", match.Title), logging.Int64("override_tmdb_id", match.TMDBID))
+		}
+	}
+
 	title := strings.TrimSpace(item.DiscTitle)
 	titleFromKeyDB := false
 
 	if scanResult != nil && scanResult.BDInfo != nil {
-		discID := strings.TrimSpace(scanResult.BDInfo.DiscID)
 		switch {
 		case discID == "" && i.keydb != nil:
 			logger.Info("keydb lookup skipped", logging.String("reason", "disc id missing in bdinfo"))
@@ -298,6 +301,29 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		episodeMatches  map[int]episodeAnnotation
 		matchedEpisodes []int
 	)
+	if overrideMatch != nil && overrideMatch.Season > 0 {
+		seasonNumber = overrideMatch.Season
+	}
+
+	showHintSources := []string{title}
+	if discLabel != "" {
+		showHintSources = append(showHintSources, discLabel)
+	}
+	if scanResult != nil && scanResult.BDInfo != nil {
+		if scanResult.BDInfo.DiscName != "" {
+			showHintSources = append(showHintSources, scanResult.BDInfo.DiscName)
+		}
+		if scanResult.BDInfo.VolumeIdentifier != "" {
+			showHintSources = append(showHintSources, scanResult.BDInfo.VolumeIdentifier)
+		}
+	}
+	if overrideMatch != nil && strings.TrimSpace(overrideMatch.Title) != "" {
+		showHintSources = append(showHintSources, overrideMatch.Title)
+	}
+	showHint, hintedSeason := deriveShowHint(showHintSources...)
+	if seasonNumber == 0 && hintedSeason > 0 {
+		seasonNumber = hintedSeason
+	}
 
 	if season, ok := extractSeasonNumber(title, discLabel); ok {
 		seasonNumber = season
@@ -306,25 +332,46 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		logging.String("media_hint", mediaHint.String()),
 		logging.Int("season_guess", seasonNumber))
 
+	queryInputs := []string{title, showHint}
+	if overrideMatch != nil {
+		queryInputs = append(queryInputs, overrideMatch.Title)
+	}
+	if discLabel != "" {
+		queryInputs = append(queryInputs, discLabel)
+	}
+	queries := buildQueryList(queryInputs...)
+	if len(queries) == 0 {
+		queries = []string{strings.TrimSpace(title)}
+	}
+
 	if isPlaceholderTitle(title, discLabel) {
 		logger.Info("tmdb lookup skipped for placeholder title",
 			logging.String("title", title),
 			logging.String("disc_label", discLabel))
 		i.scheduleReview(ctx, item, "Disc title placeholder; manual identification required")
 	} else {
-		response, modeUsed, err := i.performTMDBSearch(ctx, logger, title, searchOpts, mediaHint)
-		if err != nil {
-			logger.Warn("tmdb search failed", logging.String("title", title), logging.Error(err))
-			i.scheduleReview(ctx, item, "TMDB lookup failed")
-		} else {
+		var (
+			best      *tmdb.Result
+			response  *tmdb.Response
+			modeUsed  searchMode
+			searchErr error
+		)
+		for _, candidate := range queries {
+			resp, mode, err := i.performTMDBSearch(ctx, logger, candidate, searchOpts, mediaHint)
+			if err != nil {
+				searchErr = err
+				logger.Warn("tmdb search attempt failed", logging.String("query", candidate), logging.Error(err))
+				continue
+			}
+			response = resp
+			modeUsed = mode
 			if response != nil {
 				logger.Info("tmdb response received",
 					logging.Int("result_count", len(response.Results)),
 					logging.Int("search_year", searchOpts.Year),
 					logging.Int("search_runtime", searchOpts.Runtime),
-					logging.String("search_mode", string(modeUsed)))
-
-				// Log detailed results for debugging
+					logging.String("search_mode", string(modeUsed)),
+					logging.String("query", candidate))
 				for idx, result := range response.Results {
 					logger.Info("tmdb search result",
 						logging.Int("index", idx),
@@ -337,125 +384,133 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 						logging.String("media_type", result.MediaType))
 				}
 			}
-
-			best := selectBestResult(logger, title, response)
-			if best == nil {
+			best = selectBestResult(logger, candidate, response)
+			if best != nil {
+				break
+			}
+		}
+		if best == nil {
+			lastQuery := queries[len(queries)-1]
+			if searchErr != nil {
+				logger.Warn("tmdb search failed", logging.String("query", lastQuery), logging.Error(searchErr))
+				i.scheduleReview(ctx, item, "TMDB lookup failed")
+			} else {
 				logger.Warn("tmdb confidence scoring failed",
-					logging.String("query", title),
+					logging.String("query", lastQuery),
 					logging.String("reason", "No result met confidence threshold"))
 				i.scheduleReview(ctx, item, "No confident TMDB match")
-			} else {
-				identified = true
-				mediaType = strings.ToLower(strings.TrimSpace(best.MediaType))
-				if mediaType == "" {
-					switch modeUsed {
-					case searchModeTV:
-						mediaType = "tv"
-					case searchModeMulti:
-						mediaType = strings.TrimSpace(best.MediaType)
-						if mediaType == "" {
-							mediaType = "movie"
-						}
-					default:
+			}
+		} else {
+			identified = true
+			mediaType = strings.ToLower(strings.TrimSpace(best.MediaType))
+			if mediaType == "" {
+				switch modeUsed {
+				case searchModeTV:
+					mediaType = "tv"
+				case searchModeMulti:
+					mediaType = strings.TrimSpace(best.MediaType)
+					if mediaType == "" {
 						mediaType = "movie"
 					}
+				default:
+					mediaType = "movie"
 				}
-				isMovie := mediaType != "tv"
-				identifiedTitle = pickTitle(*best)
-				year = ""
-				titleWithYear := identifiedTitle
-				releaseDate := best.ReleaseDate
-				if mediaType == "tv" && strings.TrimSpace(best.FirstAirDate) != "" {
-					releaseDate = best.FirstAirDate
-				}
-				if releaseDate != "" && len(releaseDate) >= 4 {
-					year = releaseDate[:4]
-					titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
-				}
-				tmdbID = best.ID
-				if mediaType == "tv" {
-					if seasonNumber == 0 {
-						if season, ok := extractSeasonNumber(item.DiscTitle, title, discLabel); ok {
-							seasonNumber = season
-						}
+			}
+			isMovie := mediaType != "tv"
+			identifiedTitle = pickTitle(*best)
+			year = ""
+			titleWithYear := identifiedTitle
+			releaseDate := best.ReleaseDate
+			if mediaType == "tv" && strings.TrimSpace(best.FirstAirDate) != "" {
+				releaseDate = best.FirstAirDate
+			}
+			if releaseDate != "" && len(releaseDate) >= 4 {
+				year = releaseDate[:4]
+				titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
+			}
+			tmdbID = best.ID
+			if mediaType == "tv" {
+				if seasonNumber == 0 {
+					if season, ok := extractSeasonNumber(item.DiscTitle, title, discLabel); ok {
+						seasonNumber = season
 					}
-					if seasonNumber == 0 {
-						seasonNumber = 1
-					}
-					matches, episodes := i.annotateEpisodes(ctx, logger, tmdbID, seasonNumber, scanResult)
-					episodeMatches = matches
-					matchedEpisodes = episodes
 				}
-				metadata = map[string]any{
-					"id":             best.ID,
-					"title":          identifiedTitle,
-					"overview":       best.Overview,
-					"media_type":     mediaType,
-					"release_date":   releaseDate,
-					"first_air_date": best.FirstAirDate,
-					"vote_average":   best.VoteAverage,
-					"vote_count":     best.VoteCount,
-					"movie":          isMovie,
-					"season_number":  seasonNumber,
+				if seasonNumber == 0 {
+					seasonNumber = 1
 				}
-				if len(matchedEpisodes) > 0 {
-					metadata["episode_numbers"] = matchedEpisodes
-				}
-				if mediaType == "tv" {
-					metadata["show_title"] = identifiedTitle
-				}
-				var metaRecord queue.Metadata
-				if mediaType == "tv" {
-					metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, matchedEpisodes, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
-				} else {
-					metaRecord = queue.NewBasicMetadata(titleWithYear, true)
-				}
-				metadata["filename"] = metaRecord.GetFilename()
-				if mediaType == "tv" {
-					metadata["show_title"] = identifiedTitle
-				}
+				matches, episodes := i.annotateEpisodes(ctx, logger, tmdbID, seasonNumber, scanResult)
+				episodeMatches = matches
+				matchedEpisodes = episodes
+			}
+			metadata = map[string]any{
+				"id":             best.ID,
+				"title":          identifiedTitle,
+				"overview":       best.Overview,
+				"media_type":     mediaType,
+				"release_date":   releaseDate,
+				"first_air_date": best.FirstAirDate,
+				"vote_average":   best.VoteAverage,
+				"vote_count":     best.VoteCount,
+				"movie":          isMovie,
+				"season_number":  seasonNumber,
+			}
+			if len(matchedEpisodes) > 0 {
+				metadata["episode_numbers"] = matchedEpisodes
+			}
+			if mediaType == "tv" {
+				metadata["show_title"] = identifiedTitle
+			}
+			var metaRecord queue.Metadata
+			if mediaType == "tv" {
+				metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, matchedEpisodes, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
+			} else {
+				metaRecord = queue.NewBasicMetadata(titleWithYear, true)
+			}
+			metadata["filename"] = metaRecord.GetFilename()
+			if mediaType == "tv" {
+				metadata["show_title"] = identifiedTitle
+			}
 
-				encodedMetadata, encodeErr := json.Marshal(metadata)
-				if encodeErr != nil {
-					return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", encodeErr)
+			encodedMetadata, encodeErr := json.Marshal(metadata)
+			if encodeErr != nil {
+				return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", encodeErr)
+			}
+			item.MetadataJSON = string(encodedMetadata)
+			// Update DiscTitle to the proper TMDB title with season/year for subsequent stages
+			displayTitle := titleWithYear
+			if mediaType == "tv" {
+				displayTitle = fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber)
+				if strings.TrimSpace(year) != "" {
+					displayTitle = fmt.Sprintf("%s Season %02d (%s)", identifiedTitle, seasonNumber, year)
 				}
-				item.MetadataJSON = string(encodedMetadata)
-				// Update DiscTitle to the proper TMDB title with season/year for subsequent stages
-				displayTitle := titleWithYear
-				if mediaType == "tv" {
-					displayTitle = fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber)
-					if strings.TrimSpace(year) != "" {
-						displayTitle = fmt.Sprintf("%s Season %02d (%s)", identifiedTitle, seasonNumber, year)
-					}
-				}
-				item.DiscTitle = displayTitle
-				item.ProgressStage = "Identified"
-				item.ProgressPercent = 100
-				item.ProgressMessage = fmt.Sprintf("Identified as: %s", item.DiscTitle)
-				tmdbID = best.ID
-				contentKey = fmt.Sprintf("tmdb:%s:%d", mediaType, tmdbID)
+			}
+			item.DiscTitle = displayTitle
+			item.ProgressStage = "Identified"
+			item.ProgressPercent = 100
+			item.ProgressMessage = fmt.Sprintf("Identified as: %s", item.DiscTitle)
+			tmdbID = best.ID
+			contentKey = fmt.Sprintf("tmdb:%s:%d", mediaType, tmdbID)
 
-				logger.Info(
-					"disc identified",
-					logging.Int64("tmdb_id", best.ID),
-					logging.String("identified_title", identifiedTitle),
-					logging.String("media_type", strings.TrimSpace(best.MediaType)),
-				)
-				if i.notifier != nil {
-					notifyType := mediaType
-					if notifyType == "" {
-						notifyType = "unknown"
+			logger.Info(
+				"disc identified",
+				logging.Int64("tmdb_id", best.ID),
+				logging.String("identified_title", identifiedTitle),
+				logging.String("media_type", strings.TrimSpace(best.MediaType)),
+			)
+			if i.notifier != nil {
+				notifyType := mediaType
+				if notifyType == "" {
+					notifyType = "unknown"
+				}
+				if strings.TrimSpace(year) != "" {
+					payload := notifications.Payload{
+						"title":        identifiedTitle,
+						"year":         strings.TrimSpace(year),
+						"mediaType":    notifyType,
+						"displayTitle": titleWithYear,
 					}
-					if strings.TrimSpace(year) != "" {
-						payload := notifications.Payload{
-							"title":        identifiedTitle,
-							"year":         strings.TrimSpace(year),
-							"mediaType":    notifyType,
-							"displayTitle": titleWithYear,
-						}
-						if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
-							logger.Warn("identification notification failed", logging.Error(err))
-						}
+					if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
+						logger.Warn("identification notification failed", logging.Error(err))
 					}
 				}
 			}
@@ -495,10 +550,11 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	titleSpecs := make([]ripSpecTitle, 0, len(scanResult.Titles))
+	episodeSpecs := make([]ripspec.Episode, 0, len(episodeMatches))
+	titleSpecs := make([]ripspec.Title, 0, len(scanResult.Titles))
 	for _, t := range scanResult.Titles {
 		fp := discfingerprint.TitleFingerprint(t)
-		spec := ripSpecTitle{
+		spec := ripspec.Title{
 			ID:                 t.ID,
 			Name:               t.Name,
 			Duration:           t.Duration,
@@ -509,6 +565,27 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			spec.Episode = annotation.Episode
 			spec.EpisodeTitle = annotation.Title
 			spec.EpisodeAirDate = annotation.Air
+			if annotation.Season > 0 && annotation.Episode > 0 {
+				showLabel := identifiedTitle
+				if strings.TrimSpace(showLabel) == "" {
+					if value, ok := metadata["title"].(string); ok && strings.TrimSpace(value) != "" {
+						showLabel = value
+					} else {
+						showLabel = title
+					}
+				}
+				episodeSpecs = append(episodeSpecs, ripspec.Episode{
+					Key:                ripspec.EpisodeKey(annotation.Season, annotation.Episode),
+					TitleID:            t.ID,
+					Season:             annotation.Season,
+					Episode:            annotation.Episode,
+					EpisodeTitle:       annotation.Title,
+					EpisodeAirDate:     annotation.Air,
+					RuntimeSeconds:     t.Duration,
+					ContentFingerprint: fp,
+					OutputBasename:     episodeOutputBasename(showLabel, annotation.Season, annotation.Episode),
+				})
+			}
 		}
 		titleSpecs = append(titleSpecs, spec)
 		logFields := []any{
@@ -526,18 +603,19 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		logger.Info("prepared title fingerprint", logFields...)
 	}
 
-	ripSpec := ripSpecEnvelope{
+	spec := ripspec.Envelope{
 		Fingerprint: ripFingerprint,
 		ContentKey:  contentKey,
 		Metadata:    metadata,
 		Titles:      titleSpecs,
+		Episodes:    episodeSpecs,
 	}
 
-	encodedSpec, err := json.Marshal(ripSpec)
+	encodedSpec, err := spec.Encode()
 	if err != nil {
 		return services.Wrap(services.ErrTransient, "identification", "encode rip spec", "Failed to serialize rip specification", err)
 	}
-	item.RipSpecData = string(encodedSpec)
+	item.RipSpecData = encodedSpec
 
 	if !identified {
 		logger.Info(
@@ -625,10 +703,8 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 		)
 	}
 
-	var ripSpec struct {
-		Fingerprint string `json:"fingerprint"`
-	}
-	if err := json.Unmarshal([]byte(ripSpecRaw), &ripSpec); err != nil {
+	spec, err := ripspec.Parse(ripSpecRaw)
+	if err != nil {
 		logger.Error("identification validation failed", logging.String("reason", "invalid rip spec"), logging.Error(err))
 		return services.Wrap(
 			services.ErrValidation,
@@ -638,7 +714,7 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 			err,
 		)
 	}
-	if specFingerprint := strings.TrimSpace(ripSpec.Fingerprint); !strings.EqualFold(specFingerprint, fingerprint) {
+	if specFingerprint := strings.TrimSpace(spec.Fingerprint); !strings.EqualFold(specFingerprint, fingerprint) {
 		logger.Error(
 			"identification validation failed",
 			logging.String("reason", "fingerprint mismatch"),
@@ -818,6 +894,20 @@ func absInt(value int) int {
 		return -value
 	}
 	return value
+}
+
+func episodeOutputBasename(show string, season, episode int) string {
+	show = strings.TrimSpace(show)
+	if show == "" {
+		show = "Manual Import"
+	}
+	display := fmt.Sprintf("%s Season %02d", show, season)
+	meta := queue.NewTVMetadata(show, season, []int{episode}, display)
+	name := meta.GetFilename()
+	if strings.TrimSpace(name) == "" {
+		return fmt.Sprintf("%s - S%02dE%02d", strings.TrimSpace(show), season, episode)
+	}
+	return name
 }
 
 func (i *Identifier) ensureStagingSkeleton(item *queue.Item) error {

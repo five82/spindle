@@ -3,13 +3,13 @@ package ripping
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +23,7 @@ import (
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/services/makemkv"
 	"spindle/internal/stage"
@@ -92,6 +93,17 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, r.logger)
 	startedAt := time.Now()
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err != nil {
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"parse rip spec",
+			"Rip specification missing or invalid; rerun identification",
+			err,
+		)
+	}
+	hasEpisodes := len(env.Episodes) > 0
 	var target string
 	const progressInterval = time.Minute
 	var lastPersisted time.Time
@@ -231,8 +243,45 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
-	if err := r.validateRippedArtifact(ctx, item, target, startedAt); err != nil {
-		return err
+	validationTargets := []string{}
+	if strings.TrimSpace(target) != "" {
+		validationTargets = append(validationTargets, target)
+	}
+	if hasEpisodes && r.client != nil {
+		assigned := assignEpisodeAssets(&env, destDir, logger)
+		if assigned == 0 {
+			logger.Warn("episode asset mapping incomplete", logging.String("dest_dir", destDir))
+		} else {
+			paths := episodeAssetPaths(env)
+			if len(paths) > 0 {
+				validationTargets = paths
+				target = paths[0]
+			}
+			if encoded, encodeErr := env.Encode(); encodeErr == nil {
+				item.RipSpecData = encoded
+			} else {
+				logger.Warn("failed to encode rip spec after ripping", logging.Error(encodeErr))
+			}
+		}
+	}
+	visited := make(map[string]struct{}, len(validationTargets))
+	for _, path := range validationTargets {
+		clean := strings.TrimSpace(path)
+		if clean == "" {
+			continue
+		}
+		if _, ok := visited[clean]; ok {
+			continue
+		}
+		visited[clean] = struct{}{}
+		if err := r.validateRippedArtifact(ctx, item, clean, startedAt); err != nil {
+			return err
+		}
+	}
+	if len(validationTargets) == 0 {
+		if err := r.validateRippedArtifact(ctx, item, target, startedAt); err != nil {
+			return err
+		}
 	}
 
 	item.RippedFile = target
@@ -539,25 +588,6 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 
 const minPrimaryRuntimeSeconds = 20 * 60
 
-type ripSpecPayload struct {
-	Titles   []ripSpecTitle `json:"titles"`
-	Metadata struct {
-		MediaType string `json:"media_type"`
-	} `json:"metadata"`
-	ContentKey string `json:"content_key"`
-}
-
-type ripSpecTitle struct {
-	ID                 int    `json:"id"`
-	Name               string `json:"name"`
-	Duration           int    `json:"duration"`
-	ContentFingerprint string `json:"content_fingerprint"`
-	Season             int    `json:"season"`
-	Episode            int    `json:"episode"`
-	EpisodeTitle       string `json:"episode_title"`
-	EpisodeAirDate     string `json:"episode_air_date"`
-}
-
 func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 	if item == nil {
 		return nil
@@ -566,18 +596,23 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 	if raw == "" {
 		return nil
 	}
-	var payload ripSpecPayload
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+	env, err := ripspec.Parse(raw)
+	if err != nil {
 		if logger != nil {
 			logger.Debug("failed to parse rip spec", logging.Error(err))
 		}
 		return nil
 	}
-	mediaType := strings.ToLower(strings.TrimSpace(payload.Metadata.MediaType))
+	mediaType := strings.ToLower(strings.TrimSpace(fmt.Sprint(env.Metadata["media_type"])))
 	if mediaType == "tv" {
-		return nil
+		ids := uniqueEpisodeTitleIDs(env)
+		if len(ids) == 0 {
+			return nil
+		}
+		sort.Ints(ids)
+		return ids
 	}
-	if selection, ok := choosePrimaryTitle(payload.Titles); ok {
+	if selection, ok := choosePrimaryTitle(env.Titles); ok {
 		if logger != nil {
 			logger.Info(
 				"selecting primary title",
@@ -591,9 +626,9 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 	return nil
 }
 
-func choosePrimaryTitle(titles []ripSpecTitle) (ripSpecTitle, bool) {
+func choosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 	if len(titles) == 0 {
-		return ripSpecTitle{}, false
+		return ripspec.Title{}, false
 	}
 	indices := make([]int, 0, len(titles))
 	for idx := range titles {
@@ -603,7 +638,7 @@ func choosePrimaryTitle(titles []ripSpecTitle) (ripSpecTitle, bool) {
 		indices = append(indices, idx)
 	}
 	if len(indices) == 0 {
-		return ripSpecTitle{}, false
+		return ripspec.Title{}, false
 	}
 	sort.Slice(indices, func(i, j int) bool {
 		left := titles[indices[i]]
@@ -631,9 +666,107 @@ func choosePrimaryTitle(titles []ripSpecTitle) (ripSpecTitle, bool) {
 		}
 	}
 	if primaryIdx == -1 {
-		return ripSpecTitle{}, false
+		return ripspec.Title{}, false
 	}
 	return titles[primaryIdx], true
+}
+
+func uniqueEpisodeTitleIDs(env ripspec.Envelope) []int {
+	if len(env.Episodes) == 0 {
+		return nil
+	}
+	seen := make(map[int]struct{}, len(env.Episodes))
+	ids := make([]int, 0, len(env.Episodes))
+	for _, episode := range env.Episodes {
+		if episode.TitleID < 0 {
+			continue
+		}
+		if _, ok := seen[episode.TitleID]; ok {
+			continue
+		}
+		seen[episode.TitleID] = struct{}{}
+		ids = append(ids, episode.TitleID)
+	}
+	return ids
+}
+
+var titleFilePattern = regexp.MustCompile(`(?i)title_t?(\d{2,3})`)
+
+func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger) int {
+	if env == nil || len(env.Episodes) == 0 {
+		return 0
+	}
+	titleFiles := make(map[int]string)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("failed to inspect rip directory", logging.String("dir", dir), logging.Error(err))
+		}
+		return 0
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(strings.ToLower(name), ".mkv") {
+			continue
+		}
+		id, ok := parseTitleID(name)
+		if !ok {
+			continue
+		}
+		titleFiles[id] = filepath.Join(dir, name)
+	}
+	assigned := 0
+	for _, episode := range env.Episodes {
+		if episode.TitleID < 0 {
+			continue
+		}
+		path, ok := titleFiles[episode.TitleID]
+		if !ok {
+			continue
+		}
+		env.Assets.AddAsset("ripped", ripspec.Asset{EpisodeKey: episode.Key, TitleID: episode.TitleID, Path: path})
+		assigned++
+	}
+	return assigned
+}
+
+func episodeAssetPaths(env ripspec.Envelope) []string {
+	if len(env.Episodes) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(env.Episodes))
+	paths := make([]string, 0, len(env.Episodes))
+	for _, episode := range env.Episodes {
+		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
+		if !ok {
+			continue
+		}
+		clean := strings.TrimSpace(asset.Path)
+		if clean == "" {
+			continue
+		}
+		if _, dup := seen[clean]; dup {
+			continue
+		}
+		seen[clean] = struct{}{}
+		paths = append(paths, clean)
+	}
+	return paths
+}
+
+func parseTitleID(name string) (int, bool) {
+	match := titleFilePattern.FindStringSubmatch(name)
+	if len(match) != 2 {
+		return 0, false
+	}
+	value, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 func sanitizeFileName(name string) string {

@@ -110,6 +110,7 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `keydb_path` – Location where Spindle stores/reads `KEYDB.cfg` for Disc ID lookups (defaults to `~/.config/spindle/keydb/KEYDB.cfg`)
 - `keydb_download_url` – Mirror URL Spindle uses when auto-refreshing `KEYDB.cfg`
 - `keydb_download_timeout` – Download timeout (seconds) for the KEYDB refresh
+- `identification_overrides_path` – Optional JSON file containing curated disc overrides (defaults to `~/.config/spindle/overrides/identification.json`)
 
 
 ## Usage

@@ -19,6 +19,7 @@ import (
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/services/plex"
 	"spindle/internal/stage"
@@ -88,6 +89,16 @@ func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, o.logger)
 	stageStarted := time.Now()
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err != nil {
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"parse rip spec",
+			"Rip specification missing or invalid; rerun identification",
+			err,
+		)
+	}
 	logger.Info(
 		"starting organization",
 		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
@@ -147,6 +158,19 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		if err := o.store.Update(ctx, item); err != nil {
 			o.logger.Warn("failed to persist fallback metadata", logging.Error(err))
 		}
+	}
+	jobs, err := buildOrganizeJobs(env, queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle))
+	if err != nil {
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"plan tv organization",
+			"Unable to map encoded episodes to library destinations",
+			err,
+		)
+	}
+	if len(jobs) > 0 {
+		return o.organizeEpisodes(ctx, item, &env, jobs, logger, stageStarted)
 	}
 
 	o.updateProgress(ctx, item, "Organizing library structure", 20)
@@ -259,6 +283,97 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 			logging.String("destination_dir", destDir),
 		)
 	}
+	return nil
+}
+
+type organizeJob struct {
+	Episode  ripspec.Episode
+	Source   string
+	Metadata queue.Metadata
+}
+
+func buildOrganizeJobs(env ripspec.Envelope, base queue.Metadata) ([]organizeJob, error) {
+	if len(env.Episodes) == 0 {
+		return nil, nil
+	}
+	show := strings.TrimSpace(base.ShowTitle)
+	if show == "" {
+		show = strings.TrimSpace(base.Title())
+	}
+	if show == "" {
+		show = "Manual Import"
+	}
+	jobs := make([]organizeJob, 0, len(env.Episodes))
+	for _, episode := range env.Episodes {
+		asset, ok := env.Assets.FindAsset("encoded", episode.Key)
+		if !ok || strings.TrimSpace(asset.Path) == "" {
+			return nil, fmt.Errorf("missing encoded asset for %s", episode.Key)
+		}
+		display := fmt.Sprintf("%s Season %02d", show, episode.Season)
+		meta := queue.NewTVMetadata(show, episode.Season, []int{episode.Episode}, display)
+		jobs = append(jobs, organizeJob{Episode: episode, Source: asset.Path, Metadata: meta})
+	}
+	return jobs, nil
+}
+
+func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []organizeJob, logger *slog.Logger, stageStarted time.Time) error {
+	finalPaths := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		targetPath, err := o.plex.Organize(ctx, job.Source, job.Metadata)
+		if err != nil {
+			return services.Wrap(
+				services.ErrExternalTool,
+				"organizing",
+				"move to library",
+				"Failed to move media into library",
+				err,
+			)
+		}
+		if env != nil {
+			env.Assets.AddAsset("final", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: targetPath})
+		}
+		if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted); err != nil {
+			return err
+		}
+		itemCopy := *item
+		itemCopy.EncodedFile = job.Source
+		if err := o.moveGeneratedSubtitles(ctx, &itemCopy, targetPath); err != nil {
+			logger.Warn("subtitle sidecar move failed", logging.Error(err))
+		}
+		if err := o.plex.Refresh(ctx, job.Metadata); err != nil {
+			logger.Warn("plex refresh failed", logging.Error(err))
+		}
+		finalPaths = append(finalPaths, targetPath)
+	}
+	if len(finalPaths) == 0 {
+		return services.Wrap(
+			services.ErrValidation,
+			"organizing",
+			"finalize episodes",
+			"No encoded episodes were organized",
+			nil,
+		)
+	}
+	if env != nil {
+		if encoded, err := env.Encode(); err == nil {
+			item.RipSpecData = encoded
+		} else {
+			logger.Warn("failed to encode rip spec after organizing", logging.Error(err))
+		}
+	}
+	item.FinalFile = finalPaths[len(finalPaths)-1]
+	item.ProgressStage = "Organizing"
+	item.ProgressPercent = 100
+	item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
+	if o.notifier != nil {
+		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
+			"mediaTitle": strings.TrimSpace(item.DiscTitle),
+			"finalFile":  filepath.Base(item.FinalFile),
+		}); err != nil {
+			logger.Warn("organization notifier failed", logging.Error(err))
+		}
+	}
+	o.cleanupStaging(ctx, item)
 	return nil
 }
 

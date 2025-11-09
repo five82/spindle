@@ -1,41 +1,18 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
+
+	"spindle/internal/ripspec"
 )
 
-type ripSpecSummary struct {
-	ContentKey string                `json:"content_key"`
-	Metadata   map[string]any        `json:"metadata"`
-	Titles     []ripSpecTitleSummary `json:"titles"`
+func parseRipSpecSummary(raw string) (ripspec.Envelope, error) {
+	return ripspec.Parse(raw)
 }
 
-type ripSpecTitleSummary struct {
-	ID                 int    `json:"id"`
-	Name               string `json:"name"`
-	Duration           int    `json:"duration"`
-	ContentFingerprint string `json:"content_fingerprint"`
-	Season             int    `json:"season"`
-	Episode            int    `json:"episode"`
-	EpisodeTitle       string `json:"episode_title"`
-}
-
-func parseRipSpecSummary(raw string) (ripSpecSummary, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ripSpecSummary{}, nil
-	}
-	var summary ripSpecSummary
-	if err := json.Unmarshal([]byte(raw), &summary); err != nil {
-		return ripSpecSummary{}, err
-	}
-	return summary, nil
-}
-
-func printRipSpecFingerprints(out io.Writer, summary ripSpecSummary) {
+func printRipSpecFingerprints(out io.Writer, summary ripspec.Envelope) {
 	if out == nil {
 		return
 	}
@@ -74,4 +51,28 @@ func printRipSpecFingerprints(out io.Writer, summary ripSpecSummary) {
 			fp,
 		)
 	}
+	if len(summary.Episodes) > 0 {
+		fmt.Fprintln(out, "\n📺 Episode Targets:")
+		for _, episode := range summary.Episodes {
+			label := fmt.Sprintf("S%02dE%02d", episode.Season, episode.Episode)
+			if strings.TrimSpace(episode.EpisodeTitle) != "" {
+				label = fmt.Sprintf("%s – %s", label, episode.EpisodeTitle)
+			}
+			fmt.Fprintf(
+				out,
+				"  - %s | Title ID %d | Fingerprint %s\n",
+				label,
+				episode.TitleID,
+				truncateFingerprint(episode.ContentFingerprint),
+			)
+		}
+	}
+}
+
+func truncateFingerprint(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 24 {
+		return value
+	}
+	return value[:24]
 }

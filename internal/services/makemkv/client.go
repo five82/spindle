@@ -126,17 +126,18 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 	if len(candidates) > 0 {
 		best := selectPreferredMKV(candidates, titleIDs)
 		if best != nil {
-			if err := replaceFile(best.path, destPath); err != nil {
-				return "", err
-			}
-			// Remove any other newly created MKV artefacts to avoid clutter when only one title was requested.
 			if len(titleIDs) <= 1 {
+				if err := replaceFile(best.path, destPath); err != nil {
+					return "", err
+				}
 				for _, file := range candidates {
 					if file.path == best.path {
 						continue
 					}
 					_ = os.Remove(file.path)
 				}
+			} else {
+				destPath = best.path
 			}
 		}
 	}

@@ -6,10 +6,10 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
 
 1. **MakeMKV scan** – `internal/disc.Scanner` calls `makemkvcon info` to capture the title list; Spindle now computes its own fingerprint from disc metadata before the scan runs.
 2. **bd_info enrichment** – The scanner always runs `bd_info` when the binary is available, harvesting Blu-ray disc IDs, studio hints, and a cleaned disc name. It still only overwrites the MakeMKV title when the original metadata is empty or generic.
-3. **KEYDB lookup** – When `bd_info` captures an AACS Disc ID, the identifier consults the KEYDB catalog (automatically refreshed weekly) to fetch curated titles/aliases before doing any string heuristics. KEYDB is also the earliest hint that a disc is episodic (for example “Season 05 Disc 1”).
-4. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, and performs TMDB lookups using the enhanced title OR KEYDB alias data. Episode-heavy discs automatically switch to the TV lookup flow before falling back to movies or TMDB’s multi-type search endpoint.
-4. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
-5. The stage writes `MetadataJSON` and `RipSpecData` back to the queue so downstream stages can pick title selections and user-facing details.
+3. **KEYDB lookup** – When `bd_info` captures an AACS Disc ID, the identifier consults the KEYDB catalog (automatically refreshed weekly) to fetch curated titles/aliases before doing any string heuristics. The alias text is now parsed for show/season hints so TV discs can be detected even when MakeMKV emits generic titles.
+4. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, applies overrides from `identification_overrides_path`, and performs TMDB lookups using the enhanced title OR KEYDB/override hints. Episode-heavy discs automatically switch to the TV lookup flow before falling back to movies or TMDB’s multi-type search endpoint.
+5. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
+6. The stage writes `MetadataJSON` and `RipSpecData` back to the queue. The rip spec now carries per-episode descriptors plus `assets` sections that record ripped/encoded/final file paths so the downstream stages can fan out work without guessing.
 
 ## Disc Scan Details
 
@@ -23,7 +23,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
   - Provider information when available
 - Generic label detection uses patterns like `LOGICAL_VOLUME_ID`, `DVD_VIDEO`, `BLURAY`, `BD_ROM`, `UNTITLED`, `UNKNOWN DISC`, numeric-only, and short alphanumeric codes.
 - Enhanced titles from bd_info replace generic MakeMKV titles before TMDB lookup.
-- KEYDB aliases override both MakeMKV and bd_info names when a Disc ID match exists (e.g., translating `VOLUME_ID [Michael Clayton]` to “Michael Clayton”).
+- KEYDB aliases override both MakeMKV and bd_info names when a Disc ID match exists (e.g., translating `VOLUME_ID [Michael Clayton]` to “Michael Clayton”). The alias text is also parsed for show names, season numbers, and disc ordinals so the TV heuristics stay consistent.
 
 ### Title Source Priority
 
@@ -50,7 +50,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
   - Year filtering via `primary_release_year` (extracted from bd_info)
   - Runtime range filtering (±10 minutes from main title duration)
   - Studio information extraction (available for future filtering)
-- **TV heuristics**: multiple 20–30 minute titles, KEYDB aliases containing “Season XX”, or BDInfo volume identifiers matching `Sxx` all tip the search order toward `/search/tv`. If that fails, the identifier falls back to movie search and finally `/search/multi` before punting to manual review.
+- **TV heuristics**: multiple 20–30 minute titles, KEYDB/override aliases containing “Season XX”, or BDInfo volume identifiers matching `Sxx` all tip the search order toward `/search/tv`. Search queries are normalized to strip `_DISC1`, `Blu-ray`, etc. before hitting TMDB so obvious shows resolve reliably.
 - **Confidence scoring logic**:
   - Exact title matches: Accept if vote_average ≥ 2.0 (lenient for perfect matches)
   - Partial matches: Require vote_average ≥ 3.0 and minimum calculated score
@@ -63,7 +63,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
 The identifier persists two JSON blobs on the queue item:
 
 - `MetadataJSON` – enhanced TMDB fields (`id`, canonical title/name, `release_date` or `first_air_date`, overview, media_type, vote stats). TV matches also record `show_title`, `season_number`, and the list of matched `episode_numbers` so Plex filenames can include `SxxEyy` ranges.
-- `RipSpecData` – structured payload with `fingerprint`, `content_key`, `metadata`, and `titles`. Each title carries a stable `content_fingerprint` derived from duration/track metadata so episodes or bonus features can be tracked independently of the disc hash. TV entries now include per-title `season`, `episode`, `episode_title`, and `episode_air_date` values taken from the TMDB season API.
+- `RipSpecData` – structured payload with `fingerprint`, `content_key`, `metadata`, `titles`, and `episodes`. Each episode entry references a specific playlist/fingerprint, carries TMDB metadata (season/episode/title/air date), and declares the target output basename that the ripping/encoding/organizer stages follow. The `assets` section records ripped, encoded, and final file paths for every episode so recoveries can resume mid-stage.
 
 **Title Propagation**: After successful identification, `item.DiscTitle` is updated from the raw disc title to the proper TMDB value (movies keep the "Title (Year)" format, while TV discs become `Show Name Season XX (Year)`), ensuring all subsequent stages use the clean, properly formatted title.
 
@@ -101,6 +101,10 @@ Update this list when the identifier begins consuming additional config (runtime
 - Inspect cached responses by tailing the daemon logs; identifier logs the raw query and any TMDB errors at warn level.
 - For ambiguous discs, update `progress_message` via manual queue edits only after taking a snapshot; otherwise prefer retrying with better metadata.
 - If TMDB throttles requests, widen the rate limit window in code or improve the caching strategy before considering retries.
+
+## Overrides
+
+Add curated matches by editing the JSON file referenced by `identification_overrides_path` (defaults to `~/.config/spindle/overrides/identification.json`). Each entry may specify disc fingerprints or KEYDB Disc IDs plus the TMDB title/season metadata to prefer. When a disc matches an override, the identifier seeds the TMDB search with the curated show/title and trusts the override’s season guess before consulting heuristics.
 
 ## Future Notes
 

@@ -49,12 +49,14 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 2. Video files are written to `<staging_dir>/<fingerprint>/rips/`, isolating each disc’s artifacts.
 3. When the rip succeeds, the item is marked `RIPPED` and an ntfy notification fires so you know the drive is free to eject manually.
 4. If MakeMKV fails or a disc defect is detected, the item becomes `FAILED` with the error message recorded in the queue. You can retry after addressing the issue with `spindle queue retry <id>`.
+5. When the identifier mapped specific episodes, Spindle rips every annotated playlist and records the resulting file path for each episode inside the rip spec. Downstream stages read this map instead of guessing which MakeMKV title belongs to which episode.
 
 ## Stage 4: Encoding to AV1 (ENCODING -> ENCODED)
 
 1. Ripped items are picked up by the Drapto encoder. The queue shows `ENCODING` with live progress updates as Drapto emits JSON status.
-2. Encoded output is written to `<staging_dir>/<fingerprint>/encoded/`, typically ending in `_encoded.mkv`.
-3. When encoding completes, the item flips to `ENCODED`. Failures surface as `FAILED` with the Drapto error text.
+2. Episode-aware jobs are encoded one file at a time, following the rip-spec plan. Each encoded file is recorded back into the spec so recoveries can resume mid-stage. Movie discs still produce a single AV1 file as before.
+3. Encoded output is written to `<staging_dir>/<fingerprint>/encoded/`, preserving the per-episode basenames (for example `South Park - S05E01.mkv`).
+4. When encoding completes for every planned episode, the item flips to `ENCODED`. Failures surface as `FAILED` with the Drapto error text.
 
 Encoding happens in the background, so you can insert the next disc while previous titles encode.
 
@@ -71,7 +73,7 @@ You can also regenerate subtitles for historic encodes with `spindle gensubtitle
 
 ## Stage 6: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
 
-1. Spindle moves the encoded file into your library, building a Plex-friendly path based on the TMDB metadata. Movies go under `library_dir/movies`, TV episodes go under `library_dir/tv/<Show Name>/Season XX/` with filenames such as `Show Name - S05E01-E04.mkv` when multiple episodes share the disc.
+1. Spindle moves each encoded artifact into your library, building Plex-friendly paths based on the TMDB metadata. Movies still land as a single file under `library_dir/movies`, while TV discs produce one file per episode under `library_dir/tv/<Show Name>/Season XX/` (for example `Show Name - S05E01.mkv`). Episode filenames and destinations come directly from the rip spec so multi-disc sets stay consistent.
 2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Plex.
 3. Plex scans are triggered for the appropriate library section (Movies vs TV Shows) when credentials are supplied.
 4. The final status `COMPLETED` means the media is on disk and Plex has been asked to rescan. Items flagged for review land in your configured `review_dir`; otherwise titles appear in the main library. An ntfy notification confirms the import when the library update succeeds.

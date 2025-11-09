@@ -36,6 +36,7 @@ type Config struct {
 	KeyDBPath                     string   `toml:"keydb_path"`
 	KeyDBDownloadURL              string   `toml:"keydb_download_url"`
 	KeyDBDownloadTimeout          int      `toml:"keydb_download_timeout"`
+	IdentificationOverridesPath   string   `toml:"identification_overrides_path"`
 	MakeMKVRipTimeout             int      `toml:"makemkv_rip_timeout"`
 	MakeMKVInfoTimeout            int      `toml:"makemkv_info_timeout"`
 	NtfyRequestTimeout            int      `toml:"ntfy_request_timeout"`
@@ -60,65 +61,67 @@ type Config struct {
 }
 
 const (
-	defaultStagingDir                = "~/.local/share/spindle/staging"
-	defaultLibraryDir                = "~/library"
-	defaultLogDir                    = "~/.local/share/spindle/logs"
-	defaultReviewDir                 = "~/review"
-	defaultOpticalDrive              = "/dev/sr0"
-	defaultMoviesDir                 = "movies"
-	defaultTVDir                     = "tv"
-	defaultTMDBLanguage              = "en-US"
-	defaultTMDBBaseURL               = "https://api.themoviedb.org/3"
-	defaultLogFormat                 = "console"
-	defaultLogLevel                  = "info"
-	defaultWorkflowHeartbeatInterval = 15
-	defaultWorkflowHeartbeatTimeout  = 120
-	defaultAPIBind                   = "127.0.0.1:7487"
-	defaultDraptoPreset              = 4
-	defaultPlexAuthPath              = "~/.config/spindle/plex_auth.json"
-	defaultDraptoLogDir              = "~/.local/share/spindle/logs/drapto"
-	defaultKeyDBPath                 = "~/.config/spindle/keydb/KEYDB.cfg"
-	defaultKeyDBDownloadURL          = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
-	defaultKeyDBDownloadTimeout      = 300
-	defaultOpenSubtitlesUserAgent    = "Spindle/dev"
+	defaultStagingDir                  = "~/.local/share/spindle/staging"
+	defaultLibraryDir                  = "~/library"
+	defaultLogDir                      = "~/.local/share/spindle/logs"
+	defaultReviewDir                   = "~/review"
+	defaultOpticalDrive                = "/dev/sr0"
+	defaultMoviesDir                   = "movies"
+	defaultTVDir                       = "tv"
+	defaultTMDBLanguage                = "en-US"
+	defaultTMDBBaseURL                 = "https://api.themoviedb.org/3"
+	defaultLogFormat                   = "console"
+	defaultLogLevel                    = "info"
+	defaultWorkflowHeartbeatInterval   = 15
+	defaultWorkflowHeartbeatTimeout    = 120
+	defaultAPIBind                     = "127.0.0.1:7487"
+	defaultDraptoPreset                = 4
+	defaultPlexAuthPath                = "~/.config/spindle/plex_auth.json"
+	defaultDraptoLogDir                = "~/.local/share/spindle/logs/drapto"
+	defaultKeyDBPath                   = "~/.config/spindle/keydb/KEYDB.cfg"
+	defaultKeyDBDownloadURL            = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
+	defaultKeyDBDownloadTimeout        = 300
+	defaultIdentificationOverridesPath = "~/.config/spindle/overrides/identification.json"
+	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
 )
 
 // Default returns a Config populated with repository defaults.
 func Default() Config {
 	return Config{
-		StagingDir:                defaultStagingDir,
-		LibraryDir:                defaultLibraryDir,
-		LogDir:                    defaultLogDir,
-		DraptoLogDir:              defaultDraptoLogDir,
-		ReviewDir:                 defaultReviewDir,
-		OpticalDrive:              defaultOpticalDrive,
-		APIBind:                   defaultAPIBind,
-		TMDBLanguage:              defaultTMDBLanguage,
-		TMDBBaseURL:               defaultTMDBBaseURL,
-		TMDBConfidenceThreshold:   0.8,
-		MoviesDir:                 defaultMoviesDir,
-		TVDir:                     defaultTVDir,
-		PlexLinkEnabled:           true,
-		MoviesLibrary:             "Movies",
-		TVLibrary:                 "TV Shows",
-		PlexAuthPath:              defaultPlexAuthPath,
-		KeyDBPath:                 defaultKeyDBPath,
-		KeyDBDownloadURL:          defaultKeyDBDownloadURL,
-		KeyDBDownloadTimeout:      defaultKeyDBDownloadTimeout,
-		MakeMKVRipTimeout:         3600,
-		MakeMKVInfoTimeout:        300,
-		NtfyRequestTimeout:        10,
-		DiscMonitorTimeout:        5,
-		QueuePollInterval:         5,
-		ErrorRetryInterval:        10,
-		WorkflowHeartbeatInterval: defaultWorkflowHeartbeatInterval,
-		WorkflowHeartbeatTimeout:  defaultWorkflowHeartbeatTimeout,
-		LogFormat:                 defaultLogFormat,
-		LogLevel:                  defaultLogLevel,
-		DraptoPreset:              defaultDraptoPreset,
-		WhisperXVADMethod:         "silero",
-		OpenSubtitlesLanguages:    []string{"en"},
-		OpenSubtitlesUserAgent:    defaultOpenSubtitlesUserAgent,
+		StagingDir:                  defaultStagingDir,
+		LibraryDir:                  defaultLibraryDir,
+		LogDir:                      defaultLogDir,
+		DraptoLogDir:                defaultDraptoLogDir,
+		ReviewDir:                   defaultReviewDir,
+		OpticalDrive:                defaultOpticalDrive,
+		APIBind:                     defaultAPIBind,
+		TMDBLanguage:                defaultTMDBLanguage,
+		TMDBBaseURL:                 defaultTMDBBaseURL,
+		TMDBConfidenceThreshold:     0.8,
+		MoviesDir:                   defaultMoviesDir,
+		TVDir:                       defaultTVDir,
+		PlexLinkEnabled:             true,
+		MoviesLibrary:               "Movies",
+		TVLibrary:                   "TV Shows",
+		PlexAuthPath:                defaultPlexAuthPath,
+		KeyDBPath:                   defaultKeyDBPath,
+		KeyDBDownloadURL:            defaultKeyDBDownloadURL,
+		KeyDBDownloadTimeout:        defaultKeyDBDownloadTimeout,
+		IdentificationOverridesPath: defaultIdentificationOverridesPath,
+		MakeMKVRipTimeout:           3600,
+		MakeMKVInfoTimeout:          300,
+		NtfyRequestTimeout:          10,
+		DiscMonitorTimeout:          5,
+		QueuePollInterval:           5,
+		ErrorRetryInterval:          10,
+		WorkflowHeartbeatInterval:   defaultWorkflowHeartbeatInterval,
+		WorkflowHeartbeatTimeout:    defaultWorkflowHeartbeatTimeout,
+		LogFormat:                   defaultLogFormat,
+		LogLevel:                    defaultLogLevel,
+		DraptoPreset:                defaultDraptoPreset,
+		WhisperXVADMethod:           "silero",
+		OpenSubtitlesLanguages:      []string{"en"},
+		OpenSubtitlesUserAgent:      defaultOpenSubtitlesUserAgent,
 	}
 }
 
@@ -219,6 +222,12 @@ func (c *Config) normalize() error {
 	}
 	if c.KeyDBPath, err = expandPath(c.KeyDBPath); err != nil {
 		return fmt.Errorf("keydb_path: %w", err)
+	}
+	if strings.TrimSpace(c.IdentificationOverridesPath) == "" {
+		c.IdentificationOverridesPath = defaultIdentificationOverridesPath
+	}
+	if c.IdentificationOverridesPath, err = expandPath(c.IdentificationOverridesPath); err != nil {
+		return fmt.Errorf("identification_overrides_path: %w", err)
 	}
 	if strings.TrimSpace(c.KeyDBDownloadURL) == "" {
 		c.KeyDBDownloadURL = defaultKeyDBDownloadURL
@@ -528,6 +537,7 @@ tmdb_confidence_threshold = 0.8                      # Match confidence (0.0-1.0
 keydb_path = "~/.config/spindle/keydb/KEYDB.cfg"     # Optional KEYDB.cfg for Disc ID lookups (leave empty to disable)
 keydb_download_url = "http://fvonline-db.bplaced.net/export/keydb_eng.zip" # Mirror for automatic KEYDB refreshes
 keydb_download_timeout = 1500                        # Download timeout in seconds when refreshing KEYDB
+identification_overrides_path = "~/.config/spindle/overrides/identification.json" # Optional JSON containing curated disc overrides
 
 # ============================================================================
 # ENCODING

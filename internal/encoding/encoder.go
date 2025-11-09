@@ -19,6 +19,7 @@ import (
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/services/drapto"
 	"spindle/internal/stage"
@@ -38,6 +39,166 @@ const (
 )
 
 var encodeProbe = ffprobe.Inspect
+
+type encodeJob struct {
+	Episode ripspec.Episode
+	Source  string
+	Output  string
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func buildEncodeJobs(env ripspec.Envelope, encodedDir string) ([]encodeJob, error) {
+	if len(env.Episodes) == 0 {
+		return nil, nil
+	}
+	jobs := make([]encodeJob, 0, len(env.Episodes))
+	for _, episode := range env.Episodes {
+		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
+		if !ok || strings.TrimSpace(asset.Path) == "" {
+			return nil, fmt.Errorf("missing ripped asset for %s", episode.Key)
+		}
+		base := strings.TrimSpace(episode.OutputBasename)
+		if base == "" {
+			base = fmt.Sprintf("episode-%s", strings.ToLower(episode.Key))
+		}
+		output := filepath.Join(encodedDir, base+".mkv")
+		jobs = append(jobs, encodeJob{Episode: episode, Source: asset.Path, Output: output})
+	}
+	return jobs, nil
+}
+
+func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath, encodedDir, label string, logger *slog.Logger) (string, error) {
+	if e.client == nil {
+		return "", nil
+	}
+	logger.Info(
+		"launching drapto encode",
+		logging.String("command", e.draptoCommand(sourcePath, encodedDir)),
+		logging.String("input", sourcePath),
+		logging.String("job", strings.TrimSpace(label)),
+	)
+	progress := func(update drapto.ProgressUpdate) {
+		copy := *item
+		if update.Stage != "" {
+			copy.ProgressStage = update.Stage
+		}
+		if update.Percent >= 0 {
+			copy.ProgressPercent = update.Percent
+		}
+		if message := progressMessageText(update); message != "" {
+			copy.ProgressMessage = message
+		}
+		if err := e.store.UpdateProgress(ctx, &copy); err != nil {
+			logger.Warn("failed to persist encoding progress", logging.Error(err))
+		}
+		*item = copy
+	}
+	var (
+		lastStage  string
+		lastMsg    string
+		lastBucket = -1
+	)
+	progressLogger := func(update drapto.ProgressUpdate) {
+		stage := strings.TrimSpace(update.Stage)
+		raw := strings.TrimSpace(update.Message)
+		summary := progressMessageText(update)
+		log := false
+		if stage != "" && stage != lastStage {
+			lastStage = stage
+			log = true
+			lastBucket = -1
+		}
+		if raw != "" && raw != lastMsg {
+			lastMsg = raw
+			log = true
+		}
+		if update.Percent >= 5 {
+			bucket := int(update.Percent / 5)
+			if bucket > lastBucket {
+				lastBucket = bucket
+				log = true
+			}
+		}
+		if update.Percent >= 100 && lastBucket < 20 {
+			lastBucket = 20
+			log = true
+		}
+		if log {
+			attrs := []logging.Attr{logging.String("job", label)}
+			if update.Percent >= 0 {
+				attrs = append(attrs, logging.Float64("progress_percent", update.Percent))
+			}
+			if stage != "" {
+				attrs = append(attrs, logging.String("progress_stage", stage))
+			}
+			if summary != "" {
+				attrs = append(attrs, logging.String("progress_message", summary))
+			}
+			logger.Info("drapto progress", logging.Args(attrs...)...)
+		}
+		progress(update)
+	}
+	path, err := e.client.Encode(ctx, sourcePath, encodedDir, progressLogger)
+	if err != nil {
+		e.updateDraptoLogPointer(logger)
+		return "", services.Wrap(
+			services.ErrExternalTool,
+			"encoding",
+			"drapto encode",
+			"Drapto encoding failed; inspect Drapto logs and confirm the binary path in config",
+			err,
+		)
+	}
+	e.updateDraptoLogPointer(logger)
+	return path, nil
+}
+
+func ensureEncodedOutput(tempPath, desiredPath, sourcePath string) (string, error) {
+	desiredPath = strings.TrimSpace(desiredPath)
+	if desiredPath == "" {
+		desiredPath = tempPath
+	}
+	if tempPath != "" {
+		if strings.EqualFold(tempPath, desiredPath) {
+			return tempPath, nil
+		}
+		if err := os.Rename(tempPath, desiredPath); err != nil {
+			return "", services.Wrap(
+				services.ErrTransient,
+				"encoding",
+				"finalize output",
+				"Failed to move encoded artifact into destination",
+				err,
+			)
+		}
+		return desiredPath, nil
+	}
+	if err := copyFile(sourcePath, desiredPath); err != nil {
+		return "", services.Wrap(
+			services.ErrTransient,
+			"encoding",
+			"stage placeholder",
+			"Failed to stage encoded artifact",
+			err,
+		)
+	}
+	return desiredPath, nil
+}
+
+func deriveEncodedFilename(rippedPath string) string {
+	base := filepath.Base(rippedPath)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	if stem == "" {
+		stem = "encoded"
+	}
+	return stem + ".mkv"
+}
 
 // NewEncoder constructs the encoding handler.
 func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Encoder {
@@ -85,8 +246,20 @@ func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
 	startedAt := time.Now()
+
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err != nil {
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"parse rip spec",
+			"Rip specification missing or invalid; rerun identification",
+			err,
+		)
+	}
+
 	logger.Info("starting encoding", logging.String("ripped_file", strings.TrimSpace(item.RippedFile)))
-	if item.RippedFile == "" {
+	if strings.TrimSpace(item.RippedFile) == "" {
 		return services.Wrap(
 			services.ErrValidation,
 			"encoding",
@@ -112,6 +285,17 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	logger.Info("prepared encoding directory", logging.String("encoded_dir", encodedDir))
 
+	jobs, err := buildEncodeJobs(env, encodedDir)
+	if err != nil {
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"plan encode jobs",
+			"Unable to map ripped episodes to encoding jobs",
+			err,
+		)
+	}
+
 	if draptoLogDir := e.draptoLogDir(); draptoLogDir != "" {
 		if err := os.MkdirAll(draptoLogDir, 0o755); err != nil {
 			return services.Wrap(
@@ -125,142 +309,78 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		logger.Info("prepared drapto log directory", logging.String("drapto_log_dir", draptoLogDir))
 	}
 
-	var encodedPath string
-	if e.client != nil {
-		base := filepath.Base(item.RippedFile)
-		stem := strings.TrimSuffix(base, filepath.Ext(base))
-		if stem == "" {
-			stem = base
+	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
+	if len(jobs) > 0 {
+		for _, job := range jobs {
+			label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
+			path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, logger)
+			if err != nil {
+				return err
+			}
+			finalPath, err := ensureEncodedOutput(path, job.Output, job.Source)
+			if err != nil {
+				return err
+			}
+			env.Assets.AddAsset("encoded", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: finalPath})
+			encodedPaths = append(encodedPaths, finalPath)
 		}
-		expectedOutput := filepath.Join(encodedDir, stem+".mkv")
-		logger.Info(
-			"launching drapto encode",
-			logging.String("command", e.draptoCommand(item.RippedFile, encodedDir)),
-			logging.String("input", item.RippedFile),
-			logging.String("expected_output", expectedOutput),
-		)
-
-		progress := func(update drapto.ProgressUpdate) {
-			copy := *item
-			if update.Stage != "" {
-				copy.ProgressStage = update.Stage
-			}
-			if update.Percent >= 0 {
-				copy.ProgressPercent = update.Percent
-			}
-			if message := progressMessageText(update); message != "" {
-				copy.ProgressMessage = message
-			}
-			if err := e.store.UpdateProgress(ctx, &copy); err != nil {
-				logger.Warn("failed to persist encoding progress", logging.Error(err))
-			}
-			*item = copy
+	} else {
+		label := strings.TrimSpace(item.DiscTitle)
+		if label == "" {
+			label = "Disc"
 		}
-
-		var (
-			lastLoggedStage  string
-			lastLoggedRawMsg string
-			lastLoggedBucket = -1
-		)
-		progressLogger := func(update drapto.ProgressUpdate) {
-			stage := strings.TrimSpace(update.Stage)
-			rawMsg := strings.TrimSpace(update.Message)
-			summary := progressMessageText(update)
-			shouldLog := false
-			if stage != "" && stage != lastLoggedStage {
-				lastLoggedStage = stage
-				shouldLog = true
-				lastLoggedBucket = -1
-			}
-			if rawMsg != "" && rawMsg != lastLoggedRawMsg {
-				lastLoggedRawMsg = rawMsg
-				shouldLog = true
-			}
-			if update.Percent >= 1 && lastLoggedBucket < 0 {
-				lastLoggedBucket = 0
-				shouldLog = true
-			}
-			if update.Percent >= 5 {
-				bucket := int(update.Percent / 5)
-				if bucket > lastLoggedBucket {
-					lastLoggedBucket = bucket
-					shouldLog = true
-				}
-			}
-			if update.Percent >= 100 && lastLoggedBucket < 20 {
-				lastLoggedBucket = 20
-				shouldLog = true
-			}
-			if shouldLog {
-				attrs := []logging.Attr{}
-				if update.Percent >= 0 {
-					attrs = append(attrs, logging.Float64("progress_percent", update.Percent))
-				}
-				if stage != "" {
-					attrs = append(attrs, logging.String("progress_stage", stage))
-				}
-				if summary != "" {
-					attrs = append(attrs, logging.String("progress_message", summary))
-				}
-				if update.ETA > 0 {
-					attrs = append(attrs, logging.Duration("progress_eta", update.ETA))
-				}
-				if update.Speed > 0 {
-					attrs = append(attrs, logging.Float64("speed_x", update.Speed))
-				}
-				if update.FPS > 0 {
-					attrs = append(attrs, logging.Float64("fps", update.FPS))
-				}
-				if update.Bitrate != "" {
-					attrs = append(attrs, logging.String("bitrate", update.Bitrate))
-				}
-				logger.Info("drapto progress", logging.Args(attrs...)...)
-			}
-			progress(update)
-		}
-		path, err := e.client.Encode(ctx, item.RippedFile, encodedDir, progressLogger)
+		path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, logger)
 		if err != nil {
-			e.updateDraptoLogPointer(logger)
-			return services.Wrap(
-				services.ErrExternalTool,
-				"encoding",
-				"drapto encode",
-				"Drapto encoding failed; inspect Drapto logs and confirm the binary path in config",
-				err,
-			)
+			return err
 		}
-		encodedPath = path
-		e.updateDraptoLogPointer(logger)
-		logger.Info("drapto encode completed", logging.String("encoded_file", encodedPath))
+		finalTarget := filepath.Join(encodedDir, deriveEncodedFilename(item.RippedFile))
+		finalPath, err := ensureEncodedOutput(path, finalTarget, item.RippedFile)
+		if err != nil {
+			return err
+		}
+		encodedPaths = append(encodedPaths, finalPath)
 	}
 
-	if encodedPath == "" {
-		base := filepath.Base(item.RippedFile)
-		encodedPath = filepath.Join(encodedDir, strings.TrimSuffix(base, filepath.Ext(base))+".encoded.mkv")
-		if err := copyFile(item.RippedFile, encodedPath); err != nil {
-			return services.Wrap(services.ErrTransient, "encoding", "copy ripped file", "Failed to stage encoded artifact", err)
-		}
-		logger.Info("created placeholder encoded copy", logging.String("encoded_file", encodedPath))
-	}
-	if err := e.validateEncodedArtifact(ctx, encodedPath, startedAt); err != nil {
-		return err
+	if len(encodedPaths) == 0 {
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"locate encoded outputs",
+			"No encoded artifacts were produced",
+			nil,
+		)
 	}
 
-	item.EncodedFile = encodedPath
+	for _, path := range encodedPaths {
+		if err := e.validateEncodedArtifact(ctx, path, startedAt); err != nil {
+			return err
+		}
+	}
+
+	if encoded, err := env.Encode(); err == nil {
+		item.RipSpecData = encoded
+	} else {
+		logger.Warn("failed to encode rip spec after encoding", logging.Error(err))
+	}
+
+	item.EncodedFile = encodedPaths[0]
 	item.ProgressStage = "Encoded"
 	item.ProgressPercent = 100
-	item.ProgressMessage = "Encoded placeholder artifact"
-	if e.client != nil {
+	if len(encodedPaths) > 1 {
+		item.ProgressMessage = fmt.Sprintf("Encoding completed (%d episodes)", len(encodedPaths))
+	} else if e.client != nil {
 		item.ProgressMessage = "Encoding completed"
-		if e.notifier != nil {
-			if err := e.notifier.Publish(ctx, notifications.EventEncodingCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
-				logger.Warn("encoding notification failed", logging.Error(err))
-			}
+	} else {
+		item.ProgressMessage = "Encoded placeholder artifact"
+	}
+	if e.client != nil && e.notifier != nil {
+		if err := e.notifier.Publish(ctx, notifications.EventEncodingCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
+			logger.Warn("encoding notification failed", logging.Error(err))
 		}
 	}
 	logger.Info(
 		"encoding stage completed",
-		logging.String("encoded_file", encodedPath),
+		logging.String("encoded_file", item.EncodedFile),
 		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
 	)
 
