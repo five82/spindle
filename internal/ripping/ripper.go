@@ -18,6 +18,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/contentid"
 	"spindle/internal/logging"
 	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
@@ -31,11 +32,12 @@ import (
 
 // Ripper manages the MakeMKV ripping workflow.
 type Ripper struct {
-	store    *queue.Store
-	cfg      *config.Config
-	logger   *slog.Logger
-	client   makemkv.Ripper
-	notifier notifications.Service
+	store          *queue.Store
+	cfg            *config.Config
+	logger         *slog.Logger
+	client         makemkv.Ripper
+	notifier       notifications.Service
+	contentMatcher *contentid.Matcher
 }
 
 const (
@@ -55,7 +57,11 @@ func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Rip
 
 // NewRipperWithDependencies allows injecting all collaborators (used in tests).
 func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper, notifier notifications.Service) *Ripper {
-	rip := &Ripper{store: store, cfg: cfg, client: client, notifier: notifier}
+	var matcher *contentid.Matcher
+	if cfg != nil {
+		matcher = contentid.NewMatcher(cfg, logger)
+	}
+	rip := &Ripper{store: store, cfg: cfg, client: client, notifier: notifier, contentMatcher: matcher}
 	rip.SetLogger(logger)
 	return rip
 }
@@ -247,21 +253,32 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	if strings.TrimSpace(target) != "" {
 		validationTargets = append(validationTargets, target)
 	}
+	specDirty := false
 	if hasEpisodes && r.client != nil {
 		assigned := assignEpisodeAssets(&env, destDir, logger)
 		if assigned == 0 {
 			logger.Warn("episode asset mapping incomplete", logging.String("dest_dir", destDir))
 		} else {
+			specDirty = true
+			if r.contentMatcher != nil {
+				if updated, err := r.contentMatcher.Match(ctx, item, &env); err != nil {
+					logger.Warn("episode content identification failed", logging.Error(err))
+				} else if updated {
+					specDirty = true
+				}
+			}
 			paths := episodeAssetPaths(env)
 			if len(paths) > 0 {
 				validationTargets = paths
 				target = paths[0]
 			}
-			if encoded, encodeErr := env.Encode(); encodeErr == nil {
-				item.RipSpecData = encoded
-			} else {
-				logger.Warn("failed to encode rip spec after ripping", logging.Error(encodeErr))
-			}
+		}
+	}
+	if specDirty {
+		if encoded, encodeErr := env.Encode(); encodeErr == nil {
+			item.RipSpecData = encoded
+		} else {
+			logger.Warn("failed to encode rip spec after ripping", logging.Error(encodeErr))
 		}
 	}
 	visited := make(map[string]struct{}, len(validationTargets))

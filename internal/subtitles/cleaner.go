@@ -102,6 +102,27 @@ func normalizeBlock(block string) string {
 	return strings.Join(lines, "\n")
 }
 
+// PlainTextFromSRT extracts the dialogue lines from an SRT payload.
+func PlainTextFromSRT(data []byte) string {
+	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+	blocks := splitBlocks(normalized)
+	if len(blocks) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		textLines := subtitleTextLines(strings.Split(block, "\n"))
+		if len(textLines) == 0 {
+			continue
+		}
+		lines = append(lines, textLines...)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
 func isNumeric(value string) bool {
 	value = strings.TrimSpace(value)
 	if value == "" {

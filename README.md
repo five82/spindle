@@ -101,7 +101,7 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `whisperx_cuda_enabled` (optional) – Set `true` to run WhisperX with CUDA (requires CUDA 12.8+ and cuDNN 9.1); leave `false` to fall back to CPU
 - `whisperx_vad_method` (optional) – Voice activity detector for WhisperX; `silero` (default) runs fully offline, `pyannote` offers tighter alignment but needs a Hugging Face token. Spindle validates the token before each run and drops back to `silero` if Hugging Face rejects it (check the subtitle logs for the authentication message).
 - `whisperx_hf_token` (optional) – Hugging Face access token required when using `whisperx_vad_method = "pyannote"`; create one at https://huggingface.co/settings/tokens. The subtitle stage logs whether authentication succeeded or if it fell back to `silero`.
-- `opensubtitles_enabled` (optional) – When true, Spindle downloads subtitles from OpenSubtitles before falling back to WhisperX transcription.
+- `opensubtitles_enabled` (optional) – When true, Spindle downloads subtitles from OpenSubtitles before falling back to WhisperX transcription. This also enables the post-rip content-ID pass that compares WhisperX transcripts from each ripped episode against OpenSubtitles references to lock in the correct episode order.
 - `opensubtitles_api_key` (optional) – API key for OpenSubtitles. Required when `opensubtitles_enabled = true`. Create one from your OpenSubtitles profile under **API consumers**.
 - `opensubtitles_user_agent` (optional) – Custom user agent string registered with OpenSubtitles. Required when `opensubtitles_enabled = true`.
 - `opensubtitles_languages` (optional) – Preferred subtitle languages (ISO 639-1 codes, for example `['en','es']`). Used for OpenSubtitles searches.
@@ -172,6 +172,7 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → E
 - `FAILED`: unrecoverable issue (inspect logs / notifications)
 - `REVIEW`: manual intervention required. When Spindle cannot identify a disc, it still rips/encodes the content, drops the final file into the `review_dir` (default `~/review`) with a unique name (for example `unidentified-1.mkv`), and marks the queue item complete so the pipeline keeps moving.
 - Rip completion is marked at `RIPPED`; you'll receive a notification and can eject the disc manually while encoding/organization continue in the background
+- When OpenSubtitles + WhisperX are available, the ripper immediately transcribes every ripped episode and compares it to OpenSubtitles references so discs with shuffled playlists still produce the correct SxxEyy assignments before encoding starts.
 - Notifications (ntfy) fire when discs are detected, a disc is identified with title/year, rips finish, encodes complete, the library import succeeds, and whenever an error occurs
 - Read `docs/workflow.md` for a detailed walkthrough
 

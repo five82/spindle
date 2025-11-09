@@ -50,6 +50,7 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 3. When the rip succeeds, the item is marked `RIPPED` and an ntfy notification fires so you know the drive is free to eject manually.
 4. If MakeMKV fails or a disc defect is detected, the item becomes `FAILED` with the error message recorded in the queue. You can retry after addressing the issue with `spindle queue retry <id>`.
 5. When the identifier mapped specific episodes, Spindle rips every annotated playlist and records the resulting file path for each episode inside the rip spec. Downstream stages read this map instead of guessing which MakeMKV title belongs to which episode.
+6. If OpenSubtitles integration is enabled, the ripper immediately runs the WhisperX/OpenSubtitles matcher: every ripped episode is transcribed, matching subtitles are fetched for the inferred season/disc range, and cosine similarity locks in the true episode numbers. The rip spec and `MetadataJSON` are updated before encoding begins so Plex filenames stay accurate even when discs shuffle the playlist order.
 
 ## Stage 4: Encoding to AV1 (ENCODING -> ENCODED)
 

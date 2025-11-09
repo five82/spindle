@@ -10,6 +10,7 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
 4. **Identification stage** – `internal/identification.Identifier` enriches queue items, checks for duplicates, applies overrides from `identification_overrides_path`, and performs TMDB lookups using the enhanced title OR KEYDB/override hints. Episode-heavy discs automatically switch to the TV lookup flow before falling back to movies or TMDB’s multi-type search endpoint.
 5. **TMDB client** – `internal/identification/tmdb` wraps the REST API with simple rate limiting and caching to avoid duplicate requests during a run.
 6. The stage writes `MetadataJSON` and `RipSpecData` back to the queue. The rip spec now carries per-episode descriptors plus `assets` sections that record ripped/encoded/final file paths so the downstream stages can fan out work without guessing.
+7. **Post-rip content ID** – After ripping maps MakeMKV titles to physical files, the ripper uses WhisperX + OpenSubtitles to re-verify episode order. Each ripped episode gets a WhisperX transcript, the matcher downloads candidate subtitles for the inferred season/disc range, and cosine similarity assigns the true `SxxEyy`. The rip spec and queue metadata are updated before encoding begins.
 
 ## Disc Scan Details
 
@@ -57,6 +58,15 @@ Reference notes for how the Go daemon classifies discs and prepares metadata so 
   - Score formula: title_match + (vote_average/10) + (vote_count/1000)
 - The first candidate above the confidence threshold wins. The chosen title is written into `MetadataJSON`, the DiscTitle is updated to "Title (Year)" format, and echoed in the progress message ("Identified as: …").
 - **Enhanced logging**: All TMDB queries, responses, and confidence scoring are logged for transparency.
+
+## WhisperX + OpenSubtitles Content ID
+
+- **Trigger point**: Right after MakeMKV finishes and `assignEpisodeAssets` maps playlist IDs to ripped files. The matcher only runs when OpenSubtitles credentials are configured—otherwise the ripper logs that the post-rip verification was skipped.
+- **Transcript generation**: Each ripped episode goes through the existing subtitle service with `forceAI=true` so WhisperX produces JSON/SRT output specific to that playlist. The raw dialogue is converted into cosine-similarity fingerprints (lowercase tokens, de-duplicated stop words).
+- **Reference download**: Using the TMDB show ID, inferred season, and (when available) disc number, the matcher fetches OpenSubtitles listings for the candidate episode numbers. Cleaned SRT payloads are normalized to the same fingerprint format.
+- **Matching**: A `ripped × reference` similarity matrix is sorted by score and greedily assigned with a configurable floor (currently 0.58). Successful matches rewrite the rip spec’s `titles[*].season/episode` fields, update each `episodes[*]` entry (title, air date, output basename), and refresh `metadata.episode_numbers`.
+- **Diagnostics**: The rip spec’s `attributes.content_id_matches` array captures the episode key, playlist ID, TMDB episode number, and similarity score. This is surfaced by `spindle rip-spec` and other tooling for auditing.
+- **Failure tolerance**: Network hiccups or missing dependencies never fail the ripping stage. The matcher returns the error for logging, but the pipeline continues with the heuristic episode ordering so operators can still intervene manually.
 
 ## Output Shape
 

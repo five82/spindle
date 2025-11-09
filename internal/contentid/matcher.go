@@ -1,0 +1,569 @@
+package contentid
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"log/slog"
+
+	"spindle/internal/config"
+	"spindle/internal/identification/tmdb"
+	"spindle/internal/logging"
+	"spindle/internal/queue"
+	"spindle/internal/ripspec"
+	"spindle/internal/subtitles"
+	"spindle/internal/subtitles/opensubtitles"
+)
+
+// Matcher coordinates WhisperX transcription and OpenSubtitles comparison to
+// derive per-episode mappings for ripped discs.
+type Matcher struct {
+	cfg       *config.Config
+	logger    *slog.Logger
+	subs      subtitleGenerator
+	openSubs  openSubtitlesClient
+	tmdb      seasonFetcher
+	languages []string
+}
+
+type subtitleGenerator interface {
+	Generate(ctx context.Context, req subtitles.GenerateRequest) (subtitles.GenerateResult, error)
+}
+
+type openSubtitlesClient interface {
+	Search(ctx context.Context, req opensubtitles.SearchRequest) (opensubtitles.SearchResponse, error)
+	Download(ctx context.Context, fileID int64, opts opensubtitles.DownloadOptions) (opensubtitles.DownloadResult, error)
+}
+
+type seasonFetcher interface {
+	GetSeasonDetails(ctx context.Context, tmdbID int64, season int) (*tmdb.SeasonDetails, error)
+}
+
+// Option customises the Matcher.
+type Option func(*Matcher)
+
+// WithSubtitleGenerator overrides the WhisperX executor (primarily for tests).
+func WithSubtitleGenerator(gen subtitleGenerator) Option {
+	return func(m *Matcher) {
+		if gen != nil {
+			m.subs = gen
+		}
+	}
+}
+
+// WithOpenSubtitlesClient injects a custom OpenSubtitles client.
+func WithOpenSubtitlesClient(client openSubtitlesClient) Option {
+	return func(m *Matcher) {
+		if client != nil {
+			m.openSubs = client
+		}
+	}
+}
+
+// WithSeasonFetcher overrides the TMDB season lookup client.
+func WithSeasonFetcher(fetcher seasonFetcher) Option {
+	return func(m *Matcher) {
+		if fetcher != nil {
+			m.tmdb = fetcher
+		}
+	}
+}
+
+// WithLanguages overrides the preferred subtitle languages.
+func WithLanguages(langs []string) Option {
+	return func(m *Matcher) {
+		if len(langs) > 0 {
+			m.languages = append([]string(nil), langs...)
+		}
+	}
+}
+
+// NewMatcher constructs a content identification matcher bound to the supplied configuration.
+func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matcher {
+	contentLogger := logger
+	if contentLogger != nil {
+		contentLogger = contentLogger.With(logging.String("component", "contentid"))
+	} else {
+		contentLogger = logging.NewNop().With(logging.String("component", "contentid"))
+	}
+	m := &Matcher{
+		cfg:    cfg,
+		logger: contentLogger,
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	if m.languages == nil {
+		if cfg != nil && len(cfg.OpenSubtitlesLanguages) > 0 {
+			m.languages = append([]string(nil), cfg.OpenSubtitlesLanguages...)
+		} else {
+			m.languages = []string{"en"}
+		}
+	}
+	if m.subs == nil && cfg != nil {
+		m.subs = subtitles.NewService(cfg, contentLogger)
+	}
+	if m.openSubs == nil && cfg != nil && cfg.OpenSubtitlesEnabled {
+		client, err := opensubtitles.New(opensubtitles.Config{
+			APIKey:    cfg.OpenSubtitlesAPIKey,
+			UserAgent: cfg.OpenSubtitlesUserAgent,
+			UserToken: cfg.OpenSubtitlesUserToken,
+		})
+		if err != nil {
+			contentLogger.Warn("opensubtitles client unavailable", logging.Error(err))
+		} else {
+			m.openSubs = client
+		}
+	}
+	if m.tmdb == nil && cfg != nil {
+		client, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
+		if err != nil {
+			contentLogger.Warn("tmdb client unavailable", logging.Error(err))
+		} else {
+			m.tmdb = client
+		}
+	}
+	return m
+}
+
+// Match analyzes ripped episode assets with WhisperX, compares them to OpenSubtitles,
+// and updates the rip specification with definitive episode mappings when possible.
+// The queue item metadata is updated in-place when matches are found.
+func (m *Matcher) Match(ctx context.Context, item *queue.Item, env *ripspec.Envelope) (bool, error) {
+	if m == nil || env == nil || len(env.Episodes) == 0 {
+		return false, nil
+	}
+	if err := m.ensureReady(); err != nil {
+		return false, err
+	}
+	ctxData, err := m.buildContext(item, env)
+	if err != nil {
+		return false, err
+	}
+	if ctxData.Season <= 0 {
+		return false, errors.New("season number unavailable for content id")
+	}
+	seasonDetails, err := m.tmdb.GetSeasonDetails(ctx, ctxData.SubtitleCtx.TMDBID, ctxData.Season)
+	if err != nil {
+		return false, fmt.Errorf("fetch tmdb season: %w", err)
+	}
+	if seasonDetails == nil || len(seasonDetails.Episodes) == 0 {
+		return false, errors.New("tmdb season returned no episodes")
+	}
+	stagingRoot := item.StagingRoot(m.cfg.StagingDir)
+	if stagingRoot == "" {
+		return false, errors.New("staging root unavailable for content id")
+	}
+	ripPrints, err := m.generateEpisodeFingerprints(ctx, ctxData, env, stagingRoot)
+	if err != nil {
+		return false, err
+	}
+	if len(ripPrints) == 0 {
+		return false, errors.New("whisperx produced no transcripts for content id")
+	}
+	candidateEpisodes := deriveCandidateEpisodes(env, seasonDetails, ctxData.DiscNumber)
+	refPrints, err := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, candidateEpisodes)
+	if err != nil {
+		return false, err
+	}
+	if len(refPrints) == 0 {
+		return false, errors.New("no opensubtitles references downloaded for comparison")
+	}
+	matches := resolveEpisodeMatches(ripPrints, refPrints)
+	if len(matches) == 0 {
+		return false, errors.New("failed to correlate ripped episodes with opensubtitles references")
+	}
+	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches)
+	m.attachMatchAttributes(env, matches)
+	m.updateMetadata(item, matches, ctxData.Season)
+	return true, nil
+}
+
+func (m *Matcher) ensureReady() error {
+	if m.cfg == nil {
+		return errors.New("configuration unavailable")
+	}
+	if m.subs == nil {
+		return errors.New("subtitle generator unavailable")
+	}
+	if m.openSubs == nil {
+		return errors.New("opensubtitles client unavailable")
+	}
+	if m.tmdb == nil {
+		return errors.New("tmdb client unavailable")
+	}
+	return nil
+}
+
+type episodeContext struct {
+	ShowTitle   string
+	Season      int
+	DiscNumber  int
+	Metadata    queue.Metadata
+	SubtitleCtx subtitles.SubtitleContext
+}
+
+func (m *Matcher) buildContext(item *queue.Item, env *ripspec.Envelope) (episodeContext, error) {
+	var ctx episodeContext
+	if item == nil {
+		return ctx, errors.New("queue item unavailable")
+	}
+	ctx.Metadata = queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
+	ctx.ShowTitle = strings.TrimSpace(ctx.Metadata.ShowTitle)
+	if ctx.ShowTitle == "" {
+		ctx.ShowTitle = strings.TrimSpace(ctx.Metadata.Title())
+	}
+	if ctx.ShowTitle == "" {
+		ctx.ShowTitle = strings.TrimSpace(item.DiscTitle)
+	}
+	ctx.Season = ctx.Metadata.SeasonNumber
+	if ctx.Season <= 0 && env != nil {
+		for _, episode := range env.Episodes {
+			if episode.Season > 0 {
+				ctx.Season = episode.Season
+				break
+			}
+		}
+	}
+	if ctx.Season <= 0 {
+		ctx.Season = 1
+	}
+	ctx.SubtitleCtx = subtitles.BuildSubtitleContext(item)
+	if ctx.SubtitleCtx.MediaType == "" {
+		ctx.SubtitleCtx.MediaType = "tv"
+	}
+	if ctx.SubtitleCtx.TMDBID == 0 {
+		return ctx, errors.New("tmdb id missing from metadata")
+	}
+	ctx.SubtitleCtx.MediaType = "episode"
+	if ctx.SubtitleCtx.Title == "" {
+		ctx.SubtitleCtx.Title = ctx.ShowTitle
+	}
+	if env != nil && len(env.Attributes) > 0 {
+		if disc, ok := asInt(env.Attributes["disc_number"]); ok {
+			ctx.DiscNumber = disc
+		}
+	}
+	return ctx, nil
+}
+
+func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeContext, env *ripspec.Envelope, stagingRoot string) ([]ripFingerprint, error) {
+	episodeDir := filepath.Join(stagingRoot, "contentid")
+	if err := os.MkdirAll(episodeDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create contentid dir: %w", err)
+	}
+	fingerprints := make([]ripFingerprint, 0, len(env.Episodes))
+	for _, episode := range env.Episodes {
+		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
+		if !ok || strings.TrimSpace(asset.Path) == "" {
+			continue
+		}
+		workDir := filepath.Join(episodeDir, episode.Key)
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create workdir %s: %w", workDir, err)
+		}
+		language := info.SubtitleCtx.Language
+		if language == "" && len(m.languages) > 0 {
+			language = m.languages[0]
+		}
+		req := subtitles.GenerateRequest{
+			SourcePath: asset.Path,
+			WorkDir:    workDir,
+			OutputDir:  workDir,
+			BaseName:   fmt.Sprintf("%s-contentid", episode.Key),
+			Language:   language,
+			Context:    info.SubtitleCtx,
+			ForceAI:    true,
+		}
+		req.Context.Title = fmt.Sprintf("%s %s", info.ShowTitle, strings.ToUpper(episode.Key))
+		result, err := m.subs.Generate(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("whisperx generate for %s: %w", episode.Key, err)
+		}
+		text, err := loadPlainText(result.SubtitlePath)
+		if err != nil {
+			return nil, fmt.Errorf("read whisperx subtitle %s: %w", result.SubtitlePath, err)
+		}
+		fp := newFingerprint(text)
+		if fp == nil {
+			return nil, fmt.Errorf("empty whisperx transcript for %s", episode.Key)
+		}
+		fingerprints = append(fingerprints, ripFingerprint{
+			EpisodeKey: episode.Key,
+			TitleID:    episode.TitleID,
+			Path:       result.SubtitlePath,
+			Vector:     fp,
+		})
+		m.logger.Info("content id whisperx transcript ready",
+			logging.String("episode_key", episode.Key),
+			logging.String("subtitle_path", result.SubtitlePath),
+			logging.Int("token_count", len(fp.tokens)),
+		)
+	}
+	return fingerprints, nil
+}
+
+func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeContext, season *tmdb.SeasonDetails, candidates []int) ([]referenceFingerprint, error) {
+	references := make([]referenceFingerprint, 0, len(candidates))
+	seen := make(map[int]struct{}, len(candidates))
+	for _, num := range candidates {
+		if _, ok := seen[num]; ok {
+			continue
+		}
+		seen[num] = struct{}{}
+		episodeData, ok := findEpisodeByNumber(season, num)
+		if !ok {
+			continue
+		}
+		searchReq := opensubtitles.SearchRequest{
+			TMDBID:    info.SubtitleCtx.TMDBID,
+			Query:     info.ShowTitle,
+			Languages: append([]string(nil), m.languages...),
+			Season:    season.SeasonNumber,
+			Episode:   episodeData.EpisodeNumber,
+			MediaType: "episode",
+			Year:      info.SubtitleCtx.Year,
+		}
+		resp, err := m.openSubs.Search(ctx, searchReq)
+		if err != nil {
+			return nil, fmt.Errorf("opensubtitles search s%02de%02d: %w", season.SeasonNumber, num, err)
+		}
+		if len(resp.Subtitles) == 0 {
+			m.logger.Warn("opensubtitles returned no candidates",
+				logging.Int("season", season.SeasonNumber),
+				logging.Int("episode", num),
+			)
+			continue
+		}
+		candidate := resp.Subtitles[0]
+		payload, err := m.openSubs.Download(ctx, candidate.FileID, opensubtitles.DownloadOptions{Format: "srt"})
+		if err != nil {
+			return nil, fmt.Errorf("download opensubtitles file %d: %w", candidate.FileID, err)
+		}
+		text, err := normalizeSubtitlePayload(payload.Data)
+		if err != nil {
+			return nil, fmt.Errorf("normalize opensubtitles payload: %w", err)
+		}
+		fp := newFingerprint(text)
+		if fp == nil {
+			return nil, fmt.Errorf("empty opensubtitles transcript for S%02dE%02d", season.SeasonNumber, num)
+		}
+		references = append(references, referenceFingerprint{
+			EpisodeNumber: episodeData.EpisodeNumber,
+			Title:         strings.TrimSpace(episodeData.Name),
+			Vector:        fp,
+		})
+		m.logger.Info("opensubtitles reference downloaded",
+			logging.Int("season", episodeData.SeasonNumber),
+			logging.Int("episode", episodeData.EpisodeNumber),
+			logging.String("title", episodeData.Name),
+			logging.Int("token_count", len(fp.tokens)),
+		)
+		// Respect API rate limits.
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return references, nil
+}
+
+func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails, showTitle string, matches []matchResult) {
+	if env == nil || season == nil || len(matches) == 0 {
+		return
+	}
+	titleByID := make(map[int]*ripspec.Title, len(env.Titles))
+	for idx := range env.Titles {
+		titleByID[env.Titles[idx].ID] = &env.Titles[idx]
+	}
+	episodeByNumber := make(map[int]tmdb.Episode, len(season.Episodes))
+	for _, e := range season.Episodes {
+		episodeByNumber[e.EpisodeNumber] = e
+	}
+	for _, match := range matches {
+		target, ok := episodeByNumber[match.TargetEpisode]
+		if !ok {
+			continue
+		}
+		if episode := env.EpisodeByKey(match.EpisodeKey); episode != nil {
+			episode.Season = target.SeasonNumber
+			episode.Episode = target.EpisodeNumber
+			episode.EpisodeTitle = strings.TrimSpace(target.Name)
+			episode.EpisodeAirDate = strings.TrimSpace(target.AirDate)
+			episode.OutputBasename = buildEpisodeBasename(showTitle, target.SeasonNumber, target.EpisodeNumber)
+		}
+		if title := titleByID[match.TitleID]; title != nil {
+			title.Season = target.SeasonNumber
+			title.Episode = target.EpisodeNumber
+			title.EpisodeTitle = strings.TrimSpace(target.Name)
+			title.EpisodeAirDate = strings.TrimSpace(target.AirDate)
+		}
+		m.logger.Info("content id episode matched",
+			logging.String("episode_key", match.EpisodeKey),
+			logging.Int("title_id", match.TitleID),
+			logging.Int("matched_episode", target.EpisodeNumber),
+			logging.Float64("score", match.Score),
+			logging.String("episode_title", strings.TrimSpace(target.Name)),
+		)
+	}
+}
+
+func (m *Matcher) attachMatchAttributes(env *ripspec.Envelope, matches []matchResult) {
+	if env == nil || len(matches) == 0 {
+		return
+	}
+	if env.Attributes == nil {
+		env.Attributes = make(map[string]any)
+	}
+	payload := make([]map[string]any, 0, len(matches))
+	for _, match := range matches {
+		payload = append(payload, map[string]any{
+			"episode_key":     match.EpisodeKey,
+			"title_id":        match.TitleID,
+			"matched_episode": match.TargetEpisode,
+			"score":           match.Score,
+		})
+	}
+	env.Attributes["content_id_matches"] = payload
+	env.Attributes["content_id_method"] = "whisperx_opensubtitles"
+}
+
+func (m *Matcher) updateMetadata(item *queue.Item, matches []matchResult, season int) {
+	if item == nil || len(matches) == 0 {
+		return
+	}
+	episodes := make([]int, 0, len(matches))
+	for _, match := range matches {
+		if match.TargetEpisode > 0 {
+			episodes = append(episodes, match.TargetEpisode)
+		}
+	}
+	if len(episodes) == 0 {
+		return
+	}
+	sort.Ints(episodes)
+	episodes = uniqueInts(episodes)
+	var payload map[string]any
+	if strings.TrimSpace(item.MetadataJSON) != "" {
+		if err := json.Unmarshal([]byte(item.MetadataJSON), &payload); err != nil {
+			payload = make(map[string]any)
+		}
+	} else {
+		payload = make(map[string]any)
+	}
+	payload["episode_numbers"] = episodes
+	if season > 0 {
+		payload["season_number"] = season
+	}
+	payload["media_type"] = "tv"
+	data, err := json.Marshal(payload)
+	if err != nil {
+		m.logger.Warn("failed to encode metadata after content id", logging.Error(err))
+		return
+	}
+	item.MetadataJSON = string(data)
+}
+
+func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, discNumber int) []int {
+	set := make(map[int]struct{}, len(env.Episodes)*2)
+	for _, episode := range env.Episodes {
+		if episode.Episode > 0 {
+			set[episode.Episode] = struct{}{}
+		}
+	}
+	totalEpisodes := len(season.Episodes)
+	if discNumber > 0 && totalEpisodes > 0 {
+		block := len(env.Episodes)
+		if block == 0 {
+			block = 4
+		}
+		start := (discNumber - 1) * block
+		if start >= totalEpisodes {
+			start = totalEpisodes - block
+		}
+		if start < 0 {
+			start = 0
+		}
+		for idx := start; idx < totalEpisodes && idx < start+block; idx++ {
+			set[season.Episodes[idx].EpisodeNumber] = struct{}{}
+		}
+	}
+	if len(set) == 0 {
+		for _, episode := range season.Episodes {
+			set[episode.EpisodeNumber] = struct{}{}
+		}
+	}
+	list := make([]int, 0, len(set))
+	for number := range set {
+		list = append(list, number)
+	}
+	sort.Ints(list)
+	return list
+}
+
+func findEpisodeByNumber(season *tmdb.SeasonDetails, number int) (tmdb.Episode, bool) {
+	if season == nil {
+		return tmdb.Episode{}, false
+	}
+	for _, episode := range season.Episodes {
+		if episode.EpisodeNumber == number {
+			return episode, true
+		}
+	}
+	return tmdb.Episode{}, false
+}
+
+func buildEpisodeBasename(show string, season, episode int) string {
+	meta := queue.NewTVMetadata(show, season, []int{episode}, fmt.Sprintf("%s Season %02d", show, season))
+	name := meta.GetFilename()
+	if strings.TrimSpace(name) == "" {
+		return fmt.Sprintf("%s - S%02dE%02d", strings.TrimSpace(show), season, episode)
+	}
+	return name
+}
+
+func uniqueInts(numbers []int) []int {
+	if len(numbers) == 0 {
+		return nil
+	}
+	result := []int{numbers[0]}
+	for _, value := range numbers[1:] {
+		if value != result[len(result)-1] {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func asInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int(v), true
+	case float32:
+		return int(v), true
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return int(i), true
+		}
+	case string:
+		if value := strings.TrimSpace(v); value != "" {
+			if i, err := strconv.Atoi(value); err == nil {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
