@@ -17,6 +17,8 @@ type SubtitleContext struct {
 	Year       string
 	ContentKey string
 	Language   string
+	Season     int
+	Episode    int
 }
 
 // HasTMDBID reports whether a TMDB identifier is available.
@@ -59,12 +61,21 @@ func BuildSubtitleContext(item *queue.Item) SubtitleContext {
 	} else {
 		ctx.MediaType = "tv"
 	}
+	if meta.SeasonNumber > 0 {
+		ctx.Season = meta.SeasonNumber
+	}
+	if len(meta.EpisodeNumbers) > 0 {
+		ctx.Episode = meta.EpisodeNumbers[0]
+	}
 
 	parseMetadataJSON(item.MetadataJSON, &ctx)
 	parseRipSpecData(item.RipSpecData, &ctx)
 
 	if ctx.Year == "" {
 		ctx.Year = extractYearFromTitle(ctx.Title)
+	}
+	if ctx.Season <= 0 {
+		ctx.Season = 1
 	}
 
 	return ctx
@@ -103,6 +114,20 @@ func parseMetadataJSON(raw string, ctx *SubtitleContext) {
 			ctx.Year = extractYear(value)
 		} else if value, ok := payload["year"].(string); ok {
 			ctx.Year = extractYear(value)
+		}
+	}
+	if ctx.Season <= 0 {
+		if value := asInt(payload["season_number"]); value > 0 {
+			ctx.Season = int(value)
+		}
+	}
+	if ctx.Episode <= 0 {
+		if episodes, ok := payload["episode_numbers"].([]any); ok && len(episodes) > 0 {
+			if value := asInt(episodes[0]); value > 0 {
+				ctx.Episode = int(value)
+			}
+		} else if value := asInt(payload["episode_number"]); value > 0 {
+			ctx.Episode = int(value)
 		}
 	}
 }

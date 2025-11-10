@@ -16,6 +16,7 @@ type Config struct {
 	StagingDir                    string   `toml:"staging_dir"`
 	LibraryDir                    string   `toml:"library_dir"`
 	LogDir                        string   `toml:"log_dir"`
+	OpenSubtitlesCacheDir         string   `toml:"opensubtitles_cache_dir"`
 	DraptoLogDir                  string   `toml:"drapto_log_dir"`
 	ReviewDir                     string   `toml:"review_dir"`
 	OpticalDrive                  string   `toml:"optical_drive"`
@@ -64,6 +65,7 @@ const (
 	defaultStagingDir                  = "~/.local/share/spindle/staging"
 	defaultLibraryDir                  = "~/library"
 	defaultLogDir                      = "~/.local/share/spindle/logs"
+	defaultOpenSubtitlesCacheDir       = "~/.local/share/spindle/cache/opensubtitles"
 	defaultReviewDir                   = "~/review"
 	defaultOpticalDrive                = "/dev/sr0"
 	defaultMoviesDir                   = "movies"
@@ -91,6 +93,7 @@ func Default() Config {
 		StagingDir:                  defaultStagingDir,
 		LibraryDir:                  defaultLibraryDir,
 		LogDir:                      defaultLogDir,
+		OpenSubtitlesCacheDir:       defaultOpenSubtitlesCacheDir,
 		DraptoLogDir:                defaultDraptoLogDir,
 		ReviewDir:                   defaultReviewDir,
 		OpticalDrive:                defaultOpticalDrive,
@@ -210,6 +213,12 @@ func (c *Config) normalize() error {
 	}
 	if c.LogDir, err = expandPath(c.LogDir); err != nil {
 		return fmt.Errorf("log_dir: %w", err)
+	}
+	if strings.TrimSpace(c.OpenSubtitlesCacheDir) == "" {
+		c.OpenSubtitlesCacheDir = defaultOpenSubtitlesCacheDir
+	}
+	if c.OpenSubtitlesCacheDir, err = expandPath(c.OpenSubtitlesCacheDir); err != nil {
+		return fmt.Errorf("opensubtitles_cache_dir: %w", err)
 	}
 	if c.ReviewDir, err = expandPath(c.ReviewDir); err != nil {
 		return fmt.Errorf("review_dir: %w", err)

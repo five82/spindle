@@ -73,12 +73,13 @@ func TestSearchBuildsQueryAndParsesResponse(t *testing.T) {
 	}
 
 	resp, err := client.Search(context.Background(), SearchRequest{
-		TMDBID:    12345,
-		IMDBID:    "tt7654321",
-		Languages: []string{"en", "es"},
-		Season:    1,
-		Episode:   2,
-		Year:      "2024",
+		TMDBID:       67890,
+		ParentTMDBID: 12345,
+		IMDBID:       "tt7654321",
+		Languages:    []string{"en", "es"},
+		Season:       1,
+		Episode:      2,
+		Year:         "2024",
 	})
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
@@ -105,7 +106,8 @@ func TestSearchBuildsQueryAndParsesResponse(t *testing.T) {
 
 	values, _ := url.ParseQuery(captured.URL.RawQuery)
 	expect := map[string]string{
-		"tmdb_id":        "12345",
+		"tmdb_id":        "67890",
+		"parent_tmdb_id": "12345",
 		"imdb_id":        "7654321",
 		"languages":      "en,es",
 		"season_number":  "1",

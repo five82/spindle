@@ -52,6 +52,21 @@ func (s *Service) ensureOpenSubtitlesReady() error {
 			return
 		}
 		s.openSubs = client
+		if s.openSubsCache == nil {
+			dir := strings.TrimSpace(s.config.OpenSubtitlesCacheDir)
+			if dir != "" {
+				cache, err := opensubtitles.NewCache(dir, s.logger)
+				if err != nil {
+					if s.logger != nil {
+						s.logger.Warn("opensubtitles cache unavailable",
+							logging.Error(err),
+						)
+					}
+				} else {
+					s.openSubsCache = cache
+				}
+			}
+		}
 		if s.logger != nil && !s.openSubsReadyLogged {
 			userAgent := strings.TrimSpace(s.config.OpenSubtitlesUserAgent)
 			tokenPresent := strings.TrimSpace(s.config.OpenSubtitlesUserToken) != ""
@@ -79,12 +94,16 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 	}
 
 	searchReq := opensubtitles.SearchRequest{
-		TMDBID:    req.Context.TMDBID,
 		IMDBID:    req.Context.IMDBID,
 		Query:     strings.TrimSpace(req.Context.Title),
 		Languages: append([]string(nil), req.Languages...),
 		MediaType: mediaTypeForContext(req.Context),
 		Year:      strings.TrimSpace(req.Context.Year),
+	}
+	if req.Context.IsMovie() {
+		searchReq.TMDBID = req.Context.TMDBID
+	} else {
+		searchReq.ParentTMDBID = req.Context.TMDBID
 	}
 
 	resp, err := s.openSubs.Search(ctx, searchReq)
@@ -199,11 +218,62 @@ func mediaTypeForContext(ctx SubtitleContext) string {
 	return "episode"
 }
 
+func (s *Service) fetchOpenSubtitlesPayload(ctx context.Context, req GenerateRequest, candidate opensubtitles.Subtitle) (opensubtitles.DownloadResult, error) {
+	if s.openSubs == nil {
+		return opensubtitles.DownloadResult{}, errors.New("opensubtitles client unavailable")
+	}
+	if s.openSubsCache != nil && candidate.FileID > 0 {
+		if cached, ok, err := s.openSubsCache.Load(candidate.FileID); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("opensubtitles cache load failed", logging.Error(err))
+			}
+		} else if ok {
+			if s.logger != nil {
+				s.logger.Info("opensubtitles cache hit",
+					logging.Int64("file_id", candidate.FileID),
+					logging.String("language", cached.Entry.Language),
+				)
+			}
+			return cached.DownloadResult(), nil
+		}
+	}
+	payload, err := s.openSubs.Download(ctx, candidate.FileID, opensubtitles.DownloadOptions{Format: "srt"})
+	if err != nil {
+		return opensubtitles.DownloadResult{}, err
+	}
+	s.storeOpenSubtitlesPayload(candidate, payload, req)
+	return payload, nil
+}
+
+func (s *Service) storeOpenSubtitlesPayload(candidate opensubtitles.Subtitle, payload opensubtitles.DownloadResult, req GenerateRequest) {
+	if s.openSubsCache == nil || candidate.FileID <= 0 || len(payload.Data) == 0 {
+		return
+	}
+	entry := opensubtitles.CacheEntry{
+		FileID:       candidate.FileID,
+		Language:     payload.Language,
+		FileName:     payload.FileName,
+		DownloadURL:  payload.DownloadURL,
+		FeatureTitle: candidate.FeatureTitle,
+		FeatureYear:  candidate.FeatureYear,
+		Season:       req.Context.Season,
+		Episode:      req.Context.Episode,
+	}
+	if req.Context.IsMovie() {
+		entry.TMDBID = req.Context.TMDBID
+	} else {
+		entry.ParentTMDBID = req.Context.TMDBID
+	}
+	if _, err := s.openSubsCache.Store(entry, payload.Data); err != nil && s.logger != nil {
+		s.logger.Warn("opensubtitles cache store failed", logging.Error(err))
+	}
+}
+
 func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generationPlan, req GenerateRequest, candidate opensubtitles.Subtitle) (GenerateResult, error) {
 	if plan == nil {
 		return GenerateResult{}, errors.New("generation plan not initialized")
 	}
-	payload, err := s.openSubs.Download(ctx, candidate.FileID, opensubtitles.DownloadOptions{Format: "srt"})
+	payload, err := s.fetchOpenSubtitlesPayload(ctx, req, candidate)
 	if err != nil {
 		return GenerateResult{}, err
 	}

@@ -32,7 +32,15 @@ type Matcher struct {
 	openSubs  openSubtitlesClient
 	tmdb      seasonFetcher
 	languages []string
+	cache     *opensubtitles.Cache
 }
+
+const (
+	openSubtitlesMinInterval    = time.Second
+	openSubtitlesMaxRateRetries = 4
+	openSubtitlesInitialBackoff = 2 * time.Second
+	openSubtitlesMaxBackoff     = 12 * time.Second
+)
 
 type subtitleGenerator interface {
 	Generate(ctx context.Context, req subtitles.GenerateRequest) (subtitles.GenerateResult, error)
@@ -121,6 +129,17 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 			contentLogger.Warn("opensubtitles client unavailable", logging.Error(err))
 		} else {
 			m.openSubs = client
+		}
+	}
+	if m.cache == nil && cfg != nil {
+		dir := strings.TrimSpace(cfg.OpenSubtitlesCacheDir)
+		if dir != "" {
+			cache, err := opensubtitles.NewCache(dir, contentLogger)
+			if err != nil {
+				contentLogger.Warn("opensubtitles cache unavailable", logging.Error(err))
+			} else {
+				m.cache = cache
+			}
 		}
 	}
 	if m.tmdb == nil && cfg != nil {
@@ -314,6 +333,7 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeContext, season *tmdb.SeasonDetails, candidates []int) ([]referenceFingerprint, error) {
 	references := make([]referenceFingerprint, 0, len(candidates))
 	seen := make(map[int]struct{}, len(candidates))
+	var lastAPICall time.Time
 	for _, num := range candidates {
 		if _, ok := seen[num]; ok {
 			continue
@@ -323,30 +343,108 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		if !ok {
 			continue
 		}
+		episodeYear := strings.TrimSpace(episodeData.AirDate)
+		if len(episodeYear) >= 4 {
+			episodeYear = episodeYear[:4]
+		} else {
+			episodeYear = ""
+		}
 		searchReq := opensubtitles.SearchRequest{
-			TMDBID:    info.SubtitleCtx.TMDBID,
-			Query:     info.ShowTitle,
-			Languages: append([]string(nil), m.languages...),
-			Season:    season.SeasonNumber,
-			Episode:   episodeData.EpisodeNumber,
-			MediaType: "episode",
-			Year:      info.SubtitleCtx.Year,
+			ParentTMDBID: info.SubtitleCtx.TMDBID,
+			Query:        info.ShowTitle,
+			Languages:    append([]string(nil), m.languages...),
+			Season:       season.SeasonNumber,
+			Episode:      episodeData.EpisodeNumber,
+			MediaType:    "episode",
+			Year:         episodeYear,
 		}
-		resp, err := m.openSubs.Search(ctx, searchReq)
-		if err != nil {
-			return nil, fmt.Errorf("opensubtitles search s%02de%02d: %w", season.SeasonNumber, num, err)
+		searchVariants := episodeSearchVariants(searchReq, info.ShowTitle, season.SeasonNumber, episodeData.EpisodeNumber, episodeData.ID)
+		var (
+			resp       opensubtitles.SearchResponse
+			selected   opensubtitles.SearchRequest
+			searchErr  error
+			foundMatch bool
+		)
+		for attempt, variant := range searchVariants {
+			searchErr = m.invokeOpenSubtitles(ctx, &lastAPICall, func() error {
+				var err error
+				resp, err = m.openSubs.Search(ctx, variant)
+				return err
+			})
+			if searchErr != nil {
+				return nil, fmt.Errorf("opensubtitles search s%02de%02d attempt %d: %w", season.SeasonNumber, num, attempt+1, searchErr)
+			}
+			if len(resp.Subtitles) == 0 {
+				if m.logger != nil {
+					m.logger.Warn("opensubtitles returned no candidates",
+						logging.Int("season", season.SeasonNumber),
+						logging.Int("episode", num),
+						logging.Int("attempt", attempt+1),
+					)
+				}
+				continue
+			}
+			selected = variant
+			foundMatch = true
+			if attempt > 0 && m.logger != nil {
+				m.logger.Info("opensubtitles fallback search succeeded",
+					logging.Int("season", season.SeasonNumber),
+					logging.Int("episode", num),
+					logging.Int("attempt", attempt+1),
+				)
+			}
+			break
 		}
-		if len(resp.Subtitles) == 0 {
-			m.logger.Warn("opensubtitles returned no candidates",
-				logging.Int("season", season.SeasonNumber),
-				logging.Int("episode", num),
-			)
+		if !foundMatch {
 			continue
 		}
 		candidate := resp.Subtitles[0]
-		payload, err := m.openSubs.Download(ctx, candidate.FileID, opensubtitles.DownloadOptions{Format: "srt"})
-		if err != nil {
-			return nil, fmt.Errorf("download opensubtitles file %d: %w", candidate.FileID, err)
+		var (
+			payload   opensubtitles.DownloadResult
+			cachePath string
+			cacheHit  bool
+		)
+		if m.cache != nil && candidate.FileID > 0 {
+			if cached, ok, err := m.cache.Load(candidate.FileID); err != nil {
+				m.logger.Warn("opensubtitles cache load failed", logging.Error(err))
+			} else if ok {
+				payload = cached.DownloadResult()
+				cachePath = cached.Path
+				cacheHit = true
+				m.logger.Info("opensubtitles cache hit",
+					logging.Int("season", season.SeasonNumber),
+					logging.Int("episode", episodeData.EpisodeNumber),
+					logging.Int64("file_id", candidate.FileID),
+				)
+			}
+		}
+		if !cacheHit {
+			if err := m.invokeOpenSubtitles(ctx, &lastAPICall, func() error {
+				var err error
+				payload, err = m.openSubs.Download(ctx, candidate.FileID, opensubtitles.DownloadOptions{Format: "srt"})
+				return err
+			}); err != nil {
+				return nil, fmt.Errorf("download opensubtitles file %d: %w", candidate.FileID, err)
+			}
+			if m.cache != nil && len(payload.Data) > 0 {
+				entry := opensubtitles.CacheEntry{
+					FileID:       candidate.FileID,
+					Language:     payload.Language,
+					FileName:     payload.FileName,
+					DownloadURL:  payload.DownloadURL,
+					TMDBID:       selected.TMDBID,
+					ParentTMDBID: selected.ParentTMDBID,
+					Season:       season.SeasonNumber,
+					Episode:      episodeData.EpisodeNumber,
+					FeatureTitle: candidate.FeatureTitle,
+					FeatureYear:  candidate.FeatureYear,
+				}
+				if path, err := m.cache.Store(entry, payload.Data); err != nil {
+					m.logger.Warn("opensubtitles cache store failed", logging.Error(err))
+				} else {
+					cachePath = path
+				}
+			}
 		}
 		text, err := normalizeSubtitlePayload(payload.Data)
 		if err != nil {
@@ -360,6 +458,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			EpisodeNumber: episodeData.EpisodeNumber,
 			Title:         strings.TrimSpace(episodeData.Name),
 			Vector:        fp,
+			FileID:        candidate.FileID,
+			Language:      payload.Language,
+			CachePath:     cachePath,
 		})
 		m.logger.Info("opensubtitles reference downloaded",
 			logging.Int("season", episodeData.SeasonNumber),
@@ -367,14 +468,136 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			logging.String("title", episodeData.Name),
 			logging.Int("token_count", len(fp.tokens)),
 		)
-		// Respect API rate limits.
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(250 * time.Millisecond):
-		}
 	}
 	return references, nil
+}
+
+func episodeSearchVariants(base opensubtitles.SearchRequest, showTitle string, seasonNumber, episodeNumber int, episodeTMDBID int64) []opensubtitles.SearchRequest {
+	variants := make([]opensubtitles.SearchRequest, 0, 3)
+
+	primary := base
+	primary.TMDBID = 0
+	variants = append(variants, primary)
+
+	if episodeTMDBID > 0 {
+		episodeVariant := base
+		episodeVariant.ParentTMDBID = 0
+		episodeVariant.TMDBID = episodeTMDBID
+		variants = append(variants, episodeVariant)
+	}
+
+	queryVariant := base
+	queryVariant.ParentTMDBID = 0
+	queryVariant.TMDBID = 0
+	title := strings.TrimSpace(showTitle)
+	if title != "" {
+		queryVariant.Query = fmt.Sprintf("%s S%02dE%02d", title, seasonNumber, episodeNumber)
+	} else {
+		queryVariant.Query = fmt.Sprintf("S%02dE%02d", seasonNumber, episodeNumber)
+	}
+	variants = append(variants, queryVariant)
+
+	unique := make([]opensubtitles.SearchRequest, 0, len(variants))
+	seen := make(map[string]struct{}, len(variants))
+	for _, variant := range variants {
+		key := variantSignature(variant)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, variant)
+	}
+	return unique
+}
+
+func variantSignature(req opensubtitles.SearchRequest) string {
+	var builder strings.Builder
+	builder.Grow(128)
+	builder.WriteString("tmdb=")
+	builder.WriteString(strconv.FormatInt(req.TMDBID, 10))
+	builder.WriteString("|parent=")
+	builder.WriteString(strconv.FormatInt(req.ParentTMDBID, 10))
+	builder.WriteString("|season=")
+	builder.WriteString(strconv.Itoa(req.Season))
+	builder.WriteString("|episode=")
+	builder.WriteString(strconv.Itoa(req.Episode))
+	builder.WriteString("|query=")
+	builder.WriteString(strings.TrimSpace(req.Query))
+	builder.WriteString("|languages=")
+	builder.WriteString(strings.Join(req.Languages, ","))
+	return builder.String()
+}
+
+func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, op func() error) error {
+	if op == nil {
+		return errors.New("opensubtitles operation unavailable")
+	}
+	attempt := 0
+	for {
+		if err := waitForOpenSubtitlesWindow(ctx, lastCall); err != nil {
+			return err
+		}
+		err := op()
+		if lastCall != nil {
+			*lastCall = time.Now()
+		}
+		if err == nil {
+			return nil
+		}
+		if !isOpenSubtitlesRateLimit(err) || attempt >= openSubtitlesMaxRateRetries {
+			return err
+		}
+		attempt++
+		backoff := openSubtitlesInitialBackoff * time.Duration(1<<uint(attempt-1))
+		if backoff > openSubtitlesMaxBackoff {
+			backoff = openSubtitlesMaxBackoff
+		}
+		if m.logger != nil {
+			m.logger.Warn("opensubtitles rate limited",
+				logging.Duration("backoff", backoff),
+				logging.Int("attempt", attempt),
+			)
+		}
+		if err := sleepWithContext(ctx, backoff); err != nil {
+			return err
+		}
+	}
+}
+
+func waitForOpenSubtitlesWindow(ctx context.Context, lastCall *time.Time) error {
+	if ctx == nil {
+		return errors.New("context unavailable")
+	}
+	if lastCall == nil || lastCall.IsZero() {
+		return nil
+	}
+	elapsed := time.Since(*lastCall)
+	if elapsed >= openSubtitlesMinInterval {
+		return nil
+	}
+	return sleepWithContext(ctx, openSubtitlesMinInterval-elapsed)
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func isOpenSubtitlesRateLimit(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "429") ||
+		strings.Contains(strings.ToLower(err.Error()), "rate limit")
 }
 
 func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails, showTitle string, matches []matchResult) {
@@ -426,12 +649,22 @@ func (m *Matcher) attachMatchAttributes(env *ripspec.Envelope, matches []matchRe
 	}
 	payload := make([]map[string]any, 0, len(matches))
 	for _, match := range matches {
-		payload = append(payload, map[string]any{
+		entry := map[string]any{
 			"episode_key":     match.EpisodeKey,
 			"title_id":        match.TitleID,
 			"matched_episode": match.TargetEpisode,
 			"score":           match.Score,
-		})
+		}
+		if match.SubtitleFileID > 0 {
+			entry["subtitle_file_id"] = match.SubtitleFileID
+		}
+		if strings.TrimSpace(match.SubtitleLanguage) != "" {
+			entry["subtitle_language"] = match.SubtitleLanguage
+		}
+		if strings.TrimSpace(match.SubtitleCachePath) != "" {
+			entry["subtitle_cache_path"] = match.SubtitleCachePath
+		}
+		payload = append(payload, entry)
 	}
 	env.Attributes["content_id_matches"] = payload
 	env.Attributes["content_id_method"] = "whisperx_opensubtitles"

@@ -260,12 +260,27 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 			logger.Warn("episode asset mapping incomplete", logging.String("dest_dir", destDir))
 		} else {
 			specDirty = true
-			if r.contentMatcher != nil {
+			canMatchEpisodes := r.contentMatcher != nil && r.cfg != nil && r.cfg.OpenSubtitlesEnabled
+			if canMatchEpisodes {
 				if updated, err := r.contentMatcher.Match(ctx, item, &env); err != nil {
-					logger.Warn("episode content identification failed", logging.Error(err))
+					return services.Wrap(
+						services.ErrTransient,
+						"ripping",
+						"content id",
+						"Failed to correlate episodes with OpenSubtitles; retry once the service is reachable",
+						err,
+					)
 				} else if updated {
 					specDirty = true
 				}
+			} else {
+				reason := "content matcher unavailable"
+				if r.cfg == nil {
+					reason = "configuration unavailable"
+				} else if !r.cfg.OpenSubtitlesEnabled {
+					reason = "opensubtitles disabled"
+				}
+				logger.Info("episode content identification skipped", logging.String("reason", reason))
 			}
 			paths := episodeAssetPaths(env)
 			if len(paths) > 0 {

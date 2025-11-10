@@ -45,10 +45,13 @@ func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint) [
 		assignedRip[candidate.ripIdx] = true
 		assignedRef[candidate.refIdx] = true
 		results = append(results, matchResult{
-			EpisodeKey:    rips[candidate.ripIdx].EpisodeKey,
-			TitleID:       rips[candidate.ripIdx].TitleID,
-			TargetEpisode: refs[candidate.refIdx].EpisodeNumber,
-			Score:         candidate.score,
+			EpisodeKey:        rips[candidate.ripIdx].EpisodeKey,
+			TitleID:           rips[candidate.ripIdx].TitleID,
+			TargetEpisode:     refs[candidate.refIdx].EpisodeNumber,
+			Score:             candidate.score,
+			SubtitleFileID:    refs[candidate.refIdx].FileID,
+			SubtitleLanguage:  refs[candidate.refIdx].Language,
+			SubtitleCachePath: refs[candidate.refIdx].CachePath,
 		})
 	}
 	return results

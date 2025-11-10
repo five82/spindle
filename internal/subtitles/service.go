@@ -83,6 +83,7 @@ type Service struct {
 	openSubsErr         error
 	openSubs            openSubtitlesClient
 	openSubsReadyLogged bool
+	openSubsCache       *opensubtitles.Cache
 	languages           []string
 }
 

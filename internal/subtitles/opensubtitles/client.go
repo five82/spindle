@@ -71,6 +71,7 @@ func New(cfg Config) (*Client, error) {
 // SearchRequest describes subtitle discovery filters.
 type SearchRequest struct {
 	TMDBID          int64
+	ParentTMDBID    int64
 	IMDBID          string
 	Query           string
 	Languages       []string
@@ -124,6 +125,9 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResponse,
 	params := url.Values{}
 	if req.TMDBID > 0 {
 		params.Set("tmdb_id", strconv.FormatInt(req.TMDBID, 10))
+	}
+	if req.ParentTMDBID > 0 {
+		params.Set("parent_tmdb_id", strconv.FormatInt(req.ParentTMDBID, 10))
 	}
 	if imdb := sanitizeIMDBID(req.IMDBID); imdb != "" {
 		params.Set("imdb_id", imdb)

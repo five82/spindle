@@ -26,13 +26,19 @@ type referenceFingerprint struct {
 	EpisodeNumber int
 	Title         string
 	Vector        *tokenFingerprint
+	FileID        int64
+	Language      string
+	CachePath     string
 }
 
 type matchResult struct {
-	EpisodeKey    string
-	TitleID       int
-	TargetEpisode int
-	Score         float64
+	EpisodeKey        string
+	TitleID           int
+	TargetEpisode     int
+	Score             float64
+	SubtitleFileID    int64
+	SubtitleLanguage  string
+	SubtitleCachePath string
 }
 
 var tokenSplitPattern = regexp.MustCompile(`[^a-z0-9]+`)
