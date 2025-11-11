@@ -349,8 +349,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		} else {
 			episodeYear = ""
 		}
+		parentID := info.SubtitleCtx.ParentID()
 		searchReq := opensubtitles.SearchRequest{
-			ParentTMDBID: info.SubtitleCtx.TMDBID,
+			ParentTMDBID: parentID,
 			Query:        info.ShowTitle,
 			Languages:    append([]string(nil), m.languages...),
 			Season:       season.SeasonNumber,
@@ -438,6 +439,12 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 					Episode:      episodeData.EpisodeNumber,
 					FeatureTitle: candidate.FeatureTitle,
 					FeatureYear:  candidate.FeatureYear,
+				}
+				if entry.ParentTMDBID == 0 {
+					entry.ParentTMDBID = parentID
+				}
+				if entry.TMDBID == 0 {
+					entry.TMDBID = info.SubtitleCtx.EpisodeID()
 				}
 				if path, err := m.cache.Store(entry, payload.Data); err != nil {
 					m.logger.Warn("opensubtitles cache store failed", logging.Error(err))

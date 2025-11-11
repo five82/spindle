@@ -10,20 +10,35 @@ import (
 
 // SubtitleContext captures metadata required to discover subtitles from external services.
 type SubtitleContext struct {
-	TMDBID     int64
-	IMDBID     string
-	MediaType  string
-	Title      string
-	Year       string
-	ContentKey string
-	Language   string
-	Season     int
-	Episode    int
+	TMDBID        int64
+	ParentTMDBID  int64
+	EpisodeTMDBID int64
+	IMDBID        string
+	MediaType     string
+	Title         string
+	Year          string
+	ContentKey    string
+	Language      string
+	Season        int
+	Episode       int
 }
 
 // HasTMDBID reports whether a TMDB identifier is available.
 func (c SubtitleContext) HasTMDBID() bool {
 	return c.TMDBID > 0
+}
+
+// ParentID returns the series/movie TMDB identifier.
+func (c SubtitleContext) ParentID() int64 {
+	if c.ParentTMDBID > 0 {
+		return c.ParentTMDBID
+	}
+	return c.TMDBID
+}
+
+// EpisodeID returns the TMDB identifier of a specific episode when known.
+func (c SubtitleContext) EpisodeID() int64 {
+	return c.EpisodeTMDBID
 }
 
 // IsMovie indicates whether the content represents a movie title.
@@ -71,6 +86,24 @@ func BuildSubtitleContext(item *queue.Item) SubtitleContext {
 	parseMetadataJSON(item.MetadataJSON, &ctx)
 	parseRipSpecData(item.RipSpecData, &ctx)
 
+	if !ctx.IsMovie() {
+		if ctx.ParentTMDBID == 0 {
+			ctx.ParentTMDBID = parseTMDBFromContentKey(ctx.ContentKey)
+		}
+		if ctx.ParentTMDBID == 0 {
+			ctx.ParentTMDBID = ctx.TMDBID
+		}
+		if ctx.ParentTMDBID > 0 {
+			ctx.TMDBID = ctx.ParentTMDBID
+		}
+	} else {
+		if ctx.ParentTMDBID == 0 {
+			ctx.ParentTMDBID = ctx.TMDBID
+		} else if ctx.TMDBID == 0 {
+			ctx.TMDBID = ctx.ParentTMDBID
+		}
+	}
+
 	if ctx.Year == "" {
 		ctx.Year = extractYearFromTitle(ctx.Title)
 	}
@@ -89,9 +122,7 @@ func parseMetadataJSON(raw string, ctx *SubtitleContext) {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return
 	}
-	if ctx.TMDBID == 0 {
-		ctx.TMDBID = asInt(payload["id"])
-	}
+	assignTMDBIdentifiers(payload, ctx)
 	if ctx.IMDBID == "" {
 		if value, ok := payload["imdb_id"].(string); ok {
 			ctx.IMDBID = strings.TrimSpace(value)
@@ -149,6 +180,7 @@ func parseRipSpecData(raw string, ctx *SubtitleContext) {
 	if ctx.ContentKey == "" {
 		ctx.ContentKey = strings.TrimSpace(spec.ContentKey)
 	}
+	assignTMDBIdentifiers(spec.Metadata, ctx)
 	if ctx.TMDBID == 0 {
 		ctx.TMDBID = parseTMDBFromContentKey(ctx.ContentKey)
 	}
@@ -192,6 +224,55 @@ func parseMediaTypeFromContentKey(value string) string {
 		return ""
 	}
 	return strings.ToLower(strings.TrimSpace(parts[1]))
+}
+
+func assignTMDBIdentifiers(payload map[string]any, ctx *SubtitleContext) {
+	if ctx == nil || len(payload) == 0 {
+		return
+	}
+	if ctx.MediaType == "" {
+		if value, ok := payload["media_type"].(string); ok {
+			ctx.MediaType = strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	if id := asInt(payload["parent_tmdb_id"]); id > 0 && ctx.ParentTMDBID == 0 {
+		ctx.ParentTMDBID = id
+	}
+	if id := asInt(payload["series_tmdb_id"]); id > 0 && ctx.ParentTMDBID == 0 {
+		ctx.ParentTMDBID = id
+	}
+	if id := asInt(payload["show_tmdb_id"]); id > 0 && ctx.ParentTMDBID == 0 {
+		ctx.ParentTMDBID = id
+	}
+	if id := asInt(payload["episode_tmdb_id"]); id > 0 && ctx.EpisodeTMDBID == 0 {
+		ctx.EpisodeTMDBID = id
+	}
+	if id := asInt(payload["tmdb_episode_id"]); id > 0 && ctx.EpisodeTMDBID == 0 {
+		ctx.EpisodeTMDBID = id
+	}
+	if id := asInt(payload["id"]); id > 0 {
+		mediaType := strings.ToLower(strings.TrimSpace(ctx.MediaType))
+		switch mediaType {
+		case "movie", "film":
+			if ctx.TMDBID == 0 {
+				ctx.TMDBID = id
+			}
+		case "episode":
+			if ctx.EpisodeTMDBID == 0 {
+				ctx.EpisodeTMDBID = id
+			}
+		default:
+			if ctx.ParentTMDBID == 0 {
+				ctx.ParentTMDBID = id
+			}
+			if ctx.TMDBID == 0 {
+				ctx.TMDBID = id
+			}
+		}
+	}
+	if ctx.ParentTMDBID == 0 && ctx.TMDBID > 0 && !ctx.IsMovie() {
+		ctx.ParentTMDBID = ctx.TMDBID
+	}
 }
 
 func asInt(value any) int64 {

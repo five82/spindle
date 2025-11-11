@@ -226,11 +226,17 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 
 	if !req.ForceAI && s.shouldUseOpenSubtitles() {
 		title := strings.TrimSpace(req.Context.Title)
+		parentID := req.Context.ParentID()
+		episodeID := req.Context.EpisodeID()
 		if s.logger != nil {
 			s.logger.Info("attempting opensubtitles fetch",
 				logging.String("title", title),
 				logging.Int64("tmdb_id", req.Context.TMDBID),
+				logging.Int64("parent_tmdb_id", parentID),
+				logging.Int64("episode_tmdb_id", episodeID),
 				logging.String("imdb_id", strings.TrimSpace(req.Context.IMDBID)),
+				logging.Int("season", req.Context.Season),
+				logging.Int("episode", req.Context.Episode),
 				logging.String("languages", strings.Join(req.Languages, ",")),
 			)
 		}
@@ -240,6 +246,10 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 					logging.Error(err),
 					logging.String("title", title),
 					logging.Int64("tmdb_id", req.Context.TMDBID),
+					logging.Int64("parent_tmdb_id", parentID),
+					logging.Int64("episode_tmdb_id", episodeID),
+					logging.Int("season", req.Context.Season),
+					logging.Int("episode", req.Context.Episode),
 				)
 			}
 		} else if ok {
@@ -254,6 +264,10 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			s.logger.Info("opensubtitles match not found",
 				logging.String("title", title),
 				logging.Int64("tmdb_id", req.Context.TMDBID),
+				logging.Int64("parent_tmdb_id", parentID),
+				logging.Int64("episode_tmdb_id", episodeID),
+				logging.Int("season", req.Context.Season),
+				logging.Int("episode", req.Context.Episode),
 				logging.String("languages", strings.Join(req.Languages, ",")),
 			)
 		}

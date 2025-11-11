@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"log/slog"
 
 	"spindle/internal/logging"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/stage"
 )
@@ -59,49 +62,98 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	if s.store == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "execute", "Queue store unavailable", nil)
 	}
-	if strings.TrimSpace(item.EncodedFile) == "" {
-		return services.Wrap(services.ErrValidation, "subtitles", "execute", "No encoded file available for subtitles", nil)
-	}
 	if !s.service.config.SubtitlesEnabled {
 		return nil
 	}
 
-	if err := s.updateProgress(ctx, item, "Running WhisperX transcription", 5); err != nil {
+	targets := s.buildSubtitleTargets(item)
+	if len(targets) == 0 {
+		return services.Wrap(services.ErrValidation, "subtitles", "execute", "No encoded assets available for subtitles", nil)
+	}
+	if err := s.updateProgress(ctx, item, fmt.Sprintf("Preparing subtitles for %d episode(s)", len(targets)), 5); err != nil {
 		return err
 	}
-	workDir := item.StagingRoot(s.service.config.StagingDir)
-	outputDir := filepath.Dir(strings.TrimSpace(item.EncodedFile))
-	ctxMeta := BuildSubtitleContext(item)
-	result, err := s.service.Generate(ctx, GenerateRequest{
-		SourcePath: item.EncodedFile,
-		WorkDir:    filepath.Join(workDir, "subtitles"),
-		OutputDir:  outputDir,
-		BaseName:   baseNameWithoutExt(item.EncodedFile),
-		Context:    ctxMeta,
-		Languages:  append([]string(nil), s.service.languages...),
-	})
-	if err != nil {
-		message := strings.TrimSpace(err.Error())
-		if message == "" {
-			message = "Subtitle generation failed"
+
+	baseCtx := BuildSubtitleContext(item)
+	step := 90.0 / float64(len(targets))
+	for idx, target := range targets {
+		message := fmt.Sprintf("Generating subtitles %d/%d – %s", idx+1, len(targets), filepath.Base(target.SourcePath))
+		if err := s.updateProgress(ctx, item, message, 5.0+step*float64(idx)); err != nil {
+			return err
+		}
+		ctxMeta := baseCtx
+		if target.Season > 0 {
+			ctxMeta.Season = target.Season
+		}
+		if target.Episode > 0 {
+			ctxMeta.Episode = target.Episode
+		}
+		if strings.TrimSpace(target.EpisodeTitle) != "" {
+			baseTitle := strings.TrimSpace(baseCtx.Title)
+			episodeTitle := strings.TrimSpace(target.EpisodeTitle)
+			if baseTitle != "" {
+				ctxMeta.Title = fmt.Sprintf("%s – %s", baseTitle, episodeTitle)
+			} else {
+				ctxMeta.Title = episodeTitle
+			}
+		}
+		if ctxMeta.ContentKey == "" {
+			ctxMeta.ContentKey = target.EpisodeKey
+		}
+		result, err := s.service.Generate(ctx, GenerateRequest{
+			SourcePath: target.SourcePath,
+			WorkDir:    target.WorkDir,
+			OutputDir:  target.OutputDir,
+			BaseName:   target.BaseName,
+			Context:    ctxMeta,
+			Languages:  append([]string(nil), s.service.languages...),
+		})
+		if err != nil {
+			message := strings.TrimSpace(err.Error())
+			if message == "" {
+				message = "Subtitle generation failed"
+			}
+			if s.logger != nil {
+				s.logger.Warn("subtitle generation skipped",
+					logging.Int64("item_id", item.ID),
+					logging.String("source", target.SourcePath),
+					logging.Error(err),
+				)
+			}
+			item.ProgressMessage = fmt.Sprintf("Subtitle generation skipped: %s", message)
+			item.ProgressPercent = 100
+			item.ErrorMessage = message
+			if err := s.store.UpdateProgress(ctx, item); err != nil {
+				return services.Wrap(services.ErrTransient, "subtitles", "persist skip", "Failed to persist subtitle skip status", err)
+			}
+			return nil
 		}
 		if s.logger != nil {
-			s.logger.Warn("subtitle generation skipped", logging.Int64("item_id", item.ID), logging.Error(err))
+			s.logger.Info("subtitle generation complete",
+				logging.String("source", target.SourcePath),
+				logging.String("subtitle", result.SubtitlePath),
+				logging.Int("segments", result.SegmentCount),
+			)
 		}
-		item.ProgressMessage = fmt.Sprintf("Subtitle generation skipped: %s", message)
-		item.ProgressPercent = 100
-		item.ErrorMessage = message
-		if err := s.store.UpdateProgress(ctx, item); err != nil {
-			return services.Wrap(services.ErrTransient, "subtitles", "persist skip", "Failed to persist subtitle skip status", err)
-		}
-		return nil
 	}
-	item.ProgressMessage = fmt.Sprintf("Generated subtitles: %s", filepath.Base(result.SubtitlePath))
+	item.ProgressMessage = fmt.Sprintf("Generated subtitles for %d episode(s)", len(targets))
 	item.ProgressPercent = 100
+	item.ErrorMessage = ""
 	if err := s.store.UpdateProgress(ctx, item); err != nil {
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}
 	return nil
+}
+
+type subtitleTarget struct {
+	SourcePath   string
+	WorkDir      string
+	OutputDir    string
+	BaseName     string
+	EpisodeKey   string
+	EpisodeTitle string
+	Season       int
+	Episode      int
 }
 
 func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) error {
@@ -116,6 +168,104 @@ func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message st
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}
 	return nil
+}
+
+func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
+	if item == nil || s == nil || s.service == nil {
+		return nil
+	}
+	stagingRoot := strings.TrimSpace(item.StagingRoot(s.service.config.StagingDir))
+	if stagingRoot == "" {
+		stagingRoot = filepath.Dir(strings.TrimSpace(item.EncodedFile))
+	}
+	if stagingRoot == "" {
+		stagingRoot = "."
+	}
+	baseWorkDir := filepath.Join(stagingRoot, "subtitles")
+	var targets []subtitleTarget
+
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err != nil && s.logger != nil {
+		s.logger.Warn("failed to parse rip spec for subtitle targets", logging.Error(err))
+	}
+	if len(env.Assets.Encoded) > 0 {
+		for idx, asset := range env.Assets.Encoded {
+			source := strings.TrimSpace(asset.Path)
+			if source == "" {
+				continue
+			}
+			episodeKey := strings.TrimSpace(asset.EpisodeKey)
+			season, episode := parseEpisodeKey(episodeKey)
+			episodeTitle := ""
+			if ep := env.EpisodeByKey(episodeKey); ep != nil {
+				if ep.Season > 0 {
+					season = ep.Season
+				}
+				if ep.Episode > 0 {
+					episode = ep.Episode
+				}
+				if strings.TrimSpace(ep.Key) != "" && episodeKey == "" {
+					episodeKey = strings.TrimSpace(ep.Key)
+				}
+				episodeTitle = strings.TrimSpace(ep.EpisodeTitle)
+			}
+			targets = append(targets, subtitleTarget{
+				SourcePath:   source,
+				WorkDir:      filepath.Join(baseWorkDir, sanitizeEpisodeToken(episodeKey, idx)),
+				OutputDir:    filepath.Dir(source),
+				BaseName:     baseNameWithoutExt(source),
+				EpisodeKey:   episodeKey,
+				EpisodeTitle: episodeTitle,
+				Season:       season,
+				Episode:      episode,
+			})
+		}
+	}
+	if len(targets) == 0 {
+		source := strings.TrimSpace(item.EncodedFile)
+		if source == "" {
+			return nil
+		}
+		targets = append(targets, subtitleTarget{
+			SourcePath: source,
+			WorkDir:    filepath.Join(baseWorkDir, "primary"),
+			OutputDir:  filepath.Dir(source),
+			BaseName:   baseNameWithoutExt(source),
+		})
+	}
+	return targets
+}
+
+var episodeKeyPattern = regexp.MustCompile(`s?(\d+)[ex](\d+)`)
+
+func parseEpisodeKey(key string) (int, int) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return 0, 0
+	}
+	matches := episodeKeyPattern.FindStringSubmatch(key)
+	if len(matches) != 3 {
+		return 0, 0
+	}
+	season, _ := strconv.Atoi(matches[1])
+	episode, _ := strconv.Atoi(matches[2])
+	return season, episode
+}
+
+func sanitizeEpisodeToken(key string, idx int) string {
+	token := strings.TrimSpace(key)
+	if token == "" {
+		token = fmt.Sprintf("episode-%d", idx+1)
+	}
+	token = strings.ToLower(token)
+	replacer := strings.NewReplacer(
+		" ", "_",
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"..", "_",
+	)
+	return replacer.Replace(token)
 }
 
 // HealthCheck reports readiness for the subtitle stage.

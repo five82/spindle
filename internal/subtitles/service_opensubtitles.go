@@ -93,17 +93,21 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		return GenerateResult{}, false, errors.New("opensubtitles client unavailable")
 	}
 
+	parentID := req.Context.ParentID()
 	searchReq := opensubtitles.SearchRequest{
-		IMDBID:    req.Context.IMDBID,
-		Query:     strings.TrimSpace(req.Context.Title),
-		Languages: append([]string(nil), req.Languages...),
-		MediaType: mediaTypeForContext(req.Context),
-		Year:      strings.TrimSpace(req.Context.Year),
+		IMDBID:       req.Context.IMDBID,
+		Query:        strings.TrimSpace(req.Context.Title),
+		Languages:    append([]string(nil), req.Languages...),
+		MediaType:    mediaTypeForContext(req.Context),
+		Year:         strings.TrimSpace(req.Context.Year),
+		Season:       req.Context.Season,
+		Episode:      req.Context.Episode,
+		ParentTMDBID: parentID,
 	}
 	if req.Context.IsMovie() {
 		searchReq.TMDBID = req.Context.TMDBID
-	} else {
-		searchReq.ParentTMDBID = req.Context.TMDBID
+	} else if episodeID := req.Context.EpisodeID(); episodeID > 0 {
+		searchReq.TMDBID = episodeID
 	}
 
 	resp, err := s.openSubs.Search(ctx, searchReq)
@@ -261,8 +265,10 @@ func (s *Service) storeOpenSubtitlesPayload(candidate opensubtitles.Subtitle, pa
 	}
 	if req.Context.IsMovie() {
 		entry.TMDBID = req.Context.TMDBID
+		entry.ParentTMDBID = req.Context.ParentID()
 	} else {
-		entry.ParentTMDBID = req.Context.TMDBID
+		entry.ParentTMDBID = req.Context.ParentID()
+		entry.TMDBID = req.Context.EpisodeID()
 	}
 	if _, err := s.openSubsCache.Store(entry, payload.Data); err != nil && s.logger != nil {
 		s.logger.Warn("opensubtitles cache store failed", logging.Error(err))
