@@ -22,6 +22,7 @@ import (
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripping"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/stage"
@@ -588,6 +589,10 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			ID:                 t.ID,
 			Name:               t.Name,
 			Duration:           t.Duration,
+			Chapters:           t.Chapters,
+			Playlist:           t.Playlist,
+			SegmentCount:       t.SegmentCount,
+			SegmentMap:         t.SegmentMap,
 			ContentFingerprint: fp,
 		}
 		if annotation, ok := episodeMatches[t.ID]; ok {
@@ -654,6 +659,15 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			logging.Int("title_count", len(titleSpecs)),
 			logging.String("content_key", contentKey),
 		)
+	} else if selection, ok := rippingChoosePrimaryTitle(titleSpecs); ok {
+		logger.Info(
+			"primary title selected for ripping",
+			logging.Int("title_id", selection.ID),
+			logging.Int("duration_seconds", selection.Duration),
+			logging.Int("chapters", selection.Chapters),
+			logging.String("playlist", strings.TrimSpace(selection.Playlist)),
+			logging.Int("segment_count", selection.SegmentCount),
+		)
 	}
 
 	if err := i.validateIdentification(ctx, item); err != nil {
@@ -661,6 +675,11 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	return nil
+}
+
+// rippingChoosePrimaryTitle proxies to ripping.ChoosePrimaryTitle without creating an import cycle.
+var rippingChoosePrimaryTitle = func(titles []ripspec.Title) (ripspec.Title, bool) {
+	return ripping.ChoosePrimaryTitle(titles)
 }
 
 // HealthCheck verifies identifier dependencies required for successful execution.

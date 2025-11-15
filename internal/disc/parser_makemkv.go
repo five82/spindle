@@ -104,7 +104,16 @@ func extractTitles(lines []string) []Title {
 			}
 			tracks = append(tracks, copy)
 		}
-		titles = append(titles, Title{ID: builder.id, Name: builder.name, Duration: builder.duration, Tracks: tracks})
+		titles = append(titles, Title{
+			ID:           builder.id,
+			Name:         builder.name,
+			Duration:     builder.duration,
+			Chapters:     builder.chapters,
+			Playlist:     builder.playlist,
+			SegmentCount: builder.segmentCount(),
+			SegmentMap:   builder.segmentMap,
+			Tracks:       tracks,
+		})
 	}
 
 	return titles
@@ -132,8 +141,28 @@ func parseTInfo(results map[int]*titleBuilder, line string) {
 		if value != "" {
 			entry.name = value
 		}
+	case 8:
+		if c, err := strconv.Atoi(value); err == nil && c > 0 {
+			entry.chapters = c
+		}
 	case 9:
 		entry.duration = parseDuration(value)
+	case 16:
+		if value != "" {
+			entry.playlist = value
+		}
+	case 25:
+		if count, err := strconv.Atoi(value); err == nil && count > 0 {
+			entry.segments = count
+		}
+	case 26:
+		if value != "" {
+			entry.segmentMap = value
+			parts := strings.Split(value, ",")
+			if len(parts) > entry.segments {
+				entry.segments = len(parts)
+			}
+		}
 	}
 }
 
@@ -218,11 +247,15 @@ func classifyTrackType(value string) TrackType {
 }
 
 type titleBuilder struct {
-	id       int
-	name     string
-	duration int
-	tracks   map[int]*Track
-	order    []int
+	id         int
+	name       string
+	duration   int
+	chapters   int
+	playlist   string
+	segments   int
+	segmentMap string
+	tracks     map[int]*Track
+	order      []int
 }
 
 func ensureTitleBuilder(results map[int]*titleBuilder, id int) *titleBuilder {
@@ -246,6 +279,17 @@ func (b *titleBuilder) ensureTrack(streamID int) *Track {
 	b.tracks[streamID] = track
 	b.order = append(b.order, streamID)
 	return track
+}
+
+func (b *titleBuilder) segmentCount() int {
+	if b.segments > 0 {
+		return b.segments
+	}
+	if b.segmentMap == "" {
+		return 0
+	}
+	parts := strings.Split(b.segmentMap, ",")
+	return len(parts)
 }
 
 func parseDuration(value string) int {

@@ -618,7 +618,10 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 	*item = copy
 }
 
-const minPrimaryRuntimeSeconds = 20 * 60
+const (
+	minPrimaryRuntimeSeconds = 20 * 60
+	durationToleranceSeconds = 2
+)
 
 func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 	if item == nil {
@@ -644,7 +647,7 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 		sort.Ints(ids)
 		return ids
 	}
-	if selection, ok := choosePrimaryTitle(env.Titles); ok {
+	if selection, ok := ChoosePrimaryTitle(env.Titles); ok {
 		if logger != nil {
 			logger.Info(
 				"selecting primary title",
@@ -658,49 +661,124 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 	return nil
 }
 
-func choosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
+// ChoosePrimaryTitle exposes the selector for other packages (e.g. logging during identification).
+func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 	if len(titles) == 0 {
 		return ripspec.Title{}, false
 	}
-	indices := make([]int, 0, len(titles))
-	for idx := range titles {
-		if titles[idx].ID < 0 {
+
+	candidates := make([]ripspec.Title, 0, len(titles))
+	for _, t := range titles {
+		if t.ID < 0 || t.Duration <= 0 {
 			continue
 		}
-		indices = append(indices, idx)
+		candidates = append(candidates, t)
 	}
-	if len(indices) == 0 {
+	if len(candidates) == 0 {
 		return ripspec.Title{}, false
 	}
-	sort.Slice(indices, func(i, j int) bool {
-		left := titles[indices[i]]
-		right := titles[indices[j]]
+
+	// Prefer feature-length runtimes within a small tolerance window.
+	maxDuration := 0
+	for _, t := range candidates {
+		if t.Duration > maxDuration {
+			maxDuration = t.Duration
+		}
+	}
+	window := make([]ripspec.Title, 0, len(candidates))
+	for _, t := range candidates {
+		if t.Duration >= maxDuration-durationToleranceSeconds {
+			window = append(window, t)
+		}
+	}
+	featureLength := window
+	tmp := make([]ripspec.Title, 0, len(window))
+	for _, t := range window {
+		if t.Duration >= minPrimaryRuntimeSeconds {
+			tmp = append(tmp, t)
+		}
+	}
+	if len(tmp) > 0 {
+		featureLength = tmp
+	}
+
+	// Prefer titles with chapter metadata.
+	withChapters := bestByInt(featureLength, func(t ripspec.Title) int { return t.Chapters })
+	if len(withChapters) > 0 {
+		featureLength = withChapters
+	}
+
+	// Prefer MPLS playlists over raw M2TS entries.
+	mplsOnly := make([]ripspec.Title, 0, len(featureLength))
+	for _, t := range featureLength {
+		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(t.Playlist)), ".mpls") {
+			mplsOnly = append(mplsOnly, t)
+		}
+	}
+	if len(mplsOnly) > 0 {
+		featureLength = mplsOnly
+	}
+
+	// Prefer playlists with more segments (helps dodge dummy/short playlists).
+	withSegments := bestByInt(featureLength, func(t ripspec.Title) int { return t.SegmentCount })
+	if len(withSegments) > 0 {
+		featureLength = withSegments
+	}
+
+	// Prefer the most common fingerprint if duplicates exist.
+	fingerprintFreq := make(map[string]int)
+	for _, t := range titles {
+		fp := strings.TrimSpace(t.ContentFingerprint)
+		if fp != "" {
+			fingerprintFreq[fp]++
+		}
+	}
+	bestFreq := 0
+	for _, t := range featureLength {
+		if freq := fingerprintFreq[strings.TrimSpace(t.ContentFingerprint)]; freq > bestFreq {
+			bestFreq = freq
+		}
+	}
+	if bestFreq > 1 {
+		filtered := make([]ripspec.Title, 0, len(featureLength))
+		for _, t := range featureLength {
+			if fingerprintFreq[strings.TrimSpace(t.ContentFingerprint)] == bestFreq {
+				filtered = append(filtered, t)
+			}
+		}
+		if len(filtered) > 0 {
+			featureLength = filtered
+		}
+	}
+
+	sort.Slice(featureLength, func(i, j int) bool {
+		left := featureLength[i]
+		right := featureLength[j]
 		if left.Duration == right.Duration {
 			return left.ID < right.ID
 		}
 		return left.Duration > right.Duration
 	})
-	primaryIdx := -1
-	for _, idx := range indices {
-		title := titles[idx]
-		if title.Duration >= minPrimaryRuntimeSeconds {
-			primaryIdx = idx
-			break
+	return featureLength[0], true
+}
+
+func bestByInt(list []ripspec.Title, score func(ripspec.Title) int) []ripspec.Title {
+	best := 0
+	for _, t := range list {
+		if v := score(t); v > best {
+			best = v
 		}
 	}
-	if primaryIdx == -1 {
-		for _, idx := range indices {
-			title := titles[idx]
-			if title.Duration > 0 {
-				primaryIdx = idx
-				break
-			}
+	if best == 0 {
+		return nil
+	}
+	out := make([]ripspec.Title, 0, len(list))
+	for _, t := range list {
+		if score(t) == best {
+			out = append(out, t)
 		}
 	}
-	if primaryIdx == -1 {
-		return ripspec.Title{}, false
-	}
-	return titles[primaryIdx], true
+	return out
 }
 
 func uniqueEpisodeTitleIDs(env ripspec.Envelope) []int {

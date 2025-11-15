@@ -5,7 +5,11 @@ import "testing"
 func TestMakeMKVParserExtractsTracks(t *testing.T) {
 	input := `
 TINFO:0,2,0,"Main Feature"
+TINFO:0,8,0,"24"
 TINFO:0,9,0,"1:39:03"
+TINFO:0,16,0,"00800.mpls"
+TINFO:0,25,0,"1"
+TINFO:0,26,0,"1,2,3"
 SINFO:0,0,1,4352,"Video"
 SINFO:0,0,6,4352,"MPEG-4 AVC"
 SINFO:0,1,1,4353,"Audio"
@@ -38,6 +42,15 @@ SINFO:0,2,30,4354,"Director Commentary"
 	}
 	if title.Duration != 5943 {
 		t.Fatalf("unexpected duration: %d", title.Duration)
+	}
+	if title.Chapters != 24 {
+		t.Fatalf("unexpected chapter count: %d", title.Chapters)
+	}
+	if title.Playlist != "00800.mpls" {
+		t.Fatalf("unexpected playlist: %q", title.Playlist)
+	}
+	if title.SegmentCount != 3 {
+		t.Fatalf("unexpected segment count: %d", title.SegmentCount)
 	}
 	if len(title.Tracks) != 3 {
 		t.Fatalf("expected 3 tracks, got %d", len(title.Tracks))

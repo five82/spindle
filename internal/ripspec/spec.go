@@ -25,6 +25,10 @@ type Title struct {
 	ID                 int    `json:"id"`
 	Name               string `json:"name"`
 	Duration           int    `json:"duration"`
+	Chapters           int    `json:"chapters,omitempty"`
+	Playlist           string `json:"playlist,omitempty"`
+	SegmentCount       int    `json:"segment_count,omitempty"`
+	SegmentMap         string `json:"segment_map,omitempty"`
 	ContentFingerprint string `json:"content_fingerprint"`
 	Season             int    `json:"season,omitempty"`
 	Episode            int    `json:"episode,omitempty"`
