@@ -106,6 +106,7 @@ Use `spindle config init` to generate `~/.config/spindle/config.toml`, then edit
 - `opensubtitles_user_agent` (optional) – Custom user agent string registered with OpenSubtitles. Required when `opensubtitles_enabled = true`.
 - `opensubtitles_languages` (optional) – Preferred subtitle languages (ISO 639-1 codes, for example `['en','es']`). Used for OpenSubtitles searches.
 - `opensubtitles_user_token` (optional) – OpenSubtitles JWT for authenticated downloads. Provides higher daily download limits than anonymous mode.
+- Subtitle pipeline: duration guardrails soft-reject mismatched candidates (logged with `soft_reject=true`), an intro-gap exception allows common disc intros, and a mis-ID guard flags items for review (“suspect mis-identification (subtitle offsets)”) while attempting a WhisperX-only fallback. Logs label the chosen `subtitle_source` as `opensubtitles` or `whisperx` so you can see what Plex will ingest.
 - `api_bind` – Host:port for the built-in JSON API (defaults to `127.0.0.1:7487`)
 - `keydb_path` – Location where Spindle stores/reads `KEYDB.cfg` for Disc ID lookups (defaults to `~/.config/spindle/keydb/KEYDB.cfg`)
 - `keydb_download_url` – Mirror URL Spindle uses when auto-refreshing `KEYDB.cfg`

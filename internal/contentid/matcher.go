@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -228,6 +229,7 @@ type episodeContext struct {
 	DiscNumber  int
 	Metadata    queue.Metadata
 	SubtitleCtx subtitles.SubtitleContext
+	ItemID      int64
 }
 
 func (m *Matcher) buildContext(item *queue.Item, env *ripspec.Envelope) (episodeContext, error) {
@@ -236,6 +238,7 @@ func (m *Matcher) buildContext(item *queue.Item, env *ripspec.Envelope) (episode
 		return ctx, errors.New("queue item unavailable")
 	}
 	ctx.Metadata = queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
+	ctx.ItemID = item.ID
 	ctx.ShowTitle = strings.TrimSpace(ctx.Metadata.ShowTitle)
 	if ctx.ShowTitle == "" {
 		ctx.ShowTitle = strings.TrimSpace(ctx.Metadata.Title())
@@ -293,14 +296,17 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 		if language == "" && len(m.languages) > 0 {
 			language = m.languages[0]
 		}
+		cacheKey := subtitles.BuildTranscriptCacheKey(info.ItemID, episode.Key)
 		req := subtitles.GenerateRequest{
-			SourcePath: asset.Path,
-			WorkDir:    workDir,
-			OutputDir:  workDir,
-			BaseName:   fmt.Sprintf("%s-contentid", episode.Key),
-			Language:   language,
-			Context:    info.SubtitleCtx,
-			ForceAI:    true,
+			SourcePath:                asset.Path,
+			WorkDir:                   workDir,
+			OutputDir:                 workDir,
+			BaseName:                  fmt.Sprintf("%s-contentid", episode.Key),
+			Language:                  language,
+			Context:                   info.SubtitleCtx,
+			ForceAI:                   true,
+			TranscriptKey:             cacheKey,
+			AllowTranscriptCacheWrite: cacheKey != "",
 		}
 		req.Context.Title = fmt.Sprintf("%s %s", info.ShowTitle, strings.ToUpper(episode.Key))
 		result, err := m.subs.Generate(ctx, req)
@@ -359,7 +365,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			MediaType:    "episode",
 			Year:         episodeYear,
 		}
-		searchVariants := episodeSearchVariants(searchReq, info.ShowTitle, season.SeasonNumber, episodeData.EpisodeNumber, episodeData.ID)
+		searchVariants := opensubtitles.EpisodeSearchVariants(searchReq, info.ShowTitle, season.SeasonNumber, episodeData.EpisodeNumber, episodeData.ID)
 		var (
 			resp       opensubtitles.SearchResponse
 			selected   opensubtitles.SearchRequest
@@ -479,62 +485,6 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 	return references, nil
 }
 
-func episodeSearchVariants(base opensubtitles.SearchRequest, showTitle string, seasonNumber, episodeNumber int, episodeTMDBID int64) []opensubtitles.SearchRequest {
-	variants := make([]opensubtitles.SearchRequest, 0, 3)
-
-	primary := base
-	primary.TMDBID = 0
-	variants = append(variants, primary)
-
-	if episodeTMDBID > 0 {
-		episodeVariant := base
-		episodeVariant.ParentTMDBID = 0
-		episodeVariant.TMDBID = episodeTMDBID
-		variants = append(variants, episodeVariant)
-	}
-
-	queryVariant := base
-	queryVariant.ParentTMDBID = 0
-	queryVariant.TMDBID = 0
-	title := strings.TrimSpace(showTitle)
-	if title != "" {
-		queryVariant.Query = fmt.Sprintf("%s S%02dE%02d", title, seasonNumber, episodeNumber)
-	} else {
-		queryVariant.Query = fmt.Sprintf("S%02dE%02d", seasonNumber, episodeNumber)
-	}
-	variants = append(variants, queryVariant)
-
-	unique := make([]opensubtitles.SearchRequest, 0, len(variants))
-	seen := make(map[string]struct{}, len(variants))
-	for _, variant := range variants {
-		key := variantSignature(variant)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		unique = append(unique, variant)
-	}
-	return unique
-}
-
-func variantSignature(req opensubtitles.SearchRequest) string {
-	var builder strings.Builder
-	builder.Grow(128)
-	builder.WriteString("tmdb=")
-	builder.WriteString(strconv.FormatInt(req.TMDBID, 10))
-	builder.WriteString("|parent=")
-	builder.WriteString(strconv.FormatInt(req.ParentTMDBID, 10))
-	builder.WriteString("|season=")
-	builder.WriteString(strconv.Itoa(req.Season))
-	builder.WriteString("|episode=")
-	builder.WriteString(strconv.Itoa(req.Episode))
-	builder.WriteString("|query=")
-	builder.WriteString(strings.TrimSpace(req.Query))
-	builder.WriteString("|languages=")
-	builder.WriteString(strings.Join(req.Languages, ","))
-	return builder.String()
-}
-
 func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, op func() error) error {
 	if op == nil {
 		return errors.New("opensubtitles operation unavailable")
@@ -551,7 +501,7 @@ func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, 
 		if err == nil {
 			return nil
 		}
-		if !isOpenSubtitlesRateLimit(err) || attempt >= openSubtitlesMaxRateRetries {
+		if !isOpenSubtitlesRetriable(err) || attempt >= openSubtitlesMaxRateRetries {
 			return err
 		}
 		attempt++
@@ -599,12 +549,36 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func isOpenSubtitlesRateLimit(err error) bool {
+func isOpenSubtitlesRetriable(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "429") ||
-		strings.Contains(strings.ToLower(err.Error()), "rate limit")
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "429") || strings.Contains(message, "rate limit") {
+		return true
+	}
+	timeoutTokens := []string{
+		"timeout",
+		"deadline exceeded",
+		"client.timeout exceeded",
+		"connection reset",
+		"connection refused",
+		"temporary failure",
+		"awaiting headers",
+	}
+	for _, token := range timeoutTokens {
+		if strings.Contains(message, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails, showTitle string, matches []matchResult) {

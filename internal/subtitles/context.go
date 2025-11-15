@@ -16,6 +16,7 @@ type SubtitleContext struct {
 	IMDBID        string
 	MediaType     string
 	Title         string
+	ShowTitle     string
 	Year          string
 	ContentKey    string
 	Language      string
@@ -53,6 +54,14 @@ func (c SubtitleContext) IsMovie() bool {
 	return false
 }
 
+// SeriesTitle returns the best-known title for the TV series when available.
+func (c SubtitleContext) SeriesTitle() string {
+	if title := strings.TrimSpace(c.ShowTitle); title != "" {
+		return title
+	}
+	return deriveShowTitle(c.Title)
+}
+
 // BuildSubtitleContext extracts high-signal metadata about the queue item to aid subtitle lookups.
 func BuildSubtitleContext(item *queue.Item) SubtitleContext {
 	var ctx SubtitleContext
@@ -68,6 +77,7 @@ func BuildSubtitleContext(item *queue.Item) SubtitleContext {
 	if ctx.Title == "" {
 		ctx.Title = strings.TrimSpace(item.SourcePath)
 	}
+	ctx.ShowTitle = strings.TrimSpace(meta.ShowTitle)
 
 	if meta.IsMovie() {
 		ctx.MediaType = "movie"
@@ -107,6 +117,9 @@ func BuildSubtitleContext(item *queue.Item) SubtitleContext {
 	if ctx.Year == "" {
 		ctx.Year = extractYearFromTitle(ctx.Title)
 	}
+	if ctx.ShowTitle == "" && !ctx.IsMovie() {
+		ctx.ShowTitle = deriveShowTitle(ctx.Title)
+	}
 	if ctx.Season <= 0 {
 		ctx.Season = 1
 	}
@@ -131,6 +144,13 @@ func parseMetadataJSON(raw string, ctx *SubtitleContext) {
 	if ctx.MediaType == "" {
 		if value, ok := payload["media_type"].(string); ok {
 			ctx.MediaType = strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	if ctx.ShowTitle == "" {
+		if value, ok := payload["show_title"].(string); ok {
+			ctx.ShowTitle = strings.TrimSpace(value)
+		} else if value, ok := payload["series_title"].(string); ok {
+			ctx.ShowTitle = strings.TrimSpace(value)
 		}
 	}
 	if ctx.Language == "" {
@@ -197,6 +217,13 @@ func parseRipSpecData(raw string, ctx *SubtitleContext) {
 	if ctx.IMDBID == "" && len(spec.Metadata) > 0 {
 		if imdb, ok := spec.Metadata["imdb_id"].(string); ok {
 			ctx.IMDBID = strings.TrimSpace(imdb)
+		}
+	}
+	if ctx.ShowTitle == "" && len(spec.Metadata) > 0 {
+		if show, ok := spec.Metadata["show_title"].(string); ok {
+			ctx.ShowTitle = strings.TrimSpace(show)
+		} else if show, ok := spec.Metadata["series_title"].(string); ok {
+			ctx.ShowTitle = strings.TrimSpace(show)
 		}
 	}
 	if ctx.Language == "" && len(spec.Metadata) > 0 {
@@ -321,4 +348,21 @@ func extractYearFromTitle(title string) string {
 		}
 	}
 	return ""
+}
+
+func deriveShowTitle(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	splitters := []string{" – ", " — ", " - ", ": "}
+	for _, sep := range splitters {
+		if idx := strings.Index(value, sep); idx > 0 {
+			candidate := strings.TrimSpace(value[:idx])
+			if candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return value
 }

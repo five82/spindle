@@ -17,6 +17,7 @@ type Config struct {
 	LibraryDir                    string   `toml:"library_dir"`
 	LogDir                        string   `toml:"log_dir"`
 	OpenSubtitlesCacheDir         string   `toml:"opensubtitles_cache_dir"`
+	WhisperXCacheDir              string   `toml:"whisperx_cache_dir"`
 	DraptoLogDir                  string   `toml:"drapto_log_dir"`
 	ReviewDir                     string   `toml:"review_dir"`
 	OpticalDrive                  string   `toml:"optical_drive"`
@@ -66,6 +67,7 @@ const (
 	defaultLibraryDir                  = "~/library"
 	defaultLogDir                      = "~/.local/share/spindle/logs"
 	defaultOpenSubtitlesCacheDir       = "~/.local/share/spindle/cache/opensubtitles"
+	defaultWhisperXCacheDir            = "~/.local/share/spindle/cache/whisperx"
 	defaultReviewDir                   = "~/review"
 	defaultOpticalDrive                = "/dev/sr0"
 	defaultMoviesDir                   = "movies"
@@ -94,6 +96,7 @@ func Default() Config {
 		LibraryDir:                  defaultLibraryDir,
 		LogDir:                      defaultLogDir,
 		OpenSubtitlesCacheDir:       defaultOpenSubtitlesCacheDir,
+		WhisperXCacheDir:            defaultWhisperXCacheDir,
 		DraptoLogDir:                defaultDraptoLogDir,
 		ReviewDir:                   defaultReviewDir,
 		OpticalDrive:                defaultOpticalDrive,
@@ -219,6 +222,12 @@ func (c *Config) normalize() error {
 	}
 	if c.OpenSubtitlesCacheDir, err = expandPath(c.OpenSubtitlesCacheDir); err != nil {
 		return fmt.Errorf("opensubtitles_cache_dir: %w", err)
+	}
+	if strings.TrimSpace(c.WhisperXCacheDir) == "" {
+		c.WhisperXCacheDir = defaultWhisperXCacheDir
+	}
+	if c.WhisperXCacheDir, err = expandPath(c.WhisperXCacheDir); err != nil {
+		return fmt.Errorf("whisperx_cache_dir: %w", err)
 	}
 	if c.ReviewDir, err = expandPath(c.ReviewDir); err != nil {
 		return fmt.Errorf("review_dir: %w", err)
@@ -530,6 +539,7 @@ subtitles_enabled = false                            # Enable WhisperX subtitle 
 whisperx_cuda_enabled = false                        # Run WhisperX with CUDA; set true when GPU + CUDA/cuDNN are installed
 whisperx_vad_method = "silero"                       # Voice activity detector: "silero" (default, no token) or "pyannote" (requires Hugging Face token)
 whisperx_hf_token = ""                               # Hugging Face access token for pyannote VAD (leave empty when using silero)
+whisperx_cache_dir = "~/.local/share/spindle/cache/whisperx" # Cache for WhisperX transcripts shared between stages
 opensubtitles_enabled = false                        # Set true to fetch subtitles from OpenSubtitles before falling back to WhisperX
 opensubtitles_api_key = "your_opensubtitles_api_key_here" # Required when opensubtitles_enabled is true; create at opensubtitles.com/consumers
 opensubtitles_user_agent = "Spindle/<version>"       # Custom User-Agent header registered with OpenSubtitles

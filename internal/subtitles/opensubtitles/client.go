@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	defaultBaseURL   = "https://api.opensubtitles.com/api/v1"
-	defaultUserAgent = "Spindle/dev"
+	defaultBaseURL     = "https://api.opensubtitles.com/api/v1"
+	defaultUserAgent   = "Spindle/dev"
+	defaultHTTPTimeout = 45 * time.Second
 )
 
 // Config describes the OpenSubtitles client configuration.
@@ -57,7 +58,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	return &Client{
 		apiKey:    apiKey,

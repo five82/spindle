@@ -2,6 +2,7 @@ package subtitles
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -51,6 +52,50 @@ func lastSRTTimestamp(path string) (float64, error) {
 		}
 	}
 	return last, nil
+}
+
+func firstSRTTimestamp(path string) (float64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("read srt: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	first := math.Inf(1)
+	found := false
+	for _, line := range lines {
+		if !strings.Contains(line, "-->") {
+			continue
+		}
+		parts := strings.Split(line, "-->")
+		if len(parts) != 2 {
+			continue
+		}
+		startText := strings.TrimSpace(parts[0])
+		seconds, err := parseSRTTimestamp(startText)
+		if err != nil {
+			continue
+		}
+		if seconds < first {
+			first = seconds
+		}
+		found = true
+	}
+	if !found {
+		return 0, nil
+	}
+	return first, nil
+}
+
+func subtitleBounds(path string) (float64, float64, error) {
+	first, err := firstSRTTimestamp(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	last, err := lastSRTTimestamp(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	return first, last, nil
 }
 
 func parseSRTTimestamp(value string) (float64, error) {

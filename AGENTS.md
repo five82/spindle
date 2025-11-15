@@ -13,7 +13,6 @@ CLAUDE.md is a symbolic link to this file so all agent guidance stays in one pla
 - Use `spindle stop` to completely stop the daemon.
 - Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → ORGANIZING → COMPLETED`, and be ready for `FAILED` or `REVIEW` detours.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn’t.
-- Treat the Python reference tree (`reference/python/src/spindle/**`) as read-only; only edit it if the user explicitly tells you to.
 
 ## Critical Expectations
 

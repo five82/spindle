@@ -45,14 +45,17 @@ type tokenValidationResult struct {
 
 // GenerateRequest describes the inputs for subtitle generation.
 type GenerateRequest struct {
-	SourcePath string
-	WorkDir    string
-	OutputDir  string
-	Language   string
-	BaseName   string
-	Context    SubtitleContext
-	Languages  []string
-	ForceAI    bool
+	SourcePath                string
+	WorkDir                   string
+	OutputDir                 string
+	Language                  string
+	BaseName                  string
+	Context                   SubtitleContext
+	Languages                 []string
+	ForceAI                   bool
+	TranscriptKey             string
+	AllowTranscriptCacheRead  bool
+	AllowTranscriptCacheWrite bool
 }
 
 // GenerateResult reports the generated subtitle file and summary stats.
@@ -60,6 +63,7 @@ type GenerateResult struct {
 	SubtitlePath string
 	SegmentCount int
 	Duration     time.Duration
+	Source       string // "opensubtitles" or "whisperx"
 }
 
 // Service orchestrates WhisperX execution and Stable-TS formatted subtitle output.
@@ -84,6 +88,11 @@ type Service struct {
 	openSubs            openSubtitlesClient
 	openSubsReadyLogged bool
 	openSubsCache       *opensubtitles.Cache
+	openSubsLastCall    time.Time
+	openSubsMu          sync.Mutex
+	transcriptCacheOnce sync.Once
+	transcriptCacheErr  error
+	transcriptCache     *transcriptCache
 	languages           []string
 }
 
@@ -241,6 +250,18 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			)
 		}
 		if result, ok, err := s.tryOpenSubtitles(ctx, plan, req); err != nil {
+			var suspect suspectMisIdentificationError
+			if errors.As(err, &suspect) {
+				if s.logger != nil {
+					s.logger.Warn("opensubtitles suggests mis-identification",
+						logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
+						logging.String("title", title),
+						logging.Int("season", req.Context.Season),
+						logging.Int("episode", req.Context.Episode),
+					)
+				}
+				return GenerateResult{}, err
+			}
 			if s.logger != nil {
 				s.logger.Warn("opensubtitles fetch failed",
 					logging.Error(err),
@@ -253,10 +274,12 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 				)
 			}
 		} else if ok {
+			result.Source = "opensubtitles"
 			if s.logger != nil {
 				s.logger.Info("using opensubtitles subtitles",
 					logging.String("subtitle_path", result.SubtitlePath),
 					logging.Int("segment_count", result.SegmentCount),
+					logging.String("subtitle_source", result.Source),
 				)
 			}
 			return result, nil
@@ -284,6 +307,16 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			}
 		}
 		s.logger.Info("opensubtitles download skipped", logging.String("reason", reason))
+	}
+
+	if req.AllowTranscriptCacheRead {
+		if cached, ok, err := s.tryLoadTranscriptFromCache(plan, req); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("transcript cache load failed", logging.Error(err))
+			}
+		} else if ok {
+			return cached, nil
+		}
 	}
 
 	if err := s.invokeWhisperX(ctx, plan); err != nil {
@@ -314,13 +347,17 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			logging.String("output", plan.outputFile),
 			logging.Int("segments", segmentCount),
 			logging.Float64("duration_seconds", finalDuration),
+			logging.String("subtitle_source", "whisperx"),
 		)
 	}
+
+	s.tryStoreTranscriptInCache(req, plan, segmentCount)
 
 	result := GenerateResult{
 		SubtitlePath: plan.outputFile,
 		SegmentCount: segmentCount,
 		Duration:     time.Duration(finalDuration * float64(time.Second)),
+		Source:       "whisperx",
 	}
 	return result, nil
 }
@@ -453,6 +490,113 @@ func (s *Service) reshapeSubtitles(ctx context.Context, whisperSRT, whisperJSON,
 		}
 	}
 	return nil
+}
+
+func (s *Service) ensureTranscriptCache() error {
+	if s == nil || s.config == nil {
+		return errors.New("subtitle service unavailable")
+	}
+	s.transcriptCacheOnce.Do(func() {
+		dir := strings.TrimSpace(s.config.WhisperXCacheDir)
+		if dir == "" {
+			s.transcriptCache = nil
+			s.transcriptCacheErr = nil
+			return
+		}
+		cache, err := newTranscriptCache(dir, s.logger)
+		if err != nil {
+			s.transcriptCacheErr = err
+			return
+		}
+		s.transcriptCache = cache
+	})
+	return s.transcriptCacheErr
+}
+
+func (s *Service) tryLoadTranscriptFromCache(plan *generationPlan, req GenerateRequest) (GenerateResult, bool, error) {
+	if plan == nil || s == nil || !req.AllowTranscriptCacheRead || strings.TrimSpace(req.TranscriptKey) == "" {
+		return GenerateResult{}, false, nil
+	}
+	if err := s.ensureTranscriptCache(); err != nil {
+		return GenerateResult{}, false, err
+	}
+	if s.transcriptCache == nil {
+		return GenerateResult{}, false, nil
+	}
+	data, meta, ok, err := s.transcriptCache.Load(req.TranscriptKey)
+	if err != nil {
+		return GenerateResult{}, false, err
+	}
+	if !ok || len(data) == 0 {
+		return GenerateResult{}, false, nil
+	}
+	if err := os.WriteFile(plan.outputFile, data, 0o644); err != nil {
+		return GenerateResult{}, false, err
+	}
+	segmentCount, err := countSRTCues(plan.outputFile)
+	if err != nil {
+		return GenerateResult{}, false, err
+	}
+	if segmentCount == 0 {
+		return GenerateResult{}, false, nil
+	}
+	finalDuration := plan.totalSeconds
+	if finalDuration <= 0 {
+		if last, err := lastSRTTimestamp(plan.outputFile); err == nil && last > 0 {
+			finalDuration = last
+		}
+	}
+	if s.logger != nil {
+		s.logger.Info("whisperx transcript cache hit",
+			logging.String("cache_key", req.TranscriptKey),
+			logging.Int("segments", segmentCount),
+			logging.String("language", strings.TrimSpace(meta.Language)),
+		)
+	}
+	result := GenerateResult{
+		SubtitlePath: plan.outputFile,
+		SegmentCount: segmentCount,
+		Duration:     time.Duration(finalDuration * float64(time.Second)),
+	}
+	return result, true, nil
+}
+
+func (s *Service) tryStoreTranscriptInCache(req GenerateRequest, plan *generationPlan, segmentCount int) {
+	if plan == nil || s == nil || !req.AllowTranscriptCacheWrite || strings.TrimSpace(req.TranscriptKey) == "" {
+		return
+	}
+	if err := s.ensureTranscriptCache(); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("whisperx transcript cache unavailable", logging.Error(err))
+		}
+		return
+	}
+	if s.transcriptCache == nil {
+		return
+	}
+	data, err := os.ReadFile(plan.outputFile)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("whisperx transcript cache read failed", logging.Error(err))
+		}
+		return
+	}
+	language := strings.TrimSpace(req.Context.Language)
+	if language == "" {
+		language = plan.language
+	}
+	if _, err := s.transcriptCache.Store(req.TranscriptKey, language, segmentCount, data); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("whisperx transcript cache store failed", logging.Error(err))
+		}
+		return
+	}
+	if s.logger != nil {
+		s.logger.Info("whisperx transcript cached",
+			logging.String("cache_key", req.TranscriptKey),
+			logging.Int("segments", segmentCount),
+		)
+	}
 }
 
 func normalizeWhisperLanguage(language string) string {

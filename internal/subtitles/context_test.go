@@ -46,6 +46,9 @@ func TestBuildSubtitleContextFromMetadata(t *testing.T) {
 	if ctx.ContentKey != "tmdb:movie:12345" {
 		t.Fatalf("expected content key tmdb:movie:12345, got %q", ctx.ContentKey)
 	}
+	if ctx.ShowTitle != "" {
+		t.Fatalf("expected empty show title for movie, got %q", ctx.ShowTitle)
+	}
 }
 
 func TestBuildSubtitleContextFallsBackToDiscTitle(t *testing.T) {
@@ -69,5 +72,33 @@ func TestBuildSubtitleContextFallsBackToDiscTitle(t *testing.T) {
 	}
 	if ctx.ContentKey != "" {
 		t.Fatalf("expected empty content key, got %q", ctx.ContentKey)
+	}
+	if ctx.ShowTitle != "Unknown Title (1999)" {
+		t.Fatalf("expected show title fallback, got %q", ctx.ShowTitle)
+	}
+}
+
+func TestBuildSubtitleContextSetsShowTitleFromMetadata(t *testing.T) {
+	item := &queue.Item{
+		DiscTitle: "South Park",
+		MetadataJSON: `{
+			"title": "South Park – Disc 1",
+			"media_type": "tv",
+			"show_title": "South Park",
+			"season_number": 5,
+			"episode_numbers": [1]
+		}`,
+	}
+	ctx := BuildSubtitleContext(item)
+	if ctx.ShowTitle != "South Park" {
+		t.Fatalf("expected show title South Park, got %q", ctx.ShowTitle)
+	}
+	if ctx.SeriesTitle() != "South Park" {
+		t.Fatalf("expected series title South Park, got %q", ctx.SeriesTitle())
+	}
+	ctx.Title = "South Park – Terrance and Phillip"
+	ctx.ShowTitle = ""
+	if got := ctx.SeriesTitle(); got != "South Park" {
+		t.Fatalf("expected derived series title South Park, got %q", got)
 	}
 }

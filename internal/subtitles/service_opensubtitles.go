@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,29 @@ import (
 	"spindle/internal/logging"
 	"spindle/internal/services"
 	"spindle/internal/subtitles/opensubtitles"
+)
+
+const (
+	openSubtitlesMinInterval      = time.Second
+	openSubtitlesMaxRateRetries   = 4
+	openSubtitlesInitialBackoff   = 2 * time.Second
+	openSubtitlesMaxBackoff       = 12 * time.Second
+	subtitleIntroAllowanceSeconds = 45.0
+	subtitleIntroMinimumSeconds   = 5.0
+	suspectOffsetSeconds          = 60.0
+	suspectRuntimeMismatchRatio   = 0.07
+)
+
+type (
+	durationMismatchError struct {
+		deltaSeconds float64
+		videoSeconds float64
+		release      string
+	}
+
+	suspectMisIdentificationError struct {
+		deltas []float64
+	}
 )
 
 func (s *Service) shouldUseOpenSubtitles() bool {
@@ -28,6 +52,28 @@ func (s *Service) shouldUseOpenSubtitles() bool {
 		return false
 	}
 	return true
+}
+
+func (e durationMismatchError) Error() string {
+	return fmt.Sprintf("subtitle duration delta %.1fs exceeds tolerance", e.deltaSeconds)
+}
+
+func (e suspectMisIdentificationError) Error() string {
+	return "opensubtitles candidates suggest mis-identification (large consistent offset)"
+}
+
+func (e suspectMisIdentificationError) medianAbsDelta() float64 {
+	if len(e.deltas) == 0 {
+		return 0
+	}
+	values := append([]float64(nil), e.deltas...)
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	mid := len(values) / 2
+	median := math.Abs(values[mid])
+	if len(values)%2 == 0 {
+		median = (math.Abs(values[mid-1]) + math.Abs(values[mid])) / 2
+	}
+	return median
 }
 
 func (s *Service) ensureOpenSubtitlesReady() error {
@@ -94,25 +140,43 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 	}
 
 	parentID := req.Context.ParentID()
+	queryTitle := strings.TrimSpace(req.Context.Title)
+	if !req.Context.IsMovie() {
+		if series := strings.TrimSpace(req.Context.SeriesTitle()); series != "" {
+			queryTitle = series
+		}
+	}
+	year := strings.TrimSpace(req.Context.Year)
+	if !req.Context.IsMovie() {
+		// Episode metadata rarely includes per-episode air dates, so avoid sending a
+		// season-level year that can incorrectly exclude matches.
+		year = ""
+	}
 	searchReq := opensubtitles.SearchRequest{
 		IMDBID:       req.Context.IMDBID,
-		Query:        strings.TrimSpace(req.Context.Title),
+		Query:        queryTitle,
 		Languages:    append([]string(nil), req.Languages...),
 		MediaType:    mediaTypeForContext(req.Context),
-		Year:         strings.TrimSpace(req.Context.Year),
+		Year:         year,
 		Season:       req.Context.Season,
 		Episode:      req.Context.Episode,
 		ParentTMDBID: parentID,
 	}
-	if req.Context.IsMovie() {
-		searchReq.TMDBID = req.Context.TMDBID
-	} else if episodeID := req.Context.EpisodeID(); episodeID > 0 {
-		searchReq.TMDBID = episodeID
-	}
 
-	resp, err := s.openSubs.Search(ctx, searchReq)
-	if err != nil {
-		return GenerateResult{}, false, err
+	var (
+		resp      opensubtitles.SearchResponse
+		searchErr error
+	)
+	if req.Context.IsMovie() || req.Context.Season <= 0 || req.Context.Episode <= 0 {
+		resp, searchErr = s.invokeOpenSubtitlesSearch(ctx, searchReq)
+	} else {
+		base := searchReq
+		base.TMDBID = 0
+		showTitle := req.Context.SeriesTitle()
+		resp, searchErr = s.searchEpisodeWithVariants(ctx, base, showTitle, req.Context.Season, req.Context.Episode, req.Context.EpisodeID())
+	}
+	if searchErr != nil {
+		return GenerateResult{}, false, searchErr
 	}
 	if s.logger != nil {
 		s.logger.Info("opensubtitles search completed",
@@ -149,19 +213,42 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		}
 	}
 
-	var lastErr error
+	var (
+		lastErr       error
+		mismatchErrs  []durationMismatchError
+		allDurationMM = true
+	)
 	for idx, candidate := range scored {
 		result, err := s.downloadAndAlignCandidate(ctx, plan, req, candidate.subtitle)
 		if err != nil {
 			lastErr = err
+			var mismatch durationMismatchError
+			if errors.As(err, &mismatch) {
+				mismatchErrs = append(mismatchErrs, mismatch)
+			} else {
+				allDurationMM = false
+			}
 			if s.logger != nil {
-				s.logger.Warn("opensubtitles candidate failed",
-					logging.Error(err),
-					logging.Int("rank", idx+1),
-					logging.String("language", candidate.subtitle.Language),
-					logging.String("release", candidate.subtitle.Release),
-					logging.Float64("score", candidate.score),
-				)
+				isSoft := errors.As(err, &mismatch)
+				if isSoft {
+					s.logger.Info("opensubtitles candidate failed (soft)",
+						logging.Error(err),
+						logging.Int("rank", idx+1),
+						logging.String("language", candidate.subtitle.Language),
+						logging.String("release", candidate.subtitle.Release),
+						logging.Float64("score", candidate.score),
+						logging.Bool("soft_reject", true),
+					)
+				} else {
+					s.logger.Warn("opensubtitles candidate failed",
+						logging.Error(err),
+						logging.Int("rank", idx+1),
+						logging.String("language", candidate.subtitle.Language),
+						logging.String("release", candidate.subtitle.Release),
+						logging.Float64("score", candidate.score),
+						logging.Bool("soft_reject", false),
+					)
+				}
 			}
 			continue
 		}
@@ -180,9 +267,32 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 	}
 
 	if lastErr != nil {
+		if len(mismatchErrs) == len(scored) && len(scored) > 0 && allDurationMM {
+			if suspect := buildSuspectError(mismatchErrs); suspect != nil {
+				return GenerateResult{}, false, suspect
+			}
+		}
 		return GenerateResult{}, false, lastErr
 	}
 	return GenerateResult{}, false, nil
+}
+
+func buildSuspectError(errors []durationMismatchError) error {
+	if len(errors) == 0 {
+		return nil
+	}
+	deltas := make([]float64, 0, len(errors))
+	for _, e := range errors {
+		if e.videoSeconds <= 0 {
+			return nil
+		}
+		deltas = append(deltas, e.deltaSeconds)
+		rel := math.Abs(e.deltaSeconds) / e.videoSeconds
+		if math.Abs(e.deltaSeconds) < suspectOffsetSeconds && rel < suspectRuntimeMismatchRatio {
+			return nil
+		}
+	}
+	return suspectMisIdentificationError{deltas: deltas}
 }
 
 func (s *Service) alignDownloadedSubtitles(ctx context.Context, plan *generationPlan, inputPath, outputPath, language string) error {
@@ -275,6 +385,167 @@ func (s *Service) storeOpenSubtitlesPayload(candidate opensubtitles.Subtitle, pa
 	}
 }
 
+func (s *Service) searchEpisodeWithVariants(ctx context.Context, base opensubtitles.SearchRequest, showTitle string, season, episode int, episodeTMDBID int64) (opensubtitles.SearchResponse, error) {
+	variants := opensubtitles.EpisodeSearchVariants(base, showTitle, season, episode, episodeTMDBID)
+	var resp opensubtitles.SearchResponse
+	for attempt, variant := range variants {
+		if s.logger != nil && attempt == 0 {
+			s.logger.Info("opensubtitles search variant",
+				logging.Int("season", season),
+				logging.Int("episode", episode),
+				logging.String("query", strings.TrimSpace(variant.Query)),
+				logging.Int64("tmdb_id", variant.TMDBID),
+				logging.Int64("parent_tmdb_id", variant.ParentTMDBID),
+			)
+		}
+		var err error
+		resp, err = s.invokeOpenSubtitlesSearch(ctx, variant)
+		if err != nil {
+			return opensubtitles.SearchResponse{}, fmt.Errorf("opensubtitles search s%02de%02d attempt %d: %w", season, episode, attempt+1, err)
+		}
+		if len(resp.Subtitles) == 0 {
+			if s.logger != nil {
+				s.logger.Warn("opensubtitles returned no candidates",
+					logging.Int("season", season),
+					logging.Int("episode", episode),
+					logging.Int("attempt", attempt+1),
+				)
+			}
+			continue
+		}
+		if attempt > 0 && s.logger != nil {
+			s.logger.Info("opensubtitles fallback search succeeded",
+				logging.Int("season", season),
+				logging.Int("episode", episode),
+				logging.Int("attempt", attempt+1),
+			)
+		}
+		return resp, nil
+	}
+	return opensubtitles.SearchResponse{}, nil
+}
+
+func (s *Service) invokeOpenSubtitlesSearch(ctx context.Context, req opensubtitles.SearchRequest) (opensubtitles.SearchResponse, error) {
+	if err := s.ensureOpenSubtitlesReady(); err != nil {
+		return opensubtitles.SearchResponse{}, err
+	}
+	if s.openSubs == nil {
+		return opensubtitles.SearchResponse{}, errors.New("opensubtitles client unavailable")
+	}
+	var resp opensubtitles.SearchResponse
+	if err := s.invokeOpenSubtitles(ctx, func() error {
+		var err error
+		resp, err = s.openSubs.Search(ctx, req)
+		return err
+	}); err != nil {
+		return opensubtitles.SearchResponse{}, err
+	}
+	return resp, nil
+}
+
+func (s *Service) invokeOpenSubtitles(ctx context.Context, op func() error) error {
+	if op == nil {
+		return errors.New("opensubtitles operation unavailable")
+	}
+	attempt := 0
+	for {
+		if err := s.waitForOpenSubtitlesWindow(ctx); err != nil {
+			return err
+		}
+		err := op()
+		s.markOpenSubtitlesCall()
+		if err == nil {
+			return nil
+		}
+		if !isOpenSubtitlesRetriable(err) || attempt >= openSubtitlesMaxRateRetries {
+			return err
+		}
+		attempt++
+		backoff := openSubtitlesInitialBackoff * time.Duration(1<<uint(attempt-1))
+		if backoff > openSubtitlesMaxBackoff {
+			backoff = openSubtitlesMaxBackoff
+		}
+		if s.logger != nil {
+			s.logger.Warn("opensubtitles rate limited",
+				logging.Duration("backoff", backoff),
+				logging.Int("attempt", attempt),
+			)
+		}
+		if err := sleepWithContext(ctx, backoff); err != nil {
+			return err
+		}
+	}
+}
+
+func (s *Service) waitForOpenSubtitlesWindow(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("context unavailable")
+	}
+	s.openSubsMu.Lock()
+	lastCall := s.openSubsLastCall
+	s.openSubsMu.Unlock()
+	if lastCall.IsZero() {
+		return nil
+	}
+	elapsed := time.Since(lastCall)
+	if elapsed >= openSubtitlesMinInterval {
+		return nil
+	}
+	return sleepWithContext(ctx, openSubtitlesMinInterval-elapsed)
+}
+
+func (s *Service) markOpenSubtitlesCall() {
+	s.openSubsMu.Lock()
+	s.openSubsLastCall = time.Now()
+	s.openSubsMu.Unlock()
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func isOpenSubtitlesRetriable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "429") || strings.Contains(message, "rate limit") {
+		return true
+	}
+	timeoutTokens := []string{
+		"timeout",
+		"deadline exceeded",
+		"client.timeout exceeded",
+		"connection reset",
+		"connection refused",
+		"temporary failure",
+		"awaiting headers",
+	}
+	for _, token := range timeoutTokens {
+		if strings.Contains(message, token) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generationPlan, req GenerateRequest, candidate opensubtitles.Subtitle) (GenerateResult, error) {
 	if plan == nil {
 		return GenerateResult{}, errors.New("generation plan not initialized")
@@ -344,14 +615,37 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 	if err != nil {
 		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "duration inspect", "Failed to compare subtitle duration", err)
 	}
+	if mismatch && delta > 0 {
+		if start, last, boundsErr := subtitleBounds(plan.outputFile); boundsErr == nil {
+			introGap := start
+			if introGap < 0 {
+				introGap = 0
+			}
+			tailDelta := plan.totalSeconds - last
+			if introGap >= subtitleIntroMinimumSeconds && tailDelta > 0 && tailDelta <= subtitleIntroAllowanceSeconds {
+				if s.logger != nil {
+					s.logger.Info("opensubtitles accepted with intro gap",
+						logging.Float64("intro_gap_seconds", introGap),
+						logging.Float64("tail_delta_seconds", tailDelta),
+						logging.String("release", candidate.Release),
+					)
+				}
+				mismatch = false
+			}
+		}
+	}
 	if mismatch {
 		if s.logger != nil {
-			s.logger.Warn("opensubtitles candidate rejected due to duration mismatch",
+			s.logger.Info("opensubtitles candidate soft-rejected (duration mismatch)",
 				logging.Float64("delta_seconds", delta),
 				logging.String("release", candidate.Release),
 			)
 		}
-		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "duration mismatch", fmt.Sprintf("subtitle duration delta %.1fs exceeds tolerance", delta), nil)
+		return GenerateResult{}, durationMismatchError{
+			deltaSeconds: delta,
+			videoSeconds: plan.totalSeconds,
+			release:      candidate.Release,
+		}
 	}
 
 	if s.logger != nil {
@@ -375,6 +669,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 		SubtitlePath: plan.outputFile,
 		SegmentCount: segmentCount,
 		Duration:     time.Duration(finalDuration * float64(time.Second)),
+		Source:       "opensubtitles",
 	}, nil
 }
 

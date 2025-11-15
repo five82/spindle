@@ -2,6 +2,7 @@ package subtitles
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -100,39 +101,70 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		if ctxMeta.ContentKey == "" {
 			ctxMeta.ContentKey = target.EpisodeKey
 		}
+		cacheKey := BuildTranscriptCacheKey(item.ID, target.EpisodeKey)
 		result, err := s.service.Generate(ctx, GenerateRequest{
-			SourcePath: target.SourcePath,
-			WorkDir:    target.WorkDir,
-			OutputDir:  target.OutputDir,
-			BaseName:   target.BaseName,
-			Context:    ctxMeta,
-			Languages:  append([]string(nil), s.service.languages...),
+			SourcePath:                target.SourcePath,
+			WorkDir:                   target.WorkDir,
+			OutputDir:                 target.OutputDir,
+			BaseName:                  target.BaseName,
+			Context:                   ctxMeta,
+			Languages:                 append([]string(nil), s.service.languages...),
+			TranscriptKey:             cacheKey,
+			AllowTranscriptCacheRead:  cacheKey != "",
+			AllowTranscriptCacheWrite: cacheKey != "",
 		})
 		if err != nil {
-			message := strings.TrimSpace(err.Error())
-			if message == "" {
-				message = "Subtitle generation failed"
+			var suspect suspectMisIdentificationError
+			if errors.As(err, &suspect) {
+				if handled, retryResult, handleErr := s.handleSuspectMisID(ctx, item, target, ctxMeta, suspect); handleErr == nil && handled {
+					result = retryResult
+				} else {
+					if handleErr != nil && s.logger != nil {
+						s.logger.Warn("misidentification handling failed", logging.Error(handleErr))
+					}
+					if s.logger != nil {
+						s.logger.Warn("subtitle generation flagged for review",
+							logging.Int64("item_id", item.ID),
+							logging.String("source", target.SourcePath),
+							logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
+						)
+					}
+					item.NeedsReview = true
+					item.ReviewReason = "suspect mis-identification from subtitle offsets"
+					item.ProgressMessage = "Subtitles diverted to review (suspect mis-identification)"
+					item.ProgressPercent = 100
+					if err := s.store.Update(ctx, item); err != nil {
+						return services.Wrap(services.ErrTransient, "subtitles", "persist review", "Failed to persist review flag", err)
+					}
+					return nil
+				}
+			} else {
+				message := strings.TrimSpace(err.Error())
+				if message == "" {
+					message = "Subtitle generation failed"
+				}
+				if s.logger != nil {
+					s.logger.Warn("subtitle generation skipped",
+						logging.Int64("item_id", item.ID),
+						logging.String("source", target.SourcePath),
+						logging.Error(err),
+					)
+				}
+				item.ProgressMessage = fmt.Sprintf("Subtitle generation skipped: %s", message)
+				item.ProgressPercent = 100
+				item.ErrorMessage = message
+				if err := s.store.UpdateProgress(ctx, item); err != nil {
+					return services.Wrap(services.ErrTransient, "subtitles", "persist skip", "Failed to persist subtitle skip status", err)
+				}
+				return nil
 			}
-			if s.logger != nil {
-				s.logger.Warn("subtitle generation skipped",
-					logging.Int64("item_id", item.ID),
-					logging.String("source", target.SourcePath),
-					logging.Error(err),
-				)
-			}
-			item.ProgressMessage = fmt.Sprintf("Subtitle generation skipped: %s", message)
-			item.ProgressPercent = 100
-			item.ErrorMessage = message
-			if err := s.store.UpdateProgress(ctx, item); err != nil {
-				return services.Wrap(services.ErrTransient, "subtitles", "persist skip", "Failed to persist subtitle skip status", err)
-			}
-			return nil
 		}
 		if s.logger != nil {
 			s.logger.Info("subtitle generation complete",
 				logging.String("source", target.SourcePath),
 				logging.String("subtitle", result.SubtitlePath),
 				logging.Int("segments", result.SegmentCount),
+				logging.String("subtitle_source", result.Source),
 			)
 		}
 	}
@@ -168,6 +200,26 @@ func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message st
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}
 	return nil
+}
+
+func (s *Stage) handleSuspectMisID(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, suspect suspectMisIdentificationError) (bool, GenerateResult, error) {
+	// Best-effort auto-fix: fall back to local WhisperX generation (no OpenSubtitles)
+	result, err := s.service.Generate(ctx, GenerateRequest{
+		SourcePath:                target.SourcePath,
+		WorkDir:                   target.WorkDir,
+		OutputDir:                 target.OutputDir,
+		BaseName:                  target.BaseName,
+		Context:                   ctxMeta,
+		Languages:                 append([]string(nil), s.service.languages...),
+		ForceAI:                   true,
+		TranscriptKey:             BuildTranscriptCacheKey(item.ID, target.EpisodeKey),
+		AllowTranscriptCacheRead:  true,
+		AllowTranscriptCacheWrite: true,
+	})
+	if err != nil {
+		return false, GenerateResult{}, err
+	}
+	return true, result, nil
 }
 
 func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
