@@ -50,7 +50,6 @@ type Config struct {
 	LogFormat                     string   `toml:"log_format"`
 	LogLevel                      string   `toml:"log_level"`
 	DraptoPreset                  int      `toml:"drapto_preset"`
-	DraptoDisableDenoise          bool     `toml:"drapto_disable_denoise"`
 	SubtitlesEnabled              bool     `toml:"subtitles_enabled"`
 	WhisperXCUDAEnabled           bool     `toml:"whisperx_cuda_enabled"`
 	WhisperXVADMethod             string   `toml:"whisperx_vad_method"`
@@ -563,7 +562,6 @@ identification_overrides_path = "~/.config/spindle/overrides/identification.json
 # ============================================================================
 
 drapto_preset = 4                                    # Drapto SVT-AV1 preset (lower is faster, higher is higher quality)
-drapto_disable_denoise = false                       # Set true to pass --no-denoise to Drapto
 
 # ============================================================================
 # WORKFLOW TUNING (ADVANCED)

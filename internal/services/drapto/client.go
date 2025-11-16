@@ -47,10 +47,9 @@ func WithBinary(binary string) Option {
 
 // CLI wraps the drapto command-line encoder.
 type CLI struct {
-	binary         string
-	logDir         string
-	preset         int
-	disableDenoise bool
+	binary string
+	logDir string
+	preset int
 }
 
 // NewCLI constructs a CLI client using defaults.
@@ -78,13 +77,6 @@ func WithPreset(preset int) Option {
 		if preset >= 0 {
 			c.preset = preset
 		}
-	}
-}
-
-// WithDisableDenoise toggles passing --no-denoise to Drapto.
-func WithDisableDenoise(disable bool) Option {
-	return func(c *CLI) {
-		c.disableDenoise = disable
 	}
 }
 
@@ -118,9 +110,6 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 	}
 	if logDir := strings.TrimSpace(c.logDir); logDir != "" {
 		args = append(args, "--log-dir", logDir)
-	}
-	if c.disableDenoise {
-		args = append(args, "--no-denoise")
 	}
 	args = append(args, "--progress-json")
 	cmd := commandContext(ctx, c.binary, args...) //nolint:gosec

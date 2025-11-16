@@ -206,7 +206,6 @@ func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *En
 		drapto.WithBinary(cfg.DraptoBinary()),
 		drapto.WithLogDir(draptoLogDirFromConfig(cfg)),
 		drapto.WithPreset(cfg.DraptoPreset),
-		drapto.WithDisableDenoise(cfg.DraptoDisableDenoise),
 	)
 	return NewEncoderWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
@@ -638,9 +637,6 @@ func (e *Encoder) draptoCommand(inputPath, outputDir string) string {
 	if logDir != "" {
 		parts = append(parts, fmt.Sprintf("--log-dir %q", logDir))
 	}
-	if e.draptoDisableDenoise() {
-		parts = append(parts, "--no-denoise")
-	}
 	parts = append(parts, "--progress-json")
 	return strings.Join(parts, " ")
 }
@@ -687,13 +683,6 @@ func (e *Encoder) draptoPreset() int {
 		return cfg.DraptoPreset
 	}
 	return e.cfg.DraptoPreset
-}
-
-func (e *Encoder) draptoDisableDenoise() bool {
-	if e == nil || e.cfg == nil {
-		return false
-	}
-	return e.cfg.DraptoDisableDenoise
 }
 
 func draptoLogDirFromConfig(cfg *config.Config) string {

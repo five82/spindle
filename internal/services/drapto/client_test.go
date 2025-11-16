@@ -90,7 +90,7 @@ func TestCLIEncodeIncludesEncodingFlags(t *testing.T) {
 		commandContext = original
 	})
 
-	cli := NewCLI(WithPreset(6), WithDisableDenoise(true))
+	cli := NewCLI(WithPreset(6))
 	tempDir := t.TempDir()
 	input := filepath.Join(tempDir, "movie.mkv")
 	outputDir := filepath.Join(tempDir, "encoded")
@@ -118,8 +118,8 @@ func TestCLIEncodeIncludesEncodingFlags(t *testing.T) {
 		t.Fatalf("expected preset value 6, got %q", capturedArgs[idx+1])
 	}
 
-	if findArg(capturedArgs, "--no-denoise") == -1 {
-		t.Fatalf("expected Drapto command to include --no-denoise, got %v", capturedArgs)
+	if findArg(capturedArgs, "--no-denoise") != -1 {
+		t.Fatalf("expected Drapto command to omit --no-denoise, got %v", capturedArgs)
 	}
 
 	if findArg(capturedArgs, "--progress-json") == -1 {
