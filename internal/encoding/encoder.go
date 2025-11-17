@@ -19,6 +19,7 @@ import (
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripcache"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/services/drapto"
@@ -32,6 +33,7 @@ type Encoder struct {
 	logger   *slog.Logger
 	client   drapto.Client
 	notifier notifications.Service
+	cache    *ripcache.Manager
 }
 
 const (
@@ -212,7 +214,13 @@ func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *En
 
 // NewEncoderWithDependencies allows injecting custom dependencies (used for tests).
 func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client drapto.Client, notifier notifications.Service) *Encoder {
-	enc := &Encoder{store: store, cfg: cfg, client: client, notifier: notifier}
+	enc := &Encoder{
+		store:    store,
+		cfg:      cfg,
+		client:   client,
+		notifier: notifier,
+		cache:    ripcache.NewManager(cfg, logger),
+	}
 	enc.SetLogger(logger)
 	return enc
 }
@@ -266,6 +274,23 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			"No ripped file available for encoding; ensure the ripping stage completed successfully",
 			nil,
 		)
+	}
+
+	if e.cache != nil {
+		ripDir := filepath.Dir(strings.TrimSpace(item.RippedFile))
+		if !fileExists(item.RippedFile) {
+			if restored, err := e.cache.Restore(ctx, item, ripDir); err != nil {
+				return services.Wrap(
+					services.ErrTransient,
+					"encoding",
+					"restore rip cache",
+					"Failed to restore ripped files from cache; check cache path and permissions",
+					err,
+				)
+			} else if restored {
+				logger.Info("restored ripped files from cache", logging.String("rip_dir", ripDir))
+			}
+		}
 	}
 
 	stagingRoot := item.StagingRoot(e.cfg.StagingDir)
@@ -499,6 +524,11 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(strings.TrimSpace(path))
+	return err == nil && !info.IsDir()
 }
 
 func (e *Encoder) validateEncodedArtifact(ctx context.Context, path string, startedAt time.Time) error {

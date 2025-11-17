@@ -20,6 +20,9 @@ type Config struct {
 	WhisperXCacheDir              string   `toml:"whisperx_cache_dir"`
 	DraptoLogDir                  string   `toml:"drapto_log_dir"`
 	ReviewDir                     string   `toml:"review_dir"`
+	RipCacheEnabled               bool     `toml:"rip_cache_enabled"`
+	RipCacheDir                   string   `toml:"rip_cache_dir"`
+	RipCacheMaxGiB                int      `toml:"rip_cache_max_gib"`
 	OpticalDrive                  string   `toml:"optical_drive"`
 	APIBind                       string   `toml:"api_bind"`
 	TMDBAPIKey                    string   `toml:"tmdb_api_key"`
@@ -86,6 +89,7 @@ const (
 	defaultKeyDBDownloadTimeout        = 300
 	defaultIdentificationOverridesPath = "~/.config/spindle/overrides/identification.json"
 	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
+	defaultRipCacheMaxGiB              = 150
 )
 
 // Default returns a Config populated with repository defaults.
@@ -98,6 +102,9 @@ func Default() Config {
 		WhisperXCacheDir:            defaultWhisperXCacheDir,
 		DraptoLogDir:                defaultDraptoLogDir,
 		ReviewDir:                   defaultReviewDir,
+		RipCacheEnabled:             false,
+		RipCacheDir:                 defaultRipCacheDir(),
+		RipCacheMaxGiB:              defaultRipCacheMaxGiB,
 		OpticalDrive:                defaultOpticalDrive,
 		APIBind:                     defaultAPIBind,
 		TMDBLanguage:                defaultTMDBLanguage,
@@ -227,6 +234,15 @@ func (c *Config) normalize() error {
 	}
 	if c.WhisperXCacheDir, err = expandPath(c.WhisperXCacheDir); err != nil {
 		return fmt.Errorf("whisperx_cache_dir: %w", err)
+	}
+	if strings.TrimSpace(c.RipCacheDir) == "" {
+		c.RipCacheDir = defaultRipCacheDir()
+	}
+	if c.RipCacheDir, err = expandPath(c.RipCacheDir); err != nil {
+		return fmt.Errorf("rip_cache_dir: %w", err)
+	}
+	if c.RipCacheMaxGiB <= 0 {
+		c.RipCacheMaxGiB = defaultRipCacheMaxGiB
 	}
 	if c.ReviewDir, err = expandPath(c.ReviewDir); err != nil {
 		return fmt.Errorf("review_dir: %w", err)
@@ -412,6 +428,14 @@ func (c *Config) Validate() error {
 			return errors.New("opensubtitles_languages must include at least one language when opensubtitles_enabled is true")
 		}
 	}
+	if c.RipCacheEnabled {
+		if strings.TrimSpace(c.RipCacheDir) == "" {
+			return errors.New("rip_cache_dir must be set when rip_cache_enabled is true")
+		}
+		if c.RipCacheMaxGiB <= 0 {
+			return errors.New("rip_cache_max_gib must be positive when rip_cache_enabled is true")
+		}
+	}
 	return nil
 }
 
@@ -420,6 +444,11 @@ func (c *Config) EnsureDirectories() error {
 	for _, dir := range []string{c.StagingDir, c.LibraryDir, c.LogDir, c.ReviewDir, c.DraptoLogDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory %q: %w", dir, err)
+		}
+	}
+	if c.RipCacheEnabled && strings.TrimSpace(c.RipCacheDir) != "" {
+		if err := os.MkdirAll(c.RipCacheDir, 0o755); err != nil {
+			return fmt.Errorf("create rip cache directory %q: %w", c.RipCacheDir, err)
 		}
 	}
 	if strings.TrimSpace(c.PlexAuthPath) != "" {
@@ -486,6 +515,17 @@ func ExpandPath(pathValue string) (string, error) {
 	return expandPath(pathValue)
 }
 
+func defaultRipCacheDir() string {
+	if base, ok := os.LookupEnv("XDG_CACHE_HOME"); ok && strings.TrimSpace(base) != "" {
+		return filepath.Join(base, "spindle", "rips")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "~/.cache/spindle/rips"
+	}
+	return filepath.Join(home, ".cache", "spindle", "rips")
+}
+
 // CreateSample writes a sample configuration file to the specified location.
 func CreateSample(path string) error {
 	sample := `# Spindle Configuration
@@ -517,6 +557,11 @@ drapto_log_dir = "~/.local/share/spindle/logs/drapto" # Drapto encoder log files
 review_dir = "~/review"                              # Encoded files awaiting manual identification
 optical_drive = "/dev/sr0"                           # Optical drive device path
 api_bind = "127.0.0.1:7487"                          # HTTP API bind address (host:port)
+
+# Optional rip cache (disabled by default)
+rip_cache_enabled = false                            # Keep copies of ripped files to avoid re-ripping after failures
+rip_cache_dir = "~/.cache/spindle/rips"              # Defaults to XDG_CACHE_HOME/spindle/rips when set
+rip_cache_max_gib = 150                              # Cache budget in GiB; oldest entries pruned when the cap or 80% disk fullness is hit
 
 # ============================================================================
 # OPTIONAL SERVICES

@@ -148,6 +148,8 @@ spindle plex link
 - `spindle test-notify`
 - `spindle config validate`
 - `spindle show --lines 50 --follow` for live tailing
+- `spindle cache stats` (shows rip cache usage; requires `rip_cache_enabled = true` in `config.toml`)
+- `spindle cache prune` (forces immediate pruning to size/free-space targets)
 
 ### HTTP API
 

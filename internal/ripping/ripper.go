@@ -24,6 +24,7 @@ import (
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripcache"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/services/makemkv"
@@ -38,6 +39,7 @@ type Ripper struct {
 	client         makemkv.Ripper
 	notifier       notifications.Service
 	contentMatcher *contentid.Matcher
+	cache          *ripcache.Manager
 }
 
 const (
@@ -61,7 +63,14 @@ func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *s
 	if cfg != nil {
 		matcher = contentid.NewMatcher(cfg, logger)
 	}
-	rip := &Ripper{store: store, cfg: cfg, client: client, notifier: notifier, contentMatcher: matcher}
+	rip := &Ripper{
+		store:          store,
+		cfg:            cfg,
+		client:         client,
+		notifier:       notifier,
+		contentMatcher: matcher,
+		cache:          ripcache.NewManager(cfg, logger),
+	}
 	rip.SetLogger(logger)
 	return rip
 }
@@ -96,9 +105,10 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
+func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	logger := logging.WithContext(ctx, r.logger)
 	startedAt := time.Now()
+	var cacheCleanup string
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
 		return services.Wrap(
@@ -149,7 +159,33 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	if stagingRoot == "" {
 		stagingRoot = filepath.Join(strings.TrimSpace(r.cfg.StagingDir), fmt.Sprintf("queue-%d", item.ID))
 	}
+
+	useCache := r.cache != nil
 	destDir := filepath.Join(stagingRoot, "rips")
+	if useCache {
+		destDir = r.cache.Path(item)
+	}
+
+	if useCache {
+		if err := os.MkdirAll(destDir, 0o755); err != nil {
+			return services.Wrap(
+				services.ErrConfiguration,
+				"ripping",
+				"ensure cache dir",
+				"Failed to create rip cache directory; check rip_cache_dir permissions",
+				err,
+			)
+		}
+		cacheCleanup = destDir
+	}
+	defer func() {
+		if cacheCleanup == "" {
+			return
+		}
+		if err != nil {
+			_ = os.RemoveAll(cacheCleanup)
+		}
+	}()
 	logger.Info(
 		"starting rip execution",
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
@@ -313,6 +349,20 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) error {
 	if len(validationTargets) == 0 {
 		if err := r.validateRippedArtifact(ctx, item, target, startedAt); err != nil {
 			return err
+		}
+	}
+
+	if useCache {
+		if err := r.cache.Register(ctx, item, destDir); err != nil {
+			return services.Wrap(
+				services.ErrConfiguration,
+				"ripping",
+				"rip cache register",
+				"Failed to register rip cache entry; free space may be insufficient",
+				err,
+			)
+		} else {
+			cacheCleanup = ""
 		}
 	}
 
