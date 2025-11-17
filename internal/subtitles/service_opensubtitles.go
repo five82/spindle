@@ -168,7 +168,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		searchErr error
 	)
 	if req.Context.IsMovie() || req.Context.Season <= 0 || req.Context.Episode <= 0 {
-		resp, searchErr = s.invokeOpenSubtitlesSearch(ctx, searchReq)
+		resp, searchErr = s.searchMovieWithVariants(ctx, searchReq)
 	} else {
 		base := searchReq
 		base.TMDBID = 0
@@ -330,6 +330,98 @@ func mediaTypeForContext(ctx SubtitleContext) string {
 		return "episode"
 	}
 	return "episode"
+}
+
+func movieVariantSignature(req opensubtitles.SearchRequest) string {
+	return fmt.Sprintf("tmdb:%d|parent:%d|imdb:%s|q:%s|y:%s|type:%s", req.TMDBID, req.ParentTMDBID, strings.TrimSpace(req.IMDBID), strings.TrimSpace(req.Query), strings.TrimSpace(req.Year), strings.TrimSpace(req.MediaType))
+}
+
+func sanitizeIMDB(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.TrimPrefix(value, "tt")
+	if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+		return ""
+	}
+	return value
+}
+
+func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitles.SearchRequest) (opensubtitles.SearchResponse, error) {
+	variants := []opensubtitles.SearchRequest{base}
+
+	// TMDB-only (drop title/year filters in case of metadata mismatch)
+	if base.TMDBID > 0 {
+		variant := base
+		variant.Query = ""
+		variant.Year = ""
+		variant.ParentTMDBID = 0
+		variants = append(variants, variant)
+	}
+
+	// Title-only (drop TMDB in case the ID is wrong) with and without year
+	if strings.TrimSpace(base.Query) != "" {
+		variant := base
+		variant.TMDBID = 0
+		variant.ParentTMDBID = 0
+		variants = append(variants, variant)
+
+		variantNoYear := variant
+		variantNoYear.Year = ""
+		variants = append(variants, variantNoYear)
+	}
+
+	// IMDB-only fallback
+	if imdb := sanitizeIMDB(base.IMDBID); imdb != "" {
+		variant := base
+		variant.TMDBID = 0
+		variant.ParentTMDBID = 0
+		variant.Query = ""
+		variant.Year = ""
+		variant.MediaType = "movie"
+		variants = append(variants, variant)
+	}
+
+	unique := make([]opensubtitles.SearchRequest, 0, len(variants))
+	seen := make(map[string]struct{})
+	for _, v := range variants {
+		sig := movieVariantSignature(v)
+		if _, ok := seen[sig]; ok {
+			continue
+		}
+		seen[sig] = struct{}{}
+		unique = append(unique, v)
+	}
+
+	for idx, variant := range unique {
+		if s.logger != nil {
+			s.logger.Info("opensubtitles search variant",
+				logging.Int("attempt", idx+1),
+				logging.String("query", variant.Query),
+				logging.String("year", variant.Year),
+				logging.Int64("tmdb_id", variant.TMDBID),
+				logging.String("imdb_id", sanitizeIMDB(variant.IMDBID)),
+				logging.String("media_type", variant.MediaType),
+			)
+		}
+		resp, err := s.invokeOpenSubtitlesSearch(ctx, variant)
+		if err != nil {
+			lastErr := err
+			if s.logger != nil {
+				s.logger.Warn("opensubtitles search variant failed", logging.Error(err))
+			}
+			if idx == len(unique)-1 {
+				return opensubtitles.SearchResponse{}, lastErr
+			}
+			continue
+		}
+		if len(resp.Subtitles) > 0 {
+			return resp, nil
+		}
+	}
+
+	return opensubtitles.SearchResponse{}, nil
 }
 
 func (s *Service) fetchOpenSubtitlesPayload(ctx context.Context, req GenerateRequest, candidate opensubtitles.Subtitle) (opensubtitles.DownloadResult, error) {

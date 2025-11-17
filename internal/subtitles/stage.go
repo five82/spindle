@@ -25,6 +25,21 @@ type Stage struct {
 	logger  *slog.Logger
 }
 
+// SetLogger allows the workflow manager to route stage logs into the item-scoped background log.
+func (s *Stage) SetLogger(logger *slog.Logger) {
+	if s == nil {
+		return
+	}
+	stageLogger := logger
+	if stageLogger != nil {
+		stageLogger = stageLogger.With(logging.String("component", "subtitle-stage"))
+	}
+	s.logger = stageLogger
+	if s.service != nil {
+		s.service.SetLogger(logger)
+	}
+}
+
 // NewStage constructs a workflow stage that generates subtitles for queue items.
 func NewStage(store *queue.Store, service *Service, logger *slog.Logger) *Stage {
 	stageLogger := logger

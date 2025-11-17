@@ -30,6 +30,10 @@ func NewConfig(t testing.TB, opts ...ConfigOption) *config.Config {
 	cfgVal.LogDir = filepath.Join(base, "logs")
 	cfgVal.ReviewDir = filepath.Join(base, "review")
 	cfgVal.APIBind = "127.0.0.1:0"
+	// Disable KEYDB in tests to avoid 20m network refreshes.
+	cfgVal.KeyDBPath = ""
+	cfgVal.KeyDBDownloadURL = ""
+	cfgVal.KeyDBDownloadTimeout = 1
 
 	builder := &configBuilder{
 		t:       t,

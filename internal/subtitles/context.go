@@ -120,7 +120,7 @@ func BuildSubtitleContext(item *queue.Item) SubtitleContext {
 	if ctx.ShowTitle == "" && !ctx.IsMovie() {
 		ctx.ShowTitle = deriveShowTitle(ctx.Title)
 	}
-	if ctx.Season <= 0 {
+	if ctx.Season <= 0 && !ctx.IsMovie() {
 		ctx.Season = 1
 	}
 
