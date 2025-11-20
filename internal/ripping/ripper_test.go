@@ -13,6 +13,7 @@ import (
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripcache"
 	"spindle/internal/ripping"
 	"spindle/internal/services/makemkv"
 	"spindle/internal/testsupport"
@@ -158,6 +159,133 @@ func TestRipperSelectsPrimaryTitleFromRipSpec(t *testing.T) {
 	}
 }
 
+func TestRipperReusesCachedRip(t *testing.T) {
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries(), testsupport.WithRipCache())
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubRipperProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "Cached Feature", "fp-cache")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusIdentified
+	spec := map[string]any{
+		"titles":   []map[string]any{{"id": 0, "name": "Main", "duration": 7200}},
+		"metadata": map[string]any{"media_type": "movie"},
+	}
+	encodedSpec, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+	item.RipSpecData = string(encodedSpec)
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	client := &countingRipperClient{failOnSecond: true}
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), client, &stubNotifier{})
+
+	item.Status = queue.StatusRipping
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update processing: %v", err)
+	}
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if client.calls != 1 {
+		t.Fatalf("expected one rip attempt, got %d", client.calls)
+	}
+	if strings.TrimSpace(item.RippedFile) == "" {
+		t.Fatal("missing ripped file after first run")
+	}
+	item.Status = queue.StatusRipped
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("persist first run: %v", err)
+	}
+	first, err := store.GetByID(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+
+	// Second run should reuse cached rip and not call MakeMKV again.
+	if err := handler.Prepare(context.Background(), first); err != nil {
+		t.Fatalf("Prepare second: %v", err)
+	}
+	if err := handler.Execute(context.Background(), first); err != nil {
+		t.Fatalf("Execute second: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("expected cached rip to skip makemkv; calls=%d", client.calls)
+	}
+	second, err := store.GetByID(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetByID second: %v", err)
+	}
+	if second.RippedFile != first.RippedFile {
+		t.Fatalf("ripped file path changed on cache reuse: %q vs %q", second.RippedFile, first.RippedFile)
+	}
+}
+
+func TestRipperIgnoresInvalidCachedRip(t *testing.T) {
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries(), testsupport.WithRipCache())
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubRipperProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "Bad Cache", "fp-badcache")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusIdentified
+	spec := map[string]any{
+		"titles":   []map[string]any{{"id": 0, "name": "Main", "duration": 7200}},
+		"metadata": map[string]any{"media_type": "movie"},
+	}
+	encodedSpec, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+	item.RipSpecData = string(encodedSpec)
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// Seed cache with an obviously invalid rip (too small).
+	manager := ripcache.NewManager(cfg, logging.NewNop())
+	cacheDir := manager.Path(item)
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("mkdir cache: %v", err)
+	}
+	invalidPath := filepath.Join(cacheDir, "title_t00.mkv")
+	if err := writeStubFile(invalidPath, 1024); err != nil {
+		t.Fatalf("seed invalid cache: %v", err)
+	}
+
+	client := &countingRipperClient{}
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), client, &stubNotifier{})
+	item.Status = queue.StatusRipping
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update processing: %v", err)
+	}
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("expected makemkv to run after invalid cache, got %d calls", client.calls)
+	}
+	if info, err := os.Stat(invalidPath); err == nil && info.Size() == 1024 {
+		t.Fatalf("invalid cache file still present; expected overwrite")
+	}
+}
+
 func TestRipperFallsBackWithoutClient(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 	store := testsupport.MustOpenStore(t, cfg)
@@ -250,6 +378,32 @@ func (s *stubRipperClient) Rip(ctx context.Context, discTitle, sourcePath, destD
 	}
 	if progress != nil {
 		progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 90, Message: "almost"})
+	}
+	return path, nil
+}
+
+type countingRipperClient struct {
+	calls        int
+	failOnSecond bool
+}
+
+func (s *countingRipperClient) Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
+	s.calls++
+	if s.failOnSecond && s.calls > 1 {
+		return "", errors.New("unexpected second rip call")
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", err
+	}
+	if progress != nil {
+		progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 10, Message: "cached"})
+	}
+	path := filepath.Join(destDir, sanitizeTestFileName(discTitle)+".mkv")
+	if err := writeStubFile(path, ripFixtureSize); err != nil {
+		return "", err
+	}
+	if progress != nil {
+		progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 95, Message: "cached"})
 	}
 	return path, nil
 }

@@ -92,6 +92,19 @@ func WithStubbedBinaries(names ...string) ConfigOption {
 	}
 }
 
+// WithRipCache enables the rip cache for tests and points it at a temp dir.
+func WithRipCache() ConfigOption {
+	return func(b *configBuilder) {
+		ripDir := filepath.Join(b.baseDir, "ripcache")
+		if err := os.MkdirAll(ripDir, 0o755); err != nil {
+			b.t.Fatalf("mkdir rip cache: %v", err)
+		}
+		b.cfg.RipCacheEnabled = true
+		b.cfg.RipCacheDir = ripDir
+		b.cfg.RipCacheMaxGiB = 10
+	}
+}
+
 // BaseDir returns the root temp directory backing the generated config.
 func BaseDir(cfg *config.Config) string {
 	return filepath.Dir(cfg.StagingDir)
