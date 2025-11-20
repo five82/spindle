@@ -178,6 +178,50 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 		cacheCleanup = destDir
 	}
+
+	cacheUsed := false
+	if useCache && existsNonEmptyDir(destDir) {
+		cachedTarget, err := selectCachedRip(destDir)
+		if err != nil {
+			logger.Warn("failed to inspect existing rip cache", logging.String("cache_dir", destDir), logging.Error(err))
+		} else if cachedTarget != "" {
+			if err := r.validateRippedArtifact(ctx, item, cachedTarget, startedAt); err == nil {
+				target = cachedTarget
+				cacheUsed = true
+				logger.Info(
+					"using cached rip entry",
+					logging.String("cache_dir", destDir),
+					logging.String("ripped_file", target),
+				)
+			} else {
+				logger.Info(
+					"discarding invalid cached rip entry",
+					logging.String("cache_dir", destDir),
+					logging.Error(err),
+				)
+				_ = os.RemoveAll(destDir)
+				if mkErr := os.MkdirAll(destDir, 0o755); mkErr != nil {
+					return services.Wrap(
+						services.ErrConfiguration,
+						"ripping",
+						"ensure cache dir",
+						"Failed to recreate rip cache directory after pruning invalid entry",
+						mkErr,
+					)
+				}
+			}
+		} else {
+			logger.Info(
+				"rip cache checked; no valid MKV entries found",
+				logging.String("cache_dir", destDir),
+			)
+		}
+	} else if useCache {
+		logger.Info(
+			"rip cache empty; no prior rip to reuse",
+			logging.String("cache_dir", destDir),
+		)
+	}
 	defer func() {
 		if cacheCleanup == "" {
 			return
@@ -195,7 +239,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	)
 
 	var titleIDs []int
-	if r.client != nil {
+	if !cacheUsed && r.client != nil {
 		if err := ensureMakeMKVSelectionRule(); err != nil {
 			logger.Error(
 				"failed to configure makemkv selection",
@@ -236,6 +280,10 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			)
 		}
 		logger.Info("makemkv rip finished", logging.String("ripped_file", target))
+	}
+
+	if cacheUsed {
+		logger.Info("skipped makemkv; cached rip validated", logging.String("ripped_file", target))
 	}
 
 	if target == "" {
@@ -290,7 +338,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		validationTargets = append(validationTargets, target)
 	}
 	specDirty := false
-	if hasEpisodes && r.client != nil {
+	if hasEpisodes {
 		assigned := assignEpisodeAssets(&env, destDir, logger)
 		if assigned == 0 {
 			logger.Warn("episode asset mapping incomplete", logging.String("dest_dir", destDir))
@@ -915,6 +963,50 @@ func episodeAssetPaths(env ripspec.Envelope) []string {
 		paths = append(paths, clean)
 	}
 	return paths
+}
+
+func existsNonEmptyDir(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	entries, err := os.ReadDir(path)
+	return err == nil && len(entries) > 0
+}
+
+// selectCachedRip picks the largest MKV in dir, assuming it is the primary
+// feature. Returns an empty string when none are present.
+func selectCachedRip(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	type candidate struct {
+		path string
+		size int64
+	}
+	candidates := make([]candidate, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.ToLower(entry.Name())
+		if !strings.HasSuffix(name, ".mkv") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return "", err
+		}
+		candidates = append(candidates, candidate{path: filepath.Join(dir, entry.Name()), size: info.Size()})
+	}
+	if len(candidates) == 0 {
+		return "", nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].size > candidates[j].size
+	})
+	return candidates[0].path, nil
 }
 
 func parseTitleID(name string) (int, bool) {
