@@ -146,9 +146,28 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 		}
 		progress(update)
 	}
+
+	// Keep the Drapto log pointer fresh while the encode is running so Flyer can tail the live log.
+	pointerDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pointerDone:
+				return
+			case <-ticker.C:
+				e.updateDraptoLogPointer(logger)
+			}
+		}
+	}()
+	defer func() {
+		close(pointerDone)
+		e.updateDraptoLogPointer(logger)
+	}()
+
 	path, err := e.client.Encode(ctx, sourcePath, encodedDir, progressLogger)
 	if err != nil {
-		e.updateDraptoLogPointer(logger)
 		return "", services.Wrap(
 			services.ErrExternalTool,
 			"encoding",
@@ -157,7 +176,6 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 			err,
 		)
 	}
-	e.updateDraptoLogPointer(logger)
 	return path, nil
 }
 
