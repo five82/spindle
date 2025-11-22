@@ -1,0 +1,143 @@
+# Spindle Configuration Guide
+
+This guide expands on the `spindle config init` output and explains every key in
+`~/.config/spindle/config.toml`. Keep it handy when you are tuning the daemon or
+when new features land.
+
+## Getting Started
+
+1. Install the CLI (`go install github.com/five82/spindle/cmd/spindle@latest`).
+2. Generate a config skeleton:
+
+   ```bash
+   spindle config init
+   ```
+
+3. Edit `~/.config/spindle/config.toml` with your preferred editor. Sample:
+
+   ```toml
+   library_dir = "~/Media/Library"
+   staging_dir = "~/Media/Staging"
+   tmdb_api_key = "tmdb-key-here"
+   plex_url = "https://plex.example.com"
+   plex_link_enabled = true
+   ntfy_topic = "spindle"
+   ```
+
+4. Validate and authorize:
+
+   ```bash
+   spindle config validate
+   spindle plex link   # prompts for Plex device code when plex_link_enabled = true
+   ```
+
+Spindle reads this configuration on startup. Changes require restarting the
+daemon (`spindle stop && spindle start`).
+
+## Core Paths & Storage
+
+| Key | Purpose | Notes |
+| --- | --- | --- |
+| `library_dir` | Final Plex-ready library root. | Must exist; Spindle creates `movies/` & `tv/` subdirs when absent. |
+| `staging_dir` | Work area for rips, encodes, subtitles, logs. | Keep on fast storage; large temporary files live here. |
+| `review_dir` | Destination for items flagged `NeedsReview`. | Defaults to `~/review`; contents are safe to rename manually. |
+| `log_dir` | Persistent logs plus the queue DB. | Ensure enough space for SQLite + log rotation. |
+| `rip_cache_dir` | Optional cache of MakeMKV output. | Enable with `rip_cache_enabled = true`. |
+
+Spindle enforces a 20% free-space floor on the rip cache. Tune
+`rip_cache_max_gib` to cap cache size.
+
+## Identification & Metadata
+
+- `tmdb_api_key` *(required)* — Grab from https://www.themoviedb.org/settings/api.
+- `tmdb_language` — ISO 639‑1 code for metadata (default `en`).
+- `tmdb_confidence_threshold` — Float 0‑1; lower values accept fuzzier matches.
+- `identification_overrides_path` — JSON file for manual disc→title overrides
+  (defaults to `~/.config/spindle/overrides/identification.json`).
+- `bd_info_enabled` — When true, Spindle shells out to `bd_info` for cleaner
+  playlist metadata. Requires `libbluray` utilities (`libbluray-bin`,
+  `libbluray-utils`, etc.).
+
+If discs often appear as “UNKNOWN” or “INDEX_BDMV”, install `bd_info` and ensure
+mount points `/media/cdrom` or `/media/cdrom0` stay accessible.
+
+## Plex & Library Integration
+
+| Key | Description |
+| --- | --- |
+| `plex_url` | Base URL of your Plex server (e.g. `https://plex.example.com`). |
+| `plex_link_enabled` | When true, Spindle performs the device-link flow and triggers library scans. |
+| `plex_auth_path` | JSON token cache (default `~/.config/spindle/plex_auth.json`). |
+| `movies_library` / `tv_library` | Plex library section names to refresh after imports. |
+
+Run `spindle plex link` once per host. If credentials are missing, the organizer
+skips Plex refreshes but still files media correctly.
+
+## Notification & API Settings
+
+- `ntfy_topic` — ntfy.sh topic for workflow notifications (disc inserted,
+  rip/encode complete, failures).
+- `ntfy_base_url` — Override when self-hosting ntfy.
+- `api_bind` — Bind address for the read-only HTTP API (default `127.0.0.1:7487`).
+- `api_tls_cert` / `api_tls_key` — Optional TLS assets when exposing the API on
+  your LAN.
+
+## Subtitle & WhisperX Pipeline
+
+| Key | Role |
+| --- | --- |
+| `subtitles_enabled` | Global toggle; subtitles run only when true. |
+| `opensubtitles_enabled` | Enables OpenSubtitles download/clean/align pass. |
+| `opensubtitles_api_key` | Required when OpenSubtitles is enabled. |
+| `opensubtitles_user_agent` | Your registered UA string; mandated by OpenSubtitles. |
+| `opensubtitles_user_token` | Optional JWT for higher daily limits. |
+| `opensubtitles_languages` | Preferred ISO 639‑1 codes (e.g. `['en','es']`). |
+| `whisperx_cuda_enabled` | Use CUDA 12.8+/cuDNN 9.1 for faster inference. |
+| `whisperx_vad_method` | `silero` (default, offline) or `pyannote` (needs HF token). |
+| `whisperx_hf_token` | Required when `whisperx_vad_method = "pyannote"`. |
+
+Set `SPD_DEBUG_SUBTITLES_KEEP=1` before launching the daemon to retain raw
+alignment artifacts inside each queue item’s staging folder for debugging.
+
+## Audio, Encoding, and Dependencies
+
+- `encoder_threads`, `encoder_preset`, `encoder_passes` — forwarded to Drapto;
+  leave unset to stick with project defaults.
+- `drapto_path` — Override when Drapto is not on `PATH`.
+- `makemkv_path` — Custom path to `makemkvcon` if needed.
+- `keydb_path`, `keydb_download_url`, `keydb_download_timeout` — controls for
+  refreshing `KEYDB.cfg` (AACS keys). Drop a manual file at
+  `~/.config/spindle/keydb/KEYDB.cfg` to seed the cache.
+- `keydb_auto_refresh` — When true, Spindle fetches updates automatically.
+
+## Queue & Workflow Toggles
+
+| Key | Details |
+| --- | --- |
+| `rip_cache_enabled` | Enables reuse of MakeMKV output. Combine with `rip_cache_max_gib`. |
+| `rip_cache_max_gib` | Absolute size cap for the cache. |
+| `max_parallel_encodes` | Limits concurrent Drapto jobs (default 1). |
+| `max_parallel_rips` | Non-zero enables overlapping MakeMKV jobs when hardware allows. |
+| `danger_allow_multiple_daemons` | Debug-only; bypasses single-instance lock. Do not set in production. |
+
+## Diagnostics & Advanced Flags
+
+- `log_level` — `info` (default), `debug`, or `trace`.
+- `diagnostic_dump_dir` — When set, intermediate artifacts are copied here for
+  long-term inspection.
+- `enable_profiler` / `profiler_bind` — Exposes Go pprof endpoints; intended for
+  development only.
+
+## Tips
+
+- After changing configuration, run `spindle config validate` to catch missing
+  directories or malformed TOML before restarting the daemon.
+- Keep `staging_dir` and `rip_cache_dir` on SSD/NVMe storage; encoding churns on
+  these paths heavily.
+- Store TMDB and OpenSubtitles credentials in a password manager; the daemon
+  reads the config in plain text.
+- Back up `~/.config/spindle/` (config + tokens) alongside the queue database in
+  `~/.local/share/spindle/` if you move hosts.
+
+Need more? See `docs/workflow.md` for the lifecycle, `docs/cli.md` for command
+syntax, and `docs/api.md` for the HTTP endpoints.

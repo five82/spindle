@@ -46,6 +46,8 @@ High-level modules you will touch most often:
 - **CLI and daemon entry point**: `cmd/spindle`
 - **Configuration & logging**: `internal/config`, `internal/logging`
 
+For title/episode mapping invariants, read `docs/content-identification.md` before changing the identifier stages.
+
 When new capabilities land, update this map and the README together so future agents know where to look.
 
 ## Workflow Lifecycle
