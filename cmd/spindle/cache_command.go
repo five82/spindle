@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -44,8 +46,44 @@ func newCacheStatsCommand(ctx *commandContext) *cobra.Command {
 			fmt.Fprintf(out, "Entries: %d\n", stats.Entries)
 			fmt.Fprintf(out, "Size:   %s / %s\n", humanBytes(stats.TotalBytes), humanBytes(stats.MaxBytes))
 			fmt.Fprintf(out, "Disk:   %s free (%.1f%%)\n", humanBytes(int64(stats.FreeBytes)), stats.FreeRatio*100)
+			printCacheEntries(out, stats.EntrySummaries)
 			return nil
 		},
+	}
+}
+
+func printCacheEntries(out io.Writer, entries []ripcache.EntrySummary) {
+	if len(entries) == 0 {
+		fmt.Fprintln(out, "Cached titles: none")
+		return
+	}
+	const stampLayout = "2006-01-02 15:04"
+	fmt.Fprintln(out, "Cached titles:")
+	for _, entry := range entries {
+		label := strings.TrimSpace(entry.PrimaryFile)
+		if label == "" {
+			label = filepath.Base(entry.Directory)
+		}
+		if label == "" {
+			label = entry.Directory
+		}
+		if label == "" {
+			label = "(unknown)"
+		}
+		extra := ""
+		if entry.VideoFileCount > 1 {
+			extra = fmt.Sprintf(" (+%d more)", entry.VideoFileCount-1)
+		}
+		updated := "unknown"
+		if !entry.ModifiedAt.IsZero() {
+			updated = entry.ModifiedAt.Local().Format(stampLayout)
+		}
+		fmt.Fprintf(out, "  - %s%s — %s (updated %s)\n",
+			label,
+			extra,
+			humanBytes(entry.SizeBytes),
+			updated,
+		)
 	}
 }
 

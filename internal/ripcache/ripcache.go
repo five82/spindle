@@ -37,12 +37,23 @@ type Manager struct {
 
 // Stats describes current cache usage.
 type Stats struct {
-	Entries      int
-	TotalBytes   int64
-	MaxBytes     int64
-	FreeBytes    uint64
-	TotalFSBytes uint64
-	FreeRatio    float64
+	Entries        int
+	TotalBytes     int64
+	MaxBytes       int64
+	FreeBytes      uint64
+	TotalFSBytes   uint64
+	FreeRatio      float64
+	EntrySummaries []EntrySummary
+}
+
+// EntrySummary surfaces human-friendly details about a rip cache entry so the
+// CLI can show which titles are currently stored.
+type EntrySummary struct {
+	Directory      string
+	SizeBytes      int64
+	ModifiedAt     time.Time
+	PrimaryFile    string
+	VideoFileCount int
 }
 
 // NewManager builds a cache manager when enabled; returns nil when caching is disabled or misconfigured.
@@ -148,13 +159,25 @@ func (m *Manager) Stats(ctx context.Context) (Stats, error) {
 	if totalFS > 0 {
 		ratio = float64(freeFS) / float64(totalFS)
 	}
+	details := make([]EntrySummary, 0, len(entries))
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		details = append(details, EntrySummary{
+			Directory:      entry.path,
+			SizeBytes:      entry.sizeBytes,
+			ModifiedAt:     entry.modTime,
+			PrimaryFile:    entry.primary,
+			VideoFileCount: entry.videoCount,
+		})
+	}
 	s = Stats{
-		Entries:      len(entries),
-		TotalBytes:   totalSize,
-		MaxBytes:     m.maxBytes,
-		FreeBytes:    freeFS,
-		TotalFSBytes: totalFS,
-		FreeRatio:    ratio,
+		Entries:        len(entries),
+		TotalBytes:     totalSize,
+		MaxBytes:       m.maxBytes,
+		FreeBytes:      freeFS,
+		TotalFSBytes:   totalFS,
+		FreeRatio:      ratio,
+		EntrySummaries: details,
 	}
 	if len(entries) == 0 {
 		m.logger.InfoContext(ctx, "rip cache empty")
@@ -233,9 +256,11 @@ func (m *Manager) prune(ctx context.Context, keepPath string) error {
 }
 
 type cacheEntry struct {
-	path      string
-	sizeBytes int64
-	modTime   time.Time
+	path       string
+	sizeBytes  int64
+	modTime    time.Time
+	primary    string
+	videoCount int
 }
 
 func (m *Manager) scan() ([]cacheEntry, int64, error) {
@@ -258,13 +283,58 @@ func (m *Manager) scan() ([]cacheEntry, int64, error) {
 			m.logger.Warn("ripcache: skip entry", logging.String("path", path), logging.Error(err))
 			continue
 		}
+		primary, count := identifyPrimaryFile(path)
 		total += size
-		entries = append(entries, cacheEntry{path: path, sizeBytes: size, modTime: mtime})
+		entries = append(entries, cacheEntry{path: path, sizeBytes: size, modTime: mtime, primary: primary, videoCount: count})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].modTime.Before(entries[j].modTime)
 	})
 	return entries, total, nil
+}
+
+var cacheVideoExtensions = map[string]struct{}{
+	".mkv": {},
+	".mp4": {},
+	".m4v": {},
+	".mov": {},
+	".avi": {},
+}
+
+func identifyPrimaryFile(dir string) (string, int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", 0
+	}
+	type candidate struct {
+		name string
+		size int64
+	}
+	files := make([]candidate, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if _, ok := cacheVideoExtensions[ext]; !ok {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, candidate{name: entry.Name(), size: info.Size()})
+	}
+	if len(files) == 0 {
+		return "", 0
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].size == files[j].size {
+			return files[i].name < files[j].name
+		}
+		return files[i].size > files[j].size
+	})
+	return files[0].name, len(files)
 }
 
 func (m *Manager) freeSpaceOK() (bool, error) {
