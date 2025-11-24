@@ -322,6 +322,9 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		stagingRoot = filepath.Join(strings.TrimSpace(e.cfg.StagingDir), fmt.Sprintf("queue-%d", item.ID))
 	}
 	encodedDir := filepath.Join(stagingRoot, "encoded")
+	if err := e.cleanupEncodedDir(logger, encodedDir); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		return services.Wrap(
 			services.ErrConfiguration,
@@ -441,6 +444,47 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
 	)
 
+	return nil
+}
+
+func (e *Encoder) cleanupEncodedDir(logger *slog.Logger, encodedDir string) error {
+	encodedDir = strings.TrimSpace(encodedDir)
+	if encodedDir == "" {
+		return nil
+	}
+	info, err := os.Stat(encodedDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return services.Wrap(
+			services.ErrConfiguration,
+			"encoding",
+			"inspect encoded dir",
+			"Failed to inspect previous encoded artifacts",
+			err,
+		)
+	}
+	if !info.IsDir() {
+		return services.Wrap(
+			services.ErrConfiguration,
+			"encoding",
+			"inspect encoded dir",
+			fmt.Sprintf("Expected encoded path %q to be a directory", encodedDir),
+			nil,
+		)
+	}
+	if err := os.RemoveAll(encodedDir); err != nil {
+		return services.Wrap(
+			services.ErrConfiguration,
+			"encoding",
+			"remove stale artifacts",
+			"Failed to remove previous encoded outputs", err,
+		)
+	}
+	if logger != nil {
+		logger.Info("removed stale encoded artifacts", logging.String("encoded_dir", encodedDir))
+	}
 	return nil
 }
 

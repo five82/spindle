@@ -171,6 +171,54 @@ func TestEncoderWrapsErrors(t *testing.T) {
 	}
 }
 
+func TestEncoderRemovesStaleEncodedArtifacts(t *testing.T) {
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubEncoderProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "Cleanup", "fp")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusRipped
+	item.DiscFingerprint = "ENCODERTESTFP6"
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	ripsDir := filepath.Join(stagingRoot, "rips")
+	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
+		t.Fatalf("mkdir rips: %v", err)
+	}
+	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
+	testsupport.WriteFile(t, item.RippedFile, encodedFixtureSize)
+
+	encodedDir := filepath.Join(stagingRoot, "encoded")
+	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
+		t.Fatalf("mkdir encoded: %v", err)
+	}
+	staleFile := filepath.Join(encodedDir, "stale.mkv")
+	testsupport.WriteFile(t, staleFile, encodedFixtureSize)
+
+	stubClient := &stubDraptoClient{}
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), stubClient, nil)
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if _, err := os.Stat(staleFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected stale file to be removed, err=%v", err)
+	}
+	entries, err := os.ReadDir(encodedDir)
+	if err != nil {
+		t.Fatalf("ReadDir encoded: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("expected new encoded artifact in %s", encodedDir)
+	}
+}
+
 func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 	store := testsupport.MustOpenStore(t, cfg)
