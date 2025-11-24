@@ -17,7 +17,7 @@ func (f presetClassifierFunc) Classify(ctx context.Context, req presetRequest) (
 
 func TestSelectPresetAppliesLLMProfile(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
-	cfg.DeepSeekPresetDeciderEnabled = true
+	cfg.PresetDeciderEnabled = true
 	enc := &Encoder{cfg: cfg, presetClassifier: presetClassifierFunc(func(ctx context.Context, req presetRequest) (presetClassification, error) {
 		return presetClassification{
 			Profile:     "clean",
@@ -43,7 +43,7 @@ func TestSelectPresetAppliesLLMProfile(t *testing.T) {
 
 func TestSelectPresetSkipsLowConfidence(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
-	cfg.DeepSeekPresetDeciderEnabled = true
+	cfg.PresetDeciderEnabled = true
 	enc := &Encoder{cfg: cfg, presetClassifier: presetClassifierFunc(func(ctx context.Context, req presetRequest) (presetClassification, error) {
 		return presetClassification{
 			Profile:     "grain",

@@ -63,6 +63,12 @@ type Config struct {
 	OpenSubtitlesLanguages        []string `toml:"opensubtitles_languages"`
 	DeepSeekPresetDeciderEnabled  bool     `toml:"deepseek_preset_decider_enabled"`
 	DeepSeekAPIKey                string   `toml:"deepseek_api_key"`
+	PresetDeciderEnabled          bool     `toml:"preset_decider_enabled"`
+	PresetDeciderAPIKey           string   `toml:"preset_decider_api_key"`
+	PresetDeciderBaseURL          string   `toml:"preset_decider_base_url"`
+	PresetDeciderModel            string   `toml:"preset_decider_model"`
+	PresetDeciderReferer          string   `toml:"preset_decider_referer"`
+	PresetDeciderTitle            string   `toml:"preset_decider_title"`
 }
 
 const (
@@ -90,6 +96,10 @@ const (
 	defaultIdentificationOverridesPath = "~/.config/spindle/overrides/identification.json"
 	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
 	defaultRipCacheMaxGiB              = 150
+	defaultPresetDeciderBaseURL        = "https://openrouter.ai/api/v1/chat/completions"
+	defaultPresetDeciderModel          = "deepseek/deepseek-v3.1-terminus"
+	defaultPresetDeciderReferer        = "https://github.com/five82/spindle"
+	defaultPresetDeciderTitle          = "Spindle Preset Decider"
 )
 
 // Default returns a Config populated with repository defaults.
@@ -133,6 +143,10 @@ func Default() Config {
 		WhisperXVADMethod:           "silero",
 		OpenSubtitlesLanguages:      []string{"en"},
 		OpenSubtitlesUserAgent:      defaultOpenSubtitlesUserAgent,
+		PresetDeciderBaseURL:        defaultPresetDeciderBaseURL,
+		PresetDeciderModel:          defaultPresetDeciderModel,
+		PresetDeciderReferer:        defaultPresetDeciderReferer,
+		PresetDeciderTitle:          defaultPresetDeciderTitle,
 	}
 }
 
@@ -353,6 +367,38 @@ func (c *Config) normalize() error {
 		c.OpenSubtitlesLanguages = langs
 	}
 
+	if !c.PresetDeciderEnabled && c.DeepSeekPresetDeciderEnabled {
+		c.PresetDeciderEnabled = true
+	}
+	c.PresetDeciderBaseURL = strings.TrimSpace(c.PresetDeciderBaseURL)
+	if c.PresetDeciderBaseURL == "" {
+		c.PresetDeciderBaseURL = defaultPresetDeciderBaseURL
+	}
+	c.PresetDeciderModel = strings.TrimSpace(c.PresetDeciderModel)
+	if c.PresetDeciderModel == "" {
+		c.PresetDeciderModel = defaultPresetDeciderModel
+	}
+	c.PresetDeciderReferer = strings.TrimSpace(c.PresetDeciderReferer)
+	if c.PresetDeciderReferer == "" {
+		c.PresetDeciderReferer = defaultPresetDeciderReferer
+	}
+	c.PresetDeciderTitle = strings.TrimSpace(c.PresetDeciderTitle)
+	if c.PresetDeciderTitle == "" {
+		c.PresetDeciderTitle = defaultPresetDeciderTitle
+	}
+	c.PresetDeciderAPIKey = strings.TrimSpace(c.PresetDeciderAPIKey)
+	if c.PresetDeciderAPIKey == "" {
+		if value, ok := os.LookupEnv("PRESET_DECIDER_API_KEY"); ok {
+			c.PresetDeciderAPIKey = strings.TrimSpace(value)
+		} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
+			c.PresetDeciderAPIKey = strings.TrimSpace(value)
+		} else if strings.TrimSpace(c.DeepSeekAPIKey) != "" {
+			c.PresetDeciderAPIKey = strings.TrimSpace(c.DeepSeekAPIKey)
+		} else if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
+			c.PresetDeciderAPIKey = strings.TrimSpace(value)
+		}
+	}
+
 	c.DeepSeekAPIKey = strings.TrimSpace(c.DeepSeekAPIKey)
 	if c.DeepSeekAPIKey == "" {
 		if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
@@ -439,8 +485,8 @@ func (c *Config) Validate() error {
 			return errors.New("rip_cache_max_gib must be positive when rip_cache_enabled is true")
 		}
 	}
-	if c.DeepSeekPresetDeciderEnabled && strings.TrimSpace(c.DeepSeekAPIKey) == "" {
-		return errors.New("deepseek_api_key must be set when deepseek_preset_decider_enabled is true (or set DEEPSEEK_API_KEY)")
+	if c.PresetDeciderEnabled && strings.TrimSpace(c.PresetDeciderAPIKey) == "" {
+		return errors.New("preset_decider_api_key must be set when preset_decider_enabled is true (or set OPENROUTER_API_KEY)")
 	}
 	return nil
 }
@@ -612,8 +658,12 @@ identification_overrides_path = "~/.config/spindle/overrides/identification.json
 # ENCODING
 # ============================================================================
 
-deepseek_preset_decider_enabled = false              # When true, call DeepSeek to choose clean/grain/default Drapto presets per title
-deepseek_api_key = ""                                # Required when the DeepSeek preset decider is enabled; or set DEEPSEEK_API_KEY
+preset_decider_enabled = false                       # When true, use an LLM to choose clean/grain/default Drapto presets per title
+preset_decider_model = "deepseek/deepseek-v3.1-terminus" # OpenRouter model identifier
+preset_decider_base_url = "https://openrouter.ai/api/v1/chat/completions" # Override to point at another provider
+preset_decider_api_key = ""                         # Required when the preset decider is enabled; or set OPENROUTER_API_KEY
+preset_decider_referer = "https://github.com/five82/spindle" # Sent to OpenRouter for routing/analytics
+preset_decider_title = "Spindle Preset Decider"      # Display name sent via X-Title header
 
 # ============================================================================
 # WORKFLOW TUNING (ADVANCED)

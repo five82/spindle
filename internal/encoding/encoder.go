@@ -242,8 +242,8 @@ func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *
 		notifier: notifier,
 		cache:    ripcache.NewManager(cfg, logger),
 	}
-	if cfg != nil && cfg.DeepSeekPresetDeciderEnabled {
-		enc.presetClassifier = newDeepSeekPresetClassifier(cfg.DeepSeekAPIKey)
+	if cfg != nil && cfg.PresetDeciderEnabled {
+		enc.presetClassifier = newPresetLLMClassifier(cfg)
 	}
 	enc.SetLogger(logger)
 	return enc

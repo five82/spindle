@@ -4,7 +4,8 @@
 disc and the daemon handles identification (TMDB), ripping (MakeMKV),
 encoding to AV1 (drapto), optional subtitle generation (OpenSubtitles +
 WhisperX), organization, Plex refreshes, and notifications. An opt-in
-DeepSeek integration can auto-select Drapto's grain/clean presets per title.
+LLM integration (via OpenRouter) can auto-select Drapto's grain/clean presets
+per title.
 
 > ⚙️ Single Go binary (`spindle`) drives both the CLI and daemon.
 > 🚧 Early-stage project: expect frequent changes.
@@ -87,13 +88,14 @@ The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
 
 ### Adaptive encoding presets (optional)
 
-- Set `deepseek_preset_decider_enabled = true` in `config.toml` to let the
-  DeepSeek Reasoner decide between `clean`, `grain`, or default Drapto settings
-  on a per-title basis. Provide `deepseek_api_key` (or export
-  `DEEPSEEK_API_KEY`) so Spindle can call the API.
+- Set `preset_decider_enabled = true` in `config.toml` to let an OpenRouter LLM
+  decide between `clean`, `grain`, or default Drapto settings on a per-title
+  basis. Provide `preset_decider_api_key` (or export `OPENROUTER_API_KEY`) so
+  Spindle can call the API, and tweak `preset_decider_model` if you prefer a
+  different provider/model.
 - When disabled (default) or when confidence is low/missing metadata, Spindle
   sticks with Drapto's built-in defaults and never passes custom presets.
-- See `docs/configuration.md` for additional details and troubleshooting tips.
+- See `docs/preset-decider.md` for additional details and troubleshooting tips.
 
 ## Documentation Map
 
@@ -102,7 +104,7 @@ The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
 - `docs/cli.md` — CLI reference grouped by task.
 - `docs/api.md` — HTTP API payloads.
 - `docs/content-identification.md` — analyzer internals and debugging notes.
-- `docs/deepseek-presets.md` — DeepSeek-powered Drapto preset selection guide.
+- `docs/preset-decider.md` — LLM-driven Drapto preset selection guide.
 - `docs/development.md` — hacking on Spindle, architecture deep dives.
 
 ## Troubleshooting

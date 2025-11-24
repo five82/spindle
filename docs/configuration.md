@@ -107,9 +107,11 @@ alignment artifacts inside each queue item’s staging folder for debugging.
   refreshing `KEYDB.cfg` (AACS keys). Drop a manual file at
   `~/.config/spindle/keydb/KEYDB.cfg` to seed the cache.
 - `keydb_auto_refresh` — When true, Spindle fetches updates automatically.
-- `deepseek_preset_decider_enabled`, `deepseek_api_key` — opt-in LLM helper that
-  calls DeepSeek to choose Drapto’s `--drapto-preset` (`clean`, `grain`, or
-  default). Provide the key in config or via `DEEPSEEK_API_KEY`.
+- `preset_decider_enabled`, `preset_decider_model`, `preset_decider_base_url`,
+  `preset_decider_api_key`, `preset_decider_referer`, `preset_decider_title` —
+  configure the OpenRouter-powered preset selector. Defaults point at
+  `deepseek/deepseek-v3.1-terminus`; supply an API key via config or
+  `OPENROUTER_API_KEY`.
 
 ## Queue & Workflow Toggles
 

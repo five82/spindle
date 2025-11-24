@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"spindle/internal/deps"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
+	"spindle/internal/services/presetllm"
 )
 
 func newDaemonCommands(ctx *commandContext) []*cobra.Command {
@@ -298,7 +300,50 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Detail:      check.Detail,
 		})
 	}
+	if cfg.PresetDeciderEnabled {
+		statuses = append(statuses, presetDeciderDependencyStatus(cfg))
+	}
 	return statuses
+}
+
+func presetDeciderDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
+	status := ipc.DependencyStatus{
+		Name:        "Preset Decider",
+		Description: "LLM-driven Drapto preset selector",
+		Optional:    true,
+	}
+	key := strings.TrimSpace(cfg.PresetDeciderAPIKey)
+	if key == "" {
+		status.Detail = "API key missing (set preset_decider_api_key or OPENROUTER_API_KEY)"
+		return status
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	client := presetllm.NewClient(presetllm.Config{
+		APIKey:  key,
+		BaseURL: cfg.PresetDeciderBaseURL,
+		Model:   cfg.PresetDeciderModel,
+		Referer: cfg.PresetDeciderReferer,
+		Title:   cfg.PresetDeciderTitle,
+	})
+	if err := client.HealthCheck(ctx); err != nil {
+		status.Detail = summarizePresetDeciderError(err)
+		return status
+	}
+	status.Available = true
+	status.Detail = "API reachable"
+	return status
+}
+
+func summarizePresetDeciderError(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "health check timed out (LLM API unresponsive)"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "health check timed out (LLM API unreachable)"
+	}
+	return err.Error()
 }
 
 func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext) error {

@@ -9,10 +9,11 @@ import (
 	"strings"
 	"unicode"
 
+	"spindle/internal/config"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/queue"
-	"spindle/internal/services/deepseek"
+	"spindle/internal/services/presetllm"
 )
 
 const (
@@ -67,21 +68,30 @@ type presetClassifier interface {
 	Classify(ctx context.Context, req presetRequest) (presetClassification, error)
 }
 
-type deepSeekPresetClassifier struct {
-	client *deepseek.Client
+type llmPresetClassifier struct {
+	client *presetllm.Client
 }
 
-func newDeepSeekPresetClassifier(apiKey string) presetClassifier {
-	apiKey = strings.TrimSpace(apiKey)
-	if apiKey == "" {
+func newPresetLLMClassifier(cfg *config.Config) presetClassifier {
+	if cfg == nil {
 		return nil
 	}
-	return &deepSeekPresetClassifier{client: deepseek.NewClient(apiKey)}
+	clientCfg := presetllm.Config{
+		APIKey:  cfg.PresetDeciderAPIKey,
+		BaseURL: cfg.PresetDeciderBaseURL,
+		Model:   cfg.PresetDeciderModel,
+		Referer: cfg.PresetDeciderReferer,
+		Title:   cfg.PresetDeciderTitle,
+	}
+	if strings.TrimSpace(clientCfg.APIKey) == "" {
+		return nil
+	}
+	return &llmPresetClassifier{client: presetllm.NewClient(clientCfg)}
 }
 
-func (c *deepSeekPresetClassifier) Classify(ctx context.Context, req presetRequest) (presetClassification, error) {
+func (c *llmPresetClassifier) Classify(ctx context.Context, req presetRequest) (presetClassification, error) {
 	if c == nil || c.client == nil {
-		return presetClassification{}, errors.New("deepseek classifier unavailable")
+		return presetClassification{}, errors.New("preset LLM unavailable")
 	}
 	description := req.Description()
 	classification, err := c.client.ClassifyPreset(ctx, description)
@@ -94,7 +104,7 @@ func (c *deepSeekPresetClassifier) Classify(ctx context.Context, req presetReque
 		Reason:      strings.TrimSpace(classification.Reason),
 		Raw:         classification.Raw,
 		Description: description,
-		Source:      "deepseek",
+		Source:      "preset_llm",
 	}, nil
 }
 
@@ -111,21 +121,21 @@ type presetDecision struct {
 
 func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSource string, logger *slog.Logger) presetDecision {
 	var decision presetDecision
-	if e == nil || e.cfg == nil || !e.cfg.DeepSeekPresetDeciderEnabled {
+	if e == nil || e.cfg == nil || !e.cfg.PresetDeciderEnabled {
 		return decision
 	}
 	if e.presetClassifier == nil {
-		logger.Warn("deepseek preset classifier unavailable; falling back to default")
+		logger.Warn("preset decider unavailable; falling back to default")
 		return decision
 	}
 	if item == nil || strings.TrimSpace(item.MetadataJSON) == "" {
-		logger.Info("deepseek preset skipped", logging.String("reason", "metadata unavailable"))
+		logger.Info("preset decider skipped", logging.String("reason", "metadata unavailable"))
 		return decision
 	}
 	meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	title := strings.TrimSpace(meta.Title())
 	if title == "" {
-		logger.Info("deepseek preset skipped", logging.String("reason", "title unavailable"))
+		logger.Info("preset decider skipped", logging.String("reason", "title unavailable"))
 		return decision
 	}
 	request := presetRequest{
@@ -140,14 +150,14 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 	}
 	if res, err := e.detectResolutionLabel(ctx, sampleSource); err != nil {
 		if sampleSource != "" {
-			logger.Warn("deepseek preset resolution detection failed", logging.String("source", sampleSource), logging.Error(err))
+			logger.Warn("preset decider resolution detection failed", logging.String("source", sampleSource), logging.Error(err))
 		}
 	} else if strings.TrimSpace(res) != "" {
 		request.Resolution = res
 	}
 	classification, err := e.presetClassifier.Classify(ctx, request)
 	if err != nil {
-		logger.Warn("deepseek preset classification failed", logging.Error(err))
+		logger.Warn("preset decider classification failed", logging.Error(err))
 		return decision
 	}
 	decision.SuggestedProfile = classification.Profile
@@ -171,20 +181,20 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 	}
 
 	if decision.SuggestedProfile == "" {
-		logger.Info("deepseek preset provided no profile", logging.Args(attrs...)...)
+		logger.Info("preset decider provided no profile", logging.Args(attrs...)...)
 		return decision
 	}
 	if decision.SuggestedProfile != "clean" && decision.SuggestedProfile != "grain" {
-		logger.Info("deepseek preset returned unsupported profile", logging.Args(append(attrs, logging.String("note", "unsupported profile"))...)...)
+		logger.Info("preset decider returned unsupported profile", logging.Args(append(attrs, logging.String("note", "unsupported profile"))...)...)
 		return decision
 	}
 	if decision.Confidence < presetConfidenceThreshold {
-		logger.Info("deepseek preset confidence below threshold", logging.Args(append(attrs, logging.Float64("required_confidence", presetConfidenceThreshold))...)...)
+		logger.Info("preset decider confidence below threshold", logging.Args(append(attrs, logging.Float64("required_confidence", presetConfidenceThreshold))...)...)
 		return decision
 	}
 	decision.Profile = decision.SuggestedProfile
 	decision.Applied = true
-	logger.Info("deepseek preset applied", logging.Args(attrs...)...)
+	logger.Info("preset decider applied", logging.Args(attrs...)...)
 	return decision
 }
 

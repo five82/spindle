@@ -1,9 +1,8 @@
-package deepseek
+package presetllm
 
-// PresetClassificationPrompt captures the instructions sent to DeepSeek when
-// classifying whether Drapto should run in clean, grain, or default mode. Keep
-// updates centralized here so it is easy to tweak without hunting through
-// call sites.
+// PresetClassificationPrompt captures the instructions sent to the configured
+// LLM when classifying whether Drapto should use clean, grain, or default
+// settings. Update this text centrally so every call stays in sync.
 const PresetClassificationPrompt = `You are an assistant that chooses an encoding profile for a movie or tv show.
 
 Available profiles:
