@@ -82,7 +82,7 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 	}
 	logger.Info(
 		"launching drapto encode",
-		logging.String("command", e.draptoCommand(sourcePath, encodedDir)),
+		logging.String("command", e.draptoCommand(sourcePath, encodedDir, presetProfile)),
 		logging.String("input", sourcePath),
 		logging.String("job", strings.TrimSpace(label)),
 	)
@@ -687,7 +687,7 @@ func (e *Encoder) draptoBinaryName() string {
 	return binary
 }
 
-func (e *Encoder) draptoCommand(inputPath, outputDir string) string {
+func (e *Encoder) draptoCommand(inputPath, outputDir, presetProfile string) string {
 	binary := e.draptoBinaryName()
 	logDir := strings.TrimSpace(e.draptoLogDir())
 	parts := []string{
@@ -698,6 +698,9 @@ func (e *Encoder) draptoCommand(inputPath, outputDir string) string {
 	}
 	if logDir != "" {
 		parts = append(parts, fmt.Sprintf("--log-dir %q", logDir))
+	}
+	if profile := strings.TrimSpace(presetProfile); profile != "" && !strings.EqualFold(profile, "default") {
+		parts = append(parts, fmt.Sprintf("--drapto-preset %s", profile))
 	}
 	parts = append(parts, "--progress-json")
 	return strings.Join(parts, " ")

@@ -25,7 +25,7 @@ const (
 	ansiBlue   = "\x1b[34m"
 )
 
-const statusLabelWidth = 14
+const statusLabelWidth = 20
 
 func renderStatusLine(label string, kind statusKind, message string, colorize bool) string {
 	statusText := statusKindLabel(kind)

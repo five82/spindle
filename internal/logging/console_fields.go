@@ -7,7 +7,7 @@ type infoField struct {
 	value string
 }
 
-const infoAttrLimit = 4
+const infoAttrLimit = 5
 
 var infoHighlightKeys = []string{
 	"disc_title",
