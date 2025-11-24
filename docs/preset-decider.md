@@ -11,12 +11,17 @@ The Drapto CLI ships with curated presets:
 
 | Preset | Intent (from Drapto) |
 | --- | --- |
-| `grain` | Preserve texture on film-sourced/noisy captures. Lower CRFs and slower SVT settings. |
-| `clean` | Favor speed + size for animation or digitally shot content with minimal noise. |
-| _no preset_ | Balanced defaults (CRF 24/26/28, SVT preset 6, AC bias 0.30, variance boost on). |
+| `grain` | Preserve texture on film-sourced/noisy captures. Lower CRFs and addtional psy settings. |
+| `clean` | Favor higher CRFs for animation or digitally shot content with minimal noise. |
+| _no preset_ | Balanced defaults (CRF 25/27/29, SVT preset 6, AC bias 0.10, variance boost off). |
 
-Manually picking between these options is tedious, so Spindle feeds the title,
-season, year, and resolution into an LLM that returns a JSON decision.
+These presets allows us to add a level of targeted encoding based on content type rather than one size fits all.
+
+## Why LLMs for preset selection?
+
+Static rules for preset selection based on genre and year would cover most content. But you would miss the edge cases such as older computer animated movies and newer films with high amounts on grain that LLMs caught in my testing.
+
+I selected deepseek-v3.1-terminus as the default model because of its lower cost and accuracy. GPT-5 mini was also very accurate. Some of the other smaller models such as gpt-oss-20b tended to be hit or miss with the outliers we're trying to classify.
 
 ## Data sent to the LLM
 
