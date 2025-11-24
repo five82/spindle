@@ -52,7 +52,6 @@ type Config struct {
 	WorkflowHeartbeatTimeout      int      `toml:"workflow_heartbeat_timeout"`
 	LogFormat                     string   `toml:"log_format"`
 	LogLevel                      string   `toml:"log_level"`
-	DraptoPreset                  int      `toml:"drapto_preset"`
 	SubtitlesEnabled              bool     `toml:"subtitles_enabled"`
 	WhisperXCUDAEnabled           bool     `toml:"whisperx_cuda_enabled"`
 	WhisperXVADMethod             string   `toml:"whisperx_vad_method"`
@@ -62,6 +61,8 @@ type Config struct {
 	OpenSubtitlesUserAgent        string   `toml:"opensubtitles_user_agent"`
 	OpenSubtitlesUserToken        string   `toml:"opensubtitles_user_token"`
 	OpenSubtitlesLanguages        []string `toml:"opensubtitles_languages"`
+	DeepSeekPresetDeciderEnabled  bool     `toml:"deepseek_preset_decider_enabled"`
+	DeepSeekAPIKey                string   `toml:"deepseek_api_key"`
 }
 
 const (
@@ -81,7 +82,6 @@ const (
 	defaultWorkflowHeartbeatInterval   = 15
 	defaultWorkflowHeartbeatTimeout    = 120
 	defaultAPIBind                     = "127.0.0.1:7487"
-	defaultDraptoPreset                = 4
 	defaultPlexAuthPath                = "~/.config/spindle/plex_auth.json"
 	defaultDraptoLogDir                = "~/.local/share/spindle/logs/drapto"
 	defaultKeyDBPath                   = "~/.config/spindle/keydb/KEYDB.cfg"
@@ -130,7 +130,6 @@ func Default() Config {
 		WorkflowHeartbeatTimeout:    defaultWorkflowHeartbeatTimeout,
 		LogFormat:                   defaultLogFormat,
 		LogLevel:                    defaultLogLevel,
-		DraptoPreset:                defaultDraptoPreset,
 		WhisperXVADMethod:           "silero",
 		OpenSubtitlesLanguages:      []string{"en"},
 		OpenSubtitlesUserAgent:      defaultOpenSubtitlesUserAgent,
@@ -354,6 +353,13 @@ func (c *Config) normalize() error {
 		c.OpenSubtitlesLanguages = langs
 	}
 
+	c.DeepSeekAPIKey = strings.TrimSpace(c.DeepSeekAPIKey)
+	if c.DeepSeekAPIKey == "" {
+		if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
+			c.DeepSeekAPIKey = strings.TrimSpace(value)
+		}
+	}
+
 	c.TMDBBaseURL = strings.TrimSpace(c.TMDBBaseURL)
 	if c.TMDBBaseURL == "" {
 		c.TMDBBaseURL = defaultTMDBBaseURL
@@ -405,9 +411,6 @@ func (c *Config) Validate() error {
 	if c.TMDBConfidenceThreshold < 0 || c.TMDBConfidenceThreshold > 1 {
 		return errors.New("tmdb_confidence_threshold must be between 0 and 1")
 	}
-	if c.DraptoPreset < 0 {
-		return errors.New("drapto_preset must be zero or positive")
-	}
 	if strings.TrimSpace(c.KeyDBDownloadURL) == "" {
 		return errors.New("keydb_download_url must be set")
 	}
@@ -435,6 +438,9 @@ func (c *Config) Validate() error {
 		if c.RipCacheMaxGiB <= 0 {
 			return errors.New("rip_cache_max_gib must be positive when rip_cache_enabled is true")
 		}
+	}
+	if c.DeepSeekPresetDeciderEnabled && strings.TrimSpace(c.DeepSeekAPIKey) == "" {
+		return errors.New("deepseek_api_key must be set when deepseek_preset_decider_enabled is true (or set DEEPSEEK_API_KEY)")
 	}
 	return nil
 }
@@ -606,7 +612,8 @@ identification_overrides_path = "~/.config/spindle/overrides/identification.json
 # ENCODING
 # ============================================================================
 
-drapto_preset = 4                                    # Drapto SVT-AV1 preset (lower is faster, higher is higher quality)
+deepseek_preset_decider_enabled = false              # When true, call DeepSeek to choose clean/grain/default Drapto presets per title
+deepseek_api_key = ""                                # Required when the DeepSeek preset decider is enabled; or set DEEPSEEK_API_KEY
 
 # ============================================================================
 # WORKFLOW TUNING (ADVANCED)

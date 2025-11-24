@@ -101,14 +101,15 @@ alignment artifacts inside each queue item’s staging folder for debugging.
 
 ## Audio, Encoding, and Dependencies
 
-- `encoder_threads`, `encoder_preset`, `encoder_passes` — forwarded to Drapto;
-  leave unset to stick with project defaults.
 - `drapto_path` — Override when Drapto is not on `PATH`.
 - `makemkv_path` — Custom path to `makemkvcon` if needed.
 - `keydb_path`, `keydb_download_url`, `keydb_download_timeout` — controls for
   refreshing `KEYDB.cfg` (AACS keys). Drop a manual file at
   `~/.config/spindle/keydb/KEYDB.cfg` to seed the cache.
 - `keydb_auto_refresh` — When true, Spindle fetches updates automatically.
+- `deepseek_preset_decider_enabled`, `deepseek_api_key` — opt-in LLM helper that
+  calls DeepSeek to choose Drapto’s `--drapto-preset` (`clean`, `grain`, or
+  default). Provide the key in config or via `DEEPSEEK_API_KEY`.
 
 ## Queue & Workflow Toggles
 

@@ -28,12 +28,13 @@ import (
 
 // Encoder manages Drapto encoding of ripped files.
 type Encoder struct {
-	store    *queue.Store
-	cfg      *config.Config
-	logger   *slog.Logger
-	client   drapto.Client
-	notifier notifications.Service
-	cache    *ripcache.Manager
+	store            *queue.Store
+	cfg              *config.Config
+	logger           *slog.Logger
+	client           drapto.Client
+	notifier         notifications.Service
+	cache            *ripcache.Manager
+	presetClassifier presetClassifier
 }
 
 const (
@@ -75,7 +76,7 @@ func buildEncodeJobs(env ripspec.Envelope, encodedDir string) ([]encodeJob, erro
 	return jobs, nil
 }
 
-func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath, encodedDir, label string, logger *slog.Logger) (string, error) {
+func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath, encodedDir, label string, presetProfile string, logger *slog.Logger) (string, error) {
 	if e.client == nil {
 		return "", nil
 	}
@@ -166,7 +167,10 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 		e.updateDraptoLogPointer(logger)
 	}()
 
-	path, err := e.client.Encode(ctx, sourcePath, encodedDir, progressLogger)
+	path, err := e.client.Encode(ctx, sourcePath, encodedDir, drapto.EncodeOptions{
+		Progress:      progressLogger,
+		PresetProfile: presetProfile,
+	})
 	if err != nil {
 		return "", services.Wrap(
 			services.ErrExternalTool,
@@ -225,7 +229,6 @@ func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *En
 	client := drapto.NewCLI(
 		drapto.WithBinary(cfg.DraptoBinary()),
 		drapto.WithLogDir(draptoLogDirFromConfig(cfg)),
-		drapto.WithPreset(cfg.DraptoPreset),
 	)
 	return NewEncoderWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
@@ -238,6 +241,9 @@ func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *
 		client:   client,
 		notifier: notifier,
 		cache:    ripcache.NewManager(cfg, logger),
+	}
+	if cfg != nil && cfg.DeepSeekPresetDeciderEnabled {
+		enc.presetClassifier = newDeepSeekPresetClassifier(cfg.DeepSeekAPIKey)
 	}
 	enc.SetLogger(logger)
 	return enc
@@ -351,11 +357,17 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		logger.Info("prepared drapto log directory", logging.String("drapto_log_dir", draptoLogDir))
 	}
 
+	sampleSource := strings.TrimSpace(item.RippedFile)
+	if len(jobs) > 0 {
+		sampleSource = strings.TrimSpace(jobs[0].Source)
+	}
+	decision := e.selectPreset(ctx, item, sampleSource, logger)
+
 	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
 	if len(jobs) > 0 {
 		for _, job := range jobs {
 			label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
-			path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, logger)
+			path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, decision.Profile, logger)
 			if err != nil {
 				return err
 			}
@@ -371,7 +383,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		if label == "" {
 			label = "Disc"
 		}
-		path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, logger)
+		path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, decision.Profile, logger)
 		if err != nil {
 			return err
 		}
@@ -414,6 +426,9 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		item.ProgressMessage = "Encoding completed"
 	} else {
 		item.ProgressMessage = "Encoded placeholder artifact"
+	}
+	if suffix := presetSummary(decision); suffix != "" {
+		item.ProgressMessage = fmt.Sprintf("%s – %s", item.ProgressMessage, suffix)
 	}
 	if e.client != nil && e.notifier != nil {
 		if err := e.notifier.Publish(ctx, notifications.EventEncodingCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
@@ -680,7 +695,6 @@ func (e *Encoder) draptoCommand(inputPath, outputDir string) string {
 		fmt.Sprintf("--input %q", strings.TrimSpace(inputPath)),
 		fmt.Sprintf("--output %q", strings.TrimSpace(outputDir)),
 		"--responsive",
-		fmt.Sprintf("--preset %d", e.draptoPreset()),
 	}
 	if logDir != "" {
 		parts = append(parts, fmt.Sprintf("--log-dir %q", logDir))
@@ -719,18 +733,6 @@ func (e *Encoder) updateDraptoLogPointer(logger *slog.Logger) {
 
 func (e *Encoder) draptoLogDir() string {
 	return draptoLogDirFromConfig(e.cfg)
-}
-
-func (e *Encoder) draptoPreset() int {
-	if e == nil || e.cfg == nil {
-		cfg := config.Default()
-		return cfg.DraptoPreset
-	}
-	if e.cfg.DraptoPreset < 0 {
-		cfg := config.Default()
-		return cfg.DraptoPreset
-	}
-	return e.cfg.DraptoPreset
 }
 
 func draptoLogDirFromConfig(cfg *config.Config) string {

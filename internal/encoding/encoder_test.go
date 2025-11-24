@@ -255,13 +255,15 @@ func TestEncoderHealthMissingClient(t *testing.T) {
 }
 
 type stubDraptoClient struct {
-	called bool
+	called        bool
+	presetProfile string
 }
 
-func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
+func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
 	s.called = true
-	if progress != nil {
-		progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 50, Message: "Halfway"})
+	s.presetProfile = opts.PresetProfile
+	if opts.Progress != nil {
+		opts.Progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 50, Message: "Halfway"})
 	}
 	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
 	if stem == "" {
@@ -292,13 +294,13 @@ func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, p
 
 type failingClient struct{}
 
-func (failingClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
+func (failingClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
 	return "", errors.New("encode failed")
 }
 
 type missingArtifactClient struct{}
 
-func (missingArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
+func (missingArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
 	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
 	if stem == "" {
 		stem = filepath.Base(inputPath)
@@ -308,7 +310,7 @@ func (missingArtifactClient) Encode(ctx context.Context, inputPath, outputDir st
 
 type emptyArtifactClient struct{}
 
-func (emptyArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
+func (emptyArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
 	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
 	if stem == "" {
 		stem = filepath.Base(inputPath)

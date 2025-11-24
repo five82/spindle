@@ -20,14 +20,14 @@ func TestNewCLIWithBinary(t *testing.T) {
 
 func TestCLIEncodeRequiresInput(t *testing.T) {
 	cli := NewCLI()
-	if _, err := cli.Encode(context.Background(), "", "/tmp", nil); err == nil {
+	if _, err := cli.Encode(context.Background(), "", "/tmp", EncodeOptions{}); err == nil {
 		t.Fatal("expected error when input path is empty")
 	}
 }
 
 func TestCLIEncodeRequiresOutputDir(t *testing.T) {
 	cli := NewCLI()
-	if _, err := cli.Encode(context.Background(), "/media/movie.mkv", "", nil); err == nil {
+	if _, err := cli.Encode(context.Background(), "/media/movie.mkv", "", EncodeOptions{}); err == nil {
 		t.Fatal("expected error when output directory is empty")
 	}
 }
@@ -50,7 +50,7 @@ func TestCLIEncodeIncludesLogDir(t *testing.T) {
 	input := filepath.Join(tempDir, "movie.mkv")
 	outputDir := filepath.Join(tempDir, "encoded")
 
-	if _, err := cli.Encode(context.Background(), input, outputDir, nil); err != nil {
+	if _, err := cli.Encode(context.Background(), input, outputDir, EncodeOptions{}); err != nil {
 		t.Fatalf("Encode returned error: %v", err)
 	}
 
@@ -90,12 +90,12 @@ func TestCLIEncodeIncludesEncodingFlags(t *testing.T) {
 		commandContext = original
 	})
 
-	cli := NewCLI(WithPreset(6))
+	cli := NewCLI()
 	tempDir := t.TempDir()
 	input := filepath.Join(tempDir, "movie.mkv")
 	outputDir := filepath.Join(tempDir, "encoded")
 
-	if _, err := cli.Encode(context.Background(), input, outputDir, nil); err != nil {
+	if _, err := cli.Encode(context.Background(), input, outputDir, EncodeOptions{}); err != nil {
 		t.Fatalf("Encode returned error: %v", err)
 	}
 
@@ -107,23 +107,49 @@ func TestCLIEncodeIncludesEncodingFlags(t *testing.T) {
 		t.Fatalf("expected Drapto command to include --responsive, got %v", capturedArgs)
 	}
 
-	idx := findArg(capturedArgs, "--preset")
-	if idx == -1 {
-		t.Fatalf("expected Drapto command to include --preset, got %v", capturedArgs)
-	}
-	if idx+1 >= len(capturedArgs) {
-		t.Fatalf("--preset flag missing value in args %v", capturedArgs)
-	}
-	if capturedArgs[idx+1] != "6" {
-		t.Fatalf("expected preset value 6, got %q", capturedArgs[idx+1])
-	}
-
 	if findArg(capturedArgs, "--no-denoise") != -1 {
 		t.Fatalf("expected Drapto command to omit --no-denoise, got %v", capturedArgs)
 	}
 
 	if findArg(capturedArgs, "--progress-json") == -1 {
 		t.Fatalf("expected Drapto command to include --progress-json, got %v", capturedArgs)
+	}
+	if findArg(capturedArgs, "--preset") != -1 {
+		t.Fatalf("expected Drapto command to omit --preset, got %v", capturedArgs)
+	}
+}
+
+func TestCLIEncodeIncludesPresetProfile(t *testing.T) {
+	var capturedArgs []string
+	original := commandContext
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		capturedArgs = append([]string(nil), args...)
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestHelperProcess")
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1", "DRAPTO_HELPER_MODE=success")
+		return cmd
+	}
+	t.Cleanup(func() {
+		commandContext = original
+	})
+
+	cli := NewCLI()
+	tempDir := t.TempDir()
+	input := filepath.Join(tempDir, "movie.mkv")
+	outputDir := filepath.Join(tempDir, "encoded")
+
+	if _, err := cli.Encode(context.Background(), input, outputDir, EncodeOptions{PresetProfile: "grain"}); err != nil {
+		t.Fatalf("Encode returned error: %v", err)
+	}
+
+	idx := findArg(capturedArgs, "--drapto-preset")
+	if idx == -1 {
+		t.Fatalf("expected Drapto command to include --drapto-preset, got %v", capturedArgs)
+	}
+	if idx+1 >= len(capturedArgs) {
+		t.Fatalf("--drapto-preset flag missing value, args=%v", capturedArgs)
+	}
+	if capturedArgs[idx+1] != "grain" {
+		t.Fatalf("expected preset profile grain, got %q", capturedArgs[idx+1])
 	}
 }
 
@@ -136,9 +162,9 @@ func TestCLIEncodeSuccess(t *testing.T) {
 	outputDir := filepath.Join(tempDir, "encoded")
 
 	var updates []ProgressUpdate
-	path, err := cli.Encode(context.Background(), input, outputDir, func(update ProgressUpdate) {
+	path, err := cli.Encode(context.Background(), input, outputDir, EncodeOptions{Progress: func(update ProgressUpdate) {
 		updates = append(updates, update)
-	})
+	}})
 	if err != nil {
 		t.Fatalf("Encode returned error: %v", err)
 	}
@@ -177,7 +203,7 @@ func TestCLIEncodeFailure(t *testing.T) {
 	input := filepath.Join(tempDir, "movie.mkv")
 	outputDir := filepath.Join(tempDir, "encoded")
 
-	if _, err := cli.Encode(context.Background(), input, outputDir, nil); err == nil {
+	if _, err := cli.Encode(context.Background(), input, outputDir, EncodeOptions{}); err == nil {
 		t.Fatal("expected encode failure error")
 	}
 }
@@ -191,9 +217,9 @@ func TestCLIEncodeSkipsInvalidJSON(t *testing.T) {
 	outputDir := filepath.Join(tempDir, "encoded")
 
 	var updates []ProgressUpdate
-	if _, err := cli.Encode(context.Background(), input, outputDir, func(update ProgressUpdate) {
+	if _, err := cli.Encode(context.Background(), input, outputDir, EncodeOptions{Progress: func(update ProgressUpdate) {
 		updates = append(updates, update)
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("Encode returned error: %v", err)
 	}
 	if len(updates) != 1 {

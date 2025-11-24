@@ -8,14 +8,11 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
 
 var commandContext = exec.CommandContext
-
-const defaultPreset = 4
 
 // ProgressUpdate captures Drapto progress events.
 type ProgressUpdate struct {
@@ -30,7 +27,13 @@ type ProgressUpdate struct {
 
 // Client defines Drapto encoding behaviour.
 type Client interface {
-	Encode(ctx context.Context, inputPath, outputDir string, progress func(ProgressUpdate)) (string, error)
+	Encode(ctx context.Context, inputPath, outputDir string, opts EncodeOptions) (string, error)
+}
+
+// EncodeOptions configures how the encoder should run.
+type EncodeOptions struct {
+	Progress      func(ProgressUpdate)
+	PresetProfile string
 }
 
 // Option configures the CLI client.
@@ -49,12 +52,11 @@ func WithBinary(binary string) Option {
 type CLI struct {
 	binary string
 	logDir string
-	preset int
 }
 
 // NewCLI constructs a CLI client using defaults.
 func NewCLI(opts ...Option) *CLI {
-	cli := &CLI{binary: "drapto", preset: defaultPreset}
+	cli := &CLI{binary: "drapto"}
 	for _, opt := range opts {
 		opt(cli)
 	}
@@ -71,17 +73,8 @@ func WithLogDir(dir string) Option {
 	}
 }
 
-// WithPreset configures the Drapto SVT-AV1 preset number.
-func WithPreset(preset int) Option {
-	return func(c *CLI) {
-		if preset >= 0 {
-			c.preset = preset
-		}
-	}
-}
-
 // Encode launches drapto encode and returns the output path.
-func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress func(ProgressUpdate)) (string, error) {
+func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, opts EncodeOptions) (string, error) {
 	if inputPath == "" {
 		return "", errors.New("input path required")
 	}
@@ -106,10 +99,12 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 		"--input", inputPath,
 		"--output", cleanOutputDir,
 		"--responsive",
-		"--preset", strconv.Itoa(c.preset),
 	}
 	if logDir := strings.TrimSpace(c.logDir); logDir != "" {
 		args = append(args, "--log-dir", logDir)
+	}
+	if profile := strings.TrimSpace(opts.PresetProfile); profile != "" && !strings.EqualFold(profile, "default") {
+		args = append(args, "--drapto-preset", profile)
 	}
 	args = append(args, "--progress-json")
 	cmd := commandContext(ctx, c.binary, args...) //nolint:gosec
@@ -138,7 +133,7 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 		if err := json.Unmarshal(line, &payload); err != nil {
 			continue
 		}
-		if progress != nil {
+		if opts.Progress != nil {
 			update := ProgressUpdate{
 				Percent: payload.Percent,
 				Stage:   payload.Stage,
@@ -154,7 +149,7 @@ func (c *CLI) Encode(ctx context.Context, inputPath, outputDir string, progress 
 			if payload.FPS != nil {
 				update.FPS = *payload.FPS
 			}
-			progress(update)
+			opts.Progress(update)
 		}
 	}
 	if err := scanner.Err(); err != nil {

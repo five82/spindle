@@ -85,12 +85,12 @@ func stubValidationProbes(t *testing.T) {
 
 type stubDraptoClient struct{}
 
-func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir string, progress func(drapto.ProgressUpdate)) (string, error) {
+func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return "", err
 	}
-	if progress != nil {
-		progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 10, Message: "starting"})
+	if opts.Progress != nil {
+		opts.Progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 10, Message: "starting"})
 	}
 	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
 	if stem == "" {
@@ -104,8 +104,8 @@ func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir stri
 	if err := os.WriteFile(dest, data, 0o644); err != nil {
 		return "", err
 	}
-	if progress != nil {
-		progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 95, Message: "finishing"})
+	if opts.Progress != nil {
+		opts.Progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 95, Message: "finishing"})
 	}
 	return dest, nil
 }
