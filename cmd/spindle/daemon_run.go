@@ -39,7 +39,14 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 
 	runID := time.Now().UTC().Format("20060102T150405.000Z")
 	logPath := filepath.Join(cfg.LogDir, fmt.Sprintf("spindle-%s.log", runID))
-	logHub := logging.NewStreamHub(1024)
+	eventsPath := filepath.Join(cfg.LogDir, fmt.Sprintf("spindle-%s.events", runID))
+	logHub := logging.NewStreamHub(4096)
+	eventArchive, archiveErr := logging.NewEventArchive(eventsPath)
+	if archiveErr != nil {
+		fmt.Fprintf(os.Stderr, "warn: unable to initialize log archive: %v\n", archiveErr)
+	} else if eventArchive != nil {
+		logHub.AddSink(eventArchive)
+	}
 	logger, err := logging.New(logging.Options{
 		Level:            cfg.LogLevel,
 		Format:           cfg.LogFormat,
@@ -54,6 +61,12 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	if err := ensureCurrentLogPointer(cfg.LogDir, logPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: unable to update spindle.log link: %v\n", err)
 	}
+	logging.CleanupOldLogs(logger, cfg.LogRetentionDays,
+		logging.RetentionTarget{Dir: cfg.LogDir, Pattern: "spindle-*.log", Exclude: []string{logPath}},
+		logging.RetentionTarget{Dir: cfg.LogDir, Pattern: "spindle-*.events", Exclude: []string{eventsPath}},
+		logging.RetentionTarget{Dir: filepath.Join(cfg.LogDir, "background"), Pattern: "*.log"},
+		logging.RetentionTarget{Dir: cfg.DraptoLogDir, Pattern: "*.log", Exclude: []string{cfg.DraptoCurrentLogPath()}},
+	)
 	pidPath := filepath.Join(cfg.LogDir, "spindle.pid")
 	if err := writePIDFile(pidPath); err != nil {
 		return fmt.Errorf("write pid file: %w", err)
@@ -70,7 +83,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	workflowManager := workflow.NewManager(cfg, store, logger)
 	registerStages(workflowManager, cfg, store, logger)
 
-	d, err := daemon.New(cfg, store, logger, workflowManager, logPath, logHub)
+	d, err := daemon.New(cfg, store, logger, workflowManager, logPath, logHub, eventArchive)
 	if err != nil {
 		return fmt.Errorf("create daemon: %w", err)
 	}

@@ -34,6 +34,7 @@ type StreamHub struct {
 	capacity int
 	buffer   []LogEvent
 	nextSeq  uint64
+	sinks    []LogEventSink
 }
 
 // NewStreamHub constructs a bounded in-memory log fan-out buffer.
@@ -46,14 +47,27 @@ func NewStreamHub(capacity int) *StreamHub {
 	return h
 }
 
+// LogEventSink receives published log events (for persistence, etc.).
+type LogEventSink interface {
+	Append(LogEvent)
+}
+
+// AddSink wires an additional sink that receives every published event.
+func (h *StreamHub) AddSink(sink LogEventSink) {
+	if h == nil || sink == nil {
+		return
+	}
+	h.mu.Lock()
+	h.sinks = append(h.sinks, sink)
+	h.mu.Unlock()
+}
+
 // Publish appends a new log event to the hub.
 func (h *StreamHub) Publish(evt LogEvent) {
 	if h == nil {
 		return
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	h.nextSeq++
 	evt.Sequence = h.nextSeq
 	if evt.Timestamp.IsZero() {
@@ -65,7 +79,13 @@ func (h *StreamHub) Publish(evt LogEvent) {
 		h.buffer = h.buffer[:h.capacity-1]
 	}
 	h.buffer = append(h.buffer, evt)
+	sinks := append([]LogEventSink(nil), h.sinks...)
 	h.cond.Broadcast()
+	h.mu.Unlock()
+
+	for _, sink := range sinks {
+		sink.Append(evt)
+	}
 }
 
 // Fetch returns all events with sequence greater than since. When wait is true,
@@ -128,6 +148,19 @@ func (h *StreamHub) Tail(limit int) ([]LogEvent, uint64) {
 	out := make([]LogEvent, len(h.buffer)-start)
 	copy(out, h.buffer[start:])
 	return out, h.nextSeq
+}
+
+// FirstSequence reports the smallest sequence number still buffered.
+func (h *StreamHub) FirstSequence() uint64 {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.buffer) == 0 {
+		return h.nextSeq
+	}
+	return h.buffer[0].Sequence
 }
 
 func (h *StreamHub) snapshotLocked(since uint64, limit int) ([]LogEvent, uint64) {

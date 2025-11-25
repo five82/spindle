@@ -196,7 +196,8 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hub := s.daemon.LogStream()
-	if hub == nil {
+	archive := s.daemon.LogArchive()
+	if hub == nil && archive == nil {
 		s.writeJSON(w, http.StatusOK, api.LogStreamResponse{Events: nil, Next: 0})
 		return
 	}
@@ -219,27 +220,45 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	component := strings.TrimSpace(query.Get("component"))
 
 	var (
-		events []api.LogEvent
-		next   uint64
-		err    error
+		converted []api.LogEvent
+		next      uint64
+		err       error
 	)
-	if tail && since == 0 && !follow {
+
+	if archive != nil && since > 0 {
+		firstSeq := uint64(0)
+		if hub != nil {
+			firstSeq = hub.FirstSequence()
+		}
+		if hub == nil || (firstSeq > 0 && since < firstSeq) {
+			archived, cursor, archErr := archive.ReadSince(since, limit)
+			if archErr != nil {
+				s.log().Warn("log archive read failed", logging.Error(archErr))
+			} else if len(archived) > 0 {
+				converted = convertLogEvents(archived)
+				next = cursor
+			}
+		}
+	}
+	if tail && since == 0 && !follow && hub != nil {
 		raw, cursor := hub.Tail(limit)
-		events = convertLogEvents(raw)
+		converted = convertLogEvents(raw)
 		next = cursor
 	} else {
-		raw, cursor, fetchErr := hub.Fetch(r.Context(), since, limit, follow)
-		if fetchErr != nil && !errors.Is(fetchErr, context.Canceled) && !errors.Is(fetchErr, context.DeadlineExceeded) {
-			s.writeError(w, http.StatusInternalServerError, fetchErr.Error())
-			return
+		if len(converted) == 0 && hub != nil {
+			raw, cursor, fetchErr := hub.Fetch(r.Context(), since, limit, follow)
+			if fetchErr != nil && !errors.Is(fetchErr, context.Canceled) && !errors.Is(fetchErr, context.DeadlineExceeded) {
+				s.writeError(w, http.StatusInternalServerError, fetchErr.Error())
+				return
+			}
+			converted = convertLogEvents(raw)
+			next = cursor
+			err = fetchErr
 		}
-		events = convertLogEvents(raw)
-		next = cursor
-		err = fetchErr
 	}
 
-	filtered := make([]api.LogEvent, 0, len(events))
-	for _, evt := range events {
+	filtered := make([]api.LogEvent, 0, len(converted))
+	for _, evt := range converted {
 		if filterItem != 0 && evt.ItemID != filterItem {
 			continue
 		}

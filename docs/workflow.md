@@ -111,7 +111,7 @@ Logs also live in `<log_dir>/spindle-<timestamp>.log` (one file per daemon start
 - **Staging**: `<staging_dir>/<fingerprint>/rips/` for MakeMKV output, `<staging_dir>/<fingerprint>/encoded/` for Drapto output while waiting on organization. AI subtitles land in the encoded folder as `<basename>.<lang>.srt` until the organizer moves them alongside the final media.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in the config.
 - **Review**: `<review_dir>/` holds encoded files that still need manual identification. Each unidentified disc is stored with a unique filename (for example `unidentified-1.mkv`), and the queue item is marked complete so it doesn’t block subsequent work.
-- **Logs & diagnostics**: `<log_dir>/` keeps `spindle-*.log` files for each run, the queue database, and analyzer/debug artifacts.
+- **Logs & diagnostics**: `<log_dir>/` keeps `spindle-*.log` files for each run, the queue database, and analyzer/debug artifacts. The daemon also maintains a structured log archive so `spindle show` (and Flyer) can stream entries for completed jobs until they age past `log_retention_days` (60 by default).
 
 ## Notifications
 

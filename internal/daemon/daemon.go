@@ -29,14 +29,15 @@ var manualFileExtensions = map[string]struct{}{
 }
 
 type Daemon struct {
-	cfg      *config.Config
-	logger   *slog.Logger
-	store    *queue.Store
-	workflow *workflow.Manager
-	logPath  string
-	logHub   *logging.StreamHub
-	monitor  *discMonitor
-	apiSrv   *apiServer
+	cfg        *config.Config
+	logger     *slog.Logger
+	store      *queue.Store
+	workflow   *workflow.Manager
+	logPath    string
+	logHub     *logging.StreamHub
+	logArchive *logging.EventArchive
+	monitor    *discMonitor
+	apiSrv     *apiServer
 
 	lockPath string
 	lock     *flock.Flock
@@ -72,7 +73,7 @@ type DependencyStatus struct {
 }
 
 // New constructs a daemon with initialized dependencies.
-func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workflow.Manager, logPath string, hub *logging.StreamHub) (*Daemon, error) {
+func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workflow.Manager, logPath string, hub *logging.StreamHub, archive *logging.EventArchive) (*Daemon, error) {
 	if cfg == nil || store == nil || logger == nil || wf == nil {
 		return nil, errors.New("daemon requires config, store, logger, and workflow manager")
 	}
@@ -83,16 +84,17 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 	lockPath := filepath.Join(cfg.LogDir, "spindle.lock")
 	monitor := newDiscMonitor(cfg, store, logger)
 	daemon := &Daemon{
-		cfg:      cfg,
-		logger:   logger,
-		store:    store,
-		workflow: wf,
-		logPath:  logPath,
-		logHub:   hub,
-		lockPath: lockPath,
-		lock:     flock.New(lockPath),
-		monitor:  monitor,
-		notifier: notifications.NewService(cfg),
+		cfg:        cfg,
+		logger:     logger,
+		store:      store,
+		workflow:   wf,
+		logPath:    logPath,
+		logHub:     hub,
+		logArchive: archive,
+		lockPath:   lockPath,
+		lock:       flock.New(lockPath),
+		monitor:    monitor,
+		notifier:   notifications.NewService(cfg),
 	}
 	apiSrv, err := newAPIServer(cfg, daemon, logger)
 	if err != nil {
@@ -182,6 +184,9 @@ func (d *Daemon) Stop() {
 // Close releases resources held by the daemon.
 func (d *Daemon) Close() error {
 	d.Stop()
+	if d.logArchive != nil {
+		_ = d.logArchive.Close()
+	}
 	if d.store != nil {
 		return d.store.Close()
 	}
@@ -324,6 +329,14 @@ func (d *Daemon) LogStream() *logging.StreamHub {
 		return nil
 	}
 	return d.logHub
+}
+
+// LogArchive exposes the on-disk event archive used for API history.
+func (d *Daemon) LogArchive() *logging.EventArchive {
+	if d == nil {
+		return nil
+	}
+	return d.logArchive
 }
 
 // Status returns the current daemon status.

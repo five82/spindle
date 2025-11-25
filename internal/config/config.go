@@ -16,6 +16,7 @@ type Config struct {
 	StagingDir                    string   `toml:"staging_dir"`
 	LibraryDir                    string   `toml:"library_dir"`
 	LogDir                        string   `toml:"log_dir"`
+	LogRetentionDays              int      `toml:"log_retention_days"`
 	OpenSubtitlesCacheDir         string   `toml:"opensubtitles_cache_dir"`
 	WhisperXCacheDir              string   `toml:"whisperx_cache_dir"`
 	DraptoLogDir                  string   `toml:"drapto_log_dir"`
@@ -75,6 +76,7 @@ const (
 	defaultStagingDir                  = "~/.local/share/spindle/staging"
 	defaultLibraryDir                  = "~/library"
 	defaultLogDir                      = "~/.local/share/spindle/logs"
+	defaultLogRetentionDays            = 60
 	defaultOpenSubtitlesCacheDir       = "~/.local/share/spindle/cache/opensubtitles"
 	defaultWhisperXCacheDir            = "~/.local/share/spindle/cache/whisperx"
 	defaultReviewDir                   = "~/review"
@@ -108,6 +110,7 @@ func Default() Config {
 		StagingDir:                  defaultStagingDir,
 		LibraryDir:                  defaultLibraryDir,
 		LogDir:                      defaultLogDir,
+		LogRetentionDays:            defaultLogRetentionDays,
 		OpenSubtitlesCacheDir:       defaultOpenSubtitlesCacheDir,
 		WhisperXCacheDir:            defaultWhisperXCacheDir,
 		DraptoLogDir:                defaultDraptoLogDir,
@@ -235,6 +238,9 @@ func (c *Config) normalize() error {
 	}
 	if c.LogDir, err = expandPath(c.LogDir); err != nil {
 		return fmt.Errorf("log_dir: %w", err)
+	}
+	if c.LogRetentionDays < 0 {
+		return fmt.Errorf("log_retention_days must be >= 0")
 	}
 	if strings.TrimSpace(c.OpenSubtitlesCacheDir) == "" {
 		c.OpenSubtitlesCacheDir = defaultOpenSubtitlesCacheDir
@@ -605,6 +611,7 @@ overwrite_existing_library_files = false             # Set true to replace exist
 
 staging_dir = "~/.local/share/spindle/staging"       # Working directory for rips/encodes
 log_dir = "~/.local/share/spindle/logs"              # Logs and queue database
+log_retention_days = 60                               # Prune logs older than this many days (0 disables cleanup)
 drapto_log_dir = "~/.local/share/spindle/logs/drapto" # Drapto encoder log files
 review_dir = "~/review"                              # Encoded files awaiting manual identification
 optical_drive = "/dev/sr0"                           # Optical drive device path

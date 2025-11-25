@@ -21,7 +21,7 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
    - `spindle start|status|stop`
    - `spindle show --follow` for live logs
 4. Reset queue state with first-class commands instead of direct DB edits: `spindle queue reset-stuck`, `spindle queue clear --completed`, etc.
-5. Logs live under `<log_dir>/spindle-<timestamp>.log`; follow the current run with `spindle show --follow` or `tail -f <log_dir>/spindle.log` when the symlink is available.
+5. Logs live under `<log_dir>/spindle-<timestamp>.log`; follow the current run with `spindle show --follow` or `tail -f <log_dir>/spindle.log` when the symlink is available. Retention is controlled by `log_retention_days` (default 60) so disk usage stays bounded.
 
 ## Testing & Quality
 
