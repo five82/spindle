@@ -65,7 +65,6 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 		logging.RetentionTarget{Dir: cfg.LogDir, Pattern: "spindle-*.log", Exclude: []string{logPath}},
 		logging.RetentionTarget{Dir: cfg.LogDir, Pattern: "spindle-*.events", Exclude: []string{eventsPath}},
 		logging.RetentionTarget{Dir: filepath.Join(cfg.LogDir, "background"), Pattern: "*.log"},
-		logging.RetentionTarget{Dir: cfg.DraptoLogDir, Pattern: "*.log", Exclude: []string{cfg.DraptoCurrentLogPath()}},
 	)
 	pidPath := filepath.Join(cfg.LogDir, "spindle.pid")
 	if err := writePIDFile(pidPath); err != nil {

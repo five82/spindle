@@ -19,7 +19,6 @@ type Config struct {
 	LogRetentionDays              int      `toml:"log_retention_days"`
 	OpenSubtitlesCacheDir         string   `toml:"opensubtitles_cache_dir"`
 	WhisperXCacheDir              string   `toml:"whisperx_cache_dir"`
-	DraptoLogDir                  string   `toml:"drapto_log_dir"`
 	ReviewDir                     string   `toml:"review_dir"`
 	RipCacheEnabled               bool     `toml:"rip_cache_enabled"`
 	RipCacheDir                   string   `toml:"rip_cache_dir"`
@@ -91,7 +90,6 @@ const (
 	defaultWorkflowHeartbeatTimeout    = 120
 	defaultAPIBind                     = "127.0.0.1:7487"
 	defaultPlexAuthPath                = "~/.config/spindle/plex_auth.json"
-	defaultDraptoLogDir                = "~/.local/share/spindle/logs/drapto"
 	defaultKeyDBPath                   = "~/.config/spindle/keydb/KEYDB.cfg"
 	defaultKeyDBDownloadURL            = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
 	defaultKeyDBDownloadTimeout        = 300
@@ -113,7 +111,6 @@ func Default() Config {
 		LogRetentionDays:            defaultLogRetentionDays,
 		OpenSubtitlesCacheDir:       defaultOpenSubtitlesCacheDir,
 		WhisperXCacheDir:            defaultWhisperXCacheDir,
-		DraptoLogDir:                defaultDraptoLogDir,
 		ReviewDir:                   defaultReviewDir,
 		RipCacheEnabled:             false,
 		RipCacheDir:                 defaultRipCacheDir(),
@@ -266,9 +263,6 @@ func (c *Config) normalize() error {
 	if c.ReviewDir, err = expandPath(c.ReviewDir); err != nil {
 		return fmt.Errorf("review_dir: %w", err)
 	}
-	if c.DraptoLogDir, err = expandPath(c.DraptoLogDir); err != nil {
-		return fmt.Errorf("drapto_log_dir: %w", err)
-	}
 	if c.PlexAuthPath, err = expandPath(c.PlexAuthPath); err != nil {
 		return fmt.Errorf("plex_auth_path: %w", err)
 	}
@@ -287,13 +281,6 @@ func (c *Config) normalize() error {
 	c.KeyDBDownloadURL = strings.TrimSpace(c.KeyDBDownloadURL)
 	if c.KeyDBDownloadTimeout <= 0 {
 		c.KeyDBDownloadTimeout = defaultKeyDBDownloadTimeout
-	}
-	if strings.TrimSpace(c.DraptoLogDir) == "" {
-		if strings.TrimSpace(c.LogDir) == "" {
-			c.DraptoLogDir = ""
-		} else {
-			c.DraptoLogDir = filepath.Join(c.LogDir, "drapto")
-		}
 	}
 	c.APIBind = strings.TrimSpace(c.APIBind)
 	if c.APIBind == "" {
@@ -469,9 +456,6 @@ func (c *Config) Validate() error {
 	if c.KeyDBDownloadTimeout <= 0 {
 		return errors.New("keydb_download_timeout must be positive (seconds)")
 	}
-	if strings.TrimSpace(c.DraptoLogDir) == "" {
-		return errors.New("drapto_log_dir must be set")
-	}
 	if c.OpenSubtitlesEnabled {
 		if strings.TrimSpace(c.OpenSubtitlesAPIKey) == "" {
 			return errors.New("opensubtitles_api_key must be set when opensubtitles_enabled is true")
@@ -499,7 +483,7 @@ func (c *Config) Validate() error {
 
 // EnsureDirectories creates required directories for daemon operation.
 func (c *Config) EnsureDirectories() error {
-	for _, dir := range []string{c.StagingDir, c.LibraryDir, c.LogDir, c.ReviewDir, c.DraptoLogDir} {
+	for _, dir := range []string{c.StagingDir, c.LibraryDir, c.LogDir, c.ReviewDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory %q: %w", dir, err)
 		}
@@ -531,18 +515,6 @@ func (c *Config) DraptoBinary() string {
 // FFprobeBinary returns the ffprobe executable name used for media validation.
 func (c *Config) FFprobeBinary() string {
 	return "ffprobe"
-}
-
-// DraptoCurrentLogPath returns the pointer file used for the most recent Drapto log.
-func (c *Config) DraptoCurrentLogPath() string {
-	if c == nil {
-		return ""
-	}
-	base := strings.TrimSpace(c.LogDir)
-	if base == "" {
-		return ""
-	}
-	return filepath.Join(base, "drapto.log")
 }
 
 func expandPath(pathValue string) (string, error) {
@@ -612,7 +584,6 @@ overwrite_existing_library_files = false             # Set true to replace exist
 staging_dir = "~/.local/share/spindle/staging"       # Working directory for rips/encodes
 log_dir = "~/.local/share/spindle/logs"              # Logs and queue database
 log_retention_days = 60                               # Prune logs older than this many days (0 disables cleanup)
-drapto_log_dir = "~/.local/share/spindle/logs/drapto" # Drapto encoder log files
 review_dir = "~/review"                              # Encoded files awaiting manual identification
 optical_drive = "/dev/sr0"                           # Optical drive device path
 api_bind = "127.0.0.1:7487"                          # HTTP API bind address (host:port)

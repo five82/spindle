@@ -32,7 +32,7 @@ func TestCLIEncodeRequiresOutputDir(t *testing.T) {
 	}
 }
 
-func TestCLIEncodeIncludesLogDir(t *testing.T) {
+func TestCLIEncodeDisablesLogs(t *testing.T) {
 	var capturedArgs []string
 	original := commandContext
 	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -45,7 +45,7 @@ func TestCLIEncodeIncludesLogDir(t *testing.T) {
 		commandContext = original
 	})
 
-	cli := NewCLI(WithLogDir("/var/log/spindle/drapto"))
+	cli := NewCLI()
 	tempDir := t.TempDir()
 	input := filepath.Join(tempDir, "movie.mkv")
 	outputDir := filepath.Join(tempDir, "encoded")
@@ -54,26 +54,8 @@ func TestCLIEncodeIncludesLogDir(t *testing.T) {
 		t.Fatalf("Encode returned error: %v", err)
 	}
 
-	if len(capturedArgs) == 0 {
-		t.Fatalf("expected Drapto command arguments to be captured")
-	}
-
-	expectedFlag := "--log-dir"
-	found := false
-	for i, arg := range capturedArgs {
-		if arg == expectedFlag {
-			if i+1 >= len(capturedArgs) {
-				t.Fatalf("log dir flag present without accompanying value")
-			}
-			if capturedArgs[i+1] != "/var/log/spindle/drapto" {
-				t.Fatalf("expected log dir %q, got %q", "/var/log/spindle/drapto", capturedArgs[i+1])
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected Drapto command to include %s flag, got args %v", expectedFlag, capturedArgs)
+	if findArg(capturedArgs, "--no-log") == -1 {
+		t.Fatalf("expected Drapto command to include --no-log, got %v", capturedArgs)
 	}
 }
 
@@ -174,24 +156,61 @@ func TestCLIEncodeSuccess(t *testing.T) {
 	if path != expected {
 		t.Fatalf("expected output path %q, got %q", expected, path)
 	}
-	if len(updates) != 3 {
-		t.Fatalf("expected 3 progress updates, got %d", len(updates))
+	if len(updates) < 6 {
+		t.Fatalf("expected multiple progress updates, got %d", len(updates))
 	}
-	if updates[len(updates)-1].Percent != 100 {
-		t.Fatalf("expected final update to report 100 percent, got %f", updates[len(updates)-1].Percent)
+	if updates[0].Type != EventTypeHardware || updates[0].Hardware == nil || updates[0].Hardware.Hostname != "white" {
+		t.Fatalf("expected first update to include hardware hostname, got %+v", updates[0])
 	}
-	middle := updates[1]
-	if middle.Stage != "encoding" {
-		t.Fatalf("expected encoding stage, got %q", middle.Stage)
+	var (
+		progressSeen    bool
+		validationSeen  bool
+		resultSeen      bool
+		finalPercent100 bool
+	)
+	for _, update := range updates {
+		switch update.Type {
+		case EventTypeEncodingProgress:
+			progressSeen = true
+			if update.Stage != "encoding" {
+				t.Fatalf("expected encoding stage, got %q", update.Stage)
+			}
+			if update.ETA != 5*time.Minute {
+				t.Fatalf("expected eta 5m, got %s", update.ETA)
+			}
+			if update.Speed != 3.0 {
+				t.Fatalf("expected speed 3.0x, got %f", update.Speed)
+			}
+			if update.FPS != 72.0 {
+				t.Fatalf("expected fps 72, got %f", update.FPS)
+			}
+		case EventTypeValidation:
+			if update.Validation == nil || !update.Validation.Passed {
+				t.Fatalf("expected validation summary to pass, got %+v", update.Validation)
+			}
+			validationSeen = true
+		case EventTypeEncodingComplete:
+			if update.Result == nil || update.Result.OriginalSize != 1000 || update.Result.EncodedSize != 800 {
+				t.Fatalf("unexpected encoding result payload: %+v", update.Result)
+			}
+			resultSeen = true
+		case EventTypeStageProgress:
+			if update.Percent == 100 {
+				finalPercent100 = true
+			}
+		}
 	}
-	if middle.ETA != 5*time.Minute {
-		t.Fatalf("expected eta 5m, got %s", middle.ETA)
+	if !progressSeen {
+		t.Fatalf("expected to observe encoding progress event")
 	}
-	if middle.Speed != 3.0 {
-		t.Fatalf("expected speed 3.0x, got %f", middle.Speed)
+	if !validationSeen {
+		t.Fatalf("expected validation_complete event")
 	}
-	if middle.FPS != 72.0 {
-		t.Fatalf("expected fps 72, got %f", middle.FPS)
+	if !resultSeen {
+		t.Fatalf("expected encoding_complete event")
+	}
+	if !finalPercent100 {
+		t.Fatalf("expected final stage progress to reach 100 percent")
 	}
 }
 
@@ -250,8 +269,14 @@ func TestHelperProcess(t *testing.T) {
 
 	switch os.Getenv("DRAPTO_HELPER_MODE") {
 	case "success":
-		fmt.Println(`{"type":"stage_progress","percent":0,"stage":"start","message":"begin"}`)
-		fmt.Println(`{"type":"encoding_progress","percent":50,"stage":"encoding","eta_seconds":300,"speed":3.0,"fps":72.0,"bitrate":"3400kbps"}`)
+		fmt.Println(`{"type":"hardware","hostname":"white"}`)
+		fmt.Println(`{"type":"initialization","input_file":"source.mkv","output_file":"source.mkv","duration":"00:21:31","resolution":"1280x720","category":"HD","dynamic_range":"SDR","audio_description":"Stereo"}`)
+		fmt.Println(`{"type":"encoding_config","encoder":"SVT-AV1","preset":"6","tune":"0","quality":"CRF 25","pixel_format":"yuv420p10le","matrix_coefficients":"bt709","audio_codec":"Opus","audio_description":"Stereo","drapto_preset":"Default","drapto_preset_settings":[{"key":"CRF","value":"25"}],"svtav1_params":"tune=0"}`)
+		fmt.Println(`{"type":"stage_progress","percent":0,"stage":"analysis","message":"Analyzing video"}`)
+		fmt.Println(`{"type":"encoding_progress","percent":50,"stage":"encoding","eta_seconds":300,"speed":3.0,"fps":72.0,"bitrate":"3400kbps","total_frames":1000,"current_frame":500}`)
+		fmt.Println(`{"type":"validation_complete","validation_passed":true,"validation_steps":[{"step":"Video codec","passed":true,"details":"ok"}]}`)
+		fmt.Println(`{"type":"encoding_complete","input_file":"source.mkv","output_file":"encoded.mkv","original_size":1000,"encoded_size":800,"video_stream":"AV1","audio_stream":"Opus","average_speed":3.1,"output_path":"/tmp/out.mkv","duration_seconds":98,"size_reduction_percent":-20}`)
+		fmt.Println(`{"type":"operation_complete","message":"Encoding finished successfully"}`)
 		fmt.Println(`{"type":"stage_progress","percent":100,"stage":"complete","message":"done"}`)
 		os.Exit(0)
 	case "failure":

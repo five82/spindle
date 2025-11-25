@@ -7,7 +7,7 @@ type infoField struct {
 	value string
 }
 
-const infoAttrLimit = 5
+const infoAttrLimit = 12
 
 var infoHighlightKeys = []string{
 	"disc_title",
@@ -23,6 +23,39 @@ var infoHighlightKeys = []string{
 	"disc_type",
 	"runtime_minutes",
 	"studio",
+	"hardware_hostname",
+	"video_file",
+	"video_output",
+	"video_duration",
+	"video_resolution",
+	"video_dynamic_range",
+	"video_audio",
+	"crop_message",
+	"crop_status",
+	"encoding_encoder",
+	"encoding_preset",
+	"encoding_tune",
+	"encoding_quality",
+	"encoding_pixel_format",
+	"encoding_audio_codec",
+	"encoding_audio",
+	"encoding_drapto_preset",
+	"encoding_preset_values",
+	"encoding_svt_params",
+	"validation_status",
+	"validation_step",
+	"validation_details",
+	"encoding_result_input",
+	"encoding_result_output",
+	"encoding_result_size",
+	"encoding_result_reduction",
+	"encoding_result_video",
+	"encoding_result_audio",
+	"encoding_result_duration",
+	"encoding_result_location",
+	"drapto_warning",
+	"drapto_error_title",
+	"drapto_error_message",
 }
 
 func selectInfoFields(attrs []kv) ([]infoField, int) {

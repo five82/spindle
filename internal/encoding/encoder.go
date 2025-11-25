@@ -107,65 +107,95 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 		lastMsg    string
 		lastBucket = -1
 	)
-	progressLogger := func(update drapto.ProgressUpdate) {
+	logProgressEvent := func(update drapto.ProgressUpdate) {
 		stage := strings.TrimSpace(update.Stage)
 		raw := strings.TrimSpace(update.Message)
 		summary := progressMessageText(update)
-		log := false
+		logEvent := false
 		if stage != "" && stage != lastStage {
 			lastStage = stage
-			log = true
+			logEvent = true
 			lastBucket = -1
 		}
 		if raw != "" && raw != lastMsg {
 			lastMsg = raw
-			log = true
+			logEvent = true
 		}
 		if update.Percent >= 5 {
 			bucket := int(update.Percent / 5)
 			if bucket > lastBucket {
 				lastBucket = bucket
-				log = true
+				logEvent = true
 			}
 		}
 		if update.Percent >= 100 && lastBucket < 20 {
 			lastBucket = 20
-			log = true
+			logEvent = true
 		}
-		if log {
-			attrs := []logging.Attr{logging.String("job", label)}
-			if update.Percent >= 0 {
-				attrs = append(attrs, logging.Float64("progress_percent", update.Percent))
-			}
-			if stage != "" {
-				attrs = append(attrs, logging.String("progress_stage", stage))
-			}
-			if summary != "" {
-				attrs = append(attrs, logging.String("progress_message", summary))
-			}
-			logger.Info("drapto progress", logging.Args(attrs...)...)
+		if !logEvent {
+			return
 		}
-		progress(update)
+		attrs := []logging.Attr{logging.String("job", label)}
+		if update.Percent >= 0 {
+			attrs = append(attrs, logging.Float64("progress_percent", update.Percent))
+		}
+		if stage != "" {
+			attrs = append(attrs, logging.String("progress_stage", stage))
+		}
+		if summary != "" {
+			attrs = append(attrs, logging.String("progress_message", summary))
+		}
+		if update.ETA > 0 {
+			attrs = append(attrs, logging.Duration("progress_eta", update.ETA))
+		}
+		if strings.TrimSpace(update.Bitrate) != "" {
+			attrs = append(attrs, logging.String("progress_bitrate", strings.TrimSpace(update.Bitrate)))
+		}
+		logger.Info("drapto progress", logging.Args(attrs...)...)
 	}
 
-	// Keep the Drapto log pointer fresh while the encode is running so Flyer can tail the live log.
-	pointerDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-pointerDone:
-				return
-			case <-ticker.C:
-				e.updateDraptoLogPointer(logger)
+	progressLogger := func(update drapto.ProgressUpdate) {
+		switch update.Type {
+		case drapto.EventTypeHardware:
+			logDraptoHardware(logger, label, update.Hardware)
+		case drapto.EventTypeInitialization:
+			logDraptoVideo(logger, label, update.Video)
+		case drapto.EventTypeCropResult:
+			logDraptoCrop(logger, label, update.Crop)
+		case drapto.EventTypeEncodingConfig:
+			logDraptoEncodingConfig(logger, label, update.EncodingConfig)
+		case drapto.EventTypeEncodingStarted:
+			logDraptoEncodingStart(logger, label, update.TotalFrames)
+		case drapto.EventTypeValidation:
+			logDraptoValidation(logger, label, update.Validation)
+		case drapto.EventTypeEncodingComplete:
+			logDraptoEncodingResult(logger, label, update.Result)
+		case drapto.EventTypeOperationComplete:
+			logDraptoOperation(logger, label, update.OperationComplete)
+		case drapto.EventTypeWarning:
+			logDraptoWarning(logger, label, update.Warning)
+		case drapto.EventTypeError:
+			logDraptoError(logger, label, update.Error)
+		case drapto.EventTypeBatchStarted:
+			logDraptoBatchStart(logger, label, update.BatchStart)
+		case drapto.EventTypeFileProgress:
+			logDraptoFileProgress(logger, label, update.FileProgress)
+		case drapto.EventTypeBatchComplete:
+			logDraptoBatchSummary(logger, label, update.BatchSummary)
+		case drapto.EventTypeStageProgress, drapto.EventTypeEncodingProgress, drapto.EventTypeUnknown:
+			logProgressEvent(update)
+			progress(update)
+		default:
+			if strings.TrimSpace(update.Message) != "" {
+				attrs := []logging.Attr{
+					logging.String("job", label),
+					logging.String("drapto_event_type", string(update.Type)),
+					logging.String("message", strings.TrimSpace(update.Message)),
+				}
+				logger.Info("drapto event", logging.Args(attrs...)...)
 			}
 		}
-	}()
-	defer func() {
-		close(pointerDone)
-		e.updateDraptoLogPointer(logger)
-	}()
+	}
 
 	path, err := e.client.Encode(ctx, sourcePath, encodedDir, drapto.EncodeOptions{
 		Progress:      progressLogger,
@@ -176,7 +206,7 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 			services.ErrExternalTool,
 			"encoding",
 			"drapto encode",
-			"Drapto encoding failed; inspect Drapto logs and confirm the binary path in config",
+			"Drapto encoding failed; inspect the encoding log output and confirm the binary path in config",
 			err,
 		)
 	}
@@ -228,7 +258,6 @@ func deriveEncodedFilename(rippedPath string) string {
 func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Encoder {
 	client := drapto.NewCLI(
 		drapto.WithBinary(cfg.DraptoBinary()),
-		drapto.WithLogDir(draptoLogDirFromConfig(cfg)),
 	)
 	return NewEncoderWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
@@ -345,19 +374,6 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			"Unable to map ripped episodes to encoding jobs",
 			err,
 		)
-	}
-
-	if draptoLogDir := e.draptoLogDir(); draptoLogDir != "" {
-		if err := os.MkdirAll(draptoLogDir, 0o755); err != nil {
-			return services.Wrap(
-				services.ErrConfiguration,
-				"encoding",
-				"ensure drapto log dir",
-				"Failed to create Drapto log directory; set log_dir to a writable path",
-				err,
-			)
-		}
-		logger.Info("prepared drapto log directory", logging.String("drapto_log_dir", draptoLogDir))
 	}
 
 	sampleSource := strings.TrimSpace(item.RippedFile)
@@ -584,6 +600,255 @@ func capitalizeASCII(value string) string {
 	return strings.ToUpper(lower[:1]) + lower[1:]
 }
 
+func logDraptoHardware(logger *slog.Logger, label string, info *drapto.HardwareInfo) {
+	if logger == nil || info == nil || strings.TrimSpace(info.Hostname) == "" {
+		return
+	}
+	infoWithJob(logger, label, "drapto hardware info", logging.String("hardware_hostname", strings.TrimSpace(info.Hostname)))
+}
+
+func logDraptoVideo(logger *slog.Logger, label string, info *drapto.VideoInfo) {
+	if logger == nil || info == nil {
+		return
+	}
+	attrs := []logging.Attr{
+		logging.String("video_file", strings.TrimSpace(info.InputFile)),
+		logging.String("video_output", strings.TrimSpace(info.OutputFile)),
+		logging.String("video_duration", strings.TrimSpace(info.Duration)),
+		logging.String("video_resolution", formatResolution(info.Resolution, info.Category)),
+		logging.String("video_dynamic_range", strings.TrimSpace(info.DynamicRange)),
+		logging.String("video_audio", strings.TrimSpace(info.AudioDescription)),
+	}
+	infoWithJob(logger, label, "drapto video info", attrs...)
+}
+
+func logDraptoCrop(logger *slog.Logger, label string, summary *drapto.CropSummary) {
+	if logger == nil || summary == nil {
+		return
+	}
+	status := "no crop required"
+	if summary.Disabled {
+		status = "auto-crop disabled"
+	} else if summary.Required {
+		status = "crop applied"
+	}
+	attrs := []logging.Attr{
+		logging.String("crop_message", strings.TrimSpace(summary.Message)),
+		logging.String("crop_status", status),
+	}
+	if strings.TrimSpace(summary.Crop) != "" {
+		attrs = append(attrs, logging.String("crop_params", strings.TrimSpace(summary.Crop)))
+	}
+	infoWithJob(logger, label, "drapto crop detection", attrs...)
+}
+
+func logDraptoEncodingConfig(logger *slog.Logger, label string, cfg *drapto.EncodingConfig) {
+	if logger == nil || cfg == nil {
+		return
+	}
+	attrs := []logging.Attr{
+		logging.String("encoding_encoder", strings.TrimSpace(cfg.Encoder)),
+		logging.String("encoding_preset", strings.TrimSpace(cfg.Preset)),
+		logging.String("encoding_tune", strings.TrimSpace(cfg.Tune)),
+		logging.String("encoding_quality", strings.TrimSpace(cfg.Quality)),
+		logging.String("encoding_pixel_format", strings.TrimSpace(cfg.PixelFormat)),
+		logging.String("encoding_matrix", strings.TrimSpace(cfg.MatrixCoefficients)),
+		logging.String("encoding_audio_codec", strings.TrimSpace(cfg.AudioCodec)),
+		logging.String("encoding_audio", strings.TrimSpace(cfg.AudioDescription)),
+		logging.String("encoding_drapto_preset", strings.TrimSpace(cfg.DraptoPreset)),
+	}
+	if len(cfg.PresetSettings) > 0 {
+		pairs := make([]string, 0, len(cfg.PresetSettings))
+		for _, setting := range cfg.PresetSettings {
+			pairs = append(pairs, fmt.Sprintf("%s=%s", setting.Key, setting.Value))
+		}
+		attrs = append(attrs, logging.String("encoding_preset_values", strings.Join(pairs, ", ")))
+	}
+	if strings.TrimSpace(cfg.SVTParams) != "" {
+		attrs = append(attrs, logging.String("encoding_svt_params", strings.TrimSpace(cfg.SVTParams)))
+	}
+	infoWithJob(logger, label, "drapto encoding config", attrs...)
+}
+
+func logDraptoEncodingStart(logger *slog.Logger, label string, totalFrames int64) {
+	if logger == nil || totalFrames <= 0 {
+		return
+	}
+	infoWithJob(logger, label, "drapto encoding started", logging.Int64("encoding_total_frames", totalFrames))
+}
+
+func logDraptoValidation(logger *slog.Logger, label string, summary *drapto.ValidationSummary) {
+	if logger == nil || summary == nil {
+		return
+	}
+	status := "failed"
+	if summary.Passed {
+		status = "passed"
+	}
+	infoWithJob(logger, label, "drapto validation", logging.String("validation_status", status))
+	for _, step := range summary.Steps {
+		infoWithJob(
+			logger,
+			label,
+			"drapto validation step",
+			logging.String("validation_step", strings.TrimSpace(step.Name)),
+			logging.String("validation_status", formatValidationStatus(step.Passed)),
+			logging.String("validation_details", strings.TrimSpace(step.Details)),
+		)
+	}
+}
+
+func logDraptoEncodingResult(logger *slog.Logger, label string, result *drapto.EncodingResult) {
+	if logger == nil || result == nil {
+		return
+	}
+	sizeSummary := fmt.Sprintf("%s -> %s", formatBytes(result.OriginalSize), formatBytes(result.EncodedSize))
+	duration := formatETA(result.Duration)
+	attrs := []logging.Attr{
+		logging.String("encoding_result_input", strings.TrimSpace(result.InputFile)),
+		logging.String("encoding_result_output", strings.TrimSpace(result.OutputFile)),
+		logging.String("encoding_result_size", sizeSummary),
+		logging.String("encoding_result_reduction", fmt.Sprintf("%.1f%%", result.SizeReductionPercent)),
+		logging.String("encoding_result_video", strings.TrimSpace(result.VideoStream)),
+		logging.String("encoding_result_audio", strings.TrimSpace(result.AudioStream)),
+		logging.Float64("encoding_result_speed", result.AverageSpeed),
+		logging.String("encoding_result_location", strings.TrimSpace(result.OutputPath)),
+	}
+	if duration != "" {
+		attrs = append(attrs, logging.String("encoding_result_duration", duration))
+	}
+	infoWithJob(logger, label, "drapto results", attrs...)
+}
+
+func logDraptoOperation(logger *slog.Logger, label, message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	infoWithJob(logger, label, "drapto encode complete", logging.String("result", strings.TrimSpace(message)))
+}
+
+func logDraptoWarning(logger *slog.Logger, label, warning string) {
+	if strings.TrimSpace(warning) == "" {
+		return
+	}
+	warnWithJob(logger, label, "drapto warning", logging.String("drapto_warning", strings.TrimSpace(warning)))
+}
+
+func logDraptoError(logger *slog.Logger, label string, issue *drapto.ReporterIssue) {
+	if logger == nil || issue == nil {
+		return
+	}
+	attrs := []logging.Attr{
+		logging.String("drapto_error_title", strings.TrimSpace(issue.Title)),
+		logging.String("drapto_error_message", strings.TrimSpace(issue.Message)),
+	}
+	if strings.TrimSpace(issue.Context) != "" {
+		attrs = append(attrs, logging.String("drapto_error_context", strings.TrimSpace(issue.Context)))
+	}
+	if strings.TrimSpace(issue.Suggestion) != "" {
+		attrs = append(attrs, logging.String("drapto_error_suggestion", strings.TrimSpace(issue.Suggestion)))
+	}
+	errorWithJob(logger, label, "drapto error", attrs...)
+}
+
+func logDraptoBatchStart(logger *slog.Logger, label string, info *drapto.BatchStartInfo) {
+	if logger == nil || info == nil {
+		return
+	}
+	attrs := []logging.Attr{
+		logging.Int("batch_total_files", info.TotalFiles),
+		logging.String("batch_output_dir", strings.TrimSpace(info.OutputDir)),
+	}
+	infoWithJob(logger, label, "drapto batch", attrs...)
+}
+
+func logDraptoFileProgress(logger *slog.Logger, label string, info *drapto.FileProgress) {
+	if logger == nil || info == nil {
+		return
+	}
+	attrs := []logging.Attr{
+		logging.Int("batch_file_index", info.CurrentFile),
+		logging.Int("batch_file_count", info.TotalFiles),
+	}
+	infoWithJob(logger, label, "drapto batch file", attrs...)
+}
+
+func logDraptoBatchSummary(logger *slog.Logger, label string, summary *drapto.BatchSummary) {
+	if logger == nil || summary == nil {
+		return
+	}
+	attrs := []logging.Attr{
+		logging.Int("batch_successful", summary.SuccessfulCount),
+		logging.Int("batch_total_files", summary.TotalFiles),
+		logging.String("batch_reduction", fmt.Sprintf("%.1f%%", summary.TotalReductionPercent)),
+	}
+	if summary.TotalDuration > 0 {
+		attrs = append(attrs, logging.String("batch_duration", formatETA(summary.TotalDuration)))
+	}
+	infoWithJob(logger, label, "drapto batch summary", attrs...)
+}
+
+func infoWithJob(logger *slog.Logger, label, message string, attrs ...logging.Attr) {
+	if logger == nil {
+		return
+	}
+	decorated := append([]logging.Attr{logging.String("job", label)}, attrs...)
+	logger.Info(message, logging.Args(decorated...)...)
+}
+
+func warnWithJob(logger *slog.Logger, label, message string, attrs ...logging.Attr) {
+	if logger == nil {
+		return
+	}
+	decorated := append([]logging.Attr{logging.String("job", label)}, attrs...)
+	logger.Warn(message, logging.Args(decorated...)...)
+}
+
+func errorWithJob(logger *slog.Logger, label, message string, attrs ...logging.Attr) {
+	if logger == nil {
+		return
+	}
+	decorated := append([]logging.Attr{logging.String("job", label)}, attrs...)
+	logger.Error(message, logging.Args(decorated...)...)
+}
+
+func formatResolution(resolution, category string) string {
+	res := strings.TrimSpace(resolution)
+	cat := strings.TrimSpace(category)
+	if res == "" {
+		return cat
+	}
+	if cat == "" {
+		return res
+	}
+	return fmt.Sprintf("%s (%s)", res, cat)
+}
+
+func formatValidationStatus(passed bool) string {
+	if passed {
+		return "ok"
+	}
+	return "failed"
+}
+
+func formatBytes(value int64) string {
+	const (
+		kiB = 1024
+		miB = kiB * 1024
+		giB = miB * 1024
+	)
+	switch {
+	case value >= giB:
+		return fmt.Sprintf("%.2f GiB", float64(value)/float64(giB))
+	case value >= miB:
+		return fmt.Sprintf("%.2f MiB", float64(value)/float64(miB))
+	case value >= kiB:
+		return fmt.Sprintf("%.2f KiB", float64(value)/float64(kiB))
+	default:
+		return fmt.Sprintf("%d B", value)
+	}
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -733,124 +998,16 @@ func (e *Encoder) draptoBinaryName() string {
 
 func (e *Encoder) draptoCommand(inputPath, outputDir, presetProfile string) string {
 	binary := e.draptoBinaryName()
-	logDir := strings.TrimSpace(e.draptoLogDir())
 	parts := []string{
 		fmt.Sprintf("%s encode", binary),
 		fmt.Sprintf("--input %q", strings.TrimSpace(inputPath)),
 		fmt.Sprintf("--output %q", strings.TrimSpace(outputDir)),
 		"--responsive",
-	}
-	if logDir != "" {
-		parts = append(parts, fmt.Sprintf("--log-dir %q", logDir))
+		"--no-log",
 	}
 	if profile := strings.TrimSpace(presetProfile); profile != "" && !strings.EqualFold(profile, "default") {
 		parts = append(parts, fmt.Sprintf("--drapto-preset %s", profile))
 	}
 	parts = append(parts, "--progress-json")
 	return strings.Join(parts, " ")
-}
-
-func (e *Encoder) updateDraptoLogPointer(logger *slog.Logger) {
-	if e == nil || e.cfg == nil {
-		return
-	}
-	logDir := strings.TrimSpace(e.draptoLogDir())
-	pointer := strings.TrimSpace(e.cfg.DraptoCurrentLogPath())
-	if logDir == "" || pointer == "" {
-		return
-	}
-	if err := updateDraptoLogPointer(logDir, pointer); err != nil {
-		if logger != nil {
-			logger.Warn(
-				"failed to update drapto log pointer",
-				logging.String("log_dir", logDir),
-				logging.String("pointer", pointer),
-				logging.Error(err),
-			)
-		}
-		return
-	}
-	if logger != nil {
-		logger.Debug(
-			"updated drapto log pointer",
-			logging.String("pointer", pointer),
-		)
-	}
-}
-
-func (e *Encoder) draptoLogDir() string {
-	return draptoLogDirFromConfig(e.cfg)
-}
-
-func draptoLogDirFromConfig(cfg *config.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	return strings.TrimSpace(cfg.DraptoLogDir)
-}
-
-func updateDraptoLogPointer(logDir, pointer string) error {
-	if strings.TrimSpace(logDir) == "" || strings.TrimSpace(pointer) == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(logDir)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("read drapto log directory: %w", err)
-	}
-
-	var (
-		latestPath string
-		latestMod  time.Time
-		latestName string
-	)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(strings.ToLower(name), ".log") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		mod := info.ModTime()
-		switch {
-		case latestPath == "":
-		case mod.After(latestMod):
-		case mod.Equal(latestMod) && name > latestName:
-		default:
-			continue
-		}
-		latestPath = filepath.Join(logDir, name)
-		latestMod = mod
-		latestName = name
-	}
-	if latestPath == "" {
-		return nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(pointer), 0o755); err != nil {
-		return fmt.Errorf("ensure drapto pointer directory: %w", err)
-	}
-	if err := os.Remove(pointer); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove existing drapto log pointer: %w", err)
-	}
-	if latestPath == pointer {
-		return nil
-	}
-	if err := os.Symlink(latestPath, pointer); err == nil {
-		return nil
-	}
-	if err := os.Link(latestPath, pointer); err == nil {
-		return nil
-	}
-	if err := copyFile(latestPath, pointer); err != nil {
-		return fmt.Errorf("copy drapto log pointer: %w", err)
-	}
-	return nil
 }

@@ -57,7 +57,6 @@ type Status struct {
 	Workflow     workflow.StatusSummary
 	QueueDBPath  string
 	LockFilePath string
-	DraptoLog    string
 	Dependencies []DependencyStatus
 	PID          int
 }
@@ -352,7 +351,6 @@ func (d *Daemon) Status(ctx context.Context) Status {
 		Workflow:     summary,
 		QueueDBPath:  filepath.Join(d.cfg.LogDir, "queue.db"),
 		LockFilePath: d.lockPath,
-		DraptoLog:    d.cfg.DraptoCurrentLogPath(),
 		Dependencies: dependencies,
 		PID:          os.Getpid(),
 	}
