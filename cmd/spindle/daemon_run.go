@@ -39,12 +39,14 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 
 	runID := time.Now().UTC().Format("20060102T150405.000Z")
 	logPath := filepath.Join(cfg.LogDir, fmt.Sprintf("spindle-%s.log", runID))
+	logHub := logging.NewStreamHub(1024)
 	logger, err := logging.New(logging.Options{
 		Level:            cfg.LogLevel,
 		Format:           cfg.LogFormat,
 		OutputPaths:      []string{"stdout", logPath},
 		ErrorOutputPaths: []string{"stderr", logPath},
 		Development:      false,
+		Stream:           logHub,
 	})
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
@@ -68,7 +70,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	workflowManager := workflow.NewManager(cfg, store, logger)
 	registerStages(workflowManager, cfg, store, logger)
 
-	d, err := daemon.New(cfg, store, logger, workflowManager, logPath)
+	d, err := daemon.New(cfg, store, logger, workflowManager, logPath, logHub)
 	if err != nil {
 		return fmt.Errorf("create daemon: %w", err)
 	}

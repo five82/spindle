@@ -424,11 +424,10 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 		if err != nil {
 			base.Warn("background log unavailable", logging.Error(err))
 		} else {
-			logger, logErr := m.newBackgroundLogger(path)
+			bgHandler, logErr := m.newBackgroundHandler(path)
 			if logErr != nil {
 				base.Warn("failed to create background log writer", logging.Error(logErr))
 			} else {
-				base = logger
 				if created && laneLogger != nil {
 					laneLogger.Info(
 						"background log created",
@@ -436,6 +435,7 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 						logging.Int64("item_id", item.ID),
 					)
 				}
+				base = logging.TeeLogger(base, bgHandler)
 			}
 		}
 	}
@@ -465,7 +465,7 @@ func (m *Manager) ensureBackgroundLog(item *queue.Item) (string, bool, error) {
 	return item.BackgroundLogPath, created, nil
 }
 
-func (m *Manager) newBackgroundLogger(path string) (*slog.Logger, error) {
+func (m *Manager) newBackgroundHandler(path string) (slog.Handler, error) {
 	level := "info"
 	format := "json"
 	if m.cfg != nil {
@@ -476,13 +476,17 @@ func (m *Manager) newBackgroundLogger(path string) (*slog.Logger, error) {
 			format = m.cfg.LogFormat
 		}
 	}
-	return logging.New(logging.Options{
+	logger, err := logging.New(logging.Options{
 		Level:            level,
 		Format:           format,
 		OutputPaths:      []string{path},
 		ErrorOutputPaths: []string{path},
 		Development:      false,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return logger.Handler(), nil
 }
 
 func (m *Manager) backgroundLogFilename(item *queue.Item) string {

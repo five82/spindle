@@ -18,6 +18,7 @@ type Options struct {
 	OutputPaths      []string
 	ErrorOutputPaths []string
 	Development      bool
+	Stream           *StreamHub
 }
 
 // New constructs a slog logger using the provided options.
@@ -52,6 +53,10 @@ func New(opts Options) (*slog.Logger, error) {
 		handler = newPrettyHandler(outputWriter, levelVar, addSource)
 	default:
 		return nil, fmt.Errorf("log format: unsupported value %q", opts.Format)
+	}
+
+	if opts.Stream != nil {
+		handler = newStreamHandler(handler, opts.Stream)
 	}
 
 	return slog.New(handler), nil

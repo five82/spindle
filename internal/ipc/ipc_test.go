@@ -34,7 +34,7 @@ func TestIPCServerClient(t *testing.T) {
 	logger := logging.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
-	d, err := daemon.New(cfg, store, logger, mgr, logPath)
+	d, err := daemon.New(cfg, store, logger, mgr, logPath, logging.NewStreamHub(128))
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}

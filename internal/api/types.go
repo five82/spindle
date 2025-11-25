@@ -1,6 +1,9 @@
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // dateTimeFormat is used for RFC3339 timestamps in API payloads.
 const dateTimeFormat = "2006-01-02T15:04:05.000Z07:00"
@@ -84,4 +87,29 @@ type QueueListResponse struct {
 // QueueItemResponse wraps a single queue item.
 type QueueItemResponse struct {
 	Item QueueItem `json:"item"`
+}
+
+// LogEvent mirrors the daemon log streaming payload.
+type LogEvent struct {
+	Sequence  uint64            `json:"seq"`
+	Timestamp time.Time         `json:"ts"`
+	Level     string            `json:"level"`
+	Message   string            `json:"msg"`
+	Component string            `json:"component,omitempty"`
+	Stage     string            `json:"stage,omitempty"`
+	ItemID    int64             `json:"item_id,omitempty"`
+	Fields    map[string]string `json:"fields,omitempty"`
+	Details   []DetailField     `json:"details,omitempty"`
+}
+
+// DetailField mirrors the bullet formatting used by console logs.
+type DetailField struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// LogStreamResponse batches log events for HTTP clients.
+type LogStreamResponse struct {
+	Events []LogEvent `json:"events"`
+	Next   uint64     `json:"next"`
 }

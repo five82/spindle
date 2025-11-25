@@ -50,6 +50,7 @@ func newAPIServer(cfg *config.Config, d *Daemon, logger *slog.Logger) (*apiServe
 	mux.HandleFunc("/api/status", srv.handleStatus)
 	mux.HandleFunc("/api/queue", srv.handleQueue)
 	mux.HandleFunc("/api/queue/", srv.handleQueueItem)
+	mux.HandleFunc("/api/logs", srv.handleLogs)
 
 	srv.server = &http.Server{
 		Handler:           mux,
@@ -187,6 +188,103 @@ func (s *apiServer) handleQueueItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, api.QueueItemResponse{Item: *item})
+}
+
+func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	hub := s.daemon.LogStream()
+	if hub == nil {
+		s.writeJSON(w, http.StatusOK, api.LogStreamResponse{Events: nil, Next: 0})
+		return
+	}
+
+	query := r.URL.Query()
+	since, _ := strconv.ParseUint(query.Get("since"), 10, 64)
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	if limit <= 0 {
+		limit = 200
+	}
+	follow := query.Get("follow") == "1" || strings.EqualFold(query.Get("follow"), "true")
+	tail := query.Get("tail") == "1" || strings.EqualFold(query.Get("tail"), "true")
+
+	var filterItem int64
+	if value := strings.TrimSpace(query.Get("item")); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+			filterItem = parsed
+		}
+	}
+	component := strings.TrimSpace(query.Get("component"))
+
+	var (
+		events []api.LogEvent
+		next   uint64
+		err    error
+	)
+	if tail && since == 0 && !follow {
+		raw, cursor := hub.Tail(limit)
+		events = convertLogEvents(raw)
+		next = cursor
+	} else {
+		raw, cursor, fetchErr := hub.Fetch(r.Context(), since, limit, follow)
+		if fetchErr != nil && !errors.Is(fetchErr, context.Canceled) && !errors.Is(fetchErr, context.DeadlineExceeded) {
+			s.writeError(w, http.StatusInternalServerError, fetchErr.Error())
+			return
+		}
+		events = convertLogEvents(raw)
+		next = cursor
+		err = fetchErr
+	}
+
+	filtered := make([]api.LogEvent, 0, len(events))
+	for _, evt := range events {
+		if filterItem != 0 && evt.ItemID != filterItem {
+			continue
+		}
+		if component != "" && !strings.EqualFold(component, evt.Component) {
+			continue
+		}
+		filtered = append(filtered, evt)
+	}
+
+	s.writeJSON(w, http.StatusOK, api.LogStreamResponse{
+		Events: filtered,
+		Next:   next,
+	})
+
+	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return
+	}
+}
+
+func convertLogEvents(events []logging.LogEvent) []api.LogEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]api.LogEvent, 0, len(events))
+	for _, evt := range events {
+		details := make([]api.DetailField, 0, len(evt.Details))
+		for _, detail := range evt.Details {
+			details = append(details, api.DetailField{
+				Label: detail.Label,
+				Value: detail.Value,
+			})
+		}
+		out = append(out, api.LogEvent{
+			Sequence:  evt.Sequence,
+			Timestamp: evt.Timestamp,
+			Level:     evt.Level,
+			Message:   evt.Message,
+			Component: evt.Component,
+			Stage:     evt.Stage,
+			ItemID:    evt.ItemID,
+			Fields:    evt.Fields,
+			Details:   details,
+		})
+	}
+	return out
 }
 
 func (s *apiServer) writeJSON(w http.ResponseWriter, status int, payload any) {

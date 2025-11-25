@@ -34,6 +34,7 @@ type Daemon struct {
 	store    *queue.Store
 	workflow *workflow.Manager
 	logPath  string
+	logHub   *logging.StreamHub
 	monitor  *discMonitor
 	apiSrv   *apiServer
 
@@ -71,7 +72,7 @@ type DependencyStatus struct {
 }
 
 // New constructs a daemon with initialized dependencies.
-func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workflow.Manager, logPath string) (*Daemon, error) {
+func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workflow.Manager, logPath string, hub *logging.StreamHub) (*Daemon, error) {
 	if cfg == nil || store == nil || logger == nil || wf == nil {
 		return nil, errors.New("daemon requires config, store, logger, and workflow manager")
 	}
@@ -87,6 +88,7 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 		store:    store,
 		workflow: wf,
 		logPath:  logPath,
+		logHub:   hub,
 		lockPath: lockPath,
 		lock:     flock.New(lockPath),
 		monitor:  monitor,
@@ -310,7 +312,18 @@ func (d *Daemon) AddFile(ctx context.Context, sourcePath string) (*queue.Item, e
 
 // LogPath returns the path to the daemon log file.
 func (d *Daemon) LogPath() string {
+	if d == nil {
+		return ""
+	}
 	return d.logPath
+}
+
+// LogStream exposes the live log event hub.
+func (d *Daemon) LogStream() *logging.StreamHub {
+	if d == nil {
+		return nil
+	}
+	return d.logHub
 }
 
 // Status returns the current daemon status.
