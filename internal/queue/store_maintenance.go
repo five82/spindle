@@ -137,7 +137,30 @@ func (s *Store) CheckHealth(ctx context.Context) (DatabaseHealth, error) {
 		}
 		health.ColumnsPresent = append(health.ColumnsPresent, columns...)
 
-		expected := []string{"id", "source_path", "disc_title", "status", "media_info_json", "ripped_file", "encoded_file", "final_file", "error_message", "created_at", "updated_at", "progress_stage", "progress_percent", "progress_message", "rip_spec_data", "disc_fingerprint", "metadata_json", "last_heartbeat"}
+		expected := []string{
+			"id",
+			"source_path",
+			"disc_title",
+			"status",
+			"media_info_json",
+			"ripped_file",
+			"encoded_file",
+			"final_file",
+			"background_log_path",
+			"error_message",
+			"created_at",
+			"updated_at",
+			"progress_stage",
+			"progress_percent",
+			"progress_message",
+			"encoding_details_json",
+			"rip_spec_data",
+			"disc_fingerprint",
+			"metadata_json",
+			"last_heartbeat",
+			"needs_review",
+			"review_reason",
+		}
 		missingMap := make(map[string]struct{}, len(expected))
 		for _, col := range expected {
 			missingMap[col] = struct{}{}

@@ -72,27 +72,28 @@ type HealthSummary struct {
 
 // Item represents a queue item persisted in SQLite.
 type Item struct {
-	ID                int64
-	SourcePath        string
-	DiscTitle         string
-	Status            Status
-	MediaInfoJSON     string
-	RippedFile        string
-	EncodedFile       string
-	FinalFile         string
-	BackgroundLogPath string
-	ErrorMessage      string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	ProgressStage     string
-	ProgressPercent   float64
-	ProgressMessage   string
-	RipSpecData       string
-	DiscFingerprint   string
-	MetadataJSON      string
-	LastHeartbeat     *time.Time
-	NeedsReview       bool
-	ReviewReason      string
+	ID                  int64
+	SourcePath          string
+	DiscTitle           string
+	Status              Status
+	MediaInfoJSON       string
+	RippedFile          string
+	EncodedFile         string
+	FinalFile           string
+	BackgroundLogPath   string
+	ErrorMessage        string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	ProgressStage       string
+	ProgressPercent     float64
+	ProgressMessage     string
+	EncodingDetailsJSON string
+	RipSpecData         string
+	DiscFingerprint     string
+	MetadataJSON        string
+	LastHeartbeat       *time.Time
+	NeedsReview         bool
+	ReviewReason        string
 }
 
 // IsProcessing returns true when the status reflects an in-flight operation.

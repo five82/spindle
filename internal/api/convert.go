@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"spindle/internal/encodingstate"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 	"spindle/internal/stage"
@@ -38,6 +39,10 @@ func FromQueueItem(item *queue.Item) QueueItem {
 		BackgroundLogPath: item.BackgroundLogPath,
 		NeedsReview:       item.NeedsReview,
 		ReviewReason:      item.ReviewReason,
+	}
+	if snapshot, err := encodingstate.Unmarshal(item.EncodingDetailsJSON); err == nil && !snapshot.IsZero() {
+		s := snapshot
+		dto.Encoding = &s
 	}
 
 	if !item.CreatedAt.IsZero() {

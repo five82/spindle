@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"time"
+
+	"spindle/internal/encodingstate"
 )
 
 // dateTimeFormat is used for RFC3339 timestamps in API payloads.
@@ -16,6 +18,7 @@ type QueueItem struct {
 	Status            string          `json:"status"`
 	ProcessingLane    string          `json:"processingLane"`
 	Progress          QueueProgress   `json:"progress"`
+	Encoding          *EncodingStatus `json:"encoding,omitempty"`
 	ErrorMessage      string          `json:"errorMessage"`
 	CreatedAt         string          `json:"createdAt,omitempty"`
 	UpdatedAt         string          `json:"updatedAt,omitempty"`
@@ -39,6 +42,9 @@ type QueueProgress struct {
 	Percent float64 `json:"percent"`
 	Message string  `json:"message"`
 }
+
+// EncodingStatus surfaces Drapto telemetry captured during encoding.
+type EncodingStatus = encodingstate.Snapshot
 
 // EpisodeStatus captures the per-episode workflow state for TV discs.
 type EpisodeStatus struct {
