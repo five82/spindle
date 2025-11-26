@@ -66,15 +66,24 @@ func NewManager(cfg *config.Config, logger *slog.Logger) *Manager {
 		return nil
 	}
 	maxBytes := int64(cfg.RipCacheMaxGiB) * 1024 * 1024 * 1024
+	manager := &Manager{
+		root:     root,
+		maxBytes: maxBytes,
+		statfs:   realStatfs,
+	}
+	manager.SetLogger(logger)
+	return manager
+}
+
+// SetLogger refreshes the manager's logging destination (allows per-item log routing).
+func (m *Manager) SetLogger(logger *slog.Logger) {
+	if m == nil {
+		return
+	}
 	if logger == nil {
 		logger = logging.NewNop()
 	}
-	return &Manager{
-		root:     root,
-		maxBytes: maxBytes,
-		logger:   logger.With(logging.String("component", "ripcache")),
-		statfs:   realStatfs,
-	}
+	m.logger = logger.With(logging.String("component", "ripcache"))
 }
 
 // Store copies a rip directory into the cache and triggers pruning.

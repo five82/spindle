@@ -82,6 +82,9 @@ func (r *Ripper) SetLogger(logger *slog.Logger) {
 		stageLogger = logging.NewNop()
 	}
 	r.logger = stageLogger.With(logging.String("component", "ripper"))
+	if r.cache != nil {
+		r.cache.SetLogger(stageLogger)
+	}
 }
 
 func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {

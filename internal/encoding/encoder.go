@@ -316,6 +316,9 @@ func (e *Encoder) SetLogger(logger *slog.Logger) {
 		stageLogger = logging.NewNop()
 	}
 	e.logger = stageLogger.With(logging.String("component", "encoder"))
+	if e.cache != nil {
+		e.cache.SetLogger(stageLogger)
+	}
 }
 
 func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
