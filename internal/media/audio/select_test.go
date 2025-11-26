@@ -129,3 +129,107 @@ func TestSelectFallsBackWhenNoEnglish(t *testing.T) {
 		t.Fatalf("expected no commentary for non-English disc, got %v", sel.CommentaryIndices)
 	}
 }
+
+func TestSelectDoesNotTreatDirectorApprovedMixAsCommentary(t *testing.T) {
+	streams := []ffprobe.Stream{
+		{
+			Index:     0,
+			CodecType: "audio",
+			CodecName: "dts",
+			Channels:  6,
+			Tags:      map[string]string{"language": "eng", "title": "Primary"},
+		},
+		{
+			Index:     1,
+			CodecType: "audio",
+			CodecName: "ac3",
+			Channels:  2,
+			Tags:      map[string]string{"language": "eng", "title": "Director Approved Mix"},
+		},
+	}
+
+	sel := Select(streams)
+	if len(sel.CommentaryIndices) != 0 {
+		t.Fatalf("expected no commentary classification, got %v", sel.CommentaryIndices)
+	}
+}
+
+func TestSelectDetectsCommentaryFromCommentTag(t *testing.T) {
+	streams := []ffprobe.Stream{
+		{
+			Index:     0,
+			CodecType: "audio",
+			CodecName: "dts",
+			Channels:  6,
+			Tags:      map[string]string{"language": "eng", "title": "Main"},
+		},
+		{
+			Index:     1,
+			CodecType: "audio",
+			CodecName: "ac3",
+			Channels:  2,
+			Tags: map[string]string{
+				"language": "eng",
+				"title":    "Untitled",
+				"comment":  "Audio Commentary with Director",
+			},
+		},
+	}
+
+	sel := Select(streams)
+	if len(sel.CommentaryIndices) != 1 || sel.CommentaryIndices[0] != 1 {
+		t.Fatalf("expected commentary track at index 1, got %v", sel.CommentaryIndices)
+	}
+}
+
+func TestSelectSkipsDubDispositionForCommentary(t *testing.T) {
+	streams := []ffprobe.Stream{
+		{
+			Index:     0,
+			CodecType: "audio",
+			CodecName: "dts",
+			Channels:  6,
+			Tags:      map[string]string{"language": "eng", "title": "Main"},
+		},
+		{
+			Index:       1,
+			CodecType:   "audio",
+			CodecName:   "ac3",
+			Channels:    2,
+			Tags:        map[string]string{"language": "eng", "title": "Dub", "comment": "Audio Commentary"},
+			Disposition: map[string]int{"dub": 1},
+		},
+	}
+
+	sel := Select(streams)
+	if len(sel.CommentaryIndices) != 0 {
+		t.Fatalf("expected dub track to be ignored for commentary, got %v", sel.CommentaryIndices)
+	}
+}
+
+func TestSelectDetectsDiscussionKeywords(t *testing.T) {
+	streams := []ffprobe.Stream{
+		{
+			Index:     0,
+			CodecType: "audio",
+			CodecName: "truehd",
+			Channels:  8,
+			Tags:      map[string]string{"language": "eng", "title": "Dolby TrueHD"},
+		},
+		{
+			Index:     1,
+			CodecType: "audio",
+			CodecName: "ac3",
+			Channels:  2,
+			Tags: map[string]string{
+				"language": "eng",
+				"title":    "Director and Writer Discussion",
+			},
+		},
+	}
+
+	sel := Select(streams)
+	if len(sel.CommentaryIndices) != 1 || sel.CommentaryIndices[0] != 1 {
+		t.Fatalf("expected discussion track classified as commentary, got %v", sel.CommentaryIndices)
+	}
+}

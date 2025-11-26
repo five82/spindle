@@ -353,65 +353,124 @@ func channelCount(stream ffprobe.Stream) int {
 }
 
 func detectCommentary(stream ffprobe.Stream, normalizedTitle string) bool {
-	if stream.Disposition != nil && stream.Disposition["commentary"] == 1 {
-		return true
-	}
-	if normalizedTitle == "" {
-		return false
-	}
-
-	// Direct commentary keywords
-	keywords := []string{
-		"commentary",
-		"audio commentary",
-		"feature commentary",
-		"director",
-		"producer",
-		"writer",
-		"screenwriter",
-		"cast",
-		"crew",
-		"filmmaker",
-		"filmmakers",
-		"actor",
-		"actors",
-		"storyteller",
-		"creators",
-		"artists",
-		"behind the scenes",
-		"interview",
-		"q&a",
-		"featurette",
-		"making of",
-		"makers",
-	}
-	for _, keyword := range keywords {
-		if strings.Contains(normalizedTitle, keyword) {
+	if stream.Disposition != nil {
+		if stream.Disposition["dub"] == 1 {
+			return false
+		}
+		if stream.Disposition["original"] == 1 {
+			return false
+		}
+		if stream.Disposition["commentary"] == 1 {
 			return true
 		}
 	}
 
-	// Common commentary patterns: "with [name]" or "[role] commentary"
-	// Examples: "Commentary with Director", "Director's Commentary", "Cast and Crew"
-	patterns := []string{
-		" with ",      // "Commentary with John Smith"
-		"'s ",         // "Director's Commentary"
-		" and ",       // "Cast and Crew"
-		"featuring ",  // "Featuring the Director"
+	texts := gatherCommentaryText(stream, normalizedTitle)
+	if len(texts) == 0 {
+		return false
 	}
-	for _, pattern := range patterns {
-		if strings.Contains(normalizedTitle, pattern) {
-			// If we see these patterns combined with any production role keywords,
-			// it's likely a commentary track
-			for _, role := range []string{"director", "producer", "writer", "cast", "crew", "actor", "filmmaker"} {
-				if strings.Contains(normalizedTitle, role) {
-					return true
-				}
-			}
+	for _, text := range texts {
+		if containsAny(text, directCommentaryKeywords) {
+			return true
+		}
+		if commentaryContextMatch(text) {
+			return true
 		}
 	}
-
 	return false
+}
+
+var directCommentaryKeywords = []string{
+	"commentary",
+	"commentaries",
+	"audio commentary",
+	"feature commentary",
+	"commentary track",
+	"talk track",
+	"commentary w/",
+	"in conversation",
+	"conversation",
+	"roundtable",
+	"q&a",
+	"qa",
+	"panel",
+	"discussion",
+	"chat track",
+	"interview",
+}
+
+var commentaryRoleKeywords = []string{
+	"director",
+	"directors",
+	"producer",
+	"producers",
+	"writer",
+	"writers",
+	"screenwriter",
+	"cast",
+	"crew",
+	"filmmaker",
+	"filmmakers",
+	"actor",
+	"actors",
+	"dp",
+}
+
+var commentaryContextKeywords = []string{
+	"discussion",
+	"conversation",
+	"talk",
+	"roundtable",
+	"panel",
+	"q&a",
+	"qa",
+	"interview",
+	"commentary",
+}
+
+func commentaryContextMatch(text string) bool {
+	if !containsAny(text, commentaryContextKeywords) {
+		return false
+	}
+	return containsAny(text, commentaryRoleKeywords)
+}
+
+func containsAny(text string, keywords []string) bool {
+	for _, keyword := range keywords {
+		if keyword == "" {
+			continue
+		}
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func gatherCommentaryText(stream ffprobe.Stream, normalizedTitle string) []string {
+	seen := make(map[string]struct{})
+	texts := make([]string, 0, 4)
+	add := func(value string) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		texts = append(texts, value)
+	}
+	add(normalizedTitle)
+	if stream.Tags == nil {
+		return texts
+	}
+	for _, key := range []string{"comment", "COMMENT", "comments", "COMMENTS", "description", "DESCRIPTION", "handler_name", "HANDLER_NAME"} {
+		if value, ok := stream.Tags[key]; ok {
+			add(value)
+		}
+	}
+	return texts
 }
 
 // titleSuggestsCommentary checks if a title contains hints that it might be commentary,
@@ -420,22 +479,28 @@ func titleSuggestsCommentary(normalizedTitle string) bool {
 	if normalizedTitle == "" {
 		return false
 	}
-	// Weaker indicators that might suggest commentary when combined with other signals
-	hints := []string{
+	// Weaker indicators reserved for stereo/mono reclassification.
+	softHints := []string{
 		"commentary",
-		"director",
-		"producer",
-		"cast",
-		"crew",
-		"with ",
-		"featuring",
-		"track",
-		"alternate",
-		"alternative",
-		"bonus",
+		"discussion",
+		"talk",
+		"roundtable",
+		"q&a",
+		"qa",
+		"interview",
+		"bonus commentary",
 	}
-	for _, hint := range hints {
+	for _, hint := range softHints {
 		if strings.Contains(normalizedTitle, hint) {
+			return true
+		}
+	}
+
+	// Treat explicit stereo/mono mix labels as commentary-style alternates when
+	// multichannel audio is also present.
+	if strings.Contains(normalizedTitle, "stereo") || strings.Contains(normalizedTitle, "mono") {
+		if strings.Contains(normalizedTitle, "mix") || strings.Contains(normalizedTitle, "track") ||
+			strings.Contains(normalizedTitle, "downmix") || strings.Contains(normalizedTitle, "fold") {
 			return true
 		}
 	}
