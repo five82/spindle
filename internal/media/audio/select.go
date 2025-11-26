@@ -151,6 +151,15 @@ func (c candidateList) hasMultiChannel() bool {
 
 func (c candidateList) commentaryCandidates(primary candidate, hasEnglishMultichannel bool) candidateList {
 	result := make(candidateList, 0)
+
+	// Count stereo English tracks to help identify commentary scenarios
+	stereoCount := 0
+	for _, cand := range c {
+		if cand.channels <= 2 {
+			stereoCount++
+		}
+	}
+
 	for _, cand := range c {
 		if cand.stream.Index == primary.stream.Index {
 			continue
@@ -162,9 +171,20 @@ func (c candidateList) commentaryCandidates(primary candidate, hasEnglishMultich
 		if cand.isDescriptive {
 			continue
 		}
+
+		// More conservative stereo heuristic: only treat stereo as commentary if:
+		// 1. Multichannel audio exists AND
+		// 2. Either the title suggests commentary OR there are multiple stereo tracks
 		if hasEnglishMultichannel && cand.channels <= 2 {
-			// Treat stereo English tracks as potential commentaries when higher fidelity exists.
-			result = append(result, cand)
+			// Check if title has any commentary-suggesting terms
+			hasSuggestiveTitle := titleSuggestsCommentary(cand.title)
+
+			// If multiple stereo tracks exist alongside multichannel, they're likely alternatives
+			multipleAlternatives := stereoCount > 1
+
+			if hasSuggestiveTitle || multipleAlternatives {
+				result = append(result, cand)
+			}
 		}
 	}
 	// Preserve original order for deterministic output.
@@ -339,21 +359,83 @@ func detectCommentary(stream ffprobe.Stream, normalizedTitle string) bool {
 	if normalizedTitle == "" {
 		return false
 	}
+
+	// Direct commentary keywords
 	keywords := []string{
 		"commentary",
+		"audio commentary",
+		"feature commentary",
 		"director",
 		"producer",
 		"writer",
+		"screenwriter",
 		"cast",
 		"crew",
 		"filmmaker",
+		"filmmakers",
 		"actor",
+		"actors",
 		"storyteller",
+		"creators",
+		"artists",
 		"behind the scenes",
 		"interview",
+		"q&a",
+		"featurette",
+		"making of",
+		"makers",
 	}
 	for _, keyword := range keywords {
 		if strings.Contains(normalizedTitle, keyword) {
+			return true
+		}
+	}
+
+	// Common commentary patterns: "with [name]" or "[role] commentary"
+	// Examples: "Commentary with Director", "Director's Commentary", "Cast and Crew"
+	patterns := []string{
+		" with ",      // "Commentary with John Smith"
+		"'s ",         // "Director's Commentary"
+		" and ",       // "Cast and Crew"
+		"featuring ",  // "Featuring the Director"
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(normalizedTitle, pattern) {
+			// If we see these patterns combined with any production role keywords,
+			// it's likely a commentary track
+			for _, role := range []string{"director", "producer", "writer", "cast", "crew", "actor", "filmmaker"} {
+				if strings.Contains(normalizedTitle, role) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// titleSuggestsCommentary checks if a title contains hints that it might be commentary,
+// even if not definitively flagged. Used as a secondary signal for stereo track classification.
+func titleSuggestsCommentary(normalizedTitle string) bool {
+	if normalizedTitle == "" {
+		return false
+	}
+	// Weaker indicators that might suggest commentary when combined with other signals
+	hints := []string{
+		"commentary",
+		"director",
+		"producer",
+		"cast",
+		"crew",
+		"with ",
+		"featuring",
+		"track",
+		"alternate",
+		"alternative",
+		"bonus",
+	}
+	for _, hint := range hints {
+		if strings.Contains(normalizedTitle, hint) {
 			return true
 		}
 	}
