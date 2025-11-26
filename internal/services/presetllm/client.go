@@ -103,10 +103,10 @@ func (c *Client) ClassifyPreset(ctx context.Context, description string) (Classi
 		return empty, errors.New("preset llm classify: empty content")
 	}
 	var parsed Classification
-	parsed.Raw = content
-	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+	if err := decodeLLMJSON(content, &parsed); err != nil {
 		return empty, fmt.Errorf("preset llm classify: parse payload: %w", err)
 	}
+	parsed.Raw = content
 	parsed.Profile = strings.ToLower(strings.TrimSpace(parsed.Profile))
 	if parsed.Confidence < 0 {
 		parsed.Confidence = 0
@@ -146,7 +146,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	var parsed struct {
 		OK bool `json:"ok"`
 	}
-	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+	if err := decodeLLMJSON(content, &parsed); err != nil {
 		return fmt.Errorf("preset llm health: parse payload: %w", err)
 	}
 	if !parsed.OK {
@@ -194,7 +194,7 @@ func buildChatRequest(model, description string) (chatCompletionRequest, error) 
 			{Role: "user", Content: description},
 		},
 		Temperature:    0,
-		ResponseFormat: map[string]string{"	type": jsonResponseType},
+		ResponseFormat: map[string]string{"type": jsonResponseType},
 	}, nil
 }
 
@@ -240,4 +240,79 @@ func (c *Client) sendChatRequest(ctx context.Context, payload chatCompletionRequ
 		return completion, fmt.Errorf("preset llm request: api error: %s", strings.TrimSpace(completion.Error.Message))
 	}
 	return completion, nil
+}
+
+func decodeLLMJSON(content string, target any) error {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return errors.New("empty payload")
+	}
+	if err := json.Unmarshal([]byte(trimmed), target); err == nil {
+		return nil
+	} else {
+		originalErr := err
+		sanitized := sanitizeJSONPayload(trimmed)
+		if sanitized != "" && sanitized != trimmed {
+			if err := json.Unmarshal([]byte(sanitized), target); err == nil {
+				return nil
+			} else {
+				return fmt.Errorf("%w (sanitized payload snippet: %s)", err, summarizePayloadSnippet(sanitized))
+			}
+		}
+		return fmt.Errorf("%w (payload snippet: %s)", originalErr, summarizePayloadSnippet(trimmed))
+	}
+}
+
+func sanitizeJSONPayload(content string) string {
+	trimmed := strings.TrimSpace(stripCodeFenceBlock(content))
+	if trimmed == "" {
+		return ""
+	}
+	if trimmed[0] == '{' || trimmed[0] == '[' {
+		return trimmed
+	}
+	if start := strings.Index(trimmed, "{"); start >= 0 {
+		if end := strings.LastIndex(trimmed, "}"); end > start {
+			return strings.TrimSpace(trimmed[start : end+1])
+		}
+	}
+	if start := strings.Index(trimmed, "["); start >= 0 {
+		if end := strings.LastIndex(trimmed, "]"); end > start {
+			return strings.TrimSpace(trimmed[start : end+1])
+		}
+	}
+	return trimmed
+}
+
+func stripCodeFenceBlock(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "```") {
+		return trimmed
+	}
+	body := trimmed[3:]
+	body = strings.TrimLeft(body, " \t\r\n")
+	if len(body) >= 4 && strings.EqualFold(body[:4], "json") {
+		body = body[4:]
+		body = strings.TrimLeft(body, " \t\r\n")
+	}
+	if idx := strings.LastIndex(body, "```"); idx >= 0 {
+		body = body[:idx]
+	}
+	return strings.TrimSpace(body)
+}
+
+func summarizePayloadSnippet(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return "<empty>"
+	}
+	replacer := strings.NewReplacer("\r", " ", "\n", " ", "\t", " ")
+	clean := replacer.Replace(trimmed)
+	clean = strings.Join(strings.Fields(clean), " ")
+	const limit = 160
+	runes := []rune(clean)
+	if len(runes) > limit {
+		clean = string(runes[:limit]) + "..."
+	}
+	return clean
 }
