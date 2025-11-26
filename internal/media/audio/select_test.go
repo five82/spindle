@@ -75,7 +75,7 @@ func TestSelectFallsBackToLosslessWhenNoSpatial(t *testing.T) {
 	}
 }
 
-func TestSelectTreatsStereoAsCommentaryWhenMultichannelExists(t *testing.T) {
+func TestSelectDoesNotTreatStereoAsCommentaryWithoutExplicitMarkers(t *testing.T) {
 	streams := []ffprobe.Stream{
 		{
 			Index:     0,
@@ -98,8 +98,9 @@ func TestSelectTreatsStereoAsCommentaryWhenMultichannelExists(t *testing.T) {
 	if sel.PrimaryIndex != 0 {
 		t.Fatalf("expected index 0 to be primary, got %d", sel.PrimaryIndex)
 	}
-	if len(sel.CommentaryIndices) != 1 || sel.CommentaryIndices[0] != 1 {
-		t.Fatalf("expected stereo track as commentary, got %v", sel.CommentaryIndices)
+	// Stereo mix should NOT be treated as commentary without explicit markers
+	if len(sel.CommentaryIndices) != 0 {
+		t.Fatalf("expected no commentary tracks without explicit markers, got %v", sel.CommentaryIndices)
 	}
 }
 
@@ -231,5 +232,81 @@ func TestSelectDetectsDiscussionKeywords(t *testing.T) {
 	sel := Select(streams)
 	if len(sel.CommentaryIndices) != 1 || sel.CommentaryIndices[0] != 1 {
 		t.Fatalf("expected discussion track classified as commentary, got %v", sel.CommentaryIndices)
+	}
+}
+
+func TestSelectDetectsExplicitCommentaryDisposition(t *testing.T) {
+	streams := []ffprobe.Stream{
+		{
+			Index:     0,
+			CodecType: "audio",
+			CodecName: "dts",
+			Channels:  6,
+			Tags:      map[string]string{"language": "eng", "title": "Main"},
+		},
+		{
+			Index:       1,
+			CodecType:   "audio",
+			CodecName:   "ac3",
+			Channels:    2,
+			Tags:        map[string]string{"language": "eng", "title": "Track 2"},
+			Disposition: map[string]int{"commentary": 1},
+		},
+	}
+
+	sel := Select(streams)
+	if sel.PrimaryIndex != 0 {
+		t.Fatalf("expected index 0 to be primary, got %d", sel.PrimaryIndex)
+	}
+	if len(sel.CommentaryIndices) != 1 || sel.CommentaryIndices[0] != 1 {
+		t.Fatalf("expected track with commentary disposition to be included, got %v", sel.CommentaryIndices)
+	}
+}
+
+func TestSelectOnlyRipsPrimaryWhenNoCommentaryDetected(t *testing.T) {
+	streams := []ffprobe.Stream{
+		{
+			Index:     0,
+			CodecType: "audio",
+			CodecName: "truehd",
+			Channels:  8,
+			Tags:      map[string]string{"language": "eng", "title": "Dolby TrueHD Atmos"},
+		},
+		{
+			Index:     1,
+			CodecType: "audio",
+			CodecName: "dts",
+			Channels:  6,
+			Tags:      map[string]string{"language": "eng", "title": "DTS-HD MA 5.1"},
+		},
+		{
+			Index:     2,
+			CodecType: "audio",
+			CodecName: "ac3",
+			Channels:  2,
+			Tags:      map[string]string{"language": "eng", "title": "Stereo"},
+		},
+		{
+			Index:     3,
+			CodecType: "audio",
+			CodecName: "ac3",
+			Channels:  2,
+			Tags:      map[string]string{"language": "fra", "title": "French 2.0"},
+		},
+	}
+
+	sel := Select(streams)
+	if sel.PrimaryIndex != 0 {
+		t.Fatalf("expected Atmos track (index 0) to be primary, got %d", sel.PrimaryIndex)
+	}
+	// Should only keep primary track when no commentary is explicitly detected
+	if len(sel.CommentaryIndices) != 0 {
+		t.Fatalf("expected no commentary tracks, got %v", sel.CommentaryIndices)
+	}
+	if len(sel.KeepIndices) != 1 {
+		t.Fatalf("expected only 1 track to be kept (primary), got %v", sel.KeepIndices)
+	}
+	if len(sel.RemovedIndices) != 3 {
+		t.Fatalf("expected 3 tracks to be removed, got %v", sel.RemovedIndices)
 	}
 }

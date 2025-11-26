@@ -152,39 +152,19 @@ func (c candidateList) hasMultiChannel() bool {
 func (c candidateList) commentaryCandidates(primary candidate, hasEnglishMultichannel bool) candidateList {
 	result := make(candidateList, 0)
 
-	// Count stereo English tracks to help identify commentary scenarios
-	stereoCount := 0
-	for _, cand := range c {
-		if cand.channels <= 2 {
-			stereoCount++
-		}
-	}
-
 	for _, cand := range c {
 		if cand.stream.Index == primary.stream.Index {
 			continue
 		}
+		// Only include tracks explicitly detected as commentary.
+		// Skip heuristics based solely on channel count or presence of multiple stereo tracks.
 		if cand.isCommentary {
 			result = append(result, cand)
 			continue
 		}
+		// Never include descriptive audio or other special-purpose tracks.
 		if cand.isDescriptive {
 			continue
-		}
-
-		// More conservative stereo heuristic: only treat stereo as commentary if:
-		// 1. Multichannel audio exists AND
-		// 2. Either the title suggests commentary OR there are multiple stereo tracks
-		if hasEnglishMultichannel && cand.channels <= 2 {
-			// Check if title has any commentary-suggesting terms
-			hasSuggestiveTitle := titleSuggestsCommentary(cand.title)
-
-			// If multiple stereo tracks exist alongside multichannel, they're likely alternatives
-			multipleAlternatives := stereoCount > 1
-
-			if hasSuggestiveTitle || multipleAlternatives {
-				result = append(result, cand)
-			}
 		}
 	}
 	// Preserve original order for deterministic output.
@@ -471,40 +451,6 @@ func gatherCommentaryText(stream ffprobe.Stream, normalizedTitle string) []strin
 		}
 	}
 	return texts
-}
-
-// titleSuggestsCommentary checks if a title contains hints that it might be commentary,
-// even if not definitively flagged. Used as a secondary signal for stereo track classification.
-func titleSuggestsCommentary(normalizedTitle string) bool {
-	if normalizedTitle == "" {
-		return false
-	}
-	// Weaker indicators reserved for stereo/mono reclassification.
-	softHints := []string{
-		"commentary",
-		"discussion",
-		"talk",
-		"roundtable",
-		"q&a",
-		"qa",
-		"interview",
-		"bonus commentary",
-	}
-	for _, hint := range softHints {
-		if strings.Contains(normalizedTitle, hint) {
-			return true
-		}
-	}
-
-	// Treat explicit stereo/mono mix labels as commentary-style alternates when
-	// multichannel audio is also present.
-	if strings.Contains(normalizedTitle, "stereo") || strings.Contains(normalizedTitle, "mono") {
-		if strings.Contains(normalizedTitle, "mix") || strings.Contains(normalizedTitle, "track") ||
-			strings.Contains(normalizedTitle, "downmix") || strings.Contains(normalizedTitle, "fold") {
-			return true
-		}
-	}
-	return false
 }
 
 func detectDescriptive(stream ffprobe.Stream, normalizedTitle string) bool {
