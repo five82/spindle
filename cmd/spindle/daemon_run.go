@@ -17,6 +17,7 @@ import (
 	"spindle/internal/identification"
 	"spindle/internal/ipc"
 	"spindle/internal/logging"
+	"spindle/internal/notifications"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
@@ -79,7 +80,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	}
 	defer store.Close()
 
-	workflowManager := workflow.NewManager(cfg, store, logger)
+	workflowManager := workflow.NewManagerWithOptions(cfg, store, logger, notifications.NewService(cfg), logHub)
 	registerStages(workflowManager, cfg, store, logger)
 
 	d, err := daemon.New(cfg, store, logger, workflowManager, logPath, logHub, eventArchive)

@@ -105,6 +105,7 @@ type Manager struct {
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
 	notifier          notifications.Service
+	logHub            *logging.StreamHub
 
 	lanes            map[laneKind]*laneState
 	laneOrder        []laneKind
@@ -123,11 +124,16 @@ type Manager struct {
 
 // NewManager constructs a new workflow manager.
 func NewManager(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Manager {
-	return NewManagerWithNotifier(cfg, store, logger, notifications.NewService(cfg))
+	return NewManagerWithOptions(cfg, store, logger, notifications.NewService(cfg), nil)
 }
 
 // NewManagerWithNotifier constructs a workflow manager with a custom notifier (used in tests).
 func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Manager {
+	return NewManagerWithOptions(cfg, store, logger, notifier, nil)
+}
+
+// NewManagerWithOptions constructs a workflow manager with full configuration.
+func NewManagerWithOptions(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service, logHub *logging.StreamHub) *Manager {
 	backgroundDir := ""
 	if cfg != nil && cfg.LogDir != "" {
 		backgroundDir = filepath.Join(cfg.LogDir, "background")
@@ -137,6 +143,7 @@ func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *slog
 		store:             store,
 		logger:            logger,
 		notifier:          notifier,
+		logHub:            logHub,
 		pollInterval:      time.Duration(cfg.QueuePollInterval) * time.Second,
 		heartbeatInterval: time.Duration(cfg.WorkflowHeartbeatInterval) * time.Second,
 		heartbeatTimeout:  time.Duration(cfg.WorkflowHeartbeatTimeout) * time.Second,
@@ -435,7 +442,8 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 						logging.Int64("item_id", item.ID),
 					)
 				}
-				base = logging.TeeLogger(base, bgHandler)
+				// Background tasks should log ONLY to the item log, not the daemon log
+				base = slog.New(bgHandler)
 			}
 		}
 	}
@@ -482,6 +490,7 @@ func (m *Manager) newBackgroundHandler(path string) (slog.Handler, error) {
 		OutputPaths:      []string{path},
 		ErrorOutputPaths: []string{path},
 		Development:      false,
+		Stream:           m.logHub,
 	})
 	if err != nil {
 		return nil, err
