@@ -3,8 +3,6 @@ package queue
 import (
 	"database/sql"
 	"errors"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -145,18 +143,4 @@ func makePlaceholders(count int) string {
 		placeholders = append(placeholders, '?')
 	}
 	return string(placeholders)
-}
-
-func inferTitleFromPath(path string) string {
-	base := strings.TrimSpace(filepath.Base(path))
-	if base == "" {
-		return "Manual Import"
-	}
-	ext := filepath.Ext(base)
-	base = strings.TrimSuffix(base, ext)
-	cleaned := strings.TrimSpace(base)
-	if cleaned == "" {
-		return "Manual Import"
-	}
-	return cleaned
 }

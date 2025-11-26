@@ -35,10 +35,9 @@ spindle queue reset-stuck           # kick stalled items forward
 spindle queue retry <id...>         # retry one or more items
 ```
 
-## File & Subtitle Utilities
+## Utilities
 
 ```bash
-spindle add-file /path/to/video.mkv     # treat local file as a rip
 spindle gensubtitle /path/to/video.mkv  # regenerate subtitles (add --forceai)
 spindle cache stats                     # inspect rip cache usage
 spindle cache prune                     # force cache cleanup

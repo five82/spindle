@@ -210,21 +210,6 @@ func (s *service) Status(_ StatusRequest, resp *StatusResponse) error {
 	return nil
 }
 
-func (s *service) AddFile(req AddFileRequest, resp *AddFileResponse) error {
-	path := strings.TrimSpace(req.Path)
-	if path == "" {
-		return errors.New("path is required")
-	}
-	item, err := s.daemon.AddFile(s.ctx, path)
-	if err != nil {
-		return err
-	}
-	if qi := convertQueueItem(item); qi != nil {
-		resp.Item = *qi
-	}
-	return nil
-}
-
 func (s *service) QueueList(req QueueListRequest, resp *QueueListResponse) error {
 	statuses := make([]queue.Status, 0, len(req.Statuses))
 	for _, status := range req.Statuses {

@@ -90,10 +90,9 @@ You can also regenerate subtitles for historic encodes with `spindle gensubtitle
 
 Use `spindle queue list` (filter with tools like `grep FAILED`), `spindle queue status` for a tally per lifecycle state, or `spindle queue health` for condensed diagnostics.
 
-## Multi-Disc Sets & Manual Files
+## Multi-Disc Sets
 
 - **TV box sets**: Each disc is processed on its own. Enhanced metadata still helps label episodes, and cached TMDB matches keep naming consistent, but there is no waiting period or required order.
-- **Manual files**: You can queue already-ripped videos with `spindle add-file /path/to/video.mkv`. These items start at `RIPPED`, skip the optical stages, and go straight to encoding and organization.
 
 ## Monitoring & Control Tips
 

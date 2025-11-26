@@ -38,7 +38,6 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newDaemonRunCommand(ctx))
 	rootCmd.AddCommand(newQueueHealthCommand(ctx))
 	rootCmd.AddCommand(newShowCommand(ctx))
-	rootCmd.AddCommand(newAddFileCommand(ctx))
 	rootCmd.AddCommand(newIdentifyCommand(ctx))
 	rootCmd.AddCommand(newGenerateSubtitleCommand(ctx))
 	rootCmd.AddCommand(newTestNotifyCommand(ctx))

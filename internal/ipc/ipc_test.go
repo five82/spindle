@@ -101,22 +101,6 @@ func TestIPCServerClient(t *testing.T) {
 		t.Fatalf("NewDisc C: %v", err)
 	}
 	discC.Status = queue.StatusRipping
-	manualDir := filepath.Join(cfg.StagingDir, "manual")
-	if err := os.MkdirAll(manualDir, 0o755); err != nil {
-		t.Fatalf("mkdir manual: %v", err)
-	}
-	manualPath := filepath.Join(manualDir, "Manual Movie.mkv")
-	if err := os.WriteFile(manualPath, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write manual file: %v", err)
-	}
-
-	addResp, err := client.AddFile(manualPath)
-	if err != nil {
-		t.Fatalf("AddFile failed: %v", err)
-	}
-	if addResp.Item.Status != string(queue.StatusRipped) {
-		t.Fatalf("expected manual item to be ripped, got %s", addResp.Item.Status)
-	}
 	if err := os.WriteFile(logPath, []byte("first\nsecond\nthird\n"), 0o644); err != nil {
 		t.Fatalf("write log file: %v", err)
 	}
@@ -156,9 +140,6 @@ func TestIPCServerClient(t *testing.T) {
 		t.Fatal("log tail follow timed out")
 	}
 
-	if addResp.Item.SourcePath == "" {
-		t.Fatal("expected manual item to include source path")
-	}
 	stopDuring, err := client.Stop()
 	if err != nil {
 		t.Fatalf("Stop failed: %v", err)
@@ -180,7 +161,7 @@ func TestIPCServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueueList failed: %v", err)
 	}
-	if len(listResp.Items) != 4 {
+	if len(listResp.Items) != 3 {
 		t.Fatalf("expected 3 queue items, got %d", len(listResp.Items))
 	}
 
@@ -235,7 +216,7 @@ func TestIPCServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueueHealth failed: %v", err)
 	}
-	if healthResp.Total != 2 || healthResp.Failed != 0 {
+	if healthResp.Total != 1 || healthResp.Failed != 0 {
 		t.Fatalf("unexpected health response: %#v", healthResp)
 	}
 
@@ -259,8 +240,8 @@ func TestIPCServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueueClear failed: %v", err)
 	}
-	if clearResp.Removed != 2 {
-		t.Fatalf("expected 2 items cleared, got %d", clearResp.Removed)
+	if clearResp.Removed != 1 {
+		t.Fatalf("expected 1 item cleared, got %d", clearResp.Removed)
 	}
 
 	stopResp, err := client.Stop()

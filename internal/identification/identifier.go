@@ -162,15 +162,24 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	if scanResult.Fingerprint != "" {
-		logger.Info("disc fingerprint captured", logging.String("fingerprint", scanResult.Fingerprint))
-		item.DiscFingerprint = scanResult.Fingerprint
+	scannerFingerprint := ""
+	if scanResult != nil {
+		scannerFingerprint = strings.TrimSpace(scanResult.Fingerprint)
+	}
+	if scannerFingerprint != "" {
+		logger.Info("disc fingerprint captured", logging.String("fingerprint", scannerFingerprint))
+		item.DiscFingerprint = scannerFingerprint
 		if err := i.handleDuplicateFingerprint(ctx, item); err != nil {
 			return err
 		}
 		if item.Status == queue.StatusReview {
 			return nil
 		}
+	} else if trimmed := strings.TrimSpace(item.DiscFingerprint); trimmed != "" {
+		logger.Info("scanner fingerprint unavailable; retaining existing fingerprint",
+			logging.String("fingerprint", trimmed))
+	} else {
+		logger.Warn("scanner fingerprint unavailable and queue fingerprint missing")
 	}
 
 	discID := ""

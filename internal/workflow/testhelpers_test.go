@@ -203,17 +203,3 @@ func (f *fakeMakemkvClient) Rip(ctx context.Context, discTitle, sourcePath, dest
 	}
 	return target, nil
 }
-
-func writeLargeTempFile(t *testing.T, path string, size int) {
-	t.Helper()
-	if size <= 0 {
-		size = 1
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir temp file: %v", err)
-	}
-	payload := bytes.Repeat([]byte{0xBC}, size)
-	if err := os.WriteFile(path, payload, 0o644); err != nil {
-		t.Fatalf("write temp file: %v", err)
-	}
-}

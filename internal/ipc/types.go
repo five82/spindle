@@ -135,16 +135,6 @@ type QueueRetryResponse struct {
 	Updated int64 `json:"updated"`
 }
 
-// AddFileRequest enqueues a manual file for processing.
-type AddFileRequest struct {
-	Path string `json:"path"`
-}
-
-// AddFileResponse returns the created queue item.
-type AddFileResponse struct {
-	Item QueueItem `json:"item"`
-}
-
 // LogTailRequest fetches log lines based on offset and follow semantics.
 type LogTailRequest struct {
 	Offset     int64 `json:"offset"`

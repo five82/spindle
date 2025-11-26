@@ -111,7 +111,7 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 		t.Fatalf("daemon.Start: %v", err)
 	}
 
-	item, err := store.NewDisc(ctx, "Daemon Disc", "")
+	item, err := store.NewDisc(ctx, "Daemon Disc", "fp-daemon")
 	if err != nil {
 		t.Fatalf("store.NewDisc: %v", err)
 	}

@@ -87,6 +87,7 @@ func TestIdentifierFallsBackToQueueFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
 	}
+	originalFingerprint := item.DiscFingerprint
 
 	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{{ID: 42, Title: "Fallback Disc", VoteAverage: 7.0, VoteCount: 100, ReleaseDate: "2010-01-01"}}, TotalResults: 1}}
 	stubScanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "", Titles: []disc.Title{{ID: 1, Name: "Fallback Disc", Duration: 7200}}}}
@@ -113,6 +114,9 @@ func TestIdentifierFallsBackToQueueFingerprint(t *testing.T) {
 	}
 	if spec.ContentKey != "tmdb:movie:42" {
 		t.Fatalf("expected tmdb content key, got %q", spec.ContentKey)
+	}
+	if item.DiscFingerprint != originalFingerprint {
+		t.Fatalf("expected disc fingerprint to remain %q, got %q", originalFingerprint, item.DiscFingerprint)
 	}
 }
 

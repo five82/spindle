@@ -160,6 +160,16 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		stagingRoot = filepath.Join(strings.TrimSpace(r.cfg.StagingDir), fmt.Sprintf("queue-%d", item.ID))
 	}
 
+	fingerprintAvailable := hasDiscFingerprint(item)
+	if !fingerprintAvailable {
+		return services.Wrap(
+			services.ErrValidation,
+			"ripping",
+			"verify disc fingerprint",
+			"Disc fingerprint missing before ripping; rerun identification to capture scanner output",
+			nil,
+		)
+	}
 	useCache := r.cache != nil
 	destDir := filepath.Join(stagingRoot, "rips")
 	if useCache {
@@ -427,6 +437,13 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 
 	return nil
+}
+
+func hasDiscFingerprint(item *queue.Item) bool {
+	if item == nil {
+		return false
+	}
+	return strings.TrimSpace(item.DiscFingerprint) != ""
 }
 
 func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {

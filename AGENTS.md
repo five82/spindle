@@ -105,7 +105,6 @@ Formatting and linting are enforced by `golangci-lint`; run it directly or via `
 - Logs: `spindle show --follow` for live tails with color, `--lines N` for snapshots (requires running daemon).
 - Queue operations: `spindle queue` subcommands (`status`, `list`, `clear`, `reset-stuck`, `health`, etc.) work with or without a running daemon.
 - Subtitle tooling: `spindle gensubtitle /path/to/video.mkv [--forceai]` regenerates SRTs for historic encodes using the same OpenSubtitles/WhisperX pipeline as the queue.
-- File operations: `spindle add-file` works with or without a running daemon.
 - Disc identification: `spindle identify [/dev/... | --verbose]` runs the TMDB matcher without touching the queue so you can debug metadata issues offline.
 - Configuration helpers: `spindle config init` scaffolds a config, `spindle config validate` sanity-checks the active file before launches.
 - Notifications & Plex: `spindle test-notify` exercises ntfy; `spindle plex link` runs the device-link handshake so organizer-triggered scans succeed.

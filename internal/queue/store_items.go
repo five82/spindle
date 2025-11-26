@@ -3,14 +3,18 @@ package queue
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
 // NewDisc inserts a new item for an optical disc awaiting identification.
 func (s *Store) NewDisc(ctx context.Context, discTitle, fingerprint string) (*Item, error) {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return nil, errors.New("disc fingerprint is required")
+	}
 	now := time.Now().UTC()
 	timestamp := now.Format(time.RFC3339Nano)
 
@@ -31,47 +35,6 @@ func (s *Store) NewDisc(ctx context.Context, discTitle, fingerprint string) (*It
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert disc: %w", err)
-	}
-
-	id, err := res.LastInsertId()
-	if err != nil {
-		return nil, fmt.Errorf("last insert id: %w", err)
-	}
-
-	return s.GetByID(ctx, id)
-}
-
-// NewFile enqueues a file that skips ripping and begins at the encoding stage.
-func (s *Store) NewFile(ctx context.Context, sourcePath string) (*Item, error) {
-	now := time.Now().UTC()
-	timestamp := now.Format(time.RFC3339Nano)
-
-	discTitle := inferTitleFromPath(sourcePath)
-	meta := NewBasicMetadata(discTitle, true)
-	metadataJSON, err := json.Marshal(meta)
-	if err != nil {
-		return nil, fmt.Errorf("marshal metadata: %w", err)
-	}
-
-	res, err := s.execWithRetry(
-		ctx,
-		`INSERT INTO queue_items (
-            source_path, disc_title, status, ripped_file, created_at, updated_at,
-            progress_stage, progress_percent, progress_message, metadata_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sourcePath,
-		discTitle,
-		StatusRipped,
-		sourcePath,
-		timestamp,
-		timestamp,
-		nil,
-		0.0,
-		nil,
-		string(metadataJSON),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert file: %w", err)
 	}
 
 	id, err := res.LastInsertId()

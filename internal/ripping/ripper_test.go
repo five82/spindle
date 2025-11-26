@@ -231,6 +231,49 @@ func TestRipperReusesCachedRip(t *testing.T) {
 	}
 }
 
+func TestRipperFailsWithoutFingerprint(t *testing.T) {
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries(), testsupport.WithRipCache())
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubRipperProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "Missing Fingerprint", "fp-missing")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusIdentified
+	spec := map[string]any{
+		"titles":   []map[string]any{{"id": 0, "name": "Main", "duration": 7200}},
+		"metadata": map[string]any{"media_type": "movie"},
+	}
+	encodedSpec, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+	item.RipSpecData = string(encodedSpec)
+	item.DiscFingerprint = ""
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	client := &countingRipperClient{}
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), client, &stubNotifier{})
+	item.Status = queue.StatusRipping
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update processing: %v", err)
+	}
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	err = handler.Execute(context.Background(), item)
+	if err == nil {
+		t.Fatal("expected Execute to fail when fingerprint missing")
+	}
+	if client.calls != 0 {
+		t.Fatalf("makemkv should not run without fingerprint; calls=%d", client.calls)
+	}
+}
+
 func TestRipperIgnoresInvalidCachedRip(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries(), testsupport.WithRipCache())
 	store := testsupport.MustOpenStore(t, cfg)

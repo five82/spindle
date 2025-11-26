@@ -61,16 +61,6 @@ func (c *Client) Status() (*StatusResponse, error) {
 	return &resp, nil
 }
 
-// AddFile enqueues a manual file.
-func (c *Client) AddFile(path string) (*AddFileResponse, error) {
-	var resp AddFileResponse
-	req := AddFileRequest{Path: path}
-	if err := c.client.Call("Spindle.AddFile", req, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
 // LogTail returns log lines from the daemon.
 func (c *Client) LogTail(req LogTailRequest) (*LogTailResponse, error) {
 	var resp LogTailResponse

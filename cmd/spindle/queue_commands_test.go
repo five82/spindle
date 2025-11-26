@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -86,25 +84,6 @@ func TestQueueRetryAndClear(t *testing.T) {
 		t.Fatalf("queue clear all: %v", err)
 	}
 	requireContains(t, out, "Cleared")
-}
-
-func TestAddFile(t *testing.T) {
-	env := setupCLITestEnv(t)
-
-	manualDir := filepath.Join(env.cfg.StagingDir, "manual")
-	if err := os.MkdirAll(manualDir, 0o755); err != nil {
-		t.Fatalf("mkdir manual: %v", err)
-	}
-	manualPath := filepath.Join(manualDir, "Manual Movie.mkv")
-	if err := os.WriteFile(manualPath, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write manual: %v", err)
-	}
-
-	out, _, err := runCLI(t, []string{"add-file", manualPath}, env.socketPath, env.configPath)
-	if err != nil {
-		t.Fatalf("add-file: %v", err)
-	}
-	requireContains(t, out, "Queued manual file")
 }
 
 func TestQueueHealthCommand(t *testing.T) {

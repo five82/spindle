@@ -3,7 +3,6 @@ package queue_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -41,35 +40,13 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	}
 }
 
-func TestNewFileSetsDefaults(t *testing.T) {
+func TestNewDiscRequiresFingerprint(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
 
 	ctx := context.Background()
-	manualPath := filepath.Join(cfg.StagingDir, "manual", "Sample Movie.mkv")
-
-	item, err := store.NewFile(ctx, manualPath)
-	if err != nil {
-		t.Fatalf("NewFile failed: %v", err)
-	}
-	if item.Status != queue.StatusRipped {
-		t.Fatalf("expected ripped status, got %s", item.Status)
-	}
-	if item.RippedFile != manualPath {
-		t.Fatalf("expected ripped file to match source, got %s", item.RippedFile)
-	}
-	if item.DiscTitle != "Sample Movie" {
-		t.Fatalf("unexpected disc title: %s", item.DiscTitle)
-	}
-	if item.MetadataJSON == "" {
-		t.Fatal("expected metadata json to be populated")
-	}
-	meta := queue.MetadataFromJSON(item.MetadataJSON, "")
-	if meta.Title() != "Sample Movie" {
-		t.Fatalf("expected metadata title to match, got %s", meta.Title())
-	}
-	if meta.GetFilename() == "" {
-		t.Fatal("expected metadata filename to be populated")
+	if _, err := store.NewDisc(ctx, "No Fingerprint", ""); err == nil {
+		t.Fatal("expected error when fingerprint missing")
 	}
 }
 

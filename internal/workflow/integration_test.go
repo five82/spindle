@@ -103,7 +103,7 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 		mgr.Stop()
 	})
 
-	item, err := store.NewDisc(ctx, "Integration Disc", "")
+	item, err := store.NewDisc(ctx, "Integration Disc", "fp-integration")
 	if err != nil {
 		t.Fatalf("store.NewDisc: %v", err)
 	}

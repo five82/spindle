@@ -21,13 +21,6 @@ import (
 	"spindle/internal/workflow"
 )
 
-// Daemon coordinates the background processing services and enforces single-instance execution.
-var manualFileExtensions = map[string]struct{}{
-	".mkv": {},
-	".mp4": {},
-	".avi": {},
-}
-
 type Daemon struct {
 	cfg        *config.Config
 	logger     *slog.Logger
@@ -280,38 +273,6 @@ func (d *Daemon) TestNotification(ctx context.Context) (bool, string, error) {
 		return false, "failed to send notification", err
 	}
 	return true, "test notification sent", nil
-}
-
-// AddFile enqueues a manual file for processing.
-func (d *Daemon) AddFile(ctx context.Context, sourcePath string) (*queue.Item, error) {
-	if d.store == nil {
-		return nil, errors.New("queue store unavailable")
-	}
-	trimmed := strings.TrimSpace(sourcePath)
-	if trimmed == "" {
-		return nil, errors.New("source path is required")
-	}
-	absPath, err := filepath.Abs(trimmed)
-	if err != nil {
-		return nil, fmt.Errorf("resolve source path: %w", err)
-	}
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return nil, fmt.Errorf("stat source file: %w", err)
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("source path %q is a directory", absPath)
-	}
-	ext := strings.ToLower(filepath.Ext(info.Name()))
-	if _, ok := manualFileExtensions[ext]; !ok {
-		return nil, fmt.Errorf("unsupported file extension %q", ext)
-	}
-	item, err := d.store.NewFile(ctx, absPath)
-	if err != nil {
-		return nil, fmt.Errorf("enqueue manual file: %w", err)
-	}
-	d.logger.Info("manual file queued", logging.Int64(logging.FieldItemID, item.ID), logging.String("source", absPath))
-	return item, nil
 }
 
 // LogPath returns the path to the daemon log file.
