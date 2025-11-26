@@ -28,6 +28,9 @@ type QueueItem struct {
 	ReviewReason      string          `json:"reviewReason,omitempty"`
 	Metadata          json.RawMessage `json:"metadata,omitempty"`
 	RipSpec           json.RawMessage `json:"ripSpec,omitempty"`
+	Episodes          []EpisodeStatus `json:"episodes,omitempty"`
+	EpisodeTotals     *EpisodeTotals  `json:"episodeTotals,omitempty"`
+	EpisodesSynced    bool            `json:"episodesSynchronized,omitempty"`
 }
 
 // QueueProgress captures stage progress information for a queue entry.
@@ -35,6 +38,34 @@ type QueueProgress struct {
 	Stage   string  `json:"stage"`
 	Percent float64 `json:"percent"`
 	Message string  `json:"message"`
+}
+
+// EpisodeStatus captures the per-episode workflow state for TV discs.
+type EpisodeStatus struct {
+	Key              string  `json:"key"`
+	Season           int     `json:"season"`
+	Episode          int     `json:"episode"`
+	Title            string  `json:"title"`
+	Stage            string  `json:"stage"`
+	RuntimeSeconds   int     `json:"runtimeSeconds,omitempty"`
+	SourceTitleID    int     `json:"sourceTitleId,omitempty"`
+	SourceTitle      string  `json:"sourceTitle,omitempty"`
+	OutputBasename   string  `json:"outputBasename,omitempty"`
+	RippedPath       string  `json:"rippedPath,omitempty"`
+	EncodedPath      string  `json:"encodedPath,omitempty"`
+	FinalPath        string  `json:"finalPath,omitempty"`
+	SubtitleSource   string  `json:"subtitleSource,omitempty"`
+	SubtitleLanguage string  `json:"subtitleLanguage,omitempty"`
+	MatchScore       float64 `json:"matchScore,omitempty"`
+	MatchedEpisode   int     `json:"matchedEpisode,omitempty"`
+}
+
+// EpisodeTotals summarizes how far a multi-episode disc progressed.
+type EpisodeTotals struct {
+	Planned int `json:"planned"`
+	Ripped  int `json:"ripped"`
+	Encoded int `json:"encoded"`
+	Final   int `json:"final"`
 }
 
 // WorkflowStatus summarizes workflow execution state.

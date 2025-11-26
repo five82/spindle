@@ -79,6 +79,7 @@ ideas.
 | --- | --- |
 | Check status & logs | `spindle status`, `spindle show --follow` |
 | Inspect queue | `spindle queue list`, `spindle queue status`, `spindle queue health` |
+| Inspect item detail | `spindle queue show <id>` (includes episode-by-episode progress) |
 | Clean up | `spindle queue clear --completed`, `spindle cache prune` |
 | Retry work | `spindle queue retry <id>`, `spindle queue reset-stuck` |
 | Utilities | `spindle add-file`, `spindle gensubtitle`, `spindle test-notify` |

@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"spindle/internal/api"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 )
 
 type queueAPI interface {
@@ -317,7 +319,7 @@ func convertAPIQueueItem(item api.QueueItem) queueItemDetailsView {
 		CreatedAt:       item.CreatedAt,
 		DiscFingerprint: item.DiscFingerprint,
 	}
-	return queueItemDetailsView{
+	view := queueItemDetailsView{
 		queueItemView:     base,
 		UpdatedAt:         item.UpdatedAt,
 		ProgressStage:     item.Progress.Stage,
@@ -333,6 +335,17 @@ func convertAPIQueueItem(item api.QueueItem) queueItemDetailsView {
 		FinalFile:         item.FinalFile,
 		BackgroundLogPath: item.BackgroundLogPath,
 	}
+	if len(item.Episodes) > 0 {
+		view.Episodes, view.EpisodeTotals = convertAPIEpisodes(item)
+		view.EpisodesSynced = item.EpisodesSynced
+	} else if eps, totals, synced := deriveEpisodeViewsFromRipSpec(view.RipSpecJSON); len(eps) > 0 {
+		view.Episodes = eps
+		view.EpisodeTotals = totals
+		view.EpisodesSynced = synced || item.EpisodesSynced
+	} else {
+		view.EpisodesSynced = item.EpisodesSynced
+	}
+	return view
 }
 
 func convertIPCQueueItem(item ipc.QueueItem) *queueItemDetailsView {
@@ -344,7 +357,7 @@ func convertIPCQueueItem(item ipc.QueueItem) *queueItemDetailsView {
 		CreatedAt:       item.CreatedAt,
 		DiscFingerprint: item.DiscFingerprint,
 	}
-	return &queueItemDetailsView{
+	view := queueItemDetailsView{
 		queueItemView:     base,
 		UpdatedAt:         item.UpdatedAt,
 		ProgressStage:     item.ProgressStage,
@@ -360,4 +373,164 @@ func convertIPCQueueItem(item ipc.QueueItem) *queueItemDetailsView {
 		FinalFile:         item.FinalFile,
 		BackgroundLogPath: item.BackgroundLogPath,
 	}
+	if eps, totals, synced := deriveEpisodeViewsFromRipSpec(item.RipSpecData); len(eps) > 0 {
+		view.Episodes = eps
+		view.EpisodeTotals = totals
+		view.EpisodesSynced = synced
+	}
+	return &view
+}
+
+func convertAPIEpisodes(item api.QueueItem) ([]queueEpisodeView, queueEpisodeTotals) {
+	episodes := make([]queueEpisodeView, 0, len(item.Episodes))
+	for _, ep := range item.Episodes {
+		view := queueEpisodeView{
+			Key:              ep.Key,
+			Season:           ep.Season,
+			Episode:          ep.Episode,
+			Title:            strings.TrimSpace(ep.Title),
+			Stage:            strings.TrimSpace(ep.Stage),
+			RuntimeSeconds:   ep.RuntimeSeconds,
+			RippedPath:       strings.TrimSpace(ep.RippedPath),
+			EncodedPath:      strings.TrimSpace(ep.EncodedPath),
+			FinalPath:        strings.TrimSpace(ep.FinalPath),
+			SubtitleSource:   strings.TrimSpace(ep.SubtitleSource),
+			SubtitleLanguage: strings.TrimSpace(ep.SubtitleLanguage),
+			MatchScore:       ep.MatchScore,
+		}
+		if view.Title == "" {
+			view.Title = strings.TrimSpace(ep.OutputBasename)
+		}
+		if view.Stage == "" {
+			view.Stage = "planned"
+		}
+		episodes = append(episodes, view)
+	}
+	totals := queueEpisodeTotals{}
+	if item.EpisodeTotals != nil {
+		totals.Planned = item.EpisodeTotals.Planned
+		totals.Ripped = item.EpisodeTotals.Ripped
+		totals.Encoded = item.EpisodeTotals.Encoded
+		totals.Final = item.EpisodeTotals.Final
+	} else {
+		totals = tallyEpisodeTotals(episodes)
+	}
+	return episodes, totals
+}
+
+func tallyEpisodeTotals(episodes []queueEpisodeView) queueEpisodeTotals {
+	var totals queueEpisodeTotals
+	for _, ep := range episodes {
+		totals.Planned++
+		if ep.RippedPath != "" {
+			totals.Ripped++
+		}
+		if ep.EncodedPath != "" {
+			totals.Encoded++
+		}
+		if ep.FinalPath != "" {
+			totals.Final++
+		}
+	}
+	return totals
+}
+
+func deriveEpisodeViewsFromRipSpec(raw string) ([]queueEpisodeView, queueEpisodeTotals, bool) {
+	env, err := ripspec.Parse(raw)
+	if err != nil || len(env.Episodes) == 0 {
+		return nil, queueEpisodeTotals{}, false
+	}
+	titleByID := make(map[int]ripspec.Title, len(env.Titles))
+	for _, title := range env.Titles {
+		titleByID[title.ID] = title
+	}
+	assetMap := make(map[string]episodeAssetPaths)
+	collectAssets := func(list []ripspec.Asset, setter func(*episodeAssetPaths, string)) {
+		for _, asset := range list {
+			key := strings.ToLower(strings.TrimSpace(asset.EpisodeKey))
+			if key == "" {
+				continue
+			}
+			entry := assetMap[key]
+			setter(&entry, strings.TrimSpace(asset.Path))
+			assetMap[key] = entry
+		}
+	}
+	collectAssets(env.Assets.Ripped, func(e *episodeAssetPaths, path string) { e.Ripped = path })
+	collectAssets(env.Assets.Encoded, func(e *episodeAssetPaths, path string) { e.Encoded = path })
+	collectAssets(env.Assets.Final, func(e *episodeAssetPaths, path string) { e.Final = path })
+	episodes := make([]queueEpisodeView, 0, len(env.Episodes))
+	totals := queueEpisodeTotals{Planned: len(env.Episodes)}
+	for _, ep := range env.Episodes {
+		view := queueEpisodeView{
+			Key:            ep.Key,
+			Season:         ep.Season,
+			Episode:        ep.Episode,
+			Title:          strings.TrimSpace(ep.EpisodeTitle),
+			Stage:          "planned",
+			RuntimeSeconds: ep.RuntimeSeconds,
+		}
+		if title, ok := titleByID[ep.TitleID]; ok {
+			if view.Title == "" {
+				view.Title = strings.TrimSpace(title.EpisodeTitle)
+			}
+			if view.Title == "" {
+				view.Title = strings.TrimSpace(title.Name)
+			}
+		}
+		if asset, ok := assetMap[strings.ToLower(strings.TrimSpace(ep.Key))]; ok {
+			if asset.Ripped != "" {
+				view.RippedPath = asset.Ripped
+				view.Stage = "ripped"
+				totals.Ripped++
+			}
+			if asset.Encoded != "" {
+				view.EncodedPath = asset.Encoded
+				view.Stage = "encoded"
+				totals.Encoded++
+			}
+			if asset.Final != "" {
+				view.FinalPath = asset.Final
+				view.Stage = "final"
+				totals.Final++
+			}
+		}
+		if view.Title == "" {
+			view.Title = strings.TrimSpace(ep.OutputBasename)
+		}
+		episodes = append(episodes, view)
+	}
+	sort.SliceStable(episodes, func(i, j int) bool {
+		if episodes[i].Season != episodes[j].Season {
+			return episodes[i].Season < episodes[j].Season
+		}
+		if episodes[i].Episode != episodes[j].Episode {
+			return episodes[i].Episode < episodes[j].Episode
+		}
+		return strings.Compare(strings.ToLower(episodes[i].Key), strings.ToLower(episodes[j].Key)) < 0
+	})
+	synced := episodesSynchronized(env)
+	return episodes, totals, synced
+}
+
+type episodeAssetPaths struct {
+	Ripped  string
+	Encoded string
+	Final   string
+}
+
+func episodesSynchronized(env ripspec.Envelope) bool {
+	if env.Attributes != nil {
+		if raw, ok := env.Attributes["episodes_synchronized"]; ok {
+			if flag, ok2 := raw.(bool); ok2 {
+				return flag
+			}
+		}
+	}
+	for _, ep := range env.Episodes {
+		if ep.Season <= 0 || ep.Episode <= 0 {
+			return false
+		}
+	}
+	return len(env.Episodes) > 0
 }

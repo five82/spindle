@@ -24,6 +24,31 @@ type queueItemDetailsView struct {
 	EncodedFile       string
 	FinalFile         string
 	BackgroundLogPath string
+	Episodes          []queueEpisodeView
+	EpisodeTotals     queueEpisodeTotals
+	EpisodesSynced    bool
+}
+
+type queueEpisodeView struct {
+	Key              string
+	Season           int
+	Episode          int
+	Title            string
+	Stage            string
+	RuntimeSeconds   int
+	RippedPath       string
+	EncodedPath      string
+	FinalPath        string
+	SubtitleSource   string
+	SubtitleLanguage string
+	MatchScore       float64
+}
+
+type queueEpisodeTotals struct {
+	Planned int
+	Ripped  int
+	Encoded int
+	Final   int
 }
 
 type queueHealthView struct {

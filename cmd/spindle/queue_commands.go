@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -297,6 +298,10 @@ func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
 	} else {
 		fmt.Fprintln(out, "Metadata: none")
 	}
+	if len(item.Episodes) > 0 {
+		fmt.Fprintln(out, "\nEpisodes:")
+		printEpisodeDetails(out, item)
+	}
 
 	summary, err := parseRipSpecSummary(item.RipSpecJSON)
 	if err != nil {
@@ -304,6 +309,74 @@ func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
 		return
 	}
 	printRipSpecFingerprints(out, summary)
+}
+
+func printEpisodeDetails(out io.Writer, item queueItemDetailsView) {
+	totals := item.EpisodeTotals
+	if totals.Planned == 0 {
+		totals = tallyEpisodeTotals(item.Episodes)
+	}
+	fmt.Fprintf(out, "  Planned: %d | Ripped: %d | Encoded: %d | Final: %d\n", totals.Planned, totals.Ripped, totals.Encoded, totals.Final)
+	mapping := "pending verification"
+	if item.EpisodesSynced {
+		mapping = "synced with TMDB"
+	}
+	fmt.Fprintf(out, "  Mapping: %s\n", mapping)
+	for _, ep := range item.Episodes {
+		label := formatEpisodeLabel(ep)
+		stage := strings.ToUpper(strings.TrimSpace(ep.Stage))
+		if stage == "" {
+			stage = "PLANNED"
+		}
+		title := strings.TrimSpace(ep.Title)
+		if title == "" {
+			title = "Unlabeled"
+		}
+		fmt.Fprintf(out, "  %s  %-8s  %s\n", label, stage, title)
+		if path := primaryEpisodePath(ep); path != "" {
+			fmt.Fprintf(out, "      File: %s\n", path)
+		}
+		if info := episodeSubtitleInfo(ep); info != "" {
+			fmt.Fprintf(out, "      Subtitles: %s\n", info)
+		}
+	}
+}
+
+func primaryEpisodePath(ep queueEpisodeView) string {
+	if strings.TrimSpace(ep.FinalPath) != "" {
+		return strings.TrimSpace(ep.FinalPath)
+	}
+	if strings.TrimSpace(ep.EncodedPath) != "" {
+		return strings.TrimSpace(ep.EncodedPath)
+	}
+	return strings.TrimSpace(ep.RippedPath)
+}
+
+func episodeSubtitleInfo(ep queueEpisodeView) string {
+	lang := strings.ToUpper(strings.TrimSpace(ep.SubtitleLanguage))
+	source := strings.TrimSpace(ep.SubtitleSource)
+	score := ep.MatchScore
+	parts := make([]string, 0, 3)
+	if lang != "" {
+		parts = append(parts, lang)
+	}
+	if source != "" {
+		parts = append(parts, source)
+	}
+	if score > 0 {
+		parts = append(parts, fmt.Sprintf("score %.2f", score))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func formatEpisodeLabel(ep queueEpisodeView) string {
+	if ep.Season > 0 && ep.Episode > 0 {
+		return fmt.Sprintf("S%02dE%02d", ep.Season, ep.Episode)
+	}
+	if strings.TrimSpace(ep.Key) != "" {
+		return strings.ToUpper(strings.TrimSpace(ep.Key))
+	}
+	return "EP"
 }
 
 func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {

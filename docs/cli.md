@@ -28,6 +28,7 @@ spindle queue list                  # every item with status + fingerprint
 spindle queue list --status encoding --status failed
 spindle queue status                # counts by lifecycle state
 spindle queue health                # condensed diagnostics
+spindle queue show <id>             # detailed view with per-episode map
 spindle queue clear --completed     # drop completed entries
 spindle queue clear-failed          # remove failed entries
 spindle queue reset-stuck           # kick stalled items forward

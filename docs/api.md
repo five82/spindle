@@ -80,7 +80,21 @@ Example: `GET /api/queue?status=failed&status=review`
       "createdAt": "2025-10-05T14:31:22.123Z",
       "updatedAt": "2025-10-05T14:42:57.812Z",
       "discFingerprint": "abcdef123456",
-      "needsReview": false
+      "needsReview": false,
+      "episodes": [
+        {
+          "key": "s05e01",
+          "season": 5,
+          "episode": 1,
+          "title": "Pilot",
+          "stage": "encoded",
+          "encodedPath": "/staging/fingerprint/encoded/Show - S05E01.mkv",
+          "subtitleSource": "whisperx_opensubtitles",
+          "subtitleLanguage": "en"
+        }
+      ],
+      "episodeTotals": { "planned": 4, "ripped": 4, "encoded": 2, "final": 0 },
+      "episodesSynchronized": true
     }
   ]
 }
@@ -121,6 +135,9 @@ Returns metadata for a single queue entry.
 | `workflow.stageHealth` | Stage readiness results from `StageHandler.HealthCheck`. Useful for dependency dashboards. |
 | `items[].progress` | Stage name, percent 0-100, and last message recorded for the item. |
 | `items[].metadata` | Raw TMDB/metadata JSON captured during identification. Omitted when empty. |
+| `items[].episodes[]` | One entry per planned episode on a TV disc. Includes season/episode numbers once verified, current stage (`planned`, `ripped`, `encoded`, `final`), runtime, artifact paths, and subtitle match info. Empty for movie discs. |
+| `items[].episodeTotals` | Aggregate counts (`planned`, `ripped`, `encoded`, `final`) derived from the per-episode map. Useful for quick progress bars. |
+| `items[].episodesSynchronized` | `true` when WhisperX/OpenSubtitles confirmed the episode order and both `MetadataJSON`/rip spec were updated. `false` when Spindle is still relying on heuristic disc ordering. |
 
 ## Versioning & Compatibility
 

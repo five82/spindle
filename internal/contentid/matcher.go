@@ -203,6 +203,7 @@ func (m *Matcher) Match(ctx context.Context, item *queue.Item, env *ripspec.Enve
 	}
 	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches)
 	m.attachMatchAttributes(env, matches)
+	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
 	return true, nil
 }
@@ -649,6 +650,16 @@ func (m *Matcher) attachMatchAttributes(env *ripspec.Envelope, matches []matchRe
 	}
 	env.Attributes["content_id_matches"] = payload
 	env.Attributes["content_id_method"] = "whisperx_opensubtitles"
+}
+
+func markEpisodesSynchronized(env *ripspec.Envelope) {
+	if env == nil {
+		return
+	}
+	if env.Attributes == nil {
+		env.Attributes = make(map[string]any)
+	}
+	env.Attributes["episodes_synchronized"] = true
 }
 
 func (m *Matcher) updateMetadata(item *queue.Item, matches []matchResult, season int) {

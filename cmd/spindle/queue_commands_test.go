@@ -158,7 +158,7 @@ func TestQueueShowDisplaysFingerprints(t *testing.T) {
 	item.Status = queue.StatusIdentified
 	item.ProgressStage = "Identified"
 	item.ProgressPercent = 100
-	item.RipSpecData = `{"content_key":"tmdb:tv:123","titles":[{"id":1,"name":"Episode 1","duration":1800,"content_fingerprint":"abc123"}]}`
+	item.RipSpecData = `{"content_key":"tmdb:tv:123","titles":[{"id":1,"name":"Episode 1","duration":1800,"content_fingerprint":"abc123"}],"episodes":[{"key":"s05e01","title_id":1,"season":5,"episode":1,"episode_title":"Pilot"}],"assets":{"encoded":[{"episode_key":"s05e01","path":"/encoded/Show - S05E01.mkv"}]}}`
 	item.MetadataJSON = `{"title":"Showcase"}`
 	if err := env.store.Update(ctx, item); err != nil {
 		t.Fatalf("update item: %v", err)
@@ -170,4 +170,6 @@ func TestQueueShowDisplaysFingerprints(t *testing.T) {
 	}
 	requireContains(t, out, "Content Key: tmdb:tv:123")
 	requireContains(t, out, "Fingerprint abc123")
+	requireContains(t, out, "Episodes:")
+	requireContains(t, out, "S05E01")
 }
