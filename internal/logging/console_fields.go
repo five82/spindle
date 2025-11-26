@@ -56,6 +56,7 @@ var infoHighlightKeys = []string{
 	"drapto_warning",
 	"drapto_error_title",
 	"drapto_error_message",
+	"preset_reason",
 }
 
 func selectInfoFields(attrs []kv) ([]infoField, int) {
@@ -176,7 +177,7 @@ func isDebugOnlyKey(key string) bool {
 
 func shouldHideInfoValue(key, value string) bool {
 	switch key {
-	case "error_message", "error", "command":
+	case "error_message", "error", "command", "preset_reason":
 		return false
 	}
 	return len(value) > 120
