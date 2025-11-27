@@ -17,10 +17,20 @@ func newCacheCommand(ctx *commandContext) *cobra.Command {
 	cacheCmd := &cobra.Command{
 		Use:   "cache",
 		Short: "Inspect and manage the rip cache",
+		Long: `Inspect and manage the rip cache.
+
+The rip cache stores MakeMKV output between ripping and encoding stages.
+Spindle automatically manages cache size and free space during normal operation.
+
+Commands:
+  stats   - Show all cached entries with their sizes and ages
+  remove  - Remove a specific entry by number (see 'stats' for numbers)
+  clear   - Remove all cached entries`,
 	}
 
 	cacheCmd.AddCommand(newCacheStatsCommand(ctx))
-	cacheCmd.AddCommand(newCachePruneCommand(ctx))
+	cacheCmd.AddCommand(newCacheRemoveCommand(ctx))
+	cacheCmd.AddCommand(newCacheClearCommand(ctx))
 
 	return cacheCmd
 }
@@ -28,7 +38,8 @@ func newCacheCommand(ctx *commandContext) *cobra.Command {
 func newCacheStatsCommand(ctx *commandContext) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stats",
-		Short: "Show rip cache usage",
+		Short: "Show all cached entries with sizes and ages",
+		Long:  "Display detailed information about each cached rip, including size and last update time. Each entry is numbered for use with 'spindle cache remove'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, warn, err := cacheManager(ctx)
 			if warn != "" {
@@ -59,7 +70,7 @@ func printCacheEntries(out io.Writer, entries []ripcache.EntrySummary) {
 	}
 	const stampLayout = "2006-01-02 15:04"
 	fmt.Fprintln(out, "Cached titles:")
-	for _, entry := range entries {
+	for i, entry := range entries {
 		label := strings.TrimSpace(entry.PrimaryFile)
 		if label == "" {
 			label = filepath.Base(entry.Directory)
@@ -78,7 +89,8 @@ func printCacheEntries(out io.Writer, entries []ripcache.EntrySummary) {
 		if !entry.ModifiedAt.IsZero() {
 			updated = entry.ModifiedAt.Local().Format(stampLayout)
 		}
-		fmt.Fprintf(out, "  - %s%s — %s (updated %s)\n",
+		fmt.Fprintf(out, "  %d. %s%s — %s (updated %s)\n",
+			i+1,
 			label,
 			extra,
 			humanBytes(entry.SizeBytes),
@@ -87,10 +99,16 @@ func printCacheEntries(out io.Writer, entries []ripcache.EntrySummary) {
 	}
 }
 
-func newCachePruneCommand(ctx *commandContext) *cobra.Command {
+func newCacheRemoveCommand(ctx *commandContext) *cobra.Command {
 	return &cobra.Command{
-		Use:   "prune",
-		Short: "Prune the rip cache now",
+		Use:   "remove <number>",
+		Short: "Remove a specific cache entry by number",
+		Long: `Remove a specific cache entry by its number from 'spindle cache stats'.
+
+Example:
+  spindle cache stats      # Shows numbered list of cached rips
+  spindle cache remove 2   # Removes entry #2 from the list`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, warn, err := cacheManager(ctx)
 			if warn != "" {
@@ -99,23 +117,63 @@ func newCachePruneCommand(ctx *commandContext) *cobra.Command {
 			if err != nil || manager == nil {
 				return err
 			}
-			before, err := manager.Stats(cmd.Context())
+
+			var entryNum int
+			if _, err := fmt.Sscanf(args[0], "%d", &entryNum); err != nil || entryNum < 1 {
+				return fmt.Errorf("invalid entry number: %s (must be a positive integer)", args[0])
+			}
+
+			stats, err := manager.Stats(cmd.Context())
 			if err != nil {
 				return err
 			}
-			if err := manager.Prune(cmd.Context(), ""); err != nil {
+
+			if entryNum > len(stats.EntrySummaries) {
+				return fmt.Errorf("entry number %d out of range (only %d entries exist)", entryNum, len(stats.EntrySummaries))
+			}
+
+			entry := stats.EntrySummaries[entryNum-1]
+			if err := os.RemoveAll(entry.Directory); err != nil {
+				return fmt.Errorf("remove cache entry: %w", err)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed cache entry %d (%s)\n", entryNum, humanBytes(entry.SizeBytes))
+			return nil
+		},
+	}
+}
+
+func newCacheClearCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "clear",
+		Short: "Remove all cache entries",
+		Long:  "Delete all cached rips to free disk space. The cache will be automatically repopulated as new discs are ripped.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manager, warn, err := cacheManager(ctx)
+			if warn != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), warn)
+			}
+			if err != nil || manager == nil {
 				return err
 			}
-			after, err := manager.Stats(cmd.Context())
+
+			stats, err := manager.Stats(cmd.Context())
 			if err != nil {
 				return err
 			}
-			freed := before.TotalBytes - after.TotalBytes
-			if freed <= 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No cache entries pruned")
+
+			if stats.Entries == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "Cache is already empty")
 				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Pruned %s (now %s / %s)\n", humanBytes(freed), humanBytes(after.TotalBytes), humanBytes(after.MaxBytes))
+
+			for _, entry := range stats.EntrySummaries {
+				if err := os.RemoveAll(entry.Directory); err != nil {
+					return fmt.Errorf("remove cache entry %s: %w", entry.Directory, err)
+				}
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d cache entries (%s freed)\n", stats.Entries, humanBytes(stats.TotalBytes))
 			return nil
 		},
 	}
