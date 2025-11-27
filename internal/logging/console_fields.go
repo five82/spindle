@@ -7,9 +7,10 @@ type infoField struct {
 	value string
 }
 
-const infoAttrLimit = 12
+const infoAttrLimit = 8
 
 var infoHighlightKeys = []string{
+	FieldAlert,
 	"disc_title",
 	"disc_label",
 	"processing_status",
@@ -157,13 +158,26 @@ func isDebugOnlyKey(key string) bool {
 		"has_aacs",
 		"vote_average",
 		"vote_count",
-		"popularity":
+		"popularity",
+		"segments",
+		"segment_count",
+		"token_count",
+		"downloads",
+		"score",
+		"score_reasons",
+		"size_mb",
+		"duration_seconds",
+		"intro_gap_seconds",
+		"tail_delta_seconds":
 		return true
 	}
 	if strings.Contains(key, "correlation") {
 		return true
 	}
 	if strings.HasSuffix(key, "_id") && key != FieldItemID {
+		return true
+	}
+	if strings.HasPrefix(key, "ffprobe.") {
 		return true
 	}
 	if strings.Contains(key, "_path") || strings.Contains(key, "_dir") {
@@ -185,6 +199,8 @@ func shouldHideInfoValue(key, value string) bool {
 
 func displayLabel(key string) string {
 	switch key {
+	case FieldAlert:
+		return "Alert"
 	case FieldItemID:
 		return "Item"
 	case FieldStage:

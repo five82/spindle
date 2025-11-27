@@ -26,6 +26,8 @@ func Uint64(key string, value uint64) Attr { return slog.Uint64(key, value) }
 
 func String(key string, value string) Attr { return slog.String(key, value) }
 
+func Alert(value string) Attr { return slog.String(FieldAlert, value) }
+
 func Group(key string, attrs ...Attr) Attr {
 	args := make([]any, 0, len(attrs))
 	for _, attr := range attrs {

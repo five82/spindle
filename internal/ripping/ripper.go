@@ -85,6 +85,9 @@ func (r *Ripper) SetLogger(logger *slog.Logger) {
 	if r.cache != nil {
 		r.cache.SetLogger(stageLogger)
 	}
+	if r.contentMatcher != nil {
+		r.contentMatcher.SetLogger(logger)
+	}
 }
 
 func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
@@ -283,15 +286,6 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			)
 		}
 		target = path
-		if err := r.refineAudioTracks(ctx, target); err != nil {
-			return services.Wrap(
-				services.ErrExternalTool,
-				"ripping",
-				"refine audio tracks",
-				"Failed to optimize ripped audio tracks with ffmpeg",
-				err,
-			)
-		}
 		logger.Info("makemkv rip finished", logging.String("ripped_file", target))
 	}
 
@@ -385,6 +379,16 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				target = paths[0]
 			}
 		}
+	}
+
+	if err := r.refineAudioTargets(ctx, validationTargets); err != nil {
+		return services.Wrap(
+			services.ErrExternalTool,
+			"ripping",
+			"refine audio tracks",
+			"Failed to optimize ripped audio tracks with ffmpeg",
+			err,
+		)
 	}
 	if specDirty {
 		if encoded, encodeErr := env.Encode(); encodeErr == nil {
@@ -498,6 +502,28 @@ func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {
 			fields = append(fields, logging.Any("removed_audio_indices", selection.RemovedIndices))
 		}
 		logger.Info("refined ripped audio tracks", fields...)
+	}
+	return nil
+}
+
+func (r *Ripper) refineAudioTargets(ctx context.Context, paths []string) error {
+	unique := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		clean := strings.TrimSpace(path)
+		if clean == "" {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		unique = append(unique, clean)
+	}
+	for _, path := range unique {
+		if err := r.refineAudioTracks(ctx, path); err != nil {
+			return err
+		}
 	}
 	return nil
 }

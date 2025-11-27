@@ -97,16 +97,8 @@ func WithLanguages(langs []string) Option {
 
 // NewMatcher constructs a content identification matcher bound to the supplied configuration.
 func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matcher {
-	contentLogger := logger
-	if contentLogger != nil {
-		contentLogger = contentLogger.With(logging.String("component", "contentid"))
-	} else {
-		contentLogger = logging.NewNop().With(logging.String("component", "contentid"))
-	}
-	m := &Matcher{
-		cfg:    cfg,
-		logger: contentLogger,
-	}
+	m := &Matcher{cfg: cfg}
+	m.SetLogger(logger)
 	for _, opt := range opts {
 		opt(m)
 	}
@@ -118,7 +110,7 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 		}
 	}
 	if m.subs == nil && cfg != nil {
-		m.subs = subtitles.NewService(cfg, contentLogger)
+		m.subs = subtitles.NewService(cfg, m.logger)
 	}
 	if m.openSubs == nil && cfg != nil && cfg.OpenSubtitlesEnabled {
 		client, err := opensubtitles.New(opensubtitles.Config{
@@ -127,7 +119,7 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 			UserToken: cfg.OpenSubtitlesUserToken,
 		})
 		if err != nil {
-			contentLogger.Warn("opensubtitles client unavailable", logging.Error(err))
+			m.logger.Warn("opensubtitles client unavailable", logging.Error(err))
 		} else {
 			m.openSubs = client
 		}
@@ -135,9 +127,9 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 	if m.cache == nil && cfg != nil {
 		dir := strings.TrimSpace(cfg.OpenSubtitlesCacheDir)
 		if dir != "" {
-			cache, err := opensubtitles.NewCache(dir, contentLogger)
+			cache, err := opensubtitles.NewCache(dir, m.logger)
 			if err != nil {
-				contentLogger.Warn("opensubtitles cache unavailable", logging.Error(err))
+				m.logger.Warn("opensubtitles cache unavailable", logging.Error(err))
 			} else {
 				m.cache = cache
 			}
@@ -146,12 +138,28 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 	if m.tmdb == nil && cfg != nil {
 		client, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
 		if err != nil {
-			contentLogger.Warn("tmdb client unavailable", logging.Error(err))
+			m.logger.Warn("tmdb client unavailable", logging.Error(err))
 		} else {
 			m.tmdb = client
 		}
 	}
 	return m
+}
+
+// SetLogger swaps the matcher logger and propagates the scoped logger to dependencies.
+func (m *Matcher) SetLogger(logger *slog.Logger) {
+	if m == nil {
+		return
+	}
+	scope := logger
+	if scope == nil {
+		scope = logging.NewNop()
+	}
+	scope = scope.With(logging.String("component", "contentid"))
+	m.logger = scope
+	if setter, ok := m.subs.(interface{ SetLogger(*slog.Logger) }); ok {
+		setter.SetLogger(logger)
+	}
 }
 
 // Match analyzes ripped episode assets with WhisperX, compares them to OpenSubtitles,
@@ -205,6 +213,14 @@ func (m *Matcher) Match(ctx context.Context, item *queue.Item, env *ripspec.Enve
 	m.attachMatchAttributes(env, matches)
 	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
+	if m.logger != nil {
+		m.logger.Info("content id alignment complete",
+			logging.Int("episodes_available", len(env.Episodes)),
+			logging.Int("rip_transcripts", len(ripPrints)),
+			logging.Int("reference_subtitles", len(refPrints)),
+			logging.Int("matched_episodes", len(matches)),
+		)
+	}
 	return true, nil
 }
 
@@ -328,7 +344,7 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 			Path:       result.SubtitlePath,
 			Vector:     fp,
 		})
-		m.logger.Info("content id whisperx transcript ready",
+		m.logger.Debug("content id whisperx transcript ready",
 			logging.String("episode_key", episode.Key),
 			logging.String("subtitle_path", result.SubtitlePath),
 			logging.Int("token_count", len(fp.tokens)),
@@ -395,7 +411,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			selected = variant
 			foundMatch = true
 			if attempt > 0 && m.logger != nil {
-				m.logger.Info("opensubtitles fallback search succeeded",
+				m.logger.Debug("opensubtitles fallback search succeeded",
 					logging.Int("season", season.SeasonNumber),
 					logging.Int("episode", num),
 					logging.Int("attempt", attempt+1),
@@ -419,7 +435,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 				payload = cached.DownloadResult()
 				cachePath = cached.Path
 				cacheHit = true
-				m.logger.Info("opensubtitles cache hit",
+				m.logger.Debug("opensubtitles cache hit",
 					logging.Int("season", season.SeasonNumber),
 					logging.Int("episode", episodeData.EpisodeNumber),
 					logging.Int64("file_id", candidate.FileID),
@@ -476,7 +492,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			Language:      payload.Language,
 			CachePath:     cachePath,
 		})
-		m.logger.Info("opensubtitles reference downloaded",
+		m.logger.Debug("opensubtitles reference downloaded",
 			logging.Int("season", episodeData.SeasonNumber),
 			logging.Int("episode", episodeData.EpisodeNumber),
 			logging.String("title", episodeData.Name),
@@ -612,7 +628,7 @@ func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails
 			title.EpisodeTitle = strings.TrimSpace(target.Name)
 			title.EpisodeAirDate = strings.TrimSpace(target.AirDate)
 		}
-		m.logger.Info("content id episode matched",
+		m.logger.Debug("content id episode matched",
 			logging.String("episode_key", match.EpisodeKey),
 			logging.Int("title_id", match.TitleID),
 			logging.Int("matched_episode", target.EpisodeNumber),

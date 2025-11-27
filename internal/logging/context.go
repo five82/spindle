@@ -14,6 +14,8 @@ const (
 	FieldStage = "stage"
 	// FieldCorrelationID is the standardized structured logging key for request correlation identifiers.
 	FieldCorrelationID = "correlation_id"
+	// FieldAlert flags warnings or anomalies that should stand out in structured logs.
+	FieldAlert = "alert"
 )
 
 // ContextFields extracts standardized slog attributes from the provided context.

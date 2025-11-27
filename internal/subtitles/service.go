@@ -249,7 +249,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		parentID := req.Context.ParentID()
 		episodeID := req.Context.EpisodeID()
 		if s.logger != nil {
-			s.logger.Info("attempting opensubtitles fetch",
+			s.logger.Debug("attempting opensubtitles fetch",
 				logging.String("title", title),
 				logging.String("media_type", strings.TrimSpace(req.Context.MediaType)),
 				logging.Int64("tmdb_id", req.Context.TMDBID),
@@ -270,6 +270,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 						logging.String("title", title),
 						logging.Int("season", req.Context.Season),
 						logging.Int("episode", req.Context.Episode),
+						logging.Alert("review"),
 					)
 				}
 				return GenerateResult{}, err
@@ -283,12 +284,13 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 					logging.Int64("episode_tmdb_id", episodeID),
 					logging.Int("season", req.Context.Season),
 					logging.Int("episode", req.Context.Episode),
+					logging.Alert("subtitle_fallback"),
 				)
 			}
 		} else if ok {
 			result.Source = "opensubtitles"
 			if s.logger != nil {
-				s.logger.Info("using opensubtitles subtitles",
+				s.logger.Debug("using opensubtitles subtitles",
 					logging.String("subtitle_path", result.SubtitlePath),
 					logging.Int("segment_count", result.SegmentCount),
 					logging.String("subtitle_source", result.Source),
@@ -296,7 +298,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			}
 			return result, nil
 		} else if s.logger != nil {
-			s.logger.Info("opensubtitles match not found",
+			s.logger.Warn("opensubtitles match not found, falling back to whisperx",
 				logging.String("title", title),
 				logging.Int64("tmdb_id", req.Context.TMDBID),
 				logging.Int64("parent_tmdb_id", parentID),
@@ -304,6 +306,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 				logging.Int("season", req.Context.Season),
 				logging.Int("episode", req.Context.Episode),
 				logging.String("languages", strings.Join(req.Languages, ",")),
+				logging.Alert("subtitle_fallback"),
 			)
 		}
 	} else if s.logger != nil {
@@ -318,7 +321,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 				reason = "opensubtitles_api_key not set"
 			}
 		}
-		s.logger.Info("opensubtitles download skipped", logging.String("reason", reason))
+		s.logger.Debug("opensubtitles download skipped", logging.String("reason", reason))
 	}
 
 	if req.AllowTranscriptCacheRead {
@@ -355,7 +358,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 	}
 
 	if s.logger != nil {
-		s.logger.Info("subtitle generation complete",
+		s.logger.Debug("subtitle generation complete",
 			logging.String("output", plan.outputFile),
 			logging.Int("segments", segmentCount),
 			logging.Float64("duration_seconds", finalDuration),
@@ -441,7 +444,7 @@ func (s *Service) extractPrimaryAudio(ctx context.Context, source string, audioI
 	}
 	start := time.Now()
 	if s.logger != nil {
-		s.logger.Info("extracting primary audio",
+		s.logger.Debug("extracting primary audio",
 			logging.String("source", source),
 			logging.Int("audio_index", audioIndex),
 			logging.String("destination", destination),
@@ -466,13 +469,13 @@ func (s *Service) extractPrimaryAudio(ctx context.Context, source string, audioI
 	}
 	if s.logger != nil {
 		if info, err := os.Stat(destination); err == nil {
-			s.logger.Info("primary audio extracted",
+			s.logger.Debug("primary audio extracted",
 				logging.String("destination", destination),
 				logging.Float64("size_mb", float64(info.Size())/1_048_576),
 				logging.Duration("elapsed", time.Since(start)),
 			)
 		} else {
-			s.logger.Info("primary audio extracted",
+			s.logger.Debug("primary audio extracted",
 				logging.String("destination", destination),
 				logging.Duration("elapsed", time.Since(start)),
 			)
@@ -581,7 +584,7 @@ func (s *Service) tryLoadTranscriptFromCache(plan *generationPlan, req GenerateR
 		}
 	}
 	if s.logger != nil {
-		s.logger.Info("whisperx transcript cache hit",
+		s.logger.Debug("whisperx transcript cache hit",
 			logging.String("cache_key", req.TranscriptKey),
 			logging.Int("segments", segmentCount),
 			logging.String("language", strings.TrimSpace(meta.Language)),
@@ -626,7 +629,7 @@ func (s *Service) tryStoreTranscriptInCache(req GenerateRequest, plan *generatio
 		return
 	}
 	if s.logger != nil {
-		s.logger.Info("whisperx transcript cached",
+		s.logger.Debug("whisperx transcript cached",
 			logging.String("cache_key", req.TranscriptKey),
 			logging.Int("segments", segmentCount),
 		)

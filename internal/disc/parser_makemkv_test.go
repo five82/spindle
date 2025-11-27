@@ -76,3 +76,12 @@ SINFO:0,2,30,4354,"Director Commentary"
 		t.Fatalf("unexpected commentary title: %q", commentary.Name)
 	}
 }
+
+func TestExtractFingerprintAllowsDiscLabels(t *testing.T) {
+	lines := []string{
+		`CINFO:32,0,"SOUTHPARK5_DISC2"`,
+	}
+	if fp := extractFingerprint(lines); fp != "SOUTHPARK5_DISC2" {
+		t.Fatalf("expected label fingerprint, got %q", fp)
+	}
+}

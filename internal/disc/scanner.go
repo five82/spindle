@@ -126,6 +126,9 @@ func (s *Scanner) Scan(ctx context.Context, device string) (*ScanResult, error) 
 		if len(result.Titles) > 0 && info.DiscName != "" && needsBDInfo {
 			result.Titles[0].Name = info.DiscName
 		}
+		if strings.TrimSpace(result.Fingerprint) == "" && strings.TrimSpace(info.DiscID) != "" {
+			result.Fingerprint = strings.ToUpper(strings.TrimSpace(info.DiscID))
+		}
 	}
 
 	return result, nil

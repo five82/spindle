@@ -32,9 +32,8 @@ func extractFingerprint(lines []string) string {
 			continue
 		}
 		if strings.Contains(strings.ToLower(trimmed), "fingerprint") {
-			match := fingerprintPattern.FindString(trimmed)
-			if match != "" {
-				return strings.ToUpper(match)
+			if fp := findFingerprintCandidate(trimmed); fp != "" {
+				return fp
 			}
 		}
 	}
@@ -54,9 +53,8 @@ func extractFingerprint(lines []string) string {
 		}
 		value := strings.TrimSpace(parts[2])
 		value = strings.Trim(value, "\"")
-		match := fingerprintPattern.FindString(value)
-		if match != "" {
-			return strings.ToUpper(match)
+		if fp := findFingerprintCandidate(value); fp != "" {
+			return fp
 		}
 	}
 
@@ -65,6 +63,29 @@ func extractFingerprint(lines []string) string {
 		return strings.ToUpper(match)
 	}
 	return ""
+}
+
+func findFingerprintCandidate(input string) string {
+	if input == "" {
+		return ""
+	}
+	if match := fingerprintPattern.FindString(input); match != "" {
+		return strings.ToUpper(match)
+	}
+	clean := strings.TrimSpace(input)
+	if clean == "" {
+		return ""
+	}
+	if len(clean) < 8 {
+		return ""
+	}
+	for _, r := range clean {
+		allowed := (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || r == '_' || r == '-'
+		if !allowed {
+			return ""
+		}
+	}
+	return strings.ToUpper(clean)
 }
 
 func extractTitles(lines []string) []Title {

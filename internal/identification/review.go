@@ -33,11 +33,12 @@ func (i *Identifier) scheduleReview(ctx context.Context, item *queue.Item, messa
 }
 
 func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message string, immediate bool) {
-	logger := logging.WithContext(ctx, i.logger)
-	logger.Info(
+	logger := logging.WithContext(ctx, i.logger).With(logging.Int64(logging.FieldItemID, item.ID))
+	logger.Warn(
 		"flagging queue item for review",
 		logging.String("reason", message),
 		logging.Bool("immediate", immediate),
+		logging.Alert("review"),
 	)
 	item.NeedsReview = true
 	item.ReviewReason = message

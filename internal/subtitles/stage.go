@@ -92,6 +92,11 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 
 	baseCtx := BuildSubtitleContext(item)
 	step := 90.0 / float64(len(targets))
+	var (
+		openSubsCount int
+		aiCount       int
+		totalSegments int
+	)
 	for idx, target := range targets {
 		message := fmt.Sprintf("Generating subtitles %d/%d – %s", idx+1, len(targets), filepath.Base(target.SourcePath))
 		if err := s.updateProgress(ctx, item, message, 5.0+step*float64(idx)); err != nil {
@@ -142,6 +147,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 							logging.Int64("item_id", item.ID),
 							logging.String("source", target.SourcePath),
 							logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
+							logging.Alert("review"),
 						)
 					}
 					item.NeedsReview = true
@@ -174,8 +180,14 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				return nil
 			}
 		}
+		if strings.EqualFold(result.Source, "opensubtitles") {
+			openSubsCount++
+		} else {
+			aiCount++
+		}
+		totalSegments += result.SegmentCount
 		if s.logger != nil {
-			s.logger.Info("subtitle generation complete",
+			s.logger.Debug("subtitle generation complete",
 				logging.String("source", target.SourcePath),
 				logging.String("subtitle", result.SubtitlePath),
 				logging.Int("segments", result.SegmentCount),
@@ -188,6 +200,38 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	item.ErrorMessage = ""
 	if err := s.store.UpdateProgress(ctx, item); err != nil {
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
+	}
+	fallbackEpisodes := len(targets) - openSubsCount
+	openSubsExpected := s.service != nil && s.service.shouldUseOpenSubtitles()
+	alertValue := ""
+	if item.NeedsReview {
+		alertValue = "review"
+	} else if fallbackEpisodes > 0 && openSubsExpected {
+		alertValue = "subtitle_fallback"
+	}
+	if s.logger != nil {
+		if alertValue != "" {
+			s.logger.Warn("subtitle stage summary",
+				logging.Int("episodes", len(targets)),
+				logging.Int("opensubtitles", openSubsCount),
+				logging.Int("whisperx_fallback", aiCount),
+				logging.Int("segments", totalSegments),
+				logging.Bool("needs_review", item.NeedsReview),
+				logging.Int("opensubtitles_missing", fallbackEpisodes),
+				logging.Bool("opensubtitles_expected", openSubsExpected),
+				logging.Alert(alertValue),
+			)
+		} else {
+			s.logger.Info("subtitle stage summary",
+				logging.Int("episodes", len(targets)),
+				logging.Int("opensubtitles", openSubsCount),
+				logging.Int("whisperx_fallback", aiCount),
+				logging.Int("segments", totalSegments),
+				logging.Bool("needs_review", item.NeedsReview),
+				logging.Int("opensubtitles_missing", fallbackEpisodes),
+				logging.Bool("opensubtitles_expected", openSubsExpected),
+			)
+		}
 	}
 	return nil
 }

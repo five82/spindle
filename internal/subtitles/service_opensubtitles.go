@@ -179,7 +179,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		return GenerateResult{}, false, searchErr
 	}
 	if s.logger != nil {
-		s.logger.Info("opensubtitles search completed",
+		s.logger.Debug("opensubtitles search completed",
 			logging.Int("results", len(resp.Subtitles)),
 			logging.Int("total_reported", resp.Total),
 		)
@@ -187,7 +187,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 	scored := rankSubtitleCandidates(resp.Subtitles, req.Languages, req.Context)
 	if len(scored) == 0 {
 		if s.logger != nil {
-			s.logger.Info("opensubtitles no candidate matched",
+			s.logger.Debug("opensubtitles no candidate matched",
 				logging.Int("results", len(resp.Subtitles)),
 				logging.String("languages", strings.Join(req.Languages, ",")),
 			)
@@ -201,7 +201,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 			limit = 5
 		}
 		for idx := 0; idx < limit; idx++ {
-			s.logger.Info("opensubtitles candidate ranked",
+			s.logger.Debug("opensubtitles candidate ranked",
 				logging.Int("rank", idx+1),
 				logging.String("language", scored[idx].subtitle.Language),
 				logging.Int("downloads", scored[idx].subtitle.Downloads),
@@ -231,7 +231,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 			if s.logger != nil {
 				isSoft := errors.As(err, &mismatch)
 				if isSoft {
-					s.logger.Info("opensubtitles candidate failed (soft)",
+					s.logger.Debug("opensubtitles candidate failed (soft)",
 						logging.Error(err),
 						logging.Int("rank", idx+1),
 						logging.String("language", candidate.subtitle.Language),
@@ -253,7 +253,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 			continue
 		}
 		if s.logger != nil {
-			s.logger.Info("opensubtitles candidate selected",
+			s.logger.Debug("opensubtitles candidate selected",
 				logging.Int("rank", idx+1),
 				logging.String("release", strings.TrimSpace(candidate.subtitle.Release)),
 				logging.String("language", candidate.subtitle.Language),
@@ -396,7 +396,7 @@ func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitle
 
 	for idx, variant := range unique {
 		if s.logger != nil {
-			s.logger.Info("opensubtitles search variant",
+			s.logger.Debug("opensubtitles search variant",
 				logging.Int("attempt", idx+1),
 				logging.String("query", variant.Query),
 				logging.String("year", variant.Year),
@@ -435,7 +435,7 @@ func (s *Service) fetchOpenSubtitlesPayload(ctx context.Context, req GenerateReq
 			}
 		} else if ok {
 			if s.logger != nil {
-				s.logger.Info("opensubtitles cache hit",
+				s.logger.Debug("opensubtitles cache hit",
 					logging.Int64("file_id", candidate.FileID),
 					logging.String("language", cached.Entry.Language),
 				)
@@ -482,7 +482,7 @@ func (s *Service) searchEpisodeWithVariants(ctx context.Context, base opensubtit
 	var resp opensubtitles.SearchResponse
 	for attempt, variant := range variants {
 		if s.logger != nil && attempt == 0 {
-			s.logger.Info("opensubtitles search variant",
+			s.logger.Debug("opensubtitles search variant",
 				logging.Int("season", season),
 				logging.Int("episode", episode),
 				logging.String("query", strings.TrimSpace(variant.Query)),
@@ -506,7 +506,7 @@ func (s *Service) searchEpisodeWithVariants(ctx context.Context, base opensubtit
 			continue
 		}
 		if attempt > 0 && s.logger != nil {
-			s.logger.Info("opensubtitles fallback search succeeded",
+			s.logger.Debug("opensubtitles fallback search succeeded",
 				logging.Int("season", season),
 				logging.Int("episode", episode),
 				logging.Int("attempt", attempt+1),
@@ -653,7 +653,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 		return GenerateResult{}, fmt.Errorf("write cleaned subtitles: %w", err)
 	}
 	if s.logger != nil {
-		s.logger.Info("opensubtitles subtitles cleaned",
+		s.logger.Debug("opensubtitles subtitles cleaned",
 			logging.String("cleaned_path", cleanedPath),
 			logging.Int("removed_cues", stats.RemovedCues),
 		)
@@ -670,7 +670,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 	} else if syncedPath != "" {
 		inputPath = syncedPath
 		if s.logger != nil {
-			s.logger.Info("ffsubsync alignment complete",
+			s.logger.Debug("ffsubsync alignment complete",
 				logging.String("output_path", syncedPath),
 			)
 		}
@@ -681,7 +681,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 		alignLanguage = plan.language
 	}
 	if s.logger != nil {
-		s.logger.Info("opensubtitles aligning subtitles",
+		s.logger.Debug("opensubtitles aligning subtitles",
 			logging.String("language", alignLanguage),
 			logging.Bool("cuda_enabled", plan.cudaEnabled),
 		)
@@ -690,7 +690,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 		return GenerateResult{}, err
 	}
 	if s.logger != nil {
-		s.logger.Info("opensubtitles alignment complete",
+		s.logger.Debug("opensubtitles alignment complete",
 			logging.String("output_path", plan.outputFile),
 		)
 	}
@@ -716,7 +716,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 			tailDelta := plan.totalSeconds - last
 			if introGap >= subtitleIntroMinimumSeconds && tailDelta > 0 && tailDelta <= subtitleIntroAllowanceSeconds {
 				if s.logger != nil {
-					s.logger.Info("opensubtitles accepted with intro gap",
+					s.logger.Debug("opensubtitles accepted with intro gap",
 						logging.Float64("intro_gap_seconds", introGap),
 						logging.Float64("tail_delta_seconds", tailDelta),
 						logging.String("release", candidate.Release),
@@ -728,7 +728,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 	}
 	if mismatch {
 		if s.logger != nil {
-			s.logger.Info("opensubtitles candidate soft-rejected (duration mismatch)",
+			s.logger.Debug("opensubtitles candidate soft-rejected (duration mismatch)",
 				logging.Float64("delta_seconds", delta),
 				logging.String("release", candidate.Release),
 			)
@@ -741,7 +741,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 	}
 
 	if s.logger != nil {
-		s.logger.Info("open subtitles download complete",
+		s.logger.Debug("open subtitles download complete",
 			logging.String("release", strings.TrimSpace(candidate.Release)),
 			logging.String("language", candidate.Language),
 			logging.Int("segments", segmentCount),

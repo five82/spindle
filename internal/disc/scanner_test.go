@@ -54,6 +54,34 @@ func TestScannerAllowsMissingFingerprint(t *testing.T) {
 	}
 }
 
+func TestScannerFallsBackToBDInfoFingerprint(t *testing.T) {
+	makemkvOutput := `MSG:1005,0,1,"start"
+TINFO:0,2,0,"Feature"
+`
+	bdInfoOutput := `Disc ID             : DEADBEEF0123456789ABCDEF0123456789ABCDEF
+Volume Identifier   : SAMPLE_DISC
+BluRay detected     : yes
+AACS detected       : yes
+`
+	executor := &mockExecutor{
+		responses: map[string][]byte{
+			"makemkvcon -r --cache=1 info dev:/dev/sr0 --robot": []byte(makemkvOutput),
+			"bd_info /dev/sr0": []byte(bdInfoOutput),
+		},
+	}
+
+	scanner := disc.NewScannerWithExecutor("makemkvcon", executor)
+	result, err := scanner.Scan(context.Background(), "/dev/sr0")
+	if err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+
+	const expected = "DEADBEEF0123456789ABCDEF0123456789ABCDEF"
+	if result.Fingerprint != expected {
+		t.Fatalf("expected fallback fingerprint %s, got %q", expected, result.Fingerprint)
+	}
+}
+
 func TestScannerNeedsBinary(t *testing.T) {
 	scanner := disc.NewScannerWithExecutor("", stubExec{})
 	if _, err := scanner.Scan(context.Background(), "disc:0"); err == nil {

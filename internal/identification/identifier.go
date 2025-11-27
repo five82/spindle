@@ -165,6 +165,13 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	scannerFingerprint := ""
 	if scanResult != nil {
 		scannerFingerprint = strings.TrimSpace(scanResult.Fingerprint)
+		if scannerFingerprint == "" && scanResult.BDInfo != nil {
+			if discID := strings.TrimSpace(scanResult.BDInfo.DiscID); discID != "" {
+				scannerFingerprint = strings.ToUpper(discID)
+				scanResult.Fingerprint = scannerFingerprint
+				logger.Info("using bd_info disc id as fingerprint", logging.String("fingerprint", scannerFingerprint))
+			}
+		}
 	}
 	if scannerFingerprint != "" {
 		logger.Info("disc fingerprint captured", logging.String("fingerprint", scannerFingerprint))
@@ -589,7 +596,13 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	ripFingerprint := strings.TrimSpace(scanResult.Fingerprint)
+	ripFingerprint := ""
+	if scanResult != nil {
+		ripFingerprint = strings.TrimSpace(scanResult.Fingerprint)
+		if ripFingerprint == "" && scanResult.BDInfo != nil {
+			ripFingerprint = strings.ToUpper(strings.TrimSpace(scanResult.BDInfo.DiscID))
+		}
+	}
 	if ripFingerprint == "" {
 		fallback := strings.TrimSpace(item.DiscFingerprint)
 		if fallback != "" {
