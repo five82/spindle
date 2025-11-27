@@ -414,7 +414,7 @@ func (m *Manager) processItem(ctx context.Context, lane *laneState, laneLogger *
 	}
 
 	requestID := uuid.NewString()
-	stageCtx := withStageContext(ctx, stage.name, item, requestID)
+	stageCtx := withStageContext(ctx, lane, stage.name, item, requestID)
 	stageLogger := m.stageLoggerForLane(stageCtx, lane, laneLogger, item)
 	if aware, ok := stage.handler.(loggerAware); ok {
 		aware.SetLogger(stageLogger)
@@ -767,7 +767,7 @@ func (m *Manager) setItemFailureState(item *queue.Item, status queue.Status, mes
 	item.LastHeartbeat = nil
 }
 
-func withStageContext(ctx context.Context, stageName string, item *queue.Item, requestID string) context.Context {
+func withStageContext(ctx context.Context, lane *laneState, stageName string, item *queue.Item, requestID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -776,6 +776,13 @@ func withStageContext(ctx context.Context, stageName string, item *queue.Item, r
 	}
 	if stageName != "" {
 		ctx = services.WithStage(ctx, stageName)
+	}
+	if lane != nil {
+		laneLabel := strings.TrimSpace(lane.name)
+		if laneLabel == "" {
+			laneLabel = string(lane.kind)
+		}
+		ctx = services.WithLane(ctx, laneLabel)
 	}
 	if requestID != "" {
 		ctx = services.WithRequestID(ctx, requestID)

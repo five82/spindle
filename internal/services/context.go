@@ -7,6 +7,7 @@ type contextKey string
 const (
 	itemIDKey    contextKey = "item_id"
 	stageKey     contextKey = "stage"
+	laneKey      contextKey = "lane"
 	requestIDKey contextKey = "request_id"
 )
 
@@ -42,6 +43,23 @@ func WithStage(ctx context.Context, stage string) context.Context {
 // StageFromContext returns the stage name if present.
 func StageFromContext(ctx context.Context) (string, bool) {
 	v := ctx.Value(stageKey)
+	if str, ok := v.(string); ok && str != "" {
+		return str, true
+	}
+	return "", false
+}
+
+// WithLane annotates context with the workflow lane name (foreground/background).
+func WithLane(ctx context.Context, lane string) context.Context {
+	if lane == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, laneKey, lane)
+}
+
+// LaneFromContext returns the lane name if present.
+func LaneFromContext(ctx context.Context) (string, bool) {
+	v := ctx.Value(laneKey)
 	if str, ok := v.(string); ok && str != "" {
 		return str, true
 	}

@@ -132,7 +132,7 @@ func selectInfoFields(attrs []kv) ([]infoField, int) {
 
 func skipInfoKey(key string) bool {
 	switch key {
-	case "", FieldItemID, FieldStage, "component":
+	case "", FieldItemID, FieldStage, FieldLane, "component":
 		return true
 	default:
 		return false

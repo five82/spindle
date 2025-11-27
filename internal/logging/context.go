@@ -12,6 +12,8 @@ const (
 	FieldItemID = "item_id"
 	// FieldStage is the standardized structured logging key for workflow stage names.
 	FieldStage = "stage"
+	// FieldLane is the standardized structured logging key for workflow lane names.
+	FieldLane = "lane"
 	// FieldCorrelationID is the standardized structured logging key for request correlation identifiers.
 	FieldCorrelationID = "correlation_id"
 	// FieldAlert flags warnings or anomalies that should stand out in structured logs.
@@ -29,6 +31,9 @@ func ContextFields(ctx context.Context) []slog.Attr {
 	}
 	if stage, ok := services.StageFromContext(ctx); ok {
 		fields = append(fields, slog.String(FieldStage, stage))
+	}
+	if lane, ok := services.LaneFromContext(ctx); ok {
+		fields = append(fields, slog.String(FieldLane, lane))
 	}
 	if rid, ok := services.RequestIDFromContext(ctx); ok {
 		fields = append(fields, slog.String(FieldCorrelationID, rid))

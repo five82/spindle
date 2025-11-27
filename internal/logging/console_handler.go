@@ -53,6 +53,7 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 	var component string
 	var itemID string
 	var stage string
+	var lane string
 	filtered := make([]kv, 0, len(kvs))
 	for _, kv := range kvs {
 		if kv.key == "component" {
@@ -66,6 +67,9 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 		}
 		if kv.key == FieldStage && stage == "" {
 			stage = attrString(kv.value)
+		}
+		if kv.key == FieldLane && lane == "" {
+			lane = attrString(kv.value)
 		}
 		filtered = append(filtered, kv)
 	}
@@ -81,16 +85,16 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if record.Level < slog.LevelInfo {
-		h.writeDebug(&buf, timestamp, record.Level, component, itemID, stage, message, record.Source(), allAttrs)
+		h.writeDebug(&buf, timestamp, record.Level, component, lane, itemID, stage, message, record.Source(), allAttrs)
 	} else {
-		h.writeInfo(&buf, timestamp, record.Level, component, itemID, stage, message, record.Source(), filtered)
+		h.writeInfo(&buf, timestamp, record.Level, component, lane, itemID, stage, message, record.Source(), filtered)
 	}
 	_, err := h.writer.Write(buf.Bytes())
 	return err
 }
 
-func (h *prettyHandler) writeInfo(buf *bytes.Buffer, ts time.Time, level slog.Level, component, itemID, stage, message string, src *slog.Source, attrs []kv) {
-	writeLogHeader(buf, ts, level, component, itemID, stage, message, h.addSource, src)
+func (h *prettyHandler) writeInfo(buf *bytes.Buffer, ts time.Time, level slog.Level, component, lane, itemID, stage, message string, src *slog.Source, attrs []kv) {
+	writeLogHeader(buf, ts, level, component, lane, itemID, stage, message, h.addSource, src)
 	fields, hidden := selectInfoFields(attrs)
 	summaryKey := infoSummaryKey(component, itemID, stage, attrs)
 	fields, _ = h.filterRepeatedInfo(summaryKey, fields, hidden, level)
@@ -108,8 +112,8 @@ func (h *prettyHandler) writeInfo(buf *bytes.Buffer, ts time.Time, level slog.Le
 	}
 }
 
-func (h *prettyHandler) writeDebug(buf *bytes.Buffer, ts time.Time, level slog.Level, component, itemID, stage, message string, src *slog.Source, attrs []kv) {
-	writeLogHeader(buf, ts, level, component, itemID, stage, message, h.addSource, src)
+func (h *prettyHandler) writeDebug(buf *bytes.Buffer, ts time.Time, level slog.Level, component, lane, itemID, stage, message string, src *slog.Source, attrs []kv) {
+	writeLogHeader(buf, ts, level, component, lane, itemID, stage, message, h.addSource, src)
 	if len(attrs) == 0 {
 		buf.WriteByte('\n')
 		return
@@ -127,7 +131,7 @@ func (h *prettyHandler) writeDebug(buf *bytes.Buffer, ts time.Time, level slog.L
 	}
 }
 
-func writeLogHeader(buf *bytes.Buffer, ts time.Time, level slog.Level, component, itemID, stage, message string, addSource bool, src *slog.Source) {
+func writeLogHeader(buf *bytes.Buffer, ts time.Time, level slog.Level, component, lane, itemID, stage, message string, addSource bool, src *slog.Source) {
 	buf.WriteString(formatTimestamp(ts))
 	buf.WriteByte(' ')
 	buf.WriteString(levelLabel(level))
@@ -136,7 +140,7 @@ func writeLogHeader(buf *bytes.Buffer, ts time.Time, level slog.Level, component
 		buf.WriteString(component)
 		buf.WriteByte(']')
 	}
-	if subject := composeSubject(itemID, stage); subject != "" {
+	if subject := composeSubject(lane, itemID, stage); subject != "" {
 		buf.WriteByte(' ')
 		buf.WriteString(subject)
 	}
@@ -153,19 +157,29 @@ func writeLogHeader(buf *bytes.Buffer, ts time.Time, level slog.Level, component
 	}
 }
 
-func composeSubject(itemID, stage string) string {
+func composeSubject(lane, itemID, stage string) string {
+	lane = strings.TrimSpace(lane)
 	itemID = strings.TrimSpace(itemID)
 	stage = strings.TrimSpace(stage)
-	if itemID == "" && stage == "" {
-		return ""
+	parts := make([]string, 0, 3)
+	if lane != "" {
+		var formattedLane string
+		if len(lane) > 1 {
+			formattedLane = strings.ToUpper(lane[:1]) + strings.ToLower(lane[1:])
+		} else {
+			formattedLane = strings.ToUpper(lane)
+		}
+		parts = append(parts, formattedLane)
 	}
-	if itemID != "" && stage != "" {
-		return "Item #" + itemID + " (" + stage + ")"
+	switch {
+	case itemID != "" && stage != "":
+		parts = append(parts, "Item #"+itemID+" ("+stage+")")
+	case itemID != "":
+		parts = append(parts, "Item #"+itemID)
+	case stage != "":
+		parts = append(parts, stage)
 	}
-	if itemID != "" {
-		return "Item #" + itemID
-	}
-	return stage
+	return strings.Join(parts, " · ")
 }
 
 func (h *prettyHandler) filterRepeatedInfo(key string, fields []infoField, hidden int, level slog.Level) ([]infoField, int) {
