@@ -184,7 +184,7 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 		logger.Info("preset decider provided no profile", logging.Args(attrs...)...)
 		return decision
 	}
-	if decision.SuggestedProfile != "clean" && decision.SuggestedProfile != "grain" {
+	if decision.SuggestedProfile != "clean" && decision.SuggestedProfile != "grain" && decision.SuggestedProfile != "default" {
 		logger.Info("preset decider returned unsupported profile", logging.Args(append(attrs, logging.String("note", "unsupported profile"))...)...)
 		return decision
 	}
