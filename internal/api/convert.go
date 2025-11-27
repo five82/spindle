@@ -21,11 +21,12 @@ func FromQueueItem(item *queue.Item) QueueItem {
 	}
 
 	dto := QueueItem{
-		ID:             item.ID,
-		DiscTitle:      item.DiscTitle,
-		SourcePath:     item.SourcePath,
-		Status:         string(item.Status),
-		ProcessingLane: string(queue.LaneForItem(item)),
+		ID:                  item.ID,
+		DiscTitle:           item.DiscTitle,
+		SourcePath:          item.SourcePath,
+		Status:              string(item.Status),
+		ProcessingLane:      string(queue.LaneForItem(item)),
+		DraptoPresetProfile: strings.TrimSpace(item.DraptoPresetProfile),
 		Progress: QueueProgress{
 			Stage:   item.ProgressStage,
 			Percent: item.ProgressPercent,

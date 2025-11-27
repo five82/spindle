@@ -138,6 +138,7 @@ Returns metadata for a single queue entry.
 | `workflow.stageHealth` | Stage readiness results from `StageHandler.HealthCheck`, including the `episode-identifier` handler when enabled. Useful for dependency dashboards. |
 | `items[].status` | Current lifecycle state from `internal/queue.Status` (`pending → identifying → identified → ripping → ripped → episode_identifying → episode_identified → encoding → encoded → subtitling → subtitled → organizing → completed`, plus `failed`/`review`). |
 | `items[].progress` | Stage name, percent 0-100, and last message recorded for the item. Episode identification surfaces as "Episode identification". |
+| `items[].draptoPresetProfile` | Drapto preset applied during encoding: `clean`, `grain`, or omitted/`default` when Drapto runs with its stock settings. |
 | `items[].metadata` | Raw TMDB/metadata JSON captured during identification. Omitted when empty. |
 | `items[].episodes[]` | One entry per planned episode on a TV disc. Includes season/episode numbers once verified, current stage (`planned`, `ripped`, `encoded`, `final`), runtime, artifact paths, and subtitle match info. Empty for movie discs. |
 | `items[].episodeTotals` | Aggregate counts (`planned`, `ripped`, `encoded`, `final`) derived from the per-episode map. Useful for quick progress bars. |

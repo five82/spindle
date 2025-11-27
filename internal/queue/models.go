@@ -92,6 +92,7 @@ type Item struct {
 	ProgressPercent     float64
 	ProgressMessage     string
 	EncodingDetailsJSON string
+	DraptoPresetProfile string
 	RipSpecData         string
 	DiscFingerprint     string
 	MetadataJSON        string

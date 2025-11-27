@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const itemColumns = "id, source_path, disc_title, status, media_info_json, ripped_file, encoded_file, final_file, background_log_path, error_message, created_at, updated_at, progress_stage, progress_percent, progress_message, encoding_details_json, rip_spec_data, disc_fingerprint, metadata_json, last_heartbeat, needs_review, review_reason"
+const itemColumns = "id, source_path, disc_title, status, media_info_json, ripped_file, encoded_file, final_file, background_log_path, error_message, created_at, updated_at, progress_stage, progress_percent, progress_message, encoding_details_json, drapto_preset_profile, rip_spec_data, disc_fingerprint, metadata_json, last_heartbeat, needs_review, review_reason"
 
 func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 	var (
@@ -26,6 +26,7 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		progressPercent  sql.NullFloat64
 		progressMessage  sql.NullString
 		encodingDetails  sql.NullString
+		draptoPreset     sql.NullString
 		ripSpec          sql.NullString
 		fingerprint      sql.NullString
 		metadata         sql.NullString
@@ -51,6 +52,7 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		&progressPercent,
 		&progressMessage,
 		&encodingDetails,
+		&draptoPreset,
 		&ripSpec,
 		&fingerprint,
 		&metadata,
@@ -76,6 +78,7 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		ProgressPercent:     progressPercent.Float64,
 		ProgressMessage:     progressMessage.String,
 		EncodingDetailsJSON: encodingDetails.String,
+		DraptoPresetProfile: draptoPreset.String,
 		RipSpecData:         ripSpec.String,
 		DiscFingerprint:     fingerprint.String,
 		MetadataJSON:        metadata.String,

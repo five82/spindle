@@ -303,6 +303,7 @@ func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 	}
 	item.ProgressMessage = "Starting Drapto encoding"
 	item.ProgressPercent = 0
+	item.DraptoPresetProfile = ""
 	item.ErrorMessage = ""
 	logger.Info(
 		"starting encoding preparation",
@@ -390,6 +391,11 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		sampleSource = strings.TrimSpace(jobs[0].Source)
 	}
 	decision := e.selectPreset(ctx, item, sampleSource, logger)
+	if profile := strings.TrimSpace(decision.Profile); profile != "" {
+		item.DraptoPresetProfile = profile
+	} else {
+		item.DraptoPresetProfile = "default"
+	}
 
 	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
 	if len(jobs) > 0 {

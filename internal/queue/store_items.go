@@ -86,7 +86,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		`UPDATE queue_items
         SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
             ripped_file = ?, encoded_file = ?, final_file = ?, background_log_path = ?, error_message = ?,
-            updated_at = ?, progress_stage = ?, progress_percent = ?, progress_message = ?, encoding_details_json = ?,
+            updated_at = ?, progress_stage = ?, progress_percent = ?, progress_message = ?, encoding_details_json = ?, drapto_preset_profile = ?,
             rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?, last_heartbeat = ?,
             needs_review = ?, review_reason = ?
          WHERE id = ?`,
@@ -104,6 +104,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		item.ProgressPercent,
 		nullableString(item.ProgressMessage),
 		nullableString(item.EncodingDetailsJSON),
+		nullableString(item.DraptoPresetProfile),
 		nullableString(item.RipSpecData),
 		nullableString(item.DiscFingerprint),
 		nullableString(item.MetadataJSON),
@@ -126,12 +127,13 @@ func (s *Store) UpdateProgress(ctx context.Context, item *Item) error {
 	if err := s.execWithoutResultRetry(
 		ctx,
 		`UPDATE queue_items
-        SET progress_stage = ?, progress_percent = ?, progress_message = ?, encoding_details_json = ?, updated_at = ?
+        SET progress_stage = ?, progress_percent = ?, progress_message = ?, encoding_details_json = ?, drapto_preset_profile = ?, updated_at = ?
         WHERE id = ?`,
 		nullableString(item.ProgressStage),
 		item.ProgressPercent,
 		nullableString(item.ProgressMessage),
 		nullableString(item.EncodingDetailsJSON),
+		nullableString(item.DraptoPresetProfile),
 		item.UpdatedAt.Format(time.RFC3339Nano),
 		item.ID,
 	); err != nil {

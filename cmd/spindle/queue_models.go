@@ -15,6 +15,7 @@ type queueItemDetailsView struct {
 	ProgressStage     string
 	ProgressPercent   float64
 	ProgressMessage   string
+	DraptoPreset      string
 	ErrorMessage      string
 	NeedsReview       bool
 	ReviewReason      string
