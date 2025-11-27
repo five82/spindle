@@ -122,6 +122,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	lastStage := item.ProgressStage
 	lastMessage := item.ProgressMessage
 	lastPercent := item.ProgressPercent
+	progressSampler := logging.NewProgressSampler(5)
 	progressCB := func(update makemkv.ProgressUpdate) {
 		now := time.Now()
 		if update.Percent >= 100 && lastPercent < 95 {
@@ -139,7 +140,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if !allow {
 			return
 		}
-		r.applyProgress(ctx, item, update)
+		r.applyProgress(ctx, item, update, progressSampler)
 		lastPersisted = now
 		if update.Stage != "" {
 			lastStage = update.Stage
@@ -703,7 +704,7 @@ func (r *Ripper) HealthCheck(ctx context.Context) stage.Health {
 	return stage.Healthy(name)
 }
 
-func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update makemkv.ProgressUpdate) {
+func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update makemkv.ProgressUpdate, sampler *logging.ProgressSampler) {
 	logger := logging.WithContext(ctx, r.logger)
 	copy := *item
 	if update.Stage != "" {
@@ -717,6 +718,11 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 	}
 	if err := r.store.UpdateProgress(ctx, &copy); err != nil {
 		logger.Warn("failed to persist progress", logging.Error(err))
+		return
+	}
+	shouldLog := sampler == nil || sampler.ShouldLog(copy.ProgressPercent, copy.ProgressStage, copy.ProgressMessage)
+	if !shouldLog {
+		*item = copy
 		return
 	}
 	fields := []any{logging.Int("percent", int(math.Round(copy.ProgressPercent)))}

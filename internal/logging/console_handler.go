@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,17 +14,19 @@ import (
 )
 
 type prettyHandler struct {
-	mu        sync.Mutex
-	writer    io.Writer
-	level     *slog.LevelVar
-	attrs     []slog.Attr
-	groups    []string
-	addSource bool
-	infoCache map[string]map[string]string
+	mu          sync.Mutex
+	writer      io.Writer
+	level       *slog.LevelVar
+	attrs       []slog.Attr
+	groups      []string
+	addSource   bool
+	infoCache   map[string]map[string]string
+	showAllInfo bool
 }
 
 func newPrettyHandler(w io.Writer, lvl *slog.LevelVar, addSource bool) slog.Handler {
-	return &prettyHandler{writer: w, level: lvl, addSource: addSource, infoCache: make(map[string]map[string]string)}
+	verbose := envBool("SPINDLE_LOG_VERBOSE")
+	return &prettyHandler{writer: w, level: lvl, addSource: addSource, infoCache: make(map[string]map[string]string), showAllInfo: verbose}
 }
 
 func (h *prettyHandler) Enabled(_ context.Context, level slog.Level) bool {
@@ -95,10 +98,14 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 
 func (h *prettyHandler) writeInfo(buf *bytes.Buffer, ts time.Time, level slog.Level, component, lane, itemID, stage, message string, src *slog.Source, attrs []kv) {
 	writeLogHeader(buf, ts, level, component, lane, itemID, stage, message, h.addSource, src)
-	fields, hidden := selectInfoFields(attrs)
+	limit := infoAttrLimit
+	if h.showAllInfo {
+		limit = 0
+	}
+	fields, hidden := selectInfoFields(attrs, limit)
 	summaryKey := infoSummaryKey(component, itemID, stage, attrs)
-	fields, _ = h.filterRepeatedInfo(summaryKey, fields, hidden, level)
-	if len(fields) == 0 {
+	fields, hidden = h.filterRepeatedInfo(summaryKey, fields, hidden, level)
+	if len(fields) == 0 && hidden == 0 {
 		buf.WriteByte('\n')
 		return
 	}
@@ -108,6 +115,20 @@ func (h *prettyHandler) writeInfo(buf *bytes.Buffer, ts time.Time, level slog.Le
 		buf.WriteString(field.label)
 		buf.WriteString(": ")
 		buf.WriteString(field.value)
+		buf.WriteByte('\n')
+	}
+	if hidden > 0 {
+		buf.WriteString("    + ")
+		buf.WriteString(strconv.Itoa(hidden))
+		buf.WriteString(" more field")
+		if hidden != 1 {
+			buf.WriteByte('s')
+		}
+		if !h.showAllInfo {
+			buf.WriteString(" hidden (set SPINDLE_LOG_VERBOSE=1 to show all)")
+		} else {
+			buf.WriteString(" hidden")
+		}
 		buf.WriteByte('\n')
 	}
 }
@@ -227,10 +248,11 @@ func (h *prettyHandler) WithGroup(name string) slog.Handler {
 
 func (h *prettyHandler) clone() *prettyHandler {
 	clone := &prettyHandler{
-		writer:    h.writer,
-		level:     h.level,
-		addSource: h.addSource,
-		infoCache: h.infoCache,
+		writer:      h.writer,
+		level:       h.level,
+		addSource:   h.addSource,
+		infoCache:   h.infoCache,
+		showAllInfo: h.showAllInfo,
 	}
 	if len(h.attrs) > 0 {
 		clone.attrs = make([]slog.Attr, len(h.attrs))
@@ -303,5 +325,18 @@ func levelLabel(level slog.Level) string {
 		return "INFO"
 	default:
 		return "DEBUG"
+	}
+}
+
+func envBool(key string) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return false
+	}
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }

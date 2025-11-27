@@ -282,14 +282,11 @@ func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
 		t.Fatalf("read log file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
-	if len(lines) != 4 {
+	if len(lines) != 6 {
 		t.Fatalf("unexpected line count: %v", lines)
 	}
 	if !strings.Contains(lines[0], "INFO [workflow-runner] Item #9 (ripper) – stage started") {
 		t.Fatalf("first header missing stage context: %q", lines[0])
-	}
-	if strings.Contains(lines[0], "details") {
-		t.Fatalf("first header should omit hidden count, got %q", lines[0])
 	}
 	if !strings.Contains(lines[1], "- Disc: \"50 First Dates\"") {
 		t.Fatalf("expected disc bullet, got %q", lines[1])
@@ -297,8 +294,14 @@ func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
 	if !strings.Contains(lines[2], "- Status: ripping") {
 		t.Fatalf("expected status bullet, got %q", lines[2])
 	}
-	if !strings.Contains(lines[3], "INFO [workflow-runner] Item #9 (ripper) – stage started") || strings.Contains(lines[3], "details") {
-		t.Fatalf("second header should be clean, got %q", lines[3])
+	if !strings.Contains(lines[3], "+ 1 more field hidden") {
+		t.Fatalf("expected hidden summary, got %q", lines[3])
+	}
+	if !strings.Contains(lines[4], "INFO [workflow-runner] Item #9 (ripper) – stage started") {
+		t.Fatalf("second header should be present, got %q", lines[4])
+	}
+	if !strings.Contains(lines[5], "+ 1 more field hidden") {
+		t.Fatalf("second entry hidden summary missing, got %q", lines[5])
 	}
 }
 

@@ -60,9 +60,12 @@ var infoHighlightKeys = []string{
 	"preset_reason",
 }
 
-func selectInfoFields(attrs []kv) ([]infoField, int) {
+func selectInfoFields(attrs []kv, limit int) ([]infoField, int) {
 	if len(attrs) == 0 {
 		return nil, 0
+	}
+	if limit < 0 {
+		limit = 0
 	}
 	used := make([]bool, len(attrs))
 	formatted := make([]string, len(attrs))
@@ -78,7 +81,7 @@ func selectInfoFields(attrs []kv) ([]infoField, int) {
 	hidden := 0
 
 	for _, key := range infoHighlightKeys {
-		if len(result) >= infoAttrLimit {
+		if limit > 0 && len(result) >= limit {
 			break
 		}
 		for idx, attr := range attrs {
@@ -120,9 +123,9 @@ func selectInfoFields(attrs []kv) ([]infoField, int) {
 			hidden++
 			continue
 		}
-		if len(result) < infoAttrLimit {
+		if limit <= 0 || len(result) < limit {
 			result = append(result, infoField{label: displayLabel(attr.key), value: val})
-		} else {
+		} else if limit > 0 {
 			hidden++
 		}
 	}

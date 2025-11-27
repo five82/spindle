@@ -87,6 +87,17 @@ ideas.
 The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
 `docs/api.md`.
 
+### Logs & Monitoring
+
+- `spindle show` accepts `--component`, `--lane`, `--request`, and `--item` to zero
+  in on a specific workflow runner, background lane, request/correlation ID, or
+  queue item when digging through noisy sessions. Combine them, e.g.
+  `spindle show --component encoder --lane background --request req-123 --follow`.
+- The console logger only prints the highest-signal fields per line; if you need
+  every attribute (for example while debugging TMDB responses), set
+  `SPINDLE_LOG_VERBOSE=1 spindle show --follow` to show the complete detail list
+  instead of the summarized bullets.
+
 ### Adaptive encoding presets (optional)
 
 - Set `preset_decider_enabled = true` in `config.toml` to let an OpenRouter LLM

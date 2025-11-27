@@ -127,15 +127,17 @@ type QueueItemResponse struct {
 
 // LogEvent mirrors the daemon log streaming payload.
 type LogEvent struct {
-	Sequence  uint64            `json:"seq"`
-	Timestamp time.Time         `json:"ts"`
-	Level     string            `json:"level"`
-	Message   string            `json:"msg"`
-	Component string            `json:"component,omitempty"`
-	Stage     string            `json:"stage,omitempty"`
-	ItemID    int64             `json:"item_id,omitempty"`
-	Fields    map[string]string `json:"fields,omitempty"`
-	Details   []DetailField     `json:"details,omitempty"`
+	Sequence      uint64            `json:"seq"`
+	Timestamp     time.Time         `json:"ts"`
+	Level         string            `json:"level"`
+	Message       string            `json:"msg"`
+	Component     string            `json:"component,omitempty"`
+	Stage         string            `json:"stage,omitempty"`
+	ItemID        int64             `json:"item_id,omitempty"`
+	Lane          string            `json:"lane,omitempty"`
+	CorrelationID string            `json:"correlation_id,omitempty"`
+	Fields        map[string]string `json:"fields,omitempty"`
+	Details       []DetailField     `json:"details,omitempty"`
 }
 
 // DetailField mirrors the bullet formatting used by console logs.

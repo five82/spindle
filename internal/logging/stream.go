@@ -10,15 +10,17 @@ import (
 
 // LogEvent represents a structured log line published to the streaming hub.
 type LogEvent struct {
-	Sequence  uint64            `json:"seq"`
-	Timestamp time.Time         `json:"ts"`
-	Level     string            `json:"level"`
-	Message   string            `json:"msg"`
-	Component string            `json:"component,omitempty"`
-	Stage     string            `json:"stage,omitempty"`
-	ItemID    int64             `json:"item_id,omitempty"`
-	Fields    map[string]string `json:"fields,omitempty"`
-	Details   []DetailField     `json:"details,omitempty"`
+	Sequence      uint64            `json:"seq"`
+	Timestamp     time.Time         `json:"ts"`
+	Level         string            `json:"level"`
+	Message       string            `json:"msg"`
+	Component     string            `json:"component,omitempty"`
+	Stage         string            `json:"stage,omitempty"`
+	ItemID        int64             `json:"item_id,omitempty"`
+	Lane          string            `json:"lane,omitempty"`
+	CorrelationID string            `json:"correlation_id,omitempty"`
+	Fields        map[string]string `json:"fields,omitempty"`
+	Details       []DetailField     `json:"details,omitempty"`
 }
 
 // DetailField mirrors the console handler's info bullet lines.
@@ -251,6 +253,12 @@ func eventFromRecord(record slog.Record) LogEvent {
 		case FieldStage:
 			event.Stage = attrString(attr.Value)
 			return true
+		case FieldLane:
+			event.Lane = attrString(attr.Value)
+			return true
+		case FieldCorrelationID:
+			event.CorrelationID = attrString(attr.Value)
+			return true
 		case "component":
 			event.Component = attrString(attr.Value)
 			return true
@@ -264,7 +272,7 @@ func eventFromRecord(record slog.Record) LogEvent {
 	})
 
 	if len(attrs) > 0 {
-		if info, _ := selectInfoFields(attrs); len(info) > 0 {
+		if info, _ := selectInfoFields(attrs, infoAttrLimit); len(info) > 0 {
 			event.Details = make([]DetailField, 0, len(info))
 			for _, field := range info {
 				event.Details = append(event.Details, DetailField{

@@ -120,37 +120,12 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 		}
 		*item = copy
 	}
-	var (
-		lastStage  string
-		lastMsg    string
-		lastBucket = -1
-	)
+	progressSampler := logging.NewProgressSampler(5)
 	logProgressEvent := func(update drapto.ProgressUpdate) {
 		stage := strings.TrimSpace(update.Stage)
 		raw := strings.TrimSpace(update.Message)
 		summary := progressMessageText(update)
-		logEvent := false
-		if stage != "" && stage != lastStage {
-			lastStage = stage
-			logEvent = true
-			lastBucket = -1
-		}
-		if raw != "" && raw != lastMsg {
-			lastMsg = raw
-			logEvent = true
-		}
-		if update.Percent >= 5 {
-			bucket := int(update.Percent / 5)
-			if bucket > lastBucket {
-				lastBucket = bucket
-				logEvent = true
-			}
-		}
-		if update.Percent >= 100 && lastBucket < 20 {
-			lastBucket = 20
-			logEvent = true
-		}
-		if !logEvent {
+		if !progressSampler.ShouldLog(update.Percent, stage, raw) {
 			return
 		}
 		attrs := []logging.Attr{logging.String("job", label)}

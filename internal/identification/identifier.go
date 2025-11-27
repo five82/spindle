@@ -147,13 +147,13 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if err != nil {
 		return err
 	}
+	titleCount := 0
+	hasBDInfo := false
 	if scanResult != nil {
-		titleCount := len(scanResult.Titles)
-		logger.Info("disc scan completed",
-			logging.Int("title_count", titleCount),
-			logging.Bool("bd_info_available", scanResult.BDInfo != nil))
+		titleCount = len(scanResult.Titles)
+		hasBDInfo = scanResult.BDInfo != nil
 		if scanResult.BDInfo != nil {
-			logger.Info("bd_info details",
+			logger.Debug("bd_info details",
 				logging.String("disc_id", strings.TrimSpace(scanResult.BDInfo.DiscID)),
 				logging.String("volume_identifier", scanResult.BDInfo.VolumeIdentifier),
 				logging.String("disc_name", scanResult.BDInfo.DiscName),
@@ -174,7 +174,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 	if scannerFingerprint != "" {
-		logger.Info("disc fingerprint captured", logging.String("fingerprint", scannerFingerprint))
+		logger.Debug("disc fingerprint captured", logging.String("fingerprint", scannerFingerprint))
 		item.DiscFingerprint = scannerFingerprint
 		if err := i.handleDuplicateFingerprint(ctx, item); err != nil {
 			return err
@@ -183,11 +183,20 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			return nil
 		}
 	} else if trimmed := strings.TrimSpace(item.DiscFingerprint); trimmed != "" {
-		logger.Info("scanner fingerprint unavailable; retaining existing fingerprint",
+		logger.Debug("scanner fingerprint unavailable; retaining existing fingerprint",
 			logging.String("fingerprint", trimmed))
 	} else {
 		logger.Warn("scanner fingerprint unavailable and queue fingerprint missing")
 	}
+	scanSummary := []logging.Attr{
+		logging.Int("title_count", titleCount),
+		logging.Bool("bd_info_available", hasBDInfo),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+	}
+	if fp := strings.TrimSpace(item.DiscFingerprint); fp != "" {
+		scanSummary = append(scanSummary, logging.String("fingerprint", fp))
+	}
+	logger.Info("disc scan completed", logging.Args(scanSummary...)...)
 
 	discID := ""
 	if scanResult != nil && scanResult.BDInfo != nil {
@@ -209,9 +218,9 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if scanResult != nil && scanResult.BDInfo != nil {
 		switch {
 		case discID == "" && i.keydb != nil:
-			logger.Info("keydb lookup skipped", logging.String("reason", "disc id missing in bdinfo"))
+			logger.Debug("keydb lookup skipped", logging.String("reason", "disc id missing in bdinfo"))
 		case i.keydb == nil:
-			logger.Info("keydb lookup skipped", logging.String("reason", "keydb catalog unavailable"))
+			logger.Debug("keydb lookup skipped", logging.String("reason", "keydb catalog unavailable"))
 		case discID != "" && i.keydb != nil:
 			entry, found, err := i.keydb.Lookup(discID)
 			if err != nil {
@@ -229,27 +238,27 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 					titleFromKeyDB = true
 				}
 			} else {
-				logger.Info("keydb lookup produced no match",
+				logger.Debug("keydb lookup produced no match",
 					logging.String("disc_id", discID))
 			}
 		}
 	} else if i.keydb != nil {
-		logger.Info("keydb lookup skipped", logging.String("reason", "bdinfo unavailable"))
+		logger.Debug("keydb lookup skipped", logging.String("reason", "bdinfo unavailable"))
 	}
 
 	if !titleFromKeyDB {
 		// Determine best title using priority-based approach
-		logger.Info("determining best title",
+		logger.Debug("determining best title",
 			logging.String("current_title", title),
 			logging.Int("makemkv_titles", len(scanResult.Titles)))
 
 		if len(scanResult.Titles) > 0 {
-			logger.Info("makemkv title available",
+			logger.Debug("makemkv title available",
 				logging.String("makemkv_title", scanResult.Titles[0].Name))
 		}
 
 		if scanResult.BDInfo != nil {
-			logger.Info("bdinfo available",
+			logger.Debug("bdinfo available",
 				logging.String("bdinfo_name", scanResult.BDInfo.DiscName))
 		}
 
@@ -275,18 +284,18 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if scanResult.BDInfo != nil {
 		if scanResult.BDInfo.Year > 0 {
 			searchOpts.Year = scanResult.BDInfo.Year
-			logger.Info("using bd_info year for TMDB search",
+			logger.Debug("using bd_info year for TMDB search",
 				logging.Int("year", scanResult.BDInfo.Year))
 		}
 		if scanResult.BDInfo.Studio != "" {
-			logger.Info("detected studio from bd_info",
+			logger.Debug("detected studio from bd_info",
 				logging.String("studio", scanResult.BDInfo.Studio))
 			// Note: Studio filtering would require company lookup API call
 		}
 		// Calculate runtime from main title duration
 		if len(scanResult.Titles) > 0 && scanResult.Titles[0].Duration > 0 {
 			searchOpts.Runtime = scanResult.Titles[0].Duration / 60 // Convert seconds to minutes
-			logger.Info("using title runtime for TMDB search",
+			logger.Debug("using title runtime for TMDB search",
 				logging.Int("runtime_minutes", searchOpts.Runtime))
 		}
 	}
@@ -311,7 +320,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	if n, ok := extractDiscNumber(discSources...); ok {
 		discNumber = n
-		logger.Info("disc number detected", logging.Int("disc_number", discNumber))
+		logger.Debug("disc number detected", logging.Int("disc_number", discNumber))
 	}
 
 	// Default metadata assumes unidentified content until TMDB lookup succeeds.
@@ -368,7 +377,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if season, ok := extractSeasonNumber(title, discLabel); ok {
 		seasonNumber = season
 	}
-	logger.Info("identification heuristics",
+	logger.Debug("identification heuristics",
 		logging.String("media_hint", mediaHint.String()),
 		logging.Int("season_guess", seasonNumber))
 
@@ -413,14 +422,14 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			response = resp
 			modeUsed = mode
 			if response != nil {
-				logger.Info("tmdb response received",
+				logger.Debug("tmdb response received",
 					logging.Int("result_count", len(response.Results)),
 					logging.Int("search_year", searchOpts.Year),
 					logging.Int("search_runtime", searchOpts.Runtime),
 					logging.String("search_mode", string(modeUsed)),
 					logging.String("query", candidate))
 				for idx, result := range response.Results {
-					logger.Info("tmdb search result",
+					logger.Debug("tmdb search result",
 						logging.Int("index", idx),
 						logging.Int64("tmdb_id", result.ID),
 						logging.String("title", result.Title),

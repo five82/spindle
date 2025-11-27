@@ -217,6 +217,11 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	component := strings.TrimSpace(query.Get("component"))
+	lane := strings.TrimSpace(query.Get("lane"))
+	correlationID := strings.TrimSpace(query.Get("correlation_id"))
+	if correlationID == "" {
+		correlationID = strings.TrimSpace(query.Get("request"))
+	}
 
 	var (
 		converted []api.LogEvent
@@ -264,6 +269,12 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 		if component != "" && !strings.EqualFold(component, evt.Component) {
 			continue
 		}
+		if lane != "" && !strings.EqualFold(lane, evt.Lane) {
+			continue
+		}
+		if correlationID != "" && !strings.EqualFold(correlationID, evt.CorrelationID) {
+			continue
+		}
 		filtered = append(filtered, evt)
 	}
 
@@ -291,15 +302,17 @@ func convertLogEvents(events []logging.LogEvent) []api.LogEvent {
 			})
 		}
 		out = append(out, api.LogEvent{
-			Sequence:  evt.Sequence,
-			Timestamp: evt.Timestamp,
-			Level:     evt.Level,
-			Message:   evt.Message,
-			Component: evt.Component,
-			Stage:     evt.Stage,
-			ItemID:    evt.ItemID,
-			Fields:    evt.Fields,
-			Details:   details,
+			Sequence:      evt.Sequence,
+			Timestamp:     evt.Timestamp,
+			Level:         evt.Level,
+			Message:       evt.Message,
+			Component:     evt.Component,
+			Stage:         evt.Stage,
+			ItemID:        evt.ItemID,
+			Lane:          evt.Lane,
+			CorrelationID: evt.CorrelationID,
+			Fields:        evt.Fields,
+			Details:       details,
 		})
 	}
 	return out

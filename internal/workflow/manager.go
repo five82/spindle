@@ -712,9 +712,14 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 	status, message := m.classifyStageFailure(stageName, stageErr)
 	m.setItemFailureState(item, status, message)
 
+	alertValue := "stage_failure"
+	if status == queue.StatusReview {
+		alertValue = "review_required"
+	}
 	logger.Error("stage failed",
 		logging.String("resolved_status", string(status)),
 		logging.String("error_message", strings.TrimSpace(message)),
+		logging.Alert(alertValue),
 		logging.Error(stageErr),
 	)
 
