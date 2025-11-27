@@ -497,6 +497,17 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			if len(matchedEpisodes) > 0 {
 				metadata["episode_numbers"] = matchedEpisodes
 			}
+			if len(episodeMatches) > 0 {
+				airDates := make([]string, 0, len(episodeMatches))
+				for _, ann := range episodeMatches {
+					if strings.TrimSpace(ann.Air) != "" {
+						airDates = append(airDates, ann.Air)
+					}
+				}
+				if len(airDates) > 0 {
+					metadata["episode_air_dates"] = airDates
+				}
+			}
 			if mediaType == "tv" {
 				metadata["show_title"] = identifiedTitle
 			}

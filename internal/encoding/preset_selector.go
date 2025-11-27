@@ -18,40 +18,61 @@ import (
 
 const (
 	presetConfidenceThreshold = 0.7
-	resolutionLabelSD         = "sd"
-	resolutionLabelHD         = "hd"
-	resolutionLabel4K         = "4K"
+	resolutionLabelSD         = "480p/SD"
+	resolutionLabelHD         = "1080p/HD"
+	resolutionLabel4K         = "3840p/4K"
 	resolutionLabelDefault    = resolutionLabelHD
+	sourceTypeDVD             = "dvd"
+	sourceTypeBluRay          = "blu-ray"
+	sourceType4KBluRay        = "4k blu-ray"
 )
 
 type presetRequest struct {
-	Title      string
-	Season     int
-	Year       string
-	Resolution string
-	MediaType  string
+	Title         string
+	Season        int
+	Year          string
+	SeasonAirYear string
+	Resolution    string
+	MediaType     string
 }
 
 func (r presetRequest) Description() string {
-	parts := make([]string, 0, 5)
+	var parts []string
+
+	// Title and season
 	if title := strings.TrimSpace(r.Title); title != "" {
-		parts = append(parts, title)
+		if r.Season > 0 && r.MediaType == "tv show" {
+			parts = append(parts, fmt.Sprintf("%s Season %d", title, r.Season))
+		} else {
+			parts = append(parts, title)
+		}
 	}
+
+	// Type
 	mediaType := strings.TrimSpace(r.MediaType)
-	isTV := mediaType == "tv show"
-	if isTV && r.Season > 0 {
-		parts = append(parts, fmt.Sprintf("Season %d", r.Season))
-	}
-	if year := strings.TrimSpace(r.Year); year != "" {
-		parts = append(parts, year)
-	}
-	if resolution := strings.TrimSpace(r.Resolution); resolution != "" {
-		parts = append(parts, resolution)
-	}
 	if mediaType == "" {
 		mediaType = "movie"
 	}
-	parts = append(parts, mediaType)
+	parts = append(parts, fmt.Sprintf("(type: %s)", mediaType))
+
+	// Year or season aired
+	isTV := mediaType == "tv show"
+	if isTV && strings.TrimSpace(r.SeasonAirYear) != "" && r.SeasonAirYear != r.Year {
+		parts = append(parts, fmt.Sprintf("(season aired: %s)", r.SeasonAirYear))
+	} else if year := strings.TrimSpace(r.Year); year != "" {
+		parts = append(parts, fmt.Sprintf("(year: %s)", year))
+	}
+
+	// Resolution
+	if resolution := strings.TrimSpace(r.Resolution); resolution != "" {
+		parts = append(parts, fmt.Sprintf("(resolution: %s)", resolution))
+	}
+
+	// Source (derived from resolution)
+	if source := deriveSourceType(r.Resolution); source != "" {
+		parts = append(parts, fmt.Sprintf("(source: %s)", source))
+	}
+
 	return strings.Join(parts, " ")
 }
 
@@ -139,11 +160,12 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 		return decision
 	}
 	request := presetRequest{
-		Title:      title,
-		Season:     meta.SeasonNumber,
-		Year:       parseYearFromMetadata(item.MetadataJSON),
-		MediaType:  presetMediaType(meta),
-		Resolution: resolutionLabelDefault,
+		Title:         title,
+		Season:        meta.SeasonNumber,
+		Year:          parseYearFromMetadata(item.MetadataJSON),
+		SeasonAirYear: parseSeasonAirYear(item.MetadataJSON),
+		MediaType:     presetMediaType(meta),
+		Resolution:    resolutionLabelDefault,
 	}
 	if !meta.IsMovie() && request.Season <= 0 {
 		request.Season = 1
@@ -241,6 +263,20 @@ func classifyResolution(width int) string {
 	}
 }
 
+func deriveSourceType(resolution string) string {
+	resolution = strings.TrimSpace(resolution)
+	switch resolution {
+	case resolutionLabelSD:
+		return sourceTypeDVD
+	case resolutionLabelHD:
+		return sourceTypeBluRay
+	case resolutionLabel4K:
+		return sourceType4KBluRay
+	default:
+		return ""
+	}
+}
+
 func presetMediaType(meta queue.Metadata) string {
 	if meta.IsMovie() {
 		return "movie"
@@ -300,6 +336,41 @@ func extractDigits(value string) string {
 		return string(digits)
 	}
 	return ""
+}
+
+func parseSeasonAirYear(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return ""
+	}
+	airDatesRaw, ok := payload["episode_air_dates"]
+	if !ok {
+		return ""
+	}
+	airDates, ok := airDatesRaw.([]any)
+	if !ok || len(airDates) == 0 {
+		return ""
+	}
+	// Find the earliest air date to get the season's production year
+	var earliestYear string
+	for _, dateRaw := range airDates {
+		dateStr, ok := dateRaw.(string)
+		if !ok {
+			continue
+		}
+		year := extractDigits(dateStr)
+		if year == "" {
+			continue
+		}
+		if earliestYear == "" || year < earliestYear {
+			earliestYear = year
+		}
+	}
+	return earliestYear
 }
 
 func normalizePresetProfile(value string) string {
