@@ -47,8 +47,9 @@ func (s Selection) Changed(totalAudio int) bool {
 }
 
 // Select returns the audio stream layout that preserves a single primary English track
-// alongside any commentary tracks. The function prefers spatial mixes, then lossless,
-// and finally the best lossy option when no higher-fidelity stream exists.
+// alongside any commentary tracks. The function prioritizes tracks by channel count first
+// (8ch > 6ch > 2ch), then source quality (lossless > lossy). Spatial audio metadata
+// (Atmos, DTS:X) is not prioritized since it's stripped during Opus transcoding.
 func Select(streams []ffprobe.Stream) Selection {
 	candidates := buildCandidates(streams)
 	if len(candidates) == 0 {
@@ -152,12 +153,11 @@ func (c candidateList) hasMultiChannel() bool {
 func (c candidateList) commentaryCandidates(primary candidate, hasEnglishMultichannel bool) candidateList {
 	result := make(candidateList, 0)
 
+	// First pass: look for explicit commentary flags
 	for _, cand := range c {
 		if cand.stream.Index == primary.stream.Index {
 			continue
 		}
-		// Only include tracks explicitly detected as commentary.
-		// Skip heuristics based solely on channel count or presence of multiple stereo tracks.
 		if cand.isCommentary {
 			result = append(result, cand)
 			continue
@@ -167,9 +167,86 @@ func (c candidateList) commentaryCandidates(primary candidate, hasEnglishMultich
 			continue
 		}
 	}
+
+	// If we found explicit commentary, don't apply heuristics
+	if len(result) > 0 {
+		sort.SliceStable(result, func(i, j int) bool { return result[i].order < result[j].order })
+		return dedupeCandidates(result)
+	}
+
+	// Heuristic: multiple identical sequential English stereo tracks after multichannel.
+	// Pattern: first stereo = downmix, subsequent identical stereo = commentary tracks.
+	// This catches discs where commentary tracks lack explicit metadata flags.
+	if hasEnglishMultichannel {
+		stereoSequence := c.englishStereoSequence()
+		if len(stereoSequence) > 1 {
+			// Skip first stereo (downmix), treat rest as commentary
+			for i := 1; i < len(stereoSequence); i++ {
+				result = append(result, stereoSequence[i])
+			}
+		}
+	}
+
 	// Preserve original order for deterministic output.
 	sort.SliceStable(result, func(i, j int) bool { return result[i].order < result[j].order })
 	return dedupeCandidates(result)
+}
+
+// englishStereoSequence finds sequential identical English stereo tracks.
+// Returns tracks in order, suitable for treating first as downmix and rest as commentary.
+func (c candidateList) englishStereoSequence() candidateList {
+	stereo := make(candidateList, 0)
+
+	// Find English stereo tracks that appear after any multichannel track
+	lastMultichannelOrder := -1
+	for _, cand := range c {
+		if cand.isEnglish && cand.channels > 2 {
+			if cand.order > lastMultichannelOrder {
+				lastMultichannelOrder = cand.order
+			}
+		}
+	}
+
+	// Collect English stereo tracks after multichannel
+	for _, cand := range c {
+		if cand.isEnglish && cand.channels == 2 && cand.order > lastMultichannelOrder {
+			stereo = append(stereo, cand)
+		}
+	}
+
+	if len(stereo) < 2 {
+		return nil
+	}
+
+	// Check if they're sequential and identical
+	sort.SliceStable(stereo, func(i, j int) bool { return stereo[i].order < stereo[j].order })
+
+	sequence := candidateList{stereo[0]}
+	reference := stereo[0]
+
+	for i := 1; i < len(stereo); i++ {
+		current := stereo[i]
+
+		// Must be sequential (order differs by 1)
+		if current.order != sequence[len(sequence)-1].order+1 {
+			break
+		}
+
+		// Must be identical codec and channels
+		if current.stream.CodecName != reference.stream.CodecName ||
+			current.channels != reference.channels {
+			break
+		}
+
+		sequence = append(sequence, current)
+	}
+
+	// Only return if we have 2+ identical sequential tracks
+	if len(sequence) < 2 {
+		return nil
+	}
+
+	return sequence
 }
 
 func dedupeCandidates(list candidateList) candidateList {
@@ -203,26 +280,32 @@ func choosePrimary(candidates candidateList) candidate {
 
 func scorePrimary(cand candidate) float64 {
 	score := 0.0
-	if cand.isSpatial {
-		score += 1000
-	} else if cand.isLossless {
-		score += 800
-	} else {
-		score += 500
-	}
 
+	// Channel count is most important for Opus transcoding.
+	// More channels preserved = better output quality.
 	switch {
 	case cand.channels >= 8:
-		score += 80
+		score += 1000
 	case cand.channels >= 6:
-		score += 60
+		score += 800
 	case cand.channels >= 4:
-		score += 40
+		score += 600
 	case cand.channels >= 2:
-		score += 20
+		score += 400
 	default:
-		score += 10
+		score += 200
 	}
+
+	// Source quality matters for transcoding quality.
+	// Lossless source = cleaner transcode to Opus.
+	if cand.isLossless {
+		score += 100
+	} else {
+		score += 50
+	}
+
+	// Spatial audio metadata (Atmos, DTS:X) is stripped during Opus transcoding,
+	// so we don't prioritize it. The channel count already captures 7.1/5.1 layout.
 
 	if cand.defaultFlagged {
 		score += 5
