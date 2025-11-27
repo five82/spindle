@@ -40,7 +40,7 @@ See `README.md` for install details, disc mounting notes, and end-user usage.
 High-level modules you will touch most often:
 
 - **Core orchestration**: `internal/workflow`, `internal/daemon`, and `internal/queue`
-- **Stage handlers**: `internal/identification`, `internal/ripping`, `internal/encoding`, `internal/subtitles`, `internal/organizer`
+- **Stage handlers**: `internal/identification`, `internal/ripping`, `internal/episodeid`, `internal/encoding`, `internal/subtitles`, `internal/organizer`
 - **Content intelligence**: `internal/contentid`, `internal/ripspec`, `internal/media`, and `internal/ripcache`
 - **External services**: `internal/services`, `internal/notifications`, `internal/identification/tmdb`, `internal/disc`
 - **CLI and daemon entry point**: `cmd/spindle`
@@ -55,12 +55,13 @@ When new capabilities land, update this map and the README together so future ag
 `internal/queue` defines the lifecycle and is the source of truth. Items typically advance:
 
 ```
-PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → SUBTITLING → SUBTITLED → ORGANIZING → COMPLETED
+PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → EPISODE_IDENTIFYING → EPISODE_IDENTIFIED → ENCODING → ENCODED → SUBTITLING → SUBTITLED → ORGANIZING → COMPLETED
 ```
 
 - **FAILED** marks irrecoverable runs. Surface the root cause and keep progress context.
 - **REVIEW** is for manual intervention (for example, uncertain identification).
 - Rip completion triggers an ntfy notification at `RIPPED`; users eject the disc manually when convenient.
+- Episode identification runs after ripping for TV shows when `opensubtitles_enabled = true`: queue items enter `EPISODE_IDENTIFYING`, WhisperX transcribes each ripped episode, OpenSubtitles downloads reference subtitles, and the matcher correlates ripped files to definitive episode numbers before flipping to `EPISODE_IDENTIFIED`. Movies and items without OpenSubtitles skip this stage automatically.
 - Subtitles run after encoding when `subtitles_enabled = true`: queue items enter `SUBTITLING`, prefer OpenSubtitles downloads, fall back to WhisperX, and flip to `SUBTITLED` before the organizer starts. `NeedsReview` plus the `review` status are used when subtitle offsets look suspicious.
 
 If you add or reorder phases, update the enums, workflow routing, CLI presentation, docs, and tests in one pull.

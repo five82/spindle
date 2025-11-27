@@ -6,27 +6,30 @@ import "time"
 type Status string
 
 const (
-	StatusPending     Status = "pending"
-	StatusIdentifying Status = "identifying"
-	StatusIdentified  Status = "identified"
-	StatusRipping     Status = "ripping"
-	StatusRipped      Status = "ripped"
-	StatusEncoding    Status = "encoding"
-	StatusEncoded     Status = "encoded"
-	StatusSubtitling  Status = "subtitling"
-	StatusSubtitled   Status = "subtitled"
-	StatusOrganizing  Status = "organizing"
-	StatusCompleted   Status = "completed"
-	StatusFailed      Status = "failed"
-	StatusReview      Status = "review"
+	StatusPending            Status = "pending"
+	StatusIdentifying        Status = "identifying"
+	StatusIdentified         Status = "identified"
+	StatusRipping            Status = "ripping"
+	StatusRipped             Status = "ripped"
+	StatusEpisodeIdentifying Status = "episode_identifying"
+	StatusEpisodeIdentified  Status = "episode_identified"
+	StatusEncoding           Status = "encoding"
+	StatusEncoded            Status = "encoded"
+	StatusSubtitling         Status = "subtitling"
+	StatusSubtitled          Status = "subtitled"
+	StatusOrganizing         Status = "organizing"
+	StatusCompleted          Status = "completed"
+	StatusFailed             Status = "failed"
+	StatusReview             Status = "review"
 )
 
 var processingStatuses = map[Status]struct{}{
-	StatusIdentifying: {},
-	StatusRipping:     {},
-	StatusEncoding:    {},
-	StatusSubtitling:  {},
-	StatusOrganizing:  {},
+	StatusIdentifying:        {},
+	StatusRipping:            {},
+	StatusEpisodeIdentifying: {},
+	StatusEncoding:           {},
+	StatusSubtitling:         {},
+	StatusOrganizing:         {},
 }
 
 type statusTransition struct {
@@ -37,7 +40,8 @@ type statusTransition struct {
 var stageRollbackTransitions = []statusTransition{
 	{from: StatusIdentifying, to: StatusPending},
 	{from: StatusRipping, to: StatusIdentified},
-	{from: StatusEncoding, to: StatusRipped},
+	{from: StatusEpisodeIdentifying, to: StatusRipped},
+	{from: StatusEncoding, to: StatusEpisodeIdentified},
 	{from: StatusSubtitling, to: StatusEncoded},
 	{from: StatusOrganizing, to: StatusEncoded},
 }
@@ -118,7 +122,7 @@ func LaneForItem(item *Item) ProcessingLane {
 	switch item.Status {
 	case StatusPending, StatusIdentifying, StatusIdentified, StatusRipping:
 		return LaneForeground
-	case StatusRipped, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted, StatusSubtitling, StatusSubtitled:
+	case StatusRipped, StatusEpisodeIdentifying, StatusEpisodeIdentified, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted, StatusSubtitling, StatusSubtitled:
 		return LaneBackground
 	case StatusFailed, StatusReview:
 		if item.BackgroundLogPath != "" {

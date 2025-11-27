@@ -62,7 +62,8 @@ func TestResetStuckProcessing(t *testing.T) {
 	}{
 		{"identifying", queue.StatusIdentifying, queue.StatusPending},
 		{"ripping", queue.StatusRipping, queue.StatusIdentified},
-		{"encoding", queue.StatusEncoding, queue.StatusRipped},
+		{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusRipped},
+		{"encoding", queue.StatusEncoding, queue.StatusEpisodeIdentified},
 		{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
 	}
 	var ids []int64
@@ -272,7 +273,8 @@ func TestReclaimStaleProcessing(t *testing.T) {
 		}{
 			{"identifying", queue.StatusIdentifying, queue.StatusPending},
 			{"ripping", queue.StatusRipping, queue.StatusIdentified},
-			{"encoding", queue.StatusEncoding, queue.StatusRipped},
+			{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusRipped},
+			{"encoding", queue.StatusEncoding, queue.StatusEpisodeIdentified},
 			{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
 		}
 		var ids []int64
@@ -294,6 +296,7 @@ func TestReclaimStaleProcessing(t *testing.T) {
 			time.Now().Add(-1*time.Hour),
 			queue.StatusIdentifying,
 			queue.StatusRipping,
+			queue.StatusEpisodeIdentifying,
 			queue.StatusEncoding,
 			queue.StatusOrganizing,
 		)
@@ -357,8 +360,8 @@ func TestReclaimStaleProcessing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetByID encoding: %v", err)
 		}
-		if reclaimed.Status != queue.StatusRipped {
-			t.Fatalf("expected encoding item rolled back to ripped, got %s", reclaimed.Status)
+		if reclaimed.Status != queue.StatusEpisodeIdentified {
+			t.Fatalf("expected encoding item rolled back to episode_identified, got %s", reclaimed.Status)
 		}
 		if reclaimed.LastHeartbeat != nil {
 			t.Fatalf("expected encoding heartbeat cleared, got %v", reclaimed.LastHeartbeat)

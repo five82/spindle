@@ -14,6 +14,7 @@ import (
 	"spindle/internal/config"
 	"spindle/internal/daemon"
 	"spindle/internal/encoding"
+	"spindle/internal/episodeid"
 	"spindle/internal/identification"
 	"spindle/internal/ipc"
 	"spindle/internal/logging"
@@ -118,11 +119,12 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 	}
 
 	mgr.ConfigureStages(workflow.StageSet{
-		Identifier: identification.NewIdentifier(cfg, store, logger),
-		Ripper:     ripping.NewRipper(cfg, store, logger),
-		Encoder:    encoding.NewEncoder(cfg, store, logger),
-		Subtitles:  subtitleStage,
-		Organizer:  organizer.NewOrganizer(cfg, store, logger),
+		Identifier:        identification.NewIdentifier(cfg, store, logger),
+		Ripper:            ripping.NewRipper(cfg, store, logger),
+		EpisodeIdentifier: episodeid.NewEpisodeIdentifier(cfg, logger),
+		Encoder:           encoding.NewEncoder(cfg, store, logger),
+		Subtitles:         subtitleStage,
+		Organizer:         organizer.NewOrganizer(cfg, store, logger),
 	})
 }
 

@@ -31,11 +31,12 @@ type StageHandler interface {
 
 // StageSet bundles the concrete workflow handlers the manager orchestrates.
 type StageSet struct {
-	Identifier StageHandler
-	Ripper     StageHandler
-	Encoder    StageHandler
-	Subtitles  StageHandler
-	Organizer  StageHandler
+	Identifier        StageHandler
+	Ripper            StageHandler
+	EpisodeIdentifier StageHandler
+	Encoder           StageHandler
+	Subtitles         StageHandler
+	Organizer         StageHandler
 }
 
 type pipelineStage struct {
@@ -176,12 +177,23 @@ func (m *Manager) ConfigureStages(set StageSet) {
 			doneStatus:       queue.StatusRipped,
 		})
 	}
+	encoderStart := queue.StatusRipped
+	if set.EpisodeIdentifier != nil {
+		background.stages = append(background.stages, pipelineStage{
+			name:             "episode-identifier",
+			handler:          set.EpisodeIdentifier,
+			startStatus:      queue.StatusRipped,
+			processingStatus: queue.StatusEpisodeIdentifying,
+			doneStatus:       queue.StatusEpisodeIdentified,
+		})
+		encoderStart = queue.StatusEpisodeIdentified
+	}
 	organizerStart := queue.StatusEncoded
 	if set.Encoder != nil {
 		background.stages = append(background.stages, pipelineStage{
 			name:             "encoder",
 			handler:          set.Encoder,
-			startStatus:      queue.StatusRipped,
+			startStatus:      encoderStart,
 			processingStatus: queue.StatusEncoding,
 			doneStatus:       queue.StatusEncoded,
 		})

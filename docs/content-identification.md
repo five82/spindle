@@ -1,19 +1,24 @@
 # Content Identification
 
-This document is for coding agents touching `internal/identification`, `internal/disc`,
-`internal/ripspec`, or any code that depends on clean metadata. It calls out the
-contractual behavior and invariants that are easy to miss when skimming the
+This document is for coding agents touching `internal/identification`, `internal/episodeid`,
+`internal/disc`, `internal/ripspec`, or any code that depends on clean metadata. It calls
+out the contractual behavior and invariants that are easy to miss when skimming the
 implementation.
 
 ## Responsibilities
 
+**Disc Identification Stage (`internal/identification`):**
 - Normalize raw disc data (MakeMKV, `bd_info`, KEYDB) into a single canonical
   title plus fingerprint.
-- Decide whether a disc is a movie, TV season disc, or “needs manual review”.
+- Decide whether a disc is a movie, TV season disc, or "needs manual review".
 - Populate queue items with `MetadataJSON` (TMDB payload) and `RipSpecData`
-  (per-title playlists, episode metadata, future filenames).
-- Kick off post-rip verification so downstream stages inherit the trusted
-  episode ordering instead of guessing.
+  (per-title playlists, initial episode guesses, future filenames).
+
+**Episode Identification Stage (`internal/episodeid`):**
+- Correlate ripped TV episode files to definitive episode numbers using WhisperX
+  transcription and OpenSubtitles reference comparison.
+- Update `RipSpecData` with confirmed episode mappings after matching.
+- Skip automatically for movies or when OpenSubtitles is disabled.
 
 ## Data Flow
 
@@ -30,13 +35,17 @@ implementation.
    - Query TMDB (`internal/identification/tmdb`) with rate limiting + caching.
    - Score candidates; accept the first one over the confidence thresholds.
 4. **Persist**:
-   - Update `queue.Item.DiscTitle` to “Title (Year)” or
-     “Show Name Season XX (Year)”.
+   - Update `queue.Item.DiscTitle` to "Title (Year)" or
+     "Show Name Season XX (Year)".
    - Store `MetadataJSON` and `RipSpecData`.
-5. **Post-rip episode verification** (`internal/ripping`):
-   - After MakeMKV finishes, WhisperX + OpenSubtitles compares each ripped
-     playlist to reference subtitles to confirm the episode map. Fields inside
-     the rip spec are rewritten when better matches are found.
+5. **Rip** (`internal/ripping`):
+   - MakeMKV extracts disc content to MKV files in staging directory.
+   - Assigns episode assets to rip spec based on initial heuristic ordering.
+6. **Episode verification** (`internal/episodeid`):
+   - After ripping completes, WhisperX + OpenSubtitles compares each ripped
+     playlist to reference subtitles to confirm the episode map.
+   - Fields inside the rip spec are rewritten when better matches are found.
+   - Skipped entirely for movies or when OpenSubtitles is disabled.
 
 ## Title Source Priority
 
@@ -69,15 +78,17 @@ Spindle surfaces noisy/incorrect names.
   - Fingerprint collision: send item to `REVIEW` immediately with message
     “Duplicate disc fingerprint”.
 
-## Episode Mapping & Subtitle Verification
+## Episode Mapping & Verification
 
-- The post-rip verifier only runs when OpenSubtitles credentials exist. It can
-  still request WhisperX-only transcripts (forceAI) to compare textual content.
-- Matching is greedy with a similarity floor (~0.58). When no match clears the
-  floor, the best-effort heuristic ordering remains but the queue item is flagged
-  for review. Do not drop to `FAILED`—encode + organize should keep running.
-- All subtitle-driven rewrites must be reflected in both `RipSpecData` and
-  `MetadataJSON` so later retries stay consistent.
+- The episode identification stage (`internal/episodeid`) only runs when OpenSubtitles
+  credentials exist and the item is a TV show. Movies skip this stage automatically.
+- Matching uses WhisperX transcription plus OpenSubtitles reference comparison with a
+  similarity floor (~0.58). When no match clears the floor, the best-effort heuristic
+  ordering remains but the queue item may be flagged for review.
+- The stage does not drop to `FAILED` on matching failures—encode + organize should keep
+  running with the heuristic episode ordering.
+- All episode rewrites must be reflected in both `RipSpecData` and `MetadataJSON` so
+  later retries stay consistent.
 
 ## Configuration Inputs
 

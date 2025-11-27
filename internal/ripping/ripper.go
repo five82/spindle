@@ -18,7 +18,6 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
-	"spindle/internal/contentid"
 	"spindle/internal/logging"
 	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
@@ -33,13 +32,12 @@ import (
 
 // Ripper manages the MakeMKV ripping workflow.
 type Ripper struct {
-	store          *queue.Store
-	cfg            *config.Config
-	logger         *slog.Logger
-	client         makemkv.Ripper
-	notifier       notifications.Service
-	contentMatcher *contentid.Matcher
-	cache          *ripcache.Manager
+	store    *queue.Store
+	cfg      *config.Config
+	logger   *slog.Logger
+	client   makemkv.Ripper
+	notifier notifications.Service
+	cache    *ripcache.Manager
 }
 
 const (
@@ -59,17 +57,12 @@ func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Rip
 
 // NewRipperWithDependencies allows injecting all collaborators (used in tests).
 func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, client makemkv.Ripper, notifier notifications.Service) *Ripper {
-	var matcher *contentid.Matcher
-	if cfg != nil {
-		matcher = contentid.NewMatcher(cfg, logger)
-	}
 	rip := &Ripper{
-		store:          store,
-		cfg:            cfg,
-		client:         client,
-		notifier:       notifier,
-		contentMatcher: matcher,
-		cache:          ripcache.NewManager(cfg, logger),
+		store:    store,
+		cfg:      cfg,
+		client:   client,
+		notifier: notifier,
+		cache:    ripcache.NewManager(cfg, logger),
 	}
 	rip.SetLogger(logger)
 	return rip
@@ -84,9 +77,6 @@ func (r *Ripper) SetLogger(logger *slog.Logger) {
 	r.logger = stageLogger.With(logging.String("component", "ripper"))
 	if r.cache != nil {
 		r.cache.SetLogger(stageLogger)
-	}
-	if r.contentMatcher != nil {
-		r.contentMatcher.SetLogger(logger)
 	}
 }
 
@@ -351,28 +341,6 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			logger.Warn("episode asset mapping incomplete", logging.String("dest_dir", destDir))
 		} else {
 			specDirty = true
-			canMatchEpisodes := r.contentMatcher != nil && r.cfg != nil && r.cfg.OpenSubtitlesEnabled
-			if canMatchEpisodes {
-				if updated, err := r.contentMatcher.Match(ctx, item, &env); err != nil {
-					return services.Wrap(
-						services.ErrTransient,
-						"ripping",
-						"content id",
-						"Failed to correlate episodes with OpenSubtitles; retry once the service is reachable",
-						err,
-					)
-				} else if updated {
-					specDirty = true
-				}
-			} else {
-				reason := "content matcher unavailable"
-				if r.cfg == nil {
-					reason = "configuration unavailable"
-				} else if !r.cfg.OpenSubtitlesEnabled {
-					reason = "opensubtitles disabled"
-				}
-				logger.Info("episode content identification skipped", logging.String("reason", reason))
-			}
 			paths := episodeAssetPaths(env)
 			if len(paths) > 0 {
 				validationTargets = paths
