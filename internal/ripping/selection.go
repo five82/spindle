@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const audioSelectionRule = "-sel:all,+sel:video,+sel:audio&(eng),+sel:audio&(special)&(eng),-sel:subtitle"
+const audioSelectionRule = "-sel:all,+sel:video,+sel:audio,-sel:subtitle"
 
 func ensureMakeMKVSelectionRule() error {
 	settingsPath, err := resolveMakeMKVSettingsPath()
