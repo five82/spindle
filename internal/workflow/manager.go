@@ -491,7 +491,8 @@ func (m *Manager) newBackgroundHandler(path string) (slog.Handler, error) {
 		OutputPaths:      []string{path},
 		ErrorOutputPaths: []string{path},
 		Development:      false,
-		Stream:           m.logHub,
+		// Background logs stay scoped to item files so the daemon/API stream remains foreground-only.
+		Stream: nil,
 	})
 	if err != nil {
 		return nil, err
