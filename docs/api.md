@@ -19,7 +19,10 @@ monitor progress without shelling out to the CLI.
 
 ### `GET /api/status`
 
-Returns daemon runtime information and workflow diagnostics.
+Returns daemon runtime information and workflow diagnostics. With the episode
+identification stage enabled, expect an additional `stageHealth` entry named
+`episode-identifier` plus new queue counts for `episode_identifying` and
+`episode_identified`.
 
 ```json
 {
@@ -65,7 +68,7 @@ Lists queue items. Optional query parameters:
 - `status=<value>` — repeatable. Filters by lifecycle status (e.g.
   `pending`, `failed`).
 
-Example: `GET /api/queue?status=failed&status=review`
+Example: `GET /api/queue?status=episode_identifying&status=failed`
 
 ```json
 {
@@ -74,8 +77,8 @@ Example: `GET /api/queue?status=failed&status=review`
       "id": 12,
       "discTitle": "Some Movie",
       "sourcePath": "/media/cdrom",
-      "status": "failed",
-      "progress": { "stage": "Ripping", "percent": 10 },
+      "status": "episode_identifying",
+      "progress": { "stage": "Episode identification", "percent": 42 },
       "errorMessage": "Unable to read title 1",
       "createdAt": "2025-10-05T14:31:22.123Z",
       "updatedAt": "2025-10-05T14:42:57.812Z",
@@ -131,13 +134,24 @@ Returns metadata for a single queue entry.
 | Field | Description |
 | --- | --- |
 | `queueDbPath` | Full path to the SQLite queue database used by the daemon. |
-| `workflow.queueStats` | Map keyed by lifecycle status -> item count. Matches `internal/queue.Status` values. |
-| `workflow.stageHealth` | Stage readiness results from `StageHandler.HealthCheck`. Useful for dependency dashboards. |
-| `items[].progress` | Stage name, percent 0-100, and last message recorded for the item. |
+| `workflow.queueStats` | Map keyed by lifecycle status -> item count. Includes the episode identification states (`episode_identifying`, `episode_identified`) when TV discs are flowing. |
+| `workflow.stageHealth` | Stage readiness results from `StageHandler.HealthCheck`, including the `episode-identifier` handler when enabled. Useful for dependency dashboards. |
+| `items[].status` | Current lifecycle state from `internal/queue.Status` (`pending → identifying → identified → ripping → ripped → episode_identifying → episode_identified → encoding → encoded → subtitling → subtitled → organizing → completed`, plus `failed`/`review`). |
+| `items[].progress` | Stage name, percent 0-100, and last message recorded for the item. Episode identification surfaces as "Episode identification". |
 | `items[].metadata` | Raw TMDB/metadata JSON captured during identification. Omitted when empty. |
 | `items[].episodes[]` | One entry per planned episode on a TV disc. Includes season/episode numbers once verified, current stage (`planned`, `ripped`, `encoded`, `final`), runtime, artifact paths, and subtitle match info. Empty for movie discs. |
 | `items[].episodeTotals` | Aggregate counts (`planned`, `ripped`, `encoded`, `final`) derived from the per-episode map. Useful for quick progress bars. |
 | `items[].episodesSynchronized` | `true` when WhisperX/OpenSubtitles confirmed the episode order and both `MetadataJSON`/rip spec were updated. `false` when Spindle is still relying on heuristic disc ordering. |
+
+### Episode Identification States
+
+The API does not need special handling for the episode identification stage: it
+emits whatever status the queue assigns. Once the stage runs, items advance from
+`ripped` to `episode_identifying` while WhisperX/OpenSubtitles align episodes;
+on success they flip to `episode_identified` before the encoder picks them up.
+API consumers should treat these states like any other processing hop, updating
+dashboards or filters if they previously assumed `ripped` flowed straight to
+`encoding`.
 
 ## Versioning & Compatibility
 
