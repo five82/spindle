@@ -443,7 +443,8 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 					)
 				}
 				// Background tasks should log ONLY to the item log, not the daemon log
-				base = slog.New(bgHandler)
+				// Ensure item_id is baked into the logger so all background logs are properly tagged
+				base = slog.New(bgHandler).With(logging.Int64("item_id", item.ID))
 			}
 		}
 	}
