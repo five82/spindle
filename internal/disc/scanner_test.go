@@ -307,6 +307,7 @@ TINFO:0,9,0,"1:39:03"
 	// Verify scan still succeeded despite bd_info failure
 	if result == nil {
 		t.Fatal("expected scan result even when bd_info fails")
+		return
 	}
 
 	// Should not have bd_info data when command fails

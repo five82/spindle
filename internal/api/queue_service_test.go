@@ -95,6 +95,7 @@ func TestQueueService_Describe(t *testing.T) {
 	}
 	if item == nil {
 		t.Fatal("Describe returned nil item")
+		return
 	}
 	if item.ID != 7 {
 		t.Fatalf("unexpected id: %d", item.ID)

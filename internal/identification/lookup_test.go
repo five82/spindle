@@ -51,6 +51,7 @@ func TestLookupTMDBByTitleReturnsBestMatch(t *testing.T) {
 	}
 	if match == nil {
 		t.Fatal("expected match, got nil")
+		return
 	}
 	if match.TMDBID != 862 {
 		t.Fatalf("expected tmdb id 862, got %d", match.TMDBID)
@@ -67,6 +68,7 @@ func TestLookupTMDBByTitleReturnsBestMatch(t *testing.T) {
 
 	if captured == nil {
 		t.Fatal("expected query parameters to be captured")
+		return
 	}
 	if captured.Get("query") != "Toy Story" {
 		t.Fatalf("expected query parameter Toy Story, got %q", captured.Get("query"))

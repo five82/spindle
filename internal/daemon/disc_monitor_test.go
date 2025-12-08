@@ -93,6 +93,7 @@ func TestDiscMonitorQueuesNewDisc(t *testing.T) {
 	monitor := newDiscMonitor(cfg, store, logging.NewNop())
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
+		return
 	}
 
 	monitor.pollInterval = 10 * time.Millisecond
@@ -157,6 +158,7 @@ func TestDiscMonitorResetsExistingItem(t *testing.T) {
 	monitor := newDiscMonitor(cfg, store, logging.NewNop())
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
+		return
 	}
 
 	monitor.pollInterval = 10 * time.Millisecond
@@ -217,6 +219,7 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 	monitor := newDiscMonitor(cfg, store, logging.NewNop())
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
+		return
 	}
 
 	monitor.pollInterval = 10 * time.Millisecond

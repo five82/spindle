@@ -17,6 +17,7 @@ func TestSelectBestResultExactMatch(t *testing.T) {
 	best := selectBestResult(logger, "Example", resp)
 	if best == nil {
 		t.Fatal("expected best result, got nil")
+		return
 	}
 	if best.ID != 1 {
 		t.Fatalf("expected ID 1, got %d", best.ID)

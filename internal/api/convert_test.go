@@ -64,3 +64,24 @@ func TestFromQueueItemIncludesEpisodes(t *testing.T) {
 		t.Fatalf("expected fallback episode number to update, got %d", dto.Episodes[1].Episode)
 	}
 }
+
+func TestEpisodeStageFallsBackToQueueStatus(t *testing.T) {
+	season := 3
+	epKey := ripspec.EpisodeKey(season, 7)
+	env := ripspec.Envelope{
+		Titles:   []ripspec.Title{{ID: 1, Name: "Title Seven", Duration: 1500}},
+		Episodes: []ripspec.Episode{{Key: epKey, TitleID: 1, Season: season, Episode: 7}},
+	}
+	encoded, err := env.Encode()
+	if err != nil {
+		t.Fatalf("encode rip spec: %v", err)
+	}
+	item := &queue.Item{Status: queue.StatusRipping, RipSpecData: encoded}
+	dto := FromQueueItem(item)
+	if len(dto.Episodes) != 1 {
+		t.Fatalf("expected 1 episode, got %d", len(dto.Episodes))
+	}
+	if dto.Episodes[0].Stage != "ripping" {
+		t.Fatalf("expected stage to fall back to queue status, got %s", dto.Episodes[0].Stage)
+	}
+}

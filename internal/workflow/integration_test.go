@@ -122,6 +122,7 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 		}
 		if updated == nil {
 			t.Fatal("queue item disappeared")
+			return
 		}
 		if updated.Status == queue.StatusCompleted {
 			if updated.RippedFile == "" {

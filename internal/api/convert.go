@@ -167,6 +167,7 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 	titles := indexTitles(env.Titles)
 	assets := indexAssets(env.Assets)
 	matches := indexMatches(env.Attributes)
+	effectiveStage := makeEpisodeStageResolver(item)
 	statuses := make([]EpisodeStatus, 0, len(env.Episodes))
 	totals := EpisodeTotals{Planned: len(env.Episodes)}
 	for _, ep := range env.Episodes {
@@ -191,25 +192,21 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 				status.RuntimeSeconds = t.Duration
 			}
 		}
-		stage := "planned"
 		if asset, ok := assets[strings.ToLower(ep.Key)]; ok {
 			if asset.RippedPath != "" {
 				status.RippedPath = asset.RippedPath
 				totals.Ripped++
-				stage = "ripped"
 			}
 			if asset.EncodedPath != "" {
 				status.EncodedPath = asset.EncodedPath
 				totals.Encoded++
-				stage = "encoded"
 			}
 			if asset.FinalPath != "" {
 				status.FinalPath = asset.FinalPath
 				totals.Final++
-				stage = "final"
 			}
 		}
-		status.Stage = stage
+		status.Stage = effectiveStage(status)
 		if match, ok := matches[strings.ToLower(ep.Key)]; ok {
 			status.SubtitleLanguage = match.SubtitleLanguage
 			status.SubtitleSource = match.SubtitleSource
@@ -358,6 +355,65 @@ func episodesSynced(attrs map[string]any, episodes []ripspec.Episode, metadataJS
 	}
 	val, ok := payload["episode_numbers"].([]any)
 	return ok && len(val) > 0
+}
+
+func makeEpisodeStageResolver(item *queue.Item) func(EpisodeStatus) string {
+	queueStage := deriveQueueStage(item)
+	return func(status EpisodeStatus) string {
+		// Prefer concrete artefacts over inferred status.
+		switch {
+		case status.FinalPath != "":
+			return "final"
+		case status.EncodedPath != "":
+			return "encoded"
+		case status.RippedPath != "":
+			return "ripped"
+		case queueStage != "":
+			return queueStage
+		default:
+			return "planned"
+		}
+	}
+}
+
+func deriveQueueStage(item *queue.Item) string {
+	if item == nil {
+		return ""
+	}
+	switch item.Status {
+	case queue.StatusCompleted:
+		return "final"
+	case queue.StatusOrganizing:
+		return "organizing"
+	case queue.StatusSubtitled:
+		return "subtitled"
+	case queue.StatusSubtitling:
+		return "subtitling"
+	case queue.StatusEncoded:
+		return "encoded"
+	case queue.StatusEncoding:
+		return "encoding"
+	case queue.StatusEpisodeIdentified:
+		return "episode_identified"
+	case queue.StatusEpisodeIdentifying:
+		return "episode_identifying"
+	case queue.StatusRipped:
+		return "ripped"
+	case queue.StatusRipping:
+		return "ripping"
+	case queue.StatusIdentified:
+		return "identified"
+	case queue.StatusIdentifying:
+		return "identifying"
+	case queue.StatusFailed:
+		return "failed"
+	case queue.StatusReview:
+		return "review"
+	case queue.StatusPending:
+		return "planned"
+	default:
+		return ""
+	}
 }
 
 func asString(v any) string {
