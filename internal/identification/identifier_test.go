@@ -160,6 +160,29 @@ func TestIdentifierMarksDuplicateForReview(t *testing.T) {
 	}
 }
 
+func TestIdentifierSkipsDuplicateCheckWithoutStore(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+
+	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{{ID: 3, Title: "CLI Disc", VoteAverage: 7.5, VoteCount: 50, ReleaseDate: "2005-02-01"}}, TotalResults: 1}}
+	stubScanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-cli", Titles: []disc.Title{{ID: 1, Name: "", Duration: 7200}}}}
+	handler := identification.NewIdentifierWithDependencies(cfg, nil, logging.NewNop(), stubTMDB, stubScanner, nil)
+	item := &queue.Item{DiscTitle: "CLI Disc", Status: queue.StatusPending}
+
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if item.NeedsReview {
+		t.Fatalf("expected identification without store to skip duplicate review, got %q", item.ReviewReason)
+	}
+	if strings.TrimSpace(item.MetadataJSON) == "" {
+		t.Fatal("expected metadata to be populated")
+	}
+}
+
 func TestIdentifierMarksReviewWhenNoResults(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)

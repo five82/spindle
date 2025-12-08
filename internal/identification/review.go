@@ -11,8 +11,18 @@ import (
 )
 
 func (i *Identifier) handleDuplicateFingerprint(ctx context.Context, item *queue.Item) error {
+	if i.store == nil {
+		// Identification CLI runs without a queue store; duplicate detection isn't possible there.
+		return nil
+	}
+
 	logger := logging.WithContext(ctx, i.logger)
-	found, err := i.store.FindByFingerprint(ctx, item.DiscFingerprint)
+	fingerprint := strings.TrimSpace(item.DiscFingerprint)
+	if fingerprint == "" {
+		return nil
+	}
+
+	found, err := i.store.FindByFingerprint(ctx, fingerprint)
 	if err != nil {
 		return services.Wrap(services.ErrTransient, "identification", "lookup fingerprint", "Failed to query existing disc fingerprint", err)
 	}
