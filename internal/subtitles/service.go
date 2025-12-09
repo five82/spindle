@@ -698,6 +698,13 @@ func defaultCommandRunner(ctx context.Context, name string, args ...string) erro
 	var stderr strings.Builder
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
+
+	// Torch 2.6 changed torch.load default to weights_only=true, breaking WhisperX/pyannote.
+	// Force legacy behavior so bundled WhisperX binaries can load checkpoints safely.
+	if os.Getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD") == "" {
+		cmd.Env = append(os.Environ(), "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1")
+	}
+
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
