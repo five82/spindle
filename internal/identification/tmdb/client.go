@@ -156,14 +156,16 @@ func (c *Client) SearchMovieWithOptions(ctx context.Context, query string, opts 
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
+	requestStart := time.Now()
 	resp, err := c.httpClient.Do(req)
+	latency := time.Since(requestStart)
 	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
+		return nil, fmt.Errorf("execute request (latency=%v): %w", latency, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tmdb search returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("tmdb search returned %d (latency=%v)", resp.StatusCode, latency)
 	}
 
 	var payload Response
@@ -199,14 +201,16 @@ func (c *Client) SearchTVWithOptions(ctx context.Context, query string, opts Sea
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
+	requestStart := time.Now()
 	resp, err := c.httpClient.Do(req)
+	latency := time.Since(requestStart)
 	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
+		return nil, fmt.Errorf("execute request (latency=%v): %w", latency, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tmdb tv search returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("tmdb tv search returned %d (latency=%v)", resp.StatusCode, latency)
 	}
 
 	var payload Response
@@ -242,14 +246,16 @@ func (c *Client) SearchMultiWithOptions(ctx context.Context, query string, opts 
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
+	requestStart := time.Now()
 	resp, err := c.httpClient.Do(req)
+	latency := time.Since(requestStart)
 	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
+		return nil, fmt.Errorf("execute request (latency=%v): %w", latency, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tmdb multi search returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("tmdb multi search returned %d (latency=%v)", resp.StatusCode, latency)
 	}
 
 	var payload Response
@@ -282,14 +288,16 @@ func (c *Client) GetSeasonDetails(ctx context.Context, showID int64, seasonNumbe
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
+	requestStart := time.Now()
 	resp, err := c.httpClient.Do(req)
+	latency := time.Since(requestStart)
 	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
+		return nil, fmt.Errorf("execute request (latency=%v): %w", latency, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tmdb season fetch returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("tmdb season fetch returned %d (latency=%v)", resp.StatusCode, latency)
 	}
 
 	var payload SeasonDetails

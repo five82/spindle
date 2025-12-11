@@ -558,9 +558,12 @@ func (s *Service) invokeOpenSubtitles(ctx context.Context, op func() error) erro
 			backoff = openSubtitlesMaxBackoff
 		}
 		if s.logger != nil {
-			s.logger.Warn("opensubtitles rate limited",
+			s.logger.Warn("opensubtitles rate limited, retrying",
 				logging.Duration("backoff", backoff),
 				logging.Int("attempt", attempt),
+				logging.Int("max_attempts", openSubtitlesMaxRateRetries),
+				logging.Error(err),
+				logging.String("reason", "rate limit or transient network error"),
 			)
 		}
 		if err := sleepWithContext(ctx, backoff); err != nil {

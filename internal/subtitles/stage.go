@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"log/slog"
 
@@ -69,6 +70,7 @@ func (s *Stage) Prepare(ctx context.Context, item *queue.Item) error {
 
 // Execute performs subtitle generation for the queue item.
 func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
+	stageStart := time.Now()
 	if s == nil || s.service == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "execute", "Subtitle stage is not configured", nil)
 	}
@@ -210,27 +212,21 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		alertValue = "subtitle_fallback"
 	}
 	if s.logger != nil {
+		summaryAttrs := []logging.Attr{
+			logging.Duration("stage_duration", time.Since(stageStart)),
+			logging.Int("episodes", len(targets)),
+			logging.Int("opensubtitles", openSubsCount),
+			logging.Int("whisperx_fallback", aiCount),
+			logging.Int("segments", totalSegments),
+			logging.Bool("needs_review", item.NeedsReview),
+			logging.Int("opensubtitles_missing", fallbackEpisodes),
+			logging.Bool("opensubtitles_expected", openSubsExpected),
+		}
 		if alertValue != "" {
-			s.logger.Warn("subtitle stage summary",
-				logging.Int("episodes", len(targets)),
-				logging.Int("opensubtitles", openSubsCount),
-				logging.Int("whisperx_fallback", aiCount),
-				logging.Int("segments", totalSegments),
-				logging.Bool("needs_review", item.NeedsReview),
-				logging.Int("opensubtitles_missing", fallbackEpisodes),
-				logging.Bool("opensubtitles_expected", openSubsExpected),
-				logging.Alert(alertValue),
-			)
+			summaryAttrs = append(summaryAttrs, logging.Alert(alertValue))
+			s.logger.Warn("subtitle stage summary", logging.Args(summaryAttrs...)...)
 		} else {
-			s.logger.Info("subtitle stage summary",
-				logging.Int("episodes", len(targets)),
-				logging.Int("opensubtitles", openSubsCount),
-				logging.Int("whisperx_fallback", aiCount),
-				logging.Int("segments", totalSegments),
-				logging.Bool("needs_review", item.NeedsReview),
-				logging.Int("opensubtitles_missing", fallbackEpisodes),
-				logging.Bool("opensubtitles_expected", openSubsExpected),
-			)
+			s.logger.Info("subtitle stage summary", logging.Args(summaryAttrs...)...)
 		}
 	}
 	return nil

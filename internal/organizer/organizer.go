@@ -88,7 +88,7 @@ func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 
 func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, o.logger)
-	stageStarted := time.Now()
+	stageStart := time.Now()
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
 		return services.Wrap(
@@ -134,7 +134,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logger.Warn("review notification failed", logging.Error(err))
 			}
 		}
-		if err := o.validateOrganizedArtifact(ctx, reviewPath, stageStarted); err != nil {
+		if err := o.validateOrganizedArtifact(ctx, reviewPath, stageStart); err != nil {
 			return err
 		}
 		o.cleanupStaging(ctx, item)
@@ -170,7 +170,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 	if len(jobs) > 0 {
-		return o.organizeEpisodes(ctx, item, &env, jobs, logger, stageStarted)
+		return o.organizeEpisodes(ctx, item, &env, jobs, logger, stageStart)
 	}
 
 	o.updateProgress(ctx, item, "Organizing library structure", 20)
@@ -184,7 +184,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	if err := o.moveGeneratedSubtitles(ctx, item, targetPath); err != nil {
 		logger.Warn("subtitle sidecar move failed", logging.Error(err))
 	}
-	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted); err != nil {
+	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStart); err != nil {
 		return err
 	}
 
@@ -197,10 +197,21 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 
 	o.updateProgress(ctx, item, "Organization completed", 100)
 	item.ProgressMessage = fmt.Sprintf("Available in library: %s", filepath.Base(targetPath))
+
+	// Calculate resource metrics
+	var finalFileSize int64
+	if info, err := os.Stat(targetPath); err == nil {
+		finalFileSize = info.Size()
+	}
+
+	// Log stage summary
 	logger.Info(
-		"organization completed",
+		"organizing stage summary",
 		logging.String("final_file", targetPath),
-		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
+		logging.Duration("stage_duration", time.Since(stageStart)),
+		logging.Int64("final_file_size_bytes", finalFileSize),
+		logging.String("media_title", strings.TrimSpace(meta.Title())),
+		logging.Bool("is_movie", meta.IsMovie()),
 	)
 
 	if o.notifier != nil {

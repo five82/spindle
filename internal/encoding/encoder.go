@@ -315,7 +315,7 @@ func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 
 func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
-	startedAt := time.Now()
+	stageStart := time.Now()
 
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
@@ -440,7 +440,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	for _, path := range encodedPaths {
-		if err := e.validateEncodedArtifact(ctx, path, startedAt); err != nil {
+		if err := e.validateEncodedArtifact(ctx, path, stageStart); err != nil {
 			return err
 		}
 	}
@@ -469,11 +469,33 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			logger.Warn("encoding notification failed", logging.Error(err))
 		}
 	}
-	logger.Info(
-		"encoding stage completed",
+
+	// Calculate resource consumption metrics
+	var totalInputBytes, totalOutputBytes int64
+	for _, path := range encodedPaths {
+		if info, err := os.Stat(path); err == nil {
+			totalOutputBytes += info.Size()
+		}
+	}
+	if info, err := os.Stat(strings.TrimSpace(item.RippedFile)); err == nil {
+		totalInputBytes = info.Size()
+	}
+	var compressionRatio float64
+	if totalInputBytes > 0 {
+		compressionRatio = float64(totalOutputBytes) / float64(totalInputBytes) * 100
+	}
+
+	// Log stage summary with timing and resource metrics
+	summaryAttrs := []logging.Attr{
 		logging.String("encoded_file", item.EncodedFile),
-		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
-	)
+		logging.Duration("stage_duration", time.Since(stageStart)),
+		logging.Int64("input_bytes", totalInputBytes),
+		logging.Int64("output_bytes", totalOutputBytes),
+		logging.Float64("compression_ratio_percent", compressionRatio),
+		logging.Int("files_encoded", len(encodedPaths)),
+		logging.String("preset_profile", strings.TrimSpace(item.DraptoPresetProfile)),
+	}
+	logger.Info("encoding stage summary", logging.Args(summaryAttrs...)...)
 
 	return nil
 }

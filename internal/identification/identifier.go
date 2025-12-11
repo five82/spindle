@@ -140,9 +140,11 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 
 // Execute performs disc scanning and TMDB identification.
 func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
+	stageStart := time.Now()
 	logger := logging.WithContext(ctx, i.logger)
 	device := strings.TrimSpace(i.cfg.OpticalDrive)
 	logger.Info("scanning disc with makemkv", logging.String("device", device))
+	scanStart := time.Now()
 	scanResult, err := i.scanDisc(ctx)
 	if err != nil {
 		return err
@@ -192,6 +194,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		logging.Int("title_count", titleCount),
 		logging.Bool("bd_info_available", hasBDInfo),
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.Duration("scan_duration", time.Since(scanStart)),
 	}
 	if fp := strings.TrimSpace(item.DiscFingerprint); fp != "" {
 		scanSummary = append(scanSummary, logging.String("fingerprint", fp))
@@ -204,11 +207,25 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	var overrideMatch *overrides.Override
 	if i.overrides != nil {
+		overrideLookupStart := time.Now()
 		if match, ok, err := i.overrides.Lookup(item.DiscFingerprint, discID); err != nil {
-			logger.Warn("override lookup failed", logging.Error(err))
+			logger.Warn("override lookup failed",
+				logging.Error(err),
+				logging.String("fingerprint", item.DiscFingerprint),
+				logging.String("disc_id", discID),
+				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
 		} else if ok {
 			overrideMatch = &match
-			logger.Info("identification override matched", logging.String("override_title", match.Title), logging.Int64("override_tmdb_id", match.TMDBID))
+			logger.Info("identification override matched",
+				logging.String("override_title", match.Title),
+				logging.Int64("override_tmdb_id", match.TMDBID),
+				logging.String("reason", "manual override configured for fingerprint/disc_id"),
+				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
+		} else {
+			logger.Debug("no override match found",
+				logging.String("fingerprint", item.DiscFingerprint),
+				logging.String("disc_id", discID),
+				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
 		}
 	}
 
@@ -222,24 +239,31 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		case i.keydb == nil:
 			logger.Debug("keydb lookup skipped", logging.String("reason", "keydb catalog unavailable"))
 		case discID != "" && i.keydb != nil:
+			keydbLookupStart := time.Now()
 			entry, found, err := i.keydb.Lookup(discID)
+			keydbLookupDuration := time.Since(keydbLookupStart)
 			if err != nil {
 				logger.Warn("keydb lookup failed",
 					logging.String("disc_id", discID),
-					logging.Error(err))
+					logging.Error(err),
+					logging.Duration("lookup_duration", keydbLookupDuration))
 			} else if found {
 				keydbTitle := strings.TrimSpace(entry.Title)
 				if keydbTitle != "" {
 					logger.Info("title updated from keydb",
 						logging.String("disc_id", discID),
-						logging.String("new_title", keydbTitle))
+						logging.String("original_title", title),
+						logging.String("new_title", keydbTitle),
+						logging.String("reason", "keydb contains authoritative title for disc_id"),
+						logging.Duration("lookup_duration", keydbLookupDuration))
 					title = keydbTitle
 					item.DiscTitle = title
 					titleFromKeyDB = true
 				}
 			} else {
 				logger.Debug("keydb lookup produced no match",
-					logging.String("disc_id", discID))
+					logging.String("disc_id", discID),
+					logging.Duration("lookup_duration", keydbLookupDuration))
 			}
 		}
 	} else if i.keydb != nil {
@@ -403,16 +427,20 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if isPlaceholderTitle(title, discLabel) {
 		logger.Info("tmdb lookup skipped for placeholder title",
 			logging.String("title", title),
-			logging.String("disc_label", discLabel))
+			logging.String("disc_label", discLabel),
+			logging.String("reason", "title is generic/placeholder; cannot perform meaningful search"))
 		i.scheduleReview(ctx, item, "Disc title placeholder; manual identification required")
 	} else {
 		var (
-			best      *tmdb.Result
-			response  *tmdb.Response
-			modeUsed  searchMode
-			searchErr error
+			best         *tmdb.Result
+			response     *tmdb.Response
+			modeUsed     searchMode
+			searchErr    error
+			tmdbStart    = time.Now()
+			queriesCount int
 		)
 		for _, candidate := range queries {
+			queriesCount++
 			resp, mode, err := i.performTMDBSearch(ctx, logger, candidate, searchOpts, mediaHint)
 			if err != nil {
 				searchErr = err
@@ -447,13 +475,20 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		if best == nil {
 			lastQuery := queries[len(queries)-1]
+			tmdbDuration := time.Since(tmdbStart)
 			if searchErr != nil {
-				logger.Warn("tmdb search failed", logging.String("query", lastQuery), logging.Error(searchErr))
+				logger.Warn("tmdb search failed",
+					logging.String("query", lastQuery),
+					logging.Error(searchErr),
+					logging.Int("queries_attempted", queriesCount),
+					logging.Duration("total_tmdb_duration", tmdbDuration))
 				i.scheduleReview(ctx, item, "TMDB lookup failed")
 			} else {
 				logger.Warn("tmdb confidence scoring failed",
 					logging.String("query", lastQuery),
-					logging.String("reason", "No result met confidence threshold"))
+					logging.String("reason", "No result met confidence threshold"),
+					logging.Int("queries_attempted", queriesCount),
+					logging.Duration("total_tmdb_duration", tmdbDuration))
 				i.scheduleReview(ctx, item, "No confident TMDB match")
 			}
 		} else {
@@ -563,6 +598,10 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 				logging.Int64("tmdb_id", best.ID),
 				logging.String("identified_title", identifiedTitle),
 				logging.String("media_type", strings.TrimSpace(best.MediaType)),
+				logging.Int("queries_attempted", queriesCount),
+				logging.Duration("tmdb_search_duration", time.Since(tmdbStart)),
+				logging.Float64("vote_average", best.VoteAverage),
+				logging.Int64("vote_count", best.VoteCount),
 			)
 			if i.notifier != nil {
 				notifyType := mediaType
@@ -716,6 +755,9 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
+	// Log stage summary with timing and key metrics
+	i.logStageSummary(ctx, item, stageStart, identified, titleCount, tmdbID, mediaType)
+
 	return nil
 }
 
@@ -833,6 +875,26 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 	)
 
 	return nil
+}
+
+// logStageSummary logs a summary of the identification stage with timing and key metrics.
+func (i *Identifier) logStageSummary(ctx context.Context, item *queue.Item, stageStart time.Time, identified bool, titleCount int, tmdbID int64, mediaType string) {
+	logger := logging.WithContext(ctx, i.logger)
+	attrs := []logging.Attr{
+		logging.Duration("stage_duration", time.Since(stageStart)),
+		logging.Bool("identified", identified),
+		logging.Int("titles_scanned", titleCount),
+		logging.String("final_disc_title", strings.TrimSpace(item.DiscTitle)),
+	}
+	if identified {
+		attrs = append(attrs, logging.Int64("tmdb_id", tmdbID))
+		attrs = append(attrs, logging.String("media_type", mediaType))
+	}
+	if item.NeedsReview {
+		attrs = append(attrs, logging.Bool("needs_review", true))
+		attrs = append(attrs, logging.String("review_reason", strings.TrimSpace(item.ReviewReason)))
+	}
+	logger.Info("identification stage summary", logging.Args(attrs...)...)
 }
 
 func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger, title string, opts tmdb.SearchOptions, hint mediaKind) (*tmdb.Response, searchMode, error) {
