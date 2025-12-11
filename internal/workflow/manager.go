@@ -892,7 +892,7 @@ func (m *Manager) notifyStageError(ctx context.Context, stageName string, item *
 		if errors.Is(err, context.Canceled) {
 			logger.Info("daemon shutting down, could not send error notification")
 		} else {
-			logger.Warn("stage error notification failed", logging.Error(err))
+			logger.Debug("stage error notification failed", logging.Error(err))
 		}
 	}
 }
@@ -926,7 +926,7 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 		if errors.Is(err, context.Canceled) {
 			m.logger.Info("daemon shutting down, could not send queue start notification")
 		} else {
-			m.logger.Warn("queue start notification failed", logging.Error(err))
+			m.logger.Debug("queue start notification failed", logging.Error(err))
 		}
 	}
 }
@@ -974,7 +974,7 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 		if errors.Is(err, context.Canceled) {
 			m.logger.Info("daemon shutting down, could not send queue completion notification")
 		} else {
-			m.logger.Warn("queue completion notification failed", logging.Error(err))
+			m.logger.Debug("queue completion notification failed", logging.Error(err))
 		}
 	}
 }

@@ -113,15 +113,7 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Fetching metadata"
 	item.ProgressPercent = 0
 
-	displayTitle := strings.TrimSpace(item.DiscTitle)
-	if displayTitle == "" {
-		displayTitle = deriveTitle(item.SourcePath)
-	}
-	logger.Info(
-		"starting disc identification",
-		logging.String("disc_title", displayTitle),
-		logging.String("source_path", strings.TrimSpace(item.SourcePath)),
-	)
+	logger.Debug("starting disc identification")
 
 	if i.notifier != nil && strings.TrimSpace(item.SourcePath) == "" {
 		title := strings.TrimSpace(item.DiscTitle)
@@ -132,7 +124,7 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 			"discTitle": title,
 			"discType":  "unknown",
 		}); err != nil {
-			logger.Warn("disc detected notification failed", logging.Error(err))
+			logger.Debug("disc detected notification failed", logging.Error(err))
 		}
 	}
 	return nil
@@ -616,7 +608,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 						"displayTitle": titleWithYear,
 					}
 					if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
-						logger.Warn("identification notification failed", logging.Error(err))
+						logger.Debug("identification notification failed", logging.Error(err))
 					}
 				}
 			}
@@ -868,10 +860,9 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 		return err
 	}
 
-	logger.Info(
+	logger.Debug(
 		"identification validation succeeded",
 		logging.String("fingerprint", fingerprint),
-		logging.String("staging_root", item.StagingRoot(i.cfg.StagingDir)),
 	)
 
 	return nil

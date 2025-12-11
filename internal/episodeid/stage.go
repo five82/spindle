@@ -66,10 +66,7 @@ func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error
 	item.ProgressMessage = "Analyzing episode content"
 	item.ProgressPercent = 0
 
-	logger.Info("starting episode identification",
-		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		logging.Int("season", metadata.SeasonNumber),
-	)
+	logger.Debug("starting episode identification")
 
 	return nil
 }

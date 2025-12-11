@@ -69,7 +69,7 @@ func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message s
 				label = "Unidentified Disc"
 			}
 			if err := i.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{"label": label}); err != nil {
-				logger.Warn("unidentified media notification failed", logging.Error(err))
+				logger.Debug("unidentified media notification failed", logging.Error(err))
 			}
 		}
 	} else {

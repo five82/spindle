@@ -305,11 +305,7 @@ func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressPercent = 0
 	item.DraptoPresetProfile = ""
 	item.ErrorMessage = ""
-	logger.Info(
-		"starting encoding preparation",
-		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		logging.String("ripped_file", strings.TrimSpace(item.RippedFile)),
-	)
+	logger.Debug("starting encoding preparation")
 	return nil
 }
 
@@ -328,7 +324,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
-	logger.Info("starting encoding", logging.String("ripped_file", strings.TrimSpace(item.RippedFile)))
+	logger.Debug("starting encoding")
 	if strings.TrimSpace(item.RippedFile) == "" {
 		return services.Wrap(
 			services.ErrValidation,
@@ -466,7 +462,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	if e.client != nil && e.notifier != nil {
 		if err := e.notifier.Publish(ctx, notifications.EventEncodingCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
-			logger.Warn("encoding notification failed", logging.Error(err))
+			logger.Debug("encoding notification failed", logging.Error(err))
 		}
 	}
 
@@ -1334,17 +1330,14 @@ func (e *Encoder) validateEncodedArtifact(ctx context.Context, path string, star
 		)
 	}
 
-	logger.Info(
+	logger.Debug(
 		"encoding validation succeeded",
 		logging.String("encoded_file", clean),
 		logging.Duration("elapsed", time.Since(startedAt)),
-		logging.String("ffprobe_binary", binary),
 		logging.Group("ffprobe",
 			logging.Float64("duration_seconds", duration),
 			logging.Int("video_streams", probe.VideoStreamCount()),
 			logging.Int("audio_streams", probe.AudioStreamCount()),
-			logging.Int64("size_bytes", info.Size()),
-			logging.Int64("bitrate_bps", probe.BitRate()),
 		),
 	)
 	return nil

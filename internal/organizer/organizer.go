@@ -78,11 +78,7 @@ func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Preparing library organization"
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
-	logger.Info(
-		"starting organization preparation",
-		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
-	)
+	logger.Debug("starting organization preparation")
 	return nil
 }
 
@@ -99,11 +95,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			err,
 		)
 	}
-	logger.Info(
-		"starting organization",
-		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
-		logging.Bool("needs_review", item.NeedsReview),
-	)
+	logger.Debug("starting organization")
 	if item.EncodedFile == "" {
 		return services.Wrap(
 			services.ErrValidation,
@@ -131,7 +123,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		if o.notifier != nil {
 			label := filepath.Base(reviewPath)
 			if err := o.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{"filename": label}); err != nil {
-				logger.Warn("review notification failed", logging.Error(err))
+				logger.Debug("review notification failed", logging.Error(err))
 			}
 		}
 		if err := o.validateOrganizedArtifact(ctx, reviewPath, stageStart); err != nil {
@@ -484,17 +476,14 @@ func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, 
 		)
 	}
 
-	logger.Info(
+	logger.Debug(
 		"organizer validation succeeded",
 		logging.String("final_file", clean),
 		logging.Duration("elapsed", time.Since(startedAt)),
-		logging.String("ffprobe_binary", binary),
 		logging.Group("ffprobe",
 			logging.Float64("duration_seconds", duration),
 			logging.Int("video_streams", probe.VideoStreamCount()),
 			logging.Int("audio_streams", probe.AudioStreamCount()),
-			logging.Int64("size_bytes", info.Size()),
-			logging.Int64("bitrate_bps", probe.BitRate()),
 		),
 	)
 	return nil

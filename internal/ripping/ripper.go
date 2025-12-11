@@ -88,14 +88,10 @@ func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Starting rip"
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
-	logger.Info(
-		"starting rip preparation",
-		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		logging.String("source_path", strings.TrimSpace(item.SourcePath)),
-	)
+	logger.Debug("starting rip preparation")
 	if r.notifier != nil {
 		if err := r.notifier.Publish(ctx, notifications.EventRipStarted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
-			logger.Warn("failed to send rip start notification", logging.Error(err))
+			logger.Debug("failed to send rip start notification", logging.Error(err))
 		}
 	}
 	return nil
@@ -187,46 +183,20 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 
 	cacheUsed := false
-	var cacheDecisionReason string
+	var cacheStatus string // "hit", "miss", "invalid", "error", or ""
 	if useCache && existsNonEmptyDir(destDir) {
-		cacheCheckStart := time.Now()
 		cachedTarget, err := selectCachedRip(destDir)
 		if err != nil {
-			cacheDecisionReason = "cache inspection failed"
-			logger.Warn("failed to inspect existing rip cache",
-				logging.String("cache_dir", destDir),
-				logging.Error(err),
-				logging.Duration("cache_check_duration", time.Since(cacheCheckStart)))
+			cacheStatus = "error"
+			logger.Warn("cache inspection failed", logging.Error(err))
 		} else if cachedTarget != "" {
 			if err := r.validateRippedArtifact(ctx, item, cachedTarget, startedAt); err == nil {
 				target = cachedTarget
 				cacheUsed = true
-				cacheDecisionReason = "valid cached rip found and validated"
-				info, _ := os.Stat(cachedTarget)
-				var cacheSize int64
-				var cacheAge time.Duration
-				if info != nil {
-					cacheSize = info.Size()
-					cacheAge = time.Since(info.ModTime())
-				}
-				logger.Info(
-					"using cached rip entry",
-					logging.String("cache_dir", destDir),
-					logging.String("ripped_file", target),
-					logging.String("reason", cacheDecisionReason),
-					logging.Int64("cached_file_size_bytes", cacheSize),
-					logging.Duration("cache_age", cacheAge),
-					logging.Duration("cache_check_duration", time.Since(cacheCheckStart)),
-				)
+				cacheStatus = "hit"
 			} else {
-				cacheDecisionReason = "cached rip failed validation"
-				logger.Info(
-					"discarding invalid cached rip entry",
-					logging.String("cache_dir", destDir),
-					logging.String("reason", cacheDecisionReason),
-					logging.Error(err),
-					logging.Duration("cache_check_duration", time.Since(cacheCheckStart)),
-				)
+				cacheStatus = "invalid"
+				logger.Debug("cached rip failed validation", logging.Error(err))
 				_ = os.RemoveAll(destDir)
 				if mkErr := os.MkdirAll(destDir, 0o755); mkErr != nil {
 					return services.Wrap(
@@ -239,21 +209,10 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				}
 			}
 		} else {
-			cacheDecisionReason = "cache directory exists but contains no valid MKV files"
-			logger.Info(
-				"rip cache checked; no valid MKV entries found",
-				logging.String("cache_dir", destDir),
-				logging.String("reason", cacheDecisionReason),
-				logging.Duration("cache_check_duration", time.Since(cacheCheckStart)),
-			)
+			cacheStatus = "miss"
 		}
 	} else if useCache {
-		cacheDecisionReason = "cache directory empty or does not exist"
-		logger.Info(
-			"rip cache empty; no prior rip to reuse",
-			logging.String("cache_dir", destDir),
-			logging.String("reason", cacheDecisionReason),
-		)
+		cacheStatus = "miss"
 	}
 	defer func() {
 		if cacheCleanup == "" {
@@ -263,13 +222,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			_ = os.RemoveAll(cacheCleanup)
 		}
 	}()
-	logger.Info(
-		"starting rip execution",
-		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		logging.String("staging_root", stagingRoot),
-		logging.String("destination_dir", destDir),
-		logging.Bool("makemkv_enabled", r.client != nil),
-	)
+	logger.Debug("starting rip execution")
 
 	var titleIDs []int
 	var makemkvDuration time.Duration
@@ -316,15 +269,9 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if info, statErr := os.Stat(target); statErr == nil {
 			rippedSize = info.Size()
 		}
-		logger.Info("makemkv rip finished",
-			logging.String("ripped_file", target),
-			logging.Duration("makemkv_duration", makemkvDuration),
-			logging.Int64("ripped_size_bytes", rippedSize),
-			logging.Int("titles_ripped", len(titleIDs)))
-	}
-
-	if cacheUsed {
-		logger.Info("skipped makemkv; cached rip validated", logging.String("ripped_file", target))
+		logger.Debug("makemkv rip finished",
+			logging.Duration("duration", makemkvDuration),
+			logging.Int64("size_bytes", rippedSize))
 	}
 
 	if target == "" {
@@ -449,29 +396,26 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	item.ProgressMessage = "Disc content ripped"
 
 	// Log stage summary with timing and resource metrics
-	stageDuration := time.Since(startedAt)
 	var totalRippedBytes int64
 	if info, statErr := os.Stat(target); statErr == nil {
 		totalRippedBytes = info.Size()
 	}
 	summaryAttrs := []logging.Attr{
-		logging.String("ripped_file", target),
-		logging.Duration("stage_duration", stageDuration),
+		logging.Duration("stage_duration", time.Since(startedAt)),
 		logging.Int64("total_ripped_bytes", totalRippedBytes),
-		logging.Bool("cache_used", cacheUsed),
 		logging.Int("titles_ripped", len(titleIDs)),
 	}
-	if makemkvDuration > 0 {
-		summaryAttrs = append(summaryAttrs, logging.Duration("makemkv_duration", makemkvDuration))
+	if cacheStatus != "" {
+		summaryAttrs = append(summaryAttrs, logging.String("cache", cacheStatus))
 	}
-	if cacheDecisionReason != "" {
-		summaryAttrs = append(summaryAttrs, logging.String("cache_decision", cacheDecisionReason))
+	if makemkvDuration > 0 {
+		summaryAttrs = append(summaryAttrs, logging.Duration("rip_time", makemkvDuration))
 	}
 	logger.Info("ripping stage summary", logging.Args(summaryAttrs...)...)
 
 	if r.notifier != nil {
 		if err := r.notifier.Publish(ctx, notifications.EventRipCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
-			logger.Warn("rip completion notification failed", logging.Error(err))
+			logger.Debug("rip completion notification failed", logging.Error(err))
 		}
 	}
 
@@ -725,17 +669,14 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 		)
 	}
 
-	logger.Info(
+	logger.Debug(
 		"ripping validation succeeded",
 		logging.String("ripped_file", clean),
 		logging.Duration("elapsed", time.Since(startedAt)),
-		logging.String("ffprobe_binary", binary),
 		logging.Group("ffprobe",
 			logging.Float64("duration_seconds", duration),
 			logging.Int("video_streams", probe.VideoStreamCount()),
 			logging.Int("audio_streams", probe.AudioStreamCount()),
-			logging.Int64("size_bytes", info.Size()),
-			logging.Int64("bitrate_bps", probe.BitRate()),
 		),
 	)
 
