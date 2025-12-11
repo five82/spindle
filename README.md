@@ -95,7 +95,7 @@ The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
   `spindle show --component encoder --lane background --request req-123 --follow`.
 - The console logger only prints the highest-signal fields per line; if you need
   every attribute (for example while debugging TMDB responses), set
-  `SPINDLE_LOG_VERBOSE=1 spindle show --follow` to show the complete detail list
+  `spindle show --follow` to show the complete detail list
   instead of the summarized bullets.
 
 ### Adaptive encoding presets (optional)

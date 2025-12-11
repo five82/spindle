@@ -272,7 +272,7 @@ func eventFromRecord(record slog.Record) LogEvent {
 	})
 
 	if len(attrs) > 0 {
-		if info, _ := selectInfoFields(attrs, infoAttrLimit); len(info) > 0 {
+		if info, _ := selectInfoFields(attrs, infoAttrLimit, false); len(info) > 0 {
 			event.Details = make([]DetailField, 0, len(info))
 			for _, field := range info {
 				event.Details = append(event.Details, DetailField{

@@ -60,7 +60,9 @@ var infoHighlightKeys = []string{
 	"preset_reason",
 }
 
-func selectInfoFields(attrs []kv, limit int) ([]infoField, int) {
+// selectInfoFields returns formatted info-level fields and a count of hidden entries.
+// limit=0 means no limit. includeDebug controls whether debug-only keys are allowed.
+func selectInfoFields(attrs []kv, limit int, includeDebug bool) ([]infoField, int) {
 	if len(attrs) == 0 {
 		return nil, 0
 	}
@@ -92,12 +94,12 @@ func selectInfoFields(attrs []kv, limit int) ([]infoField, int) {
 			if skipInfoKey(attr.key) {
 				break
 			}
-			if isDebugOnlyKey(attr.key) {
+			if !includeDebug && isDebugOnlyKey(attr.key) {
 				hidden++
 				break
 			}
 			val := ensureValue(idx)
-			if shouldHideInfoValue(attr.key, val) {
+			if !includeDebug && shouldHideInfoValue(attr.key, val) {
 				hidden++
 				break
 			}
@@ -114,12 +116,12 @@ func selectInfoFields(attrs []kv, limit int) ([]infoField, int) {
 		if skipInfoKey(attr.key) {
 			continue
 		}
-		if isDebugOnlyKey(attr.key) {
+		if !includeDebug && isDebugOnlyKey(attr.key) {
 			hidden++
 			continue
 		}
 		val := ensureValue(idx)
-		if shouldHideInfoValue(attr.key, val) {
+		if !includeDebug && shouldHideInfoValue(attr.key, val) {
 			hidden++
 			continue
 		}

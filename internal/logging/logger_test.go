@@ -282,7 +282,7 @@ func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
 		t.Fatalf("read log file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
-	if len(lines) != 6 {
+	if len(lines) != 5 {
 		t.Fatalf("unexpected line count: %v", lines)
 	}
 	if !strings.Contains(lines[0], "INFO [workflow-runner] Item #9 (ripper) – stage started") {
@@ -294,14 +294,11 @@ func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
 	if !strings.Contains(lines[2], "- Status: ripping") {
 		t.Fatalf("expected status bullet, got %q", lines[2])
 	}
-	if !strings.Contains(lines[3], "+ 1 more field hidden") {
-		t.Fatalf("expected hidden summary, got %q", lines[3])
+	if !strings.Contains(lines[3], "- Correlation Id: abc-123") {
+		t.Fatalf("expected correlation bullet, got %q", lines[3])
 	}
 	if !strings.Contains(lines[4], "INFO [workflow-runner] Item #9 (ripper) – stage started") {
 		t.Fatalf("second header should be present, got %q", lines[4])
-	}
-	if !strings.Contains(lines[5], "+ 1 more field hidden") {
-		t.Fatalf("second entry hidden summary missing, got %q", lines[5])
 	}
 }
 
