@@ -21,7 +21,7 @@ These presets allows us to add a level of targeted encoding based on content typ
 
 Static rules for preset selection based on genre and year would cover most content. But you would miss the edge cases such as older computer animated movies and newer films with high amounts on grain that LLMs caught in my testing.
 
-I selected deepseek-v3.1-terminus as the default model because of its lower cost and accuracy. GPT-5 mini was also very accurate. Some of the other smaller models such as gpt-oss-20b tended to be hit or miss with the outliers we're trying to classify.
+Deepseek-v3.2 is the default model because of its low cost and accuracy. GPT-5 mini was also very accurate. Some of the other smaller models such as gpt-oss-20b tended to be hit or miss with the outliers we're trying to classify.
 
 ## Data sent to the LLM
 
@@ -42,7 +42,7 @@ are never included.
 
 ```toml
 preset_decider_enabled = true
-preset_decider_model = "deepseek/deepseek-v3.1-terminus"
+preset_decider_model = "deepseek/deepseek-v3.2"
 preset_decider_base_url = "https://openrouter.ai/api/v1/chat/completions"
 preset_decider_api_key = " your_openrouter_key "
 preset_decider_referer = "https://github.com/five82/spindle"
@@ -55,7 +55,7 @@ preset_decider_title = "Spindle Preset Decider"
   `deepseek_api_key` and `DEEPSEEK_API_KEY` continue to work but are
   discouraged.
 - `preset_decider_model` – any OpenRouter model that supports structured JSON
-  output. Defaults to `deepseek/deepseek-v3.1-terminus`.
+  output. Defaults to `deepseek/deepseek-v3.2`.
 - `preset_decider_base_url` – override if you self-host a router or call a
   different provider.
 - `preset_decider_referer` & `preset_decider_title` – sent via headers because

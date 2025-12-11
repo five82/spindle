@@ -115,7 +115,7 @@ alignment artifacts inside each queue item’s staging folder for debugging.
 - `preset_decider_enabled`, `preset_decider_model`, `preset_decider_base_url`,
   `preset_decider_api_key`, `preset_decider_referer`, `preset_decider_title` —
   configure the OpenRouter-powered preset selector. Defaults point at
-  `deepseek/deepseek-v3.1-terminus`; supply an API key via config or
+  `deepseek/deepseek-v3.2`; supply an API key via config or
   `OPENROUTER_API_KEY`.
 
 ## Queue & Workflow Toggles

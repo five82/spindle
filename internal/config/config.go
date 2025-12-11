@@ -97,7 +97,7 @@ const (
 	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
 	defaultRipCacheMaxGiB              = 150
 	defaultPresetDeciderBaseURL        = "https://openrouter.ai/api/v1/chat/completions"
-	defaultPresetDeciderModel          = "deepseek/deepseek-v3.1-terminus"
+	defaultPresetDeciderModel          = "deepseek/deepseek-v3.2"
 	defaultPresetDeciderReferer        = "https://github.com/five82/spindle"
 	defaultPresetDeciderTitle          = "Spindle Preset Decider"
 )
@@ -637,7 +637,7 @@ identification_overrides_path = "~/.config/spindle/overrides/identification.json
 # ============================================================================
 
 preset_decider_enabled = false                       # When true, use an LLM to choose clean/grain/default Drapto presets per title
-preset_decider_model = "deepseek/deepseek-v3.1-terminus" # OpenRouter model identifier
+preset_decider_model = "deepseek/deepseek-v3.2"      # OpenRouter model identifier
 preset_decider_base_url = "https://openrouter.ai/api/v1/chat/completions" # Override to point at another provider
 preset_decider_api_key = ""                         # Required when the preset decider is enabled; or set OPENROUTER_API_KEY
 preset_decider_referer = "https://github.com/five82/spindle" # Sent to OpenRouter for routing/analytics
