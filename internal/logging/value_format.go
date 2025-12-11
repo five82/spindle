@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 )
 
 func attrString(v slog.Value) string {
@@ -19,6 +20,82 @@ func attrString(v slog.Value) string {
 	default:
 		return formatValue(v)
 	}
+}
+
+// formatBytes returns a human-readable byte size string.
+func formatBytes(bytes int64) string {
+	if bytes < 0 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	value := float64(bytes) / float64(div)
+	units := []string{"KB", "MB", "GB", "TB", "PB"}
+	if exp >= len(units) {
+		exp = len(units) - 1
+	}
+	// Use appropriate precision based on size
+	if value >= 100 {
+		return fmt.Sprintf("%.0f %s", value, units[exp])
+	} else if value >= 10 {
+		return fmt.Sprintf("%.1f %s", value, units[exp])
+	}
+	return fmt.Sprintf("%.2f %s", value, units[exp])
+}
+
+// formatDurationHuman returns a cleaner duration string for display.
+func formatDurationHuman(d time.Duration) string {
+	if d < 0 {
+		return d.String()
+	}
+	// For very short durations, show with limited precision
+	if d < time.Second {
+		ms := d.Milliseconds()
+		if ms > 0 {
+			return fmt.Sprintf("%dms", ms)
+		}
+		return d.String()
+	}
+	// For durations under a minute, show seconds with one decimal
+	if d < time.Minute {
+		secs := d.Seconds()
+		if secs == float64(int(secs)) {
+			return fmt.Sprintf("%ds", int(secs))
+		}
+		return fmt.Sprintf("%.1fs", secs)
+	}
+	// For longer durations, use a cleaner format
+	hours := int(d.Hours())
+	mins := int(d.Minutes()) % 60
+	secs := int(d.Seconds()) % 60
+	if hours > 0 {
+		if secs > 0 {
+			return fmt.Sprintf("%dh %dm %ds", hours, mins, secs)
+		}
+		if mins > 0 {
+			return fmt.Sprintf("%dh %dm", hours, mins)
+		}
+		return fmt.Sprintf("%dh", hours)
+	}
+	if secs > 0 {
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	}
+	return fmt.Sprintf("%dm", mins)
+}
+
+// formatPercent formats a percentage with appropriate precision.
+func formatPercent(value float64) string {
+	if value == float64(int(value)) {
+		return fmt.Sprintf("%.0f%%", value)
+	}
+	return fmt.Sprintf("%.1f%%", value)
 }
 
 func formatValue(v slog.Value) string {

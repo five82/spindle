@@ -1,6 +1,9 @@
 package logging
 
-import "strings"
+import (
+	"log/slog"
+	"strings"
+)
 
 type infoField struct {
 	label string
@@ -58,6 +61,26 @@ var infoHighlightKeys = []string{
 	"drapto_error_title",
 	"drapto_error_message",
 	"preset_reason",
+	// Stage summary fields
+	"stage_duration",
+	"scan_duration",
+	"makemkv_duration",
+	"tmdb_search_duration",
+	"total_ripped_bytes",
+	"ripped_size_bytes",
+	"input_bytes",
+	"output_bytes",
+	"compression_ratio_percent",
+	"final_file_size_bytes",
+	"files_encoded",
+	"titles_ripped",
+	"title_count",
+	"cache_used",
+	"cache_decision",
+	"identified",
+	"media_type",
+	"media_title",
+	"reason",
 }
 
 // selectInfoFields returns formatted info-level fields and a count of hidden entries.
@@ -74,7 +97,7 @@ func selectInfoFields(attrs []kv, limit int, includeDebug bool) ([]infoField, in
 	formattedSet := make([]bool, len(attrs))
 	ensureValue := func(idx int) string {
 		if !formattedSet[idx] {
-			formatted[idx] = formatValue(attrs[idx].value)
+			formatted[idx] = formatValueForKey(attrs[idx].key, attrs[idx].value)
 			formattedSet[idx] = true
 		}
 		return formatted[idx]
@@ -133,6 +156,68 @@ func selectInfoFields(attrs []kv, limit int, includeDebug bool) ([]infoField, in
 	}
 
 	return result, hidden
+}
+
+// formatValueForKey applies smart formatting based on the key name.
+func formatValueForKey(key string, v slog.Value) string {
+	v = v.Resolve()
+
+	// Handle byte sizes
+	if isByteSizeKey(key) && (v.Kind() == slog.KindInt64 || v.Kind() == slog.KindUint64) {
+		var bytes int64
+		if v.Kind() == slog.KindInt64 {
+			bytes = v.Int64()
+		} else {
+			bytes = int64(v.Uint64())
+		}
+		return formatBytes(bytes)
+	}
+
+	// Handle durations
+	if isDurationKey(key) && v.Kind() == slog.KindDuration {
+		return formatDurationHuman(v.Duration())
+	}
+
+	// Handle percentages
+	if isPercentKey(key) && v.Kind() == slog.KindFloat64 {
+		return formatPercent(v.Float64())
+	}
+
+	// Handle booleans with friendlier display
+	if v.Kind() == slog.KindBool {
+		if v.Bool() {
+			return "yes"
+		}
+		return "no"
+	}
+
+	return formatValue(v)
+}
+
+// isByteSizeKey returns true if the key represents a byte size.
+func isByteSizeKey(key string) bool {
+	return strings.HasSuffix(key, "_bytes") ||
+		strings.HasSuffix(key, "_size") ||
+		key == "size" ||
+		key == "input_bytes" ||
+		key == "output_bytes"
+}
+
+// isDurationKey returns true if the key represents a duration.
+func isDurationKey(key string) bool {
+	return strings.HasSuffix(key, "_duration") ||
+		strings.HasSuffix(key, "_elapsed") ||
+		strings.HasSuffix(key, "_latency") ||
+		key == "elapsed" ||
+		key == "duration" ||
+		key == "backoff"
+}
+
+// isPercentKey returns true if the key represents a percentage.
+func isPercentKey(key string) bool {
+	return strings.HasSuffix(key, "_percent") ||
+		strings.HasSuffix(key, "_ratio_percent") ||
+		key == "progress_percent"
 }
 
 func skipInfoKey(key string) bool {
@@ -224,6 +309,57 @@ func displayLabel(key string) string {
 		return "Type"
 	case "runtime_minutes":
 		return "Runtime"
+	// Stage summary fields - concise labels
+	case "stage_duration":
+		return "Duration"
+	case "scan_duration":
+		return "Scan Time"
+	case "makemkv_duration":
+		return "Rip Time"
+	case "tmdb_search_duration":
+		return "TMDB Lookup"
+	case "total_ripped_bytes", "ripped_size_bytes":
+		return "Ripped Size"
+	case "input_bytes":
+		return "Input"
+	case "output_bytes":
+		return "Output"
+	case "compression_ratio_percent":
+		return "Compression"
+	case "final_file_size_bytes":
+		return "File Size"
+	case "files_encoded":
+		return "Files"
+	case "titles_ripped", "title_count":
+		return "Titles"
+	case "cache_used":
+		return "Cache Hit"
+	case "cache_decision":
+		return "Cache"
+	case "identified":
+		return "Identified"
+	case "media_type":
+		return "Type"
+	case "media_title":
+		return "Title"
+	case "identified_title":
+		return "Title"
+	case "queries_attempted":
+		return "Queries"
+	case "needs_review":
+		return "Needs Review"
+	case "preset_profile":
+		return "Preset"
+	case "is_movie":
+		return "Movie"
+	case "reason":
+		return "Reason"
+	case "opensubtitles":
+		return "OpenSubtitles"
+	case "whisperx_fallback":
+		return "WhisperX"
+	case "episodes":
+		return "Episodes"
 	default:
 		return titleizeKey(key)
 	}
