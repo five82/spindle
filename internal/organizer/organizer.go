@@ -122,7 +122,10 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		if o.notifier != nil {
 			label := filepath.Base(reviewPath)
-			if err := o.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{"filename": label}); err != nil {
+			if err := o.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{
+				"filename": label,
+				"reason":   strings.TrimSpace(item.ReviewReason),
+			}); err != nil {
 				logger.Debug("review notification failed", logging.Error(err))
 			}
 		}
@@ -181,10 +184,12 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	o.updateProgress(ctx, item, "Refreshing Plex library", 80)
+	plexRefreshed := false
 	if err := o.plex.Refresh(ctx, meta); err != nil {
 		logger.Warn("plex refresh failed", logging.Error(err))
 	} else {
 		logger.Info("plex library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
+		plexRefreshed = true
 	}
 
 	o.updateProgress(ctx, item, "Organization completed", 100)
@@ -215,8 +220,9 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			title = filepath.Base(targetPath)
 		}
 		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
-			"mediaTitle": title,
-			"finalFile":  filepath.Base(targetPath),
+			"mediaTitle":    title,
+			"finalFile":     filepath.Base(targetPath),
+			"plexRefreshed": plexRefreshed,
 		}); err != nil {
 			logger.Warn("organization notifier failed", logging.Error(err))
 		}
@@ -370,8 +376,9 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 	item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
 	if o.notifier != nil {
 		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
-			"mediaTitle": strings.TrimSpace(item.DiscTitle),
-			"finalFile":  filepath.Base(item.FinalFile),
+			"mediaTitle":    strings.TrimSpace(item.DiscTitle),
+			"finalFile":     filepath.Base(item.FinalFile),
+			"plexRefreshed": true,
 		}); err != nil {
 			logger.Warn("organization notifier failed", logging.Error(err))
 		}

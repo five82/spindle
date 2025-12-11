@@ -414,7 +414,12 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	logger.Info("ripping stage summary", logging.Args(summaryAttrs...)...)
 
 	if r.notifier != nil {
-		if err := r.notifier.Publish(ctx, notifications.EventRipCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
+		if err := r.notifier.Publish(ctx, notifications.EventRipCompleted, notifications.Payload{
+			"discTitle": item.DiscTitle,
+			"duration":  time.Since(startedAt),
+			"bytes":     totalRippedBytes,
+			"cache":     cacheStatus,
+		}); err != nil {
 			logger.Debug("rip completion notification failed", logging.Error(err))
 		}
 	}

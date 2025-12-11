@@ -83,6 +83,16 @@ skips Plex refreshes but still files media correctly.
 - `ntfy_topic` — ntfy.sh topic for workflow notifications (disc inserted,
   rip/encode complete, failures).
 - `ntfy_base_url` — Override when self-hosting ntfy.
+- `notify_identification` / `notify_rip` / `notify_encoding` /
+  `notify_organization` — Per-stage toggles.
+- `notify_queue` — Send queue start/finish only when `count >= notify_queue_min_items`
+  (default 2) to avoid noise.
+- `notify_review` — Notify when an item is diverted to `review_dir`.
+- `notify_errors` — Always send errors when true.
+- `notify_min_rip_seconds` — Skip rip-complete notifications for cache hits faster
+  than this many seconds (default 120).
+- `notify_dedup_window_seconds` — Suppress identical notifications within this
+  window (default 600s).
 - `api_bind` — Bind address for the read-only HTTP API (default `127.0.0.1:7487`).
 - `api_tls_cert` / `api_tls_key` — Optional TLS assets when exposing the API on
   your LAN.

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"spindle/internal/config"
@@ -28,6 +29,7 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 		expectTitle    string
 		expectMessage  string
 		expectPriority string
+		expectTags     string
 	}{
 		{
 			name:  "identification completed",
@@ -40,6 +42,7 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			},
 			expectTitle:   "Spindle - Identified",
 			expectMessage: "🎬 Identified: Interstellar (2014)",
+			expectTags:    "identify",
 		},
 		{
 			name:  "disc detected",
@@ -59,25 +62,34 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			},
 			expectTitle:   "Spindle - Rip Complete",
 			expectMessage: "💿 Rip complete: Jurassic Park",
+			expectTags:    "rip",
 		},
 		{
 			name:  "encoding completed",
 			event: notifications.EventEncodingCompleted,
 			payload: notifications.Payload{
-				"discTitle": "The Matrix",
+				"discTitle":   "The Matrix",
+				"ratio":       50.0,
+				"inputBytes":  int64(1000),
+				"outputBytes": int64(500),
+				"files":       1,
+				"preset":      "default",
 			},
 			expectTitle:   "Spindle - Encoded",
-			expectMessage: "🎞️ Encoding complete: The Matrix",
+			expectMessage: "🎞️ Encoding complete: The Matrix\nPreset: default\nOutput: 500 B of 1000 B (50.0%)",
+			expectTags:    "encode",
 		},
 		{
 			name:  "organization completed",
 			event: notifications.EventOrganizationCompleted,
 			payload: notifications.Payload{
-				"mediaTitle": "Arrival",
-				"finalFile":  "Arrival (2016).mkv",
+				"mediaTitle":    "Arrival",
+				"finalFile":     "Arrival (2016).mkv",
+				"plexRefreshed": true,
 			},
 			expectTitle:   "Spindle - Library Updated",
-			expectMessage: "Added to Plex: Arrival\nFile: Arrival (2016).mkv",
+			expectMessage: "Added to Plex: Arrival\nFile: Arrival (2016).mkv\nPlex refresh requested",
+			expectTags:    "organize",
 		},
 		{
 			name:  "error",
@@ -89,6 +101,7 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			expectTitle:    "Spindle - Error",
 			expectMessage:  "❌ Error with rip: failed to read disc",
 			expectPriority: "high",
+			expectTags:     "error",
 		},
 	}
 
@@ -133,8 +146,8 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			if captured.body != tc.expectMessage {
 				t.Fatalf("expected message %q, got %q", tc.expectMessage, captured.body)
 			}
-			if captured.tags != "" {
-				t.Fatalf("expected no tags header, got %q", captured.tags)
+			if strings.TrimSpace(captured.tags) != strings.TrimSpace(tc.expectTags) {
+				t.Fatalf("expected tags %q, got %q", tc.expectTags, captured.tags)
 			}
 			if captured.priority != tc.expectPriority {
 				t.Fatalf("expected priority %q, got %q", tc.expectPriority, captured.priority)
@@ -156,14 +169,36 @@ func TestNtfyServiceIgnoresSuppressedEvents(t *testing.T) {
 	suppressed := []notifications.Event{
 		notifications.EventRipStarted,
 		notifications.EventProcessingCompleted,
-		notifications.EventQueueStarted,
-		notifications.EventQueueCompleted,
-		notifications.EventUnidentifiedMedia,
 	}
 
 	for _, event := range suppressed {
 		if err := svc.Publish(context.Background(), event, notifications.Payload{"value": "ignored"}); err != nil {
 			t.Fatalf("expected no error for suppressed event %s, got %v", event, err)
 		}
+	}
+}
+
+func TestQueueNotificationsRespectMinimumCount(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.NtfyTopic = server.URL
+	cfg.NotifyQueueMinItems = 2
+
+	svc := notifications.NewService(&cfg)
+	// Should suppress because below threshold.
+	if err := svc.Publish(context.Background(), notifications.EventQueueStarted, notifications.Payload{"count": 1}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should send because count meets threshold.
+	if err := svc.Publish(context.Background(), notifications.EventQueueStarted, notifications.Payload{"count": 3}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 notification sent, got %d", calls)
 	}
 }

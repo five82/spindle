@@ -460,12 +460,6 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	if suffix := presetSummary(decision); suffix != "" {
 		item.ProgressMessage = fmt.Sprintf("%s – %s", item.ProgressMessage, suffix)
 	}
-	if e.client != nil && e.notifier != nil {
-		if err := e.notifier.Publish(ctx, notifications.EventEncodingCompleted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
-			logger.Debug("encoding notification failed", logging.Error(err))
-		}
-	}
-
 	// Calculate resource consumption metrics
 	var totalInputBytes, totalOutputBytes int64
 	for _, path := range encodedPaths {
@@ -479,6 +473,20 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	var compressionRatio float64
 	if totalInputBytes > 0 {
 		compressionRatio = float64(totalOutputBytes) / float64(totalInputBytes) * 100
+	}
+
+	if e.notifier != nil {
+		if err := e.notifier.Publish(ctx, notifications.EventEncodingCompleted, notifications.Payload{
+			"discTitle":   item.DiscTitle,
+			"placeholder": e.client == nil,
+			"ratio":       compressionRatio,
+			"inputBytes":  totalInputBytes,
+			"outputBytes": totalOutputBytes,
+			"files":       len(encodedPaths),
+			"preset":      strings.TrimSpace(item.DraptoPresetProfile),
+		}); err != nil {
+			logger.Debug("encoding notification failed", logging.Error(err))
+		}
 	}
 
 	// Log stage summary with timing and resource metrics

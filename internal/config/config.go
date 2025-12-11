@@ -56,6 +56,16 @@ type Config struct {
 	WhisperXCUDAEnabled           bool     `toml:"whisperx_cuda_enabled"`
 	WhisperXVADMethod             string   `toml:"whisperx_vad_method"`
 	WhisperXHuggingFaceToken      string   `toml:"whisperx_hf_token"`
+	NotifyIdentification          bool     `toml:"notify_identification"`
+	NotifyRip                     bool     `toml:"notify_rip"`
+	NotifyEncoding                bool     `toml:"notify_encoding"`
+	NotifyOrganization            bool     `toml:"notify_organization"`
+	NotifyQueue                   bool     `toml:"notify_queue"`
+	NotifyReview                  bool     `toml:"notify_review"`
+	NotifyErrors                  bool     `toml:"notify_errors"`
+	NotifyMinRipSeconds           int      `toml:"notify_min_rip_seconds"`
+	NotifyQueueMinItems           int      `toml:"notify_queue_min_items"`
+	NotifyDedupWindowSeconds      int      `toml:"notify_dedup_window_seconds"`
 	OpenSubtitlesEnabled          bool     `toml:"opensubtitles_enabled"`
 	OpenSubtitlesAPIKey           string   `toml:"opensubtitles_api_key"`
 	OpenSubtitlesUserAgent        string   `toml:"opensubtitles_user_agent"`
@@ -89,6 +99,9 @@ const (
 	defaultWorkflowHeartbeatInterval   = 15
 	defaultWorkflowHeartbeatTimeout    = 120
 	defaultAPIBind                     = "127.0.0.1:7487"
+	defaultNotifyMinRipSeconds         = 120
+	defaultNotifyQueueMinItems         = 2
+	defaultNotifyDedupWindowSeconds    = 600
 	defaultPlexAuthPath                = "~/.config/spindle/plex_auth.json"
 	defaultKeyDBPath                   = "~/.config/spindle/keydb/KEYDB.cfg"
 	defaultKeyDBDownloadURL            = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
@@ -143,6 +156,16 @@ func Default() Config {
 		WhisperXVADMethod:           "silero",
 		OpenSubtitlesLanguages:      []string{"en"},
 		OpenSubtitlesUserAgent:      defaultOpenSubtitlesUserAgent,
+		NotifyIdentification:        true,
+		NotifyRip:                   true,
+		NotifyEncoding:              true,
+		NotifyOrganization:          true,
+		NotifyQueue:                 true,
+		NotifyReview:                true,
+		NotifyErrors:                true,
+		NotifyMinRipSeconds:         defaultNotifyMinRipSeconds,
+		NotifyQueueMinItems:         defaultNotifyQueueMinItems,
+		NotifyDedupWindowSeconds:    defaultNotifyDedupWindowSeconds,
 		PresetDeciderBaseURL:        defaultPresetDeciderBaseURL,
 		PresetDeciderModel:          defaultPresetDeciderModel,
 		PresetDeciderReferer:        defaultPresetDeciderReferer,
@@ -478,6 +501,15 @@ func (c *Config) Validate() error {
 	if c.PresetDeciderEnabled && strings.TrimSpace(c.PresetDeciderAPIKey) == "" {
 		return errors.New("preset_decider_api_key must be set when preset_decider_enabled is true (or set OPENROUTER_API_KEY)")
 	}
+	if c.NotifyMinRipSeconds < 0 {
+		return errors.New("notify_min_rip_seconds must be >= 0")
+	}
+	if c.NotifyQueueMinItems < 1 {
+		return errors.New("notify_queue_min_items must be >= 1")
+	}
+	if c.NotifyDedupWindowSeconds < 0 {
+		return errors.New("notify_dedup_window_seconds must be >= 0")
+	}
 	return nil
 }
 
@@ -607,6 +639,16 @@ tv_library = "TV Shows"                              # Plex TV library name
 # Notifications
 ntfy_topic = "https://ntfy.sh/your_topic"            # ntfy topic for push notifications (optional)
 ntfy_request_timeout = 10                            # ntfy HTTP client timeout (seconds)
+notify_identification = true                         # Send identification success notifications
+notify_rip = true                                    # Send rip completion notifications (skips fast cache hits)
+notify_encoding = true                               # Send encoding completion notifications (real encodes only)
+notify_organization = true                           # Send library/organizer completion notifications
+notify_queue = true                                  # Send queue start/finish notifications for batches
+notify_review = true                                 # Send notifications when an item is sent to review_dir
+notify_errors = true                                 # Always notify on errors when true
+notify_min_rip_seconds = 120                         # Suppress rip notifications for cache hits faster than this many seconds
+notify_queue_min_items = 2                           # Minimum items in flight to send queue start/finish notices
+notify_dedup_window_seconds = 600                    # De-duplicate identical notifications within this window (seconds)
 
 # AI-generated subtitles (optional)
 subtitles_enabled = false                            # Enable WhisperX subtitle generation after encoding
