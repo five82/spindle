@@ -1,6 +1,9 @@
 package queue
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Status represents the lifecycle of a queue item.
 type Status string
@@ -22,6 +25,32 @@ const (
 	StatusFailed             Status = "failed"
 	StatusReview             Status = "review"
 )
+
+var allStatuses = []Status{
+	StatusPending,
+	StatusIdentifying,
+	StatusIdentified,
+	StatusRipping,
+	StatusRipped,
+	StatusEpisodeIdentifying,
+	StatusEpisodeIdentified,
+	StatusEncoding,
+	StatusEncoded,
+	StatusSubtitling,
+	StatusSubtitled,
+	StatusOrganizing,
+	StatusCompleted,
+	StatusFailed,
+	StatusReview,
+}
+
+var statusSet = func() map[Status]struct{} {
+	set := make(map[Status]struct{}, len(allStatuses))
+	for _, status := range allStatuses {
+		set[status] = struct{}{}
+	}
+	return set
+}()
 
 var processingStatuses = map[Status]struct{}{
 	StatusIdentifying:        {},
@@ -101,10 +130,75 @@ type Item struct {
 	ReviewReason        string
 }
 
+// AllStatuses returns the ordered list of known statuses.
+func AllStatuses() []Status {
+	cp := make([]Status, len(allStatuses))
+	copy(cp, allStatuses)
+	return cp
+}
+
+// ParseStatus converts a string into a known Status.
+func ParseStatus(value string) (Status, bool) {
+	normalized := Status(strings.ToLower(strings.TrimSpace(value)))
+	if normalized == "" {
+		return "", false
+	}
+	_, ok := statusSet[normalized]
+	return normalized, ok
+}
+
 // IsProcessing returns true when the status reflects an in-flight operation.
 func (i Item) IsProcessing() bool {
 	_, ok := processingStatuses[i.Status]
 	return ok
+}
+
+// IsInWorkflow returns true when an item is actively progressing (or queued to progress)
+// through stages and should not be reset simply because the disc was reinserted.
+func (i Item) IsInWorkflow() bool {
+	if i.IsProcessing() {
+		return true
+	}
+	switch i.Status {
+	case StatusIdentified,
+		StatusRipped,
+		StatusEpisodeIdentified,
+		StatusEncoded,
+		StatusSubtitled,
+		StatusOrganizing,
+		StatusCompleted:
+		return true
+	default:
+		return false
+	}
+}
+
+// StageKey returns the normalized stage identifier used in API/CLI presentation.
+func (s Status) StageKey() string {
+	switch s {
+	case "":
+		return ""
+	case StatusPending:
+		return "planned"
+	case StatusCompleted:
+		return "final"
+	case StatusIdentifying,
+		StatusIdentified,
+		StatusRipping,
+		StatusRipped,
+		StatusEpisodeIdentifying,
+		StatusEpisodeIdentified,
+		StatusEncoding,
+		StatusEncoded,
+		StatusSubtitling,
+		StatusSubtitled,
+		StatusOrganizing,
+		StatusFailed,
+		StatusReview:
+		return string(s)
+	default:
+		return ""
+	}
 }
 
 // ProcessingLane partitions workflow into user-facing foreground stages and background work.

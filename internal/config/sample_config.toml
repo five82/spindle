@@ -1,0 +1,111 @@
+# Spindle Configuration
+# ====================
+# Edit the REQUIRED settings below, then customize optional settings when needed.
+
+# ============================================================================
+# REQUIRED SETTINGS - Update these before running Spindle
+# ============================================================================
+
+# TMDB API (required for media identification)
+tmdb_api_key = "your_tmdb_api_key_here"              # Get from themoviedb.org/settings/api
+
+# Directory paths - adjust for your environment
+library_dir = "~/your-media-library"                 # MUST EXIST: Final media library directory
+movies_dir = "movies"                                # Subdirectory inside library_dir for movies
+tv_dir = "tv"                                        # Subdirectory inside library_dir for TV
+
+# Library import behavior
+overwrite_existing_library_files = false             # Set true to replace existing MKV/SRT files in the library
+
+# ============================================================================
+# PATHS & HARDWARE
+# ============================================================================
+
+staging_dir = "~/.local/share/spindle/staging"       # Working directory for rips/encodes
+log_dir = "~/.local/share/spindle/logs"              # Logs and queue database
+log_retention_days = 60                               # Prune logs older than this many days (0 disables cleanup)
+review_dir = "~/review"                              # Encoded files awaiting manual identification
+optical_drive = "/dev/sr0"                           # Optical drive device path
+api_bind = "127.0.0.1:7487"                          # HTTP API bind address (host:port)
+
+# Optional rip cache (disabled by default)
+rip_cache_enabled = false                            # Keep copies of ripped files to avoid re-ripping after failures
+rip_cache_dir = "~/.cache/spindle/rips"              # Defaults to XDG_CACHE_HOME/spindle/rips when set
+rip_cache_max_gib = 150                              # Cache budget in GiB; oldest entries pruned when the cap or 80% disk fullness is hit
+
+# ============================================================================
+# OPTIONAL SERVICES
+# ============================================================================
+
+# Plex link (Plex library scanning)
+plex_link_enabled = true                             # If false, Spindle will not trigger Plex scans automatically
+plex_url = "http://localhost:32400"                  # Plex server URL (omit to disable)
+plex_auth_path = "~/.config/spindle/plex_auth.json"  # Location for stored Plex authorization tokens
+movies_library = "Movies"                            # Plex movie library name
+tv_library = "TV Shows"                              # Plex TV library name
+
+# Notifications
+ntfy_topic = "https://ntfy.sh/your_topic"            # ntfy topic for push notifications (optional)
+ntfy_request_timeout = 10                            # ntfy HTTP client timeout (seconds)
+notify_identification = true                         # Send identification success notifications
+notify_rip = true                                    # Send rip completion notifications (skips fast cache hits)
+notify_encoding = true                               # Send encoding completion notifications (real encodes only)
+notify_organization = true                           # Send library/organizer completion notifications
+notify_queue = true                                  # Send queue start/finish notifications for batches
+notify_review = true                                 # Send notifications when an item is sent to review_dir
+notify_errors = true                                 # Always notify on errors when true
+notify_min_rip_seconds = 120                         # Suppress rip notifications for cache hits faster than this many seconds
+notify_queue_min_items = 2                           # Minimum items in flight to send queue start/finish notices
+notify_dedup_window_seconds = 600                    # De-duplicate identical notifications within this window (seconds)
+
+# AI-generated subtitles (optional)
+subtitles_enabled = false                            # Enable WhisperX subtitle generation after encoding
+whisperx_cuda_enabled = false                        # Run WhisperX with CUDA; set true when GPU + CUDA/cuDNN are installed
+whisperx_vad_method = "silero"                       # Voice activity detector: "silero" (default, no token) or "pyannote" (requires Hugging Face token)
+whisperx_hf_token = ""                               # Hugging Face access token for pyannote VAD (leave empty when using silero)
+whisperx_cache_dir = "~/.local/share/spindle/cache/whisperx" # Cache for WhisperX transcripts shared between stages
+opensubtitles_enabled = false                        # Set true to fetch subtitles from OpenSubtitles before falling back to WhisperX
+opensubtitles_api_key = "your_opensubtitles_api_key_here" # Required when opensubtitles_enabled is true; create at opensubtitles.com/consumers
+opensubtitles_user_agent = "Spindle/<version>"       # Custom User-Agent header registered with OpenSubtitles
+opensubtitles_languages = ["en"]                     # Preferred subtitle languages (ISO 639-1 codes, e.g., ["en","es"])
+opensubtitles_user_token = ""                        # Optional OpenSubtitles user JWT for higher download limits
+
+# ============================================================================
+# TMDB & METADATA
+# ============================================================================
+
+tmdb_language = "en-US"                              # ISO 639-1 language for TMDB metadata
+tmdb_base_url = "https://api.themoviedb.org/3"       # Override when using a TMDB proxy
+tmdb_confidence_threshold = 0.8                      # Match confidence (0.0-1.0)
+keydb_path = "~/.config/spindle/keydb/KEYDB.cfg"     # Optional KEYDB.cfg for Disc ID lookups (leave empty to disable)
+keydb_download_url = "http://fvonline-db.bplaced.net/export/keydb_eng.zip" # Mirror for automatic KEYDB refreshes
+keydb_download_timeout = 1500                        # Download timeout in seconds when refreshing KEYDB
+identification_overrides_path = "~/.config/spindle/overrides/identification.json" # Optional JSON containing curated disc overrides
+
+# ============================================================================
+# ENCODING
+# ============================================================================
+
+preset_decider_enabled = false                       # When true, use an LLM to choose clean/grain/default Drapto presets per title
+preset_decider_model = "deepseek/deepseek-v3.2"      # OpenRouter model identifier
+preset_decider_base_url = "https://openrouter.ai/api/v1/chat/completions" # Override to point at another provider
+preset_decider_api_key = ""                         # Required when the preset decider is enabled; or set OPENROUTER_API_KEY
+preset_decider_referer = "https://github.com/five82/spindle" # Sent to OpenRouter for routing/analytics
+preset_decider_title = "Spindle Preset Decider"      # Display name sent via X-Title header
+
+# ============================================================================
+# WORKFLOW TUNING (ADVANCED)
+# ============================================================================
+
+makemkv_rip_timeout = 3600                           # MakeMKV ripping timeout (seconds)
+queue_poll_interval = 5                              # Queue polling cadence (seconds)
+error_retry_interval = 10                            # Delay before retrying failures (seconds)
+workflow_heartbeat_interval = 15                     # Worker heartbeat interval (seconds)
+workflow_heartbeat_timeout = 120                     # Worker heartbeat timeout (seconds)
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+
+log_format = "console"                              # "console" or "json"
+log_level = "info"                                  # info, debug, warn, error

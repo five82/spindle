@@ -358,7 +358,10 @@ func episodesSynced(attrs map[string]any, episodes []ripspec.Episode, metadataJS
 }
 
 func makeEpisodeStageResolver(item *queue.Item) func(EpisodeStatus) string {
-	queueStage := deriveQueueStage(item)
+	queueStage := ""
+	if item != nil {
+		queueStage = item.Status.StageKey()
+	}
 	return func(status EpisodeStatus) string {
 		// Prefer concrete artefacts over inferred status.
 		switch {
@@ -373,46 +376,6 @@ func makeEpisodeStageResolver(item *queue.Item) func(EpisodeStatus) string {
 		default:
 			return "planned"
 		}
-	}
-}
-
-func deriveQueueStage(item *queue.Item) string {
-	if item == nil {
-		return ""
-	}
-	switch item.Status {
-	case queue.StatusCompleted:
-		return "final"
-	case queue.StatusOrganizing:
-		return "organizing"
-	case queue.StatusSubtitled:
-		return "subtitled"
-	case queue.StatusSubtitling:
-		return "subtitling"
-	case queue.StatusEncoded:
-		return "encoded"
-	case queue.StatusEncoding:
-		return "encoding"
-	case queue.StatusEpisodeIdentified:
-		return "episode_identified"
-	case queue.StatusEpisodeIdentifying:
-		return "episode_identifying"
-	case queue.StatusRipped:
-		return "ripped"
-	case queue.StatusRipping:
-		return "ripping"
-	case queue.StatusIdentified:
-		return "identified"
-	case queue.StatusIdentifying:
-		return "identifying"
-	case queue.StatusFailed:
-		return "failed"
-	case queue.StatusReview:
-		return "review"
-	case queue.StatusPending:
-		return "planned"
-	default:
-		return ""
 	}
 }
 

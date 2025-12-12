@@ -92,7 +92,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 		return true, nil
 	}
 
-	if status == queue.StatusIdentified || status == queue.StatusRipped || status == queue.StatusEncoded || status == queue.StatusSubtitled || status == queue.StatusOrganizing || existing.IsProcessing() {
+	if existing.IsInWorkflow() {
 		if label != "" && shouldRefreshDiscTitle(existing.DiscTitle) && label != strings.TrimSpace(existing.DiscTitle) {
 			existing.DiscTitle = label
 			updated = true

@@ -9,12 +9,12 @@ import (
 	"net/rpc/jsonrpc"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"log/slog"
 
+	"spindle/internal/api"
 	"spindle/internal/daemon"
 	"spindle/internal/logging"
 	"spindle/internal/logs"
@@ -115,37 +115,12 @@ type service struct {
 	ctx    context.Context
 }
 
-func convertQueueItem(item *queue.Item) *QueueItem {
+func convertQueueItem(item *api.QueueItem) *QueueItem {
 	if item == nil {
 		return nil
 	}
-	qi := &QueueItem{
-		ID:                  item.ID,
-		DiscTitle:           item.DiscTitle,
-		SourcePath:          item.SourcePath,
-		Status:              string(item.Status),
-		ProgressStage:       item.ProgressStage,
-		ProgressPercent:     item.ProgressPercent,
-		ProgressMessage:     item.ProgressMessage,
-		DraptoPresetProfile: item.DraptoPresetProfile,
-		ErrorMessage:        item.ErrorMessage,
-		DiscFingerprint:     item.DiscFingerprint,
-		NeedsReview:         item.NeedsReview,
-		ReviewReason:        item.ReviewReason,
-		MetadataJSON:        item.MetadataJSON,
-		RipSpecData:         item.RipSpecData,
-		RippedFile:          item.RippedFile,
-		EncodedFile:         item.EncodedFile,
-		FinalFile:           item.FinalFile,
-		BackgroundLogPath:   item.BackgroundLogPath,
-	}
-	if !item.CreatedAt.IsZero() {
-		qi.CreatedAt = item.CreatedAt.Format(time.RFC3339)
-	}
-	if !item.UpdatedAt.IsZero() {
-		qi.UpdatedAt = item.UpdatedAt.Format(time.RFC3339)
-	}
-	return qi
+	qi := QueueItem(*item)
+	return &qi
 }
 
 func (s *service) Start(_ StartRequest, resp *StartResponse) error {
@@ -177,7 +152,8 @@ func (s *service) Status(_ StatusRequest, resp *StatusResponse) error {
 	}
 	resp.LastError = status.Workflow.LastError
 	if status.Workflow.LastItem != nil {
-		resp.LastItem = convertQueueItem(status.Workflow.LastItem)
+		item := api.FromQueueItem(status.Workflow.LastItem)
+		resp.LastItem = convertQueueItem(&item)
 	}
 	if len(status.Workflow.StageHealth) > 0 {
 		resp.StageHealth = make([]StageHealth, 0, len(status.Workflow.StageHealth))
@@ -214,11 +190,11 @@ func (s *service) Status(_ StatusRequest, resp *StatusResponse) error {
 func (s *service) QueueList(req QueueListRequest, resp *QueueListResponse) error {
 	statuses := make([]queue.Status, 0, len(req.Statuses))
 	for _, status := range req.Statuses {
-		trimmed := strings.TrimSpace(status)
-		if trimmed == "" {
+		parsed, ok := queue.ParseStatus(status)
+		if !ok {
 			continue
 		}
-		statuses = append(statuses, queue.Status(trimmed))
+		statuses = append(statuses, parsed)
 	}
 	items, err := s.daemon.ListQueue(s.ctx, statuses)
 	if err != nil {
@@ -226,7 +202,11 @@ func (s *service) QueueList(req QueueListRequest, resp *QueueListResponse) error
 	}
 	resp.Items = make([]QueueItem, 0, len(items))
 	for _, item := range items {
-		if qi := convertQueueItem(item); qi != nil {
+		if item == nil {
+			continue
+		}
+		dto := api.FromQueueItem(item)
+		if qi := convertQueueItem(&dto); qi != nil {
 			resp.Items = append(resp.Items, *qi)
 		}
 	}
@@ -244,7 +224,8 @@ func (s *service) QueueDescribe(req QueueDescribeRequest, resp *QueueDescribeRes
 	if item == nil {
 		return fmt.Errorf("queue item %d not found", req.ID)
 	}
-	if qi := convertQueueItem(item); qi != nil {
+	dto := api.FromQueueItem(item)
+	if qi := convertQueueItem(&dto); qi != nil {
 		resp.Item = *qi
 	}
 	return nil
