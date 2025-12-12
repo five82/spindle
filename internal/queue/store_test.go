@@ -38,6 +38,14 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	if found == nil || found.ID != item.ID {
 		t.Fatalf("expected to find inserted item, got %#v", found)
 	}
+
+	found, err = store.FindByFingerprint(ctx, " fingerprint-1 \n")
+	if err != nil {
+		t.Fatalf("FindByFingerprint (trimmed) failed: %v", err)
+	}
+	if found == nil || found.ID != item.ID {
+		t.Fatalf("expected to find inserted item via trimmed lookup, got %#v", found)
+	}
 }
 
 func TestNewDiscRequiresFingerprint(t *testing.T) {

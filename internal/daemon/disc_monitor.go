@@ -15,7 +15,6 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
-	"spindle/internal/disc/fingerprint"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -50,7 +49,6 @@ type discMonitor struct {
 	scanner discScanner
 
 	queueHandler  queueProcessor
-	fingerprints  fingerprintService
 	errorNotifier fingerprintErrorNotifier
 
 	device       string
@@ -96,15 +94,11 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger)
 	runner := execCommandRunner{}
 	detect := buildDetectFunc(runner, poll)
 
-	fingerprintService := fingerprint.ComputeTimeout
 	return &discMonitor{
-		cfg:          cfg,
-		logger:       monitorLogger,
-		scanner:      disc.NewScanner(cfg.MakemkvBinary()),
-		queueHandler: newQueueStoreProcessor(store),
-		fingerprints: fingerprintFunc(func(ctx context.Context, info discInfo, timeout time.Duration) (string, error) {
-			return fingerprintService(ctx, info.Device, info.Type, timeout)
-		}),
+		cfg:           cfg,
+		logger:        monitorLogger,
+		scanner:       disc.NewScanner(cfg.MakemkvBinary()),
+		queueHandler:  newQueueStoreProcessor(store),
 		errorNotifier: newNotifierAdapter(notifications.NewService(cfg)),
 		device:        device,
 		scanTimeout:   scanTimeout,
@@ -230,21 +224,29 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		defer cancel()
 	}
 
-	fpSvc := m.fingerprints
-	if fpSvc == nil {
-		fingerprintService := fingerprint.ComputeTimeout
-		fpSvc = fingerprintFunc(func(ctx context.Context, info discInfo, timeout time.Duration) (string, error) {
-			return fingerprintService(ctx, info.Device, info.Type, timeout)
-		})
+	scanner := m.scanner
+	if scanner == nil {
+		logger.Error("disc scanner unavailable")
+		return false
 	}
-	logger.Info("computing disc fingerprint", logging.Duration("timeout", m.scanTimeout))
-	discFingerprint, fpErr := fpSvc.Compute(scanCtx, info, m.scanTimeout)
-	if fpErr != nil {
-		logger.Error("generate fingerprint failed", logging.Error(fpErr))
+
+	logger.Info("scanning disc for fingerprint", logging.Duration("timeout", m.scanTimeout))
+	scanResult, scanErr := scanner.Scan(scanCtx, info.Device)
+	if scanErr != nil {
+		logger.Error("disc scan failed", logging.Error(scanErr))
 		if m.errorNotifier != nil {
-			m.errorNotifier.FingerprintFailed(ctx, info, fpErr, logger)
+			m.errorNotifier.FingerprintFailed(ctx, info, scanErr, logger)
 		}
 		return false
+	}
+
+	discFingerprint := ""
+	if scanResult != nil {
+		discFingerprint = strings.TrimSpace(scanResult.Fingerprint)
+	}
+	if discFingerprint == "" {
+		discFingerprint = strings.TrimSpace(info.Label)
+		logger.Warn("scanner fingerprint unavailable; falling back to disc label", logging.String("fallback", discFingerprint))
 	}
 	logger.Info("computed fingerprint", logging.String("fingerprint", discFingerprint))
 

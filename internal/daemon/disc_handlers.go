@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"log/slog"
 
@@ -13,22 +12,12 @@ import (
 	"spindle/internal/queue"
 )
 
-type fingerprintService interface {
-	Compute(ctx context.Context, info discInfo, timeout time.Duration) (string, error)
-}
-
 type queueProcessor interface {
 	Process(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error)
 }
 
 type fingerprintErrorNotifier interface {
 	FingerprintFailed(ctx context.Context, info discInfo, err error, logger *slog.Logger)
-}
-
-type fingerprintFunc func(ctx context.Context, info discInfo, timeout time.Duration) (string, error)
-
-func (f fingerprintFunc) Compute(ctx context.Context, info discInfo, timeout time.Duration) (string, error) {
-	return f(ctx, info, timeout)
 }
 
 type queueStoreProcessor struct {
@@ -47,6 +36,11 @@ func (p *queueStoreProcessor) Process(ctx context.Context, info discInfo, finger
 		return false, fmt.Errorf("queue processor unavailable")
 	}
 
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return false, fmt.Errorf("disc fingerprint is required")
+	}
+
 	existing, err := p.store.FindByFingerprint(ctx, fingerprint)
 	if err != nil {
 		return false, fmt.Errorf("lookup existing disc: %w", err)
@@ -63,10 +57,6 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 	label := strings.TrimSpace(info.Label)
 	updated := false
 
-	if label != "" && label != strings.TrimSpace(existing.DiscTitle) {
-		existing.DiscTitle = label
-		updated = true
-	}
 	if existing.DiscFingerprint != fingerprint {
 		existing.DiscFingerprint = fingerprint
 		updated = true
@@ -74,6 +64,10 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 
 	status := existing.Status
 	if status == queue.StatusCompleted {
+		if label != "" && shouldRefreshDiscTitle(existing.DiscTitle) && label != strings.TrimSpace(existing.DiscTitle) {
+			existing.DiscTitle = label
+			updated = true
+		}
 		if updated {
 			if err := p.store.Update(ctx, existing); err != nil {
 				if logger != nil {
@@ -99,6 +93,10 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 	}
 
 	if status == queue.StatusIdentified || status == queue.StatusRipped || status == queue.StatusEncoded || status == queue.StatusSubtitled || status == queue.StatusOrganizing || existing.IsProcessing() {
+		if label != "" && shouldRefreshDiscTitle(existing.DiscTitle) && label != strings.TrimSpace(existing.DiscTitle) {
+			existing.DiscTitle = label
+			updated = true
+		}
 		if updated {
 			if err := p.store.Update(ctx, existing); err != nil {
 				if logger != nil {
@@ -141,6 +139,14 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 		)
 	}
 	return true, nil
+}
+
+func shouldRefreshDiscTitle(current string) bool {
+	trimmed := strings.TrimSpace(current)
+	if trimmed == "" {
+		return true
+	}
+	return trimmed == "Unknown Disc"
 }
 
 func (p *queueStoreProcessor) enqueueNew(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error) {

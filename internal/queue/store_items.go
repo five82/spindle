@@ -60,6 +60,10 @@ func (s *Store) GetByID(ctx context.Context, id int64) (*Item, error) {
 
 // FindByFingerprint returns the first item matching a fingerprint.
 func (s *Store) FindByFingerprint(ctx context.Context, fingerprint string) (*Item, error) {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return nil, nil
+	}
 	row := s.db.QueryRowContext(
 		ctx,
 		`SELECT `+itemColumns+` FROM queue_items WHERE disc_fingerprint = ? ORDER BY id LIMIT 1`,

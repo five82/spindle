@@ -100,9 +100,6 @@ func TestDiscMonitorQueuesNewDisc(t *testing.T) {
 
 	scanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-demo"}}
 	monitor.scanner = scanner
-	monitor.fingerprints = fingerprintFunc(func(ctx context.Context, info discInfo, timeout time.Duration) (string, error) {
-		return "fp-demo", nil
-	})
 
 	var detectCalls atomic.Int32
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -163,9 +160,6 @@ func TestDiscMonitorResetsExistingItem(t *testing.T) {
 
 	monitor.pollInterval = 10 * time.Millisecond
 	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-demo"}}
-	monitor.fingerprints = fingerprintFunc(func(ctx context.Context, info discInfo, timeout time.Duration) (string, error) {
-		return "fp-demo", nil
-	})
 
 	var detectCalls atomic.Int32
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -207,7 +201,7 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 
 	ctx := context.Background()
-	item, err := store.NewDisc(ctx, "Done", "fp-done")
+	item, err := store.NewDisc(ctx, "Nice Title", "fp-done")
 	if err != nil {
 		t.Fatalf("store.NewDisc: %v", err)
 	}
@@ -223,15 +217,12 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 	}
 
 	monitor.pollInterval = 10 * time.Millisecond
-	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-done"}}
-	monitor.fingerprints = fingerprintFunc(func(ctx context.Context, info discInfo, timeout time.Duration) (string, error) {
-		return "fp-done", nil
-	})
+	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-done\n"}}
 
 	var detectCalls atomic.Int32
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
 		if detectCalls.Add(1) == 1 {
-			return &discInfo{Device: device, Label: "Done", Type: "Blu-ray"}, nil
+			return &discInfo{Device: device, Label: "RAW_DISC_LABEL", Type: "Blu-ray"}, nil
 		}
 		return nil, nil
 	}
@@ -263,5 +254,8 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 	}
 	if items[0].Status != queue.StatusCompleted {
 		t.Fatalf("expected completed item to remain completed, got %s", items[0].Status)
+	}
+	if items[0].DiscTitle != "Nice Title" {
+		t.Fatalf("expected completed item title to remain unchanged, got %q", items[0].DiscTitle)
 	}
 }
