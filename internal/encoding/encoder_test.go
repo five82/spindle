@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindle/internal/encoding"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 	"spindle/internal/services/drapto"
 	"spindle/internal/testsupport"
 )
@@ -219,6 +221,121 @@ func TestEncoderRemovesStaleEncodedArtifacts(t *testing.T) {
 	}
 }
 
+func TestEncoderPersistsRipSpecPerEpisode(t *testing.T) {
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubEncoderProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "TV Disc", "fp")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusRipped
+	item.DiscFingerprint = "ENCODERTESTFP_TV"
+
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	ripsDir := filepath.Join(stagingRoot, "rips")
+	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
+		t.Fatalf("mkdir rips: %v", err)
+	}
+
+	season := 5
+	ep1Key := ripspec.EpisodeKey(season, 1)
+	ep2Key := ripspec.EpisodeKey(season, 2)
+	ep1Rip := filepath.Join(ripsDir, "title_001.mkv")
+	ep2Rip := filepath.Join(ripsDir, "title_002.mkv")
+	testsupport.WriteFile(t, ep1Rip, encodedFixtureSize)
+	testsupport.WriteFile(t, ep2Rip, encodedFixtureSize)
+
+	item.RippedFile = ep1Rip
+
+	env := ripspec.Envelope{
+		Titles: []ripspec.Title{
+			{ID: 1, Name: "Episode 1", Duration: 1800},
+			{ID: 2, Name: "Episode 2", Duration: 1810},
+		},
+		Episodes: []ripspec.Episode{
+			{Key: ep1Key, TitleID: 1, Season: season, Episode: 1, EpisodeTitle: "Episode One", OutputBasename: "Show - S05E01"},
+			{Key: ep2Key, TitleID: 2, Season: season, Episode: 2, EpisodeTitle: "Episode Two", OutputBasename: "Show - S05E02"},
+		},
+		Assets: ripspec.Assets{
+			Ripped: []ripspec.Asset{
+				{EpisodeKey: ep1Key, TitleID: 1, Path: ep1Rip},
+				{EpisodeKey: ep2Key, TitleID: 2, Path: ep2Rip},
+			},
+		},
+	}
+	encoded, err := env.Encode()
+	if err != nil {
+		t.Fatalf("encode rip spec: %v", err)
+	}
+	item.RipSpecData = encoded
+
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	stubClient := newBlockingDraptoClient()
+	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), stubClient, nil)
+	item.Status = queue.StatusEncoding
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update processing: %v", err)
+	}
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- handler.Execute(context.Background(), item)
+	}()
+
+	select {
+	case <-stubClient.startedSecond:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for second encode invocation")
+	}
+
+	mid, err := store.GetByID(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetByID (mid): %v", err)
+	}
+	midEnv, err := ripspec.Parse(mid.RipSpecData)
+	if err != nil {
+		t.Fatalf("parse rip spec (mid): %v", err)
+	}
+	if len(midEnv.Assets.Encoded) != 1 {
+		t.Fatalf("expected 1 encoded asset mid-run, got %d", len(midEnv.Assets.Encoded))
+	}
+	if _, ok := midEnv.Assets.FindAsset("encoded", ep1Key); !ok {
+		t.Fatalf("expected encoded asset for %s mid-run", ep1Key)
+	}
+	if _, ok := midEnv.Assets.FindAsset("encoded", ep2Key); ok {
+		t.Fatalf("did not expect encoded asset for %s mid-run", ep2Key)
+	}
+
+	close(stubClient.allowSecond)
+	if err := <-errCh; err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	final, err := store.GetByID(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetByID (final): %v", err)
+	}
+	finalEnv, err := ripspec.Parse(final.RipSpecData)
+	if err != nil {
+		t.Fatalf("parse rip spec (final): %v", err)
+	}
+	if len(finalEnv.Assets.Encoded) != 2 {
+		t.Fatalf("expected 2 encoded assets final, got %d", len(finalEnv.Assets.Encoded))
+	}
+	if _, ok := finalEnv.Assets.FindAsset("encoded", ep2Key); !ok {
+		t.Fatalf("expected encoded asset for %s final", ep2Key)
+	}
+}
+
 func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 	store := testsupport.MustOpenStore(t, cfg)
@@ -369,4 +486,42 @@ func (emptyArtifactClient) Encode(ctx context.Context, inputPath, outputDir stri
 		return "", err
 	}
 	return path, file.Close()
+}
+
+type blockingDraptoClient struct {
+	count         int
+	startedSecond chan struct{}
+	allowSecond   chan struct{}
+}
+
+func newBlockingDraptoClient() *blockingDraptoClient {
+	return &blockingDraptoClient{
+		startedSecond: make(chan struct{}),
+		allowSecond:   make(chan struct{}),
+	}
+}
+
+func (s *blockingDraptoClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
+	s.count++
+	if s.count == 2 {
+		close(s.startedSecond)
+		select {
+		case <-s.allowSecond:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	if opts.Progress != nil {
+		opts.Progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 50, Message: "Halfway"})
+	}
+	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+	if stem == "" {
+		stem = filepath.Base(inputPath)
+	}
+	path := filepath.Join(outputDir, stem+".mkv")
+	payload := bytes.Repeat([]byte{0xEC}, encodedFixtureSize)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }

@@ -407,6 +407,20 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			}
 			env.Assets.AddAsset("encoded", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: finalPath})
 			encodedPaths = append(encodedPaths, finalPath)
+
+			// Persist rip spec after each episode so API consumers can surface
+			// per-episode progress while the encoding stage is still running.
+			if encoded, err := env.Encode(); err == nil {
+				copy := *item
+				copy.RipSpecData = encoded
+				if err := e.store.Update(ctx, &copy); err != nil {
+					logger.Warn("failed to persist rip spec after episode encode", logging.Error(err))
+				} else {
+					*item = copy
+				}
+			} else {
+				logger.Warn("failed to encode rip spec after episode encode", logging.Error(err))
+			}
 		}
 	} else {
 		label := strings.TrimSpace(item.DiscTitle)
