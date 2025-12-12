@@ -129,6 +129,28 @@ Returns metadata for a single queue entry.
 }
 ```
 
+### `GET /api/logtail`
+
+Returns raw lines from a queue item's background log file (the per-item log
+stored under `log_dir/background/`). This is intended for remote dashboards and
+TUIs that cannot access the daemon's filesystem.
+
+Query parameters:
+
+- `item=<id>` (required) — queue item id.
+- `offset=<bytes>` (optional) — file offset to read from. Use `-1` to tail the
+  last `limit` lines (default).
+- `limit=<n>` (optional) — maximum number of lines to return (default 200).
+- `follow=1` (optional) — wait for new lines when at EOF.
+- `wait_ms=<n>` (optional) — max wait duration when `follow=1` (default 5000ms).
+
+```json
+{
+  "lines": ["..."],
+  "offset": 123456
+}
+```
+
 ## Field Reference
 
 | Field | Description |

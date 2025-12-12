@@ -152,3 +152,9 @@ type LogStreamResponse struct {
 	Events []LogEvent `json:"events"`
 	Next   uint64     `json:"next"`
 }
+
+// LogTailResponse returns raw log lines and the next file offset.
+type LogTailResponse struct {
+	Lines  []string `json:"lines"`
+	Offset int64    `json:"offset"`
+}

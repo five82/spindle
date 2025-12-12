@@ -16,6 +16,7 @@ import (
 	"spindle/internal/api"
 	"spindle/internal/config"
 	"spindle/internal/logging"
+	"spindle/internal/logs"
 	"spindle/internal/queue"
 )
 
@@ -51,6 +52,7 @@ func newAPIServer(cfg *config.Config, d *Daemon, logger *slog.Logger) (*apiServe
 	mux.HandleFunc("/api/queue", srv.handleQueue)
 	mux.HandleFunc("/api/queue/", srv.handleQueueItem)
 	mux.HandleFunc("/api/logs", srv.handleLogs)
+	mux.HandleFunc("/api/logtail", srv.handleLogTail)
 
 	srv.server = &http.Server{
 		Handler:           mux,
@@ -286,6 +288,80 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 		return
 	}
+}
+
+func (s *apiServer) handleLogTail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.queueSvc == nil {
+		s.writeJSON(w, http.StatusOK, api.LogTailResponse{Lines: nil, Offset: 0})
+		return
+	}
+
+	query := r.URL.Query()
+	itemStr := strings.TrimSpace(query.Get("item"))
+	if itemStr == "" {
+		s.writeError(w, http.StatusBadRequest, "missing item id")
+		return
+	}
+	itemID, err := strconv.ParseInt(itemStr, 10, 64)
+	if err != nil || itemID <= 0 {
+		s.writeError(w, http.StatusBadRequest, "invalid item id")
+		return
+	}
+
+	offset := int64(-1)
+	if value := strings.TrimSpace(query.Get("offset")); value != "" {
+		if parsed, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil {
+			offset = parsed
+		}
+	}
+	limit := 200
+	if value := strings.TrimSpace(query.Get("limit")); value != "" {
+		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	follow := query.Get("follow") == "1" || strings.EqualFold(query.Get("follow"), "true")
+	waitMillis := 0
+	if value := strings.TrimSpace(query.Get("wait_ms")); value != "" {
+		if parsed, parseErr := strconv.Atoi(value); parseErr == nil && parsed > 0 {
+			waitMillis = parsed
+		}
+	}
+	wait := time.Duration(waitMillis) * time.Millisecond
+	if follow && wait <= 0 {
+		wait = 5 * time.Second
+	}
+
+	item, err := s.queueSvc.Describe(r.Context(), itemID)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if item == nil {
+		s.writeError(w, http.StatusNotFound, "queue item not found")
+		return
+	}
+	path := strings.TrimSpace(item.BackgroundLogPath)
+	if path == "" {
+		s.writeJSON(w, http.StatusOK, api.LogTailResponse{Lines: nil, Offset: 0})
+		return
+	}
+
+	result, err := logs.Tail(r.Context(), path, logs.TailOptions{
+		Offset: offset,
+		Limit:  limit,
+		Follow: follow,
+		Wait:   wait,
+	})
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, api.LogTailResponse{Lines: result.Lines, Offset: result.Offset})
 }
 
 func convertLogEvents(events []logging.LogEvent) []api.LogEvent {
