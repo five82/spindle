@@ -74,6 +74,9 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 		filtered = append(filtered, kv)
 	}
 
+	filtered = dedupeKVsByKey(filtered)
+	allAttrs = dedupeKVsByKey(allAttrs)
+
 	message := strings.TrimSpace(record.Message)
 	if message == "" {
 		message = "(no message)"
@@ -256,6 +259,26 @@ func (h *prettyHandler) clone() *prettyHandler {
 type kv struct {
 	key   string
 	value slog.Value
+}
+
+func dedupeKVsByKey(attrs []kv) []kv {
+	if len(attrs) < 2 {
+		return attrs
+	}
+	positions := make(map[string]int, len(attrs))
+	deduped := make([]kv, 0, len(attrs))
+	for _, attr := range attrs {
+		if attr.key == "" {
+			continue
+		}
+		if pos, ok := positions[attr.key]; ok {
+			deduped[pos].value = attr.value
+			continue
+		}
+		positions[attr.key] = len(deduped)
+		deduped = append(deduped, attr)
+	}
+	return deduped
 }
 
 func flattenAttrs(dst *[]kv, prefix []string, attrs []slog.Attr) {

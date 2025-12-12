@@ -302,6 +302,43 @@ func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
 	}
 }
 
+func TestConsoleInfoFormattingDedupesDuplicateCorrelationID(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "info-dedupe.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "info",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	logger = logger.With(
+		logging.String("component", "workflow-runner"),
+		logging.Int("item_id", 9),
+		logging.String("stage", "ripper"),
+		logging.String("disc_title", "50 First Dates"),
+		logging.String("processing_status", "ripping"),
+		logging.String("correlation_id", "abc-123"),
+		logging.String("correlation_id", "abc-123"),
+	)
+
+	logger.Info("stage started")
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if strings.Count(string(content), "Correlation Id: abc-123") != 1 {
+		t.Fatalf("expected correlation_id printed once, got %q", string(content))
+	}
+}
+
 func TestConsoleInfoFormattingResetsPerStage(t *testing.T) {
 	tempDir := t.TempDir()
 	logPath := filepath.Join(tempDir, "info-stage.log")

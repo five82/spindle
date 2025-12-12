@@ -103,3 +103,72 @@ func TestClientClassifyPresetCodeFence(t *testing.T) {
 		t.Fatalf("expected raw payload to retain code fence, got %q", classification.Raw)
 	}
 }
+
+func TestClientClassifyPresetToolCallsArguments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload := map[string]any{
+			"choices": []any{
+				map[string]any{
+					"finish_reason": "tool_calls",
+					"message": map[string]any{
+						"content": "",
+						"tool_calls": []any{
+							map[string]any{
+								"type": "function",
+								"id":   "call_1",
+								"function": map[string]any{
+									"name":      "classify_preset",
+									"arguments": `{"profile":"clean","confidence":0.91,"reason":"animated"}`,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		if err := json.NewEncoder(w).Encode(payload); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
+	classification, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	if err != nil {
+		t.Fatalf("ClassifyPreset returned error: %v", err)
+	}
+	if classification.Profile != "clean" {
+		t.Fatalf("expected profile clean, got %q", classification.Profile)
+	}
+	if classification.Raw == "" || !strings.Contains(classification.Raw, "\"profile\"") {
+		t.Fatalf("expected raw payload to contain JSON arguments, got %q", classification.Raw)
+	}
+}
+
+func TestClientClassifyPresetEmptyContentHasSnippet(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload := map[string]any{
+			"choices": []any{
+				map[string]any{
+					"finish_reason": "stop",
+					"message": map[string]any{
+						"content": "",
+					},
+				},
+			},
+		}
+		if err := json.NewEncoder(w).Encode(payload); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
+	_, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	if err == nil {
+		t.Fatal("expected classify to fail")
+	}
+	if !strings.Contains(err.Error(), "empty content") || !strings.Contains(err.Error(), "response_snippet=") {
+		t.Fatalf("expected empty-content error to include snippet, got %v", err)
+	}
+}

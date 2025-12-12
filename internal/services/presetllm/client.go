@@ -91,16 +91,20 @@ func (c *Client) ClassifyPreset(ctx context.Context, description string) (Classi
 	if err != nil {
 		return empty, err
 	}
-	completion, err := c.sendChatRequest(ctx, requestBody)
+	completion, body, err := c.sendChatRequest(ctx, requestBody)
 	if err != nil {
 		return empty, err
 	}
-	if len(completion.Choices) == 0 {
-		return empty, errors.New("preset llm classify: empty choices")
-	}
-	content := strings.TrimSpace(completion.Choices[0].Message.Content)
+	content, finishReason := extractCompletionPayload(completion)
 	if content == "" {
-		return empty, errors.New("preset llm classify: empty content")
+		if len(completion.Choices) == 0 {
+			return empty, errors.New("preset llm classify: empty choices")
+		}
+		return empty, fmt.Errorf(
+			"preset llm classify: empty content (finish_reason=%q, response_snippet=%s)",
+			finishReason,
+			summarizePayloadSnippet(string(body)),
+		)
 	}
 	var parsed Classification
 	if err := decodeLLMJSON(content, &parsed); err != nil {
@@ -132,16 +136,20 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 		Temperature:    0,
 		ResponseFormat: map[string]string{"type": jsonResponseType},
 	}
-	completion, err := c.sendChatRequest(ctx, payload)
+	completion, body, err := c.sendChatRequest(ctx, payload)
 	if err != nil {
 		return err
 	}
-	if len(completion.Choices) == 0 {
-		return errors.New("preset llm health: empty response")
-	}
-	content := strings.TrimSpace(completion.Choices[0].Message.Content)
+	content, finishReason := extractCompletionPayload(completion)
 	if content == "" {
-		return errors.New("preset llm health: empty content")
+		if len(completion.Choices) == 0 {
+			return errors.New("preset llm health: empty response")
+		}
+		return fmt.Errorf(
+			"preset llm health: empty content (finish_reason=%q, response_snippet=%s)",
+			finishReason,
+			summarizePayloadSnippet(string(body)),
+		)
 	}
 	var parsed struct {
 		OK bool `json:"ok"`
@@ -170,12 +178,50 @@ type chatMessage struct {
 type chatCompletionResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content      string        `json:"content"`
+			ToolCalls    []toolCall    `json:"tool_calls"`
+			FunctionCall *functionCall `json:"function_call"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+type toolCall struct {
+	Type     string       `json:"type"`
+	ID       string       `json:"id"`
+	Index    int          `json:"index"`
+	Function functionCall `json:"function"`
+}
+
+type functionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+func extractCompletionPayload(completion chatCompletionResponse) (string, string) {
+	var finishReason string
+	for idx, choice := range completion.Choices {
+		if idx == 0 {
+			finishReason = strings.TrimSpace(choice.FinishReason)
+		}
+		if content := strings.TrimSpace(choice.Message.Content); content != "" {
+			return content, finishReason
+		}
+		if fc := choice.Message.FunctionCall; fc != nil {
+			if args := strings.TrimSpace(fc.Arguments); args != "" {
+				return args, finishReason
+			}
+		}
+		for _, call := range choice.Message.ToolCalls {
+			if args := strings.TrimSpace(call.Function.Arguments); args != "" {
+				return args, finishReason
+			}
+		}
+	}
+	return "", finishReason
 }
 
 func buildChatRequest(model, description string) (chatCompletionRequest, error) {
@@ -198,19 +244,19 @@ func buildChatRequest(model, description string) (chatCompletionRequest, error) 
 	}, nil
 }
 
-func (c *Client) sendChatRequest(ctx context.Context, payload chatCompletionRequest) (chatCompletionResponse, error) {
+func (c *Client) sendChatRequest(ctx context.Context, payload chatCompletionRequest) (chatCompletionResponse, []byte, error) {
 	var completion chatCompletionResponse
 	endpoint, err := url.JoinPath(c.cfg.BaseURL, "")
 	if err != nil {
-		return completion, fmt.Errorf("preset llm request: build url: %w", err)
+		return completion, nil, fmt.Errorf("preset llm request: build url: %w", err)
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return completion, fmt.Errorf("preset llm request: encode body: %w", err)
+		return completion, nil, fmt.Errorf("preset llm request: encode body: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
 	if err != nil {
-		return completion, fmt.Errorf("preset llm request: new request: %w", err)
+		return completion, nil, fmt.Errorf("preset llm request: new request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -223,23 +269,23 @@ func (c *Client) sendChatRequest(ctx context.Context, payload chatCompletionRequ
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return completion, fmt.Errorf("preset llm request: http error: %w", err)
+		return completion, nil, fmt.Errorf("preset llm request: http error: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return completion, fmt.Errorf("preset llm request: read body: %w", err)
+		return completion, nil, fmt.Errorf("preset llm request: read body: %w", err)
 	}
 	if resp.StatusCode >= http.StatusMultipleChoices {
-		return completion, fmt.Errorf("preset llm request: http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return completion, body, fmt.Errorf("preset llm request: http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if err := json.Unmarshal(body, &completion); err != nil {
-		return completion, fmt.Errorf("preset llm request: decode response: %w", err)
+		return completion, body, fmt.Errorf("preset llm request: decode response: %w", err)
 	}
 	if completion.Error != nil {
-		return completion, fmt.Errorf("preset llm request: api error: %s", strings.TrimSpace(completion.Error.Message))
+		return completion, body, fmt.Errorf("preset llm request: api error: %s", strings.TrimSpace(completion.Error.Message))
 	}
-	return completion, nil
+	return completion, body, nil
 }
 
 func decodeLLMJSON(content string, target any) error {
