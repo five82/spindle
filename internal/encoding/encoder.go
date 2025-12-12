@@ -88,6 +88,8 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 		logging.String("job", strings.TrimSpace(label)),
 	)
 	snapshot := loadEncodingSnapshot(logger, item.EncodingDetailsJSON)
+	const progressPersistInterval = 2 * time.Second
+	var lastPersisted time.Time
 	progress := func(update drapto.ProgressUpdate) {
 		copy := *item
 		changed := false
@@ -114,6 +116,14 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 		}
 		if !changed {
 			return
+		}
+		if update.Type == drapto.EventTypeEncodingProgress {
+			now := time.Now()
+			if !lastPersisted.IsZero() && now.Sub(lastPersisted) < progressPersistInterval {
+				*item = copy
+				return
+			}
+			lastPersisted = now
 		}
 		if err := e.store.UpdateProgress(ctx, &copy); err != nil {
 			logger.Warn("failed to persist encoding progress", logging.Error(err))

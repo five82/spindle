@@ -113,7 +113,10 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 	hasEpisodes := len(env.Episodes) > 0
 	var target string
-	const progressInterval = time.Minute
+	// MakeMKV can emit progress events very frequently; persisting them too often
+	// causes unnecessary SQLite churn while providing little UX value. Keep the
+	// TUI feeling responsive without hammering the queue DB.
+	const progressInterval = 5 * time.Second
 	var lastPersisted time.Time
 	lastStage := item.ProgressStage
 	lastMessage := item.ProgressMessage
