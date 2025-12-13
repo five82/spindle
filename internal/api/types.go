@@ -60,6 +60,7 @@ type EpisodeStatus struct {
 	OutputBasename   string  `json:"outputBasename,omitempty"`
 	RippedPath       string  `json:"rippedPath,omitempty"`
 	EncodedPath      string  `json:"encodedPath,omitempty"`
+	SubtitledPath    string  `json:"subtitledPath,omitempty"`
 	FinalPath        string  `json:"finalPath,omitempty"`
 	SubtitleSource   string  `json:"subtitleSource,omitempty"`
 	SubtitleLanguage string  `json:"subtitleLanguage,omitempty"`

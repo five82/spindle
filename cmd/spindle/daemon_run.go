@@ -121,7 +121,7 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 	mgr.ConfigureStages(workflow.StageSet{
 		Identifier:        identification.NewIdentifier(cfg, store, logger),
 		Ripper:            ripping.NewRipper(cfg, store, logger),
-		EpisodeIdentifier: episodeid.NewEpisodeIdentifier(cfg, logger),
+		EpisodeIdentifier: episodeid.NewEpisodeIdentifier(cfg, store, logger),
 		Encoder:           encoding.NewEncoder(cfg, store, logger),
 		Subtitles:         subtitleStage,
 		Organizer:         organizer.NewOrganizer(cfg, store, logger),

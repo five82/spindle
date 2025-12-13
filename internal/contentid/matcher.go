@@ -166,6 +166,12 @@ func (m *Matcher) SetLogger(logger *slog.Logger) {
 // and updates the rip specification with definitive episode mappings when possible.
 // The queue item metadata is updated in-place when matches are found.
 func (m *Matcher) Match(ctx context.Context, item *queue.Item, env *ripspec.Envelope) (bool, error) {
+	return m.MatchWithProgress(ctx, item, env, nil)
+}
+
+// MatchWithProgress behaves like Match but reports per-episode milestones through progress.
+// The callback is best-effort and must remain fast; errors are ignored.
+func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *ripspec.Envelope, progress func(phase string, current, total int, episodeKey string)) (bool, error) {
 	if m == nil || env == nil || len(env.Episodes) == 0 {
 		return false, nil
 	}
@@ -190,7 +196,7 @@ func (m *Matcher) Match(ctx context.Context, item *queue.Item, env *ripspec.Enve
 	if stagingRoot == "" {
 		return false, errors.New("staging root unavailable for content id")
 	}
-	ripPrints, err := m.generateEpisodeFingerprints(ctx, ctxData, env, stagingRoot)
+	ripPrints, err := m.generateEpisodeFingerprints(ctx, ctxData, env, stagingRoot, progress)
 	if err != nil {
 		return false, err
 	}
@@ -198,7 +204,7 @@ func (m *Matcher) Match(ctx context.Context, item *queue.Item, env *ripspec.Enve
 		return false, errors.New("whisperx produced no transcripts for content id")
 	}
 	candidateEpisodes := deriveCandidateEpisodes(env, seasonDetails, ctxData.DiscNumber)
-	refPrints, err := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, candidateEpisodes)
+	refPrints, err := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, candidateEpisodes, progress)
 	if err != nil {
 		return false, err
 	}
@@ -209,7 +215,7 @@ func (m *Matcher) Match(ctx context.Context, item *queue.Item, env *ripspec.Enve
 	if len(matches) == 0 {
 		return false, errors.New("failed to correlate ripped episodes with opensubtitles references")
 	}
-	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches)
+	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches, progress)
 	m.attachMatchAttributes(env, matches)
 	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
@@ -294,17 +300,22 @@ func (m *Matcher) buildContext(item *queue.Item, env *ripspec.Envelope) (episode
 	return ctx, nil
 }
 
-func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeContext, env *ripspec.Envelope, stagingRoot string) ([]ripFingerprint, error) {
+func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeContext, env *ripspec.Envelope, stagingRoot string, progress func(phase string, current, total int, episodeKey string)) ([]ripFingerprint, error) {
 	episodeDir := filepath.Join(stagingRoot, "contentid")
 	if err := os.MkdirAll(episodeDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create contentid dir: %w", err)
 	}
-	fingerprints := make([]ripFingerprint, 0, len(env.Episodes))
+	work := make([]ripspec.Episode, 0, len(env.Episodes))
 	for _, episode := range env.Episodes {
 		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
 		if !ok || strings.TrimSpace(asset.Path) == "" {
 			continue
 		}
+		work = append(work, episode)
+	}
+	fingerprints := make([]ripFingerprint, 0, len(work))
+	for idx, episode := range work {
+		asset, _ := env.Assets.FindAsset("ripped", episode.Key)
 		workDir := filepath.Join(episodeDir, episode.Key)
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create workdir %s: %w", workDir, err)
@@ -344,6 +355,9 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 			Path:       result.SubtitlePath,
 			Vector:     fp,
 		})
+		if progress != nil {
+			progress("transcribe", idx+1, len(work), episode.Key)
+		}
 		m.logger.Debug("content id whisperx transcript ready",
 			logging.String("episode_key", episode.Key),
 			logging.String("subtitle_path", result.SubtitlePath),
@@ -353,17 +367,30 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 	return fingerprints, nil
 }
 
-func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeContext, season *tmdb.SeasonDetails, candidates []int) ([]referenceFingerprint, error) {
+func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeContext, season *tmdb.SeasonDetails, candidates []int, progress func(phase string, current, total int, episodeKey string)) ([]referenceFingerprint, error) {
 	references := make([]referenceFingerprint, 0, len(candidates))
+	unique := make([]int, 0, len(candidates))
 	seen := make(map[int]struct{}, len(candidates))
-	var lastAPICall time.Time
 	for _, num := range candidates {
+		if _, ok := seen[num]; ok {
+			continue
+		}
+		seen[num] = struct{}{}
+		unique = append(unique, num)
+	}
+	clear(seen)
+	var lastAPICall time.Time
+	for idx, num := range unique {
+		episodeKey := fmt.Sprintf("s%02de%02d", season.SeasonNumber, num)
 		if _, ok := seen[num]; ok {
 			continue
 		}
 		seen[num] = struct{}{}
 		episodeData, ok := findEpisodeByNumber(season, num)
 		if !ok {
+			if progress != nil {
+				progress("reference", idx+1, len(unique), episodeKey)
+			}
 			continue
 		}
 		episodeYear := strings.TrimSpace(episodeData.AirDate)
@@ -420,6 +447,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			break
 		}
 		if !foundMatch {
+			if progress != nil {
+				progress("reference", idx+1, len(unique), episodeKey)
+			}
 			continue
 		}
 		candidate := resp.Subtitles[0]
@@ -482,6 +512,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		}
 		fp := newFingerprint(text)
 		if fp == nil {
+			if progress != nil {
+				progress("reference", idx+1, len(unique), episodeKey)
+			}
 			return nil, fmt.Errorf("empty opensubtitles transcript for S%02dE%02d", season.SeasonNumber, num)
 		}
 		references = append(references, referenceFingerprint{
@@ -492,6 +525,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			Language:      payload.Language,
 			CachePath:     cachePath,
 		})
+		if progress != nil {
+			progress("reference", idx+1, len(unique), episodeKey)
+		}
 		m.logger.Debug("opensubtitles reference downloaded",
 			logging.Int("season", episodeData.SeasonNumber),
 			logging.Int("episode", episodeData.EpisodeNumber),
@@ -598,7 +634,7 @@ func isOpenSubtitlesRetriable(err error) bool {
 	return false
 }
 
-func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails, showTitle string, matches []matchResult) {
+func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails, showTitle string, matches []matchResult, progress func(phase string, current, total int, episodeKey string)) {
 	if env == nil || season == nil || len(matches) == 0 {
 		return
 	}
@@ -610,7 +646,7 @@ func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails
 	for _, e := range season.Episodes {
 		episodeByNumber[e.EpisodeNumber] = e
 	}
-	for _, match := range matches {
+	for idx, match := range matches {
 		target, ok := episodeByNumber[match.TargetEpisode]
 		if !ok {
 			continue
@@ -627,6 +663,9 @@ func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails
 			title.Episode = target.EpisodeNumber
 			title.EpisodeTitle = strings.TrimSpace(target.Name)
 			title.EpisodeAirDate = strings.TrimSpace(target.AirDate)
+		}
+		if progress != nil {
+			progress("apply", idx+1, len(matches), match.EpisodeKey)
 		}
 		m.logger.Debug("content id episode matched",
 			logging.String("episode_key", match.EpisodeKey),

@@ -340,6 +340,19 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		}
 		if env != nil {
 			env.Assets.AddAsset("final", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: targetPath})
+			// Persist per-episode progress so API consumers can surface completed
+			// episodes while the organizing stage is still running.
+			if encoded, err := env.Encode(); err == nil {
+				copy := *item
+				copy.RipSpecData = encoded
+				if err := o.store.Update(ctx, &copy); err != nil {
+					logger.Warn("failed to persist rip spec after episode organize", logging.Error(err))
+				} else {
+					*item = copy
+				}
+			} else {
+				logger.Warn("failed to encode rip spec after episode organize", logging.Error(err))
+			}
 		}
 		if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted); err != nil {
 			return err

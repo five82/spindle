@@ -84,6 +84,17 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		return nil
 	}
 
+	var env ripspec.Envelope
+	hasRipSpec := false
+	if raw := strings.TrimSpace(item.RipSpecData); raw != "" {
+		if parsed, err := ripspec.Parse(raw); err == nil {
+			env = parsed
+			hasRipSpec = true
+		} else if s.logger != nil {
+			s.logger.Warn("failed to parse rip spec for subtitle progress", logging.Error(err))
+		}
+	}
+
 	targets := s.buildSubtitleTargets(item)
 	if len(targets) == 0 {
 		return services.Wrap(services.ErrValidation, "subtitles", "execute", "No encoded assets available for subtitles", nil)
@@ -196,6 +207,20 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				logging.String("subtitle_source", result.Source),
 			)
 		}
+		if hasRipSpec && strings.TrimSpace(target.EpisodeKey) != "" {
+			env.Assets.AddAsset("subtitled", ripspec.Asset{EpisodeKey: target.EpisodeKey, TitleID: target.TitleID, Path: target.SourcePath})
+			if encoded, err := env.Encode(); err == nil {
+				copy := *item
+				copy.RipSpecData = encoded
+				if err := s.store.Update(ctx, &copy); err != nil && s.logger != nil {
+					s.logger.Warn("failed to persist rip spec after subtitles", logging.Error(err))
+				} else if err == nil {
+					*item = copy
+				}
+			} else if s.logger != nil {
+				s.logger.Warn("failed to encode rip spec after subtitles", logging.Error(err))
+			}
+		}
 	}
 	item.ProgressMessage = fmt.Sprintf("Generated subtitles for %d episode(s)", len(targets))
 	item.ProgressPercent = 100
@@ -239,6 +264,7 @@ type subtitleTarget struct {
 	BaseName     string
 	EpisodeKey   string
 	EpisodeTitle string
+	TitleID      int
 	Season       int
 	Episode      int
 }
@@ -323,6 +349,7 @@ func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
 				BaseName:     baseNameWithoutExt(source),
 				EpisodeKey:   episodeKey,
 				EpisodeTitle: episodeTitle,
+				TitleID:      asset.TitleID,
 				Season:       season,
 				Episode:      episode,
 			})

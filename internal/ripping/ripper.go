@@ -113,6 +113,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 	hasEpisodes := len(env.Episodes) > 0
 	var target string
+	var destDir string
 	// MakeMKV can emit progress events very frequently; persisting them too often
 	// causes unnecessary SQLite churn while providing little UX value. Keep the
 	// TUI feeling responsive without hammering the queue DB.
@@ -122,6 +123,52 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	lastMessage := item.ProgressMessage
 	lastPercent := item.ProgressPercent
 	progressSampler := logging.NewProgressSampler(5)
+	rippedSignature := func(list []ripspec.Asset) string {
+		if len(list) == 0 {
+			return ""
+		}
+		var b strings.Builder
+		b.Grow(len(list) * 64)
+		for _, asset := range list {
+			key := strings.ToLower(strings.TrimSpace(asset.EpisodeKey))
+			path := strings.TrimSpace(asset.Path)
+			if key == "" && path == "" {
+				continue
+			}
+			b.WriteString(key)
+			b.WriteByte('=')
+			b.WriteString(path)
+			b.WriteByte('#')
+			b.WriteString(strconv.Itoa(asset.TitleID))
+			b.WriteByte('|')
+		}
+		return b.String()
+	}
+	lastRippedSignature := rippedSignature(env.Assets.Ripped)
+	persistRipSpecIfNeeded := func() {
+		if !hasEpisodes || strings.TrimSpace(destDir) == "" {
+			return
+		}
+		before := lastRippedSignature
+		assignEpisodeAssets(&env, destDir, logger)
+		after := rippedSignature(env.Assets.Ripped)
+		if after == before {
+			return
+		}
+		encoded, encodeErr := env.Encode()
+		if encodeErr != nil {
+			logger.Warn("failed to encode rip spec after episode rip", logging.Error(encodeErr))
+			return
+		}
+		copy := *item
+		copy.RipSpecData = encoded
+		if updateErr := r.store.Update(ctx, &copy); updateErr != nil {
+			logger.Warn("failed to persist rip spec after episode rip", logging.Error(updateErr))
+			return
+		}
+		*item = copy
+		lastRippedSignature = after
+	}
 	progressCB := func(update makemkv.ProgressUpdate) {
 		now := time.Now()
 		if update.Percent >= 100 && lastPercent < 95 {
@@ -140,6 +187,9 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			return
 		}
 		r.applyProgress(ctx, item, update, progressSampler)
+		if percentReached {
+			persistRipSpecIfNeeded()
+		}
 		lastPersisted = now
 		if update.Stage != "" {
 			lastStage = update.Stage
@@ -167,7 +217,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		)
 	}
 	useCache := r.cache != nil
-	destDir := filepath.Join(stagingRoot, "rips")
+	destDir = filepath.Join(stagingRoot, "rips")
 	if useCache {
 		destDir = r.cache.Path(item)
 	}

@@ -51,9 +51,10 @@ type Episode struct {
 
 // Assets captures realised artefacts for each stage.
 type Assets struct {
-	Ripped  []Asset `json:"ripped,omitempty"`
-	Encoded []Asset `json:"encoded,omitempty"`
-	Final   []Asset `json:"final,omitempty"`
+	Ripped    []Asset `json:"ripped,omitempty"`
+	Encoded   []Asset `json:"encoded,omitempty"`
+	Subtitled []Asset `json:"subtitled,omitempty"`
+	Final     []Asset `json:"final,omitempty"`
 }
 
 // Asset associates an episode with a file path.
@@ -124,6 +125,8 @@ func (a *Assets) AddAsset(kind string, asset Asset) {
 		a.Ripped = appendOrReplace(a.Ripped, asset)
 	case "encoded":
 		a.Encoded = appendOrReplace(a.Encoded, asset)
+	case "subtitled":
+		a.Subtitled = appendOrReplace(a.Subtitled, asset)
 	case "final":
 		a.Final = appendOrReplace(a.Final, asset)
 	}
@@ -144,6 +147,8 @@ func (a Assets) fromKind(kind string) []Asset {
 	switch strings.ToLower(kind) {
 	case "encoded":
 		return a.Encoded
+	case "subtitled":
+		return a.Subtitled
 	case "final":
 		return a.Final
 	default:
@@ -186,9 +191,10 @@ func cloneMetadata(input map[string]any) map[string]any {
 // Clone creates a deep copy of the assets set.
 func (a Assets) Clone() Assets {
 	return Assets{
-		Ripped:  cloneAssets(a.Ripped),
-		Encoded: cloneAssets(a.Encoded),
-		Final:   cloneAssets(a.Final),
+		Ripped:    cloneAssets(a.Ripped),
+		Encoded:   cloneAssets(a.Encoded),
+		Subtitled: cloneAssets(a.Subtitled),
+		Final:     cloneAssets(a.Final),
 	}
 }
 

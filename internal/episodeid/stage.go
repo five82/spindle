@@ -2,6 +2,7 @@ package episodeid
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -18,18 +19,20 @@ import (
 // using WhisperX transcription and OpenSubtitles reference comparison.
 type EpisodeIdentifier struct {
 	cfg     *config.Config
+	store   *queue.Store
 	logger  *slog.Logger
 	matcher *contentid.Matcher
 }
 
 // NewEpisodeIdentifier constructs a new episode identification stage handler.
-func NewEpisodeIdentifier(cfg *config.Config, logger *slog.Logger) *EpisodeIdentifier {
+func NewEpisodeIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *EpisodeIdentifier {
 	var matcher *contentid.Matcher
 	if cfg != nil && cfg.OpenSubtitlesEnabled {
 		matcher = contentid.NewMatcher(cfg, logger)
 	}
 	id := &EpisodeIdentifier{
 		cfg:     cfg,
+		store:   store,
 		matcher: matcher,
 	}
 	id.SetLogger(logger)
@@ -137,10 +140,37 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	logger.Info("correlating episodes with OpenSubtitles references",
 		logging.Int("episode_count", len(env.Episodes)))
 
-	item.ProgressPercent = 25
+	item.ProgressPercent = 5
 	item.ProgressMessage = "Generating WhisperX transcripts"
+	if e.store != nil {
+		_ = e.store.UpdateProgress(ctx, item)
+	}
 
-	updated, err := e.matcher.Match(ctx, item, &env)
+	updated, err := e.matcher.MatchWithProgress(ctx, item, &env, func(phase string, current, total int, episodeKey string) {
+		if e.store == nil || item == nil {
+			return
+		}
+		episodeKey = strings.ToUpper(strings.TrimSpace(episodeKey))
+		switch phase {
+		case "transcribe":
+			item.ProgressMessage = fmt.Sprintf("Generating WhisperX transcripts %d/%d – %s", current, total, episodeKey)
+			item.ProgressPercent = 10 + 40*(float64(current)/float64(max(1, total)))
+		case "reference":
+			item.ProgressMessage = fmt.Sprintf("Downloading OpenSubtitles references %d/%d – %s", current, total, episodeKey)
+			item.ProgressPercent = 50 + 30*(float64(current)/float64(max(1, total)))
+		case "apply":
+			item.ProgressMessage = fmt.Sprintf("Applying episode matches %d/%d – %s", current, total, episodeKey)
+			item.ProgressPercent = 80 + 15*(float64(current)/float64(max(1, total)))
+			if encoded, encodeErr := env.Encode(); encodeErr == nil {
+				copy := *item
+				copy.RipSpecData = encoded
+				if err := e.store.Update(ctx, &copy); err == nil {
+					*item = copy
+				}
+			}
+		}
+		_ = e.store.UpdateProgress(ctx, item)
+	})
 	if err != nil {
 		return services.Wrap(
 			services.ErrTransient,

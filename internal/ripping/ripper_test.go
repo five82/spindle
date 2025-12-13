@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
@@ -15,6 +17,7 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/ripcache"
 	"spindle/internal/ripping"
+	"spindle/internal/ripspec"
 	"spindle/internal/services/makemkv"
 	"spindle/internal/testsupport"
 )
@@ -156,6 +159,104 @@ func TestRipperSelectsPrimaryTitleFromRipSpec(t *testing.T) {
 	}
 	if len(stubClient.lastTitleIDs) != 1 || stubClient.lastTitleIDs[0] != 0 {
 		t.Fatalf("expected makemkv to target main title, got %v", stubClient.lastTitleIDs)
+	}
+}
+
+func TestRipperPersistsRipSpecPerEpisode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubRipperProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "TV Disc", "fp")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusIdentified
+
+	season := 1
+	ep1Key := ripspec.EpisodeKey(season, 1)
+	ep2Key := ripspec.EpisodeKey(season, 2)
+	env := ripspec.Envelope{
+		Metadata: map[string]any{"media_type": "tv"},
+		Titles: []ripspec.Title{
+			{ID: 1, Name: "Episode 1", Duration: 1800},
+			{ID: 2, Name: "Episode 2", Duration: 1810},
+		},
+		Episodes: []ripspec.Episode{
+			{Key: ep1Key, TitleID: 1, Season: season, Episode: 1, EpisodeTitle: "Episode One", OutputBasename: "Show - S01E01"},
+			{Key: ep2Key, TitleID: 2, Season: season, Episode: 2, EpisodeTitle: "Episode Two", OutputBasename: "Show - S01E02"},
+		},
+	}
+	encoded, err := env.Encode()
+	if err != nil {
+		t.Fatalf("encode rip spec: %v", err)
+	}
+	item.RipSpecData = encoded
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	stubClient := newBlockingEpisodeRipperClient()
+	handler := ripping.NewRipperWithDependencies(cfg, store, logging.NewNop(), stubClient, &stubNotifier{})
+
+	item.Status = queue.StatusRipping
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update processing: %v", err)
+	}
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- handler.Execute(context.Background(), item)
+	}()
+
+	select {
+	case <-stubClient.startedSecond:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for episode 2 rip")
+	}
+
+	mid, err := store.GetByID(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetByID (mid): %v", err)
+	}
+	midEnv, err := ripspec.Parse(mid.RipSpecData)
+	if err != nil {
+		t.Fatalf("parse rip spec (mid): %v", err)
+	}
+	if len(midEnv.Assets.Ripped) != 1 {
+		t.Fatalf("expected 1 ripped asset mid-run, got %d", len(midEnv.Assets.Ripped))
+	}
+	if _, ok := midEnv.Assets.FindAsset("ripped", ep1Key); !ok {
+		t.Fatalf("expected ripped asset for %s mid-run", ep1Key)
+	}
+	if _, ok := midEnv.Assets.FindAsset("ripped", ep2Key); ok {
+		t.Fatalf("did not expect ripped asset for %s mid-run", ep2Key)
+	}
+
+	close(stubClient.allowSecond)
+	if err := <-errCh; err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	final, err := store.GetByID(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetByID (final): %v", err)
+	}
+	finalEnv, err := ripspec.Parse(final.RipSpecData)
+	if err != nil {
+		t.Fatalf("parse rip spec (final): %v", err)
+	}
+	if len(finalEnv.Assets.Ripped) != 2 {
+		t.Fatalf("expected 2 ripped assets final, got %d", len(finalEnv.Assets.Ripped))
+	}
+	if _, ok := finalEnv.Assets.FindAsset("ripped", ep2Key); !ok {
+		t.Fatalf("expected ripped asset for %s final", ep2Key)
 	}
 }
 
@@ -449,6 +550,48 @@ func (s *countingRipperClient) Rip(ctx context.Context, discTitle, sourcePath, d
 		progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 95, Message: "cached"})
 	}
 	return path, nil
+}
+
+type blockingEpisodeRipperClient struct {
+	startedSecond chan struct{}
+	allowSecond   chan struct{}
+}
+
+func newBlockingEpisodeRipperClient() *blockingEpisodeRipperClient {
+	return &blockingEpisodeRipperClient{
+		startedSecond: make(chan struct{}),
+		allowSecond:   make(chan struct{}),
+	}
+}
+
+func (s *blockingEpisodeRipperClient) Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", err
+	}
+	var lastPath string
+	for idx, id := range titleIDs {
+		if progress != nil {
+			progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 10, Message: fmt.Sprintf("episode %d starting", idx+1)})
+			progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 96, Message: fmt.Sprintf("episode %d nearly done", idx+1)})
+		}
+		path := filepath.Join(destDir, fmt.Sprintf("title_t%02d.mkv", id))
+		if err := writeStubFile(path, ripFixtureSize); err != nil {
+			return "", err
+		}
+		if progress != nil {
+			progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 100, Message: fmt.Sprintf("episode %d done", idx+1)})
+		}
+		lastPath = path
+		if idx == 0 && len(titleIDs) > 1 {
+			close(s.startedSecond)
+			select {
+			case <-s.allowSecond:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+	}
+	return lastPath, nil
 }
 
 func sanitizeTestFileName(name string) string {

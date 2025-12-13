@@ -9,12 +9,14 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 	"spindle/internal/services/plex"
 	"spindle/internal/testsupport"
 )
@@ -93,6 +95,104 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 	}
 	if _, err := os.Stat(stagingRoot); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected staging root cleanup, err=%v", err)
+	}
+}
+
+func TestOrganizerPersistsRipSpecPerEpisode(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubOrganizerProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "TV Disc", "fp-tv")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusEncoded
+	item.DiscFingerprint = "ORGANIZERTESTFP_TV"
+
+	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	encodedDir := filepath.Join(stagingRoot, "encoded")
+	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
+		t.Fatalf("mkdir encoded: %v", err)
+	}
+
+	season := 1
+	ep1Key := ripspec.EpisodeKey(season, 1)
+	ep2Key := ripspec.EpisodeKey(season, 2)
+	ep1Encoded := filepath.Join(encodedDir, "ep1.mkv")
+	ep2Encoded := filepath.Join(encodedDir, "ep2.mkv")
+	testsupport.WriteFile(t, ep1Encoded, organizedFixtureSize)
+	testsupport.WriteFile(t, ep2Encoded, organizedFixtureSize)
+	item.EncodedFile = ep1Encoded
+
+	env := ripspec.Envelope{
+		Metadata: map[string]any{"media_type": "tv"},
+		Episodes: []ripspec.Episode{
+			{Key: ep1Key, TitleID: 1, Season: season, Episode: 1, EpisodeTitle: "Episode One", OutputBasename: "Show - S01E01"},
+			{Key: ep2Key, TitleID: 2, Season: season, Episode: 2, EpisodeTitle: "Episode Two", OutputBasename: "Show - S01E02"},
+		},
+		Assets: ripspec.Assets{
+			Encoded: []ripspec.Asset{
+				{EpisodeKey: ep1Key, TitleID: 1, Path: ep1Encoded},
+				{EpisodeKey: ep2Key, TitleID: 2, Path: ep2Encoded},
+			},
+		},
+	}
+	encodedSpec, err := env.Encode()
+	if err != nil {
+		t.Fatalf("encode rip spec: %v", err)
+	}
+	item.RipSpecData = encodedSpec
+
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	targetDir := filepath.Join(cfg.LibraryDir, cfg.TVDir)
+	stubPlex := newBlockingPlexService(targetDir)
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, nil)
+
+	item.Status = queue.StatusOrganizing
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update processing: %v", err)
+	}
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- handler.Execute(context.Background(), item)
+	}()
+
+	select {
+	case <-stubPlex.startedSecond:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for second organize invocation")
+	}
+
+	mid, err := store.GetByID(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetByID (mid): %v", err)
+	}
+	midEnv, err := ripspec.Parse(mid.RipSpecData)
+	if err != nil {
+		t.Fatalf("parse rip spec (mid): %v", err)
+	}
+	if len(midEnv.Assets.Final) != 1 {
+		t.Fatalf("expected 1 final asset mid-run, got %d", len(midEnv.Assets.Final))
+	}
+	if _, ok := midEnv.Assets.FindAsset("final", ep1Key); !ok {
+		t.Fatalf("expected final asset for %s mid-run", ep1Key)
+	}
+	if _, ok := midEnv.Assets.FindAsset("final", ep2Key); ok {
+		t.Fatalf("did not expect final asset for %s mid-run", ep2Key)
+	}
+
+	close(stubPlex.allowSecond)
+	if err := <-errCh; err != nil {
+		t.Fatalf("Execute: %v", err)
 	}
 }
 
@@ -366,6 +466,49 @@ func (s *stubPlexService) Organize(ctx context.Context, sourcePath string, meta 
 }
 
 func (s *stubPlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
+	return nil
+}
+
+type blockingPlexService struct {
+	targetDir     string
+	count         int
+	startedSecond chan struct{}
+	allowSecond   chan struct{}
+}
+
+func newBlockingPlexService(targetDir string) *blockingPlexService {
+	return &blockingPlexService{
+		targetDir:     targetDir,
+		startedSecond: make(chan struct{}),
+		allowSecond:   make(chan struct{}),
+	}
+}
+
+func (s *blockingPlexService) Organize(ctx context.Context, sourcePath string, meta plex.MediaMetadata) (string, error) {
+	s.count++
+	if s.count == 2 {
+		close(s.startedSecond)
+		select {
+		case <-s.allowSecond:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	destDir := s.targetDir
+	if destDir == "" {
+		destDir = filepath.Join(filepath.Dir(sourcePath), "library")
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(destDir, filepath.Base(sourcePath))
+	if err := os.Rename(sourcePath, targetPath); err != nil {
+		return "", err
+	}
+	return targetPath, nil
+}
+
+func (s *blockingPlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
 	return nil
 }
 

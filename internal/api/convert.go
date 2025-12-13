@@ -201,6 +201,9 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 				status.EncodedPath = asset.EncodedPath
 				totals.Encoded++
 			}
+			if asset.SubtitledPath != "" {
+				status.SubtitledPath = asset.SubtitledPath
+			}
 			if asset.FinalPath != "" {
 				status.FinalPath = asset.FinalPath
 				totals.Final++
@@ -231,9 +234,10 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 }
 
 type episodeAssets struct {
-	RippedPath  string
-	EncodedPath string
-	FinalPath   string
+	RippedPath    string
+	EncodedPath   string
+	SubtitledPath string
+	FinalPath     string
 }
 
 func indexAssets(assets ripspec.Assets) map[string]episodeAssets {
@@ -250,6 +254,8 @@ func indexAssets(assets ripspec.Assets) map[string]episodeAssets {
 				entry.RippedPath = asset.Path
 			case "encoded":
 				entry.EncodedPath = asset.Path
+			case "subtitled":
+				entry.SubtitledPath = asset.Path
 			case "final":
 				entry.FinalPath = asset.Path
 			}
@@ -258,6 +264,7 @@ func indexAssets(assets ripspec.Assets) map[string]episodeAssets {
 	}
 	build("ripped", assets.Ripped)
 	build("encoded", assets.Encoded)
+	build("subtitled", assets.Subtitled)
 	build("final", assets.Final)
 	return lookup
 }
@@ -367,6 +374,8 @@ func makeEpisodeStageResolver(item *queue.Item) func(EpisodeStatus) string {
 		switch {
 		case status.FinalPath != "":
 			return "final"
+		case status.SubtitledPath != "":
+			return "subtitled"
 		case status.EncodedPath != "":
 			return "encoded"
 		case status.RippedPath != "":
