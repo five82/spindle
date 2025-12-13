@@ -323,6 +323,9 @@ func TestRipperReusesCachedRip(t *testing.T) {
 	if client.calls != 1 {
 		t.Fatalf("expected cached rip to skip makemkv; calls=%d", client.calls)
 	}
+	if !strings.Contains(first.ProgressMessage, "Rip cache hit") {
+		t.Fatalf("expected progress message to mention rip cache hit, got %q", first.ProgressMessage)
+	}
 	second, err := store.GetByID(context.Background(), item.ID)
 	if err != nil {
 		t.Fatalf("GetByID second: %v", err)

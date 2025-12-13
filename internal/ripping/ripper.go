@@ -247,6 +247,20 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				target = cachedTarget
 				cacheUsed = true
 				cacheStatus = "hit"
+				logger.Info(
+					"rip cache hit; skipping makemkv rip",
+					logging.Bool("cache_used", true),
+					logging.String("cache_decision", "hit"),
+					logging.String("rip_dir", destDir),
+					logging.String("ripped_file", cachedTarget),
+				)
+				copy := *item
+				copy.ProgressMessage = "Rip cache hit; skipping MakeMKV rip"
+				if err := r.store.UpdateProgress(ctx, &copy); err != nil {
+					logger.Warn("failed to persist rip cache hit progress", logging.Error(err))
+				} else {
+					*item = copy
+				}
 			} else {
 				cacheStatus = "invalid"
 				logger.Debug("cached rip failed validation", logging.Error(err))
@@ -446,7 +460,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	item.RippedFile = target
 	item.ProgressStage = "Ripped"
 	item.ProgressPercent = 100
-	item.ProgressMessage = "Disc content ripped"
+	if cacheUsed {
+		item.ProgressMessage = "Rip cache hit; MakeMKV rip skipped"
+	} else {
+		item.ProgressMessage = "Disc content ripped"
+	}
 
 	// Log stage summary with timing and resource metrics
 	var totalRippedBytes int64
@@ -459,7 +477,8 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		logging.Int("titles_ripped", len(titleIDs)),
 	}
 	if cacheStatus != "" {
-		summaryAttrs = append(summaryAttrs, logging.String("cache", cacheStatus))
+		summaryAttrs = append(summaryAttrs, logging.String("cache_decision", cacheStatus))
+		summaryAttrs = append(summaryAttrs, logging.Bool("cache_used", cacheStatus == "hit"))
 	}
 	if makemkvDuration > 0 {
 		summaryAttrs = append(summaryAttrs, logging.Duration("rip_time", makemkvDuration))
