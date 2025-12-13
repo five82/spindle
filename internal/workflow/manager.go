@@ -503,8 +503,9 @@ func (m *Manager) newBackgroundHandler(path string) (slog.Handler, error) {
 		OutputPaths:      []string{path},
 		ErrorOutputPaths: []string{path},
 		Development:      false,
-		// Background logs stay scoped to item files so the daemon/API stream remains foreground-only.
-		Stream: nil,
+		// Background logs write to item files, but still publish to the daemon stream so
+		// users can observe per-item/episode progress via the log API and `spindle show --lane background --item <id>`.
+		Stream: m.logHub,
 	})
 	if err != nil {
 		return nil, err

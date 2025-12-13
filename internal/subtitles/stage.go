@@ -65,6 +65,7 @@ func (s *Stage) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Preparing audio for transcription"
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
+	item.ActiveEpisodeKey = ""
 	return s.store.UpdateProgress(ctx, item)
 }
 
@@ -111,7 +112,19 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		totalSegments int
 	)
 	for idx, target := range targets {
-		message := fmt.Sprintf("Generating subtitles %d/%d – %s", idx+1, len(targets), filepath.Base(target.SourcePath))
+		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(target.EpisodeKey))
+		label := ""
+		if target.Season > 0 && target.Episode > 0 {
+			label = fmt.Sprintf("S%02dE%02d", target.Season, target.Episode)
+		} else if strings.TrimSpace(target.EpisodeKey) != "" {
+			label = strings.ToUpper(strings.TrimSpace(target.EpisodeKey))
+		}
+		message := ""
+		if label != "" {
+			message = fmt.Sprintf("Generating subtitles %d/%d – %s", idx+1, len(targets), label)
+		} else {
+			message = fmt.Sprintf("Generating subtitles %d/%d – %s", idx+1, len(targets), filepath.Base(target.SourcePath))
+		}
 		if err := s.updateProgress(ctx, item, message, 5.0+step*float64(idx)); err != nil {
 			return err
 		}
@@ -225,6 +238,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = fmt.Sprintf("Generated subtitles for %d episode(s)", len(targets))
 	item.ProgressPercent = 100
 	item.ErrorMessage = ""
+	item.ActiveEpisodeKey = ""
 	if err := s.store.UpdateProgress(ctx, item); err != nil {
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}

@@ -114,6 +114,7 @@ type Item struct {
 	EncodedFile         string
 	FinalFile           string
 	BackgroundLogPath   string
+	ActiveEpisodeKey    string
 	ErrorMessage        string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time

@@ -14,6 +14,14 @@ const (
 	FieldStage = "stage"
 	// FieldLane is the standardized structured logging key for workflow lane names.
 	FieldLane = "lane"
+	// FieldEpisodeKey is the standardized structured logging key for episode identifiers (e.g. s01e02).
+	FieldEpisodeKey = "episode_key"
+	// FieldEpisodeLabel is the standardized structured logging key for user-friendly episode labels (e.g. S01E02).
+	FieldEpisodeLabel = "episode_label"
+	// FieldEpisodeIndex is the standardized structured logging key for 1-based episode index within a batch.
+	FieldEpisodeIndex = "episode_index"
+	// FieldEpisodeCount is the standardized structured logging key for total episodes in a batch.
+	FieldEpisodeCount = "episode_count"
 	// FieldCorrelationID is the standardized structured logging key for request correlation identifiers.
 	FieldCorrelationID = "correlation_id"
 	// FieldAlert flags warnings or anomalies that should stand out in structured logs.

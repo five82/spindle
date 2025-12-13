@@ -77,26 +77,57 @@ func buildEncodeJobs(env ripspec.Envelope, encodedDir string) ([]encodeJob, erro
 	return jobs, nil
 }
 
-func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath, encodedDir, label string, presetProfile string, logger *slog.Logger) (string, error) {
+func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath, encodedDir, label, episodeKey string, episodeIndex, episodeCount int, presetProfile string, logger *slog.Logger) (string, error) {
 	if e.client == nil {
 		return "", nil
 	}
-	logger.Info(
+	jobLogger := logger
+	episodeKey = strings.ToLower(strings.TrimSpace(episodeKey))
+	if strings.TrimSpace(label) != "" || episodeKey != "" {
+		jobLogger = jobLogger.With(
+			logging.String(logging.FieldEpisodeKey, episodeKey),
+			logging.String(logging.FieldEpisodeLabel, strings.TrimSpace(label)),
+			logging.Int(logging.FieldEpisodeIndex, episodeIndex),
+			logging.Int(logging.FieldEpisodeCount, episodeCount),
+		)
+	}
+	jobLogger.Info(
 		"launching drapto encode",
 		logging.String("command", e.draptoCommand(sourcePath, encodedDir, presetProfile)),
 		logging.String("input", sourcePath),
 		logging.String("job", strings.TrimSpace(label)),
 	)
-	snapshot := loadEncodingSnapshot(logger, item.EncodingDetailsJSON)
+	snapshot := loadEncodingSnapshot(jobLogger, item.EncodingDetailsJSON)
+	snapshot.JobLabel = strings.TrimSpace(label)
+	snapshot.EpisodeKey = episodeKey
+	snapshot.EpisodeIndex = episodeIndex
+	snapshot.EpisodeCount = episodeCount
+	if raw, err := snapshot.Marshal(); err != nil {
+		jobLogger.Warn("failed to marshal encoding snapshot", logging.Error(err))
+	} else if raw != "" {
+		copy := *item
+		copy.EncodingDetailsJSON = raw
+		copy.ActiveEpisodeKey = episodeKey
+		if err := e.store.UpdateProgress(ctx, &copy); err != nil {
+			jobLogger.Warn("failed to persist encoding job context", logging.Error(err))
+		} else {
+			*item = copy
+		}
+	}
 	const progressPersistInterval = 2 * time.Second
 	var lastPersisted time.Time
 	progress := func(update drapto.ProgressUpdate) {
 		copy := *item
 		changed := false
 		message := progressMessageText(update)
+		if message != "" && strings.TrimSpace(label) != "" && episodeIndex > 0 && episodeCount > 0 {
+			message = fmt.Sprintf("%s (%d/%d) — %s", strings.TrimSpace(label), episodeIndex, episodeCount, message)
+		} else if message != "" && strings.TrimSpace(label) != "" {
+			message = fmt.Sprintf("%s — %s", strings.TrimSpace(label), message)
+		}
 		if applyDraptoUpdate(&snapshot, update, message) {
 			if raw, err := snapshot.Marshal(); err != nil {
-				logger.Warn("failed to marshal encoding snapshot", logging.Error(err))
+				jobLogger.Warn("failed to marshal encoding snapshot", logging.Error(err))
 			} else {
 				copy.EncodingDetailsJSON = raw
 			}
@@ -126,7 +157,7 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 			lastPersisted = now
 		}
 		if err := e.store.UpdateProgress(ctx, &copy); err != nil {
-			logger.Warn("failed to persist encoding progress", logging.Error(err))
+			jobLogger.Warn("failed to persist encoding progress", logging.Error(err))
 		}
 		*item = copy
 	}
@@ -154,47 +185,47 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 		if strings.TrimSpace(update.Bitrate) != "" {
 			attrs = append(attrs, logging.String("progress_bitrate", strings.TrimSpace(update.Bitrate)))
 		}
-		logger.Info("drapto progress", logging.Args(attrs...)...)
+		jobLogger.Info("drapto progress", logging.Args(attrs...)...)
 	}
 
 	progressLogger := func(update drapto.ProgressUpdate) {
 		persist := false
 		switch update.Type {
 		case drapto.EventTypeHardware:
-			logDraptoHardware(logger, label, update.Hardware)
+			logDraptoHardware(jobLogger, label, update.Hardware)
 			persist = true
 		case drapto.EventTypeInitialization:
-			logDraptoVideo(logger, label, update.Video)
+			logDraptoVideo(jobLogger, label, update.Video)
 			persist = true
 		case drapto.EventTypeCropResult:
-			logDraptoCrop(logger, label, update.Crop)
+			logDraptoCrop(jobLogger, label, update.Crop)
 			persist = true
 		case drapto.EventTypeEncodingConfig:
-			logDraptoEncodingConfig(logger, label, update.EncodingConfig)
+			logDraptoEncodingConfig(jobLogger, label, update.EncodingConfig)
 			persist = true
 		case drapto.EventTypeEncodingStarted:
-			logDraptoEncodingStart(logger, label, update.TotalFrames)
+			logDraptoEncodingStart(jobLogger, label, update.TotalFrames)
 			persist = true
 		case drapto.EventTypeValidation:
-			logDraptoValidation(logger, label, update.Validation)
+			logDraptoValidation(jobLogger, label, update.Validation)
 			persist = true
 		case drapto.EventTypeEncodingComplete:
-			logDraptoEncodingResult(logger, label, update.Result)
+			logDraptoEncodingResult(jobLogger, label, update.Result)
 			persist = true
 		case drapto.EventTypeOperationComplete:
-			logDraptoOperation(logger, label, update.OperationComplete)
+			logDraptoOperation(jobLogger, label, update.OperationComplete)
 		case drapto.EventTypeWarning:
-			logDraptoWarning(logger, label, update.Warning)
+			logDraptoWarning(jobLogger, label, update.Warning)
 			persist = true
 		case drapto.EventTypeError:
-			logDraptoError(logger, label, update.Error)
+			logDraptoError(jobLogger, label, update.Error)
 			persist = true
 		case drapto.EventTypeBatchStarted:
-			logDraptoBatchStart(logger, label, update.BatchStart)
+			logDraptoBatchStart(jobLogger, label, update.BatchStart)
 		case drapto.EventTypeFileProgress:
-			logDraptoFileProgress(logger, label, update.FileProgress)
+			logDraptoFileProgress(jobLogger, label, update.FileProgress)
 		case drapto.EventTypeBatchComplete:
-			logDraptoBatchSummary(logger, label, update.BatchSummary)
+			logDraptoBatchSummary(jobLogger, label, update.BatchSummary)
 		case drapto.EventTypeStageProgress, drapto.EventTypeEncodingProgress, drapto.EventTypeUnknown:
 			logProgressEvent(update)
 			persist = true
@@ -205,7 +236,7 @@ func (e *Encoder) encodeSource(ctx context.Context, item *queue.Item, sourcePath
 					logging.String("drapto_event_type", string(update.Type)),
 					logging.String("message", strings.TrimSpace(update.Message)),
 				}
-				logger.Info("drapto event", logging.Args(attrs...)...)
+				jobLogger.Info("drapto event", logging.Args(attrs...)...)
 			}
 		}
 		if persist {
@@ -405,9 +436,17 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 
 	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
 	if len(jobs) > 0 {
-		for _, job := range jobs {
+		for idx, job := range jobs {
 			label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
-			path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, decision.Profile, logger)
+			item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(job.Episode.Key))
+			if item.ActiveEpisodeKey != "" {
+				item.ProgressMessage = fmt.Sprintf("Starting encode %s (%d/%d)", label, idx+1, len(jobs))
+				item.ProgressPercent = 0
+				if err := e.store.UpdateProgress(ctx, item); err != nil {
+					logger.Warn("failed to persist encoding job start", logging.Error(err))
+				}
+			}
+			path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, job.Episode.Key, idx+1, len(jobs), decision.Profile, logger)
 			if err != nil {
 				return err
 			}
@@ -437,7 +476,8 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		if label == "" {
 			label = "Disc"
 		}
-		path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, decision.Profile, logger)
+		item.ActiveEpisodeKey = ""
+		path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, "", 0, 0, decision.Profile, logger)
 		if err != nil {
 			return err
 		}
@@ -474,6 +514,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	item.EncodedFile = encodedPaths[0]
 	item.ProgressStage = "Encoded"
 	item.ProgressPercent = 100
+	item.ActiveEpisodeKey = ""
 	if len(encodedPaths) > 1 {
 		item.ProgressMessage = fmt.Sprintf("Encoding completed (%d episodes)", len(encodedPaths))
 	} else if e.client != nil {

@@ -7,6 +7,10 @@ import (
 
 // Snapshot captures Drapto encoding telemetry in a transport-friendly form.
 type Snapshot struct {
+	JobLabel     string      `json:"jobLabel,omitempty"`
+	EpisodeKey   string      `json:"episodeKey,omitempty"`
+	EpisodeIndex int         `json:"episodeIndex,omitempty"`
+	EpisodeCount int         `json:"episodeCount,omitempty"`
 	Stage        string      `json:"stage,omitempty"`
 	Message      string      `json:"message,omitempty"`
 	Percent      float64     `json:"percent,omitempty"`
@@ -108,7 +112,11 @@ type Result struct {
 
 // IsZero reports whether the snapshot has no meaningful data.
 func (s Snapshot) IsZero() bool {
-	return strings.TrimSpace(s.Stage) == "" &&
+	return strings.TrimSpace(s.JobLabel) == "" &&
+		strings.TrimSpace(s.EpisodeKey) == "" &&
+		s.EpisodeIndex == 0 &&
+		s.EpisodeCount == 0 &&
+		strings.TrimSpace(s.Stage) == "" &&
 		strings.TrimSpace(s.Message) == "" &&
 		s.Percent == 0 &&
 		s.ETASeconds == 0 &&

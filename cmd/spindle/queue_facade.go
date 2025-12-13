@@ -357,6 +357,7 @@ func convertAPIEpisodes(item api.QueueItem) ([]queueEpisodeView, queueEpisodeTot
 			Episode:          ep.Episode,
 			Title:            strings.TrimSpace(ep.Title),
 			Stage:            strings.TrimSpace(ep.Stage),
+			Active:           ep.Active,
 			RuntimeSeconds:   ep.RuntimeSeconds,
 			RippedPath:       strings.TrimSpace(ep.RippedPath),
 			EncodedPath:      strings.TrimSpace(ep.EncodedPath),
@@ -364,6 +365,11 @@ func convertAPIEpisodes(item api.QueueItem) ([]queueEpisodeView, queueEpisodeTot
 			SubtitleSource:   strings.TrimSpace(ep.SubtitleSource),
 			SubtitleLanguage: strings.TrimSpace(ep.SubtitleLanguage),
 			MatchScore:       ep.MatchScore,
+		}
+		if ep.Progress != nil {
+			view.ProgressStage = strings.TrimSpace(ep.Progress.Stage)
+			view.ProgressPercent = ep.Progress.Percent
+			view.ProgressMessage = strings.TrimSpace(ep.Progress.Message)
 		}
 		if view.Title == "" {
 			view.Title = strings.TrimSpace(ep.OutputBasename)

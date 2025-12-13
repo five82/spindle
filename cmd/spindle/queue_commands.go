@@ -333,12 +333,23 @@ func printEpisodeDetails(out io.Writer, item queueItemDetailsView) {
 		if title == "" {
 			title = "Unlabeled"
 		}
-		fmt.Fprintf(out, "  %s  %-8s  %s\n", label, stage, title)
+		marker := " "
+		if ep.Active {
+			marker = "*"
+		}
+		fmt.Fprintf(out, "  %s%s  %-8s  %s\n", marker, label, stage, title)
 		if path := primaryEpisodePath(ep); path != "" {
 			fmt.Fprintf(out, "      File: %s\n", path)
 		}
 		if info := episodeSubtitleInfo(ep); info != "" {
 			fmt.Fprintf(out, "      Subtitles: %s\n", info)
+		}
+		if ep.Active {
+			if msg := strings.TrimSpace(ep.ProgressMessage); msg != "" {
+				fmt.Fprintf(out, "      Active: %s\n", msg)
+			} else if ep.ProgressPercent > 0 {
+				fmt.Fprintf(out, "      Active: %.0f%%\n", ep.ProgressPercent)
+			}
 		}
 	}
 }

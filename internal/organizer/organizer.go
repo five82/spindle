@@ -78,6 +78,7 @@ func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Preparing library organization"
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
+	item.ActiveEpisodeKey = ""
 	logger.Debug("starting organization preparation")
 	return nil
 }
@@ -327,7 +328,14 @@ func buildOrganizeJobs(env ripspec.Envelope, base queue.Metadata) ([]organizeJob
 
 func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []organizeJob, logger *slog.Logger, stageStarted time.Time) error {
 	finalPaths := make([]string, 0, len(jobs))
-	for _, job := range jobs {
+	step := 80.0
+	if len(jobs) > 0 {
+		step = 80.0 / float64(len(jobs))
+	}
+	for idx, job := range jobs {
+		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(job.Episode.Key))
+		label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
+		o.updateProgress(ctx, item, fmt.Sprintf("Organizing %s (%d/%d)", label, idx+1, len(jobs)), step*float64(idx))
 		targetPath, err := o.plex.Organize(ctx, job.Source, job.Metadata)
 		if err != nil {
 			return services.Wrap(
@@ -387,6 +395,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 	item.ProgressStage = "Organizing"
 	item.ProgressPercent = 100
 	item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
+	item.ActiveEpisodeKey = ""
 	if o.notifier != nil {
 		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
 			"mediaTitle":    strings.TrimSpace(item.DiscTitle),

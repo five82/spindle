@@ -36,6 +36,10 @@ type queueEpisodeView struct {
 	Episode          int
 	Title            string
 	Stage            string
+	Active           bool
+	ProgressStage    string
+	ProgressPercent  float64
+	ProgressMessage  string
 	RuntimeSeconds   int
 	RippedPath       string
 	EncodedPath      string

@@ -68,6 +68,7 @@ func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error
 	item.ProgressStage = "Episode Identification"
 	item.ProgressMessage = "Analyzing episode content"
 	item.ProgressPercent = 0
+	item.ActiveEpisodeKey = ""
 
 	logger.Debug("starting episode identification")
 
@@ -86,6 +87,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		item.ProgressStage = "Episode Identified"
 		item.ProgressMessage = "Skipped (movie content)"
 		item.ProgressPercent = 100
+		item.ActiveEpisodeKey = ""
 		return nil
 	}
 
@@ -96,6 +98,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		item.ProgressStage = "Episode Identified"
 		item.ProgressMessage = "Skipped (no rip spec)"
 		item.ProgressPercent = 100
+		item.ActiveEpisodeKey = ""
 		return nil
 	}
 
@@ -107,6 +110,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		item.ProgressStage = "Episode Identified"
 		item.ProgressMessage = "Skipped (invalid rip spec)"
 		item.ProgressPercent = 100
+		item.ActiveEpisodeKey = ""
 		return nil
 	}
 
@@ -117,6 +121,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		item.ProgressStage = "Episode Identified"
 		item.ProgressMessage = "Skipped (no episodes)"
 		item.ProgressPercent = 100
+		item.ActiveEpisodeKey = ""
 		return nil
 	}
 
@@ -133,6 +138,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		item.ProgressStage = "Episode Identified"
 		item.ProgressMessage = "Skipped (OpenSubtitles disabled)"
 		item.ProgressPercent = 100
+		item.ActiveEpisodeKey = ""
 		return nil
 	}
 
@@ -149,6 +155,10 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	updated, err := e.matcher.MatchWithProgress(ctx, item, &env, func(phase string, current, total int, episodeKey string) {
 		if e.store == nil || item == nil {
 			return
+		}
+		normalizedKey := strings.ToLower(strings.TrimSpace(episodeKey))
+		if normalizedKey != "" {
+			item.ActiveEpisodeKey = normalizedKey
 		}
 		episodeKey = strings.ToUpper(strings.TrimSpace(episodeKey))
 		switch phase {
@@ -199,6 +209,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	item.ProgressStage = "Episode Identified"
 	item.ProgressMessage = "Episodes correlated with OpenSubtitles"
 	item.ProgressPercent = 100
+	item.ActiveEpisodeKey = ""
 
 	return nil
 }

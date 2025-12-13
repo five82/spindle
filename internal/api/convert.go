@@ -170,6 +170,7 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 	effectiveStage := makeEpisodeStageResolver(item)
 	statuses := make([]EpisodeStatus, 0, len(env.Episodes))
 	totals := EpisodeTotals{Planned: len(env.Episodes)}
+	activeKey := strings.TrimSpace(item.ActiveEpisodeKey)
 	for _, ep := range env.Episodes {
 		status := EpisodeStatus{
 			Key:            ep.Key,
@@ -179,6 +180,15 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 			RuntimeSeconds: ep.RuntimeSeconds,
 			SourceTitleID:  ep.TitleID,
 			OutputBasename: strings.TrimSpace(ep.OutputBasename),
+		}
+		if activeKey != "" && strings.EqualFold(activeKey, strings.TrimSpace(ep.Key)) {
+			status.Active = true
+			progress := QueueProgress{
+				Stage:   item.ProgressStage,
+				Percent: item.ProgressPercent,
+				Message: item.ProgressMessage,
+			}
+			status.Progress = &progress
 		}
 		if t, ok := titles[ep.TitleID]; ok {
 			if status.Title == "" {
@@ -366,8 +376,10 @@ func episodesSynced(attrs map[string]any, episodes []ripspec.Episode, metadataJS
 
 func makeEpisodeStageResolver(item *queue.Item) func(EpisodeStatus) string {
 	queueStage := ""
+	activeKey := ""
 	if item != nil {
 		queueStage = item.Status.StageKey()
+		activeKey = strings.ToLower(strings.TrimSpace(item.ActiveEpisodeKey))
 	}
 	return func(status EpisodeStatus) string {
 		// Prefer concrete artefacts over inferred status.
@@ -381,10 +393,31 @@ func makeEpisodeStageResolver(item *queue.Item) func(EpisodeStatus) string {
 		case status.RippedPath != "":
 			return "ripped"
 		case queueStage != "":
-			return queueStage
+			if activeKey == "" {
+				return queueStage
+			}
+			if !isPerEpisodeQueueStage(queueStage) {
+				return queueStage
+			}
+			if strings.EqualFold(activeKey, strings.ToLower(strings.TrimSpace(status.Key))) {
+				return queueStage
+			}
+			return "planned"
 		default:
 			return "planned"
 		}
+	}
+}
+
+func isPerEpisodeQueueStage(queueStage string) bool {
+	switch strings.ToLower(strings.TrimSpace(queueStage)) {
+	case string(queue.StatusEpisodeIdentifying),
+		string(queue.StatusEncoding),
+		string(queue.StatusSubtitling),
+		string(queue.StatusOrganizing):
+		return true
+	default:
+		return false
 	}
 }
 

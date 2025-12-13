@@ -49,23 +49,25 @@ type EncodingStatus = encodingstate.Snapshot
 
 // EpisodeStatus captures the per-episode workflow state for TV discs.
 type EpisodeStatus struct {
-	Key              string  `json:"key"`
-	Season           int     `json:"season"`
-	Episode          int     `json:"episode"`
-	Title            string  `json:"title"`
-	Stage            string  `json:"stage"`
-	RuntimeSeconds   int     `json:"runtimeSeconds,omitempty"`
-	SourceTitleID    int     `json:"sourceTitleId,omitempty"`
-	SourceTitle      string  `json:"sourceTitle,omitempty"`
-	OutputBasename   string  `json:"outputBasename,omitempty"`
-	RippedPath       string  `json:"rippedPath,omitempty"`
-	EncodedPath      string  `json:"encodedPath,omitempty"`
-	SubtitledPath    string  `json:"subtitledPath,omitempty"`
-	FinalPath        string  `json:"finalPath,omitempty"`
-	SubtitleSource   string  `json:"subtitleSource,omitempty"`
-	SubtitleLanguage string  `json:"subtitleLanguage,omitempty"`
-	MatchScore       float64 `json:"matchScore,omitempty"`
-	MatchedEpisode   int     `json:"matchedEpisode,omitempty"`
+	Key              string         `json:"key"`
+	Season           int            `json:"season"`
+	Episode          int            `json:"episode"`
+	Title            string         `json:"title"`
+	Stage            string         `json:"stage"`
+	Active           bool           `json:"active,omitempty"`
+	Progress         *QueueProgress `json:"progress,omitempty"`
+	RuntimeSeconds   int            `json:"runtimeSeconds,omitempty"`
+	SourceTitleID    int            `json:"sourceTitleId,omitempty"`
+	SourceTitle      string         `json:"sourceTitle,omitempty"`
+	OutputBasename   string         `json:"outputBasename,omitempty"`
+	RippedPath       string         `json:"rippedPath,omitempty"`
+	EncodedPath      string         `json:"encodedPath,omitempty"`
+	SubtitledPath    string         `json:"subtitledPath,omitempty"`
+	FinalPath        string         `json:"finalPath,omitempty"`
+	SubtitleSource   string         `json:"subtitleSource,omitempty"`
+	SubtitleLanguage string         `json:"subtitleLanguage,omitempty"`
+	MatchScore       float64        `json:"matchScore,omitempty"`
+	MatchedEpisode   int            `json:"matchedEpisode,omitempty"`
 }
 
 // EpisodeTotals summarizes how far a multi-episode disc progressed.
