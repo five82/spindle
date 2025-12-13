@@ -14,6 +14,19 @@ CLAUDE.md is a symbolic link to this file so all agent guidance stays in one pla
 - Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → SUBTITLING → SUBTITLED → ORGANIZING → COMPLETED`, and be ready for `FAILED` or `REVIEW` detours.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn’t.
 
+## Related Repos (Local Dev Layout)
+
+Spindle is one of three sibling repos that are developed together on this machine:
+
+- **spindle** (this repo): `~/projects/spindle/` — daemon + CLI + workflow orchestration
+- **flyer**: `~/projects/flyer/` — read-only TUI that polls Spindle’s API/logs and renders queue state
+- **drapto**: `~/projects/drapto/` — ffmpeg encoding wrapper invoked by Spindle during `ENCODING`
+
+Integration contracts to keep in mind while changing code:
+
+- Spindle shells out to Drapto (external binary) and consumes Drapto’s `--progress-json` event stream; keep those JSON objects compatible with Spindle’s consumer.
+- Flyer should remain read-only (no queue mutations) and must tolerate Spindle being down or misconfigured (clear error states, no panics).
+
 ## Critical Expectations
 
 **This is a personal project in rapid development.** Architectural churn is embraced. Optimize for clarity, not backwards compatibility.
@@ -137,3 +150,4 @@ Keep AGENTS.md short enough for a fast read. When the workflow evolves, trim obs
 
 spindle - https://github.com/five82/spindle
 drapto - https://github.com/five82/drapto
+flyer - https://github.com/five82/flyer
