@@ -64,6 +64,18 @@ type GenerateResult struct {
 	SegmentCount int
 	Duration     time.Duration
 	Source       string // "opensubtitles" or "whisperx"
+	// OpenSubtitlesDecision captures what happened with OpenSubtitles during
+	// generation. It is intended for observability (logs/UI) so operators can
+	// understand when/why WhisperX was used.
+	//
+	// Values:
+	// - "used": a subtitle was downloaded from OpenSubtitles
+	// - "no_match": OpenSubtitles lookup succeeded but no suitable match was found
+	// - "error": OpenSubtitles lookup failed (see OpenSubtitlesDetail)
+	// - "skipped": OpenSubtitles was not attempted (see OpenSubtitlesDetail)
+	// - "force_ai": OpenSubtitles was bypassed because ForceAI was true
+	OpenSubtitlesDecision string
+	OpenSubtitlesDetail   string
 }
 
 // Service orchestrates WhisperX execution and Stable-TS formatted subtitle output.
@@ -244,6 +256,8 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, err
 	}
 
+	openSubsDecision := ""
+	openSubsDetail := ""
 	if !req.ForceAI && s.shouldUseOpenSubtitles() {
 		title := strings.TrimSpace(req.Context.Title)
 		parentID := req.Context.ParentID()
@@ -262,6 +276,8 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			)
 		}
 		if result, ok, err := s.tryOpenSubtitles(ctx, plan, req); err != nil {
+			openSubsDecision = "error"
+			openSubsDetail = strings.TrimSpace(err.Error())
 			var suspect suspectMisIdentificationError
 			if errors.As(err, &suspect) {
 				if s.logger != nil {
@@ -289,6 +305,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			}
 		} else if ok {
 			result.Source = "opensubtitles"
+			result.OpenSubtitlesDecision = "used"
 			if s.logger != nil {
 				s.logger.Debug("using opensubtitles subtitles",
 					logging.String("subtitle_path", result.SubtitlePath),
@@ -297,21 +314,29 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 				)
 			}
 			return result, nil
-		} else if s.logger != nil {
-			s.logger.Warn("opensubtitles match not found, falling back to whisperx",
-				logging.String("title", title),
-				logging.Int64("tmdb_id", req.Context.TMDBID),
-				logging.Int64("parent_tmdb_id", parentID),
-				logging.Int64("episode_tmdb_id", episodeID),
-				logging.Int("season", req.Context.Season),
-				logging.Int("episode", req.Context.Episode),
-				logging.String("languages", strings.Join(req.Languages, ",")),
-				logging.Alert("subtitle_fallback"),
-			)
+		} else {
+			openSubsDecision = "no_match"
+			openSubsDetail = "no suitable match found"
+			if s.logger != nil {
+				s.logger.Warn("opensubtitles match not found, falling back to whisperx",
+					logging.String("title", title),
+					logging.Int64("tmdb_id", req.Context.TMDBID),
+					logging.Int64("parent_tmdb_id", parentID),
+					logging.Int64("episode_tmdb_id", episodeID),
+					logging.Int("season", req.Context.Season),
+					logging.Int("episode", req.Context.Episode),
+					logging.String("languages", strings.Join(req.Languages, ",")),
+					logging.Alert("subtitle_fallback"),
+				)
+			}
 		}
-	} else if s.logger != nil {
+	} else {
 		reason := "forceai flag enabled"
-		if !req.ForceAI {
+		if req.ForceAI {
+			openSubsDecision = "force_ai"
+			openSubsDetail = reason
+		} else {
+			openSubsDecision = "skipped"
 			reason = "opensubtitles disabled"
 			if s.config == nil {
 				reason = "configuration unavailable"
@@ -320,8 +345,11 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			} else if strings.TrimSpace(s.config.OpenSubtitlesAPIKey) == "" {
 				reason = "opensubtitles_api_key not set"
 			}
+			openSubsDetail = reason
 		}
-		s.logger.Debug("opensubtitles download skipped", logging.String("reason", reason))
+		if s.logger != nil {
+			s.logger.Debug("opensubtitles download skipped", logging.String("reason", reason))
+		}
 	}
 
 	if req.AllowTranscriptCacheRead {
@@ -330,6 +358,8 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 				s.logger.Warn("transcript cache load failed", logging.Error(err))
 			}
 		} else if ok {
+			cached.OpenSubtitlesDecision = openSubsDecision
+			cached.OpenSubtitlesDetail = openSubsDetail
 			return cached, nil
 		}
 	}
@@ -363,16 +393,19 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			logging.Int("segments", segmentCount),
 			logging.Float64("duration_seconds", finalDuration),
 			logging.String("subtitle_source", "whisperx"),
+			logging.String("opensubtitles_decision", openSubsDecision),
 		)
 	}
 
 	s.tryStoreTranscriptInCache(req, plan, segmentCount)
 
 	result := GenerateResult{
-		SubtitlePath: plan.outputFile,
-		SegmentCount: segmentCount,
-		Duration:     time.Duration(finalDuration * float64(time.Second)),
-		Source:       "whisperx",
+		SubtitlePath:          plan.outputFile,
+		SegmentCount:          segmentCount,
+		Duration:              time.Duration(finalDuration * float64(time.Second)),
+		Source:                "whisperx",
+		OpenSubtitlesDecision: openSubsDecision,
+		OpenSubtitlesDetail:   openSubsDetail,
 	}
 	return result, nil
 }
@@ -594,6 +627,7 @@ func (s *Service) tryLoadTranscriptFromCache(plan *generationPlan, req GenerateR
 		SubtitlePath: plan.outputFile,
 		SegmentCount: segmentCount,
 		Duration:     time.Duration(finalDuration * float64(time.Second)),
+		Source:       "whisperx",
 	}
 	return result, true, nil
 }

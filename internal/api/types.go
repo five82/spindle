@@ -12,29 +12,30 @@ const dateTimeFormat = "2006-01-02T15:04:05.000Z07:00"
 
 // QueueItem describes a queue entry in a transport-friendly format.
 type QueueItem struct {
-	ID                  int64           `json:"id"`
-	DiscTitle           string          `json:"discTitle"`
-	SourcePath          string          `json:"sourcePath"`
-	Status              string          `json:"status"`
-	ProcessingLane      string          `json:"processingLane"`
-	Progress            QueueProgress   `json:"progress"`
-	Encoding            *EncodingStatus `json:"encoding,omitempty"`
-	DraptoPresetProfile string          `json:"draptoPresetProfile,omitempty"`
-	ErrorMessage        string          `json:"errorMessage"`
-	CreatedAt           string          `json:"createdAt,omitempty"`
-	UpdatedAt           string          `json:"updatedAt,omitempty"`
-	DiscFingerprint     string          `json:"discFingerprint,omitempty"`
-	RippedFile          string          `json:"rippedFile,omitempty"`
-	EncodedFile         string          `json:"encodedFile,omitempty"`
-	FinalFile           string          `json:"finalFile,omitempty"`
-	BackgroundLogPath   string          `json:"backgroundLogPath,omitempty"`
-	NeedsReview         bool            `json:"needsReview"`
-	ReviewReason        string          `json:"reviewReason,omitempty"`
-	Metadata            json.RawMessage `json:"metadata,omitempty"`
-	RipSpec             json.RawMessage `json:"ripSpec,omitempty"`
-	Episodes            []EpisodeStatus `json:"episodes,omitempty"`
-	EpisodeTotals       *EpisodeTotals  `json:"episodeTotals,omitempty"`
-	EpisodesSynced      bool            `json:"episodesSynchronized,omitempty"`
+	ID                  int64                     `json:"id"`
+	DiscTitle           string                    `json:"discTitle"`
+	SourcePath          string                    `json:"sourcePath"`
+	Status              string                    `json:"status"`
+	ProcessingLane      string                    `json:"processingLane"`
+	Progress            QueueProgress             `json:"progress"`
+	Encoding            *EncodingStatus           `json:"encoding,omitempty"`
+	DraptoPresetProfile string                    `json:"draptoPresetProfile,omitempty"`
+	ErrorMessage        string                    `json:"errorMessage"`
+	CreatedAt           string                    `json:"createdAt,omitempty"`
+	UpdatedAt           string                    `json:"updatedAt,omitempty"`
+	DiscFingerprint     string                    `json:"discFingerprint,omitempty"`
+	RippedFile          string                    `json:"rippedFile,omitempty"`
+	EncodedFile         string                    `json:"encodedFile,omitempty"`
+	FinalFile           string                    `json:"finalFile,omitempty"`
+	BackgroundLogPath   string                    `json:"backgroundLogPath,omitempty"`
+	NeedsReview         bool                      `json:"needsReview"`
+	ReviewReason        string                    `json:"reviewReason,omitempty"`
+	Metadata            json.RawMessage           `json:"metadata,omitempty"`
+	RipSpec             json.RawMessage           `json:"ripSpec,omitempty"`
+	Episodes            []EpisodeStatus           `json:"episodes,omitempty"`
+	EpisodeTotals       *EpisodeTotals            `json:"episodeTotals,omitempty"`
+	EpisodesSynced      bool                      `json:"episodesSynchronized,omitempty"`
+	SubtitleGeneration  *SubtitleGenerationStatus `json:"subtitleGeneration,omitempty"`
 }
 
 // QueueProgress captures stage progress information for a queue entry.
@@ -49,25 +50,36 @@ type EncodingStatus = encodingstate.Snapshot
 
 // EpisodeStatus captures the per-episode workflow state for TV discs.
 type EpisodeStatus struct {
-	Key              string         `json:"key"`
-	Season           int            `json:"season"`
-	Episode          int            `json:"episode"`
-	Title            string         `json:"title"`
-	Stage            string         `json:"stage"`
-	Active           bool           `json:"active,omitempty"`
-	Progress         *QueueProgress `json:"progress,omitempty"`
-	RuntimeSeconds   int            `json:"runtimeSeconds,omitempty"`
-	SourceTitleID    int            `json:"sourceTitleId,omitempty"`
-	SourceTitle      string         `json:"sourceTitle,omitempty"`
-	OutputBasename   string         `json:"outputBasename,omitempty"`
-	RippedPath       string         `json:"rippedPath,omitempty"`
-	EncodedPath      string         `json:"encodedPath,omitempty"`
-	SubtitledPath    string         `json:"subtitledPath,omitempty"`
-	FinalPath        string         `json:"finalPath,omitempty"`
-	SubtitleSource   string         `json:"subtitleSource,omitempty"`
-	SubtitleLanguage string         `json:"subtitleLanguage,omitempty"`
-	MatchScore       float64        `json:"matchScore,omitempty"`
-	MatchedEpisode   int            `json:"matchedEpisode,omitempty"`
+	Key                       string         `json:"key"`
+	Season                    int            `json:"season"`
+	Episode                   int            `json:"episode"`
+	Title                     string         `json:"title"`
+	Stage                     string         `json:"stage"`
+	Active                    bool           `json:"active,omitempty"`
+	Progress                  *QueueProgress `json:"progress,omitempty"`
+	RuntimeSeconds            int            `json:"runtimeSeconds,omitempty"`
+	SourceTitleID             int            `json:"sourceTitleId,omitempty"`
+	SourceTitle               string         `json:"sourceTitle,omitempty"`
+	OutputBasename            string         `json:"outputBasename,omitempty"`
+	RippedPath                string         `json:"rippedPath,omitempty"`
+	EncodedPath               string         `json:"encodedPath,omitempty"`
+	SubtitledPath             string         `json:"subtitledPath,omitempty"`
+	FinalPath                 string         `json:"finalPath,omitempty"`
+	SubtitleSource            string         `json:"subtitleSource,omitempty"`
+	SubtitleLanguage          string         `json:"subtitleLanguage,omitempty"`
+	GeneratedSubtitleSource   string         `json:"generatedSubtitleSource,omitempty"`
+	GeneratedSubtitleLanguage string         `json:"generatedSubtitleLanguage,omitempty"`
+	GeneratedSubtitleDecision string         `json:"generatedSubtitleDecision,omitempty"`
+	MatchScore                float64        `json:"matchScore,omitempty"`
+	MatchedEpisode            int            `json:"matchedEpisode,omitempty"`
+}
+
+// SubtitleGenerationStatus summarizes how subtitles were produced for a queue item.
+type SubtitleGenerationStatus struct {
+	OpenSubtitles         int  `json:"opensubtitles"`
+	WhisperX              int  `json:"whisperx"`
+	ExpectedOpenSubtitles bool `json:"expectedOpenSubtitles,omitempty"`
+	FallbackUsed          bool `json:"fallbackUsed,omitempty"`
 }
 
 // EpisodeTotals summarizes how far a multi-episode disc progressed.

@@ -109,6 +109,27 @@ func TestStagePersistsRipSpecPerEpisode(t *testing.T) {
 	if _, ok := midEnv.Assets.FindAsset("subtitled", ep2Key); ok {
 		t.Fatalf("did not expect subtitled asset for %s mid-run", ep2Key)
 	}
+	if midEnv.Attributes == nil {
+		t.Fatalf("expected subtitle generation attributes to be populated")
+	}
+	resultsAny, ok := midEnv.Attributes["subtitle_generation_results"]
+	if !ok {
+		t.Fatalf("expected subtitle_generation_results attribute mid-run")
+	}
+	results, ok := resultsAny.([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("expected 1 subtitle_generation_results entry mid-run, got %#v", resultsAny)
+	}
+	entry, ok := results[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected subtitle_generation_results entry to be map, got %#v", results[0])
+	}
+	if entry["episode_key"] != strings.ToLower(ep1Key) {
+		t.Fatalf("expected episode_key %q, got %#v", strings.ToLower(ep1Key), entry["episode_key"])
+	}
+	if entry["source"] != "whisperx" {
+		t.Fatalf("expected source whisperx, got %#v", entry["source"])
+	}
 
 	close(runner.allowSecond)
 	if err := <-errCh; err != nil {

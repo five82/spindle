@@ -45,6 +45,9 @@ func FromQueueItem(item *queue.Item) QueueItem {
 		s := snapshot
 		dto.Encoding = &s
 	}
+	if sg := deriveSubtitleGeneration(item); sg != nil {
+		dto.SubtitleGeneration = sg
+	}
 
 	if !item.CreatedAt.IsZero() {
 		dto.CreatedAt = item.CreatedAt.UTC().Format(dateTimeFormat)
@@ -167,6 +170,7 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 	titles := indexTitles(env.Titles)
 	assets := indexAssets(env.Assets)
 	matches := indexMatches(env.Attributes)
+	generated := indexGeneratedSubtitles(env.Attributes)
 	effectiveStage := makeEpisodeStageResolver(item)
 	statuses := make([]EpisodeStatus, 0, len(env.Episodes))
 	totals := EpisodeTotals{Planned: len(env.Episodes)}
@@ -228,6 +232,11 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 			if status.Episode == 0 && match.MatchedEpisode > 0 {
 				status.Episode = match.MatchedEpisode
 			}
+		}
+		if gen, ok := generated[strings.ToLower(strings.TrimSpace(ep.Key))]; ok {
+			status.GeneratedSubtitleSource = gen.Source
+			status.GeneratedSubtitleLanguage = gen.Language
+			status.GeneratedSubtitleDecision = gen.Decision
 		}
 		statuses = append(statuses, status)
 	}
@@ -341,6 +350,97 @@ func indexMatches(attrs map[string]any) map[string]matchInfo {
 		}
 	}
 	return lookup
+}
+
+type generatedSubtitleInfo struct {
+	Source   string
+	Language string
+	Decision string
+}
+
+func indexGeneratedSubtitles(attrs map[string]any) map[string]generatedSubtitleInfo {
+	if len(attrs) == 0 {
+		return nil
+	}
+	var rawResults []any
+	switch v := attrs["subtitle_generation_results"].(type) {
+	case []any:
+		rawResults = v
+	case []map[string]any:
+		rawResults = make([]any, len(v))
+		for i := range v {
+			rawResults[i] = v[i]
+		}
+	default:
+		return nil
+	}
+	lookup := make(map[string]generatedSubtitleInfo, len(rawResults))
+	for _, entry := range rawResults {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(asString(m["episode_key"])))
+		if key == "" {
+			continue
+		}
+		lookup[key] = generatedSubtitleInfo{
+			Source:   strings.ToLower(strings.TrimSpace(asString(m["source"]))),
+			Language: strings.ToLower(strings.TrimSpace(asString(m["language"]))),
+			Decision: strings.TrimSpace(asString(m["opensubtitles_decision"])),
+		}
+	}
+	return lookup
+}
+
+func deriveSubtitleGeneration(item *queue.Item) *SubtitleGenerationStatus {
+	if item == nil || strings.TrimSpace(item.RipSpecData) == "" {
+		return nil
+	}
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err != nil || len(env.Attributes) == 0 {
+		return nil
+	}
+	var (
+		openSubs    int
+		whisperx    int
+		expected    bool
+		fallback    bool
+		haveSummary bool
+	)
+	if raw, ok := env.Attributes["subtitle_generation_summary"].(map[string]any); ok && len(raw) > 0 {
+		openSubs = asInt(raw["opensubtitles"])
+		whisperx = asInt(raw["whisperx"])
+		expected = asBool(raw["expected_opensubtitles"])
+		fallback = asBool(raw["fallback_used"])
+		haveSummary = true
+	}
+	if !haveSummary {
+		generated := indexGeneratedSubtitles(env.Attributes)
+		if len(generated) == 0 {
+			return nil
+		}
+		for _, info := range generated {
+			switch strings.ToLower(strings.TrimSpace(info.Source)) {
+			case "opensubtitles":
+				openSubs++
+			case "whisperx":
+				whisperx++
+			}
+		}
+		expected = false
+		fallback = false
+	}
+	if openSubs == 0 && whisperx == 0 {
+		return nil
+	}
+	status := &SubtitleGenerationStatus{
+		OpenSubtitles:         openSubs,
+		WhisperX:              whisperx,
+		ExpectedOpenSubtitles: expected,
+		FallbackUsed:          fallback,
+	}
+	return status
 }
 
 func episodesSynced(attrs map[string]any, episodes []ripspec.Episode, metadataJSON string) bool {
@@ -463,5 +563,16 @@ func asInt(v any) int {
 		return value
 	default:
 		return 0
+	}
+}
+
+func asBool(v any) bool {
+	switch value := v.(type) {
+	case bool:
+		return value
+	case string:
+		return strings.EqualFold(strings.TrimSpace(value), "true")
+	default:
+		return false
 	}
 }

@@ -34,6 +34,21 @@ func TestFromQueueItemIncludesEpisodes(t *testing.T) {
 				"score":             0.91,
 				"subtitle_language": "en",
 			}},
+			"subtitle_generation_summary": map[string]any{
+				"opensubtitles":          1,
+				"whisperx":               1,
+				"expected_opensubtitles": true,
+				"fallback_used":          true,
+			},
+			"subtitle_generation_results": []map[string]any{{
+				"episode_key": ep1,
+				"source":      "opensubtitles",
+			}, {
+				"episode_key":            ep2,
+				"source":                 "whisperx",
+				"language":               "en",
+				"opensubtitles_decision": "no_match",
+			}},
 		},
 	}
 	encoded, err := env.Encode()
@@ -62,6 +77,18 @@ func TestFromQueueItemIncludesEpisodes(t *testing.T) {
 	}
 	if dto.Episodes[1].Episode != 2 {
 		t.Fatalf("expected fallback episode number to update, got %d", dto.Episodes[1].Episode)
+	}
+	if dto.SubtitleGeneration == nil {
+		t.Fatalf("expected subtitle generation summary to be populated")
+	}
+	if dto.SubtitleGeneration.OpenSubtitles != 1 || dto.SubtitleGeneration.WhisperX != 1 || !dto.SubtitleGeneration.FallbackUsed || !dto.SubtitleGeneration.ExpectedOpenSubtitles {
+		t.Fatalf("unexpected subtitle generation: %+v", dto.SubtitleGeneration)
+	}
+	if dto.Episodes[1].GeneratedSubtitleSource != "whisperx" {
+		t.Fatalf("expected generated subtitle source whisperx, got %q", dto.Episodes[1].GeneratedSubtitleSource)
+	}
+	if dto.Episodes[1].GeneratedSubtitleDecision != "no_match" {
+		t.Fatalf("expected generated subtitle decision no_match, got %q", dto.Episodes[1].GeneratedSubtitleDecision)
 	}
 }
 

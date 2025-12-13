@@ -105,6 +105,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	baseCtx := BuildSubtitleContext(item)
+	openSubsExpected := s.service != nil && s.service.shouldUseOpenSubtitles()
 	step := 90.0 / float64(len(targets))
 	var (
 		openSubsCount int
@@ -212,16 +213,37 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			aiCount++
 		}
 		totalSegments += result.SegmentCount
+		episodeKey := strings.ToLower(strings.TrimSpace(target.EpisodeKey))
+		if episodeKey == "" {
+			episodeKey = "primary"
+		}
+		if openSubsExpected && strings.EqualFold(result.Source, "whisperx") && result.OpenSubtitlesDecision != "force_ai" && result.OpenSubtitlesDecision != "skipped" {
+			if s.logger != nil {
+				s.logger.Warn("whisperx subtitle fallback used",
+					logging.Int64("item_id", item.ID),
+					logging.String("episode_key", episodeKey),
+					logging.String("source", target.SourcePath),
+					logging.String("subtitle", result.SubtitlePath),
+					logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
+					logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
+					logging.Alert("subtitle_fallback"),
+				)
+			}
+		}
 		if s.logger != nil {
 			s.logger.Debug("subtitle generation complete",
 				logging.String("source", target.SourcePath),
 				logging.String("subtitle", result.SubtitlePath),
 				logging.Int("segments", result.SegmentCount),
 				logging.String("subtitle_source", result.Source),
+				logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
 			)
 		}
-		if hasRipSpec && strings.TrimSpace(target.EpisodeKey) != "" {
-			env.Assets.AddAsset("subtitled", ripspec.Asset{EpisodeKey: target.EpisodeKey, TitleID: target.TitleID, Path: target.SourcePath})
+		if hasRipSpec {
+			if strings.TrimSpace(target.EpisodeKey) != "" {
+				env.Assets.AddAsset("subtitled", ripspec.Asset{EpisodeKey: target.EpisodeKey, TitleID: target.TitleID, Path: result.SubtitlePath})
+			}
+			recordSubtitleGeneration(&env, episodeKey, ctxMeta.Language, result, openSubsExpected, openSubsCount, aiCount)
 			if encoded, err := env.Encode(); err == nil {
 				copy := *item
 				copy.RipSpecData = encoded
@@ -235,7 +257,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			}
 		}
 	}
-	item.ProgressMessage = fmt.Sprintf("Generated subtitles for %d episode(s)", len(targets))
+	item.ProgressMessage = subtitleStageMessage(len(targets), openSubsCount, aiCount)
 	item.ProgressPercent = 100
 	item.ErrorMessage = ""
 	item.ActiveEpisodeKey = ""
@@ -243,7 +265,6 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}
 	fallbackEpisodes := len(targets) - openSubsCount
-	openSubsExpected := s.service != nil && s.service.shouldUseOpenSubtitles()
 	alertValue := ""
 	if item.NeedsReview {
 		alertValue = "review"
@@ -269,6 +290,106 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 	return nil
+}
+
+const (
+	subtitleGenerationResultsKey = "subtitle_generation_results"
+	subtitleGenerationSummaryKey = "subtitle_generation_summary"
+)
+
+func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string, result GenerateResult, openSubsExpected bool, openSubsCount, whisperxCount int) {
+	if env == nil {
+		return
+	}
+	if env.Attributes == nil {
+		env.Attributes = make(map[string]any)
+	}
+	key := strings.ToLower(strings.TrimSpace(episodeKey))
+	if key == "" {
+		key = "primary"
+	}
+
+	entry := map[string]any{
+		"episode_key": key,
+		"source":      strings.ToLower(strings.TrimSpace(result.Source)),
+	}
+	if strings.TrimSpace(result.SubtitlePath) != "" {
+		entry["subtitle_path"] = strings.TrimSpace(result.SubtitlePath)
+	}
+	if result.SegmentCount > 0 {
+		entry["segments"] = result.SegmentCount
+	}
+	if lang := strings.ToLower(strings.TrimSpace(language)); lang != "" {
+		entry["language"] = lang
+	}
+	if dec := strings.TrimSpace(result.OpenSubtitlesDecision); dec != "" {
+		entry["opensubtitles_decision"] = dec
+	}
+	if detail := strings.TrimSpace(result.OpenSubtitlesDetail); detail != "" {
+		entry["opensubtitles_detail"] = detail
+	}
+
+	var list []map[string]any
+	switch v := env.Attributes[subtitleGenerationResultsKey].(type) {
+	case []map[string]any:
+		list = v
+	case []any:
+		list = make([]map[string]any, 0, len(v))
+		for _, raw := range v {
+			if m, ok := raw.(map[string]any); ok {
+				list = append(list, m)
+			}
+		}
+	}
+	replaced := false
+	for i := range list {
+		existingKey := strings.ToLower(strings.TrimSpace(toString(list[i]["episode_key"])))
+		if existingKey != "" && strings.EqualFold(existingKey, key) {
+			list[i] = entry
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		list = append(list, entry)
+	}
+	env.Attributes[subtitleGenerationResultsKey] = list
+
+	env.Attributes[subtitleGenerationSummaryKey] = map[string]any{
+		"opensubtitles":          openSubsCount,
+		"whisperx":               whisperxCount,
+		"expected_opensubtitles": openSubsExpected,
+		"fallback_used":          openSubsExpected && whisperxCount > 0,
+	}
+}
+
+func subtitleStageMessage(episodeCount, openSubsCount, whisperxCount int) string {
+	base := "Generated subtitles"
+	if episodeCount > 1 {
+		base = fmt.Sprintf("Generated subtitles for %d episode(s)", episodeCount)
+	}
+	parts := make([]string, 0, 2)
+	if openSubsCount > 0 {
+		parts = append(parts, fmt.Sprintf("OpenSubtitles: %d", openSubsCount))
+	}
+	if whisperxCount > 0 {
+		parts = append(parts, fmt.Sprintf("WhisperX: %d", whisperxCount))
+	}
+	if len(parts) == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s (%s)", base, strings.Join(parts, ", "))
+}
+
+func toString(v any) string {
+	switch value := v.(type) {
+	case string:
+		return value
+	case fmt.Stringer:
+		return value.String()
+	default:
+		return ""
+	}
 }
 
 type subtitleTarget struct {
