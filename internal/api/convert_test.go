@@ -145,3 +145,30 @@ func TestFromQueueItem_PreservesReviewCompletionStage(t *testing.T) {
 		t.Fatalf("expected percent 100, got %v", dto.Progress.Percent)
 	}
 }
+
+func TestFromQueueItem_FillsEmptyProgressStageFromStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status queue.Status
+		want   string
+	}{
+		{name: "pending", status: queue.StatusPending, want: "Pending"},
+		{name: "encoding", status: queue.StatusEncoding, want: "Encoding"},
+		{name: "organizing", status: queue.StatusOrganizing, want: "Organizing"},
+		{name: "review", status: queue.StatusReview, want: "Manual review"},
+		{name: "completed", status: queue.StatusCompleted, want: "Completed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := &queue.Item{
+				Status:        tt.status,
+				ProgressStage: "",
+			}
+			dto := FromQueueItem(item)
+			if dto.Progress.Stage != tt.want {
+				t.Fatalf("expected stage %q, got %q", tt.want, dto.Progress.Stage)
+			}
+		})
+	}
+}

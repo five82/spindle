@@ -22,6 +22,9 @@ func FromQueueItem(item *queue.Item) QueueItem {
 
 	progressStage := item.ProgressStage
 	progressPercent := item.ProgressPercent
+	if strings.TrimSpace(progressStage) == "" {
+		progressStage = defaultProgressStageForStatus(item.Status)
+	}
 	if item.Status == queue.StatusCompleted {
 		stageLower := strings.ToLower(strings.TrimSpace(progressStage))
 		if !item.NeedsReview && !strings.Contains(stageLower, "review") {
@@ -82,6 +85,43 @@ func FromQueueItem(item *queue.Item) QueueItem {
 		dto.EpisodesSynced = synced
 	}
 	return dto
+}
+
+func defaultProgressStageForStatus(status queue.Status) string {
+	switch status {
+	case queue.StatusPending:
+		return "Pending"
+	case queue.StatusIdentifying:
+		return "Identifying"
+	case queue.StatusIdentified:
+		return "Identified"
+	case queue.StatusRipping:
+		return "Ripping"
+	case queue.StatusRipped:
+		return "Ripped"
+	case queue.StatusEpisodeIdentifying:
+		return "Episode identification"
+	case queue.StatusEpisodeIdentified:
+		return "Episode identified"
+	case queue.StatusEncoding:
+		return "Encoding"
+	case queue.StatusEncoded:
+		return "Encoded"
+	case queue.StatusSubtitling:
+		return "Subtitling"
+	case queue.StatusSubtitled:
+		return "Subtitled"
+	case queue.StatusOrganizing:
+		return "Organizing"
+	case queue.StatusCompleted:
+		return "Completed"
+	case queue.StatusFailed:
+		return "Failed"
+	case queue.StatusReview:
+		return "Manual review"
+	default:
+		return strings.TrimSpace(string(status))
+	}
 }
 
 // FromQueueItems converts a slice of queue records into API DTOs.
