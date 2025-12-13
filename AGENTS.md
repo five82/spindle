@@ -39,8 +39,9 @@ Integration contracts to keep in mind while changing code:
 
 ## Project Snapshot
 
-Spindle automates the journey from optical disc to organized Plex library. It coordinates disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata lookup (TMDB), Plex library updates, and notifications (ntfy).
+Spindle is a **personal project maintained by a single developer** that automates the journey from optical disc to organized Plex library. It coordinates disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata lookup (TMDB), Plex library updates, and notifications (ntfy).
 
+- **Scope**: Single-developer personal project - avoid over-engineering
 - **Environment**: Go 1.25+ toolchain plus MakeMKV/Drapto binaries.
 - **Operation mode**: Daemon with optional direct database access. Queue commands work without a running daemon.
 - **Inputs**: Optical discs via `optical_drive` (defaults to `/dev/sr0`).
