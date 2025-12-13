@@ -20,6 +20,18 @@ func FromQueueItem(item *queue.Item) QueueItem {
 		return QueueItem{}
 	}
 
+	progressStage := item.ProgressStage
+	progressPercent := item.ProgressPercent
+	if item.Status == queue.StatusCompleted {
+		stageLower := strings.ToLower(strings.TrimSpace(progressStage))
+		if !item.NeedsReview && !strings.Contains(stageLower, "review") {
+			progressStage = "Completed"
+		}
+		if progressPercent < 100 {
+			progressPercent = 100
+		}
+	}
+
 	dto := QueueItem{
 		ID:                  item.ID,
 		DiscTitle:           item.DiscTitle,
@@ -28,8 +40,8 @@ func FromQueueItem(item *queue.Item) QueueItem {
 		ProcessingLane:      string(queue.LaneForItem(item)),
 		DraptoPresetProfile: strings.TrimSpace(item.DraptoPresetProfile),
 		Progress: QueueProgress{
-			Stage:   item.ProgressStage,
-			Percent: item.ProgressPercent,
+			Stage:   progressStage,
+			Percent: progressPercent,
 			Message: item.ProgressMessage,
 		},
 		ErrorMessage:      item.ErrorMessage,

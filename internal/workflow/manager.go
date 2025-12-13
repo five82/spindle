@@ -615,6 +615,18 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 		item.Status = stage.doneStatus
 	}
 	item.LastHeartbeat = nil
+	if item.Status == queue.StatusCompleted {
+		currentLabel := strings.TrimSpace(item.ProgressStage)
+		if !item.NeedsReview && !strings.Contains(strings.ToLower(currentLabel), "review") {
+			item.ProgressStage = deriveStageLabel(queue.StatusCompleted)
+		}
+		if item.ProgressPercent < 100 {
+			item.ProgressPercent = 100
+		}
+		if strings.TrimSpace(item.ProgressMessage) == "" {
+			item.ProgressMessage = deriveStageLabel(queue.StatusCompleted)
+		}
+	}
 	if err := m.store.Update(ctx, item); err != nil {
 		wrapped := fmt.Errorf("persist stage result: %w", err)
 		stageLogger.Error("failed to persist stage result", logging.Error(wrapped))

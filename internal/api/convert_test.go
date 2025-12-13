@@ -112,3 +112,36 @@ func TestEpisodeStageFallsBackToQueueStatus(t *testing.T) {
 		t.Fatalf("expected stage to fall back to queue status, got %s", dto.Episodes[0].Stage)
 	}
 }
+
+func TestFromQueueItem_NormalizesCompletedProgressStage(t *testing.T) {
+	item := &queue.Item{
+		Status:          queue.StatusCompleted,
+		ProgressStage:   "Organizing",
+		ProgressPercent: 42,
+	}
+
+	dto := FromQueueItem(item)
+	if dto.Progress.Stage != "Completed" {
+		t.Fatalf("expected completed stage, got %q", dto.Progress.Stage)
+	}
+	if dto.Progress.Percent != 100 {
+		t.Fatalf("expected percent 100, got %v", dto.Progress.Percent)
+	}
+}
+
+func TestFromQueueItem_PreservesReviewCompletionStage(t *testing.T) {
+	item := &queue.Item{
+		Status:          queue.StatusCompleted,
+		NeedsReview:     true,
+		ProgressStage:   "Manual review",
+		ProgressPercent: 100,
+	}
+
+	dto := FromQueueItem(item)
+	if dto.Progress.Stage != "Manual review" {
+		t.Fatalf("expected manual review stage, got %q", dto.Progress.Stage)
+	}
+	if dto.Progress.Percent != 100 {
+		t.Fatalf("expected percent 100, got %v", dto.Progress.Percent)
+	}
+}

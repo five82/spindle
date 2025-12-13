@@ -91,6 +91,9 @@ func TestManagerProcessesItems(t *testing.T) {
 			t.Fatalf("GetByID failed: %v", err)
 		}
 		if updated.Status == queue.StatusCompleted {
+			if updated.ProgressStage != "Completed" {
+				t.Fatalf("expected progress stage %q, got %q", "Completed", updated.ProgressStage)
+			}
 			break
 		}
 		time.Sleep(25 * time.Millisecond)
