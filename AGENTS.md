@@ -11,7 +11,7 @@ CLAUDE.md is a symbolic link to this file so all agent guidance stays in one pla
 - Finish the work you start. Ask the user before dropping scope or leaving TODOs.
 - Most commands work with or without a running daemon; queue commands access the database directly when the daemon is stopped.
 - Use `spindle stop` to completely stop the daemon.
-- Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED → SUBTITLING → SUBTITLED → ORGANIZING → COMPLETED`, and be ready for `FAILED` or `REVIEW` detours.
+- Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENTIFYING → EPISODE_IDENTIFIED] → ENCODING → ENCODED → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED`, and be ready for `FAILED` or `REVIEW` detours.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn’t.
 
 ## Related Repos (Local Dev Layout)
@@ -41,9 +41,9 @@ Integration contracts to keep in mind while changing code:
 
 Spindle automates the journey from optical disc to organized Plex library. It coordinates disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata lookup (TMDB), Plex library updates, and notifications (ntfy).
 
-- **Environment**: Go 1.25+ toolchain (dev boxes run Go 1.25.4) plus MakeMKV/Drapto binaries.
+- **Environment**: Go 1.25+ toolchain plus MakeMKV/Drapto binaries.
 - **Operation mode**: Daemon with optional direct database access. Queue commands work without a running daemon.
-- **Inputs**: Mounted discs at `/media/cdrom` or `/media/cdrom0`, or files dropped into watch folders.
+- **Inputs**: Optical discs via `optical_drive` (defaults to `/dev/sr0`).
 - **Outputs**: Structured library tree plus ntfy progress.
 
 See `README.md` for install details, disc mounting notes, and end-user usage.
@@ -68,9 +68,10 @@ When new capabilities land, update this map and the README together so future ag
 `internal/queue` defines the lifecycle and is the source of truth. Items typically advance:
 
 ```
-PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → EPISODE_IDENTIFYING → EPISODE_IDENTIFIED → ENCODING → ENCODED → SUBTITLING → SUBTITLED → ORGANIZING → COMPLETED
+PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENTIFYING → EPISODE_IDENTIFIED] → ENCODING → ENCODED → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED
 ```
 
+- In the SQLite DB / HTTP API these appear as lower-case snake-case (see `internal/queue.Status`).
 - **FAILED** marks irrecoverable runs. Surface the root cause and keep progress context.
 - **REVIEW** is for manual intervention (for example, uncertain identification).
 - Rip completion triggers an ntfy notification at `RIPPED`; users eject the disc manually when convenient.
@@ -81,7 +82,7 @@ If you add or reorder phases, update the enums, workflow routing, CLI presentati
 
 ## Development Workflow
 
-- Install Go 1.25+ (currently tested on 1.25.4) and keep `golangci-lint` up to date via `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
+- Install Go 1.25+ and keep `golangci-lint` up to date via `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
 - Build the binary from source while iterating: `go install ./cmd/spindle`.
 - Configuration lives at `~/.config/spindle/config.toml`. Use dedicated staging/library directories and a test TMDB key for integration flows.
 - Before handing off, execute `./check-ci.sh` (runs `go test ./...` and `golangci-lint run`). If you cannot run it, state why.
@@ -91,7 +92,7 @@ If you add or reorder phases, update the enums, workflow routing, CLI presentati
 - `tmdb_api_key` (required) plus `tmdb_language`/`tmdb_confidence_threshold` control identification; use `spindle config init` to scaffold a sample (fills defaults for everything else).
 - Paths: `staging_dir`, `library_dir`, `review_dir`, `log_dir`, `opensubtitles_cache_dir`, `whisperx_cache_dir`, and `rip_cache_dir`; keep them on fast storage because stages stream large files.
 - Subtitles & WhisperX: toggle with `subtitles_enabled`; OpenSubtitles requires `opensubtitles_enabled`, `opensubtitles_api_key`, `opensubtitles_user_agent`, optional `opensubtitles_user_token`, and `opensubtitles_languages`; WhisperX tuning lives behind `whisperx_cuda_enabled`, `whisperx_vad_method`, and `whisperx_hf_token`.
-- Rip cache: enable via `rip_cache_enabled`, size with `rip_cache_max_gib`, and point at a volume that can hold repeated rips; the cache honors a 20%% free-space floor automatically.
+- Rip cache: enable via `rip_cache_enabled`, size with `rip_cache_max_gib`, and point at a volume that can hold repeated rips; the cache honors a 20% free-space floor automatically.
 - Plex: `plex_link_enabled`, `plex_url`, `plex_auth_path`, `movies_library`, and `tv_library` must be set before `spindle plex link` can finish; otherwise the organizer skips Plex refreshes.
 - Notifications & misc: `ntfy_topic` enables push updates, `keydb_path`/`keydb_download_url` keep MakeMKV happy, and `api_bind` exposes the queue health endpoint.
 
@@ -131,7 +132,7 @@ Formatting and linting are enforced by `golangci-lint`; run it directly or via `
 - **Identification stalls**: Inspect TMDB configuration, confirm the API key, and review identifier warnings for cache/HTTP issues.
 - **Encoding hiccups**: Drapto integration streams JSON progress from `internal/encoding`; capture the log payload before retrying.
 - **Subtitle stalls**: Confirm `subtitles_enabled`/`opensubtitles_*` configuration plus WhisperX toggles (`whisperx_cuda_enabled`, `whisperx_hf_token` when using `pyannote` VAD). Logs from `internal/subtitles` include `subtitle_source`, rejection reasons, and offsets—set `SPD_DEBUG_SUBTITLES_KEEP=1` to retain intermediate files under the item's staging folder for inspection. Use `spindle gensubtitle` for targeted retries once config issues are resolved.
-- **Rip cache surprises**: When `rip_cache_enabled` is true, ripped titles persist under `rip_cache_dir` and shortcut future encodes. If disk pressure grows, run `spindle cache stats` to review usage or `spindle cache prune` to reclaim space; the manager also auto-prunes when free space dips below ~20%%, so verify `rip_cache_max_gib` aligns with local capacity.
+- **Rip cache surprises**: When `rip_cache_enabled` is true, ripped titles persist under `rip_cache_dir` and shortcut future encodes. If disk pressure grows, run `spindle cache stats` to review usage or `spindle cache prune` to reclaim space; the manager also auto-prunes when free space dips below ~20%, so verify `rip_cache_max_gib` aligns with local capacity.
 - **Queue visibility**: `sqlite3 path/to/queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'` is often faster than adding debug prints.
 - **Single instance conflicts**: `internal/daemon` enforces single-instance operation; avoid bypassing it with ad-hoc process launches.
 - **Daemon persistence**: `spindle stop` completely terminates the daemon. Queue commands continue to work by accessing the database directly.

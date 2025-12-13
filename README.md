@@ -65,8 +65,8 @@ organization continue in the background.
 Each queue item flows through:
 
 ```
-PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → ENCODING → ENCODED
-        → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED
+PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENTIFYING → EPISODE_IDENTIFIED]
+        → ENCODING → ENCODED → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED
 ```
 
 `REVIEW` and `FAILED` capture manual intervention paths. Read

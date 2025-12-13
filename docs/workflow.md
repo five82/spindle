@@ -4,7 +4,7 @@ This guide walks through what happens after you start the Spindle daemon and ins
 
 ## Before You Start
 
-- Install Spindle with `go install github.com/five82/spindle/cmd/spindle@latest` and create your config with `spindle init-config` (see `docs/configuration.md` for the detailed setup).
+- Install Spindle with `go install github.com/five82/spindle/cmd/spindle@latest` and create your config with `spindle config init` (see `docs/configuration.md` for the detailed setup).
 - Edit `~/.config/spindle/config.toml` so `library_dir`, `staging_dir`, `tmdb_api_key`, `plex_url`, `plex_link_enabled`, and `ntfy_topic` (optional) are filled out. Run `spindle plex link` once to authorize Plex when automatic refreshes are enabled.
 - Run `spindle config validate` to confirm the configuration and directories are ready.
 - Start the background process with `spindle start`, then monitor logs with `spindle show --follow` (add `--lines N` for a snapshot without following).
@@ -18,6 +18,7 @@ Every item moves through the queue in order. The statuses you will see are:
 - `PENDING` - disc noticed, waiting for identification
 - `IDENTIFYING` -> `IDENTIFIED` - MakeMKV scan + TMDB lookup completed
 - `RIPPING` -> `RIPPED` - video copied to the staging area; you’ll get a notification so the disc can be ejected manually
+- `EPISODE_IDENTIFYING` -> `EPISODE_IDENTIFIED` *(optional)* - for TV discs, WhisperX + OpenSubtitles align ripped files to definitive episode numbers before encoding
 - `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
 - `SUBTITLING` -> `SUBTITLED` *(optional)* - WhisperX generates AI subtitles (formatted by Stable-TS) when enabled
 - `ORGANIZING` -> `COMPLETED` - file moved into your library, Plex refresh triggered
@@ -50,9 +51,15 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 3. When the rip succeeds, the item is marked `RIPPED` and an ntfy notification fires so you know the drive is free to eject manually.
 4. If MakeMKV fails or a disc defect is detected, the item becomes `FAILED` with the error message recorded in the queue. You can retry after addressing the issue with `spindle queue retry <id>`.
 5. When the identifier mapped specific episodes, Spindle rips every annotated playlist and records the resulting file path for each episode inside the rip spec. Downstream stages read this map instead of guessing which MakeMKV title belongs to which episode.
-6. If OpenSubtitles integration is enabled, the ripper immediately runs the WhisperX/OpenSubtitles matcher: every ripped episode is transcribed, matching subtitles are fetched for the inferred season/disc range, and cosine similarity locks in the true episode numbers. The rip spec and `MetadataJSON` are updated before encoding begins so Plex filenames stay accurate even when discs shuffle the playlist order.
 
-## Stage 4: Encoding to AV1 (ENCODING -> ENCODED)
+## Stage 4: Episode Identification (EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED)
+
+1. If OpenSubtitles integration is enabled and the item is a TV show, Spindle runs the WhisperX/OpenSubtitles matcher to confirm which ripped file maps to which episode number (multi-episode discs often scramble playlist order).
+2. The matcher transcribes each ripped file with WhisperX, fetches reference subtitles for the season via OpenSubtitles, and scores similarity to lock in the definitive episode mapping.
+3. The rip spec and `MetadataJSON` are updated before encoding begins so filenames and organizer paths match the real episode order.
+4. Movies, and items without OpenSubtitles enabled, skip this stage automatically and proceed to encoding.
+
+## Stage 5: Encoding to AV1 (ENCODING -> ENCODED)
 
 1. Ripped items are picked up by the Drapto encoder. The queue shows `ENCODING` with live progress updates as Drapto emits JSON status.
 2. Episode-aware jobs are encoded one file at a time, following the rip-spec plan. Each encoded file is recorded back into the spec so recoveries can resume mid-stage. Movie discs still produce a single AV1 file as before.
@@ -61,7 +68,7 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 
 Encoding happens in the background, so you can insert the next disc while previous titles encode.
 
-## Stage 5: AI Subtitle Generation (SUBTITLING -> SUBTITLED)
+## Stage 6: AI Subtitle Generation (SUBTITLING -> SUBTITLED)
 
 When `subtitles_enabled = true`, Spindle prefers human-curated subtitles before generating them locally. If `opensubtitles_enabled = true`, the subtitle stage searches OpenSubtitles using the TMDB/IMDB identifiers, textual title, and the languages configured in `opensubtitles_languages`. Matches are cleaned to strip sponsor/advertisement cues, then aligned against the encoded audio using a lightweight WhisperX alignment pass so the downloaded dialogue snaps to the actual rip.
 
@@ -75,7 +82,7 @@ When `subtitles_enabled = true`, Spindle prefers human-curated subtitles before 
 
 You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI now performs a TMDB lookup based on the filename, feeds that identifier into the OpenSubtitles search, and falls back to WhisperX when no curated subtitles are available. Pass `--forceai` to skip OpenSubtitles entirely and always run the WhisperX transcription pipeline, which drops the finished SRT beside your media.
 
-## Stage 6: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
+## Stage 7: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
 
 1. Spindle moves each encoded artifact into your library, building Plex-friendly paths based on the TMDB metadata. Movies still land as a single file under `library_dir/movies`, while TV discs produce one file per episode under `library_dir/tv/<Show Name>/Season XX/` (for example `Show Name - S05E01.mkv`). Episode filenames and destinations come directly from the rip spec so multi-disc sets stay consistent.
 2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Plex.
