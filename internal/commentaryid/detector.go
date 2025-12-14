@@ -512,9 +512,16 @@ func (d *Detector) DebugLog(ref Refinement) {
 	attrs := []logging.Attr{
 		logging.Int("primary_audio_index", ref.PrimaryIndex),
 		logging.Int("keep_audio_streams", len(ref.KeepIndices)),
+		logging.Any("keep_audio_indices", ref.KeepIndices),
 	}
 	if len(ref.Dropped) > 0 {
-		attrs = append(attrs, logging.Int("dropped_audio_streams", len(ref.Dropped)))
+		attrs = append(attrs,
+			logging.Int("dropped_audio_streams", len(ref.Dropped)),
+			logging.Any("dropped_decisions", ref.Dropped),
+		)
+	}
+	if len(ref.Kept) > 0 {
+		attrs = append(attrs, logging.Any("kept_decisions", ref.Kept))
 	}
 	d.logger.Info("commentary detection summary", logging.Args(attrs...)...)
 }

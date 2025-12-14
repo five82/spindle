@@ -454,7 +454,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 					logger.Warn("failed to persist encoding job start", logging.Error(err))
 				}
 			}
-			if err := e.refineCommentaryTracks(ctx, item, job.Source, stagingRoot, logger); err != nil {
+			if err := e.refineCommentaryTracks(ctx, item, job.Source, stagingRoot, label, idx+1, len(jobs), logger); err != nil {
 				logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
 			}
 			path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, job.Episode.Key, idx+1, len(jobs), decision.Profile, logger)
@@ -488,7 +488,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			label = "Disc"
 		}
 		item.ActiveEpisodeKey = ""
-		if err := e.refineCommentaryTracks(ctx, item, item.RippedFile, stagingRoot, logger); err != nil {
+		if err := e.refineCommentaryTracks(ctx, item, item.RippedFile, stagingRoot, label, 0, 0, logger); err != nil {
 			logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
 		}
 		path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, "", 0, 0, decision.Profile, logger)
