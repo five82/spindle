@@ -224,6 +224,7 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if correlationID == "" {
 		correlationID = strings.TrimSpace(query.Get("request"))
 	}
+	implicitForegroundOnly := lane == ""
 
 	var (
 		converted []api.LogEvent
@@ -269,6 +270,9 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if component != "" && !strings.EqualFold(component, evt.Component) {
+			continue
+		}
+		if implicitForegroundOnly && strings.EqualFold(evt.Lane, "background") {
 			continue
 		}
 		if lane != "" && !strings.EqualFold(lane, evt.Lane) {

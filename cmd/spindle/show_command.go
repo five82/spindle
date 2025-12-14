@@ -105,7 +105,7 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output")
 	cmd.Flags().IntVarP(&lines, "lines", "n", 10, "Number of lines to show (0 for all)")
 	cmd.Flags().StringVar(&componentFilter, "component", "", "Filter logs by component label")
-	cmd.Flags().StringVar(&laneFilter, "lane", "", "Filter logs by workflow lane (main/background)")
+	cmd.Flags().StringVar(&laneFilter, "lane", "", "Filter logs by workflow lane (foreground/background)")
 	cmd.Flags().StringVar(&requestFilter, "request", "", "Filter logs by request/correlation ID")
 	cmd.Flags().Int64VarP(&itemFilter, "item", "i", 0, "Filter logs by queue item ID")
 	return cmd

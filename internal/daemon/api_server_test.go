@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"spindle/internal/api"
+	"spindle/internal/logging"
 	"spindle/internal/queue"
 )
 
@@ -89,5 +91,52 @@ func TestAPIServerHandleLogTail(t *testing.T) {
 	}
 	if resp.Offset <= 0 {
 		t.Fatalf("expected positive offset, got %d", resp.Offset)
+	}
+}
+
+func TestAPIServerHandleLogsDefaultsToForeground(t *testing.T) {
+	hub := logging.NewStreamHub(16)
+	hub.Publish(logging.LogEvent{Timestamp: time.Now().UTC(), Message: "bg", Lane: "background"})
+	hub.Publish(logging.LogEvent{Timestamp: time.Now().UTC(), Message: "fg", Lane: "foreground"})
+	hub.Publish(logging.LogEvent{Timestamp: time.Now().UTC(), Message: "daemon"})
+
+	srv := &apiServer{daemon: &Daemon{logHub: hub}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?tail=1&limit=10", nil)
+	w := httptest.NewRecorder()
+	srv.handleLogs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+	var resp api.LogStreamResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(resp.Events))
+	}
+	if resp.Events[0].Lane != "foreground" || resp.Events[0].Message != "fg" {
+		t.Fatalf("unexpected first event: %#v", resp.Events[0])
+	}
+	if resp.Events[1].Lane != "" || resp.Events[1].Message != "daemon" {
+		t.Fatalf("unexpected second event: %#v", resp.Events[1])
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/logs?tail=1&limit=10&lane=background", nil)
+	w = httptest.NewRecorder()
+	srv.handleLogs(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+	resp = api.LogStreamResponse{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(resp.Events))
+	}
+	if resp.Events[0].Lane != "background" || resp.Events[0].Message != "bg" {
+		t.Fatalf("unexpected background event: %#v", resp.Events[0])
 	}
 }
