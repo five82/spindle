@@ -14,6 +14,7 @@ import (
 
 	"log/slog"
 
+	"spindle/internal/commentaryid"
 	"spindle/internal/config"
 	"spindle/internal/encodingstate"
 	"spindle/internal/logging"
@@ -36,6 +37,7 @@ type Encoder struct {
 	notifier         notifications.Service
 	cache            *ripcache.Manager
 	presetClassifier presetClassifier
+	commentary       *commentaryid.Detector
 }
 
 const (
@@ -321,6 +323,9 @@ func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *
 	if cfg != nil && cfg.PresetDeciderEnabled {
 		enc.presetClassifier = newPresetLLMClassifier(cfg)
 	}
+	if cfg != nil && cfg.CommentaryDetectionEnabled {
+		enc.commentary = commentaryid.New(cfg, logger)
+	}
 	enc.SetLogger(logger)
 	return enc
 }
@@ -334,6 +339,9 @@ func (e *Encoder) SetLogger(logger *slog.Logger) {
 	e.logger = stageLogger.With(logging.String("component", "encoder"))
 	if e.cache != nil {
 		e.cache.SetLogger(stageLogger)
+	}
+	if e.commentary != nil {
+		e.commentary.SetLogger(stageLogger)
 	}
 }
 
@@ -446,6 +454,9 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 					logger.Warn("failed to persist encoding job start", logging.Error(err))
 				}
 			}
+			if err := e.refineCommentaryTracks(ctx, item, job.Source, stagingRoot, logger); err != nil {
+				logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
+			}
 			path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, job.Episode.Key, idx+1, len(jobs), decision.Profile, logger)
 			if err != nil {
 				return err
@@ -477,6 +488,9 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			label = "Disc"
 		}
 		item.ActiveEpisodeKey = ""
+		if err := e.refineCommentaryTracks(ctx, item, item.RippedFile, stagingRoot, logger); err != nil {
+			logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
+		}
 		path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, "", 0, 0, decision.Profile, logger)
 		if err != nil {
 			return err

@@ -13,12 +13,12 @@
 // hand.
 //
 // Once MakeMKV produces the MKV container, the ripper re-runs ffprobe to
-// inventory audio streams and then remuxes the file with ffmpeg. The remux keeps
-// a single English primary track (prioritizing by channel count then lossless quality,
-// since Opus transcoding strips spatial metadata) plus any detected commentary tracks
-// while dropping other audio. Commentary is inferred from MakeMKV/ffprobe metadata
-// and heuristics that treat early English stereo mixes as likely commentaries when
-// higher-channel mixes are present.
+// inventory audio streams and then remuxes the file with ffmpeg. By default the
+// remux keeps only a single English primary track (prioritizing by channel count
+// then lossless quality, since Opus transcoding strips spatial metadata) while
+// dropping other audio. When commentary detection is enabled, the remux keeps
+// all English stereo tracks as candidates for later WhisperX/LLM analysis before
+// encoding.
 //
 // Centralize new ripping behaviours here so the workflow manager interacts with
 // a single, well-tested abstraction.

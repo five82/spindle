@@ -287,6 +287,13 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Optional:    true,
 		},
 	}
+	if cfg.SubtitlesEnabled || cfg.CommentaryDetectionEnabled {
+		requirements = append(requirements, deps.Requirement{
+			Name:        "uvx",
+			Command:     "uvx",
+			Description: "Required for WhisperX-driven transcription",
+		})
+	}
 	checks := deps.CheckBinaries(requirements)
 	checks = append(checks, deps.CheckFFmpegForDrapto(cfg.DraptoBinary()))
 	statuses := make([]ipc.DependencyStatus, 0, len(checks))
@@ -302,6 +309,9 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 	}
 	if cfg.PresetDeciderEnabled {
 		statuses = append(statuses, presetDeciderDependencyStatus(cfg))
+	}
+	if cfg.CommentaryDetectionEnabled {
+		statuses = append(statuses, commentaryDetectorDependencyStatus(cfg))
 	}
 	return statuses
 }
@@ -325,6 +335,35 @@ func presetDeciderDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 		Model:   cfg.PresetDeciderModel,
 		Referer: cfg.PresetDeciderReferer,
 		Title:   cfg.PresetDeciderTitle,
+	})
+	if err := client.HealthCheck(ctx); err != nil {
+		status.Detail = summarizePresetDeciderError(err)
+		return status
+	}
+	status.Available = true
+	status.Detail = "API reachable"
+	return status
+}
+
+func commentaryDetectorDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
+	status := ipc.DependencyStatus{
+		Name:        "Commentary Detector",
+		Description: "WhisperX + LLM audio track classifier",
+		Optional:    true,
+	}
+	key := strings.TrimSpace(cfg.CommentaryDetectionAPIKey)
+	if key == "" {
+		status.Detail = "API key missing (set commentary_detection_api_key or OPENROUTER_API_KEY)"
+		return status
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	client := presetllm.NewClient(presetllm.Config{
+		APIKey:  key,
+		BaseURL: cfg.CommentaryDetectionBaseURL,
+		Model:   cfg.CommentaryDetectionModel,
+		Referer: cfg.CommentaryDetectionReferer,
+		Title:   cfg.CommentaryDetectionTitle,
 	})
 	if err := client.HealthCheck(ctx); err != nil {
 		status.Detail = summarizePresetDeciderError(err)

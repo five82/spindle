@@ -38,7 +38,7 @@ You can keep inserting discs back-to-back; each one lands in the queue.
 ## Stage 2: Content Identification (IDENTIFYING -> IDENTIFIED)
 
 1. Spindle triggers a MakeMKV scan to read every title on the disc.
-2. The intelligent analyzer classifies the disc (movie vs TV set, extras, commentary tracks) and calls TMDB to find the best metadata match. Multiple 20–30 minute titles or KEYDB labels like “Season 05 Disc 1” force a TV lookup, and TMDB season endpoints supply official episode names once a show is identified.
+2. The intelligent analyzer classifies the disc (movie vs TV set, extras) and calls TMDB to find the best metadata match. Multiple 20–30 minute titles or KEYDB labels like “Season 05 Disc 1” force a TV lookup, and TMDB season endpoints supply official episode names once a show is identified.
 3. Success: the queue item is marked `IDENTIFIED`, media details (title, year, season, matched episode numbers) are stored, and the rip specification is written to the queue database (each title now records `SxxEyy` info when available). When a release year or first-air year is available, an ntfy notification announces the match so you know the daemon has the correct metadata before ripping starts.
 4. No confident match: the item stays at `IDENTIFIED` but is flagged with `NeedsReview = true`, and you receive guidance in the logs. The pipeline keeps moving so downstream stages can finish while you decide how to handle the unknown metadata.
 
@@ -61,10 +61,11 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 
 ## Stage 5: Encoding to AV1 (ENCODING -> ENCODED)
 
-1. Ripped items are picked up by the Drapto encoder. The queue shows `ENCODING` with live progress updates as Drapto emits JSON status.
-2. Episode-aware jobs are encoded one file at a time, following the rip-spec plan. Each encoded file is recorded back into the spec so recoveries can resume mid-stage. Movie discs still produce a single AV1 file as before.
-3. Encoded output is written to `<staging_dir>/<fingerprint>/encoded/`, preserving the per-episode basenames (for example `South Park - S05E01.mkv`).
-4. When encoding completes for every planned episode, the item flips to `ENCODED`. Failures surface as `FAILED` with the Drapto error text.
+1. *(Optional)* If `commentary_detection_enabled = true`, Spindle runs a pre-encode audio pass: it transcribes short WhisperX snippets from the primary audio track and each English stereo track, then keeps only the primary track plus tracks classified as commentary (dropping obvious duplicates / music-only / audio-description tracks). This happens inside the encoding stage (no extra queue status).
+2. Ripped items are then picked up by the Drapto encoder. The queue shows `ENCODING` with live progress updates as Drapto emits JSON status.
+3. Episode-aware jobs are encoded one file at a time, following the rip-spec plan. Each encoded file is recorded back into the spec so recoveries can resume mid-stage. Movie discs still produce a single AV1 file as before.
+4. Encoded output is written to `<staging_dir>/<fingerprint>/encoded/`, preserving the per-episode basenames (for example `South Park - S05E01.mkv`).
+5. When encoding completes for every planned episode, the item flips to `ENCODED`. Failures surface as `FAILED` with the Drapto error text.
 
 Encoding happens in the background, so you can insert the next disc while previous titles encode.
 

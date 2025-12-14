@@ -83,6 +83,12 @@ type Config struct {
 	PresetDeciderModel            string   `toml:"preset_decider_model"`
 	PresetDeciderReferer          string   `toml:"preset_decider_referer"`
 	PresetDeciderTitle            string   `toml:"preset_decider_title"`
+	CommentaryDetectionEnabled    bool     `toml:"commentary_detection_enabled"`
+	CommentaryDetectionAPIKey     string   `toml:"commentary_detection_api_key"`
+	CommentaryDetectionBaseURL    string   `toml:"commentary_detection_base_url"`
+	CommentaryDetectionModel      string   `toml:"commentary_detection_model"`
+	CommentaryDetectionReferer    string   `toml:"commentary_detection_referer"`
+	CommentaryDetectionTitle      string   `toml:"commentary_detection_title"`
 }
 
 const (
@@ -117,6 +123,7 @@ const (
 	defaultPresetDeciderModel          = "deepseek/deepseek-v3.2"
 	defaultPresetDeciderReferer        = "https://github.com/five82/spindle"
 	defaultPresetDeciderTitle          = "Spindle Preset Decider"
+	defaultCommentaryDetectionTitle    = "Spindle Commentary Detector"
 )
 
 // Default returns a Config populated with repository defaults.
@@ -174,6 +181,10 @@ func Default() Config {
 		PresetDeciderModel:          defaultPresetDeciderModel,
 		PresetDeciderReferer:        defaultPresetDeciderReferer,
 		PresetDeciderTitle:          defaultPresetDeciderTitle,
+		CommentaryDetectionBaseURL:  defaultPresetDeciderBaseURL,
+		CommentaryDetectionModel:    defaultPresetDeciderModel,
+		CommentaryDetectionReferer:  defaultPresetDeciderReferer,
+		CommentaryDetectionTitle:    defaultCommentaryDetectionTitle,
 	}
 }
 
@@ -419,6 +430,47 @@ func (c *Config) normalize() error {
 		}
 	}
 
+	c.CommentaryDetectionBaseURL = strings.TrimSpace(c.CommentaryDetectionBaseURL)
+	if c.CommentaryDetectionBaseURL == "" {
+		c.CommentaryDetectionBaseURL = c.PresetDeciderBaseURL
+	}
+	if c.CommentaryDetectionBaseURL == "" {
+		c.CommentaryDetectionBaseURL = defaultPresetDeciderBaseURL
+	}
+
+	c.CommentaryDetectionModel = strings.TrimSpace(c.CommentaryDetectionModel)
+	if c.CommentaryDetectionModel == "" {
+		c.CommentaryDetectionModel = c.PresetDeciderModel
+	}
+	if c.CommentaryDetectionModel == "" {
+		c.CommentaryDetectionModel = defaultPresetDeciderModel
+	}
+
+	c.CommentaryDetectionReferer = strings.TrimSpace(c.CommentaryDetectionReferer)
+	if c.CommentaryDetectionReferer == "" {
+		c.CommentaryDetectionReferer = c.PresetDeciderReferer
+	}
+	if c.CommentaryDetectionReferer == "" {
+		c.CommentaryDetectionReferer = defaultPresetDeciderReferer
+	}
+
+	c.CommentaryDetectionTitle = strings.TrimSpace(c.CommentaryDetectionTitle)
+	if c.CommentaryDetectionTitle == "" {
+		c.CommentaryDetectionTitle = defaultCommentaryDetectionTitle
+	}
+
+	c.CommentaryDetectionAPIKey = strings.TrimSpace(c.CommentaryDetectionAPIKey)
+	if c.CommentaryDetectionAPIKey == "" {
+		c.CommentaryDetectionAPIKey = c.PresetDeciderAPIKey
+	}
+	if c.CommentaryDetectionAPIKey == "" {
+		if value, ok := os.LookupEnv("COMMENTARY_DETECTION_API_KEY"); ok {
+			c.CommentaryDetectionAPIKey = strings.TrimSpace(value)
+		} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
+			c.CommentaryDetectionAPIKey = strings.TrimSpace(value)
+		}
+	}
+
 	c.DeepSeekAPIKey = strings.TrimSpace(c.DeepSeekAPIKey)
 	if c.DeepSeekAPIKey == "" {
 		if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
@@ -504,6 +556,9 @@ func (c *Config) Validate() error {
 	}
 	if c.PresetDeciderEnabled && strings.TrimSpace(c.PresetDeciderAPIKey) == "" {
 		return errors.New("preset_decider_api_key must be set when preset_decider_enabled is true (or set OPENROUTER_API_KEY)")
+	}
+	if c.CommentaryDetectionEnabled && strings.TrimSpace(c.CommentaryDetectionAPIKey) == "" {
+		return errors.New("commentary_detection_api_key must be set when commentary_detection_enabled is true (or set OPENROUTER_API_KEY)")
 	}
 	if c.NotifyMinRipSeconds < 0 {
 		return errors.New("notify_min_rip_seconds must be >= 0")

@@ -94,6 +94,17 @@ preset_decider_referer = "https://github.com/five82/spindle" # Sent to OpenRoute
 preset_decider_title = "Spindle Preset Decider"      # Display name sent via X-Title header
 
 # ============================================================================
+# COMMENTARY DETECTION (ADVANCED)
+# ============================================================================
+
+commentary_detection_enabled = false                 # When true, use WhisperX + an LLM to classify English stereo tracks and keep only commentary tracks
+commentary_detection_model = ""                      # OpenRouter model identifier; defaults to preset_decider_model when empty
+commentary_detection_base_url = ""                   # Override to point at another provider; defaults to preset_decider_base_url when empty
+commentary_detection_api_key = ""                    # Defaults to preset_decider_api_key; required when enabled (or set OPENROUTER_API_KEY)
+commentary_detection_referer = ""                    # Defaults to preset_decider_referer when empty
+commentary_detection_title = "Spindle Commentary Detector" # Display name sent via X-Title header
+
+# ============================================================================
 # WORKFLOW TUNING (ADVANCED)
 # ============================================================================
 

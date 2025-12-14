@@ -139,6 +139,32 @@ func (e *emptyContentError) Error() string {
 	)
 }
 
+// CompleteJSON issues a JSON-only chat completion request with the supplied prompts.
+// It returns the raw JSON payload produced by the model.
+func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	userPrompt = strings.TrimSpace(userPrompt)
+	if systemPrompt == "" {
+		return "", errors.New("preset llm complete: system prompt required")
+	}
+	if userPrompt == "" {
+		return "", errors.New("preset llm complete: user prompt required")
+	}
+	if strings.TrimSpace(c.cfg.APIKey) == "" {
+		return "", errors.New("preset llm complete: api key required")
+	}
+	payload := chatCompletionRequest{
+		Model: c.cfg.Model,
+		Messages: []chatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature:    0,
+		ResponseFormat: map[string]string{"type": jsonResponseType},
+	}
+	return c.completionContentWithRetry(ctx, payload, "preset llm complete")
+}
+
 // ClassifyPreset issues a classification request for the supplied description.
 func (c *Client) ClassifyPreset(ctx context.Context, description string) (Classification, error) {
 	var empty Classification
@@ -149,11 +175,7 @@ func (c *Client) ClassifyPreset(ctx context.Context, description string) (Classi
 	if strings.TrimSpace(c.cfg.APIKey) == "" {
 		return empty, errors.New("preset llm classify: api key required")
 	}
-	requestBody, err := buildChatRequest(c.cfg.Model, description)
-	if err != nil {
-		return empty, err
-	}
-	content, err := c.completionContentWithRetry(ctx, requestBody, "preset llm classify")
+	content, err := c.CompleteJSON(ctx, PresetClassificationPrompt, description)
 	if err != nil {
 		return empty, err
 	}
@@ -350,26 +372,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func buildChatRequest(model, description string) (chatCompletionRequest, error) {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return chatCompletionRequest{}, errors.New("preset llm classify: model required")
-	}
-	description = strings.TrimSpace(description)
-	if description == "" {
-		return chatCompletionRequest{}, errors.New("preset llm classify: description required")
-	}
-	return chatCompletionRequest{
-		Model: model,
-		Messages: []chatMessage{
-			{Role: "system", Content: PresetClassificationPrompt},
-			{Role: "user", Content: description},
-		},
-		Temperature:    0,
-		ResponseFormat: map[string]string{"type": jsonResponseType},
-	}, nil
 }
 
 func (c *Client) sendChatRequestOnce(ctx context.Context, payload chatCompletionRequest) (chatCompletionResponse, []byte, error) {

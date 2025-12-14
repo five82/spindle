@@ -523,7 +523,9 @@ func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {
 	if totalAudio <= 1 {
 		return nil
 	}
-	selection := audio.Select(probe.Streams)
+	selection := audio.SelectWithOptions(probe.Streams, audio.SelectOptions{
+		KeepEnglishStereo: r.cfg != nil && r.cfg.CommentaryDetectionEnabled,
+	})
 	if !selection.Changed(totalAudio) {
 		return nil
 	}
@@ -547,9 +549,6 @@ func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {
 		fields := []any{
 			logging.String("primary_audio", selection.PrimaryLabel()),
 			logging.Int("kept_audio_streams", len(selection.KeepIndices)),
-		}
-		if labels := selection.CommentaryLabels(); len(labels) > 0 {
-			fields = append(fields, logging.Any("commentary_audio", labels))
 		}
 		if len(selection.RemovedIndices) > 0 {
 			fields = append(fields, logging.Any("removed_audio_indices", selection.RemovedIndices))
