@@ -41,11 +41,7 @@ func NewEpisodeIdentifier(cfg *config.Config, store *queue.Store, logger *slog.L
 
 // SetLogger updates the episode identifier's logging destination.
 func (e *EpisodeIdentifier) SetLogger(logger *slog.Logger) {
-	stageLogger := logger
-	if stageLogger == nil {
-		stageLogger = logging.NewNop()
-	}
-	e.logger = stageLogger.With(logging.String("component", "episodeid"))
+	e.logger = logging.NewComponentLogger(logger, "episodeid")
 	if e.matcher != nil {
 		e.matcher.SetLogger(logger)
 	}
@@ -65,13 +61,8 @@ func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error
 		return nil
 	}
 
-	item.ProgressStage = "Episode Identification"
-	item.ProgressMessage = "Analyzing episode content"
-	item.ProgressPercent = 0
-	item.ActiveEpisodeKey = ""
-
+	item.InitProgress("Episode Identification", "Analyzing episode content")
 	logger.Debug("starting episode identification")
-
 	return nil
 }
 

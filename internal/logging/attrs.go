@@ -59,6 +59,15 @@ func NewNop() *slog.Logger {
 	return slog.New(NoopHandler{})
 }
 
+// NewComponentLogger creates a logger with a standardized component attribute.
+// If logger is nil, a no-op logger is used as the base.
+func NewComponentLogger(logger *slog.Logger, component string) *slog.Logger {
+	if logger == nil {
+		logger = NewNop()
+	}
+	return logger.With(String(FieldComponent, component))
+}
+
 // NoopHandler discards all log output.
 type NoopHandler struct{}
 

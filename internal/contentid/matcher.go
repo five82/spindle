@@ -151,12 +151,7 @@ func (m *Matcher) SetLogger(logger *slog.Logger) {
 	if m == nil {
 		return
 	}
-	scope := logger
-	if scope == nil {
-		scope = logging.NewNop()
-	}
-	scope = scope.With(logging.String("component", "contentid"))
-	m.logger = scope
+	m.logger = logging.NewComponentLogger(logger, "contentid")
 	if setter, ok := m.subs.(interface{ SetLogger(*slog.Logger) }); ok {
 		setter.SetLogger(logger)
 	}

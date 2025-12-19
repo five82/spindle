@@ -141,10 +141,7 @@ func (s *Service) SetLogger(logger *slog.Logger) {
 	if s == nil {
 		return
 	}
-	if logger != nil {
-		logger = logger.With(logging.String("component", "subtitles"))
-	}
-	s.logger = logger
+	s.logger = logging.NewComponentLogger(logger, "subtitles")
 }
 
 // WithOpenSubtitlesClient injects a custom OpenSubtitles client (used in tests).
@@ -158,10 +155,7 @@ func WithOpenSubtitlesClient(client openSubtitlesClient) ServiceOption {
 
 // NewService constructs a subtitle generation service.
 func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) *Service {
-	serviceLogger := logger
-	if serviceLogger != nil {
-		serviceLogger = serviceLogger.With(logging.String("component", "subtitles"))
-	}
+	serviceLogger := logging.NewComponentLogger(logger, "subtitles")
 	token := ""
 	if cfg != nil {
 		token = strings.TrimSpace(cfg.WhisperXHuggingFaceToken)

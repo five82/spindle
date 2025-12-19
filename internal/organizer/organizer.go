@@ -63,22 +63,12 @@ func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger
 
 // SetLogger updates the organizer's logging destination while preserving component labeling.
 func (o *Organizer) SetLogger(logger *slog.Logger) {
-	stageLogger := logger
-	if stageLogger == nil {
-		stageLogger = logging.NewNop()
-	}
-	o.logger = stageLogger.With(logging.String("component", "organizer"))
+	o.logger = logging.NewComponentLogger(logger, "organizer")
 }
 
 func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, o.logger)
-	if item.ProgressStage == "" {
-		item.ProgressStage = "Organizing"
-	}
-	item.ProgressMessage = "Preparing library organization"
-	item.ProgressPercent = 0
-	item.ErrorMessage = ""
-	item.ActiveEpisodeKey = ""
+	item.InitProgress("Organizing", "Preparing library organization")
 	logger.Debug("starting organization preparation")
 	return nil
 }

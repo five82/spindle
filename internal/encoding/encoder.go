@@ -332,28 +332,19 @@ func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *
 
 // SetLogger updates the encoder's logging destination while preserving component labeling.
 func (e *Encoder) SetLogger(logger *slog.Logger) {
-	stageLogger := logger
-	if stageLogger == nil {
-		stageLogger = logging.NewNop()
-	}
-	e.logger = stageLogger.With(logging.String("component", "encoder"))
+	e.logger = logging.NewComponentLogger(logger, "encoder")
 	if e.cache != nil {
-		e.cache.SetLogger(stageLogger)
+		e.cache.SetLogger(logger)
 	}
 	if e.commentary != nil {
-		e.commentary.SetLogger(stageLogger)
+		e.commentary.SetLogger(logger)
 	}
 }
 
 func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
-	if item.ProgressStage == "" {
-		item.ProgressStage = "Encoding"
-	}
-	item.ProgressMessage = "Starting Drapto encoding"
-	item.ProgressPercent = 0
+	item.InitProgress("Encoding", "Starting Drapto encoding")
 	item.DraptoPresetProfile = ""
-	item.ErrorMessage = ""
 	logger.Debug("starting encoding preparation")
 	return nil
 }

@@ -45,11 +45,8 @@ type snippetTranscriber interface {
 func New(cfg *config.Config, logger *slog.Logger) *Detector {
 	d := &Detector{
 		cfg:    cfg,
-		logger: logger,
+		logger: logging.NewComponentLogger(logger, "commentaryid"),
 		probe:  ffprobe.Inspect,
-	}
-	if logger != nil {
-		d.logger = logger.With(logging.String("component", "commentaryid"))
 	}
 	if cfg == nil || !cfg.CommentaryDetectionEnabled {
 		return d
@@ -71,11 +68,7 @@ func (d *Detector) SetLogger(logger *slog.Logger) {
 	if d == nil {
 		return
 	}
-	if logger != nil {
-		d.logger = logger.With(logging.String("component", "commentaryid"))
-	} else {
-		d.logger = nil
-	}
+	d.logger = logging.NewComponentLogger(logger, "commentaryid")
 	if svc, ok := d.transcribe.(*subtitles.Service); ok {
 		svc.SetLogger(logger)
 	}

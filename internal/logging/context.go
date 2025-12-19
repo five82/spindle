@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	// FieldComponent is the standardized structured logging key for component names.
+	FieldComponent = "component"
 	// FieldItemID is the standardized structured logging key for queue item identifiers.
 	FieldItemID = "item_id"
 	// FieldStage is the standardized structured logging key for workflow stage names.

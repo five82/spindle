@@ -80,10 +80,7 @@ func (m *Manager) SetLogger(logger *slog.Logger) {
 	if m == nil {
 		return
 	}
-	if logger == nil {
-		logger = logging.NewNop()
-	}
-	m.logger = logger.With(logging.String("component", "ripcache"))
+	m.logger = logging.NewComponentLogger(logger, "ripcache")
 }
 
 // Store copies a rip directory into the cache and triggers pruning.

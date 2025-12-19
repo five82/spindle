@@ -97,22 +97,13 @@ func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logge
 
 // SetLogger updates the identifier's logging destination while preserving component labeling.
 func (i *Identifier) SetLogger(logger *slog.Logger) {
-	stageLogger := logger
-	if stageLogger == nil {
-		stageLogger = logging.NewNop()
-	}
-	i.logger = stageLogger.With(logging.String("component", "identifier"))
+	i.logger = logging.NewComponentLogger(logger, "identifier")
 }
 
 // Prepare initializes progress messaging prior to Execute.
 func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, i.logger)
-	if item.ProgressStage == "" {
-		item.ProgressStage = "Identifying"
-	}
-	item.ProgressMessage = "Fetching metadata"
-	item.ProgressPercent = 0
-
+	item.InitProgress("Identifying", "Fetching metadata")
 	logger.Debug("starting disc identification")
 
 	if i.notifier != nil && strings.TrimSpace(item.SourcePath) == "" {

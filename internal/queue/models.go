@@ -154,6 +154,21 @@ func (i Item) IsProcessing() bool {
 	return ok
 }
 
+// InitProgress resets progress fields for a new stage.
+// If ProgressStage is currently empty, it is set to the provided stage value;
+// otherwise the existing stage is preserved (to support resume scenarios).
+// ProgressMessage is set to message, ProgressPercent is reset to 0,
+// and ErrorMessage and ActiveEpisodeKey are cleared.
+func (i *Item) InitProgress(stage, message string) {
+	if i.ProgressStage == "" {
+		i.ProgressStage = stage
+	}
+	i.ProgressMessage = message
+	i.ProgressPercent = 0
+	i.ErrorMessage = ""
+	i.ActiveEpisodeKey = ""
+}
+
 // IsInWorkflow returns true when an item is actively progressing (or queued to progress)
 // through stages and should not be reset simply because the disc was reinserted.
 func (i Item) IsInWorkflow() bool {

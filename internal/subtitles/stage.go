@@ -31,11 +31,7 @@ func (s *Stage) SetLogger(logger *slog.Logger) {
 	if s == nil {
 		return
 	}
-	stageLogger := logger
-	if stageLogger != nil {
-		stageLogger = stageLogger.With(logging.String("component", "subtitle-stage"))
-	}
-	s.logger = stageLogger
+	s.logger = logging.NewComponentLogger(logger, "subtitle-stage")
 	if s.service != nil {
 		s.service.SetLogger(logger)
 	}
@@ -43,11 +39,7 @@ func (s *Stage) SetLogger(logger *slog.Logger) {
 
 // NewStage constructs a workflow stage that generates subtitles for queue items.
 func NewStage(store *queue.Store, service *Service, logger *slog.Logger) *Stage {
-	stageLogger := logger
-	if stageLogger != nil {
-		stageLogger = stageLogger.With(logging.String("component", "subtitle-stage"))
-	}
-	return &Stage{store: store, service: service, logger: stageLogger}
+	return &Stage{store: store, service: service, logger: logging.NewComponentLogger(logger, "subtitle-stage")}
 }
 
 // Prepare primes queue progress fields before executing the stage.
@@ -61,11 +53,7 @@ func (s *Stage) Prepare(ctx context.Context, item *queue.Item) error {
 	if s.store == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "prepare", "Queue store unavailable", nil)
 	}
-	item.ProgressStage = progressStageGenerating
-	item.ProgressMessage = "Preparing audio for transcription"
-	item.ProgressPercent = 0
-	item.ErrorMessage = ""
-	item.ActiveEpisodeKey = ""
+	item.InitProgress(progressStageGenerating, "Preparing audio for transcription")
 	return s.store.UpdateProgress(ctx, item)
 }
 

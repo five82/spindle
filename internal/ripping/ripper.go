@@ -70,24 +70,15 @@ func NewRipperWithDependencies(cfg *config.Config, store *queue.Store, logger *s
 
 // SetLogger updates the ripper's logging destination while preserving component labeling.
 func (r *Ripper) SetLogger(logger *slog.Logger) {
-	stageLogger := logger
-	if stageLogger == nil {
-		stageLogger = logging.NewNop()
-	}
-	r.logger = stageLogger.With(logging.String("component", "ripper"))
+	r.logger = logging.NewComponentLogger(logger, "ripper")
 	if r.cache != nil {
-		r.cache.SetLogger(stageLogger)
+		r.cache.SetLogger(logger)
 	}
 }
 
 func (r *Ripper) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, r.logger)
-	if item.ProgressStage == "" {
-		item.ProgressStage = "Ripping"
-	}
-	item.ProgressMessage = "Starting rip"
-	item.ProgressPercent = 0
-	item.ErrorMessage = ""
+	item.InitProgress("Ripping", "Starting rip")
 	logger.Debug("starting rip preparation")
 	if r.notifier != nil {
 		if err := r.notifier.Publish(ctx, notifications.EventRipStarted, notifications.Payload{"discTitle": item.DiscTitle}); err != nil {
