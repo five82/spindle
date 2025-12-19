@@ -2,7 +2,7 @@
 
 This file provides guidance when working with code in this repository.
 
-CLAUDE.md is a symbolic link to this file so all agent guidance stays in one place.
+CLAUDE.md and GEMINI.md are symlinks to this file so all agent guidance stays in one place.
 
 ## TL;DR
 
