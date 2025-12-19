@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -99,18 +97,17 @@ func (l *laneState) stageForStatus(status queue.Status) (pipelineStage, bool) {
 
 // Manager coordinates queue processing using registered stage functions.
 type Manager struct {
-	cfg               *config.Config
-	store             *queue.Store
-	logger            *slog.Logger
-	pollInterval      time.Duration
-	heartbeatInterval time.Duration
-	heartbeatTimeout  time.Duration
-	notifier          notifications.Service
-	logHub            *logging.StreamHub
+	cfg          *config.Config
+	store        *queue.Store
+	logger       *slog.Logger
+	pollInterval time.Duration
+	notifier     notifications.Service
 
-	lanes            map[laneKind]*laneState
-	laneOrder        []laneKind
-	backgroundLogDir string
+	heartbeat *HeartbeatMonitor
+	bgLogger  *BackgroundLogger
+
+	lanes     map[laneKind]*laneState
+	laneOrder []laneKind
 
 	mu       sync.RWMutex
 	running  bool
@@ -135,26 +132,24 @@ func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *slog
 
 // NewManagerWithOptions constructs a workflow manager with full configuration.
 func NewManagerWithOptions(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service, logHub *logging.StreamHub) *Manager {
-	backgroundDir := ""
-	if cfg != nil && cfg.LogDir != "" {
-		backgroundDir = filepath.Join(cfg.LogDir, "background")
-	}
 	return &Manager{
-		cfg:               cfg,
-		store:             store,
-		logger:            logger,
-		notifier:          notifier,
-		logHub:            logHub,
-		pollInterval:      time.Duration(cfg.QueuePollInterval) * time.Second,
-		heartbeatInterval: time.Duration(cfg.WorkflowHeartbeatInterval) * time.Second,
-		heartbeatTimeout:  time.Duration(cfg.WorkflowHeartbeatTimeout) * time.Second,
-		lanes:             make(map[laneKind]*laneState),
-		backgroundLogDir:  backgroundDir,
+		cfg:          cfg,
+		store:        store,
+		logger:       logger,
+		notifier:     notifier,
+		pollInterval: time.Duration(cfg.QueuePollInterval) * time.Second,
+		heartbeat: NewHeartbeatMonitor(
+			store,
+			logger,
+			time.Duration(cfg.WorkflowHeartbeatInterval)*time.Second,
+			time.Duration(cfg.WorkflowHeartbeatTimeout)*time.Second,
+		),
+		bgLogger: NewBackgroundLogger(cfg, logHub),
+		lanes:    make(map[laneKind]*laneState),
 	}
 }
 
 // ConfigureStages registers the concrete stage handlers the workflow will run.
-
 func (m *Manager) ConfigureStages(set StageSet) {
 	foreground := &laneState{kind: laneForeground, name: "foreground", notificationsEnabled: true}
 	background := &laneState{kind: laneBackground, name: "background", notificationsEnabled: false}
@@ -333,7 +328,7 @@ func (m *Manager) runLane(ctx context.Context, lane *laneState) {
 		}
 
 		if lane.runReclaimer {
-			if err := m.reclaimStaleItems(ctx, logger, lane.processingStatuses); err != nil {
+			if err := m.heartbeat.ReclaimStaleItems(ctx, logger, lane.processingStatuses); err != nil {
 				logger.Warn("reclaim stale processing failed", logging.Error(err))
 			}
 		}
@@ -354,24 +349,6 @@ func (m *Manager) runLane(ctx context.Context, lane *laneState) {
 			}
 		}
 	}
-}
-
-func (m *Manager) reclaimStaleItems(ctx context.Context, logger *slog.Logger, statuses []queue.Status) error {
-	if m.heartbeatTimeout <= 0 {
-		return nil
-	}
-	if len(statuses) == 0 {
-		return nil
-	}
-	cutoff := time.Now().Add(-m.heartbeatTimeout)
-	reclaimed, err := m.store.ReclaimStaleProcessing(ctx, cutoff, statuses...)
-	if err != nil {
-		return err
-	}
-	if reclaimed > 0 {
-		logger.Info("reclaimed stale items", logging.Int64("count", reclaimed))
-	}
-	return nil
 }
 
 func (m *Manager) nextItemForLane(ctx context.Context, lane *laneState) (*queue.Item, error) {
@@ -439,11 +416,11 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 	}
 
 	if lane != nil && lane.kind == laneBackground {
-		path, created, err := m.ensureBackgroundLog(item)
+		path, created, err := m.bgLogger.Ensure(item)
 		if err != nil {
 			base.Warn("background log unavailable", logging.Error(err))
 		} else {
-			bgHandler, logErr := m.newBackgroundHandler(path)
+			bgHandler, logErr := m.bgLogger.CreateHandler(path)
 			if logErr != nil {
 				base.Warn("failed to create background log writer", logging.Error(logErr))
 			} else {
@@ -462,101 +439,6 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 	}
 
 	return logging.WithContext(ctx, base)
-}
-
-func (m *Manager) ensureBackgroundLog(item *queue.Item) (string, bool, error) {
-	if item == nil {
-		return "", false, errors.New("queue item is nil")
-	}
-	if strings.TrimSpace(m.backgroundLogDir) == "" {
-		return "", false, errors.New("background log directory not configured")
-	}
-	created := false
-	if strings.TrimSpace(item.BackgroundLogPath) == "" {
-		filename := m.backgroundLogFilename(item)
-		if filename == "" {
-			filename = fmt.Sprintf("item-%d.log", item.ID)
-		}
-		item.BackgroundLogPath = filepath.Join(m.backgroundLogDir, filename)
-		created = true
-	}
-	if err := os.MkdirAll(filepath.Dir(item.BackgroundLogPath), 0o755); err != nil {
-		return "", false, fmt.Errorf("ensure background log directory: %w", err)
-	}
-	return item.BackgroundLogPath, created, nil
-}
-
-func (m *Manager) newBackgroundHandler(path string) (slog.Handler, error) {
-	level := "info"
-	format := "json"
-	if m.cfg != nil {
-		if strings.TrimSpace(m.cfg.LogLevel) != "" {
-			level = m.cfg.LogLevel
-		}
-		if strings.TrimSpace(m.cfg.LogFormat) != "" {
-			format = m.cfg.LogFormat
-		}
-	}
-	logger, err := logging.New(logging.Options{
-		Level:            level,
-		Format:           format,
-		OutputPaths:      []string{path},
-		ErrorOutputPaths: []string{path},
-		Development:      false,
-		// Background logs write to item files, but still publish to the daemon stream so
-		// users can observe per-item/episode progress via the log API and `spindle show --lane background --item <id>`.
-		Stream: m.logHub,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return logger.Handler(), nil
-}
-
-func (m *Manager) backgroundLogFilename(item *queue.Item) string {
-	timestamp := time.Now().UTC().Format("20060102T150405")
-	fingerprint := strings.TrimSpace(item.DiscFingerprint)
-	if fingerprint == "" {
-		fingerprint = fmt.Sprintf("item-%d", item.ID)
-	}
-	title := sanitizeSlug(item.DiscTitle)
-	if title == "" {
-		title = "untitled"
-	}
-	return fmt.Sprintf("%s-%s-%s.log", timestamp, fingerprint, title)
-}
-
-func sanitizeSlug(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	var builder strings.Builder
-	builder.Grow(len(value))
-	lastDash := false
-	for _, r := range value {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			builder.WriteRune(r)
-			lastDash = false
-		case r >= 'A' && r <= 'Z':
-			builder.WriteRune(unicode.ToLower(r))
-			lastDash = false
-		case unicode.IsDigit(r):
-			builder.WriteRune(r)
-			lastDash = false
-		default:
-			if !lastDash {
-				builder.WriteByte('-')
-				lastDash = true
-			}
-		}
-	}
-	slug := strings.Trim(builder.String(), "-")
-	if slug == "" {
-		return ""
-	}
-	return slug
 }
 
 func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger *slog.Logger, stage pipelineStage, item *queue.Item) error {
@@ -657,7 +539,7 @@ func (m *Manager) executeWithHeartbeat(ctx context.Context, handler StageHandler
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	var hbWG sync.WaitGroup
 	hbWG.Add(1)
-	go m.heartbeatLoop(hbCtx, &hbWG, item.ID)
+	go m.heartbeat.StartLoop(hbCtx, &hbWG, item.ID)
 
 	execErr := handler.Execute(ctx, item)
 	hbCancel()
@@ -693,30 +575,6 @@ func (m *Manager) setItemProcessingState(item *queue.Item, processing queue.Stat
 	item.ProgressPercent = 0
 	item.ErrorMessage = ""
 	item.LastHeartbeat = &now
-}
-
-func (m *Manager) heartbeatLoop(ctx context.Context, wg *sync.WaitGroup, itemID int64) {
-	defer wg.Done()
-	ticker := time.NewTicker(m.heartbeatInterval)
-	defer ticker.Stop()
-
-	logger := logging.WithContext(ctx, m.logger.With(logging.String("component", "workflow-heartbeat")))
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := m.store.UpdateHeartbeat(ctx, itemID); err != nil {
-				// Check if this is a context cancellation (normal shutdown)
-				if errors.Is(err, context.Canceled) {
-					logger.Info("daemon shutting down, heartbeat update cancelled")
-				} else {
-					logger.Warn("heartbeat update failed", logging.Error(err))
-				}
-			}
-		}
-	}
 }
 
 func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item *queue.Item, stageErr error) {
