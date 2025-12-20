@@ -70,18 +70,18 @@ func NewFromConfig(cfg *config.Config) (*slog.Logger, error) {
 
 	outputPaths := []string{"stdout"}
 	errorOutputs := []string{"stderr"}
-	if cfg.LogDir != "" {
-		if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
+	if cfg.Paths.LogDir != "" {
+		if err := os.MkdirAll(cfg.Paths.LogDir, 0o755); err != nil {
 			return nil, fmt.Errorf("ensure log directory: %w", err)
 		}
-		logPath := filepath.Join(cfg.LogDir, "spindle.log")
+		logPath := filepath.Join(cfg.Paths.LogDir, "spindle.log")
 		outputPaths = append(outputPaths, logPath)
 		errorOutputs = append(errorOutputs, logPath)
 	}
 
 	opts := Options{
-		Level:            cfg.LogLevel,
-		Format:           cfg.LogFormat,
+		Level:            cfg.Logging.Level,
+		Format:           cfg.Logging.Format,
 		OutputPaths:      outputPaths,
 		ErrorOutputPaths: errorOutputs,
 		Development:      false,

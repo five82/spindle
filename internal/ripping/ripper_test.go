@@ -444,7 +444,7 @@ func TestRipperFallsBackWithoutClient(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusIdentified
-	sourcePath := filepath.Join(cfg.StagingDir, "incoming", "fallback-source.mkv")
+	sourcePath := filepath.Join(cfg.Paths.StagingDir, "incoming", "fallback-source.mkv")
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
 		t.Fatalf("mkdir source: %v", err)
 	}

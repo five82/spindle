@@ -27,10 +27,10 @@ func (noopStage) HealthCheck(context.Context) stage.Health {
 
 func TestIPCServerClient(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
-	cfg.OpticalDrive = ""
-	cfg.APIBind = "127.0.0.1:0"
+	cfg.MakeMKV.OpticalDrive = ""
+	cfg.Paths.APIBind = "127.0.0.1:0"
 	store := testsupport.MustOpenStore(t, cfg)
-	logPath := filepath.Join(cfg.LogDir, "ipc-test.log")
+	logPath := filepath.Join(cfg.Paths.LogDir, "ipc-test.log")
 	logger := logging.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
@@ -45,7 +45,7 @@ func TestIPCServerClient(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	socket := filepath.Join(cfg.LogDir, "spindle.sock")
+	socket := filepath.Join(cfg.Paths.LogDir, "spindle.sock")
 	srv, err := ipc.NewServer(ctx, socket, d, logger)
 	if err != nil {
 		if strings.Contains(err.Error(), "operation not permitted") {

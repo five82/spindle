@@ -48,17 +48,17 @@ func New(cfg *config.Config, logger *slog.Logger) *Detector {
 		logger: logging.NewComponentLogger(logger, "commentaryid"),
 		probe:  ffprobe.Inspect,
 	}
-	if cfg == nil || !cfg.CommentaryDetectionEnabled {
+	if cfg == nil || !cfg.CommentaryDetection.Enabled {
 		return d
 	}
 	d.transcribe = subtitles.NewService(cfg, logger)
-	if strings.TrimSpace(cfg.CommentaryDetectionAPIKey) != "" {
+	if strings.TrimSpace(cfg.CommentaryDetection.APIKey) != "" {
 		d.llm = presetllm.NewClient(presetllm.Config{
-			APIKey:  cfg.CommentaryDetectionAPIKey,
-			BaseURL: cfg.CommentaryDetectionBaseURL,
-			Model:   cfg.CommentaryDetectionModel,
-			Referer: cfg.CommentaryDetectionReferer,
-			Title:   cfg.CommentaryDetectionTitle,
+			APIKey:  cfg.CommentaryDetection.APIKey,
+			BaseURL: cfg.CommentaryDetection.BaseURL,
+			Model:   cfg.CommentaryDetection.Model,
+			Referer: cfg.CommentaryDetection.Referer,
+			Title:   cfg.CommentaryDetection.Title,
 		})
 	}
 	return d
@@ -82,7 +82,7 @@ type candidate struct {
 
 func (d *Detector) Refine(ctx context.Context, sourcePath string, workDir string) (Refinement, error) {
 	var empty Refinement
-	if d == nil || d.cfg == nil || !d.cfg.CommentaryDetectionEnabled {
+	if d == nil || d.cfg == nil || !d.cfg.CommentaryDetection.Enabled {
 		return empty, nil
 	}
 	if d.transcribe == nil {

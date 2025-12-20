@@ -45,10 +45,10 @@ func (s *Service) shouldUseOpenSubtitles() bool {
 	if s == nil || s.config == nil {
 		return false
 	}
-	if !s.config.OpenSubtitlesEnabled {
+	if !s.config.Subtitles.OpenSubtitlesEnabled {
 		return false
 	}
-	if strings.TrimSpace(s.config.OpenSubtitlesAPIKey) == "" {
+	if strings.TrimSpace(s.config.Subtitles.OpenSubtitlesAPIKey) == "" {
 		return false
 	}
 	return true
@@ -89,9 +89,9 @@ func (s *Service) ensureOpenSubtitlesReady() error {
 			return
 		}
 		client, err := opensubtitles.New(opensubtitles.Config{
-			APIKey:    s.config.OpenSubtitlesAPIKey,
-			UserAgent: s.config.OpenSubtitlesUserAgent,
-			UserToken: s.config.OpenSubtitlesUserToken,
+			APIKey:    s.config.Subtitles.OpenSubtitlesAPIKey,
+			UserAgent: s.config.Subtitles.OpenSubtitlesUserAgent,
+			UserToken: s.config.Subtitles.OpenSubtitlesUserToken,
 		})
 		if err != nil {
 			s.openSubsErr = err
@@ -99,7 +99,7 @@ func (s *Service) ensureOpenSubtitlesReady() error {
 		}
 		s.openSubs = client
 		if s.openSubsCache == nil {
-			dir := strings.TrimSpace(s.config.OpenSubtitlesCacheDir)
+			dir := strings.TrimSpace(s.config.Paths.OpenSubtitlesCacheDir)
 			if dir != "" {
 				cache, err := opensubtitles.NewCache(dir, s.logger)
 				if err != nil {
@@ -114,8 +114,8 @@ func (s *Service) ensureOpenSubtitlesReady() error {
 			}
 		}
 		if s.logger != nil && !s.openSubsReadyLogged {
-			userAgent := strings.TrimSpace(s.config.OpenSubtitlesUserAgent)
-			tokenPresent := strings.TrimSpace(s.config.OpenSubtitlesUserToken) != ""
+			userAgent := strings.TrimSpace(s.config.Subtitles.OpenSubtitlesUserAgent)
+			tokenPresent := strings.TrimSpace(s.config.Subtitles.OpenSubtitlesUserToken) != ""
 			s.logger.Info("opensubtitles authentication ready",
 				logging.String("user_agent", userAgent),
 				logging.Bool("user_token_present", tokenPresent),

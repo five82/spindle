@@ -51,10 +51,10 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 	}
 	t.Setenv("HOME", homeDir)
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
-	cfg.OpticalDrive = filepath.Join(base, "fake-drive")
-	cfg.APIBind = "127.0.0.1:0"
-	logPath := filepath.Join(cfg.LogDir, "spindle-test.log")
-	if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
+	cfg.MakeMKV.OpticalDrive = filepath.Join(base, "fake-drive")
+	cfg.Paths.APIBind = "127.0.0.1:0"
+	logPath := filepath.Join(cfg.Paths.LogDir, "spindle-test.log")
+	if err := os.MkdirAll(cfg.Paths.LogDir, 0o755); err != nil {
 		t.Fatalf("mkdir log dir: %v", err)
 	}
 	if _, err := os.Stat(logPath); errors.Is(err, os.ErrNotExist) {
@@ -81,7 +81,7 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	socketPath := filepath.Join(cfg.LogDir, "cli.sock")
+	socketPath := filepath.Join(cfg.Paths.LogDir, "cli.sock")
 	srv, err := ipc.NewServer(ctx, socketPath, d, logger)
 	if err != nil {
 		t.Fatalf("ipc.NewServer: %v", err)
@@ -137,14 +137,14 @@ func appendLine(path, line string) error {
 func writeTestConfig(t *testing.T, path string, cfg *config.Config) {
 	t.Helper()
 	content := fmt.Sprintf(
-		"staging_dir = %q\nlibrary_dir = %q\nlog_dir = %q\nreview_dir = %q\ntmdb_api_key = %q\noptical_drive = %q\napi_bind = %q\n",
-		cfg.StagingDir,
-		cfg.LibraryDir,
-		cfg.LogDir,
-		cfg.ReviewDir,
-		cfg.TMDBAPIKey,
-		cfg.OpticalDrive,
-		cfg.APIBind,
+		"[paths]\nstaging_dir = %q\nlibrary_dir = %q\nlog_dir = %q\nreview_dir = %q\napi_bind = %q\n\n[tmdb]\napi_key = %q\n\n[makemkv]\noptical_drive = %q\n",
+		cfg.Paths.StagingDir,
+		cfg.Paths.LibraryDir,
+		cfg.Paths.LogDir,
+		cfg.Paths.ReviewDir,
+		cfg.Paths.APIBind,
+		cfg.TMDB.APIKey,
+		cfg.MakeMKV.OpticalDrive,
 	)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)

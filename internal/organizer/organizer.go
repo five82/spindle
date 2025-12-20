@@ -266,7 +266,7 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 		}
 		source := filepath.Join(stagingDir, name)
 		destination := filepath.Join(destDir, fmt.Sprintf("%s.%s", destBase, suffix))
-		if o.cfg != nil && o.cfg.OverwriteExistingLibraryFiles {
+		if o.cfg != nil && o.cfg.Library.OverwriteExisting {
 			if err := os.Remove(destination); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("remove existing subtitle %q: %w", destination, err)
 			}
@@ -512,7 +512,7 @@ func (o *Organizer) cleanupStaging(ctx context.Context, item *queue.Item) {
 	if item == nil || o.cfg == nil {
 		return
 	}
-	base := strings.TrimSpace(o.cfg.StagingDir)
+	base := strings.TrimSpace(o.cfg.Paths.StagingDir)
 	if base == "" {
 		return
 	}
@@ -535,7 +535,7 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
 	)
-	reviewDir := strings.TrimSpace(o.cfg.ReviewDir)
+	reviewDir := strings.TrimSpace(o.cfg.Paths.ReviewDir)
 	if reviewDir == "" {
 		return "", services.Wrap(
 			services.ErrConfiguration,
@@ -685,10 +685,10 @@ func (o *Organizer) HealthCheck(ctx context.Context) stage.Health {
 	if o.cfg == nil {
 		return stage.Unhealthy(name, "configuration unavailable")
 	}
-	if strings.TrimSpace(o.cfg.LibraryDir) == "" {
+	if strings.TrimSpace(o.cfg.Paths.LibraryDir) == "" {
 		return stage.Unhealthy(name, "library directory not configured")
 	}
-	if strings.TrimSpace(o.cfg.MoviesDir) == "" && strings.TrimSpace(o.cfg.TVDir) == "" {
+	if strings.TrimSpace(o.cfg.Library.MoviesDir) == "" && strings.TrimSpace(o.cfg.Library.TVDir) == "" {
 		return stage.Unhealthy(name, "library subdirectories not configured")
 	}
 	if o.plex == nil {

@@ -103,8 +103,8 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 		opt(m)
 	}
 	if m.languages == nil {
-		if cfg != nil && len(cfg.OpenSubtitlesLanguages) > 0 {
-			m.languages = append([]string(nil), cfg.OpenSubtitlesLanguages...)
+		if cfg != nil && len(cfg.Subtitles.OpenSubtitlesLanguages) > 0 {
+			m.languages = append([]string(nil), cfg.Subtitles.OpenSubtitlesLanguages...)
 		} else {
 			m.languages = []string{"en"}
 		}
@@ -112,11 +112,11 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 	if m.subs == nil && cfg != nil {
 		m.subs = subtitles.NewService(cfg, m.logger)
 	}
-	if m.openSubs == nil && cfg != nil && cfg.OpenSubtitlesEnabled {
+	if m.openSubs == nil && cfg != nil && cfg.Subtitles.OpenSubtitlesEnabled {
 		client, err := opensubtitles.New(opensubtitles.Config{
-			APIKey:    cfg.OpenSubtitlesAPIKey,
-			UserAgent: cfg.OpenSubtitlesUserAgent,
-			UserToken: cfg.OpenSubtitlesUserToken,
+			APIKey:    cfg.Subtitles.OpenSubtitlesAPIKey,
+			UserAgent: cfg.Subtitles.OpenSubtitlesUserAgent,
+			UserToken: cfg.Subtitles.OpenSubtitlesUserToken,
 		})
 		if err != nil {
 			m.logger.Warn("opensubtitles client unavailable", logging.Error(err))
@@ -125,7 +125,7 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 		}
 	}
 	if m.cache == nil && cfg != nil {
-		dir := strings.TrimSpace(cfg.OpenSubtitlesCacheDir)
+		dir := strings.TrimSpace(cfg.Paths.OpenSubtitlesCacheDir)
 		if dir != "" {
 			cache, err := opensubtitles.NewCache(dir, m.logger)
 			if err != nil {
@@ -136,7 +136,7 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 		}
 	}
 	if m.tmdb == nil && cfg != nil {
-		client, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
+		client, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 		if err != nil {
 			m.logger.Warn("tmdb client unavailable", logging.Error(err))
 		} else {
@@ -187,7 +187,7 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	if seasonDetails == nil || len(seasonDetails.Episodes) == 0 {
 		return false, errors.New("tmdb season returned no episodes")
 	}
-	stagingRoot := item.StagingRoot(m.cfg.StagingDir)
+	stagingRoot := item.StagingRoot(m.cfg.Paths.StagingDir)
 	if stagingRoot == "" {
 		return false, errors.New("staging root unavailable for content id")
 	}

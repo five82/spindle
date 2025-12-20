@@ -184,10 +184,10 @@ func cacheManager(ctx *commandContext) (*ripcache.Manager, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if cfg == nil || !cfg.RipCacheEnabled {
-		return nil, "Rip cache is disabled (set rip_cache_enabled = true in config.toml)", nil
+	if cfg == nil || !cfg.RipCache.Enabled {
+		return nil, "Rip cache is disabled (set rip_cache.enabled = true in config.toml)", nil
 	}
-	if strings.TrimSpace(cfg.RipCacheDir) == "" {
+	if strings.TrimSpace(cfg.RipCache.Dir) == "" {
 		return nil, "Rip cache dir is not configured", nil
 	}
 	logger, err := logging.New(logging.Options{Level: "info", Format: "console"})
@@ -195,7 +195,7 @@ func cacheManager(ctx *commandContext) (*ripcache.Manager, string, error) {
 		return nil, "", fmt.Errorf("init logger: %w", err)
 	}
 	logger = logger.With(logging.String("component", "cli-cache"))
-	if err := os.MkdirAll(cfg.RipCacheDir, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.RipCache.Dir, 0o755); err != nil {
 		return nil, "", fmt.Errorf("ensure cache dir: %w", err)
 	}
 	return ripcache.NewManager(cfg, logger), "", nil

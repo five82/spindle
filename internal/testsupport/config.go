@@ -24,16 +24,16 @@ func NewConfig(t testing.TB, opts ...ConfigOption) *config.Config {
 
 	base := t.TempDir()
 	cfgVal := config.Default()
-	cfgVal.TMDBAPIKey = "test"
-	cfgVal.StagingDir = filepath.Join(base, "staging")
-	cfgVal.LibraryDir = filepath.Join(base, "library")
-	cfgVal.LogDir = filepath.Join(base, "logs")
-	cfgVal.ReviewDir = filepath.Join(base, "review")
-	cfgVal.APIBind = "127.0.0.1:0"
+	cfgVal.TMDB.APIKey = "test"
+	cfgVal.Paths.StagingDir = filepath.Join(base, "staging")
+	cfgVal.Paths.LibraryDir = filepath.Join(base, "library")
+	cfgVal.Paths.LogDir = filepath.Join(base, "logs")
+	cfgVal.Paths.ReviewDir = filepath.Join(base, "review")
+	cfgVal.Paths.APIBind = "127.0.0.1:0"
 	// Disable KEYDB in tests to avoid 20m network refreshes.
-	cfgVal.KeyDBPath = ""
-	cfgVal.KeyDBDownloadURL = ""
-	cfgVal.KeyDBDownloadTimeout = 1
+	cfgVal.MakeMKV.KeyDBPath = ""
+	cfgVal.MakeMKV.KeyDBDownloadURL = ""
+	cfgVal.MakeMKV.KeyDBDownloadTimeout = 1
 
 	builder := &configBuilder{
 		t:       t,
@@ -51,14 +51,14 @@ func NewConfig(t testing.TB, opts ...ConfigOption) *config.Config {
 // WithTMDBKey sets the TMDB API key on the test config.
 func WithTMDBKey(key string) ConfigOption {
 	return func(b *configBuilder) {
-		b.cfg.TMDBAPIKey = key
+		b.cfg.TMDB.APIKey = key
 	}
 }
 
 // WithOpticalDrive overrides the optical drive path on the test config.
 func WithOpticalDrive(path string) ConfigOption {
 	return func(b *configBuilder) {
-		b.cfg.OpticalDrive = path
+		b.cfg.MakeMKV.OpticalDrive = path
 	}
 }
 
@@ -99,13 +99,13 @@ func WithRipCache() ConfigOption {
 		if err := os.MkdirAll(ripDir, 0o755); err != nil {
 			b.t.Fatalf("mkdir rip cache: %v", err)
 		}
-		b.cfg.RipCacheEnabled = true
-		b.cfg.RipCacheDir = ripDir
-		b.cfg.RipCacheMaxGiB = 10
+		b.cfg.RipCache.Enabled = true
+		b.cfg.RipCache.Dir = ripDir
+		b.cfg.RipCache.MaxGiB = 10
 	}
 }
 
 // BaseDir returns the root temp directory backing the generated config.
 func BaseDir(cfg *config.Config) string {
-	return filepath.Dir(cfg.StagingDir)
+	return filepath.Dir(cfg.Paths.StagingDir)
 }

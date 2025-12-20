@@ -49,11 +49,11 @@ This command does not touch the queue database or require the daemon.`,
 			writeSection(cmd.ErrOrStderr(), "Response", "Printed to stdout as JSON.")
 
 			client := presetllm.NewClient(presetllm.Config{
-				APIKey:  cfg.PresetDeciderAPIKey,
-				BaseURL: cfg.PresetDeciderBaseURL,
-				Model:   cfg.PresetDeciderModel,
-				Referer: cfg.PresetDeciderReferer,
-				Title:   cfg.PresetDeciderTitle,
+				APIKey:  cfg.PresetDecider.APIKey,
+				BaseURL: cfg.PresetDecider.BaseURL,
+				Model:   cfg.PresetDecider.Model,
+				Referer: cfg.PresetDecider.Referer,
+				Title:   cfg.PresetDecider.Title,
 			})
 
 			reqCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

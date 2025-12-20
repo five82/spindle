@@ -158,11 +158,11 @@ func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) 
 	serviceLogger := logging.NewComponentLogger(logger, "subtitles")
 	token := ""
 	if cfg != nil {
-		token = strings.TrimSpace(cfg.WhisperXHuggingFaceToken)
+		token = strings.TrimSpace(cfg.Subtitles.WhisperXHuggingFace)
 	}
 	languages := []string{"en"}
-	if cfg != nil && len(cfg.OpenSubtitlesLanguages) > 0 {
-		languages = append([]string(nil), cfg.OpenSubtitlesLanguages...)
+	if cfg != nil && len(cfg.Subtitles.OpenSubtitlesLanguages) > 0 {
+		languages = append([]string(nil), cfg.Subtitles.OpenSubtitlesLanguages...)
 	}
 	svc := &Service{
 		config:    cfg,
@@ -334,9 +334,9 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			reason = "opensubtitles disabled"
 			if s.config == nil {
 				reason = "configuration unavailable"
-			} else if !s.config.OpenSubtitlesEnabled {
+			} else if !s.config.Subtitles.OpenSubtitlesEnabled {
 				reason = "opensubtitles_enabled is false"
-			} else if strings.TrimSpace(s.config.OpenSubtitlesAPIKey) == "" {
+			} else if strings.TrimSpace(s.config.Subtitles.OpenSubtitlesAPIKey) == "" {
 				reason = "opensubtitles_api_key not set"
 			}
 			openSubsDetail = reason
@@ -412,7 +412,7 @@ func (s *Service) ffprobeBinary() string {
 }
 
 func (s *Service) buildWhisperXArgs(source, outputDir, language string) []string {
-	cudaEnabled := s != nil && s.config != nil && s.config.WhisperXCUDAEnabled
+	cudaEnabled := s != nil && s.config != nil && s.config.Subtitles.WhisperXCUDAEnabled
 
 	args := make([]string, 0, 32)
 	if cudaEnabled {
@@ -561,7 +561,7 @@ func (s *Service) ensureTranscriptCache() error {
 		return errors.New("subtitle service unavailable")
 	}
 	s.transcriptCacheOnce.Do(func() {
-		dir := strings.TrimSpace(s.config.WhisperXCacheDir)
+		dir := strings.TrimSpace(s.config.Paths.WhisperXCacheDir)
 		if dir == "" {
 			s.transcriptCache = nil
 			s.transcriptCacheErr = nil
@@ -743,7 +743,7 @@ func (s *Service) configuredVADMethod() string {
 	if s == nil || s.config == nil {
 		return whisperXVADMethodSilero
 	}
-	method := strings.ToLower(strings.TrimSpace(s.config.WhisperXVADMethod))
+	method := strings.ToLower(strings.TrimSpace(s.config.Subtitles.WhisperXVADMethod))
 	switch method {
 	case whisperXVADMethodPyannote, whisperXVADMethodSilero:
 		return method

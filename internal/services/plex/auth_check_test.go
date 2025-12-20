@@ -64,7 +64,7 @@ func TestCheckAuthSuccess(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	cfg.PlexURL = server.URL
+	cfg.Plex.URL = server.URL
 
 	err := CheckAuth(context.Background(), &cfg, server.Client(), &stubTokenProvider{
 		token: "token-123",
@@ -85,7 +85,7 @@ func TestCheckAuthUnauthorized(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	cfg.PlexURL = server.URL
+	cfg.Plex.URL = server.URL
 
 	err := CheckAuth(context.Background(), &cfg, server.Client(), &stubTokenProvider{
 		token: "anything",
@@ -108,7 +108,7 @@ func TestCheckAuthServerError(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	cfg.PlexURL = server.URL
+	cfg.Plex.URL = server.URL
 
 	err := CheckAuth(context.Background(), &cfg, server.Client(), &stubTokenProvider{
 		token: "anything",
@@ -124,7 +124,7 @@ func TestCheckAuthHostnameMismatchResolves(t *testing.T) {
 
 	token := "token-123"
 	cfg := config.Default()
-	cfg.PlexURL = "https://internal.example:32400"
+	cfg.Plex.URL = "https://internal.example:32400"
 
 	resourcesXML := fmt.Sprintf(`
 <resources>
@@ -178,7 +178,7 @@ func TestCheckAuthHTTPConfiguredURLResolvesImmediately(t *testing.T) {
 
 	token := "token-123"
 	cfg := config.Default()
-	cfg.PlexURL = "http://internal.example:32400"
+	cfg.Plex.URL = "http://internal.example:32400"
 
 	resourcesXML := fmt.Sprintf(`
 <resources>

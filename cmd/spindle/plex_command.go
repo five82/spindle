@@ -34,8 +34,8 @@ func newPlexLinkCommand(cfgFn func() *config.Config) *cobra.Command {
 				return errors.New("configuration not loaded")
 			}
 
-			if !cfg.PlexLinkEnabled {
-				fmt.Fprintln(cmd.OutOrStdout(), "Plex link is disabled in config.toml; enable plex_link_enabled to link.")
+			if !cfg.Plex.Enabled {
+				fmt.Fprintln(cmd.OutOrStdout(), "Plex link is disabled in config.toml; enable plex.enabled to link.")
 				return nil
 			}
 

@@ -53,19 +53,19 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 	}
 	item.Status = queue.StatusEncoded
 	item.DiscFingerprint = "ORGANIZERTESTFP1"
-	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	stagingRoot := item.StagingRoot(cfg.Paths.StagingDir)
 	encodedDir := filepath.Join(stagingRoot, "encoded")
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		t.Fatalf("mkdir encoded: %v", err)
 	}
 	item.EncodedFile = filepath.Join(encodedDir, "demo.encoded.mkv")
 	testsupport.WriteFile(t, item.EncodedFile, organizedFixtureSize)
-	item.MetadataJSON = `{"title":"Demo", "filename":"Demo", " library_path":"` + filepath.Join(cfg.LibraryDir, cfg.MoviesDir) + `", "movie":true}`
+	item.MetadataJSON = `{"title":"Demo", "filename":"Demo", " library_path":"` + filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir) + `", "movie":true}`
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 
-	stubPlex := &stubPlexService{targetDir: filepath.Join(cfg.LibraryDir, cfg.MoviesDir)}
+	stubPlex := &stubPlexService{targetDir: filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)}
 	notifier := &stubNotifier{}
 	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, notifier)
 	item.Status = queue.StatusOrganizing
@@ -111,7 +111,7 @@ func TestOrganizerPersistsRipSpecPerEpisode(t *testing.T) {
 	item.Status = queue.StatusEncoded
 	item.DiscFingerprint = "ORGANIZERTESTFP_TV"
 
-	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	stagingRoot := item.StagingRoot(cfg.Paths.StagingDir)
 	encodedDir := filepath.Join(stagingRoot, "encoded")
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		t.Fatalf("mkdir encoded: %v", err)
@@ -149,7 +149,7 @@ func TestOrganizerPersistsRipSpecPerEpisode(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	targetDir := filepath.Join(cfg.LibraryDir, cfg.TVDir)
+	targetDir := filepath.Join(cfg.Paths.LibraryDir, cfg.Library.TVDir)
 	stubPlex := newBlockingPlexService(targetDir)
 	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, nil)
 
@@ -207,7 +207,7 @@ func TestOrganizerMovesGeneratedSubtitles(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusEncoded
-	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	stagingRoot := item.StagingRoot(cfg.Paths.StagingDir)
 	encodedDir := filepath.Join(stagingRoot, "encoded")
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		t.Fatalf("mkdir encoded: %v", err)
@@ -223,7 +223,7 @@ func TestOrganizerMovesGeneratedSubtitles(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	targetDir := filepath.Join(cfg.LibraryDir, cfg.MoviesDir)
+	targetDir := filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)
 	stubPlex := &stubPlexService{targetDir: targetDir}
 	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, nil)
 	item.Status = queue.StatusOrganizing
@@ -245,7 +245,7 @@ func TestOrganizerMovesGeneratedSubtitles(t *testing.T) {
 
 func TestOrganizerOverwritesExistingSubtitles(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
-	cfg.OverwriteExistingLibraryFiles = true
+	cfg.Library.OverwriteExisting = true
 	store := testsupport.MustOpenStore(t, cfg)
 
 	stubOrganizerProbe(t)
@@ -255,7 +255,7 @@ func TestOrganizerOverwritesExistingSubtitles(t *testing.T) {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	item.Status = queue.StatusEncoded
-	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	stagingRoot := item.StagingRoot(cfg.Paths.StagingDir)
 	encodedDir := filepath.Join(stagingRoot, "encoded")
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		t.Fatalf("mkdir encoded: %v", err)
@@ -271,7 +271,7 @@ func TestOrganizerOverwritesExistingSubtitles(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	targetDir := filepath.Join(cfg.LibraryDir, cfg.MoviesDir)
+	targetDir := filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatalf("mkdir library: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 		}
 		item.Status = queue.StatusEncoded
 		item.DiscFingerprint = fmt.Sprintf("FPREVIEW%02dABCDEFG", i)
-		stagingRoot := item.StagingRoot(cfg.StagingDir)
+		stagingRoot := item.StagingRoot(cfg.Paths.StagingDir)
 		encodedDir := filepath.Join(stagingRoot, "encoded")
 		if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 			t.Fatalf("mkdir encoded: %v", err)
@@ -373,7 +373,7 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 	}
 	item.Status = queue.StatusEncoded
 	item.DiscFingerprint = "ORGANIZERTESTFPFAIL"
-	encodedDir := filepath.Join(item.StagingRoot(cfg.StagingDir), "encoded")
+	encodedDir := filepath.Join(item.StagingRoot(cfg.Paths.StagingDir), "encoded")
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
 		t.Fatalf("mkdir encoded: %v", err)
 	}

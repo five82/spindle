@@ -98,7 +98,7 @@ func Open(cfg *config.Config) (*Store, error) {
 		return nil, fmt.Errorf("ensure directories: %w", err)
 	}
 
-	dbPath := filepath.Join(cfg.LogDir, "queue.db")
+	dbPath := filepath.Join(cfg.Paths.LogDir, "queue.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db: %w", err)

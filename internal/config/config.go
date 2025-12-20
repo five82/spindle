@@ -15,80 +15,138 @@ import (
 //go:embed sample_config.toml
 var sampleConfig string
 
-// Config encapsulates all configuration values for the Go implementation of Spindle.
+// Paths contains directory and bind address configuration.
+type Paths struct {
+	StagingDir            string `toml:"staging_dir"`
+	LibraryDir            string `toml:"library_dir"`
+	LogDir                string `toml:"log_dir"`
+	ReviewDir             string `toml:"review_dir"`
+	OpenSubtitlesCacheDir string `toml:"opensubtitles_cache_dir"`
+	WhisperXCacheDir      string `toml:"whisperx_cache_dir"`
+	APIBind               string `toml:"api_bind"`
+}
+
+// TMDB contains configuration for The Movie Database API.
+type TMDB struct {
+	APIKey              string  `toml:"api_key"`
+	BaseURL             string  `toml:"base_url"`
+	Language            string  `toml:"language"`
+	ConfidenceThreshold float64 `toml:"confidence_threshold"`
+}
+
+// Plex contains configuration for Plex Media Server integration.
+type Plex struct {
+	Enabled       bool   `toml:"enabled"`
+	URL           string `toml:"url"`
+	AuthPath      string `toml:"auth_path"`
+	MoviesLibrary string `toml:"movies_library"`
+	TVLibrary     string `toml:"tv_library"`
+}
+
+// Library contains configuration for the media library structure.
+type Library struct {
+	MoviesDir         string `toml:"movies_dir"`
+	TVDir             string `toml:"tv_dir"`
+	OverwriteExisting bool   `toml:"overwrite_existing"`
+}
+
+// Notifications contains configuration for ntfy push notifications.
+type Notifications struct {
+	NtfyTopic          string `toml:"ntfy_topic"`
+	RequestTimeout     int    `toml:"request_timeout"`
+	Identification     bool   `toml:"identification"`
+	Rip                bool   `toml:"rip"`
+	Encoding           bool   `toml:"encoding"`
+	Organization       bool   `toml:"organization"`
+	Queue              bool   `toml:"queue"`
+	Review             bool   `toml:"review"`
+	Errors             bool   `toml:"errors"`
+	MinRipSeconds      int    `toml:"min_rip_seconds"`
+	QueueMinItems      int    `toml:"queue_min_items"`
+	DedupWindowSeconds int    `toml:"dedup_window_seconds"`
+}
+
+// Subtitles contains configuration for subtitle generation and retrieval.
+type Subtitles struct {
+	Enabled                bool     `toml:"enabled"`
+	WhisperXCUDAEnabled    bool     `toml:"whisperx_cuda_enabled"`
+	WhisperXVADMethod      string   `toml:"whisperx_vad_method"`
+	WhisperXHuggingFace    string   `toml:"whisperx_hf_token"`
+	OpenSubtitlesEnabled   bool     `toml:"opensubtitles_enabled"`
+	OpenSubtitlesAPIKey    string   `toml:"opensubtitles_api_key"`
+	OpenSubtitlesUserAgent string   `toml:"opensubtitles_user_agent"`
+	OpenSubtitlesUserToken string   `toml:"opensubtitles_user_token"`
+	OpenSubtitlesLanguages []string `toml:"opensubtitles_languages"`
+}
+
+// RipCache contains configuration for the rip cache.
+type RipCache struct {
+	Enabled bool   `toml:"enabled"`
+	Dir     string `toml:"dir"`
+	MaxGiB  int    `toml:"max_gib"`
+}
+
+// MakeMKV contains configuration for disc ripping.
+type MakeMKV struct {
+	OpticalDrive                string `toml:"optical_drive"`
+	RipTimeout                  int    `toml:"rip_timeout"`
+	InfoTimeout                 int    `toml:"info_timeout"`
+	KeyDBPath                   string `toml:"keydb_path"`
+	KeyDBDownloadURL            string `toml:"keydb_download_url"`
+	KeyDBDownloadTimeout        int    `toml:"keydb_download_timeout"`
+	IdentificationOverridesPath string `toml:"identification_overrides_path"`
+}
+
+// PresetDecider contains configuration for LLM-based encoding preset selection.
+type PresetDecider struct {
+	Enabled bool   `toml:"enabled"`
+	APIKey  string `toml:"api_key"`
+	BaseURL string `toml:"base_url"`
+	Model   string `toml:"model"`
+	Referer string `toml:"referer"`
+	Title   string `toml:"title"`
+}
+
+// CommentaryDetection contains configuration for LLM-based commentary track detection.
+type CommentaryDetection struct {
+	Enabled bool   `toml:"enabled"`
+	APIKey  string `toml:"api_key"`
+	BaseURL string `toml:"base_url"`
+	Model   string `toml:"model"`
+	Referer string `toml:"referer"`
+	Title   string `toml:"title"`
+}
+
+// Workflow contains configuration for daemon timing and intervals.
+type Workflow struct {
+	QueuePollInterval  int `toml:"queue_poll_interval"`
+	ErrorRetryInterval int `toml:"error_retry_interval"`
+	HeartbeatInterval  int `toml:"heartbeat_interval"`
+	HeartbeatTimeout   int `toml:"heartbeat_timeout"`
+	DiscMonitorTimeout int `toml:"disc_monitor_timeout"`
+}
+
+// Logging contains configuration for log output.
+type Logging struct {
+	Format        string `toml:"format"`
+	Level         string `toml:"level"`
+	RetentionDays int    `toml:"retention_days"`
+}
+
+// Config encapsulates all configuration values for Spindle.
 type Config struct {
-	StagingDir                    string   `toml:"staging_dir"`
-	LibraryDir                    string   `toml:"library_dir"`
-	LogDir                        string   `toml:"log_dir"`
-	LogRetentionDays              int      `toml:"log_retention_days"`
-	OpenSubtitlesCacheDir         string   `toml:"opensubtitles_cache_dir"`
-	WhisperXCacheDir              string   `toml:"whisperx_cache_dir"`
-	ReviewDir                     string   `toml:"review_dir"`
-	RipCacheEnabled               bool     `toml:"rip_cache_enabled"`
-	RipCacheDir                   string   `toml:"rip_cache_dir"`
-	RipCacheMaxGiB                int      `toml:"rip_cache_max_gib"`
-	OpticalDrive                  string   `toml:"optical_drive"`
-	APIBind                       string   `toml:"api_bind"`
-	TMDBAPIKey                    string   `toml:"tmdb_api_key"`
-	TMDBBaseURL                   string   `toml:"tmdb_base_url"`
-	TMDBLanguage                  string   `toml:"tmdb_language"`
-	TMDBConfidenceThreshold       float64  `toml:"tmdb_confidence_threshold"`
-	MoviesDir                     string   `toml:"movies_dir"`
-	TVDir                         string   `toml:"tv_dir"`
-	PlexLinkEnabled               bool     `toml:"plex_link_enabled"`
-	PlexURL                       string   `toml:"plex_url"`
-	PlexAuthPath                  string   `toml:"plex_auth_path"`
-	OverwriteExistingLibraryFiles bool     `toml:"overwrite_existing_library_files"`
-	MoviesLibrary                 string   `toml:"movies_library"`
-	TVLibrary                     string   `toml:"tv_library"`
-	NtfyTopic                     string   `toml:"ntfy_topic"`
-	KeyDBPath                     string   `toml:"keydb_path"`
-	KeyDBDownloadURL              string   `toml:"keydb_download_url"`
-	KeyDBDownloadTimeout          int      `toml:"keydb_download_timeout"`
-	IdentificationOverridesPath   string   `toml:"identification_overrides_path"`
-	MakeMKVRipTimeout             int      `toml:"makemkv_rip_timeout"`
-	MakeMKVInfoTimeout            int      `toml:"makemkv_info_timeout"`
-	NtfyRequestTimeout            int      `toml:"ntfy_request_timeout"`
-	DiscMonitorTimeout            int      `toml:"disc_monitor_timeout"`
-	QueuePollInterval             int      `toml:"queue_poll_interval"`
-	ErrorRetryInterval            int      `toml:"error_retry_interval"`
-	WorkflowHeartbeatInterval     int      `toml:"workflow_heartbeat_interval"`
-	WorkflowHeartbeatTimeout      int      `toml:"workflow_heartbeat_timeout"`
-	LogFormat                     string   `toml:"log_format"`
-	LogLevel                      string   `toml:"log_level"`
-	SubtitlesEnabled              bool     `toml:"subtitles_enabled"`
-	WhisperXCUDAEnabled           bool     `toml:"whisperx_cuda_enabled"`
-	WhisperXVADMethod             string   `toml:"whisperx_vad_method"`
-	WhisperXHuggingFaceToken      string   `toml:"whisperx_hf_token"`
-	NotifyIdentification          bool     `toml:"notify_identification"`
-	NotifyRip                     bool     `toml:"notify_rip"`
-	NotifyEncoding                bool     `toml:"notify_encoding"`
-	NotifyOrganization            bool     `toml:"notify_organization"`
-	NotifyQueue                   bool     `toml:"notify_queue"`
-	NotifyReview                  bool     `toml:"notify_review"`
-	NotifyErrors                  bool     `toml:"notify_errors"`
-	NotifyMinRipSeconds           int      `toml:"notify_min_rip_seconds"`
-	NotifyQueueMinItems           int      `toml:"notify_queue_min_items"`
-	NotifyDedupWindowSeconds      int      `toml:"notify_dedup_window_seconds"`
-	OpenSubtitlesEnabled          bool     `toml:"opensubtitles_enabled"`
-	OpenSubtitlesAPIKey           string   `toml:"opensubtitles_api_key"`
-	OpenSubtitlesUserAgent        string   `toml:"opensubtitles_user_agent"`
-	OpenSubtitlesUserToken        string   `toml:"opensubtitles_user_token"`
-	OpenSubtitlesLanguages        []string `toml:"opensubtitles_languages"`
-	DeepSeekPresetDeciderEnabled  bool     `toml:"deepseek_preset_decider_enabled"`
-	DeepSeekAPIKey                string   `toml:"deepseek_api_key"`
-	PresetDeciderEnabled          bool     `toml:"preset_decider_enabled"`
-	PresetDeciderAPIKey           string   `toml:"preset_decider_api_key"`
-	PresetDeciderBaseURL          string   `toml:"preset_decider_base_url"`
-	PresetDeciderModel            string   `toml:"preset_decider_model"`
-	PresetDeciderReferer          string   `toml:"preset_decider_referer"`
-	PresetDeciderTitle            string   `toml:"preset_decider_title"`
-	CommentaryDetectionEnabled    bool     `toml:"commentary_detection_enabled"`
-	CommentaryDetectionAPIKey     string   `toml:"commentary_detection_api_key"`
-	CommentaryDetectionBaseURL    string   `toml:"commentary_detection_base_url"`
-	CommentaryDetectionModel      string   `toml:"commentary_detection_model"`
-	CommentaryDetectionReferer    string   `toml:"commentary_detection_referer"`
-	CommentaryDetectionTitle      string   `toml:"commentary_detection_title"`
+	Paths               Paths               `toml:"paths"`
+	TMDB                TMDB                `toml:"tmdb"`
+	Plex                Plex                `toml:"plex"`
+	Library             Library             `toml:"library"`
+	Notifications       Notifications       `toml:"notifications"`
+	Subtitles           Subtitles           `toml:"subtitles"`
+	RipCache            RipCache            `toml:"rip_cache"`
+	MakeMKV             MakeMKV             `toml:"makemkv"`
+	PresetDecider       PresetDecider       `toml:"preset_decider"`
+	CommentaryDetection CommentaryDetection `toml:"commentary_detection"`
+	Workflow            Workflow            `toml:"workflow"`
+	Logging             Logging             `toml:"logging"`
 }
 
 const (
@@ -129,62 +187,85 @@ const (
 // Default returns a Config populated with repository defaults.
 func Default() Config {
 	return Config{
-		StagingDir:                  defaultStagingDir,
-		LibraryDir:                  defaultLibraryDir,
-		LogDir:                      defaultLogDir,
-		LogRetentionDays:            defaultLogRetentionDays,
-		OpenSubtitlesCacheDir:       defaultOpenSubtitlesCacheDir,
-		WhisperXCacheDir:            defaultWhisperXCacheDir,
-		ReviewDir:                   defaultReviewDir,
-		RipCacheEnabled:             false,
-		RipCacheDir:                 defaultRipCacheDir(),
-		RipCacheMaxGiB:              defaultRipCacheMaxGiB,
-		OpticalDrive:                defaultOpticalDrive,
-		APIBind:                     defaultAPIBind,
-		TMDBLanguage:                defaultTMDBLanguage,
-		TMDBBaseURL:                 defaultTMDBBaseURL,
-		TMDBConfidenceThreshold:     0.8,
-		MoviesDir:                   defaultMoviesDir,
-		TVDir:                       defaultTVDir,
-		PlexLinkEnabled:             true,
-		MoviesLibrary:               "Movies",
-		TVLibrary:                   "TV Shows",
-		PlexAuthPath:                defaultPlexAuthPath,
-		KeyDBPath:                   defaultKeyDBPath,
-		KeyDBDownloadURL:            defaultKeyDBDownloadURL,
-		KeyDBDownloadTimeout:        defaultKeyDBDownloadTimeout,
-		IdentificationOverridesPath: defaultIdentificationOverridesPath,
-		MakeMKVRipTimeout:           3600,
-		MakeMKVInfoTimeout:          300,
-		NtfyRequestTimeout:          10,
-		DiscMonitorTimeout:          5,
-		QueuePollInterval:           5,
-		ErrorRetryInterval:          10,
-		WorkflowHeartbeatInterval:   defaultWorkflowHeartbeatInterval,
-		WorkflowHeartbeatTimeout:    defaultWorkflowHeartbeatTimeout,
-		LogFormat:                   defaultLogFormat,
-		LogLevel:                    defaultLogLevel,
-		WhisperXVADMethod:           "silero",
-		OpenSubtitlesLanguages:      []string{"en"},
-		OpenSubtitlesUserAgent:      defaultOpenSubtitlesUserAgent,
-		NotifyIdentification:        true,
-		NotifyRip:                   true,
-		NotifyEncoding:              true,
-		NotifyOrganization:          true,
-		NotifyQueue:                 true,
-		NotifyReview:                true,
-		NotifyErrors:                true,
-		NotifyMinRipSeconds:         defaultNotifyMinRipSeconds,
-		NotifyQueueMinItems:         defaultNotifyQueueMinItems,
-		NotifyDedupWindowSeconds:    defaultNotifyDedupWindowSeconds,
-		PresetDeciderBaseURL:        defaultPresetDeciderBaseURL,
-		PresetDeciderModel:          defaultPresetDeciderModel,
-		PresetDeciderReferer:        defaultPresetDeciderReferer,
-		PresetDeciderTitle:          defaultPresetDeciderTitle,
-		CommentaryDetectionBaseURL:  defaultPresetDeciderBaseURL,
-		CommentaryDetectionModel:    defaultPresetDeciderModel,
-		CommentaryDetectionReferer:  defaultPresetDeciderReferer,
-		CommentaryDetectionTitle:    defaultCommentaryDetectionTitle,
+		Paths: Paths{
+			StagingDir:            defaultStagingDir,
+			LibraryDir:            defaultLibraryDir,
+			LogDir:                defaultLogDir,
+			ReviewDir:             defaultReviewDir,
+			OpenSubtitlesCacheDir: defaultOpenSubtitlesCacheDir,
+			WhisperXCacheDir:      defaultWhisperXCacheDir,
+			APIBind:               defaultAPIBind,
+		},
+		TMDB: TMDB{
+			Language:            defaultTMDBLanguage,
+			BaseURL:             defaultTMDBBaseURL,
+			ConfidenceThreshold: 0.8,
+		},
+		Plex: Plex{
+			Enabled:       true,
+			AuthPath:      defaultPlexAuthPath,
+			MoviesLibrary: "Movies",
+			TVLibrary:     "TV Shows",
+		},
+		Library: Library{
+			MoviesDir: defaultMoviesDir,
+			TVDir:     defaultTVDir,
+		},
+		Notifications: Notifications{
+			RequestTimeout:     10,
+			Identification:     true,
+			Rip:                true,
+			Encoding:           true,
+			Organization:       true,
+			Queue:              true,
+			Review:             true,
+			Errors:             true,
+			MinRipSeconds:      defaultNotifyMinRipSeconds,
+			QueueMinItems:      defaultNotifyQueueMinItems,
+			DedupWindowSeconds: defaultNotifyDedupWindowSeconds,
+		},
+		Subtitles: Subtitles{
+			WhisperXVADMethod:      "silero",
+			OpenSubtitlesLanguages: []string{"en"},
+			OpenSubtitlesUserAgent: defaultOpenSubtitlesUserAgent,
+		},
+		RipCache: RipCache{
+			Dir:    defaultRipCacheDir(),
+			MaxGiB: defaultRipCacheMaxGiB,
+		},
+		MakeMKV: MakeMKV{
+			OpticalDrive:                defaultOpticalDrive,
+			RipTimeout:                  3600,
+			InfoTimeout:                 300,
+			KeyDBPath:                   defaultKeyDBPath,
+			KeyDBDownloadURL:            defaultKeyDBDownloadURL,
+			KeyDBDownloadTimeout:        defaultKeyDBDownloadTimeout,
+			IdentificationOverridesPath: defaultIdentificationOverridesPath,
+		},
+		PresetDecider: PresetDecider{
+			BaseURL: defaultPresetDeciderBaseURL,
+			Model:   defaultPresetDeciderModel,
+			Referer: defaultPresetDeciderReferer,
+			Title:   defaultPresetDeciderTitle,
+		},
+		CommentaryDetection: CommentaryDetection{
+			BaseURL: defaultPresetDeciderBaseURL,
+			Model:   defaultPresetDeciderModel,
+			Referer: defaultPresetDeciderReferer,
+			Title:   defaultCommentaryDetectionTitle,
+		},
+		Workflow: Workflow{
+			QueuePollInterval:  5,
+			ErrorRetryInterval: 10,
+			HeartbeatInterval:  defaultWorkflowHeartbeatInterval,
+			HeartbeatTimeout:   defaultWorkflowHeartbeatTimeout,
+			DiscMonitorTimeout: 5,
+		},
+		Logging: Logging{
+			Format:        defaultLogFormat,
+			Level:         defaultLogLevel,
+			RetentionDays: defaultLogRetentionDays,
+		},
 	}
 }
 
@@ -264,124 +345,123 @@ func resolveConfigPath(path string) (string, bool, error) {
 }
 
 func (c *Config) normalize() error {
+	if err := c.normalizePaths(); err != nil {
+		return err
+	}
+	if err := c.normalizeTMDB(); err != nil {
+		return err
+	}
+	if err := c.normalizePlex(); err != nil {
+		return err
+	}
+	if err := c.normalizeSubtitles(); err != nil {
+		return err
+	}
+	if err := c.normalizeRipCache(); err != nil {
+		return err
+	}
+	if err := c.normalizeMakeMKV(); err != nil {
+		return err
+	}
+	if err := c.normalizePresetDecider(); err != nil {
+		return err
+	}
+	if err := c.normalizeCommentaryDetection(); err != nil {
+		return err
+	}
+	c.normalizeLogging()
+	return nil
+}
+
+func (c *Config) normalizePaths() error {
 	var err error
-	if c.StagingDir, err = expandPath(c.StagingDir); err != nil {
-		return fmt.Errorf("staging_dir: %w", err)
+	if c.Paths.StagingDir, err = expandPath(c.Paths.StagingDir); err != nil {
+		return fmt.Errorf("paths.staging_dir: %w", err)
 	}
-	if c.LibraryDir, err = expandPath(c.LibraryDir); err != nil {
-		return fmt.Errorf("library_dir: %w", err)
+	if c.Paths.LibraryDir, err = expandPath(c.Paths.LibraryDir); err != nil {
+		return fmt.Errorf("paths.library_dir: %w", err)
 	}
-	if c.LogDir, err = expandPath(c.LogDir); err != nil {
-		return fmt.Errorf("log_dir: %w", err)
+	if c.Paths.LogDir, err = expandPath(c.Paths.LogDir); err != nil {
+		return fmt.Errorf("paths.log_dir: %w", err)
 	}
-	if c.LogRetentionDays < 0 {
-		return fmt.Errorf("log_retention_days must be >= 0")
+	if c.Paths.ReviewDir, err = expandPath(c.Paths.ReviewDir); err != nil {
+		return fmt.Errorf("paths.review_dir: %w", err)
 	}
-	if strings.TrimSpace(c.OpenSubtitlesCacheDir) == "" {
-		c.OpenSubtitlesCacheDir = defaultOpenSubtitlesCacheDir
+	if strings.TrimSpace(c.Paths.OpenSubtitlesCacheDir) == "" {
+		c.Paths.OpenSubtitlesCacheDir = defaultOpenSubtitlesCacheDir
 	}
-	if c.OpenSubtitlesCacheDir, err = expandPath(c.OpenSubtitlesCacheDir); err != nil {
-		return fmt.Errorf("opensubtitles_cache_dir: %w", err)
+	if c.Paths.OpenSubtitlesCacheDir, err = expandPath(c.Paths.OpenSubtitlesCacheDir); err != nil {
+		return fmt.Errorf("paths.opensubtitles_cache_dir: %w", err)
 	}
-	if strings.TrimSpace(c.WhisperXCacheDir) == "" {
-		c.WhisperXCacheDir = defaultWhisperXCacheDir
+	if strings.TrimSpace(c.Paths.WhisperXCacheDir) == "" {
+		c.Paths.WhisperXCacheDir = defaultWhisperXCacheDir
 	}
-	if c.WhisperXCacheDir, err = expandPath(c.WhisperXCacheDir); err != nil {
-		return fmt.Errorf("whisperx_cache_dir: %w", err)
+	if c.Paths.WhisperXCacheDir, err = expandPath(c.Paths.WhisperXCacheDir); err != nil {
+		return fmt.Errorf("paths.whisperx_cache_dir: %w", err)
 	}
-	if strings.TrimSpace(c.RipCacheDir) == "" {
-		c.RipCacheDir = defaultRipCacheDir()
+	c.Paths.APIBind = strings.TrimSpace(c.Paths.APIBind)
+	if c.Paths.APIBind == "" {
+		c.Paths.APIBind = defaultAPIBind
 	}
-	if c.RipCacheDir, err = expandPath(c.RipCacheDir); err != nil {
-		return fmt.Errorf("rip_cache_dir: %w", err)
-	}
-	if c.RipCacheMaxGiB <= 0 {
-		c.RipCacheMaxGiB = defaultRipCacheMaxGiB
-	}
-	if c.ReviewDir, err = expandPath(c.ReviewDir); err != nil {
-		return fmt.Errorf("review_dir: %w", err)
-	}
-	if c.PlexAuthPath, err = expandPath(c.PlexAuthPath); err != nil {
-		return fmt.Errorf("plex_auth_path: %w", err)
-	}
-	if c.KeyDBPath, err = expandPath(c.KeyDBPath); err != nil {
-		return fmt.Errorf("keydb_path: %w", err)
-	}
-	if strings.TrimSpace(c.IdentificationOverridesPath) == "" {
-		c.IdentificationOverridesPath = defaultIdentificationOverridesPath
-	}
-	if c.IdentificationOverridesPath, err = expandPath(c.IdentificationOverridesPath); err != nil {
-		return fmt.Errorf("identification_overrides_path: %w", err)
-	}
-	if strings.TrimSpace(c.KeyDBDownloadURL) == "" {
-		c.KeyDBDownloadURL = defaultKeyDBDownloadURL
-	}
-	c.KeyDBDownloadURL = strings.TrimSpace(c.KeyDBDownloadURL)
-	if c.KeyDBDownloadTimeout <= 0 {
-		c.KeyDBDownloadTimeout = defaultKeyDBDownloadTimeout
-	}
-	c.APIBind = strings.TrimSpace(c.APIBind)
-	if c.APIBind == "" {
-		c.APIBind = defaultAPIBind
-	}
+	return nil
+}
 
-	c.LogFormat = strings.ToLower(strings.TrimSpace(c.LogFormat))
-	switch c.LogFormat {
-	case "", "console":
-		c.LogFormat = "console"
-	case "json":
-	default:
-		if c.LogFormat != "json" {
-			return fmt.Errorf("log_format: unsupported value %q", c.LogFormat)
-		}
-	}
-
-	c.LogLevel = strings.ToLower(strings.TrimSpace(c.LogLevel))
-	if c.LogLevel == "" {
-		c.LogLevel = defaultLogLevel
-	}
-
-	if c.TMDBAPIKey == "" {
+func (c *Config) normalizeTMDB() error {
+	if c.TMDB.APIKey == "" {
 		if value, ok := os.LookupEnv("TMDB_API_KEY"); ok {
-			c.TMDBAPIKey = value
+			c.TMDB.APIKey = value
 		}
 	}
-
-	c.WhisperXVADMethod = strings.ToLower(strings.TrimSpace(c.WhisperXVADMethod))
-	if c.WhisperXVADMethod == "" {
-		c.WhisperXVADMethod = "silero"
+	c.TMDB.BaseURL = strings.TrimSpace(c.TMDB.BaseURL)
+	if c.TMDB.BaseURL == "" {
+		c.TMDB.BaseURL = defaultTMDBBaseURL
 	}
-	c.WhisperXHuggingFaceToken = strings.TrimSpace(c.WhisperXHuggingFaceToken)
-	if c.WhisperXHuggingFaceToken == "" {
+	return nil
+}
+
+func (c *Config) normalizePlex() error {
+	var err error
+	if c.Plex.AuthPath, err = expandPath(c.Plex.AuthPath); err != nil {
+		return fmt.Errorf("plex.auth_path: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) normalizeSubtitles() error {
+	c.Subtitles.WhisperXVADMethod = strings.ToLower(strings.TrimSpace(c.Subtitles.WhisperXVADMethod))
+	if c.Subtitles.WhisperXVADMethod == "" {
+		c.Subtitles.WhisperXVADMethod = "silero"
+	}
+	c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(c.Subtitles.WhisperXHuggingFace)
+	if c.Subtitles.WhisperXHuggingFace == "" {
 		if value, ok := os.LookupEnv("HUGGING_FACE_HUB_TOKEN"); ok {
-			c.WhisperXHuggingFaceToken = strings.TrimSpace(value)
+			c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(value)
 		} else if value, ok := os.LookupEnv("HF_TOKEN"); ok {
-			c.WhisperXHuggingFaceToken = strings.TrimSpace(value)
+			c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(value)
 		}
 	}
-
-	c.OpenSubtitlesAPIKey = strings.TrimSpace(c.OpenSubtitlesAPIKey)
-	if c.OpenSubtitlesAPIKey == "" {
+	c.Subtitles.OpenSubtitlesAPIKey = strings.TrimSpace(c.Subtitles.OpenSubtitlesAPIKey)
+	if c.Subtitles.OpenSubtitlesAPIKey == "" {
 		if value, ok := os.LookupEnv("OPENSUBTITLES_API_KEY"); ok {
-			c.OpenSubtitlesAPIKey = strings.TrimSpace(value)
+			c.Subtitles.OpenSubtitlesAPIKey = strings.TrimSpace(value)
 		}
 	}
-	c.OpenSubtitlesUserAgent = strings.TrimSpace(c.OpenSubtitlesUserAgent)
-	if c.OpenSubtitlesUserAgent == "" {
-		c.OpenSubtitlesUserAgent = defaultOpenSubtitlesUserAgent
+	c.Subtitles.OpenSubtitlesUserAgent = strings.TrimSpace(c.Subtitles.OpenSubtitlesUserAgent)
+	if c.Subtitles.OpenSubtitlesUserAgent == "" {
+		c.Subtitles.OpenSubtitlesUserAgent = defaultOpenSubtitlesUserAgent
 	}
-	c.OpenSubtitlesUserToken = strings.TrimSpace(c.OpenSubtitlesUserToken)
-	if c.OpenSubtitlesUserToken == "" {
+	c.Subtitles.OpenSubtitlesUserToken = strings.TrimSpace(c.Subtitles.OpenSubtitlesUserToken)
+	if c.Subtitles.OpenSubtitlesUserToken == "" {
 		if value, ok := os.LookupEnv("OPENSUBTITLES_USER_TOKEN"); ok {
-			c.OpenSubtitlesUserToken = strings.TrimSpace(value)
+			c.Subtitles.OpenSubtitlesUserToken = strings.TrimSpace(value)
 		}
 	}
-	if len(c.OpenSubtitlesLanguages) == 0 {
-		c.OpenSubtitlesLanguages = []string{"en"}
+	if len(c.Subtitles.OpenSubtitlesLanguages) == 0 {
+		c.Subtitles.OpenSubtitlesLanguages = []string{"en"}
 	} else {
-		langs := make([]string, 0, len(c.OpenSubtitlesLanguages))
-		seen := make(map[string]struct{}, len(c.OpenSubtitlesLanguages))
-		for _, lang := range c.OpenSubtitlesLanguages {
+		langs := make([]string, 0, len(c.Subtitles.OpenSubtitlesLanguages))
+		seen := make(map[string]struct{}, len(c.Subtitles.OpenSubtitlesLanguages))
+		for _, lang := range c.Subtitles.OpenSubtitlesLanguages {
 			normalized := strings.ToLower(strings.TrimSpace(lang))
 			if normalized == "" {
 				continue
@@ -395,197 +475,304 @@ func (c *Config) normalize() error {
 		if len(langs) == 0 {
 			langs = []string{"en"}
 		}
-		c.OpenSubtitlesLanguages = langs
+		c.Subtitles.OpenSubtitlesLanguages = langs
 	}
-
-	if !c.PresetDeciderEnabled && c.DeepSeekPresetDeciderEnabled {
-		c.PresetDeciderEnabled = true
-	}
-	c.PresetDeciderBaseURL = strings.TrimSpace(c.PresetDeciderBaseURL)
-	if c.PresetDeciderBaseURL == "" {
-		c.PresetDeciderBaseURL = defaultPresetDeciderBaseURL
-	}
-	c.PresetDeciderModel = strings.TrimSpace(c.PresetDeciderModel)
-	if c.PresetDeciderModel == "" {
-		c.PresetDeciderModel = defaultPresetDeciderModel
-	}
-	c.PresetDeciderReferer = strings.TrimSpace(c.PresetDeciderReferer)
-	if c.PresetDeciderReferer == "" {
-		c.PresetDeciderReferer = defaultPresetDeciderReferer
-	}
-	c.PresetDeciderTitle = strings.TrimSpace(c.PresetDeciderTitle)
-	if c.PresetDeciderTitle == "" {
-		c.PresetDeciderTitle = defaultPresetDeciderTitle
-	}
-	c.PresetDeciderAPIKey = strings.TrimSpace(c.PresetDeciderAPIKey)
-	if c.PresetDeciderAPIKey == "" {
-		if value, ok := os.LookupEnv("PRESET_DECIDER_API_KEY"); ok {
-			c.PresetDeciderAPIKey = strings.TrimSpace(value)
-		} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
-			c.PresetDeciderAPIKey = strings.TrimSpace(value)
-		} else if strings.TrimSpace(c.DeepSeekAPIKey) != "" {
-			c.PresetDeciderAPIKey = strings.TrimSpace(c.DeepSeekAPIKey)
-		} else if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
-			c.PresetDeciderAPIKey = strings.TrimSpace(value)
-		}
-	}
-
-	c.CommentaryDetectionBaseURL = strings.TrimSpace(c.CommentaryDetectionBaseURL)
-	if c.CommentaryDetectionBaseURL == "" {
-		c.CommentaryDetectionBaseURL = c.PresetDeciderBaseURL
-	}
-	if c.CommentaryDetectionBaseURL == "" {
-		c.CommentaryDetectionBaseURL = defaultPresetDeciderBaseURL
-	}
-
-	c.CommentaryDetectionModel = strings.TrimSpace(c.CommentaryDetectionModel)
-	if c.CommentaryDetectionModel == "" {
-		c.CommentaryDetectionModel = c.PresetDeciderModel
-	}
-	if c.CommentaryDetectionModel == "" {
-		c.CommentaryDetectionModel = defaultPresetDeciderModel
-	}
-
-	c.CommentaryDetectionReferer = strings.TrimSpace(c.CommentaryDetectionReferer)
-	if c.CommentaryDetectionReferer == "" {
-		c.CommentaryDetectionReferer = c.PresetDeciderReferer
-	}
-	if c.CommentaryDetectionReferer == "" {
-		c.CommentaryDetectionReferer = defaultPresetDeciderReferer
-	}
-
-	c.CommentaryDetectionTitle = strings.TrimSpace(c.CommentaryDetectionTitle)
-	if c.CommentaryDetectionTitle == "" {
-		c.CommentaryDetectionTitle = defaultCommentaryDetectionTitle
-	}
-
-	c.CommentaryDetectionAPIKey = strings.TrimSpace(c.CommentaryDetectionAPIKey)
-	if c.CommentaryDetectionAPIKey == "" {
-		c.CommentaryDetectionAPIKey = c.PresetDeciderAPIKey
-	}
-	if c.CommentaryDetectionAPIKey == "" {
-		if value, ok := os.LookupEnv("COMMENTARY_DETECTION_API_KEY"); ok {
-			c.CommentaryDetectionAPIKey = strings.TrimSpace(value)
-		} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
-			c.CommentaryDetectionAPIKey = strings.TrimSpace(value)
-		}
-	}
-
-	c.DeepSeekAPIKey = strings.TrimSpace(c.DeepSeekAPIKey)
-	if c.DeepSeekAPIKey == "" {
-		if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
-			c.DeepSeekAPIKey = strings.TrimSpace(value)
-		}
-	}
-
-	c.TMDBBaseURL = strings.TrimSpace(c.TMDBBaseURL)
-	if c.TMDBBaseURL == "" {
-		c.TMDBBaseURL = defaultTMDBBaseURL
-	}
-
 	return nil
+}
+
+func (c *Config) normalizeRipCache() error {
+	var err error
+	if strings.TrimSpace(c.RipCache.Dir) == "" {
+		c.RipCache.Dir = defaultRipCacheDir()
+	}
+	if c.RipCache.Dir, err = expandPath(c.RipCache.Dir); err != nil {
+		return fmt.Errorf("rip_cache.dir: %w", err)
+	}
+	if c.RipCache.MaxGiB <= 0 {
+		c.RipCache.MaxGiB = defaultRipCacheMaxGiB
+	}
+	return nil
+}
+
+func (c *Config) normalizeMakeMKV() error {
+	var err error
+	if c.MakeMKV.KeyDBPath, err = expandPath(c.MakeMKV.KeyDBPath); err != nil {
+		return fmt.Errorf("makemkv.keydb_path: %w", err)
+	}
+	if strings.TrimSpace(c.MakeMKV.IdentificationOverridesPath) == "" {
+		c.MakeMKV.IdentificationOverridesPath = defaultIdentificationOverridesPath
+	}
+	if c.MakeMKV.IdentificationOverridesPath, err = expandPath(c.MakeMKV.IdentificationOverridesPath); err != nil {
+		return fmt.Errorf("makemkv.identification_overrides_path: %w", err)
+	}
+	if strings.TrimSpace(c.MakeMKV.KeyDBDownloadURL) == "" {
+		c.MakeMKV.KeyDBDownloadURL = defaultKeyDBDownloadURL
+	}
+	c.MakeMKV.KeyDBDownloadURL = strings.TrimSpace(c.MakeMKV.KeyDBDownloadURL)
+	if c.MakeMKV.KeyDBDownloadTimeout <= 0 {
+		c.MakeMKV.KeyDBDownloadTimeout = defaultKeyDBDownloadTimeout
+	}
+	return nil
+}
+
+func (c *Config) normalizePresetDecider() error {
+	c.PresetDecider.BaseURL = strings.TrimSpace(c.PresetDecider.BaseURL)
+	if c.PresetDecider.BaseURL == "" {
+		c.PresetDecider.BaseURL = defaultPresetDeciderBaseURL
+	}
+	c.PresetDecider.Model = strings.TrimSpace(c.PresetDecider.Model)
+	if c.PresetDecider.Model == "" {
+		c.PresetDecider.Model = defaultPresetDeciderModel
+	}
+	c.PresetDecider.Referer = strings.TrimSpace(c.PresetDecider.Referer)
+	if c.PresetDecider.Referer == "" {
+		c.PresetDecider.Referer = defaultPresetDeciderReferer
+	}
+	c.PresetDecider.Title = strings.TrimSpace(c.PresetDecider.Title)
+	if c.PresetDecider.Title == "" {
+		c.PresetDecider.Title = defaultPresetDeciderTitle
+	}
+	c.PresetDecider.APIKey = strings.TrimSpace(c.PresetDecider.APIKey)
+	if c.PresetDecider.APIKey == "" {
+		if value, ok := os.LookupEnv("PRESET_DECIDER_API_KEY"); ok {
+			c.PresetDecider.APIKey = strings.TrimSpace(value)
+		} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
+			c.PresetDecider.APIKey = strings.TrimSpace(value)
+		} else if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
+			c.PresetDecider.APIKey = strings.TrimSpace(value)
+		}
+	}
+	return nil
+}
+
+func (c *Config) normalizeCommentaryDetection() error {
+	c.CommentaryDetection.BaseURL = strings.TrimSpace(c.CommentaryDetection.BaseURL)
+	if c.CommentaryDetection.BaseURL == "" {
+		c.CommentaryDetection.BaseURL = c.PresetDecider.BaseURL
+	}
+	if c.CommentaryDetection.BaseURL == "" {
+		c.CommentaryDetection.BaseURL = defaultPresetDeciderBaseURL
+	}
+	c.CommentaryDetection.Model = strings.TrimSpace(c.CommentaryDetection.Model)
+	if c.CommentaryDetection.Model == "" {
+		c.CommentaryDetection.Model = c.PresetDecider.Model
+	}
+	if c.CommentaryDetection.Model == "" {
+		c.CommentaryDetection.Model = defaultPresetDeciderModel
+	}
+	c.CommentaryDetection.Referer = strings.TrimSpace(c.CommentaryDetection.Referer)
+	if c.CommentaryDetection.Referer == "" {
+		c.CommentaryDetection.Referer = c.PresetDecider.Referer
+	}
+	if c.CommentaryDetection.Referer == "" {
+		c.CommentaryDetection.Referer = defaultPresetDeciderReferer
+	}
+	c.CommentaryDetection.Title = strings.TrimSpace(c.CommentaryDetection.Title)
+	if c.CommentaryDetection.Title == "" {
+		c.CommentaryDetection.Title = defaultCommentaryDetectionTitle
+	}
+	c.CommentaryDetection.APIKey = strings.TrimSpace(c.CommentaryDetection.APIKey)
+	if c.CommentaryDetection.APIKey == "" {
+		c.CommentaryDetection.APIKey = c.PresetDecider.APIKey
+	}
+	if c.CommentaryDetection.APIKey == "" {
+		if value, ok := os.LookupEnv("COMMENTARY_DETECTION_API_KEY"); ok {
+			c.CommentaryDetection.APIKey = strings.TrimSpace(value)
+		} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
+			c.CommentaryDetection.APIKey = strings.TrimSpace(value)
+		}
+	}
+	return nil
+}
+
+func (c *Config) normalizeLogging() {
+	c.Logging.Format = strings.ToLower(strings.TrimSpace(c.Logging.Format))
+	switch c.Logging.Format {
+	case "", "console":
+		c.Logging.Format = "console"
+	case "json":
+	default:
+		c.Logging.Format = "console"
+	}
+	c.Logging.Level = strings.ToLower(strings.TrimSpace(c.Logging.Level))
+	if c.Logging.Level == "" {
+		c.Logging.Level = defaultLogLevel
+	}
+	if c.Logging.RetentionDays < 0 {
+		c.Logging.RetentionDays = 0
+	}
 }
 
 // Validate ensures the configuration is usable.
 func (c *Config) Validate() error {
-	if c.TMDBAPIKey == "" {
+	if err := c.validateTMDB(); err != nil {
+		return err
+	}
+	if err := c.validateLibrary(); err != nil {
+		return err
+	}
+	if err := c.validatePlex(); err != nil {
+		return err
+	}
+	if err := c.validateWorkflow(); err != nil {
+		return err
+	}
+	if err := c.validateMakeMKV(); err != nil {
+		return err
+	}
+	if err := c.validateSubtitles(); err != nil {
+		return err
+	}
+	if err := c.validateRipCache(); err != nil {
+		return err
+	}
+	if err := c.validatePresetDecider(); err != nil {
+		return err
+	}
+	if err := c.validateCommentaryDetection(); err != nil {
+		return err
+	}
+	if err := c.validateNotifications(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Config) validateTMDB() error {
+	if c.TMDB.APIKey == "" {
 		defaultPath, err := DefaultConfigPath()
 		if err != nil {
 			defaultPath = "~/.config/spindle/config.toml"
 		}
-		return fmt.Errorf("tmdb_api_key is required. Set TMDB_API_KEY env var or edit %s (create with 'spindle config init')", defaultPath)
+		return fmt.Errorf("tmdb.api_key is required. Set TMDB_API_KEY env var or edit %s (create with 'spindle config init')", defaultPath)
 	}
-	if c.MoviesDir == "" {
-		return errors.New("movies_dir must be set")
+	if c.TMDB.ConfidenceThreshold < 0 || c.TMDB.ConfidenceThreshold > 1 {
+		return errors.New("tmdb.confidence_threshold must be between 0 and 1")
 	}
-	if c.TVDir == "" {
-		return errors.New("tv_dir must be set")
+	return nil
+}
+
+func (c *Config) validateLibrary() error {
+	if c.Library.MoviesDir == "" {
+		return errors.New("library.movies_dir must be set")
 	}
-	if c.MoviesLibrary == "" {
-		return errors.New("movies_library must be set")
+	if c.Library.TVDir == "" {
+		return errors.New("library.tv_dir must be set")
 	}
-	if c.TVLibrary == "" {
-		return errors.New("tv_library must be set")
+	return nil
+}
+
+func (c *Config) validatePlex() error {
+	if c.Plex.MoviesLibrary == "" {
+		return errors.New("plex.movies_library must be set")
 	}
+	if c.Plex.TVLibrary == "" {
+		return errors.New("plex.tv_library must be set")
+	}
+	return nil
+}
+
+func (c *Config) validateWorkflow() error {
 	if err := ensurePositiveMap(map[string]int{
-		"makemkv_rip_timeout":  c.MakeMKVRipTimeout,
-		"makemkv_info_timeout": c.MakeMKVInfoTimeout,
-		"ntfy_request_timeout": c.NtfyRequestTimeout,
-		"disc_monitor_timeout": c.DiscMonitorTimeout,
-		"queue_poll_interval":  c.QueuePollInterval,
-		"error_retry_interval": c.ErrorRetryInterval,
+		"makemkv.rip_timeout":           c.MakeMKV.RipTimeout,
+		"makemkv.info_timeout":          c.MakeMKV.InfoTimeout,
+		"notifications.request_timeout": c.Notifications.RequestTimeout,
+		"workflow.disc_monitor_timeout": c.Workflow.DiscMonitorTimeout,
+		"workflow.queue_poll_interval":  c.Workflow.QueuePollInterval,
+		"workflow.error_retry_interval": c.Workflow.ErrorRetryInterval,
 	}); err != nil {
 		return err
 	}
-	if c.WorkflowHeartbeatInterval <= 0 {
-		return errors.New("workflow_heartbeat_interval must be positive")
+	if c.Workflow.HeartbeatInterval <= 0 {
+		return errors.New("workflow.heartbeat_interval must be positive")
 	}
-	if c.WorkflowHeartbeatTimeout <= 0 {
-		return errors.New("workflow_heartbeat_timeout must be positive")
+	if c.Workflow.HeartbeatTimeout <= 0 {
+		return errors.New("workflow.heartbeat_timeout must be positive")
 	}
-	if c.WorkflowHeartbeatTimeout <= c.WorkflowHeartbeatInterval {
-		return errors.New("workflow_heartbeat_timeout must be greater than workflow_heartbeat_interval")
+	if c.Workflow.HeartbeatTimeout <= c.Workflow.HeartbeatInterval {
+		return errors.New("workflow.heartbeat_timeout must be greater than workflow.heartbeat_interval")
 	}
-	if c.TMDBConfidenceThreshold < 0 || c.TMDBConfidenceThreshold > 1 {
-		return errors.New("tmdb_confidence_threshold must be between 0 and 1")
+	return nil
+}
+
+func (c *Config) validateMakeMKV() error {
+	if strings.TrimSpace(c.MakeMKV.KeyDBDownloadURL) == "" {
+		return errors.New("makemkv.keydb_download_url must be set")
 	}
-	if strings.TrimSpace(c.KeyDBDownloadURL) == "" {
-		return errors.New("keydb_download_url must be set")
+	if c.MakeMKV.KeyDBDownloadTimeout <= 0 {
+		return errors.New("makemkv.keydb_download_timeout must be positive (seconds)")
 	}
-	if c.KeyDBDownloadTimeout <= 0 {
-		return errors.New("keydb_download_timeout must be positive (seconds)")
-	}
-	if c.OpenSubtitlesEnabled {
-		if strings.TrimSpace(c.OpenSubtitlesAPIKey) == "" {
-			return errors.New("opensubtitles_api_key must be set when opensubtitles_enabled is true")
+	return nil
+}
+
+func (c *Config) validateSubtitles() error {
+	if c.Subtitles.OpenSubtitlesEnabled {
+		if strings.TrimSpace(c.Subtitles.OpenSubtitlesAPIKey) == "" {
+			return errors.New("subtitles.opensubtitles_api_key must be set when subtitles.opensubtitles_enabled is true")
 		}
-		if strings.TrimSpace(c.OpenSubtitlesUserAgent) == "" {
-			return errors.New("opensubtitles_user_agent must be set when opensubtitles_enabled is true")
+		if strings.TrimSpace(c.Subtitles.OpenSubtitlesUserAgent) == "" {
+			return errors.New("subtitles.opensubtitles_user_agent must be set when subtitles.opensubtitles_enabled is true")
 		}
-		if len(c.OpenSubtitlesLanguages) == 0 {
-			return errors.New("opensubtitles_languages must include at least one language when opensubtitles_enabled is true")
-		}
-	}
-	if c.RipCacheEnabled {
-		if strings.TrimSpace(c.RipCacheDir) == "" {
-			return errors.New("rip_cache_dir must be set when rip_cache_enabled is true")
-		}
-		if c.RipCacheMaxGiB <= 0 {
-			return errors.New("rip_cache_max_gib must be positive when rip_cache_enabled is true")
+		if len(c.Subtitles.OpenSubtitlesLanguages) == 0 {
+			return errors.New("subtitles.opensubtitles_languages must include at least one language when subtitles.opensubtitles_enabled is true")
 		}
 	}
-	if c.PresetDeciderEnabled && strings.TrimSpace(c.PresetDeciderAPIKey) == "" {
-		return errors.New("preset_decider_api_key must be set when preset_decider_enabled is true (or set OPENROUTER_API_KEY)")
+	return nil
+}
+
+func (c *Config) validateRipCache() error {
+	if c.RipCache.Enabled {
+		if strings.TrimSpace(c.RipCache.Dir) == "" {
+			return errors.New("rip_cache.dir must be set when rip_cache.enabled is true")
+		}
+		if c.RipCache.MaxGiB <= 0 {
+			return errors.New("rip_cache.max_gib must be positive when rip_cache.enabled is true")
+		}
 	}
-	if c.CommentaryDetectionEnabled && strings.TrimSpace(c.CommentaryDetectionAPIKey) == "" {
-		return errors.New("commentary_detection_api_key must be set when commentary_detection_enabled is true (or set OPENROUTER_API_KEY)")
+	return nil
+}
+
+func (c *Config) validatePresetDecider() error {
+	if c.PresetDecider.Enabled && strings.TrimSpace(c.PresetDecider.APIKey) == "" {
+		return errors.New("preset_decider.api_key must be set when preset_decider.enabled is true (or set OPENROUTER_API_KEY)")
 	}
-	if c.NotifyMinRipSeconds < 0 {
-		return errors.New("notify_min_rip_seconds must be >= 0")
+	return nil
+}
+
+func (c *Config) validateCommentaryDetection() error {
+	if c.CommentaryDetection.Enabled && strings.TrimSpace(c.CommentaryDetection.APIKey) == "" {
+		return errors.New("commentary_detection.api_key must be set when commentary_detection.enabled is true (or set OPENROUTER_API_KEY)")
 	}
-	if c.NotifyQueueMinItems < 1 {
-		return errors.New("notify_queue_min_items must be >= 1")
+	return nil
+}
+
+func (c *Config) validateNotifications() error {
+	if c.Notifications.MinRipSeconds < 0 {
+		return errors.New("notifications.min_rip_seconds must be >= 0")
 	}
-	if c.NotifyDedupWindowSeconds < 0 {
-		return errors.New("notify_dedup_window_seconds must be >= 0")
+	if c.Notifications.QueueMinItems < 1 {
+		return errors.New("notifications.queue_min_items must be >= 1")
+	}
+	if c.Notifications.DedupWindowSeconds < 0 {
+		return errors.New("notifications.dedup_window_seconds must be >= 0")
 	}
 	return nil
 }
 
 // EnsureDirectories creates required directories for daemon operation.
 func (c *Config) EnsureDirectories() error {
-	for _, dir := range []string{c.StagingDir, c.LibraryDir, c.LogDir, c.ReviewDir} {
+	for _, dir := range []string{c.Paths.StagingDir, c.Paths.LibraryDir, c.Paths.LogDir, c.Paths.ReviewDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory %q: %w", dir, err)
 		}
 	}
-	if c.RipCacheEnabled && strings.TrimSpace(c.RipCacheDir) != "" {
-		if err := os.MkdirAll(c.RipCacheDir, 0o755); err != nil {
-			return fmt.Errorf("create rip cache directory %q: %w", c.RipCacheDir, err)
+	if c.RipCache.Enabled && strings.TrimSpace(c.RipCache.Dir) != "" {
+		if err := os.MkdirAll(c.RipCache.Dir, 0o755); err != nil {
+			return fmt.Errorf("create rip cache directory %q: %w", c.RipCache.Dir, err)
 		}
 	}
-	if strings.TrimSpace(c.PlexAuthPath) != "" {
-		authDir := filepath.Dir(c.PlexAuthPath)
+	if strings.TrimSpace(c.Plex.AuthPath) != "" {
+		authDir := filepath.Dir(c.Plex.AuthPath)
 		if err := os.MkdirAll(authDir, 0o755); err != nil {
 			return fmt.Errorf("create directory %q: %w", authDir, err)
 		}

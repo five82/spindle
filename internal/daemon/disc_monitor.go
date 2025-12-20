@@ -71,17 +71,17 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger)
 		return nil
 	}
 
-	device := strings.TrimSpace(cfg.OpticalDrive)
+	device := strings.TrimSpace(cfg.MakeMKV.OpticalDrive)
 	if device == "" {
 		return nil
 	}
 
-	poll := time.Duration(cfg.DiscMonitorTimeout) * time.Second
+	poll := time.Duration(cfg.Workflow.DiscMonitorTimeout) * time.Second
 	if poll <= 0 {
 		poll = 5 * time.Second
 	}
 
-	scanTimeout := time.Duration(cfg.MakeMKVInfoTimeout) * time.Second
+	scanTimeout := time.Duration(cfg.MakeMKV.InfoTimeout) * time.Second
 	if scanTimeout <= 0 {
 		scanTimeout = 300 * time.Second
 	}

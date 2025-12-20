@@ -291,7 +291,7 @@ func TestIdentifierHealthReady(t *testing.T) {
 
 func TestIdentifierHealthMissingAPIKey(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
-	cfg.TMDBAPIKey = ""
+	cfg.TMDB.APIKey = ""
 	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), &stubSearcher{}, &stubDiscScanner{}, nil)

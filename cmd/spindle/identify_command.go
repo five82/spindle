@@ -48,12 +48,12 @@ Examples:
 				device = strings.TrimSpace(args[0])
 			}
 			if device == "" {
-				device = cfg.OpticalDrive
+				device = cfg.MakeMKV.OpticalDrive
 			}
 			if device == "" {
 				return fmt.Errorf("no device specified and no optical_drive configured")
 			}
-			cfg.OpticalDrive = device
+			cfg.MakeMKV.OpticalDrive = device
 
 			// Setup logging
 			logLevel := "info"
@@ -62,7 +62,7 @@ Examples:
 			}
 			logger, err := logging.New(logging.Options{
 				Level:       logLevel,
-				Format:      cfg.LogFormat,
+				Format:      cfg.Logging.Format,
 				OutputPaths: []string{"stdout"},
 				Development: verbose,
 			})
@@ -71,7 +71,7 @@ Examples:
 			}
 
 			// Create components for identification
-			tmdbClient, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
+			tmdbClient, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 			if err != nil {
 				logger.Warn("tmdb client initialization failed", logging.Error(err))
 				return fmt.Errorf("create TMDB client: %w", err)

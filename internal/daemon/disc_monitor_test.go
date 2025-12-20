@@ -33,12 +33,12 @@ func testMonitorConfig(t *testing.T) *config.Config {
 	t.Helper()
 	base := t.TempDir()
 	cfg := config.Default()
-	cfg.TMDBAPIKey = "test-key"
-	cfg.StagingDir = base + "/staging"
-	cfg.LibraryDir = base + "/library"
-	cfg.LogDir = base + "/logs"
-	cfg.ReviewDir = base + "/review"
-	cfg.DiscMonitorTimeout = 1
+	cfg.TMDB.APIKey = "test-key"
+	cfg.Paths.StagingDir = base + "/staging"
+	cfg.Paths.LibraryDir = base + "/library"
+	cfg.Paths.LogDir = base + "/logs"
+	cfg.Paths.ReviewDir = base + "/review"
+	cfg.Workflow.DiscMonitorTimeout = 1
 	return &cfg
 }
 

@@ -49,7 +49,7 @@ func (s *stubStage) HealthCheck(context.Context) stage.Health {
 
 func TestManagerProcessesItems(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
-	cfg.QueuePollInterval = 0
+	cfg.Workflow.QueuePollInterval = 0
 	store := testsupport.MustOpenStore(t, cfg)
 
 	identifier := newStubStage("identifier")
@@ -115,7 +115,7 @@ func TestManagerProcessesItems(t *testing.T) {
 
 func TestManagerStatusIncludesStageHealth(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
-	cfg.QueuePollInterval = 0
+	cfg.Workflow.QueuePollInterval = 0
 	store := testsupport.MustOpenStore(t, cfg)
 
 	handler := newStubStage("identifier")
@@ -139,7 +139,7 @@ func TestManagerStatusIncludesStageHealth(t *testing.T) {
 
 func TestManagerValidationErrorTriggersReview(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
-	cfg.QueuePollInterval = 0
+	cfg.Workflow.QueuePollInterval = 0
 	store := testsupport.MustOpenStore(t, cfg)
 
 	stageErr := services.Wrap(
@@ -201,7 +201,7 @@ func TestManagerValidationErrorTriggersReview(t *testing.T) {
 
 func TestManagerFailureDefaultsToFailed(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
-	cfg.QueuePollInterval = 0
+	cfg.Workflow.QueuePollInterval = 0
 	store := testsupport.MustOpenStore(t, cfg)
 
 	failing := newStubStage("ripper")

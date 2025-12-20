@@ -32,9 +32,9 @@ func CheckAuth(ctx context.Context, cfg *config.Config, client HTTPDoer, provide
 		return errors.New("token provider is nil")
 	}
 
-	configuredURL := strings.TrimRight(strings.TrimSpace(cfg.PlexURL), "/")
+	configuredURL := strings.TrimRight(strings.TrimSpace(cfg.Plex.URL), "/")
 	if configuredURL == "" {
-		return errors.New("plex_url not configured")
+		return errors.New("plex.url not configured")
 	}
 
 	var requester HTTPDoer

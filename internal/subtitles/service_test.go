@@ -28,7 +28,7 @@ func TestServiceGenerateProducesStableTSSRT_CPUMode(t *testing.T) {
 	stub := setupInspectAndStub(t, 120, false)
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
+	cfg.Subtitles.Enabled = true
 	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
 
 	result, err := service.Generate(context.Background(), GenerateRequest{
@@ -86,8 +86,8 @@ func TestServiceGenerateUsesCUDAArgsWhenEnabled(t *testing.T) {
 	stub := setupInspectAndStub(t, 60, true)
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
-	cfg.WhisperXCUDAEnabled = true
+	cfg.Subtitles.Enabled = true
+	cfg.Subtitles.WhisperXCUDAEnabled = true
 	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
 
 	if _, err := service.Generate(context.Background(), GenerateRequest{
@@ -119,9 +119,9 @@ func TestServiceGenerateRequiresTokenForPyannote(t *testing.T) {
 	stub := setupInspectAndStub(t, 30, false)
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
-	cfg.WhisperXVADMethod = "pyannote"
-	cfg.WhisperXHuggingFaceToken = ""
+	cfg.Subtitles.Enabled = true
+	cfg.Subtitles.WhisperXVADMethod = "pyannote"
+	cfg.Subtitles.WhisperXHuggingFace = ""
 	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
 
 	if _, err := service.Generate(context.Background(), GenerateRequest{
@@ -144,9 +144,9 @@ func TestServiceGeneratePyannoteWithToken(t *testing.T) {
 	stub := setupInspectAndStub(t, 45, false)
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
-	cfg.WhisperXVADMethod = "pyannote"
-	cfg.WhisperXHuggingFaceToken = "token"
+	cfg.Subtitles.Enabled = true
+	cfg.Subtitles.WhisperXVADMethod = "pyannote"
+	cfg.Subtitles.WhisperXHuggingFace = "token"
 	validator := func(ctx context.Context, token string) (tokenValidationResult, error) {
 		if token != "token" {
 			return tokenValidationResult{}, fmt.Errorf("unexpected token: %s", token)
@@ -198,8 +198,8 @@ func TestServiceGenerateUsesTranscriptCache(t *testing.T) {
 	stub := setupInspectAndStub(t, 30, false)
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
-	cfg.WhisperXCacheDir = filepath.Join(tmp, "cache")
+	cfg.Subtitles.Enabled = true
+	cfg.Paths.WhisperXCacheDir = filepath.Join(tmp, "cache")
 	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
 
 	key := "queue-1/s01e01"
@@ -254,8 +254,8 @@ func TestServiceGenerateStoresTranscriptInCache(t *testing.T) {
 	stub := setupInspectAndStub(t, 50, false)
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
-	cfg.WhisperXCacheDir = filepath.Join(tmp, "cache")
+	cfg.Subtitles.Enabled = true
+	cfg.Paths.WhisperXCacheDir = filepath.Join(tmp, "cache")
 	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
 
 	key := "queue-2/s01e02"
@@ -309,9 +309,9 @@ func TestServiceGeneratePyannoteTokenFallbackToSilero(t *testing.T) {
 	stub := setupInspectAndStub(t, 45, false)
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
-	cfg.WhisperXVADMethod = "pyannote"
-	cfg.WhisperXHuggingFaceToken = "bad-token"
+	cfg.Subtitles.Enabled = true
+	cfg.Subtitles.WhisperXVADMethod = "pyannote"
+	cfg.Subtitles.WhisperXHuggingFace = "bad-token"
 	validator := func(ctx context.Context, token string) (tokenValidationResult, error) {
 		if token != "bad-token" {
 			return tokenValidationResult{}, fmt.Errorf("unexpected token: %s", token)
@@ -426,7 +426,7 @@ func TestServiceGenerateFallsBackToWhisperSRT(t *testing.T) {
 	stub.stableTSError = fmt.Errorf("stable-ts boom")
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
+	cfg.Subtitles.Enabled = true
 	service := NewService(&cfg, nil, WithCommandRunner(stub.Runner), WithoutDependencyCheck())
 
 	t.Setenv("SPD_DEBUG_SUBTITLES_KEEP", "1")
@@ -484,11 +484,11 @@ Aligned text
 	}
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
-	cfg.OpenSubtitlesEnabled = true
-	cfg.OpenSubtitlesAPIKey = "k"
-	cfg.OpenSubtitlesUserAgent = "Spindle/test"
-	cfg.OpenSubtitlesLanguages = []string{"en"}
+	cfg.Subtitles.Enabled = true
+	cfg.Subtitles.OpenSubtitlesEnabled = true
+	cfg.Subtitles.OpenSubtitlesAPIKey = "k"
+	cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/test"
+	cfg.Subtitles.OpenSubtitlesLanguages = []string{"en"}
 
 	service := NewService(&cfg, nil,
 		WithCommandRunner(stub.Runner),
@@ -557,11 +557,11 @@ Example text
 	}
 
 	cfg := config.Default()
-	cfg.SubtitlesEnabled = true
-	cfg.OpenSubtitlesEnabled = true
-	cfg.OpenSubtitlesAPIKey = "k"
-	cfg.OpenSubtitlesUserAgent = "Spindle/test"
-	cfg.OpenSubtitlesLanguages = []string{"en"}
+	cfg.Subtitles.Enabled = true
+	cfg.Subtitles.OpenSubtitlesEnabled = true
+	cfg.Subtitles.OpenSubtitlesAPIKey = "k"
+	cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/test"
+	cfg.Subtitles.OpenSubtitlesLanguages = []string{"en"}
 
 	service := NewService(&cfg, nil,
 		WithCommandRunner(stub.Runner),

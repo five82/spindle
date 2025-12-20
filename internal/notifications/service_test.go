@@ -14,7 +14,7 @@ import (
 
 func TestNewServiceReturnsNoopWhenTopicMissing(t *testing.T) {
 	cfg := config.Default()
-	cfg.NtfyTopic = ""
+	cfg.Notifications.NtfyTopic = ""
 	svc := notifications.NewService(&cfg)
 	if err := svc.Publish(context.Background(), notifications.EventRipCompleted, notifications.Payload{"discTitle": "Example"}); err != nil {
 		t.Fatalf("expected noop notifier to return nil, got %v", err)
@@ -132,8 +132,8 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			defer server.Close()
 
 			cfg := config.Default()
-			cfg.NtfyTopic = server.URL
-			cfg.NtfyRequestTimeout = 5
+			cfg.Notifications.NtfyTopic = server.URL
+			cfg.Notifications.RequestTimeout = 5
 
 			svc := notifications.NewService(&cfg)
 			if err := svc.Publish(context.Background(), tc.event, tc.payload); err != nil {
@@ -163,7 +163,7 @@ func TestNtfyServiceIgnoresSuppressedEvents(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	cfg.NtfyTopic = server.URL
+	cfg.Notifications.NtfyTopic = server.URL
 
 	svc := notifications.NewService(&cfg)
 	suppressed := []notifications.Event{
@@ -186,8 +186,8 @@ func TestQueueNotificationsRespectMinimumCount(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	cfg.NtfyTopic = server.URL
-	cfg.NotifyQueueMinItems = 2
+	cfg.Notifications.NtfyTopic = server.URL
+	cfg.Notifications.QueueMinItems = 2
 
 	svc := notifications.NewService(&cfg)
 	// Should suppress because below threshold.

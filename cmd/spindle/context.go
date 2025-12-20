@@ -135,7 +135,7 @@ func wrapDialError(err error, socket string) error {
 func defaultSocketPath() string {
 	cfg, _, _, err := config.Load("")
 	if err == nil {
-		return filepath.Join(cfg.LogDir, "spindle.sock")
+		return filepath.Join(cfg.Paths.LogDir, "spindle.sock")
 	}
 
 	logDir, err2 := config.ExpandPath("~/.local/share/spindle/logs")

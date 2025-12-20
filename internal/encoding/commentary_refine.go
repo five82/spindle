@@ -18,7 +18,7 @@ import (
 )
 
 func (e *Encoder) refineCommentaryTracks(ctx context.Context, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int, logger *slog.Logger) error {
-	if e == nil || e.cfg == nil || e.commentary == nil || !e.cfg.CommentaryDetectionEnabled {
+	if e == nil || e.cfg == nil || e.commentary == nil || !e.cfg.CommentaryDetection.Enabled {
 		return nil
 	}
 	sourcePath = strings.TrimSpace(sourcePath)

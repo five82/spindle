@@ -29,67 +29,67 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	}
 
 	wantStaging := filepath.Join(tempHome, ".local", "share", "spindle", "staging")
-	if cfg.StagingDir != wantStaging {
-		t.Fatalf("unexpected staging dir: got %q want %q", cfg.StagingDir, wantStaging)
+	if cfg.Paths.StagingDir != wantStaging {
+		t.Fatalf("unexpected staging dir: got %q want %q", cfg.Paths.StagingDir, wantStaging)
 	}
-	if cfg.LibraryDir != filepath.Join(tempHome, "library") {
-		t.Fatalf("unexpected library dir: %q", cfg.LibraryDir)
+	if cfg.Paths.LibraryDir != filepath.Join(tempHome, "library") {
+		t.Fatalf("unexpected library dir: %q", cfg.Paths.LibraryDir)
 	}
 	wantPlexAuth := filepath.Join(tempHome, ".config", "spindle", "plex_auth.json")
-	if cfg.PlexAuthPath != wantPlexAuth {
-		t.Fatalf("unexpected plex auth path: got %q want %q", cfg.PlexAuthPath, wantPlexAuth)
+	if cfg.Plex.AuthPath != wantPlexAuth {
+		t.Fatalf("unexpected plex auth path: got %q want %q", cfg.Plex.AuthPath, wantPlexAuth)
 	}
-	if cfg.APIBind != "127.0.0.1:7487" {
-		t.Fatalf("unexpected api bind: %q", cfg.APIBind)
+	if cfg.Paths.APIBind != "127.0.0.1:7487" {
+		t.Fatalf("unexpected api bind: %q", cfg.Paths.APIBind)
 	}
-	if cfg.TMDBAPIKey != "test-key" {
-		t.Fatalf("expected TMDB key from env, got %q", cfg.TMDBAPIKey)
+	if cfg.TMDB.APIKey != "test-key" {
+		t.Fatalf("expected TMDB key from env, got %q", cfg.TMDB.APIKey)
 	}
-	if cfg.TMDBBaseURL != config.Default().TMDBBaseURL {
-		t.Fatalf("unexpected TMDB base url: %q", cfg.TMDBBaseURL)
+	if cfg.TMDB.BaseURL != config.Default().TMDB.BaseURL {
+		t.Fatalf("unexpected TMDB base url: %q", cfg.TMDB.BaseURL)
 	}
-	if cfg.SubtitlesEnabled {
+	if cfg.Subtitles.Enabled {
 		t.Fatal("expected subtitles disabled by default")
 	}
-	if cfg.WhisperXCUDAEnabled {
+	if cfg.Subtitles.WhisperXCUDAEnabled {
 		t.Fatal("expected WhisperX CUDA disabled by default")
 	}
-	if cfg.WhisperXVADMethod != "silero" {
-		t.Fatalf("expected WhisperX VAD default to silero, got %q", cfg.WhisperXVADMethod)
+	if cfg.Subtitles.WhisperXVADMethod != "silero" {
+		t.Fatalf("expected WhisperX VAD default to silero, got %q", cfg.Subtitles.WhisperXVADMethod)
 	}
-	if cfg.WhisperXHuggingFaceToken != "" {
-		t.Fatalf("expected WhisperX Hugging Face token to be empty by default, got %q", cfg.WhisperXHuggingFaceToken)
+	if cfg.Subtitles.WhisperXHuggingFace != "" {
+		t.Fatalf("expected WhisperX Hugging Face token to be empty by default, got %q", cfg.Subtitles.WhisperXHuggingFace)
 	}
-	if cfg.OpenSubtitlesEnabled {
+	if cfg.Subtitles.OpenSubtitlesEnabled {
 		t.Fatal("expected OpenSubtitles integration disabled by default")
 	}
-	if cfg.OpenSubtitlesAPIKey != "" {
-		t.Fatalf("expected OpenSubtitles API key to be empty by default, got %q", cfg.OpenSubtitlesAPIKey)
+	if cfg.Subtitles.OpenSubtitlesAPIKey != "" {
+		t.Fatalf("expected OpenSubtitles API key to be empty by default, got %q", cfg.Subtitles.OpenSubtitlesAPIKey)
 	}
-	if cfg.OpenSubtitlesUserToken != "" {
-		t.Fatalf("expected OpenSubtitles user token to be empty by default, got %q", cfg.OpenSubtitlesUserToken)
+	if cfg.Subtitles.OpenSubtitlesUserToken != "" {
+		t.Fatalf("expected OpenSubtitles user token to be empty by default, got %q", cfg.Subtitles.OpenSubtitlesUserToken)
 	}
-	if cfg.OpenSubtitlesUserAgent == "" {
+	if cfg.Subtitles.OpenSubtitlesUserAgent == "" {
 		t.Fatalf("expected OpenSubtitles user agent to have default value")
 	}
-	if len(cfg.OpenSubtitlesLanguages) == 0 {
+	if len(cfg.Subtitles.OpenSubtitlesLanguages) == 0 {
 		t.Fatalf("expected OpenSubtitles languages to include defaults")
 	}
-	if cfg.OpenSubtitlesLanguages[0] != "en" {
-		t.Fatalf("expected OpenSubtitles default language to be en, got %v", cfg.OpenSubtitlesLanguages)
+	if cfg.Subtitles.OpenSubtitlesLanguages[0] != "en" {
+		t.Fatalf("expected OpenSubtitles default language to be en, got %v", cfg.Subtitles.OpenSubtitlesLanguages)
 	}
-	if cfg.WorkflowHeartbeatInterval != config.Default().WorkflowHeartbeatInterval {
-		t.Fatalf("unexpected heartbeat interval: %d", cfg.WorkflowHeartbeatInterval)
+	if cfg.Workflow.HeartbeatInterval != config.Default().Workflow.HeartbeatInterval {
+		t.Fatalf("unexpected heartbeat interval: %d", cfg.Workflow.HeartbeatInterval)
 	}
-	if cfg.WorkflowHeartbeatTimeout != config.Default().WorkflowHeartbeatTimeout {
-		t.Fatalf("unexpected heartbeat timeout: %d", cfg.WorkflowHeartbeatTimeout)
+	if cfg.Workflow.HeartbeatTimeout != config.Default().Workflow.HeartbeatTimeout {
+		t.Fatalf("unexpected heartbeat timeout: %d", cfg.Workflow.HeartbeatTimeout)
 	}
 	if err := cfg.EnsureDirectories(); err != nil {
 		t.Fatalf("EnsureDirectories failed: %v", err)
 	}
 
-	authDir := filepath.Dir(cfg.PlexAuthPath)
-	for _, dir := range []string{cfg.StagingDir, cfg.LibraryDir, cfg.LogDir, cfg.ReviewDir, authDir} {
+	authDir := filepath.Dir(cfg.Plex.AuthPath)
+	for _, dir := range []string{cfg.Paths.StagingDir, cfg.Paths.LibraryDir, cfg.Paths.LogDir, cfg.Paths.ReviewDir, authDir} {
 		info, err := os.Stat(dir)
 		if err != nil {
 			t.Fatalf("expected directory %q to exist: %v", dir, err)
@@ -106,19 +106,25 @@ func TestLoadCustomPath(t *testing.T) {
 	configPath := filepath.Join(tempDir, "spindle.toml")
 
 	type payload struct {
-		TMDBAPIKey                string `toml:"tmdb_api_key"`
-		TMDBBaseURL               string `toml:"tmdb_base_url"`
-		MoviesDir                 string `toml:"movies_dir"`
-		WorkflowHeartbeatInterval int    `toml:"workflow_heartbeat_interval"`
-		WorkflowHeartbeatTimeout  int    `toml:"workflow_heartbeat_timeout"`
+		TMDB struct {
+			APIKey  string `toml:"api_key"`
+			BaseURL string `toml:"base_url"`
+		} `toml:"tmdb"`
+		Library struct {
+			MoviesDir string `toml:"movies_dir"`
+		} `toml:"library"`
+		Workflow struct {
+			HeartbeatInterval int `toml:"heartbeat_interval"`
+			HeartbeatTimeout  int `toml:"heartbeat_timeout"`
+		} `toml:"workflow"`
 	}
-	data, err := toml.Marshal(payload{
-		TMDBAPIKey:                "abc123",
-		TMDBBaseURL:               "https://example.com/tmdb",
-		MoviesDir:                 "custom",
-		WorkflowHeartbeatInterval: 20,
-		WorkflowHeartbeatTimeout:  200,
-	})
+	custom := payload{}
+	custom.TMDB.APIKey = "abc123"
+	custom.TMDB.BaseURL = "https://example.com/tmdb"
+	custom.Library.MoviesDir = "custom"
+	custom.Workflow.HeartbeatInterval = 20
+	custom.Workflow.HeartbeatTimeout = 200
+	data, err := toml.Marshal(custom)
 	if err != nil {
 		t.Fatalf("marshal custom config: %v", err)
 	}
@@ -136,20 +142,20 @@ func TestLoadCustomPath(t *testing.T) {
 	if resolved != configPath {
 		t.Fatalf("unexpected resolved path: got %q want %q", resolved, configPath)
 	}
-	if cfg.TMDBAPIKey != "abc123" {
-		t.Fatalf("expected TMDB key from file, got %q", cfg.TMDBAPIKey)
+	if cfg.TMDB.APIKey != "abc123" {
+		t.Fatalf("expected TMDB key from file, got %q", cfg.TMDB.APIKey)
 	}
-	if cfg.MoviesDir != "custom" {
-		t.Fatalf("expected MoviesDir to be 'custom', got %q", cfg.MoviesDir)
+	if cfg.Library.MoviesDir != "custom" {
+		t.Fatalf("expected MoviesDir to be 'custom', got %q", cfg.Library.MoviesDir)
 	}
-	if cfg.TMDBBaseURL != "https://example.com/tmdb" {
-		t.Fatalf("expected TMDB base url override, got %q", cfg.TMDBBaseURL)
+	if cfg.TMDB.BaseURL != "https://example.com/tmdb" {
+		t.Fatalf("expected TMDB base url override, got %q", cfg.TMDB.BaseURL)
 	}
-	if cfg.WorkflowHeartbeatInterval != 20 {
-		t.Fatalf("expected heartbeat interval 20, got %d", cfg.WorkflowHeartbeatInterval)
+	if cfg.Workflow.HeartbeatInterval != 20 {
+		t.Fatalf("expected heartbeat interval 20, got %d", cfg.Workflow.HeartbeatInterval)
 	}
-	if cfg.WorkflowHeartbeatTimeout != 200 {
-		t.Fatalf("expected heartbeat timeout 200, got %d", cfg.WorkflowHeartbeatTimeout)
+	if cfg.Workflow.HeartbeatTimeout != 200 {
+		t.Fatalf("expected heartbeat timeout 200, got %d", cfg.Workflow.HeartbeatTimeout)
 	}
 }
 
@@ -176,64 +182,64 @@ func TestCreateSample(t *testing.T) {
 	// On Windows join uses backslashes; skip path expectation specifics when running there to avoid
 	// differences in drive letters during CI.
 	if runtime.GOOS != "windows" {
-		if !strings.Contains(cfg.StagingDir, "spindle") {
-			t.Fatalf("expected staging dir to contain spindle, got %q", cfg.StagingDir)
+		if !strings.Contains(cfg.Paths.StagingDir, "spindle") {
+			t.Fatalf("expected staging dir to contain spindle, got %q", cfg.Paths.StagingDir)
 		}
 	}
 }
 
 func TestValidateDetectsInvalidValues(t *testing.T) {
 	cfg := config.Default()
-	cfg.TMDBAPIKey = "key"
-	cfg.MakeMKVRipTimeout = 0
+	cfg.TMDB.APIKey = "key"
+	cfg.MakeMKV.RipTimeout = 0
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for non-positive timeout")
 	}
 
 	cfg = config.Default()
-	cfg.TMDBAPIKey = "key"
-	cfg.WorkflowHeartbeatInterval = 0
+	cfg.TMDB.APIKey = "key"
+	cfg.Workflow.HeartbeatInterval = 0
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for heartbeat interval")
 	}
 
 	cfg = config.Default()
-	cfg.TMDBAPIKey = "key"
-	cfg.WorkflowHeartbeatTimeout = cfg.WorkflowHeartbeatInterval
+	cfg.TMDB.APIKey = "key"
+	cfg.Workflow.HeartbeatTimeout = cfg.Workflow.HeartbeatInterval
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error when timeout <= interval")
 	}
 
 	cfg = config.Default()
-	cfg.TMDBAPIKey = "key"
-	cfg.TMDBConfidenceThreshold = 1.5
+	cfg.TMDB.APIKey = "key"
+	cfg.TMDB.ConfidenceThreshold = 1.5
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for tmdb confidence threshold")
 	}
 
 	cfg = config.Default()
-	cfg.TMDBAPIKey = "key"
-	cfg.OpenSubtitlesEnabled = true
-	cfg.OpenSubtitlesAPIKey = ""
+	cfg.TMDB.APIKey = "key"
+	cfg.Subtitles.OpenSubtitlesEnabled = true
+	cfg.Subtitles.OpenSubtitlesAPIKey = ""
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error when OpenSubtitles enabled without API key")
 	}
 
 	cfg = config.Default()
-	cfg.TMDBAPIKey = "key"
-	cfg.OpenSubtitlesEnabled = true
-	cfg.OpenSubtitlesAPIKey = "abc"
-	cfg.OpenSubtitlesUserAgent = ""
+	cfg.TMDB.APIKey = "key"
+	cfg.Subtitles.OpenSubtitlesEnabled = true
+	cfg.Subtitles.OpenSubtitlesAPIKey = "abc"
+	cfg.Subtitles.OpenSubtitlesUserAgent = ""
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error when OpenSubtitles enabled without user agent")
 	}
 
 	cfg = config.Default()
-	cfg.TMDBAPIKey = "key"
-	cfg.OpenSubtitlesEnabled = true
-	cfg.OpenSubtitlesAPIKey = "abc"
-	cfg.OpenSubtitlesUserAgent = "Spindle/test"
-	cfg.OpenSubtitlesLanguages = nil
+	cfg.TMDB.APIKey = "key"
+	cfg.Subtitles.OpenSubtitlesEnabled = true
+	cfg.Subtitles.OpenSubtitlesAPIKey = "abc"
+	cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/test"
+	cfg.Subtitles.OpenSubtitlesLanguages = nil
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error when OpenSubtitles enabled without languages")
 	}

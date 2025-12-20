@@ -44,12 +44,12 @@ type Service interface {
 // NewService builds a notification service backed by ntfy when configured.
 // When no ntfy topic is configured, a noop implementation is returned.
 func NewService(cfg *config.Config) Service {
-	topic := strings.TrimSpace(cfg.NtfyTopic)
+	topic := strings.TrimSpace(cfg.Notifications.NtfyTopic)
 	if topic == "" {
 		return noopService{}
 	}
 
-	timeout := time.Duration(cfg.NtfyRequestTimeout) * time.Second
+	timeout := time.Duration(cfg.Notifications.RequestTimeout) * time.Second
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
@@ -364,20 +364,20 @@ func buildNotifyConfig(cfg *config.Config) notifyConfig {
 			dedupeWindow:         10 * time.Minute,
 		}
 	}
-	window := time.Duration(cfg.NotifyDedupWindowSeconds) * time.Second
+	window := time.Duration(cfg.Notifications.DedupWindowSeconds) * time.Second
 	if window < 0 {
 		window = 0
 	}
 	return notifyConfig{
-		notifyIdentification: cfg.NotifyIdentification,
-		notifyRip:            cfg.NotifyRip,
-		notifyEncoding:       cfg.NotifyEncoding,
-		notifyOrganization:   cfg.NotifyOrganization,
-		notifyQueue:          cfg.NotifyQueue,
-		notifyReview:         cfg.NotifyReview,
-		notifyErrors:         cfg.NotifyErrors,
-		minRipSeconds:        cfg.NotifyMinRipSeconds,
-		queueMinItems:        cfg.NotifyQueueMinItems,
+		notifyIdentification: cfg.Notifications.Identification,
+		notifyRip:            cfg.Notifications.Rip,
+		notifyEncoding:       cfg.Notifications.Encoding,
+		notifyOrganization:   cfg.Notifications.Organization,
+		notifyQueue:          cfg.Notifications.Queue,
+		notifyReview:         cfg.Notifications.Review,
+		notifyErrors:         cfg.Notifications.Errors,
+		minRipSeconds:        cfg.Notifications.MinRipSeconds,
+		queueMinItems:        cfg.Notifications.QueueMinItems,
 		dedupeWindow:         window,
 	}
 }

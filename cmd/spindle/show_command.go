@@ -195,7 +195,7 @@ func newLogAPIClient(cfg *config.Config) (*logAPIClient, error) {
 	if cfg == nil {
 		return nil, nil
 	}
-	bind := strings.TrimSpace(cfg.APIBind)
+	bind := strings.TrimSpace(cfg.Paths.APIBind)
 	if bind == "" {
 		return nil, nil
 	}

@@ -47,7 +47,7 @@ func (s *Stage) Prepare(ctx context.Context, item *queue.Item) error {
 	if s == nil || s.service == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "prepare", "Subtitle stage is not configured", nil)
 	}
-	if !s.service.config.SubtitlesEnabled {
+	if !s.service.config.Subtitles.Enabled {
 		return nil
 	}
 	if s.store == nil {
@@ -69,7 +69,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	if s.store == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "execute", "Queue store unavailable", nil)
 	}
-	if !s.service.config.SubtitlesEnabled {
+	if !s.service.config.Subtitles.Enabled {
 		return nil
 	}
 
@@ -430,7 +430,7 @@ func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
 	if item == nil || s == nil || s.service == nil {
 		return nil
 	}
-	stagingRoot := strings.TrimSpace(item.StagingRoot(s.service.config.StagingDir))
+	stagingRoot := strings.TrimSpace(item.StagingRoot(s.service.config.Paths.StagingDir))
 	if stagingRoot == "" {
 		stagingRoot = filepath.Dir(strings.TrimSpace(item.EncodedFile))
 	}
@@ -530,7 +530,7 @@ func (s *Stage) HealthCheck(ctx context.Context) stage.Health {
 	if s == nil || s.service == nil {
 		return stage.Unhealthy("subtitles", "stage not configured")
 	}
-	if !s.service.config.SubtitlesEnabled {
+	if !s.service.config.Subtitles.Enabled {
 		return stage.Healthy("subtitles")
 	}
 	return stage.Healthy("subtitles")

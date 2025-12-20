@@ -73,7 +73,7 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 		return nil, errors.New("daemon requires log path")
 	}
 
-	lockPath := filepath.Join(cfg.LogDir, "spindle.lock")
+	lockPath := filepath.Join(cfg.Paths.LogDir, "spindle.lock")
 	monitor := newDiscMonitor(cfg, store, logger)
 	daemon := &Daemon{
 		cfg:        cfg,
@@ -265,7 +265,7 @@ func (d *Daemon) TestNotification(ctx context.Context) (bool, string, error) {
 	if d.cfg == nil {
 		return false, "configuration unavailable", errors.New("configuration unavailable")
 	}
-	if strings.TrimSpace(d.cfg.NtfyTopic) == "" {
+	if strings.TrimSpace(d.cfg.Notifications.NtfyTopic) == "" {
 		return false, "ntfy topic not configured", nil
 	}
 	notifier := notifications.NewService(d.cfg)
@@ -310,7 +310,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	return Status{
 		Running:      d.running.Load(),
 		Workflow:     summary,
-		QueueDBPath:  filepath.Join(d.cfg.LogDir, "queue.db"),
+		QueueDBPath:  filepath.Join(d.cfg.Paths.LogDir, "queue.db"),
 		LockFilePath: d.lockPath,
 		Dependencies: dependencies,
 		PID:          os.Getpid(),

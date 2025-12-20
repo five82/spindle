@@ -67,7 +67,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			workRoot := strings.TrimSpace(workDir)
 			cleanupWorkDir := false
 			if workRoot == "" {
-				root := cfg.StagingDir
+				root := cfg.Paths.StagingDir
 				if root == "" {
 					root = os.TempDir()
 				}
@@ -89,8 +89,8 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			}
 
 			logger, err := logging.New(logging.Options{
-				Level:       cfg.LogLevel,
-				Format:      cfg.LogFormat,
+				Level:       cfg.Logging.Level,
+				Format:      cfg.Logging.Format,
 				OutputPaths: []string{"stdout"},
 				Development: false,
 			})
@@ -105,7 +105,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 				inferredTitle = baseName
 			}
 			ctxMeta := subtitles.SubtitleContext{Title: inferredTitle, MediaType: "movie", Year: inferredYear}
-			if lang := strings.TrimSpace(cfg.TMDBLanguage); lang != "" {
+			if lang := strings.TrimSpace(cfg.TMDB.Language); lang != "" {
 				ctxMeta.Language = strings.ToLower(strings.SplitN(lang, "-", 2)[0])
 			}
 
@@ -140,7 +140,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 					logger.Info("opensubtitles download disabled", logging.String("reason", disabledReason))
 				}
 			}
-			languages := append([]string(nil), cfg.OpenSubtitlesLanguages...)
+			languages := append([]string(nil), cfg.Subtitles.OpenSubtitlesLanguages...)
 			result, err := service.Generate(cmd.Context(), subtitles.GenerateRequest{
 				SourcePath: source,
 				WorkDir:    filepath.Join(workRoot, "work"),
@@ -168,10 +168,10 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 }
 
 func lookupTMDBMetadata(ctx context.Context, cfg *config.Config, logger *slog.Logger, title, year string) *identification.LookupMatch {
-	if cfg == nil || strings.TrimSpace(cfg.TMDBAPIKey) == "" {
+	if cfg == nil || strings.TrimSpace(cfg.TMDB.APIKey) == "" {
 		return nil
 	}
-	client, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
+	client, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("tmdb client init failed", logging.Error(err))
@@ -225,10 +225,10 @@ func openSubtitlesReady(cfg *config.Config) (bool, string) {
 	if cfg == nil {
 		return false, "configuration unavailable"
 	}
-	if !cfg.OpenSubtitlesEnabled {
+	if !cfg.Subtitles.OpenSubtitlesEnabled {
 		return false, "opensubtitles_enabled is false"
 	}
-	if strings.TrimSpace(cfg.OpenSubtitlesAPIKey) == "" {
+	if strings.TrimSpace(cfg.Subtitles.OpenSubtitlesAPIKey) == "" {
 		return false, "opensubtitles_api_key not set"
 	}
 	return true, ""

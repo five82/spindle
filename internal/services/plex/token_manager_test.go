@@ -19,8 +19,8 @@ import (
 
 func TestTokenManagerReturnsCachedToken(t *testing.T) {
 	cfg := config.Default()
-	cfg.LogDir = t.TempDir()
-	cfg.PlexAuthPath = filepath.Join(cfg.LogDir, "plex_auth.json")
+	cfg.Paths.LogDir = t.TempDir()
+	cfg.Plex.AuthPath = filepath.Join(cfg.Paths.LogDir, "plex_auth.json")
 
 	state := map[string]any{
 		"client_identifier":   "cached-client",
@@ -28,7 +28,7 @@ func TestTokenManagerReturnsCachedToken(t *testing.T) {
 		"token":               "cached-token",
 		"token_expires_at":    time.Now().Add(12 * time.Hour).Format(time.RFC3339),
 	}
-	writeTokenState(t, cfg.PlexAuthPath, state)
+	writeTokenState(t, cfg.Plex.AuthPath, state)
 
 	manager, err := NewTokenManager(&cfg)
 	if err != nil {
@@ -46,8 +46,8 @@ func TestTokenManagerReturnsCachedToken(t *testing.T) {
 
 func TestTokenManagerRefreshesExpiredToken(t *testing.T) {
 	cfg := config.Default()
-	cfg.LogDir = t.TempDir()
-	cfg.PlexAuthPath = filepath.Join(cfg.LogDir, "plex_auth.json")
+	cfg.Paths.LogDir = t.TempDir()
+	cfg.Plex.AuthPath = filepath.Join(cfg.Paths.LogDir, "plex_auth.json")
 
 	nonceCalls := 0
 	tokenCalls := 0
@@ -101,7 +101,7 @@ func TestTokenManagerRefreshesExpiredToken(t *testing.T) {
 		"token":               "stale",
 		"token_expires_at":    time.Now().Add(-time.Hour).Format(time.RFC3339),
 	}
-	writeTokenState(t, cfg.PlexAuthPath, state)
+	writeTokenState(t, cfg.Plex.AuthPath, state)
 
 	manager, err := NewTokenManager(&cfg, WithHTTPClient(client), WithBaseURL(server.URL))
 	if err != nil {
@@ -116,7 +116,7 @@ func TestTokenManagerRefreshesExpiredToken(t *testing.T) {
 		t.Fatalf("expected refreshed token, got %q", token)
 	}
 
-	data, err := os.ReadFile(cfg.PlexAuthPath)
+	data, err := os.ReadFile(cfg.Plex.AuthPath)
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}

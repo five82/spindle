@@ -21,10 +21,10 @@ func plexStatusLine(cfg *config.Config, colorize bool) string {
 	if cfg == nil {
 		return renderStatusLine("Plex", statusInfo, "Unknown", colorize)
 	}
-	if strings.TrimSpace(cfg.PlexURL) == "" {
+	if strings.TrimSpace(cfg.Plex.URL) == "" {
 		return renderStatusLine("Plex", statusWarn, "Not configured or unreachable", colorize)
 	}
-	if !cfg.PlexLinkEnabled {
+	if !cfg.Plex.Enabled {
 		return renderStatusLine("Plex", statusWarn, "Link disabled", colorize)
 	}
 	manager, err := plex.NewTokenManager(cfg)

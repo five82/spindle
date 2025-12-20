@@ -19,8 +19,8 @@ import (
 
 func TestNewFromConfigConsole(t *testing.T) {
 	cfg := config.Default()
-	cfg.TMDBAPIKey = "test"
-	cfg.LogDir = t.TempDir()
+	cfg.TMDB.APIKey = "test"
+	cfg.Paths.LogDir = t.TempDir()
 
 	logger, err := logging.NewFromConfig(&cfg)
 	if err != nil {

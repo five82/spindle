@@ -62,7 +62,7 @@ func isPlaceholderTitle(title, discLabel string) bool {
 
 // NewIdentifier creates a new stage handler.
 func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Identifier {
-	client, err := tmdb.New(cfg.TMDBAPIKey, cfg.TMDBBaseURL, cfg.TMDBLanguage)
+	client, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 	if err != nil {
 		logger.Warn("tmdb client initialization failed", logging.Error(err))
 	}
@@ -74,12 +74,12 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) 
 func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher TMDBSearcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
 	var catalog *keydb.Catalog
 	if cfg != nil {
-		timeout := time.Duration(cfg.KeyDBDownloadTimeout) * time.Second
-		catalog = keydb.NewCatalog(cfg.KeyDBPath, logger, cfg.KeyDBDownloadURL, timeout)
+		timeout := time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout) * time.Second
+		catalog = keydb.NewCatalog(cfg.MakeMKV.KeyDBPath, logger, cfg.MakeMKV.KeyDBDownloadURL, timeout)
 	}
 	var overrideCatalog *overrides.Catalog
 	if cfg != nil {
-		overrideCatalog = overrides.NewCatalog(cfg.IdentificationOverridesPath, logger)
+		overrideCatalog = overrides.NewCatalog(cfg.MakeMKV.IdentificationOverridesPath, logger)
 	}
 	id := &Identifier{
 		store:     store,
@@ -706,7 +706,7 @@ func (i *Identifier) HealthCheck(ctx context.Context) stage.Health {
 	if i.cfg == nil {
 		return stage.Unhealthy(name, "configuration unavailable")
 	}
-	if strings.TrimSpace(i.cfg.TMDBAPIKey) == "" {
+	if strings.TrimSpace(i.cfg.TMDB.APIKey) == "" {
 		return stage.Unhealthy(name, "tmdb api key missing")
 	}
 	if i.tmdb == nil || i.tmdb.client == nil {
@@ -728,7 +728,7 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 			nil,
 		)
 	}
-	device := strings.TrimSpace(i.cfg.OpticalDrive)
+	device := strings.TrimSpace(i.cfg.MakeMKV.OpticalDrive)
 	if device == "" {
 		return nil, services.Wrap(
 			services.ErrConfiguration,
@@ -747,7 +747,7 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 
 // scanDiscAndCaptureFingerprint scans the disc, captures the fingerprint, and handles duplicates.
 func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *queue.Item, logger *slog.Logger) (*disc.ScanResult, int, error) {
-	device := strings.TrimSpace(i.cfg.OpticalDrive)
+	device := strings.TrimSpace(i.cfg.MakeMKV.OpticalDrive)
 	logger.Info("scanning disc with makemkv", logging.String("device", device))
 	scanStart := time.Now()
 
@@ -1133,7 +1133,7 @@ func (i *Identifier) ensureStagingSkeleton(item *queue.Item) error {
 			nil,
 		)
 	}
-	base := strings.TrimSpace(i.cfg.StagingDir)
+	base := strings.TrimSpace(i.cfg.Paths.StagingDir)
 	if base == "" {
 		return services.Wrap(
 			services.ErrConfiguration,

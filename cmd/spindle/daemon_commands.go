@@ -191,14 +191,14 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			} else {
 				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusWarn, "Not running (run `spindle start`)", colorize))
 			}
-			fmt.Fprintln(stdout, detectDiscLine(cfg.OpticalDrive, colorize))
+			fmt.Fprintln(stdout, detectDiscLine(cfg.MakeMKV.OpticalDrive, colorize))
 			if executableAvailable("drapto") {
 				fmt.Fprintln(stdout, renderStatusLine("Drapto", statusOK, "Available", colorize))
 			} else {
 				fmt.Fprintln(stdout, renderStatusLine("Drapto", statusError, "Not available", colorize))
 			}
 			fmt.Fprintln(stdout, plexStatusLine(cfg, colorize))
-			if strings.TrimSpace(cfg.NtfyTopic) != "" {
+			if strings.TrimSpace(cfg.Notifications.NtfyTopic) != "" {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusOK, "Configured", colorize))
 			} else {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusWarn, "Not configured", colorize))
@@ -212,9 +212,9 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				label string
 				path  string
 			}{
-				{label: "Library", path: cfg.LibraryDir},
-				{label: "Movies", path: librarySubdirPath(cfg.LibraryDir, cfg.MoviesDir)},
-				{label: "TV", path: librarySubdirPath(cfg.LibraryDir, cfg.TVDir)},
+				{label: "Library", path: cfg.Paths.LibraryDir},
+				{label: "Movies", path: librarySubdirPath(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)},
+				{label: "TV", path: librarySubdirPath(cfg.Paths.LibraryDir, cfg.Library.TVDir)},
 			} {
 				fmt.Fprintln(stdout, directoryStatusLine(dir.label, dir.path, colorize))
 			}
@@ -287,7 +287,7 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Optional:    true,
 		},
 	}
-	if cfg.SubtitlesEnabled || cfg.CommentaryDetectionEnabled {
+	if cfg.Subtitles.Enabled || cfg.CommentaryDetection.Enabled {
 		requirements = append(requirements, deps.Requirement{
 			Name:        "uvx",
 			Command:     "uvx",
@@ -307,10 +307,10 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Detail:      check.Detail,
 		})
 	}
-	if cfg.PresetDeciderEnabled {
+	if cfg.PresetDecider.Enabled {
 		statuses = append(statuses, presetDeciderDependencyStatus(cfg))
 	}
-	if cfg.CommentaryDetectionEnabled {
+	if cfg.CommentaryDetection.Enabled {
 		statuses = append(statuses, commentaryDetectorDependencyStatus(cfg))
 	}
 	return statuses
@@ -322,7 +322,7 @@ func presetDeciderDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 		Description: "LLM-driven Drapto preset selector",
 		Optional:    true,
 	}
-	key := strings.TrimSpace(cfg.PresetDeciderAPIKey)
+	key := strings.TrimSpace(cfg.PresetDecider.APIKey)
 	if key == "" {
 		status.Detail = "API key missing (set preset_decider_api_key or OPENROUTER_API_KEY)"
 		return status
@@ -331,10 +331,10 @@ func presetDeciderDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 	defer cancel()
 	client := presetllm.NewClient(presetllm.Config{
 		APIKey:  key,
-		BaseURL: cfg.PresetDeciderBaseURL,
-		Model:   cfg.PresetDeciderModel,
-		Referer: cfg.PresetDeciderReferer,
-		Title:   cfg.PresetDeciderTitle,
+		BaseURL: cfg.PresetDecider.BaseURL,
+		Model:   cfg.PresetDecider.Model,
+		Referer: cfg.PresetDecider.Referer,
+		Title:   cfg.PresetDecider.Title,
 	})
 	if err := client.HealthCheck(ctx); err != nil {
 		status.Detail = summarizePresetDeciderError(err)
@@ -351,7 +351,7 @@ func commentaryDetectorDependencyStatus(cfg *config.Config) ipc.DependencyStatus
 		Description: "WhisperX + LLM audio track classifier",
 		Optional:    true,
 	}
-	key := strings.TrimSpace(cfg.CommentaryDetectionAPIKey)
+	key := strings.TrimSpace(cfg.CommentaryDetection.APIKey)
 	if key == "" {
 		status.Detail = "API key missing (set commentary_detection_api_key or OPENROUTER_API_KEY)"
 		return status
@@ -360,10 +360,10 @@ func commentaryDetectorDependencyStatus(cfg *config.Config) ipc.DependencyStatus
 	defer cancel()
 	client := presetllm.NewClient(presetllm.Config{
 		APIKey:  key,
-		BaseURL: cfg.CommentaryDetectionBaseURL,
-		Model:   cfg.CommentaryDetectionModel,
-		Referer: cfg.CommentaryDetectionReferer,
-		Title:   cfg.CommentaryDetectionTitle,
+		BaseURL: cfg.CommentaryDetection.BaseURL,
+		Model:   cfg.CommentaryDetection.Model,
+		Referer: cfg.CommentaryDetection.Referer,
+		Title:   cfg.CommentaryDetection.Title,
 	})
 	if err := client.HealthCheck(ctx); err != nil {
 		status.Detail = summarizePresetDeciderError(err)
@@ -463,8 +463,8 @@ func deriveLogDir(lockPath, queueDBPath string, ctx *commandContext) string {
 	if queueDBPath != "" {
 		return filepath.Dir(queueDBPath)
 	}
-	if cfg := ctx.configValue(); cfg != nil && strings.TrimSpace(cfg.LogDir) != "" {
-		return cfg.LogDir
+	if cfg := ctx.configValue(); cfg != nil && strings.TrimSpace(cfg.Paths.LogDir) != "" {
+		return cfg.Paths.LogDir
 	}
 	return ""
 }

@@ -98,11 +98,11 @@ func newPresetLLMClassifier(cfg *config.Config) presetClassifier {
 		return nil
 	}
 	clientCfg := presetllm.Config{
-		APIKey:  cfg.PresetDeciderAPIKey,
-		BaseURL: cfg.PresetDeciderBaseURL,
-		Model:   cfg.PresetDeciderModel,
-		Referer: cfg.PresetDeciderReferer,
-		Title:   cfg.PresetDeciderTitle,
+		APIKey:  cfg.PresetDecider.APIKey,
+		BaseURL: cfg.PresetDecider.BaseURL,
+		Model:   cfg.PresetDecider.Model,
+		Referer: cfg.PresetDecider.Referer,
+		Title:   cfg.PresetDecider.Title,
 	}
 	if strings.TrimSpace(clientCfg.APIKey) == "" {
 		return nil
@@ -142,7 +142,7 @@ type presetDecision struct {
 
 func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSource string, logger *slog.Logger) presetDecision {
 	var decision presetDecision
-	if e == nil || e.cfg == nil || !e.cfg.PresetDeciderEnabled {
+	if e == nil || e.cfg == nil || !e.cfg.PresetDecider.Enabled {
 		return decision
 	}
 	if e.presetClassifier == nil {

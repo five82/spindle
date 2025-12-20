@@ -59,7 +59,7 @@ func TestDaemonStartStopStatus(t *testing.T) {
 func TestDaemonStatusDiscDetectionTimeout(t *testing.T) {
 	env := setupCLITestEnv(t)
 
-	env.cfg.OpticalDrive = "/dev/does-not-exist"
+	env.cfg.MakeMKV.OpticalDrive = "/dev/does-not-exist"
 
 	out, _, err := runCLI(t, []string{"status"}, env.socketPath, env.configPath)
 	if err != nil {

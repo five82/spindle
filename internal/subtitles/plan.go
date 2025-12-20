@@ -118,7 +118,7 @@ func (s *Service) prepareGenerationPlan(ctx context.Context, req GenerateRequest
 		language:     language,
 		totalSeconds: probe.DurationSeconds(),
 		audioIndex:   selection.PrimaryIndex,
-		cudaEnabled:  s != nil && s.config != nil && s.config.WhisperXCUDAEnabled,
+		cudaEnabled:  s != nil && s.config != nil && s.config.Subtitles.WhisperXCUDAEnabled,
 		cleanup:      cleanup,
 	}, nil
 }

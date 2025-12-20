@@ -25,7 +25,7 @@ func (noopStage) HealthCheck(context.Context) stage.Health {
 func TestDaemonStartStop(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries("makemkvcon", "drapto", "ffmpeg"))
 	store := testsupport.MustOpenStore(t, cfg)
-	logPath := filepath.Join(cfg.LogDir, "daemon-test.log")
+	logPath := filepath.Join(cfg.Paths.LogDir, "daemon-test.log")
 	logger := logging.NewNop()
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})

@@ -24,13 +24,16 @@ func TestPresetDeciderTestCommandPrintsJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := appendLine(env.configPath, `preset_decider_api_key = "test"`); err != nil {
+	if err := appendLine(env.configPath, "\n[preset_decider]"); err != nil {
 		t.Fatalf("append config: %v", err)
 	}
-	if err := appendLine(env.configPath, `preset_decider_base_url = "`+server.URL+`"`); err != nil {
+	if err := appendLine(env.configPath, `api_key = "test"`); err != nil {
 		t.Fatalf("append config: %v", err)
 	}
-	if err := appendLine(env.configPath, `preset_decider_model = "demo-model"`); err != nil {
+	if err := appendLine(env.configPath, `base_url = "`+server.URL+`"`); err != nil {
+		t.Fatalf("append config: %v", err)
+	}
+	if err := appendLine(env.configPath, `model = "demo-model"`); err != nil {
 		t.Fatalf("append config: %v", err)
 	}
 

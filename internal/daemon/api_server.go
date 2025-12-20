@@ -34,7 +34,7 @@ func newAPIServer(cfg *config.Config, d *Daemon, logger *slog.Logger) (*apiServe
 	if cfg == nil || d == nil {
 		return nil, nil
 	}
-	bind := strings.TrimSpace(cfg.APIBind)
+	bind := strings.TrimSpace(cfg.Paths.APIBind)
 	if bind == "" {
 		return nil, nil
 	}

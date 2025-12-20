@@ -24,8 +24,8 @@ type BackgroundLogger struct {
 // NewBackgroundLogger creates a new background logger.
 func NewBackgroundLogger(cfg *config.Config, hub *logging.StreamHub) *BackgroundLogger {
 	dir := ""
-	if cfg != nil && cfg.LogDir != "" {
-		dir = filepath.Join(cfg.LogDir, "background")
+	if cfg != nil && cfg.Paths.LogDir != "" {
+		dir = filepath.Join(cfg.Paths.LogDir, "background")
 	}
 	return &BackgroundLogger{
 		baseDir: dir,
@@ -62,11 +62,11 @@ func (b *BackgroundLogger) CreateHandler(path string) (slog.Handler, error) {
 	level := "info"
 	format := "json"
 	if b.cfg != nil {
-		if strings.TrimSpace(b.cfg.LogLevel) != "" {
-			level = b.cfg.LogLevel
+		if strings.TrimSpace(b.cfg.Logging.Level) != "" {
+			level = b.cfg.Logging.Level
 		}
-		if strings.TrimSpace(b.cfg.LogFormat) != "" {
-			format = b.cfg.LogFormat
+		if strings.TrimSpace(b.cfg.Logging.Format) != "" {
+			format = b.cfg.Logging.Format
 		}
 	}
 	logger, err := logging.New(logging.Options{

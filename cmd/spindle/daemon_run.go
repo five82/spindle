@@ -40,8 +40,8 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	}
 
 	runID := time.Now().UTC().Format("20060102T150405.000Z")
-	logPath := filepath.Join(cfg.LogDir, fmt.Sprintf("spindle-%s.log", runID))
-	eventsPath := filepath.Join(cfg.LogDir, fmt.Sprintf("spindle-%s.events", runID))
+	logPath := filepath.Join(cfg.Paths.LogDir, fmt.Sprintf("spindle-%s.log", runID))
+	eventsPath := filepath.Join(cfg.Paths.LogDir, fmt.Sprintf("spindle-%s.events", runID))
 	logHub := logging.NewStreamHub(4096)
 	eventArchive, archiveErr := logging.NewEventArchive(eventsPath)
 	if archiveErr != nil {
@@ -50,8 +50,8 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 		logHub.AddSink(eventArchive)
 	}
 	logger, err := logging.New(logging.Options{
-		Level:            cfg.LogLevel,
-		Format:           cfg.LogFormat,
+		Level:            cfg.Logging.Level,
+		Format:           cfg.Logging.Format,
 		OutputPaths:      []string{"stdout", logPath},
 		ErrorOutputPaths: []string{"stderr", logPath},
 		Development:      false,
@@ -60,15 +60,15 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
-	if err := ensureCurrentLogPointer(cfg.LogDir, logPath); err != nil {
+	if err := ensureCurrentLogPointer(cfg.Paths.LogDir, logPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: unable to update spindle.log link: %v\n", err)
 	}
-	logging.CleanupOldLogs(logger, cfg.LogRetentionDays,
-		logging.RetentionTarget{Dir: cfg.LogDir, Pattern: "spindle-*.log", Exclude: []string{logPath}},
-		logging.RetentionTarget{Dir: cfg.LogDir, Pattern: "spindle-*.events", Exclude: []string{eventsPath}},
-		logging.RetentionTarget{Dir: filepath.Join(cfg.LogDir, "background"), Pattern: "*.log"},
+	logging.CleanupOldLogs(logger, cfg.Logging.RetentionDays,
+		logging.RetentionTarget{Dir: cfg.Paths.LogDir, Pattern: "spindle-*.log", Exclude: []string{logPath}},
+		logging.RetentionTarget{Dir: cfg.Paths.LogDir, Pattern: "spindle-*.events", Exclude: []string{eventsPath}},
+		logging.RetentionTarget{Dir: filepath.Join(cfg.Paths.LogDir, "background"), Pattern: "*.log"},
 	)
-	pidPath := filepath.Join(cfg.LogDir, "spindle.pid")
+	pidPath := filepath.Join(cfg.Paths.LogDir, "spindle.pid")
 	if err := writePIDFile(pidPath); err != nil {
 		return fmt.Errorf("write pid file: %w", err)
 	}
@@ -113,7 +113,7 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 	}
 
 	var subtitleStage workflow.StageHandler
-	if cfg.SubtitlesEnabled {
+	if cfg.Subtitles.Enabled {
 		service := subtitles.NewService(cfg, logger)
 		subtitleStage = subtitles.NewStage(store, service, logger)
 	}
@@ -132,7 +132,7 @@ func buildSocketPath(cfg *config.Config) string {
 	if cfg == nil {
 		return filepath.Join("", "spindle.sock")
 	}
-	return filepath.Join(cfg.LogDir, "spindle.sock")
+	return filepath.Join(cfg.Paths.LogDir, "spindle.sock")
 }
 
 func ensureCurrentLogPointer(logDir, target string) error {

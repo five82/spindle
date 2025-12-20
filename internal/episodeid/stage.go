@@ -27,7 +27,7 @@ type EpisodeIdentifier struct {
 // NewEpisodeIdentifier constructs a new episode identification stage handler.
 func NewEpisodeIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *EpisodeIdentifier {
 	var matcher *contentid.Matcher
-	if cfg != nil && cfg.OpenSubtitlesEnabled {
+	if cfg != nil && cfg.Subtitles.OpenSubtitlesEnabled {
 		matcher = contentid.NewMatcher(cfg, logger)
 	}
 	id := &EpisodeIdentifier{
@@ -121,7 +121,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		reason := "content matcher unavailable"
 		if e.cfg == nil {
 			reason = "configuration unavailable"
-		} else if !e.cfg.OpenSubtitlesEnabled {
+		} else if !e.cfg.Subtitles.OpenSubtitlesEnabled {
 			reason = "opensubtitles disabled"
 		}
 		logger.Info("episode content identification skipped", logging.String("reason", reason))
@@ -215,7 +215,7 @@ func (e *EpisodeIdentifier) HealthCheck(ctx context.Context) stage.Health {
 		}
 	}
 
-	if !e.cfg.OpenSubtitlesEnabled {
+	if !e.cfg.Subtitles.OpenSubtitlesEnabled {
 		return stage.Health{
 			Name:   "episodeid",
 			Ready:  true,

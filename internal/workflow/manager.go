@@ -137,12 +137,12 @@ func NewManagerWithOptions(cfg *config.Config, store *queue.Store, logger *slog.
 		store:        store,
 		logger:       logger,
 		notifier:     notifier,
-		pollInterval: time.Duration(cfg.QueuePollInterval) * time.Second,
+		pollInterval: time.Duration(cfg.Workflow.QueuePollInterval) * time.Second,
 		heartbeat: NewHeartbeatMonitor(
 			store,
 			logger,
-			time.Duration(cfg.WorkflowHeartbeatInterval)*time.Second,
-			time.Duration(cfg.WorkflowHeartbeatTimeout)*time.Second,
+			time.Duration(cfg.Workflow.HeartbeatInterval)*time.Second,
+			time.Duration(cfg.Workflow.HeartbeatTimeout)*time.Second,
 		),
 		bgLogger: NewBackgroundLogger(cfg, logHub),
 		lanes:    make(map[laneKind]*laneState),
@@ -364,7 +364,7 @@ func (m *Manager) handleNextItemError(ctx context.Context, logger *slog.Logger, 
 	select {
 	case <-ctx.Done():
 		return
-	case <-time.After(time.Duration(m.cfg.ErrorRetryInterval) * time.Second):
+	case <-time.After(time.Duration(m.cfg.Workflow.ErrorRetryInterval) * time.Second):
 	}
 }
 

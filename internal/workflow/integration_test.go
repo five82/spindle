@@ -25,18 +25,18 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 
 	stubValidationProbes(t)
 	base := t.TempDir()
-	cfg.StagingDir = filepath.Join(base, "staging")
-	cfg.LibraryDir = filepath.Join(base, "library")
-	cfg.LogDir = filepath.Join(base, "logs")
-	cfg.ReviewDir = filepath.Join(base, "review")
-	cfg.TMDBAPIKey = "integration-test-key"
-	cfg.OpticalDrive = filepath.Join(base, "devices", "sr0")
-	cfg.MoviesDir = "movies"
-	cfg.TVDir = "tv"
-	cfg.QueuePollInterval = 0
-	cfg.ErrorRetryInterval = 1
-	cfg.WorkflowHeartbeatInterval = 1
-	cfg.WorkflowHeartbeatTimeout = 5
+	cfg.Paths.StagingDir = filepath.Join(base, "staging")
+	cfg.Paths.LibraryDir = filepath.Join(base, "library")
+	cfg.Paths.LogDir = filepath.Join(base, "logs")
+	cfg.Paths.ReviewDir = filepath.Join(base, "review")
+	cfg.TMDB.APIKey = "integration-test-key"
+	cfg.MakeMKV.OpticalDrive = filepath.Join(base, "devices", "sr0")
+	cfg.Library.MoviesDir = "movies"
+	cfg.Library.TVDir = "tv"
+	cfg.Workflow.QueuePollInterval = 0
+	cfg.Workflow.ErrorRetryInterval = 1
+	cfg.Workflow.HeartbeatInterval = 1
+	cfg.Workflow.HeartbeatTimeout = 5
 
 	if err := cfg.EnsureDirectories(); err != nil {
 		t.Fatalf("EnsureDirectories: %v", err)
@@ -78,7 +78,7 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 
 	ripperClient := &fakeMakemkvClient{}
 	draptoClient := &stubDraptoClient{}
-	plexClient := &stubPlexService{root: cfg.LibraryDir, moviesDir: cfg.MoviesDir, tvDir: cfg.TVDir}
+	plexClient := &stubPlexService{root: cfg.Paths.LibraryDir, moviesDir: cfg.Library.MoviesDir, tvDir: cfg.Library.TVDir}
 
 	identifier := identification.NewIdentifierWithDependencies(cfg, store, logger, tmdbClient, scanner, notifier)
 	ripper := ripping.NewRipperWithDependencies(cfg, store, logger, ripperClient, notifier)

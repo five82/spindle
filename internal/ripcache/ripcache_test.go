@@ -16,9 +16,9 @@ import (
 func TestStoreAndRestore(t *testing.T) {
 	base := t.TempDir()
 	cfg := config.Default()
-	cfg.RipCacheEnabled = true
-	cfg.RipCacheDir = base
-	cfg.RipCacheMaxGiB = 1
+	cfg.RipCache.Enabled = true
+	cfg.RipCache.Dir = base
+	cfg.RipCache.MaxGiB = 1
 
 	manager := NewManager(&cfg, slog.Default())
 	if manager == nil {
@@ -60,9 +60,9 @@ func TestStoreAndRestore(t *testing.T) {
 func TestPruneBySize(t *testing.T) {
 	base := t.TempDir()
 	cfg := config.Default()
-	cfg.RipCacheEnabled = true
-	cfg.RipCacheDir = base
-	cfg.RipCacheMaxGiB = 1 // small budget
+	cfg.RipCache.Enabled = true
+	cfg.RipCache.Dir = base
+	cfg.RipCache.MaxGiB = 1 // small budget
 
 	manager := NewManager(&cfg, slog.Default())
 
@@ -112,9 +112,9 @@ func TestPruneBySize(t *testing.T) {
 func TestStatsIncludesEntrySummaries(t *testing.T) {
 	base := t.TempDir()
 	cfg := config.Default()
-	cfg.RipCacheEnabled = true
-	cfg.RipCacheDir = base
-	cfg.RipCacheMaxGiB = 1
+	cfg.RipCache.Enabled = true
+	cfg.RipCache.Dir = base
+	cfg.RipCache.MaxGiB = 1
 
 	manager := NewManager(&cfg, slog.Default())
 	if manager == nil {

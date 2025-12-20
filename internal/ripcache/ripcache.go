@@ -58,14 +58,14 @@ type EntrySummary struct {
 
 // NewManager builds a cache manager when enabled; returns nil when caching is disabled or misconfigured.
 func NewManager(cfg *config.Config, logger *slog.Logger) *Manager {
-	if cfg == nil || !cfg.RipCacheEnabled {
+	if cfg == nil || !cfg.RipCache.Enabled {
 		return nil
 	}
-	root := strings.TrimSpace(cfg.RipCacheDir)
-	if root == "" || cfg.RipCacheMaxGiB <= 0 {
+	root := strings.TrimSpace(cfg.RipCache.Dir)
+	if root == "" || cfg.RipCache.MaxGiB <= 0 {
 		return nil
 	}
-	maxBytes := int64(cfg.RipCacheMaxGiB) * 1024 * 1024 * 1024
+	maxBytes := int64(cfg.RipCache.MaxGiB) * 1024 * 1024 * 1024
 	manager := &Manager{
 		root:     root,
 		maxBytes: maxBytes,

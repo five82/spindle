@@ -33,17 +33,17 @@ func TestHTTPServiceRefreshTriggersPlex(t *testing.T) {
 	defer server.Close()
 
 	cfg := config.Default()
-	cfg.LibraryDir = t.TempDir()
-	cfg.LogDir = t.TempDir()
-	cfg.MoviesDir = "Movies"
-	cfg.TVDir = "TV"
-	cfg.MoviesLibrary = "Movies"
-	cfg.TVLibrary = "TV Shows"
-	cfg.PlexURL = server.URL
-	cfg.PlexLinkEnabled = true
-	cfg.PlexAuthPath = filepath.Join(cfg.LogDir, "plex_auth.json")
+	cfg.Paths.LibraryDir = t.TempDir()
+	cfg.Paths.LogDir = t.TempDir()
+	cfg.Library.MoviesDir = "Movies"
+	cfg.Library.TVDir = "TV"
+	cfg.Plex.MoviesLibrary = "Movies"
+	cfg.Plex.TVLibrary = "TV Shows"
+	cfg.Plex.URL = server.URL
+	cfg.Plex.Enabled = true
+	cfg.Plex.AuthPath = filepath.Join(cfg.Paths.LogDir, "plex_auth.json")
 
-	statePath := cfg.PlexAuthPath
+	statePath := cfg.Plex.AuthPath
 	state := map[string]any{
 		"client_identifier":   "test-client",
 		"authorization_token": "auth-token",

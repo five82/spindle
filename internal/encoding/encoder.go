@@ -320,10 +320,10 @@ func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *
 		notifier: notifier,
 		cache:    ripcache.NewManager(cfg, logger),
 	}
-	if cfg != nil && cfg.PresetDeciderEnabled {
+	if cfg != nil && cfg.PresetDecider.Enabled {
 		enc.presetClassifier = newPresetLLMClassifier(cfg)
 	}
-	if cfg != nil && cfg.CommentaryDetectionEnabled {
+	if cfg != nil && cfg.CommentaryDetection.Enabled {
 		enc.commentary = commentaryid.New(cfg, logger)
 	}
 	enc.SetLogger(logger)
@@ -429,9 +429,9 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 
 // prepareEncodedDirectory creates a clean output directory for encoded files.
 func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item, logger *slog.Logger) (stagingRoot, encodedDir string, err error) {
-	stagingRoot = item.StagingRoot(e.cfg.StagingDir)
+	stagingRoot = item.StagingRoot(e.cfg.Paths.StagingDir)
 	if stagingRoot == "" {
-		stagingRoot = filepath.Join(strings.TrimSpace(e.cfg.StagingDir), fmt.Sprintf("queue-%d", item.ID))
+		stagingRoot = filepath.Join(strings.TrimSpace(e.cfg.Paths.StagingDir), fmt.Sprintf("queue-%d", item.ID))
 	}
 	encodedDir = filepath.Join(stagingRoot, "encoded")
 	if err := e.cleanupEncodedDir(logger, encodedDir); err != nil {
@@ -710,7 +710,7 @@ func (e *Encoder) HealthCheck(ctx context.Context) stage.Health {
 	if e.cfg == nil {
 		return stage.Unhealthy(name, "configuration unavailable")
 	}
-	if strings.TrimSpace(e.cfg.StagingDir) == "" {
+	if strings.TrimSpace(e.cfg.Paths.StagingDir) == "" {
 		return stage.Unhealthy(name, "staging directory not configured")
 	}
 	if e.client == nil {

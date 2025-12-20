@@ -18,9 +18,9 @@ func TestStagePersistsRipSpecPerEpisode(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	cfg := testsupport.NewConfig(t)
-	cfg.SubtitlesEnabled = true
-	cfg.OpenSubtitlesEnabled = false
-	cfg.WhisperXCacheDir = t.TempDir()
+	cfg.Subtitles.Enabled = true
+	cfg.Subtitles.OpenSubtitlesEnabled = false
+	cfg.Paths.WhisperXCacheDir = t.TempDir()
 
 	store := testsupport.MustOpenStore(t, cfg)
 
@@ -37,7 +37,7 @@ func TestStagePersistsRipSpecPerEpisode(t *testing.T) {
 	item.Status = queue.StatusSubtitling
 	item.DiscFingerprint = "SUBTITLESTAGETESTFP"
 
-	stagingRoot := item.StagingRoot(cfg.StagingDir)
+	stagingRoot := item.StagingRoot(cfg.Paths.StagingDir)
 	if strings.TrimSpace(stagingRoot) == "" {
 		t.Fatalf("expected staging root")
 	}

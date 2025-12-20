@@ -97,9 +97,9 @@ func NewTokenManager(cfg *config.Config, opts ...TokenManagerOption) (*TokenMana
 		return nil, errors.New("config is nil")
 	}
 
-	statePath := strings.TrimSpace(cfg.PlexAuthPath)
+	statePath := strings.TrimSpace(cfg.Plex.AuthPath)
 	if statePath == "" {
-		statePath = filepath.Join(cfg.LogDir, stateFileName)
+		statePath = filepath.Join(cfg.Paths.LogDir, stateFileName)
 	}
 	mgr := &TokenManager{
 		cfg:        cfg,
@@ -203,8 +203,8 @@ func (m *TokenManager) ClearResolvedPlexURL() error {
 
 // EnsureResolvedPlexURL resolves and caches a compatible Plex base URL.
 func (m *TokenManager) EnsureResolvedPlexURL(ctx context.Context) (string, error) {
-	if strings.TrimSpace(m.cfg.PlexURL) == "" {
-		return "", errors.New("plex_url not configured")
+	if strings.TrimSpace(m.cfg.Plex.URL) == "" {
+		return "", errors.New("plex.url not configured")
 	}
 
 	m.stateMu.RLock()

@@ -48,7 +48,7 @@ var probeVideo = ffprobe.Inspect
 
 // NewRipper constructs the ripping handler using default dependencies.
 func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Ripper {
-	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKVRipTimeout)
+	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKV.RipTimeout)
 	if err != nil {
 		logger.Warn("makemkv client unavailable", logging.Error(err))
 	}
@@ -192,9 +192,9 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			lastPercent = update.Percent
 		}
 	}
-	stagingRoot := item.StagingRoot(r.cfg.StagingDir)
+	stagingRoot := item.StagingRoot(r.cfg.Paths.StagingDir)
 	if stagingRoot == "" {
-		stagingRoot = filepath.Join(strings.TrimSpace(r.cfg.StagingDir), fmt.Sprintf("queue-%d", item.ID))
+		stagingRoot = filepath.Join(strings.TrimSpace(r.cfg.Paths.StagingDir), fmt.Sprintf("queue-%d", item.ID))
 	}
 
 	fingerprintAvailable := hasDiscFingerprint(item)
@@ -515,7 +515,7 @@ func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {
 		return nil
 	}
 	selection := audio.SelectWithOptions(probe.Streams, audio.SelectOptions{
-		KeepEnglishStereo: r.cfg != nil && r.cfg.CommentaryDetectionEnabled,
+		KeepEnglishStereo: r.cfg != nil && r.cfg.CommentaryDetection.Enabled,
 	})
 	if !selection.Changed(totalAudio) {
 		return nil
@@ -756,10 +756,10 @@ func (r *Ripper) HealthCheck(ctx context.Context) stage.Health {
 	if r.cfg == nil {
 		return stage.Unhealthy(name, "configuration unavailable")
 	}
-	if strings.TrimSpace(r.cfg.StagingDir) == "" {
+	if strings.TrimSpace(r.cfg.Paths.StagingDir) == "" {
 		return stage.Unhealthy(name, "staging directory not configured")
 	}
-	if strings.TrimSpace(r.cfg.OpticalDrive) == "" {
+	if strings.TrimSpace(r.cfg.MakeMKV.OpticalDrive) == "" {
 		return stage.Unhealthy(name, "optical drive not configured")
 	}
 	if r.client == nil {
