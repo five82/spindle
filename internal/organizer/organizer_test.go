@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -392,6 +393,53 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 	}
 }
 
+func TestOrganizerRoutesUnavailableLibraryToReview(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+
+	stubOrganizerProbe(t)
+
+	item, err := store.NewDisc(context.Background(), "Unavailable", "fp-unavail")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	item.Status = queue.StatusEncoded
+	encodedDir := filepath.Join(item.StagingRoot(cfg.Paths.StagingDir), "encoded")
+	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
+		t.Fatalf("mkdir encoded: %v", err)
+	}
+	item.EncodedFile = filepath.Join(encodedDir, "unavailable.mkv")
+	testsupport.WriteFile(t, item.EncodedFile, organizedFixtureSize)
+	originalEncoded := item.EncodedFile
+	if err := store.Update(context.Background(), item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), unavailablePlexService{}, &stubNotifier{})
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if item.Status != queue.StatusCompleted {
+		t.Fatalf("expected completed status, got %s", item.Status)
+	}
+	if item.FinalFile == "" {
+		t.Fatal("expected final file path")
+	}
+	if _, err := os.Stat(item.FinalFile); err != nil {
+		t.Fatalf("expected review file to exist: %v", err)
+	}
+	if _, err := os.Stat(originalEncoded); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected encoded file to be moved: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(item.ProgressStage), "review") {
+		t.Fatalf("expected progress stage to mention review, got %q", item.ProgressStage)
+	}
+}
+
 func TestOrganizerHealthReady(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
@@ -519,5 +567,19 @@ func (failingPlexService) Organize(ctx context.Context, sourcePath string, meta 
 }
 
 func (failingPlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
+	return nil
+}
+
+type unavailablePlexService struct{}
+
+func (unavailablePlexService) Organize(ctx context.Context, sourcePath string, meta plex.MediaMetadata) (string, error) {
+	return "", fmt.Errorf("create target directory: %w", &os.PathError{
+		Op:   "mkdir",
+		Path: "/mnt/library",
+		Err:  syscall.ENODEV,
+	})
+}
+
+func (unavailablePlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
 	return nil
 }

@@ -225,11 +225,17 @@ func resolveConfigPath(path string) (string, bool, error) {
 }
 
 // EnsureDirectories creates required directories for daemon operation.
+// LibraryDir is created on a best-effort basis so the daemon can run when
+// external storage is temporarily unavailable.
 func (c *Config) EnsureDirectories() error {
-	for _, dir := range []string{c.Paths.StagingDir, c.Paths.LibraryDir, c.Paths.LogDir, c.Paths.ReviewDir} {
+	for _, dir := range []string{c.Paths.StagingDir, c.Paths.LogDir, c.Paths.ReviewDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory %q: %w", dir, err)
 		}
+	}
+	if strings.TrimSpace(c.Paths.LibraryDir) != "" {
+		// Best-effort to avoid failing config load when storage is offline.
+		_ = os.MkdirAll(c.Paths.LibraryDir, 0o755)
 	}
 	if c.RipCache.Enabled && strings.TrimSpace(c.RipCache.Dir) != "" {
 		if err := os.MkdirAll(c.RipCache.Dir, 0o755); err != nil {

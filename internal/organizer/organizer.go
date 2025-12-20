@@ -87,7 +87,8 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 	logger.Debug("starting organization")
-	if item.EncodedFile == "" {
+	encodedSources := collectEncodedSources(item, &env)
+	if len(encodedSources) == 0 {
 		return services.Wrap(
 			services.ErrValidation,
 			"organizing",
@@ -98,33 +99,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	if item.NeedsReview {
 		logger.Info("routing item to manual review", logging.String("reason", strings.TrimSpace(item.ReviewReason)))
-		reviewPath, err := o.moveToReview(ctx, item)
-		if err != nil {
-			return err
-		}
-		item.FinalFile = reviewPath
-		item.EncodedFile = reviewPath
-		item.Status = queue.StatusCompleted
-		item.ProgressStage = "Manual review"
-		item.ProgressPercent = 100
-		item.ProgressMessage = fmt.Sprintf("Moved to review directory: %s", filepath.Base(reviewPath))
-		if strings.TrimSpace(item.ErrorMessage) == "" {
-			item.ErrorMessage = strings.TrimSpace(item.ReviewReason)
-		}
-		if o.notifier != nil {
-			label := filepath.Base(reviewPath)
-			if err := o.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, notifications.Payload{
-				"filename": label,
-				"reason":   strings.TrimSpace(item.ReviewReason),
-			}); err != nil {
-				logger.Debug("review notification failed", logging.Error(err))
-			}
-		}
-		if err := o.validateOrganizedArtifact(ctx, reviewPath, stageStart); err != nil {
-			return err
-		}
-		o.cleanupStaging(ctx, item)
-		return nil
+		return o.finishReview(ctx, item, stageStart, strings.TrimSpace(item.ReviewReason), encodedSources, nil)
 	}
 	var meta MetadataProvider
 	meta = queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
@@ -163,6 +138,10 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger.Info("organizing encoded file into library", logging.String("encoded_file", item.EncodedFile))
 	targetPath, err := o.plex.Organize(ctx, item.EncodedFile, meta)
 	if err != nil {
+		if isLibraryUnavailable(err) {
+			logger.Warn("library unavailable; moving to review directory", logging.Error(err))
+			return o.finishReview(ctx, item, stageStart, "Library unavailable", encodedSources, err)
+		}
 		return services.Wrap(services.ErrExternalTool, "organizing", "move to library", "Failed to move media into library", err)
 	}
 	item.FinalFile = targetPath
@@ -328,6 +307,10 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		o.updateProgress(ctx, item, fmt.Sprintf("Organizing %s (%d/%d)", label, idx+1, len(jobs)), step*float64(idx))
 		targetPath, err := o.plex.Organize(ctx, job.Source, job.Metadata)
 		if err != nil {
+			if isLibraryUnavailable(err) {
+				logger.Warn("library unavailable; moving to review directory", logging.Error(err))
+				return o.finishReview(ctx, item, stageStarted, "Library unavailable", collectEncodedSources(item, env), err)
+			}
 			return services.Wrap(
 				services.ErrExternalTool,
 				"organizing",
@@ -528,11 +511,11 @@ func (o *Organizer) cleanupStaging(ctx context.Context, item *queue.Item) {
 	logger.Info("cleaned staging directory", logging.String("staging_root", root))
 }
 
-func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string, error) {
+func (o *Organizer) movePathToReview(ctx context.Context, item *queue.Item, sourcePath string) (string, error) {
 	logger := logging.WithContext(ctx, o.logger)
 	logger.Info(
 		"moving encoded file to review",
-		logging.String("encoded_file", strings.TrimSpace(item.EncodedFile)),
+		logging.String("encoded_file", strings.TrimSpace(sourcePath)),
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
 	)
 	reviewDir := strings.TrimSpace(o.cfg.Paths.ReviewDir)
@@ -548,7 +531,7 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 	if err := os.MkdirAll(reviewDir, 0o755); err != nil {
 		return "", services.Wrap(services.ErrConfiguration, "organizing", "ensure review dir", "Failed to create review directory", err)
 	}
-	ext := filepath.Ext(item.EncodedFile)
+	ext := filepath.Ext(sourcePath)
 	if ext == "" {
 		ext = ".mkv"
 	}
@@ -557,22 +540,22 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 	if err != nil {
 		return "", services.Wrap(services.ErrTransient, "organizing", "allocate review filename", "Unable to allocate review filename", err)
 	}
-	if renameErr := os.Rename(item.EncodedFile, target); renameErr != nil {
+	if renameErr := os.Rename(sourcePath, target); renameErr != nil {
 		if errors.Is(renameErr, os.ErrExist) {
 			retryTarget, retryErr := o.nextReviewPath(reviewDir, prefix, ext)
 			if retryErr != nil {
 				return "", services.Wrap(services.ErrTransient, "organizing", "allocate review filename", "Unable to allocate review filename", retryErr)
 			}
 			target = retryTarget
-			renameErr = os.Rename(item.EncodedFile, target)
+			renameErr = os.Rename(sourcePath, target)
 		}
 		if renameErr != nil {
 			var linkErr *os.LinkError
 			if errors.As(renameErr, &linkErr) && errors.Is(linkErr.Err, syscall.EXDEV) {
-				if copyErr := copyFile(item.EncodedFile, target); copyErr != nil {
+				if copyErr := copyFile(sourcePath, target); copyErr != nil {
 					return "", services.Wrap(services.ErrTransient, "organizing", "copy review file", "Failed to copy file into review directory", copyErr)
 				}
-				if err := os.Remove(item.EncodedFile); err != nil {
+				if err := os.Remove(sourcePath); err != nil {
 					logger.Warn("failed to remove source file after copy", logging.Error(err))
 				}
 			} else {
@@ -581,6 +564,113 @@ func (o *Organizer) moveToReview(ctx context.Context, item *queue.Item) (string,
 		}
 	}
 	return target, nil
+}
+
+func (o *Organizer) finishReview(ctx context.Context, item *queue.Item, stageStart time.Time, reason string, sources []string, detailErr error) error {
+	if item == nil {
+		return services.Wrap(services.ErrValidation, "organizing", "move to review", "Queue item unavailable for review routing", nil)
+	}
+	logger := logging.WithContext(ctx, o.logger)
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "Manual review required"
+	}
+	item.NeedsReview = true
+	item.ReviewReason = reason
+
+	if len(sources) == 0 && strings.TrimSpace(item.EncodedFile) != "" {
+		sources = []string{item.EncodedFile}
+	}
+
+	moved := make([]string, 0, len(sources))
+	for _, source := range sources {
+		source = strings.TrimSpace(source)
+		if source == "" {
+			continue
+		}
+		target, err := o.movePathToReview(ctx, item, source)
+		if err != nil {
+			return err
+		}
+		moved = append(moved, target)
+	}
+	if len(moved) == 0 {
+		return services.Wrap(services.ErrValidation, "organizing", "move to review", "No encoded files available to move to review directory", nil)
+	}
+
+	item.FinalFile = moved[len(moved)-1]
+	item.EncodedFile = item.FinalFile
+	item.Status = queue.StatusCompleted
+	item.ProgressStage = "Manual review"
+	item.ProgressPercent = 100
+	item.ActiveEpisodeKey = ""
+	if len(moved) == 1 {
+		item.ProgressMessage = fmt.Sprintf("Moved to review directory: %s", filepath.Base(item.FinalFile))
+	} else {
+		item.ProgressMessage = fmt.Sprintf("Moved %d files to review directory", len(moved))
+	}
+	if strings.TrimSpace(item.ErrorMessage) == "" {
+		if detailErr != nil {
+			item.ErrorMessage = fmt.Sprintf("%s: %v", reason, detailErr)
+		} else {
+			item.ErrorMessage = reason
+		}
+	}
+
+	if o.notifier != nil {
+		label := filepath.Base(item.FinalFile)
+		payload := notifications.Payload{
+			"filename": label,
+			"reason":   strings.TrimSpace(item.ReviewReason),
+		}
+		if len(moved) > 1 {
+			payload["count"] = len(moved)
+		}
+		if err := o.notifier.Publish(ctx, notifications.EventUnidentifiedMedia, payload); err != nil {
+			logger.Debug("review notification failed", logging.Error(err))
+		}
+	}
+
+	for _, reviewPath := range moved {
+		if err := o.validateOrganizedArtifact(ctx, reviewPath, stageStart); err != nil {
+			return err
+		}
+	}
+	o.cleanupStaging(ctx, item)
+	return nil
+}
+
+func collectEncodedSources(item *queue.Item, env *ripspec.Envelope) []string {
+	sources := make([]string, 0, 4)
+	if env != nil {
+		for _, asset := range env.Assets.Encoded {
+			if path := strings.TrimSpace(asset.Path); path != "" {
+				sources = append(sources, path)
+			}
+		}
+	}
+	if len(sources) == 0 && item != nil {
+		if path := strings.TrimSpace(item.EncodedFile); path != "" {
+			sources = append(sources, path)
+		}
+	}
+	return sources
+}
+
+func isLibraryUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if os.IsNotExist(err) {
+		return true
+	}
+	return errors.Is(err, syscall.ENODEV) ||
+		errors.Is(err, syscall.ENOTCONN) ||
+		errors.Is(err, syscall.EHOSTDOWN) ||
+		errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.ETIMEDOUT) ||
+		errors.Is(err, syscall.EIO) ||
+		errors.Is(err, syscall.ESTALE)
 }
 
 func (o *Organizer) nextReviewPath(dir, prefix, ext string) (string, error) {
