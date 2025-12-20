@@ -12,13 +12,15 @@ import (
 
 	"log/slog"
 
+	"spindle/internal/commentaryid"
+	"spindle/internal/config"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/services"
 )
 
-func (e *Encoder) refineCommentaryTracks(ctx context.Context, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int, logger *slog.Logger) error {
-	if e == nil || e.cfg == nil || e.commentary == nil || !e.cfg.CommentaryDetection.Enabled {
+func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queue.Store, detector *commentaryid.Detector, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int, logger *slog.Logger) error {
+	if cfg == nil || detector == nil || !cfg.CommentaryDetection.Enabled {
 		return nil
 	}
 	sourcePath = strings.TrimSpace(sourcePath)
@@ -40,7 +42,7 @@ func (e *Encoder) refineCommentaryTracks(ctx context.Context, item *queue.Item, 
 		}
 		return step
 	}
-	ffprobeBinary := e.cfg.FFprobeBinary()
+	ffprobeBinary := cfg.FFprobeBinary()
 	probe, err := encodeProbe(ctx, ffprobeBinary, sourcePath)
 	if err != nil {
 		return services.Wrap(services.ErrExternalTool, "encoding", "ffprobe commentary detection", "Failed to inspect source file audio streams", err)
@@ -57,21 +59,21 @@ func (e *Encoder) refineCommentaryTracks(ctx context.Context, item *queue.Item, 
 
 	if item != nil {
 		item.ProgressMessage = decorate("Commentary scan (WhisperX)")
-		if e.store != nil {
-			_ = e.store.UpdateProgress(ctx, item)
+		if store != nil {
+			_ = store.UpdateProgress(ctx, item)
 		}
 	}
 
-	ref, err := e.commentary.Refine(ctx, sourcePath, workDir)
+	ref, err := detector.Refine(ctx, sourcePath, workDir)
 	if err != nil {
 		return err
 	}
-	e.commentary.DebugLog(ref)
+	detector.DebugLog(ref)
 	if ref.PrimaryIndex < 0 || len(ref.KeepIndices) == 0 {
 		if item != nil {
 			item.ProgressMessage = decorate("Commentary scan complete")
-			if e.store != nil {
-				_ = e.store.UpdateProgress(ctx, item)
+			if store != nil {
+				_ = store.UpdateProgress(ctx, item)
 			}
 		}
 		return nil
@@ -95,8 +97,8 @@ func (e *Encoder) refineCommentaryTracks(ctx context.Context, item *queue.Item, 
 	if !needsRemux {
 		if item != nil {
 			item.ProgressMessage = decorate("Commentary scan complete (no changes)")
-			if e.store != nil {
-				_ = e.store.UpdateProgress(ctx, item)
+			if store != nil {
+				_ = store.UpdateProgress(ctx, item)
 			}
 		}
 		return nil
@@ -105,8 +107,8 @@ func (e *Encoder) refineCommentaryTracks(ctx context.Context, item *queue.Item, 
 	tmpPath := deriveTempCommentaryPath(sourcePath)
 	if item != nil {
 		item.ProgressMessage = decorate("Commentary remux (ffmpeg)")
-		if e.store != nil {
-			_ = e.store.UpdateProgress(ctx, item)
+		if store != nil {
+			_ = store.UpdateProgress(ctx, item)
 		}
 	}
 	if err := remuxKeepAudioIndices(ctx, "ffmpeg", sourcePath, tmpPath, ref.KeepIndices); err != nil {
@@ -115,8 +117,8 @@ func (e *Encoder) refineCommentaryTracks(ctx context.Context, item *queue.Item, 
 		}
 		if item != nil {
 			item.ProgressMessage = decorate("Commentary remux failed; keeping original audio")
-			if e.store != nil {
-				_ = e.store.UpdateProgress(ctx, item)
+			if store != nil {
+				_ = store.UpdateProgress(ctx, item)
 			}
 		}
 		_ = os.Remove(tmpPath)
@@ -147,8 +149,8 @@ func (e *Encoder) refineCommentaryTracks(ctx context.Context, item *queue.Item, 
 			dropped = len(ref.Dropped)
 		}
 		item.ProgressMessage = decorate(fmt.Sprintf("Commentary remux complete (kept %d, dropped %d)", len(ref.KeepIndices), dropped))
-		if e.store != nil {
-			_ = e.store.UpdateProgress(ctx, item)
+		if store != nil {
+			_ = store.UpdateProgress(ctx, item)
 		}
 	}
 
