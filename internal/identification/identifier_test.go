@@ -3,6 +3,8 @@ package identification_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -275,6 +277,164 @@ func TestIdentifierAnnotatesTVEpisodes(t *testing.T) {
 	}
 }
 
+func TestIdentifierUsesKeyDBTitleForSearch(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	cfg.MakeMKV.OpticalDrive = "/dev/sr0"
+
+	discID := "0123456789ABCDEF0123456789ABCDEF01234567"
+	keydbPath := filepath.Join(t.TempDir(), "keydb.cfg")
+	if err := os.WriteFile(keydbPath, []byte("0x"+discID+"=KeyDB Title\n"), 0o644); err != nil {
+		t.Fatalf("write keydb: %v", err)
+	}
+	cfg.MakeMKV.KeyDBPath = keydbPath
+
+	overridePath := filepath.Join(t.TempDir(), "overrides.json")
+	overrideData := []byte(`[{"fingerprints":["FP-OVERRIDE"],"disc_ids":["` + discID + `"],"title":"Override Title","tmdb_id":99,"media_type":"tv","season":2}]`)
+	if err := os.WriteFile(overridePath, overrideData, 0o644); err != nil {
+		t.Fatalf("write overrides: %v", err)
+	}
+	cfg.MakeMKV.IdentificationOverridesPath = overridePath
+
+	store := testsupport.MustOpenStore(t, cfg)
+	item, err := store.NewDisc(context.Background(), "Original Title", "FP-OVERRIDE")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+
+	searcher := &recordingSearcher{
+		responses: map[string]*tmdb.Response{
+			"Override Title": {
+				Results: []tmdb.Result{{
+					ID:          11,
+					Title:       "Override Title",
+					MediaType:   "movie",
+					VoteAverage: 8.0,
+					VoteCount:   250,
+					ReleaseDate: "2001-01-01",
+				}},
+				TotalResults: 1,
+			},
+		},
+	}
+	scanner := &stubDiscScanner{result: &disc.ScanResult{
+		Fingerprint: "FP-OVERRIDE",
+		Titles:      []disc.Title{{ID: 1, Name: "Original Title", Duration: 7200}},
+		BDInfo:      &disc.BDInfoResult{DiscID: discID, DiscName: "Disc Name", VolumeIdentifier: "VOL"},
+	}}
+
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), searcher, scanner, nil)
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	uniqueQueries := uniqueStrings(searcher.queries)
+	if len(uniqueQueries) < 2 || uniqueQueries[0] != "KeyDB Title" || uniqueQueries[1] != "Override Title" {
+		t.Fatalf("expected keydb then override query order, got %+v", uniqueQueries)
+	}
+	if !strings.HasPrefix(item.DiscTitle, "Override Title") {
+		t.Fatalf("expected override title to win after fallback, got %q", item.DiscTitle)
+	}
+
+	var spec struct {
+		ContentKey string `json:"content_key"`
+	}
+	if err := json.Unmarshal([]byte(item.RipSpecData), &spec); err != nil {
+		t.Fatalf("decode rip spec: %v", err)
+	}
+	if spec.ContentKey != "tmdb:movie:11" {
+		t.Fatalf("expected content key tmdb:movie:11, got %q", spec.ContentKey)
+	}
+}
+
+func TestIdentifierKeepsKeyDBResultWhenMatched(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	cfg.MakeMKV.OpticalDrive = "/dev/sr0"
+
+	discID := "89ABCDEF0123456789ABCDEF0123456789ABCDEF"
+	keydbPath := filepath.Join(t.TempDir(), "keydb.cfg")
+	if err := os.WriteFile(keydbPath, []byte("0x"+discID+"=KeyDB Match\n"), 0o644); err != nil {
+		t.Fatalf("write keydb: %v", err)
+	}
+	cfg.MakeMKV.KeyDBPath = keydbPath
+
+	overridePath := filepath.Join(t.TempDir(), "overrides.json")
+	overrideData := []byte(`[{"fingerprints":["FP-MATCH"],"disc_ids":["` + discID + `"],"title":"Override Match","tmdb_id":77,"media_type":"tv","season":2}]`)
+	if err := os.WriteFile(overridePath, overrideData, 0o644); err != nil {
+		t.Fatalf("write overrides: %v", err)
+	}
+	cfg.MakeMKV.IdentificationOverridesPath = overridePath
+
+	store := testsupport.MustOpenStore(t, cfg)
+	item, err := store.NewDisc(context.Background(), "Original Title", "FP-MATCH")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+
+	searcher := &recordingSearcher{
+		responses: map[string]*tmdb.Response{
+			"KeyDB Match": {
+				Results: []tmdb.Result{{
+					ID:          55,
+					Title:       "KeyDB Match",
+					MediaType:   "movie",
+					VoteAverage: 7.5,
+					VoteCount:   150,
+					ReleaseDate: "1999-01-01",
+				}},
+				TotalResults: 1,
+			},
+			"Override Match": {
+				Results: []tmdb.Result{{
+					ID:          99,
+					Title:       "Override Match",
+					MediaType:   "movie",
+					VoteAverage: 8.5,
+					VoteCount:   200,
+					ReleaseDate: "2000-01-01",
+				}},
+				TotalResults: 1,
+			},
+		},
+	}
+	scanner := &stubDiscScanner{result: &disc.ScanResult{
+		Fingerprint: "FP-MATCH",
+		Titles:      []disc.Title{{ID: 1, Name: "Original Title", Duration: 7200}},
+		BDInfo:      &disc.BDInfoResult{DiscID: discID, DiscName: "Disc Name", VolumeIdentifier: "VOL"},
+	}}
+
+	handler := identification.NewIdentifierWithDependencies(cfg, store, logging.NewNop(), searcher, scanner, nil)
+	if err := handler.Prepare(context.Background(), item); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := handler.Execute(context.Background(), item); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	uniqueQueries := uniqueStrings(searcher.queries)
+	if len(uniqueQueries) == 0 || uniqueQueries[0] != "KeyDB Match" {
+		t.Fatalf("expected keydb query first, got %+v", uniqueQueries)
+	}
+	if len(uniqueQueries) != 1 {
+		t.Fatalf("expected only keydb query to be used, got %+v", uniqueQueries)
+	}
+	if !strings.HasPrefix(item.DiscTitle, "KeyDB Match") {
+		t.Fatalf("expected keydb title to remain, got %q", item.DiscTitle)
+	}
+
+	var spec struct {
+		ContentKey string `json:"content_key"`
+	}
+	if err := json.Unmarshal([]byte(item.RipSpecData), &spec); err != nil {
+		t.Fatalf("decode rip spec: %v", err)
+	}
+	if spec.ContentKey != "tmdb:movie:55" {
+		t.Fatalf("expected content key tmdb:movie:55, got %q", spec.ContentKey)
+	}
+}
+
 func TestIdentifierHealthReady(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
@@ -314,6 +474,39 @@ type stubSearcher struct {
 	tvCalls     int
 	multiCalls  int
 	seasonCalls int
+}
+
+type recordingSearcher struct {
+	responses map[string]*tmdb.Response
+	queries   []string
+}
+
+func (s *recordingSearcher) SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	s.queries = append(s.queries, query)
+	if resp, ok := s.responses[query]; ok {
+		return resp, nil
+	}
+	return &tmdb.Response{}, nil
+}
+
+func (s *recordingSearcher) SearchTVWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	s.queries = append(s.queries, query)
+	if resp, ok := s.responses[query]; ok {
+		return resp, nil
+	}
+	return &tmdb.Response{}, nil
+}
+
+func (s *recordingSearcher) SearchMultiWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
+	s.queries = append(s.queries, query)
+	if resp, ok := s.responses[query]; ok {
+		return resp, nil
+	}
+	return &tmdb.Response{}, nil
+}
+
+func (s *recordingSearcher) GetSeasonDetails(ctx context.Context, showID int64, seasonNumber int) (*tmdb.SeasonDetails, error) {
+	return &tmdb.SeasonDetails{}, nil
 }
 
 func (s *stubSearcher) SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
@@ -370,6 +563,19 @@ func (s *stubDiscScanner) Scan(ctx context.Context, device string) (*disc.ScanRe
 		return nil, s.err
 	}
 	return s.result, nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 type recordingNotifier struct {
