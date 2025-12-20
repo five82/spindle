@@ -353,9 +353,41 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
 	stageStart := time.Now()
 
+	env, err := e.validateAndParseInputs(ctx, item, logger)
+	if err != nil {
+		return err
+	}
+
+	stagingRoot, encodedDir, err := e.prepareEncodedDirectory(ctx, item, logger)
+	if err != nil {
+		return err
+	}
+
+	jobs, decision, err := e.planEncodeJobs(ctx, item, env, encodedDir, logger)
+	if err != nil {
+		return err
+	}
+
+	encodedPaths, err := e.runEncodingJobs(ctx, item, env, jobs, decision, stagingRoot, encodedDir, logger)
+	if err != nil {
+		return err
+	}
+
+	if err := e.validateEncodedOutputs(ctx, encodedPaths, stageStart); err != nil {
+		return err
+	}
+
+	e.finalizeEncodedItem(item, env, encodedPaths, decision, logger)
+	e.reportEncodingSummary(ctx, item, encodedPaths, stageStart, decision, logger)
+
+	return nil
+}
+
+// validateAndParseInputs parses the rip spec and ensures ripped files are available.
+func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, logger *slog.Logger) (ripspec.Envelope, error) {
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
-		return services.Wrap(
+		return ripspec.Envelope{}, services.Wrap(
 			services.ErrValidation,
 			"encoding",
 			"parse rip spec",
@@ -366,7 +398,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 
 	logger.Debug("starting encoding")
 	if strings.TrimSpace(item.RippedFile) == "" {
-		return services.Wrap(
+		return ripspec.Envelope{}, services.Wrap(
 			services.ErrValidation,
 			"encoding",
 			"validate inputs",
@@ -379,7 +411,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		ripDir := filepath.Dir(strings.TrimSpace(item.RippedFile))
 		if !fileExists(item.RippedFile) {
 			if restored, err := e.cache.Restore(ctx, item, ripDir); err != nil {
-				return services.Wrap(
+				return ripspec.Envelope{}, services.Wrap(
 					services.ErrTransient,
 					"encoding",
 					"restore rip cache",
@@ -392,16 +424,21 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	stagingRoot := item.StagingRoot(e.cfg.StagingDir)
+	return env, nil
+}
+
+// prepareEncodedDirectory creates a clean output directory for encoded files.
+func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item, logger *slog.Logger) (stagingRoot, encodedDir string, err error) {
+	stagingRoot = item.StagingRoot(e.cfg.StagingDir)
 	if stagingRoot == "" {
 		stagingRoot = filepath.Join(strings.TrimSpace(e.cfg.StagingDir), fmt.Sprintf("queue-%d", item.ID))
 	}
-	encodedDir := filepath.Join(stagingRoot, "encoded")
+	encodedDir = filepath.Join(stagingRoot, "encoded")
 	if err := e.cleanupEncodedDir(logger, encodedDir); err != nil {
-		return err
+		return "", "", err
 	}
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
-		return services.Wrap(
+		return "", "", services.Wrap(
 			services.ErrConfiguration,
 			"encoding",
 			"ensure encoded dir",
@@ -410,10 +447,14 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 	logger.Info("prepared encoding directory", logging.String("encoded_dir", encodedDir))
+	return stagingRoot, encodedDir, nil
+}
 
+// planEncodeJobs builds the list of encoding jobs and selects the preset profile.
+func (e *Encoder) planEncodeJobs(ctx context.Context, item *queue.Item, env ripspec.Envelope, encodedDir string, logger *slog.Logger) ([]encodeJob, presetDecision, error) {
 	jobs, err := buildEncodeJobs(env, encodedDir)
 	if err != nil {
-		return services.Wrap(
+		return nil, presetDecision{}, services.Wrap(
 			services.ErrValidation,
 			"encoding",
 			"plan encode jobs",
@@ -433,69 +474,29 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		item.DraptoPresetProfile = "default"
 	}
 
-	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
-	if len(jobs) > 0 {
-		for idx, job := range jobs {
-			label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
-			item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(job.Episode.Key))
-			if item.ActiveEpisodeKey != "" {
-				item.ProgressMessage = fmt.Sprintf("Starting encode %s (%d/%d)", label, idx+1, len(jobs))
-				item.ProgressPercent = 0
-				if err := e.store.UpdateProgress(ctx, item); err != nil {
-					logger.Warn("failed to persist encoding job start", logging.Error(err))
-				}
-			}
-			if err := e.refineCommentaryTracks(ctx, item, job.Source, stagingRoot, label, idx+1, len(jobs), logger); err != nil {
-				logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
-			}
-			path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, job.Episode.Key, idx+1, len(jobs), decision.Profile, logger)
-			if err != nil {
-				return err
-			}
-			finalPath, err := ensureEncodedOutput(path, job.Output, job.Source)
-			if err != nil {
-				return err
-			}
-			env.Assets.AddAsset("encoded", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: finalPath})
-			encodedPaths = append(encodedPaths, finalPath)
+	return jobs, decision, nil
+}
 
-			// Persist rip spec after each episode so API consumers can surface
-			// per-episode progress while the encoding stage is still running.
-			if encoded, err := env.Encode(); err == nil {
-				copy := *item
-				copy.RipSpecData = encoded
-				if err := e.store.Update(ctx, &copy); err != nil {
-					logger.Warn("failed to persist rip spec after episode encode", logging.Error(err))
-				} else {
-					*item = copy
-				}
-			} else {
-				logger.Warn("failed to encode rip spec after episode encode", logging.Error(err))
-			}
+// runEncodingJobs encodes all jobs (episodes or single file) and returns the output paths.
+func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
+
+	if len(jobs) > 0 {
+		paths, err := e.encodeEpisodes(ctx, item, &env, jobs, decision, stagingRoot, encodedDir, logger)
+		if err != nil {
+			return nil, err
 		}
+		encodedPaths = paths
 	} else {
-		label := strings.TrimSpace(item.DiscTitle)
-		if label == "" {
-			label = "Disc"
-		}
-		item.ActiveEpisodeKey = ""
-		if err := e.refineCommentaryTracks(ctx, item, item.RippedFile, stagingRoot, label, 0, 0, logger); err != nil {
-			logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
-		}
-		path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, "", 0, 0, decision.Profile, logger)
+		path, err := e.encodeSingleFile(ctx, item, decision, stagingRoot, encodedDir, logger)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		finalTarget := filepath.Join(encodedDir, deriveEncodedFilename(item.RippedFile))
-		finalPath, err := ensureEncodedOutput(path, finalTarget, item.RippedFile)
-		if err != nil {
-			return err
-		}
-		encodedPaths = append(encodedPaths, finalPath)
+		encodedPaths = append(encodedPaths, path)
 	}
 
 	if len(encodedPaths) == 0 {
-		return services.Wrap(
+		return nil, services.Wrap(
 			services.ErrValidation,
 			"encoding",
 			"locate encoded outputs",
@@ -504,12 +505,97 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
+	return encodedPaths, nil
+}
+
+// encodeEpisodes processes multiple episode encoding jobs.
+func (e *Encoder) encodeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+	encodedPaths := make([]string, 0, len(jobs))
+
+	for idx, job := range jobs {
+		label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
+		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(job.Episode.Key))
+		if item.ActiveEpisodeKey != "" {
+			item.ProgressMessage = fmt.Sprintf("Starting encode %s (%d/%d)", label, idx+1, len(jobs))
+			item.ProgressPercent = 0
+			if err := e.store.UpdateProgress(ctx, item); err != nil {
+				logger.Warn("failed to persist encoding job start", logging.Error(err))
+			}
+		}
+
+		if err := e.refineCommentaryTracks(ctx, item, job.Source, stagingRoot, label, idx+1, len(jobs), logger); err != nil {
+			logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
+		}
+
+		path, err := e.encodeSource(ctx, item, job.Source, encodedDir, label, job.Episode.Key, idx+1, len(jobs), decision.Profile, logger)
+		if err != nil {
+			return nil, err
+		}
+
+		finalPath, err := ensureEncodedOutput(path, job.Output, job.Source)
+		if err != nil {
+			return nil, err
+		}
+
+		env.Assets.AddAsset("encoded", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: finalPath})
+		encodedPaths = append(encodedPaths, finalPath)
+
+		// Persist rip spec after each episode so API consumers can surface
+		// per-episode progress while the encoding stage is still running.
+		if encoded, err := env.Encode(); err == nil {
+			copy := *item
+			copy.RipSpecData = encoded
+			if err := e.store.Update(ctx, &copy); err != nil {
+				logger.Warn("failed to persist rip spec after episode encode", logging.Error(err))
+			} else {
+				*item = copy
+			}
+		} else {
+			logger.Warn("failed to encode rip spec after episode encode", logging.Error(err))
+		}
+	}
+
+	return encodedPaths, nil
+}
+
+// encodeSingleFile processes a single file (movie) encoding.
+func (e *Encoder) encodeSingleFile(ctx context.Context, item *queue.Item, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) (string, error) {
+	label := strings.TrimSpace(item.DiscTitle)
+	if label == "" {
+		label = "Disc"
+	}
+	item.ActiveEpisodeKey = ""
+
+	if err := e.refineCommentaryTracks(ctx, item, item.RippedFile, stagingRoot, label, 0, 0, logger); err != nil {
+		logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
+	}
+
+	path, err := e.encodeSource(ctx, item, item.RippedFile, encodedDir, label, "", 0, 0, decision.Profile, logger)
+	if err != nil {
+		return "", err
+	}
+
+	finalTarget := filepath.Join(encodedDir, deriveEncodedFilename(item.RippedFile))
+	finalPath, err := ensureEncodedOutput(path, finalTarget, item.RippedFile)
+	if err != nil {
+		return "", err
+	}
+
+	return finalPath, nil
+}
+
+// validateEncodedOutputs validates all encoded artifacts.
+func (e *Encoder) validateEncodedOutputs(ctx context.Context, encodedPaths []string, stageStart time.Time) error {
 	for _, path := range encodedPaths {
 		if err := e.validateEncodedArtifact(ctx, path, stageStart); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
+// finalizeEncodedItem updates the queue item with encoding results.
+func (e *Encoder) finalizeEncodedItem(item *queue.Item, env ripspec.Envelope, encodedPaths []string, decision presetDecision, logger *slog.Logger) {
 	if encoded, err := env.Encode(); err == nil {
 		item.RipSpecData = encoded
 	} else {
@@ -520,6 +606,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	item.ProgressStage = "Encoded"
 	item.ProgressPercent = 100
 	item.ActiveEpisodeKey = ""
+
 	if len(encodedPaths) > 1 {
 		item.ProgressMessage = fmt.Sprintf("Encoding completed (%d episodes)", len(encodedPaths))
 	} else if e.client != nil {
@@ -527,10 +614,14 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	} else {
 		item.ProgressMessage = "Encoded placeholder artifact"
 	}
+
 	if suffix := presetSummary(decision); suffix != "" {
 		item.ProgressMessage = fmt.Sprintf("%s – %s", item.ProgressMessage, suffix)
 	}
-	// Calculate resource consumption metrics
+}
+
+// reportEncodingSummary calculates metrics, sends notifications, and logs the summary.
+func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, encodedPaths []string, stageStart time.Time, decision presetDecision, logger *slog.Logger) {
 	var totalInputBytes, totalOutputBytes int64
 	for _, path := range encodedPaths {
 		if info, err := os.Stat(path); err == nil {
@@ -540,6 +631,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	if info, err := os.Stat(strings.TrimSpace(item.RippedFile)); err == nil {
 		totalInputBytes = info.Size()
 	}
+
 	var compressionRatio float64
 	if totalInputBytes > 0 {
 		compressionRatio = float64(totalOutputBytes) / float64(totalInputBytes) * 100
@@ -559,7 +651,6 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Log stage summary with timing and resource metrics
 	summaryAttrs := []logging.Attr{
 		logging.String("encoded_file", item.EncodedFile),
 		logging.Duration("stage_duration", time.Since(stageStart)),
@@ -570,8 +661,6 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		logging.String("preset_profile", strings.TrimSpace(item.DraptoPresetProfile)),
 	}
 	logger.Info("encoding stage summary", logging.Args(summaryAttrs...)...)
-
-	return nil
 }
 
 func (e *Encoder) cleanupEncodedDir(logger *slog.Logger, encodedDir string) error {
