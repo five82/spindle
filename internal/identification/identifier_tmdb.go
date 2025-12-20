@@ -1,0 +1,86 @@
+package identification
+
+import (
+	"context"
+	"fmt"
+
+	"log/slog"
+
+	"spindle/internal/disc"
+	"spindle/internal/identification/tmdb"
+	"spindle/internal/logging"
+)
+
+func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger, title string, opts tmdb.SearchOptions, hint mediaKind) (*tmdb.Response, searchMode, error) {
+	orders := searchOrderForHint(hint)
+	var lastErr error
+	var lastResp *tmdb.Response
+	modeUsed := searchModeMovie
+	for _, mode := range orders {
+		logger.Info("tmdb query details",
+			logging.String("query", title),
+			logging.String("mode", string(mode)),
+			logging.Int("year", opts.Year),
+			logging.String("studio", opts.Studio),
+			logging.Int("runtime_minutes", opts.Runtime),
+			logging.String("runtime_range", fmt.Sprintf("%d-%d", opts.Runtime-10, opts.Runtime+10)))
+		resp, err := i.tmdb.search(ctx, title, opts, mode)
+		if err != nil {
+			lastErr = err
+			logger.Warn("tmdb search attempt failed", logging.String("mode", string(mode)), logging.Error(err))
+			continue
+		}
+		if resp != nil {
+			lastResp = resp
+			modeUsed = mode
+			if len(resp.Results) > 0 {
+				return resp, mode, nil
+			}
+		}
+	}
+	return lastResp, modeUsed, lastErr
+}
+
+func searchOrderForHint(h mediaKind) []searchMode {
+	switch h {
+	case mediaKindTV:
+		return []searchMode{searchModeTV, searchModeMovie, searchModeMulti}
+	case mediaKindMovie:
+		return []searchMode{searchModeMovie, searchModeTV, searchModeMulti}
+	default:
+		return []searchMode{searchModeMovie, searchModeTV, searchModeMulti}
+	}
+}
+
+type episodeAnnotation struct {
+	Season  int
+	Episode int
+	Title   string
+	Air     string
+}
+
+func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, tmdbID int64, seasonNumber int, discNumber int, scanResult *disc.ScanResult) (map[int]episodeAnnotation, []int) {
+	if tmdbID == 0 || seasonNumber <= 0 || scanResult == nil || len(scanResult.Titles) == 0 {
+		return nil, nil
+	}
+	if i.tmdbInfo == nil {
+		logger.Warn("tmdb season lookup unavailable", logging.String("reason", "tmdb client missing"))
+		return nil, nil
+	}
+	season, err := i.tmdbInfo.GetSeasonDetails(ctx, tmdbID, seasonNumber)
+	if err != nil {
+		logger.Warn("tmdb season lookup failed",
+			logging.Int64("tmdb_id", tmdbID),
+			logging.Int("season", seasonNumber),
+			logging.Error(err))
+		return nil, nil
+	}
+	if season == nil || len(season.Episodes) == 0 {
+		logger.Info("tmdb season lookup returned no episodes",
+			logging.Int64("tmdb_id", tmdbID),
+			logging.Int("season", seasonNumber))
+		return nil, nil
+	}
+	matches, numbers := mapEpisodesToTitles(scanResult.Titles, season.Episodes, discNumber)
+	return matches, numbers
+}
