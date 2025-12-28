@@ -61,7 +61,7 @@ Progress messages in `spindle show --follow` tell you what the analyzer is doing
 
 ## Stage 5: Encoding to AV1 (ENCODING -> ENCODED)
 
-1. *(Optional)* If `commentary_detection_enabled = true`, Spindle runs a pre-encode audio pass: it transcribes short WhisperX snippets from the primary audio track and each English stereo track, then keeps only the primary track plus tracks classified as commentary (dropping obvious duplicates / music-only / audio-description tracks). This happens inside the encoding stage (no extra queue status).
+1. Spindle keeps only the primary audio track when refining ripped media before encoding.
 2. Ripped items are then picked up by the Drapto encoder. The queue shows `ENCODING` with live progress updates as Drapto emits JSON status.
 3. Episode-aware jobs are encoded one file at a time, following the rip-spec plan. Each encoded file is recorded back into the spec so recoveries can resume mid-stage. Movie discs still produce a single AV1 file as before.
 4. Encoded output is written to `<staging_dir>/<fingerprint>/encoded/`, preserving the per-episode basenames (for example `South Park - S05E01.mkv`).

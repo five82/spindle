@@ -14,51 +14,34 @@ import (
 	"spindle/internal/services"
 )
 
-type refineCommentaryFunc func(ctx context.Context, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int, logger *slog.Logger) (string, error)
-
 type encodeJobRunner struct {
-	store   *queue.Store
-	runner  *draptoRunner
-	refiner refineCommentaryFunc
+	store  *queue.Store
+	runner *draptoRunner
 }
 
-func newEncodeJobRunner(store *queue.Store, runner *draptoRunner, refiner refineCommentaryFunc) *encodeJobRunner {
-	return &encodeJobRunner{store: store, runner: runner, refiner: refiner}
+func newEncodeJobRunner(store *queue.Store, runner *draptoRunner) *encodeJobRunner {
+	return &encodeJobRunner{store: store, runner: runner}
 }
 
-type encodeResults struct {
-	EncodedPaths  []string
-	SourcePaths   []string
-	WorkingCopies []string
-}
-
-func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) (encodeResults, error) {
+func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
-	sourcePaths := make([]string, 0, maxInt(1, len(jobs)))
-	workingCopies := make([]string, 0, maxInt(1, len(jobs)))
 
 	if len(jobs) > 0 {
-		paths, sources, copies, err := r.encodeEpisodes(ctx, item, &env, jobs, decision, stagingRoot, encodedDir, logger)
+		paths, err := r.encodeEpisodes(ctx, item, &env, jobs, decision, stagingRoot, encodedDir, logger)
 		if err != nil {
-			return encodeResults{}, err
+			return nil, err
 		}
 		encodedPaths = paths
-		sourcePaths = sources
-		workingCopies = copies
 	} else {
-		path, source, copyPath, err := r.encodeSingleFile(ctx, item, decision, stagingRoot, encodedDir, logger)
+		path, err := r.encodeSingleFile(ctx, item, decision, stagingRoot, encodedDir, logger)
 		if err != nil {
-			return encodeResults{}, err
+			return nil, err
 		}
 		encodedPaths = append(encodedPaths, path)
-		sourcePaths = append(sourcePaths, source)
-		if strings.TrimSpace(copyPath) != "" {
-			workingCopies = append(workingCopies, copyPath)
-		}
 	}
 
 	if len(encodedPaths) == 0 {
-		return encodeResults{}, services.Wrap(
+		return nil, services.Wrap(
 			services.ErrValidation,
 			"encoding",
 			"locate encoded outputs",
@@ -67,17 +50,11 @@ func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec
 		)
 	}
 
-	return encodeResults{
-		EncodedPaths:  encodedPaths,
-		SourcePaths:   sourcePaths,
-		WorkingCopies: workingCopies,
-	}, nil
+	return encodedPaths, nil
 }
 
-func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, []string, []string, error) {
+func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, len(jobs))
-	sourcePaths := make([]string, 0, len(jobs))
-	workingCopies := make([]string, 0, len(jobs))
 
 	for idx, job := range jobs {
 		label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
@@ -93,35 +70,22 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 		}
 
 		sourcePath := job.Source
-		if r.refiner != nil {
-			refined, err := r.refiner(ctx, item, sourcePath, stagingRoot, label, idx+1, len(jobs), logger)
-			if err != nil {
-				logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
-			} else if strings.TrimSpace(refined) != "" {
-				sourcePath = refined
-				if !strings.EqualFold(strings.TrimSpace(sourcePath), strings.TrimSpace(job.Source)) {
-					workingCopies = append(workingCopies, sourcePath)
-				}
-			}
-		}
-
 		path := ""
 		if r.runner != nil {
 			var err error
 			path, err = r.runner.Encode(ctx, item, sourcePath, encodedDir, label, job.Episode.Key, idx+1, len(jobs), decision.Profile, logger)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, err
 			}
 		}
 
 		finalPath, err := ensureEncodedOutput(path, job.Output, sourcePath)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
 
 		env.Assets.AddAsset("encoded", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: finalPath})
 		encodedPaths = append(encodedPaths, finalPath)
-		sourcePaths = append(sourcePaths, sourcePath)
 
 		// Persist rip spec after each episode so API consumers can surface
 		// per-episode progress while the encoding stage is still running.
@@ -140,10 +104,10 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 		}
 	}
 
-	return encodedPaths, sourcePaths, workingCopies, nil
+	return encodedPaths, nil
 }
 
-func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) (string, string, string, error) {
+func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) (string, error) {
 	label := strings.TrimSpace(item.DiscTitle)
 	if label == "" {
 		label = "Disc"
@@ -151,33 +115,20 @@ func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item
 	item.ActiveEpisodeKey = ""
 
 	sourcePath := item.RippedFile
-	workingCopy := ""
-	if r.refiner != nil {
-		refined, err := r.refiner(ctx, item, sourcePath, stagingRoot, label, 0, 0, logger)
-		if err != nil {
-			logger.Warn("commentary detection failed; encoding with existing audio streams", logging.Error(err))
-		} else if strings.TrimSpace(refined) != "" {
-			sourcePath = refined
-			if !strings.EqualFold(strings.TrimSpace(sourcePath), strings.TrimSpace(item.RippedFile)) {
-				workingCopy = sourcePath
-			}
-		}
-	}
-
 	path := ""
 	if r.runner != nil {
 		var err error
 		path, err = r.runner.Encode(ctx, item, sourcePath, encodedDir, label, "", 0, 0, decision.Profile, logger)
 		if err != nil {
-			return "", "", "", err
+			return "", err
 		}
 	}
 
 	finalTarget := filepath.Join(encodedDir, deriveEncodedFilename(item.RippedFile))
 	finalPath, err := ensureEncodedOutput(path, finalTarget, sourcePath)
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
 
-	return finalPath, sourcePath, workingCopy, nil
+	return finalPath, nil
 }

@@ -112,19 +112,6 @@ title = "Spindle Preset Decider"                     # Display name sent via X-T
 timeout_seconds = 15                                 # HTTP timeout (seconds)
 
 # ============================================================================
-# COMMENTARY DETECTION (LLM-based audio track classification)
-# ============================================================================
-
-[commentary_detection]
-enabled = false                                      # Use WhisperX + LLM to classify audio tracks
-api_key = ""                                         # Defaults to preset_decider.api_key
-base_url = ""                                        # Defaults to preset_decider.base_url
-model = ""                                           # Defaults to preset_decider.model
-referer = ""                                         # Defaults to preset_decider.referer
-title = "Spindle Commentary Detector"
-timeout_seconds = 45                                 # HTTP timeout (seconds); defaults to preset_decider if 0
-
-# ============================================================================
 # WORKFLOW TUNING
 # ============================================================================
 

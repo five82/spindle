@@ -32,9 +32,6 @@ func (c *Config) Validate() error {
 	if err := c.validatePresetDecider(); err != nil {
 		return err
 	}
-	if err := c.validateCommentaryDetection(); err != nil {
-		return err
-	}
 	if err := c.validateNotifications(); err != nil {
 		return err
 	}
@@ -141,13 +138,6 @@ func (c *Config) validateRipCache() error {
 func (c *Config) validatePresetDecider() error {
 	if c.PresetDecider.Enabled && strings.TrimSpace(c.PresetDecider.APIKey) == "" {
 		return errors.New("preset_decider.api_key must be set when preset_decider.enabled is true (or set OPENROUTER_API_KEY)")
-	}
-	return nil
-}
-
-func (c *Config) validateCommentaryDetection() error {
-	if c.CommentaryDetection.Enabled && strings.TrimSpace(c.CommentaryDetection.APIKey) == "" {
-		return errors.New("commentary_detection.api_key must be set when commentary_detection.enabled is true (or set OPENROUTER_API_KEY)")
 	}
 	return nil
 }

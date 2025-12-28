@@ -107,18 +107,6 @@ type PresetDecider struct {
 	TimeoutSeconds int `toml:"timeout_seconds"`
 }
 
-// CommentaryDetection contains configuration for LLM-based commentary track detection.
-type CommentaryDetection struct {
-	Enabled bool   `toml:"enabled"`
-	APIKey  string `toml:"api_key"`
-	BaseURL string `toml:"base_url"`
-	Model   string `toml:"model"`
-	Referer string `toml:"referer"`
-	Title   string `toml:"title"`
-	// TimeoutSeconds controls the HTTP timeout when calling the commentary LLM.
-	TimeoutSeconds int `toml:"timeout_seconds"`
-}
-
 // Workflow contains configuration for daemon timing and intervals.
 type Workflow struct {
 	QueuePollInterval  int `toml:"queue_poll_interval"`
@@ -137,18 +125,17 @@ type Logging struct {
 
 // Config encapsulates all configuration values for Spindle.
 type Config struct {
-	Paths               Paths               `toml:"paths"`
-	TMDB                TMDB                `toml:"tmdb"`
-	Jellyfin            Jellyfin            `toml:"jellyfin"`
-	Library             Library             `toml:"library"`
-	Notifications       Notifications       `toml:"notifications"`
-	Subtitles           Subtitles           `toml:"subtitles"`
-	RipCache            RipCache            `toml:"rip_cache"`
-	MakeMKV             MakeMKV             `toml:"makemkv"`
-	PresetDecider       PresetDecider       `toml:"preset_decider"`
-	CommentaryDetection CommentaryDetection `toml:"commentary_detection"`
-	Workflow            Workflow            `toml:"workflow"`
-	Logging             Logging             `toml:"logging"`
+	Paths         Paths         `toml:"paths"`
+	TMDB          TMDB          `toml:"tmdb"`
+	Jellyfin      Jellyfin      `toml:"jellyfin"`
+	Library       Library       `toml:"library"`
+	Notifications Notifications `toml:"notifications"`
+	Subtitles     Subtitles     `toml:"subtitles"`
+	RipCache      RipCache      `toml:"rip_cache"`
+	MakeMKV       MakeMKV       `toml:"makemkv"`
+	PresetDecider PresetDecider `toml:"preset_decider"`
+	Workflow      Workflow      `toml:"workflow"`
+	Logging       Logging       `toml:"logging"`
 }
 
 // DefaultConfigPath returns the absolute path to the default configuration file location.

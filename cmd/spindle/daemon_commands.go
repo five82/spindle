@@ -282,7 +282,7 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Optional:    true,
 		},
 	}
-	if cfg.Subtitles.Enabled || cfg.CommentaryDetection.Enabled {
+	if cfg.Subtitles.Enabled {
 		requirements = append(requirements, deps.Requirement{
 			Name:        "uvx",
 			Command:     "uvx",
@@ -304,9 +304,6 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 	}
 	if cfg.PresetDecider.Enabled {
 		statuses = append(statuses, presetDeciderDependencyStatus(cfg))
-	}
-	if cfg.CommentaryDetection.Enabled {
-		statuses = append(statuses, commentaryDetectorDependencyStatus(cfg))
 	}
 	return statuses
 }
@@ -330,35 +327,6 @@ func presetDeciderDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 		Model:   cfg.PresetDecider.Model,
 		Referer: cfg.PresetDecider.Referer,
 		Title:   cfg.PresetDecider.Title,
-	})
-	if err := client.HealthCheck(ctx); err != nil {
-		status.Detail = summarizePresetDeciderError(err)
-		return status
-	}
-	status.Available = true
-	status.Detail = "API reachable"
-	return status
-}
-
-func commentaryDetectorDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
-	status := ipc.DependencyStatus{
-		Name:        "Commentary Detector",
-		Description: "WhisperX + LLM audio track classifier",
-		Optional:    true,
-	}
-	key := strings.TrimSpace(cfg.CommentaryDetection.APIKey)
-	if key == "" {
-		status.Detail = "API key missing (set commentary_detection_api_key or OPENROUTER_API_KEY)"
-		return status
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	client := presetllm.NewClient(presetllm.Config{
-		APIKey:  key,
-		BaseURL: cfg.CommentaryDetection.BaseURL,
-		Model:   cfg.CommentaryDetection.Model,
-		Referer: cfg.CommentaryDetection.Referer,
-		Title:   cfg.CommentaryDetection.Title,
 	})
 	if err := client.HealthCheck(ctx); err != nil {
 		status.Detail = summarizePresetDeciderError(err)

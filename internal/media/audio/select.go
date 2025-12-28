@@ -16,16 +16,6 @@ type Selection struct {
 	RemovedIndices []int
 }
 
-// SelectOptions controls optional selection behavior used by upstream pipeline stages.
-type SelectOptions struct {
-	// KeepEnglishStereo retains all English stereo tracks (2ch) in KeepIndices,
-	// even when they are not confidently classified as commentary.
-	//
-	// This is intended for workflows that perform post-rip audio analysis before
-	// encoding (for example WhisperX/LLM classification).
-	KeepEnglishStereo bool
-}
-
 // PrimaryLabel returns a human-readable summary of the selected primary stream.
 func (s Selection) PrimaryLabel() string {
 	if s.PrimaryIndex < 0 {
@@ -47,11 +37,6 @@ func (s Selection) Changed(totalAudio int) bool {
 // (8ch > 6ch > 2ch), then source quality (lossless > lossy). Spatial audio metadata
 // (Atmos, DTS:X) is not prioritized since it's stripped during Opus transcoding.
 func Select(streams []ffprobe.Stream) Selection {
-	return SelectWithOptions(streams, SelectOptions{})
-}
-
-// SelectWithOptions behaves like Select but can retain additional candidate tracks when requested.
-func SelectWithOptions(streams []ffprobe.Stream, opts SelectOptions) Selection {
 	candidates := buildCandidates(streams)
 	if len(candidates) == 0 {
 		return Selection{PrimaryIndex: -1}
@@ -68,30 +53,6 @@ func SelectWithOptions(streams []ffprobe.Stream, opts SelectOptions) Selection {
 		Primary:      primary.stream,
 		PrimaryIndex: primary.stream.Index,
 		KeepIndices:  []int{primary.stream.Index},
-	}
-
-	if opts.KeepEnglishStereo {
-		// Preserve original stream order for deterministic remux output, while
-		// ensuring the primary track is first.
-		ordered := append(candidateList(nil), english...)
-		sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].order < ordered[j].order })
-		seen := map[int]struct{}{primary.stream.Index: {}}
-		for _, cand := range ordered {
-			if cand.stream.Index == primary.stream.Index {
-				continue
-			}
-			if cand.channels != 2 {
-				continue
-			}
-			if cand.stream.Disposition != nil && cand.stream.Disposition["dub"] == 1 {
-				continue
-			}
-			if _, ok := seen[cand.stream.Index]; ok {
-				continue
-			}
-			seen[cand.stream.Index] = struct{}{}
-			selection.KeepIndices = append(selection.KeepIndices, cand.stream.Index)
-		}
 	}
 
 	kept := make(map[int]struct{}, len(selection.KeepIndices))

@@ -3,10 +3,9 @@
 **Spindle automates the trip from optical disc to Jellyfin-ready library.** Insert a
 disc and the daemon handles identification (TMDB), ripping (MakeMKV),
 encoding to AV1 (drapto), optional subtitle generation (OpenSubtitles +
-WhisperX), optional commentary-track retention, organization, Jellyfin refreshes,
-and notifications. Opt-in LLM integrations (via OpenRouter) can auto-select
-Drapto's grain/clean presets per title and help detect commentary audio tracks
-when disc metadata is unreliable.
+WhisperX), organization, Jellyfin refreshes, and notifications. Opt-in LLM
+integrations (via OpenRouter) can auto-select Drapto's grain/clean presets per
+title.
 
 > ⚙️ Single Go binary (`spindle`) drives both the CLI and daemon.
 > 🚧 Early-stage project: expect frequent changes.
@@ -117,15 +116,6 @@ The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
   sticks with Drapto's built-in defaults and never passes custom presets.
 - See `docs/preset-decider.md` for additional details and troubleshooting tips.
 
-### Commentary tracks (optional)
-
-- By default, Spindle keeps only the primary audio track when ripping/encoding.
-- Set `commentary_detection_enabled = true` to keep commentary tracks too. The
-  detector transcribes short WhisperX snippets from the primary track plus each
-  English stereo track, then classifies which candidates are commentary (and
-  drops obvious duplicates / music-only / audio description tracks).
-- See `docs/commentary-detection.md` for configuration and behavior details.
-
 ## Documentation Map
 
 - `docs/configuration.md` — every config key plus tuning tips.
@@ -134,7 +124,6 @@ The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
 - `docs/api.md` — HTTP API payloads.
 - `docs/content-identification.md` — analyzer internals and debugging notes.
 - `docs/preset-decider.md` — LLM-driven Drapto preset selection guide.
-- `docs/commentary-detection.md` — WhisperX + LLM commentary detector guide.
 - `docs/development.md` — hacking on Spindle, architecture deep dives.
 
 ## Troubleshooting

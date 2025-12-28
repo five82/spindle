@@ -514,9 +514,7 @@ func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {
 	if totalAudio <= 1 {
 		return nil
 	}
-	selection := audio.SelectWithOptions(probe.Streams, audio.SelectOptions{
-		KeepEnglishStereo: r.cfg != nil && r.cfg.CommentaryDetection.Enabled,
-	})
+	selection := audio.Select(probe.Streams)
 	if !selection.Changed(totalAudio) {
 		return nil
 	}

@@ -28,9 +28,6 @@ func (c *Config) normalize() error {
 	if err := c.normalizePresetDecider(); err != nil {
 		return err
 	}
-	if err := c.normalizeCommentaryDetection(); err != nil {
-		return err
-	}
 	c.normalizeLogging()
 	return nil
 }
@@ -208,53 +205,6 @@ func (c *Config) normalizePresetDecider() error {
 			c.PresetDecider.APIKey = strings.TrimSpace(value)
 		} else if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
 			c.PresetDecider.APIKey = strings.TrimSpace(value)
-		}
-	}
-	return nil
-}
-
-func (c *Config) normalizeCommentaryDetection() error {
-	c.CommentaryDetection.BaseURL = strings.TrimSpace(c.CommentaryDetection.BaseURL)
-	if c.CommentaryDetection.BaseURL == "" {
-		c.CommentaryDetection.BaseURL = c.PresetDecider.BaseURL
-	}
-	if c.CommentaryDetection.BaseURL == "" {
-		c.CommentaryDetection.BaseURL = defaultPresetDeciderBaseURL
-	}
-	c.CommentaryDetection.Model = strings.TrimSpace(c.CommentaryDetection.Model)
-	if c.CommentaryDetection.Model == "" {
-		c.CommentaryDetection.Model = c.PresetDecider.Model
-	}
-	if c.CommentaryDetection.Model == "" {
-		c.CommentaryDetection.Model = defaultPresetDeciderModel
-	}
-	c.CommentaryDetection.Referer = strings.TrimSpace(c.CommentaryDetection.Referer)
-	if c.CommentaryDetection.Referer == "" {
-		c.CommentaryDetection.Referer = c.PresetDecider.Referer
-	}
-	if c.CommentaryDetection.Referer == "" {
-		c.CommentaryDetection.Referer = defaultPresetDeciderReferer
-	}
-	c.CommentaryDetection.Title = strings.TrimSpace(c.CommentaryDetection.Title)
-	if c.CommentaryDetection.Title == "" {
-		c.CommentaryDetection.Title = defaultCommentaryDetectionTitle
-	}
-	if c.CommentaryDetection.TimeoutSeconds <= 0 {
-		if c.PresetDecider.TimeoutSeconds > 0 {
-			c.CommentaryDetection.TimeoutSeconds = c.PresetDecider.TimeoutSeconds
-		} else {
-			c.CommentaryDetection.TimeoutSeconds = defaultCommentaryDetectionTimeoutSeconds
-		}
-	}
-	c.CommentaryDetection.APIKey = strings.TrimSpace(c.CommentaryDetection.APIKey)
-	if c.CommentaryDetection.APIKey == "" {
-		c.CommentaryDetection.APIKey = c.PresetDecider.APIKey
-	}
-	if c.CommentaryDetection.APIKey == "" {
-		if value, ok := os.LookupEnv("COMMENTARY_DETECTION_API_KEY"); ok {
-			c.CommentaryDetection.APIKey = strings.TrimSpace(value)
-		} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
-			c.CommentaryDetection.APIKey = strings.TrimSpace(value)
 		}
 	}
 	return nil

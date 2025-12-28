@@ -1,40 +1,38 @@
 package config
 
 const (
-	defaultStagingDir                        = "~/.local/share/spindle/staging"
-	defaultLibraryDir                        = "~/library"
-	defaultLogDir                            = "~/.local/share/spindle/logs"
-	defaultLogRetentionDays                  = 60
-	defaultOpenSubtitlesCacheDir             = "~/.local/share/spindle/cache/opensubtitles"
-	defaultWhisperXCacheDir                  = "~/.local/share/spindle/cache/whisperx"
-	defaultReviewDir                         = "~/review"
-	defaultOpticalDrive                      = "/dev/sr0"
-	defaultMoviesDir                         = "movies"
-	defaultTVDir                             = "tv"
-	defaultTMDBLanguage                      = "en-US"
-	defaultTMDBBaseURL                       = "https://api.themoviedb.org/3"
-	defaultLogFormat                         = "console"
-	defaultLogLevel                          = "info"
-	defaultWorkflowHeartbeatInterval         = 15
-	defaultWorkflowHeartbeatTimeout          = 120
-	defaultAPIBind                           = "127.0.0.1:7487"
-	defaultNotifyMinRipSeconds               = 120
-	defaultNotifyQueueMinItems               = 2
-	defaultNotifyDedupWindowSeconds          = 600
-	defaultJellyfinEnabled                   = false
-	defaultKeyDBPath                         = "~/.config/spindle/keydb/KEYDB.cfg"
-	defaultKeyDBDownloadURL                  = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
-	defaultKeyDBDownloadTimeout              = 300
-	defaultIdentificationOverridesPath       = "~/.config/spindle/overrides/identification.json"
-	defaultOpenSubtitlesUserAgent            = "Spindle/dev"
-	defaultRipCacheMaxGiB                    = 150
-	defaultPresetDeciderBaseURL              = "https://openrouter.ai/api/v1/chat/completions"
-	defaultPresetDeciderModel                = "deepseek/deepseek-v3.2"
-	defaultPresetDeciderReferer              = "https://github.com/five82/spindle"
-	defaultPresetDeciderTitle                = "Spindle Preset Decider"
-	defaultPresetDeciderTimeoutSeconds       = 15
-	defaultCommentaryDetectionTitle          = "Spindle Commentary Detector"
-	defaultCommentaryDetectionTimeoutSeconds = 45
+	defaultStagingDir                  = "~/.local/share/spindle/staging"
+	defaultLibraryDir                  = "~/library"
+	defaultLogDir                      = "~/.local/share/spindle/logs"
+	defaultLogRetentionDays            = 60
+	defaultOpenSubtitlesCacheDir       = "~/.local/share/spindle/cache/opensubtitles"
+	defaultWhisperXCacheDir            = "~/.local/share/spindle/cache/whisperx"
+	defaultReviewDir                   = "~/review"
+	defaultOpticalDrive                = "/dev/sr0"
+	defaultMoviesDir                   = "movies"
+	defaultTVDir                       = "tv"
+	defaultTMDBLanguage                = "en-US"
+	defaultTMDBBaseURL                 = "https://api.themoviedb.org/3"
+	defaultLogFormat                   = "console"
+	defaultLogLevel                    = "info"
+	defaultWorkflowHeartbeatInterval   = 15
+	defaultWorkflowHeartbeatTimeout    = 120
+	defaultAPIBind                     = "127.0.0.1:7487"
+	defaultNotifyMinRipSeconds         = 120
+	defaultNotifyQueueMinItems         = 2
+	defaultNotifyDedupWindowSeconds    = 600
+	defaultJellyfinEnabled             = false
+	defaultKeyDBPath                   = "~/.config/spindle/keydb/KEYDB.cfg"
+	defaultKeyDBDownloadURL            = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
+	defaultKeyDBDownloadTimeout        = 300
+	defaultIdentificationOverridesPath = "~/.config/spindle/overrides/identification.json"
+	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
+	defaultRipCacheMaxGiB              = 150
+	defaultPresetDeciderBaseURL        = "https://openrouter.ai/api/v1/chat/completions"
+	defaultPresetDeciderModel          = "deepseek/deepseek-v3.2"
+	defaultPresetDeciderReferer        = "https://github.com/five82/spindle"
+	defaultPresetDeciderTitle          = "Spindle Preset Decider"
+	defaultPresetDeciderTimeoutSeconds = 15
 )
 
 // Default returns a Config populated with repository defaults.
@@ -98,13 +96,6 @@ func Default() Config {
 			Referer:        defaultPresetDeciderReferer,
 			Title:          defaultPresetDeciderTitle,
 			TimeoutSeconds: defaultPresetDeciderTimeoutSeconds,
-		},
-		CommentaryDetection: CommentaryDetection{
-			BaseURL:        defaultPresetDeciderBaseURL,
-			Model:          defaultPresetDeciderModel,
-			Referer:        defaultPresetDeciderReferer,
-			Title:          defaultCommentaryDetectionTitle,
-			TimeoutSeconds: defaultCommentaryDetectionTimeoutSeconds,
 		},
 		Workflow: Workflow{
 			QueuePollInterval:  5,

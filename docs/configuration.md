@@ -135,30 +135,6 @@ alignment artifacts inside each queue item’s staging folder for debugging.
   `deepseek/deepseek-v3.2`; supply an API key via config or
   `OPENROUTER_API_KEY`.
 
-### Commentary detection (optional)
-
-Spindle can optionally detect and retain commentary tracks even when disc
-metadata is missing or misleading. When enabled, Spindle:
-
-- Keeps the primary audio track plus all English stereo tracks in the rip.
-- Before encoding, transcribes short WhisperX snippets from each candidate and
-  keeps only the primary track plus the tracks classified as commentary.
-
-This feature currently considers English stereo tracks only.
-
-| Key | Description |
-| --- | --- |
-| `commentary_detection_enabled` | Master toggle. When false, Spindle keeps only the primary audio track. |
-| `commentary_detection_model` | OpenRouter model identifier; defaults to `preset_decider_model` when empty. |
-| `commentary_detection_base_url` | OpenRouter base URL; defaults to `preset_decider_base_url` when empty. |
-| `commentary_detection_api_key` | API key; defaults to `preset_decider_api_key` when empty, or `OPENROUTER_API_KEY`. |
-| `commentary_detection_referer` | Attribution header; defaults to `preset_decider_referer` when empty. |
-| `commentary_detection_title` | Attribution header title; defaults to `Spindle Commentary Detector`. |
-| `commentary_detection_timeout_seconds` | HTTP timeout in seconds; defaults to `preset_decider_timeout_seconds` when 0 (default 45). |
-
-Set `SPD_DEBUG_COMMENTARY_KEEP=1` before launching the daemon to retain
-commentary-detector artifacts under each queue item’s staging folder.
-
 ## Queue & Workflow Toggles
 
 | Key | Details |
