@@ -113,17 +113,17 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	encodedPaths, err := e.runEncodingJobs(ctx, item, env, jobs, decision, stagingRoot, encodedDir, logger)
+	results, err := e.runEncodingJobs(ctx, item, env, jobs, decision, stagingRoot, encodedDir, logger)
 	if err != nil {
 		return err
 	}
 
-	if err := e.validateEncodedOutputs(ctx, encodedPaths, stageStart); err != nil {
+	if err := e.validateEncodedOutputs(ctx, results.EncodedPaths, stageStart); err != nil {
 		return err
 	}
 
-	e.finalizeEncodedItem(item, env, encodedPaths, decision, logger)
-	e.reportEncodingSummary(ctx, item, encodedPaths, stageStart, decision, logger)
+	e.finalizeEncodedItem(item, env, results.EncodedPaths, decision, logger)
+	e.reportEncodingSummary(ctx, item, results.EncodedPaths, results.SourcePaths, results.WorkingCopies, stageStart, decision, logger)
 
 	return nil
 }
@@ -149,7 +149,7 @@ func (e *Encoder) ensureJobRunner() *encodeJobRunner {
 	return e.jobRunner
 }
 
-func (e *Encoder) refineCommentary(ctx context.Context, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int, logger *slog.Logger) error {
+func (e *Encoder) refineCommentary(ctx context.Context, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int, logger *slog.Logger) (string, error) {
 	if e.commentaryRefiner == nil {
 		e.commentaryRefiner = newCommentaryRefiner(e.cfg, e.store, e.logger, e.commentary)
 	}
@@ -223,8 +223,8 @@ func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item,
 	return stagingRoot, encodedDir, nil
 }
 
-// runEncodingJobs encodes all jobs (episodes or single file) and returns the output paths.
-func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+// runEncodingJobs encodes all jobs (episodes or single file) and returns the output paths and sources used.
+func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) (encodeResults, error) {
 	return e.ensureJobRunner().Run(ctx, item, env, jobs, decision, stagingRoot, encodedDir, logger)
 }
 
@@ -255,7 +255,7 @@ func (e *Encoder) finalizeEncodedItem(item *queue.Item, env ripspec.Envelope, en
 }
 
 // reportEncodingSummary calculates metrics, sends notifications, and logs the summary.
-func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, encodedPaths []string, stageStart time.Time, decision presetDecision, logger *slog.Logger) {
+func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, encodedPaths, sourcePaths, workingCopies []string, stageStart time.Time, decision presetDecision, logger *slog.Logger) {
 	var totalInputBytes, totalOutputBytes int64
 	for _, path := range encodedPaths {
 		if info, err := os.Stat(path); err == nil {
@@ -293,6 +293,12 @@ func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, e
 		logging.Float64("compression_ratio_percent", compressionRatio),
 		logging.Int("files_encoded", len(encodedPaths)),
 		logging.String("preset_profile", strings.TrimSpace(item.DraptoPresetProfile)),
+	}
+	if len(workingCopies) > 0 {
+		summaryAttrs = append(summaryAttrs, logging.Any("commentary_working_copies", workingCopies))
+	}
+	if len(sourcePaths) > 0 {
+		summaryAttrs = append(summaryAttrs, logging.Any("source_paths", sourcePaths))
 	}
 	logger.Info("encoding stage summary", logging.Args(summaryAttrs...)...)
 }

@@ -28,9 +28,9 @@ func (r *commentaryRefiner) SetLogger(logger *slog.Logger) {
 	}
 }
 
-func (r *commentaryRefiner) Refine(ctx context.Context, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int) error {
+func (r *commentaryRefiner) Refine(ctx context.Context, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int) (string, error) {
 	if r == nil || r.cfg == nil || r.core == nil || !r.cfg.CommentaryDetection.Enabled {
-		return nil
+		return sourcePath, nil
 	}
 	return refineCommentaryTracks(ctx, r.cfg, r.store, r.core, item, sourcePath, stagingRoot, label, episodeIndex, episodeCount, r.logger)
 }

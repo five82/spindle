@@ -19,13 +19,13 @@ import (
 	"spindle/internal/services"
 )
 
-func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queue.Store, detector *commentaryid.Detector, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int, logger *slog.Logger) error {
+func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queue.Store, detector *commentaryid.Detector, item *queue.Item, sourcePath, stagingRoot, label string, episodeIndex, episodeCount int, logger *slog.Logger) (string, error) {
 	if cfg == nil || detector == nil || !cfg.CommentaryDetection.Enabled {
-		return nil
+		return sourcePath, nil
 	}
 	sourcePath = strings.TrimSpace(sourcePath)
 	if sourcePath == "" {
-		return nil
+		return sourcePath, nil
 	}
 
 	decorate := func(step string) string {
@@ -45,17 +45,35 @@ func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queu
 	ffprobeBinary := cfg.FFprobeBinary()
 	probe, err := encodeProbe(ctx, ffprobeBinary, sourcePath)
 	if err != nil {
-		return services.Wrap(services.ErrExternalTool, "encoding", "ffprobe commentary detection", "Failed to inspect source file audio streams", err)
+		return sourcePath, services.Wrap(services.ErrExternalTool, "encoding", "ffprobe commentary detection", "Failed to inspect source file audio streams", err)
 	}
 	if probe.AudioStreamCount() <= 1 {
-		return nil
+		return sourcePath, nil
 	}
 
-	workDir := strings.TrimSpace(stagingRoot)
-	if workDir == "" {
-		workDir = filepath.Dir(sourcePath)
+	baseDir := strings.TrimSpace(stagingRoot)
+	if baseDir == "" {
+		baseDir = filepath.Dir(sourcePath)
 	}
-	workDir = filepath.Join(workDir, "commentary")
+	workDir := filepath.Join(baseDir, "commentary")
+
+	workingSource := sourcePath
+	if isPathWithin(strings.TrimSpace(cfg.RipCache.Dir), sourcePath) {
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			return sourcePath, services.Wrap(services.ErrConfiguration, "encoding", "commentary working copy", "Failed to create commentary working directory", err)
+		}
+		copyPath := filepath.Join(workDir, "source-"+filepath.Base(sourcePath))
+		if err := copyFile(sourcePath, copyPath); err != nil {
+			return sourcePath, services.Wrap(services.ErrTransient, "encoding", "commentary working copy", "Failed to copy rip cache source for commentary detection", err)
+		}
+		if logger != nil {
+			logger.Info("created commentary working copy from rip cache",
+				logging.String("source", sourcePath),
+				logging.String("working_copy", copyPath),
+			)
+		}
+		workingSource = copyPath
+	}
 
 	if item != nil {
 		item.ProgressMessage = decorate("Commentary scan (WhisperX)")
@@ -64,9 +82,9 @@ func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queu
 		}
 	}
 
-	ref, err := detector.Refine(ctx, sourcePath, workDir)
+	ref, err := detector.Refine(ctx, workingSource, workDir)
 	if err != nil {
-		return err
+		return workingSource, err
 	}
 	detector.DebugLog(ref)
 	if ref.PrimaryIndex < 0 || len(ref.KeepIndices) == 0 {
@@ -76,7 +94,7 @@ func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queu
 				_ = store.UpdateProgress(ctx, item)
 			}
 		}
-		return nil
+		return workingSource, nil
 	}
 
 	keepSet := make(map[int]struct{}, len(ref.KeepIndices))
@@ -101,17 +119,17 @@ func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queu
 				_ = store.UpdateProgress(ctx, item)
 			}
 		}
-		return nil
+		return workingSource, nil
 	}
 
-	tmpPath := deriveTempCommentaryPath(sourcePath)
+	tmpPath := deriveTempCommentaryPath(workingSource)
 	if item != nil {
 		item.ProgressMessage = decorate("Commentary remux (ffmpeg)")
 		if store != nil {
 			_ = store.UpdateProgress(ctx, item)
 		}
 	}
-	if err := remuxKeepAudioIndices(ctx, "ffmpeg", sourcePath, tmpPath, ref.KeepIndices); err != nil {
+	if err := remuxKeepAudioIndices(ctx, "ffmpeg", workingSource, tmpPath, ref.KeepIndices); err != nil {
 		if logger != nil {
 			logger.Warn("commentary remux failed; keeping original audio streams", logging.Error(err))
 		}
@@ -122,16 +140,16 @@ func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queu
 			}
 		}
 		_ = os.Remove(tmpPath)
-		return nil
+		return workingSource, nil
 	}
-	if err := os.Rename(tmpPath, sourcePath); err != nil {
+	if err := os.Rename(tmpPath, workingSource); err != nil {
 		_ = os.Remove(tmpPath)
-		return services.Wrap(services.ErrTransient, "encoding", "finalize commentary remux", "Failed to finalize remuxed source file", err)
+		return workingSource, services.Wrap(services.ErrTransient, "encoding", "finalize commentary remux", "Failed to finalize remuxed source file", err)
 	}
 
 	if logger != nil {
 		fields := []any{
-			logging.String("source", sourcePath),
+			logging.String("source", workingSource),
 			logging.Int("kept_audio_streams", len(ref.KeepIndices)),
 			logging.Any("kept_audio_indices", ref.KeepIndices),
 		}
@@ -154,7 +172,7 @@ func refineCommentaryTracks(ctx context.Context, cfg *config.Config, store *queu
 		}
 	}
 
-	return nil
+	return workingSource, nil
 }
 
 func deriveTempCommentaryPath(src string) string {
@@ -190,4 +208,19 @@ func remuxKeepAudioIndices(ctx context.Context, ffmpegBinary, src, dst string, k
 		return fmt.Errorf("ffmpeg remux: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+func isPathWithin(baseDir, targetPath string) bool {
+	baseDir = strings.TrimSpace(baseDir)
+	targetPath = strings.TrimSpace(targetPath)
+	if baseDir == "" || targetPath == "" {
+		return false
+	}
+	baseDir = filepath.Clean(baseDir)
+	targetPath = filepath.Clean(targetPath)
+	rel, err := filepath.Rel(baseDir, targetPath)
+	if err != nil {
+		return false
+	}
+	return rel != "." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != ".."
 }

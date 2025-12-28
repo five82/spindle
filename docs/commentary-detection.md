@@ -16,8 +16,9 @@ During the encoding stage (before Drapto starts), Spindle:
 4. Drops obvious non-commentary candidates (duplicates, music-only).
 5. Optionally calls an OpenRouter-hosted LLM to classify the remaining tracks as
    `commentary` vs `audio_description` vs `unknown`.
-6. Remuxes the source MKV to keep only the primary track + detected commentary
-   tracks, then proceeds with encoding.
+6. Remuxes a working copy of the source MKV to keep only the primary track +
+   detected commentary tracks, then proceeds with encoding (the rip cache stays
+   untouched).
 
 When commentary detection is disabled, Spindle keeps only the primary audio
 track (no heuristics).
