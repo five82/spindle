@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"log/slog"
@@ -40,6 +41,7 @@ type Catalog struct {
 	modTime     time.Time
 	maxAge      time.Duration
 	refresh     sync.Mutex
+	refreshing  atomic.Bool
 	logger      *slog.Logger
 	downloadURL string
 	client      *http.Client
@@ -88,51 +90,50 @@ func (c *Catalog) Lookup(discID string) (Entry, bool, error) {
 }
 
 func (c *Catalog) ensureLoaded() error {
-	// Attempt to refresh the catalog if it is missing or stale.
-	needsRefresh, err := c.needsRefresh()
-	if err != nil {
-		return err
-	}
-	if needsRefresh {
-		if c.logger != nil {
-			c.logger.Info("refreshing keydb catalog", slog.String("path", c.path))
-		}
-		if err := c.refreshRemote(); err != nil {
-			c.mu.RLock()
-			haveCache := c.entries != nil
-			c.mu.RUnlock()
-			if !haveCache {
-				if c.logger != nil {
-					c.logger.Warn("keydb refresh failed", slog.String("path", c.path), slog.String("error", err.Error()))
-				}
-				return err
-			}
-			if c.logger != nil {
-				c.logger.Warn("keydb refresh failed", slog.String("path", c.path), slog.String("error", err.Error()))
-			}
-		}
-	}
-
 	info, err := os.Stat(c.path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			c.mu.Lock()
-			c.entries = map[string]Entry{}
-			c.modTime = time.Time{}
-			c.mu.Unlock()
-			return nil
+			if c.logger != nil {
+				c.logger.Info("refreshing keydb catalog", slog.String("path", c.path))
+			}
+			if err := c.refreshRemote(); err != nil {
+				if c.logger != nil {
+					c.logger.Warn("keydb refresh failed", slog.String("path", c.path), slog.String("error", err.Error()))
+				}
+				c.mu.Lock()
+				c.entries = map[string]Entry{}
+				c.modTime = time.Time{}
+				c.mu.Unlock()
+				return nil
+			}
+
+			info, err = os.Stat(c.path)
+			if err != nil {
+				c.mu.Lock()
+				c.entries = map[string]Entry{}
+				c.modTime = time.Time{}
+				c.mu.Unlock()
+				return nil
+			}
+		} else {
+			return err
 		}
-		return err
 	}
 
+	// Always load from disk if the file exists and hasn't been loaded yet.
 	c.mu.RLock()
 	alreadyLoaded := c.entries != nil && c.modTime.Equal(info.ModTime())
 	c.mu.RUnlock()
 	if alreadyLoaded {
+		c.refreshRemoteAsync()
 		return nil
 	}
 
-	return c.loadFromDisk(info)
+	if err := c.loadFromDisk(info); err != nil {
+		return err
+	}
+	c.refreshRemoteAsync()
+	return nil
 }
 
 func (c *Catalog) needsRefresh() (bool, error) {
@@ -147,6 +148,27 @@ func (c *Catalog) needsRefresh() (bool, error) {
 		return false, nil
 	}
 	return time.Since(info.ModTime()) > c.maxAge, nil
+}
+
+func (c *Catalog) refreshRemoteAsync() {
+	needsRefresh, err := c.needsRefresh()
+	if err != nil || !needsRefresh {
+		return
+	}
+	if !c.refreshing.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer c.refreshing.Store(false)
+		if c.logger != nil {
+			c.logger.Info("refreshing keydb catalog", slog.String("path", c.path))
+		}
+		if err := c.refreshRemote(); err != nil {
+			if c.logger != nil {
+				c.logger.Warn("keydb refresh failed", slog.String("path", c.path), slog.String("error", err.Error()))
+			}
+		}
+	}()
 }
 
 func (c *Catalog) loadFromDisk(info fs.FileInfo) error {
