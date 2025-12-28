@@ -112,11 +112,6 @@ func classifyDiscType(fstype string) string {
 	}
 }
 
-func executableAvailable(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
-}
-
 func directoryStatusLine(label, path string, colorize bool) string {
 	if err := checkDirectoryAccess(path); err != nil {
 		return renderStatusLine(label, statusError, fmt.Sprintf("%s (error: %v)", path, err), colorize)

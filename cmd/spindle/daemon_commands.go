@@ -192,11 +192,6 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusWarn, "Not running (run `spindle start`)", colorize))
 			}
 			fmt.Fprintln(stdout, detectDiscLine(cfg.MakeMKV.OpticalDrive, colorize))
-			if executableAvailable("drapto") {
-				fmt.Fprintln(stdout, renderStatusLine("Drapto", statusOK, "Available", colorize))
-			} else {
-				fmt.Fprintln(stdout, renderStatusLine("Drapto", statusError, "Not available", colorize))
-			}
 			fmt.Fprintln(stdout, jellyfinStatusLine(cfg, colorize))
 			if strings.TrimSpace(cfg.Notifications.NtfyTopic) != "" {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusOK, "Configured", colorize))
