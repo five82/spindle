@@ -39,7 +39,7 @@ Integration contracts to keep in mind while changing code:
 
 ## Project Snapshot
 
-Spindle is a **personal project maintained by a single developer** that automates the journey from optical disc to organized Plex library. It coordinates disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata lookup (TMDB), Plex library updates, and notifications (ntfy).
+Spindle is a **personal project maintained by a single developer** that automates the journey from optical disc to organized Jellyfin library. It coordinates disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata lookup (TMDB), Jellyfin library updates, and notifications (ntfy).
 
 - **Scope**: Single-developer personal project - avoid over-engineering
 - **Environment**: Go 1.25+ toolchain plus MakeMKV/Drapto binaries.
@@ -94,7 +94,7 @@ If you add or reorder phases, update the enums, workflow routing, CLI presentati
 - Paths: `staging_dir`, `library_dir`, `review_dir`, `log_dir`, `opensubtitles_cache_dir`, `whisperx_cache_dir`, and `rip_cache_dir`; keep them on fast storage because stages stream large files.
 - Subtitles & WhisperX: toggle with `subtitles_enabled`; OpenSubtitles requires `opensubtitles_enabled`, `opensubtitles_api_key`, `opensubtitles_user_agent`, optional `opensubtitles_user_token`, and `opensubtitles_languages`; WhisperX tuning lives behind `whisperx_cuda_enabled`, `whisperx_vad_method`, and `whisperx_hf_token`.
 - Rip cache: enable via `rip_cache_enabled`, size with `rip_cache_max_gib`, and point at a volume that can hold repeated rips; the cache honors a 20% free-space floor automatically.
-- Plex: `plex_link_enabled`, `plex_url`, `plex_auth_path`, `movies_library`, and `tv_library` must be set before `spindle plex link` can finish; otherwise the organizer skips Plex refreshes.
+- Jellyfin: `jellyfin.enabled`, `jellyfin.url`, and `jellyfin.api_key` must be set before organizer-triggered refreshes run; otherwise the organizer skips Jellyfin refreshes.
 - Notifications & misc: `ntfy_topic` enables push updates, `keydb_path`/`keydb_download_url` keep MakeMKV happy, and `api_bind` exposes the queue health endpoint.
 
 ## Package Documentation
@@ -110,7 +110,7 @@ If you add or reorder phases, update the enums, workflow routing, CLI presentati
 The Go tests lean heavily on integration-style coverage:
 
 - Key packages: `internal/queue`, `internal/workflow`, `internal/identification`, `internal/ripping`, `internal/encoding`, `internal/organizer`, and `cmd/spindle` integration tests.
-- Use interfaces to stub external services (TMDB, Plex, Drapto, MakeMKV) and temporary SQLite databases for queue tests.
+- Use interfaces to stub external services (TMDB, Jellyfin, Drapto, MakeMKV) and temporary SQLite databases for queue tests.
 - Add tests alongside features and keep assertions at observable boundaries.
 
 Formatting and linting are enforced by `golangci-lint`; run it directly or via `./check-ci.sh`.
@@ -123,7 +123,7 @@ Formatting and linting are enforced by `golangci-lint`; run it directly or via `
 - Subtitle tooling: `spindle gensubtitle /path/to/video.mkv [--forceai]` regenerates SRTs for historic encodes using the same OpenSubtitles/WhisperX pipeline as the queue.
 - Disc identification: `spindle identify [/dev/... | --verbose]` runs the TMDB matcher without touching the queue so you can debug metadata issues offline.
 - Configuration helpers: `spindle config init` scaffolds a config, `spindle config validate` sanity-checks the active file before launches.
-- Notifications & Plex: `spindle test-notify` exercises ntfy; `spindle plex link` runs the device-link handshake so organizer-triggered scans succeed.
+- Notifications & Jellyfin: `spindle test-notify` exercises ntfy; provide Jellyfin credentials so organizer-triggered scans succeed.
 - Rip cache: `spindle cache stats|prune` inspects or trims cached rips; useful before/after enabling `rip_cache_enabled`.
 - For day-to-day command syntax, rely on `README.md` to avoid duplicating authority here.
 

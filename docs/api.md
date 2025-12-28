@@ -50,7 +50,7 @@ identification stage enabled, expect an additional `stageHealth` entry named
     },
     "stageHealth": [
       { "name": "encoder", "ready": true },
-      { "name": "organizer", "ready": false, "detail": "missing plex url" }
+      { "name": "organizer", "ready": false, "detail": "jellyfin client unavailable" }
     ]
   },
   "dependencies": [

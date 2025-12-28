@@ -18,7 +18,6 @@ spindle show --lines 50 --follow  # snapshot + follow
 ```bash
 spindle config init       # scaffold ~/.config/spindle/config.toml
 spindle config validate   # check paths, credentials, syntax
-spindle plex link         # run Plex device-link flow
 ```
 
 ## Queue Management

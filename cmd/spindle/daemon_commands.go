@@ -197,7 +197,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			} else {
 				fmt.Fprintln(stdout, renderStatusLine("Drapto", statusError, "Not available", colorize))
 			}
-			fmt.Fprintln(stdout, plexStatusLine(cfg, colorize))
+			fmt.Fprintln(stdout, jellyfinStatusLine(cfg, colorize))
 			if strings.TrimSpace(cfg.Notifications.NtfyTopic) != "" {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusOK, "Configured", colorize))
 			} else {

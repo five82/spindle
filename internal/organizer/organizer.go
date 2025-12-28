@@ -21,7 +21,7 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
-	"spindle/internal/services/plex"
+	"spindle/internal/services/jellyfin"
 	"spindle/internal/stage"
 )
 
@@ -38,7 +38,7 @@ type Organizer struct {
 	store    *queue.Store
 	cfg      *config.Config
 	logger   *slog.Logger
-	plex     plex.Service
+	jellyfin jellyfin.Service
 	notifier notifications.Service
 }
 
@@ -50,13 +50,13 @@ var organizerProbe = ffprobe.Inspect
 
 // NewOrganizer constructs the organizer stage handler using default dependencies.
 func NewOrganizer(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Organizer {
-	plexService := plex.NewConfiguredService(cfg)
-	return NewOrganizerWithDependencies(cfg, store, logger, plexService, notifications.NewService(cfg))
+	jellyfinService := jellyfin.NewConfiguredService(cfg)
+	return NewOrganizerWithDependencies(cfg, store, logger, jellyfinService, notifications.NewService(cfg))
 }
 
 // NewOrganizerWithDependencies allows injecting collaborators (used in tests).
-func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, plexClient plex.Service, notifier notifications.Service) *Organizer {
-	org := &Organizer{store: store, cfg: cfg, plex: plexClient, notifier: notifier}
+func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, jellyfinClient jellyfin.Service, notifier notifications.Service) *Organizer {
+	org := &Organizer{store: store, cfg: cfg, jellyfin: jellyfinClient, notifier: notifier}
 	org.SetLogger(logger)
 	return org
 }
@@ -136,7 +136,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 
 	o.updateProgress(ctx, item, "Organizing library structure", 20)
 	logger.Info("organizing encoded file into library", logging.String("encoded_file", item.EncodedFile))
-	targetPath, err := o.plex.Organize(ctx, item.EncodedFile, meta)
+	targetPath, err := o.jellyfin.Organize(ctx, item.EncodedFile, meta)
 	if err != nil {
 		if isLibraryUnavailable(err) {
 			logger.Warn("library unavailable; moving to review directory", logging.Error(err))
@@ -153,13 +153,13 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	o.updateProgress(ctx, item, "Refreshing Plex library", 80)
-	plexRefreshed := false
-	if err := o.plex.Refresh(ctx, meta); err != nil {
-		logger.Warn("plex refresh failed", logging.Error(err))
+	o.updateProgress(ctx, item, "Refreshing Jellyfin library", 80)
+	jellyfinRefreshed := false
+	if err := o.jellyfin.Refresh(ctx, meta); err != nil {
+		logger.Warn("jellyfin refresh failed", logging.Error(err))
 	} else {
-		logger.Info("plex library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
-		plexRefreshed = true
+		logger.Info("jellyfin library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
+		jellyfinRefreshed = true
 	}
 
 	o.updateProgress(ctx, item, "Organization completed", 100)
@@ -190,9 +190,9 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			title = filepath.Base(targetPath)
 		}
 		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
-			"mediaTitle":    title,
-			"finalFile":     filepath.Base(targetPath),
-			"plexRefreshed": plexRefreshed,
+			"mediaTitle":        title,
+			"finalFile":         filepath.Base(targetPath),
+			"jellyfinRefreshed": jellyfinRefreshed,
 		}); err != nil {
 			logger.Warn("organization notifier failed", logging.Error(err))
 		}
@@ -250,7 +250,7 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 				return fmt.Errorf("remove existing subtitle %q: %w", destination, err)
 			}
 		}
-		if err := plex.FileMover(source, destination); err != nil {
+		if err := jellyfin.FileMover(source, destination); err != nil {
 			return fmt.Errorf("move subtitle %q: %w", name, err)
 		}
 		moved++
@@ -305,7 +305,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(job.Episode.Key))
 		label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
 		o.updateProgress(ctx, item, fmt.Sprintf("Organizing %s (%d/%d)", label, idx+1, len(jobs)), step*float64(idx))
-		targetPath, err := o.plex.Organize(ctx, job.Source, job.Metadata)
+		targetPath, err := o.jellyfin.Organize(ctx, job.Source, job.Metadata)
 		if err != nil {
 			if isLibraryUnavailable(err) {
 				logger.Warn("library unavailable; moving to review directory", logging.Error(err))
@@ -343,8 +343,8 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		if err := o.moveGeneratedSubtitles(ctx, &itemCopy, targetPath); err != nil {
 			logger.Warn("subtitle sidecar move failed", logging.Error(err))
 		}
-		if err := o.plex.Refresh(ctx, job.Metadata); err != nil {
-			logger.Warn("plex refresh failed", logging.Error(err))
+		if err := o.jellyfin.Refresh(ctx, job.Metadata); err != nil {
+			logger.Warn("jellyfin refresh failed", logging.Error(err))
 		}
 		finalPaths = append(finalPaths, targetPath)
 	}
@@ -371,9 +371,9 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 	item.ActiveEpisodeKey = ""
 	if o.notifier != nil {
 		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
-			"mediaTitle":    strings.TrimSpace(item.DiscTitle),
-			"finalFile":     filepath.Base(item.FinalFile),
-			"plexRefreshed": true,
+			"mediaTitle":        strings.TrimSpace(item.DiscTitle),
+			"finalFile":         filepath.Base(item.FinalFile),
+			"jellyfinRefreshed": true,
 		}); err != nil {
 			logger.Warn("organization notifier failed", logging.Error(err))
 		}
@@ -769,7 +769,7 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-// HealthCheck verifies organizer prerequisites such as library paths and Plex connectivity configuration.
+// HealthCheck verifies organizer prerequisites such as library paths and Jellyfin connectivity configuration.
 func (o *Organizer) HealthCheck(ctx context.Context) stage.Health {
 	const name = "organizer"
 	if o.cfg == nil {
@@ -781,8 +781,8 @@ func (o *Organizer) HealthCheck(ctx context.Context) stage.Health {
 	if strings.TrimSpace(o.cfg.Library.MoviesDir) == "" && strings.TrimSpace(o.cfg.Library.TVDir) == "" {
 		return stage.Unhealthy(name, "library subdirectories not configured")
 	}
-	if o.plex == nil {
-		return stage.Unhealthy(name, "plex client unavailable")
+	if o.jellyfin == nil {
+		return stage.Unhealthy(name, "jellyfin client unavailable")
 	}
 	return stage.Healthy(name)
 }

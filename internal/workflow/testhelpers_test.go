@@ -16,8 +16,8 @@ import (
 	"spindle/internal/organizer"
 	"spindle/internal/ripping"
 	"spindle/internal/services/drapto"
+	"spindle/internal/services/jellyfin"
 	"spindle/internal/services/makemkv"
-	"spindle/internal/services/plex"
 )
 
 type stubNotifier struct {
@@ -110,14 +110,14 @@ func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir stri
 	return dest, nil
 }
 
-type stubPlexService struct {
+type stubJellyfinService struct {
 	root           string
 	moviesDir      string
 	tvDir          string
 	organizeCalled bool
 }
 
-func (s *stubPlexService) Organize(ctx context.Context, sourcePath string, meta plex.MediaMetadata) (string, error) {
+func (s *stubJellyfinService) Organize(ctx context.Context, sourcePath string, meta jellyfin.MediaMetadata) (string, error) {
 	targetDir := meta.GetLibraryPath(s.root, s.moviesDir, s.tvDir)
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return "", err
@@ -134,7 +134,7 @@ func (s *stubPlexService) Organize(ctx context.Context, sourcePath string, meta 
 	return targetPath, nil
 }
 
-func (s *stubPlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
+func (s *stubJellyfinService) Refresh(ctx context.Context, meta jellyfin.MediaMetadata) error {
 	return nil
 }
 

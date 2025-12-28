@@ -83,12 +83,12 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 			name:  "organization completed",
 			event: notifications.EventOrganizationCompleted,
 			payload: notifications.Payload{
-				"mediaTitle":    "Arrival",
-				"finalFile":     "Arrival (2016).mkv",
-				"plexRefreshed": true,
+				"mediaTitle":        "Arrival",
+				"finalFile":         "Arrival (2016).mkv",
+				"jellyfinRefreshed": true,
 			},
 			expectTitle:   "Spindle - Library Updated",
-			expectMessage: "Added to Plex: Arrival\nFile: Arrival (2016).mkv\nPlex refresh requested",
+			expectMessage: "Added to Jellyfin: Arrival\nFile: Arrival (2016).mkv\nJellyfin refresh requested",
 			expectTags:    "organize",
 		},
 		{

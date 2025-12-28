@@ -16,11 +16,19 @@ when new features land.
 3. Edit `~/.config/spindle/config.toml` with your preferred editor. Sample:
 
    ```toml
+   [paths]
    library_dir = "~/Media/Library"
    staging_dir = "~/Media/Staging"
-   tmdb_api_key = "tmdb-key-here"
-   plex_url = "https://plex.example.com"
-   plex_link_enabled = true
+
+   [tmdb]
+   api_key = "tmdb-key-here"
+
+   [jellyfin]
+   enabled = true
+   url = "https://jellyfin.example.com"
+   api_key = "jellyfin-api-key"
+
+   [notifications]
    ntfy_topic = "spindle"
    ```
 
@@ -28,7 +36,6 @@ when new features land.
 
    ```bash
    spindle config validate
-   spindle plex link   # prompts for Plex device code when plex_link_enabled = true
    ```
 
 Spindle reads this configuration on startup. Changes require restarting the
@@ -38,7 +45,7 @@ daemon (`spindle stop && spindle start`).
 
 | Key | Purpose | Notes |
 | --- | --- | --- |
-| `library_dir` | Final Plex-ready library root. | Must exist; Spindle creates `movies/` & `tv/` subdirs when absent. |
+| `library_dir` | Final Jellyfin-ready library root. | Must exist; Spindle creates `movies/` & `tv/` subdirs when absent. |
 | `staging_dir` | Work area for rips, encodes, subtitles, logs. | Keep on fast storage; large temporary files live here. |
 | `review_dir` | Destination for items flagged `NeedsReview`. | Defaults to `~/review`; contents are safe to rename manually. |
 | `log_dir` | Persistent logs plus the queue DB. | Ensure enough space for SQLite + log rotation. |
@@ -66,17 +73,16 @@ indefinitely.
 If discs often appear as “UNKNOWN” or “INDEX_BDMV”, install `bd_info` and ensure
 mount points `/media/cdrom` or `/media/cdrom0` stay accessible.
 
-## Plex & Library Integration
+## Jellyfin & Library Integration
 
 | Key | Description |
 | --- | --- |
-| `plex_url` | Base URL of your Plex server (e.g. `https://plex.example.com`). |
-| `plex_link_enabled` | When true, Spindle performs the device-link flow and triggers library scans. |
-| `plex_auth_path` | JSON token cache (default `~/.config/spindle/plex_auth.json`). |
-| `movies_library` / `tv_library` | Plex library section names to refresh after imports. |
+| `jellyfin.url` | Base URL of your Jellyfin server (e.g. `https://jellyfin.example.com`). |
+| `jellyfin.api_key` | Jellyfin API key used to trigger library refreshes. |
+| `jellyfin.enabled` | When true, Spindle triggers Jellyfin library refreshes after organizing. |
 
-Run `spindle plex link` once per host. If credentials are missing, the organizer
-skips Plex refreshes but still files media correctly.
+If credentials are missing, the organizer skips Jellyfin refreshes but still
+files media correctly.
 
 ## Notification & API Settings
 

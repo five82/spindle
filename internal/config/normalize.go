@@ -13,7 +13,7 @@ func (c *Config) normalize() error {
 	if err := c.normalizeTMDB(); err != nil {
 		return err
 	}
-	if err := c.normalizePlex(); err != nil {
+	if err := c.normalizeJellyfin(); err != nil {
 		return err
 	}
 	if err := c.normalizeSubtitles(); err != nil {
@@ -81,11 +81,14 @@ func (c *Config) normalizeTMDB() error {
 	return nil
 }
 
-func (c *Config) normalizePlex() error {
-	var err error
-	if c.Plex.AuthPath, err = expandPath(c.Plex.AuthPath); err != nil {
-		return fmt.Errorf("plex.auth_path: %w", err)
+func (c *Config) normalizeJellyfin() error {
+	if c.Jellyfin.APIKey == "" {
+		if value, ok := os.LookupEnv("JELLYFIN_API_KEY"); ok {
+			c.Jellyfin.APIKey = strings.TrimSpace(value)
+		}
 	}
+	c.Jellyfin.URL = strings.TrimSpace(c.Jellyfin.URL)
+	c.Jellyfin.APIKey = strings.TrimSpace(c.Jellyfin.APIKey)
 	return nil
 }
 

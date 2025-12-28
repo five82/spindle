@@ -35,15 +35,13 @@ tv_dir = "tv"                                        # Subdirectory inside libra
 overwrite_existing = false                           # Set true to replace existing MKV/SRT files
 
 # ============================================================================
-# PLEX INTEGRATION
+# JELLYFIN INTEGRATION
 # ============================================================================
 
-[plex]
-enabled = true                                       # If false, Spindle will not trigger Plex scans
-url = "http://localhost:32400"                       # Plex server URL (omit to disable)
-auth_path = "~/.config/spindle/plex_auth.json"       # Location for stored Plex authorization tokens
-movies_library = "Movies"                            # Plex movie library name
-tv_library = "TV Shows"                              # Plex TV library name
+[jellyfin]
+enabled = false                                      # If false, Spindle will not trigger Jellyfin scans
+url = "http://localhost:8096"                        # Jellyfin server URL
+api_key = "your_jellyfin_api_key"                    # Jellyfin API key (create in the admin dashboard)
 
 # ============================================================================
 # NOTIFICATIONS

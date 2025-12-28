@@ -34,13 +34,11 @@ type TMDB struct {
 	ConfidenceThreshold float64 `toml:"confidence_threshold"`
 }
 
-// Plex contains configuration for Plex Media Server integration.
-type Plex struct {
-	Enabled       bool   `toml:"enabled"`
-	URL           string `toml:"url"`
-	AuthPath      string `toml:"auth_path"`
-	MoviesLibrary string `toml:"movies_library"`
-	TVLibrary     string `toml:"tv_library"`
+// Jellyfin contains configuration for Jellyfin Media Server integration.
+type Jellyfin struct {
+	Enabled bool   `toml:"enabled"`
+	URL     string `toml:"url"`
+	APIKey  string `toml:"api_key"`
 }
 
 // Library contains configuration for the media library structure.
@@ -137,7 +135,7 @@ type Logging struct {
 type Config struct {
 	Paths               Paths               `toml:"paths"`
 	TMDB                TMDB                `toml:"tmdb"`
-	Plex                Plex                `toml:"plex"`
+	Jellyfin            Jellyfin            `toml:"jellyfin"`
 	Library             Library             `toml:"library"`
 	Notifications       Notifications       `toml:"notifications"`
 	Subtitles           Subtitles           `toml:"subtitles"`
@@ -240,12 +238,6 @@ func (c *Config) EnsureDirectories() error {
 	if c.RipCache.Enabled && strings.TrimSpace(c.RipCache.Dir) != "" {
 		if err := os.MkdirAll(c.RipCache.Dir, 0o755); err != nil {
 			return fmt.Errorf("create rip cache directory %q: %w", c.RipCache.Dir, err)
-		}
-	}
-	if strings.TrimSpace(c.Plex.AuthPath) != "" {
-		authDir := filepath.Dir(c.Plex.AuthPath)
-		if err := os.MkdirAll(authDir, 0o755); err != nil {
-			return fmt.Errorf("create directory %q: %w", authDir, err)
 		}
 	}
 	return nil

@@ -1,9 +1,9 @@
 # spindle
 
-**Spindle automates the trip from optical disc to Plex-ready library.** Insert a
+**Spindle automates the trip from optical disc to Jellyfin-ready library.** Insert a
 disc and the daemon handles identification (TMDB), ripping (MakeMKV),
 encoding to AV1 (drapto), optional subtitle generation (OpenSubtitles +
-WhisperX), optional commentary-track retention, organization, Plex refreshes,
+WhisperX), optional commentary-track retention, organization, Jellyfin refreshes,
 and notifications. Opt-in LLM integrations (via OpenRouter) can auto-select
 Drapto's grain/clean presets per title and help detect commentary audio tracks
 when disc metadata is unreliable.
@@ -40,20 +40,27 @@ when disc metadata is unreliable.
    Minimal example:
 
    ```toml
+   [paths]
    library_dir = "~/Media/Library"
    staging_dir = "~/Media/Staging"
-   tmdb_api_key = "tmdb-key-here"
-   plex_url = "https://plex.example.com"
-   plex_link_enabled = true
+
+   [tmdb]
+   api_key = "tmdb-key-here"
+
+   [jellyfin]
+   enabled = true
+   url = "https://jellyfin.example.com"
+   api_key = "jellyfin-api-key"
+
+   [notifications]
    ntfy_topic = "spindle"
    ```
 
-   See `docs/configuration.md` for every knob (Plex, subtitles, rip cache, etc.).
+   See `docs/configuration.md` for every knob (Jellyfin, subtitles, rip cache, etc.).
 4. **Validate, authorize, and run**
 
    ```bash
    spindle config validate
-   spindle plex link        # once per host when Plex linking is enabled
    spindle start            # launches daemon in the background
    spindle show --follow    # colorful live logs
    ```

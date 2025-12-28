@@ -79,12 +79,12 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 
 	ripperClient := &fakeMakemkvClient{}
 	draptoClient := &stubDraptoClient{}
-	plexClient := &stubPlexService{root: cfg.Paths.LibraryDir, moviesDir: cfg.Library.MoviesDir, tvDir: cfg.Library.TVDir}
+	jellyfinClient := &stubJellyfinService{root: cfg.Paths.LibraryDir, moviesDir: cfg.Library.MoviesDir, tvDir: cfg.Library.TVDir}
 
 	identifier := identification.NewIdentifierWithDependencies(cfg, store, logger, tmdbClient, scanner, notifier)
 	ripper := ripping.NewRipperWithDependencies(cfg, store, logger, ripperClient, notifier)
 	encoder := encoding.NewEncoderWithDependencies(cfg, store, logger, draptoClient, notifier)
-	organizerStage := organizer.NewOrganizerWithDependencies(cfg, store, logger, plexClient, notifier)
+	organizerStage := organizer.NewOrganizerWithDependencies(cfg, store, logger, jellyfinClient, notifier)
 
 	mgr := workflow.NewManagerWithNotifier(cfg, store, logger, notifier)
 	mgr.ConfigureStages(workflow.StageSet{
@@ -181,8 +181,8 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 			if len(notifier.ripCompletes) == 0 {
 				t.Fatal("expected rip completion notification")
 			}
-			if !plexClient.organizeCalled {
-				t.Fatal("expected plex organize to run")
+			if !jellyfinClient.organizeCalled {
+				t.Fatal("expected jellyfin organize to run")
 			}
 			return
 		}

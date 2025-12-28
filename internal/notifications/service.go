@@ -205,13 +205,13 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 		}
 		mediaTitle := strings.TrimSpace(payloadString(data, "mediaTitle"))
 		finalFile := strings.TrimSpace(payloadString(data, "finalFile"))
-		plexRefreshed := payloadBool(data, "plexRefreshed")
-		message := fmt.Sprintf("Added to Plex: %s", mediaTitle)
+		jellyfinRefreshed := payloadBool(data, "jellyfinRefreshed")
+		message := fmt.Sprintf("Added to Jellyfin: %s", mediaTitle)
 		if finalFile != "" {
 			message = fmt.Sprintf("%s\nFile: %s", message, finalFile)
 		}
-		if plexRefreshed {
-			message = fmt.Sprintf("%s\nPlex refresh requested", message)
+		if jellyfinRefreshed {
+			message = fmt.Sprintf("%s\nJellyfin refresh requested", message)
 		}
 		return n.sendOnce(ctx, event, data, payload{
 			title:   "Spindle - Library Updated",

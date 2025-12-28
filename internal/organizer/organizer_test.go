@@ -18,7 +18,7 @@ import (
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
-	"spindle/internal/services/plex"
+	"spindle/internal/services/jellyfin"
 	"spindle/internal/testsupport"
 )
 
@@ -66,9 +66,9 @@ func TestOrganizerMovesFileToLibrary(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	stubPlex := &stubPlexService{targetDir: filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)}
+	stubJellyfin := &stubJellyfinService{targetDir: filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)}
 	notifier := &stubNotifier{}
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, notifier)
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubJellyfin, notifier)
 	item.Status = queue.StatusOrganizing
 	if err := store.Update(context.Background(), item); err != nil {
 		t.Fatalf("Update processing: %v", err)
@@ -151,8 +151,8 @@ func TestOrganizerPersistsRipSpecPerEpisode(t *testing.T) {
 	}
 
 	targetDir := filepath.Join(cfg.Paths.LibraryDir, cfg.Library.TVDir)
-	stubPlex := newBlockingPlexService(targetDir)
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, nil)
+	stubJellyfin := newBlockingJellyfinService(targetDir)
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubJellyfin, nil)
 
 	item.Status = queue.StatusOrganizing
 	if err := store.Update(context.Background(), item); err != nil {
@@ -168,7 +168,7 @@ func TestOrganizerPersistsRipSpecPerEpisode(t *testing.T) {
 	}()
 
 	select {
-	case <-stubPlex.startedSecond:
+	case <-stubJellyfin.startedSecond:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for second organize invocation")
 	}
@@ -191,7 +191,7 @@ func TestOrganizerPersistsRipSpecPerEpisode(t *testing.T) {
 		t.Fatalf("did not expect final asset for %s mid-run", ep2Key)
 	}
 
-	close(stubPlex.allowSecond)
+	close(stubJellyfin.allowSecond)
 	if err := <-errCh; err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -225,8 +225,8 @@ func TestOrganizerMovesGeneratedSubtitles(t *testing.T) {
 	}
 
 	targetDir := filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)
-	stubPlex := &stubPlexService{targetDir: targetDir}
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, nil)
+	stubJellyfin := &stubJellyfinService{targetDir: targetDir}
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubJellyfin, nil)
 	item.Status = queue.StatusOrganizing
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -281,8 +281,8 @@ func TestOrganizerOverwritesExistingSubtitles(t *testing.T) {
 		t.Fatalf("seed existing subtitle: %v", err)
 	}
 
-	stubPlex := &stubPlexService{targetDir: targetDir}
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubPlex, nil)
+	stubJellyfin := &stubJellyfinService{targetDir: targetDir}
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), stubJellyfin, nil)
 	item.Status = queue.StatusOrganizing
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -307,7 +307,7 @@ func TestOrganizerRoutesUnidentifiedToReview(t *testing.T) {
 	stubOrganizerProbe(t)
 
 	notifier := &stubNotifier{}
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), &stubPlexService{}, notifier)
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), &stubJellyfinService{}, notifier)
 
 	seenTargets := map[string]struct{}{}
 	for i := 0; i < 2; i++ {
@@ -384,7 +384,7 @@ func TestOrganizerWrapsErrors(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), failingPlexService{}, nil)
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), failingJellyfinService{}, nil)
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestOrganizerRoutesUnavailableLibraryToReview(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), unavailablePlexService{}, &stubNotifier{})
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), unavailableJellyfinService{}, &stubNotifier{})
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -444,14 +444,14 @@ func TestOrganizerHealthReady(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
 
-	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), &stubPlexService{}, &stubNotifier{})
+	handler := organizer.NewOrganizerWithDependencies(cfg, store, logging.NewNop(), &stubJellyfinService{}, &stubNotifier{})
 	health := handler.HealthCheck(context.Background())
 	if !health.Ready {
 		t.Fatalf("expected ready health, got %+v", health)
 	}
 }
 
-func TestOrganizerHealthMissingPlex(t *testing.T) {
+func TestOrganizerHealthMissingJellyfin(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
 
@@ -460,8 +460,8 @@ func TestOrganizerHealthMissingPlex(t *testing.T) {
 	if health.Ready {
 		t.Fatalf("expected not ready health, got %+v", health)
 	}
-	if !strings.Contains(strings.ToLower(health.Detail), "plex") {
-		t.Fatalf("expected detail to reference plex, got %q", health.Detail)
+	if !strings.Contains(strings.ToLower(health.Detail), "jellyfin") {
+		t.Fatalf("expected detail to reference jellyfin, got %q", health.Detail)
 	}
 }
 
@@ -492,12 +492,12 @@ func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, p
 	return nil
 }
 
-type stubPlexService struct {
+type stubJellyfinService struct {
 	organized string
 	targetDir string
 }
 
-func (s *stubPlexService) Organize(ctx context.Context, sourcePath string, meta plex.MediaMetadata) (string, error) {
+func (s *stubJellyfinService) Organize(ctx context.Context, sourcePath string, meta jellyfin.MediaMetadata) (string, error) {
 	destDir := s.targetDir
 	if destDir == "" {
 		destDir = filepath.Join(filepath.Dir(sourcePath), "library")
@@ -513,26 +513,26 @@ func (s *stubPlexService) Organize(ctx context.Context, sourcePath string, meta 
 	return targetPath, nil
 }
 
-func (s *stubPlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
+func (s *stubJellyfinService) Refresh(ctx context.Context, meta jellyfin.MediaMetadata) error {
 	return nil
 }
 
-type blockingPlexService struct {
+type blockingJellyfinService struct {
 	targetDir     string
 	count         int
 	startedSecond chan struct{}
 	allowSecond   chan struct{}
 }
 
-func newBlockingPlexService(targetDir string) *blockingPlexService {
-	return &blockingPlexService{
+func newBlockingJellyfinService(targetDir string) *blockingJellyfinService {
+	return &blockingJellyfinService{
 		targetDir:     targetDir,
 		startedSecond: make(chan struct{}),
 		allowSecond:   make(chan struct{}),
 	}
 }
 
-func (s *blockingPlexService) Organize(ctx context.Context, sourcePath string, meta plex.MediaMetadata) (string, error) {
+func (s *blockingJellyfinService) Organize(ctx context.Context, sourcePath string, meta jellyfin.MediaMetadata) (string, error) {
 	s.count++
 	if s.count == 2 {
 		close(s.startedSecond)
@@ -556,23 +556,23 @@ func (s *blockingPlexService) Organize(ctx context.Context, sourcePath string, m
 	return targetPath, nil
 }
 
-func (s *blockingPlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
+func (s *blockingJellyfinService) Refresh(ctx context.Context, meta jellyfin.MediaMetadata) error {
 	return nil
 }
 
-type failingPlexService struct{}
+type failingJellyfinService struct{}
 
-func (failingPlexService) Organize(ctx context.Context, sourcePath string, meta plex.MediaMetadata) (string, error) {
+func (failingJellyfinService) Organize(ctx context.Context, sourcePath string, meta jellyfin.MediaMetadata) (string, error) {
 	return "", errors.New("organize failed")
 }
 
-func (failingPlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
+func (failingJellyfinService) Refresh(ctx context.Context, meta jellyfin.MediaMetadata) error {
 	return nil
 }
 
-type unavailablePlexService struct{}
+type unavailableJellyfinService struct{}
 
-func (unavailablePlexService) Organize(ctx context.Context, sourcePath string, meta plex.MediaMetadata) (string, error) {
+func (unavailableJellyfinService) Organize(ctx context.Context, sourcePath string, meta jellyfin.MediaMetadata) (string, error) {
 	return "", fmt.Errorf("create target directory: %w", &os.PathError{
 		Op:   "mkdir",
 		Path: "/mnt/library",
@@ -580,6 +580,6 @@ func (unavailablePlexService) Organize(ctx context.Context, sourcePath string, m
 	})
 }
 
-func (unavailablePlexService) Refresh(ctx context.Context, meta plex.MediaMetadata) error {
+func (unavailableJellyfinService) Refresh(ctx context.Context, meta jellyfin.MediaMetadata) error {
 	return nil
 }

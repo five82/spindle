@@ -21,7 +21,7 @@ const (
 	defaultNotifyMinRipSeconds         = 120
 	defaultNotifyQueueMinItems         = 2
 	defaultNotifyDedupWindowSeconds    = 600
-	defaultPlexAuthPath                = "~/.config/spindle/plex_auth.json"
+	defaultJellyfinEnabled             = false
 	defaultKeyDBPath                   = "~/.config/spindle/keydb/KEYDB.cfg"
 	defaultKeyDBDownloadURL            = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
 	defaultKeyDBDownloadTimeout        = 300
@@ -52,11 +52,8 @@ func Default() Config {
 			BaseURL:             defaultTMDBBaseURL,
 			ConfidenceThreshold: 0.8,
 		},
-		Plex: Plex{
-			Enabled:       true,
-			AuthPath:      defaultPlexAuthPath,
-			MoviesLibrary: "Movies",
-			TVLibrary:     "TV Shows",
+		Jellyfin: Jellyfin{
+			Enabled: defaultJellyfinEnabled,
 		},
 		Library: Library{
 			MoviesDir: defaultMoviesDir,

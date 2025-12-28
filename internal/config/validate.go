@@ -14,7 +14,7 @@ func (c *Config) Validate() error {
 	if err := c.validateLibrary(); err != nil {
 		return err
 	}
-	if err := c.validatePlex(); err != nil {
+	if err := c.validateJellyfin(); err != nil {
 		return err
 	}
 	if err := c.validateWorkflow(); err != nil {
@@ -65,12 +65,15 @@ func (c *Config) validateLibrary() error {
 	return nil
 }
 
-func (c *Config) validatePlex() error {
-	if c.Plex.MoviesLibrary == "" {
-		return errors.New("plex.movies_library must be set")
+func (c *Config) validateJellyfin() error {
+	if !c.Jellyfin.Enabled {
+		return nil
 	}
-	if c.Plex.TVLibrary == "" {
-		return errors.New("plex.tv_library must be set")
+	if strings.TrimSpace(c.Jellyfin.URL) == "" {
+		return errors.New("jellyfin.url must be set when jellyfin.enabled is true")
+	}
+	if strings.TrimSpace(c.Jellyfin.APIKey) == "" {
+		return errors.New("jellyfin.api_key must be set when jellyfin.enabled is true")
 	}
 	return nil
 }

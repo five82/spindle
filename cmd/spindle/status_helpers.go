@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,41 +13,59 @@ import (
 	"golang.org/x/sys/unix"
 
 	"spindle/internal/config"
-	"spindle/internal/services/plex"
 )
 
-func plexStatusLine(cfg *config.Config, colorize bool) string {
+func jellyfinStatusLine(cfg *config.Config, colorize bool) string {
 	if cfg == nil {
-		return renderStatusLine("Plex", statusInfo, "Unknown", colorize)
+		return renderStatusLine("Jellyfin", statusInfo, "Unknown", colorize)
 	}
-	if strings.TrimSpace(cfg.Plex.URL) == "" {
-		return renderStatusLine("Plex", statusWarn, "Not configured or unreachable", colorize)
+	if !cfg.Jellyfin.Enabled {
+		return renderStatusLine("Jellyfin", statusWarn, "Disabled", colorize)
 	}
-	if !cfg.Plex.Enabled {
-		return renderStatusLine("Plex", statusWarn, "Link disabled", colorize)
+	if strings.TrimSpace(cfg.Jellyfin.URL) == "" {
+		return renderStatusLine("Jellyfin", statusWarn, "Missing URL", colorize)
 	}
-	manager, err := plex.NewTokenManager(cfg)
-	if err != nil {
-		return renderStatusLine("Plex", statusError, fmt.Sprintf("Auth error (%v)", err), colorize)
+	if strings.TrimSpace(cfg.Jellyfin.APIKey) == "" {
+		return renderStatusLine("Jellyfin", statusWarn, "Missing API key", colorize)
 	}
-	if manager.HasAuthorization() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-		client := &http.Client{Timeout: 5 * time.Second}
-		if err := plex.CheckAuth(ctx, cfg, client, manager); err != nil {
-			switch {
-			case errors.Is(err, plex.ErrAuthorizationMissing):
-				return renderStatusLine("Plex", statusWarn, "Stored token rejected by Plex (run spindle plex link)", colorize)
-			case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-				return renderStatusLine("Plex", statusWarn, "Auth check timed out", colorize)
-			default:
-				return renderStatusLine("Plex", statusWarn, fmt.Sprintf("Auth check failed (%v)", err), colorize)
-			}
-		}
-		return renderStatusLine("Plex", statusOK, "Linked", colorize)
+	client := &http.Client{Timeout: 5 * time.Second}
+	if err := checkJellyfinAuth(ctx, client, cfg.Jellyfin.URL, cfg.Jellyfin.APIKey); err != nil {
+		return renderStatusLine("Jellyfin", statusWarn, err.Error(), colorize)
 	}
-	return renderStatusLine("Plex", statusWarn, "Link required (run spindle plex link)", colorize)
+	return renderStatusLine("Jellyfin", statusOK, "Reachable", colorize)
+}
+
+func checkJellyfinAuth(ctx context.Context, client *http.Client, baseURL, apiKey string) error {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return fmt.Errorf("missing url")
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		return fmt.Errorf("missing api key")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/Users", nil)
+	if err != nil {
+		return fmt.Errorf("auth check failed (%v)", err)
+	}
+	req.Header.Set("X-Emby-Token", strings.TrimSpace(apiKey))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("auth check failed (%v)", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("auth failed (invalid api key)")
+	default:
+		return fmt.Errorf("auth check failed (%d)", resp.StatusCode)
+	}
 }
 
 func detectDiscLine(device string, colorize bool) string {

@@ -1,4 +1,4 @@
-package plex
+package jellyfin
 
 import (
 	"context"
@@ -18,7 +18,7 @@ type MediaMetadata interface {
 	Title() string
 }
 
-// Service defines Plex/library operations used by the organizer.
+// Service defines Jellyfin/library operations used by the organizer.
 type Service interface {
 	Organize(ctx context.Context, sourcePath string, meta MediaMetadata) (string, error)
 	Refresh(ctx context.Context, meta MediaMetadata) error
@@ -93,25 +93,21 @@ func removeExistingTarget(path string) error {
 	return nil
 }
 
-// SimpleService is a placeholder organiser; a real implementation would call Plex APIs.
+// SimpleService moves files into the library directory tree.
 type SimpleService struct {
 	LibraryDir        string
 	MoviesDir         string
 	TVDir             string
-	MoviesLibrary     string
-	TVLibrary         string
 	MoveFunc          func(string, string) error
 	OverwriteExisting bool
 }
 
-// NewSimpleService constructs a simple Plex organizer.
-func NewSimpleService(libraryDir, moviesDir, tvDir, moviesLibrary, tvLibrary string, overwriteExisting bool) *SimpleService {
+// NewSimpleService constructs a simple Jellyfin organizer.
+func NewSimpleService(libraryDir, moviesDir, tvDir string, overwriteExisting bool) *SimpleService {
 	return &SimpleService{
 		LibraryDir:        libraryDir,
 		MoviesDir:         moviesDir,
 		TVDir:             tvDir,
-		MoviesLibrary:     moviesLibrary,
-		TVLibrary:         tvLibrary,
 		MoveFunc:          FileMover,
 		OverwriteExisting: overwriteExisting,
 	}
@@ -152,6 +148,6 @@ func (s *SimpleService) Organize(ctx context.Context, sourcePath string, meta Me
 }
 
 func (s *SimpleService) Refresh(ctx context.Context, meta MediaMetadata) error {
-	// Placeholder: real implementation would call Plex HTTP API.
+	// Placeholder: real implementation uses Jellyfin HTTP API.
 	return nil
 }

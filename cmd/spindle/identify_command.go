@@ -147,7 +147,7 @@ Examples:
 			if item.MetadataJSON != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ✅ Available\n")
 				if year != "Unknown" && tmdbTitle != "Unknown" {
-					fmt.Fprintf(cmd.OutOrStdout(), "  Plex Filename: %s (%s).mkv\n", tmdbTitle, year)
+					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s (%s).mkv\n", tmdbTitle, year)
 				}
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ❌ None found\n")

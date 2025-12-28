@@ -1,4 +1,4 @@
-package plex_test
+package jellyfin_test
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"spindle/internal/services/plex"
+	"spindle/internal/services/jellyfin"
 )
 
 type staticMetadata struct {
@@ -49,7 +49,7 @@ func TestSimpleServiceOrganizeAddsSuffixWhenOverwriteDisabled(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 
-	svc := plex.NewSimpleService(libraryDir, moviesDir, "tv", "Movies", "TV Shows", false)
+	svc := jellyfin.NewSimpleService(libraryDir, moviesDir, "tv", false)
 	meta := staticMetadata{filename: "Demo", movie: true}
 
 	finalPath, err := svc.Organize(context.Background(), source, meta)
@@ -98,7 +98,7 @@ func TestSimpleServiceOrganizeOverwritesWhenEnabled(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 
-	svc := plex.NewSimpleService(libraryDir, moviesDir, "tv", "Movies", "TV Shows", true)
+	svc := jellyfin.NewSimpleService(libraryDir, moviesDir, "tv", true)
 	meta := staticMetadata{filename: "Demo", movie: true}
 
 	finalPath, err := svc.Organize(context.Background(), source, meta)

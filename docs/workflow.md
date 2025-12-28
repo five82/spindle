@@ -5,7 +5,7 @@ This guide walks through what happens after you start the Spindle daemon and ins
 ## Before You Start
 
 - Install Spindle with `go install github.com/five82/spindle/cmd/spindle@latest` and create your config with `spindle config init` (see `docs/configuration.md` for the detailed setup).
-- Edit `~/.config/spindle/config.toml` so `library_dir`, `staging_dir`, `tmdb_api_key`, `plex_url`, `plex_link_enabled`, and `ntfy_topic` (optional) are filled out. Run `spindle plex link` once to authorize Plex when automatic refreshes are enabled.
+- Edit `~/.config/spindle/config.toml` so `library_dir`, `staging_dir`, `tmdb_api_key`, `jellyfin.url`, `jellyfin.api_key`, and `ntfy_topic` (optional) are filled out.
 - Run `spindle config validate` to confirm the configuration and directories are ready.
 - Start the background process with `spindle start`, then monitor logs with `spindle show --follow` (add `--lines N` for a snapshot without following).
 
@@ -21,7 +21,7 @@ Every item moves through the queue in order. The statuses you will see are:
 - `EPISODE_IDENTIFYING` -> `EPISODE_IDENTIFIED` *(optional)* - for TV discs, WhisperX + OpenSubtitles align ripped files to definitive episode numbers before encoding
 - `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
 - `SUBTITLING` -> `SUBTITLED` *(optional)* - WhisperX generates AI subtitles (formatted by Stable-TS) when enabled
-- `ORGANIZING` -> `COMPLETED` - file moved into your library, Plex refresh triggered
+- `ORGANIZING` -> `COMPLETED` - file moved into your library, Jellyfin refresh triggered
 - `REVIEW` - manual attention required (no confident match found)
 - `FAILED` - an error stopped progress; inspect logs and retry when ready
 
@@ -83,12 +83,12 @@ When `subtitles_enabled = true`, Spindle prefers human-curated subtitles before 
 
 You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI now performs a TMDB lookup based on the filename, feeds that identifier into the OpenSubtitles search, and falls back to WhisperX when no curated subtitles are available. Pass `--forceai` to skip OpenSubtitles entirely and always run the WhisperX transcription pipeline, which drops the finished SRT beside your media.
 
-## Stage 7: Organizing & Plex Refresh (ORGANIZING -> COMPLETED)
+## Stage 7: Organizing & Jellyfin Refresh (ORGANIZING -> COMPLETED)
 
-1. Spindle moves each encoded artifact into your library, building Plex-friendly paths based on the TMDB metadata. Movies still land as a single file under `library_dir/movies`, while TV discs produce one file per episode under `library_dir/tv/<Show Name>/Season XX/` (for example `Show Name - S05E01.mkv`). Episode filenames and destinations come directly from the rip spec so multi-disc sets stay consistent.
-2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Plex.
-3. Plex scans are triggered for the appropriate library section (Movies vs TV Shows) when credentials are supplied.
-4. The final status `COMPLETED` means the media is on disk and Plex has been asked to rescan. Items flagged for review land in your configured `review_dir`; otherwise titles appear in the main library. An ntfy notification confirms the import when the library update succeeds.
+1. Spindle moves each encoded artifact into your library, building library-friendly paths based on the TMDB metadata. Movies still land as a single file under `library_dir/movies`, while TV discs produce one file per episode under `library_dir/tv/<Show Name>/Season XX/` (for example `Show Name - S05E01.mkv`). Episode filenames and destinations come directly from the rip spec so multi-disc sets stay consistent.
+2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Jellyfin.
+3. Jellyfin scans are triggered after organizing when credentials are supplied.
+4. The final status `COMPLETED` means the media is on disk and Jellyfin has been asked to rescan. Items flagged for review land in your configured `review_dir`; otherwise titles appear in the main library. An ntfy notification confirms the import when the library update succeeds.
 
 ## Special Paths: REVIEW and FAILED
 
@@ -130,4 +130,4 @@ If `ntfy_topic` is set, Spindle posts compact notifications at key steps: disc d
 - Identification deep dive: `docs/content-identification.md`
 - Development workflow (if you are hacking on Spindle): `docs/development.md`
 
-With these pieces in mind, you can trust the daemon to run hands-free while still understanding exactly where each disc is in the journey from tray to Plex shelf.
+With these pieces in mind, you can trust the daemon to run hands-free while still understanding exactly where each disc is in the journey from tray to Jellyfin shelf.
