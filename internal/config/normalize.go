@@ -19,6 +19,9 @@ func (c *Config) normalize() error {
 	if err := c.normalizeSubtitles(); err != nil {
 		return err
 	}
+	if err := c.normalizeCommentaryDetection(); err != nil {
+		return err
+	}
 	if err := c.normalizeRipCache(); err != nil {
 		return err
 	}
@@ -138,6 +141,61 @@ func (c *Config) normalizeSubtitles() error {
 			langs = []string{"en"}
 		}
 		c.Subtitles.OpenSubtitlesLanguages = langs
+	}
+	return nil
+}
+
+func (c *Config) normalizeCommentaryDetection() error {
+	if len(c.CommentaryDetection.Languages) == 0 {
+		c.CommentaryDetection.Languages = []string{"en"}
+	} else {
+		langs := make([]string, 0, len(c.CommentaryDetection.Languages))
+		seen := make(map[string]struct{}, len(c.CommentaryDetection.Languages))
+		for _, lang := range c.CommentaryDetection.Languages {
+			normalized := strings.ToLower(strings.TrimSpace(lang))
+			if normalized == "" {
+				continue
+			}
+			if _, exists := seen[normalized]; exists {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			langs = append(langs, normalized)
+		}
+		if len(langs) == 0 {
+			langs = []string{"en"}
+		}
+		c.CommentaryDetection.Languages = langs
+	}
+	if c.CommentaryDetection.Channels <= 0 {
+		c.CommentaryDetection.Channels = defaultCommentaryChannels
+	}
+	if c.CommentaryDetection.SampleWindows <= 0 {
+		c.CommentaryDetection.SampleWindows = defaultCommentarySampleWindows
+	}
+	if c.CommentaryDetection.WindowSeconds <= 0 {
+		c.CommentaryDetection.WindowSeconds = defaultCommentaryWindowSeconds
+	}
+	if c.CommentaryDetection.FingerprintSimilarityDuplicate <= 0 {
+		c.CommentaryDetection.FingerprintSimilarityDuplicate = 0.98
+	}
+	if c.CommentaryDetection.SpeechRatioMinCommentary <= 0 {
+		c.CommentaryDetection.SpeechRatioMinCommentary = 0.25
+	}
+	if c.CommentaryDetection.SpeechRatioMaxMusic <= 0 {
+		c.CommentaryDetection.SpeechRatioMaxMusic = 0.10
+	}
+	if c.CommentaryDetection.SpeechOverlapPrimaryMin <= 0 {
+		c.CommentaryDetection.SpeechOverlapPrimaryMin = 0.60
+	}
+	if c.CommentaryDetection.SpeechInSilenceMax <= 0 {
+		c.CommentaryDetection.SpeechInSilenceMax = 0.40
+	}
+	if c.CommentaryDetection.DurationToleranceSeconds < 0 {
+		c.CommentaryDetection.DurationToleranceSeconds = 0
+	}
+	if c.CommentaryDetection.DurationToleranceRatio < 0 {
+		c.CommentaryDetection.DurationToleranceRatio = 0
 	}
 	return nil
 }

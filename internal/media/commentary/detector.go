@@ -1,0 +1,730 @@
+package commentary
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"log/slog"
+
+	"spindle/internal/config"
+	"spindle/internal/deps"
+	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
+)
+
+const (
+	defaultSampleRate          = 16000
+	defaultFrameMs             = 20
+	minSpeechRatioDeltaPrimary = 0.05
+)
+
+// Result captures detected commentary tracks plus per-track decisions.
+type Result struct {
+	Indices   []int
+	Decisions []Decision
+}
+
+// Decision captures commentary classifier output for a single stream.
+type Decision struct {
+	Index    int
+	Include  bool
+	Reason   string
+	Metadata Metadata
+	Metrics  Metrics
+}
+
+// Metadata captures stream-tag signals for the classifier.
+type Metadata struct {
+	Language string
+	Title    string
+	Positive bool
+	Negative string
+}
+
+// Metrics captures audio analysis signals for the classifier.
+type Metrics struct {
+	SpeechRatio              float64
+	SpeechOverlapWithPrimary float64
+	SpeechInPrimarySilence   float64
+	FingerprintSimilarity    float64
+	PrimarySpeechRatio       float64
+}
+
+// Detect runs commentary detection for the provided media path.
+func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.Result, primaryIndex int, logger *slog.Logger) (Result, error) {
+	if cfg == nil || !cfg.CommentaryDetection.Enabled {
+		return Result{}, nil
+	}
+	settings := cfg.CommentaryDetection
+	if strings.TrimSpace(path) == "" {
+		return Result{}, errors.New("commentary detect: empty path")
+	}
+	logger = logging.WithContext(ctx, logging.NewComponentLogger(logger, "commentary"))
+
+	ffmpegBinary := deps.ResolveFFmpegPath(cfg.DraptoBinary())
+	if strings.TrimSpace(ffmpegBinary) == "" {
+		ffmpegBinary = "ffmpeg"
+	}
+	if _, err := exec.LookPath(ffmpegBinary); err != nil {
+		logger.Info("commentary detection skipped (ffmpeg missing)", logging.String("binary", ffmpegBinary))
+		return Result{}, nil
+	}
+	if _, err := exec.LookPath("fpcalc"); err != nil {
+		logger.Info("commentary detection skipped (fpcalc missing)")
+		return Result{}, nil
+	}
+	if _, err := exec.LookPath("cc"); err != nil {
+		logger.Info("commentary detection skipped (cgo toolchain missing)")
+		return Result{}, nil
+	}
+
+	primaryStream, ok := findStream(probe.Streams, primaryIndex)
+	if !ok {
+		return Result{}, fmt.Errorf("commentary detect: primary stream %d missing", primaryIndex)
+	}
+	primaryDuration := streamDurationSeconds(primaryStream)
+	if primaryDuration <= 0 {
+		primaryDuration = probe.DurationSeconds()
+	}
+	windows := buildWindows(primaryDuration, settings.SampleWindows, settings.WindowSeconds)
+	if len(windows) == 0 {
+		return Result{}, nil
+	}
+
+	primarySpeech, err := analyzeSpeech(ctx, ffmpegBinary, path, primaryIndex, windows)
+	if err != nil {
+		return Result{}, fmt.Errorf("commentary detect: primary speech analysis: %w", err)
+	}
+	primarySpeechRatio := primarySpeech.speechRatio()
+
+	workDir, cleanup, err := tempWorkDir(path)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanup()
+
+	primaryFingerprint, err := fingerprintForStream(ctx, ffmpegBinary, path, primaryIndex, windows, filepath.Join(workDir, fmt.Sprintf("primary-%d.wav", primaryIndex)))
+	if err != nil {
+		return Result{}, fmt.Errorf("commentary detect: primary fingerprint: %w", err)
+	}
+
+	candidates := buildCandidates(probe.Streams, settings, primaryDuration)
+	decisions := make([]Decision, 0, len(candidates))
+	indices := make([]int, 0)
+
+	for _, cand := range candidates {
+		if cand.stream.Index == primaryIndex {
+			continue
+		}
+		meta := Metadata{
+			Language: cand.language,
+			Title:    cand.title,
+			Positive: cand.metadataPositive,
+			Negative: cand.metadataNegative,
+		}
+		decision := Decision{
+			Index:    cand.stream.Index,
+			Metadata: meta,
+		}
+		if meta.Negative != "" {
+			decision.Include = false
+			decision.Reason = meta.Negative
+			decisions = append(decisions, decision)
+			continue
+		}
+
+		candSpeech, err := analyzeSpeech(ctx, ffmpegBinary, path, cand.stream.Index, windows)
+		if err != nil {
+			decision.Include = false
+			decision.Reason = "analysis_failed"
+			decisions = append(decisions, decision)
+			continue
+		}
+		speechRatio := candSpeech.speechRatio()
+		overlap, inSilence := speechOverlap(primarySpeech, candSpeech)
+
+		fingerprint, err := fingerprintForStream(ctx, ffmpegBinary, path, cand.stream.Index, windows, filepath.Join(workDir, fmt.Sprintf("cand-%d.wav", cand.stream.Index)))
+		if err != nil {
+			decision.Include = false
+			decision.Reason = "fingerprint_failed"
+			decisions = append(decisions, decision)
+			continue
+		}
+		similarity := compareFingerprints(primaryFingerprint, fingerprint)
+
+		decision.Metrics = Metrics{
+			SpeechRatio:              speechRatio,
+			SpeechOverlapWithPrimary: overlap,
+			SpeechInPrimarySilence:   inSilence,
+			FingerprintSimilarity:    similarity,
+			PrimarySpeechRatio:       primarySpeechRatio,
+		}
+		decision.Include, decision.Reason = classify(decision.Metrics, meta, settings)
+		decisions = append(decisions, decision)
+		if decision.Include {
+			indices = append(indices, cand.stream.Index)
+		}
+	}
+
+	sort.Ints(indices)
+	for _, decision := range decisions {
+		logger.Info("commentary decision",
+			logging.Int("stream_index", decision.Index),
+			logging.Bool("included", decision.Include),
+			logging.String("reason", decision.Reason),
+			logging.String("language", decision.Metadata.Language),
+			logging.String("title", decision.Metadata.Title),
+			logging.Bool("metadata_positive", decision.Metadata.Positive),
+			logging.Float64("speech_ratio", decision.Metrics.SpeechRatio),
+			logging.Float64("speech_overlap_primary", decision.Metrics.SpeechOverlapWithPrimary),
+			logging.Float64("speech_in_primary_silence", decision.Metrics.SpeechInPrimarySilence),
+			logging.Float64("fingerprint_similarity", decision.Metrics.FingerprintSimilarity),
+		)
+	}
+
+	return Result{Indices: indices, Decisions: decisions}, nil
+}
+
+type candidate struct {
+	stream           ffprobe.Stream
+	language         string
+	title            string
+	channels         int
+	duration         float64
+	metadataPositive bool
+	metadataNegative string
+}
+
+func buildCandidates(streams []ffprobe.Stream, cfg config.CommentaryDetection, primaryDuration float64) []candidate {
+	result := make([]candidate, 0)
+	langs := normalizedLanguages(cfg.Languages)
+	for _, stream := range streams {
+		if !strings.EqualFold(stream.CodecType, "audio") {
+			continue
+		}
+		language := normalizeLanguage(stream.Tags)
+		if language == "" {
+			continue
+		}
+		if !languageAllowed(language, langs) {
+			continue
+		}
+		channels := channelCount(stream)
+		if cfg.Channels > 0 && channels != cfg.Channels {
+			continue
+		}
+		duration := streamDurationSeconds(stream)
+		if duration > 0 && primaryDuration > 0 {
+			if !durationWithinTolerance(duration, primaryDuration, cfg) {
+				continue
+			}
+		}
+		title := normalizeTitle(stream.Tags)
+		metaPos, metaNeg := classifyMetadata(title)
+		result = append(result, candidate{
+			stream:           stream,
+			language:         language,
+			title:            title,
+			channels:         channels,
+			duration:         duration,
+			metadataPositive: metaPos,
+			metadataNegative: metaNeg,
+		})
+	}
+	return result
+}
+
+func classify(metrics Metrics, meta Metadata, cfg config.CommentaryDetection) (bool, string) {
+	if meta.Negative != "" {
+		return false, meta.Negative
+	}
+	if metrics.SpeechRatio <= cfg.SpeechRatioMaxMusic {
+		return false, "music_or_silent"
+	}
+	if metrics.FingerprintSimilarity >= cfg.FingerprintSimilarityDuplicate &&
+		math.Abs(metrics.SpeechRatio-metrics.PrimarySpeechRatio) <= minSpeechRatioDeltaPrimary {
+		return false, "duplicate_downmix"
+	}
+	if metrics.SpeechInPrimarySilence >= cfg.SpeechInSilenceMax && metrics.FingerprintSimilarity >= 0.5 {
+		return false, "audio_description"
+	}
+
+	commentaryMax := cfg.FingerprintSimilarityDuplicate - 0.15
+	if commentaryMax < 0.3 {
+		commentaryMax = 0.3
+	}
+	if commentaryMax > 0.7 {
+		commentaryMax = 0.7
+	}
+
+	if metrics.FingerprintSimilarity <= commentaryMax && metrics.SpeechRatio >= cfg.SpeechRatioMinCommentary {
+		return true, "commentary_only"
+	}
+	if metrics.SpeechOverlapWithPrimary >= cfg.SpeechOverlapPrimaryMin &&
+		metrics.FingerprintSimilarity < cfg.FingerprintSimilarityDuplicate {
+		return true, "mixed_commentary"
+	}
+	if meta.Positive && metrics.SpeechRatio >= cfg.SpeechRatioMinCommentary &&
+		metrics.FingerprintSimilarity < cfg.FingerprintSimilarityDuplicate {
+		return true, "metadata_commentary"
+	}
+	return false, "ambiguous"
+}
+
+func classifyMetadata(title string) (bool, string) {
+	if title == "" {
+		return false, ""
+	}
+	value := strings.ToLower(title)
+	positive := []string{
+		"commentary",
+		"director commentary",
+		"cast commentary",
+		"commentary by",
+		"screenwriter commentary",
+	}
+	negative := map[string]string{
+		"audio description":       "audio_description",
+		"descriptive":             "audio_description",
+		"dvs":                     "audio_description",
+		"visually impaired":       "audio_description",
+		"narration for the blind": "audio_description",
+		"isolated score":          "music_only",
+		"music only":              "music_only",
+		"score":                   "music_only",
+		"soundtrack":              "music_only",
+		"karaoke":                 "music_only",
+		"sing-along":              "music_only",
+	}
+	for key, reason := range negative {
+		if strings.Contains(value, key) {
+			return false, reason
+		}
+	}
+	for _, key := range positive {
+		if strings.Contains(value, key) {
+			return true, ""
+		}
+	}
+	return false, ""
+}
+
+func normalizedLanguages(langs []string) []string {
+	out := make([]string, 0, len(langs))
+	seen := make(map[string]struct{}, len(langs))
+	for _, lang := range langs {
+		normalized := strings.ToLower(strings.TrimSpace(lang))
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	if len(out) == 0 {
+		out = []string{"en"}
+	}
+	return out
+}
+
+func languageAllowed(language string, allowed []string) bool {
+	if language == "" {
+		return false
+	}
+	lang := strings.ToLower(language)
+	for _, allow := range allowed {
+		if strings.HasPrefix(lang, allow) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeLanguage(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	for _, key := range []string{"language", "LANGUAGE", "Language", "language_ietf", "LANG"} {
+		if value, ok := tags[key]; ok {
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return ""
+}
+
+func normalizeTitle(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	for _, key := range []string{"title", "TITLE", "handler_name", "HANDLER_NAME"} {
+		if value, ok := tags[key]; ok {
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return ""
+}
+
+func channelCount(stream ffprobe.Stream) int {
+	if stream.Channels > 0 {
+		return stream.Channels
+	}
+	layout := strings.ToLower(strings.TrimSpace(stream.ChannelLayout))
+	if layout == "" {
+		return 0
+	}
+	if strings.HasPrefix(layout, "2.0") {
+		return 2
+	}
+	if strings.HasPrefix(layout, "2.1") {
+		return 3
+	}
+	if strings.HasPrefix(layout, "1.0") {
+		return 1
+	}
+	if strings.Contains(layout, ".") {
+		parts := strings.Split(layout, ".")
+		total := 0
+		for _, part := range parts {
+			part = strings.Trim(part, "abcdefghijklmnopqrstuvwxyz ()")
+			if part == "" {
+				continue
+			}
+			if n, err := strconv.Atoi(part); err == nil {
+				total += n
+			}
+		}
+		if total > 0 {
+			return total
+		}
+	}
+	return 0
+}
+
+func streamDurationSeconds(stream ffprobe.Stream) float64 {
+	value := strings.TrimSpace(stream.Duration)
+	if value == "" {
+		return 0
+	}
+	if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed > 0 {
+		return parsed
+	}
+	return 0
+}
+
+func durationWithinTolerance(candidate, primary float64, cfg config.CommentaryDetection) bool {
+	if candidate <= 0 || primary <= 0 {
+		return true
+	}
+	absTolerance := float64(cfg.DurationToleranceSeconds)
+	ratioTolerance := cfg.DurationToleranceRatio * primary
+	tolerance := math.Max(absTolerance, ratioTolerance)
+	if tolerance <= 0 {
+		tolerance = math.Max(120, primary*0.02)
+	}
+	diff := math.Abs(candidate - primary)
+	return diff <= tolerance
+}
+
+type window struct {
+	start    float64
+	duration float64
+}
+
+func buildWindows(duration float64, count int, seconds int) []window {
+	if count <= 0 {
+		return nil
+	}
+	windowSeconds := float64(seconds)
+	if windowSeconds <= 0 {
+		windowSeconds = 90
+	}
+	if duration <= 0 {
+		return []window{{start: 0, duration: windowSeconds}}
+	}
+	out := make([]window, 0, count)
+	for i, ratio := range windowRatios(count) {
+		if i >= count {
+			break
+		}
+		start := ratio * duration
+		if start < 0 {
+			start = 0
+		}
+		if start+windowSeconds > duration {
+			start = math.Max(0, duration-windowSeconds)
+		}
+		winDuration := windowSeconds
+		if duration-start < winDuration {
+			winDuration = duration - start
+		}
+		if winDuration <= 0 {
+			continue
+		}
+		out = append(out, window{start: start, duration: winDuration})
+	}
+	return out
+}
+
+func windowRatios(count int) []float64 {
+	if count <= 1 {
+		return []float64{0.5}
+	}
+	if count == 3 {
+		return []float64{0.1, 0.5, 0.9}
+	}
+	out := make([]float64, 0, count)
+	for i := 0; i < count; i++ {
+		out = append(out, float64(i+1)/float64(count+1))
+	}
+	return out
+}
+
+type speechAnalysis struct {
+	totalFrames  int
+	speechFrames int
+	windows      [][]bool
+}
+
+func (s speechAnalysis) speechRatio() float64 {
+	if s.totalFrames == 0 {
+		return 0
+	}
+	return float64(s.speechFrames) / float64(s.totalFrames)
+}
+
+func analyzeSpeech(ctx context.Context, ffmpegBinary, path string, streamIndex int, windows []window) (speechAnalysis, error) {
+	vad, err := newVAD()
+	if err != nil {
+		return speechAnalysis{}, err
+	}
+	out := speechAnalysis{windows: make([][]bool, 0, len(windows))}
+	for _, win := range windows {
+		data, err := extractPCM(ctx, ffmpegBinary, path, streamIndex, win)
+		if err != nil {
+			return speechAnalysis{}, err
+		}
+		flags, frames := vadFrames(vad, data, defaultSampleRate, defaultFrameMs)
+		out.windows = append(out.windows, flags)
+		out.totalFrames += frames
+		for _, flag := range flags {
+			if flag {
+				out.speechFrames++
+			}
+		}
+	}
+	return out, nil
+}
+
+func vadFrames(vad *vadProcessor, data []byte, sampleRate, frameMs int) ([]bool, int) {
+	if vad == nil || len(data) == 0 {
+		return nil, 0
+	}
+	samplesPerFrame := sampleRate * frameMs / 1000
+	frameBytes := samplesPerFrame * 2
+	if frameBytes <= 0 {
+		return nil, 0
+	}
+	flags := make([]bool, 0, len(data)/frameBytes)
+	total := 0
+	for offset := 0; offset+frameBytes <= len(data); offset += frameBytes {
+		frame := data[offset : offset+frameBytes]
+		isSpeech, err := vad.Process(sampleRate, frame)
+		if err != nil {
+			continue
+		}
+		flags = append(flags, isSpeech)
+		total++
+	}
+	return flags, total
+}
+
+func speechOverlap(primary, candidate speechAnalysis) (float64, float64) {
+	totalSpeech := 0
+	overlap := 0
+	inSilence := 0
+	for i := 0; i < len(candidate.windows) && i < len(primary.windows); i++ {
+		cand := candidate.windows[i]
+		prim := primary.windows[i]
+		frames := len(cand)
+		if len(prim) < frames {
+			frames = len(prim)
+		}
+		for j := 0; j < frames; j++ {
+			if !cand[j] {
+				continue
+			}
+			totalSpeech++
+			if prim[j] {
+				overlap++
+			} else {
+				inSilence++
+			}
+		}
+	}
+	if totalSpeech == 0 {
+		return 0, 0
+	}
+	return float64(overlap) / float64(totalSpeech), float64(inSilence) / float64(totalSpeech)
+}
+
+func extractPCM(ctx context.Context, ffmpegBinary, path string, streamIndex int, win window) ([]byte, error) {
+	if strings.TrimSpace(ffmpegBinary) == "" {
+		ffmpegBinary = "ffmpeg"
+	}
+	args := []string{
+		"-hide_banner", "-loglevel", "error",
+		"-ss", fmt.Sprintf("%.3f", win.start),
+		"-t", fmt.Sprintf("%.3f", win.duration),
+		"-i", path,
+		"-map", fmt.Sprintf("0:%d", streamIndex),
+		"-ac", "1",
+		"-ar", fmt.Sprintf("%d", defaultSampleRate),
+		"-f", "s16le",
+		"-",
+	}
+	cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("ffmpeg pcm extract: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
+}
+
+func fingerprintForStream(ctx context.Context, ffmpegBinary, path string, streamIndex int, windows []window, outputPath string) ([]int, error) {
+	if err := extractFingerprintAudio(ctx, ffmpegBinary, path, streamIndex, windows, outputPath); err != nil {
+		return nil, err
+	}
+	return runFPcalc(ctx, outputPath)
+}
+
+func extractFingerprintAudio(ctx context.Context, ffmpegBinary, path string, streamIndex int, windows []window, outputPath string) error {
+	if strings.TrimSpace(ffmpegBinary) == "" {
+		ffmpegBinary = "ffmpeg"
+	}
+	filter, label := buildFilter(streamIndex, windows)
+	args := []string{"-hide_banner", "-loglevel", "error", "-i", path}
+	if filter != "" {
+		args = append(args, "-filter_complex", filter, "-map", label)
+	} else {
+		args = append(args, "-map", fmt.Sprintf("0:%d", streamIndex))
+	}
+	args = append(args,
+		"-ac", "1",
+		"-ar", "11025",
+		"-c:a", "pcm_s16le",
+		outputPath,
+	)
+	cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ffmpeg fingerprint extract: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func buildFilter(streamIndex int, windows []window) (string, string) {
+	if len(windows) == 0 {
+		return "", ""
+	}
+	if len(windows) == 1 {
+		win := windows[0]
+		return fmt.Sprintf("[0:a:%d]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS[aout]", streamIndex, win.start, win.duration), "[aout]"
+	}
+	parts := make([]string, 0, len(windows))
+	labels := make([]string, 0, len(windows))
+	for i, win := range windows {
+		label := fmt.Sprintf("a%d", i)
+		labels = append(labels, "["+label+"]")
+		parts = append(parts, fmt.Sprintf("[0:a:%d]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS[%s]", streamIndex, win.start, win.duration, label))
+	}
+	concat := fmt.Sprintf("%sconcat=n=%d:v=0:a=1[aout]", strings.Join(labels, ""), len(windows))
+	parts = append(parts, concat)
+	return strings.Join(parts, ";"), "[aout]"
+}
+
+func runFPcalc(ctx context.Context, path string) ([]int, error) {
+	cmd := exec.CommandContext(ctx, "fpcalc", path) //nolint:gosec
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("fpcalc: %w", err)
+	}
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "FINGERPRINT=") {
+			values := strings.TrimPrefix(line, "FINGERPRINT=")
+			return parseFingerprint(values), nil
+		}
+	}
+	return nil, errors.New("fpcalc: fingerprint missing")
+}
+
+func parseFingerprint(value string) []int {
+	parts := strings.Split(value, ",")
+	out := make([]int, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if v, err := strconv.Atoi(part); err == nil {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func compareFingerprints(primary, candidate []int) float64 {
+	if len(primary) == 0 || len(candidate) == 0 {
+		return 0
+	}
+	limit := len(primary)
+	if len(candidate) < limit {
+		limit = len(candidate)
+	}
+	matches := 0
+	for i := 0; i < limit; i++ {
+		if primary[i] == candidate[i] {
+			matches++
+		}
+	}
+	return float64(matches) / float64(limit)
+}
+
+func tempWorkDir(path string) (string, func(), error) {
+	base := filepath.Dir(path)
+	dir, err := os.MkdirTemp(base, "spindle-commentary-")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("commentary detect: temp dir: %w", err)
+	}
+	cleanup := func() {
+		if os.Getenv("SPD_DEBUG_COMMENTARY_KEEP") == "" {
+			_ = os.RemoveAll(dir)
+		}
+	}
+	return dir, cleanup, nil
+}
+
+func findStream(streams []ffprobe.Stream, index int) (ffprobe.Stream, bool) {
+	for _, stream := range streams {
+		if stream.Index == index {
+			return stream, true
+		}
+	}
+	return ffprobe.Stream{}, false
+}

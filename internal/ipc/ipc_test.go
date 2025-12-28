@@ -26,7 +26,7 @@ func (noopStage) HealthCheck(context.Context) stage.Health {
 }
 
 func TestIPCServerClient(t *testing.T) {
-	cfg := testsupport.NewConfig(t)
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 	cfg.MakeMKV.OpticalDrive = ""
 	cfg.Paths.APIBind = "127.0.0.1:0"
 	store := testsupport.MustOpenStore(t, cfg)

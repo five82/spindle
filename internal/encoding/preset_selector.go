@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"spindle/internal/config"
+	"spindle/internal/deps"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/queue"
@@ -228,7 +229,7 @@ func (e *Encoder) detectResolutionLabel(ctx context.Context, path string) (strin
 	}
 	binary := "ffprobe"
 	if e != nil && e.cfg != nil {
-		binary = e.cfg.FFprobeBinary()
+		binary = deps.ResolveFFprobePath(e.cfg.FFprobeBinary())
 	}
 	result, err := encodeProbe(ctx, binary, path)
 	if err != nil {

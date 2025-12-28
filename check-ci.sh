@@ -81,6 +81,8 @@ fi
 
 print_success "Go toolchain ready (Go $GO_VERSION, golangci-lint $GOLANGCI_VERSION)"
 
+ORIGINAL_PATH="$PATH"
+
 echo "\n🧹 Simulating GitHub Actions environment (minimal PATH)"
 TEMP_BIN=$(mktemp -d)
 trap 'rm -rf "$TEMP_BIN"' EXIT
@@ -104,6 +106,19 @@ if go test ./...; then
     print_success "go test passed"
 else
     print_error "go test failed"
+    exit 1
+fi
+
+print_step "Running CGO-enabled build"
+export PATH="$ORIGINAL_PATH"
+if ! command -v gcc >/dev/null 2>&1; then
+    print_error "cgo build requires gcc; install build-essential and rerun"
+    exit 1
+fi
+if CGO_ENABLED=1 go build ./...; then
+    print_success "cgo build passed"
+else
+    print_error "cgo build failed"
     exit 1
 fi
 

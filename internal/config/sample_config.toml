@@ -77,6 +77,24 @@ opensubtitles_user_token = ""                        # Optional OpenSubtitles us
 opensubtitles_languages = ["en"]                     # Preferred subtitle languages (ISO 639-1)
 
 # ============================================================================
+# COMMENTARY DETECTION
+# ============================================================================
+
+[commentary_detection]
+enabled = true                                       # Detect and keep commentary audio tracks
+languages = ["en"]                                   # Strict language filter for commentary candidates
+channels = 2                                         # Channel count required for commentary candidates
+sample_windows = 3                                   # Windows sampled across the program
+window_seconds = 90                                  # Seconds per sample window
+fingerprint_similarity_duplicate = 0.98              # Similarity threshold for duplicate/downmix exclusion
+speech_ratio_min_commentary = 0.25                   # Minimum speech ratio for commentary inclusion
+speech_ratio_max_music = 0.10                        # Maximum speech ratio for music-only exclusion
+speech_overlap_primary_min = 0.60                    # Minimum overlap for mixed commentary inclusion
+speech_in_silence_max = 0.40                         # Max allowed speech in primary silence (AD exclusion)
+duration_tolerance_seconds = 120                     # Absolute duration tolerance vs primary (seconds)
+duration_tolerance_ratio = 0.02                      # Relative duration tolerance vs primary (ratio)
+
+# ============================================================================
 # RIP CACHE (optional)
 # ============================================================================
 

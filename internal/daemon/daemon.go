@@ -110,6 +110,11 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return errors.New("another spindle daemon instance is already running")
 	}
 
+	if err := d.runDependencyChecks(ctx); err != nil {
+		_ = d.lock.Unlock()
+		return err
+	}
+
 	d.ctx, d.cancel = context.WithCancel(ctx)
 	if err := d.workflow.Start(d.ctx); err != nil {
 		_ = d.lock.Unlock()
@@ -144,7 +149,6 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	d.running.Store(true)
 	d.logger.Info("spindle daemon started", logging.String("lock", d.lockPath))
-	d.runDependencyChecks(ctx)
 	return nil
 }
 
@@ -317,7 +321,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	}
 }
 
-func (d *Daemon) runDependencyChecks(ctx context.Context) {
+func (d *Daemon) runDependencyChecks(ctx context.Context) error {
 	requirements := []deps.Requirement{
 		{
 			Name:        "MakeMKV",
@@ -329,6 +333,52 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) {
 			Command:     d.cfg.DraptoBinary(),
 			Description: "Required for encoding",
 		},
+		{
+			Name:        "FFprobe",
+			Command:     deps.ResolveFFprobePath(d.cfg.FFprobeBinary()),
+			Description: "Required for media inspection",
+		},
+		{
+			Name:        "MediaInfo",
+			Command:     "mediainfo",
+			Description: "Required for metadata inspection",
+		},
+		{
+			Name:        "bd_info",
+			Command:     "bd_info",
+			Description: "Enhances disc metadata when MakeMKV titles are generic",
+			Optional:    true,
+		},
+	}
+	if d.cfg.Subtitles.Enabled {
+		requirements = append(requirements, deps.Requirement{
+			Name:        "uvx",
+			Command:     "uvx",
+			Description: "Required for WhisperX-driven transcription",
+		})
+	}
+	if d.cfg.CommentaryDetection.Enabled {
+		requirements = append(requirements, deps.Requirement{
+			Name:        "fpcalc",
+			Command:     "fpcalc",
+			Description: "Required for commentary fingerprinting",
+		}, deps.Requirement{
+			Name:        "webrtcvad (cgo)",
+			Command:     "cc",
+			Description: "Required for commentary speech detection",
+		})
+	} else {
+		requirements = append(requirements, deps.Requirement{
+			Name:        "fpcalc",
+			Command:     "fpcalc",
+			Description: "Required for commentary fingerprinting",
+			Optional:    true,
+		}, deps.Requirement{
+			Name:        "webrtcvad (cgo)",
+			Command:     "cc",
+			Description: "Required for commentary speech detection",
+			Optional:    true,
+		})
 	}
 
 	results := deps.CheckBinaries(requirements)
@@ -371,4 +421,15 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) {
 			}
 		}
 	}
+	missing := make([]string, 0)
+	for _, status := range results {
+		if status.Available || status.Optional {
+			continue
+		}
+		missing = append(missing, status.Name)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required dependencies: %s (see README.md)", strings.Join(missing, ", "))
+	}
+	return nil
 }

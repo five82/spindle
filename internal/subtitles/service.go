@@ -17,6 +17,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/deps"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/services"
@@ -406,7 +407,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 
 func (s *Service) ffprobeBinary() string {
 	if s != nil && s.config != nil {
-		return s.config.FFprobeBinary()
+		return deps.ResolveFFprobePath(s.config.FFprobeBinary())
 	}
 	return "ffprobe"
 }

@@ -23,7 +23,7 @@ func (noopStage) HealthCheck(context.Context) stage.Health {
 }
 
 func TestDaemonStartStop(t *testing.T) {
-	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries("makemkvcon", "drapto", "ffmpeg"))
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 	store := testsupport.MustOpenStore(t, cfg)
 	logPath := filepath.Join(cfg.Paths.LogDir, "daemon-test.log")
 	logger := logging.NewNop()
@@ -52,6 +52,9 @@ func TestDaemonStartStop(t *testing.T) {
 		t.Fatal("expected dependency status to be populated")
 	}
 	for _, dep := range status.Dependencies {
+		if dep.Optional {
+			continue
+		}
 		if !dep.Available {
 			t.Fatalf("expected dependency %s to be available, got detail %q", dep.Name, dep.Detail)
 		}

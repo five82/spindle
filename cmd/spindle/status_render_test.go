@@ -34,8 +34,8 @@ func TestDependencyLines(t *testing.T) {
 		{Name: "ntfy", Available: false, Optional: true, Detail: "not configured"},
 	}
 	lines := dependencyLines(deps, false)
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(lines))
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines, got %d", len(lines))
 	}
 	if !strings.Contains(lines[0], "[ERROR] not available") {
 		t.Fatalf("expected error detail in first line, got %q", lines[0])
@@ -45,6 +45,9 @@ func TestDependencyLines(t *testing.T) {
 	}
 	if !strings.Contains(lines[2], "[WARN] not configured") {
 		t.Fatalf("expected warn detail in third line, got %q", lines[2])
+	}
+	if !strings.Contains(lines[3], "Missing dependencies:") {
+		t.Fatalf("expected missing dependencies summary, got %q", lines[3])
 	}
 }
 

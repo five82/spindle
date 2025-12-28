@@ -67,6 +67,40 @@ title.
 Once the daemon reports `RIPPED`, eject the disc manually; encoding and
 organization continue in the background.
 
+Note: `./check-ci.sh` now runs a CGO-enabled build and requires `gcc`
+(`build-essential` on Ubuntu) to be available in your PATH.
+
+## Dependencies (Ubuntu 24.04)
+
+Spindle expects system packages plus external binaries to be present in `PATH`.
+
+System packages:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential ffmpeg mediainfo libchromaprint-tools
+```
+
+External binaries (installed separately):
+
+- MakeMKV (provides `makemkvcon`)
+- Drapto (Spindle's encoder)
+
+Required binaries in `PATH`:
+
+- `ffmpeg`, `ffprobe`
+- `makemkvcon`
+- `drapto`
+- `mediainfo`
+- `fpcalc` (Chromaprint)
+
+If your custom builds are already on `PATH`, no extra config is needed. Use
+`SPINDLE_FFMPEG_PATH`/`FFMPEG_PATH` and `SPINDLE_FFPROBE_PATH`/`FFPROBE_PATH`
+only when you need to override `PATH` resolution (systemd services, CI, or
+multiple ffmpeg installs).
+
+`spindle status` reports dependency presence and points out anything missing.
+
 ## Everyday Workflow
 
 Each queue item flows through:

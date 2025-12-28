@@ -12,10 +12,14 @@
 // MakeMKV settings by hand.
 //
 // Once MakeMKV produces the MKV container, the ripper re-runs ffprobe to
-// inventory audio streams and then remuxes the file with ffmpeg. By default the
-// remux keeps only a single English primary track (prioritizing by channel count
-// then lossless quality, since Opus transcoding strips spatial metadata) while
-// dropping other audio.
+// inventory audio streams and then remuxes the working copy with ffmpeg. The
+// remux keeps the primary English track plus any detected commentary tracks
+// (English, stereo) while dropping other audio. Commentary detection blends
+// metadata heuristics with audio analysis for high precision.
+//
+// When the rip cache is enabled, raw rips are stored unchanged in the cache and
+// copied into the staging directory for commentary selection. The cache remains
+// immutable so future runs can always re-derive commentary picks.
 //
 // Centralize new ripping behaviours here so the workflow manager interacts with
 // a single, well-tested abstraction.

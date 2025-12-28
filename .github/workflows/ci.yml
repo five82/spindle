@@ -25,6 +25,9 @@ jobs:
       - name: Run unit tests
         run: go test ./...
 
+      - name: CGO build
+        run: CGO_ENABLED=1 go build ./...
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:

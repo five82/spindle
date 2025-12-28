@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"spindle/internal/deps"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/services"
@@ -79,7 +80,7 @@ func (e *Encoder) validateEncodedArtifact(ctx context.Context, path string, star
 
 	binary := "ffprobe"
 	if e.cfg != nil {
-		binary = e.cfg.FFprobeBinary()
+		binary = deps.ResolveFFprobePath(e.cfg.FFprobeBinary())
 	}
 	probe, err := encodeProbe(ctx, binary, clean)
 	if err != nil {

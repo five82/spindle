@@ -15,6 +15,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/deps"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
@@ -433,7 +434,7 @@ func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, 
 
 	binary := "ffprobe"
 	if o.cfg != nil {
-		binary = o.cfg.FFprobeBinary()
+		binary = deps.ResolveFFprobePath(o.cfg.FFprobeBinary())
 	}
 	probe, err := organizerProbe(ctx, binary, clean)
 	if err != nil {

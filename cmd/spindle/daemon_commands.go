@@ -199,6 +199,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusWarn, "Not configured", colorize))
 			}
 
+			fmt.Fprintln(stdout, "Dependencies")
 			for _, line := range dependencyLines(statusResp.Dependencies, colorize) {
 				fmt.Fprintln(stdout, line)
 			}
@@ -237,6 +238,7 @@ func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
 		return nil
 	}
 	lines := make([]string, 0, len(deps))
+	missing := make([]string, 0)
 	for _, dep := range deps {
 		if dep.Available {
 			message := "Ready"
@@ -256,6 +258,12 @@ func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
 			kind = statusWarn
 		}
 		lines = append(lines, renderStatusLine(dep.Name, kind, detail, colorize))
+		missing = append(missing, dep.Name)
+	}
+	if len(missing) == 0 {
+		lines = append(lines, "Missing dependencies: none")
+	} else {
+		lines = append(lines, fmt.Sprintf("Missing dependencies: %s (see README.md for install steps)", strings.Join(missing, ", ")))
 	}
 	return lines
 }
@@ -276,6 +284,16 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Description: "Required for encoding",
 		},
 		{
+			Name:        "FFprobe",
+			Command:     deps.ResolveFFprobePath(cfg.FFprobeBinary()),
+			Description: "Required for media inspection",
+		},
+		{
+			Name:        "MediaInfo",
+			Command:     "mediainfo",
+			Description: "Required for metadata inspection",
+		},
+		{
 			Name:        "bd_info",
 			Command:     "bd_info",
 			Description: "Enhances disc metadata when MakeMKV titles are generic",
@@ -287,6 +305,29 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Name:        "uvx",
 			Command:     "uvx",
 			Description: "Required for WhisperX-driven transcription",
+		})
+	}
+	if cfg.CommentaryDetection.Enabled {
+		requirements = append(requirements, deps.Requirement{
+			Name:        "fpcalc",
+			Command:     "fpcalc",
+			Description: "Required for commentary fingerprinting",
+		}, deps.Requirement{
+			Name:        "webrtcvad (cgo)",
+			Command:     "cc",
+			Description: "Required for commentary speech detection",
+		})
+	} else {
+		requirements = append(requirements, deps.Requirement{
+			Name:        "fpcalc",
+			Command:     "fpcalc",
+			Description: "Required for commentary fingerprinting",
+			Optional:    true,
+		}, deps.Requirement{
+			Name:        "webrtcvad (cgo)",
+			Command:     "cc",
+			Description: "Required for commentary speech detection",
+			Optional:    true,
 		})
 	}
 	checks := deps.CheckBinaries(requirements)

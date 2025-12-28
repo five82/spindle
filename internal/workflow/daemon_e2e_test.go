@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"spindle/internal/config"
 	"spindle/internal/daemon"
 	"spindle/internal/disc"
 	"spindle/internal/encoding"
@@ -17,12 +16,12 @@ import (
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
+	"spindle/internal/testsupport"
 	"spindle/internal/workflow"
 )
 
 func TestDaemonEndToEndWorkflow(t *testing.T) {
-	cfgValue := config.Default()
-	cfg := &cfgValue
+	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 
 	stubValidationProbes(t)
 

@@ -1,10 +1,10 @@
 package ripping
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -18,8 +18,8 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/deps"
 	"spindle/internal/logging"
-	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -196,6 +196,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	if stagingRoot == "" {
 		stagingRoot = filepath.Join(strings.TrimSpace(r.cfg.Paths.StagingDir), fmt.Sprintf("queue-%d", item.ID))
 	}
+	workingDir := filepath.Join(stagingRoot, "rips")
 
 	fingerprintAvailable := hasDiscFingerprint(item)
 	if !fingerprintAvailable {
@@ -208,22 +209,25 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		)
 	}
 	useCache := r.cache != nil
-	destDir = filepath.Join(stagingRoot, "rips")
+	destDir = workingDir
 	if useCache {
 		destDir = r.cache.Path(item)
 	}
 
-	if useCache {
-		if err := os.MkdirAll(destDir, 0o755); err != nil {
-			return services.Wrap(
-				services.ErrConfiguration,
-				"ripping",
-				"ensure cache dir",
-				"Failed to create rip cache directory; check rip_cache_dir permissions",
-				err,
-			)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		contextLabel := "staging dir"
+		message := "Failed to create staging directory; set staging_dir to a writable location"
+		if useCache {
+			contextLabel = "cache dir"
+			message = "Failed to create rip cache directory; check rip_cache_dir permissions"
 		}
-		cacheCleanup = destDir
+		return services.Wrap(
+			services.ErrConfiguration,
+			"ripping",
+			"ensure "+contextLabel,
+			message,
+			err,
+		)
 	}
 
 	cacheUsed := false
@@ -271,6 +275,9 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 	} else if useCache {
 		cacheStatus = "miss"
+	}
+	if useCache && cacheStatus != "hit" {
+		cacheCleanup = destDir
 	}
 	defer func() {
 		if cacheCleanup == "" {
@@ -334,15 +341,6 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 
 	if target == "" {
 		sourcePath := strings.TrimSpace(item.SourcePath)
-		if err := os.MkdirAll(destDir, 0o755); err != nil {
-			return services.Wrap(
-				services.ErrConfiguration,
-				"ripping",
-				"ensure staging dir",
-				"Failed to create staging directory; set staging_dir to a writable location",
-				err,
-			)
-		}
 		if sourcePath == "" {
 			logger.Error(
 				"ripping validation failed",
@@ -378,6 +376,20 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			logging.String("ripped_file", target),
 		)
 	}
+	if useCache && destDir != workingDir {
+		if err := refreshWorkingCopy(destDir, workingDir); err != nil {
+			return services.Wrap(
+				services.ErrTransient,
+				"ripping",
+				"refresh working copy",
+				"Failed to copy raw rip into staging; check disk space and permissions",
+				err,
+			)
+		}
+		if strings.TrimSpace(target) != "" {
+			target = mapToWorkingPath(target, destDir, workingDir)
+		}
+	}
 
 	validationTargets := []string{}
 	if strings.TrimSpace(target) != "" {
@@ -385,9 +397,9 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 	specDirty := false
 	if hasEpisodes {
-		assigned := assignEpisodeAssets(&env, destDir, logger)
+		assigned := assignEpisodeAssets(&env, workingDir, logger)
 		if assigned == 0 {
-			logger.Warn("episode asset mapping incomplete", logging.String("dest_dir", destDir))
+			logger.Warn("episode asset mapping incomplete", logging.String("dest_dir", workingDir))
 		} else {
 			specDirty = true
 			paths := episodeAssetPaths(env)
@@ -398,7 +410,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 	}
 
-	if err := r.refineAudioTargets(ctx, validationTargets); err != nil {
+	if err := RefineAudioTargets(ctx, r.cfg, r.logger, validationTargets); err != nil {
 		return services.Wrap(
 			services.ErrExternalTool,
 			"ripping",
@@ -497,147 +509,6 @@ func hasDiscFingerprint(item *queue.Item) bool {
 	return strings.TrimSpace(item.DiscFingerprint) != ""
 }
 
-func (r *Ripper) refineAudioTracks(ctx context.Context, path string) error {
-	logger := logging.WithContext(ctx, r.logger)
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("refine audio: empty path")
-	}
-	ffprobeBinary := "ffprobe"
-	if r.cfg != nil {
-		ffprobeBinary = r.cfg.FFprobeBinary()
-	}
-	probe, err := probeVideo(ctx, ffprobeBinary, path)
-	if err != nil {
-		return fmt.Errorf("inspect ripped audio: %w", err)
-	}
-	totalAudio := countAudioStreams(probe.Streams)
-	if totalAudio <= 1 {
-		return nil
-	}
-	selection := audio.Select(probe.Streams)
-	if !selection.Changed(totalAudio) {
-		return nil
-	}
-	if len(selection.KeepIndices) == 0 {
-		return fmt.Errorf("refine audio: selection produced no audio streams")
-	}
-	tmpPath := deriveTempAudioPath(path)
-	if err := r.remuxAudioSelection(ctx, path, tmpPath, selection); err != nil {
-		return err
-	}
-	// Replace the original rip with the remuxed variant.
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("refine audio: remove original rip: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("refine audio: finalize remux: %w", err)
-	}
-	if logger != nil {
-		fields := []any{
-			logging.String("primary_audio", selection.PrimaryLabel()),
-			logging.Int("kept_audio_streams", len(selection.KeepIndices)),
-		}
-		if len(selection.RemovedIndices) > 0 {
-			fields = append(fields, logging.Any("removed_audio_indices", selection.RemovedIndices))
-		}
-		logger.Info("refined ripped audio tracks", fields...)
-	}
-	return nil
-}
-
-func (r *Ripper) refineAudioTargets(ctx context.Context, paths []string) error {
-	unique := make([]string, 0, len(paths))
-	seen := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		clean := strings.TrimSpace(path)
-		if clean == "" {
-			continue
-		}
-		if _, ok := seen[clean]; ok {
-			continue
-		}
-		seen[clean] = struct{}{}
-		unique = append(unique, clean)
-	}
-	for _, path := range unique {
-		if err := r.refineAudioTracks(ctx, path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *Ripper) remuxAudioSelection(ctx context.Context, src, dst string, selection audio.Selection) error {
-	if strings.TrimSpace(src) == "" || strings.TrimSpace(dst) == "" {
-		return fmt.Errorf("remux audio: invalid path")
-	}
-	ffmpegBinary := "ffmpeg"
-	args := []string{"-y", "-hide_banner", "-loglevel", "error", "-i", src, "-map", "0:v?", "-map", "0:s?", "-map", "0:d?", "-map", "0:t?"}
-	for _, idx := range selection.KeepIndices {
-		args = append(args, "-map", fmt.Sprintf("0:%d", idx))
-	}
-	args = append(args, "-c", "copy")
-	if len(selection.KeepIndices) > 0 {
-		args = append(args, "-disposition:a:0", "default")
-		for i := 1; i < len(selection.KeepIndices); i++ {
-			args = append(args, "-disposition:a:"+strconv.Itoa(i), "none")
-		}
-	}
-	if format := outputFormatForPath(dst); format != "" {
-		args = append(args, "-f", format)
-	}
-	args = append(args, dst)
-	cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg remux: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
-}
-
-func countAudioStreams(streams []ffprobe.Stream) int {
-	count := 0
-	for _, stream := range streams {
-		if strings.EqualFold(stream.CodecType, "audio") {
-			count++
-		}
-	}
-	return count
-}
-
-func deriveTempAudioPath(path string) string {
-	clean := strings.TrimSpace(path)
-	if clean == "" {
-		return path + ".spindle-audio"
-	}
-	ext := filepath.Ext(clean)
-	base := strings.TrimSuffix(clean, ext)
-	if ext == "" {
-		ext = ".mkv"
-	}
-	return fmt.Sprintf("%s.spindle-audio%s", base, ext)
-}
-
-func outputFormatForPath(path string) string {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mkv", ".mk3d":
-		return "matroska"
-	case ".mp4", ".m4v":
-		return "mp4"
-	case ".mov":
-		return "mov"
-	case ".ts", ".m2ts":
-		return "mpegts"
-	case ".mka":
-		return "matroska"
-	default:
-		return ""
-	}
-}
-
 func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, path string, startedAt time.Time) error {
 	logger := logging.WithContext(ctx, r.logger)
 	clean := strings.TrimSpace(path)
@@ -689,7 +560,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 
 	binary := "ffprobe"
 	if r.cfg != nil {
-		binary = r.cfg.FFprobeBinary()
+		binary = deps.ResolveFFprobePath(r.cfg.FFprobeBinary())
 	}
 	probe, err := probeVideo(ctx, binary, clean)
 	if err != nil {
@@ -1061,6 +932,79 @@ func existsNonEmptyDir(path string) bool {
 	}
 	entries, err := os.ReadDir(path)
 	return err == nil && len(entries) > 0
+}
+
+func refreshWorkingCopy(src, dst string) error {
+	if strings.TrimSpace(src) == "" || strings.TrimSpace(dst) == "" {
+		return errors.New("refresh working copy: empty path")
+	}
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return nil
+	}
+	if err := os.RemoveAll(dst); err != nil {
+		return fmt.Errorf("refresh working copy: remove existing: %w", err)
+	}
+	return copyDir(src, dst)
+}
+
+func mapToWorkingPath(rawPath, rawDir, workingDir string) string {
+	rawPath = strings.TrimSpace(rawPath)
+	if rawPath == "" {
+		return rawPath
+	}
+	if strings.TrimSpace(rawDir) == "" || strings.TrimSpace(workingDir) == "" {
+		return rawPath
+	}
+	rel, err := filepath.Rel(rawDir, rawPath)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return filepath.Join(workingDir, filepath.Base(rawPath))
+	}
+	return filepath.Join(workingDir, rel)
+}
+
+func copyDir(src, dst string) error {
+	if src == "" || dst == "" {
+		return errors.New("copyDir: empty path")
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if info.Mode().Type() != 0 {
+			return nil
+		}
+		return copyFile(path, target, info.Mode())
+	})
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 // selectCachedRip picks the largest MKV in dir, assuming it is the primary

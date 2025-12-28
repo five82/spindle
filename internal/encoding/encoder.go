@@ -18,6 +18,7 @@ import (
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/ripcache"
+	"spindle/internal/ripping"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/services/drapto"
@@ -173,11 +174,42 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 				)
 			} else if restored {
 				logger.Info("restored ripped files from cache", logging.String("rip_dir", ripDir))
+				paths := rippedPaths(item, env)
+				if err := ripping.RefineAudioTargets(ctx, e.cfg, logger, paths); err != nil {
+					return ripspec.Envelope{}, services.Wrap(
+						services.ErrExternalTool,
+						"encoding",
+						"refine audio tracks",
+						"Failed to optimize ripped audio tracks after cache restore",
+						err,
+					)
+				}
 			}
 		}
 	}
 
 	return env, nil
+}
+
+func rippedPaths(item *queue.Item, env ripspec.Envelope) []string {
+	paths := make([]string, 0)
+	if len(env.Episodes) > 0 {
+		for _, episode := range env.Episodes {
+			asset, ok := env.Assets.FindAsset("ripped", episode.Key)
+			if !ok {
+				continue
+			}
+			if value := strings.TrimSpace(asset.Path); value != "" {
+				paths = append(paths, value)
+			}
+		}
+	}
+	if len(paths) == 0 && item != nil {
+		if value := strings.TrimSpace(item.RippedFile); value != "" {
+			paths = append(paths, value)
+		}
+	}
+	return paths
 }
 
 // prepareEncodedDirectory creates a clean output directory for encoded files.

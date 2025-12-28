@@ -33,6 +33,10 @@ const (
 	defaultPresetDeciderReferer        = "https://github.com/five82/spindle"
 	defaultPresetDeciderTitle          = "Spindle Preset Decider"
 	defaultPresetDeciderTimeoutSeconds = 15
+	defaultCommentaryEnabled           = true
+	defaultCommentaryChannels          = 2
+	defaultCommentarySampleWindows     = 3
+	defaultCommentaryWindowSeconds     = 90
 )
 
 // Default returns a Config populated with repository defaults.
@@ -76,6 +80,20 @@ func Default() Config {
 			WhisperXVADMethod:      "silero",
 			OpenSubtitlesLanguages: []string{"en"},
 			OpenSubtitlesUserAgent: defaultOpenSubtitlesUserAgent,
+		},
+		CommentaryDetection: CommentaryDetection{
+			Enabled:                        defaultCommentaryEnabled,
+			Languages:                      []string{"en"},
+			Channels:                       defaultCommentaryChannels,
+			SampleWindows:                  defaultCommentarySampleWindows,
+			WindowSeconds:                  defaultCommentaryWindowSeconds,
+			FingerprintSimilarityDuplicate: 0.98,
+			SpeechRatioMinCommentary:       0.25,
+			SpeechRatioMaxMusic:            0.10,
+			SpeechOverlapPrimaryMin:        0.60,
+			SpeechInSilenceMax:             0.40,
+			DurationToleranceSeconds:       120,
+			DurationToleranceRatio:         0.02,
 		},
 		RipCache: RipCache{
 			Dir:    defaultRipCacheDir(),
