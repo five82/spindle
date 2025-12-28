@@ -156,7 +156,7 @@ staging directory for inspection.
   `preset_decider_api_key`, `preset_decider_referer`, `preset_decider_title`,
   `preset_decider_timeout_seconds` —
   configure the OpenRouter-powered preset selector. Defaults point at
-  `deepseek/deepseek-v3.2`; supply an API key via config or
+  `google/gemini-3-flash-preview`; supply an API key via config or
   `OPENROUTER_API_KEY`.
 - Custom FFmpeg/FFprobe builds are picked up automatically when they are in
   `PATH`. Use `SPINDLE_FFMPEG_PATH`/`FFMPEG_PATH` or

@@ -181,7 +181,20 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 	}
 	classification, err := e.presetClassifier.Classify(ctx, request)
 	if err != nil {
-		logger.Warn("preset decider classification failed", logging.Error(err))
+		attrs := []logging.Attr{logging.Error(err)}
+		if e != nil && e.cfg != nil {
+			timeoutSeconds := presetDeciderTimeoutSeconds(&e.cfg.PresetDecider)
+			if timeoutSeconds > 0 {
+				attrs = append(attrs, logging.Int("timeout_seconds", timeoutSeconds))
+			}
+			if model := strings.TrimSpace(e.cfg.PresetDecider.Model); model != "" {
+				attrs = append(attrs, logging.String("model", model))
+			}
+			if baseURL := strings.TrimSpace(e.cfg.PresetDecider.BaseURL); baseURL != "" {
+				attrs = append(attrs, logging.String("base_url", baseURL))
+			}
+		}
+		logger.Warn("preset decider classification failed", logging.Args(attrs...)...)
 		return decision
 	}
 	decision.SuggestedProfile = classification.Profile
@@ -220,6 +233,13 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 	decision.Applied = true
 	logger.Info("preset decider applied", logging.Args(attrs...)...)
 	return decision
+}
+
+func presetDeciderTimeoutSeconds(cfg *config.PresetDecider) int {
+	if cfg != nil && cfg.TimeoutSeconds > 0 {
+		return cfg.TimeoutSeconds
+	}
+	return int(presetllm.DefaultHTTPTimeout().Seconds())
 }
 
 func (e *Encoder) detectResolutionLabel(ctx context.Context, path string) (string, error) {

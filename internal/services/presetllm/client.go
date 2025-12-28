@@ -33,6 +33,11 @@ type Config struct {
 	TimeoutSeconds int
 }
 
+// DefaultHTTPTimeout returns the default timeout used for preset LLM requests.
+func DefaultHTTPTimeout() time.Duration {
+	return defaultHTTPTimeout
+}
+
 // Client wraps the OpenRouter chat completion API.
 type Client struct {
 	cfg        Config
@@ -405,12 +410,12 @@ func (c *Client) sendChatRequestOnce(ctx context.Context, payload chatCompletion
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return completion, nil, fmt.Errorf("preset llm request: http error: %w", err)
+		return completion, nil, fmt.Errorf("preset llm request: http error (timeout=%s): %w", c.timeoutDuration(), err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return completion, nil, fmt.Errorf("preset llm request: read body: %w", err)
+		return completion, nil, fmt.Errorf("preset llm request: read body (timeout=%s): %w", c.timeoutDuration(), err)
 	}
 	if resp.StatusCode >= http.StatusMultipleChoices {
 		retryAfter, _ := parseRetryAfter(resp.Header.Get("Retry-After"))
@@ -427,6 +432,16 @@ func (c *Client) sendChatRequestOnce(ctx context.Context, payload chatCompletion
 		return completion, body, fmt.Errorf("preset llm request: api error: %s", strings.TrimSpace(completion.Error.Message))
 	}
 	return completion, body, nil
+}
+
+func (c *Client) timeoutDuration() time.Duration {
+	if c == nil || c.httpClient == nil {
+		return defaultHTTPTimeout
+	}
+	if c.httpClient.Timeout <= 0 {
+		return defaultHTTPTimeout
+	}
+	return c.httpClient.Timeout
 }
 
 func (c *Client) retryAttempts() int {

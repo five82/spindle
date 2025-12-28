@@ -42,7 +42,7 @@ are never included.
 
 ```toml
 preset_decider_enabled = true
-preset_decider_model = "deepseek/deepseek-v3.2"
+preset_decider_model = "google/gemini-3-flash-preview"
 preset_decider_base_url = "https://openrouter.ai/api/v1/chat/completions"
 preset_decider_api_key = " your_openrouter_key "
 preset_decider_referer = "https://github.com/five82/spindle"
@@ -55,7 +55,7 @@ preset_decider_title = "Spindle Preset Decider"
   `deepseek_api_key` and `DEEPSEEK_API_KEY` continue to work but are
   discouraged.
 - `preset_decider_model` – any OpenRouter model that supports structured JSON
-  output. Defaults to `deepseek/deepseek-v3.2`.
+  output. Defaults to `google/gemini-3-flash-preview`.
 - `preset_decider_base_url` – override if you self-host a router or call a
   different provider.
 - `preset_decider_referer` & `preset_decider_title` – sent via headers because

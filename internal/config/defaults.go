@@ -29,10 +29,10 @@ const (
 	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
 	defaultRipCacheMaxGiB              = 150
 	defaultPresetDeciderBaseURL        = "https://openrouter.ai/api/v1/chat/completions"
-	defaultPresetDeciderModel          = "deepseek/deepseek-v3.2"
+	defaultPresetDeciderModel          = "google/gemini-3-flash-preview"
 	defaultPresetDeciderReferer        = "https://github.com/five82/spindle"
 	defaultPresetDeciderTitle          = "Spindle Preset Decider"
-	defaultPresetDeciderTimeoutSeconds = 15
+	defaultPresetDeciderTimeoutSeconds = 60
 	defaultCommentaryEnabled           = true
 	defaultCommentaryChannels          = 2
 	defaultCommentarySampleWindows     = 3

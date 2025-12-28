@@ -124,10 +124,10 @@ identification_overrides_path = "~/.config/spindle/overrides/identification.json
 enabled = false                                      # Use LLM to choose Drapto presets per title
 api_key = ""                                         # Required when enabled; or set OPENROUTER_API_KEY
 base_url = "https://openrouter.ai/api/v1/chat/completions"
-model = "deepseek/deepseek-v3.2"                     # OpenRouter model identifier
+model = "google/gemini-3-flash-preview"             # OpenRouter model identifier
 referer = "https://github.com/five82/spindle"        # Sent to OpenRouter for routing/analytics
 title = "Spindle Preset Decider"                     # Display name sent via X-Title header
-timeout_seconds = 15                                 # HTTP timeout (seconds)
+timeout_seconds = 60                                 # HTTP timeout (seconds)
 
 # ============================================================================
 # WORKFLOW TUNING

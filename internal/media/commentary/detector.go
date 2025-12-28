@@ -99,6 +99,20 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	if len(windows) == 0 {
 		return Result{}, nil
 	}
+	logger.Info("commentary detection criteria",
+		logging.Int("primary_stream", primaryIndex),
+		logging.String("languages", strings.Join(normalizedLanguages(settings.Languages), ",")),
+		logging.Int("channels", settings.Channels),
+		logging.Int("sample_windows", settings.SampleWindows),
+		logging.Int("window_seconds", settings.WindowSeconds),
+		logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
+		logging.Float64("speech_ratio_max_music", settings.SpeechRatioMaxMusic),
+		logging.Float64("speech_overlap_primary_min", settings.SpeechOverlapPrimaryMin),
+		logging.Float64("speech_in_silence_max", settings.SpeechInSilenceMax),
+		logging.Float64("fingerprint_similarity_duplicate", settings.FingerprintSimilarityDuplicate),
+		logging.Int("duration_tolerance_seconds", settings.DurationToleranceSeconds),
+		logging.Float64("duration_tolerance_ratio", settings.DurationToleranceRatio),
+	)
 
 	primarySpeech, err := analyzeSpeech(ctx, ffmpegBinary, path, primaryIndex, windows)
 	if err != nil {
@@ -117,9 +131,26 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 		return Result{}, fmt.Errorf("commentary detect: primary fingerprint: %w", err)
 	}
 
-	candidates := buildCandidates(probe.Streams, settings, primaryDuration)
+	candidates, prefilter := evaluateCandidates(probe.Streams, settings, primaryDuration, primaryIndex)
 	decisions := make([]Decision, 0, len(candidates))
 	indices := make([]int, 0)
+	candidateIndices := make([]int, 0, len(candidates))
+	for _, decision := range prefilter {
+		logger.Info("commentary candidate evaluated",
+			logging.Int("stream_index", decision.Index),
+			logging.Bool("candidate", decision.Candidate),
+			logging.String("reason", decision.Reason),
+			logging.String("language", decision.Language),
+			logging.String("title", decision.Title),
+			logging.Int("channels", decision.Channels),
+			logging.Float64("duration_seconds", decision.Duration),
+			logging.Bool("metadata_positive", decision.MetadataPositive),
+			logging.String("metadata_negative", decision.MetadataNegative),
+		)
+		if decision.Candidate {
+			candidateIndices = append(candidateIndices, decision.Index)
+		}
+	}
 
 	for _, cand := range candidates {
 		if cand.stream.Index == primaryIndex {
@@ -177,6 +208,13 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 
 	sort.Ints(indices)
 	for _, decision := range decisions {
+		thresholds := []logging.Attr{
+			logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
+			logging.Float64("speech_ratio_max_music", settings.SpeechRatioMaxMusic),
+			logging.Float64("speech_overlap_primary_min", settings.SpeechOverlapPrimaryMin),
+			logging.Float64("speech_in_silence_max", settings.SpeechInSilenceMax),
+			logging.Float64("fingerprint_similarity_duplicate", settings.FingerprintSimilarityDuplicate),
+		}
 		logger.Info("commentary decision",
 			logging.Int("stream_index", decision.Index),
 			logging.Bool("included", decision.Include),
@@ -188,8 +226,16 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			logging.Float64("speech_overlap_primary", decision.Metrics.SpeechOverlapWithPrimary),
 			logging.Float64("speech_in_primary_silence", decision.Metrics.SpeechInPrimarySilence),
 			logging.Float64("fingerprint_similarity", decision.Metrics.FingerprintSimilarity),
+			logging.Group("thresholds", thresholds...),
 		)
 	}
+	sort.Ints(candidateIndices)
+	logger.Info("commentary selection summary",
+		logging.Int("candidate_count", len(candidateIndices)),
+		logging.Any("candidate_indices", candidateIndices),
+		logging.Int("kept_count", len(indices)),
+		logging.Any("kept_indices", indices),
+	)
 
 	return Result{Indices: indices, Decisions: decisions}, nil
 }
@@ -204,43 +250,74 @@ type candidate struct {
 	metadataNegative string
 }
 
-func buildCandidates(streams []ffprobe.Stream, cfg config.CommentaryDetection, primaryDuration float64) []candidate {
+type candidateDecision struct {
+	Index            int
+	Candidate        bool
+	Reason           string
+	Language         string
+	Title            string
+	Channels         int
+	Duration         float64
+	MetadataPositive bool
+	MetadataNegative string
+}
+
+func evaluateCandidates(streams []ffprobe.Stream, cfg config.CommentaryDetection, primaryDuration float64, primaryIndex int) ([]candidate, []candidateDecision) {
 	result := make([]candidate, 0)
+	decisions := make([]candidateDecision, 0)
 	langs := normalizedLanguages(cfg.Languages)
 	for _, stream := range streams {
 		if !strings.EqualFold(stream.CodecType, "audio") {
 			continue
 		}
 		language := normalizeLanguage(stream.Tags)
-		if language == "" {
-			continue
-		}
-		if !languageAllowed(language, langs) {
-			continue
-		}
 		channels := channelCount(stream)
-		if cfg.Channels > 0 && channels != cfg.Channels {
-			continue
-		}
 		duration := streamDurationSeconds(stream)
-		if duration > 0 && primaryDuration > 0 {
-			if !durationWithinTolerance(duration, primaryDuration, cfg) {
-				continue
-			}
-		}
 		title := normalizeTitle(stream.Tags)
 		metaPos, metaNeg := classifyMetadata(title)
-		result = append(result, candidate{
-			stream:           stream,
-			language:         language,
-			title:            title,
-			channels:         channels,
-			duration:         duration,
-			metadataPositive: metaPos,
-			metadataNegative: metaNeg,
-		})
+		decision := candidateDecision{
+			Index:            stream.Index,
+			Language:         language,
+			Title:            title,
+			Channels:         channels,
+			Duration:         duration,
+			MetadataPositive: metaPos,
+			MetadataNegative: metaNeg,
+		}
+		switch {
+		case stream.Index == primaryIndex:
+			decision.Candidate = false
+			decision.Reason = "primary_stream"
+		case language == "":
+			decision.Candidate = false
+			decision.Reason = "language_missing"
+		case !languageAllowed(language, langs):
+			decision.Candidate = false
+			decision.Reason = "language_not_allowed"
+		case cfg.Channels > 0 && channels != cfg.Channels:
+			decision.Candidate = false
+			decision.Reason = "channel_mismatch"
+		case duration > 0 && primaryDuration > 0 && !durationWithinTolerance(duration, primaryDuration, cfg):
+			decision.Candidate = false
+			decision.Reason = "duration_mismatch"
+		default:
+			decision.Candidate = true
+			decision.Reason = "candidate"
+		}
+		decisions = append(decisions, decision)
+		if decision.Candidate {
+			result = append(result, candidate{
+				stream:           stream,
+				language:         language,
+				title:            title,
+				channels:         channels,
+				duration:         duration,
+				metadataPositive: metaPos,
+				metadataNegative: metaNeg,
+			})
+		}
 	}
-	return result
+	return result, decisions
 }
 
 func classify(metrics Metrics, meta Metadata, cfg config.CommentaryDetection) (bool, string) {
