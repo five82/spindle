@@ -129,7 +129,8 @@ alignment artifacts inside each queue item’s staging folder for debugging.
   `~/.config/spindle/keydb/KEYDB.cfg` to seed the cache.
 - `keydb_auto_refresh` — When true, Spindle fetches updates automatically.
 - `preset_decider_enabled`, `preset_decider_model`, `preset_decider_base_url`,
-  `preset_decider_api_key`, `preset_decider_referer`, `preset_decider_title` —
+  `preset_decider_api_key`, `preset_decider_referer`, `preset_decider_title`,
+  `preset_decider_timeout_seconds` —
   configure the OpenRouter-powered preset selector. Defaults point at
   `deepseek/deepseek-v3.2`; supply an API key via config or
   `OPENROUTER_API_KEY`.
@@ -153,6 +154,7 @@ This feature currently considers English stereo tracks only.
 | `commentary_detection_api_key` | API key; defaults to `preset_decider_api_key` when empty, or `OPENROUTER_API_KEY`. |
 | `commentary_detection_referer` | Attribution header; defaults to `preset_decider_referer` when empty. |
 | `commentary_detection_title` | Attribution header title; defaults to `Spindle Commentary Detector`. |
+| `commentary_detection_timeout_seconds` | HTTP timeout in seconds; defaults to `preset_decider_timeout_seconds` when 0 (default 45). |
 
 Set `SPD_DEBUG_COMMENTARY_KEEP=1` before launching the daemon to retain
 commentary-detector artifacts under each queue item’s staging folder.

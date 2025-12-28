@@ -54,11 +54,12 @@ func New(cfg *config.Config, logger *slog.Logger) *Detector {
 	d.transcribe = subtitles.NewService(cfg, logger)
 	if strings.TrimSpace(cfg.CommentaryDetection.APIKey) != "" {
 		d.llm = presetllm.NewClient(presetllm.Config{
-			APIKey:  cfg.CommentaryDetection.APIKey,
-			BaseURL: cfg.CommentaryDetection.BaseURL,
-			Model:   cfg.CommentaryDetection.Model,
-			Referer: cfg.CommentaryDetection.Referer,
-			Title:   cfg.CommentaryDetection.Title,
+			APIKey:         cfg.CommentaryDetection.APIKey,
+			BaseURL:        cfg.CommentaryDetection.BaseURL,
+			Model:          cfg.CommentaryDetection.Model,
+			Referer:        cfg.CommentaryDetection.Referer,
+			Title:          cfg.CommentaryDetection.Title,
+			TimeoutSeconds: cfg.CommentaryDetection.TimeoutSeconds,
 		})
 	}
 	return d

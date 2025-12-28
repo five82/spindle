@@ -25,11 +25,12 @@ const (
 
 // Config captures the runtime settings required to talk to the preset LLM.
 type Config struct {
-	APIKey  string
-	BaseURL string
-	Model   string
-	Referer string
-	Title   string
+	APIKey         string
+	BaseURL        string
+	Model          string
+	Referer        string
+	Title          string
+	TimeoutSeconds int
 }
 
 // Client wraps the OpenRouter chat completion API.
@@ -79,15 +80,20 @@ func WithSleeper(sleeper func(time.Duration)) Option {
 
 // NewClient constructs a preset LLM client using the supplied configuration.
 func NewClient(cfg Config, opts ...Option) *Client {
+	timeout := defaultHTTPTimeout
+	if cfg.TimeoutSeconds > 0 {
+		timeout = time.Duration(cfg.TimeoutSeconds) * time.Second
+	}
 	client := &Client{
 		cfg: Config{
-			APIKey:  strings.TrimSpace(cfg.APIKey),
-			BaseURL: strings.TrimSpace(cfg.BaseURL),
-			Model:   strings.TrimSpace(cfg.Model),
-			Referer: strings.TrimSpace(cfg.Referer),
-			Title:   strings.TrimSpace(cfg.Title),
+			APIKey:         strings.TrimSpace(cfg.APIKey),
+			BaseURL:        strings.TrimSpace(cfg.BaseURL),
+			Model:          strings.TrimSpace(cfg.Model),
+			Referer:        strings.TrimSpace(cfg.Referer),
+			Title:          strings.TrimSpace(cfg.Title),
+			TimeoutSeconds: cfg.TimeoutSeconds,
 		},
-		httpClient:       &http.Client{Timeout: defaultHTTPTimeout},
+		httpClient:       &http.Client{Timeout: timeout},
 		retryMaxAttempts: defaultRetryAttempts,
 		retryBaseDelay:   defaultRetryBaseDelay,
 		retryMaxDelay:    defaultRetryMaxDelay,

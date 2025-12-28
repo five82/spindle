@@ -197,6 +197,9 @@ func (c *Config) normalizePresetDecider() error {
 	if c.PresetDecider.Title == "" {
 		c.PresetDecider.Title = defaultPresetDeciderTitle
 	}
+	if c.PresetDecider.TimeoutSeconds <= 0 {
+		c.PresetDecider.TimeoutSeconds = defaultPresetDeciderTimeoutSeconds
+	}
 	c.PresetDecider.APIKey = strings.TrimSpace(c.PresetDecider.APIKey)
 	if c.PresetDecider.APIKey == "" {
 		if value, ok := os.LookupEnv("PRESET_DECIDER_API_KEY"); ok {
@@ -235,6 +238,13 @@ func (c *Config) normalizeCommentaryDetection() error {
 	c.CommentaryDetection.Title = strings.TrimSpace(c.CommentaryDetection.Title)
 	if c.CommentaryDetection.Title == "" {
 		c.CommentaryDetection.Title = defaultCommentaryDetectionTitle
+	}
+	if c.CommentaryDetection.TimeoutSeconds <= 0 {
+		if c.PresetDecider.TimeoutSeconds > 0 {
+			c.CommentaryDetection.TimeoutSeconds = c.PresetDecider.TimeoutSeconds
+		} else {
+			c.CommentaryDetection.TimeoutSeconds = defaultCommentaryDetectionTimeoutSeconds
+		}
 	}
 	c.CommentaryDetection.APIKey = strings.TrimSpace(c.CommentaryDetection.APIKey)
 	if c.CommentaryDetection.APIKey == "" {

@@ -98,11 +98,12 @@ func newPresetLLMClassifier(cfg *config.Config) presetClassifier {
 		return nil
 	}
 	clientCfg := presetllm.Config{
-		APIKey:  cfg.PresetDecider.APIKey,
-		BaseURL: cfg.PresetDecider.BaseURL,
-		Model:   cfg.PresetDecider.Model,
-		Referer: cfg.PresetDecider.Referer,
-		Title:   cfg.PresetDecider.Title,
+		APIKey:         cfg.PresetDecider.APIKey,
+		BaseURL:        cfg.PresetDecider.BaseURL,
+		Model:          cfg.PresetDecider.Model,
+		Referer:        cfg.PresetDecider.Referer,
+		Title:          cfg.PresetDecider.Title,
+		TimeoutSeconds: cfg.PresetDecider.TimeoutSeconds,
 	}
 	if strings.TrimSpace(clientCfg.APIKey) == "" {
 		return nil

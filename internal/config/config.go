@@ -103,6 +103,8 @@ type PresetDecider struct {
 	Model   string `toml:"model"`
 	Referer string `toml:"referer"`
 	Title   string `toml:"title"`
+	// TimeoutSeconds controls the HTTP timeout when calling the preset LLM.
+	TimeoutSeconds int `toml:"timeout_seconds"`
 }
 
 // CommentaryDetection contains configuration for LLM-based commentary track detection.
@@ -113,6 +115,8 @@ type CommentaryDetection struct {
 	Model   string `toml:"model"`
 	Referer string `toml:"referer"`
 	Title   string `toml:"title"`
+	// TimeoutSeconds controls the HTTP timeout when calling the commentary LLM.
+	TimeoutSeconds int `toml:"timeout_seconds"`
 }
 
 // Workflow contains configuration for daemon timing and intervals.

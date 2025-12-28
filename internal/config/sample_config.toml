@@ -109,6 +109,7 @@ base_url = "https://openrouter.ai/api/v1/chat/completions"
 model = "deepseek/deepseek-v3.2"                     # OpenRouter model identifier
 referer = "https://github.com/five82/spindle"        # Sent to OpenRouter for routing/analytics
 title = "Spindle Preset Decider"                     # Display name sent via X-Title header
+timeout_seconds = 15                                 # HTTP timeout (seconds)
 
 # ============================================================================
 # COMMENTARY DETECTION (LLM-based audio track classification)
@@ -121,6 +122,7 @@ base_url = ""                                        # Defaults to preset_decide
 model = ""                                           # Defaults to preset_decider.model
 referer = ""                                         # Defaults to preset_decider.referer
 title = "Spindle Commentary Detector"
+timeout_seconds = 45                                 # HTTP timeout (seconds); defaults to preset_decider if 0
 
 # ============================================================================
 # WORKFLOW TUNING

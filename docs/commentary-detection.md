@@ -33,14 +33,15 @@ commentary_detection_base_url = ""
 commentary_detection_api_key = ""
 commentary_detection_referer = ""
 commentary_detection_title = "Spindle Commentary Detector"
+commentary_detection_timeout_seconds = 45
 ```
 
 Notes:
 
-- When a `commentary_detection_*` value is empty, Spindle falls back to the
-  corresponding `preset_decider_*` value. This keeps configuration simple when
-  you want one OpenRouter model for both features, but still allows a dedicated
-  model if you prefer.
+- When a `commentary_detection_*` value is empty (or `commentary_detection_timeout_seconds`
+  is 0), Spindle falls back to the corresponding `preset_decider_*` value. This
+  keeps configuration simple when you want one OpenRouter model for both
+  features, but still allows a dedicated model if you prefer.
 - If OpenRouter is not configured (no API key), Spindle still filters duplicates
   and music-only tracks, then keeps the remaining English stereo candidates (it
   errs on the side of retaining).
@@ -83,4 +84,3 @@ Spindle sends the LLM a JSON payload containing:
   short transcript sample (samples are truncated to keep prompts bounded)
 
 No file paths, host identifiers, or queue IDs are included.
-
