@@ -28,7 +28,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "gensubtitle <encoded-file>",
-		Short: "Generate AI subtitles for an encoded media file",
+		Short: "Create subtitles for an encoded media file (OpenSubtitles/WhisperX)",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return fmt.Errorf("provide the path to the encoded media file. Example: spindle gensubtitle /path/to/video.mkv\nRun spindle gensubtitle --help for more details")
