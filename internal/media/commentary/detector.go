@@ -175,6 +175,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 
 		candSpeech, err := analyzeSpeech(ctx, ffmpegBinary, path, cand.stream.Index, windows)
 		if err != nil {
+			logger.Warn("commentary candidate analysis failed", logging.Int("stream", cand.stream.Index), logging.Error(err))
 			decision.Include = false
 			decision.Reason = "analysis_failed"
 			decisions = append(decisions, decision)
@@ -185,6 +186,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 
 		fingerprint, err := fingerprintForStream(ctx, ffmpegBinary, path, cand.stream.Index, windows, filepath.Join(workDir, fmt.Sprintf("cand-%d.wav", cand.stream.Index)))
 		if err != nil {
+			logger.Warn("commentary candidate fingerprint failed", logging.Int("stream", cand.stream.Index), logging.Error(err))
 			decision.Include = false
 			decision.Reason = "fingerprint_failed"
 			decisions = append(decisions, decision)
@@ -230,28 +232,52 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 		)
 	}
 	sort.Ints(candidateIndices)
+	sort.Slice(decisions, func(i, j int) bool {
+		return decisions[i].Index < decisions[j].Index
+	})
+
 	reasonCounts := make(map[string]int)
-	excluded := make([]string, 0)
+	summaryLines := make([]string, 0, len(decisions))
+
 	for _, decision := range decisions {
+		status := "Rejected"
 		if decision.Include {
-			continue
+			status = "Kept"
 		}
 		reason := strings.TrimSpace(decision.Reason)
 		if reason == "" {
 			reason = "unknown"
 		}
 		reasonCounts[reason]++
-		excluded = append(excluded, fmt.Sprintf("%d:%s", decision.Index, reason))
+
+		lang := decision.Metadata.Language
+		if lang == "" {
+			lang = "und"
+		}
+
+		details := ""
+		switch reason {
+		case "commentary_only", "mixed_commentary", "metadata_commentary":
+			details = fmt.Sprintf(" [Speech: %.0f%%, Audio Similarity: %.0f%%]", decision.Metrics.SpeechRatio*100, decision.Metrics.FingerprintSimilarity*100)
+		case "music_or_silent":
+			details = fmt.Sprintf(" [Speech: %.0f%% (Low)]", decision.Metrics.SpeechRatio*100)
+		case "duplicate_downmix":
+			details = fmt.Sprintf(" [Audio Similarity: %.0f%% (High)]", decision.Metrics.FingerprintSimilarity*100)
+		case "audio_description":
+			details = fmt.Sprintf(" [Speech in Silence: %.0f%%, Audio Similarity: %.0f%%]", decision.Metrics.SpeechInPrimarySilence*100, decision.Metrics.FingerprintSimilarity*100)
+		case "fingerprint_failed":
+			details = " [Audio Similarity Check Failed]"
+		case "analysis_failed":
+			details = " [Speech Analysis Failed]"
+		}
+
+		summaryLines = append(summaryLines, fmt.Sprintf("#%d (%s): %s (%s)%s", decision.Index, lang, status, reason, details))
 	}
-	sort.Ints(indices)
-	sort.Strings(excluded)
+
 	logger.Info("commentary selection summary",
 		logging.String(logging.FieldDecisionType, "commentary_detection"),
 		logging.Int("candidate_count", len(candidateIndices)),
-		logging.Any("candidate_indices", candidateIndices),
-		logging.Int("kept_count", len(indices)),
-		logging.Any("kept_indices", indices),
-		logging.Any("decision_rejects", excluded),
+		logging.Any("decisions", summaryLines),
 		logging.Any("reason_counts", reasonCounts),
 		logging.Group("thresholds",
 			logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
