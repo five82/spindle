@@ -173,15 +173,17 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		}
 
 		// Build summary line for this candidate
-		line := fmt.Sprintf("#%d (Score: %.1f): %s (%s) [Language: %s, Downloads: %d, Release: %s]%s", 
+		factors := strings.Join(candidate.reasons, ", ")
+		line := fmt.Sprintf("#%d (Score: %.1f): %s (%s)%s [Lang: %s, DLs: %d, Rel: %s] {%s}", 
 			idx+1, 
 			candidate.score, 
 			status, 
-			reason, 
+			reason,
+			details, 
 			candidate.subtitle.Language, 
 			candidate.subtitle.Downloads, 
 			strings.TrimSpace(candidate.subtitle.Release),
-			details,
+			factors,
 		)
 		summaryLines = append(summaryLines, line)
 
