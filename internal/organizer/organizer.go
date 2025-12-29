@@ -99,9 +99,24 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 	if item.NeedsReview {
+		logger.Info(
+			"organizer review decision",
+			logging.String(logging.FieldDecisionType, "organizer_review_routing"),
+			logging.String("decision_result", "review"),
+			logging.String("decision_reason", "needs_review_flag"),
+			logging.String("decision_options", "organize, review"),
+			logging.String("review_reason", strings.TrimSpace(item.ReviewReason)),
+		)
 		logger.Info("routing item to manual review", logging.String("reason", strings.TrimSpace(item.ReviewReason)))
 		return o.finishReview(ctx, item, stageStart, strings.TrimSpace(item.ReviewReason), encodedSources, nil)
 	}
+	logger.Info(
+		"organizer review decision",
+		logging.String(logging.FieldDecisionType, "organizer_review_routing"),
+		logging.String("decision_result", "organize"),
+		logging.String("decision_reason", "ready_for_organize"),
+		logging.String("decision_options", "organize, review"),
+	)
 	var meta MetadataProvider
 	meta = queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if item.MetadataJSON == "" || meta.Title() == "" {
@@ -110,6 +125,18 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			base := strings.TrimSpace(filepath.Base(item.EncodedFile))
 			fallbackTitle = strings.TrimSuffix(base, filepath.Ext(base))
 		}
+		fallbackReason := "metadata_missing"
+		if item.MetadataJSON != "" {
+			fallbackReason = "title_missing"
+		}
+		logger.Info(
+			"metadata selection decision",
+			logging.String(logging.FieldDecisionType, "metadata_fallback"),
+			logging.String("decision_result", "fallback_metadata"),
+			logging.String("decision_reason", fallbackReason),
+			logging.String("decision_options", "metadata, fallback"),
+			logging.String("fallback_title", strings.TrimSpace(fallbackTitle)),
+		)
 		basic := queue.NewBasicMetadata(fallbackTitle, true)
 		encoded, err := json.Marshal(basic)
 		if err != nil {
@@ -131,6 +158,15 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			err,
 		)
 	}
+	logger.Info(
+		"organizer job plan",
+		logging.String(logging.FieldDecisionType, "organizer_job_plan"),
+		logging.String("decision_result", ternary(len(jobs) > 0, "episodes", "single_file")),
+		logging.String("decision_reason", ternary(len(jobs) > 0, "episode_assets", "single_media_asset")),
+		logging.String("decision_options", "episodes, single_file"),
+		logging.Int("job_count", len(jobs)),
+		logging.String("job_episode_keys", summarizeOrganizeJobs(jobs)),
+	)
 	if len(jobs) > 0 {
 		return o.organizeEpisodes(ctx, item, &env, jobs, logger, stageStart)
 	}
@@ -140,6 +176,13 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	targetPath, err := o.jellyfin.Organize(ctx, item.EncodedFile, meta)
 	if err != nil {
 		if isLibraryUnavailable(err) {
+			logger.Info(
+				"organizer review decision",
+				logging.String(logging.FieldDecisionType, "organizer_review_routing"),
+				logging.String("decision_result", "review"),
+				logging.String("decision_reason", "library_unavailable"),
+				logging.String("decision_options", "organize, review"),
+			)
 			logger.Warn("library unavailable; moving to review directory", logging.Error(err))
 			return o.finishReview(ctx, item, stageStart, "Library unavailable", encodedSources, err)
 		}
@@ -155,12 +198,27 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	o.updateProgress(ctx, item, "Refreshing Jellyfin library", 80)
+	refreshAllowed, refreshReason := shouldRefreshJellyfin(o.cfg)
+	if o.jellyfin == nil {
+		refreshAllowed = false
+		refreshReason = "service_unavailable"
+	}
+	logger.Info(
+		"jellyfin refresh decision",
+		logging.String(logging.FieldDecisionType, "jellyfin_refresh"),
+		logging.String("decision_result", ternary(refreshAllowed, "refresh", "skip")),
+		logging.String("decision_reason", refreshReason),
+		logging.String("decision_options", "refresh, skip"),
+		logging.String("decision_scope", "item"),
+	)
 	jellyfinRefreshed := false
-	if err := o.jellyfin.Refresh(ctx, meta); err != nil {
-		logger.Warn("jellyfin refresh failed", logging.Error(err))
-	} else {
-		logger.Info("jellyfin library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
-		jellyfinRefreshed = true
+	if refreshAllowed {
+		if err := o.jellyfin.Refresh(ctx, meta); err != nil {
+			logger.Warn("jellyfin refresh failed", logging.Error(err))
+		} else {
+			logger.Info("jellyfin library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
+			jellyfinRefreshed = true
+		}
 	}
 
 	o.updateProgress(ctx, item, "Organization completed", 100)
@@ -296,12 +354,60 @@ func buildOrganizeJobs(env ripspec.Envelope, base queue.Metadata) ([]organizeJob
 	return jobs, nil
 }
 
+func summarizeOrganizeJobs(jobs []organizeJob) string {
+	if len(jobs) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		key := strings.TrimSpace(job.Episode.Key)
+		if key == "" {
+			key = fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
+		}
+		keys = append(keys, strings.ToLower(key))
+	}
+	return strings.Join(keys, ", ")
+}
+
+func shouldRefreshJellyfin(cfg *config.Config) (bool, string) {
+	if cfg == nil {
+		return false, "config_unavailable"
+	}
+	if !cfg.Jellyfin.Enabled {
+		return false, "disabled"
+	}
+	if strings.TrimSpace(cfg.Jellyfin.URL) == "" || strings.TrimSpace(cfg.Jellyfin.APIKey) == "" {
+		return false, "missing_credentials"
+	}
+	return true, "configured"
+}
+
+func ternary[T any](cond bool, a, b T) T {
+	if cond {
+		return a
+	}
+	return b
+}
+
 func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []organizeJob, logger *slog.Logger, stageStarted time.Time) error {
 	finalPaths := make([]string, 0, len(jobs))
 	step := 80.0
 	if len(jobs) > 0 {
 		step = 80.0 / float64(len(jobs))
 	}
+	refreshAllowed, refreshReason := shouldRefreshJellyfin(o.cfg)
+	if o.jellyfin == nil {
+		refreshAllowed = false
+		refreshReason = "service_unavailable"
+	}
+	logger.Info(
+		"jellyfin refresh decision",
+		logging.String(logging.FieldDecisionType, "jellyfin_refresh"),
+		logging.String("decision_result", ternary(refreshAllowed, "refresh", "skip")),
+		logging.String("decision_reason", refreshReason),
+		logging.String("decision_options", "refresh, skip"),
+		logging.String("decision_scope", "per_episode"),
+	)
 	for idx, job := range jobs {
 		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(job.Episode.Key))
 		label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
@@ -309,6 +415,13 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		targetPath, err := o.jellyfin.Organize(ctx, job.Source, job.Metadata)
 		if err != nil {
 			if isLibraryUnavailable(err) {
+				logger.Info(
+					"organizer review decision",
+					logging.String(logging.FieldDecisionType, "organizer_review_routing"),
+					logging.String("decision_result", "review"),
+					logging.String("decision_reason", "library_unavailable"),
+					logging.String("decision_options", "organize, review"),
+				)
 				logger.Warn("library unavailable; moving to review directory", logging.Error(err))
 				return o.finishReview(ctx, item, stageStarted, "Library unavailable", collectEncodedSources(item, env), err)
 			}
@@ -320,6 +433,12 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 				err,
 			)
 		}
+		logger.Info(
+			"organized episode into library",
+			logging.String("episode_label", label),
+			logging.String("source_file", strings.TrimSpace(job.Source)),
+			logging.String("final_file", targetPath),
+		)
 		if env != nil {
 			env.Assets.AddAsset("final", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: targetPath})
 			// Persist per-episode progress so API consumers can surface completed
@@ -344,8 +463,10 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		if err := o.moveGeneratedSubtitles(ctx, &itemCopy, targetPath); err != nil {
 			logger.Warn("subtitle sidecar move failed", logging.Error(err))
 		}
-		if err := o.jellyfin.Refresh(ctx, job.Metadata); err != nil {
-			logger.Warn("jellyfin refresh failed", logging.Error(err))
+		if refreshAllowed {
+			if err := o.jellyfin.Refresh(ctx, job.Metadata); err != nil {
+				logger.Warn("jellyfin refresh failed", logging.Error(err))
+			}
 		}
 		finalPaths = append(finalPaths, targetPath)
 	}

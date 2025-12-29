@@ -198,8 +198,19 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	if len(ripPrints) == 0 {
 		return false, errors.New("whisperx produced no transcripts for content id")
 	}
-	candidateEpisodes := deriveCandidateEpisodes(env, seasonDetails, ctxData.DiscNumber)
-	refPrints, err := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, candidateEpisodes, progress)
+	candidatePlan := deriveCandidateEpisodes(env, seasonDetails, ctxData.DiscNumber)
+	if m.logger != nil {
+		m.logger.Info("content id candidate episodes",
+			logging.String(logging.FieldDecisionType, "contentid_candidates"),
+			logging.String("decision_result", "selected"),
+			logging.Any("decision_selected", candidatePlan.Episodes),
+			logging.Any("decision_candidates", candidatePlan.Options()),
+			logging.Any("decision_sources", candidatePlan.Sources),
+			logging.Int("disc_number", ctxData.DiscNumber),
+			logging.Int("season_episodes", len(seasonDetails.Episodes)),
+		)
+	}
+	refPrints, err := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, candidatePlan.Episodes, progress)
 	if err != nil {
 		return false, err
 	}
@@ -215,7 +226,14 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
 	if m.logger != nil {
+		matchSummaries := make([]string, 0, len(matches))
+		for _, match := range matches {
+			matchSummaries = append(matchSummaries, formatMatchSummary(match))
+		}
 		m.logger.Info("content id alignment complete",
+			logging.String(logging.FieldDecisionType, "contentid_matches"),
+			logging.String("decision_result", "selected"),
+			logging.Any("decision_selected", matchSummaries),
 			logging.Int("episodes_available", len(env.Episodes)),
 			logging.Int("rip_transcripts", len(ripPrints)),
 			logging.Int("reference_subtitles", len(refPrints)),
@@ -432,22 +450,50 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			}
 			selected = variant
 			foundMatch = true
-			if attempt > 0 && m.logger != nil {
-				m.logger.Debug("opensubtitles fallback search succeeded",
+			if m.logger != nil {
+				m.logger.Info("opensubtitles reference search selected",
+					logging.String(logging.FieldDecisionType, "opensubtitles_reference_search"),
+					logging.String("decision_result", "selected"),
 					logging.Int("season", season.SeasonNumber),
 					logging.Int("episode", num),
 					logging.Int("attempt", attempt+1),
+					logging.Int("attempts_total", len(searchVariants)),
+					logging.Int("candidates", len(resp.Subtitles)),
 				)
 			}
 			break
 		}
 		if !foundMatch {
+			if m.logger != nil {
+				m.logger.Info("opensubtitles reference search skipped",
+					logging.String(logging.FieldDecisionType, "opensubtitles_reference_search"),
+					logging.String("decision_result", "skipped"),
+					logging.String("decision_reason", "no_candidates"),
+					logging.Int("season", season.SeasonNumber),
+					logging.Int("episode", num),
+					logging.Int("attempts_total", len(searchVariants)),
+				)
+			}
 			if progress != nil {
 				progress("reference", idx+1, len(unique), episodeKey)
 			}
 			continue
 		}
 		candidate := resp.Subtitles[0]
+		if m.logger != nil {
+			m.logger.Info("opensubtitles reference selection",
+				logging.String(logging.FieldDecisionType, "opensubtitles_reference_pick"),
+				logging.String("decision_result", "selected"),
+				logging.String("decision_reason", "top_result"),
+				logging.Int("season", season.SeasonNumber),
+				logging.Int("episode", episodeData.EpisodeNumber),
+				logging.Int("candidate_count", len(resp.Subtitles)),
+				logging.Int64("file_id", candidate.FileID),
+				logging.String("language", strings.TrimSpace(candidate.Language)),
+				logging.Int("downloads", candidate.Downloads),
+				logging.String("release", strings.TrimSpace(candidate.Release)),
+			)
+		}
 		var (
 			payload   opensubtitles.DownloadResult
 			cachePath string
@@ -748,13 +794,36 @@ func (m *Matcher) updateMetadata(item *queue.Item, matches []matchResult, season
 	item.MetadataJSON = string(data)
 }
 
-func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, discNumber int) []int {
+type candidateEpisodePlan struct {
+	Episodes          []int
+	Sources           []string
+	RipSpecEpisodes   []int
+	DiscBlockEpisodes []int
+	SeasonFallback    []int
+}
+
+func (p candidateEpisodePlan) Options() map[string]any {
+	return map[string]any{
+		"rip_spec":        p.RipSpecEpisodes,
+		"disc_block":      p.DiscBlockEpisodes,
+		"season_fallback": p.SeasonFallback,
+	}
+}
+
+func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, discNumber int) candidateEpisodePlan {
+	plan := candidateEpisodePlan{}
 	set := make(map[int]struct{}, len(env.Episodes)*2)
 	for _, episode := range env.Episodes {
 		if episode.Episode > 0 {
 			set[episode.Episode] = struct{}{}
+			plan.RipSpecEpisodes = append(plan.RipSpecEpisodes, episode.Episode)
 		}
 	}
+	sort.Ints(plan.RipSpecEpisodes)
+	if len(plan.RipSpecEpisodes) > 0 {
+		plan.Sources = append(plan.Sources, "rip_spec")
+	}
+
 	totalEpisodes := len(season.Episodes)
 	if discNumber > 0 && totalEpisodes > 0 {
 		block := len(env.Episodes)
@@ -769,20 +838,46 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 			start = 0
 		}
 		for idx := start; idx < totalEpisodes && idx < start+block; idx++ {
-			set[season.Episodes[idx].EpisodeNumber] = struct{}{}
+			number := season.Episodes[idx].EpisodeNumber
+			set[number] = struct{}{}
+			plan.DiscBlockEpisodes = append(plan.DiscBlockEpisodes, number)
+		}
+		sort.Ints(plan.DiscBlockEpisodes)
+		if len(plan.DiscBlockEpisodes) > 0 {
+			plan.Sources = append(plan.Sources, "disc_block")
 		}
 	}
+
 	if len(set) == 0 {
 		for _, episode := range season.Episodes {
+			plan.SeasonFallback = append(plan.SeasonFallback, episode.EpisodeNumber)
 			set[episode.EpisodeNumber] = struct{}{}
 		}
+		sort.Ints(plan.SeasonFallback)
+		plan.Sources = append(plan.Sources, "season_fallback")
 	}
 	list := make([]int, 0, len(set))
 	for number := range set {
 		list = append(list, number)
 	}
 	sort.Ints(list)
-	return list
+	plan.Episodes = list
+	return plan
+}
+
+func formatMatchSummary(match matchResult) string {
+	episodeLabel := strings.ToUpper(strings.TrimSpace(match.EpisodeKey))
+	if episodeLabel == "" {
+		episodeLabel = "UNKNOWN"
+	}
+	return fmt.Sprintf("%s -> E%02d (score=%.2f, title_id=%d, subtitle_file_id=%d, lang=%s)",
+		episodeLabel,
+		match.TargetEpisode,
+		match.Score,
+		match.TitleID,
+		match.SubtitleFileID,
+		strings.TrimSpace(match.SubtitleLanguage),
+	)
 }
 
 func findEpisodeByNumber(season *tmdb.SeasonDetails, number int) (tmdb.Episode, bool) {

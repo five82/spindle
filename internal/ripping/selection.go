@@ -35,6 +35,21 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 	mediaType := strings.ToLower(strings.TrimSpace(fmt.Sprint(env.Metadata["media_type"])))
 	if mediaType == "tv" {
 		ids := uniqueEpisodeTitleIDs(env)
+		if logger != nil {
+			result := "selected"
+			reason := "media_type_tv"
+			if len(ids) == 0 {
+				result = "skipped"
+				reason = "no_episode_titles"
+			}
+			logger.Info(
+				"episode title selection decision",
+				logging.String(logging.FieldDecisionType, "episode_title_selection"),
+				logging.String("decision_result", result),
+				logging.String("decision_reason", reason),
+				logging.Any("decision_selected", ids),
+			)
+		}
 		if len(ids) == 0 {
 			return nil
 		}
@@ -57,6 +72,14 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 			)
 		}
 		return []int{selection.ID}
+	}
+	if logger != nil {
+		logger.Info(
+			"primary title decision",
+			logging.String(logging.FieldDecisionType, "primary_title"),
+			logging.String("decision_result", "skipped"),
+			logging.String("decision_reason", "no_candidates"),
+		)
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 
 	"log/slog"
 
+	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
@@ -42,10 +43,29 @@ func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env r
 			err,
 		)
 	}
+	if logger != nil {
+		choices := []string{"single_file"}
+		decisionReason := "single_file"
+		if len(jobs) > 0 {
+			choices = append(choices, "episodes")
+			decisionReason = "episode_jobs_available"
+		}
+		logger.Info(
+			"encoding job plan",
+			logging.String(logging.FieldDecisionType, "encoding_job_plan"),
+			logging.String("decision_result", ternary(len(jobs) > 0, "episodes", "single_file")),
+			logging.String("decision_reason", decisionReason),
+			logging.String("decision_options", strings.Join(choices, ", ")),
+			logging.Int("job_count", len(jobs)),
+			logging.String("job_episode_keys", summarizeEncodeJobs(jobs)),
+		)
+	}
 
 	sampleSource := strings.TrimSpace(item.RippedFile)
+	sampleSourceSource := "ripped_file"
 	if len(jobs) > 0 {
 		sampleSource = strings.TrimSpace(jobs[0].Source)
+		sampleSourceSource = "first_episode_source"
 	}
 	var decision presetDecision
 	if p != nil && p.selectPreset != nil {
@@ -55,6 +75,17 @@ func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env r
 		item.DraptoPresetProfile = profile
 	} else {
 		item.DraptoPresetProfile = "default"
+	}
+	if logger != nil {
+		logger.Info(
+			"encoding preset profile selected",
+			logging.String(logging.FieldDecisionType, "encoding_preset_profile"),
+			logging.String("decision_result", strings.TrimSpace(item.DraptoPresetProfile)),
+			logging.String("decision_reason", ternary(decision.Applied, "preset_decider", "default")),
+			logging.String("decision_options", "default, preset_decider"),
+			logging.String("sample_source", sampleSource),
+			logging.String("sample_source_reason", sampleSourceSource),
+		)
 	}
 
 	return jobs, decision, nil
@@ -85,4 +116,19 @@ func buildEncodeJobs(env ripspec.Envelope, encodedDir string) ([]encodeJob, erro
 		jobs = append(jobs, encodeJob{Episode: episode, Source: asset.Path, Output: output})
 	}
 	return jobs, nil
+}
+
+func summarizeEncodeJobs(jobs []encodeJob) string {
+	if len(jobs) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		key := strings.TrimSpace(job.Episode.Key)
+		if key == "" {
+			key = fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
+		}
+		keys = append(keys, strings.ToLower(key))
+	}
+	return strings.Join(keys, ", ")
 }

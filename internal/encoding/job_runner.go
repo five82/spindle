@@ -25,6 +25,17 @@ func newEncodeJobRunner(store *queue.Store, runner *draptoRunner) *encodeJobRunn
 
 func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
+	if logger != nil {
+		runnerAvailable := r != nil && r.runner != nil
+		logger.Info(
+			"encoding runner decision",
+			logging.String(logging.FieldDecisionType, "encoding_runner"),
+			logging.String("decision_result", ternary(runnerAvailable, "drapto", "placeholder")),
+			logging.String("decision_reason", ternary(runnerAvailable, "drapto_client_configured", "drapto_client_unavailable")),
+			logging.String("decision_options", "drapto, placeholder"),
+			logging.Int("job_count", len(jobs)),
+		)
+	}
 
 	if len(jobs) > 0 {
 		paths, err := r.encodeEpisodes(ctx, item, &env, jobs, decision, stagingRoot, encodedDir, logger)

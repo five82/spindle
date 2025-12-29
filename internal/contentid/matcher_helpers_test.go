@@ -23,7 +23,7 @@ func TestDeriveCandidateEpisodesUsesRipSpecEpisodes(t *testing.T) {
 			{EpisodeNumber: 4},
 		},
 	}
-	got := deriveCandidateEpisodes(env, season, 0)
+	got := deriveCandidateEpisodes(env, season, 0).Episodes
 	expect := []int{2, 4}
 	if !intSlicesEqual(got, expect) {
 		t.Fatalf("expected %v, got %v", expect, got)
@@ -51,7 +51,7 @@ func TestDeriveCandidateEpisodesUsesDiscBlocks(t *testing.T) {
 			{EpisodeNumber: 8},
 		},
 	}
-	got := deriveCandidateEpisodes(env, season, 2)
+	got := deriveCandidateEpisodes(env, season, 2).Episodes
 	expect := []int{4, 5, 6}
 	if !intSlicesEqual(got, expect) {
 		t.Fatalf("expected %v, got %v", expect, got)
@@ -67,7 +67,7 @@ func TestDeriveCandidateEpisodesFallsBackToSeason(t *testing.T) {
 			{EpisodeNumber: 2},
 		},
 	}
-	got := deriveCandidateEpisodes(env, season, 0)
+	got := deriveCandidateEpisodes(env, season, 0).Episodes
 	expect := []int{1, 2}
 	if !intSlicesEqual(got, expect) {
 		t.Fatalf("expected %v, got %v", expect, got)

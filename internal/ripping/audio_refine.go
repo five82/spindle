@@ -60,11 +60,34 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	}
 	totalAudio := countAudioStreams(probe.Streams)
 	if totalAudio <= 1 {
+		if logger != nil {
+			candidates, _ := summarizeAudioCandidates(probe.Streams)
+			logger.Info("audio selection decision",
+				logging.String(logging.FieldDecisionType, "audio_selection"),
+				logging.String("decision_result", "skipped"),
+				logging.String("decision_reason", "single_audio_stream"),
+				logging.Any("decision_candidates", candidates),
+			)
+		}
 		return nil
 	}
 	selection := audio.Select(probe.Streams)
 	if selection.PrimaryIndex < 0 {
 		return fmt.Errorf("refine audio: primary selection missing")
+	}
+	if logger != nil {
+		candidates, hasEnglish := summarizeAudioCandidates(probe.Streams)
+		reason := "english_preferred"
+		if !hasEnglish {
+			reason = "fallback_first_audio"
+		}
+		logger.Info("audio selection decision",
+			logging.String(logging.FieldDecisionType, "audio_selection"),
+			logging.String("decision_result", "selected"),
+			logging.String("decision_reason", reason),
+			logging.String("decision_selected", selection.PrimaryLabel()),
+			logging.Any("decision_candidates", candidates),
+		)
 	}
 
 	commentaryIndices := []int{}
@@ -217,6 +240,77 @@ func needsDispositionFix(streams []ffprobe.Stream, keep []int) bool {
 		}
 	}
 	return false
+}
+
+func summarizeAudioCandidates(streams []ffprobe.Stream) ([]string, bool) {
+	candidates := make([]string, 0)
+	hasEnglish := false
+	for _, stream := range streams {
+		if !strings.EqualFold(stream.CodecType, "audio") {
+			continue
+		}
+		lang := audioLanguage(stream.Tags)
+		if strings.HasPrefix(lang, "en") {
+			hasEnglish = true
+		}
+		langLabel := lang
+		if langLabel == "" {
+			langLabel = "und"
+		}
+		codec := strings.TrimSpace(stream.CodecLong)
+		if codec == "" {
+			codec = strings.TrimSpace(stream.CodecName)
+		}
+		if codec == "" {
+			codec = "unknown"
+		}
+		title := audioTitle(stream.Tags)
+		titleLabel := ""
+		if title != "" {
+			titleLabel = " | " + title
+		}
+		defaultLabel := ""
+		if stream.Disposition != nil && stream.Disposition["default"] == 1 {
+			defaultLabel = " default"
+		}
+		channelLabel := "unknown"
+		if stream.Channels > 0 {
+			channelLabel = fmt.Sprintf("%dch", stream.Channels)
+		}
+		candidates = append(candidates, fmt.Sprintf("#%d (%s): %s %s%s%s",
+			stream.Index,
+			langLabel,
+			codec,
+			channelLabel,
+			defaultLabel,
+			titleLabel,
+		))
+	}
+	return candidates, hasEnglish
+}
+
+func audioLanguage(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	for _, key := range []string{"language", "LANGUAGE", "Language", "language_ietf", "LANG"} {
+		if value, ok := tags[key]; ok {
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return ""
+}
+
+func audioTitle(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	for _, key := range []string{"title", "TITLE", "handler_name", "HANDLER_NAME"} {
+		if value, ok := tags[key]; ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func deriveTempAudioPath(path string) string {
