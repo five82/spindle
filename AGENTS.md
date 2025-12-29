@@ -53,6 +53,8 @@ See `README.md` for install details, disc mounting notes, and end-user usage.
 
 - Log output must be clear, human-readable, and aligned to user workflows.
 - INFO logs must capture every decision point with the options considered, the chosen outcome, and the reason.
+- Prioritize signal over noise; decide whether a message belongs at INFO or DEBUG before logging it.
+- Keep INFO logs easy to follow: short, structured, and readable at a glance.
 - DEBUG logs are for raw metrics or large per-sample/per-stream dumps; INFO should still summarize decision evidence (counts, thresholds hit, top-N candidates, etc.).
 - WARN/ERROR logs explain: cause, impact, and required user action (if any), plus the next troubleshooting step when possible.
 - Include consistent context fields when available: stage, item id, episode key, decision type.
