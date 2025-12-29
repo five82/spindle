@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -57,7 +56,7 @@ func (h *HeartbeatMonitor) StartLoop(ctx context.Context, wg *sync.WaitGroup, it
 	defer ticker.Stop()
 
 	logger := logging.WithContext(ctx, h.logger.With(logging.String("component", "workflow-heartbeat")))
-	var lastSnapshot string
+	sampler := logging.NewProgressSampler(5)
 
 	for {
 		select {
@@ -73,12 +72,12 @@ func (h *HeartbeatMonitor) StartLoop(ctx context.Context, wg *sync.WaitGroup, it
 				}
 				continue
 			}
-			h.logStatusSnapshot(ctx, logger, itemID, &lastSnapshot)
+			h.logStatusSnapshot(ctx, logger, itemID, sampler)
 		}
 	}
 }
 
-func (h *HeartbeatMonitor) logStatusSnapshot(ctx context.Context, logger *slog.Logger, itemID int64, lastSnapshot *string) {
+func (h *HeartbeatMonitor) logStatusSnapshot(ctx context.Context, logger *slog.Logger, itemID int64, sampler *logging.ProgressSampler) {
 	if h == nil || h.store == nil || logger == nil {
 		return
 	}
@@ -86,18 +85,18 @@ func (h *HeartbeatMonitor) logStatusSnapshot(ctx context.Context, logger *slog.L
 	if err != nil || item == nil {
 		return
 	}
-	snapshot := fmt.Sprintf("%s|%s|%.2f|%s", item.Status, item.ProgressStage, item.ProgressPercent, item.ProgressMessage)
-	if lastSnapshot != nil && *lastSnapshot == snapshot {
-		return
+	progressMessage := strings.TrimSpace(item.ProgressMessage)
+	if strings.HasPrefix(progressMessage, "Progress ") {
+		progressMessage = ""
 	}
-	if lastSnapshot != nil {
-		*lastSnapshot = snapshot
+	if sampler != nil && !sampler.ShouldLog(item.ProgressPercent, item.ProgressStage, progressMessage) {
+		return
 	}
 	logger.Debug("status snapshot",
 		logging.String(logging.FieldEventType, "status_snapshot"),
 		logging.String("status", string(item.Status)),
 		logging.String(logging.FieldProgressStage, strings.TrimSpace(item.ProgressStage)),
 		logging.Float64(logging.FieldProgressPercent, item.ProgressPercent),
-		logging.String(logging.FieldProgressMessage, strings.TrimSpace(item.ProgressMessage)),
+		logging.String(logging.FieldProgressMessage, progressMessage),
 	)
 }

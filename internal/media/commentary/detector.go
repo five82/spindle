@@ -137,18 +137,21 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	candidateIndices := make([]int, 0, len(candidates))
 	prefilterRejections := make([]string, 0)
 	prefilterReasonCounts := make(map[string]int)
+	verbosePrefilter := os.Getenv("SPD_DEBUG_COMMENTARY_VERBOSE") != ""
 	for _, decision := range prefilter {
-		logger.Debug("commentary candidate evaluated",
-			logging.Int("stream_index", decision.Index),
-			logging.Bool("candidate", decision.Candidate),
-			logging.String("reason", decision.Reason),
-			logging.String("language", decision.Language),
-			logging.String("title", decision.Title),
-			logging.Int("channels", decision.Channels),
-			logging.Float64("duration_seconds", decision.Duration),
-			logging.Bool("metadata_positive", decision.MetadataPositive),
-			logging.String("metadata_negative", decision.MetadataNegative),
-		)
+		if verbosePrefilter {
+			logger.Debug("commentary candidate evaluated",
+				logging.Int("stream_index", decision.Index),
+				logging.Bool("candidate", decision.Candidate),
+				logging.String("reason", decision.Reason),
+				logging.String("language", decision.Language),
+				logging.String("title", decision.Title),
+				logging.Int("channels", decision.Channels),
+				logging.Float64("duration_seconds", decision.Duration),
+				logging.Bool("metadata_positive", decision.MetadataPositive),
+				logging.String("metadata_negative", decision.MetadataNegative),
+			)
+		}
 		if !decision.Candidate {
 			reason := strings.TrimSpace(decision.Reason)
 			if reason == "" {

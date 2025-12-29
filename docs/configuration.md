@@ -143,6 +143,7 @@ candidates.
 
 Set `SPD_DEBUG_COMMENTARY_KEEP=1` to retain commentary analysis artifacts in the
 staging directory for inspection.
+Set `SPD_DEBUG_COMMENTARY_VERBOSE=1` to emit per-candidate commentary debug logs.
 
 ## Audio, Encoding, and Dependencies
 

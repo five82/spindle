@@ -167,7 +167,12 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 				logging.Int("search_runtime", input.SearchOpts.Runtime),
 				logging.String("search_mode", string(modeUsed)),
 				logging.String("query", candidate))
-			for idx, result := range response.Results {
+			const tmdbDebugResultLimit = 3
+			limit := tmdbDebugResultLimit
+			if len(response.Results) < limit {
+				limit = len(response.Results)
+			}
+			for idx, result := range response.Results[:limit] {
 				logger.Debug("tmdb search result",
 					logging.Int("index", idx),
 					logging.Int64("tmdb_id", result.ID),

@@ -112,9 +112,8 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 	progressSampler := logging.NewProgressSampler(5)
 	logProgressEvent := func(update drapto.ProgressUpdate) {
 		stage := strings.TrimSpace(update.Stage)
-		raw := strings.TrimSpace(update.Message)
 		summary := progressMessageText(update)
-		if !progressSampler.ShouldLog(update.Percent, stage, raw) {
+		if !progressSampler.ShouldLog(update.Percent, stage, summary) {
 			return
 		}
 		attrs := []logging.Attr{logging.String("job", label)}
