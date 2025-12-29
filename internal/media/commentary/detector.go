@@ -186,9 +186,17 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 
 		fingerprint, err := fingerprintForStream(ctx, ffmpegBinary, path, cand.stream.Index, windows, filepath.Join(workDir, fmt.Sprintf("cand-%d.wav", cand.stream.Index)))
 		if err != nil {
-			logger.Warn("commentary candidate fingerprint failed", logging.Int("stream", cand.stream.Index), logging.Error(err))
+			failure := classifyFingerprintFailure(err)
+			logger.Warn("commentary candidate fingerprint failed",
+				logging.Int("stream", cand.stream.Index),
+				logging.String("cause", failure.Cause),
+				logging.String("attention", failure.Attention),
+				logging.String("impact", "candidate_dropped"),
+				logging.String("hint", failure.Hint),
+				logging.Error(err),
+			)
 			decision.Include = false
-			decision.Reason = "fingerprint_failed"
+			decision.Reason = failure.Reason
 			decisions = append(decisions, decision)
 			continue
 		}
@@ -240,38 +248,12 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	summaryLines := make([]string, 0, len(decisions))
 
 	for _, decision := range decisions {
-		status := "Rejected"
-		if decision.Include {
-			status = "Kept"
-		}
 		reason := strings.TrimSpace(decision.Reason)
 		if reason == "" {
 			reason = "unknown"
 		}
 		reasonCounts[reason]++
-
-		lang := decision.Metadata.Language
-		if lang == "" {
-			lang = "und"
-		}
-
-		details := ""
-		switch reason {
-		case "commentary_only", "mixed_commentary", "metadata_commentary":
-			details = fmt.Sprintf(" [Speech: %.0f%%, Audio Similarity: %.0f%%]", decision.Metrics.SpeechRatio*100, decision.Metrics.FingerprintSimilarity*100)
-		case "music_or_silent":
-			details = fmt.Sprintf(" [Speech: %.0f%% (Low)]", decision.Metrics.SpeechRatio*100)
-		case "duplicate_downmix":
-			details = fmt.Sprintf(" [Audio Similarity: %.0f%% (High)]", decision.Metrics.FingerprintSimilarity*100)
-		case "audio_description":
-			details = fmt.Sprintf(" [Speech in Silence: %.0f%%, Audio Similarity: %.0f%%]", decision.Metrics.SpeechInPrimarySilence*100, decision.Metrics.FingerprintSimilarity*100)
-		case "fingerprint_failed":
-			details = " [Audio Similarity Check Failed]"
-		case "analysis_failed":
-			details = " [Speech Analysis Failed]"
-		}
-
-		summaryLines = append(summaryLines, fmt.Sprintf("#%d (%s): %s (%s)%s", decision.Index, lang, status, reason, details))
+		summaryLines = append(summaryLines, formatDecisionSummary(decision, reason))
 	}
 
 	logger.Info("commentary selection summary",
@@ -289,6 +271,41 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	)
 
 	return Result{Indices: indices, Decisions: decisions}, nil
+}
+
+func formatDecisionSummary(decision Decision, reason string) string {
+	status := "Rejected"
+	if decision.Include {
+		status = "Kept"
+	}
+	lang := decision.Metadata.Language
+	if lang == "" {
+		lang = "und"
+	}
+
+	details := ""
+	switch reason {
+	case "commentary_only", "mixed_commentary", "metadata_commentary":
+		details = fmt.Sprintf(" [Speech: %.0f%%, Audio Similarity: %.0f%%]", decision.Metrics.SpeechRatio*100, decision.Metrics.FingerprintSimilarity*100)
+	case "music_or_silent":
+		details = fmt.Sprintf(" [Speech: %.0f%% (Low)]", decision.Metrics.SpeechRatio*100)
+	case "duplicate_downmix":
+		details = fmt.Sprintf(" [Audio Similarity: %.0f%% (High)]", decision.Metrics.FingerprintSimilarity*100)
+	case "audio_description":
+		details = fmt.Sprintf(" [Speech in Silence: %.0f%%, Audio Similarity: %.0f%%]", decision.Metrics.SpeechInPrimarySilence*100, decision.Metrics.FingerprintSimilarity*100)
+	case "fingerprint_failed":
+		details = " [Audio Similarity Check Failed]"
+	case "fingerprint_failed_stream_missing":
+		details = " [Stream not found by ffmpeg; candidate skipped]"
+	case "fingerprint_failed_decode":
+		details = " [ffmpeg could not decode stream; candidate skipped]"
+	case "fingerprint_failed_fpcalc":
+		details = " [fpcalc failed; candidate skipped]"
+	case "analysis_failed":
+		details = " [Speech Analysis Failed]"
+	}
+
+	return fmt.Sprintf("#%d (%s): %s (%s)%s", decision.Index, lang, status, reason, details)
 }
 
 type candidate struct {
@@ -739,6 +756,47 @@ func fingerprintForStream(ctx context.Context, ffmpegBinary, path string, stream
 	return runFPcalc(ctx, outputPath)
 }
 
+type fingerprintFailure struct {
+	Reason    string
+	Cause     string
+	Attention string
+	Hint      string
+}
+
+func classifyFingerprintFailure(err error) fingerprintFailure {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "stream specifier") || strings.Contains(message, "matches no streams") || strings.Contains(message, "no such stream"):
+		return fingerprintFailure{
+			Reason:    "fingerprint_failed_stream_missing",
+			Cause:     "ffmpeg_stream_missing",
+			Attention: "investigate_if_frequent",
+			Hint:      "ffmpeg could not map the audio stream; candidate skipped",
+		}
+	case strings.Contains(message, "error while decoding") || strings.Contains(message, "invalid data found when processing input") || strings.Contains(message, "could not find codec parameters"):
+		return fingerprintFailure{
+			Reason:    "fingerprint_failed_decode",
+			Cause:     "ffmpeg_decode_error",
+			Attention: "investigate_if_frequent",
+			Hint:      "ffmpeg could not decode the stream; candidate skipped",
+		}
+	case strings.Contains(message, "fpcalc"):
+		return fingerprintFailure{
+			Reason:    "fingerprint_failed_fpcalc",
+			Cause:     "fpcalc_error",
+			Attention: "investigate",
+			Hint:      "fpcalc failed to produce a fingerprint; candidate skipped",
+		}
+	default:
+		return fingerprintFailure{
+			Reason:    "fingerprint_failed",
+			Cause:     "unknown_error",
+			Attention: "investigate_if_frequent",
+			Hint:      "fingerprint extraction failed; candidate skipped",
+		}
+	}
+}
+
 func extractFingerprintAudio(ctx context.Context, ffmpegBinary, path string, streamIndex int, windows []window, outputPath string) error {
 	if strings.TrimSpace(ffmpegBinary) == "" {
 		ffmpegBinary = "ffmpeg"
@@ -771,14 +829,14 @@ func buildFilter(streamIndex int, windows []window) (string, string) {
 	}
 	if len(windows) == 1 {
 		win := windows[0]
-		return fmt.Sprintf("[0:a:%d]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS[aout]", streamIndex, win.start, win.duration), "[aout]"
+		return fmt.Sprintf("[0:%d]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS[aout]", streamIndex, win.start, win.duration), "[aout]"
 	}
 	parts := make([]string, 0, len(windows))
 	labels := make([]string, 0, len(windows))
 	for i, win := range windows {
 		label := fmt.Sprintf("a%d", i)
 		labels = append(labels, "["+label+"]")
-		parts = append(parts, fmt.Sprintf("[0:a:%d]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS[%s]", streamIndex, win.start, win.duration, label))
+		parts = append(parts, fmt.Sprintf("[0:%d]atrim=start=%.3f:duration=%.3f,asetpts=PTS-STARTPTS[%s]", streamIndex, win.start, win.duration, label))
 	}
 	concat := fmt.Sprintf("%sconcat=n=%d:v=0:a=1[aout]", strings.Join(labels, ""), len(windows))
 	parts = append(parts, concat)
