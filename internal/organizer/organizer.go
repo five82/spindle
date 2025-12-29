@@ -107,7 +107,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			logging.String("decision_options", "organize, review"),
 			logging.String("review_reason", strings.TrimSpace(item.ReviewReason)),
 		)
-		logger.Info("routing item to manual review", logging.String("reason", strings.TrimSpace(item.ReviewReason)))
+		logger.Debug("routing item to manual review", logging.String("reason", strings.TrimSpace(item.ReviewReason)))
 		return o.finishReview(ctx, item, stageStart, strings.TrimSpace(item.ReviewReason), encodedSources, nil)
 	}
 	logger.Info(
@@ -172,7 +172,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	o.updateProgress(ctx, item, "Organizing library structure", 20)
-	logger.Info("organizing encoded file into library", logging.String("encoded_file", item.EncodedFile))
+	logger.Debug("organizing encoded file into library", logging.String("encoded_file", item.EncodedFile))
 	targetPath, err := o.jellyfin.Organize(ctx, item.EncodedFile, meta)
 	if err != nil {
 		if isLibraryUnavailable(err) {
@@ -189,7 +189,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		return services.Wrap(services.ErrExternalTool, "organizing", "move to library", "Failed to move media into library", err)
 	}
 	item.FinalFile = targetPath
-	logger.Info("library move completed", logging.String("final_file", targetPath))
+	logger.Debug("library move completed", logging.String("final_file", targetPath))
 	if err := o.moveGeneratedSubtitles(ctx, item, targetPath); err != nil {
 		logger.Warn("subtitle sidecar move failed", logging.Error(err))
 	}
@@ -203,7 +203,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		refreshAllowed = false
 		refreshReason = "service_unavailable"
 	}
-	logger.Info(
+	logger.Debug(
 		"jellyfin refresh decision",
 		logging.String(logging.FieldDecisionType, "jellyfin_refresh"),
 		logging.String("decision_result", ternary(refreshAllowed, "refresh", "skip")),
@@ -216,7 +216,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		if err := o.jellyfin.Refresh(ctx, meta); err != nil {
 			logger.Warn("jellyfin refresh failed", logging.Error(err))
 		} else {
-			logger.Info("jellyfin library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
+			logger.Debug("jellyfin library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
 			jellyfinRefreshed = true
 		}
 	}
@@ -233,6 +233,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	// Log stage summary
 	logger.Info(
 		"organizing stage summary",
+		logging.String(logging.FieldEventType, "stage_complete"),
 		logging.String("final_file", targetPath),
 		logging.Duration("stage_duration", time.Since(stageStart)),
 		logging.Int64("final_file_size_bytes", finalFileSize),
@@ -315,10 +316,10 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 		moved++
 	}
 	if moved > 0 && o.logger != nil {
-		o.logger.Info(
+		o.logger.Debug(
 			"moved subtitle sidecars",
 			logging.Int("count", moved),
-			logging.String("destination_dir", destDir),
+			logging.String("destination", destDir),
 		)
 	}
 	return nil
@@ -400,7 +401,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		refreshAllowed = false
 		refreshReason = "service_unavailable"
 	}
-	logger.Info(
+	logger.Debug(
 		"jellyfin refresh decision",
 		logging.String(logging.FieldDecisionType, "jellyfin_refresh"),
 		logging.String("decision_result", ternary(refreshAllowed, "refresh", "skip")),
@@ -433,7 +434,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 				err,
 			)
 		}
-		logger.Info(
+		logger.Debug(
 			"organized episode into library",
 			logging.String("episode_label", label),
 			logging.String("source_file", strings.TrimSpace(job.Source)),
@@ -529,7 +530,7 @@ func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, 
 		)
 	}
 	if info.IsDir() {
-		logger.Error("organizer validation failed", logging.String("reason", "path is directory"), logging.String("final_path", clean))
+		logger.Error("organizer validation failed", logging.String("reason", "path is directory"), logging.String("final_file", clean))
 		return services.Wrap(
 			services.ErrValidation,
 			"organizing",
@@ -630,12 +631,12 @@ func (o *Organizer) cleanupStaging(ctx context.Context, item *queue.Item) {
 		logger.Warn("failed to clean staging directory", logging.String("staging_root", root), logging.Error(err))
 		return
 	}
-	logger.Info("cleaned staging directory", logging.String("staging_root", root))
+	logger.Debug("cleaned staging directory", logging.String("staging_root", root))
 }
 
 func (o *Organizer) movePathToReview(ctx context.Context, item *queue.Item, sourcePath string) (string, error) {
 	logger := logging.WithContext(ctx, o.logger)
-	logger.Info(
+	logger.Debug(
 		"moving encoded file to review",
 		logging.String("encoded_file", strings.TrimSpace(sourcePath)),
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),

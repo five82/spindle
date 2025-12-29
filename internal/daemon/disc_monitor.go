@@ -230,7 +230,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		return false
 	}
 
-	logger.Info("scanning disc for fingerprint", logging.Duration("timeout", m.scanTimeout))
+	logger.Debug("scanning disc for fingerprint", logging.Duration("timeout", m.scanTimeout))
 	scanResult, scanErr := scanner.Scan(scanCtx, info.Device)
 	if scanErr != nil {
 		logger.Error("disc scan failed", logging.Error(scanErr))
@@ -248,7 +248,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		discFingerprint = strings.TrimSpace(info.Label)
 		logger.Warn("scanner fingerprint unavailable; falling back to disc label", logging.String("fallback", discFingerprint))
 	}
-	logger.Info("computed fingerprint", logging.String("fingerprint", discFingerprint))
+	logger.Debug("computed fingerprint", logging.String("fingerprint", discFingerprint))
 
 	queueHandler := m.queueHandler
 	if queueHandler == nil {

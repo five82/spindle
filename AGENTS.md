@@ -52,7 +52,7 @@ See `README.md` for install details, disc mounting notes, and end-user usage.
 ## Logging Guidance
 
 - Log output must be clear, human-readable, and aligned to user workflows.
-- INFO logs must capture every decision point with the options considered, the chosen outcome, and the reason.
+- INFO logs capture decision points that change the final encoded output or the delivered subtitle artifacts (track selection, subtitle source, encode preset, output mapping). Other decisions belong at DEBUG.
 - Prioritize signal over noise; decide whether a message belongs at INFO or DEBUG before logging it.
 - Keep INFO logs easy to follow: short, structured, and readable at a glance.
 - DEBUG logs are for raw metrics or large per-sample/per-stream dumps; INFO should still summarize decision evidence (counts, thresholds hit, top-N candidates, etc.).

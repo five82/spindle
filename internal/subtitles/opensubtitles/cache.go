@@ -138,7 +138,7 @@ func (c *Cache) Store(entry CacheEntry, data []byte) (string, error) {
 		return "", err
 	}
 	if c.logger != nil {
-		c.logger.Info("opensubtitles cache stored",
+		c.logger.Debug("opensubtitles cache stored",
 			slog.Int64("file_id", entry.FileID),
 			slog.String("path", dataPath),
 			slog.String("language", entry.Language),

@@ -45,7 +45,7 @@ func (h *HeartbeatMonitor) ReclaimStaleItems(ctx context.Context, logger *slog.L
 		return err
 	}
 	if reclaimed > 0 {
-		logger.Info("reclaimed stale items", logging.Int64("count", reclaimed))
+		logger.Debug("reclaimed stale items", logging.Int64("count", reclaimed))
 	}
 	return nil
 }
@@ -67,7 +67,7 @@ func (h *HeartbeatMonitor) StartLoop(ctx context.Context, wg *sync.WaitGroup, it
 			if err := h.store.UpdateHeartbeat(ctx, itemID); err != nil {
 				// Check if this is a context cancellation (normal shutdown)
 				if errors.Is(err, context.Canceled) {
-					logger.Info("daemon shutting down, heartbeat update cancelled")
+					logger.Debug("daemon shutting down, heartbeat update cancelled")
 				} else {
 					logger.Warn("heartbeat update failed", logging.Error(err))
 				}
@@ -93,7 +93,7 @@ func (h *HeartbeatMonitor) logStatusSnapshot(ctx context.Context, logger *slog.L
 	if lastSnapshot != nil {
 		*lastSnapshot = snapshot
 	}
-	logger.Info("status snapshot",
+	logger.Debug("status snapshot",
 		logging.String(logging.FieldEventType, "status_snapshot"),
 		logging.String("status", string(item.Status)),
 		logging.String(logging.FieldProgressStage, strings.TrimSpace(item.ProgressStage)),

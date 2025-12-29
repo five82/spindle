@@ -73,7 +73,7 @@ func NewServer(ctx context.Context, path string, d *daemon.Daemon, logger *slog.
 
 // Serve starts accepting RPC connections until the context is canceled.
 func (s *Server) Serve() {
-	s.logger.Info("IPC server listening", logging.String("socket", s.path))
+	s.logger.Debug("IPC server listening", logging.String("socket", s.path))
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()

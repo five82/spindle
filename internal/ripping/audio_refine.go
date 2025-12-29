@@ -66,6 +66,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 				logging.String(logging.FieldDecisionType, "audio_selection"),
 				logging.String("decision_result", "skipped"),
 				logging.String("decision_reason", "single_audio_stream"),
+				logging.String("decision_options", "select, skip"),
 				logging.Any("decision_candidates", candidates),
 			)
 		}
@@ -85,6 +86,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 			logging.String(logging.FieldDecisionType, "audio_selection"),
 			logging.String("decision_result", "selected"),
 			logging.String("decision_reason", reason),
+			logging.String("decision_options", "select, skip"),
 			logging.String("decision_selected", selection.PrimaryLabel()),
 			logging.Any("decision_candidates", candidates),
 		)

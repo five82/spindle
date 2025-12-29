@@ -71,7 +71,7 @@ func (s *Service) prepareGenerationPlan(ctx context.Context, req GenerateRequest
 		return nil, services.Wrap(services.ErrValidation, "subtitles", "select audio", "No primary audio track available for subtitles", nil)
 	}
 	if s.logger != nil {
-		s.logger.Info("selected primary audio stream",
+		s.logger.Debug("selected primary audio stream",
 			logging.String("codec", selection.Primary.CodecName),
 			logging.Int("index", selection.Primary.Index),
 		)
@@ -130,7 +130,7 @@ func (s *Service) invokeWhisperX(ctx context.Context, plan *generationPlan) erro
 
 	args := s.buildWhisperXArgs(plan.audioPath, plan.runDir, plan.language)
 	if s.logger != nil {
-		s.logger.Info("running whisperx",
+		s.logger.Debug("running whisperx",
 			logging.String("model", whisperXModel),
 			logging.String("align_model", whisperXAlignModel),
 			logging.String("language", plan.language),

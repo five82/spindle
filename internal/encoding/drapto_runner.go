@@ -39,10 +39,10 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 			logging.Int(logging.FieldEpisodeCount, episodeCount),
 		)
 	}
-	jobLogger.Info(
+	jobLogger.Debug(
 		"launching drapto encode",
 		logging.String("command", r.draptoCommand(sourcePath, encodedDir, presetProfile)),
-		logging.String("input", sourcePath),
+		logging.String("source_file", sourcePath),
 		logging.String("job", strings.TrimSpace(label)),
 	)
 	snapshot := loadEncodingSnapshot(jobLogger, item.EncodingDetailsJSON)
@@ -133,7 +133,7 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 		if strings.TrimSpace(update.Bitrate) != "" {
 			attrs = append(attrs, logging.String("progress_bitrate", strings.TrimSpace(update.Bitrate)))
 		}
-		jobLogger.Info("drapto progress", logging.Args(attrs...)...)
+		jobLogger.Debug("drapto progress", logging.Args(attrs...)...)
 	}
 
 	progressLogger := func(update drapto.ProgressUpdate) {
@@ -184,7 +184,7 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 					logging.String("drapto_event_type", string(update.Type)),
 					logging.String("message", strings.TrimSpace(update.Message)),
 				}
-				jobLogger.Info("drapto event", logging.Args(attrs...)...)
+				jobLogger.Debug("drapto event", logging.Args(attrs...)...)
 			}
 		}
 		if persist {
@@ -239,7 +239,7 @@ func logDraptoHardware(logger *slog.Logger, label string, info *drapto.HardwareI
 	if logger == nil || info == nil || strings.TrimSpace(info.Hostname) == "" {
 		return
 	}
-	infoWithJob(logger, label, "drapto hardware info", logging.String("hardware_hostname", strings.TrimSpace(info.Hostname)))
+	debugWithJob(logger, label, "drapto hardware info", logging.String("hardware_hostname", strings.TrimSpace(info.Hostname)))
 }
 
 func logDraptoVideo(logger *slog.Logger, label string, info *drapto.VideoInfo) {
@@ -254,7 +254,7 @@ func logDraptoVideo(logger *slog.Logger, label string, info *drapto.VideoInfo) {
 		logging.String("video_dynamic_range", strings.TrimSpace(info.DynamicRange)),
 		logging.String("video_audio", strings.TrimSpace(info.AudioDescription)),
 	}
-	infoWithJob(logger, label, "drapto video info", attrs...)
+	debugWithJob(logger, label, "drapto video info", attrs...)
 }
 
 func logDraptoCrop(logger *slog.Logger, label string, summary *drapto.CropSummary) {
@@ -309,7 +309,7 @@ func logDraptoEncodingStart(logger *slog.Logger, label string, totalFrames int64
 	if logger == nil || totalFrames <= 0 {
 		return
 	}
-	infoWithJob(logger, label, "drapto encoding started", logging.Int64("encoding_total_frames", totalFrames))
+	debugWithJob(logger, label, "drapto encoding started", logging.Int64("encoding_total_frames", totalFrames))
 }
 
 func logDraptoValidation(logger *slog.Logger, label string, summary *drapto.ValidationSummary) {
@@ -320,9 +320,9 @@ func logDraptoValidation(logger *slog.Logger, label string, summary *drapto.Vali
 	if summary.Passed {
 		status = "passed"
 	}
-	infoWithJob(logger, label, "drapto validation", logging.String("validation_status", status))
+	debugWithJob(logger, label, "drapto validation", logging.String("validation_status", status))
 	for _, step := range summary.Steps {
-		infoWithJob(
+		debugWithJob(
 			logger,
 			label,
 			"drapto validation step",
@@ -394,7 +394,7 @@ func logDraptoBatchStart(logger *slog.Logger, label string, info *drapto.BatchSt
 		logging.Int("batch_total_files", info.TotalFiles),
 		logging.String("batch_output_dir", strings.TrimSpace(info.OutputDir)),
 	}
-	infoWithJob(logger, label, "drapto batch", attrs...)
+	debugWithJob(logger, label, "drapto batch", attrs...)
 }
 
 func logDraptoFileProgress(logger *slog.Logger, label string, info *drapto.FileProgress) {
@@ -405,7 +405,7 @@ func logDraptoFileProgress(logger *slog.Logger, label string, info *drapto.FileP
 		logging.Int("batch_file_index", info.CurrentFile),
 		logging.Int("batch_file_count", info.TotalFiles),
 	}
-	infoWithJob(logger, label, "drapto batch file", attrs...)
+	debugWithJob(logger, label, "drapto batch file", attrs...)
 }
 
 func logDraptoBatchSummary(logger *slog.Logger, label string, summary *drapto.BatchSummary) {
@@ -429,6 +429,14 @@ func infoWithJob(logger *slog.Logger, label, message string, attrs ...logging.At
 	}
 	decorated := append([]logging.Attr{logging.String("job", label)}, attrs...)
 	logger.Info(message, logging.Args(decorated...)...)
+}
+
+func debugWithJob(logger *slog.Logger, label, message string, attrs ...logging.Attr) {
+	if logger == nil {
+		return
+	}
+	decorated := append([]logging.Attr{logging.String("job", label)}, attrs...)
+	logger.Debug(message, logging.Args(decorated...)...)
 }
 
 func warnWithJob(logger *slog.Logger, label, message string, attrs ...logging.Attr) {

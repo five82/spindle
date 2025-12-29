@@ -160,7 +160,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 					if s.logger != nil {
 						s.logger.Warn("subtitle generation flagged for review",
 							logging.Int64("item_id", item.ID),
-							logging.String("source", target.SourcePath),
+							logging.String("source_file", target.SourcePath),
 							logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
 							logging.Alert("review"),
 						)
@@ -182,7 +182,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				if s.logger != nil {
 					s.logger.Warn("subtitle generation skipped",
 						logging.Int64("item_id", item.ID),
-						logging.String("source", target.SourcePath),
+						logging.String("source_file", target.SourcePath),
 						logging.Error(err),
 					)
 				}
@@ -210,8 +210,8 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				s.logger.Warn("whisperx subtitle fallback used",
 					logging.Int64("item_id", item.ID),
 					logging.String("episode_key", episodeKey),
-					logging.String("source", target.SourcePath),
-					logging.String("subtitle", result.SubtitlePath),
+					logging.String("source_file", target.SourcePath),
+					logging.String("subtitle_file", result.SubtitlePath),
 					logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
 					logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
 					logging.Alert("subtitle_fallback"),
@@ -220,9 +220,13 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		if s.logger != nil {
 			s.logger.Info("subtitle generation decision",
+				logging.String(logging.FieldDecisionType, "subtitle_generation"),
+				logging.String("decision_result", strings.ToLower(strings.TrimSpace(result.Source))),
+				logging.String("decision_reason", strings.TrimSpace(result.OpenSubtitlesDecision)),
+				logging.String("decision_options", "opensubtitles, whisperx"),
 				logging.String("episode_key", episodeKey),
-				logging.String("source", target.SourcePath),
-				logging.String("subtitle", result.SubtitlePath),
+				logging.String("source_file", target.SourcePath),
+				logging.String("subtitle_file", result.SubtitlePath),
 				logging.Int("segments", result.SegmentCount),
 				logging.String("subtitle_source", result.Source),
 				logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
@@ -263,6 +267,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	if s.logger != nil {
 		summaryAttrs := []logging.Attr{
+			logging.String(logging.FieldEventType, "stage_complete"),
 			logging.Duration("stage_duration", time.Since(stageStart)),
 			logging.Int("episodes", len(targets)),
 			logging.Int("opensubtitles", openSubsCount),

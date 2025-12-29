@@ -75,7 +75,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 				}
 			}
 			if logger != nil {
-				logger.Info(
+				logger.Debug(
 					"refreshed completed disc metadata",
 					logging.Int64(logging.FieldItemID, existing.ID),
 					logging.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
@@ -83,7 +83,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 			}
 		}
 		if logger != nil {
-			logger.Info(
+			logger.Debug(
 				"disc already completed",
 				logging.Int64(logging.FieldItemID, existing.ID),
 				logging.String("status", string(existing.Status)),
@@ -105,7 +105,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 			}
 		}
 		if logger != nil {
-			logger.Info(
+			logger.Debug(
 				"disc already in workflow",
 				logging.Int64(logging.FieldItemID, existing.ID),
 				logging.String("status", string(existing.Status)),
@@ -132,7 +132,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 	}
 
 	if logger != nil {
-		logger.Info(
+		logger.Debug(
 			"reset existing disc for processing",
 			logging.Int64(logging.FieldItemID, existing.ID),
 			logging.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
@@ -161,7 +161,7 @@ func (p *queueStoreProcessor) enqueueNew(ctx context.Context, info discInfo, fin
 	}
 
 	if logger != nil {
-		logger.Info(
+		logger.Debug(
 			"queued new disc",
 			logging.Int64(logging.FieldItemID, item.ID),
 			logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),

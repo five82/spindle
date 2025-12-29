@@ -230,7 +230,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				target = cachedTarget
 				cacheUsed = true
 				cacheStatus = "hit"
-				logger.Info(
+				logger.Debug(
 					"rip cache hit; skipping makemkv rip",
 					logging.Bool("cache_used", true),
 					logging.String("cache_decision", "hit"),
@@ -294,9 +294,9 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			)
 		}
 		titleIDs = r.selectTitleIDs(item, logger)
-		logger.Info(
+		logger.Debug(
 			"launching makemkv rip",
-			logging.String("destination_dir", destDir),
+			logging.String("destination", destDir),
 			logging.Any("title_ids", titleIDs),
 			logging.Int("title_count", len(titleIDs)),
 		)
@@ -358,9 +358,9 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if err := copyPlaceholder(sourcePath, target); err != nil {
 			return services.Wrap(services.ErrTransient, "ripping", "stage source", "Failed to copy source into staging", err)
 		}
-		logger.Info(
+		logger.Debug(
 			"copied source into rip staging",
-			logging.String("source_path", sourcePath),
+			logging.String("source_file", sourcePath),
 			logging.String("ripped_file", target),
 		)
 	}
@@ -387,7 +387,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	if hasEpisodes {
 		assigned := assignEpisodeAssets(&env, workingDir, logger)
 		if assigned == 0 {
-			logger.Warn("episode asset mapping incomplete", logging.String("dest_dir", workingDir))
+			logger.Warn("episode asset mapping incomplete", logging.String("destination", workingDir))
 		} else {
 			specDirty = true
 			paths := episodeAssetPaths(env)
@@ -463,6 +463,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		totalRippedBytes = info.Size()
 	}
 	summaryAttrs := []logging.Attr{
+		logging.String(logging.FieldEventType, "stage_complete"),
 		logging.Duration("stage_duration", time.Since(startedAt)),
 		logging.Int64("total_ripped_bytes", totalRippedBytes),
 		logging.Int("titles_ripped", len(titleIDs)),
@@ -556,6 +557,6 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 	if progressMessage != "" {
 		fields = append(fields, logging.String(logging.FieldProgressMessage, progressMessage))
 	}
-	logger.Info("makemkv progress", fields...)
+	logger.Debug("makemkv progress", fields...)
 	*item = copy
 }

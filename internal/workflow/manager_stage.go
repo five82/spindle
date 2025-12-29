@@ -52,14 +52,14 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 		logging.String(logging.FieldEventType, "stage_start"),
 		logging.String("processing_status", string(stage.processingStatus)),
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		logging.String("source_path", strings.TrimSpace(item.SourcePath)),
+		logging.String("source_file", strings.TrimSpace(item.SourcePath)),
 	)
 	if lane != nil && lane.kind == laneBackground && lane.logger != nil {
-		logging.WithContext(ctx, lane.logger).Info(
+		logging.WithContext(ctx, lane.logger).Debug(
 			"background stage started",
-			logging.String("stage", stage.name),
-			logging.Int64("item_id", item.ID),
-			logging.String("log_path", strings.TrimSpace(item.BackgroundLogPath)),
+			logging.String(logging.FieldStage, stage.name),
+			logging.Int64(logging.FieldItemID, item.ID),
+			logging.String("log_file", strings.TrimSpace(item.BackgroundLogPath)),
 		)
 	}
 
@@ -90,7 +90,7 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 	execErr := m.executeWithHeartbeat(ctx, handler, item)
 	if execErr != nil {
 		if errors.Is(execErr, context.Canceled) {
-			stageLogger.Info("stage interrupted by shutdown")
+			stageLogger.Debug("stage interrupted by shutdown")
 			return execErr
 		}
 		m.handleStageFailure(ctx, stage.name, item, execErr)
@@ -126,14 +126,14 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 		logging.String("next_status", string(item.Status)),
 		logging.String("progress_stage", strings.TrimSpace(item.ProgressStage)),
 		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
-		logging.Duration("elapsed", time.Since(stageStart)),
+		logging.Duration("stage_duration", time.Since(stageStart)),
 	)
 	if lane != nil && lane.kind == laneBackground && lane.logger != nil {
-		logging.WithContext(ctx, lane.logger).Info(
+		logging.WithContext(ctx, lane.logger).Debug(
 			"background stage completed",
-			logging.String("stage", stage.name),
-			logging.Int64("item_id", item.ID),
-			logging.Duration("elapsed", time.Since(stageStart)),
+			logging.String(logging.FieldStage, stage.name),
+			logging.Int64(logging.FieldItemID, item.ID),
+			logging.Duration("stage_duration", time.Since(stageStart)),
 		)
 	}
 	m.setLastItem(item)

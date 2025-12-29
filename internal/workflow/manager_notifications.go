@@ -23,7 +23,7 @@ func (m *Manager) notifyStageError(ctx context.Context, stageName string, item *
 	}); err != nil {
 		// Check if this is a context cancellation (normal shutdown)
 		if errors.Is(err, context.Canceled) {
-			logger.Info("daemon shutting down, could not send error notification")
+			logger.Debug("daemon shutting down, could not send error notification")
 		} else {
 			logger.Debug("stage error notification failed", logging.Error(err))
 		}
@@ -38,7 +38,7 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 	if err != nil {
 		// Check if this is a context cancellation (normal shutdown)
 		if errors.Is(err, context.Canceled) {
-			m.logger.Info("daemon shutting down, could not get queue stats for start notification")
+			m.logger.Debug("daemon shutting down, could not get queue stats for start notification")
 		} else {
 			m.logger.Warn("queue stats unavailable for start notification", logging.Error(err))
 		}
@@ -57,7 +57,7 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 	if err := m.notifier.Publish(ctx, notifications.EventQueueStarted, notifications.Payload{"count": count}); err != nil {
 		// Check if this is a context cancellation (normal shutdown)
 		if errors.Is(err, context.Canceled) {
-			m.logger.Info("daemon shutting down, could not send queue start notification")
+			m.logger.Debug("daemon shutting down, could not send queue start notification")
 		} else {
 			m.logger.Debug("queue start notification failed", logging.Error(err))
 		}
@@ -72,7 +72,7 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 	if err != nil {
 		// Check if this is a context cancellation (normal shutdown)
 		if errors.Is(err, context.Canceled) {
-			m.logger.Info("daemon shutting down, could not check queue completion")
+			m.logger.Debug("daemon shutting down, could not check queue completion")
 		} else {
 			m.logger.Warn("queue stats unavailable for completion notification", logging.Error(err))
 		}
@@ -105,7 +105,7 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 	}); err != nil {
 		// Check if this is a context cancellation (normal shutdown)
 		if errors.Is(err, context.Canceled) {
-			m.logger.Info("daemon shutting down, could not send queue completion notification")
+			m.logger.Debug("daemon shutting down, could not send queue completion notification")
 		} else {
 			m.logger.Debug("queue completion notification failed", logging.Error(err))
 		}

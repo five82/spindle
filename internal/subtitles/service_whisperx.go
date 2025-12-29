@@ -75,7 +75,7 @@ func (s *Service) extractPrimaryAudio(ctx context.Context, source string, audioI
 	start := time.Now()
 	if s.logger != nil {
 		s.logger.Debug("extracting primary audio",
-			logging.String("source", source),
+			logging.String("source_file", source),
 			logging.Int("audio_index", audioIndex),
 			logging.String("destination", destination),
 		)

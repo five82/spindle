@@ -86,7 +86,11 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, i.logger)
 	item.InitProgress("Identifying", "Fetching metadata")
 	logger.Info("identification stage started",
-		logging.String(logging.FieldEventType, "stage_start"))
+		logging.String(logging.FieldEventType, "stage_start"),
+		logging.String("processing_status", string(queue.StatusIdentifying)),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.String("source_file", strings.TrimSpace(item.SourcePath)),
+	)
 
 	if i.notifier != nil && strings.TrimSpace(item.SourcePath) == "" {
 		title := strings.TrimSpace(item.DiscTitle)
@@ -142,6 +146,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 				logging.String("override_title", match.Title),
 				logging.Int64("override_tmdb_id", match.TMDBID),
 				logging.String("decision_reason", "manual override configured for fingerprint/disc_id"),
+				logging.String("decision_options", "override, search"),
 				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
 		} else {
 			logger.Debug("no override match found",
@@ -180,6 +185,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 						logging.String(logging.FieldDecisionType, "title_source"),
 						logging.String("decision_result", "updated"),
 						logging.String("decision_reason", "keydb contains authoritative title for disc_id"),
+						logging.String("decision_options", "keep, update"),
 						logging.String("decision_selected", keydbTitle),
 						logging.String("disc_id", discID),
 						logging.String("original_title", title),
@@ -221,10 +227,11 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 				logging.String(logging.FieldDecisionType, "title_source"),
 				logging.String("decision_result", "updated"),
 				logging.String("decision_reason", "priority_source"),
+				logging.String("decision_options", "keep, update"),
 				logging.String("decision_selected", bestTitle),
 				logging.String("original_title", title),
 				logging.String("new_title", bestTitle),
-				logging.String("source", detectTitleSource(bestTitle, scanResult)))
+				logging.String("decision_source", detectTitleSource(bestTitle, scanResult)))
 			title = bestTitle
 			item.DiscTitle = title
 		}

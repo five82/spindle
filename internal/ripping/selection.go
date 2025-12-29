@@ -47,6 +47,7 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 				logging.String(logging.FieldDecisionType, "episode_title_selection"),
 				logging.String("decision_result", result),
 				logging.String("decision_reason", reason),
+				logging.String("decision_options", "select, skip"),
 				logging.Any("decision_selected", ids),
 			)
 		}
@@ -63,6 +64,8 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 				"primary title decision",
 				logging.String(logging.FieldDecisionType, "primary_title"),
 				logging.String("decision_result", "selected"),
+				logging.String("decision_reason", "primary_title_selector"),
+				logging.String("decision_options", "select, skip"),
 				logging.String("decision_selected", fmt.Sprintf("%d:%ds", selection.ID, selection.Duration)),
 				logging.Any("decision_candidates", candidates),
 				logging.Any("decision_rejects", rejects),
@@ -79,6 +82,7 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 			logging.String(logging.FieldDecisionType, "primary_title"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "no_candidates"),
+			logging.String("decision_options", "select, skip"),
 		)
 	}
 	return nil

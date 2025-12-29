@@ -58,6 +58,7 @@ func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "movie_content"),
+			logging.String("decision_options", "identify, skip"),
 		)
 		item.ProgressStage = "Episode Identification"
 		item.ProgressMessage = "Skipped (movie content)"
@@ -81,6 +82,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "movie_content"),
+			logging.String("decision_options", "identify, skip"),
 		)
 		item.Status = queue.StatusEpisodeIdentified
 		item.ProgressStage = "Episode Identified"
@@ -96,6 +98,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "no_rip_spec"),
+			logging.String("decision_options", "identify, skip"),
 		)
 		item.Status = queue.StatusEpisodeIdentified
 		item.ProgressStage = "Episode Identified"
@@ -111,6 +114,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "invalid_rip_spec"),
+			logging.String("decision_options", "identify, skip"),
 			logging.Error(err),
 		)
 		item.Status = queue.StatusEpisodeIdentified
@@ -127,6 +131,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "no_episodes"),
+			logging.String("decision_options", "identify, skip"),
 		)
 		item.Status = queue.StatusEpisodeIdentified
 		item.ProgressStage = "Episode Identified"
@@ -148,6 +153,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", reason),
+			logging.String("decision_options", "identify, skip"),
 		)
 		item.Status = queue.StatusEpisodeIdentified
 		item.ProgressStage = "Episode Identified"
@@ -158,7 +164,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	}
 
 	// Perform episode matching
-	logger.Info("correlating episodes with OpenSubtitles references",
+	logger.Debug("correlating episodes with OpenSubtitles references",
 		logging.Int("episode_count", len(env.Episodes)))
 
 	item.ProgressPercent = 5

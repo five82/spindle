@@ -45,7 +45,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 		)
 	}
 	if info.IsDir() {
-		logger.Error("ripping validation failed", logging.String("reason", "path is directory"), logging.String("ripped_path", clean))
+		logger.Error("ripping validation failed", logging.String("reason", "path is directory"), logging.String("ripped_file", clean))
 		return services.Wrap(
 			services.ErrValidation,
 			"ripping",

@@ -262,7 +262,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			result.OpenSubtitlesDecision = "used"
 			if s.logger != nil {
 				s.logger.Debug("using opensubtitles subtitles",
-					logging.String("subtitle_path", result.SubtitlePath),
+					logging.String("subtitle_file", result.SubtitlePath),
 					logging.Int("segment_count", result.SegmentCount),
 					logging.String("subtitle_source", result.Source),
 				)
@@ -343,7 +343,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 
 	if s.logger != nil {
 		s.logger.Debug("subtitle generation complete",
-			logging.String("output", plan.outputFile),
+			logging.String("subtitle_file", plan.outputFile),
 			logging.Int("segments", segmentCount),
 			logging.Float64("duration_seconds", finalDuration),
 			logging.String("subtitle_source", "whisperx"),

@@ -103,7 +103,7 @@ func (c *Catalog) ensureLoaded() error {
 	c.loaded = info.ModTime()
 	c.mu.Unlock()
 	if c.logger != nil {
-		c.logger.Info("loaded identification overrides", slog.String("path", path), slog.Int("count", len(entries)))
+		c.logger.Debug("loaded identification overrides", slog.String("path", path), slog.Int("count", len(entries)))
 	}
 	return nil
 }

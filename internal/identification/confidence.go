@@ -114,9 +114,11 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	}
 	topCandidates := summarizeCandidates(candidates, 3)
 	attrs := []logging.Attr{
+		logging.String(logging.FieldEventType, "decision_summary"),
 		logging.String(logging.FieldDecisionType, "tmdb_confidence"),
 		logging.String("decision_result", decisionResult),
 		logging.String("decision_reason", decisionReason),
+		logging.String("decision_options", "accept, reject"),
 		logging.Any("decision_candidates", topCandidates),
 		logging.String("decision_selected", fmt.Sprintf("%d:%s", best.ID, title)),
 		logging.Int("total_results", len(response.Results)),

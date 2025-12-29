@@ -7,10 +7,13 @@
 // also provides a no-op logger for tests and wiring code that cannot fail.
 //
 // Logging contract:
-//   - INFO: narrative milestones, decisions, stage summaries, and status lines.
+//   - INFO: narrative milestones plus decisions that change the final encoded
+//     output or delivered subtitle artifacts (track selection, subtitle source,
+//     encode preset, output mapping).
 //   - WARN: degraded behavior or user action needed (fallbacks, review states).
 //   - ERROR: operation failed; will stop or retry (include short error_message).
-//   - DEBUG: raw diagnostics, per-candidate scoring, tool payloads, trace noise.
+//   - DEBUG: raw diagnostics, per-candidate scoring, tool payloads, and
+//     decisions that do not affect the final encoded file.
 //
 // Common fields:
 //   - progress_stage/progress_percent/progress_message/progress_eta for progress.

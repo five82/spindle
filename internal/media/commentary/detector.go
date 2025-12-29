@@ -99,7 +99,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	if len(windows) == 0 {
 		return Result{}, nil
 	}
-	logger.Info("commentary detection criteria",
+	logger.Debug("commentary detection criteria",
 		logging.Int("primary_stream", primaryIndex),
 		logging.String("languages", strings.Join(normalizedLanguages(settings.Languages), ",")),
 		logging.Int("channels", settings.Channels),
@@ -267,6 +267,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	}
 
 	logger.Info("commentary selection summary",
+		logging.String(logging.FieldEventType, "decision_summary"),
 		logging.String(logging.FieldDecisionType, "commentary_detection"),
 		logging.Int("candidate_count", len(candidateIndices)),
 		logging.Any("decisions", summaryLines),

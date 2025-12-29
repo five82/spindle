@@ -200,9 +200,12 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	}
 	candidatePlan := deriveCandidateEpisodes(env, seasonDetails, ctxData.DiscNumber)
 	if m.logger != nil {
-		m.logger.Info("content id candidate episodes",
+		m.logger.Debug("content id candidate episodes",
+			logging.String(logging.FieldEventType, "decision_summary"),
 			logging.String(logging.FieldDecisionType, "contentid_candidates"),
 			logging.String("decision_result", "selected"),
+			logging.String("decision_reason", "derived_from_ripspec"),
+			logging.String("decision_options", "match, skip"),
 			logging.Any("decision_selected", candidatePlan.Episodes),
 			logging.Any("decision_candidates", candidatePlan.Options()),
 			logging.Any("decision_sources", candidatePlan.Sources),
@@ -230,9 +233,12 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 		for _, match := range matches {
 			matchSummaries = append(matchSummaries, formatMatchSummary(match))
 		}
-		m.logger.Info("content id alignment complete",
+		m.logger.Debug("content id alignment complete",
+			logging.String(logging.FieldEventType, "decision_summary"),
 			logging.String(logging.FieldDecisionType, "contentid_matches"),
 			logging.String("decision_result", "selected"),
+			logging.String("decision_reason", "matches_resolved"),
+			logging.String("decision_options", "match, review"),
 			logging.Any("decision_selected", matchSummaries),
 			logging.Int("episodes_available", len(env.Episodes)),
 			logging.Int("rip_transcripts", len(ripPrints)),
@@ -373,7 +379,7 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 		}
 		m.logger.Debug("content id whisperx transcript ready",
 			logging.String("episode_key", episode.Key),
-			logging.String("subtitle_path", result.SubtitlePath),
+			logging.String("subtitle_file", result.SubtitlePath),
 			logging.Int("token_count", len(fp.tokens)),
 		)
 	}
@@ -451,9 +457,12 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			selected = variant
 			foundMatch = true
 			if m.logger != nil {
-				m.logger.Info("opensubtitles reference search selected",
+				m.logger.Debug("opensubtitles reference search selected",
+					logging.String(logging.FieldEventType, "decision_summary"),
 					logging.String(logging.FieldDecisionType, "opensubtitles_reference_search"),
 					logging.String("decision_result", "selected"),
+					logging.String("decision_reason", "candidates_available"),
+					logging.String("decision_options", "search, skip"),
 					logging.Int("season", season.SeasonNumber),
 					logging.Int("episode", num),
 					logging.Int("attempt", attempt+1),
@@ -465,10 +474,12 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		}
 		if !foundMatch {
 			if m.logger != nil {
-				m.logger.Info("opensubtitles reference search skipped",
+				m.logger.Debug("opensubtitles reference search skipped",
+					logging.String(logging.FieldEventType, "decision_summary"),
 					logging.String(logging.FieldDecisionType, "opensubtitles_reference_search"),
 					logging.String("decision_result", "skipped"),
 					logging.String("decision_reason", "no_candidates"),
+					logging.String("decision_options", "search, skip"),
 					logging.Int("season", season.SeasonNumber),
 					logging.Int("episode", num),
 					logging.Int("attempts_total", len(searchVariants)),
@@ -481,10 +492,12 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		}
 		candidate := resp.Subtitles[0]
 		if m.logger != nil {
-			m.logger.Info("opensubtitles reference selection",
+			m.logger.Debug("opensubtitles reference selection",
+				logging.String(logging.FieldEventType, "decision_summary"),
 				logging.String(logging.FieldDecisionType, "opensubtitles_reference_pick"),
 				logging.String("decision_result", "selected"),
 				logging.String("decision_reason", "top_result"),
+				logging.String("decision_options", "select, skip"),
 				logging.Int("season", season.SeasonNumber),
 				logging.Int("episode", episodeData.EpisodeNumber),
 				logging.Int("candidate_count", len(resp.Subtitles)),

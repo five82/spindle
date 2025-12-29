@@ -24,6 +24,7 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 	details := services.Details(stageErr)
 	attrs := []logging.Attr{
 		logging.String("resolved_status", string(status)),
+		logging.String("processing_status", string(status)),
 		logging.String("error_message", strings.TrimSpace(message)),
 		logging.Alert(alertValue),
 		logging.String(logging.FieldErrorKind, string(details.Kind)),
@@ -42,7 +43,7 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 
 	if err := m.store.Update(ctx, item); err != nil {
 		if errors.Is(err, context.Canceled) {
-			logger.Info("daemon shutting down, could not update stage failure")
+			logger.Debug("daemon shutting down, could not update stage failure")
 		} else {
 			logger.Error("failed to persist stage failure", logging.Error(err))
 		}

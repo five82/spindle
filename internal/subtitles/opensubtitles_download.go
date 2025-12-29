@@ -83,7 +83,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 	}
 	if s.logger != nil {
 		s.logger.Debug("opensubtitles subtitles cleaned",
-			logging.String("cleaned_path", cleanedPath),
+			logging.String("subtitle_file", cleanedPath),
 			logging.Int("removed_cues", stats.RemovedCues),
 		)
 	}
@@ -93,14 +93,14 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 		if s.logger != nil {
 			s.logger.Warn("ffsubsync alignment skipped",
 				logging.Error(err),
-				logging.String("input", cleanedPath),
+				logging.String("source_file", cleanedPath),
 			)
 		}
 	} else if syncedPath != "" {
 		inputPath = syncedPath
 		if s.logger != nil {
 			s.logger.Debug("ffsubsync alignment complete",
-				logging.String("output_path", syncedPath),
+				logging.String("subtitle_file", syncedPath),
 			)
 		}
 	}
@@ -120,7 +120,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 	}
 	if s.logger != nil {
 		s.logger.Debug("opensubtitles alignment complete",
-			logging.String("output_path", plan.outputFile),
+			logging.String("subtitle_file", plan.outputFile),
 		)
 	}
 

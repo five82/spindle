@@ -87,7 +87,7 @@ func (s *apiServer) start(ctx context.Context) error {
 		_ = s.server.Shutdown(shutdownCtx)
 	}()
 
-	s.log().Info("api server listening", slog.String("address", listener.Addr().String()))
+	s.log().Debug("api server listening", slog.String("address", listener.Addr().String()))
 	return nil
 }
 

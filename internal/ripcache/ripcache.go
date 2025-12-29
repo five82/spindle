@@ -286,7 +286,7 @@ func (m *Manager) scan() ([]cacheEntry, int64, error) {
 		path := filepath.Join(m.root, entry.Name())
 		size, mtime, err := dirSizeAndTime(path)
 		if err != nil {
-			m.logger.Warn("ripcache: skip entry", logging.String("path", path), logging.Error(err))
+			m.logger.Warn("ripcache: skip entry", logging.String("source_file", path), logging.Error(err))
 			continue
 		}
 		primary, count := identifyPrimaryFile(path)

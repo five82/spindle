@@ -54,7 +54,7 @@ func (e *Encoder) validateEncodedArtifact(ctx context.Context, path string, star
 		)
 	}
 	if info.IsDir() {
-		logger.Error("encoding validation failed", logging.String("reason", "path is directory"), logging.String("encoded_path", clean))
+		logger.Error("encoding validation failed", logging.String("reason", "path is directory"), logging.String("encoded_file", clean))
 		return services.Wrap(
 			services.ErrValidation,
 			"encoding",

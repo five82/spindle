@@ -7,7 +7,7 @@ Scope: Improve log signal-to-noise, make stage progress and decisions easy to fo
 ## Goals
 
 - Make stage boundaries unmistakable (start/decision/progress/summary).
-- Provide decision context: possible choices, chosen option, and why.
+- Provide decision context for output-impacting choices (including subtitle generation): possible options, chosen option, and why.
 - Reduce noisy progress logs (especially MakeMKV and encoding).
 - Keep WARN/ERROR lines short and readable while pointing to detailed diagnostics.
 - Preserve structured fields for the API stream so CLI/UI can filter or summarize.
@@ -29,11 +29,13 @@ Scope: Improve log signal-to-noise, make stage progress and decisions easy to fo
 
 ## Design Principles
 
-- **Signal over noise:** INFO should read like a narrative; details go to DEBUG.
+- **Signal over noise:** INFO should read like a narrative focused on choices that
+  change the final encoded output or delivered subtitle artifacts; details go to DEBUG.
 - **Single-line WARN/ERROR:** make them scannable; store full stderr elsewhere.
 - **Structured fields first:** logs should be parseable and filtered in API/CLI.
 - **Consistent progress keys:** `progress_stage`, `progress_percent`, `progress_message`, `progress_eta`.
-- **Decision-first logging:** one summary line per decision with explicit reasoning.
+- **Decision-first logging:** one summary line for decisions that impact the
+  final encoded file or delivered subtitle artifacts; other decision detail belongs in DEBUG.
 - **Stable semantics:** predictable log levels and optional per-stage overrides.
 
 ## Implementation Plan
@@ -258,4 +260,3 @@ Scope: Improve log signal-to-noise, make stage progress and decisions easy to fo
   - Decision logs appear once with clear reasoning
   - WARN/ERROR lines are short and include detail path
 - Use `spindle show --level warn` to verify filtering works.
-

@@ -163,7 +163,7 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 
 	cacheEnabled := e != nil && e.cfg != nil && e.cfg.RipCache.Enabled && e.cache != nil
 	if !cacheEnabled {
-		logger.Info(
+		logger.Debug(
 			"rip cache decision",
 			logging.String(logging.FieldDecisionType, "rip_cache_restore"),
 			logging.String("decision_result", "skip"),
@@ -173,7 +173,7 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 	} else {
 		ripDir := filepath.Dir(strings.TrimSpace(item.RippedFile))
 		if fileExists(item.RippedFile) {
-			logger.Info(
+			logger.Debug(
 				"rip cache decision",
 				logging.String(logging.FieldDecisionType, "rip_cache_restore"),
 				logging.String("decision_result", "skip"),
@@ -182,7 +182,7 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 				logging.String("rip_dir", ripDir),
 			)
 		} else {
-			logger.Info(
+			logger.Debug(
 				"rip cache decision",
 				logging.String(logging.FieldDecisionType, "rip_cache_restore"),
 				logging.String("decision_result", "restore"),
@@ -200,7 +200,7 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 					err,
 				)
 			}
-			logger.Info(
+			logger.Debug(
 				"rip cache restore result",
 				logging.String(logging.FieldDecisionType, "rip_cache_restore"),
 				logging.String("decision_result", ternary(restored, "cache_hit", "cache_miss")),
@@ -209,7 +209,7 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 				logging.String("rip_dir", ripDir),
 			)
 			if restored {
-				logger.Info(
+				logger.Debug(
 					"audio refinement decision",
 					logging.String(logging.FieldDecisionType, "audio_refine"),
 					logging.String("decision_result", "refine"),
@@ -273,7 +273,7 @@ func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item,
 			err,
 		)
 	}
-	logger.Info("prepared encoding directory", logging.String("encoded_dir", encodedDir))
+	logger.Debug("prepared encoding directory", logging.String("encoded_dir", encodedDir))
 	return stagingRoot, encodedDir, nil
 }
 
@@ -340,6 +340,7 @@ func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, e
 	}
 
 	summaryAttrs := []logging.Attr{
+		logging.String(logging.FieldEventType, "stage_complete"),
 		logging.String("encoded_file", item.EncodedFile),
 		logging.Duration("stage_duration", time.Since(stageStart)),
 		logging.Int64("input_bytes", totalInputBytes),
@@ -387,7 +388,7 @@ func (e *Encoder) cleanupEncodedDir(logger *slog.Logger, encodedDir string) erro
 		)
 	}
 	if logger != nil {
-		logger.Info("removed stale encoded artifacts", logging.String("encoded_dir", encodedDir))
+		logger.Debug("removed stale encoded artifacts", logging.String("encoded_dir", encodedDir))
 	}
 	return nil
 }

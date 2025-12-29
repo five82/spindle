@@ -153,7 +153,7 @@ func (s *Scanner) lookupBDInfo(ctx context.Context, device string) *BDInfoResult
 	if err != nil {
 		var execErr *exec.Error
 		if errors.As(err, &execErr) && execErr.Err == exec.ErrNotFound {
-			slog.Default().Info("bd_info command not found; skipping enhanced disc metadata")
+			slog.Default().Debug("bd_info command not found; skipping enhanced disc metadata")
 		}
 		return nil
 	}

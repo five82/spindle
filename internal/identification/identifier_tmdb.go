@@ -20,16 +20,18 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 	for _, mode := range orders {
 		modeLabels = append(modeLabels, string(mode))
 	}
-	logger.Info("tmdb search plan",
+	logger.Debug("tmdb search plan",
 		logging.String("query", title),
 		logging.Any("modes", modeLabels),
 		logging.Int("year", opts.Year),
 		logging.String("studio", opts.Studio),
 		logging.Int("runtime_minutes", opts.Runtime),
 		logging.String("runtime_range", fmt.Sprintf("%d-%d", opts.Runtime-10, opts.Runtime+10)),
+		logging.String(logging.FieldEventType, "decision_summary"),
 		logging.String(logging.FieldDecisionType, "tmdb_search"),
 		logging.String("decision_result", "planned"),
 		logging.String("decision_reason", fmt.Sprintf("media_hint=%s", hint.String())),
+		logging.String("decision_options", "search, skip"),
 	)
 	for _, mode := range orders {
 		logger.Debug("tmdb query details",
@@ -100,7 +102,7 @@ func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, 
 		return nil, nil
 	}
 	if season == nil || len(season.Episodes) == 0 {
-		logger.Info("tmdb season lookup returned no episodes",
+		logger.Debug("tmdb season lookup returned no episodes",
 			logging.Int64("tmdb_id", tmdbID),
 			logging.Int("season", seasonNumber),
 			logging.String("reason", "season has no episodes"))

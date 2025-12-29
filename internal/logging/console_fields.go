@@ -19,6 +19,14 @@ var infoHighlightKeys = []string{
 	"disc_title",
 	"disc_label",
 	"processing_status",
+	"next_status",
+	"source_file",
+	"ripped_file",
+	"encoded_file",
+	"final_file",
+	"log_file",
+	"destination",
+	"subtitle_file",
 	FieldProgressStage,
 	FieldProgressPercent,
 	FieldProgressMessage,
@@ -342,6 +350,22 @@ func displayLabel(key string) string {
 		return "Label"
 	case "processing_status":
 		return "Status"
+	case "next_status":
+		return "Next Status"
+	case "source_file":
+		return "Source"
+	case "ripped_file":
+		return "Ripped"
+	case "encoded_file":
+		return "Encoded"
+	case "final_file":
+		return "Final"
+	case "log_file":
+		return "Log"
+	case "destination":
+		return "Destination"
+	case "subtitle_file":
+		return "Subtitle"
 	case "progress_stage":
 		return "Progress Stage"
 	case "progress_message":

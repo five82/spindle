@@ -183,7 +183,7 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 	}
 	if res, err := e.detectResolutionLabel(ctx, sampleSource); err != nil {
 		if sampleSource != "" {
-			logger.Warn("preset decider resolution detection failed", logging.String("source", sampleSource), logging.Error(err))
+			logger.Warn("preset decider resolution detection failed", logging.String("sample_source", sampleSource), logging.Error(err))
 		}
 	} else if strings.TrimSpace(res) != "" {
 		request.Resolution = res

@@ -64,7 +64,7 @@ func (s *Service) ensureOpenSubtitlesReady() error {
 		if s.logger != nil && !s.openSubsReadyLogged {
 			userAgent := strings.TrimSpace(s.config.Subtitles.OpenSubtitlesUserAgent)
 			tokenPresent := strings.TrimSpace(s.config.Subtitles.OpenSubtitlesUserToken) != ""
-			s.logger.Info("opensubtitles authentication ready",
+			s.logger.Debug("opensubtitles authentication ready",
 				logging.String("user_agent", userAgent),
 				logging.Bool("user_token_present", tokenPresent),
 			)
@@ -190,10 +190,13 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		if err == nil {
 			// Success
 			if s.logger != nil {
-				s.logger.Info("opensubtitles candidate summary",
-					logging.String("decision", "selected"),
+				s.logger.Debug("opensubtitles candidate summary",
+					logging.String(logging.FieldEventType, "decision_summary"),
+					logging.String(logging.FieldDecisionType, "opensubtitles_candidate_summary"),
+					logging.String("decision_result", "selected"),
+					logging.String("decision_reason", "match_found"),
 					logging.Int("candidate_count", len(scored)),
-					logging.Any("decisions", summaryLines),
+					logging.Any("decision_candidates", summaryLines),
 				)
 			}
 			return result, true, nil
@@ -201,10 +204,13 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 	}
 
 	if s.logger != nil {
-		s.logger.Info("opensubtitles candidate summary",
-			logging.String("decision", "failed"),
+		s.logger.Debug("opensubtitles candidate summary",
+			logging.String(logging.FieldEventType, "decision_summary"),
+			logging.String(logging.FieldDecisionType, "opensubtitles_candidate_summary"),
+			logging.String("decision_result", "failed"),
+			logging.String("decision_reason", "no_match"),
 			logging.Int("candidate_count", len(scored)),
-			logging.Any("decisions", summaryLines),
+			logging.Any("decision_candidates", summaryLines),
 		)
 	}
 

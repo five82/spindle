@@ -84,7 +84,7 @@ func (s *Service) ensureTokenReady(ctx context.Context) error {
 		if account == "" {
 			account = "huggingface"
 		}
-		s.logger.Info("pyannote authentication verified", logging.String("account", account))
+		s.logger.Debug("pyannote authentication verified", logging.String("account", account))
 		s.tokenSuccessLogged = true
 	}
 

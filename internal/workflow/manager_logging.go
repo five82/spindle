@@ -45,15 +45,15 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 				base.Warn("failed to create background log writer", logging.Error(logErr))
 			} else {
 				if created && laneLogger != nil {
-					laneLogger.Info(
+					laneLogger.Debug(
 						"background log created",
-						logging.String("path", path),
-						logging.Int64("item_id", item.ID),
+						logging.String("log_file", path),
+						logging.Int64(logging.FieldItemID, item.ID),
 					)
 				}
 				// Background tasks should log ONLY to the item log, not the daemon log
 				// Ensure item_id is baked into the logger so all background logs are properly tagged
-				base = slog.New(bgHandler).With(logging.Int64("item_id", item.ID))
+				base = slog.New(bgHandler).With(logging.Int64(logging.FieldItemID, item.ID))
 			}
 		}
 	}

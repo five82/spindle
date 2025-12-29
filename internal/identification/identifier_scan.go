@@ -43,7 +43,7 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 // scanDiscAndCaptureFingerprint scans the disc, captures the fingerprint, and handles duplicates.
 func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *queue.Item, logger *slog.Logger) (*disc.ScanResult, int, error) {
 	device := strings.TrimSpace(i.cfg.MakeMKV.OpticalDrive)
-	logger.Info("scanning disc with makemkv",
+	logger.Debug("scanning disc with makemkv",
 		logging.String("device", device),
 		logging.String(logging.FieldEventType, "scan_start"))
 	scanStart := time.Now()
@@ -75,7 +75,7 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 			if discID := strings.TrimSpace(scanResult.BDInfo.DiscID); discID != "" {
 				scannerFingerprint = strings.ToUpper(discID)
 				scanResult.Fingerprint = scannerFingerprint
-				logger.Info("using bd_info disc id as fingerprint",
+				logger.Debug("using bd_info disc id as fingerprint",
 					logging.String(logging.FieldDecisionType, "fingerprint_source"),
 					logging.String("decision_result", "selected"),
 					logging.String("decision_reason", "bd_info_disc_id_available"),
@@ -113,7 +113,7 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 		scanSummary = append(scanSummary, logging.String("fingerprint", fp))
 	}
 	scanSummary = append(scanSummary, logging.String(logging.FieldEventType, "scan_complete"))
-	logger.Info("disc scan completed", logging.Args(scanSummary...)...)
+	logger.Debug("disc scan completed", logging.Args(scanSummary...)...)
 
 	return scanResult, titleCount, nil
 }

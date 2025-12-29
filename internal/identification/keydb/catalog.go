@@ -94,7 +94,7 @@ func (c *Catalog) ensureLoaded() error {
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			if c.logger != nil {
-				c.logger.Info("refreshing keydb catalog", slog.String("path", c.path))
+				c.logger.Debug("refreshing keydb catalog", slog.String("path", c.path))
 			}
 			if err := c.refreshRemote(); err != nil {
 				if c.logger != nil {
@@ -161,7 +161,7 @@ func (c *Catalog) refreshRemoteAsync() {
 	go func() {
 		defer c.refreshing.Store(false)
 		if c.logger != nil {
-			c.logger.Info("refreshing keydb catalog", slog.String("path", c.path))
+			c.logger.Debug("refreshing keydb catalog", slog.String("path", c.path))
 		}
 		if err := c.refreshRemote(); err != nil {
 			if c.logger != nil {
@@ -238,7 +238,7 @@ func (c *Catalog) refreshRemote() error {
 	defer c.refresh.Unlock()
 
 	if c.logger != nil {
-		c.logger.Info("downloading keydb catalog", slog.String("url", c.downloadURL))
+		c.logger.Debug("downloading keydb catalog", slog.String("url", c.downloadURL))
 	}
 	client := c.client
 	if client == nil {
@@ -298,7 +298,7 @@ func (c *Catalog) refreshRemote() error {
 	}
 
 	if c.logger != nil {
-		c.logger.Info("keydb catalog refreshed", slog.String("path", c.path), slog.Int("bytes", len(cfgData)))
+		c.logger.Debug("keydb catalog refreshed", slog.String("path", c.path), slog.Int("bytes", len(cfgData)))
 	}
 	return nil
 }
