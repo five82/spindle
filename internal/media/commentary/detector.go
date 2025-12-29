@@ -136,7 +136,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	indices := make([]int, 0)
 	candidateIndices := make([]int, 0, len(candidates))
 	for _, decision := range prefilter {
-		logger.Info("commentary candidate evaluated",
+		logger.Debug("commentary candidate evaluated",
 			logging.Int("stream_index", decision.Index),
 			logging.Bool("candidate", decision.Candidate),
 			logging.String("reason", decision.Reason),
@@ -215,7 +215,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			logging.Float64("speech_in_silence_max", settings.SpeechInSilenceMax),
 			logging.Float64("fingerprint_similarity_duplicate", settings.FingerprintSimilarityDuplicate),
 		}
-		logger.Info("commentary decision",
+		logger.Debug("commentary decision",
 			logging.Int("stream_index", decision.Index),
 			logging.Bool("included", decision.Include),
 			logging.String("reason", decision.Reason),
@@ -230,11 +230,36 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 		)
 	}
 	sort.Ints(candidateIndices)
+	reasonCounts := make(map[string]int)
+	excluded := make([]string, 0)
+	for _, decision := range decisions {
+		if decision.Include {
+			continue
+		}
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = "unknown"
+		}
+		reasonCounts[reason]++
+		excluded = append(excluded, fmt.Sprintf("%d:%s", decision.Index, reason))
+	}
+	sort.Ints(indices)
+	sort.Strings(excluded)
 	logger.Info("commentary selection summary",
+		logging.String(logging.FieldDecisionType, "commentary_detection"),
 		logging.Int("candidate_count", len(candidateIndices)),
 		logging.Any("candidate_indices", candidateIndices),
 		logging.Int("kept_count", len(indices)),
 		logging.Any("kept_indices", indices),
+		logging.Any("decision_rejects", excluded),
+		logging.Any("reason_counts", reasonCounts),
+		logging.Group("thresholds",
+			logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
+			logging.Float64("speech_ratio_max_music", settings.SpeechRatioMaxMusic),
+			logging.Float64("speech_overlap_primary_min", settings.SpeechOverlapPrimaryMin),
+			logging.Float64("speech_in_silence_max", settings.SpeechInSilenceMax),
+			logging.Float64("fingerprint_similarity_duplicate", settings.FingerprintSimilarityDuplicate),
+		),
 	)
 
 	return Result{Indices: indices, Decisions: decisions}, nil

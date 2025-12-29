@@ -14,15 +14,20 @@ const infoAttrLimit = 8
 
 var infoHighlightKeys = []string{
 	FieldAlert,
+	FieldEventType,
+	FieldDecisionType,
 	"disc_title",
 	"disc_label",
 	"processing_status",
-	"progress_stage",
-	"progress_percent",
-	"progress_message",
-	"progress_eta",
+	FieldProgressStage,
+	FieldProgressPercent,
+	FieldProgressMessage,
+	FieldProgressETA,
 	"command",
 	"error_message",
+	FieldErrorCode,
+	FieldErrorHint,
+	FieldErrorDetailPath,
 	"status",
 	"disc_type",
 	"runtime_minutes",
@@ -61,6 +66,10 @@ var infoHighlightKeys = []string{
 	"drapto_error_title",
 	"drapto_error_message",
 	"preset_reason",
+	"decision_result",
+	"decision_selected",
+	"decision_candidates",
+	"decision_rejects",
 	// Stage summary fields
 	"stage_duration",
 	"scan_duration",
@@ -97,7 +106,7 @@ func selectInfoFields(attrs []kv, limit int, includeDebug bool) ([]infoField, in
 	formattedSet := make([]bool, len(attrs))
 	ensureValue := func(idx int) string {
 		if !formattedSet[idx] {
-			formatted[idx] = formatValueForKey(attrs[idx].key, attrs[idx].value)
+			formatted[idx] = formatValueForKeyWithAttrs(attrs[idx].key, attrs[idx].value, attrs)
 			formattedSet[idx] = true
 		}
 		return formatted[idx]
@@ -159,7 +168,7 @@ func selectInfoFields(attrs []kv, limit int, includeDebug bool) ([]infoField, in
 }
 
 // formatValueForKey applies smart formatting based on the key name.
-func formatValueForKey(key string, v slog.Value) string {
+func formatValueForKeyWithAttrs(key string, v slog.Value, attrs []kv) string {
 	v = v.Resolve()
 
 	// Handle byte sizes
@@ -191,7 +200,12 @@ func formatValueForKey(key string, v slog.Value) string {
 		return "no"
 	}
 
-	return formatValue(v)
+	value := formatValue(v)
+	if key == "error" || key == "error_message" {
+		detailPath := attrValue(attrs, FieldErrorDetailPath)
+		value = truncateErrorValue(value, detailPath)
+	}
+	return value
 }
 
 // isByteSizeKey returns true if the key represents a byte size.
@@ -217,7 +231,24 @@ func isDurationKey(key string) bool {
 func isPercentKey(key string) bool {
 	return strings.HasSuffix(key, "_percent") ||
 		strings.HasSuffix(key, "_ratio_percent") ||
-		key == "progress_percent"
+		key == FieldProgressPercent
+}
+
+func truncateErrorValue(value, detailPath string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
+	}
+	const maxLen = 200
+	if len(value) > maxLen {
+		value = value[:maxLen] + "…"
+	}
+	if strings.TrimSpace(detailPath) != "" {
+		if !strings.Contains(value, "error_detail_path") && !strings.Contains(value, "detail_path") {
+			value += " (see error_detail_path)"
+		}
+	}
+	return value
 }
 
 func skipInfoKey(key string) bool {
@@ -291,6 +322,16 @@ func displayLabel(key string) string {
 	switch key {
 	case FieldAlert:
 		return "Alert"
+	case FieldEventType:
+		return "Event"
+	case FieldDecisionType:
+		return "Decision"
+	case FieldErrorCode:
+		return "Error Code"
+	case FieldErrorHint:
+		return "Hint"
+	case FieldErrorDetailPath:
+		return "Error Detail"
 	case FieldItemID:
 		return "Item"
 	case FieldStage:
@@ -350,6 +391,14 @@ func displayLabel(key string) string {
 		return "Needs Review"
 	case "preset_profile":
 		return "Preset"
+	case "decision_result":
+		return "Decision"
+	case "decision_selected":
+		return "Selected"
+	case "decision_candidates":
+		return "Candidates"
+	case "decision_rejects":
+		return "Rejected"
 	case "is_movie":
 		return "Movie"
 	case "reason":

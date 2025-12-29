@@ -14,6 +14,7 @@ import (
 // Options describes logger construction parameters.
 type Options struct {
 	Level            string
+	OverrideLevel    string
 	Format           string
 	OutputPaths      []string
 	ErrorOutputPaths []string
@@ -58,6 +59,10 @@ func New(opts Options) (*slog.Logger, error) {
 	if opts.Stream != nil {
 		handler = newStreamHandler(handler, opts.Stream)
 	}
+	if strings.TrimSpace(opts.OverrideLevel) != "" {
+		overrideLevel := parseLevel(opts.OverrideLevel)
+		handler = newLevelOverrideHandler(handler, overrideLevel)
+	}
 
 	return slog.New(handler), nil
 }
@@ -79,8 +84,15 @@ func NewFromConfig(cfg *config.Config) (*slog.Logger, error) {
 		errorOutputs = append(errorOutputs, logPath)
 	}
 
+	level := cfg.Logging.Level
+	override := ""
+	if base, ok := minLevelWithOverrides(cfg.Logging.Level, cfg.Logging.StageOverrides); ok {
+		level = base
+		override = cfg.Logging.Level
+	}
 	opts := Options{
-		Level:            cfg.Logging.Level,
+		Level:            level,
+		OverrideLevel:    override,
 		Format:           cfg.Logging.Format,
 		OutputPaths:      outputPaths,
 		ErrorOutputPaths: errorOutputs,
@@ -104,6 +116,28 @@ func parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+func minLevelWithOverrides(base string, overrides map[string]string) (string, bool) {
+	if len(overrides) == 0 {
+		return "", false
+	}
+	minLevel := parseLevel(base)
+	hasOverride := false
+	for _, value := range overrides {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		parsed := parseLevel(value)
+		if parsed < minLevel {
+			minLevel = parsed
+		}
+		hasOverride = true
+	}
+	if !hasOverride {
+		return "", false
+	}
+	return minLevel.String(), true
 }
 
 func defaultSlice(value []string, fallback []string) []string {

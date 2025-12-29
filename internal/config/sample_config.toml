@@ -148,3 +148,6 @@ disc_monitor_timeout = 5                             # Disc monitor polling time
 format = "console"                                   # "console" or "json"
 level = "info"                                       # info, debug, warn, error
 retention_days = 60                                  # Prune logs older than this (0 disables)
+
+[logging.stage_overrides]                            # Per-stage log level overrides
+# subtitles = "debug"

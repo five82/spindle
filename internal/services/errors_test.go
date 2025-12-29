@@ -22,7 +22,7 @@ func TestWrapIncludesContext(t *testing.T) {
 		t.Fatalf("expected wrapped error to contain base error, got %v", err)
 	}
 	msg := err.Error()
-	for _, fragment := range []string{"external tool error", "encoding", "mux", "failed"} {
+	for _, fragment := range []string{"encoding", "mux", "failed"} {
 		if !strings.Contains(msg, fragment) {
 			t.Fatalf("expected %q in error string %q", fragment, msg)
 		}

@@ -3,6 +3,7 @@ package identification
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -352,9 +353,14 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			logging.Int("title_count", len(titleSpecs)),
 			logging.String("content_key", contentKey),
 		)
-	} else if selection, ok := rippingChoosePrimaryTitle(titleSpecs); ok {
+	} else if selection, ok, candidates, rejects := rippingPrimaryTitleSummary(titleSpecs); ok {
 		logger.Info(
-			"primary title selected for ripping",
+			"primary title decision",
+			logging.String(logging.FieldDecisionType, "primary_title"),
+			logging.String("decision_result", "selected"),
+			logging.String("decision_selected", fmt.Sprintf("%d:%ds", selection.ID, selection.Duration)),
+			logging.Any("decision_candidates", candidates),
+			logging.Any("decision_rejects", rejects),
 			logging.Int("title_id", selection.ID),
 			logging.Int("duration_seconds", selection.Duration),
 			logging.Int("chapters", selection.Chapters),
@@ -373,9 +379,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-// rippingChoosePrimaryTitle proxies to ripping.ChoosePrimaryTitle without creating an import cycle.
-var rippingChoosePrimaryTitle = func(titles []ripspec.Title) (ripspec.Title, bool) {
-	return ripping.ChoosePrimaryTitle(titles)
+var rippingPrimaryTitleSummary = func(titles []ripspec.Title) (ripspec.Title, bool, []string, []string) {
+	return ripping.PrimaryTitleDecisionSummary(titles)
 }
 
 // HealthCheck verifies identifier dependencies required for successful execution.

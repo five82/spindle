@@ -168,13 +168,16 @@ func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) 
 	svc := &Service{
 		config:    cfg,
 		logger:    serviceLogger,
-		run:       defaultCommandRunner,
+		run:       nil,
 		hfToken:   token,
 		hfCheck:   defaultTokenValidator,
 		languages: languages,
 	}
 	for _, opt := range opts {
 		opt(svc)
+	}
+	if svc.run == nil {
+		svc.run = svc.defaultCommandRunner
 	}
 	return svc
 }
@@ -722,7 +725,7 @@ func normalizeLanguageList(languages []string) []string {
 	return normalized
 }
 
-func defaultCommandRunner(ctx context.Context, name string, args ...string) error {
+func (s *Service) defaultCommandRunner(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec
 	var stderr strings.Builder
 	cmd.Stdout = io.Discard
@@ -735,9 +738,70 @@ func defaultCommandRunner(ctx context.Context, name string, args ...string) erro
 	}
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		raw := strings.TrimSpace(stderr.String())
+		detailPath := s.writeToolLog(name, args, raw)
+		base := fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+		return &services.ServiceError{
+			Marker:     services.ErrExternalTool,
+			Kind:       services.ErrorKindExternal,
+			Operation:  "command",
+			Message:    "External command failed",
+			DetailPath: detailPath,
+			Cause:      base,
+		}
 	}
 	return nil
+}
+
+func (s *Service) writeToolLog(name string, args []string, stderr string) string {
+	if s == nil || s.config == nil {
+		return ""
+	}
+	logDir := strings.TrimSpace(s.config.Paths.LogDir)
+	if logDir == "" {
+		return ""
+	}
+	toolDir := filepath.Join(logDir, "tool")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to create tool log directory", logging.Error(err))
+		}
+		return ""
+	}
+	timestamp := time.Now().UTC().Format("20060102T150405.000Z")
+	toolName := sanitizeToolName(name)
+	if toolName == "" {
+		toolName = "tool"
+	}
+	path := filepath.Join(toolDir, fmt.Sprintf("%s-%s.log", timestamp, toolName))
+
+	command := strings.TrimSpace(strings.Join(append([]string{name}, args...), " "))
+	payload := strings.Builder{}
+	payload.Grow(len(command) + len(stderr) + 64)
+	payload.WriteString("command: ")
+	payload.WriteString(command)
+	payload.WriteByte('\n')
+	payload.WriteString("stderr:\n")
+	payload.WriteString(stderr)
+	payload.WriteByte('\n')
+
+	if err := os.WriteFile(path, []byte(payload.String()), 0o644); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to write tool log", logging.Error(err))
+		}
+		return ""
+	}
+	return path
+}
+
+func sanitizeToolName(value string) string {
+	value = strings.TrimSpace(filepath.Base(value))
+	if value == "" {
+		return ""
+	}
+	value = strings.ToLower(value)
+	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
+	return strings.Trim(replacer.Replace(value), "-")
 }
 
 func (s *Service) configuredVADMethod() string {

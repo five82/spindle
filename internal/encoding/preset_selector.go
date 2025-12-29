@@ -148,17 +148,26 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 		return decision
 	}
 	if e.presetClassifier == nil {
-		logger.Warn("preset decider unavailable; falling back to default")
+		logger.Warn("preset decider unavailable; falling back to default",
+			logging.Alert("preset_decider_fallback"),
+			logging.String(logging.FieldDecisionType, "preset_decider"),
+		)
 		return decision
 	}
 	if item == nil || strings.TrimSpace(item.MetadataJSON) == "" {
-		logger.Info("preset decider skipped", logging.String("reason", "metadata unavailable"))
+		logger.Info("preset decider skipped",
+			logging.String("reason", "metadata unavailable"),
+			logging.String(logging.FieldDecisionType, "preset_decider"),
+		)
 		return decision
 	}
 	meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	title := strings.TrimSpace(meta.Title())
 	if title == "" {
-		logger.Info("preset decider skipped", logging.String("reason", "title unavailable"))
+		logger.Info("preset decider skipped",
+			logging.String("reason", "title unavailable"),
+			logging.String(logging.FieldDecisionType, "preset_decider"),
+		)
 		return decision
 	}
 	request := presetRequest{
@@ -194,6 +203,10 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 				attrs = append(attrs, logging.String("base_url", baseURL))
 			}
 		}
+		attrs = append(attrs,
+			logging.Alert("preset_decider_fallback"),
+			logging.String(logging.FieldDecisionType, "preset_decider"),
+		)
 		logger.Warn("preset decider classification failed", logging.Args(attrs...)...)
 		return decision
 	}
@@ -214,24 +227,40 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 		attrs = append(attrs, logging.String("preset_reason", decision.Reason))
 	}
 	if decision.Raw != "" {
-		attrs = append(attrs, logging.String("preset_raw", decision.Raw))
+		logger.Debug("preset decider raw response", logging.String("preset_raw", decision.Raw))
 	}
 
+	fallbackReason := ""
 	if decision.SuggestedProfile == "" {
-		logger.Info("preset decider provided no profile", logging.Args(attrs...)...)
-		return decision
+		fallbackReason = "no_profile"
+	} else if decision.SuggestedProfile != "clean" && decision.SuggestedProfile != "grain" && decision.SuggestedProfile != "default" {
+		fallbackReason = "unsupported_profile"
+		attrs = append(attrs, logging.String("note", "unsupported profile"))
+	} else if decision.Confidence < presetConfidenceThreshold {
+		fallbackReason = "confidence_below_threshold"
+		attrs = append(attrs, logging.Float64("required_confidence", presetConfidenceThreshold))
+	} else {
+		decision.Profile = decision.SuggestedProfile
+		decision.Applied = true
 	}
-	if decision.SuggestedProfile != "clean" && decision.SuggestedProfile != "grain" && decision.SuggestedProfile != "default" {
-		logger.Info("preset decider returned unsupported profile", logging.Args(append(attrs, logging.String("note", "unsupported profile"))...)...)
-		return decision
+
+	decisionAttrs := append([]logging.Attr{
+		logging.String(logging.FieldDecisionType, "preset_decider"),
+		logging.String("decision_result", ternary(decision.Applied, "applied", "fallback")),
+		logging.String("decision_selected", decision.Profile),
+		logging.String("decision_reason", fallbackReason),
+	}, attrs...)
+	logger.Info("preset decider decision", logging.Args(decisionAttrs...)...)
+
+	if !decision.Applied {
+		logger.Warn("preset decider fallback applied",
+			logging.Alert("preset_decider_fallback"),
+			logging.String("fallback_reason", fallbackReason),
+			logging.String("preset_suggested", decision.SuggestedProfile),
+			logging.Float64("preset_confidence", decision.Confidence),
+			logging.String(logging.FieldDecisionType, "preset_decider"),
+		)
 	}
-	if decision.Confidence < presetConfidenceThreshold {
-		logger.Info("preset decider confidence below threshold", logging.Args(append(attrs, logging.Float64("required_confidence", presetConfidenceThreshold))...)...)
-		return decision
-	}
-	decision.Profile = decision.SuggestedProfile
-	decision.Applied = true
-	logger.Info("preset decider applied", logging.Args(attrs...)...)
 	return decision
 }
 
@@ -257,6 +286,13 @@ func (e *Encoder) detectResolutionLabel(ctx context.Context, path string) (strin
 	}
 	width := maxVideoWidth(result)
 	return classifyResolution(width), nil
+}
+
+func ternary[T any](cond bool, a, b T) T {
+	if cond {
+		return a
+	}
+	return b
 }
 
 func maxVideoWidth(result ffprobe.Result) int {

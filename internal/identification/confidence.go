@@ -1,6 +1,8 @@
 package identification
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -10,6 +12,17 @@ import (
 	"spindle/internal/logging"
 )
 
+type scoredCandidate struct {
+	ID           int64
+	Title        string
+	Score        float64
+	VoteAverage  float64
+	VoteCount    int64
+	ExactMatch   bool
+	MatchType    string
+	TitleCleaned string
+}
+
 func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response) *tmdb.Result {
 	if response == nil || len(response.Results) == 0 {
 		return nil
@@ -18,11 +31,7 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	queryNormalized := normalizeForComparison(query)
 	var best *tmdb.Result
 	bestScore := -1.0
-
-	logger.Info("confidence scoring analysis",
-		logging.String("query", query),
-		logging.String("query_normalized", queryNormalized),
-		logging.Int("total_results", len(response.Results)))
+	candidates := make([]scoredCandidate, 0, len(response.Results))
 
 	for idx := range response.Results {
 		res := response.Results[idx]
@@ -32,8 +41,9 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		titleLower := strings.ToLower(title)
 		titleNormalized := normalizeForComparison(title)
 		exactMatch := titleLower == queryLower || titleNormalized == queryNormalized
+		match := matchType(titleLower, queryLower)
 
-		logger.Info("calculating confidence score",
+		logger.Debug("calculating confidence score",
 			logging.Int("result_index", idx),
 			logging.Int64("tmdb_id", res.ID),
 			logging.String("title", title),
@@ -42,7 +52,18 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 			logging.Float64("vote_average", res.VoteAverage),
 			logging.Int64("vote_count", res.VoteCount),
 			logging.Bool("exact_title_match", exactMatch),
-			logging.String("match_type", matchType(titleLower, queryLower)))
+			logging.String("match_type", match))
+
+		candidates = append(candidates, scoredCandidate{
+			ID:           res.ID,
+			Title:        title,
+			Score:        score,
+			VoteAverage:  res.VoteAverage,
+			VoteCount:    res.VoteCount,
+			ExactMatch:   exactMatch,
+			MatchType:    match,
+			TitleCleaned: titleNormalized,
+		})
 
 		if score > bestScore {
 			best = &response.Results[idx]
@@ -58,49 +79,71 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	titleLower := strings.ToLower(title)
 	titleNormalized := normalizeForComparison(title)
 	exactMatch := titleLower == queryLower || titleNormalized == queryNormalized
+	match := matchType(titleLower, queryLower)
 
-	logger.Info("best result before confidence thresholds",
-		logging.Int64("tmdb_id", best.ID),
-		logging.String("title", title),
-		logging.String("title_normalized", titleNormalized),
+	decisionResult := "rejected"
+	decisionReason := ""
+	rejects := []string{}
+	var minExpectedScore float64
+	if exactMatch {
+		if best.VoteAverage < 2.0 {
+			decisionReason = "vote_average_below_threshold"
+			rejects = append(rejects, fmt.Sprintf("%d:vote_average_below_2.0", best.ID))
+		} else {
+			decisionResult = "accepted"
+			decisionReason = "exact_match"
+		}
+	} else {
+		if best.VoteAverage < 3.0 {
+			decisionReason = "vote_average_below_threshold"
+			rejects = append(rejects, fmt.Sprintf("%d:vote_average_below_3.0", best.ID))
+		} else {
+			minExpectedScore = 1.3 + float64(best.VoteCount)/1000.0
+			if bestScore < minExpectedScore {
+				decisionReason = "confidence_below_threshold"
+				rejects = append(rejects, fmt.Sprintf("%d:confidence_below_threshold", best.ID))
+			} else {
+				decisionResult = "accepted"
+				decisionReason = "confidence_passed"
+			}
+		}
+	}
+
+	if decisionReason == "" {
+		decisionReason = "no_match"
+	}
+	topCandidates := summarizeCandidates(candidates, 3)
+	attrs := []logging.Attr{
+		logging.String(logging.FieldDecisionType, "tmdb_confidence"),
+		logging.String("decision_result", decisionResult),
+		logging.String("decision_reason", decisionReason),
+		logging.Any("decision_candidates", topCandidates),
+		logging.String("decision_selected", fmt.Sprintf("%d:%s", best.ID, title)),
+		logging.Int("total_results", len(response.Results)),
 		logging.Float64("best_score", bestScore),
 		logging.Float64("vote_average", best.VoteAverage),
 		logging.Int64("vote_count", best.VoteCount),
-		logging.Bool("exact_title_match", exactMatch))
-
+		logging.Bool("exact_title_match", exactMatch),
+		logging.String("match_type", match),
+		logging.String("query", query),
+		logging.String("query_normalized", queryNormalized),
+	}
 	if exactMatch {
-		if best.VoteAverage < 2.0 {
-			logger.Warn("exact match rejected: vote average too low",
-				logging.Float64("vote_average", best.VoteAverage),
-				logging.Float64("threshold", 2.0))
-			return nil
+		attrs = append(attrs, logging.Float64("vote_average_threshold", 2.0))
+	} else {
+		attrs = append(attrs, logging.Float64("vote_average_threshold", 3.0))
+		if minExpectedScore > 0 {
+			attrs = append(attrs, logging.Float64("min_expected_score", minExpectedScore))
 		}
-		logger.Info("exact match accepted: confidence passed",
-			logging.Float64("vote_average", best.VoteAverage),
-			logging.Float64("threshold", 2.0))
-		return best
 	}
+	if len(rejects) > 0 {
+		attrs = append(attrs, logging.Any("decision_rejects", rejects))
+	}
+	logger.Info("tmdb confidence decision", logging.Args(attrs...)...)
 
-	if best.VoteAverage < 3.0 {
-		logger.Warn("partial match rejected: vote average too low",
-			logging.Float64("vote_average", best.VoteAverage),
-			logging.Float64("threshold", 3.0))
+	if decisionResult != "accepted" {
 		return nil
 	}
-
-	minExpectedScore := 1.3 + float64(best.VoteCount)/1000.0
-	if bestScore < minExpectedScore {
-		logger.Warn("partial match rejected: confidence score too low",
-			logging.Float64("best_score", bestScore),
-			logging.Float64("min_expected_score", minExpectedScore),
-			logging.String("formula", "1.3 + (vote_count/1000.0)"))
-		return nil
-	}
-
-	logger.Info("partial match accepted: confidence passed",
-		logging.Float64("best_score", bestScore),
-		logging.Float64("min_expected_score", minExpectedScore))
-
 	return best
 }
 
@@ -154,4 +197,28 @@ func normalizeForComparison(input string) string {
 		}
 	}
 	return builder.String()
+}
+
+func summarizeCandidates(candidates []scoredCandidate, limit int) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Score == candidates[j].Score {
+			return candidates[i].VoteCount > candidates[j].VoteCount
+		}
+		return candidates[i].Score > candidates[j].Score
+	})
+	if limit <= 0 || limit > len(candidates) {
+		limit = len(candidates)
+	}
+	out := make([]string, 0, limit)
+	for _, cand := range candidates[:limit] {
+		label := strings.TrimSpace(cand.Title)
+		if label == "" {
+			label = "untitled"
+		}
+		out = append(out, fmt.Sprintf("%d:%s (score=%.2f votes=%.1f/%d match=%s)", cand.ID, label, cand.Score, cand.VoteAverage, cand.VoteCount, cand.MatchType))
+	}
+	return out
 }

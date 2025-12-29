@@ -134,9 +134,10 @@ type Workflow struct {
 
 // Logging contains configuration for log output.
 type Logging struct {
-	Format        string `toml:"format"`
-	Level         string `toml:"level"`
-	RetentionDays int    `toml:"retention_days"`
+	Format         string            `toml:"format"`
+	Level          string            `toml:"level"`
+	RetentionDays  int               `toml:"retention_days"`
+	StageOverrides map[string]string `toml:"stage_overrides"`
 }
 
 // Config encapsulates all configuration values for Spindle.

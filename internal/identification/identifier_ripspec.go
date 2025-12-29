@@ -69,7 +69,7 @@ func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatc
 				logging.Int("episode", spec.Episode),
 				logging.String("episode_title", strings.TrimSpace(spec.EpisodeTitle)))
 		}
-		logger.Info("prepared title fingerprint", logFields...)
+		logger.Debug("prepared title fingerprint", logFields...)
 	}
 	return titleSpecs, episodeSpecs
 }

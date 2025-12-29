@@ -282,7 +282,7 @@ func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
 		t.Fatalf("read log file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
-	if len(lines) != 5 {
+	if len(lines) != 4 {
 		t.Fatalf("unexpected line count: %v", lines)
 	}
 	if !strings.Contains(lines[0], "INFO [workflow-runner] Item #9 (ripper) – stage started") {
@@ -296,9 +296,6 @@ func TestConsoleInfoFormattingHighlightsHumanContext(t *testing.T) {
 	}
 	if !strings.Contains(lines[3], "- Correlation Id: abc-123") {
 		t.Fatalf("expected correlation bullet, got %q", lines[3])
-	}
-	if !strings.Contains(lines[4], "INFO [workflow-runner] Item #9 (ripper) – stage started") {
-		t.Fatalf("second header should be present, got %q", lines[4])
 	}
 }
 
@@ -439,5 +436,102 @@ func TestConsoleDebugFormattingEmitsDetailedContext(t *testing.T) {
 	}
 	if !hasDisc {
 		t.Fatalf("expected disc title in debug details, got %q", content)
+	}
+}
+
+func TestConsoleInfoSuppressesEmptyDuplicates(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "info-empty.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "info",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	logger.Info("heartbeat")
+	logger.Info("heartbeat")
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected single line, got %q", content)
+	}
+}
+
+func TestConsoleInfoShowsProgressFields(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "info-progress.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "info",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	logger.Info("progress update",
+		logging.String(logging.FieldProgressStage, "Ripping"),
+		logging.Float64(logging.FieldProgressPercent, 42.0),
+		logging.String(logging.FieldProgressMessage, "Scanning titles"),
+	)
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if !strings.Contains(string(content), "Progress Stage: Ripping") {
+		t.Fatalf("expected progress stage in output, got %q", content)
+	}
+	if !strings.Contains(string(content), "Progress: \"Scanning titles\"") {
+		t.Fatalf("expected progress message in output, got %q", content)
+	}
+}
+
+func TestConsoleTruncatesErrorMessage(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "info-error.log")
+
+	opts := logging.Options{
+		Format:           "console",
+		Level:            "info",
+		OutputPaths:      []string{logPath},
+		ErrorOutputPaths: []string{logPath},
+	}
+
+	logger, err := logging.New(opts)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	long := strings.Repeat("x", 300)
+	logger.Info("error detail",
+		logging.String("error_message", long),
+		logging.String(logging.FieldErrorDetailPath, "/tmp/tool.log"),
+	)
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if !strings.Contains(string(content), "see error_detail_path") {
+		t.Fatalf("expected detail path hint, got %q", content)
+	}
+	if strings.Contains(string(content), long) {
+		t.Fatalf("expected truncation, got %q", content)
 	}
 }

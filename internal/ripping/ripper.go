@@ -660,17 +660,23 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 		logger.Warn("failed to persist progress", logging.Error(err))
 		return
 	}
-	shouldLog := sampler == nil || sampler.ShouldLog(copy.ProgressPercent, copy.ProgressStage, copy.ProgressMessage)
+	progressMessage := strings.TrimSpace(copy.ProgressMessage)
+	if strings.HasPrefix(progressMessage, "Progress ") {
+		progressMessage = ""
+	}
+	shouldLog := sampler == nil || sampler.ShouldLog(copy.ProgressPercent, copy.ProgressStage, progressMessage)
 	if !shouldLog {
 		*item = copy
 		return
 	}
-	fields := []any{logging.Int("percent", int(math.Round(copy.ProgressPercent)))}
-	if stage := strings.TrimSpace(copy.ProgressStage); stage != "" {
-		fields = append(fields, logging.String("stage", stage))
+	fields := []any{
+		logging.Float64(logging.FieldProgressPercent, math.Round(copy.ProgressPercent)),
 	}
-	if message := strings.TrimSpace(copy.ProgressMessage); message != "" && !strings.HasPrefix(message, "Progress ") {
-		fields = append(fields, logging.String("message", message))
+	if stage := strings.TrimSpace(copy.ProgressStage); stage != "" {
+		fields = append(fields, logging.String(logging.FieldProgressStage, stage))
+	}
+	if progressMessage != "" {
+		fields = append(fields, logging.String(logging.FieldProgressMessage, progressMessage))
 	}
 	logger.Info("makemkv progress", fields...)
 	*item = copy
@@ -707,8 +713,14 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 	}
 	if selection, ok := ChoosePrimaryTitle(env.Titles); ok {
 		if logger != nil {
+			_, _, candidates, rejects := PrimaryTitleDecisionSummary(env.Titles)
 			logger.Info(
-				"selecting primary title",
+				"primary title decision",
+				logging.String(logging.FieldDecisionType, "primary_title"),
+				logging.String("decision_result", "selected"),
+				logging.String("decision_selected", fmt.Sprintf("%d:%ds", selection.ID, selection.Duration)),
+				logging.Any("decision_candidates", candidates),
+				logging.Any("decision_rejects", rejects),
 				logging.Int("title_id", selection.ID),
 				logging.Int("duration_seconds", selection.Duration),
 				logging.String("title_name", strings.TrimSpace(selection.Name)),
@@ -818,6 +830,27 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 		return left.Duration > right.Duration
 	})
 	return featureLength[0], true
+}
+
+// PrimaryTitleDecisionSummary returns the primary selection plus candidate and rejection summaries.
+func PrimaryTitleDecisionSummary(titles []ripspec.Title) (ripspec.Title, bool, []string, []string) {
+	selection, ok := ChoosePrimaryTitle(titles)
+	candidates := make([]string, 0, len(titles))
+	rejects := make([]string, 0)
+	for _, t := range titles {
+		if t.ID < 0 {
+			rejects = append(rejects, fmt.Sprintf("%d:invalid_id", t.ID))
+			continue
+		}
+		if t.Duration <= 0 {
+			rejects = append(rejects, fmt.Sprintf("%d:duration<=0", t.ID))
+			continue
+		}
+		candidates = append(candidates, fmt.Sprintf("%d:%ds ch=%d seg=%d playlist=%s", t.ID, t.Duration, t.Chapters, t.SegmentCount, strings.TrimSpace(t.Playlist)))
+	}
+	sort.Strings(candidates)
+	sort.Strings(rejects)
+	return selection, ok, candidates, rejects
 }
 
 func bestByInt(list []ripspec.Title, score func(ripspec.Title) int) []ripspec.Title {

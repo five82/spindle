@@ -16,8 +16,21 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 	var lastErr error
 	var lastResp *tmdb.Response
 	modeUsed := searchModeMovie
+	modeLabels := make([]string, 0, len(orders))
 	for _, mode := range orders {
-		logger.Info("tmdb query details",
+		modeLabels = append(modeLabels, string(mode))
+	}
+	logger.Info("tmdb search plan",
+		logging.String("query", title),
+		logging.Any("modes", modeLabels),
+		logging.Int("year", opts.Year),
+		logging.String("studio", opts.Studio),
+		logging.Int("runtime_minutes", opts.Runtime),
+		logging.String("runtime_range", fmt.Sprintf("%d-%d", opts.Runtime-10, opts.Runtime+10)),
+		logging.String(logging.FieldDecisionType, "tmdb_search"),
+	)
+	for _, mode := range orders {
+		logger.Debug("tmdb query details",
 			logging.String("query", title),
 			logging.String("mode", string(mode)),
 			logging.Int("year", opts.Year),

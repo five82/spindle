@@ -26,6 +26,10 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 	var laneFilter string
 	var requestFilter string
 	var itemFilter int64
+	var levelFilter string
+	var alertFilter string
+	var decisionFilter string
+	var searchFilter string
 
 	cmd := &cobra.Command{
 		Use:   "show",
@@ -40,6 +44,10 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 				Lane:      laneFilter,
 				RequestID: requestFilter,
 				ItemID:    itemFilter,
+				Level:     levelFilter,
+				Alert:     alertFilter,
+				Decision:  decisionFilter,
+				Search:    searchFilter,
 			}
 			if err := streamLogsFromAPI(cmd, cfg, lines, follow, filters); err == nil {
 				return nil
@@ -108,6 +116,10 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().StringVar(&laneFilter, "lane", "", "Filter logs by workflow lane (foreground/background)")
 	cmd.Flags().StringVar(&requestFilter, "request", "", "Filter logs by request/correlation ID")
 	cmd.Flags().Int64VarP(&itemFilter, "item", "i", 0, "Filter logs by queue item ID")
+	cmd.Flags().StringVar(&levelFilter, "level", "", "Minimum log level (debug, info, warn, error)")
+	cmd.Flags().StringVar(&alertFilter, "alert", "", "Filter logs by alert flag")
+	cmd.Flags().StringVar(&decisionFilter, "decision-type", "", "Filter logs by decision type")
+	cmd.Flags().StringVar(&searchFilter, "search", "", "Search logs by substring")
 	return cmd
 }
 
@@ -130,6 +142,10 @@ func streamLogsFromAPI(cmd *cobra.Command, cfg *config.Config, lines int, follow
 		Lane:          filters.Lane,
 		CorrelationID: filters.RequestID,
 		ItemID:        filters.ItemID,
+		Level:         filters.Level,
+		Alert:         filters.Alert,
+		DecisionType:  filters.Decision,
+		Search:        filters.Search,
 	}
 	if query.Limit <= 0 {
 		query.Limit = 200
@@ -175,6 +191,10 @@ type logAPIQuery struct {
 	Lane          string
 	CorrelationID string
 	ItemID        int64
+	Level         string
+	Alert         string
+	DecisionType  string
+	Search        string
 }
 
 type logFilters struct {
@@ -182,12 +202,20 @@ type logFilters struct {
 	Lane      string
 	RequestID string
 	ItemID    int64
+	Level     string
+	Alert     string
+	Decision  string
+	Search    string
 }
 
 func (f logFilters) empty() bool {
 	return strings.TrimSpace(f.Component) == "" &&
 		strings.TrimSpace(f.Lane) == "" &&
 		strings.TrimSpace(f.RequestID) == "" &&
+		strings.TrimSpace(f.Level) == "" &&
+		strings.TrimSpace(f.Alert) == "" &&
+		strings.TrimSpace(f.Decision) == "" &&
+		strings.TrimSpace(f.Search) == "" &&
 		f.ItemID == 0
 }
 
@@ -243,6 +271,18 @@ func (c *logAPIClient) Fetch(ctx context.Context, q logAPIQuery) (api.LogStreamR
 	}
 	if q.ItemID > 0 {
 		values.Set("item", strconv.FormatInt(q.ItemID, 10))
+	}
+	if strings.TrimSpace(q.Level) != "" {
+		values.Set("level", q.Level)
+	}
+	if strings.TrimSpace(q.Alert) != "" {
+		values.Set("alert", q.Alert)
+	}
+	if strings.TrimSpace(q.DecisionType) != "" {
+		values.Set("decision_type", q.DecisionType)
+	}
+	if strings.TrimSpace(q.Search) != "" {
+		values.Set("search", q.Search)
 	}
 
 	endpoint := c.base.ResolveReference(&url.URL{Path: "/api/logs", RawQuery: values.Encode()})

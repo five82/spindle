@@ -438,13 +438,22 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 		}
 	}
 
-	return logging.WithContext(ctx, base)
+	logger := logging.WithContext(ctx, base)
+	if m != nil && m.cfg != nil {
+		if stage, ok := services.StageFromContext(ctx); ok {
+			if override := stageOverrideLevel(m.cfg.Logging.StageOverrides, stage); override != "" {
+				logger = logging.WithLevelOverride(logger, parseStageLevel(override))
+			}
+		}
+	}
+	return logger
 }
 
 func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger *slog.Logger, stage pipelineStage, item *queue.Item) error {
 	stageStart := time.Now()
 	stageLogger.Info(
 		"stage started",
+		logging.String(logging.FieldEventType, "stage_start"),
 		logging.String("processing_status", string(stage.processingStatus)),
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
 		logging.String("source_path", strings.TrimSpace(item.SourcePath)),
@@ -517,6 +526,7 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 	}
 	stageLogger.Info(
 		"stage completed",
+		logging.String(logging.FieldEventType, "stage_complete"),
 		logging.String("next_status", string(item.Status)),
 		logging.String("progress_stage", strings.TrimSpace(item.ProgressStage)),
 		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
@@ -587,12 +597,24 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 	if status == queue.StatusReview {
 		alertValue = "review_required"
 	}
-	logger.Error("stage failed",
+	details := services.Details(stageErr)
+	attrs := []logging.Attr{
 		logging.String("resolved_status", string(status)),
 		logging.String("error_message", strings.TrimSpace(message)),
 		logging.Alert(alertValue),
-		logging.Error(stageErr),
-	)
+		logging.String(logging.FieldErrorKind, string(details.Kind)),
+		logging.String(logging.FieldErrorOperation, details.Operation),
+		logging.String(logging.FieldErrorDetailPath, details.DetailPath),
+		logging.String(logging.FieldErrorCode, details.Code),
+		logging.String(logging.FieldErrorHint, details.Hint),
+	}
+	if details.Cause != nil {
+		attrs = append(attrs, logging.Error(details.Cause))
+	} else {
+		attrs = append(attrs, logging.Error(stageErr))
+	}
+	attrs = append(attrs, logging.String(logging.FieldEventType, "stage_failure"))
+	logger.Error("stage failed", logging.Args(attrs...)...)
 
 	if err := m.store.Update(ctx, item); err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -614,7 +636,11 @@ func (m *Manager) classifyStageFailure(stageName string, stageErr error) (queue.
 	}
 
 	status := services.FailureStatus(stageErr)
-	message := strings.TrimSpace(stageErr.Error())
+	details := services.Details(stageErr)
+	message := strings.TrimSpace(details.Message)
+	if message == "" {
+		message = strings.TrimSpace(stageErr.Error())
+	}
 	if message == "" {
 		message = m.getStageFailureMessage(stageName, "failed")
 	}
@@ -641,6 +667,35 @@ func (m *Manager) setItemFailureState(item *queue.Item, status queue.Status, mes
 	item.ProgressMessage = message
 	item.ProgressPercent = 0
 	item.LastHeartbeat = nil
+}
+
+func stageOverrideLevel(overrides map[string]string, stage string) string {
+	if len(overrides) == 0 {
+		return ""
+	}
+	stage = strings.ToLower(strings.TrimSpace(stage))
+	if stage == "" {
+		return ""
+	}
+	for key, value := range overrides {
+		if strings.ToLower(strings.TrimSpace(key)) == stage {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func parseStageLevel(level string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func withStageContext(ctx context.Context, lane *laneState, stageName string, item *queue.Item, requestID string) context.Context {

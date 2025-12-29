@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -60,6 +62,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
+	logDependencySnapshot(logger, cfg)
 	if err := ensureCurrentLogPointer(cfg.Paths.LogDir, logPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: unable to update spindle.log link: %v\n", err)
 	}
@@ -67,6 +70,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 		logging.RetentionTarget{Dir: cfg.Paths.LogDir, Pattern: "spindle-*.log", Exclude: []string{logPath}},
 		logging.RetentionTarget{Dir: cfg.Paths.LogDir, Pattern: "spindle-*.events", Exclude: []string{eventsPath}},
 		logging.RetentionTarget{Dir: filepath.Join(cfg.Paths.LogDir, "background"), Pattern: "*.log"},
+		logging.RetentionTarget{Dir: filepath.Join(cfg.Paths.LogDir, "tool"), Pattern: "*.log"},
 	)
 	pidPath := filepath.Join(cfg.Paths.LogDir, "spindle.pid")
 	if err := writePIDFile(pidPath); err != nil {
@@ -159,4 +163,35 @@ func writePIDFile(path string) error {
 	}
 	value := strconv.Itoa(os.Getpid()) + "\n"
 	return os.WriteFile(path, []byte(value), 0o644)
+}
+
+func logDependencySnapshot(logger *slog.Logger, cfg *config.Config) {
+	if logger == nil || cfg == nil {
+		return
+	}
+	makemkv := cfg.MakemkvBinary()
+	drapto := cfg.DraptoBinary()
+	ffprobe := cfg.FFprobeBinary()
+	logger.Info("dependency snapshot",
+		logging.String(logging.FieldEventType, "dependency_snapshot"),
+		logging.Bool("tmdb_key_present", strings.TrimSpace(cfg.TMDB.APIKey) != ""),
+		logging.Bool("makemkv_available", binaryAvailable(makemkv)),
+		logging.String("makemkv_binary", makemkv),
+		logging.Bool("drapto_available", binaryAvailable(drapto)),
+		logging.String("drapto_binary", drapto),
+		logging.Bool("ffprobe_available", binaryAvailable(ffprobe)),
+		logging.String("ffprobe_binary", ffprobe),
+		logging.Bool("opensubtitles_enabled", cfg.Subtitles.OpenSubtitlesEnabled),
+		logging.Bool("opensubtitles_key_present", strings.TrimSpace(cfg.Subtitles.OpenSubtitlesAPIKey) != ""),
+		logging.Bool("whisperx_cuda", cfg.Subtitles.WhisperXCUDAEnabled),
+		logging.String("whisperx_vad_method", strings.TrimSpace(cfg.Subtitles.WhisperXVADMethod)),
+	)
+}
+
+func binaryAvailable(name string) bool {
+	if strings.TrimSpace(name) == "" {
+		return false
+	}
+	_, err := exec.LookPath(name)
+	return err == nil
 }

@@ -28,6 +28,28 @@ const (
 	FieldCorrelationID = "correlation_id"
 	// FieldAlert flags warnings or anomalies that should stand out in structured logs.
 	FieldAlert = "alert"
+	// FieldProgressStage is the standardized key for progress stage labels.
+	FieldProgressStage = "progress_stage"
+	// FieldProgressPercent is the standardized key for progress percent (0-100).
+	FieldProgressPercent = "progress_percent"
+	// FieldProgressMessage is the standardized key for progress messages.
+	FieldProgressMessage = "progress_message"
+	// FieldProgressETA is the standardized key for progress ETA.
+	FieldProgressETA = "progress_eta"
+	// FieldDecisionType categorizes decision logs for filtering.
+	FieldDecisionType = "decision_type"
+	// FieldEventType categorizes lifecycle events (stage_start, stage_complete, status, etc.).
+	FieldEventType = "event_type"
+	// FieldErrorKind captures the error taxonomy (validation/config/external/etc.).
+	FieldErrorKind = "error_kind"
+	// FieldErrorOperation captures the failing operation name.
+	FieldErrorOperation = "error_operation"
+	// FieldErrorDetailPath points to additional diagnostics for an error.
+	FieldErrorDetailPath = "error_detail_path"
+	// FieldErrorCode captures stable error codes.
+	FieldErrorCode = "error_code"
+	// FieldErrorHint provides a short hint for recovery.
+	FieldErrorHint = "error_hint"
 )
 
 // ContextFields extracts standardized slog attributes from the provided context.

@@ -224,6 +224,11 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if correlationID == "" {
 		correlationID = strings.TrimSpace(query.Get("request"))
 	}
+	levelFilter := strings.TrimSpace(query.Get("level"))
+	alertFilter := strings.TrimSpace(query.Get("alert"))
+	decisionFilter := strings.TrimSpace(query.Get("decision_type"))
+	searchFilter := strings.TrimSpace(query.Get("search"))
+	searchFilterLower := strings.ToLower(searchFilter)
 	implicitForegroundOnly := lane == ""
 
 	var (
@@ -279,6 +284,18 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if correlationID != "" && !strings.EqualFold(correlationID, evt.CorrelationID) {
+			continue
+		}
+		if levelFilter != "" && !levelAllows(levelFilter, evt.Level) {
+			continue
+		}
+		if alertFilter != "" && !fieldEquals(evt.Fields, logging.FieldAlert, alertFilter) {
+			continue
+		}
+		if decisionFilter != "" && !fieldEquals(evt.Fields, logging.FieldDecisionType, decisionFilter) {
+			continue
+		}
+		if searchFilterLower != "" && !eventMatchesSearch(evt, searchFilterLower) {
 			continue
 		}
 		filtered = append(filtered, evt)
@@ -396,6 +413,75 @@ func convertLogEvents(events []logging.LogEvent) []api.LogEvent {
 		})
 	}
 	return out
+}
+
+func levelAllows(filter string, candidate string) bool {
+	filter = strings.ToUpper(strings.TrimSpace(filter))
+	candidate = strings.ToUpper(strings.TrimSpace(candidate))
+	if filter == "" {
+		return true
+	}
+	filterRank := levelRank(filter)
+	candidateRank := levelRank(candidate)
+	return candidateRank >= filterRank
+}
+
+func levelRank(level string) int {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "ERROR":
+		return 4
+	case "WARN", "WARNING":
+		return 3
+	case "INFO":
+		return 2
+	case "DEBUG":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func fieldEquals(fields map[string]string, key, target string) bool {
+	if len(fields) == 0 || key == "" {
+		return false
+	}
+	value, ok := fields[key]
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target))
+}
+
+func eventMatchesSearch(evt api.LogEvent, query string) bool {
+	if query == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(evt.Message), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(evt.Component), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(evt.Stage), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(evt.Lane), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(evt.CorrelationID), query) {
+		return true
+	}
+	for _, value := range evt.Fields {
+		if strings.Contains(strings.ToLower(value), query) {
+			return true
+		}
+	}
+	for _, detail := range evt.Details {
+		if strings.Contains(strings.ToLower(detail.Label), query) || strings.Contains(strings.ToLower(detail.Value), query) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *apiServer) writeJSON(w http.ResponseWriter, status int, payload any) {

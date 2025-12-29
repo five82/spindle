@@ -20,10 +20,17 @@ type prettyHandler struct {
 	groups    []string
 	addSource bool
 	infoCache map[string]map[string]string
+	msgCache  map[string]string
 }
 
 func newPrettyHandler(w io.Writer, lvl *slog.LevelVar, addSource bool) slog.Handler {
-	return &prettyHandler{writer: w, level: lvl, addSource: addSource, infoCache: make(map[string]map[string]string)}
+	return &prettyHandler{
+		writer:    w,
+		level:     lvl,
+		addSource: addSource,
+		infoCache: make(map[string]map[string]string),
+		msgCache:  make(map[string]string),
+	}
 }
 
 func (h *prettyHandler) Enabled(_ context.Context, level slog.Level) bool {
@@ -97,14 +104,19 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 }
 
 func (h *prettyHandler) writeInfo(buf *bytes.Buffer, ts time.Time, level slog.Level, component, lane, itemID, stage, message string, src *slog.Source, attrs []kv) {
-	writeLogHeader(buf, ts, level, component, lane, itemID, stage, message, h.addSource, src)
 	fields, hidden := selectInfoFields(attrs, 0, true)
 	summaryKey := infoSummaryKey(component, itemID, stage, attrs)
 	fields, hidden = h.filterRepeatedInfo(summaryKey, fields, hidden, level)
 	if len(fields) == 0 && hidden == 0 {
+		if h.shouldSuppressEmptyInfo(summaryKey, message) {
+			return
+		}
+		writeLogHeader(buf, ts, level, component, lane, itemID, stage, message, h.addSource, src)
 		buf.WriteByte('\n')
 		return
 	}
+	h.recordInfoMessage(summaryKey, message)
+	writeLogHeader(buf, ts, level, component, lane, itemID, stage, message, h.addSource, src)
 	buf.WriteByte('\n')
 	for _, field := range fields {
 		buf.WriteString("    - ")
@@ -226,6 +238,31 @@ func (h *prettyHandler) ensureInfoCache(key string) map[string]string {
 	return cache
 }
 
+func (h *prettyHandler) shouldSuppressEmptyInfo(key, message string) bool {
+	if key == "" {
+		key = strings.TrimSpace(message)
+		if key == "" {
+			return false
+		}
+	}
+	last, ok := h.msgCache[key]
+	if ok && last == message {
+		return true
+	}
+	h.msgCache[key] = message
+	return false
+}
+
+func (h *prettyHandler) recordInfoMessage(key, message string) {
+	if key == "" {
+		key = strings.TrimSpace(message)
+		if key == "" {
+			return
+		}
+	}
+	h.msgCache[key] = message
+}
+
 func (h *prettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	clone := h.clone()
 	clone.attrs = append(clone.attrs, attrs...)
@@ -244,6 +281,7 @@ func (h *prettyHandler) clone() *prettyHandler {
 		level:     h.level,
 		addSource: h.addSource,
 		infoCache: h.infoCache,
+		msgCache:  h.msgCache,
 	}
 	if len(h.attrs) > 0 {
 		clone.attrs = make([]slog.Attr, len(h.attrs))

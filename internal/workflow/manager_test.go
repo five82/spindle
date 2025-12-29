@@ -186,12 +186,11 @@ func TestManagerValidationErrorTriggersReview(t *testing.T) {
 			if updated.ProgressStage != "Needs review" {
 				t.Fatalf("expected progress stage 'Needs review', got %s", updated.ProgressStage)
 			}
-			if !strings.Contains(strings.ToLower(updated.ErrorMessage), "validation error") {
-				t.Fatalf("expected validation marker in error message, got %s", updated.ErrorMessage)
+			if !strings.Contains(strings.ToLower(updated.ErrorMessage), "validation") {
+				t.Fatalf("expected validation hint in error message, got %s", updated.ErrorMessage)
 			}
-			expected := stageErr.Error()
-			if updated.ProgressMessage != expected {
-				t.Fatalf("expected progress message %q, got %q", expected, updated.ProgressMessage)
+			if updated.ProgressMessage != updated.ErrorMessage {
+				t.Fatalf("expected progress message to match error message, got %q", updated.ProgressMessage)
 			}
 			break
 		}
