@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/mattn/go-isatty"
 )
@@ -25,7 +26,10 @@ const (
 	ansiBlue   = "\x1b[34m"
 )
 
-const statusLabelWidth = 20
+const (
+	statusLabelWidth = 20
+	statusIndent     = "  "
+)
 
 func renderStatusLine(label string, kind statusKind, message string, colorize bool) string {
 	statusText := statusKindLabel(kind)
@@ -34,7 +38,7 @@ func renderStatusLine(label string, kind statusKind, message string, colorize bo
 	} else {
 		statusText = fmt.Sprintf("[%s]", statusText)
 	}
-	base := fmt.Sprintf("%-*s %s", statusLabelWidth, label+":", statusText)
+	base := fmt.Sprintf("%s%-*s %s", statusIndent, statusLabelWidth, label+":", statusText)
 	if colorize {
 		if color := statusKindColor(kind); color != "" {
 			return color + base + ansiReset
@@ -69,6 +73,16 @@ func statusKindColor(kind statusKind) string {
 	default:
 		return ""
 	}
+}
+
+func renderSectionHeader(title string, colorize bool) []string {
+	line := fmt.Sprintf("== %s ==", strings.TrimSpace(title))
+	rule := strings.Repeat("-", len(line))
+	if colorize {
+		line = ansiBlue + line + ansiReset
+		rule = ansiBlue + rule + ansiReset
+	}
+	return []string{line, rule}
 }
 
 func shouldColorize(writer io.Writer) bool {

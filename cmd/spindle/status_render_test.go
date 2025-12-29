@@ -11,7 +11,7 @@ import (
 
 func TestRenderStatusLineNoColor(t *testing.T) {
 	got := renderStatusLine("Spindle", statusError, "Not running", false)
-	want := fmt.Sprintf("%-*s %s", statusLabelWidth, "Spindle:", "[ERROR] Not running")
+	want := fmt.Sprintf("%s%-*s %s", statusIndent, statusLabelWidth, "Spindle:", "[ERROR] Not running")
 	if got != want {
 		t.Fatalf("renderStatusLine mismatch\n got: %q\nwant: %q", got, want)
 	}
@@ -34,20 +34,23 @@ func TestDependencyLines(t *testing.T) {
 		{Name: "ntfy", Available: false, Optional: true, Detail: "not configured"},
 	}
 	lines := dependencyLines(deps, false)
-	if len(lines) != 4 {
-		t.Fatalf("expected 4 lines, got %d", len(lines))
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 lines, got %d", len(lines))
 	}
-	if !strings.Contains(lines[0], "[ERROR] not available") {
-		t.Fatalf("expected error detail in first line, got %q", lines[0])
+	if !strings.Contains(lines[0], "[ERROR]") || !strings.Contains(lines[0], "Summary") {
+		t.Fatalf("expected summary line first, got %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "[OK] Ready (command: drapto)") {
-		t.Fatalf("expected ready detail in second line, got %q", lines[1])
+	if !strings.Contains(lines[1], "[ERROR] not available") {
+		t.Fatalf("expected error detail in second line, got %q", lines[1])
 	}
-	if !strings.Contains(lines[2], "[WARN] not configured") {
-		t.Fatalf("expected warn detail in third line, got %q", lines[2])
+	if !strings.Contains(lines[2], "[OK] Ready (command: drapto)") {
+		t.Fatalf("expected ready detail in third line, got %q", lines[2])
 	}
-	if !strings.Contains(lines[3], "Missing dependencies:") {
-		t.Fatalf("expected missing dependencies summary, got %q", lines[3])
+	if !strings.Contains(lines[3], "[WARN] not configured") {
+		t.Fatalf("expected warn detail in fourth line, got %q", lines[3])
+	}
+	if !strings.Contains(lines[4], "Missing dependencies:") {
+		t.Fatalf("expected missing dependencies summary, got %q", lines[4])
 	}
 }
 

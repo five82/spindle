@@ -185,7 +185,9 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 
 			colorize := shouldColorize(stdout)
 
-			fmt.Fprintln(stdout, "System Status")
+			for _, line := range renderSectionHeader("System Status", colorize) {
+				fmt.Fprintln(stdout, line)
+			}
 			if statusResp.Running {
 				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusOK, "Running", colorize))
 			} else {
@@ -198,12 +200,19 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			} else {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusWarn, "Not configured", colorize))
 			}
+			fmt.Fprintln(stdout)
 
-			fmt.Fprintln(stdout, "Dependencies")
+			for _, line := range renderSectionHeader("Dependencies", colorize) {
+				fmt.Fprintln(stdout, line)
+			}
 			for _, line := range dependencyLines(statusResp.Dependencies, colorize) {
 				fmt.Fprintln(stdout, line)
 			}
+			fmt.Fprintln(stdout)
 
+			for _, line := range renderSectionHeader("Library Paths", colorize) {
+				fmt.Fprintln(stdout, line)
+			}
 			for _, dir := range []struct {
 				label string
 				path  string
@@ -216,7 +225,9 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			}
 
 			fmt.Fprintln(stdout)
-			fmt.Fprintln(stdout, "Queue Status")
+			for _, line := range renderSectionHeader("Queue Status", colorize) {
+				fmt.Fprintln(stdout, line)
+			}
 
 			rows := buildQueueStatusRows(queueStats)
 			if len(rows) == 0 {
@@ -237,7 +248,20 @@ func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
 	if len(deps) == 0 {
 		return nil
 	}
-	lines := make([]string, 0, len(deps))
+	lines := make([]string, 0, len(deps)+1)
+	missingRequired := 0
+	missingOptional := 0
+	for _, dep := range deps {
+		if dep.Available {
+			continue
+		}
+		if dep.Optional {
+			missingOptional++
+		} else {
+			missingRequired++
+		}
+	}
+	lines = append(lines, dependencySummaryLine(len(deps), missingRequired, missingOptional, colorize))
 	missing := make([]string, 0)
 	for _, dep := range deps {
 		if dep.Available {
@@ -260,12 +284,28 @@ func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
 		lines = append(lines, renderStatusLine(dep.Name, kind, detail, colorize))
 		missing = append(missing, dep.Name)
 	}
-	if len(missing) == 0 {
-		lines = append(lines, "Missing dependencies: none")
-	} else {
-		lines = append(lines, fmt.Sprintf("Missing dependencies: %s (see README.md for install steps)", strings.Join(missing, ", ")))
+	if len(missing) > 0 {
+		lines = append(lines, renderStatusLine("Missing dependencies", statusWarn, fmt.Sprintf("%s (see README.md for install steps)", strings.Join(missing, ", ")), colorize))
 	}
 	return lines
+}
+
+func dependencySummaryLine(total, missingRequired, missingOptional int, colorize bool) string {
+	if total <= 0 {
+		return renderStatusLine("Summary", statusInfo, "No dependency checks configured", colorize)
+	}
+	missingCount := missingRequired + missingOptional
+	available := total - missingCount
+	if missingCount == 0 {
+		return renderStatusLine("Summary", statusOK, fmt.Sprintf("%d/%d available", available, total), colorize)
+	}
+
+	kind := statusWarn
+	if missingRequired > 0 {
+		kind = statusError
+	}
+	detail := fmt.Sprintf("%d/%d available (missing: %d required, %d optional)", available, total, missingRequired, missingOptional)
+	return renderStatusLine("Summary", kind, detail, colorize)
 }
 
 func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
