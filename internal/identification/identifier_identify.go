@@ -118,6 +118,9 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 
 	if isPlaceholderTitle(input.Title, input.DiscLabel) {
 		logger.Info("tmdb lookup skipped for placeholder title",
+			logging.String(logging.FieldDecisionType, "tmdb_search"),
+			logging.String("decision_result", "skipped"),
+			logging.String("decision_reason", "placeholder_title"),
 			logging.String("title", input.Title),
 			logging.String("disc_label", input.DiscLabel),
 			logging.String("reason", "title is generic/placeholder; cannot perform meaningful search"))
@@ -149,7 +152,9 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		resp, mode, err := i.performTMDBSearch(ctx, logger, candidate, input.SearchOpts, input.MediaHint)
 		if err != nil {
 			searchErr = err
-			logger.Warn("tmdb search attempt failed", logging.String("query", candidate), logging.Error(err))
+			logger.Debug("tmdb search attempt failed",
+				logging.String("query", candidate),
+				logging.Error(err))
 			continue
 		}
 		response = resp
@@ -183,13 +188,21 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		tmdbDuration := time.Since(tmdbStart)
 		if searchErr != nil {
 			logger.Warn("tmdb search failed",
+				logging.String(logging.FieldDecisionType, "tmdb_search"),
+				logging.String("decision_result", "failed"),
+				logging.String("decision_reason", "search_error"),
 				logging.String("query", lastQuery),
 				logging.Error(searchErr),
+				logging.String("error_message", "TMDB search failed"),
+				logging.String(logging.FieldErrorHint, "Check TMDB API key, network connectivity, and search query"),
 				logging.Int("queries_attempted", queriesCount),
 				logging.Duration("total_tmdb_duration", tmdbDuration))
 			i.scheduleReview(ctx, item, "TMDB lookup failed")
 		} else {
 			logger.Warn("tmdb confidence scoring failed",
+				logging.String(logging.FieldDecisionType, "tmdb_confidence"),
+				logging.String("decision_result", "rejected"),
+				logging.String("decision_reason", "no_result_met_threshold"),
 				logging.String("query", lastQuery),
 				logging.String("reason", "No result met confidence threshold"),
 				logging.Int("queries_attempted", queriesCount),
@@ -312,6 +325,11 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 
 	logger.Info(
 		"disc identified",
+		logging.String(logging.FieldDecisionType, "tmdb_identification"),
+		logging.String("decision_result", "identified"),
+		logging.String("decision_reason", "tmdb_match"),
+		logging.String("decision_selected", fmt.Sprintf("%d:%s", best.ID, identifiedTitle)),
+		logging.String(logging.FieldEventType, "status"),
 		logging.Int64("tmdb_id", best.ID),
 		logging.String("identified_title", identifiedTitle),
 		logging.String("media_type", strings.TrimSpace(best.MediaType)),

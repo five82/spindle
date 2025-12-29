@@ -29,6 +29,8 @@ func (i *Identifier) handleDuplicateFingerprint(ctx context.Context, item *queue
 	if found != nil && found.ID != item.ID {
 		logger.Info(
 			"duplicate disc fingerprint detected",
+			logging.String(logging.FieldDecisionType, "duplicate_fingerprint"),
+			logging.String("decision_result", "review_required"),
 			logging.Int64("existing_item_id", found.ID),
 			logging.String("fingerprint", item.DiscFingerprint),
 		)
@@ -46,6 +48,9 @@ func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message s
 	logger := logging.WithContext(ctx, i.logger).With(logging.Int64(logging.FieldItemID, item.ID))
 	logger.Warn(
 		"flagging queue item for review",
+		logging.String(logging.FieldEventType, "review"),
+		logging.String(logging.FieldDecisionType, "review"),
+		logging.String("decision_result", "review_required"),
 		logging.String("reason", message),
 		logging.Bool("immediate", immediate),
 		logging.Alert("review"),

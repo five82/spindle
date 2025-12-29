@@ -85,7 +85,8 @@ func (i *Identifier) SetLogger(logger *slog.Logger) {
 func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, i.logger)
 	item.InitProgress("Identifying", "Fetching metadata")
-	logger.Debug("starting disc identification")
+	logger.Info("identification stage started",
+		logging.String(logging.FieldEventType, "stage_start"))
 
 	if i.notifier != nil && strings.TrimSpace(item.SourcePath) == "" {
 		title := strings.TrimSpace(item.DiscTitle)
@@ -96,7 +97,9 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 			"discTitle": title,
 			"discType":  "unknown",
 		}); err != nil {
-			logger.Debug("disc detected notification failed", logging.Error(err))
+			logger.Debug("disc detected notification failed",
+				logging.String("error_message", "Unable to send disc detected notification"),
+				logging.Error(err))
 		}
 	}
 	return nil
@@ -128,16 +131,22 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 				logging.Error(err),
 				logging.String("fingerprint", item.DiscFingerprint),
 				logging.String("disc_id", discID),
-				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
+				logging.Duration("lookup_duration", time.Since(overrideLookupStart)),
+				logging.String("error_message", "Failed to search identification overrides"),
+				logging.String(logging.FieldErrorHint, "Check override file path and JSON formatting"))
 		} else if ok {
 			overrideMatch = &match
 			logger.Info("identification override matched",
+				logging.String(logging.FieldDecisionType, "identification_override"),
+				logging.String("decision_result", "matched"),
 				logging.String("override_title", match.Title),
 				logging.Int64("override_tmdb_id", match.TMDBID),
-				logging.String("reason", "manual override configured for fingerprint/disc_id"),
+				logging.String("decision_reason", "manual override configured for fingerprint/disc_id"),
 				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
 		} else {
 			logger.Debug("no override match found",
+				logging.String(logging.FieldDecisionType, "identification_override"),
+				logging.String("decision_result", "no_match"),
 				logging.String("fingerprint", item.DiscFingerprint),
 				logging.String("disc_id", discID),
 				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
@@ -161,15 +170,20 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 				logger.Warn("keydb lookup failed",
 					logging.String("disc_id", discID),
 					logging.Error(err),
-					logging.Duration("lookup_duration", keydbLookupDuration))
+					logging.Duration("lookup_duration", keydbLookupDuration),
+					logging.String("error_message", "Failed to query keydb catalog"),
+					logging.String(logging.FieldErrorHint, "Verify keydb path and refresh connectivity"))
 			} else if found {
 				keydbTitle := strings.TrimSpace(entry.Title)
 				if keydbTitle != "" {
 					logger.Info("title updated from keydb",
+						logging.String(logging.FieldDecisionType, "title_source"),
+						logging.String("decision_result", "updated"),
+						logging.String("decision_reason", "keydb contains authoritative title for disc_id"),
+						logging.String("decision_selected", keydbTitle),
 						logging.String("disc_id", discID),
 						logging.String("original_title", title),
 						logging.String("new_title", keydbTitle),
-						logging.String("reason", "keydb contains authoritative title for disc_id"),
 						logging.Duration("lookup_duration", keydbLookupDuration))
 					title = keydbTitle
 					item.DiscTitle = title
@@ -204,6 +218,10 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		bestTitle := determineBestTitle(title, scanResult)
 		if bestTitle != title {
 			logger.Info("title updated based on priority sources",
+				logging.String(logging.FieldDecisionType, "title_source"),
+				logging.String("decision_result", "updated"),
+				logging.String("decision_reason", "priority_source"),
+				logging.String("decision_selected", bestTitle),
 				logging.String("original_title", title),
 				logging.String("new_title", bestTitle),
 				logging.String("source", detectTitleSource(bestTitle, scanResult)))
@@ -308,7 +326,10 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		if encoded, err := json.Marshal(metadata); err == nil {
 			item.MetadataJSON = string(encoded)
 		} else {
-			logger.Warn("failed to encode fallback metadata", logging.Error(err))
+			logger.Warn("failed to encode fallback metadata",
+				logging.Error(err),
+				logging.String("error_message", "Fallback metadata could not be serialized"),
+				logging.String(logging.FieldErrorHint, "Retry identification or report JSON encoding issue"))
 		}
 	}
 
@@ -325,6 +346,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			logger.Warn(
 				"scanner fingerprint missing; using queue fingerprint",
 				logging.String("fallback_fingerprint", fallback),
+				logging.String(logging.FieldErrorHint, "Run identification again after confirming MakeMKV can read the disc"),
 			)
 			ripFingerprint = fallback
 		}
@@ -350,6 +372,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if !identified {
 		logger.Info(
 			"prepared unidentified rip specification",
+			logging.String(logging.FieldDecisionType, "identification_outcome"),
+			logging.String("decision_result", "unidentified"),
 			logging.Int("title_count", len(titleSpecs)),
 			logging.String("content_key", contentKey),
 		)

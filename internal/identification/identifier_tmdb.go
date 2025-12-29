@@ -28,6 +28,8 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 		logging.Int("runtime_minutes", opts.Runtime),
 		logging.String("runtime_range", fmt.Sprintf("%d-%d", opts.Runtime-10, opts.Runtime+10)),
 		logging.String(logging.FieldDecisionType, "tmdb_search"),
+		logging.String("decision_result", "planned"),
+		logging.String("decision_reason", fmt.Sprintf("media_hint=%s", hint.String())),
 	)
 	for _, mode := range orders {
 		logger.Debug("tmdb query details",
@@ -40,7 +42,12 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 		resp, err := i.tmdb.search(ctx, title, opts, mode)
 		if err != nil {
 			lastErr = err
-			logger.Warn("tmdb search attempt failed", logging.String("mode", string(mode)), logging.Error(err))
+			logger.Warn("tmdb search attempt failed",
+				logging.String("mode", string(mode)),
+				logging.String("query", title),
+				logging.Error(err),
+				logging.String("error_message", "TMDB search attempt failed"),
+				logging.String(logging.FieldErrorHint, "Verify TMDB credentials and retry"))
 			continue
 		}
 		if resp != nil {
@@ -77,7 +84,9 @@ func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, 
 		return nil, nil
 	}
 	if i.tmdbInfo == nil {
-		logger.Warn("tmdb season lookup unavailable", logging.String("reason", "tmdb client missing"))
+		logger.Warn("tmdb season lookup unavailable",
+			logging.String("reason", "tmdb client missing"),
+			logging.String(logging.FieldErrorHint, "Check TMDB client initialization"))
 		return nil, nil
 	}
 	season, err := i.tmdbInfo.GetSeasonDetails(ctx, tmdbID, seasonNumber)
@@ -85,13 +94,16 @@ func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, 
 		logger.Warn("tmdb season lookup failed",
 			logging.Int64("tmdb_id", tmdbID),
 			logging.Int("season", seasonNumber),
-			logging.Error(err))
+			logging.Error(err),
+			logging.String("error_message", "Failed to fetch TMDB season details"),
+			logging.String(logging.FieldErrorHint, "Verify TMDB connectivity and API key"))
 		return nil, nil
 	}
 	if season == nil || len(season.Episodes) == 0 {
 		logger.Info("tmdb season lookup returned no episodes",
 			logging.Int64("tmdb_id", tmdbID),
-			logging.Int("season", seasonNumber))
+			logging.Int("season", seasonNumber),
+			logging.String("reason", "season has no episodes"))
 		return nil, nil
 	}
 	matches, numbers := mapEpisodesToTitles(scanResult.Titles, season.Episodes, discNumber)

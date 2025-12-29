@@ -43,7 +43,9 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 // scanDiscAndCaptureFingerprint scans the disc, captures the fingerprint, and handles duplicates.
 func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *queue.Item, logger *slog.Logger) (*disc.ScanResult, int, error) {
 	device := strings.TrimSpace(i.cfg.MakeMKV.OpticalDrive)
-	logger.Info("scanning disc with makemkv", logging.String("device", device))
+	logger.Info("scanning disc with makemkv",
+		logging.String("device", device),
+		logging.String(logging.FieldEventType, "scan_start"))
 	scanStart := time.Now()
 
 	scanResult, err := i.scanDisc(ctx)
@@ -73,7 +75,12 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 			if discID := strings.TrimSpace(scanResult.BDInfo.DiscID); discID != "" {
 				scannerFingerprint = strings.ToUpper(discID)
 				scanResult.Fingerprint = scannerFingerprint
-				logger.Info("using bd_info disc id as fingerprint", logging.String("fingerprint", scannerFingerprint))
+				logger.Info("using bd_info disc id as fingerprint",
+					logging.String(logging.FieldDecisionType, "fingerprint_source"),
+					logging.String("decision_result", "selected"),
+					logging.String("decision_reason", "bd_info_disc_id_available"),
+					logging.String("decision_selected", scannerFingerprint),
+					logging.String("fingerprint", scannerFingerprint))
 			}
 		}
 	}
@@ -91,7 +98,9 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 		logger.Debug("scanner fingerprint unavailable; retaining existing fingerprint",
 			logging.String("fingerprint", trimmed))
 	} else {
-		logger.Warn("scanner fingerprint unavailable and queue fingerprint missing")
+		logger.Warn("scanner fingerprint unavailable and queue fingerprint missing",
+			logging.String("error_message", "Disc fingerprint missing after MakeMKV scan"),
+			logging.String(logging.FieldErrorHint, "Confirm the disc is readable and rerun identification"))
 	}
 
 	scanSummary := []logging.Attr{
@@ -103,6 +112,7 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 	if fp := strings.TrimSpace(item.DiscFingerprint); fp != "" {
 		scanSummary = append(scanSummary, logging.String("fingerprint", fp))
 	}
+	scanSummary = append(scanSummary, logging.String(logging.FieldEventType, "scan_complete"))
 	logger.Info("disc scan completed", logging.Args(scanSummary...)...)
 
 	return scanResult, titleCount, nil

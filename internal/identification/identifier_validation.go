@@ -18,7 +18,12 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 	logger := logging.WithContext(ctx, i.logger)
 	fingerprint := strings.TrimSpace(item.DiscFingerprint)
 	if fingerprint == "" {
-		logger.Error("identification validation failed", logging.String("reason", "missing fingerprint"))
+		logger.Error("identification validation failed",
+			logging.String("reason", "missing fingerprint"),
+			logging.String(logging.FieldErrorKind, string(services.ErrorKindValidation)),
+			logging.String(logging.FieldErrorOperation, "validate fingerprint"),
+			logging.String("error_message", "Disc fingerprint missing after identification"),
+			logging.String(logging.FieldErrorHint, "Rerun identification to capture MakeMKV scan results"))
 		return services.Wrap(
 			services.ErrValidation,
 			"identification",
@@ -30,7 +35,12 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 
 	ripSpecRaw := strings.TrimSpace(item.RipSpecData)
 	if ripSpecRaw == "" {
-		logger.Error("identification validation failed", logging.String("reason", "missing rip spec"))
+		logger.Error("identification validation failed",
+			logging.String("reason", "missing rip spec"),
+			logging.String(logging.FieldErrorKind, string(services.ErrorKindValidation)),
+			logging.String(logging.FieldErrorOperation, "validate rip spec"),
+			logging.String("error_message", "Rip specification missing after identification"),
+			logging.String(logging.FieldErrorHint, "Rerun identification to rebuild the rip spec"))
 		return services.Wrap(
 			services.ErrValidation,
 			"identification",
@@ -42,7 +52,13 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 
 	spec, err := ripspec.Parse(ripSpecRaw)
 	if err != nil {
-		logger.Error("identification validation failed", logging.String("reason", "invalid rip spec"), logging.Error(err))
+		logger.Error("identification validation failed",
+			logging.String("reason", "invalid rip spec"),
+			logging.Error(err),
+			logging.String(logging.FieldErrorKind, string(services.ErrorKindValidation)),
+			logging.String(logging.FieldErrorOperation, "parse rip spec"),
+			logging.String("error_message", "Rip specification JSON failed to parse"),
+			logging.String(logging.FieldErrorHint, "Rerun identification to regenerate the rip spec"))
 		return services.Wrap(
 			services.ErrValidation,
 			"identification",
@@ -57,6 +73,10 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 			logging.String("reason", "fingerprint mismatch"),
 			logging.String("item_fingerprint", fingerprint),
 			logging.String("spec_fingerprint", specFingerprint),
+			logging.String(logging.FieldErrorKind, string(services.ErrorKindValidation)),
+			logging.String(logging.FieldErrorOperation, "validate rip spec fingerprint"),
+			logging.String("error_message", "Rip specification fingerprint does not match queue item"),
+			logging.String(logging.FieldErrorHint, "Rerun identification to regenerate the rip spec"),
 		)
 		return services.Wrap(
 			services.ErrValidation,
@@ -83,6 +103,7 @@ func (i *Identifier) validateIdentification(ctx context.Context, item *queue.Ite
 func (i *Identifier) logStageSummary(ctx context.Context, item *queue.Item, stageStart time.Time, identified bool, titleCount int, tmdbID int64, mediaType string) {
 	logger := logging.WithContext(ctx, i.logger)
 	attrs := []logging.Attr{
+		logging.String(logging.FieldEventType, "stage_complete"),
 		logging.Duration("stage_duration", time.Since(stageStart)),
 		logging.Bool("identified", identified),
 		logging.Int("titles_scanned", titleCount),
