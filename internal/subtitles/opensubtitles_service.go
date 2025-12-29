@@ -150,9 +150,9 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 
 	for idx, candidate := range scored {
 		result, err := s.downloadAndAlignCandidate(ctx, plan, req, candidate.subtitle)
-		
+
 		status := "Rejected"
-		reason := "unknown"
+		var reason string
 		details := ""
 
 		if err != nil {
@@ -174,14 +174,14 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 
 		// Build summary line for this candidate
 		factors := strings.Join(candidate.reasons, ", ")
-		line := fmt.Sprintf("#%d (Score: %.1f): %s (%s)%s [Lang: %s, DLs: %d, Rel: %s] {%s}", 
-			idx+1, 
-			candidate.score, 
-			status, 
+		line := fmt.Sprintf("#%d (Score: %.1f): %s (%s)%s [Lang: %s, DLs: %d, Rel: %s] {%s}",
+			idx+1,
+			candidate.score,
+			status,
 			reason,
-			details, 
-			candidate.subtitle.Language, 
-			candidate.subtitle.Downloads, 
+			details,
+			candidate.subtitle.Language,
+			candidate.subtitle.Downloads,
 			strings.TrimSpace(candidate.subtitle.Release),
 			factors,
 		)
