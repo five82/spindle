@@ -135,6 +135,8 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	decisions := make([]Decision, 0, len(candidates))
 	indices := make([]int, 0)
 	candidateIndices := make([]int, 0, len(candidates))
+	prefilterRejections := make([]string, 0)
+	prefilterReasonCounts := make(map[string]int)
 	for _, decision := range prefilter {
 		logger.Debug("commentary candidate evaluated",
 			logging.Int("stream_index", decision.Index),
@@ -147,6 +149,14 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			logging.Bool("metadata_positive", decision.MetadataPositive),
 			logging.String("metadata_negative", decision.MetadataNegative),
 		)
+		if !decision.Candidate {
+			reason := strings.TrimSpace(decision.Reason)
+			if reason == "" {
+				reason = "unknown"
+			}
+			prefilterReasonCounts[reason]++
+			prefilterRejections = append(prefilterRejections, formatPrefilterSummary(decision, reason))
+		}
 		if decision.Candidate {
 			candidateIndices = append(candidateIndices, decision.Index)
 		}
@@ -261,6 +271,8 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 		logging.Int("candidate_count", len(candidateIndices)),
 		logging.Any("decisions", summaryLines),
 		logging.Any("reason_counts", reasonCounts),
+		logging.Any("prefilter_rejections", prefilterRejections),
+		logging.Any("prefilter_reason_counts", prefilterReasonCounts),
 		logging.Group("thresholds",
 			logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
 			logging.Float64("speech_ratio_max_music", settings.SpeechRatioMaxMusic),
@@ -306,6 +318,36 @@ func formatDecisionSummary(decision Decision, reason string) string {
 	}
 
 	return fmt.Sprintf("#%d (%s): %s (%s)%s", decision.Index, lang, status, reason, details)
+}
+
+func formatPrefilterSummary(decision candidateDecision, reason string) string {
+	status := "Rejected"
+	if decision.Candidate {
+		status = "Candidate"
+	}
+	lang := decision.Language
+	if lang == "" {
+		lang = "und"
+	}
+	title := strings.TrimSpace(decision.Title)
+	if title == "" {
+		title = "untitled"
+	}
+	durationLabel := ""
+	if decision.Duration > 0 {
+		durationLabel = fmt.Sprintf("%.0fs", decision.Duration)
+	} else {
+		durationLabel = "unknown"
+	}
+	return fmt.Sprintf("#%d (%s): %s (%s) [Channels: %d, Duration: %s, Title: %s]",
+		decision.Index,
+		lang,
+		status,
+		reason,
+		decision.Channels,
+		durationLabel,
+		title,
+	)
 }
 
 type candidate struct {

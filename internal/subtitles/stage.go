@@ -219,12 +219,14 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			}
 		}
 		if s.logger != nil {
-			s.logger.Debug("subtitle generation complete",
+			s.logger.Info("subtitle generation decision",
+				logging.String("episode_key", episodeKey),
 				logging.String("source", target.SourcePath),
 				logging.String("subtitle", result.SubtitlePath),
 				logging.Int("segments", result.SegmentCount),
 				logging.String("subtitle_source", result.Source),
 				logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
+				logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
 			)
 		}
 		if hasRipSpec {
