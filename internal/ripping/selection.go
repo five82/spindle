@@ -1,152 +1,222 @@
 package ripping
 
 import (
-	"bufio"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+
+	"log/slog"
+
+	"spindle/internal/logging"
+	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 )
 
-const audioSelectionRule = "-sel:all,+sel:video,+sel:audio,-sel:subtitle"
+const (
+	minPrimaryRuntimeSeconds = 20 * 60
+	durationToleranceSeconds = 2
+)
 
-func ensureMakeMKVSelectionRule() error {
-	settingsPath, err := resolveMakeMKVSettingsPath()
-	if err != nil {
-		return err
-	}
-	return applyMakeMKVSelectionRule(settingsPath, audioSelectionRule)
-}
-
-func resolveMakeMKVSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home directory: %w", err)
-	}
-	if strings.TrimSpace(home) == "" {
-		return "", errors.New("resolve home directory: empty path")
-	}
-	return filepath.Join(home, ".MakeMKV", "settings.conf"), nil
-}
-
-func applyMakeMKVSelectionRule(path, rule string) error {
-	if strings.TrimSpace(path) == "" {
-		return errors.New("settings path is empty")
-	}
-	if strings.TrimSpace(rule) == "" {
-		return errors.New("selection rule is empty")
-	}
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create settings directory: %w", err)
-	}
-
-	existing, order, err := readMakeMKVSettings(path)
-	if err != nil {
-		return err
-	}
-
-	if existing["app_DefaultSelectionString"] == rule {
+func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
+	if item == nil {
 		return nil
 	}
-
-	existing["app_DefaultSelectionString"] = rule
-	if !containsKey(order, "app_DefaultSelectionString") {
-		order = append(order, "app_DefaultSelectionString")
+	raw := strings.TrimSpace(item.RipSpecData)
+	if raw == "" {
+		return nil
 	}
-
-	return writeMakeMKVSettings(path, existing, order)
-}
-
-func readMakeMKVSettings(path string) (map[string]string, []string, error) {
-	settings := make(map[string]string)
-	order := make([]string, 0)
-
-	file, err := os.Open(path)
+	env, err := ripspec.Parse(raw)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return settings, order, nil
+		if logger != nil {
+			logger.Debug("failed to parse rip spec", logging.Error(err))
 		}
-		return nil, nil, fmt.Errorf("open settings: %w", err)
+		return nil
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	mediaType := strings.ToLower(strings.TrimSpace(fmt.Sprint(env.Metadata["media_type"])))
+	if mediaType == "tv" {
+		ids := uniqueEpisodeTitleIDs(env)
+		if len(ids) == 0 {
+			return nil
 		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		value = strings.Trim(value, "\"")
-		settings[key] = value
-		if !containsKey(order, key) {
-			order = append(order, key)
-		}
+		sort.Ints(ids)
+		return ids
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, nil, fmt.Errorf("read settings: %w", err)
-	}
-	return settings, order, nil
-}
-
-func writeMakeMKVSettings(path string, kv map[string]string, order []string) error {
-	keys := make([]string, 0, len(kv))
-	keys = append(keys, order...)
-	for key := range kv {
-		if !containsKey(keys, key) {
-			keys = append(keys, key)
+	if selection, ok := ChoosePrimaryTitle(env.Titles); ok {
+		if logger != nil {
+			_, _, candidates, rejects := PrimaryTitleDecisionSummary(env.Titles)
+			logger.Info(
+				"primary title decision",
+				logging.String(logging.FieldDecisionType, "primary_title"),
+				logging.String("decision_result", "selected"),
+				logging.String("decision_selected", fmt.Sprintf("%d:%ds", selection.ID, selection.Duration)),
+				logging.Any("decision_candidates", candidates),
+				logging.Any("decision_rejects", rejects),
+				logging.Int("title_id", selection.ID),
+				logging.Int("duration_seconds", selection.Duration),
+				logging.String("title_name", strings.TrimSpace(selection.Name)),
+			)
 		}
-	}
-	// ensure deterministic order when file previously empty
-	dedup := make([]string, 0, len(keys))
-	seen := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		dedup = append(dedup, key)
-	}
-	if len(order) == 0 {
-		sort.Strings(dedup)
-	}
-
-	builder := &strings.Builder{}
-	builder.WriteString("# MakeMKV settings file (managed by Spindle)\n")
-	for _, key := range dedup {
-		value := kv[key]
-		if _, err := fmt.Fprintf(builder, "%s = \"%s\"\n", key, escapeQuotes(value)); err != nil {
-			return fmt.Errorf("write selection rule: %w", err)
-		}
-	}
-
-	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
-		return fmt.Errorf("write settings: %w", err)
+		return []int{selection.ID}
 	}
 	return nil
 }
 
-func escapeQuotes(value string) string {
-	return strings.ReplaceAll(value, "\"", "\\\"")
-}
+// ChoosePrimaryTitle exposes the selector for other packages (e.g. logging during identification).
+func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
+	if len(titles) == 0 {
+		return ripspec.Title{}, false
+	}
 
-func containsKey(slice []string, key string) bool {
-	for _, item := range slice {
-		if item == key {
-			return true
+	candidates := make([]ripspec.Title, 0, len(titles))
+	for _, t := range titles {
+		if t.ID < 0 || t.Duration <= 0 {
+			continue
+		}
+		candidates = append(candidates, t)
+	}
+	if len(candidates) == 0 {
+		return ripspec.Title{}, false
+	}
+
+	// Prefer feature-length runtimes within a small tolerance window.
+	maxDuration := 0
+	for _, t := range candidates {
+		if t.Duration > maxDuration {
+			maxDuration = t.Duration
 		}
 	}
-	return false
+	window := make([]ripspec.Title, 0, len(candidates))
+	for _, t := range candidates {
+		if t.Duration >= maxDuration-durationToleranceSeconds {
+			window = append(window, t)
+		}
+	}
+	featureLength := window
+	tmp := make([]ripspec.Title, 0, len(window))
+	for _, t := range window {
+		if t.Duration >= minPrimaryRuntimeSeconds {
+			tmp = append(tmp, t)
+		}
+	}
+	if len(tmp) > 0 {
+		featureLength = tmp
+	}
+
+	// Prefer titles with chapter metadata.
+	withChapters := bestByInt(featureLength, func(t ripspec.Title) int { return t.Chapters })
+	if len(withChapters) > 0 {
+		featureLength = withChapters
+	}
+
+	// Prefer MPLS playlists over raw M2TS entries.
+	mplsOnly := make([]ripspec.Title, 0, len(featureLength))
+	for _, t := range featureLength {
+		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(t.Playlist)), ".mpls") {
+			mplsOnly = append(mplsOnly, t)
+		}
+	}
+	if len(mplsOnly) > 0 {
+		featureLength = mplsOnly
+	}
+
+	// Prefer playlists with more segments (helps dodge dummy/short playlists).
+	withSegments := bestByInt(featureLength, func(t ripspec.Title) int { return t.SegmentCount })
+	if len(withSegments) > 0 {
+		featureLength = withSegments
+	}
+
+	// Prefer the most common fingerprint if duplicates exist.
+	fingerprintFreq := make(map[string]int)
+	for _, t := range titles {
+		fp := strings.TrimSpace(t.ContentFingerprint)
+		if fp != "" {
+			fingerprintFreq[fp]++
+		}
+	}
+	bestFreq := 0
+	for _, t := range featureLength {
+		if freq := fingerprintFreq[strings.TrimSpace(t.ContentFingerprint)]; freq > bestFreq {
+			bestFreq = freq
+		}
+	}
+	if bestFreq > 1 {
+		filtered := make([]ripspec.Title, 0, len(featureLength))
+		for _, t := range featureLength {
+			if fingerprintFreq[strings.TrimSpace(t.ContentFingerprint)] == bestFreq {
+				filtered = append(filtered, t)
+			}
+		}
+		if len(filtered) > 0 {
+			featureLength = filtered
+		}
+	}
+
+	sort.Slice(featureLength, func(i, j int) bool {
+		left := featureLength[i]
+		right := featureLength[j]
+		if left.Duration == right.Duration {
+			return left.ID < right.ID
+		}
+		return left.Duration > right.Duration
+	})
+	return featureLength[0], true
+}
+
+// PrimaryTitleDecisionSummary returns the primary selection plus candidate and rejection summaries.
+func PrimaryTitleDecisionSummary(titles []ripspec.Title) (ripspec.Title, bool, []string, []string) {
+	selection, ok := ChoosePrimaryTitle(titles)
+	candidates := make([]string, 0, len(titles))
+	rejects := make([]string, 0)
+	for _, t := range titles {
+		if t.ID < 0 {
+			rejects = append(rejects, fmt.Sprintf("%d:invalid_id", t.ID))
+			continue
+		}
+		if t.Duration <= 0 {
+			rejects = append(rejects, fmt.Sprintf("%d:duration<=0", t.ID))
+			continue
+		}
+		candidates = append(candidates, fmt.Sprintf("%d:%ds ch=%d seg=%d playlist=%s", t.ID, t.Duration, t.Chapters, t.SegmentCount, strings.TrimSpace(t.Playlist)))
+	}
+	sort.Strings(candidates)
+	sort.Strings(rejects)
+	return selection, ok, candidates, rejects
+}
+
+func bestByInt(list []ripspec.Title, score func(ripspec.Title) int) []ripspec.Title {
+	best := 0
+	for _, t := range list {
+		if v := score(t); v > best {
+			best = v
+		}
+	}
+	if best == 0 {
+		return nil
+	}
+	out := make([]ripspec.Title, 0, len(list))
+	for _, t := range list {
+		if score(t) == best {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func uniqueEpisodeTitleIDs(env ripspec.Envelope) []int {
+	if len(env.Episodes) == 0 {
+		return nil
+	}
+	seen := make(map[int]struct{}, len(env.Episodes))
+	ids := make([]int, 0, len(env.Episodes))
+	for _, episode := range env.Episodes {
+		if episode.TitleID < 0 {
+			continue
+		}
+		if _, ok := seen[episode.TitleID]; ok {
+			continue
+		}
+		seen[episode.TitleID] = struct{}{}
+		ids = append(ids, episode.TitleID)
+	}
+	return ids
 }
