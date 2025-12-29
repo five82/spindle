@@ -3,6 +3,7 @@ package subtitles
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"spindle/internal/logging"
@@ -140,75 +141,69 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		return GenerateResult{}, false, nil
 	}
 
-	if s.logger != nil {
-		limit := len(scored)
-		if limit > 5 {
-			limit = 5
-		}
-		for idx := 0; idx < limit; idx++ {
-			s.logger.Debug("opensubtitles candidate ranked",
-				logging.Int("rank", idx+1),
-				logging.String("language", scored[idx].subtitle.Language),
-				logging.Int("downloads", scored[idx].subtitle.Downloads),
-				logging.Bool("ai_translated", scored[idx].subtitle.AITranslated),
-				logging.String("release", scored[idx].subtitle.Release),
-				logging.Float64("score", scored[idx].score),
-				logging.String("score_reasons", strings.Join(scored[idx].reasons, ",")),
-			)
-		}
-	}
-
 	var (
 		lastErr       error
 		mismatchErrs  []durationMismatchError
 		allDurationMM = true
+		summaryLines  []string
 	)
+
 	for idx, candidate := range scored {
 		result, err := s.downloadAndAlignCandidate(ctx, plan, req, candidate.subtitle)
+		
+		status := "Rejected"
+		reason := "unknown"
+		details := ""
+
 		if err != nil {
 			lastErr = err
 			var mismatch durationMismatchError
 			if errors.As(err, &mismatch) {
 				mismatchErrs = append(mismatchErrs, mismatch)
+				reason = "duration_mismatch"
+				details = fmt.Sprintf(" [Diff: %.1fs]", mismatch.deltaSeconds)
 			} else {
 				allDurationMM = false
+				reason = "download_or_align_failed"
+				details = fmt.Sprintf(" [%v]", err)
 			}
+		} else {
+			status = "Selected"
+			reason = "best_match"
+		}
+
+		// Build summary line for this candidate
+		line := fmt.Sprintf("#%d (Score: %.1f): %s (%s) [Language: %s, Downloads: %d, Release: %s]%s", 
+			idx+1, 
+			candidate.score, 
+			status, 
+			reason, 
+			candidate.subtitle.Language, 
+			candidate.subtitle.Downloads, 
+			strings.TrimSpace(candidate.subtitle.Release),
+			details,
+		)
+		summaryLines = append(summaryLines, line)
+
+		if err == nil {
+			// Success
 			if s.logger != nil {
-				isSoft := errors.As(err, &mismatch)
-				if isSoft {
-					s.logger.Debug("opensubtitles candidate failed (soft)",
-						logging.Error(err),
-						logging.Int("rank", idx+1),
-						logging.String("language", candidate.subtitle.Language),
-						logging.String("release", candidate.subtitle.Release),
-						logging.Float64("score", candidate.score),
-						logging.Bool("soft_reject", true),
-					)
-				} else {
-					s.logger.Warn("opensubtitles candidate failed",
-						logging.Error(err),
-						logging.Int("rank", idx+1),
-						logging.String("language", candidate.subtitle.Language),
-						logging.String("release", candidate.subtitle.Release),
-						logging.Float64("score", candidate.score),
-						logging.Bool("soft_reject", false),
-					)
-				}
+				s.logger.Info("opensubtitles candidate summary",
+					logging.String("decision", "selected"),
+					logging.Int("candidate_count", len(scored)),
+					logging.Any("decisions", summaryLines),
+				)
 			}
-			continue
+			return result, true, nil
 		}
-		if s.logger != nil {
-			s.logger.Debug("opensubtitles candidate selected",
-				logging.Int("rank", idx+1),
-				logging.String("release", strings.TrimSpace(candidate.subtitle.Release)),
-				logging.String("language", candidate.subtitle.Language),
-				logging.Int("downloads", candidate.subtitle.Downloads),
-				logging.Bool("ai_translated", candidate.subtitle.AITranslated),
-				logging.Float64("score", candidate.score),
-				logging.String("score_reasons", strings.Join(candidate.reasons, ",")),
-			)
-		}
-		return result, true, nil
+	}
+
+	if s.logger != nil {
+		s.logger.Info("opensubtitles candidate summary",
+			logging.String("decision", "failed"),
+			logging.Int("candidate_count", len(scored)),
+			logging.Any("decisions", summaryLines),
+		)
 	}
 
 	if lastErr != nil {
