@@ -123,7 +123,7 @@ ideas.
 | Inspect item detail | `spindle queue show <id>` (includes episode-by-episode progress) |
 | Clean up | `spindle queue clear --completed`, `spindle cache prune` |
 | Retry work | `spindle queue retry <id>`, `spindle queue reset-stuck` |
-| Utilities | `spindle gensubtitle`, `spindle cache stats`, `spindle test-notify` |
+| Utilities | `spindle gensubtitle`, `spindle cache rip`, `spindle cache stats`, `spindle test-notify` |
 
 The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
 `docs/api.md`.

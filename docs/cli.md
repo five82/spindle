@@ -38,6 +38,7 @@ spindle queue retry <id...>         # retry one or more items
 
 ```bash
 spindle gensubtitle /path/to/video.mkv  # regenerate subtitles (add --forceai)
+spindle cache rip                       # rip a disc directly into the cache
 spindle cache stats                     # inspect rip cache usage
 spindle cache prune                     # force cache cleanup
 spindle test-notify                     # send a test ntfy message

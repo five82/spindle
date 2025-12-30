@@ -23,12 +23,14 @@ The rip cache stores MakeMKV output between ripping and encoding stages.
 Spindle automatically manages cache size and free space during normal operation.
 
 Commands:
+  rip     - Rip a disc into the rip cache
   stats   - Show all cached entries with their sizes and ages
   commentary - Run commentary detection on a cached rip file
   remove  - Remove a specific entry by number (see 'stats' for numbers)
   clear   - Remove all cached entries`,
 	}
 
+	cacheCmd.AddCommand(newCacheRipCommand(ctx))
 	cacheCmd.AddCommand(newCacheStatsCommand(ctx))
 	cacheCmd.AddCommand(newCacheCommentaryCommand(ctx))
 	cacheCmd.AddCommand(newCacheRemoveCommand(ctx))
