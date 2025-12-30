@@ -100,7 +100,10 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 	} else {
 		logger.Warn("scanner fingerprint unavailable and queue fingerprint missing",
 			logging.String("error_message", "Disc fingerprint missing after MakeMKV scan"),
-			logging.String(logging.FieldErrorHint, "Confirm the disc is readable and rerun identification"))
+			logging.String(logging.FieldEventType, "fingerprint_missing"),
+			logging.String(logging.FieldErrorHint, "confirm the disc is readable and rerun identification"),
+			logging.String("impact", "identification will rely on disc title heuristics"),
+		)
 	}
 
 	scanSummary := []logging.Attr{

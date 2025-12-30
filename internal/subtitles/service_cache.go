@@ -85,7 +85,11 @@ func (s *Service) tryStoreTranscriptInCache(req GenerateRequest, plan *generatio
 	}
 	if err := s.ensureTranscriptCache(); err != nil {
 		if s.logger != nil {
-			s.logger.Warn("whisperx transcript cache unavailable", logging.Error(err))
+			s.logger.Warn("whisperx transcript cache unavailable; caching disabled",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "transcript_cache_unavailable"),
+				logging.String(logging.FieldErrorHint, "check whisperx_cache_dir permissions"),
+			)
 		}
 		return
 	}
@@ -95,7 +99,11 @@ func (s *Service) tryStoreTranscriptInCache(req GenerateRequest, plan *generatio
 	data, err := os.ReadFile(plan.outputFile)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("whisperx transcript cache read failed", logging.Error(err))
+			s.logger.Warn("whisperx transcript cache read failed; skipping cache write",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "transcript_cache_read_failed"),
+				logging.String(logging.FieldErrorHint, "check whisperx_cache_dir permissions"),
+			)
 		}
 		return
 	}
@@ -105,7 +113,11 @@ func (s *Service) tryStoreTranscriptInCache(req GenerateRequest, plan *generatio
 	}
 	if _, err := s.transcriptCache.Store(req.TranscriptKey, language, segmentCount, data); err != nil {
 		if s.logger != nil {
-			s.logger.Warn("whisperx transcript cache store failed", logging.Error(err))
+			s.logger.Warn("whisperx transcript cache store failed; cache may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "transcript_cache_store_failed"),
+				logging.String(logging.FieldErrorHint, "check whisperx_cache_dir permissions"),
+			)
 		}
 		return
 	}

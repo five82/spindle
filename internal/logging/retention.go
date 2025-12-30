@@ -71,12 +71,20 @@ func CleanupOldLogs(logger *slog.Logger, retentionDays int, targets ...Retention
 			}
 			if err := os.Remove(fullPath); err != nil {
 				if logger != nil {
-					logger.Warn("log retention remove failed", slog.String("path", fullPath), slog.String("error", err.Error()))
+					logger.Warn("log retention remove failed; file remains",
+						String("path", fullPath),
+						Error(err),
+						String(FieldEventType, "log_retention_failed"),
+						String(FieldErrorHint, "check file permissions and log_dir ownership"),
+					)
 				}
 				continue
 			}
 			if logger != nil {
-				logger.Info("log pruned", slog.String("path", fullPath))
+				logger.Info("log pruned",
+					String("path", fullPath),
+					String(FieldEventType, "log_pruned"),
+				)
 			}
 		}
 	}

@@ -145,7 +145,11 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		item.MetadataJSON = string(encoded)
 		meta = basic
 		if err := o.store.Update(ctx, item); err != nil {
-			o.logger.Warn("failed to persist fallback metadata", logging.Error(err))
+			o.logger.Warn("failed to persist fallback metadata; organizer may re-evaluate defaults",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "metadata_persist_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+			)
 		}
 	}
 	jobs, err := buildOrganizeJobs(env, queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle))
@@ -183,7 +187,11 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logging.String("decision_reason", "library_unavailable"),
 				logging.String("decision_options", "organize, review"),
 			)
-			logger.Warn("library unavailable; moving to review directory", logging.Error(err))
+			logger.Warn("library unavailable; moving to review directory",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "library_unavailable"),
+				logging.String(logging.FieldErrorHint, "check library_dir mount and Jellyfin configuration"),
+			)
 			return o.finishReview(ctx, item, stageStart, "Library unavailable", encodedSources, err)
 		}
 		return services.Wrap(services.ErrExternalTool, "organizing", "move to library", "Failed to move media into library", err)
@@ -191,7 +199,11 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	item.FinalFile = targetPath
 	logger.Debug("library move completed", logging.String("final_file", targetPath))
 	if err := o.moveGeneratedSubtitles(ctx, item, targetPath); err != nil {
-		logger.Warn("subtitle sidecar move failed", logging.Error(err))
+		logger.Warn("subtitle sidecar move failed; subtitles may be missing in library",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "subtitle_move_failed"),
+			logging.String(logging.FieldErrorHint, "check library_dir permissions and subtitle file names"),
+		)
 	}
 	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStart); err != nil {
 		return err
@@ -214,7 +226,11 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	jellyfinRefreshed := false
 	if refreshAllowed {
 		if err := o.jellyfin.Refresh(ctx, meta); err != nil {
-			logger.Warn("jellyfin refresh failed", logging.Error(err))
+			logger.Warn("jellyfin refresh failed; library scan may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "jellyfin_refresh_failed"),
+				logging.String(logging.FieldErrorHint, "check jellyfin.url and jellyfin.api_key"),
+			)
 		} else {
 			logger.Debug("jellyfin library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
 			jellyfinRefreshed = true
@@ -254,10 +270,18 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			"finalFile":         filepath.Base(targetPath),
 			"jellyfinRefreshed": jellyfinRefreshed,
 		}); err != nil {
-			logger.Warn("organization notifier failed", logging.Error(err))
+			logger.Warn("organization notifier failed; completion alert skipped",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "notify_failed"),
+				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
+			)
 		}
 		if err := o.notifier.Publish(ctx, notifications.EventProcessingCompleted, notifications.Payload{"title": title}); err != nil {
-			logger.Warn("processing completion notifier failed", logging.Error(err))
+			logger.Warn("processing completion notifier failed; completion alert skipped",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "notify_failed"),
+				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
+			)
 		}
 	}
 
@@ -423,7 +447,11 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 					logging.String("decision_reason", "library_unavailable"),
 					logging.String("decision_options", "organize, review"),
 				)
-				logger.Warn("library unavailable; moving to review directory", logging.Error(err))
+				logger.Warn("library unavailable; moving to review directory",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "library_unavailable"),
+					logging.String(logging.FieldErrorHint, "check library_dir mount and Jellyfin configuration"),
+				)
 				return o.finishReview(ctx, item, stageStarted, "Library unavailable", collectEncodedSources(item, env), err)
 			}
 			return services.Wrap(
@@ -448,12 +476,20 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 				copy := *item
 				copy.RipSpecData = encoded
 				if err := o.store.Update(ctx, &copy); err != nil {
-					logger.Warn("failed to persist rip spec after episode organize", logging.Error(err))
+					logger.Warn("failed to persist rip spec after episode organize; metadata may be stale",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+						logging.String(logging.FieldErrorHint, "check queue database access"),
+					)
 				} else {
 					*item = copy
 				}
 			} else {
-				logger.Warn("failed to encode rip spec after episode organize", logging.Error(err))
+				logger.Warn("failed to encode rip spec after episode organize; metadata may be stale",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+					logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+				)
 			}
 		}
 		if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted); err != nil {
@@ -462,11 +498,19 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		itemCopy := *item
 		itemCopy.EncodedFile = job.Source
 		if err := o.moveGeneratedSubtitles(ctx, &itemCopy, targetPath); err != nil {
-			logger.Warn("subtitle sidecar move failed", logging.Error(err))
+			logger.Warn("subtitle sidecar move failed; subtitles may be missing in library",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "subtitle_move_failed"),
+				logging.String(logging.FieldErrorHint, "check library_dir permissions and subtitle file names"),
+			)
 		}
 		if refreshAllowed {
 			if err := o.jellyfin.Refresh(ctx, job.Metadata); err != nil {
-				logger.Warn("jellyfin refresh failed", logging.Error(err))
+				logger.Warn("jellyfin refresh failed; library scan may be stale",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "jellyfin_refresh_failed"),
+					logging.String(logging.FieldErrorHint, "check jellyfin.url and jellyfin.api_key"),
+				)
 			}
 		}
 		finalPaths = append(finalPaths, targetPath)
@@ -484,7 +528,11 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		if encoded, err := env.Encode(); err == nil {
 			item.RipSpecData = encoded
 		} else {
-			logger.Warn("failed to encode rip spec after organizing", logging.Error(err))
+			logger.Warn("failed to encode rip spec after organizing; metadata may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+			)
 		}
 	}
 	item.FinalFile = finalPaths[len(finalPaths)-1]
@@ -498,7 +546,11 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 			"finalFile":         filepath.Base(item.FinalFile),
 			"jellyfinRefreshed": true,
 		}); err != nil {
-			logger.Warn("organization notifier failed", logging.Error(err))
+			logger.Warn("organization notifier failed; completion alert skipped",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "notify_failed"),
+				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
+			)
 		}
 	}
 	o.cleanupStaging(ctx, item)
@@ -628,7 +680,12 @@ func (o *Organizer) cleanupStaging(ctx context.Context, item *queue.Item) {
 	}
 	logger := logging.WithContext(ctx, o.logger)
 	if err := os.RemoveAll(root); err != nil {
-		logger.Warn("failed to clean staging directory", logging.String("staging_root", root), logging.Error(err))
+		logger.Warn("failed to clean staging directory; leftover files remain",
+			logging.String("staging_root", root),
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "staging_cleanup_failed"),
+			logging.String(logging.FieldErrorHint, "check staging_dir permissions"),
+		)
 		return
 	}
 	logger.Debug("cleaned staging directory", logging.String("staging_root", root))
@@ -679,7 +736,11 @@ func (o *Organizer) movePathToReview(ctx context.Context, item *queue.Item, sour
 					return "", services.Wrap(services.ErrTransient, "organizing", "copy review file", "Failed to copy file into review directory", copyErr)
 				}
 				if err := os.Remove(sourcePath); err != nil {
-					logger.Warn("failed to remove source file after copy", logging.Error(err))
+					logger.Warn("failed to remove source file after copy; duplicate files remain",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "review_source_cleanup_failed"),
+						logging.String(logging.FieldErrorHint, "manually delete the staging file if needed"),
+					)
 				}
 			} else {
 				return "", services.Wrap(services.ErrTransient, "organizing", "move review file", "Failed to move file into review directory", renameErr)
@@ -916,7 +977,11 @@ func (o *Organizer) updateProgress(ctx context.Context, item *queue.Item, messag
 	copy.ProgressMessage = message
 	copy.ProgressPercent = percent
 	if err := o.store.UpdateProgress(ctx, &copy); err != nil {
-		logger.Warn("failed to persist organizer progress", logging.Error(err))
+		logger.Warn("failed to persist organizer progress; queue status may lag",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
+			logging.String(logging.FieldErrorHint, "check queue database access"),
+		)
 		return
 	}
 	*item = copy

@@ -220,7 +220,10 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 				logging.Int("episode_count", len(env.Episodes)))
 		} else {
 			logger.Warn("failed to encode rip spec after episode identification",
-				logging.Error(encodeErr))
+				logging.Error(encodeErr),
+				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+				logging.String("impact", "episode matches were not persisted to metadata"),
+				logging.String(logging.FieldErrorHint, "Retry episode identification or inspect rip spec serialization errors"))
 		}
 	} else {
 		logger.Info("episode identification complete, no changes needed")

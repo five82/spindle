@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"log/slog"
+
+	"spindle/internal/logging"
 )
 
 const (
@@ -98,7 +100,12 @@ func (c *Catalog) ensureLoaded() error {
 			}
 			if err := c.refreshRemote(); err != nil {
 				if c.logger != nil {
-					c.logger.Warn("keydb refresh failed", slog.String("path", c.path), slog.String("error", err.Error()))
+					c.logger.Warn("keydb refresh failed; keydb lookups may be stale",
+						slog.String("path", c.path),
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "keydb_refresh_failed"),
+						logging.String(logging.FieldErrorHint, "check network access or set keydb_download_url"),
+					)
 				}
 				c.mu.Lock()
 				c.entries = map[string]Entry{}
@@ -165,7 +172,12 @@ func (c *Catalog) refreshRemoteAsync() {
 		}
 		if err := c.refreshRemote(); err != nil {
 			if c.logger != nil {
-				c.logger.Warn("keydb refresh failed", slog.String("path", c.path), slog.String("error", err.Error()))
+				c.logger.Warn("keydb refresh failed; keydb lookups may be stale",
+					slog.String("path", c.path),
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "keydb_refresh_failed"),
+					logging.String(logging.FieldErrorHint, "check network access or set keydb_download_url"),
+				)
 			}
 		}
 	}()

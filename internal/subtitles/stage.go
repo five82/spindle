@@ -80,7 +80,11 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			env = parsed
 			hasRipSpec = true
 		} else if s.logger != nil {
-			s.logger.Warn("failed to parse rip spec for subtitle progress", logging.Error(err))
+			s.logger.Warn("failed to parse rip spec for subtitle progress; continuing without progress details",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_spec_parse_failed"),
+				logging.String(logging.FieldErrorHint, "rerun identification if subtitle progress looks wrong"),
+			)
 		}
 	}
 
@@ -155,7 +159,11 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 					result = retryResult
 				} else {
 					if handleErr != nil && s.logger != nil {
-						s.logger.Warn("misidentification handling failed", logging.Error(handleErr))
+						s.logger.Warn("misidentification handling failed; review required",
+							logging.Error(handleErr),
+							logging.String(logging.FieldEventType, "subtitle_misidentification_handle_failed"),
+							logging.String(logging.FieldErrorHint, "review subtitle offsets and metadata"),
+						)
 					}
 					if s.logger != nil {
 						s.logger.Warn("subtitle generation flagged for review",
@@ -163,6 +171,8 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 							logging.String("source_file", target.SourcePath),
 							logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
 							logging.Alert("review"),
+							logging.String(logging.FieldEventType, "subtitle_review_required"),
+							logging.String(logging.FieldErrorHint, "review subtitle offsets and metadata"),
 						)
 					}
 					item.NeedsReview = true
@@ -184,6 +194,8 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 						logging.Int64("item_id", item.ID),
 						logging.String("source_file", target.SourcePath),
 						logging.Error(err),
+						logging.String(logging.FieldEventType, "subtitle_generation_skipped"),
+						logging.String(logging.FieldErrorHint, "check WhisperX/OpenSubtitles logs and retry"),
 					)
 				}
 				item.ProgressMessage = fmt.Sprintf("Subtitle generation skipped: %s", message)
@@ -215,6 +227,8 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 					logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
 					logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
 					logging.Alert("subtitle_fallback"),
+					logging.String(logging.FieldEventType, "subtitle_fallback"),
+					logging.String(logging.FieldErrorHint, "verify OpenSubtitles metadata or use --forceai"),
 				)
 			}
 		}
@@ -242,12 +256,20 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				copy := *item
 				copy.RipSpecData = encoded
 				if err := s.store.Update(ctx, &copy); err != nil && s.logger != nil {
-					s.logger.Warn("failed to persist rip spec after subtitles", logging.Error(err))
+					s.logger.Warn("failed to persist rip spec after subtitles; metadata may be stale",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+						logging.String(logging.FieldErrorHint, "check queue database access"),
+					)
 				} else if err == nil {
 					*item = copy
 				}
 			} else if s.logger != nil {
-				s.logger.Warn("failed to encode rip spec after subtitles", logging.Error(err))
+				s.logger.Warn("failed to encode rip spec after subtitles; metadata may be stale",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+					logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+				)
 			}
 		}
 	}
@@ -279,6 +301,10 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		if alertValue != "" {
 			summaryAttrs = append(summaryAttrs, logging.Alert(alertValue))
+			summaryAttrs = append(summaryAttrs,
+				logging.String("impact", "subtitle stage completed with review or fallback alerts"),
+				logging.String(logging.FieldErrorHint, "Review subtitle results or rerun spindle gensubtitle for affected episodes"),
+			)
 			s.logger.Warn("subtitle stage summary", logging.Args(summaryAttrs...)...)
 		} else {
 			s.logger.Info("subtitle stage summary", logging.Args(summaryAttrs...)...)
@@ -449,7 +475,11 @@ func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
 
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil && s.logger != nil {
-		s.logger.Warn("failed to parse rip spec for subtitle targets", logging.Error(err))
+		s.logger.Warn("failed to parse rip spec for subtitle targets; continuing with encoded file fallback",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "rip_spec_parse_failed"),
+			logging.String(logging.FieldErrorHint, "rerun identification if subtitle targets look wrong"),
+		)
 	}
 	if len(env.Assets.Encoded) > 0 {
 		for idx, asset := range env.Assets.Encoded {

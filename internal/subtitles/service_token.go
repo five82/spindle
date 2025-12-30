@@ -73,7 +73,11 @@ func (s *Service) ensureTokenReady(ctx context.Context) error {
 
 	if s.tokenErr != nil {
 		if !s.tokenFallbackLogged && s.logger != nil {
-			s.logger.Warn("pyannote authentication failed, falling back to silero", logging.Error(s.tokenErr))
+			s.logger.Warn("pyannote authentication failed; falling back to silero",
+				logging.Error(s.tokenErr),
+				logging.String(logging.FieldEventType, "pyannote_auth_failed"),
+				logging.String(logging.FieldErrorHint, "verify whisperx_hf_token or switch whisperx_vad_method"),
+			)
 			s.tokenFallbackLogged = true
 		}
 		return nil

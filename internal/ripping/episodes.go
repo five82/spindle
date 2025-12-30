@@ -23,7 +23,12 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("failed to inspect rip directory", logging.String("dir", dir), logging.Error(err))
+			logger.Warn("failed to inspect rip directory; episode mapping skipped",
+				logging.String("dir", dir),
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_dir_scan_failed"),
+				logging.String(logging.FieldErrorHint, "check staging directory permissions"),
+			)
 		}
 		return 0
 	}

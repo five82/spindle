@@ -38,7 +38,11 @@ type Ripper struct {
 func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Ripper {
 	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKV.RipTimeout)
 	if err != nil {
-		logger.Warn("makemkv client unavailable", logging.Error(err))
+		logger.Warn("makemkv client unavailable; ripping disabled",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "makemkv_unavailable"),
+			logging.String(logging.FieldErrorHint, "check makemkv_binary and license configuration"),
+		)
 	}
 	return NewRipperWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
@@ -136,13 +140,21 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 		encoded, encodeErr := env.Encode()
 		if encodeErr != nil {
-			logger.Warn("failed to encode rip spec after episode rip", logging.Error(encodeErr))
+			logger.Warn("failed to encode rip spec after episode rip; progress metadata stale",
+				logging.Error(encodeErr),
+				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+				logging.String(logging.FieldErrorHint, "rerun identification if episode mapping looks wrong"),
+			)
 			return
 		}
 		copy := *item
 		copy.RipSpecData = encoded
 		if updateErr := r.store.Update(ctx, &copy); updateErr != nil {
-			logger.Warn("failed to persist rip spec after episode rip", logging.Error(updateErr))
+			logger.Warn("failed to persist rip spec after episode rip; progress metadata stale",
+				logging.Error(updateErr),
+				logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+			)
 			return
 		}
 		*item = copy
@@ -224,7 +236,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		cachedTarget, err := selectCachedRip(destDir)
 		if err != nil {
 			cacheStatus = "error"
-			logger.Warn("cache inspection failed", logging.Error(err))
+			logger.Warn("cache inspection failed; falling back to MakeMKV",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_cache_inspection_failed"),
+				logging.String(logging.FieldErrorHint, "check rip_cache_dir permissions or disable rip_cache_enabled"),
+			)
 		} else if cachedTarget != "" {
 			if err := r.validateRippedArtifact(ctx, item, cachedTarget, startedAt); err == nil {
 				target = cachedTarget
@@ -240,7 +256,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				copy := *item
 				copy.ProgressMessage = "Rip cache hit; skipping MakeMKV rip"
 				if err := r.store.UpdateProgress(ctx, &copy); err != nil {
-					logger.Warn("failed to persist rip cache hit progress", logging.Error(err))
+					logger.Warn("failed to persist rip cache hit progress; queue status may lag",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
+						logging.String(logging.FieldErrorHint, "check queue database access"),
+					)
 				} else {
 					*item = copy
 				}
@@ -282,8 +302,10 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	if !cacheUsed && r.client != nil {
 		if err := ensureMakeMKVSelectionRule(); err != nil {
 			logger.Error(
-				"failed to configure makemkv selection",
+				"failed to configure makemkv selection; ripping aborted",
 				logging.Error(err),
+				logging.String(logging.FieldEventType, "makemkv_config_failed"),
+				logging.String(logging.FieldErrorHint, "ensure Spindle can write to ~/.MakeMKV"),
 			)
 			return services.Wrap(
 				services.ErrConfiguration,
@@ -307,7 +329,10 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			logger.Error("makemkv rip failed",
 				logging.Error(err),
 				logging.Duration("makemkv_duration", makemkvDuration),
-				logging.Any("title_ids", titleIDs))
+				logging.Any("title_ids", titleIDs),
+				logging.String(logging.FieldEventType, "makemkv_rip_failed"),
+				logging.String(logging.FieldErrorHint, "check disc readability and MakeMKV logs"),
+			)
 			return services.Wrap(
 				services.ErrExternalTool,
 				"ripping",
@@ -387,7 +412,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	if hasEpisodes {
 		assigned := assignEpisodeAssets(&env, workingDir, logger)
 		if assigned == 0 {
-			logger.Warn("episode asset mapping incomplete", logging.String("destination", workingDir))
+			logger.Warn("episode asset mapping incomplete; episode-level ripping may be missing",
+				logging.String("destination", workingDir),
+				logging.String(logging.FieldEventType, "episode_asset_mapping_incomplete"),
+				logging.String(logging.FieldErrorHint, "verify rip outputs and episode title IDs"),
+			)
 		} else {
 			specDirty = true
 			paths := episodeAssetPaths(env)
@@ -411,7 +440,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if encoded, encodeErr := env.Encode(); encodeErr == nil {
 			item.RipSpecData = encoded
 		} else {
-			logger.Warn("failed to encode rip spec after ripping", logging.Error(encodeErr))
+			logger.Warn("failed to encode rip spec after ripping; metadata may be stale",
+				logging.Error(encodeErr),
+				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+			)
 		}
 	}
 	visited := make(map[string]struct{}, len(validationTargets))
@@ -536,7 +569,11 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 		copy.ProgressMessage = update.Message
 	}
 	if err := r.store.UpdateProgress(ctx, &copy); err != nil {
-		logger.Warn("failed to persist progress", logging.Error(err))
+		logger.Warn("failed to persist progress; queue status may lag",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
+			logging.String(logging.FieldErrorHint, "check queue database access"),
+		)
 		return
 	}
 	progressMessage := strings.TrimSpace(copy.ProgressMessage)

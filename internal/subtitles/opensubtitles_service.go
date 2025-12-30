@@ -52,8 +52,10 @@ func (s *Service) ensureOpenSubtitlesReady() error {
 				cache, err := opensubtitles.NewCache(dir, s.logger)
 				if err != nil {
 					if s.logger != nil {
-						s.logger.Warn("opensubtitles cache unavailable",
+						s.logger.Warn("opensubtitles cache unavailable; caching disabled",
 							logging.Error(err),
+							logging.String(logging.FieldEventType, "opensubtitles_cache_unavailable"),
+							logging.String(logging.FieldErrorHint, "check opensubtitles_cache_dir permissions"),
 						)
 					}
 				} else {

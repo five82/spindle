@@ -119,7 +119,11 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 			UserToken: cfg.Subtitles.OpenSubtitlesUserToken,
 		})
 		if err != nil {
-			m.logger.Warn("opensubtitles client unavailable", logging.Error(err))
+			m.logger.Warn("opensubtitles client unavailable",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "opensubtitles_client_unavailable"),
+				logging.String("impact", "episode matching will skip OpenSubtitles references"),
+				logging.String(logging.FieldErrorHint, "Check opensubtitles_api_key and network connectivity"))
 		} else {
 			m.openSubs = client
 		}
@@ -129,7 +133,11 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 		if dir != "" {
 			cache, err := opensubtitles.NewCache(dir, m.logger)
 			if err != nil {
-				m.logger.Warn("opensubtitles cache unavailable", logging.Error(err))
+				m.logger.Warn("opensubtitles cache unavailable",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "opensubtitles_cache_unavailable"),
+					logging.String("impact", "OpenSubtitles cache disabled for content matching"),
+					logging.String(logging.FieldErrorHint, "Check opensubtitles_cache_dir permissions"))
 			} else {
 				m.cache = cache
 			}
@@ -138,7 +146,11 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 	if m.tmdb == nil && cfg != nil {
 		client, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 		if err != nil {
-			m.logger.Warn("tmdb client unavailable", logging.Error(err))
+			m.logger.Warn("tmdb client unavailable",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "tmdb_client_unavailable"),
+				logging.String("impact", "episode matching cannot load TMDB season details"),
+				logging.String(logging.FieldErrorHint, "Check tmdb_api_key and tmdb_base_url in config"))
 		} else {
 			m.tmdb = client
 		}
@@ -450,6 +462,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 						logging.Int("season", season.SeasonNumber),
 						logging.Int("episode", num),
 						logging.Int("attempt", attempt+1),
+						logging.String(logging.FieldEventType, "opensubtitles_no_candidates"),
+						logging.String("impact", "episode matching may fall back to WhisperX-only heuristics"),
+						logging.String(logging.FieldErrorHint, "Verify OpenSubtitles languages and TMDB metadata"),
 					)
 				}
 				continue
@@ -514,7 +529,11 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		)
 		if m.cache != nil && candidate.FileID > 0 {
 			if cached, ok, err := m.cache.Load(candidate.FileID); err != nil {
-				m.logger.Warn("opensubtitles cache load failed", logging.Error(err))
+				m.logger.Warn("opensubtitles cache load failed",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "opensubtitles_cache_load_failed"),
+					logging.String("impact", "cache miss forces network download"),
+					logging.String(logging.FieldErrorHint, "Check opensubtitles_cache_dir permissions"))
 			} else if ok {
 				payload = cached.DownloadResult()
 				cachePath = cached.Path
@@ -554,7 +573,11 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 					entry.TMDBID = info.SubtitleCtx.EpisodeID()
 				}
 				if path, err := m.cache.Store(entry, payload.Data); err != nil {
-					m.logger.Warn("opensubtitles cache store failed", logging.Error(err))
+					m.logger.Warn("opensubtitles cache store failed",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "opensubtitles_cache_store_failed"),
+						logging.String("impact", "future runs will re-download reference subtitles"),
+						logging.String(logging.FieldErrorHint, "Check opensubtitles_cache_dir permissions and free space"))
 				} else {
 					cachePath = path
 				}
@@ -620,6 +643,9 @@ func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, 
 			m.logger.Warn("opensubtitles rate limited",
 				logging.Duration("backoff", backoff),
 				logging.Int("attempt", attempt),
+				logging.String(logging.FieldEventType, "opensubtitles_rate_limited"),
+				logging.String("impact", "episode matching delayed while respecting API limits"),
+				logging.String(logging.FieldErrorHint, "Wait and retry or check OpenSubtitles rate limits"),
 			)
 		}
 		if err := sleepWithContext(ctx, backoff); err != nil {
@@ -801,7 +827,11 @@ func (m *Matcher) updateMetadata(item *queue.Item, matches []matchResult, season
 	payload["media_type"] = "tv"
 	data, err := json.Marshal(payload)
 	if err != nil {
-		m.logger.Warn("failed to encode metadata after content id", logging.Error(err))
+		m.logger.Warn("failed to encode metadata after content id",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "metadata_encode_failed"),
+			logging.String("impact", "episode metadata updates were not persisted"),
+			logging.String(logging.FieldErrorHint, "Retry content identification or inspect metadata serialization errors"))
 		return
 	}
 	item.MetadataJSON = string(data)

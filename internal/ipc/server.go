@@ -85,7 +85,11 @@ func (s *Server) Serve() {
 					return
 				default:
 				}
-				s.logger.Warn("accept failed", logging.Error(err))
+				s.logger.Warn("accept failed",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "ipc_accept_failed"),
+					logging.String("impact", "IPC clients may fail to connect"),
+					logging.String(logging.FieldErrorHint, "Check socket permissions and restart the daemon if needed"))
 				continue
 			}
 			s.wg.Add(1)
@@ -105,7 +109,12 @@ func (s *Server) Close() {
 	}
 	s.wg.Wait()
 	if err := os.RemoveAll(s.path); err != nil {
-		s.logger.Warn("failed to remove socket", logging.String("socket", s.path), logging.Error(err))
+		s.logger.Warn("failed to remove socket",
+			logging.String("socket", s.path),
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "ipc_socket_cleanup_failed"),
+			logging.String("impact", "stale IPC socket may block future starts"),
+			logging.String(logging.FieldErrorHint, "Remove the socket file manually or rerun spindle stop"))
 	}
 }
 

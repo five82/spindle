@@ -49,7 +49,10 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 				logging.String("query", title),
 				logging.Error(err),
 				logging.String("error_message", "TMDB search attempt failed"),
-				logging.String(logging.FieldErrorHint, "Verify TMDB credentials and retry"))
+				logging.String(logging.FieldEventType, "tmdb_search_failed"),
+				logging.String(logging.FieldErrorHint, "verify TMDB credentials and retry"),
+				logging.String("impact", "retrying next search mode"),
+			)
 			continue
 		}
 		if resp != nil {
@@ -88,7 +91,9 @@ func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, 
 	if i.tmdbInfo == nil {
 		logger.Warn("tmdb season lookup unavailable",
 			logging.String("reason", "tmdb client missing"),
-			logging.String(logging.FieldErrorHint, "Check TMDB client initialization"))
+			logging.String(logging.FieldEventType, "tmdb_season_lookup_unavailable"),
+			logging.String(logging.FieldErrorHint, "check TMDB client initialization"),
+		)
 		return nil, nil
 	}
 	season, err := i.tmdbInfo.GetSeasonDetails(ctx, tmdbID, seasonNumber)
@@ -98,7 +103,9 @@ func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, 
 			logging.Int("season", seasonNumber),
 			logging.Error(err),
 			logging.String("error_message", "Failed to fetch TMDB season details"),
-			logging.String(logging.FieldErrorHint, "Verify TMDB connectivity and API key"))
+			logging.String(logging.FieldEventType, "tmdb_season_lookup_failed"),
+			logging.String(logging.FieldErrorHint, "verify TMDB connectivity and API key"),
+		)
 		return nil, nil
 	}
 	if season == nil || len(season.Episodes) == 0 {

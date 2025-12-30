@@ -24,7 +24,11 @@ func (m *Manager) processItem(ctx context.Context, lane *laneState, laneLogger *
 		if laneLogger == nil {
 			laneLogger = logging.NewNop()
 		}
-		laneLogger.Warn("no stage configured for status", logging.String("status", string(item.Status)))
+		laneLogger.Warn("no stage configured for status; item will wait",
+			logging.String("status", string(item.Status)),
+			logging.String(logging.FieldEventType, "stage_missing"),
+			logging.String(logging.FieldErrorHint, "check workflow configuration and queue status mapping"),
+		)
 		m.waitForItemOrShutdown(ctx)
 		return nil
 	}
@@ -37,7 +41,11 @@ func (m *Manager) processItem(ctx context.Context, lane *laneState, laneLogger *
 	}
 
 	if err := m.transitionToProcessing(stageCtx, lane, stage.processingStatus, stage.name, item); err != nil {
-		stageLogger.Error("failed to transition item to processing", logging.Error(err))
+		stageLogger.Error("failed to transition item to processing",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "queue_update_failed"),
+			logging.String(logging.FieldErrorHint, "check queue database access"),
+		)
 		m.setLastError(err)
 		return err
 	}
@@ -57,11 +65,19 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 
 	handler := stage.handler
 	if handler == nil {
-		stageLogger.Warn("missing stage handler", logging.String("stage", stage.name))
+		stageLogger.Warn("missing stage handler; item moved to failed",
+			logging.String("stage", stage.name),
+			logging.String(logging.FieldEventType, "stage_handler_missing"),
+			logging.String(logging.FieldErrorHint, "check workflow wiring and stage registration"),
+		)
 		item.Status = queue.StatusFailed
 		item.ErrorMessage = fmt.Sprintf("stage %s missing handler", stage.name)
 		if err := m.store.Update(ctx, item); err != nil {
-			stageLogger.Error("failed to persist missing handler failure", logging.Error(err))
+			stageLogger.Error("failed to persist missing handler failure",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "queue_update_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+			)
 		}
 		m.setLastError(errors.New("stage handler unavailable"))
 		return errors.New("stage handler unavailable")
@@ -74,7 +90,11 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 	}
 	if err := m.store.Update(ctx, item); err != nil {
 		wrapped := fmt.Errorf("persist stage preparation: %w", err)
-		stageLogger.Error("failed to persist stage preparation", logging.Error(wrapped))
+		stageLogger.Error("failed to persist stage preparation",
+			logging.Error(wrapped),
+			logging.String(logging.FieldEventType, "queue_update_failed"),
+			logging.String(logging.FieldErrorHint, "check queue database access"),
+		)
 		m.setLastError(wrapped)
 		return wrapped
 	}
@@ -108,7 +128,11 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 	}
 	if err := m.store.Update(ctx, item); err != nil {
 		wrapped := fmt.Errorf("persist stage result: %w", err)
-		stageLogger.Error("failed to persist stage result", logging.Error(wrapped))
+		stageLogger.Error("failed to persist stage result",
+			logging.Error(wrapped),
+			logging.String(logging.FieldEventType, "queue_update_failed"),
+			logging.String(logging.FieldErrorHint, "check queue database access"),
+		)
 		m.setLastError(wrapped)
 		return wrapped
 	}

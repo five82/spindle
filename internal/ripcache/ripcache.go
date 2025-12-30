@@ -286,7 +286,12 @@ func (m *Manager) scan() ([]cacheEntry, int64, error) {
 		path := filepath.Join(m.root, entry.Name())
 		size, mtime, err := dirSizeAndTime(path)
 		if err != nil {
-			m.logger.Warn("ripcache: skip entry", logging.String("source_file", path), logging.Error(err))
+			m.logger.Warn("ripcache: skip entry; excluded from stats and pruning",
+				logging.String("source_file", path),
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "ripcache_entry_skipped"),
+				logging.String(logging.FieldErrorHint, "inspect cache directory permissions or remove the corrupted entry"),
+			)
 			continue
 		}
 		primary, count := identifyPrimaryFile(path)

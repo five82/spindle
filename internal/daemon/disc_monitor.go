@@ -175,7 +175,11 @@ func (m *discMonitor) poll() {
 		if logger == nil {
 			logger = logging.NewNop()
 		}
-		logger.Warn("disc detection failed", logging.Error(err))
+		logger.Warn("disc detection failed; will retry",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "disc_detect_failed"),
+			logging.String(logging.FieldErrorHint, "check optical drive path, permissions, and mount state; see README.md"),
+		)
 		return
 	}
 
@@ -215,7 +219,9 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		logging.String("disc_label", info.Label),
 		logging.String("disc_type", info.Type),
 	)
-	logger.Info("detected disc")
+	logger.Info("detected disc",
+		logging.String(logging.FieldEventType, "disc_detected"),
+	)
 
 	scanCtx := ctx
 	var cancel context.CancelFunc
@@ -226,14 +232,21 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 
 	scanner := m.scanner
 	if scanner == nil {
-		logger.Error("disc scanner unavailable")
+		logger.Error("disc scanner unavailable; disc fingerprinting skipped",
+			logging.String(logging.FieldEventType, "disc_scan_unavailable"),
+			logging.String(logging.FieldErrorHint, "check MakeMKV installation and config.makemkv_binary"),
+		)
 		return false
 	}
 
 	logger.Debug("scanning disc for fingerprint", logging.Duration("timeout", m.scanTimeout))
 	scanResult, scanErr := scanner.Scan(scanCtx, info.Device)
 	if scanErr != nil {
-		logger.Error("disc scan failed", logging.Error(scanErr))
+		logger.Error("disc scan failed; disc not queued",
+			logging.Error(scanErr),
+			logging.String(logging.FieldEventType, "disc_scan_failed"),
+			logging.String(logging.FieldErrorHint, "verify drive access and MakeMKV availability; rerun with spindle identify for details"),
+		)
 		if m.errorNotifier != nil {
 			m.errorNotifier.FingerprintFailed(ctx, info, scanErr, logger)
 		}
@@ -246,19 +259,30 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 	}
 	if discFingerprint == "" {
 		discFingerprint = strings.TrimSpace(info.Label)
-		logger.Warn("scanner fingerprint unavailable; falling back to disc label", logging.String("fallback", discFingerprint))
+		logger.Warn("scanner fingerprint unavailable; falling back to disc label",
+			logging.String("fallback", discFingerprint),
+			logging.String(logging.FieldEventType, "disc_fingerprint_fallback"),
+			logging.Alert("fingerprint_fallback"),
+		)
 	}
 	logger.Debug("computed fingerprint", logging.String("fingerprint", discFingerprint))
 
 	queueHandler := m.queueHandler
 	if queueHandler == nil {
-		logger.Error("queue handler unavailable")
+		logger.Error("queue handler unavailable; disc not queued",
+			logging.String(logging.FieldEventType, "queue_handler_unavailable"),
+			logging.String(logging.FieldErrorHint, "restart the daemon or check queue database initialization"),
+		)
 		return false
 	}
 
 	success, err := queueHandler.Process(ctx, info, discFingerprint, logger)
 	if err != nil {
-		logger.Error("queue processing failed", logging.Error(err))
+		logger.Error("queue processing failed; disc not queued",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "queue_processing_failed"),
+			logging.String(logging.FieldErrorHint, "check queue database health and daemon logs"),
+		)
 		return false
 	}
 	return success

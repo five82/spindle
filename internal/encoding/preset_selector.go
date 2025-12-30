@@ -151,6 +151,8 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 		logger.Warn("preset decider unavailable; falling back to default",
 			logging.Alert("preset_decider_fallback"),
 			logging.String(logging.FieldDecisionType, "preset_decider"),
+			logging.String(logging.FieldEventType, "preset_decider_unavailable"),
+			logging.String(logging.FieldErrorHint, "configure preset_decider settings or disable the feature"),
 		)
 		return decision
 	}
@@ -183,7 +185,12 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 	}
 	if res, err := e.detectResolutionLabel(ctx, sampleSource); err != nil {
 		if sampleSource != "" {
-			logger.Warn("preset decider resolution detection failed", logging.String("sample_source", sampleSource), logging.Error(err))
+			logger.Warn("preset decider resolution detection failed; using default resolution",
+				logging.String("sample_source", sampleSource),
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "preset_resolution_failed"),
+				logging.String(logging.FieldErrorHint, "check ffprobe availability and sample file path"),
+			)
 		}
 	} else if strings.TrimSpace(res) != "" {
 		request.Resolution = res
@@ -206,6 +213,8 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 		attrs = append(attrs,
 			logging.Alert("preset_decider_fallback"),
 			logging.String(logging.FieldDecisionType, "preset_decider"),
+			logging.String(logging.FieldEventType, "preset_decider_failed"),
+			logging.String(logging.FieldErrorHint, "check preset_decider credentials or disable the feature"),
 		)
 		logger.Warn("preset decider classification failed", logging.Args(attrs...)...)
 		return decision
@@ -259,6 +268,8 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 			logging.String("preset_suggested", decision.SuggestedProfile),
 			logging.Float64("preset_confidence", decision.Confidence),
 			logging.String(logging.FieldDecisionType, "preset_decider"),
+			logging.String(logging.FieldEventType, "preset_decider_fallback"),
+			logging.String(logging.FieldErrorHint, "review preset_decider confidence threshold or disable the feature"),
 		)
 	}
 	return decision

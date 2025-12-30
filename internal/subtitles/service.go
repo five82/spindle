@@ -241,6 +241,8 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 						logging.Int("season", req.Context.Season),
 						logging.Int("episode", req.Context.Episode),
 						logging.Alert("review"),
+						logging.String(logging.FieldEventType, "subtitle_misidentification_suspected"),
+						logging.String(logging.FieldErrorHint, "verify TMDB match or force WhisperX subtitles"),
 					)
 				}
 				return GenerateResult{}, err
@@ -255,6 +257,8 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 					logging.Int("season", req.Context.Season),
 					logging.Int("episode", req.Context.Episode),
 					logging.Alert("subtitle_fallback"),
+					logging.String(logging.FieldEventType, "opensubtitles_fetch_failed"),
+					logging.String(logging.FieldErrorHint, "check OpenSubtitles API credentials and connectivity"),
 				)
 			}
 		} else if ok {
@@ -281,6 +285,8 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 					logging.Int("episode", req.Context.Episode),
 					logging.String("languages", strings.Join(req.Languages, ",")),
 					logging.Alert("subtitle_fallback"),
+					logging.String(logging.FieldEventType, "opensubtitles_no_match"),
+					logging.String(logging.FieldErrorHint, "verify title/season/episode metadata or use --forceai"),
 				)
 			}
 		}
@@ -309,7 +315,11 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 	if req.AllowTranscriptCacheRead {
 		if cached, ok, err := s.tryLoadTranscriptFromCache(plan, req); err != nil {
 			if s.logger != nil {
-				s.logger.Warn("transcript cache load failed", logging.Error(err))
+				s.logger.Warn("transcript cache load failed; regenerating subtitles",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "transcript_cache_load_failed"),
+					logging.String(logging.FieldErrorHint, "check whisperx_cache_dir permissions"),
+				)
 			}
 		} else if ok {
 			cached.OpenSubtitlesDecision = openSubsDecision

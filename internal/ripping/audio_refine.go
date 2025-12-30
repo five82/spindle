@@ -96,7 +96,11 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	if cfg != nil && cfg.CommentaryDetection.Enabled {
 		result, detectErr := commentary.Detect(ctx, cfg, path, probe, selection.PrimaryIndex, logger)
 		if detectErr != nil {
-			logger.Warn("commentary detection failed", logging.Error(detectErr))
+			logger.Warn("commentary detection failed; continuing without commentary tracks",
+				logging.Error(detectErr),
+				logging.String(logging.FieldEventType, "commentary_detection_failed"),
+				logging.String(logging.FieldErrorHint, "check ffmpeg/fpcalc availability or disable commentary_detection"),
+			)
 		} else {
 			commentaryIndices = append(commentaryIndices, result.Indices...)
 		}

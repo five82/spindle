@@ -68,7 +68,11 @@ func (h *HeartbeatMonitor) StartLoop(ctx context.Context, wg *sync.WaitGroup, it
 				if errors.Is(err, context.Canceled) {
 					logger.Debug("daemon shutting down, heartbeat update cancelled")
 				} else {
-					logger.Warn("heartbeat update failed", logging.Error(err))
+					logger.Warn("heartbeat update failed; item may be reclaimed",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "heartbeat_update_failed"),
+						logging.String(logging.FieldErrorHint, "check queue database access"),
+					)
 				}
 				continue
 			}

@@ -81,7 +81,11 @@ func (c *transcriptCache) Store(key, language string, segments int, data []byte)
 		Updated:  time.Now().UTC(),
 	}
 	if err := c.writeMeta(key, meta); err != nil && c.logger != nil {
-		c.logger.Warn("transcript cache metadata write failed", logging.Error(err))
+		c.logger.Warn("transcript cache metadata write failed; cache metadata may be stale",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "transcript_cache_meta_write_failed"),
+			logging.String(logging.FieldErrorHint, "check whisperx_cache_dir permissions"),
+		)
 	}
 	return path, nil
 }

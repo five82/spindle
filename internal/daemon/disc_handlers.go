@@ -71,7 +71,12 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 		if updated {
 			if err := p.store.Update(ctx, existing); err != nil {
 				if logger != nil {
-					logger.Warn("failed to update completed item", logging.Error(err))
+					logger.Warn("failed to update completed item",
+						logging.Error(err),
+						logging.Int64(logging.FieldItemID, existing.ID),
+						logging.String(logging.FieldEventType, "queue_update_failed"),
+						logging.String("impact", "disc title refresh was not saved"),
+						logging.String(logging.FieldErrorHint, "Check queue database availability and disk health"))
 				}
 			}
 			if logger != nil {
@@ -100,7 +105,12 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 		if updated {
 			if err := p.store.Update(ctx, existing); err != nil {
 				if logger != nil {
-					logger.Warn("failed to update in-flight item", logging.Error(err))
+					logger.Warn("failed to update in-flight item",
+						logging.Error(err),
+						logging.Int64(logging.FieldItemID, existing.ID),
+						logging.String(logging.FieldEventType, "queue_update_failed"),
+						logging.String("impact", "disc title refresh was not saved"),
+						logging.String(logging.FieldErrorHint, "Check queue database availability and disk health"))
 				}
 			}
 		}
@@ -191,7 +201,11 @@ func (n *notifierAdapter) FingerprintFailed(ctx context.Context, info discInfo, 
 		"context": info.Label,
 	}); notifyErr != nil {
 		if logger != nil {
-			logger.Warn("failed to send fingerprint error notification", logging.Error(notifyErr))
+			logger.Warn("failed to send fingerprint error notification",
+				logging.Error(notifyErr),
+				logging.String(logging.FieldEventType, "notification_failed"),
+				logging.String("impact", "disc fingerprint error notification was not delivered"),
+				logging.String(logging.FieldErrorHint, "Check ntfy configuration and connectivity"))
 		}
 	}
 }

@@ -75,7 +75,11 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 			item.ProgressPercent = 0
 			if r.store != nil {
 				if err := r.store.UpdateProgress(ctx, item); err != nil {
-					logger.Warn("failed to persist encoding job start", logging.Error(err))
+					logger.Warn("failed to persist encoding job start; queue status may lag",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
+						logging.String(logging.FieldErrorHint, "check queue database access"),
+					)
 				}
 			}
 		}
@@ -105,13 +109,21 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 			copy.RipSpecData = encoded
 			if r.store != nil {
 				if err := r.store.Update(ctx, &copy); err != nil {
-					logger.Warn("failed to persist rip spec after episode encode", logging.Error(err))
+					logger.Warn("failed to persist rip spec after episode encode; metadata may be stale",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+						logging.String(logging.FieldErrorHint, "check queue database access"),
+					)
 				} else {
 					*item = copy
 				}
 			}
 		} else {
-			logger.Warn("failed to encode rip spec after episode encode", logging.Error(err))
+			logger.Warn("failed to encode rip spec after episode encode; metadata may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+			)
 		}
 	}
 

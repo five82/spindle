@@ -35,7 +35,11 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 
 	stats, err := m.store.Stats(ctx)
 	if err != nil {
-		m.logger.Warn("failed to read queue stats", logging.Error(err))
+		m.logger.Warn("failed to read queue stats; status may be stale",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "queue_stats_failed"),
+			logging.String(logging.FieldErrorHint, "check queue database access"),
+		)
 	}
 
 	health := make(map[string]stage.Health, len(stageSet))

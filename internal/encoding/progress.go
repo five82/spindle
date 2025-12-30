@@ -90,7 +90,11 @@ func loadEncodingSnapshot(logger *slog.Logger, raw string) encodingstate.Snapsho
 	snapshot, err := encodingstate.Unmarshal(raw)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("failed to parse encoding snapshot", logging.Error(err))
+			logger.Warn("failed to parse encoding snapshot; progress details may be reset",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "encoding_snapshot_parse_failed"),
+				logging.String(logging.FieldErrorHint, "check encoding_details_json schema changes"),
+			)
 		}
 		return encodingstate.Snapshot{}
 	}

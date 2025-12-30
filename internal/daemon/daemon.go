@@ -148,7 +148,10 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}
 
 	d.running.Store(true)
-	d.logger.Info("spindle daemon started", logging.String("lock", d.lockPath))
+	d.logger.Info("spindle daemon started",
+		logging.String("lock", d.lockPath),
+		logging.String(logging.FieldEventType, "daemon_start"),
+	)
 	return nil
 }
 
@@ -170,11 +173,17 @@ func (d *Daemon) Stop() {
 	}
 	d.workflow.Stop()
 	if err := d.lock.Unlock(); err != nil {
-		d.logger.Warn("failed to release daemon lock", logging.Error(err))
+		d.logger.Warn("failed to release daemon lock",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "daemon_lock_release_failed"),
+			logging.String("impact", "stale lock may block future daemon starts"),
+			logging.String(logging.FieldErrorHint, "Run spindle stop again or remove the lock file manually"))
 	}
 	d.ctx = nil
 	d.running.Store(false)
-	d.logger.Info("spindle daemon stopped")
+	d.logger.Info("spindle daemon stopped",
+		logging.String(logging.FieldEventType, "daemon_stop"),
+	)
 }
 
 // Close releases resources held by the daemon.
@@ -409,10 +418,18 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) error {
 			fields = append(fields, logging.String("detail", status.Detail))
 		}
 		if status.Optional {
-			fields = append(fields, logging.Bool("optional", true))
-			d.logger.Warn("optional dependency unavailable", logging.Args(fields...)...)
+			fields = append(fields,
+				logging.Bool("optional", true),
+				logging.String(logging.FieldEventType, "dependency_unavailable"),
+				logging.String(logging.FieldErrorHint, "install the dependency or disable the feature in config"),
+			)
+			d.logger.Warn("optional dependency unavailable; related features disabled", logging.Args(fields...)...)
 		} else {
-			d.logger.Error("required dependency unavailable", logging.Args(fields...)...)
+			fields = append(fields,
+				logging.String(logging.FieldEventType, "dependency_unavailable"),
+				logging.String(logging.FieldErrorHint, "install the dependency or update the configured binary path; see README.md"),
+			)
+			d.logger.Error("required dependency unavailable; daemon startup blocked", logging.Args(fields...)...)
 			if d.notifier != nil {
 				_ = d.notifier.Publish(ctx, notifications.EventError, notifications.Payload{
 					"context": fmt.Sprintf("dependency %s", status.Name),

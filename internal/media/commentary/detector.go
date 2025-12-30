@@ -189,7 +189,12 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 
 		candSpeech, err := analyzeSpeech(ctx, ffmpegBinary, path, cand.stream.Index, windows)
 		if err != nil {
-			logger.Warn("commentary candidate analysis failed", logging.Int("stream", cand.stream.Index), logging.Error(err))
+			logger.Warn("commentary candidate analysis failed; candidate dropped",
+				logging.Int("stream", cand.stream.Index),
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "commentary_analysis_failed"),
+				logging.String(logging.FieldErrorHint, "verify ffmpeg access and try re-encoding or disable commentary detection"),
+			)
 			decision.Include = false
 			decision.Reason = "analysis_failed"
 			decisions = append(decisions, decision)
@@ -203,10 +208,11 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			failure := classifyFingerprintFailure(err)
 			logger.Warn("commentary candidate fingerprint failed",
 				logging.Int("stream", cand.stream.Index),
+				logging.String(logging.FieldEventType, "commentary_fingerprint_failed"),
 				logging.String("cause", failure.Cause),
 				logging.String("attention", failure.Attention),
 				logging.String("impact", "candidate_dropped"),
-				logging.String("hint", failure.Hint),
+				logging.String(logging.FieldErrorHint, failure.Hint),
 				logging.Error(err),
 			)
 			decision.Include = false

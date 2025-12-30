@@ -98,7 +98,11 @@ func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitle
 		if err != nil {
 			lastErr := err
 			if s.logger != nil {
-				s.logger.Warn("opensubtitles search variant failed", logging.Error(err))
+				s.logger.Warn("opensubtitles search variant failed; trying fallback query",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "opensubtitles_search_failed"),
+					logging.String(logging.FieldErrorHint, "check OpenSubtitles credentials and connectivity"),
+				)
 			}
 			if idx == len(unique)-1 {
 				return opensubtitles.SearchResponse{}, lastErr
@@ -137,6 +141,8 @@ func (s *Service) searchEpisodeWithVariants(ctx context.Context, base opensubtit
 					logging.Int("season", season),
 					logging.Int("episode", episode),
 					logging.Int("attempt", attempt+1),
+					logging.String(logging.FieldEventType, "opensubtitles_no_candidates"),
+					logging.String(logging.FieldErrorHint, "verify episode metadata and OpenSubtitles language filters"),
 				)
 			}
 			continue

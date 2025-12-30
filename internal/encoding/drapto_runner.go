@@ -51,13 +51,21 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 	snapshot.EpisodeIndex = episodeIndex
 	snapshot.EpisodeCount = episodeCount
 	if raw, err := snapshot.Marshal(); err != nil {
-		jobLogger.Warn("failed to marshal encoding snapshot", logging.Error(err))
+		jobLogger.Warn("failed to marshal encoding snapshot; progress details may be stale",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "encoding_snapshot_marshal_failed"),
+			logging.String(logging.FieldErrorHint, "check encoding_details_json schema changes"),
+		)
 	} else if raw != "" {
 		copy := *item
 		copy.EncodingDetailsJSON = raw
 		copy.ActiveEpisodeKey = episodeKey
 		if err := r.store.UpdateProgress(ctx, &copy); err != nil {
-			jobLogger.Warn("failed to persist encoding job context", logging.Error(err))
+			jobLogger.Warn("failed to persist encoding job context; progress may be incomplete",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "encoding_job_context_persist_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+			)
 		} else {
 			*item = copy
 		}
@@ -75,7 +83,11 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 		}
 		if applyDraptoUpdate(&snapshot, update, message) {
 			if raw, err := snapshot.Marshal(); err != nil {
-				jobLogger.Warn("failed to marshal encoding snapshot", logging.Error(err))
+				jobLogger.Warn("failed to marshal encoding snapshot; progress details may be stale",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "encoding_snapshot_marshal_failed"),
+					logging.String(logging.FieldErrorHint, "check encoding_details_json schema changes"),
+				)
 			} else {
 				copy.EncodingDetailsJSON = raw
 			}
@@ -105,7 +117,11 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 			lastPersisted = now
 		}
 		if err := r.store.UpdateProgress(ctx, &copy); err != nil {
-			jobLogger.Warn("failed to persist encoding progress", logging.Error(err))
+			jobLogger.Warn("failed to persist encoding progress; queue status may lag",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+			)
 		}
 		*item = copy
 	}
@@ -442,6 +458,15 @@ func warnWithJob(logger *slog.Logger, label, message string, attrs ...logging.At
 	if logger == nil {
 		return
 	}
+	if !hasAttrKey(attrs, logging.FieldEventType) {
+		attrs = append(attrs, logging.String(logging.FieldEventType, "drapto_warning"))
+	}
+	if !hasAttrKey(attrs, logging.FieldErrorHint) {
+		attrs = append(attrs, logging.String(logging.FieldErrorHint, "Review Drapto warnings and encoding logs"))
+	}
+	if !hasAttrKey(attrs, "impact") {
+		attrs = append(attrs, logging.String("impact", "encoding completed with warnings"))
+	}
 	decorated := append([]logging.Attr{logging.String("job", label)}, attrs...)
 	logger.Warn(message, logging.Args(decorated...)...)
 }
@@ -452,6 +477,15 @@ func errorWithJob(logger *slog.Logger, label, message string, attrs ...logging.A
 	}
 	decorated := append([]logging.Attr{logging.String("job", label)}, attrs...)
 	logger.Error(message, logging.Args(decorated...)...)
+}
+
+func hasAttrKey(attrs []logging.Attr, key string) bool {
+	for _, attr := range attrs {
+		if attr.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func formatResolution(resolution, category string) string {

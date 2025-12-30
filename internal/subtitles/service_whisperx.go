@@ -143,7 +143,11 @@ func (s *Service) formatWithStableTS(ctx context.Context, whisperJSON, outputPat
 func (s *Service) reshapeSubtitles(ctx context.Context, whisperSRT, whisperJSON, outputPath, language string, totalDuration float64) error {
 	if err := s.formatWithStableTS(ctx, whisperJSON, outputPath, normalizeWhisperLanguage(language)); err != nil {
 		if s.logger != nil {
-			s.logger.Warn("stable-ts formatter failed, delivering raw whisper subtitles", logging.Error(err))
+			s.logger.Warn("stable-ts formatter failed, delivering raw whisper subtitles",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "stablets_formatter_failed"),
+				logging.String(logging.FieldErrorHint, "check stable-ts installation and WhisperX outputs"),
+			)
 		}
 		if strings.TrimSpace(whisperSRT) == "" {
 			return err
@@ -198,7 +202,11 @@ func (s *Service) writeToolLog(name string, args []string, stderr string) string
 	toolDir := filepath.Join(logDir, "tool")
 	if err := os.MkdirAll(toolDir, 0o755); err != nil {
 		if s.logger != nil {
-			s.logger.Warn("failed to create tool log directory", logging.Error(err))
+			s.logger.Warn("failed to create tool log directory; tool stderr not captured",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "tool_log_dir_failed"),
+				logging.String(logging.FieldErrorHint, "check log_dir permissions"),
+			)
 		}
 		return ""
 	}
@@ -221,7 +229,11 @@ func (s *Service) writeToolLog(name string, args []string, stderr string) string
 
 	if err := os.WriteFile(path, []byte(payload.String()), 0o644); err != nil {
 		if s.logger != nil {
-			s.logger.Warn("failed to write tool log", logging.Error(err))
+			s.logger.Warn("failed to write tool log; stderr detail lost",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "tool_log_write_failed"),
+				logging.String(logging.FieldErrorHint, "check log_dir permissions"),
+			)
 		}
 		return ""
 	}

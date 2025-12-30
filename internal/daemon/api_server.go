@@ -76,7 +76,11 @@ func (s *apiServer) start(ctx context.Context) error {
 
 	go func() {
 		if err := s.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.log().Error("api server error", slog.String("error", err.Error()))
+			s.log().Error("api server error; API unavailable",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "api_server_error"),
+				logging.String(logging.FieldErrorHint, "check api_bind configuration and port availability"),
+			)
 		}
 	}()
 
@@ -87,7 +91,10 @@ func (s *apiServer) start(ctx context.Context) error {
 		_ = s.server.Shutdown(shutdownCtx)
 	}()
 
-	s.log().Debug("api server listening", slog.String("address", listener.Addr().String()))
+	s.log().Debug("api server listening",
+		slog.String("address", listener.Addr().String()),
+		logging.String(logging.FieldEventType, "api_server_listening"),
+	)
 	return nil
 }
 
@@ -245,7 +252,11 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 		if hub == nil || (firstSeq > 0 && since < firstSeq) {
 			archived, cursor, archErr := archive.ReadSince(since, limit)
 			if archErr != nil {
-				s.log().Warn("log archive read failed", logging.Error(archErr))
+				s.log().Warn("log archive read failed",
+					logging.Error(archErr),
+					logging.String(logging.FieldEventType, "log_archive_read_failed"),
+					logging.String("impact", "older log events may be missing from the response"),
+					logging.String(logging.FieldErrorHint, "Check log directory permissions and available disk space"))
 			} else if len(archived) > 0 {
 				converted = convertLogEvents(archived)
 				next = cursor
@@ -491,7 +502,11 @@ func (s *apiServer) writeJSON(w http.ResponseWriter, status int, payload any) {
 		return
 	}
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		s.log().Error("failed to encode response", slog.String("error", err.Error()))
+		s.log().Error("failed to encode response; client may see empty body",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "api_response_encode_failed"),
+			logging.String(logging.FieldErrorHint, "inspect response payload types for non-serializable values"),
+		)
 	}
 }
 

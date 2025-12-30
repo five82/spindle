@@ -39,6 +39,8 @@ func (s *Service) invokeOpenSubtitles(ctx context.Context, op func() error) erro
 				logging.Int("max_attempts", openSubtitlesMaxRateRetries),
 				logging.Error(err),
 				logging.String("reason", "rate limit or transient network error"),
+				logging.String(logging.FieldEventType, "opensubtitles_rate_limited"),
+				logging.String(logging.FieldErrorHint, "wait for rate limits or check network connectivity"),
 			)
 		}
 		if err := sleepWithContext(ctx, backoff); err != nil {

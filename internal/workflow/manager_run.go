@@ -85,7 +85,11 @@ func (m *Manager) runLane(ctx context.Context, lane *laneState) {
 
 		if lane.runReclaimer {
 			if err := m.heartbeat.ReclaimStaleItems(ctx, logger, lane.processingStatuses); err != nil {
-				logger.Warn("reclaim stale processing failed", logging.Error(err))
+				logger.Warn("reclaim stale processing failed; stuck items may remain",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "heartbeat_reclaim_failed"),
+					logging.String(logging.FieldErrorHint, "check queue database access"),
+				)
 			}
 		}
 
@@ -116,7 +120,11 @@ func (m *Manager) nextItemForLane(ctx context.Context, lane *laneState) (*queue.
 
 func (m *Manager) handleNextItemError(ctx context.Context, logger *slog.Logger, err error) {
 	m.setLastError(err)
-	logger.Error("failed to fetch next queue item", logging.Error(err))
+	logger.Error("failed to fetch next queue item",
+		logging.Error(err),
+		logging.String(logging.FieldEventType, "queue_fetch_failed"),
+		logging.String(logging.FieldErrorHint, "check queue database access"),
+	)
 	select {
 	case <-ctx.Done():
 		return

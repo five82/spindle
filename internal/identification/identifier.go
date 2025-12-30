@@ -45,7 +45,11 @@ type DiscScanner interface {
 func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Identifier {
 	client, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 	if err != nil {
-		logger.Warn("tmdb client initialization failed", logging.Error(err))
+		logger.Warn("tmdb client initialization failed; tmdb lookups disabled",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "tmdb_client_unavailable"),
+			logging.String(logging.FieldErrorHint, "check tmdb_api_key and tmdb_base_url in config"),
+		)
 	}
 	scanner := disc.NewScanner(cfg.MakemkvBinary())
 	return NewIdentifierWithDependencies(cfg, store, logger, client, scanner, notifications.NewService(cfg))
@@ -353,6 +357,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			logger.Warn(
 				"scanner fingerprint missing; using queue fingerprint",
 				logging.String("fallback_fingerprint", fallback),
+				logging.String(logging.FieldEventType, "fingerprint_fallback_used"),
+				logging.String("impact", "identification may be less precise without scanner fingerprint"),
 				logging.String(logging.FieldErrorHint, "Run identification again after confirming MakeMKV can read the disc"),
 			)
 			ripFingerprint = fallback

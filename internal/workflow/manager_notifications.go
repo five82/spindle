@@ -40,7 +40,11 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 		if errors.Is(err, context.Canceled) {
 			m.logger.Debug("daemon shutting down, could not get queue stats for start notification")
 		} else {
-			m.logger.Warn("queue stats unavailable for start notification", logging.Error(err))
+			m.logger.Warn("queue stats unavailable for start notification; notification skipped",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "queue_stats_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+			)
 		}
 		return
 	}
@@ -74,7 +78,11 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 		if errors.Is(err, context.Canceled) {
 			m.logger.Debug("daemon shutting down, could not check queue completion")
 		} else {
-			m.logger.Warn("queue stats unavailable for completion notification", logging.Error(err))
+			m.logger.Warn("queue stats unavailable for completion notification; notification skipped",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "queue_stats_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+			)
 		}
 		return
 	}

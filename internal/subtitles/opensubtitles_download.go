@@ -21,7 +21,11 @@ func (s *Service) fetchOpenSubtitlesPayload(ctx context.Context, req GenerateReq
 	if s.openSubsCache != nil && candidate.FileID > 0 {
 		if cached, ok, err := s.openSubsCache.Load(candidate.FileID); err != nil {
 			if s.logger != nil {
-				s.logger.Warn("opensubtitles cache load failed", logging.Error(err))
+				s.logger.Warn("opensubtitles cache load failed; continuing with network fetch",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "opensubtitles_cache_load_failed"),
+					logging.String(logging.FieldErrorHint, "check opensubtitles_cache_dir permissions"),
+				)
 			}
 		} else if ok {
 			if s.logger != nil {
@@ -63,7 +67,11 @@ func (s *Service) storeOpenSubtitlesPayload(candidate opensubtitles.Subtitle, pa
 		entry.TMDBID = req.Context.EpisodeID()
 	}
 	if _, err := s.openSubsCache.Store(entry, payload.Data); err != nil && s.logger != nil {
-		s.logger.Warn("opensubtitles cache store failed", logging.Error(err))
+		s.logger.Warn("opensubtitles cache store failed; subtitles will re-download next time",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "opensubtitles_cache_store_failed"),
+			logging.String(logging.FieldErrorHint, "check opensubtitles_cache_dir permissions"),
+		)
 	}
 }
 
@@ -94,6 +102,8 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 			s.logger.Warn("ffsubsync alignment skipped",
 				logging.Error(err),
 				logging.String("source_file", cleanedPath),
+				logging.String(logging.FieldEventType, "ffsubsync_skipped"),
+				logging.String(logging.FieldErrorHint, "install ffsubsync or set subtitles_enabled=false"),
 			)
 		}
 	} else if syncedPath != "" {

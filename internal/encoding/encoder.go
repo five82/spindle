@@ -287,7 +287,11 @@ func (e *Encoder) finalizeEncodedItem(item *queue.Item, env ripspec.Envelope, en
 	if encoded, err := env.Encode(); err == nil {
 		item.RipSpecData = encoded
 	} else {
-		logger.Warn("failed to encode rip spec after encoding", logging.Error(err))
+		logger.Warn("failed to encode rip spec after encoding; metadata may be stale",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+			logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+		)
 	}
 
 	item.EncodedFile = encodedPaths[0]

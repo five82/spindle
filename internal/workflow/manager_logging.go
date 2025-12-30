@@ -38,11 +38,19 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 	if item != nil {
 		path, _, err := m.bgLogger.Ensure(item)
 		if err != nil {
-			base.Warn("item log unavailable", logging.Error(err))
+			base.Warn("item log unavailable; falling back to daemon log",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "item_log_unavailable"),
+				logging.String(logging.FieldErrorHint, "check log_dir permissions and disk space"),
+			)
 		} else {
 			bgHandler, logErr := m.bgLogger.CreateHandler(path)
 			if logErr != nil {
-				base.Warn("failed to create item log writer", logging.Error(logErr))
+				base.Warn("failed to create item log writer; falling back to daemon log",
+					logging.Error(logErr),
+					logging.String(logging.FieldEventType, "item_log_writer_failed"),
+					logging.String(logging.FieldErrorHint, "check log_dir permissions and disk space"),
+				)
 			} else {
 				// Item processing should log ONLY to the item log, not the daemon log.
 				// Ensure item_id is baked into the logger so all logs are properly tagged.
