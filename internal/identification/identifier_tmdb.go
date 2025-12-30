@@ -20,9 +20,9 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 	for _, mode := range orders {
 		modeLabels = append(modeLabels, string(mode))
 	}
-	logger.Debug("tmdb search plan",
+	attrs := []logging.Attr{
 		logging.String("query", title),
-		logging.Any("modes", modeLabels),
+		logging.Int("mode_count", len(modeLabels)),
 		logging.Int("year", opts.Year),
 		logging.String("studio", opts.Studio),
 		logging.Int("runtime_minutes", opts.Runtime),
@@ -32,7 +32,11 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 		logging.String("decision_result", "planned"),
 		logging.String("decision_reason", fmt.Sprintf("media_hint=%s", hint.String())),
 		logging.String("decision_options", "search, skip"),
-	)
+	}
+	for idx, modeLabel := range modeLabels {
+		attrs = append(attrs, logging.String(fmt.Sprintf("mode_%d", idx+1), modeLabel))
+	}
+	logger.Debug("tmdb search plan", logging.Args(attrs...)...)
 	for _, mode := range orders {
 		logger.Debug("tmdb query details",
 			logging.String("query", title),

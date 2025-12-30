@@ -3,6 +3,7 @@ package ripping
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"log/slog"
@@ -42,13 +43,19 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 				result = "skipped"
 				reason = "no_episode_titles"
 			}
-			logger.Info(
-				"episode title selection decision",
+			attrs := []logging.Attr{
 				logging.String(logging.FieldDecisionType, "episode_title_selection"),
 				logging.String("decision_result", result),
 				logging.String("decision_reason", reason),
 				logging.String("decision_options", "select, skip"),
-				logging.Any("decision_selected", ids),
+				logging.Int("selected_count", len(ids)),
+			}
+			for _, id := range ids {
+				attrs = append(attrs, logging.String(fmt.Sprintf("selected_%d", id), fmt.Sprintf("%d", id)))
+			}
+			logger.Info(
+				"episode title selection decision",
+				logging.Args(attrs...)...,
 			)
 		}
 		if len(ids) == 0 {
@@ -60,19 +67,21 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 	if selection, ok := ChoosePrimaryTitle(env.Titles); ok {
 		if logger != nil {
 			_, _, candidates, rejects := PrimaryTitleDecisionSummary(env.Titles)
-			logger.Info(
-				"primary title decision",
+			attrs := []logging.Attr{
 				logging.String(logging.FieldDecisionType, "primary_title"),
 				logging.String("decision_result", "selected"),
 				logging.String("decision_reason", "primary_title_selector"),
 				logging.String("decision_options", "select, skip"),
 				logging.String("decision_selected", fmt.Sprintf("%d:%ds", selection.ID, selection.Duration)),
-				logging.Any("decision_candidates", candidates),
-				logging.Any("decision_rejects", rejects),
+				logging.Int("candidate_count", len(candidates)),
+				logging.Int("rejected_count", len(rejects)),
 				logging.Int("title_id", selection.ID),
 				logging.Int("duration_seconds", selection.Duration),
 				logging.String("title_name", strings.TrimSpace(selection.Name)),
-			)
+			}
+			attrs = appendDecisionLines(attrs, "candidate", candidates)
+			attrs = appendDecisionLines(attrs, "rejected", rejects)
+			logger.Info("primary title decision", logging.Args(attrs...)...)
 		}
 		return []int{selection.ID}
 	}
@@ -86,6 +95,33 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 		)
 	}
 	return nil
+}
+
+func appendDecisionLines(attrs []logging.Attr, prefix string, items []string) []logging.Attr {
+	for idx, item := range items {
+		key := fmt.Sprintf("%s_%d", prefix, idx+1)
+		if id, ok := decisionItemID(item); ok {
+			key = fmt.Sprintf("%s_%d", prefix, id)
+		}
+		attrs = append(attrs, logging.String(key, item))
+	}
+	return attrs
+}
+
+func decisionItemID(value string) (int, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, false
+	}
+	parts := strings.SplitN(trimmed, ":", 2)
+	if len(parts) == 0 {
+		return 0, false
+	}
+	id, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }
 
 // ChoosePrimaryTitle exposes the selector for other packages (e.g. logging during identification).

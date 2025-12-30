@@ -50,15 +50,15 @@ func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env r
 			choices = append(choices, "episodes")
 			decisionReason = "episode_jobs_available"
 		}
-		logger.Info(
-			"encoding job plan",
+		attrs := []logging.Attr{
 			logging.String(logging.FieldDecisionType, "encoding_job_plan"),
 			logging.String("decision_result", ternary(len(jobs) > 0, "episodes", "single_file")),
 			logging.String("decision_reason", decisionReason),
 			logging.String("decision_options", strings.Join(choices, ", ")),
 			logging.Int("job_count", len(jobs)),
-			logging.String("job_episode_keys", summarizeEncodeJobs(jobs)),
-		)
+		}
+		attrs = appendEncodeJobLines(attrs, jobs)
+		logger.Info("encoding job plan", logging.Args(attrs...)...)
 	}
 
 	sampleSource := strings.TrimSpace(item.RippedFile)
@@ -118,17 +118,35 @@ func buildEncodeJobs(env ripspec.Envelope, encodedDir string) ([]encodeJob, erro
 	return jobs, nil
 }
 
-func summarizeEncodeJobs(jobs []encodeJob) string {
+const maxLoggedEncodeJobs = 6
+
+func appendEncodeJobLines(attrs []logging.Attr, jobs []encodeJob) []logging.Attr {
 	if len(jobs) == 0 {
-		return ""
+		return attrs
 	}
-	keys := make([]string, 0, len(jobs))
-	for _, job := range jobs {
-		key := strings.TrimSpace(job.Episode.Key)
-		if key == "" {
-			key = fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
-		}
-		keys = append(keys, strings.ToLower(key))
+	limit := len(jobs)
+	if limit > maxLoggedEncodeJobs {
+		limit = maxLoggedEncodeJobs
+		attrs = append(attrs, logging.Int("job_hidden_count", len(jobs)-limit))
 	}
-	return strings.Join(keys, ", ")
+	for idx := 0; idx < limit; idx++ {
+		attrs = append(attrs, logging.String(fmt.Sprintf("job_%d", idx+1), formatEncodeJobValue(jobs[idx])))
+	}
+	return attrs
+}
+
+func formatEncodeJobValue(job encodeJob) string {
+	key := strings.TrimSpace(job.Episode.Key)
+	if key == "" {
+		key = fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
+	}
+	source := filepath.Base(job.Source)
+	if source == "" {
+		source = "unknown"
+	}
+	output := filepath.Base(job.Output)
+	if output == "" {
+		output = "unknown"
+	}
+	return fmt.Sprintf("%s | %s -> %s", strings.ToUpper(key), source, output)
 }

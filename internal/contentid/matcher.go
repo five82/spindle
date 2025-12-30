@@ -212,18 +212,26 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	}
 	candidatePlan := deriveCandidateEpisodes(env, seasonDetails, ctxData.DiscNumber)
 	if m.logger != nil {
-		m.logger.Debug("content id candidate episodes",
+		options := candidatePlan.Options()
+		attrs := []logging.Attr{
 			logging.String(logging.FieldEventType, "decision_summary"),
 			logging.String(logging.FieldDecisionType, "contentid_candidates"),
 			logging.String("decision_result", "selected"),
 			logging.String("decision_reason", "derived_from_ripspec"),
 			logging.String("decision_options", "match, skip"),
-			logging.Any("decision_selected", candidatePlan.Episodes),
-			logging.Any("decision_candidates", candidatePlan.Options()),
-			logging.Any("decision_sources", candidatePlan.Sources),
+			logging.Int("selected_count", len(candidatePlan.Episodes)),
+			logging.Int("source_count", len(candidatePlan.Sources)),
 			logging.Int("disc_number", ctxData.DiscNumber),
 			logging.Int("season_episodes", len(seasonDetails.Episodes)),
-		)
+		}
+		for _, episode := range candidatePlan.Episodes {
+			attrs = append(attrs, logging.String(fmt.Sprintf("selected_%02d", episode), fmt.Sprintf("E%02d", episode)))
+		}
+		for idx, source := range candidatePlan.Sources {
+			attrs = append(attrs, logging.String(fmt.Sprintf("source_%d", idx+1), source))
+		}
+		attrs = appendCandidatePlanOptions(attrs, options)
+		m.logger.Debug("content id candidate episodes", logging.Args(attrs...)...)
 	}
 	refPrints, err := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, candidatePlan.Episodes, progress)
 	if err != nil {
@@ -241,22 +249,39 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
 	if m.logger != nil {
-		matchSummaries := make([]string, 0, len(matches))
-		for _, match := range matches {
-			matchSummaries = append(matchSummaries, formatMatchSummary(match))
-		}
-		m.logger.Debug("content id alignment complete",
-			logging.String(logging.FieldEventType, "decision_summary"),
-			logging.String(logging.FieldDecisionType, "contentid_matches"),
-			logging.String("decision_result", "selected"),
-			logging.String("decision_reason", "matches_resolved"),
+		infoAttrs := buildMatchSummaryAttrs(
+			"decision_summary",
+			"contentid_matches",
+			"selected",
+			"matches_resolved",
+			matches,
+			maxLoggedContentIDMatches,
+		)
+		infoAttrs = append(infoAttrs,
 			logging.String("decision_options", "match, review"),
-			logging.Any("decision_selected", matchSummaries),
 			logging.Int("episodes_available", len(env.Episodes)),
 			logging.Int("rip_transcripts", len(ripPrints)),
 			logging.Int("reference_subtitles", len(refPrints)),
 			logging.Int("matched_episodes", len(matches)),
 		)
+		m.logger.Info("content id alignment complete", logging.Args(infoAttrs...)...)
+
+		debugAttrs := buildMatchSummaryAttrs(
+			"decision_summary_full",
+			"contentid_matches",
+			"selected",
+			"matches_resolved",
+			matches,
+			0,
+		)
+		debugAttrs = append(debugAttrs,
+			logging.String("decision_options", "match, review"),
+			logging.Int("episodes_available", len(env.Episodes)),
+			logging.Int("rip_transcripts", len(ripPrints)),
+			logging.Int("reference_subtitles", len(refPrints)),
+			logging.Int("matched_episodes", len(matches)),
+		)
+		m.logger.Debug("content id alignment complete", logging.Args(debugAttrs...)...)
 	}
 	return true, nil
 }
@@ -507,7 +532,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		}
 		candidate := resp.Subtitles[0]
 		if m.logger != nil {
-			m.logger.Debug("opensubtitles reference selection",
+			attrs := []logging.Attr{
 				logging.String(logging.FieldEventType, "decision_summary"),
 				logging.String(logging.FieldDecisionType, "opensubtitles_reference_pick"),
 				logging.String("decision_result", "selected"),
@@ -520,6 +545,12 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 				logging.String("language", strings.TrimSpace(candidate.Language)),
 				logging.Int("downloads", candidate.Downloads),
 				logging.String("release", strings.TrimSpace(candidate.Release)),
+			}
+			if len(resp.Subtitles) > 1 {
+				attrs = append(attrs, logging.Int("candidate_hidden_count", len(resp.Subtitles)-1))
+			}
+			m.logger.Debug("opensubtitles reference selection",
+				logging.Args(attrs...)...,
 			)
 		}
 		var (
@@ -921,6 +952,68 @@ func formatMatchSummary(match matchResult) string {
 		match.SubtitleFileID,
 		strings.TrimSpace(match.SubtitleLanguage),
 	)
+}
+
+const maxLoggedContentIDMatches = 6
+
+func buildMatchSummaryAttrs(eventType, decisionType, result, reason string, matches []matchResult, limit int) []logging.Attr {
+	attrs := []logging.Attr{
+		logging.String(logging.FieldEventType, eventType),
+		logging.String(logging.FieldDecisionType, decisionType),
+		logging.String("decision_result", result),
+		logging.String("decision_reason", reason),
+		logging.Int("selected_count", len(matches)),
+	}
+	if limit <= 0 || limit > len(matches) {
+		limit = len(matches)
+	}
+	if limit < len(matches) {
+		attrs = append(attrs, logging.Int("selected_hidden_count", len(matches)-limit))
+	}
+	for idx := 0; idx < limit; idx++ {
+		match := matches[idx]
+		key := fmt.Sprintf("selected_%02d", match.TargetEpisode)
+		if match.TargetEpisode <= 0 {
+			key = fmt.Sprintf("selected_%d", idx+1)
+		}
+		attrs = append(attrs, logging.String(key, formatMatchSummary(match)))
+	}
+	return attrs
+}
+
+func appendCandidatePlanOptions(attrs []logging.Attr, options map[string]any) []logging.Attr {
+	if len(options) == 0 {
+		return attrs
+	}
+	keys := make([]string, 0, len(options))
+	for key := range options {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	attrs = append(attrs, logging.Int("candidate_count", len(keys)))
+	for _, key := range keys {
+		label := fmt.Sprintf("candidate_%s", key)
+		attrs = append(attrs, logging.String(label, formatCandidateOptionValue(options[key])))
+	}
+	return attrs
+}
+
+func formatCandidateOptionValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return "none"
+	case []int:
+		if len(typed) == 0 {
+			return "none"
+		}
+		parts := make([]string, 0, len(typed))
+		for _, v := range typed {
+			parts = append(parts, fmt.Sprintf("%d", v))
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return fmt.Sprint(value)
+	}
 }
 
 func findEpisodeByNumber(season *tmdb.SeasonDetails, number int) (tmdb.Episode, bool) {

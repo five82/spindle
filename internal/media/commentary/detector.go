@@ -306,7 +306,8 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 		infoAttrs = append(infoAttrs, logging.String(key, formatDecisionValue(decision, reason)))
 	}
 	if len(reasonCounts) > 0 {
-		infoAttrs = append(infoAttrs, logging.Any("reason_counts", reasonCounts))
+		infoAttrs = append(infoAttrs, logging.Int("reason_count", len(reasonCounts)))
+		infoAttrs = appendReasonCounts(infoAttrs, "reason", reasonCounts)
 	}
 
 	logger.Info("commentary selection summary",
@@ -321,7 +322,8 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			debugAttrs = append(debugAttrs, logging.String(fmt.Sprintf("prefilter_reject_%d", idx+1), rejection))
 		}
 		if len(prefilterReasonCounts) > 0 {
-			debugAttrs = append(debugAttrs, logging.Any("prefilter_reason_counts", prefilterReasonCounts))
+			debugAttrs = append(debugAttrs, logging.Int("prefilter_reason_count", len(prefilterReasonCounts)))
+			debugAttrs = appendReasonCounts(debugAttrs, "prefilter_reason", prefilterReasonCounts)
 		}
 		debugAttrs = append(debugAttrs, logging.Group("thresholds",
 			logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
@@ -389,6 +391,22 @@ func formatCandidateValue(cand candidate) string {
 		durationLabel = "unknown"
 	}
 	return fmt.Sprintf("%s | %dch | %s | %s", lang, cand.channels, durationLabel, title)
+}
+
+func appendReasonCounts(attrs []logging.Attr, prefix string, counts map[string]int) []logging.Attr {
+	if len(counts) == 0 {
+		return attrs
+	}
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		label := fmt.Sprintf("%s_%s", prefix, key)
+		attrs = append(attrs, logging.Int(label, counts[key]))
+	}
+	return attrs
 }
 
 func formatPrefilterSummary(decision candidateDecision, reason string) string {

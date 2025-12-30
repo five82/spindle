@@ -316,23 +316,29 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			)
 		}
 		titleIDs = r.selectTitleIDs(item, logger)
-		logger.Debug(
-			"launching makemkv rip",
+		launchAttrs := []logging.Attr{
 			logging.String("destination", destDir),
-			logging.Any("title_ids", titleIDs),
 			logging.Int("title_count", len(titleIDs)),
-		)
+		}
+		for _, id := range titleIDs {
+			launchAttrs = append(launchAttrs, logging.String(fmt.Sprintf("title_%d", id), fmt.Sprintf("%d", id)))
+		}
+		logger.Debug("launching makemkv rip", logging.Args(launchAttrs...)...)
 		makemkvStart := time.Now()
 		path, err := r.client.Rip(ctx, item.DiscTitle, item.SourcePath, destDir, titleIDs, progressCB)
 		makemkvDuration = time.Since(makemkvStart)
 		if err != nil {
-			logger.Error("makemkv rip failed",
+			errorAttrs := []logging.Attr{
 				logging.Error(err),
 				logging.Duration("makemkv_duration", makemkvDuration),
-				logging.Any("title_ids", titleIDs),
 				logging.String(logging.FieldEventType, "makemkv_rip_failed"),
 				logging.String(logging.FieldErrorHint, "check disc readability and MakeMKV logs"),
-			)
+				logging.Int("title_count", len(titleIDs)),
+			}
+			for _, id := range titleIDs {
+				errorAttrs = append(errorAttrs, logging.String(fmt.Sprintf("title_%d", id), fmt.Sprintf("%d", id)))
+			}
+			logger.Error("makemkv rip failed", logging.Args(errorAttrs...)...)
 			return services.Wrap(
 				services.ErrExternalTool,
 				"ripping",

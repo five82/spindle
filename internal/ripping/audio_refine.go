@@ -62,12 +62,18 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	if totalAudio <= 1 {
 		if logger != nil {
 			candidates, _ := summarizeAudioCandidates(probe.Streams)
-			logger.Info("audio selection decision",
+			attrs := []logging.Attr{
 				logging.String(logging.FieldDecisionType, "audio_selection"),
 				logging.String("decision_result", "skipped"),
 				logging.String("decision_reason", "single_audio_stream"),
 				logging.String("decision_options", "select, skip"),
-				logging.Any("decision_candidates", candidates),
+				logging.Int("candidate_count", len(candidates)),
+			}
+			for _, candidate := range candidates {
+				attrs = append(attrs, logging.String(fmt.Sprintf("candidate_%d", candidate.Index), candidate.Value))
+			}
+			logger.Info("audio selection decision",
+				logging.Args(attrs...)...,
 			)
 		}
 		return nil
@@ -78,17 +84,30 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	}
 	if logger != nil {
 		candidates, hasEnglish := summarizeAudioCandidates(probe.Streams)
+		candidateByIndex := make(map[int]string, len(candidates))
+		for _, candidate := range candidates {
+			candidateByIndex[candidate.Index] = candidate.Value
+		}
 		reason := "english_preferred"
 		if !hasEnglish {
 			reason = "fallback_first_audio"
 		}
-		logger.Info("audio selection decision",
+		attrs := []logging.Attr{
 			logging.String(logging.FieldDecisionType, "audio_selection"),
 			logging.String("decision_result", "selected"),
 			logging.String("decision_reason", reason),
 			logging.String("decision_options", "select, skip"),
 			logging.String("decision_selected", selection.PrimaryLabel()),
-			logging.Any("decision_candidates", candidates),
+			logging.Int("candidate_count", len(candidates)),
+		}
+		for _, candidate := range candidates {
+			attrs = append(attrs, logging.String(fmt.Sprintf("candidate_%d", candidate.Index), candidate.Value))
+		}
+		if selectedValue, ok := candidateByIndex[selection.PrimaryIndex]; ok {
+			attrs = append(attrs, logging.String(fmt.Sprintf("selected_%d", selection.PrimaryIndex), selectedValue+" | primary"))
+		}
+		logger.Info("audio selection decision",
+			logging.Args(attrs...)...,
 		)
 	}
 
@@ -136,18 +155,26 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		return fmt.Errorf("refine audio: finalize remux: %w", err)
 	}
 
-	fields := []any{
+	fields := []logging.Attr{
 		logging.String("primary_audio", selection.PrimaryLabel()),
 		logging.Int("kept_audio_streams", len(selection.KeepIndices)),
+		logging.Int("commentary_count", len(commentaryIndices)),
+		logging.Int("removed_count", len(selection.RemovedIndices)),
 	}
 	if len(commentaryIndices) > 0 {
 		sort.Ints(commentaryIndices)
-		fields = append(fields, logging.Any("commentary_indices", commentaryIndices))
+		for _, idx := range commentaryIndices {
+			fields = append(fields, logging.String(fmt.Sprintf("commentary_%d", idx), fmt.Sprintf("%d", idx)))
+		}
 	}
 	if len(selection.RemovedIndices) > 0 {
-		fields = append(fields, logging.Any("removed_audio_indices", selection.RemovedIndices))
+		removed := append([]int(nil), selection.RemovedIndices...)
+		sort.Ints(removed)
+		for _, idx := range removed {
+			fields = append(fields, logging.String(fmt.Sprintf("removed_%d", idx), fmt.Sprintf("%d", idx)))
+		}
 	}
-	logger.Info("refined ripped audio tracks", fields...)
+	logger.Info("refined ripped audio tracks", logging.Args(fields...)...)
 	return nil
 }
 
@@ -283,51 +310,56 @@ func needsCommentaryDispositionFix(streams []ffprobe.Stream, commentaryTitles ma
 	return false
 }
 
-func summarizeAudioCandidates(streams []ffprobe.Stream) ([]string, bool) {
-	candidates := make([]string, 0)
+type audioCandidate struct {
+	Index int
+	Value string
+}
+
+func summarizeAudioCandidates(streams []ffprobe.Stream) ([]audioCandidate, bool) {
+	candidates := make([]audioCandidate, 0)
 	hasEnglish := false
 	for _, stream := range streams {
 		if !strings.EqualFold(stream.CodecType, "audio") {
 			continue
 		}
-		lang := audioLanguage(stream.Tags)
-		if strings.HasPrefix(lang, "en") {
+		value, isEnglish := formatAudioCandidateValue(stream)
+		if isEnglish {
 			hasEnglish = true
 		}
-		langLabel := lang
-		if langLabel == "" {
-			langLabel = "und"
-		}
-		codec := strings.TrimSpace(stream.CodecLong)
-		if codec == "" {
-			codec = strings.TrimSpace(stream.CodecName)
-		}
-		if codec == "" {
-			codec = "unknown"
-		}
-		title := audioTitle(stream.Tags)
-		titleLabel := ""
-		if title != "" {
-			titleLabel = " | " + title
-		}
-		defaultLabel := ""
-		if stream.Disposition != nil && stream.Disposition["default"] == 1 {
-			defaultLabel = " default"
-		}
-		channelLabel := "unknown"
-		if stream.Channels > 0 {
-			channelLabel = fmt.Sprintf("%dch", stream.Channels)
-		}
-		candidates = append(candidates, fmt.Sprintf("#%d (%s): %s %s%s%s",
-			stream.Index,
-			langLabel,
-			codec,
-			channelLabel,
-			defaultLabel,
-			titleLabel,
-		))
+		candidates = append(candidates, audioCandidate{
+			Index: stream.Index,
+			Value: value,
+		})
 	}
 	return candidates, hasEnglish
+}
+
+func formatAudioCandidateValue(stream ffprobe.Stream) (string, bool) {
+	lang := audioLanguage(stream.Tags)
+	isEnglish := strings.HasPrefix(lang, "en")
+	if lang == "" {
+		lang = "und"
+	}
+	codec := strings.TrimSpace(stream.CodecLong)
+	if codec == "" {
+		codec = strings.TrimSpace(stream.CodecName)
+	}
+	if codec == "" {
+		codec = "unknown"
+	}
+	channelLabel := "unknown"
+	if stream.Channels > 0 {
+		channelLabel = fmt.Sprintf("%dch", stream.Channels)
+	}
+	parts := []string{lang, codec, channelLabel}
+	if stream.Disposition != nil && stream.Disposition["default"] == 1 {
+		parts = append(parts, "default")
+	}
+	title := strings.TrimSpace(audioTitle(stream.Tags))
+	if title != "" {
+		parts = append(parts, title)
+	}
+	return strings.Join(parts, " | "), isEnglish
 }
 
 func audioLanguage(tags map[string]string) string {

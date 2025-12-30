@@ -3,6 +3,7 @@ package identification
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -119,7 +120,7 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		logging.String("decision_result", decisionResult),
 		logging.String("decision_reason", decisionReason),
 		logging.String("decision_options", "accept, reject"),
-		logging.Any("decision_candidates", topCandidates),
+		logging.Int("candidate_count", len(topCandidates)),
 		logging.String("decision_selected", fmt.Sprintf("%d:%s", best.ID, title)),
 		logging.Int("total_results", len(response.Results)),
 		logging.Float64("best_score", bestScore),
@@ -130,6 +131,16 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		logging.String("query", query),
 		logging.String("query_normalized", queryNormalized),
 	}
+	if len(candidates) > len(topCandidates) {
+		attrs = append(attrs, logging.Int("candidate_hidden_count", len(candidates)-len(topCandidates)))
+	}
+	for idx, candidate := range topCandidates {
+		key := fmt.Sprintf("candidate_%d", idx+1)
+		if id, ok := decisionItemID(candidate); ok {
+			key = fmt.Sprintf("candidate_%d", id)
+		}
+		attrs = append(attrs, logging.String(key, candidate))
+	}
 	if exactMatch {
 		attrs = append(attrs, logging.Float64("vote_average_threshold", 2.0))
 	} else {
@@ -139,7 +150,14 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		}
 	}
 	if len(rejects) > 0 {
-		attrs = append(attrs, logging.Any("decision_rejects", rejects))
+		attrs = append(attrs, logging.Int("rejected_count", len(rejects)))
+		for idx, reject := range rejects {
+			key := fmt.Sprintf("rejected_%d", idx+1)
+			if id, ok := decisionItemID(reject); ok {
+				key = fmt.Sprintf("rejected_%d", id)
+			}
+			attrs = append(attrs, logging.String(key, reject))
+		}
 	}
 	logger.Info("tmdb confidence decision", logging.Args(attrs...)...)
 
@@ -223,4 +241,20 @@ func summarizeCandidates(candidates []scoredCandidate, limit int) []string {
 		out = append(out, fmt.Sprintf("%d:%s (score=%.2f votes=%.1f/%d match=%s)", cand.ID, label, cand.Score, cand.VoteAverage, cand.VoteCount, cand.MatchType))
 	}
 	return out
+}
+
+func decisionItemID(value string) (int, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, false
+	}
+	parts := strings.SplitN(trimmed, ":", 2)
+	if len(parts) == 0 {
+		return 0, false
+	}
+	id, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }

@@ -2,10 +2,13 @@ package logging
 
 import (
 	"log/slog"
+	"sort"
+	"strconv"
 	"strings"
 )
 
 type infoField struct {
+	key   string
 	label string
 	value string
 }
@@ -76,8 +79,6 @@ var infoHighlightKeys = []string{
 	"preset_reason",
 	"decision_result",
 	"decision_selected",
-	"decision_candidates",
-	"decision_rejects",
 	// Stage summary fields
 	"stage_duration",
 	"scan_duration",
@@ -143,7 +144,7 @@ func selectInfoFields(attrs []kv, limit int, includeDebug bool) ([]infoField, in
 				hidden++
 				break
 			}
-			result = append(result, infoField{label: displayLabel(attr.key), value: val})
+			result = append(result, infoField{key: attr.key, label: displayLabel(attr.key), value: val})
 			break
 		}
 	}
@@ -166,13 +167,13 @@ func selectInfoFields(attrs []kv, limit int, includeDebug bool) ([]infoField, in
 			continue
 		}
 		if limit <= 0 || len(result) < limit {
-			result = append(result, infoField{label: displayLabel(attr.key), value: val})
+			result = append(result, infoField{key: attr.key, label: displayLabel(attr.key), value: val})
 		} else if limit > 0 {
 			hidden++
 		}
 	}
 
-	return result, hidden
+	return reorderInfoFields(result), hidden
 }
 
 // formatValueForKey applies smart formatting based on the key name.
@@ -419,10 +420,6 @@ func displayLabel(key string) string {
 		return "Decision"
 	case "decision_selected":
 		return "Selected"
-	case "decision_candidates":
-		return "Candidates"
-	case "decision_rejects":
-		return "Rejected"
 	case "is_movie":
 		return "Movie"
 	case "reason":
@@ -452,6 +449,142 @@ func titleizeKey(key string) string {
 		parts[i] = capitalizeASCII(part)
 	}
 	return strings.Join(parts, " ")
+}
+
+func reorderInfoFields(fields []infoField) []infoField {
+	if len(fields) == 0 {
+		return fields
+	}
+	priorityKeys := []string{
+		FieldEventType,
+		FieldDecisionType,
+		"decision_result",
+		"decision_reason",
+		"decision_options",
+		"decision_selected",
+	}
+	type groupSpec struct {
+		name       string
+		countKey   string
+		itemPrefix string
+	}
+	groups := []groupSpec{
+		{name: "job", countKey: "job_count", itemPrefix: "job_"},
+		{name: "source", countKey: "source_count", itemPrefix: "source_"},
+		{name: "mode", countKey: "mode_count", itemPrefix: "mode_"},
+		{name: "title", countKey: "title_count", itemPrefix: "title_"},
+		{name: "candidate", countKey: "candidate_count", itemPrefix: "candidate_"},
+		{name: "accepted", countKey: "accepted_count", itemPrefix: "accepted_"},
+		{name: "selected", countKey: "selected_count", itemPrefix: "selected_"},
+		{name: "rejected", countKey: "rejected_count", itemPrefix: "rejected_"},
+		{name: "reason", countKey: "reason_count", itemPrefix: "reason_"},
+		{name: "prefilter_reason", countKey: "prefilter_reason_count", itemPrefix: "prefilter_reason_"},
+		{name: "thresholds", countKey: "", itemPrefix: "thresholds."},
+	}
+
+	type groupBucket struct {
+		count *infoField
+		items []infoField
+	}
+	buckets := make(map[string]*groupBucket, len(groups))
+	isGrouped := func(key string) (string, bool) {
+		for _, group := range groups {
+			if group.countKey != "" && key == group.countKey {
+				return group.name, true
+			}
+			if group.itemPrefix != "" && strings.HasPrefix(key, group.itemPrefix) {
+				return group.name, true
+			}
+			if group.name != "" && key == group.name+"_hidden_count" {
+				return group.name, true
+			}
+		}
+		return "", false
+	}
+
+	nonGroup := make([]infoField, 0, len(fields))
+	for _, field := range fields {
+		if field.key == "" {
+			nonGroup = append(nonGroup, field)
+			continue
+		}
+		groupName, ok := isGrouped(field.key)
+		if !ok {
+			nonGroup = append(nonGroup, field)
+			continue
+		}
+		bucket := buckets[groupName]
+		if bucket == nil {
+			bucket = &groupBucket{}
+			buckets[groupName] = bucket
+		}
+		if strings.HasSuffix(field.key, "_count") {
+			fieldCopy := field
+			bucket.count = &fieldCopy
+			continue
+		}
+		bucket.items = append(bucket.items, field)
+	}
+
+	out := make([]infoField, 0, len(fields))
+	used := make([]bool, len(nonGroup))
+	for _, key := range priorityKeys {
+		for idx, field := range nonGroup {
+			if used[idx] || field.key != key {
+				continue
+			}
+			out = append(out, field)
+			used[idx] = true
+			break
+		}
+	}
+	for idx, field := range nonGroup {
+		if used[idx] {
+			continue
+		}
+		out = append(out, field)
+	}
+
+	for _, group := range groups {
+		bucket := buckets[group.name]
+		if bucket == nil {
+			continue
+		}
+		if bucket.count != nil {
+			out = append(out, *bucket.count)
+		}
+		if len(bucket.items) == 0 {
+			continue
+		}
+		sort.Slice(bucket.items, func(i, j int) bool {
+			leftKey := bucket.items[i].key
+			rightKey := bucket.items[j].key
+			leftNum, leftOK := suffixNumber(leftKey)
+			rightNum, rightOK := suffixNumber(rightKey)
+			if leftOK && rightOK && leftNum != rightNum {
+				return leftNum < rightNum
+			}
+			if leftOK != rightOK {
+				return leftOK
+			}
+			return leftKey < rightKey
+		})
+		out = append(out, bucket.items...)
+	}
+
+	return out
+}
+
+func suffixNumber(key string) (int, bool) {
+	idx := strings.LastIndex(key, "_")
+	if idx == -1 || idx == len(key)-1 {
+		return 0, false
+	}
+	value, err := strconv.Atoi(key[idx+1:])
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 func capitalizeASCII(value string) string {

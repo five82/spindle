@@ -54,6 +54,7 @@ See `README.md` for install details, disc mounting notes, and end-user usage.
 - Log output must be clear, human-readable, and aligned to user workflows.
 - Use a consistent visual hierarchy: counts before details, one line per item, and stable labels (e.g., `Candidate 3`, `Accepted 12`) for scanability.
 - INFO should read top-down (summary → candidates → decisions → reason counts); push raw thresholds and prefilter noise to DEBUG.
+- If a list is truncated to top‑N items, add a `*_hidden_count` field to surface how many entries were omitted.
 - INFO logs capture decision points that change the final encoded output or the delivered subtitle artifacts (track selection, subtitle source, encode preset, output mapping). Other decisions belong at DEBUG.
 - Prioritize signal over noise; decide whether a message belongs at INFO or DEBUG before logging it.
 - Keep INFO logs easy to follow: short, structured, and readable at a glance.

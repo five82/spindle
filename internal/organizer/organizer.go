@@ -162,15 +162,15 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			err,
 		)
 	}
-	logger.Info(
-		"organizer job plan",
+	attrs := []logging.Attr{
 		logging.String(logging.FieldDecisionType, "organizer_job_plan"),
 		logging.String("decision_result", ternary(len(jobs) > 0, "episodes", "single_file")),
 		logging.String("decision_reason", ternary(len(jobs) > 0, "episode_assets", "single_media_asset")),
 		logging.String("decision_options", "episodes, single_file"),
 		logging.Int("job_count", len(jobs)),
-		logging.String("job_episode_keys", summarizeOrganizeJobs(jobs)),
-	)
+	}
+	attrs = appendOrganizeJobLines(attrs, jobs)
+	logger.Info("organizer job plan", logging.Args(attrs...)...)
 	if len(jobs) > 0 {
 		return o.organizeEpisodes(ctx, item, &env, jobs, logger, stageStart)
 	}
@@ -379,19 +379,33 @@ func buildOrganizeJobs(env ripspec.Envelope, base queue.Metadata) ([]organizeJob
 	return jobs, nil
 }
 
-func summarizeOrganizeJobs(jobs []organizeJob) string {
+const maxLoggedOrganizeJobs = 6
+
+func appendOrganizeJobLines(attrs []logging.Attr, jobs []organizeJob) []logging.Attr {
 	if len(jobs) == 0 {
-		return ""
+		return attrs
 	}
-	keys := make([]string, 0, len(jobs))
-	for _, job := range jobs {
-		key := strings.TrimSpace(job.Episode.Key)
-		if key == "" {
-			key = fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
-		}
-		keys = append(keys, strings.ToLower(key))
+	limit := len(jobs)
+	if limit > maxLoggedOrganizeJobs {
+		limit = maxLoggedOrganizeJobs
+		attrs = append(attrs, logging.Int("job_hidden_count", len(jobs)-limit))
 	}
-	return strings.Join(keys, ", ")
+	for idx := 0; idx < limit; idx++ {
+		attrs = append(attrs, logging.String(fmt.Sprintf("job_%d", idx+1), formatOrganizeJobValue(jobs[idx])))
+	}
+	return attrs
+}
+
+func formatOrganizeJobValue(job organizeJob) string {
+	key := strings.TrimSpace(job.Episode.Key)
+	if key == "" {
+		key = fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
+	}
+	source := filepath.Base(job.Source)
+	if source == "" {
+		source = "unknown"
+	}
+	return fmt.Sprintf("%s | %s", strings.ToUpper(key), source)
 }
 
 func shouldRefreshJellyfin(cfg *config.Config) (bool, string) {

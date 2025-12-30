@@ -11,6 +11,8 @@ import (
 	"spindle/internal/subtitles/opensubtitles"
 )
 
+const maxLoggedOpenSubCandidates = 6
+
 func (s *Service) shouldUseOpenSubtitles() bool {
 	if s == nil || s.config == nil {
 		return false
@@ -192,28 +194,50 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		if err == nil {
 			// Success
 			if s.logger != nil {
-				s.logger.Debug("opensubtitles candidate summary",
-					logging.String(logging.FieldEventType, "decision_summary"),
-					logging.String(logging.FieldDecisionType, "opensubtitles_candidate_summary"),
-					logging.String("decision_result", "selected"),
-					logging.String("decision_reason", "match_found"),
-					logging.Int("candidate_count", len(scored)),
-					logging.Any("decision_candidates", summaryLines),
+				infoAttrs := buildCandidateSummaryAttrs(
+					"decision_summary",
+					"opensubtitles_candidate_summary",
+					"selected",
+					"match_found",
+					summaryLines,
+					maxLoggedOpenSubCandidates,
 				)
+				s.logger.Info("opensubtitles candidate summary", logging.Args(infoAttrs...)...)
+
+				debugAttrs := buildCandidateSummaryAttrs(
+					"decision_summary_full",
+					"opensubtitles_candidate_summary",
+					"selected",
+					"match_found",
+					summaryLines,
+					0,
+				)
+				s.logger.Debug("opensubtitles candidate summary", logging.Args(debugAttrs...)...)
 			}
 			return result, true, nil
 		}
 	}
 
 	if s.logger != nil {
-		s.logger.Debug("opensubtitles candidate summary",
-			logging.String(logging.FieldEventType, "decision_summary"),
-			logging.String(logging.FieldDecisionType, "opensubtitles_candidate_summary"),
-			logging.String("decision_result", "failed"),
-			logging.String("decision_reason", "no_match"),
-			logging.Int("candidate_count", len(scored)),
-			logging.Any("decision_candidates", summaryLines),
+		infoAttrs := buildCandidateSummaryAttrs(
+			"decision_summary",
+			"opensubtitles_candidate_summary",
+			"failed",
+			"no_match",
+			summaryLines,
+			maxLoggedOpenSubCandidates,
 		)
+		s.logger.Info("opensubtitles candidate summary", logging.Args(infoAttrs...)...)
+
+		debugAttrs := buildCandidateSummaryAttrs(
+			"decision_summary_full",
+			"opensubtitles_candidate_summary",
+			"failed",
+			"no_match",
+			summaryLines,
+			0,
+		)
+		s.logger.Debug("opensubtitles candidate summary", logging.Args(debugAttrs...)...)
 	}
 
 	if lastErr != nil {
@@ -225,4 +249,24 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		return GenerateResult{}, false, lastErr
 	}
 	return GenerateResult{}, false, nil
+}
+
+func buildCandidateSummaryAttrs(eventType, decisionType, result, reason string, summaryLines []string, limit int) []logging.Attr {
+	attrs := []logging.Attr{
+		logging.String(logging.FieldEventType, eventType),
+		logging.String(logging.FieldDecisionType, decisionType),
+		logging.String("decision_result", result),
+		logging.String("decision_reason", reason),
+		logging.Int("candidate_count", len(summaryLines)),
+	}
+	if limit <= 0 || limit > len(summaryLines) {
+		limit = len(summaryLines)
+	}
+	if limit < len(summaryLines) {
+		attrs = append(attrs, logging.Int("candidate_hidden_count", len(summaryLines)-limit))
+	}
+	for idx := 0; idx < limit; idx++ {
+		attrs = append(attrs, logging.String(fmt.Sprintf("candidate_%d", idx+1), summaryLines[idx]))
+	}
+	return attrs
 }

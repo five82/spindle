@@ -391,19 +391,33 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			logging.String("content_key", contentKey),
 		)
 	} else if selection, ok, candidates, rejects := rippingPrimaryTitleSummary(titleSpecs); ok {
-		logger.Info(
-			"primary title decision",
+		attrs := []logging.Attr{
 			logging.String(logging.FieldDecisionType, "primary_title"),
 			logging.String("decision_result", "selected"),
 			logging.String("decision_selected", fmt.Sprintf("%d:%ds", selection.ID, selection.Duration)),
-			logging.Any("decision_candidates", candidates),
-			logging.Any("decision_rejects", rejects),
+			logging.Int("candidate_count", len(candidates)),
+			logging.Int("rejected_count", len(rejects)),
 			logging.Int("title_id", selection.ID),
 			logging.Int("duration_seconds", selection.Duration),
 			logging.Int("chapters", selection.Chapters),
 			logging.String("playlist", strings.TrimSpace(selection.Playlist)),
 			logging.Int("segment_count", selection.SegmentCount),
-		)
+		}
+		for idx, candidate := range candidates {
+			key := fmt.Sprintf("candidate_%d", idx+1)
+			if id, ok := decisionItemID(candidate); ok {
+				key = fmt.Sprintf("candidate_%d", id)
+			}
+			attrs = append(attrs, logging.String(key, candidate))
+		}
+		for idx, reject := range rejects {
+			key := fmt.Sprintf("rejected_%d", idx+1)
+			if id, ok := decisionItemID(reject); ok {
+				key = fmt.Sprintf("rejected_%d", id)
+			}
+			attrs = append(attrs, logging.String(key, reject))
+		}
+		logger.Info("primary title decision", logging.Args(attrs...)...)
 	}
 
 	if err := i.validateIdentification(ctx, item); err != nil {
