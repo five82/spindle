@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,8 @@ const (
 	defaultSampleRate          = 16000
 	defaultFrameMs             = 20
 	minSpeechRatioDeltaPrimary = 0.05
+	minRelativeSilenceDelta    = 0.08
+	minRelativeSimilarityDelta = 0.15
 )
 
 // Result captures detected commentary tracks plus per-track decisions.
@@ -134,7 +137,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 
 	candidates, prefilter := evaluateCandidates(probe.Streams, settings, primaryDuration, primaryIndex)
 	decisions := make([]Decision, 0, len(candidates))
-	indices := make([]int, 0)
+	var indices []int
 	candidateIndices := make([]int, 0, len(candidates))
 	prefilterRejections := make([]string, 0)
 	prefilterReasonCounts := make(map[string]int)
@@ -231,12 +234,13 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 		}
 		decision.Include, decision.Reason = classify(decision.Metrics, meta, settings)
 		decisions = append(decisions, decision)
-		if decision.Include {
-			indices = append(indices, cand.stream.Index)
-		}
 	}
 
-	sort.Ints(indices)
+	decisions = applyRelativeScoring(settings, decisions, logger)
+	if whisperxAvailable(cfg) {
+		decisions = applyWhisperXClassification(ctx, cfg, ffmpegBinary, path, windows, workDir, decisions, logger)
+	}
+	indices = indicesFromDecisions(decisions)
 	for _, decision := range decisions {
 		thresholds := []logging.Attr{
 			logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
@@ -348,13 +352,13 @@ func formatDecisionValue(decision Decision, reason string) string {
 	}
 	details := ""
 	switch reason {
-	case "commentary_only", "mixed_commentary", "metadata_commentary":
+	case "commentary_only", "mixed_commentary", "metadata_commentary", "commentary_relative", "whisperx_commentary":
 		details = fmt.Sprintf(" | speech %.0f%% | similarity %.0f%%", decision.Metrics.SpeechRatio*100, decision.Metrics.FingerprintSimilarity*100)
 	case "music_or_silent":
 		details = fmt.Sprintf(" | speech %.0f%% (low)", decision.Metrics.SpeechRatio*100)
 	case "duplicate_downmix":
 		details = fmt.Sprintf(" | similarity %.0f%% (high)", decision.Metrics.FingerprintSimilarity*100)
-	case "audio_description":
+	case "audio_description", "audio_description_outlier", "whisperx_audio_description":
 		details = fmt.Sprintf(" | silence speech %.0f%% | overlap %.0f%% | similarity %.0f%%",
 			decision.Metrics.SpeechInPrimarySilence*100,
 			decision.Metrics.SpeechOverlapWithPrimary*100,
@@ -529,6 +533,18 @@ func classify(metrics Metrics, meta Metadata, cfg config.CommentaryDetection) (b
 	if metrics.FingerprintSimilarity >= cfg.FingerprintSimilarityDuplicate &&
 		math.Abs(metrics.SpeechRatio-metrics.PrimarySpeechRatio) <= minSpeechRatioDeltaPrimary {
 		return false, "duplicate_downmix"
+	}
+	adSimilarityMin := cfg.FingerprintSimilarityDuplicate - 0.10
+	if adSimilarityMin < 0.70 {
+		adSimilarityMin = 0.70
+	}
+	if adSimilarityMin > 0.95 {
+		adSimilarityMin = 0.95
+	}
+	if metrics.FingerprintSimilarity >= adSimilarityMin &&
+		metrics.SpeechInPrimarySilence >= cfg.SpeechInSilenceMax &&
+		metrics.SpeechRatio >= cfg.SpeechRatioMinCommentary {
+		return false, "audio_description"
 	}
 	if metrics.SpeechInPrimarySilence >= cfg.SpeechInSilenceMax &&
 		metrics.SpeechOverlapWithPrimary <= cfg.SpeechOverlapPrimaryMaxAD &&
@@ -977,7 +993,7 @@ func buildFilter(streamIndex int, windows []window) (string, string) {
 }
 
 func runFPcalc(ctx context.Context, path string) ([]int, error) {
-	cmd := exec.CommandContext(ctx, "fpcalc", path) //nolint:gosec
+	cmd := exec.CommandContext(ctx, "fpcalc", "-raw", "-plain", path) //nolint:gosec
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("fpcalc: %w", err)
@@ -985,9 +1001,13 @@ func runFPcalc(ctx context.Context, path string) ([]int, error) {
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "FINGERPRINT=") {
-			values := strings.TrimPrefix(line, "FINGERPRINT=")
-			return parseFingerprint(values), nil
+		if line == "" {
+			continue
+		}
+		line = strings.TrimPrefix(line, "FINGERPRINT=")
+		values := parseFingerprint(line)
+		if len(values) > 0 {
+			return values, nil
 		}
 	}
 	return nil, errors.New("fpcalc: fingerprint missing")
@@ -1016,13 +1036,16 @@ func compareFingerprints(primary, candidate []int) float64 {
 	if len(candidate) < limit {
 		limit = len(candidate)
 	}
-	matches := 0
+	var matches uint64
 	for i := 0; i < limit; i++ {
-		if primary[i] == candidate[i] {
-			matches++
-		}
+		xor := uint32(primary[i]) ^ uint32(candidate[i])
+		matches += uint64(32 - bits.OnesCount32(xor))
 	}
-	return float64(matches) / float64(limit)
+	totalBits := uint64(limit) * 32
+	if totalBits == 0 {
+		return 0
+	}
+	return float64(matches) / float64(totalBits)
 }
 
 func tempWorkDir(path string) (string, func(), error) {

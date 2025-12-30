@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -64,12 +65,17 @@ to a rip cache file/directory.`,
 				return errors.New("no audio streams found for commentary detection")
 			}
 
+			out := cmd.OutOrStdout()
+			start := time.Now()
+			fmt.Fprintf(out, "Commentary Detection Start: %s\n", start.Format("Jan 2 2006 15:04:05 MST"))
 			result, err := commentary.Detect(cmd.Context(), cfg, target, probe, selection.PrimaryIndex, logger)
+			end := time.Now()
+			fmt.Fprintf(out, "Commentary Detection End: %s\n", end.Format("Jan 2 2006 15:04:05 MST"))
+			fmt.Fprintf(out, "Commentary Detection Duration: %s\n", end.Sub(start).Round(time.Millisecond))
 			if err != nil {
 				return err
 			}
 
-			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "Target: %s\n", label)
 			fmt.Fprintf(out, "Primary Audio: %s\n", selection.PrimaryLabel())
 			if len(result.Indices) == 0 {

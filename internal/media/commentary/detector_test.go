@@ -72,6 +72,18 @@ func TestClassifyRules(t *testing.T) {
 
 	metrics = Metrics{
 		SpeechRatio:              0.50,
+		SpeechOverlapWithPrimary: 0.45,
+		SpeechInPrimarySilence:   0.55,
+		FingerprintSimilarity:    0.90,
+		PrimarySpeechRatio:       0.35,
+	}
+	include, reason = classify(metrics, Metadata{}, cfg)
+	if include || reason != "audio_description" {
+		t.Fatalf("expected audio_description exclusion (similarity), got include=%v reason=%q", include, reason)
+	}
+
+	metrics = Metrics{
+		SpeechRatio:              0.50,
 		SpeechOverlapWithPrimary: 0.65,
 		SpeechInPrimarySilence:   0.55,
 		FingerprintSimilarity:    0.05,
@@ -92,6 +104,50 @@ func TestClassifyRules(t *testing.T) {
 	include, reason = classify(metrics, Metadata{}, cfg)
 	if include || reason != "music_or_silent" {
 		t.Fatalf("expected music_or_silent exclusion, got include=%v reason=%q", include, reason)
+	}
+}
+
+func TestCompareFingerprints(t *testing.T) {
+	if got := compareFingerprints([]int{1, 2, 3}, []int{1, 2, 3}); got != 1 {
+		t.Fatalf("expected full similarity, got %v", got)
+	}
+	if got := compareFingerprints([]int{0xffffffff}, []int{0}); got > 0.01 {
+		t.Fatalf("expected near-zero similarity, got %v", got)
+	}
+	if got := compareFingerprints([]int{0x0f0f0f0f}, []int{0x0f0f0f0f}); got != 1 {
+		t.Fatalf("expected full similarity for matching bits, got %v", got)
+	}
+}
+
+func TestApplyRelativeScoring(t *testing.T) {
+	cfg := defaultCommentaryConfig()
+	decisions := []Decision{
+		{
+			Index:   3,
+			Reason:  "ambiguous",
+			Metrics: Metrics{SpeechInPrimarySilence: 0.58, FingerprintSimilarity: 0.83},
+		},
+		{
+			Index:   12,
+			Reason:  "ambiguous",
+			Metrics: Metrics{SpeechInPrimarySilence: 0.57, FingerprintSimilarity: 0.86},
+		},
+		{
+			Index:   13,
+			Reason:  "ambiguous",
+			Metrics: Metrics{SpeechInPrimarySilence: 0.70, FingerprintSimilarity: 0.52},
+		},
+	}
+
+	got := applyRelativeScoring(cfg, decisions, nil)
+	if got[2].Include || got[2].Reason != "audio_description_outlier" {
+		t.Fatalf("expected stream 13 to be audio_description_outlier, got include=%v reason=%q", got[2].Include, got[2].Reason)
+	}
+	if !got[0].Include || got[0].Reason != "commentary_relative" {
+		t.Fatalf("expected stream 3 to be commentary_relative, got include=%v reason=%q", got[0].Include, got[0].Reason)
+	}
+	if !got[1].Include || got[1].Reason != "commentary_relative" {
+		t.Fatalf("expected stream 12 to be commentary_relative, got include=%v reason=%q", got[1].Include, got[1].Reason)
 	}
 }
 
