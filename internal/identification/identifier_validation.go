@@ -106,8 +106,8 @@ func (i *Identifier) logStageSummary(ctx context.Context, item *queue.Item, stag
 		logging.String(logging.FieldEventType, "stage_complete"),
 		logging.Duration("stage_duration", time.Since(stageStart)),
 		logging.Bool("identified", identified),
-		logging.Int("titles_scanned", titleCount),
-		logging.String("final_disc_title", strings.TrimSpace(item.DiscTitle)),
+		logging.Int("title_count", titleCount),
+		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
 	}
 	if identified {
 		attrs = append(attrs, logging.Int64("tmdb_id", tmdbID))

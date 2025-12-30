@@ -36,6 +36,8 @@ var infoHighlightKeys = []string{
 	FieldProgressETA,
 	"command",
 	"error_message",
+	"impact",
+	"next_step",
 	FieldErrorCode,
 	FieldErrorHint,
 	FieldErrorDetailPath,
@@ -96,6 +98,7 @@ var infoHighlightKeys = []string{
 	"cache_used",
 	"cache_decision",
 	"identified",
+	"review_reason",
 	"media_type",
 	"media_title",
 	"reason",
@@ -341,6 +344,10 @@ func displayLabel(key string) string {
 		return "Hint"
 	case FieldErrorDetailPath:
 		return "Error Detail"
+	case "impact":
+		return "Impact"
+	case "next_step":
+		return "Next Step"
 	case FieldItemID:
 		return "Item"
 	case FieldStage:
@@ -404,6 +411,8 @@ func displayLabel(key string) string {
 		return "Cache"
 	case "identified":
 		return "Identified"
+	case "review_reason":
+		return "Review Reason"
 	case "media_type":
 		return "Type"
 	case "media_title":
@@ -469,6 +478,8 @@ func reorderInfoFields(fields []infoField) []infoField {
 		itemPrefix string
 	}
 	groups := []groupSpec{
+		{name: "commentary", countKey: "commentary_count", itemPrefix: "commentary_"},
+		{name: "removed", countKey: "removed_count", itemPrefix: "removed_"},
 		{name: "job", countKey: "job_count", itemPrefix: "job_"},
 		{name: "source", countKey: "source_count", itemPrefix: "source_"},
 		{name: "mode", countKey: "mode_count", itemPrefix: "mode_"},
