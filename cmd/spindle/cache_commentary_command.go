@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -76,6 +78,9 @@ to a rip cache file/directory.`,
 				fmt.Fprintf(out, "Commentary Indices: %v\n", result.Indices)
 			}
 			printCommentaryDecisions(out, result.Decisions)
+			if err := writeCommentarySamples(cmd.Context(), cfg, target, result.Decisions, out); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -204,4 +209,102 @@ func printCommentaryDecisions(out io.Writer, decisions []commentary.Decision) {
 		}
 		fmt.Fprintf(out, "  - #%d (%s) %s — %s — %s\n", decision.Index, meta.Language, tag, reason, title)
 	}
+}
+
+func writeCommentarySamples(ctx context.Context, cfg *config.Config, target string, decisions []commentary.Decision, out io.Writer) error {
+	if len(decisions) == 0 {
+		return nil
+	}
+
+	ffmpegBinary := deps.ResolveFFmpegPath(cfg.DraptoBinary())
+	if strings.TrimSpace(ffmpegBinary) == "" {
+		ffmpegBinary = "ffmpeg"
+	}
+	if _, err := exec.LookPath(ffmpegBinary); err != nil {
+		return fmt.Errorf("ffmpeg not found: %w", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve working directory: %w", err)
+	}
+
+	sorted := append([]commentary.Decision(nil), decisions...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Index < sorted[j].Index })
+
+	fmt.Fprintln(out, "Audio Samples:")
+	for _, decision := range sorted {
+		lang := strings.TrimSpace(decision.Metadata.Language)
+		if lang == "" {
+			lang = "und"
+		}
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = "unknown"
+		}
+		filename := fmt.Sprintf("commentary_candidate_%d_%s_%s.opus", decision.Index, sanitizeToken(lang), sanitizeToken(reason))
+		path := filepath.Join(cwd, filename)
+		if _, err := os.Stat(path); err == nil {
+			fmt.Fprintf(out, "  - Warning: overwriting existing file %s\n", filename)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect output file %q: %w", path, err)
+		}
+
+		title := fmt.Sprintf("Commentary Candidate #%d (%s)", decision.Index, reason)
+		args := []string{
+			"-hide_banner", "-loglevel", "error",
+			"-i", target,
+			"-map", fmt.Sprintf("0:%d", decision.Index),
+			"-t", "600",
+			"-vn", "-sn", "-dn",
+			"-c:a", "libopus",
+			"-b:a", "128k",
+			"-metadata:s:a:0", fmt.Sprintf("title=%s", title),
+			"-metadata:s:a:0", fmt.Sprintf("language=%s", lang),
+			"-y", path,
+		}
+		cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			message := strings.TrimSpace(stderr.String())
+			if message == "" {
+				message = err.Error()
+			}
+			if strings.Contains(strings.ToLower(message), "unknown encoder 'libopus'") {
+				return fmt.Errorf("ffmpeg does not support libopus encoding: %s", message)
+			}
+			return fmt.Errorf("ffmpeg opus encode failed for stream %d: %s", decision.Index, message)
+		}
+		fmt.Fprintf(out, "  - #%d -> %s\n", decision.Index, filename)
+	}
+	return nil
+}
+
+func sanitizeToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r + ('a' - 'A'))
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	out = strings.Trim(out, "_-")
+	if out == "" {
+		return "unknown"
+	}
+	return out
 }
