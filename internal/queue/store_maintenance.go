@@ -146,7 +146,7 @@ func (s *Store) CheckHealth(ctx context.Context) (DatabaseHealth, error) {
 			"ripped_file",
 			"encoded_file",
 			"final_file",
-			"background_log_path",
+			"item_log_path",
 			"active_episode_key",
 			"error_message",
 			"created_at",

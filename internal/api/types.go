@@ -27,7 +27,7 @@ type QueueItem struct {
 	RippedFile          string                    `json:"rippedFile,omitempty"`
 	EncodedFile         string                    `json:"encodedFile,omitempty"`
 	FinalFile           string                    `json:"finalFile,omitempty"`
-	BackgroundLogPath   string                    `json:"backgroundLogPath,omitempty"`
+	ItemLogPath         string                    `json:"itemLogPath,omitempty"`
 	NeedsReview         bool                      `json:"needsReview"`
 	ReviewReason        string                    `json:"reviewReason,omitempty"`
 	Metadata            json.RawMessage           `json:"metadata,omitempty"`

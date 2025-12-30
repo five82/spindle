@@ -366,7 +366,7 @@ func (s *apiServer) handleLogTail(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "queue item not found")
 		return
 	}
-	path := strings.TrimSpace(item.BackgroundLogPath)
+	path := strings.TrimSpace(item.ItemLogPath)
 	if path == "" {
 		s.writeJSON(w, http.StatusOK, api.LogTailResponse{Lines: nil, Offset: 0})
 		return

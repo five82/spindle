@@ -65,10 +65,10 @@ func TestAPIServerHandleLogTail(t *testing.T) {
 	}
 
 	store := &queueStoreStub{items: []*queue.Item{{
-		ID:                1,
-		DiscTitle:         "Example",
-		Status:            queue.StatusPending,
-		BackgroundLogPath: logPath,
+		ID:          1,
+		DiscTitle:   "Example",
+		Status:      queue.StatusPending,
+		ItemLogPath: logPath,
 	}}}
 	srv := &apiServer{queueSvc: api.NewQueueService(store)}
 

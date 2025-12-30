@@ -113,7 +113,7 @@ type Item struct {
 	RippedFile          string
 	EncodedFile         string
 	FinalFile           string
-	BackgroundLogPath   string
+	ItemLogPath         string
 	ActiveEpisodeKey    string
 	ErrorMessage        string
 	CreatedAt           time.Time
@@ -236,7 +236,7 @@ func LaneForItem(item *Item) ProcessingLane {
 	case StatusRipped, StatusEpisodeIdentifying, StatusEpisodeIdentified, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted, StatusSubtitling, StatusSubtitled:
 		return LaneBackground
 	case StatusFailed, StatusReview:
-		if item.BackgroundLogPath != "" {
+		if item.ItemLogPath != "" {
 			return LaneBackground
 		}
 		return LaneForeground

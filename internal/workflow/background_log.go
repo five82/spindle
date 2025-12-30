@@ -43,18 +43,18 @@ func (b *BackgroundLogger) Ensure(item *queue.Item) (string, bool, error) {
 		return "", false, fmt.Errorf("item log directory not configured")
 	}
 	created := false
-	if strings.TrimSpace(item.BackgroundLogPath) == "" {
+	if strings.TrimSpace(item.ItemLogPath) == "" {
 		filename := b.filename(item)
 		if filename == "" {
 			filename = fmt.Sprintf("item-%d.log", item.ID)
 		}
-		item.BackgroundLogPath = filepath.Join(b.baseDir, filename)
+		item.ItemLogPath = filepath.Join(b.baseDir, filename)
 		created = true
 	}
-	if err := os.MkdirAll(filepath.Dir(item.BackgroundLogPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(item.ItemLogPath), 0o755); err != nil {
 		return "", false, fmt.Errorf("ensure item log directory: %w", err)
 	}
-	return item.BackgroundLogPath, created, nil
+	return item.ItemLogPath, created, nil
 }
 
 // CreateHandler builds a slog.Handler writing to the specified path.

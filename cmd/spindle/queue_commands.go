@@ -291,8 +291,8 @@ func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
 	if value := strings.TrimSpace(item.FinalFile); value != "" {
 		fmt.Fprintf(out, "Final File: %s\n", value)
 	}
-	if value := strings.TrimSpace(item.BackgroundLogPath); value != "" {
-		fmt.Fprintf(out, "Background Log: %s\n", value)
+	if value := strings.TrimSpace(item.ItemLogPath); value != "" {
+		fmt.Fprintf(out, "Item Log: %s\n", value)
 	}
 	if strings.TrimSpace(item.MetadataJSON) != "" {
 		fmt.Fprintln(out, "Metadata: present")

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const itemColumns = "id, source_path, disc_title, status, media_info_json, ripped_file, encoded_file, final_file, background_log_path, active_episode_key, error_message, created_at, updated_at, progress_stage, progress_percent, progress_message, encoding_details_json, drapto_preset_profile, rip_spec_data, disc_fingerprint, metadata_json, last_heartbeat, needs_review, review_reason"
+const itemColumns = "id, source_path, disc_title, status, media_info_json, ripped_file, encoded_file, final_file, item_log_path, active_episode_key, error_message, created_at, updated_at, progress_stage, progress_percent, progress_message, encoding_details_json, drapto_preset_profile, rip_spec_data, disc_fingerprint, metadata_json, last_heartbeat, needs_review, review_reason"
 
 func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 	var (
@@ -18,7 +18,7 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		rippedFile       sql.NullString
 		encodedFile      sql.NullString
 		finalFile        sql.NullString
-		backgroundLog    sql.NullString
+		itemLog          sql.NullString
 		activeEpisodeKey sql.NullString
 		errorMessage     sql.NullString
 		createdRaw       sql.NullString
@@ -45,7 +45,7 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		&rippedFile,
 		&encodedFile,
 		&finalFile,
-		&backgroundLog,
+		&itemLog,
 		&activeEpisodeKey,
 		&errorMessage,
 		&createdRaw,
@@ -74,7 +74,7 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		RippedFile:          rippedFile.String,
 		EncodedFile:         encodedFile.String,
 		FinalFile:           finalFile.String,
-		BackgroundLogPath:   backgroundLog.String,
+		ItemLogPath:         itemLog.String,
 		ActiveEpisodeKey:    activeEpisodeKey.String,
 		ErrorMessage:        errorMessage.String,
 		ProgressStage:       progressStage.String,

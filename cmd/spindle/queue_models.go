@@ -11,23 +11,23 @@ type queueItemView struct {
 
 type queueItemDetailsView struct {
 	queueItemView
-	UpdatedAt         string
-	ProgressStage     string
-	ProgressPercent   float64
-	ProgressMessage   string
-	DraptoPreset      string
-	ErrorMessage      string
-	NeedsReview       bool
-	ReviewReason      string
-	MetadataJSON      string
-	RipSpecJSON       string
-	RippedFile        string
-	EncodedFile       string
-	FinalFile         string
-	BackgroundLogPath string
-	Episodes          []queueEpisodeView
-	EpisodeTotals     queueEpisodeTotals
-	EpisodesSynced    bool
+	UpdatedAt       string
+	ProgressStage   string
+	ProgressPercent float64
+	ProgressMessage string
+	DraptoPreset    string
+	ErrorMessage    string
+	NeedsReview     bool
+	ReviewReason    string
+	MetadataJSON    string
+	RipSpecJSON     string
+	RippedFile      string
+	EncodedFile     string
+	FinalFile       string
+	ItemLogPath     string
+	Episodes        []queueEpisodeView
+	EpisodeTotals   queueEpisodeTotals
+	EpisodesSynced  bool
 }
 
 type queueEpisodeView struct {

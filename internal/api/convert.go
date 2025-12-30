@@ -47,14 +47,14 @@ func FromQueueItem(item *queue.Item) QueueItem {
 			Percent: progressPercent,
 			Message: item.ProgressMessage,
 		},
-		ErrorMessage:      item.ErrorMessage,
-		DiscFingerprint:   item.DiscFingerprint,
-		RippedFile:        item.RippedFile,
-		EncodedFile:       item.EncodedFile,
-		FinalFile:         item.FinalFile,
-		BackgroundLogPath: item.BackgroundLogPath,
-		NeedsReview:       item.NeedsReview,
-		ReviewReason:      item.ReviewReason,
+		ErrorMessage:    item.ErrorMessage,
+		DiscFingerprint: item.DiscFingerprint,
+		RippedFile:      item.RippedFile,
+		EncodedFile:     item.EncodedFile,
+		FinalFile:       item.FinalFile,
+		ItemLogPath:     item.ItemLogPath,
+		NeedsReview:     item.NeedsReview,
+		ReviewReason:    item.ReviewReason,
 	}
 	if snapshot, err := encodingstate.Unmarshal(item.EncodingDetailsJSON); err == nil && !snapshot.IsZero() {
 		s := snapshot
