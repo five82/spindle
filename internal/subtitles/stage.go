@@ -26,7 +26,7 @@ type Stage struct {
 	logger  *slog.Logger
 }
 
-// SetLogger allows the workflow manager to route stage logs into the item-scoped background log.
+// SetLogger allows the workflow manager to route stage logs into the item-scoped log.
 func (s *Stage) SetLogger(logger *slog.Logger) {
 	if s == nil {
 		return

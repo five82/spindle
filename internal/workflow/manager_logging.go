@@ -35,24 +35,17 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 		base = logging.NewNop()
 	}
 
-	if lane != nil && lane.kind == laneBackground {
-		path, created, err := m.bgLogger.Ensure(item)
+	if item != nil {
+		path, _, err := m.bgLogger.Ensure(item)
 		if err != nil {
-			base.Warn("background log unavailable", logging.Error(err))
+			base.Warn("item log unavailable", logging.Error(err))
 		} else {
 			bgHandler, logErr := m.bgLogger.CreateHandler(path)
 			if logErr != nil {
-				base.Warn("failed to create background log writer", logging.Error(logErr))
+				base.Warn("failed to create item log writer", logging.Error(logErr))
 			} else {
-				if created && laneLogger != nil {
-					laneLogger.Debug(
-						"background log created",
-						logging.String("log_file", path),
-						logging.Int64(logging.FieldItemID, item.ID),
-					)
-				}
-				// Background tasks should log ONLY to the item log, not the daemon log
-				// Ensure item_id is baked into the logger so all background logs are properly tagged
+				// Item processing should log ONLY to the item log, not the daemon log.
+				// Ensure item_id is baked into the logger so all logs are properly tagged.
 				base = slog.New(bgHandler).With(logging.Int64(logging.FieldItemID, item.ID))
 			}
 		}

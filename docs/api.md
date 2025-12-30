@@ -131,8 +131,8 @@ Returns metadata for a single queue entry.
 
 ### `GET /api/logtail`
 
-Returns raw lines from a queue item's background log file (the per-item log
-stored under `log_dir/background/`). This is intended for remote dashboards and
+Returns raw lines from a queue item's log file (the per-item log stored under
+`log_dir/items/`). This is intended for remote dashboards and
 TUIs that cannot access the daemon's filesystem.
 
 Query parameters:

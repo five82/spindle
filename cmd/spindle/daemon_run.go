@@ -69,7 +69,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	logging.CleanupOldLogs(logger, cfg.Logging.RetentionDays,
 		logging.RetentionTarget{Dir: cfg.Paths.LogDir, Pattern: "spindle-*.log", Exclude: []string{logPath}},
 		logging.RetentionTarget{Dir: cfg.Paths.LogDir, Pattern: "spindle-*.events", Exclude: []string{eventsPath}},
-		logging.RetentionTarget{Dir: filepath.Join(cfg.Paths.LogDir, "background"), Pattern: "*.log"},
+		logging.RetentionTarget{Dir: filepath.Join(cfg.Paths.LogDir, "items"), Pattern: "*.log"},
 		logging.RetentionTarget{Dir: filepath.Join(cfg.Paths.LogDir, "tool"), Pattern: "*.log"},
 	)
 	pidPath := filepath.Join(cfg.Paths.LogDir, "spindle.pid")

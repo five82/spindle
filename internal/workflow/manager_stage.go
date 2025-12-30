@@ -54,14 +54,6 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
 		logging.String("source_file", strings.TrimSpace(item.SourcePath)),
 	)
-	if lane != nil && lane.kind == laneBackground && lane.logger != nil {
-		logging.WithContext(ctx, lane.logger).Debug(
-			"background stage started",
-			logging.String(logging.FieldStage, stage.name),
-			logging.Int64(logging.FieldItemID, item.ID),
-			logging.String("log_file", strings.TrimSpace(item.BackgroundLogPath)),
-		)
-	}
 
 	handler := stage.handler
 	if handler == nil {
@@ -128,14 +120,6 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
 		logging.Duration("stage_duration", time.Since(stageStart)),
 	)
-	if lane != nil && lane.kind == laneBackground && lane.logger != nil {
-		logging.WithContext(ctx, lane.logger).Debug(
-			"background stage completed",
-			logging.String(logging.FieldStage, stage.name),
-			logging.Int64(logging.FieldItemID, item.ID),
-			logging.Duration("stage_duration", time.Since(stageStart)),
-		)
-	}
 	m.setLastItem(item)
 	m.checkQueueCompletion(ctx)
 	return nil

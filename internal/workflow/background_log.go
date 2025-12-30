@@ -14,18 +14,18 @@ import (
 	"spindle/internal/queue"
 )
 
-// BackgroundLogger manages dedicated log files for background processing lanes.
+// BackgroundLogger manages dedicated per-item log files for workflow stages.
 type BackgroundLogger struct {
 	baseDir string
 	hub     *logging.StreamHub
 	cfg     *config.Config
 }
 
-// NewBackgroundLogger creates a new background logger.
+// NewBackgroundLogger creates a new per-item logger.
 func NewBackgroundLogger(cfg *config.Config, hub *logging.StreamHub) *BackgroundLogger {
 	dir := ""
 	if cfg != nil && cfg.Paths.LogDir != "" {
-		dir = filepath.Join(cfg.Paths.LogDir, "background")
+		dir = filepath.Join(cfg.Paths.LogDir, "items")
 	}
 	return &BackgroundLogger{
 		baseDir: dir,
@@ -40,7 +40,7 @@ func (b *BackgroundLogger) Ensure(item *queue.Item) (string, bool, error) {
 		return "", false, fmt.Errorf("queue item is nil")
 	}
 	if strings.TrimSpace(b.baseDir) == "" {
-		return "", false, fmt.Errorf("background log directory not configured")
+		return "", false, fmt.Errorf("item log directory not configured")
 	}
 	created := false
 	if strings.TrimSpace(item.BackgroundLogPath) == "" {
@@ -52,7 +52,7 @@ func (b *BackgroundLogger) Ensure(item *queue.Item) (string, bool, error) {
 		created = true
 	}
 	if err := os.MkdirAll(filepath.Dir(item.BackgroundLogPath), 0o755); err != nil {
-		return "", false, fmt.Errorf("ensure background log directory: %w", err)
+		return "", false, fmt.Errorf("ensure item log directory: %w", err)
 	}
 	return item.BackgroundLogPath, created, nil
 }
@@ -83,8 +83,8 @@ func (b *BackgroundLogger) CreateHandler(path string) (slog.Handler, error) {
 		OutputPaths:      []string{path},
 		ErrorOutputPaths: []string{path},
 		Development:      false,
-		// Background logs write to item files, but still publish to the daemon stream so
-		// users can observe per-item/episode progress via the log API and `spindle show --lane background --item <id>`.
+		// Item logs write to per-item files, but still publish to the daemon stream so
+		// users can observe per-item/episode progress via the log API and `spindle show --item <id>`.
 		Stream: b.hub,
 	})
 	if err != nil {

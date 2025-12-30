@@ -12,7 +12,11 @@ import (
 )
 
 func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item *queue.Item, stageErr error) {
-	logger := logging.WithContext(ctx, m.logger.With(logging.String("component", "workflow-manager")))
+	base := m.logger
+	if base == nil {
+		base = logging.NewNop()
+	}
+	logger := m.stageLoggerForLane(ctx, nil, base, item).With(logging.String("component", "workflow-manager"))
 
 	status, message := m.classifyStageFailure(stageName, stageErr)
 	m.setItemFailureState(item, status, message)
