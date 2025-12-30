@@ -165,6 +165,7 @@ Query parameters:
 | `items[].episodes[]` | One entry per planned episode on a TV disc. Includes season/episode numbers once verified, current stage (`planned`, `ripped`, `encoded`, `final`), runtime, artifact paths, and subtitle match info. Empty for movie discs. |
 | `items[].episodeTotals` | Aggregate counts (`planned`, `ripped`, `encoded`, `final`) derived from the per-episode map. Useful for quick progress bars. |
 | `items[].episodesSynchronized` | `true` when WhisperX/OpenSubtitles confirmed the episode order and both `MetadataJSON`/rip spec were updated. `false` when Spindle is still relying on heuristic disc ordering. |
+| `items[].itemLogPath` | Full path to the per-item log file on disk when available. |
 
 ### Episode Identification States
 
