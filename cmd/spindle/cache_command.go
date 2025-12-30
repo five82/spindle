@@ -24,11 +24,13 @@ Spindle automatically manages cache size and free space during normal operation.
 
 Commands:
   stats   - Show all cached entries with their sizes and ages
+  commentary - Run commentary detection on a cached rip file
   remove  - Remove a specific entry by number (see 'stats' for numbers)
   clear   - Remove all cached entries`,
 	}
 
 	cacheCmd.AddCommand(newCacheStatsCommand(ctx))
+	cacheCmd.AddCommand(newCacheCommentaryCommand(ctx))
 	cacheCmd.AddCommand(newCacheRemoveCommand(ctx))
 	cacheCmd.AddCommand(newCacheClearCommand(ctx))
 
