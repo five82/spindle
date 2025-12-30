@@ -7,8 +7,10 @@ import (
 func newRootCommand() *cobra.Command {
 	var socketFlag string
 	var configFlag string
+	var logLevelFlag string
+	var verbose bool
 
-	ctx := newCommandContext(&socketFlag, &configFlag)
+	ctx := newCommandContext(&socketFlag, &configFlag, &logLevelFlag, &verbose)
 
 	rootCmd := &cobra.Command{
 		Use:           "spindle",
@@ -29,6 +31,8 @@ func newRootCommand() *cobra.Command {
 
 	rootCmd.PersistentFlags().StringVar(&socketFlag, "socket", "", "Path to the spindle daemon socket")
 	rootCmd.PersistentFlags().StringVarP(&configFlag, "config", "c", "", "Configuration file path")
+	rootCmd.PersistentFlags().StringVar(&logLevelFlag, "log-level", "", "Log level for CLI output (debug, info, warn, error)")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Shorthand for --log-level=debug")
 
 	for _, cmd := range newDaemonCommands(ctx) {
 		rootCmd.AddCommand(cmd)

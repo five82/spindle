@@ -194,7 +194,12 @@ func cacheManager(ctx *commandContext) (*ripcache.Manager, string, error) {
 	if strings.TrimSpace(cfg.RipCache.Dir) == "" {
 		return nil, "Rip cache dir is not configured", nil
 	}
-	logger, err := logging.New(logging.Options{Level: "info", Format: "console"})
+	logLevel := ctx.resolvedLogLevel(cfg)
+	logger, err := logging.New(logging.Options{
+		Level:       logLevel,
+		Format:      "console",
+		Development: ctx.logDevelopment(cfg),
+	})
 	if err != nil {
 		return nil, "", fmt.Errorf("init logger: %w", err)
 	}

@@ -88,11 +88,12 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 				defer os.RemoveAll(workRoot)
 			}
 
+			logLevel := ctx.resolvedLogLevel(cfg)
 			logger, err := logging.New(logging.Options{
-				Level:       cfg.Logging.Level,
+				Level:       logLevel,
 				Format:      cfg.Logging.Format,
 				OutputPaths: []string{"stdout"},
-				Development: false,
+				Development: ctx.logDevelopment(cfg),
 			})
 			if err != nil {
 				return fmt.Errorf("init subtitle logger: %w", err)

@@ -51,12 +51,13 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	} else if eventArchive != nil {
 		logHub.AddSink(eventArchive)
 	}
+	logLevel := ctx.resolvedLogLevel(cfg)
 	logger, err := logging.New(logging.Options{
-		Level:            cfg.Logging.Level,
+		Level:            logLevel,
 		Format:           cfg.Logging.Format,
 		OutputPaths:      []string{"stdout", logPath},
 		ErrorOutputPaths: []string{"stderr", logPath},
-		Development:      false,
+		Development:      ctx.logDevelopment(cfg),
 		Stream:           logHub,
 	})
 	if err != nil {

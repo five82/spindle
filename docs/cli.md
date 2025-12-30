@@ -3,6 +3,10 @@
 The `spindle` binary runs both the daemon and the CLI. This reference groups
 the most common commands; see `spindle --help` for the full tree.
 
+Global flags:
+- `--log-level` (debug|info|warn|error) sets CLI logging verbosity for any command.
+- `-v`/`--verbose` is shorthand for `--log-level=debug`.
+
 ## Daemon Lifecycle
 
 ```bash
@@ -46,7 +50,7 @@ spindle test-notify                     # send a test ntfy message
 
 ## Troubleshooting Shortcuts
 
-- `spindle identify /dev/sr0 --verbose` — run TMDB identification without
+- `spindle --log-level=debug identify /dev/sr0` — run TMDB identification without
   touching the queue.
 - `spindle show --follow | grep -i error` — tail logs with a filter.
 - `sqlite3 ~/.local/share/spindle/queue.db 'SELECT id, status FROM queue_items;'`

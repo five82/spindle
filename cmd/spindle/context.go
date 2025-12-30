@@ -19,16 +19,20 @@ import (
 type commandContext struct {
 	socketFlag *string
 	configFlag *string
+	logLevel   *string
+	verbose    *bool
 
 	configOnce sync.Once
 	config     *config.Config
 	configErr  error
 }
 
-func newCommandContext(socketFlag, configFlag *string) *commandContext {
+func newCommandContext(socketFlag, configFlag, logLevel *string, verbose *bool) *commandContext {
 	return &commandContext{
 		socketFlag: socketFlag,
 		configFlag: configFlag,
+		logLevel:   logLevel,
+		verbose:    verbose,
 	}
 }
 
@@ -65,6 +69,28 @@ func (c *commandContext) socketPath() string {
 		*c.socketFlag = defaultSocketPath()
 	}
 	return *c.socketFlag
+}
+
+func (c *commandContext) resolvedLogLevel(cfg *config.Config) string {
+	if c != nil && c.logLevel != nil {
+		if trimmed := strings.TrimSpace(*c.logLevel); trimmed != "" {
+			return trimmed
+		}
+	}
+	if c != nil && c.verbose != nil && *c.verbose {
+		return "debug"
+	}
+	if cfg != nil {
+		if trimmed := strings.TrimSpace(cfg.Logging.Level); trimmed != "" {
+			return trimmed
+		}
+	}
+	return "info"
+}
+
+func (c *commandContext) logDevelopment(cfg *config.Config) bool {
+	level := strings.ToLower(strings.TrimSpace(c.resolvedLogLevel(cfg)))
+	return level == "debug"
 }
 
 func (c *commandContext) withClient(fn func(*ipc.Client) error) error {

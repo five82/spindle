@@ -21,7 +21,6 @@ import (
 
 func newIdentifyCommand(ctx *commandContext) *cobra.Command {
 	var device string
-	var verbose bool
 
 	cmd := &cobra.Command{
 		Use:   "identify [device]",
@@ -56,15 +55,12 @@ Examples:
 			cfg.MakeMKV.OpticalDrive = device
 
 			// Setup logging
-			logLevel := "info"
-			if verbose {
-				logLevel = "debug"
-			}
+			logLevel := ctx.resolvedLogLevel(cfg)
 			logger, err := logging.New(logging.Options{
 				Level:       logLevel,
 				Format:      cfg.Logging.Format,
 				OutputPaths: []string{"stdout"},
-				Development: verbose,
+				Development: ctx.logDevelopment(cfg),
 			})
 			if err != nil {
 				return fmt.Errorf("setup logging: %w", err)
@@ -177,7 +173,6 @@ Examples:
 	}
 
 	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path (default: configured optical_drive)")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose debug output")
 
 	return cmd
 }

@@ -130,6 +130,9 @@ The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
 
 ### Logs & Monitoring
 
+- Use the global `--log-level` flag to control CLI logging verbosity (applies to
+  all subcommands), e.g. `spindle --log-level=debug cache commentary 1`. The
+  shorthand `-v`/`--verbose` maps to `--log-level=debug`.
 - `spindle show` accepts `--component`, `--lane`, `--request`, and `--item` to zero
   in on a specific workflow runner, background lane, request/correlation ID, or
   queue item when digging through noisy sessions. Combine them, e.g.

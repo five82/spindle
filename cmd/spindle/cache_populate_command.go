@@ -35,7 +35,6 @@ type loggerAware interface {
 
 func newCacheRipCommand(ctx *commandContext) *cobra.Command {
 	var device string
-	var verbose bool
 
 	cmd := &cobra.Command{
 		Use:   "rip [device]",
@@ -66,15 +65,12 @@ it is overwritten.`,
 				return fmt.Errorf("spindle daemon is running; stop it with: spindle stop")
 			}
 
-			logLevel := "info"
-			if verbose {
-				logLevel = "debug"
-			}
+			logLevel := ctx.resolvedLogLevel(cfg)
 			logger, err := logging.New(logging.Options{
 				Level:       logLevel,
 				Format:      cfg.Logging.Format,
 				OutputPaths: []string{"stdout"},
-				Development: verbose,
+				Development: ctx.logDevelopment(cfg),
 			})
 			if err != nil {
 				return fmt.Errorf("setup logging: %w", err)
@@ -165,7 +161,6 @@ it is overwritten.`,
 	}
 
 	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path (default: configured optical_drive)")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose debug output")
 
 	return cmd
 }

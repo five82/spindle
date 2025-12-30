@@ -40,7 +40,12 @@ to a rip cache file/directory.`,
 				return err
 			}
 
-			logger, err := logging.New(logging.Options{Level: "info", Format: "console"})
+			logLevel := ctx.resolvedLogLevel(cfg)
+			logger, err := logging.New(logging.Options{
+				Level:       logLevel,
+				Format:      "console",
+				Development: ctx.logDevelopment(cfg),
+			})
 			if err != nil {
 				return fmt.Errorf("init logger: %w", err)
 			}
