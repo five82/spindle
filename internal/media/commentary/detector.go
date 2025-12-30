@@ -108,6 +108,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 		logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
 		logging.Float64("speech_ratio_max_music", settings.SpeechRatioMaxMusic),
 		logging.Float64("speech_overlap_primary_min", settings.SpeechOverlapPrimaryMin),
+		logging.Float64("speech_overlap_primary_max_audio_description", settings.SpeechOverlapPrimaryMaxAD),
 		logging.Float64("speech_in_silence_max", settings.SpeechInSilenceMax),
 		logging.Float64("fingerprint_similarity_duplicate", settings.FingerprintSimilarityDuplicate),
 		logging.Int("duration_tolerance_seconds", settings.DurationToleranceSeconds),
@@ -281,6 +282,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
 			logging.Float64("speech_ratio_max_music", settings.SpeechRatioMaxMusic),
 			logging.Float64("speech_overlap_primary_min", settings.SpeechOverlapPrimaryMin),
+			logging.Float64("speech_overlap_primary_max_audio_description", settings.SpeechOverlapPrimaryMaxAD),
 			logging.Float64("speech_in_silence_max", settings.SpeechInSilenceMax),
 			logging.Float64("fingerprint_similarity_duplicate", settings.FingerprintSimilarityDuplicate),
 		),
@@ -308,7 +310,11 @@ func formatDecisionSummary(decision Decision, reason string) string {
 	case "duplicate_downmix":
 		details = fmt.Sprintf(" [Audio Similarity: %.0f%% (High)]", decision.Metrics.FingerprintSimilarity*100)
 	case "audio_description":
-		details = fmt.Sprintf(" [Speech in Silence: %.0f%%, Audio Similarity: %.0f%%]", decision.Metrics.SpeechInPrimarySilence*100, decision.Metrics.FingerprintSimilarity*100)
+		details = fmt.Sprintf(" [Speech in Silence: %.0f%%, Overlap: %.0f%%, Audio Similarity: %.0f%%]",
+			decision.Metrics.SpeechInPrimarySilence*100,
+			decision.Metrics.SpeechOverlapWithPrimary*100,
+			decision.Metrics.FingerprintSimilarity*100,
+		)
 	case "fingerprint_failed":
 		details = " [Audio Similarity Check Failed]"
 	case "fingerprint_failed_stream_missing":
@@ -445,7 +451,9 @@ func classify(metrics Metrics, meta Metadata, cfg config.CommentaryDetection) (b
 		math.Abs(metrics.SpeechRatio-metrics.PrimarySpeechRatio) <= minSpeechRatioDeltaPrimary {
 		return false, "duplicate_downmix"
 	}
-	if metrics.SpeechInPrimarySilence >= cfg.SpeechInSilenceMax && metrics.FingerprintSimilarity >= 0.5 {
+	if metrics.SpeechInPrimarySilence >= cfg.SpeechInSilenceMax &&
+		metrics.SpeechOverlapWithPrimary <= cfg.SpeechOverlapPrimaryMaxAD &&
+		metrics.SpeechRatio >= cfg.SpeechRatioMinCommentary {
 		return false, "audio_description"
 	}
 

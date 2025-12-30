@@ -59,6 +59,30 @@ func TestClassifyRules(t *testing.T) {
 	}
 
 	metrics = Metrics{
+		SpeechRatio:              0.50,
+		SpeechOverlapWithPrimary: 0.10,
+		SpeechInPrimarySilence:   0.55,
+		FingerprintSimilarity:    0.05,
+		PrimarySpeechRatio:       0.35,
+	}
+	include, reason = classify(metrics, Metadata{}, cfg)
+	if include || reason != "audio_description" {
+		t.Fatalf("expected audio_description exclusion, got include=%v reason=%q", include, reason)
+	}
+
+	metrics = Metrics{
+		SpeechRatio:              0.50,
+		SpeechOverlapWithPrimary: 0.65,
+		SpeechInPrimarySilence:   0.55,
+		FingerprintSimilarity:    0.05,
+		PrimarySpeechRatio:       0.35,
+	}
+	include, reason = classify(metrics, Metadata{}, cfg)
+	if !include || reason != "commentary_only" {
+		t.Fatalf("expected commentary_only inclusion, got include=%v reason=%q", include, reason)
+	}
+
+	metrics = Metrics{
 		SpeechRatio:              0.05,
 		SpeechOverlapWithPrimary: 0.05,
 		SpeechInPrimarySilence:   0.02,
@@ -165,6 +189,7 @@ func defaultCommentaryConfig() config.CommentaryDetection {
 		SpeechRatioMinCommentary:       0.25,
 		SpeechRatioMaxMusic:            0.10,
 		SpeechOverlapPrimaryMin:        0.60,
+		SpeechOverlapPrimaryMaxAD:      0.30,
 		SpeechInSilenceMax:             0.40,
 		DurationToleranceSeconds:       120,
 		DurationToleranceRatio:         0.02,

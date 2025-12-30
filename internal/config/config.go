@@ -88,6 +88,7 @@ type CommentaryDetection struct {
 	SpeechRatioMinCommentary       float64  `toml:"speech_ratio_min_commentary"`
 	SpeechRatioMaxMusic            float64  `toml:"speech_ratio_max_music"`
 	SpeechOverlapPrimaryMin        float64  `toml:"speech_overlap_primary_min"`
+	SpeechOverlapPrimaryMaxAD      float64  `toml:"speech_overlap_primary_max_audio_description"`
 	SpeechInSilenceMax             float64  `toml:"speech_in_silence_max"`
 	DurationToleranceSeconds       int      `toml:"duration_tolerance_seconds"`
 	DurationToleranceRatio         float64  `toml:"duration_tolerance_ratio"`

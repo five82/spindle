@@ -91,6 +91,7 @@ func Default() Config {
 			SpeechRatioMinCommentary:       0.25,
 			SpeechRatioMaxMusic:            0.10,
 			SpeechOverlapPrimaryMin:        0.60,
+			SpeechOverlapPrimaryMaxAD:      0.30,
 			SpeechInSilenceMax:             0.40,
 			DurationToleranceSeconds:       120,
 			DurationToleranceRatio:         0.02,

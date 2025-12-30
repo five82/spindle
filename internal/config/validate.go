@@ -155,6 +155,9 @@ func (c *Config) validateCommentaryDetection() error {
 	if cfg.SpeechOverlapPrimaryMin < 0 || cfg.SpeechOverlapPrimaryMin > 1 {
 		return errors.New("commentary_detection.speech_overlap_primary_min must be between 0 and 1")
 	}
+	if cfg.SpeechOverlapPrimaryMaxAD < 0 || cfg.SpeechOverlapPrimaryMaxAD > 1 {
+		return errors.New("commentary_detection.speech_overlap_primary_max_audio_description must be between 0 and 1")
+	}
 	if cfg.SpeechInSilenceMax < 0 || cfg.SpeechInSilenceMax > 1 {
 		return errors.New("commentary_detection.speech_in_silence_max must be between 0 and 1")
 	}

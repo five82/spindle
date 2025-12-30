@@ -188,6 +188,9 @@ func (c *Config) normalizeCommentaryDetection() error {
 	if c.CommentaryDetection.SpeechOverlapPrimaryMin <= 0 {
 		c.CommentaryDetection.SpeechOverlapPrimaryMin = 0.60
 	}
+	if c.CommentaryDetection.SpeechOverlapPrimaryMaxAD <= 0 {
+		c.CommentaryDetection.SpeechOverlapPrimaryMaxAD = 0.30
+	}
 	if c.CommentaryDetection.SpeechInSilenceMax <= 0 {
 		c.CommentaryDetection.SpeechInSilenceMax = 0.40
 	}
