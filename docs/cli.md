@@ -7,9 +7,9 @@ the most common commands; see `spindle --help` for the full tree.
 
 ```bash
 spindle start          # launch the daemon (background)
-spindle status         # quick health summary
+spindle status         # status summary
 spindle stop           # graceful shutdown
-spindle show --follow  # tail logs with color
+spindle show --follow  # tail logs with ANSI color formatting
 spindle show --lines 50 --follow  # snapshot + follow
 ```
 

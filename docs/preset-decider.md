@@ -5,9 +5,9 @@ with its `clean`, `grain`, or default profile for each queue item. This document
 describes how the integration works, how to configure it, and what to expect if
 the model cannot provide a confident answer.
 
-## Why use it?
+## When to use it
 
-The Drapto CLI ships with curated presets:
+The Drapto CLI ships with presets:
 
 | Preset | Intent (from Drapto) |
 | --- | --- |
@@ -15,13 +15,13 @@ The Drapto CLI ships with curated presets:
 | `clean` | Favor higher CRFs for animation or digitally shot content with minimal noise. |
 | _no preset_ | Balanced defaults (CRF 25/27/29, SVT preset 6, AC bias 0.10, variance boost off). |
 
-These presets allows us to add a level of targeted encoding based on content type rather than one size fits all.
+These presets let you select a profile based on content type rather than a single default.
 
-## Why LLMs for preset selection?
+## Rationale for LLM selection
 
-Static rules for preset selection based on genre and year would cover most content. But you would miss the edge cases such as older computer animated movies and newer films with high amounts on grain that LLMs caught in my testing.
+Static rules for preset selection based on genre and year cover most content. The LLM is meant for edge cases such as older computer-animated movies and newer films with heavy grain.
 
-Deepseek-v3.2 is the default model because of its low cost and accuracy. GPT-5 mini was also very accurate. Some of the other smaller models such as gpt-oss-20b tended to be hit or miss with the outliers we're trying to classify.
+The default model is `google/gemini-3-flash-preview`. GPT-5 mini performed well in testing. Some smaller models such as gpt-oss-20b were inconsistent on outliers.
 
 ## Data sent to the LLM
 
@@ -78,10 +78,10 @@ failure and keeps using Drapto’s defaults so encoding continues.
 
 ## Health checks & observability
 
-- `spindle status` now pings OpenRouter with a fast JSON-only prompt so you can
+- `spindle status` now pings OpenRouter with a small JSON-only prompt so you can
   verify connectivity before starting work.
 - Encoder logs include `preset_suggested`, `preset_confidence`, and `preset_raw`
-  fields for quick inspection.
+  fields for inspection.
 - A confidence threshold of 0.7 avoids most hallucinations; you can experiment
   locally by changing `presetConfidenceThreshold` in
   `internal/encoding/preset_selector.go` if needed.

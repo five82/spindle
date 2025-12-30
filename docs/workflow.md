@@ -38,7 +38,7 @@ You can keep inserting discs back-to-back; each one lands in the queue.
 ## Stage 2: Content Identification (IDENTIFYING -> IDENTIFIED)
 
 1. Spindle triggers a MakeMKV scan to read every title on the disc.
-2. The intelligent analyzer classifies the disc (movie vs TV set, extras) and calls TMDB to find the best metadata match. Multiple 20–30 minute titles or KEYDB labels like “Season 05 Disc 1” force a TV lookup, and TMDB season endpoints supply official episode names once a show is identified.
+2. The analyzer classifies the disc (movie vs TV set, extras) and calls TMDB to select a metadata match. Multiple 20–30 minute titles or KEYDB labels like “Season 05 Disc 1” force a TV lookup, and TMDB season endpoints supply official episode names once a show is identified.
 3. Success: the queue item is marked `IDENTIFIED`, media details (title, year, season, matched episode numbers) are stored, and the rip specification is written to the queue database (each title now records `SxxEyy` info when available). When a release year or first-air year is available, an ntfy notification announces the match so you know the daemon has the correct metadata before ripping starts.
 4. No confident match: the item stays at `IDENTIFIED` but is flagged with `NeedsReview = true`, and you receive guidance in the logs. The pipeline keeps moving so downstream stages can finish while you decide how to handle the unknown metadata.
 
@@ -71,21 +71,21 @@ Encoding happens in the background, so you can insert the next disc while previo
 
 ## Stage 6: AI Subtitle Generation (SUBTITLING -> SUBTITLED)
 
-When `subtitles_enabled = true`, Spindle prefers human-curated subtitles before generating them locally. If `opensubtitles_enabled = true`, the subtitle stage searches OpenSubtitles using the TMDB/IMDB identifiers, textual title, and the languages configured in `opensubtitles_languages`. Matches are cleaned to strip sponsor/advertisement cues, then aligned against the encoded audio using a lightweight WhisperX alignment pass so the downloaded dialogue snaps to the actual rip.
+When `subtitles_enabled = true`, Spindle tries OpenSubtitles before generating subtitles locally. If `opensubtitles_enabled = true`, the subtitle stage searches OpenSubtitles using the TMDB/IMDB identifiers, textual title, and the languages configured in `opensubtitles_languages`. Matches are cleaned to strip sponsor/advertisement cues, then aligned against the encoded audio using a WhisperX alignment pass so the downloaded dialogue aligns to the rip.
 
 1. After encoding, the queue updates to `SUBTITLING`. Spindle extracts the primary audio track and, when configured, downloads and cleans an SRT file from OpenSubtitles.
 2. The cleaned subtitles are aligned with WhisperX (via `uvx --from whisperx python ...`) so cue timings match the rip even when the upstream file came from another release.
 3. Duration guardrails: candidates whose runtime differs by more than ~±8s are soft-rejected and logged as informational; an intro-gap exception lets files that start ≥5s late and end ≤45s early pass for discs with custom intros. We keep trying lower-ranked candidates until one passes.
 4. Mis-ID guard: if every candidate shows a large consistent offset (>~60s or >7% runtime), the stage marks the item `NeedsReview` with reason “suspect mis-identification (subtitle offsets)”, attempts a WhisperX-only fallback, and then lets the organizer park the outputs in `review_dir` so the queue stays unblocked.
 5. Logs now record `subtitle_source=opensubtitles|whisperx`, and failed candidates include `soft_reject=true` when they were filtered by duration/offset rather than hard errors.
-6. If OpenSubtitles has no acceptable candidate (or you set `--forceai`), Spindle falls back to WhisperX end-to-end: it transcribes with the `large-v3` model, aligns with wav2vec2, and feeds the JSON into Stable-TS for sentence regrouping. Stable-TS failures still fall back to WhisperX’s raw SRT so the pipeline never ends empty-handed. CUDA can be enabled with `whisperx_cuda_enabled`, and `whisperx_vad_method` controls the VAD (`silero` by default, `pyannote` requires `whisperx_hf_token`).
+6. If OpenSubtitles has no acceptable candidate (or you set `--forceai`), Spindle falls back to WhisperX: it transcribes with the `large-v3` model, aligns with wav2vec2, and feeds the JSON into Stable-TS for sentence regrouping. If Stable-TS fails, Spindle keeps WhisperX’s raw SRT. CUDA can be enabled with `whisperx_cuda_enabled`, and `whisperx_vad_method` controls the VAD (`silero` by default, `pyannote` requires `whisperx_hf_token`).
 7. The finished SRT lands beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). Intermediate artifacts are cleaned up unless `SPD_DEBUG_SUBTITLES_KEEP` is set. The queue advances to `SUBTITLED`, and any errors are logged before the organizer continues so the rest of the workflow remains unblocked.
 
-You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI now performs a TMDB lookup based on the filename, feeds that identifier into the OpenSubtitles search, and falls back to WhisperX when no curated subtitles are available. Pass `--forceai` to skip OpenSubtitles entirely and always run the WhisperX transcription pipeline, which drops the finished SRT beside your media.
+You can also regenerate subtitles for historic encodes with `spindle gensubtitle /path/to/video.mkv`. The CLI performs a TMDB lookup based on the filename, feeds that identifier into the OpenSubtitles search, and falls back to WhisperX when no subtitles are available. Pass `--forceai` to skip OpenSubtitles entirely and always run the WhisperX transcription pipeline, which drops the finished SRT beside your media.
 
 ## Stage 7: Organizing & Jellyfin Refresh (ORGANIZING -> COMPLETED)
 
-1. Spindle moves each encoded artifact into your library, building library-friendly paths based on the TMDB metadata. Movies still land as a single file under `library_dir/movies`, while TV discs produce one file per episode under `library_dir/tv/<Show Name>/Season XX/` (for example `Show Name - S05E01.mkv`). Episode filenames and destinations come directly from the rip spec so multi-disc sets stay consistent.
+1. Spindle moves each encoded artifact into your library, building library paths based on the TMDB metadata. Movies still land as a single file under `library_dir/movies`, while TV discs produce one file per episode under `library_dir/tv/<Show Name>/Season XX/` (for example `Show Name - S05E01.mkv`). Episode filenames and destinations come directly from the rip spec so multi-disc sets stay consistent.
 2. Progress is reported as `ORGANIZING`, progressing from 20% up to 100% as the organizer creates directories, moves files, and calls Jellyfin.
 3. Jellyfin scans are triggered after organizing when credentials are supplied.
 4. The final status `COMPLETED` means the media is on disk and Jellyfin has been asked to rescan. Items flagged for review land in your configured `review_dir`; otherwise titles appear in the main library. An ntfy notification confirms the import when the library update succeeds.
@@ -104,8 +104,8 @@ Use `spindle queue list` (filter with tools like `grep FAILED`), `spindle queue 
 
 ## Monitoring & Control Tips
 
-- `spindle show --follow` - tails the daemon log with color formatting.
-- `spindle status` - quick summary (daemon running, current disc, queue totals).
+- `spindle show --follow` - tails the daemon log with ANSI color formatting.
+- `spindle status` - status summary (daemon running, current disc, queue totals).
 - `spindle queue list` - see every item, its status, and fingerprint.
 - `spindle queue status` - table of lifecycle counts (pending, ripping, encoding, etc.).
 - `spindle queue clear` - prune finished entries without touching active work; add `spindle queue clear-failed` to drop only failed items.
@@ -130,4 +130,4 @@ If `ntfy_topic` is set, Spindle posts compact notifications at key steps: disc d
 - Identification deep dive: `docs/content-identification.md`
 - Development workflow (if you are hacking on Spindle): `docs/development.md`
 
-With these pieces in mind, you can trust the daemon to run hands-free while still understanding exactly where each disc is in the journey from tray to Jellyfin shelf.
+With these pieces in mind, you can track where each disc is in the workflow from disc detection to library import.

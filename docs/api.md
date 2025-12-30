@@ -1,6 +1,6 @@
 # Spindle HTTP API
 
-Spindle ships with a lightweight HTTP API that mirrors the daemon's internal
+Spindle ships with a read-only HTTP API that mirrors the daemon's internal
 state. Remote tooling (dashboards, TUIs, scripts) can consume these endpoints to
 monitor progress without shelling out to the CLI.
 
@@ -157,13 +157,13 @@ Query parameters:
 | --- | --- |
 | `queueDbPath` | Full path to the SQLite queue database used by the daemon. |
 | `workflow.queueStats` | Map keyed by lifecycle status -> item count. Includes the episode identification states (`episode_identifying`, `episode_identified`) when TV discs are flowing. |
-| `workflow.stageHealth` | Stage readiness results from `StageHandler.HealthCheck`, including the `episode-identifier` handler when enabled. Useful for dependency dashboards. |
+| `workflow.stageHealth` | Stage readiness results from `StageHandler.HealthCheck`, including the `episode-identifier` handler when enabled. For dependency dashboards. |
 | `items[].status` | Current lifecycle state from `internal/queue.Status` (`pending → identifying → identified → ripping → ripped → episode_identifying → episode_identified → encoding → encoded → subtitling → subtitled → organizing → completed`, plus `failed`/`review`). |
 | `items[].progress` | Stage name, percent 0-100, and last message recorded for the item. Episode identification surfaces as "Episode identification". |
 | `items[].draptoPresetProfile` | Drapto preset applied during encoding: `clean`, `grain`, or omitted/`default` when Drapto runs with its stock settings. |
 | `items[].metadata` | Raw TMDB/metadata JSON captured during identification. Omitted when empty. |
 | `items[].episodes[]` | One entry per planned episode on a TV disc. Includes season/episode numbers once verified, current stage (`planned`, `ripped`, `encoded`, `final`), runtime, artifact paths, and subtitle match info. Empty for movie discs. |
-| `items[].episodeTotals` | Aggregate counts (`planned`, `ripped`, `encoded`, `final`) derived from the per-episode map. Useful for quick progress bars. |
+| `items[].episodeTotals` | Aggregate counts (`planned`, `ripped`, `encoded`, `final`) derived from the per-episode map. For progress bars. |
 | `items[].episodesSynchronized` | `true` when WhisperX/OpenSubtitles confirmed the episode order and both `MetadataJSON`/rip spec were updated. `false` when Spindle is still relying on heuristic disc ordering. |
 | `items[].itemLogPath` | Full path to the per-item log file on disk when available. |
 

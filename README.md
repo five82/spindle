@@ -1,27 +1,27 @@
 # spindle
 
-**Spindle automates the trip from optical disc to Jellyfin-ready library.** Insert a
-disc and the daemon handles identification (TMDB), ripping (MakeMKV),
-encoding to AV1 (drapto), optional subtitle generation (OpenSubtitles +
-WhisperX), organization, Jellyfin refreshes, and notifications. Opt-in LLM
+Spindle is my personal workflow for turning optical discs into a Jellyfin-ready
+library. Insert a disc and the daemon handles identification (TMDB), ripping
+(MakeMKV), encoding to AV1 (drapto), optional subtitle generation (OpenSubtitles
++ WhisperX), organization, Jellyfin refreshes, and notifications. Opt-in LLM
 integrations (via OpenRouter) can auto-select Drapto's grain/clean presets per
 title.
 
-> ⚙️ Single Go binary (`spindle`) drives both the CLI and daemon.
-> 🚧 Early-stage project: expect frequent changes.
+Single Go binary (`spindle`) drives both the CLI and daemon. This is an
+early-stage project, so expect frequent changes.
 
-## Why Spindle
+## What it does
 
-- End-to-end workflow: disc detection → rip → encode → organize → notify.
-- Rich metadata: TMDB matching, TV episode mapping, subtitle validation.
-- Resilient queue: recover from failures, retry stages, inspect via CLI or API.
-- Friendly ops: ntfy notifications, HTTP status API, and human-readable logs.
+- Disc → rip → encode → organize → notify workflow.
+- TMDB matching, TV episode mapping, subtitle validation.
+- Queue with retries and inspection via CLI or API.
+- ntfy notifications, HTTP status API, and structured logs.
 
 ## Quick Start
 
 1. **Install prerequisites**
    - Go 1.25+ (`go env GOVERSION`), MakeMKV ≥ 1.17, Drapto (`cargo install --git https://github.com/five82/drapto`).
-   - Optional helpers: `bd_info` (`libbluray` tools) for better identification, `eject` util, CUDA 12.8+ for WhisperX acceleration.
+   - Optional helpers: `bd_info` (`libbluray` tools) can improve identification, `eject` util, CUDA 12.8+ for WhisperX acceleration.
 2. **Install Spindle**
 
    ```bash
@@ -61,7 +61,7 @@ title.
    ```bash
    spindle config validate
    spindle start            # launches daemon in the background
-   spindle show --follow    # colorful live logs
+   spindle show --follow    # live logs
    ```
 
 Once the daemon reports `RIPPED`, eject the disc manually; encoding and
@@ -101,7 +101,7 @@ multiple ffmpeg installs).
 
 `spindle status` reports dependency presence and points out anything missing.
 
-## Everyday Workflow
+## Workflow
 
 Each queue item flows through:
 
@@ -152,12 +152,12 @@ The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
 
 ## Documentation Map
 
-- `docs/configuration.md` — every config key plus tuning tips.
+- `docs/configuration.md` — every config key plus configuration details.
 - `docs/workflow.md` — lifecycle walkthrough and monitoring pointers.
 - `docs/cli.md` — CLI reference grouped by task.
 - `docs/api.md` — HTTP API payloads.
 - `docs/content-identification.md` — analyzer internals and debugging notes.
-- `docs/preset-decider.md` — LLM-driven Drapto preset selection guide.
+- `docs/preset-decider.md` — LLM-based Drapto preset selection guide.
 - `docs/development.md` — hacking on Spindle, architecture deep dives.
 
 ## Troubleshooting
@@ -168,12 +168,12 @@ The complete command catalog lives in `docs/cli.md`. HTTP consumers should read
 - Subtitle drift: inspect queue logs (`spindle show --follow`) and re-run
   `spindle gensubtitle --forceai` when needed.
 
-If the daemon surprises you, stop it (`spindle stop`), fix the issue, and retry
+If the daemon misbehaves, stop it (`spindle stop`), fix the issue, and retry
 items with `spindle queue retry <id>`.
 
 ## Development
 
-Clone the repo for local hacking:
+Clone the repo for local development:
 
 ```bash
 git clone https://github.com/five82/spindle.git

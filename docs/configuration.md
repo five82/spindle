@@ -1,8 +1,8 @@
 # Spindle Configuration Guide
 
 This guide expands on the `spindle config init` output and explains every key in
-`~/.config/spindle/config.toml`. Keep it handy when you are tuning the daemon or
-when new features land.
+`~/.config/spindle/config.toml`. Use it when tuning the daemon or when new
+features land.
 
 ## Getting Started
 
@@ -46,7 +46,7 @@ daemon (`spindle stop && spindle start`).
 | Key | Purpose | Notes |
 | --- | --- | --- |
 | `library_dir` | Final Jellyfin-ready library root. | Must exist; Spindle creates `movies/` & `tv/` subdirs when absent. |
-| `staging_dir` | Work area for rips, encodes, subtitles, logs. | Keep on fast storage; large temporary files live here. |
+| `staging_dir` | Work area for rips, encodes, subtitles, logs. | Prefer fast storage; large temporary files live here. |
 | `review_dir` | Destination for items flagged `NeedsReview`. | Defaults to `~/review`; contents are safe to rename manually. |
 | `log_dir` | Persistent logs plus the queue DB. | Ensure enough space for SQLite + log rotation. |
 | `log_retention_days` | Days to keep daemon/item logs before pruning. | Default 60; set 0 to disable automatic cleanup. |
@@ -66,7 +66,7 @@ indefinitely.
 - `tmdb_confidence_threshold` — Float 0‑1; lower values accept fuzzier matches.
 - `identification_overrides_path` — JSON file for manual disc→title overrides
   (defaults to `~/.config/spindle/overrides/identification.json`).
-- `bd_info_enabled` — When true, Spindle shells out to `bd_info` for cleaner
+- `bd_info_enabled` — When true, Spindle shells out to `bd_info` for additional
   playlist metadata. Requires `libbluray` utilities (`libbluray-bin`,
   `libbluray-utils`, etc.).
 
@@ -113,7 +113,7 @@ files media correctly.
 | `opensubtitles_user_agent` | Your registered UA string; mandated by OpenSubtitles. |
 | `opensubtitles_user_token` | Optional JWT for higher daily limits. |
 | `opensubtitles_languages` | Preferred ISO 639‑1 codes (e.g. `['en','es']`). |
-| `whisperx_cuda_enabled` | Use CUDA 12.8+/cuDNN 9.1 for faster inference. |
+| `whisperx_cuda_enabled` | Use CUDA 12.8+/cuDNN 9.1 for GPU inference. |
 | `whisperx_vad_method` | `silero` (default, offline) or `pyannote` (needs HF token). |
 | `whisperx_hf_token` | Required when `whisperx_vad_method = "pyannote"`. |
 

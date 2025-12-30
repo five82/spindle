@@ -27,7 +27,7 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 
 - Canonical pre-commit check is `./check-ci.sh`; it verifies Go version, runs `go test ./...`, runs a CGO-enabled `go build ./...` (requires `gcc`), and executes `golangci-lint run`.
 - If `check-ci.sh` fails, fix lint findings first (`golangci-lint run --fix` when safe), then rerun targeted packages with `go test ./internal/queue ./internal/workflow`, etc.
-- Useful focused test runs:
+- Focused test runs:
   - `go test ./internal/queue`
   - `go test ./internal/workflow`
   - `go test ./internal/identification -run TestIdentifier`
