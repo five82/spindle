@@ -118,13 +118,7 @@ func (h *prettyHandler) writeInfo(buf *bytes.Buffer, ts time.Time, level slog.Le
 	h.recordInfoMessage(summaryKey, message)
 	writeLogHeader(buf, ts, level, component, lane, itemID, stage, message, h.addSource, src)
 	buf.WriteByte('\n')
-	for _, field := range fields {
-		buf.WriteString("    - ")
-		buf.WriteString(field.label)
-		buf.WriteString(": ")
-		buf.WriteString(field.value)
-		buf.WriteByte('\n')
-	}
+	writeDetailLines(buf, buildInfoLines(fields))
 	if hidden > 0 {
 		buf.WriteString("    + ")
 		buf.WriteString(strconv.Itoa(hidden))
@@ -144,16 +138,18 @@ func (h *prettyHandler) writeDebug(buf *bytes.Buffer, ts time.Time, level slog.L
 		return
 	}
 	buf.WriteByte('\n')
+	fields := make([]infoField, 0, len(attrs))
 	for _, kv := range attrs {
 		if kv.key == "" {
 			continue
 		}
-		buf.WriteString("    ")
-		buf.WriteString(kv.key)
-		buf.WriteString(": ")
-		buf.WriteString(formatValue(kv.value))
-		buf.WriteByte('\n')
+		fields = append(fields, infoField{
+			key:   kv.key,
+			label: kv.key,
+			value: formatValueForKeyWithAttrs(kv.key, kv.value, attrs),
+		})
 	}
+	writeDetailLines(buf, buildDebugLines(fields))
 }
 
 func writeLogHeader(buf *bytes.Buffer, ts time.Time, level slog.Level, component, lane, itemID, stage, message string, addSource bool, src *slog.Source) {
@@ -374,5 +370,27 @@ func levelLabel(level slog.Level) string {
 		return "INFO"
 	default:
 		return "DEBUG"
+	}
+}
+
+func writeDetailLines(buf *bytes.Buffer, lines []detailLine) {
+	for _, line := range lines {
+		if line.label == "" {
+			continue
+		}
+		indent := line.indent
+		if indent < 1 {
+			indent = 1
+		}
+		for i := 0; i < indent; i++ {
+			buf.WriteString("    ")
+		}
+		buf.WriteString("- ")
+		buf.WriteString(line.label)
+		if line.value != "" {
+			buf.WriteString(": ")
+			buf.WriteString(line.value)
+		}
+		buf.WriteByte('\n')
 	}
 }

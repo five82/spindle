@@ -13,6 +13,12 @@ type infoField struct {
 	value string
 }
 
+type detailLine struct {
+	indent int
+	label  string
+	value  string
+}
+
 const infoAttrLimit = 8
 
 var infoHighlightKeys = []string{
@@ -472,31 +478,8 @@ func reorderInfoFields(fields []infoField) []infoField {
 		"decision_options",
 		"decision_selected",
 	}
-	type groupSpec struct {
-		name       string
-		countKey   string
-		itemPrefix string
-	}
-	groups := []groupSpec{
-		{name: "commentary", countKey: "commentary_count", itemPrefix: "commentary_"},
-		{name: "removed", countKey: "removed_count", itemPrefix: "removed_"},
-		{name: "job", countKey: "job_count", itemPrefix: "job_"},
-		{name: "source", countKey: "source_count", itemPrefix: "source_"},
-		{name: "mode", countKey: "mode_count", itemPrefix: "mode_"},
-		{name: "title", countKey: "title_count", itemPrefix: "title_"},
-		{name: "candidate", countKey: "candidate_count", itemPrefix: "candidate_"},
-		{name: "accepted", countKey: "accepted_count", itemPrefix: "accepted_"},
-		{name: "selected", countKey: "selected_count", itemPrefix: "selected_"},
-		{name: "rejected", countKey: "rejected_count", itemPrefix: "rejected_"},
-		{name: "reason", countKey: "reason_count", itemPrefix: "reason_"},
-		{name: "prefilter_reason", countKey: "prefilter_reason_count", itemPrefix: "prefilter_reason_"},
-		{name: "thresholds", countKey: "", itemPrefix: "thresholds."},
-	}
+	groups := infoGroupSpecs()
 
-	type groupBucket struct {
-		count *infoField
-		items []infoField
-	}
 	buckets := make(map[string]*groupBucket, len(groups))
 	isGrouped := func(key string) (string, bool) {
 		for _, group := range groups {
@@ -584,6 +567,143 @@ func reorderInfoFields(fields []infoField) []infoField {
 	}
 
 	return out
+}
+
+type groupSpec struct {
+	name       string
+	countKey   string
+	itemPrefix string
+	label      string
+}
+
+type groupBucket struct {
+	count *infoField
+	items []infoField
+}
+
+func infoGroupSpecs() []groupSpec {
+	return []groupSpec{
+		{name: "commentary", countKey: "commentary_count", itemPrefix: "commentary_", label: "Commentary"},
+		{name: "removed", countKey: "removed_count", itemPrefix: "removed_", label: "Removed"},
+		{name: "job", countKey: "job_count", itemPrefix: "job_", label: "Jobs"},
+		{name: "source", countKey: "source_count", itemPrefix: "source_", label: "Sources"},
+		{name: "mode", countKey: "mode_count", itemPrefix: "mode_", label: "Modes"},
+		{name: "title", countKey: "title_count", itemPrefix: "title_", label: "Titles"},
+		{name: "candidate", countKey: "candidate_count", itemPrefix: "candidate_", label: "Candidates"},
+		{name: "accepted", countKey: "accepted_count", itemPrefix: "accepted_", label: "Accepted"},
+		{name: "selected", countKey: "selected_count", itemPrefix: "selected_", label: "Selected"},
+		{name: "rejected", countKey: "rejected_count", itemPrefix: "rejected_", label: "Rejected"},
+		{name: "reason", countKey: "reason_count", itemPrefix: "reason_", label: "Reason Counts"},
+		{name: "prefilter_reject", countKey: "", itemPrefix: "prefilter_reject_", label: "Prefilter Rejections"},
+		{name: "prefilter_reason", countKey: "prefilter_reason_count", itemPrefix: "prefilter_reason_", label: "Prefilter Reason Counts"},
+		{name: "thresholds", countKey: "", itemPrefix: "thresholds.", label: "Thresholds"},
+	}
+}
+
+type detailLineOptions struct {
+	friendlyLabels bool
+}
+
+func buildInfoLines(fields []infoField) []detailLine {
+	return buildDetailLines(fields, detailLineOptions{friendlyLabels: true})
+}
+
+func buildDebugLines(fields []infoField) []detailLine {
+	return buildDetailLines(fields, detailLineOptions{friendlyLabels: false})
+}
+
+func buildDetailLines(fields []infoField, opts detailLineOptions) []detailLine {
+	if len(fields) == 0 {
+		return nil
+	}
+	ordered := fields
+	if opts.friendlyLabels {
+		ordered = reorderInfoFields(fields)
+	}
+	groupSpecs := infoGroupSpecs()
+	groupBuckets := make(map[string]*groupBucket, len(groupSpecs))
+	findGroup := func(key string) (groupSpec, bool, bool) {
+		for _, spec := range groupSpecs {
+			if spec.countKey != "" && key == spec.countKey {
+				return spec, true, true
+			}
+			if spec.itemPrefix != "" && strings.HasPrefix(key, spec.itemPrefix) {
+				return spec, true, false
+			}
+		}
+		return groupSpec{}, false, false
+	}
+
+	nonGroup := make([]infoField, 0, len(fields))
+	for _, field := range ordered {
+		spec, ok, isCount := findGroup(field.key)
+		if !ok {
+			nonGroup = append(nonGroup, field)
+			continue
+		}
+		bucket := groupBuckets[spec.name]
+		if bucket == nil {
+			bucket = &groupBucket{}
+			groupBuckets[spec.name] = bucket
+		}
+		if isCount {
+			fieldCopy := field
+			bucket.count = &fieldCopy
+			continue
+		}
+		bucket.items = append(bucket.items, field)
+	}
+
+	lines := make([]detailLine, 0, len(fields))
+	for _, field := range nonGroup {
+		lines = append(lines, detailLine{indent: 1, label: field.label, value: field.value})
+	}
+	for _, spec := range groupSpecs {
+		bucket := groupBuckets[spec.name]
+		if bucket == nil {
+			continue
+		}
+		if len(bucket.items) == 0 {
+			if bucket.count == nil {
+				continue
+			}
+			lines = append(lines, detailLine{indent: 1, label: groupLabel(spec), value: bucket.count.value})
+			continue
+		}
+		headerValue := ""
+		if bucket.count != nil {
+			headerValue = bucket.count.value
+		}
+		lines = append(lines, detailLine{indent: 1, label: groupLabel(spec), value: headerValue})
+		for _, item := range bucket.items {
+			lines = append(lines, detailLine{indent: 2, label: groupItemLabel(spec, item, opts.friendlyLabels), value: item.value})
+		}
+	}
+	return lines
+}
+
+func groupLabel(spec groupSpec) string {
+	if spec.label != "" {
+		return spec.label
+	}
+	return titleizeKey(spec.name)
+}
+
+func groupItemLabel(spec groupSpec, field infoField, friendly bool) string {
+	if spec.itemPrefix != "" && strings.HasPrefix(field.key, spec.itemPrefix) {
+		if n, ok := suffixNumber(field.key); ok {
+			return "#" + strconv.Itoa(n)
+		}
+		suffix := strings.TrimPrefix(field.key, spec.itemPrefix)
+		if suffix != "" {
+			if friendly {
+				suffix = strings.ReplaceAll(suffix, ".", "_")
+				return titleizeKey(suffix)
+			}
+			return suffix
+		}
+	}
+	return field.label
 }
 
 func suffixNumber(key string) (int, bool) {
