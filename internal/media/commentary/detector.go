@@ -265,75 +265,130 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	})
 
 	reasonCounts := make(map[string]int)
-	summaryLines := make([]string, 0, len(decisions))
+	acceptedCount := 0
+	rejectedCount := 0
 
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].stream.Index < candidates[j].stream.Index
+	})
 	for _, decision := range decisions {
 		reason := strings.TrimSpace(decision.Reason)
 		if reason == "" {
 			reason = "unknown"
 		}
 		reasonCounts[reason]++
-		summaryLines = append(summaryLines, formatDecisionSummary(decision, reason))
+		if decision.Include {
+			acceptedCount++
+		} else {
+			rejectedCount++
+		}
+	}
+
+	infoAttrs := []logging.Attr{
+		logging.String(logging.FieldEventType, "decision_summary"),
+		logging.String(logging.FieldDecisionType, "commentary_detection"),
+		logging.Int("candidate_count", len(candidates)),
+		logging.Int("accepted_count", acceptedCount),
+		logging.Int("rejected_count", rejectedCount),
+	}
+	for _, cand := range candidates {
+		infoAttrs = append(infoAttrs, logging.String(fmt.Sprintf("candidate_%d", cand.stream.Index), formatCandidateValue(cand)))
+	}
+	for _, decision := range decisions {
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = "unknown"
+		}
+		key := fmt.Sprintf("rejected_%d", decision.Index)
+		if decision.Include {
+			key = fmt.Sprintf("accepted_%d", decision.Index)
+		}
+		infoAttrs = append(infoAttrs, logging.String(key, formatDecisionValue(decision, reason)))
+	}
+	if len(reasonCounts) > 0 {
+		infoAttrs = append(infoAttrs, logging.Any("reason_counts", reasonCounts))
 	}
 
 	logger.Info("commentary selection summary",
-		logging.String(logging.FieldEventType, "decision_summary"),
-		logging.String(logging.FieldDecisionType, "commentary_detection"),
-		logging.Int("candidate_count", len(candidateIndices)),
-		logging.Any("decisions", summaryLines),
-		logging.Any("reason_counts", reasonCounts),
-		logging.Any("prefilter_rejections", prefilterRejections),
-		logging.Any("prefilter_reason_counts", prefilterReasonCounts),
-		logging.Group("thresholds",
+		logging.Args(infoAttrs...)...,
+	)
+	if len(prefilterRejections) > 0 {
+		debugAttrs := []logging.Attr{
+			logging.String(logging.FieldEventType, "commentary_prefilter"),
+			logging.Int("candidate_count", len(candidates)),
+		}
+		for idx, rejection := range prefilterRejections {
+			debugAttrs = append(debugAttrs, logging.String(fmt.Sprintf("prefilter_reject_%d", idx+1), rejection))
+		}
+		if len(prefilterReasonCounts) > 0 {
+			debugAttrs = append(debugAttrs, logging.Any("prefilter_reason_counts", prefilterReasonCounts))
+		}
+		debugAttrs = append(debugAttrs, logging.Group("thresholds",
 			logging.Float64("speech_ratio_min_commentary", settings.SpeechRatioMinCommentary),
 			logging.Float64("speech_ratio_max_music", settings.SpeechRatioMaxMusic),
 			logging.Float64("speech_overlap_primary_min", settings.SpeechOverlapPrimaryMin),
 			logging.Float64("speech_overlap_primary_max_audio_description", settings.SpeechOverlapPrimaryMaxAD),
 			logging.Float64("speech_in_silence_max", settings.SpeechInSilenceMax),
 			logging.Float64("fingerprint_similarity_duplicate", settings.FingerprintSimilarityDuplicate),
-		),
-	)
+		))
+		logger.Debug("commentary prefilter summary",
+			logging.Args(debugAttrs...)...,
+		)
+	}
 
 	return Result{Indices: indices, Decisions: decisions}, nil
 }
 
-func formatDecisionSummary(decision Decision, reason string) string {
-	status := "Rejected"
-	if decision.Include {
-		status = "Kept"
-	}
+func formatDecisionValue(decision Decision, reason string) string {
 	lang := decision.Metadata.Language
 	if lang == "" {
 		lang = "und"
 	}
-
 	details := ""
 	switch reason {
 	case "commentary_only", "mixed_commentary", "metadata_commentary":
-		details = fmt.Sprintf(" [Speech: %.0f%%, Audio Similarity: %.0f%%]", decision.Metrics.SpeechRatio*100, decision.Metrics.FingerprintSimilarity*100)
+		details = fmt.Sprintf(" | speech %.0f%% | similarity %.0f%%", decision.Metrics.SpeechRatio*100, decision.Metrics.FingerprintSimilarity*100)
 	case "music_or_silent":
-		details = fmt.Sprintf(" [Speech: %.0f%% (Low)]", decision.Metrics.SpeechRatio*100)
+		details = fmt.Sprintf(" | speech %.0f%% (low)", decision.Metrics.SpeechRatio*100)
 	case "duplicate_downmix":
-		details = fmt.Sprintf(" [Audio Similarity: %.0f%% (High)]", decision.Metrics.FingerprintSimilarity*100)
+		details = fmt.Sprintf(" | similarity %.0f%% (high)", decision.Metrics.FingerprintSimilarity*100)
 	case "audio_description":
-		details = fmt.Sprintf(" [Speech in Silence: %.0f%%, Overlap: %.0f%%, Audio Similarity: %.0f%%]",
+		details = fmt.Sprintf(" | silence speech %.0f%% | overlap %.0f%% | similarity %.0f%%",
 			decision.Metrics.SpeechInPrimarySilence*100,
 			decision.Metrics.SpeechOverlapWithPrimary*100,
 			decision.Metrics.FingerprintSimilarity*100,
 		)
 	case "fingerprint_failed":
-		details = " [Audio Similarity Check Failed]"
+		details = " | fingerprint failed"
 	case "fingerprint_failed_stream_missing":
-		details = " [Stream not found by ffmpeg; candidate skipped]"
+		details = " | ffmpeg stream missing"
 	case "fingerprint_failed_decode":
-		details = " [ffmpeg could not decode stream; candidate skipped]"
+		details = " | ffmpeg decode failed"
 	case "fingerprint_failed_fpcalc":
-		details = " [fpcalc failed; candidate skipped]"
+		details = " | fpcalc failed"
 	case "analysis_failed":
-		details = " [Speech Analysis Failed]"
+		details = " | speech analysis failed"
 	}
 
-	return fmt.Sprintf("#%d (%s): %s (%s)%s", decision.Index, lang, status, reason, details)
+	return fmt.Sprintf("%s | %s%s", lang, reason, details)
+}
+
+func formatCandidateValue(cand candidate) string {
+	lang := cand.language
+	if lang == "" {
+		lang = "und"
+	}
+	title := strings.TrimSpace(cand.title)
+	if title == "" {
+		title = "untitled"
+	}
+	durationLabel := ""
+	if cand.duration > 0 {
+		durationLabel = fmt.Sprintf("%.0fs", cand.duration)
+	} else {
+		durationLabel = "unknown"
+	}
+	return fmt.Sprintf("%s | %dch | %s | %s", lang, cand.channels, durationLabel, title)
 }
 
 func formatPrefilterSummary(decision candidateDecision, reason string) string {

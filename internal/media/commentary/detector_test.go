@@ -174,11 +174,11 @@ func TestFormatDecisionSummaryFingerprintFailure(t *testing.T) {
 			Language: "eng",
 		},
 	}
-	summary := formatDecisionSummary(decision, decision.Reason)
+	summary := formatDecisionValue(decision, decision.Reason)
 	if !strings.Contains(summary, "fingerprint_failed_stream_missing") {
 		t.Fatalf("expected reason in summary, got %q", summary)
 	}
-	if !strings.Contains(summary, "Stream not found by ffmpeg; candidate skipped") {
+	if !strings.Contains(summary, "ffmpeg stream missing") {
 		t.Fatalf("expected stream missing hint, got %q", summary)
 	}
 }
