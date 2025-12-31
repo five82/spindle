@@ -26,6 +26,7 @@ Commands:
   rip     - Rip a disc into the rip cache
   stats   - Show all cached entries with their sizes and ages
   commentary - Run commentary detection on a cached rip file
+  process - Queue a cached entry for post-rip processing
   remove  - Remove a specific entry by number (see 'stats' for numbers)
   clear   - Remove all cached entries`,
 	}
@@ -33,6 +34,7 @@ Commands:
 	cacheCmd.AddCommand(newCacheRipCommand(ctx))
 	cacheCmd.AddCommand(newCacheStatsCommand(ctx))
 	cacheCmd.AddCommand(newCacheCommentaryCommand(ctx))
+	cacheCmd.AddCommand(newCacheProcessCommand(ctx))
 	cacheCmd.AddCommand(newCacheRemoveCommand(ctx))
 	cacheCmd.AddCommand(newCacheClearCommand(ctx))
 

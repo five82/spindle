@@ -482,9 +482,15 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				"Failed to register rip cache entry; free space may be insufficient",
 				err,
 			)
-		} else {
-			cacheCleanup = ""
 		}
+		if err := r.cache.WriteMetadata(ctx, item, destDir); err != nil {
+			logger.Warn("failed to store rip cache metadata",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_cache_metadata_failed"),
+				logging.String(logging.FieldErrorHint, "check rip_cache_dir permissions and free space"),
+			)
+		}
+		cacheCleanup = ""
 	}
 
 	item.RippedFile = target

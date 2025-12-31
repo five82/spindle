@@ -69,7 +69,9 @@ Progress messages in `spindle show --follow` describe the identification steps a
 4. When ripping succeeds, the item is marked `RIPPED` and an ntfy notification fires so you know the drive is free to eject manually.
 5. If MakeMKV fails or the disc is defective, the item becomes `FAILED` with the error recorded in the queue.
 
-If the rip cache is enabled, raw rips are stored for reuse; restored rips are reprocessed for audio refinement.
+If the rip cache is enabled, raw rips are stored for reuse along with the identification metadata
+(disc fingerprint, rip spec, TMDB metadata). Cached entries can be re-queued without inserting a disc
+via `spindle cache process <number>`; restored rips are reprocessed for audio refinement.
 
 ## Stage 4: Episode Identification (EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED)
 

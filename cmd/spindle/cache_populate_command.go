@@ -149,6 +149,12 @@ it is overwritten.`,
 				return fmt.Errorf("ripping requires review: %s", strings.TrimSpace(item.ReviewReason))
 			}
 
+			if _, ok, err := ripcache.LoadMetadata(cacheDir); err != nil {
+				return fmt.Errorf("load rip cache metadata: %w", err)
+			} else if !ok {
+				return fmt.Errorf("rip cache metadata missing; check rip_cache_dir permissions and free space")
+			}
+
 			if removed, err := store.Remove(baseCtx, item.ID); err != nil {
 				logger.Warn("failed to remove queue item after cache populate", logging.Error(err))
 			} else if removed {
