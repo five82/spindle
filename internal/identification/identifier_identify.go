@@ -97,12 +97,24 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		logging.String("media_hint", input.MediaHint.String()),
 		logging.Int("season_guess", seasonNumber))
 
-	queryInputs := []string{input.Title, showHint}
+	titleForQuery, titleYear := splitTitleYear(input.Title)
+	discLabelForQuery, labelYear := splitTitleYear(input.DiscLabel)
+	if input.SearchOpts.Year == 0 {
+		if titleYear > 0 {
+			input.SearchOpts.Year = titleYear
+			logger.Debug("using year from title for TMDB search", logging.Int("year", titleYear))
+		} else if labelYear > 0 {
+			input.SearchOpts.Year = labelYear
+			logger.Debug("using year from disc label for TMDB search", logging.Int("year", labelYear))
+		}
+	}
+
+	queryInputs := []string{titleForQuery, showHint}
 	if input.Override != nil {
 		queryInputs = append(queryInputs, input.Override.Title)
 	}
-	if input.DiscLabel != "" {
-		queryInputs = append(queryInputs, input.DiscLabel)
+	if discLabelForQuery != "" {
+		queryInputs = append(queryInputs, discLabelForQuery)
 	}
 	seasonQuerySource := strings.TrimSpace(showHint)
 	if seasonQuerySource == "" {

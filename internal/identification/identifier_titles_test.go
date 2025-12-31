@@ -40,6 +40,8 @@ func TestIsPlaceholderTitle(t *testing.T) {
 		{title: "Unknown Disc", discLabel: "", want: true},
 		{title: "Unknown Disc 2", discLabel: "", want: true},
 		{title: "DISC_ONE", discLabel: "disc_one", want: true},
+		{title: "Goodfellas (1990)", discLabel: "Goodfellas (1990)", want: false},
+		{title: "DVD_VIDEO", discLabel: "DVD_VIDEO", want: true},
 		{title: "My Movie", discLabel: "", want: false},
 		{title: "Some Label", discLabel: "Other", want: false},
 	}

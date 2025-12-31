@@ -17,7 +17,20 @@ func isPlaceholderTitle(title, discLabel string) bool {
 		return true
 	}
 	if strings.TrimSpace(discLabel) != "" && strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(discLabel)) {
-		return true
+		if disc.IsGenericLabel(title) || isTechnicalLabel(title) || looksLikeDiscLabel(title) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeDiscLabel(title string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(title))
+	if upper == "" {
+		return false
+	}
+	if strings.Contains(upper, "DISC") || strings.Contains(upper, "DISK") {
+		return strings.Contains(upper, "_")
 	}
 	return false
 }

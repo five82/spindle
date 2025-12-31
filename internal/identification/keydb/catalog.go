@@ -224,6 +224,7 @@ func (c *Catalog) loadFromDisk(info fs.FileInfo) error {
 		} else {
 			title = strings.TrimSpace(stripAlias(title))
 		}
+		title = normalizeDuplicateTitle(title)
 		if title == "" {
 			title = payload
 		}
@@ -333,4 +334,40 @@ func stripAlias(title string) string {
 		return strings.TrimSpace(title[:idx])
 	}
 	return title
+}
+
+func normalizeDuplicateTitle(title string) string {
+	normalized := strings.TrimSpace(title)
+	for {
+		trimmed := strings.TrimSpace(normalized)
+		if trimmed == "" || !strings.HasSuffix(trimmed, ")") {
+			return normalized
+		}
+		open := findMatchingOpenParen(trimmed)
+		if open == -1 || open+1 >= len(trimmed)-1 {
+			return normalized
+		}
+		prefix := strings.TrimSpace(trimmed[:open])
+		inner := strings.TrimSpace(trimmed[open+1 : len(trimmed)-1])
+		if prefix == "" || inner == "" || prefix != inner {
+			return normalized
+		}
+		normalized = prefix
+	}
+}
+
+func findMatchingOpenParen(value string) int {
+	depth := 0
+	for i := len(value) - 1; i >= 0; i-- {
+		switch value[i] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }

@@ -38,6 +38,27 @@ func TestCatalogLookupParsesEntries(t *testing.T) {
 	}
 }
 
+func TestCatalogLookupNormalizesDuplicateTitle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keydb.cfg")
+	content := []byte("0x" + sampleDiscID + "=Goodfellas (1990) (Goodfellas (1990))\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("write keydb: %v", err)
+	}
+	catalog := NewCatalog(path, nil, "", 0)
+
+	entry, ok, err := catalog.Lookup(sampleDiscID)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected lookup to find entry")
+	}
+	if entry.Title != "Goodfellas (1990)" {
+		t.Fatalf("unexpected title: %q", entry.Title)
+	}
+}
+
 func TestCatalogRefreshesRemoteWhenMissing(t *testing.T) {
 	zipData := buildKeyDBZip(t, []byte(sampleDiscID+"=Remote Title\n"))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -30,6 +30,7 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	}
 	queryLower := strings.ToLower(query)
 	queryNormalized := normalizeForComparison(query)
+	queryYear, queryTitleNormalized := splitQueryYear(query)
 	var best *tmdb.Result
 	bestScore := -1.0
 	candidates := make([]scoredCandidate, 0, len(response.Results))
@@ -42,6 +43,11 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		titleLower := strings.ToLower(title)
 		titleNormalized := normalizeForComparison(title)
 		exactMatch := titleLower == queryLower || titleNormalized == queryNormalized
+		if !exactMatch && queryYear > 0 && queryTitleNormalized != "" && titleNormalized == queryTitleNormalized {
+			if resultYear := resultReleaseYear(res); resultYear == queryYear {
+				exactMatch = true
+			}
+		}
 		match := matchType(titleLower, queryLower)
 
 		logger.Debug("calculating confidence score",
@@ -80,6 +86,11 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	titleLower := strings.ToLower(title)
 	titleNormalized := normalizeForComparison(title)
 	exactMatch := titleLower == queryLower || titleNormalized == queryNormalized
+	if !exactMatch && queryYear > 0 && queryTitleNormalized != "" && titleNormalized == queryTitleNormalized {
+		if resultYear := resultReleaseYear(*best); resultYear == queryYear {
+			exactMatch = true
+		}
+	}
 	match := matchType(titleLower, queryLower)
 
 	decisionResult := "rejected"
@@ -217,6 +228,41 @@ func normalizeForComparison(input string) string {
 		}
 	}
 	return builder.String()
+}
+
+func splitQueryYear(query string) (int, string) {
+	fields := strings.Fields(strings.TrimSpace(query))
+	if len(fields) < 2 {
+		return 0, ""
+	}
+	last := fields[len(fields)-1]
+	if len(last) != 4 {
+		return 0, ""
+	}
+	year, err := strconv.Atoi(last)
+	if err != nil || year < 1880 || year > 2100 {
+		return 0, ""
+	}
+	title := strings.TrimSpace(strings.Join(fields[:len(fields)-1], " "))
+	if title == "" {
+		return 0, ""
+	}
+	return year, normalizeForComparison(title)
+}
+
+func resultReleaseYear(result tmdb.Result) int {
+	date := strings.TrimSpace(result.ReleaseDate)
+	if date == "" && strings.TrimSpace(result.FirstAirDate) != "" {
+		date = strings.TrimSpace(result.FirstAirDate)
+	}
+	if len(date) < 4 {
+		return 0
+	}
+	year, err := strconv.Atoi(date[:4])
+	if err != nil {
+		return 0
+	}
+	return year
 }
 
 func summarizeCandidates(candidates []scoredCandidate, limit int) []string {

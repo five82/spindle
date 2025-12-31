@@ -2,6 +2,7 @@ package identification
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -12,6 +13,7 @@ var (
 
 var parenthesesStripper = strings.NewReplacer("(", " ", ")", " ")
 var discNoisePattern = regexp.MustCompile(`(?i)\b(?:disc|dvd|blu[- ]?ray|bd)\s*[0-9ivxlcdm]*\b`)
+var trailingYearPattern = regexp.MustCompile(`(?i)\s*(?:\(|\b)(\d{4})\)?\s*$`)
 
 func sanitizeQueryCandidate(value string) string {
 	value = strings.TrimSpace(value)
@@ -25,6 +27,27 @@ func sanitizeQueryCandidate(value string) string {
 	cleaned = strings.ReplaceAll(cleaned, "-", " ")
 	cleaned = whitespacePattern.ReplaceAllString(cleaned, " ")
 	return strings.TrimSpace(cleaned)
+}
+
+func splitTitleYear(value string) (string, int) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", 0
+	}
+	matches := trailingYearPattern.FindStringSubmatch(trimmed)
+	if len(matches) != 2 {
+		return trimmed, 0
+	}
+	year, err := strconv.Atoi(matches[1])
+	if err != nil || year < 1880 || year > 2100 {
+		return trimmed, 0
+	}
+	cleaned := strings.TrimSpace(trailingYearPattern.ReplaceAllString(trimmed, ""))
+	if cleaned == "" {
+		return trimmed, 0
+	}
+	cleaned = whitespacePattern.ReplaceAllString(cleaned, " ")
+	return cleaned, year
 }
 
 func deriveShowHint(values ...string) (string, int) {

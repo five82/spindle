@@ -33,3 +33,23 @@ func TestBuildQueryListDeduplicatesSanitizedVariants(t *testing.T) {
 		t.Fatalf("unexpected second query %q", queries[1])
 	}
 }
+
+func TestSplitTitleYear(t *testing.T) {
+	cases := []struct {
+		input string
+		title string
+		year  int
+	}{
+		{input: "Goodfellas (1990)", title: "Goodfellas", year: 1990},
+		{input: "Goodfellas 1990", title: "Goodfellas", year: 1990},
+		{input: "Goodfellas (1990) ", title: "Goodfellas", year: 1990},
+		{input: "Goodfellas (1990) (Director's Cut)", title: "Goodfellas (1990) (Director's Cut)", year: 0},
+		{input: "Goodfellas", title: "Goodfellas", year: 0},
+	}
+	for _, tc := range cases {
+		title, year := splitTitleYear(tc.input)
+		if title != tc.title || year != tc.year {
+			t.Fatalf("splitTitleYear(%q) = %q, %d want %q, %d", tc.input, title, year, tc.title, tc.year)
+		}
+	}
+}
