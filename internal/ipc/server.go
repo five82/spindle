@@ -285,6 +285,18 @@ func (s *service) QueueRetry(req QueueRetryRequest, resp *QueueRetryResponse) er
 	return nil
 }
 
+func (s *service) QueueStop(req QueueStopRequest, resp *QueueStopResponse) error {
+	if len(req.IDs) == 0 {
+		return errors.New("queue stop requires at least one id")
+	}
+	updated, err := s.daemon.StopQueueItems(s.ctx, req.IDs)
+	if err != nil {
+		return err
+	}
+	resp.Updated = updated
+	return nil
+}
+
 func (s *service) LogTail(req LogTailRequest, resp *LogTailResponse) error {
 	logPath := s.daemon.LogPath()
 	if logPath == "" {

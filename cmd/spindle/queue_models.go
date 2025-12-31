@@ -82,3 +82,24 @@ type queueRetryResult struct {
 	UpdatedCount int64
 	Items        []queueRetryItemResult
 }
+
+type queueStopOutcome int
+
+const (
+	queueStopOutcomeUpdated queueStopOutcome = iota
+	queueStopOutcomeNotFound
+	queueStopOutcomeAlreadyReview
+	queueStopOutcomeAlreadyCompleted
+	queueStopOutcomeAlreadyFailed
+)
+
+type queueStopItemResult struct {
+	ID          int64
+	Outcome     queueStopOutcome
+	PriorStatus string
+}
+
+type queueStopResult struct {
+	UpdatedCount int64
+	Items        []queueStopItemResult
+}

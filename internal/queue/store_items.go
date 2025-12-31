@@ -84,6 +84,9 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 	if item == nil {
 		return errors.New("item is nil")
 	}
+	if err := s.applyStopReviewOverride(ctx, item); err != nil {
+		return err
+	}
 	item.UpdatedAt = time.Now().UTC()
 	if err := s.execWithoutResultRetry(
 		ctx,
@@ -120,6 +123,30 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		item.ID,
 	); err != nil {
 		return fmt.Errorf("update item: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) applyStopReviewOverride(ctx context.Context, item *Item) error {
+	if item == nil || item.ID == 0 {
+		return nil
+	}
+	if item.Status == StatusReview && IsStopReviewReason(item.ReviewReason) {
+		return nil
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT status, review_reason FROM queue_items WHERE id = ?`, item.ID)
+	var status Status
+	var reviewReason sql.NullString
+	if err := row.Scan(&status, &reviewReason); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("load stop review state: %w", err)
+	}
+	if status == StatusReview && IsStopReviewReason(reviewReason.String) {
+		item.Status = StatusReview
+		item.NeedsReview = true
+		item.ReviewReason = reviewReason.String
 	}
 	return nil
 }

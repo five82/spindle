@@ -117,6 +117,41 @@ func TestQueueRetrySpecificID(t *testing.T) {
 	requireContains(t, out, fmt.Sprintf("Item %d reset for retry", alpha.ID))
 }
 
+func TestQueueStopSpecificID(t *testing.T) {
+	env := setupCLITestEnv(t)
+	ctx := context.Background()
+
+	item, err := env.store.NewDisc(ctx, "Alpha", "fp-alpha")
+	if err != nil {
+		t.Fatalf("alpha: %v", err)
+	}
+	item.Status = queue.StatusEncoding
+	if err := env.store.Update(ctx, item); err != nil {
+		t.Fatalf("alpha encoding: %v", err)
+	}
+
+	out, _, err := runCLI(t, []string{"queue", "stop", fmt.Sprintf("%d", item.ID)}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue stop: %v", err)
+	}
+	requireContains(t, out, "stop requested")
+	requireContains(t, out, "will halt after current stage")
+
+	updated, err := env.store.GetByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("lookup alpha: %v", err)
+	}
+	if updated.Status != queue.StatusReview {
+		t.Fatalf("expected review, got %s", updated.Status)
+	}
+	if updated.ReviewReason != queue.StopReviewReason {
+		t.Fatalf("expected review reason %q, got %q", queue.StopReviewReason, updated.ReviewReason)
+	}
+	if !updated.NeedsReview {
+		t.Fatalf("expected needs_review to be true")
+	}
+}
+
 func TestQueueRetryInvalidID(t *testing.T) {
 	env := setupCLITestEnv(t)
 

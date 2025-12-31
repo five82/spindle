@@ -26,6 +26,8 @@ const (
 	StatusReview             Status = "review"
 )
 
+const StopReviewReason = "Stop requested by user"
+
 var allStatuses = []Status{
 	StatusPending,
 	StatusIdentifying,
@@ -152,6 +154,17 @@ func ParseStatus(value string) (Status, bool) {
 func (i Item) IsProcessing() bool {
 	_, ok := processingStatuses[i.Status]
 	return ok
+}
+
+// IsProcessingStatus reports whether a status reflects an in-flight operation.
+func IsProcessingStatus(status Status) bool {
+	_, ok := processingStatuses[status]
+	return ok
+}
+
+// IsStopReviewReason reports whether a review reason represents a stop request.
+func IsStopReviewReason(reason string) bool {
+	return strings.EqualFold(strings.TrimSpace(reason), StopReviewReason)
 }
 
 // InitProgress resets progress fields for a new stage.

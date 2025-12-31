@@ -106,6 +106,16 @@ type QueueRetryResponse struct {
 	Updated int64 `json:"updated"`
 }
 
+// QueueStopRequest stops queue items. Empty list is invalid.
+type QueueStopRequest struct {
+	IDs []int64 `json:"ids"`
+}
+
+// QueueStopResponse reports number of stopped items.
+type QueueStopResponse struct {
+	Updated int64 `json:"updated"`
+}
+
 // LogTailRequest fetches log lines based on offset and follow semantics.
 type LogTailRequest struct {
 	Offset     int64 `json:"offset"`

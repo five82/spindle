@@ -138,3 +138,32 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// StopItems moves selected items into review to halt further processing.
+func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	placeholders := makePlaceholders(len(ids))
+	args := make([]any, 0, len(ids)+7)
+	args = append(args,
+		StatusReview,
+		StopReviewReason,
+		"Manual review",
+		StopReviewReason,
+		now,
+	)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	query := `UPDATE queue_items
+        SET status = ?, needs_review = 1, review_reason = ?, progress_stage = ?, progress_message = ?,
+            progress_percent = 0, error_message = NULL, last_heartbeat = NULL, active_episode_key = NULL, updated_at = ?
+        WHERE id IN (` + placeholders + `) AND status NOT IN ('` + string(StatusCompleted) + `','` + string(StatusFailed) + `','` + string(StatusReview) + `')`
+	res, err := s.execWithRetry(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("stop items: %w", err)
+	}
+	return res.RowsAffected()
+}

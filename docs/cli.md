@@ -36,6 +36,7 @@ spindle queue clear --completed     # drop completed entries
 spindle queue clear-failed          # remove failed entries
 spindle queue reset-stuck           # kick stalled items forward
 spindle queue retry <id...>         # retry one or more items
+spindle queue stop <id...>          # halt processing for specific items
 ```
 
 ## Utilities

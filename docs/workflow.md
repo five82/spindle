@@ -110,7 +110,7 @@ When `subtitles_enabled = true`, Spindle attempts OpenSubtitles first (if enable
 
 ## Review vs Failed
 
-- **`REVIEW` status**: Workflow stops. This is used for validation/configuration issues or duplicate fingerprints. Fix the problem, then reinsert the disc or clear the item; `spindle queue retry` only applies to `FAILED` items.
+- **`REVIEW` status**: Workflow stops. This is used for validation/configuration issues, duplicate fingerprints, or manual stop requests (`spindle queue stop <id>`). Fix the problem, then reinsert the disc or clear the item; `spindle queue retry` only applies to `FAILED` items.
 - **`NeedsReview` flag**: Workflow continues. Final artifacts are routed to `review_dir`, and the item completes with progress stage "Manual review" so the pipeline stays unblocked.
 - **`FAILED` status**: Something went wrong (external tool failure, read error, etc.). Fix the root cause, then use `spindle queue retry <id>` to requeue.
 
@@ -120,6 +120,7 @@ When `subtitles_enabled = true`, Spindle attempts OpenSubtitles first (if enable
 - `spindle status` - status summary; uses the daemon when available, otherwise inspects the queue database.
 - `spindle queue list`, `spindle queue status`, `spindle queue health` - queue inspection (works with or without daemon).
 - `spindle queue retry <id>` - retry failed items only.
+- `spindle queue stop <id>` - halt processing for a specific item (takes effect after the current stage if already running).
 - `spindle queue reset-stuck` - return in-flight items to the start of their current stage.
 - `spindle stop` - cleanly stop the daemon.
 

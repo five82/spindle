@@ -154,6 +154,16 @@ func (c *Client) QueueRetry(ids []int64) (*QueueRetryResponse, error) {
 	return &resp, nil
 }
 
+// QueueStop stops queue items.
+func (c *Client) QueueStop(ids []int64) (*QueueStopResponse, error) {
+	var resp QueueStopResponse
+	req := QueueStopRequest{IDs: ids}
+	if err := c.client.Call("Spindle.QueueStop", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // QueueHealth returns queue diagnostics.
 func (c *Client) QueueHealth() (*QueueHealthResponse, error) {
 	var resp QueueHealthResponse

@@ -19,6 +19,7 @@ type queueAPI interface {
 	ResetStuck(ctx context.Context) (int64, error)
 	RetryAll(ctx context.Context) (int64, error)
 	RetryIDs(ctx context.Context, ids []int64) (queueRetryResult, error)
+	StopIDs(ctx context.Context, ids []int64) (queueStopResult, error)
 	Health(ctx context.Context) (queueHealthView, error)
 }
 
@@ -166,6 +167,51 @@ func (f *queueIPCFacade) RetryIDs(_ context.Context, ids []int64) (queueRetryRes
 	return result, nil
 }
 
+func (f *queueIPCFacade) StopIDs(_ context.Context, ids []int64) (queueStopResult, error) {
+	result := queueStopResult{
+		Items: make([]queueStopItemResult, 0, len(ids)),
+	}
+
+	for _, id := range ids {
+		resp, err := f.client.QueueDescribe(id)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "not found") {
+				result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeNotFound})
+				continue
+			}
+			return queueStopResult{}, err
+		}
+		status := strings.TrimSpace(resp.Item.Status)
+		parsed, ok := queue.ParseStatus(status)
+		if ok {
+			switch parsed {
+			case queue.StatusReview:
+				result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyReview, PriorStatus: status})
+				continue
+			case queue.StatusCompleted:
+				result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyCompleted, PriorStatus: status})
+				continue
+			case queue.StatusFailed:
+				result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyFailed, PriorStatus: status})
+				continue
+			}
+		}
+
+		stopResp, err := f.client.QueueStop([]int64{id})
+		if err != nil {
+			return queueStopResult{}, err
+		}
+		if stopResp != nil && stopResp.Updated > 0 {
+			result.UpdatedCount += stopResp.Updated
+			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeUpdated, PriorStatus: status})
+			continue
+		}
+		result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyReview, PriorStatus: status})
+	}
+
+	return result, nil
+}
+
 func (f *queueIPCFacade) Health(_ context.Context) (queueHealthView, error) {
 	resp, err := f.client.QueueHealth()
 	if err != nil {
@@ -289,6 +335,48 @@ func (f *queueStoreFacade) RetryIDs(ctx context.Context, ids []int64) (queueRetr
 		}
 
 		result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFailed})
+	}
+
+	return result, nil
+}
+
+func (f *queueStoreFacade) StopIDs(ctx context.Context, ids []int64) (queueStopResult, error) {
+	result := queueStopResult{
+		Items: make([]queueStopItemResult, 0, len(ids)),
+	}
+
+	for _, id := range ids {
+		item, err := f.store.GetByID(ctx, id)
+		if err != nil {
+			return queueStopResult{}, err
+		}
+		if item == nil {
+			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeNotFound})
+			continue
+		}
+		status := string(item.Status)
+		switch item.Status {
+		case queue.StatusReview:
+			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyReview, PriorStatus: status})
+			continue
+		case queue.StatusCompleted:
+			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyCompleted, PriorStatus: status})
+			continue
+		case queue.StatusFailed:
+			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyFailed, PriorStatus: status})
+			continue
+		}
+
+		updated, err := f.store.StopItems(ctx, id)
+		if err != nil {
+			return queueStopResult{}, err
+		}
+		if updated > 0 {
+			result.UpdatedCount += updated
+			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeUpdated, PriorStatus: status})
+			continue
+		}
+		result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyReview, PriorStatus: status})
 	}
 
 	return result, nil

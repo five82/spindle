@@ -257,6 +257,14 @@ func (d *Daemon) RetryFailed(ctx context.Context, ids []int64) (int64, error) {
 	return d.store.RetryFailed(ctx, ids...)
 }
 
+// StopQueueItems moves items into review to halt further processing.
+func (d *Daemon) StopQueueItems(ctx context.Context, ids []int64) (int64, error) {
+	if d.store == nil {
+		return 0, errors.New("queue store unavailable")
+	}
+	return d.store.StopItems(ctx, ids...)
+}
+
 // QueueHealth returns aggregate queue diagnostics.
 func (d *Daemon) QueueHealth(ctx context.Context) (queue.HealthSummary, error) {
 	if d.store == nil {

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"spindle/internal/queue"
 )
 
 func newQueueCommand(ctx *commandContext) *cobra.Command {
@@ -23,6 +25,7 @@ func newQueueCommand(ctx *commandContext) *cobra.Command {
 	queueCmd.AddCommand(newQueueClearFailedCommand(ctx))
 	queueCmd.AddCommand(newQueueResetCommand(ctx))
 	queueCmd.AddCommand(newQueueRetryCommand(ctx))
+	queueCmd.AddCommand(newQueueStopCommand(ctx))
 	queueCmd.AddCommand(newQueueHealthSubcommand(ctx))
 
 	return queueCmd
@@ -231,6 +234,52 @@ func newQueueRetryCommand(ctx *commandContext) *cobra.Command {
 						fmt.Fprintf(out, "Item %d is not in failed state\n", item.ID)
 					case queueRetryOutcomeUpdated:
 						fmt.Fprintf(out, "Item %d reset for retry\n", item.ID)
+					}
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func newQueueStopCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop <id...>",
+		Short: "Stop processing for specific queue items",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ids := make([]int64, 0, len(args))
+			for _, arg := range args {
+				id, err := strconv.ParseInt(arg, 10, 64)
+				if err != nil || id <= 0 {
+					return fmt.Errorf("invalid item id %q", arg)
+				}
+				ids = append(ids, id)
+			}
+
+			return ctx.withQueueAPI(func(api queueAPI) error {
+				out := cmd.OutOrStdout()
+				result, err := api.StopIDs(cmd.Context(), ids)
+				if err != nil {
+					return err
+				}
+				for _, item := range result.Items {
+					switch item.Outcome {
+					case queueStopOutcomeNotFound:
+						fmt.Fprintf(out, "Item %d not found\n", item.ID)
+					case queueStopOutcomeAlreadyReview:
+						fmt.Fprintf(out, "Item %d is already stopped (review)\n", item.ID)
+					case queueStopOutcomeAlreadyCompleted:
+						fmt.Fprintf(out, "Item %d is already completed\n", item.ID)
+					case queueStopOutcomeAlreadyFailed:
+						fmt.Fprintf(out, "Item %d is already failed\n", item.ID)
+					case queueStopOutcomeUpdated:
+						message := fmt.Sprintf("Item %d stop requested", item.ID)
+						if parsed, ok := queue.ParseStatus(item.PriorStatus); ok && queue.IsProcessingStatus(parsed) {
+							statusLabel := formatStatusLabel(item.PriorStatus)
+							message = fmt.Sprintf("Item %d stop requested (currently %s; will halt after current stage)", item.ID, statusLabel)
+						}
+						fmt.Fprintln(out, message)
 					}
 				}
 				return nil

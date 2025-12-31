@@ -188,6 +188,24 @@ func TestIPCServerClient(t *testing.T) {
 		t.Fatalf("expected discC to resume at identification stage after reset, got %s", updatedC.Status)
 	}
 
+	queueStopResp, err := client.QueueStop([]int64{discC.ID})
+	if err != nil {
+		t.Fatalf("QueueStop failed: %v", err)
+	}
+	if queueStopResp.Updated != 1 {
+		t.Fatalf("expected 1 item stopped, got %d", queueStopResp.Updated)
+	}
+	stoppedC, err := store.GetByID(ctx, discC.ID)
+	if err != nil {
+		t.Fatalf("GetByID stopped discC: %v", err)
+	}
+	if stoppedC.Status != queue.StatusReview {
+		t.Fatalf("expected discC to be review after stop, got %s", stoppedC.Status)
+	}
+	if stoppedC.ReviewReason != queue.StopReviewReason {
+		t.Fatalf("expected review reason %q, got %q", queue.StopReviewReason, stoppedC.ReviewReason)
+	}
+
 	clearFailedResp, err := client.QueueClearFailed()
 	if err != nil {
 		t.Fatalf("QueueClearFailed failed: %v", err)
