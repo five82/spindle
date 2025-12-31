@@ -49,14 +49,14 @@ daemon (`spindle stop && spindle start`).
 | `staging_dir` | Work area for rips, encodes, subtitles, logs. | Prefer fast storage; large temporary files live here. |
 | `review_dir` | Destination for items flagged `NeedsReview`. | Defaults to `~/review`; contents are safe to rename manually. |
 | `log_dir` | Persistent logs plus the queue DB. | Ensure enough space for SQLite + log rotation. |
-| `log_retention_days` | Days to keep daemon/item logs before pruning. | Default 60; set 0 to disable automatic cleanup. |
+| `logging.retention_days` | Days to keep daemon/item logs before pruning. | Default 60; set 0 to disable automatic cleanup. |
 | `rip_cache_dir` | Optional cache of MakeMKV output. | Enable with `rip_cache_enabled = true`. |
 
 Spindle enforces a 20% free-space floor on the rip cache. Tune
 `rip_cache_max_gib` to cap cache size.
 
 Daemon and item logs are pruned automatically when they exceed
-`log_retention_days` (default 60). Set the value to `0` to retain logs
+`logging.retention_days` (default 60). Set the value to `0` to retain logs
 indefinitely.
 
 ## Identification & Metadata
