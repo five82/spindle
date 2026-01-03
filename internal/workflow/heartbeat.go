@@ -72,6 +72,7 @@ func (h *HeartbeatMonitor) StartLoop(ctx context.Context, wg *sync.WaitGroup, it
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "heartbeat_update_failed"),
 						logging.String(logging.FieldErrorHint, "check queue database access"),
+						logging.String(logging.FieldImpact, "item may be reclaimed by another worker or marked stuck"),
 					)
 				}
 				continue

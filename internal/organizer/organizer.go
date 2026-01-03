@@ -149,6 +149,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "metadata_persist_failed"),
 				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldImpact, "metadata may be regenerated on retry"),
 			)
 		}
 	}
@@ -191,6 +192,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "library_unavailable"),
 				logging.String(logging.FieldErrorHint, "check library_dir mount and Jellyfin configuration"),
+				logging.String(logging.FieldImpact, "item routed to review directory for manual handling"),
 			)
 			return o.finishReview(ctx, item, stageStart, "Library unavailable", encodedSources, err)
 		}
@@ -203,6 +205,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "subtitle_move_failed"),
 			logging.String(logging.FieldErrorHint, "check library_dir permissions and subtitle file names"),
+			logging.String(logging.FieldImpact, "subtitles will not appear in Jellyfin for this item"),
 		)
 	}
 	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStart); err != nil {
@@ -230,6 +233,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "jellyfin_refresh_failed"),
 				logging.String(logging.FieldErrorHint, "check jellyfin.url and jellyfin.api_key"),
+				logging.String(logging.FieldImpact, "new media may not appear in Jellyfin until next scan"),
 			)
 		} else {
 			logger.Debug("jellyfin library refresh requested", logging.String("title", strings.TrimSpace(meta.Title())))
@@ -274,6 +278,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "notify_failed"),
 				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
+				logging.String(logging.FieldImpact, "user will not receive completion notification"),
 			)
 		}
 		if err := o.notifier.Publish(ctx, notifications.EventProcessingCompleted, notifications.Payload{"title": title}); err != nil {
@@ -281,6 +286,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "notify_failed"),
 				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
+				logging.String(logging.FieldImpact, "user will not receive completion notification"),
 			)
 		}
 	}
@@ -465,6 +471,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "library_unavailable"),
 					logging.String(logging.FieldErrorHint, "check library_dir mount and Jellyfin configuration"),
+					logging.String(logging.FieldImpact, "item routed to review directory for manual handling"),
 				)
 				return o.finishReview(ctx, item, stageStarted, "Library unavailable", collectEncodedSources(item, env), err)
 			}
@@ -494,6 +501,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
 						logging.String(logging.FieldErrorHint, "check queue database access"),
+						logging.String(logging.FieldImpact, "episode metadata may not reflect latest state"),
 					)
 				} else {
 					*item = copy
@@ -503,6 +511,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
 					logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+					logging.String(logging.FieldImpact, "episode metadata may not reflect latest state"),
 				)
 			}
 		}
@@ -516,6 +525,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "subtitle_move_failed"),
 				logging.String(logging.FieldErrorHint, "check library_dir permissions and subtitle file names"),
+				logging.String(logging.FieldImpact, "subtitles will not appear in Jellyfin for this episode"),
 			)
 		}
 		if refreshAllowed {
@@ -524,6 +534,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "jellyfin_refresh_failed"),
 					logging.String(logging.FieldErrorHint, "check jellyfin.url and jellyfin.api_key"),
+					logging.String(logging.FieldImpact, "new media may not appear in Jellyfin until next scan"),
 				)
 			}
 		}
@@ -546,6 +557,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
 				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+				logging.String(logging.FieldImpact, "organize metadata may not reflect latest state"),
 			)
 		}
 	}
@@ -564,6 +576,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "notify_failed"),
 				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
+				logging.String(logging.FieldImpact, "user will not receive completion notification"),
 			)
 		}
 	}
@@ -699,6 +712,7 @@ func (o *Organizer) cleanupStaging(ctx context.Context, item *queue.Item) {
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "staging_cleanup_failed"),
 			logging.String(logging.FieldErrorHint, "check staging_dir permissions"),
+			logging.String(logging.FieldImpact, "disk space not reclaimed; manual cleanup needed"),
 		)
 		return
 	}
@@ -754,6 +768,7 @@ func (o *Organizer) movePathToReview(ctx context.Context, item *queue.Item, sour
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "review_source_cleanup_failed"),
 						logging.String(logging.FieldErrorHint, "manually delete the staging file if needed"),
+						logging.String(logging.FieldImpact, "duplicate file exists in staging; manual cleanup needed"),
 					)
 				}
 			} else {
@@ -995,6 +1010,7 @@ func (o *Organizer) updateProgress(ctx context.Context, item *queue.Item, messag
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
 			logging.String(logging.FieldErrorHint, "check queue database access"),
+			logging.String(logging.FieldImpact, "queue UI may show stale progress"),
 		)
 		return
 	}

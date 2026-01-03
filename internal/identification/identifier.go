@@ -49,6 +49,7 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) 
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "tmdb_client_unavailable"),
 			logging.String(logging.FieldErrorHint, "check tmdb_api_key and tmdb_base_url in config"),
+			logging.String(logging.FieldImpact, "disc identification will route to review"),
 		)
 	}
 	scanner := disc.NewScanner(cfg.MakemkvBinary())
@@ -141,7 +142,9 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 				logging.String("disc_id", discID),
 				logging.Duration("lookup_duration", time.Since(overrideLookupStart)),
 				logging.String("error_message", "Failed to search identification overrides"),
-				logging.String(logging.FieldErrorHint, "Check override file path and JSON formatting"))
+				logging.String(logging.FieldErrorHint, "Check override file path and JSON formatting"),
+				logging.String(logging.FieldImpact, "override skipped; will fall back to TMDB search"),
+				logging.String(logging.FieldEventType, "override_lookup_failed"))
 		} else if ok {
 			overrideMatch = &match
 			logger.Info("identification override matched",
@@ -181,7 +184,9 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 					logging.Error(err),
 					logging.Duration("lookup_duration", keydbLookupDuration),
 					logging.String("error_message", "Failed to query keydb catalog"),
-					logging.String(logging.FieldErrorHint, "Verify keydb path and refresh connectivity"))
+					logging.String(logging.FieldErrorHint, "Verify keydb path and refresh connectivity"),
+					logging.String(logging.FieldImpact, "title lookup skipped; using disc title from scan"),
+					logging.String(logging.FieldEventType, "keydb_lookup_failed"))
 			} else if found {
 				keydbTitle := strings.TrimSpace(entry.Title)
 				if keydbTitle != "" {
@@ -340,7 +345,9 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			logger.Warn("failed to encode fallback metadata",
 				logging.Error(err),
 				logging.String("error_message", "Fallback metadata could not be serialized"),
-				logging.String(logging.FieldErrorHint, "Retry identification or report JSON encoding issue"))
+				logging.String(logging.FieldErrorHint, "Retry identification or report JSON encoding issue"),
+				logging.String(logging.FieldImpact, "metadata will be incomplete for downstream stages"),
+				logging.String(logging.FieldEventType, "metadata_encode_failed"))
 		}
 	}
 

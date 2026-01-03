@@ -44,6 +44,7 @@ func (m *Manager) onItemStarted(ctx context.Context) {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "queue_stats_failed"),
 				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldImpact, "start notification will not be sent"),
 			)
 		}
 		return
@@ -82,6 +83,7 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "queue_stats_failed"),
 				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldImpact, "completion notification will not be sent"),
 			)
 		}
 		return

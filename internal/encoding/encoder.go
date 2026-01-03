@@ -291,6 +291,7 @@ func (e *Encoder) finalizeEncodedItem(item *queue.Item, env ripspec.Envelope, en
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
 			logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+			logging.String(logging.FieldImpact, "encoding metadata may not reflect latest state"),
 		)
 	}
 

@@ -68,6 +68,53 @@ func NewComponentLogger(logger *slog.Logger, component string) *slog.Logger {
 	return logger.With(String(FieldComponent, component))
 }
 
+// HasAttrKey returns true if any attribute in attrs has the given key.
+func HasAttrKey(attrs []Attr, key string) bool {
+	for _, a := range attrs {
+		if a.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// FieldImpact is the standardized key for user-facing consequence of a warning.
+const FieldImpact = "impact"
+
+// WarnWithContext logs a warning with enforced event_type, error_hint, and impact fields.
+// If any of these fields are missing from attrs, defaults are injected.
+// This ensures all WARN logs follow the guidance: cause + impact + next step.
+func WarnWithContext(logger *slog.Logger, msg, eventType string, attrs ...Attr) {
+	if logger == nil {
+		return
+	}
+	if !HasAttrKey(attrs, FieldEventType) {
+		attrs = append(attrs, String(FieldEventType, eventType))
+	}
+	if !HasAttrKey(attrs, FieldErrorHint) {
+		attrs = append(attrs, String(FieldErrorHint, "check logs for details"))
+	}
+	if !HasAttrKey(attrs, FieldImpact) {
+		attrs = append(attrs, String(FieldImpact, "operation completed with warnings"))
+	}
+	logger.Warn(msg, Args(attrs...)...)
+}
+
+// ErrorWithContext logs an error with enforced event_type and error_hint fields.
+// If any of these fields are missing from attrs, defaults are injected.
+func ErrorWithContext(logger *slog.Logger, msg, eventType string, attrs ...Attr) {
+	if logger == nil {
+		return
+	}
+	if !HasAttrKey(attrs, FieldEventType) {
+		attrs = append(attrs, String(FieldEventType, eventType))
+	}
+	if !HasAttrKey(attrs, FieldErrorHint) {
+		attrs = append(attrs, String(FieldErrorHint, "check logs for details"))
+	}
+	logger.Error(msg, Args(attrs...)...)
+}
+
 // NoopHandler discards all log output.
 type NoopHandler struct{}
 

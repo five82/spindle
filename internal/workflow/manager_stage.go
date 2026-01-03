@@ -28,6 +28,7 @@ func (m *Manager) processItem(ctx context.Context, lane *laneState, laneLogger *
 			logging.String("status", string(item.Status)),
 			logging.String(logging.FieldEventType, "stage_missing"),
 			logging.String(logging.FieldErrorHint, "check workflow configuration and queue status mapping"),
+			logging.String(logging.FieldImpact, "item will remain in current status until stage is configured"),
 		)
 		m.waitForItemOrShutdown(ctx)
 		return nil
@@ -69,6 +70,7 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 			logging.String("stage", stage.name),
 			logging.String(logging.FieldEventType, "stage_handler_missing"),
 			logging.String(logging.FieldErrorHint, "check workflow wiring and stage registration"),
+			logging.String(logging.FieldImpact, "item marked as failed and will not be processed"),
 		)
 		item.Status = queue.StatusFailed
 		item.ErrorMessage = fmt.Sprintf("stage %s missing handler", stage.name)

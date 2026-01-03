@@ -79,6 +79,7 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
 						logging.String(logging.FieldErrorHint, "check queue database access"),
+						logging.String(logging.FieldImpact, "queue UI may show stale progress"),
 					)
 				}
 			}
@@ -113,6 +114,7 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
 						logging.String(logging.FieldErrorHint, "check queue database access"),
+						logging.String(logging.FieldImpact, "episode encoding metadata may not reflect latest state"),
 					)
 				} else {
 					*item = copy
@@ -123,6 +125,7 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
 				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+				logging.String(logging.FieldImpact, "episode encoding metadata may not reflect latest state"),
 			)
 		}
 	}

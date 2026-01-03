@@ -84,6 +84,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "rip_spec_parse_failed"),
 				logging.String(logging.FieldErrorHint, "rerun identification if subtitle progress looks wrong"),
+				logging.String(logging.FieldImpact, "progress display may be inaccurate"),
 			)
 		}
 	}
@@ -163,6 +164,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 							logging.Error(handleErr),
 							logging.String(logging.FieldEventType, "subtitle_misidentification_handle_failed"),
 							logging.String(logging.FieldErrorHint, "review subtitle offsets and metadata"),
+							logging.String(logging.FieldImpact, "item routed to review for manual inspection"),
 						)
 					}
 					if s.logger != nil {
@@ -173,6 +175,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 							logging.Alert("review"),
 							logging.String(logging.FieldEventType, "subtitle_review_required"),
 							logging.String(logging.FieldErrorHint, "review subtitle offsets and metadata"),
+							logging.String(logging.FieldImpact, "item diverted to review queue"),
 						)
 					}
 					item.NeedsReview = true
@@ -196,6 +199,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "subtitle_generation_skipped"),
 						logging.String(logging.FieldErrorHint, "check WhisperX/OpenSubtitles logs and retry"),
+						logging.String(logging.FieldImpact, "subtitles will be missing for this episode"),
 					)
 				}
 				item.ProgressMessage = fmt.Sprintf("Subtitle generation skipped: %s", message)
@@ -229,6 +233,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 					logging.Alert("subtitle_fallback"),
 					logging.String(logging.FieldEventType, "subtitle_fallback"),
 					logging.String(logging.FieldErrorHint, "verify OpenSubtitles metadata or use --forceai"),
+					logging.String(logging.FieldImpact, "AI-generated subtitles used instead of OpenSubtitles"),
 				)
 			}
 		}
@@ -260,6 +265,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
 						logging.String(logging.FieldErrorHint, "check queue database access"),
+						logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
 					)
 				} else if err == nil {
 					*item = copy
@@ -269,6 +275,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
 					logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+					logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
 				)
 			}
 		}
@@ -479,6 +486,7 @@ func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "rip_spec_parse_failed"),
 			logging.String(logging.FieldErrorHint, "rerun identification if subtitle targets look wrong"),
+			logging.String(logging.FieldImpact, "subtitle targets determined from encoded file instead of rip spec"),
 		)
 	}
 	if len(env.Assets.Encoded) > 0 {

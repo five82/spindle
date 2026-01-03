@@ -42,6 +42,7 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "item_log_unavailable"),
 				logging.String(logging.FieldErrorHint, "check log_dir permissions and disk space"),
+				logging.String(logging.FieldImpact, "item logs will appear in daemon log instead"),
 			)
 		} else {
 			bgHandler, logErr := m.bgLogger.CreateHandler(path)
@@ -50,6 +51,7 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 					logging.Error(logErr),
 					logging.String(logging.FieldEventType, "item_log_writer_failed"),
 					logging.String(logging.FieldErrorHint, "check log_dir permissions and disk space"),
+					logging.String(logging.FieldImpact, "item logs will appear in daemon log instead"),
 				)
 			} else {
 				// Item processing should log ONLY to the item log, not the daemon log.

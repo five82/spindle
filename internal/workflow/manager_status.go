@@ -39,6 +39,7 @@ func (m *Manager) Status(ctx context.Context) StatusSummary {
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "queue_stats_failed"),
 			logging.String(logging.FieldErrorHint, "check queue database access"),
+			logging.String(logging.FieldImpact, "queue status display may be inaccurate"),
 		)
 	}
 

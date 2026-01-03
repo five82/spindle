@@ -89,6 +89,7 @@ func (m *Manager) runLane(ctx context.Context, lane *laneState) {
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "heartbeat_reclaim_failed"),
 					logging.String(logging.FieldErrorHint, "check queue database access"),
+					logging.String(logging.FieldImpact, "stuck items may not be automatically reclaimed"),
 				)
 			}
 		}

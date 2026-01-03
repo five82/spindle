@@ -42,6 +42,7 @@ func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Rip
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "makemkv_unavailable"),
 			logging.String(logging.FieldErrorHint, "check makemkv_binary and license configuration"),
+			logging.String(logging.FieldImpact, "disc ripping will not be available"),
 		)
 	}
 	return NewRipperWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
@@ -144,6 +145,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				logging.Error(encodeErr),
 				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
 				logging.String(logging.FieldErrorHint, "rerun identification if episode mapping looks wrong"),
+				logging.String(logging.FieldImpact, "episode progress may not reflect latest state"),
 			)
 			return
 		}
@@ -154,6 +156,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				logging.Error(updateErr),
 				logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
 				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldImpact, "episode progress may not reflect latest state"),
 			)
 			return
 		}
@@ -240,6 +243,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "rip_cache_inspection_failed"),
 				logging.String(logging.FieldErrorHint, "check rip_cache_dir permissions or disable rip_cache_enabled"),
+				logging.String(logging.FieldImpact, "rip cache bypassed; MakeMKV rip will proceed"),
 			)
 		} else if cachedTarget != "" {
 			if err := r.validateRippedArtifact(ctx, item, cachedTarget, startedAt); err == nil {
@@ -260,6 +264,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
 						logging.String(logging.FieldErrorHint, "check queue database access"),
+						logging.String(logging.FieldImpact, "queue UI may show stale progress"),
 					)
 				} else {
 					*item = copy
@@ -422,6 +427,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				logging.String("destination", workingDir),
 				logging.String(logging.FieldEventType, "episode_asset_mapping_incomplete"),
 				logging.String(logging.FieldErrorHint, "verify rip outputs and episode title IDs"),
+				logging.String(logging.FieldImpact, "some episodes may not be processed"),
 			)
 		} else {
 			specDirty = true
@@ -450,6 +456,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				logging.Error(encodeErr),
 				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
 				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+				logging.String(logging.FieldImpact, "rip metadata may not reflect latest state"),
 			)
 		}
 	}
@@ -488,6 +495,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "rip_cache_metadata_failed"),
 				logging.String(logging.FieldErrorHint, "check rip_cache_dir permissions and free space"),
+				logging.String(logging.FieldImpact, "rip cache entry may not be reused"),
 			)
 		}
 		cacheCleanup = ""
@@ -585,6 +593,7 @@ func (r *Ripper) applyProgress(ctx context.Context, item *queue.Item, update mak
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
 			logging.String(logging.FieldErrorHint, "check queue database access"),
+			logging.String(logging.FieldImpact, "queue UI may show stale progress"),
 		)
 		return
 	}
