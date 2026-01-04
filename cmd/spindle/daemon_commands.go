@@ -241,7 +241,86 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		},
 	}
 
-	return []*cobra.Command{startCmd, stopCmd, statusCmd}
+	restartCmd := &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the spindle daemon",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stdout := cmd.OutOrStdout()
+
+			// Stop the daemon if running
+			client, err := ctx.dialClient()
+			if err == nil {
+				statusResp, statusErr := client.Status()
+				var lockPath, queueDBPath string
+				pid := 0
+				if statusErr == nil && statusResp != nil {
+					lockPath = statusResp.LockPath
+					queueDBPath = statusResp.QueueDBPath
+					pid = statusResp.PID
+				}
+				_, _ = client.Stop()
+				_ = client.Close()
+
+				_ = waitForDaemonShutdown(ctx.socketPath(), 5*time.Second)
+				alive, livePID, aliveErr := daemonProcessInfo(ctx.socketPath())
+				if aliveErr != nil {
+					alive = false
+				}
+
+				if alive {
+					currentPID := livePID
+					if currentPID == 0 {
+						currentPID = pid
+					}
+					logDir := deriveLogDir(lockPath, queueDBPath, ctx)
+					if logDir == "" {
+						return fmt.Errorf("unable to determine daemon log directory")
+					}
+					pidPath := filepath.Join(logDir, "spindle.pid")
+					lockFile := filepath.Join(logDir, "spindle.lock")
+					fmt.Fprintf(stdout, "Stopping daemon process (pid %d)...\n", currentPID)
+					_, killErr := forceKillDaemonProcess(pidPath, lockFile, currentPID)
+					if killErr != nil {
+						return fmt.Errorf("failed to stop daemon process: %w", killErr)
+					}
+					_ = os.Remove(ctx.socketPath())
+				}
+				fmt.Fprintln(stdout, "Daemon stopped")
+			}
+
+			// Start the daemon
+			fmt.Fprintln(stdout, "Starting daemon...")
+			if launchErr := launchDaemonProcess(cmd, ctx); launchErr != nil {
+				return launchErr
+			}
+			client, err = waitForDaemonClient(ctx.socketPath(), 10*time.Second)
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			statusResp, statusErr := client.Status()
+			if statusErr == nil && statusResp != nil && statusResp.Running {
+				fmt.Fprintln(stdout, "Daemon restarted")
+				return nil
+			}
+
+			resp, err := client.Start()
+			if err != nil {
+				return err
+			}
+			if resp.Started || strings.EqualFold(strings.TrimSpace(resp.Message), "daemon already running") {
+				fmt.Fprintln(stdout, "Daemon restarted")
+			} else if strings.TrimSpace(resp.Message) != "" {
+				fmt.Fprintln(stdout, resp.Message)
+			} else {
+				fmt.Fprintln(stdout, "Start request sent")
+			}
+			return nil
+		},
+	}
+
+	return []*cobra.Command{startCmd, stopCmd, restartCmd, statusCmd}
 }
 
 func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
