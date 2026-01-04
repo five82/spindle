@@ -12,30 +12,32 @@ const dateTimeFormat = "2006-01-02T15:04:05.000Z07:00"
 
 // QueueItem describes a queue entry in a transport-friendly format.
 type QueueItem struct {
-	ID                  int64                     `json:"id"`
-	DiscTitle           string                    `json:"discTitle"`
-	SourcePath          string                    `json:"sourcePath"`
-	Status              string                    `json:"status"`
-	ProcessingLane      string                    `json:"processingLane"`
-	Progress            QueueProgress             `json:"progress"`
-	Encoding            *EncodingStatus           `json:"encoding,omitempty"`
-	DraptoPresetProfile string                    `json:"draptoPresetProfile,omitempty"`
-	ErrorMessage        string                    `json:"errorMessage"`
-	CreatedAt           string                    `json:"createdAt,omitempty"`
-	UpdatedAt           string                    `json:"updatedAt,omitempty"`
-	DiscFingerprint     string                    `json:"discFingerprint,omitempty"`
-	RippedFile          string                    `json:"rippedFile,omitempty"`
-	EncodedFile         string                    `json:"encodedFile,omitempty"`
-	FinalFile           string                    `json:"finalFile,omitempty"`
-	ItemLogPath         string                    `json:"itemLogPath,omitempty"`
-	NeedsReview         bool                      `json:"needsReview"`
-	ReviewReason        string                    `json:"reviewReason,omitempty"`
-	Metadata            json.RawMessage           `json:"metadata,omitempty"`
-	RipSpec             json.RawMessage           `json:"ripSpec,omitempty"`
-	Episodes            []EpisodeStatus           `json:"episodes,omitempty"`
-	EpisodeTotals       *EpisodeTotals            `json:"episodeTotals,omitempty"`
-	EpisodesSynced      bool                      `json:"episodesSynchronized,omitempty"`
-	SubtitleGeneration  *SubtitleGenerationStatus `json:"subtitleGeneration,omitempty"`
+	ID                      int64                     `json:"id"`
+	DiscTitle               string                    `json:"discTitle"`
+	SourcePath              string                    `json:"sourcePath"`
+	Status                  string                    `json:"status"`
+	ProcessingLane          string                    `json:"processingLane"`
+	Progress                QueueProgress             `json:"progress"`
+	Encoding                *EncodingStatus           `json:"encoding,omitempty"`
+	DraptoPresetProfile     string                    `json:"draptoPresetProfile,omitempty"`
+	ErrorMessage            string                    `json:"errorMessage"`
+	CreatedAt               string                    `json:"createdAt,omitempty"`
+	UpdatedAt               string                    `json:"updatedAt,omitempty"`
+	DiscFingerprint         string                    `json:"discFingerprint,omitempty"`
+	RippedFile              string                    `json:"rippedFile,omitempty"`
+	EncodedFile             string                    `json:"encodedFile,omitempty"`
+	FinalFile               string                    `json:"finalFile,omitempty"`
+	ItemLogPath             string                    `json:"itemLogPath,omitempty"`
+	NeedsReview             bool                      `json:"needsReview"`
+	ReviewReason            string                    `json:"reviewReason,omitempty"`
+	Metadata                json.RawMessage           `json:"metadata,omitempty"`
+	RipSpec                 json.RawMessage           `json:"ripSpec,omitempty"`
+	Episodes                []EpisodeStatus           `json:"episodes,omitempty"`
+	EpisodeTotals           *EpisodeTotals            `json:"episodeTotals,omitempty"`
+	EpisodesSynced          bool                      `json:"episodesSynchronized,omitempty"`
+	SubtitleGeneration      *SubtitleGenerationStatus `json:"subtitleGeneration,omitempty"`
+	PrimaryAudioDescription string                    `json:"primaryAudioDescription,omitempty"`
+	CommentaryCount         int                       `json:"commentaryCount,omitempty"`
 }
 
 // QueueProgress captures stage progress information for a queue entry.

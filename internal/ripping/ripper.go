@@ -447,7 +447,8 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 	}
 
-	if err := RefineAudioTargets(ctx, r.cfg, r.logger, validationTargets); err != nil {
+	audioInfo, err := RefineAudioTargets(ctx, r.cfg, r.logger, validationTargets)
+	if err != nil {
 		return services.Wrap(
 			services.ErrExternalTool,
 			"ripping",
@@ -456,6 +457,17 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			err,
 		)
 	}
+
+	// Store audio info in RipSpec attributes
+	if audioInfo.PrimaryAudioDescription != "" || audioInfo.CommentaryCount > 0 {
+		if env.Attributes == nil {
+			env.Attributes = make(map[string]any)
+		}
+		env.Attributes["primary_audio_description"] = audioInfo.PrimaryAudioDescription
+		env.Attributes["commentary_count"] = audioInfo.CommentaryCount
+		specDirty = true
+	}
+
 	if specDirty {
 		if encoded, encodeErr := env.Encode(); encodeErr == nil {
 			item.RipSpecData = encoded

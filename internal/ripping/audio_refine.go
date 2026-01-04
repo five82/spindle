@@ -22,8 +22,15 @@ import (
 	"spindle/internal/media/ffprobe"
 )
 
+// AudioRefinementResult captures audio selection outcomes for reporting.
+type AudioRefinementResult struct {
+	PrimaryAudioDescription string
+	CommentaryCount         int
+}
+
 // RefineAudioTargets applies primary + commentary selection across a set of rip paths.
-func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Logger, paths []string) error {
+// Returns aggregated audio info from the first successfully processed path.
+func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Logger, paths []string) (AudioRefinementResult, error) {
 	unique := make([]string, 0, len(paths))
 	seen := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
@@ -37,18 +44,24 @@ func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Lo
 		seen[clean] = struct{}{}
 		unique = append(unique, clean)
 	}
-	for _, path := range unique {
-		if err := refineAudioTracks(ctx, cfg, logger, path); err != nil {
-			return err
+	var result AudioRefinementResult
+	for i, path := range unique {
+		info, err := refineAudioTracks(ctx, cfg, logger, path)
+		if err != nil {
+			return AudioRefinementResult{}, err
+		}
+		// Capture audio info from the first path (consistent across episodes)
+		if i == 0 {
+			result = info
 		}
 	}
-	return nil
+	return result, nil
 }
 
-func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Logger, path string) error {
+func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Logger, path string) (AudioRefinementResult, error) {
 	logger = logging.WithContext(ctx, logging.NewComponentLogger(logger, "audio-refiner"))
 	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("refine audio: empty path")
+		return AudioRefinementResult{}, fmt.Errorf("refine audio: empty path")
 	}
 	ffprobeBinary := "ffprobe"
 	if cfg != nil {
@@ -56,7 +69,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	}
 	probe, err := probeVideo(ctx, ffprobeBinary, path)
 	if err != nil {
-		return fmt.Errorf("inspect ripped audio: %w", err)
+		return AudioRefinementResult{}, fmt.Errorf("inspect ripped audio: %w", err)
 	}
 	totalAudio := countAudioStreams(probe.Streams)
 	if totalAudio <= 1 {
@@ -76,11 +89,21 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 				logging.Args(attrs...)...,
 			)
 		}
-		return nil
+		// Single audio stream - return info from that stream
+		result := AudioRefinementResult{CommentaryCount: 0}
+		if len(probe.Streams) > 0 {
+			for _, s := range probe.Streams {
+				if s.CodecType == "audio" {
+					result.PrimaryAudioDescription = formatAudioDescription(s)
+					break
+				}
+			}
+		}
+		return result, nil
 	}
 	selection := audio.Select(probe.Streams)
 	if selection.PrimaryIndex < 0 {
-		return fmt.Errorf("refine audio: primary selection missing")
+		return AudioRefinementResult{}, fmt.Errorf("refine audio: primary selection missing")
 	}
 	if logger != nil {
 		candidates, hasEnglish := summarizeAudioCandidates(probe.Streams)
@@ -128,14 +151,27 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 
 	keep := buildKeepOrder(selection.PrimaryIndex, commentaryIndices)
 	if len(keep) == 0 {
-		return fmt.Errorf("refine audio: selection produced no audio streams")
+		return AudioRefinementResult{}, fmt.Errorf("refine audio: selection produced no audio streams")
 	}
 	selection.KeepIndices = keep
 	selection.RemovedIndices = removedIndices(probe.Streams, keep)
 
+	// Build result with audio info
+	result := AudioRefinementResult{
+		PrimaryAudioDescription: selection.PrimaryLabel(),
+		CommentaryCount:         len(commentaryIndices),
+	}
+	// Get full audio description from the primary stream
+	for _, s := range probe.Streams {
+		if s.Index == selection.PrimaryIndex {
+			result.PrimaryAudioDescription = formatAudioDescription(s)
+			break
+		}
+	}
+
 	needsRemux := selection.Changed(totalAudio) || needsDispositionFix(probe.Streams, keep) || needsCommentaryDispositionFix(probe.Streams, commentaryTitles)
 	if !needsRemux {
-		return nil
+		return result, nil
 	}
 
 	tmpPath := deriveTempAudioPath(path)
@@ -144,15 +180,15 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		ffmpegBinary = deps.ResolveFFmpegPath(cfg.DraptoBinary())
 	}
 	if err := remuxAudioSelection(ctx, ffmpegBinary, path, tmpPath, selection, commentaryTitles); err != nil {
-		return err
+		return AudioRefinementResult{}, err
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("refine audio: remove original rip: %w", err)
+		return AudioRefinementResult{}, fmt.Errorf("refine audio: remove original rip: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("refine audio: finalize remux: %w", err)
+		return AudioRefinementResult{}, fmt.Errorf("refine audio: finalize remux: %w", err)
 	}
 
 	fields := []logging.Attr{
@@ -175,7 +211,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		}
 	}
 	logger.Info("refined ripped audio tracks", logging.Args(fields...)...)
-	return nil
+	return result, nil
 }
 
 func remuxAudioSelection(ctx context.Context, ffmpegBinary, src, dst string, selection audio.Selection, commentaryTitles map[int]string) error {
@@ -450,4 +486,78 @@ func outputFormatForPath(path string) string {
 	default:
 		return ""
 	}
+}
+
+// formatAudioDescription builds a human-readable audio description from stream metadata.
+// Example output: "TrueHD 7.1 Atmos" or "DTS-HD MA 5.1"
+func formatAudioDescription(s ffprobe.Stream) string {
+	if s.CodecType != "audio" {
+		return ""
+	}
+
+	parts := []string{}
+
+	// Codec name (normalize common ones)
+	codec := strings.ToUpper(s.CodecName)
+	switch strings.ToLower(s.CodecName) {
+	case "truehd":
+		codec = "TrueHD"
+	case "dts":
+		// Check profile for HD variants
+		profile := strings.ToLower(s.Profile)
+		if strings.Contains(profile, "ma") {
+			codec = "DTS-HD MA"
+		} else if strings.Contains(profile, "hd") {
+			codec = "DTS-HD"
+		} else {
+			codec = "DTS"
+		}
+	case "eac3":
+		codec = "E-AC3"
+	case "ac3":
+		codec = "AC3"
+	case "flac":
+		codec = "FLAC"
+	case "pcm_s16le", "pcm_s24le", "pcm_s32le":
+		codec = "PCM"
+	case "aac":
+		codec = "AAC"
+	case "opus":
+		codec = "Opus"
+	}
+	parts = append(parts, codec)
+
+	// Channel layout (e.g., "7.1", "5.1", "stereo")
+	layout := strings.TrimSpace(s.ChannelLayout)
+	if layout == "" && s.Channels > 0 {
+		switch s.Channels {
+		case 1:
+			layout = "mono"
+		case 2:
+			layout = "stereo"
+		case 6:
+			layout = "5.1"
+		case 8:
+			layout = "7.1"
+		default:
+			layout = fmt.Sprintf("%dch", s.Channels)
+		}
+	}
+	if layout != "" {
+		// Normalize common layouts
+		switch strings.ToLower(layout) {
+		case "5.1(side)", "5.1":
+			layout = "5.1"
+		case "7.1(wide)", "7.1":
+			layout = "7.1"
+		}
+		parts = append(parts, layout)
+	}
+
+	// Check for Atmos (usually in profile or side data)
+	if strings.Contains(strings.ToLower(s.Profile), "atmos") {
+		parts = append(parts, "Atmos")
+	}
+
+	return strings.Join(parts, " ")
 }

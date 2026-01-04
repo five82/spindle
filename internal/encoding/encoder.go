@@ -219,7 +219,7 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 					logging.String("decision_options", "refine, skip"),
 				)
 				paths := rippedPaths(item, env)
-				if err := ripping.RefineAudioTargets(ctx, e.cfg, logger, paths); err != nil {
+				if _, err := ripping.RefineAudioTargets(ctx, e.cfg, logger, paths); err != nil {
 					return ripspec.Envelope{}, services.Wrap(
 						services.ErrExternalTool,
 						"encoding",
