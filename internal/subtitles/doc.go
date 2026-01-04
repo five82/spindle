@@ -8,4 +8,10 @@
 // JSON to Stable-TS to regroup phrases and timing before emitting library-
 // compatible SRT sidecars. If Stable-TS cannot complete, the raw WhisperX SRT
 // is copied so subtitle generation never leaves the pipeline empty-handed.
+//
+// # Debugging
+//
+// Set SPD_DEBUG_SUBTITLES_KEEP=1 to retain intermediate files (demuxed audio,
+// raw WhisperX output, alignment JSON) in the item's staging folder. Useful
+// for diagnosing transcription or timing issues.
 package subtitles
