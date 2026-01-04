@@ -331,21 +331,67 @@ func logDraptoValidation(logger *slog.Logger, label string, summary *drapto.Vali
 	if logger == nil || summary == nil {
 		return
 	}
-	status := "failed"
 	if summary.Passed {
-		status = "passed"
+		debugWithJob(logger, label, "drapto validation", logging.String("validation_status", "passed"))
+		for _, step := range summary.Steps {
+			debugWithJob(
+				logger,
+				label,
+				"drapto validation step",
+				logging.String("validation_step", strings.TrimSpace(step.Name)),
+				logging.String("validation_status", "ok"),
+				logging.String("validation_details", strings.TrimSpace(step.Details)),
+			)
+		}
+		return
 	}
-	debugWithJob(logger, label, "drapto validation", logging.String("validation_status", status))
+	// Validation failed - log at WARN level
+	failedSteps := countFailedValidationSteps(summary.Steps)
+	warnWithJob(
+		logger,
+		label,
+		"drapto validation failed",
+		logging.String("validation_status", "failed"),
+		logging.Int("failed_steps", failedSteps),
+		logging.Int("total_steps", len(summary.Steps)),
+		logging.String(logging.FieldEventType, "drapto_validation_failed"),
+		logging.String(logging.FieldErrorHint, "Review validation step details; encoded output may not match source"),
+		logging.String("impact", "encoded file may have unexpected characteristics"),
+	)
 	for _, step := range summary.Steps {
-		debugWithJob(
-			logger,
-			label,
-			"drapto validation step",
-			logging.String("validation_step", strings.TrimSpace(step.Name)),
-			logging.String("validation_status", formatValidationStatus(step.Passed)),
-			logging.String("validation_details", strings.TrimSpace(step.Details)),
-		)
+		if step.Passed {
+			debugWithJob(
+				logger,
+				label,
+				"drapto validation step",
+				logging.String("validation_step", strings.TrimSpace(step.Name)),
+				logging.String("validation_status", "ok"),
+				logging.String("validation_details", strings.TrimSpace(step.Details)),
+			)
+		} else {
+			warnWithJob(
+				logger,
+				label,
+				"drapto validation step failed",
+				logging.String("validation_step", strings.TrimSpace(step.Name)),
+				logging.String("validation_status", "failed"),
+				logging.String("validation_details", strings.TrimSpace(step.Details)),
+				logging.String(logging.FieldEventType, "drapto_validation_step_failed"),
+				logging.String(logging.FieldErrorHint, "Check step details for mismatch cause"),
+				logging.String("impact", "this validation check did not pass"),
+			)
+		}
 	}
+}
+
+func countFailedValidationSteps(steps []drapto.ValidationStep) int {
+	count := 0
+	for _, step := range steps {
+		if !step.Passed {
+			count++
+		}
+	}
+	return count
 }
 
 func logDraptoEncodingResult(logger *slog.Logger, label string, result *drapto.EncodingResult) {
@@ -498,13 +544,6 @@ func formatResolution(resolution, category string) string {
 		return res
 	}
 	return fmt.Sprintf("%s (%s)", res, cat)
-}
-
-func formatValidationStatus(passed bool) string {
-	if passed {
-		return "ok"
-	}
-	return "failed"
 }
 
 func formatBytes(value int64) string {

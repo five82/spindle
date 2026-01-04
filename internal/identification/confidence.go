@@ -24,7 +24,7 @@ type scoredCandidate struct {
 	TitleCleaned string
 }
 
-func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response) *tmdb.Result {
+func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response, minVoteCountExactMatch int) *tmdb.Result {
 	if response == nil || len(response.Results) == 0 {
 		return nil
 	}
@@ -101,6 +101,9 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		if best.VoteAverage < 2.0 {
 			decisionReason = "vote_average_below_threshold"
 			rejects = append(rejects, fmt.Sprintf("%d:vote_average_below_2.0", best.ID))
+		} else if minVoteCountExactMatch > 0 && best.VoteCount < int64(minVoteCountExactMatch) {
+			decisionReason = "vote_count_below_threshold"
+			rejects = append(rejects, fmt.Sprintf("%d:vote_count_below_%d", best.ID, minVoteCountExactMatch))
 		} else {
 			decisionResult = "accepted"
 			decisionReason = "exact_match"
@@ -154,6 +157,9 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	}
 	if exactMatch {
 		attrs = append(attrs, logging.Float64("vote_average_threshold", 2.0))
+		if minVoteCountExactMatch > 0 {
+			attrs = append(attrs, logging.Int("vote_count_threshold", minVoteCountExactMatch))
+		}
 	} else {
 		attrs = append(attrs, logging.Float64("vote_average_threshold", 3.0))
 		if minExpectedScore > 0 {

@@ -196,7 +196,11 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 					logging.String("media_type", result.MediaType))
 			}
 		}
-		best = selectBestResult(logger, candidate, response)
+		minVoteCount := 0
+		if i.cfg != nil {
+			minVoteCount = i.cfg.Validation.MinVoteCountExactMatch
+		}
+		best = selectBestResult(logger, candidate, response, minVoteCount)
 		if best != nil {
 			break
 		}
@@ -329,6 +333,17 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		metadata["show_title"] = identifiedTitle
 	}
 
+	// Validate metadata before persisting
+	if err := validateMetadataForPersist(identifiedTitle, mediaType, tmdbID); err != nil {
+		logger.Error("metadata validation failed before persist",
+			logging.String(logging.FieldEventType, "metadata_validation_failed"),
+			logging.String("title", identifiedTitle),
+			logging.String("media_type", mediaType),
+			logging.Int64("tmdb_id", tmdbID),
+			logging.Error(err))
+		return identifyOutcome{}, err
+	}
+
 	encodedMetadata, encodeErr := json.Marshal(metadata)
 	if encodeErr != nil {
 		return identifyOutcome{}, services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", encodeErr)
@@ -394,4 +409,41 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		MatchedEpisodes: matchedEpisodes,
 		Metadata:        metadata,
 	}, nil
+}
+
+// validateMetadataForPersist ensures required metadata fields are valid before
+// persisting to the database. Returns an error if any required field is missing
+// or invalid.
+func validateMetadataForPersist(title, mediaType string, tmdbID int64) error {
+	if strings.TrimSpace(title) == "" {
+		return services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"validate metadata",
+			"Identified title is empty; cannot persist invalid metadata",
+			nil,
+		)
+	}
+
+	if mediaType != "movie" && mediaType != "tv" {
+		return services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"validate metadata",
+			fmt.Sprintf("Invalid media type %q; must be 'movie' or 'tv'", mediaType),
+			nil,
+		)
+	}
+
+	if tmdbID <= 0 {
+		return services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"validate metadata",
+			fmt.Sprintf("Invalid TMDB ID %d; must be positive", tmdbID),
+			nil,
+		)
+	}
+
+	return nil
 }

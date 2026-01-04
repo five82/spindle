@@ -214,17 +214,24 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 	// Update rip spec if matches were found
 	if updated {
-		if encoded, encodeErr := env.Encode(); encodeErr == nil {
-			item.RipSpecData = encoded
-			logger.Info("episode identification complete, rip spec updated",
-				logging.Int("episode_count", len(env.Episodes)))
-		} else {
-			logger.Warn("failed to encode rip spec after episode identification",
+		encoded, encodeErr := env.Encode()
+		if encodeErr != nil {
+			logger.Error("failed to encode rip spec after episode identification",
 				logging.Error(encodeErr),
 				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-				logging.String("impact", "episode matches were not persisted to metadata"),
+				logging.String("impact", "episode matches cannot be persisted to metadata"),
 				logging.String(logging.FieldErrorHint, "Retry episode identification or inspect rip spec serialization errors"))
+			return services.Wrap(
+				services.ErrValidation,
+				"episode_identification",
+				"persist episode matches",
+				"Failed to encode episode identification results; episode matches would be lost",
+				encodeErr,
+			)
 		}
+		item.RipSpecData = encoded
+		logger.Info("episode identification complete, rip spec updated",
+			logging.Int("episode_count", len(env.Episodes)))
 	} else {
 		logger.Info("episode identification complete, no changes needed")
 	}

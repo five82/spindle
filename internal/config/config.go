@@ -55,6 +55,7 @@ type Notifications struct {
 	Identification     bool   `toml:"identification"`
 	Rip                bool   `toml:"rip"`
 	Encoding           bool   `toml:"encoding"`
+	Validation         bool   `toml:"validation"`
 	Organization       bool   `toml:"organization"`
 	Queue              bool   `toml:"queue"`
 	Review             bool   `toml:"review"`
@@ -141,6 +142,21 @@ type Logging struct {
 	StageOverrides map[string]string `toml:"stage_overrides"`
 }
 
+// Validation contains configuration for pipeline validation checks.
+type Validation struct {
+	// Encoding validation
+	EnforceDraptoValidation bool    `toml:"enforce_drapto_validation"`
+	MinCompressionRatio     float64 `toml:"min_compression_ratio"`
+	MaxCompressionRatio     float64 `toml:"max_compression_ratio"`
+
+	// Identification validation
+	MinVoteCountExactMatch int `toml:"min_vote_count_exact_match"`
+
+	// Organizer validation
+	RequireSubtitles        bool `toml:"require_subtitles"`
+	VerifyFileSizeAfterMove bool `toml:"verify_file_size_after_move"`
+}
+
 // Config encapsulates all configuration values for Spindle.
 //
 // Configuration sections by subsystem:
@@ -156,6 +172,7 @@ type Logging struct {
 //   - PresetDecider: LLM-based encoding preset selection
 //   - Workflow: daemon polling intervals and timeouts
 //   - Logging: log format, level, and retention
+//   - Validation: pipeline validation checks and thresholds
 type Config struct {
 	Paths               Paths               `toml:"paths"`
 	TMDB                TMDB                `toml:"tmdb"`
@@ -169,6 +186,7 @@ type Config struct {
 	PresetDecider       PresetDecider       `toml:"preset_decider"`
 	Workflow            Workflow            `toml:"workflow"`
 	Logging             Logging             `toml:"logging"`
+	Validation          Validation          `toml:"validation"`
 }
 
 // DefaultConfigPath returns the absolute path to the default configuration file location.

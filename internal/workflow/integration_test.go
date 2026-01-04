@@ -37,6 +37,10 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 	cfg.Workflow.ErrorRetryInterval = 1
 	cfg.Workflow.HeartbeatInterval = 1
 	cfg.Workflow.HeartbeatTimeout = 5
+	// Disable compression ratio validation in tests since stub encodes
+	// don't produce compressed outputs.
+	cfg.Validation.MinCompressionRatio = 0
+	cfg.Validation.MaxCompressionRatio = 0
 
 	if err := cfg.EnsureDirectories(); err != nil {
 		t.Fatalf("EnsureDirectories: %v", err)

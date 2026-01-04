@@ -956,6 +956,12 @@ func reviewFilenamePrefix(item *queue.Item) string {
 }
 
 func copyFile(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("stat source: %w", err)
+	}
+	srcSize := srcInfo.Size()
+
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -973,12 +979,20 @@ func copyFile(src, dst string) error {
 		_ = out.Close()
 	}()
 
-	if _, err := io.Copy(out, in); err != nil {
+	written, err := io.Copy(out, in)
+	if err != nil {
 		return err
 	}
 	if err := out.Close(); err != nil {
 		return err
 	}
+
+	// Verify copied size matches source
+	if written != srcSize {
+		_ = os.Remove(dst) // Clean up partial copy
+		return fmt.Errorf("copy size mismatch: source %d bytes, copied %d bytes", srcSize, written)
+	}
+
 	return nil
 }
 

@@ -423,11 +423,19 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	if hasEpisodes {
 		assigned := assignEpisodeAssets(&env, workingDir, logger)
 		if assigned == 0 {
-			logger.Warn("episode asset mapping incomplete; episode-level ripping may be missing",
+			logger.Error("no episode assets mapped after ripping",
 				logging.String("destination", workingDir),
-				logging.String(logging.FieldEventType, "episode_asset_mapping_incomplete"),
+				logging.String(logging.FieldEventType, "episode_asset_mapping_failed"),
 				logging.String(logging.FieldErrorHint, "verify rip outputs and episode title IDs"),
-				logging.String(logging.FieldImpact, "some episodes may not be processed"),
+				logging.String(logging.FieldImpact, "encoding stage will have no files to process"),
+				logging.Int("expected_episodes", len(env.Episodes)),
+			)
+			return services.Wrap(
+				services.ErrValidation,
+				"ripping",
+				"episode asset mapping",
+				"No episode files could be mapped after ripping; verify disc content and title IDs",
+				nil,
 			)
 		} else {
 			specDirty = true

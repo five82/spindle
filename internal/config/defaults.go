@@ -37,6 +37,14 @@ const (
 	defaultCommentaryChannels          = 2
 	defaultCommentarySampleWindows     = 3
 	defaultCommentaryWindowSeconds     = 90
+
+	// Validation defaults
+	defaultEnforceDraptoValidation = true
+	defaultMinCompressionRatio     = 0.10
+	defaultMaxCompressionRatio     = 0.95
+	defaultMinVoteCountExactMatch  = 5
+	defaultRequireSubtitles        = false
+	defaultVerifyFileSizeAfterMove = true
 )
 
 // Default returns a Config populated with repository defaults.
@@ -68,6 +76,7 @@ func Default() Config {
 			Identification:     true,
 			Rip:                true,
 			Encoding:           true,
+			Validation:         true,
 			Organization:       true,
 			Queue:              true,
 			Review:             true,
@@ -127,6 +136,14 @@ func Default() Config {
 			Format:        defaultLogFormat,
 			Level:         defaultLogLevel,
 			RetentionDays: defaultLogRetentionDays,
+		},
+		Validation: Validation{
+			EnforceDraptoValidation: defaultEnforceDraptoValidation,
+			MinCompressionRatio:     defaultMinCompressionRatio,
+			MaxCompressionRatio:     defaultMaxCompressionRatio,
+			MinVoteCountExactMatch:  defaultMinVoteCountExactMatch,
+			RequireSubtitles:        defaultRequireSubtitles,
+			VerifyFileSizeAfterMove: defaultVerifyFileSizeAfterMove,
 		},
 	}
 }

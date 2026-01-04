@@ -14,7 +14,7 @@ func TestSelectBestResultExactMatch(t *testing.T) {
 		{ID: 2, Title: "Something Else", VoteAverage: 8.0, VoteCount: 400},
 	}}
 
-	best := selectBestResult(logger, "Example", resp)
+	best := selectBestResult(logger, "Example", resp, 0)
 	if best == nil {
 		t.Fatal("expected best result, got nil")
 		return
@@ -30,9 +30,28 @@ func TestSelectBestResultRejectsLowConfidence(t *testing.T) {
 		{ID: 3, Title: "Example", VoteAverage: 1.5, VoteCount: 10},
 	}}
 
-	best := selectBestResult(logger, "Example", resp)
+	best := selectBestResult(logger, "Example", resp, 0)
 	if best != nil {
 		t.Fatalf("expected nil result for low rated match, got %+v", best)
+	}
+}
+
+func TestSelectBestResultRejectsLowVoteCount(t *testing.T) {
+	logger := logging.NewNop()
+	resp := &tmdb.Response{Results: []tmdb.Result{
+		{ID: 4, Title: "Example", VoteAverage: 7.0, VoteCount: 3},
+	}}
+
+	// With threshold of 5, should reject vote_count=3
+	best := selectBestResult(logger, "Example", resp, 5)
+	if best != nil {
+		t.Fatalf("expected nil result for low vote count match, got %+v", best)
+	}
+
+	// With threshold of 0 (disabled), should accept
+	best = selectBestResult(logger, "Example", resp, 0)
+	if best == nil {
+		t.Fatal("expected result with threshold disabled, got nil")
 	}
 }
 

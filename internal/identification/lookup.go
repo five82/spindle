@@ -40,7 +40,9 @@ func LookupTMDBByTitle(ctx context.Context, client *tmdb.Client, logger *slog.Lo
 		scoreLogger = logging.NewNop()
 	}
 
-	best := selectBestResult(scoreLogger, title, response)
+	// No min vote count threshold for standalone lookups (threshold only applies in
+	// daemon workflows where config is available)
+	best := selectBestResult(scoreLogger, title, response, 0)
 	if best == nil {
 		return nil, nil
 	}

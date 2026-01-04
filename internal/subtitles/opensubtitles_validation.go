@@ -7,17 +7,25 @@ func buildSuspectError(errors []durationMismatchError) error {
 		return nil
 	}
 	deltas := make([]float64, 0, len(errors))
+	anySuspect := false
 	for _, e := range errors {
 		if e.videoSeconds <= 0 {
-			return nil
+			continue // Skip invalid entries rather than returning nil
 		}
 		deltas = append(deltas, e.deltaSeconds)
 		rel := math.Abs(e.deltaSeconds) / e.videoSeconds
-		if math.Abs(e.deltaSeconds) < suspectOffsetSeconds && rel < suspectRuntimeMismatchRatio {
-			return nil
+		// Flag as suspect if EITHER threshold is exceeded (stricter than before)
+		if math.Abs(e.deltaSeconds) >= suspectOffsetSeconds || rel >= suspectRuntimeMismatchRatio {
+			anySuspect = true
 		}
 	}
-	return suspectMisIdentificationError{deltas: deltas}
+	if len(deltas) == 0 {
+		return nil // No valid errors to check
+	}
+	if anySuspect {
+		return suspectMisIdentificationError{deltas: deltas}
+	}
+	return nil
 }
 
 func checkSubtitleDuration(path string, videoSeconds float64) (float64, bool, error) {

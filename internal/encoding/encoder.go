@@ -14,6 +14,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/encodingstate"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -103,6 +104,16 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 
 	encodedPaths, err := e.runEncodingJobs(ctx, item, env, jobs, decision, stagingRoot, encodedDir, logger)
 	if err != nil {
+		return err
+	}
+
+	// Enforce Drapto's internal validation results
+	if err := e.enforceDraptoValidation(ctx, item, logger); err != nil {
+		return err
+	}
+
+	// Validate compression ratio is within expected bounds
+	if err := e.validateCompressionRatio(ctx, item, encodedPaths, logger); err != nil {
 		return err
 	}
 
@@ -342,6 +353,9 @@ func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, e
 		}); err != nil {
 			logger.Debug("encoding notification failed", logging.Error(err))
 		}
+
+		// Check for validation failures and notify
+		e.notifyValidationFailures(ctx, item, logger)
 	}
 
 	summaryAttrs := []logging.Attr{
@@ -355,6 +369,41 @@ func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, e
 		logging.String("preset_profile", strings.TrimSpace(item.DraptoPresetProfile)),
 	}
 	logger.Info("encoding stage summary", logging.Args(summaryAttrs...)...)
+}
+
+// notifyValidationFailures checks the encoding snapshot for validation failures
+// and sends a notification if any validation steps failed.
+func (e *Encoder) notifyValidationFailures(ctx context.Context, item *queue.Item, logger *slog.Logger) {
+	if e.notifier == nil || item == nil {
+		return
+	}
+
+	snapshot, err := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	if err != nil {
+		logger.Debug("failed to unmarshal encoding snapshot for validation check", logging.Error(err))
+		return
+	}
+
+	if snapshot.Validation == nil || snapshot.Validation.Passed {
+		return
+	}
+
+	// Collect failed step names
+	var failedNames []string
+	for _, step := range snapshot.Validation.Steps {
+		if !step.Passed {
+			failedNames = append(failedNames, strings.TrimSpace(step.Name))
+		}
+	}
+
+	if err := e.notifier.Publish(ctx, notifications.EventValidationFailed, notifications.Payload{
+		"discTitle":   item.DiscTitle,
+		"failedSteps": len(failedNames),
+		"totalSteps":  len(snapshot.Validation.Steps),
+		"failedNames": strings.Join(failedNames, ", "),
+	}); err != nil {
+		logger.Debug("validation failure notification failed", logging.Error(err))
+	}
 }
 
 func (e *Encoder) cleanupEncodedDir(logger *slog.Logger, encodedDir string) error {
@@ -418,4 +467,136 @@ func (e *Encoder) HealthCheck(ctx context.Context) stage.Health {
 		return stage.Unhealthy(name, fmt.Sprintf("drapto binary %q not found", binary))
 	}
 	return stage.Healthy(name)
+}
+
+// enforceDraptoValidation checks Drapto's internal validation results and fails
+// the encoding stage if any validation steps failed. Drapto validates codec,
+// duration, HDR, audio, and A/V sync - we enforce those results here rather
+// than duplicating the checks.
+func (e *Encoder) enforceDraptoValidation(ctx context.Context, item *queue.Item, logger *slog.Logger) error {
+	if e.cfg != nil && !e.cfg.Validation.EnforceDraptoValidation {
+		logger.Debug("drapto validation enforcement disabled")
+		return nil
+	}
+
+	snapshot, err := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	if err != nil {
+		logger.Debug("failed to unmarshal encoding snapshot for validation", logging.Error(err))
+		return nil // No snapshot = can't validate, continue
+	}
+
+	if snapshot.Validation == nil {
+		logger.Debug("drapto did not report validation results")
+		return nil // Drapto didn't report validation
+	}
+
+	if snapshot.Validation.Passed {
+		logger.Debug("drapto validation passed",
+			logging.Int("steps", len(snapshot.Validation.Steps)),
+		)
+		return nil
+	}
+
+	// Collect failed step details
+	var failures []string
+	for _, step := range snapshot.Validation.Steps {
+		if !step.Passed {
+			detail := strings.TrimSpace(step.Name)
+			if step.Details != "" {
+				detail = fmt.Sprintf("%s: %s", step.Name, step.Details)
+			}
+			failures = append(failures, detail)
+		}
+	}
+
+	logger.Error("drapto validation failed",
+		logging.Int("failed_steps", len(failures)),
+		logging.Int("total_steps", len(snapshot.Validation.Steps)),
+		logging.String("failures", strings.Join(failures, "; ")),
+	)
+
+	return services.Wrap(
+		services.ErrValidation,
+		"encoding",
+		"drapto validation",
+		fmt.Sprintf("Drapto validation failed (%d/%d steps): %s",
+			len(failures), len(snapshot.Validation.Steps), strings.Join(failures, "; ")),
+		nil,
+	)
+}
+
+// validateCompressionRatio checks that the encoded output size is within
+// expected bounds relative to the input size. Extremely low ratios may
+// indicate corruption, while extremely high ratios suggest encoding failure.
+func (e *Encoder) validateCompressionRatio(ctx context.Context, item *queue.Item, encodedPaths []string, logger *slog.Logger) error {
+	if e.cfg == nil {
+		return nil
+	}
+
+	minRatio := e.cfg.Validation.MinCompressionRatio
+	maxRatio := e.cfg.Validation.MaxCompressionRatio
+
+	// Skip if thresholds are not configured
+	if minRatio <= 0 && maxRatio <= 0 {
+		return nil
+	}
+
+	var totalOutputBytes int64
+	for _, path := range encodedPaths {
+		if info, err := os.Stat(path); err == nil {
+			totalOutputBytes += info.Size()
+		}
+	}
+
+	var totalInputBytes int64
+	if info, err := os.Stat(strings.TrimSpace(item.RippedFile)); err == nil {
+		totalInputBytes = info.Size()
+	}
+
+	if totalInputBytes == 0 {
+		logger.Debug("cannot validate compression ratio: no input size available")
+		return nil
+	}
+
+	ratio := float64(totalOutputBytes) / float64(totalInputBytes)
+
+	logger.Debug("compression ratio check",
+		logging.Int64("input_bytes", totalInputBytes),
+		logging.Int64("output_bytes", totalOutputBytes),
+		logging.Float64("ratio", ratio),
+		logging.Float64("min_ratio", minRatio),
+		logging.Float64("max_ratio", maxRatio),
+	)
+
+	if minRatio > 0 && ratio < minRatio {
+		logger.Error("compression ratio below minimum",
+			logging.Float64("ratio", ratio),
+			logging.Float64("min_ratio", minRatio),
+		)
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate compression ratio",
+			fmt.Sprintf("Compression ratio %.1f%% is below minimum %.1f%% - output may be corrupt",
+				ratio*100, minRatio*100),
+			nil,
+		)
+	}
+
+	if maxRatio > 0 && ratio > maxRatio {
+		logger.Error("compression ratio above maximum",
+			logging.Float64("ratio", ratio),
+			logging.Float64("max_ratio", maxRatio),
+		)
+		return services.Wrap(
+			services.ErrValidation,
+			"encoding",
+			"validate compression ratio",
+			fmt.Sprintf("Compression ratio %.1f%% is above maximum %.1f%% - encoding may have failed",
+				ratio*100, maxRatio*100),
+			nil,
+		)
+	}
+
+	return nil
 }

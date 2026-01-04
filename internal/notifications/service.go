@@ -24,6 +24,7 @@ const (
 	EventRipStarted              Event = "rip_started"
 	EventRipCompleted            Event = "rip_completed"
 	EventEncodingCompleted       Event = "encoding_completed"
+	EventValidationFailed        Event = "validation_failed"
 	EventProcessingCompleted     Event = "processing_completed"
 	EventOrganizationCompleted   Event = "organization_completed"
 	EventQueueStarted            Event = "queue_started"
@@ -86,6 +87,7 @@ type notifyConfig struct {
 	notifyIdentification bool
 	notifyRip            bool
 	notifyEncoding       bool
+	notifyValidation     bool
 	notifyOrganization   bool
 	notifyQueue          bool
 	notifyReview         bool
@@ -198,6 +200,30 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			title:   "Spindle - Encoded",
 			message: message,
 			tags:    []string{"encode"},
+		})
+	case EventValidationFailed:
+		if !n.cfg.notifyValidation {
+			return nil
+		}
+		discTitle := strings.TrimSpace(payloadString(data, "discTitle"))
+		failedSteps := payloadInt(data, "failedSteps")
+		totalSteps := payloadInt(data, "totalSteps")
+		failedNames := strings.TrimSpace(payloadString(data, "failedNames"))
+
+		var message string
+		if failedSteps > 0 && totalSteps > 0 {
+			message = fmt.Sprintf("Validation failed: %s\nFailed checks: %d of %d", discTitle, failedSteps, totalSteps)
+		} else {
+			message = fmt.Sprintf("Validation failed: %s", discTitle)
+		}
+		if failedNames != "" {
+			message = fmt.Sprintf("%s\nFailed: %s", message, failedNames)
+		}
+		return n.sendOnce(ctx, event, data, payload{
+			title:    "Spindle - Validation Failed",
+			message:  message,
+			priority: "high",
+			tags:     []string{"validation", "warning"},
 		})
 	case EventOrganizationCompleted:
 		if !n.cfg.notifyOrganization {
@@ -355,6 +381,7 @@ func buildNotifyConfig(cfg *config.Config) notifyConfig {
 			notifyIdentification: true,
 			notifyRip:            true,
 			notifyEncoding:       true,
+			notifyValidation:     true,
 			notifyOrganization:   true,
 			notifyQueue:          true,
 			notifyReview:         true,
@@ -372,6 +399,7 @@ func buildNotifyConfig(cfg *config.Config) notifyConfig {
 		notifyIdentification: cfg.Notifications.Identification,
 		notifyRip:            cfg.Notifications.Rip,
 		notifyEncoding:       cfg.Notifications.Encoding,
+		notifyValidation:     cfg.Notifications.Validation,
 		notifyOrganization:   cfg.Notifications.Organization,
 		notifyQueue:          cfg.Notifications.Queue,
 		notifyReview:         cfg.Notifications.Review,
