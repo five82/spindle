@@ -103,18 +103,19 @@ func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time, st
 	return res.RowsAffected()
 }
 
-// RetryFailed moves failed items back to pending for reprocessing.
+// RetryFailed moves failed or review items back to pending for reprocessing.
 func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	if len(ids) == 0 {
 		res, err := s.execWithRetry(
 			ctx,
 			`UPDATE queue_items
             SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
-                progress_message = NULL, error_message = NULL, updated_at = ?
-            WHERE status = ?`,
+                progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
+            WHERE status IN (?, ?)`,
 			StatusPending,
 			time.Now().UTC().Format(time.RFC3339Nano),
 			StatusFailed,
+			StatusReview,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("retry failed items: %w", err)
@@ -130,8 +131,8 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	}
 	query := `UPDATE queue_items
         SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
-            progress_message = NULL, error_message = NULL, updated_at = ?
-        WHERE id IN (` + placeholders + `) AND status = '` + string(StatusFailed) + `'`
+            progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
+        WHERE id IN (` + placeholders + `) AND status IN ('` + string(StatusFailed) + `','` + string(StatusReview) + `')`
 	res, err := s.execWithRetry(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("retry selected items: %w", err)

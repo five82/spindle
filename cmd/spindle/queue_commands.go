@@ -198,7 +198,7 @@ func newQueueResetCommand(ctx *commandContext) *cobra.Command {
 func newQueueRetryCommand(ctx *commandContext) *cobra.Command {
 	return &cobra.Command{
 		Use:   "retry [itemID...]",
-		Short: "Retry failed queue items",
+		Short: "Retry failed or review queue items",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ids := make([]int64, 0, len(args))
@@ -231,7 +231,7 @@ func newQueueRetryCommand(ctx *commandContext) *cobra.Command {
 					case queueRetryOutcomeNotFound:
 						fmt.Fprintf(out, "Item %d not found\n", item.ID)
 					case queueRetryOutcomeNotFailed:
-						fmt.Fprintf(out, "Item %d is not in failed state\n", item.ID)
+						fmt.Fprintf(out, "Item %d is not in a retryable state (only failed/review items can be retried)\n", item.ID)
 					case queueRetryOutcomeUpdated:
 						fmt.Fprintf(out, "Item %d reset for retry\n", item.ID)
 					}

@@ -226,15 +226,27 @@ func TestIPCServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueueRetry failed: %v", err)
 	}
-	if retryResp.Updated != 0 {
-		t.Fatalf("expected 0 retried items, got %d", retryResp.Updated)
+	// discC was in review status and should now be retried (reset to pending)
+	if retryResp.Updated != 1 {
+		t.Fatalf("expected 1 retried item (review item), got %d", retryResp.Updated)
+	}
+	retriedC, err := store.GetByID(ctx, discC.ID)
+	if err != nil {
+		t.Fatalf("GetByID retried discC: %v", err)
+	}
+	if retriedC.Status != queue.StatusPending {
+		t.Fatalf("expected discC to be pending after retry, got %s", retriedC.Status)
+	}
+	if retriedC.NeedsReview {
+		t.Fatalf("expected discC.NeedsReview to be false after retry")
 	}
 
 	healthResp, err := client.QueueHealth()
 	if err != nil {
 		t.Fatalf("QueueHealth failed: %v", err)
 	}
-	if healthResp.Total != 1 || healthResp.Failed != 0 {
+	// discC is now pending (not failed, not review)
+	if healthResp.Total != 1 || healthResp.Failed != 0 || healthResp.Pending != 1 {
 		t.Fatalf("unexpected health response: %#v", healthResp)
 	}
 

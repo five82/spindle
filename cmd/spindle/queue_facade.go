@@ -146,7 +146,7 @@ func (f *queueIPCFacade) RetryIDs(_ context.Context, ids []int64) (queueRetryRes
 			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFound})
 			continue
 		}
-		if !statusIsFailed(item.Status) {
+		if !statusIsRetryable(item.Status) {
 			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFailed})
 			continue
 		}
@@ -319,7 +319,7 @@ func (f *queueStoreFacade) RetryIDs(ctx context.Context, ids []int64) (queueRetr
 			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFound})
 			continue
 		}
-		if item.Status != queue.StatusFailed {
+		if item.Status != queue.StatusFailed && item.Status != queue.StatusReview {
 			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFailed})
 			continue
 		}
@@ -397,8 +397,10 @@ func (f *queueStoreFacade) Health(ctx context.Context) (queueHealthView, error) 
 	}, nil
 }
 
-func statusIsFailed(value string) bool {
-	return strings.EqualFold(strings.TrimSpace(value), string(queue.StatusFailed))
+func statusIsRetryable(value string) bool {
+	normalized := strings.TrimSpace(value)
+	return strings.EqualFold(normalized, string(queue.StatusFailed)) ||
+		strings.EqualFold(normalized, string(queue.StatusReview))
 }
 
 func convertDTOQueueItem(item api.QueueItem) queueItemDetailsView {
