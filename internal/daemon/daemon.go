@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gofrs/flock"
 
@@ -172,6 +173,25 @@ func (d *Daemon) Stop() {
 		d.apiSrv.stop()
 	}
 	d.workflow.Stop()
+
+	// Mark all active queue items as failed so they require explicit retry on restart
+	if d.store != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if count, err := d.store.FailActiveOnShutdown(ctx); err != nil {
+			d.logger.Warn("failed to mark active items as failed on shutdown",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "shutdown_fail_active_error"),
+				logging.String(logging.FieldErrorHint, "items may auto-resume on next start; use queue retry to control"),
+				logging.String(logging.FieldImpact, "active items may resume automatically on daemon restart"))
+		} else if count > 0 {
+			d.logger.Info("marked active items as failed on shutdown",
+				logging.Int64("count", count),
+				logging.String(logging.FieldEventType, "shutdown_fail_active"),
+			)
+		}
+	}
+
 	if err := d.lock.Unlock(); err != nil {
 		d.logger.Warn("failed to release daemon lock",
 			logging.Error(err),

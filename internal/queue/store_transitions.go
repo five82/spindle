@@ -140,6 +140,30 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	return res.RowsAffected()
 }
 
+// FailActiveOnShutdown marks all non-terminal items as failed when the daemon stops.
+// Terminal states (completed, failed, review) are left untouched.
+func (s *Store) FailActiveOnShutdown(ctx context.Context) (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := s.execWithRetry(
+		ctx,
+		`UPDATE queue_items
+        SET status = ?, progress_stage = 'Daemon stopped', progress_percent = 0,
+            progress_message = ?, error_message = ?, last_heartbeat = NULL, updated_at = ?
+        WHERE status NOT IN (?, ?, ?)`,
+		StatusFailed,
+		DaemonStopReason,
+		DaemonStopReason,
+		now,
+		StatusCompleted,
+		StatusFailed,
+		StatusReview,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("fail active items on shutdown: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // StopItems moves selected items into review to halt further processing.
 func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
 	if len(ids) == 0 {

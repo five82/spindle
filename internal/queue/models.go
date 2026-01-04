@@ -28,6 +28,9 @@ const (
 
 const StopReviewReason = "Stop requested by user"
 
+// DaemonStopReason is the error message set when items are failed due to daemon shutdown.
+const DaemonStopReason = "Daemon stopped"
+
 var allStatuses = []Status{
 	StatusPending,
 	StatusIdentifying,
