@@ -66,16 +66,82 @@ See `README.md` for install details, disc mounting notes, and end-user usage.
 
 High-level modules you will touch most often:
 
-- **Core orchestration**: `internal/workflow`, `internal/daemon`, and `internal/queue`
+- **Core orchestration**: `internal/workflow`, `internal/daemon`, `internal/queue`
 - **Stage handlers**: `internal/identification`, `internal/ripping`, `internal/episodeid`, `internal/encoding`, `internal/subtitles`, `internal/organizer`
-- **Content intelligence**: `internal/contentid`, `internal/ripspec`, `internal/media`, and `internal/ripcache`
-- **External services**: `internal/services`, `internal/notifications`, `internal/identification/tmdb`, `internal/disc`
+- **Content intelligence**: `internal/contentid`, `internal/ripspec`, `internal/media`, `internal/ripcache`
+- **External services**: `internal/services`, `internal/notifications`, `internal/disc`
 - **CLI and daemon entry point**: `cmd/spindle`
 - **Configuration & logging**: `internal/config`, `internal/logging`
+- **Communication layer**: `internal/api` (wire-format DTOs), `internal/ipc` (JSON-RPC daemon communication)
+- **Utilities**: `internal/logs` (log tailing), `internal/deps` (dependency checks), `internal/encodingstate` (Drapto telemetry)
+
+Notable sub-packages within larger modules:
+
+- `internal/services/`: `drapto/`, `jellyfin/`, `makemkv/`, `presetllm/`
+- `internal/media/`: `audio/` (track selection), `commentary/` (detection), `ffprobe/` (media inspection)
+- `internal/identification/`: `tmdb/`, `keydb/`, `overrides/`
+- `internal/subtitles/`: `opensubtitles/`
+- `internal/disc/`: `fingerprint/`
 
 For title/episode mapping invariants, read `docs/content-identification.md` before changing the identifier stages.
 
 When new capabilities land, update this map and the README together so future agents know where to look.
+
+## Quick Navigation
+
+Where to look first for common tasks:
+
+| Task | Start here |
+|------|------------|
+| Queue status/lifecycle | `internal/queue/models.go` (Status enum), `internal/queue/store.go` (persistence) |
+| Stage logic | `internal/{stagename}/handler.go` or `internal/{stagename}/{stagename}.go` |
+| CLI commands | `cmd/spindle/{command}.go` (e.g., `cmd/spindle/queue.go`) |
+| Config fields | `internal/config/config.go` (struct definitions + defaults) |
+| Error classification | `internal/queue/failure.go` (FailureStatus, ErrorClassifier) |
+| API/IPC contracts | `internal/api/` (DTOs), `internal/ipc/methods.go` (RPC handlers) |
+| Drapto integration | `internal/services/drapto/runner.go`, `internal/encodingstate/` |
+| Flyer integration | `internal/api/` (converters transform internal models to wire format) |
+
+## Key Interfaces
+
+Critical abstractions for testing and extension:
+
+```go
+// Queue persistence - stub this in tests with in-memory SQLite
+queue.Store interface {
+    Create, Get, Update, List, UpdateStatus, ...
+}
+
+// Stage execution contract - each stage implements this
+workflow.StageHandler interface {
+    Handle(ctx, item) error
+}
+
+// TMDB client - stub for identification tests
+tmdb.Searcher interface {
+    SearchMovie, SearchTV, GetMovieDetails, GetTVDetails, ...
+}
+
+// Notification abstraction
+services.Notifier interface {
+    Send(ctx, event) error
+}
+
+// Error classification - determines retry vs. permanent failure
+queue.ErrorClassifier interface {
+    Classify(error) FailureStatus
+}
+```
+
+## Common Patterns
+
+**Error propagation**: Stages return errors that bubble up to the workflow manager. Use `queue.ErrorClassifier` to classify errors as `FailureRetryable` (transient) or `FailurePermanent` (irrecoverable). The workflow manager updates item status accordingly.
+
+**Progress tracking**: Stages call `item.SetProgress(stage, message)` for incremental updates and `item.SetProgressComplete(stage)` when done. These updates are persisted and visible via `queue show <id>`.
+
+**State transitions**: Only the workflow manager should call `store.UpdateStatus()`. Stages signal completion by returning nil; the manager advances the item to the next status.
+
+**Testing pattern**: Create a temporary SQLite database with `testsupport.NewTestDB()`, inject stub implementations of external service interfaces, and assert on final queue item state.
 
 ## Workflow Lifecycle
 
@@ -108,7 +174,15 @@ If you add or reorder phases, update the enums, workflow routing, CLI presentati
 - Subtitles & WhisperX: toggle with `subtitles_enabled`; OpenSubtitles requires `opensubtitles_enabled`, `opensubtitles_api_key`, `opensubtitles_user_agent`, optional `opensubtitles_user_token`, and `opensubtitles_languages`; WhisperX tuning lives behind `whisperx_cuda_enabled`, `whisperx_vad_method`, and `whisperx_hf_token`.
 - Rip cache: enable via `rip_cache_enabled`, size with `rip_cache_max_gib`, and point at a volume that can hold repeated rips; the cache honors a 20% free-space floor automatically.
 - Jellyfin: `jellyfin.enabled`, `jellyfin.url`, and `jellyfin.api_key` must be set before organizer-triggered refreshes run; otherwise the organizer skips Jellyfin refreshes.
-- Notifications & misc: `ntfy_topic` enables push updates, `keydb_path`/`keydb_download_url` keep MakeMKV happy, and `api_bind` exposes the queue health endpoint.
+- Notifications: `ntfy_topic` enables push updates; granular per-event toggles available under `notifications.*`.
+- MakeMKV: `keydb_path`/`keydb_download_url` keep MakeMKV happy; `optical_drive` defaults to `/dev/sr0`.
+- Commentary detection: `commentary_detection.*` exposes ~9 audio analysis parameters for tuning commentary track identification.
+- LLM preset selection: `preset_decider.*` configures OpenRouter integration (`api_key`, `base_url`, `model`, `timeout`) for automatic encoding preset classification.
+- Workflow tuning: `workflow.*` controls poll intervals, heartbeat settings, and error retry behavior.
+- Logging: `logging.level`, `logging.format`, `logging.retention_days`; use `logging.stage_overrides` for per-component log level tuning.
+- Network: `api_bind` exposes the queue health endpoint and IPC socket.
+
+See `internal/config/config.go` for the complete Config struct with all fields and defaults.
 
 ## Package Documentation
 
@@ -131,13 +205,24 @@ Formatting and linting are enforced by `golangci-lint`; run it directly or via `
 ## Operations Reference
 
 - Daemon control: `spindle start|stop|status`. `spindle stop` completely terminates the daemon.
-- Logs: `spindle show --follow` for live tails with color, `--lines N` for snapshots (requires running daemon).
-- Queue operations: `spindle queue` subcommands (`status`, `list`, `clear`, `reset-stuck`, `health`, etc.) work with or without a running daemon.
+- Logs: `spindle show --follow` for live tails with color, `--lines N` for snapshots (requires running daemon). Filter with `--component`, `--lane`, `--request`, `--item`.
+- Queue operations: `spindle queue` subcommands work with or without a running daemon:
+  - `queue status` - aggregate counts by status
+  - `queue list` - list all items
+  - `queue show <id>` - detailed item view with per-episode progress
+  - `queue stop <id>` - stop a queued item
+  - `queue retry <id>` - reset a failed item for retry
+  - `queue clear [--completed]` - remove items from queue
+  - `queue clear-failed` - remove all failed items
+  - `queue reset-stuck` - recover items stuck via heartbeat timeout
+  - `queue health` - database diagnostics
 - Subtitle tooling: `spindle gensubtitle /path/to/video.mkv [--forceai]` regenerates SRTs for historic encodes using the same OpenSubtitles/WhisperX pipeline as the queue.
 - Disc identification: `spindle identify [/dev/... | --verbose]` runs the TMDB matcher without touching the queue so you can debug metadata issues offline.
 - Configuration helpers: `spindle config init` scaffolds a config, `spindle config validate` sanity-checks the active file before launches.
 - Notifications & Jellyfin: `spindle test-notify` exercises ntfy; provide Jellyfin credentials so organizer-triggered scans succeed.
-- Rip cache: `spindle cache stats|prune` inspects or trims cached rips; useful before/after enabling `rip_cache_enabled`.
+- Rip cache: `spindle cache stats|prune` inspects or trims cached rips; `cache rip <path>` processes a directory without a disc; `cache populate <dir>` fills cache from existing rips; `cache commentary` runs commentary detection on cached items.
+- LLM preset debugging: `spindle preset-decider-test` tests the OpenRouter-based encoding preset selection.
+- Global flags: `--log-level` adjusts verbosity for any subcommand.
 - For day-to-day command syntax, rely on `README.md` to avoid duplicating authority here.
 
 ## Debugging & Troubleshooting
@@ -159,7 +244,7 @@ Surface recurring issues in `docs/` so future agents know the resolution path.
 - `check-ci.sh`: Source of truth for local CI expectations.
 - `docs/`: Additional design notes and deep dives (extend when you introduce new subsystems).
 
-Keep AGENTS.md short enough for a fast read. When the workflow evolves, trim obsolete guidance instead of stacking new paragraphs on top.
+When the workflow evolves, update this file and trim obsolete guidance rather than stacking new paragraphs on top.
 
 ## GitHub Repositories
 
