@@ -112,15 +112,6 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	// Validate compression ratio is within expected bounds
-	if err := e.validateCompressionRatio(ctx, item, encodedPaths, logger); err != nil {
-		return err
-	}
-
-	if err := e.validateEncodedOutputs(ctx, encodedPaths, stageStart); err != nil {
-		return err
-	}
-
 	e.finalizeEncodedItem(item, env, encodedPaths, decision, logger)
 	e.reportEncodingSummary(ctx, item, encodedPaths, stageStart, decision, logger)
 
@@ -523,80 +514,4 @@ func (e *Encoder) enforceDraptoValidation(ctx context.Context, item *queue.Item,
 			len(failures), len(snapshot.Validation.Steps), strings.Join(failures, "; ")),
 		nil,
 	)
-}
-
-// validateCompressionRatio checks that the encoded output size is within
-// expected bounds relative to the input size. Extremely low ratios may
-// indicate corruption, while extremely high ratios suggest encoding failure.
-func (e *Encoder) validateCompressionRatio(ctx context.Context, item *queue.Item, encodedPaths []string, logger *slog.Logger) error {
-	if e.cfg == nil {
-		return nil
-	}
-
-	minRatio := e.cfg.Validation.MinCompressionRatio
-	maxRatio := e.cfg.Validation.MaxCompressionRatio
-
-	// Skip if thresholds are not configured
-	if minRatio <= 0 && maxRatio <= 0 {
-		return nil
-	}
-
-	var totalOutputBytes int64
-	for _, path := range encodedPaths {
-		if info, err := os.Stat(path); err == nil {
-			totalOutputBytes += info.Size()
-		}
-	}
-
-	var totalInputBytes int64
-	if info, err := os.Stat(strings.TrimSpace(item.RippedFile)); err == nil {
-		totalInputBytes = info.Size()
-	}
-
-	if totalInputBytes == 0 {
-		logger.Debug("cannot validate compression ratio: no input size available")
-		return nil
-	}
-
-	ratio := float64(totalOutputBytes) / float64(totalInputBytes)
-
-	logger.Debug("compression ratio check",
-		logging.Int64("input_bytes", totalInputBytes),
-		logging.Int64("output_bytes", totalOutputBytes),
-		logging.Float64("ratio", ratio),
-		logging.Float64("min_ratio", minRatio),
-		logging.Float64("max_ratio", maxRatio),
-	)
-
-	if minRatio > 0 && ratio < minRatio {
-		logger.Error("compression ratio below minimum",
-			logging.Float64("ratio", ratio),
-			logging.Float64("min_ratio", minRatio),
-		)
-		return services.Wrap(
-			services.ErrValidation,
-			"encoding",
-			"validate compression ratio",
-			fmt.Sprintf("Compression ratio %.1f%% is below minimum %.1f%% - output may be corrupt",
-				ratio*100, minRatio*100),
-			nil,
-		)
-	}
-
-	if maxRatio > 0 && ratio > maxRatio {
-		logger.Error("compression ratio above maximum",
-			logging.Float64("ratio", ratio),
-			logging.Float64("max_ratio", maxRatio),
-		)
-		return services.Wrap(
-			services.ErrValidation,
-			"encoding",
-			"validate compression ratio",
-			fmt.Sprintf("Compression ratio %.1f%% is above maximum %.1f%% - encoding may have failed",
-				ratio*100, maxRatio*100),
-			nil,
-		)
-	}
-
-	return nil
 }

@@ -40,8 +40,6 @@ const (
 
 	// Validation defaults
 	defaultEnforceDraptoValidation = true
-	defaultMinCompressionRatio     = 0.10
-	defaultMaxCompressionRatio     = 0.95
 	defaultMinVoteCountExactMatch  = 5
 	defaultRequireSubtitles        = false
 	defaultVerifyFileSizeAfterMove = true
@@ -139,8 +137,6 @@ func Default() Config {
 		},
 		Validation: Validation{
 			EnforceDraptoValidation: defaultEnforceDraptoValidation,
-			MinCompressionRatio:     defaultMinCompressionRatio,
-			MaxCompressionRatio:     defaultMaxCompressionRatio,
 			MinVoteCountExactMatch:  defaultMinVoteCountExactMatch,
 			RequireSubtitles:        defaultRequireSubtitles,
 			VerifyFileSizeAfterMove: defaultVerifyFileSizeAfterMove,

@@ -35,11 +35,6 @@ func NewConfig(t testing.TB, opts ...ConfigOption) *config.Config {
 	cfgVal.MakeMKV.KeyDBDownloadURL = ""
 	cfgVal.MakeMKV.KeyDBDownloadTimeout = 1
 
-	// Disable compression ratio validation in tests since stub encodes
-	// don't produce compressed outputs.
-	cfgVal.Validation.MinCompressionRatio = 0
-	cfgVal.Validation.MaxCompressionRatio = 0
-
 	builder := &configBuilder{
 		t:       t,
 		baseDir: base,

@@ -145,9 +145,7 @@ type Logging struct {
 // Validation contains configuration for pipeline validation checks.
 type Validation struct {
 	// Encoding validation
-	EnforceDraptoValidation bool    `toml:"enforce_drapto_validation"`
-	MinCompressionRatio     float64 `toml:"min_compression_ratio"`
-	MaxCompressionRatio     float64 `toml:"max_compression_ratio"`
+	EnforceDraptoValidation bool `toml:"enforce_drapto_validation"`
 
 	// Identification validation
 	MinVoteCountExactMatch int `toml:"min_vote_count_exact_match"`

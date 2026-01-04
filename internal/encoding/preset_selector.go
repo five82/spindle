@@ -28,6 +28,10 @@ const (
 	sourceType4KBluRay        = "4k blu-ray"
 )
 
+// encodeProbe is the ffprobe function used for resolution detection.
+// It can be overridden in tests via SetProbeForTests.
+var encodeProbe = ffprobe.Inspect
+
 type presetRequest struct {
 	Title         string
 	Season        int

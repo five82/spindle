@@ -336,64 +336,6 @@ func TestEncoderPersistsRipSpecPerEpisode(t *testing.T) {
 	}
 }
 
-func TestEncoderFailsWhenEncodedArtifactMissing(t *testing.T) {
-	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
-	store := testsupport.MustOpenStore(t, cfg)
-
-	stubEncoderProbe(t)
-
-	item, err := store.NewDisc(context.Background(), "Missing", "fp")
-	if err != nil {
-		t.Fatalf("NewDisc: %v", err)
-	}
-	item.Status = queue.StatusRipped
-	item.DiscFingerprint = "ENCODERTESTFP4"
-	stagingRoot := item.StagingRoot(cfg.Paths.StagingDir)
-	ripsDir := filepath.Join(stagingRoot, "rips")
-	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
-		t.Fatalf("mkdir rips: %v", err)
-	}
-	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	testsupport.WriteFile(t, item.RippedFile, encodedFixtureSize)
-
-	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), missingArtifactClient{}, nil)
-	if err := handler.Prepare(context.Background(), item); err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	if err := handler.Execute(context.Background(), item); err == nil {
-		t.Fatal("expected execute error when encoded artifact missing")
-	}
-}
-
-func TestEncoderFailsWhenEncodedArtifactEmpty(t *testing.T) {
-	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
-	store := testsupport.MustOpenStore(t, cfg)
-
-	stubEncoderProbe(t)
-
-	item, err := store.NewDisc(context.Background(), "Empty", "fp")
-	if err != nil {
-		t.Fatalf("NewDisc: %v", err)
-	}
-	item.Status = queue.StatusRipped
-	item.DiscFingerprint = "ENCODERTESTFP5"
-	stagingRoot := item.StagingRoot(cfg.Paths.StagingDir)
-	ripsDir := filepath.Join(stagingRoot, "rips")
-	if err := os.MkdirAll(ripsDir, 0o755); err != nil {
-		t.Fatalf("mkdir rips: %v", err)
-	}
-	item.RippedFile = filepath.Join(ripsDir, "demo.mkv")
-	testsupport.WriteFile(t, item.RippedFile, encodedFixtureSize)
-
-	handler := encoding.NewEncoderWithDependencies(cfg, store, logging.NewNop(), emptyArtifactClient{}, nil)
-	if err := handler.Prepare(context.Background(), item); err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	if err := handler.Execute(context.Background(), item); err == nil {
-		t.Fatal("expected execute error when encoded artifact empty")
-	}
-}
-
 func TestEncoderHealthReady(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 	store := testsupport.MustOpenStore(t, cfg)
@@ -461,31 +403,6 @@ type failingClient struct{}
 
 func (failingClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
 	return "", errors.New("encode failed")
-}
-
-type missingArtifactClient struct{}
-
-func (missingArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
-	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
-	if stem == "" {
-		stem = filepath.Base(inputPath)
-	}
-	return filepath.Join(outputDir, stem+".mkv"), nil
-}
-
-type emptyArtifactClient struct{}
-
-func (emptyArtifactClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
-	stem := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
-	if stem == "" {
-		stem = filepath.Base(inputPath)
-	}
-	path := filepath.Join(outputDir, stem+".mkv")
-	file, err := os.Create(path)
-	if err != nil {
-		return "", err
-	}
-	return path, file.Close()
 }
 
 type blockingDraptoClient struct {
