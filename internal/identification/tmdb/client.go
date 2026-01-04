@@ -53,6 +53,14 @@ type SeasonDetails struct {
 	Episodes     []Episode `json:"episodes"`
 }
 
+// Searcher defines the TMDB search operations used by identification.
+type Searcher interface {
+	SearchMovieWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error)
+	SearchTVWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error)
+	SearchMultiWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error)
+	GetSeasonDetails(ctx context.Context, showID int64, seasonNumber int) (*SeasonDetails, error)
+}
+
 // Client provides access to the TMDB API for searches.
 type Client struct {
 	apiKey     string
@@ -60,6 +68,8 @@ type Client struct {
 	language   string
 	httpClient *http.Client
 }
+
+var _ Searcher = (*Client)(nil)
 
 // Option configures a Client.
 type Option func(*Client)

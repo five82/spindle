@@ -182,6 +182,36 @@ func (i *Item) InitProgress(stage, message string) {
 	i.ActiveEpisodeKey = ""
 }
 
+// SetProgress updates all three progress fields atomically.
+// Use this instead of setting ProgressStage, ProgressPercent, and ProgressMessage individually.
+func (i *Item) SetProgress(stage, message string, percent float64) {
+	i.ProgressStage = stage
+	i.ProgressMessage = message
+	i.ProgressPercent = percent
+}
+
+// SetProgressComplete sets progress to 100% with the given stage and message.
+// Convenience method for stage completion.
+func (i *Item) SetProgressComplete(stage, message string) {
+	i.SetProgress(stage, message, 100)
+}
+
+// SetFailed marks the item as failed with the given status and error message.
+// Clears heartbeat and sets progress fields appropriately.
+// Use StatusFailed for retryable failures, StatusReview for manual intervention.
+func (i *Item) SetFailed(status Status, message string) {
+	i.Status = status
+	i.ErrorMessage = message
+	i.ProgressPercent = 0
+	i.ProgressMessage = message
+	i.LastHeartbeat = nil
+	if status == StatusReview {
+		i.ProgressStage = "Needs review"
+	} else {
+		i.ProgressStage = "Failed"
+	}
+}
+
 // IsInWorkflow returns true when an item is actively progressing (or queued to progress)
 // through stages and should not be reset simply because the disc was reinserted.
 func (i Item) IsInWorkflow() bool {

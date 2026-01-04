@@ -31,16 +31,16 @@ func TestWrapIncludesContext(t *testing.T) {
 
 func TestFailureStatusMapping(t *testing.T) {
 	validationErr := services.Wrap(services.ErrValidation, "identifier", "prepare", "invalid", nil)
-	if status := services.FailureStatus(validationErr); status != queue.StatusReview {
+	if status := queue.FailureStatus(validationErr); status != queue.StatusReview {
 		t.Fatalf("expected review for validation error, got %s", status)
 	}
 
 	transientErr := services.Wrap(services.ErrTransient, "encoding", "copy", "copy failed", errors.New("io"))
-	if status := services.FailureStatus(transientErr); status != queue.StatusFailed {
+	if status := queue.FailureStatus(transientErr); status != queue.StatusFailed {
 		t.Fatalf("expected failed for transient error, got %s", status)
 	}
 
-	if status := services.FailureStatus(nil); status != queue.StatusFailed {
+	if status := queue.FailureStatus(nil); status != queue.StatusFailed {
 		t.Fatalf("expected failed for nil error, got %s", status)
 	}
 }

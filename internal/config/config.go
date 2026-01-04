@@ -142,6 +142,20 @@ type Logging struct {
 }
 
 // Config encapsulates all configuration values for Spindle.
+//
+// Configuration sections by subsystem:
+//   - Paths: directories and API bind address
+//   - TMDB: disc identification via The Movie Database
+//   - Jellyfin: media server library refresh integration
+//   - Library: output directory structure (movies/tv subdirs)
+//   - Notifications: ntfy push notification settings
+//   - Subtitles: OpenSubtitles + WhisperX configuration
+//   - CommentaryDetection: audio analysis for commentary track filtering
+//   - RipCache: cached raw rips for re-encoding
+//   - MakeMKV: disc ripping settings and keydb
+//   - PresetDecider: LLM-based encoding preset selection
+//   - Workflow: daemon polling intervals and timeouts
+//   - Logging: log format, level, and retention
 type Config struct {
 	Paths               Paths               `toml:"paths"`
 	TMDB                TMDB                `toml:"tmdb"`

@@ -64,7 +64,7 @@ func (m *Manager) classifyStageFailure(stageName string, stageErr error) (queue.
 		return queue.StatusFailed, msg
 	}
 
-	status := services.FailureStatus(stageErr)
+	status := queue.FailureStatus(stageErr)
 	details := services.Details(stageErr)
 	message := strings.TrimSpace(details.Message)
 	if message == "" {
@@ -84,16 +84,5 @@ func (m *Manager) getStageFailureMessage(stageName, defaultMsg string) string {
 }
 
 func (m *Manager) setItemFailureState(item *queue.Item, status queue.Status, message string) {
-	item.Status = status
-	item.ErrorMessage = message
-
-	if status == queue.StatusReview {
-		item.ProgressStage = "Needs review"
-	} else {
-		item.ProgressStage = "Failed"
-	}
-
-	item.ProgressMessage = message
-	item.ProgressPercent = 0
-	item.LastHeartbeat = nil
+	item.SetFailed(status, message)
 }

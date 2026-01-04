@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"spindle/internal/queue"
 )
 
 var (
@@ -71,6 +69,14 @@ func (e *ServiceError) Is(target error) bool {
 		return true
 	}
 	return errors.Is(e.Cause, target)
+}
+
+// ErrorKind implements queue.ErrorClassifier for status mapping.
+func (e *ServiceError) ErrorKind() string {
+	if e == nil {
+		return ""
+	}
+	return string(e.Kind)
 }
 
 // ErrorDetails exposes a snapshot of a ServiceError for structured logging.
@@ -188,17 +194,6 @@ func wrapWithOptions(marker error, stage, operation, message string, err error, 
 		serviceErr.Hint = "See error_detail_path for tool output"
 	}
 	return serviceErr
-}
-
-// FailureStatus maps a stage error to the queue status the workflow manager
-// should persist after the stage fails.
-func FailureStatus(err error) queue.Status {
-	switch {
-	case errors.Is(err, ErrValidation), errors.Is(err, ErrConfiguration), errors.Is(err, ErrNotFound):
-		return queue.StatusReview
-	default:
-		return queue.StatusFailed
-	}
 }
 
 func buildDetail(stage, operation, message string) string {

@@ -228,23 +228,14 @@ func handleStageFailure(ctx context.Context, logger *slog.Logger, store *queue.S
 	status := queue.StatusFailed
 	message := "stage failed"
 	if stageErr != nil {
-		status = services.FailureStatus(stageErr)
+		status = queue.FailureStatus(stageErr)
 		details := services.Details(stageErr)
 		message = strings.TrimSpace(details.Message)
 		if message == "" {
 			message = strings.TrimSpace(stageErr.Error())
 		}
 	}
-	item.Status = status
-	item.ErrorMessage = message
-	if status == queue.StatusReview {
-		item.ProgressStage = "Needs review"
-	} else {
-		item.ProgressStage = "Failed"
-	}
-	item.ProgressMessage = message
-	item.ProgressPercent = 0
-	item.LastHeartbeat = nil
+	item.SetFailed(status, message)
 
 	logger.Error(
 		"stage failed",
