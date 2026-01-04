@@ -175,7 +175,12 @@ func lookupTMDBMetadata(ctx context.Context, cfg *config.Config, logger *slog.Lo
 	client, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("tmdb client init failed", logging.Error(err))
+			logger.Warn("tmdb client init failed",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "tmdb_client_init_failed"),
+				logging.String(logging.FieldErrorHint, "verify tmdb_api_key in config"),
+				logging.String(logging.FieldImpact, "subtitle context will lack TMDB metadata"),
+			)
 		}
 		return nil
 	}
@@ -188,7 +193,13 @@ func lookupTMDBMetadata(ctx context.Context, cfg *config.Config, logger *slog.Lo
 	match, err := identification.LookupTMDBByTitle(ctx, client, logger, title, opts)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("tmdb lookup failed", logging.Error(err), logging.String("title", title))
+			logger.Warn("tmdb lookup failed",
+				logging.Error(err),
+				logging.String("title", title),
+				logging.String(logging.FieldEventType, "tmdb_lookup_failed"),
+				logging.String(logging.FieldErrorHint, "verify title format or TMDB availability"),
+				logging.String(logging.FieldImpact, "subtitle context will lack TMDB metadata"),
+			)
 		}
 		return nil
 	}

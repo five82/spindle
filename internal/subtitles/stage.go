@@ -53,7 +53,7 @@ func (s *Stage) Prepare(ctx context.Context, item *queue.Item) error {
 	if s.store == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "prepare", "Queue store unavailable", nil)
 	}
-	item.InitProgress(progressStageGenerating, "Preparing audio for transcription")
+	item.InitProgress(progressStageGenerating, "Phase 1/2 - Preparing audio")
 	return s.store.UpdateProgress(ctx, item)
 }
 
@@ -93,7 +93,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	if len(targets) == 0 {
 		return services.Wrap(services.ErrValidation, "subtitles", "execute", "No encoded assets available for subtitles", nil)
 	}
-	if err := s.updateProgress(ctx, item, fmt.Sprintf("Preparing subtitles for %d episode(s)", len(targets)), 5); err != nil {
+	if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Preparing subtitles (%d episodes)", len(targets)), 5); err != nil {
 		return err
 	}
 
@@ -115,9 +115,9 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		message := ""
 		if label != "" {
-			message = fmt.Sprintf("Generating subtitles %d/%d – %s", idx+1, len(targets), label)
+			message = fmt.Sprintf("Phase 2/2 - Generating subtitles (%d/%d – %s)", idx+1, len(targets), label)
 		} else {
-			message = fmt.Sprintf("Generating subtitles %d/%d – %s", idx+1, len(targets), filepath.Base(target.SourcePath))
+			message = fmt.Sprintf("Phase 2/2 - Generating subtitles (%d/%d – %s)", idx+1, len(targets), filepath.Base(target.SourcePath))
 		}
 		if err := s.updateProgress(ctx, item, message, 5.0+step*float64(idx)); err != nil {
 			return err

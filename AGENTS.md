@@ -51,16 +51,60 @@ See `README.md` for install details, disc mounting notes, and end-user usage.
 
 ## Logging Guidance
 
-- Log output must be clear, human-readable, and aligned to user workflows.
-- Use a consistent visual hierarchy: counts before details, one line per item, and stable labels (e.g., `Candidate 3`, `Accepted 12`) for scanability.
-- INFO should read top-down (summary → candidates → decisions → reason counts); push raw thresholds and prefilter noise to DEBUG.
-- If a list is truncated to top‑N items, add a `*_hidden_count` field to surface how many entries were omitted.
-- INFO logs capture decision points that change the final encoded output or the delivered subtitle artifacts (track selection, subtitle source, encode preset, output mapping). Other decisions belong at DEBUG.
-- Prioritize signal over noise; decide whether a message belongs at INFO or DEBUG before logging it.
-- Keep INFO logs easy to follow: short, structured, and readable at a glance.
-- DEBUG logs are for raw metrics or large per-sample/per-stream dumps; INFO should still summarize decision evidence (counts, thresholds hit, top-N candidates, etc.).
-- WARN/ERROR logs explain: cause, impact, and required user action (if any), plus the next troubleshooting step when possible.
-- Include consistent context fields when available: stage, item id, episode key, decision type.
+### Level Semantics
+
+| Level | Use For | Required Fields |
+|-------|---------|-----------------|
+| INFO | Stage start, stage summary, decisions that **change output** | `event_type` |
+| DEBUG | Skip decisions, search results, internal state, raw metrics | (none) |
+| WARN | Degraded behavior, work continues but user should know | WARN triad |
+| ERROR | Operation failed, will stop or retry | `event_type`, `error_hint`, `error` |
+
+### Stage Logging Pattern
+
+Every stage emits exactly:
+1. **DEBUG** on prepare: `"starting {stage} preparation"`
+2. **INFO** for decisions that affect the final output file
+3. **DEBUG** for skip decisions explaining why something didn't happen
+4. **INFO** on completion: `"{stage} stage summary"` with:
+   - `event_type: "stage_complete"`
+   - `stage_duration`
+   - Key metrics (file count, bytes, cache status, etc.)
+
+### Progress Messages
+
+Use consistent format: `"Phase N/M - Action (context)"`
+
+Examples:
+- `"Phase 1/3 - Scanning disc with MakeMKV"`
+- `"Phase 2/3 - Ripping selected titles (5 of 12)"`
+- `"Phase 3/3 - Validating ripped files"`
+
+### Decision Logs
+
+Only log decisions at INFO when they **change the final file**:
+- Track selection (audio, subtitle tracks)
+- Preset selection
+- Subtitle source (OpenSubtitles vs WhisperX)
+- Encoding parameters
+
+Internal skip logic (movie content, no episodes, cache miss) belongs at DEBUG.
+
+### WARN Triad (Enforced)
+
+All WARN logs must include:
+- `event_type`: what happened (e.g., `"cache_inspection_failed"`)
+- `error_hint`: actionable next step
+- `impact`: user-facing consequence
+
+Use `logging.WarnWithContext()` helper to enforce this.
+
+### Condensing Verbose Output
+
+When logging lists (search results, candidates, matches):
+- Log summary at INFO: count, best match, key decision factors
+- Include `*_hidden_count` field when truncating
+- Full details belong at DEBUG only
 
 ## Architecture Map
 

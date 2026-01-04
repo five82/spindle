@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"spindle/internal/config"
 	"spindle/internal/contentid"
@@ -54,7 +55,7 @@ func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error
 	// Check if this is a TV show - skip for movies
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if metadata.IsMovie() {
-		logger.Info("episode identification decision",
+		logger.Debug("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "movie_content"),
@@ -73,12 +74,13 @@ func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error
 
 // Execute performs episode matching using WhisperX and OpenSubtitles.
 func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error {
+	stageStart := time.Now()
 	logger := logging.WithContext(ctx, e.logger)
 
 	// Check if this is a TV show - skip for movies
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if metadata.IsMovie() {
-		logger.Info("episode identification decision",
+		logger.Debug("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "movie_content"),
@@ -94,7 +96,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 	// Decode rip spec
 	if strings.TrimSpace(item.RipSpecData) == "" {
-		logger.Info("episode identification decision",
+		logger.Debug("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "no_rip_spec"),
@@ -110,7 +112,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
-		logger.Info("episode identification decision",
+		logger.Debug("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "invalid_rip_spec"),
@@ -127,7 +129,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 	// Check if we have episodes to match
 	if len(env.Episodes) == 0 {
-		logger.Info("episode identification decision",
+		logger.Debug("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "no_episodes"),
@@ -149,7 +151,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		} else if !e.cfg.Subtitles.OpenSubtitlesEnabled {
 			reason = "opensubtitles disabled"
 		}
-		logger.Info("episode identification decision",
+		logger.Debug("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", reason),
@@ -168,7 +170,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		logging.Int("episode_count", len(env.Episodes)))
 
 	item.ProgressPercent = 5
-	item.ProgressMessage = "Generating WhisperX transcripts"
+	item.ProgressMessage = "Phase 1/3 - Generating transcripts"
 	if e.store != nil {
 		_ = e.store.UpdateProgress(ctx, item)
 	}
@@ -184,13 +186,13 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		episodeKey = strings.ToUpper(strings.TrimSpace(episodeKey))
 		switch phase {
 		case "transcribe":
-			item.ProgressMessage = fmt.Sprintf("Generating WhisperX transcripts %d/%d – %s", current, total, episodeKey)
+			item.ProgressMessage = fmt.Sprintf("Phase 1/3 - Generating transcripts (%d/%d – %s)", current, total, episodeKey)
 			item.ProgressPercent = 10 + 40*(float64(current)/float64(max(1, total)))
 		case "reference":
-			item.ProgressMessage = fmt.Sprintf("Downloading OpenSubtitles references %d/%d – %s", current, total, episodeKey)
+			item.ProgressMessage = fmt.Sprintf("Phase 2/3 - Downloading references (%d/%d – %s)", current, total, episodeKey)
 			item.ProgressPercent = 50 + 30*(float64(current)/float64(max(1, total)))
 		case "apply":
-			item.ProgressMessage = fmt.Sprintf("Applying episode matches %d/%d – %s", current, total, episodeKey)
+			item.ProgressMessage = fmt.Sprintf("Phase 3/3 - Applying matches (%d/%d – %s)", current, total, episodeKey)
 			item.ProgressPercent = 80 + 15*(float64(current)/float64(max(1, total)))
 			if encoded, encodeErr := env.Encode(); encodeErr == nil {
 				copy := *item
@@ -230,10 +232,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			)
 		}
 		item.RipSpecData = encoded
-		logger.Info("episode identification complete, rip spec updated",
-			logging.Int("episode_count", len(env.Episodes)))
-	} else {
-		logger.Info("episode identification complete, no changes needed")
 	}
 
 	item.Status = queue.StatusEpisodeIdentified
@@ -241,6 +239,13 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	item.ProgressMessage = "Episodes correlated with OpenSubtitles"
 	item.ProgressPercent = 100
 	item.ActiveEpisodeKey = ""
+
+	logger.Info("episode identification stage summary",
+		logging.String(logging.FieldEventType, "stage_complete"),
+		logging.Duration("stage_duration", time.Since(stageStart)),
+		logging.Int("episode_count", len(env.Episodes)),
+		logging.Bool("rip_spec_updated", updated),
+	)
 
 	return nil
 }

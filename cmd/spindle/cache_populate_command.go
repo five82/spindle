@@ -83,7 +83,12 @@ it is overwritten.`,
 
 			discLabel, err := getDiscLabel(device)
 			if err != nil {
-				logger.Warn("failed to get disc label", logging.Error(err))
+				logger.Warn("failed to get disc label",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "disc_label_read_failed"),
+					logging.String(logging.FieldErrorHint, "verify disc is inserted and readable"),
+					logging.String(logging.FieldImpact, "disc fingerprint used without label"),
+				)
 				discLabel = ""
 			}
 			logger.Info("detected disc label", logging.String("label", discLabel))
@@ -114,7 +119,12 @@ it is overwritten.`,
 
 			tmdbClient, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 			if err != nil {
-				logger.Warn("tmdb client initialization failed", logging.Error(err))
+				logger.Warn("tmdb client initialization failed",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "tmdb_client_init_failed"),
+					logging.String(logging.FieldErrorHint, "verify tmdb_api_key in config"),
+					logging.String(logging.FieldImpact, "identification will fail"),
+				)
 				return fmt.Errorf("create TMDB client: %w", err)
 			}
 			scanner := disc.NewScanner(cfg.MakemkvBinary())
@@ -156,7 +166,12 @@ it is overwritten.`,
 			}
 
 			if removed, err := store.Remove(baseCtx, item.ID); err != nil {
-				logger.Warn("failed to remove queue item after cache populate", logging.Error(err))
+				logger.Warn("failed to remove queue item after cache populate",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "queue_item_remove_failed"),
+					logging.String(logging.FieldErrorHint, "run spindle queue clear to clean up"),
+					logging.String(logging.FieldImpact, "orphaned queue item may remain"),
+				)
 			} else if removed {
 				logger.Info("removed queue item after cache populate", logging.Int64(logging.FieldItemID, item.ID))
 			}

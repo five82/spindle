@@ -173,28 +173,26 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		response = resp
 		modeUsed = mode
 		if response != nil {
-			logger.Debug("tmdb response received",
+			attrs := []logging.Attr{
 				logging.Int("result_count", len(response.Results)),
 				logging.Int("search_year", input.SearchOpts.Year),
 				logging.Int("search_runtime", input.SearchOpts.Runtime),
 				logging.String("search_mode", string(modeUsed)),
-				logging.String("query", candidate))
-			const tmdbDebugResultLimit = 3
-			limit := tmdbDebugResultLimit
-			if len(response.Results) < limit {
-				limit = len(response.Results)
+				logging.String("query", candidate),
 			}
-			for idx, result := range response.Results[:limit] {
-				logger.Debug("tmdb search result",
-					logging.Int("index", idx),
-					logging.Int64("tmdb_id", result.ID),
-					logging.String("title", result.Title),
-					logging.String("release_date", result.ReleaseDate),
-					logging.Float64("vote_average", result.VoteAverage),
-					logging.Int64("vote_count", result.VoteCount),
-					logging.Float64("popularity", result.Popularity),
-					logging.String("media_type", result.MediaType))
+			if len(response.Results) > 0 {
+				best := response.Results[0]
+				attrs = append(attrs,
+					logging.Int64("best_tmdb_id", best.ID),
+					logging.String("best_title", best.Title),
+					logging.String("best_release_date", best.ReleaseDate),
+					logging.Float64("best_vote_average", best.VoteAverage),
+				)
+				if len(response.Results) > 1 {
+					attrs = append(attrs, logging.Int("results_hidden_count", len(response.Results)-1))
+				}
 			}
+			logger.Debug("tmdb search results", logging.Args(attrs...)...)
 		}
 		minVoteCount := 0
 		if i.cfg != nil {

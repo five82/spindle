@@ -157,7 +157,7 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 		return decision
 	}
 	if item == nil || strings.TrimSpace(item.MetadataJSON) == "" {
-		logger.Info("preset decider skipped",
+		logger.Debug("preset decider skipped",
 			logging.String("reason", "metadata unavailable"),
 			logging.String(logging.FieldDecisionType, "preset_decider"),
 		)
@@ -166,7 +166,7 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 	meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	title := strings.TrimSpace(meta.Title())
 	if title == "" {
-		logger.Info("preset decider skipped",
+		logger.Debug("preset decider skipped",
 			logging.String("reason", "title unavailable"),
 			logging.String(logging.FieldDecisionType, "preset_decider"),
 		)

@@ -124,6 +124,13 @@ type service struct {
 	ctx    context.Context
 }
 
+func (s *service) log() *slog.Logger {
+	if s.logger == nil {
+		return logging.NewNop()
+	}
+	return s.logger.With(logging.String("component", "ipc"))
+}
+
 func convertQueueItem(item *api.QueueItem) *QueueItem {
 	if item == nil {
 		return nil
@@ -133,6 +140,7 @@ func convertQueueItem(item *api.QueueItem) *QueueItem {
 }
 
 func (s *service) Start(_ StartRequest, resp *StartResponse) error {
+	s.log().Debug("daemon start requested")
 	if err := s.daemon.Start(s.ctx); err != nil {
 		resp.Started = false
 		resp.Message = err.Error()
@@ -140,12 +148,17 @@ func (s *service) Start(_ StartRequest, resp *StartResponse) error {
 	}
 	resp.Started = true
 	resp.Message = "daemon started"
+	s.log().Info("daemon started via IPC",
+		logging.String(logging.FieldEventType, "daemon_start"))
 	return nil
 }
 
 func (s *service) Stop(_ StopRequest, resp *StopResponse) error {
+	s.log().Debug("daemon stop requested")
 	s.daemon.Stop()
 	resp.Stopped = true
+	s.log().Info("daemon stopped via IPC",
+		logging.String(logging.FieldEventType, "daemon_stop"))
 	return nil
 }
 
@@ -241,47 +254,67 @@ func (s *service) QueueDescribe(req QueueDescribeRequest, resp *QueueDescribeRes
 }
 
 func (s *service) QueueClear(_ QueueClearRequest, resp *QueueClearResponse) error {
+	s.log().Debug("queue clear requested")
 	removed, err := s.daemon.ClearQueue(s.ctx)
 	if err != nil {
 		return err
 	}
 	resp.Removed = removed
+	s.log().Info("queue cleared",
+		logging.String(logging.FieldEventType, "queue_clear"),
+		logging.Int64("removed_count", removed))
 	return nil
 }
 
 func (s *service) QueueClearCompleted(_ QueueClearCompletedRequest, resp *QueueClearCompletedResponse) error {
+	s.log().Debug("queue clear completed requested")
 	removed, err := s.daemon.ClearCompleted(s.ctx)
 	if err != nil {
 		return err
 	}
 	resp.Removed = removed
+	s.log().Info("queue completed items cleared",
+		logging.String(logging.FieldEventType, "queue_clear_completed"),
+		logging.Int64("removed_count", removed))
 	return nil
 }
 
 func (s *service) QueueClearFailed(_ QueueClearFailedRequest, resp *QueueClearFailedResponse) error {
+	s.log().Debug("queue clear failed requested")
 	removed, err := s.daemon.ClearFailed(s.ctx)
 	if err != nil {
 		return err
 	}
 	resp.Removed = removed
+	s.log().Info("queue failed items cleared",
+		logging.String(logging.FieldEventType, "queue_clear_failed"),
+		logging.Int64("removed_count", removed))
 	return nil
 }
 
 func (s *service) QueueReset(_ QueueResetRequest, resp *QueueResetResponse) error {
+	s.log().Debug("queue reset stuck requested")
 	updated, err := s.daemon.ResetStuck(s.ctx)
 	if err != nil {
 		return err
 	}
 	resp.Updated = updated
+	s.log().Info("queue stuck items reset",
+		logging.String(logging.FieldEventType, "queue_reset_stuck"),
+		logging.Int64("updated_count", updated))
 	return nil
 }
 
 func (s *service) QueueRetry(req QueueRetryRequest, resp *QueueRetryResponse) error {
+	s.log().Debug("queue retry requested", logging.Int("item_count", len(req.IDs)))
 	updated, err := s.daemon.RetryFailed(s.ctx, req.IDs)
 	if err != nil {
 		return err
 	}
 	resp.Updated = updated
+	s.log().Info("queue items retried",
+		logging.String(logging.FieldEventType, "queue_retry"),
+		logging.Int64("updated_count", updated))
 	return nil
 }
 
@@ -289,11 +322,15 @@ func (s *service) QueueStop(req QueueStopRequest, resp *QueueStopResponse) error
 	if len(req.IDs) == 0 {
 		return errors.New("queue stop requires at least one id")
 	}
+	s.log().Debug("queue stop requested", logging.Int("item_count", len(req.IDs)))
 	updated, err := s.daemon.StopQueueItems(s.ctx, req.IDs)
 	if err != nil {
 		return err
 	}
 	resp.Updated = updated
+	s.log().Info("queue items stopped",
+		logging.String(logging.FieldEventType, "queue_stop"),
+		logging.Int64("updated_count", updated))
 	return nil
 }
 

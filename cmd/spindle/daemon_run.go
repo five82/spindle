@@ -104,7 +104,12 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	ipcServer.Serve()
 
 	if err := d.Start(signalCtx); err != nil {
-		logger.Warn("daemon start", logging.Error(err))
+		logger.Warn("daemon start failed",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "daemon_start_failed"),
+			logging.String(logging.FieldErrorHint, "check configuration and queue database access"),
+			logging.String(logging.FieldImpact, "daemon may not process queue items"),
+		)
 	}
 
 	<-signalCtx.Done()

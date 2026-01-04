@@ -69,7 +69,12 @@ Examples:
 			// Create components for identification
 			tmdbClient, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 			if err != nil {
-				logger.Warn("tmdb client initialization failed", logging.Error(err))
+				logger.Warn("tmdb client initialization failed",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "tmdb_client_init_failed"),
+					logging.String(logging.FieldErrorHint, "verify tmdb_api_key in config"),
+					logging.String(logging.FieldImpact, "identification cannot proceed"),
+				)
 				return fmt.Errorf("create TMDB client: %w", err)
 			}
 
@@ -85,7 +90,12 @@ Examples:
 			logger.Debug("getting disc label", logging.String("device", device))
 			discLabel, err := getDiscLabel(device)
 			if err != nil {
-				logger.Warn("failed to get disc label", logging.Error(err))
+				logger.Warn("failed to get disc label",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "disc_label_read_failed"),
+					logging.String(logging.FieldErrorHint, "verify disc is inserted and readable"),
+					logging.String(logging.FieldImpact, "identification may use fallback title"),
+				)
 				discLabel = ""
 			} else {
 				logger.Debug("disc label retrieved", logging.String("device", device), logging.String("label", discLabel))
@@ -114,7 +124,12 @@ Examples:
 			fingerprintTimeout := 2 * time.Minute
 			computedFingerprint, fpErr := fingerprint.ComputeTimeout(identifyCtx, device, "", fingerprintTimeout)
 			if fpErr != nil {
-				logger.Warn("fingerprint computation failed", logging.Error(fpErr))
+				logger.Warn("fingerprint computation failed",
+					logging.Error(fpErr),
+					logging.String(logging.FieldEventType, "fingerprint_compute_failed"),
+					logging.String(logging.FieldErrorHint, "verify disc is readable and not copy-protected"),
+					logging.String(logging.FieldImpact, "rip cache lookup will not work"),
+				)
 			} else if strings.TrimSpace(computedFingerprint) != "" {
 				item.DiscFingerprint = strings.TrimSpace(computedFingerprint)
 				logger.Info("fingerprint computed", logging.String("fingerprint", item.DiscFingerprint))
