@@ -1,8 +1,10 @@
 # spindle
 
-Personal workflow for turning optical discs into a Jellyfin-ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Drapto), optional subtitles (OpenSubtitles + WhisperX), organization, Jellyfin refreshes, and notifications.
+Personal workflow for turning optical discs into a Jellyfin ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Drapto), optional subtitles (OpenSubtitles + WhisperX), organization, Jellyfin refreshes, and notifications.
 
-Single Go binary drives both the CLI and daemon. Early-stage project; expect frequent changes.
+Single Go binary drives both the CLI and daemon.
+
+Early-stage project; expect frequent changes.
 
 ## Install
 
