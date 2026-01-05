@@ -2,7 +2,29 @@
 
 Notes for day-to-day work on Spindle. Public setup and usage docs live in `README.md`; agent-specific guidance is in `AGENTS.md`.
 
-## Environment & Tooling
+## Prerequisites
+
+### System Packages (Ubuntu 24.04)
+
+```bash
+sudo apt update
+sudo apt install -y build-essential ffmpeg mediainfo libchromaprint-tools
+```
+
+### External Binaries
+
+Install these separately and ensure they're on your `PATH`:
+
+- **MakeMKV** (provides `makemkvcon`) - https://www.makemkv.com
+- **Drapto** - `cargo install --git https://github.com/five82/drapto`
+
+Required binaries: `ffmpeg`, `ffprobe`, `makemkvcon`, `drapto`, `mediainfo`, `fpcalc`
+
+Optional: `bd_info` (from `libbluray` tools) improves disc identification; `eject` utility; CUDA 12.8+ for WhisperX GPU acceleration.
+
+Use `spindle status` to check for missing dependencies.
+
+### Go Toolchain
 
 - Install Go 1.25 or newer (`go version` should confirm) and keep `GOBIN`/`GOPATH` on your `PATH` so the `spindle` binary is discoverable during iteration.
 - Install lint tooling with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.

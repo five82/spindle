@@ -1,45 +1,8 @@
 # Spindle Configuration Guide
 
-This guide expands on the `spindle config init` output and explains every key in
-`~/.config/spindle/config.toml`. Use it when tuning the daemon or when new
-features land.
+Complete reference for `~/.config/spindle/config.toml`. See the [README](../README.md) for initial setup.
 
-## Getting Started
-
-1. Install the CLI (`go install github.com/five82/spindle/cmd/spindle@latest`).
-2. Generate a config skeleton:
-
-   ```bash
-   spindle config init
-   ```
-
-3. Edit `~/.config/spindle/config.toml` with your preferred editor. Sample:
-
-   ```toml
-   [paths]
-   library_dir = "~/Media/Library"
-   staging_dir = "~/Media/Staging"
-
-   [tmdb]
-   api_key = "tmdb-key-here"
-
-   [jellyfin]
-   enabled = true
-   url = "https://jellyfin.example.com"
-   api_key = "jellyfin-api-key"
-
-   [notifications]
-   ntfy_topic = "spindle"
-   ```
-
-4. Validate and authorize:
-
-   ```bash
-   spindle config validate
-   ```
-
-Spindle reads this configuration on startup. Changes require restarting the
-daemon (`spindle stop && spindle start`).
+Changes require restarting the daemon (`spindle stop && spindle start`).
 
 ## Core Paths & Storage
 

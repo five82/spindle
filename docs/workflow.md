@@ -1,15 +1,8 @@
 # Spindle Workflow Guide
 
-This guide explains what happens after you start the Spindle daemon and insert a disc. It is written for daily users who want to understand each stage, where files land, and how to keep an eye on progress.
+Stage-by-stage breakdown of what happens after you insert a disc. See the [README](../README.md) for installation and initial setup.
 
-## Before You Start
-
-- Install Spindle with `go install github.com/five82/spindle/cmd/spindle@latest` and create your config with `spindle config init` (see `docs/configuration.md`).
-- Edit `~/.config/spindle/config.toml` so `library_dir`, `staging_dir`, `tmdb_api_key`, and any optional services (Jellyfin, ntfy, OpenSubtitles) are filled out.
-- Run `spindle config validate` to confirm the configuration and directories are ready.
-- Start the background process with `spindle start`, then monitor logs with `spindle show --follow` (add `--lines N` for a snapshot without following).
-
-The daemon owns disc detection and the automated pipeline. Queue commands and utilities can run with or without the daemon; log tailing (`spindle show`) requires the daemon.
+The daemon owns disc detection and the automated pipeline. Queue commands work with or without the daemon; log tailing (`spindle show`) requires a running daemon.
 
 ## Lifecycle at a Glance
 
