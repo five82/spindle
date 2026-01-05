@@ -93,6 +93,7 @@ type CommentaryDetection struct {
 	SpeechInSilenceMax             float64  `toml:"speech_in_silence_max"`
 	DurationToleranceSeconds       int      `toml:"duration_tolerance_seconds"`
 	DurationToleranceRatio         float64  `toml:"duration_tolerance_ratio"`
+	WhisperXSimilarityGuardrail    float64  `toml:"whisperx_similarity_guardrail"`
 }
 
 // RipCache contains configuration for the rip cache.

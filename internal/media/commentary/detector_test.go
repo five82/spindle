@@ -22,6 +22,7 @@ func TestClassifyMetadata(t *testing.T) {
 func TestClassifyRules(t *testing.T) {
 	cfg := defaultCommentaryConfig()
 
+	// Commentary-only: low similarity
 	metrics := Metrics{
 		SpeechRatio:              0.30,
 		SpeechOverlapWithPrimary: 0.10,
@@ -34,11 +35,12 @@ func TestClassifyRules(t *testing.T) {
 		t.Fatalf("expected commentary_only, got include=%v reason=%q", include, reason)
 	}
 
+	// Mixed commentary: high overlap, moderate similarity
 	metrics = Metrics{
 		SpeechRatio:              0.40,
 		SpeechOverlapWithPrimary: 0.80,
 		SpeechInPrimarySilence:   0.10,
-		FingerprintSimilarity:    0.90,
+		FingerprintSimilarity:    0.75,
 		PrimarySpeechRatio:       0.30,
 	}
 	include, reason = classify(metrics, Metadata{}, cfg)
@@ -46,6 +48,7 @@ func TestClassifyRules(t *testing.T) {
 		t.Fatalf("expected mixed_commentary, got include=%v reason=%q", include, reason)
 	}
 
+	// Duplicate downmix: very high similarity
 	metrics = Metrics{
 		SpeechRatio:              0.30,
 		SpeechOverlapWithPrimary: 0.50,
@@ -58,6 +61,7 @@ func TestClassifyRules(t *testing.T) {
 		t.Fatalf("expected duplicate_downmix exclusion, got include=%v reason=%q", include, reason)
 	}
 
+	// Audio description: high speech in silence, low overlap
 	metrics = Metrics{
 		SpeechRatio:              0.50,
 		SpeechOverlapWithPrimary: 0.10,
@@ -70,6 +74,7 @@ func TestClassifyRules(t *testing.T) {
 		t.Fatalf("expected audio_description exclusion, got include=%v reason=%q", include, reason)
 	}
 
+	// Audio description via similarity: high speech in silence + moderate similarity
 	metrics = Metrics{
 		SpeechRatio:              0.50,
 		SpeechOverlapWithPrimary: 0.45,
@@ -82,6 +87,7 @@ func TestClassifyRules(t *testing.T) {
 		t.Fatalf("expected audio_description exclusion (similarity), got include=%v reason=%q", include, reason)
 	}
 
+	// Commentary-only: low similarity, high overlap
 	metrics = Metrics{
 		SpeechRatio:              0.50,
 		SpeechOverlapWithPrimary: 0.65,
@@ -94,6 +100,7 @@ func TestClassifyRules(t *testing.T) {
 		t.Fatalf("expected commentary_only inclusion, got include=%v reason=%q", include, reason)
 	}
 
+	// Music or silent: very low speech ratio
 	metrics = Metrics{
 		SpeechRatio:              0.05,
 		SpeechOverlapWithPrimary: 0.05,

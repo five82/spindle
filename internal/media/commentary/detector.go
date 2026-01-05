@@ -28,6 +28,8 @@ const (
 	minSpeechRatioDeltaPrimary = 0.05
 	minRelativeSilenceDelta    = 0.08
 	minRelativeSimilarityDelta = 0.15
+	downmixSimilarityMin       = 0.85
+	downmixCorrelationMin      = 0.90
 )
 
 // Result captures detected commentary tracks plus per-track decisions.
@@ -60,6 +62,7 @@ type Metrics struct {
 	SpeechInPrimarySilence   float64
 	FingerprintSimilarity    float64
 	PrimarySpeechRatio       float64
+	SpeechTimingCorrelation  float64
 }
 
 // Detect runs commentary detection for the provided media path.
@@ -204,7 +207,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			continue
 		}
 		speechRatio := candSpeech.speechRatio()
-		overlap, inSilence := speechOverlap(primarySpeech, candSpeech)
+		overlap, inSilence, correlation := speechOverlap(primarySpeech, candSpeech)
 
 		fingerprint, err := fingerprintForStream(ctx, ffmpegBinary, path, cand.stream.Index, windows, filepath.Join(workDir, fmt.Sprintf("cand-%d.wav", cand.stream.Index)))
 		if err != nil {
@@ -231,6 +234,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			SpeechInPrimarySilence:   inSilence,
 			FingerprintSimilarity:    similarity,
 			PrimarySpeechRatio:       primarySpeechRatio,
+			SpeechTimingCorrelation:  correlation,
 		}
 		decision.Include, decision.Reason = classify(decision.Metrics, meta, settings)
 		decisions = append(decisions, decision)
@@ -259,6 +263,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 			logging.Float64("speech_ratio", decision.Metrics.SpeechRatio),
 			logging.Float64("speech_overlap_primary", decision.Metrics.SpeechOverlapWithPrimary),
 			logging.Float64("speech_in_primary_silence", decision.Metrics.SpeechInPrimarySilence),
+			logging.Float64("speech_timing_correlation", decision.Metrics.SpeechTimingCorrelation),
 			logging.Float64("fingerprint_similarity", decision.Metrics.FingerprintSimilarity),
 			logging.Group("thresholds", thresholds...),
 		)
@@ -358,6 +363,11 @@ func formatDecisionValue(decision Decision, reason string) string {
 		details = fmt.Sprintf(" | speech %.0f%% (low)", decision.Metrics.SpeechRatio*100)
 	case "duplicate_downmix":
 		details = fmt.Sprintf(" | similarity %.0f%% (high)", decision.Metrics.FingerprintSimilarity*100)
+	case "downmix_correlation":
+		details = fmt.Sprintf(" | similarity %.0f%% | timing correlation %.0f%%",
+			decision.Metrics.FingerprintSimilarity*100,
+			decision.Metrics.SpeechTimingCorrelation*100,
+		)
 	case "audio_description", "audio_description_outlier", "whisperx_audio_description":
 		details = fmt.Sprintf(" | silence speech %.0f%% | overlap %.0f%% | similarity %.0f%%",
 			decision.Metrics.SpeechInPrimarySilence*100,
@@ -530,9 +540,16 @@ func classify(metrics Metrics, meta Metadata, cfg config.CommentaryDetection) (b
 	if metrics.SpeechRatio <= cfg.SpeechRatioMaxMusic {
 		return false, "music_or_silent"
 	}
+
+	// Duplicate detection for very high similarity
 	if metrics.FingerprintSimilarity >= cfg.FingerprintSimilarityDuplicate &&
 		math.Abs(metrics.SpeechRatio-metrics.PrimarySpeechRatio) <= minSpeechRatioDeltaPrimary {
 		return false, "duplicate_downmix"
+	}
+	// Correlation-based downmix detection
+	if metrics.FingerprintSimilarity >= downmixSimilarityMin &&
+		metrics.SpeechTimingCorrelation >= downmixCorrelationMin {
+		return false, "downmix_correlation"
 	}
 	adSimilarityMin := cfg.FingerprintSimilarityDuplicate - 0.10
 	if adSimilarityMin < 0.70 {
@@ -843,10 +860,14 @@ func vadFrames(vad *vadProcessor, data []byte, sampleRate, frameMs int) ([]bool,
 	return flags, total
 }
 
-func speechOverlap(primary, candidate speechAnalysis) (float64, float64) {
+func speechOverlap(primary, candidate speechAnalysis) (float64, float64, float64) {
 	totalSpeech := 0
 	overlap := 0
 	inSilence := 0
+
+	// Collect all frames for correlation calculation
+	var primFrames, candFrames []float64
+
 	for i := 0; i < len(candidate.windows) && i < len(primary.windows); i++ {
 		cand := candidate.windows[i]
 		prim := primary.windows[i]
@@ -855,6 +876,19 @@ func speechOverlap(primary, candidate speechAnalysis) (float64, float64) {
 			frames = len(prim)
 		}
 		for j := 0; j < frames; j++ {
+			// Collect for correlation (convert bool to float64)
+			primVal := 0.0
+			if prim[j] {
+				primVal = 1.0
+			}
+			candVal := 0.0
+			if cand[j] {
+				candVal = 1.0
+			}
+			primFrames = append(primFrames, primVal)
+			candFrames = append(candFrames, candVal)
+
+			// Original overlap/silence calculation
 			if !cand[j] {
 				continue
 			}
@@ -866,10 +900,50 @@ func speechOverlap(primary, candidate speechAnalysis) (float64, float64) {
 			}
 		}
 	}
-	if totalSpeech == 0 {
-		return 0, 0
+
+	overlapRatio := 0.0
+	inSilenceRatio := 0.0
+	if totalSpeech > 0 {
+		overlapRatio = float64(overlap) / float64(totalSpeech)
+		inSilenceRatio = float64(inSilence) / float64(totalSpeech)
 	}
-	return float64(overlap) / float64(totalSpeech), float64(inSilence) / float64(totalSpeech)
+
+	correlation := pearsonCorrelation(primFrames, candFrames)
+	return overlapRatio, inSilenceRatio, correlation
+}
+
+// pearsonCorrelation computes the Pearson correlation coefficient between two series.
+// Returns 0 if the series are empty or have zero variance.
+func pearsonCorrelation(x, y []float64) float64 {
+	n := len(x)
+	if n == 0 || len(y) != n {
+		return 0
+	}
+
+	// Compute means
+	var sumX, sumY float64
+	for i := 0; i < n; i++ {
+		sumX += x[i]
+		sumY += y[i]
+	}
+	meanX := sumX / float64(n)
+	meanY := sumY / float64(n)
+
+	// Compute correlation components
+	var numerator, sumSqX, sumSqY float64
+	for i := 0; i < n; i++ {
+		dx := x[i] - meanX
+		dy := y[i] - meanY
+		numerator += dx * dy
+		sumSqX += dx * dx
+		sumSqY += dy * dy
+	}
+
+	denominator := math.Sqrt(sumSqX * sumSqY)
+	if denominator == 0 {
+		return 0
+	}
+	return numerator / denominator
 }
 
 func extractPCM(ctx context.Context, ffmpegBinary, path string, streamIndex int, win window) ([]byte, error) {

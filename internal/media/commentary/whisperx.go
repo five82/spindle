@@ -78,6 +78,11 @@ func applyWhisperXClassification(ctx context.Context, cfg *config.Config, ffmpeg
 		return decisions
 	}
 
+	guardrail := cfg.CommentaryDetection.WhisperXSimilarityGuardrail
+	if guardrail <= 0 {
+		guardrail = 0.85
+	}
+
 	for _, idx := range candidates {
 		decision := decisions[idx]
 		label, scores, err := classifyWithWhisperX(ctx, cfg, ffmpegBinary, path, decision.Metadata.Language, decision.Index, windows, workDir)
@@ -105,6 +110,17 @@ func applyWhisperXClassification(ctx context.Context, cfg *config.Config, ffmpeg
 
 		switch label {
 		case "commentary":
+			if decision.Metrics.FingerprintSimilarity >= guardrail {
+				if logger != nil {
+					logger.Debug("commentary whisperx override blocked by similarity",
+						logging.Int("stream_index", decision.Index),
+						logging.String("whisperx_label", label),
+						logging.Float64("fingerprint_similarity", decision.Metrics.FingerprintSimilarity),
+						logging.Float64("guardrail_threshold", guardrail),
+					)
+				}
+				continue
+			}
 			decisions[idx].Include = true
 			decisions[idx].Reason = "whisperx_commentary"
 		case "audio_description":
