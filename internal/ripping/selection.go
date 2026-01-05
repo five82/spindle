@@ -141,6 +141,14 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 		return ripspec.Title{}, false
 	}
 
+	// Early check for Disney/Pixar multi-language discs.
+	// These have 00800.mpls (English), 00801.mpls (Spanish), 00802.mpls (French) with
+	// the English version often being slightly shorter due to language-specific credits.
+	// If we find feature-length 800-series playlists, prefer 00800.mpls before duration filtering.
+	if preferred := filterPreferredPlaylistFeatureLength(candidates, minPrimaryRuntimeSeconds); len(preferred) > 0 {
+		candidates = preferred
+	}
+
 	// Prefer feature-length runtimes within a small tolerance window.
 	maxDuration := 0
 	for _, t := range candidates {
@@ -263,6 +271,66 @@ func bestByInt(list []ripspec.Title, score func(ripspec.Title) int) []ripspec.Ti
 		}
 	}
 	return out
+}
+
+// filterPreferredPlaylistFeatureLength returns feature-length titles with the preferred 800-series playlist.
+// Disney/Pixar discs use 00800.mpls for English, 00801 for Spanish, 00802 for French.
+// The English version is often slightly shorter due to language-specific credits.
+// Only applies when multiple feature-length 800-series playlists exist (indicating a multi-language disc).
+// Returns empty slice if not a multi-language disc pattern.
+func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int) []ripspec.Title {
+	// Collect feature-length titles with 800-series playlists
+	type scored struct {
+		title ripspec.Title
+		num   int
+	}
+	var candidates []scored
+	for _, t := range titles {
+		if t.Duration < minRuntime {
+			continue
+		}
+		pl := strings.ToLower(strings.TrimSpace(t.Playlist))
+		// Match 008XX.mpls pattern (800-899 range)
+		if strings.HasPrefix(pl, "008") && strings.HasSuffix(pl, ".mpls") {
+			numStr := strings.TrimPrefix(pl, "00")
+			numStr = strings.TrimSuffix(numStr, ".mpls")
+			if num, err := strconv.Atoi(numStr); err == nil && num >= 800 && num < 900 {
+				candidates = append(candidates, scored{title: t, num: num})
+			}
+		}
+	}
+
+	// Only apply if we have multiple 800-series playlists (indicating multi-language disc)
+	if len(candidates) < 2 {
+		return nil
+	}
+
+	// Check if we have different playlist numbers (e.g., 800, 801, 802)
+	playlistNums := make(map[int]bool)
+	for _, c := range candidates {
+		playlistNums[c.num] = true
+	}
+	if len(playlistNums) < 2 {
+		// All same playlist number, not a multi-language pattern
+		return nil
+	}
+
+	// Find minimum playlist number (00800 = English)
+	minNum := candidates[0].num
+	for _, c := range candidates[1:] {
+		if c.num < minNum {
+			minNum = c.num
+		}
+	}
+
+	// Return all titles with that minimum playlist number
+	result := make([]ripspec.Title, 0)
+	for _, c := range candidates {
+		if c.num == minNum {
+			result = append(result, c.title)
+		}
+	}
+	return result
 }
 
 func uniqueEpisodeTitleIDs(env ripspec.Envelope) []int {
