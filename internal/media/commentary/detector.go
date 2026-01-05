@@ -241,6 +241,11 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	}
 
 	decisions = applyRelativeScoring(settings, decisions, logger)
+	// Speaker embedding is primary signal for voice identity
+	if speakerEmbeddingAvailable(cfg) {
+		decisions = applySpeakerEmbeddingClassification(ctx, cfg, ffmpegBinary, path, windows, workDir, primaryIndex, decisions, logger)
+	}
+	// WhisperX is fallback for still-ambiguous candidates
 	if whisperxAvailable(cfg) {
 		decisions = applyWhisperXClassification(ctx, cfg, ffmpegBinary, path, windows, workDir, decisions, logger)
 	}
@@ -357,7 +362,7 @@ func formatDecisionValue(decision Decision, reason string) string {
 	}
 	details := ""
 	switch reason {
-	case "commentary_only", "mixed_commentary", "metadata_commentary", "commentary_relative", "whisperx_commentary":
+	case "commentary_only", "mixed_commentary", "metadata_commentary", "commentary_relative", "whisperx_commentary", "speaker_commentary":
 		details = fmt.Sprintf(" | speech %.0f%% | similarity %.0f%%", decision.Metrics.SpeechRatio*100, decision.Metrics.FingerprintSimilarity*100)
 	case "music_or_silent":
 		details = fmt.Sprintf(" | speech %.0f%% (low)", decision.Metrics.SpeechRatio*100)
@@ -368,12 +373,14 @@ func formatDecisionValue(decision Decision, reason string) string {
 			decision.Metrics.FingerprintSimilarity*100,
 			decision.Metrics.SpeechTimingCorrelation*100,
 		)
-	case "audio_description", "audio_description_outlier", "whisperx_audio_description":
+	case "audio_description", "audio_description_outlier", "whisperx_audio_description", "speaker_audio_description":
 		details = fmt.Sprintf(" | silence speech %.0f%% | overlap %.0f%% | similarity %.0f%%",
 			decision.Metrics.SpeechInPrimarySilence*100,
 			decision.Metrics.SpeechOverlapWithPrimary*100,
 			decision.Metrics.FingerprintSimilarity*100,
 		)
+	case "speaker_same_voices":
+		details = fmt.Sprintf(" | similarity %.0f%% (same voices)", decision.Metrics.FingerprintSimilarity*100)
 	case "fingerprint_failed":
 		details = " | fingerprint failed"
 	case "fingerprint_failed_stream_missing":

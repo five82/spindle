@@ -94,6 +94,7 @@ speech_overlap_primary_max_audio_description = 0.30  # Max overlap for audio-des
 speech_in_silence_max = 0.40                         # Max allowed speech in primary silence (AD exclusion)
 duration_tolerance_seconds = 120                     # Absolute duration tolerance vs primary (seconds)
 duration_tolerance_ratio = 0.02                      # Relative duration tolerance vs primary (ratio)
+speaker_embedding_enabled = false                    # Use pyannote speaker embedding (requires HF token)
 
 # ============================================================================
 # RIP CACHE (optional)

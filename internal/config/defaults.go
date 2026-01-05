@@ -103,6 +103,7 @@ func Default() Config {
 			DurationToleranceSeconds:       120,
 			DurationToleranceRatio:         0.02,
 			WhisperXSimilarityGuardrail:    0.85,
+			SpeakerEmbeddingEnabled:        false,
 		},
 		RipCache: RipCache{
 			Dir:    defaultRipCacheDir(),

@@ -94,6 +94,7 @@ type CommentaryDetection struct {
 	DurationToleranceSeconds       int      `toml:"duration_tolerance_seconds"`
 	DurationToleranceRatio         float64  `toml:"duration_tolerance_ratio"`
 	WhisperXSimilarityGuardrail    float64  `toml:"whisperx_similarity_guardrail"`
+	SpeakerEmbeddingEnabled        bool     `toml:"speaker_embedding_enabled"`
 }
 
 // RipCache contains configuration for the rip cache.

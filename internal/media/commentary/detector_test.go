@@ -246,6 +246,140 @@ func TestFormatDecisionSummaryFingerprintFailure(t *testing.T) {
 	}
 }
 
+func TestClassifySpeakerResult(t *testing.T) {
+	cfg := &config.Config{
+		CommentaryDetection: defaultCommentaryConfig(),
+	}
+
+	// Same speakers (high similarity) -> reject as downmix
+	decision := Decision{
+		Index:   6,
+		Include: false,
+		Reason:  "ambiguous",
+		Metrics: Metrics{SpeechInPrimarySilence: 0.20},
+	}
+	result := SpeakerResult{
+		PrimarySpeakerCount:   3,
+		CandidateSpeakerCount: 3,
+		MaxSimilarity:         0.85,
+		SameSpeakers:          true,
+	}
+	got := classifySpeakerResult(decision, result, cfg)
+	if got.Include || got.Reason != "speaker_same_voices" {
+		t.Fatalf("expected speaker_same_voices rejection, got include=%v reason=%q", got.Include, got.Reason)
+	}
+
+	// Different speakers + high speech-in-silence -> audio description
+	decision = Decision{
+		Index:   7,
+		Include: false,
+		Reason:  "audio_description",
+		Metrics: Metrics{SpeechInPrimarySilence: 0.55}, // Above 0.40 threshold
+	}
+	result = SpeakerResult{
+		PrimarySpeakerCount:   3,
+		CandidateSpeakerCount: 1,
+		MaxSimilarity:         0.25,
+		SameSpeakers:          false,
+	}
+	got = classifySpeakerResult(decision, result, cfg)
+	if got.Include || got.Reason != "speaker_audio_description" {
+		t.Fatalf("expected speaker_audio_description, got include=%v reason=%q", got.Include, got.Reason)
+	}
+
+	// Different speakers + low speech-in-silence -> commentary (solo director)
+	decision = Decision{
+		Index:   8,
+		Include: false,
+		Reason:  "ambiguous",
+		Metrics: Metrics{SpeechInPrimarySilence: 0.20}, // Below 0.40 threshold
+	}
+	result = SpeakerResult{
+		PrimarySpeakerCount:   3,
+		CandidateSpeakerCount: 1, // Solo director
+		MaxSimilarity:         0.30,
+		SameSpeakers:          false,
+	}
+	got = classifySpeakerResult(decision, result, cfg)
+	if !got.Include || got.Reason != "speaker_commentary" {
+		t.Fatalf("expected speaker_commentary (solo), got include=%v reason=%q", got.Include, got.Reason)
+	}
+
+	// Different speakers + low speech-in-silence -> commentary (group)
+	decision = Decision{
+		Index:   9,
+		Include: false,
+		Reason:  "ambiguous",
+		Metrics: Metrics{SpeechInPrimarySilence: 0.15},
+	}
+	result = SpeakerResult{
+		PrimarySpeakerCount:   3,
+		CandidateSpeakerCount: 2, // Director + writer
+		MaxSimilarity:         0.20,
+		SameSpeakers:          false,
+	}
+	got = classifySpeakerResult(decision, result, cfg)
+	if !got.Include || got.Reason != "speaker_commentary" {
+		t.Fatalf("expected speaker_commentary (group), got include=%v reason=%q", got.Include, got.Reason)
+	}
+
+	// Ambiguous similarity range (0.5-0.7) + low speech-in-silence -> unchanged (fall through to WhisperX)
+	decision = Decision{
+		Index:   10,
+		Include: false,
+		Reason:  "ambiguous",
+		Metrics: Metrics{SpeechInPrimarySilence: 0.30},
+	}
+	result = SpeakerResult{
+		PrimarySpeakerCount:   3,
+		CandidateSpeakerCount: 2,
+		MaxSimilarity:         0.60, // Ambiguous range
+		SameSpeakers:          false,
+	}
+	got = classifySpeakerResult(decision, result, cfg)
+	if got.Include || got.Reason != "ambiguous" {
+		t.Fatalf("expected unchanged ambiguous, got include=%v reason=%q", got.Include, got.Reason)
+	}
+
+	// High similarity + high speech-in-silence -> AD (movie audio bleed-through in AD tracks)
+	// AD tracks contain movie audio mixed with narrator, so speaker embedding picks up movie voices
+	decision = Decision{
+		Index:   11,
+		Include: false,
+		Reason:  "ambiguous",
+		Metrics: Metrics{SpeechInPrimarySilence: 0.55, FingerprintSimilarity: 0.78}, // Above 0.40 threshold
+	}
+	result = SpeakerResult{
+		PrimarySpeakerCount:   2,
+		CandidateSpeakerCount: 2,
+		MaxSimilarity:         0.92, // High similarity due to movie audio bleed-through
+		SameSpeakers:          true,
+	}
+	got = classifySpeakerResult(decision, result, cfg)
+	if got.Include || got.Reason != "speaker_audio_description" {
+		t.Fatalf("expected speaker_audio_description (bleed-through), got include=%v reason=%q", got.Include, got.Reason)
+	}
+
+	// Very high similarity + high fingerprint -> downmix (even with elevated speech-in-silence)
+	// Stereo downmix may have slight measurement variance in speech-in-silence
+	decision = Decision{
+		Index:   12,
+		Include: false,
+		Reason:  "ambiguous",
+		Metrics: Metrics{SpeechInPrimarySilence: 0.43, FingerprintSimilarity: 0.89}, // Just above threshold but high fingerprint
+	}
+	result = SpeakerResult{
+		PrimarySpeakerCount:   2,
+		CandidateSpeakerCount: 2,
+		MaxSimilarity:         0.98, // Very high - definite same voices
+		SameSpeakers:          true,
+	}
+	got = classifySpeakerResult(decision, result, cfg)
+	if got.Include || got.Reason != "speaker_same_voices" {
+		t.Fatalf("expected speaker_same_voices (downmix), got include=%v reason=%q", got.Include, got.Reason)
+	}
+}
+
 func defaultCommentaryConfig() config.CommentaryDetection {
 	return config.CommentaryDetection{
 		FingerprintSimilarityDuplicate: 0.98,
