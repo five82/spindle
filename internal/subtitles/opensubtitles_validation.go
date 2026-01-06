@@ -45,3 +45,21 @@ func checkSubtitleDuration(path string, videoSeconds float64) (float64, bool, er
 	}
 	return delta, true, nil
 }
+
+// earlyDurationPreCheck performs a quick duration sanity check before expensive
+// alignment. Returns true if the subtitle duration is obviously wrong (>120s off).
+// This saves time by rejecting candidates that would fail the final duration check anyway.
+func earlyDurationPreCheck(path string, videoSeconds float64) (delta float64, reject bool) {
+	if videoSeconds <= 0 {
+		return 0, false
+	}
+	last, err := lastSRTTimestamp(path)
+	if err != nil || last <= 0 {
+		return 0, false // Can't determine, proceed with alignment
+	}
+	delta = videoSeconds - last
+	if math.Abs(delta) > earlyDurationToleranceSeconds {
+		return delta, true // Obviously wrong, skip alignment
+	}
+	return delta, false
+}

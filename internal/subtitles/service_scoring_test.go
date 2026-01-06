@@ -76,3 +76,81 @@ func TestCheckSubtitleDurationAllowsSmallDelta(t *testing.T) {
 		t.Fatalf("expected no mismatch, got delta %.2f", delta)
 	}
 }
+
+func TestIsTitleMismatchRejectsWrongMovies(t *testing.T) {
+	tests := []struct {
+		expected  string
+		candidate string
+		mismatch  bool
+	}{
+		// Exact matches
+		{"Toy Story 3", "Toy Story 3", false},
+		{"toy story 3", "Toy Story 3", false},
+		{"Toy Story 3", "toy story 3", false},
+
+		// Contains relationship
+		{"Toy Story 3", "Toy Story 3 3D", false},
+		{"Toy Story", "Toy Story 3", false},
+
+		// Partial word overlap (>= 50%)
+		{"The Dark Knight", "Dark Knight Rises", false},
+
+		// Complete mismatch - should reject
+		{"Toy Story 3", "Some Other Stories", true},
+		{"Toy Story 3", "Finding Nemo", true},
+		{"The Matrix", "Die Hard", true},
+
+		// Empty strings - should not reject
+		{"Toy Story 3", "", false},
+		{"", "Some Movie", false},
+	}
+
+	for _, tt := range tests {
+		got := isTitleMismatch(tt.expected, tt.candidate)
+		if got != tt.mismatch {
+			t.Errorf("isTitleMismatch(%q, %q) = %v, want %v", tt.expected, tt.candidate, got, tt.mismatch)
+		}
+	}
+}
+
+func TestRankSubtitleCandidatesFiltersMismatchedTitles(t *testing.T) {
+	subs := []opensubtitles.Subtitle{
+		{FileID: 1, Language: "en", FeatureTitle: "Toy Story 3", Downloads: 100},
+		{FileID: 2, Language: "en", FeatureTitle: "Some Other Stories", Downloads: 200},
+		{FileID: 3, Language: "en", FeatureTitle: "Toy Story 3 3D", Downloads: 50},
+	}
+	ctx := SubtitleContext{Title: "Toy Story 3", MediaType: "movie"}
+	ordered := rankSubtitleCandidates(subs, []string{"en"}, ctx)
+
+	// Should only have 2 candidates (mismatched title filtered out)
+	if len(ordered) != 2 {
+		t.Fatalf("expected 2 candidates after filtering, got %d", len(ordered))
+	}
+
+	// Verify the wrong movie was filtered
+	for _, s := range ordered {
+		if s.subtitle.FeatureTitle == "Some Other Stories" {
+			t.Fatalf("mismatched title should have been filtered out")
+		}
+	}
+}
+
+func TestTitleMatchScorePenalizesMismatch(t *testing.T) {
+	// Exact match should get bonus
+	score, reason := titleMatchScore("Toy Story 3", "Toy Story 3")
+	if score <= 0 {
+		t.Errorf("exact match should have positive score, got %.1f", score)
+	}
+	if reason != "title=exact" {
+		t.Errorf("expected reason 'title=exact', got %q", reason)
+	}
+
+	// Mismatch should get heavy penalty
+	score, reason = titleMatchScore("Toy Story 3", "Finding Nemo")
+	if score >= 0 {
+		t.Errorf("mismatch should have negative score, got %.1f", score)
+	}
+	if reason != "title=mismatch" {
+		t.Errorf("expected reason 'title=mismatch', got %q", reason)
+	}
+}

@@ -23,7 +23,7 @@ const (
 	whisperXCUDADevice     = "cuda"
 	whisperXCPUComputeType = "float32"
 	stableTSCommand        = "uvx"
-	stableTSPackage        = "stable-ts"
+	stableTSPackage        = "stable-ts-whisperless"
 	whisperXPackage        = "whisperx"
 	ffsubsyncCommand       = "uvx"
 	ffsubsyncPackage       = "ffsubsync"

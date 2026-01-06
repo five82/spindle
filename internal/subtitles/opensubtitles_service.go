@@ -145,6 +145,13 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		return GenerateResult{}, false, nil
 	}
 
+	// Limit candidates to avoid excessive processing time.
+	// If top candidates fail, lower-ranked ones are unlikely to succeed.
+	candidatesToTry := scored
+	if len(candidatesToTry) > maxOpenSubtitlesCandidates {
+		candidatesToTry = candidatesToTry[:maxOpenSubtitlesCandidates]
+	}
+
 	var (
 		lastErr       error
 		mismatchErrs  []durationMismatchError
@@ -152,7 +159,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		summaryLines  []string
 	)
 
-	for idx, candidate := range scored {
+	for idx, candidate := range candidatesToTry {
 		result, err := s.downloadAndAlignCandidate(ctx, plan, req, candidate.subtitle)
 
 		status := "Rejected"
@@ -162,10 +169,19 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		if err != nil {
 			lastErr = err
 			var mismatch durationMismatchError
+			var earlyReject earlyDurationRejectError
 			if errors.As(err, &mismatch) {
 				mismatchErrs = append(mismatchErrs, mismatch)
 				reason = "duration_mismatch"
 				details = fmt.Sprintf(" [Diff: %.1fs]", mismatch.deltaSeconds)
+			} else if errors.As(err, &earlyReject) {
+				// Early rejection counts as duration mismatch for summary purposes
+				mismatchErrs = append(mismatchErrs, durationMismatchError{
+					deltaSeconds: earlyReject.deltaSeconds,
+					release:      earlyReject.release,
+				})
+				reason = "early_duration_reject"
+				details = fmt.Sprintf(" [Diff: %.1fs, skipped alignment]", earlyReject.deltaSeconds)
 			} else {
 				allDurationMM = false
 				reason = "download_or_align_failed"
@@ -241,7 +257,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 	}
 
 	if lastErr != nil {
-		if len(mismatchErrs) == len(scored) && len(scored) > 0 && allDurationMM {
+		if len(mismatchErrs) == len(candidatesToTry) && len(candidatesToTry) > 0 && allDurationMM {
 			if suspect := buildSuspectError(mismatchErrs); suspect != nil {
 				return GenerateResult{}, false, suspect
 			}

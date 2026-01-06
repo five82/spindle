@@ -3,6 +3,7 @@ package subtitles
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -234,20 +235,23 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			openSubsDetail = strings.TrimSpace(err.Error())
 			var suspect suspectMisIdentificationError
 			if errors.As(err, &suspect) {
+				// All candidates had consistent duration mismatch. This can happen with
+				// UHD/extended cuts that have different runtime than theatrical releases.
+				// Log warning but fall back to WhisperX instead of failing.
+				openSubsDecision = "duration_mismatch"
+				openSubsDetail = fmt.Sprintf("all candidates rejected (median delta %.0fs)", suspect.medianAbsDelta())
 				if s.logger != nil {
-					s.logger.Warn("opensubtitles suggests mis-identification",
+					s.logger.Warn("opensubtitles duration mismatch, falling back to whisperx",
 						logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
 						logging.String("title", title),
 						logging.Int("season", req.Context.Season),
 						logging.Int("episode", req.Context.Episode),
-						logging.Alert("review"),
-						logging.String(logging.FieldEventType, "subtitle_misidentification_suspected"),
-						logging.String(logging.FieldErrorHint, "verify TMDB match or force WhisperX subtitles"),
+						logging.Alert("subtitle_fallback"),
+						logging.String(logging.FieldEventType, "opensubtitles_duration_mismatch"),
+						logging.String(logging.FieldErrorHint, "video may be extended/UHD cut with different runtime"),
 					)
 				}
-				return GenerateResult{}, err
-			}
-			if s.logger != nil {
+			} else if s.logger != nil {
 				s.logger.Warn("opensubtitles fetch failed",
 					logging.Error(err),
 					logging.String("title", title),

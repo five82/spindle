@@ -17,12 +17,28 @@ const (
 	suspectOffsetSeconds             = 60.0
 	suspectRuntimeMismatchRatio      = 0.07
 	subtitleDurationToleranceSeconds = 8.0
+
+	// Early duration pre-check tolerance (generous to avoid false rejections,
+	// but catches obviously wrong candidates before expensive alignment).
+	// Candidates with >120s mismatch are rejected without alignment.
+	earlyDurationToleranceSeconds = 120.0
+
+	// Maximum number of OpenSubtitles candidates to evaluate.
+	// If top candidates all fail, lower-ranked ones are unlikely to succeed.
+	maxOpenSubtitlesCandidates = 15
 )
 
 type (
 	durationMismatchError struct {
 		deltaSeconds float64
 		videoSeconds float64
+		release      string
+	}
+
+	// earlyDurationRejectError indicates a candidate was rejected during
+	// early duration pre-check (before expensive alignment).
+	earlyDurationRejectError struct {
+		deltaSeconds float64
 		release      string
 	}
 
@@ -33,6 +49,10 @@ type (
 
 func (e durationMismatchError) Error() string {
 	return fmt.Sprintf("subtitle duration delta %.1fs exceeds tolerance", e.deltaSeconds)
+}
+
+func (e earlyDurationRejectError) Error() string {
+	return fmt.Sprintf("subtitle rejected early: duration delta %.1fs exceeds pre-check tolerance", e.deltaSeconds)
 }
 
 func (e suspectMisIdentificationError) Error() string {

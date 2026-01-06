@@ -3,12 +3,15 @@ package subtitles
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"spindle/internal/subtitles/opensubtitles"
 )
+
+var titleNormalizeRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 type scoredSubtitle struct {
 	subtitle opensubtitles.Subtitle
@@ -29,6 +32,11 @@ func rankSubtitleCandidates(subs []opensubtitles.Subtitle, preferred []string, c
 	)
 	for _, sub := range subs {
 		if sub.FileID == 0 {
+			continue
+		}
+		// Hard reject candidates with mismatched feature titles to prevent
+		// using subtitles from wrong movies that happen to pass duration checks
+		if isTitleMismatch(ctx.Title, sub.FeatureTitle) {
 			continue
 		}
 		entry := scoredSubtitle{
@@ -86,6 +94,13 @@ func scoreSubtitleCandidate(sub opensubtitles.Subtitle, ctx SubtitleContext) (fl
 	score += releaseScore
 	reasons = append(reasons, releaseReasons...)
 
+	// Title matching - reject candidates with mismatched feature titles
+	titleScore, titleReason := titleMatchScore(ctx.Title, sub.FeatureTitle)
+	score += titleScore
+	if titleReason != "" {
+		reasons = append(reasons, titleReason)
+	}
+
 	if ctxYear := parseContextYear(ctx.Year); ctxYear > 0 && sub.FeatureYear > 0 {
 		delta := math.Abs(float64(ctxYear - sub.FeatureYear))
 		switch {
@@ -125,6 +140,112 @@ func scoreSubtitleCandidate(sub opensubtitles.Subtitle, ctx SubtitleContext) (fl
 	}
 
 	return score, reasons
+}
+
+// titleMatchScore compares the expected title against the candidate's feature title.
+// Returns a score adjustment and reason string.
+func titleMatchScore(expected, candidate string) (float64, string) {
+	expectedNorm := normalizeTitle(expected)
+	candidateNorm := normalizeTitle(candidate)
+
+	if expectedNorm == "" || candidateNorm == "" {
+		return 0, ""
+	}
+
+	// Exact match after normalization
+	if expectedNorm == candidateNorm {
+		return 1.0, "title=exact"
+	}
+
+	// Check if one contains the other (handles "Toy Story 3" vs "Toy Story 3 3D")
+	if strings.Contains(candidateNorm, expectedNorm) || strings.Contains(expectedNorm, candidateNorm) {
+		return 0.5, "title=contains"
+	}
+
+	// Check for significant word overlap (at least 50% of words match)
+	expectedWords := normalizeTitleWords(expected)
+	candidateWords := normalizeTitleWords(candidate)
+	if len(expectedWords) > 0 && len(candidateWords) > 0 {
+		matches := 0
+		for _, ew := range expectedWords {
+			for _, cw := range candidateWords {
+				if ew == cw {
+					matches++
+					break
+				}
+			}
+		}
+		overlap := float64(matches) / float64(len(expectedWords))
+		if overlap >= 0.5 {
+			return 0, "title=partial"
+		}
+	}
+
+	// No meaningful match - this is likely wrong content
+	// Apply heavy penalty to push this candidate to the bottom
+	return -10.0, "title=mismatch"
+}
+
+// normalizeTitle converts a title to lowercase and removes non-alphanumeric characters.
+func normalizeTitle(title string) string {
+	return titleNormalizeRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(title)), "")
+}
+
+// isTitleMismatch returns true if the candidate title clearly doesn't match
+// the expected title. Used to hard-reject wrongly labeled subtitles.
+func isTitleMismatch(expected, candidate string) bool {
+	expectedNorm := normalizeTitle(expected)
+	candidateNorm := normalizeTitle(candidate)
+
+	// If either is empty, don't reject (can't determine mismatch)
+	if expectedNorm == "" || candidateNorm == "" {
+		return false
+	}
+
+	// Exact match
+	if expectedNorm == candidateNorm {
+		return false
+	}
+
+	// One contains the other (handles variants like "Toy Story 3" vs "Toy Story 3 3D")
+	if strings.Contains(candidateNorm, expectedNorm) || strings.Contains(expectedNorm, candidateNorm) {
+		return false
+	}
+
+	// Check for significant word overlap (at least 50% of expected words present)
+	expectedWords := normalizeTitleWords(expected)
+	candidateWords := normalizeTitleWords(candidate)
+	if len(expectedWords) > 0 && len(candidateWords) > 0 {
+		matches := 0
+		for _, ew := range expectedWords {
+			for _, cw := range candidateWords {
+				if ew == cw {
+					matches++
+					break
+				}
+			}
+		}
+		overlap := float64(matches) / float64(len(expectedWords))
+		if overlap >= 0.5 {
+			return false
+		}
+	}
+
+	// No meaningful match - reject this candidate
+	return true
+}
+
+// normalizeTitleWords splits a title into normalized words for overlap comparison.
+func normalizeTitleWords(title string) []string {
+	words := strings.Fields(strings.ToLower(strings.TrimSpace(title)))
+	result := make([]string, 0, len(words))
+	for _, w := range words {
+		normalized := titleNormalizeRe.ReplaceAllString(w, "")
+		if normalized != "" {
+			result = append(result, normalized)
+		}
+	}
+	return result
 }
 
 func releaseMatchScore(release string) (float64, []string) {

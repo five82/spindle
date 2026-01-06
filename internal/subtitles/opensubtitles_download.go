@@ -96,6 +96,21 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 		)
 	}
 
+	// Early duration pre-check: reject obviously wrong candidates before
+	// expensive alignment (saves ~30-40s per rejected candidate).
+	if delta, reject := earlyDurationPreCheck(cleanedPath, plan.totalSeconds); reject {
+		if s.logger != nil {
+			s.logger.Debug("opensubtitles candidate rejected early (duration pre-check)",
+				logging.Float64("delta_seconds", delta),
+				logging.String("release", candidate.Release),
+			)
+		}
+		return GenerateResult{}, earlyDurationRejectError{
+			deltaSeconds: delta,
+			release:      candidate.Release,
+		}
+	}
+
 	inputPath := cleanedPath
 	if syncedPath, err := s.applyFFSubsync(ctx, plan, cleanedPath); err != nil {
 		if s.logger != nil {
