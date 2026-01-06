@@ -13,6 +13,14 @@ import (
 
 var titleNormalizeRe = regexp.MustCompile(`[^a-z0-9]+`)
 
+// titleStopWords are common articles excluded from word overlap comparison
+// to prevent false matches like "The Freshman" matching "The Godfather".
+var titleStopWords = map[string]bool{
+	"the": true,
+	"a":   true,
+	"an":  true,
+}
+
 type scoredSubtitle struct {
 	subtitle opensubtitles.Subtitle
 	score    float64
@@ -236,14 +244,20 @@ func isTitleMismatch(expected, candidate string) bool {
 }
 
 // normalizeTitleWords splits a title into normalized words for overlap comparison.
+// Filters out common stop words (the, a, an) to prevent false matches.
 func normalizeTitleWords(title string) []string {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(title)))
 	result := make([]string, 0, len(words))
 	for _, w := range words {
 		normalized := titleNormalizeRe.ReplaceAllString(w, "")
-		if normalized != "" {
-			result = append(result, normalized)
+		if normalized == "" {
+			continue
 		}
+		// Skip common articles that cause false matches
+		if titleStopWords[normalized] {
+			continue
+		}
+		result = append(result, normalized)
 	}
 	return result
 }

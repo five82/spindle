@@ -25,6 +25,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	var outputDir string
 	var workDir string
 	var forceAI bool
+	var openSubtitlesOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "gensubtitle <encoded-file>",
@@ -143,20 +144,21 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			}
 			languages := append([]string(nil), cfg.Subtitles.OpenSubtitlesLanguages...)
 			result, err := service.Generate(cmd.Context(), subtitles.GenerateRequest{
-				SourcePath: source,
-				WorkDir:    filepath.Join(workRoot, "work"),
-				OutputDir:  outDir,
-				BaseName:   baseName,
-				ForceAI:    forceAI,
-				Context:    ctxMeta,
-				Languages:  languages,
+				SourcePath:        source,
+				WorkDir:           filepath.Join(workRoot, "work"),
+				OutputDir:         outDir,
+				BaseName:          baseName,
+				ForceAI:           forceAI,
+				OpenSubtitlesOnly: openSubtitlesOnly,
+				Context:           ctxMeta,
+				Languages:         languages,
 			})
 			if err != nil {
 				return fmt.Errorf("subtitle generation failed: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Generated subtitle: %s (segments: %d, duration: %s)\n",
-				result.SubtitlePath, result.SegmentCount, result.Duration.Round(time.Second))
+			fmt.Fprintf(cmd.OutOrStdout(), "Generated subtitle: %s (source: %s, segments: %d, duration: %s)\n",
+				result.SubtitlePath, result.Source, result.SegmentCount, result.Duration.Round(time.Second))
 			return nil
 		},
 	}
@@ -164,6 +166,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "Output directory for the generated subtitle (default: alongside source file)")
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory for intermediate files (default: temporary directory under staging_dir)")
 	cmd.Flags().BoolVar(&forceAI, "forceai", false, "Force WhisperX transcription and skip OpenSubtitles downloads")
+	cmd.Flags().BoolVar(&openSubtitlesOnly, "opensubtitles-only", false, "Require OpenSubtitles match; fail instead of falling back to WhisperX (for troubleshooting)")
 
 	return cmd
 }

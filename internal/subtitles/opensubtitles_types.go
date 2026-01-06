@@ -18,10 +18,12 @@ const (
 	suspectRuntimeMismatchRatio      = 0.07
 	subtitleDurationToleranceSeconds = 8.0
 
-	// Early duration pre-check tolerance (generous to avoid false rejections,
-	// but catches obviously wrong candidates before expensive alignment).
-	// Candidates with >120s mismatch are rejected without alignment.
-	earlyDurationToleranceSeconds = 120.0
+	// Duration tolerances are asymmetric because credits are normal (no dialogue).
+	// Subtitle shorter than video: Allow up to 10 minutes for credits.
+	// Subtitle longer than video: Only allow small tolerance (suspicious mismatch).
+	earlyDurationCreditsToleranceSeconds = 600.0 // 10 minutes for credits (early check)
+	earlyDurationOverlapToleranceSeconds = 60.0  // 1 minute if subtitle is longer (early check)
+	postAlignmentCreditsToleranceSeconds = 600.0 // 10 minutes for credits (post-alignment)
 
 	// Maximum number of OpenSubtitles candidates to evaluate.
 	// If top candidates all fail, lower-ranked ones are unlikely to succeed.

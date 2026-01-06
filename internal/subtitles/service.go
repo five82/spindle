@@ -38,6 +38,7 @@ type GenerateRequest struct {
 	Context                   SubtitleContext
 	Languages                 []string
 	ForceAI                   bool
+	OpenSubtitlesOnly         bool // Fail if OpenSubtitles doesn't produce a match (no WhisperX fallback)
 	TranscriptKey             string
 	AllowTranscriptCacheRead  bool
 	AllowTranscriptCacheWrite bool
@@ -213,6 +214,17 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 
 	openSubsDecision := ""
 	openSubsDetail := ""
+
+	// Validate OpenSubtitlesOnly flag
+	if req.OpenSubtitlesOnly && !s.shouldUseOpenSubtitles() {
+		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "opensubtitles",
+			"--opensubtitles-only requires OpenSubtitles to be enabled and configured", nil)
+	}
+	if req.OpenSubtitlesOnly && req.ForceAI {
+		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "flags",
+			"--opensubtitles-only and --forceai are mutually exclusive", nil)
+	}
+
 	if !req.ForceAI && s.shouldUseOpenSubtitles() {
 		title := strings.TrimSpace(req.Context.Title)
 		parentID := req.Context.ParentID()
@@ -237,9 +249,12 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			if errors.As(err, &suspect) {
 				// All candidates had consistent duration mismatch. This can happen with
 				// UHD/extended cuts that have different runtime than theatrical releases.
-				// Log warning but fall back to WhisperX instead of failing.
 				openSubsDecision = "duration_mismatch"
 				openSubsDetail = fmt.Sprintf("all candidates rejected (median delta %.0fs)", suspect.medianAbsDelta())
+				if req.OpenSubtitlesOnly {
+					return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "opensubtitles",
+						fmt.Sprintf("all candidates rejected due to duration mismatch (median delta %.0fs)", suspect.medianAbsDelta()), err)
+				}
 				if s.logger != nil {
 					s.logger.Warn("opensubtitles duration mismatch, falling back to whisperx",
 						logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
@@ -251,34 +266,45 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 						logging.String(logging.FieldErrorHint, "video may be extended/UHD cut with different runtime"),
 					)
 				}
-			} else if s.logger != nil {
-				s.logger.Warn("opensubtitles fetch failed",
-					logging.Error(err),
-					logging.String("title", title),
-					logging.Int64("tmdb_id", req.Context.TMDBID),
-					logging.Int64("parent_tmdb_id", parentID),
-					logging.Int64("episode_tmdb_id", episodeID),
-					logging.Int("season", req.Context.Season),
-					logging.Int("episode", req.Context.Episode),
-					logging.Alert("subtitle_fallback"),
-					logging.String(logging.FieldEventType, "opensubtitles_fetch_failed"),
-					logging.String(logging.FieldErrorHint, "check OpenSubtitles API credentials and connectivity"),
-				)
+			} else {
+				// Generic error - could be download failure, alignment failure, etc.
+				if req.OpenSubtitlesOnly {
+					return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "opensubtitles",
+						"all candidates rejected", err)
+				}
+				if s.logger != nil {
+					s.logger.Warn("opensubtitles candidates rejected, falling back to whisperx",
+						logging.Error(err),
+						logging.String("title", title),
+						logging.Int64("tmdb_id", req.Context.TMDBID),
+						logging.Int("season", req.Context.Season),
+						logging.Int("episode", req.Context.Episode),
+						logging.Alert("subtitle_fallback"),
+						logging.String(logging.FieldEventType, "opensubtitles_candidates_rejected"),
+						logging.String(logging.FieldErrorHint, "see candidate summary above for rejection details"),
+					)
+				}
 			}
 		} else if ok {
 			result.Source = "opensubtitles"
 			result.OpenSubtitlesDecision = "used"
 			if s.logger != nil {
-				s.logger.Debug("using opensubtitles subtitles",
+				s.logger.Info("subtitle source selected",
+					logging.String(logging.FieldEventType, "subtitle_source_selected"),
+					logging.String(logging.FieldDecisionType, "subtitle_source"),
+					logging.String("decision_result", "opensubtitles"),
 					logging.String("subtitle_file", result.SubtitlePath),
 					logging.Int("segment_count", result.SegmentCount),
-					logging.String("subtitle_source", result.Source),
 				)
 			}
 			return result, nil
 		} else {
 			openSubsDecision = "no_match"
 			openSubsDetail = "no suitable match found"
+			if req.OpenSubtitlesOnly {
+				return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "opensubtitles",
+					"no suitable subtitle match found on OpenSubtitles", nil)
+			}
 			if s.logger != nil {
 				s.logger.Warn("opensubtitles match not found, falling back to whisperx",
 					logging.String("title", title),
@@ -356,12 +382,13 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 	}
 
 	if s.logger != nil {
-		s.logger.Debug("subtitle generation complete",
+		s.logger.Info("subtitle source selected",
+			logging.String(logging.FieldEventType, "subtitle_source_selected"),
+			logging.String(logging.FieldDecisionType, "subtitle_source"),
+			logging.String("decision_result", "whisperx"),
+			logging.String("decision_reason", openSubsDecision),
 			logging.String("subtitle_file", plan.outputFile),
-			logging.Int("segments", segmentCount),
-			logging.Float64("duration_seconds", finalDuration),
-			logging.String("subtitle_source", "whisperx"),
-			logging.String("opensubtitles_decision", openSubsDecision),
+			logging.Int("segment_count", segmentCount),
 		)
 	}
 

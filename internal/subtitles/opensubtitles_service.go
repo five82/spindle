@@ -178,6 +178,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 				// Early rejection counts as duration mismatch for summary purposes
 				mismatchErrs = append(mismatchErrs, durationMismatchError{
 					deltaSeconds: earlyReject.deltaSeconds,
+					videoSeconds: plan.totalSeconds,
 					release:      earlyReject.release,
 				})
 				reason = "early_duration_reject"
@@ -234,12 +235,29 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		}
 	}
 
+	// Determine the actual failure reason for logging
+	failureReason := "no_match"
+	var returnErr error
+	if lastErr != nil {
+		if len(mismatchErrs) == len(candidatesToTry) && len(candidatesToTry) > 0 && allDurationMM {
+			failureReason = fmt.Sprintf("all_%d_candidates_duration_mismatch", len(candidatesToTry))
+			returnErr = buildSuspectError(mismatchErrs)
+			if returnErr == nil {
+				// buildSuspectError returned nil, but we still want to indicate duration mismatch
+				returnErr = suspectMisIdentificationError{deltas: extractDeltas(mismatchErrs)}
+			}
+		} else {
+			failureReason = "candidate_errors"
+			returnErr = lastErr
+		}
+	}
+
 	if s.logger != nil {
 		infoAttrs := buildCandidateSummaryAttrs(
 			"decision_summary",
 			"opensubtitles_candidate_summary",
-			"failed",
-			"no_match",
+			"rejected",
+			failureReason,
 			summaryLines,
 			maxLoggedOpenSubCandidates,
 		)
@@ -248,23 +266,26 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		debugAttrs := buildCandidateSummaryAttrs(
 			"decision_summary_full",
 			"opensubtitles_candidate_summary",
-			"failed",
-			"no_match",
+			"rejected",
+			failureReason,
 			summaryLines,
 			0,
 		)
 		s.logger.Debug("opensubtitles candidate summary", logging.Args(debugAttrs...)...)
 	}
 
-	if lastErr != nil {
-		if len(mismatchErrs) == len(candidatesToTry) && len(candidatesToTry) > 0 && allDurationMM {
-			if suspect := buildSuspectError(mismatchErrs); suspect != nil {
-				return GenerateResult{}, false, suspect
-			}
-		}
-		return GenerateResult{}, false, lastErr
+	if returnErr != nil {
+		return GenerateResult{}, false, returnErr
 	}
 	return GenerateResult{}, false, nil
+}
+
+func extractDeltas(errs []durationMismatchError) []float64 {
+	deltas := make([]float64, 0, len(errs))
+	for _, e := range errs {
+		deltas = append(deltas, e.deltaSeconds)
+	}
+	return deltas
 }
 
 func buildCandidateSummaryAttrs(eventType, decisionType, result, reason string, summaryLines []string, limit int) []logging.Attr {
