@@ -103,6 +103,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		year = ""
 	}
 	searchReq := opensubtitles.SearchRequest{
+		TMDBID:       req.Context.TMDBID,
 		IMDBID:       req.Context.IMDBID,
 		Query:        queryTitle,
 		Languages:    append([]string(nil), req.Languages...),
