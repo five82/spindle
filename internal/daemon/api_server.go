@@ -255,7 +255,7 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 				s.log().Warn("log archive read failed",
 					logging.Error(archErr),
 					logging.String(logging.FieldEventType, "log_archive_read_failed"),
-					logging.String("impact", "older log events may be missing from the response"),
+					logging.String(logging.FieldImpact, "older log events may be missing from the response"),
 					logging.String(logging.FieldErrorHint, "Check log directory permissions and available disk space"))
 			} else if len(archived) > 0 {
 				converted = convertLogEvents(archived)

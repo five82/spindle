@@ -115,7 +115,7 @@ it is overwritten.`,
 				return fmt.Errorf("create queue item: %w", err)
 			}
 
-			baseCtx := services.WithItemID(cmd.Context(), item.ID)
+			baseCtx := logging.WithItemID(cmd.Context(), item.ID)
 
 			tmdbClient, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 			if err != nil {
@@ -190,7 +190,7 @@ func runStage(ctx context.Context, logger *slog.Logger, store *queue.Store, hand
 	if handler == nil {
 		return fmt.Errorf("stage handler unavailable: %s", name)
 	}
-	stageCtx := services.WithStage(ctx, name)
+	stageCtx := logging.WithStage(ctx, name)
 	stageLogger := logging.WithContext(stageCtx, logger)
 	if aware, ok := handler.(loggerAware); ok {
 		aware.SetLogger(stageLogger)

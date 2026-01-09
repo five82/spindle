@@ -9,7 +9,6 @@ import (
 
 	"spindle/internal/logging"
 	"spindle/internal/queue"
-	"spindle/internal/services"
 )
 
 func (m *Manager) laneLogger(lane *laneState) *slog.Logger {
@@ -63,7 +62,7 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 
 	logger := logging.WithContext(ctx, base)
 	if m != nil && m.cfg != nil {
-		if stage, ok := services.StageFromContext(ctx); ok {
+		if stage, ok := logging.StageFromContext(ctx); ok {
 			if override := stageOverrideLevel(m.cfg.Logging.StageOverrides, stage); override != "" {
 				logger = logging.WithLevelOverride(logger, parseStageLevel(override))
 			}
@@ -106,20 +105,20 @@ func withStageContext(ctx context.Context, lane *laneState, stageName string, it
 		ctx = context.Background()
 	}
 	if item != nil {
-		ctx = services.WithItemID(ctx, item.ID)
+		ctx = logging.WithItemID(ctx, item.ID)
 	}
 	if stageName != "" {
-		ctx = services.WithStage(ctx, stageName)
+		ctx = logging.WithStage(ctx, stageName)
 	}
 	if lane != nil {
 		laneLabel := strings.TrimSpace(lane.name)
 		if laneLabel == "" {
 			laneLabel = string(lane.kind)
 		}
-		ctx = services.WithLane(ctx, laneLabel)
+		ctx = logging.WithLane(ctx, laneLabel)
 	}
 	if requestID != "" {
-		ctx = services.WithRequestID(ctx, requestID)
+		ctx = logging.WithRequestID(ctx, requestID)
 	}
 	return ctx
 }

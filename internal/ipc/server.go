@@ -88,7 +88,7 @@ func (s *Server) Serve() {
 				s.logger.Warn("accept failed",
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "ipc_accept_failed"),
-					logging.String("impact", "IPC clients may fail to connect"),
+					logging.String(logging.FieldImpact, "IPC clients may fail to connect"),
 					logging.String(logging.FieldErrorHint, "Check socket permissions and restart the daemon if needed"))
 				continue
 			}
@@ -113,7 +113,7 @@ func (s *Server) Close() {
 			logging.String("socket", s.path),
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "ipc_socket_cleanup_failed"),
-			logging.String("impact", "stale IPC socket may block future starts"),
+			logging.String(logging.FieldImpact, "stale IPC socket may block future starts"),
 			logging.String(logging.FieldErrorHint, "Remove the socket file manually or rerun spindle stop"))
 	}
 }

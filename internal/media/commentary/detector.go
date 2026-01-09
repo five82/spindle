@@ -217,7 +217,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 				logging.String(logging.FieldEventType, "commentary_fingerprint_failed"),
 				logging.String("cause", failure.Cause),
 				logging.String("attention", failure.Attention),
-				logging.String("impact", "candidate_dropped"),
+				logging.String(logging.FieldImpact, "candidate_dropped"),
 				logging.String(logging.FieldErrorHint, failure.Hint),
 				logging.Error(err),
 			)

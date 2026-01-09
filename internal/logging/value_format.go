@@ -22,8 +22,8 @@ func attrString(v slog.Value) string {
 	}
 }
 
-// formatBytes returns a human-readable byte size string.
-func formatBytes(bytes int64) string {
+// FormatBytes returns a human-readable byte size string.
+func FormatBytes(bytes int64) string {
 	if bytes < 0 {
 		return fmt.Sprintf("%d B", bytes)
 	}

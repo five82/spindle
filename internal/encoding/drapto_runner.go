@@ -356,7 +356,7 @@ func logDraptoValidation(logger *slog.Logger, label string, summary *drapto.Vali
 		logging.Int("total_steps", len(summary.Steps)),
 		logging.String(logging.FieldEventType, "drapto_validation_failed"),
 		logging.String(logging.FieldErrorHint, "Review validation step details; encoded output may not match source"),
-		logging.String("impact", "encoded file may have unexpected characteristics"),
+		logging.String(logging.FieldImpact, "encoded file may have unexpected characteristics"),
 	)
 	for _, step := range summary.Steps {
 		if step.Passed {
@@ -378,7 +378,7 @@ func logDraptoValidation(logger *slog.Logger, label string, summary *drapto.Vali
 				logging.String("validation_details", strings.TrimSpace(step.Details)),
 				logging.String(logging.FieldEventType, "drapto_validation_step_failed"),
 				logging.String(logging.FieldErrorHint, "Check step details for mismatch cause"),
-				logging.String("impact", "this validation check did not pass"),
+				logging.String(logging.FieldImpact, "this validation check did not pass"),
 			)
 		}
 	}
@@ -398,7 +398,7 @@ func logDraptoEncodingResult(logger *slog.Logger, label string, result *drapto.E
 	if logger == nil || result == nil {
 		return
 	}
-	sizeSummary := fmt.Sprintf("%s -> %s", formatBytes(result.OriginalSize), formatBytes(result.EncodedSize))
+	sizeSummary := fmt.Sprintf("%s -> %s", logging.FormatBytes(result.OriginalSize), logging.FormatBytes(result.EncodedSize))
 	duration := formatETA(result.Duration)
 	attrs := []logging.Attr{
 		logging.String("encoding_result_input", strings.TrimSpace(result.InputFile)),
@@ -504,14 +504,14 @@ func warnWithJob(logger *slog.Logger, label, message string, attrs ...logging.At
 	if logger == nil {
 		return
 	}
-	if !hasAttrKey(attrs, logging.FieldEventType) {
+	if !logging.HasAttrKey(attrs, logging.FieldEventType) {
 		attrs = append(attrs, logging.String(logging.FieldEventType, "drapto_warning"))
 	}
-	if !hasAttrKey(attrs, logging.FieldErrorHint) {
+	if !logging.HasAttrKey(attrs, logging.FieldErrorHint) {
 		attrs = append(attrs, logging.String(logging.FieldErrorHint, "Review Drapto warnings and encoding logs"))
 	}
-	if !hasAttrKey(attrs, "impact") {
-		attrs = append(attrs, logging.String("impact", "encoding completed with warnings"))
+	if !logging.HasAttrKey(attrs, logging.FieldImpact) {
+		attrs = append(attrs, logging.String(logging.FieldImpact, "encoding completed with warnings"))
 	}
 	decorated := append([]logging.Attr{logging.String("job", label)}, attrs...)
 	logger.Warn(message, logging.Args(decorated...)...)
@@ -525,15 +525,6 @@ func errorWithJob(logger *slog.Logger, label, message string, attrs ...logging.A
 	logger.Error(message, logging.Args(decorated...)...)
 }
 
-func hasAttrKey(attrs []logging.Attr, key string) bool {
-	for _, attr := range attrs {
-		if attr.Key == key {
-			return true
-		}
-	}
-	return false
-}
-
 func formatResolution(resolution, category string) string {
 	res := strings.TrimSpace(resolution)
 	cat := strings.TrimSpace(category)
@@ -544,22 +535,4 @@ func formatResolution(resolution, category string) string {
 		return res
 	}
 	return fmt.Sprintf("%s (%s)", res, cat)
-}
-
-func formatBytes(value int64) string {
-	const (
-		kiB = 1024
-		miB = kiB * 1024
-		giB = miB * 1024
-	)
-	switch {
-	case value >= giB:
-		return fmt.Sprintf("%.2f GiB", float64(value)/float64(giB))
-	case value >= miB:
-		return fmt.Sprintf("%.2f MiB", float64(value)/float64(miB))
-	case value >= kiB:
-		return fmt.Sprintf("%.2f KiB", float64(value)/float64(kiB))
-	default:
-		return fmt.Sprintf("%d B", value)
-	}
 }

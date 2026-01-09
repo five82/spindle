@@ -42,7 +42,7 @@ var infoHighlightKeys = []string{
 	FieldProgressETA,
 	"command",
 	"error_message",
-	"impact",
+	FieldImpact,
 	"next_step",
 	FieldErrorCode,
 	FieldErrorHint,
@@ -197,7 +197,7 @@ func formatValueForKeyWithAttrs(key string, v slog.Value, attrs []kv) string {
 		} else {
 			bytes = int64(v.Uint64())
 		}
-		return formatBytes(bytes)
+		return FormatBytes(bytes)
 	}
 
 	// Handle durations
@@ -350,7 +350,7 @@ func displayLabel(key string) string {
 		return "Hint"
 	case FieldErrorDetailPath:
 		return "Error Detail"
-	case "impact":
+	case FieldImpact:
 		return "Impact"
 	case "next_step":
 		return "Next Step"

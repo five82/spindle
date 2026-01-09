@@ -55,7 +55,7 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 				logging.String("error_message", "TMDB search attempt failed"),
 				logging.String(logging.FieldEventType, "tmdb_search_failed"),
 				logging.String(logging.FieldErrorHint, "verify TMDB credentials and retry"),
-				logging.String("impact", "retrying next search mode"),
+				logging.String(logging.FieldImpact, "retrying next search mode"),
 			)
 			continue
 		}

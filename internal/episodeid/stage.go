@@ -221,7 +221,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			logger.Error("failed to encode rip spec after episode identification",
 				logging.Error(encodeErr),
 				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-				logging.String("impact", "episode matches cannot be persisted to metadata"),
+				logging.String(logging.FieldImpact, "episode matches cannot be persisted to metadata"),
 				logging.String(logging.FieldErrorHint, "Retry episode identification or inspect rip spec serialization errors"))
 			return services.Wrap(
 				services.ErrValidation,

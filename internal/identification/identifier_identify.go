@@ -214,7 +214,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 				logging.Error(searchErr),
 				logging.String("error_message", "TMDB search failed"),
 				logging.String(logging.FieldErrorHint, "Check TMDB API key, network connectivity, and search query"),
-				logging.String("impact", "item moved to review for manual identification"),
+				logging.String(logging.FieldImpact, "item moved to review for manual identification"),
 				logging.Int("queries_attempted", queriesCount),
 				logging.Duration("total_tmdb_duration", tmdbDuration))
 			i.scheduleReview(ctx, item, "TMDB lookup failed")
@@ -227,7 +227,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 				logging.String(logging.FieldEventType, "tmdb_confidence_failed"),
 				logging.String("query", lastQuery),
 				logging.String("reason", "No result met confidence threshold"),
-				logging.String("impact", "item moved to review for manual identification"),
+				logging.String(logging.FieldImpact, "item moved to review for manual identification"),
 				logging.String(logging.FieldErrorHint, "Adjust tmdb_confidence_threshold or retry with a revised title"),
 				logging.Int("queries_attempted", queriesCount),
 				logging.Duration("total_tmdb_duration", tmdbDuration))

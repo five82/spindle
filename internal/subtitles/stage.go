@@ -309,7 +309,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		if alertValue != "" {
 			summaryAttrs = append(summaryAttrs, logging.Alert(alertValue))
 			summaryAttrs = append(summaryAttrs,
-				logging.String("impact", "subtitle stage completed with review or fallback alerts"),
+				logging.String(logging.FieldImpact, "subtitle stage completed with review or fallback alerts"),
 				logging.String(logging.FieldErrorHint, "Review subtitle results or rerun spindle gensubtitle for affected episodes"),
 			)
 			s.logger.Warn("subtitle stage summary", logging.Args(summaryAttrs...)...)

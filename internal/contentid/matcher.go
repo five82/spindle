@@ -122,7 +122,7 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 			m.logger.Warn("opensubtitles client unavailable",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "opensubtitles_client_unavailable"),
-				logging.String("impact", "episode matching will skip OpenSubtitles references"),
+				logging.String(logging.FieldImpact, "episode matching will skip OpenSubtitles references"),
 				logging.String(logging.FieldErrorHint, "Check opensubtitles_api_key and network connectivity"))
 		} else {
 			m.openSubs = client
@@ -136,7 +136,7 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 				m.logger.Warn("opensubtitles cache unavailable",
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "opensubtitles_cache_unavailable"),
-					logging.String("impact", "OpenSubtitles cache disabled for content matching"),
+					logging.String(logging.FieldImpact, "OpenSubtitles cache disabled for content matching"),
 					logging.String(logging.FieldErrorHint, "Check opensubtitles_cache_dir permissions"))
 			} else {
 				m.cache = cache
@@ -149,7 +149,7 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 			m.logger.Warn("tmdb client unavailable",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "tmdb_client_unavailable"),
-				logging.String("impact", "episode matching cannot load TMDB season details"),
+				logging.String(logging.FieldImpact, "episode matching cannot load TMDB season details"),
 				logging.String(logging.FieldErrorHint, "Check tmdb_api_key and tmdb_base_url in config"))
 		} else {
 			m.tmdb = client
@@ -488,7 +488,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 						logging.Int("episode", num),
 						logging.Int("attempt", attempt+1),
 						logging.String(logging.FieldEventType, "opensubtitles_no_candidates"),
-						logging.String("impact", "episode matching may fall back to WhisperX-only heuristics"),
+						logging.String(logging.FieldImpact, "episode matching may fall back to WhisperX-only heuristics"),
 						logging.String(logging.FieldErrorHint, "Verify OpenSubtitles languages and TMDB metadata"),
 					)
 				}
@@ -563,7 +563,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 				m.logger.Warn("opensubtitles cache load failed",
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "opensubtitles_cache_load_failed"),
-					logging.String("impact", "cache miss forces network download"),
+					logging.String(logging.FieldImpact, "cache miss forces network download"),
 					logging.String(logging.FieldErrorHint, "Check opensubtitles_cache_dir permissions"))
 			} else if ok {
 				payload = cached.DownloadResult()
@@ -607,7 +607,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 					m.logger.Warn("opensubtitles cache store failed",
 						logging.Error(err),
 						logging.String(logging.FieldEventType, "opensubtitles_cache_store_failed"),
-						logging.String("impact", "future runs will re-download reference subtitles"),
+						logging.String(logging.FieldImpact, "future runs will re-download reference subtitles"),
 						logging.String(logging.FieldErrorHint, "Check opensubtitles_cache_dir permissions and free space"))
 				} else {
 					cachePath = path
@@ -675,7 +675,7 @@ func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, 
 				logging.Duration("backoff", backoff),
 				logging.Int("attempt", attempt),
 				logging.String(logging.FieldEventType, "opensubtitles_rate_limited"),
-				logging.String("impact", "episode matching delayed while respecting API limits"),
+				logging.String(logging.FieldImpact, "episode matching delayed while respecting API limits"),
 				logging.String(logging.FieldErrorHint, "Wait and retry or check OpenSubtitles rate limits"),
 			)
 		}
@@ -861,7 +861,7 @@ func (m *Matcher) updateMetadata(item *queue.Item, matches []matchResult, season
 		m.logger.Warn("failed to encode metadata after content id",
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "metadata_encode_failed"),
-			logging.String("impact", "episode metadata updates were not persisted"),
+			logging.String(logging.FieldImpact, "episode metadata updates were not persisted"),
 			logging.String(logging.FieldErrorHint, "Retry content identification or inspect metadata serialization errors"))
 		return
 	}

@@ -196,7 +196,7 @@ func (d *Daemon) Stop() {
 		d.logger.Warn("failed to release daemon lock",
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "daemon_lock_release_failed"),
-			logging.String("impact", "stale lock may block future daemon starts"),
+			logging.String(logging.FieldImpact, "stale lock may block future daemon starts"),
 			logging.String(logging.FieldErrorHint, "Run spindle stop again or remove the lock file manually"))
 	}
 	d.ctx = nil

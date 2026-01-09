@@ -14,7 +14,6 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/logging"
-	"spindle/internal/services"
 )
 
 func TestNewFromConfigConsole(t *testing.T) {
@@ -220,9 +219,9 @@ func TestNewInvalidLevelDefaultsToInfo(t *testing.T) {
 
 func TestWithContextAddsFields(t *testing.T) {
 	ctx := context.Background()
-	ctx = services.WithItemID(ctx, 123)
-	ctx = services.WithStage(ctx, "encoding")
-	ctx = services.WithRequestID(ctx, "req-xyz")
+	ctx = logging.WithItemID(ctx, 123)
+	ctx = logging.WithStage(ctx, "encoding")
+	ctx = logging.WithRequestID(ctx, "req-xyz")
 
 	var buf bytes.Buffer
 	handler := slog.NewJSONHandler(&buf, nil)

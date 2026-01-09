@@ -75,7 +75,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 						logging.Error(err),
 						logging.Int64(logging.FieldItemID, existing.ID),
 						logging.String(logging.FieldEventType, "queue_update_failed"),
-						logging.String("impact", "disc title refresh was not saved"),
+						logging.String(logging.FieldImpact, "disc title refresh was not saved"),
 						logging.String(logging.FieldErrorHint, "Check queue database availability and disk health"))
 				}
 			}
@@ -109,7 +109,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 						logging.Error(err),
 						logging.Int64(logging.FieldItemID, existing.ID),
 						logging.String(logging.FieldEventType, "queue_update_failed"),
-						logging.String("impact", "disc title refresh was not saved"),
+						logging.String(logging.FieldImpact, "disc title refresh was not saved"),
 						logging.String(logging.FieldErrorHint, "Check queue database availability and disk health"))
 				}
 			}
@@ -204,7 +204,7 @@ func (n *notifierAdapter) FingerprintFailed(ctx context.Context, info discInfo, 
 			logger.Warn("failed to send fingerprint error notification",
 				logging.Error(notifyErr),
 				logging.String(logging.FieldEventType, "notification_failed"),
-				logging.String("impact", "disc fingerprint error notification was not delivered"),
+				logging.String(logging.FieldImpact, "disc fingerprint error notification was not delivered"),
 				logging.String(logging.FieldErrorHint, "Check ntfy configuration and connectivity"))
 		}
 	}

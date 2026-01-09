@@ -365,7 +365,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 				"scanner fingerprint missing; using queue fingerprint",
 				logging.String("fallback_fingerprint", fallback),
 				logging.String(logging.FieldEventType, "fingerprint_fallback_used"),
-				logging.String("impact", "identification may be less precise without scanner fingerprint"),
+				logging.String(logging.FieldImpact, "identification may be less precise without scanner fingerprint"),
 				logging.String(logging.FieldErrorHint, "Run identification again after confirming MakeMKV can read the disc"),
 			)
 			ripFingerprint = fallback
