@@ -16,20 +16,17 @@ func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint) [
 
 	n := len(rips)
 	m := len(refs)
-	size := n
-	if m > size {
-		size = m
-	}
+	size := max(n, m)
 
 	// Build cost matrix for minimization; cost = 1 - similarity (bounded to [0,1]).
 	// Padded rows/cols use a high cost so they won't be chosen unless necessary.
 	const padCost = 2.0
 	cost := make([][]float64, size)
 	scores := make([][]float64, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		cost[i] = make([]float64, size)
 		scores[i] = make([]float64, size)
-		for j := 0; j < size; j++ {
+		for j := range size {
 			cost[i][j] = padCost
 		}
 	}
@@ -50,7 +47,7 @@ func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint) [
 
 	assign := hungarian(cost)
 
-	results := make([]matchResult, 0, minValue(len(rips), len(refs)))
+	results := make([]matchResult, 0, min(len(rips), len(refs)))
 	for i, j := range assign {
 		if i >= n || j < 0 || j >= m {
 			continue
@@ -70,13 +67,6 @@ func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint) [
 		})
 	}
 	return results
-}
-
-func minValue(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // hungarian solves the assignment problem for a square cost matrix (minimization).

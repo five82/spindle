@@ -155,23 +155,10 @@ func romanToInt(input string) int {
 	return value
 }
 
+var romanDigits = map[rune]int{
+	'i': 1, 'v': 5, 'x': 10, 'l': 50, 'c': 100, 'd': 500, 'm': 1000,
+}
+
 func romanDigitValue(r rune) int {
-	switch r {
-	case 'i':
-		return 1
-	case 'v':
-		return 5
-	case 'x':
-		return 10
-	case 'l':
-		return 50
-	case 'c':
-		return 100
-	case 'd':
-		return 500
-	case 'm':
-		return 1000
-	default:
-		return 0
-	}
+	return romanDigits[r]
 }

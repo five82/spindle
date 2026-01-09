@@ -185,13 +185,14 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 }
 
 func matchType(titleLower, queryLower string) string {
-	if titleLower == queryLower {
+	switch {
+	case titleLower == queryLower:
 		return "exact"
-	}
-	if strings.Contains(titleLower, queryLower) {
+	case strings.Contains(titleLower, queryLower):
 		return "contains"
+	default:
+		return "partial"
 	}
-	return "partial"
 }
 
 func scoreResult(query string, result tmdb.Result) float64 {
@@ -211,10 +212,7 @@ func pickTitle(result tmdb.Result) string {
 	if result.Title != "" {
 		return result.Title
 	}
-	if result.Name != "" {
-		return result.Name
-	}
-	return ""
+	return result.Name
 }
 
 func normalizeForComparison(input string) string {

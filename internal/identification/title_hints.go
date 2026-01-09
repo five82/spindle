@@ -15,16 +15,15 @@ var parenthesesStripper = strings.NewReplacer("(", " ", ")", " ")
 var discNoisePattern = regexp.MustCompile(`(?i)\b(?:disc|dvd|blu[- ]?ray|bd)\s*[0-9ivxlcdm]*\b`)
 var trailingYearPattern = regexp.MustCompile(`(?i)\s*(?:\(|\b)(\d{4})\)?\s*$`)
 
+var separatorReplacer = strings.NewReplacer("_", " ", "-", " ", "–", " ")
+
 func sanitizeQueryCandidate(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
 	}
-	cleaned := strings.ReplaceAll(value, "_", " ")
-	cleaned = strings.ReplaceAll(cleaned, "-", " ")
-	cleaned = strings.ReplaceAll(cleaned, "–", " ")
+	cleaned := separatorReplacer.Replace(value)
 	cleaned = parenthesesStripper.Replace(cleaned)
-	cleaned = strings.ReplaceAll(cleaned, "-", " ")
 	cleaned = whitespacePattern.ReplaceAllString(cleaned, " ")
 	return strings.TrimSpace(cleaned)
 }
@@ -77,17 +76,23 @@ func splitShowSeason(value string) (string, int) {
 	}
 	cleaned := strings.ReplaceAll(value, "_", " ")
 	cleaned = parenthesesStripper.Replace(cleaned)
+
 	season := 0
 	if s, ok := extractSeasonNumber(cleaned); ok {
 		season = s
 	}
+
+	// Remove season/disc markers
 	cleaned = seasonPattern.ReplaceAllString(cleaned, " ")
 	cleaned = sPattern.ReplaceAllString(cleaned, " ")
 	cleaned = discNoisePattern.ReplaceAllString(cleaned, " ")
+
+	// Normalize whitespace and clean up
 	cleaned = whitespacePattern.ReplaceAllString(cleaned, " ")
 	cleaned = strings.TrimSpace(cleaned)
 	cleaned = trimLeadingNoise(cleaned)
 	cleaned = stripPunctuationTokens(cleaned)
+
 	return cleaned, season
 }
 

@@ -71,14 +71,11 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 }
 
 func searchOrderForHint(h mediaKind) []searchMode {
-	switch h {
-	case mediaKindTV:
+	if h == mediaKindTV {
 		return []searchMode{searchModeTV, searchModeMovie, searchModeMulti}
-	case mediaKindMovie:
-		return []searchMode{searchModeMovie, searchModeTV, searchModeMulti}
-	default:
-		return []searchMode{searchModeMovie, searchModeTV, searchModeMulti}
 	}
+	// Default order for movies and unknown media types
+	return []searchMode{searchModeMovie, searchModeTV, searchModeMulti}
 }
 
 type episodeAnnotation struct {

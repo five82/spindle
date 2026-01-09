@@ -49,12 +49,9 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	if input.DiscNumber > 0 {
 		metadata["disc_number"] = input.DiscNumber
 	}
-	if hint := input.MediaHint.String(); hint != "unknown" {
-		metadata["media_type"] = hint
-	}
-	mediaType := fmt.Sprintf("%v", metadata["media_type"])
-	if mediaType == "<nil>" || strings.TrimSpace(mediaType) == "" {
-		mediaType = "unknown"
+	mediaType := input.MediaHint.String()
+	if mediaType != "unknown" {
+		metadata["media_type"] = mediaType
 	}
 	contentKey := unknownContentKey(item.DiscFingerprint)
 	identified := false

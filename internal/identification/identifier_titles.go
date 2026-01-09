@@ -55,57 +55,42 @@ func truncateFingerprint(value string) string {
 }
 
 func determineBestTitle(currentTitle string, scanResult *disc.ScanResult) string {
-	// Priority 1: MakeMKV title (highest quality - reads actual disc metadata)
+	// Priority order: MakeMKV title > BDInfo name > current title
+	candidates := []string{}
+
 	if len(scanResult.Titles) > 0 {
-		makemkvTitle := strings.TrimSpace(scanResult.Titles[0].Name)
-		if makemkvTitle != "" && !isTechnicalLabel(makemkvTitle) {
-			return makemkvTitle
-		}
+		candidates = append(candidates, strings.TrimSpace(scanResult.Titles[0].Name))
 	}
-
-	// Priority 2: BDInfo disc name (Blu-ray specific, good quality)
 	if scanResult.BDInfo != nil {
-		bdName := strings.TrimSpace(scanResult.BDInfo.DiscName)
-		if bdName != "" && !isTechnicalLabel(bdName) {
-			return bdName
+		candidates = append(candidates, strings.TrimSpace(scanResult.BDInfo.DiscName))
+	}
+	candidates = append(candidates, currentTitle)
+
+	for _, title := range candidates {
+		if title != "" && !isTechnicalLabel(title) {
+			return title
 		}
-	}
-
-	// Priority 3: Current title (usually raw disc label, lowest quality)
-	if currentTitle != "" && !isTechnicalLabel(currentTitle) {
-		return currentTitle
-	}
-
-	// Priority 4: Try to derive from source path (file-based identification)
-	derived := strings.TrimSpace(deriveTitle(""))
-	if derived != "" && !disc.IsGenericLabel(derived) {
-		return derived
 	}
 
 	return "Unknown Disc"
 }
 
+var (
+	allDigitsPattern  = regexp.MustCompile(`^\d+$`)
+	shortCodePattern  = regexp.MustCompile(`^[A-Z0-9_]{1,4}$`)
+	technicalPatterns = []string{
+		"LOGICAL_VOLUME_ID", "DVD_VIDEO", "BLURAY", "BD_ROM",
+		"UNTITLED", "UNKNOWN DISC", "VOLUME_", "VOLUME ID", "DISK_", "TRACK_",
+	}
+)
+
 func isTechnicalLabel(title string) bool {
-	if strings.TrimSpace(title) == "" {
+	title = strings.TrimSpace(title)
+	if title == "" {
 		return true
 	}
 
 	upper := strings.ToUpper(title)
-
-	// Common technical/generic patterns
-	technicalPatterns := []string{
-		"LOGICAL_VOLUME_ID",
-		"DVD_VIDEO",
-		"BLURAY",
-		"BD_ROM",
-		"UNTITLED",
-		"UNKNOWN DISC",
-		"VOLUME_",
-		"VOLUME ID",
-		"DISK_",
-		"TRACK_",
-	}
-
 	for _, pattern := range technicalPatterns {
 		if strings.Contains(upper, pattern) {
 			return true
@@ -113,16 +98,12 @@ func isTechnicalLabel(title string) bool {
 	}
 
 	// All uppercase with underscores (likely technical label)
-	if strings.Contains(title, "_") && title == strings.ToUpper(title) && len(title) > 8 {
+	if strings.Contains(title, "_") && title == upper && len(title) > 8 {
 		return true
 	}
 
 	// All numbers or very short uppercase codes
-	if regexp.MustCompile(`^\d+$`).MatchString(title) || regexp.MustCompile(`^[A-Z0-9_]{1,4}$`).MatchString(title) {
-		return true
-	}
-
-	return false
+	return allDigitsPattern.MatchString(title) || shortCodePattern.MatchString(title)
 }
 
 func detectTitleSource(title string, scanResult *disc.ScanResult) string {
