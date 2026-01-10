@@ -21,18 +21,20 @@ type commandContext struct {
 	configFlag *string
 	logLevel   *string
 	verbose    *bool
+	diagnostic *bool
 
 	configOnce sync.Once
 	config     *config.Config
 	configErr  error
 }
 
-func newCommandContext(socketFlag, configFlag, logLevel *string, verbose *bool) *commandContext {
+func newCommandContext(socketFlag, configFlag, logLevel *string, verbose, diagnostic *bool) *commandContext {
 	return &commandContext{
 		socketFlag: socketFlag,
 		configFlag: configFlag,
 		logLevel:   logLevel,
 		verbose:    verbose,
+		diagnostic: diagnostic,
 	}
 }
 
@@ -91,6 +93,10 @@ func (c *commandContext) resolvedLogLevel(cfg *config.Config) string {
 func (c *commandContext) logDevelopment(cfg *config.Config) bool {
 	level := strings.ToLower(strings.TrimSpace(c.resolvedLogLevel(cfg)))
 	return level == "debug"
+}
+
+func (c *commandContext) diagnosticMode() bool {
+	return c != nil && c.diagnostic != nil && *c.diagnostic
 }
 
 func (c *commandContext) withClient(fn func(*ipc.Client) error) error {

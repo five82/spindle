@@ -10,7 +10,7 @@ func newRootCommand() *cobra.Command {
 	var logLevelFlag string
 	var verbose bool
 
-	ctx := newCommandContext(&socketFlag, &configFlag, &logLevelFlag, &verbose)
+	ctx := newCommandContext(&socketFlag, &configFlag, &logLevelFlag, &verbose, nil)
 
 	rootCmd := &cobra.Command{
 		Use:           "spindle",

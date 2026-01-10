@@ -16,21 +16,27 @@ import (
 
 // BackgroundLogger manages dedicated per-item log files for workflow stages.
 type BackgroundLogger struct {
-	baseDir string
-	hub     *logging.StreamHub
-	cfg     *config.Config
+	baseDir           string
+	hub               *logging.StreamHub
+	cfg               *config.Config
+	diagnosticMode    bool
+	diagnosticBaseDir string
+	sessionID         string
 }
 
 // NewBackgroundLogger creates a new per-item logger.
-func NewBackgroundLogger(cfg *config.Config, hub *logging.StreamHub) *BackgroundLogger {
+func NewBackgroundLogger(cfg *config.Config, hub *logging.StreamHub, diagnosticMode bool, diagnosticItemDir, sessionID string) *BackgroundLogger {
 	dir := ""
 	if cfg != nil && cfg.Paths.LogDir != "" {
 		dir = filepath.Join(cfg.Paths.LogDir, "items")
 	}
 	return &BackgroundLogger{
-		baseDir: dir,
-		hub:     hub,
-		cfg:     cfg,
+		baseDir:           dir,
+		hub:               hub,
+		cfg:               cfg,
+		diagnosticMode:    diagnosticMode,
+		diagnosticBaseDir: diagnosticItemDir,
+		sessionID:         sessionID,
 	}
 }
 
@@ -58,6 +64,8 @@ func (b *BackgroundLogger) Ensure(item *queue.Item) (string, bool, error) {
 }
 
 // CreateHandler builds a slog.Handler writing to the specified path.
+// When diagnostic mode is enabled, it creates a fanout handler that also writes DEBUG logs
+// to the diagnostic items directory.
 func (b *BackgroundLogger) CreateHandler(path string) (slog.Handler, error) {
 	level := "info"
 	format := "json"
@@ -85,12 +93,32 @@ func (b *BackgroundLogger) CreateHandler(path string) (slog.Handler, error) {
 		Development:      false,
 		// Item logs write to per-item files, but still publish to the daemon stream so
 		// users can observe per-item/episode progress via the log API and `spindle show --item <id>`.
-		Stream: b.hub,
+		Stream:    b.hub,
+		SessionID: b.sessionID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return logger.Handler(), nil
+
+	handler := logger.Handler()
+
+	// If diagnostic mode is enabled, create a DEBUG handler for the diagnostic items directory
+	if b.diagnosticMode && strings.TrimSpace(b.diagnosticBaseDir) != "" {
+		debugPath := filepath.Join(b.diagnosticBaseDir, filepath.Base(path))
+		debugLogger, debugErr := logging.New(logging.Options{
+			Level:            "debug",
+			Format:           "json",
+			OutputPaths:      []string{debugPath},
+			ErrorOutputPaths: []string{debugPath},
+			Development:      true,
+			SessionID:        b.sessionID,
+		})
+		if debugErr == nil {
+			handler = logging.TeeHandler(handler, debugLogger.Handler())
+		}
+	}
+
+	return handler, nil
 }
 
 func minLevelWithOverrides(base string, overrides map[string]string) (string, bool) {

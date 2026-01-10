@@ -22,6 +22,7 @@ import (
 )
 
 func newDaemonCommands(ctx *commandContext) []*cobra.Command {
+	var startDiagnostic bool
 	startCmd := &cobra.Command{
 		Use:   "start",
 		Short: "Start the spindle daemon",
@@ -31,7 +32,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			launched := false
 			if err != nil {
 				fmt.Fprintln(stdout, "Daemon not running, launching...")
-				if launchErr := launchDaemonProcess(cmd, ctx); launchErr != nil {
+				if launchErr := launchDaemonProcess(cmd, ctx, startDiagnostic); launchErr != nil {
 					return launchErr
 				}
 				client, err = waitForDaemonClient(ctx.socketPath(), 10*time.Second)
@@ -70,6 +71,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			return nil
 		},
 	}
+	startCmd.Flags().BoolVar(&startDiagnostic, "diagnostic", false, "Enable diagnostic mode with separate DEBUG logs")
 
 	stopCmd := &cobra.Command{
 		Use:   "stop",
@@ -241,6 +243,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		},
 	}
 
+	var restartDiagnostic bool
 	restartCmd := &cobra.Command{
 		Use:   "restart",
 		Short: "Restart the spindle daemon",
@@ -290,7 +293,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 
 			// Start the daemon
 			fmt.Fprintln(stdout, "Starting daemon...")
-			if launchErr := launchDaemonProcess(cmd, ctx); launchErr != nil {
+			if launchErr := launchDaemonProcess(cmd, ctx, restartDiagnostic); launchErr != nil {
 				return launchErr
 			}
 			client, err = waitForDaemonClient(ctx.socketPath(), 10*time.Second)
@@ -319,6 +322,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			return nil
 		},
 	}
+	restartCmd.Flags().BoolVar(&restartDiagnostic, "diagnostic", false, "Enable diagnostic mode with separate DEBUG logs")
 
 	return []*cobra.Command{startCmd, stopCmd, restartCmd, statusCmd}
 }
@@ -508,7 +512,7 @@ func summarizePresetDeciderError(err error) string {
 	return err.Error()
 }
 
-func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext) error {
+func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext, diagnostic bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
@@ -523,6 +527,9 @@ func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext) error {
 		if config := strings.TrimSpace(*ctx.configFlag); config != "" {
 			args = append(args, "--config", config)
 		}
+	}
+	if diagnostic {
+		args = append(args, "--diagnostic")
 	}
 	proc := exec.Command(exe, args...)
 	if err := proc.Start(); err != nil {

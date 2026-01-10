@@ -37,6 +37,24 @@ type Manager struct {
 	queueStart  time.Time
 }
 
+// ManagerOption configures optional Manager behavior.
+type ManagerOption func(*managerOptions)
+
+type managerOptions struct {
+	diagnosticMode    bool
+	diagnosticItemDir string
+	sessionID         string
+}
+
+// WithDiagnosticMode enables diagnostic logging with separate DEBUG logs.
+func WithDiagnosticMode(enabled bool, itemDir, sessionID string) ManagerOption {
+	return func(o *managerOptions) {
+		o.diagnosticMode = enabled
+		o.diagnosticItemDir = itemDir
+		o.sessionID = sessionID
+	}
+}
+
 // NewManager constructs a new workflow manager.
 func NewManager(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Manager {
 	return NewManagerWithOptions(cfg, store, logger, notifications.NewService(cfg), nil)
@@ -48,7 +66,11 @@ func NewManagerWithNotifier(cfg *config.Config, store *queue.Store, logger *slog
 }
 
 // NewManagerWithOptions constructs a workflow manager with full configuration.
-func NewManagerWithOptions(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service, logHub *logging.StreamHub) *Manager {
+func NewManagerWithOptions(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service, logHub *logging.StreamHub, opts ...ManagerOption) *Manager {
+	options := &managerOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	return &Manager{
 		cfg:          cfg,
 		store:        store,
@@ -61,7 +83,7 @@ func NewManagerWithOptions(cfg *config.Config, store *queue.Store, logger *slog.
 			time.Duration(cfg.Workflow.HeartbeatInterval)*time.Second,
 			time.Duration(cfg.Workflow.HeartbeatTimeout)*time.Second,
 		),
-		bgLogger: NewBackgroundLogger(cfg, logHub),
+		bgLogger: NewBackgroundLogger(cfg, logHub, options.diagnosticMode, options.diagnosticItemDir, options.sessionID),
 		lanes:    make(map[laneKind]*laneState),
 	}
 }

@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"spindle/internal/config"
 	"spindle/internal/daemon"
 	"spindle/internal/encoding"
@@ -51,18 +53,65 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	} else if eventArchive != nil {
 		logHub.AddSink(eventArchive)
 	}
+
+	// Diagnostic mode setup
+	diagnosticMode := ctx.diagnosticMode()
+	var sessionID string
+	var debugLogPath string
+	var debugItemsDir string
+	if diagnosticMode {
+		sessionID = uuid.NewString()
+		debugDir := filepath.Join(cfg.Paths.LogDir, "debug")
+		if err := os.MkdirAll(debugDir, 0o755); err != nil {
+			return fmt.Errorf("create debug log directory: %w", err)
+		}
+		debugLogPath = filepath.Join(debugDir, fmt.Sprintf("spindle-%s.log", runID))
+		debugItemsDir = filepath.Join(debugDir, "items")
+		if err := os.MkdirAll(debugItemsDir, 0o755); err != nil {
+			return fmt.Errorf("create debug items directory: %w", err)
+		}
+	}
+
 	logLevel := ctx.resolvedLogLevel(cfg)
-	logger, err := logging.New(logging.Options{
+	loggerOpts := logging.Options{
 		Level:            logLevel,
 		Format:           cfg.Logging.Format,
 		OutputPaths:      []string{"stdout", logPath},
 		ErrorOutputPaths: []string{"stderr", logPath},
 		Development:      ctx.logDevelopment(cfg),
 		Stream:           logHub,
-	})
+		SessionID:        sessionID, // Empty string if not diagnostic mode
+	}
+	logger, err := logging.New(loggerOpts)
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
+
+	// Set up diagnostic DEBUG logger if enabled
+	if diagnosticMode {
+		debugLogger, debugErr := logging.New(logging.Options{
+			Level:            "debug",
+			Format:           "json",
+			OutputPaths:      []string{debugLogPath},
+			ErrorOutputPaths: []string{debugLogPath},
+			Development:      true,
+			SessionID:        sessionID,
+		})
+		if debugErr != nil {
+			fmt.Fprintf(os.Stderr, "warn: unable to initialize debug logger: %v\n", debugErr)
+		} else {
+			logger = logging.TeeLogger(logger, debugLogger.Handler())
+			if err := ensureCurrentLogPointer(filepath.Join(cfg.Paths.LogDir, "debug"), debugLogPath); err != nil {
+				fmt.Fprintf(os.Stderr, "warn: unable to update debug/spindle.log link: %v\n", err)
+			}
+		}
+		logger.Info("diagnostic mode enabled",
+			logging.String(logging.FieldEventType, "diagnostic_mode_enabled"),
+			logging.String(logging.FieldSessionID, sessionID),
+			logging.String("debug_log_path", debugLogPath),
+		)
+	}
+
 	logDependencySnapshot(logger, cfg)
 	if err := ensureCurrentLogPointer(cfg.Paths.LogDir, logPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: unable to update spindle.log link: %v\n", err)
@@ -86,7 +135,8 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	}
 	defer store.Close()
 
-	workflowManager := workflow.NewManagerWithOptions(cfg, store, logger, notifications.NewService(cfg), logHub)
+	workflowManager := workflow.NewManagerWithOptions(cfg, store, logger, notifications.NewService(cfg), logHub,
+		workflow.WithDiagnosticMode(diagnosticMode, debugItemsDir, sessionID))
 	registerStages(workflowManager, cfg, store, logger)
 
 	d, err := daemon.New(cfg, store, logger, workflowManager, logPath, logHub, eventArchive)

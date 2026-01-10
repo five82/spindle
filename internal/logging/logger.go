@@ -20,6 +20,7 @@ type Options struct {
 	ErrorOutputPaths []string
 	Development      bool
 	Stream           *StreamHub
+	SessionID        string // When set, injects session_id into all log records
 }
 
 // New constructs a slog logger using the provided options.
@@ -62,6 +63,9 @@ func New(opts Options) (*slog.Logger, error) {
 	if strings.TrimSpace(opts.OverrideLevel) != "" {
 		overrideLevel := parseLevel(opts.OverrideLevel)
 		handler = newLevelOverrideHandler(handler, overrideLevel)
+	}
+	if strings.TrimSpace(opts.SessionID) != "" {
+		handler = newSessionIDHandler(handler, opts.SessionID)
 	}
 
 	return slog.New(handler), nil

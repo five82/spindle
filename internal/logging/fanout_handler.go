@@ -72,3 +72,8 @@ func TeeLogger(base *slog.Logger, handlers ...slog.Handler) *slog.Logger {
 	all := append([]slog.Handler{base.Handler()}, handlers...)
 	return slog.New(newFanoutHandler(all...))
 }
+
+// TeeHandler creates a handler that duplicates log output to multiple handlers.
+func TeeHandler(handlers ...slog.Handler) slog.Handler {
+	return newFanoutHandler(handlers...)
+}
