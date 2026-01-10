@@ -1,6 +1,6 @@
 #!/bin/bash
 # Local CI check for spindle.
-# Mirrors the lightweight GitHub Actions workflow while isolating system toolchains.
+# Mirrors the GitHub Actions workflow.
 
 set -euo pipefail
 
@@ -10,16 +10,15 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 print_step() {
-    echo -e "\n${BLUE}📋 $1${NC}"
-    echo "----------------------"
+    echo -e "\n${BLUE}:: $1${NC}"
 }
 
 print_success() {
-    echo -e "${GREEN}✅ $1${NC}"
+    echo -e "${GREEN}   $1${NC}"
 }
 
 print_error() {
-    echo -e "${RED}❌ $1${NC}"
+    echo -e "${RED}   $1${NC}"
 }
 
 version_lt() {
@@ -28,15 +27,14 @@ version_lt() {
 
 print_step "Checking Go toolchain"
 
-GO_BINARY=$(command -v go || true)
-if [ -z "$GO_BINARY" ]; then
+if ! command -v go &>/dev/null; then
     print_error "Go is not installed. Install Go 1.25 or newer."
     exit 1
 fi
 
-GO_VERSION=$("$GO_BINARY" env GOVERSION 2>/dev/null | sed 's/^go//')
+GO_VERSION=$(go env GOVERSION 2>/dev/null | sed 's/^go//')
 if [ -z "$GO_VERSION" ]; then
-    GO_VERSION=$("$GO_BINARY" version | awk '{print $3}' | sed 's/^go//')
+    GO_VERSION=$(go version | awk '{print $3}' | sed 's/^go//')
 fi
 
 MIN_GO_VERSION="1.25"
@@ -45,29 +43,12 @@ if version_lt "$GO_VERSION" "$MIN_GO_VERSION"; then
     exit 1
 fi
 
-GOROOT_DIR=$("$GO_BINARY" env GOROOT)
-if [ -z "$GOROOT_DIR" ] || [ ! -d "$GOROOT_DIR" ]; then
-    print_error "Unable to determine GOROOT; ensure Go installation is healthy."
-    exit 1
-fi
-
-GOLANGCI_BINARY=$(command -v golangci-lint || true)
-if [ -z "$GOLANGCI_BINARY" ]; then
-    GO_BIN_DIR=$("$GO_BINARY" env GOBIN)
-    if [ -z "$GO_BIN_DIR" ]; then
-        GO_BIN_DIR=$("$GO_BINARY" env GOPATH)/bin
-    fi
-    if [ -x "$GO_BIN_DIR/golangci-lint" ]; then
-        GOLANGCI_BINARY="$GO_BIN_DIR/golangci-lint"
-    fi
-fi
-
-if [ -z "$GOLANGCI_BINARY" ]; then
+if ! command -v golangci-lint &>/dev/null; then
     print_error "golangci-lint not found. Install via: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
     exit 1
 fi
 
-GOLANGCI_VERSION=$("$GOLANGCI_BINARY" version --format short 2>/dev/null || "$GOLANGCI_BINARY" version 2>/dev/null | head -n1 | sed 's/.*version //; s/ .*//')
+GOLANGCI_VERSION=$(golangci-lint version --format short 2>/dev/null || golangci-lint version 2>/dev/null | head -n1 | sed 's/.*version //; s/ .*//')
 MIN_GOLANGCI_VERSION="2.0.0"
 if [ -z "$GOLANGCI_VERSION" ]; then
     print_error "Unable to determine golangci-lint version; ensure v$MIN_GOLANGCI_VERSION or newer is installed."
@@ -79,68 +60,62 @@ if version_lt "$GOLANGCI_VERSION" "$MIN_GOLANGCI_VERSION"; then
     exit 1
 fi
 
-print_success "Go toolchain ready (Go $GO_VERSION, golangci-lint $GOLANGCI_VERSION)"
+print_success "Go $GO_VERSION, golangci-lint $GOLANGCI_VERSION"
 
-ORIGINAL_PATH="$PATH"
-
-echo "\n🧹 Simulating GitHub Actions environment (minimal PATH)"
-TEMP_BIN=$(mktemp -d)
-trap 'rm -rf "$TEMP_BIN"' EXIT
-
-cp "$GO_BINARY" "$TEMP_BIN/" 2>/dev/null || {
-    print_error "Failed to stage Go binary"
+print_step "Verifying go.mod is tidy"
+go mod tidy
+if ! git diff --quiet go.mod go.sum 2>/dev/null; then
+    print_error "go.mod or go.sum changed after 'go mod tidy'. Commit the changes."
     exit 1
-}
-cp "$GOLANGCI_BINARY" "$TEMP_BIN/" 2>/dev/null || {
-    print_error "Failed to stage golangci-lint binary"
-    exit 1
-}
-cp "$(command -v rm)" "$TEMP_BIN/" 2>/dev/null || true
-
-export PATH="$TEMP_BIN"
-export INVOCATION_ID="test-github-actions"
-export GOROOT="$GOROOT_DIR"
+fi
+print_success "go.mod is tidy"
 
 print_step "Running go test ./..."
 if go test ./...; then
-    print_success "go test passed"
+    print_success "Tests passed"
 else
-    print_error "go test failed"
+    print_error "Tests failed"
     exit 1
 fi
 
 print_step "Running go test -race ./..."
-export PATH="$ORIGINAL_PATH"
 if go test -race ./...; then
-    print_success "go test -race passed"
+    print_success "Race detection passed"
 else
-    print_error "go test -race failed (race condition detected)"
+    print_error "Race condition detected"
     exit 1
 fi
-export PATH="$TEMP_BIN"
 
-print_step "Running CGO-enabled build"
-export PATH="$ORIGINAL_PATH"
-if ! command -v gcc >/dev/null 2>&1; then
-    print_error "cgo build requires gcc; install build-essential and rerun"
+print_step "Running CGO build"
+if ! command -v gcc &>/dev/null; then
+    print_error "CGO build requires gcc; install build-essential and rerun"
     exit 1
 fi
 if CGO_ENABLED=1 go build ./...; then
-    print_success "cgo build passed"
+    print_success "CGO build passed"
 else
-    print_error "cgo build failed"
+    print_error "CGO build failed"
     exit 1
 fi
 
-print_step "Running golangci-lint run"
+print_step "Running golangci-lint"
 if golangci-lint run; then
-    print_success "golangci-lint passed"
+    print_success "Lint passed"
 else
-    print_error "golangci-lint reported issues"
-    echo "Run: golangci-lint run"
+    print_error "Lint issues found"
     exit 1
 fi
 
-echo "\n======================"
-print_success "🎉 Go checks passed"
-echo "======================"
+print_step "Running govulncheck"
+if ! command -v govulncheck &>/dev/null; then
+    echo "   Installing govulncheck..."
+    go install golang.org/x/vuln/cmd/govulncheck@latest
+fi
+if govulncheck ./...; then
+    print_success "No vulnerabilities found"
+else
+    print_error "Vulnerabilities detected"
+    exit 1
+fi
+
+echo -e "\n${GREEN}All checks passed${NC}"

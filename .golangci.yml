@@ -8,8 +8,10 @@ run:
 linters:
   enable:
     - errcheck
+    - gocritic
     - govet
     - ineffassign
+    - misspell
     - staticcheck
     - unused
   exclusions:
@@ -19,6 +21,12 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
+  settings:
+    gocritic:
+      disabled-checks:
+        - appendAssign
+        - ifElseChain
+        - unlambda
 
 formatters:
   enable:

@@ -267,17 +267,15 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 		raw, cursor := hub.Tail(limit)
 		converted = convertLogEvents(raw)
 		next = cursor
-	} else {
-		if len(converted) == 0 && hub != nil {
-			raw, cursor, fetchErr := hub.Fetch(r.Context(), since, limit, follow)
-			if fetchErr != nil && !errors.Is(fetchErr, context.Canceled) && !errors.Is(fetchErr, context.DeadlineExceeded) {
-				s.writeError(w, http.StatusInternalServerError, fetchErr.Error())
-				return
-			}
-			converted = convertLogEvents(raw)
-			next = cursor
-			err = fetchErr
+	} else if len(converted) == 0 && hub != nil {
+		raw, cursor, fetchErr := hub.Fetch(r.Context(), since, limit, follow)
+		if fetchErr != nil && !errors.Is(fetchErr, context.Canceled) && !errors.Is(fetchErr, context.DeadlineExceeded) {
+			s.writeError(w, http.StatusInternalServerError, fetchErr.Error())
+			return
 		}
+		converted = convertLogEvents(raw)
+		next = cursor
+		err = fetchErr
 	}
 
 	filtered := make([]api.LogEvent, 0, len(converted))
