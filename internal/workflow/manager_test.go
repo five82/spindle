@@ -182,9 +182,9 @@ func TestManagerValidationErrorTriggersReview(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetByID failed: %v", err)
 		}
-		if updated.Status == queue.StatusReview {
-			if updated.ProgressStage != "Needs review" {
-				t.Fatalf("expected progress stage 'Needs review', got %s", updated.ProgressStage)
+		if updated.Status == queue.StatusFailed {
+			if updated.ProgressStage != "Failed" {
+				t.Fatalf("expected progress stage 'Failed', got %s", updated.ProgressStage)
 			}
 			if !strings.Contains(strings.ToLower(updated.ErrorMessage), "validation") {
 				t.Fatalf("expected validation hint in error message, got %s", updated.ErrorMessage)

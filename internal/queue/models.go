@@ -23,7 +23,6 @@ const (
 	StatusOrganizing         Status = "organizing"
 	StatusCompleted          Status = "completed"
 	StatusFailed             Status = "failed"
-	StatusReview             Status = "review"
 )
 
 const StopReviewReason = "Stop requested by user"
@@ -46,7 +45,6 @@ var allStatuses = []Status{
 	StatusOrganizing,
 	StatusCompleted,
 	StatusFailed,
-	StatusReview,
 }
 
 var statusSet = func() map[Status]struct{} {
@@ -104,7 +102,6 @@ type HealthSummary struct {
 	Pending    int
 	Processing int
 	Failed     int
-	Review     int
 	Completed  int
 }
 
@@ -201,20 +198,15 @@ func (i *Item) SetProgressComplete(stage, message string) {
 	i.SetProgress(stage, message, 100)
 }
 
-// SetFailed marks the item as failed with the given status and error message.
+// SetFailed marks the item as failed with the given error message.
 // Clears heartbeat and sets progress fields appropriately.
-// Use StatusFailed for retryable failures, StatusReview for manual intervention.
-func (i *Item) SetFailed(status Status, message string) {
-	i.Status = status
+func (i *Item) SetFailed(message string) {
+	i.Status = StatusFailed
 	i.ErrorMessage = message
 	i.ProgressPercent = 0
 	i.ProgressMessage = message
 	i.LastHeartbeat = nil
-	if status == StatusReview {
-		i.ProgressStage = "Needs review"
-	} else {
-		i.ProgressStage = "Failed"
-	}
+	i.ProgressStage = "Failed"
 }
 
 // IsInWorkflow returns true when an item is actively progressing (or queued to progress)
@@ -257,8 +249,7 @@ func (s Status) StageKey() string {
 		StatusSubtitling,
 		StatusSubtitled,
 		StatusOrganizing,
-		StatusFailed,
-		StatusReview:
+		StatusFailed:
 		return string(s)
 	default:
 		return ""
@@ -283,7 +274,7 @@ func LaneForItem(item *Item) ProcessingLane {
 		return LaneForeground
 	case StatusRipped, StatusEpisodeIdentifying, StatusEpisodeIdentified, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted, StatusSubtitling, StatusSubtitled:
 		return LaneBackground
-	case StatusFailed, StatusReview:
+	case StatusFailed:
 		if item.ItemLogPath != "" {
 			return LaneBackground
 		}

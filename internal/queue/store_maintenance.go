@@ -44,8 +44,6 @@ func (s *Store) Health(ctx context.Context) (HealthSummary, error) {
 			health.Pending += count
 		case StatusFailed:
 			health.Failed += count
-		case StatusReview:
-			health.Review += count
 		case StatusCompleted:
 			health.Completed += count
 		default:

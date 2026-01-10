@@ -30,9 +30,10 @@ func TestWrapIncludesContext(t *testing.T) {
 }
 
 func TestFailureStatusMapping(t *testing.T) {
+	// All errors now map to StatusFailed - error classification is for logging only
 	validationErr := services.Wrap(services.ErrValidation, "identifier", "prepare", "invalid", nil)
-	if status := queue.FailureStatus(validationErr); status != queue.StatusReview {
-		t.Fatalf("expected review for validation error, got %s", status)
+	if status := queue.FailureStatus(validationErr); status != queue.StatusFailed {
+		t.Fatalf("expected failed for validation error, got %s", status)
 	}
 
 	transientErr := services.Wrap(services.ErrTransient, "encoding", "copy", "copy failed", errors.New("io"))

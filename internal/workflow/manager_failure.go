@@ -18,19 +18,15 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 	}
 	logger := m.stageLoggerForLane(ctx, nil, base, item).With(logging.String("component", "workflow-manager"))
 
-	status, message := m.classifyStageFailure(stageName, stageErr)
-	m.setItemFailureState(item, status, message)
+	_, message := m.classifyStageFailure(stageName, stageErr)
+	m.setItemFailureState(item, message)
 
-	alertValue := "stage_failure"
-	if status == queue.StatusReview {
-		alertValue = "review_required"
-	}
 	details := services.Details(stageErr)
 	attrs := []logging.Attr{
-		logging.String("resolved_status", string(status)),
-		logging.String("processing_status", string(status)),
+		logging.String("resolved_status", string(queue.StatusFailed)),
+		logging.String("processing_status", string(queue.StatusFailed)),
 		logging.String("error_message", strings.TrimSpace(message)),
-		logging.Alert(alertValue),
+		logging.Alert("stage_failure"),
 		logging.String(logging.FieldErrorKind, string(details.Kind)),
 		logging.String(logging.FieldErrorOperation, details.Operation),
 		logging.String(logging.FieldErrorDetailPath, details.DetailPath),
@@ -83,6 +79,6 @@ func (m *Manager) getStageFailureMessage(stageName, defaultMsg string) string {
 	return fmt.Sprintf("workflow %s", defaultMsg)
 }
 
-func (m *Manager) setItemFailureState(item *queue.Item, status queue.Status, message string) {
-	item.SetFailed(status, message)
+func (m *Manager) setItemFailureState(item *queue.Item, message string) {
+	item.SetFailed(message)
 }

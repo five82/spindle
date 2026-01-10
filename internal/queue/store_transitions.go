@@ -103,7 +103,7 @@ func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time, st
 	return res.RowsAffected()
 }
 
-// RetryFailed moves failed or review items back to pending for reprocessing.
+// RetryFailed moves failed items back to pending for reprocessing.
 func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	if len(ids) == 0 {
 		res, err := s.execWithRetry(
@@ -111,11 +111,10 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 			`UPDATE queue_items
             SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
                 progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
-            WHERE status IN (?, ?)`,
+            WHERE status = ?`,
 			StatusPending,
 			time.Now().UTC().Format(time.RFC3339Nano),
 			StatusFailed,
-			StatusReview,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("retry failed items: %w", err)
@@ -132,7 +131,7 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	query := `UPDATE queue_items
         SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
             progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
-        WHERE id IN (` + placeholders + `) AND status IN ('` + string(StatusFailed) + `','` + string(StatusReview) + `')`
+        WHERE id IN (` + placeholders + `) AND status = '` + string(StatusFailed) + `'`
 	res, err := s.execWithRetry(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("retry selected items: %w", err)
@@ -141,7 +140,7 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 }
 
 // FailActiveOnShutdown marks all non-terminal items as failed when the daemon stops.
-// Terminal states (completed, failed, review) are left untouched.
+// Terminal states (completed, failed) are left untouched.
 func (s *Store) FailActiveOnShutdown(ctx context.Context) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := s.execWithRetry(
@@ -149,14 +148,13 @@ func (s *Store) FailActiveOnShutdown(ctx context.Context) (int64, error) {
 		`UPDATE queue_items
         SET status = ?, progress_stage = 'Daemon stopped', progress_percent = 0,
             progress_message = ?, error_message = ?, last_heartbeat = NULL, updated_at = ?
-        WHERE status NOT IN (?, ?, ?)`,
+        WHERE status NOT IN (?, ?)`,
 		StatusFailed,
 		DaemonStopReason,
 		DaemonStopReason,
 		now,
 		StatusCompleted,
 		StatusFailed,
-		StatusReview,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("fail active items on shutdown: %w", err)
@@ -164,18 +162,18 @@ func (s *Store) FailActiveOnShutdown(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
-// StopItems moves selected items into review to halt further processing.
+// StopItems marks selected items as failed to halt further processing.
 func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	placeholders := makePlaceholders(len(ids))
-	args := make([]any, 0, len(ids)+7)
+	args := make([]any, 0, len(ids)+6)
 	args = append(args,
-		StatusReview,
+		StatusFailed,
 		StopReviewReason,
-		"Manual review",
+		"Stopped",
 		StopReviewReason,
 		now,
 	)
@@ -185,7 +183,7 @@ func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
 	query := `UPDATE queue_items
         SET status = ?, needs_review = 1, review_reason = ?, progress_stage = ?, progress_message = ?,
             progress_percent = 0, error_message = NULL, last_heartbeat = NULL, active_episode_key = NULL, updated_at = ?
-        WHERE id IN (` + placeholders + `) AND status NOT IN ('` + string(StatusCompleted) + `','` + string(StatusFailed) + `','` + string(StatusReview) + `')`
+        WHERE id IN (` + placeholders + `) AND status NOT IN ('` + string(StatusCompleted) + `','` + string(StatusFailed) + `')`
 	res, err := s.execWithRetry(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("stop items: %w", err)

@@ -131,7 +131,7 @@ func (s *Store) applyStopReviewOverride(ctx context.Context, item *Item) error {
 	if item == nil || item.ID == 0 {
 		return nil
 	}
-	if item.Status == StatusReview && IsStopReviewReason(item.ReviewReason) {
+	if item.Status == StatusFailed && IsStopReviewReason(item.ReviewReason) {
 		return nil
 	}
 	row := s.db.QueryRowContext(ctx, `SELECT status, review_reason FROM queue_items WHERE id = ?`, item.ID)
@@ -143,8 +143,8 @@ func (s *Store) applyStopReviewOverride(ctx context.Context, item *Item) error {
 		}
 		return fmt.Errorf("load stop review state: %w", err)
 	}
-	if status == StatusReview && IsStopReviewReason(reviewReason.String) {
-		item.Status = StatusReview
+	if status == StatusFailed && IsStopReviewReason(reviewReason.String) {
+		item.Status = StatusFailed
 		item.NeedsReview = true
 		item.ReviewReason = reviewReason.String
 	}
@@ -288,9 +288,13 @@ func (s *Store) Clear(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
-// ClearFailed removes only failed items from the queue.
+// ClearFailed removes failed items from the queue, excluding items stopped by user.
 func (s *Store) ClearFailed(ctx context.Context) (int64, error) {
-	res, err := s.execWithRetry(ctx, `DELETE FROM queue_items WHERE status = ?`, StatusFailed)
+	res, err := s.execWithRetry(ctx,
+		`DELETE FROM queue_items WHERE status = ? AND (review_reason IS NULL OR review_reason != ?)`,
+		StatusFailed,
+		StopReviewReason,
+	)
 	if err != nil {
 		return 0, fmt.Errorf("clear failed: %w", err)
 	}

@@ -307,8 +307,6 @@ func newQueueStopCommand(ctx *commandContext) *cobra.Command {
 					switch item.Outcome {
 					case queueStopOutcomeNotFound:
 						fmt.Fprintf(out, "Item %d not found\n", item.ID)
-					case queueStopOutcomeAlreadyReview:
-						fmt.Fprintf(out, "Item %d is already stopped (review)\n", item.ID)
 					case queueStopOutcomeAlreadyCompleted:
 						fmt.Fprintf(out, "Item %d is already completed\n", item.ID)
 					case queueStopOutcomeAlreadyFailed:
@@ -490,12 +488,11 @@ func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Total: %d\nPending: %d\nProcessing: %d\nFailed: %d\nReview: %d\nCompleted: %d\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "Total: %d\nPending: %d\nProcessing: %d\nFailed: %d\nCompleted: %d\n",
 					health.Total,
 					health.Pending,
 					health.Processing,
 					health.Failed,
-					health.Review,
 					health.Completed,
 				)
 				return nil

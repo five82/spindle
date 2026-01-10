@@ -86,7 +86,7 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 	if err := i.handleDuplicateFingerprint(ctx, item); err != nil {
 		return nil, 0, err
 	}
-	if item.Status == queue.StatusReview {
+	if item.Status == queue.StatusFailed {
 		return scanResult, titleCount, nil
 	}
 

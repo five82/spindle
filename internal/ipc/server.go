@@ -378,7 +378,6 @@ func (s *service) QueueHealth(_ QueueHealthRequest, resp *QueueHealthResponse) e
 	resp.Pending = health.Pending
 	resp.Processing = health.Processing
 	resp.Failed = health.Failed
-	resp.Review = health.Review
 	resp.Completed = health.Completed
 	return nil
 }

@@ -132,7 +132,7 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 			t.Fatal("queue item disappeared")
 			return
 		}
-		if updated.Status == queue.StatusFailed || updated.Status == queue.StatusReview {
+		if updated.Status == queue.StatusFailed {
 			t.Fatalf("queue item ended in status %s: %s", updated.Status, updated.ErrorMessage)
 		}
 		item = updated

@@ -141,8 +141,8 @@ func TestQueueStopSpecificID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lookup alpha: %v", err)
 	}
-	if updated.Status != queue.StatusReview {
-		t.Fatalf("expected review, got %s", updated.Status)
+	if updated.Status != queue.StatusFailed {
+		t.Fatalf("expected failed, got %s", updated.Status)
 	}
 	if updated.ReviewReason != queue.StopReviewReason {
 		t.Fatalf("expected review reason %q, got %q", queue.StopReviewReason, updated.ReviewReason)

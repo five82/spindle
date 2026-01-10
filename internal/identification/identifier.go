@@ -117,8 +117,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if err != nil {
 		return err
 	}
-	if item.Status == queue.StatusReview {
-		return nil // Duplicate fingerprint triggered review
+	if item.Status == queue.StatusFailed {
+		return nil // Duplicate fingerprint triggered failure
 	}
 
 	discID := ""

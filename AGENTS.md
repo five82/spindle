@@ -11,7 +11,7 @@ CLAUDE.md and GEMINI.md are symlinks to this file so all agent guidance stays in
 - Finish the work you start. Ask the user before dropping scope or leaving TODOs.
 - Most commands work with or without a running daemon; queue commands access the database directly when the daemon is stopped.
 - Use `spindle stop` to completely stop the daemon.
-- Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENTIFYING → EPISODE_IDENTIFIED] → ENCODING → ENCODED → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED`, and be ready for `FAILED` or `REVIEW` detours.
+- Queue statuses matter: handle `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENTIFYING → EPISODE_IDENTIFIED] → ENCODING → ENCODED → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED`, and be ready for `FAILED` detours.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn’t.
 
 ## Related Repos (Local Dev Layout)
@@ -196,11 +196,10 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENT
 ```
 
 - In the SQLite DB / HTTP API these appear as lower-case snake-case (see `internal/queue.Status`).
-- **FAILED** marks irrecoverable runs. Surface the root cause and keep progress context.
-- **REVIEW** is for manual intervention (for example, uncertain identification).
+- **FAILED** marks irrecoverable runs. Surface the root cause and keep progress context. Items with `NeedsReview = true` indicate manual intervention may be needed (files routed to `review_dir`).
 - Rip completion triggers an ntfy notification at `RIPPED`; users eject the disc manually when convenient.
 - Episode identification runs after ripping for TV shows when `opensubtitles_enabled = true`: queue items enter `EPISODE_IDENTIFYING`, WhisperX transcribes each ripped episode, OpenSubtitles downloads reference subtitles, and the matcher correlates ripped files to definitive episode numbers before flipping to `EPISODE_IDENTIFIED`. Movies and items without OpenSubtitles skip this stage automatically.
-- Subtitles run after encoding when `subtitles_enabled = true`: queue items enter `SUBTITLING`, prefer OpenSubtitles downloads, fall back to WhisperX, and flip to `SUBTITLED` before the organizer starts. `NeedsReview` plus the `review` status are used when subtitle offsets look suspicious.
+- Subtitles run after encoding when `subtitles_enabled = true`: queue items enter `SUBTITLING`, prefer OpenSubtitles downloads, fall back to WhisperX, and flip to `SUBTITLED` before the organizer starts. `NeedsReview` flag is set when subtitle offsets look suspicious.
 
 If you add or reorder phases, update the enums, workflow routing, CLI presentation, docs, and tests in one pull.
 

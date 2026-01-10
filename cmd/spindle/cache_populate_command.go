@@ -134,10 +134,10 @@ it is overwritten.`,
 			if err := runStage(baseCtx, logger, store, identifier, "identifier", queue.StatusIdentifying, queue.StatusIdentified, item); err != nil {
 				return err
 			}
-			if item.NeedsReview || item.Status == queue.StatusReview {
-				return fmt.Errorf("identification requires review: %s", strings.TrimSpace(item.ReviewReason))
-			}
 			if item.Status == queue.StatusFailed {
+				if item.NeedsReview {
+					return fmt.Errorf("identification requires review: %s", strings.TrimSpace(item.ReviewReason))
+				}
 				return fmt.Errorf("identification failed: %s", strings.TrimSpace(item.ErrorMessage))
 			}
 
@@ -153,10 +153,10 @@ it is overwritten.`,
 				return err
 			}
 			if item.Status == queue.StatusFailed {
+				if item.NeedsReview {
+					return fmt.Errorf("ripping requires review: %s", strings.TrimSpace(item.ReviewReason))
+				}
 				return fmt.Errorf("ripping failed: %s", strings.TrimSpace(item.ErrorMessage))
-			}
-			if item.Status == queue.StatusReview {
-				return fmt.Errorf("ripping requires review: %s", strings.TrimSpace(item.ReviewReason))
 			}
 
 			if _, ok, err := ripcache.LoadMetadata(cacheDir); err != nil {
@@ -240,22 +240,20 @@ func runStage(ctx context.Context, logger *slog.Logger, store *queue.Store, hand
 }
 
 func handleStageFailure(ctx context.Context, logger *slog.Logger, store *queue.Store, item *queue.Item, stageErr error) error {
-	status := queue.StatusFailed
 	message := "stage failed"
 	if stageErr != nil {
-		status = queue.FailureStatus(stageErr)
 		details := services.Details(stageErr)
 		message = strings.TrimSpace(details.Message)
 		if message == "" {
 			message = strings.TrimSpace(stageErr.Error())
 		}
 	}
-	item.SetFailed(status, message)
+	item.SetFailed(message)
 
 	logger.Error(
 		"stage failed",
 		logging.String(logging.FieldEventType, "stage_failure"),
-		logging.String("resolved_status", string(status)),
+		logging.String("resolved_status", string(queue.StatusFailed)),
 		logging.String("error_message", strings.TrimSpace(message)),
 		logging.Error(stageErr),
 	)

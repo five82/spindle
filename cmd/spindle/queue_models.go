@@ -61,7 +61,6 @@ type queueHealthView struct {
 	Pending    int
 	Processing int
 	Failed     int
-	Review     int
 	Completed  int
 }
 
@@ -90,7 +89,6 @@ type queueStopOutcome int
 const (
 	queueStopOutcomeUpdated queueStopOutcome = iota
 	queueStopOutcomeNotFound
-	queueStopOutcomeAlreadyReview
 	queueStopOutcomeAlreadyCompleted
 	queueStopOutcomeAlreadyFailed
 )

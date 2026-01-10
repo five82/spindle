@@ -1,30 +1,17 @@
 package queue
 
-import "errors"
-
-// ErrorClassifier allows errors to declare their classification for status mapping.
-// Errors that implement this interface can influence whether a failure results in
-// StatusFailed (retry-able) or StatusReview (needs manual intervention).
+// ErrorClassifier allows errors to declare their classification for logging and diagnostics.
+// This interface is retained for error categorization even though all failures now result
+// in StatusFailed.
 type ErrorClassifier interface {
 	// ErrorKind returns a string classification of the error.
-	// Known kinds that map to StatusReview: "validation", "configuration", "not_found"
-	// All other kinds map to StatusFailed.
+	// Common kinds: "validation", "configuration", "not_found", "external", "timeout"
 	ErrorKind() string
 }
 
-// FailureStatus maps a stage error to the queue status the workflow manager
-// should persist after the stage fails.
-//
-// Errors implementing ErrorClassifier with kinds "validation", "configuration",
-// or "not_found" result in StatusReview (manual intervention needed).
-// All other errors result in StatusFailed.
-func FailureStatus(err error) Status {
-	var classifier ErrorClassifier
-	if errors.As(err, &classifier) {
-		switch classifier.ErrorKind() {
-		case "validation", "configuration", "not_found":
-			return StatusReview
-		}
-	}
+// FailureStatus returns StatusFailed for any error.
+// All queue failures are retryable; error classification is used only for
+// logging and diagnostics, not status routing.
+func FailureStatus(_ error) Status {
 	return StatusFailed
 }

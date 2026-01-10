@@ -97,8 +97,8 @@ Use 'spindle cache stats' to find entry numbers.`,
 			item.NeedsReview = meta.NeedsReview
 			item.ReviewReason = meta.ReviewReason
 			if meta.NeedsReview {
-				item.Status = queue.StatusReview
-				item.ProgressStage = "Needs review"
+				item.Status = queue.StatusFailed
+				item.ProgressStage = "Failed"
 				item.ProgressPercent = 100
 				item.ProgressMessage = strings.TrimSpace(meta.ReviewReason)
 				item.ErrorMessage = strings.TrimSpace(meta.ReviewReason)

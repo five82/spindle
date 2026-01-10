@@ -165,6 +165,5 @@ type QueueHealthResponse struct {
 	Pending    int `json:"pending"`
 	Processing int `json:"processing"`
 	Failed     int `json:"failed"`
-	Review     int `json:"review"`
 	Completed  int `json:"completed"`
 }

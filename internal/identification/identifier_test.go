@@ -151,8 +151,8 @@ func TestIdentifierMarksDuplicateForReview(t *testing.T) {
 	if err := handler.Execute(ctx, second); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if second.Status != queue.StatusReview {
-		t.Fatalf("expected review status, got %s", second.Status)
+	if second.Status != queue.StatusFailed {
+		t.Fatalf("expected failed status, got %s", second.Status)
 	}
 	if !second.NeedsReview {
 		t.Fatal("expected duplicate to require review")

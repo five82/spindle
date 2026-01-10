@@ -66,7 +66,7 @@ func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message s
 	item.ProgressMessage = message
 	item.ErrorMessage = message
 	if immediate {
-		item.Status = queue.StatusReview
+		item.Status = queue.StatusFailed
 		if i.notifier != nil {
 			label := strings.TrimSpace(item.DiscTitle)
 			if label == "" {
@@ -81,8 +81,8 @@ func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message s
 		}
 	} else {
 		switch item.Status {
-		case queue.StatusReview:
-			// leave untouched if already review
+		case queue.StatusFailed:
+			// leave untouched if already failed
 		case queue.StatusIdentifying, queue.StatusPending, "":
 			item.Status = queue.StatusIdentified
 		default:

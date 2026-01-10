@@ -193,9 +193,6 @@ func (f *queueIPCFacade) StopIDs(_ context.Context, ids []int64) (queueStopResul
 		parsed, ok := queue.ParseStatus(status)
 		if ok {
 			switch parsed {
-			case queue.StatusReview:
-				result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyReview, PriorStatus: status})
-				continue
 			case queue.StatusCompleted:
 				result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyCompleted, PriorStatus: status})
 				continue
@@ -214,7 +211,7 @@ func (f *queueIPCFacade) StopIDs(_ context.Context, ids []int64) (queueStopResul
 			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeUpdated, PriorStatus: status})
 			continue
 		}
-		result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyReview, PriorStatus: status})
+		result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyFailed, PriorStatus: status})
 	}
 
 	return result, nil
@@ -230,7 +227,6 @@ func (f *queueIPCFacade) Health(_ context.Context) (queueHealthView, error) {
 		Pending:    resp.Pending,
 		Processing: resp.Processing,
 		Failed:     resp.Failed,
-		Review:     resp.Review,
 		Completed:  resp.Completed,
 	}, nil
 }
@@ -327,7 +323,7 @@ func (f *queueStoreFacade) RetryIDs(ctx context.Context, ids []int64) (queueRetr
 			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFound})
 			continue
 		}
-		if item.Status != queue.StatusFailed && item.Status != queue.StatusReview {
+		if item.Status != queue.StatusFailed {
 			result.Items = append(result.Items, queueRetryItemResult{ID: id, Outcome: queueRetryOutcomeNotFailed})
 			continue
 		}
@@ -364,9 +360,6 @@ func (f *queueStoreFacade) StopIDs(ctx context.Context, ids []int64) (queueStopR
 		}
 		status := string(item.Status)
 		switch item.Status {
-		case queue.StatusReview:
-			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyReview, PriorStatus: status})
-			continue
 		case queue.StatusCompleted:
 			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyCompleted, PriorStatus: status})
 			continue
@@ -384,7 +377,7 @@ func (f *queueStoreFacade) StopIDs(ctx context.Context, ids []int64) (queueStopR
 			result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeUpdated, PriorStatus: status})
 			continue
 		}
-		result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyReview, PriorStatus: status})
+		result.Items = append(result.Items, queueStopItemResult{ID: id, Outcome: queueStopOutcomeAlreadyFailed, PriorStatus: status})
 	}
 
 	return result, nil
@@ -400,15 +393,13 @@ func (f *queueStoreFacade) Health(ctx context.Context) (queueHealthView, error) 
 		Pending:    summary.Pending,
 		Processing: summary.Processing,
 		Failed:     summary.Failed,
-		Review:     summary.Review,
 		Completed:  summary.Completed,
 	}, nil
 }
 
 func statusIsRetryable(value string) bool {
 	normalized := strings.TrimSpace(value)
-	return strings.EqualFold(normalized, string(queue.StatusFailed)) ||
-		strings.EqualFold(normalized, string(queue.StatusReview))
+	return strings.EqualFold(normalized, string(queue.StatusFailed))
 }
 
 func convertDTOQueueItem(item api.QueueItem) queueItemDetailsView {
@@ -515,8 +506,8 @@ func (f *queueStoreFacade) RetryEpisode(ctx context.Context, itemID int64, episo
 		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeNotFound}, nil
 	}
 
-	// Only allow retry on failed or review items
-	if item.Status != queue.StatusFailed && item.Status != queue.StatusReview {
+	// Only allow retry on failed items
+	if item.Status != queue.StatusFailed {
 		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeNotFailed}, nil
 	}
 

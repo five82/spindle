@@ -125,10 +125,11 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 		return true, nil
 	}
 
-	if status == queue.StatusReview {
+	// Only prevent reset if user explicitly stopped this item
+	if status == queue.StatusFailed && queue.IsStopReviewReason(existing.ReviewReason) {
 		if logger != nil {
 			logger.Debug(
-				"disc requires manual review",
+				"disc stopped by user, not resetting",
 				logging.Int64(logging.FieldItemID, existing.ID),
 				logging.String("status", string(existing.Status)),
 				logging.String("review_reason", strings.TrimSpace(existing.ReviewReason)),

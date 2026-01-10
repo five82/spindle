@@ -155,7 +155,6 @@ func TestFromQueueItem_FillsEmptyProgressStageFromStatus(t *testing.T) {
 		{name: "pending", status: queue.StatusPending, want: "Pending"},
 		{name: "encoding", status: queue.StatusEncoding, want: "Encoding"},
 		{name: "organizing", status: queue.StatusOrganizing, want: "Organizing"},
-		{name: "review", status: queue.StatusReview, want: "Manual review"},
 		{name: "completed", status: queue.StatusCompleted, want: "Completed"},
 	}
 

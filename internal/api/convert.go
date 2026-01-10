@@ -123,8 +123,6 @@ func defaultProgressStageForStatus(status queue.Status) string {
 		return "Completed"
 	case queue.StatusFailed:
 		return "Failed"
-	case queue.StatusReview:
-		return "Manual review"
 	default:
 		return strings.TrimSpace(string(status))
 	}

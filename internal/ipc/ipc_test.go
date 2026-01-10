@@ -199,8 +199,8 @@ func TestIPCServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID stopped discC: %v", err)
 	}
-	if stoppedC.Status != queue.StatusReview {
-		t.Fatalf("expected discC to be review after stop, got %s", stoppedC.Status)
+	if stoppedC.Status != queue.StatusFailed {
+		t.Fatalf("expected discC to be failed after stop, got %s", stoppedC.Status)
 	}
 	if stoppedC.ReviewReason != queue.StopReviewReason {
 		t.Fatalf("expected review reason %q, got %q", queue.StopReviewReason, stoppedC.ReviewReason)
