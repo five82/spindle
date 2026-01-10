@@ -3,12 +3,40 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"spindle/internal/queue"
 )
+
+// syncBuffer is a thread-safe wrapper around bytes.Buffer for use in tests.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Len()
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+var _ io.Writer = (*syncBuffer)(nil)
 
 func TestDaemonStartStopStatus(t *testing.T) {
 	env := setupCLITestEnv(t)
@@ -82,8 +110,9 @@ func TestShowFollow(t *testing.T) {
 	cmd := newRootCommand()
 	cmd.SetArgs([]string{"--socket", env.socketPath, "--config", env.configPath, "show", "--follow"})
 	cmd.SetContext(ctx)
-	var stdout bytes.Buffer
-	cmd.SetOut(&stdout)
+	// Use syncBuffer to avoid data race between goroutine writing and main test reading
+	stdout := &syncBuffer{}
+	cmd.SetOut(stdout)
 	cmd.SetErr(&bytes.Buffer{})
 
 	done := make(chan error, 1)

@@ -109,6 +109,16 @@ else
     exit 1
 fi
 
+print_step "Running go test -race ./..."
+export PATH="$ORIGINAL_PATH"
+if go test -race ./...; then
+    print_success "go test -race passed"
+else
+    print_error "go test -race failed (race condition detected)"
+    exit 1
+fi
+export PATH="$TEMP_BIN"
+
 print_step "Running CGO-enabled build"
 export PATH="$ORIGINAL_PATH"
 if ! command -v gcc >/dev/null 2>&1; then

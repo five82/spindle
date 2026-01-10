@@ -1,8 +1,12 @@
 package contentid
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestResolveEpisodeMatchesOptimalAssignment(t *testing.T) {
+	t.Parallel()
+
 	// Construct two episodes with cross-similarity where greedy would swap.
 	rip1 := newFingerprint("alpha beta gamma intro theme park")              // intended E1
 	rip2 := newFingerprint("delta epsilon zeta magic heroes rescue mission") // intended E2
@@ -27,10 +31,392 @@ func TestResolveEpisodeMatchesOptimalAssignment(t *testing.T) {
 }
 
 func TestResolveEpisodeMatchesThreshold(t *testing.T) {
+	t.Parallel()
+
 	rip := []ripFingerprint{{EpisodeKey: "s05e01", TitleID: 1, Vector: newFingerprint("barely similar")}}
 	ref := []referenceFingerprint{{EpisodeNumber: 1, Vector: newFingerprint("completely different")}}
 	matches := resolveEpisodeMatches(rip, ref)
 	if len(matches) != 0 {
 		t.Fatalf("expected no matches below threshold, got %d", len(matches))
 	}
+}
+
+func TestResolveEpisodeMatchesEmptyInputs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty rips", func(t *testing.T) {
+		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: newFingerprint("some content here")}}
+		matches := resolveEpisodeMatches(nil, refs)
+		if matches != nil {
+			t.Fatalf("expected nil for empty rips, got %v", matches)
+		}
+	})
+
+	t.Run("empty refs", func(t *testing.T) {
+		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint("some content here")}}
+		matches := resolveEpisodeMatches(rips, nil)
+		if matches != nil {
+			t.Fatalf("expected nil for empty refs, got %v", matches)
+		}
+	})
+
+	t.Run("both empty", func(t *testing.T) {
+		matches := resolveEpisodeMatches(nil, nil)
+		if matches != nil {
+			t.Fatalf("expected nil for both empty, got %v", matches)
+		}
+	})
+}
+
+func TestResolveEpisodeMatchesNilVectors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil rip vector", func(t *testing.T) {
+		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: nil}}
+		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: newFingerprint("episode one content dialog")}}
+		matches := resolveEpisodeMatches(rips, refs)
+		if len(matches) != 0 {
+			t.Fatalf("expected no matches with nil rip vector, got %d", len(matches))
+		}
+	})
+
+	t.Run("nil ref vector", func(t *testing.T) {
+		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint("episode one content dialog")}}
+		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: nil}}
+		matches := resolveEpisodeMatches(rips, refs)
+		if len(matches) != 0 {
+			t.Fatalf("expected no matches with nil ref vector, got %d", len(matches))
+		}
+	})
+}
+
+func TestResolveEpisodeMatchesPerfectMatch(t *testing.T) {
+	t.Parallel()
+
+	// Identical text should produce score of 1.0 (well above threshold)
+	text := "the quick brown fox jumps over the lazy dog near the riverbank"
+	rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint(text)}}
+	refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: newFingerprint(text), FileID: 42, Language: "en"}}
+
+	matches := resolveEpisodeMatches(rips, refs)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+	if matches[0].Score < 0.99 {
+		t.Fatalf("expected near-perfect score for identical text, got %f", matches[0].Score)
+	}
+	if matches[0].SubtitleFileID != 42 {
+		t.Fatalf("expected subtitle file ID 42, got %d", matches[0].SubtitleFileID)
+	}
+	if matches[0].SubtitleLanguage != "en" {
+		t.Fatalf("expected language 'en', got %q", matches[0].SubtitleLanguage)
+	}
+}
+
+func TestResolveEpisodeMatchesBoundaryThreshold(t *testing.T) {
+	t.Parallel()
+
+	// Test scores near the minSimilarityScore (0.58) boundary
+	// Create content that should produce scores around the threshold
+
+	t.Run("just above threshold", func(t *testing.T) {
+		// Share enough vocabulary to be above 0.58
+		rip := newFingerprint("hello world this test content shared vocabulary terms episode")
+		ref := newFingerprint("hello world this test content shared vocabulary terms different")
+
+		score := cosineSimilarity(rip, ref)
+		if score < minSimilarityScore {
+			t.Skipf("test fingerprints produce score %f below threshold %f, adjust test data", score, minSimilarityScore)
+		}
+
+		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: rip}}
+		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: ref}}
+		matches := resolveEpisodeMatches(rips, refs)
+		if len(matches) != 1 {
+			t.Fatalf("expected match above threshold (score=%f), got %d matches", score, len(matches))
+		}
+	})
+
+	t.Run("just below threshold", func(t *testing.T) {
+		// Limited shared vocabulary to be below 0.58
+		rip := newFingerprint("alpha beta gamma delta epsilon zeta eta theta")
+		ref := newFingerprint("one two three four five six seven eight")
+
+		score := cosineSimilarity(rip, ref)
+		if score >= minSimilarityScore {
+			t.Skipf("test fingerprints produce score %f at or above threshold %f, adjust test data", score, minSimilarityScore)
+		}
+
+		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: rip}}
+		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: ref}}
+		matches := resolveEpisodeMatches(rips, refs)
+		if len(matches) != 0 {
+			t.Fatalf("expected no match below threshold (score=%f), got %d matches", score, len(matches))
+		}
+	})
+}
+
+func TestResolveEpisodeMatchesMoreRipsThanRefs(t *testing.T) {
+	t.Parallel()
+
+	// 4 rips, only 2 references available
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint("episode one dialog scene character speaking words")},
+		{EpisodeKey: "s01e02", TitleID: 2, Vector: newFingerprint("episode two different scene another character talking")},
+		{EpisodeKey: "s01e03", TitleID: 3, Vector: newFingerprint("episode three plot development story continues here")},
+		{EpisodeKey: "s01e04", TitleID: 4, Vector: newFingerprint("episode four climax action sequence resolution ending")},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 1, Vector: newFingerprint("episode one dialog scene character speaking words")},
+		{EpisodeNumber: 2, Vector: newFingerprint("episode two different scene another character talking")},
+	}
+
+	matches := resolveEpisodeMatches(rips, refs)
+	// Should match at most 2 (the number of refs)
+	if len(matches) > 2 {
+		t.Fatalf("expected at most 2 matches, got %d", len(matches))
+	}
+	// Verify the matches are correct
+	for _, m := range matches {
+		if m.EpisodeKey == "s01e01" && m.TargetEpisode != 1 {
+			t.Fatalf("s01e01 should match episode 1, got %d", m.TargetEpisode)
+		}
+		if m.EpisodeKey == "s01e02" && m.TargetEpisode != 2 {
+			t.Fatalf("s01e02 should match episode 2, got %d", m.TargetEpisode)
+		}
+	}
+}
+
+func TestResolveEpisodeMatchesMoreRefsThanRips(t *testing.T) {
+	t.Parallel()
+
+	// 2 rips, 4 references available - should still match correctly
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01e03", TitleID: 3, Vector: newFingerprint("episode three plot development story continues here")},
+		{EpisodeKey: "s01e04", TitleID: 4, Vector: newFingerprint("episode four climax action sequence resolution ending")},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 1, Vector: newFingerprint("episode one dialog scene character speaking words")},
+		{EpisodeNumber: 2, Vector: newFingerprint("episode two different scene another character talking")},
+		{EpisodeNumber: 3, Vector: newFingerprint("episode three plot development story continues here")},
+		{EpisodeNumber: 4, Vector: newFingerprint("episode four climax action sequence resolution ending")},
+	}
+
+	matches := resolveEpisodeMatches(rips, refs)
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches, got %d", len(matches))
+	}
+
+	matchMap := make(map[string]int)
+	for _, m := range matches {
+		matchMap[m.EpisodeKey] = m.TargetEpisode
+	}
+	if matchMap["s01e03"] != 3 {
+		t.Fatalf("s01e03 should match episode 3, got %d", matchMap["s01e03"])
+	}
+	if matchMap["s01e04"] != 4 {
+		t.Fatalf("s01e04 should match episode 4, got %d", matchMap["s01e04"])
+	}
+}
+
+func TestResolveEpisodeMatchesFullSeason(t *testing.T) {
+	t.Parallel()
+
+	// Simulate a full 10-episode season
+	var rips []ripFingerprint
+	var refs []referenceFingerprint
+
+	baseDialogs := []string{
+		"pilot episode introduces main character backstory origin",
+		"second episode develops plot introduces antagonist conflict",
+		"third episode character growth challenges obstacles faced",
+		"fourth episode midpoint revelation secrets revealed truth",
+		"fifth episode consequences actions impact relationships change",
+		"sixth episode recovery rebuilding trust allies gather",
+		"seventh episode preparation final confrontation plans made",
+		"eighth episode betrayal unexpected twist allegiances shift",
+		"ninth episode climax battle showdown ultimate challenge",
+		"tenth episode resolution conclusion ending new beginning",
+	}
+
+	for i := range 10 {
+		var key string
+		if i < 9 {
+			key = "s01e0" + string(rune('1'+i))
+		} else {
+			key = "s01e10"
+		}
+		rips = append(rips, ripFingerprint{
+			EpisodeKey: key,
+			TitleID:    i + 1,
+			Vector:     newFingerprint(baseDialogs[i]),
+		})
+		refs = append(refs, referenceFingerprint{
+			EpisodeNumber: i + 1,
+			Vector:        newFingerprint(baseDialogs[i]),
+			FileID:        int64(100 + i),
+			Language:      "en",
+		})
+	}
+
+	matches := resolveEpisodeMatches(rips, refs)
+	if len(matches) != 10 {
+		t.Fatalf("expected 10 matches for full season, got %d", len(matches))
+	}
+
+	// Verify all matches are correct
+	for _, m := range matches {
+		expectedEp := m.TitleID // TitleID matches episode number in this test
+		if m.TargetEpisode != expectedEp {
+			t.Errorf("episode key %s (title %d) matched to episode %d, expected %d",
+				m.EpisodeKey, m.TitleID, m.TargetEpisode, expectedEp)
+		}
+	}
+}
+
+func TestResolveEpisodeMatchesSimilarScoresCorrectAssignment(t *testing.T) {
+	t.Parallel()
+
+	// Create scenarios where multiple rips have similar scores to multiple refs
+	// The Hungarian algorithm should find the optimal assignment
+
+	// All episodes share common vocabulary but have distinct phrases
+	common := "the character walks into room and says hello goodbye "
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint(common + "alpha alpha alpha unique")},
+		{EpisodeKey: "s01e02", TitleID: 2, Vector: newFingerprint(common + "beta beta beta special")},
+		{EpisodeKey: "s01e03", TitleID: 3, Vector: newFingerprint(common + "gamma gamma gamma distinct")},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 1, Vector: newFingerprint(common + "alpha alpha alpha unique")},
+		{EpisodeNumber: 2, Vector: newFingerprint(common + "beta beta beta special")},
+		{EpisodeNumber: 3, Vector: newFingerprint(common + "gamma gamma gamma distinct")},
+	}
+
+	matches := resolveEpisodeMatches(rips, refs)
+	if len(matches) != 3 {
+		t.Fatalf("expected 3 matches, got %d", len(matches))
+	}
+
+	for _, m := range matches {
+		expected := m.TitleID
+		if m.TargetEpisode != expected {
+			t.Errorf("%s matched to episode %d, expected %d (score=%f)",
+				m.EpisodeKey, m.TargetEpisode, expected, m.Score)
+		}
+	}
+}
+
+func TestResolveEpisodeMatchesPreservesMetadata(t *testing.T) {
+	t.Parallel()
+
+	// Verify that all metadata fields are properly carried through
+	rips := []ripFingerprint{
+		{EpisodeKey: "s02e05", TitleID: 7, Vector: newFingerprint("specific episode content dialog speech")},
+	}
+	refs := []referenceFingerprint{
+		{
+			EpisodeNumber: 5,
+			Vector:        newFingerprint("specific episode content dialog speech"),
+			FileID:        12345,
+			Language:      "es",
+			CachePath:     "/cache/subtitles/show/s02e05.srt",
+		},
+	}
+
+	matches := resolveEpisodeMatches(rips, refs)
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+
+	m := matches[0]
+	if m.EpisodeKey != "s02e05" {
+		t.Errorf("expected EpisodeKey 's02e05', got %q", m.EpisodeKey)
+	}
+	if m.TitleID != 7 {
+		t.Errorf("expected TitleID 7, got %d", m.TitleID)
+	}
+	if m.TargetEpisode != 5 {
+		t.Errorf("expected TargetEpisode 5, got %d", m.TargetEpisode)
+	}
+	if m.SubtitleFileID != 12345 {
+		t.Errorf("expected SubtitleFileID 12345, got %d", m.SubtitleFileID)
+	}
+	if m.SubtitleLanguage != "es" {
+		t.Errorf("expected SubtitleLanguage 'es', got %q", m.SubtitleLanguage)
+	}
+	if m.SubtitleCachePath != "/cache/subtitles/show/s02e05.srt" {
+		t.Errorf("expected SubtitleCachePath, got %q", m.SubtitleCachePath)
+	}
+}
+
+func TestCosineSimilarityEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil inputs", func(t *testing.T) {
+		if score := cosineSimilarity(nil, nil); score != 0 {
+			t.Errorf("expected 0 for nil inputs, got %f", score)
+		}
+		if score := cosineSimilarity(newFingerprint("hello world"), nil); score != 0 {
+			t.Errorf("expected 0 for nil second input, got %f", score)
+		}
+		if score := cosineSimilarity(nil, newFingerprint("hello world")); score != 0 {
+			t.Errorf("expected 0 for nil first input, got %f", score)
+		}
+	})
+
+	t.Run("empty fingerprint", func(t *testing.T) {
+		// Short tokens (< 3 chars) are filtered out
+		empty := newFingerprint("a b c")
+		if empty != nil {
+			t.Errorf("expected nil fingerprint for short tokens")
+		}
+	})
+
+	t.Run("no overlap", func(t *testing.T) {
+		a := newFingerprint("alpha beta gamma delta epsilon")
+		b := newFingerprint("one two three four five six")
+		score := cosineSimilarity(a, b)
+		if score != 0 {
+			t.Errorf("expected 0 for no token overlap, got %f", score)
+		}
+	})
+
+	t.Run("identical content", func(t *testing.T) {
+		text := "identical content repeated several times"
+		a := newFingerprint(text)
+		b := newFingerprint(text)
+		score := cosineSimilarity(a, b)
+		if score < 0.999 {
+			t.Errorf("expected ~1.0 for identical content, got %f", score)
+		}
+	})
+}
+
+func TestHungarianAlgorithmEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("single element", func(t *testing.T) {
+		cost := [][]float64{{0.5}}
+		assign := hungarian(cost)
+		if len(assign) != 1 || assign[0] != 0 {
+			t.Errorf("expected [0] for single element, got %v", assign)
+		}
+	})
+
+	t.Run("empty matrix", func(t *testing.T) {
+		assign := hungarian(nil)
+		if assign != nil {
+			t.Errorf("expected nil for empty matrix, got %v", assign)
+		}
+	})
+
+	t.Run("non-square returns nil", func(t *testing.T) {
+		// hungarian expects square matrix
+		cost := [][]float64{{1, 2, 3}}
+		assign := hungarian(cost)
+		if assign != nil {
+			t.Errorf("expected nil for non-square matrix, got %v", assign)
+		}
+	})
 }

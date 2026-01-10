@@ -76,7 +76,7 @@ func TestTailFollowWaits(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("tail follow did not return")
 	}
 }

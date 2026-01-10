@@ -25,6 +25,9 @@ jobs:
       - name: Run unit tests
         run: go test ./...
 
+      - name: Run race detection
+        run: go test -race ./...
+
       - name: CGO build
         run: CGO_ENABLED=1 go build ./...
 

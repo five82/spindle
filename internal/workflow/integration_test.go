@@ -1,7 +1,6 @@
 package workflow_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -93,8 +92,7 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 		Organizer:  organizer,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatalf("manager.Start: %v", err)
@@ -108,7 +106,7 @@ func TestWorkflowIntegrationEndToEnd(t *testing.T) {
 		t.Fatalf("store.NewDisc: %v", err)
 	}
 
-	deadline := time.After(120 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for {
 		select {
 		case <-deadline:

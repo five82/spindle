@@ -79,7 +79,7 @@ func TestManagerProcessesItems(t *testing.T) {
 		t.Fatalf("NewDisc failed: %v", err)
 	}
 
-	deadline := time.After(60 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for {
 		select {
 		case <-deadline:

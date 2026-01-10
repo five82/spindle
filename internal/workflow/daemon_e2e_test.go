@@ -115,8 +115,11 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 		t.Fatalf("store.NewDisc: %v", err)
 	}
 
-	waitCtx, waitCancel := context.WithTimeout(ctx, 180*time.Second)
+	// Wait for workflow completion with timeout
+	waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer waitCancel()
+
+	var finalItem *queue.Item
 	for {
 		select {
 		case <-waitCtx.Done():
@@ -130,61 +133,92 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 		}
 		if updated == nil {
 			t.Fatal("queue item disappeared")
-			return
 		}
 		if updated.Status == queue.StatusFailed {
 			t.Fatalf("queue item ended in status %s: %s", updated.Status, updated.ErrorMessage)
 		}
 		item = updated
 		if updated.Status == queue.StatusCompleted {
-			if updated.RippedFile == "" {
-				t.Fatal("expected ripped file path")
-			}
-			if updated.EncodedFile == "" {
-				t.Fatal("expected encoded file path")
-			}
-			if updated.FinalFile == "" {
-				t.Fatal("expected final file path")
-			}
-			if _, err := os.Stat(updated.FinalFile); err != nil {
-				t.Fatalf("final file missing: %v", err)
-			}
-			if updated.MetadataJSON == "" {
-				t.Fatal("expected metadata json")
-			}
-			meta := queue.MetadataFromJSON(updated.MetadataJSON, updated.DiscTitle)
-			if meta.Title() != "Daemon Disc" {
-				t.Fatalf("expected metadata title 'Daemon Disc', got %q", meta.Title())
-			}
-			if len(tmdbClient.queries) == 0 {
-				t.Fatal("expected TMDB search to be invoked")
-			}
-			if scanner.calls == 0 {
-				t.Fatal("expected disc scanner to be used")
-			}
-			if ripperClient.calls == 0 {
-				t.Fatal("expected MakeMKV ripper to be invoked")
-			}
-			if len(notifier.encodeCompletes) == 0 {
-				t.Fatal("expected encoding notification")
-			}
-			if len(notifier.organizeCompletes) == 0 {
-				t.Fatal("expected organization notification")
-			}
-			if len(notifier.processingCompletes) == 0 {
-				t.Fatal("expected processing completion notification")
-			}
-			if len(notifier.ripStarts) == 0 {
-				t.Fatal("expected rip start notification")
-			}
-			if len(notifier.ripCompletes) == 0 {
-				t.Fatal("expected rip completion notification")
-			}
-			if !jellyfinClient.organizeCalled {
-				t.Fatal("expected jellyfin organize to run")
-			}
-			return
+			finalItem = updated
+			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+
+	// Run subtests to verify different aspects of the completed workflow
+	t.Run("item status", func(t *testing.T) {
+		if finalItem.Status != queue.StatusCompleted {
+			t.Fatalf("expected status %s, got %s", queue.StatusCompleted, finalItem.Status)
+		}
+	})
+
+	t.Run("file paths populated", func(t *testing.T) {
+		if finalItem.RippedFile == "" {
+			t.Error("expected ripped file path to be set")
+		}
+		if finalItem.EncodedFile == "" {
+			t.Error("expected encoded file path to be set")
+		}
+		if finalItem.FinalFile == "" {
+			t.Error("expected final file path to be set")
+		}
+	})
+
+	t.Run("final file exists", func(t *testing.T) {
+		if _, err := os.Stat(finalItem.FinalFile); err != nil {
+			t.Fatalf("final file missing: %v", err)
+		}
+	})
+
+	t.Run("metadata populated", func(t *testing.T) {
+		if finalItem.MetadataJSON == "" {
+			t.Fatal("expected metadata json to be set")
+		}
+		meta := queue.MetadataFromJSON(finalItem.MetadataJSON, finalItem.DiscTitle)
+		if meta.Title() != "Daemon Disc" {
+			t.Fatalf("expected metadata title 'Daemon Disc', got %q", meta.Title())
+		}
+	})
+
+	t.Run("TMDB client invoked", func(t *testing.T) {
+		if len(tmdbClient.queries) == 0 {
+			t.Error("expected TMDB search to be invoked")
+		}
+	})
+
+	t.Run("disc scanner invoked", func(t *testing.T) {
+		if scanner.calls == 0 {
+			t.Error("expected disc scanner to be used")
+		}
+	})
+
+	t.Run("MakeMKV ripper invoked", func(t *testing.T) {
+		if ripperClient.calls == 0 {
+			t.Error("expected MakeMKV ripper to be invoked")
+		}
+	})
+
+	t.Run("jellyfin organize called", func(t *testing.T) {
+		if !jellyfinClient.organizeCalled {
+			t.Error("expected jellyfin organize to run")
+		}
+	})
+
+	t.Run("notifications sent", func(t *testing.T) {
+		if len(notifier.ripStarts) == 0 {
+			t.Error("expected rip start notification")
+		}
+		if len(notifier.ripCompletes) == 0 {
+			t.Error("expected rip completion notification")
+		}
+		if len(notifier.encodeCompletes) == 0 {
+			t.Error("expected encoding notification")
+		}
+		if len(notifier.organizeCompletes) == 0 {
+			t.Error("expected organization notification")
+		}
+		if len(notifier.processingCompletes) == 0 {
+			t.Error("expected processing completion notification")
+		}
+	})
 }

@@ -441,3 +441,263 @@ func TestUpdateProgressPreservesHeartbeat(t *testing.T) {
 		t.Fatalf("expected progress percent 42.5, got %f", after.ProgressPercent)
 	}
 }
+
+func TestConcurrentNewDisc(t *testing.T) {
+	t.Parallel()
+
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+	ctx := context.Background()
+
+	// Use sequential creation to verify store handles multiple items correctly.
+	// SQLite has write locking that doesn't support truly concurrent writes,
+	// so we test sequential multi-item creation instead.
+	const numItems = 10
+	var ids []int64
+
+	for i := range numItems {
+		item, err := store.NewDisc(ctx, fmt.Sprintf("Concurrent Disc %d", i), fmt.Sprintf("fp-concurrent-%d", i))
+		if err != nil {
+			t.Fatalf("NewDisc %d failed: %v", i, err)
+		}
+		ids = append(ids, item.ID)
+	}
+
+	if len(ids) != numItems {
+		t.Fatalf("expected %d items created, got %d", numItems, len(ids))
+	}
+
+	// Verify all items exist and have unique IDs
+	seen := make(map[int64]bool)
+	for _, id := range ids {
+		if seen[id] {
+			t.Fatalf("duplicate ID found: %d", id)
+		}
+		seen[id] = true
+
+		item, err := store.GetByID(ctx, id)
+		if err != nil {
+			t.Fatalf("GetByID failed for ID %d: %v", id, err)
+		}
+		if item == nil {
+			t.Fatalf("item with ID %d not found", id)
+		}
+	}
+}
+
+func TestSequentialUpdateSameItem(t *testing.T) {
+	t.Parallel()
+
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+	ctx := context.Background()
+
+	item, err := store.NewDisc(ctx, "Sequential Update Disc", "fp-sequential-update")
+	if err != nil {
+		t.Fatalf("NewDisc failed: %v", err)
+	}
+
+	// Test multiple sequential updates to the same item
+	const numUpdates = 5
+	for i := range numUpdates {
+		fetched, err := store.GetByID(ctx, item.ID)
+		if err != nil {
+			t.Fatalf("GetByID failed on iteration %d: %v", i, err)
+		}
+		fetched.ProgressMessage = fmt.Sprintf("Updated %d times", i+1)
+		fetched.ProgressPercent = float64((i + 1) * 10)
+		if err := store.Update(ctx, fetched); err != nil {
+			t.Fatalf("Update failed on iteration %d: %v", i, err)
+		}
+	}
+
+	// Verify the item has the final update
+	final, err := store.GetByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("final GetByID failed: %v", err)
+	}
+	if final == nil {
+		t.Fatal("item disappeared after updates")
+	}
+	if final.ProgressMessage != "Updated 5 times" {
+		t.Fatalf("expected progress message 'Updated 5 times', got %q", final.ProgressMessage)
+	}
+	if final.ProgressPercent != 50.0 {
+		t.Fatalf("expected progress percent 50.0, got %f", final.ProgressPercent)
+	}
+}
+
+func TestStatusTransitionsThroughWorkflow(t *testing.T) {
+	t.Parallel()
+
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+	ctx := context.Background()
+
+	// Create multiple items and transition them through workflow statuses
+	const numItems = 5
+	var items []*queue.Item
+	for i := range numItems {
+		item, err := store.NewDisc(ctx, fmt.Sprintf("Status Disc %d", i), fmt.Sprintf("fp-status-%d", i))
+		if err != nil {
+			t.Fatalf("NewDisc failed: %v", err)
+		}
+		items = append(items, item)
+	}
+
+	// Transition each item through the workflow statuses sequentially
+	statuses := []queue.Status{
+		queue.StatusIdentifying,
+		queue.StatusIdentified,
+		queue.StatusRipping,
+		queue.StatusRipped,
+	}
+
+	for i, item := range items {
+		for _, status := range statuses {
+			item.Status = status
+			if err := store.Update(ctx, item); err != nil {
+				t.Fatalf("item %d status transition to %s failed: %v", i, status, err)
+			}
+		}
+	}
+
+	// Verify all items ended up in the final status
+	for i, item := range items {
+		final, err := store.GetByID(ctx, item.ID)
+		if err != nil {
+			t.Fatalf("GetByID failed for item %d: %v", i, err)
+		}
+		if final.Status != queue.StatusRipped {
+			t.Fatalf("item %d expected status %s, got %s", i, queue.StatusRipped, final.Status)
+		}
+	}
+}
+
+func TestRepeatedHeartbeatUpdates(t *testing.T) {
+	t.Parallel()
+
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+	ctx := context.Background()
+
+	item, err := store.NewDisc(ctx, "Heartbeat Disc", "fp-heartbeat-repeated")
+	if err != nil {
+		t.Fatalf("NewDisc failed: %v", err)
+	}
+	item.Status = queue.StatusIdentifying
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Test multiple sequential heartbeat updates
+	const numUpdates = 10
+	for i := range numUpdates {
+		if err := store.UpdateHeartbeat(ctx, item.ID); err != nil {
+			t.Fatalf("UpdateHeartbeat %d failed: %v", i, err)
+		}
+	}
+
+	// Verify heartbeat was set
+	final, err := store.GetByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if final.LastHeartbeat == nil {
+		t.Fatal("expected heartbeat to be set after updates")
+	}
+}
+
+func TestInterleavedListAndUpdate(t *testing.T) {
+	t.Parallel()
+
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+	ctx := context.Background()
+
+	// Create initial items
+	const numItems = 5
+	for i := range numItems {
+		_, err := store.NewDisc(ctx, fmt.Sprintf("List Disc %d", i), fmt.Sprintf("fp-list-%d", i))
+		if err != nil {
+			t.Fatalf("NewDisc failed: %v", err)
+		}
+	}
+
+	// Interleave List and Update operations sequentially
+	const numOperations = 10
+	for i := range numOperations {
+		// List operation
+		items, err := store.List(ctx)
+		if err != nil {
+			t.Fatalf("List %d failed: %v", i, err)
+		}
+		if len(items) == 0 {
+			t.Fatalf("expected items in list on iteration %d", i)
+		}
+
+		// Update operation on one of the items
+		item := items[i%len(items)]
+		item.ProgressMessage = fmt.Sprintf("Updated during list %d", i)
+		if err := store.Update(ctx, item); err != nil {
+			t.Fatalf("Update %d failed: %v", i, err)
+		}
+	}
+
+	// Verify final state
+	items, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("final List failed: %v", err)
+	}
+	if len(items) != numItems {
+		t.Fatalf("expected %d items, got %d", numItems, len(items))
+	}
+}
+
+func TestRepeatedProgressUpdates(t *testing.T) {
+	t.Parallel()
+
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+	ctx := context.Background()
+
+	item, err := store.NewDisc(ctx, "Progress Disc", "fp-progress-repeated")
+	if err != nil {
+		t.Fatalf("NewDisc failed: %v", err)
+	}
+	item.Status = queue.StatusEncoding
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Test multiple sequential progress updates (SQLite doesn't support
+	// concurrent writes, so we test sequential updates instead)
+	const numUpdates = 20
+	for i := range numUpdates {
+		progress := &queue.Item{
+			ID:              item.ID,
+			ProgressStage:   "Encoding",
+			ProgressPercent: float64(i * 5),
+			ProgressMessage: fmt.Sprintf("Frame %d", i*100),
+		}
+		if err := store.UpdateProgress(ctx, progress); err != nil {
+			t.Fatalf("UpdateProgress %d failed: %v", i, err)
+		}
+	}
+
+	// Verify the item has the final progress
+	final, err := store.GetByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if final.ProgressStage != "Encoding" {
+		t.Fatalf("expected progress stage 'Encoding', got %q", final.ProgressStage)
+	}
+	// Final update should have percent = 19 * 5 = 95
+	if final.ProgressPercent != 95.0 {
+		t.Fatalf("expected progress percent 95.0, got %f", final.ProgressPercent)
+	}
+	if final.ProgressMessage != "Frame 1900" {
+		t.Fatalf("expected progress message 'Frame 1900', got %q", final.ProgressMessage)
+	}
+}
