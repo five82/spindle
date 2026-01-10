@@ -25,7 +25,6 @@ const (
 	defaultKeyDBPath                   = "~/.config/spindle/keydb/KEYDB.cfg"
 	defaultKeyDBDownloadURL            = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
 	defaultKeyDBDownloadTimeout        = 300
-	defaultIdentificationOverridesPath = "~/.config/spindle/overrides/identification.json"
 	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
 	defaultRipCacheMaxGiB              = 150
 	defaultPresetDeciderBaseURL        = "https://openrouter.ai/api/v1/chat/completions"
@@ -110,13 +109,12 @@ func Default() Config {
 			MaxGiB: defaultRipCacheMaxGiB,
 		},
 		MakeMKV: MakeMKV{
-			OpticalDrive:                defaultOpticalDrive,
-			RipTimeout:                  3600,
-			InfoTimeout:                 300,
-			KeyDBPath:                   defaultKeyDBPath,
-			KeyDBDownloadURL:            defaultKeyDBDownloadURL,
-			KeyDBDownloadTimeout:        defaultKeyDBDownloadTimeout,
-			IdentificationOverridesPath: defaultIdentificationOverridesPath,
+			OpticalDrive:         defaultOpticalDrive,
+			RipTimeout:           3600,
+			InfoTimeout:          300,
+			KeyDBPath:            defaultKeyDBPath,
+			KeyDBDownloadURL:     defaultKeyDBDownloadURL,
+			KeyDBDownloadTimeout: defaultKeyDBDownloadTimeout,
 		},
 		PresetDecider: PresetDecider{
 			BaseURL:        defaultPresetDeciderBaseURL,

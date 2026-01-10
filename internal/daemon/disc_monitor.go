@@ -258,12 +258,14 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		discFingerprint = strings.TrimSpace(scanResult.Fingerprint)
 	}
 	if discFingerprint == "" {
-		discFingerprint = strings.TrimSpace(info.Label)
-		logger.Warn("scanner fingerprint unavailable; falling back to disc label",
-			logging.String("fallback", discFingerprint),
-			logging.String(logging.FieldEventType, "disc_fingerprint_fallback"),
-			logging.Alert("fingerprint_fallback"),
+		logger.Error("scanner fingerprint unavailable; disc not queued",
+			logging.String(logging.FieldEventType, "disc_fingerprint_failed"),
+			logging.String(logging.FieldErrorHint, "fingerprint computation failed; check disc readability and MakeMKV logs"),
 		)
+		if m.errorNotifier != nil {
+			m.errorNotifier.FingerprintFailed(ctx, info, fmt.Errorf("fingerprint computation failed"), logger)
+		}
+		return false
 	}
 	logger.Debug("computed fingerprint", logging.String("fingerprint", discFingerprint))
 

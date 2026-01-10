@@ -130,15 +130,11 @@ func parseOverrideLevel(level string) slog.Level {
 
 func (b *BackgroundLogger) filename(item *queue.Item) string {
 	timestamp := time.Now().UTC().Format("20060102T150405")
-	fingerprint := strings.TrimSpace(item.DiscFingerprint)
-	if fingerprint == "" {
-		fingerprint = fmt.Sprintf("item-%d", item.ID)
-	}
 	title := sanitizeSlug(item.DiscTitle)
 	if title == "" {
 		title = "untitled"
 	}
-	return fmt.Sprintf("%s-%s-%s.log", timestamp, fingerprint, title)
+	return fmt.Sprintf("%s-%d-%s.log", timestamp, item.ID, title)
 }
 
 func sanitizeSlug(value string) string {

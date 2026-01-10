@@ -67,7 +67,7 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 	var spec struct {
 		ContentKey string `json:"content_key"`
 		Titles     []struct {
-			ContentFingerprint string `json:"content_fingerprint"`
+			TitleHash string `json:"title_hash"`
 		} `json:"titles"`
 	}
 	if err := json.Unmarshal([]byte(updated.RipSpecData), &spec); err != nil {
@@ -76,8 +76,8 @@ func TestIdentifierTransitionsToIdentified(t *testing.T) {
 	if spec.ContentKey != "tmdb:movie:1" {
 		t.Fatalf("expected content key tmdb:movie:1, got %q", spec.ContentKey)
 	}
-	if len(spec.Titles) == 0 || spec.Titles[0].ContentFingerprint == "" {
-		t.Fatal("expected per-title content fingerprint")
+	if len(spec.Titles) == 0 || spec.Titles[0].TitleHash == "" {
+		t.Fatal("expected per-title hash")
 	}
 }
 
@@ -136,7 +136,7 @@ func TestIdentifierMarksDuplicateForReview(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	second, err := store.NewDisc(ctx, "Duplicate", "fp-dup")
+	second, err := store.NewDisc(ctx, "Duplicate", first.DiscFingerprint)
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestIdentifierSkipsDuplicateCheckWithoutStore(t *testing.T) {
 	stubTMDB := &stubSearcher{resp: &tmdb.Response{Results: []tmdb.Result{{ID: 3, Title: "CLI Disc", VoteAverage: 7.5, VoteCount: 50, ReleaseDate: "2005-02-01"}}, TotalResults: 1}}
 	stubScanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-cli", Titles: []disc.Title{{ID: 1, Name: "", Duration: 7200}}}}
 	handler := identification.NewIdentifierWithDependencies(cfg, nil, logging.NewNop(), stubTMDB, stubScanner, nil)
-	item := &queue.Item{DiscTitle: "CLI Disc", Status: queue.StatusPending}
+	item := &queue.Item{DiscTitle: "CLI Disc", Status: queue.StatusPending, DiscFingerprint: "fp-cli"}
 
 	if err := handler.Prepare(context.Background(), item); err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -288,25 +288,18 @@ func TestIdentifierUsesKeyDBTitleForSearch(t *testing.T) {
 	}
 	cfg.MakeMKV.KeyDBPath = keydbPath
 
-	overridePath := filepath.Join(t.TempDir(), "overrides.json")
-	overrideData := []byte(`[{"fingerprints":["FP-OVERRIDE"],"disc_ids":["` + discID + `"],"title":"Override Title","tmdb_id":99,"media_type":"tv","season":2}]`)
-	if err := os.WriteFile(overridePath, overrideData, 0o644); err != nil {
-		t.Fatalf("write overrides: %v", err)
-	}
-	cfg.MakeMKV.IdentificationOverridesPath = overridePath
-
 	store := testsupport.MustOpenStore(t, cfg)
-	item, err := store.NewDisc(context.Background(), "Original Title", "FP-OVERRIDE")
+	item, err := store.NewDisc(context.Background(), "Original Title", "FP-TEST")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
 	}
 
 	searcher := &recordingSearcher{
 		responses: map[string]*tmdb.Response{
-			"Override Title": {
+			"KeyDB Title": {
 				Results: []tmdb.Result{{
 					ID:          11,
-					Title:       "Override Title",
+					Title:       "KeyDB Title",
 					MediaType:   "movie",
 					VoteAverage: 8.0,
 					VoteCount:   250,
@@ -317,7 +310,7 @@ func TestIdentifierUsesKeyDBTitleForSearch(t *testing.T) {
 		},
 	}
 	scanner := &stubDiscScanner{result: &disc.ScanResult{
-		Fingerprint: "FP-OVERRIDE",
+		Fingerprint: "FP-TEST",
 		Titles:      []disc.Title{{ID: 1, Name: "Original Title", Duration: 7200}},
 		BDInfo:      &disc.BDInfoResult{DiscID: discID, DiscName: "Disc Name", VolumeIdentifier: "VOL"},
 	}}
@@ -331,11 +324,11 @@ func TestIdentifierUsesKeyDBTitleForSearch(t *testing.T) {
 	}
 
 	uniqueQueries := uniqueStrings(searcher.queries)
-	if len(uniqueQueries) < 2 || uniqueQueries[0] != "KeyDB Title" || uniqueQueries[1] != "Override Title" {
-		t.Fatalf("expected keydb then override query order, got %+v", uniqueQueries)
+	if len(uniqueQueries) < 1 || uniqueQueries[0] != "KeyDB Title" {
+		t.Fatalf("expected keydb title as first query, got %+v", uniqueQueries)
 	}
-	if !strings.HasPrefix(item.DiscTitle, "Override Title") {
-		t.Fatalf("expected override title to win after fallback, got %q", item.DiscTitle)
+	if !strings.HasPrefix(item.DiscTitle, "KeyDB Title") {
+		t.Fatalf("expected keydb title to be used, got %q", item.DiscTitle)
 	}
 
 	var spec struct {
@@ -360,13 +353,6 @@ func TestIdentifierKeepsKeyDBResultWhenMatched(t *testing.T) {
 	}
 	cfg.MakeMKV.KeyDBPath = keydbPath
 
-	overridePath := filepath.Join(t.TempDir(), "overrides.json")
-	overrideData := []byte(`[{"fingerprints":["FP-MATCH"],"disc_ids":["` + discID + `"],"title":"Override Match","tmdb_id":77,"media_type":"tv","season":2}]`)
-	if err := os.WriteFile(overridePath, overrideData, 0o644); err != nil {
-		t.Fatalf("write overrides: %v", err)
-	}
-	cfg.MakeMKV.IdentificationOverridesPath = overridePath
-
 	store := testsupport.MustOpenStore(t, cfg)
 	item, err := store.NewDisc(context.Background(), "Original Title", "FP-MATCH")
 	if err != nil {
@@ -383,17 +369,6 @@ func TestIdentifierKeepsKeyDBResultWhenMatched(t *testing.T) {
 					VoteAverage: 7.5,
 					VoteCount:   150,
 					ReleaseDate: "1999-01-01",
-				}},
-				TotalResults: 1,
-			},
-			"Override Match": {
-				Results: []tmdb.Result{{
-					ID:          99,
-					Title:       "Override Match",
-					MediaType:   "movie",
-					VoteAverage: 8.5,
-					VoteCount:   200,
-					ReleaseDate: "2000-01-01",
 				}},
 				TotalResults: 1,
 			},
@@ -416,9 +391,6 @@ func TestIdentifierKeepsKeyDBResultWhenMatched(t *testing.T) {
 	uniqueQueries := uniqueStrings(searcher.queries)
 	if len(uniqueQueries) == 0 || uniqueQueries[0] != "KeyDB Match" {
 		t.Fatalf("expected keydb query first, got %+v", uniqueQueries)
-	}
-	if len(uniqueQueries) != 1 {
-		t.Fatalf("expected only keydb query to be used, got %+v", uniqueQueries)
 	}
 	if !strings.HasPrefix(item.DiscTitle, "KeyDB Match") {
 		t.Fatalf("expected keydb title to remain, got %q", item.DiscTitle)

@@ -79,7 +79,7 @@ var (
 	allDigitsPattern  = regexp.MustCompile(`^\d+$`)
 	shortCodePattern  = regexp.MustCompile(`^[A-Z0-9_]{1,4}$`)
 	technicalPatterns = []string{
-		"LOGICAL_VOLUME_ID", "DVD_VIDEO", "BLURAY", "BD_ROM",
+		"LOGICAL_VOLUME_ID", "VOLUME_ID", "DVD_VIDEO", "BLURAY", "BD_ROM",
 		"UNTITLED", "UNKNOWN DISC", "VOLUME_", "VOLUME ID", "DISK_", "TRACK_",
 	}
 )

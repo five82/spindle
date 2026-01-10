@@ -222,12 +222,6 @@ func (c *Config) normalizeMakeMKV() error {
 	if c.MakeMKV.KeyDBPath, err = expandPath(c.MakeMKV.KeyDBPath); err != nil {
 		return fmt.Errorf("makemkv.keydb_path: %w", err)
 	}
-	if strings.TrimSpace(c.MakeMKV.IdentificationOverridesPath) == "" {
-		c.MakeMKV.IdentificationOverridesPath = defaultIdentificationOverridesPath
-	}
-	if c.MakeMKV.IdentificationOverridesPath, err = expandPath(c.MakeMKV.IdentificationOverridesPath); err != nil {
-		return fmt.Errorf("makemkv.identification_overrides_path: %w", err)
-	}
 	if strings.TrimSpace(c.MakeMKV.KeyDBDownloadURL) == "" {
 		c.MakeMKV.KeyDBDownloadURL = defaultKeyDBDownloadURL
 	}

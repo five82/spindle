@@ -116,7 +116,6 @@ info_timeout = 300                                   # MakeMKV disc info timeout
 keydb_path = "~/.config/spindle/keydb/KEYDB.cfg"     # Optional KEYDB.cfg for Disc ID lookups
 keydb_download_url = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
 keydb_download_timeout = 1500                        # Download timeout in seconds
-identification_overrides_path = "~/.config/spindle/overrides/identification.json"
 
 # ============================================================================
 # PRESET DECIDER (LLM-based encoding preset selection)

@@ -8,7 +8,7 @@ import (
 
 // StagingRoot returns the per-item staging directory rooted at base.
 // If a disc fingerprint is available it is used; otherwise it falls
-// back to a queue-scoped segment to avoid collisions.
+// back to queue-{ID} to avoid collisions.
 func (i Item) StagingRoot(base string) string {
 	base = strings.TrimSpace(base)
 	if base == "" {
@@ -18,14 +18,7 @@ func (i Item) StagingRoot(base string) string {
 	if segment != "" {
 		segment = strings.ToUpper(segment)
 	} else {
-		if i.ID > 0 {
-			segment = fmt.Sprintf("queue-%d", i.ID)
-		} else {
-			segment = sanitizeSegment(i.DiscTitle)
-			if segment == "" {
-				segment = "queue-temp"
-			}
-		}
+		segment = fmt.Sprintf("queue-%d", i.ID)
 	}
 	segment = sanitizeSegment(segment)
 	return filepath.Join(base, segment)

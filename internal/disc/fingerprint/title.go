@@ -10,11 +10,11 @@ import (
 	"spindle/internal/disc"
 )
 
-// TitleFingerprint computes a deterministic fingerprint for a MakeMKV title using
+// TitleHash computes a deterministic hash for a MakeMKV title using
 // stable attributes (duration, track ordering, codec metadata, languages, etc.).
 // The goal is to identify the logical piece of content regardless of which disc
 // it appears on, so the disc fingerprint is intentionally excluded.
-func TitleFingerprint(title disc.Title) string {
+func TitleHash(title disc.Title) string {
 	hasher := sha256.New()
 
 	writeComponent(hasher, strings.ToLower(strings.TrimSpace(title.Name)))

@@ -12,7 +12,6 @@ import (
 	"spindle/internal/config"
 	"spindle/internal/disc"
 	"spindle/internal/identification/keydb"
-	"spindle/internal/identification/overrides"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
@@ -25,15 +24,14 @@ import (
 
 // Identifier performs disc identification using MakeMKV scanning and TMDB metadata.
 type Identifier struct {
-	store     *queue.Store
-	cfg       *config.Config
-	logger    *slog.Logger
-	tmdb      *tmdbSearch
-	tmdbInfo  TMDBSearcher
-	keydb     *keydb.Catalog
-	overrides *overrides.Catalog
-	scanner   DiscScanner
-	notifier  notifications.Service
+	store    *queue.Store
+	cfg      *config.Config
+	logger   *slog.Logger
+	tmdb     *tmdbSearch
+	tmdbInfo TMDBSearcher
+	keydb    *keydb.Catalog
+	scanner  DiscScanner
+	notifier notifications.Service
 }
 
 // DiscScanner defines disc scanning operations.
@@ -63,19 +61,14 @@ func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logge
 		timeout := time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout) * time.Second
 		catalog = keydb.NewCatalog(cfg.MakeMKV.KeyDBPath, logger, cfg.MakeMKV.KeyDBDownloadURL, timeout)
 	}
-	var overrideCatalog *overrides.Catalog
-	if cfg != nil {
-		overrideCatalog = overrides.NewCatalog(cfg.MakeMKV.IdentificationOverridesPath, logger)
-	}
 	id := &Identifier{
-		store:     store,
-		cfg:       cfg,
-		tmdb:      newTMDBSearch(searcher),
-		tmdbInfo:  searcher,
-		keydb:     catalog,
-		overrides: overrideCatalog,
-		scanner:   scanner,
-		notifier:  notifier,
+		store:    store,
+		cfg:      cfg,
+		tmdb:     newTMDBSearch(searcher),
+		tmdbInfo: searcher,
+		keydb:    catalog,
+		scanner:  scanner,
+		notifier: notifier,
 	}
 	id.SetLogger(logger)
 	return id
@@ -131,38 +124,6 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	discID := ""
 	if scanResult != nil && scanResult.BDInfo != nil {
 		discID = strings.TrimSpace(scanResult.BDInfo.DiscID)
-	}
-	var overrideMatch *overrides.Override
-	if i.overrides != nil {
-		overrideLookupStart := time.Now()
-		if match, ok, err := i.overrides.Lookup(item.DiscFingerprint, discID); err != nil {
-			logger.Warn("override lookup failed",
-				logging.Error(err),
-				logging.String("fingerprint", item.DiscFingerprint),
-				logging.String("disc_id", discID),
-				logging.Duration("lookup_duration", time.Since(overrideLookupStart)),
-				logging.String("error_message", "Failed to search identification overrides"),
-				logging.String(logging.FieldErrorHint, "Check override file path and JSON formatting"),
-				logging.String(logging.FieldImpact, "override skipped; will fall back to TMDB search"),
-				logging.String(logging.FieldEventType, "override_lookup_failed"))
-		} else if ok {
-			overrideMatch = &match
-			logger.Info("identification override matched",
-				logging.String(logging.FieldDecisionType, "identification_override"),
-				logging.String("decision_result", "matched"),
-				logging.String("override_title", match.Title),
-				logging.Int64("override_tmdb_id", match.TMDBID),
-				logging.String("decision_reason", "manual override configured for fingerprint/disc_id"),
-				logging.String("decision_options", "override, search"),
-				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
-		} else {
-			logger.Debug("no override match found",
-				logging.String(logging.FieldDecisionType, "identification_override"),
-				logging.String("decision_result", "no_match"),
-				logging.String("fingerprint", item.DiscFingerprint),
-				logging.String("disc_id", discID),
-				logging.Duration("lookup_duration", time.Since(overrideLookupStart)))
-		}
 	}
 
 	title := strings.TrimSpace(item.DiscTitle)
@@ -288,9 +249,6 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			discSources = append(discSources, scanResult.BDInfo.VolumeIdentifier)
 		}
 	}
-	if overrideMatch != nil && strings.TrimSpace(overrideMatch.Title) != "" {
-		discSources = append(discSources, overrideMatch.Title)
-	}
 	if n, ok := extractDiscNumber(discSources...); ok {
 		discNumber = n
 		logger.Debug("disc number detected", logging.Int("disc_number", discNumber))
@@ -308,7 +266,6 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		DiscNumber: discNumber,
 		SearchOpts: searchOpts,
 		MediaHint:  mediaHint,
-		Override:   overrideMatch,
 		ScanResult: scanResult,
 	})
 	if err != nil {
@@ -351,26 +308,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	ripFingerprint := ""
-	if scanResult != nil {
-		ripFingerprint = strings.TrimSpace(scanResult.Fingerprint)
-		if ripFingerprint == "" && scanResult.BDInfo != nil {
-			ripFingerprint = strings.ToUpper(strings.TrimSpace(scanResult.BDInfo.DiscID))
-		}
-	}
-	if ripFingerprint == "" {
-		fallback := strings.TrimSpace(item.DiscFingerprint)
-		if fallback != "" {
-			logger.Warn(
-				"scanner fingerprint missing; using queue fingerprint",
-				logging.String("fallback_fingerprint", fallback),
-				logging.String(logging.FieldEventType, "fingerprint_fallback_used"),
-				logging.String(logging.FieldImpact, "identification may be less precise without scanner fingerprint"),
-				logging.String(logging.FieldErrorHint, "Run identification again after confirming MakeMKV can read the disc"),
-			)
-			ripFingerprint = fallback
-		}
-	}
+	// Use queue item fingerprint - it's mandatory at enqueue time
+	ripFingerprint := strings.TrimSpace(item.DiscFingerprint)
 
 	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, episodeMatches, identifiedTitle, title, metadata)
 

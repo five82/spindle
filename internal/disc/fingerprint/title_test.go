@@ -6,7 +6,7 @@ import (
 	"spindle/internal/disc"
 )
 
-func TestTitleFingerprintDeterministic(t *testing.T) {
+func TestTitleHashDeterministic(t *testing.T) {
 	title := disc.Title{
 		ID:       5,
 		Name:     "Episode One",
@@ -39,20 +39,20 @@ func TestTitleFingerprintDeterministic(t *testing.T) {
 		},
 	}
 
-	fp1 := TitleFingerprint(title)
+	fp1 := TitleHash(title)
 	if fp1 == "" {
-		t.Fatal("expected fingerprint to be generated")
+		t.Fatal("expected hash to be generated")
 	}
 
-	// Reorder tracks; fingerprint should remain stable.
+	// Reorder tracks; hash should remain stable.
 	title.Tracks[0], title.Tracks[1] = title.Tracks[1], title.Tracks[0]
-	fp2 := TitleFingerprint(title)
+	fp2 := TitleHash(title)
 	if fp1 != fp2 {
-		t.Fatalf("expected deterministic fingerprint, got %s vs %s", fp1, fp2)
+		t.Fatalf("expected deterministic hash, got %s vs %s", fp1, fp2)
 	}
 }
 
-func TestTitleFingerprintIgnoresDiscSpecificFields(t *testing.T) {
+func TestTitleHashIgnoresDiscSpecificFields(t *testing.T) {
 	base := disc.Title{
 		Name:     "Episode Two",
 		Duration: 1810,
@@ -61,13 +61,13 @@ func TestTitleFingerprintIgnoresDiscSpecificFields(t *testing.T) {
 			{StreamID: 2, Order: 1, Type: disc.TrackTypeAudio, CodecID: "A_DTS", Language: "eng"},
 		},
 	}
-	fp1 := TitleFingerprint(base)
+	fp1 := TitleHash(base)
 
 	modified := base
 	modified.ID = 999
-	fp2 := TitleFingerprint(modified)
+	fp2 := TitleHash(modified)
 
 	if fp1 != fp2 {
-		t.Fatalf("expected identical fingerprint when disc-only fields differ, got %s vs %s", fp1, fp2)
+		t.Fatalf("expected identical hash when disc-only fields differ, got %s vs %s", fp1, fp2)
 	}
 }

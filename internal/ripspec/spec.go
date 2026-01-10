@@ -22,31 +22,31 @@ type Envelope struct {
 
 // Title records playlist metadata captured during disc scanning.
 type Title struct {
-	ID                 int    `json:"id"`
-	Name               string `json:"name"`
-	Duration           int    `json:"duration"`
-	Chapters           int    `json:"chapters,omitempty"`
-	Playlist           string `json:"playlist,omitempty"`
-	SegmentCount       int    `json:"segment_count,omitempty"`
-	SegmentMap         string `json:"segment_map,omitempty"`
-	ContentFingerprint string `json:"content_fingerprint"`
-	Season             int    `json:"season,omitempty"`
-	Episode            int    `json:"episode,omitempty"`
-	EpisodeTitle       string `json:"episode_title,omitempty"`
-	EpisodeAirDate     string `json:"episode_air_date,omitempty"`
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	Duration       int    `json:"duration"`
+	Chapters       int    `json:"chapters,omitempty"`
+	Playlist       string `json:"playlist,omitempty"`
+	SegmentCount   int    `json:"segment_count,omitempty"`
+	SegmentMap     string `json:"segment_map,omitempty"`
+	TitleHash      string `json:"title_hash"`
+	Season         int    `json:"season,omitempty"`
+	Episode        int    `json:"episode,omitempty"`
+	EpisodeTitle   string `json:"episode_title,omitempty"`
+	EpisodeAirDate string `json:"episode_air_date,omitempty"`
 }
 
 // Episode describes a target episode to be produced from the disc.
 type Episode struct {
-	Key                string `json:"key"`
-	TitleID            int    `json:"title_id"`
-	Season             int    `json:"season"`
-	Episode            int    `json:"episode"`
-	EpisodeTitle       string `json:"episode_title,omitempty"`
-	EpisodeAirDate     string `json:"episode_air_date,omitempty"`
-	RuntimeSeconds     int    `json:"runtime_seconds,omitempty"`
-	ContentFingerprint string `json:"content_fingerprint,omitempty"`
-	OutputBasename     string `json:"output_basename,omitempty"`
+	Key            string `json:"key"`
+	TitleID        int    `json:"title_id"`
+	Season         int    `json:"season"`
+	Episode        int    `json:"episode"`
+	EpisodeTitle   string `json:"episode_title,omitempty"`
+	EpisodeAirDate string `json:"episode_air_date,omitempty"`
+	RuntimeSeconds int    `json:"runtime_seconds,omitempty"`
+	TitleHash      string `json:"title_hash,omitempty"`
+	OutputBasename string `json:"output_basename,omitempty"`
 }
 
 // Assets captures realised artefacts for each stage.

@@ -42,17 +42,17 @@ func TestChoosePrimaryTitlePrefersMPLSWithSegments(t *testing.T) {
 	}
 }
 
-func TestChoosePrimaryTitleUsesFingerprintWhenTied(t *testing.T) {
+func TestChoosePrimaryTitleUsesHashWhenTied(t *testing.T) {
 	titles := []ripspec.Title{
-		{ID: 0, Duration: 5400, Chapters: 40, Playlist: "00100.mpls", SegmentCount: 10, ContentFingerprint: "aaa"},
-		{ID: 1, Duration: 5400, Chapters: 40, Playlist: "00101.mpls", SegmentCount: 10, ContentFingerprint: "bbb"},
-		{ID: 2, Duration: 5400, Chapters: 40, Playlist: "00102.mpls", SegmentCount: 10, ContentFingerprint: "aaa"},
+		{ID: 0, Duration: 5400, Chapters: 40, Playlist: "00100.mpls", SegmentCount: 10, TitleHash: "aaa"},
+		{ID: 1, Duration: 5400, Chapters: 40, Playlist: "00101.mpls", SegmentCount: 10, TitleHash: "bbb"},
+		{ID: 2, Duration: 5400, Chapters: 40, Playlist: "00102.mpls", SegmentCount: 10, TitleHash: "aaa"},
 	}
 	selection, ok := ChoosePrimaryTitle(titles)
 	if !ok {
 		t.Fatalf("choosePrimaryTitle returned false")
 	}
-	if selection.ContentFingerprint != "aaa" {
-		t.Fatalf("expected fingerprint with highest frequency \"aaa\", got %q", selection.ContentFingerprint)
+	if selection.TitleHash != "aaa" {
+		t.Fatalf("expected hash with highest frequency \"aaa\", got %q", selection.TitleHash)
 	}
 }

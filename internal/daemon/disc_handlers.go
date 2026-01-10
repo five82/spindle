@@ -125,6 +125,18 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 		return true, nil
 	}
 
+	if status == queue.StatusReview {
+		if logger != nil {
+			logger.Debug(
+				"disc requires manual review",
+				logging.Int64(logging.FieldItemID, existing.ID),
+				logging.String("status", string(existing.Status)),
+				logging.String("review_reason", strings.TrimSpace(existing.ReviewReason)),
+			)
+		}
+		return true, nil
+	}
+
 	existing.Status = queue.StatusPending
 	existing.ErrorMessage = ""
 	existing.ProgressStage = "Awaiting identification"

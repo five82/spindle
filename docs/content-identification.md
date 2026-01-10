@@ -28,7 +28,6 @@ implementation.
      structures). Every downstream lookup hinges on this value.
 2. **Enrich**:
    - Merge MakeMKV titles with `bd_info` and KEYDB aliases; strip generic names.
-   - Apply any JSON overrides stored at `identification_overrides_path`.
 3. **Match** (`internal/identification.Identifier`):
    - Choose TV vs movie heuristics (runtime clusters, KEYDB hints, `_Season_`
      strings, etc.).
@@ -95,7 +94,6 @@ Spindle surfaces noisy/incorrect names.
 Key settings the identifier consumes (see `docs/configuration.md` for details):
 
 - `tmdb_api_key`, `tmdb_language`, `tmdb_confidence_threshold`
-- `identification_overrides_path`
 - `keydb_path`, `keydb_download_url`, `keydb_download_timeout`
 - `bd_info_enabled`
 - `optical_drive`

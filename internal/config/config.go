@@ -106,13 +106,12 @@ type RipCache struct {
 
 // MakeMKV contains configuration for disc ripping.
 type MakeMKV struct {
-	OpticalDrive                string `toml:"optical_drive"`
-	RipTimeout                  int    `toml:"rip_timeout"`
-	InfoTimeout                 int    `toml:"info_timeout"`
-	KeyDBPath                   string `toml:"keydb_path"`
-	KeyDBDownloadURL            string `toml:"keydb_download_url"`
-	KeyDBDownloadTimeout        int    `toml:"keydb_download_timeout"`
-	IdentificationOverridesPath string `toml:"identification_overrides_path"`
+	OpticalDrive         string `toml:"optical_drive"`
+	RipTimeout           int    `toml:"rip_timeout"`
+	InfoTimeout          int    `toml:"info_timeout"`
+	KeyDBPath            string `toml:"keydb_path"`
+	KeyDBDownloadURL     string `toml:"keydb_download_url"`
+	KeyDBDownloadTimeout int    `toml:"keydb_download_timeout"`
 }
 
 // PresetDecider contains configuration for LLM-based encoding preset selection.

@@ -199,21 +199,21 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 	// Prefer the most common fingerprint if duplicates exist.
 	fingerprintFreq := make(map[string]int)
 	for _, t := range titles {
-		fp := strings.TrimSpace(t.ContentFingerprint)
+		fp := strings.TrimSpace(t.TitleHash)
 		if fp != "" {
 			fingerprintFreq[fp]++
 		}
 	}
 	bestFreq := 0
 	for _, t := range featureLength {
-		if freq := fingerprintFreq[strings.TrimSpace(t.ContentFingerprint)]; freq > bestFreq {
+		if freq := fingerprintFreq[strings.TrimSpace(t.TitleHash)]; freq > bestFreq {
 			bestFreq = freq
 		}
 	}
 	if bestFreq > 1 {
 		filtered := make([]ripspec.Title, 0, len(featureLength))
 		for _, t := range featureLength {
-			if fingerprintFreq[strings.TrimSpace(t.ContentFingerprint)] == bestFreq {
+			if fingerprintFreq[strings.TrimSpace(t.TitleHash)] == bestFreq {
 				filtered = append(filtered, t)
 			}
 		}

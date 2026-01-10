@@ -40,11 +40,15 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 	return result, nil
 }
 
-// scanDiscAndCaptureFingerprint scans the disc, captures the fingerprint, and handles duplicates.
+// scanDiscAndCaptureFingerprint scans the disc for title info. The fingerprint should
+// already be set by the daemon; this function validates it and handles duplicates.
 func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *queue.Item, logger *slog.Logger) (*disc.ScanResult, int, error) {
 	device := strings.TrimSpace(i.cfg.MakeMKV.OpticalDrive)
+	existingFingerprint := strings.TrimSpace(item.DiscFingerprint)
+
 	logger.Debug("scanning disc with makemkv",
 		logging.String("device", device),
+		logging.String("existing_fingerprint", existingFingerprint),
 		logging.String(logging.FieldEventType, "scan_start"))
 	scanStart := time.Now()
 
@@ -68,40 +72,21 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 		}
 	}
 
-	scannerFingerprint := ""
-	if scanResult != nil {
-		scannerFingerprint = strings.TrimSpace(scanResult.Fingerprint)
-		if scannerFingerprint == "" && scanResult.BDInfo != nil {
-			if discID := strings.TrimSpace(scanResult.BDInfo.DiscID); discID != "" {
-				scannerFingerprint = strings.ToUpper(discID)
-				scanResult.Fingerprint = scannerFingerprint
-				logger.Debug("using bd_info disc id as fingerprint",
-					logging.String(logging.FieldDecisionType, "fingerprint_source"),
-					logging.String("decision_result", "selected"),
-					logging.String("decision_reason", "bd_info_disc_id_available"),
-					logging.String("decision_selected", scannerFingerprint),
-					logging.String("fingerprint", scannerFingerprint))
-			}
-		}
-	}
-
-	if scannerFingerprint != "" {
-		logger.Debug("disc fingerprint captured", logging.String("fingerprint", scannerFingerprint))
-		item.DiscFingerprint = scannerFingerprint
+	// Use existing fingerprint from daemon; it's mandatory at enqueue time
+	if existingFingerprint != "" {
+		logger.Debug("using fingerprint from daemon", logging.String("fingerprint", existingFingerprint))
 		if err := i.handleDuplicateFingerprint(ctx, item); err != nil {
 			return nil, 0, err
 		}
 		if item.Status == queue.StatusReview {
 			return scanResult, titleCount, nil
 		}
-	} else if trimmed := strings.TrimSpace(item.DiscFingerprint); trimmed != "" {
-		logger.Debug("scanner fingerprint unavailable; retaining existing fingerprint",
-			logging.String("fingerprint", trimmed))
 	} else {
-		logger.Warn("scanner fingerprint unavailable and queue fingerprint missing",
-			logging.String("error_message", "Disc fingerprint missing after MakeMKV scan"),
+		// This shouldn't happen since fingerprint is mandatory at enqueue
+		logger.Warn("fingerprint missing; should have been set at enqueue",
+			logging.String("error_message", "Disc fingerprint missing"),
 			logging.String(logging.FieldEventType, "fingerprint_missing"),
-			logging.String(logging.FieldErrorHint, "confirm the disc is readable and rerun identification"),
+			logging.String(logging.FieldErrorHint, "fingerprint should be computed at disc detection"),
 			logging.String(logging.FieldImpact, "identification will rely on disc title heuristics"),
 		)
 	}

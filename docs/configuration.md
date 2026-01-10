@@ -27,8 +27,6 @@ indefinitely.
 - `tmdb_api_key` *(required)* — Grab from https://www.themoviedb.org/settings/api.
 - `tmdb_language` — ISO 639‑1 code for metadata (default `en`).
 - `tmdb_confidence_threshold` — Float 0‑1; lower values accept fuzzier matches.
-- `identification_overrides_path` — JSON file for manual disc→title overrides
-  (defaults to `~/.config/spindle/overrides/identification.json`).
 - `bd_info_enabled` — When true, Spindle shells out to `bd_info` for additional
   playlist metadata. Requires `libbluray` utilities (`libbluray-bin`,
   `libbluray-utils`, etc.).

@@ -10,7 +10,6 @@ import (
 	"log/slog"
 
 	"spindle/internal/disc"
-	"spindle/internal/identification/overrides"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
@@ -24,7 +23,6 @@ type identifyContext struct {
 	DiscNumber int
 	SearchOpts tmdb.SearchOptions
 	MediaHint  mediaKind
-	Override   *overrides.Override
 	ScanResult *disc.ScanResult
 }
 
@@ -63,10 +61,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		episodeMatches  map[int]episodeAnnotation
 		matchedEpisodes []int
 	)
-	if input.Override != nil && input.Override.Season > 0 {
-		seasonNumber = input.Override.Season
-	}
-
 	showHintSources := []string{input.Title}
 	if input.DiscLabel != "" {
 		showHintSources = append(showHintSources, input.DiscLabel)
@@ -78,9 +72,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		if input.ScanResult.BDInfo.VolumeIdentifier != "" {
 			showHintSources = append(showHintSources, input.ScanResult.BDInfo.VolumeIdentifier)
 		}
-	}
-	if input.Override != nil && strings.TrimSpace(input.Override.Title) != "" {
-		showHintSources = append(showHintSources, input.Override.Title)
 	}
 	showHint, hintedSeason := deriveShowHint(showHintSources...)
 	if seasonNumber == 0 && hintedSeason > 0 {
@@ -107,9 +98,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	}
 
 	queryInputs := []string{titleForQuery, showHint}
-	if input.Override != nil {
-		queryInputs = append(queryInputs, input.Override.Title)
-	}
 	if discLabelForQuery != "" {
 		queryInputs = append(queryInputs, discLabelForQuery)
 	}
