@@ -71,7 +71,7 @@ func (e *ServiceError) Is(target error) bool {
 	return errors.Is(e.Cause, target)
 }
 
-// ErrorKind implements queue.ErrorClassifier for status mapping.
+// ErrorKind returns the error classification for logging and diagnostics.
 func (e *ServiceError) ErrorKind() string {
 	if e == nil {
 		return ""

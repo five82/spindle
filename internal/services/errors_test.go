@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"spindle/internal/queue"
 	"spindle/internal/services"
 )
 
@@ -29,19 +28,17 @@ func TestWrapIncludesContext(t *testing.T) {
 	}
 }
 
-func TestFailureStatusMapping(t *testing.T) {
-	// All errors now map to StatusFailed - error classification is for logging only
+func TestErrorKindClassification(t *testing.T) {
+	// Error classification is used for logging and diagnostics
 	validationErr := services.Wrap(services.ErrValidation, "identifier", "prepare", "invalid", nil)
-	if status := queue.FailureStatus(validationErr); status != queue.StatusFailed {
-		t.Fatalf("expected failed for validation error, got %s", status)
+	details := services.Details(validationErr)
+	if details.Kind != services.ErrorKindValidation {
+		t.Fatalf("expected validation kind, got %s", details.Kind)
 	}
 
 	transientErr := services.Wrap(services.ErrTransient, "encoding", "copy", "copy failed", errors.New("io"))
-	if status := queue.FailureStatus(transientErr); status != queue.StatusFailed {
-		t.Fatalf("expected failed for transient error, got %s", status)
-	}
-
-	if status := queue.FailureStatus(nil); status != queue.StatusFailed {
-		t.Fatalf("expected failed for nil error, got %s", status)
+	details = services.Details(transientErr)
+	if details.Kind != services.ErrorKindTransient {
+		t.Fatalf("expected transient kind, got %s", details.Kind)
 	}
 }

@@ -144,8 +144,8 @@ func TestQueueStopSpecificID(t *testing.T) {
 	if updated.Status != queue.StatusFailed {
 		t.Fatalf("expected failed, got %s", updated.Status)
 	}
-	if updated.ReviewReason != queue.StopReviewReason {
-		t.Fatalf("expected review reason %q, got %q", queue.StopReviewReason, updated.ReviewReason)
+	if updated.ReviewReason != queue.UserStopReason {
+		t.Fatalf("expected review reason %q, got %q", queue.UserStopReason, updated.ReviewReason)
 	}
 	if !updated.NeedsReview {
 		t.Fatalf("expected needs_review to be true")

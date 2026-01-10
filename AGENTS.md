@@ -141,7 +141,7 @@ Where to look first for common tasks:
 | Stage logic | `internal/{stagename}/handler.go` or `internal/{stagename}/{stagename}.go` |
 | CLI commands | `cmd/spindle/{command}.go` (e.g., `cmd/spindle/queue.go`) |
 | Config fields | `internal/config/config.go` (struct definitions + defaults) |
-| Error classification | `internal/queue/failure.go` (FailureStatus, ErrorClassifier) |
+| Error classification | `internal/services/errors.go` (ServiceError, ErrorKind) |
 | API/IPC contracts | `internal/api/` (DTOs), `internal/ipc/methods.go` (RPC handlers) |
 | Drapto integration | `internal/services/drapto/runner.go`, `internal/encodingstate/` |
 | Flyer integration | `internal/api/` (converters transform internal models to wire format) |
@@ -171,15 +171,16 @@ services.Notifier interface {
     Send(ctx, event) error
 }
 
-// Error classification - determines retry vs. permanent failure
-queue.ErrorClassifier interface {
-    Classify(error) FailureStatus
+// Error classification - used for logging and diagnostics
+services.ServiceError struct {
+    Kind ErrorKind  // validation, configuration, not_found, transient, etc.
+    // ... stage context, message, hints
 }
 ```
 
 ## Common Patterns
 
-**Error propagation**: Stages return errors that bubble up to the workflow manager. Use `queue.ErrorClassifier` to classify errors as `FailureRetryable` (transient) or `FailurePermanent` (irrecoverable). The workflow manager updates item status accordingly.
+**Error propagation**: Stages return errors that bubble up to the workflow manager. All failures result in `StatusFailed`; error classification via `services.ServiceError` is used for logging and diagnostics, not status routing.
 
 **Progress tracking**: Stages call `item.SetProgress(stage, message)` for incremental updates and `item.SetProgressComplete(stage)` when done. These updates are persisted and visible via `queue show <id>`.
 

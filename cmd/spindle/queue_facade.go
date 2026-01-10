@@ -398,8 +398,8 @@ func (f *queueStoreFacade) Health(ctx context.Context) (queueHealthView, error) 
 }
 
 func statusIsRetryable(value string) bool {
-	normalized := strings.TrimSpace(value)
-	return strings.EqualFold(normalized, string(queue.StatusFailed))
+	status, ok := queue.ParseStatus(value)
+	return ok && status == queue.StatusFailed
 }
 
 func convertDTOQueueItem(item api.QueueItem) queueItemDetailsView {

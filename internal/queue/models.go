@@ -25,7 +25,8 @@ const (
 	StatusFailed             Status = "failed"
 )
 
-const StopReviewReason = "Stop requested by user"
+// UserStopReason is the review reason set when a user explicitly stops an item.
+const UserStopReason = "Stop requested by user"
 
 // DaemonStopReason is the error message set when items are failed due to daemon shutdown.
 const DaemonStopReason = "Daemon stopped"
@@ -164,9 +165,9 @@ func IsProcessingStatus(status Status) bool {
 	return ok
 }
 
-// IsStopReviewReason reports whether a review reason represents a stop request.
-func IsStopReviewReason(reason string) bool {
-	return strings.EqualFold(strings.TrimSpace(reason), StopReviewReason)
+// IsUserStopReason reports whether a review reason represents a user-initiated stop.
+func IsUserStopReason(reason string) bool {
+	return strings.EqualFold(strings.TrimSpace(reason), UserStopReason)
 }
 
 // InitProgress resets progress fields for a new stage.

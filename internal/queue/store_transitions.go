@@ -172,9 +172,9 @@ func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
 	args := make([]any, 0, len(ids)+6)
 	args = append(args,
 		StatusFailed,
-		StopReviewReason,
+		UserStopReason,
 		"Stopped",
-		StopReviewReason,
+		UserStopReason,
 		now,
 	)
 	for _, id := range ids {

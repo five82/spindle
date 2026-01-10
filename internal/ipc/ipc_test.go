@@ -202,8 +202,8 @@ func TestIPCServerClient(t *testing.T) {
 	if stoppedC.Status != queue.StatusFailed {
 		t.Fatalf("expected discC to be failed after stop, got %s", stoppedC.Status)
 	}
-	if stoppedC.ReviewReason != queue.StopReviewReason {
-		t.Fatalf("expected review reason %q, got %q", queue.StopReviewReason, stoppedC.ReviewReason)
+	if stoppedC.ReviewReason != queue.UserStopReason {
+		t.Fatalf("expected review reason %q, got %q", queue.UserStopReason, stoppedC.ReviewReason)
 	}
 
 	clearFailedResp, err := client.QueueClearFailed()
@@ -226,9 +226,9 @@ func TestIPCServerClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueueRetry failed: %v", err)
 	}
-	// discC was in review status and should now be retried (reset to pending)
+	// discC was failed (user-stopped) and should now be retried (reset to pending)
 	if retryResp.Updated != 1 {
-		t.Fatalf("expected 1 retried item (review item), got %d", retryResp.Updated)
+		t.Fatalf("expected 1 retried item (user-stopped), got %d", retryResp.Updated)
 	}
 	retriedC, err := store.GetByID(ctx, discC.ID)
 	if err != nil {

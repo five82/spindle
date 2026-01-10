@@ -18,7 +18,7 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 	}
 	logger := m.stageLoggerForLane(ctx, nil, base, item).With(logging.String("component", "workflow-manager"))
 
-	_, message := m.classifyStageFailure(stageName, stageErr)
+	message := m.classifyStageFailure(stageName, stageErr)
 	m.setItemFailureState(item, message)
 
 	details := services.Details(stageErr)
@@ -54,13 +54,11 @@ func (m *Manager) handleStageFailure(ctx context.Context, stageName string, item
 	m.checkQueueCompletion(ctx)
 }
 
-func (m *Manager) classifyStageFailure(stageName string, stageErr error) (queue.Status, string) {
+func (m *Manager) classifyStageFailure(stageName string, stageErr error) string {
 	if stageErr == nil {
-		msg := m.getStageFailureMessage(stageName, "failed without error detail")
-		return queue.StatusFailed, msg
+		return m.getStageFailureMessage(stageName, "failed without error detail")
 	}
 
-	status := queue.FailureStatus(stageErr)
 	details := services.Details(stageErr)
 	message := strings.TrimSpace(details.Message)
 	if message == "" {
@@ -69,7 +67,7 @@ func (m *Manager) classifyStageFailure(stageName string, stageErr error) (queue.
 	if message == "" {
 		message = m.getStageFailureMessage(stageName, "failed")
 	}
-	return status, message
+	return message
 }
 
 func (m *Manager) getStageFailureMessage(stageName, defaultMsg string) string {
