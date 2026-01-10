@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"spindle/internal/logging"
@@ -23,18 +22,6 @@ func mediaTypeForContext(ctx SubtitleContext) string {
 
 func movieVariantSignature(req opensubtitles.SearchRequest) string {
 	return fmt.Sprintf("tmdb:%d|parent:%d|imdb:%s|q:%s|y:%s|type:%s", req.TMDBID, req.ParentTMDBID, strings.TrimSpace(req.IMDBID), strings.TrimSpace(req.Query), strings.TrimSpace(req.Year), strings.TrimSpace(req.MediaType))
-}
-
-func sanitizeIMDB(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	value = strings.TrimPrefix(value, "tt")
-	if _, err := strconv.ParseInt(value, 10, 64); err != nil {
-		return ""
-	}
-	return value
 }
 
 func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitles.SearchRequest) (opensubtitles.SearchResponse, error) {
@@ -62,7 +49,7 @@ func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitle
 	}
 
 	// IMDB-only fallback
-	if imdb := sanitizeIMDB(base.IMDBID); imdb != "" {
+	if imdb := opensubtitles.SanitizeIMDBID(base.IMDBID); imdb != "" {
 		variant := base
 		variant.TMDBID = 0
 		variant.ParentTMDBID = 0
@@ -90,7 +77,7 @@ func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitle
 				logging.String("query", variant.Query),
 				logging.String("year", variant.Year),
 				logging.Int64("tmdb_id", variant.TMDBID),
-				logging.String("imdb_id", sanitizeIMDB(variant.IMDBID)),
+				logging.String("imdb_id", opensubtitles.SanitizeIMDBID(variant.IMDBID)),
 				logging.String("media_type", variant.MediaType),
 			)
 		}

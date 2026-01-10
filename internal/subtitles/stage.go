@@ -93,13 +93,13 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	if len(targets) == 0 {
 		return services.Wrap(services.ErrValidation, "subtitles", "execute", "No encoded assets available for subtitles", nil)
 	}
-	if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Preparing subtitles (%d episodes)", len(targets)), 5); err != nil {
+	if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Preparing subtitles (%d episodes)", len(targets)), progressPercentAfterPrep); err != nil {
 		return err
 	}
 
 	baseCtx := BuildSubtitleContext(item)
 	openSubsExpected := s.service != nil && s.service.shouldUseOpenSubtitles()
-	step := 90.0 / float64(len(targets))
+	step := progressPercentForGen / float64(len(targets))
 	var (
 		openSubsCount int
 		aiCount       int
@@ -107,40 +107,12 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	)
 	for idx, target := range targets {
 		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(target.EpisodeKey))
-		label := ""
-		if target.Season > 0 && target.Episode > 0 {
-			label = fmt.Sprintf("S%02dE%02d", target.Season, target.Episode)
-		} else if strings.TrimSpace(target.EpisodeKey) != "" {
-			label = strings.ToUpper(strings.TrimSpace(target.EpisodeKey))
-		}
-		message := ""
-		if label != "" {
-			message = fmt.Sprintf("Phase 2/2 - Generating subtitles (%d/%d – %s)", idx+1, len(targets), label)
-		} else {
-			message = fmt.Sprintf("Phase 2/2 - Generating subtitles (%d/%d – %s)", idx+1, len(targets), filepath.Base(target.SourcePath))
-		}
-		if err := s.updateProgress(ctx, item, message, 5.0+step*float64(idx)); err != nil {
+		label := episodeProgressLabel(target)
+		message := fmt.Sprintf("Phase 2/2 - Generating subtitles (%d/%d – %s)", idx+1, len(targets), label)
+		if err := s.updateProgress(ctx, item, message, progressPercentAfterPrep+step*float64(idx)); err != nil {
 			return err
 		}
-		ctxMeta := baseCtx
-		if target.Season > 0 {
-			ctxMeta.Season = target.Season
-		}
-		if target.Episode > 0 {
-			ctxMeta.Episode = target.Episode
-		}
-		if strings.TrimSpace(target.EpisodeTitle) != "" {
-			baseTitle := strings.TrimSpace(baseCtx.Title)
-			episodeTitle := strings.TrimSpace(target.EpisodeTitle)
-			if baseTitle != "" {
-				ctxMeta.Title = fmt.Sprintf("%s – %s", baseTitle, episodeTitle)
-			} else {
-				ctxMeta.Title = episodeTitle
-			}
-		}
-		if ctxMeta.ContentKey == "" {
-			ctxMeta.ContentKey = target.EpisodeKey
-		}
+		ctxMeta := buildEpisodeContext(baseCtx, target)
 		cacheKey := BuildTranscriptCacheKey(item.ID, target.EpisodeKey)
 		result, err := s.service.Generate(ctx, GenerateRequest{
 			SourcePath:                target.SourcePath,
@@ -217,68 +189,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			aiCount++
 		}
 		totalSegments += result.SegmentCount
-		episodeKey := strings.ToLower(strings.TrimSpace(target.EpisodeKey))
-		if episodeKey == "" {
-			episodeKey = "primary"
-		}
-		if openSubsExpected && strings.EqualFold(result.Source, "whisperx") && result.OpenSubtitlesDecision != "force_ai" && result.OpenSubtitlesDecision != "skipped" {
-			if s.logger != nil {
-				s.logger.Warn("whisperx subtitle fallback used",
-					logging.Int64("item_id", item.ID),
-					logging.String("episode_key", episodeKey),
-					logging.String("source_file", target.SourcePath),
-					logging.String("subtitle_file", result.SubtitlePath),
-					logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
-					logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
-					logging.Alert("subtitle_fallback"),
-					logging.String(logging.FieldEventType, "subtitle_fallback"),
-					logging.String(logging.FieldErrorHint, "verify OpenSubtitles metadata or use --forceai"),
-					logging.String(logging.FieldImpact, "AI-generated subtitles used instead of OpenSubtitles"),
-				)
-			}
-		}
-		if s.logger != nil {
-			s.logger.Info("subtitle generation decision",
-				logging.String(logging.FieldDecisionType, "subtitle_generation"),
-				logging.String("decision_result", strings.ToLower(strings.TrimSpace(result.Source))),
-				logging.String("decision_reason", strings.TrimSpace(result.OpenSubtitlesDecision)),
-				logging.String("decision_options", "opensubtitles, whisperx"),
-				logging.String("episode_key", episodeKey),
-				logging.String("source_file", target.SourcePath),
-				logging.String("subtitle_file", result.SubtitlePath),
-				logging.Int("segments", result.SegmentCount),
-				logging.String("subtitle_source", result.Source),
-				logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
-				logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
-			)
-		}
-		if hasRipSpec {
-			if strings.TrimSpace(target.EpisodeKey) != "" {
-				env.Assets.AddAsset("subtitled", ripspec.Asset{EpisodeKey: target.EpisodeKey, TitleID: target.TitleID, Path: result.SubtitlePath})
-			}
-			recordSubtitleGeneration(&env, episodeKey, ctxMeta.Language, result, openSubsExpected, openSubsCount, aiCount)
-			if encoded, err := env.Encode(); err == nil {
-				copy := *item
-				copy.RipSpecData = encoded
-				if err := s.store.Update(ctx, &copy); err != nil && s.logger != nil {
-					s.logger.Warn("failed to persist rip spec after subtitles; metadata may be stale",
-						logging.Error(err),
-						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
-						logging.String(logging.FieldErrorHint, "check queue database access"),
-						logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
-					)
-				} else if err == nil {
-					*item = copy
-				}
-			} else if s.logger != nil {
-				s.logger.Warn("failed to encode rip spec after subtitles; metadata may be stale",
-					logging.Error(err),
-					logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-					logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
-					logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
-				)
-			}
-		}
+		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, openSubsExpected, openSubsCount, aiCount, ctxMeta)
 	}
 	item.ProgressMessage = subtitleStageMessage(len(targets), openSubsCount, aiCount)
 	item.ProgressPercent = 100
@@ -464,6 +375,120 @@ func (s *Stage) handleSuspectMisID(ctx context.Context, item *queue.Item, target
 		return false, GenerateResult{}, err
 	}
 	return true, result, nil
+}
+
+// buildEpisodeContext creates episode-specific subtitle context from base context.
+func buildEpisodeContext(baseCtx SubtitleContext, target subtitleTarget) SubtitleContext {
+	ctx := baseCtx
+	if target.Season > 0 {
+		ctx.Season = target.Season
+	}
+	if target.Episode > 0 {
+		ctx.Episode = target.Episode
+	}
+	if strings.TrimSpace(target.EpisodeTitle) != "" {
+		baseTitle := strings.TrimSpace(baseCtx.Title)
+		episodeTitle := strings.TrimSpace(target.EpisodeTitle)
+		if baseTitle != "" {
+			ctx.Title = fmt.Sprintf("%s – %s", baseTitle, episodeTitle)
+		} else {
+			ctx.Title = episodeTitle
+		}
+	}
+	if ctx.ContentKey == "" {
+		ctx.ContentKey = target.EpisodeKey
+	}
+	return ctx
+}
+
+// episodeProgressLabel builds a display label for the current episode.
+func episodeProgressLabel(target subtitleTarget) string {
+	if target.Season > 0 && target.Episode > 0 {
+		return fmt.Sprintf("S%02dE%02d", target.Season, target.Episode)
+	}
+	if key := strings.TrimSpace(target.EpisodeKey); key != "" {
+		return strings.ToUpper(key)
+	}
+	return filepath.Base(target.SourcePath)
+}
+
+// processGenerationResult handles logging and RipSpec update after successful generation.
+func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, target subtitleTarget, result GenerateResult, env *ripspec.Envelope, hasRipSpec, openSubsExpected bool, openSubsCount, aiCount int, ctxMeta SubtitleContext) {
+	episodeKey := strings.ToLower(strings.TrimSpace(target.EpisodeKey))
+	if episodeKey == "" {
+		episodeKey = "primary"
+	}
+
+	// Log fallback warning if OpenSubtitles was expected but WhisperX was used
+	if openSubsExpected && strings.EqualFold(result.Source, "whisperx") &&
+		result.OpenSubtitlesDecision != "force_ai" && result.OpenSubtitlesDecision != "skipped" {
+		if s.logger != nil {
+			s.logger.Warn("whisperx subtitle fallback used",
+				logging.Int64("item_id", item.ID),
+				logging.String("episode_key", episodeKey),
+				logging.String("source_file", target.SourcePath),
+				logging.String("subtitle_file", result.SubtitlePath),
+				logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
+				logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
+				logging.Alert("subtitle_fallback"),
+				logging.String(logging.FieldEventType, "subtitle_fallback"),
+				logging.String(logging.FieldErrorHint, "verify OpenSubtitles metadata or use --forceai"),
+				logging.String(logging.FieldImpact, "AI-generated subtitles used instead of OpenSubtitles"),
+			)
+		}
+	}
+
+	// Log generation decision
+	if s.logger != nil {
+		s.logger.Info("subtitle generation decision",
+			logging.String(logging.FieldDecisionType, "subtitle_generation"),
+			logging.String("decision_result", strings.ToLower(strings.TrimSpace(result.Source))),
+			logging.String("decision_reason", strings.TrimSpace(result.OpenSubtitlesDecision)),
+			logging.String("decision_options", "opensubtitles, whisperx"),
+			logging.String("episode_key", episodeKey),
+			logging.String("source_file", target.SourcePath),
+			logging.String("subtitle_file", result.SubtitlePath),
+			logging.Int("segments", result.SegmentCount),
+			logging.String("subtitle_source", result.Source),
+			logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
+			logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
+		)
+	}
+
+	// Update RipSpec if available
+	if !hasRipSpec {
+		return
+	}
+	if strings.TrimSpace(target.EpisodeKey) != "" {
+		env.Assets.AddAsset("subtitled", ripspec.Asset{EpisodeKey: target.EpisodeKey, TitleID: target.TitleID, Path: result.SubtitlePath})
+	}
+	recordSubtitleGeneration(env, episodeKey, ctxMeta.Language, result, openSubsExpected, openSubsCount, aiCount)
+	encoded, err := env.Encode()
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to encode rip spec after subtitles; metadata may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+				logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
+			)
+		}
+		return
+	}
+	copy := *item
+	copy.RipSpecData = encoded
+	if err := s.store.Update(ctx, &copy); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to persist rip spec after subtitles; metadata may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
+			)
+		}
+	} else {
+		*item = copy
+	}
 }
 
 func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {

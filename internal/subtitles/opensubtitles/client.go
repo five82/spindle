@@ -130,7 +130,7 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResponse,
 	if req.ParentTMDBID > 0 {
 		params.Set("parent_tmdb_id", strconv.FormatInt(req.ParentTMDBID, 10))
 	}
-	if imdb := sanitizeIMDBID(req.IMDBID); imdb != "" {
+	if imdb := SanitizeIMDBID(req.IMDBID); imdb != "" {
 		params.Set("imdb_id", imdb)
 	}
 	if req.Query != "" {
@@ -311,7 +311,10 @@ func (c *Client) applyHeaders(req *http.Request) {
 	}
 }
 
-func sanitizeIMDBID(value string) string {
+// SanitizeIMDBID normalizes an IMDB ID by trimming whitespace, removing the
+// "tt" prefix, and validating that the remainder is numeric. Returns an empty
+// string if the input is invalid.
+func SanitizeIMDBID(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""

@@ -7,27 +7,12 @@ import (
 	"time"
 )
 
+// OpenSubtitles rate limiting configuration.
 const (
-	openSubtitlesMinInterval         = time.Second
-	openSubtitlesMaxRateRetries      = 4
-	openSubtitlesInitialBackoff      = 2 * time.Second
-	openSubtitlesMaxBackoff          = 12 * time.Second
-	subtitleIntroAllowanceSeconds    = 45.0
-	subtitleIntroMinimumSeconds      = 5.0
-	suspectOffsetSeconds             = 60.0
-	suspectRuntimeMismatchRatio      = 0.07
-	subtitleDurationToleranceSeconds = 8.0
-
-	// Duration tolerances are asymmetric because credits are normal (no dialogue).
-	// Subtitle shorter than video: Allow up to 10 minutes for credits.
-	// Subtitle longer than video: Only allow small tolerance (suspicious mismatch).
-	earlyDurationCreditsToleranceSeconds = 600.0 // 10 minutes for credits (early check)
-	earlyDurationOverlapToleranceSeconds = 60.0  // 1 minute if subtitle is longer (early check)
-	postAlignmentCreditsToleranceSeconds = 600.0 // 10 minutes for credits (post-alignment)
-
-	// Maximum number of OpenSubtitles candidates to evaluate.
-	// If top candidates all fail, lower-ranked ones are unlikely to succeed.
-	maxOpenSubtitlesCandidates = 15
+	openSubtitlesMinInterval    = time.Second
+	openSubtitlesMaxRateRetries = 4
+	openSubtitlesInitialBackoff = 2 * time.Second
+	openSubtitlesMaxBackoff     = 12 * time.Second
 )
 
 type (

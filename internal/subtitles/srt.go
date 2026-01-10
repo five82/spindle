@@ -54,13 +54,14 @@ func lastSRTTimestamp(path string) (float64, error) {
 	return last, nil
 }
 
-func firstSRTTimestamp(path string) (float64, error) {
+func subtitleBounds(path string) (float64, float64, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, fmt.Errorf("read srt: %w", err)
+		return 0, 0, fmt.Errorf("read srt: %w", err)
 	}
 	lines := strings.Split(string(data), "\n")
 	first := math.Inf(1)
+	var last float64
 	found := false
 	for _, line := range lines {
 		if !strings.Contains(line, "-->") {
@@ -71,29 +72,21 @@ func firstSRTTimestamp(path string) (float64, error) {
 			continue
 		}
 		startText := strings.TrimSpace(parts[0])
-		seconds, err := parseSRTTimestamp(startText)
-		if err != nil {
-			continue
+		if startSeconds, err := parseSRTTimestamp(startText); err == nil {
+			if startSeconds < first {
+				first = startSeconds
+			}
+			found = true
 		}
-		if seconds < first {
-			first = seconds
+		endText := strings.TrimSpace(parts[1])
+		if endSeconds, err := parseSRTTimestamp(endText); err == nil {
+			if endSeconds > last {
+				last = endSeconds
+			}
 		}
-		found = true
 	}
 	if !found {
-		return 0, nil
-	}
-	return first, nil
-}
-
-func subtitleBounds(path string) (float64, float64, error) {
-	first, err := firstSRTTimestamp(path)
-	if err != nil {
-		return 0, 0, err
-	}
-	last, err := lastSRTTimestamp(path)
-	if err != nil {
-		return 0, 0, err
+		return 0, last, nil
 	}
 	return first, last, nil
 }

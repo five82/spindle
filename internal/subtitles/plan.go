@@ -10,8 +10,12 @@ import (
 
 	"spindle/internal/logging"
 	"spindle/internal/media/audio"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/services"
 )
+
+// inspectMedia wraps ffprobe.Inspect for testability.
+var inspectMedia = ffprobe.Inspect
 
 type generationPlan struct {
 	source       string

@@ -212,135 +212,15 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, err
 	}
 
-	openSubsDecision := ""
-	openSubsDetail := ""
-
-	// Validate OpenSubtitlesOnly flag
-	if req.OpenSubtitlesOnly && !s.shouldUseOpenSubtitles() {
-		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "opensubtitles",
-			"--opensubtitles-only requires OpenSubtitles to be enabled and configured", nil)
+	attempt := s.attemptOpenSubtitles(ctx, plan, req)
+	if attempt.err != nil {
+		return GenerateResult{}, attempt.err
 	}
-	if req.OpenSubtitlesOnly && req.ForceAI {
-		return GenerateResult{}, services.Wrap(services.ErrConfiguration, "subtitles", "flags",
-			"--opensubtitles-only and --forceai are mutually exclusive", nil)
+	if attempt.result != nil {
+		return *attempt.result, nil
 	}
-
-	if !req.ForceAI && s.shouldUseOpenSubtitles() {
-		title := strings.TrimSpace(req.Context.Title)
-		parentID := req.Context.ParentID()
-		episodeID := req.Context.EpisodeID()
-		if s.logger != nil {
-			s.logger.Debug("attempting opensubtitles fetch",
-				logging.String("title", title),
-				logging.String("media_type", strings.TrimSpace(req.Context.MediaType)),
-				logging.Int64("tmdb_id", req.Context.TMDBID),
-				logging.Int64("parent_tmdb_id", parentID),
-				logging.Int64("episode_tmdb_id", episodeID),
-				logging.String("imdb_id", strings.TrimSpace(req.Context.IMDBID)),
-				logging.Int("season", req.Context.Season),
-				logging.Int("episode", req.Context.Episode),
-				logging.String("languages", strings.Join(req.Languages, ",")),
-			)
-		}
-		if result, ok, err := s.tryOpenSubtitles(ctx, plan, req); err != nil {
-			openSubsDecision = "error"
-			openSubsDetail = strings.TrimSpace(err.Error())
-			var suspect suspectMisIdentificationError
-			if errors.As(err, &suspect) {
-				// All candidates had consistent duration mismatch. This can happen with
-				// UHD/extended cuts that have different runtime than theatrical releases.
-				openSubsDecision = "duration_mismatch"
-				openSubsDetail = fmt.Sprintf("all candidates rejected (median delta %.0fs)", suspect.medianAbsDelta())
-				if req.OpenSubtitlesOnly {
-					return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "opensubtitles",
-						fmt.Sprintf("all candidates rejected due to duration mismatch (median delta %.0fs)", suspect.medianAbsDelta()), err)
-				}
-				if s.logger != nil {
-					s.logger.Warn("opensubtitles duration mismatch, falling back to whisperx",
-						logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
-						logging.String("title", title),
-						logging.Int("season", req.Context.Season),
-						logging.Int("episode", req.Context.Episode),
-						logging.Alert("subtitle_fallback"),
-						logging.String(logging.FieldEventType, "opensubtitles_duration_mismatch"),
-						logging.String(logging.FieldErrorHint, "video may be extended/UHD cut with different runtime"),
-					)
-				}
-			} else {
-				// Generic error - could be download failure, alignment failure, etc.
-				if req.OpenSubtitlesOnly {
-					return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "opensubtitles",
-						"all candidates rejected", err)
-				}
-				if s.logger != nil {
-					s.logger.Warn("opensubtitles candidates rejected, falling back to whisperx",
-						logging.Error(err),
-						logging.String("title", title),
-						logging.Int64("tmdb_id", req.Context.TMDBID),
-						logging.Int("season", req.Context.Season),
-						logging.Int("episode", req.Context.Episode),
-						logging.Alert("subtitle_fallback"),
-						logging.String(logging.FieldEventType, "opensubtitles_candidates_rejected"),
-						logging.String(logging.FieldErrorHint, "see candidate summary above for rejection details"),
-					)
-				}
-			}
-		} else if ok {
-			result.Source = "opensubtitles"
-			result.OpenSubtitlesDecision = "used"
-			if s.logger != nil {
-				s.logger.Info("subtitle source selected",
-					logging.String(logging.FieldEventType, "subtitle_source_selected"),
-					logging.String(logging.FieldDecisionType, "subtitle_source"),
-					logging.String("decision_result", "opensubtitles"),
-					logging.String("subtitle_file", result.SubtitlePath),
-					logging.Int("segment_count", result.SegmentCount),
-				)
-			}
-			return result, nil
-		} else {
-			openSubsDecision = "no_match"
-			openSubsDetail = "no suitable match found"
-			if req.OpenSubtitlesOnly {
-				return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "opensubtitles",
-					"no suitable subtitle match found on OpenSubtitles", nil)
-			}
-			if s.logger != nil {
-				s.logger.Warn("opensubtitles match not found, falling back to whisperx",
-					logging.String("title", title),
-					logging.Int64("tmdb_id", req.Context.TMDBID),
-					logging.Int64("parent_tmdb_id", parentID),
-					logging.Int64("episode_tmdb_id", episodeID),
-					logging.Int("season", req.Context.Season),
-					logging.Int("episode", req.Context.Episode),
-					logging.String("languages", strings.Join(req.Languages, ",")),
-					logging.Alert("subtitle_fallback"),
-					logging.String(logging.FieldEventType, "opensubtitles_no_match"),
-					logging.String(logging.FieldErrorHint, "verify title/season/episode metadata or use --forceai"),
-				)
-			}
-		}
-	} else {
-		reason := "forceai flag enabled"
-		if req.ForceAI {
-			openSubsDecision = "force_ai"
-			openSubsDetail = reason
-		} else {
-			openSubsDecision = "skipped"
-			reason = "opensubtitles disabled"
-			if s.config == nil {
-				reason = "configuration unavailable"
-			} else if !s.config.Subtitles.OpenSubtitlesEnabled {
-				reason = "opensubtitles_enabled is false"
-			} else if strings.TrimSpace(s.config.Subtitles.OpenSubtitlesAPIKey) == "" {
-				reason = "opensubtitles_api_key not set"
-			}
-			openSubsDetail = reason
-		}
-		if s.logger != nil {
-			s.logger.Debug("opensubtitles download skipped", logging.String("reason", reason))
-		}
-	}
+	openSubsDecision := attempt.decision
+	openSubsDetail := attempt.detail
 
 	if req.AllowTranscriptCacheRead {
 		if cached, ok, err := s.tryLoadTranscriptFromCache(plan, req); err != nil {
@@ -403,4 +283,177 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		OpenSubtitlesDetail:   openSubsDetail,
 	}
 	return result, nil
+}
+
+// openSubtitlesAttempt captures the outcome of trying OpenSubtitles.
+type openSubtitlesAttempt struct {
+	decision string          // "used", "no_match", "error", "duration_mismatch", "skipped", "force_ai"
+	detail   string          // human-readable explanation
+	result   *GenerateResult // non-nil when decision is "used"
+	err      error           // non-nil only when OpenSubtitlesOnly is true and lookup failed
+}
+
+// attemptOpenSubtitles encapsulates all OpenSubtitles decision logic.
+func (s *Service) attemptOpenSubtitles(ctx context.Context, plan *generationPlan, req GenerateRequest) openSubtitlesAttempt {
+	// Validate flag combinations
+	if req.OpenSubtitlesOnly && !s.shouldUseOpenSubtitles() {
+		return openSubtitlesAttempt{
+			decision: "error",
+			detail:   "--opensubtitles-only requires OpenSubtitles to be enabled and configured",
+			err: services.Wrap(services.ErrConfiguration, "subtitles", "opensubtitles",
+				"--opensubtitles-only requires OpenSubtitles to be enabled and configured", nil),
+		}
+	}
+	if req.OpenSubtitlesOnly && req.ForceAI {
+		return openSubtitlesAttempt{
+			decision: "error",
+			detail:   "--opensubtitles-only and --forceai are mutually exclusive",
+			err: services.Wrap(services.ErrConfiguration, "subtitles", "flags",
+				"--opensubtitles-only and --forceai are mutually exclusive", nil),
+		}
+	}
+
+	// ForceAI bypasses OpenSubtitles
+	if req.ForceAI {
+		if s.logger != nil {
+			s.logger.Debug("opensubtitles download skipped", logging.String("reason", "forceai flag enabled"))
+		}
+		return openSubtitlesAttempt{decision: "force_ai", detail: "forceai flag enabled"}
+	}
+
+	// OpenSubtitles not configured
+	if !s.shouldUseOpenSubtitles() {
+		reason := s.openSubtitlesDisabledReason()
+		if s.logger != nil {
+			s.logger.Debug("opensubtitles download skipped", logging.String("reason", reason))
+		}
+		return openSubtitlesAttempt{decision: "skipped", detail: reason}
+	}
+
+	// Attempt OpenSubtitles lookup
+	title := strings.TrimSpace(req.Context.Title)
+	parentID := req.Context.ParentID()
+	episodeID := req.Context.EpisodeID()
+	if s.logger != nil {
+		s.logger.Debug("attempting opensubtitles fetch",
+			logging.String("title", title),
+			logging.String("media_type", strings.TrimSpace(req.Context.MediaType)),
+			logging.Int64("tmdb_id", req.Context.TMDBID),
+			logging.Int64("parent_tmdb_id", parentID),
+			logging.Int64("episode_tmdb_id", episodeID),
+			logging.String("imdb_id", strings.TrimSpace(req.Context.IMDBID)),
+			logging.Int("season", req.Context.Season),
+			logging.Int("episode", req.Context.Episode),
+			logging.String("languages", strings.Join(req.Languages, ",")),
+		)
+	}
+
+	result, ok, err := s.tryOpenSubtitles(ctx, plan, req)
+	if err != nil {
+		return s.handleOpenSubtitlesError(err, req, title)
+	}
+	if ok {
+		result.Source = "opensubtitles"
+		result.OpenSubtitlesDecision = "used"
+		if s.logger != nil {
+			s.logger.Info("subtitle source selected",
+				logging.String(logging.FieldEventType, "subtitle_source_selected"),
+				logging.String(logging.FieldDecisionType, "subtitle_source"),
+				logging.String("decision_result", "opensubtitles"),
+				logging.String("subtitle_file", result.SubtitlePath),
+				logging.Int("segment_count", result.SegmentCount),
+			)
+		}
+		return openSubtitlesAttempt{decision: "used", result: &result}
+	}
+
+	// No match found
+	if req.OpenSubtitlesOnly {
+		return openSubtitlesAttempt{
+			decision: "no_match",
+			detail:   "no suitable match found",
+			err: services.Wrap(services.ErrTransient, "subtitles", "opensubtitles",
+				"no suitable subtitle match found on OpenSubtitles", nil),
+		}
+	}
+	if s.logger != nil {
+		s.logger.Warn("opensubtitles match not found, falling back to whisperx",
+			logging.String("title", title),
+			logging.Int64("tmdb_id", req.Context.TMDBID),
+			logging.Int64("parent_tmdb_id", parentID),
+			logging.Int64("episode_tmdb_id", episodeID),
+			logging.Int("season", req.Context.Season),
+			logging.Int("episode", req.Context.Episode),
+			logging.String("languages", strings.Join(req.Languages, ",")),
+			logging.Alert("subtitle_fallback"),
+			logging.String(logging.FieldEventType, "opensubtitles_no_match"),
+			logging.String(logging.FieldErrorHint, "verify title/season/episode metadata or use --forceai"),
+		)
+	}
+	return openSubtitlesAttempt{decision: "no_match", detail: "no suitable match found"}
+}
+
+// handleOpenSubtitlesError processes errors from tryOpenSubtitles.
+func (s *Service) handleOpenSubtitlesError(err error, req GenerateRequest, title string) openSubtitlesAttempt {
+	var suspect suspectMisIdentificationError
+	if errors.As(err, &suspect) {
+		detail := fmt.Sprintf("all candidates rejected (median delta %.0fs)", suspect.medianAbsDelta())
+		if req.OpenSubtitlesOnly {
+			return openSubtitlesAttempt{
+				decision: "duration_mismatch",
+				detail:   detail,
+				err: services.Wrap(services.ErrTransient, "subtitles", "opensubtitles",
+					fmt.Sprintf("all candidates rejected due to duration mismatch (median delta %.0fs)", suspect.medianAbsDelta()), err),
+			}
+		}
+		if s.logger != nil {
+			s.logger.Warn("opensubtitles duration mismatch, falling back to whisperx",
+				logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
+				logging.String("title", title),
+				logging.Int("season", req.Context.Season),
+				logging.Int("episode", req.Context.Episode),
+				logging.Alert("subtitle_fallback"),
+				logging.String(logging.FieldEventType, "opensubtitles_duration_mismatch"),
+				logging.String(logging.FieldErrorHint, "video may be extended/UHD cut with different runtime"),
+			)
+		}
+		return openSubtitlesAttempt{decision: "duration_mismatch", detail: detail}
+	}
+
+	// Generic error
+	detail := strings.TrimSpace(err.Error())
+	if req.OpenSubtitlesOnly {
+		return openSubtitlesAttempt{
+			decision: "error",
+			detail:   detail,
+			err:      services.Wrap(services.ErrTransient, "subtitles", "opensubtitles", "all candidates rejected", err),
+		}
+	}
+	if s.logger != nil {
+		s.logger.Warn("opensubtitles candidates rejected, falling back to whisperx",
+			logging.Error(err),
+			logging.String("title", title),
+			logging.Int64("tmdb_id", req.Context.TMDBID),
+			logging.Int("season", req.Context.Season),
+			logging.Int("episode", req.Context.Episode),
+			logging.Alert("subtitle_fallback"),
+			logging.String(logging.FieldEventType, "opensubtitles_candidates_rejected"),
+			logging.String(logging.FieldErrorHint, "see candidate summary above for rejection details"),
+		)
+	}
+	return openSubtitlesAttempt{decision: "error", detail: detail}
+}
+
+// openSubtitlesDisabledReason returns why OpenSubtitles is not available.
+func (s *Service) openSubtitlesDisabledReason() string {
+	if s.config == nil {
+		return "configuration unavailable"
+	}
+	if !s.config.Subtitles.OpenSubtitlesEnabled {
+		return "opensubtitles_enabled is false"
+	}
+	if strings.TrimSpace(s.config.Subtitles.OpenSubtitlesAPIKey) == "" {
+		return "opensubtitles_api_key not set"
+	}
+	return "opensubtitles disabled"
 }

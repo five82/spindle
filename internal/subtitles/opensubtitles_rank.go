@@ -150,27 +150,33 @@ func scoreSubtitleCandidate(sub opensubtitles.Subtitle, ctx SubtitleContext) (fl
 	return score, reasons
 }
 
-// titleMatchScore compares the expected title against the candidate's feature title.
-// Returns a score adjustment and reason string.
-func titleMatchScore(expected, candidate string) (float64, string) {
+// titleMatchLevel indicates how closely two titles match.
+type titleMatchLevel int
+
+const (
+	titleMatchNone    titleMatchLevel = iota // No meaningful match
+	titleMatchPartial                        // At least 50% word overlap
+	titleMatchContain                        // One title contains the other
+	titleMatchExact                          // Exact match after normalization
+)
+
+// compareTitles determines how closely two titles match after normalization.
+func compareTitles(expected, candidate string) titleMatchLevel {
 	expectedNorm := normalizeTitle(expected)
 	candidateNorm := normalizeTitle(candidate)
 
 	if expectedNorm == "" || candidateNorm == "" {
-		return 0, ""
+		return titleMatchExact // Can't determine mismatch, treat as match
 	}
 
-	// Exact match after normalization
 	if expectedNorm == candidateNorm {
-		return 1.0, "title=exact"
+		return titleMatchExact
 	}
 
-	// Check if one contains the other (handles "Toy Story 3" vs "Toy Story 3 3D")
 	if strings.Contains(candidateNorm, expectedNorm) || strings.Contains(expectedNorm, candidateNorm) {
-		return 0.5, "title=contains"
+		return titleMatchContain
 	}
 
-	// Check for significant word overlap (at least 50% of words match)
 	expectedWords := normalizeTitleWords(expected)
 	candidateWords := normalizeTitleWords(candidate)
 	if len(expectedWords) > 0 && len(candidateWords) > 0 {
@@ -183,15 +189,30 @@ func titleMatchScore(expected, candidate string) (float64, string) {
 				}
 			}
 		}
-		overlap := float64(matches) / float64(len(expectedWords))
-		if overlap >= 0.5 {
-			return 0, "title=partial"
+		if float64(matches)/float64(len(expectedWords)) >= 0.5 {
+			return titleMatchPartial
 		}
 	}
 
-	// No meaningful match - this is likely wrong content
-	// Apply heavy penalty to push this candidate to the bottom
-	return -10.0, "title=mismatch"
+	return titleMatchNone
+}
+
+// titleMatchScore compares the expected title against the candidate's feature title.
+// Returns a score adjustment and reason string.
+func titleMatchScore(expected, candidate string) (float64, string) {
+	switch compareTitles(expected, candidate) {
+	case titleMatchExact:
+		if normalizeTitle(expected) == "" || normalizeTitle(candidate) == "" {
+			return 0, ""
+		}
+		return 1.0, "title=exact"
+	case titleMatchContain:
+		return 0.5, "title=contains"
+	case titleMatchPartial:
+		return 0, "title=partial"
+	default:
+		return -10.0, "title=mismatch"
+	}
 }
 
 // normalizeTitle converts a title to lowercase and removes non-alphanumeric characters.
@@ -202,45 +223,7 @@ func normalizeTitle(title string) string {
 // isTitleMismatch returns true if the candidate title clearly doesn't match
 // the expected title. Used to hard-reject wrongly labeled subtitles.
 func isTitleMismatch(expected, candidate string) bool {
-	expectedNorm := normalizeTitle(expected)
-	candidateNorm := normalizeTitle(candidate)
-
-	// If either is empty, don't reject (can't determine mismatch)
-	if expectedNorm == "" || candidateNorm == "" {
-		return false
-	}
-
-	// Exact match
-	if expectedNorm == candidateNorm {
-		return false
-	}
-
-	// One contains the other (handles variants like "Toy Story 3" vs "Toy Story 3 3D")
-	if strings.Contains(candidateNorm, expectedNorm) || strings.Contains(expectedNorm, candidateNorm) {
-		return false
-	}
-
-	// Check for significant word overlap (at least 50% of expected words present)
-	expectedWords := normalizeTitleWords(expected)
-	candidateWords := normalizeTitleWords(candidate)
-	if len(expectedWords) > 0 && len(candidateWords) > 0 {
-		matches := 0
-		for _, ew := range expectedWords {
-			for _, cw := range candidateWords {
-				if ew == cw {
-					matches++
-					break
-				}
-			}
-		}
-		overlap := float64(matches) / float64(len(expectedWords))
-		if overlap >= 0.5 {
-			return false
-		}
-	}
-
-	// No meaningful match - reject this candidate
-	return true
+	return compareTitles(expected, candidate) == titleMatchNone
 }
 
 // normalizeTitleWords splits a title into normalized words for overlap comparison.
