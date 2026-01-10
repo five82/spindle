@@ -187,19 +187,18 @@ func (o *Organizer) nextReviewPath(dir, prefix, ext string) (string, error) {
 
 // reviewFilenamePrefix generates a prefix for review filenames based on the review reason.
 func reviewFilenamePrefix(item *queue.Item) string {
-	reason := item.ReviewReason
-	if strings.TrimSpace(reason) == "" {
+	reason := strings.TrimSpace(item.ReviewReason)
+	if reason == "" {
 		reason = "unidentified"
 	}
 	result := sanitizeSlug(reason, 0)
 	if result == "" {
 		result = "unidentified"
 	}
-	fpSlug := sanitizeSlug(item.DiscFingerprint, 8)
-	if fpSlug == "" {
-		return result
+	if fpSlug := sanitizeSlug(item.DiscFingerprint, 8); fpSlug != "" {
+		return result + "-" + fpSlug
 	}
-	return result + "-" + fpSlug
+	return result
 }
 
 // handleLibraryUnavailable logs the unavailable library and routes to review.

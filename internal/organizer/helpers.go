@@ -58,6 +58,17 @@ func notificationTitle(meta MetadataProvider, discTitle, finalPath string) strin
 	return filepath.Base(finalPath)
 }
 
+// libraryUnavailableErrors lists syscall errors that indicate the library is unavailable.
+var libraryUnavailableErrors = []error{
+	syscall.ENODEV,
+	syscall.ENOTCONN,
+	syscall.EHOSTDOWN,
+	syscall.EHOSTUNREACH,
+	syscall.ETIMEDOUT,
+	syscall.EIO,
+	syscall.ESTALE,
+}
+
 // isLibraryUnavailable checks whether an error indicates the library filesystem is unavailable.
 func isLibraryUnavailable(err error) bool {
 	if err == nil {
@@ -66,13 +77,12 @@ func isLibraryUnavailable(err error) bool {
 	if os.IsNotExist(err) {
 		return true
 	}
-	return errors.Is(err, syscall.ENODEV) ||
-		errors.Is(err, syscall.ENOTCONN) ||
-		errors.Is(err, syscall.EHOSTDOWN) ||
-		errors.Is(err, syscall.EHOSTUNREACH) ||
-		errors.Is(err, syscall.ETIMEDOUT) ||
-		errors.Is(err, syscall.EIO) ||
-		errors.Is(err, syscall.ESTALE)
+	for _, target := range libraryUnavailableErrors {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // sanitizeSlug converts input to a lowercase alphanumeric slug with hyphens.

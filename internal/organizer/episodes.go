@@ -79,10 +79,7 @@ func formatOrganizeJobValue(job organizeJob) string {
 // organizeEpisodes organizes multiple TV episodes into the library.
 func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []organizeJob, logger *slog.Logger, stageStarted time.Time) error {
 	finalPaths := make([]string, 0, len(jobs))
-	step := 80.0
-	if len(jobs) > 0 {
-		step = 80.0 / float64(len(jobs))
-	}
+	step := 80.0 / float64(len(jobs))
 
 	refreshAllowed, refreshReason := shouldRefreshJellyfin(o.cfg)
 	if o.jellyfin == nil {

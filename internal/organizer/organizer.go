@@ -154,10 +154,7 @@ func (o *Organizer) resolveMetadata(ctx context.Context, item *queue.Item, logge
 			base := strings.TrimSpace(filepath.Base(item.EncodedFile))
 			fallbackTitle = strings.TrimSuffix(base, filepath.Ext(base))
 		}
-		fallbackReason := "metadata_missing"
-		if item.MetadataJSON != "" {
-			fallbackReason = "title_missing"
-		}
+		fallbackReason := ternary(item.MetadataJSON == "", "metadata_missing", "title_missing")
 		logger.Info(
 			"metadata selection decision",
 			logging.String(logging.FieldDecisionType, "metadata_fallback"),
