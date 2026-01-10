@@ -25,9 +25,17 @@ func (noopStage) HealthCheck(context.Context) stage.Health {
 	return stage.Healthy("noop")
 }
 
+// ipcTestEnv holds the test infrastructure for IPC tests.
+type ipcTestEnv struct {
+	Client  *ipc.Client
+	Store   *queue.Store
+	Ctx     context.Context
+	Cancel  context.CancelFunc
+	LogPath string
+}
+
 // setupIPCTest creates the common test infrastructure for IPC tests.
-// Returns the client, store, cleanup function, and any setup error.
-func setupIPCTest(t *testing.T) (*ipc.Client, *queue.Store, context.Context, context.CancelFunc) {
+func setupIPCTest(t *testing.T) *ipcTestEnv {
 	t.Helper()
 
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
@@ -77,14 +85,20 @@ func setupIPCTest(t *testing.T) (*ipc.Client, *queue.Store, context.Context, con
 		t.Fatalf("write log file: %v", err)
 	}
 
-	return client, store, ctx, cancel
+	return &ipcTestEnv{
+		Client:  client,
+		Store:   store,
+		Ctx:     ctx,
+		Cancel:  cancel,
+		LogPath: logPath,
+	}
 }
 
 func TestIPCDaemonStartStop(t *testing.T) {
-	client, _, _, _ := setupIPCTest(t)
+	env := setupIPCTest(t)
 
 	t.Run("start daemon", func(t *testing.T) {
-		startResp, err := client.Start()
+		startResp, err := env.Client.Start()
 		if err != nil {
 			t.Fatalf("Start RPC failed: %v", err)
 		}
@@ -94,7 +108,7 @@ func TestIPCDaemonStartStop(t *testing.T) {
 	})
 
 	t.Run("status shows running", func(t *testing.T) {
-		status, err := client.Status()
+		status, err := env.Client.Status()
 		if err != nil {
 			t.Fatalf("Status RPC failed: %v", err)
 		}
@@ -104,7 +118,7 @@ func TestIPCDaemonStartStop(t *testing.T) {
 	})
 
 	t.Run("stop daemon", func(t *testing.T) {
-		stopResp, err := client.Stop()
+		stopResp, err := env.Client.Stop()
 		if err != nil {
 			t.Fatalf("Stop RPC failed: %v", err)
 		}
@@ -114,7 +128,7 @@ func TestIPCDaemonStartStop(t *testing.T) {
 	})
 
 	t.Run("status shows stopped", func(t *testing.T) {
-		status, err := client.Status()
+		status, err := env.Client.Status()
 		if err != nil {
 			t.Fatalf("Status RPC failed: %v", err)
 		}
@@ -125,32 +139,32 @@ func TestIPCDaemonStartStop(t *testing.T) {
 }
 
 func TestIPCQueueOperations(t *testing.T) {
-	client, store, ctx, _ := setupIPCTest(t)
+	env := setupIPCTest(t)
 
 	// Create test items
-	discA, err := store.NewDisc(ctx, "Disc A", "fp-a")
+	discA, err := env.Store.NewDisc(env.Ctx, "Disc A", "fp-a")
 	if err != nil {
 		t.Fatalf("NewDisc A: %v", err)
 	}
-	discB, err := store.NewDisc(ctx, "Disc B", "fp-b")
+	discB, err := env.Store.NewDisc(env.Ctx, "Disc B", "fp-b")
 	if err != nil {
 		t.Fatalf("NewDisc B: %v", err)
 	}
 	discB.Status = queue.StatusFailed
-	if err := store.Update(ctx, discB); err != nil {
+	if err := env.Store.Update(env.Ctx, discB); err != nil {
 		t.Fatalf("Update discB: %v", err)
 	}
-	discC, err := store.NewDisc(ctx, "Disc C", "fp-c")
+	discC, err := env.Store.NewDisc(env.Ctx, "Disc C", "fp-c")
 	if err != nil {
 		t.Fatalf("NewDisc C: %v", err)
 	}
 	discC.Status = queue.StatusRipping
-	if err := store.Update(ctx, discC); err != nil {
+	if err := env.Store.Update(env.Ctx, discC); err != nil {
 		t.Fatalf("Update discC: %v", err)
 	}
 
 	t.Run("list all items", func(t *testing.T) {
-		listResp, err := client.QueueList(nil)
+		listResp, err := env.Client.QueueList(nil)
 		if err != nil {
 			t.Fatalf("QueueList failed: %v", err)
 		}
@@ -160,7 +174,7 @@ func TestIPCQueueOperations(t *testing.T) {
 	})
 
 	t.Run("list filtered by status", func(t *testing.T) {
-		failedResp, err := client.QueueList([]string{string(queue.StatusFailed)})
+		failedResp, err := env.Client.QueueList([]string{string(queue.StatusFailed)})
 		if err != nil {
 			t.Fatalf("QueueList failed filter: %v", err)
 		}
@@ -170,14 +184,14 @@ func TestIPCQueueOperations(t *testing.T) {
 	})
 
 	t.Run("reset stuck items", func(t *testing.T) {
-		resetResp, err := client.QueueReset()
+		resetResp, err := env.Client.QueueReset()
 		if err != nil {
 			t.Fatalf("QueueReset failed: %v", err)
 		}
 		if resetResp.Updated != 1 {
 			t.Fatalf("expected 1 item reset, got %d", resetResp.Updated)
 		}
-		updatedC, err := store.GetByID(ctx, discC.ID)
+		updatedC, err := env.Store.GetByID(env.Ctx, discC.ID)
 		if err != nil {
 			t.Fatalf("GetByID discC: %v", err)
 		}
@@ -187,14 +201,14 @@ func TestIPCQueueOperations(t *testing.T) {
 	})
 
 	t.Run("stop queue item", func(t *testing.T) {
-		queueStopResp, err := client.QueueStop([]int64{discC.ID})
+		queueStopResp, err := env.Client.QueueStop([]int64{discC.ID})
 		if err != nil {
 			t.Fatalf("QueueStop failed: %v", err)
 		}
 		if queueStopResp.Updated != 1 {
 			t.Fatalf("expected 1 item stopped, got %d", queueStopResp.Updated)
 		}
-		stoppedC, err := store.GetByID(ctx, discC.ID)
+		stoppedC, err := env.Store.GetByID(env.Ctx, discC.ID)
 		if err != nil {
 			t.Fatalf("GetByID stopped discC: %v", err)
 		}
@@ -209,11 +223,11 @@ func TestIPCQueueOperations(t *testing.T) {
 	t.Run("clear failed items", func(t *testing.T) {
 		// Mark discA as completed for later test
 		discA.Status = queue.StatusCompleted
-		if err := store.Update(ctx, discA); err != nil {
+		if err := env.Store.Update(env.Ctx, discA); err != nil {
 			t.Fatalf("Update discA: %v", err)
 		}
 
-		clearFailedResp, err := client.QueueClearFailed()
+		clearFailedResp, err := env.Client.QueueClearFailed()
 		if err != nil {
 			t.Fatalf("QueueClearFailed failed: %v", err)
 		}
@@ -224,7 +238,7 @@ func TestIPCQueueOperations(t *testing.T) {
 	})
 
 	t.Run("clear completed items", func(t *testing.T) {
-		clearCompletedResp, err := client.QueueClearCompleted()
+		clearCompletedResp, err := env.Client.QueueClearCompleted()
 		if err != nil {
 			t.Fatalf("QueueClearCompleted failed: %v", err)
 		}
@@ -235,22 +249,22 @@ func TestIPCQueueOperations(t *testing.T) {
 }
 
 func TestIPCQueueRetry(t *testing.T) {
-	client, store, ctx, _ := setupIPCTest(t)
+	env := setupIPCTest(t)
 
 	// Create a failed item
-	disc, err := store.NewDisc(ctx, "Failed Disc", "fp-failed")
+	disc, err := env.Store.NewDisc(env.Ctx, "Failed Disc", "fp-failed")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
 	}
 	disc.Status = queue.StatusFailed
 	disc.NeedsReview = true
 	disc.ReviewReason = queue.UserStopReason
-	if err := store.Update(ctx, disc); err != nil {
+	if err := env.Store.Update(env.Ctx, disc); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 
 	t.Run("retry failed item", func(t *testing.T) {
-		retryResp, err := client.QueueRetry(nil)
+		retryResp, err := env.Client.QueueRetry(nil)
 		if err != nil {
 			t.Fatalf("QueueRetry failed: %v", err)
 		}
@@ -260,7 +274,7 @@ func TestIPCQueueRetry(t *testing.T) {
 	})
 
 	t.Run("verify retry state", func(t *testing.T) {
-		retried, err := store.GetByID(ctx, disc.ID)
+		retried, err := env.Store.GetByID(env.Ctx, disc.ID)
 		if err != nil {
 			t.Fatalf("GetByID: %v", err)
 		}
@@ -274,18 +288,17 @@ func TestIPCQueueRetry(t *testing.T) {
 }
 
 func TestIPCQueueHealth(t *testing.T) {
-	client, store, ctx, _ := setupIPCTest(t)
+	env := setupIPCTest(t)
 
 	// Create items in various states
-	pending, _ := store.NewDisc(ctx, "Pending", "fp-pending")
-	_ = pending
+	_, _ = env.Store.NewDisc(env.Ctx, "Pending", "fp-pending")
 
-	failed, _ := store.NewDisc(ctx, "Failed", "fp-failed-health")
+	failed, _ := env.Store.NewDisc(env.Ctx, "Failed", "fp-failed-health")
 	failed.Status = queue.StatusFailed
-	_ = store.Update(ctx, failed)
+	_ = env.Store.Update(env.Ctx, failed)
 
 	t.Run("health stats", func(t *testing.T) {
-		healthResp, err := client.QueueHealth()
+		healthResp, err := env.Client.QueueHealth()
 		if err != nil {
 			t.Fatalf("QueueHealth failed: %v", err)
 		}
@@ -302,10 +315,10 @@ func TestIPCQueueHealth(t *testing.T) {
 }
 
 func TestIPCDatabaseHealth(t *testing.T) {
-	client, _, _, _ := setupIPCTest(t)
+	env := setupIPCTest(t)
 
 	t.Run("database health", func(t *testing.T) {
-		dbHealth, err := client.DatabaseHealth()
+		dbHealth, err := env.Client.DatabaseHealth()
 		if err != nil {
 			t.Fatalf("DatabaseHealth failed: %v", err)
 		}
@@ -316,10 +329,10 @@ func TestIPCDatabaseHealth(t *testing.T) {
 }
 
 func TestIPCTestNotification(t *testing.T) {
-	client, _, _, _ := setupIPCTest(t)
+	env := setupIPCTest(t)
 
 	t.Run("test notification", func(t *testing.T) {
-		notifyResp, err := client.TestNotification()
+		notifyResp, err := env.Client.TestNotification()
 		if err != nil {
 			t.Fatalf("TestNotification failed: %v", err)
 		}
@@ -330,10 +343,10 @@ func TestIPCTestNotification(t *testing.T) {
 }
 
 func TestIPCLogTail(t *testing.T) {
-	client, _, _, _ := setupIPCTest(t)
+	env := setupIPCTest(t)
 
 	t.Run("tail last lines", func(t *testing.T) {
-		logResp, err := client.LogTail(ipc.LogTailRequest{Offset: -1, Limit: 2})
+		logResp, err := env.Client.LogTail(ipc.LogTailRequest{Offset: -1, Limit: 2})
 		if err != nil {
 			t.Fatalf("LogTail initial failed: %v", err)
 		}
@@ -344,55 +357,10 @@ func TestIPCLogTail(t *testing.T) {
 }
 
 func TestIPCLogTailFollow(t *testing.T) {
-	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
-	cfg.MakeMKV.OpticalDrive = ""
-	cfg.Paths.APIBind = "127.0.0.1:0"
-	store := testsupport.MustOpenStore(t, cfg)
-	logPath := filepath.Join(cfg.Paths.LogDir, "ipc-follow-test.log")
-	logger := logging.NewNop()
-	mgr := workflow.NewManager(cfg, store, logger)
-	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
-	d, err := daemon.New(cfg, store, logger, mgr, logPath, logging.NewStreamHub(128), nil)
-	if err != nil {
-		t.Fatalf("daemon.New: %v", err)
-	}
-	t.Cleanup(func() {
-		d.Close()
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	socket := filepath.Join(cfg.Paths.LogDir, "spindle-follow.sock")
-	srv, err := ipc.NewServer(ctx, socket, d, logger)
-	if err != nil {
-		if strings.Contains(err.Error(), "operation not permitted") {
-			t.Skipf("skipping IPC server test: %v", err)
-		}
-		t.Fatalf("ipc.NewServer: %v", err)
-	}
-	srv.Serve()
-	t.Cleanup(func() {
-		srv.Close()
-	})
-
-	time.Sleep(50 * time.Millisecond)
-
-	client, err := ipc.Dial(socket)
-	if err != nil {
-		t.Fatalf("ipc.Dial: %v", err)
-	}
-	t.Cleanup(func() {
-		client.Close()
-	})
-
-	// Write initial content
-	if err := os.WriteFile(logPath, []byte("first\nsecond\nthird\n"), 0o644); err != nil {
-		t.Fatalf("write log file: %v", err)
-	}
+	env := setupIPCTest(t)
 
 	// Get initial offset
-	logResp, err := client.LogTail(ipc.LogTailRequest{Offset: -1, Limit: 2})
+	logResp, err := env.Client.LogTail(ipc.LogTailRequest{Offset: -1, Limit: 2})
 	if err != nil {
 		t.Fatalf("LogTail initial failed: %v", err)
 	}
@@ -400,7 +368,7 @@ func TestIPCLogTailFollow(t *testing.T) {
 	t.Run("follow mode", func(t *testing.T) {
 		followDone := make(chan struct{})
 		go func(offset int64) {
-			resp, err := client.LogTail(ipc.LogTailRequest{Offset: offset, Follow: true, WaitMillis: 500})
+			resp, err := env.Client.LogTail(ipc.LogTailRequest{Offset: offset, Follow: true, WaitMillis: 500})
 			if err != nil {
 				t.Errorf("LogTail follow error: %v", err)
 				return
@@ -412,7 +380,7 @@ func TestIPCLogTailFollow(t *testing.T) {
 		}(logResp.Offset)
 
 		time.Sleep(100 * time.Millisecond)
-		if f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+		if f, err := os.OpenFile(env.LogPath, os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 			_, _ = f.WriteString("fourth\n")
 			_ = f.Close()
 		} else {
@@ -428,16 +396,16 @@ func TestIPCLogTailFollow(t *testing.T) {
 }
 
 func TestIPCQueueClear(t *testing.T) {
-	client, store, ctx, _ := setupIPCTest(t)
+	env := setupIPCTest(t)
 
 	// Create an item to clear
-	_, err := store.NewDisc(ctx, "Clear Me", "fp-clear")
+	_, err := env.Store.NewDisc(env.Ctx, "Clear Me", "fp-clear")
 	if err != nil {
 		t.Fatalf("NewDisc: %v", err)
 	}
 
 	t.Run("clear all items", func(t *testing.T) {
-		clearResp, err := client.QueueClear()
+		clearResp, err := env.Client.QueueClear()
 		if err != nil {
 			t.Fatalf("QueueClear failed: %v", err)
 		}
@@ -447,7 +415,7 @@ func TestIPCQueueClear(t *testing.T) {
 	})
 
 	t.Run("verify empty", func(t *testing.T) {
-		items, err := store.List(ctx)
+		items, err := env.Store.List(env.Ctx)
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
