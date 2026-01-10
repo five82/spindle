@@ -1,3 +1,11 @@
+-- Spindle queue schema (version 1)
+-- This is a transient database for tracking in-flight jobs.
+-- On schema changes, bump schemaVersion in schema.go and clear the database.
+
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY
+);
+
 CREATE TABLE IF NOT EXISTS queue_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_path TEXT,
@@ -16,12 +24,16 @@ CREATE TABLE IF NOT EXISTS queue_items (
     rip_spec_data TEXT,
     disc_fingerprint TEXT,
     metadata_json TEXT,
-    last_heartbeat TIMESTAMP
+    last_heartbeat TIMESTAMP,
+    needs_review INTEGER NOT NULL DEFAULT 0,
+    review_reason TEXT,
+    item_log_path TEXT,
+    encoding_details_json TEXT,
+    drapto_preset_profile TEXT,
+    active_episode_key TEXT,
+    progress_bytes_copied INTEGER DEFAULT 0,
+    progress_total_bytes INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status);
 CREATE INDEX IF NOT EXISTS idx_queue_fingerprint ON queue_items(disc_fingerprint);
-
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version TEXT PRIMARY KEY
-);

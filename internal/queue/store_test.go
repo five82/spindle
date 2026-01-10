@@ -10,7 +10,7 @@ import (
 	"spindle/internal/testsupport"
 )
 
-func TestOpenAppliesMigrations(t *testing.T) {
+func TestOpenInitializesSchema(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
 

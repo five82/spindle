@@ -92,7 +92,7 @@ func (s *Store) execWithoutResultRetry(ctx context.Context, query string, args .
 	})
 }
 
-// Open initializes or connects to the queue database and applies migrations.
+// Open initializes or connects to the queue database.
 func Open(cfg *config.Config) (*Store, error) {
 	if err := cfg.EnsureDirectories(); err != nil {
 		return nil, fmt.Errorf("ensure directories: %w", err)
@@ -117,7 +117,7 @@ func Open(cfg *config.Config) (*Store, error) {
 	}
 
 	store := &Store{db: db, path: dbPath}
-	if err := store.applyMigrations(context.Background()); err != nil {
+	if err := store.initSchema(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

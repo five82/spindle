@@ -57,7 +57,7 @@ Use `spindle status` to check for missing dependencies.
 
 ## Database & Workflow Notes
 
-- `internal/queue` owns schema migrations and recovery logic; the SQLite database is `<log_dir>/queue.db` by default.
+- `internal/queue` owns the schema and recovery logic; the SQLite database is `<log_dir>/queue.db` by default. The queue is transient storage for in-flight jobs. On schema changes, bump `schemaVersion` in `schema.go` and users clear the database.
 - Inspect state directly when needed with SQLite:
   - `sqlite3 ~/.local/share/spindle/logs/queue.db "SELECT id, disc_title, status, progress_stage FROM queue_items;"`
   - `sqlite3 ~/.local/share/spindle/logs/queue.db ".schema queue_items"`
