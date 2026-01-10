@@ -3,6 +3,7 @@ package ripspec
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -197,16 +198,10 @@ func (a *Assets) listPtr(kind string) *[]Asset {
 }
 
 func (a Assets) fromKind(kind string) []Asset {
-	switch strings.ToLower(kind) {
-	case "encoded":
-		return a.Encoded
-	case "subtitled":
-		return a.Subtitled
-	case "final":
-		return a.Final
-	default:
-		return a.Ripped
+	if ptr := a.listPtr(kind); ptr != nil {
+		return *ptr
 	}
+	return a.Ripped
 }
 
 func appendOrReplace(list []Asset, asset Asset) []Asset {
@@ -235,9 +230,7 @@ func cloneMetadata(input map[string]any) map[string]any {
 		return nil
 	}
 	out := make(map[string]any, len(input))
-	for k, v := range input {
-		out[k] = v
-	}
+	maps.Copy(out, input)
 	return out
 }
 

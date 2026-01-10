@@ -439,10 +439,8 @@ func convertDTOQueueItem(item api.QueueItem) queueItemDetailsView {
 	}
 	if len(item.Episodes) > 0 {
 		view.Episodes, view.EpisodeTotals = convertAPIEpisodes(item)
-		view.EpisodesSynced = item.EpisodesSynced
-	} else {
-		view.EpisodesSynced = item.EpisodesSynced
 	}
+	view.EpisodesSynced = item.EpisodesSynced
 	return view
 }
 
