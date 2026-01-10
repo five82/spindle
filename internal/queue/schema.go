@@ -8,7 +8,7 @@ import (
 )
 
 //go:embed schema.sql
-var schemaSql string
+var schemaSQL string
 
 // schemaVersion is the current schema version. Bump this when the schema changes.
 // Users will need to clear their queue database after schema changes.
@@ -54,7 +54,7 @@ func (s *Store) createSchema(ctx context.Context) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(ctx, schemaSql); err != nil {
+	if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("create schema: %w", err)
 	}
 

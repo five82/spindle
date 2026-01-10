@@ -122,8 +122,7 @@ func nullableTime(value *time.Time) any {
 	if value == nil {
 		return nil
 	}
-	v := value.UTC().Format(time.RFC3339Nano)
-	return v
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func boolToInt(value bool) int {

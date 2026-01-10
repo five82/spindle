@@ -442,16 +442,14 @@ func TestUpdateProgressPreservesHeartbeat(t *testing.T) {
 	}
 }
 
-func TestConcurrentNewDisc(t *testing.T) {
+func TestMultipleNewDisc(t *testing.T) {
 	t.Parallel()
 
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
 	ctx := context.Background()
 
-	// Use sequential creation to verify store handles multiple items correctly.
-	// SQLite has write locking that doesn't support truly concurrent writes,
-	// so we test sequential multi-item creation instead.
+	// Verify store handles multiple items correctly.
 	const numItems = 10
 	var ids []int64
 

@@ -49,13 +49,14 @@ func isSQLiteBusy(err error) bool {
 func retryOnBusy(ctx context.Context, op func() error) error {
 	ctx = ensureContext(ctx)
 	delay := busyRetryInitialBackoff
+	var lastErr error
 	for attempt := 0; attempt < busyRetryAttempts; attempt++ {
-		err := op()
-		if err == nil {
+		lastErr = op()
+		if lastErr == nil {
 			return nil
 		}
-		if !isSQLiteBusy(err) || attempt == busyRetryAttempts-1 {
-			return err
+		if !isSQLiteBusy(lastErr) || attempt == busyRetryAttempts-1 {
+			break
 		}
 		select {
 		case <-time.After(delay):
@@ -66,7 +67,7 @@ func retryOnBusy(ctx context.Context, op func() error) error {
 			delay = next
 		}
 	}
-	return nil
+	return lastErr
 }
 
 func (s *Store) execWithRetry(ctx context.Context, query string, args ...any) (sql.Result, error) {
