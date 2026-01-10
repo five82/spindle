@@ -91,13 +91,6 @@ func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env r
 	return jobs, decision, nil
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func buildEncodeJobs(env ripspec.Envelope, encodedDir string) ([]encodeJob, error) {
 	if len(env.Episodes) == 0 {
 		return nil, nil

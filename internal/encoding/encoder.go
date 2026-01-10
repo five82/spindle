@@ -118,6 +118,8 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
+// ensurePlanner returns the planner, initializing it lazily if needed.
+// Tests may set e.planner directly to inject a stub implementation.
 func (e *Encoder) ensurePlanner() encodePlanner {
 	if e.planner == nil {
 		e.planner = newEncodePlanner(e.selectPreset)
@@ -125,6 +127,8 @@ func (e *Encoder) ensurePlanner() encodePlanner {
 	return e.planner
 }
 
+// ensureRunner returns the Drapto runner, initializing it lazily if needed.
+// Tests may set e.runner directly to inject a stub implementation.
 func (e *Encoder) ensureRunner() *draptoRunner {
 	if e.runner == nil {
 		e.runner = newDraptoRunner(e.cfg, e.client, e.store)
@@ -132,6 +136,8 @@ func (e *Encoder) ensureRunner() *draptoRunner {
 	return e.runner
 }
 
+// ensureJobRunner returns the job runner, initializing it lazily if needed.
+// Tests may set e.jobRunner directly to inject a stub implementation.
 func (e *Encoder) ensureJobRunner() *encodeJobRunner {
 	if e.jobRunner == nil {
 		e.jobRunner = newEncodeJobRunner(e.store, e.ensureRunner())
@@ -163,7 +169,17 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 		)
 	}
 
-	cacheEnabled := e != nil && e.cfg != nil && e.cfg.RipCache.Enabled && e.cache != nil
+	if err := e.restoreFromCacheIfNeeded(ctx, item, env, logger); err != nil {
+		return ripspec.Envelope{}, err
+	}
+
+	return env, nil
+}
+
+// restoreFromCacheIfNeeded checks if ripped files need to be restored from cache
+// and performs the restore operation if necessary.
+func (e *Encoder) restoreFromCacheIfNeeded(ctx context.Context, item *queue.Item, env ripspec.Envelope, logger *slog.Logger) error {
+	cacheEnabled := e.cfg != nil && e.cfg.RipCache.Enabled && e.cache != nil
 	if !cacheEnabled {
 		logger.Debug(
 			"rip cache decision",
@@ -172,67 +188,72 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 			logging.String("decision_reason", "cache_disabled"),
 			logging.String("decision_options", "restore, skip"),
 		)
-	} else {
-		ripDir := filepath.Dir(strings.TrimSpace(item.RippedFile))
-		if fileExists(item.RippedFile) {
-			logger.Debug(
-				"rip cache decision",
-				logging.String(logging.FieldDecisionType, "rip_cache_restore"),
-				logging.String("decision_result", "skip"),
-				logging.String("decision_reason", "ripped_file_present"),
-				logging.String("decision_options", "restore, skip"),
-				logging.String("rip_dir", ripDir),
+		return nil
+	}
+
+	ripDir := filepath.Dir(strings.TrimSpace(item.RippedFile))
+	if fileExists(item.RippedFile) {
+		logger.Debug(
+			"rip cache decision",
+			logging.String(logging.FieldDecisionType, "rip_cache_restore"),
+			logging.String("decision_result", "skip"),
+			logging.String("decision_reason", "ripped_file_present"),
+			logging.String("decision_options", "restore, skip"),
+			logging.String("rip_dir", ripDir),
+		)
+		return nil
+	}
+
+	logger.Debug(
+		"rip cache decision",
+		logging.String(logging.FieldDecisionType, "rip_cache_restore"),
+		logging.String("decision_result", "restore"),
+		logging.String("decision_reason", "ripped_file_missing"),
+		logging.String("decision_options", "restore, skip"),
+		logging.String("rip_dir", ripDir),
+	)
+
+	restored, err := e.cache.Restore(ctx, item, ripDir)
+	if err != nil {
+		return services.Wrap(
+			services.ErrTransient,
+			"encoding",
+			"restore rip cache",
+			"Failed to restore ripped files from cache; check cache path and permissions",
+			err,
+		)
+	}
+
+	logger.Debug(
+		"rip cache restore result",
+		logging.String(logging.FieldDecisionType, "rip_cache_restore"),
+		logging.String("decision_result", ternary(restored, "cache_hit", "cache_miss")),
+		logging.String("decision_reason", ternary(restored, "restored_from_cache", "no_cache_entry_or_target_not_empty")),
+		logging.String("decision_options", "cache_hit, cache_miss"),
+		logging.String("rip_dir", ripDir),
+	)
+
+	if restored {
+		logger.Debug(
+			"audio refinement decision",
+			logging.String(logging.FieldDecisionType, "audio_refine"),
+			logging.String("decision_result", "refine"),
+			logging.String("decision_reason", "rip_cache_restore"),
+			logging.String("decision_options", "refine, skip"),
+		)
+		paths := rippedPaths(item, env)
+		if _, err := ripping.RefineAudioTargets(ctx, e.cfg, logger, paths); err != nil {
+			return services.Wrap(
+				services.ErrExternalTool,
+				"encoding",
+				"refine audio tracks",
+				"Failed to optimize ripped audio tracks after cache restore",
+				err,
 			)
-		} else {
-			logger.Debug(
-				"rip cache decision",
-				logging.String(logging.FieldDecisionType, "rip_cache_restore"),
-				logging.String("decision_result", "restore"),
-				logging.String("decision_reason", "ripped_file_missing"),
-				logging.String("decision_options", "restore, skip"),
-				logging.String("rip_dir", ripDir),
-			)
-			restored, err := e.cache.Restore(ctx, item, ripDir)
-			if err != nil {
-				return ripspec.Envelope{}, services.Wrap(
-					services.ErrTransient,
-					"encoding",
-					"restore rip cache",
-					"Failed to restore ripped files from cache; check cache path and permissions",
-					err,
-				)
-			}
-			logger.Debug(
-				"rip cache restore result",
-				logging.String(logging.FieldDecisionType, "rip_cache_restore"),
-				logging.String("decision_result", ternary(restored, "cache_hit", "cache_miss")),
-				logging.String("decision_reason", ternary(restored, "restored_from_cache", "no_cache_entry_or_target_not_empty")),
-				logging.String("decision_options", "cache_hit, cache_miss"),
-				logging.String("rip_dir", ripDir),
-			)
-			if restored {
-				logger.Debug(
-					"audio refinement decision",
-					logging.String(logging.FieldDecisionType, "audio_refine"),
-					logging.String("decision_result", "refine"),
-					logging.String("decision_reason", "rip_cache_restore"),
-					logging.String("decision_options", "refine, skip"),
-				)
-				paths := rippedPaths(item, env)
-				if _, err := ripping.RefineAudioTargets(ctx, e.cfg, logger, paths); err != nil {
-					return ripspec.Envelope{}, services.Wrap(
-						services.ErrExternalTool,
-						"encoding",
-						"refine audio tracks",
-						"Failed to optimize ripped audio tracks after cache restore",
-						err,
-					)
-				}
-			}
 		}
 	}
 
-	return env, nil
+	return nil
 }
 
 func rippedPaths(item *queue.Item, env ripspec.Envelope) []string {

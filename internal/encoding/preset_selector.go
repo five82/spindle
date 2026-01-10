@@ -202,7 +202,7 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 	classification, err := e.presetClassifier.Classify(ctx, request)
 	if err != nil {
 		attrs := []logging.Attr{logging.Error(err)}
-		if e != nil && e.cfg != nil {
+		if e.cfg != nil {
 			timeoutSeconds := presetDeciderTimeoutSeconds(&e.cfg.PresetDecider)
 			if timeoutSeconds > 0 {
 				attrs = append(attrs, logging.Int("timeout_seconds", timeoutSeconds))
@@ -243,18 +243,14 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 		logger.Debug("preset decider raw response", logging.String("preset_raw", decision.Raw))
 	}
 
-	fallbackReason := ""
-	if decision.SuggestedProfile == "" {
-		fallbackReason = "no_profile"
-	} else if decision.SuggestedProfile != "clean" && decision.SuggestedProfile != "grain" && decision.SuggestedProfile != "default" {
-		fallbackReason = "unsupported_profile"
-		attrs = append(attrs, logging.String("note", "unsupported profile"))
-	} else if decision.Confidence < presetConfidenceThreshold {
-		fallbackReason = "confidence_below_threshold"
-		attrs = append(attrs, logging.Float64("required_confidence", presetConfidenceThreshold))
-	} else {
+	valid, fallbackReason := isValidPreset(decision.SuggestedProfile, decision.Confidence)
+	if valid {
 		decision.Profile = decision.SuggestedProfile
 		decision.Applied = true
+	} else if fallbackReason == "unsupported_profile" {
+		attrs = append(attrs, logging.String("note", "unsupported profile"))
+	} else if fallbackReason == "confidence_below_threshold" {
+		attrs = append(attrs, logging.Float64("required_confidence", presetConfidenceThreshold))
 	}
 
 	decisionAttrs := append([]logging.Attr{
@@ -454,6 +450,22 @@ func normalizePresetProfile(value string) string {
 	default:
 		return ""
 	}
+}
+
+// isValidPreset checks if a preset profile should be applied based on
+// the profile name and confidence level. Returns true if valid, or false
+// with a reason string explaining why validation failed.
+func isValidPreset(profile string, confidence float64) (bool, string) {
+	if profile == "" {
+		return false, "no_profile"
+	}
+	if profile != "clean" && profile != "grain" && profile != "default" {
+		return false, "unsupported_profile"
+	}
+	if confidence < presetConfidenceThreshold {
+		return false, "confidence_below_threshold"
+	}
+	return true, ""
 }
 
 func presetSummary(decision presetDecision) string {

@@ -29,12 +29,13 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 	if r == nil || r.client == nil {
 		return "", nil
 	}
-	jobLogger := logger
+	label = strings.TrimSpace(label)
 	episodeKey = strings.ToLower(strings.TrimSpace(episodeKey))
-	if strings.TrimSpace(label) != "" || episodeKey != "" {
+	jobLogger := logger
+	if label != "" || episodeKey != "" {
 		jobLogger = jobLogger.With(
 			logging.String(logging.FieldEpisodeKey, episodeKey),
-			logging.String(logging.FieldEpisodeLabel, strings.TrimSpace(label)),
+			logging.String(logging.FieldEpisodeLabel, label),
 			logging.Int(logging.FieldEpisodeIndex, episodeIndex),
 			logging.Int(logging.FieldEpisodeCount, episodeCount),
 		)
@@ -43,10 +44,10 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 		"launching drapto encode",
 		logging.String("command", r.draptoCommand(sourcePath, encodedDir, presetProfile)),
 		logging.String("source_file", sourcePath),
-		logging.String("job", strings.TrimSpace(label)),
+		logging.String("job", label),
 	)
 	snapshot := loadEncodingSnapshot(jobLogger, item.EncodingDetailsJSON)
-	snapshot.JobLabel = strings.TrimSpace(label)
+	snapshot.JobLabel = label
 	snapshot.EpisodeKey = episodeKey
 	snapshot.EpisodeIndex = episodeIndex
 	snapshot.EpisodeCount = episodeCount
@@ -76,10 +77,10 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 		copy := *item
 		changed := false
 		message := progressMessageText(update)
-		if message != "" && strings.TrimSpace(label) != "" && episodeIndex > 0 && episodeCount > 0 {
-			message = fmt.Sprintf("%s (%d/%d) — %s", strings.TrimSpace(label), episodeIndex, episodeCount, message)
-		} else if message != "" && strings.TrimSpace(label) != "" {
-			message = fmt.Sprintf("%s — %s", strings.TrimSpace(label), message)
+		if message != "" && label != "" && episodeIndex > 0 && episodeCount > 0 {
+			message = fmt.Sprintf("%s (%d/%d) — %s", label, episodeIndex, episodeCount, message)
+		} else if message != "" && label != "" {
+			message = fmt.Sprintf("%s — %s", label, message)
 		}
 		if applyDraptoUpdate(&snapshot, update, message) {
 			if raw, err := snapshot.Marshal(); err != nil {

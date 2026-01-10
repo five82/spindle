@@ -106,46 +106,33 @@ func applyDraptoUpdate(snapshot *encodingstate.Snapshot, update drapto.ProgressU
 		return false
 	}
 	changed := false
+
+	// Handle progress-related events
 	switch update.Type {
 	case drapto.EventTypeStageProgress, drapto.EventTypeEncodingProgress, drapto.EventTypeEncodingStarted, drapto.EventTypeUnknown:
-		if mergeProgressSnapshot(snapshot, update, summary) {
-			changed = true
-		}
+		changed = mergeProgressSnapshot(snapshot, update, summary) || changed
 	}
+
+	// Handle metadata events
 	switch update.Type {
 	case drapto.EventTypeHardware:
-		if mergeHardwareSnapshot(snapshot, update.Hardware) {
-			changed = true
-		}
+		changed = mergeHardwareSnapshot(snapshot, update.Hardware) || changed
 	case drapto.EventTypeInitialization:
-		if mergeVideoSnapshot(snapshot, update.Video) {
-			changed = true
-		}
+		changed = mergeVideoSnapshot(snapshot, update.Video) || changed
 	case drapto.EventTypeCropResult:
-		if mergeCropSnapshot(snapshot, update.Crop) {
-			changed = true
-		}
+		changed = mergeCropSnapshot(snapshot, update.Crop) || changed
 	case drapto.EventTypeEncodingConfig:
-		if mergeConfigSnapshot(snapshot, update.EncodingConfig) {
-			changed = true
-		}
+		changed = mergeConfigSnapshot(snapshot, update.EncodingConfig) || changed
 	case drapto.EventTypeValidation:
-		if mergeValidationSnapshot(snapshot, update.Validation) {
-			changed = true
-		}
+		changed = mergeValidationSnapshot(snapshot, update.Validation) || changed
 	case drapto.EventTypeEncodingComplete:
-		if mergeResultSnapshot(snapshot, update.Result) {
-			changed = true
-		}
+		changed = mergeResultSnapshot(snapshot, update.Result) || changed
 	case drapto.EventTypeWarning:
-		if mergeWarningSnapshot(snapshot, update.Warning, update.Message) {
-			changed = true
-		}
+		changed = mergeWarningSnapshot(snapshot, update.Warning, update.Message) || changed
 	case drapto.EventTypeError:
-		if mergeErrorSnapshot(snapshot, update.Error) {
-			changed = true
-		}
+		changed = mergeErrorSnapshot(snapshot, update.Error) || changed
 	}
+
 	return changed
 }
 

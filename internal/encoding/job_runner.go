@@ -24,7 +24,7 @@ func newEncodeJobRunner(store *queue.Store, runner *draptoRunner) *encodeJobRunn
 }
 
 func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
-	encodedPaths := make([]string, 0, maxInt(1, len(jobs)))
+	encodedPaths := make([]string, 0, max(1, len(jobs)))
 	if logger != nil {
 		runnerAvailable := r != nil && r.runner != nil
 		logger.Info(
