@@ -117,8 +117,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		logging.String("decision_reason", "ready_for_organize"),
 		logging.String("decision_options", "organize, review"),
 	)
-	var meta MetadataProvider
-	meta = queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
+	meta := MetadataProvider(queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle))
 	if item.MetadataJSON == "" || meta.Title() == "" {
 		fallbackTitle := item.DiscTitle
 		if fallbackTitle == "" {
@@ -262,33 +261,8 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	)
 
 	if o.notifier != nil {
-		title := strings.TrimSpace(meta.Title())
-		if title == "" {
-			title = strings.TrimSpace(item.DiscTitle)
-		}
-		if title == "" {
-			title = filepath.Base(targetPath)
-		}
-		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
-			"mediaTitle":        title,
-			"finalFile":         filepath.Base(targetPath),
-			"jellyfinRefreshed": jellyfinRefreshed,
-		}); err != nil {
-			logger.Warn("organization notifier failed; completion alert skipped",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "notify_failed"),
-				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
-				logging.String(logging.FieldImpact, "user will not receive completion notification"),
-			)
-		}
-		if err := o.notifier.Publish(ctx, notifications.EventProcessingCompleted, notifications.Payload{"title": title}); err != nil {
-			logger.Warn("processing completion notifier failed; completion alert skipped",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "notify_failed"),
-				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
-				logging.String(logging.FieldImpact, "user will not receive completion notification"),
-			)
-		}
+		title := notificationTitle(meta, item.DiscTitle, targetPath)
+		o.publishCompletionNotifications(ctx, logger, title, targetPath, jellyfinRefreshed, 0, 0)
 	}
 
 	o.cleanupStaging(ctx, item)
@@ -391,12 +365,11 @@ func appendOrganizeJobLines(attrs []logging.Attr, jobs []organizeJob) []logging.
 	if len(jobs) == 0 {
 		return attrs
 	}
-	limit := len(jobs)
-	if limit > maxLoggedOrganizeJobs {
-		limit = maxLoggedOrganizeJobs
+	limit := min(len(jobs), maxLoggedOrganizeJobs)
+	if len(jobs) > maxLoggedOrganizeJobs {
 		attrs = append(attrs, logging.Int("job_hidden_count", len(jobs)-limit))
 	}
-	for idx := 0; idx < limit; idx++ {
+	for idx := range limit {
 		attrs = append(attrs, logging.String(fmt.Sprintf("job_%d", idx+1), formatOrganizeJobValue(jobs[idx])))
 	}
 	return attrs
@@ -432,6 +405,20 @@ func ternary[T any](cond bool, a, b T) T {
 		return a
 	}
 	return b
+}
+
+// notificationTitle returns the best available title for notifications,
+// falling back through metadata title, disc title, and finally the filename.
+func notificationTitle(meta MetadataProvider, discTitle, finalPath string) string {
+	if meta != nil {
+		if title := strings.TrimSpace(meta.Title()); title != "" {
+			return title
+		}
+	}
+	if title := strings.TrimSpace(discTitle); title != "" {
+		return title
+	}
+	return filepath.Base(finalPath)
 }
 
 func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []organizeJob, logger *slog.Logger, stageStarted time.Time) error {
@@ -608,28 +595,13 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 	item.FinalFile = finalPaths[len(finalPaths)-1]
 	item.ProgressStage = "Organizing"
 	item.ProgressPercent = 100
-	successMsg := fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
-	if failedEpisodes > 0 {
-		successMsg = fmt.Sprintf("Available in library (%d episodes, %d failed)", len(finalPaths), failedEpisodes)
-	}
-	item.ProgressMessage = successMsg
 	item.ActiveEpisodeKey = ""
-	if o.notifier != nil {
-		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
-			"mediaTitle":        strings.TrimSpace(item.DiscTitle),
-			"finalFile":         filepath.Base(item.FinalFile),
-			"jellyfinRefreshed": jellyfinRefreshed,
-			"episodeCount":      len(finalPaths),
-			"failedCount":       failedEpisodes,
-		}); err != nil {
-			logger.Warn("organization notifier failed; completion alert skipped",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "notify_failed"),
-				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
-				logging.String(logging.FieldImpact, "user will not receive completion notification"),
-			)
-		}
+	if failedEpisodes > 0 {
+		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d failed)", len(finalPaths), failedEpisodes)
+	} else {
+		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
 	}
+	o.publishCompletionNotifications(ctx, logger, strings.TrimSpace(item.DiscTitle), item.FinalFile, jellyfinRefreshed, len(finalPaths), failedEpisodes)
 	o.cleanupStaging(ctx, item)
 	return nil
 }
@@ -795,6 +767,41 @@ func (o *Organizer) cleanupStaging(ctx context.Context, item *queue.Item) {
 		return
 	}
 	logger.Debug("cleaned staging directory", logging.String("staging_root", root))
+}
+
+// publishCompletionNotifications sends organization and processing completion events.
+// episodeCount and failedCount are only included in payloads when episodeCount > 0.
+func (o *Organizer) publishCompletionNotifications(ctx context.Context, logger *slog.Logger, title, finalPath string, jellyfinRefreshed bool, episodeCount, failedCount int) {
+	if o.notifier == nil {
+		return
+	}
+	payload := notifications.Payload{
+		"mediaTitle":        title,
+		"finalFile":         filepath.Base(finalPath),
+		"jellyfinRefreshed": jellyfinRefreshed,
+	}
+	if episodeCount > 0 {
+		payload["episodeCount"] = episodeCount
+		payload["failedCount"] = failedCount
+	}
+	if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, payload); err != nil {
+		logger.Warn("organization notifier failed; completion alert skipped",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "notify_failed"),
+			logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
+			logging.String(logging.FieldImpact, "user will not receive completion notification"),
+		)
+	}
+	if episodeCount == 0 {
+		if err := o.notifier.Publish(ctx, notifications.EventProcessingCompleted, notifications.Payload{"title": title}); err != nil {
+			logger.Warn("processing completion notifier failed; completion alert skipped",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "notify_failed"),
+				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
+				logging.String(logging.FieldImpact, "user will not receive completion notification"),
+			)
+		}
+	}
 }
 
 func (o *Organizer) movePathToReview(ctx context.Context, item *queue.Item, sourcePath string) (string, error) {
@@ -985,14 +992,17 @@ func (o *Organizer) nextReviewPath(dir, prefix, ext string) (string, error) {
 	return "", fmt.Errorf("exhausted review filename slots in %s", dir)
 }
 
-func reviewFilenamePrefix(item *queue.Item) string {
-	reason := strings.ToLower(strings.TrimSpace(item.ReviewReason))
-	if reason == "" {
-		reason = "unidentified"
-	}
-	slug := strings.Builder{}
+// sanitizeSlug converts input to a lowercase alphanumeric slug with hyphens.
+// Spaces, underscores, periods, and hyphens become hyphens. Other characters are dropped.
+// maxLen of 0 means unlimited length.
+func sanitizeSlug(input string, maxLen int) string {
+	input = strings.ToLower(strings.TrimSpace(input))
+	var slug strings.Builder
 	lastHyphen := false
-	for _, r := range reason {
+	for _, r := range input {
+		if maxLen > 0 && slug.Len() >= maxLen {
+			break
+		}
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			slug.WriteRune(r)
@@ -1002,35 +1012,25 @@ func reviewFilenamePrefix(item *queue.Item) string {
 				slug.WriteRune('-')
 				lastHyphen = true
 			}
-		default:
-			// drop other runes
 		}
 	}
-	result := strings.Trim(slug.String(), "-")
+	return strings.Trim(slug.String(), "-")
+}
+
+func reviewFilenamePrefix(item *queue.Item) string {
+	reason := item.ReviewReason
+	if strings.TrimSpace(reason) == "" {
+		reason = "unidentified"
+	}
+	result := sanitizeSlug(reason, 0)
 	if result == "" {
 		result = "unidentified"
 	}
-	fingerprint := strings.ToLower(strings.TrimSpace(item.DiscFingerprint))
-	if fingerprint == "" {
+	fpSlug := sanitizeSlug(item.DiscFingerprint, 8)
+	if fpSlug == "" {
 		return result
 	}
-	fpSlug := strings.Builder{}
-	for _, r := range fingerprint {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			fpSlug.WriteRune(r)
-		default:
-			// drop
-		}
-		if fpSlug.Len() >= 8 {
-			break
-		}
-	}
-	fingerprintSegment := strings.Trim(fpSlug.String(), "-")
-	if fingerprintSegment == "" {
-		return result
-	}
-	return result + "-" + fingerprintSegment
+	return result + "-" + fpSlug
 }
 
 func copyFile(src, dst string) error {
