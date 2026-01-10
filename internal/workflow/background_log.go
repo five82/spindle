@@ -79,7 +79,7 @@ func (b *BackgroundLogger) CreateHandler(path string) (slog.Handler, error) {
 	}
 	override := ""
 	if b.cfg != nil {
-		if base, ok := minLevelWithOverrides(b.cfg.Logging.Level, b.cfg.Logging.StageOverrides); ok {
+		if base, ok := logging.MinLevelWithOverrides(b.cfg.Logging.Level, b.cfg.Logging.StageOverrides); ok {
 			level = base
 			override = b.cfg.Logging.Level
 		}
@@ -119,41 +119,6 @@ func (b *BackgroundLogger) CreateHandler(path string) (slog.Handler, error) {
 	}
 
 	return handler, nil
-}
-
-func minLevelWithOverrides(base string, overrides map[string]string) (string, bool) {
-	if len(overrides) == 0 {
-		return "", false
-	}
-	minLevel := parseOverrideLevel(base)
-	hasOverride := false
-	for _, value := range overrides {
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		parsed := parseOverrideLevel(value)
-		if parsed < minLevel {
-			minLevel = parsed
-		}
-		hasOverride = true
-	}
-	if !hasOverride {
-		return "", false
-	}
-	return minLevel.String(), true
-}
-
-func parseOverrideLevel(level string) slog.Level {
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
 }
 
 func (b *BackgroundLogger) filename(item *queue.Item) string {

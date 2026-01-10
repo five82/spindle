@@ -203,14 +203,14 @@ func ensureCurrentLogPointer(logDir, target string) error {
 	if err := os.Remove(current); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove existing log pointer: %w", err)
 	}
+	// Try symlink first, fall back to hardlink
 	if err := os.Symlink(target, current); err == nil {
 		return nil
-	} else {
-		if err := os.Link(target, current); err == nil {
-			return nil
-		}
+	}
+	if err := os.Link(target, current); err != nil {
 		return fmt.Errorf("link log pointer: %w", err)
 	}
+	return nil
 }
 
 func writePIDFile(path string) error {

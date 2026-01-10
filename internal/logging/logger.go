@@ -25,7 +25,7 @@ type Options struct {
 
 // New constructs a slog logger using the provided options.
 func New(opts Options) (*slog.Logger, error) {
-	level := parseLevel(opts.Level)
+	level := ParseLevel(opts.Level)
 	levelVar := new(slog.LevelVar)
 	levelVar.Set(level)
 
@@ -61,7 +61,7 @@ func New(opts Options) (*slog.Logger, error) {
 		handler = newStreamHandler(handler, opts.Stream)
 	}
 	if strings.TrimSpace(opts.OverrideLevel) != "" {
-		overrideLevel := parseLevel(opts.OverrideLevel)
+		overrideLevel := ParseLevel(opts.OverrideLevel)
 		handler = newLevelOverrideHandler(handler, overrideLevel)
 	}
 	if strings.TrimSpace(opts.SessionID) != "" {
@@ -90,7 +90,7 @@ func NewFromConfig(cfg *config.Config) (*slog.Logger, error) {
 
 	level := cfg.Logging.Level
 	override := ""
-	if base, ok := minLevelWithOverrides(cfg.Logging.Level, cfg.Logging.StageOverrides); ok {
+	if base, ok := MinLevelWithOverrides(cfg.Logging.Level, cfg.Logging.StageOverrides); ok {
 		level = base
 		override = cfg.Logging.Level
 	}
@@ -105,7 +105,9 @@ func NewFromConfig(cfg *config.Config) (*slog.Logger, error) {
 	return New(opts)
 }
 
-func parseLevel(level string) slog.Level {
+// ParseLevel converts a string log level to slog.Level.
+// Recognized levels: debug, info, warn, error. Unrecognized values default to info.
+func ParseLevel(level string) slog.Level {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "debug":
 		return slog.LevelDebug
@@ -122,17 +124,20 @@ func parseLevel(level string) slog.Level {
 	}
 }
 
-func minLevelWithOverrides(base string, overrides map[string]string) (string, bool) {
+// MinLevelWithOverrides returns the minimum log level needed to satisfy both
+// the base level and any stage overrides. Returns the level string and true
+// if overrides require a lower level than base, otherwise returns empty string and false.
+func MinLevelWithOverrides(base string, overrides map[string]string) (string, bool) {
 	if len(overrides) == 0 {
 		return "", false
 	}
-	minLevel := parseLevel(base)
+	minLevel := ParseLevel(base)
 	hasOverride := false
 	for _, value := range overrides {
 		if strings.TrimSpace(value) == "" {
 			continue
 		}
-		parsed := parseLevel(value)
+		parsed := ParseLevel(value)
 		if parsed < minLevel {
 			minLevel = parsed
 		}

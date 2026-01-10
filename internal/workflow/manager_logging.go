@@ -64,7 +64,7 @@ func (m *Manager) stageLoggerForLane(ctx context.Context, lane *laneState, laneL
 	if m != nil && m.cfg != nil {
 		if stage, ok := logging.StageFromContext(ctx); ok {
 			if override := stageOverrideLevel(m.cfg.Logging.StageOverrides, stage); override != "" {
-				logger = logging.WithLevelOverride(logger, parseStageLevel(override))
+				logger = logging.WithLevelOverride(logger, logging.ParseLevel(override))
 			}
 		}
 	}
@@ -85,19 +85,6 @@ func stageOverrideLevel(overrides map[string]string, stage string) string {
 		}
 	}
 	return ""
-}
-
-func parseStageLevel(level string) slog.Level {
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
 }
 
 func withStageContext(ctx context.Context, lane *laneState, stageName string, item *queue.Item, requestID string) context.Context {
