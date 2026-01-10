@@ -126,6 +126,8 @@ type Item struct {
 	ProgressStage       string
 	ProgressPercent     float64
 	ProgressMessage     string
+	ProgressBytesCopied int64 // Only set during organizing
+	ProgressTotalBytes  int64 // Only set during organizing
 	EncodingDetailsJSON string
 	DraptoPresetProfile string
 	RipSpecData         string

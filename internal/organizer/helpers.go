@@ -308,10 +308,17 @@ func (o *Organizer) cleanupStaging(ctx context.Context, item *queue.Item) {
 
 // updateProgress updates the item's progress in the queue store.
 func (o *Organizer) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) {
+	o.updateProgressWithBytes(ctx, item, message, percent, 0, 0)
+}
+
+// updateProgressWithBytes updates the item's progress including byte copy tracking.
+func (o *Organizer) updateProgressWithBytes(ctx context.Context, item *queue.Item, message string, percent float64, bytesCopied, totalBytes int64) {
 	logger := logging.WithContext(ctx, o.logger)
 	copy := *item
 	copy.ProgressMessage = message
 	copy.ProgressPercent = percent
+	copy.ProgressBytesCopied = bytesCopied
+	copy.ProgressTotalBytes = totalBytes
 	if err := o.store.UpdateProgress(ctx, &copy); err != nil {
 		logger.Warn("failed to persist organizer progress; queue status may lag",
 			logging.Error(err),

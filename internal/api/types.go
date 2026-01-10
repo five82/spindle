@@ -42,9 +42,11 @@ type QueueItem struct {
 
 // QueueProgress captures stage progress information for a queue entry.
 type QueueProgress struct {
-	Stage   string  `json:"stage"`
-	Percent float64 `json:"percent"`
-	Message string  `json:"message"`
+	Stage       string  `json:"stage"`
+	Percent     float64 `json:"percent"`
+	Message     string  `json:"message"`
+	BytesCopied int64   `json:"bytesCopied,omitempty"` // Only set during organizing
+	TotalBytes  int64   `json:"totalBytes,omitempty"`  // Only set during organizing
 }
 
 // EncodingStatus surfaces Drapto telemetry captured during encoding.
