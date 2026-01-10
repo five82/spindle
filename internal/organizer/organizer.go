@@ -451,12 +451,34 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		logging.String("decision_result", ternary(refreshAllowed, "refresh", "skip")),
 		logging.String("decision_reason", refreshReason),
 		logging.String("decision_options", "refresh, skip"),
-		logging.String("decision_scope", "per_episode"),
+		logging.String("decision_scope", "batch_after_all_episodes"),
 	)
+
+	var (
+		skipped        int
+		failedEpisodes int
+		lastErr        error
+	)
+
 	for idx, job := range jobs {
-		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(job.Episode.Key))
+		episodeKey := strings.ToLower(strings.TrimSpace(job.Episode.Key))
 		label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
-		o.updateProgress(ctx, item, fmt.Sprintf("Organizing %s (%d/%d)", label, idx+1, len(jobs)), step*float64(idx))
+
+		// Skip already-organized episodes (enables resume after partial failure)
+		if asset, ok := env.Assets.FindAsset("final", episodeKey); ok && asset.IsCompleted() {
+			logger.Debug("skipping already-organized episode",
+				logging.String("episode_key", episodeKey),
+				logging.String("final_path", asset.Path),
+			)
+			finalPaths = append(finalPaths, asset.Path)
+			skipped++
+			continue
+		}
+
+		item.ActiveEpisodeKey = episodeKey
+		remaining := len(jobs) - skipped
+		current := idx + 1 - skipped
+		o.updateProgress(ctx, item, fmt.Sprintf("Organizing %s (%d/%d)", label, current, remaining), step*float64(idx))
 		targetPath, err := o.jellyfin.Organize(ctx, job.Source, job.Metadata)
 		if err != nil {
 			if isLibraryUnavailable(err) {
@@ -475,13 +497,23 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 				)
 				return o.finishReview(ctx, item, stageStarted, "Library unavailable", collectEncodedSources(item, env), err)
 			}
-			return services.Wrap(
-				services.ErrExternalTool,
-				"organizing",
-				"move to library",
-				"Failed to move media into library",
-				err,
+			// Record per-episode failure and continue to next episode
+			logger.Error("episode organization failed",
+				logging.String("episode_key", episodeKey),
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "episode_organize_failed"),
 			)
+			env.Assets.AddAsset("final", ripspec.Asset{
+				EpisodeKey: job.Episode.Key,
+				TitleID:    job.Episode.TitleID,
+				Path:       "",
+				Status:     ripspec.AssetStatusFailed,
+				ErrorMsg:   err.Error(),
+			})
+			failedEpisodes++
+			lastErr = err
+			o.persistRipSpec(ctx, item, env, logger)
+			continue
 		}
 		logger.Debug(
 			"organized episode into library",
@@ -490,33 +522,32 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 			logging.String("final_file", targetPath),
 		)
 		if env != nil {
-			env.Assets.AddAsset("final", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: targetPath})
-			// Persist per-episode progress so API consumers can surface completed
-			// episodes while the organizing stage is still running.
-			if encoded, err := env.Encode(); err == nil {
-				copy := *item
-				copy.RipSpecData = encoded
-				if err := o.store.Update(ctx, &copy); err != nil {
-					logger.Warn("failed to persist rip spec after episode organize; metadata may be stale",
-						logging.Error(err),
-						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
-						logging.String(logging.FieldErrorHint, "check queue database access"),
-						logging.String(logging.FieldImpact, "episode metadata may not reflect latest state"),
-					)
-				} else {
-					*item = copy
-				}
-			} else {
-				logger.Warn("failed to encode rip spec after episode organize; metadata may be stale",
-					logging.Error(err),
-					logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-					logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
-					logging.String(logging.FieldImpact, "episode metadata may not reflect latest state"),
-				)
-			}
+			env.Assets.AddAsset("final", ripspec.Asset{
+				EpisodeKey: job.Episode.Key,
+				TitleID:    job.Episode.TitleID,
+				Path:       targetPath,
+				Status:     ripspec.AssetStatusCompleted,
+			})
+			o.persistRipSpec(ctx, item, env, logger)
 		}
 		if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted); err != nil {
-			return err
+			// Validation failure is critical - record and continue
+			logger.Error("episode validation failed",
+				logging.String("episode_key", episodeKey),
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "episode_validation_failed"),
+			)
+			env.Assets.AddAsset("final", ripspec.Asset{
+				EpisodeKey: job.Episode.Key,
+				TitleID:    job.Episode.TitleID,
+				Path:       targetPath,
+				Status:     ripspec.AssetStatusFailed,
+				ErrorMsg:   err.Error(),
+			})
+			failedEpisodes++
+			lastErr = err
+			o.persistRipSpec(ctx, item, env, logger)
+			continue
 		}
 		itemCopy := *item
 		itemCopy.EncodedFile = job.Source
@@ -528,27 +559,20 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 				logging.String(logging.FieldImpact, "subtitles will not appear in Jellyfin for this episode"),
 			)
 		}
-		if refreshAllowed {
-			if err := o.jellyfin.Refresh(ctx, job.Metadata); err != nil {
-				logger.Warn("jellyfin refresh failed; library scan may be stale",
-					logging.Error(err),
-					logging.String(logging.FieldEventType, "jellyfin_refresh_failed"),
-					logging.String(logging.FieldErrorHint, "check jellyfin.url and jellyfin.api_key"),
-					logging.String(logging.FieldImpact, "new media may not appear in Jellyfin until next scan"),
-				)
-			}
-		}
 		finalPaths = append(finalPaths, targetPath)
 	}
-	if len(finalPaths) == 0 {
+
+	// Only fail if no episodes were organized successfully
+	if len(finalPaths) == 0 && lastErr != nil {
 		return services.Wrap(
-			services.ErrValidation,
+			services.ErrExternalTool,
 			"organizing",
-			"finalize episodes",
-			"No encoded episodes were organized",
-			nil,
+			"move to library",
+			fmt.Sprintf("All %d episode(s) failed organization", len(jobs)-skipped),
+			lastErr,
 		)
 	}
+
 	if env != nil {
 		if encoded, err := env.Encode(); err == nil {
 			item.RipSpecData = encoded
@@ -561,16 +585,42 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 			)
 		}
 	}
+
+	// Batch Jellyfin refresh once after all episodes are organized
+	jellyfinRefreshed := false
+	if refreshAllowed && len(finalPaths) > 0 {
+		// Use first job's metadata for library refresh (show-level refresh)
+		if err := o.jellyfin.Refresh(ctx, jobs[0].Metadata); err != nil {
+			logger.Warn("jellyfin refresh failed; library scan may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "jellyfin_refresh_failed"),
+				logging.String(logging.FieldErrorHint, "check jellyfin.url and jellyfin.api_key"),
+				logging.String(logging.FieldImpact, "new media may not appear in Jellyfin until next scan"),
+			)
+		} else {
+			jellyfinRefreshed = true
+			logger.Debug("jellyfin library refresh requested (batch)",
+				logging.Int("organized_episodes", len(finalPaths)),
+			)
+		}
+	}
+
 	item.FinalFile = finalPaths[len(finalPaths)-1]
 	item.ProgressStage = "Organizing"
 	item.ProgressPercent = 100
-	item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
+	successMsg := fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
+	if failedEpisodes > 0 {
+		successMsg = fmt.Sprintf("Available in library (%d episodes, %d failed)", len(finalPaths), failedEpisodes)
+	}
+	item.ProgressMessage = successMsg
 	item.ActiveEpisodeKey = ""
 	if o.notifier != nil {
 		if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, notifications.Payload{
 			"mediaTitle":        strings.TrimSpace(item.DiscTitle),
 			"finalFile":         filepath.Base(item.FinalFile),
-			"jellyfinRefreshed": true,
+			"jellyfinRefreshed": jellyfinRefreshed,
+			"episodeCount":      len(finalPaths),
+			"failedCount":       failedEpisodes,
 		}); err != nil {
 			logger.Warn("organization notifier failed; completion alert skipped",
 				logging.Error(err),
@@ -582,6 +632,34 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 	}
 	o.cleanupStaging(ctx, item)
 	return nil
+}
+
+func (o *Organizer) persistRipSpec(ctx context.Context, item *queue.Item, env *ripspec.Envelope, logger *slog.Logger) {
+	if env == nil {
+		return
+	}
+	encoded, err := env.Encode()
+	if err != nil {
+		logger.Warn("failed to encode rip spec after episode organize; metadata may be stale",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+			logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+			logging.String(logging.FieldImpact, "episode metadata may not reflect latest state"),
+		)
+		return
+	}
+	itemCopy := *item
+	itemCopy.RipSpecData = encoded
+	if err := o.store.Update(ctx, &itemCopy); err != nil {
+		logger.Warn("failed to persist rip spec after episode organize; metadata may be stale",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+			logging.String(logging.FieldErrorHint, "check queue database access"),
+			logging.String(logging.FieldImpact, "episode metadata may not reflect latest state"),
+		)
+	} else {
+		*item = itemCopy
+	}
 }
 
 func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, startedAt time.Time) error {

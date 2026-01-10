@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"spindle/internal/api"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 )
 
 type queueAPI interface {
@@ -21,6 +23,12 @@ type queueAPI interface {
 	RetryIDs(ctx context.Context, ids []int64) (queueRetryResult, error)
 	StopIDs(ctx context.Context, ids []int64) (queueStopResult, error)
 	Health(ctx context.Context) (queueHealthView, error)
+}
+
+// queueStoreAPI extends queueAPI with operations that require direct store access.
+type queueStoreAPI interface {
+	queueAPI
+	RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (queueRetryItemResult, error)
 }
 
 type queueIPCFacade struct {
@@ -496,4 +504,95 @@ func tallyEpisodeTotals(episodes []queueEpisodeView) queueEpisodeTotals {
 		}
 	}
 	return totals
+}
+
+// RetryEpisode clears a specific episode's failed status and resets the item
+// to the appropriate stage so it can be re-processed.
+func (f *queueStoreFacade) RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (queueRetryItemResult, error) {
+	item, err := f.store.GetByID(ctx, itemID)
+	if err != nil {
+		return queueRetryItemResult{}, err
+	}
+	if item == nil {
+		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeNotFound}, nil
+	}
+
+	// Only allow retry on failed or review items
+	if item.Status != queue.StatusFailed && item.Status != queue.StatusReview {
+		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeNotFailed}, nil
+	}
+
+	// Parse rip spec
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err != nil {
+		return queueRetryItemResult{}, fmt.Errorf("parse rip spec: %w", err)
+	}
+
+	// Normalize episode key
+	episodeKey = strings.ToLower(strings.TrimSpace(episodeKey))
+	if episodeKey == "" {
+		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeEpisodeNotFound}, nil
+	}
+
+	// Find and determine the stage to reset to based on which asset failed
+	targetStatus := determineRetryStatus(&env, episodeKey)
+	if targetStatus == "" {
+		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeEpisodeNotFound}, nil
+	}
+
+	// Clear failed assets for this episode
+	env.Assets.ClearFailedAsset("encoded", episodeKey)
+	env.Assets.ClearFailedAsset("subtitled", episodeKey)
+	env.Assets.ClearFailedAsset("final", episodeKey)
+
+	// Re-encode and persist
+	encoded, err := env.Encode()
+	if err != nil {
+		return queueRetryItemResult{}, fmt.Errorf("encode rip spec: %w", err)
+	}
+
+	// Update item
+	item.RipSpecData = encoded
+	item.Status = targetStatus
+	item.ErrorMessage = ""
+	item.NeedsReview = false
+	item.ReviewReason = ""
+
+	if err := f.store.Update(ctx, item); err != nil {
+		return queueRetryItemResult{}, fmt.Errorf("update item: %w", err)
+	}
+
+	return queueRetryItemResult{
+		ID:        itemID,
+		Outcome:   queueRetryOutcomeUpdated,
+		NewStatus: string(targetStatus),
+	}, nil
+}
+
+// determineRetryStatus figures out which status to reset the item to based on
+// which asset failed for the given episode.
+func determineRetryStatus(env *ripspec.Envelope, episodeKey string) queue.Status {
+	// Check if episode exists in the spec
+	episode := env.EpisodeByKey(episodeKey)
+	if episode == nil {
+		return ""
+	}
+
+	// Check which stage failed (in reverse order of workflow)
+	if asset, ok := env.Assets.FindAsset("final", episodeKey); ok && asset.IsFailed() {
+		return queue.StatusEncoded // Re-run organizing
+	}
+	if asset, ok := env.Assets.FindAsset("subtitled", episodeKey); ok && asset.IsFailed() {
+		return queue.StatusEncoded // Re-run subtitling
+	}
+	if asset, ok := env.Assets.FindAsset("encoded", episodeKey); ok && asset.IsFailed() {
+		// Check if episode identification was completed
+		if len(env.Episodes) > 0 {
+			return queue.StatusEpisodeIdentified // Re-run encoding after episode ID
+		}
+		return queue.StatusRipped // Re-run encoding
+	}
+
+	// If no failed assets found, still allow retry from ripped stage
+	return queue.StatusRipped
 }

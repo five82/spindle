@@ -57,11 +57,20 @@ type Assets struct {
 	Final     []Asset `json:"final,omitempty"`
 }
 
-// Asset associates an episode with a file path.
+// Asset status constants for per-episode tracking.
+const (
+	AssetStatusPending   = "pending"
+	AssetStatusCompleted = "completed"
+	AssetStatusFailed    = "failed"
+)
+
+// Asset associates an episode with a file path and its processing status.
 type Asset struct {
 	EpisodeKey string `json:"episode_key"`
 	TitleID    int    `json:"title_id,omitempty"`
 	Path       string `json:"path"`
+	Status     string `json:"status,omitempty"`    // pending, completed, failed
+	ErrorMsg   string `json:"error_msg,omitempty"` // per-episode error message
 }
 
 // Parse loads a rip spec from JSON, returning an empty envelope on blank input.
@@ -141,6 +150,50 @@ func (a Assets) FindAsset(kind, key string) (Asset, bool) {
 		}
 	}
 	return Asset{}, false
+}
+
+// IsCompleted returns true if the asset has a path and is marked completed (or has no status).
+func (a Asset) IsCompleted() bool {
+	return strings.TrimSpace(a.Path) != "" && a.Status != AssetStatusFailed
+}
+
+// IsFailed returns true if the asset is marked as failed.
+func (a Asset) IsFailed() bool {
+	return a.Status == AssetStatusFailed
+}
+
+// ClearFailedAsset resets a failed asset so it can be retried.
+func (assets *Assets) ClearFailedAsset(kind, key string) {
+	if assets == nil {
+		return
+	}
+	list := assets.listPtr(kind)
+	if list == nil {
+		return
+	}
+	for idx := range *list {
+		if strings.EqualFold((*list)[idx].EpisodeKey, key) {
+			(*list)[idx].Status = ""
+			(*list)[idx].ErrorMsg = ""
+			(*list)[idx].Path = ""
+			return
+		}
+	}
+}
+
+func (a *Assets) listPtr(kind string) *[]Asset {
+	switch strings.ToLower(kind) {
+	case "ripped":
+		return &a.Ripped
+	case "encoded":
+		return &a.Encoded
+	case "subtitled":
+		return &a.Subtitled
+	case "final":
+		return &a.Final
+	default:
+		return nil
+	}
 }
 
 func (a Assets) fromKind(kind string) []Asset {

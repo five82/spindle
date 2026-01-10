@@ -57,6 +57,8 @@ type EpisodeStatus struct {
 	Episode                   int            `json:"episode"`
 	Title                     string         `json:"title"`
 	Stage                     string         `json:"stage"`
+	Status                    string         `json:"status,omitempty"`       // pending, completed, failed
+	ErrorMessage              string         `json:"errorMessage,omitempty"` // per-episode error
 	Active                    bool           `json:"active,omitempty"`
 	Progress                  *QueueProgress `json:"progress,omitempty"`
 	RuntimeSeconds            int            `json:"runtimeSeconds,omitempty"`

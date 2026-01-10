@@ -66,12 +66,29 @@ func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec
 
 func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, len(jobs))
+	var lastErr error
+	skipped := 0
 
 	for idx, job := range jobs {
+		episodeKey := strings.ToLower(strings.TrimSpace(job.Episode.Key))
 		label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
-		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(job.Episode.Key))
+
+		// Skip already-completed episodes (enables resume after partial failure)
+		if asset, ok := env.Assets.FindAsset("encoded", episodeKey); ok && asset.IsCompleted() {
+			logger.Debug("skipping already-encoded episode",
+				logging.String("episode_key", episodeKey),
+				logging.String("encoded_path", asset.Path),
+			)
+			encodedPaths = append(encodedPaths, asset.Path)
+			skipped++
+			continue
+		}
+
+		item.ActiveEpisodeKey = episodeKey
 		if item.ActiveEpisodeKey != "" {
-			item.ProgressMessage = fmt.Sprintf("Starting encode %s (%d/%d)", label, idx+1, len(jobs))
+			remaining := len(jobs) - skipped
+			current := idx + 1 - skipped
+			item.ProgressMessage = fmt.Sprintf("Starting encode %s (%d/%d)", label, current, remaining)
 			item.ProgressPercent = 0
 			if r.store != nil {
 				if err := r.store.UpdateProgress(ctx, item); err != nil {
@@ -91,46 +108,91 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 			var err error
 			path, err = r.runner.Encode(ctx, item, sourcePath, encodedDir, label, job.Episode.Key, idx+1, len(jobs), decision.Profile, logger)
 			if err != nil {
-				return nil, err
+				// Record per-episode failure and continue to next episode
+				logger.Error("episode encoding failed",
+					logging.String("episode_key", episodeKey),
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "episode_encode_failed"),
+				)
+				env.Assets.AddAsset("encoded", ripspec.Asset{
+					EpisodeKey: job.Episode.Key,
+					TitleID:    job.Episode.TitleID,
+					Path:       "",
+					Status:     ripspec.AssetStatusFailed,
+					ErrorMsg:   err.Error(),
+				})
+				lastErr = err
+				r.persistRipSpec(ctx, item, env, logger)
+				continue
 			}
 		}
 
 		finalPath, err := ensureEncodedOutput(path, job.Output, sourcePath)
 		if err != nil {
-			return nil, err
+			// Record per-episode failure and continue to next episode
+			logger.Error("episode output finalization failed",
+				logging.String("episode_key", episodeKey),
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "episode_output_failed"),
+			)
+			env.Assets.AddAsset("encoded", ripspec.Asset{
+				EpisodeKey: job.Episode.Key,
+				TitleID:    job.Episode.TitleID,
+				Path:       "",
+				Status:     ripspec.AssetStatusFailed,
+				ErrorMsg:   err.Error(),
+			})
+			lastErr = err
+			r.persistRipSpec(ctx, item, env, logger)
+			continue
 		}
 
-		env.Assets.AddAsset("encoded", ripspec.Asset{EpisodeKey: job.Episode.Key, TitleID: job.Episode.TitleID, Path: finalPath})
+		env.Assets.AddAsset("encoded", ripspec.Asset{
+			EpisodeKey: job.Episode.Key,
+			TitleID:    job.Episode.TitleID,
+			Path:       finalPath,
+			Status:     ripspec.AssetStatusCompleted,
+		})
 		encodedPaths = append(encodedPaths, finalPath)
 
 		// Persist rip spec after each episode so API consumers can surface
 		// per-episode progress while the encoding stage is still running.
-		if encoded, err := env.Encode(); err == nil {
-			copy := *item
-			copy.RipSpecData = encoded
-			if r.store != nil {
-				if err := r.store.Update(ctx, &copy); err != nil {
-					logger.Warn("failed to persist rip spec after episode encode; metadata may be stale",
-						logging.Error(err),
-						logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
-						logging.String(logging.FieldErrorHint, "check queue database access"),
-						logging.String(logging.FieldImpact, "episode encoding metadata may not reflect latest state"),
-					)
-				} else {
-					*item = copy
-				}
-			}
-		} else {
-			logger.Warn("failed to encode rip spec after episode encode; metadata may be stale",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
-				logging.String(logging.FieldImpact, "episode encoding metadata may not reflect latest state"),
-			)
-		}
+		r.persistRipSpec(ctx, item, env, logger)
+	}
+
+	// Only fail if no episodes were encoded successfully
+	if len(encodedPaths) == 0 && lastErr != nil {
+		return nil, lastErr
 	}
 
 	return encodedPaths, nil
+}
+
+func (r *encodeJobRunner) persistRipSpec(ctx context.Context, item *queue.Item, env *ripspec.Envelope, logger *slog.Logger) {
+	encoded, err := env.Encode()
+	if err != nil {
+		logger.Warn("failed to encode rip spec after episode encode; metadata may be stale",
+			logging.Error(err),
+			logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+			logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+			logging.String(logging.FieldImpact, "episode encoding metadata may not reflect latest state"),
+		)
+		return
+	}
+	itemCopy := *item
+	itemCopy.RipSpecData = encoded
+	if r.store != nil {
+		if err := r.store.Update(ctx, &itemCopy); err != nil {
+			logger.Warn("failed to persist rip spec after episode encode; metadata may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldImpact, "episode encoding metadata may not reflect latest state"),
+			)
+		} else {
+			*item = itemCopy
+		}
+	}
 }
 
 func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) (string, error) {

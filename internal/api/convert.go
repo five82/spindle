@@ -278,6 +278,13 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 				status.FinalPath = asset.FinalPath
 				totals.Final++
 			}
+			// Per-episode status and error from asset tracking
+			if asset.Status != "" {
+				status.Status = asset.Status
+			}
+			if asset.ErrorMessage != "" {
+				status.ErrorMessage = asset.ErrorMessage
+			}
 		}
 		status.Stage = effectiveStage(status)
 		if match, ok := matches[strings.ToLower(ep.Key)]; ok {
@@ -313,6 +320,8 @@ type episodeAssets struct {
 	EncodedPath   string
 	SubtitledPath string
 	FinalPath     string
+	Status        string // Overall episode status (derived from most advanced failed asset)
+	ErrorMessage  string // Per-episode error message
 }
 
 func indexAssets(assets ripspec.Assets) map[string]episodeAssets {
@@ -329,10 +338,27 @@ func indexAssets(assets ripspec.Assets) map[string]episodeAssets {
 				entry.RippedPath = asset.Path
 			case "encoded":
 				entry.EncodedPath = asset.Path
+				// Track encoded status/error since it's the first per-episode stage
+				if asset.Status != "" {
+					entry.Status = asset.Status
+				}
+				if asset.ErrorMsg != "" {
+					entry.ErrorMessage = asset.ErrorMsg
+				}
 			case "subtitled":
 				entry.SubtitledPath = asset.Path
+				// Override with subtitled status if it failed
+				if asset.Status == ripspec.AssetStatusFailed {
+					entry.Status = asset.Status
+					entry.ErrorMessage = asset.ErrorMsg
+				}
 			case "final":
 				entry.FinalPath = asset.Path
+				// Override with final status if it failed
+				if asset.Status == ripspec.AssetStatusFailed {
+					entry.Status = asset.Status
+					entry.ErrorMessage = asset.ErrorMsg
+				}
 			}
 			lookup[key] = entry
 		}

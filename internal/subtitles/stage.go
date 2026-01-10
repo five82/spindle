@@ -101,14 +101,34 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	openSubsExpected := s.service != nil && s.service.shouldUseOpenSubtitles()
 	step := progressPercentForGen / float64(len(targets))
 	var (
-		openSubsCount int
-		aiCount       int
-		totalSegments int
+		openSubsCount   int
+		aiCount         int
+		totalSegments   int
+		skipped         int
+		failedEpisodes  int
+		reviewEpisodes  int
+		lastReviewError string
 	)
 	for idx, target := range targets {
-		item.ActiveEpisodeKey = strings.ToLower(strings.TrimSpace(target.EpisodeKey))
+		episodeKey := strings.ToLower(strings.TrimSpace(target.EpisodeKey))
+
+		// Skip already-completed subtitled episodes (enables resume after partial failure)
+		if asset, ok := env.Assets.FindAsset("subtitled", episodeKey); ok && asset.IsCompleted() {
+			if s.logger != nil {
+				s.logger.Debug("skipping already-subtitled episode",
+					logging.String("episode_key", episodeKey),
+					logging.String("subtitle_path", asset.Path),
+				)
+			}
+			skipped++
+			continue
+		}
+
+		item.ActiveEpisodeKey = episodeKey
 		label := episodeProgressLabel(target)
-		message := fmt.Sprintf("Phase 2/2 - Generating subtitles (%d/%d – %s)", idx+1, len(targets), label)
+		remaining := len(targets) - skipped
+		current := idx + 1 - skipped
+		message := fmt.Sprintf("Phase 2/2 - Generating subtitles (%d/%d – %s)", current, remaining, label)
 		if err := s.updateProgress(ctx, item, message, progressPercentAfterPrep+step*float64(idx)); err != nil {
 			return err
 		}
@@ -136,51 +156,61 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 							logging.Error(handleErr),
 							logging.String(logging.FieldEventType, "subtitle_misidentification_handle_failed"),
 							logging.String(logging.FieldErrorHint, "review subtitle offsets and metadata"),
-							logging.String(logging.FieldImpact, "item routed to review for manual inspection"),
+							logging.String(logging.FieldImpact, "episode flagged for review, continuing with others"),
 						)
 					}
 					if s.logger != nil {
 						s.logger.Warn("subtitle generation flagged for review",
 							logging.Int64("item_id", item.ID),
+							logging.String("episode_key", episodeKey),
 							logging.String("source_file", target.SourcePath),
 							logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
 							logging.Alert("review"),
 							logging.String(logging.FieldEventType, "subtitle_review_required"),
 							logging.String(logging.FieldErrorHint, "review subtitle offsets and metadata"),
-							logging.String(logging.FieldImpact, "item diverted to review queue"),
+							logging.String(logging.FieldImpact, "episode diverted to review, continuing with others"),
 						)
 					}
-					item.NeedsReview = true
-					item.ReviewReason = "suspect mis-identification from subtitle offsets"
-					item.ProgressMessage = "Subtitles diverted to review (suspect mis-identification)"
-					item.ProgressPercent = 100
-					if err := s.store.Update(ctx, item); err != nil {
-						return services.Wrap(services.ErrTransient, "subtitles", "persist review", "Failed to persist review flag", err)
-					}
-					return nil
+					// Record per-episode review status and continue to next episode
+					env.Assets.AddAsset("subtitled", ripspec.Asset{
+						EpisodeKey: target.EpisodeKey,
+						TitleID:    target.TitleID,
+						Path:       "",
+						Status:     ripspec.AssetStatusFailed,
+						ErrorMsg:   "suspect mis-identification from subtitle offsets",
+					})
+					reviewEpisodes++
+					lastReviewError = "suspect mis-identification from subtitle offsets"
+					s.persistRipSpec(ctx, item, &env)
+					continue
 				}
 			} else {
-				message := strings.TrimSpace(err.Error())
-				if message == "" {
-					message = "Subtitle generation failed"
+				errMessage := strings.TrimSpace(err.Error())
+				if errMessage == "" {
+					errMessage = "Subtitle generation failed"
 				}
 				if s.logger != nil {
-					s.logger.Warn("subtitle generation skipped",
+					s.logger.Warn("subtitle generation failed for episode",
 						logging.Int64("item_id", item.ID),
+						logging.String("episode_key", episodeKey),
 						logging.String("source_file", target.SourcePath),
 						logging.Error(err),
-						logging.String(logging.FieldEventType, "subtitle_generation_skipped"),
+						logging.String(logging.FieldEventType, "episode_subtitle_failed"),
 						logging.String(logging.FieldErrorHint, "check WhisperX/OpenSubtitles logs and retry"),
-						logging.String(logging.FieldImpact, "subtitles will be missing for this episode"),
+						logging.String(logging.FieldImpact, "subtitles will be missing for this episode, continuing with others"),
 					)
 				}
-				item.ProgressMessage = fmt.Sprintf("Subtitle generation skipped: %s", message)
-				item.ProgressPercent = 100
-				item.ErrorMessage = message
-				if err := s.store.UpdateProgress(ctx, item); err != nil {
-					return services.Wrap(services.ErrTransient, "subtitles", "persist skip", "Failed to persist subtitle skip status", err)
-				}
-				return nil
+				// Record per-episode failure and continue to next episode
+				env.Assets.AddAsset("subtitled", ripspec.Asset{
+					EpisodeKey: target.EpisodeKey,
+					TitleID:    target.TitleID,
+					Path:       "",
+					Status:     ripspec.AssetStatusFailed,
+					ErrorMsg:   errMessage,
+				})
+				failedEpisodes++
+				s.persistRipSpec(ctx, item, &env)
+				continue
 			}
 		}
 		if strings.EqualFold(result.Source, "opensubtitles") {
@@ -189,7 +219,34 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			aiCount++
 		}
 		totalSegments += result.SegmentCount
+		// Mark as completed when adding successful asset
+		env.Assets.AddAsset("subtitled", ripspec.Asset{
+			EpisodeKey: target.EpisodeKey,
+			TitleID:    target.TitleID,
+			Path:       result.SubtitlePath,
+			Status:     ripspec.AssetStatusCompleted,
+		})
 		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, openSubsExpected, openSubsCount, aiCount, ctxMeta)
+	}
+
+	// Determine final item status based on episode outcomes
+	successfulEpisodes := openSubsCount + aiCount
+	totalProcessed := len(targets) - skipped
+	if reviewEpisodes > 0 && successfulEpisodes == 0 {
+		// All non-skipped episodes need review
+		item.NeedsReview = true
+		item.ReviewReason = lastReviewError
+		item.ProgressMessage = "Subtitles diverted to review (suspect mis-identification)"
+		item.ProgressPercent = 100
+		if err := s.store.Update(ctx, item); err != nil {
+			return services.Wrap(services.ErrTransient, "subtitles", "persist review", "Failed to persist review flag", err)
+		}
+		return nil
+	}
+	if failedEpisodes > 0 && successfulEpisodes == 0 && reviewEpisodes == 0 {
+		// All episodes failed (no successes, no review cases)
+		return services.Wrap(services.ErrTransient, "subtitles", "execute",
+			fmt.Sprintf("All %d episode(s) failed subtitle generation", totalProcessed), nil)
 	}
 	item.ProgressMessage = subtitleStageMessage(len(targets), openSubsCount, aiCount)
 	item.ProgressPercent = 100
@@ -357,6 +414,35 @@ func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message st
 	return nil
 }
 
+func (s *Stage) persistRipSpec(ctx context.Context, item *queue.Item, env *ripspec.Envelope) {
+	encoded, err := env.Encode()
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to encode rip spec after subtitle; metadata may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
+				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+				logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
+			)
+		}
+		return
+	}
+	itemCopy := *item
+	itemCopy.RipSpecData = encoded
+	if err := s.store.Update(ctx, &itemCopy); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to persist rip spec after subtitle; metadata may be stale",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
+			)
+		}
+	} else {
+		*item = itemCopy
+	}
+}
+
 func (s *Stage) handleSuspectMisID(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, suspect suspectMisIdentificationError) (bool, GenerateResult, error) {
 	// Best-effort auto-fix: fall back to local WhisperX generation (no OpenSubtitles)
 	result, err := s.service.Generate(ctx, GenerateRequest{
@@ -455,12 +541,9 @@ func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, t
 		)
 	}
 
-	// Update RipSpec if available
+	// Update RipSpec if available (asset already added in main loop with status)
 	if !hasRipSpec {
 		return
-	}
-	if strings.TrimSpace(target.EpisodeKey) != "" {
-		env.Assets.AddAsset("subtitled", ripspec.Asset{EpisodeKey: target.EpisodeKey, TitleID: target.TitleID, Path: result.SubtitlePath})
 	}
 	recordSubtitleGeneration(env, episodeKey, ctxMeta.Language, result, openSubsExpected, openSubsCount, aiCount)
 	encoded, err := env.Encode()

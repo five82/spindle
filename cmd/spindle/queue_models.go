@@ -71,11 +71,13 @@ const (
 	queueRetryOutcomeUpdated queueRetryOutcome = iota
 	queueRetryOutcomeNotFound
 	queueRetryOutcomeNotFailed
+	queueRetryOutcomeEpisodeNotFound
 )
 
 type queueRetryItemResult struct {
-	ID      int64
-	Outcome queueRetryOutcome
+	ID        int64
+	Outcome   queueRetryOutcome
+	NewStatus string // For episode retry, indicates the status item was reset to
 }
 
 type queueRetryResult struct {

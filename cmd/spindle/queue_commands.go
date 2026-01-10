@@ -196,10 +196,21 @@ func newQueueResetCommand(ctx *commandContext) *cobra.Command {
 }
 
 func newQueueRetryCommand(ctx *commandContext) *cobra.Command {
-	return &cobra.Command{
+	var episodeKey string
+
+	cmd := &cobra.Command{
 		Use:   "retry [itemID...]",
 		Short: "Retry failed or review queue items",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Retry failed or review queue items.
+
+Without --episode, retries the entire item from the beginning.
+With --episode, clears only the specified episode's failed status so it can be
+re-processed while leaving other episodes' progress intact.
+
+Examples:
+  spindle queue retry 123              # Retry entire item
+  spindle queue retry 123 --episode s01e05  # Retry only episode S01E05`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ids := make([]int64, 0, len(args))
 			for _, arg := range args {
@@ -208,6 +219,32 @@ func newQueueRetryCommand(ctx *commandContext) *cobra.Command {
 					return fmt.Errorf("invalid item id %q", arg)
 				}
 				ids = append(ids, id)
+			}
+
+			// Per-episode retry requires direct store access
+			if episodeKey != "" {
+				if len(ids) != 1 {
+					return errors.New("--episode requires exactly one item ID")
+				}
+				return ctx.withQueueStore(func(store queueStoreAPI) error {
+					out := cmd.OutOrStdout()
+					result, err := store.RetryEpisode(cmd.Context(), ids[0], episodeKey)
+					if err != nil {
+						return err
+					}
+					switch result.Outcome {
+					case queueRetryOutcomeNotFound:
+						fmt.Fprintf(out, "Item %d not found\n", ids[0])
+					case queueRetryOutcomeNotFailed:
+						fmt.Fprintf(out, "Item %d is not in a retryable state\n", ids[0])
+					case queueRetryOutcomeEpisodeNotFound:
+						fmt.Fprintf(out, "Episode %s not found in item %d\n", episodeKey, ids[0])
+					case queueRetryOutcomeUpdated:
+						fmt.Fprintf(out, "Episode %s in item %d cleared for retry (item reset to %s)\n",
+							strings.ToUpper(episodeKey), ids[0], result.NewStatus)
+					}
+					return nil
+				})
 			}
 
 			return ctx.withQueueAPI(func(api queueAPI) error {
@@ -240,6 +277,9 @@ func newQueueRetryCommand(ctx *commandContext) *cobra.Command {
 			})
 		},
 	}
+
+	cmd.Flags().StringVarP(&episodeKey, "episode", "e", "", "Retry only a specific episode (e.g., s01e05)")
+	return cmd
 }
 
 func newQueueStopCommand(ctx *commandContext) *cobra.Command {
