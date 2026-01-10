@@ -15,9 +15,15 @@ import (
 
 var titleFilePattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:title_)?t(\d{2,3})`)
 
-func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger) int {
+// EpisodeAssignResult holds the result of episode asset assignment.
+type EpisodeAssignResult struct {
+	Assigned int
+	Missing  []string // Episode keys that could not be matched to ripped files
+}
+
+func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger) EpisodeAssignResult {
 	if env == nil || len(env.Episodes) == 0 {
-		return 0
+		return EpisodeAssignResult{}
 	}
 	titleFiles := make(map[int]string)
 	entries, err := os.ReadDir(dir)
@@ -30,7 +36,7 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger)
 				logging.String(logging.FieldErrorHint, "check staging directory permissions"),
 			)
 		}
-		return 0
+		return EpisodeAssignResult{}
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -46,19 +52,21 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger)
 		}
 		titleFiles[id] = filepath.Join(dir, name)
 	}
-	assigned := 0
+	result := EpisodeAssignResult{}
 	for _, episode := range env.Episodes {
 		if episode.TitleID < 0 {
+			result.Missing = append(result.Missing, episode.Key)
 			continue
 		}
 		path, ok := titleFiles[episode.TitleID]
 		if !ok {
+			result.Missing = append(result.Missing, episode.Key)
 			continue
 		}
 		env.Assets.AddAsset("ripped", ripspec.Asset{EpisodeKey: episode.Key, TitleID: episode.TitleID, Path: path})
-		assigned++
+		result.Assigned++
 	}
-	return assigned
+	return result
 }
 
 func episodeAssetPaths(env ripspec.Envelope) []string {

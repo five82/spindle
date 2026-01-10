@@ -163,9 +163,27 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 	item.ActiveEpisodeKey = ""
 	if failedEpisodes > 0 {
 		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d failed)", len(finalPaths), failedEpisodes)
+		// Flag for review if some episodes failed
+		item.NeedsReview = true
+		if item.ReviewReason == "" {
+			item.ReviewReason = fmt.Sprintf("%d episode(s) failed organization", failedEpisodes)
+		}
 	} else {
 		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
 	}
+
+	// Log final organization summary
+	expected, _, _, final := env.AssetCounts()
+	logger.Info("organization stage summary",
+		logging.String(logging.FieldEventType, "stage_complete"),
+		logging.Duration("stage_duration", time.Since(stageStarted)),
+		logging.Int("expected_episodes", expected),
+		logging.Int("organized_episodes", len(finalPaths)),
+		logging.Int("failed_episodes", failedEpisodes),
+		logging.Int("skipped_episodes", skipped),
+		logging.Int("final_asset_count", final),
+	)
+
 	o.publishCompletionNotifications(ctx, logger, strings.TrimSpace(item.DiscTitle), item.FinalFile, jellyfinRefreshed, len(finalPaths), failedEpisodes)
 	o.cleanupStaging(ctx, item)
 	return nil
@@ -228,7 +246,7 @@ func (o *Organizer) processEpisode(ctx context.Context, item *queue.Item, env *r
 	// Move subtitles for this episode
 	itemCopy := *item
 	itemCopy.EncodedFile = job.Source
-	if err := o.moveGeneratedSubtitles(ctx, &itemCopy, targetPath); err != nil {
+	if _, err := o.moveGeneratedSubtitles(ctx, &itemCopy, targetPath); err != nil {
 		logger.Warn("subtitle sidecar move failed; subtitles may be missing in library",
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "subtitle_move_failed"),

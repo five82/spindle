@@ -158,6 +158,20 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 		)
 	}
 
+	// Cross-stage validation: check for missing ripped episodes
+	if missing := env.MissingEpisodes("ripped"); len(missing) > 0 {
+		logger.Warn("missing ripped episodes at encoding start",
+			logging.Int("missing_count", len(missing)),
+			logging.String("missing_episodes", strings.Join(missing, ",")),
+			logging.String(logging.FieldEventType, "encoding_missing_ripped"),
+			logging.String(logging.FieldErrorHint, "some episodes were not ripped successfully"),
+		)
+		item.NeedsReview = true
+		if item.ReviewReason == "" {
+			item.ReviewReason = fmt.Sprintf("missing %d ripped episode(s)", len(missing))
+		}
+	}
+
 	logger.Debug("starting encoding")
 	if strings.TrimSpace(item.RippedFile) == "" {
 		return ripspec.Envelope{}, services.Wrap(

@@ -1,7 +1,9 @@
 package organizer
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -110,7 +112,7 @@ func sanitizeSlug(input string, maxLen int) string {
 	return strings.Trim(slug.String(), "-")
 }
 
-// copyFile copies a file from src to dst, verifying the size matches.
+// copyFile copies a file from src to dst, verifying both size and content hash.
 func copyFile(src, dst string) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -135,7 +137,13 @@ func copyFile(src, dst string) error {
 		_ = out.Close()
 	}()
 
-	written, err := io.Copy(out, in)
+	// Hash source while reading, hash destination while writing
+	srcHasher := sha256.New()
+	dstHasher := sha256.New()
+	tee := io.TeeReader(in, srcHasher)
+	multi := io.MultiWriter(out, dstHasher)
+
+	written, err := io.Copy(multi, tee)
 	if err != nil {
 		return err
 	}
@@ -146,6 +154,12 @@ func copyFile(src, dst string) error {
 	if written != srcSize {
 		_ = os.Remove(dst)
 		return fmt.Errorf("copy size mismatch: source %d bytes, copied %d bytes", srcSize, written)
+	}
+
+	// Verify hashes match to detect corruption
+	if !bytes.Equal(srcHasher.Sum(nil), dstHasher.Sum(nil)) {
+		_ = os.Remove(dst)
+		return fmt.Errorf("copy hash mismatch: file corrupted during copy")
 	}
 
 	return nil

@@ -768,6 +768,7 @@ func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails
 			episode.EpisodeTitle = strings.TrimSpace(target.Name)
 			episode.EpisodeAirDate = strings.TrimSpace(target.AirDate)
 			episode.OutputBasename = buildEpisodeBasename(showTitle, target.SeasonNumber, target.EpisodeNumber)
+			episode.MatchConfidence = match.Score
 		}
 		if title := titleByID[match.TitleID]; title != nil {
 			title.Season = target.SeasonNumber

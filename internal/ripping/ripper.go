@@ -134,7 +134,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			return
 		}
 		before := lastRippedSignature
-		assignEpisodeAssets(&env, destDir, logger)
+		_ = assignEpisodeAssets(&env, destDir, logger) // Ignore missing during progress tracking
 		after := rippedSignature(env.Assets.Ripped)
 		if after == before {
 			return
@@ -421,8 +421,8 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 	specDirty := false
 	if hasEpisodes {
-		assigned := assignEpisodeAssets(&env, workingDir, logger)
-		if assigned == 0 {
+		assignResult := assignEpisodeAssets(&env, workingDir, logger)
+		if assignResult.Assigned == 0 {
 			logger.Error("no episode assets mapped after ripping",
 				logging.String("destination", workingDir),
 				logging.String(logging.FieldEventType, "episode_asset_mapping_failed"),
@@ -437,13 +437,25 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				"No episode files could be mapped after ripping; verify disc content and title IDs",
 				nil,
 			)
-		} else {
-			specDirty = true
-			paths := episodeAssetPaths(env)
-			if len(paths) > 0 {
-				validationTargets = paths
-				target = paths[0]
-			}
+		}
+		// Check for partial assignment - some episodes missing
+		if len(assignResult.Missing) > 0 {
+			logger.Warn("missing episode files after rip",
+				logging.Int("assigned_count", assignResult.Assigned),
+				logging.Int("missing_count", len(assignResult.Missing)),
+				logging.String("missing_episodes", strings.Join(assignResult.Missing, ",")),
+				logging.String(logging.FieldEventType, "episode_files_missing"),
+				logging.String(logging.FieldErrorHint, "check MakeMKV output for failed titles"),
+				logging.String(logging.FieldImpact, "some episodes will be missing from final output"),
+			)
+			item.NeedsReview = true
+			item.ReviewReason = fmt.Sprintf("missing %d episode(s): %s", len(assignResult.Missing), strings.Join(assignResult.Missing, ", "))
+		}
+		specDirty = true
+		paths := episodeAssetPaths(env)
+		if len(paths) > 0 {
+			validationTargets = paths
+			target = paths[0]
 		}
 	}
 

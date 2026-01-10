@@ -213,6 +213,24 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				continue
 			}
 		}
+		// Validate generated SRT content
+		if issues := ValidateSRTContent(result.SubtitlePath, 0); len(issues) > 0 {
+			if s.logger != nil {
+				s.logger.Warn("SRT content validation issues",
+					logging.String("episode_key", episodeKey),
+					logging.String("subtitle_path", result.SubtitlePath),
+					logging.String("issues", strings.Join(issues, "; ")),
+					logging.String(logging.FieldEventType, "srt_validation_issues"),
+					logging.String(logging.FieldErrorHint, "review subtitle file or regenerate"),
+				)
+			}
+			// Continue with the subtitle but flag for review if there are issues
+			item.NeedsReview = true
+			if item.ReviewReason == "" {
+				item.ReviewReason = fmt.Sprintf("SRT validation issues: %s", strings.Join(issues, "; "))
+			}
+		}
+
 		if strings.EqualFold(result.Source, "opensubtitles") {
 			openSubsCount++
 		} else {

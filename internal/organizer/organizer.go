@@ -89,6 +89,21 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	logger.Debug("starting organization")
+
+	// Cross-stage validation: check for missing encoded episodes
+	if missing := env.MissingEpisodes("encoded"); len(missing) > 0 {
+		logger.Warn("missing encoded episodes at organizer start",
+			logging.Int("missing_count", len(missing)),
+			logging.String("missing_episodes", strings.Join(missing, ",")),
+			logging.String(logging.FieldEventType, "organizer_missing_encoded"),
+			logging.String(logging.FieldErrorHint, "some episodes failed encoding"),
+		)
+		item.NeedsReview = true
+		if item.ReviewReason == "" {
+			item.ReviewReason = fmt.Sprintf("missing %d encoded episode(s)", len(missing))
+		}
+	}
+
 	encodedSources := collectEncodedSources(item, &env)
 	if len(encodedSources) == 0 {
 		return services.Wrap(
@@ -182,19 +197,20 @@ func (o *Organizer) resolveMetadata(ctx context.Context, item *queue.Item, logge
 	return meta, nil
 }
 
-// moveGeneratedSubtitles moves subtitle sidecar files alongside the organized media.
-func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item, targetPath string) error {
+// moveGeneratedSubtitles moves subtitle sidecars to the library.
+// Returns the count of moved subtitle files.
+func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item, targetPath string) (int, error) {
 	if item == nil {
-		return nil
+		return 0, nil
 	}
 	encodedPath := strings.TrimSpace(item.EncodedFile)
 	if encodedPath == "" {
-		return nil
+		return 0, nil
 	}
 	stagingDir := filepath.Dir(encodedPath)
 	entries, err := os.ReadDir(stagingDir)
 	if err != nil {
-		return fmt.Errorf("enumerate staging dir: %w", err)
+		return 0, fmt.Errorf("enumerate staging dir: %w", err)
 	}
 	base := strings.TrimSuffix(filepath.Base(encodedPath), filepath.Ext(encodedPath))
 	if base == "" {
@@ -225,11 +241,11 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 		destination := filepath.Join(destDir, fmt.Sprintf("%s.%s", destBase, suffix))
 		if o.cfg != nil && o.cfg.Library.OverwriteExisting {
 			if err := os.Remove(destination); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("remove existing subtitle %q: %w", destination, err)
+				return moved, fmt.Errorf("remove existing subtitle %q: %w", destination, err)
 			}
 		}
 		if err := jellyfin.FileMover(source, destination); err != nil {
-			return fmt.Errorf("move subtitle %q: %w", name, err)
+			return moved, fmt.Errorf("move subtitle %q: %w", name, err)
 		}
 		moved++
 	}
@@ -240,7 +256,7 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 			logging.String("destination", destDir),
 		)
 	}
-	return nil
+	return moved, nil
 }
 
 // publishCompletionNotifications sends organization and processing completion events.

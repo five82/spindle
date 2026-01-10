@@ -249,6 +249,25 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	if whisperxAvailable(cfg) {
 		decisions = applyWhisperXClassification(ctx, cfg, ffmpegBinary, path, windows, workDir, decisions, logger)
 	}
+
+	// Check if ALL candidates failed due to analysis/fingerprint errors
+	analysisFailures := 0
+	for _, d := range decisions {
+		if strings.HasPrefix(d.Reason, "analysis_failed") ||
+			strings.HasPrefix(d.Reason, "fingerprint_failed") {
+			analysisFailures++
+		}
+	}
+	if len(candidates) > 0 && analysisFailures == len(candidates) {
+		logger.Warn("all commentary candidates failed analysis",
+			logging.Int("candidate_count", len(candidates)),
+			logging.Int("analysis_failures", analysisFailures),
+			logging.String(logging.FieldEventType, "commentary_all_candidates_failed"),
+			logging.String(logging.FieldErrorHint, "check ffmpeg, disk permissions, codec support"),
+			logging.String(logging.FieldImpact, "all commentary tracks excluded due to analysis failures"),
+		)
+	}
+
 	indices = indicesFromDecisions(decisions)
 	for _, decision := range decisions {
 		thresholds := []logging.Attr{

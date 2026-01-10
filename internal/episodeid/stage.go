@@ -232,6 +232,29 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			)
 		}
 		item.RipSpecData = encoded
+
+		// Check for low-confidence episode matches
+		const minMatchConfidence = 0.70
+		var lowConfidenceEpisodes []string
+		for _, ep := range env.Episodes {
+			if ep.MatchConfidence > 0 && ep.MatchConfidence < minMatchConfidence {
+				lowConfidenceEpisodes = append(lowConfidenceEpisodes, ep.Key)
+			}
+		}
+		if len(lowConfidenceEpisodes) > 0 {
+			logger.Warn("low confidence episode matches detected",
+				logging.Int("count", len(lowConfidenceEpisodes)),
+				logging.String("episodes", strings.Join(lowConfidenceEpisodes, ", ")),
+				logging.Float64("threshold", minMatchConfidence),
+				logging.String(logging.FieldEventType, "episode_match_low_confidence"),
+				logging.String(logging.FieldErrorHint, "verify episode numbers manually before encoding"),
+				logging.String(logging.FieldImpact, "episodes may be incorrectly identified"),
+			)
+			item.NeedsReview = true
+			if item.ReviewReason == "" {
+				item.ReviewReason = fmt.Sprintf("low episode match confidence (%d episodes below %.0f%%)", len(lowConfidenceEpisodes), minMatchConfidence*100)
+			}
+		}
 	}
 
 	item.Status = queue.StatusEpisodeIdentified

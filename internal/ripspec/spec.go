@@ -39,15 +39,16 @@ type Title struct {
 
 // Episode describes a target episode to be produced from the disc.
 type Episode struct {
-	Key            string `json:"key"`
-	TitleID        int    `json:"title_id"`
-	Season         int    `json:"season"`
-	Episode        int    `json:"episode"`
-	EpisodeTitle   string `json:"episode_title,omitempty"`
-	EpisodeAirDate string `json:"episode_air_date,omitempty"`
-	RuntimeSeconds int    `json:"runtime_seconds,omitempty"`
-	TitleHash      string `json:"title_hash,omitempty"`
-	OutputBasename string `json:"output_basename,omitempty"`
+	Key             string  `json:"key"`
+	TitleID         int     `json:"title_id"`
+	Season          int     `json:"season"`
+	Episode         int     `json:"episode"`
+	EpisodeTitle    string  `json:"episode_title,omitempty"`
+	EpisodeAirDate  string  `json:"episode_air_date,omitempty"`
+	RuntimeSeconds  int     `json:"runtime_seconds,omitempty"`
+	TitleHash       string  `json:"title_hash,omitempty"`
+	OutputBasename  string  `json:"output_basename,omitempty"`
+	MatchConfidence float64 `json:"match_confidence,omitempty"` // Confidence score from episode matching (0.0-1.0)
 }
 
 // Assets captures realised artefacts for each stage.
@@ -251,4 +252,50 @@ func cloneAssets(list []Asset) []Asset {
 	out := make([]Asset, len(list))
 	copy(out, list)
 	return out
+}
+
+// ExpectedCount returns the expected episode/file count.
+// For TV content with episodes, returns len(Episodes).
+// For movies (no episodes), returns 1.
+func (e Envelope) ExpectedCount() int {
+	if len(e.Episodes) > 0 {
+		return len(e.Episodes)
+	}
+	return 1
+}
+
+// AssetCounts returns counts for each stage of the pipeline.
+func (e Envelope) AssetCounts() (expected, ripped, encoded, final int) {
+	expected = e.ExpectedCount()
+	ripped = len(e.Assets.Ripped)
+	encoded = len(e.Assets.Encoded)
+	final = len(e.Assets.Final)
+	return
+}
+
+// MissingEpisodes returns episode keys that don't have assets at the given stage.
+// For movies, returns nil since there are no episode keys to track.
+func (e Envelope) MissingEpisodes(stage string) []string {
+	if len(e.Episodes) == 0 {
+		return nil
+	}
+	var missing []string
+	for _, ep := range e.Episodes {
+		if _, ok := e.Assets.FindAsset(stage, ep.Key); !ok {
+			missing = append(missing, ep.Key)
+		}
+	}
+	return missing
+}
+
+// CompletedAssetCount returns the count of completed (non-failed) assets at the given stage.
+func (a Assets) CompletedAssetCount(stage string) int {
+	list := a.fromKind(stage)
+	count := 0
+	for _, asset := range list {
+		if asset.IsCompleted() {
+			count++
+		}
+	}
+	return count
 }

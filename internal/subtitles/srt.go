@@ -124,3 +124,40 @@ func parseSRTTimestamp(value string) (float64, error) {
 	total := hours*3600 + minutes*60 + seconds
 	return float64(total) + float64(millis)/1000, nil
 }
+
+// ValidateSRTContent checks an SRT file for format issues.
+// Returns a list of issues found; empty slice means validation passed.
+func ValidateSRTContent(path string, videoSeconds float64) []string {
+	var issues []string
+
+	// Check cue count > 0
+	cues, err := countSRTCues(path)
+	if err != nil {
+		issues = append(issues, fmt.Sprintf("read_error: %v", err))
+		return issues
+	}
+	if cues == 0 {
+		issues = append(issues, "empty_subtitle_file")
+		return issues
+	}
+
+	// Check timestamp format validity
+	first, last, err := subtitleBounds(path)
+	if err != nil {
+		issues = append(issues, fmt.Sprintf("timestamp_parse_error: %v", err))
+	} else if first == 0 && last == 0 {
+		issues = append(issues, "no_valid_timestamps")
+	}
+
+	// Check duration alignment if video duration is known
+	if videoSeconds > 0 {
+		delta, suspect, err := checkSubtitleDuration(path, videoSeconds)
+		if err != nil {
+			issues = append(issues, fmt.Sprintf("duration_check_error: %v", err))
+		} else if suspect {
+			issues = append(issues, fmt.Sprintf("duration_mismatch: delta=%.1fs", delta))
+		}
+	}
+
+	return issues
+}

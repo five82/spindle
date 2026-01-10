@@ -191,6 +191,11 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		return AudioRefinementResult{}, fmt.Errorf("refine audio: finalize remux: %w", err)
 	}
 
+	// Validate remuxed audio streams match expectations
+	if err := validateRemuxedAudio(ctx, ffprobeBinary, path, selection.KeepIndices, logger); err != nil {
+		return AudioRefinementResult{}, fmt.Errorf("audio validation failed: %w", err)
+	}
+
 	fields := []logging.Attr{
 		logging.String("primary_audio", selection.PrimaryLabel()),
 		logging.Int("kept_audio_streams", len(selection.KeepIndices)),
@@ -560,4 +565,46 @@ func formatAudioDescription(s ffprobe.Stream) string {
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// validateRemuxedAudio probes the remuxed file and validates that the expected
+// audio streams are present. Returns an error if validation fails.
+func validateRemuxedAudio(ctx context.Context, ffprobeBinary, path string, expectedIndices []int, logger *slog.Logger) error {
+	if len(expectedIndices) == 0 {
+		return nil // Nothing to validate
+	}
+
+	probe, err := probeVideo(ctx, ffprobeBinary, path)
+	if err != nil {
+		return fmt.Errorf("probe remuxed file: %w", err)
+	}
+
+	actualCount := countAudioStreams(probe.Streams)
+	expectedCount := len(expectedIndices)
+
+	if actualCount != expectedCount {
+		if logger != nil {
+			logger.Error("audio stream count mismatch after remux",
+				logging.Int("expected_count", expectedCount),
+				logging.Int("actual_count", actualCount),
+				logging.String("path", path),
+				logging.String(logging.FieldEventType, "audio_validation_failed"),
+			)
+		}
+		return fmt.Errorf("audio stream count mismatch: expected %d, got %d", expectedCount, actualCount)
+	}
+
+	// Validate primary audio stream exists (first in keep list)
+	if actualCount == 0 {
+		return fmt.Errorf("no audio streams in remuxed file")
+	}
+
+	if logger != nil {
+		logger.Debug("audio validation passed",
+			logging.Int("audio_stream_count", actualCount),
+			logging.String("path", path),
+		)
+	}
+
+	return nil
 }
