@@ -253,10 +253,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		return false
 	}
 
-	discFingerprint := ""
-	if scanResult != nil {
-		discFingerprint = strings.TrimSpace(scanResult.Fingerprint)
-	}
+	discFingerprint := strings.TrimSpace(scanResult.Fingerprint)
 	if discFingerprint == "" {
 		logger.Error("scanner fingerprint unavailable; disc not queued",
 			logging.String(logging.FieldEventType, "disc_fingerprint_failed"),

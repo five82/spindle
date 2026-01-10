@@ -163,12 +163,12 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 	return true, nil
 }
 
+// shouldRefreshDiscTitle reports whether a stored queue item title should be
+// replaced when a disc is re-inserted. This is intentionally simpler than
+// identification.isPlaceholderTitle which handles disc scan heuristics.
 func shouldRefreshDiscTitle(current string) bool {
 	trimmed := strings.TrimSpace(current)
-	if trimmed == "" {
-		return true
-	}
-	return trimmed == "Unknown Disc"
+	return trimmed == "" || trimmed == "Unknown Disc"
 }
 
 func (p *queueStoreProcessor) enqueueNew(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error) {

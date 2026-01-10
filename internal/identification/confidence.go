@@ -150,7 +150,7 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	}
 	for idx, candidate := range topCandidates {
 		key := fmt.Sprintf("candidate_%d", idx+1)
-		if id, ok := decisionItemID(candidate); ok {
+		if id, ok := logging.ParseDecisionID(candidate); ok {
 			key = fmt.Sprintf("candidate_%d", id)
 		}
 		attrs = append(attrs, logging.String(key, candidate))
@@ -170,7 +170,7 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		attrs = append(attrs, logging.Int("rejected_count", len(rejects)))
 		for idx, reject := range rejects {
 			key := fmt.Sprintf("rejected_%d", idx+1)
-			if id, ok := decisionItemID(reject); ok {
+			if id, ok := logging.ParseDecisionID(reject); ok {
 				key = fmt.Sprintf("rejected_%d", id)
 			}
 			attrs = append(attrs, logging.String(key, reject))
@@ -291,20 +291,4 @@ func summarizeCandidates(candidates []scoredCandidate, limit int) []string {
 		out = append(out, fmt.Sprintf("%d:%s (score=%.2f votes=%.1f/%d match=%s)", cand.ID, label, cand.Score, cand.VoteAverage, cand.VoteCount, cand.MatchType))
 	}
 	return out
-}
-
-func decisionItemID(value string) (int, bool) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return 0, false
-	}
-	parts := strings.SplitN(trimmed, ":", 2)
-	if len(parts) == 0 {
-		return 0, false
-	}
-	id, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil {
-		return 0, false
-	}
-	return id, true
 }

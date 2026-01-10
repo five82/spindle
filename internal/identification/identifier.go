@@ -129,50 +129,49 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	title := strings.TrimSpace(item.DiscTitle)
 	titleFromKeyDB := false
 
-	if scanResult != nil && scanResult.BDInfo != nil {
-		switch {
-		case discID == "" && i.keydb != nil:
-			logger.Debug("keydb lookup skipped", logging.String("reason", "disc id missing in bdinfo"))
-		case i.keydb == nil:
-			logger.Debug("keydb lookup skipped", logging.String("reason", "keydb catalog unavailable"))
-		case discID != "" && i.keydb != nil:
-			keydbLookupStart := time.Now()
-			entry, found, err := i.keydb.Lookup(discID)
-			keydbLookupDuration := time.Since(keydbLookupStart)
-			if err != nil {
-				logger.Warn("keydb lookup failed",
-					logging.String("disc_id", discID),
-					logging.Error(err),
-					logging.Duration("lookup_duration", keydbLookupDuration),
-					logging.String("error_message", "Failed to query keydb catalog"),
-					logging.String(logging.FieldErrorHint, "Verify keydb path and refresh connectivity"),
-					logging.String(logging.FieldImpact, "title lookup skipped; using disc title from scan"),
-					logging.String(logging.FieldEventType, "keydb_lookup_failed"))
-			} else if found {
-				keydbTitle := strings.TrimSpace(entry.Title)
-				if keydbTitle != "" {
-					logger.Info("title updated from keydb",
-						logging.String(logging.FieldDecisionType, "title_source"),
-						logging.String("decision_result", "updated"),
-						logging.String("decision_reason", "keydb contains authoritative title for disc_id"),
-						logging.String("decision_options", "keep, update"),
-						logging.String("decision_selected", keydbTitle),
-						logging.String("disc_id", discID),
-						logging.String("original_title", title),
-						logging.String("new_title", keydbTitle),
-						logging.Duration("lookup_duration", keydbLookupDuration))
-					title = keydbTitle
-					item.DiscTitle = title
-					titleFromKeyDB = true
-				}
-			} else {
-				logger.Debug("keydb lookup produced no match",
-					logging.String("disc_id", discID),
-					logging.Duration("lookup_duration", keydbLookupDuration))
-			}
+	if scanResult == nil || scanResult.BDInfo == nil {
+		if i.keydb != nil {
+			logger.Debug("keydb lookup skipped", logging.String("reason", "bdinfo unavailable"))
 		}
-	} else if i.keydb != nil {
-		logger.Debug("keydb lookup skipped", logging.String("reason", "bdinfo unavailable"))
+	} else if i.keydb == nil {
+		logger.Debug("keydb lookup skipped", logging.String("reason", "keydb catalog unavailable"))
+	} else if discID == "" {
+		logger.Debug("keydb lookup skipped", logging.String("reason", "disc id missing in bdinfo"))
+	} else {
+		keydbLookupStart := time.Now()
+		entry, found, err := i.keydb.Lookup(discID)
+		keydbLookupDuration := time.Since(keydbLookupStart)
+		if err != nil {
+			logger.Warn("keydb lookup failed",
+				logging.String("disc_id", discID),
+				logging.Error(err),
+				logging.Duration("lookup_duration", keydbLookupDuration),
+				logging.String("error_message", "Failed to query keydb catalog"),
+				logging.String(logging.FieldErrorHint, "Verify keydb path and refresh connectivity"),
+				logging.String(logging.FieldImpact, "title lookup skipped; using disc title from scan"),
+				logging.String(logging.FieldEventType, "keydb_lookup_failed"))
+		} else if found {
+			keydbTitle := strings.TrimSpace(entry.Title)
+			if keydbTitle != "" {
+				logger.Info("title updated from keydb",
+					logging.String(logging.FieldDecisionType, "title_source"),
+					logging.String("decision_result", "updated"),
+					logging.String("decision_reason", "keydb contains authoritative title for disc_id"),
+					logging.String("decision_options", "keep, update"),
+					logging.String("decision_selected", keydbTitle),
+					logging.String("disc_id", discID),
+					logging.String("original_title", title),
+					logging.String("new_title", keydbTitle),
+					logging.Duration("lookup_duration", keydbLookupDuration))
+				title = keydbTitle
+				item.DiscTitle = title
+				titleFromKeyDB = true
+			}
+		} else {
+			logger.Debug("keydb lookup produced no match",
+				logging.String("disc_id", discID),
+				logging.Duration("lookup_duration", keydbLookupDuration))
+		}
 	}
 
 	if !titleFromKeyDB {
@@ -254,7 +253,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		logger.Debug("disc number detected", logging.Int("disc_number", discNumber))
 	}
 
-	attributes := map[string]any(nil)
+	var attributes map[string]any
 	if discNumber > 0 {
 		attributes = map[string]any{"disc_number": discNumber}
 	}
@@ -351,14 +350,14 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 		for idx, candidate := range candidates {
 			key := fmt.Sprintf("candidate_%d", idx+1)
-			if id, ok := decisionItemID(candidate); ok {
+			if id, ok := logging.ParseDecisionID(candidate); ok {
 				key = fmt.Sprintf("candidate_%d", id)
 			}
 			attrs = append(attrs, logging.String(key, candidate))
 		}
 		for idx, reject := range rejects {
 			key := fmt.Sprintf("rejected_%d", idx+1)
-			if id, ok := decisionItemID(reject); ok {
+			if id, ok := logging.ParseDecisionID(reject); ok {
 				key = fmt.Sprintf("rejected_%d", id)
 			}
 			attrs = append(attrs, logging.String(key, reject))

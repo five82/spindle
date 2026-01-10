@@ -100,28 +100,12 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 func appendDecisionLines(attrs []logging.Attr, prefix string, items []string) []logging.Attr {
 	for idx, item := range items {
 		key := fmt.Sprintf("%s_%d", prefix, idx+1)
-		if id, ok := decisionItemID(item); ok {
+		if id, ok := logging.ParseDecisionID(item); ok {
 			key = fmt.Sprintf("%s_%d", prefix, id)
 		}
 		attrs = append(attrs, logging.String(key, item))
 	}
 	return attrs
-}
-
-func decisionItemID(value string) (int, bool) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return 0, false
-	}
-	parts := strings.SplitN(trimmed, ":", 2)
-	if len(parts) == 0 {
-		return 0, false
-	}
-	id, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil {
-		return 0, false
-	}
-	return id, true
 }
 
 // ChoosePrimaryTitle exposes the selector for other packages (e.g. logging during identification).

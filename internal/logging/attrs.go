@@ -3,6 +3,8 @@ package logging
 import (
 	"context"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -125,3 +127,21 @@ func (NoopHandler) Handle(context.Context, slog.Record) error { return nil }
 func (NoopHandler) WithAttrs([]slog.Attr) slog.Handler { return NoopHandler{} }
 
 func (NoopHandler) WithGroup(string) slog.Handler { return NoopHandler{} }
+
+// ParseDecisionID extracts an integer ID from a decision string formatted as "ID:description".
+// Returns the parsed ID and true if successful, or 0 and false otherwise.
+func ParseDecisionID(value string) (int, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, false
+	}
+	parts := strings.SplitN(trimmed, ":", 2)
+	if len(parts) == 0 {
+		return 0, false
+	}
+	id, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}

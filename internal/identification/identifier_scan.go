@@ -73,22 +73,21 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 	}
 
 	// Use existing fingerprint from daemon; it's mandatory at enqueue time
-	if existingFingerprint != "" {
-		logger.Debug("using fingerprint from daemon", logging.String("fingerprint", existingFingerprint))
-		if err := i.handleDuplicateFingerprint(ctx, item); err != nil {
-			return nil, 0, err
-		}
-		if item.Status == queue.StatusReview {
-			return scanResult, titleCount, nil
-		}
-	} else {
-		// This shouldn't happen since fingerprint is mandatory at enqueue
-		logger.Warn("fingerprint missing; should have been set at enqueue",
-			logging.String("error_message", "Disc fingerprint missing"),
-			logging.String(logging.FieldEventType, "fingerprint_missing"),
-			logging.String(logging.FieldErrorHint, "fingerprint should be computed at disc detection"),
-			logging.String(logging.FieldImpact, "identification will rely on disc title heuristics"),
+	if existingFingerprint == "" {
+		return nil, 0, services.Wrap(
+			services.ErrValidation,
+			"identification",
+			"validate fingerprint",
+			"Disc fingerprint missing; should have been set at enqueue time",
+			nil,
 		)
+	}
+	logger.Debug("using fingerprint from daemon", logging.String("fingerprint", existingFingerprint))
+	if err := i.handleDuplicateFingerprint(ctx, item); err != nil {
+		return nil, 0, err
+	}
+	if item.Status == queue.StatusReview {
+		return scanResult, titleCount, nil
 	}
 
 	scanSummary := []logging.Attr{
