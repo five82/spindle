@@ -275,33 +275,16 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 // HealthCheck reports the stage's operational readiness.
 func (e *EpisodeIdentifier) HealthCheck(ctx context.Context) stage.Health {
-	if e.cfg == nil {
-		return stage.Health{
-			Name:   "episodeid",
-			Ready:  false,
-			Detail: "configuration unavailable",
-		}
-	}
+	const name = "episodeid"
 
-	if !e.cfg.Subtitles.OpenSubtitlesEnabled {
-		return stage.Health{
-			Name:   "episodeid",
-			Ready:  true,
-			Detail: "opensubtitles disabled (will skip TV episode matching)",
-		}
-	}
-
-	if e.matcher == nil {
-		return stage.Health{
-			Name:   "episodeid",
-			Ready:  false,
-			Detail: "content matcher unavailable",
-		}
-	}
-
-	return stage.Health{
-		Name:   "episodeid",
-		Ready:  true,
-		Detail: "ready",
+	switch {
+	case e.cfg == nil:
+		return stage.Unhealthy(name, "configuration unavailable")
+	case !e.cfg.Subtitles.OpenSubtitlesEnabled:
+		return stage.Health{Name: name, Ready: true, Detail: "opensubtitles disabled (will skip TV episode matching)"}
+	case e.matcher == nil:
+		return stage.Unhealthy(name, "content matcher unavailable")
+	default:
+		return stage.Healthy(name)
 	}
 }

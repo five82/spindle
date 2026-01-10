@@ -167,7 +167,7 @@ func copyFile(src, dst string) error {
 
 // collectEncodedSources gathers all encoded file paths from the item and envelope.
 func collectEncodedSources(item *queue.Item, env *ripspec.Envelope) []string {
-	sources := make([]string, 0, 4)
+	var sources []string
 	if env != nil {
 		for _, asset := range env.Assets.Encoded {
 			if path := strings.TrimSpace(asset.Path); path != "" {

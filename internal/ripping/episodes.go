@@ -74,21 +74,21 @@ func episodeAssetPaths(env ripspec.Envelope) []string {
 		return nil
 	}
 	seen := make(map[string]struct{}, len(env.Episodes))
-	paths := make([]string, 0, len(env.Episodes))
+	var paths []string
 	for _, episode := range env.Episodes {
 		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
 		if !ok {
 			continue
 		}
-		clean := strings.TrimSpace(asset.Path)
-		if clean == "" {
+		path := strings.TrimSpace(asset.Path)
+		if path == "" {
 			continue
 		}
-		if _, dup := seen[clean]; dup {
+		if _, dup := seen[path]; dup {
 			continue
 		}
-		seen[clean] = struct{}{}
-		paths = append(paths, clean)
+		seen[path] = struct{}{}
+		paths = append(paths, path)
 	}
 	return paths
 }

@@ -1038,14 +1038,15 @@ func buildEpisodeBasename(show string, season, episode int) string {
 	return name
 }
 
-func uniqueInts(numbers []int) []int {
-	if len(numbers) == 0 {
+func uniqueInts(sorted []int) []int {
+	if len(sorted) == 0 {
 		return nil
 	}
-	result := []int{numbers[0]}
-	for _, value := range numbers[1:] {
-		if value != result[len(result)-1] {
-			result = append(result, value)
+	result := make([]int, 0, len(sorted))
+	result = append(result, sorted[0])
+	for _, v := range sorted[1:] {
+		if v != result[len(result)-1] {
+			result = append(result, v)
 		}
 	}
 	return result

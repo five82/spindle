@@ -35,14 +35,14 @@ func buildOrganizeJobs(env ripspec.Envelope, base queue.Metadata) ([]organizeJob
 		show = "Manual Import"
 	}
 	jobs := make([]organizeJob, 0, len(env.Episodes))
-	for _, episode := range env.Episodes {
-		asset, ok := env.Assets.FindAsset("encoded", episode.Key)
+	for _, ep := range env.Episodes {
+		asset, ok := env.Assets.FindAsset("encoded", ep.Key)
 		if !ok || strings.TrimSpace(asset.Path) == "" {
-			return nil, fmt.Errorf("missing encoded asset for %s", episode.Key)
+			return nil, fmt.Errorf("missing encoded asset for %s", ep.Key)
 		}
-		display := fmt.Sprintf("%s Season %02d", show, episode.Season)
-		meta := queue.NewTVMetadata(show, episode.Season, []int{episode.Episode}, display)
-		jobs = append(jobs, organizeJob{Episode: episode, Source: asset.Path, Metadata: meta})
+		display := fmt.Sprintf("%s Season %02d", show, ep.Season)
+		meta := queue.NewTVMetadata(show, ep.Season, []int{ep.Episode}, display)
+		jobs = append(jobs, organizeJob{Episode: ep, Source: asset.Path, Metadata: meta})
 	}
 	return jobs, nil
 }

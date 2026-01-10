@@ -604,7 +604,6 @@ func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
 		stagingRoot = "."
 	}
 	baseWorkDir := filepath.Join(stagingRoot, "subtitles")
-	var targets []subtitleTarget
 
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil && s.logger != nil {
@@ -615,40 +614,42 @@ func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
 			logging.String(logging.FieldImpact, "subtitle targets determined from encoded file instead of rip spec"),
 		)
 	}
-	if len(env.Assets.Encoded) > 0 {
-		for idx, asset := range env.Assets.Encoded {
-			source := strings.TrimSpace(asset.Path)
-			if source == "" {
-				continue
-			}
-			episodeKey := strings.TrimSpace(asset.EpisodeKey)
-			season, episode := parseEpisodeKey(episodeKey)
-			episodeTitle := ""
-			if ep := env.EpisodeByKey(episodeKey); ep != nil {
-				if ep.Season > 0 {
-					season = ep.Season
-				}
-				if ep.Episode > 0 {
-					episode = ep.Episode
-				}
-				if strings.TrimSpace(ep.Key) != "" && episodeKey == "" {
-					episodeKey = strings.TrimSpace(ep.Key)
-				}
-				episodeTitle = strings.TrimSpace(ep.EpisodeTitle)
-			}
-			targets = append(targets, subtitleTarget{
-				SourcePath:   source,
-				WorkDir:      filepath.Join(baseWorkDir, sanitizeEpisodeToken(episodeKey, idx)),
-				OutputDir:    filepath.Dir(source),
-				BaseName:     baseNameWithoutExt(source),
-				EpisodeKey:   episodeKey,
-				EpisodeTitle: episodeTitle,
-				TitleID:      asset.TitleID,
-				Season:       season,
-				Episode:      episode,
-			})
+
+	var targets []subtitleTarget
+	for idx, asset := range env.Assets.Encoded {
+		source := strings.TrimSpace(asset.Path)
+		if source == "" {
+			continue
 		}
+		episodeKey := strings.TrimSpace(asset.EpisodeKey)
+		season, episode := parseEpisodeKey(episodeKey)
+		var episodeTitle string
+		if ep := env.EpisodeByKey(episodeKey); ep != nil {
+			if ep.Season > 0 {
+				season = ep.Season
+			}
+			if ep.Episode > 0 {
+				episode = ep.Episode
+			}
+			if strings.TrimSpace(ep.Key) != "" && episodeKey == "" {
+				episodeKey = strings.TrimSpace(ep.Key)
+			}
+			episodeTitle = strings.TrimSpace(ep.EpisodeTitle)
+		}
+		targets = append(targets, subtitleTarget{
+			SourcePath:   source,
+			WorkDir:      filepath.Join(baseWorkDir, sanitizeEpisodeToken(episodeKey, idx)),
+			OutputDir:    filepath.Dir(source),
+			BaseName:     baseNameWithoutExt(source),
+			EpisodeKey:   episodeKey,
+			EpisodeTitle: episodeTitle,
+			TitleID:      asset.TitleID,
+			Season:       season,
+			Episode:      episode,
+		})
 	}
+
+	// Fall back to single encoded file if no episode assets
 	if len(targets) == 0 {
 		source := strings.TrimSpace(item.EncodedFile)
 		if source == "" {
@@ -698,11 +699,9 @@ func sanitizeEpisodeToken(key string, idx int) string {
 
 // HealthCheck reports readiness for the subtitle stage.
 func (s *Stage) HealthCheck(ctx context.Context) stage.Health {
+	const name = "subtitles"
 	if s == nil || s.service == nil {
-		return stage.Unhealthy("subtitles", "stage not configured")
+		return stage.Unhealthy(name, "stage not configured")
 	}
-	if !s.service.config.Subtitles.Enabled {
-		return stage.Healthy("subtitles")
-	}
-	return stage.Healthy("subtitles")
+	return stage.Healthy(name)
 }

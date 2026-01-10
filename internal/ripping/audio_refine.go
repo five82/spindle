@@ -263,9 +263,9 @@ func remuxAudioSelection(ctx context.Context, ffmpegBinary, src, dst string, sel
 }
 
 func countAudioStreams(streams []ffprobe.Stream) int {
-	count := 0
-	for _, stream := range streams {
-		if strings.EqualFold(stream.CodecType, "audio") {
+	var count int
+	for _, s := range streams {
+		if strings.EqualFold(s.CodecType, "audio") {
 			count++
 		}
 	}
@@ -296,15 +296,14 @@ func removedIndices(streams []ffprobe.Stream, keep []int) []int {
 	for _, idx := range keep {
 		kept[idx] = struct{}{}
 	}
-	removed := make([]int, 0)
-	for _, stream := range streams {
-		if !strings.EqualFold(stream.CodecType, "audio") {
+	var removed []int
+	for _, s := range streams {
+		if !strings.EqualFold(s.CodecType, "audio") {
 			continue
 		}
-		if _, ok := kept[stream.Index]; ok {
-			continue
+		if _, ok := kept[s.Index]; !ok {
+			removed = append(removed, s.Index)
 		}
-		removed = append(removed, stream.Index)
 	}
 	sort.Ints(removed)
 	return removed
@@ -357,20 +356,15 @@ type audioCandidate struct {
 }
 
 func summarizeAudioCandidates(streams []ffprobe.Stream) ([]audioCandidate, bool) {
-	candidates := make([]audioCandidate, 0)
-	hasEnglish := false
-	for _, stream := range streams {
-		if !strings.EqualFold(stream.CodecType, "audio") {
+	var candidates []audioCandidate
+	var hasEnglish bool
+	for _, s := range streams {
+		if !strings.EqualFold(s.CodecType, "audio") {
 			continue
 		}
-		value, isEnglish := formatAudioCandidateValue(stream)
-		if isEnglish {
-			hasEnglish = true
-		}
-		candidates = append(candidates, audioCandidate{
-			Index: stream.Index,
-			Value: value,
-		})
+		value, isEnglish := formatAudioCandidateValue(s)
+		hasEnglish = hasEnglish || isEnglish
+		candidates = append(candidates, audioCandidate{Index: s.Index, Value: value})
 	}
 	return candidates, hasEnglish
 }
@@ -433,20 +427,18 @@ func collectCommentaryTitles(streams []ffprobe.Stream, commentaryIndices []int) 
 	}
 	indices := make(map[int]struct{}, len(commentaryIndices))
 	for _, idx := range commentaryIndices {
-		if idx < 0 {
-			continue
+		if idx >= 0 {
+			indices[idx] = struct{}{}
 		}
-		indices[idx] = struct{}{}
 	}
 	titles := make(map[int]string, len(indices))
-	for _, stream := range streams {
-		if !strings.EqualFold(stream.CodecType, "audio") {
+	for _, s := range streams {
+		if !strings.EqualFold(s.CodecType, "audio") {
 			continue
 		}
-		if _, ok := indices[stream.Index]; !ok {
-			continue
+		if _, ok := indices[s.Index]; ok {
+			titles[s.Index] = audioTitle(s.Tags)
 		}
-		titles[stream.Index] = audioTitle(stream.Tags)
 	}
 	return titles
 }

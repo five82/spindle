@@ -199,10 +199,11 @@ func (a *Assets) listPtr(kind string) *[]Asset {
 }
 
 func (a Assets) fromKind(kind string) []Asset {
-	if ptr := a.listPtr(kind); ptr != nil {
-		return *ptr
+	ptr := a.listPtr(kind)
+	if ptr == nil {
+		return nil
 	}
-	return a.Ripped
+	return *ptr
 }
 
 func appendOrReplace(list []Asset, asset Asset) []Asset {

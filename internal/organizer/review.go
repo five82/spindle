@@ -37,7 +37,7 @@ func (o *Organizer) finishReview(ctx context.Context, item *queue.Item, stageSta
 		sources = []string{item.EncodedFile}
 	}
 
-	moved := make([]string, 0, len(sources))
+	var moved []string
 	for _, source := range sources {
 		source = strings.TrimSpace(source)
 		if source == "" {

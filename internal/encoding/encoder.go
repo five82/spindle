@@ -271,13 +271,10 @@ func (e *Encoder) restoreFromCacheIfNeeded(ctx context.Context, item *queue.Item
 }
 
 func rippedPaths(item *queue.Item, env ripspec.Envelope) []string {
-	paths := make([]string, 0)
-	if len(env.Episodes) > 0 {
-		for _, episode := range env.Episodes {
-			asset, ok := env.Assets.FindAsset("ripped", episode.Key)
-			if !ok {
-				continue
-			}
+	var paths []string
+	for _, episode := range env.Episodes {
+		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
+		if ok {
 			if value := strings.TrimSpace(asset.Path); value != "" {
 				paths = append(paths, value)
 			}
