@@ -246,6 +246,18 @@ The Go tests lean heavily on integration-style coverage:
 
 Formatting and linting are enforced by `golangci-lint`; run it directly or via `./check-ci.sh`.
 
+## Database Schema Changes
+
+The queue database (`internal/queue`) is **transient**—it tracks in-flight jobs, not permanent data. Do not implement migrations.
+
+When changing the schema:
+
+1. Update `schema.sql` with the new columns/tables
+2. Bump `schemaVersion` in `schema.go`
+3. Update the comment in `schema.sql` to match the new version
+
+Users with an existing database will see a clear error on daemon start telling them to run `spindle queue clear` or delete the database file. This is intentional—the queue is ephemeral and can always be recreated.
+
 ## Operations Reference
 
 - Daemon control: `spindle start|stop|status`. `spindle stop` completely terminates the daemon.

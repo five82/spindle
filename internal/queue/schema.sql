@@ -1,4 +1,4 @@
--- Spindle queue schema (version 1)
+-- Spindle queue schema (version 2)
 -- This is a transient database for tracking in-flight jobs.
 -- On schema changes, bump schemaVersion in schema.go and clear the database.
 
