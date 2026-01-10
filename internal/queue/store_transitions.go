@@ -46,7 +46,7 @@ func transitionsForStatuses(pairs []statusTransition, statuses ...Status) []stat
 
 // ResetStuckProcessing resets items in processing states back to the start of their current stage.
 func (s *Store) ResetStuckProcessing(ctx context.Context) (int64, error) {
-	pairs := processingRollbackTransitions()
+	pairs := stageRollbackTransitions
 	caseExpr, caseArgs := rollbackCaseClause(pairs)
 	statusArgs := rollbackStatuses(pairs)
 	query := fmt.Sprintf(`UPDATE queue_items
@@ -54,7 +54,7 @@ func (s *Store) ResetStuckProcessing(ctx context.Context) (int64, error) {
             progress_stage = 'Reset from stuck processing',
             progress_percent = 0, progress_message = NULL, last_heartbeat = NULL, updated_at = ?
         WHERE status IN (%s)`, caseExpr, makePlaceholders(len(statusArgs)))
-	args := append(caseArgs, time.Now().UTC().Format(time.RFC3339Nano))
+	args := append(caseArgs, nowTimestamp())
 	args = append(args, statusArgs...)
 	res, err := s.execWithRetry(ctx, query, args...)
 	if err != nil {
@@ -65,12 +65,12 @@ func (s *Store) ResetStuckProcessing(ctx context.Context) (int64, error) {
 
 // UpdateHeartbeat updates the last heartbeat timestamp for an in-flight item.
 func (s *Store) UpdateHeartbeat(ctx context.Context, id int64) error {
-	now := time.Now().UTC()
+	now := nowTimestamp()
 	if err := s.execWithoutResultRetry(
 		ctx,
 		`UPDATE queue_items SET last_heartbeat = ?, updated_at = ? WHERE id = ?`,
-		now.Format(time.RFC3339Nano),
-		now.Format(time.RFC3339Nano),
+		now,
+		now,
 		id,
 	); err != nil {
 		return fmt.Errorf("update heartbeat: %w", err)
@@ -81,8 +81,7 @@ func (s *Store) UpdateHeartbeat(ctx context.Context, id int64) error {
 // ReclaimStaleProcessing returns items stuck in the provided processing statuses (or all processing statuses when none are specified)
 // back to the start of their current stage when heartbeats expire.
 func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time, statuses ...Status) (int64, error) {
-	now := time.Now().UTC()
-	pairs := transitionsForStatuses(processingRollbackTransitions(), statuses...)
+	pairs := transitionsForStatuses(stageRollbackTransitions, statuses...)
 	if len(pairs) == 0 {
 		return 0, nil
 	}
@@ -93,7 +92,7 @@ func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time, st
             progress_stage = 'Reclaimed from stale processing',
             progress_percent = 0, progress_message = NULL, last_heartbeat = NULL, updated_at = ?
         WHERE status IN (%s) AND last_heartbeat IS NOT NULL AND last_heartbeat < ?`, caseExpr, makePlaceholders(len(statusArgs)))
-	args := append(caseArgs, now.Format(time.RFC3339Nano))
+	args := append(caseArgs, nowTimestamp())
 	args = append(args, statusArgs...)
 	args = append(args, cutoff.UTC().Format(time.RFC3339Nano))
 	res, err := s.execWithRetry(ctx, query, args...)
@@ -113,7 +112,7 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
                 progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
             WHERE status = ?`,
 			StatusPending,
-			time.Now().UTC().Format(time.RFC3339Nano),
+			nowTimestamp(),
 			StatusFailed,
 		)
 		if err != nil {
@@ -123,15 +122,16 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	}
 
 	placeholders := makePlaceholders(len(ids))
-	args := make([]any, 0, len(ids)+2)
-	args = append(args, StatusPending, time.Now().UTC().Format(time.RFC3339Nano))
+	args := make([]any, 0, len(ids)+3)
+	args = append(args, StatusPending, nowTimestamp())
 	for _, id := range ids {
 		args = append(args, id)
 	}
+	args = append(args, StatusFailed)
 	query := `UPDATE queue_items
         SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
             progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
-        WHERE id IN (` + placeholders + `) AND status = '` + string(StatusFailed) + `'`
+        WHERE id IN (` + placeholders + `) AND status = ?`
 	res, err := s.execWithRetry(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("retry selected items: %w", err)
@@ -142,7 +142,7 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 // FailActiveOnShutdown marks all non-terminal items as failed when the daemon stops.
 // Terminal states (completed, failed) are left untouched.
 func (s *Store) FailActiveOnShutdown(ctx context.Context) (int64, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := nowTimestamp()
 	res, err := s.execWithRetry(
 		ctx,
 		`UPDATE queue_items
@@ -167,9 +167,9 @@ func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := nowTimestamp()
 	placeholders := makePlaceholders(len(ids))
-	args := make([]any, 0, len(ids)+6)
+	args := make([]any, 0, len(ids)+7)
 	args = append(args,
 		StatusFailed,
 		UserStopReason,
@@ -180,10 +180,11 @@ func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
 	for _, id := range ids {
 		args = append(args, id)
 	}
+	args = append(args, StatusCompleted, StatusFailed)
 	query := `UPDATE queue_items
         SET status = ?, needs_review = 1, review_reason = ?, progress_stage = ?, progress_message = ?,
             progress_percent = 0, error_message = NULL, last_heartbeat = NULL, active_episode_key = NULL, updated_at = ?
-        WHERE id IN (` + placeholders + `) AND status NOT IN ('` + string(StatusCompleted) + `','` + string(StatusFailed) + `')`
+        WHERE id IN (` + placeholders + `) AND status NOT IN (?, ?)`
 	res, err := s.execWithRetry(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("stop items: %w", err)

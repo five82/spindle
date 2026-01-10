@@ -47,7 +47,6 @@ func isSQLiteBusy(err error) bool {
 }
 
 func retryOnBusy(ctx context.Context, op func() error) error {
-	ctx = ensureContext(ctx)
 	delay := busyRetryInitialBackoff
 	var lastErr error
 	for attempt := 0; attempt < busyRetryAttempts; attempt++ {

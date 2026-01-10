@@ -15,8 +15,7 @@ func (s *Store) NewDisc(ctx context.Context, discTitle, fingerprint string) (*It
 	if fingerprint == "" {
 		return nil, errors.New("disc fingerprint is required")
 	}
-	now := time.Now().UTC()
-	timestamp := now.Format(time.RFC3339Nano)
+	timestamp := nowTimestamp()
 
 	res, err := s.execWithRetry(
 		ctx,
@@ -108,7 +107,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		nullableString(item.ItemLogPath),
 		nullableString(item.ErrorMessage),
 		nullableString(item.ActiveEpisodeKey),
-		item.UpdatedAt.Format(time.RFC3339Nano),
+		nowTimestamp(),
 		nullableString(item.ProgressStage),
 		item.ProgressPercent,
 		nullableString(item.ProgressMessage),
@@ -170,7 +169,7 @@ func (s *Store) UpdateProgress(ctx context.Context, item *Item) error {
 		nullableString(item.EncodingDetailsJSON),
 		nullableString(item.DraptoPresetProfile),
 		nullableString(item.ActiveEpisodeKey),
-		item.UpdatedAt.Format(time.RFC3339Nano),
+		nowTimestamp(),
 		item.ID,
 	); err != nil {
 		return fmt.Errorf("update progress: %w", err)

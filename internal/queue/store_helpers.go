@@ -111,6 +111,10 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 	return item, nil
 }
 
+func nowTimestamp() string {
+	return time.Now().UTC().Format(time.RFC3339Nano)
+}
+
 func nullableString(value string) any {
 	if value == "" {
 		return nil

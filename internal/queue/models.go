@@ -79,10 +79,6 @@ var stageRollbackTransitions = []statusTransition{
 	{from: StatusOrganizing, to: StatusEncoded},
 }
 
-func processingRollbackTransitions() []statusTransition {
-	return stageRollbackTransitions
-}
-
 // DatabaseHealth captures diagnostic information about the queue database.
 type DatabaseHealth struct {
 	DBPath           string
