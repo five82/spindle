@@ -1,8 +1,8 @@
-# AGENTS.md
+# CLAUDE.md
 
-This file provides guidance when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-CLAUDE.md and GEMINI.md are symlinks to this file so all agent guidance stays in one place.
+CLAUDE.md and GEMINI.md are symlinks to AGENTS.md so all agent guidance stays in one place.
 
 ## TL;DR
 
@@ -204,12 +204,33 @@ PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENT
 
 If you add or reorder phases, update the enums, workflow routing, CLI presentation, docs, and tests in one pull.
 
+## Build, Test, Lint Commands
+
+```bash
+# Build
+go install ./cmd/spindle          # Build and install binary
+
+# Test
+go test ./...                     # Run all tests
+go test -race ./...               # Run all tests with race detector
+go test ./internal/queue          # Run tests for a specific package
+go test ./internal/queue -run TestStore  # Run a single test by name
+go test ./internal/identification -run TestIdentifier/movie  # Run subtest
+
+# Lint
+golangci-lint run                 # Run linter
+golangci-lint run --fix           # Auto-fix safe issues
+
+# Full CI check (recommended before handing off)
+./check-ci.sh                     # Runs: go mod tidy, go test, go test -race,
+                                  # CGO build, golangci-lint, govulncheck
+```
+
 ## Development Workflow
 
-- Install Go 1.25+ and keep `golangci-lint` up to date via `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
-- Build the binary from source while iterating: `go install ./cmd/spindle`.
+- Install Go 1.25+ and keep `golangci-lint` v2.0+ up to date via `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
 - Configuration lives at `~/.config/spindle/config.toml`. Use dedicated staging/library directories and a test TMDB key for integration flows.
-- Before handing off, execute `./check-ci.sh` (runs `go test ./...` and `golangci-lint run`). If you cannot run it, state why.
+- Before handing off, execute `./check-ci.sh`. If you cannot run it, state why.
 
 ## Configuration Cheat Sheet
 
