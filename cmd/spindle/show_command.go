@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -239,7 +238,7 @@ func newLogAPIClient(cfg *config.Config) (*logAPIClient, error) {
 	base.Fragment = ""
 	return &logAPIClient{
 		base: base,
-		http: &http.Client{Timeout: 15 * time.Second},
+		http: &http.Client{}, // No timeout - streaming waits indefinitely for events; user cancels with Ctrl+C
 	}, nil
 }
 
