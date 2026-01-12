@@ -3,12 +3,14 @@ package encoding
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/encodingstate"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/services"
@@ -82,7 +84,12 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 		} else if message != "" && label != "" {
 			message = fmt.Sprintf("%s — %s", label, message)
 		}
-		if applyDraptoUpdate(&snapshot, update, message) {
+		snapshotChanged := applyDraptoUpdate(&snapshot, update, message)
+		// Update estimated file size during encoding progress
+		if update.Type == drapto.EventTypeEncodingProgress {
+			snapshotChanged = updateEstimatedSize(&snapshot, update.Percent) || snapshotChanged
+		}
+		if snapshotChanged {
 			if raw, err := snapshot.Marshal(); err != nil {
 				jobLogger.Warn("failed to marshal encoding snapshot; progress details may be stale",
 					logging.Error(err),
@@ -536,4 +543,39 @@ func formatResolution(resolution, category string) string {
 		return res
 	}
 	return fmt.Sprintf("%s (%s)", res, cat)
+}
+
+// updateEstimatedSize reads the current output file size and calculates the
+// estimated total size based on encoding progress. Only updates when percent >= 10
+// to ensure the estimate has stabilized.
+func updateEstimatedSize(snapshot *encodingstate.Snapshot, percent float64) bool {
+	if snapshot == nil || snapshot.Video == nil {
+		return false
+	}
+	if percent < 10 {
+		return false
+	}
+	outputPath := strings.TrimSpace(snapshot.Video.OutputFile)
+	if outputPath == "" {
+		return false
+	}
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		return false
+	}
+	currentBytes := info.Size()
+	if currentBytes <= 0 {
+		return false
+	}
+	estimatedTotal := int64(float64(currentBytes) / (percent / 100))
+	changed := false
+	if snapshot.CurrentOutputBytes != currentBytes {
+		snapshot.CurrentOutputBytes = currentBytes
+		changed = true
+	}
+	if snapshot.EstimatedTotalBytes != estimatedTotal {
+		snapshot.EstimatedTotalBytes = estimatedTotal
+		changed = true
+	}
+	return changed
 }

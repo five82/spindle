@@ -7,27 +7,29 @@ import (
 
 // Snapshot captures Drapto encoding telemetry in a transport-friendly form.
 type Snapshot struct {
-	JobLabel     string      `json:"jobLabel,omitempty"`
-	EpisodeKey   string      `json:"episodeKey,omitempty"`
-	EpisodeIndex int         `json:"episodeIndex,omitempty"`
-	EpisodeCount int         `json:"episodeCount,omitempty"`
-	Stage        string      `json:"stage,omitempty"`
-	Message      string      `json:"message,omitempty"`
-	Percent      float64     `json:"percent,omitempty"`
-	ETASeconds   float64     `json:"etaSeconds,omitempty"`
-	Speed        float64     `json:"speed,omitempty"`
-	FPS          float64     `json:"fps,omitempty"`
-	Bitrate      string      `json:"bitrate,omitempty"`
-	TotalFrames  int64       `json:"totalFrames,omitempty"`
-	CurrentFrame int64       `json:"currentFrame,omitempty"`
-	Hardware     *Hardware   `json:"hardware,omitempty"`
-	Video        *Video      `json:"video,omitempty"`
-	Crop         *Crop       `json:"crop,omitempty"`
-	Config       *Config     `json:"config,omitempty"`
-	Validation   *Validation `json:"validation,omitempty"`
-	Warning      string      `json:"warning,omitempty"`
-	Error        *Issue      `json:"error,omitempty"`
-	Result       *Result     `json:"result,omitempty"`
+	JobLabel            string      `json:"jobLabel,omitempty"`
+	EpisodeKey          string      `json:"episodeKey,omitempty"`
+	EpisodeIndex        int         `json:"episodeIndex,omitempty"`
+	EpisodeCount        int         `json:"episodeCount,omitempty"`
+	Stage               string      `json:"stage,omitempty"`
+	Message             string      `json:"message,omitempty"`
+	Percent             float64     `json:"percent,omitempty"`
+	ETASeconds          float64     `json:"etaSeconds,omitempty"`
+	Speed               float64     `json:"speed,omitempty"`
+	FPS                 float64     `json:"fps,omitempty"`
+	Bitrate             string      `json:"bitrate,omitempty"`
+	TotalFrames         int64       `json:"totalFrames,omitempty"`
+	CurrentFrame        int64       `json:"currentFrame,omitempty"`
+	CurrentOutputBytes  int64       `json:"currentOutputBytes,omitempty"`
+	EstimatedTotalBytes int64       `json:"estimatedTotalBytes,omitempty"`
+	Hardware            *Hardware   `json:"hardware,omitempty"`
+	Video               *Video      `json:"video,omitempty"`
+	Crop                *Crop       `json:"crop,omitempty"`
+	Config              *Config     `json:"config,omitempty"`
+	Validation          *Validation `json:"validation,omitempty"`
+	Warning             string      `json:"warning,omitempty"`
+	Error               *Issue      `json:"error,omitempty"`
+	Result              *Result     `json:"result,omitempty"`
 }
 
 // Hardware describes the encoder host.
@@ -125,6 +127,8 @@ func (s Snapshot) IsZero() bool {
 		strings.TrimSpace(s.Bitrate) == "" &&
 		s.TotalFrames == 0 &&
 		s.CurrentFrame == 0 &&
+		s.CurrentOutputBytes == 0 &&
+		s.EstimatedTotalBytes == 0 &&
 		s.Hardware == nil &&
 		s.Video == nil &&
 		s.Crop == nil &&
