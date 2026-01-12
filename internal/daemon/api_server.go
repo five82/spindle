@@ -236,7 +236,8 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	decisionFilter := strings.TrimSpace(query.Get("decision_type"))
 	searchFilter := strings.TrimSpace(query.Get("search"))
 	searchFilterLower := strings.ToLower(searchFilter)
-	implicitForegroundOnly := lane == ""
+	// When filtering by item, include background lane logs (item work runs there)
+	implicitForegroundOnly := lane == "" && filterItem == 0
 
 	var (
 		converted []api.LogEvent
