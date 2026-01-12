@@ -258,6 +258,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 					logging.String("ripped_file", cachedTarget),
 				)
 				copy := *item
+				copy.ProgressStage = "Ripping"
 				copy.ProgressMessage = "Rip cache hit; skipping MakeMKV rip"
 				if err := r.store.UpdateProgress(ctx, &copy); err != nil {
 					logger.Warn("failed to persist rip cache hit progress; queue status may lag",
@@ -456,6 +457,23 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if len(paths) > 0 {
 			validationTargets = paths
 			target = paths[0]
+		}
+	}
+
+	// Update progress for commentary detection if enabled
+	if r.cfg != nil && r.cfg.CommentaryDetection.Enabled {
+		copy := *item
+		copy.ProgressStage = "Detecting Commentary"
+		copy.ProgressMessage = "Analyzing audio tracks for commentary"
+		if err := r.store.UpdateProgress(ctx, &copy); err != nil {
+			logger.Warn("failed to persist commentary detection progress; queue status may lag",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
+				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldImpact, "queue UI may show stale progress"),
+			)
+		} else {
+			*item = copy
 		}
 	}
 
