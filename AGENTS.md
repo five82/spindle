@@ -38,6 +38,10 @@ Integration contracts to keep in mind while changing code:
 - Keep edits ASCII unless the file already uses extended characters for UX.
 - Follow the repo Contributing rhythm: implement, self-test, then summarize what changed and how to validate.
 
+## MCP
+
+Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+
 ## Project Snapshot
 
 Spindle is a **personal project maintained by a single developer** that automates the journey from optical disc to organized Jellyfin library. It coordinates disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata lookup (TMDB), Jellyfin library updates, and notifications (ntfy).
