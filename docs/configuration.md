@@ -108,7 +108,6 @@ Set `SPD_DEBUG_COMMENTARY_VERBOSE=1` to emit per-candidate commentary debug logs
 
 ## Audio, Encoding, and Dependencies
 
-- `drapto_path` — Override when Drapto is not on `PATH`.
 - `makemkv_path` — Custom path to `makemkvcon` if needed.
 - `keydb_path`, `keydb_download_url`, `keydb_download_timeout` — controls for
   refreshing `KEYDB.cfg` (AACS keys). Drop a manual file at

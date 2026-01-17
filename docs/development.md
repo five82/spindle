@@ -16,9 +16,10 @@ sudo apt install -y build-essential ffmpeg mediainfo libchromaprint-tools
 Install these separately and ensure they're on your `PATH`:
 
 - **MakeMKV** (provides `makemkvcon`) - https://www.makemkv.com
-- **Drapto** - `cargo install --git https://github.com/five82/drapto`
 
-Required binaries: `ffmpeg`, `ffprobe`, `makemkvcon`, `drapto`, `mediainfo`, `fpcalc`
+Required binaries: `ffmpeg`, `ffprobe`, `makemkvcon`, `mediainfo`, `fpcalc`
+
+Note: Drapto is now a Go library dependency (`github.com/five82/drapto`), not an external binary.
 
 Optional: `bd_info` (from `libbluray` tools) improves disc identification; `eject` utility; CUDA 12.8+ for WhisperX GPU acceleration.
 
@@ -28,7 +29,7 @@ Use `spindle status` to check for missing dependencies.
 
 - Install Go 1.25 or newer (`go version` should confirm) and keep `GOBIN`/`GOPATH` on your `PATH` so the `spindle` binary is discoverable during iteration.
 - Install lint tooling with `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
-- Keep MakeMKV and Drapto binaries on the PATH (`/usr/local/bin` on the lab machine by convention).
+- Keep MakeMKV binary on the PATH (`/usr/local/bin` on the lab machine by convention).
 - Default staging/library roots (override in `~/.config/spindle/config.toml` when needed):
   - `~/media/spindle/staging`
   - `~/media/spindle/library`

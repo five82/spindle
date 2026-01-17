@@ -18,7 +18,7 @@ Do not modify this header.
 Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata (TMDB), subtitles (OpenSubtitles/WhisperX), Jellyfin refresh, and ntfy notifications.
 
 - **Scope**: Single-developer project - avoid over-engineering
-- **Environment**: Go 1.25+, MakeMKV, Drapto binaries
+- **Environment**: Go 1.25+, MakeMKV, FFmpeg
 - **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.
 
 Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED] -> ENCODING -> ENCODED -> [SUBTITLING -> SUBTITLED] -> ORGANIZING -> COMPLETED` (with `FAILED`/`REVIEW` detours).
@@ -38,10 +38,10 @@ Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [
 |------|------|------|
 | spindle | `~/projects/spindle/` | Daemon + CLI + orchestration (this repo) |
 | flyer | `~/projects/flyer/` | Read-only TUI that polls Spindle's API/logs |
-| drapto | `~/projects/drapto/` | ffmpeg encoding wrapper invoked during ENCODING |
+| drapto | `~/projects/drapto/` | Go library for AV1 encoding (imported as `github.com/five82/drapto`) |
 
 **Integration contracts:**
-- Spindle shells out to Drapto and consumes its `--progress-json` event stream. Keep those JSON objects compatible.
+- Spindle imports Drapto as a Go library and implements its `Reporter` interface for progress events.
 - Flyer is read-only (no queue mutations) and must tolerate Spindle being down.
 
 ## Build, Test, Lint

@@ -12,7 +12,7 @@ Early-stage project; expect frequent changes.
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.25+, MakeMKV, Drapto, ffmpeg, mediainfo, fpcalc. See [docs/development.md](docs/development.md) for full setup.
+Prerequisites: Go 1.25+, MakeMKV, ffmpeg, mediainfo, fpcalc. See [docs/development.md](docs/development.md) for full setup.
 
 ## Configure
 
