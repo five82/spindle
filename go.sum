@@ -7,8 +7,8 @@ github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkp
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/fatih/color v1.18.0 h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM=
 github.com/fatih/color v1.18.0/go.mod h1:4FelSpRwEGDpQ12mAdzqdOukCy4u8WUtOY6lkT/6HfU=
-github.com/five82/drapto v0.1.0 h1:1KU1SF/IZiVBve74eeLm6ca0Z/jpT4Zz5aDMg2Krcp4=
-github.com/five82/drapto v0.1.0/go.mod h1:n3iLYkVgqo+dlgOF2A9YZ4DhbJm0IkFAdxfgQD/sD3s=
+github.com/five82/drapto v0.2.0 h1:Nl6oO52tN7cLKD8PZcFXhVQ3wiGE0YT4As4sQyOzP1k=
+github.com/five82/drapto v0.2.0/go.mod h1:n3iLYkVgqo+dlgOF2A9YZ4DhbJm0IkFAdxfgQD/sD3s=
 github.com/gofrs/flock v0.13.0 h1:95JolYOvGMqeH31+FC7D2+uULf6mG61mEZ/A8dRYMzw=
 github.com/gofrs/flock v0.13.0/go.mod h1:jxeyy9R1auM5S6JYDBhDt+E2TCo7DkratH4Pgi8P+Z0=
 github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e h1:ijClszYn+mADRFY17kjQEVQ1XRhq2/JR1M3sGqeJoxs=

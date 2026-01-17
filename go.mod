@@ -3,7 +3,7 @@ module spindle
 go 1.25.1
 
 require (
-	github.com/five82/drapto v0.1.0
+	github.com/five82/drapto v0.2.0
 	github.com/gofrs/flock v0.13.0
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-isatty v0.0.20
