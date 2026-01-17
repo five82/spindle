@@ -171,6 +171,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 			lastErr = err
 			var mismatch durationMismatchError
 			var earlyReject earlyDurationRejectError
+			var sparse *sparseSubtitleResult
 			if errors.As(err, &mismatch) {
 				mismatchErrs = append(mismatchErrs, mismatch)
 				reason = "duration_mismatch"
@@ -184,6 +185,11 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 				})
 				reason = "early_duration_reject"
 				details = fmt.Sprintf(" [Diff: %.1fs, skipped alignment]", earlyReject.deltaSeconds)
+			} else if errors.As(err, &sparse) {
+				// Sparse subtitles: too few cues or poor coverage, should fall back to WhisperX
+				allDurationMM = false
+				reason = "sparse_subtitles"
+				details = fmt.Sprintf(" [%.1f cues/min, %.0f%% coverage]", sparse.cuesPerMinute, sparse.coverageRatio*100)
 			} else {
 				allDurationMM = false
 				reason = "download_or_align_failed"

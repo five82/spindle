@@ -19,12 +19,30 @@ func TestServiceGenerateUsesOpenSubtitlesWhenAvailable(t *testing.T) {
 	}
 
 	stub := setupInspectAndStub(t, 120, false)
+	// Need enough cues to pass density check (2 cues/min for 2 min video = 4 cues minimum).
+	// First cue is an ad that gets cleaned, so we need 5 total.
 	osStub := &openSubtitlesStub{
 		data: []byte(`1
 00:00:01,000 --> 00:00:03,000
 www.opensubtitles.org
 
 2
+00:00:10,000 --> 00:00:15,000
+First line of dialogue.
+
+3
+00:00:30,000 --> 00:00:35,000
+Second line of dialogue.
+
+4
+00:01:00,000 --> 00:01:05,000
+Third line of dialogue.
+
+5
+00:01:30,000 --> 00:01:35,000
+Fourth line of dialogue.
+
+6
 00:01:54,000 --> 00:02:00,000
 Aligned text
 `),
@@ -83,8 +101,9 @@ Aligned text
 	if !strings.Contains(output, "Aligned text") {
 		t.Fatalf("expected aligned text to remain, got %q", output)
 	}
-	if result.SegmentCount != 1 {
-		t.Fatalf("expected segment count 1, got %d", result.SegmentCount)
+	// 6 cues total, 1 ad removed = 5 valid cues
+	if result.SegmentCount != 5 {
+		t.Fatalf("expected segment count 5, got %d", result.SegmentCount)
 	}
 }
 

@@ -47,9 +47,10 @@ const (
 
 // Duration validation thresholds for subtitle/video matching.
 const (
-	// Intro allowance for subtitle-to-video gap at start.
-	subtitleIntroAllowanceSeconds = 45.0
-	subtitleIntroMinimumSeconds   = 5.0
+	// Intro allowance for subtitle-to-video gap at start/end.
+	subtitleIntroAllowanceSeconds = 45.0  // Max gap at end of video (credits)
+	subtitleIntroMinimumSeconds   = 5.0   // Min gap at start to trigger exception
+	subtitleIntroMaximumSeconds   = 300.0 // Max gap at start (5 min) - larger gaps are suspicious
 
 	// Suspect offset detection thresholds.
 	suspectOffsetSeconds        = 60.0
@@ -67,4 +68,14 @@ const (
 
 	// Maximum OpenSubtitles candidates to evaluate before giving up.
 	maxOpenSubtitlesCandidates = 15
+
+	// Segment density validation: minimum cues per minute expected for valid subtitles.
+	// Typical movies have 6-12 cues/minute. 2 cues/minute is a very low threshold that
+	// catches obviously sparse/incomplete subtitles (like 143 cues for a 126-min movie = 1.1/min).
+	minCuesPerMinute = 2.0
+
+	// Coverage validation: minimum percentage of video duration that should have subtitle coverage.
+	// A subtitle that ends way before the video (excluding credits) is likely incomplete.
+	// This catches cases where subtitles cover only part of the movie.
+	minSubtitleCoverageRatio = 0.75 // Subtitle should cover at least 75% of video duration
 )

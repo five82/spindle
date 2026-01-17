@@ -157,6 +157,22 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "opensubtitles", "Fetched subtitles contained no cues", nil)
 	}
 
+	// Validate subtitle density: catch obviously sparse/incomplete subtitles
+	// (e.g., 143 cues for a 126-minute movie is only 1.1 cues/min, expected 6-12).
+	if sparseResult := checkSubtitleDensity(plan.outputFile, plan.totalSeconds, segmentCount); sparseResult != nil {
+		if s.logger != nil {
+			s.logger.Debug("opensubtitles candidate rejected (sparse subtitles)",
+				logging.Int("cue_count", sparseResult.cueCount),
+				logging.Float64("video_minutes", sparseResult.videoMinutes),
+				logging.Float64("cues_per_minute", sparseResult.cuesPerMinute),
+				logging.Float64("coverage_ratio", sparseResult.coverageRatio),
+				logging.String("reason", sparseResult.reason),
+				logging.String("release", candidate.Release),
+			)
+		}
+		return GenerateResult{}, sparseResult
+	}
+
 	delta, mismatch, err := checkSubtitleDuration(plan.outputFile, plan.totalSeconds)
 	if err != nil {
 		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "duration inspect", "Failed to compare subtitle duration", err)
@@ -168,7 +184,15 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 				introGap = 0
 			}
 			tailDelta := plan.totalSeconds - last
-			if introGap >= subtitleIntroMinimumSeconds && tailDelta > 0 && tailDelta <= subtitleIntroAllowanceSeconds {
+
+			// Accept with intro gap exception if:
+			// - Intro gap is between 5s and 5 minutes (reasonable opening credits/sequence)
+			// - Tail gap is 0-45s (reasonable credits)
+			// Larger intro gaps are suspicious (wrong cut, missing content).
+			introGapValid := introGap >= subtitleIntroMinimumSeconds && introGap <= subtitleIntroMaximumSeconds
+			tailGapValid := tailDelta > 0 && tailDelta <= subtitleIntroAllowanceSeconds
+
+			if introGapValid && tailGapValid {
 				if s.logger != nil {
 					s.logger.Debug("opensubtitles accepted with intro gap",
 						logging.Float64("intro_gap_seconds", introGap),
