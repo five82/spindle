@@ -177,7 +177,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	tmpPath := deriveTempAudioPath(path)
 	ffmpegBinary := "ffmpeg"
 	if cfg != nil {
-		ffmpegBinary = deps.ResolveFFmpegPath(cfg.DraptoBinary())
+		ffmpegBinary = deps.ResolveFFmpegPath()
 	}
 	if err := remuxAudioSelection(ctx, ffmpegBinary, path, tmpPath, selection, commentaryTitles); err != nil {
 		return AudioRefinementResult{}, err

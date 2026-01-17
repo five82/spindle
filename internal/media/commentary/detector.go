@@ -76,7 +76,7 @@ func Detect(ctx context.Context, cfg *config.Config, path string, probe ffprobe.
 	}
 	logger = logging.WithContext(ctx, logging.NewComponentLogger(logger, "commentary"))
 
-	ffmpegBinary := deps.ResolveFFmpegPath(cfg.DraptoBinary())
+	ffmpegBinary := deps.ResolveFFmpegPath()
 	if strings.TrimSpace(ffmpegBinary) == "" {
 		ffmpegBinary = "ffmpeg"
 	}

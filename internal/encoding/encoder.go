@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -42,9 +41,7 @@ type Encoder struct {
 
 // NewEncoder constructs the encoding handler.
 func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Encoder {
-	client := drapto.NewCLI(
-		drapto.WithBinary(cfg.DraptoBinary()),
-	)
+	client := drapto.NewLibrary()
 	return NewEncoderWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
 }
 
@@ -481,13 +478,6 @@ func (e *Encoder) HealthCheck(ctx context.Context) stage.Health {
 	}
 	if e.client == nil {
 		return stage.Unhealthy(name, "drapto client unavailable")
-	}
-	binary := strings.TrimSpace(e.cfg.DraptoBinary())
-	if binary == "" {
-		return stage.Unhealthy(name, "drapto binary not configured")
-	}
-	if _, err := exec.LookPath(binary); err != nil {
-		return stage.Unhealthy(name, fmt.Sprintf("drapto binary %q not found", binary))
 	}
 	return stage.Healthy(name)
 }

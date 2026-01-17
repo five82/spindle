@@ -17,6 +17,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/daemon"
+	"spindle/internal/deps"
 	"spindle/internal/encoding"
 	"spindle/internal/episodeid"
 	"spindle/internal/identification"
@@ -226,15 +227,15 @@ func logDependencySnapshot(logger *slog.Logger, cfg *config.Config) {
 		return
 	}
 	makemkv := cfg.MakemkvBinary()
-	drapto := cfg.DraptoBinary()
+	ffmpeg := deps.ResolveFFmpegPath()
 	ffprobe := cfg.FFprobeBinary()
 	logger.Info("dependency snapshot",
 		logging.String(logging.FieldEventType, "dependency_snapshot"),
 		logging.Bool("tmdb_key_present", strings.TrimSpace(cfg.TMDB.APIKey) != ""),
 		logging.Bool("makemkv_available", binaryAvailable(makemkv)),
 		logging.String("makemkv_binary", makemkv),
-		logging.Bool("drapto_available", binaryAvailable(drapto)),
-		logging.String("drapto_binary", drapto),
+		logging.Bool("ffmpeg_available", binaryAvailable(ffmpeg)),
+		logging.String("ffmpeg_binary", ffmpeg),
 		logging.Bool("ffprobe_available", binaryAvailable(ffprobe)),
 		logging.String("ffprobe_binary", ffprobe),
 		logging.Bool("opensubtitles_enabled", cfg.Subtitles.OpenSubtitlesEnabled),

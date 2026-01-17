@@ -289,11 +289,6 @@ func (c *Config) MakemkvBinary() string {
 	return "makemkvcon"
 }
 
-// DraptoBinary returns the Drapto executable name.
-func (c *Config) DraptoBinary() string {
-	return "drapto"
-}
-
 // FFprobeBinary returns the ffprobe executable name used for media validation.
 func (c *Config) FFprobeBinary() string {
 	return "ffprobe"

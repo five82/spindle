@@ -44,8 +44,9 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 	}
 	jobLogger.Debug(
 		"launching drapto encode",
-		logging.String("command", r.draptoCommand(sourcePath, encodedDir, presetProfile)),
 		logging.String("source_file", sourcePath),
+		logging.String("output_dir", encodedDir),
+		logging.String("preset_profile", presetProfile),
 		logging.String("job", label),
 	)
 	snapshot := loadEncodingSnapshot(jobLogger, item.EncodingDetailsJSON)
@@ -229,33 +230,6 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 		)
 	}
 	return path, nil
-}
-
-func (r *draptoRunner) draptoBinaryName() string {
-	if r == nil || r.cfg == nil {
-		return "drapto"
-	}
-	binary := strings.TrimSpace(r.cfg.DraptoBinary())
-	if binary == "" {
-		return "drapto"
-	}
-	return binary
-}
-
-func (r *draptoRunner) draptoCommand(inputPath, outputDir, presetProfile string) string {
-	binary := r.draptoBinaryName()
-	parts := []string{
-		fmt.Sprintf("%s encode", binary),
-		fmt.Sprintf("--input %q", strings.TrimSpace(inputPath)),
-		fmt.Sprintf("--output %q", strings.TrimSpace(outputDir)),
-		"--responsive",
-		"--no-log",
-	}
-	if profile := strings.TrimSpace(presetProfile); profile != "" && !strings.EqualFold(profile, "default") {
-		parts = append(parts, fmt.Sprintf("--drapto-preset %s", profile))
-	}
-	parts = append(parts, "--progress-json")
-	return strings.Join(parts, " ")
 }
 
 func logDraptoHardware(logger *slog.Logger, label string, info *drapto.HardwareInfo) {

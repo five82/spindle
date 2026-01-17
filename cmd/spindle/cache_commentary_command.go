@@ -222,7 +222,7 @@ func writeCommentarySamples(ctx context.Context, cfg *config.Config, target stri
 		return nil
 	}
 
-	ffmpegBinary := deps.ResolveFFmpegPath(cfg.DraptoBinary())
+	ffmpegBinary := deps.ResolveFFmpegPath()
 	if strings.TrimSpace(ffmpegBinary) == "" {
 		ffmpegBinary = "ffmpeg"
 	}

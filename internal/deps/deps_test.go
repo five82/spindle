@@ -44,71 +44,53 @@ func TestCheckBinaries(t *testing.T) {
 	}
 }
 
-func TestCheckFFmpegForDraptoSidecar(t *testing.T) {
+func TestResolveFFmpegPathFromEnv(t *testing.T) {
 	tmp := t.TempDir()
-	draptoName := executableName("drapto")
-	ffmpegName := executableName("ffmpeg")
-	draptoPath := filepath.Join(tmp, draptoName)
-	ffmpegPath := filepath.Join(tmp, ffmpegName)
+	ffmpegPath := filepath.Join(tmp, executableName("ffmpeg"))
 	script := []byte("#!/bin/sh\nexit 0\n")
-	if err := os.WriteFile(draptoPath, script, 0o755); err != nil {
-		t.Fatalf("write drapto stub: %v", err)
-	}
-	if err := os.WriteFile(ffmpegPath, script, 0o755); err != nil {
-		t.Fatalf("write ffmpeg sidecar: %v", err)
-	}
-
-	status := CheckFFmpegForDrapto(draptoPath)
-	if !status.Available {
-		t.Fatalf("expected ffmpeg sidecar to be available, got detail %q", status.Detail)
-	}
-	if status.Command != ffmpegPath {
-		t.Fatalf("expected ffmpeg command %q, got %q", ffmpegPath, status.Command)
-	}
-}
-
-func TestCheckFFmpegForDraptoPathFallback(t *testing.T) {
-	tmp := t.TempDir()
-	draptoPath := filepath.Join(tmp, executableName("drapto"))
-	script := []byte("#!/bin/sh\nexit 0\n")
-	if err := os.WriteFile(draptoPath, script, 0o755); err != nil {
-		t.Fatalf("write drapto stub: %v", err)
-	}
-
-	binDir := filepath.Join(tmp, "bin")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatalf("mkdir bin: %v", err)
-	}
-	ffmpegPath := filepath.Join(binDir, executableName("ffmpeg"))
 	if err := os.WriteFile(ffmpegPath, script, 0o755); err != nil {
 		t.Fatalf("write ffmpeg stub: %v", err)
 	}
-	oldPath := os.Getenv("PATH")
-	newPath := binDir
-	if oldPath != "" {
-		newPath = binDir + string(os.PathListSeparator) + oldPath
-	}
-	t.Setenv("PATH", newPath)
 
-	status := CheckFFmpegForDrapto(draptoPath)
-	if !status.Available {
-		t.Fatalf("expected ffmpeg fallback to be available, got detail %q", status.Detail)
-	}
-	if status.Command != ffmpegPath {
-		t.Fatalf("expected ffmpeg command %q, got %q", ffmpegPath, status.Command)
+	t.Setenv("SPINDLE_FFMPEG_PATH", ffmpegPath)
+	result := ResolveFFmpegPath()
+	if result != ffmpegPath {
+		t.Fatalf("expected ffmpeg path %q, got %q", ffmpegPath, result)
 	}
 }
 
-func TestCheckFFmpegForDraptoNotFound(t *testing.T) {
+func TestResolveFFmpegPathFromPATH(t *testing.T) {
 	tmp := t.TempDir()
-	draptoPath := filepath.Join(tmp, executableName("drapto"))
-	t.Setenv("PATH", "")
-	status := CheckFFmpegForDrapto(draptoPath)
-	if status.Available {
-		t.Fatal("expected ffmpeg resolution to fail")
+	ffmpegPath := filepath.Join(tmp, executableName("ffmpeg"))
+	script := []byte("#!/bin/sh\nexit 0\n")
+	if err := os.WriteFile(ffmpegPath, script, 0o755); err != nil {
+		t.Fatalf("write ffmpeg stub: %v", err)
 	}
-	if status.Detail == "" {
-		t.Fatal("expected detail message when ffmpeg is unavailable")
+
+	// Clear env vars and set PATH
+	t.Setenv("SPINDLE_FFMPEG_PATH", "")
+	t.Setenv("FFMPEG_PATH", "")
+	oldPath := os.Getenv("PATH")
+	newPath := tmp
+	if oldPath != "" {
+		newPath = tmp + string(os.PathListSeparator) + oldPath
+	}
+	t.Setenv("PATH", newPath)
+
+	result := ResolveFFmpegPath()
+	if result != ffmpegPath {
+		t.Fatalf("expected ffmpeg path %q, got %q", ffmpegPath, result)
+	}
+}
+
+func TestResolveFFmpegPathFallback(t *testing.T) {
+	t.Setenv("SPINDLE_FFMPEG_PATH", "")
+	t.Setenv("FFMPEG_PATH", "")
+	t.Setenv("PATH", "")
+
+	result := ResolveFFmpegPath()
+	if result != "ffmpeg" {
+		t.Fatalf("expected fallback to 'ffmpeg', got %q", result)
 	}
 }
 

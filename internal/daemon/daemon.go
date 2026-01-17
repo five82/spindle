@@ -366,8 +366,8 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) error {
 			Description: "Required for disc ripping",
 		},
 		{
-			Name:        "Drapto",
-			Command:     d.cfg.DraptoBinary(),
+			Name:        "FFmpeg",
+			Command:     deps.ResolveFFmpegPath(),
 			Description: "Required for encoding",
 		},
 		{
@@ -419,7 +419,6 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) error {
 	}
 
 	results := deps.CheckBinaries(requirements)
-	results = append(results, deps.CheckFFmpegForDrapto(d.cfg.DraptoBinary()))
 	d.depsMu.Lock()
 	d.dependencies = make([]DependencyStatus, len(results))
 	for i, result := range results {
