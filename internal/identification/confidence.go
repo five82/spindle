@@ -33,6 +33,8 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	queryYear, queryTitleNormalized := splitQueryYear(query)
 	var best *tmdb.Result
 	bestScore := -1.0
+	var bestExact *tmdb.Result
+	bestExactScore := -1.0
 	candidates := make([]scoredCandidate, 0, len(response.Results))
 
 	for idx := range response.Results {
@@ -72,6 +74,12 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 			TitleCleaned: titleNormalized,
 		})
 
+		// Track best exact match separately
+		if exactMatch && score > bestExactScore {
+			bestExact = &response.Results[idx]
+			bestExactScore = score
+		}
+
 		if score > bestScore {
 			best = &response.Results[idx]
 			bestScore = score
@@ -82,12 +90,30 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		return nil
 	}
 
-	title := pickTitle(*best)
+	// Prefer exact match over highest-scoring result if it meets minimum thresholds
+	selected := best
+	selectedScore := bestScore
+	exactMatchPreferred := false
+	if bestExact != nil && bestExact.ID != best.ID {
+		// Check if the exact match meets minimum thresholds
+		if bestExact.VoteAverage >= 2.0 && (minVoteCountExactMatch <= 0 || bestExact.VoteCount >= int64(minVoteCountExactMatch)) {
+			selected = bestExact
+			selectedScore = bestExactScore
+			exactMatchPreferred = true
+			logger.Debug("preferring exact match over higher-scoring result",
+				logging.Int64("exact_match_id", bestExact.ID),
+				logging.Float64("exact_match_score", bestExactScore),
+				logging.Int64("highest_score_id", best.ID),
+				logging.Float64("highest_score", bestScore))
+		}
+	}
+
+	title := pickTitle(*selected)
 	titleLower := strings.ToLower(title)
 	titleNormalized := normalizeForComparison(title)
 	exactMatch := titleLower == queryLower || titleNormalized == queryNormalized
 	if !exactMatch && queryYear > 0 && queryTitleNormalized != "" && titleNormalized == queryTitleNormalized {
-		if resultYear := resultReleaseYear(*best); resultYear == queryYear {
+		if resultYear := resultReleaseYear(*selected); resultYear == queryYear {
 			exactMatch = true
 		}
 	}
@@ -98,25 +124,28 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	rejects := []string{}
 	var minExpectedScore float64
 	if exactMatch {
-		if best.VoteAverage < 2.0 {
+		if selected.VoteAverage < 2.0 {
 			decisionReason = "vote_average_below_threshold"
-			rejects = append(rejects, fmt.Sprintf("%d:vote_average_below_2.0", best.ID))
-		} else if minVoteCountExactMatch > 0 && best.VoteCount < int64(minVoteCountExactMatch) {
+			rejects = append(rejects, fmt.Sprintf("%d:vote_average_below_2.0", selected.ID))
+		} else if minVoteCountExactMatch > 0 && selected.VoteCount < int64(minVoteCountExactMatch) {
 			decisionReason = "vote_count_below_threshold"
-			rejects = append(rejects, fmt.Sprintf("%d:vote_count_below_%d", best.ID, minVoteCountExactMatch))
+			rejects = append(rejects, fmt.Sprintf("%d:vote_count_below_%d", selected.ID, minVoteCountExactMatch))
 		} else {
 			decisionResult = "accepted"
 			decisionReason = "exact_match"
+			if exactMatchPreferred {
+				decisionReason = "exact_match_preferred"
+			}
 		}
 	} else {
-		if best.VoteAverage < 3.0 {
+		if selected.VoteAverage < 3.0 {
 			decisionReason = "vote_average_below_threshold"
-			rejects = append(rejects, fmt.Sprintf("%d:vote_average_below_3.0", best.ID))
+			rejects = append(rejects, fmt.Sprintf("%d:vote_average_below_3.0", selected.ID))
 		} else {
-			minExpectedScore = 1.3 + float64(best.VoteCount)/1000.0
-			if bestScore < minExpectedScore {
+			minExpectedScore = 1.3 + float64(selected.VoteCount)/1000.0
+			if selectedScore < minExpectedScore {
 				decisionReason = "confidence_below_threshold"
-				rejects = append(rejects, fmt.Sprintf("%d:confidence_below_threshold", best.ID))
+				rejects = append(rejects, fmt.Sprintf("%d:confidence_below_threshold", selected.ID))
 			} else {
 				decisionResult = "accepted"
 				decisionReason = "confidence_passed"
@@ -135,11 +164,11 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 		logging.String("decision_reason", decisionReason),
 		logging.String("decision_options", "accept, reject"),
 		logging.Int("candidate_count", len(topCandidates)),
-		logging.String("decision_selected", fmt.Sprintf("%d:%s", best.ID, title)),
+		logging.String("decision_selected", fmt.Sprintf("%d:%s", selected.ID, title)),
 		logging.Int("total_results", len(response.Results)),
-		logging.Float64("best_score", bestScore),
-		logging.Float64("vote_average", best.VoteAverage),
-		logging.Int64("vote_count", best.VoteCount),
+		logging.Float64("best_score", selectedScore),
+		logging.Float64("vote_average", selected.VoteAverage),
+		logging.Int64("vote_count", selected.VoteCount),
 		logging.Bool("exact_title_match", exactMatch),
 		logging.String("match_type", match),
 		logging.String("query", query),
@@ -181,7 +210,7 @@ func selectBestResult(logger *slog.Logger, query string, response *tmdb.Response
 	if decisionResult != "accepted" {
 		return nil
 	}
-	return best
+	return selected
 }
 
 func matchType(titleLower, queryLower string) string {

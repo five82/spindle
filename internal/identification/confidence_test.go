@@ -24,6 +24,25 @@ func TestSelectBestResultExactMatch(t *testing.T) {
 	}
 }
 
+func TestSelectBestResultPrefersExactMatchOverHigherScore(t *testing.T) {
+	// Simulates "The Wolverine" scenario: exact match has lower score than
+	// a more popular non-exact match, but should still be preferred.
+	logger := logging.NewNop()
+	resp := &tmdb.Response{Results: []tmdb.Result{
+		{ID: 76170, Title: "The Wolverine", VoteAverage: 6.4, VoteCount: 10070},                // exact match, score ~11.7
+		{ID: 263115, Title: "Logan", VoteAverage: 7.8, VoteCount: 20058},                       // higher score ~20.8, but not exact
+		{ID: 447158, Title: "The Wolverine: Path of a Ronin", VoteAverage: 6.9, VoteCount: 25}, // contains, low votes
+	}}
+
+	best := selectBestResult(logger, "The Wolverine", resp, 5)
+	if best == nil {
+		t.Fatal("expected best result, got nil")
+	}
+	if best.ID != 76170 {
+		t.Fatalf("expected exact match ID 76170 (The Wolverine), got ID %d (%s)", best.ID, best.Title)
+	}
+}
+
 func TestSelectBestResultRejectsLowConfidence(t *testing.T) {
 	logger := logging.NewNop()
 	resp := &tmdb.Response{Results: []tmdb.Result{
