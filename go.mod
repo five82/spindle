@@ -11,17 +11,17 @@ require (
 	github.com/visvasity/webrtcvad v0.0.0-20250704160404-fe7c7fca86e2
 	golang.org/x/sys v0.40.0
 	golang.org/x/text v0.33.0
-	modernc.org/sqlite v1.42.2
+	modernc.org/sqlite v1.44.1
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/ncruces/go-strftime v0.1.9 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
-	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
-	modernc.org/libc v1.66.10 // indirect
+	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
+	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
