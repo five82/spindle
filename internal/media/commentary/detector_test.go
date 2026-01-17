@@ -112,6 +112,21 @@ func TestClassifyRules(t *testing.T) {
 	if include || reason != "music_or_silent" {
 		t.Fatalf("expected music_or_silent exclusion, got include=%v reason=%q", include, reason)
 	}
+
+	// High similarity downmix: high overlap but too similar to primary (likely stereo downmix)
+	// This was the "The Wolverine" false positive case
+	metrics = Metrics{
+		SpeechRatio:              0.33,
+		SpeechOverlapWithPrimary: 0.62,
+		SpeechInPrimarySilence:   0.38,
+		FingerprintSimilarity:    0.90, // Above downmixSimilarityMin (0.85)
+		PrimarySpeechRatio:       0.30,
+		SpeechTimingCorrelation:  0.72,
+	}
+	include, reason = classify(metrics, Metadata{}, cfg)
+	if include {
+		t.Fatalf("expected high-similarity track to be rejected, got include=%v reason=%q", include, reason)
+	}
 }
 
 func TestCompareFingerprints(t *testing.T) {

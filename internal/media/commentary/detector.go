@@ -607,7 +607,8 @@ func classify(metrics Metrics, meta Metadata, cfg config.CommentaryDetection) (b
 		return true, "commentary_only"
 	}
 	if metrics.SpeechOverlapWithPrimary >= cfg.SpeechOverlapPrimaryMin &&
-		metrics.FingerprintSimilarity < cfg.FingerprintSimilarityDuplicate {
+		metrics.FingerprintSimilarity < cfg.FingerprintSimilarityDuplicate &&
+		metrics.FingerprintSimilarity < downmixSimilarityMin {
 		return true, "mixed_commentary"
 	}
 	if meta.Positive && metrics.SpeechRatio >= cfg.SpeechRatioMinCommentary &&
