@@ -77,6 +77,7 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 				logging.Int("rejected_count", len(rejects)),
 				logging.Int("title_id", selection.ID),
 				logging.Int("duration_seconds", selection.Duration),
+				logging.String("playlist", strings.TrimSpace(selection.Playlist)),
 				logging.String("title_name", strings.TrimSpace(selection.Name)),
 			}
 			attrs = appendDecisionLines(attrs, "candidate", candidates)
