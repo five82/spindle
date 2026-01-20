@@ -110,7 +110,7 @@ func Default() Config {
 		},
 		MakeMKV: MakeMKV{
 			OpticalDrive:         defaultOpticalDrive,
-			RipTimeout:           3600,
+			RipTimeout:           14400, // 4 hours for 4K UHD discs
 			InfoTimeout:          300,
 			KeyDBPath:            defaultKeyDBPath,
 			KeyDBDownloadURL:     defaultKeyDBDownloadURL,

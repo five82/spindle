@@ -111,7 +111,7 @@ max_gib = 150                                        # Cache budget in GiB
 
 [makemkv]
 optical_drive = "/dev/sr0"                           # Optical drive device path
-rip_timeout = 3600                                   # MakeMKV ripping timeout (seconds)
+rip_timeout = 14400                                  # MakeMKV ripping timeout (seconds, 4 hours for 4K UHD)
 info_timeout = 300                                   # MakeMKV disc info timeout (seconds)
 keydb_path = "~/.config/spindle/keydb/KEYDB.cfg"     # Optional KEYDB.cfg for Disc ID lookups
 keydb_download_url = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
