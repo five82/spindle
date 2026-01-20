@@ -81,6 +81,8 @@ it is overwritten.`,
 				return fmt.Errorf("rip cache is disabled or misconfigured (set rip_cache.enabled = true and configure rip_cache.dir/max_gib)")
 			}
 
+			notifier := notifications.NewService(cfg)
+
 			discLabel, err := getDiscLabel(device)
 			if err != nil {
 				logger.Warn("failed to get disc label",
@@ -128,10 +130,10 @@ it is overwritten.`,
 				return fmt.Errorf("create TMDB client: %w", err)
 			}
 			scanner := disc.NewScanner(cfg.MakemkvBinary())
-			identifier := identification.NewIdentifierWithDependencies(cfg, nil, logger, tmdbClient, scanner, notifications.NewService(cfg))
+			identifier := identification.NewIdentifierWithDependencies(cfg, nil, logger, tmdbClient, scanner, notifier)
 			ripper := ripping.NewRipper(cfg, store, logger)
 
-			if err := runStage(baseCtx, logger, store, identifier, "identifier", queue.StatusIdentifying, queue.StatusIdentified, item); err != nil {
+			if err := runStage(baseCtx, logger, store, notifier, identifier, "identifier", queue.StatusIdentifying, queue.StatusIdentified, item); err != nil {
 				return err
 			}
 			if item.Status == queue.StatusFailed {
@@ -149,7 +151,7 @@ it is overwritten.`,
 				return fmt.Errorf("remove existing rip cache entry: %w", err)
 			}
 
-			if err := runStage(baseCtx, logger, store, ripper, "ripper", queue.StatusRipping, queue.StatusRipped, item); err != nil {
+			if err := runStage(baseCtx, logger, store, notifier, ripper, "ripper", queue.StatusRipping, queue.StatusRipped, item); err != nil {
 				return err
 			}
 			if item.Status == queue.StatusFailed {
@@ -186,7 +188,7 @@ it is overwritten.`,
 	return cmd
 }
 
-func runStage(ctx context.Context, logger *slog.Logger, store *queue.Store, handler stageHandler, name string, processing, done queue.Status, item *queue.Item) error {
+func runStage(ctx context.Context, logger *slog.Logger, store *queue.Store, notifier notifications.Service, handler stageHandler, name string, processing, done queue.Status, item *queue.Item) error {
 	if handler == nil {
 		return fmt.Errorf("stage handler unavailable: %s", name)
 	}
@@ -210,14 +212,14 @@ func runStage(ctx context.Context, logger *slog.Logger, store *queue.Store, hand
 	}
 
 	if err := handler.Prepare(stageCtx, item); err != nil {
-		return handleStageFailure(stageCtx, stageLogger, store, item, err)
+		return handleStageFailure(stageCtx, stageLogger, store, notifier, name, item, err)
 	}
 	if err := store.Update(stageCtx, item); err != nil {
 		return fmt.Errorf("persist stage preparation: %w", err)
 	}
 
 	if err := handler.Execute(stageCtx, item); err != nil {
-		return handleStageFailure(stageCtx, stageLogger, store, item, err)
+		return handleStageFailure(stageCtx, stageLogger, store, notifier, name, item, err)
 	}
 
 	if item.Status == processing || item.Status == "" {
@@ -239,7 +241,7 @@ func runStage(ctx context.Context, logger *slog.Logger, store *queue.Store, hand
 	return nil
 }
 
-func handleStageFailure(ctx context.Context, logger *slog.Logger, store *queue.Store, item *queue.Item, stageErr error) error {
+func handleStageFailure(ctx context.Context, logger *slog.Logger, store *queue.Store, notifier notifications.Service, stageName string, item *queue.Item, stageErr error) error {
 	message := "stage failed"
 	if stageErr != nil {
 		details := services.Details(stageErr)
@@ -260,6 +262,18 @@ func handleStageFailure(ctx context.Context, logger *slog.Logger, store *queue.S
 	if err := store.Update(ctx, item); err != nil {
 		logger.Error("failed to persist stage failure", logging.Error(err))
 	}
+
+	// Send error notification
+	if notifier != nil && stageErr != nil {
+		contextLabel := fmt.Sprintf("%s (item #%d)", stageName, item.ID)
+		if err := notifier.Publish(ctx, notifications.EventError, notifications.Payload{
+			"error":   stageErr,
+			"context": contextLabel,
+		}); err != nil {
+			logger.Debug("stage error notification failed", logging.Error(err))
+		}
+	}
+
 	return stageErr
 }
 
