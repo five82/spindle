@@ -48,6 +48,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newTestNotifyCommand(ctx))
 	rootCmd.AddCommand(newConfigCommand(ctx))
 	rootCmd.AddCommand(newCacheCommand(ctx))
+	rootCmd.AddCommand(newStagingCommand(ctx))
 
 	return rootCmd
 }

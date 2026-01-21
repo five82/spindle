@@ -186,6 +186,8 @@ logs/
 !internal/logs/
 !internal/logs/**
 staging/
+!internal/staging/
+!internal/staging/**
 queue.db
 config.toml
 spindle.toml

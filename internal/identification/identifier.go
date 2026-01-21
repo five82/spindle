@@ -20,6 +20,7 @@ import (
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/stage"
+	"spindle/internal/staging"
 )
 
 // Identifier performs disc identification using MakeMKV scanning and TMDB metadata.
@@ -82,6 +83,10 @@ func (i *Identifier) SetLogger(logger *slog.Logger) {
 // Prepare initializes progress messaging prior to Execute.
 func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, i.logger)
+
+	// Clean up stale staging directories (older than 48 hours) at job start
+	i.cleanStaleStagingDirectories(ctx, logger)
+
 	item.InitProgress("Identifying", "Fetching metadata")
 	logger.Info("identification stage started",
 		logging.String(logging.FieldEventType, "stage_start"),
@@ -377,6 +382,29 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 
 var rippingPrimaryTitleSummary = func(titles []ripspec.Title) (ripspec.Title, bool, []string, []string) {
 	return ripping.PrimaryTitleDecisionSummary(titles)
+}
+
+// cleanStaleStagingDirectories removes staging directories older than 48 hours.
+// This is called at the start of each job to prevent disk space accumulation
+// from prior failed runs.
+func (i *Identifier) cleanStaleStagingDirectories(ctx context.Context, logger *slog.Logger) {
+	if i.cfg == nil {
+		return
+	}
+	stagingDir := strings.TrimSpace(i.cfg.Paths.StagingDir)
+	if stagingDir == "" {
+		return
+	}
+
+	const maxAge = 48 * time.Hour
+	result := staging.CleanStale(ctx, stagingDir, maxAge, logger)
+
+	if len(result.Removed) > 0 {
+		logger.Info("staging cleanup completed",
+			logging.Int("removed_count", len(result.Removed)),
+			logging.String(logging.FieldEventType, "staging_cleanup_complete"),
+		)
+	}
 }
 
 // HealthCheck verifies identifier dependencies required for successful execution.
