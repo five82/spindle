@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,11 +46,19 @@ func WithExecutor(exec Executor) Option {
 	}
 }
 
+// WithLogger injects a logger for diagnostic output during ripping.
+func WithLogger(logger *slog.Logger) Option {
+	return func(c *Client) {
+		c.logger = logger
+	}
+}
+
 // Client wraps MakeMKV CLI interactions.
 type Client struct {
 	binary     string
 	ripTimeout time.Duration
 	exec       Executor
+	logger     *slog.Logger
 }
 
 // New constructs a MakeMKV client.
@@ -114,6 +123,17 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 	}
 	destPath := filepath.Join(destDir, sanitized+".mkv")
 
+	if c.logger != nil {
+		c.logger.Debug("makemkv rip starting",
+			slog.String("disc_title", discTitle),
+			slog.String("sanitized_title", sanitized),
+			slog.String("expected_output", destPath),
+			slog.String("dest_dir", destDir),
+			slog.Bool("skip_rename", skipRename),
+			slog.Any("title_ids", titleIDs),
+		)
+	}
+
 	args := []string{"--robot"}
 	if progress != nil {
 		args = append(args, "--progress=-same")
@@ -126,7 +146,25 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 	}
 	args = append(args, destDir)
 
+	// Start file size monitor goroutine
+	monitorCtx, cancelMonitor := context.WithCancel(ctx)
+	defer cancelMonitor()
+	go c.monitorOutputSize(monitorCtx, destDir)
+
+	// Track MakeMKV messages for diagnostic purposes
+	var messages []string
+	var messagesMu sync.Mutex
+
 	if err := c.exec.Run(ctx, c.binary, args, func(line string) {
+		// Capture MSG lines for diagnostics (errors, warnings, info)
+		if strings.HasPrefix(line, "MSG:") {
+			messagesMu.Lock()
+			messages = append(messages, line)
+			messagesMu.Unlock()
+			if c.logger != nil {
+				c.logger.Debug("makemkv message", slog.String("msg", line))
+			}
+		}
 		if progress == nil {
 			return
 		}
@@ -134,6 +172,13 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 			progress(update)
 		}
 	}); err != nil {
+		// Log captured messages on failure
+		if c.logger != nil && len(messages) > 0 {
+			c.logger.Debug("makemkv messages before failure",
+				slog.Int("message_count", len(messages)),
+				slog.Any("messages", messages),
+			)
+		}
 		return "", fmt.Errorf("makemkv rip: %w", err)
 	}
 
@@ -141,17 +186,96 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 	if err != nil {
 		return "", fmt.Errorf("inspect rip outputs: %w", err)
 	}
+
+	// Log what files we found in the output directory
+	if c.logger != nil {
+		if len(candidates) == 0 {
+			c.logger.Debug("no mkv files found in output directory",
+				slog.String("dest_dir", destDir),
+			)
+			// List all files in directory for debugging
+			if items, readErr := os.ReadDir(destDir); readErr == nil {
+				var names []string
+				for _, item := range items {
+					info, _ := item.Info()
+					if info != nil {
+						names = append(names, fmt.Sprintf("%s (%d bytes)", item.Name(), info.Size()))
+					} else {
+						names = append(names, item.Name())
+					}
+				}
+				c.logger.Debug("directory contents",
+					slog.String("dest_dir", destDir),
+					slog.Any("files", names),
+				)
+			}
+		} else {
+			var candidateInfo []string
+			for _, cand := range candidates {
+				candidateInfo = append(candidateInfo, fmt.Sprintf("%s (%d bytes, %s)",
+					filepath.Base(cand.path), cand.size, cand.modTime.Format(time.RFC3339)))
+			}
+			c.logger.Debug("found mkv candidates",
+				slog.Int("count", len(candidates)),
+				slog.Any("candidates", candidateInfo),
+			)
+		}
+	}
+
 	if len(candidates) > 0 {
 		best := selectPreferredMKV(candidates, titleIDs)
 		if best == nil {
 			best = newestEntry(candidates)
 		}
+
+		// Log selection decision
+		if c.logger != nil && best != nil {
+			expectedSuffix := ""
+			if len(titleIDs) == 1 {
+				expectedSuffix = fmt.Sprintf("_t%02d.mkv", titleIDs[0])
+			}
+			c.logger.Debug("selected output file",
+				slog.String("selected", filepath.Base(best.path)),
+				slog.Int64("size_bytes", best.size),
+				slog.String("expected_suffix", expectedSuffix),
+				slog.String("target_path", destPath),
+				slog.Bool("will_rename", !skipRename && len(titleIDs) <= 1 && best.path != destPath),
+			)
+		}
+
 		if best != nil {
 			if skipRename {
 				destPath = best.path
 			} else if len(titleIDs) <= 1 {
+				if c.logger != nil && best.path != destPath {
+					c.logger.Debug("renaming output file",
+						slog.String("from", best.path),
+						slog.String("to", destPath),
+					)
+				}
 				if err := replaceFile(best.path, destPath); err != nil {
+					if c.logger != nil {
+						c.logger.Debug("rename failed",
+							slog.String("from", best.path),
+							slog.String("to", destPath),
+							slog.String("error", err.Error()),
+						)
+					}
 					return "", err
+				}
+				// Verify rename succeeded
+				if c.logger != nil {
+					if info, statErr := os.Stat(destPath); statErr != nil {
+						c.logger.Debug("rename succeeded but file not found at destination",
+							slog.String("dest_path", destPath),
+							slog.String("error", statErr.Error()),
+						)
+					} else {
+						c.logger.Debug("rename verified",
+							slog.String("dest_path", destPath),
+							slog.Int64("size_bytes", info.Size()),
+						)
+					}
 				}
 				for _, file := range candidates {
 					if file.path == destPath {
@@ -166,10 +290,93 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 	}
 
 	if _, err := os.Stat(destPath); errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("makemkv produced no output file; check disc for read errors")
+		// Enhanced error with diagnostic details
+		if c.logger != nil {
+			c.logger.Debug("output validation failed",
+				slog.String("expected_path", destPath),
+				slog.Int("candidates_found", len(candidates)),
+				slog.Int("message_count", len(messages)),
+			)
+			// Log the last few MakeMKV messages which might explain the failure
+			if len(messages) > 0 {
+				lastMessages := messages
+				if len(lastMessages) > 10 {
+					lastMessages = lastMessages[len(lastMessages)-10:]
+				}
+				c.logger.Debug("recent makemkv messages", slog.Any("messages", lastMessages))
+			}
+		}
+		// Build informative error based on what we found
+		if len(candidates) == 0 {
+			return "", errors.New("makemkv produced no output file; no mkv files found in output directory; check disc for read errors")
+		}
+		// We found candidates but destPath doesn't exist - this indicates a rename/processing bug
+		var names []string
+		for _, c := range candidates {
+			names = append(names, filepath.Base(c.path))
+		}
+		return "", fmt.Errorf("output file missing after processing; found %d candidate(s) [%s] but expected %s; this may indicate a spindle bug in file handling",
+			len(candidates), strings.Join(names, ", "), filepath.Base(destPath))
+	}
+
+	if c.logger != nil {
+		info, _ := os.Stat(destPath)
+		var sizeBytes int64
+		if info != nil {
+			sizeBytes = info.Size()
+		}
+		c.logger.Debug("rip output validated",
+			slog.String("path", destPath),
+			slog.Int64("size_bytes", sizeBytes),
+		)
 	}
 
 	return destPath, nil
+}
+
+// monitorOutputSize periodically logs the size of files being written to destDir.
+func (c *Client) monitorOutputSize(ctx context.Context, destDir string) {
+	if c.logger == nil {
+		return
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	var lastSize int64
+	var lastFile string
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			entries, err := gatherMKVEntries(destDir)
+			if err != nil || len(entries) == 0 {
+				continue
+			}
+			// Find the largest/newest file (likely the one being written)
+			var current *mkvEntry
+			for i := range entries {
+				if current == nil || entries[i].size > current.size {
+					current = &entries[i]
+				}
+			}
+			if current == nil {
+				continue
+			}
+			// Only log if there's meaningful change
+			currentFile := filepath.Base(current.path)
+			if current.size != lastSize || currentFile != lastFile {
+				c.logger.Debug("rip progress file size",
+					slog.String("file", currentFile),
+					slog.Int64("size_bytes", current.size),
+					slog.String("size_human", formatBytes(current.size)),
+				)
+				lastSize = current.size
+				lastFile = currentFile
+			}
+		}
+	}
 }
 
 func newestEntry(entries []mkvEntry) *mkvEntry {
@@ -225,9 +432,10 @@ func selectPreferredMKV(files []mkvEntry, titleIDs []int) *mkvEntry {
 		return nil
 	}
 	if len(titleIDs) == 1 {
-		expected := strings.ToLower(fmt.Sprintf("title_t%02d.mkv", titleIDs[0]))
+		// MakeMKV creates files like "{disc_name}_t{NN}.mkv" where NN is the title number
+		suffix := strings.ToLower(fmt.Sprintf("_t%02d.mkv", titleIDs[0]))
 		for i := range files {
-			if strings.ToLower(filepath.Base(files[i].path)) == expected {
+			if strings.HasSuffix(strings.ToLower(files[i].path), suffix) {
 				return &files[i]
 			}
 		}
@@ -393,4 +601,17 @@ func sanitizeFileName(name string) string {
 	}
 	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "", "\"", "", "<", "", ">", "", "|", "")
 	return strings.TrimSpace(replacer.Replace(name))
+}
+
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }

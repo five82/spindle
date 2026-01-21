@@ -36,7 +36,8 @@ type Ripper struct {
 
 // NewRipper constructs the ripping handler using default dependencies.
 func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Ripper {
-	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKV.RipTimeout)
+	componentLogger := logging.NewComponentLogger(logger, "makemkv")
+	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKV.RipTimeout, makemkv.WithLogger(componentLogger))
 	if err != nil {
 		logger.Warn("makemkv client unavailable; ripping disabled",
 			logging.Error(err),
