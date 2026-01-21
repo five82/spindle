@@ -25,7 +25,7 @@ type ProgressUpdate struct {
 
 // Ripper defines the behaviour required by the ripping handler.
 type Ripper interface {
-	Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error)
+	Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error)
 }
 
 // Executor abstracts command execution for testability.
@@ -71,7 +71,7 @@ func New(binary string, ripTimeoutSeconds int, opts ...Option) (*Client, error) 
 }
 
 // Rip executes MakeMKV, returning the resulting file path.
-func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error) {
+func (c *Client) Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error) {
 	if destDir == "" {
 		return "", errors.New("destination directory required")
 	}
@@ -93,12 +93,12 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 	}
 
 	if len(titleIDs) == 0 {
-		return c.executeRip(ripCtx, discTitle, sourcePath, destDir, nil, false, progress)
+		return c.executeRip(ripCtx, discTitle, destDir, nil, false, progress)
 	}
 
 	var lastPath string
 	for _, id := range titleIDs {
-		path, err := c.executeRip(ripCtx, discTitle, sourcePath, destDir, []int{id}, multiTitle, progress)
+		path, err := c.executeRip(ripCtx, discTitle, destDir, []int{id}, multiTitle, progress)
 		if err != nil {
 			return "", fmt.Errorf("makemkv rip title %d: %w", id, err)
 		}
@@ -107,7 +107,7 @@ func (c *Client) Rip(ctx context.Context, discTitle, sourcePath, destDir string,
 	return lastPath, nil
 }
 
-func (c *Client) executeRip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, skipRename bool, progress func(ProgressUpdate)) (string, error) {
+func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titleIDs []int, skipRename bool, progress func(ProgressUpdate)) (string, error) {
 	sanitized := sanitizeFileName(discTitle)
 	if sanitized == "" {
 		sanitized = "spindle-disc"
@@ -166,15 +166,7 @@ func (c *Client) executeRip(ctx context.Context, discTitle, sourcePath, destDir 
 	}
 
 	if _, err := os.Stat(destPath); errors.Is(err, os.ErrNotExist) {
-		if sourcePath != "" {
-			if copyErr := copyFile(sourcePath, destPath); copyErr != nil {
-				return "", fmt.Errorf("copy placeholder rip: %w", copyErr)
-			}
-		} else {
-			if writeErr := os.WriteFile(destPath, []byte("placeholder"), 0o644); writeErr != nil {
-				return "", fmt.Errorf("write placeholder rip: %w", writeErr)
-			}
-		}
+		return "", fmt.Errorf("makemkv produced no output file; check disc for read errors")
 	}
 
 	return destPath, nil
@@ -401,23 +393,4 @@ func sanitizeFileName(name string) string {
 	}
 	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "", "\"", "", "<", "", ">", "", "|", "")
 	return strings.TrimSpace(replacer.Replace(name))
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
 }

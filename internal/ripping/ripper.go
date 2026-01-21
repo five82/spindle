@@ -331,7 +331,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 		logger.Debug("launching makemkv rip", logging.Args(launchAttrs...)...)
 		makemkvStart := time.Now()
-		path, err := r.client.Rip(ctx, item.DiscTitle, item.SourcePath, destDir, titleIDs, progressCB)
+		path, err := r.client.Rip(ctx, item.DiscTitle, destDir, titleIDs, progressCB)
 		makemkvDuration = time.Since(makemkvStart)
 		if err != nil {
 			errorAttrs := []logging.Attr{
@@ -460,6 +460,27 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 	}
 
+	// Validate ripped files before any processing (catches placeholder/corrupted files)
+	visited := make(map[string]struct{}, len(validationTargets))
+	for _, path := range validationTargets {
+		clean := strings.TrimSpace(path)
+		if clean == "" {
+			continue
+		}
+		if _, ok := visited[clean]; ok {
+			continue
+		}
+		visited[clean] = struct{}{}
+		if err := r.validateRippedArtifact(ctx, item, clean, startedAt); err != nil {
+			return err
+		}
+	}
+	if len(validationTargets) == 0 {
+		if err := r.validateRippedArtifact(ctx, item, target, startedAt); err != nil {
+			return err
+		}
+	}
+
 	// Update progress for commentary detection if enabled
 	if r.cfg != nil && r.cfg.CommentaryDetection.Enabled {
 		copy := *item
@@ -508,25 +529,6 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
 				logging.String(logging.FieldImpact, "rip metadata may not reflect latest state"),
 			)
-		}
-	}
-	visited := make(map[string]struct{}, len(validationTargets))
-	for _, path := range validationTargets {
-		clean := strings.TrimSpace(path)
-		if clean == "" {
-			continue
-		}
-		if _, ok := visited[clean]; ok {
-			continue
-		}
-		visited[clean] = struct{}{}
-		if err := r.validateRippedArtifact(ctx, item, clean, startedAt); err != nil {
-			return err
-		}
-	}
-	if len(validationTargets) == 0 {
-		if err := r.validateRippedArtifact(ctx, item, target, startedAt); err != nil {
-			return err
 		}
 	}
 

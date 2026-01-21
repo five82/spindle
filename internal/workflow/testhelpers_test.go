@@ -186,7 +186,7 @@ type fakeMakemkvClient struct {
 	calls int
 }
 
-func (f *fakeMakemkvClient) Rip(ctx context.Context, discTitle, sourcePath, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
+func (f *fakeMakemkvClient) Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
 	f.calls++
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", err

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"spindle/internal/services/makemkv"
@@ -29,7 +30,7 @@ func (s *stubExecutor) Run(ctx context.Context, binary string, args []string, on
 	return s.err
 }
 
-func TestRipCreatesPlaceholderWhenOutputMissing(t *testing.T) {
+func TestRipErrorsWhenNoOutputProduced(t *testing.T) {
 	tmp := t.TempDir()
 	exec := &stubExecutor{lines: []string{"PRGV:0,10,100", "PRGV:0,80,100"}}
 	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
@@ -37,26 +38,12 @@ func TestRipCreatesPlaceholderWhenOutputMissing(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	var progress []makemkv.ProgressUpdate
-	path, err := client.Rip(context.Background(), "Sample", "", tmp, nil, func(update makemkv.ProgressUpdate) {
-		progress = append(progress, update)
-	})
-	if err != nil {
-		t.Fatalf("Rip returned error: %v", err)
+	_, err = client.Rip(context.Background(), "Sample", tmp, nil, nil)
+	if err == nil {
+		t.Fatal("expected error when MakeMKV produces no output")
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("expected rip file to exist: %v", err)
-	}
-	if len(progress) != 2 || progress[0].Percent != 10 || progress[1].Percent != 80 {
-		t.Fatalf("unexpected progress: %#v", progress)
-	}
-	if len(exec.args) != 1 {
-		t.Fatalf("expected makemkv invocation recorded")
-	}
-	gotArgs := exec.args[0]
-	expectedArgs := []string{"--robot", "--progress=-same", "mkv", "disc:0", "all", tmp}
-	if !equalStrings(gotArgs, expectedArgs) {
-		t.Fatalf("unexpected makemkv args: got %v want %v", gotArgs, expectedArgs)
+	if !strings.Contains(err.Error(), "no output file") {
+		t.Fatalf("expected 'no output file' error, got: %v", err)
 	}
 }
 
@@ -65,34 +52,8 @@ func TestRipReturnsExecutorError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
-	if _, err := client.Rip(context.Background(), "Sample", "", t.TempDir(), nil, nil); err == nil {
+	if _, err := client.Rip(context.Background(), "Sample", t.TempDir(), nil, nil); err == nil {
 		t.Fatal("expected error from executor")
-	}
-}
-
-func TestRipCopiesSourceWhenProvided(t *testing.T) {
-	tmp := t.TempDir()
-	src := filepath.Join(tmp, "src.mkv")
-	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-
-	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(&stubExecutor{}))
-	if err != nil {
-		t.Fatalf("New returned error: %v", err)
-	}
-
-	destDir := filepath.Join(tmp, "dest")
-	path, err := client.Rip(context.Background(), "Movie", src, destDir, nil, nil)
-	if err != nil {
-		t.Fatalf("Rip returned error: %v", err)
-	}
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read dest: %v", err)
-	}
-	if string(contents) != "data" {
-		t.Fatalf("expected copied data, got %q", contents)
 	}
 }
 
@@ -105,7 +66,7 @@ func TestRipSelectsSpecificTitleAndRenamesOutput(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	path, err := client.Rip(context.Background(), "Sample Movie", "", destDir, []int{0}, nil)
+	path, err := client.Rip(context.Background(), "Sample Movie", destDir, []int{0}, nil)
 	if err != nil {
 		t.Fatalf("Rip returned error: %v", err)
 	}
@@ -138,7 +99,7 @@ func TestRipSequentialTitles(t *testing.T) {
 	}
 
 	ids := []int{0, 3, 7}
-	path, err := client.Rip(context.Background(), "Sample Show", "", destDir, ids, nil)
+	path, err := client.Rip(context.Background(), "Sample Show", destDir, ids, nil)
 	if err != nil {
 		t.Fatalf("Rip returned error: %v", err)
 	}
