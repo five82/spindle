@@ -307,7 +307,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	var titleIDs []int
 	var makemkvDuration time.Duration
 	if !cacheUsed && r.client != nil {
-		if err := ensureMakeMKVSelectionRule(); err != nil {
+		if err := ensureMakeMKVSettings(); err != nil {
 			logger.Error(
 				"failed to configure makemkv selection; ripping aborted",
 				logging.Error(err),

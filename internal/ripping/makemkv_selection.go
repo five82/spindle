@@ -10,14 +10,20 @@ import (
 	"strings"
 )
 
-const audioSelectionRule = "-sel:all,+sel:video,+sel:audio,-sel:subtitle"
+// requiredMakeMKVSettings defines settings that Spindle ensures are configured.
+// app_DefaultSelectionString: Select video and audio tracks, skip subtitles (handled separately).
+// app_LibdriveIO: Enable libdrive mode for direct disc access, required for UHD and better reliability.
+var requiredMakeMKVSettings = map[string]string{
+	"app_DefaultSelectionString": "-sel:all,+sel:video,+sel:audio,-sel:subtitle",
+	"app_LibdriveIO":             "true",
+}
 
-func ensureMakeMKVSelectionRule() error {
+func ensureMakeMKVSettings() error {
 	settingsPath, err := resolveMakeMKVSettingsPath()
 	if err != nil {
 		return err
 	}
-	return applyMakeMKVSelectionRule(settingsPath, audioSelectionRule)
+	return applyMakeMKVSettings(settingsPath, requiredMakeMKVSettings)
 }
 
 func resolveMakeMKVSettingsPath() (string, error) {
@@ -31,12 +37,12 @@ func resolveMakeMKVSettingsPath() (string, error) {
 	return filepath.Join(home, ".MakeMKV", "settings.conf"), nil
 }
 
-func applyMakeMKVSelectionRule(path, rule string) error {
+func applyMakeMKVSettings(path string, required map[string]string) error {
 	if strings.TrimSpace(path) == "" {
 		return errors.New("settings path is empty")
 	}
-	if strings.TrimSpace(rule) == "" {
-		return errors.New("selection rule is empty")
+	if len(required) == 0 {
+		return errors.New("no settings to apply")
 	}
 
 	dir := filepath.Dir(path)
@@ -49,13 +55,24 @@ func applyMakeMKVSelectionRule(path, rule string) error {
 		return err
 	}
 
-	if existing["app_DefaultSelectionString"] == rule {
+	// Check if all required settings are already correct
+	needsUpdate := false
+	for key, value := range required {
+		if existing[key] != value {
+			needsUpdate = true
+			break
+		}
+	}
+	if !needsUpdate {
 		return nil
 	}
 
-	existing["app_DefaultSelectionString"] = rule
-	if !containsKey(order, "app_DefaultSelectionString") {
-		order = append(order, "app_DefaultSelectionString")
+	// Apply required settings
+	for key, value := range required {
+		existing[key] = value
+		if !containsKey(order, key) {
+			order = append(order, key)
+		}
 	}
 
 	return writeMakeMKVSettings(path, existing, order)

@@ -7,15 +7,18 @@ import (
 	"testing"
 )
 
-func TestApplyMakeMKVSelectionRuleCreatesFile(t *testing.T) {
+func TestApplyMakeMKVSettingsCreatesFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.conf")
 
-	rule := "-sel:test"
-	if err := applyMakeMKVSelectionRule(path, rule); err != nil {
-		t.Fatalf("applyMakeMKVSelectionRule returned error: %v", err)
+	settings := map[string]string{
+		"app_DefaultSelectionString": "-sel:test",
+		"app_LibdriveIO":             "true",
+	}
+	if err := applyMakeMKVSettings(path, settings); err != nil {
+		t.Fatalf("applyMakeMKVSettings returned error: %v", err)
 	}
 
 	data, err := os.ReadFile(path)
@@ -27,9 +30,12 @@ func TestApplyMakeMKVSelectionRuleCreatesFile(t *testing.T) {
 	if !strings.Contains(content, "app_DefaultSelectionString = \"-sel:test\"") {
 		t.Fatalf("expected selection rule in file, got: %s", content)
 	}
+	if !strings.Contains(content, "app_LibdriveIO = \"true\"") {
+		t.Fatalf("expected libdrive setting in file, got: %s", content)
+	}
 }
 
-func TestApplyMakeMKVSelectionRulePreservesSettings(t *testing.T) {
+func TestApplyMakeMKVSettingsPreservesExisting(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -40,30 +46,64 @@ func TestApplyMakeMKVSelectionRulePreservesSettings(t *testing.T) {
 		t.Fatalf("write initial file: %v", err)
 	}
 
-	rule := "-sel:new"
-	if err := applyMakeMKVSelectionRule(path, rule); err != nil {
-		t.Fatalf("applyMakeMKVSelectionRule returned error: %v", err)
+	settings := map[string]string{
+		"app_DefaultSelectionString": "-sel:new",
+		"app_LibdriveIO":             "true",
+	}
+	if err := applyMakeMKVSettings(path, settings); err != nil {
+		t.Fatalf("applyMakeMKVSettings returned error: %v", err)
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read settings file: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	content := string(data)
 
-	expected := []string{
-		"# MakeMKV settings file (managed by Spindle)",
-		"foo = \"bar\"",
-		"app_DefaultSelectionString = \"-sel:new\"",
+	// Verify existing settings are preserved
+	if !strings.Contains(content, "foo = \"bar\"") {
+		t.Fatalf("expected existing setting foo preserved, got: %s", content)
+	}
+	// Verify new settings are applied
+	if !strings.Contains(content, "app_DefaultSelectionString = \"-sel:new\"") {
+		t.Fatalf("expected updated selection rule, got: %s", content)
+	}
+	if !strings.Contains(content, "app_LibdriveIO = \"true\"") {
+		t.Fatalf("expected libdrive setting, got: %s", content)
+	}
+}
+
+func TestApplyMakeMKVSettingsNoUpdateWhenCurrent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.conf")
+
+	settings := map[string]string{
+		"app_LibdriveIO": "true",
 	}
 
-	if len(lines) != len(expected) {
-		t.Fatalf("unexpected line count: got %d, want %d (%v)", len(lines), len(expected), lines)
+	// First write
+	if err := applyMakeMKVSettings(path, settings); err != nil {
+		t.Fatalf("first applyMakeMKVSettings returned error: %v", err)
 	}
 
-	for i, line := range lines {
-		if line != expected[i] {
-			t.Fatalf("line %d mismatch: got %q, want %q", i, line, expected[i])
-		}
+	info1, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat file: %v", err)
+	}
+
+	// Second write with same settings should be a no-op
+	if err := applyMakeMKVSettings(path, settings); err != nil {
+		t.Fatalf("second applyMakeMKVSettings returned error: %v", err)
+	}
+
+	info2, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat file after second write: %v", err)
+	}
+
+	if !info1.ModTime().Equal(info2.ModTime()) {
+		t.Fatal("file was modified when settings were already current")
 	}
 }
