@@ -12,7 +12,7 @@ require (
 	github.com/visvasity/webrtcvad v0.0.0-20250704160404-fe7c7fca86e2
 	golang.org/x/sys v0.40.0
 	golang.org/x/text v0.33.0
-	modernc.org/sqlite v1.44.1
+	modernc.org/sqlite v1.44.3
 )
 
 require (
