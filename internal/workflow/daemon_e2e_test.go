@@ -102,7 +102,7 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		cancel()
-		d.Stop()
+		d.Stop(context.Background())
 		_ = d.Close()
 	})
 

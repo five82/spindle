@@ -65,7 +65,7 @@ func TestDaemonStartStop(t *testing.T) {
 		t.Fatal("expected second start to fail")
 	}
 
-	d.Stop()
+	d.Stop(context.Background())
 	time.Sleep(50 * time.Millisecond)
 	status = d.Status(ctx)
 	if status.Running {

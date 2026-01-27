@@ -157,7 +157,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 }
 
 // Stop stops background processing and releases the daemon lock.
-func (d *Daemon) Stop() {
+// The passed context is used as the parent for shutdown timeouts;
+// pass context.Background() if no external cancellation is needed.
+func (d *Daemon) Stop(ctx context.Context) {
 	if !d.running.Load() {
 		return
 	}
@@ -170,15 +172,15 @@ func (d *Daemon) Stop() {
 		d.monitor.Stop()
 	}
 	if d.apiSrv != nil {
-		d.apiSrv.stop()
+		d.apiSrv.stop(ctx)
 	}
 	d.workflow.Stop()
 
 	// Mark all active queue items as failed so they require explicit retry on restart
 	if d.store != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		if count, err := d.store.FailActiveOnShutdown(ctx); err != nil {
+		if count, err := d.store.FailActiveOnShutdown(shutdownCtx); err != nil {
 			d.logger.Warn("failed to mark active items as failed on shutdown",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "shutdown_fail_active_error"),
@@ -208,7 +210,7 @@ func (d *Daemon) Stop() {
 
 // Close releases resources held by the daemon.
 func (d *Daemon) Close() error {
-	d.Stop()
+	d.Stop(context.Background())
 	if d.logArchive != nil {
 		_ = d.logArchive.Close()
 	}

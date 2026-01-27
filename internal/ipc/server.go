@@ -155,7 +155,7 @@ func (s *service) Start(_ StartRequest, resp *StartResponse) error {
 
 func (s *service) Stop(_ StopRequest, resp *StopResponse) error {
 	s.log().Debug("daemon stop requested")
-	s.daemon.Stop()
+	s.daemon.Stop(s.ctx)
 	resp.Stopped = true
 	s.log().Info("daemon stopped via IPC",
 		logging.String(logging.FieldEventType, "daemon_stop"))

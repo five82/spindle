@@ -98,12 +98,12 @@ func (s *apiServer) start(ctx context.Context) error {
 	return nil
 }
 
-func (s *apiServer) stop() {
+func (s *apiServer) stop(ctx context.Context) {
 	if s == nil {
 		return
 	}
 	if s.server != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		_ = s.server.Shutdown(shutdownCtx)
 	}
