@@ -227,6 +227,13 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	component := strings.TrimSpace(query.Get("component"))
 	lane := strings.TrimSpace(query.Get("lane"))
+	// lane=* or lane=all requests all lanes without implicit foreground filtering
+	allLanes := lane == "*" || strings.EqualFold(lane, "all")
+	if allLanes {
+		lane = ""
+	}
+	// daemon_only=1 filters to logs without item association
+	daemonOnly := query.Get("daemon_only") == "1"
 	correlationID := strings.TrimSpace(query.Get("correlation_id"))
 	if correlationID == "" {
 		correlationID = strings.TrimSpace(query.Get("request"))
@@ -237,7 +244,8 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	searchFilter := strings.TrimSpace(query.Get("search"))
 	searchFilterLower := strings.ToLower(searchFilter)
 	// When filtering by item, include background lane logs (item work runs there)
-	implicitForegroundOnly := lane == "" && filterItem == 0
+	// Also skip filtering when lane=* or lane=all is explicitly requested
+	implicitForegroundOnly := lane == "" && filterItem == 0 && !allLanes && !daemonOnly
 
 	var (
 		converted []api.LogEvent
@@ -282,6 +290,9 @@ func (s *apiServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 	filtered := make([]api.LogEvent, 0, len(converted))
 	for _, evt := range converted {
 		if filterItem != 0 && evt.ItemID != filterItem {
+			continue
+		}
+		if daemonOnly && evt.ItemID != 0 {
 			continue
 		}
 		if component != "" && !strings.EqualFold(component, evt.Component) {

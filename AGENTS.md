@@ -97,6 +97,24 @@ golangci-lint run                     # Lint
 
 **Progress format**: `"Phase N/M - Action (context)"` (e.g., `"Phase 2/3 - Ripping selected titles (5 of 12)"`)
 
+## Log Streaming Architecture
+
+Spindle exposes logs via `/api/logs` with two distinct audiences:
+
+| Audience | Filter | Lane | ItemID | Content |
+|----------|--------|------|--------|---------|
+| Daemon logs (Flyer) | `daemon_only=1` | any | 0 only | Startup, workflow status, API events |
+| Item logs (Flyer) | `item=N` | all | N | Encoding progress, subtitles, organizing |
+| CLI/debug | `lane=*` | all | all | Everything |
+
+**Key fields:**
+- `ItemID`: Associates log with queue item (0 = daemon-level)
+- `Lane`: `foreground` (disc ops) or `background` (encoding/subtitles/organizing)
+
+**Defaults:** Without filters, API returns foreground-only logs (legacy behavior). Flyer uses `daemon_only=1` for daemon view and `item=N` for item view.
+
+**When adding new logs:** Set `ItemID` via context for item-specific work. Daemon-level logs (startup, API, workflow manager) should have `ItemID=0`.
+
 ## Database Schema
 
 The queue DB is **transient** (in-flight jobs only). No migrations - just bump `schemaVersion` in `schema.go` and update `schema.sql`. Users run `spindle queue clear` on mismatch.

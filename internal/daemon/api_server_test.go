@@ -139,4 +139,65 @@ func TestAPIServerHandleLogsDefaultsToForeground(t *testing.T) {
 	if resp.Events[0].Lane != "background" || resp.Events[0].Message != "bg" {
 		t.Fatalf("unexpected background event: %#v", resp.Events[0])
 	}
+
+	// Test lane=* returns all lanes
+	req = httptest.NewRequest(http.MethodGet, "/api/logs?tail=1&limit=10&lane=*", nil)
+	w = httptest.NewRecorder()
+	srv.handleLogs(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+	resp = api.LogStreamResponse{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Events) != 3 {
+		t.Fatalf("expected 3 events with lane=*, got %d", len(resp.Events))
+	}
+}
+
+func TestAPIServerHandleLogsDaemonOnly(t *testing.T) {
+	hub := logging.NewStreamHub(16)
+	hub.Publish(logging.LogEvent{Timestamp: time.Now().UTC(), Message: "daemon startup", ItemID: 0})
+	hub.Publish(logging.LogEvent{Timestamp: time.Now().UTC(), Message: "item progress", ItemID: 42})
+	hub.Publish(logging.LogEvent{Timestamp: time.Now().UTC(), Message: "workflow status", ItemID: 0})
+
+	srv := &apiServer{daemon: &Daemon{logHub: hub}}
+
+	// Without daemon_only, all events returned (with lane=* to bypass foreground filter)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?tail=1&limit=10&lane=*", nil)
+	w := httptest.NewRecorder()
+	srv.handleLogs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+	var resp api.LogStreamResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Events) != 3 {
+		t.Fatalf("expected 3 events without daemon_only, got %d", len(resp.Events))
+	}
+
+	// With daemon_only=1, only events without ItemID
+	req = httptest.NewRequest(http.MethodGet, "/api/logs?tail=1&limit=10&daemon_only=1", nil)
+	w = httptest.NewRecorder()
+	srv.handleLogs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+	resp = api.LogStreamResponse{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Events) != 2 {
+		t.Fatalf("expected 2 events with daemon_only=1, got %d", len(resp.Events))
+	}
+	for _, evt := range resp.Events {
+		if evt.ItemID != 0 {
+			t.Fatalf("daemon_only should exclude item events, got ItemID=%d", evt.ItemID)
+		}
+	}
 }
