@@ -41,10 +41,6 @@ func (i *Identifier) handleDuplicateFingerprint(ctx context.Context, item *queue
 	return nil
 }
 
-func (i *Identifier) scheduleReview(ctx context.Context, item *queue.Item, message string) {
-	i.flagReview(ctx, item, message, false)
-}
-
 func (i *Identifier) flagReview(ctx context.Context, item *queue.Item, message string, immediate bool) {
 	logger := logging.WithContext(ctx, i.logger).With(logging.Int64(logging.FieldItemID, item.ID))
 	logger.Warn(

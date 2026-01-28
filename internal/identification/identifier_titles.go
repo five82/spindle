@@ -46,14 +46,6 @@ func unknownContentKey(fingerprint string) string {
 	return fmt.Sprintf("unknown:%s", strings.ToLower(fp))
 }
 
-func truncateFingerprint(value string) string {
-	v := strings.TrimSpace(value)
-	if len(v) <= 12 {
-		return v
-	}
-	return v[:12]
-}
-
 func determineBestTitle(currentTitle string, scanResult *disc.ScanResult) string {
 	// Priority order: MakeMKV title > BDInfo name > current title
 	candidates := []string{}

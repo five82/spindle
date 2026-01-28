@@ -147,7 +147,8 @@ func absInt(value int) int {
 	return value
 }
 
-func episodeOutputBasename(show string, season, episode int) string {
+// EpisodeOutputBasename generates a standard episode filename from show, season, and episode.
+func EpisodeOutputBasename(show string, season, episode int) string {
 	show = strings.TrimSpace(show)
 	if show == "" {
 		show = "Manual Import"

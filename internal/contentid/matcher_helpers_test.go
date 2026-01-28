@@ -3,6 +3,7 @@ package contentid
 import (
 	"testing"
 
+	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/ripspec"
 )
@@ -74,8 +75,8 @@ func TestDeriveCandidateEpisodesFallsBackToSeason(t *testing.T) {
 	}
 }
 
-func TestBuildEpisodeBasename(t *testing.T) {
-	name := buildEpisodeBasename("Show Name", 1, 2)
+func TestEpisodeOutputBasename(t *testing.T) {
+	name := identification.EpisodeOutputBasename("Show Name", 1, 2)
 	if name != "Show Name - S01E02" {
 		t.Fatalf("unexpected basename %q", name)
 	}

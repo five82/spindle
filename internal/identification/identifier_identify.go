@@ -122,7 +122,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 			logging.String("title", input.Title),
 			logging.String("disc_label", input.DiscLabel),
 			logging.String("reason", "title is generic/placeholder; cannot perform meaningful search"))
-		i.scheduleReview(ctx, item, "Disc title placeholder; manual identification required")
+		i.flagReview(ctx, item, "Disc title placeholder; manual identification required", false)
 		return identifyOutcome{
 			Identified:      identified,
 			MediaType:       mediaType,
@@ -205,7 +205,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 				logging.String(logging.FieldImpact, "item moved to review for manual identification"),
 				logging.Int("queries_attempted", queriesCount),
 				logging.Duration("total_tmdb_duration", tmdbDuration))
-			i.scheduleReview(ctx, item, "TMDB lookup failed")
+			i.flagReview(ctx, item, "TMDB lookup failed", false)
 		} else {
 			logger.Warn("tmdb confidence scoring failed",
 				logging.String(logging.FieldDecisionType, "tmdb_confidence"),
@@ -219,7 +219,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 				logging.String(logging.FieldErrorHint, "Adjust tmdb_confidence_threshold or retry with a revised title"),
 				logging.Int("queries_attempted", queriesCount),
 				logging.Duration("total_tmdb_duration", tmdbDuration))
-			i.scheduleReview(ctx, item, "No confident TMDB match")
+			i.flagReview(ctx, item, "No confident TMDB match", false)
 		}
 		return identifyOutcome{
 			Identified:      identified,
@@ -236,20 +236,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	}
 
 	identified = true
-	mediaType = strings.ToLower(strings.TrimSpace(best.MediaType))
-	if mediaType == "" {
-		switch modeUsed {
-		case searchModeTV:
-			mediaType = "tv"
-		case searchModeMulti:
-			mediaType = strings.TrimSpace(best.MediaType)
-			if mediaType == "" {
-				mediaType = "movie"
-			}
-		default:
-			mediaType = "movie"
-		}
-	}
+	mediaType = determineMediaType(*best, modeUsed)
 	isMovie := mediaType != "tv"
 	identifiedTitle = pickTitle(*best)
 	year = ""
@@ -264,11 +251,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	}
 	tmdbID = best.ID
 	if mediaType == "tv" {
-		if seasonNumber == 0 {
-			if season, ok := extractSeasonNumber(item.DiscTitle, input.Title, input.DiscLabel); ok {
-				seasonNumber = season
-			}
-		}
 		if seasonNumber == 0 {
 			seasonNumber = 1
 		}
@@ -392,6 +374,20 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		MatchedEpisodes: matchedEpisodes,
 		Metadata:        metadata,
 	}, nil
+}
+
+// determineMediaType resolves the media type from a TMDB result and search mode.
+func determineMediaType(result tmdb.Result, mode searchMode) string {
+	mediaType := strings.ToLower(strings.TrimSpace(result.MediaType))
+	if mediaType != "" {
+		return mediaType
+	}
+	switch mode {
+	case searchModeTV:
+		return "tv"
+	default:
+		return "movie"
+	}
 }
 
 // validateMetadataForPersist ensures required metadata fields are valid before

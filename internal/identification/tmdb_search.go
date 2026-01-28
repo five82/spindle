@@ -11,14 +11,6 @@ import (
 	"spindle/internal/identification/tmdb"
 )
 
-// TMDBSearcher defines the subset of TMDB client functionality used by the identifier.
-type TMDBSearcher interface {
-	SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error)
-	SearchTVWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error)
-	SearchMultiWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error)
-	GetSeasonDetails(ctx context.Context, showID int64, seasonNumber int) (*tmdb.SeasonDetails, error)
-}
-
 type searchMode string
 
 const (
@@ -33,7 +25,7 @@ type tmdbCacheEntry struct {
 }
 
 type tmdbSearch struct {
-	client     TMDBSearcher
+	client     tmdb.Searcher
 	cache      map[string]tmdbCacheEntry
 	cacheTTL   time.Duration
 	rateLimit  time.Duration
@@ -41,7 +33,7 @@ type tmdbSearch struct {
 	lastLookup time.Time
 }
 
-func newTMDBSearch(client TMDBSearcher) *tmdbSearch {
+func newTMDBSearch(client tmdb.Searcher) *tmdbSearch {
 	if client == nil {
 		return &tmdbSearch{}
 	}

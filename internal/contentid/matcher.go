@@ -16,6 +16,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
@@ -767,7 +768,7 @@ func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails
 			episode.Episode = target.EpisodeNumber
 			episode.EpisodeTitle = strings.TrimSpace(target.Name)
 			episode.EpisodeAirDate = strings.TrimSpace(target.AirDate)
-			episode.OutputBasename = buildEpisodeBasename(showTitle, target.SeasonNumber, target.EpisodeNumber)
+			episode.OutputBasename = identification.EpisodeOutputBasename(showTitle, target.SeasonNumber, target.EpisodeNumber)
 			episode.MatchConfidence = match.Score
 		}
 		if title := titleByID[match.TitleID]; title != nil {
@@ -1027,15 +1028,6 @@ func findEpisodeByNumber(season *tmdb.SeasonDetails, number int) (tmdb.Episode, 
 		}
 	}
 	return tmdb.Episode{}, false
-}
-
-func buildEpisodeBasename(show string, season, episode int) string {
-	meta := queue.NewTVMetadata(show, season, []int{episode}, fmt.Sprintf("%s Season %02d", show, season))
-	name := meta.GetFilename()
-	if strings.TrimSpace(name) == "" {
-		return fmt.Sprintf("%s - S%02dE%02d", strings.TrimSpace(show), season, episode)
-	}
-	return name
 }
 
 func uniqueInts(sorted []int) []int {

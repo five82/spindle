@@ -52,16 +52,20 @@ func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatc
 					EpisodeAirDate: annotation.Air,
 					RuntimeSeconds: t.Duration,
 					TitleHash:      fp,
-					OutputBasename: episodeOutputBasename(showLabel, annotation.Season, annotation.Episode),
+					OutputBasename: EpisodeOutputBasename(showLabel, annotation.Season, annotation.Episode),
 				})
 			}
 		}
 		titleSpecs = append(titleSpecs, spec)
+		displayHash := fp
+		if len(displayHash) > 12 {
+			displayHash = displayHash[:12]
+		}
 		logFields := []any{
 			logging.Int("title_id", t.ID),
 			logging.Int("duration_seconds", t.Duration),
 			logging.String("title_name", strings.TrimSpace(t.Name)),
-			logging.String("title_hash", truncateFingerprint(fp)),
+			logging.String("title_hash", displayHash),
 		}
 		if spec.Season > 0 && spec.Episode > 0 {
 			logFields = append(logFields,

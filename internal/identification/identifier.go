@@ -29,7 +29,7 @@ type Identifier struct {
 	cfg      *config.Config
 	logger   *slog.Logger
 	tmdb     *tmdbSearch
-	tmdbInfo TMDBSearcher
+	tmdbInfo tmdb.Searcher
 	keydb    *keydb.Catalog
 	scanner  DiscScanner
 	notifier notifications.Service
@@ -56,7 +56,7 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) 
 }
 
 // NewIdentifierWithDependencies allows injecting TMDB searcher and disc scanner (used in tests).
-func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher TMDBSearcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
+func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher tmdb.Searcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
 	var catalog *keydb.Catalog
 	if cfg != nil {
 		timeout := time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout) * time.Second
