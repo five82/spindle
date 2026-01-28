@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"log/slog"
@@ -129,10 +128,6 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		)
 	}
 
-	keep := []int{selection.PrimaryIndex}
-	selection.KeepIndices = keep
-	selection.RemovedIndices = removedIndices(probe.Streams, keep)
-
 	// Build result with audio info
 	result := AudioRefinementResult{
 		PrimaryAudioDescription: selection.PrimaryLabel(),
@@ -145,7 +140,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		}
 	}
 
-	needsRemux := selection.Changed(totalAudio) || needsDispositionFix(probe.Streams, keep)
+	needsRemux := selection.Changed(totalAudio) || needsDispositionFix(probe.Streams, selection.KeepIndices)
 	if !needsRemux {
 		return result, nil
 	}
@@ -177,12 +172,8 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		logging.Int("kept_audio_streams", len(selection.KeepIndices)),
 		logging.Int("removed_count", len(selection.RemovedIndices)),
 	}
-	if len(selection.RemovedIndices) > 0 {
-		removed := append([]int(nil), selection.RemovedIndices...)
-		sort.Ints(removed)
-		for _, idx := range removed {
-			fields = append(fields, logging.String(fmt.Sprintf("removed_%d", idx), fmt.Sprintf("%d", idx)))
-		}
+	for _, idx := range selection.RemovedIndices {
+		fields = append(fields, logging.String(fmt.Sprintf("removed_%d", idx), fmt.Sprintf("%d", idx)))
 	}
 	logger.Info("refined ripped audio tracks", logging.Args(fields...)...)
 	return result, nil
@@ -225,24 +216,6 @@ func countAudioStreams(streams []ffprobe.Stream) int {
 		}
 	}
 	return count
-}
-
-func removedIndices(streams []ffprobe.Stream, keep []int) []int {
-	kept := make(map[int]struct{}, len(keep))
-	for _, idx := range keep {
-		kept[idx] = struct{}{}
-	}
-	var removed []int
-	for _, s := range streams {
-		if !strings.EqualFold(s.CodecType, "audio") {
-			continue
-		}
-		if _, ok := kept[s.Index]; !ok {
-			removed = append(removed, s.Index)
-		}
-	}
-	sort.Ints(removed)
-	return removed
 }
 
 func needsDispositionFix(streams []ffprobe.Stream, keep []int) bool {
@@ -372,7 +345,7 @@ func formatAudioDescription(s ffprobe.Stream) string {
 		return ""
 	}
 
-	parts := []string{}
+	var parts []string
 
 	// Codec name (normalize common ones)
 	codec := strings.ToUpper(s.CodecName)
