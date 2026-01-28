@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"log/slog"
@@ -18,17 +17,15 @@ import (
 	"spindle/internal/deps"
 	"spindle/internal/logging"
 	"spindle/internal/media/audio"
-	"spindle/internal/media/commentary"
 	"spindle/internal/media/ffprobe"
 )
 
 // AudioRefinementResult captures audio selection outcomes for reporting.
 type AudioRefinementResult struct {
 	PrimaryAudioDescription string
-	CommentaryCount         int
 }
 
-// RefineAudioTargets applies primary + commentary selection across a set of rip paths.
+// RefineAudioTargets applies primary audio selection across a set of rip paths.
 // Returns aggregated audio info from the first successfully processed path.
 func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Logger, paths []string) (AudioRefinementResult, error) {
 	unique := make([]string, 0, len(paths))
@@ -90,13 +87,11 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 			)
 		}
 		// Single audio stream - return info from that stream
-		result := AudioRefinementResult{CommentaryCount: 0}
-		if len(probe.Streams) > 0 {
-			for _, s := range probe.Streams {
-				if s.CodecType == "audio" {
-					result.PrimaryAudioDescription = formatAudioDescription(s)
-					break
-				}
+		result := AudioRefinementResult{}
+		for _, s := range probe.Streams {
+			if s.CodecType == "audio" {
+				result.PrimaryAudioDescription = formatAudioDescription(s)
+				break
 			}
 		}
 		return result, nil
@@ -134,32 +129,13 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		)
 	}
 
-	commentaryIndices := []int{}
-	if cfg != nil && cfg.CommentaryDetection.Enabled {
-		result, detectErr := commentary.Detect(ctx, cfg, path, probe, selection.PrimaryIndex, logger)
-		if detectErr != nil {
-			logger.Warn("commentary detection failed; continuing without commentary tracks",
-				logging.Error(detectErr),
-				logging.String(logging.FieldEventType, "commentary_detection_failed"),
-				logging.String(logging.FieldErrorHint, "check ffmpeg/fpcalc availability or disable commentary_detection"),
-			)
-		} else {
-			commentaryIndices = append(commentaryIndices, result.Indices...)
-		}
-	}
-	commentaryTitles := collectCommentaryTitles(probe.Streams, commentaryIndices)
-
-	keep := buildKeepOrder(selection.PrimaryIndex, commentaryIndices)
-	if len(keep) == 0 {
-		return AudioRefinementResult{}, fmt.Errorf("refine audio: selection produced no audio streams")
-	}
+	keep := []int{selection.PrimaryIndex}
 	selection.KeepIndices = keep
 	selection.RemovedIndices = removedIndices(probe.Streams, keep)
 
 	// Build result with audio info
 	result := AudioRefinementResult{
 		PrimaryAudioDescription: selection.PrimaryLabel(),
-		CommentaryCount:         len(commentaryIndices),
 	}
 	// Get full audio description from the primary stream
 	for _, s := range probe.Streams {
@@ -169,7 +145,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		}
 	}
 
-	needsRemux := selection.Changed(totalAudio) || needsDispositionFix(probe.Streams, keep) || needsCommentaryDispositionFix(probe.Streams, commentaryTitles)
+	needsRemux := selection.Changed(totalAudio) || needsDispositionFix(probe.Streams, keep)
 	if !needsRemux {
 		return result, nil
 	}
@@ -179,7 +155,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	if cfg != nil {
 		ffmpegBinary = deps.ResolveFFmpegPath()
 	}
-	if err := remuxAudioSelection(ctx, ffmpegBinary, path, tmpPath, selection, commentaryTitles); err != nil {
+	if err := remuxAudioSelection(ctx, ffmpegBinary, path, tmpPath, selection); err != nil {
 		return AudioRefinementResult{}, err
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -199,14 +175,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	fields := []logging.Attr{
 		logging.String("primary_audio", selection.PrimaryLabel()),
 		logging.Int("kept_audio_streams", len(selection.KeepIndices)),
-		logging.Int("commentary_count", len(commentaryIndices)),
 		logging.Int("removed_count", len(selection.RemovedIndices)),
-	}
-	if len(commentaryIndices) > 0 {
-		sort.Ints(commentaryIndices)
-		for _, idx := range commentaryIndices {
-			fields = append(fields, logging.String(fmt.Sprintf("commentary_%d", idx), fmt.Sprintf("%d", idx)))
-		}
 	}
 	if len(selection.RemovedIndices) > 0 {
 		removed := append([]int(nil), selection.RemovedIndices...)
@@ -219,7 +188,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	return result, nil
 }
 
-func remuxAudioSelection(ctx context.Context, ffmpegBinary, src, dst string, selection audio.Selection, commentaryTitles map[int]string) error {
+func remuxAudioSelection(ctx context.Context, ffmpegBinary, src, dst string, selection audio.Selection) error {
 	if strings.TrimSpace(src) == "" || strings.TrimSpace(dst) == "" {
 		return fmt.Errorf("remux audio: invalid path")
 	}
@@ -232,22 +201,8 @@ func remuxAudioSelection(ctx context.Context, ffmpegBinary, src, dst string, sel
 	}
 	args = append(args, "-c", "copy")
 	if len(selection.KeepIndices) > 0 {
-		for outIdx, srcIdx := range selection.KeepIndices {
-			if outIdx == 0 {
-				args = append(args, "-disposition:a:0", "default")
-				continue
-			}
-			title, isCommentary := commentaryTitles[srcIdx]
-			if isCommentary {
-				args = append(args, "-disposition:a:"+strconv.Itoa(outIdx), "comment")
-				label := commentaryLabel(title)
-				if label != "" {
-					args = append(args, "-metadata:s:a:"+strconv.Itoa(outIdx), "title="+label)
-				}
-				continue
-			}
-			args = append(args, "-disposition:a:"+strconv.Itoa(outIdx), "none")
-		}
+		// Set first audio stream as default
+		args = append(args, "-disposition:a:0", "default")
 	}
 	if format := outputFormatForPath(dst); format != "" {
 		args = append(args, "-f", format)
@@ -270,25 +225,6 @@ func countAudioStreams(streams []ffprobe.Stream) int {
 		}
 	}
 	return count
-}
-
-func buildKeepOrder(primaryIndex int, commentaryIndices []int) []int {
-	if primaryIndex < 0 {
-		return nil
-	}
-	keep := []int{primaryIndex}
-	seen := map[int]struct{}{primaryIndex: {}}
-	for _, idx := range commentaryIndices {
-		if idx < 0 {
-			continue
-		}
-		if _, ok := seen[idx]; ok {
-			continue
-		}
-		seen[idx] = struct{}{}
-		keep = append(keep, idx)
-	}
-	return keep
 }
 
 func removedIndices(streams []ffprobe.Stream, keep []int) []int {
@@ -322,28 +258,6 @@ func needsDispositionFix(streams []ffprobe.Stream, keep []int) bool {
 			continue
 		}
 		if stream.Disposition != nil && stream.Disposition["default"] == 1 {
-			return true
-		}
-	}
-	return false
-}
-
-func needsCommentaryDispositionFix(streams []ffprobe.Stream, commentaryTitles map[int]string) bool {
-	if len(commentaryTitles) == 0 {
-		return false
-	}
-	for _, stream := range streams {
-		if !strings.EqualFold(stream.CodecType, "audio") {
-			continue
-		}
-		title, ok := commentaryTitles[stream.Index]
-		if !ok {
-			continue
-		}
-		if stream.Disposition == nil || stream.Disposition["comment"] != 1 {
-			return true
-		}
-		if title == "" || !strings.Contains(strings.ToLower(title), "commentary") {
 			return true
 		}
 	}
@@ -419,40 +333,6 @@ func audioTitle(tags map[string]string) string {
 		}
 	}
 	return ""
-}
-
-func collectCommentaryTitles(streams []ffprobe.Stream, commentaryIndices []int) map[int]string {
-	if len(commentaryIndices) == 0 {
-		return nil
-	}
-	indices := make(map[int]struct{}, len(commentaryIndices))
-	for _, idx := range commentaryIndices {
-		if idx >= 0 {
-			indices[idx] = struct{}{}
-		}
-	}
-	titles := make(map[int]string, len(indices))
-	for _, s := range streams {
-		if !strings.EqualFold(s.CodecType, "audio") {
-			continue
-		}
-		if _, ok := indices[s.Index]; ok {
-			titles[s.Index] = audioTitle(s.Tags)
-		}
-	}
-	return titles
-}
-
-func commentaryLabel(original string) string {
-	title := strings.TrimSpace(original)
-	if title == "" {
-		return "Commentary"
-	}
-	lower := strings.ToLower(title)
-	if strings.Contains(lower, "commentary") {
-		return title
-	}
-	return title + " (Commentary)"
 }
 
 func deriveTempAudioPath(path string) string {

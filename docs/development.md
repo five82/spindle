@@ -8,7 +8,7 @@ Notes for day-to-day work on Spindle. Public setup and usage docs live in `READM
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential ffmpeg mediainfo libchromaprint-tools
+sudo apt install -y build-essential ffmpeg mediainfo
 ```
 
 ### External Binaries
@@ -17,7 +17,7 @@ Install these separately and ensure they're on your `PATH`:
 
 - **MakeMKV** (provides `makemkvcon`) - https://www.makemkv.com
 
-Required binaries: `ffmpeg`, `ffprobe`, `makemkvcon`, `mediainfo`, `fpcalc`
+Required binaries: `ffmpeg`, `ffprobe`, `makemkvcon`, `mediainfo`
 
 Note: Drapto is now a Go library dependency (`github.com/five82/drapto`), not an external binary.
 

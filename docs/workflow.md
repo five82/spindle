@@ -58,7 +58,7 @@ Progress messages in `spindle show --follow` describe the identification steps a
 
 1. Identified items flow into the MakeMKV ripper. The queue updates to `RIPPING` and streams progress as `makemkvcon` runs.
 2. Video files are written to `<staging_dir>/<fingerprint-or-queue-id>/rips/`.
-3. Rips are post-processed to keep the primary audio stream (preferring English when available). If `commentary_detection.enabled = true`, detected commentary tracks are kept and labeled; other audio streams are dropped.
+3. Rips are post-processed to keep the primary audio stream (preferring English when available); other audio streams are dropped.
 4. When ripping succeeds, the item is marked `RIPPED` and an ntfy notification fires so you know the drive is free to eject manually.
 5. If MakeMKV fails or the disc is defective, the item becomes `FAILED` with the error recorded in the queue.
 

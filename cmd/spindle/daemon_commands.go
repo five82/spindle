@@ -430,29 +430,6 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Description: "Required for WhisperX-driven transcription",
 		})
 	}
-	if cfg.CommentaryDetection.Enabled {
-		requirements = append(requirements, deps.Requirement{
-			Name:        "fpcalc",
-			Command:     "fpcalc",
-			Description: "Required for commentary fingerprinting",
-		}, deps.Requirement{
-			Name:        "webrtcvad (cgo)",
-			Command:     "cc",
-			Description: "Required for commentary speech detection",
-		})
-	} else {
-		requirements = append(requirements, deps.Requirement{
-			Name:        "fpcalc",
-			Command:     "fpcalc",
-			Description: "Required for commentary fingerprinting",
-			Optional:    true,
-		}, deps.Requirement{
-			Name:        "webrtcvad (cgo)",
-			Command:     "cc",
-			Description: "Required for commentary speech detection",
-			Optional:    true,
-		})
-	}
 	checks := deps.CheckBinaries(requirements)
 	statuses := make([]ipc.DependencyStatus, 0, len(checks))
 	for _, check := range checks {

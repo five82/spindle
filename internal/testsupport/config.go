@@ -68,7 +68,7 @@ func WithOpticalDrive(path string) ConfigOption {
 func WithStubbedBinaries(names ...string) ConfigOption {
 	return func(b *configBuilder) {
 		if len(names) == 0 {
-			names = []string{"makemkvcon", "drapto", "ffmpeg", "ffprobe", "mediainfo", "fpcalc", "cc"}
+			names = []string{"makemkvcon", "drapto", "ffmpeg", "ffprobe", "mediainfo"}
 		}
 		binDir := filepath.Join(b.baseDir, "bin")
 		if err := os.MkdirAll(binDir, 0o755); err != nil {

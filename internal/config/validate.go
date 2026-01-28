@@ -26,9 +26,6 @@ func (c *Config) Validate() error {
 	if err := c.validateSubtitles(); err != nil {
 		return err
 	}
-	if err := c.validateCommentaryDetection(); err != nil {
-		return err
-	}
 	if err := c.validateRipCache(); err != nil {
 		return err
 	}
@@ -122,50 +119,6 @@ func (c *Config) validateSubtitles() error {
 		if len(c.Subtitles.OpenSubtitlesLanguages) == 0 {
 			return errors.New("subtitles.opensubtitles_languages must include at least one language when subtitles.opensubtitles_enabled is true")
 		}
-	}
-	return nil
-}
-
-func (c *Config) validateCommentaryDetection() error {
-	cfg := c.CommentaryDetection
-	if !cfg.Enabled {
-		return nil
-	}
-	if len(cfg.Languages) == 0 {
-		return errors.New("commentary_detection.languages must include at least one language")
-	}
-	if cfg.Channels <= 0 {
-		return errors.New("commentary_detection.channels must be positive")
-	}
-	if cfg.SampleWindows <= 0 {
-		return errors.New("commentary_detection.sample_windows must be positive")
-	}
-	if cfg.WindowSeconds <= 0 {
-		return errors.New("commentary_detection.window_seconds must be positive")
-	}
-	if cfg.FingerprintSimilarityDuplicate <= 0 || cfg.FingerprintSimilarityDuplicate > 1 {
-		return errors.New("commentary_detection.fingerprint_similarity_duplicate must be between 0 and 1")
-	}
-	if cfg.SpeechRatioMinCommentary < 0 || cfg.SpeechRatioMinCommentary > 1 {
-		return errors.New("commentary_detection.speech_ratio_min_commentary must be between 0 and 1")
-	}
-	if cfg.SpeechRatioMaxMusic < 0 || cfg.SpeechRatioMaxMusic > 1 {
-		return errors.New("commentary_detection.speech_ratio_max_music must be between 0 and 1")
-	}
-	if cfg.SpeechOverlapPrimaryMin < 0 || cfg.SpeechOverlapPrimaryMin > 1 {
-		return errors.New("commentary_detection.speech_overlap_primary_min must be between 0 and 1")
-	}
-	if cfg.SpeechOverlapPrimaryMaxAD < 0 || cfg.SpeechOverlapPrimaryMaxAD > 1 {
-		return errors.New("commentary_detection.speech_overlap_primary_max_audio_description must be between 0 and 1")
-	}
-	if cfg.SpeechInSilenceMax < 0 || cfg.SpeechInSilenceMax > 1 {
-		return errors.New("commentary_detection.speech_in_silence_max must be between 0 and 1")
-	}
-	if cfg.DurationToleranceSeconds < 0 {
-		return errors.New("commentary_detection.duration_tolerance_seconds must be >= 0")
-	}
-	if cfg.DurationToleranceRatio < 0 || cfg.DurationToleranceRatio > 1 {
-		return errors.New("commentary_detection.duration_tolerance_ratio must be between 0 and 1")
 	}
 	return nil
 }

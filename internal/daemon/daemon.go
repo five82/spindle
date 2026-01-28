@@ -396,30 +396,6 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) error {
 			Description: "Required for WhisperX-driven transcription",
 		})
 	}
-	if d.cfg.CommentaryDetection.Enabled {
-		requirements = append(requirements, deps.Requirement{
-			Name:        "fpcalc",
-			Command:     "fpcalc",
-			Description: "Required for commentary fingerprinting",
-		}, deps.Requirement{
-			Name:        "webrtcvad (cgo)",
-			Command:     "cc",
-			Description: "Required for commentary speech detection",
-		})
-	} else {
-		requirements = append(requirements, deps.Requirement{
-			Name:        "fpcalc",
-			Command:     "fpcalc",
-			Description: "Required for commentary fingerprinting",
-			Optional:    true,
-		}, deps.Requirement{
-			Name:        "webrtcvad (cgo)",
-			Command:     "cc",
-			Description: "Required for commentary speech detection",
-			Optional:    true,
-		})
-	}
-
 	results := deps.CheckBinaries(requirements)
 	d.depsMu.Lock()
 	d.dependencies = make([]DependencyStatus, len(results))

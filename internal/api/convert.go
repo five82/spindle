@@ -65,9 +65,8 @@ func FromQueueItem(item *queue.Item) QueueItem {
 	if sg := deriveSubtitleGeneration(item); sg != nil {
 		dto.SubtitleGeneration = sg
 	}
-	if audioDesc, commentaryCount := deriveAudioInfo(item); audioDesc != "" || commentaryCount > 0 {
+	if audioDesc := deriveAudioInfo(item); audioDesc != "" {
 		dto.PrimaryAudioDescription = audioDesc
-		dto.CommentaryCount = commentaryCount
 	}
 
 	if !item.CreatedAt.IsZero() {
@@ -475,17 +474,15 @@ func indexGeneratedSubtitles(attrs map[string]any) map[string]generatedSubtitleI
 	return lookup
 }
 
-func deriveAudioInfo(item *queue.Item) (string, int) {
+func deriveAudioInfo(item *queue.Item) string {
 	if item == nil || strings.TrimSpace(item.RipSpecData) == "" {
-		return "", 0
+		return ""
 	}
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil || len(env.Attributes) == 0 {
-		return "", 0
+		return ""
 	}
-	audioDesc := strings.TrimSpace(asString(env.Attributes["primary_audio_description"]))
-	commentaryCount := asInt(env.Attributes["commentary_count"])
-	return audioDesc, commentaryCount
+	return strings.TrimSpace(asString(env.Attributes["primary_audio_description"]))
 }
 
 func deriveSubtitleGeneration(item *queue.Item) *SubtitleGenerationStatus {

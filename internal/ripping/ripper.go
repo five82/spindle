@@ -482,23 +482,6 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 	}
 
-	// Update progress for commentary detection if enabled
-	if r.cfg != nil && r.cfg.CommentaryDetection.Enabled {
-		copy := *item
-		copy.ProgressStage = "Detecting Commentary"
-		copy.ProgressMessage = "Analyzing audio tracks for commentary"
-		if err := r.store.UpdateProgress(ctx, &copy); err != nil {
-			logger.Warn("failed to persist commentary detection progress; queue status may lag",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
-				logging.String(logging.FieldErrorHint, "check queue database access"),
-				logging.String(logging.FieldImpact, "queue UI may show stale progress"),
-			)
-		} else {
-			*item = copy
-		}
-	}
-
 	audioInfo, err := RefineAudioTargets(ctx, r.cfg, r.logger, validationTargets)
 	if err != nil {
 		return services.Wrap(
@@ -511,12 +494,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 
 	// Store audio info in RipSpec attributes
-	if audioInfo.PrimaryAudioDescription != "" || audioInfo.CommentaryCount > 0 {
+	if audioInfo.PrimaryAudioDescription != "" {
 		if env.Attributes == nil {
 			env.Attributes = make(map[string]any)
 		}
 		env.Attributes["primary_audio_description"] = audioInfo.PrimaryAudioDescription
-		env.Attributes["commentary_count"] = audioInfo.CommentaryCount
 		specDirty = true
 	}
 

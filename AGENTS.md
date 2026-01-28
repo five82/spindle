@@ -123,7 +123,6 @@ The queue DB is **transient** (in-flight jobs only). No migrations - just bump `
 
 - **Queue inspection**: `sqlite3 queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'`
 - **Subtitle debugging**: Set `SPD_DEBUG_SUBTITLES_KEEP=1` to retain intermediate files
-- **Commentary debugging**: Set `SPD_DEBUG_COMMENTARY_KEEP=1` or `SPD_DEBUG_COMMENTARY_VERBOSE=1`
 - **Daemon issues**: Single-instance enforced in `internal/daemon`; use `spindle stop` to fully terminate
 
 ## Deep Dive Documentation
@@ -136,7 +135,6 @@ For detailed guidance beyond this file:
 | Workflow stages | `docs/workflow.md` |
 | Development setup | `docs/development.md` |
 | Content identification | `docs/content-identification.md` |
-| Commentary detection | `docs/commentary-detection.md` |
 | CLI reference | `docs/cli.md`, `README.md` |
 | API endpoints | `docs/api.md` |
 | Package internals | Each package has `doc.go` |

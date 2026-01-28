@@ -583,7 +583,6 @@ type groupBucket struct {
 
 func infoGroupSpecs() []groupSpec {
 	return []groupSpec{
-		{name: "commentary", countKey: "commentary_count", itemPrefix: "commentary_", label: "Commentary"},
 		{name: "removed", countKey: "removed_count", itemPrefix: "removed_", label: "Removed"},
 		{name: "job", countKey: "job_count", itemPrefix: "job_", label: "Jobs"},
 		{name: "source", countKey: "source_count", itemPrefix: "source_", label: "Sources"},

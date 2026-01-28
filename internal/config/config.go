@@ -78,25 +78,6 @@ type Subtitles struct {
 	OpenSubtitlesLanguages []string `toml:"opensubtitles_languages"`
 }
 
-// CommentaryDetection contains configuration for commentary track detection.
-type CommentaryDetection struct {
-	Enabled                        bool     `toml:"enabled"`
-	Languages                      []string `toml:"languages"`
-	Channels                       int      `toml:"channels"`
-	SampleWindows                  int      `toml:"sample_windows"`
-	WindowSeconds                  int      `toml:"window_seconds"`
-	FingerprintSimilarityDuplicate float64  `toml:"fingerprint_similarity_duplicate"`
-	SpeechRatioMinCommentary       float64  `toml:"speech_ratio_min_commentary"`
-	SpeechRatioMaxMusic            float64  `toml:"speech_ratio_max_music"`
-	SpeechOverlapPrimaryMin        float64  `toml:"speech_overlap_primary_min"`
-	SpeechOverlapPrimaryMaxAD      float64  `toml:"speech_overlap_primary_max_audio_description"`
-	SpeechInSilenceMax             float64  `toml:"speech_in_silence_max"`
-	DurationToleranceSeconds       int      `toml:"duration_tolerance_seconds"`
-	DurationToleranceRatio         float64  `toml:"duration_tolerance_ratio"`
-	WhisperXSimilarityGuardrail    float64  `toml:"whisperx_similarity_guardrail"`
-	SpeakerEmbeddingEnabled        bool     `toml:"speaker_embedding_enabled"`
-}
-
 // RipCache contains configuration for the rip cache.
 type RipCache struct {
 	Enabled bool   `toml:"enabled"`
@@ -165,7 +146,6 @@ type Validation struct {
 //   - Library: output directory structure (movies/tv subdirs)
 //   - Notifications: ntfy push notification settings
 //   - Subtitles: OpenSubtitles + WhisperX configuration
-//   - CommentaryDetection: audio analysis for commentary track filtering
 //   - RipCache: cached raw rips for re-encoding
 //   - MakeMKV: disc ripping settings and keydb
 //   - PresetDecider: LLM-based encoding preset selection
@@ -173,19 +153,18 @@ type Validation struct {
 //   - Logging: log format, level, and retention
 //   - Validation: pipeline validation checks and thresholds
 type Config struct {
-	Paths               Paths               `toml:"paths"`
-	TMDB                TMDB                `toml:"tmdb"`
-	Jellyfin            Jellyfin            `toml:"jellyfin"`
-	Library             Library             `toml:"library"`
-	Notifications       Notifications       `toml:"notifications"`
-	Subtitles           Subtitles           `toml:"subtitles"`
-	CommentaryDetection CommentaryDetection `toml:"commentary_detection"`
-	RipCache            RipCache            `toml:"rip_cache"`
-	MakeMKV             MakeMKV             `toml:"makemkv"`
-	PresetDecider       PresetDecider       `toml:"preset_decider"`
-	Workflow            Workflow            `toml:"workflow"`
-	Logging             Logging             `toml:"logging"`
-	Validation          Validation          `toml:"validation"`
+	Paths         Paths         `toml:"paths"`
+	TMDB          TMDB          `toml:"tmdb"`
+	Jellyfin      Jellyfin      `toml:"jellyfin"`
+	Library       Library       `toml:"library"`
+	Notifications Notifications `toml:"notifications"`
+	Subtitles     Subtitles     `toml:"subtitles"`
+	RipCache      RipCache      `toml:"rip_cache"`
+	MakeMKV       MakeMKV       `toml:"makemkv"`
+	PresetDecider PresetDecider `toml:"preset_decider"`
+	Workflow      Workflow      `toml:"workflow"`
+	Logging       Logging       `toml:"logging"`
+	Validation    Validation    `toml:"validation"`
 }
 
 // DefaultConfigPath returns the absolute path to the default configuration file location.

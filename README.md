@@ -12,7 +12,7 @@ Early-stage project; expect frequent changes.
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.25+, MakeMKV, ffmpeg, mediainfo, fpcalc. See [docs/development.md](docs/development.md) for full setup.
+Prerequisites: Go 1.25+, MakeMKV, ffmpeg, mediainfo. See [docs/development.md](docs/development.md) for full setup.
 
 ## Configure
 
@@ -53,6 +53,5 @@ Once the daemon reports `RIPPED`, eject the disc manually; encoding and organiza
 | [cli.md](docs/cli.md) | Command reference |
 | [api.md](docs/api.md) | HTTP API |
 | [content-identification.md](docs/content-identification.md) | TMDB matching internals |
-| [commentary-detection.md](docs/commentary-detection.md) | Audio track classification |
 | [preset-decider.md](docs/preset-decider.md) | LLM-based encoding presets |
 | [development.md](docs/development.md) | Prerequisites and dev setup |

@@ -79,32 +79,7 @@ files media correctly.
 | `whisperx_hf_token` | Required when `whisperx_vad_method = "pyannote"`. |
 
 Set `SPD_DEBUG_SUBTITLES_KEEP=1` before launching the daemon to retain raw
-alignment artifacts inside each queue item’s staging folder for debugging.
-
-## Commentary Detection
-
-Commentary detection keeps the primary audio plus qualifying commentary tracks
-(English + stereo only). It is conservative by design and drops ambiguous
-candidates.
-
-| Key | Role |
-| --- | --- |
-| `commentary_detection.enabled` | Enable commentary track detection. |
-| `commentary_detection.languages` | Allowed languages (ISO 639-1/2 prefixes). |
-| `commentary_detection.channels` | Channel count required for candidates (default 2). |
-| `commentary_detection.sample_windows` | Number of audio windows sampled across the program. |
-| `commentary_detection.window_seconds` | Seconds per analysis window. |
-| `commentary_detection.fingerprint_similarity_duplicate` | Similarity threshold used to drop duplicate/downmix tracks. |
-| `commentary_detection.speech_ratio_min_commentary` | Minimum speech ratio required for commentary inclusion. |
-| `commentary_detection.speech_ratio_max_music` | Maximum speech ratio for music-only exclusion. |
-| `commentary_detection.speech_overlap_primary_min` | Minimum overlap with primary speech for mixed commentary. |
-| `commentary_detection.speech_in_silence_max` | Maximum speech in primary silence before flagging AD. |
-| `commentary_detection.duration_tolerance_seconds` | Absolute duration tolerance vs primary (seconds). |
-| `commentary_detection.duration_tolerance_ratio` | Relative duration tolerance vs primary (ratio). |
-
-Set `SPD_DEBUG_COMMENTARY_KEEP=1` to retain commentary analysis artifacts in the
-staging directory for inspection.
-Set `SPD_DEBUG_COMMENTARY_VERBOSE=1` to emit per-candidate commentary debug logs.
+alignment artifacts inside each queue item's staging folder for debugging.
 
 ## Audio, Encoding, and Dependencies
 

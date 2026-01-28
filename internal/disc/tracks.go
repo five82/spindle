@@ -32,21 +32,3 @@ type Track struct {
 func (t Track) IsAudio() bool {
 	return t.Type == TrackTypeAudio
 }
-
-// IsCommentaryFlagged returns true when MakeMKV marked the stream as a special/commentary track.
-func (t Track) IsCommentaryFlagged() bool {
-	if len(t.Attributes) == 0 {
-		return false
-	}
-	for id, value := range t.Attributes {
-		if id == 3 || id == 28 { // language codes, not commentary flags
-			continue
-		}
-		if id == 38 || id == 39 {
-			if value == "c" || value == "C" {
-				return true
-			}
-		}
-	}
-	return false
-}
