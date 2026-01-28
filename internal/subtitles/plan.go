@@ -133,9 +133,13 @@ func (s *Service) invokeWhisperX(ctx context.Context, plan *generationPlan) erro
 	}
 
 	args := s.buildWhisperXArgs(plan.audioPath, plan.runDir, plan.language)
+	model := whisperXModel
+	if s.config != nil && s.config.Subtitles.WhisperXModel != "" {
+		model = s.config.Subtitles.WhisperXModel
+	}
 	if s.logger != nil {
 		s.logger.Debug("running whisperx",
-			logging.String("model", whisperXModel),
+			logging.String("model", model),
 			logging.String("align_model", whisperXAlignModel),
 			logging.String("language", plan.language),
 			logging.Bool("cuda", plan.cudaEnabled),

@@ -26,6 +26,7 @@ const (
 	defaultKeyDBDownloadURL            = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
 	defaultKeyDBDownloadTimeout        = 300
 	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
+	defaultWhisperXModel               = "large-v3"
 	defaultRipCacheMaxGiB              = 150
 	defaultPresetDeciderBaseURL        = "https://openrouter.ai/api/v1/chat/completions"
 	defaultPresetDeciderModel          = "google/gemini-3-flash-preview"
@@ -79,6 +80,7 @@ func Default() Config {
 			DedupWindowSeconds: defaultNotifyDedupWindowSeconds,
 		},
 		Subtitles: Subtitles{
+			WhisperXModel:          defaultWhisperXModel,
 			WhisperXVADMethod:      "silero",
 			OpenSubtitlesLanguages: []string{"en"},
 			OpenSubtitlesUserAgent: defaultOpenSubtitlesUserAgent,

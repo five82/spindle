@@ -29,10 +29,15 @@ func (s *Service) buildWhisperXArgs(source, outputDir, language string) []string
 		)
 	}
 
+	model := whisperXModel
+	if s != nil && s.config != nil && s.config.Subtitles.WhisperXModel != "" {
+		model = s.config.Subtitles.WhisperXModel
+	}
+
 	args = append(args,
 		"whisperx",
 		source,
-		"--model", whisperXModel,
+		"--model", model,
 		"--align_model", whisperXAlignModel,
 		"--batch_size", whisperXBatchSize,
 		"--output_dir", outputDir,

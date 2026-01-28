@@ -68,6 +68,7 @@ type Notifications struct {
 // Subtitles contains configuration for subtitle generation and retrieval.
 type Subtitles struct {
 	Enabled                bool     `toml:"enabled"`
+	WhisperXModel          string   `toml:"whisperx_model"`
 	WhisperXCUDAEnabled    bool     `toml:"whisperx_cuda_enabled"`
 	WhisperXVADMethod      string   `toml:"whisperx_vad_method"`
 	WhisperXHuggingFace    string   `toml:"whisperx_hf_token"`
