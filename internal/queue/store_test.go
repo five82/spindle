@@ -516,6 +516,7 @@ func TestSequentialUpdateSameItem(t *testing.T) {
 	}
 	if final == nil {
 		t.Fatal("item disappeared after updates")
+		return
 	}
 	if final.ProgressMessage != "Updated 5 times" {
 		t.Fatalf("expected progress message 'Updated 5 times', got %q", final.ProgressMessage)

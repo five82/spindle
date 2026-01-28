@@ -43,23 +43,9 @@ if version_lt "$GO_VERSION" "$MIN_GO_VERSION"; then
     exit 1
 fi
 
-if ! command -v golangci-lint &>/dev/null; then
-    print_error "golangci-lint not found. Install via: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
-    exit 1
-fi
-
+print_step "Updating golangci-lint to latest"
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 GOLANGCI_VERSION=$(golangci-lint version --format short 2>/dev/null || golangci-lint version 2>/dev/null | head -n1 | sed 's/.*version //; s/ .*//')
-MIN_GOLANGCI_VERSION="2.0.0"
-if [ -z "$GOLANGCI_VERSION" ]; then
-    print_error "Unable to determine golangci-lint version; ensure v$MIN_GOLANGCI_VERSION or newer is installed."
-    exit 1
-fi
-
-if version_lt "$GOLANGCI_VERSION" "$MIN_GOLANGCI_VERSION"; then
-    print_error "golangci-lint $MIN_GOLANGCI_VERSION or newer required (found $GOLANGCI_VERSION). Upgrade via: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
-    exit 1
-fi
-
 print_success "Go $GO_VERSION, golangci-lint $GOLANGCI_VERSION"
 
 print_step "Verifying go.mod is tidy"

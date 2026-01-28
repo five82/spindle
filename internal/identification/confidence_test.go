@@ -37,6 +37,7 @@ func TestSelectBestResultPrefersExactMatchOverHigherScore(t *testing.T) {
 	best := selectBestResult(logger, "The Wolverine", resp, 5)
 	if best == nil {
 		t.Fatal("expected best result, got nil")
+		return
 	}
 	if best.ID != 76170 {
 		t.Fatalf("expected exact match ID 76170 (The Wolverine), got ID %d (%s)", best.ID, best.Title)
