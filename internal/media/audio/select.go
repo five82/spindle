@@ -162,7 +162,7 @@ func buildCandidates(streams []ffprobe.Stream) candidateList {
 		cand := candidate{
 			stream:         stream,
 			order:          order,
-			language:       normalizeLanguage(stream.Tags),
+			language:       NormalizeLanguage(stream.Tags),
 			title:          normalizeTitle(stream.Tags),
 			channels:       channelCount(stream),
 			defaultFlagged: stream.Disposition != nil && stream.Disposition["default"] == 1,
@@ -176,7 +176,9 @@ func buildCandidates(streams []ffprobe.Stream) candidateList {
 	return result
 }
 
-func normalizeLanguage(tags map[string]string) string {
+// NormalizeLanguage extracts and normalizes the language tag from stream metadata.
+// It checks common tag keys and returns a lowercase, trimmed value.
+func NormalizeLanguage(tags map[string]string) string {
 	if len(tags) == 0 {
 		return ""
 	}
@@ -200,6 +202,17 @@ func normalizeTitle(tags map[string]string) string {
 	return ""
 }
 
+// layoutChannels maps common channel layout prefixes to their channel counts.
+var layoutChannels = map[string]int{
+	"7.1": 8,
+	"6.1": 7,
+	"5.1": 6,
+	"4.0": 4,
+	"2.1": 3,
+	"2.0": 2,
+	"1.0": 1,
+}
+
 func channelCount(stream ffprobe.Stream) int {
 	if stream.Channels > 0 {
 		return stream.Channels
@@ -208,26 +221,10 @@ func channelCount(stream ffprobe.Stream) int {
 	if layout == "" {
 		return 0
 	}
-	if strings.HasPrefix(layout, "7.1") {
-		return 8
-	}
-	if strings.HasPrefix(layout, "6.1") {
-		return 7
-	}
-	if strings.HasPrefix(layout, "5.1") {
-		return 6
-	}
-	if strings.HasPrefix(layout, "4.0") {
-		return 4
-	}
-	if strings.HasPrefix(layout, "2.1") {
-		return 3
-	}
-	if strings.HasPrefix(layout, "2.0") {
-		return 2
-	}
-	if strings.HasPrefix(layout, "1.0") {
-		return 1
+	for prefix, count := range layoutChannels {
+		if strings.HasPrefix(layout, prefix) {
+			return count
+		}
 	}
 	if strings.Contains(layout, ".") {
 		parts := strings.Split(layout, ".")
@@ -289,15 +286,8 @@ func detectLossless(stream ffprobe.Stream) bool {
 
 func formatStreamSummary(stream ffprobe.Stream) string {
 	parts := make([]string, 0, 4)
-	lang := ""
-	if stream.Tags != nil {
-		lang = strings.TrimSpace(stream.Tags["language"])
-		if lang == "" {
-			lang = strings.TrimSpace(stream.Tags["LANGUAGE"])
-		}
-	}
-	if lang != "" {
-		parts = append(parts, strings.ToLower(lang))
+	if lang := NormalizeLanguage(stream.Tags); lang != "" {
+		parts = append(parts, lang)
 	}
 	codec := stream.CodecLong
 	if codec == "" {

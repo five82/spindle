@@ -67,7 +67,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	if err != nil {
 		return AudioRefinementResult{}, fmt.Errorf("inspect ripped audio: %w", err)
 	}
-	totalAudio := countAudioStreams(probe.Streams)
+	totalAudio := probe.AudioStreamCount()
 	if totalAudio <= 1 {
 		if logger != nil {
 			candidates, _ := summarizeAudioCandidates(probe.Streams)
@@ -208,16 +208,6 @@ func remuxAudioSelection(ctx context.Context, ffmpegBinary, src, dst string, sel
 	return nil
 }
 
-func countAudioStreams(streams []ffprobe.Stream) int {
-	var count int
-	for _, s := range streams {
-		if strings.EqualFold(s.CodecType, "audio") {
-			count++
-		}
-	}
-	return count
-}
-
 func needsDispositionFix(streams []ffprobe.Stream, keep []int) bool {
 	if len(keep) == 0 {
 		return false
@@ -257,7 +247,7 @@ func summarizeAudioCandidates(streams []ffprobe.Stream) ([]audioCandidate, bool)
 }
 
 func formatAudioCandidateValue(stream ffprobe.Stream) (string, bool) {
-	lang := audioLanguage(stream.Tags)
+	lang := audio.NormalizeLanguage(stream.Tags)
 	isEnglish := strings.HasPrefix(lang, "en")
 	if lang == "" {
 		lang = "und"
@@ -282,18 +272,6 @@ func formatAudioCandidateValue(stream ffprobe.Stream) (string, bool) {
 		parts = append(parts, title)
 	}
 	return strings.Join(parts, " | "), isEnglish
-}
-
-func audioLanguage(tags map[string]string) string {
-	if len(tags) == 0 {
-		return ""
-	}
-	for _, key := range []string{"language", "LANGUAGE", "Language", "language_ietf", "LANG"} {
-		if value, ok := tags[key]; ok {
-			return strings.ToLower(strings.TrimSpace(value))
-		}
-	}
-	return ""
 }
 
 func audioTitle(tags map[string]string) string {
@@ -424,7 +402,7 @@ func validateRemuxedAudio(ctx context.Context, ffprobeBinary, path string, expec
 		return fmt.Errorf("probe remuxed file: %w", err)
 	}
 
-	actualCount := countAudioStreams(probe.Streams)
+	actualCount := probe.AudioStreamCount()
 	expectedCount := len(expectedIndices)
 
 	if actualCount != expectedCount {
