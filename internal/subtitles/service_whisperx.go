@@ -38,7 +38,6 @@ func (s *Service) buildWhisperXArgs(source, outputDir, language string) []string
 		"whisperx",
 		source,
 		"--model", model,
-		"--align_model", whisperXAlignModel,
 		"--batch_size", whisperXBatchSize,
 		"--output_dir", outputDir,
 		"--output_format", whisperXOutputFormat,

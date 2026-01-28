@@ -140,7 +140,6 @@ func (s *Service) invokeWhisperX(ctx context.Context, plan *generationPlan) erro
 	if s.logger != nil {
 		s.logger.Debug("running whisperx",
 			logging.String("model", model),
-			logging.String("align_model", whisperXAlignModel),
 			logging.String("language", plan.language),
 			logging.Bool("cuda", plan.cudaEnabled),
 		)

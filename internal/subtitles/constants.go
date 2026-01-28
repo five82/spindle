@@ -16,7 +16,6 @@ const (
 	whisperXCUDAIndexURL   = "https://download.pytorch.org/whl/cu128"
 	whisperXPypiIndexURL   = "https://pypi.org/simple"
 	whisperXModel          = "large-v3" // fallback when config unavailable
-	whisperXAlignModel     = "WAV2VEC2_ASR_LARGE_LV60K_960H"
 	whisperXBatchSize      = "4"
 	whisperXChunkSize      = "15"
 	whisperXVADOnset       = "0.08"
