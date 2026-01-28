@@ -275,7 +275,7 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 	return nil
 }
 
-func (s *whisperXStub) simulateStableTSFormatter(jsonPath, outputPath, language string) error {
+func (s *whisperXStub) simulateStableTSFormatter(jsonPath, outputPath, _ string) error {
 	segments, err := loadWhisperSegments(jsonPath)
 	if err != nil {
 		return fmt.Errorf("load whisper segments: %w", err)

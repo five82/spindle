@@ -52,16 +52,11 @@ func splitBlocks(content string) []string {
 }
 
 func blockIsAdvertisement(block string) bool {
-	lines := strings.Split(block, "\n")
-	if len(lines) == 0 {
-		return false
-	}
-	textLines := subtitleTextLines(lines)
+	textLines := subtitleTextLines(strings.Split(block, "\n"))
 	if len(textLines) == 0 {
 		return false
 	}
-	payload := strings.ToLower(strings.Join(textLines, " "))
-	payload = strings.TrimSpace(payload)
+	payload := strings.TrimSpace(strings.ToLower(strings.Join(textLines, " ")))
 	if payload == "" {
 		return false
 	}

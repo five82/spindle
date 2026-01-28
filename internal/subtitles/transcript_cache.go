@@ -90,16 +90,17 @@ func (c *transcriptCache) Store(key, language string, segments int, data []byte)
 	return path, nil
 }
 
-func (c *transcriptCache) dataPath(key string) string {
+func (c *transcriptCache) hashKey(key string) string {
 	hash := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(key))))
-	name := hex.EncodeToString(hash[:])
-	return filepath.Join(c.dir, name+".srt")
+	return hex.EncodeToString(hash[:])
+}
+
+func (c *transcriptCache) dataPath(key string) string {
+	return filepath.Join(c.dir, c.hashKey(key)+".srt")
 }
 
 func (c *transcriptCache) metaPath(key string) string {
-	hash := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(key))))
-	name := hex.EncodeToString(hash[:])
-	return filepath.Join(c.dir, name+".json")
+	return filepath.Join(c.dir, c.hashKey(key)+".json")
 }
 
 func (c *transcriptCache) writeMeta(key string, entry transcriptCacheEntry) error {

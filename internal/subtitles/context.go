@@ -45,13 +45,7 @@ func (c SubtitleContext) EpisodeID() int64 {
 // IsMovie indicates whether the content represents a movie title.
 func (c SubtitleContext) IsMovie() bool {
 	mediaType := strings.ToLower(strings.TrimSpace(c.MediaType))
-	switch mediaType {
-	case "movie", "film":
-		return true
-	case "tv", "tv_show", "television", "series", "episode":
-		return false
-	}
-	return false
+	return mediaType == "movie" || mediaType == "film"
 }
 
 // SeriesTitle returns the best-known title for the TV series when available.

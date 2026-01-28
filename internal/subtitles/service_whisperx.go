@@ -98,18 +98,14 @@ func (s *Service) extractPrimaryAudio(ctx context.Context, source string, audioI
 		return services.Wrap(services.ErrExternalTool, "subtitles", "extract audio", "Failed to extract primary audio track with ffmpeg", err)
 	}
 	if s.logger != nil {
-		if info, err := os.Stat(destination); err == nil {
-			s.logger.Debug("primary audio extracted",
-				logging.String("destination", destination),
-				logging.Float64("size_mb", float64(info.Size())/1_048_576),
-				logging.Duration("elapsed", time.Since(start)),
-			)
-		} else {
-			s.logger.Debug("primary audio extracted",
-				logging.String("destination", destination),
-				logging.Duration("elapsed", time.Since(start)),
-			)
+		attrs := []logging.Attr{
+			logging.String("destination", destination),
+			logging.Duration("elapsed", time.Since(start)),
 		}
+		if info, err := os.Stat(destination); err == nil {
+			attrs = append(attrs, logging.Float64("size_mb", float64(info.Size())/1_048_576))
+		}
+		s.logger.Debug("primary audio extracted", logging.Args(attrs...)...)
 	}
 	return nil
 }
@@ -140,7 +136,7 @@ func (s *Service) formatWithStableTS(ctx context.Context, whisperJSON, outputPat
 	return nil
 }
 
-func (s *Service) reshapeSubtitles(ctx context.Context, whisperSRT, whisperJSON, outputPath, language string, totalDuration float64) error {
+func (s *Service) reshapeSubtitles(ctx context.Context, whisperSRT, whisperJSON, outputPath, language string, _ float64) error {
 	if err := s.formatWithStableTS(ctx, whisperJSON, outputPath, normalizeWhisperLanguage(language)); err != nil {
 		if s.logger != nil {
 			s.logger.Warn("stable-ts formatter failed, delivering raw whisper subtitles",

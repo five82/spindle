@@ -26,14 +26,10 @@ func (s *Service) configuredVADMethod() string {
 		return whisperXVADMethodSilero
 	}
 	method := strings.ToLower(strings.TrimSpace(s.config.Subtitles.WhisperXVADMethod))
-	switch method {
-	case whisperXVADMethodPyannote, whisperXVADMethodSilero:
-		return method
-	case "":
-		return whisperXVADMethodSilero
-	default:
-		return whisperXVADMethodSilero
+	if method == whisperXVADMethodPyannote {
+		return whisperXVADMethodPyannote
 	}
+	return whisperXVADMethodSilero
 }
 
 func (s *Service) activeVADMethod() string {

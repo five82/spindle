@@ -64,7 +64,7 @@ func normalizeLanguageList(languages []string) []string {
 
 func baseNameWithoutExt(path string) string {
 	filename := filepath.Base(strings.TrimSpace(path))
-	if filename == "" {
+	if filename == "" || filename == "." {
 		return "subtitle"
 	}
 	return strings.TrimSuffix(filename, filepath.Ext(filename))

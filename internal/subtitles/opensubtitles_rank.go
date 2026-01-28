@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -182,11 +183,8 @@ func compareTitles(expected, candidate string) titleMatchLevel {
 	if len(expectedWords) > 0 && len(candidateWords) > 0 {
 		matches := 0
 		for _, ew := range expectedWords {
-			for _, cw := range candidateWords {
-				if ew == cw {
-					matches++
-					break
-				}
+			if slices.Contains(candidateWords, ew) {
+				matches++
 			}
 		}
 		if float64(matches)/float64(len(expectedWords)) >= 0.5 {
@@ -200,11 +198,13 @@ func compareTitles(expected, candidate string) titleMatchLevel {
 // titleMatchScore compares the expected title against the candidate's feature title.
 // Returns a score adjustment and reason string.
 func titleMatchScore(expected, candidate string) (float64, string) {
-	switch compareTitles(expected, candidate) {
+	level := compareTitles(expected, candidate)
+	// compareTitles returns titleMatchExact when either title is empty (can't determine mismatch)
+	if level == titleMatchExact && (normalizeTitle(expected) == "" || normalizeTitle(candidate) == "") {
+		return 0, ""
+	}
+	switch level {
 	case titleMatchExact:
-		if normalizeTitle(expected) == "" || normalizeTitle(candidate) == "" {
-			return 0, ""
-		}
 		return 1.0, "title=exact"
 	case titleMatchContain:
 		return 0.5, "title=contains"

@@ -216,28 +216,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		summaryLines = append(summaryLines, line)
 
 		if err == nil {
-			// Success
-			if s.logger != nil {
-				infoAttrs := buildCandidateSummaryAttrs(
-					"decision_summary",
-					"opensubtitles_candidate_summary",
-					"selected",
-					"match_found",
-					summaryLines,
-					maxLoggedOpenSubCandidates,
-				)
-				s.logger.Info("opensubtitles candidate summary", logging.Args(infoAttrs...)...)
-
-				debugAttrs := buildCandidateSummaryAttrs(
-					"decision_summary_full",
-					"opensubtitles_candidate_summary",
-					"selected",
-					"match_found",
-					summaryLines,
-					0,
-				)
-				s.logger.Debug("opensubtitles candidate summary", logging.Args(debugAttrs...)...)
-			}
+			s.logCandidateSummary("selected", "match_found", summaryLines)
 			return result, true, nil
 		}
 	}
@@ -259,27 +238,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		}
 	}
 
-	if s.logger != nil {
-		infoAttrs := buildCandidateSummaryAttrs(
-			"decision_summary",
-			"opensubtitles_candidate_summary",
-			"rejected",
-			failureReason,
-			summaryLines,
-			maxLoggedOpenSubCandidates,
-		)
-		s.logger.Info("opensubtitles candidate summary", logging.Args(infoAttrs...)...)
-
-		debugAttrs := buildCandidateSummaryAttrs(
-			"decision_summary_full",
-			"opensubtitles_candidate_summary",
-			"rejected",
-			failureReason,
-			summaryLines,
-			0,
-		)
-		s.logger.Debug("opensubtitles candidate summary", logging.Args(debugAttrs...)...)
-	}
+	s.logCandidateSummary("rejected", failureReason, summaryLines)
 
 	if returnErr != nil {
 		return GenerateResult{}, false, returnErr
@@ -303,14 +262,27 @@ func buildCandidateSummaryAttrs(eventType, decisionType, result, reason string, 
 		logging.String("decision_reason", reason),
 		logging.Int("candidate_count", len(summaryLines)),
 	}
-	if limit <= 0 || limit > len(summaryLines) {
-		limit = len(summaryLines)
+	effectiveLimit := limit
+	if effectiveLimit <= 0 || effectiveLimit > len(summaryLines) {
+		effectiveLimit = len(summaryLines)
 	}
-	if limit < len(summaryLines) {
-		attrs = append(attrs, logging.Int("candidate_hidden_count", len(summaryLines)-limit))
+	if effectiveLimit < len(summaryLines) {
+		attrs = append(attrs, logging.Int("candidate_hidden_count", len(summaryLines)-effectiveLimit))
 	}
-	for idx := 0; idx < limit; idx++ {
+	for idx := 0; idx < effectiveLimit; idx++ {
 		attrs = append(attrs, logging.String(fmt.Sprintf("candidate_%d", idx+1), summaryLines[idx]))
 	}
 	return attrs
+}
+
+// logCandidateSummary logs candidate summary at both INFO (truncated) and DEBUG (full) levels.
+func (s *Service) logCandidateSummary(result, reason string, summaryLines []string) {
+	if s.logger == nil {
+		return
+	}
+	infoAttrs := buildCandidateSummaryAttrs("decision_summary", "opensubtitles_candidate_summary", result, reason, summaryLines, maxLoggedOpenSubCandidates)
+	s.logger.Info("opensubtitles candidate summary", logging.Args(infoAttrs...)...)
+
+	debugAttrs := buildCandidateSummaryAttrs("decision_summary_full", "opensubtitles_candidate_summary", result, reason, summaryLines, 0)
+	s.logger.Debug("opensubtitles candidate summary", logging.Args(debugAttrs...)...)
 }

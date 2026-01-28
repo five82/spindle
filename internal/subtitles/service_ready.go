@@ -29,8 +29,8 @@ func (s *Service) ensureReady() error {
 	if s.readyErr != nil {
 		return s.readyErr
 	}
-	vadMethod := strings.ToLower(strings.TrimSpace(s.configuredVADMethod()))
-	if vadMethod == whisperXVADMethodPyannote && strings.TrimSpace(s.hfToken) == "" {
+	// configuredVADMethod already returns normalized lowercase values
+	if s.configuredVADMethod() == whisperXVADMethodPyannote && strings.TrimSpace(s.hfToken) == "" {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "validate vad", "pyannote VAD selected but no Hugging Face token configured (set whisperx_hf_token)", nil)
 	}
 	return nil

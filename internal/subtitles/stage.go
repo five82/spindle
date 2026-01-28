@@ -461,7 +461,7 @@ func (s *Stage) persistRipSpec(ctx context.Context, item *queue.Item, env *ripsp
 	}
 }
 
-func (s *Stage) handleSuspectMisID(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, suspect suspectMisIdentificationError) (bool, GenerateResult, error) {
+func (s *Stage) handleSuspectMisID(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, _ suspectMisIdentificationError) (bool, GenerateResult, error) {
 	// Best-effort auto-fix: fall back to local WhisperX generation (no OpenSubtitles)
 	result, err := s.service.Generate(ctx, GenerateRequest{
 		SourcePath:                target.SourcePath,
@@ -576,9 +576,9 @@ func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, t
 		}
 		return
 	}
-	copy := *item
-	copy.RipSpecData = encoded
-	if err := s.store.Update(ctx, &copy); err != nil {
+	itemCopy := *item
+	itemCopy.RipSpecData = encoded
+	if err := s.store.Update(ctx, &itemCopy); err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to persist rip spec after subtitles; metadata may be stale",
 				logging.Error(err),
@@ -588,7 +588,7 @@ func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, t
 			)
 		}
 	} else {
-		*item = copy
+		*item = itemCopy
 	}
 }
 

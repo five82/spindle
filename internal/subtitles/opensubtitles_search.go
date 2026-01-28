@@ -14,9 +14,6 @@ func mediaTypeForContext(ctx SubtitleContext) string {
 	if ctx.IsMovie() {
 		return "movie"
 	}
-	if strings.EqualFold(ctx.MediaType, "episode") {
-		return "episode"
-	}
 	return "episode"
 }
 
