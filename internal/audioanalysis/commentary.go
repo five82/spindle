@@ -262,40 +262,47 @@ func (s *Stage) createLLMClient() *llm.Client {
 
 // classifyWithLLM uses an LLM to determine if a transcript is commentary.
 func (s *Stage) classifyWithLLM(ctx context.Context, client *llm.Client, transcript string, item *queue.Item, env *ripspec.Envelope) (CommentaryDecision, error) {
-	// Build context about the content - use DiscTitle from item
-	title := strings.TrimSpace(item.DiscTitle)
+	userMessage := buildClassificationPrompt(item.DiscTitle, extractYear(env), transcript)
 
-	// Try to get year from metadata
-	year := ""
-	if env != nil && env.Metadata != nil {
-		if y, ok := env.Metadata["year"]; ok {
-			if yearInt, ok := y.(float64); ok && yearInt > 0 {
-				year = fmt.Sprintf("%.0f", yearInt)
-			} else if yearStr, ok := y.(string); ok {
-				year = yearStr
-			}
-		}
-	}
-
-	// Build user message with transcript
-	userMessage := fmt.Sprintf("Title: %s", title)
-	if year != "" {
-		userMessage += fmt.Sprintf(" (%s)", year)
-	}
-	userMessage += fmt.Sprintf("\n\nTranscript sample:\n%s", truncateTranscript(transcript, 4000))
-
-	// Call LLM using CompleteJSON for JSON response
 	response, err := client.CompleteJSON(ctx, CommentaryClassificationPrompt, userMessage)
 	if err != nil {
 		return CommentaryDecision{}, fmt.Errorf("llm completion: %w", err)
 	}
 
-	// Parse JSON response
 	var decision CommentaryDecision
 	if err := llm.DecodeLLMJSON(response, &decision); err != nil {
 		return CommentaryDecision{}, fmt.Errorf("parse llm response: %w", err)
 	}
 	return decision, nil
+}
+
+// buildClassificationPrompt constructs the user message for LLM classification.
+func buildClassificationPrompt(title, year, transcript string) string {
+	header := fmt.Sprintf("Title: %s", strings.TrimSpace(title))
+	if year != "" {
+		header += fmt.Sprintf(" (%s)", year)
+	}
+	return header + fmt.Sprintf("\n\nTranscript sample:\n%s", truncateTranscript(transcript, 4000))
+}
+
+// extractYear retrieves the year from ripspec metadata.
+func extractYear(env *ripspec.Envelope) string {
+	if env == nil || env.Metadata == nil {
+		return ""
+	}
+	y, ok := env.Metadata["year"]
+	if !ok {
+		return ""
+	}
+	switch v := y.(type) {
+	case float64:
+		if v > 0 {
+			return fmt.Sprintf("%.0f", v)
+		}
+	case string:
+		return v
+	}
+	return ""
 }
 
 // truncateTranscript limits transcript length for LLM input.
@@ -421,12 +428,7 @@ func buildAudioStreamMappings(streams []ffprobe.Stream, commentaryIndices map[in
 
 // hasAnyCommentary returns true if any stream in the mappings is commentary.
 func hasAnyCommentary(mappings []audioStreamMapping) bool {
-	for _, m := range mappings {
-		if m.isCommentary {
-			return true
-		}
-	}
-	return false
+	return countCommentaryTracks(mappings) > 0
 }
 
 // countCommentaryTracks returns the number of commentary tracks in the mappings.

@@ -341,6 +341,67 @@ func outputFormatForPath(path string) string {
 	}
 }
 
+// normalizeCodecName returns a human-friendly codec name for display.
+func normalizeCodecName(s ffprobe.Stream) string {
+	switch strings.ToLower(s.CodecName) {
+	case "truehd":
+		return "TrueHD"
+	case "dts":
+		profile := strings.ToLower(s.Profile)
+		if strings.Contains(profile, "ma") {
+			return "DTS-HD MA"
+		}
+		if strings.Contains(profile, "hd") {
+			return "DTS-HD"
+		}
+		return "DTS"
+	case "eac3":
+		return "E-AC3"
+	case "ac3":
+		return "AC3"
+	case "flac":
+		return "FLAC"
+	case "pcm_s16le", "pcm_s24le", "pcm_s32le":
+		return "PCM"
+	case "aac":
+		return "AAC"
+	case "opus":
+		return "Opus"
+	default:
+		return strings.ToUpper(s.CodecName)
+	}
+}
+
+// formatChannelLayout returns a human-friendly channel layout string.
+func formatChannelLayout(s ffprobe.Stream) string {
+	layout := strings.TrimSpace(s.ChannelLayout)
+	if layout == "" {
+		switch s.Channels {
+		case 1:
+			return "mono"
+		case 2:
+			return "stereo"
+		case 6:
+			return "5.1"
+		case 8:
+			return "7.1"
+		case 0:
+			return ""
+		default:
+			return fmt.Sprintf("%dch", s.Channels)
+		}
+	}
+	// Normalize common layout variants
+	switch strings.ToLower(layout) {
+	case "5.1(side)", "5.1":
+		return "5.1"
+	case "7.1(wide)", "7.1":
+		return "7.1"
+	default:
+		return layout
+	}
+}
+
 // formatAudioDescription builds a human-readable audio description from stream metadata.
 // Example output: "TrueHD 7.1 Atmos" or "DTS-HD MA 5.1"
 func formatAudioDescription(s ffprobe.Stream) string {
@@ -348,66 +409,12 @@ func formatAudioDescription(s ffprobe.Stream) string {
 		return ""
 	}
 
-	var parts []string
+	parts := []string{normalizeCodecName(s)}
 
-	// Codec name (normalize common ones)
-	codec := strings.ToUpper(s.CodecName)
-	switch strings.ToLower(s.CodecName) {
-	case "truehd":
-		codec = "TrueHD"
-	case "dts":
-		// Check profile for HD variants
-		profile := strings.ToLower(s.Profile)
-		if strings.Contains(profile, "ma") {
-			codec = "DTS-HD MA"
-		} else if strings.Contains(profile, "hd") {
-			codec = "DTS-HD"
-		} else {
-			codec = "DTS"
-		}
-	case "eac3":
-		codec = "E-AC3"
-	case "ac3":
-		codec = "AC3"
-	case "flac":
-		codec = "FLAC"
-	case "pcm_s16le", "pcm_s24le", "pcm_s32le":
-		codec = "PCM"
-	case "aac":
-		codec = "AAC"
-	case "opus":
-		codec = "Opus"
-	}
-	parts = append(parts, codec)
-
-	// Channel layout (e.g., "7.1", "5.1", "stereo")
-	layout := strings.TrimSpace(s.ChannelLayout)
-	if layout == "" && s.Channels > 0 {
-		switch s.Channels {
-		case 1:
-			layout = "mono"
-		case 2:
-			layout = "stereo"
-		case 6:
-			layout = "5.1"
-		case 8:
-			layout = "7.1"
-		default:
-			layout = fmt.Sprintf("%dch", s.Channels)
-		}
-	}
-	if layout != "" {
-		// Normalize common layouts
-		switch strings.ToLower(layout) {
-		case "5.1(side)", "5.1":
-			layout = "5.1"
-		case "7.1(wide)", "7.1":
-			layout = "7.1"
-		}
+	if layout := formatChannelLayout(s); layout != "" {
 		parts = append(parts, layout)
 	}
 
-	// Check for Atmos (usually in profile or side data)
 	if strings.Contains(strings.ToLower(s.Profile), "atmos") {
 		parts = append(parts, "Atmos")
 	}
