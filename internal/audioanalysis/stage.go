@@ -90,36 +90,15 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			"No ripped assets available for audio analysis", nil)
 	}
 
-	// Update progress
-	if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Analyzing audio (%d file(s))", len(targets)), progressPercentPrep); err != nil {
-		return err
-	}
-
-	// Phase 1: Primary audio selection (moved from ripping stage)
-	refineResult, err := RefineAudioTargets(ctx, s.cfg, s.logger, targets)
-	if err != nil {
-		return services.Wrap(services.ErrExternalTool, "audioanalysis", "refine audio tracks",
-			"Failed to optimize ripped audio tracks with ffmpeg", err)
-	}
-
-	// Store audio info in RipSpec attributes
-	specDirty := false
-	if refineResult.PrimaryAudioDescription != "" {
-		if env.Attributes == nil {
-			env.Attributes = make(map[string]any)
-		}
-		env.Attributes["primary_audio_description"] = refineResult.PrimaryAudioDescription
-		specDirty = true
-	}
-
-	if err := s.updateProgress(ctx, item, "Phase 1/2 - Audio selection complete", progressPercentRefine); err != nil {
-		return err
-	}
-
-	// Phase 2: Commentary detection (when enabled)
+	// Phase 1: Commentary detection (when enabled)
+	// Must run BEFORE audio refinement so we can identify commentary tracks
+	// before they get stripped from the file.
 	var commentaryResult *CommentaryResult
+	var commentaryIndices []int
+	specDirty := false
+
 	if s.cfg.Commentary.Enabled {
-		if err := s.updateProgress(ctx, item, "Phase 2/2 - Detecting commentary tracks", progressPercentRefine+5); err != nil {
+		if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Detecting commentary (%d file(s))", len(targets)), progressPercentPrep); err != nil {
 			return err
 		}
 
@@ -136,16 +115,9 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			specDirty = true
 			storeCommentaryResult(&env, commentaryResult)
 
-			// Apply "comment" disposition to commentary tracks for Jellyfin recognition
-			if len(commentaryResult.CommentaryTracks) > 0 {
-				if err := ApplyCommentaryDisposition(ctx, s.cfg, s.logger, targets, commentaryResult); err != nil {
-					logger.Warn("failed to set commentary disposition; tracks may not be labeled",
-						logging.Error(err),
-						logging.String(logging.FieldEventType, "commentary_disposition_failed"),
-						logging.String(logging.FieldErrorHint, "commentary tracks will still be present but unlabeled"),
-						logging.String(logging.FieldImpact, "Jellyfin may not recognize commentary tracks"),
-					)
-				}
+			// Collect commentary track indices for audio refinement
+			for _, track := range commentaryResult.CommentaryTracks {
+				commentaryIndices = append(commentaryIndices, track.Index)
 			}
 
 			logger.Info("commentary detection complete",
@@ -155,6 +127,42 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	} else {
 		logger.Debug("commentary detection disabled")
+		if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Analyzing audio (%d file(s))", len(targets)), progressPercentPrep); err != nil {
+			return err
+		}
+	}
+
+	// Phase 2: Primary audio selection with commentary preservation
+	if err := s.updateProgress(ctx, item, "Phase 2/2 - Selecting audio tracks", progressPercentRefine); err != nil {
+		return err
+	}
+
+	refineResult, err := RefineAudioTargets(ctx, s.cfg, s.logger, targets, commentaryIndices)
+	if err != nil {
+		return services.Wrap(services.ErrExternalTool, "audioanalysis", "refine audio tracks",
+			"Failed to optimize ripped audio tracks with ffmpeg", err)
+	}
+
+	// Store audio info in RipSpec attributes
+	if refineResult.PrimaryAudioDescription != "" {
+		if env.Attributes == nil {
+			env.Attributes = make(map[string]any)
+		}
+		env.Attributes["primary_audio_description"] = refineResult.PrimaryAudioDescription
+		specDirty = true
+	}
+
+	// Apply "comment" disposition to commentary tracks for Jellyfin recognition
+	// Must happen AFTER refinement since disposition is set on the remuxed file
+	if commentaryResult != nil && len(commentaryResult.CommentaryTracks) > 0 {
+		if err := ApplyCommentaryDisposition(ctx, s.cfg, s.logger, targets, commentaryResult); err != nil {
+			logger.Warn("failed to set commentary disposition; tracks may not be labeled",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "commentary_disposition_failed"),
+				logging.String(logging.FieldErrorHint, "commentary tracks will still be present but unlabeled"),
+				logging.String(logging.FieldImpact, "Jellyfin may not recognize commentary tracks"),
+			)
+		}
 	}
 
 	// Persist updated RipSpec

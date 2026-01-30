@@ -25,8 +25,9 @@ type AudioRefinementResult struct {
 }
 
 // RefineAudioTargets applies primary audio selection across a set of rip paths.
+// additionalKeep specifies extra stream indices to preserve (e.g., commentary tracks).
 // Returns aggregated audio info from the first successfully processed path.
-func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Logger, paths []string) (AudioRefinementResult, error) {
+func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Logger, paths []string, additionalKeep []int) (AudioRefinementResult, error) {
 	unique := make([]string, 0, len(paths))
 	seen := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
@@ -42,7 +43,7 @@ func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Lo
 	}
 	var result AudioRefinementResult
 	for i, path := range unique {
-		info, err := refineAudioTracks(ctx, cfg, logger, path)
+		info, err := refineAudioTracks(ctx, cfg, logger, path, additionalKeep)
 		if err != nil {
 			return AudioRefinementResult{}, err
 		}
@@ -54,7 +55,7 @@ func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Lo
 	return result, nil
 }
 
-func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Logger, path string) (AudioRefinementResult, error) {
+func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Logger, path string, additionalKeep []int) (AudioRefinementResult, error) {
 	logger = logging.WithContext(ctx, logging.NewComponentLogger(logger, "audio-refiner"))
 	if strings.TrimSpace(path) == "" {
 		return AudioRefinementResult{}, fmt.Errorf("refine audio: empty path")
@@ -92,6 +93,44 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 	selection := audio.Select(probe.Streams)
 	if selection.PrimaryIndex < 0 {
 		return AudioRefinementResult{}, fmt.Errorf("refine audio: primary selection missing")
+	}
+
+	// Merge additional indices to keep (e.g., commentary tracks detected before refinement)
+	if len(additionalKeep) > 0 {
+		keepSet := make(map[int]struct{}, len(selection.KeepIndices)+len(additionalKeep))
+		for _, idx := range selection.KeepIndices {
+			keepSet[idx] = struct{}{}
+		}
+		for _, idx := range additionalKeep {
+			keepSet[idx] = struct{}{}
+		}
+
+		// Rebuild KeepIndices in stream order
+		selection.KeepIndices = selection.KeepIndices[:0]
+		for _, stream := range probe.Streams {
+			if stream.CodecType != "audio" {
+				continue
+			}
+			if _, ok := keepSet[stream.Index]; ok {
+				selection.KeepIndices = append(selection.KeepIndices, stream.Index)
+			}
+		}
+
+		// Rebuild RemovedIndices excluding the additional kept tracks
+		newRemoved := make([]int, 0, len(selection.RemovedIndices))
+		for _, idx := range selection.RemovedIndices {
+			if _, ok := keepSet[idx]; !ok {
+				newRemoved = append(newRemoved, idx)
+			}
+		}
+		selection.RemovedIndices = newRemoved
+
+		if logger != nil && len(additionalKeep) > 0 {
+			logger.Debug("merged additional audio tracks",
+				logging.Int("additional_count", len(additionalKeep)),
+				logging.Int("total_kept", len(selection.KeepIndices)),
+			)
+		}
 	}
 	if logger != nil {
 		candidates, hasEnglish := summarizeAudioCandidates(probe.Streams)

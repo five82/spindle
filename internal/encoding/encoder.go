@@ -253,7 +253,7 @@ func (e *Encoder) restoreFromCacheIfNeeded(ctx context.Context, item *queue.Item
 			logging.String("decision_options", "refine, skip"),
 		)
 		paths := rippedPaths(item, env)
-		if _, err := audioanalysis.RefineAudioTargets(ctx, e.cfg, logger, paths); err != nil {
+		if _, err := audioanalysis.RefineAudioTargets(ctx, e.cfg, logger, paths, nil); err != nil {
 			return services.Wrap(
 				services.ErrExternalTool,
 				"encoding",
