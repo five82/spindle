@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,11 +100,11 @@ func TestManagerProcessesItems(t *testing.T) {
 		time.Sleep(25 * time.Millisecond)
 	}
 
-	if len(notifier.queueStarts) != 1 {
-		t.Fatalf("expected one queue start notification, got %d", len(notifier.queueStarts))
+	if notifier.startsCount() != 1 {
+		t.Fatalf("expected one queue start notification, got %d", notifier.startsCount())
 	}
 	deadline = time.After(10 * time.Second)
-	for len(notifier.queueCompletes) == 0 {
+	for notifier.completesCount() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("expected queue completion notification")
@@ -250,11 +251,15 @@ func TestManagerFailureDefaultsToFailed(t *testing.T) {
 }
 
 type managerNotifier struct {
+	mu             sync.Mutex
 	queueStarts    []int
 	queueCompletes []struct{ processed, failed int }
 }
 
 func (m *managerNotifier) Publish(ctx context.Context, event notifications.Event, payload notifications.Payload) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	switch event {
 	case notifications.EventQueueStarted:
 		if payload != nil {
@@ -276,4 +281,16 @@ func (m *managerNotifier) Publish(ctx context.Context, event notifications.Event
 		m.queueCompletes = append(m.queueCompletes, struct{ processed, failed int }{processed: processed, failed: failed})
 	}
 	return nil
+}
+
+func (m *managerNotifier) startsCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.queueStarts)
+}
+
+func (m *managerNotifier) completesCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.queueCompletes)
 }
