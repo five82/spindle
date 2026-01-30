@@ -182,8 +182,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			return
 		}
 		// Format the progress message for better readability
-		formattedMsg, _ := formatRipProgressMessage(update)
-		if formattedMsg != "" {
+		if formattedMsg := formatRipProgressMessage(update); formattedMsg != "" {
 			update.Message = formattedMsg
 		}
 		r.applyProgress(ctx, item, update, progressSampler)
@@ -560,33 +559,32 @@ func hasDiscFingerprint(item *queue.Item) bool {
 }
 
 // formatRipProgressMessage transforms raw MakeMKV progress messages into user-friendly format.
-// Returns the formatted message and a phase indicator (1=analyzing, 2=ripping).
-func formatRipProgressMessage(update makemkv.ProgressUpdate) (string, int) {
+func formatRipProgressMessage(update makemkv.ProgressUpdate) string {
 	msg := strings.TrimSpace(update.Message)
 	stage := strings.ToLower(strings.TrimSpace(update.Stage))
 
-	// Detect analysis vs ripping phase from stage or message patterns
+	// Detect analysis phase from stage or message patterns
 	if strings.Contains(stage, "analyz") || strings.Contains(msg, "Opening disc") ||
 		strings.Contains(msg, "Analyzing seamless") {
-		return "Phase 1/2 - Analyzing disc", 1
+		return "Phase 1/2 - Analyzing disc"
 	}
 
 	// Filter out raw "Progress X%" messages
 	if strings.HasPrefix(msg, "Progress ") {
-		return fmt.Sprintf("Phase 2/2 - Ripping (%.0f%%)", update.Percent), 2
+		return fmt.Sprintf("Phase 2/2 - Ripping (%.0f%%)", update.Percent)
 	}
 
-	// Handle "Saving title" messages - extract title number if present
+	// Handle "Saving title" messages
 	if strings.HasPrefix(msg, "Saving ") {
-		return fmt.Sprintf("Phase 2/2 - %s", msg), 2
+		return fmt.Sprintf("Phase 2/2 - %s", msg)
 	}
 
-	// Default to showing the message as-is with phase prefix
+	// Default to showing the message with phase prefix
 	if msg != "" && !strings.HasPrefix(msg, "Phase ") {
-		return fmt.Sprintf("Phase 2/2 - %s", msg), 2
+		return fmt.Sprintf("Phase 2/2 - %s", msg)
 	}
 
-	return msg, 2
+	return msg
 }
 
 // HealthCheck verifies MakeMKV ripping dependencies.
