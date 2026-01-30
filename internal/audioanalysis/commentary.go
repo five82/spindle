@@ -187,10 +187,11 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 					Index:  candidate.Index,
 					Reason: fmt.Sprintf("llm_classification: %s (confidence: %.2f)", decision.Decision, decision.Confidence),
 				})
-				logger.Debug("candidate not classified as commentary",
+				logger.Info("commentary track rejected",
 					logging.Int("track_index", candidate.Index),
 					logging.String("decision", decision.Decision),
 					logging.Float64("confidence", decision.Confidence),
+					logging.String("reason", decision.Reason),
 				)
 			}
 		} else {
