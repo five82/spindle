@@ -37,7 +37,6 @@ const (
 	// Validation defaults
 	defaultEnforceDraptoValidation = true
 	defaultMinVoteCountExactMatch  = 5
-	defaultVerifyFileSizeAfterMove = true
 
 	// Commentary defaults
 	defaultCommentarySimilarityThreshold = 0.92
@@ -58,9 +57,8 @@ func Default() Config {
 			APIBind:               defaultAPIBind,
 		},
 		TMDB: TMDB{
-			Language:            defaultTMDBLanguage,
-			BaseURL:             defaultTMDBBaseURL,
-			ConfidenceThreshold: 0.8,
+			Language: defaultTMDBLanguage,
+			BaseURL:  defaultTMDBBaseURL,
 		},
 		Jellyfin: Jellyfin{
 			Enabled: defaultJellyfinEnabled,
@@ -123,7 +121,6 @@ func Default() Config {
 		Validation: Validation{
 			EnforceDraptoValidation: defaultEnforceDraptoValidation,
 			MinVoteCountExactMatch:  defaultMinVoteCountExactMatch,
-			VerifyFileSizeAfterMove: defaultVerifyFileSizeAfterMove,
 		},
 		Commentary: Commentary{
 			Enabled:             false,

@@ -210,13 +210,6 @@ func TestValidateDetectsInvalidValues(t *testing.T) {
 
 	cfg = config.Default()
 	cfg.TMDB.APIKey = "key"
-	cfg.TMDB.ConfidenceThreshold = 1.5
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected error for tmdb confidence threshold")
-	}
-
-	cfg = config.Default()
-	cfg.TMDB.APIKey = "key"
 	cfg.Subtitles.OpenSubtitlesEnabled = true
 	cfg.Subtitles.OpenSubtitlesAPIKey = ""
 	if err := cfg.Validate(); err == nil {

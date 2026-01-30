@@ -46,9 +46,6 @@ func (c *Config) validateTMDB() error {
 		}
 		return fmt.Errorf("tmdb.api_key is required. Set TMDB_API_KEY env var or edit %s (create with 'spindle config init')", defaultPath)
 	}
-	if c.TMDB.ConfidenceThreshold < 0 || c.TMDB.ConfidenceThreshold > 1 {
-		return errors.New("tmdb.confidence_threshold must be between 0 and 1")
-	}
 	return nil
 }
 

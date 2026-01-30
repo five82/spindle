@@ -28,10 +28,9 @@ type Paths struct {
 
 // TMDB contains configuration for The Movie Database API.
 type TMDB struct {
-	APIKey              string  `toml:"api_key"`
-	BaseURL             string  `toml:"base_url"`
-	Language            string  `toml:"language"`
-	ConfidenceThreshold float64 `toml:"confidence_threshold"`
+	APIKey   string `toml:"api_key"`
+	BaseURL  string `toml:"base_url"`
+	Language string `toml:"language"`
 }
 
 // Jellyfin contains configuration for Jellyfin Media Server integration.
@@ -133,8 +132,6 @@ type Validation struct {
 	// Identification validation
 	MinVoteCountExactMatch int `toml:"min_vote_count_exact_match"`
 
-	// Organizer validation
-	VerifyFileSizeAfterMove bool `toml:"verify_file_size_after_move"`
 }
 
 // Commentary contains configuration for commentary track detection.
