@@ -131,7 +131,6 @@ type Validation struct {
 
 	// Identification validation
 	MinVoteCountExactMatch int `toml:"min_vote_count_exact_match"`
-
 }
 
 // Commentary contains configuration for commentary track detection.
