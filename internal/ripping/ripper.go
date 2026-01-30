@@ -470,8 +470,6 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 	}
 
-	// Audio refinement moved to audioanalysis stage
-
 	if specDirty {
 		if encoded, encodeErr := env.Encode(); encodeErr == nil {
 			item.RipSpecData = encoded

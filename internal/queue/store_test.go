@@ -73,6 +73,7 @@ func TestResetStuckProcessing(t *testing.T) {
 		{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusRipped},
 		{"encoding", queue.StatusEncoding, queue.StatusEpisodeIdentified},
 		{"audio_analyzing", queue.StatusAudioAnalyzing, queue.StatusEncoded},
+		{"subtitling", queue.StatusSubtitling, queue.StatusAudioAnalyzed},
 		{"organizing", queue.StatusOrganizing, queue.StatusAudioAnalyzed},
 	}
 	var ids []int64
@@ -285,6 +286,7 @@ func TestReclaimStaleProcessing(t *testing.T) {
 			{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusRipped},
 			{"encoding", queue.StatusEncoding, queue.StatusEpisodeIdentified},
 			{"audio_analyzing", queue.StatusAudioAnalyzing, queue.StatusEncoded},
+			{"subtitling", queue.StatusSubtitling, queue.StatusAudioAnalyzed},
 			{"organizing", queue.StatusOrganizing, queue.StatusAudioAnalyzed},
 		}
 		var ids []int64
@@ -309,6 +311,7 @@ func TestReclaimStaleProcessing(t *testing.T) {
 			queue.StatusAudioAnalyzing,
 			queue.StatusEpisodeIdentifying,
 			queue.StatusEncoding,
+			queue.StatusSubtitling,
 			queue.StatusOrganizing,
 		)
 		if err != nil {
