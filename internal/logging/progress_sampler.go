@@ -3,17 +3,15 @@ package logging
 import "strings"
 
 // ProgressSampler suppresses repetitive progress logs while preserving signal
-// when stages, messages, or percentage buckets change.
+// when stages or percentage buckets change.
 type ProgressSampler struct {
 	bucketSize float64
 	lastStage  string
-	lastMsg    string
 	lastBucket int
 }
 
 // NewProgressSampler constructs a sampler that emits when the percent crosses
-// bucket boundaries (default 5%), when the stage changes, or when the message
-// changes.
+// bucket boundaries (default 5%) or when the stage changes.
 func NewProgressSampler(bucketSize float64) *ProgressSampler {
 	if bucketSize <= 0 {
 		bucketSize = 5
@@ -22,23 +20,19 @@ func NewProgressSampler(bucketSize float64) *ProgressSampler {
 }
 
 // ShouldLog reports whether a progress event should be logged. Percent can be
-// negative to indicate "unknown"; stage and message are trimmed before
-// comparison.
+// negative to indicate "unknown"; stage is trimmed before comparison. The
+// message parameter is accepted for signature compatibility but ignored for
+// deduplication (messages often contain volatile fields like ETA).
 func (s *ProgressSampler) ShouldLog(percent float64, stage, message string) bool {
 	if s == nil {
 		return true
 	}
 	stage = strings.TrimSpace(stage)
-	message = strings.TrimSpace(message)
 	emit := false
 	if stage != "" && stage != s.lastStage {
 		s.lastStage = stage
 		emit = true
 		s.lastBucket = -1
-	}
-	if message != "" && message != s.lastMsg {
-		s.lastMsg = message
-		emit = true
 	}
 	if percent >= 0 {
 		bucket := int(percent / s.bucketSize)
@@ -59,6 +53,5 @@ func (s *ProgressSampler) Reset() {
 		return
 	}
 	s.lastStage = ""
-	s.lastMsg = ""
 	s.lastBucket = -1
 }
