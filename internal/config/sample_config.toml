@@ -112,6 +112,20 @@ title = "Spindle Preset Decider"                     # Display name sent via X-T
 timeout_seconds = 60                                 # HTTP timeout (seconds)
 
 # ============================================================================
+# COMMENTARY DETECTION (audio analysis to identify commentary tracks)
+# ============================================================================
+
+[commentary]
+enabled = false                                      # Enable commentary track detection during ripping
+whisperx_model = "large-v3-turbo"                    # Whisper model for transcription (defaults to subtitles model)
+similarity_threshold = 0.92                          # Cosine similarity above which track is a stereo downmix (not commentary)
+confidence_threshold = 0.80                          # LLM confidence required to classify as commentary
+# LLM settings - if not set, falls back to preset_decider settings above
+# api_key = ""
+# base_url = ""
+# model = ""
+
+# ============================================================================
 # WORKFLOW TUNING
 # ============================================================================
 
