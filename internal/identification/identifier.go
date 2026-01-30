@@ -112,12 +112,26 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
+// updateProgress persists stage progress to the queue database.
+func (i *Identifier) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) error {
+	item.ProgressStage = "Identifying"
+	item.ProgressMessage = message
+	item.ProgressPercent = percent
+	if i.store == nil {
+		return nil
+	}
+	return i.store.UpdateProgress(ctx, item)
+}
+
 // Execute performs disc scanning and TMDB identification.
 func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	stageStart := time.Now()
 	logger := logging.WithContext(ctx, i.logger)
 
 	// Phase 1: Scan disc and capture fingerprint
+	if err := i.updateProgress(ctx, item, "Phase 1/3 - Scanning disc", 10); err != nil {
+		logger.Debug("failed to update scanning progress", logging.Error(err))
+	}
 	scanResult, titleCount, err := i.scanDiscAndCaptureFingerprint(ctx, item, logger)
 	if err != nil {
 		return err
@@ -143,6 +157,10 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	} else if discID == "" {
 		logger.Debug("keydb lookup skipped", logging.String("reason", "disc id missing in bdinfo"))
 	} else {
+		// Phase 2: KeyDB lookup
+		if err := i.updateProgress(ctx, item, "Phase 2/3 - Looking up KeyDB", 40); err != nil {
+			logger.Debug("failed to update keydb progress", logging.Error(err))
+		}
 		keydbLookupStart := time.Now()
 		entry, found, err := i.keydb.Lookup(discID)
 		keydbLookupDuration := time.Since(keydbLookupStart)
@@ -269,6 +287,11 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	mediaHint := detectMediaKind(title, discLabel, scanResult)
+
+	// Phase 3: TMDB search
+	if err := i.updateProgress(ctx, item, "Phase 3/3 - Searching TMDB", 60); err != nil {
+		logger.Debug("failed to update tmdb progress", logging.Error(err))
+	}
 	outcome, err := i.identifyWithTMDB(ctx, logger, item, identifyContext{
 		Title:      title,
 		DiscLabel:  discLabel,

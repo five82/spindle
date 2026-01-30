@@ -181,6 +181,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if !allow {
 			return
 		}
+		// Format the progress message for better readability
+		formattedMsg, _ := formatRipProgressMessage(update)
+		if formattedMsg != "" {
+			update.Message = formattedMsg
+		}
 		r.applyProgress(ctx, item, update, progressSampler)
 		if percentReached {
 			persistRipSpecIfNeeded()
@@ -552,6 +557,36 @@ func hasDiscFingerprint(item *queue.Item) bool {
 		return false
 	}
 	return strings.TrimSpace(item.DiscFingerprint) != ""
+}
+
+// formatRipProgressMessage transforms raw MakeMKV progress messages into user-friendly format.
+// Returns the formatted message and a phase indicator (1=analyzing, 2=ripping).
+func formatRipProgressMessage(update makemkv.ProgressUpdate) (string, int) {
+	msg := strings.TrimSpace(update.Message)
+	stage := strings.ToLower(strings.TrimSpace(update.Stage))
+
+	// Detect analysis vs ripping phase from stage or message patterns
+	if strings.Contains(stage, "analyz") || strings.Contains(msg, "Opening disc") ||
+		strings.Contains(msg, "Analyzing seamless") {
+		return "Phase 1/2 - Analyzing disc", 1
+	}
+
+	// Filter out raw "Progress X%" messages
+	if strings.HasPrefix(msg, "Progress ") {
+		return fmt.Sprintf("Phase 2/2 - Ripping (%.0f%%)", update.Percent), 2
+	}
+
+	// Handle "Saving title" messages - extract title number if present
+	if strings.HasPrefix(msg, "Saving ") {
+		return fmt.Sprintf("Phase 2/2 - %s", msg), 2
+	}
+
+	// Default to showing the message as-is with phase prefix
+	if msg != "" && !strings.HasPrefix(msg, "Phase ") {
+		return fmt.Sprintf("Phase 2/2 - %s", msg), 2
+	}
+
+	return msg, 2
 }
 
 // HealthCheck verifies MakeMKV ripping dependencies.

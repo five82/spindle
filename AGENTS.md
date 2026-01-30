@@ -21,7 +21,7 @@ Spindle is a **personal project** that automates optical disc to Jellyfin librar
 - **Environment**: Go 1.25+, MakeMKV, FFmpeg
 - **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.
 
-Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED] -> ENCODING -> ENCODED -> [SUBTITLING -> SUBTITLED] -> ORGANIZING -> COMPLETED` (with `FAILED`/`REVIEW` detours).
+Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED] -> ENCODING -> ENCODED -> [AUDIO_ANALYZING -> AUDIO_ANALYZED] -> [SUBTITLING -> SUBTITLED] -> ORGANIZING -> COMPLETED` (with `FAILED`/`REVIEW` detours).
 
 ## Critical Expectations
 

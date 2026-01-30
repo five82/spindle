@@ -13,6 +13,7 @@ Every item moves through the queue in order. The statuses you will see are:
 - `RIPPING` -> `RIPPED` - video copied to staging; you’ll get a notification so the disc can be ejected manually
 - `EPISODE_IDENTIFYING` -> `EPISODE_IDENTIFIED` *(optional)* - for TV discs with OpenSubtitles enabled, WhisperX + OpenSubtitles correlate ripped files to definitive episode numbers
 - `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
+- `AUDIO_ANALYZING` -> `AUDIO_ANALYZED` *(optional)* - detects commentary tracks for exclusion
 - `SUBTITLING` -> `SUBTITLED` *(optional)* - OpenSubtitles + WhisperX generate subtitle sidecars
 - `ORGANIZING` -> `COMPLETED` - files moved into your library; Jellyfin refresh triggered when configured
 - `REVIEW` - workflow stopped; manual attention required
@@ -25,7 +26,7 @@ Use `spindle queue list` to inspect items and `spindle queue health` for lifecyc
 Spindle runs two independent lanes:
 
 - **Foreground**: identification and ripping.
-- **Background**: episode identification, encoding, subtitles, and organizing.
+- **Background**: episode identification, encoding, audio analysis, subtitles, and organizing.
 
 This lets you rip disc B while disc A is still encoding or organizing.
 
@@ -79,7 +80,16 @@ via `spindle cache process <number>`; restored rips are reprocessed for audio re
 3. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`. The rip spec is updated after each episode so progress is recoverable.
 4. When encoding completes, the item flips to `ENCODED`. Failures surface as `FAILED` (or `REVIEW` for validation/configuration errors).
 
-## Stage 6: Subtitle Generation (SUBTITLING -> SUBTITLED)
+## Stage 6: Audio Analysis (AUDIO_ANALYZING -> AUDIO_ANALYZED)
+
+When `audio_analysis_enabled = true`, Spindle analyzes encoded files to detect and exclude commentary tracks before subtitle generation.
+
+1. Extracts audio from each encoded asset.
+2. Uses speech detection to identify commentary vs. primary audio tracks.
+3. Updates the rip spec with analysis results for downstream stages.
+4. Skipped when audio analysis is disabled or no encoded assets exist.
+
+## Stage 7: Subtitle Generation (SUBTITLING -> SUBTITLED)
 
 When `subtitles_enabled = true`, Spindle attempts OpenSubtitles first (if enabled) and falls back to WhisperX. Subtitles are generated per encoded asset.
 
@@ -95,7 +105,7 @@ When `subtitles_enabled = true`, Spindle attempts OpenSubtitles first (if enable
 
 `spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename, uses TMDB to seed OpenSubtitles when enabled, and supports `--forceai` to skip OpenSubtitles entirely.
 
-## Stage 7: Organizing & Jellyfin Refresh (ORGANIZING -> COMPLETED)
+## Stage 8: Organizing & Jellyfin Refresh (ORGANIZING -> COMPLETED)
 
 1. Spindle moves encoded artifacts into your library using TMDB metadata. Movies land under `library_dir/movies`, TV under `library_dir/tv/<Show>/Season XX/`.
 2. When `NeedsReview` is set, or when the library target is unavailable, outputs are moved to `review_dir` instead. The queue item still completes, but progress is labeled "Manual review".
