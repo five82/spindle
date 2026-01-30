@@ -258,9 +258,14 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		logger.Debug("disc number detected", logging.Int("disc_number", discNumber))
 	}
 
-	var attributes map[string]any
+	attributes := make(map[string]any)
 	if discNumber > 0 {
-		attributes = map[string]any{"disc_number": discNumber}
+		attributes["disc_number"] = discNumber
+	}
+	if scanResult.HasForcedEnglishSubtitles() {
+		attributes["has_forced_subtitle_track"] = true
+		logger.Debug("forced subtitle track detected on disc",
+			logging.Bool("has_forced_subtitle_track", true))
 	}
 
 	mediaHint := detectMediaKind(title, discLabel, scanResult)

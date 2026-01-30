@@ -71,31 +71,33 @@ func New(cfg Config) (*Client, error) {
 
 // SearchRequest describes subtitle discovery filters.
 type SearchRequest struct {
-	TMDBID          int64
-	ParentTMDBID    int64
-	IMDBID          string
-	Query           string
-	Languages       []string
-	Season          int
-	Episode         int
-	MediaType       string
-	Year            string
-	HearingImpaired bool
+	TMDBID           int64
+	ParentTMDBID     int64
+	IMDBID           string
+	Query            string
+	Languages        []string
+	Season           int
+	Episode          int
+	MediaType        string
+	Year             string
+	HearingImpaired  bool
+	ForeignPartsOnly *bool // nil = don't filter, true = only forced, false = exclude forced
 }
 
 // Subtitle represents a subtitle candidate returned by OpenSubtitles.
 type Subtitle struct {
-	ID              string
-	FileID          int64
-	Language        string
-	Release         string
-	FeatureTitle    string
-	FeatureYear     int
-	FeatureType     string
-	Downloads       int
-	HearingImpaired bool
-	HD              bool
-	AITranslated    bool
+	ID               string
+	FileID           int64
+	Language         string
+	Release          string
+	FeatureTitle     string
+	FeatureYear      int
+	FeatureType      string
+	Downloads        int
+	HearingImpaired  bool
+	ForeignPartsOnly bool
+	HD               bool
+	AITranslated     bool
 }
 
 // SearchResponse bundles the subtitles returned by a query.
@@ -154,6 +156,9 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResponse,
 	if req.HearingImpaired {
 		params.Set("hearing_impaired", "true")
 	}
+	if req.ForeignPartsOnly != nil {
+		params.Set("foreign_parts_only", strconv.FormatBool(*req.ForeignPartsOnly))
+	}
 	if params.Get("type") == "" {
 		if req.Season > 0 || req.Episode > 0 {
 			params.Set("type", "episode")
@@ -197,17 +202,18 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResponse,
 			continue
 		}
 		subtitles = append(subtitles, Subtitle{
-			ID:              entry.ID,
-			FileID:          fileID,
-			Language:        entry.Attributes.Language,
-			Release:         entry.Attributes.Release,
-			FeatureTitle:    entry.Attributes.FeatureDetails.Title,
-			FeatureYear:     entry.Attributes.FeatureDetails.Year,
-			FeatureType:     entry.Attributes.FeatureDetails.FeatureType,
-			Downloads:       entry.Attributes.DownloadCount,
-			HearingImpaired: entry.Attributes.HearingImpaired,
-			HD:              entry.Attributes.HD,
-			AITranslated:    entry.Attributes.AITranslated || entry.Attributes.MachineTranslated,
+			ID:               entry.ID,
+			FileID:           fileID,
+			Language:         entry.Attributes.Language,
+			Release:          entry.Attributes.Release,
+			FeatureTitle:     entry.Attributes.FeatureDetails.Title,
+			FeatureYear:      entry.Attributes.FeatureDetails.Year,
+			FeatureType:      entry.Attributes.FeatureDetails.FeatureType,
+			Downloads:        entry.Attributes.DownloadCount,
+			HearingImpaired:  entry.Attributes.HearingImpaired,
+			ForeignPartsOnly: entry.Attributes.ForeignPartsOnly,
+			HD:               entry.Attributes.HD,
+			AITranslated:     entry.Attributes.AITranslated || entry.Attributes.MachineTranslated,
 		})
 	}
 
@@ -341,6 +347,7 @@ type searchAttributes struct {
 	Release           string         `json:"release"`
 	DownloadCount     int            `json:"download_count"`
 	HearingImpaired   bool           `json:"hearing_impaired"`
+	ForeignPartsOnly  bool           `json:"foreign_parts_only"`
 	HD                bool           `json:"hd"`
 	AITranslated      bool           `json:"ai_translated"`
 	MachineTranslated bool           `json:"machine_translated"`

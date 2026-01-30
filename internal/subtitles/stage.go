@@ -245,6 +245,9 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			Status:     ripspec.AssetStatusCompleted,
 		})
 		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, openSubsExpected, openSubsCount, aiCount, ctxMeta)
+
+		// Check for forced subtitles if disc has forced subtitle tracks
+		s.tryForcedSubtitlesForTarget(ctx, item, target, ctxMeta, &env)
 	}
 
 	// Determine final item status based on episode outcomes
@@ -589,6 +592,104 @@ func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, t
 		}
 	} else {
 		*item = itemCopy
+	}
+}
+
+// tryForcedSubtitlesForTarget checks if the disc has forced subtitle tracks and
+// downloads foreign-parts-only subtitles from OpenSubtitles if available.
+func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, env *ripspec.Envelope) {
+	if s == nil || s.service == nil || env == nil {
+		return
+	}
+
+	// Check if disc has forced subtitle tracks
+	hasForcedTrack, _ := env.Attributes["has_forced_subtitle_track"].(bool)
+	if !hasForcedTrack {
+		return
+	}
+
+	// Only attempt if OpenSubtitles is enabled
+	if !s.service.shouldUseOpenSubtitles() {
+		if s.logger != nil {
+			s.logger.Debug("forced subtitle search skipped",
+				logging.String("reason", "opensubtitles not enabled"),
+				logging.String("episode_key", target.EpisodeKey),
+			)
+		}
+		return
+	}
+
+	episodeKey := strings.ToLower(strings.TrimSpace(target.EpisodeKey))
+	if episodeKey == "" {
+		episodeKey = "primary"
+	}
+
+	if s.logger != nil {
+		s.logger.Debug("disc has forced subtitle track, searching for foreign-parts-only subtitles",
+			logging.String("episode_key", episodeKey),
+		)
+	}
+
+	// Build generation request for forced subtitle search
+	req := GenerateRequest{
+		SourcePath: target.SourcePath,
+		WorkDir:    target.WorkDir,
+		OutputDir:  target.OutputDir,
+		BaseName:   target.BaseName,
+		Context:    ctxMeta,
+		Languages:  append([]string(nil), s.service.languages...),
+	}
+
+	// Prepare a generation plan for the forced subtitle search
+	plan, err := s.service.prepareGenerationPlan(ctx, req)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Debug("forced subtitle plan preparation failed",
+				logging.Error(err),
+				logging.String("episode_key", episodeKey),
+			)
+		}
+		return
+	}
+	if plan.cleanup != nil {
+		defer plan.cleanup()
+	}
+
+	// Compute the base path for the forced subtitle output
+	basePath := filepath.Join(target.OutputDir, target.BaseName)
+
+	forcedPath, err := s.service.tryForcedSubtitles(ctx, plan, req, basePath)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("forced subtitle search failed",
+				logging.Error(err),
+				logging.String("episode_key", episodeKey),
+				logging.String(logging.FieldEventType, "forced_subtitle_search_failed"),
+				logging.String(logging.FieldErrorHint, "forced subtitles may not be available on OpenSubtitles"),
+			)
+		}
+		return
+	}
+
+	if forcedPath == "" {
+		if s.logger != nil {
+			s.logger.Warn("no forced subtitles found on OpenSubtitles",
+				logging.String("episode_key", episodeKey),
+				logging.String("title", strings.TrimSpace(ctxMeta.Title)),
+				logging.String(logging.FieldEventType, "forced_subtitle_not_found"),
+				logging.String(logging.FieldErrorHint, "forced subtitles may not be available on OpenSubtitles for this title"),
+				logging.String(logging.FieldImpact, "forced subtitles will be missing; foreign language dialogue may not have translations"),
+			)
+		}
+		return
+	}
+
+	if s.logger != nil {
+		s.logger.Info("forced subtitle downloaded successfully",
+			logging.String(logging.FieldEventType, "forced_subtitle_complete"),
+			logging.String("episode_key", episodeKey),
+			logging.String("forced_subtitle_path", forcedPath),
+		)
 	}
 }
 

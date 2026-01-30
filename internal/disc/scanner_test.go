@@ -338,3 +338,114 @@ func TestIsGenericLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestHasForcedEnglishSubtitles(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   *disc.ScanResult
+		expected bool
+	}{
+		{
+			name:     "nil result",
+			result:   nil,
+			expected: false,
+		},
+		{
+			name:     "empty result",
+			result:   &disc.ScanResult{},
+			expected: false,
+		},
+		{
+			name: "no subtitle tracks",
+			result: &disc.ScanResult{
+				Titles: []disc.Title{
+					{
+						ID: 0,
+						Tracks: []disc.Track{
+							{Type: disc.TrackTypeVideo, Name: "Video"},
+							{Type: disc.TrackTypeAudio, Name: "Audio", Language: "eng"},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "regular subtitle only",
+			result: &disc.ScanResult{
+				Titles: []disc.Title{
+					{
+						ID: 0,
+						Tracks: []disc.Track{
+							{Type: disc.TrackTypeVideo, Name: "Video"},
+							{Type: disc.TrackTypeSubtitle, Name: "PGS English", Language: "eng"},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "forced english subtitle",
+			result: &disc.ScanResult{
+				Titles: []disc.Title{
+					{
+						ID: 0,
+						Tracks: []disc.Track{
+							{Type: disc.TrackTypeVideo, Name: "Video"},
+							{Type: disc.TrackTypeSubtitle, Name: "PGS English", Language: "eng"},
+							{Type: disc.TrackTypeSubtitle, Name: "PGS English  (forced only)", Language: "eng"},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "forced spanish subtitle not english",
+			result: &disc.ScanResult{
+				Titles: []disc.Title{
+					{
+						ID: 0,
+						Tracks: []disc.Track{
+							{Type: disc.TrackTypeVideo, Name: "Video"},
+							{Type: disc.TrackTypeSubtitle, Name: "PGS Spanish  (forced only)", Language: "spa"},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "forced subtitle in second title",
+			result: &disc.ScanResult{
+				Titles: []disc.Title{
+					{
+						ID: 0,
+						Tracks: []disc.Track{
+							{Type: disc.TrackTypeVideo, Name: "Video"},
+							{Type: disc.TrackTypeSubtitle, Name: "PGS English", Language: "eng"},
+						},
+					},
+					{
+						ID: 1,
+						Tracks: []disc.Track{
+							{Type: disc.TrackTypeVideo, Name: "Video"},
+							{Type: disc.TrackTypeSubtitle, Name: "Subtitles (forced only)", Language: "eng"},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.result.HasForcedEnglishSubtitles()
+			if result != tt.expected {
+				t.Errorf("HasForcedEnglishSubtitles() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}

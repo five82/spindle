@@ -213,3 +213,19 @@ func (c *bdInfoCommandRunner) Inspect(ctx context.Context, device string) ([]byt
 
 	return c.exec.Run(ctx, "bd_info", []string{bdInfoDevice})
 }
+
+// HasForcedEnglishSubtitles returns true if any title has forced English subtitle tracks.
+// This is used to determine whether to search for foreign-parts-only subtitles.
+func (r *ScanResult) HasForcedEnglishSubtitles() bool {
+	if r == nil {
+		return false
+	}
+	for _, title := range r.Titles {
+		for _, track := range title.Tracks {
+			if track.IsForced() && strings.EqualFold(track.Language, "eng") {
+				return true
+			}
+		}
+	}
+	return false
+}

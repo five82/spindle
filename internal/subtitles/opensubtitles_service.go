@@ -286,3 +286,128 @@ func (s *Service) logCandidateSummary(result, reason string, summaryLines []stri
 	debugAttrs := buildCandidateSummaryAttrs("decision_summary_full", "opensubtitles_candidate_summary", result, reason, summaryLines, 0)
 	s.logger.Debug("opensubtitles candidate summary", logging.Args(debugAttrs...)...)
 }
+
+// tryForcedSubtitles searches OpenSubtitles for foreign-parts-only (forced) subtitles.
+// Returns the output path if successful, empty string if no match found or an error occurred.
+func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, req GenerateRequest, baseName string) (string, error) {
+	if plan == nil {
+		return "", nil
+	}
+	if err := s.ensureOpenSubtitlesReady(); err != nil {
+		return "", err
+	}
+	if s.openSubs == nil {
+		return "", errors.New("opensubtitles client unavailable")
+	}
+
+	parentID := req.Context.ParentID()
+	queryTitle := strings.TrimSpace(req.Context.Title)
+	if !req.Context.IsMovie() {
+		if series := strings.TrimSpace(req.Context.SeriesTitle()); series != "" {
+			queryTitle = series
+		}
+	}
+	year := strings.TrimSpace(req.Context.Year)
+	if !req.Context.IsMovie() {
+		year = ""
+	}
+
+	foreignPartsOnly := true
+	searchReq := opensubtitles.SearchRequest{
+		TMDBID:           req.Context.TMDBID,
+		IMDBID:           req.Context.IMDBID,
+		Query:            queryTitle,
+		Languages:        append([]string(nil), req.Languages...),
+		MediaType:        mediaTypeForContext(req.Context),
+		Year:             year,
+		Season:           req.Context.Season,
+		Episode:          req.Context.Episode,
+		ParentTMDBID:     parentID,
+		ForeignPartsOnly: &foreignPartsOnly,
+	}
+
+	if s.logger != nil {
+		s.logger.Debug("searching opensubtitles for forced subtitles",
+			logging.String("title", queryTitle),
+			logging.Int64("tmdb_id", req.Context.TMDBID),
+			logging.String("languages", strings.Join(req.Languages, ",")),
+		)
+	}
+
+	resp, err := s.invokeOpenSubtitlesSearch(ctx, searchReq)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("forced subtitle search failed",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "forced_subtitle_search_failed"),
+				logging.String(logging.FieldErrorHint, "check OpenSubtitles connectivity"),
+			)
+		}
+		return "", nil // Non-fatal: just skip forced subtitles
+	}
+
+	if len(resp.Subtitles) == 0 {
+		if s.logger != nil {
+			s.logger.Debug("no forced subtitles found on opensubtitles",
+				logging.String("title", queryTitle),
+				logging.Int64("tmdb_id", req.Context.TMDBID),
+			)
+		}
+		return "", nil
+	}
+
+	// Rank and select best candidate
+	scored := rankSubtitleCandidates(resp.Subtitles, req.Languages, req.Context)
+	if len(scored) == 0 {
+		if s.logger != nil {
+			s.logger.Debug("no forced subtitle candidate matched language criteria",
+				logging.Int("results", len(resp.Subtitles)),
+				logging.String("languages", strings.Join(req.Languages, ",")),
+			)
+		}
+		return "", nil
+	}
+
+	// Create a modified plan for forced subtitle output
+	forcedPlan := *plan
+	forcedPlan.outputFile = fmt.Sprintf("%s.%s.forced.srt", baseName, plan.language)
+
+	// Try top candidates
+	candidatesToTry := scored
+	if len(candidatesToTry) > maxOpenSubtitlesCandidates {
+		candidatesToTry = candidatesToTry[:maxOpenSubtitlesCandidates]
+	}
+
+	for _, candidate := range candidatesToTry {
+		result, err := s.downloadAndAlignCandidate(ctx, &forcedPlan, req, candidate.subtitle)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Debug("forced subtitle candidate rejected",
+					logging.String("release", candidate.subtitle.Release),
+					logging.Error(err),
+				)
+			}
+			continue
+		}
+
+		if s.logger != nil {
+			s.logger.Info("forced subtitle downloaded",
+				logging.String(logging.FieldEventType, "forced_subtitle_downloaded"),
+				logging.String("subtitle_file", result.SubtitlePath),
+				logging.String("release", candidate.subtitle.Release),
+				logging.Int("segments", result.SegmentCount),
+			)
+		}
+		return result.SubtitlePath, nil
+	}
+
+	if s.logger != nil {
+		s.logger.Warn("all forced subtitle candidates rejected",
+			logging.Int("candidates_tried", len(candidatesToTry)),
+			logging.String("title", queryTitle),
+			logging.String(logging.FieldEventType, "forced_subtitle_no_match"),
+			logging.String(logging.FieldErrorHint, "forced subtitles may not be available on OpenSubtitles for this title"),
+		)
+	}
+	return "", nil
+}
