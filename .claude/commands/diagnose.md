@@ -10,7 +10,7 @@ Diagnose Spindle processing issues by analyzing structured logs.
 ## Procedure
 
 1. Check daemon status: `spindle status`
-2. Get item info (if item specified): `spindle queue describe <id> --json`
+2. Get item info (if item specified): `spindle queue show <id>`
 3. Check for debug logs first (they have richer context):
    - Look for `log_dir/debug/items/<item>.log` matching the item ID
    - Debug logs may exist from a previous diagnostic run even if daemon is now stopped or running in normal mode
