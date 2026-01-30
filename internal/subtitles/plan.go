@@ -131,22 +131,26 @@ func (s *Service) invokeWhisperX(ctx context.Context, plan *generationPlan) erro
 	if plan == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "whisperx", "Subtitle generation plan not initialized", nil)
 	}
-
-	args := s.buildWhisperXArgs(plan.audioPath, plan.runDir, plan.language)
-	model := whisperXModel
-	if s.config != nil && s.config.Subtitles.WhisperXModel != "" {
-		model = s.config.Subtitles.WhisperXModel
+	if s.whisperxSvc == nil {
+		return services.Wrap(services.ErrConfiguration, "subtitles", "whisperx", "WhisperX service not initialized", nil)
 	}
+
 	if s.logger != nil {
 		s.logger.Debug("running whisperx",
-			logging.String("model", model),
+			logging.String("model", s.whisperxSvc.Model()),
 			logging.String("language", plan.language),
-			logging.Bool("cuda", plan.cudaEnabled),
+			logging.Bool("cuda", s.whisperxSvc.CUDAEnabled()),
 		)
 	}
-	if err := s.run(ctx, whisperXCommand, args...); err != nil {
+
+	result, err := s.whisperxSvc.TranscribeFile(ctx, plan.audioPath, plan.runDir, plan.language)
+	if err != nil {
 		return services.Wrap(services.ErrExternalTool, "subtitles", "whisperx", "WhisperX execution failed", err)
 	}
+
+	// Update plan with actual output paths from transcription
+	plan.whisperSRT = result.SRTPath
+	plan.whisperJSON = result.JSONPath
 
 	if _, err := os.Stat(plan.whisperSRT); err != nil {
 		if errors.Is(err, os.ErrNotExist) {

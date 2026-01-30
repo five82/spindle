@@ -14,67 +14,12 @@ import (
 	"spindle/internal/services"
 )
 
-func (s *Service) buildWhisperXArgs(source, outputDir, language string) []string {
-	cudaEnabled := s != nil && s.config != nil && s.config.Subtitles.WhisperXCUDAEnabled
-
-	args := make([]string, 0, 32)
-	if cudaEnabled {
-		args = append(args,
-			"--index-url", whisperXCUDAIndexURL,
-			"--extra-index-url", whisperXPypiIndexURL,
-		)
-	} else {
-		args = append(args,
-			"--index-url", whisperXPypiIndexURL,
-		)
-	}
-
-	model := whisperXModel
-	if s != nil && s.config != nil && s.config.Subtitles.WhisperXModel != "" {
-		model = s.config.Subtitles.WhisperXModel
-	}
-
-	args = append(args,
-		"whisperx",
-		source,
-		"--model", model,
-		"--batch_size", whisperXBatchSize,
-		"--output_dir", outputDir,
-		"--output_format", whisperXOutputFormat,
-		"--segment_resolution", whisperXSegmentRes,
-		"--chunk_size", whisperXChunkSize,
-		"--vad_onset", whisperXVADOnset,
-		"--vad_offset", whisperXVADOffset,
-		"--beam_size", whisperXBeamSize,
-		"--best_of", whisperXBestOf,
-		"--temperature", whisperXTemperature,
-		"--patience", whisperXPatience,
-	)
-
-	vadMethod := s.activeVADMethod()
-	args = append(args, "--vad_method", vadMethod)
-	if vadMethod == whisperXVADMethodPyannote && s != nil {
-		token := strings.TrimSpace(s.hfToken)
-		if token != "" {
-			args = append(args, "--hf_token", token)
-		}
-	}
-
-	if lang := normalizeWhisperLanguage(language); lang != "" {
-		args = append(args, "--language", lang)
-	}
-	if cudaEnabled {
-		args = append(args, "--device", whisperXCUDADevice)
-	} else {
-		args = append(args, "--device", whisperXCPUDevice, "--compute_type", whisperXCPUComputeType)
-	}
-	// Ensure highlight_words is disabled (default false) without passing CLI flag.
-	return args
-}
-
 func (s *Service) extractPrimaryAudio(ctx context.Context, source string, audioIndex int, destination string) error {
 	if audioIndex < 0 {
 		return services.Wrap(services.ErrValidation, "subtitles", "extract audio", "Invalid audio track index", nil)
+	}
+	if s.whisperxSvc == nil {
+		return services.Wrap(services.ErrConfiguration, "subtitles", "extract audio", "WhisperX service not initialized", nil)
 	}
 	start := time.Now()
 	if s.logger != nil {
@@ -84,21 +29,7 @@ func (s *Service) extractPrimaryAudio(ctx context.Context, source string, audioI
 			logging.String("destination", destination),
 		)
 	}
-	args := []string{
-		"-y",
-		"-hide_banner",
-		"-loglevel", "error",
-		"-i", source,
-		"-map", fmt.Sprintf("0:%d", audioIndex),
-		"-vn",
-		"-sn",
-		"-dn",
-		"-ac", "1",
-		"-ar", "16000",
-		"-c:a", "pcm_s16le",
-		destination,
-	}
-	if err := s.run(ctx, ffmpegCommand, args...); err != nil {
+	if err := s.whisperxSvc.ExtractFullAudio(ctx, source, audioIndex, destination); err != nil {
 		return services.Wrap(services.ErrExternalTool, "subtitles", "extract audio", "Failed to extract primary audio track with ffmpeg", err)
 	}
 	if s.logger != nil {

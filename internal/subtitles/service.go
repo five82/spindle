@@ -11,8 +11,10 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/deps"
 	"spindle/internal/logging"
 	"spindle/internal/services"
+	"spindle/internal/services/whisperx"
 	"spindle/internal/subtitles/opensubtitles"
 )
 
@@ -72,7 +74,7 @@ type Service struct {
 	hfToken     string
 	hfCheck     tokenValidator
 	skipCheck   bool
-	vadOverride string
+	whisperxSvc *whisperx.Service
 
 	tokenOnce           sync.Once
 	tokenErr            error
@@ -139,6 +141,15 @@ func WithOpenSubtitlesClient(client openSubtitlesClient) ServiceOption {
 	}
 }
 
+// WithWhisperXService injects a custom WhisperX service (used in tests).
+func WithWhisperXService(svc *whisperx.Service) ServiceOption {
+	return func(s *Service) {
+		if svc != nil {
+			s.whisperxSvc = svc
+		}
+	}
+}
+
 // NewService constructs a subtitle generation service.
 func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) *Service {
 	serviceLogger := logging.NewComponentLogger(logger, "subtitles")
@@ -161,8 +172,23 @@ func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) 
 	for _, opt := range opts {
 		opt(svc)
 	}
+	customRunner := svc.run != nil
 	if svc.run == nil {
 		svc.run = svc.defaultCommandRunner
+	}
+	if svc.whisperxSvc == nil && cfg != nil {
+		whisperxCfg := whisperx.Config{
+			Model:       cfg.Subtitles.WhisperXModel,
+			CUDAEnabled: cfg.Subtitles.WhisperXCUDAEnabled,
+			VADMethod:   cfg.Subtitles.WhisperXVADMethod,
+			HFToken:     cfg.Subtitles.WhisperXHuggingFace,
+		}
+		svc.whisperxSvc = whisperx.NewService(whisperxCfg, deps.ResolveFFmpegPath())
+	}
+	// If a custom command runner was provided (e.g., for tests), configure the
+	// whisperx service to use it too so extraction and transcription are stubbed.
+	if customRunner && svc.whisperxSvc != nil {
+		svc.whisperxSvc.WithCommandRunner(svc.run)
 	}
 	return svc
 }

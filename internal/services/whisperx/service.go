@@ -33,12 +33,58 @@ func (s *Service) WithCommandRunner(runner func(ctx context.Context, name string
 	s.commandRunner = runner
 }
 
+// SetVADMethod updates the VAD method at runtime (used when HF token validation fails).
+func (s *Service) SetVADMethod(method string) {
+	s.cfg.VADMethod = method
+}
+
+// Model returns the configured model name for logging.
+func (s *Service) Model() string {
+	if s.cfg.Model != "" {
+		return s.cfg.Model
+	}
+	return DefaultModel
+}
+
+// CUDAEnabled returns whether CUDA is enabled.
+func (s *Service) CUDAEnabled() bool {
+	return s.cfg.CUDAEnabled
+}
+
+// ExtractFullAudio extracts the entire audio stream from a source file.
+// The output is a mono 16kHz WAV file suitable for WhisperX.
+// This method uses the service's command runner if configured.
+func (s *Service) ExtractFullAudio(ctx context.Context, source string, audioIndex int, dest string) error {
+	if s.commandRunner != nil {
+		args := buildFFmpegExtractArgs(source, audioIndex, -1, -1, dest)
+		return s.commandRunner(ctx, s.ffmpegBinary, args...)
+	}
+	return ExtractFullAudio(ctx, s.ffmpegBinary, source, audioIndex, dest)
+}
+
+// ExtractSegment extracts a time-range segment of audio from a source file.
+// This method uses the service's command runner if configured.
+func (s *Service) ExtractSegment(ctx context.Context, source string, audioIndex int, startSec, durationSec int, dest string) error {
+	if s.commandRunner != nil {
+		args := buildFFmpegExtractArgs(source, audioIndex, startSec, durationSec, dest)
+		return s.commandRunner(ctx, s.ffmpegBinary, args...)
+	}
+	return ExtractSegment(ctx, s.ffmpegBinary, source, audioIndex, startSec, durationSec, dest)
+}
+
 // run executes a command, using the custom runner if set.
 func (s *Service) run(ctx context.Context, name string, args ...string) error {
 	if s.commandRunner != nil {
 		return s.commandRunner(ctx, name, args...)
 	}
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec
+
+	// Torch 2.6 changed torch.load default to weights_only=true, breaking WhisperX/pyannote.
+	// Force legacy behavior so bundled WhisperX binaries can load checkpoints safely.
+	if os.Getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD") == "" {
+		cmd.Env = append(os.Environ(), "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1")
+	}
+
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(output)))
 	}

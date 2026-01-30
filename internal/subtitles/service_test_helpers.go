@@ -49,7 +49,8 @@ func setupInspectAndStub(t *testing.T, durationSeconds float64, expectCUDA bool)
 }
 
 func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) error {
-	if name == ffmpegCommand {
+	// Check if name is ffmpeg (either bare command or resolved path)
+	if name == ffmpegCommand || strings.HasSuffix(name, "/ffmpeg") {
 		s.calledFFmpeg = true
 		if len(args) == 0 {
 			s.t.Fatalf("ffmpeg called without arguments")

@@ -32,16 +32,6 @@ func (s *Service) configuredVADMethod() string {
 	return whisperXVADMethodSilero
 }
 
-func (s *Service) activeVADMethod() string {
-	if s == nil {
-		return whisperXVADMethodSilero
-	}
-	if s.vadOverride != "" {
-		return s.vadOverride
-	}
-	return s.configuredVADMethod()
-}
-
 func (s *Service) ensureTokenReady(ctx context.Context) error {
 	if s == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "token", "Subtitle service unavailable", nil)
@@ -61,7 +51,9 @@ func (s *Service) ensureTokenReady(ctx context.Context) error {
 		result, err := s.hfCheck(ctx, s.hfToken)
 		if err != nil {
 			s.tokenErr = err
-			s.vadOverride = whisperXVADMethodSilero
+			if s.whisperxSvc != nil {
+				s.whisperxSvc.SetVADMethod(whisperXVADMethodSilero)
+			}
 			return
 		}
 		s.tokenResult = &result

@@ -10,22 +10,11 @@ const (
 	progressPercentForGen    = 90.0 // Progress allocated to generation phase
 )
 
-// WhisperX configuration.
+// WhisperX configuration (parameters are in services/whisperx package).
 const (
 	whisperXCommand        = "uvx"
 	whisperXCUDAIndexURL   = "https://download.pytorch.org/whl/cu128"
 	whisperXPypiIndexURL   = "https://pypi.org/simple"
-	whisperXModel          = "large-v3" // fallback when config unavailable
-	whisperXBatchSize      = "4"
-	whisperXChunkSize      = "15"
-	whisperXVADOnset       = "0.08"
-	whisperXVADOffset      = "0.07"
-	whisperXBeamSize       = "10"
-	whisperXBestOf         = "10"
-	whisperXTemperature    = "0.0"
-	whisperXPatience       = "1.0"
-	whisperXSegmentRes     = "sentence"
-	whisperXOutputFormat   = "all"
 	whisperXCPUDevice      = "cpu"
 	whisperXCUDADevice     = "cuda"
 	whisperXCPUComputeType = "float32"

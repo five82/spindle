@@ -7,6 +7,34 @@ import (
 	"strings"
 )
 
+// buildFFmpegExtractArgs builds the ffmpeg command arguments for audio extraction.
+// If startSec < 0, extracts the full audio. Otherwise extracts from startSec for durationSec.
+func buildFFmpegExtractArgs(source string, audioIndex int, startSec, durationSec int, dest string) []string {
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+	}
+	if startSec >= 0 && durationSec > 0 {
+		args = append(args,
+			"-ss", fmt.Sprintf("%d", startSec),
+			"-t", fmt.Sprintf("%d", durationSec),
+		)
+	}
+	args = append(args,
+		"-i", source,
+		"-map", fmt.Sprintf("0:%d", audioIndex),
+		"-vn",
+		"-sn",
+		"-dn",
+		"-ac", "1",
+		"-ar", "16000",
+		"-c:a", "pcm_s16le",
+		dest,
+	)
+	return args
+}
+
 // ExtractFullAudio extracts the entire audio stream from a source file.
 // The output is a mono 16kHz WAV file suitable for WhisperX.
 func ExtractFullAudio(ctx context.Context, ffmpegBinary, source string, audioIndex int, dest string) error {
