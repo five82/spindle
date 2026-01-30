@@ -37,6 +37,10 @@ func (h *fanoutHandler) Enabled(ctx context.Context, level slog.Level) bool {
 func (h *fanoutHandler) Handle(ctx context.Context, record slog.Record) error {
 	var firstErr error
 	for idx, handler := range h.handlers {
+		// Only call Handle on handlers that accept this log level
+		if !handler.Enabled(ctx, record.Level) {
+			continue
+		}
 		rec := record
 		if idx < len(h.handlers)-1 {
 			rec = record.Clone()
