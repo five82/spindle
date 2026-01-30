@@ -196,15 +196,16 @@ func contextError(ctx context.Context) error {
 }
 
 type streamHandler struct {
-	next slog.Handler
-	hub  *StreamHub
+	next  slog.Handler
+	hub   *StreamHub
+	attrs []slog.Attr // accumulated attrs from WithAttrs calls
 }
 
 func newStreamHandler(next slog.Handler, hub *StreamHub) slog.Handler {
 	if hub == nil || next == nil {
 		return next
 	}
-	return &streamHandler{next: next, hub: hub}
+	return &streamHandler{next: next, hub: hub, attrs: nil}
 }
 
 func (h *streamHandler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -213,15 +214,20 @@ func (h *streamHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 func (h *streamHandler) Handle(ctx context.Context, record slog.Record) error {
 	if h.hub != nil {
-		h.hub.Publish(eventFromRecord(record))
+		h.hub.Publish(eventFromRecordWithAttrs(record, h.attrs))
 	}
 	return h.next.Handle(ctx, record.Clone())
 }
 
 func (h *streamHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	// Accumulate attrs so Handle() can include them in LogEvents
+	newAttrs := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
+	newAttrs = append(newAttrs, h.attrs...)
+	newAttrs = append(newAttrs, attrs...)
 	return &streamHandler{
-		next: h.next.WithAttrs(attrs),
-		hub:  h.hub,
+		next:  h.next.WithAttrs(attrs),
+		hub:   h.hub,
+		attrs: newAttrs,
 	}
 }
 
@@ -232,7 +238,7 @@ func (h *streamHandler) WithGroup(name string) slog.Handler {
 	}
 }
 
-func eventFromRecord(record slog.Record) LogEvent {
+func eventFromRecordWithAttrs(record slog.Record, preAttrs []slog.Attr) LogEvent {
 	event := LogEvent{
 		Timestamp: record.Time,
 		Level:     strings.ToUpper(record.Level.String()),
@@ -240,34 +246,44 @@ func eventFromRecord(record slog.Record) LogEvent {
 		Fields:    make(map[string]string),
 	}
 
-	var attrs []kv
-	record.Attrs(func(attr slog.Attr) bool {
+	// Process an attribute and update the event
+	processAttr := func(attr slog.Attr) {
 		key := strings.TrimSpace(attr.Key)
 		if key == "" {
-			return true
+			return
 		}
 		switch key {
 		case FieldItemID:
 			event.ItemID = attr.Value.Int64()
-			return true
 		case FieldStage:
 			event.Stage = attrString(attr.Value)
-			return true
 		case FieldLane:
 			event.Lane = attrString(attr.Value)
-			return true
 		case FieldCorrelationID:
 			event.CorrelationID = attrString(attr.Value)
-			return true
 		case "component":
 			event.Component = attrString(attr.Value)
-			return true
+		default:
+			if event.Fields == nil {
+				event.Fields = make(map[string]string)
+			}
+			event.Fields[key] = attrString(attr.Value)
 		}
-		if event.Fields == nil {
-			event.Fields = make(map[string]string)
+	}
+
+	// Process pre-accumulated attrs first (from WithAttrs calls)
+	for _, attr := range preAttrs {
+		processAttr(attr)
+	}
+
+	// Then process record attrs (call-site attrs override pre-attrs)
+	var attrs []kv
+	record.Attrs(func(attr slog.Attr) bool {
+		processAttr(attr)
+		key := strings.TrimSpace(attr.Key)
+		if key != "" {
+			attrs = append(attrs, kv{key: key, value: attr.Value})
 		}
-		event.Fields[key] = attrString(attr.Value)
-		attrs = append(attrs, kv{key: key, value: attr.Value})
 		return true
 	})
 
