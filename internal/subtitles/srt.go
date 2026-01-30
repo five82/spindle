@@ -96,6 +96,7 @@ func parseSRTTimestamp(value string) (float64, error) {
 	if value == "" {
 		return 0, fmt.Errorf("empty timestamp")
 	}
+	// Normalize period to comma (SRT standard uses comma for milliseconds)
 	value = strings.ReplaceAll(value, ".", ",")
 	timeParts := strings.Split(value, ",")
 	if len(timeParts) != 2 {
@@ -105,24 +106,14 @@ func parseSRTTimestamp(value string) (float64, error) {
 	if len(hms) != 3 {
 		return 0, fmt.Errorf("invalid timestamp %q", value)
 	}
-	hours, err := strconv.Atoi(hms[0])
-	if err != nil {
-		return 0, fmt.Errorf("parse hours: %w", err)
+	hours, errH := strconv.Atoi(hms[0])
+	minutes, errM := strconv.Atoi(hms[1])
+	seconds, errS := strconv.Atoi(hms[2])
+	millis, errMS := strconv.Atoi(timeParts[1])
+	if errH != nil || errM != nil || errS != nil || errMS != nil {
+		return 0, fmt.Errorf("invalid timestamp %q", value)
 	}
-	minutes, err := strconv.Atoi(hms[1])
-	if err != nil {
-		return 0, fmt.Errorf("parse minutes: %w", err)
-	}
-	seconds, err := strconv.Atoi(hms[2])
-	if err != nil {
-		return 0, fmt.Errorf("parse seconds: %w", err)
-	}
-	millis, err := strconv.Atoi(timeParts[1])
-	if err != nil {
-		return 0, fmt.Errorf("parse millis: %w", err)
-	}
-	total := hours*3600 + minutes*60 + seconds
-	return float64(total) + float64(millis)/1000, nil
+	return float64(hours*3600+minutes*60+seconds) + float64(millis)/1000, nil
 }
 
 // ValidateSRTContent checks an SRT file for format issues.

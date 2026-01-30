@@ -22,11 +22,7 @@ var (
 const huggingFaceWhoAmIEndpoint = "https://huggingface.co/api/whoami-v2"
 
 func (s *Service) configuredVADMethod() string {
-	if s == nil || s.config == nil {
-		return whisperXVADMethodSilero
-	}
-	method := strings.ToLower(strings.TrimSpace(s.config.Subtitles.WhisperXVADMethod))
-	if method == whisperXVADMethodPyannote {
+	if s != nil && s.config != nil && strings.EqualFold(strings.TrimSpace(s.config.Subtitles.WhisperXVADMethod), whisperXVADMethodPyannote) {
 		return whisperXVADMethodPyannote
 	}
 	return whisperXVADMethodSilero

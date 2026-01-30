@@ -91,8 +91,7 @@ func (s *Service) prepareGenerationPlan(ctx context.Context, req GenerateRequest
 
 	baseName := strings.TrimSpace(req.BaseName)
 	if baseName == "" {
-		filename := filepath.Base(source)
-		baseName = strings.TrimSuffix(filename, filepath.Ext(filename))
+		baseName = baseNameWithoutExt(source)
 	}
 
 	runDir := filepath.Join(workDir, "whisperx")

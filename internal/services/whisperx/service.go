@@ -262,26 +262,6 @@ type whisperXPayload struct {
 	Segments []Segment `json:"segments"`
 }
 
-// loadTranscriptText loads and concatenates text from a WhisperX JSON file.
-func loadTranscriptText(jsonPath string) (string, error) {
-	data, err := os.ReadFile(jsonPath)
-	if err != nil {
-		return "", err
-	}
-	var payload whisperXPayload
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return "", fmt.Errorf("parse whisperx json: %w", err)
-	}
-	var parts []string
-	for _, seg := range payload.Segments {
-		text := strings.TrimSpace(seg.Text)
-		if text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, " "), nil
-}
-
 // LoadSegments loads segments from a WhisperX JSON file.
 func LoadSegments(jsonPath string) ([]Segment, error) {
 	data, err := os.ReadFile(jsonPath)
@@ -293,4 +273,19 @@ func LoadSegments(jsonPath string) ([]Segment, error) {
 		return nil, fmt.Errorf("parse whisperx json: %w", err)
 	}
 	return payload.Segments, nil
+}
+
+// loadTranscriptText loads and concatenates text from a WhisperX JSON file.
+func loadTranscriptText(jsonPath string) (string, error) {
+	segments, err := LoadSegments(jsonPath)
+	if err != nil {
+		return "", err
+	}
+	var parts []string
+	for _, seg := range segments {
+		if text := strings.TrimSpace(seg.Text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, " "), nil
 }

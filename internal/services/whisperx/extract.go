@@ -41,20 +41,7 @@ func ExtractFullAudio(ctx context.Context, ffmpegBinary, source string, audioInd
 	if audioIndex < 0 {
 		return fmt.Errorf("extract audio: invalid audio track index %d", audioIndex)
 	}
-	args := []string{
-		"-y",
-		"-hide_banner",
-		"-loglevel", "error",
-		"-i", source,
-		"-map", fmt.Sprintf("0:%d", audioIndex),
-		"-vn",
-		"-sn",
-		"-dn",
-		"-ac", "1",
-		"-ar", "16000",
-		"-c:a", "pcm_s16le",
-		dest,
-	}
+	args := buildFFmpegExtractArgs(source, audioIndex, -1, -1, dest)
 	cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg extract: %w: %s", err, strings.TrimSpace(string(output)))
@@ -72,22 +59,7 @@ func ExtractSegment(ctx context.Context, ffmpegBinary, source string, audioIndex
 	if durationSec <= 0 {
 		return fmt.Errorf("extract segment: invalid duration %d", durationSec)
 	}
-	args := []string{
-		"-y",
-		"-hide_banner",
-		"-loglevel", "error",
-		"-ss", fmt.Sprintf("%d", startSec),
-		"-t", fmt.Sprintf("%d", durationSec),
-		"-i", source,
-		"-map", fmt.Sprintf("0:%d", audioIndex),
-		"-vn",
-		"-sn",
-		"-dn",
-		"-ac", "1",
-		"-ar", "16000",
-		"-c:a", "pcm_s16le",
-		dest,
-	}
+	args := buildFFmpegExtractArgs(source, audioIndex, startSec, durationSec, dest)
 	cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg extract segment: %w: %s", err, strings.TrimSpace(string(output)))

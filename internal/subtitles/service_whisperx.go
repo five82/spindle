@@ -172,11 +172,10 @@ func (s *Service) writeToolLog(name string, args []string, stderr string) string
 }
 
 func sanitizeToolName(value string) string {
-	value = strings.TrimSpace(filepath.Base(value))
-	if value == "" {
+	base := strings.TrimSpace(filepath.Base(value))
+	if base == "" {
 		return ""
 	}
-	value = strings.ToLower(value)
 	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
-	return strings.Trim(replacer.Replace(value), "-")
+	return strings.Trim(replacer.Replace(strings.ToLower(base)), "-")
 }
