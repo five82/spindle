@@ -78,11 +78,11 @@ type statusTransition struct {
 var stageRollbackTransitions = []statusTransition{
 	{from: StatusIdentifying, to: StatusPending},
 	{from: StatusRipping, to: StatusIdentified},
-	{from: StatusAudioAnalyzing, to: StatusRipped},
-	{from: StatusEpisodeIdentifying, to: StatusAudioAnalyzed},
+	{from: StatusEpisodeIdentifying, to: StatusRipped},
 	{from: StatusEncoding, to: StatusEpisodeIdentified},
-	{from: StatusSubtitling, to: StatusEncoded},
-	{from: StatusOrganizing, to: StatusEncoded},
+	{from: StatusAudioAnalyzing, to: StatusEncoded},
+	{from: StatusSubtitling, to: StatusAudioAnalyzed},
+	{from: StatusOrganizing, to: StatusAudioAnalyzed},
 }
 
 // DatabaseHealth captures diagnostic information about the queue database.

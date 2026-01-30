@@ -25,30 +25,20 @@ func (m *Manager) ConfigureStages(set StageSet) {
 			doneStatus:       queue.StatusRipped,
 		})
 	}
-	// Audio analysis runs in background lane after ripping
-	audioAnalyzedStatus := queue.StatusRipped
-	if set.AudioAnalysis != nil {
-		background.stages = append(background.stages, pipelineStage{
-			name:             "audio-analysis",
-			handler:          set.AudioAnalysis,
-			startStatus:      queue.StatusRipped,
-			processingStatus: queue.StatusAudioAnalyzing,
-			doneStatus:       queue.StatusAudioAnalyzed,
-		})
-		audioAnalyzedStatus = queue.StatusAudioAnalyzed
-	}
-	encoderStart := audioAnalyzedStatus
+	// Episode identification runs after ripping (before encoding)
+	encoderStart := queue.StatusRipped
 	if set.EpisodeIdentifier != nil {
 		background.stages = append(background.stages, pipelineStage{
 			name:             "episode-identifier",
 			handler:          set.EpisodeIdentifier,
-			startStatus:      audioAnalyzedStatus,
+			startStatus:      queue.StatusRipped,
 			processingStatus: queue.StatusEpisodeIdentifying,
 			doneStatus:       queue.StatusEpisodeIdentified,
 		})
 		encoderStart = queue.StatusEpisodeIdentified
 	}
-	organizerStart := queue.StatusEncoded
+	// Encoding reads from cache (no copy needed)
+	audioAnalysisStart := queue.StatusEncoded
 	if set.Encoder != nil {
 		background.stages = append(background.stages, pipelineStage{
 			name:             "encoder",
@@ -58,11 +48,24 @@ func (m *Manager) ConfigureStages(set StageSet) {
 			doneStatus:       queue.StatusEncoded,
 		})
 	}
+	// Audio analysis runs after encoding (operates on smaller encoded files)
+	subtitlesStart := audioAnalysisStart
+	if set.AudioAnalysis != nil {
+		background.stages = append(background.stages, pipelineStage{
+			name:             "audio-analysis",
+			handler:          set.AudioAnalysis,
+			startStatus:      queue.StatusEncoded,
+			processingStatus: queue.StatusAudioAnalyzing,
+			doneStatus:       queue.StatusAudioAnalyzed,
+		})
+		subtitlesStart = queue.StatusAudioAnalyzed
+	}
+	organizerStart := subtitlesStart
 	if set.Subtitles != nil {
 		background.stages = append(background.stages, pipelineStage{
 			name:             "subtitles",
 			handler:          set.Subtitles,
-			startStatus:      queue.StatusEncoded,
+			startStatus:      subtitlesStart,
 			processingStatus: queue.StatusSubtitling,
 			doneStatus:       queue.StatusSubtitled,
 		})

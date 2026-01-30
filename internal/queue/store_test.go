@@ -70,10 +70,10 @@ func TestResetStuckProcessing(t *testing.T) {
 	}{
 		{"identifying", queue.StatusIdentifying, queue.StatusPending},
 		{"ripping", queue.StatusRipping, queue.StatusIdentified},
-		{"audio_analyzing", queue.StatusAudioAnalyzing, queue.StatusRipped},
-		{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusAudioAnalyzed},
+		{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusRipped},
 		{"encoding", queue.StatusEncoding, queue.StatusEpisodeIdentified},
-		{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
+		{"audio_analyzing", queue.StatusAudioAnalyzing, queue.StatusEncoded},
+		{"organizing", queue.StatusOrganizing, queue.StatusAudioAnalyzed},
 	}
 	var ids []int64
 	for i, tc := range cases {
@@ -282,10 +282,10 @@ func TestReclaimStaleProcessing(t *testing.T) {
 		}{
 			{"identifying", queue.StatusIdentifying, queue.StatusPending},
 			{"ripping", queue.StatusRipping, queue.StatusIdentified},
-			{"audio_analyzing", queue.StatusAudioAnalyzing, queue.StatusRipped},
-			{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusAudioAnalyzed},
+			{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusRipped},
 			{"encoding", queue.StatusEncoding, queue.StatusEpisodeIdentified},
-			{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
+			{"audio_analyzing", queue.StatusAudioAnalyzing, queue.StatusEncoded},
+			{"organizing", queue.StatusOrganizing, queue.StatusAudioAnalyzed},
 		}
 		var ids []int64
 		for i, tc := range cases {

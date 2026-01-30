@@ -68,8 +68,3 @@ func copyFile(src, dst string) error {
 	}
 	return out.Close()
 }
-
-func fileExists(path string) bool {
-	info, err := os.Stat(strings.TrimSpace(path))
-	return err == nil && !info.IsDir()
-}

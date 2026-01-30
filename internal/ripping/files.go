@@ -1,9 +1,7 @@
 package ripping
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,79 +15,6 @@ func existsNonEmptyDir(path string) bool {
 	}
 	entries, err := os.ReadDir(path)
 	return err == nil && len(entries) > 0
-}
-
-func refreshWorkingCopy(src, dst string) error {
-	if strings.TrimSpace(src) == "" || strings.TrimSpace(dst) == "" {
-		return errors.New("refresh working copy: empty path")
-	}
-	if filepath.Clean(src) == filepath.Clean(dst) {
-		return nil
-	}
-	if err := os.RemoveAll(dst); err != nil {
-		return fmt.Errorf("refresh working copy: remove existing: %w", err)
-	}
-	return copyDir(src, dst)
-}
-
-func mapToWorkingPath(rawPath, rawDir, workingDir string) string {
-	rawPath = strings.TrimSpace(rawPath)
-	if rawPath == "" {
-		return rawPath
-	}
-	if strings.TrimSpace(rawDir) == "" || strings.TrimSpace(workingDir) == "" {
-		return rawPath
-	}
-	rel, err := filepath.Rel(rawDir, rawPath)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return filepath.Join(workingDir, filepath.Base(rawPath))
-	}
-	return filepath.Join(workingDir, rel)
-}
-
-func copyDir(src, dst string) error {
-	if src == "" || dst == "" {
-		return errors.New("copyDir: empty path")
-	}
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
-	}
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		if info.Mode().Type() != 0 {
-			return nil
-		}
-		return copyFile(path, target, info.Mode())
-	})
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
 }
 
 // selectCachedRip picks the largest MKV in dir, assuming it is the primary

@@ -12,7 +12,6 @@ import (
 
 	"log/slog"
 
-	"spindle/internal/audioanalysis"
 	"spindle/internal/config"
 	"spindle/internal/encodingstate"
 	"spindle/internal/logging"
@@ -180,109 +179,10 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 		)
 	}
 
-	if err := e.restoreFromCacheIfNeeded(ctx, item, env, logger); err != nil {
-		return ripspec.Envelope{}, err
-	}
+	// Encoding reads directly from item.RippedFile which points to the cache
+	// path when cache is enabled. Audio analysis now runs post-encoding.
 
 	return env, nil
-}
-
-// restoreFromCacheIfNeeded checks if ripped files need to be restored from cache
-// and performs the restore operation if necessary.
-func (e *Encoder) restoreFromCacheIfNeeded(ctx context.Context, item *queue.Item, env ripspec.Envelope, logger *slog.Logger) error {
-	cacheEnabled := e.cfg != nil && e.cfg.RipCache.Enabled && e.cache != nil
-	if !cacheEnabled {
-		logger.Debug(
-			"rip cache decision",
-			logging.String(logging.FieldDecisionType, "rip_cache_restore"),
-			logging.String("decision_result", "skip"),
-			logging.String("decision_reason", "cache_disabled"),
-			logging.String("decision_options", "restore, skip"),
-		)
-		return nil
-	}
-
-	ripDir := filepath.Dir(strings.TrimSpace(item.RippedFile))
-	if fileExists(item.RippedFile) {
-		logger.Debug(
-			"rip cache decision",
-			logging.String(logging.FieldDecisionType, "rip_cache_restore"),
-			logging.String("decision_result", "skip"),
-			logging.String("decision_reason", "ripped_file_present"),
-			logging.String("decision_options", "restore, skip"),
-			logging.String("rip_dir", ripDir),
-		)
-		return nil
-	}
-
-	logger.Debug(
-		"rip cache decision",
-		logging.String(logging.FieldDecisionType, "rip_cache_restore"),
-		logging.String("decision_result", "restore"),
-		logging.String("decision_reason", "ripped_file_missing"),
-		logging.String("decision_options", "restore, skip"),
-		logging.String("rip_dir", ripDir),
-	)
-
-	restored, err := e.cache.Restore(ctx, item, ripDir)
-	if err != nil {
-		return services.Wrap(
-			services.ErrTransient,
-			"encoding",
-			"restore rip cache",
-			"Failed to restore ripped files from cache; check cache path and permissions",
-			err,
-		)
-	}
-
-	logger.Debug(
-		"rip cache restore result",
-		logging.String(logging.FieldDecisionType, "rip_cache_restore"),
-		logging.String("decision_result", ternary(restored, "cache_hit", "cache_miss")),
-		logging.String("decision_reason", ternary(restored, "restored_from_cache", "no_cache_entry_or_target_not_empty")),
-		logging.String("decision_options", "cache_hit, cache_miss"),
-		logging.String("rip_dir", ripDir),
-	)
-
-	if restored {
-		logger.Debug(
-			"audio refinement decision",
-			logging.String(logging.FieldDecisionType, "audio_refine"),
-			logging.String("decision_result", "refine"),
-			logging.String("decision_reason", "rip_cache_restore"),
-			logging.String("decision_options", "refine, skip"),
-		)
-		paths := rippedPaths(item, env)
-		if _, err := audioanalysis.RefineAudioTargets(ctx, e.cfg, logger, paths, nil); err != nil {
-			return services.Wrap(
-				services.ErrExternalTool,
-				"encoding",
-				"refine audio tracks",
-				"Failed to optimize ripped audio tracks after cache restore",
-				err,
-			)
-		}
-	}
-
-	return nil
-}
-
-func rippedPaths(item *queue.Item, env ripspec.Envelope) []string {
-	var paths []string
-	for _, episode := range env.Episodes {
-		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
-		if ok {
-			if value := strings.TrimSpace(asset.Path); value != "" {
-				paths = append(paths, value)
-			}
-		}
-	}
-	if len(paths) == 0 && item != nil {
-		if value := strings.TrimSpace(item.RippedFile); value != "" {
-			paths = append(paths, value)
-		}
-	}
-	return paths
 }
 
 // prepareEncodedDirectory creates a clean output directory for encoded files.

@@ -402,20 +402,8 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			logging.String("ripped_file", target),
 		)
 	}
-	if useCache && destDir != workingDir {
-		if err := refreshWorkingCopy(destDir, workingDir); err != nil {
-			return services.Wrap(
-				services.ErrTransient,
-				"ripping",
-				"refresh working copy",
-				"Failed to copy raw rip into staging; check disk space and permissions",
-				err,
-			)
-		}
-		if strings.TrimSpace(target) != "" {
-			target = mapToWorkingPath(target, destDir, workingDir)
-		}
-	}
+	// When cache is enabled, item.RippedFile points directly to the cache path.
+	// Encoding reads from cache; no working copy is needed.
 
 	validationTargets := []string{}
 	if strings.TrimSpace(target) != "" {
@@ -423,10 +411,10 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 	specDirty := false
 	if hasEpisodes {
-		assignResult := assignEpisodeAssets(&env, workingDir, logger)
+		assignResult := assignEpisodeAssets(&env, destDir, logger)
 		if assignResult.Assigned == 0 {
 			logger.Error("no episode assets mapped after ripping",
-				logging.String("destination", workingDir),
+				logging.String("destination", destDir),
 				logging.String(logging.FieldEventType, "episode_asset_mapping_failed"),
 				logging.String(logging.FieldErrorHint, "verify rip outputs and episode title IDs"),
 				logging.String(logging.FieldImpact, "encoding stage will have no files to process"),

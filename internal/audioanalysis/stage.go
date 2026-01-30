@@ -83,11 +83,11 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			"Rip specification missing or invalid; rerun identification", err)
 	}
 
-	// Build list of targets to analyze
+	// Build list of targets to analyze (from encoded files)
 	targets := buildAnalysisTargets(&env, item)
 	if len(targets) == 0 {
 		return services.Wrap(services.ErrValidation, "audioanalysis", "execute",
-			"No ripped assets available for audio analysis", nil)
+			"No encoded assets available for audio analysis", nil)
 	}
 
 	// Phase 1: Commentary detection (when enabled)
@@ -228,22 +228,23 @@ func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message st
 	return nil
 }
 
-// buildAnalysisTargets extracts file paths to analyze from the rip spec.
+// buildAnalysisTargets extracts file paths to analyze from encoded assets.
+// Audio analysis now runs post-encoding to operate on smaller files.
 func buildAnalysisTargets(env *ripspec.Envelope, item *queue.Item) []string {
 	if env == nil {
 		return nil
 	}
 
 	var targets []string
-	for _, asset := range env.Assets.Ripped {
+	for _, asset := range env.Assets.Encoded {
 		if path := strings.TrimSpace(asset.Path); path != "" {
 			targets = append(targets, path)
 		}
 	}
 
-	// Fall back to item's ripped file if no assets in envelope
+	// Fall back to item's encoded file if no assets in envelope
 	if len(targets) == 0 && item != nil {
-		if path := strings.TrimSpace(item.RippedFile); path != "" {
+		if path := strings.TrimSpace(item.EncodedFile); path != "" {
 			targets = append(targets, path)
 		}
 	}
