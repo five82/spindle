@@ -179,6 +179,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 				})
 				logger.Info("commentary track detected",
 					logging.Int("track_index", candidate.Index),
+					logging.String("decision", decision.Decision),
 					logging.Float64("confidence", decision.Confidence),
 					logging.String("reason", decision.Reason),
 				)
