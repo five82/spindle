@@ -330,7 +330,7 @@ func isDebugOnlyKey(key string) bool {
 
 func shouldHideInfoValue(key, value string) bool {
 	switch key {
-	case "error_message", "error", "command", "preset_reason":
+	case "error_message", "error", "command", "preset_reason", "reason":
 		return false
 	}
 	return len(value) > 120
