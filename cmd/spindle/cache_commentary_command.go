@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -41,7 +39,7 @@ The command will:
 2. Transcribe the primary audio and each candidate using WhisperX
 3. Compare transcripts to filter out stereo downmixes (similarity check)
 4. Classify remaining candidates with the LLM
-5. Output audio samples of each candidate for manual verification
+5. Save transcripts to text files for review and troubleshooting
 
 Example:
   spindle cache commentary 1        # Run on cache entry #1
@@ -75,7 +73,7 @@ Example:
 			fmt.Fprintf(out, "\nTarget: %s\n", label)
 			printCommentaryResults(out, result)
 
-			if err := writeCommentarySamples(cmd.Context(), cfg, target, result, out); err != nil {
+			if err := writeCommentaryTranscripts(result, out); err != nil {
 				return err
 			}
 			return nil
@@ -86,10 +84,11 @@ Example:
 
 // commentaryDetectionResult captures the full results of commentary detection.
 type commentaryDetectionResult struct {
-	PrimaryIndex       int
-	PrimaryLabel       string
-	Candidates         []candidateResult
-	CommentaryIndices  []int
+	PrimaryIndex        int
+	PrimaryLabel        string
+	PrimaryTranscript   string
+	Candidates          []candidateResult
+	CommentaryIndices   []int
 	SimilarityThreshold float64
 	ConfidenceThreshold float64
 }
@@ -100,6 +99,7 @@ type candidateResult struct {
 	Language     string
 	Title        string
 	Channels     int
+	Transcript   string
 	Similarity   float64
 	IsDownmix    bool
 	LLMDecision  *audioanalysis.CommentaryDecision
@@ -262,6 +262,7 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 	if err != nil {
 		return nil, fmt.Errorf("transcribe primary audio: %w", err)
 	}
+	result.PrimaryTranscript = primaryTranscript
 	primaryFingerprint := textutil.NewFingerprint(primaryTranscript)
 
 	// Create LLM client if configured
@@ -296,6 +297,7 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 			result.Candidates = append(result.Candidates, candResult)
 			continue
 		}
+		candResult.Transcript = candidateTranscript
 
 		candidateFingerprint := textutil.NewFingerprint(candidateTranscript)
 
@@ -461,29 +463,28 @@ func printCommentaryResults(out io.Writer, result *commentaryDetectionResult) {
 	}
 }
 
-func writeCommentarySamples(ctx context.Context, cfg *config.Config, target string, result *commentaryDetectionResult, out io.Writer) error {
-	if len(result.Candidates) == 0 {
-		return nil
-	}
-
-	ffmpegBinary := deps.ResolveFFmpegPath()
-	if strings.TrimSpace(ffmpegBinary) == "" {
-		ffmpegBinary = "ffmpeg"
-	}
-	if _, err := exec.LookPath(ffmpegBinary); err != nil {
-		return fmt.Errorf("ffmpeg not found: %w", err)
-	}
-
+func writeCommentaryTranscripts(result *commentaryDetectionResult, out io.Writer) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 
-	fmt.Fprintln(out, "\nAudio Samples (first 10 minutes):")
+	fmt.Fprintln(out, "\nTranscripts (first 10 minutes):")
+
+	// Write primary audio transcript
+	if result.PrimaryTranscript != "" {
+		filename := fmt.Sprintf("commentary_primary_%d.txt", result.PrimaryIndex)
+		path := filepath.Join(cwd, filename)
+		if err := os.WriteFile(path, []byte(result.PrimaryTranscript), 0o644); err != nil {
+			return fmt.Errorf("write primary transcript: %w", err)
+		}
+		fmt.Fprintf(out, "  primary #%d -> %s\n", result.PrimaryIndex, filename)
+	}
+
+	// Write candidate transcripts
 	for _, cand := range result.Candidates {
-		lang := cand.Language
-		if lang == "" {
-			lang = "und"
+		if cand.Transcript == "" {
+			continue
 		}
 
 		reason := cand.Reason
@@ -491,43 +492,14 @@ func writeCommentarySamples(ctx context.Context, cfg *config.Config, target stri
 			reason = "unknown"
 		}
 
-		filename := fmt.Sprintf("commentary_candidate_%d_%s_%s.opus", cand.Index, sanitizeToken(lang), sanitizeToken(reason))
+		filename := fmt.Sprintf("commentary_candidate_%d_%s.txt", cand.Index, sanitizeToken(reason))
 		path := filepath.Join(cwd, filename)
-
-		if _, err := os.Stat(path); err == nil {
-			fmt.Fprintf(out, "  Warning: overwriting existing file %s\n", filename)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("inspect output file %q: %w", path, err)
+		if err := os.WriteFile(path, []byte(cand.Transcript), 0o644); err != nil {
+			return fmt.Errorf("write candidate transcript: %w", err)
 		}
-
-		title := fmt.Sprintf("Commentary Candidate #%d (%s)", cand.Index, reason)
-		args := []string{
-			"-hide_banner", "-loglevel", "error",
-			"-i", target,
-			"-map", fmt.Sprintf("0:%d", cand.Index),
-			"-t", "600",
-			"-vn", "-sn", "-dn",
-			"-c:a", "libopus",
-			"-b:a", "128k",
-			"-metadata:s:a:0", fmt.Sprintf("title=%s", title),
-			"-metadata:s:a:0", fmt.Sprintf("language=%s", lang),
-			"-y", path,
-		}
-		cmd := exec.CommandContext(ctx, ffmpegBinary, args...) //nolint:gosec
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			message := strings.TrimSpace(stderr.String())
-			if message == "" {
-				message = err.Error()
-			}
-			if strings.Contains(strings.ToLower(message), "unknown encoder 'libopus'") {
-				return fmt.Errorf("ffmpeg does not support libopus encoding: %s", message)
-			}
-			return fmt.Errorf("ffmpeg opus encode failed for stream %d: %s", cand.Index, message)
-		}
-		fmt.Fprintf(out, "  #%d -> %s\n", cand.Index, filename)
+		fmt.Fprintf(out, "  candidate #%d -> %s\n", cand.Index, filename)
 	}
+
 	return nil
 }
 
