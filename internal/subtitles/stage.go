@@ -110,7 +110,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		lastReviewError string
 	)
 	for idx, target := range targets {
-		episodeKey := strings.ToLower(strings.TrimSpace(target.EpisodeKey))
+		episodeKey := normalizeEpisodeKey(target.EpisodeKey)
 
 		// Skip already-completed subtitled episodes (enables resume after partial failure)
 		if asset, ok := env.Assets.FindAsset("subtitled", episodeKey); ok && asset.IsCompleted() {
@@ -321,10 +321,7 @@ func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string
 	if env.Attributes == nil {
 		env.Attributes = make(map[string]any)
 	}
-	key := strings.ToLower(strings.TrimSpace(episodeKey))
-	if key == "" {
-		key = "primary"
-	}
+	key := normalizeEpisodeKey(episodeKey)
 
 	entry := map[string]any{
 		"episode_key": key,
@@ -521,10 +518,7 @@ func episodeProgressLabel(target subtitleTarget) string {
 
 // processGenerationResult handles logging and RipSpec update after successful generation.
 func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, target subtitleTarget, result GenerateResult, env *ripspec.Envelope, hasRipSpec, openSubsExpected bool, openSubsCount, aiCount int, ctxMeta SubtitleContext) {
-	episodeKey := strings.ToLower(strings.TrimSpace(target.EpisodeKey))
-	if episodeKey == "" {
-		episodeKey = "primary"
-	}
+	episodeKey := normalizeEpisodeKey(target.EpisodeKey)
 
 	// Log fallback warning if OpenSubtitles was expected but WhisperX was used
 	if openSubsExpected && strings.EqualFold(result.Source, "whisperx") &&
@@ -602,13 +596,11 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		return
 	}
 
-	// Check if disc has forced subtitle tracks
 	hasForcedTrack, _ := env.Attributes["has_forced_subtitle_track"].(bool)
 	if !hasForcedTrack {
 		return
 	}
 
-	// Only attempt if OpenSubtitles is enabled
 	if !s.service.shouldUseOpenSubtitles() {
 		if s.logger != nil {
 			s.logger.Debug("forced subtitle search skipped",
@@ -619,10 +611,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		return
 	}
 
-	episodeKey := strings.ToLower(strings.TrimSpace(target.EpisodeKey))
-	if episodeKey == "" {
-		episodeKey = "primary"
-	}
+	episodeKey := normalizeEpisodeKey(target.EpisodeKey)
 
 	if s.logger != nil {
 		s.logger.Debug("disc has forced subtitle track, searching for foreign-parts-only subtitles",
@@ -630,7 +619,6 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		)
 	}
 
-	// Build generation request for forced subtitle search
 	req := GenerateRequest{
 		SourcePath: target.SourcePath,
 		WorkDir:    target.WorkDir,
@@ -640,7 +628,6 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		Languages:  append([]string(nil), s.service.languages...),
 	}
 
-	// Prepare a generation plan for the forced subtitle search
 	plan, err := s.service.prepareGenerationPlan(ctx, req)
 	if err != nil {
 		if s.logger != nil {
@@ -655,9 +642,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		defer plan.cleanup()
 	}
 
-	// Compute the base path for the forced subtitle output
 	basePath := filepath.Join(target.OutputDir, target.BaseName)
-
 	forcedPath, err := s.service.tryForcedSubtitles(ctx, plan, req, basePath)
 	if err != nil {
 		if s.logger != nil {
@@ -673,12 +658,9 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 
 	if forcedPath == "" {
 		if s.logger != nil {
-			s.logger.Warn("no forced subtitles found on OpenSubtitles",
+			s.logger.Debug("no forced subtitles found on OpenSubtitles",
 				logging.String("episode_key", episodeKey),
 				logging.String("title", strings.TrimSpace(ctxMeta.Title)),
-				logging.String(logging.FieldEventType, "forced_subtitle_not_found"),
-				logging.String(logging.FieldErrorHint, "forced subtitles may not be available on OpenSubtitles for this title"),
-				logging.String(logging.FieldImpact, "forced subtitles will be missing; foreign language dialogue may not have translations"),
 			)
 		}
 		return
@@ -796,6 +778,15 @@ func sanitizeEpisodeToken(key string, idx int) string {
 		"..", "_",
 	)
 	return replacer.Replace(token)
+}
+
+// normalizeEpisodeKey returns a lowercase, trimmed episode key or "primary" if empty.
+func normalizeEpisodeKey(key string) string {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	if normalized == "" {
+		return "primary"
+	}
+	return normalized
 }
 
 // HealthCheck reports readiness for the subtitle stage.

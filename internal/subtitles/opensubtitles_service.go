@@ -89,30 +89,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		return GenerateResult{}, false, errors.New("opensubtitles client unavailable")
 	}
 
-	parentID := req.Context.ParentID()
-	queryTitle := strings.TrimSpace(req.Context.Title)
-	if !req.Context.IsMovie() {
-		if series := strings.TrimSpace(req.Context.SeriesTitle()); series != "" {
-			queryTitle = series
-		}
-	}
-	year := strings.TrimSpace(req.Context.Year)
-	if !req.Context.IsMovie() {
-		// Episode metadata rarely includes per-episode air dates, so avoid sending a
-		// season-level year that can incorrectly exclude matches.
-		year = ""
-	}
-	searchReq := opensubtitles.SearchRequest{
-		TMDBID:       req.Context.TMDBID,
-		IMDBID:       req.Context.IMDBID,
-		Query:        queryTitle,
-		Languages:    append([]string(nil), req.Languages...),
-		MediaType:    mediaTypeForContext(req.Context),
-		Year:         year,
-		Season:       req.Context.Season,
-		Episode:      req.Context.Episode,
-		ParentTMDBID: parentID,
-	}
+	searchReq := buildBaseSearchRequest(req)
 
 	var (
 		resp      opensubtitles.SearchResponse
@@ -300,31 +277,8 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 		return "", errors.New("opensubtitles client unavailable")
 	}
 
-	parentID := req.Context.ParentID()
-	queryTitle := strings.TrimSpace(req.Context.Title)
-	if !req.Context.IsMovie() {
-		if series := strings.TrimSpace(req.Context.SeriesTitle()); series != "" {
-			queryTitle = series
-		}
-	}
-	year := strings.TrimSpace(req.Context.Year)
-	if !req.Context.IsMovie() {
-		year = ""
-	}
-
-	foreignPartsOnly := true
-	searchReq := opensubtitles.SearchRequest{
-		TMDBID:           req.Context.TMDBID,
-		IMDBID:           req.Context.IMDBID,
-		Query:            queryTitle,
-		Languages:        append([]string(nil), req.Languages...),
-		MediaType:        mediaTypeForContext(req.Context),
-		Year:             year,
-		Season:           req.Context.Season,
-		Episode:          req.Context.Episode,
-		ParentTMDBID:     parentID,
-		ForeignPartsOnly: &foreignPartsOnly,
-	}
+	searchReq := s.buildForcedSubtitleSearchRequest(req)
+	queryTitle := searchReq.Query
 
 	if s.logger != nil {
 		s.logger.Debug("searching opensubtitles for forced subtitles",
@@ -343,7 +297,7 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 				logging.String(logging.FieldErrorHint, "check OpenSubtitles connectivity"),
 			)
 		}
-		return "", nil // Non-fatal: just skip forced subtitles
+		return "", nil
 	}
 
 	if len(resp.Subtitles) == 0 {
@@ -356,7 +310,6 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 		return "", nil
 	}
 
-	// Rank and select best candidate
 	scored := rankSubtitleCandidates(resp.Subtitles, req.Languages, req.Context)
 	if len(scored) == 0 {
 		if s.logger != nil {
@@ -368,11 +321,9 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 		return "", nil
 	}
 
-	// Create a modified plan for forced subtitle output
 	forcedPlan := *plan
 	forcedPlan.outputFile = fmt.Sprintf("%s.%s.forced.srt", baseName, plan.language)
 
-	// Try top candidates
 	candidatesToTry := scored
 	if len(candidatesToTry) > maxOpenSubtitlesCandidates {
 		candidatesToTry = candidatesToTry[:maxOpenSubtitlesCandidates]
@@ -410,4 +361,41 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 		)
 	}
 	return "", nil
+}
+
+// buildForcedSubtitleSearchRequest constructs a search request for forced subtitles.
+func (s *Service) buildForcedSubtitleSearchRequest(req GenerateRequest) opensubtitles.SearchRequest {
+	searchReq := buildBaseSearchRequest(req)
+	foreignPartsOnly := true
+	searchReq.ForeignPartsOnly = &foreignPartsOnly
+	return searchReq
+}
+
+// buildBaseSearchRequest constructs a common search request from a GenerateRequest.
+func buildBaseSearchRequest(req GenerateRequest) opensubtitles.SearchRequest {
+	queryTitle := strings.TrimSpace(req.Context.Title)
+	if !req.Context.IsMovie() {
+		if series := strings.TrimSpace(req.Context.SeriesTitle()); series != "" {
+			queryTitle = series
+		}
+	}
+
+	year := strings.TrimSpace(req.Context.Year)
+	if !req.Context.IsMovie() {
+		// Episode metadata rarely includes per-episode air dates, so avoid sending a
+		// season-level year that can incorrectly exclude matches.
+		year = ""
+	}
+
+	return opensubtitles.SearchRequest{
+		TMDBID:       req.Context.TMDBID,
+		IMDBID:       req.Context.IMDBID,
+		Query:        queryTitle,
+		Languages:    append([]string(nil), req.Languages...),
+		MediaType:    mediaTypeForContext(req.Context),
+		Year:         year,
+		Season:       req.Context.Season,
+		Episode:      req.Context.Episode,
+		ParentTMDBID: req.Context.ParentID(),
+	}
 }
