@@ -3,7 +3,6 @@ package audioanalysis
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,10 +32,7 @@ type CommentaryResult struct {
 
 // TrackInfo describes an audio track.
 type TrackInfo struct {
-	Index    int
-	Codec    string
-	Channels int
-	Language string
+	Index int
 }
 
 // CommentaryTrack describes a detected commentary track.
@@ -171,30 +167,31 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 				continue
 			}
 
-			if decision.IsCommentary(s.cfg.Commentary.ConfidenceThreshold) {
+			isCommentary := decision.IsCommentary(s.cfg.Commentary.ConfidenceThreshold)
+			if isCommentary {
 				commentaryTracks = append(commentaryTracks, CommentaryTrack{
 					Index:      candidate.Index,
 					Confidence: decision.Confidence,
 					Reason:     decision.Reason,
 				})
-				logger.Info("commentary track detected",
-					logging.Int("track_index", candidate.Index),
-					logging.String("decision", decision.Decision),
-					logging.Float64("confidence", decision.Confidence),
-					logging.String("reason", decision.Reason),
-				)
 			} else {
 				excludedTracks = append(excludedTracks, ExcludedTrack{
 					Index:  candidate.Index,
-					Reason: fmt.Sprintf("llm_classification: %s (confidence: %.2f)", decision.Decision, decision.Confidence),
+					Reason: "llm_rejected",
 				})
-				logger.Info("commentary track rejected",
-					logging.Int("track_index", candidate.Index),
-					logging.String("decision", decision.Decision),
-					logging.Float64("confidence", decision.Confidence),
-					logging.String("reason", decision.Reason),
-				)
 			}
+
+			result := "rejected"
+			if isCommentary {
+				result = "detected"
+			}
+			logger.Info("commentary track classification",
+				logging.Int("track_index", candidate.Index),
+				logging.String("result", result),
+				logging.String("decision", decision.Decision),
+				logging.Float64("confidence", decision.Confidence),
+				logging.String("reason", decision.Reason),
+			)
 		} else {
 			// No LLM configured - skip LLM classification
 			logger.Debug("LLM not configured; skipping classification",
@@ -295,13 +292,9 @@ func (s *Stage) classifyWithLLM(ctx context.Context, client *llm.Client, transcr
 
 	// Parse JSON response
 	var decision CommentaryDecision
-	if err := json.Unmarshal([]byte(response), &decision); err != nil {
-		// Try to extract JSON from the response using LLM helper
-		if decodeErr := llm.DecodeLLMJSON(response, &decision); decodeErr != nil {
-			return CommentaryDecision{}, fmt.Errorf("parse llm response: %w (raw: %s)", err, response)
-		}
+	if err := llm.DecodeLLMJSON(response, &decision); err != nil {
+		return CommentaryDecision{}, fmt.Errorf("parse llm response: %w", err)
 	}
-
 	return decision, nil
 }
 

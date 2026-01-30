@@ -345,18 +345,35 @@ func CreateSample(path string) error {
 	return nil
 }
 
-// CommentaryLLMConfig returns the LLM configuration for commentary detection,
-// falling back to preset_decider settings when commentary-specific settings are not set.
-type CommentaryLLMConfig struct {
-	APIKey  string
-	BaseURL string
-	Model   string
+// LLMConfig contains common LLM settings used across features.
+type LLMConfig struct {
+	APIKey         string
+	BaseURL        string
+	Model          string
+	Referer        string
+	Title          string
+	TimeoutSeconds int
 }
+
+// PresetLLM returns the LLM settings for preset detection.
+func (c *Config) PresetLLM() LLMConfig {
+	return LLMConfig{
+		APIKey:         strings.TrimSpace(c.PresetDecider.APIKey),
+		BaseURL:        strings.TrimSpace(c.PresetDecider.BaseURL),
+		Model:          strings.TrimSpace(c.PresetDecider.Model),
+		Referer:        strings.TrimSpace(c.PresetDecider.Referer),
+		Title:          strings.TrimSpace(c.PresetDecider.Title),
+		TimeoutSeconds: c.PresetDecider.TimeoutSeconds,
+	}
+}
+
+// CommentaryLLMConfig is an alias for LLMConfig for backward compatibility.
+type CommentaryLLMConfig = LLMConfig
 
 // CommentaryLLM returns the LLM settings for commentary detection.
 // Falls back to preset_decider settings when not explicitly configured.
-func (c *Config) CommentaryLLM() CommentaryLLMConfig {
-	cfg := CommentaryLLMConfig{
+func (c *Config) CommentaryLLM() LLMConfig {
+	cfg := LLMConfig{
 		APIKey:  strings.TrimSpace(c.Commentary.APIKey),
 		BaseURL: strings.TrimSpace(c.Commentary.BaseURL),
 		Model:   strings.TrimSpace(c.Commentary.Model),

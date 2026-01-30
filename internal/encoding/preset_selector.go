@@ -102,16 +102,17 @@ func newPresetLLMClassifier(cfg *config.Config) presetClassifier {
 	if cfg == nil {
 		return nil
 	}
-	clientCfg := llm.Config{
-		APIKey:         cfg.PresetDecider.APIKey,
-		BaseURL:        cfg.PresetDecider.BaseURL,
-		Model:          cfg.PresetDecider.Model,
-		Referer:        cfg.PresetDecider.Referer,
-		Title:          cfg.PresetDecider.Title,
-		TimeoutSeconds: cfg.PresetDecider.TimeoutSeconds,
-	}
-	if strings.TrimSpace(clientCfg.APIKey) == "" {
+	llmCfg := cfg.PresetLLM()
+	if llmCfg.APIKey == "" {
 		return nil
+	}
+	clientCfg := llm.Config{
+		APIKey:         llmCfg.APIKey,
+		BaseURL:        llmCfg.BaseURL,
+		Model:          llmCfg.Model,
+		Referer:        llmCfg.Referer,
+		Title:          llmCfg.Title,
+		TimeoutSeconds: llmCfg.TimeoutSeconds,
 	}
 	return &llmPresetClassifier{client: llm.NewClient(clientCfg)}
 }
