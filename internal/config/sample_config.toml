@@ -156,5 +156,4 @@ retention_days = 60                                  # Prune logs older than thi
 [validation]
 enforce_drapto_validation = true                     # Fail encoding if Drapto validation fails
 min_vote_count_exact_match = 5                       # TMDB vote threshold for high-confidence matches
-require_subtitles = false                            # Require subtitles before organizing to library
 verify_file_size_after_move = true                   # Verify file size matches after moving to library

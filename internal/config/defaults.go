@@ -37,7 +37,6 @@ const (
 	// Validation defaults
 	defaultEnforceDraptoValidation = true
 	defaultMinVoteCountExactMatch  = 5
-	defaultRequireSubtitles        = false
 	defaultVerifyFileSizeAfterMove = true
 
 	// Commentary defaults
@@ -124,7 +123,6 @@ func Default() Config {
 		Validation: Validation{
 			EnforceDraptoValidation: defaultEnforceDraptoValidation,
 			MinVoteCountExactMatch:  defaultMinVoteCountExactMatch,
-			RequireSubtitles:        defaultRequireSubtitles,
 			VerifyFileSizeAfterMove: defaultVerifyFileSizeAfterMove,
 		},
 		Commentary: Commentary{

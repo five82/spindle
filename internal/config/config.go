@@ -134,7 +134,6 @@ type Validation struct {
 	MinVoteCountExactMatch int `toml:"min_vote_count_exact_match"`
 
 	// Organizer validation
-	RequireSubtitles        bool `toml:"require_subtitles"`
 	VerifyFileSizeAfterMove bool `toml:"verify_file_size_after_move"`
 }
 
