@@ -1,4 +1,4 @@
-package presetllm
+package llm
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ const (
 	defaultRetryAttempts  = 5
 )
 
-// Config captures the runtime settings required to talk to the preset LLM.
+// Config captures the runtime settings required to talk to the LLM.
 type Config struct {
 	APIKey         string
 	BaseURL        string
@@ -33,7 +33,7 @@ type Config struct {
 	TimeoutSeconds int
 }
 
-// DefaultHTTPTimeout returns the default timeout used for preset LLM requests.
+// DefaultHTTPTimeout returns the default timeout used for LLM requests.
 func DefaultHTTPTimeout() time.Duration {
 	return defaultHTTPTimeout
 }
@@ -83,7 +83,7 @@ func WithSleeper(sleeper func(time.Duration)) Option {
 	}
 }
 
-// NewClient constructs a preset LLM client using the supplied configuration.
+// NewClient constructs an LLM client using the supplied configuration.
 func NewClient(cfg Config, opts ...Option) *Client {
 	timeout := defaultHTTPTimeout
 	if cfg.TimeoutSeconds > 0 {
@@ -115,7 +115,7 @@ func NewClient(cfg Config, opts ...Option) *Client {
 	return client
 }
 
-// Classification captures the JSON payload returned by the LLM.
+// Classification captures the JSON payload returned by the LLM for preset classification.
 type Classification struct {
 	Profile    string  `json:"profile"`
 	Confidence float64 `json:"confidence"`
@@ -130,7 +130,7 @@ type httpStatusError struct {
 }
 
 func (e *httpStatusError) Error() string {
-	return fmt.Sprintf("preset llm request: http %d: %s", e.StatusCode, strings.TrimSpace(e.Body))
+	return fmt.Sprintf("llm request: http %d: %s", e.StatusCode, strings.TrimSpace(e.Body))
 }
 
 type emptyContentError struct {
@@ -156,13 +156,13 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 	systemPrompt = strings.TrimSpace(systemPrompt)
 	userPrompt = strings.TrimSpace(userPrompt)
 	if systemPrompt == "" {
-		return "", errors.New("preset llm complete: system prompt required")
+		return "", errors.New("llm complete: system prompt required")
 	}
 	if userPrompt == "" {
-		return "", errors.New("preset llm complete: user prompt required")
+		return "", errors.New("llm complete: user prompt required")
 	}
 	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return "", errors.New("preset llm complete: api key required")
+		return "", errors.New("llm complete: api key required")
 	}
 	payload := chatCompletionRequest{
 		Model: c.cfg.Model,
@@ -173,7 +173,7 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 		Temperature:    0,
 		ResponseFormat: map[string]string{"type": jsonResponseType},
 	}
-	return c.completionContentWithRetry(ctx, payload, "preset llm complete")
+	return c.completionContentWithRetry(ctx, payload, "llm complete")
 }
 
 // ClassifyPreset issues a classification request for the supplied description.
@@ -181,18 +181,18 @@ func (c *Client) ClassifyPreset(ctx context.Context, description string) (Classi
 	var empty Classification
 	description = strings.TrimSpace(description)
 	if description == "" {
-		return empty, errors.New("preset llm classify: description required")
+		return empty, errors.New("llm classify: description required")
 	}
 	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return empty, errors.New("preset llm classify: api key required")
+		return empty, errors.New("llm classify: api key required")
 	}
 	content, err := c.CompleteJSON(ctx, PresetClassificationPrompt, description)
 	if err != nil {
 		return empty, err
 	}
 	var parsed Classification
-	if err := decodeLLMJSON(content, &parsed); err != nil {
-		return empty, fmt.Errorf("preset llm classify: parse payload: %w", err)
+	if err := DecodeLLMJSON(content, &parsed); err != nil {
+		return empty, fmt.Errorf("llm classify: parse payload: %w", err)
 	}
 	parsed.Raw = content
 	parsed.Profile = strings.ToLower(strings.TrimSpace(parsed.Profile))
@@ -209,7 +209,7 @@ func (c *Client) ClassifyPreset(ctx context.Context, description string) (Classi
 // HealthCheck issues a fast ping to verify the API key and model are usable.
 func (c *Client) HealthCheck(ctx context.Context) error {
 	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return errors.New("preset llm health: api key required")
+		return errors.New("llm health: api key required")
 	}
 	payload := chatCompletionRequest{
 		Model: c.cfg.Model,
@@ -220,18 +220,18 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 		Temperature:    0,
 		ResponseFormat: map[string]string{"type": jsonResponseType},
 	}
-	content, err := c.completionContentWithRetry(ctx, payload, "preset llm health")
+	content, err := c.completionContentWithRetry(ctx, payload, "llm health")
 	if err != nil {
 		return err
 	}
 	var parsed struct {
 		OK bool `json:"ok"`
 	}
-	if err := decodeLLMJSON(content, &parsed); err != nil {
-		return fmt.Errorf("preset llm health: parse payload: %w", err)
+	if err := DecodeLLMJSON(content, &parsed); err != nil {
+		return fmt.Errorf("llm health: parse payload: %w", err)
 	}
 	if !parsed.OK {
-		return errors.New("preset llm health: unexpected response")
+		return errors.New("llm health: unexpected response")
 	}
 	return nil
 }
@@ -389,15 +389,15 @@ func (c *Client) sendChatRequestOnce(ctx context.Context, payload chatCompletion
 	var completion chatCompletionResponse
 	endpoint, err := url.JoinPath(c.cfg.BaseURL, "")
 	if err != nil {
-		return completion, nil, fmt.Errorf("preset llm request: build url: %w", err)
+		return completion, nil, fmt.Errorf("llm request: build url: %w", err)
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return completion, nil, fmt.Errorf("preset llm request: encode body: %w", err)
+		return completion, nil, fmt.Errorf("llm request: encode body: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
 	if err != nil {
-		return completion, nil, fmt.Errorf("preset llm request: new request: %w", err)
+		return completion, nil, fmt.Errorf("llm request: new request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -410,12 +410,12 @@ func (c *Client) sendChatRequestOnce(ctx context.Context, payload chatCompletion
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return completion, nil, fmt.Errorf("preset llm request: http error (timeout=%s): %w", c.timeoutDuration(), err)
+		return completion, nil, fmt.Errorf("llm request: http error (timeout=%s): %w", c.timeoutDuration(), err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return completion, nil, fmt.Errorf("preset llm request: read body (timeout=%s): %w", c.timeoutDuration(), err)
+		return completion, nil, fmt.Errorf("llm request: read body (timeout=%s): %w", c.timeoutDuration(), err)
 	}
 	if resp.StatusCode >= http.StatusMultipleChoices {
 		retryAfter, _ := parseRetryAfter(resp.Header.Get("Retry-After"))
@@ -426,10 +426,10 @@ func (c *Client) sendChatRequestOnce(ctx context.Context, payload chatCompletion
 		}
 	}
 	if err := json.Unmarshal(body, &completion); err != nil {
-		return completion, body, fmt.Errorf("preset llm request: decode response: %w", err)
+		return completion, body, fmt.Errorf("llm request: decode response: %w", err)
 	}
 	if completion.Error != nil {
-		return completion, body, fmt.Errorf("preset llm request: api error: %s", strings.TrimSpace(completion.Error.Message))
+		return completion, body, fmt.Errorf("llm request: api error: %s", strings.TrimSpace(completion.Error.Message))
 	}
 	return completion, body, nil
 }
@@ -560,7 +560,7 @@ func (c *Client) sleep(ctx context.Context, delay time.Duration) error {
 		return nil
 	}
 	if ctx == nil {
-		return errors.New("preset llm retry: nil context")
+		return errors.New("llm retry: nil context")
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -603,7 +603,8 @@ func parseRetryAfter(value string) (time.Duration, bool) {
 	return 0, false
 }
 
-func decodeLLMJSON(content string, target any) error {
+// DecodeLLMJSON decodes JSON from an LLM response, handling common formatting quirks.
+func DecodeLLMJSON(content string, target any) error {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
 		return errors.New("empty payload")

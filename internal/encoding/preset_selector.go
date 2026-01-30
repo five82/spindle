@@ -14,7 +14,7 @@ import (
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/queue"
-	"spindle/internal/services/presetllm"
+	"spindle/internal/services/llm"
 )
 
 const (
@@ -95,14 +95,14 @@ type presetClassifier interface {
 }
 
 type llmPresetClassifier struct {
-	client *presetllm.Client
+	client *llm.Client
 }
 
 func newPresetLLMClassifier(cfg *config.Config) presetClassifier {
 	if cfg == nil {
 		return nil
 	}
-	clientCfg := presetllm.Config{
+	clientCfg := llm.Config{
 		APIKey:         cfg.PresetDecider.APIKey,
 		BaseURL:        cfg.PresetDecider.BaseURL,
 		Model:          cfg.PresetDecider.Model,
@@ -113,7 +113,7 @@ func newPresetLLMClassifier(cfg *config.Config) presetClassifier {
 	if strings.TrimSpace(clientCfg.APIKey) == "" {
 		return nil
 	}
-	return &llmPresetClassifier{client: presetllm.NewClient(clientCfg)}
+	return &llmPresetClassifier{client: llm.NewClient(clientCfg)}
 }
 
 func (c *llmPresetClassifier) Classify(ctx context.Context, req presetRequest) (presetClassification, error) {
@@ -279,7 +279,7 @@ func presetDeciderTimeoutSeconds(cfg *config.PresetDecider) int {
 	if cfg != nil && cfg.TimeoutSeconds > 0 {
 		return cfg.TimeoutSeconds
 	}
-	return int(presetllm.DefaultHTTPTimeout().Seconds())
+	return int(llm.DefaultHTTPTimeout().Seconds())
 }
 
 func (e *Encoder) detectResolutionLabel(ctx context.Context, path string) (string, error) {

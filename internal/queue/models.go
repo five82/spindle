@@ -14,6 +14,8 @@ const (
 	StatusIdentified         Status = "identified"
 	StatusRipping            Status = "ripping"
 	StatusRipped             Status = "ripped"
+	StatusAudioAnalyzing     Status = "audio_analyzing"
+	StatusAudioAnalyzed      Status = "audio_analyzed"
 	StatusEpisodeIdentifying Status = "episode_identifying"
 	StatusEpisodeIdentified  Status = "episode_identified"
 	StatusEncoding           Status = "encoding"
@@ -37,6 +39,8 @@ var allStatuses = []Status{
 	StatusIdentified,
 	StatusRipping,
 	StatusRipped,
+	StatusAudioAnalyzing,
+	StatusAudioAnalyzed,
 	StatusEpisodeIdentifying,
 	StatusEpisodeIdentified,
 	StatusEncoding,
@@ -59,6 +63,7 @@ var statusSet = func() map[Status]struct{} {
 var processingStatuses = map[Status]struct{}{
 	StatusIdentifying:        {},
 	StatusRipping:            {},
+	StatusAudioAnalyzing:     {},
 	StatusEpisodeIdentifying: {},
 	StatusEncoding:           {},
 	StatusSubtitling:         {},
@@ -73,7 +78,8 @@ type statusTransition struct {
 var stageRollbackTransitions = []statusTransition{
 	{from: StatusIdentifying, to: StatusPending},
 	{from: StatusRipping, to: StatusIdentified},
-	{from: StatusEpisodeIdentifying, to: StatusRipped},
+	{from: StatusAudioAnalyzing, to: StatusRipped},
+	{from: StatusEpisodeIdentifying, to: StatusAudioAnalyzed},
 	{from: StatusEncoding, to: StatusEpisodeIdentified},
 	{from: StatusSubtitling, to: StatusEncoded},
 	{from: StatusOrganizing, to: StatusEncoded},
@@ -215,6 +221,7 @@ func (i Item) IsInWorkflow() bool {
 	switch i.Status {
 	case StatusIdentified,
 		StatusRipped,
+		StatusAudioAnalyzed,
 		StatusEpisodeIdentified,
 		StatusEncoded,
 		StatusSubtitled,
@@ -239,6 +246,8 @@ func (s Status) StageKey() string {
 		StatusIdentified,
 		StatusRipping,
 		StatusRipped,
+		StatusAudioAnalyzing,
+		StatusAudioAnalyzed,
 		StatusEpisodeIdentifying,
 		StatusEpisodeIdentified,
 		StatusEncoding,
@@ -269,7 +278,7 @@ func LaneForItem(item *Item) ProcessingLane {
 	switch item.Status {
 	case StatusPending, StatusIdentifying, StatusIdentified, StatusRipping:
 		return LaneForeground
-	case StatusRipped, StatusEpisodeIdentifying, StatusEpisodeIdentified, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted, StatusSubtitling, StatusSubtitled:
+	case StatusRipped, StatusAudioAnalyzing, StatusAudioAnalyzed, StatusEpisodeIdentifying, StatusEpisodeIdentified, StatusEncoding, StatusEncoded, StatusOrganizing, StatusCompleted, StatusSubtitling, StatusSubtitled:
 		return LaneBackground
 	case StatusFailed:
 		if item.ItemLogPath != "" {

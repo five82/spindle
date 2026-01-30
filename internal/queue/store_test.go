@@ -70,7 +70,8 @@ func TestResetStuckProcessing(t *testing.T) {
 	}{
 		{"identifying", queue.StatusIdentifying, queue.StatusPending},
 		{"ripping", queue.StatusRipping, queue.StatusIdentified},
-		{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusRipped},
+		{"audio_analyzing", queue.StatusAudioAnalyzing, queue.StatusRipped},
+		{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusAudioAnalyzed},
 		{"encoding", queue.StatusEncoding, queue.StatusEpisodeIdentified},
 		{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
 	}
@@ -281,7 +282,8 @@ func TestReclaimStaleProcessing(t *testing.T) {
 		}{
 			{"identifying", queue.StatusIdentifying, queue.StatusPending},
 			{"ripping", queue.StatusRipping, queue.StatusIdentified},
-			{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusRipped},
+			{"audio_analyzing", queue.StatusAudioAnalyzing, queue.StatusRipped},
+			{"episode_identifying", queue.StatusEpisodeIdentifying, queue.StatusAudioAnalyzed},
 			{"encoding", queue.StatusEncoding, queue.StatusEpisodeIdentified},
 			{"organizing", queue.StatusOrganizing, queue.StatusEncoded},
 		}
@@ -304,6 +306,7 @@ func TestReclaimStaleProcessing(t *testing.T) {
 			time.Now().Add(-1*time.Hour),
 			queue.StatusIdentifying,
 			queue.StatusRipping,
+			queue.StatusAudioAnalyzing,
 			queue.StatusEpisodeIdentifying,
 			queue.StatusEncoding,
 			queue.StatusOrganizing,

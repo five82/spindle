@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"spindle/internal/services/presetllm"
+	"spindle/internal/services/llm"
 )
 
 const presetDeciderTestDescription = "Toy Story (type: movie) (year: 1995) (resolution: 1080p/HD) (source: blu-ray)"
@@ -44,11 +44,11 @@ This command does not touch the queue database or require the daemon.`,
 				return fmt.Errorf("load configuration: %w", err)
 			}
 
-			writeSection(cmd.ErrOrStderr(), "System Prompt", presetllm.PresetClassificationPrompt)
+			writeSection(cmd.ErrOrStderr(), "System Prompt", llm.PresetClassificationPrompt)
 			writeSection(cmd.ErrOrStderr(), "User Description", presetDeciderTestDescription)
 			writeSection(cmd.ErrOrStderr(), "Response", "Printed to stdout as JSON.")
 
-			client := presetllm.NewClient(presetllm.Config{
+			client := llm.NewClient(llm.Config{
 				APIKey:  cfg.PresetDecider.APIKey,
 				BaseURL: cfg.PresetDecider.BaseURL,
 				Model:   cfg.PresetDecider.Model,

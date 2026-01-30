@@ -1,4 +1,4 @@
-package ripping
+package audioanalysis
 
 import (
 	"bytes"
@@ -430,4 +430,13 @@ func validateRemuxedAudio(ctx context.Context, ffprobeBinary, path string, expec
 	}
 
 	return nil
+}
+
+// probeVideo runs ffprobe on a video file and returns the parsed result.
+func probeVideo(ctx context.Context, ffprobeBinary, path string) (*ffprobe.Result, error) {
+	result, err := ffprobe.Inspect(ctx, ffprobeBinary, path)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }

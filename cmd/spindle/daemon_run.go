@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"spindle/internal/audioanalysis"
 	"spindle/internal/config"
 	"spindle/internal/daemon"
 	"spindle/internal/deps"
@@ -182,6 +183,7 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 	mgr.ConfigureStages(workflow.StageSet{
 		Identifier:        identification.NewIdentifier(cfg, store, logger),
 		Ripper:            ripping.NewRipper(cfg, store, logger),
+		AudioAnalysis:     audioanalysis.NewStage(cfg, store, logger),
 		EpisodeIdentifier: episodeid.NewEpisodeIdentifier(cfg, store, logger),
 		Encoder:           encoding.NewEncoder(cfg, store, logger),
 		Subtitles:         subtitleStage,

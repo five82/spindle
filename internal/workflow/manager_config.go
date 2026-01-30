@@ -25,12 +25,24 @@ func (m *Manager) ConfigureStages(set StageSet) {
 			doneStatus:       queue.StatusRipped,
 		})
 	}
-	encoderStart := queue.StatusRipped
+	// Audio analysis runs in background lane after ripping
+	audioAnalyzedStatus := queue.StatusRipped
+	if set.AudioAnalysis != nil {
+		background.stages = append(background.stages, pipelineStage{
+			name:             "audio-analysis",
+			handler:          set.AudioAnalysis,
+			startStatus:      queue.StatusRipped,
+			processingStatus: queue.StatusAudioAnalyzing,
+			doneStatus:       queue.StatusAudioAnalyzed,
+		})
+		audioAnalyzedStatus = queue.StatusAudioAnalyzed
+	}
+	encoderStart := audioAnalyzedStatus
 	if set.EpisodeIdentifier != nil {
 		background.stages = append(background.stages, pipelineStage{
 			name:             "episode-identifier",
 			handler:          set.EpisodeIdentifier,
-			startStatus:      queue.StatusRipped,
+			startStatus:      audioAnalyzedStatus,
 			processingStatus: queue.StatusEpisodeIdentifying,
 			doneStatus:       queue.StatusEpisodeIdentified,
 		})

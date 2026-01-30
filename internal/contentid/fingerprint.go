@@ -2,30 +2,24 @@ package contentid
 
 import (
 	"errors"
-	"math"
 	"os"
-	"regexp"
 	"strings"
 
 	"spindle/internal/subtitles"
+	"spindle/internal/textutil"
 )
-
-type tokenFingerprint struct {
-	tokens map[string]float64
-	norm   float64
-}
 
 type ripFingerprint struct {
 	EpisodeKey string
 	TitleID    int
 	Path       string
-	Vector     *tokenFingerprint
+	Vector     *textutil.Fingerprint
 }
 
 type referenceFingerprint struct {
 	EpisodeNumber int
 	Title         string
-	Vector        *tokenFingerprint
+	Vector        *textutil.Fingerprint
 	FileID        int64
 	Language      string
 	CachePath     string
@@ -40,8 +34,6 @@ type matchResult struct {
 	SubtitleLanguage  string
 	SubtitleCachePath string
 }
-
-var tokenSplitPattern = regexp.MustCompile(`[^a-z0-9]+`)
 
 func loadPlainText(path string) (string, error) {
 	data, err := os.ReadFile(path)
@@ -63,51 +55,12 @@ func normalizeSubtitlePayload(data []byte) (string, error) {
 	return text, nil
 }
 
-func newFingerprint(text string) *tokenFingerprint {
-	tokens := tokenize(text)
-	if len(tokens) == 0 {
-		return nil
-	}
-	counts := make(map[string]float64, len(tokens))
-	for _, token := range tokens {
-		counts[token]++
-	}
-	var norm float64
-	for _, count := range counts {
-		norm += count * count
-	}
-	return &tokenFingerprint{
-		tokens: counts,
-		norm:   math.Sqrt(norm),
-	}
+// newFingerprint creates a fingerprint from text using the textutil package.
+func newFingerprint(text string) *textutil.Fingerprint {
+	return textutil.NewFingerprint(text)
 }
 
-func tokenize(text string) []string {
-	lowered := strings.ToLower(text)
-	raw := tokenSplitPattern.Split(lowered, -1)
-	terms := make([]string, 0, len(raw))
-	for _, token := range raw {
-		token = strings.TrimSpace(token)
-		if len(token) < 3 {
-			continue
-		}
-		terms = append(terms, token)
-	}
-	return terms
-}
-
-func cosineSimilarity(a, b *tokenFingerprint) float64 {
-	if a == nil || b == nil || a.norm == 0 || b.norm == 0 {
-		return 0
-	}
-	var dot float64
-	for token, count := range a.tokens {
-		if other, ok := b.tokens[token]; ok {
-			dot += count * other
-		}
-	}
-	if dot == 0 {
-		return 0
-	}
-	return dot / (a.norm * b.norm)
+// cosineSimilarity computes similarity between two fingerprints using the textutil package.
+func cosineSimilarity(a, b *textutil.Fingerprint) float64 {
+	return textutil.CosineSimilarity(a, b)
 }

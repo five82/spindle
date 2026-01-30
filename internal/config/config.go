@@ -138,6 +138,25 @@ type Validation struct {
 	VerifyFileSizeAfterMove bool `toml:"verify_file_size_after_move"`
 }
 
+// Commentary contains configuration for commentary track detection.
+type Commentary struct {
+	// Enabled controls whether commentary detection runs during audio analysis.
+	Enabled bool `toml:"enabled"`
+	// WhisperXModel is the model to use for transcription (e.g., "large-v3-turbo").
+	// If empty, defaults to the subtitles model or "large-v3-turbo".
+	WhisperXModel string `toml:"whisperx_model"`
+	// SimilarityThreshold is the cosine similarity above which a track is considered
+	// a stereo downmix of the primary audio (not commentary). Default: 0.92
+	SimilarityThreshold float64 `toml:"similarity_threshold"`
+	// ConfidenceThreshold is the LLM confidence required to classify a track as
+	// commentary. Default: 0.80
+	ConfidenceThreshold float64 `toml:"confidence_threshold"`
+	// LLM settings - if not set, falls back to preset_decider settings
+	APIKey  string `toml:"api_key"`
+	BaseURL string `toml:"base_url"`
+	Model   string `toml:"model"`
+}
+
 // Config encapsulates all configuration values for Spindle.
 //
 // Configuration sections by subsystem:
@@ -150,6 +169,7 @@ type Validation struct {
 //   - RipCache: cached raw rips for re-encoding
 //   - MakeMKV: disc ripping settings and keydb
 //   - PresetDecider: LLM-based encoding preset selection
+//   - Commentary: commentary track detection via audio analysis
 //   - Workflow: daemon polling intervals and timeouts
 //   - Logging: log format, level, and retention
 //   - Validation: pipeline validation checks and thresholds
@@ -163,6 +183,7 @@ type Config struct {
 	RipCache      RipCache      `toml:"rip_cache"`
 	MakeMKV       MakeMKV       `toml:"makemkv"`
 	PresetDecider PresetDecider `toml:"preset_decider"`
+	Commentary    Commentary    `toml:"commentary"`
 	Workflow      Workflow      `toml:"workflow"`
 	Logging       Logging       `toml:"logging"`
 	Validation    Validation    `toml:"validation"`
@@ -327,4 +348,33 @@ func CreateSample(path string) error {
 		return fmt.Errorf("write sample config: %w", err)
 	}
 	return nil
+}
+
+// CommentaryLLMConfig returns the LLM configuration for commentary detection,
+// falling back to preset_decider settings when commentary-specific settings are not set.
+type CommentaryLLMConfig struct {
+	APIKey  string
+	BaseURL string
+	Model   string
+}
+
+// CommentaryLLM returns the LLM settings for commentary detection.
+// Falls back to preset_decider settings when not explicitly configured.
+func (c *Config) CommentaryLLM() CommentaryLLMConfig {
+	cfg := CommentaryLLMConfig{
+		APIKey:  strings.TrimSpace(c.Commentary.APIKey),
+		BaseURL: strings.TrimSpace(c.Commentary.BaseURL),
+		Model:   strings.TrimSpace(c.Commentary.Model),
+	}
+	// Fall back to preset_decider settings
+	if cfg.APIKey == "" {
+		cfg.APIKey = strings.TrimSpace(c.PresetDecider.APIKey)
+	}
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = strings.TrimSpace(c.PresetDecider.BaseURL)
+	}
+	if cfg.Model == "" {
+		cfg.Model = strings.TrimSpace(c.PresetDecider.Model)
+	}
+	return cfg
 }

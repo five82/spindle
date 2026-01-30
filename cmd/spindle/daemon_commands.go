@@ -18,7 +18,7 @@ import (
 	"spindle/internal/deps"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
-	"spindle/internal/services/presetllm"
+	"spindle/internal/services/llm"
 )
 
 func newDaemonCommands(ctx *commandContext) []*cobra.Command {
@@ -461,7 +461,7 @@ func presetDeciderDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	client := presetllm.NewClient(presetllm.Config{
+	client := llm.NewClient(llm.Config{
 		APIKey:  key,
 		BaseURL: cfg.PresetDecider.BaseURL,
 		Model:   cfg.PresetDecider.Model,

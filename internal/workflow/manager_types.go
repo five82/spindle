@@ -19,6 +19,7 @@ type StageHandler interface {
 type StageSet struct {
 	Identifier        StageHandler
 	Ripper            StageHandler
+	AudioAnalysis     StageHandler
 	EpisodeIdentifier StageHandler
 	Encoder           StageHandler
 	Subtitles         StageHandler

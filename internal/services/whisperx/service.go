@@ -1,0 +1,250 @@
+package whisperx
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// Service provides WhisperX transcription capabilities.
+type Service struct {
+	cfg           Config
+	ffmpegBinary  string
+	commandRunner func(ctx context.Context, name string, args ...string) error
+}
+
+// NewService creates a WhisperX service with the given configuration.
+func NewService(cfg Config, ffmpegBinary string) *Service {
+	if ffmpegBinary == "" {
+		ffmpegBinary = FFmpegCommand
+	}
+	return &Service{
+		cfg:          cfg,
+		ffmpegBinary: ffmpegBinary,
+	}
+}
+
+// WithCommandRunner sets a custom command runner (for testing).
+func (s *Service) WithCommandRunner(runner func(ctx context.Context, name string, args ...string) error) {
+	s.commandRunner = runner
+}
+
+// run executes a command, using the custom runner if set.
+func (s *Service) run(ctx context.Context, name string, args ...string) error {
+	if s.commandRunner != nil {
+		return s.commandRunner(ctx, name, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// TranscribeResult contains the result of a transcription.
+type TranscribeResult struct {
+	// Text is the plain text transcription.
+	Text string
+	// SRTPath is the path to the generated SRT file (if available).
+	SRTPath string
+	// JSONPath is the path to the generated JSON file (if available).
+	JSONPath string
+}
+
+// TranscribeFile transcribes an audio file and returns the text.
+// The source should be a WAV file extracted for WhisperX.
+// outputDir is where WhisperX will write its output files.
+func (s *Service) TranscribeFile(ctx context.Context, source, outputDir, language string) (TranscribeResult, error) {
+	var result TranscribeResult
+
+	if source == "" {
+		return result, fmt.Errorf("transcribe: source path required")
+	}
+	if outputDir == "" {
+		outputDir = filepath.Dir(source)
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return result, fmt.Errorf("transcribe: ensure output dir: %w", err)
+	}
+
+	args := s.buildArgs(source, outputDir, language)
+	if err := s.run(ctx, UVXCommand, args...); err != nil {
+		return result, fmt.Errorf("whisperx: %w", err)
+	}
+
+	// Derive output file paths from source
+	baseName := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
+	result.SRTPath = filepath.Join(outputDir, baseName+".srt")
+	result.JSONPath = filepath.Join(outputDir, baseName+".json")
+
+	// Load transcript text from JSON
+	if text, err := loadTranscriptText(result.JSONPath); err == nil {
+		result.Text = text
+	}
+
+	return result, nil
+}
+
+// TranscribeSegment extracts and transcribes a segment of audio.
+// startSec is the start time in seconds, durationSec is the segment length.
+// workDir is a working directory for temporary files.
+func (s *Service) TranscribeSegment(ctx context.Context, source string, audioIndex int, startSec, durationSec int, workDir, language string) (TranscribeResult, error) {
+	var result TranscribeResult
+
+	if workDir == "" {
+		return result, fmt.Errorf("transcribe segment: workDir required")
+	}
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return result, fmt.Errorf("transcribe segment: ensure workDir: %w", err)
+	}
+
+	// Extract segment
+	segmentPath := filepath.Join(workDir, fmt.Sprintf("segment_%d_%d.wav", startSec, durationSec))
+	if err := ExtractSegment(ctx, s.ffmpegBinary, source, audioIndex, startSec, durationSec, segmentPath); err != nil {
+		return result, fmt.Errorf("transcribe segment: extract: %w", err)
+	}
+
+	// Transcribe
+	return s.TranscribeFile(ctx, segmentPath, workDir, language)
+}
+
+// buildArgs constructs the uvx command arguments for WhisperX.
+func (s *Service) buildArgs(source, outputDir, language string) []string {
+	args := make([]string, 0, 32)
+
+	// Index URLs
+	if s.cfg.CUDAEnabled {
+		args = append(args,
+			"--index-url", CUDAIndexURL,
+			"--extra-index-url", PypiIndexURL,
+		)
+	} else {
+		args = append(args, "--index-url", PypiIndexURL)
+	}
+
+	// Model
+	model := s.cfg.Model
+	if model == "" {
+		model = DefaultModel
+	}
+
+	args = append(args,
+		"whisperx",
+		source,
+		"--model", model,
+		"--batch_size", BatchSize,
+		"--output_dir", outputDir,
+		"--output_format", OutputFormat,
+		"--segment_resolution", SegmentResolution,
+		"--chunk_size", ChunkSize,
+		"--vad_onset", VADOnset,
+		"--vad_offset", VADOffset,
+		"--beam_size", BeamSize,
+		"--best_of", BestOf,
+		"--temperature", Temperature,
+		"--patience", Patience,
+	)
+
+	// VAD method
+	vadMethod := s.cfg.VADMethod
+	if vadMethod == "" {
+		vadMethod = VADMethodSilero
+	}
+	args = append(args, "--vad_method", vadMethod)
+	if vadMethod == VADMethodPyannote && s.cfg.HFToken != "" {
+		args = append(args, "--hf_token", s.cfg.HFToken)
+	}
+
+	// Language
+	if lang := normalizeLanguage(language); lang != "" {
+		args = append(args, "--language", lang)
+	}
+
+	// Device
+	if s.cfg.CUDAEnabled {
+		args = append(args, "--device", CUDADevice)
+	} else {
+		args = append(args, "--device", CPUDevice, "--compute_type", CPUComputeType)
+	}
+
+	return args
+}
+
+// normalizeLanguage converts language codes to WhisperX format.
+func normalizeLanguage(lang string) string {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	switch lang {
+	case "en", "eng", "english":
+		return "en"
+	case "es", "spa", "spanish":
+		return "es"
+	case "fr", "fra", "fre", "french":
+		return "fr"
+	case "de", "deu", "ger", "german":
+		return "de"
+	case "it", "ita", "italian":
+		return "it"
+	case "pt", "por", "portuguese":
+		return "pt"
+	case "ja", "jpn", "japanese":
+		return "ja"
+	case "zh", "chi", "zho", "chinese":
+		return "zh"
+	case "ko", "kor", "korean":
+		return "ko"
+	default:
+		if len(lang) == 2 {
+			return lang
+		}
+		return ""
+	}
+}
+
+// Segment represents a transcribed segment from WhisperX JSON output.
+type Segment struct {
+	Text  string  `json:"text"`
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+}
+
+// whisperXPayload is the JSON structure from WhisperX output.
+type whisperXPayload struct {
+	Segments []Segment `json:"segments"`
+}
+
+// loadTranscriptText loads and concatenates text from a WhisperX JSON file.
+func loadTranscriptText(jsonPath string) (string, error) {
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return "", err
+	}
+	var payload whisperXPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", fmt.Errorf("parse whisperx json: %w", err)
+	}
+	var parts []string
+	for _, seg := range payload.Segments {
+		text := strings.TrimSpace(seg.Text)
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, " "), nil
+}
+
+// LoadSegments loads segments from a WhisperX JSON file.
+func LoadSegments(jsonPath string) ([]Segment, error) {
+	data, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return nil, err
+	}
+	var payload whisperXPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, fmt.Errorf("parse whisperx json: %w", err)
+	}
+	return payload.Segments, nil
+}

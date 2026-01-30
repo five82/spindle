@@ -418,7 +418,7 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 		m.logger.Debug("content id whisperx transcript ready",
 			logging.String("episode_key", episode.Key),
 			logging.String("subtitle_file", result.SubtitlePath),
-			logging.Int("token_count", len(fp.tokens)),
+			logging.Int("token_count", fp.TokenCount()),
 		)
 	}
 	return fingerprints, nil
@@ -641,7 +641,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			logging.Int("season", episodeData.SeasonNumber),
 			logging.Int("episode", episodeData.EpisodeNumber),
 			logging.String("title", episodeData.Name),
-			logging.Int("token_count", len(fp.tokens)),
+			logging.Int("token_count", fp.TokenCount()),
 		)
 	}
 	return references, nil

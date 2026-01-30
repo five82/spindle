@@ -1,4 +1,4 @@
-package presetllm
+package llm
 
 // PresetClassificationPrompt captures the instructions sent to the configured
 // LLM when classifying whether Drapto should use clean, grain, or default

@@ -39,6 +39,11 @@ const (
 	defaultMinVoteCountExactMatch  = 5
 	defaultRequireSubtitles        = false
 	defaultVerifyFileSizeAfterMove = true
+
+	// Commentary defaults
+	defaultCommentarySimilarityThreshold = 0.92
+	defaultCommentaryConfidenceThreshold = 0.80
+	defaultCommentaryWhisperXModel       = "large-v3-turbo"
 )
 
 // Default returns a Config populated with repository defaults.
@@ -121,6 +126,12 @@ func Default() Config {
 			MinVoteCountExactMatch:  defaultMinVoteCountExactMatch,
 			RequireSubtitles:        defaultRequireSubtitles,
 			VerifyFileSizeAfterMove: defaultVerifyFileSizeAfterMove,
+		},
+		Commentary: Commentary{
+			Enabled:             false,
+			WhisperXModel:       defaultCommentaryWhisperXModel,
+			SimilarityThreshold: defaultCommentarySimilarityThreshold,
+			ConfidenceThreshold: defaultCommentaryConfidenceThreshold,
 		},
 	}
 }

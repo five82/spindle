@@ -12,13 +12,13 @@ import (
 
 	"log/slog"
 
+	"spindle/internal/audioanalysis"
 	"spindle/internal/config"
 	"spindle/internal/encodingstate"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/ripcache"
-	"spindle/internal/ripping"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/services/drapto"
@@ -253,7 +253,7 @@ func (e *Encoder) restoreFromCacheIfNeeded(ctx context.Context, item *queue.Item
 			logging.String("decision_options", "refine, skip"),
 		)
 		paths := rippedPaths(item, env)
-		if _, err := ripping.RefineAudioTargets(ctx, e.cfg, logger, paths); err != nil {
+		if _, err := audioanalysis.RefineAudioTargets(ctx, e.cfg, logger, paths); err != nil {
 			return services.Wrap(
 				services.ErrExternalTool,
 				"encoding",

@@ -482,25 +482,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 	}
 
-	audioInfo, err := RefineAudioTargets(ctx, r.cfg, r.logger, validationTargets)
-	if err != nil {
-		return services.Wrap(
-			services.ErrExternalTool,
-			"ripping",
-			"refine audio tracks",
-			"Failed to optimize ripped audio tracks with ffmpeg",
-			err,
-		)
-	}
-
-	// Store audio info in RipSpec attributes
-	if audioInfo.PrimaryAudioDescription != "" {
-		if env.Attributes == nil {
-			env.Attributes = make(map[string]any)
-		}
-		env.Attributes["primary_audio_description"] = audioInfo.PrimaryAudioDescription
-		specDirty = true
-	}
+	// Audio refinement moved to audioanalysis stage
 
 	if specDirty {
 		if encoded, encodeErr := env.Encode(); encodeErr == nil {
