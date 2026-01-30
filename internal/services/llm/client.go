@@ -609,20 +609,24 @@ func DecodeLLMJSON(content string, target any) error {
 	if trimmed == "" {
 		return errors.New("empty payload")
 	}
-	if err := json.Unmarshal([]byte(trimmed), target); err == nil {
+
+	// Try direct unmarshal first
+	directErr := json.Unmarshal([]byte(trimmed), target)
+	if directErr == nil {
 		return nil
-	} else {
-		originalErr := err
-		sanitized := sanitizeJSONPayload(trimmed)
-		if sanitized != "" && sanitized != trimmed {
-			if err := json.Unmarshal([]byte(sanitized), target); err == nil {
-				return nil
-			} else {
-				return fmt.Errorf("%w (sanitized payload snippet: %s)", err, summarizePayloadSnippet(sanitized))
-			}
-		}
-		return fmt.Errorf("%w (payload snippet: %s)", originalErr, summarizePayloadSnippet(trimmed))
 	}
+
+	// Try sanitizing (strip code fences, extract JSON object/array)
+	sanitized := sanitizeJSONPayload(trimmed)
+	if sanitized == "" || sanitized == trimmed {
+		return fmt.Errorf("%w (payload snippet: %s)", directErr, summarizePayloadSnippet(trimmed))
+	}
+
+	sanitizedErr := json.Unmarshal([]byte(sanitized), target)
+	if sanitizedErr == nil {
+		return nil
+	}
+	return fmt.Errorf("%w (sanitized payload snippet: %s)", sanitizedErr, summarizePayloadSnippet(sanitized))
 }
 
 func sanitizeJSONPayload(content string) string {

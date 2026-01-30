@@ -226,16 +226,14 @@ func buildAnalysisTargets(env *ripspec.Envelope, item *queue.Item) []string {
 		return nil
 	}
 
-	// Check for episode assets (TV shows)
 	var targets []string
 	for _, asset := range env.Assets.Ripped {
-		path := strings.TrimSpace(asset.Path)
-		if path != "" {
+		if path := strings.TrimSpace(asset.Path); path != "" {
 			targets = append(targets, path)
 		}
 	}
 
-	// Fall back to single ripped file (movies)
+	// Fall back to item's ripped file if no assets in envelope
 	if len(targets) == 0 && item != nil {
 		if path := strings.TrimSpace(item.RippedFile); path != "" {
 			targets = append(targets, path)

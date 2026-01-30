@@ -212,24 +212,22 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 func findCommentaryCandidates(streams []ffprobe.Stream, primaryIndex int) []ffprobe.Stream {
 	var candidates []ffprobe.Stream
 	for _, stream := range streams {
-		if stream.CodecType != "audio" {
-			continue
-		}
-		if stream.Index == primaryIndex {
-			continue
-		}
-		// Look for 2-channel (stereo) tracks
-		if stream.Channels != 2 {
-			continue
-		}
-		// Check for English language
-		lang := audio.NormalizeLanguage(stream.Tags)
-		if !strings.HasPrefix(lang, "en") && lang != "" && lang != "und" {
+		if !isCommentaryCandidate(stream, primaryIndex) {
 			continue
 		}
 		candidates = append(candidates, stream)
 	}
 	return candidates
+}
+
+// isCommentaryCandidate returns true if the stream could be a commentary track.
+// Candidates are non-primary 2-channel audio tracks in English or unknown language.
+func isCommentaryCandidate(stream ffprobe.Stream, primaryIndex int) bool {
+	if stream.CodecType != "audio" || stream.Index == primaryIndex || stream.Channels != 2 {
+		return false
+	}
+	lang := audio.NormalizeLanguage(stream.Tags)
+	return strings.HasPrefix(lang, "en") || lang == "" || lang == "und"
 }
 
 // transcribeSegment transcribes a segment of an audio track.
@@ -337,52 +335,28 @@ func ApplyCommentaryDisposition(ctx context.Context, cfg *config.Config, logger 
 	return nil
 }
 
+// audioStreamMapping tracks input-to-output index mapping for audio streams.
+type audioStreamMapping struct {
+	inputIndex   int
+	outputIndex  int
+	isCommentary bool
+}
+
 // applyDispositionToFile remuxes a single file to set commentary disposition.
 func applyDispositionToFile(ctx context.Context, ffmpegBinary, path string, commentaryIndices map[int]bool, logger *slog.Logger) error {
 	if len(commentaryIndices) == 0 {
 		return nil
 	}
 
-	// Probe the file to get current audio stream layout
 	ffprobeBinary := deps.ResolveFFprobePath("")
 	probe, err := ffprobe.Inspect(ctx, ffprobeBinary, path)
 	if err != nil {
 		return fmt.Errorf("probe file: %w", err)
 	}
 
-	// Build list of audio streams with their output indices
-	var audioStreams []struct {
-		inputIndex   int
-		outputIndex  int
-		isCommentary bool
-	}
-	outputIdx := 0
-	for _, stream := range probe.Streams {
-		if stream.CodecType != "audio" {
-			continue
-		}
-		audioStreams = append(audioStreams, struct {
-			inputIndex   int
-			outputIndex  int
-			isCommentary bool
-		}{
-			inputIndex:   stream.Index,
-			outputIndex:  outputIdx,
-			isCommentary: commentaryIndices[stream.Index],
-		})
-		outputIdx++
-	}
-
-	// Check if any commentary tracks exist in this file
-	hasCommentary := false
-	for _, s := range audioStreams {
-		if s.isCommentary {
-			hasCommentary = true
-			break
-		}
-	}
-	if !hasCommentary {
-		return nil // No commentary tracks in this file
+	audioStreams := buildAudioStreamMappings(probe.Streams, commentaryIndices)
+	if !hasAnyCommentary(audioStreams) {
+		return nil
 	}
 
 	// Build ffmpeg command to remux with disposition flags
@@ -423,17 +397,50 @@ func applyDispositionToFile(ctx context.Context, ffmpegBinary, path string, comm
 	}
 
 	if logger != nil {
-		var commentaryOutputIndices []int
-		for _, s := range audioStreams {
-			if s.isCommentary {
-				commentaryOutputIndices = append(commentaryOutputIndices, s.outputIndex)
-			}
-		}
 		logger.Info("set commentary disposition",
 			logging.String("file", filepath.Base(path)),
-			logging.Int("commentary_tracks", len(commentaryOutputIndices)),
+			logging.Int("commentary_tracks", countCommentaryTracks(audioStreams)),
 		)
 	}
 
 	return nil
+}
+
+// buildAudioStreamMappings creates a mapping of audio streams to their output indices.
+func buildAudioStreamMappings(streams []ffprobe.Stream, commentaryIndices map[int]bool) []audioStreamMapping {
+	var mappings []audioStreamMapping
+	outputIdx := 0
+	for _, stream := range streams {
+		if stream.CodecType != "audio" {
+			continue
+		}
+		mappings = append(mappings, audioStreamMapping{
+			inputIndex:   stream.Index,
+			outputIndex:  outputIdx,
+			isCommentary: commentaryIndices[stream.Index],
+		})
+		outputIdx++
+	}
+	return mappings
+}
+
+// hasAnyCommentary returns true if any stream in the mappings is commentary.
+func hasAnyCommentary(mappings []audioStreamMapping) bool {
+	for _, m := range mappings {
+		if m.isCommentary {
+			return true
+		}
+	}
+	return false
+}
+
+// countCommentaryTracks returns the number of commentary tracks in the mappings.
+func countCommentaryTracks(mappings []audioStreamMapping) int {
+	count := 0
+	for _, m := range mappings {
+		if m.isCommentary {
+			count++
+		}
+	}
+	return count
 }

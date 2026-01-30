@@ -85,15 +85,9 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 				logging.Args(attrs...)...,
 			)
 		}
-		// Single audio stream - return info from that stream
-		result := AudioRefinementResult{}
-		for _, s := range probe.Streams {
-			if s.CodecType == "audio" {
-				result.PrimaryAudioDescription = formatAudioDescription(s)
-				break
-			}
-		}
-		return result, nil
+		return AudioRefinementResult{
+			PrimaryAudioDescription: findAudioDescription(probe.Streams, -1),
+		}, nil
 	}
 	selection := audio.Select(probe.Streams)
 	if selection.PrimaryIndex < 0 {
@@ -128,16 +122,8 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 		)
 	}
 
-	// Build result with audio info
 	result := AudioRefinementResult{
-		PrimaryAudioDescription: selection.PrimaryLabel(),
-	}
-	// Get full audio description from the primary stream
-	for _, s := range probe.Streams {
-		if s.Index == selection.PrimaryIndex {
-			result.PrimaryAudioDescription = formatAudioDescription(s)
-			break
-		}
+		PrimaryAudioDescription: findAudioDescription(probe.Streams, selection.PrimaryIndex),
 	}
 
 	needsRemux := selection.Changed(totalAudio) || needsDispositionFix(probe.Streams, selection.KeepIndices)
@@ -439,4 +425,18 @@ func probeVideo(ctx context.Context, ffprobeBinary, path string) (*ffprobe.Resul
 		return nil, err
 	}
 	return &result, nil
+}
+
+// findAudioDescription returns the formatted audio description for the specified stream index.
+// If index is negative, returns the description of the first audio stream found.
+func findAudioDescription(streams []ffprobe.Stream, index int) string {
+	for _, s := range streams {
+		if s.CodecType != "audio" {
+			continue
+		}
+		if index < 0 || s.Index == index {
+			return formatAudioDescription(s)
+		}
+	}
+	return ""
 }
