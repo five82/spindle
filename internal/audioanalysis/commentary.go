@@ -344,6 +344,7 @@ type audioStreamMapping struct {
 	inputIndex   int
 	outputIndex  int
 	isCommentary bool
+	title        string
 }
 
 // applyDispositionToFile remuxes a single file to set commentary disposition.
@@ -371,11 +372,14 @@ func applyDispositionToFile(ctx context.Context, ffmpegBinary, path string, comm
 	args = append(args, "-map", "0")
 	args = append(args, "-c", "copy")
 
-	// Set dispositions for audio streams
+	// Set dispositions and titles for audio streams
 	for _, s := range audioStreams {
 		if s.isCommentary {
 			// Set comment disposition for commentary tracks
 			args = append(args, fmt.Sprintf("-disposition:a:%d", s.outputIndex), "comment")
+			// Set title metadata to ensure Jellyfin displays the commentary label
+			label := commentaryLabel(s.title)
+			args = append(args, fmt.Sprintf("-metadata:s:a:%d", s.outputIndex), "title="+label)
 		} else if s.outputIndex == 0 {
 			// Ensure first audio track is default
 			args = append(args, fmt.Sprintf("-disposition:a:%d", s.outputIndex), "default")
@@ -422,10 +426,26 @@ func buildAudioStreamMappings(streams []ffprobe.Stream, commentaryIndices map[in
 			inputIndex:   stream.Index,
 			outputIndex:  outputIdx,
 			isCommentary: commentaryIndices[stream.Index],
+			title:        audioTitle(stream.Tags),
 		})
 		outputIdx++
 	}
 	return mappings
+}
+
+// commentaryLabel formats a stream title for a commentary track.
+// If the title is empty, returns "Commentary".
+// If the title already contains "commentary" (case-insensitive), returns the original title.
+// Otherwise, appends " (Commentary)" to the title.
+func commentaryLabel(original string) string {
+	title := strings.TrimSpace(original)
+	if title == "" {
+		return "Commentary"
+	}
+	if strings.Contains(strings.ToLower(title), "commentary") {
+		return title
+	}
+	return title + " (Commentary)"
 }
 
 // hasAnyCommentary returns true if any stream in the mappings is commentary.
