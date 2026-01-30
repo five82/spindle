@@ -37,6 +37,7 @@ type QueueItem struct {
 	EpisodesSynced          bool                      `json:"episodesSynchronized,omitempty"`
 	SubtitleGeneration      *SubtitleGenerationStatus `json:"subtitleGeneration,omitempty"`
 	PrimaryAudioDescription string                    `json:"primaryAudioDescription,omitempty"`
+	CommentaryCount         int                       `json:"commentaryCount,omitempty"`
 }
 
 // QueueProgress captures stage progress information for a queue entry.
