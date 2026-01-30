@@ -257,6 +257,8 @@ func (s *Stage) createLLMClient() *llm.Client {
 		APIKey:  llmCfg.APIKey,
 		BaseURL: llmCfg.BaseURL,
 		Model:   llmCfg.Model,
+		Referer: llmCfg.Referer,
+		Title:   llmCfg.Title,
 	})
 }
 

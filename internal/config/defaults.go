@@ -42,6 +42,7 @@ const (
 	defaultCommentarySimilarityThreshold = 0.92
 	defaultCommentaryConfidenceThreshold = 0.80
 	defaultCommentaryWhisperXModel       = "large-v3-turbo"
+	defaultCommentaryTitle               = "Spindle Commentary Detector"
 )
 
 // Default returns a Config populated with repository defaults.

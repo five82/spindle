@@ -377,8 +377,11 @@ func (c *Config) CommentaryLLM() LLMConfig {
 		APIKey:  strings.TrimSpace(c.Commentary.APIKey),
 		BaseURL: strings.TrimSpace(c.Commentary.BaseURL),
 		Model:   strings.TrimSpace(c.Commentary.Model),
+		// Use commentary-specific title, falling back to preset_decider settings
+		Referer: strings.TrimSpace(c.PresetDecider.Referer),
+		Title:   defaultCommentaryTitle,
 	}
-	// Fall back to preset_decider settings
+	// Fall back to preset_decider settings for connection details
 	if cfg.APIKey == "" {
 		cfg.APIKey = strings.TrimSpace(c.PresetDecider.APIKey)
 	}
