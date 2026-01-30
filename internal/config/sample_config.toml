@@ -53,6 +53,7 @@ request_timeout = 10                                 # ntfy HTTP client timeout 
 identification = true                                # Send identification success notifications
 rip = true                                           # Send rip completion notifications
 encoding = true                                      # Send encoding completion notifications
+validation = true                                    # Send validation failure notifications
 organization = true                                  # Send library/organizer completion notifications
 queue = true                                         # Send queue start/finish notifications
 review = true                                        # Send notifications when item sent to review_dir
@@ -147,3 +148,13 @@ retention_days = 60                                  # Prune logs older than thi
 
 [logging.stage_overrides]                            # Per-stage log level overrides
 # subtitles = "debug"
+
+# ============================================================================
+# VALIDATION
+# ============================================================================
+
+[validation]
+enforce_drapto_validation = true                     # Fail encoding if Drapto validation fails
+min_vote_count_exact_match = 5                       # TMDB vote threshold for high-confidence matches
+require_subtitles = false                            # Require subtitles before organizing to library
+verify_file_size_after_move = true                   # Verify file size matches after moving to library
