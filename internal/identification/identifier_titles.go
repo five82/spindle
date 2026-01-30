@@ -2,7 +2,6 @@ package identification
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"spindle/internal/disc"
@@ -25,14 +24,7 @@ func isPlaceholderTitle(title, discLabel string) bool {
 }
 
 func looksLikeDiscLabel(title string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(title))
-	if upper == "" {
-		return false
-	}
-	if strings.Contains(upper, "DISC") || strings.Contains(upper, "DISK") {
-		return strings.Contains(upper, "_")
-	}
-	return false
+	return disc.IsUnusableLabel(title)
 }
 
 func unknownContentKey(fingerprint string) string {
@@ -67,35 +59,8 @@ func determineBestTitle(currentTitle string, scanResult *disc.ScanResult) string
 	return "Unknown Disc"
 }
 
-var (
-	allDigitsPattern  = regexp.MustCompile(`^\d+$`)
-	shortCodePattern  = regexp.MustCompile(`^[A-Z0-9_]{1,4}$`)
-	technicalPatterns = []string{
-		"LOGICAL_VOLUME_ID", "VOLUME_ID", "DVD_VIDEO", "BLURAY", "BD_ROM",
-		"UNTITLED", "UNKNOWN DISC", "VOLUME_", "VOLUME ID", "DISK_", "TRACK_",
-	}
-)
-
 func isTechnicalLabel(title string) bool {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return true
-	}
-
-	upper := strings.ToUpper(title)
-	for _, pattern := range technicalPatterns {
-		if strings.Contains(upper, pattern) {
-			return true
-		}
-	}
-
-	// All uppercase with underscores (likely technical label)
-	if strings.Contains(title, "_") && title == upper && len(title) > 8 {
-		return true
-	}
-
-	// All numbers or very short uppercase codes
-	return allDigitsPattern.MatchString(title) || shortCodePattern.MatchString(title)
+	return disc.IsUnusableLabel(title)
 }
 
 func detectTitleSource(title string, scanResult *disc.ScanResult) string {

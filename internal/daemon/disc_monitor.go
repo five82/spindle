@@ -15,6 +15,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
+	"spindle/internal/disc/fingerprint"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -30,6 +31,10 @@ type detectFunc func(ctx context.Context, device string) (*discInfo, error)
 
 type discScanner interface {
 	Scan(ctx context.Context, device string) (*disc.ScanResult, error)
+}
+
+type fingerprintProvider interface {
+	Compute(ctx context.Context, device, discType string) (string, error)
 }
 
 type commandRunner interface {
@@ -48,8 +53,9 @@ type discMonitor struct {
 	logger  *slog.Logger
 	scanner discScanner
 
-	queueHandler  queueProcessor
-	errorNotifier fingerprintErrorNotifier
+	queueHandler        queueProcessor
+	errorNotifier       fingerprintErrorNotifier
+	fingerprintProvider fingerprintProvider
 
 	device       string
 	scanTimeout  time.Duration
@@ -64,6 +70,13 @@ type discMonitor struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// defaultFingerprintProvider uses the fingerprint package.
+type defaultFingerprintProvider struct{}
+
+func (defaultFingerprintProvider) Compute(ctx context.Context, device, discType string) (string, error) {
+	return fingerprint.ComputeTimeout(ctx, device, discType, 2*time.Minute)
 }
 
 func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger) *discMonitor {
@@ -95,15 +108,16 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger)
 	detect := buildDetectFunc(runner, poll)
 
 	return &discMonitor{
-		cfg:           cfg,
-		logger:        monitorLogger,
-		scanner:       disc.NewScanner(cfg.MakemkvBinary()),
-		queueHandler:  newQueueStoreProcessor(store),
-		errorNotifier: newNotifierAdapter(notifications.NewService(cfg)),
-		device:        device,
-		scanTimeout:   scanTimeout,
-		pollInterval:  poll,
-		detect:        detect,
+		cfg:                 cfg,
+		logger:              monitorLogger,
+		scanner:             disc.NewScanner(cfg.MakemkvBinary()),
+		queueHandler:        newQueueStoreProcessor(store),
+		errorNotifier:       newNotifierAdapter(notifications.NewService(cfg)),
+		fingerprintProvider: defaultFingerprintProvider{},
+		device:              device,
+		scanTimeout:         scanTimeout,
+		pollInterval:        poll,
+		detect:              detect,
 	}
 }
 
@@ -223,6 +237,23 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		logging.String(logging.FieldEventType, "disc_detected"),
 	)
 
+	// Compute fingerprint from disc filesystem (uses SHA-256 hash of metadata files).
+	// This must happen before MakeMKV scan to ensure CLI and daemon use the same method.
+	logger.Debug("computing fingerprint from disc filesystem")
+	discFingerprint, fpErr := m.fingerprintProvider.Compute(ctx, info.Device, info.Type)
+	if fpErr != nil {
+		logger.Error("fingerprint computation failed; disc not queued",
+			logging.Error(fpErr),
+			logging.String(logging.FieldEventType, "disc_fingerprint_failed"),
+			logging.String(logging.FieldErrorHint, "verify disc is readable and mounted"),
+		)
+		if m.errorNotifier != nil {
+			m.errorNotifier.FingerprintFailed(ctx, info, fpErr, logger)
+		}
+		return false
+	}
+	logger.Debug("computed fingerprint", logging.String("fingerprint", discFingerprint))
+
 	scanCtx := ctx
 	var cancel context.CancelFunc
 	if m.scanTimeout > 0 {
@@ -232,15 +263,15 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 
 	scanner := m.scanner
 	if scanner == nil {
-		logger.Error("disc scanner unavailable; disc fingerprinting skipped",
+		logger.Error("disc scanner unavailable; disc not queued",
 			logging.String(logging.FieldEventType, "disc_scan_unavailable"),
 			logging.String(logging.FieldErrorHint, "check MakeMKV installation and config.makemkv_binary"),
 		)
 		return false
 	}
 
-	logger.Debug("scanning disc for fingerprint", logging.Duration("timeout", m.scanTimeout))
-	scanResult, scanErr := scanner.Scan(scanCtx, info.Device)
+	logger.Debug("scanning disc for title information", logging.Duration("timeout", m.scanTimeout))
+	_, scanErr := scanner.Scan(scanCtx, info.Device)
 	if scanErr != nil {
 		logger.Error("disc scan failed; disc not queued",
 			logging.Error(scanErr),
@@ -252,19 +283,6 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		}
 		return false
 	}
-
-	discFingerprint := strings.TrimSpace(scanResult.Fingerprint)
-	if discFingerprint == "" {
-		logger.Error("scanner fingerprint unavailable; disc not queued",
-			logging.String(logging.FieldEventType, "disc_fingerprint_failed"),
-			logging.String(logging.FieldErrorHint, "fingerprint computation failed; check disc readability and MakeMKV logs"),
-		)
-		if m.errorNotifier != nil {
-			m.errorNotifier.FingerprintFailed(ctx, info, fmt.Errorf("fingerprint computation failed"), logger)
-		}
-		return false
-	}
-	logger.Debug("computed fingerprint", logging.String("fingerprint", discFingerprint))
 
 	queueHandler := m.queueHandler
 	if queueHandler == nil {

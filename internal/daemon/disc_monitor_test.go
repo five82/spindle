@@ -26,7 +26,19 @@ func (s *stubDiscScanner) Scan(ctx context.Context, device string) (*disc.ScanRe
 	if s.result != nil {
 		return s.result, nil
 	}
-	return &disc.ScanResult{Fingerprint: "fp-default"}, nil
+	return &disc.ScanResult{}, nil
+}
+
+type stubFingerprintProvider struct {
+	fingerprint string
+	err         error
+}
+
+func (s *stubFingerprintProvider) Compute(ctx context.Context, device, discType string) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.fingerprint, nil
 }
 
 func testMonitorConfig(t *testing.T) *config.Config {
@@ -98,8 +110,9 @@ func TestDiscMonitorQueuesNewDisc(t *testing.T) {
 
 	monitor.pollInterval = 10 * time.Millisecond
 
-	scanner := &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-demo"}}
+	scanner := &stubDiscScanner{result: &disc.ScanResult{}}
 	monitor.scanner = scanner
+	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-demo"}
 
 	var detectCalls atomic.Int32
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -159,7 +172,8 @@ func TestDiscMonitorResetsExistingItem(t *testing.T) {
 	}
 
 	monitor.pollInterval = 10 * time.Millisecond
-	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-demo"}}
+	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
+	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-demo"}
 
 	var detectCalls atomic.Int32
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -217,7 +231,8 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 	}
 
 	monitor.pollInterval = 10 * time.Millisecond
-	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{Fingerprint: "fp-done\n"}}
+	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
+	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-done"}
 
 	var detectCalls atomic.Int32
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {

@@ -2,7 +2,6 @@ package disc
 
 import (
 	"errors"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,75 +16,9 @@ func (makeMKVParser) Parse(data []byte) (*ScanResult, error) {
 	}
 
 	lines := strings.Split(text, "\n")
-	fingerprint := extractFingerprint(lines)
 	titles := extractTitles(lines)
 
-	return &ScanResult{Fingerprint: fingerprint, Titles: titles}, nil
-}
-
-var fingerprintPattern = regexp.MustCompile(`[0-9A-Fa-f]{16,}`)
-
-func extractFingerprint(lines []string) string {
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if strings.Contains(strings.ToLower(trimmed), "fingerprint") {
-			if fp := findFingerprintCandidate(trimmed); fp != "" {
-				return fp
-			}
-		}
-	}
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "CINFO:") {
-			continue
-		}
-		payload := strings.TrimPrefix(trimmed, "CINFO:")
-		parts := strings.SplitN(payload, ",", 3)
-		if len(parts) < 3 {
-			continue
-		}
-		if strings.TrimSpace(parts[0]) != "32" {
-			continue
-		}
-		value := strings.TrimSpace(parts[2])
-		value = strings.Trim(value, "\"")
-		if fp := findFingerprintCandidate(value); fp != "" {
-			return fp
-		}
-	}
-
-	match := fingerprintPattern.FindString(strings.Join(lines, "\n"))
-	if match != "" {
-		return strings.ToUpper(match)
-	}
-	return ""
-}
-
-func findFingerprintCandidate(input string) string {
-	if input == "" {
-		return ""
-	}
-	if match := fingerprintPattern.FindString(input); match != "" {
-		return strings.ToUpper(match)
-	}
-	clean := strings.TrimSpace(input)
-	if clean == "" {
-		return ""
-	}
-	if len(clean) < 8 {
-		return ""
-	}
-	for _, r := range clean {
-		allowed := (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || r == '_' || r == '-'
-		if !allowed {
-			return ""
-		}
-	}
-	return strings.ToUpper(clean)
+	return &ScanResult{Titles: titles}, nil
 }
 
 func extractTitles(lines []string) []Title {

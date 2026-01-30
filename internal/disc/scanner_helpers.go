@@ -31,35 +31,7 @@ func ExtractDiscNameFromVolumeID(volumeID string) string {
 
 // IsGenericLabel checks if a disc label is too generic for reliable identification.
 func IsGenericLabel(label string) bool {
-	if label == "" {
-		return true
-	}
-
-	genericPatterns := []string{
-		"LOGICAL_VOLUME_ID",
-		"DVD_VIDEO",
-		"BLURAY",
-		"BD_ROM",
-		"UNTITLED",
-		"UNKNOWN DISC",
-	}
-
-	lowerLabel := strings.ToUpper(label)
-	for _, pattern := range genericPatterns {
-		if strings.Contains(lowerLabel, pattern) {
-			return true
-		}
-	}
-
-	if regexp.MustCompile(`^\d+$`).MatchString(label) {
-		return true
-	}
-
-	if regexp.MustCompile(`^[A-Z0-9_]{1,3}$`).MatchString(label) {
-		return true
-	}
-
-	return false
+	return IsUnusableLabel(label)
 }
 
 func extractMakemkvStderr(err error) []byte {

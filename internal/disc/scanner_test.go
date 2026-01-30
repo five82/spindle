@@ -20,9 +20,9 @@ func (s stubExec) Run(ctx context.Context, binary string, args []string) ([]byte
 	return s.output, s.err
 }
 
-func TestScannerParsesFingerprint(t *testing.T) {
+func TestScannerParsesTitles(t *testing.T) {
 	output := `MSG:1005,0,1,"start"
-CINFO:32,0,"0123456789ABCDEF0123456789ABCDEF"
+CINFO:32,0,"MOVIE_LABEL"
 TINFO:0,2,0,"Main Feature"
 TINFO:0,9,0,"1:39:03"
 `
@@ -31,8 +31,9 @@ TINFO:0,9,0,"1:39:03"
 	if err != nil {
 		t.Fatalf("Scan returned error: %v", err)
 	}
-	if result.Fingerprint != "0123456789ABCDEF0123456789ABCDEF" {
-		t.Fatalf("unexpected fingerprint: %s", result.Fingerprint)
+	// Fingerprints are now computed from disc filesystem, not MakeMKV output
+	if result.Fingerprint != "" {
+		t.Fatalf("expected empty fingerprint from MakeMKV parser, got: %s", result.Fingerprint)
 	}
 	if len(result.Titles) != 1 || result.Titles[0].ID != 0 {
 		t.Fatalf("unexpected titles: %#v", result.Titles)
@@ -325,9 +326,11 @@ func TestIsGenericLabel(t *testing.T) {
 		{"12345", true},           // numbers only
 		{"ABC", true},             // short alphanumeric
 		{"", true},                // empty
-		{"50_FIRST_DATES", false}, // real title
+		{"50_FIRST_DATES", true},  // disc label (uppercase + underscores > 8 chars)
 		{"Movie Title", false},    // normal title
-		{"THE_MATRIX", false},     // normal title with underscores
+		{"THE_MATRIX", true},      // disc label (uppercase + underscores > 8 chars)
+		{"The Matrix", false},     // proper mixed-case title
+		{"50 First Dates", false}, // proper mixed-case title
 	}
 
 	for _, tc := range testCases {
