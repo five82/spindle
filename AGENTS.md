@@ -88,12 +88,14 @@ golangci-lint run                     # Lint
 
 | Level | Use For |
 |-------|---------|
-| INFO | Stage start/summary, decisions that **change output** (track selection, preset choice) |
-| DEBUG | Skip decisions, search results, internal state, raw metrics |
-| WARN | Degraded behavior (must include `event_type`, `error_hint`, `impact` via `logging.WarnWithContext()`) |
+| INFO | All decisions that affect output: stage start/complete, track selection, preset choice, skip decisions, fallback logic, cache hits |
+| DEBUG | Raw data dumps, metrics, internal state (not decisions) |
+| WARN | Degraded behavior (include `event_type`, `error_hint`, `impact`) |
 | ERROR | Operation failed (include `event_type`, `error_hint`, `error`) |
 
-**Stage pattern**: DEBUG on prepare -> INFO for output-affecting decisions -> DEBUG for skips -> INFO on completion with `event_type: "stage_complete"` + `stage_duration` + key metrics.
+**Decision logging pattern:** All decisions use `decision_type`, `decision_result`, `decision_reason` attributes.
+
+**Rationale:** If a decision changes what happens next, it must be visible without enabling DEBUG. Invisible decisions make debugging impossible.
 
 **Progress format**: `"Phase N/M - Action (context)"` (e.g., `"Phase 2/3 - Ripping selected titles (5 of 12)"`)
 

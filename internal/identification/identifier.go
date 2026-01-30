@@ -280,13 +280,22 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if discNumber > 0 {
 		attributes["disc_number"] = discNumber
 	}
-	if scanResult.HasForcedEnglishSubtitles() {
+	hasForcedTrack := scanResult.HasForcedEnglishSubtitles()
+	if hasForcedTrack {
 		attributes["has_forced_subtitle_track"] = true
-		logger.Debug("forced subtitle track detected on disc",
-			logging.Bool("has_forced_subtitle_track", true))
 	}
+	logger.Info("forced subtitle detection",
+		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
+		logging.String("decision_result", ternary(hasForcedTrack, "detected", "none")),
+		logging.String("decision_reason", ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
+		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
 
-	mediaHint := detectMediaKind(title, discLabel, scanResult)
+	mediaHint, mediaReason := detectMediaKindWithReason(title, discLabel, scanResult)
+	logger.Info("media type detection",
+		logging.String(logging.FieldDecisionType, "media_type_detection"),
+		logging.String("decision_result", mediaHint.String()),
+		logging.String("decision_reason", mediaReason),
+	)
 
 	// Phase 3: TMDB search
 	if err := i.updateProgress(ctx, item, "Phase 3/3 - Searching TMDB", 60); err != nil {
@@ -451,4 +460,11 @@ func (i *Identifier) HealthCheck(ctx context.Context) stage.Health {
 		return stage.Unhealthy(name, "disc scanner unavailable")
 	}
 	return stage.Healthy(name)
+}
+
+func ternary[T any](cond bool, a, b T) T {
+	if cond {
+		return a
+	}
+	return b
 }

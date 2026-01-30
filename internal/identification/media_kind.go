@@ -34,18 +34,20 @@ var (
 	discNumberPattern = regexp.MustCompile(`(?i)\b(?:disc|dvd|blu[- ]?ray|bd)\s*([0-9]{1,2}|[ivxlcdm]{1,4})\b`)
 )
 
-func detectMediaKind(title, label string, scan *disc.ScanResult) mediaKind {
+// detectMediaKindWithReason returns both the detected kind and the reason for the decision.
+func detectMediaKindWithReason(title, label string, scan *disc.ScanResult) (mediaKind, string) {
 	titleLower := strings.ToLower(title)
 	labelLower := strings.ToLower(label)
-	if looksLikeTVTitle(titleLower) || looksLikeTVTitle(labelLower) {
-		return mediaKindTV
+	if looksLikeTVTitle(titleLower) {
+		return mediaKindTV, "title_contains_season_marker"
 	}
-	if scan != nil {
-		if multiEpisodeDuration(scan) {
-			return mediaKindTV
-		}
+	if looksLikeTVTitle(labelLower) {
+		return mediaKindTV, "label_contains_season_marker"
 	}
-	return mediaKindUnknown
+	if scan != nil && multiEpisodeDuration(scan) {
+		return mediaKindTV, "multiple_episode_length_titles"
+	}
+	return mediaKindUnknown, "no_tv_indicators"
 }
 
 func looksLikeTVTitle(value string) bool {

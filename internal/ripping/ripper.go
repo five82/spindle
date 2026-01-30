@@ -255,10 +255,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				target = cachedTarget
 				cacheUsed = true
 				cacheStatus = "hit"
-				logger.Debug(
-					"rip cache hit; skipping makemkv rip",
+				logger.Info("rip cache decision",
+					logging.String(logging.FieldDecisionType, "rip_cache"),
+					logging.String("decision_result", "hit"),
+					logging.String("decision_reason", "valid_cached_rip_found"),
 					logging.Bool("cache_used", true),
-					logging.String("cache_decision", "hit"),
 					logging.String("rip_dir", destDir),
 					logging.String("ripped_file", cachedTarget),
 				)
@@ -277,7 +278,12 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				}
 			} else {
 				cacheStatus = "invalid"
-				logger.Debug("cached rip failed validation", logging.Error(err))
+				logger.Info("rip cache decision",
+					logging.String(logging.FieldDecisionType, "rip_cache"),
+					logging.String("decision_result", "invalid"),
+					logging.String("decision_reason", "cached_rip_failed_validation"),
+					logging.Error(err),
+				)
 				_ = os.RemoveAll(destDir)
 				if mkErr := os.MkdirAll(destDir, 0o755); mkErr != nil {
 					return services.Wrap(
@@ -297,6 +303,15 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 	if useCache && cacheStatus != "hit" {
 		cacheCleanup = destDir
+	}
+	// Log cache miss decisions (cache hit is logged above with full context)
+	if useCache && cacheStatus == "miss" {
+		logger.Info("rip cache decision",
+			logging.String(logging.FieldDecisionType, "rip_cache"),
+			logging.String("decision_result", "miss"),
+			logging.String("decision_reason", "no_cached_rip_found"),
+			logging.String("rip_dir", destDir),
+		)
 	}
 	defer func() {
 		if cacheCleanup == "" {

@@ -258,9 +258,24 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 				)
 			}
 		} else if ok {
+			if s.logger != nil {
+				s.logger.Info("transcript cache decision",
+					logging.String(logging.FieldDecisionType, "transcript_cache"),
+					logging.String("decision_result", "hit"),
+					logging.String("decision_reason", "valid_cached_transcript_found"),
+					logging.String("transcript_key", req.TranscriptKey),
+				)
+			}
 			cached.OpenSubtitlesDecision = openSubsDecision
 			cached.OpenSubtitlesDetail = openSubsDetail
 			return cached, nil
+		} else if s.logger != nil {
+			s.logger.Info("transcript cache decision",
+				logging.String(logging.FieldDecisionType, "transcript_cache"),
+				logging.String("decision_result", "miss"),
+				logging.String("decision_reason", "no_cached_transcript_found"),
+				logging.String("transcript_key", req.TranscriptKey),
+			)
 		}
 	}
 

@@ -36,7 +36,7 @@ func (i *Identifier) performTMDBSearch(ctx context.Context, logger *slog.Logger,
 	for idx, modeLabel := range modeLabels {
 		attrs = append(attrs, logging.String(fmt.Sprintf("mode_%d", idx+1), modeLabel))
 	}
-	logger.Debug("tmdb search plan", logging.Args(attrs...)...)
+	logger.Info("tmdb search mode decision", logging.Args(attrs...)...)
 	for _, mode := range orders {
 		logger.Debug("tmdb query details",
 			logging.String("query", title),

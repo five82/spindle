@@ -67,6 +67,14 @@ func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitle
 		unique = append(unique, v)
 	}
 
+	if s.logger != nil && len(unique) > 0 {
+		s.logger.Info("opensubtitles search strategy",
+			logging.String(logging.FieldDecisionType, "opensubtitles_search_strategy"),
+			logging.String("decision_result", "movie_variants"),
+			logging.String("decision_reason", "searching_with_fallback_variants"),
+			logging.Int("variant_count", len(unique)),
+		)
+	}
 	for idx, variant := range unique {
 		if s.logger != nil {
 			s.logger.Debug("opensubtitles search variant",

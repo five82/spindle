@@ -597,24 +597,37 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 	}
 
 	hasForcedTrack, _ := env.Attributes["has_forced_subtitle_track"].(bool)
-	if !hasForcedTrack {
-		return
-	}
+	episodeKey := normalizeEpisodeKey(target.EpisodeKey)
 
-	if !s.service.shouldUseOpenSubtitles() {
+	if !hasForcedTrack {
 		if s.logger != nil {
-			s.logger.Debug("forced subtitle search skipped",
-				logging.String("reason", "opensubtitles not enabled"),
-				logging.String("episode_key", target.EpisodeKey),
+			s.logger.Info("forced subtitle search decision",
+				logging.String(logging.FieldDecisionType, "forced_subtitle_search"),
+				logging.String("decision_result", "skipped"),
+				logging.String("decision_reason", "no_forced_track_on_disc"),
+				logging.String("episode_key", episodeKey),
 			)
 		}
 		return
 	}
 
-	episodeKey := normalizeEpisodeKey(target.EpisodeKey)
+	if !s.service.shouldUseOpenSubtitles() {
+		if s.logger != nil {
+			s.logger.Info("forced subtitle search decision",
+				logging.String(logging.FieldDecisionType, "forced_subtitle_search"),
+				logging.String("decision_result", "skipped"),
+				logging.String("decision_reason", "opensubtitles_disabled"),
+				logging.String("episode_key", episodeKey),
+			)
+		}
+		return
+	}
 
 	if s.logger != nil {
-		s.logger.Debug("disc has forced subtitle track, searching for foreign-parts-only subtitles",
+		s.logger.Info("forced subtitle search decision",
+			logging.String(logging.FieldDecisionType, "forced_subtitle_search"),
+			logging.String("decision_result", "searching"),
+			logging.String("decision_reason", "disc_has_forced_track"),
 			logging.String("episode_key", episodeKey),
 		)
 	}
@@ -658,7 +671,10 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 
 	if forcedPath == "" {
 		if s.logger != nil {
-			s.logger.Debug("no forced subtitles found on OpenSubtitles",
+			s.logger.Info("forced subtitle download decision",
+				logging.String(logging.FieldDecisionType, "forced_subtitle_download"),
+				logging.String("decision_result", "not_found"),
+				logging.String("decision_reason", "no_foreign_parts_subtitle_available"),
 				logging.String("episode_key", episodeKey),
 				logging.String("title", strings.TrimSpace(ctxMeta.Title)),
 			)

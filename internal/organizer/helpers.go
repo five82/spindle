@@ -358,7 +358,7 @@ func logReviewDecision(logger *slog.Logger, result, reason string) {
 
 // logJellyfinRefreshDecision logs a Jellyfin refresh decision with consistent fields.
 func logJellyfinRefreshDecision(logger *slog.Logger, allowed bool, reason, scope string) {
-	logger.Debug(
+	logger.Info(
 		"jellyfin refresh decision",
 		logging.String(logging.FieldDecisionType, "jellyfin_refresh"),
 		logging.String("decision_result", ternary(allowed, "refresh", "skip")),

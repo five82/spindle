@@ -55,7 +55,7 @@ func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error
 	// Check if this is a TV show - skip for movies
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if metadata.IsMovie() {
-		logger.Debug("episode identification decision",
+		logger.Info("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "movie_content"),
@@ -80,7 +80,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	// Check if this is a TV show - skip for movies
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if metadata.IsMovie() {
-		logger.Debug("episode identification decision",
+		logger.Info("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "movie_content"),
@@ -96,7 +96,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 	// Decode rip spec
 	if strings.TrimSpace(item.RipSpecData) == "" {
-		logger.Debug("episode identification decision",
+		logger.Info("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "no_rip_spec"),
@@ -112,7 +112,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
-		logger.Debug("episode identification decision",
+		logger.Info("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "invalid_rip_spec"),
@@ -129,7 +129,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 	// Check if we have episodes to match
 	if len(env.Episodes) == 0 {
-		logger.Debug("episode identification decision",
+		logger.Info("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", "no_episodes"),
@@ -151,7 +151,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		} else if !e.cfg.Subtitles.OpenSubtitlesEnabled {
 			reason = "opensubtitles disabled"
 		}
-		logger.Debug("episode identification decision",
+		logger.Info("episode identification decision",
 			logging.String(logging.FieldDecisionType, "episode_identification"),
 			logging.String("decision_result", "skipped"),
 			logging.String("decision_reason", reason),

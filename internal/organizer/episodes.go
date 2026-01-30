@@ -197,7 +197,10 @@ func (o *Organizer) processEpisode(ctx context.Context, item *queue.Item, env *r
 
 	// Skip already-organized episodes (enables resume after partial failure)
 	if asset, ok := env.Assets.FindAsset("final", episodeKey); ok && asset.IsCompleted() {
-		logger.Debug("skipping already-organized episode",
+		logger.Info("episode organization decision",
+			logging.String(logging.FieldDecisionType, "episode_organization"),
+			logging.String("decision_result", "skipped"),
+			logging.String("decision_reason", "already_organized"),
 			logging.String("episode_key", episodeKey),
 			logging.String("final_path", asset.Path),
 		)

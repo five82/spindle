@@ -249,9 +249,11 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 		}
 		moved++
 	}
-	if moved > 0 && o.logger != nil {
-		o.logger.Debug(
-			"moved subtitle sidecars",
+	if o.logger != nil {
+		o.logger.Info("subtitle sidecar move decision",
+			logging.String(logging.FieldDecisionType, "subtitle_sidecar_move"),
+			logging.String("decision_result", ternary(moved > 0, "moved", "none_found")),
+			logging.String("decision_reason", ternary(moved > 0, "subtitles_found", "no_matching_srt_files")),
 			logging.Int("count", moved),
 			logging.String("destination", destDir),
 		)

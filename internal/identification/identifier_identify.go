@@ -81,7 +81,10 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	if season, ok := extractSeasonNumber(input.Title, input.DiscLabel); ok {
 		seasonNumber = season
 	}
-	logger.Debug("identification heuristics",
+	logger.Info("identification heuristics",
+		logging.String(logging.FieldDecisionType, "identification_heuristics"),
+		logging.String("decision_result", "computed"),
+		logging.String("decision_reason", "title_and_scan_analysis"),
 		logging.String("media_hint", input.MediaHint.String()),
 		logging.Int("season_guess", seasonNumber))
 
@@ -90,10 +93,18 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	if input.SearchOpts.Year == 0 {
 		if titleYear > 0 {
 			input.SearchOpts.Year = titleYear
-			logger.Debug("using year from title for TMDB search", logging.Int("year", titleYear))
+			logger.Info("year source decision",
+				logging.String(logging.FieldDecisionType, "year_source"),
+				logging.String("decision_result", "title"),
+				logging.String("decision_reason", "extracted_from_title"),
+				logging.Int("year", titleYear))
 		} else if labelYear > 0 {
 			input.SearchOpts.Year = labelYear
-			logger.Debug("using year from disc label for TMDB search", logging.Int("year", labelYear))
+			logger.Info("year source decision",
+				logging.String(logging.FieldDecisionType, "year_source"),
+				logging.String("decision_result", "disc_label"),
+				logging.String("decision_reason", "extracted_from_disc_label"),
+				logging.Int("year", labelYear))
 		}
 	}
 

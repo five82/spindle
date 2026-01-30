@@ -75,7 +75,10 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 
 		// Skip already-completed episodes (enables resume after partial failure)
 		if asset, ok := env.Assets.FindAsset("encoded", episodeKey); ok && asset.IsCompleted() {
-			logger.Debug("skipping already-encoded episode",
+			logger.Info("episode encoding decision",
+				logging.String(logging.FieldDecisionType, "episode_encoding"),
+				logging.String("decision_result", "skipped"),
+				logging.String("decision_reason", "already_encoded"),
 				logging.String("episode_key", episodeKey),
 				logging.String("encoded_path", asset.Path),
 			)

@@ -116,15 +116,15 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 		)
 	}
 
-	logger.Debug(
-		"ripping validation succeeded",
+	logger.Info("ripping validation decision",
+		logging.String(logging.FieldDecisionType, "rip_validation"),
+		logging.String("decision_result", "passed"),
+		logging.String("decision_reason", "valid_media_file"),
 		logging.String("ripped_file", clean),
 		logging.Duration("elapsed", time.Since(startedAt)),
-		logging.Group("ffprobe",
-			logging.Float64("duration_seconds", duration),
-			logging.Int("video_streams", probe.VideoStreamCount()),
-			logging.Int("audio_streams", probe.AudioStreamCount()),
-		),
+		logging.Float64("duration_seconds", duration),
+		logging.Int("video_streams", probe.VideoStreamCount()),
+		logging.Int("audio_streams", probe.AudioStreamCount()),
 	)
 
 	return nil
