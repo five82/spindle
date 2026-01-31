@@ -167,3 +167,13 @@ type QueueHealthResponse struct {
 	Failed     int `json:"failed"`
 	Completed  int `json:"completed"`
 }
+
+// QueueRemoveRequest removes specific items by ID.
+type QueueRemoveRequest struct {
+	IDs []int64 `json:"ids"`
+}
+
+// QueueRemoveResponse reports number of removed entries.
+type QueueRemoveResponse struct {
+	Removed int64 `json:"removed"`
+}

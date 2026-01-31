@@ -18,6 +18,7 @@ type queueAPI interface {
 	ClearAll(ctx context.Context) (int64, error)
 	ClearCompleted(ctx context.Context) (int64, error)
 	ClearFailed(ctx context.Context) (int64, error)
+	RemoveIDs(ctx context.Context, ids []int64) (queueRemoveResult, error)
 	ResetStuck(ctx context.Context) (int64, error)
 	RetryAll(ctx context.Context) (int64, error)
 	RetryIDs(ctx context.Context, ids []int64) (queueRetryResult, error)
@@ -115,6 +116,46 @@ func (f *queueIPCFacade) ClearFailed(_ context.Context) (int64, error) {
 		return 0, err
 	}
 	return resp.Removed, nil
+}
+
+func (f *queueIPCFacade) RemoveIDs(_ context.Context, ids []int64) (queueRemoveResult, error) {
+	result := queueRemoveResult{
+		Items: make([]queueRemoveItemResult, 0, len(ids)),
+	}
+
+	// Check which items exist first
+	resp, err := f.client.QueueList(nil)
+	if err != nil {
+		return queueRemoveResult{}, err
+	}
+
+	existingIDs := make(map[int64]struct{}, len(resp.Items))
+	for _, item := range resp.Items {
+		existingIDs[item.ID] = struct{}{}
+	}
+
+	// Identify which IDs exist
+	var toRemove []int64
+	for _, id := range ids {
+		if _, ok := existingIDs[id]; ok {
+			toRemove = append(toRemove, id)
+		} else {
+			result.Items = append(result.Items, queueRemoveItemResult{ID: id, Outcome: queueRemoveOutcomeNotFound})
+		}
+	}
+
+	if len(toRemove) > 0 {
+		removeResp, err := f.client.QueueRemove(toRemove)
+		if err != nil {
+			return queueRemoveResult{}, err
+		}
+		result.RemovedCount = removeResp.Removed
+		for _, id := range toRemove {
+			result.Items = append(result.Items, queueRemoveItemResult{ID: id, Outcome: queueRemoveOutcomeRemoved})
+		}
+	}
+
+	return result, nil
 }
 
 func (f *queueIPCFacade) ResetStuck(_ context.Context) (int64, error) {
@@ -299,6 +340,27 @@ func (f *queueStoreFacade) ClearCompleted(ctx context.Context) (int64, error) {
 
 func (f *queueStoreFacade) ClearFailed(ctx context.Context) (int64, error) {
 	return f.store.ClearFailed(ctx)
+}
+
+func (f *queueStoreFacade) RemoveIDs(ctx context.Context, ids []int64) (queueRemoveResult, error) {
+	result := queueRemoveResult{
+		Items: make([]queueRemoveItemResult, 0, len(ids)),
+	}
+
+	for _, id := range ids {
+		removed, err := f.store.Remove(ctx, id)
+		if err != nil {
+			return queueRemoveResult{}, err
+		}
+		if removed {
+			result.RemovedCount++
+			result.Items = append(result.Items, queueRemoveItemResult{ID: id, Outcome: queueRemoveOutcomeRemoved})
+		} else {
+			result.Items = append(result.Items, queueRemoveItemResult{ID: id, Outcome: queueRemoveOutcomeNotFound})
+		}
+	}
+
+	return result, nil
 }
 
 func (f *queueStoreFacade) ResetStuck(ctx context.Context) (int64, error) {

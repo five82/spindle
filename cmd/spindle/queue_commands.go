@@ -114,19 +114,80 @@ func newQueueShowCommand(ctx *commandContext) *cobra.Command {
 }
 
 func newQueueClearCommand(ctx *commandContext) *cobra.Command {
+	var clearAll bool
 	var clearCompleted bool
 	var clearFailed bool
 
 	cmd := &cobra.Command{
-		Use:   "clear",
+		Use:   "clear [id...]",
 		Short: "Remove queue items",
+		Long: `Remove queue items from the queue.
+
+Requires either item IDs or a flag to specify what to clear.
+
+Examples:
+  spindle queue clear 10           # Remove item 10
+  spindle queue clear 10 11 12     # Remove items 10, 11, and 12
+  spindle queue clear --all        # Remove all items
+  spindle queue clear --completed  # Remove only completed items
+  spindle queue clear --failed     # Remove only failed items`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if clearCompleted && clearFailed {
-				return errors.New("specify only one of --completed or --failed")
+			// Count how many filter flags are set
+			flagCount := 0
+			if clearAll {
+				flagCount++
 			}
+			if clearCompleted {
+				flagCount++
+			}
+			if clearFailed {
+				flagCount++
+			}
+			if flagCount > 1 {
+				return errors.New("specify only one of --all, --completed, or --failed")
+			}
+
+			// Parse IDs if provided
+			ids := make([]int64, 0, len(args))
+			for _, arg := range args {
+				id, err := strconv.ParseInt(arg, 10, 64)
+				if err != nil || id <= 0 {
+					return fmt.Errorf("invalid item id %q", arg)
+				}
+				ids = append(ids, id)
+			}
+
+			// If IDs provided, cannot use filter flags
+			if len(ids) > 0 && flagCount > 0 {
+				return errors.New("cannot use --all, --completed, or --failed with specific item IDs")
+			}
+
+			// Require either IDs or a flag
+			if len(ids) == 0 && flagCount == 0 {
+				return errors.New("specify item IDs or use --all, --completed, or --failed")
+			}
+
 			return ctx.withQueueAPI(func(api queueAPI) error {
 				out := cmd.OutOrStdout()
 
+				// Handle specific IDs
+				if len(ids) > 0 {
+					result, err := api.RemoveIDs(cmd.Context(), ids)
+					if err != nil {
+						return err
+					}
+					for _, item := range result.Items {
+						switch item.Outcome {
+						case queueRemoveOutcomeNotFound:
+							fmt.Fprintf(out, "Item %d not found\n", item.ID)
+						case queueRemoveOutcomeRemoved:
+							fmt.Fprintf(out, "Item %d removed\n", item.ID)
+						}
+					}
+					return nil
+				}
+
+				// Handle bulk clear
 				var (
 					removed int64
 					err     error
@@ -136,7 +197,7 @@ func newQueueClearCommand(ctx *commandContext) *cobra.Command {
 					removed, err = api.ClearCompleted(cmd.Context())
 				case clearFailed:
 					removed, err = api.ClearFailed(cmd.Context())
-				default:
+				case clearAll:
 					removed, err = api.ClearAll(cmd.Context())
 				}
 				if err != nil {
@@ -148,7 +209,7 @@ func newQueueClearCommand(ctx *commandContext) *cobra.Command {
 					fmt.Fprintf(out, "Cleared %d completed items\n", removed)
 				case clearFailed:
 					fmt.Fprintf(out, "Cleared %d failed items\n", removed)
-				default:
+				case clearAll:
 					fmt.Fprintf(out, "Cleared %d queue items\n", removed)
 				}
 				return nil
@@ -156,6 +217,7 @@ func newQueueClearCommand(ctx *commandContext) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&clearAll, "all", false, "Remove all items")
 	cmd.Flags().BoolVar(&clearCompleted, "completed", false, "Remove only completed items")
 	cmd.Flags().BoolVar(&clearFailed, "failed", false, "Remove only failed items")
 	return cmd

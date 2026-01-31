@@ -172,3 +172,13 @@ func (c *Client) QueueHealth() (*QueueHealthResponse, error) {
 	}
 	return &resp, nil
 }
+
+// QueueRemove removes specific items by ID.
+func (c *Client) QueueRemove(ids []int64) (*QueueRemoveResponse, error) {
+	var resp QueueRemoveResponse
+	req := QueueRemoveRequest{IDs: ids}
+	if err := c.client.Call("Spindle.QueueRemove", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

@@ -287,6 +287,24 @@ func (d *Daemon) StopQueueItems(ctx context.Context, ids []int64) (int64, error)
 	return d.store.StopItems(ctx, ids...)
 }
 
+// RemoveQueueItems deletes specific items from the queue by ID.
+func (d *Daemon) RemoveQueueItems(ctx context.Context, ids []int64) (int64, error) {
+	if d.store == nil {
+		return 0, errors.New("queue store unavailable")
+	}
+	var removed int64
+	for _, id := range ids {
+		ok, err := d.store.Remove(ctx, id)
+		if err != nil {
+			return removed, err
+		}
+		if ok {
+			removed++
+		}
+	}
+	return removed, nil
+}
+
 // QueueHealth returns aggregate queue diagnostics.
 func (d *Daemon) QueueHealth(ctx context.Context) (queue.HealthSummary, error) {
 	if d.store == nil {

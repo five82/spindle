@@ -79,7 +79,7 @@ func TestQueueRetryAndClear(t *testing.T) {
 	}
 	requireContains(t, out, "Cleared 1 failed items")
 
-	out, _, err = runCLI(t, []string{"queue", "clear"}, env.socketPath, env.configPath)
+	out, _, err = runCLI(t, []string{"queue", "clear", "--all"}, env.socketPath, env.configPath)
 	if err != nil {
 		t.Fatalf("queue clear all: %v", err)
 	}

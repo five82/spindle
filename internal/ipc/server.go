@@ -409,3 +409,19 @@ func (s *service) TestNotification(_ TestNotificationRequest, resp *TestNotifica
 	resp.Message = message
 	return err
 }
+
+func (s *service) QueueRemove(req QueueRemoveRequest, resp *QueueRemoveResponse) error {
+	if len(req.IDs) == 0 {
+		return errors.New("queue remove requires at least one id")
+	}
+	s.log().Debug("queue remove requested", logging.Int("item_count", len(req.IDs)))
+	removed, err := s.daemon.RemoveQueueItems(s.ctx, req.IDs)
+	if err != nil {
+		return err
+	}
+	resp.Removed = removed
+	s.log().Info("queue items removed",
+		logging.String(logging.FieldEventType, "queue_remove"),
+		logging.Int64("removed_count", removed))
+	return nil
+}
