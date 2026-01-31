@@ -62,6 +62,12 @@ func (c *Config) normalizePaths() error {
 	if c.Paths.APIBind == "" {
 		c.Paths.APIBind = defaultAPIBind
 	}
+	// Environment variable overrides config file for API token (security best practice)
+	if value, ok := os.LookupEnv("SPINDLE_API_TOKEN"); ok {
+		c.Paths.APIToken = strings.TrimSpace(value)
+	} else {
+		c.Paths.APIToken = strings.TrimSpace(c.Paths.APIToken)
+	}
 	return nil
 }
 

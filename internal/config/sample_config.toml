@@ -13,7 +13,8 @@ log_dir = "~/.local/share/spindle/logs"              # Logs and queue database
 review_dir = "~/review"                              # Files needing manual attention (uncertain metadata, etc.)
 opensubtitles_cache_dir = "~/.local/share/spindle/cache/opensubtitles"
 whisperx_cache_dir = "~/.local/share/spindle/cache/whisperx"
-api_bind = "127.0.0.1:7487"                          # HTTP API bind address (host:port)
+api_bind = "127.0.0.1:7487"                          # HTTP API bind address (use 0.0.0.0:7487 for remote access)
+api_token = ""                                       # Bearer token for API auth (or set SPINDLE_API_TOKEN env var)
 
 # ============================================================================
 # TMDB & METADATA (required for media identification)

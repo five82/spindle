@@ -14,6 +14,7 @@ Changes require restarting the daemon (`spindle stop && spindle start`).
 
 | Config Key | Environment Variable(s) |
 | --- | --- |
+| `paths.api_token` | `SPINDLE_API_TOKEN` |
 | `tmdb.api_key` | `TMDB_API_KEY` |
 | `jellyfin.api_key` | `JELLYFIN_API_KEY` |
 | `subtitles.opensubtitles_api_key` | `OPENSUBTITLES_API_KEY` |
@@ -80,6 +81,10 @@ files media correctly.
 - `notify_dedup_window_seconds` — Suppress identical notifications within this
   window (default 600s).
 - `api_bind` — Bind address for the read-only HTTP API (default `127.0.0.1:7487`).
+  Use `0.0.0.0:7487` to allow remote connections.
+- `api_token` — Bearer token for API authentication. When set, all API requests
+  must include `Authorization: Bearer <token>`. Generate with `openssl rand -hex 32`.
+  Can also be set via `SPINDLE_API_TOKEN` environment variable.
 - `api_tls_cert` / `api_tls_key` — Optional TLS assets when exposing the API on
   your LAN.
 

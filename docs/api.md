@@ -5,8 +5,7 @@ state. Remote tooling (dashboards, TUIs, scripts) can consume these endpoints to
 monitor progress without shelling out to the CLI.
 
 > ⚠️ **Scope**: the API is read-only today. All mutating operations still flow
-> through the CLI or future RPC endpoints. Authentication is not implemented; run
-> Spindle on trusted networks only.
+> through the CLI or IPC socket.
 
 ## Getting Started
 
@@ -14,6 +13,28 @@ monitor progress without shelling out to the CLI.
 - Default bind address: `http://127.0.0.1:7487`. Override via
   `api_bind = "host:port"` in `config.toml`.
 - Responses are JSON with RFC3339 timestamps using millisecond precision.
+
+## Authentication
+
+When `api_token` is set in config (or `SPINDLE_API_TOKEN` environment variable),
+all API requests require a bearer token:
+
+```bash
+curl -H "Authorization: Bearer <token>" http://localhost:7487/api/status
+```
+
+Requests without a valid token receive `401 Unauthorized`. When no token is
+configured, authentication is disabled and all requests are allowed.
+
+**Remote access setup:**
+
+1. Set `api_bind = "0.0.0.0:7487"` to listen on all interfaces
+2. Generate a token: `openssl rand -hex 32`
+3. Set `api_token` in config or export `SPINDLE_API_TOKEN`
+4. Restart the daemon
+
+For TLS, consider running behind a reverse proxy (nginx, Caddy) or using
+Tailscale for encrypted point-to-point connections.
 
 ## Endpoints
 

@@ -24,6 +24,7 @@ type Paths struct {
 	OpenSubtitlesCacheDir string `toml:"opensubtitles_cache_dir"`
 	WhisperXCacheDir      string `toml:"whisperx_cache_dir"`
 	APIBind               string `toml:"api_bind"`
+	APIToken              string `toml:"api_token"`
 }
 
 // TMDB contains configuration for The Movie Database API.

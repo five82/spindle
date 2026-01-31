@@ -22,6 +22,7 @@ import (
 
 type apiServer struct {
 	bind     string
+	token    string
 	logger   *slog.Logger
 	daemon   *Daemon
 	queueSvc *api.QueueService
@@ -41,18 +42,20 @@ func newAPIServer(cfg *config.Config, d *Daemon, logger *slog.Logger) (*apiServe
 
 	svc := api.NewQueueService(d.store)
 	mux := http.NewServeMux()
+	token := strings.TrimSpace(cfg.Paths.APIToken)
 	srv := &apiServer{
 		bind:     bind,
+		token:    token,
 		logger:   logger,
 		daemon:   d,
 		queueSvc: svc,
 	}
 
-	mux.HandleFunc("/api/status", srv.handleStatus)
-	mux.HandleFunc("/api/queue", srv.handleQueue)
-	mux.HandleFunc("/api/queue/", srv.handleQueueItem)
-	mux.HandleFunc("/api/logs", srv.handleLogs)
-	mux.HandleFunc("/api/logtail", srv.handleLogTail)
+	mux.HandleFunc("/api/status", authMiddleware(token, srv.handleStatus))
+	mux.HandleFunc("/api/queue", authMiddleware(token, srv.handleQueue))
+	mux.HandleFunc("/api/queue/", authMiddleware(token, srv.handleQueueItem))
+	mux.HandleFunc("/api/logs", authMiddleware(token, srv.handleLogs))
+	mux.HandleFunc("/api/logtail", authMiddleware(token, srv.handleLogTail))
 
 	srv.server = &http.Server{
 		Handler:           mux,
