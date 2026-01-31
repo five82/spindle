@@ -139,19 +139,24 @@ func (f *queueIPCFacade) RemoveIDs(_ context.Context, ids []int64) (queueRemoveR
 	for _, id := range ids {
 		if _, ok := existingIDs[id]; ok {
 			toRemove = append(toRemove, id)
-		} else {
-			result.Items = append(result.Items, queueRemoveItemResult{ID: id, Outcome: queueRemoveOutcomeNotFound})
 		}
 	}
 
+	// Remove existing items
 	if len(toRemove) > 0 {
 		removeResp, err := f.client.QueueRemove(toRemove)
 		if err != nil {
 			return queueRemoveResult{}, err
 		}
 		result.RemovedCount = removeResp.Removed
-		for _, id := range toRemove {
+	}
+
+	// Build results in input order
+	for _, id := range ids {
+		if _, ok := existingIDs[id]; ok {
 			result.Items = append(result.Items, queueRemoveItemResult{ID: id, Outcome: queueRemoveOutcomeRemoved})
+		} else {
+			result.Items = append(result.Items, queueRemoveItemResult{ID: id, Outcome: queueRemoveOutcomeNotFound})
 		}
 	}
 
