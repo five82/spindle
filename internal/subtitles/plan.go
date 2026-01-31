@@ -18,19 +18,20 @@ import (
 var inspectMedia = ffprobe.Inspect
 
 type generationPlan struct {
-	source       string
-	workDir      string
-	outputDir    string
-	runDir       string
-	audioPath    string
-	whisperSRT   string
-	whisperJSON  string
-	outputFile   string
-	language     string
-	totalSeconds float64
-	audioIndex   int
-	cudaEnabled  bool
-	cleanup      func()
+	source                string
+	workDir               string
+	outputDir             string
+	runDir                string
+	audioPath             string
+	whisperSRT            string
+	whisperJSON           string
+	outputFile            string
+	language              string
+	totalSeconds          float64
+	audioIndex            int
+	cudaEnabled           bool
+	cleanup               func()
+	referenceSubtitlePath string // For forced subtitle alignment: use aligned regular subtitle as reference
 }
 
 func (s *Service) prepareGenerationPlan(ctx context.Context, req GenerateRequest) (*generationPlan, error) {

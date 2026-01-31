@@ -246,8 +246,9 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		})
 		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, openSubsExpected, openSubsCount, aiCount, ctxMeta)
 
-		// Check for forced subtitles if disc has forced subtitle tracks
-		s.tryForcedSubtitlesForTarget(ctx, item, target, ctxMeta, &env)
+		// Check for forced subtitles if disc has forced subtitle tracks.
+		// Pass the aligned regular subtitle as reference for subtitle-to-subtitle alignment.
+		s.tryForcedSubtitlesForTarget(ctx, item, target, ctxMeta, &env, result.SubtitlePath)
 	}
 
 	// Determine final item status based on episode outcomes
@@ -591,7 +592,8 @@ func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, t
 
 // tryForcedSubtitlesForTarget checks if the disc has forced subtitle tracks and
 // downloads foreign-parts-only subtitles from OpenSubtitles if available.
-func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, env *ripspec.Envelope) {
+// referenceSubtitle is the path to the aligned regular subtitle used for alignment.
+func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, env *ripspec.Envelope, referenceSubtitle string) {
 	if s == nil || s.service == nil || env == nil {
 		return
 	}
@@ -656,7 +658,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 	}
 
 	basePath := filepath.Join(target.OutputDir, target.BaseName)
-	forcedPath, err := s.service.tryForcedSubtitles(ctx, plan, req, basePath)
+	forcedPath, err := s.service.tryForcedSubtitles(ctx, plan, req, basePath, referenceSubtitle)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("forced subtitle search failed",

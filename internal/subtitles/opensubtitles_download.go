@@ -115,41 +115,59 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 	}
 
 	inputPath := cleanedPath
-	if syncedPath, err := s.applyFFSubsync(ctx, plan, cleanedPath); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("ffsubsync alignment skipped",
-				logging.Error(err),
-				logging.String("source_file", cleanedPath),
-				logging.String(logging.FieldEventType, "ffsubsync_skipped"),
-				logging.String(logging.FieldErrorHint, "install ffsubsync or set subtitles_enabled=false"),
-			)
-		}
-	} else if syncedPath != "" {
-		inputPath = syncedPath
-		if s.logger != nil {
-			s.logger.Debug("ffsubsync alignment complete",
-				logging.String("subtitle_file", syncedPath),
-			)
-		}
-	}
 
-	alignLanguage := req.Context.Language
-	if alignLanguage == "" {
-		alignLanguage = plan.language
-	}
-	if s.logger != nil {
-		s.logger.Debug("opensubtitles aligning subtitles",
-			logging.String("language", alignLanguage),
-			logging.Bool("cuda_enabled", plan.cudaEnabled),
-		)
-	}
-	if err := s.alignDownloadedSubtitles(ctx, plan, inputPath, plan.outputFile, alignLanguage); err != nil {
-		return GenerateResult{}, err
-	}
-	if s.logger != nil {
-		s.logger.Debug("opensubtitles alignment complete",
-			logging.String("subtitle_file", plan.outputFile),
-		)
+	// Forced subtitles (indicated by referenceSubtitlePath being set) skip alignment entirely.
+	// They're sparse (few cues) and alignment algorithms produce garbage with insufficient data.
+	// Forced subtitles from OpenSubtitles are typically pre-aligned by the uploader.
+	isForcedSubtitle := strings.TrimSpace(plan.referenceSubtitlePath) != ""
+
+	if isForcedSubtitle {
+		if err := copyFile(inputPath, plan.outputFile); err != nil {
+			return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "copy forced", "Failed to copy forced subtitle", err)
+		}
+		if s.logger != nil {
+			s.logger.Debug("forced subtitle alignment skipped (using original timing)",
+				logging.String("subtitle_file", plan.outputFile),
+				logging.String("reason", "sparse_content_alignment_unreliable"),
+			)
+		}
+	} else {
+		if syncedPath, err := s.applyFFSubsync(ctx, plan, cleanedPath); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("ffsubsync alignment skipped",
+					logging.Error(err),
+					logging.String("source_file", cleanedPath),
+					logging.String(logging.FieldEventType, "ffsubsync_skipped"),
+					logging.String(logging.FieldErrorHint, "install ffsubsync or set subtitles_enabled=false"),
+				)
+			}
+		} else if syncedPath != "" {
+			inputPath = syncedPath
+			if s.logger != nil {
+				s.logger.Debug("ffsubsync alignment complete",
+					logging.String("subtitle_file", syncedPath),
+				)
+			}
+		}
+
+		alignLanguage := req.Context.Language
+		if alignLanguage == "" {
+			alignLanguage = plan.language
+		}
+		if s.logger != nil {
+			s.logger.Debug("opensubtitles aligning subtitles",
+				logging.String("language", alignLanguage),
+				logging.Bool("cuda_enabled", plan.cudaEnabled),
+			)
+		}
+		if err := s.alignDownloadedSubtitles(ctx, plan, inputPath, plan.outputFile, alignLanguage); err != nil {
+			return GenerateResult{}, err
+		}
+		if s.logger != nil {
+			s.logger.Debug("opensubtitles alignment complete",
+				logging.String("subtitle_file", plan.outputFile),
+			)
+		}
 	}
 
 	segmentCount, err := countSRTCues(plan.outputFile)
@@ -305,4 +323,12 @@ func (s *Service) applyFFSubsync(ctx context.Context, plan *generationPlan, inpu
 		return "", services.Wrap(services.ErrExternalTool, "subtitles", "ffsubsync", "Failed to synchronize downloaded subtitles", err)
 	}
 	return outputPath, nil
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
 }

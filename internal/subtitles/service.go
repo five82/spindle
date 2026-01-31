@@ -348,7 +348,11 @@ func (s *Service) tryAttachForcedSubtitles(ctx context.Context, plan *generation
 		return
 	}
 	baseName := plan.outputFile[:len(plan.outputFile)-len(".srt")]
-	forcedPath, err := s.tryForcedSubtitles(ctx, plan, req, baseName)
+	// Use the aligned regular subtitle as reference for forced subtitle alignment.
+	// Forced subtitles are sparse (few cues) and audio-based alignment often fails.
+	// Subtitle-to-subtitle alignment is more reliable for sparse content.
+	referenceSubtitle := result.SubtitlePath
+	forcedPath, err := s.tryForcedSubtitles(ctx, plan, req, baseName, referenceSubtitle)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("forced subtitle fetch failed",

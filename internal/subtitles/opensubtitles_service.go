@@ -265,8 +265,11 @@ func (s *Service) logCandidateSummary(result, reason string, summaryLines []stri
 }
 
 // tryForcedSubtitles searches OpenSubtitles for foreign-parts-only (forced) subtitles.
+// referenceSubtitle is the path to an aligned regular subtitle file used as the alignment
+// reference instead of audio. Subtitle-to-subtitle alignment is more reliable for sparse
+// forced subtitles.
 // Returns the output path if successful, empty string if no match found or an error occurred.
-func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, req GenerateRequest, baseName string) (string, error) {
+func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, req GenerateRequest, baseName, referenceSubtitle string) (string, error) {
 	if plan == nil {
 		return "", nil
 	}
@@ -335,6 +338,7 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 
 	forcedPlan := *plan
 	forcedPlan.outputFile = fmt.Sprintf("%s.forced.srt", baseName)
+	forcedPlan.referenceSubtitlePath = referenceSubtitle
 
 	candidatesToTry := scored
 	if len(candidatesToTry) > maxOpenSubtitlesCandidates {
