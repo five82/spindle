@@ -44,19 +44,28 @@ Diagnose Spindle processing issues by analyzing structured logs.
 ## Log Access
 
 **Via API** (daemon running):
+
+When `api_token` is configured (or `SPINDLE_API_TOKEN` env var), include the bearer token:
+
 ```bash
 # Warnings for specific item
-curl "http://127.0.0.1:7487/api/logs?item=<ID>&level=WARN&lane=*"
+curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
+  "http://127.0.0.1:7487/api/logs?item=<ID>&level=WARN&lane=*"
 
 # Decision events (shows decision_type, decision_result, decision_reason)
-curl "http://127.0.0.1:7487/api/logs?item=<ID>&decision_type=*&lane=*"
+curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
+  "http://127.0.0.1:7487/api/logs?item=<ID>&decision_type=*&lane=*"
 
 # Daemon-level issues
-curl "http://127.0.0.1:7487/api/logs?daemon_only=1&level=WARN"
+curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
+  "http://127.0.0.1:7487/api/logs?daemon_only=1&level=WARN"
 
 # Full DEBUG logs (if log_level=debug in config)
-curl "http://127.0.0.1:7487/api/logs?item=<ID>&level=DEBUG&lane=*"
+curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
+  "http://127.0.0.1:7487/api/logs?item=<ID>&level=DEBUG&lane=*"
 ```
+
+If no token is configured, authentication is disabled and the `-H` header can be omitted.
 
 **Via log file** (daemon may be stopped):
 - Debug logs (check first): `log_dir/debug/items/YYYYMMDDTHHMMSS-<id>-<slug>.log`
