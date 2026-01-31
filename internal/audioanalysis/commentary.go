@@ -463,3 +463,27 @@ func countCommentaryTracks(mappings []audioStreamMapping) int {
 	}
 	return count
 }
+
+// RemapCommentaryIndices updates commentary track indices after audio refinement.
+// The keptIndices slice contains the original stream indices in output order.
+// For each commentary track, its Index is updated to reflect its position
+// in the output file (as an audio-relative index, not absolute stream index).
+func RemapCommentaryIndices(result *CommentaryResult, keptIndices []int) {
+	if result == nil || len(result.CommentaryTracks) == 0 || len(keptIndices) == 0 {
+		return
+	}
+
+	// Build mapping from original index to output audio index
+	indexToOutput := make(map[int]int, len(keptIndices))
+	for outputIdx, origIdx := range keptIndices {
+		indexToOutput[origIdx] = outputIdx
+	}
+
+	// Update each commentary track's index
+	for i := range result.CommentaryTracks {
+		origIdx := result.CommentaryTracks[i].Index
+		if newIdx, ok := indexToOutput[origIdx]; ok {
+			result.CommentaryTracks[i].Index = newIdx
+		}
+	}
+}

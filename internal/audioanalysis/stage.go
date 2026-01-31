@@ -153,8 +153,10 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Apply "comment" disposition to commentary tracks for Jellyfin recognition
-	// Must happen AFTER refinement since disposition is set on the remuxed file
+	// Must happen AFTER refinement since disposition is set on the remuxed file.
+	// Remap commentary indices to reflect post-refinement audio stream positions.
 	if commentaryResult != nil && len(commentaryResult.CommentaryTracks) > 0 {
+		RemapCommentaryIndices(commentaryResult, refineResult.KeptIndices)
 		if err := ApplyCommentaryDisposition(ctx, s.cfg, s.logger, targets, commentaryResult); err != nil {
 			logger.Warn("failed to set commentary disposition; tracks may not be labeled",
 				logging.Error(err),

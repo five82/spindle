@@ -22,6 +22,10 @@ import (
 // AudioRefinementResult captures audio selection outcomes for reporting.
 type AudioRefinementResult struct {
 	PrimaryAudioDescription string
+	// KeptIndices contains the original stream indices that were preserved,
+	// in the order they appear in the output file. Used to map old indices
+	// to new output positions after remux.
+	KeptIndices []int
 }
 
 // RefineAudioTargets applies primary audio selection across a set of rip paths.
@@ -86,8 +90,17 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 				logging.Args(attrs...)...,
 			)
 		}
+		// Collect the single audio stream index for KeptIndices
+		var keptIndices []int
+		for _, stream := range probe.Streams {
+			if stream.CodecType == "audio" {
+				keptIndices = append(keptIndices, stream.Index)
+				break
+			}
+		}
 		return AudioRefinementResult{
 			PrimaryAudioDescription: findAudioDescription(probe.Streams, -1),
+			KeptIndices:             keptIndices,
 		}, nil
 	}
 	selection := audio.Select(probe.Streams)
@@ -163,6 +176,7 @@ func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Log
 
 	result := AudioRefinementResult{
 		PrimaryAudioDescription: findAudioDescription(probe.Streams, selection.PrimaryIndex),
+		KeptIndices:             selection.KeepIndices,
 	}
 
 	needsRemux := selection.Changed(totalAudio) || needsDispositionFix(probe.Streams, selection.KeepIndices)
