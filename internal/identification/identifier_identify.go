@@ -91,20 +91,21 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	titleForQuery, titleYear := splitTitleYear(input.Title)
 	discLabelForQuery, labelYear := splitTitleYear(input.DiscLabel)
 	if input.SearchOpts.Year == 0 {
-		if titleYear > 0 {
-			input.SearchOpts.Year = titleYear
+		var source, reason string
+		var year int
+		switch {
+		case titleYear > 0:
+			year, source, reason = titleYear, "title", "extracted_from_title"
+		case labelYear > 0:
+			year, source, reason = labelYear, "disc_label", "extracted_from_disc_label"
+		}
+		if year > 0 {
+			input.SearchOpts.Year = year
 			logger.Info("year source decision",
 				logging.String(logging.FieldDecisionType, "year_source"),
-				logging.String("decision_result", "title"),
-				logging.String("decision_reason", "extracted_from_title"),
-				logging.Int("year", titleYear))
-		} else if labelYear > 0 {
-			input.SearchOpts.Year = labelYear
-			logger.Info("year source decision",
-				logging.String(logging.FieldDecisionType, "year_source"),
-				logging.String("decision_result", "disc_label"),
-				logging.String("decision_reason", "extracted_from_disc_label"),
-				logging.Int("year", labelYear))
+				logging.String("decision_result", source),
+				logging.String("decision_reason", reason),
+				logging.Int("year", year))
 		}
 	}
 

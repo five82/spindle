@@ -24,14 +24,6 @@ import (
 	"spindle/internal/services/jellyfin"
 )
 
-// ternary is a generic conditional helper.
-func ternary[T any](cond bool, a, b T) T {
-	if cond {
-		return a
-	}
-	return b
-}
-
 // shouldRefreshJellyfin checks whether Jellyfin refresh is allowed and returns the reason.
 func shouldRefreshJellyfin(cfg *config.Config) (bool, string) {
 	if cfg == nil {
@@ -361,7 +353,7 @@ func logJellyfinRefreshDecision(logger *slog.Logger, allowed bool, reason, scope
 	logger.Info(
 		"jellyfin refresh decision",
 		logging.String(logging.FieldDecisionType, "jellyfin_refresh"),
-		logging.String("decision_result", ternary(allowed, "refresh", "skip")),
+		logging.String("decision_result", logging.Ternary(allowed, "refresh", "skip")),
 		logging.String("decision_reason", reason),
 		logging.String("decision_options", "refresh, skip"),
 		logging.String("decision_scope", scope),

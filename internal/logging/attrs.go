@@ -145,3 +145,31 @@ func ParseDecisionID(value string) (int, bool) {
 	}
 	return id, true
 }
+
+// Ternary is a generic conditional helper that returns a if cond is true, b otherwise.
+func Ternary[T any](cond bool, a, b T) T {
+	if cond {
+		return a
+	}
+	return b
+}
+
+// DecisionAttrs builds consistent attributes for decision logging.
+// All decision logs should use decision_type, decision_result, and decision_reason.
+func DecisionAttrs(decisionType, result, reason string) []Attr {
+	return []Attr{
+		String(FieldDecisionType, decisionType),
+		String("decision_result", result),
+		String("decision_reason", reason),
+	}
+}
+
+// DecisionAttrsWithOptions builds decision attributes including the options field.
+func DecisionAttrsWithOptions(decisionType, result, reason, options string) []Attr {
+	return []Attr{
+		String(FieldDecisionType, decisionType),
+		String("decision_result", result),
+		String("decision_reason", reason),
+		String("decision_options", options),
+	}
+}

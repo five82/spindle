@@ -286,8 +286,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	logger.Info("forced subtitle detection",
 		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
-		logging.String("decision_result", ternary(hasForcedTrack, "detected", "none")),
-		logging.String("decision_reason", ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
+		logging.String("decision_result", logging.Ternary(hasForcedTrack, "detected", "none")),
+		logging.String("decision_reason", logging.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
 		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
 
 	mediaHint, mediaReason := detectMediaKindWithReason(title, discLabel, scanResult)
@@ -460,11 +460,4 @@ func (i *Identifier) HealthCheck(ctx context.Context) stage.Health {
 		return stage.Unhealthy(name, "disc scanner unavailable")
 	}
 	return stage.Healthy(name)
-}
-
-func ternary[T any](cond bool, a, b T) T {
-	if cond {
-		return a
-	}
-	return b
 }

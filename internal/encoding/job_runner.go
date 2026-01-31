@@ -30,8 +30,8 @@ func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec
 		logger.Info(
 			"encoding runner decision",
 			logging.String(logging.FieldDecisionType, "encoding_runner"),
-			logging.String("decision_result", ternary(runnerAvailable, "drapto", "placeholder")),
-			logging.String("decision_reason", ternary(runnerAvailable, "drapto_client_configured", "drapto_client_unavailable")),
+			logging.String("decision_result", logging.Ternary(runnerAvailable, "drapto", "placeholder")),
+			logging.String("decision_reason", logging.Ternary(runnerAvailable, "drapto_client_configured", "drapto_client_unavailable")),
 			logging.String("decision_options", "drapto, placeholder"),
 			logging.Int("job_count", len(jobs)),
 		)

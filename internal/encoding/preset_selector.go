@@ -256,7 +256,7 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 
 	decisionAttrs := append([]logging.Attr{
 		logging.String(logging.FieldDecisionType, "preset_decider"),
-		logging.String("decision_result", ternary(decision.Applied, "applied", "fallback")),
+		logging.String("decision_result", logging.Ternary(decision.Applied, "applied", "fallback")),
 		logging.String("decision_selected", decision.Profile),
 		logging.String("decision_reason", fallbackReason),
 	}, attrs...)
@@ -298,13 +298,6 @@ func (e *Encoder) detectResolutionLabel(ctx context.Context, path string) (strin
 	}
 	width := maxVideoWidth(result)
 	return classifyResolution(width), nil
-}
-
-func ternary[T any](cond bool, a, b T) T {
-	if cond {
-		return a
-	}
-	return b
 }
 
 func maxVideoWidth(result ffprobe.Result) int {

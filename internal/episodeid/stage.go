@@ -55,12 +55,7 @@ func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error
 	// Check if this is a TV show - skip for movies
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if metadata.IsMovie() {
-		logger.Info("episode identification decision",
-			logging.String(logging.FieldDecisionType, "episode_identification"),
-			logging.String("decision_result", "skipped"),
-			logging.String("decision_reason", "movie_content"),
-			logging.String("decision_options", "identify, skip"),
-		)
+		logSkipDecision(logger, "movie_content")
 		item.ProgressStage = "Episode Identification"
 		item.ProgressMessage = "Skipped (movie content)"
 		item.ProgressPercent = 100
@@ -80,88 +75,42 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	// Check if this is a TV show - skip for movies
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if metadata.IsMovie() {
-		logger.Info("episode identification decision",
-			logging.String(logging.FieldDecisionType, "episode_identification"),
-			logging.String("decision_result", "skipped"),
-			logging.String("decision_reason", "movie_content"),
-			logging.String("decision_options", "identify, skip"),
-		)
-		item.Status = queue.StatusEpisodeIdentified
-		item.ProgressStage = "Episode Identified"
-		item.ProgressMessage = "Skipped (movie content)"
-		item.ProgressPercent = 100
-		item.ActiveEpisodeKey = ""
+		logSkipDecision(logger, "movie_content")
+		setSkipProgress(item, "Skipped (movie content)")
 		return nil
 	}
 
 	// Decode rip spec
 	if strings.TrimSpace(item.RipSpecData) == "" {
-		logger.Info("episode identification decision",
-			logging.String(logging.FieldDecisionType, "episode_identification"),
-			logging.String("decision_result", "skipped"),
-			logging.String("decision_reason", "no_rip_spec"),
-			logging.String("decision_options", "identify, skip"),
-		)
-		item.Status = queue.StatusEpisodeIdentified
-		item.ProgressStage = "Episode Identified"
-		item.ProgressMessage = "Skipped (no rip spec)"
-		item.ProgressPercent = 100
-		item.ActiveEpisodeKey = ""
+		logSkipDecision(logger, "no_rip_spec")
+		setSkipProgress(item, "Skipped (no rip spec)")
 		return nil
 	}
 
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
-		logger.Info("episode identification decision",
-			logging.String(logging.FieldDecisionType, "episode_identification"),
-			logging.String("decision_result", "skipped"),
-			logging.String("decision_reason", "invalid_rip_spec"),
-			logging.String("decision_options", "identify, skip"),
-			logging.Error(err),
-		)
-		item.Status = queue.StatusEpisodeIdentified
-		item.ProgressStage = "Episode Identified"
-		item.ProgressMessage = "Skipped (invalid rip spec)"
-		item.ProgressPercent = 100
-		item.ActiveEpisodeKey = ""
+		logSkipDecision(logger, "invalid_rip_spec", logging.Error(err))
+		setSkipProgress(item, "Skipped (invalid rip spec)")
 		return nil
 	}
 
 	// Check if we have episodes to match
 	if len(env.Episodes) == 0 {
-		logger.Info("episode identification decision",
-			logging.String(logging.FieldDecisionType, "episode_identification"),
-			logging.String("decision_result", "skipped"),
-			logging.String("decision_reason", "no_episodes"),
-			logging.String("decision_options", "identify, skip"),
-		)
-		item.Status = queue.StatusEpisodeIdentified
-		item.ProgressStage = "Episode Identified"
-		item.ProgressMessage = "Skipped (no episodes)"
-		item.ProgressPercent = 100
-		item.ActiveEpisodeKey = ""
+		logSkipDecision(logger, "no_episodes")
+		setSkipProgress(item, "Skipped (no episodes)")
 		return nil
 	}
 
 	// Check if content matcher is available
 	if e.matcher == nil {
-		reason := "content matcher unavailable"
+		reason := "content_matcher_unavailable"
 		if e.cfg == nil {
-			reason = "configuration unavailable"
+			reason = "configuration_unavailable"
 		} else if !e.cfg.Subtitles.OpenSubtitlesEnabled {
-			reason = "opensubtitles disabled"
+			reason = "opensubtitles_disabled"
 		}
-		logger.Info("episode identification decision",
-			logging.String(logging.FieldDecisionType, "episode_identification"),
-			logging.String("decision_result", "skipped"),
-			logging.String("decision_reason", reason),
-			logging.String("decision_options", "identify, skip"),
-		)
-		item.Status = queue.StatusEpisodeIdentified
-		item.ProgressStage = "Episode Identified"
-		item.ProgressMessage = "Skipped (OpenSubtitles disabled)"
-		item.ProgressPercent = 100
-		item.ActiveEpisodeKey = ""
+		logSkipDecision(logger, reason)
+		setSkipProgress(item, "Skipped (OpenSubtitles disabled)")
 		return nil
 	}
 
@@ -271,6 +220,24 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	)
 
 	return nil
+}
+
+// logSkipDecision logs an episode identification skip decision with consistent fields.
+func logSkipDecision(logger *slog.Logger, reason string, extraAttrs ...logging.Attr) {
+	attrs := append(
+		logging.DecisionAttrsWithOptions("episode_identification", "skipped", reason, "identify, skip"),
+		extraAttrs...,
+	)
+	logger.Info("episode identification decision", logging.Args(attrs...)...)
+}
+
+// setSkipProgress updates item fields for a skipped stage.
+func setSkipProgress(item *queue.Item, message string) {
+	item.Status = queue.StatusEpisodeIdentified
+	item.ProgressStage = "Episode Identified"
+	item.ProgressMessage = message
+	item.ProgressPercent = 100
+	item.ActiveEpisodeKey = ""
 }
 
 // HealthCheck reports the stage's operational readiness.
