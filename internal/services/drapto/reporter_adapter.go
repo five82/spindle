@@ -56,14 +56,26 @@ func (r *spindleReporter) StageProgress(s draptolib.StageProgress) {
 }
 
 func (r *spindleReporter) CropResult(s draptolib.CropSummary) {
+	// Convert crop candidates
+	var candidates []CropCandidate
+	for _, c := range s.Candidates {
+		candidates = append(candidates, CropCandidate{
+			Crop:    c.Crop,
+			Count:   c.Count,
+			Percent: c.Percent,
+		})
+	}
+
 	r.callback(ProgressUpdate{
 		Type:      EventTypeCropResult,
 		Timestamp: time.Now(),
 		Crop: &CropSummary{
-			Message:  s.Message,
-			Crop:     s.Crop,
-			Required: s.Required,
-			Disabled: s.Disabled,
+			Message:      s.Message,
+			Crop:         s.Crop,
+			Required:     s.Required,
+			Disabled:     s.Disabled,
+			Candidates:   candidates,
+			TotalSamples: s.TotalSamples,
 		},
 	})
 }

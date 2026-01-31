@@ -2,6 +2,8 @@ module spindle
 
 go 1.25.1
 
+replace github.com/five82/drapto => ../drapto
+
 require (
 	github.com/five82/drapto v0.3.0
 	github.com/gofrs/flock v0.13.0

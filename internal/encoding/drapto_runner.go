@@ -272,6 +272,28 @@ func logDraptoCrop(logger *slog.Logger, label string, summary *drapto.CropSummar
 		attrs = append(attrs, logging.String("crop_params", strings.TrimSpace(summary.Crop)))
 	}
 	infoWithJob(logger, label, "drapto crop detection", attrs...)
+
+	// Log crop candidates at DEBUG level for diagnosing multiple aspect ratio issues
+	if len(summary.Candidates) > 0 {
+		debugWithJob(logger, label, "drapto crop candidates",
+			logging.Int("crop_total_samples", summary.TotalSamples),
+			logging.Int("crop_unique_values", len(summary.Candidates)),
+		)
+		for i, c := range summary.Candidates {
+			if i >= 10 {
+				debugWithJob(logger, label, "drapto crop candidates truncated",
+					logging.Int("remaining_candidates", len(summary.Candidates)-10),
+				)
+				break
+			}
+			debugWithJob(logger, label, "drapto crop candidate",
+				logging.Int("crop_candidate_rank", i+1),
+				logging.String("crop_candidate_value", c.Crop),
+				logging.Int("crop_candidate_count", c.Count),
+				logging.Float64("crop_candidate_percent", c.Percent),
+			)
+		}
+	}
 }
 
 func logDraptoEncodingConfig(logger *slog.Logger, label string, cfg *drapto.EncodingConfig) {

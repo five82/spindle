@@ -28,6 +28,7 @@ Commands:
   process    - Queue a cached entry for post-rip processing
   remove     - Remove a specific entry by number (see 'stats' for numbers)
   clear      - Remove all cached entries
+  crop       - Run crop detection on a cached file (troubleshooting)
   commentary - Run commentary detection on a cached file (troubleshooting)`,
 	}
 
@@ -36,6 +37,7 @@ Commands:
 	cacheCmd.AddCommand(newCacheProcessCommand(ctx))
 	cacheCmd.AddCommand(newCacheRemoveCommand(ctx))
 	cacheCmd.AddCommand(newCacheClearCommand(ctx))
+	cacheCmd.AddCommand(newCacheCropCommand(ctx))
 	cacheCmd.AddCommand(newCacheCommentaryCommand(ctx))
 
 	return cacheCmd
