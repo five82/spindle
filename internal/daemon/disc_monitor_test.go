@@ -102,7 +102,7 @@ func TestDiscMonitorQueuesNewDisc(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop())
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -165,7 +165,7 @@ func TestDiscMonitorResetsExistingItem(t *testing.T) {
 		t.Fatalf("store.Update: %v", err)
 	}
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop())
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -224,7 +224,7 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 		t.Fatalf("store.Update: %v", err)
 	}
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop())
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -272,5 +272,74 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 	}
 	if items[0].DiscTitle != "Nice Title" {
 		t.Fatalf("expected completed item title to remain unchanged, got %q", items[0].DiscTitle)
+	}
+}
+
+func TestDiscMonitorSkipsPollWhenPaused(t *testing.T) {
+	cfg := testMonitorConfig(t)
+	store, err := queue.Open(cfg)
+	if err != nil {
+		t.Fatalf("queue.Open: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	var paused atomic.Bool
+	paused.Store(true)
+
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), paused.Load)
+	if monitor == nil {
+		t.Fatal("expected monitor to be created")
+		return
+	}
+
+	monitor.pollInterval = 10 * time.Millisecond
+	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
+	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-paused"}
+
+	var detectCalls atomic.Int32
+	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
+		detectCalls.Add(1)
+		return &discInfo{Device: device, Label: "Should Not Queue", Type: "Blu-ray"}, nil
+	}
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := monitor.Start(runCtx); err != nil {
+		t.Fatalf("monitor.Start: %v", err)
+	}
+	t.Cleanup(func() { monitor.Stop() })
+
+	// Wait for several poll cycles while paused
+	time.Sleep(100 * time.Millisecond)
+
+	if detectCalls.Load() != 0 {
+		t.Fatalf("expected no detect calls while paused, got %d", detectCalls.Load())
+	}
+
+	items, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no items while paused, got %d", len(items))
+	}
+
+	// Unpause and verify detection resumes
+	paused.Store(false)
+
+	deadline := time.After(500 * time.Millisecond)
+	for detectCalls.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for detection call after unpause")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	items = waitForItems(t, store, 1)
+	if items[0].DiscTitle != "Should Not Queue" {
+		t.Fatalf("unexpected disc title after unpause: %q", items[0].DiscTitle)
 	}
 }

@@ -34,6 +34,7 @@ type DependencyStatus = api.DependencyStatus
 // StatusResponse represents combined daemon/workflow status information.
 type StatusResponse struct {
 	Running      bool               `json:"running"`
+	DiscPaused   bool               `json:"disc_paused"`
 	QueueStats   map[string]int     `json:"queue_stats"`
 	LastError    string             `json:"last_error"`
 	LastItem     *QueueItem         `json:"last_item"`
@@ -176,4 +177,22 @@ type QueueRemoveRequest struct {
 // QueueRemoveResponse reports number of removed entries.
 type QueueRemoveResponse struct {
 	Removed int64 `json:"removed"`
+}
+
+// DiscPauseRequest pauses detection of new disc insertions.
+type DiscPauseRequest struct{}
+
+// DiscPauseResponse reports whether disc processing was paused.
+type DiscPauseResponse struct {
+	Paused  bool   `json:"paused"`
+	Message string `json:"message"`
+}
+
+// DiscResumeRequest resumes detection of new disc insertions.
+type DiscResumeRequest struct{}
+
+// DiscResumeResponse reports whether disc processing was resumed.
+type DiscResumeResponse struct {
+	Resumed bool   `json:"resumed"`
+	Message string `json:"message"`
 }

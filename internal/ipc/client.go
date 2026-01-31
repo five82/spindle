@@ -182,3 +182,21 @@ func (c *Client) QueueRemove(ids []int64) (*QueueRemoveResponse, error) {
 	}
 	return &resp, nil
 }
+
+// DiscPause pauses detection of new disc insertions.
+func (c *Client) DiscPause() (*DiscPauseResponse, error) {
+	var resp DiscPauseResponse
+	if err := c.client.Call("Spindle.DiscPause", DiscPauseRequest{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// DiscResume resumes detection of new disc insertions.
+func (c *Client) DiscResume() (*DiscResumeResponse, error) {
+	var resp DiscResumeResponse
+	if err := c.client.Call("Spindle.DiscResume", DiscResumeRequest{}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

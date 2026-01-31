@@ -61,6 +61,7 @@ type discMonitor struct {
 	scanTimeout  time.Duration
 	pollInterval time.Duration
 	detect       detectFunc
+	isPaused     func() bool
 
 	mu          sync.Mutex
 	running     bool
@@ -79,7 +80,7 @@ func (defaultFingerprintProvider) Compute(ctx context.Context, device, discType 
 	return fingerprint.ComputeTimeout(ctx, device, discType, 2*time.Minute)
 }
 
-func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger) *discMonitor {
+func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger, isPaused func() bool) *discMonitor {
 	if cfg == nil || store == nil {
 		return nil
 	}
@@ -118,6 +119,7 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger)
 		scanTimeout:         scanTimeout,
 		pollInterval:        poll,
 		detect:              detect,
+		isPaused:            isPaused,
 	}
 }
 
@@ -180,6 +182,10 @@ func (m *discMonitor) loop() {
 func (m *discMonitor) poll() {
 	ctx := m.ctx
 	if ctx == nil {
+		return
+	}
+
+	if m.isPaused != nil && m.isPaused() {
 		return
 	}
 

@@ -36,9 +36,10 @@ type Daemon struct {
 	lockPath string
 	lock     *flock.Flock
 
-	running atomic.Bool
-	ctx     context.Context
-	cancel  context.CancelFunc
+	running    atomic.Bool
+	discPaused atomic.Bool
+	ctx        context.Context
+	cancel     context.CancelFunc
 
 	depsMu       sync.RWMutex
 	dependencies []DependencyStatus
@@ -48,6 +49,7 @@ type Daemon struct {
 // Status represents daemon runtime information.
 type Status struct {
 	Running      bool
+	DiscPaused   bool
 	Workflow     workflow.StatusSummary
 	QueueDBPath  string
 	LockFilePath string
@@ -75,7 +77,6 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 	}
 
 	lockPath := filepath.Join(cfg.Paths.LogDir, "spindle.lock")
-	monitor := newDiscMonitor(cfg, store, logger)
 	daemon := &Daemon{
 		cfg:        cfg,
 		logger:     logger,
@@ -86,9 +87,9 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 		logArchive: archive,
 		lockPath:   lockPath,
 		lock:       flock.New(lockPath),
-		monitor:    monitor,
 		notifier:   notifications.NewService(cfg),
 	}
+	daemon.monitor = newDiscMonitor(cfg, store, logger, daemon.DiscPaused)
 	apiSrv, err := newAPIServer(cfg, daemon, logger)
 	if err != nil {
 		return nil, err
@@ -370,12 +371,28 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	d.depsMu.RUnlock()
 	return Status{
 		Running:      d.running.Load(),
+		DiscPaused:   d.discPaused.Load(),
 		Workflow:     summary,
 		QueueDBPath:  filepath.Join(d.cfg.Paths.LogDir, "queue.db"),
 		LockFilePath: d.lockPath,
 		Dependencies: dependencies,
 		PID:          os.Getpid(),
 	}
+}
+
+// PauseDisc pauses detection of new disc insertions. Returns true if state changed.
+func (d *Daemon) PauseDisc() bool {
+	return d.discPaused.CompareAndSwap(false, true)
+}
+
+// ResumeDisc resumes detection of new disc insertions. Returns true if state changed.
+func (d *Daemon) ResumeDisc() bool {
+	return d.discPaused.CompareAndSwap(true, false)
+}
+
+// DiscPaused reports whether disc detection is paused.
+func (d *Daemon) DiscPaused() bool {
+	return d.discPaused.Load()
 }
 
 func (d *Daemon) runDependencyChecks(ctx context.Context) error {

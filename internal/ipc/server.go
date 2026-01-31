@@ -165,6 +165,7 @@ func (s *service) Stop(_ StopRequest, resp *StopResponse) error {
 func (s *service) Status(_ StatusRequest, resp *StatusResponse) error {
 	status := s.daemon.Status(s.ctx)
 	resp.Running = status.Running
+	resp.DiscPaused = status.DiscPaused
 	resp.QueueDBPath = status.QueueDBPath
 	resp.LockPath = status.LockFilePath
 	resp.QueueStats = make(map[string]int, len(status.Workflow.QueueStats))
@@ -423,5 +424,33 @@ func (s *service) QueueRemove(req QueueRemoveRequest, resp *QueueRemoveResponse)
 	s.log().Info("queue items removed",
 		logging.String(logging.FieldEventType, "queue_remove"),
 		logging.Int64("removed_count", removed))
+	return nil
+}
+
+func (s *service) DiscPause(_ DiscPauseRequest, resp *DiscPauseResponse) error {
+	s.log().Debug("disc pause requested")
+	changed := s.daemon.PauseDisc()
+	resp.Paused = true
+	if changed {
+		resp.Message = "disc processing paused"
+		s.log().Info("disc processing paused",
+			logging.String(logging.FieldEventType, "disc_pause"))
+	} else {
+		resp.Message = "disc processing already paused"
+	}
+	return nil
+}
+
+func (s *service) DiscResume(_ DiscResumeRequest, resp *DiscResumeResponse) error {
+	s.log().Debug("disc resume requested")
+	changed := s.daemon.ResumeDisc()
+	resp.Resumed = true
+	if changed {
+		resp.Message = "disc processing resumed"
+		s.log().Info("disc processing resumed",
+			logging.String(logging.FieldEventType, "disc_resume"))
+	} else {
+		resp.Message = "disc processing already active"
+	}
 	return nil
 }

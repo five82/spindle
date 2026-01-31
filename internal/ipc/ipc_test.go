@@ -424,3 +424,95 @@ func TestIPCQueueClear(t *testing.T) {
 		}
 	})
 }
+
+func TestIPCDiscPauseResume(t *testing.T) {
+	env := setupIPCTest(t)
+
+	// Start the daemon first
+	_, err := env.Client.Start()
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	t.Run("initial status shows not paused", func(t *testing.T) {
+		status, err := env.Client.Status()
+		if err != nil {
+			t.Fatalf("Status failed: %v", err)
+		}
+		if status.DiscPaused {
+			t.Fatal("expected DiscPaused to be false initially")
+		}
+	})
+
+	t.Run("pause disc processing", func(t *testing.T) {
+		resp, err := env.Client.DiscPause()
+		if err != nil {
+			t.Fatalf("DiscPause failed: %v", err)
+		}
+		if !resp.Paused {
+			t.Fatal("expected Paused to be true")
+		}
+		if resp.Message != "disc processing paused" {
+			t.Fatalf("unexpected message: %s", resp.Message)
+		}
+	})
+
+	t.Run("status shows paused", func(t *testing.T) {
+		status, err := env.Client.Status()
+		if err != nil {
+			t.Fatalf("Status failed: %v", err)
+		}
+		if !status.DiscPaused {
+			t.Fatal("expected DiscPaused to be true after pause")
+		}
+	})
+
+	t.Run("pause again is idempotent", func(t *testing.T) {
+		resp, err := env.Client.DiscPause()
+		if err != nil {
+			t.Fatalf("DiscPause failed: %v", err)
+		}
+		if !resp.Paused {
+			t.Fatal("expected Paused to be true")
+		}
+		if resp.Message != "disc processing already paused" {
+			t.Fatalf("unexpected message: %s", resp.Message)
+		}
+	})
+
+	t.Run("resume disc processing", func(t *testing.T) {
+		resp, err := env.Client.DiscResume()
+		if err != nil {
+			t.Fatalf("DiscResume failed: %v", err)
+		}
+		if !resp.Resumed {
+			t.Fatal("expected Resumed to be true")
+		}
+		if resp.Message != "disc processing resumed" {
+			t.Fatalf("unexpected message: %s", resp.Message)
+		}
+	})
+
+	t.Run("status shows not paused", func(t *testing.T) {
+		status, err := env.Client.Status()
+		if err != nil {
+			t.Fatalf("Status failed: %v", err)
+		}
+		if status.DiscPaused {
+			t.Fatal("expected DiscPaused to be false after resume")
+		}
+	})
+
+	t.Run("resume again is idempotent", func(t *testing.T) {
+		resp, err := env.Client.DiscResume()
+		if err != nil {
+			t.Fatalf("DiscResume failed: %v", err)
+		}
+		if !resp.Resumed {
+			t.Fatal("expected Resumed to be true")
+		}
+		if resp.Message != "disc processing already active" {
+			t.Fatalf("unexpected message: %s", resp.Message)
+		}
+	})
+}

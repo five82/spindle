@@ -192,6 +192,11 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			}
 			if statusResp.Running {
 				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusOK, "Running", colorize))
+				if statusResp.DiscPaused {
+					fmt.Fprintln(stdout, renderStatusLine("Disc Processing", statusWarn, "Paused", colorize))
+				} else {
+					fmt.Fprintln(stdout, renderStatusLine("Disc Processing", statusOK, "Active", colorize))
+				}
 			} else {
 				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusWarn, "Not running (run `spindle start`)", colorize))
 			}

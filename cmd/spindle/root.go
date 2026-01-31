@@ -49,6 +49,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newConfigCommand(ctx))
 	rootCmd.AddCommand(newCacheCommand(ctx))
 	rootCmd.AddCommand(newStagingCommand(ctx))
+	rootCmd.AddCommand(newDiscCommand(ctx))
 
 	return rootCmd
 }
