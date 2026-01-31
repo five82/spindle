@@ -2,6 +2,9 @@ package audioanalysis
 
 import (
 	"testing"
+
+	"spindle/internal/media/ffprobe"
+	"spindle/internal/ripspec"
 )
 
 func TestRemapCommentaryIndices(t *testing.T) {
@@ -112,4 +115,347 @@ func TestCommentaryLabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsCommentaryCandidate(t *testing.T) {
+	tests := []struct {
+		name         string
+		stream       ffprobe.Stream
+		primaryIndex int
+		want         bool
+	}{
+		{
+			name:         "video stream",
+			stream:       ffprobe.Stream{Index: 0, CodecType: "video", Channels: 2},
+			primaryIndex: 1,
+			want:         false,
+		},
+		{
+			name:         "primary audio stream",
+			stream:       ffprobe.Stream{Index: 1, CodecType: "audio", Channels: 2},
+			primaryIndex: 1,
+			want:         false,
+		},
+		{
+			name:         "non-stereo audio",
+			stream:       ffprobe.Stream{Index: 2, CodecType: "audio", Channels: 6},
+			primaryIndex: 1,
+			want:         false,
+		},
+		{
+			name: "english stereo",
+			stream: ffprobe.Stream{
+				Index:     2,
+				CodecType: "audio",
+				Channels:  2,
+				Tags:      map[string]string{"language": "eng"},
+			},
+			primaryIndex: 1,
+			want:         true,
+		},
+		{
+			name: "undefined language stereo",
+			stream: ffprobe.Stream{
+				Index:     2,
+				CodecType: "audio",
+				Channels:  2,
+				Tags:      map[string]string{"language": "und"},
+			},
+			primaryIndex: 1,
+			want:         true,
+		},
+		{
+			name: "no language tag stereo",
+			stream: ffprobe.Stream{
+				Index:     2,
+				CodecType: "audio",
+				Channels:  2,
+				Tags:      map[string]string{},
+			},
+			primaryIndex: 1,
+			want:         true,
+		},
+		{
+			name: "french stereo",
+			stream: ffprobe.Stream{
+				Index:     2,
+				CodecType: "audio",
+				Channels:  2,
+				Tags:      map[string]string{"language": "fra"},
+			},
+			primaryIndex: 1,
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isCommentaryCandidate(tt.stream, tt.primaryIndex)
+			if got != tt.want {
+				t.Errorf("isCommentaryCandidate() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindCommentaryCandidates(t *testing.T) {
+	streams := []ffprobe.Stream{
+		{Index: 0, CodecType: "video"},
+		{Index: 1, CodecType: "audio", Channels: 8, Tags: map[string]string{"language": "eng"}},
+		{Index: 2, CodecType: "audio", Channels: 2, Tags: map[string]string{"language": "eng"}},
+		{Index: 3, CodecType: "audio", Channels: 2, Tags: map[string]string{"language": "eng"}},
+		{Index: 4, CodecType: "audio", Channels: 6, Tags: map[string]string{"language": "fra"}},
+		{Index: 5, CodecType: "subtitle"},
+	}
+
+	candidates := findCommentaryCandidates(streams, 1) // primary is index 1
+
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(candidates))
+	}
+	if candidates[0].Index != 2 {
+		t.Errorf("first candidate index = %d, want 2", candidates[0].Index)
+	}
+	if candidates[1].Index != 3 {
+		t.Errorf("second candidate index = %d, want 3", candidates[1].Index)
+	}
+}
+
+func TestBuildAudioStreamMappings(t *testing.T) {
+	streams := []ffprobe.Stream{
+		{Index: 0, CodecType: "video"},
+		{Index: 1, CodecType: "audio", Tags: map[string]string{"title": "Main"}},
+		{Index: 2, CodecType: "subtitle"},
+		{Index: 3, CodecType: "audio", Tags: map[string]string{"title": "Commentary"}},
+		{Index: 4, CodecType: "audio", Tags: map[string]string{"title": "Music Only"}},
+	}
+
+	commentaryIndices := map[int]bool{1: true} // output index 1 is commentary
+
+	mappings := buildAudioStreamMappings(streams, commentaryIndices)
+
+	if len(mappings) != 3 {
+		t.Fatalf("expected 3 audio mappings, got %d", len(mappings))
+	}
+
+	// First audio (input 1) -> output 0
+	if mappings[0].inputIndex != 1 || mappings[0].outputIndex != 0 {
+		t.Errorf("mapping[0]: input=%d output=%d, want input=1 output=0",
+			mappings[0].inputIndex, mappings[0].outputIndex)
+	}
+	if mappings[0].isCommentary {
+		t.Error("mapping[0] should not be commentary (output index 0)")
+	}
+
+	// Second audio (input 3) -> output 1
+	if mappings[1].inputIndex != 3 || mappings[1].outputIndex != 1 {
+		t.Errorf("mapping[1]: input=%d output=%d, want input=3 output=1",
+			mappings[1].inputIndex, mappings[1].outputIndex)
+	}
+	if !mappings[1].isCommentary {
+		t.Error("mapping[1] should be commentary (output index 1)")
+	}
+
+	// Third audio (input 4) -> output 2
+	if mappings[2].inputIndex != 4 || mappings[2].outputIndex != 2 {
+		t.Errorf("mapping[2]: input=%d output=%d, want input=4 output=2",
+			mappings[2].inputIndex, mappings[2].outputIndex)
+	}
+}
+
+func TestHasAnyCommentary(t *testing.T) {
+	tests := []struct {
+		name     string
+		mappings []audioStreamMapping
+		want     bool
+	}{
+		{
+			name:     "empty",
+			mappings: []audioStreamMapping{},
+			want:     false,
+		},
+		{
+			name: "no commentary",
+			mappings: []audioStreamMapping{
+				{isCommentary: false},
+				{isCommentary: false},
+			},
+			want: false,
+		},
+		{
+			name: "has commentary",
+			mappings: []audioStreamMapping{
+				{isCommentary: false},
+				{isCommentary: true},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasAnyCommentary(tt.mappings)
+			if got != tt.want {
+				t.Errorf("hasAnyCommentary() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCountCommentaryTracks(t *testing.T) {
+	mappings := []audioStreamMapping{
+		{isCommentary: false},
+		{isCommentary: true},
+		{isCommentary: false},
+		{isCommentary: true},
+	}
+
+	got := countCommentaryTracks(mappings)
+	if got != 2 {
+		t.Errorf("countCommentaryTracks() = %d, want 2", got)
+	}
+}
+
+func TestTruncateTranscript(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		maxLen    int
+		wantTrunc bool
+	}{
+		{
+			name:      "short text",
+			input:     "Hello world",
+			maxLen:    100,
+			wantTrunc: false,
+		},
+		{
+			name:      "exact length",
+			input:     "12345",
+			maxLen:    5,
+			wantTrunc: false,
+		},
+		{
+			name:      "needs truncation",
+			input:     "This is a very long transcript that exceeds the limit",
+			maxLen:    20,
+			wantTrunc: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateTranscript(tt.input, tt.maxLen)
+			if tt.wantTrunc {
+				if len(got) > tt.maxLen+len("\n[truncated]") {
+					t.Errorf("truncated result too long: %d", len(got))
+				}
+				if got[len(got)-11:] != "[truncated]" {
+					t.Errorf("missing truncation marker")
+				}
+			} else if got != tt.input {
+				t.Errorf("got %q, want %q", got, tt.input)
+			}
+		})
+	}
+}
+
+func TestExtractYear(t *testing.T) {
+	tests := []struct {
+		name string
+		env  *ripspec.Envelope
+		want string
+	}{
+		{
+			name: "nil envelope",
+			env:  nil,
+			want: "",
+		},
+		{
+			name: "nil metadata",
+			env:  &ripspec.Envelope{},
+			want: "",
+		},
+		{
+			name: "no year key",
+			env:  &ripspec.Envelope{Metadata: map[string]any{"title": "Test"}},
+			want: "",
+		},
+		{
+			name: "year as float64",
+			env:  &ripspec.Envelope{Metadata: map[string]any{"year": float64(2024)}},
+			want: "2024",
+		},
+		{
+			name: "year as string",
+			env:  &ripspec.Envelope{Metadata: map[string]any{"year": "2023"}},
+			want: "2023",
+		},
+		{
+			name: "year as zero float",
+			env:  &ripspec.Envelope{Metadata: map[string]any{"year": float64(0)}},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractYear(tt.env)
+			if got != tt.want {
+				t.Errorf("extractYear() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildClassificationPrompt(t *testing.T) {
+	tests := []struct {
+		name       string
+		title      string
+		year       string
+		transcript string
+		wantParts  []string
+	}{
+		{
+			name:       "with year",
+			title:      "Test Movie",
+			year:       "2024",
+			transcript: "Sample transcript",
+			wantParts:  []string{"Title: Test Movie", "(2024)", "Sample transcript"},
+		},
+		{
+			name:       "without year",
+			title:      "Test Movie",
+			year:       "",
+			transcript: "Sample transcript",
+			wantParts:  []string{"Title: Test Movie", "Sample transcript"},
+		},
+		{
+			name:       "whitespace title",
+			title:      "  Spaced Title  ",
+			year:       "",
+			transcript: "text",
+			wantParts:  []string{"Title: Spaced Title"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildClassificationPrompt(tt.title, tt.year, tt.transcript)
+			for _, part := range tt.wantParts {
+				if !containsSubstring(got, part) {
+					t.Errorf("buildClassificationPrompt() = %q, missing %q", got, part)
+				}
+			}
+		})
+	}
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

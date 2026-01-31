@@ -343,3 +343,158 @@ func TestDiscMonitorSkipsPollWhenPaused(t *testing.T) {
 		t.Fatalf("unexpected disc title after unpause: %q", items[0].DiscTitle)
 	}
 }
+
+func TestDiscMonitorSkipsAlreadyInWorkflow(t *testing.T) {
+	cfg := testMonitorConfig(t)
+	store, err := queue.Open(cfg)
+	if err != nil {
+		t.Fatalf("queue.Open: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	ctx := context.Background()
+
+	// Create an item that is currently being processed (in workflow)
+	item, err := store.NewDisc(ctx, "Processing Disc", "fp-active")
+	if err != nil {
+		t.Fatalf("store.NewDisc: %v", err)
+	}
+	item.Status = queue.StatusRipping // Actively being processed
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("store.Update: %v", err)
+	}
+
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	if monitor == nil {
+		t.Fatal("expected monitor to be created")
+		return
+	}
+
+	monitor.pollInterval = 10 * time.Millisecond
+
+	// Scanner should NOT be called because the disc is already in workflow
+	scanner := &stubDiscScanner{result: &disc.ScanResult{}}
+	monitor.scanner = scanner
+	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-active"}
+
+	var detectCalls atomic.Int32
+	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
+		if detectCalls.Add(1) == 1 {
+			return &discInfo{Device: device, Label: "Same Disc Again", Type: "Blu-ray"}, nil
+		}
+		return nil, nil
+	}
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := monitor.Start(runCtx); err != nil {
+		t.Fatalf("monitor.Start: %v", err)
+	}
+	t.Cleanup(func() { monitor.Stop() })
+
+	// Wait for detection and processing
+	deadline := time.After(500 * time.Millisecond)
+	for detectCalls.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for detection call")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// Give some time for any potential scan to happen
+	time.Sleep(50 * time.Millisecond)
+
+	// Scanner should NOT have been called - disc is already in workflow
+	if scanner.calls.Load() != 0 {
+		t.Fatalf("expected scanner to not be called for disc already in workflow, got %d calls", scanner.calls.Load())
+	}
+
+	// Only one item should exist
+	items, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected single item, got %d", len(items))
+	}
+	// Item should still be in ripping status
+	if items[0].Status != queue.StatusRipping {
+		t.Fatalf("expected item to remain in ripping status, got %s", items[0].Status)
+	}
+}
+
+func TestDiscMonitorProcessesAfterWorkflowComplete(t *testing.T) {
+	cfg := testMonitorConfig(t)
+	store, err := queue.Open(cfg)
+	if err != nil {
+		t.Fatalf("queue.Open: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	ctx := context.Background()
+
+	// Create an item that was completed
+	item, err := store.NewDisc(ctx, "Previously Completed", "fp-reinsert")
+	if err != nil {
+		t.Fatalf("store.NewDisc: %v", err)
+	}
+	item.Status = queue.StatusCompleted
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("store.Update: %v", err)
+	}
+
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	if monitor == nil {
+		t.Fatal("expected monitor to be created")
+		return
+	}
+
+	monitor.pollInterval = 10 * time.Millisecond
+	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
+	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-reinsert"}
+
+	var detectCalls atomic.Int32
+	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
+		if detectCalls.Add(1) == 1 {
+			return &discInfo{Device: device, Label: "Same Disc Re-inserted", Type: "Blu-ray"}, nil
+		}
+		return nil, nil
+	}
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := monitor.Start(runCtx); err != nil {
+		t.Fatalf("monitor.Start: %v", err)
+	}
+	t.Cleanup(func() { monitor.Stop() })
+
+	// Wait for detection
+	deadline := time.After(500 * time.Millisecond)
+	for detectCalls.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for detection call")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// Give time for processing
+	time.Sleep(100 * time.Millisecond)
+
+	items, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("store.List: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected single item, got %d", len(items))
+	}
+	// Completed item should remain completed (not be re-queued)
+	if items[0].Status != queue.StatusCompleted {
+		t.Fatalf("expected completed item to remain completed, got %s", items[0].Status)
+	}
+}

@@ -127,6 +127,419 @@ func TestSearchBuildsQueryAndParsesResponse(t *testing.T) {
 	}
 }
 
+func TestNew(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantErr bool
+	}{
+		{
+			name:    "missing api key",
+			cfg:     Config{},
+			wantErr: true,
+		},
+		{
+			name:    "empty api key",
+			cfg:     Config{APIKey: "   "},
+			wantErr: true,
+		},
+		{
+			name:    "valid minimal config",
+			cfg:     Config{APIKey: "test-key"},
+			wantErr: false,
+		},
+		{
+			name: "valid full config",
+			cfg: Config{
+				APIKey:    "test-key",
+				UserAgent: "TestAgent/1.0",
+				UserToken: "bearer-token",
+				BaseURL:   "https://custom.api.example.com",
+			},
+			wantErr: false,
+		},
+		{
+			name:    "invalid base url",
+			cfg:     Config{APIKey: "test-key", BaseURL: "://invalid"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, err := New(tt.cfg)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if client == nil {
+				t.Error("expected client, got nil")
+			}
+		})
+	}
+}
+
+func TestNewDefaultsUserAgent(t *testing.T) {
+	client, err := New(Config{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if client.userAgent != defaultUserAgent {
+		t.Errorf("userAgent = %q, want %q", client.userAgent, defaultUserAgent)
+	}
+}
+
+func TestNewDefaultsBaseURL(t *testing.T) {
+	client, err := New(Config{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if client.baseURL.String() != defaultBaseURL {
+		t.Errorf("baseURL = %q, want %q", client.baseURL.String(), defaultBaseURL)
+	}
+}
+
+func TestSanitizeIMDBID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"   ", ""},
+		{"tt0123456", "0123456"},
+		{"0123456", "0123456"},
+		{"  tt0123456  ", "0123456"},
+		{"invalid", ""},
+		{"tt", ""},
+		{"ttabc", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := SanitizeIMDBID(tt.input)
+			if got != tt.want {
+				t.Errorf("SanitizeIMDBID(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchForeignPartsOnlyParameter(t *testing.T) {
+	tests := []struct {
+		name    string
+		foreign *bool
+		wantVal string
+		wantSet bool
+	}{
+		{
+			name:    "nil - no filter",
+			foreign: nil,
+			wantSet: false,
+		},
+		{
+			name:    "true - only forced",
+			foreign: boolPtr(true),
+			wantVal: "only",
+			wantSet: true,
+		},
+		{
+			name:    "false - exclude forced",
+			foreign: boolPtr(false),
+			wantVal: "exclude",
+			wantSet: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedURL string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedURL = r.URL.String()
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(searchResponse{})
+			}))
+			defer server.Close()
+
+			client, err := New(Config{APIKey: "test-key", BaseURL: server.URL})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			_, err = client.Search(context.Background(), SearchRequest{
+				TMDBID:           123,
+				ForeignPartsOnly: tt.foreign,
+			})
+			if err != nil {
+				t.Fatalf("Search: %v", err)
+			}
+
+			if tt.wantSet {
+				if !strings.Contains(capturedURL, "foreign_parts_only="+tt.wantVal) {
+					t.Errorf("URL %q missing foreign_parts_only=%s", capturedURL, tt.wantVal)
+				}
+			} else {
+				if strings.Contains(capturedURL, "foreign_parts_only") {
+					t.Errorf("URL %q should not contain foreign_parts_only", capturedURL)
+				}
+			}
+		})
+	}
+}
+
+func TestSearchNilClient(t *testing.T) {
+	var client *Client
+	_, err := client.Search(context.Background(), SearchRequest{})
+	if err == nil {
+		t.Error("expected error for nil client")
+	}
+}
+
+func TestSearchHandlesHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("invalid api key"))
+	}))
+	defer server.Close()
+
+	client, err := New(Config{APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = client.Search(context.Background(), SearchRequest{TMDBID: 123})
+	if err == nil {
+		t.Error("expected error for 401 response")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error should mention status code: %v", err)
+	}
+}
+
+func TestSearchSkipsEntriesWithoutLanguage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := searchResponse{
+			Data: []struct {
+				ID         string           `json:"id"`
+				Attributes searchAttributes `json:"attributes"`
+			}{
+				{
+					ID: "no-lang",
+					Attributes: searchAttributes{
+						Language: "",
+						Files:    []searchFile{{FileID: 100}},
+					},
+				},
+				{
+					ID: "with-lang",
+					Attributes: searchAttributes{
+						Language: "en",
+						Files:    []searchFile{{FileID: 200}},
+					},
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := New(Config{APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	result, err := client.Search(context.Background(), SearchRequest{TMDBID: 123})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if len(result.Subtitles) != 1 {
+		t.Fatalf("expected 1 subtitle (entry without language should be skipped), got %d", len(result.Subtitles))
+	}
+	if result.Subtitles[0].ID != "with-lang" {
+		t.Errorf("expected subtitle with-lang, got %s", result.Subtitles[0].ID)
+	}
+}
+
+func TestSearchSkipsEntriesWithoutFileID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := searchResponse{
+			Data: []struct {
+				ID         string           `json:"id"`
+				Attributes searchAttributes `json:"attributes"`
+			}{
+				{
+					ID: "no-file",
+					Attributes: searchAttributes{
+						Language: "en",
+						Files:    []searchFile{},
+					},
+				},
+				{
+					ID: "with-file",
+					Attributes: searchAttributes{
+						Language: "en",
+						Files:    []searchFile{{FileID: 200}},
+					},
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := New(Config{APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	result, err := client.Search(context.Background(), SearchRequest{TMDBID: 123})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if len(result.Subtitles) != 1 {
+		t.Fatalf("expected 1 subtitle (entry without file_id should be skipped), got %d", len(result.Subtitles))
+	}
+	if result.Subtitles[0].ID != "with-file" {
+		t.Errorf("expected subtitle with-file, got %s", result.Subtitles[0].ID)
+	}
+}
+
+func TestSearchDetectsAITranslated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := searchResponse{
+			Data: []struct {
+				ID         string           `json:"id"`
+				Attributes searchAttributes `json:"attributes"`
+			}{
+				{
+					ID: "ai-translated",
+					Attributes: searchAttributes{
+						Language:     "en",
+						AITranslated: true,
+						Files:        []searchFile{{FileID: 1}},
+					},
+				},
+				{
+					ID: "machine-translated",
+					Attributes: searchAttributes{
+						Language:          "en",
+						MachineTranslated: true,
+						Files:             []searchFile{{FileID: 2}},
+					},
+				},
+				{
+					ID: "human-translated",
+					Attributes: searchAttributes{
+						Language: "en",
+						Files:    []searchFile{{FileID: 3}},
+					},
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, err := New(Config{APIKey: "test-key", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	result, err := client.Search(context.Background(), SearchRequest{TMDBID: 123})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if len(result.Subtitles) != 3 {
+		t.Fatalf("expected 3 subtitles, got %d", len(result.Subtitles))
+	}
+
+	// First should be AI translated
+	if !result.Subtitles[0].AITranslated {
+		t.Error("expected first subtitle to be AI translated")
+	}
+	// Second should also be flagged (machine translated)
+	if !result.Subtitles[1].AITranslated {
+		t.Error("expected second subtitle to be flagged as AI translated (machine)")
+	}
+	// Third should not be flagged
+	if result.Subtitles[2].AITranslated {
+		t.Error("expected third subtitle NOT to be AI translated")
+	}
+}
+
+func TestSearchAttributesPrimaryFileID(t *testing.T) {
+	tests := []struct {
+		name  string
+		files []searchFile
+		want  int64
+	}{
+		{
+			name:  "empty files",
+			files: []searchFile{},
+			want:  0,
+		},
+		{
+			name:  "single file",
+			files: []searchFile{{FileID: 123}},
+			want:  123,
+		},
+		{
+			name:  "multiple files returns first",
+			files: []searchFile{{FileID: 100}, {FileID: 200}},
+			want:  100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attr := searchAttributes{Files: tt.files}
+			got := attr.PrimaryFileID()
+			if got != tt.want {
+				t.Errorf("PrimaryFileID() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDownloadNilClient(t *testing.T) {
+	var client *Client
+	_, err := client.Download(context.Background(), 123, DownloadOptions{})
+	if err == nil {
+		t.Error("expected error for nil client")
+	}
+}
+
+func TestDownloadInvalidFileID(t *testing.T) {
+	client, err := New(Config{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = client.Download(context.Background(), 0, DownloadOptions{})
+	if err == nil {
+		t.Error("expected error for zero file ID")
+	}
+
+	_, err = client.Download(context.Background(), -1, DownloadOptions{})
+	if err == nil {
+		t.Error("expected error for negative file ID")
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func TestDownloadFetchesSubtitleData(t *testing.T) {
 	var negotiationBody string
 	var server *httptest.Server
