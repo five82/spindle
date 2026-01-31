@@ -169,9 +169,9 @@ func TestEnvVarOverridesConfigFileForAPIKeys(t *testing.T) {
 			APIKey string `toml:"api_key"`
 		} `toml:"jellyfin"`
 		Subtitles struct {
-			OpenSubtitlesAPIKey   string `toml:"opensubtitles_api_key"`
+			OpenSubtitlesAPIKey    string `toml:"opensubtitles_api_key"`
 			OpenSubtitlesUserToken string `toml:"opensubtitles_user_token"`
-			WhisperXHuggingFace   string `toml:"whisperx_hf_token"`
+			WhisperXHuggingFace    string `toml:"whisperx_hf_token"`
 		} `toml:"subtitles"`
 		PresetDecider struct {
 			APIKey string `toml:"api_key"`
