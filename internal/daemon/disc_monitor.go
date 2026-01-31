@@ -254,6 +254,18 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 	}
 	logger.Debug("computed fingerprint", logging.String("fingerprint", discFingerprint))
 
+	// Skip MakeMKV scan if disc is already being processed. This prevents scan
+	// failures when the drive is locked by an active rip operation.
+	if m.queueHandler != nil {
+		if inWorkflow, itemID := m.queueHandler.IsInWorkflow(ctx, discFingerprint); inWorkflow {
+			logger.Debug("disc already in workflow, skipping scan",
+				logging.Int64(logging.FieldItemID, itemID),
+				logging.String("fingerprint", discFingerprint),
+			)
+			return true
+		}
+	}
+
 	scanCtx := ctx
 	var cancel context.CancelFunc
 	if m.scanTimeout > 0 {

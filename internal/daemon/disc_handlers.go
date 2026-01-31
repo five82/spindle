@@ -14,6 +14,9 @@ import (
 
 type queueProcessor interface {
 	Process(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error)
+	// IsInWorkflow reports whether a disc with the given fingerprint is already
+	// being processed. Returns the item ID if found, 0 otherwise.
+	IsInWorkflow(ctx context.Context, fingerprint string) (bool, int64)
 }
 
 type fingerprintErrorNotifier interface {
@@ -29,6 +32,24 @@ func newQueueStoreProcessor(store *queue.Store) *queueStoreProcessor {
 		return nil
 	}
 	return &queueStoreProcessor{store: store}
+}
+
+func (p *queueStoreProcessor) IsInWorkflow(ctx context.Context, fingerprint string) (bool, int64) {
+	if p == nil || p.store == nil {
+		return false, 0
+	}
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return false, 0
+	}
+	existing, err := p.store.FindByFingerprint(ctx, fingerprint)
+	if err != nil || existing == nil {
+		return false, 0
+	}
+	if existing.IsInWorkflow() {
+		return true, existing.ID
+	}
+	return false, 0
 }
 
 func (p *queueStoreProcessor) Process(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error) {
