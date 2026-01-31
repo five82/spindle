@@ -157,7 +157,12 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResponse,
 		params.Set("hearing_impaired", "true")
 	}
 	if req.ForeignPartsOnly != nil {
-		params.Set("foreign_parts_only", strconv.FormatBool(*req.ForeignPartsOnly))
+		// API accepts "include", "exclude", "only" - not boolean strings
+		if *req.ForeignPartsOnly {
+			params.Set("foreign_parts_only", "only")
+		} else {
+			params.Set("foreign_parts_only", "exclude")
+		}
 	}
 	if params.Get("type") == "" {
 		if req.Season > 0 || req.Episode > 0 {
