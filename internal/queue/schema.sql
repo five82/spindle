@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS queue_items (
     source_path TEXT,
     disc_title TEXT,
     status TEXT NOT NULL,
+    failed_at_status TEXT,
     media_info_json TEXT,
     ripped_file TEXT,
     encoded_file TEXT,

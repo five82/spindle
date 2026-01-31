@@ -19,6 +19,21 @@ func rollbackCaseClause(pairs []statusTransition) (string, []any) {
 	return b.String(), args
 }
 
+// retryCaseClause builds a CASE expression that maps failed_at_status to the appropriate
+// retry status using the rollback transitions. Falls back to the provided default status.
+func retryCaseClause(pairs []statusTransition, defaultStatus Status) (string, []any) {
+	var b strings.Builder
+	b.WriteString("CASE failed_at_status")
+	args := make([]any, 0, len(pairs)*2+1)
+	for _, pair := range pairs {
+		b.WriteString(" WHEN ? THEN ?")
+		args = append(args, pair.from, pair.to)
+	}
+	b.WriteString(" ELSE ? END")
+	args = append(args, defaultStatus)
+	return b.String(), args
+}
+
 func rollbackStatuses(pairs []statusTransition) []any {
 	args := make([]any, len(pairs))
 	for i, pair := range pairs {
@@ -102,19 +117,20 @@ func (s *Store) ReclaimStaleProcessing(ctx context.Context, cutoff time.Time, st
 	return res.RowsAffected()
 }
 
-// RetryFailed moves failed items back to pending for reprocessing.
+// RetryFailed moves failed items back to the start of their failed stage for reprocessing.
+// Uses failed_at_status to determine the appropriate retry point; falls back to pending
+// if failed_at_status is not set (for legacy items or unknown failure states).
 func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
+	caseExpr, caseArgs := retryCaseClause(stageRollbackTransitions, StatusPending)
+
 	if len(ids) == 0 {
-		res, err := s.execWithRetry(
-			ctx,
-			`UPDATE queue_items
-            SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
+		query := fmt.Sprintf(`UPDATE queue_items
+            SET status = %s, failed_at_status = NULL,
+                progress_stage = 'Retry requested', progress_percent = 0,
                 progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
-            WHERE status = ?`,
-			StatusPending,
-			nowTimestamp(),
-			StatusFailed,
-		)
+            WHERE status = ?`, caseExpr)
+		args := append(caseArgs, nowTimestamp(), StatusFailed)
+		res, err := s.execWithRetry(ctx, query, args...)
 		if err != nil {
 			return 0, fmt.Errorf("retry failed items: %w", err)
 		}
@@ -122,16 +138,16 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 	}
 
 	placeholders := makePlaceholders(len(ids))
-	args := make([]any, 0, len(ids)+3)
-	args = append(args, StatusPending, nowTimestamp())
+	query := fmt.Sprintf(`UPDATE queue_items
+        SET status = %s, failed_at_status = NULL,
+            progress_stage = 'Retry requested', progress_percent = 0,
+            progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
+        WHERE id IN (%s) AND status = ?`, caseExpr, placeholders)
+	args := append(caseArgs, nowTimestamp())
 	for _, id := range ids {
 		args = append(args, id)
 	}
 	args = append(args, StatusFailed)
-	query := `UPDATE queue_items
-        SET status = ?, progress_stage = 'Retry requested', progress_percent = 0,
-            progress_message = NULL, error_message = NULL, needs_review = 0, review_reason = NULL, updated_at = ?
-        WHERE id IN (` + placeholders + `) AND status = ?`
 	res, err := s.execWithRetry(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("retry selected items: %w", err)
@@ -141,12 +157,13 @@ func (s *Store) RetryFailed(ctx context.Context, ids ...int64) (int64, error) {
 
 // FailActiveOnShutdown marks all non-terminal items as failed when the daemon stops.
 // Terminal states (completed, failed) are left untouched.
+// Captures current status in failed_at_status for retry purposes.
 func (s *Store) FailActiveOnShutdown(ctx context.Context) (int64, error) {
 	now := nowTimestamp()
 	res, err := s.execWithRetry(
 		ctx,
 		`UPDATE queue_items
-        SET status = ?, progress_stage = 'Daemon stopped', progress_percent = 0,
+        SET failed_at_status = status, status = ?, progress_stage = 'Daemon stopped', progress_percent = 0,
             progress_message = ?, error_message = ?, last_heartbeat = NULL, updated_at = ?
         WHERE status NOT IN (?, ?)`,
 		StatusFailed,
@@ -163,6 +180,7 @@ func (s *Store) FailActiveOnShutdown(ctx context.Context) (int64, error) {
 }
 
 // StopItems marks selected items as failed to halt further processing.
+// Captures current status in failed_at_status for retry purposes.
 func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -182,7 +200,7 @@ func (s *Store) StopItems(ctx context.Context, ids ...int64) (int64, error) {
 	}
 	args = append(args, StatusCompleted, StatusFailed)
 	query := `UPDATE queue_items
-        SET status = ?, needs_review = 1, review_reason = ?, progress_stage = ?, progress_message = ?,
+        SET failed_at_status = status, status = ?, needs_review = 1, review_reason = ?, progress_stage = ?, progress_message = ?,
             progress_percent = 0, error_message = NULL, last_heartbeat = NULL, active_episode_key = NULL, updated_at = ?
         WHERE id IN (` + placeholders + `) AND status NOT IN (?, ?)`
 	res, err := s.execWithRetry(ctx, query, args...)

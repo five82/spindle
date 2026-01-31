@@ -90,7 +90,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 	if err := s.execWithoutResultRetry(
 		ctx,
 		`UPDATE queue_items
-        SET source_path = ?, disc_title = ?, status = ?, media_info_json = ?,
+        SET source_path = ?, disc_title = ?, status = ?, failed_at_status = ?, media_info_json = ?,
             ripped_file = ?, encoded_file = ?, final_file = ?, item_log_path = ?, error_message = ?,
             active_episode_key = ?,
             updated_at = ?, progress_stage = ?, progress_percent = ?, progress_message = ?, encoding_details_json = ?, drapto_preset_profile = ?,
@@ -100,6 +100,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		nullableString(item.SourcePath),
 		nullableString(item.DiscTitle),
 		item.Status,
+		nullableString(string(item.FailedAtStatus)),
 		nullableString(item.MediaInfoJSON),
 		nullableString(item.RippedFile),
 		nullableString(item.EncodedFile),

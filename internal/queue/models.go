@@ -114,6 +114,7 @@ type Item struct {
 	SourcePath          string
 	DiscTitle           string
 	Status              Status
+	FailedAtStatus      Status
 	MediaInfoJSON       string
 	RippedFile          string
 	EncodedFile         string
@@ -203,7 +204,9 @@ func (i *Item) SetProgressComplete(stage, message string) {
 
 // SetFailed marks the item as failed with the given error message.
 // Clears heartbeat and sets progress fields appropriately.
+// Captures the current status in FailedAtStatus for retry purposes.
 func (i *Item) SetFailed(message string) {
+	i.FailedAtStatus = i.Status
 	i.Status = StatusFailed
 	i.ErrorMessage = message
 	i.ProgressPercent = 0

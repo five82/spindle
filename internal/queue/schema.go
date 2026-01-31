@@ -12,7 +12,7 @@ var schemaSQL string
 
 // schemaVersion is the current schema version. Bump this when the schema changes.
 // Users will need to clear their queue database after schema changes.
-const schemaVersion = 2
+const schemaVersion = 3
 
 // ErrSchemaMismatch indicates the database schema version doesn't match the expected version.
 var ErrSchemaMismatch = errors.New("schema version mismatch")

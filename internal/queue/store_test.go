@@ -242,6 +242,91 @@ func TestRetryFailed(t *testing.T) {
 	}
 }
 
+func TestRetryFailedFromStage(t *testing.T) {
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+	ctx := context.Background()
+
+	// Test retry from encoding stage - should go back to episode_identified
+	encoding, err := store.NewDisc(ctx, "EncodingFailed", "fp-encoding")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	encoding.Status = queue.StatusEncoding
+	if err := store.Update(ctx, encoding); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	encoding.SetFailed("encoding error")
+	if err := store.Update(ctx, encoding); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// Test retry from subtitling stage - should go back to audio_analyzed
+	subtitling, err := store.NewDisc(ctx, "SubtitlingFailed", "fp-subtitling")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	subtitling.Status = queue.StatusSubtitling
+	if err := store.Update(ctx, subtitling); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	subtitling.SetFailed("subtitling error")
+	if err := store.Update(ctx, subtitling); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// Test legacy item without failed_at_status - should go back to pending
+	legacy, err := store.NewDisc(ctx, "LegacyFailed", "fp-legacy")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	legacy.Status = queue.StatusFailed
+	legacy.ErrorMessage = "legacy error"
+	// Don't set FailedAtStatus to simulate a legacy item
+	if err := store.Update(ctx, legacy); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// Retry all failed items
+	updated, err := store.RetryFailed(ctx)
+	if err != nil {
+		t.Fatalf("RetryFailed: %v", err)
+	}
+	if updated != 3 {
+		t.Fatalf("expected 3 items retried, got %d", updated)
+	}
+
+	// Verify encoding item went back to episode_identified (before encoding)
+	enc, err := store.GetByID(ctx, encoding.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if enc.Status != queue.StatusEpisodeIdentified {
+		t.Errorf("encoding item: expected status episode_identified, got %s", enc.Status)
+	}
+	if enc.FailedAtStatus != "" {
+		t.Errorf("encoding item: expected failed_at_status cleared, got %s", enc.FailedAtStatus)
+	}
+
+	// Verify subtitling item went back to audio_analyzed (before subtitling)
+	sub, err := store.GetByID(ctx, subtitling.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if sub.Status != queue.StatusAudioAnalyzed {
+		t.Errorf("subtitling item: expected status audio_analyzed, got %s", sub.Status)
+	}
+
+	// Verify legacy item went back to pending (fallback behavior)
+	leg, err := store.GetByID(ctx, legacy.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if leg.Status != queue.StatusPending {
+		t.Errorf("legacy item: expected status pending, got %s", leg.Status)
+	}
+}
+
 func TestUpdateHeartbeat(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
 	store := testsupport.MustOpenStore(t, cfg)
