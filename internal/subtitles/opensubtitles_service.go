@@ -288,11 +288,23 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 		)
 	}
 
-	resp, err := s.invokeOpenSubtitlesSearch(ctx, searchReq)
-	if err != nil {
+	// Use the same variant search strategy as regular subtitles
+	var (
+		resp      opensubtitles.SearchResponse
+		searchErr error
+	)
+	if req.Context.IsMovie() || req.Context.Season <= 0 || req.Context.Episode <= 0 {
+		resp, searchErr = s.searchMovieWithVariants(ctx, searchReq)
+	} else {
+		base := searchReq
+		base.TMDBID = 0
+		showTitle := req.Context.SeriesTitle()
+		resp, searchErr = s.searchEpisodeWithVariants(ctx, base, showTitle, req.Context.Season, req.Context.Episode, req.Context.EpisodeID())
+	}
+	if searchErr != nil {
 		if s.logger != nil {
 			s.logger.Warn("forced subtitle search failed",
-				logging.Error(err),
+				logging.Error(searchErr),
 				logging.String(logging.FieldEventType, "forced_subtitle_search_failed"),
 				logging.String(logging.FieldErrorHint, "check OpenSubtitles connectivity"),
 			)
@@ -322,7 +334,7 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 	}
 
 	forcedPlan := *plan
-	forcedPlan.outputFile = fmt.Sprintf("%s.%s.forced.srt", baseName, plan.language)
+	forcedPlan.outputFile = fmt.Sprintf("%s.forced.srt", baseName)
 
 	candidatesToTry := scored
 	if len(candidatesToTry) > maxOpenSubtitlesCandidates {

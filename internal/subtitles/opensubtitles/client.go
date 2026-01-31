@@ -58,7 +58,21 @@ func New(cfg Config) (*Client, error) {
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: defaultHTTPTimeout}
+		client = &http.Client{
+			Timeout: defaultHTTPTimeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				// Preserve headers across redirects (Go strips them by default)
+				if len(via) > 0 {
+					for key, val := range via[0].Header {
+						req.Header[key] = val
+					}
+				}
+				if len(via) >= 10 {
+					return errors.New("stopped after 10 redirects")
+				}
+				return nil
+			},
+		}
 	}
 	return &Client{
 		apiKey:    apiKey,

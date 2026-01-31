@@ -26,6 +26,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	var workDir string
 	var forceAI bool
 	var openSubtitlesOnly bool
+	var fetchForced bool
 
 	cmd := &cobra.Command{
 		Use:   "gensubtitle <encoded-file>",
@@ -150,6 +151,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 				BaseName:          baseName,
 				ForceAI:           forceAI,
 				OpenSubtitlesOnly: openSubtitlesOnly,
+				FetchForced:       fetchForced,
 				Context:           ctxMeta,
 				Languages:         languages,
 			})
@@ -159,6 +161,9 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Generated subtitle: %s (source: %s, segments: %d, duration: %s)\n",
 				result.SubtitlePath, result.Source, result.SegmentCount, result.Duration.Round(time.Second))
+			if result.ForcedSubtitlePath != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Generated forced subtitle: %s\n", result.ForcedSubtitlePath)
+			}
 			return nil
 		},
 	}
@@ -167,6 +172,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory for intermediate files (default: temporary directory under staging_dir)")
 	cmd.Flags().BoolVar(&forceAI, "forceai", false, "Force WhisperX transcription and skip OpenSubtitles downloads")
 	cmd.Flags().BoolVar(&openSubtitlesOnly, "opensubtitles-only", false, "Require OpenSubtitles match; fail instead of falling back to WhisperX (for troubleshooting)")
+	cmd.Flags().BoolVar(&fetchForced, "fetch-forced", false, "Also search OpenSubtitles for forced (foreign-parts-only) subtitles")
 
 	return cmd
 }

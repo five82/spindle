@@ -41,6 +41,7 @@ type GenerateRequest struct {
 	Languages                 []string
 	ForceAI                   bool
 	OpenSubtitlesOnly         bool // Fail if OpenSubtitles doesn't produce a match (no WhisperX fallback)
+	FetchForced               bool // Also search for forced (foreign-parts-only) subtitles on OpenSubtitles
 	TranscriptKey             string
 	AllowTranscriptCacheRead  bool
 	AllowTranscriptCacheWrite bool
@@ -48,10 +49,11 @@ type GenerateRequest struct {
 
 // GenerateResult reports the generated subtitle file and summary stats.
 type GenerateResult struct {
-	SubtitlePath string
-	SegmentCount int
-	Duration     time.Duration
-	Source       string // "opensubtitles" or "whisperx"
+	SubtitlePath       string
+	ForcedSubtitlePath string // Path to forced (foreign-parts-only) subtitle, if fetched
+	SegmentCount       int
+	Duration           time.Duration
+	Source             string // "opensubtitles" or "whisperx"
 	// OpenSubtitlesDecision captures what happened with OpenSubtitles during
 	// generation. It is intended for observability (logs/UI) so operators can
 	// understand when/why WhisperX was used.
@@ -243,7 +245,9 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, attempt.err
 	}
 	if attempt.result != nil {
-		return *attempt.result, nil
+		result := *attempt.result
+		s.tryAttachForcedSubtitles(ctx, plan, req, &result)
+		return result, nil
 	}
 	openSubsDecision := attempt.decision
 	openSubsDetail := attempt.detail
@@ -268,6 +272,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 			}
 			cached.OpenSubtitlesDecision = openSubsDecision
 			cached.OpenSubtitlesDetail = openSubsDetail
+			s.tryAttachForcedSubtitles(ctx, plan, req, &cached)
 			return cached, nil
 		} else if s.logger != nil {
 			s.logger.Info("transcript cache decision",
@@ -323,7 +328,53 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		OpenSubtitlesDecision: openSubsDecision,
 		OpenSubtitlesDetail:   openSubsDetail,
 	}
+	s.tryAttachForcedSubtitles(ctx, plan, req, &result)
 	return result, nil
+}
+
+// tryAttachForcedSubtitles searches for forced subtitles if FetchForced is set.
+func (s *Service) tryAttachForcedSubtitles(ctx context.Context, plan *generationPlan, req GenerateRequest, result *GenerateResult) {
+	if !req.FetchForced {
+		return
+	}
+	if !s.shouldUseOpenSubtitles() {
+		if s.logger != nil {
+			s.logger.Info("forced subtitle decision",
+				logging.String(logging.FieldDecisionType, "forced_subtitle_fetch"),
+				logging.String("decision_result", "skipped"),
+				logging.String("decision_reason", s.openSubtitlesDisabledReason()),
+			)
+		}
+		return
+	}
+	baseName := plan.outputFile[:len(plan.outputFile)-len(".srt")]
+	forcedPath, err := s.tryForcedSubtitles(ctx, plan, req, baseName)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("forced subtitle fetch failed",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "forced_subtitle_fetch_failed"),
+			)
+		}
+		return
+	}
+	if forcedPath != "" {
+		result.ForcedSubtitlePath = forcedPath
+		if s.logger != nil {
+			s.logger.Info("forced subtitle decision",
+				logging.String(logging.FieldDecisionType, "forced_subtitle_fetch"),
+				logging.String("decision_result", "downloaded"),
+				logging.String("decision_reason", "match_found"),
+				logging.String("forced_subtitle_file", forcedPath),
+			)
+		}
+	} else if s.logger != nil {
+		s.logger.Info("forced subtitle decision",
+			logging.String(logging.FieldDecisionType, "forced_subtitle_fetch"),
+			logging.String("decision_result", "not_found"),
+			logging.String("decision_reason", "no_match_on_opensubtitles"),
+		)
+	}
 }
 
 // openSubtitlesAttempt captures the outcome of trying OpenSubtitles.

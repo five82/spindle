@@ -98,16 +98,19 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 
 	// Early duration pre-check: reject obviously wrong candidates before
 	// expensive alignment (saves ~30-40s per rejected candidate).
-	if delta, reject := earlyDurationPreCheck(cleanedPath, plan.totalSeconds); reject {
-		if s.logger != nil {
-			s.logger.Debug("opensubtitles candidate rejected early (duration pre-check)",
-				logging.Float64("delta_seconds", delta),
-				logging.String("release", candidate.Release),
-			)
-		}
-		return GenerateResult{}, earlyDurationRejectError{
-			deltaSeconds: delta,
-			release:      candidate.Release,
+	// Skip for forced subtitles - they're sparse and end when last foreign dialogue occurs.
+	if !candidate.ForeignPartsOnly {
+		if delta, reject := earlyDurationPreCheck(cleanedPath, plan.totalSeconds); reject {
+			if s.logger != nil {
+				s.logger.Debug("opensubtitles candidate rejected early (duration pre-check)",
+					logging.Float64("delta_seconds", delta),
+					logging.String("release", candidate.Release),
+				)
+			}
+			return GenerateResult{}, earlyDurationRejectError{
+				deltaSeconds: delta,
+				release:      candidate.Release,
+			}
 		}
 	}
 
@@ -159,62 +162,68 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 
 	// Validate subtitle density: catch obviously sparse/incomplete subtitles
 	// (e.g., 143 cues for a 126-minute movie is only 1.1 cues/min, expected 6-12).
-	if sparseResult := checkSubtitleDensity(plan.outputFile, plan.totalSeconds, segmentCount); sparseResult != nil {
-		if s.logger != nil {
-			s.logger.Debug("opensubtitles candidate rejected (sparse subtitles)",
-				logging.Int("cue_count", sparseResult.cueCount),
-				logging.Float64("video_minutes", sparseResult.videoMinutes),
-				logging.Float64("cues_per_minute", sparseResult.cuesPerMinute),
-				logging.Float64("coverage_ratio", sparseResult.coverageRatio),
-				logging.String("reason", sparseResult.reason),
-				logging.String("release", candidate.Release),
-			)
-		}
-		return GenerateResult{}, sparseResult
-	}
-
-	delta, mismatch, err := checkSubtitleDuration(plan.outputFile, plan.totalSeconds)
-	if err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "duration inspect", "Failed to compare subtitle duration", err)
-	}
-	if mismatch && delta > 0 {
-		if start, last, boundsErr := subtitleBounds(plan.outputFile); boundsErr == nil {
-			introGap := start
-			if introGap < 0 {
-				introGap = 0
+	// Skip for forced subtitles - they're intentionally sparse.
+	if !candidate.ForeignPartsOnly {
+		if sparseResult := checkSubtitleDensity(plan.outputFile, plan.totalSeconds, segmentCount); sparseResult != nil {
+			if s.logger != nil {
+				s.logger.Debug("opensubtitles candidate rejected (sparse subtitles)",
+					logging.Int("cue_count", sparseResult.cueCount),
+					logging.Float64("video_minutes", sparseResult.videoMinutes),
+					logging.Float64("cues_per_minute", sparseResult.cuesPerMinute),
+					logging.Float64("coverage_ratio", sparseResult.coverageRatio),
+					logging.String("reason", sparseResult.reason),
+					logging.String("release", candidate.Release),
+				)
 			}
-			tailDelta := plan.totalSeconds - last
+			return GenerateResult{}, sparseResult
+		}
+	}
 
-			// Accept with intro gap exception if:
-			// - Intro gap is between 5s and 5 minutes (reasonable opening credits/sequence)
-			// - Tail gap is 0-45s (reasonable credits)
-			// Larger intro gaps are suspicious (wrong cut, missing content).
-			introGapValid := introGap >= subtitleIntroMinimumSeconds && introGap <= subtitleIntroMaximumSeconds
-			tailGapValid := tailDelta > 0 && tailDelta <= subtitleIntroAllowanceSeconds
-
-			if introGapValid && tailGapValid {
-				if s.logger != nil {
-					s.logger.Debug("opensubtitles accepted with intro gap",
-						logging.Float64("intro_gap_seconds", introGap),
-						logging.Float64("tail_delta_seconds", tailDelta),
-						logging.String("release", candidate.Release),
-					)
+	// Skip duration check for forced subtitles - they end when last foreign dialogue occurs.
+	if !candidate.ForeignPartsOnly {
+		delta, mismatch, err := checkSubtitleDuration(plan.outputFile, plan.totalSeconds)
+		if err != nil {
+			return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "duration inspect", "Failed to compare subtitle duration", err)
+		}
+		if mismatch && delta > 0 {
+			if start, last, boundsErr := subtitleBounds(plan.outputFile); boundsErr == nil {
+				introGap := start
+				if introGap < 0 {
+					introGap = 0
 				}
-				mismatch = false
+				tailDelta := plan.totalSeconds - last
+
+				// Accept with intro gap exception if:
+				// - Intro gap is between 5s and 5 minutes (reasonable opening credits/sequence)
+				// - Tail gap is 0-45s (reasonable credits)
+				// Larger intro gaps are suspicious (wrong cut, missing content).
+				introGapValid := introGap >= subtitleIntroMinimumSeconds && introGap <= subtitleIntroMaximumSeconds
+				tailGapValid := tailDelta > 0 && tailDelta <= subtitleIntroAllowanceSeconds
+
+				if introGapValid && tailGapValid {
+					if s.logger != nil {
+						s.logger.Debug("opensubtitles accepted with intro gap",
+							logging.Float64("intro_gap_seconds", introGap),
+							logging.Float64("tail_delta_seconds", tailDelta),
+							logging.String("release", candidate.Release),
+						)
+					}
+					mismatch = false
+				}
 			}
 		}
-	}
-	if mismatch {
-		if s.logger != nil {
-			s.logger.Debug("opensubtitles candidate soft-rejected (duration mismatch)",
-				logging.Float64("delta_seconds", delta),
-				logging.String("release", candidate.Release),
-			)
-		}
-		return GenerateResult{}, durationMismatchError{
-			deltaSeconds: delta,
-			videoSeconds: plan.totalSeconds,
-			release:      candidate.Release,
+		if mismatch {
+			if s.logger != nil {
+				s.logger.Debug("opensubtitles candidate soft-rejected (duration mismatch)",
+					logging.Float64("delta_seconds", delta),
+					logging.String("release", candidate.Release),
+				)
+			}
+			return GenerateResult{}, durationMismatchError{
+				deltaSeconds: delta,
+				videoSeconds: plan.totalSeconds,
+				release:      candidate.Release,
+			}
 		}
 	}
 
