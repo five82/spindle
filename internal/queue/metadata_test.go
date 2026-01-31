@@ -36,7 +36,7 @@ func TestMetadataGetLibraryPathTvBuildsHierarchy(t *testing.T) {
 
 func TestMetadataGetFilenameSanitizes(t *testing.T) {
 	meta := MetadataFromJSON("", "Batman: The Long / Short")
-	want := "Batman- The Long - Short"
+	want := "Batman - The Long - Short"
 	if meta.GetFilename() != want {
 		t.Fatalf("expected sanitized filename %q, got %q", want, meta.GetFilename())
 	}

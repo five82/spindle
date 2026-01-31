@@ -183,6 +183,8 @@ func sanitizeFilename(value string) string {
 	if value == "" {
 		return "manual-import"
 	}
+	// Handle ": " first to get proper spacing ("Mission: Impossible" -> "Mission - Impossible")
+	value = strings.ReplaceAll(value, ": ", " - ")
 	replacer := strings.NewReplacer(
 		"/", "-",
 		"\\", "-",
