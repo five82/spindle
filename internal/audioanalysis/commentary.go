@@ -425,7 +425,7 @@ func buildAudioStreamMappings(streams []ffprobe.Stream, commentaryIndices map[in
 		mappings = append(mappings, audioStreamMapping{
 			inputIndex:   stream.Index,
 			outputIndex:  outputIdx,
-			isCommentary: commentaryIndices[stream.Index],
+			isCommentary: commentaryIndices[outputIdx],
 			title:        audioTitle(stream.Tags),
 		})
 		outputIdx++
