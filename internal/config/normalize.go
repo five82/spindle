@@ -66,10 +66,9 @@ func (c *Config) normalizePaths() error {
 }
 
 func (c *Config) normalizeTMDB() error {
-	if c.TMDB.APIKey == "" {
-		if value, ok := os.LookupEnv("TMDB_API_KEY"); ok {
-			c.TMDB.APIKey = value
-		}
+	// Environment variables override config file for API keys (security best practice)
+	if value, ok := os.LookupEnv("TMDB_API_KEY"); ok {
+		c.TMDB.APIKey = strings.TrimSpace(value)
 	}
 	c.TMDB.BaseURL = strings.TrimSpace(c.TMDB.BaseURL)
 	if c.TMDB.BaseURL == "" {
@@ -79,13 +78,13 @@ func (c *Config) normalizeTMDB() error {
 }
 
 func (c *Config) normalizeJellyfin() error {
-	if c.Jellyfin.APIKey == "" {
-		if value, ok := os.LookupEnv("JELLYFIN_API_KEY"); ok {
-			c.Jellyfin.APIKey = strings.TrimSpace(value)
-		}
+	// Environment variables override config file for API keys (security best practice)
+	if value, ok := os.LookupEnv("JELLYFIN_API_KEY"); ok {
+		c.Jellyfin.APIKey = strings.TrimSpace(value)
+	} else {
+		c.Jellyfin.APIKey = strings.TrimSpace(c.Jellyfin.APIKey)
 	}
 	c.Jellyfin.URL = strings.TrimSpace(c.Jellyfin.URL)
-	c.Jellyfin.APIKey = strings.TrimSpace(c.Jellyfin.APIKey)
 	return nil
 }
 
@@ -94,29 +93,27 @@ func (c *Config) normalizeSubtitles() error {
 	if c.Subtitles.WhisperXVADMethod == "" {
 		c.Subtitles.WhisperXVADMethod = "silero"
 	}
-	c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(c.Subtitles.WhisperXHuggingFace)
-	if c.Subtitles.WhisperXHuggingFace == "" {
-		if value, ok := os.LookupEnv("HUGGING_FACE_HUB_TOKEN"); ok {
-			c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(value)
-		} else if value, ok := os.LookupEnv("HF_TOKEN"); ok {
-			c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(value)
-		}
+	// Environment variables override config file for API keys/tokens (security best practice)
+	if value, ok := os.LookupEnv("HUGGING_FACE_HUB_TOKEN"); ok {
+		c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(value)
+	} else if value, ok := os.LookupEnv("HF_TOKEN"); ok {
+		c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(value)
+	} else {
+		c.Subtitles.WhisperXHuggingFace = strings.TrimSpace(c.Subtitles.WhisperXHuggingFace)
 	}
-	c.Subtitles.OpenSubtitlesAPIKey = strings.TrimSpace(c.Subtitles.OpenSubtitlesAPIKey)
-	if c.Subtitles.OpenSubtitlesAPIKey == "" {
-		if value, ok := os.LookupEnv("OPENSUBTITLES_API_KEY"); ok {
-			c.Subtitles.OpenSubtitlesAPIKey = strings.TrimSpace(value)
-		}
+	if value, ok := os.LookupEnv("OPENSUBTITLES_API_KEY"); ok {
+		c.Subtitles.OpenSubtitlesAPIKey = strings.TrimSpace(value)
+	} else {
+		c.Subtitles.OpenSubtitlesAPIKey = strings.TrimSpace(c.Subtitles.OpenSubtitlesAPIKey)
 	}
 	c.Subtitles.OpenSubtitlesUserAgent = strings.TrimSpace(c.Subtitles.OpenSubtitlesUserAgent)
 	if c.Subtitles.OpenSubtitlesUserAgent == "" {
 		c.Subtitles.OpenSubtitlesUserAgent = defaultOpenSubtitlesUserAgent
 	}
-	c.Subtitles.OpenSubtitlesUserToken = strings.TrimSpace(c.Subtitles.OpenSubtitlesUserToken)
-	if c.Subtitles.OpenSubtitlesUserToken == "" {
-		if value, ok := os.LookupEnv("OPENSUBTITLES_USER_TOKEN"); ok {
-			c.Subtitles.OpenSubtitlesUserToken = strings.TrimSpace(value)
-		}
+	if value, ok := os.LookupEnv("OPENSUBTITLES_USER_TOKEN"); ok {
+		c.Subtitles.OpenSubtitlesUserToken = strings.TrimSpace(value)
+	} else {
+		c.Subtitles.OpenSubtitlesUserToken = strings.TrimSpace(c.Subtitles.OpenSubtitlesUserToken)
 	}
 	if len(c.Subtitles.OpenSubtitlesLanguages) == 0 {
 		c.Subtitles.OpenSubtitlesLanguages = []string{"en"}
@@ -191,15 +188,15 @@ func (c *Config) normalizePresetDecider() error {
 	if c.PresetDecider.TimeoutSeconds <= 0 {
 		c.PresetDecider.TimeoutSeconds = defaultPresetDeciderTimeoutSeconds
 	}
-	c.PresetDecider.APIKey = strings.TrimSpace(c.PresetDecider.APIKey)
-	if c.PresetDecider.APIKey == "" {
-		if value, ok := os.LookupEnv("PRESET_DECIDER_API_KEY"); ok {
-			c.PresetDecider.APIKey = strings.TrimSpace(value)
-		} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
-			c.PresetDecider.APIKey = strings.TrimSpace(value)
-		} else if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
-			c.PresetDecider.APIKey = strings.TrimSpace(value)
-		}
+	// Environment variables override config file for API keys (security best practice)
+	if value, ok := os.LookupEnv("PRESET_DECIDER_API_KEY"); ok {
+		c.PresetDecider.APIKey = strings.TrimSpace(value)
+	} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
+		c.PresetDecider.APIKey = strings.TrimSpace(value)
+	} else if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
+		c.PresetDecider.APIKey = strings.TrimSpace(value)
+	} else {
+		c.PresetDecider.APIKey = strings.TrimSpace(c.PresetDecider.APIKey)
 	}
 	return nil
 }
