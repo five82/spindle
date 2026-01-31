@@ -228,11 +228,6 @@ func printCropResults(out io.Writer, result *draptolib.CropDetectionResult) {
 			}
 			fmt.Fprintf(out, "%s%2d. crop=%s  count=%3d (%5.1f%%)%s\n",
 				marker, i+1, c.Crop, c.Count, c.Percent, dimStr)
-
-			if i >= 9 && len(result.Candidates) > 10 {
-				fmt.Fprintf(out, "     ... and %d more\n", len(result.Candidates)-10)
-				break
-			}
 		}
 
 		// If multiple ratios, show what threshold would have been needed
