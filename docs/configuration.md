@@ -4,6 +4,25 @@ Complete reference for `~/.config/spindle/config.toml`. See the [README](../READ
 
 Changes require restarting the daemon (`spindle stop && spindle start`).
 
+## API Keys and Secrets
+
+**Environment variables always override config file values for API keys.** This is a security best practice that allows you to:
+
+- Keep secrets out of config files that might be accidentally shared or committed
+- Use different credentials in development vs production
+- Integrate with secret managers and container orchestration
+
+| Config Key | Environment Variable(s) |
+| --- | --- |
+| `tmdb.api_key` | `TMDB_API_KEY` |
+| `jellyfin.api_key` | `JELLYFIN_API_KEY` |
+| `subtitles.opensubtitles_api_key` | `OPENSUBTITLES_API_KEY` |
+| `subtitles.opensubtitles_user_token` | `OPENSUBTITLES_USER_TOKEN` |
+| `subtitles.whisperx_hf_token` | `HUGGING_FACE_HUB_TOKEN` or `HF_TOKEN` |
+| `preset_decider.api_key` | `PRESET_DECIDER_API_KEY`, `OPENROUTER_API_KEY`, or `DEEPSEEK_API_KEY` |
+
+If an environment variable is set, the config file value is ignored for that key.
+
 ## Core Paths & Storage
 
 | Key | Purpose | Notes |
@@ -123,8 +142,9 @@ alignment artifacts inside each queue item's staging folder for debugging.
   directories or malformed TOML before restarting the daemon.
 - Keep `staging_dir` and `rip_cache_dir` on SSD/NVMe storage; encoding churns on
   these paths heavily.
-- Store TMDB and OpenSubtitles credentials in a password manager; the daemon
-  reads the config in plain text.
+- Prefer setting API keys via environment variables rather than config file.
+  This keeps secrets out of files and works better with containers and secret managers.
+- If you must use config file for keys, ensure `chmod 600 ~/.config/spindle/config.toml`.
 - Back up `~/.config/spindle/` (config + tokens) alongside the queue database in
   `~/.local/share/spindle/` if you move hosts.
 

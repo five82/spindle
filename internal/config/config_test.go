@@ -99,7 +99,6 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 }
 
 func TestLoadCustomPath(t *testing.T) {
-	t.Setenv("TMDB_API_KEY", "from-env")
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "spindle.toml")
 
@@ -154,6 +153,77 @@ func TestLoadCustomPath(t *testing.T) {
 	}
 	if cfg.Workflow.HeartbeatTimeout != 200 {
 		t.Fatalf("expected heartbeat timeout 200, got %d", cfg.Workflow.HeartbeatTimeout)
+	}
+}
+
+func TestEnvVarOverridesConfigFileForAPIKeys(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "spindle.toml")
+
+	// Write config file with API keys
+	type payload struct {
+		TMDB struct {
+			APIKey string `toml:"api_key"`
+		} `toml:"tmdb"`
+		Jellyfin struct {
+			APIKey string `toml:"api_key"`
+		} `toml:"jellyfin"`
+		Subtitles struct {
+			OpenSubtitlesAPIKey    string `toml:"opensubtitles_api_key"`
+			OpenSubtitlesUserToken string `toml:"opensubtitles_user_token"`
+			WhisperXHuggingFace    string `toml:"whisperx_hf_token"`
+		} `toml:"subtitles"`
+		PresetDecider struct {
+			APIKey string `toml:"api_key"`
+		} `toml:"preset_decider"`
+	}
+	custom := payload{}
+	custom.TMDB.APIKey = "file-tmdb"
+	custom.Jellyfin.APIKey = "file-jellyfin"
+	custom.Subtitles.OpenSubtitlesAPIKey = "file-opensub"
+	custom.Subtitles.OpenSubtitlesUserToken = "file-opensub-token"
+	custom.Subtitles.WhisperXHuggingFace = "file-hf"
+	custom.PresetDecider.APIKey = "file-preset"
+
+	data, err := toml.Marshal(custom)
+	if err != nil {
+		t.Fatalf("marshal custom config: %v", err)
+	}
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		t.Fatalf("write custom config: %v", err)
+	}
+
+	// Set env vars that should override
+	t.Setenv("TMDB_API_KEY", "env-tmdb")
+	t.Setenv("JELLYFIN_API_KEY", "env-jellyfin")
+	t.Setenv("OPENSUBTITLES_API_KEY", "env-opensub")
+	t.Setenv("OPENSUBTITLES_USER_TOKEN", "env-opensub-token")
+	t.Setenv("HF_TOKEN", "env-hf")
+	t.Setenv("PRESET_DECIDER_API_KEY", "env-preset")
+
+	cfg, _, _, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	// Verify env vars override config file values
+	if cfg.TMDB.APIKey != "env-tmdb" {
+		t.Errorf("expected TMDB key from env, got %q", cfg.TMDB.APIKey)
+	}
+	if cfg.Jellyfin.APIKey != "env-jellyfin" {
+		t.Errorf("expected Jellyfin key from env, got %q", cfg.Jellyfin.APIKey)
+	}
+	if cfg.Subtitles.OpenSubtitlesAPIKey != "env-opensub" {
+		t.Errorf("expected OpenSubtitles key from env, got %q", cfg.Subtitles.OpenSubtitlesAPIKey)
+	}
+	if cfg.Subtitles.OpenSubtitlesUserToken != "env-opensub-token" {
+		t.Errorf("expected OpenSubtitles token from env, got %q", cfg.Subtitles.OpenSubtitlesUserToken)
+	}
+	if cfg.Subtitles.WhisperXHuggingFace != "env-hf" {
+		t.Errorf("expected HuggingFace token from env, got %q", cfg.Subtitles.WhisperXHuggingFace)
+	}
+	if cfg.PresetDecider.APIKey != "env-preset" {
+		t.Errorf("expected PresetDecider key from env, got %q", cfg.PresetDecider.APIKey)
 	}
 }
 
