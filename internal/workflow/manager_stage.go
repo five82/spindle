@@ -101,7 +101,19 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 		return wrapped
 	}
 
+	// Pause disc monitoring during ripping to avoid concurrent device access
+	// that can cause read errors (L-EC uncorrectable errors).
+	isRipper := stage.name == "ripper"
+	if isRipper && m.ripHooks != nil {
+		m.ripHooks.BeforeRip()
+	}
+
 	execErr := m.executeWithHeartbeat(ctx, handler, item)
+
+	if isRipper && m.ripHooks != nil {
+		m.ripHooks.AfterRip()
+	}
+
 	if execErr != nil {
 		if errors.Is(execErr, context.Canceled) {
 			stageLogger.Debug("stage interrupted by shutdown")

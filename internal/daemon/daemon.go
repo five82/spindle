@@ -95,6 +95,10 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 		return nil, err
 	}
 	daemon.apiSrv = apiSrv
+
+	// Register disc pause hooks to stop monitoring during rips.
+	wf.SetRipHooks(daemon)
+
 	return daemon, nil
 }
 
@@ -393,6 +397,26 @@ func (d *Daemon) ResumeDisc() bool {
 // DiscPaused reports whether disc detection is paused.
 func (d *Daemon) DiscPaused() bool {
 	return d.discPaused.Load()
+}
+
+// BeforeRip implements workflow.RipHooks. Called before MakeMKV starts reading.
+func (d *Daemon) BeforeRip() {
+	if d.PauseDisc() {
+		d.logger.Debug("paused disc monitoring for rip",
+			logging.String(logging.FieldEventType, "disc_monitor_paused"),
+			logging.String("reason", "rip_started"),
+		)
+	}
+}
+
+// AfterRip implements workflow.RipHooks. Called after ripping completes.
+func (d *Daemon) AfterRip() {
+	if d.ResumeDisc() {
+		d.logger.Debug("resumed disc monitoring after rip",
+			logging.String(logging.FieldEventType, "disc_monitor_resumed"),
+			logging.String("reason", "rip_completed"),
+		)
+	}
 }
 
 func (d *Daemon) runDependencyChecks(ctx context.Context) error {

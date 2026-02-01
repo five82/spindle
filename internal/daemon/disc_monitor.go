@@ -189,6 +189,16 @@ func (m *discMonitor) poll() {
 		return
 	}
 
+	// Skip detection if disc already being tracked or processed.
+	// This avoids running lsblk/blkid while MakeMKV is ripping,
+	// which can cause read errors from concurrent device access.
+	m.mu.Lock()
+	if m.discPresent || m.processing {
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+
 	info, err := m.detect(ctx, m.device)
 	if err != nil {
 		logger := m.logger
@@ -212,6 +222,7 @@ func (m *discMonitor) poll() {
 
 	m.mu.Lock()
 	if m.discPresent || m.processing {
+		// Race: another goroutine beat us to it
 		m.mu.Unlock()
 		return
 	}

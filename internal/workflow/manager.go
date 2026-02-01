@@ -12,6 +12,17 @@ import (
 	"spindle/internal/queue"
 )
 
+// RipHooks provides callbacks around the ripping stage to coordinate
+// external resources like disc monitoring.
+type RipHooks interface {
+	// BeforeRip is called before MakeMKV starts reading the disc.
+	// Use this to pause disc monitoring and avoid concurrent device access.
+	BeforeRip()
+	// AfterRip is called after ripping completes (success or failure).
+	// Use this to resume disc monitoring.
+	AfterRip()
+}
+
 // Manager coordinates queue processing using registered stage functions.
 type Manager struct {
 	cfg          *config.Config
@@ -19,6 +30,7 @@ type Manager struct {
 	logger       *slog.Logger
 	pollInterval time.Duration
 	notifier     notifications.Service
+	ripHooks     RipHooks
 
 	heartbeat *HeartbeatMonitor
 	bgLogger  *BackgroundLogger
@@ -86,4 +98,10 @@ func NewManagerWithOptions(cfg *config.Config, store *queue.Store, logger *slog.
 		bgLogger: NewBackgroundLogger(cfg, logHub, options.diagnosticMode, options.diagnosticItemDir, options.sessionID),
 		lanes:    make(map[laneKind]*laneState),
 	}
+}
+
+// SetRipHooks registers callbacks for disc coordination during ripping.
+// The daemon uses this to pause disc monitoring while MakeMKV reads.
+func (m *Manager) SetRipHooks(hooks RipHooks) {
+	m.ripHooks = hooks
 }
