@@ -84,7 +84,13 @@ func (m Metadata) GetBaseFilename() string {
 	if strings.TrimSpace(value) == "" {
 		value = m.TitleValue
 	}
-	return sanitizeFilename(value)
+	base := sanitizeFilename(value)
+	// Strip edition suffix if present
+	if edition := strings.TrimSpace(m.Edition); edition != "" {
+		suffix := " - " + edition
+		base = strings.TrimSuffix(base, suffix)
+	}
+	return base
 }
 
 func (m Metadata) GetLibraryPath(root, moviesDir, tvDir string) string {
