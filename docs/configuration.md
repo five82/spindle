@@ -44,14 +44,16 @@ indefinitely.
 
 ## Identification & Metadata
 
-- `tmdb_api_key` *(required)* — Grab from https://www.themoviedb.org/settings/api.
-- `tmdb_language` — ISO 639‑1 code for metadata (default `en`).
-- `tmdb_confidence_threshold` — Float 0‑1; lower values accept fuzzier matches.
-- `bd_info_enabled` — When true, Spindle shells out to `bd_info` for additional
-  playlist metadata. Requires `libbluray` utilities (`libbluray-bin`,
-  `libbluray-utils`, etc.).
+| Key | Description |
+| --- | --- |
+| `tmdb.api_key` | *(required)* TMDB API key from https://www.themoviedb.org/settings/api. |
+| `tmdb.language` | ISO 639-1 code for metadata (default `en`). |
+| `tmdb.base_url` | Override TMDB API base URL (rarely needed). |
+| `validation.min_vote_count_exact_match` | Minimum TMDB votes for exact title match acceptance. |
 
-If discs often appear as “UNKNOWN” or “INDEX_BDMV”, install `bd_info` and ensure
+Spindle automatically uses `bd_info` when available to enhance disc metadata.
+If discs often appear as "UNKNOWN" or "INDEX_BDMV", install `bd_info` from
+libbluray utilities (`libbluray-bin`, `libbluray-utils`, etc.) and ensure
 mount points `/media/cdrom` or `/media/cdrom0` stay accessible.
 
 ## Jellyfin & Library Integration
@@ -139,23 +141,39 @@ Commentary detection uses WhisperX to transcribe audio tracks and an LLM to
 classify whether the content is commentary. Detected commentary tracks are
 excluded from the final output.
 
-## Queue & Workflow Toggles
+## Rip Cache
 
 | Key | Details |
 | --- | --- |
-| `rip_cache_enabled` | Enables reuse of MakeMKV output. Combine with `rip_cache_max_gib`. |
-| `rip_cache_max_gib` | Absolute size cap for the cache. |
-| `max_parallel_encodes` | Limits concurrent Drapto jobs (default 1). |
-| `max_parallel_rips` | Non-zero enables overlapping MakeMKV jobs when hardware allows. |
-| `danger_allow_multiple_daemons` | Debug-only; bypasses single-instance lock. Do not set in production. |
+| `rip_cache.enabled` | Enables reuse of MakeMKV output. |
+| `rip_cache.dir` | Cache directory path. |
+| `rip_cache.max_gib` | Absolute size cap for the cache. |
 
-## Diagnostics & Advanced Flags
+## Workflow Timing
 
-- `log_level` — `info` (default), `debug`, or `trace`.
-- `diagnostic_dump_dir` — When set, intermediate artifacts are copied here for
-  long-term inspection.
-- `enable_profiler` / `profiler_bind` — Exposes Go pprof endpoints; intended for
-  development only.
+| Key | Details |
+| --- | --- |
+| `workflow.queue_poll_interval` | Seconds between queue polls (default 5). |
+| `workflow.error_retry_interval` | Seconds before retrying after transient errors. |
+| `workflow.heartbeat_interval` | Seconds between heartbeat updates for in-progress items. |
+| `workflow.heartbeat_timeout` | Seconds before an item is considered stuck. |
+| `workflow.disc_monitor_timeout` | Seconds to wait when polling for disc presence. |
+
+## Logging & Diagnostics
+
+| Key | Details |
+| --- | --- |
+| `logging.level` | Log level: `debug`, `info` (default), `warn`, `error`. |
+| `logging.format` | Output format: `console` or `json`. |
+| `logging.retention_days` | Days to keep logs before pruning (default 60; 0 disables). |
+| `logging.stage_overrides` | Per-stage log level overrides (e.g., `{encoding = "debug"}`). |
+
+## Validation
+
+| Key | Details |
+| --- | --- |
+| `validation.enforce_drapto_validation` | Fail encoding if Drapto validation fails. |
+| `validation.min_vote_count_exact_match` | Minimum TMDB votes for exact title match acceptance. |
 
 ## Tips
 

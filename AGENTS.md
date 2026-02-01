@@ -73,7 +73,7 @@ golangci-lint run                     # Lint
 | CLI entry | `cmd/spindle` |
 | Config & logging | `internal/config`, `internal/logging`, `internal/logs` |
 | Communication | `internal/api` (DTOs), `internal/ipc` (JSON-RPC), `internal/notifications` |
-| Infrastructure | `internal/staging`, `internal/deps`, `internal/encodingstate`, `internal/textutil`, `internal/testsupport` |
+| Infrastructure | `internal/staging`, `internal/deps`, `internal/encodingstate`, `internal/textutil`, `internal/testsupport`, `internal/stage` |
 
 ## Quick Navigation
 
@@ -89,7 +89,7 @@ golangci-lint run                     # Lint
 ## Common Patterns
 
 - **Error propagation**: Stages return errors -> workflow manager -> `StatusFailed`. Use `services.ServiceError` for classification.
-- **Progress tracking**: `item.SetProgress(stage, message)` for updates; `item.SetProgressComplete(stage)` when done.
+- **Progress tracking**: `item.SetProgress(stage, message, percent)` for updates; `item.SetProgressComplete(stage, message)` when done.
 - **State transitions**: Only workflow manager calls `store.UpdateStatus()`. Stages return nil to signal completion.
 - **Testing**: `testsupport.NewTestDB()` for temp SQLite; stub external service interfaces.
 
@@ -128,13 +128,14 @@ Spindle exposes logs via `/api/logs` with two distinct audiences:
 
 ## Database Schema
 
-The queue DB is **transient** (in-flight jobs only). No migrations - just bump `schemaVersion` in `schema.go` and update `schema.sql`. Users run `spindle queue clear` on mismatch.
+The queue DB is **transient** (in-flight jobs only). No migrations - just bump `schemaVersion` in `schema.go` and update `schema.sql`. Users run `spindle queue clear --all` on mismatch.
 
 ## Troubleshooting Quick Reference
 
 - **Queue inspection**: `sqlite3 queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'`
 - **Subtitle debugging**: Set `SPD_DEBUG_SUBTITLES_KEEP=1` to retain intermediate files
 - **Daemon issues**: Single-instance enforced in `internal/daemon`; use `spindle stop` to fully terminate
+- **Disc detection**: Use `spindle disc pause` to temporarily stop new disc queueing (resets on restart)
 
 ## Deep Dive Documentation
 

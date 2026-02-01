@@ -42,6 +42,8 @@ This lets you rip disc B while disc A is still encoding or organizing.
 
 Disc-detected notifications are emitted when identification begins.
 
+Use `spindle disc pause` to temporarily stop queueing new discs without stopping the daemon. This is useful when you need to swap drives or perform maintenance. Use `spindle disc resume` to resume detection. The pause state resets when the daemon restarts.
+
 ## Stage 2: Content Identification (IDENTIFYING -> IDENTIFIED)
 
 1. Spindle scans the disc with MakeMKV, capturing the fingerprint and title list.
@@ -125,6 +127,7 @@ When `subtitles_enabled = true`, Spindle attempts OpenSubtitles first (if enable
 - `spindle queue retry <id>` - retry failed items only.
 - `spindle queue stop <id>` - halt processing for a specific item (takes effect after the current stage if already running).
 - `spindle queue reset-stuck` - return in-flight items to the start of their current stage.
+- `spindle disc pause` / `spindle disc resume` - pause or resume detection of new discs (already-queued items continue processing).
 - `spindle stop` - cleanly stop the daemon.
 
 ## Where Files Live

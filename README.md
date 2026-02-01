@@ -39,6 +39,7 @@ See [docs/configuration.md](docs/configuration.md) for all options (Jellyfin, su
 ```bash
 spindle config validate   # check config
 spindle start             # launch daemon
+spindle status            # check daemon and dependencies
 spindle show --follow     # tail logs
 ```
 
