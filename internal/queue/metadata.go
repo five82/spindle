@@ -117,25 +117,26 @@ func (m Metadata) GetLibraryPath(root, moviesDir, tvDir string) string {
 }
 
 func (m Metadata) GetFilename() string {
+	// Handle TV shows that have explicit show title or episode information
 	if !m.IsMovie() {
 		show := strings.TrimSpace(m.ShowTitle)
-		if show == "" && len(m.EpisodeNumbers) == 0 {
-			goto fallback
-		}
-		if show == "" {
-			show = strings.TrimSpace(m.TitleValue)
-		}
-		season := m.SeasonNumber
-		if season <= 0 {
-			season = 1
-		}
-		if label := buildEpisodeFilename(show, season, m.EpisodeNumbers); label != "" {
-			return label
+		hasExplicitTVInfo := show != "" || len(m.EpisodeNumbers) > 0
+		if hasExplicitTVInfo {
+			if show == "" {
+				show = strings.TrimSpace(m.TitleValue)
+			}
+			season := m.SeasonNumber
+			if season <= 0 {
+				season = 1
+			}
+			if label := buildEpisodeFilename(show, season, m.EpisodeNumbers); label != "" {
+				return label
+			}
 		}
 	}
-fallback:
+
+	// Fall back to base filename, with edition suffix for movies
 	base := m.GetBaseFilename()
-	// Append edition suffix for movies when edition is set
 	if m.IsMovie() && strings.TrimSpace(m.Edition) != "" {
 		return base + " - " + strings.TrimSpace(m.Edition)
 	}

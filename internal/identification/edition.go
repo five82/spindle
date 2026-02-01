@@ -125,13 +125,8 @@ func DetectEditionWithLLM(ctx context.Context, client *llm.Client, discTitle, tm
 		return EditionDecision{}, err
 	}
 
-	// Clamp confidence to valid range
-	if decision.Confidence < 0 {
-		decision.Confidence = 0
-	}
-	if decision.Confidence > 1 {
-		decision.Confidence = 1
-	}
+	// Clamp confidence to valid range [0, 1]
+	decision.Confidence = max(0, min(1, decision.Confidence))
 
 	return decision, nil
 }
@@ -188,14 +183,16 @@ func normalizeForEditionComparison(title string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// commonWords contains words that shouldn't be considered edition markers.
+var commonWords = map[string]bool{
+	"THE": true, "A": true, "AN": true, "OF": true, "AND": true,
+	"IN": true, "TO": true, "FOR": true, "ON": true, "AT": true,
+	"BY": true, "WITH": true, "FROM": true, "OR": true,
+}
+
 // isCommonWord returns true for words that shouldn't be considered edition markers.
 func isCommonWord(word string) bool {
-	common := map[string]bool{
-		"THE": true, "A": true, "AN": true, "OF": true, "AND": true,
-		"IN": true, "TO": true, "FOR": true, "ON": true, "AT": true,
-		"BY": true, "WITH": true, "FROM": true, "OR": true,
-	}
-	return common[strings.ToUpper(word)]
+	return commonWords[strings.ToUpper(word)]
 }
 
 // isYearLike returns true if the word looks like a year (4 digits starting with 1 or 2).
@@ -217,25 +214,16 @@ func isYearLike(word string) bool {
 // NormalizeEditionLabel cleans up a raw edition label.
 // Converts underscores to spaces and applies title case.
 func NormalizeEditionLabel(raw string) string {
-	if raw == "" {
-		return ""
-	}
-
-	// Replace underscores with spaces
+	// Replace underscores with spaces and split into words
 	s := strings.ReplaceAll(raw, "_", " ")
-	// Trim and collapse whitespace
-	s = strings.Join(strings.Fields(s), " ")
-
-	if s == "" {
+	words := strings.Fields(s)
+	if len(words) == 0 {
 		return ""
 	}
 
-	// Title case
-	words := strings.Fields(s)
+	// Apply title case to each word
 	for i, w := range words {
-		if len(w) > 0 {
-			words[i] = strings.ToUpper(string(w[0])) + strings.ToLower(w[1:])
-		}
+		words[i] = strings.ToUpper(string(w[0])) + strings.ToLower(w[1:])
 	}
 	return strings.Join(words, " ")
 }
