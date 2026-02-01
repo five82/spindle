@@ -74,8 +74,8 @@ Spindle surfaces noisy/incorrect names.
   - Success path: `PENDING → IDENTIFYING → IDENTIFIED`.
   - Missing match: stay `IDENTIFIED` but set `NeedsReview = true`. Subsequent
     stages still run; organizer diverts files to `review_dir`.
-  - Fingerprint collision: send item to `REVIEW` immediately with message
-    “Duplicate disc fingerprint”.
+  - Fingerprint collision: send item to `FAILED` with `NeedsReview = true` and message
+    "Duplicate disc fingerprint".
 
 ## Episode Mapping & Verification
 
@@ -105,7 +105,7 @@ same change.
 
 - **No TMDB match**: item stays `IDENTIFIED`, `NeedsReview = true`. Organizer
   relocates output to `review_dir`. Never leave the queue in `PENDING`.
-- **Duplicate fingerprint**: set status `REVIEW`, preserve the error message, do
+- **Duplicate fingerprint**: set status `FAILED` with `NeedsReview = true`, preserve the error message, do
   not start MakeMKV.
 - **MakeMKV/bd_info errors**: bubble them up as `FAILED` with the command stderr
   attached; retries should resume from `PENDING`.

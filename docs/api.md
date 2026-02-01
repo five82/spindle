@@ -137,7 +137,7 @@ Returns metadata for a single queue entry.
     "id": 15,
     "discTitle": "Unknown Disc",
     "sourcePath": "",
-    "status": "review",
+    "status": "failed",
     "progress": { "stage": "Manual review", "percent": 100 },
     "errorMessage": "TMDB lookup failed",
     "metadata": {
@@ -149,6 +149,51 @@ Returns metadata for a single queue entry.
   }
 }
 ```
+
+### `GET /api/logs`
+
+Streams structured log events from the daemon's in-memory ring buffer. This is
+the primary endpoint for real-time log monitoring with rich filtering.
+
+Query parameters:
+
+- `since=<seq>` (optional) — sequence number to resume from (default 0, start of buffer).
+- `limit=<n>` (optional) — maximum events to return (default 200).
+- `follow=1` (optional) — wait for new events when at end of buffer.
+- `tail=1` (optional) — return the last `limit` events (ignores `since`).
+- `item=<id>` (optional) — filter to events for a specific queue item.
+- `daemon_only=1` (optional) — filter to daemon-level events only (ItemID=0).
+- `lane=<value>` (optional) — filter by lane (`foreground`, `background`, or `*`/`all` for all).
+- `component=<name>` (optional) — filter by component name.
+- `level=<value>` (optional) — filter by minimum log level (`debug`, `info`, `warn`, `error`).
+- `correlation_id=<id>` (optional) — filter by correlation ID (alias: `request`).
+- `decision_type=<type>` (optional) — filter by decision type field.
+- `alert=<value>` (optional) — filter by alert field.
+- `search=<text>` (optional) — case-insensitive text search in messages.
+
+**Lane filtering:** Without explicit filters, only foreground-lane events are
+returned. Use `lane=*` or `lane=all` to see all lanes. When filtering by `item`,
+background-lane events are automatically included.
+
+```json
+{
+  "events": [
+    {
+      "seq": 12345,
+      "time": "2025-10-05T14:31:22.123Z",
+      "level": "info",
+      "message": "Encoding completed",
+      "component": "encoder",
+      "itemId": 8,
+      "lane": "background",
+      "fields": { "preset": "grain", "duration_seconds": 3600 }
+    }
+  ],
+  "next": 12346
+}
+```
+
+Use the `next` cursor as the `since` parameter for pagination or follow-mode polling.
 
 ### `GET /api/logtail`
 
@@ -179,7 +224,7 @@ Query parameters:
 | `queueDbPath` | Full path to the SQLite queue database used by the daemon. |
 | `workflow.queueStats` | Map keyed by lifecycle status -> item count. Includes the episode identification states (`episode_identifying`, `episode_identified`) when TV discs are flowing. |
 | `workflow.stageHealth` | Stage readiness results from `StageHandler.HealthCheck`, including the `episode-identifier` handler when enabled. For dependency dashboards. |
-| `items[].status` | Current lifecycle state from `internal/queue.Status` (`pending → identifying → identified → ripping → ripped → episode_identifying → episode_identified → encoding → encoded → subtitling → subtitled → organizing → completed`, plus `failed`/`review`). |
+| `items[].status` | Current lifecycle state from `internal/queue.Status` (`pending → identifying → identified → ripping → ripped → episode_identifying → episode_identified → encoding → encoded → audio_analyzing → audio_analyzed → subtitling → subtitled → organizing → completed`, plus `failed`). Items may also have `needsReview: true` for review routing. |
 | `items[].progress` | Stage name, percent 0-100, and last message recorded for the item. Episode identification surfaces as "Episode identification". |
 | `items[].draptoPresetProfile` | Drapto preset applied during encoding: `clean`, `grain`, or omitted/`default` when Drapto runs with its stock settings. |
 | `items[].metadata` | Raw TMDB/metadata JSON captured during identification. Omitted when empty. |

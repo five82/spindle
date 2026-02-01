@@ -123,6 +123,22 @@ alignment artifacts inside each queue item's staging folder for debugging.
   `SPINDLE_FFPROBE_PATH`/`FFPROBE_PATH` only when you need to override PATH
   resolution (systemd services, CI, or multiple installs).
 
+## Commentary Detection
+
+| Key | Description |
+| --- | --- |
+| `commentary.enabled` | Enable commentary track detection during audio analysis stage. |
+| `commentary.whisperx_model` | Model for transcription (default: `large-v3-turbo`). |
+| `commentary.similarity_threshold` | Cosine similarity above which a track is considered a stereo downmix (default: 0.92). |
+| `commentary.confidence_threshold` | LLM confidence required to classify as commentary (default: 0.80). |
+| `commentary.api_key` | OpenRouter API key (falls back to `preset_decider.api_key`). |
+| `commentary.base_url` | API endpoint (falls back to `preset_decider.base_url`). |
+| `commentary.model` | LLM model for classification (falls back to `preset_decider.model`). |
+
+Commentary detection uses WhisperX to transcribe audio tracks and an LLM to
+classify whether the content is commentary. Detected commentary tracks are
+excluded from the final output.
+
 ## Queue & Workflow Toggles
 
 | Key | Details |

@@ -62,7 +62,7 @@ Use `spindle status` to check for missing dependencies.
 - Inspect state directly when needed with SQLite:
   - `sqlite3 ~/.local/share/spindle/logs/queue.db "SELECT id, disc_title, status, progress_stage FROM queue_items;"`
   - `sqlite3 ~/.local/share/spindle/logs/queue.db ".schema queue_items"`
-- Status progression remains `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENTIFYING → EPISODE_IDENTIFIED] → ENCODING → ENCODED → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED` with `FAILED`/`REVIEW` detours. When introducing new stages, update enums, orchestrator routing, CLI output, docs, and tests together.
+- Status progression remains `PENDING → IDENTIFYING → IDENTIFIED → RIPPING → RIPPED → [EPISODE_IDENTIFYING → EPISODE_IDENTIFIED] → ENCODING → ENCODED → [AUDIO_ANALYZING → AUDIO_ANALYZED] → [SUBTITLING → SUBTITLED] → ORGANIZING → COMPLETED` with `FAILED` detour and `NeedsReview` flag for review routing. When introducing new stages, update enums, orchestrator routing, CLI output, docs, and tests together.
 
 ## Release Checklist
 

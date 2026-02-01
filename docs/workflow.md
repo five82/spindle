@@ -16,8 +16,9 @@ Every item moves through the queue in order. The statuses you will see are:
 - `AUDIO_ANALYZING` -> `AUDIO_ANALYZED` *(optional)* - detects commentary tracks for exclusion
 - `SUBTITLING` -> `SUBTITLED` *(optional)* - OpenSubtitles + WhisperX generate subtitle sidecars
 - `ORGANIZING` -> `COMPLETED` - files moved into your library; Jellyfin refresh triggered when configured
-- `REVIEW` - workflow stopped; manual attention required
 - `FAILED` - an error stopped progress; fix the root cause and retry
+
+Items may also have a `NeedsReview` flag set, which routes output to `review_dir` without stopping the workflow.
 
 Use `spindle queue list` to inspect items and `spindle queue health` for lifecycle totals.
 
@@ -51,7 +52,7 @@ Disc-detected notifications are emitted when identification begins.
    - Updates `disc_title` to a canonical name (movie: `Title (Year)`, TV: `Show Season XX (Year)` when available).
    - Sends a notification when a year is known.
 4. If no confident match is found (or TMDB lookup fails), the item is marked `NeedsReview` with a reason. The status remains `IDENTIFIED` so downstream stages can still run, and the organizer will route output to `review_dir`.
-5. Duplicate fingerprints are treated as immediate review: the item is placed in `REVIEW` and the workflow stops.
+5. Duplicate fingerprints are treated as immediate failure: the item is placed in `FAILED` with `NeedsReview = true` and the workflow stops.
 
 Progress messages in `spindle show --follow` describe the identification steps and any review reasons.
 
@@ -78,7 +79,7 @@ via `spindle cache process <number>`; restored rips are reprocessed for audio re
 1. The encoder builds a job plan from the rip spec and runs Drapto for each episode (or a single file for movies).
 2. When `preset_decider.enabled = true`, an OpenRouter LLM can select a Drapto preset (`clean`, `grain`, or default); otherwise the default profile is used.
 3. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`. The rip spec is updated after each episode so progress is recoverable.
-4. When encoding completes, the item flips to `ENCODED`. Failures surface as `FAILED` (or `REVIEW` for validation/configuration errors).
+4. When encoding completes, the item flips to `ENCODED`. Failures surface as `FAILED` (with `NeedsReview = true` for validation/configuration errors).
 
 ## Stage 6: Audio Analysis (AUDIO_ANALYZING -> AUDIO_ANALYZED)
 
@@ -113,9 +114,8 @@ When `subtitles_enabled = true`, Spindle attempts OpenSubtitles first (if enable
 
 ## Review vs Failed
 
-- **`REVIEW` status**: Workflow stops. This is used for validation/configuration issues, duplicate fingerprints, or manual stop requests (`spindle queue stop <id>`). Fix the problem, then reinsert the disc or clear the item; `spindle queue retry` only applies to `FAILED` items.
-- **`NeedsReview` flag**: Workflow continues. Final artifacts are routed to `review_dir`, and the item completes with progress stage "Manual review" so the pipeline stays unblocked.
-- **`FAILED` status**: Something went wrong (external tool failure, read error, etc.). Fix the root cause, then use `spindle queue retry <id>` to requeue.
+- **`FAILED` status**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, and manual stop requests (`spindle queue stop <id>`). Items stopped by user have `ReviewReason = "Stop requested by user"`. Fix the root cause, then use `spindle queue retry <id>` to requeue.
+- **`NeedsReview` flag**: Workflow continues but final artifacts are routed to `review_dir` instead of the library. The item completes with progress stage "Manual review" so the pipeline stays unblocked. This is used for low-confidence matches, missing metadata, or other issues that need manual attention but shouldn't block processing.
 
 ## Monitoring & Control Tips
 

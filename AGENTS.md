@@ -21,7 +21,7 @@ Spindle is a **personal project** that automates optical disc to Jellyfin librar
 - **Environment**: Go 1.25+, MakeMKV, FFmpeg
 - **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.
 
-Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED] -> ENCODING -> ENCODED -> [AUDIO_ANALYZING -> AUDIO_ANALYZED] -> [SUBTITLING -> SUBTITLED] -> ORGANIZING -> COMPLETED` (with `FAILED`/`REVIEW` detours).
+Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED] -> ENCODING -> ENCODED -> [AUDIO_ANALYZING -> AUDIO_ANALYZED] -> [SUBTITLING -> SUBTITLED] -> ORGANIZING -> COMPLETED` (with `FAILED` detour and `NeedsReview` flag for review routing).
 
 ## Critical Expectations
 
@@ -67,12 +67,13 @@ golangci-lint run                     # Lint
 | Area | Packages |
 |------|----------|
 | Core orchestration | `internal/workflow`, `internal/daemon`, `internal/queue` |
-| Stage handlers | `internal/identification`, `internal/ripping`, `internal/episodeid`, `internal/encoding`, `internal/subtitles`, `internal/organizer` |
-| Content intelligence | `internal/contentid`, `internal/ripspec`, `internal/media`, `internal/ripcache` |
-| External services | `internal/services/` (`drapto/`, `jellyfin/`, `makemkv/`, `presetllm/`) |
+| Stage handlers | `internal/identification`, `internal/ripping`, `internal/episodeid`, `internal/encoding`, `internal/audioanalysis`, `internal/subtitles`, `internal/organizer` |
+| Content intelligence | `internal/contentid`, `internal/ripspec`, `internal/media`, `internal/ripcache`, `internal/disc` |
+| External services | `internal/services/` (`drapto/`, `jellyfin/`, `llm/`, `makemkv/`, `whisperx/`) |
 | CLI entry | `cmd/spindle` |
-| Config & logging | `internal/config`, `internal/logging` |
-| Communication | `internal/api` (DTOs), `internal/ipc` (JSON-RPC) |
+| Config & logging | `internal/config`, `internal/logging`, `internal/logs` |
+| Communication | `internal/api` (DTOs), `internal/ipc` (JSON-RPC), `internal/notifications` |
+| Infrastructure | `internal/staging`, `internal/deps`, `internal/encodingstate`, `internal/textutil`, `internal/testsupport` |
 
 ## Quick Navigation
 
@@ -83,7 +84,7 @@ golangci-lint run                     # Lint
 | CLI commands | `cmd/spindle/{command}.go` |
 | Config fields | `internal/config/config.go` |
 | Error types | `internal/services/errors.go` |
-| API/IPC | `internal/api/`, `internal/ipc/methods.go` |
+| API/IPC | `internal/api/`, `internal/ipc/server.go` |
 
 ## Common Patterns
 

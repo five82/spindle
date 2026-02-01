@@ -28,7 +28,7 @@ The default model is `google/gemini-3-flash-preview`. GPT-5 mini performed well 
 For each job the encoder sends:
 
 ```
-<prompt from internal/services/presetllm/prompt.go>
+<prompt from internal/services/llm/prompt.go>
 
 Now classify this title:
 South Park Season 5 1997 hd tv show
