@@ -27,11 +27,12 @@ func TestNewProgressSampler(t *testing.T) {
 	}
 }
 
-func TestProgressSampler_ShouldLogNilSampler(t *testing.T) {
+func TestProgressSampler_NilSampler(t *testing.T) {
 	var s *ProgressSampler
 	if !s.ShouldLog(50, "stage", "message") {
-		t.Error("nil sampler should always return true")
+		t.Error("ShouldLog on nil sampler should always return true")
 	}
+	s.Reset() // should not panic
 }
 
 func TestProgressSampler_ShouldLogStageChange(t *testing.T) {
@@ -155,11 +156,8 @@ func TestProgressSampler_ShouldLogIgnoresMessage(t *testing.T) {
 
 func TestProgressSampler_Reset(t *testing.T) {
 	s := NewProgressSampler(5)
-
-	// Establish state
 	s.ShouldLog(50, "Ripping", "")
 
-	// Reset
 	s.Reset()
 
 	if s.lastStage != "" {
@@ -168,62 +166,42 @@ func TestProgressSampler_Reset(t *testing.T) {
 	if s.lastBucket != -1 {
 		t.Errorf("lastBucket = %d, want -1 after reset", s.lastBucket)
 	}
-
-	// After reset, same values should log again
 	if !s.ShouldLog(50, "Ripping", "") {
 		t.Error("should log after reset")
 	}
 }
 
-func TestProgressSampler_ResetNilSampler(t *testing.T) {
-	var s *ProgressSampler
-	// Should not panic
-	s.Reset()
-}
+func TestProgressSampler_BucketSizes(t *testing.T) {
+	t.Run("1% buckets", func(t *testing.T) {
+		s := NewProgressSampler(1)
+		s.ShouldLog(0, "Test", "")
 
-func TestProgressSampler_SmallBucketSize(t *testing.T) {
-	s := NewProgressSampler(1) // 1% buckets
+		if !s.ShouldLog(1, "Test", "") {
+			t.Error("1% should log")
+		}
+		if s.ShouldLog(1.5, "Test", "") {
+			t.Error("1.5% should not log (same bucket)")
+		}
+		if !s.ShouldLog(2, "Test", "") {
+			t.Error("2% should log")
+		}
+	})
 
-	s.ShouldLog(0, "Test", "")
+	t.Run("25% buckets", func(t *testing.T) {
+		s := NewProgressSampler(25)
+		s.ShouldLog(0, "Test", "")
 
-	// 1% should log
-	if !s.ShouldLog(1, "Test", "") {
-		t.Error("1% should log with 1% bucket size")
-	}
-
-	// 1.5% is still in bucket 1
-	if s.ShouldLog(1.5, "Test", "") {
-		t.Error("1.5% should not log (same bucket as 1%)")
-	}
-
-	// 2% should log
-	if !s.ShouldLog(2, "Test", "") {
-		t.Error("2% should log")
-	}
-}
-
-func TestProgressSampler_LargeBucketSize(t *testing.T) {
-	s := NewProgressSampler(25) // 25% buckets
-
-	s.ShouldLog(0, "Test", "")
-
-	// 20% is still in bucket 0
-	if s.ShouldLog(20, "Test", "") {
-		t.Error("20% should not log with 25% bucket size")
-	}
-
-	// 25% crosses to bucket 1
-	if !s.ShouldLog(25, "Test", "") {
-		t.Error("25% should log")
-	}
-
-	// 49% is still in bucket 1
-	if s.ShouldLog(49, "Test", "") {
-		t.Error("49% should not log")
-	}
-
-	// 50% crosses to bucket 2
-	if !s.ShouldLog(50, "Test", "") {
-		t.Error("50% should log")
-	}
+		if s.ShouldLog(20, "Test", "") {
+			t.Error("20% should not log")
+		}
+		if !s.ShouldLog(25, "Test", "") {
+			t.Error("25% should log")
+		}
+		if s.ShouldLog(49, "Test", "") {
+			t.Error("49% should not log")
+		}
+		if !s.ShouldLog(50, "Test", "") {
+			t.Error("50% should log")
+		}
+	})
 }

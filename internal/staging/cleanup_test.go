@@ -10,24 +10,12 @@ import (
 	"spindle/internal/logging"
 )
 
-func TestCleanStaleEmptyDir(t *testing.T) {
-	result := CleanStale(context.Background(), "", time.Hour, logging.NewNop())
-	if len(result.Removed) != 0 || len(result.Errors) != 0 {
-		t.Error("expected empty result for empty dir")
-	}
-}
-
-func TestCleanStaleWhitespaceDir(t *testing.T) {
-	result := CleanStale(context.Background(), "   ", time.Hour, logging.NewNop())
-	if len(result.Removed) != 0 || len(result.Errors) != 0 {
-		t.Error("expected empty result for whitespace dir")
-	}
-}
-
-func TestCleanStaleNonexistentDir(t *testing.T) {
-	result := CleanStale(context.Background(), "/nonexistent/path/12345", time.Hour, logging.NewNop())
-	if len(result.Removed) != 0 || len(result.Errors) != 0 {
-		t.Error("expected empty result for nonexistent dir (not an error)")
+func TestCleanStaleInvalidPaths(t *testing.T) {
+	for _, dir := range []string{"", "   ", "/nonexistent/path/12345"} {
+		result := CleanStale(context.Background(), dir, time.Hour, logging.NewNop())
+		if len(result.Removed) != 0 || len(result.Errors) != 0 {
+			t.Errorf("expected empty result for path %q", dir)
+		}
 	}
 }
 
@@ -97,9 +85,11 @@ func TestCleanStaleIgnoresFiles(t *testing.T) {
 }
 
 func TestCleanOrphanedEmptyDir(t *testing.T) {
-	result := CleanOrphaned(context.Background(), "", nil, logging.NewNop())
-	if len(result.Removed) != 0 || len(result.Errors) != 0 {
-		t.Error("expected empty result for empty dir")
+	for _, dir := range []string{"", "   "} {
+		result := CleanOrphaned(context.Background(), dir, nil, logging.NewNop())
+		if len(result.Removed) != 0 || len(result.Errors) != 0 {
+			t.Errorf("expected empty result for path %q", dir)
+		}
 	}
 }
 
@@ -201,23 +191,15 @@ func TestCleanOrphanedSkipsQueueDirs(t *testing.T) {
 	}
 }
 
-func TestListDirectoriesEmpty(t *testing.T) {
-	dirs, err := ListDirectories("")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if dirs != nil {
-		t.Errorf("expected nil for empty path, got %v", dirs)
-	}
-}
-
-func TestListDirectoriesNonexistent(t *testing.T) {
-	dirs, err := ListDirectories("/nonexistent/path/12345")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if dirs != nil {
-		t.Errorf("expected nil for nonexistent path, got %v", dirs)
+func TestListDirectoriesInvalidPaths(t *testing.T) {
+	for _, path := range []string{"", "/nonexistent/path/12345"} {
+		dirs, err := ListDirectories(path)
+		if err != nil {
+			t.Fatalf("unexpected error for %q: %v", path, err)
+		}
+		if dirs != nil {
+			t.Errorf("expected nil for path %q, got %v", path, dirs)
+		}
 	}
 }
 

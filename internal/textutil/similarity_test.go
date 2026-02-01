@@ -6,24 +6,15 @@ import (
 )
 
 func TestCosineSimilarityNil(t *testing.T) {
-	tests := []struct {
-		name string
-		a    *Fingerprint
-		b    *Fingerprint
-		want float64
-	}{
-		{"both nil", nil, nil, 0},
-		{"a nil", nil, NewFingerprint("hello world"), 0},
-		{"b nil", NewFingerprint("hello world"), nil, 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := CosineSimilarity(tt.a, tt.b)
-			if got != tt.want {
-				t.Errorf("CosineSimilarity() = %v, want %v", got, tt.want)
-			}
-		})
+	fp := NewFingerprint("hello world")
+	for name, pair := range map[string][2]*Fingerprint{
+		"both nil": {nil, nil},
+		"a nil":    {nil, fp},
+		"b nil":    {fp, nil},
+	} {
+		if got := CosineSimilarity(pair[0], pair[1]); got != 0 {
+			t.Errorf("%s: CosineSimilarity() = %v, want 0", name, got)
+		}
 	}
 }
 
@@ -81,18 +72,14 @@ func TestCosineSimilarityZeroNorm(t *testing.T) {
 	}
 }
 
-func TestNewFingerprintEmpty(t *testing.T) {
-	fp := NewFingerprint("")
-	if fp != nil {
-		t.Error("expected nil for empty text")
-	}
-}
-
-func TestNewFingerprintShortTokens(t *testing.T) {
-	// Only short tokens (< 3 chars) should result in nil
-	fp := NewFingerprint("a an it to")
-	if fp != nil {
-		t.Error("expected nil for text with only short tokens")
+func TestNewFingerprintReturnsNil(t *testing.T) {
+	for name, text := range map[string]string{
+		"empty":        "",
+		"short tokens": "a an it to",
+	} {
+		if fp := NewFingerprint(text); fp != nil {
+			t.Errorf("%s: expected nil fingerprint", name)
+		}
 	}
 }
 

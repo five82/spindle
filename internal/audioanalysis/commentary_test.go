@@ -1,6 +1,7 @@
 package audioanalysis
 
 import (
+	"strings"
 	"testing"
 
 	"spindle/internal/media/ffprobe"
@@ -443,19 +444,10 @@ func TestBuildClassificationPrompt(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := buildClassificationPrompt(tt.title, tt.year, tt.transcript)
 			for _, part := range tt.wantParts {
-				if !containsSubstring(got, part) {
+				if !strings.Contains(got, part) {
 					t.Errorf("buildClassificationPrompt() = %q, missing %q", got, part)
 				}
 			}
 		})
 	}
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

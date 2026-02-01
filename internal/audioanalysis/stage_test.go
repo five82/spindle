@@ -2,6 +2,7 @@ package audioanalysis
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"spindle/internal/config"
@@ -99,27 +100,23 @@ func TestStage_SetLoggerNilStage(t *testing.T) {
 	s.SetLogger(logging.NewNop())
 }
 
-func TestStage_PrepareNilStage(t *testing.T) {
-	var s *Stage
-	err := s.Prepare(context.Background(), &queue.Item{})
-	if err == nil {
-		t.Error("expected error for nil stage")
+func TestStage_PrepareErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		stage *Stage
+	}{
+		{"nil stage", nil},
+		{"nil config", &Stage{cfg: nil}},
+		{"nil store", &Stage{cfg: &config.Config{}, store: nil}},
 	}
-}
 
-func TestStage_PrepareNilConfig(t *testing.T) {
-	s := &Stage{cfg: nil}
-	err := s.Prepare(context.Background(), &queue.Item{})
-	if err == nil {
-		t.Error("expected error for nil config")
-	}
-}
-
-func TestStage_PrepareNilStore(t *testing.T) {
-	s := &Stage{cfg: &config.Config{}, store: nil}
-	err := s.Prepare(context.Background(), &queue.Item{})
-	if err == nil {
-		t.Error("expected error for nil store")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.stage.Prepare(context.Background(), &queue.Item{})
+			if err == nil {
+				t.Errorf("expected error for %s", tt.name)
+			}
+		})
 	}
 }
 
@@ -268,7 +265,7 @@ func TestBuildCompletionMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := buildCompletionMessage(tt.refine, tt.commentary)
 			for _, part := range tt.wantParts {
-				if !containsString(got, part) {
+				if !strings.Contains(got, part) {
 					t.Errorf("buildCompletionMessage() = %q, missing %q", got, part)
 				}
 			}
@@ -379,18 +376,4 @@ func TestStoreCommentaryResult(t *testing.T) {
 			tt.check(t, tt.env)
 		})
 	}
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

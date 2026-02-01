@@ -184,20 +184,13 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestNewDefaultsUserAgent(t *testing.T) {
+func TestNewDefaults(t *testing.T) {
 	client, err := New(Config{APIKey: "test-key"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	if client.userAgent != defaultUserAgent {
 		t.Errorf("userAgent = %q, want %q", client.userAgent, defaultUserAgent)
-	}
-}
-
-func TestNewDefaultsBaseURL(t *testing.T) {
-	client, err := New(Config{APIKey: "test-key"})
-	if err != nil {
-		t.Fatalf("New: %v", err)
 	}
 	if client.baseURL.String() != defaultBaseURL {
 		t.Errorf("baseURL = %q, want %q", client.baseURL.String(), defaultBaseURL)
@@ -291,11 +284,13 @@ func TestSearchForeignPartsOnlyParameter(t *testing.T) {
 	}
 }
 
-func TestSearchNilClient(t *testing.T) {
+func TestNilClient(t *testing.T) {
 	var client *Client
-	_, err := client.Search(context.Background(), SearchRequest{})
-	if err == nil {
-		t.Error("expected error for nil client")
+	if _, err := client.Search(context.Background(), SearchRequest{}); err == nil {
+		t.Error("Search: expected error for nil client")
+	}
+	if _, err := client.Download(context.Background(), 123, DownloadOptions{}); err == nil {
+		t.Error("Download: expected error for nil client")
 	}
 }
 
@@ -320,95 +315,64 @@ func TestSearchHandlesHTTPError(t *testing.T) {
 	}
 }
 
-func TestSearchSkipsEntriesWithoutLanguage(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		resp := searchResponse{
-			Data: []struct {
-				ID         string           `json:"id"`
-				Attributes searchAttributes `json:"attributes"`
-			}{
-				{
-					ID: "no-lang",
-					Attributes: searchAttributes{
-						Language: "",
-						Files:    []searchFile{{FileID: 100}},
+func TestSearchSkipsInvalidEntries(t *testing.T) {
+	tests := []struct {
+		name      string
+		invalid   searchAttributes
+		invalidID string
+		valid     searchAttributes
+		validID   string
+	}{
+		{
+			name:      "skips entries without language",
+			invalid:   searchAttributes{Language: "", Files: []searchFile{{FileID: 100}}},
+			invalidID: "no-lang",
+			valid:     searchAttributes{Language: "en", Files: []searchFile{{FileID: 200}}},
+			validID:   "with-lang",
+		},
+		{
+			name:      "skips entries without file ID",
+			invalid:   searchAttributes{Language: "en", Files: []searchFile{}},
+			invalidID: "no-file",
+			valid:     searchAttributes{Language: "en", Files: []searchFile{{FileID: 200}}},
+			validID:   "with-file",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				resp := searchResponse{
+					Data: []struct {
+						ID         string           `json:"id"`
+						Attributes searchAttributes `json:"attributes"`
+					}{
+						{ID: tt.invalidID, Attributes: tt.invalid},
+						{ID: tt.validID, Attributes: tt.valid},
 					},
-				},
-				{
-					ID: "with-lang",
-					Attributes: searchAttributes{
-						Language: "en",
-						Files:    []searchFile{{FileID: 200}},
-					},
-				},
-			},
-		}
-		json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+				}
+				json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
 
-	client, err := New(Config{APIKey: "test-key", BaseURL: server.URL})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+			client, err := New(Config{APIKey: "test-key", BaseURL: server.URL})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
 
-	result, err := client.Search(context.Background(), SearchRequest{TMDBID: 123})
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
+			result, err := client.Search(context.Background(), SearchRequest{TMDBID: 123})
+			if err != nil {
+				t.Fatalf("Search: %v", err)
+			}
 
-	if len(result.Subtitles) != 1 {
-		t.Fatalf("expected 1 subtitle (entry without language should be skipped), got %d", len(result.Subtitles))
-	}
-	if result.Subtitles[0].ID != "with-lang" {
-		t.Errorf("expected subtitle with-lang, got %s", result.Subtitles[0].ID)
-	}
-}
-
-func TestSearchSkipsEntriesWithoutFileID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		resp := searchResponse{
-			Data: []struct {
-				ID         string           `json:"id"`
-				Attributes searchAttributes `json:"attributes"`
-			}{
-				{
-					ID: "no-file",
-					Attributes: searchAttributes{
-						Language: "en",
-						Files:    []searchFile{},
-					},
-				},
-				{
-					ID: "with-file",
-					Attributes: searchAttributes{
-						Language: "en",
-						Files:    []searchFile{{FileID: 200}},
-					},
-				},
-			},
-		}
-		json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
-
-	client, err := New(Config{APIKey: "test-key", BaseURL: server.URL})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	result, err := client.Search(context.Background(), SearchRequest{TMDBID: 123})
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-
-	if len(result.Subtitles) != 1 {
-		t.Fatalf("expected 1 subtitle (entry without file_id should be skipped), got %d", len(result.Subtitles))
-	}
-	if result.Subtitles[0].ID != "with-file" {
-		t.Errorf("expected subtitle with-file, got %s", result.Subtitles[0].ID)
+			if len(result.Subtitles) != 1 {
+				t.Fatalf("expected 1 subtitle, got %d", len(result.Subtitles))
+			}
+			if result.Subtitles[0].ID != tt.validID {
+				t.Errorf("expected subtitle %s, got %s", tt.validID, result.Subtitles[0].ID)
+			}
+		})
 	}
 }
 
@@ -511,28 +475,16 @@ func TestSearchAttributesPrimaryFileID(t *testing.T) {
 	}
 }
 
-func TestDownloadNilClient(t *testing.T) {
-	var client *Client
-	_, err := client.Download(context.Background(), 123, DownloadOptions{})
-	if err == nil {
-		t.Error("expected error for nil client")
-	}
-}
-
 func TestDownloadInvalidFileID(t *testing.T) {
 	client, err := New(Config{APIKey: "test-key"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
-	_, err = client.Download(context.Background(), 0, DownloadOptions{})
-	if err == nil {
-		t.Error("expected error for zero file ID")
-	}
-
-	_, err = client.Download(context.Background(), -1, DownloadOptions{})
-	if err == nil {
-		t.Error("expected error for negative file ID")
+	for _, id := range []int64{0, -1} {
+		if _, err := client.Download(context.Background(), id, DownloadOptions{}); err == nil {
+			t.Errorf("expected error for file ID %d", id)
+		}
 	}
 }
 
