@@ -198,86 +198,51 @@ Examples:
 	return cmd
 }
 
-// extractYearFromMetadata extracts the year from TMDB metadata
-func extractYearFromMetadata(metadataJSON string) string {
+// metadataField extracts a string field from JSON metadata.
+// Returns the field value, or fallback if the JSON is empty, invalid, or the field is missing.
+func metadataField(metadataJSON, field, fallback string) string {
 	if metadataJSON == "" {
-		return "Unknown"
+		return fallback
 	}
-
-	var metadata map[string]interface{}
+	var metadata map[string]any
 	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return fallback
+	}
+	value, ok := metadata[field].(string)
+	if !ok || value == "" {
+		return fallback
+	}
+	return value
+}
+
+// yearPattern matches a 4-digit year at the start of a string.
+var yearPattern = regexp.MustCompile(`^\d{4}`)
+
+// extractYearFromMetadata extracts the year from the release_date field.
+func extractYearFromMetadata(metadataJSON string) string {
+	releaseDate := metadataField(metadataJSON, "release_date", "")
+	if releaseDate == "" {
 		return "Unknown"
 	}
-
-	releaseDate, ok := metadata["release_date"].(string)
-	if !ok || releaseDate == "" {
-		return "Unknown"
-	}
-
-	// Extract year from YYYY-MM-DD format
-	yearPattern := regexp.MustCompile(`^\d{4}`)
 	if match := yearPattern.FindString(releaseDate); match != "" {
 		return match
 	}
-
 	return "Unknown"
 }
 
-// extractTitleFromMetadata extracts the title from TMDB metadata
+// extractTitleFromMetadata extracts the title field.
 func extractTitleFromMetadata(metadataJSON string) string {
-	if metadataJSON == "" {
-		return "Unknown"
-	}
-
-	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		return "Unknown"
-	}
-
-	title, ok := metadata["title"].(string)
-	if !ok || title == "" {
-		return "Unknown"
-	}
-
-	return title
+	return metadataField(metadataJSON, "title", "Unknown")
 }
 
-// extractFilenameFromMetadata extracts the computed filename from metadata
+// extractFilenameFromMetadata extracts the filename field.
 func extractFilenameFromMetadata(metadataJSON string) string {
-	if metadataJSON == "" {
-		return ""
-	}
-
-	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		return ""
-	}
-
-	filename, ok := metadata["filename"].(string)
-	if !ok {
-		return ""
-	}
-
-	return filename
+	return metadataField(metadataJSON, "filename", "")
 }
 
-// extractEditionFromMetadata extracts the edition label from metadata
+// extractEditionFromMetadata extracts the edition field.
 func extractEditionFromMetadata(metadataJSON string) string {
-	if metadataJSON == "" {
-		return ""
-	}
-
-	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		return ""
-	}
-
-	edition, ok := metadata["edition"].(string)
-	if !ok {
-		return ""
-	}
-
-	return edition
+	return metadataField(metadataJSON, "edition", "")
 }
 
 // getDiscLabel gets the disc label using lsblk, same as the daemon

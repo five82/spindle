@@ -46,63 +46,75 @@ type editionPattern struct {
 	label   string
 }
 
-// knownEditionPatterns contains regex patterns for common edition indicators.
-// Order matters: more specific patterns should come before general ones.
-var knownEditionPatterns = []editionPattern{
-	// Director's versions
-	{regexp.MustCompile(`(?i)\b(DIRECTOR['S]*\s*(CUT|EDITION|VERSION))\b`), "Director's Cut"},
-	{regexp.MustCompile(`(?i)\bDIRECTOR['S]*\b`), "Director's Cut"},
-
-	// Extended versions
-	{regexp.MustCompile(`(?i)\b(EXTENDED\s*(CUT|EDITION|VERSION))\b`), "Extended Edition"},
-	{regexp.MustCompile(`(?i)\bEXTENDED\b`), "Extended Edition"},
-
-	// Unrated/Uncut
-	{regexp.MustCompile(`(?i)\b(UNRATED\s*(CUT|EDITION|VERSION)?)\b`), "Unrated"},
-	{regexp.MustCompile(`(?i)\b(UNCUT\s*(EDITION|VERSION)?)\b`), "Uncut"},
-
-	// Theatrical (when explicitly marked, indicates there are other versions)
-	{regexp.MustCompile(`(?i)\b(THEATRICAL\s*(CUT|EDITION|VERSION|RELEASE))\b`), "Theatrical"},
-
-	// Remastered
-	{regexp.MustCompile(`(?i)\b(REMASTERED\s*(EDITION|VERSION)?)\b`), "Remastered"},
-
-	// Special editions
-	{regexp.MustCompile(`(?i)\b(SPECIAL\s*EDITION)\b`), "Special Edition"},
-
-	// Anniversary editions
-	{regexp.MustCompile(`(?i)\b(\d+\s*(TH|ST|ND|RD)?\s*ANNIVERSARY\s*(EDITION)?)\b`), "Anniversary Edition"},
-
-	// Ultimate/Definitive
-	{regexp.MustCompile(`(?i)\b(ULTIMATE\s*(CUT|EDITION))\b`), "Ultimate Edition"},
-	{regexp.MustCompile(`(?i)\b(DEFINITIVE\s*(CUT|EDITION))\b`), "Definitive Edition"},
-
-	// Final Cut
-	{regexp.MustCompile(`(?i)\b(FINAL\s*CUT)\b`), "Final Cut"},
-
-	// Redux
-	{regexp.MustCompile(`(?i)\bREDUX\b`), "Redux"},
-
-	// IMAX
-	{regexp.MustCompile(`(?i)\bIMAX\s*(EDITION)?\b`), "IMAX"},
+// editionDef defines an edition type with patterns for detection and stripping.
+// detectPattern matches the edition anywhere in text (uses word boundaries).
+// stripSuffix matches the edition as a suffix for removal (anchored at end).
+type editionDef struct {
+	label         string
+	detectPattern string
+	stripSuffix   string
 }
 
-// editionStripPatterns are patterns to remove from titles before TMDB search.
-// These are broader than knownEditionPatterns to catch variations.
-var editionStripPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\s*[-:]\s*DIRECTOR['']?S?\s*(CUT|EDITION|VERSION)\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*EXTENDED\s*(CUT|EDITION|VERSION)?\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*UNRATED\s*(CUT|EDITION|VERSION)?\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*UNCUT\s*(EDITION|VERSION)?\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*THEATRICAL\s*(CUT|EDITION|VERSION|RELEASE)?\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*REMASTERED\s*(EDITION|VERSION)?\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*SPECIAL\s*EDITION\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*\d+\s*(TH|ST|ND|RD)?\s*ANNIVERSARY\s*(EDITION)?\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*ULTIMATE\s*(CUT|EDITION)\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*DEFINITIVE\s*(CUT|EDITION)\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*FINAL\s*CUT\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*REDUX\s*$`),
-	regexp.MustCompile(`(?i)\s*[-:]\s*IMAX\s*(EDITION)?\s*$`),
+// editionDefs is the single source of truth for edition patterns.
+// Each entry defines how to detect and strip a particular edition type.
+var editionDefs = []editionDef{
+	// Director's versions - match with or without full phrase
+	{"Director's Cut", `DIRECTOR['S]*\s*(CUT|EDITION|VERSION)`, `DIRECTOR['']?S?\s*(CUT|EDITION|VERSION)`},
+	{"Director's Cut", `DIRECTOR['S]*`, ``}, // Standalone detection only
+
+	// Extended versions
+	{"Extended Edition", `EXTENDED\s*(CUT|EDITION|VERSION)`, `EXTENDED\s*(CUT|EDITION|VERSION)?`},
+	{"Extended Edition", `EXTENDED`, ``}, // Standalone detection only
+
+	// Unrated/Uncut
+	{"Unrated", `UNRATED\s*(CUT|EDITION|VERSION)?`, `UNRATED\s*(CUT|EDITION|VERSION)?`},
+	{"Uncut", `UNCUT\s*(EDITION|VERSION)?`, `UNCUT\s*(EDITION|VERSION)?`},
+
+	// Theatrical (explicitly marked indicates other versions exist)
+	{"Theatrical", `THEATRICAL\s*(CUT|EDITION|VERSION|RELEASE)`, `THEATRICAL\s*(CUT|EDITION|VERSION|RELEASE)?`},
+
+	// Remastered
+	{"Remastered", `REMASTERED\s*(EDITION|VERSION)?`, `REMASTERED\s*(EDITION|VERSION)?`},
+
+	// Special editions
+	{"Special Edition", `SPECIAL\s*EDITION`, `SPECIAL\s*EDITION`},
+
+	// Anniversary editions
+	{"Anniversary Edition", `\d+\s*(TH|ST|ND|RD)?\s*ANNIVERSARY\s*(EDITION)?`, `\d+\s*(TH|ST|ND|RD)?\s*ANNIVERSARY\s*(EDITION)?`},
+
+	// Ultimate/Definitive
+	{"Ultimate Edition", `ULTIMATE\s*(CUT|EDITION)`, `ULTIMATE\s*(CUT|EDITION)`},
+	{"Definitive Edition", `DEFINITIVE\s*(CUT|EDITION)`, `DEFINITIVE\s*(CUT|EDITION)`},
+
+	// Final Cut
+	{"Final Cut", `FINAL\s*CUT`, `FINAL\s*CUT`},
+
+	// Redux
+	{"Redux", `REDUX`, `REDUX`},
+
+	// IMAX
+	{"IMAX", `IMAX\s*(EDITION)?`, `IMAX\s*(EDITION)?`},
+}
+
+// knownEditionPatterns contains compiled regex patterns for edition detection.
+// Built from editionDefs at init time.
+var knownEditionPatterns []editionPattern
+
+// editionStripPatterns contains compiled regex patterns for stripping edition suffixes.
+// Built from editionDefs at init time.
+var editionStripPatterns []*regexp.Regexp
+
+func init() {
+	for _, def := range editionDefs {
+		if def.detectPattern != "" {
+			pattern := regexp.MustCompile(`(?i)\b(` + def.detectPattern + `)\b`)
+			knownEditionPatterns = append(knownEditionPatterns, editionPattern{pattern, def.label})
+		}
+		if def.stripSuffix != "" {
+			pattern := regexp.MustCompile(`(?i)\s*[-:]\s*` + def.stripSuffix + `\s*$`)
+			editionStripPatterns = append(editionStripPatterns, pattern)
+		}
+	}
 }
 
 // StripEditionSuffix removes edition markers from a title for TMDB search.

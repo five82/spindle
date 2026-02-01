@@ -164,6 +164,9 @@ func buildQueryList(candidates ...string) []string {
 	return ordered
 }
 
+// discInfoPrefixes are strings that indicate parenthesized content is disc info, not a title.
+var discInfoPrefixes = []string{"DISC", "VOL", "DVD", "BD"}
+
 // extractCanonicalTitle parses a keydb-style title in the format
 // "DISC_LABEL (CANONICAL_TITLE)" and returns the canonical title and disc label
 // separately. If the title doesn't match this format, canonical is empty and
@@ -180,55 +183,57 @@ func extractCanonicalTitle(title string) (canonical, label string) {
 		return "", ""
 	}
 
-	// Find the last opening parenthesis that has a matching close at the end
 	if !strings.HasSuffix(title, ")") {
 		return "", title
 	}
 
-	// Find matching open paren for the final close paren
-	depth := 0
-	openIdx := -1
-	for i := len(title) - 1; i >= 0; i-- {
-		switch title[i] {
-		case ')':
-			depth++
-		case '(':
-			depth--
-			if depth == 0 {
-				openIdx = i
-			}
-		}
-		if openIdx >= 0 {
-			break
-		}
-	}
-
+	openIdx := findMatchingOpenParen(title)
 	if openIdx <= 0 {
-		// No valid parentheses or nothing before them
 		return "", title
 	}
 
 	inner := strings.TrimSpace(title[openIdx+1 : len(title)-1])
 	prefix := strings.TrimSpace(title[:openIdx])
 
-	// Skip if inner is just a year (4 digits)
-	if len(inner) == 4 && isYearLike(inner) {
-		return "", title
-	}
-
-	// Skip if inner is too short to be a meaningful title
-	if len(inner) < 3 {
-		return "", title
-	}
-
-	// Skip if inner looks like disc/volume info rather than a title
-	innerUpper := strings.ToUpper(inner)
-	if strings.HasPrefix(innerUpper, "DISC") ||
-		strings.HasPrefix(innerUpper, "VOL") ||
-		strings.HasPrefix(innerUpper, "DVD") ||
-		strings.HasPrefix(innerUpper, "BD") {
+	if !isValidCanonicalTitle(inner) {
 		return "", title
 	}
 
 	return inner, prefix
+}
+
+// findMatchingOpenParen returns the index of the opening parenthesis that matches
+// the closing parenthesis at the end of the string. Returns -1 if not found.
+func findMatchingOpenParen(s string) int {
+	depth := 0
+	for i := len(s) - 1; i >= 0; i-- {
+		switch s[i] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// isValidCanonicalTitle checks if a parenthesized string is a valid canonical title
+// (not a year, not too short, not disc/volume info).
+func isValidCanonicalTitle(inner string) bool {
+	if len(inner) < 3 {
+		return false
+	}
+	if len(inner) == 4 && isYearLike(inner) {
+		return false
+	}
+	innerUpper := strings.ToUpper(inner)
+	for _, prefix := range discInfoPrefixes {
+		if strings.HasPrefix(innerUpper, prefix) {
+			return false
+		}
+	}
+	return true
 }
