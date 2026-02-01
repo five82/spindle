@@ -44,6 +44,14 @@ Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [
 - Spindle imports Drapto as a Go library and implements its `Reporter` interface for progress events.
 - Flyer is read-only (no queue mutations) and must tolerate Spindle being down.
 
+**Drapto dependency workflow:**
+- Local dev uses `go.work` (gitignored) to reference `../drapto` directly.
+- CI uses the version in `go.mod`. After pushing drapto changes, update spindle:
+  ```bash
+  go get github.com/five82/drapto@main && go mod tidy
+  ```
+- Formal version tags (v1.0.0, etc.) are deferred until the API stabilizes.
+
 ## Build, Test, Lint
 
 ```bash
