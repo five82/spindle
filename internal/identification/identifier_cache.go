@@ -31,53 +31,23 @@ func (i *Identifier) completeIdentificationFromCache(
 	stageStart time.Time,
 	titleCount int,
 ) error {
-	// Update progress - we're skipping straight to TMDB details fetch
 	if err := i.updateProgress(ctx, item, "Using cached identification", 50); err != nil {
 		logger.Debug("failed to update cache progress", logging.Error(err))
-	}
-
-	// Fetch fresh metadata from TMDB using the cached ID
-	var tmdbResult interface {
-		getID() int64
-		getTitle() string
-		getOverview() string
-		getReleaseDate() string
-		getFirstAirDate() string
-		getVoteAverage() float64
-		getVoteCount() int64
 	}
 
 	mediaType := cacheEntry.MediaType
 	tmdbID := cacheEntry.TMDBID
 
-	// Fetch current TMDB details
-	if mediaType == "tv" {
-		details, err := i.tmdbInfo.GetTVDetails(ctx, tmdbID)
-		if err != nil {
-			logger.Warn("failed to fetch TV details from TMDB",
-				logging.String(logging.FieldEventType, "tmdb_fetch_failed"),
-				logging.Error(err),
-				logging.Int64("tmdb_id", tmdbID),
-				logging.String(logging.FieldErrorHint, "cache entry may be stale"),
-				logging.String(logging.FieldImpact, "falling back to cached title"))
-			// Fall back to cached data
-			tmdbResult = nil
-		} else {
-			tmdbResult = &tvDetailsWrapper{details}
-		}
-	} else {
-		details, err := i.tmdbInfo.GetMovieDetails(ctx, tmdbID)
-		if err != nil {
-			logger.Warn("failed to fetch movie details from TMDB",
-				logging.String(logging.FieldEventType, "tmdb_fetch_failed"),
-				logging.Error(err),
-				logging.Int64("tmdb_id", tmdbID),
-				logging.String(logging.FieldErrorHint, "cache entry may be stale"),
-				logging.String(logging.FieldImpact, "falling back to cached title"))
-			tmdbResult = nil
-		} else {
-			tmdbResult = &movieDetailsWrapper{details}
-		}
+	// Fetch fresh metadata from TMDB using the cached ID
+	tmdbResult, err := i.fetchTMDBDetails(ctx, mediaType, tmdbID)
+	if err != nil {
+		logger.Warn("failed to fetch details from TMDB",
+			logging.String(logging.FieldEventType, "tmdb_fetch_failed"),
+			logging.Error(err),
+			logging.Int64("tmdb_id", tmdbID),
+			logging.String("media_type", mediaType),
+			logging.String(logging.FieldErrorHint, "cache entry may be stale"),
+			logging.String(logging.FieldImpact, "falling back to cached title"))
 	}
 
 	// Build metadata from TMDB response or cached data
@@ -86,17 +56,15 @@ func (i *Identifier) completeIdentificationFromCache(
 	var voteCount int64
 
 	if tmdbResult != nil {
-		identifiedTitle = tmdbResult.getTitle()
-		releaseDate = tmdbResult.getReleaseDate()
-		if mediaType == "tv" && tmdbResult.getFirstAirDate() != "" {
-			releaseDate = tmdbResult.getFirstAirDate()
+		identifiedTitle = pickTitle(*tmdbResult)
+		releaseDate = tmdbResult.ReleaseDate
+		if mediaType == "tv" && tmdbResult.FirstAirDate != "" {
+			releaseDate = tmdbResult.FirstAirDate
 		}
-		voteAverage = tmdbResult.getVoteAverage()
-		voteCount = tmdbResult.getVoteCount()
+		voteAverage = tmdbResult.VoteAverage
+		voteCount = tmdbResult.VoteCount
 	} else {
-		// Use cached data as fallback
 		identifiedTitle = cacheEntry.Title
-		releaseDate = ""
 	}
 
 	if releaseDate != "" && len(releaseDate) >= 4 {
@@ -142,8 +110,8 @@ func (i *Identifier) completeIdentificationFromCache(
 	}
 
 	if tmdbResult != nil {
-		metadata["overview"] = tmdbResult.getOverview()
-		metadata["first_air_date"] = tmdbResult.getFirstAirDate()
+		metadata["overview"] = tmdbResult.Overview
+		metadata["first_air_date"] = tmdbResult.FirstAirDate
 	}
 
 	if len(matchedEpisodes) > 0 {
@@ -307,27 +275,10 @@ func (i *Identifier) populateDiscIDCache(
 	}
 }
 
-// Wrapper types to provide a common interface for movie and TV details
-type movieDetailsWrapper struct {
-	result *tmdb.Result
+// fetchTMDBDetails retrieves movie or TV details from TMDB by ID.
+func (i *Identifier) fetchTMDBDetails(ctx context.Context, mediaType string, tmdbID int64) (*tmdb.Result, error) {
+	if mediaType == "tv" {
+		return i.tmdbInfo.GetTVDetails(ctx, tmdbID)
+	}
+	return i.tmdbInfo.GetMovieDetails(ctx, tmdbID)
 }
-
-func (w *movieDetailsWrapper) getID() int64            { return w.result.ID }
-func (w *movieDetailsWrapper) getTitle() string        { return pickTitle(*w.result) }
-func (w *movieDetailsWrapper) getOverview() string     { return w.result.Overview }
-func (w *movieDetailsWrapper) getReleaseDate() string  { return w.result.ReleaseDate }
-func (w *movieDetailsWrapper) getFirstAirDate() string { return w.result.FirstAirDate }
-func (w *movieDetailsWrapper) getVoteAverage() float64 { return w.result.VoteAverage }
-func (w *movieDetailsWrapper) getVoteCount() int64     { return w.result.VoteCount }
-
-type tvDetailsWrapper struct {
-	result *tmdb.Result
-}
-
-func (w *tvDetailsWrapper) getID() int64            { return w.result.ID }
-func (w *tvDetailsWrapper) getTitle() string        { return pickTitle(*w.result) }
-func (w *tvDetailsWrapper) getOverview() string     { return w.result.Overview }
-func (w *tvDetailsWrapper) getReleaseDate() string  { return w.result.ReleaseDate }
-func (w *tvDetailsWrapper) getFirstAirDate() string { return w.result.FirstAirDate }
-func (w *tvDetailsWrapper) getVoteAverage() float64 { return w.result.VoteAverage }
-func (w *tvDetailsWrapper) getVoteCount() int64     { return w.result.VoteCount }

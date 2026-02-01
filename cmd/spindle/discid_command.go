@@ -172,10 +172,7 @@ func discIDCacheManager(ctx *commandContext) (*discidcache.Cache, string, error)
 	if err != nil {
 		return nil, "", err
 	}
-	if cfg == nil {
-		return nil, "Configuration not loaded", nil
-	}
-	if !cfg.DiscIDCache.Enabled {
+	if cfg == nil || !cfg.DiscIDCache.Enabled {
 		return nil, "Disc ID cache is disabled (set disc_id_cache.enabled = true in config.toml)", nil
 	}
 	if strings.TrimSpace(cfg.DiscIDCache.Path) == "" {
@@ -193,6 +190,5 @@ func discIDCacheManager(ctx *commandContext) (*discidcache.Cache, string, error)
 	}
 	logger = logger.With(logging.String("component", "cli-discid"))
 
-	cache := discidcache.NewCache(cfg.DiscIDCache.Path, logger)
-	return cache, "", nil
+	return discidcache.NewCache(cfg.DiscIDCache.Path, logger), "", nil
 }
