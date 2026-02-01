@@ -148,7 +148,7 @@ func librarySubdirPath(root, child string) string {
 }
 
 func udevRuleStatusLine(colorize bool) string {
-	installed, needsUpdate, _ := CheckUdevRuleInstalled()
+	installed, needsUpdate := CheckUdevRuleInstalled()
 	if !installed {
 		return renderStatusLine("Disc Detection", statusWarn, "udev rule not installed (run: spindle disc setup)", colorize)
 	}

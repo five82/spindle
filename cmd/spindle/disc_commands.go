@@ -188,27 +188,27 @@ func discRPC(ctx *commandContext, cmd *cobra.Command, fn func(*ipc.Client) (stri
 }
 
 // CheckUdevRuleInstalled checks if the spindle udev rule is installed and valid.
-// Returns true if installed, and the current spindle path if it needs updating.
-func CheckUdevRuleInstalled() (installed bool, needsUpdate bool, currentPath string) {
+// Returns installed=true if a spindle rule exists, needsUpdate=true if the
+// binary path in the rule doesn't match the current executable.
+func CheckUdevRuleInstalled() (installed bool, needsUpdate bool) {
 	data, err := os.ReadFile(udevRulePath)
 	if err != nil {
-		return false, false, ""
+		return false, false
 	}
 
 	content := string(data)
 	if !strings.Contains(content, "spindle disc detected") {
-		return false, false, ""
+		return false, false
 	}
 
-	// Check if the path in the rule matches current executable
 	exePath, err := os.Executable()
 	if err != nil {
-		return true, false, ""
+		return true, false
 	}
 
 	if !strings.Contains(content, exePath) {
-		return true, true, exePath
+		return true, true
 	}
 
-	return true, false, ""
+	return true, false
 }

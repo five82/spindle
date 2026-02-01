@@ -451,8 +451,7 @@ func detectBluRayOrDVD(ctx context.Context, runner commandRunner, device string,
 		}
 	}
 
-	mountPoints := []string{"/media/cdrom", "/media/cdrom0"}
-	for _, mount := range mountPoints {
+	for _, mount := range []string{"/media/cdrom", "/media/cdrom0"} {
 		entries, err := os.ReadDir(mount)
 		if err != nil {
 			continue
@@ -463,11 +462,10 @@ func detectBluRayOrDVD(ctx context.Context, runner commandRunner, device string,
 			if !entry.IsDir() {
 				continue
 			}
-			name := strings.ToUpper(entry.Name())
-			if name == "BDMV" {
+			switch strings.ToUpper(entry.Name()) {
+			case "BDMV":
 				hasBDMV = true
-			}
-			if name == "VIDEO_TS" {
+			case "VIDEO_TS":
 				hasVideoTS = true
 			}
 		}
