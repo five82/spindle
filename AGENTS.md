@@ -98,7 +98,9 @@ The queue DB is transient (in-flight jobs only). No migrations - bump `schemaVer
 
 ## Troubleshooting Quick Reference
 
-- **Queue inspection**: `sqlite3 queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'`
+- **Queue database**: `~/.local/share/spindle/logs/queue.db` (location set by `log_dir` in config)
+- **Queue inspection**: `sqlite3 ~/.local/share/spindle/logs/queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'`
+- **Item logs**: `~/.local/share/spindle/logs/items/` (one log file per item)
 - **Subtitle debugging**: Set `SPD_DEBUG_SUBTITLES_KEEP=1` to retain intermediate files
 - **Daemon issues**: Single-instance enforced in `internal/daemon`; use `spindle stop` to fully terminate
 - **Disc detection**: Use `spindle disc pause` to temporarily stop new disc queueing (resets on restart)

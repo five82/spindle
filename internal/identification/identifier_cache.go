@@ -133,6 +133,11 @@ func (i *Identifier) completeIdentificationFromCache(
 	}
 	if cacheEntry.Edition != "" {
 		metadata["edition"] = cacheEntry.Edition
+		logger.Info("edition from cache",
+			logging.String(logging.FieldDecisionType, "edition_detection"),
+			logging.String("decision_result", "cached"),
+			logging.String("decision_reason", "disc_id_cache"),
+			logging.String("edition_label", cacheEntry.Edition))
 	}
 
 	// Build filename
