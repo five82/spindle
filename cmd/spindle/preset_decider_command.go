@@ -81,7 +81,7 @@ This command does not touch the queue database or require the daemon.`,
 }
 
 func normalizePresetDeciderJSON(raw string) ([]byte, error) {
-	trimmed := strings.TrimSpace(stripCodeFenceBlock(raw))
+	trimmed := strings.TrimSpace(llm.StripCodeFenceBlock(raw))
 	if trimmed == "" {
 		return nil, fmt.Errorf("empty payload")
 	}
@@ -100,23 +100,6 @@ func normalizePresetDeciderJSON(raw string) ([]byte, error) {
 		return nil, err
 	}
 	return []byte(candidate), nil
-}
-
-func stripCodeFenceBlock(content string) string {
-	trimmed := strings.TrimSpace(content)
-	if !strings.HasPrefix(trimmed, "```") {
-		return trimmed
-	}
-	body := trimmed[3:]
-	body = strings.TrimLeft(body, " \t\r\n")
-	if len(body) >= 4 && strings.EqualFold(body[:4], "json") {
-		body = body[4:]
-		body = strings.TrimLeft(body, " \t\r\n")
-	}
-	if idx := strings.LastIndex(body, "```"); idx >= 0 {
-		body = body[:idx]
-	}
-	return strings.TrimSpace(body)
 }
 
 func writeSection(w interface {

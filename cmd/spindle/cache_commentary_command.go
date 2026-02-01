@@ -376,9 +376,8 @@ func transcribeSegment(ctx context.Context, whisperSvc *whisperx.Service, source
 }
 
 func classifyWithLLM(ctx context.Context, client *llm.Client, transcript, targetPath string) (audioanalysis.CommentaryDecision, error) {
-	// Build a simple prompt
 	title := filepath.Base(targetPath)
-	userMessage := fmt.Sprintf("Title: %s\n\nTranscript sample:\n%s", title, truncateTranscript(transcript, 4000))
+	userMessage := audioanalysis.BuildClassificationPrompt(title, "", transcript)
 
 	response, err := client.CompleteJSON(ctx, audioanalysis.CommentaryClassificationPrompt, userMessage)
 	if err != nil {
@@ -390,13 +389,6 @@ func classifyWithLLM(ctx context.Context, client *llm.Client, transcript, target
 		return audioanalysis.CommentaryDecision{}, fmt.Errorf("parse llm response: %w", err)
 	}
 	return decision, nil
-}
-
-func truncateTranscript(transcript string, maxLen int) string {
-	if len(transcript) <= maxLen {
-		return transcript
-	}
-	return transcript[:maxLen] + "\n[truncated]"
 }
 
 func streamTitle(tags map[string]string) string {

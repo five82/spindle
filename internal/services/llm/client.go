@@ -630,7 +630,7 @@ func DecodeLLMJSON(content string, target any) error {
 }
 
 func sanitizeJSONPayload(content string) string {
-	trimmed := strings.TrimSpace(stripCodeFenceBlock(content))
+	trimmed := strings.TrimSpace(StripCodeFenceBlock(content))
 	if trimmed == "" {
 		return ""
 	}
@@ -650,7 +650,9 @@ func sanitizeJSONPayload(content string) string {
 	return trimmed
 }
 
-func stripCodeFenceBlock(content string) string {
+// StripCodeFenceBlock removes markdown code fence delimiters from LLM output.
+// It handles ```json ... ``` blocks and returns the inner content.
+func StripCodeFenceBlock(content string) string {
 	trimmed := strings.TrimSpace(content)
 	if !strings.HasPrefix(trimmed, "```") {
 		return trimmed

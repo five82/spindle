@@ -346,7 +346,7 @@ func TestTruncateTranscript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := truncateTranscript(tt.input, tt.maxLen)
+			got := TruncateTranscript(tt.input, tt.maxLen)
 			if tt.wantTrunc {
 				if len(got) > tt.maxLen+len("\n[truncated]") {
 					t.Errorf("truncated result too long: %d", len(got))
@@ -442,10 +442,10 @@ func TestBuildClassificationPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildClassificationPrompt(tt.title, tt.year, tt.transcript)
+			got := BuildClassificationPrompt(tt.title, tt.year, tt.transcript)
 			for _, part := range tt.wantParts {
 				if !strings.Contains(got, part) {
-					t.Errorf("buildClassificationPrompt() = %q, missing %q", got, part)
+					t.Errorf("BuildClassificationPrompt() = %q, missing %q", got, part)
 				}
 			}
 		})

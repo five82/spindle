@@ -264,7 +264,7 @@ func (s *Stage) createLLMClient() *llm.Client {
 
 // classifyWithLLM uses an LLM to determine if a transcript is commentary.
 func (s *Stage) classifyWithLLM(ctx context.Context, client *llm.Client, transcript string, item *queue.Item, env *ripspec.Envelope) (CommentaryDecision, error) {
-	userMessage := buildClassificationPrompt(item.DiscTitle, extractYear(env), transcript)
+	userMessage := BuildClassificationPrompt(item.DiscTitle, extractYear(env), transcript)
 
 	response, err := client.CompleteJSON(ctx, CommentaryClassificationPrompt, userMessage)
 	if err != nil {
@@ -278,13 +278,14 @@ func (s *Stage) classifyWithLLM(ctx context.Context, client *llm.Client, transcr
 	return decision, nil
 }
 
-// buildClassificationPrompt constructs the user message for LLM classification.
-func buildClassificationPrompt(title, year, transcript string) string {
+// BuildClassificationPrompt constructs the user message for LLM classification.
+// If year is empty, it is omitted from the prompt.
+func BuildClassificationPrompt(title, year, transcript string) string {
 	header := fmt.Sprintf("Title: %s", strings.TrimSpace(title))
 	if year != "" {
 		header += fmt.Sprintf(" (%s)", year)
 	}
-	return header + fmt.Sprintf("\n\nTranscript sample:\n%s", truncateTranscript(transcript, 4000))
+	return header + fmt.Sprintf("\n\nTranscript sample:\n%s", TruncateTranscript(transcript, 4000))
 }
 
 // extractYear retrieves the year from ripspec metadata.
@@ -307,8 +308,8 @@ func extractYear(env *ripspec.Envelope) string {
 	return ""
 }
 
-// truncateTranscript limits transcript length for LLM input.
-func truncateTranscript(transcript string, maxLen int) string {
+// TruncateTranscript limits transcript length for LLM input.
+func TruncateTranscript(transcript string, maxLen int) string {
 	if len(transcript) <= maxLen {
 		return transcript
 	}
