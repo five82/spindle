@@ -18,6 +18,7 @@ type Metadata struct {
 	ShowTitle      string `json:"show_title"`
 	SeasonNumber   int    `json:"season_number"`
 	EpisodeNumbers []int  `json:"episode_numbers"`
+	Edition        string `json:"edition,omitempty"`
 }
 
 // MetadataFromJSON builds metadata from stored JSON, falling back to basic inference.
@@ -76,12 +77,24 @@ func NewTVMetadata(showTitle string, season int, episodeNumbers []int, displayTi
 	}
 }
 
+// GetBaseFilename returns the filename without any edition suffix.
+// This is used for folder naming so all editions of a movie share one folder.
+func (m Metadata) GetBaseFilename() string {
+	value := m.FilenameValue
+	if strings.TrimSpace(value) == "" {
+		value = m.TitleValue
+	}
+	return sanitizeFilename(value)
+}
+
 func (m Metadata) GetLibraryPath(root, moviesDir, tvDir string) string {
 	if m.LibraryPath != "" {
 		return m.LibraryPath
 	}
 	if m.IsMovie() {
-		folder := m.GetFilename()
+		// Use base filename (without edition) for folder name so all editions
+		// of the same movie share one folder per Jellyfin requirements.
+		folder := m.GetBaseFilename()
 		if folder == "" {
 			folder = "Manual Import"
 		}
@@ -121,11 +134,12 @@ func (m Metadata) GetFilename() string {
 		}
 	}
 fallback:
-	value := m.FilenameValue
-	if strings.TrimSpace(value) == "" {
-		value = m.TitleValue
+	base := m.GetBaseFilename()
+	// Append edition suffix for movies when edition is set
+	if m.IsMovie() && strings.TrimSpace(m.Edition) != "" {
+		return base + " - " + strings.TrimSpace(m.Edition)
 	}
-	return sanitizeFilename(value)
+	return base
 }
 
 func (m Metadata) IsMovie() bool {

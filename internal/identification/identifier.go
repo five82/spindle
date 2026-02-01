@@ -19,6 +19,7 @@ import (
 	"spindle/internal/ripping"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
+	"spindle/internal/services/llm"
 	"spindle/internal/stage"
 	"spindle/internal/staging"
 )
@@ -460,4 +461,96 @@ func (i *Identifier) HealthCheck(ctx context.Context) stage.Health {
 		return stage.Unhealthy(name, "disc scanner unavailable")
 	}
 	return stage.Healthy(name)
+}
+
+// detectMovieEdition determines if a disc is an alternate movie edition.
+// It first tries regex patterns for known editions, then falls back to LLM
+// for ambiguous cases. Returns the edition label or empty string if not an edition.
+func (i *Identifier) detectMovieEdition(ctx context.Context, logger *slog.Logger, discTitle, tmdbTitle, titleWithYear string) string {
+	// Step 1: Try known patterns first (no LLM needed)
+	if label, found := ExtractKnownEdition(discTitle); found {
+		logger.Info("edition detected via regex",
+			logging.String(logging.FieldDecisionType, "edition_detection"),
+			logging.String("decision_result", "detected"),
+			logging.String("decision_reason", "regex_pattern_match"),
+			logging.String("disc_title", discTitle),
+			logging.String("edition_label", label))
+		return label
+	}
+
+	// Step 2: Check if there's ambiguous extra content that might be an edition
+	if !HasAmbiguousEditionMarker(discTitle, tmdbTitle) {
+		logger.Debug("no edition markers detected",
+			logging.String("disc_title", discTitle),
+			logging.String("tmdb_title", tmdbTitle))
+		return ""
+	}
+
+	// Step 3: LLM fallback for ambiguous cases
+	llmCfg := i.cfg.PresetLLM()
+	if llmCfg.APIKey == "" {
+		// LLM not configured - skip ambiguous editions
+		logger.Debug("edition detection skipped for ambiguous title",
+			logging.String(logging.FieldDecisionType, "edition_detection"),
+			logging.String("decision_result", "skipped"),
+			logging.String("decision_reason", "llm_not_configured"),
+			logging.String("disc_title", discTitle))
+		return ""
+	}
+
+	client := llm.NewClient(llm.Config{
+		APIKey:         llmCfg.APIKey,
+		BaseURL:        llmCfg.BaseURL,
+		Model:          llmCfg.Model,
+		Referer:        llmCfg.Referer,
+		Title:          llmCfg.Title,
+		TimeoutSeconds: llmCfg.TimeoutSeconds,
+	})
+
+	decision, err := DetectEditionWithLLM(ctx, client, discTitle, titleWithYear)
+	if err != nil {
+		logger.Warn("edition detection LLM call failed",
+			logging.String(logging.FieldEventType, "edition_llm_failed"),
+			logging.String("disc_title", discTitle),
+			logging.Error(err),
+			logging.String(logging.FieldErrorHint, "Check LLM configuration and network"),
+			logging.String(logging.FieldImpact, "edition detection skipped"))
+		return ""
+	}
+
+	const confidenceThreshold = 0.8
+	if !decision.IsEdition || decision.Confidence < confidenceThreshold {
+		logger.Info("edition not confirmed by LLM",
+			logging.String(logging.FieldDecisionType, "edition_detection"),
+			logging.String("decision_result", "not_edition"),
+			logging.String("decision_reason", "llm_rejected"),
+			logging.String("disc_title", discTitle),
+			logging.Bool("is_edition", decision.IsEdition),
+			logging.Float64("confidence", decision.Confidence),
+			logging.String("llm_reason", decision.Reason))
+		return ""
+	}
+
+	// Extract the edition label from the difference
+	label := ExtractEditionLabel(discTitle, tmdbTitle)
+	if label == "" {
+		logger.Warn("edition confirmed but label extraction failed",
+			logging.String(logging.FieldDecisionType, "edition_detection"),
+			logging.String("decision_result", "extraction_failed"),
+			logging.String("decision_reason", "no_label_extracted"),
+			logging.String("disc_title", discTitle),
+			logging.String("tmdb_title", tmdbTitle))
+		return ""
+	}
+
+	logger.Info("edition detected via LLM",
+		logging.String(logging.FieldDecisionType, "edition_detection"),
+		logging.String("decision_result", "detected"),
+		logging.String("decision_reason", "llm_confirmed"),
+		logging.String("disc_title", discTitle),
+		logging.String("edition_label", label),
+		logging.Float64("confidence", decision.Confidence),
+		logging.String("llm_reason", decision.Reason))
+
+	return label
 }

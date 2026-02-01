@@ -299,11 +299,24 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	if mediaType == "tv" {
 		metadata["show_title"] = identifiedTitle
 	}
+
+	// Detect movie edition (Director's Cut, Extended, etc.)
+	var editionLabel string
+	if mediaType == "movie" {
+		editionLabel = i.detectMovieEdition(ctx, logger, input.Title, identifiedTitle, titleWithYear)
+		if editionLabel != "" {
+			metadata["edition"] = editionLabel
+		}
+	}
+
 	var metaRecord queue.Metadata
 	if mediaType == "tv" {
 		metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, matchedEpisodes, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
 	} else {
 		metaRecord = queue.NewBasicMetadata(titleWithYear, true)
+		if editionLabel != "" {
+			metaRecord.Edition = editionLabel
+		}
 	}
 	metadata["filename"] = metaRecord.GetFilename()
 	if mediaType == "tv" {
