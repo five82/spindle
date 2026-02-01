@@ -167,6 +167,24 @@ func (f *fakeTMDB) GetSeasonDetails(ctx context.Context, showID int64, seasonNum
 	return &tmdb.SeasonDetails{}, nil
 }
 
+func (f *fakeTMDB) GetMovieDetails(ctx context.Context, movieID int64) (*tmdb.Result, error) {
+	if f.response != nil && len(f.response.Results) > 0 {
+		result := f.response.Results[0]
+		result.MediaType = "movie"
+		return &result, nil
+	}
+	return &tmdb.Result{ID: movieID, MediaType: "movie"}, nil
+}
+
+func (f *fakeTMDB) GetTVDetails(ctx context.Context, showID int64) (*tmdb.Result, error) {
+	if f.response != nil && len(f.response.Results) > 0 {
+		result := f.response.Results[0]
+		result.MediaType = "tv"
+		return &result, nil
+	}
+	return &tmdb.Result{ID: showID, MediaType: "tv"}, nil
+}
+
 type fakeDiscScanner struct {
 	result     *disc.ScanResult
 	calls      int

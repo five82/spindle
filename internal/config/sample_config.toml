@@ -88,6 +88,14 @@ dir = "~/.cache/spindle/rips"                        # Defaults to XDG_CACHE_HOM
 max_gib = 150                                        # Cache budget in GiB
 
 # ============================================================================
+# DISC ID CACHE (optional)
+# ============================================================================
+
+[disc_id_cache]
+enabled = false                                      # Cache disc ID to TMDB ID mappings
+path = "~/.cache/spindle/discid_cache.json"          # Cache file location
+
+# ============================================================================
 # MAKEMKV & DISC RIPPING
 # ============================================================================
 

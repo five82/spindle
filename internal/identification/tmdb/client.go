@@ -59,6 +59,8 @@ type Searcher interface {
 	SearchTVWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error)
 	SearchMultiWithOptions(ctx context.Context, query string, opts SearchOptions) (*Response, error)
 	GetSeasonDetails(ctx context.Context, showID int64, seasonNumber int) (*SeasonDetails, error)
+	GetMovieDetails(ctx context.Context, movieID int64) (*Result, error)
+	GetTVDetails(ctx context.Context, showID int64) (*Result, error)
 }
 
 // Client provides access to the TMDB API for searches.
@@ -314,5 +316,87 @@ func (c *Client) GetSeasonDetails(ctx context.Context, showID int64, seasonNumbe
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode season response: %w", err)
 	}
+	return &payload, nil
+}
+
+// GetMovieDetails fetches movie details by TMDB ID.
+func (c *Client) GetMovieDetails(ctx context.Context, movieID int64) (*Result, error) {
+	if movieID <= 0 {
+		return nil, errors.New("movie id must be positive")
+	}
+	endpoint, err := url.Parse(fmt.Sprintf("%s/movie/%d", c.baseURL, movieID))
+	if err != nil {
+		return nil, fmt.Errorf("parse tmdb url: %w", err)
+	}
+	params := url.Values{}
+	params.Set("api_key", c.apiKey)
+	if c.language != "" {
+		params.Set("language", c.language)
+	}
+	endpoint.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+
+	requestStart := time.Now()
+	resp, err := c.httpClient.Do(req)
+	latency := time.Since(requestStart)
+	if err != nil {
+		return nil, fmt.Errorf("execute request (latency=%v): %w", latency, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tmdb movie details returned %d (latency=%v)", resp.StatusCode, latency)
+	}
+
+	var payload Result
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode movie details: %w", err)
+	}
+	payload.MediaType = "movie"
+	return &payload, nil
+}
+
+// GetTVDetails fetches TV show details by TMDB ID.
+func (c *Client) GetTVDetails(ctx context.Context, showID int64) (*Result, error) {
+	if showID <= 0 {
+		return nil, errors.New("show id must be positive")
+	}
+	endpoint, err := url.Parse(fmt.Sprintf("%s/tv/%d", c.baseURL, showID))
+	if err != nil {
+		return nil, fmt.Errorf("parse tmdb url: %w", err)
+	}
+	params := url.Values{}
+	params.Set("api_key", c.apiKey)
+	if c.language != "" {
+		params.Set("language", c.language)
+	}
+	endpoint.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+
+	requestStart := time.Now()
+	resp, err := c.httpClient.Do(req)
+	latency := time.Since(requestStart)
+	if err != nil {
+		return nil, fmt.Errorf("execute request (latency=%v): %w", latency, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tmdb tv details returned %d (latency=%v)", resp.StatusCode, latency)
+	}
+
+	var payload Result
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode tv details: %w", err)
+	}
+	payload.MediaType = "tv"
 	return &payload, nil
 }

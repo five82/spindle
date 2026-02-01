@@ -11,6 +11,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
+	"spindle/internal/discidcache"
 	"spindle/internal/identification/keydb"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
@@ -26,14 +27,15 @@ import (
 
 // Identifier performs disc identification using MakeMKV scanning and TMDB metadata.
 type Identifier struct {
-	store    *queue.Store
-	cfg      *config.Config
-	logger   *slog.Logger
-	tmdb     *tmdbSearch
-	tmdbInfo tmdb.Searcher
-	keydb    *keydb.Catalog
-	scanner  DiscScanner
-	notifier notifications.Service
+	store       *queue.Store
+	cfg         *config.Config
+	logger      *slog.Logger
+	tmdb        *tmdbSearch
+	tmdbInfo    tmdb.Searcher
+	keydb       *keydb.Catalog
+	discIDCache *discidcache.Cache
+	scanner     DiscScanner
+	notifier    notifications.Service
 }
 
 // DiscScanner defines disc scanning operations.
@@ -59,18 +61,25 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) 
 // NewIdentifierWithDependencies allows injecting TMDB searcher and disc scanner (used in tests).
 func NewIdentifierWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, searcher tmdb.Searcher, scanner DiscScanner, notifier notifications.Service) *Identifier {
 	var catalog *keydb.Catalog
+	var cache *discidcache.Cache
 	if cfg != nil {
 		timeout := time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout) * time.Second
 		catalog = keydb.NewCatalog(cfg.MakeMKV.KeyDBPath, logger, cfg.MakeMKV.KeyDBDownloadURL, timeout)
+
+		// Initialize disc ID cache if enabled
+		if cfg.DiscIDCache.Enabled {
+			cache = discidcache.NewCache(cfg.DiscIDCache.Path, logger)
+		}
 	}
 	id := &Identifier{
-		store:    store,
-		cfg:      cfg,
-		tmdb:     newTMDBSearch(searcher),
-		tmdbInfo: searcher,
-		keydb:    catalog,
-		scanner:  scanner,
-		notifier: notifier,
+		store:       store,
+		cfg:         cfg,
+		tmdb:        newTMDBSearch(searcher),
+		tmdbInfo:    searcher,
+		keydb:       catalog,
+		discIDCache: cache,
+		scanner:     scanner,
+		notifier:    notifier,
 	}
 	id.SetLogger(logger)
 	return id
@@ -144,6 +153,19 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	discID := ""
 	if scanResult != nil && scanResult.BDInfo != nil {
 		discID = strings.TrimSpace(scanResult.BDInfo.DiscID)
+	}
+
+	// Fast path: check disc ID cache (skips KeyDB + TMDB search)
+	if i.discIDCache != nil && discID != "" {
+		if cacheEntry, found := i.discIDCache.Lookup(discID); found {
+			logger.Info("identification from disc id cache",
+				logging.String(logging.FieldDecisionType, "disc_id_cache"),
+				logging.String("decision_result", "cache_hit"),
+				logging.String("disc_id", discID),
+				logging.Int64("tmdb_id", cacheEntry.TMDBID),
+				logging.String("title", cacheEntry.Title))
+			return i.completeIdentificationFromCache(ctx, logger, item, scanResult, cacheEntry, stageStart, titleCount)
+		}
 	}
 
 	title := strings.TrimSpace(item.DiscTitle)
@@ -410,6 +432,15 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 
 	if err := i.validateIdentification(ctx, item); err != nil {
 		return err
+	}
+
+	// Cache successful identification for fast lookup on future discs with same ID
+	if identified && discID != "" {
+		edition := ""
+		if e, ok := metadata["edition"].(string); ok {
+			edition = e
+		}
+		i.populateDiscIDCache(logger, discID, tmdbID, mediaType, identifiedTitle, edition, seasonNumber, outcome.Year)
 	}
 
 	// Log stage summary with timing and key metrics

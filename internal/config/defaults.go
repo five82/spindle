@@ -28,6 +28,7 @@ const (
 	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
 	defaultWhisperXModel               = "large-v3"
 	defaultRipCacheMaxGiB              = 150
+	defaultDiscIDCachePath             = "~/.cache/spindle/discid_cache.json"
 	defaultPresetDeciderBaseURL        = "https://openrouter.ai/api/v1/chat/completions"
 	defaultPresetDeciderModel          = "google/gemini-3-flash-preview"
 	defaultPresetDeciderReferer        = "https://github.com/five82/spindle"
@@ -91,6 +92,10 @@ func Default() Config {
 		RipCache: RipCache{
 			Dir:    defaultRipCacheDir(),
 			MaxGiB: defaultRipCacheMaxGiB,
+		},
+		DiscIDCache: DiscIDCache{
+			Enabled: false,
+			Path:    defaultDiscIDCachePath,
 		},
 		MakeMKV: MakeMKV{
 			OpticalDrive:         defaultOpticalDrive,

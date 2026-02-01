@@ -50,6 +50,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newCacheCommand(ctx))
 	rootCmd.AddCommand(newStagingCommand(ctx))
 	rootCmd.AddCommand(newDiscCommand(ctx))
+	rootCmd.AddCommand(newDiscIDCommand(ctx))
 
 	return rootCmd
 }

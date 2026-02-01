@@ -481,6 +481,14 @@ func (s *recordingSearcher) GetSeasonDetails(ctx context.Context, showID int64, 
 	return &tmdb.SeasonDetails{}, nil
 }
 
+func (s *recordingSearcher) GetMovieDetails(ctx context.Context, movieID int64) (*tmdb.Result, error) {
+	return &tmdb.Result{ID: movieID, MediaType: "movie"}, nil
+}
+
+func (s *recordingSearcher) GetTVDetails(ctx context.Context, showID int64) (*tmdb.Result, error) {
+	return &tmdb.Result{ID: showID, MediaType: "tv"}, nil
+}
+
 func (s *stubSearcher) SearchMovieWithOptions(ctx context.Context, query string, opts tmdb.SearchOptions) (*tmdb.Response, error) {
 	s.movieCalls++
 	if s.err != nil {
@@ -523,6 +531,30 @@ func (s *stubSearcher) GetSeasonDetails(ctx context.Context, showID int64, seaso
 		return s.season, nil
 	}
 	return &tmdb.SeasonDetails{}, nil
+}
+
+func (s *stubSearcher) GetMovieDetails(ctx context.Context, movieID int64) (*tmdb.Result, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.resp != nil && len(s.resp.Results) > 0 {
+		result := s.resp.Results[0]
+		result.MediaType = "movie"
+		return &result, nil
+	}
+	return &tmdb.Result{ID: movieID, MediaType: "movie"}, nil
+}
+
+func (s *stubSearcher) GetTVDetails(ctx context.Context, showID int64) (*tmdb.Result, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.tvResp != nil && len(s.tvResp.Results) > 0 {
+		result := s.tvResp.Results[0]
+		result.MediaType = "tv"
+		return &result, nil
+	}
+	return &tmdb.Result{ID: showID, MediaType: "tv"}, nil
 }
 
 type stubDiscScanner struct {

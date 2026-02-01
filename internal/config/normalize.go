@@ -22,6 +22,9 @@ func (c *Config) normalize() error {
 	if err := c.normalizeRipCache(); err != nil {
 		return err
 	}
+	if err := c.normalizeDiscIDCache(); err != nil {
+		return err
+	}
 	if err := c.normalizeMakeMKV(); err != nil {
 		return err
 	}
@@ -155,6 +158,17 @@ func (c *Config) normalizeRipCache() error {
 	}
 	if c.RipCache.MaxGiB <= 0 {
 		c.RipCache.MaxGiB = defaultRipCacheMaxGiB
+	}
+	return nil
+}
+
+func (c *Config) normalizeDiscIDCache() error {
+	var err error
+	if strings.TrimSpace(c.DiscIDCache.Path) == "" {
+		c.DiscIDCache.Path = defaultDiscIDCachePath
+	}
+	if c.DiscIDCache.Path, err = expandPath(c.DiscIDCache.Path); err != nil {
+		return fmt.Errorf("disc_id_cache.path: %w", err)
 	}
 	return nil
 }

@@ -86,6 +86,12 @@ type RipCache struct {
 	MaxGiB  int    `toml:"max_gib"`
 }
 
+// DiscIDCache contains configuration for the disc ID to TMDB ID cache.
+type DiscIDCache struct {
+	Enabled bool   `toml:"enabled"` // Default: false
+	Path    string `toml:"path"`    // Default: ~/.cache/spindle/discid_cache.json
+}
+
 // MakeMKV contains configuration for disc ripping.
 type MakeMKV struct {
 	OpticalDrive         string `toml:"optical_drive"`
@@ -163,6 +169,7 @@ type Commentary struct {
 //   - Notifications: ntfy push notification settings
 //   - Subtitles: OpenSubtitles + WhisperX configuration
 //   - RipCache: cached raw rips for re-encoding
+//   - DiscIDCache: disc ID to TMDB ID mapping cache
 //   - MakeMKV: disc ripping settings and keydb
 //   - PresetDecider: LLM-based encoding preset selection
 //   - Commentary: commentary track detection via audio analysis
@@ -177,6 +184,7 @@ type Config struct {
 	Notifications Notifications `toml:"notifications"`
 	Subtitles     Subtitles     `toml:"subtitles"`
 	RipCache      RipCache      `toml:"rip_cache"`
+	DiscIDCache   DiscIDCache   `toml:"disc_id_cache"`
 	MakeMKV       MakeMKV       `toml:"makemkv"`
 	PresetDecider PresetDecider `toml:"preset_decider"`
 	Commentary    Commentary    `toml:"commentary"`
