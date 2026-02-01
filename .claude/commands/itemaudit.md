@@ -1,17 +1,17 @@
-# Spindle Diagnostic Skill
+# Spindle Item Audit Skill
 
-Comprehensive diagnosis of Spindle processing issues through multi-layer artifact analysis.
+Comprehensive audit of Spindle queue items through multi-layer artifact analysis.
 
 ## Usage
 
-`/diagnose <item_id>` - Diagnose a specific queue item
-`/diagnose` - Diagnose daemon-level issues
+`/itemaudit <item_id>` - Audit a specific queue item
+`/itemaudit` - Audit daemon-level issues
 
 ## Philosophy
 
 The goal is to **uncover problems that automated code does not detect**. Quick log scans saying "no warnings, no errors" are insufficient. This skill performs deep, manual analysis of all available artifacts to find anomalies.
 
-## Diagnostic Procedure
+## Audit Procedure
 
 ### Phase 1: Gather Context
 
@@ -21,7 +21,7 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
 4. **Locate log files**:
    - Debug logs (preferred): `log_dir/debug/items/<item>.log`
    - Normal logs (fallback): `log_dir/items/<item>.log`
-   - Debug logs persist from previous diagnostic runs even if daemon restarted in normal mode
+   - Debug logs persist from previous audit runs even if daemon restarted in normal mode
 
 ### Phase 2: Log Analysis (All Items)
 
@@ -228,15 +228,15 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Preset LLM response | Encoding | `decision_type=preset_llm` full prompt/response |
 | Subtitle ranking | Subtitles | `decision_type=subtitle_rank` candidate scores |
 
-## Diagnostic Report Format
+## Audit Report Format
 
 ```
-## Diagnostic Report for Item #<id>
+## Audit Report for Item #<id>
 
 **Title:** <identified_title>
 **Status:** <status> | **NeedsReview:** <bool> | **ReviewReason:** <reason>
 **Media Type:** <movie/tv> | **Source:** <DVD/Blu-ray/4K Blu-ray>
-**Diagnostic Mode:** active/inactive (debug logs available: yes/no)
+**Debug Mode:** active/inactive (debug logs available: yes/no)
 
 ### Executive Summary
 <1-2 sentence overview of findings>
@@ -306,7 +306,7 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 
 ## Execution Checklist
 
-For each diagnosis, complete these steps:
+For each audit, complete these steps:
 
 - [ ] Gathered item info and status
 - [ ] Located and read log files (debug preferred)
