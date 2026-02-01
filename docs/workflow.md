@@ -13,7 +13,7 @@ Every item moves through the queue in order. The statuses you will see are:
 - `RIPPING` -> `RIPPED` - video copied to staging; you’ll get a notification so the disc can be ejected manually
 - `EPISODE_IDENTIFYING` -> `EPISODE_IDENTIFIED` *(optional)* - for TV discs with OpenSubtitles enabled, WhisperX + OpenSubtitles correlate ripped files to definitive episode numbers
 - `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
-- `AUDIO_ANALYZING` -> `AUDIO_ANALYZED` *(optional)* - detects commentary tracks for exclusion
+- `AUDIO_ANALYZING` -> `AUDIO_ANALYZED` *(optional)* - detects commentary tracks for exclusion (requires `commentary.enabled = true`)
 - `SUBTITLING` -> `SUBTITLED` *(optional)* - OpenSubtitles + WhisperX generate subtitle sidecars
 - `ORGANIZING` -> `COMPLETED` - files moved into your library; Jellyfin refresh triggered when configured
 - `FAILED` - an error stopped progress; fix the root cause and retry
@@ -27,7 +27,7 @@ Use `spindle queue list` to inspect items and `spindle queue health` for lifecyc
 Spindle runs two independent lanes:
 
 - **Foreground**: identification and ripping.
-- **Background**: episode identification, encoding, audio analysis, subtitles, and organizing.
+- **Background**: episode identification, encoding, audio analysis (commentary detection), subtitles, and organizing.
 
 This lets you rip disc B while disc A is still encoding or organizing.
 
@@ -85,12 +85,12 @@ via `spindle cache process <number>`; restored rips are reprocessed for audio re
 
 ## Stage 6: Audio Analysis (AUDIO_ANALYZING -> AUDIO_ANALYZED)
 
-When `audio_analysis_enabled = true`, Spindle analyzes encoded files to detect and exclude commentary tracks before subtitle generation.
+When `commentary.enabled = true`, Spindle analyzes encoded files to detect and exclude commentary tracks before subtitle generation.
 
 1. Extracts audio from each encoded asset.
-2. Uses speech detection to identify commentary vs. primary audio tracks.
+2. Uses WhisperX transcription and LLM classification to identify commentary vs. primary audio tracks.
 3. Updates the rip spec with analysis results for downstream stages.
-4. Skipped when audio analysis is disabled or no encoded assets exist.
+4. Skipped when commentary detection is disabled or no encoded assets exist.
 
 ## Stage 7: Subtitle Generation (SUBTITLING -> SUBTITLED)
 

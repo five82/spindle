@@ -32,8 +32,10 @@ If an environment variable is set, the config file value is ignored for that key
 | `staging_dir` | Work area for rips, encodes, subtitles, logs. | Prefer fast storage; large temporary files live here. |
 | `review_dir` | Destination for items flagged `NeedsReview`. | Defaults to `~/review`; contents are safe to rename manually. |
 | `log_dir` | Persistent logs plus the queue DB. | Ensure enough space for SQLite + log rotation. |
+| `opensubtitles_cache_dir` | Cache for OpenSubtitles downloads. | Defaults to `~/.local/share/spindle/cache/opensubtitles`. |
+| `whisperx_cache_dir` | Cache for WhisperX models. | Defaults to `~/.local/share/spindle/cache/whisperx`. |
 | `logging.retention_days` | Days to keep daemon/item logs before pruning. | Default 60; set 0 to disable automatic cleanup. |
-| `rip_cache_dir` | Optional cache of MakeMKV output. | Enable with `rip_cache_enabled = true`. |
+| `rip_cache.dir` | Optional cache of MakeMKV output. | Enable with `rip_cache.enabled = true`. |
 
 Spindle enforces a 20% free-space floor on the rip cache. Tune
 `rip_cache_max_gib` to cap cache size.
@@ -71,9 +73,9 @@ files media correctly.
 
 - `ntfy_topic` — ntfy.sh topic for workflow notifications (disc inserted,
   rip/encode complete, failures).
-- `ntfy_base_url` — Override when self-hosting ntfy.
 - `notify_identification` / `notify_rip` / `notify_encoding` /
   `notify_organization` — Per-stage toggles.
+- `notify_validation` — Notify on Drapto validation events.
 - `notify_queue` — Send queue start/finish only when `count >= notify_queue_min_items`
   (default 2) to avoid noise.
 - `notify_review` — Notify when an item is diverted to `review_dir`.
@@ -82,13 +84,12 @@ files media correctly.
   than this many seconds (default 120).
 - `notify_dedup_window_seconds` — Suppress identical notifications within this
   window (default 600s).
+- `request_timeout` — HTTP timeout for notification requests in seconds (default 10).
 - `api_bind` — Bind address for the read-only HTTP API (default `127.0.0.1:7487`).
   Use `0.0.0.0:7487` to allow remote connections.
 - `api_token` — Bearer token for API authentication. When set, all API requests
   must include `Authorization: Bearer <token>`. Generate with `openssl rand -hex 32`.
   Can also be set via `SPINDLE_API_TOKEN` environment variable.
-- `api_tls_cert` / `api_tls_key` — Optional TLS assets when exposing the API on
-  your LAN.
 
 ## Subtitle & WhisperX Pipeline
 
@@ -109,14 +110,15 @@ alignment artifacts inside each queue item's staging folder for debugging.
 
 ## Audio, Encoding, and Dependencies
 
-- `makemkv_path` — Custom path to `makemkvcon` if needed.
-- `keydb_path`, `keydb_download_url`, `keydb_download_timeout` — controls for
+- `makemkv.optical_drive` — Path to optical drive (default `/dev/sr0`).
+- `makemkv.rip_timeout` — Timeout in seconds for ripping operations (default 14400 / 4 hours for UHD).
+- `makemkv.info_timeout` — Timeout in seconds for disc info operations (default 300).
+- `makemkv.keydb_path`, `makemkv.keydb_download_url`, `makemkv.keydb_download_timeout` — controls for
   refreshing `KEYDB.cfg` (AACS keys). Drop a manual file at
   `~/.config/spindle/keydb/KEYDB.cfg` to seed the cache.
-- `keydb_auto_refresh` — When true, Spindle fetches updates automatically.
-- `preset_decider_enabled`, `preset_decider_model`, `preset_decider_base_url`,
-  `preset_decider_api_key`, `preset_decider_referer`, `preset_decider_title`,
-  `preset_decider_timeout_seconds` —
+- `preset_decider.enabled`, `preset_decider.model`, `preset_decider.base_url`,
+  `preset_decider.api_key`, `preset_decider.referer`, `preset_decider.title`,
+  `preset_decider.timeout_seconds` —
   configure the OpenRouter-powered preset selector. Defaults point at
   `google/gemini-3-flash-preview`; supply an API key via config or
   `OPENROUTER_API_KEY`.
@@ -125,11 +127,11 @@ alignment artifacts inside each queue item's staging folder for debugging.
   `SPINDLE_FFPROBE_PATH`/`FFPROBE_PATH` only when you need to override PATH
   resolution (systemd services, CI, or multiple installs).
 
-## Commentary Detection
+## Commentary Detection (Audio Analysis Stage)
 
 | Key | Description |
 | --- | --- |
-| `commentary.enabled` | Enable commentary track detection during audio analysis stage. |
+| `commentary.enabled` | Enable commentary track detection during audio analysis stage. Default: `false`. |
 | `commentary.whisperx_model` | Model for transcription (default: `large-v3-turbo`). |
 | `commentary.similarity_threshold` | Cosine similarity above which a track is considered a stereo downmix (default: 0.92). |
 | `commentary.confidence_threshold` | LLM confidence required to classify as commentary (default: 0.80). |
@@ -137,9 +139,7 @@ alignment artifacts inside each queue item's staging folder for debugging.
 | `commentary.base_url` | API endpoint (falls back to `preset_decider.base_url`). |
 | `commentary.model` | LLM model for classification (falls back to `preset_decider.model`). |
 
-Commentary detection uses WhisperX to transcribe audio tracks and an LLM to
-classify whether the content is commentary. Detected commentary tracks are
-excluded from the final output.
+Commentary detection runs during the audio analysis stage (after encoding). It uses WhisperX to transcribe audio tracks and an LLM to classify whether the content is commentary. Detected commentary tracks are excluded from the final output.
 
 ## Rip Cache
 
