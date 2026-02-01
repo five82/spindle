@@ -57,20 +57,16 @@ type discMonitor struct {
 	errorNotifier       fingerprintErrorNotifier
 	fingerprintProvider fingerprintProvider
 
-	device       string
-	scanTimeout  time.Duration
-	pollInterval time.Duration
-	detect       detectFunc
-	isPaused     func() bool
+	device      string
+	scanTimeout time.Duration
+	detect      detectFunc
+	isPaused    func() bool
 
-	mu          sync.Mutex
-	running     bool
-	discPresent bool
-	processing  bool
+	mu         sync.Mutex
+	processing bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
 }
 
 // defaultFingerprintProvider uses the fingerprint package.
@@ -90,11 +86,6 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger,
 		return nil
 	}
 
-	poll := time.Duration(cfg.Workflow.DiscMonitorTimeout) * time.Second
-	if poll <= 0 {
-		poll = 5 * time.Second
-	}
-
 	scanTimeout := time.Duration(cfg.MakeMKV.InfoTimeout) * time.Second
 	if scanTimeout <= 0 {
 		scanTimeout = 300 * time.Second
@@ -106,7 +97,7 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger,
 	}
 
 	runner := execCommandRunner{}
-	detect := buildDetectFunc(runner, poll)
+	detect := buildDetectFunc(runner, 5*time.Second)
 
 	return &discMonitor{
 		cfg:                 cfg,
@@ -117,12 +108,14 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger,
 		fingerprintProvider: defaultFingerprintProvider{},
 		device:              device,
 		scanTimeout:         scanTimeout,
-		pollInterval:        poll,
 		detect:              detect,
 		isPaused:            isPaused,
 	}
 }
 
+// Start initializes the disc monitor context. With udev-based detection,
+// there is no polling loop - this just prepares the monitor to handle
+// external detection events.
 func (m *discMonitor) Start(ctx context.Context) error {
 	if m == nil {
 		return errors.New("disc monitor unavailable")
@@ -130,127 +123,109 @@ func (m *discMonitor) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.running {
-		return errors.New("disc monitor already running")
-	}
-
 	runCtx, cancel := context.WithCancel(ctx)
 	m.ctx = runCtx
 	m.cancel = cancel
-	m.running = true
 
-	m.wg.Add(1)
-	go m.loop()
+	if m.logger != nil {
+		m.logger.Info("disc monitor ready for udev events",
+			logging.String(logging.FieldEventType, "disc_monitor_ready"),
+			logging.String("device", m.device))
+	}
 	return nil
 }
 
+// Stop shuts down the disc monitor.
 func (m *discMonitor) Stop() {
 	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
-		return
-	}
 	cancel := m.cancel
-	m.running = false
 	m.cancel = nil
 	m.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
 	}
-	m.wg.Wait()
 }
 
-func (m *discMonitor) loop() {
-	defer m.wg.Done()
-
-	m.poll()
-
-	ticker := time.NewTicker(m.pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-			m.poll()
-		}
-	}
-}
-
-func (m *discMonitor) poll() {
-	ctx := m.ctx
-	if ctx == nil {
-		return
+// HandleExternalDetection processes a disc detection event triggered by udev.
+// It detects disc info, computes fingerprint, scans with MakeMKV, and queues the disc.
+func (m *discMonitor) HandleExternalDetection(ctx context.Context, device string) (*DiscDetectedResult, error) {
+	if m == nil {
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: "disc monitor unavailable",
+		}, nil
 	}
 
-	if m.isPaused != nil && m.isPaused() {
-		return
+	// Use monitor context if available, fall back to provided context
+	monitorCtx := m.ctx
+	if monitorCtx == nil {
+		monitorCtx = ctx
 	}
 
-	// Skip detection if disc already being tracked or processed.
-	// This avoids running lsblk/blkid while MakeMKV is ripping,
-	// which can cause read errors from concurrent device access.
+	// Check if already processing a disc
 	m.mu.Lock()
-	if m.discPresent || m.processing {
+	if m.processing {
 		m.mu.Unlock()
-		return
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: "already processing a disc",
+		}, nil
 	}
-	m.mu.Unlock()
-
-	info, err := m.detect(ctx, m.device)
-	if err != nil {
-		logger := m.logger
-		if logger == nil {
-			logger = logging.NewNop()
-		}
-		logger.Warn("disc detection failed; will retry",
-			logging.Error(err),
-			logging.String(logging.FieldEventType, "disc_detect_failed"),
-			logging.String(logging.FieldErrorHint, "check optical drive path, permissions, and mount state; see README.md"),
-		)
-		return
-	}
-
-	if info == nil {
-		m.mu.Lock()
-		m.discPresent = false
-		m.mu.Unlock()
-		return
-	}
-
-	m.mu.Lock()
-	if m.discPresent || m.processing {
-		// Race: another goroutine beat us to it
-		m.mu.Unlock()
-		return
-	}
-	m.discPresent = true
 	m.processing = true
 	m.mu.Unlock()
 
-	m.wg.Add(1)
-	go func(det discInfo) {
-		defer m.wg.Done()
-		success := m.handleDetectedDisc(ctx, det)
-
+	defer func() {
 		m.mu.Lock()
-		if !success {
-			m.discPresent = false
-		}
 		m.processing = false
 		m.mu.Unlock()
-	}(*info)
+	}()
+
+	// Detect disc information
+	info, err := m.detect(monitorCtx, device)
+	if err != nil {
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: fmt.Sprintf("disc detection failed: %v", err),
+		}, nil
+	}
+	if info == nil {
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: "no disc detected in drive",
+		}, nil
+	}
+
+	// Process the detected disc
+	itemID, success, err := m.handleDetectedDisc(monitorCtx, *info)
+	if err != nil {
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: fmt.Sprintf("disc processing failed: %v", err),
+		}, nil
+	}
+
+	if !success {
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: "disc could not be queued",
+		}, nil
+	}
+
+	return &DiscDetectedResult{
+		Handled: true,
+		Message: fmt.Sprintf("disc queued: %s", info.Label),
+		ItemID:  itemID,
+	}, nil
 }
 
-func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) bool {
+func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) (int64, bool, error) {
 	logger := logging.WithContext(ctx, m.logger).With(
 		logging.String("device", info.Device),
 		logging.String("disc_label", info.Label),
 		logging.String("disc_type", info.Type),
 	)
-	logger.Info("detected disc",
+	logger.Info("detected disc via udev",
 		logging.String(logging.FieldEventType, "disc_detected"),
 	)
 
@@ -267,7 +242,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		if m.errorNotifier != nil {
 			m.errorNotifier.FingerprintFailed(ctx, info, fpErr, logger)
 		}
-		return false
+		return 0, false, fpErr
 	}
 	logger.Debug("computed fingerprint", logging.String("fingerprint", discFingerprint))
 
@@ -279,7 +254,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 				logging.Int64(logging.FieldItemID, itemID),
 				logging.String("fingerprint", discFingerprint),
 			)
-			return true
+			return itemID, true, nil
 		}
 	}
 
@@ -296,7 +271,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 			logging.String(logging.FieldEventType, "disc_scan_unavailable"),
 			logging.String(logging.FieldErrorHint, "check MakeMKV installation and config.makemkv_binary"),
 		)
-		return false
+		return 0, false, errors.New("disc scanner unavailable")
 	}
 
 	logger.Debug("scanning disc for title information", logging.Duration("timeout", m.scanTimeout))
@@ -310,7 +285,7 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 		if m.errorNotifier != nil {
 			m.errorNotifier.FingerprintFailed(ctx, info, scanErr, logger)
 		}
-		return false
+		return 0, false, scanErr
 	}
 
 	queueHandler := m.queueHandler
@@ -319,19 +294,19 @@ func (m *discMonitor) handleDetectedDisc(ctx context.Context, info discInfo) boo
 			logging.String(logging.FieldEventType, "queue_handler_unavailable"),
 			logging.String(logging.FieldErrorHint, "restart the daemon or check queue database initialization"),
 		)
-		return false
+		return 0, false, errors.New("queue handler unavailable")
 	}
 
-	success, err := queueHandler.Process(ctx, info, discFingerprint, logger)
+	success, itemID, err := queueHandler.ProcessWithID(ctx, info, discFingerprint, logger)
 	if err != nil {
 		logger.Error("queue processing failed; disc not queued",
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "queue_processing_failed"),
 			logging.String(logging.FieldErrorHint, "check queue database health and daemon logs"),
 		)
-		return false
+		return 0, false, err
 	}
-	return success
+	return itemID, success, nil
 }
 
 func buildDetectFunc(runner commandRunner, timeout time.Duration) detectFunc {

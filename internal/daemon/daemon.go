@@ -399,6 +399,30 @@ func (d *Daemon) DiscPaused() bool {
 	return d.discPaused.Load()
 }
 
+// DiscDetectedResult contains the outcome of a disc detection event.
+type DiscDetectedResult struct {
+	Handled bool
+	Message string
+	ItemID  int64
+}
+
+// HandleDiscDetected processes a disc detection event triggered by udev.
+func (d *Daemon) HandleDiscDetected(ctx context.Context, device string) (*DiscDetectedResult, error) {
+	if d.monitor == nil {
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: "disc monitor not available",
+		}, nil
+	}
+	if d.discPaused.Load() {
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: "disc detection paused",
+		}, nil
+	}
+	return d.monitor.HandleExternalDetection(ctx, device)
+}
+
 // BeforeRip implements workflow.RipHooks. Called before MakeMKV starts reading.
 func (d *Daemon) BeforeRip() {
 	if d.PauseDisc() {

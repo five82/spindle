@@ -207,6 +207,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			} else {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusWarn, "Not configured", colorize))
 			}
+			fmt.Fprintln(stdout, udevRuleStatusLine(colorize))
 			fmt.Fprintln(stdout)
 
 			for _, line := range renderSectionHeader("Dependencies", colorize) {

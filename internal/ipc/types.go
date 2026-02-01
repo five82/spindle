@@ -196,3 +196,15 @@ type DiscResumeResponse struct {
 	Resumed bool   `json:"resumed"`
 	Message string `json:"message"`
 }
+
+// DiscDetectedRequest triggers disc detection for a specific device.
+type DiscDetectedRequest struct {
+	Device string `json:"device"`
+}
+
+// DiscDetectedResponse reports the result of disc detection.
+type DiscDetectedResponse struct {
+	Handled bool   `json:"handled"`
+	Message string `json:"message"`
+	ItemID  int64  `json:"item_id,omitempty"`
+}

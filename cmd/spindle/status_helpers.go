@@ -146,3 +146,14 @@ func librarySubdirPath(root, child string) string {
 	}
 	return filepath.Join(root, child)
 }
+
+func udevRuleStatusLine(colorize bool) string {
+	installed, needsUpdate, _ := CheckUdevRuleInstalled()
+	if !installed {
+		return renderStatusLine("Disc Detection", statusWarn, "udev rule not installed (run: spindle disc setup)", colorize)
+	}
+	if needsUpdate {
+		return renderStatusLine("Disc Detection", statusWarn, "udev rule path outdated (run: spindle disc setup)", colorize)
+	}
+	return renderStatusLine("Disc Detection", statusOK, "udev rule installed", colorize)
+}

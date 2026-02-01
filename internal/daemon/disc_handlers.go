@@ -14,6 +14,8 @@ import (
 
 type queueProcessor interface {
 	Process(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error)
+	// ProcessWithID is like Process but also returns the queue item ID.
+	ProcessWithID(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, int64, error)
 	// IsInWorkflow reports whether a disc with the given fingerprint is already
 	// being processed. Returns the item ID if found, 0 otherwise.
 	IsInWorkflow(ctx context.Context, fingerprint string) (bool, int64)
@@ -53,22 +55,28 @@ func (p *queueStoreProcessor) IsInWorkflow(ctx context.Context, fingerprint stri
 }
 
 func (p *queueStoreProcessor) Process(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error) {
+	success, _, err := p.ProcessWithID(ctx, info, fingerprint, logger)
+	return success, err
+}
+
+func (p *queueStoreProcessor) ProcessWithID(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, int64, error) {
 	if p == nil || p.store == nil {
-		return false, fmt.Errorf("queue processor unavailable")
+		return false, 0, fmt.Errorf("queue processor unavailable")
 	}
 
 	fingerprint = strings.TrimSpace(fingerprint)
 	if fingerprint == "" {
-		return false, fmt.Errorf("disc fingerprint is required")
+		return false, 0, fmt.Errorf("disc fingerprint is required")
 	}
 
 	existing, err := p.store.FindByFingerprint(ctx, fingerprint)
 	if err != nil {
-		return false, fmt.Errorf("lookup existing disc: %w", err)
+		return false, 0, fmt.Errorf("lookup existing disc: %w", err)
 	}
 
 	if existing != nil {
-		return p.handleExisting(ctx, info, existing, fingerprint, logger)
+		success, err := p.handleExisting(ctx, info, existing, fingerprint, logger)
+		return success, existing.ID, err
 	}
 
 	return p.enqueueNew(ctx, info, fingerprint, logger)
@@ -193,7 +201,7 @@ func shouldRefreshDiscTitle(current string) bool {
 	return trimmed == "" || trimmed == "Unknown Disc"
 }
 
-func (p *queueStoreProcessor) enqueueNew(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error) {
+func (p *queueStoreProcessor) enqueueNew(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, int64, error) {
 	title := strings.TrimSpace(info.Label)
 	if title == "" {
 		title = "Unknown Disc"
@@ -201,7 +209,7 @@ func (p *queueStoreProcessor) enqueueNew(ctx context.Context, info discInfo, fin
 
 	item, err := p.store.NewDisc(ctx, title, fingerprint)
 	if err != nil {
-		return false, fmt.Errorf("failed to enqueue disc: %w", err)
+		return false, 0, fmt.Errorf("failed to enqueue disc: %w", err)
 	}
 
 	if logger != nil {
@@ -212,7 +220,7 @@ func (p *queueStoreProcessor) enqueueNew(ctx context.Context, info discInfo, fin
 			logging.String("fingerprint", fingerprint),
 		)
 	}
-	return true, nil
+	return true, item.ID, nil
 }
 
 type notifierAdapter struct {
