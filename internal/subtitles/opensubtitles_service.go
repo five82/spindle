@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"spindle/internal/logging"
@@ -336,6 +337,20 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 		return "", nil
 	}
 
+	// Forced subtitles require stricter title matching than regular subtitles.
+	// Partial word overlap (e.g., "Star Trek: Generations" vs "Star Trek III") is
+	// not acceptable - we need the title to contain or exactly match the expected title.
+	scored = filterForcedSubtitleCandidates(scored, req.Context.Title, s.logger)
+	if len(scored) == 0 {
+		if s.logger != nil {
+			s.logger.Debug("no forced subtitle candidate passed strict title matching",
+				logging.Int("results", len(resp.Subtitles)),
+				logging.String("title", req.Context.Title),
+			)
+		}
+		return "", nil
+	}
+
 	forcedPlan := *plan
 	forcedPlan.outputFile = fmt.Sprintf("%s.forced.srt", baseName)
 	forcedPlan.referenceSubtitlePath = referenceSubtitle
@@ -385,6 +400,28 @@ func (s *Service) buildForcedSubtitleSearchRequest(req GenerateRequest) opensubt
 	foreignPartsOnly := true
 	searchReq.ForeignPartsOnly = &foreignPartsOnly
 	return searchReq
+}
+
+// filterForcedSubtitleCandidates filters candidates to only those with strict title matches.
+// Forced subtitles require stricter matching than regular subtitles because partial word
+// overlap (e.g., "Star Trek: Generations" vs "Star Trek III") can match wrong movies
+// in a franchise.
+func filterForcedSubtitleCandidates(candidates []scoredSubtitle, expectedTitle string, logger *slog.Logger) []scoredSubtitle {
+	result := make([]scoredSubtitle, 0, len(candidates))
+	for _, c := range candidates {
+		if isTitleStrictMismatch(expectedTitle, c.subtitle.FeatureTitle) {
+			if logger != nil {
+				logger.Debug("forced subtitle candidate rejected for title mismatch",
+					logging.String("expected", expectedTitle),
+					logging.String("candidate", c.subtitle.FeatureTitle),
+					logging.String("release", c.subtitle.Release),
+				)
+			}
+			continue
+		}
+		result = append(result, c)
+	}
+	return result
 }
 
 // buildBaseSearchRequest constructs a common search request from a GenerateRequest.

@@ -122,9 +122,14 @@ func scoreSubtitleCandidate(sub opensubtitles.Subtitle, ctx SubtitleContext) (fl
 		case delta <= 3:
 			score -= 0.5
 			reasons = append(reasons, "year=off")
-		default:
-			score -= 1.0
+		case delta <= 5:
+			score -= 1.5
 			reasons = append(reasons, "year=far")
+		default:
+			// Large year differences (>5 years) strongly suggest wrong movie,
+			// especially in franchises with similar titles
+			score -= 4.0
+			reasons = append(reasons, "year=wrong")
 		}
 	}
 
@@ -224,6 +229,15 @@ func normalizeTitle(title string) string {
 // the expected title. Used to hard-reject wrongly labeled subtitles.
 func isTitleMismatch(expected, candidate string) bool {
 	return compareTitles(expected, candidate) == titleMatchNone
+}
+
+// isTitleStrictMismatch returns true if the candidate title doesn't meet strict
+// matching criteria (must contain or exactly match the expected title).
+// Used for forced subtitles where partial word overlap is insufficient.
+func isTitleStrictMismatch(expected, candidate string) bool {
+	level := compareTitles(expected, candidate)
+	// Only accept titleMatchExact or titleMatchContain
+	return level != titleMatchExact && level != titleMatchContain
 }
 
 // normalizeTitleWords splits a title into normalized words for overlap comparison.

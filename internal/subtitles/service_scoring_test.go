@@ -179,3 +179,129 @@ func TestTitleMatchScorePenalizesMismatch(t *testing.T) {
 		t.Errorf("expected reason 'title=mismatch', got %q", reason)
 	}
 }
+
+func TestIsTitleStrictMismatchRejectsFranchiseTitles(t *testing.T) {
+	tests := []struct {
+		name      string
+		expected  string
+		candidate string
+		mismatch  bool
+	}{
+		// Exact matches - should pass
+		{"exact match", "Star Trek: Generations", "Star Trek: Generations", false},
+		{"exact match normalized", "star trek generations", "Star Trek: Generations", false},
+
+		// Contains relationship - should pass
+		{"contains", "Star Trek: Generations", "Star Trek: Generations - Special Edition", false},
+
+		// Partial word overlap (franchise) - should FAIL strict matching
+		{"franchise partial Star Trek III", "Star Trek: Generations", "Star Trek III: The Search for Spock", true},
+		{"franchise partial Star Trek II", "Star Trek: Generations", "Star Trek II: The Wrath of Khan", true},
+		{"franchise partial Fast Furious", "Fast & Furious 6", "Fast & Furious 7", true},
+		{"franchise partial Avengers", "Avengers: Endgame", "Avengers: Age of Ultron", true},
+
+		// Complete mismatch - should fail
+		{"complete mismatch", "Star Trek: Generations", "Die Hard", true},
+
+		// Empty strings - should pass (can't determine mismatch)
+		{"empty candidate", "Star Trek: Generations", "", false},
+		{"empty expected", "", "Star Trek III", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTitleStrictMismatch(tt.expected, tt.candidate)
+			if got != tt.mismatch {
+				t.Errorf("isTitleStrictMismatch(%q, %q) = %v, want %v", tt.expected, tt.candidate, got, tt.mismatch)
+			}
+		})
+	}
+}
+
+func TestYearPenaltyForLargeDifferences(t *testing.T) {
+	// Test that large year differences get strong penalties
+	ctx := SubtitleContext{Title: "Star Trek: Generations", MediaType: "movie", Year: "1994"}
+
+	// Subtitle from 1984 (10 year difference) should get year=wrong penalty
+	sub1984 := opensubtitles.Subtitle{
+		FileID:      1,
+		FeatureYear: 1984,
+		Release:     "1080p.BluRay",
+	}
+	score1984, reasons1984 := scoreSubtitleCandidate(sub1984, ctx)
+
+	// Subtitle from 1994 (exact match) should get year=exact bonus
+	sub1994 := opensubtitles.Subtitle{
+		FileID:      2,
+		FeatureYear: 1994,
+		Release:     "1080p.BluRay",
+	}
+	score1994, reasons1994 := scoreSubtitleCandidate(sub1994, ctx)
+
+	// 1994 should score significantly higher than 1984
+	if score1994 <= score1984 {
+		t.Errorf("expected 1994 (%v, %.1f) to score higher than 1984 (%v, %.1f)",
+			reasons1994, score1994, reasons1984, score1984)
+	}
+
+	// Check that 1984 has year=wrong penalty
+	hasWrongYear := false
+	for _, r := range reasons1984 {
+		if r == "year=wrong" {
+			hasWrongYear = true
+			break
+		}
+	}
+	if !hasWrongYear {
+		t.Errorf("expected year=wrong for 10-year difference, got reasons: %v", reasons1984)
+	}
+
+	// Check that 1994 has year=exact bonus
+	hasExactYear := false
+	for _, r := range reasons1994 {
+		if r == "year=exact" {
+			hasExactYear = true
+			break
+		}
+	}
+	if !hasExactYear {
+		t.Errorf("expected year=exact for matching year, got reasons: %v", reasons1994)
+	}
+}
+
+func TestFilterForcedSubtitleCandidatesRejectsFranchiseTitles(t *testing.T) {
+	candidates := []scoredSubtitle{
+		{subtitle: opensubtitles.Subtitle{FileID: 1, FeatureTitle: "Star Trek: Generations", Release: "correct.release"}},
+		{subtitle: opensubtitles.Subtitle{FileID: 2, FeatureTitle: "Star Trek III: The Search for Spock", Release: "wrong.franchise.entry"}},
+		{subtitle: opensubtitles.Subtitle{FileID: 3, FeatureTitle: "Star Trek: Generations - Extended", Release: "extended.edition"}},
+	}
+
+	filtered := filterForcedSubtitleCandidates(candidates, "Star Trek: Generations", nil)
+
+	// Should only keep candidates with exact or contains match
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 candidates after filtering, got %d", len(filtered))
+	}
+
+	// Verify Star Trek III was filtered out
+	for _, c := range filtered {
+		if c.subtitle.FileID == 2 {
+			t.Fatalf("Star Trek III should have been filtered out for forced subtitles")
+		}
+	}
+
+	// Verify correct entries remain
+	foundExact := false
+	foundExtended := false
+	for _, c := range filtered {
+		if c.subtitle.FileID == 1 {
+			foundExact = true
+		}
+		if c.subtitle.FileID == 3 {
+			foundExtended = true
+		}
+	}
+	if !foundExact || !foundExtended {
+		t.Fatalf("expected both exact and extended matches to remain")
+	}
+}
