@@ -53,3 +53,66 @@ func TestSplitTitleYear(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractCanonicalTitle(t *testing.T) {
+	cases := []struct {
+		input     string
+		canonical string
+		label     string
+	}{
+		// Standard keydb format with canonical title in parentheses
+		{
+			input:     "STAR_TREK_TMP_DIRECTOR_EDITION (STAR TREK: THE MOTION PICTURE - DIRECTOR'S EDITION)",
+			canonical: "STAR TREK: THE MOTION PICTURE - DIRECTOR'S EDITION",
+			label:     "STAR_TREK_TMP_DIRECTOR_EDITION",
+		},
+		{
+			input:     "GOODFELLAS_DISC1 (Goodfellas)",
+			canonical: "Goodfellas",
+			label:     "GOODFELLAS_DISC1",
+		},
+		// Year-only parentheses should not be treated as canonical title
+		{
+			input:     "Goodfellas (1990)",
+			canonical: "",
+			label:     "Goodfellas (1990)",
+		},
+		// No parentheses - return as label
+		{
+			input:     "GOODFELLAS",
+			canonical: "",
+			label:     "GOODFELLAS",
+		},
+		// Empty input
+		{
+			input:     "",
+			canonical: "",
+			label:     "",
+		},
+		// Disc info in parentheses should not be extracted
+		{
+			input:     "MOVIE (Disc 1)",
+			canonical: "",
+			label:     "MOVIE (Disc 1)",
+		},
+		// Short content in parentheses should not be extracted
+		{
+			input:     "MOVIE (AB)",
+			canonical: "",
+			label:     "MOVIE (AB)",
+		},
+		// Nested parentheses - extract outermost content
+		{
+			input:     "ALIENS (Aliens (1986) - Director's Cut)",
+			canonical: "Aliens (1986) - Director's Cut",
+			label:     "ALIENS",
+		},
+	}
+	for _, tc := range cases {
+		canonical, label := extractCanonicalTitle(tc.input)
+		if canonical != tc.canonical || label != tc.label {
+			t.Errorf("extractCanonicalTitle(%q) = (%q, %q), want (%q, %q)",
+				tc.input, canonical, label, tc.canonical, tc.label)
+		}
+	}
+}

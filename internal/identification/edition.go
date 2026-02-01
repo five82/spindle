@@ -87,6 +87,35 @@ var knownEditionPatterns = []editionPattern{
 	{regexp.MustCompile(`(?i)\bIMAX\s*(EDITION)?\b`), "IMAX"},
 }
 
+// editionStripPatterns are patterns to remove from titles before TMDB search.
+// These are broader than knownEditionPatterns to catch variations.
+var editionStripPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\s*[-:]\s*DIRECTOR['']?S?\s*(CUT|EDITION|VERSION)\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*EXTENDED\s*(CUT|EDITION|VERSION)?\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*UNRATED\s*(CUT|EDITION|VERSION)?\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*UNCUT\s*(EDITION|VERSION)?\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*THEATRICAL\s*(CUT|EDITION|VERSION|RELEASE)?\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*REMASTERED\s*(EDITION|VERSION)?\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*SPECIAL\s*EDITION\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*\d+\s*(TH|ST|ND|RD)?\s*ANNIVERSARY\s*(EDITION)?\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*ULTIMATE\s*(CUT|EDITION)\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*DEFINITIVE\s*(CUT|EDITION)\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*FINAL\s*CUT\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*REDUX\s*$`),
+	regexp.MustCompile(`(?i)\s*[-:]\s*IMAX\s*(EDITION)?\s*$`),
+}
+
+// StripEditionSuffix removes edition markers from a title for TMDB search.
+// For example: "Star Trek: The Motion Picture - Director's Edition" becomes
+// "Star Trek: The Motion Picture".
+func StripEditionSuffix(title string) string {
+	result := strings.TrimSpace(title)
+	for _, pattern := range editionStripPatterns {
+		result = strings.TrimSpace(pattern.ReplaceAllString(result, ""))
+	}
+	return result
+}
+
 // ExtractKnownEdition checks the disc title against known edition patterns.
 // Returns the normalized edition label and true if a match is found.
 func ExtractKnownEdition(discTitle string) (string, bool) {

@@ -148,16 +148,22 @@ Examples:
 			// Display results
 			year := extractYearFromMetadata(item.MetadataJSON)
 			tmdbTitle := extractTitleFromMetadata(item.MetadataJSON)
+			edition := extractEditionFromMetadata(item.MetadataJSON)
 			fmt.Fprintf(cmd.OutOrStdout(), "\n📊 Identification Results:\n")
 			fmt.Fprintf(cmd.OutOrStdout(), "  Disc Title: %s\n", item.DiscTitle)
 			fmt.Fprintf(cmd.OutOrStdout(), "  TMDB Title: %s\n", tmdbTitle)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Year: %s\n", year)
+			if edition != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Edition: %s\n", edition)
+			}
 			if item.ProgressMessage != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Message: %s\n", item.ProgressMessage)
 			}
 			if item.MetadataJSON != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ✅ Available\n")
-				if year != "Unknown" && tmdbTitle != "Unknown" {
+				if filename := extractFilenameFromMetadata(item.MetadataJSON); filename != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s.mkv\n", filename)
+				} else if year != "Unknown" && tmdbTitle != "Unknown" {
 					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s (%s).mkv\n", tmdbTitle, year)
 				}
 			} else {
@@ -234,6 +240,44 @@ func extractTitleFromMetadata(metadataJSON string) string {
 	}
 
 	return title
+}
+
+// extractFilenameFromMetadata extracts the computed filename from metadata
+func extractFilenameFromMetadata(metadataJSON string) string {
+	if metadataJSON == "" {
+		return ""
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return ""
+	}
+
+	filename, ok := metadata["filename"].(string)
+	if !ok {
+		return ""
+	}
+
+	return filename
+}
+
+// extractEditionFromMetadata extracts the edition label from metadata
+func extractEditionFromMetadata(metadataJSON string) string {
+	if metadataJSON == "" {
+		return ""
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return ""
+	}
+
+	edition, ok := metadata["edition"].(string)
+	if !ok {
+		return ""
+	}
+
+	return edition
 }
 
 // getDiscLabel gets the disc label using lsblk, same as the daemon

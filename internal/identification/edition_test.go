@@ -330,3 +330,76 @@ func TestIsYearLike(t *testing.T) {
 		})
 	}
 }
+
+func TestStripEditionSuffix(t *testing.T) {
+	tests := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{
+			name:  "director's edition with dash",
+			title: "STAR TREK: THE MOTION PICTURE - DIRECTOR'S EDITION",
+			want:  "STAR TREK: THE MOTION PICTURE",
+		},
+		{
+			name:  "director's cut with colon",
+			title: "Blade Runner: Director's Cut",
+			want:  "Blade Runner",
+		},
+		{
+			name:  "extended edition",
+			title: "Lord of the Rings - Extended Edition",
+			want:  "Lord of the Rings",
+		},
+		{
+			name:  "unrated",
+			title: "Anchorman - Unrated",
+			want:  "Anchorman",
+		},
+		{
+			name:  "final cut",
+			title: "Blade Runner - Final Cut",
+			want:  "Blade Runner",
+		},
+		{
+			name:  "redux",
+			title: "Apocalypse Now - Redux",
+			want:  "Apocalypse Now",
+		},
+		{
+			name:  "no edition suffix",
+			title: "Star Trek: The Motion Picture",
+			want:  "Star Trek: The Motion Picture",
+		},
+		{
+			name:  "empty string",
+			title: "",
+			want:  "",
+		},
+		{
+			name:  "anniversary edition",
+			title: "Jaws - 25th Anniversary Edition",
+			want:  "Jaws",
+		},
+		{
+			name:  "special edition",
+			title: "Star Wars: A New Hope - Special Edition",
+			want:  "Star Wars: A New Hope",
+		},
+		{
+			name:  "imax",
+			title: "Dune - IMAX Edition",
+			want:  "Dune",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripEditionSuffix(tt.title)
+			if got != tt.want {
+				t.Errorf("StripEditionSuffix(%q) = %q, want %q", tt.title, got, tt.want)
+			}
+		})
+	}
+}

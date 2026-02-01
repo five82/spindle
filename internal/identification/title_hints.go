@@ -163,3 +163,72 @@ func buildQueryList(candidates ...string) []string {
 	}
 	return ordered
 }
+
+// extractCanonicalTitle parses a keydb-style title in the format
+// "DISC_LABEL (CANONICAL_TITLE)" and returns the canonical title and disc label
+// separately. If the title doesn't match this format, canonical is empty and
+// label contains the original title.
+//
+// Examples:
+//
+//	"STAR_TREK_TMP (Star Trek: The Motion Picture)" → ("Star Trek: The Motion Picture", "STAR_TREK_TMP")
+//	"GOODFELLAS" → ("", "GOODFELLAS")
+//	"Movie (2020)" → ("", "Movie (2020)") // year-only parentheses are not canonical titles
+func extractCanonicalTitle(title string) (canonical, label string) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "", ""
+	}
+
+	// Find the last opening parenthesis that has a matching close at the end
+	if !strings.HasSuffix(title, ")") {
+		return "", title
+	}
+
+	// Find matching open paren for the final close paren
+	depth := 0
+	openIdx := -1
+	for i := len(title) - 1; i >= 0; i-- {
+		switch title[i] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+			if depth == 0 {
+				openIdx = i
+			}
+		}
+		if openIdx >= 0 {
+			break
+		}
+	}
+
+	if openIdx <= 0 {
+		// No valid parentheses or nothing before them
+		return "", title
+	}
+
+	inner := strings.TrimSpace(title[openIdx+1 : len(title)-1])
+	prefix := strings.TrimSpace(title[:openIdx])
+
+	// Skip if inner is just a year (4 digits)
+	if len(inner) == 4 && isYearLike(inner) {
+		return "", title
+	}
+
+	// Skip if inner is too short to be a meaningful title
+	if len(inner) < 3 {
+		return "", title
+	}
+
+	// Skip if inner looks like disc/volume info rather than a title
+	innerUpper := strings.ToUpper(inner)
+	if strings.HasPrefix(innerUpper, "DISC") ||
+		strings.HasPrefix(innerUpper, "VOL") ||
+		strings.HasPrefix(innerUpper, "DVD") ||
+		strings.HasPrefix(innerUpper, "BD") {
+		return "", title
+	}
+
+	return inner, prefix
+}

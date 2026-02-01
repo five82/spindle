@@ -88,6 +88,9 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		logging.String("media_hint", input.MediaHint.String()),
 		logging.Int("season_guess", seasonNumber))
 
+	// Extract canonical title from keydb format "DISC_LABEL (CANONICAL_TITLE)"
+	canonicalTitle, discLabelPart := extractCanonicalTitle(input.Title)
+
 	titleForQuery, titleYear := splitTitleYear(input.Title)
 	discLabelForQuery, labelYear := splitTitleYear(input.DiscLabel)
 	if input.SearchOpts.Year == 0 {
@@ -109,8 +112,35 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		}
 	}
 
-	queryInputs := []string{titleForQuery, showHint}
-	if discLabelForQuery != "" {
+	// Build query inputs prioritizing canonical title from keydb
+	var queryInputs []string
+	if canonicalTitle != "" {
+		// Strip edition suffixes for TMDB search (e.g., "Director's Edition")
+		// since TMDB typically only has the base movie title
+		strippedCanonical := StripEditionSuffix(canonicalTitle)
+		if strippedCanonical != "" && strippedCanonical != canonicalTitle {
+			queryInputs = append(queryInputs, strippedCanonical)
+			logger.Debug("stripped edition suffix from canonical title",
+				logging.String("original", canonicalTitle),
+				logging.String("stripped", strippedCanonical))
+		}
+		// Also try the full canonical title in case TMDB has edition variants
+		queryInputs = append(queryInputs, canonicalTitle)
+		logger.Debug("using canonical title from keydb format",
+			logging.String("canonical_title", canonicalTitle),
+			logging.String("disc_label_part", discLabelPart))
+	}
+	// Add other candidates as fallbacks
+	if discLabelPart != "" {
+		queryInputs = append(queryInputs, discLabelPart)
+	} else if canonicalTitle == "" {
+		// No keydb format detected, use original title
+		queryInputs = append(queryInputs, titleForQuery)
+	}
+	if showHint != "" {
+		queryInputs = append(queryInputs, showHint)
+	}
+	if discLabelForQuery != "" && discLabelForQuery != discLabelPart {
 		queryInputs = append(queryInputs, discLabelForQuery)
 	}
 	seasonQuerySource := strings.TrimSpace(showHint)
