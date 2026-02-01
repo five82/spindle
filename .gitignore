@@ -23,6 +23,7 @@ coverage.out
 profile.out
 *.pprof
 go.work
+go.work.sum
 
 # Distribution / packaging
 .Python
