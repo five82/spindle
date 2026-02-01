@@ -40,7 +40,7 @@ func newTMDBSearch(client tmdb.Searcher) *tmdbSearch {
 	return &tmdbSearch{
 		client:     client,
 		cache:      make(map[string]tmdbCacheEntry),
-		cacheTTL:   10 * time.Minute,
+		cacheTTL:   time.Hour,
 		rateLimit:  250 * time.Millisecond,
 		lastLookup: time.Unix(0, 0),
 	}
