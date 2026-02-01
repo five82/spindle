@@ -141,8 +141,3 @@ When `subtitles_enabled = true`, Spindle attempts OpenSubtitles first (if enable
 
 If `ntfy_topic` is set, Spindle posts compact notifications at key steps: disc detected, disc identified (with year when available), rip completed, encoding completed, library import completed, and any errors. You can test the channel any time with `spindle test-notify`.
 
-## Need More Detail?
-
-- Setup and installation: see `docs/configuration.md`
-- Identification deep dive: `docs/content-identification.md`
-- Development workflow (if you are hacking on Spindle): `docs/development.md`

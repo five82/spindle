@@ -12,7 +12,7 @@ Early-stage project; expect frequent changes.
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.25+, MakeMKV, ffmpeg, mediainfo. See [docs/development.md](docs/development.md) for full setup.
+Prerequisites: Go 1.25+, MakeMKV, ffmpeg, mediainfo.
 
 ## Configure
 
@@ -32,7 +32,7 @@ staging_dir = "~/Media/Staging"
 api_key = "your-tmdb-key"
 ```
 
-See [docs/configuration.md](docs/configuration.md) for all options (Jellyfin, subtitles, notifications, rip cache, etc.).
+See `sample_config.toml` for all options (Jellyfin, subtitles, notifications, rip cache, etc.).
 
 ## Run
 
@@ -47,12 +47,6 @@ Once the daemon reports `RIPPED`, eject the disc manually; encoding and organiza
 
 ## Documentation
 
-| Guide | Content |
-|-------|---------|
-| [configuration.md](docs/configuration.md) | All config options |
-| [workflow.md](docs/workflow.md) | Stage-by-stage lifecycle |
-| [cli.md](docs/cli.md) | Command reference |
-| [api.md](docs/api.md) | HTTP API |
-| [content-identification.md](docs/content-identification.md) | TMDB matching internals |
-| [preset-decider.md](docs/preset-decider.md) | LLM-based encoding presets |
-| [development.md](docs/development.md) | Prerequisites and dev setup |
+- [docs/workflow.md](docs/workflow.md) - stage-by-stage lifecycle
+- `sample_config.toml` - all config options with comments
+- `spindle --help` - command reference

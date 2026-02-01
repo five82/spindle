@@ -62,29 +62,13 @@ golangci-lint run                     # Lint
 ./check-ci.sh                         # Full CI (recommended before handoff)
 ```
 
-## Architecture Map
+## Finding Your Way
 
-| Area | Packages |
-|------|----------|
-| Core orchestration | `internal/workflow`, `internal/daemon`, `internal/queue` |
-| Stage handlers | `internal/identification`, `internal/ripping`, `internal/episodeid`, `internal/encoding`, `internal/audioanalysis`, `internal/subtitles`, `internal/organizer` |
-| Content intelligence | `internal/contentid`, `internal/ripspec`, `internal/media`, `internal/ripcache`, `internal/disc` |
-| External services | `internal/services/` (`drapto/`, `jellyfin/`, `llm/`, `makemkv/`, `whisperx/`) |
-| CLI entry | `cmd/spindle` |
-| Config & logging | `internal/config`, `internal/logging`, `internal/logs` |
-| Communication | `internal/api` (DTOs), `internal/ipc` (JSON-RPC), `internal/notifications` |
-| Infrastructure | `internal/staging`, `internal/deps`, `internal/encodingstate`, `internal/textutil`, `internal/testsupport`, `internal/stage` |
-
-## Quick Navigation
-
-| Task | Start here |
-|------|------------|
-| Queue lifecycle | `internal/queue/models.go`, `internal/queue/store.go` |
-| Stage logic | `internal/{stage}/handler.go` or `internal/{stage}/{stage}.go` |
-| CLI commands | `cmd/spindle/{command}.go` |
-| Config fields | `internal/config/config.go` |
-| Error types | `internal/services/errors.go` |
-| API/IPC | `internal/api/`, `internal/ipc/server.go` |
+- Queue lifecycle: `internal/queue/` (start with doc.go)
+- Stage implementations: `internal/{stage}/` (identification, ripping, encoding, etc.)
+- CLI: `cmd/spindle/` - each command is a file
+- Config: `internal/config/config.go` defines fields; `sample_config.toml` is the reference
+- Run `ls internal/` to see packages; each has doc.go
 
 ## Common Patterns
 
@@ -108,27 +92,9 @@ golangci-lint run                     # Lint
 
 **Progress format**: `"Phase N/M - Action (context)"` (e.g., `"Phase 2/3 - Ripping selected titles (5 of 12)"`)
 
-## Log Streaming Architecture
-
-Spindle exposes logs via `/api/logs` with two distinct audiences:
-
-| Audience | Filter | Lane | ItemID | Content |
-|----------|--------|------|--------|---------|
-| Daemon logs (Flyer) | `daemon_only=1` | any | 0 only | Startup, workflow status, API events |
-| Item logs (Flyer) | `item=N` | all | N | Encoding progress, subtitles, organizing |
-| CLI/debug | `lane=*` | all | all | Everything |
-
-**Key fields:**
-- `ItemID`: Associates log with queue item (0 = daemon-level)
-- `Lane`: `foreground` (disc ops) or `background` (encoding/subtitles/organizing)
-
-**Defaults:** Without filters, API returns foreground-only logs (legacy behavior). Flyer uses `daemon_only=1` for daemon view and `item=N` for item view.
-
-**When adding new logs:** Set `ItemID` via context for item-specific work. Daemon-level logs (startup, API, workflow manager) should have `ItemID=0`.
-
 ## Database Schema
 
-The queue DB is **transient** (in-flight jobs only). No migrations - just bump `schemaVersion` in `schema.go` and update `schema.sql`. Users run `spindle queue clear --all` on mismatch.
+The queue DB is transient (in-flight jobs only). No migrations - bump `schemaVersion` in `internal/queue/schema.go` on changes.
 
 ## Troubleshooting Quick Reference
 
@@ -136,20 +102,6 @@ The queue DB is **transient** (in-flight jobs only). No migrations - just bump `
 - **Subtitle debugging**: Set `SPD_DEBUG_SUBTITLES_KEEP=1` to retain intermediate files
 - **Daemon issues**: Single-instance enforced in `internal/daemon`; use `spindle stop` to fully terminate
 - **Disc detection**: Use `spindle disc pause` to temporarily stop new disc queueing (resets on restart)
-
-## Deep Dive Documentation
-
-For detailed guidance beyond this file:
-
-| Topic | Location |
-|-------|----------|
-| Configuration options | `docs/configuration.md` |
-| Workflow stages | `docs/workflow.md` |
-| Development setup | `docs/development.md` |
-| Content identification | `docs/content-identification.md` |
-| CLI reference | `docs/cli.md`, `README.md` |
-| API endpoints | `docs/api.md` |
-| Package internals | Each package has `doc.go` |
 
 ## GitHub
 
