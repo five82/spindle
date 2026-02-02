@@ -147,13 +147,9 @@ func librarySubdirPath(root, child string) string {
 	return filepath.Join(root, child)
 }
 
-func udevRuleStatusLine(colorize bool) string {
-	installed, needsUpdate := CheckUdevRuleInstalled()
-	if !installed {
-		return renderStatusLine("Disc Detection", statusWarn, "udev rule not installed (run: spindle disc setup)", colorize)
+func discDetectionStatusLine(netlinkActive bool, colorize bool) string {
+	if netlinkActive {
+		return renderStatusLine("Disc Detection", statusOK, "Netlink monitoring active", colorize)
 	}
-	if needsUpdate {
-		return renderStatusLine("Disc Detection", statusWarn, "udev rule path outdated (run: spindle disc setup)", colorize)
-	}
-	return renderStatusLine("Disc Detection", statusOK, "udev rule installed", colorize)
+	return renderStatusLine("Disc Detection", statusWarn, "Netlink unavailable (manual detection via 'spindle disc detected')", colorize)
 }

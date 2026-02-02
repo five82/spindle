@@ -31,6 +31,7 @@ type Daemon struct {
 	logHub     *logging.StreamHub
 	logArchive *logging.EventArchive
 	monitor    *discMonitor
+	netlink    *netlinkMonitor
 	apiSrv     *apiServer
 
 	lockPath string
@@ -48,13 +49,14 @@ type Daemon struct {
 
 // Status represents daemon runtime information.
 type Status struct {
-	Running      bool
-	DiscPaused   bool
-	Workflow     workflow.StatusSummary
-	QueueDBPath  string
-	LockFilePath string
-	Dependencies []DependencyStatus
-	PID          int
+	Running           bool
+	DiscPaused        bool
+	NetlinkMonitoring bool
+	Workflow          workflow.StatusSummary
+	QueueDBPath       string
+	LockFilePath      string
+	Dependencies      []DependencyStatus
+	PID               int
 }
 
 // DependencyStatus reports the availability of an external requirement.
@@ -90,6 +92,7 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 		notifier:   notifications.NewService(cfg),
 	}
 	daemon.monitor = newDiscMonitor(cfg, store, logger, daemon.DiscPaused)
+	daemon.netlink = newNetlinkMonitor(cfg, logger, daemon.HandleDiscDetected, daemon.DiscPaused)
 	apiSrv, err := newAPIServer(cfg, daemon, logger)
 	if err != nil {
 		return nil, err
@@ -139,6 +142,17 @@ func (d *Daemon) Start(ctx context.Context) error {
 			return fmt.Errorf("start disc monitor: %w", err)
 		}
 	}
+	if d.netlink != nil {
+		// Netlink monitor start is non-fatal - if it fails, log a warning
+		// but continue with manual detection via IPC
+		if err := d.netlink.Start(d.ctx); err != nil {
+			d.logger.Warn("netlink monitor failed to start; automatic disc detection unavailable",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "netlink_start_failed"),
+				logging.String(logging.FieldImpact, "disc detection requires manual trigger via spindle disc detected"),
+			)
+		}
+	}
 	if d.apiSrv != nil {
 		if err := d.apiSrv.start(d.ctx); err != nil {
 			if d.monitor != nil {
@@ -172,6 +186,9 @@ func (d *Daemon) Stop(ctx context.Context) {
 	if d.cancel != nil {
 		d.cancel()
 		d.cancel = nil
+	}
+	if d.netlink != nil {
+		d.netlink.Stop()
 	}
 	if d.monitor != nil {
 		d.monitor.Stop()
@@ -373,14 +390,21 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	dependencies := make([]DependencyStatus, len(d.dependencies))
 	copy(dependencies, d.dependencies)
 	d.depsMu.RUnlock()
+
+	netlinkRunning := false
+	if d.netlink != nil {
+		netlinkRunning = d.netlink.Running()
+	}
+
 	return Status{
-		Running:      d.running.Load(),
-		DiscPaused:   d.discPaused.Load(),
-		Workflow:     summary,
-		QueueDBPath:  filepath.Join(d.cfg.Paths.LogDir, "queue.db"),
-		LockFilePath: d.lockPath,
-		Dependencies: dependencies,
-		PID:          os.Getpid(),
+		Running:           d.running.Load(),
+		DiscPaused:        d.discPaused.Load(),
+		NetlinkMonitoring: netlinkRunning,
+		Workflow:          summary,
+		QueueDBPath:       filepath.Join(d.cfg.Paths.LogDir, "queue.db"),
+		LockFilePath:      d.lockPath,
+		Dependencies:      dependencies,
+		PID:               os.Getpid(),
 	}
 }
 

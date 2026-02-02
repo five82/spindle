@@ -166,6 +166,7 @@ func (s *service) Status(_ StatusRequest, resp *StatusResponse) error {
 	status := s.daemon.Status(s.ctx)
 	resp.Running = status.Running
 	resp.DiscPaused = status.DiscPaused
+	resp.NetlinkMonitoring = status.NetlinkMonitoring
 	resp.QueueDBPath = status.QueueDBPath
 	resp.LockPath = status.LockFilePath
 	resp.QueueStats = make(map[string]int, len(status.Workflow.QueueStats))

@@ -128,7 +128,7 @@ func (m *discMonitor) Start(ctx context.Context) error {
 	m.cancel = cancel
 
 	if m.logger != nil {
-		m.logger.Info("disc monitor ready for udev events",
+		m.logger.Info("disc monitor ready for external detection events",
 			logging.String(logging.FieldEventType, "disc_monitor_ready"),
 			logging.String("device", m.device))
 	}
