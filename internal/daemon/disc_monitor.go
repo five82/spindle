@@ -178,6 +178,20 @@ func (m *discMonitor) HandleDetectionForDevice(ctx context.Context, device strin
 		m.mu.Unlock()
 	}()
 
+	// Check if any item is in a disc-dependent stage (identifying/ripping).
+	// Skip detection to avoid concurrent disc access which can cause read errors.
+	if m.queueHandler != nil && m.queueHandler.HasDiscDependentItem(monitorCtx) {
+		if m.logger != nil {
+			m.logger.Debug("skipping disc detection; disc-dependent stage in progress",
+				logging.String("device", device),
+			)
+		}
+		return &DiscDetectedResult{
+			Handled: false,
+			Message: "disc in use by active workflow",
+		}, nil
+	}
+
 	// Detect disc information
 	info, err := m.detect(monitorCtx, device)
 	if err != nil {

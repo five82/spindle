@@ -19,6 +19,9 @@ type queueProcessor interface {
 	// IsInWorkflow reports whether a disc with the given fingerprint is already
 	// being processed. Returns the item ID if found, 0 otherwise.
 	IsInWorkflow(ctx context.Context, fingerprint string) (bool, int64)
+	// HasDiscDependentItem reports whether any item is in a disc-dependent stage
+	// (identifying or ripping) that requires exclusive disc access.
+	HasDiscDependentItem(ctx context.Context) bool
 }
 
 type fingerprintErrorNotifier interface {
@@ -52,6 +55,17 @@ func (p *queueStoreProcessor) IsInWorkflow(ctx context.Context, fingerprint stri
 		return true, existing.ID
 	}
 	return false, 0
+}
+
+func (p *queueStoreProcessor) HasDiscDependentItem(ctx context.Context) bool {
+	if p == nil || p.store == nil {
+		return false
+	}
+	has, err := p.store.HasDiscDependentItem(ctx)
+	if err != nil {
+		return false
+	}
+	return has
 }
 
 func (p *queueStoreProcessor) Process(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, error) {

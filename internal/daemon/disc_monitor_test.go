@@ -12,9 +12,13 @@ import (
 type stubFingerprintProvider struct {
 	fingerprint string
 	err         error
+	onCompute   func() // optional callback to track if Compute was called
 }
 
 func (s *stubFingerprintProvider) Compute(ctx context.Context, device, discType string) (string, error) {
+	if s.onCompute != nil {
+		s.onCompute()
+	}
 	if s.err != nil {
 		return "", s.err
 	}
@@ -235,7 +239,7 @@ func TestDiscMonitorSkipsAlreadyInWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.NewDisc: %v", err)
 	}
-	item.Status = queue.StatusRipping // Actively being processed
+	item.Status = queue.StatusRipping // Actively being processed (disc-dependent stage)
 	if err := store.Update(ctx, item); err != nil {
 		t.Fatalf("store.Update: %v", err)
 	}
@@ -246,9 +250,20 @@ func TestDiscMonitorSkipsAlreadyInWorkflow(t *testing.T) {
 		return
 	}
 
-	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-active"}
+	// Track if disc access functions are called - they should NOT be called
+	// when a disc-dependent stage is in progress
+	detectCalled := false
+	fingerprintCalled := false
+
+	monitor.fingerprintProvider = &stubFingerprintProvider{
+		fingerprint: "fp-active",
+		onCompute: func() {
+			fingerprintCalled = true
+		},
+	}
 
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
+		detectCalled = true
 		return &discInfo{Device: device, Label: "Same Disc Again", Type: "Blu-ray"}, nil
 	}
 
@@ -264,8 +279,21 @@ func TestDiscMonitorSkipsAlreadyInWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleDetectionForDevice: %v", err)
 	}
-	if !result.Handled {
-		t.Fatalf("expected disc to be handled (already in workflow), got message: %s", result.Message)
+
+	// Detection should be skipped (not handled) when disc-dependent stage is in progress
+	if result.Handled {
+		t.Fatalf("expected disc detection to be skipped when ripping in progress")
+	}
+	if result.Message != "disc in use by active workflow" {
+		t.Fatalf("unexpected message: %s", result.Message)
+	}
+
+	// Verify no disc access occurred
+	if detectCalled {
+		t.Fatal("detect should not be called when disc-dependent stage in progress")
+	}
+	if fingerprintCalled {
+		t.Fatal("fingerprint should not be computed when disc-dependent stage in progress")
 	}
 
 	// Only one item should exist

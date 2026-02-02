@@ -70,6 +70,13 @@ var processingStatuses = map[Status]struct{}{
 	StatusOrganizing:         {},
 }
 
+// DiscDependentStatuses returns statuses that require exclusive disc access.
+// These stages actively access the optical drive, so concurrent disc detection
+// should be skipped to avoid read errors.
+func DiscDependentStatuses() []Status {
+	return []Status{StatusIdentifying, StatusRipping}
+}
+
 type statusTransition struct {
 	from Status
 	to   Status

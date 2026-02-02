@@ -300,3 +300,22 @@ func (s *Store) ClearFailed(ctx context.Context) (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// HasDiscDependentItem reports whether any item is in a disc-dependent stage
+// (identifying or ripping). These stages actively access the optical drive,
+// so concurrent disc detection should be skipped to avoid read errors.
+func (s *Store) HasDiscDependentItem(ctx context.Context) (bool, error) {
+	statuses := DiscDependentStatuses()
+	placeholders := makePlaceholders(len(statuses))
+	args := make([]any, len(statuses))
+	for i, status := range statuses {
+		args[i] = status
+	}
+
+	query := `SELECT COUNT(*) FROM queue_items WHERE status IN (` + placeholders + `)`
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return false, fmt.Errorf("check disc-dependent items: %w", err)
+	}
+	return count > 0, nil
+}

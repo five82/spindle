@@ -791,3 +791,85 @@ func TestRepeatedProgressUpdates(t *testing.T) {
 		t.Fatalf("expected progress message 'Frame 1900', got %q", final.ProgressMessage)
 	}
 }
+
+func TestHasDiscDependentItem(t *testing.T) {
+	t.Parallel()
+
+	cfg := testsupport.NewConfig(t)
+	store := testsupport.MustOpenStore(t, cfg)
+	ctx := context.Background()
+
+	// Initially no disc-dependent items
+	has, err := store.HasDiscDependentItem(ctx)
+	if err != nil {
+		t.Fatalf("HasDiscDependentItem: %v", err)
+	}
+	if has {
+		t.Fatal("expected no disc-dependent items initially")
+	}
+
+	// Add an item in pending status (not disc-dependent)
+	item, err := store.NewDisc(ctx, "Test Disc", "fp-test")
+	if err != nil {
+		t.Fatalf("NewDisc: %v", err)
+	}
+	has, err = store.HasDiscDependentItem(ctx)
+	if err != nil {
+		t.Fatalf("HasDiscDependentItem: %v", err)
+	}
+	if has {
+		t.Fatal("pending item should not be disc-dependent")
+	}
+
+	// Transition to identifying (disc-dependent)
+	item.Status = queue.StatusIdentifying
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	has, err = store.HasDiscDependentItem(ctx)
+	if err != nil {
+		t.Fatalf("HasDiscDependentItem: %v", err)
+	}
+	if !has {
+		t.Fatal("identifying item should be disc-dependent")
+	}
+
+	// Transition to ripping (still disc-dependent)
+	item.Status = queue.StatusRipping
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	has, err = store.HasDiscDependentItem(ctx)
+	if err != nil {
+		t.Fatalf("HasDiscDependentItem: %v", err)
+	}
+	if !has {
+		t.Fatal("ripping item should be disc-dependent")
+	}
+
+	// Transition to ripped (no longer disc-dependent)
+	item.Status = queue.StatusRipped
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	has, err = store.HasDiscDependentItem(ctx)
+	if err != nil {
+		t.Fatalf("HasDiscDependentItem: %v", err)
+	}
+	if has {
+		t.Fatal("ripped item should not be disc-dependent")
+	}
+
+	// Encoding is not disc-dependent
+	item.Status = queue.StatusEncoding
+	if err := store.Update(ctx, item); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	has, err = store.HasDiscDependentItem(ctx)
+	if err != nil {
+		t.Fatalf("HasDiscDependentItem: %v", err)
+	}
+	if has {
+		t.Fatal("encoding item should not be disc-dependent")
+	}
+}
