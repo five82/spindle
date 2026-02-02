@@ -258,10 +258,19 @@ func bestByInt(list []ripspec.Title, score func(ripspec.Title) int) []ripspec.Ti
 	return out
 }
 
+// maxLanguageVariantRuntimeDiff is the maximum runtime difference (in seconds) between
+// 800-series playlists that indicates language variants vs different cuts.
+// Disney multi-language discs differ by only a few seconds (localized title cards/credits).
+// Differences greater than this threshold indicate different cuts (theatrical vs director's).
+const maxLanguageVariantRuntimeDiff = 30
+
 // filterPreferredPlaylistFeatureLength returns feature-length titles with the preferred 800-series playlist.
 // Disney/Pixar discs use 00800.mpls for English, 00801 for Spanish, 00802 for French.
 // The English version is often slightly shorter due to language-specific credits.
-// Only applies when multiple feature-length 800-series playlists exist (indicating a multi-language disc).
+// Only applies when multiple feature-length 800-series playlists exist with similar runtimes
+// (indicating a multi-language disc). If runtimes differ by more than 30 seconds, assumes
+// different cuts (e.g., theatrical vs director's cut) and returns empty to let normal
+// selection prefer the longer version.
 // Returns empty slice if not a multi-language disc pattern.
 func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int) []ripspec.Title {
 	// Collect feature-length titles with 800-series playlists
@@ -297,6 +306,24 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 	}
 	if len(playlistNums) < 2 {
 		// All same playlist number, not a multi-language pattern
+		return nil
+	}
+
+	// Check runtime variance - if playlists differ by more than the threshold,
+	// they are likely different cuts (theatrical vs director's), not language variants.
+	// Disney language variants differ by only a few seconds (title cards/credits).
+	minDuration, maxDuration := candidates[0].title.Duration, candidates[0].title.Duration
+	for _, c := range candidates[1:] {
+		if c.title.Duration < minDuration {
+			minDuration = c.title.Duration
+		}
+		if c.title.Duration > maxDuration {
+			maxDuration = c.title.Duration
+		}
+	}
+	if maxDuration-minDuration > maxLanguageVariantRuntimeDiff {
+		// Runtime difference too large - likely different cuts, not language variants.
+		// Return empty to let normal selection logic prefer the longer version.
 		return nil
 	}
 
