@@ -120,9 +120,9 @@ func TestIsForcesSRT(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			result := isForcesSRT(tt.path)
+			result := isForcedSRT(tt.path)
 			if result != tt.expected {
-				t.Errorf("isForcesSRT(%q) = %v, want %v", tt.path, result, tt.expected)
+				t.Errorf("isForcedSRT(%q) = %v, want %v", tt.path, result, tt.expected)
 			}
 		})
 	}

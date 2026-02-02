@@ -2,6 +2,7 @@ package subtitles
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -117,10 +118,7 @@ func findMatchingCues(reference, forced []srtCue) [][2]srtCue {
 			}
 
 			// Skip if timing is too far off (unless we have no reference point yet)
-			timeDiff := fc.start - rc.start
-			if timeDiff < 0 {
-				timeDiff = -timeDiff
-			}
+			timeDiff := math.Abs(fc.start - rc.start)
 			if len(matches) > 0 && timeDiff > maxTimeDiff {
 				continue
 			}

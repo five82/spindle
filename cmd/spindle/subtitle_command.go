@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -278,23 +277,18 @@ func splitTitleAndYear(base string) (string, string) {
 	if trimmed == "" {
 		return "", ""
 	}
-	if idx := strings.LastIndex(trimmed, "("); idx != -1 && strings.HasSuffix(trimmed, ")") {
-		candidate := strings.TrimSpace(trimmed[idx+1 : len(trimmed)-1])
-		if len(candidate) == 4 {
-			allDigits := true
-			for _, r := range candidate {
-				if !unicode.IsDigit(r) {
-					allDigits = false
-					break
-				}
-			}
-			if allDigits {
-				title := strings.TrimSpace(trimmed[:idx])
-				return title, candidate
-			}
-		}
+	idx := strings.LastIndex(trimmed, "(")
+	if idx == -1 || !strings.HasSuffix(trimmed, ")") {
+		return trimmed, ""
 	}
-	return trimmed, ""
+	candidate := strings.TrimSpace(trimmed[idx+1 : len(trimmed)-1])
+	if len(candidate) != 4 {
+		return trimmed, ""
+	}
+	if _, err := strconv.Atoi(candidate); err != nil {
+		return trimmed, ""
+	}
+	return strings.TrimSpace(trimmed[:idx]), candidate
 }
 
 func openSubtitlesReady(cfg *config.Config) (bool, string) {

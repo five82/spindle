@@ -169,7 +169,7 @@ func (m *Muxer) buildMkvmergeArgs(req MuxRequest, outputPath string) []string {
 
 	// Add each subtitle track
 	for _, srtPath := range req.SubtitlePaths {
-		isForced := isForcesSRT(srtPath)
+		isForced := isForcedSRT(srtPath)
 		trackName := buildTrackName(req.Language, isForced)
 
 		// Language flag (applies to track 0 of the following file)
@@ -193,8 +193,8 @@ func (m *Muxer) buildMkvmergeArgs(req MuxRequest, outputPath string) []string {
 	return args
 }
 
-// isForcesSRT checks if an SRT path is a forced subtitle based on filename pattern.
-func isForcesSRT(path string) bool {
+// isForcedSRT checks if an SRT path is a forced subtitle based on filename pattern.
+func isForcedSRT(path string) bool {
 	lower := strings.ToLower(path)
 	return strings.Contains(lower, ".forced.") || strings.HasSuffix(lower, ".forced.srt")
 }
@@ -211,6 +211,8 @@ func buildTrackName(lang string, forced bool) string {
 // languageDisplayName returns a human-readable language name.
 func languageDisplayName(code string) string {
 	switch strings.ToLower(code) {
+	case "":
+		return "Unknown"
 	case "en", "eng":
 		return "English"
 	case "es", "spa":
@@ -248,9 +250,6 @@ func languageDisplayName(code string) string {
 	case "fi", "fin":
 		return "Finnish"
 	default:
-		if code == "" {
-			return "Unknown"
-		}
 		return strings.ToUpper(code)
 	}
 }

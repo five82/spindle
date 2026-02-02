@@ -580,32 +580,7 @@ func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, t
 		return
 	}
 	recordSubtitleGeneration(env, episodeKey, ctxMeta.Language, result, openSubsExpected, openSubsCount, aiCount)
-	encoded, err := env.Encode()
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("failed to encode rip spec after subtitles; metadata may be stale",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
-				logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
-			)
-		}
-		return
-	}
-	itemCopy := *item
-	itemCopy.RipSpecData = encoded
-	if err := s.store.Update(ctx, &itemCopy); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("failed to persist rip spec after subtitles; metadata may be stale",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
-				logging.String(logging.FieldErrorHint, "check queue database access"),
-				logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
-			)
-		}
-	} else {
-		*item = itemCopy
-	}
+	s.persistRipSpec(ctx, item, env)
 }
 
 // tryForcedSubtitlesForTarget checks if the disc has forced subtitle tracks and
