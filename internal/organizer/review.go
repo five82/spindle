@@ -86,7 +86,7 @@ func (o *Organizer) finishReview(ctx context.Context, item *queue.Item, stageSta
 	}
 
 	for _, reviewPath := range moved {
-		if err := o.validateOrganizedArtifact(ctx, reviewPath, stageStart); err != nil {
+		if err := o.validateOrganizedArtifact(ctx, reviewPath, stageStart, ""); err != nil {
 			return err
 		}
 	}

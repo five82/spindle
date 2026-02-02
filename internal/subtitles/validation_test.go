@@ -83,11 +83,8 @@ func TestAnalyzeSubtitleStreamsWithSubtitles(t *testing.T) {
 	if result.SubtitleCount != 2 {
 		t.Errorf("expected 2 subtitle count, got %d", result.SubtitleCount)
 	}
-	if result.DefaultTrack != 0 { // First subtitle stream (index 0 in subtitle-relative indexing)
-		t.Errorf("expected default track at index 0, got %d", result.DefaultTrack)
-	}
-	if result.ForcedTrack != 1 { // Second subtitle stream
-		t.Errorf("expected forced track at index 1, got %d", result.ForcedTrack)
+	if !result.HasDefault {
+		t.Error("expected default track to be present")
 	}
 	if !result.HasRegularSubs {
 		t.Error("expected regular subs to be present")

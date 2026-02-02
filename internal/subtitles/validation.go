@@ -13,11 +13,10 @@ import (
 	"spindle/internal/services"
 )
 
-// MuxValidationResult captures the outcome of subtitle muxing verification.
-type MuxValidationResult struct {
+// muxValidationResult captures the outcome of subtitle muxing verification.
+type muxValidationResult struct {
 	SubtitleCount  int
-	DefaultTrack   int  // Index of track marked default, -1 if none
-	ForcedTrack    int  // Index of track marked forced, -1 if none
+	HasDefault     bool // True if at least one track is marked default
 	LanguageMatch  bool // True if language metadata matches expected
 	HasRegularSubs bool // True if non-forced subtitles exist
 	HasForcedSubs  bool // True if forced subtitles exist
@@ -67,7 +66,7 @@ func ValidateMuxedSubtitles(ctx context.Context, ffprobeBinary, mkvPath string, 
 	}
 
 	// Verify at least one track is marked default (for regular subs)
-	if result.HasRegularSubs && result.DefaultTrack < 0 {
+	if result.HasRegularSubs && !result.HasDefault {
 		issues = append(issues, "no subtitle track marked as default")
 	}
 
@@ -113,16 +112,12 @@ func ValidateMuxedSubtitles(ctx context.Context, ffprobeBinary, mkvPath string, 
 }
 
 // analyzeSubtitleStreams examines subtitle streams and returns validation metrics.
-func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) MuxValidationResult {
-	result := MuxValidationResult{
-		DefaultTrack: -1,
-		ForcedTrack:  -1,
-	}
+func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) muxValidationResult {
+	var result muxValidationResult
 
 	expectedLang = strings.ToLower(strings.TrimSpace(expectedLang))
 	expectedLang3 := mapLanguageCode(expectedLang)
 
-	subtitleIdx := 0
 	for _, stream := range streams {
 		if stream.CodecType != "subtitle" {
 			continue
@@ -133,10 +128,9 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) MuxVa
 		// Check disposition flags
 		if stream.Disposition != nil {
 			if stream.Disposition["default"] == 1 {
-				result.DefaultTrack = subtitleIdx
+				result.HasDefault = true
 			}
 			if stream.Disposition["forced"] == 1 {
-				result.ForcedTrack = subtitleIdx
 				result.HasForcedSubs = true
 			} else {
 				result.HasRegularSubs = true
@@ -153,8 +147,6 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) MuxVa
 				result.LanguageMatch = true
 			}
 		}
-
-		subtitleIdx++
 	}
 
 	// If no language check was requested, mark as matching

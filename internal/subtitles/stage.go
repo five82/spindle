@@ -892,15 +892,7 @@ func (s *Stage) tryMuxSubtitles(ctx context.Context, target subtitleTarget, resu
 		ffprobeBinary = s.service.config.FFprobeBinary()
 	}
 	if err := ValidateMuxedSubtitles(ctx, ffprobeBinary, mkvPath, len(srtPaths), lang, s.logger); err != nil {
-		if s.logger != nil {
-			s.logger.Error("subtitle mux validation failed",
-				logging.Error(err),
-				logging.String("episode_key", episodeKey),
-				logging.String("mkv_path", mkvPath),
-				logging.String(logging.FieldEventType, "mux_validation_failed"),
-				logging.String(logging.FieldErrorHint, "subtitles may not have been embedded correctly"),
-			)
-		}
+		// Error already logged by ValidateMuxedSubtitles
 		return false
 	}
 

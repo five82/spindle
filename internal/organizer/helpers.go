@@ -176,8 +176,8 @@ func collectEncodedSources(item *queue.Item, env *ripspec.Envelope) []string {
 }
 
 // validateOrganizedArtifact validates that an organized file exists and is valid media.
-// The optional edition parameter triggers edition filename validation when non-empty.
-func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, startedAt time.Time, edition ...string) error {
+// The edition parameter triggers edition filename validation when non-empty.
+func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, startedAt time.Time, edition string) error {
 	logger := logging.WithContext(ctx, o.logger)
 	clean := strings.TrimSpace(path)
 	if clean == "" {
@@ -274,10 +274,8 @@ func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, 
 	}
 
 	// Validate edition filename if edition metadata is present
-	if len(edition) > 0 && strings.TrimSpace(edition[0]) != "" {
-		if err := ValidateEditionFilename(clean, edition[0], logger); err != nil {
-			return err
-		}
+	if err := ValidateEditionFilename(clean, edition, logger); err != nil {
+		return err
 	}
 
 	logger.Debug(

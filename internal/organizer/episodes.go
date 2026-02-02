@@ -235,7 +235,7 @@ func (o *Organizer) processEpisode(ctx context.Context, item *queue.Item, env *r
 	)
 	o.recordEpisodeAsset(ctx, item, env, job.Episode, targetPath, ripspec.AssetStatusCompleted, "", logger)
 
-	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted); err != nil {
+	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStarted, ""); err != nil {
 		// Validation failure is critical - record and return error
 		logger.Error("episode validation failed",
 			logging.String("episode_key", episodeKey),
