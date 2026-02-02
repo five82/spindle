@@ -20,7 +20,7 @@ func newDiscCommand(ctx *commandContext) *cobra.Command {
 	cmd.AddCommand(
 		newDiscPauseCommand(ctx),
 		newDiscResumeCommand(ctx),
-		newDiscDetectedCommand(ctx),
+		newDiscDetectCommand(ctx),
 	)
 	return cmd
 }
@@ -57,13 +57,11 @@ func newDiscResumeCommand(ctx *commandContext) *cobra.Command {
 	}
 }
 
-func newDiscDetectedCommand(ctx *commandContext) *cobra.Command {
-	var device string
-
-	cmd := &cobra.Command{
-		Use:   "detected",
-		Short: "Manually trigger disc detection for a device",
-		Long: `Manually trigger disc detection for a specific device.
+func newDiscDetectCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "detect",
+		Short: "Trigger disc detection",
+		Long: `Trigger disc detection using the configured optical drive.
 
 This command is useful for testing or when automatic netlink detection
 is unavailable. The daemon normally detects discs automatically via
@@ -79,7 +77,7 @@ If the daemon is not running, this command exits silently.`,
 			}
 			defer client.Close()
 
-			resp, err := client.DiscDetected(device)
+			resp, err := client.DiscDetect()
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "disc detection failed: %v\n", err)
 				return nil
@@ -93,11 +91,6 @@ If the daemon is not running, this command exits silently.`,
 			return nil
 		},
 	}
-
-	cmd.Flags().StringVar(&device, "device", "", "Device path (e.g., /dev/sr0)")
-	_ = cmd.MarkFlagRequired("device")
-
-	return cmd
 }
 
 func discRPC(ctx *commandContext, cmd *cobra.Command, fn func(*ipc.Client) (string, error)) error {

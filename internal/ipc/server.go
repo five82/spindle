@@ -456,9 +456,9 @@ func (s *service) DiscResume(_ DiscResumeRequest, resp *DiscResumeResponse) erro
 	return nil
 }
 
-func (s *service) DiscDetected(req DiscDetectedRequest, resp *DiscDetectedResponse) error {
-	s.log().Debug("disc detected via udev", logging.String("device", req.Device))
-	result, err := s.daemon.HandleDiscDetected(s.ctx, req.Device)
+func (s *service) DiscDetect(_ DiscDetectRequest, resp *DiscDetectResponse) error {
+	s.log().Debug("disc detect requested")
+	result, err := s.daemon.HandleDiscDetect(s.ctx)
 	if err != nil {
 		resp.Handled = false
 		resp.Message = err.Error()
@@ -469,8 +469,7 @@ func (s *service) DiscDetected(req DiscDetectedRequest, resp *DiscDetectedRespon
 	resp.ItemID = result.ItemID
 	if result.Handled {
 		s.log().Info("disc detection handled",
-			logging.String(logging.FieldEventType, "disc_detected_handled"),
-			logging.String("device", req.Device),
+			logging.String(logging.FieldEventType, "disc_detect_handled"),
 			logging.Int64(logging.FieldItemID, result.ItemID))
 	}
 	return nil

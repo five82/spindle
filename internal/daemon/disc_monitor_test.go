@@ -2,31 +2,12 @@ package daemon
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 
 	"spindle/internal/config"
-	"spindle/internal/disc"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 )
-
-type stubDiscScanner struct {
-	result *disc.ScanResult
-	err    error
-	calls  atomic.Int32
-}
-
-func (s *stubDiscScanner) Scan(ctx context.Context, device string) (*disc.ScanResult, error) {
-	s.calls.Add(1)
-	if s.err != nil {
-		return nil, s.err
-	}
-	if s.result != nil {
-		return s.result, nil
-	}
-	return &disc.ScanResult{}, nil
-}
 
 type stubFingerprintProvider struct {
 	fingerprint string
@@ -66,8 +47,6 @@ func TestDiscMonitorQueuesNewDisc(t *testing.T) {
 		return
 	}
 
-	scanner := &stubDiscScanner{result: &disc.ScanResult{}}
-	monitor.scanner = scanner
 	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-demo"}
 
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -82,9 +61,9 @@ func TestDiscMonitorQueuesNewDisc(t *testing.T) {
 	}
 	t.Cleanup(func() { monitor.Stop() })
 
-	result, err := monitor.HandleExternalDetection(ctx, "/dev/sr0")
+	result, err := monitor.HandleDetectionForDevice(ctx, "/dev/sr0")
 	if err != nil {
-		t.Fatalf("HandleExternalDetection: %v", err)
+		t.Fatalf("HandleDetectionForDevice: %v", err)
 	}
 	if !result.Handled {
 		t.Fatalf("expected disc to be handled, got message: %s", result.Message)
@@ -140,7 +119,6 @@ func TestDiscMonitorResetsExistingItem(t *testing.T) {
 		return
 	}
 
-	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
 	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-demo"}
 
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -155,9 +133,9 @@ func TestDiscMonitorResetsExistingItem(t *testing.T) {
 	}
 	t.Cleanup(func() { monitor.Stop() })
 
-	result, err := monitor.HandleExternalDetection(runCtx, "/dev/sr0")
+	result, err := monitor.HandleDetectionForDevice(runCtx, "/dev/sr0")
 	if err != nil {
-		t.Fatalf("HandleExternalDetection: %v", err)
+		t.Fatalf("HandleDetectionForDevice: %v", err)
 	}
 	if !result.Handled {
 		t.Fatalf("expected disc to be handled, got message: %s", result.Message)
@@ -205,7 +183,6 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 		return
 	}
 
-	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
 	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-done"}
 
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -220,9 +197,9 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 	}
 	t.Cleanup(func() { monitor.Stop() })
 
-	result, err := monitor.HandleExternalDetection(runCtx, "/dev/sr0")
+	result, err := monitor.HandleDetectionForDevice(runCtx, "/dev/sr0")
 	if err != nil {
-		t.Fatalf("HandleExternalDetection: %v", err)
+		t.Fatalf("HandleDetectionForDevice: %v", err)
 	}
 	if !result.Handled {
 		t.Fatalf("expected disc to be handled (completed items still count), got message: %s", result.Message)
@@ -269,9 +246,6 @@ func TestDiscMonitorSkipsAlreadyInWorkflow(t *testing.T) {
 		return
 	}
 
-	// Scanner should NOT be called because the disc is already in workflow
-	scanner := &stubDiscScanner{result: &disc.ScanResult{}}
-	monitor.scanner = scanner
 	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-active"}
 
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -286,17 +260,12 @@ func TestDiscMonitorSkipsAlreadyInWorkflow(t *testing.T) {
 	}
 	t.Cleanup(func() { monitor.Stop() })
 
-	result, err := monitor.HandleExternalDetection(runCtx, "/dev/sr0")
+	result, err := monitor.HandleDetectionForDevice(runCtx, "/dev/sr0")
 	if err != nil {
-		t.Fatalf("HandleExternalDetection: %v", err)
+		t.Fatalf("HandleDetectionForDevice: %v", err)
 	}
 	if !result.Handled {
 		t.Fatalf("expected disc to be handled (already in workflow), got message: %s", result.Message)
-	}
-
-	// Scanner should NOT have been called - disc is already in workflow
-	if scanner.calls.Load() != 0 {
-		t.Fatalf("expected scanner to not be called for disc already in workflow, got %d calls", scanner.calls.Load())
 	}
 
 	// Only one item should exist
@@ -339,7 +308,6 @@ func TestDiscMonitorProcessesAfterWorkflowComplete(t *testing.T) {
 		return
 	}
 
-	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
 	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-reinsert"}
 
 	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
@@ -354,9 +322,9 @@ func TestDiscMonitorProcessesAfterWorkflowComplete(t *testing.T) {
 	}
 	t.Cleanup(func() { monitor.Stop() })
 
-	result, err := monitor.HandleExternalDetection(runCtx, "/dev/sr0")
+	result, err := monitor.HandleDetectionForDevice(runCtx, "/dev/sr0")
 	if err != nil {
-		t.Fatalf("HandleExternalDetection: %v", err)
+		t.Fatalf("HandleDetectionForDevice: %v", err)
 	}
 	if !result.Handled {
 		t.Fatalf("expected disc to be handled, got message: %s", result.Message)
@@ -389,7 +357,6 @@ func TestDiscMonitorNoDiscDetected(t *testing.T) {
 		return
 	}
 
-	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
 	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-demo"}
 
 	// Simulate no disc in drive
@@ -405,9 +372,9 @@ func TestDiscMonitorNoDiscDetected(t *testing.T) {
 	}
 	t.Cleanup(func() { monitor.Stop() })
 
-	result, err := monitor.HandleExternalDetection(ctx, "/dev/sr0")
+	result, err := monitor.HandleDetectionForDevice(ctx, "/dev/sr0")
 	if err != nil {
-		t.Fatalf("HandleExternalDetection: %v", err)
+		t.Fatalf("HandleDetectionForDevice: %v", err)
 	}
 	if result.Handled {
 		t.Fatal("expected disc to not be handled when no disc detected")
@@ -440,7 +407,6 @@ func TestDiscMonitorConcurrentDetection(t *testing.T) {
 		<-detectComplete
 		return &discInfo{Device: device, Label: "Demo Disc", Type: "Blu-ray"}, nil
 	}
-	monitor.scanner = &stubDiscScanner{result: &disc.ScanResult{}}
 	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-concurrent"}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -454,7 +420,7 @@ func TestDiscMonitorConcurrentDetection(t *testing.T) {
 	// Start first detection in background
 	resultCh := make(chan *DiscDetectedResult, 1)
 	go func() {
-		result, _ := monitor.HandleExternalDetection(ctx, "/dev/sr0")
+		result, _ := monitor.HandleDetectionForDevice(ctx, "/dev/sr0")
 		resultCh <- result
 	}()
 
@@ -462,9 +428,9 @@ func TestDiscMonitorConcurrentDetection(t *testing.T) {
 	<-detectStarted
 
 	// Try second detection - should be rejected
-	result2, err := monitor.HandleExternalDetection(ctx, "/dev/sr0")
+	result2, err := monitor.HandleDetectionForDevice(ctx, "/dev/sr0")
 	if err != nil {
-		t.Fatalf("second HandleExternalDetection: %v", err)
+		t.Fatalf("second HandleDetectionForDevice: %v", err)
 	}
 	if result2.Handled {
 		t.Fatal("expected second detection to be rejected while first is processing")
@@ -480,5 +446,50 @@ func TestDiscMonitorConcurrentDetection(t *testing.T) {
 	result1 := <-resultCh
 	if !result1.Handled {
 		t.Fatalf("expected first disc to be handled, got message: %s", result1.Message)
+	}
+}
+
+func TestDiscMonitorHandleDetectionUsesConfiguredDevice(t *testing.T) {
+	cfg := testMonitorConfig(t)
+	store, err := queue.Open(cfg)
+	if err != nil {
+		t.Fatalf("queue.Open: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	if monitor == nil {
+		t.Fatal("expected monitor to be created")
+		return
+	}
+
+	monitor.fingerprintProvider = &stubFingerprintProvider{fingerprint: "fp-configured"}
+
+	var detectedDevice string
+	monitor.detect = func(ctx context.Context, device string) (*discInfo, error) {
+		detectedDevice = device
+		return &discInfo{Device: device, Label: "Demo Disc", Type: "Blu-ray"}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := monitor.Start(ctx); err != nil {
+		t.Fatalf("monitor.Start: %v", err)
+	}
+	t.Cleanup(func() { monitor.Stop() })
+
+	// HandleDetection should use the configured device
+	result, err := monitor.HandleDetection(ctx)
+	if err != nil {
+		t.Fatalf("HandleDetection: %v", err)
+	}
+	if !result.Handled {
+		t.Fatalf("expected disc to be handled, got message: %s", result.Message)
+	}
+
+	// Verify it used the configured device (from config default)
+	if detectedDevice != monitor.device {
+		t.Fatalf("expected device %q, got %q", monitor.device, detectedDevice)
 	}
 }

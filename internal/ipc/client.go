@@ -201,11 +201,10 @@ func (c *Client) DiscResume() (*DiscResumeResponse, error) {
 	return &resp, nil
 }
 
-// DiscDetected notifies the daemon that a disc was detected on a device.
-func (c *Client) DiscDetected(device string) (*DiscDetectedResponse, error) {
-	var resp DiscDetectedResponse
-	req := DiscDetectedRequest{Device: device}
-	if err := c.client.Call("Spindle.DiscDetected", req, &resp); err != nil {
+// DiscDetect triggers disc detection using the configured device.
+func (c *Client) DiscDetect() (*DiscDetectResponse, error) {
+	var resp DiscDetectResponse
+	if err := c.client.Call("Spindle.DiscDetect", DiscDetectRequest{}, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

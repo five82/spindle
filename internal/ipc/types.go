@@ -198,13 +198,11 @@ type DiscResumeResponse struct {
 	Message string `json:"message"`
 }
 
-// DiscDetectedRequest triggers disc detection for a specific device.
-type DiscDetectedRequest struct {
-	Device string `json:"device"`
-}
+// DiscDetectRequest triggers disc detection using the configured device.
+type DiscDetectRequest struct{}
 
-// DiscDetectedResponse reports the result of disc detection.
-type DiscDetectedResponse struct {
+// DiscDetectResponse reports the result of disc detection.
+type DiscDetectResponse struct {
 	Handled bool   `json:"handled"`
 	Message string `json:"message"`
 	ItemID  int64  `json:"item_id,omitempty"`
