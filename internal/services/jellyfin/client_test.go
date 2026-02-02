@@ -24,6 +24,7 @@ func (m staticMetadata) GetLibraryPath(root, moviesDir, tvDir string) string {
 func (m staticMetadata) GetFilename() string { return m.filename }
 func (m staticMetadata) IsMovie() bool       { return m.movie }
 func (m staticMetadata) Title() string       { return m.filename }
+func (m staticMetadata) GetEdition() string  { return "" }
 
 func TestSimpleServiceOrganizeAddsSuffixWhenOverwriteDisabled(t *testing.T) {
 	t.Parallel()

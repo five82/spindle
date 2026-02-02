@@ -29,6 +29,7 @@ type MetadataProvider interface {
 	GetFilename() string
 	IsMovie() bool
 	Title() string
+	GetEdition() string
 }
 
 // Organizer moves encoded files into the final library location.

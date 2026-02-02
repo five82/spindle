@@ -16,6 +16,7 @@ type MediaMetadata interface {
 	GetFilename() string
 	IsMovie() bool
 	Title() string
+	GetEdition() string
 }
 
 // Service defines Jellyfin/library operations used by the organizer.

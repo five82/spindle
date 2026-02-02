@@ -885,6 +885,25 @@ func (s *Stage) tryMuxSubtitles(ctx context.Context, target subtitleTarget, resu
 			logging.Int("sidecars_removed", len(muxResult.RemovedSidecars)),
 		)
 	}
+
+	// Validate that subtitles were actually embedded in the MKV
+	ffprobeBinary := ""
+	if s.service != nil && s.service.config != nil {
+		ffprobeBinary = s.service.config.FFprobeBinary()
+	}
+	if err := ValidateMuxedSubtitles(ctx, ffprobeBinary, mkvPath, len(srtPaths), lang, s.logger); err != nil {
+		if s.logger != nil {
+			s.logger.Error("subtitle mux validation failed",
+				logging.Error(err),
+				logging.String("episode_key", episodeKey),
+				logging.String("mkv_path", mkvPath),
+				logging.String(logging.FieldEventType, "mux_validation_failed"),
+				logging.String(logging.FieldErrorHint, "subtitles may not have been embedded correctly"),
+			)
+		}
+		return false
+	}
+
 	return true
 }
 

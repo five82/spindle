@@ -160,7 +160,8 @@ func (m Metadata) IsMovie() bool {
 	return m.Movie
 }
 
-func (m Metadata) Title() string { return m.TitleValue }
+func (m Metadata) Title() string      { return m.TitleValue }
+func (m Metadata) GetEdition() string { return strings.TrimSpace(m.Edition) }
 
 func buildEpisodeFilename(show string, season int, episodes []int) string {
 	show = sanitizeFilename(show)

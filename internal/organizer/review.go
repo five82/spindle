@@ -17,7 +17,6 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
-	"spindle/internal/services/jellyfin"
 )
 
 // finishReview moves encoded files to the review directory and marks the item complete.
@@ -210,7 +209,7 @@ func (o *Organizer) handleLibraryUnavailable(ctx context.Context, item *queue.It
 }
 
 // organizeToLibrary performs the core library organization for a single file.
-func (o *Organizer) organizeToLibrary(ctx context.Context, item *queue.Item, meta jellyfin.MediaMetadata, stageStart time.Time, env *ripspec.Envelope) error {
+func (o *Organizer) organizeToLibrary(ctx context.Context, item *queue.Item, meta MetadataProvider, stageStart time.Time, env *ripspec.Envelope) error {
 	logger := logging.WithContext(ctx, o.logger)
 
 	o.updateProgress(ctx, item, "Organizing library structure", 20)
@@ -270,7 +269,12 @@ func (o *Organizer) organizeToLibrary(ctx context.Context, item *queue.Item, met
 		}
 	}
 
-	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStart); err != nil {
+	// Validate organized artifact (passing edition for movies to verify filename includes it)
+	edition := ""
+	if meta.IsMovie() {
+		edition = meta.GetEdition()
+	}
+	if err := o.validateOrganizedArtifact(ctx, targetPath, stageStart, edition); err != nil {
 		return err
 	}
 

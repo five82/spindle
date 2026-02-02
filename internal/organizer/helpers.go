@@ -176,7 +176,8 @@ func collectEncodedSources(item *queue.Item, env *ripspec.Envelope) []string {
 }
 
 // validateOrganizedArtifact validates that an organized file exists and is valid media.
-func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, startedAt time.Time) error {
+// The optional edition parameter triggers edition filename validation when non-empty.
+func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, startedAt time.Time, edition ...string) error {
 	logger := logging.WithContext(ctx, o.logger)
 	clean := strings.TrimSpace(path)
 	if clean == "" {
@@ -270,6 +271,13 @@ func (o *Organizer) validateOrganizedArtifact(ctx context.Context, path string, 
 			"Organized file duration could not be determined",
 			nil,
 		)
+	}
+
+	// Validate edition filename if edition metadata is present
+	if len(edition) > 0 && strings.TrimSpace(edition[0]) != "" {
+		if err := ValidateEditionFilename(clean, edition[0], logger); err != nil {
+			return err
+		}
 	}
 
 	logger.Debug(

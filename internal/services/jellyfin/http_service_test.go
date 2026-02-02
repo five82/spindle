@@ -71,3 +71,5 @@ func (m testMetadata) GetFilename() string { return m.filename }
 func (m testMetadata) IsMovie() bool { return m.movie }
 
 func (m testMetadata) Title() string { return m.title }
+
+func (m testMetadata) GetEdition() string { return "" }

@@ -164,6 +164,12 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				logging.String(logging.FieldErrorHint, "commentary tracks will still be present but unlabeled"),
 				logging.String(logging.FieldImpact, "Jellyfin may not recognize commentary tracks"),
 			)
+		} else {
+			// Validate that commentary labeling was applied correctly
+			expectedCount := len(commentaryResult.CommentaryTracks)
+			if err := ValidateCommentaryLabeling(ctx, s.cfg.FFprobeBinary(), targets, expectedCount, s.logger); err != nil {
+				return err
+			}
 		}
 	}
 
