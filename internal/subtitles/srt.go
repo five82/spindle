@@ -150,5 +150,18 @@ func ValidateSRTContent(path string, videoSeconds float64) []string {
 		}
 	}
 
+	// Check cue density (sparse subtitles often indicate wrong language or incomplete file)
+	if videoSeconds > 60 {
+		cuesPerMinute := float64(cues) / (videoSeconds / 60.0)
+		if cuesPerMinute < 2.0 {
+			issues = append(issues, fmt.Sprintf("sparse_subtitles: %.1f cues/min (expected >= 2)", cuesPerMinute))
+		}
+	}
+
+	// Check first cue timing (late start often indicates wrong release/edition)
+	if first < math.Inf(1) && first > 900 { // 15 minutes
+		issues = append(issues, fmt.Sprintf("late_first_cue: starts at %.0fs (%.1f min)", first, first/60))
+	}
+
 	return issues
 }
