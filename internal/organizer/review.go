@@ -227,27 +227,46 @@ func (o *Organizer) organizeToLibrary(ctx context.Context, item *queue.Item, met
 	item.FinalFile = targetPath
 	logger.Debug("library move completed", logging.String("final_file", targetPath))
 
-	subtitlesMoved, err := o.moveGeneratedSubtitles(ctx, item, targetPath)
-	if err != nil {
-		logger.Warn("subtitle sidecar move failed; subtitles may be missing in library",
-			logging.Error(err),
-			logging.String(logging.FieldEventType, "subtitle_move_failed"),
-			logging.String(logging.FieldErrorHint, "check library_dir permissions and subtitle file names"),
-			logging.String(logging.FieldImpact, "subtitles will not appear in Jellyfin for this item"),
-		)
+	// Check if subtitles were muxed into MKV (skip sidecar move if so)
+	subtitlesMuxed := false
+	if env != nil && len(env.Assets.Subtitled) > 0 {
+		// For single-file (movie), check the "primary" episode key
+		if asset, ok := env.Assets.FindAsset("subtitled", "primary"); ok && asset.SubtitlesMuxed {
+			subtitlesMuxed = true
+		}
 	}
 
-	// Check if subtitles were expected but missing
-	if o.cfg != nil && o.cfg.Subtitles.Enabled && env != nil && len(env.Assets.Subtitled) > 0 && subtitlesMoved == 0 {
-		logger.Warn("expected subtitles not found",
-			logging.Int("expected_count", len(env.Assets.Subtitled)),
-			logging.Int("moved_count", subtitlesMoved),
-			logging.String(logging.FieldEventType, "subtitles_missing"),
-			logging.String(logging.FieldErrorHint, "check subtitle generation logs"),
+	var subtitlesMoved int
+	if subtitlesMuxed {
+		logger.Info("subtitle sidecar move decision",
+			logging.String(logging.FieldDecisionType, "subtitle_sidecar_move"),
+			logging.String("decision_result", "skipped"),
+			logging.String("decision_reason", "subtitles_muxed_into_mkv"),
 		)
-		item.NeedsReview = true
-		if item.ReviewReason == "" {
-			item.ReviewReason = "expected subtitles missing"
+	} else {
+		var err error
+		subtitlesMoved, err = o.moveGeneratedSubtitles(ctx, item, targetPath)
+		if err != nil {
+			logger.Warn("subtitle sidecar move failed; subtitles may be missing in library",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "subtitle_move_failed"),
+				logging.String(logging.FieldErrorHint, "check library_dir permissions and subtitle file names"),
+				logging.String(logging.FieldImpact, "subtitles will not appear in Jellyfin for this item"),
+			)
+		}
+
+		// Check if subtitles were expected but missing (only when not muxed)
+		if o.cfg != nil && o.cfg.Subtitles.Enabled && env != nil && len(env.Assets.Subtitled) > 0 && subtitlesMoved == 0 {
+			logger.Warn("expected subtitles not found",
+				logging.Int("expected_count", len(env.Assets.Subtitled)),
+				logging.Int("moved_count", subtitlesMoved),
+				logging.String(logging.FieldEventType, "subtitles_missing"),
+				logging.String(logging.FieldErrorHint, "check subtitle generation logs"),
+			)
+			item.NeedsReview = true
+			if item.ReviewReason == "" {
+				item.ReviewReason = "expected subtitles missing"
+			}
 		}
 	}
 

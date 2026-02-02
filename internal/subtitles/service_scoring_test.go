@@ -305,3 +305,125 @@ func TestFilterForcedSubtitleCandidatesRejectsFranchiseTitles(t *testing.T) {
 		t.Fatalf("expected both exact and extended matches to remain")
 	}
 }
+
+func TestEditionMatchScore(t *testing.T) {
+	tests := []struct {
+		name            string
+		expectedEdition string
+		release         string
+		wantPositive    bool
+		wantNegative    bool
+		wantReason      string
+	}{
+		// No edition specified - no adjustment
+		{"no edition", "", "Movie.2007.1080p.BluRay", false, false, ""},
+
+		// Director's cut variations
+		{"dc match directors cut", "director's cut", "Movie.2007.Directors.Cut.1080p.BluRay", true, false, "edition=match"},
+		{"dc match dc abbreviation", "director's cut", "Movie.2007.DC.1080p.BluRay", true, false, "edition=match"},
+		{"dc mismatch theatrical", "director's cut", "Movie.2007.1080p.BluRay", false, true, "edition=mismatch"},
+
+		// Extended edition
+		{"extended match", "extended", "Movie.2007.Extended.1080p.BluRay", true, false, "edition=match"},
+		{"extended match edition", "extended edition", "Movie.2007.Extended.Edition.1080p.BluRay", true, false, "edition=match"},
+		{"extended mismatch", "extended", "Movie.2007.1080p.BluRay", false, true, "edition=mismatch"},
+
+		// Theatrical
+		{"theatrical match", "theatrical", "Movie.2007.Theatrical.1080p.BluRay", true, false, "edition=match"},
+		{"theatrical mismatch dc", "theatrical", "Movie.2007.Directors.Cut.1080p.BluRay", false, true, "edition=mismatch"},
+
+		// Unrated
+		{"unrated match", "unrated", "Movie.2007.Unrated.1080p.BluRay", true, false, "edition=match"},
+		{"unrated mismatch", "unrated", "Movie.2007.1080p.BluRay", false, true, "edition=mismatch"},
+
+		// Final cut
+		{"final cut match", "final cut", "Blade.Runner.1982.Final.Cut.1080p.BluRay", true, false, "edition=match"},
+		{"final cut mismatch theatrical", "final cut", "Blade.Runner.1982.Theatrical.1080p.BluRay", false, true, "edition=mismatch"},
+
+		// IMAX
+		{"imax match", "imax", "Movie.2007.IMAX.1080p.BluRay", true, false, "edition=match"},
+
+		// Case insensitivity
+		{"case insensitive", "DIRECTOR'S CUT", "movie.2007.directors.cut.1080p.bluray", true, false, "edition=match"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score, reason := editionMatchScore(tt.expectedEdition, tt.release)
+
+			if tt.wantPositive && score <= 0 {
+				t.Errorf("expected positive score for edition match, got %.1f", score)
+			}
+			if tt.wantNegative && score >= 0 {
+				t.Errorf("expected negative score for edition mismatch, got %.1f", score)
+			}
+			if !tt.wantPositive && !tt.wantNegative && score != 0 {
+				t.Errorf("expected zero score when no edition, got %.1f", score)
+			}
+			if reason != tt.wantReason {
+				t.Errorf("expected reason %q, got %q", tt.wantReason, reason)
+			}
+		})
+	}
+}
+
+func TestRankSubtitleCandidatesPrefersMatchingEdition(t *testing.T) {
+	// Simulate Director's Cut source needing subtitles
+	ctx := SubtitleContext{
+		Title:     "Star Trek The Motion Picture",
+		MediaType: "movie",
+		Year:      "1979",
+		Edition:   "director's cut",
+	}
+
+	subs := []opensubtitles.Subtitle{
+		// Theatrical cut - more downloads but wrong edition
+		{FileID: 1, Language: "en", Release: "Star.Trek.The.Motion.Picture.1979.Theatrical.1080p.BluRay", Downloads: 5000, FeatureYear: 1979, FeatureTitle: "Star Trek: The Motion Picture"},
+		// Director's cut - fewer downloads but matching edition
+		{FileID: 2, Language: "en", Release: "Star.Trek.The.Motion.Picture.1979.Directors.Cut.1080p.BluRay", Downloads: 500, FeatureYear: 1979, FeatureTitle: "Star Trek: The Motion Picture"},
+		// Generic release - no edition indicator
+		{FileID: 3, Language: "en", Release: "Star.Trek.The.Motion.Picture.1979.1080p.BluRay", Downloads: 3000, FeatureYear: 1979, FeatureTitle: "Star Trek: The Motion Picture"},
+	}
+
+	ordered := rankSubtitleCandidates(subs, []string{"en"}, ctx)
+
+	if len(ordered) != 3 {
+		t.Fatalf("expected 3 candidates, got %d", len(ordered))
+	}
+
+	// Director's Cut should rank first despite fewer downloads
+	if ordered[0].subtitle.FileID != 2 {
+		t.Errorf("expected Director's Cut (FileID=2) to rank first, got FileID=%d", ordered[0].subtitle.FileID)
+		t.Logf("Ranking order:")
+		for i, s := range ordered {
+			t.Logf("  %d: FileID=%d, Release=%s, Score=%.2f, Reasons=%v",
+				i, s.subtitle.FileID, s.subtitle.Release, s.score, s.reasons)
+		}
+	}
+
+	// Verify Director's Cut gets edition=match in reasons
+	hasEditionMatch := false
+	for _, reason := range ordered[0].reasons {
+		if reason == "edition=match" {
+			hasEditionMatch = true
+			break
+		}
+	}
+	if !hasEditionMatch {
+		t.Errorf("expected edition=match reason for Director's Cut, got: %v", ordered[0].reasons)
+	}
+
+	// Both non-matching editions (theatrical and generic) should have edition=mismatch
+	for i := 1; i < len(ordered); i++ {
+		hasEditionMismatch := false
+		for _, reason := range ordered[i].reasons {
+			if reason == "edition=mismatch" {
+				hasEditionMismatch = true
+				break
+			}
+		}
+		if !hasEditionMismatch {
+			t.Errorf("expected edition=mismatch for FileID=%d, got: %v", ordered[i].subtitle.FileID, ordered[i].reasons)
+		}
+	}
+}

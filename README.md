@@ -12,7 +12,7 @@ Early-stage project; expect frequent changes.
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.25+, MakeMKV, ffmpeg, mediainfo.
+Prerequisites: Go 1.25+, MakeMKV, ffmpeg, mediainfo. Optional: mkvmerge (for subtitle muxing).
 
 ## Configure
 

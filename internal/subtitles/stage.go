@@ -23,6 +23,7 @@ import (
 type Stage struct {
 	store   *queue.Store
 	service *Service
+	muxer   *Muxer
 	logger  *slog.Logger
 }
 
@@ -35,11 +36,20 @@ func (s *Stage) SetLogger(logger *slog.Logger) {
 	if s.service != nil {
 		s.service.SetLogger(logger)
 	}
+	if s.muxer != nil {
+		s.muxer.SetLogger(logger)
+	}
 }
 
 // NewStage constructs a workflow stage that generates subtitles for queue items.
 func NewStage(store *queue.Store, service *Service, logger *slog.Logger) *Stage {
-	return &Stage{store: store, service: service, logger: logging.NewComponentLogger(logger, "subtitle-stage")}
+	stageLogger := logging.NewComponentLogger(logger, "subtitle-stage")
+	return &Stage{
+		store:   store,
+		service: service,
+		muxer:   NewMuxer(logger),
+		logger:  stageLogger,
+	}
 }
 
 // Prepare primes queue progress fields before executing the stage.
@@ -237,18 +247,26 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			aiCount++
 		}
 		totalSegments += result.SegmentCount
-		// Mark as completed when adding successful asset
-		env.Assets.AddAsset("subtitled", ripspec.Asset{
-			EpisodeKey: target.EpisodeKey,
-			TitleID:    target.TitleID,
-			Path:       result.SubtitlePath,
-			Status:     ripspec.AssetStatusCompleted,
-		})
-		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, openSubsExpected, openSubsCount, aiCount, ctxMeta)
 
 		// Check for forced subtitles if disc has forced subtitle tracks.
 		// Pass the aligned regular subtitle as reference for subtitle-to-subtitle alignment.
 		s.tryForcedSubtitlesForTarget(ctx, item, target, ctxMeta, &env, result.SubtitlePath)
+
+		// Mux subtitles into MKV if configured
+		subtitlesMuxed := false
+		if s.shouldMuxSubtitles() {
+			subtitlesMuxed = s.tryMuxSubtitles(ctx, target, result, &env, episodeKey)
+		}
+
+		// Mark as completed when adding successful asset
+		env.Assets.AddAsset("subtitled", ripspec.Asset{
+			EpisodeKey:     target.EpisodeKey,
+			TitleID:        target.TitleID,
+			Path:           result.SubtitlePath,
+			Status:         ripspec.AssetStatusCompleted,
+			SubtitlesMuxed: subtitlesMuxed,
+		})
+		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, openSubsExpected, openSubsCount, aiCount, ctxMeta)
 	}
 
 	// Determine final item status based on episode outcomes
@@ -805,6 +823,94 @@ func normalizeEpisodeKey(key string) string {
 		return "primary"
 	}
 	return normalized
+}
+
+// shouldMuxSubtitles returns true if subtitle muxing is enabled.
+func (s *Stage) shouldMuxSubtitles() bool {
+	if s == nil || s.service == nil || s.service.config == nil {
+		return false
+	}
+	return s.service.config.Subtitles.MuxIntoMKV
+}
+
+// tryMuxSubtitles attempts to mux generated subtitles into the encoded MKV.
+// Returns true if muxing succeeded, false otherwise (sidecars are preserved on failure).
+func (s *Stage) tryMuxSubtitles(ctx context.Context, target subtitleTarget, result GenerateResult, env *ripspec.Envelope, episodeKey string) bool {
+	if s == nil || s.muxer == nil {
+		return false
+	}
+
+	// Collect subtitle paths to mux
+	var srtPaths []string
+	if strings.TrimSpace(result.SubtitlePath) != "" {
+		srtPaths = append(srtPaths, result.SubtitlePath)
+	}
+	if strings.TrimSpace(result.ForcedSubtitlePath) != "" {
+		srtPaths = append(srtPaths, result.ForcedSubtitlePath)
+	}
+	if len(srtPaths) == 0 {
+		return false
+	}
+
+	// Get the encoded MKV path from the target
+	mkvPath := strings.TrimSpace(target.SourcePath)
+	if mkvPath == "" {
+		if s.logger != nil {
+			s.logger.Warn("cannot mux subtitles: no source MKV path",
+				logging.String("episode_key", episodeKey),
+				logging.String(logging.FieldEventType, "mux_skipped"),
+			)
+		}
+		return false
+	}
+
+	// Determine language from subtitle context or filename
+	lang := "en"
+	if s.service != nil && len(s.service.languages) > 0 {
+		lang = s.service.languages[0]
+	}
+
+	if s.logger != nil {
+		s.logger.Info("subtitle mux decision",
+			logging.String(logging.FieldDecisionType, "subtitle_mux"),
+			logging.String("decision_result", "muxing"),
+			logging.String("decision_reason", "mux_into_mkv_enabled"),
+			logging.String("episode_key", episodeKey),
+			logging.String("mkv_path", mkvPath),
+			logging.Int("subtitle_count", len(srtPaths)),
+		)
+	}
+
+	muxResult, err := s.muxer.MuxSubtitles(ctx, MuxRequest{
+		MKVPath:           mkvPath,
+		SubtitlePaths:     srtPaths,
+		Language:          lang,
+		StripExistingSubs: true, // Remove any existing subtitle tracks
+	})
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("subtitle muxing failed; keeping sidecar files",
+				logging.Error(err),
+				logging.String("episode_key", episodeKey),
+				logging.String("mkv_path", mkvPath),
+				logging.String(logging.FieldEventType, "mux_failed"),
+				logging.String(logging.FieldErrorHint, "check mkvmerge installation and MKV file integrity"),
+				logging.String(logging.FieldImpact, "subtitles preserved as external sidecar files"),
+			)
+		}
+		return false
+	}
+
+	if s.logger != nil {
+		s.logger.Info("subtitle muxing completed",
+			logging.String(logging.FieldEventType, "mux_complete"),
+			logging.String("episode_key", episodeKey),
+			logging.String("output_path", muxResult.OutputPath),
+			logging.Int("tracks_muxed", len(muxResult.MuxedSubtitles)),
+			logging.Int("sidecars_removed", len(muxResult.RemovedSidecars)),
+		)
+	}
+	return true
 }
 
 // HealthCheck reports readiness for the subtitle stage.

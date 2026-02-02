@@ -478,6 +478,13 @@ func (d *Daemon) runDependencyChecks(ctx context.Context) error {
 			Command:     "uvx",
 			Description: "Required for WhisperX-driven transcription",
 		})
+		if d.cfg.Subtitles.MuxIntoMKV {
+			requirements = append(requirements, deps.Requirement{
+				Name:        "mkvmerge",
+				Command:     "mkvmerge",
+				Description: "Required for muxing subtitles into MKV containers",
+			})
+		}
 	}
 	results := deps.CheckBinaries(requirements)
 	d.depsMu.Lock()

@@ -68,11 +68,12 @@ const (
 
 // Asset associates an episode with a file path and its processing status.
 type Asset struct {
-	EpisodeKey string `json:"episode_key"`
-	TitleID    int    `json:"title_id,omitempty"`
-	Path       string `json:"path"`
-	Status     string `json:"status,omitempty"`    // pending, completed, failed
-	ErrorMsg   string `json:"error_msg,omitempty"` // per-episode error message
+	EpisodeKey     string `json:"episode_key"`
+	TitleID        int    `json:"title_id,omitempty"`
+	Path           string `json:"path"`
+	Status         string `json:"status,omitempty"`          // pending, completed, failed
+	ErrorMsg       string `json:"error_msg,omitempty"`       // per-episode error message
+	SubtitlesMuxed bool   `json:"subtitles_muxed,omitempty"` // true when subtitles embedded in MKV
 }
 
 // Parse loads a rip spec from JSON, returning an empty envelope on blank input.

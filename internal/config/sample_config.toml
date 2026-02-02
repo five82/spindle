@@ -68,6 +68,7 @@ dedup_window_seconds = 600                           # De-duplicate identical no
 
 [subtitles]
 enabled = false                                      # Enable WhisperX subtitle generation after encoding
+mux_into_mkv = true                                  # Embed subtitles into MKV container (requires mkvmerge)
 whisperx_model = "large-v3"                          # Whisper model: "large-v3" (best) or "large-v3-turbo" (faster)
 whisperx_cuda_enabled = false                        # Run WhisperX with CUDA; set true when GPU available
 whisperx_vad_method = "silero"                       # Voice activity detector: "silero" or "pyannote"

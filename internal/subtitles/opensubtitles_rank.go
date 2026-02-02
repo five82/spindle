@@ -103,6 +103,13 @@ func scoreSubtitleCandidate(sub opensubtitles.Subtitle, ctx SubtitleContext) (fl
 	score += releaseScore
 	reasons = append(reasons, releaseReasons...)
 
+	// Edition matching - critical for alternate cuts with different timing
+	editionScore, editionReason := editionMatchScore(ctx.Edition, sub.Release)
+	score += editionScore
+	if editionReason != "" {
+		reasons = append(reasons, editionReason)
+	}
+
 	// Title matching - reject candidates with mismatched feature titles
 	titleScore, titleReason := titleMatchScore(ctx.Title, sub.FeatureTitle)
 	score += titleScore
@@ -287,6 +294,88 @@ func releaseMatchScore(release string) (float64, []string) {
 	apply(-4.0, "release=cam", "cam", "telesync", "telecine", "ts", "tc", "scr", "screener")
 	apply(-1.5, "release=hardcoded", "hcsub", "hardcoded")
 	return score, reasons
+}
+
+// editionPatternDef maps an edition label to patterns for matching in release names.
+type editionPatternDef struct {
+	label    string
+	patterns []string
+}
+
+// editionPatterns defines known edition types and their release name variations.
+var editionPatterns = []editionPatternDef{
+	{"director's cut", []string{"director's cut", "directors cut", "director cut", "dc"}},
+	{"extended", []string{"extended", "extended cut", "extended edition"}},
+	{"unrated", []string{"unrated", "unrated cut"}},
+	{"uncut", []string{"uncut"}},
+	{"theatrical", []string{"theatrical", "theatrical cut"}},
+	{"remastered", []string{"remastered"}},
+	{"special edition", []string{"special edition"}},
+	{"final cut", []string{"final cut"}},
+	{"redux", []string{"redux"}},
+	{"imax", []string{"imax"}},
+	{"ultimate", []string{"ultimate cut", "ultimate edition"}},
+	{"definitive", []string{"definitive cut", "definitive edition"}},
+}
+
+// editionMatchScore compares the expected edition against the release name.
+// Returns a significant boost for matching editions and a penalty for mismatches
+// when the source has an edition but the subtitle doesn't.
+func editionMatchScore(expectedEdition, release string) (float64, string) {
+	expectedEdition = strings.ToLower(strings.TrimSpace(expectedEdition))
+	release = strings.ToLower(strings.TrimSpace(release))
+
+	// No edition specified - no adjustment
+	if expectedEdition == "" {
+		return 0, ""
+	}
+
+	// Normalize release name separators (periods, dashes, underscores) to spaces
+	// for pattern matching against editions like "directors cut" or "final cut"
+	releaseNormalized := normalizeReleaseSeparators(release)
+
+	// Normalize the expected edition and find matching patterns
+	var expectedPatterns []string
+	for _, def := range editionPatterns {
+		if strings.Contains(expectedEdition, def.label) || editionMatches(expectedEdition, def.patterns) {
+			expectedPatterns = def.patterns
+			break
+		}
+	}
+
+	// If we couldn't find known patterns, use the edition string directly
+	if len(expectedPatterns) == 0 {
+		expectedPatterns = []string{expectedEdition}
+	}
+
+	// Check if release contains any of the expected edition patterns
+	for _, pattern := range expectedPatterns {
+		if strings.Contains(releaseNormalized, pattern) {
+			return 8.0, "edition=match" // Strong boost for matching edition
+		}
+	}
+
+	// Edition expected but not found in release - penalize
+	// This is critical because theatrical vs director's cut have different timing
+	return -6.0, "edition=mismatch"
+}
+
+// normalizeReleaseSeparators converts common release name separators to spaces.
+func normalizeReleaseSeparators(release string) string {
+	for _, sep := range []string{".", "-", "_"} {
+		release = strings.ReplaceAll(release, sep, " ")
+	}
+	return release
+}
+
+// editionMatches checks if the edition string matches any of the patterns.
+func editionMatches(edition string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.Contains(edition, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseContextYear(value string) int {

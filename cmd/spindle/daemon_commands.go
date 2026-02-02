@@ -435,6 +435,13 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Command:     "uvx",
 			Description: "Required for WhisperX-driven transcription",
 		})
+		if cfg.Subtitles.MuxIntoMKV {
+			requirements = append(requirements, deps.Requirement{
+				Name:        "mkvmerge",
+				Command:     "mkvmerge",
+				Description: "Required for muxing subtitles into MKV containers",
+			})
+		}
 	}
 	checks := deps.CheckBinaries(requirements)
 	statuses := make([]ipc.DependencyStatus, 0, len(checks))

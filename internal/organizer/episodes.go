@@ -246,16 +246,26 @@ func (o *Organizer) processEpisode(ctx context.Context, item *queue.Item, env *r
 		return "", err
 	}
 
-	// Move subtitles for this episode
-	itemCopy := *item
-	itemCopy.EncodedFile = job.Source
-	if _, err := o.moveGeneratedSubtitles(ctx, &itemCopy, targetPath); err != nil {
-		logger.Warn("subtitle sidecar move failed; subtitles may be missing in library",
-			logging.Error(err),
-			logging.String(logging.FieldEventType, "subtitle_move_failed"),
-			logging.String(logging.FieldErrorHint, "check library_dir permissions and subtitle file names"),
-			logging.String(logging.FieldImpact, "subtitles will not appear in Jellyfin for this episode"),
+	// Move subtitles for this episode unless already muxed into MKV
+	subtitledAsset, hasSubtitled := env.Assets.FindAsset("subtitled", episodeKey)
+	if hasSubtitled && subtitledAsset.SubtitlesMuxed {
+		logger.Info("subtitle sidecar move decision",
+			logging.String(logging.FieldDecisionType, "subtitle_sidecar_move"),
+			logging.String("decision_result", "skipped"),
+			logging.String("decision_reason", "subtitles_muxed_into_mkv"),
+			logging.String("episode_key", episodeKey),
 		)
+	} else {
+		itemCopy := *item
+		itemCopy.EncodedFile = job.Source
+		if _, err := o.moveGeneratedSubtitles(ctx, &itemCopy, targetPath); err != nil {
+			logger.Warn("subtitle sidecar move failed; subtitles may be missing in library",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "subtitle_move_failed"),
+				logging.String(logging.FieldErrorHint, "check library_dir permissions and subtitle file names"),
+				logging.String(logging.FieldImpact, "subtitles will not appear in Jellyfin for this episode"),
+			)
+		}
 	}
 
 	return targetPath, nil

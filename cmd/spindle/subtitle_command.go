@@ -18,6 +18,7 @@ import (
 	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
+	"spindle/internal/services/jellyfin"
 	"spindle/internal/subtitles"
 )
 
@@ -27,6 +28,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	var forceAI bool
 	var openSubtitlesOnly bool
 	var fetchForced bool
+	var external bool
 
 	cmd := &cobra.Command{
 		Use:   "gensubtitle <encoded-file>",
@@ -103,13 +105,20 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			service := subtitles.NewService(cfg, logger)
 
 			baseName := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
-			inferredTitle, inferredYear := splitTitleAndYear(baseName)
+			// Extract edition from filename before stripping (e.g., "Director's Cut")
+			edition, _ := identification.ExtractKnownEdition(baseName)
+			// Strip edition suffix for TMDB lookup
+			cleanedName := identification.StripEditionSuffix(baseName)
+			inferredTitle, inferredYear := splitTitleAndYear(cleanedName)
 			if inferredTitle == "" {
-				inferredTitle = baseName
+				inferredTitle = cleanedName
 			}
-			ctxMeta := subtitles.SubtitleContext{Title: inferredTitle, MediaType: "movie", Year: inferredYear}
+			ctxMeta := subtitles.SubtitleContext{Title: inferredTitle, MediaType: "movie", Year: inferredYear, Edition: edition}
 			if lang := strings.TrimSpace(cfg.TMDB.Language); lang != "" {
 				ctxMeta.Language = strings.ToLower(strings.SplitN(lang, "-", 2)[0])
+			}
+			if edition != "" && logger != nil {
+				logger.Info("detected edition from filename", logging.String("edition", edition))
 			}
 
 			if forceAI {
@@ -159,11 +168,56 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 				return fmt.Errorf("subtitle generation failed: %w", err)
 			}
 
+			// Mux subtitles into MKV unless --external flag is set
+			if !external && strings.HasSuffix(strings.ToLower(source), ".mkv") {
+				var srtPaths []string
+				if strings.TrimSpace(result.SubtitlePath) != "" {
+					srtPaths = append(srtPaths, result.SubtitlePath)
+				}
+				if strings.TrimSpace(result.ForcedSubtitlePath) != "" {
+					srtPaths = append(srtPaths, result.ForcedSubtitlePath)
+				}
+				if len(srtPaths) > 0 {
+					lang := "en"
+					if len(languages) > 0 {
+						lang = languages[0]
+					}
+					muxer := subtitles.NewMuxer(logger)
+					muxResult, muxErr := muxer.MuxSubtitles(cmd.Context(), subtitles.MuxRequest{
+						MKVPath:           source,
+						SubtitlePaths:     srtPaths,
+						Language:          lang,
+						StripExistingSubs: true,
+					})
+					if muxErr != nil {
+						if logger != nil {
+							logger.Warn("subtitle muxing failed; keeping sidecar files",
+								logging.Error(muxErr),
+								logging.String("mkv_path", source),
+							)
+						}
+						// Fall back to reporting sidecar files
+						fmt.Fprintf(cmd.OutOrStdout(), "Generated subtitle: %s (source: %s, segments: %d, duration: %s)\n",
+							result.SubtitlePath, result.Source, result.SegmentCount, result.Duration.Round(time.Second))
+						if result.ForcedSubtitlePath != "" {
+							fmt.Fprintf(cmd.OutOrStdout(), "Generated forced subtitle: %s\n", result.ForcedSubtitlePath)
+						}
+						fmt.Fprintf(cmd.OutOrStdout(), "Note: Muxing failed, subtitles saved as sidecar files\n")
+					} else {
+						fmt.Fprintf(cmd.OutOrStdout(), "Muxed %d subtitle track(s) into %s (source: %s, segments: %d, duration: %s)\n",
+							len(muxResult.MuxedSubtitles), filepath.Base(source), result.Source, result.SegmentCount, result.Duration.Round(time.Second))
+						tryJellyfinRefresh(cmd.Context(), cfg, logger)
+					}
+					return nil
+				}
+			}
+
 			fmt.Fprintf(cmd.OutOrStdout(), "Generated subtitle: %s (source: %s, segments: %d, duration: %s)\n",
 				result.SubtitlePath, result.Source, result.SegmentCount, result.Duration.Round(time.Second))
 			if result.ForcedSubtitlePath != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "Generated forced subtitle: %s\n", result.ForcedSubtitlePath)
 			}
+			tryJellyfinRefresh(cmd.Context(), cfg, logger)
 			return nil
 		},
 	}
@@ -173,6 +227,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().BoolVar(&forceAI, "forceai", false, "Force WhisperX transcription and skip OpenSubtitles downloads")
 	cmd.Flags().BoolVar(&openSubtitlesOnly, "opensubtitles-only", false, "Require OpenSubtitles match; fail instead of falling back to WhisperX (for troubleshooting)")
 	cmd.Flags().BoolVar(&fetchForced, "fetch-forced", false, "Also search OpenSubtitles for forced (foreign-parts-only) subtitles")
+	cmd.Flags().BoolVar(&external, "external", false, "Create external SRT sidecar instead of muxing into MKV")
 
 	return cmd
 }
@@ -253,4 +308,24 @@ func openSubtitlesReady(cfg *config.Config) (bool, string) {
 		return false, "opensubtitles_api_key not set"
 	}
 	return true, ""
+}
+
+func tryJellyfinRefresh(ctx context.Context, cfg *config.Config, logger *slog.Logger) {
+	if cfg == nil || !cfg.Jellyfin.Enabled {
+		return
+	}
+	jf := jellyfin.NewConfiguredService(cfg)
+	if err := jf.Refresh(ctx, nil); err != nil {
+		if logger != nil {
+			logger.Warn("jellyfin refresh failed",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "jellyfin_refresh_failed"),
+				logging.String(logging.FieldErrorHint, "check jellyfin.url and jellyfin.api_key in config"),
+			)
+		}
+	} else if logger != nil {
+		logger.Info("jellyfin library refresh requested",
+			logging.String(logging.FieldEventType, "jellyfin_refresh_requested"),
+		)
+	}
 }

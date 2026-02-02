@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"spindle/internal/identification"
 	"spindle/internal/queue"
 )
 
@@ -22,6 +23,7 @@ type SubtitleContext struct {
 	Language      string
 	Season        int
 	Episode       int
+	Edition       string // Edition label (e.g., "Director's Cut", "Extended Edition")
 }
 
 // HasTMDBID reports whether a TMDB identifier is available.
@@ -116,6 +118,15 @@ func BuildSubtitleContext(item *queue.Item) SubtitleContext {
 	}
 	if ctx.Season <= 0 && !ctx.IsMovie() {
 		ctx.Season = 1
+	}
+
+	// Extract edition from disc title or source path (for alternate cuts)
+	if ctx.Edition == "" {
+		if edition, found := identification.ExtractKnownEdition(item.DiscTitle); found {
+			ctx.Edition = edition
+		} else if edition, found := identification.ExtractKnownEdition(item.SourcePath); found {
+			ctx.Edition = edition
+		}
 	}
 
 	return ctx

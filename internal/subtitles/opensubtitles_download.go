@@ -116,20 +116,33 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 
 	inputPath := cleanedPath
 
-	// Forced subtitles (indicated by referenceSubtitlePath being set) skip alignment entirely.
-	// They're sparse (few cues) and alignment algorithms produce garbage with insufficient data.
-	// Forced subtitles from OpenSubtitles are typically pre-aligned by the uploader.
+	// Forced subtitles (indicated by referenceSubtitlePath being set) skip audio-based alignment
+	// because they're sparse (few cues) and alignment algorithms produce garbage with insufficient data.
+	// Instead, we align forced subtitles to the reference (already-aligned regular) subtitle by
+	// finding matching cues and calculating a time transformation.
 	isForcedSubtitle := strings.TrimSpace(plan.referenceSubtitlePath) != ""
 
 	if isForcedSubtitle {
-		if err := copyFile(inputPath, plan.outputFile); err != nil {
-			return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "copy forced", "Failed to copy forced subtitle", err)
+		matchCount, transform, err := alignForcedToReference(plan.referenceSubtitlePath, inputPath, plan.outputFile)
+		if err != nil {
+			return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "align forced", "Failed to align forced subtitle", err)
 		}
 		if s.logger != nil {
-			s.logger.Debug("forced subtitle alignment skipped (using original timing)",
-				logging.String("subtitle_file", plan.outputFile),
-				logging.String("reason", "sparse_content_alignment_unreliable"),
-			)
+			if matchCount >= 2 {
+				s.logger.Debug("forced subtitle aligned to reference",
+					logging.String("subtitle_file", plan.outputFile),
+					logging.String("reference_file", plan.referenceSubtitlePath),
+					logging.Int("matched_cues", matchCount),
+					logging.Float64("scale_factor", transform.scale),
+					logging.Float64("offset_seconds", transform.offset),
+				)
+			} else {
+				s.logger.Debug("forced subtitle alignment skipped (insufficient matching cues)",
+					logging.String("subtitle_file", plan.outputFile),
+					logging.Int("matched_cues", matchCount),
+					logging.String("reason", "using_original_timing"),
+				)
+			}
 		}
 	} else {
 		if syncedPath, err := s.applyFFSubsync(ctx, plan, cleanedPath); err != nil {

@@ -84,6 +84,7 @@ func Default() Config {
 			DedupWindowSeconds: defaultNotifyDedupWindowSeconds,
 		},
 		Subtitles: Subtitles{
+			MuxIntoMKV:             true,
 			WhisperXModel:          defaultWhisperXModel,
 			WhisperXVADMethod:      "silero",
 			OpenSubtitlesLanguages: []string{"en"},
