@@ -45,6 +45,7 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
 4. **LLM decision review**:
    - Search for `decision_type=preset_llm` entries
    - Search for `decision_type=commentary` entries
+   - Search for `decision_type=edition_detection` entries (movies only)
    - Evaluate if confidence levels and reasons make sense for the content
 
 ### Phase 3: Rip Cache Analysis (Post-Ripping Items)
@@ -119,31 +120,69 @@ For Blu-ray and 4K Blu-ray content:
    - Some films have IMAX sequences with different ratios
    - This may be acceptable or may indicate detection issues
 
-### Phase 6: Subtitle Analysis (Post-Subtitling Items)
+### Phase 6: Edition Detection Validation (Movies Only)
+
+If item is a movie, validate edition detection:
+
+1. **From logs**: Search for `decision_type=edition_detection` entries
+2. **Expected detection paths**:
+   - `decision_reason=regex_pattern_match`: Known edition detected via pattern (Director's Cut, Extended, etc.)
+   - `decision_reason=llm_confirmed`: Ambiguous edition confirmed by LLM
+   - `decision_reason=llm_rejected`: LLM determined not an edition
+   - `decision_reason=llm_not_configured`: Ambiguous title but no LLM available
+
+3. **Verify detection correctness**:
+   - If disc title contains obvious edition markers (Director's Cut, Extended, Unrated, IMAX, etc.), an edition should be detected
+   - If cache was used, check for `edition from cache` log entry
+   - Cross-reference with blu-ray.com review to confirm whether disc is actually an alternate edition
+
+4. **Verify edition label**:
+   - Check `edition_label` in logs matches the actual edition type
+   - Known patterns: Director's Cut, Extended Edition, Unrated, Theatrical, Remastered, Special Edition, Anniversary Edition, Ultimate Edition, Final Cut, Redux, IMAX
+
+5. **Verify filename**:
+   - Movie filenames should be: `Title (Year) - Edition.mkv`
+   - Check final organized file includes edition suffix when detected
+   - Edition should NOT appear in folder name (GetBaseFilename strips it)
+
+### Phase 7: Subtitle Analysis (Post-Subtitling Items)
 
 If item has passed subtitling stage:
 
-1. **Locate SRT files**: Look in staging directory and final destination
-2. **Read and analyze SRT content**:
+1. **Locate subtitles**: Check encoded MKV for embedded tracks (preferred) or sidecar SRT files
+2. **For embedded subtitles** (muxed into MKV):
+   ```bash
+   ffprobe -v error -show_streams -select_streams s -of json "<mkv_file>"
+   ```
+   - Verify subtitle track exists with correct language
+   - Check track has "default" disposition if it's the main subtitle
+   - Forced subtitles should have "forced" disposition
+
+3. **For sidecar SRT files** (legacy):
    ```bash
    head -100 "<srt_file>"  # Check beginning
    tail -50 "<srt_file>"   # Check ending
    wc -l "<srt_file>"      # Total lines (rough cue estimate)
    ```
 
-3. **Content quality checks**:
+4. **Content quality checks**:
    - First cue timestamp reasonable (typically within first few minutes)
    - Last cue timestamp near video duration
    - Cue density: minimum ~2 cues per minute expected
    - No obvious encoding issues (mojibake, wrong language)
    - Dialogue makes sense for the content (spot check a few cues)
 
-4. **Duration alignment**:
+5. **Duration alignment**:
    - Subtitle end time should be within 10 minutes of video duration
    - Subtitles significantly shorter = missing content
    - Subtitles significantly longer = wrong subtitle file
 
-### Phase 7: Commentary Track Validation
+6. **Edition-aware subtitle selection** (if movie has edition):
+   - Check logs for `edition=match` or `edition=mismatch` in subtitle ranking
+   - Selected subtitle should match edition when possible (e.g., Director's Cut subtitle for Director's Cut disc)
+   - If `edition=mismatch` was accepted, verify no matching edition subtitle was available
+
+### Phase 8: Commentary Track Validation
 
 1. **From logs**: Find `commentary track classification` and `commentary detection complete` entries
 2. **Expected behavior**:
@@ -160,7 +199,7 @@ If item has passed subtitling stage:
    - Count audio streams with "comment" disposition
    - Verify all are properly labeled (see Phase 4)
 
-### Phase 8: Preset Selection Validation
+### Phase 9: Preset Selection Validation
 
 1. **From logs**: Find `preset_decider` or `preset_llm` decision entries
 2. **Review decision**:
@@ -209,6 +248,9 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Duplicate fingerprint | Identification | `decision_type=duplicate_fingerprint` | Item silently rejected |
 | Low TMDB confidence | Identification | Low score in `decision_type=tmdb_confidence` | Wrong title match |
 | Episode misidentification | Identification | Low score in `decision_type=episode_match` | Wrong S##E## labels |
+| Missed edition detection | Identification | No `edition_detection` decision for disc with edition markers | Edition not in filename |
+| Wrong edition label | Identification | `edition_label` doesn't match actual edition type | Incorrect filename/subtitle selection |
+| Edition detection LLM failure | Identification | `event_type=edition_llm_failed` | Ambiguous edition not detected |
 | Preset fallback | Encoding | `alert=preset_decider_fallback` | Suboptimal encoding |
 | Wrong crop detection | Encoding | Aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review | Commentary tracks not preserved |
@@ -217,6 +259,8 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | SRT validation issues | Subtitles | `event_type=srt_validation_issues` | Malformed subtitles |
 | Subtitle duration mismatch | Subtitles | Duration delta > 10 minutes | Wrong subtitle file |
 | Sparse subtitles | Subtitles | < 2 cues/minute | Possibly wrong language/incomplete |
+| Edition subtitle mismatch | Subtitles | `edition=mismatch` when matching subtitle exists | Wrong timing for alternate cut |
+| Subtitles not muxed | Subtitles | Sidecar SRT exists but no embedded tracks | Jellyfin may not auto-load |
 
 ### DEBUG-Only Patterns
 
@@ -224,9 +268,11 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 |---------|-------|----------|
 | TMDB candidate scoring | Identification | `decision_type=tmdb_search` with all candidates |
 | Episode runtime matching | Identification | `decision_type=episode_runtime_match` |
+| Edition marker analysis | Identification | No edition markers detected (DEBUG level) |
 | Track selection | Ripping | `decision_type=track_select` per-track |
 | Preset LLM response | Encoding | `decision_type=preset_llm` full prompt/response |
 | Subtitle ranking | Subtitles | `decision_type=subtitle_rank` candidate scores |
+| Edition match scoring | Subtitles | `edition=match` or `edition=mismatch` in ranking reasons |
 
 ## Audit Report Format
 
@@ -236,6 +282,7 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 **Title:** <identified_title>
 **Status:** <status> | **NeedsReview:** <bool> | **ReviewReason:** <reason>
 **Media Type:** <movie/tv> | **Source:** <DVD/Blu-ray/4K Blu-ray>
+**Edition:** <edition_label or "none detected">
 **Debug Mode:** active/inactive (debug logs available: yes/no)
 
 ### Executive Summary
@@ -281,10 +328,19 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 - Crop applied: <crop filter or "none">
 - Calculated aspect ratio: <ratio>
 
+#### Edition Detection (movies only)
+- Detection method: <regex/llm/cache/none>
+- Edition label: <label or "none">
+- Filename includes edition: <yes/no>
+- blu-ray.com confirms edition: <yes/no/not checked>
+
 #### Subtitles (if applicable)
-- SRT files: <count>
+- Muxed into MKV: <yes/no>
+- Subtitle tracks: <count>
+- SRT sidecar files: <count>
 - Duration coverage: <percentage>
 - Cue density: <cues/minute>
+- Edition match status: <match/mismatch/n/a>
 - Content spot-check: <pass/concerns>
 
 ### External Validation (Blu-ray/4K)
@@ -294,10 +350,12 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 - Listed aspect ratio: <ratio>
 - Listed audio tracks: <description>
 - Listed commentary: <count and description>
+- Edition type: <theatrical/director's cut/extended/etc. or "standard release">
 
 #### Validation Results
 - Aspect ratio match: <yes/no/concern>
 - Commentary count match: <yes/no/concern>
+- Edition detection match: <yes/no/concern> (is our detection correct?)
 - Other notes: <any discrepancies>
 
 ### Decision Trace
@@ -314,9 +372,14 @@ For each audit, complete these steps:
 - [ ] If post-ripping: analyzed rip cache metadata
 - [ ] If post-encoding: ran ffprobe and analyzed streams
 - [ ] If post-encoding: verified commentary labeling specifically
+- [ ] If movie: validated edition detection logic
+- [ ] If movie with edition: verified edition in filename
 - [ ] If Blu-ray: looked up blu-ray.com review
 - [ ] If Blu-ray: validated crop detection against review
 - [ ] If Blu-ray: validated commentary count against review
-- [ ] If post-subtitling: analyzed SRT content quality
-- [ ] Reviewed LLM decisions (preset, commentary) for reasonableness
+- [ ] If Blu-ray movie: validated edition detection against review
+- [ ] If post-subtitling: verified subtitles are muxed into MKV
+- [ ] If post-subtitling: analyzed subtitle content quality
+- [ ] If movie with edition: verified subtitle edition matching
+- [ ] Reviewed LLM decisions (preset, commentary, edition) for reasonableness
 - [ ] Generated comprehensive report with specific findings
