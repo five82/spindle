@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -73,10 +72,6 @@ troubleshooting or manual testing.
 
 If the daemon is not running, this command exits silently.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(device) == "" {
-				return fmt.Errorf("--device is required")
-			}
-
 			client, err := ctx.dialClient()
 			if err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "spindle daemon not running; disc detection skipped")
