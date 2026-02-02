@@ -312,13 +312,14 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 	// Check runtime variance - if playlists differ by more than the threshold,
 	// they are likely different cuts (theatrical vs director's), not language variants.
 	// Disney language variants differ by only a few seconds (title cards/credits).
-	minDuration, maxDuration := candidates[0].title.Duration, candidates[0].title.Duration
-	for _, c := range candidates[1:] {
-		if c.title.Duration < minDuration {
-			minDuration = c.title.Duration
+	var minDuration, maxDuration int
+	for i, c := range candidates {
+		dur := c.title.Duration
+		if i == 0 || dur < minDuration {
+			minDuration = dur
 		}
-		if c.title.Duration > maxDuration {
-			maxDuration = c.title.Duration
+		if dur > maxDuration {
+			maxDuration = dur
 		}
 	}
 	if maxDuration-minDuration > maxLanguageVariantRuntimeDiff {
@@ -336,7 +337,7 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 	}
 
 	// Return all titles with that minimum playlist number
-	result := make([]ripspec.Title, 0)
+	result := make([]ripspec.Title, 0, 1)
 	for _, c := range candidates {
 		if c.num == minNum {
 			result = append(result, c.title)
