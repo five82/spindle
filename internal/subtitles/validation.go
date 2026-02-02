@@ -16,10 +16,11 @@ import (
 // muxValidationResult captures the outcome of subtitle muxing verification.
 type muxValidationResult struct {
 	SubtitleCount  int
-	HasDefault     bool // True if at least one track is marked default
-	LanguageMatch  bool // True if language metadata matches expected
-	HasRegularSubs bool // True if non-forced subtitles exist
-	HasForcedSubs  bool // True if forced subtitles exist
+	HasDefault     bool     // True if at least one track is marked default
+	LanguageMatch  bool     // True if language metadata matches expected
+	HasRegularSubs bool     // True if non-forced subtitles exist
+	HasForcedSubs  bool     // True if forced subtitles exist
+	LabelIssues    []string // Label validation problems (missing or incorrect titles)
 }
 
 // ValidateMuxedSubtitles verifies that subtitles were correctly muxed into the MKV.
@@ -78,6 +79,9 @@ func ValidateMuxedSubtitles(ctx context.Context, ffprobeBinary, mkvPath string, 
 		))
 	}
 
+	// Include any label validation issues
+	issues = append(issues, result.LabelIssues...)
+
 	if len(issues) > 0 {
 		if logger != nil {
 			logger.Error("subtitle mux validation failed",
@@ -105,6 +109,7 @@ func ValidateMuxedSubtitles(ctx context.Context, ffprobeBinary, mkvPath string, 
 			logging.Int("subtitle_tracks_verified", result.SubtitleCount),
 			logging.Bool("has_regular", result.HasRegularSubs),
 			logging.Bool("has_forced", result.HasForcedSubs),
+			logging.Bool("labels_verified", true),
 		)
 	}
 
@@ -117,6 +122,7 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) muxVa
 
 	expectedLang = strings.ToLower(strings.TrimSpace(expectedLang))
 	expectedLang3 := mapLanguageCode(expectedLang)
+	expectedLangName := languageDisplayName(expectedLang)
 
 	for _, stream := range streams {
 		if stream.CodecType != "subtitle" {
@@ -125,12 +131,14 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) muxVa
 
 		result.SubtitleCount++
 
+		isForced := stream.Disposition != nil && stream.Disposition["forced"] == 1
+
 		// Check disposition flags
 		if stream.Disposition != nil {
 			if stream.Disposition["default"] == 1 {
 				result.HasDefault = true
 			}
-			if stream.Disposition["forced"] == 1 {
+			if isForced {
 				result.HasForcedSubs = true
 			} else {
 				result.HasRegularSubs = true
@@ -147,6 +155,31 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) muxVa
 				result.LanguageMatch = true
 			}
 		}
+
+		// Check track label/title
+		title := subtitleTitle(stream.Tags)
+		if title == "" {
+			result.LabelIssues = append(result.LabelIssues, fmt.Sprintf(
+				"subtitle stream %d has no title label",
+				stream.Index,
+			))
+		} else if isForced {
+			// Forced subtitles should have "(Forced)" in the title
+			if !strings.Contains(title, "(Forced)") {
+				result.LabelIssues = append(result.LabelIssues, fmt.Sprintf(
+					"forced subtitle stream %d has title %q but lacks '(Forced)' label",
+					stream.Index, title,
+				))
+			}
+		} else if expectedLangName != "" && expectedLangName != "Unknown" {
+			// Regular subtitles should have the language name in the title
+			if !strings.Contains(strings.ToLower(title), strings.ToLower(expectedLangName)) {
+				result.LabelIssues = append(result.LabelIssues, fmt.Sprintf(
+					"subtitle stream %d has title %q but expected language %q in label",
+					stream.Index, title, expectedLangName,
+				))
+			}
+		}
 	}
 
 	// If no language check was requested, mark as matching
@@ -155,6 +188,19 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) muxVa
 	}
 
 	return result
+}
+
+// subtitleTitle extracts the title from subtitle stream tags.
+func subtitleTitle(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	for _, key := range []string{"title", "TITLE"} {
+		if value, ok := tags[key]; ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // normalizeSubtitleLanguage extracts and normalizes the language from stream tags.

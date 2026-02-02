@@ -157,6 +157,9 @@ If item has passed subtitling stage:
    - Verify subtitle track exists with correct language
    - Check track has "default" disposition if it's the main subtitle
    - Forced subtitles should have "forced" disposition
+   - **Check subtitle labeling** (similar to commentary labeling):
+     - Regular subtitles should have title containing language name (e.g., "English")
+     - Forced subtitles should have title containing "(Forced)" (e.g., "English (Forced)")
 
 3. **For sidecar SRT files** (legacy):
    ```bash
@@ -261,6 +264,7 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Sparse subtitles | Subtitles | < 2 cues/minute | Possibly wrong language/incomplete |
 | Edition subtitle mismatch | Subtitles | `edition=mismatch` when matching subtitle exists | Wrong timing for alternate cut |
 | Subtitles not muxed | Subtitles | Sidecar SRT exists but no embedded tracks | Jellyfin may not auto-load |
+| Unlabeled subtitles | Subtitles | Missing or incorrect title in embedded track | Jellyfin won't display track name properly |
 
 ### DEBUG-Only Patterns
 
@@ -337,6 +341,7 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 #### Subtitles (if applicable)
 - Muxed into MKV: <yes/no>
 - Subtitle tracks: <count>
+- Track labels correct: <yes/no> (regular has language name, forced has "(Forced)")
 - SRT sidecar files: <count>
 - Duration coverage: <percentage>
 - Cue density: <cues/minute>
@@ -379,6 +384,7 @@ For each audit, complete these steps:
 - [ ] If Blu-ray: validated commentary count against review
 - [ ] If Blu-ray movie: validated edition detection against review
 - [ ] If post-subtitling: verified subtitles are muxed into MKV
+- [ ] If post-subtitling: verified subtitle track labels (language name, "(Forced)" marker)
 - [ ] If post-subtitling: analyzed subtitle content quality
 - [ ] If movie with edition: verified subtitle edition matching
 - [ ] Reviewed LLM decisions (preset, commentary, edition) for reasonableness
