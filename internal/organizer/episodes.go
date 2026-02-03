@@ -247,8 +247,7 @@ func (o *Organizer) processEpisode(ctx context.Context, item *queue.Item, env *r
 	}
 
 	// Move subtitles for this episode unless already muxed into MKV
-	subtitledAsset, hasSubtitled := env.Assets.FindAsset("subtitled", episodeKey)
-	if hasSubtitled && subtitledAsset.SubtitlesMuxed {
+	if o.cfg != nil && o.cfg.Subtitles.MuxIntoMKV {
 		logger.Info("subtitle sidecar move decision",
 			logging.String(logging.FieldDecisionType, "subtitle_sidecar_move"),
 			logging.String("decision_result", "skipped"),

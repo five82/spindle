@@ -227,13 +227,7 @@ func (o *Organizer) organizeToLibrary(ctx context.Context, item *queue.Item, met
 	logger.Debug("library move completed", logging.String("final_file", targetPath))
 
 	// Check if subtitles were muxed into MKV (skip sidecar move if so)
-	subtitlesMuxed := false
-	if env != nil && len(env.Assets.Subtitled) > 0 {
-		// For single-file (movie), check the "primary" episode key
-		if asset, ok := env.Assets.FindAsset("subtitled", "primary"); ok && asset.SubtitlesMuxed {
-			subtitlesMuxed = true
-		}
-	}
+	subtitlesMuxed := o.cfg != nil && o.cfg.Subtitles.MuxIntoMKV
 
 	var subtitlesMoved int
 	if subtitlesMuxed {

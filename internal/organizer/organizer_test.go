@@ -199,6 +199,7 @@ func TestOrganizerPersistsRipSpecPerEpisode(t *testing.T) {
 
 func TestOrganizerMovesGeneratedSubtitles(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
+	cfg.Subtitles.MuxIntoMKV = false // test sidecar move behavior
 	store := testsupport.MustOpenStore(t, cfg)
 
 	stubOrganizerProbe(t)
@@ -246,6 +247,7 @@ func TestOrganizerMovesGeneratedSubtitles(t *testing.T) {
 
 func TestOrganizerOverwritesExistingSubtitles(t *testing.T) {
 	cfg := testsupport.NewConfig(t)
+	cfg.Subtitles.MuxIntoMKV = false // test sidecar move behavior
 	cfg.Library.OverwriteExisting = true
 	store := testsupport.MustOpenStore(t, cfg)
 
