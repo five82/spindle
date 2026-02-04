@@ -250,7 +250,9 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 
 		// Check for forced subtitles if disc has forced subtitle tracks.
 		// Pass the aligned regular subtitle as reference for subtitle-to-subtitle alignment.
-		s.tryForcedSubtitlesForTarget(ctx, item, target, ctxMeta, &env, result.SubtitlePath)
+		if forcedPath := s.tryForcedSubtitlesForTarget(ctx, item, target, ctxMeta, &env, result.SubtitlePath); forcedPath != "" {
+			result.ForcedSubtitlePath = forcedPath
+		}
 
 		// Mux subtitles into MKV if configured
 		subtitlesMuxed := false
@@ -586,9 +588,10 @@ func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, t
 // tryForcedSubtitlesForTarget checks if the disc has forced subtitle tracks and
 // downloads foreign-parts-only subtitles from OpenSubtitles if available.
 // referenceSubtitle is the path to the aligned regular subtitle used for alignment.
-func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, env *ripspec.Envelope, referenceSubtitle string) {
+// Returns the path to the downloaded forced subtitle, or empty string if none.
+func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, env *ripspec.Envelope, referenceSubtitle string) string {
 	if s == nil || s.service == nil || env == nil {
-		return
+		return ""
 	}
 
 	hasForcedTrack, _ := env.Attributes["has_forced_subtitle_track"].(bool)
@@ -603,7 +606,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 				logging.String("episode_key", episodeKey),
 			)
 		}
-		return
+		return ""
 	}
 
 	if !s.service.shouldUseOpenSubtitles() {
@@ -615,7 +618,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 				logging.String("episode_key", episodeKey),
 			)
 		}
-		return
+		return ""
 	}
 
 	if s.logger != nil {
@@ -644,7 +647,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 				logging.String("episode_key", episodeKey),
 			)
 		}
-		return
+		return ""
 	}
 	if plan.cleanup != nil {
 		defer plan.cleanup()
@@ -661,7 +664,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 				logging.String(logging.FieldErrorHint, "forced subtitles may not be available on OpenSubtitles"),
 			)
 		}
-		return
+		return ""
 	}
 
 	if forcedPath == "" {
@@ -674,7 +677,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 				logging.String("title", strings.TrimSpace(ctxMeta.Title)),
 			)
 		}
-		return
+		return ""
 	}
 
 	if s.logger != nil {
@@ -684,6 +687,7 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 			logging.String("forced_subtitle_path", forcedPath),
 		)
 	}
+	return forcedPath
 }
 
 func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
