@@ -98,38 +98,14 @@ func (p *queueStoreProcessor) ProcessWithID(ctx context.Context, info discInfo, 
 
 func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo, existing *queue.Item, fingerprint string, logger *slog.Logger) (bool, error) {
 	label := strings.TrimSpace(info.Label)
-	updated := false
-
-	if existing.DiscFingerprint != fingerprint {
+	fingerprintChanged := existing.DiscFingerprint != fingerprint
+	if fingerprintChanged {
 		existing.DiscFingerprint = fingerprint
-		updated = true
 	}
 
 	status := existing.Status
 	if status == queue.StatusCompleted {
-		if label != "" && shouldRefreshDiscTitle(existing.DiscTitle) && label != strings.TrimSpace(existing.DiscTitle) {
-			existing.DiscTitle = label
-			updated = true
-		}
-		if updated {
-			if err := p.store.Update(ctx, existing); err != nil {
-				if logger != nil {
-					logger.Warn("failed to update completed item",
-						logging.Error(err),
-						logging.Int64(logging.FieldItemID, existing.ID),
-						logging.String(logging.FieldEventType, "queue_update_failed"),
-						logging.String(logging.FieldImpact, "disc title refresh was not saved"),
-						logging.String(logging.FieldErrorHint, "Check queue database availability and disk health"))
-				}
-			}
-			if logger != nil {
-				logger.Debug(
-					"refreshed completed disc metadata",
-					logging.Int64(logging.FieldItemID, existing.ID),
-					logging.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
-				)
-			}
-		}
+		p.tryRefreshDiscTitle(ctx, existing, label, logger, "completed", fingerprintChanged)
 		if logger != nil {
 			logger.Debug(
 				"disc already completed",
@@ -141,22 +117,7 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 	}
 
 	if existing.IsInWorkflow() {
-		if label != "" && shouldRefreshDiscTitle(existing.DiscTitle) && label != strings.TrimSpace(existing.DiscTitle) {
-			existing.DiscTitle = label
-			updated = true
-		}
-		if updated {
-			if err := p.store.Update(ctx, existing); err != nil {
-				if logger != nil {
-					logger.Warn("failed to update in-flight item",
-						logging.Error(err),
-						logging.Int64(logging.FieldItemID, existing.ID),
-						logging.String(logging.FieldEventType, "queue_update_failed"),
-						logging.String(logging.FieldImpact, "disc title refresh was not saved"),
-						logging.String(logging.FieldErrorHint, "Check queue database availability and disk health"))
-				}
-			}
-		}
+		p.tryRefreshDiscTitle(ctx, existing, label, logger, "in-flight", fingerprintChanged)
 		if logger != nil {
 			logger.Debug(
 				"disc already in workflow",
@@ -213,6 +174,36 @@ func (p *queueStoreProcessor) handleExisting(ctx context.Context, info discInfo,
 func shouldRefreshDiscTitle(current string) bool {
 	trimmed := strings.TrimSpace(current)
 	return trimmed == "" || trimmed == "Unknown Disc"
+}
+
+// tryRefreshDiscTitle updates the disc title if the current title is a placeholder
+// and the new label differs. Also persists any fingerprint change. Returns true if
+// the title was refreshed.
+func (p *queueStoreProcessor) tryRefreshDiscTitle(ctx context.Context, existing *queue.Item, label string, logger *slog.Logger, itemType string, fingerprintChanged bool) bool {
+	titleRefreshed := label != "" && shouldRefreshDiscTitle(existing.DiscTitle) && label != strings.TrimSpace(existing.DiscTitle)
+	if titleRefreshed {
+		existing.DiscTitle = label
+	}
+	if !titleRefreshed && !fingerprintChanged {
+		return false
+	}
+	if err := p.store.Update(ctx, existing); err != nil {
+		if logger != nil {
+			logger.Warn("failed to update "+itemType+" item",
+				logging.Error(err),
+				logging.Int64(logging.FieldItemID, existing.ID),
+				logging.String(logging.FieldEventType, "queue_update_failed"),
+				logging.String(logging.FieldImpact, "disc title refresh was not saved"),
+				logging.String(logging.FieldErrorHint, "Check queue database availability and disk health"))
+		}
+	} else if titleRefreshed && logger != nil {
+		logger.Debug(
+			"refreshed "+itemType+" disc metadata",
+			logging.Int64(logging.FieldItemID, existing.ID),
+			logging.String("disc_title", strings.TrimSpace(existing.DiscTitle)),
+		)
+	}
+	return titleRefreshed
 }
 
 func (p *queueStoreProcessor) enqueueNew(ctx context.Context, info discInfo, fingerprint string, logger *slog.Logger) (bool, int64, error) {
