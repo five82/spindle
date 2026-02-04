@@ -1,3 +1,10 @@
+---
+name: itemaudit
+description: Comprehensive audit of Spindle queue items through multi-layer artifact analysis. Use /itemaudit <item_id> to audit a specific queue item or /itemaudit for daemon-level issues.
+user-invocable: true
+argument-hint: [item_id]
+---
+
 # Spindle Item Audit Skill
 
 Comprehensive audit of Spindle queue items through multi-layer artifact analysis.
