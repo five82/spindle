@@ -18,7 +18,7 @@ Do not modify this header.
 Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata (TMDB), subtitles (OpenSubtitles/WhisperX), Jellyfin refresh, and ntfy notifications.
 
 - **Scope**: Single-developer project - avoid over-engineering
-- **Environment**: Go 1.25+, MakeMKV, FFmpeg
+- **Environment**: Go 1.26+, MakeMKV, FFmpeg
 - **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.
 
 Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED] -> ENCODING -> ENCODED -> [AUDIO_ANALYZING -> AUDIO_ANALYZED] -> [SUBTITLING -> SUBTITLED] -> ORGANIZING -> COMPLETED` (with `FAILED` detour and `NeedsReview` flag for review routing).
