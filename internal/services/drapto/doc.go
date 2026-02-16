@@ -1,8 +1,8 @@
-// Package drapto wraps the Drapto command-line encoder so the encoding stage can
+// Package drapto integrates the Drapto Go library so the encoding stage can
 // launch AV1 transcodes and observe structured progress updates.
 //
-// It exposes a small client interface, a CLI implementation with configurable
-// binary paths, and typed progress callbacks that surface percent complete,
-// stage names, and human messages. Tests can swap in fakes to avoid executing
+// It exposes a Client interface, a Library implementation that calls Drapto
+// directly, and a reporter adapter that translates Drapto's Reporter callbacks
+// into typed ProgressUpdate values. Tests can swap in fakes to avoid executing
 // the real encoder while still exercising workflow behaviour.
 package drapto
