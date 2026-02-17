@@ -76,6 +76,7 @@ golangci-lint run                     # Lint
 - **Progress tracking**: `item.SetProgress(stage, message, percent)` for updates; `item.SetProgressComplete(stage, message)` when done.
 - **State transitions**: Only workflow manager calls `store.UpdateStatus()`. Stages return nil to signal completion.
 - **Testing**: `testsupport.NewTestDB()` for temp SQLite; stub external service interfaces.
+- **Package docs**: When modifying a package, check whether its `doc.go` still accurately describes the package.
 
 ## Logging Guidance
 

@@ -13,5 +13,5 @@
 //
 // Primary entry points:
 //   - Compute: generates fingerprint from mounted disc device
-//   - ComputeTitle: generates fingerprint from title/duration for cache matching
+//   - TitleHash: generates a content-based hash from title metadata for cache matching
 package fingerprint
