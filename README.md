@@ -1,10 +1,17 @@
 # spindle
 
-Personal workflow for turning optical discs into a Jellyfin ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Drapto), optional subtitles (OpenSubtitles + WhisperX), organization, Jellyfin refreshes, and notifications.
+Workflow for turning optical discs into a Jellyfin ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Drapto), optional subtitles (OpenSubtitles + WhisperX), organization, Jellyfin refreshes, and notifications.
 
 Single Go binary drives both the CLI and daemon.
 
-Early-stage project; expect frequent changes.
+## Expectations
+
+This repository is shared as is. Spindle is a personal tool I built for my own encoding workflow, hardware, and preferences. I’m open sourcing it in the spirit of sharing.
+
+• Personal-first: Things will change and break as I iterate.
+• Best-effort only: This is a part-time hobby project and I work on it when I'm able to. I may be slow to respond to questions or may not respond at all.
+• PRs welcome (when aligned): I’m happy to review pull requests if they align with the project’s direction and keep things simple/maintainable. For larger changes, please open a discussion thread.
+• “Vibe coded”: I’m not a Go developer and this project started as (and remains) a vibe-coding experiment. Expect rough edges.
 
 ## Install
 
