@@ -8,10 +8,10 @@ Single Go binary drives both the CLI and daemon.
 
 This repository is shared as is. Spindle is a personal tool I built for my own encoding workflow, hardware, and preferences. I've open sourced it because I believe in sharing but I'm not an active maintainer.
 
-• Personal-first: Things will change and break as I iterate.
-• Best-effort only: This is a part-time hobby project and I work on it when I'm able to. I may be slow to respond to questions or may not respond at all.
-• PRs: Pull requests are welcome if they align with the project's goals but I may be slow to review them or may not accept changes that don't fit my own use case.
-• “Vibe coded”: I’m not a Go developer and this project started as (and remains) a vibe-coding experiment. Expect rough edges.
+- Personal-first: Things will change and break as I iterate.
+- Best-effort only: This is a part-time hobby project and I work on it when I'm able to. I may be slow to respond to questions or may not respond at all.
+- PRs: Pull requests are welcome if they align with the project's goals but I may be slow to review them or may not accept changes that don't fit my own use case.
+- “Vibe coded”: I’m not a Go developer and this project started as (and remains) a vibe-coding experiment. Expect rough edges.
 
 ## Install
 
