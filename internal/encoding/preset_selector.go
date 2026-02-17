@@ -122,7 +122,7 @@ func (c *llmPresetClassifier) Classify(ctx context.Context, req presetRequest) (
 		return presetClassification{}, errors.New("preset LLM unavailable")
 	}
 	description := req.Description()
-	classification, err := c.client.ClassifyPreset(ctx, description)
+	classification, err := c.client.ClassifyPreset(ctx, PresetClassificationPrompt, description)
 	if err != nil {
 		return presetClassification{}, err
 	}

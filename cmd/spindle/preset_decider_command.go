@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/encoding"
 	"spindle/internal/services/llm"
 )
 
@@ -44,7 +45,7 @@ This command does not touch the queue database or require the daemon.`,
 				return fmt.Errorf("load configuration: %w", err)
 			}
 
-			writeSection(cmd.ErrOrStderr(), "System Prompt", llm.PresetClassificationPrompt)
+			writeSection(cmd.ErrOrStderr(), "System Prompt", encoding.PresetClassificationPrompt)
 			writeSection(cmd.ErrOrStderr(), "User Description", presetDeciderTestDescription)
 			writeSection(cmd.ErrOrStderr(), "Response", "Printed to stdout as JSON.")
 
@@ -59,7 +60,7 @@ This command does not touch the queue database or require the daemon.`,
 			reqCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
-			classification, err := client.ClassifyPreset(reqCtx, presetDeciderTestDescription)
+			classification, err := client.ClassifyPreset(reqCtx, encoding.PresetClassificationPrompt, presetDeciderTestDescription)
 			if err != nil {
 				return err
 			}

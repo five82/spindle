@@ -90,7 +90,7 @@ func TestClientClassifyPresetCodeFence(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
-	classification, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
 		t.Fatalf("ClassifyPreset returned error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestClientClassifyPresetToolCallsArguments(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
-	classification, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
 		t.Fatalf("ClassifyPreset returned error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestClientClassifyPresetEmptyContentHasSnippet(t *testing.T) {
 		WithRetryBackoff(0, 0),
 		WithSleeper(func(time.Duration) {}),
 	)
-	_, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	_, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
 	if err == nil {
 		t.Fatal("expected classify to fail")
 	}
@@ -197,7 +197,7 @@ func TestClientClassifyPresetDeltaContent(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
-	classification, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
 		t.Fatalf("ClassifyPreset returned error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestClientClassifyPresetLegacyText(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
-	classification, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
 		t.Fatalf("ClassifyPreset returned error: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestClientRetriesOnHTTP429(t *testing.T) {
 		WithRetryBackoff(0, 10*time.Second),
 		WithRetryMaxAttempts(5),
 	)
-	classification, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
 		t.Fatalf("ClassifyPreset returned error: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestClientRetriesOnEmptyContentThenSucceeds(t *testing.T) {
 		WithSleeper(func(time.Duration) {}),
 		WithRetryMaxAttempts(5),
 	)
-	classification, err := client.ClassifyPreset(context.Background(), "Example Movie")
+	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
 		t.Fatalf("ClassifyPreset returned error: %v", err)
 	}

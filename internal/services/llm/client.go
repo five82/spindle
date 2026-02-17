@@ -177,7 +177,7 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 }
 
 // ClassifyPreset issues a classification request for the supplied description.
-func (c *Client) ClassifyPreset(ctx context.Context, description string) (Classification, error) {
+func (c *Client) ClassifyPreset(ctx context.Context, systemPrompt, description string) (Classification, error) {
 	var empty Classification
 	description = strings.TrimSpace(description)
 	if description == "" {
@@ -186,7 +186,7 @@ func (c *Client) ClassifyPreset(ctx context.Context, description string) (Classi
 	if strings.TrimSpace(c.cfg.APIKey) == "" {
 		return empty, errors.New("llm classify: api key required")
 	}
-	content, err := c.CompleteJSON(ctx, PresetClassificationPrompt, description)
+	content, err := c.CompleteJSON(ctx, systemPrompt, description)
 	if err != nil {
 		return empty, err
 	}

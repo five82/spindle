@@ -1,8 +1,7 @@
-package llm
+package encoding
 
-// PresetClassificationPrompt captures the instructions sent to the configured
-// LLM when classifying whether Drapto should use clean, grain, or default
-// settings. Update this text centrally so every call stays in sync.
+// PresetClassificationPrompt is the system prompt sent to the LLM when
+// classifying which Drapto encoding profile to use for a title.
 const PresetClassificationPrompt = `You are an assistant that chooses an encoding profile for a movie or tv show.
 
 Available profiles:
