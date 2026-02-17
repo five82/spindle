@@ -11,7 +11,10 @@
 // The fingerprint is a SHA-256 hash that uniquely identifies disc content,
 // enabling duplicate detection and rip cache lookups.
 //
+// If the disc is not already mounted, Compute will mount it automatically
+// using the system's fstab configuration and unmount it after fingerprinting.
+//
 // Primary entry points:
-//   - Compute: generates fingerprint from mounted disc device
+//   - Compute: generates fingerprint from disc device (auto-mounts if needed)
 //   - TitleHash: generates a content-based hash from title metadata for cache matching
 package fingerprint

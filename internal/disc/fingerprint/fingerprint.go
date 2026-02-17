@@ -24,18 +24,12 @@ var errMountNotFound = errors.New("optical drive mount point not found")
 // discType may be "Blu-ray", "DVD", or left empty; when empty the directory
 // layout is probed to pick an appropriate strategy.
 func Compute(ctx context.Context, device, discType string) (string, error) {
-	mountPoint, err := resolveMountPoint(device)
+	mountPoint, weMounted, err := ensureMount(ctx, device)
 	if err != nil {
-		if !errors.Is(err, errMountNotFound) {
-			return "", err
-		}
-		mountPoint = fallbackMountPoint()
+		return "", err
 	}
-	if mountPoint == "" {
-		mountPoint = fallbackMountPoint()
-	}
-	if mountPoint == "" {
-		return "", errMountNotFound
+	if weMounted {
+		defer unmountDevice(ctx, device)
 	}
 
 	info, err := os.Stat(mountPoint)
