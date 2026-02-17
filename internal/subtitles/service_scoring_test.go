@@ -200,6 +200,11 @@ func TestIsTitleStrictMismatchRejectsFranchiseTitles(t *testing.T) {
 		{"franchise partial Fast Furious", "Fast & Furious 6", "Fast & Furious 7", true},
 		{"franchise partial Avengers", "Avengers: Endgame", "Avengers: Age of Ultron", true},
 
+		// Short title false containment - should FAIL strict matching
+		{"short title false containment", "Scream", "Scream for Me Sarajevo", true},
+		{"short title sequel", "Scream", "Scream 2", false},
+		{"short title false containment alien", "Alien", "Alien vs Predator", true},
+
 		// Complete mismatch - should fail
 		{"complete mismatch", "Star Trek: Generations", "Die Hard", true},
 
@@ -303,6 +308,27 @@ func TestFilterForcedSubtitleCandidatesRejectsFranchiseTitles(t *testing.T) {
 	}
 	if !foundExact || !foundExtended {
 		t.Fatalf("expected both exact and extended matches to remain")
+	}
+}
+
+func TestFilterForcedSubtitleCandidatesRejectsShortTitleMismatch(t *testing.T) {
+	candidates := []scoredSubtitle{
+		{subtitle: opensubtitles.Subtitle{FileID: 1, FeatureTitle: "Scream", Release: "Scream.1996.1080p.BluRay"}},
+		{subtitle: opensubtitles.Subtitle{FileID: 2, FeatureTitle: "Scream for Me Sarajevo", Release: "Scream.for.Me.Sarajevo.2017"}},
+		{subtitle: opensubtitles.Subtitle{FileID: 3, FeatureTitle: "Scream 2", Release: "Scream.2.1997.1080p.BluRay"}},
+	}
+
+	filtered := filterForcedSubtitleCandidates(candidates, "Scream", nil)
+
+	// "Scream for Me Sarajevo" must be rejected (1/4 words = 25% < 50%)
+	// "Scream" (exact) and "Scream 2" (1/2 words = 50%) should pass
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 candidates after filtering, got %d", len(filtered))
+	}
+	for _, c := range filtered {
+		if c.subtitle.FileID == 2 {
+			t.Fatalf("'Scream for Me Sarajevo' should have been rejected for forced subtitles")
+		}
 	}
 }
 

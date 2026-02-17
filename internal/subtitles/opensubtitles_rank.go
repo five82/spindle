@@ -186,12 +186,13 @@ func compareTitles(expected, candidate string) titleMatchLevel {
 		return titleMatchExact
 	}
 
-	if strings.Contains(candidateNorm, expectedNorm) || strings.Contains(expectedNorm, candidateNorm) {
+	expectedWords := normalizeTitleWords(expected)
+	candidateWords := normalizeTitleWords(candidate)
+
+	if isWordContainment(expectedWords, candidateWords) {
 		return titleMatchContain
 	}
 
-	expectedWords := normalizeTitleWords(expected)
-	candidateWords := normalizeTitleWords(candidate)
 	if len(expectedWords) > 0 && len(candidateWords) > 0 {
 		matches := 0
 		for _, ew := range expectedWords {
@@ -264,6 +265,32 @@ func normalizeTitleWords(title string) []string {
 		result = append(result, normalized)
 	}
 	return result
+}
+
+// isWordContainment returns true if all words of the shorter list appear in the
+// longer list AND the shorter list has at least 50% of the longer's word count.
+// This prevents single-word titles like "Scream" from matching unrelated titles
+// like "Scream for Me Sarajevo" (1/4 = 25%) while allowing legitimate variants
+// like "Star Trek: Generations" matching "Star Trek: Generations - Special Edition"
+// (3/5 = 60%).
+func isWordContainment(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	shorter, longer := a, b
+	if len(a) > len(b) {
+		shorter, longer = b, a
+	}
+	// Require the shorter title to be at least 50% of the longer's word count
+	if float64(len(shorter))/float64(len(longer)) < 0.5 {
+		return false
+	}
+	for _, w := range shorter {
+		if !slices.Contains(longer, w) {
+			return false
+		}
+	}
+	return true
 }
 
 func releaseMatchScore(release string) (float64, []string) {
