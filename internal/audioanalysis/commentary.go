@@ -160,10 +160,22 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 		if llmClient != nil {
 			decision, err := s.classifyWithLLM(ctx, llmClient, candidateTranscript, item, env)
 			if err != nil {
-				logger.Warn("LLM classification failed; skipping candidate",
+				logger.Warn("LLM classification failed; preserving candidate and flagging for review",
 					logging.Int("track_index", candidate.Index),
 					logging.Error(err),
+					logging.String(logging.FieldEventType, "commentary_llm_failed"),
+					logging.String(logging.FieldErrorHint, "check LLM API key and configuration"),
+					logging.String(logging.FieldImpact, "commentary candidate preserved without LLM confirmation"),
 				)
+				// Conservatively preserve the track — losing a commentary track
+				// is worse than keeping an extra audio track.
+				commentaryTracks = append(commentaryTracks, CommentaryTrack{
+					Index:      candidate.Index,
+					Confidence: 0,
+					Reason:     fmt.Sprintf("LLM classification failed; preserved for review: %v", err),
+				})
+				item.NeedsReview = true
+				item.ReviewReason = fmt.Sprintf("LLM commentary classification failed for track %d: %v", candidate.Index, err)
 				continue
 			}
 

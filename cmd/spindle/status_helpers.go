@@ -3,16 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"spindle/internal/config"
+	"spindle/internal/preflight"
 )
 
 func jellyfinStatusLine(cfg *config.Config, colorize bool) string {
@@ -28,44 +25,11 @@ func jellyfinStatusLine(cfg *config.Config, colorize bool) string {
 	if strings.TrimSpace(cfg.Jellyfin.APIKey) == "" {
 		return renderStatusLine("Jellyfin", statusWarn, "Missing API key", colorize)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	if err := checkJellyfinAuth(ctx, client, cfg.Jellyfin.URL, cfg.Jellyfin.APIKey); err != nil {
-		return renderStatusLine("Jellyfin", statusWarn, err.Error(), colorize)
+	result := preflight.CheckJellyfin(context.Background(), cfg.Jellyfin.URL, cfg.Jellyfin.APIKey)
+	if result.Passed {
+		return renderStatusLine("Jellyfin", statusOK, result.Detail, colorize)
 	}
-	return renderStatusLine("Jellyfin", statusOK, "Reachable", colorize)
-}
-
-func checkJellyfinAuth(ctx context.Context, client *http.Client, baseURL, apiKey string) error {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		return fmt.Errorf("missing url")
-	}
-	if strings.TrimSpace(apiKey) == "" {
-		return fmt.Errorf("missing api key")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/Users", nil)
-	if err != nil {
-		return fmt.Errorf("auth check failed (%v)", err)
-	}
-	req.Header.Set("X-Emby-Token", strings.TrimSpace(apiKey))
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("auth check failed (%v)", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		return nil
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("auth failed (invalid api key)")
-	default:
-		return fmt.Errorf("auth check failed (%d)", resp.StatusCode)
-	}
+	return renderStatusLine("Jellyfin", statusWarn, result.Detail, colorize)
 }
 
 func detectDiscLine(device string, colorize bool) string {
@@ -113,27 +77,11 @@ func classifyDiscType(fstype string) string {
 }
 
 func directoryStatusLine(label, path string, colorize bool) string {
-	if err := checkDirectoryAccess(path); err != nil {
-		return renderStatusLine(label, statusError, fmt.Sprintf("%s (error: %v)", path, err), colorize)
+	result := preflight.CheckDirectoryAccess(label, path)
+	if result.Passed {
+		return renderStatusLine(label, statusOK, result.Detail, colorize)
 	}
-	return renderStatusLine(label, statusOK, fmt.Sprintf("%s (read/write ok)", path), colorize)
-}
-
-func checkDirectoryAccess(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("does not exist")
-		}
-		return fmt.Errorf("stat: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("is not a directory")
-	}
-	if err := unix.Access(path, unix.R_OK|unix.W_OK|unix.X_OK); err != nil {
-		return fmt.Errorf("insufficient permissions: %w", err)
-	}
-	return nil
+	return renderStatusLine(label, statusError, result.Detail, colorize)
 }
 
 func librarySubdirPath(root, child string) string {

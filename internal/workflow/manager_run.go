@@ -104,6 +104,16 @@ func (m *Manager) runLane(ctx context.Context, lane *laneState) {
 			continue
 		}
 
+		if err := m.runPreflightChecks(ctx, logger); err != nil {
+			logger.Error("preflight check failed; halting lane",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "preflight_halt"),
+				logging.String(logging.FieldErrorHint, "fix the reported issue and restart the daemon"),
+			)
+			m.setLastError(err)
+			return
+		}
+
 		if err := m.processItem(ctx, lane, logger, item); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return

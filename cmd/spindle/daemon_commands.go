@@ -458,6 +458,9 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 	if cfg.PresetDecider.Enabled {
 		statuses = append(statuses, presetDeciderDependencyStatus(cfg))
 	}
+	if cfg.Commentary.Enabled {
+		statuses = append(statuses, commentaryLLMDependencyStatus(cfg))
+	}
 	return statuses
 }
 
@@ -480,6 +483,35 @@ func presetDeciderDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 		Model:   cfg.PresetDecider.Model,
 		Referer: cfg.PresetDecider.Referer,
 		Title:   cfg.PresetDecider.Title,
+	})
+	if err := client.HealthCheck(ctx); err != nil {
+		status.Detail = summarizePresetDeciderError(err)
+		return status
+	}
+	status.Available = true
+	status.Detail = "API reachable"
+	return status
+}
+
+func commentaryLLMDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
+	status := ipc.DependencyStatus{
+		Name:        "Commentary LLM",
+		Description: "LLM-driven commentary track detection",
+		Optional:    true,
+	}
+	llmCfg := cfg.CommentaryLLM()
+	if llmCfg.APIKey == "" {
+		status.Detail = "API key missing (set commentary.api_key or preset_decider.api_key)"
+		return status
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	client := llm.NewClient(llm.Config{
+		APIKey:  llmCfg.APIKey,
+		BaseURL: llmCfg.BaseURL,
+		Model:   llmCfg.Model,
+		Referer: llmCfg.Referer,
+		Title:   llmCfg.Title,
 	})
 	if err := client.HealthCheck(ctx); err != nil {
 		status.Detail = summarizePresetDeciderError(err)
