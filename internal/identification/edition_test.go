@@ -204,6 +204,12 @@ func TestExtractEditionLabel(t *testing.T) {
 			tmdbTitle: "",
 			wantLabel: "",
 		},
+		{
+			name:      "parenthesized duplicate from keydb not treated as extra",
+			discTitle: "SCREAM (Scream)",
+			tmdbTitle: "Scream",
+			wantLabel: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -293,6 +299,12 @@ func TestHasAmbiguousEditionMarker(t *testing.T) {
 			name:      "only common words extra - not ambiguous",
 			discTitle: "THE_MOVIE_AND",
 			tmdbTitle: "The Movie",
+			want:      false,
+		},
+		{
+			name:      "parenthesized duplicate from keydb - not ambiguous",
+			discTitle: "SCREAM (Scream)",
+			tmdbTitle: "Scream",
 			want:      false,
 		},
 	}

@@ -186,6 +186,8 @@ func normalizeForEditionComparison(title string) string {
 	// Remove common punctuation
 	s = strings.ReplaceAll(s, "'", "")
 	s = strings.ReplaceAll(s, "-", " ")
+	s = strings.ReplaceAll(s, "(", "")
+	s = strings.ReplaceAll(s, ")", "")
 	// Uppercase for comparison
 	s = strings.ToUpper(s)
 	// Collapse whitespace
