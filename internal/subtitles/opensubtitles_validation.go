@@ -3,6 +3,7 @@ package subtitles
 import (
 	"fmt"
 	"math"
+	"sort"
 )
 
 func buildSuspectError(errors []durationMismatchError) error {
@@ -171,6 +172,233 @@ func checkSubtitleDensity(path string, videoSeconds float64, cueCount int) *spar
 			coverageRatio:  coverageRatio,
 			reason:         fmt.Sprintf("covers only %.0f%% of video (expected >= %.0f%%)", coverageRatio*100, minSubtitleCoverageRatio*100),
 			subtitleEndSec: last,
+		}
+	}
+
+	return nil
+}
+
+// alignmentQualityMetrics holds statistics from comparing pre- and post-alignment SRT files.
+type alignmentQualityMetrics struct {
+	// Shift statistics (seconds): per-cue difference between after and before start times.
+	shiftMean   float64
+	shiftMedian float64
+	shiftStdDev float64
+	shiftMax    float64
+	cueCount    int
+
+	// Integrity counts on the post-alignment file.
+	negativeTimestamps  int
+	zeroDurationCues    int
+	newOverlaps         int
+	preExistingOverlaps int
+}
+
+// analyzeAlignmentQuality parses before/after SRT files, matches cues by index,
+// and computes shift statistics and integrity metrics. FFSubsync preserves cue
+// structure 1:1, so index-based matching is reliable.
+func analyzeAlignmentQuality(beforePath, afterPath string) (alignmentQualityMetrics, error) {
+	before, err := parseSRTCues(beforePath)
+	if err != nil {
+		return alignmentQualityMetrics{}, fmt.Errorf("parse before: %w", err)
+	}
+	after, err := parseSRTCues(afterPath)
+	if err != nil {
+		return alignmentQualityMetrics{}, fmt.Errorf("parse after: %w", err)
+	}
+
+	n := len(before)
+	if len(after) < n {
+		n = len(after)
+	}
+	if n == 0 {
+		return alignmentQualityMetrics{}, nil
+	}
+
+	// Compute per-cue start-time shifts.
+	shifts := make([]float64, n)
+	for i := 0; i < n; i++ {
+		shifts[i] = after[i].start - before[i].start
+	}
+
+	// Mean
+	var sum float64
+	for _, s := range shifts {
+		sum += s
+	}
+	mean := sum / float64(n)
+
+	// Median
+	sorted := make([]float64, n)
+	copy(sorted, shifts)
+	sort.Float64s(sorted)
+	var median float64
+	if n%2 == 0 {
+		median = (sorted[n/2-1] + sorted[n/2]) / 2
+	} else {
+		median = sorted[n/2]
+	}
+
+	// Stddev and max absolute shift
+	var sqSum, maxShift float64
+	for _, s := range shifts {
+		d := s - mean
+		sqSum += d * d
+		if abs := math.Abs(s); abs > maxShift {
+			maxShift = abs
+		}
+	}
+	stddev := math.Sqrt(sqSum / float64(n))
+
+	// Count integrity issues in the after file.
+	var negTS, zeroDur int
+	for _, c := range after {
+		if c.start < 0 || c.end < 0 {
+			negTS++
+		}
+		if c.end <= c.start {
+			zeroDur++
+		}
+	}
+
+	// Count overlaps: cue[i].end > cue[i+1].start.
+	// Track both before and after to identify new overlaps introduced by alignment.
+	beforeOverlaps := countOverlaps(before)
+	afterOverlaps := countOverlaps(after)
+	newOverlaps := afterOverlaps - beforeOverlaps
+	if newOverlaps < 0 {
+		newOverlaps = 0
+	}
+
+	return alignmentQualityMetrics{
+		shiftMean:           mean,
+		shiftMedian:         median,
+		shiftStdDev:         stddev,
+		shiftMax:            maxShift,
+		cueCount:            n,
+		negativeTimestamps:  negTS,
+		zeroDurationCues:    zeroDur,
+		newOverlaps:         newOverlaps,
+		preExistingOverlaps: beforeOverlaps,
+	}, nil
+}
+
+// countOverlaps returns the number of consecutive cue pairs where cue[i].end > cue[i+1].start.
+func countOverlaps(cues []srtCue) int {
+	count := 0
+	for i := 0; i < len(cues)-1; i++ {
+		if cues[i].end > cues[i+1].start {
+			count++
+		}
+	}
+	return count
+}
+
+// checkAlignmentQuality compares before/after SRT files and returns an error if
+// alignment produced incoherent timing. Used after ffsubsync which preserves
+// cue structure 1:1.
+func checkAlignmentQuality(beforePath, afterPath, release string) *alignmentQualityError {
+	m, err := analyzeAlignmentQuality(beforePath, afterPath)
+	if err != nil {
+		return &alignmentQualityError{
+			reason:  fmt.Sprintf("analysis failed: %v", err),
+			release: release,
+			metrics: m,
+		}
+	}
+	if m.cueCount == 0 {
+		return nil // Nothing to compare
+	}
+
+	// Reject: negative timestamps
+	if m.negativeTimestamps > 0 {
+		return &alignmentQualityError{
+			reason:  fmt.Sprintf("%d cues have negative timestamps", m.negativeTimestamps),
+			release: release,
+			metrics: m,
+		}
+	}
+
+	// Reject: zero-duration cues (end <= start)
+	if m.zeroDurationCues > 0 {
+		return &alignmentQualityError{
+			reason:  fmt.Sprintf("%d cues have zero or negative duration", m.zeroDurationCues),
+			release: release,
+			metrics: m,
+		}
+	}
+
+	// Reject: chaotic shifts (high stddev relative to median)
+	absMedian := math.Abs(m.shiftMedian)
+	if absMedian > 0.5 {
+		// Non-trivial median shift: check coherence ratio
+		ratio := m.shiftStdDev / absMedian
+		if ratio > alignmentShiftCoherenceMaxRatio {
+			return &alignmentQualityError{
+				reason:  fmt.Sprintf("chaotic alignment: shift stddev/|median| ratio %.2f exceeds %.2f (stddev=%.2fs, median=%.2fs)", ratio, alignmentShiftCoherenceMaxRatio, m.shiftStdDev, m.shiftMedian),
+				release: release,
+				metrics: m,
+			}
+		}
+	} else if m.shiftStdDev > alignmentZeroShiftMaxStdDev {
+		// Near-zero median shift: high stddev means partial failure
+		return &alignmentQualityError{
+			reason:  fmt.Sprintf("partial alignment failure: stddev %.2fs with near-zero median shift %.2fs", m.shiftStdDev, m.shiftMedian),
+			release: release,
+			metrics: m,
+		}
+	}
+
+	// Reject: too many new overlaps introduced by alignment
+	overlapRatio := float64(m.newOverlaps) / float64(m.cueCount)
+	if overlapRatio > alignmentMaxNewOverlapRatio {
+		return &alignmentQualityError{
+			reason:  fmt.Sprintf("alignment introduced %d new overlaps (%.0f%% of cues, max %.0f%%)", m.newOverlaps, overlapRatio*100, alignmentMaxNewOverlapRatio*100),
+			release: release,
+			metrics: m,
+		}
+	}
+
+	return nil
+}
+
+// checkOutputIntegrity checks an output SRT file for basic timing integrity
+// without comparing to a before file. Used after WhisperX where cue structure
+// can change (merge/split), making cross-file comparison unreliable.
+func checkOutputIntegrity(path, release string) *alignmentQualityError {
+	cues, err := parseSRTCues(path)
+	if err != nil {
+		return &alignmentQualityError{
+			reason:  fmt.Sprintf("parse failed: %v", err),
+			release: release,
+		}
+	}
+	if len(cues) == 0 {
+		return nil
+	}
+
+	var negTS, zeroDur int
+	for _, c := range cues {
+		if c.start < 0 || c.end < 0 {
+			negTS++
+		}
+		if c.end <= c.start {
+			zeroDur++
+		}
+	}
+
+	if negTS > 0 {
+		return &alignmentQualityError{
+			reason:  fmt.Sprintf("%d cues have negative timestamps", negTS),
+			release: release,
+			metrics: alignmentQualityMetrics{negativeTimestamps: negTS, cueCount: len(cues)},
+		}
+	}
+	if zeroDur > 0 {
+		return &alignmentQualityError{
+			reason:  fmt.Sprintf("%d cues have zero or negative duration", zeroDur),
+			release: release,
+			metrics: alignmentQualityMetrics{zeroDurationCues: zeroDur, cueCount: len(cues)},
 		}
 	}
 

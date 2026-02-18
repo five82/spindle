@@ -66,4 +66,10 @@ const (
 	// A subtitle that ends way before the video (excluding credits) is likely incomplete.
 	// This catches cases where subtitles cover only part of the movie.
 	minSubtitleCoverageRatio = 0.75 // Subtitle should cover at least 75% of video duration
+
+	// Alignment quality thresholds: detect when alignment tools produce incoherent timing.
+	// After alignment, per-cue time shifts should be coherent (similar magnitude).
+	alignmentShiftCoherenceMaxRatio = 2.0  // max stddev/|median| ratio for shifts
+	alignmentZeroShiftMaxStdDev     = 2.0  // max stddev (seconds) when median shift is ~0
+	alignmentMaxNewOverlapRatio     = 0.10 // max fraction of cues with new overlaps introduced by alignment
 )

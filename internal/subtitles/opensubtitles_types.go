@@ -32,6 +32,15 @@ type (
 	suspectMisIdentificationError struct {
 		deltas []float64
 	}
+
+	// alignmentQualityError indicates alignment produced incoherent timing.
+	// Returned when shift analysis or output integrity checks detect that an
+	// alignment tool produced garbage rather than improving timing.
+	alignmentQualityError struct {
+		reason  string
+		release string
+		metrics alignmentQualityMetrics
+	}
 )
 
 func (e durationMismatchError) Error() string {
@@ -40,6 +49,10 @@ func (e durationMismatchError) Error() string {
 
 func (e earlyDurationRejectError) Error() string {
 	return fmt.Sprintf("subtitle rejected early: duration delta %.1fs exceeds pre-check tolerance", e.deltaSeconds)
+}
+
+func (e alignmentQualityError) Error() string {
+	return fmt.Sprintf("alignment quality failed: %s", e.reason)
 }
 
 func (e suspectMisIdentificationError) Error() string {

@@ -156,6 +156,28 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 			}
 			return GenerateResult{}, err
 		} else if syncedPath != "" {
+			// Validate ffsubsync alignment quality before proceeding.
+			// FFSubsync preserves cue structure 1:1, so before/after comparison is reliable.
+			if qualityErr := checkAlignmentQuality(cleanedPath, syncedPath, candidate.Release); qualityErr != nil {
+				if s.logger != nil {
+					s.logger.Info("ffsubsync alignment quality check failed",
+						logging.String(logging.FieldEventType, "alignment_quality_failed"),
+						logging.String(logging.FieldDecisionType, "alignment_quality"),
+						logging.String("decision_result", "rejected"),
+						logging.String("decision_reason", qualityErr.reason),
+						logging.String("release", candidate.Release),
+						logging.Float64("shift_mean", qualityErr.metrics.shiftMean),
+						logging.Float64("shift_median", qualityErr.metrics.shiftMedian),
+						logging.Float64("shift_stddev", qualityErr.metrics.shiftStdDev),
+						logging.Float64("shift_max", qualityErr.metrics.shiftMax),
+						logging.Int("cue_count", qualityErr.metrics.cueCount),
+						logging.Int("negative_timestamps", qualityErr.metrics.negativeTimestamps),
+						logging.Int("zero_duration_cues", qualityErr.metrics.zeroDurationCues),
+						logging.Int("new_overlaps", qualityErr.metrics.newOverlaps),
+					)
+				}
+				return GenerateResult{}, qualityErr
+			}
 			inputPath = syncedPath
 			if s.logger != nil {
 				s.logger.Debug("ffsubsync alignment complete",
@@ -181,6 +203,23 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 			s.logger.Debug("opensubtitles alignment complete",
 				logging.String("subtitle_file", plan.outputFile),
 			)
+		}
+
+		// Validate WhisperX output integrity (no negative timestamps, no zero-duration cues).
+		// WhisperX can change cue structure, so only output-only checks are reliable here.
+		if qualityErr := checkOutputIntegrity(plan.outputFile, candidate.Release); qualityErr != nil {
+			if s.logger != nil {
+				s.logger.Info("whisperx output integrity check failed",
+					logging.String(logging.FieldEventType, "output_integrity_failed"),
+					logging.String(logging.FieldDecisionType, "output_integrity"),
+					logging.String("decision_result", "rejected"),
+					logging.String("decision_reason", qualityErr.reason),
+					logging.String("release", candidate.Release),
+					logging.Int("negative_timestamps", qualityErr.metrics.negativeTimestamps),
+					logging.Int("zero_duration_cues", qualityErr.metrics.zeroDurationCues),
+				)
+			}
+			return GenerateResult{}, qualityErr
 		}
 	}
 

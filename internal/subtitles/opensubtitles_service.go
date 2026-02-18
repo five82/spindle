@@ -136,6 +136,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 		mismatchErrs  []durationMismatchError
 		allDurationMM = true
 		summaryLines  []string
+		breakLoop     bool
 	)
 
 	for idx, candidate := range candidatesToTry {
@@ -150,6 +151,7 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 			var mismatch durationMismatchError
 			var earlyReject earlyDurationRejectError
 			var sparse *sparseSubtitleResult
+			var aqErr *alignmentQualityError
 			if errors.As(err, &mismatch) {
 				mismatchErrs = append(mismatchErrs, mismatch)
 				reason = "duration_mismatch"
@@ -163,11 +165,21 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 				})
 				reason = "early_duration_reject"
 				details = fmt.Sprintf(" [Diff: %.1fs, skipped alignment]", earlyReject.deltaSeconds)
+			} else if errors.As(err, &aqErr) {
+				// Alignment quality failure: don't conflate with duration mismatch
+				allDurationMM = false
+				reason = "alignment_quality_failed"
+				details = fmt.Sprintf(" [%s]", aqErr.reason)
 			} else if errors.As(err, &sparse) {
 				// Sparse subtitles: too few cues or poor coverage, should fall back to WhisperX
 				allDurationMM = false
 				reason = "sparse_subtitles"
 				details = fmt.Sprintf(" [%.1f cues/min, %.0f%% coverage]", sparse.cuesPerMinute, sparse.coverageRatio*100)
+			} else if errors.Is(err, services.ErrExternalTool) {
+				allDurationMM = false
+				reason = "tool_failure"
+				details = fmt.Sprintf(" [%v]", err)
+				breakLoop = true
 			} else {
 				allDurationMM = false
 				reason = "download_or_align_failed"
@@ -192,6 +204,10 @@ func (s *Service) tryOpenSubtitles(ctx context.Context, plan *generationPlan, re
 			factors,
 		)
 		summaryLines = append(summaryLines, line)
+
+		if breakLoop {
+			break
+		}
 
 		if err == nil {
 			s.logCandidateSummary("selected", "match_found", summaryLines)
@@ -363,6 +379,16 @@ func (s *Service) tryForcedSubtitles(ctx context.Context, plan *generationPlan, 
 	for _, candidate := range candidatesToTry {
 		result, err := s.downloadAndAlignCandidate(ctx, &forcedPlan, req, candidate.subtitle)
 		if err != nil {
+			if errors.Is(err, services.ErrExternalTool) {
+				if s.logger != nil {
+					s.logger.Warn("forced subtitle alignment tool failure, aborting candidates",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "forced_subtitle_tool_failure"),
+						logging.String(logging.FieldErrorHint, "check that ffsubsync is installed and working"),
+					)
+				}
+				break
+			}
 			if s.logger != nil {
 				s.logger.Debug("forced subtitle candidate rejected",
 					logging.String("release", candidate.subtitle.Release),
