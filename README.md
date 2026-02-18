@@ -1,6 +1,6 @@
 # spindle
 
-Workflow for turning optical discs into a Jellyfin ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Drapto), optional subtitles (OpenSubtitles + WhisperX), organization, Jellyfin refreshes, and notifications.
+Workflow for turning optical discs into a Jellyfin ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Drapto), optional subtitles (WhisperX transcription), organization, Jellyfin refreshes, and notifications.
 
 Single Go binary drives both the CLI and daemon.
 
@@ -19,7 +19,7 @@ This repository is shared as is. Spindle is a personal tool I built for my own e
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.26+, MakeMKV, ffmpeg, mediainfo, python3-dev (required by ffsubsync). Optional: mkvmerge (for subtitle muxing).
+Prerequisites: Go 1.26+, MakeMKV, ffmpeg, mediainfo. Optional: mkvmerge (for subtitle muxing).
 
 ## Configure
 

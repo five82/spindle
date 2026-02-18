@@ -1,13 +1,17 @@
-// Package subtitles generates external subtitle files. The primary path is to
-// download reference subtitles from OpenSubtitles (when enabled/configured).
-// When OpenSubtitles is unavailable, has no match, or fails, the stage falls
-// back to local WhisperX transcription/alignment.
+// Package subtitles generates external subtitle files using WhisperX
+// transcription. Regular subtitles always come from WhisperX, which
+// demuxes the primary audio stream, runs transcription (GPU when
+// config.Subtitles.WhisperXCUDAEnabled is true, otherwise CPU), then feeds
+// the alignment JSON to Stable-TS to regroup phrases and timing before
+// emitting library-compatible SRT sidecars. A post-transcription filter
+// then removes known hallucination patterns (e.g. repeated "Thank you."
+// during silence) and trims credits-section noise. If Stable-TS cannot
+// complete, the raw WhisperX SRT is copied so subtitle generation never
+// leaves the pipeline empty-handed.
 //
-// WhisperX execution demuxes the primary audio stream, runs WhisperX (GPU when
-// config.Subtitles.WhisperXCUDAEnabled is true, otherwise CPU), then feeds the alignment
-// JSON to Stable-TS to regroup phrases and timing before emitting library-
-// compatible SRT sidecars. If Stable-TS cannot complete, the raw WhisperX SRT
-// is copied so subtitle generation never leaves the pipeline empty-handed.
+// Forced (foreign-parts-only) subtitles are still fetched from OpenSubtitles
+// when enabled and configured, then aligned against the WhisperX output via
+// text-based matching.
 //
 // # Debugging
 //

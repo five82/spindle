@@ -381,17 +381,13 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 		if language == "" && len(m.languages) > 0 {
 			language = m.languages[0]
 		}
-		cacheKey := subtitles.BuildTranscriptCacheKey(info.ItemID, episode.Key)
 		req := subtitles.GenerateRequest{
-			SourcePath:                asset.Path,
-			WorkDir:                   workDir,
-			OutputDir:                 workDir,
-			BaseName:                  fmt.Sprintf("%s-contentid", episode.Key),
-			Language:                  language,
-			Context:                   info.SubtitleCtx,
-			ForceAI:                   true,
-			TranscriptKey:             cacheKey,
-			AllowTranscriptCacheWrite: cacheKey != "",
+			SourcePath: asset.Path,
+			WorkDir:    workDir,
+			OutputDir:  workDir,
+			BaseName:   fmt.Sprintf("%s-contentid", episode.Key),
+			Language:   language,
+			Context:    info.SubtitleCtx,
 		}
 		req.Context.Title = fmt.Sprintf("%s %s", info.ShowTitle, strings.ToUpper(episode.Key))
 		result, err := m.subs.Generate(ctx, req)

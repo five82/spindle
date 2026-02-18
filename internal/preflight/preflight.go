@@ -40,11 +40,6 @@ func RunAll(ctx context.Context, cfg *config.Config) []Result {
 		results = append(results, CheckLLM(ctx, "Preset Decider LLM", cfg.PresetLLM()))
 	}
 
-	// ffsubsync (when subtitles enabled)
-	if cfg.Subtitles.Enabled {
-		results = append(results, CheckFFSubsync(ctx))
-	}
-
 	// Commentary LLM (only when it uses a distinct endpoint from preset decider)
 	if cfg.Commentary.Enabled && commentaryUsesDistinctLLM(cfg) {
 		results = append(results, CheckLLM(ctx, "Commentary LLM", cfg.CommentaryLLM()))

@@ -233,6 +233,15 @@ func writeSRTCues(path string, cues []srtCue) error {
 	return os.WriteFile(path, []byte(sb.String()), 0644)
 }
 
+// copyFile copies a file from src to dst.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
+}
+
 // alignForcedToReference adjusts forced subtitle timing based on a reference subtitle.
 // It finds matching cues, calculates a time transformation, and applies it.
 func alignForcedToReference(referencePath, forcedPath, outputPath string) (int, timeTransform, error) {

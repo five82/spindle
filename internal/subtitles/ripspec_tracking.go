@@ -15,7 +15,7 @@ const (
 	subtitleGenerationSummaryKey = "subtitle_generation_summary"
 )
 
-func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string, result GenerateResult, openSubsExpected bool, openSubsCount, whisperxCount int) {
+func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string, result GenerateResult) {
 	if env == nil {
 		return
 	}
@@ -26,7 +26,7 @@ func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string
 
 	entry := map[string]any{
 		"episode_key": key,
-		"source":      strings.ToLower(strings.TrimSpace(result.Source)),
+		"source":      "whisperx",
 	}
 	if strings.TrimSpace(result.SubtitlePath) != "" {
 		entry["subtitle_path"] = strings.TrimSpace(result.SubtitlePath)
@@ -36,12 +36,6 @@ func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string
 	}
 	if lang := strings.ToLower(strings.TrimSpace(language)); lang != "" {
 		entry["language"] = lang
-	}
-	if dec := strings.TrimSpace(result.OpenSubtitlesDecision); dec != "" {
-		entry["opensubtitles_decision"] = dec
-	}
-	if detail := strings.TrimSpace(result.OpenSubtitlesDetail); detail != "" {
-		entry["opensubtitles_detail"] = detail
 	}
 
 	var list []map[string]any
@@ -71,29 +65,8 @@ func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string
 	env.Attributes[subtitleGenerationResultsKey] = list
 
 	env.Attributes[subtitleGenerationSummaryKey] = map[string]any{
-		"opensubtitles":          openSubsCount,
-		"whisperx":               whisperxCount,
-		"expected_opensubtitles": openSubsExpected,
-		"fallback_used":          openSubsExpected && whisperxCount > 0,
+		"source": "whisperx",
 	}
-}
-
-func subtitleStageMessage(episodeCount, openSubsCount, whisperxCount int) string {
-	base := "Generated subtitles"
-	if episodeCount > 1 {
-		base = fmt.Sprintf("Generated subtitles for %d episode(s)", episodeCount)
-	}
-	parts := make([]string, 0, 2)
-	if openSubsCount > 0 {
-		parts = append(parts, fmt.Sprintf("OpenSubtitles: %d", openSubsCount))
-	}
-	if whisperxCount > 0 {
-		parts = append(parts, fmt.Sprintf("WhisperX: %d", whisperxCount))
-	}
-	if len(parts) == 0 {
-		return base
-	}
-	return fmt.Sprintf("%s (%s)", base, strings.Join(parts, ", "))
 }
 
 func toString(v any) string {
@@ -137,49 +110,24 @@ func (s *Stage) persistRipSpec(ctx context.Context, item *queue.Item, env *ripsp
 }
 
 // processGenerationResult handles logging and RipSpec update after successful generation.
-func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, target subtitleTarget, result GenerateResult, env *ripspec.Envelope, hasRipSpec, openSubsExpected bool, openSubsCount, aiCount int, ctxMeta SubtitleContext) {
+func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, target subtitleTarget, result GenerateResult, env *ripspec.Envelope, hasRipSpec bool, ctxMeta SubtitleContext) {
 	episodeKey := normalizeEpisodeKey(target.EpisodeKey)
 
-	// Log fallback warning if OpenSubtitles was expected but WhisperX was used
-	if openSubsExpected && strings.EqualFold(result.Source, "whisperx") &&
-		result.OpenSubtitlesDecision != "force_ai" && result.OpenSubtitlesDecision != "skipped" {
-		if s.logger != nil {
-			s.logger.Warn("whisperx subtitle fallback used",
-				logging.Int64("item_id", item.ID),
-				logging.String("episode_key", episodeKey),
-				logging.String("source_file", target.SourcePath),
-				logging.String("subtitle_file", result.SubtitlePath),
-				logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
-				logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
-				logging.Alert("subtitle_fallback"),
-				logging.String(logging.FieldEventType, "subtitle_fallback"),
-				logging.String(logging.FieldErrorHint, "verify OpenSubtitles metadata or use --forceai"),
-				logging.String(logging.FieldImpact, "AI-generated subtitles used instead of OpenSubtitles"),
-			)
-		}
-	}
-
-	// Log generation decision
 	if s.logger != nil {
 		s.logger.Info("subtitle generation decision",
 			logging.String(logging.FieldDecisionType, "subtitle_generation"),
-			logging.String("decision_result", strings.ToLower(strings.TrimSpace(result.Source))),
-			logging.String("decision_reason", strings.TrimSpace(result.OpenSubtitlesDecision)),
-			logging.String("decision_options", "opensubtitles, whisperx"),
+			logging.String("decision_result", "whisperx"),
+			logging.String("decision_reason", "whisperx_only"),
 			logging.String("episode_key", episodeKey),
 			logging.String("source_file", target.SourcePath),
 			logging.String("subtitle_file", result.SubtitlePath),
 			logging.Int("segments", result.SegmentCount),
-			logging.String("subtitle_source", result.Source),
-			logging.String("opensubtitles_decision", result.OpenSubtitlesDecision),
-			logging.String("opensubtitles_detail", result.OpenSubtitlesDetail),
 		)
 	}
 
-	// Update RipSpec if available (asset already added in main loop with status)
 	if !hasRipSpec {
 		return
 	}
-	recordSubtitleGeneration(env, episodeKey, ctxMeta.Language, result, openSubsExpected, openSubsCount, aiCount)
+	recordSubtitleGeneration(env, episodeKey, ctxMeta.Language, result)
 	s.persistRipSpec(ctx, item, env)
 }

@@ -2,7 +2,6 @@ package subtitles
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -106,16 +105,12 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	baseCtx := BuildSubtitleContext(item)
-	openSubsExpected := s.service != nil && s.service.shouldUseOpenSubtitles()
 	step := progressPercentForGen / float64(len(targets))
 	var (
-		openSubsCount   int
-		aiCount         int
-		totalSegments   int
-		skipped         int
-		failedEpisodes  int
-		reviewEpisodes  int
-		lastReviewError string
+		successCount   int
+		totalSegments  int
+		skipped        int
+		failedEpisodes int
 	)
 	for idx, target := range targets {
 		episodeKey := normalizeEpisodeKey(target.EpisodeKey)
@@ -141,85 +136,41 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			return err
 		}
 		ctxMeta := buildEpisodeContext(baseCtx, target)
-		cacheKey := BuildTranscriptCacheKey(item.ID, target.EpisodeKey)
 		result, err := s.service.Generate(ctx, GenerateRequest{
-			SourcePath:                target.SourcePath,
-			WorkDir:                   target.WorkDir,
-			OutputDir:                 target.OutputDir,
-			BaseName:                  target.BaseName,
-			Context:                   ctxMeta,
-			Languages:                 append([]string(nil), s.service.languages...),
-			TranscriptKey:             cacheKey,
-			AllowTranscriptCacheRead:  cacheKey != "",
-			AllowTranscriptCacheWrite: cacheKey != "",
+			SourcePath: target.SourcePath,
+			WorkDir:    target.WorkDir,
+			OutputDir:  target.OutputDir,
+			BaseName:   target.BaseName,
+			Context:    ctxMeta,
+			Languages:  append([]string(nil), s.service.languages...),
 		})
 		if err != nil {
-			var suspect suspectMisIdentificationError
-			if errors.As(err, &suspect) {
-				if handled, retryResult, handleErr := s.handleSuspectMisID(ctx, item, target, ctxMeta, suspect); handleErr == nil && handled {
-					result = retryResult
-				} else {
-					if handleErr != nil && s.logger != nil {
-						s.logger.Warn("misidentification handling failed; review required",
-							logging.Error(handleErr),
-							logging.String(logging.FieldEventType, "subtitle_misidentification_handle_failed"),
-							logging.String(logging.FieldErrorHint, "review subtitle offsets and metadata"),
-							logging.String(logging.FieldImpact, "episode flagged for review, continuing with others"),
-						)
-					}
-					if s.logger != nil {
-						s.logger.Warn("subtitle generation flagged for review",
-							logging.Int64("item_id", item.ID),
-							logging.String("episode_key", episodeKey),
-							logging.String("source_file", target.SourcePath),
-							logging.Float64("median_delta_seconds", suspect.medianAbsDelta()),
-							logging.Alert("review"),
-							logging.String(logging.FieldEventType, "subtitle_review_required"),
-							logging.String(logging.FieldErrorHint, "review subtitle offsets and metadata"),
-							logging.String(logging.FieldImpact, "episode diverted to review, continuing with others"),
-						)
-					}
-					// Record per-episode review status and continue to next episode
-					env.Assets.AddAsset("subtitled", ripspec.Asset{
-						EpisodeKey: target.EpisodeKey,
-						TitleID:    target.TitleID,
-						Path:       "",
-						Status:     ripspec.AssetStatusFailed,
-						ErrorMsg:   "suspect mis-identification from subtitle offsets",
-					})
-					reviewEpisodes++
-					lastReviewError = "suspect mis-identification from subtitle offsets"
-					s.persistRipSpec(ctx, item, &env)
-					continue
-				}
-			} else {
-				errMessage := strings.TrimSpace(err.Error())
-				if errMessage == "" {
-					errMessage = "Subtitle generation failed"
-				}
-				if s.logger != nil {
-					s.logger.Warn("subtitle generation failed for episode",
-						logging.Int64("item_id", item.ID),
-						logging.String("episode_key", episodeKey),
-						logging.String("source_file", target.SourcePath),
-						logging.Error(err),
-						logging.String(logging.FieldEventType, "episode_subtitle_failed"),
-						logging.String(logging.FieldErrorHint, "check WhisperX/OpenSubtitles logs and retry"),
-						logging.String(logging.FieldImpact, "subtitles will be missing for this episode, continuing with others"),
-					)
-				}
-				// Record per-episode failure and continue to next episode
-				env.Assets.AddAsset("subtitled", ripspec.Asset{
-					EpisodeKey: target.EpisodeKey,
-					TitleID:    target.TitleID,
-					Path:       "",
-					Status:     ripspec.AssetStatusFailed,
-					ErrorMsg:   errMessage,
-				})
-				failedEpisodes++
-				s.persistRipSpec(ctx, item, &env)
-				continue
+			errMessage := strings.TrimSpace(err.Error())
+			if errMessage == "" {
+				errMessage = "Subtitle generation failed"
 			}
+			if s.logger != nil {
+				s.logger.Warn("subtitle generation failed for episode",
+					logging.Int64("item_id", item.ID),
+					logging.String("episode_key", episodeKey),
+					logging.String("source_file", target.SourcePath),
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "episode_subtitle_failed"),
+					logging.String(logging.FieldErrorHint, "check WhisperX logs and retry"),
+					logging.String(logging.FieldImpact, "subtitles will be missing for this episode, continuing with others"),
+				)
+			}
+			// Record per-episode failure and continue to next episode
+			env.Assets.AddAsset("subtitled", ripspec.Asset{
+				EpisodeKey: target.EpisodeKey,
+				TitleID:    target.TitleID,
+				Path:       "",
+				Status:     ripspec.AssetStatusFailed,
+				ErrorMsg:   errMessage,
+			})
+			failedEpisodes++
+			s.persistRipSpec(ctx, item, &env)
+			continue
 		}
 		// Validate generated SRT content
 		if issues := ValidateSRTContent(result.SubtitlePath, 0); len(issues) > 0 {
@@ -239,11 +190,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			}
 		}
 
-		if strings.EqualFold(result.Source, "opensubtitles") {
-			openSubsCount++
-		} else {
-			aiCount++
-		}
+		successCount++
 		totalSegments += result.SegmentCount
 
 		// Check for forced subtitles if disc has forced subtitle tracks.
@@ -266,58 +213,39 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			Status:         ripspec.AssetStatusCompleted,
 			SubtitlesMuxed: subtitlesMuxed,
 		})
-		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, openSubsExpected, openSubsCount, aiCount, ctxMeta)
+		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, ctxMeta)
 	}
 
 	// Determine final item status based on episode outcomes
-	successfulEpisodes := openSubsCount + aiCount
 	totalProcessed := len(targets) - skipped
-	if reviewEpisodes > 0 && successfulEpisodes == 0 {
-		// All non-skipped episodes need review
-		item.NeedsReview = true
-		item.ReviewReason = lastReviewError
-		item.ProgressMessage = "Subtitles diverted to review (suspect mis-identification)"
-		item.ProgressPercent = 100
-		if err := s.store.Update(ctx, item); err != nil {
-			return services.Wrap(services.ErrTransient, "subtitles", "persist review", "Failed to persist review flag", err)
-		}
-		return nil
-	}
-	if failedEpisodes > 0 && successfulEpisodes == 0 && reviewEpisodes == 0 {
-		// All episodes failed (no successes, no review cases)
+	if failedEpisodes > 0 && successCount == 0 {
 		return services.Wrap(services.ErrTransient, "subtitles", "execute",
 			fmt.Sprintf("All %d episode(s) failed subtitle generation", totalProcessed), nil)
 	}
-	item.ProgressMessage = subtitleStageMessage(len(targets), openSubsCount, aiCount)
+	item.ProgressMessage = fmt.Sprintf("Subtitles generated (%d episodes, %d segments)", successCount, totalSegments)
 	item.ProgressPercent = 100
 	item.ErrorMessage = ""
 	item.ActiveEpisodeKey = ""
 	if err := s.store.UpdateProgress(ctx, item); err != nil {
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}
-	fallbackEpisodes := len(targets) - openSubsCount
 	alertValue := ""
 	if item.NeedsReview {
 		alertValue = "review"
-	} else if fallbackEpisodes > 0 && openSubsExpected {
-		alertValue = "subtitle_fallback"
 	}
 	if s.logger != nil {
 		summaryAttrs := []logging.Attr{
 			logging.String(logging.FieldEventType, "stage_complete"),
 			logging.Duration("stage_duration", time.Since(stageStart)),
 			logging.Int("episodes", len(targets)),
-			logging.Int("opensubtitles", openSubsCount),
-			logging.Int("whisperx_fallback", aiCount),
+			logging.Int("whisperx", successCount),
 			logging.Int("segments", totalSegments),
 			logging.Bool("needs_review", item.NeedsReview),
-			logging.Int("opensubtitles_missing", fallbackEpisodes),
-			logging.Bool("opensubtitles_expected", openSubsExpected),
 		}
 		if alertValue != "" {
 			summaryAttrs = append(summaryAttrs, logging.Alert(alertValue))
 			summaryAttrs = append(summaryAttrs,
-				logging.String(logging.FieldImpact, "subtitle stage completed with review or fallback alerts"),
+				logging.String(logging.FieldImpact, "subtitle stage completed with review alerts"),
 				logging.String(logging.FieldErrorHint, "Review subtitle results or rerun spindle gensubtitle for affected episodes"),
 			)
 			s.logger.Warn("subtitle stage summary", logging.Args(summaryAttrs...)...)
@@ -340,26 +268,6 @@ func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message st
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}
 	return nil
-}
-
-func (s *Stage) handleSuspectMisID(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, _ suspectMisIdentificationError) (bool, GenerateResult, error) {
-	// Best-effort auto-fix: fall back to local WhisperX generation (no OpenSubtitles)
-	result, err := s.service.Generate(ctx, GenerateRequest{
-		SourcePath:                target.SourcePath,
-		WorkDir:                   target.WorkDir,
-		OutputDir:                 target.OutputDir,
-		BaseName:                  target.BaseName,
-		Context:                   ctxMeta,
-		Languages:                 append([]string(nil), s.service.languages...),
-		ForceAI:                   true,
-		TranscriptKey:             BuildTranscriptCacheKey(item.ID, target.EpisodeKey),
-		AllowTranscriptCacheRead:  true,
-		AllowTranscriptCacheWrite: true,
-	})
-	if err != nil {
-		return false, GenerateResult{}, err
-	}
-	return true, result, nil
 }
 
 // buildEpisodeContext creates episode-specific subtitle context from base context.

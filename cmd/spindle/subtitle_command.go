@@ -24,14 +24,12 @@ import (
 func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 	var outputDir string
 	var workDir string
-	var forceAI bool
-	var openSubtitlesOnly bool
 	var fetchForced bool
 	var external bool
 
 	cmd := &cobra.Command{
 		Use:   "gensubtitle <encoded-file>",
-		Short: "Create subtitles for an encoded media file (OpenSubtitles/WhisperX)",
+		Short: "Create subtitles for an encoded media file (WhisperX transcription)",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return fmt.Errorf("provide the path to the encoded media file. Example: spindle gensubtitle /path/to/video.mkv\nRun spindle gensubtitle --help for more details")
@@ -120,48 +118,36 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 				logger.Info("detected edition from filename", logging.String("edition", edition))
 			}
 
-			if forceAI {
+			// Look up TMDB metadata (used for forced subtitle search via OpenSubtitles)
+			if match := lookupTMDBMetadata(cmd.Context(), cfg, logger, inferredTitle, inferredYear); match != nil {
+				ctxMeta.TMDBID = match.TMDBID
+				ctxMeta.MediaType = match.MediaType
+				if match.Title != "" {
+					ctxMeta.Title = match.Title
+				}
+				if match.Year != "" {
+					ctxMeta.Year = match.Year
+				}
 				if logger != nil {
-					logger.Info("forceai flag enabled; skipping opensubtitles lookup and tmdb identification")
+					logger.Info("tmdb metadata attached",
+						logging.Int64("tmdb_id", match.TMDBID),
+						logging.String("title", ctxMeta.Title),
+						logging.String("year", ctxMeta.Year),
+						logging.String("media_type", ctxMeta.MediaType),
+					)
 				}
-			} else {
-				openSubsReady, disabledReason := openSubtitlesReady(cfg)
-				if openSubsReady {
-					if match := lookupTMDBMetadata(cmd.Context(), cfg, logger, inferredTitle, inferredYear); match != nil {
-						ctxMeta.TMDBID = match.TMDBID
-						ctxMeta.MediaType = match.MediaType
-						if match.Title != "" {
-							ctxMeta.Title = match.Title
-						}
-						if match.Year != "" {
-							ctxMeta.Year = match.Year
-						}
-						if logger != nil {
-							logger.Info("tmdb metadata attached",
-								logging.Int64("tmdb_id", match.TMDBID),
-								logging.String("title", ctxMeta.Title),
-								logging.String("year", ctxMeta.Year),
-								logging.String("media_type", ctxMeta.MediaType),
-							)
-						}
-					} else if logger != nil {
-						logger.Info("tmdb lookup skipped: no confident match", logging.String("title", inferredTitle))
-					}
-				} else if logger != nil {
-					logger.Info("opensubtitles download disabled", logging.String("reason", disabledReason))
-				}
+			} else if logger != nil {
+				logger.Info("tmdb lookup skipped: no confident match", logging.String("title", inferredTitle))
 			}
 			languages := append([]string(nil), cfg.Subtitles.OpenSubtitlesLanguages...)
 			result, err := service.Generate(cmd.Context(), subtitles.GenerateRequest{
-				SourcePath:        source,
-				WorkDir:           filepath.Join(workRoot, "work"),
-				OutputDir:         outDir,
-				BaseName:          baseName,
-				ForceAI:           forceAI,
-				OpenSubtitlesOnly: openSubtitlesOnly,
-				FetchForced:       fetchForced,
-				Context:           ctxMeta,
-				Languages:         languages,
+				SourcePath:  source,
+				WorkDir:     filepath.Join(workRoot, "work"),
+				OutputDir:   outDir,
+				BaseName:    baseName,
+				FetchForced: fetchForced,
+				Context:     ctxMeta,
+				Languages:   languages,
 			})
 			if err != nil {
 				return fmt.Errorf("subtitle generation failed: %w", err)
@@ -223,8 +209,6 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "Output directory for the generated subtitle (default: alongside source file)")
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory for intermediate files (default: temporary directory under staging_dir)")
-	cmd.Flags().BoolVar(&forceAI, "forceai", false, "Force WhisperX transcription and skip OpenSubtitles downloads")
-	cmd.Flags().BoolVar(&openSubtitlesOnly, "opensubtitles-only", false, "Require OpenSubtitles match; fail instead of falling back to WhisperX (for troubleshooting)")
 	cmd.Flags().BoolVar(&fetchForced, "fetch-forced", false, "Also search OpenSubtitles for forced (foreign-parts-only) subtitles")
 	cmd.Flags().BoolVar(&external, "external", false, "Create external SRT sidecar instead of muxing into MKV")
 
@@ -289,19 +273,6 @@ func splitTitleAndYear(base string) (string, string) {
 		return trimmed, ""
 	}
 	return strings.TrimSpace(trimmed[:idx]), candidate
-}
-
-func openSubtitlesReady(cfg *config.Config) (bool, string) {
-	if cfg == nil {
-		return false, "configuration unavailable"
-	}
-	if !cfg.Subtitles.OpenSubtitlesEnabled {
-		return false, "opensubtitles_enabled is false"
-	}
-	if strings.TrimSpace(cfg.Subtitles.OpenSubtitlesAPIKey) == "" {
-		return false, "opensubtitles_api_key not set"
-	}
-	return true, ""
 }
 
 func tryJellyfinRefresh(ctx context.Context, cfg *config.Config, logger *slog.Logger) {

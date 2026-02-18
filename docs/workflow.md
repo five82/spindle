@@ -14,7 +14,7 @@ Every item moves through the queue in order. The statuses you will see are:
 - `EPISODE_IDENTIFYING` -> `EPISODE_IDENTIFIED` *(optional)* - for TV discs with OpenSubtitles enabled, WhisperX + OpenSubtitles correlate ripped files to definitive episode numbers
 - `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
 - `AUDIO_ANALYZING` -> `AUDIO_ANALYZED` *(optional)* - detects commentary tracks for exclusion (requires `commentary.enabled = true`)
-- `SUBTITLING` -> `SUBTITLED` *(optional)* - OpenSubtitles + WhisperX generate subtitle sidecars
+- `SUBTITLING` -> `SUBTITLED` *(optional)* - WhisperX transcription generates subtitle sidecars; forced subtitles optionally fetched from OpenSubtitles
 - `ORGANIZING` -> `COMPLETED` - files moved into your library; Jellyfin refresh triggered when configured
 - `FAILED` - an error stopped progress; fix the root cause and retry
 
@@ -94,19 +94,14 @@ When `commentary.enabled = true`, Spindle analyzes encoded files to detect and e
 
 ## Stage 7: Subtitle Generation (SUBTITLING -> SUBTITLED)
 
-When `subtitles_enabled = true`, Spindle attempts OpenSubtitles first (if enabled) and falls back to WhisperX. Subtitles are generated per encoded asset.
+When `subtitles_enabled = true`, Spindle generates subtitles from the actual audio using WhisperX transcription. Subtitles are generated per encoded asset.
 
 1. Spindle extracts the primary audio track.
-2. **OpenSubtitles path** (if enabled):
-   - Downloads and cleans the SRT (advertisement cues removed).
-   - Optionally syncs it with `ffsubsync` if available.
-   - Runs a WhisperX alignment pass so cues match the rip audio.
-   - Applies duration guards: candidates whose runtime differs by more than ~±8s are soft-rejected. An intro-gap exception allows files that start ≥5s late and end ≤45s early.
-   - If every candidate shows a large consistent offset (>~60s or >7% runtime), Spindle attempts a forced WhisperX pass. If that fails, the item is flagged `NeedsReview` with reason "suspect mis-identification from subtitle offsets".
-3. **WhisperX path**: transcribes with the `large-v3` model, aligns with wav2vec2, and formats with Stable-TS. If Stable-TS fails, the raw WhisperX SRT is used.
+2. **WhisperX transcription**: transcribes with the `large-v3` model, aligns with wav2vec2, and formats with Stable-TS. If Stable-TS fails, the raw WhisperX SRT is used.
+3. **Forced subtitles** (optional): when `--fetch-forced` is used and OpenSubtitles is configured, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the WhisperX output via text-based matching.
 4. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`).
 
-`spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename, uses TMDB to seed OpenSubtitles when enabled, and supports `--forceai` to skip OpenSubtitles entirely.
+`spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename and uses TMDB for metadata context.
 
 ## Stage 8: Organizing & Jellyfin Refresh (ORGANIZING -> COMPLETED)
 

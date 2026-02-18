@@ -36,7 +36,7 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
 
 1. **Decision anomalies**:
    - Low confidence scores on decisions that were accepted anyway
-   - Unexpected fallbacks (preset fallback, subtitle source changes)
+   - Unexpected fallbacks (preset fallback, encoding retries)
    - Decisions that contradict expected behavior for the content type
 
 2. **Timing anomalies**:
@@ -156,6 +156,10 @@ If item is a movie, validate edition detection:
 
 If item has passed subtitling stage:
 
+Regular subtitles always come from WhisperX transcription (generated from the actual audio).
+Forced (foreign-parts-only) subtitles are fetched from OpenSubtitles when enabled, then aligned
+against the WhisperX output via text-based matching.
+
 1. **Locate subtitles**: Check encoded MKV for embedded tracks (preferred) or sidecar SRT files
 2. **For embedded subtitles** (muxed into MKV):
    ```bash
@@ -187,10 +191,11 @@ If item has passed subtitling stage:
    - Subtitles significantly shorter = missing content
    - Subtitles significantly longer = wrong subtitle file
 
-6. **Edition-aware subtitle selection** (if movie has edition):
-   - Check logs for `edition=match` or `edition=mismatch` in subtitle ranking
-   - Selected subtitle should match edition when possible (e.g., Director's Cut subtitle for Director's Cut disc)
+6. **Edition-aware forced subtitle selection** (if movie has edition and forced subs fetched):
+   - Check logs for `edition=match` or `edition=mismatch` in forced subtitle ranking
+   - Selected forced subtitle should match edition when possible (e.g., Director's Cut subtitle for Director's Cut disc)
    - If `edition=mismatch` was accepted, verify no matching edition subtitle was available
+   - Note: regular subtitles are always WhisperX-generated, so edition matching only applies to forced subtitles from OpenSubtitles
 
 ### Phase 8: Commentary Track Validation
 
@@ -267,9 +272,9 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Unlabeled commentary | Audio Analysis | Missing title/disposition in ffprobe | Jellyfin won't recognize tracks |
 | Stereo downmix kept | Audio Analysis | Extra 2ch track that matches primary | Unnecessary audio bloat |
 | SRT validation issues | Subtitles | `event_type=srt_validation_issues` | Malformed subtitles |
-| Subtitle duration mismatch | Subtitles | Duration delta > 10 minutes | Wrong subtitle file |
-| Sparse subtitles | Subtitles | < 2 cues/minute | Possibly wrong language/incomplete |
-| Edition subtitle mismatch | Subtitles | `edition=mismatch` when matching subtitle exists | Wrong timing for alternate cut |
+| Subtitle duration mismatch | Subtitles | Duration delta > 10 minutes | WhisperX timing issue or truncated audio |
+| Sparse subtitles | Subtitles | < 2 cues/minute | WhisperX transcription issue or wrong language |
+| Forced subtitle edition mismatch | Subtitles | `edition=mismatch` on forced sub when matching exists | Wrong forced subtitle for alternate cut |
 | Subtitles not muxed | Subtitles | Sidecar SRT exists but no embedded tracks | Jellyfin may not auto-load |
 | Unlabeled subtitles | Subtitles | Missing or incorrect title in embedded track | Jellyfin won't display track name properly |
 
@@ -282,8 +287,8 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Edition marker analysis | Identification | No edition markers detected (DEBUG level) |
 | Track selection | Ripping | `decision_type=track_select` per-track |
 | Preset LLM response | Encoding | `decision_type=preset_llm` full prompt/response |
-| Subtitle ranking | Subtitles | `decision_type=subtitle_rank` candidate scores |
-| Edition match scoring | Subtitles | `edition=match` or `edition=mismatch` in ranking reasons |
+| Forced subtitle ranking | Subtitles | `decision_type=subtitle_rank` candidate scores (forced subs only) |
+| Forced subtitle edition scoring | Subtitles | `edition=match` or `edition=mismatch` in forced subtitle ranking reasons |
 
 ## Audit Report Format
 
@@ -346,13 +351,14 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 - blu-ray.com confirms edition: <yes/no/not checked>
 
 #### Subtitles (if applicable)
+- Source: WhisperX (regular always WhisperX; forced from OpenSubtitles if enabled)
 - Muxed into MKV: <yes/no>
 - Subtitle tracks: <count>
 - Track labels correct: <yes/no> (regular has language name, forced has "(Forced)")
 - SRT sidecar files: <count>
 - Duration coverage: <percentage>
 - Cue density: <cues/minute>
-- Edition match status: <match/mismatch/n/a>
+- Forced subtitle edition match: <match/mismatch/n/a> (only for forced subs from OpenSubtitles)
 - Content spot-check: <pass/concerns>
 
 ### External Validation (Blu-ray/4K)
@@ -393,6 +399,6 @@ For each audit, complete these steps:
 - [ ] If post-subtitling: verified subtitles are muxed into MKV
 - [ ] If post-subtitling: verified subtitle track labels (language name, "(Forced)" marker)
 - [ ] If post-subtitling: analyzed subtitle content quality
-- [ ] If movie with edition: verified subtitle edition matching
+- [ ] If movie with edition and forced subs: verified forced subtitle edition matching
 - [ ] Reviewed LLM decisions (preset, commentary, edition) for reasonableness
 - [ ] Generated comprehensive report with specific findings

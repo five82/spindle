@@ -15,17 +15,15 @@ import (
 )
 
 type whisperXStub struct {
-	t               *testing.T
-	expectCUDA      bool
-	calledWhisper   bool
-	calledStableTS  bool
-	calledFFmpeg    bool
-	calledAlignment bool
-	calledFFSubsync bool
-	duration        float64
-	lastVAD         string
-	lastHFToken     string
-	stableTSError   error
+	t              *testing.T
+	expectCUDA     bool
+	calledWhisper  bool
+	calledStableTS bool
+	calledFFmpeg   bool
+	duration       float64
+	lastVAD        string
+	lastHFToken    string
+	stableTSError  error
 }
 
 func setupInspectAndStub(t *testing.T, durationSeconds float64, expectCUDA bool) *whisperXStub {
@@ -181,46 +179,7 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 			break
 		}
 	}
-	if pkg == ffsubsyncPackage {
-		s.calledFFSubsync = true
-		var (
-			reference  string
-			inputPath  string
-			outputPath string
-		)
-		seenCommand := false
-		for i := 0; i < len(args); i++ {
-			switch args[i] {
-			case "ffsubsync":
-				seenCommand = true
-			case "-i", "--input", "--srtin":
-				if i+1 < len(args) {
-					inputPath = args[i+1]
-				}
-			case "-o", "--output", "--srtout":
-				if i+1 < len(args) {
-					outputPath = args[i+1]
-				}
-			default:
-				if seenCommand && reference == "" && !strings.HasPrefix(args[i], "-") {
-					reference = args[i]
-				}
-			}
-		}
-		if reference == "" {
-			s.t.Fatalf("ffsubsync missing reference media: %v", args)
-		}
-		if inputPath == "" || outputPath == "" {
-			s.t.Fatalf("ffsubsync missing input/output: %v", args)
-		}
-		data, err := os.ReadFile(inputPath)
-		if err != nil {
-			return fmt.Errorf("read ffsubsync input: %w", err)
-		}
-		return os.WriteFile(outputPath, data, 0o644)
-	}
 	if pkg == whisperXPackage {
-		s.calledAlignment = true
 		idxScript := -1
 		for i := 0; i < len(args); i++ {
 			if args[i] == "-c" {
