@@ -250,9 +250,6 @@ func lookupTMDBMetadata(ctx context.Context, cfg *config.Config, logger *slog.Lo
 		}
 		return nil
 	}
-	if match == nil && logger != nil {
-		logger.Info("tmdb lookup returned no confident match", logging.String("title", title))
-	}
 	return match
 }
 

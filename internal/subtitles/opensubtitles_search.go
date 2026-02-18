@@ -88,7 +88,6 @@ func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitle
 		}
 		resp, err := s.invokeOpenSubtitlesSearch(ctx, variant)
 		if err != nil {
-			lastErr := err
 			if s.logger != nil {
 				s.logger.Warn("opensubtitles search variant failed; trying fallback query",
 					logging.Error(err),
@@ -97,7 +96,7 @@ func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitle
 				)
 			}
 			if idx == len(unique)-1 {
-				return opensubtitles.SearchResponse{}, lastErr
+				return opensubtitles.SearchResponse{}, err
 			}
 			continue
 		}

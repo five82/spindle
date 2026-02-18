@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -36,13 +35,6 @@ type Matcher struct {
 	languages []string
 	cache     *opensubtitles.Cache
 }
-
-const (
-	openSubtitlesMinInterval    = time.Second
-	openSubtitlesMaxRateRetries = 4
-	openSubtitlesInitialBackoff = 2 * time.Second
-	openSubtitlesMaxBackoff     = 12 * time.Second
-)
 
 type subtitleGenerator interface {
 	Generate(ctx context.Context, req subtitles.GenerateRequest) (subtitles.GenerateResult, error)
@@ -431,14 +423,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		seen[num] = struct{}{}
 		unique = append(unique, num)
 	}
-	clear(seen)
 	var lastAPICall time.Time
 	for idx, num := range unique {
 		episodeKey := fmt.Sprintf("s%02de%02d", season.SeasonNumber, num)
-		if _, ok := seen[num]; ok {
-			continue
-		}
-		seen[num] = struct{}{}
 		episodeData, ok := findEpisodeByNumber(season, num)
 		if !ok {
 			if progress != nil {
@@ -659,13 +646,13 @@ func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, 
 		if err == nil {
 			return nil
 		}
-		if !isOpenSubtitlesRetriable(err) || attempt >= openSubtitlesMaxRateRetries {
+		if !opensubtitles.IsRetriable(err) || attempt >= opensubtitles.MaxRateRetries {
 			return err
 		}
 		attempt++
-		backoff := openSubtitlesInitialBackoff * time.Duration(1<<uint(attempt-1))
-		if backoff > openSubtitlesMaxBackoff {
-			backoff = openSubtitlesMaxBackoff
+		backoff := opensubtitles.InitialBackoff * time.Duration(1<<uint(attempt-1))
+		if backoff > opensubtitles.MaxBackoff {
+			backoff = opensubtitles.MaxBackoff
 		}
 		if m.logger != nil {
 			m.logger.Warn("opensubtitles rate limited",
@@ -676,7 +663,7 @@ func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, 
 				logging.String(logging.FieldErrorHint, "Wait and retry or check OpenSubtitles rate limits"),
 			)
 		}
-		if err := sleepWithContext(ctx, backoff); err != nil {
+		if err := opensubtitles.SleepWithContext(ctx, backoff); err != nil {
 			return err
 		}
 	}
@@ -690,56 +677,10 @@ func waitForOpenSubtitlesWindow(ctx context.Context, lastCall *time.Time) error 
 		return nil
 	}
 	elapsed := time.Since(*lastCall)
-	if elapsed >= openSubtitlesMinInterval {
+	if elapsed >= opensubtitles.MinInterval {
 		return nil
 	}
-	return sleepWithContext(ctx, openSubtitlesMinInterval-elapsed)
-}
-
-func sleepWithContext(ctx context.Context, d time.Duration) error {
-	if d <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func isOpenSubtitlesRetriable(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "429") || strings.Contains(message, "rate limit") {
-		return true
-	}
-	timeoutTokens := []string{
-		"timeout",
-		"deadline exceeded",
-		"client.timeout exceeded",
-		"connection reset",
-		"connection refused",
-		"temporary failure",
-		"awaiting headers",
-	}
-	for _, token := range timeoutTokens {
-		if strings.Contains(message, token) {
-			return true
-		}
-	}
-	return false
+	return opensubtitles.SleepWithContext(ctx, opensubtitles.MinInterval-elapsed)
 }
 
 func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails, showTitle string, matches []matchResult, progress func(phase string, current, total int, episodeKey string)) {

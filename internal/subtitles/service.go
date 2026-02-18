@@ -144,7 +144,6 @@ func NewService(cfg *config.Config, logger *slog.Logger, opts ...ServiceOption) 
 	svc := &Service{
 		config:    cfg,
 		logger:    serviceLogger,
-		run:       nil,
 		hfToken:   token,
 		hfCheck:   defaultTokenValidator,
 		languages: languages,

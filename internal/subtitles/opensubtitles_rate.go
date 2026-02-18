@@ -3,11 +3,10 @@ package subtitles
 import (
 	"context"
 	"errors"
-	"net"
-	"strings"
 	"time"
 
 	"spindle/internal/logging"
+	"spindle/internal/subtitles/opensubtitles"
 )
 
 func (s *Service) invokeOpenSubtitles(ctx context.Context, op func() error) error {
@@ -24,26 +23,26 @@ func (s *Service) invokeOpenSubtitles(ctx context.Context, op func() error) erro
 		if err == nil {
 			return nil
 		}
-		if !isOpenSubtitlesRetriable(err) || attempt >= openSubtitlesMaxRateRetries {
+		if !opensubtitles.IsRetriable(err) || attempt >= opensubtitles.MaxRateRetries {
 			return err
 		}
 		attempt++
-		backoff := openSubtitlesInitialBackoff * time.Duration(1<<uint(attempt-1))
-		if backoff > openSubtitlesMaxBackoff {
-			backoff = openSubtitlesMaxBackoff
+		backoff := opensubtitles.InitialBackoff * time.Duration(1<<uint(attempt-1))
+		if backoff > opensubtitles.MaxBackoff {
+			backoff = opensubtitles.MaxBackoff
 		}
 		if s.logger != nil {
 			s.logger.Warn("opensubtitles rate limited, retrying",
 				logging.Duration("backoff", backoff),
 				logging.Int("attempt", attempt),
-				logging.Int("max_attempts", openSubtitlesMaxRateRetries),
+				logging.Int("max_attempts", opensubtitles.MaxRateRetries),
 				logging.Error(err),
 				logging.String("reason", "rate limit or transient network error"),
 				logging.String(logging.FieldEventType, "opensubtitles_rate_limited"),
 				logging.String(logging.FieldErrorHint, "wait for rate limits or check network connectivity"),
 			)
 		}
-		if err := sleepWithContext(ctx, backoff); err != nil {
+		if err := opensubtitles.SleepWithContext(ctx, backoff); err != nil {
 			return err
 		}
 	}
@@ -60,60 +59,14 @@ func (s *Service) waitForOpenSubtitlesWindow(ctx context.Context) error {
 		return nil
 	}
 	elapsed := time.Since(lastCall)
-	if elapsed >= openSubtitlesMinInterval {
+	if elapsed >= opensubtitles.MinInterval {
 		return nil
 	}
-	return sleepWithContext(ctx, openSubtitlesMinInterval-elapsed)
+	return opensubtitles.SleepWithContext(ctx, opensubtitles.MinInterval-elapsed)
 }
 
 func (s *Service) markOpenSubtitlesCall() {
 	s.openSubsMu.Lock()
 	s.openSubsLastCall = time.Now()
 	s.openSubsMu.Unlock()
-}
-
-func sleepWithContext(ctx context.Context, d time.Duration) error {
-	if d <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func isOpenSubtitlesRetriable(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "429") || strings.Contains(message, "rate limit") {
-		return true
-	}
-	timeoutTokens := []string{
-		"timeout",
-		"deadline exceeded",
-		"client.timeout exceeded",
-		"connection reset",
-		"connection refused",
-		"temporary failure",
-		"awaiting headers",
-	}
-	for _, token := range timeoutTokens {
-		if strings.Contains(message, token) {
-			return true
-		}
-	}
-	return false
 }
