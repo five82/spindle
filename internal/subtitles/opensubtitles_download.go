@@ -151,7 +151,7 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 					logging.Error(err),
 					logging.String("source_file", cleanedPath),
 					logging.String(logging.FieldEventType, "ffsubsync_failed"),
-					logging.String(logging.FieldErrorHint, "verify with: uvx --from ffsubsync ffsubsync --version"),
+					logging.String(logging.FieldErrorHint, "verify with: uvx --from ffsubsync --with webrtcvad-wheels ffsubsync --version"),
 				)
 			}
 			return GenerateResult{}, err
@@ -367,6 +367,7 @@ func (s *Service) applyFFSubsync(ctx context.Context, plan *generationPlan, inpu
 	outputPath := filepath.Join(plan.runDir, "opensubtitles-ffsubsync.srt")
 	args := []string{
 		"--from", ffsubsyncPackage,
+		"--with", ffsubsyncWebrtcvadFix,
 		"ffsubsync",
 		audioPath,
 		"-i", inputPath,

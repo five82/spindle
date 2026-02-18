@@ -31,6 +31,10 @@ const (
 	stableTSPackage  = "stable-ts-whisperless"
 	ffsubsyncCommand = "uvx"
 	ffsubsyncPackage = "ffsubsync"
+	// The original webrtcvad package does "import pkg_resources" which was
+	// removed in setuptools 75+ / Python 3.12+. webrtcvad-wheels is a maintained
+	// fork that replaced the pkg_resources usage.
+	ffsubsyncWebrtcvadFix = "webrtcvad-wheels"
 )
 
 // Duration validation thresholds for subtitle/video matching.

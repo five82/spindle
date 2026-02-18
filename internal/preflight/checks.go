@@ -104,7 +104,7 @@ func CheckFFSubsync(ctx context.Context) Result {
 	const name = "ffsubsync"
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "uvx", "--from", "ffsubsync", "ffsubsync", "--version")
+	cmd := exec.CommandContext(checkCtx, "uvx", "--from", "ffsubsync", "--with", "webrtcvad-wheels", "ffsubsync", "--version")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return Result{Name: name, Detail: fmt.Sprintf("failed: %v", err)}
@@ -164,7 +164,7 @@ func CheckSystemDeps(ctx context.Context, cfg *config.Config) []deps.Status {
 		fsResult := CheckFFSubsync(ctx)
 		results = append(results, deps.Status{
 			Name:        "ffsubsync",
-			Command:     "uvx --from ffsubsync ffsubsync",
+			Command:     "uvx --from ffsubsync --with webrtcvad-wheels ffsubsync",
 			Description: "Required for subtitle synchronization",
 			Available:   fsResult.Passed,
 			Detail:      fsResult.Detail,
