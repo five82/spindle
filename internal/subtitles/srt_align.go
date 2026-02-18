@@ -225,8 +225,8 @@ func writeSRTCues(path string, cues []srtCue) error {
 		if i > 0 {
 			sb.WriteString("\n")
 		}
-		sb.WriteString(fmt.Sprintf("%d\n", cue.index))
-		sb.WriteString(fmt.Sprintf("%s --> %s\n", formatSRTTimestamp(cue.start), formatSRTTimestamp(cue.end)))
+		fmt.Fprintf(&sb, "%d\n", cue.index)
+		fmt.Fprintf(&sb, "%s --> %s\n", formatSRTTimestamp(cue.start), formatSRTTimestamp(cue.end))
 		sb.WriteString(cue.text)
 		sb.WriteString("\n")
 	}

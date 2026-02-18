@@ -19,7 +19,7 @@ This repository is shared as is. Spindle is a personal tool I built for my own e
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.26+, MakeMKV, ffmpeg, mediainfo. Optional: mkvmerge (for subtitle muxing).
+Prerequisites: Go 1.26+, MakeMKV, ffmpeg, mediainfo, python3-dev (required by ffsubsync). Optional: mkvmerge (for subtitle muxing).
 
 ## Configure
 

@@ -147,13 +147,14 @@ func (s *Service) downloadAndAlignCandidate(ctx context.Context, plan *generatio
 	} else {
 		if syncedPath, err := s.applyFFSubsync(ctx, plan, cleanedPath); err != nil {
 			if s.logger != nil {
-				s.logger.Warn("ffsubsync alignment skipped",
+				s.logger.Warn("ffsubsync alignment failed",
 					logging.Error(err),
 					logging.String("source_file", cleanedPath),
-					logging.String(logging.FieldEventType, "ffsubsync_skipped"),
-					logging.String(logging.FieldErrorHint, "install ffsubsync or set subtitles_enabled=false"),
+					logging.String(logging.FieldEventType, "ffsubsync_failed"),
+					logging.String(logging.FieldErrorHint, "verify with: uvx --from ffsubsync ffsubsync --version"),
 				)
 			}
+			return GenerateResult{}, err
 		} else if syncedPath != "" {
 			inputPath = syncedPath
 			if s.logger != nil {

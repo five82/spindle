@@ -15,8 +15,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/config"
-	"spindle/internal/deps"
 	"spindle/internal/ipc"
+	"spindle/internal/preflight"
 	"spindle/internal/queue"
 	"spindle/internal/services/llm"
 )
@@ -401,49 +401,7 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 	if cfg == nil {
 		return nil
 	}
-	requirements := []deps.Requirement{
-		{
-			Name:        "MakeMKV",
-			Command:     cfg.MakemkvBinary(),
-			Description: "Required for disc ripping",
-		},
-		{
-			Name:        "FFmpeg",
-			Command:     deps.ResolveFFmpegPath(),
-			Description: "Required for encoding",
-		},
-		{
-			Name:        "FFprobe",
-			Command:     deps.ResolveFFprobePath(cfg.FFprobeBinary()),
-			Description: "Required for media inspection",
-		},
-		{
-			Name:        "MediaInfo",
-			Command:     "mediainfo",
-			Description: "Required for metadata inspection",
-		},
-		{
-			Name:        "bd_info",
-			Command:     "bd_info",
-			Description: "Enhances disc metadata when MakeMKV titles are generic",
-			Optional:    true,
-		},
-	}
-	if cfg.Subtitles.Enabled {
-		requirements = append(requirements, deps.Requirement{
-			Name:        "uvx",
-			Command:     "uvx",
-			Description: "Required for WhisperX-driven transcription",
-		})
-		if cfg.Subtitles.MuxIntoMKV {
-			requirements = append(requirements, deps.Requirement{
-				Name:        "mkvmerge",
-				Command:     "mkvmerge",
-				Description: "Required for muxing subtitles into MKV containers",
-			})
-		}
-	}
-	checks := deps.CheckBinaries(requirements)
+	checks := preflight.CheckSystemDeps(context.Background(), cfg)
 	statuses := make([]ipc.DependencyStatus, 0, len(checks))
 	for _, check := range checks {
 		statuses = append(statuses, ipc.DependencyStatus{

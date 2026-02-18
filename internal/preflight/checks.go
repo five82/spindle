@@ -7,12 +7,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
 
 	"spindle/internal/config"
+	"spindle/internal/deps"
 	"spindle/internal/services/llm"
 )
 
@@ -94,6 +96,81 @@ func CheckDirectoryAccess(name, path string) Result {
 		return Result{Name: name, Detail: fmt.Sprintf("%s (error: insufficient permissions: %v)", path, err)}
 	}
 	return Result{Name: name, Passed: true, Detail: fmt.Sprintf("%s (read/write ok)", path)}
+}
+
+// CheckFFSubsync verifies that ffsubsync can be launched via uvx.
+// It uses a 30-second timeout and a single attempt (no retries).
+func CheckFFSubsync(ctx context.Context) Result {
+	const name = "ffsubsync"
+	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(checkCtx, "uvx", "--from", "ffsubsync", "ffsubsync", "--version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return Result{Name: name, Detail: fmt.Sprintf("failed: %v", err)}
+	}
+	return Result{Name: name, Passed: true, Detail: strings.TrimSpace(string(output))}
+}
+
+// CheckSystemDeps evaluates all system-level dependencies for the given config.
+// Both the daemon and the CLI status command use this to avoid duplicating
+// the requirements list. LLM checks are not included here because only the
+// CLI status path uses them.
+func CheckSystemDeps(ctx context.Context, cfg *config.Config) []deps.Status {
+	requirements := []deps.Requirement{
+		{
+			Name:        "MakeMKV",
+			Command:     cfg.MakemkvBinary(),
+			Description: "Required for disc ripping",
+		},
+		{
+			Name:        "FFmpeg",
+			Command:     deps.ResolveFFmpegPath(),
+			Description: "Required for encoding",
+		},
+		{
+			Name:        "FFprobe",
+			Command:     deps.ResolveFFprobePath(cfg.FFprobeBinary()),
+			Description: "Required for media inspection",
+		},
+		{
+			Name:        "MediaInfo",
+			Command:     "mediainfo",
+			Description: "Required for metadata inspection",
+		},
+		{
+			Name:        "bd_info",
+			Command:     "bd_info",
+			Description: "Enhances disc metadata when MakeMKV titles are generic",
+			Optional:    true,
+		},
+	}
+	if cfg.Subtitles.Enabled {
+		requirements = append(requirements, deps.Requirement{
+			Name:        "uvx",
+			Command:     "uvx",
+			Description: "Required for WhisperX-driven transcription",
+		})
+		if cfg.Subtitles.MuxIntoMKV {
+			requirements = append(requirements, deps.Requirement{
+				Name:        "mkvmerge",
+				Command:     "mkvmerge",
+				Description: "Required for muxing subtitles into MKV containers",
+			})
+		}
+	}
+	results := deps.CheckBinaries(requirements)
+	if cfg.Subtitles.Enabled {
+		fsResult := CheckFFSubsync(ctx)
+		results = append(results, deps.Status{
+			Name:        "ffsubsync",
+			Command:     "uvx --from ffsubsync ffsubsync",
+			Description: "Required for subtitle synchronization",
+			Available:   fsResult.Passed,
+			Detail:      fsResult.Detail,
+		})
+	}
+	return results
 }
 
 // summarizeLLMError produces a human-readable summary for LLM health check failures.

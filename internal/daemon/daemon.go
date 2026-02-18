@@ -15,9 +15,9 @@ import (
 	"github.com/gofrs/flock"
 
 	"spindle/internal/config"
-	"spindle/internal/deps"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
+	"spindle/internal/preflight"
 	"spindle/internal/queue"
 	"spindle/internal/workflow"
 )
@@ -486,49 +486,7 @@ func (d *Daemon) AfterRip() {
 }
 
 func (d *Daemon) runDependencyChecks(ctx context.Context) error {
-	requirements := []deps.Requirement{
-		{
-			Name:        "MakeMKV",
-			Command:     d.cfg.MakemkvBinary(),
-			Description: "Required for disc ripping",
-		},
-		{
-			Name:        "FFmpeg",
-			Command:     deps.ResolveFFmpegPath(),
-			Description: "Required for encoding",
-		},
-		{
-			Name:        "FFprobe",
-			Command:     deps.ResolveFFprobePath(d.cfg.FFprobeBinary()),
-			Description: "Required for media inspection",
-		},
-		{
-			Name:        "MediaInfo",
-			Command:     "mediainfo",
-			Description: "Required for metadata inspection",
-		},
-		{
-			Name:        "bd_info",
-			Command:     "bd_info",
-			Description: "Enhances disc metadata when MakeMKV titles are generic",
-			Optional:    true,
-		},
-	}
-	if d.cfg.Subtitles.Enabled {
-		requirements = append(requirements, deps.Requirement{
-			Name:        "uvx",
-			Command:     "uvx",
-			Description: "Required for WhisperX-driven transcription",
-		})
-		if d.cfg.Subtitles.MuxIntoMKV {
-			requirements = append(requirements, deps.Requirement{
-				Name:        "mkvmerge",
-				Command:     "mkvmerge",
-				Description: "Required for muxing subtitles into MKV containers",
-			})
-		}
-	}
-	results := deps.CheckBinaries(requirements)
+	results := preflight.CheckSystemDeps(ctx, d.cfg)
 	d.depsMu.Lock()
 	d.dependencies = make([]DependencyStatus, len(results))
 	for i, result := range results {
