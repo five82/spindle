@@ -206,7 +206,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		}
 	}
 
-	item.Status = queue.StatusEpisodeIdentified
 	item.ProgressStage = "Episode Identified"
 	item.ProgressMessage = "Episodes correlated with OpenSubtitles"
 	item.ProgressPercent = 100
@@ -233,7 +232,6 @@ func logSkipDecision(logger *slog.Logger, reason string, extraAttrs ...logging.A
 
 // setSkipProgress updates item fields for a skipped stage.
 func setSkipProgress(item *queue.Item, message string) {
-	item.Status = queue.StatusEpisodeIdentified
 	item.ProgressStage = "Episode Identified"
 	item.ProgressMessage = message
 	item.ProgressPercent = 100

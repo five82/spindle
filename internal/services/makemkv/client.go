@@ -15,6 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"spindle/internal/logging"
+	"spindle/internal/textutil"
 )
 
 // ProgressUpdate captures MakeMKV progress output.
@@ -117,7 +120,7 @@ func (c *Client) Rip(ctx context.Context, discTitle, destDir string, titleIDs []
 }
 
 func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titleIDs []int, skipRename bool, progress func(ProgressUpdate)) (string, error) {
-	sanitized := sanitizeFileName(discTitle)
+	sanitized := textutil.SanitizeFileName(discTitle)
 	if sanitized == "" {
 		sanitized = "spindle-disc"
 	}
@@ -370,7 +373,7 @@ func (c *Client) monitorOutputSize(ctx context.Context, destDir string) {
 				c.logger.Debug("rip progress file size",
 					slog.String("file", currentFile),
 					slog.Int64("size_bytes", current.size),
-					slog.String("size_human", formatBytes(current.size)),
+					slog.String("size_human", logging.FormatBytes(current.size)),
 				)
 				lastSize = current.size
 				lastFile = currentFile
@@ -592,26 +595,4 @@ func (commandExecutor) Run(ctx context.Context, binary string, args []string, on
 		return fmt.Errorf("wait command: %w", err)
 	}
 	return nil
-}
-
-func sanitizeFileName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "", "\"", "", "<", "", ">", "", "|", "")
-	return strings.TrimSpace(replacer.Replace(name))
-}
-
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }

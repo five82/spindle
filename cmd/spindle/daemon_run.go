@@ -137,11 +137,12 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	}
 	defer store.Close()
 
-	workflowManager := workflow.NewManagerWithOptions(cfg, store, logger, notifications.NewService(cfg), logHub,
+	notifier := notifications.NewService(cfg)
+	workflowManager := workflow.NewManagerWithOptions(cfg, store, logger, notifier, logHub,
 		workflow.WithDiagnosticMode(diagnosticMode, debugItemsDir, sessionID))
-	registerStages(workflowManager, cfg, store, logger)
+	registerStages(workflowManager, cfg, store, logger, notifier)
 
-	d, err := daemon.New(cfg, store, logger, workflowManager, logPath, logHub, eventArchive)
+	d, err := daemon.New(cfg, store, logger, workflowManager, logPath, logHub, eventArchive, notifier)
 	if err != nil {
 		return fmt.Errorf("create daemon: %w", err)
 	}
@@ -169,7 +170,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	return nil
 }
 
-func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Store, logger *slog.Logger) {
+func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) {
 	if mgr == nil || cfg == nil {
 		return
 	}
@@ -181,13 +182,13 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 	}
 
 	mgr.ConfigureStages(workflow.StageSet{
-		Identifier:        identification.NewIdentifier(cfg, store, logger),
-		Ripper:            ripping.NewRipper(cfg, store, logger),
+		Identifier:        identification.NewIdentifier(cfg, store, logger, notifier),
+		Ripper:            ripping.NewRipper(cfg, store, logger, notifier),
 		AudioAnalysis:     audioanalysis.NewStage(cfg, store, logger),
 		EpisodeIdentifier: episodeid.NewEpisodeIdentifier(cfg, store, logger),
-		Encoder:           encoding.NewEncoder(cfg, store, logger),
+		Encoder:           encoding.NewEncoder(cfg, store, logger, notifier),
 		Subtitles:         subtitleStage,
-		Organizer:         organizer.NewOrganizer(cfg, store, logger),
+		Organizer:         organizer.NewOrganizer(cfg, store, logger, notifier),
 	})
 }
 

@@ -81,31 +81,15 @@ func toString(v any) string {
 }
 
 func (s *Stage) persistRipSpec(ctx context.Context, item *queue.Item, env *ripspec.Envelope) {
-	encoded, err := env.Encode()
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("failed to encode rip spec after subtitle; metadata may be stale",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-				logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
-				logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
-			)
-		}
-		return
-	}
-	itemCopy := *item
-	itemCopy.RipSpecData = encoded
-	if err := s.store.Update(ctx, &itemCopy); err != nil {
+	if err := queue.PersistRipSpec(ctx, s.store, item, env); err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to persist rip spec after subtitle; metadata may be stale",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
-				logging.String(logging.FieldErrorHint, "check queue database access"),
+				logging.String(logging.FieldErrorHint, "rerun identification or check queue database access"),
 				logging.String(logging.FieldImpact, "subtitle metadata may not reflect latest state"),
 			)
 		}
-	} else {
-		*item = itemCopy
 	}
 }
 

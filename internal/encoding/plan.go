@@ -12,6 +12,7 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
+	"spindle/internal/textutil"
 )
 
 type encodeJob struct {
@@ -52,7 +53,7 @@ func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env r
 		}
 		attrs := []logging.Attr{
 			logging.String(logging.FieldDecisionType, "encoding_job_plan"),
-			logging.String("decision_result", logging.Ternary(len(jobs) > 0, "episodes", "single_file")),
+			logging.String("decision_result", textutil.Ternary(len(jobs) > 0, "episodes", "single_file")),
 			logging.String("decision_reason", decisionReason),
 			logging.String("decision_options", strings.Join(choices, ", ")),
 			logging.Int("job_count", len(jobs)),
@@ -81,7 +82,7 @@ func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env r
 			"encoding preset profile selected",
 			logging.String(logging.FieldDecisionType, "encoding_preset_profile"),
 			logging.String("decision_result", strings.TrimSpace(item.DraptoPresetProfile)),
-			logging.String("decision_reason", logging.Ternary(decision.Applied, "preset_decider", "default")),
+			logging.String("decision_reason", textutil.Ternary(decision.Applied, "preset_decider", "default")),
 			logging.String("decision_options", "default, preset_decider"),
 			logging.String("sample_source", sampleSource),
 			logging.String("sample_source_reason", sampleSourceSource),

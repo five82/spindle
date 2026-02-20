@@ -22,6 +22,7 @@ import (
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
 	"spindle/internal/services/jellyfin"
+	"spindle/internal/textutil"
 )
 
 // shouldRefreshJellyfin checks whether Jellyfin refresh is allowed and returns the reason.
@@ -359,7 +360,7 @@ func logJellyfinRefreshDecision(logger *slog.Logger, allowed bool, reason, scope
 	logger.Info(
 		"jellyfin refresh decision",
 		logging.String(logging.FieldDecisionType, "jellyfin_refresh"),
-		logging.String("decision_result", logging.Ternary(allowed, "refresh", "skip")),
+		logging.String("decision_result", textutil.Ternary(allowed, "refresh", "skip")),
 		logging.String("decision_reason", reason),
 		logging.String("decision_options", "refresh, skip"),
 		logging.String("decision_scope", scope),
@@ -396,26 +397,12 @@ func (o *Organizer) persistRipSpec(ctx context.Context, item *queue.Item, env *r
 	if env == nil {
 		return
 	}
-	encoded, err := env.Encode()
-	if err != nil {
-		logger.Warn("failed to encode rip spec after episode organize; metadata may be stale",
-			logging.Error(err),
-			logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-			logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
-			logging.String(logging.FieldImpact, "episode metadata may not reflect latest state"),
-		)
-		return
-	}
-	itemCopy := *item
-	itemCopy.RipSpecData = encoded
-	if err := o.store.Update(ctx, &itemCopy); err != nil {
+	if err := queue.PersistRipSpec(ctx, o.store, item, env); err != nil {
 		logger.Warn("failed to persist rip spec after episode organize; metadata may be stale",
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
-			logging.String(logging.FieldErrorHint, "check queue database access"),
+			logging.String(logging.FieldErrorHint, "rerun identification or check queue database access"),
 			logging.String(logging.FieldImpact, "episode metadata may not reflect latest state"),
 		)
-	} else {
-		*item = itemCopy
 	}
 }

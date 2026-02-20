@@ -89,9 +89,6 @@ func TestExecuteSkipsMovie(t *testing.T) {
 	if err := id.Execute(context.Background(), item); err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
-	if item.Status != queue.StatusEpisodeIdentified {
-		t.Fatalf("expected status %s, got %s", queue.StatusEpisodeIdentified, item.Status)
-	}
 	if item.ProgressMessage != "Skipped (movie content)" {
 		t.Fatalf("unexpected progress message: %q", item.ProgressMessage)
 	}
@@ -254,9 +251,6 @@ func TestExecuteMatchesEpisodes(t *testing.T) {
 
 	if err := id.Execute(context.Background(), item); err != nil {
 		t.Fatalf("Execute failed: %v", err)
-	}
-	if item.Status != queue.StatusEpisodeIdentified {
-		t.Fatalf("expected status %s, got %s", queue.StatusEpisodeIdentified, item.Status)
 	}
 	if item.ProgressMessage != "Episodes correlated with OpenSubtitles" {
 		t.Fatalf("unexpected progress message: %q", item.ProgressMessage)

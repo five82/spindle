@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"spindle/internal/textutil"
 )
 
 // StagingRoot returns the per-item staging directory rooted at base.
@@ -25,26 +27,14 @@ func (i Item) StagingRoot(base string) string {
 }
 
 func sanitizeSegment(value string) string {
-	value = strings.TrimSpace(value)
+	value = textutil.SanitizeFileName(value)
 	if value == "" {
 		return ""
 	}
-	replacer := strings.NewReplacer(
-		"/", "-",
-		"\\", "-",
-		" ", "-",
-		":", "-",
-		"*", "",
-		"?", "",
-		"\"", "",
-		"<", "",
-		">", "",
-		"|", "",
-	)
-	cleaned := replacer.Replace(value)
-	cleaned = strings.Trim(cleaned, "-_")
-	if cleaned == "" {
+	value = strings.ReplaceAll(value, " ", "-")
+	value = strings.Trim(value, "-_")
+	if value == "" {
 		return "queue"
 	}
-	return cleaned
+	return value
 }

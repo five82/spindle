@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/logging"
 	"spindle/internal/staging"
 )
 
@@ -79,7 +80,7 @@ func newStagingListCommand(ctx *commandContext) *cobra.Command {
 			for _, dir := range dirs {
 				age := time.Since(dir.ModTime).Truncate(time.Minute)
 				ageStr := formatDuration(age)
-				sizeStr := humanBytes(dir.Size)
+				sizeStr := logging.FormatBytes(dir.Size)
 				totalSize += dir.Size
 				rows = append(rows, []string{dir.Name[:12], ageStr, sizeStr})
 			}
@@ -90,7 +91,7 @@ func newStagingListCommand(ctx *commandContext) *cobra.Command {
 				[]columnAlignment{alignLeft, alignRight, alignRight},
 			)
 			fmt.Fprint(out, table)
-			fmt.Fprintf(out, "\nTotal: %d directories, %s\n", len(dirs), humanBytes(totalSize))
+			fmt.Fprintf(out, "\nTotal: %d directories, %s\n", len(dirs), logging.FormatBytes(totalSize))
 			return nil
 		},
 	}

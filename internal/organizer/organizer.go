@@ -21,6 +21,7 @@ import (
 	"spindle/internal/services"
 	"spindle/internal/services/jellyfin"
 	"spindle/internal/stage"
+	"spindle/internal/textutil"
 )
 
 // MetadataProvider describes the media metadata used for organization.
@@ -48,9 +49,9 @@ const (
 var organizerProbe = ffprobe.Inspect
 
 // NewOrganizer constructs the organizer stage handler using default dependencies.
-func NewOrganizer(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Organizer {
+func NewOrganizer(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Organizer {
 	jellyfinService := jellyfin.NewConfiguredService(cfg)
-	return NewOrganizerWithDependencies(cfg, store, logger, jellyfinService, notifications.NewService(cfg))
+	return NewOrganizerWithDependencies(cfg, store, logger, jellyfinService, notifier)
 }
 
 // NewOrganizerWithDependencies allows injecting collaborators (used in tests).
@@ -145,8 +146,8 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	// Log job plan
 	attrs := []logging.Attr{
 		logging.String(logging.FieldDecisionType, "organizer_job_plan"),
-		logging.String("decision_result", logging.Ternary(len(jobs) > 0, "episodes", "single_file")),
-		logging.String("decision_reason", logging.Ternary(len(jobs) > 0, "episode_assets", "single_media_asset")),
+		logging.String("decision_result", textutil.Ternary(len(jobs) > 0, "episodes", "single_file")),
+		logging.String("decision_reason", textutil.Ternary(len(jobs) > 0, "episode_assets", "single_media_asset")),
 		logging.String("decision_options", "episodes, single_file"),
 		logging.Int("job_count", len(jobs)),
 	}
@@ -170,7 +171,7 @@ func (o *Organizer) resolveMetadata(ctx context.Context, item *queue.Item, logge
 			base := strings.TrimSpace(filepath.Base(item.EncodedFile))
 			fallbackTitle = strings.TrimSuffix(base, filepath.Ext(base))
 		}
-		fallbackReason := logging.Ternary(item.MetadataJSON == "", "metadata_missing", "title_missing")
+		fallbackReason := textutil.Ternary(item.MetadataJSON == "", "metadata_missing", "title_missing")
 		logger.Info(
 			"metadata selection decision",
 			logging.String(logging.FieldDecisionType, "metadata_fallback"),
@@ -253,8 +254,8 @@ func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item
 	if o.logger != nil {
 		o.logger.Info("subtitle sidecar move decision",
 			logging.String(logging.FieldDecisionType, "subtitle_sidecar_move"),
-			logging.String("decision_result", logging.Ternary(moved > 0, "moved", "none_found")),
-			logging.String("decision_reason", logging.Ternary(moved > 0, "subtitles_found", "no_matching_srt_files")),
+			logging.String("decision_result", textutil.Ternary(moved > 0, "moved", "none_found")),
+			logging.String("decision_reason", textutil.Ternary(moved > 0, "subtitles_found", "no_matching_srt_files")),
 			logging.Int("count", moved),
 			logging.String("destination", destDir),
 		)

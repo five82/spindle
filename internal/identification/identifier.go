@@ -23,6 +23,7 @@ import (
 	"spindle/internal/services/llm"
 	"spindle/internal/stage"
 	"spindle/internal/staging"
+	"spindle/internal/textutil"
 )
 
 // Identifier performs disc identification using MakeMKV scanning and TMDB metadata.
@@ -44,7 +45,7 @@ type DiscScanner interface {
 }
 
 // NewIdentifier creates a new stage handler.
-func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Identifier {
+func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Identifier {
 	client, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 	if err != nil {
 		logger.Warn("tmdb client initialization failed; tmdb lookups disabled",
@@ -55,7 +56,7 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) 
 		)
 	}
 	scanner := disc.NewScanner(cfg.MakemkvBinary())
-	return NewIdentifierWithDependencies(cfg, store, logger, client, scanner, notifications.NewService(cfg))
+	return NewIdentifierWithDependencies(cfg, store, logger, client, scanner, notifier)
 }
 
 // NewIdentifierWithDependencies allows injecting TMDB searcher and disc scanner (used in tests).
@@ -309,8 +310,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	logger.Info("forced subtitle detection",
 		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
-		logging.String("decision_result", logging.Ternary(hasForcedTrack, "detected", "none")),
-		logging.String("decision_reason", logging.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
+		logging.String("decision_result", textutil.Ternary(hasForcedTrack, "detected", "none")),
+		logging.String("decision_reason", textutil.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
 		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
 
 	mediaHint, mediaReason := detectMediaKindWithReason(title, discLabel, scanResult)

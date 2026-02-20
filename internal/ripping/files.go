@@ -52,15 +52,6 @@ func selectCachedRip(dir string) (string, error) {
 	return candidates[0].path, nil
 }
 
-func sanitizeFileName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "", "\"", "", "<", "", ">", "", "|", "")
-	return strings.TrimSpace(replacer.Replace(name))
-}
-
 func copyPlaceholder(src, dst string) error {
 	sourceData, err := os.ReadFile(src)
 	if err != nil {

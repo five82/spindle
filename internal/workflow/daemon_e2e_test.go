@@ -13,6 +13,7 @@ import (
 	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
+	"spindle/internal/notifications"
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
@@ -96,7 +97,7 @@ func TestDaemonEndToEndWorkflow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d, err := daemon.New(cfg, store, logger, mgr, logPath, logging.NewStreamHub(128), nil)
+	d, err := daemon.New(cfg, store, logger, mgr, logPath, logging.NewStreamHub(128), nil, notifications.NewService(cfg))
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}

@@ -22,6 +22,7 @@ import (
 	"spindle/internal/services"
 	"spindle/internal/services/makemkv"
 	"spindle/internal/stage"
+	"spindle/internal/textutil"
 )
 
 // Ripper manages the MakeMKV ripping workflow.
@@ -35,7 +36,7 @@ type Ripper struct {
 }
 
 // NewRipper constructs the ripping handler using default dependencies.
-func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Ripper {
+func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Ripper {
 	componentLogger := logging.NewComponentLogger(logger, "makemkv")
 	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKV.RipTimeout, makemkv.WithLogger(componentLogger))
 	if err != nil {
@@ -46,7 +47,7 @@ func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Rip
 			logging.String(logging.FieldImpact, "disc ripping will not be available"),
 		)
 	}
-	return NewRipperWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
+	return NewRipperWithDependencies(cfg, store, logger, client, notifier)
 }
 
 // NewRipperWithDependencies allows injecting all collaborators (used in tests).
@@ -400,7 +401,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				nil,
 			)
 		}
-		cleaned := sanitizeFileName(item.DiscTitle)
+		cleaned := textutil.SanitizeFileName(item.DiscTitle)
 		if cleaned == "" {
 			cleaned = strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))
 			if cleaned == "" {

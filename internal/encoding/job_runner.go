@@ -12,6 +12,7 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
+	"spindle/internal/textutil"
 )
 
 type encodeJobRunner struct {
@@ -30,8 +31,8 @@ func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec
 		logger.Info(
 			"encoding runner decision",
 			logging.String(logging.FieldDecisionType, "encoding_runner"),
-			logging.String("decision_result", logging.Ternary(runnerAvailable, "drapto", "placeholder")),
-			logging.String("decision_reason", logging.Ternary(runnerAvailable, "drapto_client_configured", "drapto_client_unavailable")),
+			logging.String("decision_result", textutil.Ternary(runnerAvailable, "drapto", "placeholder")),
+			logging.String("decision_reason", textutil.Ternary(runnerAvailable, "drapto_client_configured", "drapto_client_unavailable")),
 			logging.String("decision_options", "drapto, placeholder"),
 			logging.Int("job_count", len(jobs)),
 		)
@@ -172,29 +173,13 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 }
 
 func (r *encodeJobRunner) persistRipSpec(ctx context.Context, item *queue.Item, env *ripspec.Envelope, logger *slog.Logger) {
-	encoded, err := env.Encode()
-	if err != nil {
-		logger.Warn("failed to encode rip spec after episode encode; metadata may be stale",
+	if err := queue.PersistRipSpec(ctx, r.store, item, env); err != nil {
+		logger.Warn("failed to persist rip spec after episode encode; metadata may be stale",
 			logging.Error(err),
-			logging.String(logging.FieldEventType, "rip_spec_encode_failed"),
-			logging.String(logging.FieldErrorHint, "rerun identification if rip spec data looks wrong"),
+			logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
+			logging.String(logging.FieldErrorHint, "rerun identification or check queue database access"),
 			logging.String(logging.FieldImpact, "episode encoding metadata may not reflect latest state"),
 		)
-		return
-	}
-	itemCopy := *item
-	itemCopy.RipSpecData = encoded
-	if r.store != nil {
-		if err := r.store.Update(ctx, &itemCopy); err != nil {
-			logger.Warn("failed to persist rip spec after episode encode; metadata may be stale",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "rip_spec_persist_failed"),
-				logging.String(logging.FieldErrorHint, "check queue database access"),
-				logging.String(logging.FieldImpact, "episode encoding metadata may not reflect latest state"),
-			)
-		} else {
-			*item = itemCopy
-		}
 	}
 }
 

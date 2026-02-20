@@ -70,7 +70,7 @@ type DependencyStatus struct {
 }
 
 // New constructs a daemon with initialized dependencies.
-func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workflow.Manager, logPath string, hub *logging.StreamHub, archive *logging.EventArchive) (*Daemon, error) {
+func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workflow.Manager, logPath string, hub *logging.StreamHub, archive *logging.EventArchive, notifier notifications.Service) (*Daemon, error) {
 	if cfg == nil || store == nil || logger == nil || wf == nil {
 		return nil, errors.New("daemon requires config, store, logger, and workflow manager")
 	}
@@ -89,9 +89,9 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 		logArchive: archive,
 		lockPath:   lockPath,
 		lock:       flock.New(lockPath),
-		notifier:   notifications.NewService(cfg),
+		notifier:   notifier,
 	}
-	daemon.monitor = newDiscMonitor(cfg, store, logger, daemon.DiscPaused)
+	daemon.monitor = newDiscMonitor(cfg, store, logger, daemon.DiscPaused, notifier)
 	daemon.netlink = newNetlinkMonitor(cfg, logger, daemon.HandleDiscDetected, daemon.DiscPaused)
 	apiSrv, err := newAPIServer(cfg, daemon, logger)
 	if err != nil {
@@ -351,8 +351,7 @@ func (d *Daemon) TestNotification(ctx context.Context) (bool, string, error) {
 	if strings.TrimSpace(d.cfg.Notifications.NtfyTopic) == "" {
 		return false, "ntfy topic not configured", nil
 	}
-	notifier := notifications.NewService(d.cfg)
-	if err := notifier.Publish(ctx, notifications.EventTestNotification, nil); err != nil {
+	if err := d.notifier.Publish(ctx, notifications.EventTestNotification, nil); err != nil {
 		return false, "failed to send notification", err
 	}
 	return true, "test notification sent", nil

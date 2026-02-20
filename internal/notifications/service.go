@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"spindle/internal/config"
+	"spindle/internal/logging"
 )
 
 const userAgent = "Spindle-Go/0.1.0"
@@ -151,7 +152,7 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			lines = append(lines, fmt.Sprintf("Duration: %s", duration.Truncate(time.Second)))
 		}
 		if bytes > 0 {
-			lines = append(lines, fmt.Sprintf("Size: %s", humanBytes(bytes)))
+			lines = append(lines, fmt.Sprintf("Size: %s", logging.FormatBytes(bytes)))
 		}
 		if cache != "" {
 			lines = append(lines, fmt.Sprintf("Cache: %s", cache))
@@ -185,9 +186,9 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			lines = append(lines, fmt.Sprintf("Preset: %s", preset))
 		}
 		if input > 0 && output > 0 {
-			lines = append(lines, fmt.Sprintf("Output: %s of %s (%.1f%%)", humanBytes(output), humanBytes(input), ratio))
+			lines = append(lines, fmt.Sprintf("Output: %s of %s (%.1f%%)", logging.FormatBytes(output), logging.FormatBytes(input), ratio))
 		} else if output > 0 {
-			lines = append(lines, fmt.Sprintf("Output: %s", humanBytes(output)))
+			lines = append(lines, fmt.Sprintf("Output: %s", logging.FormatBytes(output)))
 		}
 		if files > 1 {
 			lines = append(lines, fmt.Sprintf("Files: %d", files))
@@ -450,21 +451,6 @@ func dedupeKey(event Event, data Payload) string {
 		}
 	}
 	return strings.Join(parts, "|")
-}
-
-func humanBytes(value int64) string {
-	if value < 1024 {
-		return fmt.Sprintf("%d B", value)
-	}
-	const unit = 1024.0
-	size := float64(value)
-	for _, suffix := range []string{"KiB", "MiB", "GiB", "TiB"} {
-		size /= unit
-		if size < unit {
-			return fmt.Sprintf("%.1f %s", size, suffix)
-		}
-	}
-	return fmt.Sprintf("%.1f PiB", size/unit)
 }
 
 func payloadString(data Payload, key string) string {

@@ -377,9 +377,6 @@ func (c *Config) PresetLLM() LLMConfig {
 	}
 }
 
-// CommentaryLLMConfig is an alias for LLMConfig for backward compatibility.
-type CommentaryLLMConfig = LLMConfig
-
 // CommentaryLLM returns the LLM settings for commentary detection.
 // Falls back to preset_decider settings when not explicitly configured.
 func (c *Config) CommentaryLLM() LLMConfig {

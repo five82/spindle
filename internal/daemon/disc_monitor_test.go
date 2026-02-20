@@ -45,7 +45,7 @@ func TestDiscMonitorQueuesNewDisc(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil, nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -117,7 +117,7 @@ func TestDiscMonitorResetsExistingItem(t *testing.T) {
 		t.Fatalf("store.Update: %v", err)
 	}
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil, nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -181,7 +181,7 @@ func TestDiscMonitorSkipsCompletedDuplicate(t *testing.T) {
 		t.Fatalf("store.Update: %v", err)
 	}
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil, nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -244,7 +244,7 @@ func TestDiscMonitorSkipsAlreadyInWorkflow(t *testing.T) {
 		t.Fatalf("store.Update: %v", err)
 	}
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil, nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -330,7 +330,7 @@ func TestDiscMonitorProcessesAfterWorkflowComplete(t *testing.T) {
 		t.Fatalf("store.Update: %v", err)
 	}
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil, nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -379,7 +379,7 @@ func TestDiscMonitorNoDiscDetected(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil, nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -420,7 +420,7 @@ func TestDiscMonitorConcurrentDetection(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil, nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return
@@ -485,7 +485,7 @@ func TestDiscMonitorHandleDetectionUsesConfiguredDevice(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil)
+	monitor := newDiscMonitor(cfg, store, logging.NewNop(), nil, nil)
 	if monitor == nil {
 		t.Fatal("expected monitor to be created")
 		return

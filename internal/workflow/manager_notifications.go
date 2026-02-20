@@ -134,19 +134,12 @@ func countWorkItems(stats map[queue.Status]int) int {
 }
 
 func countActiveItems(stats map[queue.Status]int) int {
-	activeStatuses := []queue.Status{
-		queue.StatusPending,
-		queue.StatusIdentifying,
-		queue.StatusIdentified,
-		queue.StatusRipping,
-		queue.StatusRipped,
-		queue.StatusEncoding,
-		queue.StatusEncoded,
-		queue.StatusOrganizing,
-	}
 	total := 0
-	for _, status := range activeStatuses {
-		total += stats[status]
+	for status, count := range stats {
+		if status == queue.StatusCompleted || status == queue.StatusFailed {
+			continue
+		}
+		total += count
 	}
 	return total
 }

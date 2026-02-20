@@ -39,9 +39,9 @@ type Encoder struct {
 }
 
 // NewEncoder constructs the encoding handler.
-func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Encoder {
+func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Encoder {
 	client := drapto.NewLibrary()
-	return NewEncoderWithDependencies(cfg, store, logger, client, notifications.NewService(cfg))
+	return NewEncoderWithDependencies(cfg, store, logger, client, notifier)
 }
 
 // NewEncoderWithDependencies allows injecting custom dependencies (used for tests).

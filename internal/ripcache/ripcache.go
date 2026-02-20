@@ -17,6 +17,7 @@ import (
 	"spindle/internal/config"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
+	"spindle/internal/textutil"
 )
 
 const (
@@ -485,23 +486,11 @@ func copyFile(src, dst string, mode os.FileMode) error {
 }
 
 func sanitize(value string) string {
-	value = strings.TrimSpace(value)
+	value = textutil.SanitizeFileName(value)
 	if value == "" {
 		return ""
 	}
-	replacer := strings.NewReplacer(
-		"/", "-",
-		"\\", "-",
-		" ", "-",
-		":", "-",
-		"*", "",
-		"?", "",
-		"\"", "",
-		"<", "",
-		">", "",
-		"|", "",
-	)
-	value = replacer.Replace(value)
+	value = strings.ReplaceAll(value, " ", "-")
 	value = strings.Trim(value, "-_.")
 	if value == "" {
 		return "queue"

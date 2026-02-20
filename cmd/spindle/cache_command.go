@@ -66,8 +66,8 @@ func newCacheStatsCommand(ctx *commandContext) *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "Entries: %d\n", stats.Entries)
-			fmt.Fprintf(out, "Size:   %s / %s\n", humanBytes(stats.TotalBytes), humanBytes(stats.MaxBytes))
-			fmt.Fprintf(out, "Disk:   %s free (%.1f%%)\n", humanBytes(int64(stats.FreeBytes)), stats.FreeRatio*100)
+			fmt.Fprintf(out, "Size:   %s / %s\n", logging.FormatBytes(stats.TotalBytes), logging.FormatBytes(stats.MaxBytes))
+			fmt.Fprintf(out, "Disk:   %s free (%.1f%%)\n", logging.FormatBytes(int64(stats.FreeBytes)), stats.FreeRatio*100)
 			printCacheEntries(out, stats.EntrySummaries)
 			return nil
 		},
@@ -104,7 +104,7 @@ func printCacheEntries(out io.Writer, entries []ripcache.EntrySummary) {
 			i+1,
 			label,
 			extra,
-			humanBytes(entry.SizeBytes),
+			logging.FormatBytes(entry.SizeBytes),
 			updated,
 		)
 	}
@@ -155,7 +155,7 @@ Example:
 					"size_bytes": entry.SizeBytes,
 				})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed cache entry %d (%s)\n", entryNum, humanBytes(entry.SizeBytes))
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed cache entry %d (%s)\n", entryNum, logging.FormatBytes(entry.SizeBytes))
 			return nil
 		},
 	}
@@ -197,7 +197,7 @@ func newCacheClearCommand(ctx *commandContext) *cobra.Command {
 			if ctx.JSONMode() {
 				return writeJSON(cmd, map[string]any{"removed": stats.Entries, "freed_bytes": stats.TotalBytes})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d cache entries (%s freed)\n", stats.Entries, humanBytes(stats.TotalBytes))
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d cache entries (%s freed)\n", stats.Entries, logging.FormatBytes(stats.TotalBytes))
 			return nil
 		},
 	}
@@ -228,19 +228,4 @@ func cacheManager(ctx *commandContext) (*ripcache.Manager, string, error) {
 		return nil, "", fmt.Errorf("ensure cache dir: %w", err)
 	}
 	return ripcache.NewManager(cfg, logger), "", nil
-}
-
-func humanBytes(v int64) string {
-	const unit = 1024
-	if v < unit {
-		return fmt.Sprintf("%d B", v)
-	}
-	div := int64(unit)
-	exp := 0
-	for n := v / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	value := float64(v) / float64(div)
-	return fmt.Sprintf("%.1f %ciB", value, "KMGTPEZY"[exp])
 }

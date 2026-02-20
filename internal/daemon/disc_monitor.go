@@ -69,7 +69,7 @@ func (defaultFingerprintProvider) Compute(ctx context.Context, device, discType 
 	return fingerprint.ComputeTimeout(ctx, device, discType, 2*time.Minute)
 }
 
-func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger, isPaused func() bool) *discMonitor {
+func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger, isPaused func() bool, notifier notifications.Service) *discMonitor {
 	if cfg == nil || store == nil {
 		return nil
 	}
@@ -91,7 +91,7 @@ func newDiscMonitor(cfg *config.Config, store *queue.Store, logger *slog.Logger,
 		cfg:                 cfg,
 		logger:              monitorLogger,
 		queueHandler:        newQueueStoreProcessor(store),
-		errorNotifier:       newNotifierAdapter(notifications.NewService(cfg)),
+		errorNotifier:       newNotifierAdapter(notifier),
 		fingerprintProvider: defaultFingerprintProvider{},
 		device:              device,
 		detect:              detect,

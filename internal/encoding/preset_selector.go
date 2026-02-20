@@ -15,6 +15,7 @@ import (
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/queue"
 	"spindle/internal/services/llm"
+	"spindle/internal/textutil"
 )
 
 const (
@@ -256,7 +257,7 @@ func (e *Encoder) selectPreset(ctx context.Context, item *queue.Item, sampleSour
 
 	decisionAttrs := append([]logging.Attr{
 		logging.String(logging.FieldDecisionType, "preset_decider"),
-		logging.String("decision_result", logging.Ternary(decision.Applied, "applied", "fallback")),
+		logging.String("decision_result", textutil.Ternary(decision.Applied, "applied", "fallback")),
 		logging.String("decision_selected", decision.Profile),
 		logging.String("decision_reason", fallbackReason),
 	}, attrs...)

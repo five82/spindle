@@ -131,7 +131,7 @@ it is overwritten.`,
 			}
 			scanner := disc.NewScanner(cfg.MakemkvBinary())
 			identifier := identification.NewIdentifierWithDependencies(cfg, nil, logger, tmdbClient, scanner, notifier)
-			ripper := ripping.NewRipper(cfg, store, logger)
+			ripper := ripping.NewRipper(cfg, store, logger, notifier)
 
 			if err := runStage(baseCtx, logger, store, notifier, identifier, "identifier", queue.StatusIdentifying, queue.StatusIdentified, item); err != nil {
 				return err

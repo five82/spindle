@@ -15,6 +15,7 @@ import (
 	"spindle/internal/daemon"
 	"spindle/internal/ipc"
 	"spindle/internal/logging"
+	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/stage"
 	"spindle/internal/testsupport"
@@ -75,7 +76,7 @@ func setupCLITestEnv(t *testing.T) *cliTestEnv {
 	mgr := workflow.NewManager(cfg, store, logger)
 	mgr.ConfigureStages(workflow.StageSet{Identifier: noopStage{}})
 
-	d, err := daemon.New(cfg, store, logger, mgr, logPath, logging.NewStreamHub(64), nil)
+	d, err := daemon.New(cfg, store, logger, mgr, logPath, logging.NewStreamHub(64), nil, notifications.NewService(cfg))
 	if err != nil {
 		t.Fatalf("daemon.New: %v", err)
 	}
