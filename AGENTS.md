@@ -64,11 +64,16 @@ golangci-lint run                     # Lint
 
 ## Finding Your Way
 
-- Queue lifecycle: `internal/queue/` (start with doc.go)
-- Stage implementations: `internal/{stage}/` (identification, ripping, encoding, etc.)
-- CLI: `cmd/spindle/` - each command is a file
-- Config: `internal/config/config.go` defines fields; `sample_config.toml` is the reference
-- Run `ls internal/` to see packages; each has doc.go
+- **Queue lifecycle**: `internal/queue/` (schema in `schema.sql`, statuses in `status.go`)
+- **Stage implementations**: `internal/{stage}/` (identification, ripping, encoding, etc.)
+- **Cross-stage data**: `internal/ripspec/` - the Envelope passed between all stages
+- **Workflow orchestration**: `internal/workflow/` - two-lane manager (foreground: disc I/O, background: encoding+)
+- **CLI**: `cmd/spindle/` - each command is a file
+- **Config**: `internal/config/config.go` defines fields; `sample_config.toml` is the reference
+- **External services**: `internal/services/{makemkv,drapto,jellyfin,whisperx,llm}/`
+- **Logging contract**: `internal/logging/doc.go` specifies required fields per level
+
+A few packages retain `doc.go` files that document non-obvious design decisions (pipelines, matching algorithms, cross-cutting contracts). Most packages are self-explanatory from their code.
 
 ## Common Patterns
 
@@ -76,7 +81,6 @@ golangci-lint run                     # Lint
 - **Progress tracking**: `item.SetProgress(stage, message, percent)` for updates; `item.SetProgressComplete(stage, message)` when done.
 - **State transitions**: Only workflow manager calls `store.UpdateStatus()`. Stages return nil to signal completion.
 - **Testing**: `testsupport.NewTestDB()` for temp SQLite; stub external service interfaces.
-- **Package docs**: When modifying a package, check whether its `doc.go` still accurately describes the package.
 
 ## Logging Guidance
 
