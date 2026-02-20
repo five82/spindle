@@ -5,8 +5,6 @@ import (
 	"strings"
 	"unicode"
 
-	"log/slog"
-
 	"spindle/internal/logging"
 )
 
@@ -169,14 +167,9 @@ func isWhisperMusicCue(text string) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
+	const musicSymbols = "\u00B6\u266A\u266B*" // ¶ ♪ ♫ *
 	for _, r := range text {
-		switch {
-		case r == '\u00B6': // ¶
-		case r == '\u266A': // ♪
-		case r == '\u266B': // ♫
-		case r == '*':
-		case unicode.IsSpace(r):
-		default:
+		if !unicode.IsSpace(r) && !strings.ContainsRune(musicSymbols, r) {
 			return false
 		}
 	}
@@ -261,7 +254,7 @@ func (s *Service) logFilterSummary(result filterResult) {
 		reasons[r.reason]++
 	}
 
-	attrs := []slog.Attr{
+	attrs := []logging.Attr{
 		logging.String(logging.FieldEventType, "whisperx_filter_applied"),
 		logging.Int("cues_removed", len(result.removals)),
 		logging.Int("cues_remaining", len(result.cues)),
@@ -269,7 +262,7 @@ func (s *Service) logFilterSummary(result filterResult) {
 	for reason, count := range reasons {
 		attrs = append(attrs, logging.Int("removed_"+reason, count))
 	}
-	s.logger.LogAttrs(nil, slog.LevelInfo, "whisperx post-filter applied", attrs...) //nolint:staticcheck // nil context is fine for slog
+	s.logger.Info("whisperx post-filter applied", logging.Args(attrs...)...)
 
 	// Individual removals at DEBUG.
 	for _, r := range result.removals {

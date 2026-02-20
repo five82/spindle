@@ -120,6 +120,9 @@ func discRPC(ctx *commandContext, cmd *cobra.Command, fn func(*ipc.Client) (stri
 	if err != nil {
 		return err
 	}
+	if ctx.JSONMode() {
+		return writeJSON(cmd, map[string]any{"message": message})
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), message)
 	return nil
 }
