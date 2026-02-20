@@ -7,6 +7,7 @@ import (
 
 	"spindle/internal/deps"
 	"spindle/internal/services"
+	"spindle/internal/services/whisperx"
 )
 
 func (s *Service) ensureReady() error {
@@ -17,8 +18,8 @@ func (s *Service) ensureReady() error {
 		if s.skipCheck {
 			return
 		}
-		if _, err := exec.LookPath(whisperXCommand); err != nil {
-			s.readyErr = services.Wrap(services.ErrConfiguration, "subtitles", "locate whisperx", fmt.Sprintf("Could not find %q on PATH", whisperXCommand), err)
+		if _, err := exec.LookPath(whisperx.UVXCommand); err != nil {
+			s.readyErr = services.Wrap(services.ErrConfiguration, "subtitles", "locate whisperx", fmt.Sprintf("Could not find %q on PATH", whisperx.UVXCommand), err)
 			return
 		}
 		if _, err := exec.LookPath(ffmpegCommand); err != nil {
@@ -30,7 +31,7 @@ func (s *Service) ensureReady() error {
 		return s.readyErr
 	}
 	// configuredVADMethod already returns normalized lowercase values
-	if s.configuredVADMethod() == whisperXVADMethodPyannote && strings.TrimSpace(s.hfToken) == "" {
+	if s.configuredVADMethod() == whisperx.VADMethodPyannote && strings.TrimSpace(s.hfToken) == "" {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "validate vad", "pyannote VAD selected but no Hugging Face token configured (set whisperx_hf_token)", nil)
 	}
 	return nil

@@ -14,6 +14,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/deps"
+	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
 	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
@@ -286,7 +287,7 @@ func summarizeAudioCandidates(streams []ffprobe.Stream) ([]audioCandidate, bool)
 }
 
 func formatAudioCandidateValue(stream ffprobe.Stream) (string, bool) {
-	lang := audio.NormalizeLanguage(stream.Tags)
+	lang := langpkg.ExtractFromTags(stream.Tags)
 	isEnglish := strings.HasPrefix(lang, "en")
 	if lang == "" {
 		lang = "und"

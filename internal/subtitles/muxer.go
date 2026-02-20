@@ -10,6 +10,7 @@ import (
 
 	"log/slog"
 
+	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
 )
 
@@ -165,7 +166,7 @@ func (m *Muxer) buildMkvmergeArgs(req MuxRequest, outputPath string) []string {
 	args = append(args, req.MKVPath)
 
 	// Map ISO 639-1 to ISO 639-2 for mkvmerge
-	lang3 := mapLanguageCode(req.Language)
+	lang3 := langpkg.ToISO3(req.Language)
 
 	// Add each subtitle track
 	for _, srtPath := range req.SubtitlePaths {
@@ -195,112 +196,16 @@ func (m *Muxer) buildMkvmergeArgs(req MuxRequest, outputPath string) []string {
 
 // isForcedSRT checks if an SRT path is a forced subtitle based on filename pattern.
 func isForcedSRT(path string) bool {
-	lower := strings.ToLower(path)
-	return strings.Contains(lower, ".forced.") || strings.HasSuffix(lower, ".forced.srt")
+	return strings.Contains(strings.ToLower(path), ".forced.")
 }
 
 // buildTrackName creates a human-readable track name.
 func buildTrackName(lang string, forced bool) string {
-	name := languageDisplayName(lang)
+	name := langpkg.DisplayName(lang)
 	if forced {
 		name += " (Forced)"
 	}
 	return name
-}
-
-// languageDisplayName returns a human-readable language name.
-func languageDisplayName(code string) string {
-	switch strings.ToLower(code) {
-	case "":
-		return "Unknown"
-	case "en", "eng":
-		return "English"
-	case "es", "spa":
-		return "Spanish"
-	case "fr", "fre", "fra":
-		return "French"
-	case "de", "deu", "ger":
-		return "German"
-	case "it", "ita":
-		return "Italian"
-	case "pt", "por":
-		return "Portuguese"
-	case "ja", "jpn":
-		return "Japanese"
-	case "ko", "kor":
-		return "Korean"
-	case "zh", "zho", "chi":
-		return "Chinese"
-	case "ru", "rus":
-		return "Russian"
-	case "ar", "ara":
-		return "Arabic"
-	case "hi", "hin":
-		return "Hindi"
-	case "nl", "nld", "dut":
-		return "Dutch"
-	case "pl", "pol":
-		return "Polish"
-	case "sv", "swe":
-		return "Swedish"
-	case "da", "dan":
-		return "Danish"
-	case "no", "nor":
-		return "Norwegian"
-	case "fi", "fin":
-		return "Finnish"
-	default:
-		return strings.ToUpper(code)
-	}
-}
-
-// mapLanguageCode converts ISO 639-1 (2-letter) to ISO 639-2 (3-letter) codes.
-// mkvmerge accepts both, but 3-letter codes are more explicit.
-func mapLanguageCode(code string) string {
-	switch strings.ToLower(code) {
-	case "en":
-		return "eng"
-	case "es":
-		return "spa"
-	case "fr":
-		return "fre"
-	case "de":
-		return "deu"
-	case "it":
-		return "ita"
-	case "pt":
-		return "por"
-	case "ja":
-		return "jpn"
-	case "ko":
-		return "kor"
-	case "zh":
-		return "zho"
-	case "ru":
-		return "rus"
-	case "ar":
-		return "ara"
-	case "hi":
-		return "hin"
-	case "nl":
-		return "nld"
-	case "pl":
-		return "pol"
-	case "sv":
-		return "swe"
-	case "da":
-		return "dan"
-	case "no":
-		return "nor"
-	case "fi":
-		return "fin"
-	default:
-		// If already 3-letter or unknown, return as-is
-		if len(code) == 3 {
-			return strings.ToLower(code)
-		}
-		return "und" // undefined
-	}
 }
 
 // defaultMuxerCommandRunner executes mkvmerge commands.

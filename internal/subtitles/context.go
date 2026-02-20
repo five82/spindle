@@ -332,27 +332,38 @@ func asInt(value any) int64 {
 func extractYear(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) >= 4 {
-		return value[:4]
+		if _, err := strconv.Atoi(value[:4]); err == nil {
+			return value[:4]
+		}
 	}
 	return ""
 }
 
+// SplitTitleAndYear extracts a trailing parenthesized 4-digit year from a title
+// string. For example, "The Matrix (1999)" returns ("The Matrix", "1999").
+// If no year is found, the full title is returned with an empty year string.
+func SplitTitleAndYear(title string) (string, string) {
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
+		return "", ""
+	}
+	idx := strings.LastIndex(trimmed, "(")
+	if idx == -1 || !strings.HasSuffix(trimmed, ")") {
+		return trimmed, ""
+	}
+	candidate := strings.TrimSpace(trimmed[idx+1 : len(trimmed)-1])
+	if len(candidate) != 4 {
+		return trimmed, ""
+	}
+	if _, err := strconv.Atoi(candidate); err != nil {
+		return trimmed, ""
+	}
+	return strings.TrimSpace(trimmed[:idx]), candidate
+}
+
 func extractYearFromTitle(title string) string {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return ""
-	}
-	open := strings.LastIndex(title, "(")
-	closeIdx := strings.LastIndex(title, ")")
-	if open >= 0 && closeIdx > open {
-		candidate := strings.TrimSpace(title[open+1 : closeIdx])
-		if len(candidate) == 4 {
-			if _, err := strconv.Atoi(candidate); err == nil {
-				return candidate
-			}
-		}
-	}
-	return ""
+	_, year := SplitTitleAndYear(title)
+	return year
 }
 
 func deriveShowTitle(value string) string {

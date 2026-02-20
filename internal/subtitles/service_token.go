@@ -12,6 +12,7 @@ import (
 
 	"spindle/internal/logging"
 	"spindle/internal/services"
+	"spindle/internal/services/whisperx"
 )
 
 var (
@@ -22,17 +23,17 @@ var (
 const huggingFaceWhoAmIEndpoint = "https://huggingface.co/api/whoami-v2"
 
 func (s *Service) configuredVADMethod() string {
-	if s != nil && s.config != nil && strings.EqualFold(strings.TrimSpace(s.config.Subtitles.WhisperXVADMethod), whisperXVADMethodPyannote) {
-		return whisperXVADMethodPyannote
+	if s != nil && s.config != nil && strings.EqualFold(strings.TrimSpace(s.config.Subtitles.WhisperXVADMethod), whisperx.VADMethodPyannote) {
+		return whisperx.VADMethodPyannote
 	}
-	return whisperXVADMethodSilero
+	return whisperx.VADMethodSilero
 }
 
 func (s *Service) ensureTokenReady(ctx context.Context) error {
 	if s == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "token", "Subtitle service unavailable", nil)
 	}
-	if s.configuredVADMethod() != whisperXVADMethodPyannote {
+	if s.configuredVADMethod() != whisperx.VADMethodPyannote {
 		return nil
 	}
 	if strings.TrimSpace(s.hfToken) == "" {
@@ -48,7 +49,7 @@ func (s *Service) ensureTokenReady(ctx context.Context) error {
 		if err != nil {
 			s.tokenErr = err
 			if s.whisperxSvc != nil {
-				s.whisperxSvc.SetVADMethod(whisperXVADMethodSilero)
+				s.whisperxSvc.SetVADMethod(whisperx.VADMethodSilero)
 			}
 			return
 		}

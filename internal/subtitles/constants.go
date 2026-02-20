@@ -10,20 +10,6 @@ const (
 	progressPercentForGen    = 90.0 // Progress allocated to generation phase
 )
 
-// WhisperX configuration (parameters are in services/whisperx package).
-const (
-	whisperXCommand        = "uvx"
-	whisperXCUDAIndexURL   = "https://download.pytorch.org/whl/cu128"
-	whisperXPypiIndexURL   = "https://pypi.org/simple"
-	whisperXCPUDevice      = "cpu"
-	whisperXCUDADevice     = "cuda"
-	whisperXCPUComputeType = "float32"
-	whisperXPackage        = "whisperx"
-
-	whisperXVADMethodPyannote = "pyannote"
-	whisperXVADMethodSilero   = "silero"
-)
-
 // External tool commands.
 const (
 	ffmpegCommand   = "ffmpeg"

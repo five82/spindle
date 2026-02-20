@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 )
@@ -112,7 +113,7 @@ func TestAnalyzeSubtitleStreamsLanguageMismatch(t *testing.T) {
 	}
 }
 
-func TestNormalizeSubtitleLanguage(t *testing.T) {
+func TestExtractFromTags(t *testing.T) {
 	tests := []struct {
 		tags     map[string]string
 		expected string
@@ -125,9 +126,9 @@ func TestNormalizeSubtitleLanguage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := normalizeSubtitleLanguage(tt.tags)
+		result := langpkg.ExtractFromTags(tt.tags)
 		if result != tt.expected {
-			t.Errorf("normalizeSubtitleLanguage(%v) = %q, want %q", tt.tags, result, tt.expected)
+			t.Errorf("ExtractFromTags(%v) = %q, want %q", tt.tags, result, tt.expected)
 		}
 	}
 }

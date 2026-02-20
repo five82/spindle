@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	langpkg "spindle/internal/language"
 	"spindle/internal/subtitles/opensubtitles"
 )
 
@@ -29,7 +30,7 @@ type scoredSubtitle struct {
 }
 
 func rankSubtitleCandidates(subs []opensubtitles.Subtitle, preferred []string, ctx SubtitleContext) []scoredSubtitle {
-	preferred = normalizeLanguageList(preferred)
+	preferred = langpkg.NormalizeList(preferred)
 	if len(subs) == 0 {
 		return nil
 	}

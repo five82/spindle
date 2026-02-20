@@ -10,6 +10,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/deps"
+	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
 	"spindle/internal/services"
 	"spindle/internal/services/whisperx"
@@ -181,7 +182,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 	if len(req.Languages) == 0 {
 		req.Languages = append([]string(nil), s.languages...)
 	} else {
-		req.Languages = normalizeLanguageList(req.Languages)
+		req.Languages = langpkg.NormalizeList(req.Languages)
 	}
 	if req.Language == "" && len(req.Languages) > 0 {
 		req.Language = req.Languages[0]
@@ -221,23 +222,26 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, err
 	}
 
-	if err := s.reshapeSubtitles(ctx, plan.whisperSRT, plan.whisperJSON, plan.outputFile, plan.language, plan.totalSeconds); err != nil {
+	if err := s.reshapeSubtitles(ctx, plan.whisperSRT, plan.whisperJSON, plan.outputFile, plan.language); err != nil {
 		return GenerateResult{}, err
 	}
 
 	// Filter WhisperX hallucinations and credits noise.
-	if err := s.filterTranscriptionOutput(plan.outputFile, plan.totalSeconds); err != nil {
+	// filterTranscriptionOutput returns the final cue count so we can skip a
+	// separate file read when filtering succeeds.
+	segmentCount, filterErr := s.filterTranscriptionOutput(plan.outputFile, plan.totalSeconds)
+	if filterErr != nil {
 		if s.logger != nil {
 			s.logger.Warn("whisperx post-filter failed, keeping unfiltered output",
-				logging.Error(err),
+				logging.Error(filterErr),
 				logging.String(logging.FieldEventType, "whisperx_filter_failed"),
 			)
 		}
-	}
-
-	segmentCount, err := countSRTCues(plan.outputFile)
-	if err != nil {
-		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "analyze srt", "Failed to inspect formatted subtitles", err)
+		// Fall back to counting from the unfiltered file.
+		segmentCount, err = countSRTCues(plan.outputFile)
+		if err != nil {
+			return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "analyze srt", "Failed to inspect formatted subtitles", err)
+		}
 	}
 	if segmentCount == 0 {
 		return GenerateResult{}, services.Wrap(services.ErrTransient, "subtitles", "format", "Subtitle formatter produced no cues", nil)

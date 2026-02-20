@@ -11,8 +11,12 @@ import (
 	"unicode/utf8"
 
 	"spindle/internal/media/ffprobe"
+	"spindle/internal/services/whisperx"
 	"spindle/internal/subtitles/opensubtitles"
 )
+
+// whisperXPackage is the package name used in uvx --from for WhisperX commands (test-only).
+const whisperXPackage = "whisperx"
 
 type whisperXStub struct {
 	t              *testing.T
@@ -66,7 +70,7 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 		return nil
 	}
 
-	if name == whisperXCommand && containsArg(args, "--output_dir") {
+	if name == whisperx.UVXCommand && containsArg(args, "--output_dir") {
 		if containsArg(args, "--download-models") || containsArg(args, "--model_cache_only") {
 			return nil
 		}
@@ -122,27 +126,27 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 
 		switch {
 		case s.expectCUDA:
-			if device != whisperXCUDADevice {
+			if device != whisperx.CUDADevice {
 				s.t.Fatalf("expected cuda device, got %q", device)
 			}
-			if indexURL != whisperXCUDAIndexURL {
-				s.t.Fatalf("expected cuda index url %q, got %q", whisperXCUDAIndexURL, indexURL)
+			if indexURL != whisperx.CUDAIndexURL {
+				s.t.Fatalf("expected cuda index url %q, got %q", whisperx.CUDAIndexURL, indexURL)
 			}
-			if extraIndexURL != whisperXPypiIndexURL {
-				s.t.Fatalf("expected extra index url %q, got %q", whisperXPypiIndexURL, extraIndexURL)
+			if extraIndexURL != whisperx.PypiIndexURL {
+				s.t.Fatalf("expected extra index url %q, got %q", whisperx.PypiIndexURL, extraIndexURL)
 			}
 			if computeType != "" {
 				s.t.Fatalf("unexpected compute type in CUDA mode: %q", computeType)
 			}
 		default:
-			if device != whisperXCPUDevice {
+			if device != whisperx.CPUDevice {
 				s.t.Fatalf("expected cpu device, got %q", device)
 			}
-			if computeType != whisperXCPUComputeType {
-				s.t.Fatalf("expected compute type %q, got %q", whisperXCPUComputeType, computeType)
+			if computeType != whisperx.CPUComputeType {
+				s.t.Fatalf("expected compute type %q, got %q", whisperx.CPUComputeType, computeType)
 			}
-			if indexURL != whisperXPypiIndexURL {
-				s.t.Fatalf("expected cpu index url %q, got %q", whisperXPypiIndexURL, indexURL)
+			if indexURL != whisperx.PypiIndexURL {
+				s.t.Fatalf("expected cpu index url %q, got %q", whisperx.PypiIndexURL, indexURL)
 			}
 			if extraIndexURL != "" {
 				s.t.Fatalf("unexpected extra index url in CPU mode: %q", extraIndexURL)
@@ -153,7 +157,7 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 			s.t.Fatal("expected --vad_method to be provided")
 		}
 		switch vadMethod {
-		case whisperXVADMethodPyannote:
+		case whisperx.VADMethodPyannote:
 			if hfToken == "" {
 				s.t.Fatal("expected --hf_token to be provided for pyannote VAD")
 			}
@@ -236,7 +240,7 @@ func (s *whisperXStub) Runner(ctx context.Context, name string, args ...string) 
 }
 
 func (s *whisperXStub) simulateStableTSFormatter(jsonPath, outputPath, _ string) error {
-	segments, err := loadWhisperSegments(jsonPath)
+	segments, err := whisperx.LoadSegments(jsonPath)
 	if err != nil {
 		return fmt.Errorf("load whisper segments: %w", err)
 	}
@@ -280,13 +284,15 @@ Somebody stop that force field.
 		return err
 	}
 
-	payload := whisperXPayload{
-		Segments: []whisperXSegment{
+	payload := struct {
+		Segments []whisperx.Segment `json:"segments"`
+	}{
+		Segments: []whisperx.Segment{
 			{
 				Text:  "Thank you.",
 				Start: 0.0,
 				End:   2.0,
-				Words: []whisperXWord{
+				Words: []whisperx.Word{
 					{Word: "Thank", Start: 0.0, End: 1.0},
 					{Word: "you.", Start: 1.0, End: 2.0},
 				},
@@ -295,7 +301,7 @@ Somebody stop that force field.
 				Text:  "General Kenobi, you are a bold one.",
 				Start: 2.5,
 				End:   4.5,
-				Words: []whisperXWord{
+				Words: []whisperx.Word{
 					{Word: "General", Start: 2.5, End: 3.0},
 					{Word: "Kenobi,", Start: 3.0, End: 3.3},
 					{Word: "you", Start: 3.3, End: 3.7},
@@ -309,7 +315,7 @@ Somebody stop that force field.
 				Text:  "Somebody stop that force field.",
 				Start: 5.0,
 				End:   7.0,
-				Words: []whisperXWord{
+				Words: []whisperx.Word{
 					{Word: "Somebody", Start: 5.0, End: 5.6},
 					{Word: "stop", Start: 5.6, End: 6.0},
 					{Word: "that", Start: 6.0, End: 6.3},
@@ -331,7 +337,7 @@ func formatDurationSeconds(value float64) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", value), "0"), ".")
 }
 
-func buildSentence(words []whisperXWord) string {
+func buildSentence(words []whisperx.Word) string {
 	var builder strings.Builder
 	for _, word := range words {
 		token := strings.TrimSpace(word.Word)
@@ -347,20 +353,6 @@ func buildSentence(words []whisperXWord) string {
 		builder.WriteString(token)
 	}
 	return builder.String()
-}
-
-func formatSRTTimestamp(seconds float64) string {
-	if seconds < 0 {
-		seconds = 0
-	}
-	msTotal := int(seconds*1000 + 0.5)
-	hours := msTotal / 3_600_000
-	msTotal %= 3_600_000
-	minutes := msTotal / 60_000
-	msTotal %= 60_000
-	secs := msTotal / 1_000
-	millis := msTotal % 1_000
-	return fmt.Sprintf("%02d:%02d:%02d,%03d", hours, minutes, secs, millis)
 }
 
 func containsArg(args []string, needle string) bool {

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"log/slog"
+
+	"spindle/internal/logging"
 )
 
 // CacheEntry captures metadata about a cached OpenSubtitles download.
@@ -139,9 +141,9 @@ func (c *Cache) Store(entry CacheEntry, data []byte) (string, error) {
 	}
 	if c.logger != nil {
 		c.logger.Debug("opensubtitles cache stored",
-			slog.Int64("file_id", entry.FileID),
-			slog.String("path", dataPath),
-			slog.String("language", entry.Language),
+			logging.Int64("file_id", entry.FileID),
+			logging.String("path", dataPath),
+			logging.String("language", entry.Language),
 		)
 	}
 	return dataPath, nil

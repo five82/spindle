@@ -347,7 +347,7 @@ The end.
 	}
 
 	svc := &Service{}
-	if err := svc.filterTranscriptionOutput(srtPath, 200); err != nil {
+	if _, err := svc.filterTranscriptionOutput(srtPath, 200); err != nil {
 		t.Fatal(err)
 	}
 

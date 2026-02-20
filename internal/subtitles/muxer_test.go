@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	langpkg "spindle/internal/language"
 )
 
-func TestMapLanguageCode(t *testing.T) {
+func TestToISO3(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -16,7 +18,7 @@ func TestMapLanguageCode(t *testing.T) {
 		{"en", "eng"},
 		{"EN", "eng"},
 		{"es", "spa"},
-		{"fr", "fre"},
+		{"fr", "fra"},
 		{"de", "deu"},
 		{"it", "ita"},
 		{"pt", "por"},
@@ -41,15 +43,15 @@ func TestMapLanguageCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := mapLanguageCode(tt.input)
+			result := langpkg.ToISO3(tt.input)
 			if result != tt.expected {
-				t.Errorf("mapLanguageCode(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("ToISO3(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestLanguageDisplayName(t *testing.T) {
+func TestDisplayName(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -69,9 +71,9 @@ func TestLanguageDisplayName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := languageDisplayName(tt.input)
+			result := langpkg.DisplayName(tt.input)
 			if result != tt.expected {
-				t.Errorf("languageDisplayName(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("DisplayName(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
@@ -105,7 +107,7 @@ func TestBuildTrackName(t *testing.T) {
 	}
 }
 
-func TestIsForcesSRT(t *testing.T) {
+func TestIsForcedSRT(t *testing.T) {
 	tests := []struct {
 		path     string
 		expected bool

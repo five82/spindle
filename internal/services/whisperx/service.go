@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	langpkg "spindle/internal/language"
 )
 
 // Service provides WhisperX transcription capabilities.
@@ -206,7 +208,7 @@ func (s *Service) buildArgs(source, outputDir, language string) []string {
 	}
 
 	// Language
-	if lang := normalizeLanguage(language); lang != "" {
+	if lang := langpkg.ToISO2(language); lang != "" {
 		args = append(args, "--language", lang)
 	}
 
@@ -220,34 +222,11 @@ func (s *Service) buildArgs(source, outputDir, language string) []string {
 	return args
 }
 
-// normalizeLanguage converts language codes to WhisperX format.
-func normalizeLanguage(lang string) string {
-	lang = strings.ToLower(strings.TrimSpace(lang))
-	switch lang {
-	case "en", "eng", "english":
-		return "en"
-	case "es", "spa", "spanish":
-		return "es"
-	case "fr", "fra", "fre", "french":
-		return "fr"
-	case "de", "deu", "ger", "german":
-		return "de"
-	case "it", "ita", "italian":
-		return "it"
-	case "pt", "por", "portuguese":
-		return "pt"
-	case "ja", "jpn", "japanese":
-		return "ja"
-	case "zh", "chi", "zho", "chinese":
-		return "zh"
-	case "ko", "kor", "korean":
-		return "ko"
-	default:
-		if len(lang) == 2 {
-			return lang
-		}
-		return ""
-	}
+// Word represents a single word with timing from WhisperX output.
+type Word struct {
+	Word  string  `json:"word"`
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
 }
 
 // Segment represents a transcribed segment from WhisperX JSON output.
@@ -255,6 +234,7 @@ type Segment struct {
 	Text  string  `json:"text"`
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
+	Words []Word  `json:"words"`
 }
 
 // whisperXPayload is the JSON structure from WhisperX output.

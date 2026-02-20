@@ -110,10 +110,21 @@ func (s *Service) searchMovieWithVariants(ctx context.Context, base opensubtitle
 
 func (s *Service) searchEpisodeWithVariants(ctx context.Context, base opensubtitles.SearchRequest, showTitle string, season, episode int, episodeTMDBID int64) (opensubtitles.SearchResponse, error) {
 	variants := opensubtitles.EpisodeSearchVariants(base, showTitle, season, episode, episodeTMDBID)
+	if s.logger != nil && len(variants) > 0 {
+		s.logger.Info("opensubtitles search strategy",
+			logging.String(logging.FieldDecisionType, "opensubtitles_search_strategy"),
+			logging.String("decision_result", "episode_variants"),
+			logging.String("decision_reason", "searching_with_fallback_variants"),
+			logging.Int("variant_count", len(variants)),
+			logging.Int("season", season),
+			logging.Int("episode", episode),
+		)
+	}
 	var resp opensubtitles.SearchResponse
 	for attempt, variant := range variants {
-		if s.logger != nil && attempt == 0 {
+		if s.logger != nil {
 			s.logger.Debug("opensubtitles search variant",
+				logging.Int("attempt", attempt+1),
 				logging.Int("season", season),
 				logging.Int("episode", episode),
 				logging.String("query", strings.TrimSpace(variant.Query)),

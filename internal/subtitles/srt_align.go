@@ -218,6 +218,21 @@ func (t timeTransform) applyTransform(seconds float64) float64 {
 	return t.scale*seconds + t.offset
 }
 
+// formatSRTTimestamp converts seconds to SRT timestamp format (HH:MM:SS,mmm).
+func formatSRTTimestamp(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	msTotal := int(seconds*1000 + 0.5)
+	hours := msTotal / 3_600_000
+	msTotal %= 3_600_000
+	minutes := msTotal / 60_000
+	msTotal %= 60_000
+	secs := msTotal / 1_000
+	millis := msTotal % 1_000
+	return fmt.Sprintf("%02d:%02d:%02d,%03d", hours, minutes, secs, millis)
+}
+
 // writeSRTCues writes cues to an SRT file.
 func writeSRTCues(path string, cues []srtCue) error {
 	var sb strings.Builder

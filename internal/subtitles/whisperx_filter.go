@@ -218,27 +218,29 @@ func sweepTrailingHallucinations(cues []srtCue, videoSeconds float64) ([]srtCue,
 
 // filterTranscriptionOutput is the integration method called from Generate().
 // It parses the SRT, runs filtering, and writes back if any cues were removed.
-// Errors are non-fatal — the caller should log and continue with unfiltered output.
-func (s *Service) filterTranscriptionOutput(srtPath string, videoSeconds float64) error {
+// Returns the final cue count (after filtering) so the caller can skip a
+// separate countSRTCues pass. Errors are non-fatal — the caller should log
+// and continue with unfiltered output.
+func (s *Service) filterTranscriptionOutput(srtPath string, videoSeconds float64) (int, error) {
 	cues, err := parseSRTCues(srtPath)
 	if err != nil {
-		return fmt.Errorf("parse srt for filtering: %w", err)
+		return 0, fmt.Errorf("parse srt for filtering: %w", err)
 	}
 	if len(cues) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	result := filterWhisperXOutput(cues, videoSeconds)
 	if len(result.removals) == 0 {
-		return nil
+		return len(cues), nil
 	}
 
 	s.logFilterSummary(result)
 
 	if err := writeSRTCues(srtPath, result.cues); err != nil {
-		return fmt.Errorf("write filtered srt: %w", err)
+		return 0, fmt.Errorf("write filtered srt: %w", err)
 	}
-	return nil
+	return len(result.cues), nil
 }
 
 // logFilterSummary logs a summary of filter actions at INFO and individual

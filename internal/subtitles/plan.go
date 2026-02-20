@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
 	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
@@ -84,7 +85,7 @@ func (s *Service) prepareGenerationPlan(ctx context.Context, req GenerateRequest
 
 	language := strings.TrimSpace(req.Language)
 	if language == "" {
-		language = inferLanguage(selection.Primary.Tags)
+		language = langpkg.ExtractFromTags(selection.Primary.Tags)
 	}
 	if language == "" {
 		language = "en"

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/deps"
+	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/services"
@@ -121,8 +122,8 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) muxVa
 	var result muxValidationResult
 
 	expectedLang = strings.ToLower(strings.TrimSpace(expectedLang))
-	expectedLang3 := mapLanguageCode(expectedLang)
-	expectedLangName := languageDisplayName(expectedLang)
+	expectedLang3 := langpkg.ToISO3(expectedLang)
+	expectedLangName := langpkg.DisplayName(expectedLang)
 
 	for _, stream := range streams {
 		if stream.CodecType != "subtitle" {
@@ -150,7 +151,7 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) muxVa
 
 		// Check language metadata
 		if !result.LanguageMatch && expectedLang != "" {
-			lang := normalizeSubtitleLanguage(stream.Tags)
+			lang := langpkg.ExtractFromTags(stream.Tags)
 			if lang == expectedLang || lang == expectedLang3 {
 				result.LanguageMatch = true
 			}
@@ -198,19 +199,6 @@ func subtitleTitle(tags map[string]string) string {
 	for _, key := range []string{"title", "TITLE"} {
 		if value, ok := tags[key]; ok {
 			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-// normalizeSubtitleLanguage extracts and normalizes the language from stream tags.
-func normalizeSubtitleLanguage(tags map[string]string) string {
-	if len(tags) == 0 {
-		return ""
-	}
-	for _, key := range []string{"language", "LANGUAGE"} {
-		if value, ok := tags[key]; ok {
-			return strings.ToLower(strings.TrimSpace(value))
 		}
 	}
 	return ""

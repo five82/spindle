@@ -173,7 +173,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			continue
 		}
 		// Validate generated SRT content
-		if issues := ValidateSRTContent(result.SubtitlePath, 0); len(issues) > 0 {
+		if issues := ValidateSRTContent(result.SubtitlePath, result.Duration.Seconds()); len(issues) > 0 {
 			if s.logger != nil {
 				s.logger.Warn("SRT content validation issues",
 					logging.String("episode_key", episodeKey),

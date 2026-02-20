@@ -13,8 +13,8 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/deps"
+	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
-	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
@@ -237,7 +237,7 @@ func isCommentaryCandidate(stream ffprobe.Stream, primaryIndex int) bool {
 	if stream.CodecType != "audio" || stream.Index == primaryIndex || stream.Channels != 2 {
 		return false
 	}
-	lang := audio.NormalizeLanguage(stream.Tags)
+	lang := langpkg.ExtractFromTags(stream.Tags)
 	return strings.HasPrefix(lang, "en") || lang == "" || lang == "und"
 }
 

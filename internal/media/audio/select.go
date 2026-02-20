@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	langpkg "spindle/internal/language"
 	"spindle/internal/media/ffprobe"
 )
 
@@ -162,7 +163,7 @@ func buildCandidates(streams []ffprobe.Stream) candidateList {
 		cand := candidate{
 			stream:         stream,
 			order:          order,
-			language:       NormalizeLanguage(stream.Tags),
+			language:       langpkg.ExtractFromTags(stream.Tags),
 			title:          normalizeTitle(stream.Tags),
 			channels:       channelCount(stream),
 			defaultFlagged: stream.Disposition != nil && stream.Disposition["default"] == 1,
@@ -174,20 +175,6 @@ func buildCandidates(streams []ffprobe.Stream) candidateList {
 		order++
 	}
 	return result
-}
-
-// NormalizeLanguage extracts and normalizes the language tag from stream metadata.
-// It checks common tag keys and returns a lowercase, trimmed value.
-func NormalizeLanguage(tags map[string]string) string {
-	if len(tags) == 0 {
-		return ""
-	}
-	for _, key := range []string{"language", "LANGUAGE", "Language", "language_ietf", "LANG"} {
-		if value, ok := tags[key]; ok {
-			return strings.ToLower(strings.TrimSpace(value))
-		}
-	}
-	return ""
 }
 
 func normalizeTitle(tags map[string]string) string {
@@ -286,7 +273,7 @@ func detectLossless(stream ffprobe.Stream) bool {
 
 func formatStreamSummary(stream ffprobe.Stream) string {
 	parts := make([]string, 0, 4)
-	if lang := NormalizeLanguage(stream.Tags); lang != "" {
+	if lang := langpkg.ExtractFromTags(stream.Tags); lang != "" {
 		parts = append(parts, lang)
 	}
 	codec := stream.CodecLong

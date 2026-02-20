@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
 	"spindle/internal/services"
 )
@@ -71,8 +72,8 @@ func (s *Service) formatWithStableTS(ctx context.Context, whisperJSON, outputPat
 	return nil
 }
 
-func (s *Service) reshapeSubtitles(ctx context.Context, whisperSRT, whisperJSON, outputPath, language string, _ float64) error {
-	if err := s.formatWithStableTS(ctx, whisperJSON, outputPath, normalizeWhisperLanguage(language)); err != nil {
+func (s *Service) reshapeSubtitles(ctx context.Context, whisperSRT, whisperJSON, outputPath, language string) error {
+	if err := s.formatWithStableTS(ctx, whisperJSON, outputPath, langpkg.ToISO2(language)); err != nil {
 		if s.logger != nil {
 			s.logger.Warn("stable-ts formatter failed, delivering raw whisper subtitles",
 				logging.Error(err),
@@ -99,12 +100,6 @@ func (s *Service) defaultCommandRunner(ctx context.Context, name string, args ..
 	var stderr strings.Builder
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
-
-	// Torch 2.6 changed torch.load default to weights_only=true, breaking WhisperX/pyannote.
-	// Force legacy behavior so bundled WhisperX binaries can load checkpoints safely.
-	if os.Getenv("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD") == "" {
-		cmd.Env = append(os.Environ(), "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1")
-	}
 
 	if err := cmd.Run(); err != nil {
 		raw := strings.TrimSpace(stderr.String())

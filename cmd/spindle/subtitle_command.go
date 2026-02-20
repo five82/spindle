@@ -106,7 +106,7 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			edition, _ := identification.ExtractKnownEdition(baseName)
 			// Strip edition suffix for TMDB lookup
 			cleanedName := identification.StripEditionSuffix(baseName)
-			inferredTitle, inferredYear := splitTitleAndYear(cleanedName)
+			inferredTitle, inferredYear := subtitles.SplitTitleAndYear(cleanedName)
 			if inferredTitle == "" {
 				inferredTitle = cleanedName
 			}
@@ -251,25 +251,6 @@ func lookupTMDBMetadata(ctx context.Context, cfg *config.Config, logger *slog.Lo
 		return nil
 	}
 	return match
-}
-
-func splitTitleAndYear(base string) (string, string) {
-	trimmed := strings.TrimSpace(base)
-	if trimmed == "" {
-		return "", ""
-	}
-	idx := strings.LastIndex(trimmed, "(")
-	if idx == -1 || !strings.HasSuffix(trimmed, ")") {
-		return trimmed, ""
-	}
-	candidate := strings.TrimSpace(trimmed[idx+1 : len(trimmed)-1])
-	if len(candidate) != 4 {
-		return trimmed, ""
-	}
-	if _, err := strconv.Atoi(candidate); err != nil {
-		return trimmed, ""
-	}
-	return strings.TrimSpace(trimmed[:idx]), candidate
 }
 
 func tryJellyfinRefresh(ctx context.Context, cfg *config.Config, logger *slog.Logger) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindle/internal/config"
+	"spindle/internal/services/whisperx"
 )
 
 func TestServiceGenerateRequiresTokenForPyannote(t *testing.T) {
@@ -82,8 +83,8 @@ func TestServiceGeneratePyannoteWithToken(t *testing.T) {
 	if result.SegmentCount == 0 {
 		t.Fatalf("expected non-zero segments")
 	}
-	if stub.lastVAD != whisperXVADMethodPyannote {
-		t.Fatalf("expected VAD %q, got %q", whisperXVADMethodPyannote, stub.lastVAD)
+	if stub.lastVAD != whisperx.VADMethodPyannote {
+		t.Fatalf("expected VAD %q, got %q", whisperx.VADMethodPyannote, stub.lastVAD)
 	}
 	if stub.lastHFToken != "token" {
 		t.Fatalf("expected hf token to be passed to whisperx")
@@ -130,8 +131,8 @@ func TestServiceGeneratePyannoteTokenFallbackToSilero(t *testing.T) {
 	if !stub.calledStableTS {
 		t.Fatalf("expected stable-ts formatter to run")
 	}
-	if stub.lastVAD != whisperXVADMethodSilero {
-		t.Fatalf("expected fallback VAD %q, got %q", whisperXVADMethodSilero, stub.lastVAD)
+	if stub.lastVAD != whisperx.VADMethodSilero {
+		t.Fatalf("expected fallback VAD %q, got %q", whisperx.VADMethodSilero, stub.lastVAD)
 	}
 	if stub.lastHFToken != "" {
 		t.Fatalf("expected no HF token when falling back, got %q", stub.lastHFToken)

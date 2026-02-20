@@ -17,6 +17,7 @@ import (
 	"spindle/internal/audioanalysis"
 	"spindle/internal/config"
 	"spindle/internal/deps"
+	langpkg "spindle/internal/language"
 	"spindle/internal/media/audio"
 	"spindle/internal/media/ffprobe"
 	"spindle/internal/services/llm"
@@ -284,7 +285,7 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 
 		candResult := candidateResult{
 			Index:    stream.Index,
-			Language: audio.NormalizeLanguage(stream.Tags),
+			Language: langpkg.ExtractFromTags(stream.Tags),
 			Title:    streamTitle(stream.Tags),
 			Channels: stream.Channels,
 		}
@@ -356,7 +357,7 @@ func isCommentaryCandidate(stream ffprobe.Stream, primaryIndex int) bool {
 	if stream.CodecType != "audio" || stream.Index == primaryIndex || stream.Channels != 2 {
 		return false
 	}
-	lang := audio.NormalizeLanguage(stream.Tags)
+	lang := langpkg.ExtractFromTags(stream.Tags)
 	return strings.HasPrefix(lang, "en") || lang == "" || lang == "und"
 }
 

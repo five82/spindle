@@ -11,6 +11,7 @@ import (
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
+	"spindle/internal/services/whisperx"
 	"spindle/internal/testsupport"
 )
 
@@ -153,7 +154,7 @@ func newBlockingWhisperXRunner(stub *whisperXStub) *blockingWhisperXRunner {
 }
 
 func (r *blockingWhisperXRunner) Runner(ctx context.Context, name string, args ...string) error {
-	if name == whisperXCommand && containsArg(args, "--output_dir") && !containsArg(args, "--download-models") && !containsArg(args, "--model_cache_only") {
+	if name == whisperx.UVXCommand && containsArg(args, "--output_dir") && !containsArg(args, "--download-models") && !containsArg(args, "--model_cache_only") {
 		r.count++
 		if r.count == 2 {
 			close(r.startedSecond)
