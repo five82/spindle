@@ -26,45 +26,64 @@ Required tools (verify before proceeding):
 
 ## Procedure
 
-### Phase 1: Extract Primary Subtitle
+### Phase 1: Probe and Extract
 
-1. **Probe the MKV** to identify subtitle streams:
+1. **Get video duration** for credits detection later:
+   ```bash
+   ffprobe -v error -show_entries format=duration -of csv=p=0 "<mkv_file>"
+   ```
+
+2. **Probe subtitle streams**:
    ```bash
    ffprobe -v error -show_streams -select_streams s -of json "<mkv_file>"
    ```
 
-2. **Identify the primary subtitle stream**:
+3. **Identify the primary subtitle stream**:
    - Look for subtitle streams (codec_type: "subtitle", codec_name: "subrip" or "srt")
    - The primary subtitle is the one with `disposition.default=1` AND `disposition.forced=0`
    - If no default is set, pick the first non-forced subtitle stream
    - If the only subtitle stream has `disposition.forced=1`, abort with message: "Only a forced subtitle track found - no primary subtitle to audit."
    - If no subtitle streams exist, abort with message: "No subtitle tracks found in this file."
 
-3. **Extract the primary subtitle** to a temp file:
+4. **Extract the primary subtitle** to a temp file:
    ```bash
    ffmpeg -v error -i "<mkv_file>" -map 0:s:<stream_index> -c:s srt "/tmp/subtitleaudit_<basename>.srt"
    ```
    - Use the relative subtitle stream index (not the absolute stream index)
    - `<basename>` is the MKV filename without extension
 
-4. **Record stream metadata** for later muxing:
+5. **Record stream metadata** for later muxing:
    - Language code (from `tags.language` or stream metadata)
    - Track title (from `tags.title`)
    - Whether forced subtitle tracks also exist (for re-muxing)
    - Total number of subtitle streams and their properties
 
+6. **Show pre-audit stats** before proceeding to review:
+   ```
+   Pre-audit stats:
+   - Video duration: <HH:MM:SS>
+   - Subtitle cues: <N>
+   - First cue: <timestamp>
+   - Last cue: <timestamp>
+   - Cue density: <N> cues/min
+   - Estimated credits region: after ~<timestamp> (last ~5-8 min of video)
+   ```
+   The credits region estimate is the video duration minus ~5-8 minutes. Cues in this region that aren't clearly dialogue deserve extra scrutiny.
+
 ### Phase 2: Review for Transcription Errors
 
-Read the extracted SRT file and analyze it for **obvious** WhisperX transcription errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors.
+**Reading large SRT files:** SRT files for feature-length films are typically too large to read in a single pass. Read the file in chunks (2000 lines at a time) to cover the full file. Do not skip sections.
+
+Analyze the file for **obvious** WhisperX transcription errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors.
 
 **DO flag these (high confidence):**
 
 | Error Type | Description | Example |
 |------------|-------------|---------|
-| Residual hallucinations | Repeated filler phrases the hallucination filter missed | Isolated "Thank you." / "Thanks for watching." not in dialogue context |
-| Credits music/lyrics | End-credits music transcribed as dialogue subtitles. These appear after the final scene ends and contain song lyrics, not spoken dialogue. | Cues after the story ends containing partial song lyrics like "Down upon us and it flows like water" |
-| Background music bleed | Incidental music or soundtrack lyrics incorrectly transcribed as dialogue mid-film. Look for cues that contain song lyrics clearly not spoken by characters, especially during montages or transitions. | "He's a goat, he's a god, he's a man, he's a guru" from a background song playing in a scene |
-| Misattributed sound effects | Non-dialogue sounds transcribed as if they were speech. Obvious cases only: clearly non-verbal sounds rendered as words. | "BOOM!" transcribed as dialogue when it's a sound effect; exclamations like "Ah!Ah!" with no speaker context |
+| Residual hallucinations | The same short phrase appearing 3+ times throughout the file in isolation -- not part of a conversation, often surrounded by large timestamp gaps (30s+) on both sides. Common phrases: "Thank you.", "Thanks for watching.", "Subscribe.", "See you next time." | "Thank you." appearing 11 times scattered across the file, each time with no surrounding dialogue |
+| Credits music/lyrics | Cues after the final scene's dialogue that contain song lyrics. Use the estimated credits region from Phase 1 to identify these. After the last clear dialogue line, any cues with poetic/lyrical phrasing are almost certainly credits music. | Cues after 01:44:00 in a 01:51:00 movie containing "Down upon us and it flows like water" |
+| Background music bleed | Soundtrack lyrics incorrectly transcribed as dialogue mid-film. Telltale signs: poetic/lyrical phrasing that doesn't fit the scene's conversation, multiple consecutive cues forming verse/chorus patterns, cues during montages or transitions. Be careful: dialogue may be interleaved with music cues in the same scene. | "He's a goat, he's a god, he's a man, he's a guru" from a Nick Cave song playing on a car stereo |
+| Misattributed sound effects | Non-dialogue sounds transcribed as if they were speech. Obvious cases only: clearly non-verbal sounds rendered as words. | "BOOM!" transcribed as dialogue when it's a sound effect |
 | Garbled nonsense | Words/phrases that are clearly not English or make no sense in context | "the flibberty jibbet of cromulence" when context makes no sense |
 | Obvious homophones | Wrong word where audio context makes the correct word unambiguous | "their" vs "there" vs "they're" when sentence grammar makes it clear |
 | Broken cues | Empty cues, cues with only whitespace, or cues with only punctuation | A cue containing just "..." or " " |
@@ -95,25 +114,27 @@ Present findings in this format:
 ## Subtitle Audit: <filename>
 
 **Stream info:** Stream #<n>, Language: <lang>, Title: "<title>"
-**Cue count:** <N> cues | **Duration:** <first_timestamp> - <last_timestamp>
+**Cue count:** <N> cues | **Video duration:** <HH:MM:SS>
+**First cue:** <timestamp> | **Last cue:** <timestamp>
+**Estimated credits region:** after <timestamp>
 
 ### Proposed Edits
 
-Found <N> issues:
+Found <N> issues (<M> total cues affected):
 
 **1. [<Error Type>] Cue #<number> (<timestamp>)**
 - Current: `<current text>`
 - Proposed: `<corrected text>` (or REMOVE if the cue should be deleted)
 - Reason: <brief explanation>
 
-**2. [<Error Type>] Cue #<number> (<timestamp>)**
+**2. [<Error Type>] Cues #<start>-#<end> (<timestamp_start> - <timestamp_end>)**
+- Current: <N> consecutive cues containing `<summary of content>`
+- Proposed: REMOVE all <N> cues
+- Reason: <brief explanation>
 ...
-
-### No Issues Found
-
-If no obvious errors are detected, report:
-"No high-confidence transcription errors found. The subtitle file looks clean."
 ```
+
+**Batching:** Consecutive cues with the same error type (e.g., a run of credits lyrics or a cluster of hallucinations) should be batched into a single numbered item listing the cue range. This keeps the report readable.
 
 **After presenting**, ask the user which edits to apply:
 - "Apply all" - apply every proposed edit
@@ -128,7 +149,7 @@ If no obvious errors are detected, report:
    - For cue removals: delete the entire cue block (index line, timestamp line, text lines, blank separator)
 3. After removals, **re-index cue numbers** sequentially (1, 2, 3, ...)
 4. Write the edited file to `/tmp/subtitleaudit_<basename>_edited.srt`
-5. Show a summary: "Applied N edits. Ready to mux back into MKV."
+5. Show a summary: "Applied N edits (M cues removed, K cues modified). Ready to mux back into MKV."
 
 ### Phase 5: Mux Edited Subtitle Back into MKV
 
@@ -162,7 +183,10 @@ If no obvious errors are detected, report:
    - Confirm language codes and titles are correct
    - Confirm disposition flags are correct
 
-5. **Replace the original**:
+5. **File size sanity check**:
+   Compare the muxed file size against the original. They should be within ~1MB of each other (subtitle changes are tiny relative to video/audio). A large discrepancy indicates a muxing problem -- abort and report.
+
+6. **Replace the original**:
    - Ask user for confirmation: "Replace original file at `<path>`?"
    - On confirmation:
      ```bash
@@ -170,7 +194,7 @@ If no obvious errors are detected, report:
      ```
    - On decline: report the muxed file location for manual handling
 
-6. **Clean up temp files**:
+7. **Clean up temp files**:
    ```bash
    rm -f /tmp/subtitleaudit_<basename>*.srt
    ```
