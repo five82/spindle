@@ -62,7 +62,10 @@ Read the extracted SRT file and analyze it for **obvious** WhisperX transcriptio
 | Error Type | Description | Example |
 |------------|-------------|---------|
 | Residual hallucinations | Repeated filler phrases the hallucination filter missed | Isolated "Thank you." / "Thanks for watching." not in dialogue context |
-| Garbled nonsense | Words/phrases that are clearly not English | "the flibberty jibbet of cromulence" when context makes no sense |
+| Credits music/lyrics | End-credits music transcribed as dialogue subtitles. These appear after the final scene ends and contain song lyrics, not spoken dialogue. | Cues after the story ends containing partial song lyrics like "Down upon us and it flows like water" |
+| Background music bleed | Incidental music or soundtrack lyrics incorrectly transcribed as dialogue mid-film. Look for cues that contain song lyrics clearly not spoken by characters, especially during montages or transitions. | "He's a goat, he's a god, he's a man, he's a guru" from a background song playing in a scene |
+| Misattributed sound effects | Non-dialogue sounds transcribed as if they were speech. Obvious cases only: clearly non-verbal sounds rendered as words. | "BOOM!" transcribed as dialogue when it's a sound effect; exclamations like "Ah!Ah!" with no speaker context |
+| Garbled nonsense | Words/phrases that are clearly not English or make no sense in context | "the flibberty jibbet of cromulence" when context makes no sense |
 | Obvious homophones | Wrong word where audio context makes the correct word unambiguous | "their" vs "there" vs "they're" when sentence grammar makes it clear |
 | Broken cues | Empty cues, cues with only whitespace, or cues with only punctuation | A cue containing just "..." or " " |
 | Encoding artifacts | Mojibake or corrupted characters | "donâ€™t" instead of "don't" |
@@ -81,6 +84,8 @@ Read the extracted SRT file and analyze it for **obvious** WhisperX transcriptio
 | Line break choices | How text is split across lines is a formatting preference |
 | Capitalization of dialogue | Some transcriptions use sentence case, others don't -- both are valid |
 | Suspected mishearings | Unless the correct word is unambiguous from surrounding text, don't guess |
+| Diegetic singing | Characters singing on-screen is valid dialogue and should stay |
+| Ambiguous exclamations | Short cues like "Oh!" or "No!" during dialogue scenes are likely real speech |
 
 ### Phase 3: Present Proposed Edits
 
