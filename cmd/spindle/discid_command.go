@@ -39,7 +39,7 @@ func newDiscIDListCommand(ctx *commandContext) *cobra.Command {
 		Long:  "Display all disc ID to TMDB ID mappings in the cache, sorted by most recently cached.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cache, warn, err := discIDCacheManager(ctx)
-			if warn != "" {
+			if warn != "" && !ctx.JSONMode() {
 				fmt.Fprintln(cmd.OutOrStdout(), warn)
 			}
 			if err != nil || cache == nil {
@@ -47,6 +47,14 @@ func newDiscIDListCommand(ctx *commandContext) *cobra.Command {
 			}
 
 			entries := cache.List()
+
+			if ctx.JSONMode() {
+				if entries == nil {
+					entries = []discidcache.Entry{}
+				}
+				return writeJSON(cmd, entries)
+			}
+
 			out := cmd.OutOrStdout()
 
 			if len(entries) == 0 {
@@ -131,6 +139,13 @@ Example:
 				return fmt.Errorf("remove cache entry: %w", err)
 			}
 
+			if ctx.JSONMode() {
+				return writeJSON(cmd, map[string]any{
+					"removed": true,
+					"entry":   entryNum,
+					"title":   entry.Title,
+				})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed disc ID cache entry %d (%s)\n", entryNum, entry.Title)
 			return nil
 		},
@@ -144,7 +159,7 @@ func newDiscIDClearCommand(ctx *commandContext) *cobra.Command {
 		Long:  "Delete all disc ID to TMDB ID mappings. The cache will be repopulated as discs are identified.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cache, warn, err := discIDCacheManager(ctx)
-			if warn != "" {
+			if warn != "" && !ctx.JSONMode() {
 				fmt.Fprintln(cmd.OutOrStdout(), warn)
 			}
 			if err != nil || cache == nil {
@@ -153,6 +168,9 @@ func newDiscIDClearCommand(ctx *commandContext) *cobra.Command {
 
 			count := cache.Count()
 			if count == 0 {
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{"removed": 0})
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), "Disc ID cache is already empty")
 				return nil
 			}
@@ -161,6 +179,9 @@ func newDiscIDClearCommand(ctx *commandContext) *cobra.Command {
 				return fmt.Errorf("clear cache: %w", err)
 			}
 
+			if ctx.JSONMode() {
+				return writeJSON(cmd, map[string]any{"removed": count})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d disc ID cache entries\n", count)
 			return nil
 		},

@@ -9,8 +9,9 @@ func newRootCommand() *cobra.Command {
 	var configFlag string
 	var logLevelFlag string
 	var verbose bool
+	var jsonOutput bool
 
-	ctx := newCommandContext(&socketFlag, &configFlag, &logLevelFlag, &verbose, nil)
+	ctx := newCommandContext(&socketFlag, &configFlag, &logLevelFlag, &verbose, nil, &jsonOutput)
 
 	rootCmd := &cobra.Command{
 		Use:           "spindle",
@@ -33,6 +34,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().StringVarP(&configFlag, "config", "c", "", "Configuration file path")
 	rootCmd.PersistentFlags().StringVar(&logLevelFlag, "log-level", "", "Log level for CLI output (debug, info, warn, error)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Shorthand for --log-level=debug")
+	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
 
 	for _, cmd := range newDaemonCommands(ctx) {
 		rootCmd.AddCommand(cmd)

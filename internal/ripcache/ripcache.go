@@ -37,23 +37,23 @@ type Manager struct {
 
 // Stats describes current cache usage.
 type Stats struct {
-	Entries        int
-	TotalBytes     int64
-	MaxBytes       int64
-	FreeBytes      uint64
-	TotalFSBytes   uint64
-	FreeRatio      float64
-	EntrySummaries []EntrySummary
+	Entries        int            `json:"entries"`
+	TotalBytes     int64          `json:"total_bytes"`
+	MaxBytes       int64          `json:"max_bytes"`
+	FreeBytes      uint64         `json:"free_bytes"`
+	TotalFSBytes   uint64         `json:"total_fs_bytes"`
+	FreeRatio      float64        `json:"free_ratio"`
+	EntrySummaries []EntrySummary `json:"entry_summaries"`
 }
 
 // EntrySummary surfaces human-friendly details about a rip cache entry so the
 // CLI can show which titles are currently stored.
 type EntrySummary struct {
-	Directory      string
-	SizeBytes      int64
-	ModifiedAt     time.Time
-	PrimaryFile    string
-	VideoFileCount int
+	Directory      string    `json:"directory"`
+	SizeBytes      int64     `json:"size_bytes"`
+	ModifiedAt     time.Time `json:"modified_at"`
+	PrimaryFile    string    `json:"primary_file"`
+	VideoFileCount int       `json:"video_file_count"`
 }
 
 // NewManager builds a cache manager when enabled; returns nil when caching is disabled or misconfigured.

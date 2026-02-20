@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -158,6 +159,159 @@ func TestQueueRetryInvalidID(t *testing.T) {
 	_, _, err := runCLI(t, []string{"queue", "retry", "abc"}, env.socketPath, env.configPath)
 	if err == nil || !strings.Contains(err.Error(), "invalid item id") {
 		t.Fatalf("expected invalid id error, got %v", err)
+	}
+}
+
+func TestQueueListJSON(t *testing.T) {
+	env := setupCLITestEnv(t)
+	ctx := context.Background()
+
+	if _, err := env.store.NewDisc(ctx, "Alpha", "fp-alpha"); err != nil {
+		t.Fatalf("alpha disc: %v", err)
+	}
+	if _, err := env.store.NewDisc(ctx, "Beta", "fp-beta"); err != nil {
+		t.Fatalf("beta disc: %v", err)
+	}
+
+	out, _, err := runCLI(t, []string{"queue", "list", "--json"}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue list --json: %v", err)
+	}
+
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(out), &items); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	for _, item := range items {
+		if _, ok := item["id"]; !ok {
+			t.Fatal("missing 'id' key in JSON item")
+		}
+		if _, ok := item["status"]; !ok {
+			t.Fatal("missing 'status' key in JSON item")
+		}
+	}
+}
+
+func TestQueueListJSONEmpty(t *testing.T) {
+	env := setupCLITestEnv(t)
+
+	out, _, err := runCLI(t, []string{"queue", "list", "--json"}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue list --json empty: %v", err)
+	}
+
+	var items []any
+	if err := json.Unmarshal([]byte(out), &items); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected empty array, got %d items", len(items))
+	}
+}
+
+func TestQueueStatusJSON(t *testing.T) {
+	env := setupCLITestEnv(t)
+	ctx := context.Background()
+
+	if _, err := env.store.NewDisc(ctx, "Alpha", "fp-alpha"); err != nil {
+		t.Fatalf("alpha disc: %v", err)
+	}
+	beta, err := env.store.NewDisc(ctx, "Beta", "fp-beta")
+	if err != nil {
+		t.Fatalf("beta disc: %v", err)
+	}
+	beta.Status = queue.StatusFailed
+	if err := env.store.Update(ctx, beta); err != nil {
+		t.Fatalf("beta failed: %v", err)
+	}
+
+	out, _, err := runCLI(t, []string{"queue", "status", "--json"}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue status --json: %v", err)
+	}
+
+	var stats map[string]any
+	if err := json.Unmarshal([]byte(out), &stats); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+	}
+	if _, ok := stats["pending"]; !ok {
+		t.Fatalf("expected 'pending' key in status JSON, got: %v", stats)
+	}
+	if _, ok := stats["failed"]; !ok {
+		t.Fatalf("expected 'failed' key in status JSON, got: %v", stats)
+	}
+}
+
+func TestQueueShowJSON(t *testing.T) {
+	env := setupCLITestEnv(t)
+	ctx := context.Background()
+
+	item, err := env.store.NewDisc(ctx, "Alpha", "fp-alpha")
+	if err != nil {
+		t.Fatalf("alpha disc: %v", err)
+	}
+
+	out, _, err := runCLI(t, []string{"queue", "show", fmt.Sprintf("%d", item.ID), "--json"}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue show --json: %v", err)
+	}
+
+	var detail map[string]any
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+	}
+	if detail["id"] != float64(item.ID) {
+		t.Fatalf("expected id %d, got %v", item.ID, detail["id"])
+	}
+	if detail["disc_title"] != "Alpha" {
+		t.Fatalf("expected disc_title Alpha, got %v", detail["disc_title"])
+	}
+}
+
+func TestQueueShowJSONNotFound(t *testing.T) {
+	env := setupCLITestEnv(t)
+
+	out, _, err := runCLI(t, []string{"queue", "show", "9999", "--json"}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue show --json not found: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+	}
+	if result["error"] != "not_found" {
+		t.Fatalf("expected error=not_found, got %v", result["error"])
+	}
+}
+
+func TestQueueHealthJSON(t *testing.T) {
+	env := setupCLITestEnv(t)
+	ctx := context.Background()
+
+	if _, err := env.store.NewDisc(ctx, "Alpha", "fp-alpha"); err != nil {
+		t.Fatalf("alpha disc: %v", err)
+	}
+
+	out, _, err := runCLI(t, []string{"queue", "health", "--json"}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue health --json: %v", err)
+	}
+
+	var health map[string]any
+	if err := json.Unmarshal([]byte(out), &health); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+	}
+	for _, key := range []string{"total", "pending", "processing", "failed", "completed"} {
+		if _, ok := health[key]; !ok {
+			t.Fatalf("missing %q key in health JSON", key)
+		}
+	}
+	if health["total"] != float64(1) {
+		t.Fatalf("expected total=1, got %v", health["total"])
 	}
 }
 

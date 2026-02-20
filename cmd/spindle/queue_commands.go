@@ -42,6 +42,13 @@ func newQueueStatusCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 
+				if ctx.JSONMode() {
+					if stats == nil {
+						stats = map[string]int{}
+					}
+					return writeJSON(cmd, stats)
+				}
+
 				rows := buildQueueStatusRows(stats)
 				if len(rows) == 0 {
 					fmt.Fprintln(cmd.OutOrStdout(), "Queue is empty")
@@ -68,6 +75,14 @@ func newQueueListCommand(ctx *commandContext) *cobra.Command {
 				if err != nil {
 					return err
 				}
+
+				if ctx.JSONMode() {
+					if items == nil {
+						items = []queueItemView{}
+					}
+					return writeJSON(cmd, items)
+				}
+
 				if len(items) == 0 {
 					fmt.Fprintln(cmd.OutOrStdout(), "Queue is empty")
 					return nil
@@ -103,8 +118,14 @@ func newQueueShowCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 				if details == nil || details.ID == 0 {
+					if ctx.JSONMode() {
+						return writeJSON(cmd, map[string]any{"error": "not_found", "id": id})
+					}
 					fmt.Fprintf(cmd.OutOrStdout(), "Queue item %d not found\n", id)
 					return nil
+				}
+				if ctx.JSONMode() {
+					return writeJSON(cmd, details)
 				}
 				printQueueItemDetails(cmd, *details)
 				return nil
@@ -176,6 +197,21 @@ Examples:
 					if err != nil {
 						return err
 					}
+					if ctx.JSONMode() {
+						type jsonItem struct {
+							ID      int64  `json:"id"`
+							Outcome string `json:"outcome"`
+						}
+						items := make([]jsonItem, 0, len(result.Items))
+						for _, item := range result.Items {
+							outcome := "removed"
+							if item.Outcome == queueRemoveOutcomeNotFound {
+								outcome = "not_found"
+							}
+							items = append(items, jsonItem{ID: item.ID, Outcome: outcome})
+						}
+						return writeJSON(cmd, map[string]any{"items": items})
+					}
 					for _, item := range result.Items {
 						switch item.Outcome {
 						case queueRemoveOutcomeNotFound:
@@ -202,6 +238,10 @@ Examples:
 				}
 				if err != nil {
 					return err
+				}
+
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{"cleared": removed})
 				}
 
 				switch {
@@ -233,6 +273,9 @@ func newQueueClearFailedCommand(ctx *commandContext) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{"cleared": removed})
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Cleared %d failed items\n", removed)
 				return nil
 			})
@@ -249,6 +292,9 @@ func newQueueResetCommand(ctx *commandContext) *cobra.Command {
 				updated, err := api.ResetStuck(cmd.Context())
 				if err != nil {
 					return err
+				}
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{"reset": updated})
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Reset %d items\n", updated)
 				return nil
@@ -294,6 +340,15 @@ Examples:
 					if err != nil {
 						return err
 					}
+					if ctx.JSONMode() {
+						outcome := retryOutcomeString(result.Outcome)
+						return writeJSON(cmd, map[string]any{
+							"id":         ids[0],
+							"episode":    episodeKey,
+							"outcome":    outcome,
+							"new_status": result.NewStatus,
+						})
+					}
 					switch result.Outcome {
 					case queueRetryOutcomeNotFound:
 						fmt.Fprintf(out, "Item %d not found\n", ids[0])
@@ -316,6 +371,9 @@ Examples:
 					if err != nil {
 						return err
 					}
+					if ctx.JSONMode() {
+						return writeJSON(cmd, map[string]any{"retried": updated})
+					}
 					fmt.Fprintf(out, "Retried %d failed items\n", updated)
 					return nil
 				}
@@ -323,6 +381,18 @@ Examples:
 				result, err := api.RetryIDs(cmd.Context(), ids)
 				if err != nil {
 					return err
+				}
+
+				if ctx.JSONMode() {
+					type jsonItem struct {
+						ID      int64  `json:"id"`
+						Outcome string `json:"outcome"`
+					}
+					items := make([]jsonItem, 0, len(result.Items))
+					for _, item := range result.Items {
+						items = append(items, jsonItem{ID: item.ID, Outcome: retryOutcomeString(item.Outcome)})
+					}
+					return writeJSON(cmd, map[string]any{"items": items})
 				}
 
 				for _, item := range result.Items {
@@ -364,6 +434,22 @@ func newQueueStopCommand(ctx *commandContext) *cobra.Command {
 				result, err := api.StopIDs(cmd.Context(), ids)
 				if err != nil {
 					return err
+				}
+				if ctx.JSONMode() {
+					type jsonItem struct {
+						ID          int64  `json:"id"`
+						Outcome     string `json:"outcome"`
+						PriorStatus string `json:"prior_status,omitempty"`
+					}
+					items := make([]jsonItem, 0, len(result.Items))
+					for _, item := range result.Items {
+						items = append(items, jsonItem{
+							ID:          item.ID,
+							Outcome:     stopOutcomeString(item.Outcome),
+							PriorStatus: item.PriorStatus,
+						})
+					}
+					return writeJSON(cmd, map[string]any{"items": items})
 				}
 				for _, item := range result.Items {
 					switch item.Outcome {
@@ -550,6 +636,9 @@ func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if ctx.JSONMode() {
+					return writeJSON(cmd, health)
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Total: %d\nPending: %d\nProcessing: %d\nFailed: %d\nCompleted: %d\n",
 					health.Total,
 					health.Pending,
@@ -560,6 +649,36 @@ func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {
 				return nil
 			})
 		},
+	}
+}
+
+func retryOutcomeString(o queueRetryOutcome) string {
+	switch o {
+	case queueRetryOutcomeUpdated:
+		return "retried"
+	case queueRetryOutcomeNotFound:
+		return "not_found"
+	case queueRetryOutcomeNotFailed:
+		return "not_failed"
+	case queueRetryOutcomeEpisodeNotFound:
+		return "episode_not_found"
+	default:
+		return "unknown"
+	}
+}
+
+func stopOutcomeString(o queueStopOutcome) string {
+	switch o {
+	case queueStopOutcomeUpdated:
+		return "stopped"
+	case queueStopOutcomeNotFound:
+		return "not_found"
+	case queueStopOutcomeAlreadyCompleted:
+		return "already_completed"
+	case queueStopOutcomeAlreadyFailed:
+		return "already_failed"
+	default:
+		return "unknown"
 	}
 }
 

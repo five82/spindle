@@ -50,7 +50,7 @@ func newCacheStatsCommand(ctx *commandContext) *cobra.Command {
 		Long:  "Display detailed information about each cached rip, including size and last update time. Each entry is numbered for use with 'spindle cache remove'.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, warn, err := cacheManager(ctx)
-			if warn != "" {
+			if warn != "" && !ctx.JSONMode() {
 				fmt.Fprintln(cmd.OutOrStdout(), warn)
 			}
 			if err != nil || manager == nil {
@@ -60,6 +60,9 @@ func newCacheStatsCommand(ctx *commandContext) *cobra.Command {
 			stats, err := manager.Stats(cmd.Context())
 			if err != nil {
 				return err
+			}
+			if ctx.JSONMode() {
+				return writeJSON(cmd, stats)
 			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "Entries: %d\n", stats.Entries)
@@ -145,6 +148,13 @@ Example:
 				return fmt.Errorf("remove cache entry: %w", err)
 			}
 
+			if ctx.JSONMode() {
+				return writeJSON(cmd, map[string]any{
+					"removed":    true,
+					"entry":      entryNum,
+					"size_bytes": entry.SizeBytes,
+				})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed cache entry %d (%s)\n", entryNum, humanBytes(entry.SizeBytes))
 			return nil
 		},
@@ -158,7 +168,7 @@ func newCacheClearCommand(ctx *commandContext) *cobra.Command {
 		Long:  "Delete all cached rips to free disk space. The cache will be automatically repopulated as new discs are ripped.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			manager, warn, err := cacheManager(ctx)
-			if warn != "" {
+			if warn != "" && !ctx.JSONMode() {
 				fmt.Fprintln(cmd.OutOrStdout(), warn)
 			}
 			if err != nil || manager == nil {
@@ -171,6 +181,9 @@ func newCacheClearCommand(ctx *commandContext) *cobra.Command {
 			}
 
 			if stats.Entries == 0 {
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{"removed": 0, "freed_bytes": 0})
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), "Cache is already empty")
 				return nil
 			}
@@ -181,6 +194,9 @@ func newCacheClearCommand(ctx *commandContext) *cobra.Command {
 				}
 			}
 
+			if ctx.JSONMode() {
+				return writeJSON(cmd, map[string]any{"removed": stats.Entries, "freed_bytes": stats.TotalBytes})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d cache entries (%s freed)\n", stats.Entries, humanBytes(stats.TotalBytes))
 			return nil
 		},

@@ -22,20 +22,27 @@ type commandContext struct {
 	logLevel   *string
 	verbose    *bool
 	diagnostic *bool
+	jsonOutput *bool
 
 	configOnce sync.Once
 	config     *config.Config
 	configErr  error
 }
 
-func newCommandContext(socketFlag, configFlag, logLevel *string, verbose, diagnostic *bool) *commandContext {
+func newCommandContext(socketFlag, configFlag, logLevel *string, verbose, diagnostic, jsonOutput *bool) *commandContext {
 	return &commandContext{
 		socketFlag: socketFlag,
 		configFlag: configFlag,
 		logLevel:   logLevel,
 		verbose:    verbose,
 		diagnostic: diagnostic,
+		jsonOutput: jsonOutput,
 	}
+}
+
+// JSONMode returns true when the user passed --json.
+func (c *commandContext) JSONMode() bool {
+	return c != nil && c.jsonOutput != nil && *c.jsonOutput
 }
 
 func (c *commandContext) ensureConfig() (*config.Config, error) {

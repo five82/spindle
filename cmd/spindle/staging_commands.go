@@ -35,6 +35,13 @@ func newStagingListCommand(ctx *commandContext) *cobra.Command {
 
 			stagingDir := strings.TrimSpace(cfg.Paths.StagingDir)
 			if stagingDir == "" {
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{
+						"staging_dir":      "",
+						"directories":      []any{},
+						"total_size_bytes": 0,
+					})
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), "Staging directory not configured")
 				return nil
 			}
@@ -42,6 +49,21 @@ func newStagingListCommand(ctx *commandContext) *cobra.Command {
 			dirs, err := staging.ListDirectories(stagingDir)
 			if err != nil {
 				return fmt.Errorf("list staging directories: %w", err)
+			}
+
+			if ctx.JSONMode() {
+				if dirs == nil {
+					dirs = []staging.DirInfo{}
+				}
+				var totalSize int64
+				for _, dir := range dirs {
+					totalSize += dir.Size
+				}
+				return writeJSON(cmd, map[string]any{
+					"staging_dir":      stagingDir,
+					"directories":      dirs,
+					"total_size_bytes": totalSize,
+				})
 			}
 
 			if len(dirs) == 0 {
@@ -94,8 +116,33 @@ Use --all to remove all staging directories regardless of queue status.`,
 
 			stagingDir := strings.TrimSpace(cfg.Paths.StagingDir)
 			if stagingDir == "" {
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{"removed": 0, "errors": []any{}})
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), "Staging directory not configured")
 				return nil
+			}
+
+			if ctx.JSONMode() {
+				if cleanAll {
+					result := staging.CleanStale(cmd.Context(), stagingDir, 0, nil)
+					return writeStagingCleanJSON(cmd, result)
+				}
+				return ctx.withQueueStore(func(api queueStoreAPI) error {
+					items, err := api.List(cmd.Context(), nil)
+					if err != nil {
+						return fmt.Errorf("list queue items: %w", err)
+					}
+					activeFingerprints := make(map[string]struct{})
+					for _, item := range items {
+						fp := strings.ToUpper(strings.TrimSpace(item.DiscFingerprint))
+						if fp != "" {
+							activeFingerprints[fp] = struct{}{}
+						}
+					}
+					result := staging.CleanOrphaned(cmd.Context(), stagingDir, activeFingerprints, nil)
+					return writeStagingCleanJSON(cmd, result)
+				})
 			}
 
 			out := cmd.OutOrStdout()
@@ -210,6 +257,17 @@ func formatDuration(d time.Duration) string {
 	}
 	days := int(d.Hours() / 24)
 	return fmt.Sprintf("%dd", days)
+}
+
+func writeStagingCleanJSON(cmd *cobra.Command, result staging.CleanStaleResult) error {
+	errs := make([]string, 0, len(result.Errors))
+	for _, e := range result.Errors {
+		errs = append(errs, fmt.Sprintf("%s: %v", e.Path, e.Error))
+	}
+	return writeJSON(cmd, map[string]any{
+		"removed": len(result.Removed),
+		"errors":  errs,
+	})
 }
 
 func formatSize(bytes int64) string {

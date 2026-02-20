@@ -20,6 +20,9 @@ func newQueueHealthCommand(ctx *commandContext) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if ctx.JSONMode() {
+					return writeJSON(cmd, resp)
+				}
 				out := cmd.OutOrStdout()
 				fmt.Fprintf(out, "Database path: %s\n", resp.DBPath)
 				fmt.Fprintf(out, "Database exists: %s\n", yesNo(resp.DatabaseExists))

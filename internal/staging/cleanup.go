@@ -188,10 +188,10 @@ func ListDirectories(stagingDir string) ([]DirInfo, error) {
 
 // DirInfo contains metadata about a staging directory.
 type DirInfo struct {
-	Name    string
-	Path    string
-	ModTime time.Time
-	Size    int64
+	Name    string    `json:"name"`
+	Path    string    `json:"path"`
+	ModTime time.Time `json:"mod_time"`
+	Size    int64     `json:"size_bytes"`
 }
 
 // dirSize calculates the total size of a directory recursively.

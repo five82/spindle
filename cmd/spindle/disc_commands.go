@@ -72,6 +72,12 @@ If the daemon is not running, this command exits silently.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := ctx.dialClient()
 			if err != nil {
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{
+						"handled": false,
+						"message": "spindle daemon not running; disc detection skipped",
+					})
+				}
 				fmt.Fprintln(cmd.ErrOrStderr(), "spindle daemon not running; disc detection skipped")
 				return nil
 			}
@@ -79,8 +85,18 @@ If the daemon is not running, this command exits silently.`,
 
 			resp, err := client.DiscDetect()
 			if err != nil {
+				if ctx.JSONMode() {
+					return writeJSON(cmd, map[string]any{
+						"handled": false,
+						"message": fmt.Sprintf("disc detection failed: %v", err),
+					})
+				}
 				fmt.Fprintf(cmd.ErrOrStderr(), "disc detection failed: %v\n", err)
 				return nil
+			}
+
+			if ctx.JSONMode() {
+				return writeJSON(cmd, resp)
 			}
 
 			if resp.Handled {
