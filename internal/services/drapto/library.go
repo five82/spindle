@@ -11,11 +11,13 @@ import (
 
 // Library implements Client using the Drapto Go library directly,
 // bypassing the CLI shell-out.
-type Library struct{}
+type Library struct {
+	svtAv1Preset uint8
+}
 
-// NewLibrary constructs a Library client.
-func NewLibrary() *Library {
-	return &Library{}
+// NewLibrary constructs a Library client with the given SVT-AV1 preset (0-13).
+func NewLibrary(svtAv1Preset int) *Library {
+	return &Library{svtAv1Preset: uint8(svtAv1Preset)}
 }
 
 // Encode encodes a video file using the Drapto library.
@@ -30,6 +32,7 @@ func (l *Library) Encode(ctx context.Context, inputPath, outputDir string, opts 
 	// Build encoder options
 	encoderOpts := []draptolib.Option{
 		draptolib.WithResponsive(),
+		draptolib.WithSVTAV1Preset(l.svtAv1Preset),
 	}
 
 	// Create encoder

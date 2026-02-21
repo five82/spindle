@@ -32,6 +32,9 @@ func (c *Config) Validate() error {
 	if err := c.validateNotifications(); err != nil {
 		return err
 	}
+	if err := c.validateEncoding(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -138,6 +141,13 @@ func (c *Config) validateNotifications() error {
 	}
 	if c.Notifications.DedupWindowSeconds < 0 {
 		return errors.New("notifications.dedup_window_seconds must be >= 0")
+	}
+	return nil
+}
+
+func (c *Config) validateEncoding() error {
+	if c.Encoding.SVTAv1Preset < 0 || c.Encoding.SVTAv1Preset > 13 {
+		return fmt.Errorf("encoding.svt_av1_preset must be 0-13, got %d", c.Encoding.SVTAv1Preset)
 	}
 	return nil
 }

@@ -139,6 +139,11 @@ type Validation struct {
 	MinVoteCountExactMatch int `toml:"min_vote_count_exact_match"`
 }
 
+// Encoding contains configuration for the Drapto AV1 encoding stage.
+type Encoding struct {
+	SVTAv1Preset int `toml:"svt_av1_preset"`
+}
+
 // Commentary contains configuration for commentary track detection.
 type Commentary struct {
 	// Enabled controls whether commentary detection runs during audio analysis.
@@ -170,6 +175,7 @@ type Commentary struct {
 //   - RipCache: cached raw rips for re-encoding
 //   - DiscIDCache: disc ID to TMDB ID mapping cache
 //   - MakeMKV: disc ripping settings and keydb
+//   - Encoding: Drapto AV1 encoding settings
 //   - LLM: shared LLM connection settings for features that need AI
 //   - Commentary: commentary track detection via audio analysis
 //   - Workflow: daemon polling intervals and timeouts
@@ -185,6 +191,7 @@ type Config struct {
 	RipCache      RipCache      `toml:"rip_cache"`
 	DiscIDCache   DiscIDCache   `toml:"disc_id_cache"`
 	MakeMKV       MakeMKV       `toml:"makemkv"`
+	Encoding      Encoding      `toml:"encoding"`
 	LLM           LLM           `toml:"llm"`
 	Commentary    Commentary    `toml:"commentary"`
 	Workflow      Workflow      `toml:"workflow"`

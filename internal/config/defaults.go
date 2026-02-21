@@ -35,6 +35,9 @@ const (
 	defaultLLMTitle                  = "Spindle"
 	defaultLLMTimeoutSeconds         = 60
 
+	// Encoding defaults
+	defaultSVTAv1Preset = 6
+
 	// Validation defaults
 	defaultEnforceDraptoValidation = true
 	defaultMinVoteCountExactMatch  = 5
@@ -96,6 +99,9 @@ func Default() Config {
 		},
 		DiscIDCache: DiscIDCache{
 			Path: defaultDiscIDCachePath,
+		},
+		Encoding: Encoding{
+			SVTAv1Preset: defaultSVTAv1Preset,
 		},
 		MakeMKV: MakeMKV{
 			OpticalDrive:         defaultOpticalDrive,

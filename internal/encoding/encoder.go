@@ -39,7 +39,7 @@ type Encoder struct {
 
 // NewEncoder constructs the encoding handler.
 func NewEncoder(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Encoder {
-	client := drapto.NewLibrary()
+	client := drapto.NewLibrary(cfg.Encoding.SVTAv1Preset)
 	return NewEncoderWithDependencies(cfg, store, logger, client, notifier)
 }
 

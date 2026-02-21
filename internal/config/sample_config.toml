@@ -109,6 +109,13 @@ keydb_download_url = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
 keydb_download_timeout = 1500                        # Download timeout in seconds
 
 # ============================================================================
+# ENCODING (Drapto AV1 encoding)
+# ============================================================================
+
+[encoding]
+svt_av1_preset = 6                                      # SVT-AV1 speed preset (0-13, lower = slower/better quality)
+
+# ============================================================================
 # LLM (shared settings for AI-powered features)
 # ============================================================================
 
