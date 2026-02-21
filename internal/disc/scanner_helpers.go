@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -88,6 +89,40 @@ func extractDevicePath(device string) string {
 	return trimmed
 }
 
+// extractWarnings extracts hardware and disc error lines from MakeMKV output.
+// MakeMKV emits bare error lines (not MSG-prefixed) for SCSI errors, read
+// failures, and other hardware issues. These are critical diagnostic signals
+// that indicate disc damage or drive problems.
+func extractWarnings(data []byte) []string {
+	if len(data) == 0 {
+		return nil
+	}
+	var warnings []string
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		// Bare error lines: Error 'Scsi error - MEDIUM ERROR:L-EC UNCORRECTABLE ERROR' ...
+		if strings.HasPrefix(line, "Error ") {
+			warnings = append(warnings, line)
+			continue
+		}
+		// MSG:2003 = read errors (e.g. L-EC uncorrectable, hardware errors)
+		if strings.HasPrefix(line, "MSG:") {
+			code := parseMSGCode(line)
+			if code == 2003 || code == 5003 || code == 5010 {
+				text := parseMSGText(line)
+				if text != "" {
+					warnings = append(warnings, text)
+				}
+			}
+		}
+	}
+	return warnings
+}
+
 func extractMakemkvErrorMessage(stdout, stderr []byte) string {
 	joined := make([]string, 0, 2)
 	if len(stderr) > 0 {
@@ -146,4 +181,60 @@ func extractMakemkvErrorMessage(stdout, stderr []byte) string {
 	}
 
 	return combined
+}
+
+// parseMSGCode extracts the numeric code from a MakeMKV MSG line.
+func parseMSGCode(line string) int {
+	if !strings.HasPrefix(line, "MSG:") {
+		return -1
+	}
+	payload := strings.TrimPrefix(line, "MSG:")
+	comma := strings.IndexByte(payload, ',')
+	if comma < 0 {
+		return -1
+	}
+	code, err := strconv.Atoi(strings.TrimSpace(payload[:comma]))
+	if err != nil {
+		return -1
+	}
+	return code
+}
+
+// parseMSGText extracts the human-readable message from a MakeMKV MSG line.
+func parseMSGText(line string) string {
+	if !strings.HasPrefix(line, "MSG:") {
+		return ""
+	}
+	payload := strings.TrimPrefix(line, "MSG:")
+	fieldIdx := 0
+	inQuote := false
+	start := 0
+	for i := 0; i < len(payload); i++ {
+		switch payload[i] {
+		case '"':
+			inQuote = !inQuote
+		case ',':
+			if !inQuote {
+				fieldIdx++
+				if fieldIdx == 3 {
+					start = i + 1
+				}
+				if fieldIdx == 4 {
+					return trimMSGField(payload[start:i])
+				}
+			}
+		}
+	}
+	if fieldIdx >= 3 {
+		return trimMSGField(payload[start:])
+	}
+	return ""
+}
+
+func trimMSGField(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	return s
 }

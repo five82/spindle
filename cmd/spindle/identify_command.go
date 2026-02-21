@@ -116,8 +116,9 @@ Examples:
 				fmt.Fprintf(cmd.OutOrStdout(), "\n")
 			}
 
-			// Set up context with timeout
-			identifyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			// Set up context with timeout: info scan + overhead for fingerprint/TMDB
+			overallTimeout := time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second + 5*time.Minute
+			identifyCtx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 			defer cancel()
 
 			// Pre-compute fingerprint so validation can pass even if MakeMKV omits it

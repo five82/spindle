@@ -39,7 +39,7 @@ type ScanResult struct {
 	Fingerprint string        `json:"fingerprint"`
 	Titles      []Title       `json:"titles"`
 	BDInfo      *BDInfoResult `json:"bd_info,omitempty"`
-	RawOutput   string
+	Warnings    []string      `json:"warnings,omitempty"`
 }
 
 // Executor abstracts command execution for the scanner.
@@ -68,7 +68,7 @@ type commandExecutor struct{}
 
 func (commandExecutor) Run(ctx context.Context, binary string, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec
-	return cmd.Output()
+	return cmd.CombinedOutput()
 }
 
 // Scanner wraps MakeMKV info commands to gather disc metadata.
@@ -126,7 +126,7 @@ func (s *Scanner) Scan(ctx context.Context, device string) (*ScanResult, error) 
 	if err != nil {
 		return nil, err
 	}
-	result.RawOutput = string(output)
+	result.Warnings = extractWarnings(output)
 
 	if err := s.waitSettleDelay(ctx); err != nil {
 		return nil, err

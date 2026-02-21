@@ -188,6 +188,9 @@ func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, des
 			messages = append(messages, line)
 			messagesMu.Unlock()
 			handler.handleMSG(line)
+		} else if strings.HasPrefix(line, "Error ") {
+			// Bare error lines from MakeMKV (e.g. SCSI errors, L-EC uncorrectable)
+			handler.handleBareError(line)
 		}
 		if progress == nil {
 			return
@@ -196,9 +199,10 @@ func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, des
 			progress(update)
 		}
 	}); err != nil {
-		// Log captured messages on failure
+		// Log captured messages on failure at WARN so they're visible
 		if c.logger != nil && len(messages) > 0 {
-			c.logger.Debug("makemkv messages before failure",
+			c.logger.Warn("makemkv messages before failure",
+				slog.String("event_type", "makemkv_failure_diagnostics"),
 				slog.Int("message_count", len(messages)),
 				slog.Any("messages", messages),
 			)
@@ -214,7 +218,8 @@ func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, des
 	// (e.g., MakeMKV exits 0 but saved 0 titles)
 	if handler.fatalErr != nil {
 		if c.logger != nil && len(messages) > 0 {
-			c.logger.Debug("makemkv messages (fatal condition detected)",
+			c.logger.Warn("makemkv messages (fatal condition detected)",
+				slog.String("event_type", "makemkv_fatal_diagnostics"),
 				slog.Int("message_count", len(messages)),
 				slog.Any("messages", messages),
 			)
@@ -336,7 +341,8 @@ func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, des
 	if _, err := os.Stat(destPath); errors.Is(err, os.ErrNotExist) {
 		// Enhanced error with diagnostic details
 		if c.logger != nil {
-			c.logger.Debug("output validation failed",
+			c.logger.Warn("makemkv output validation failed",
+				slog.String("event_type", "makemkv_output_missing"),
 				slog.String("expected_path", destPath),
 				slog.Int("candidates_found", len(candidates)),
 				slog.Int("message_count", len(messages)),
@@ -347,7 +353,7 @@ func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, des
 				if len(lastMessages) > 10 {
 					lastMessages = lastMessages[len(lastMessages)-10:]
 				}
-				c.logger.Debug("recent makemkv messages", slog.Any("messages", lastMessages))
+				c.logger.Warn("recent makemkv messages", slog.String("event_type", "makemkv_output_diagnostics"), slog.Any("messages", lastMessages))
 			}
 		}
 		// Build informative error based on what we found

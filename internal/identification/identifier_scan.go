@@ -2,6 +2,7 @@ package identification
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -33,8 +34,19 @@ func (i *Identifier) scanDisc(ctx context.Context) (*disc.ScanResult, error) {
 			nil,
 		)
 	}
-	result, err := i.scanner.Scan(ctx, device)
+	scanCtx := ctx
+	if i.cfg.MakeMKV.InfoTimeout > 0 {
+		var cancel context.CancelFunc
+		scanCtx, cancel = context.WithTimeout(ctx, time.Duration(i.cfg.MakeMKV.InfoTimeout)*time.Second)
+		defer cancel()
+	}
+
+	result, err := i.scanner.Scan(scanCtx, device)
 	if err != nil {
+		if scanCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+			return nil, services.Wrap(services.ErrExternalTool, "identification", "makemkv scan",
+				fmt.Sprintf("MakeMKV disc info scan timed out after %ds; disc may have unreadable sectors", i.cfg.MakeMKV.InfoTimeout), err)
+		}
 		return nil, services.Wrap(services.ErrExternalTool, "identification", "makemkv scan", "MakeMKV disc scan failed", err)
 	}
 	return result, nil
@@ -55,6 +67,23 @@ func (i *Identifier) scanDiscAndCaptureFingerprint(ctx context.Context, item *qu
 	scanResult, err := i.scanDisc(ctx)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	// Surface disc/hardware warnings detected during scan
+	if scanResult != nil && len(scanResult.Warnings) > 0 {
+		for _, w := range scanResult.Warnings {
+			logger.Warn("disc error during scan",
+				logging.String("event_type", "disc_scan_warning"),
+				logging.String("error_hint", "disc may have physical damage or drive issue"),
+				logging.String("impact", "scan may produce incomplete results"),
+				logging.String("warning", w),
+			)
+		}
+		logger.Warn("disc scan completed with errors",
+			logging.String("event_type", "disc_scan_errors_summary"),
+			logging.Int("warning_count", len(scanResult.Warnings)),
+			logging.String("error_hint", "check disc for scratches or try cleaning"),
+		)
 	}
 
 	titleCount := 0

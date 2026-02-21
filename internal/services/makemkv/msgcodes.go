@@ -31,6 +31,7 @@ type msgHandler struct {
 	failedCount int
 	fatalErr    error
 	readErrors  int
+	bareErrors  int
 }
 
 // handleMSG dispatches a single MSG line to the appropriate handler based on
@@ -100,6 +101,32 @@ func (h *msgHandler) handleReadError(text string) {
 			slog.String("classification", classification),
 			slog.Int("read_error_count", h.readErrors),
 			slog.String("msg_text", text),
+		)
+	}
+}
+
+func (h *msgHandler) handleBareError(line string) {
+	h.bareErrors++
+	upper := strings.ToUpper(line)
+	var classification string
+	switch {
+	case strings.Contains(upper, "L-EC UNCORRECTABLE"):
+		classification = "uncorrectable_read"
+	case strings.Contains(upper, "HARDWARE ERROR"):
+		classification = "hardware_error"
+	case strings.Contains(upper, "MEDIUM ERROR"):
+		classification = "medium_error"
+	default:
+		classification = "disc_error"
+	}
+	if h.logger != nil {
+		h.logger.Warn("makemkv disc error",
+			slog.String("event_type", "makemkv_disc_error"),
+			slog.String("error_hint", "disc may have physical damage or drive issue"),
+			slog.String("impact", "output may be corrupted or incomplete"),
+			slog.String("classification", classification),
+			slog.Int("disc_error_count", h.bareErrors),
+			slog.String("detail", line),
 		)
 	}
 }
