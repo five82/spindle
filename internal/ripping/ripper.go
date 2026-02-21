@@ -290,10 +290,14 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				}
 			} else {
 				cacheStatus = "invalid"
-				logger.Info("rip cache decision",
+				logger.Warn("rip cache invalidated",
+					logging.String(logging.FieldEventType, "rip_cache_invalidated"),
+					logging.String(logging.FieldErrorHint, "cached rip failed validation; will re-rip from disc"),
+					logging.String(logging.FieldImpact, "rip cache entry removed; MakeMKV rip will proceed"),
 					logging.String(logging.FieldDecisionType, "rip_cache"),
 					logging.String("decision_result", "invalid"),
 					logging.String("decision_reason", "cached_rip_failed_validation"),
+					logging.String("rip_dir", destDir),
 					logging.Error(err),
 				)
 				_ = os.RemoveAll(destDir)
@@ -403,24 +407,27 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		path, err := r.client.Rip(ctx, r.cfg.MakeMKV.OpticalDrive, item.DiscTitle, destDir, titleIDs, progressCB)
 		makemkvDuration = time.Since(makemkvStart)
 		if err != nil {
+			isTimeout := strings.Contains(err.Error(), "timed out")
 			errorAttrs := []logging.Attr{
 				logging.Error(err),
 				logging.Duration("makemkv_duration", makemkvDuration),
 				logging.String(logging.FieldEventType, "makemkv_rip_failed"),
-				logging.String(logging.FieldErrorHint, "check disc readability and MakeMKV logs"),
 				logging.Int("title_count", len(titleIDs)),
+			}
+			marker := services.ErrExternalTool
+			hint := "MakeMKV rip failed; check MakeMKV installation and disc readability"
+			if isTimeout {
+				marker = services.ErrTimeout
+				hint = fmt.Sprintf("MakeMKV rip timed out; consider increasing rip_timeout (currently %ds)", r.cfg.MakeMKV.RipTimeout)
+				errorAttrs = append(errorAttrs, logging.String(logging.FieldErrorHint, hint))
+			} else {
+				errorAttrs = append(errorAttrs, logging.String(logging.FieldErrorHint, "check disc readability and MakeMKV logs"))
 			}
 			for _, id := range titleIDs {
 				errorAttrs = append(errorAttrs, logging.String(fmt.Sprintf("title_%d", id), fmt.Sprintf("%d", id)))
 			}
 			logger.Error("makemkv rip failed", logging.Args(errorAttrs...)...)
-			return services.Wrap(
-				services.ErrExternalTool,
-				"ripping",
-				"makemkv rip",
-				"MakeMKV rip failed; check MakeMKV installation and disc readability",
-				err,
-			)
+			return services.Wrap(marker, "ripping", "makemkv rip", hint, err)
 		}
 		target = path
 		// Get ripped file size for resource tracking
@@ -434,6 +441,18 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			logging.Int64("ripped_size_bytes", rippedSize),
 			logging.String("ripped_file", target),
 		)
+	}
+
+	setPostRipProgress := func(message string) {
+		copy := *item
+		copy.ProgressStage = "Ripping"
+		copy.ProgressMessage = message
+		copy.ProgressPercent = 100
+		if updateErr := r.store.UpdateProgress(ctx, &copy); updateErr != nil {
+			logger.Debug("progress update failed", logging.Error(updateErr))
+		} else {
+			*item = copy
+		}
 	}
 
 	if target == "" {
@@ -467,8 +486,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if err := copyPlaceholder(sourcePath, target); err != nil {
 			return services.Wrap(services.ErrTransient, "ripping", "stage source", "Failed to copy source into staging", err)
 		}
-		logger.Debug(
-			"copied source into rip staging",
+		logger.Info(
+			"rip source fallback",
+			logging.String(logging.FieldDecisionType, "rip_source"),
+			logging.String("decision_result", "fallback_copy"),
+			logging.String("decision_reason", "no_makemkv_output_using_source_path"),
 			logging.String("source_file", sourcePath),
 			logging.String("ripped_file", target),
 		)
@@ -482,6 +504,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 	specDirty := false
 	if hasEpisodes {
+		setPostRipProgress("Mapping episode files")
 		assignResult := assignEpisodeAssets(&env, destDir, logger)
 		if assignResult.Assigned == 0 {
 			logger.Error("no episode assets mapped after ripping",
@@ -521,6 +544,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 
 	// Validate ripped files before any processing (catches placeholder/corrupted files)
+	setPostRipProgress("Validating ripped files")
 	visited := make(map[string]struct{}, len(validationTargets))
 	for _, path := range validationTargets {
 		clean := strings.TrimSpace(path)
@@ -555,6 +579,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 
 	if useCache {
+		setPostRipProgress("Registering rip cache")
 		if err := r.cache.Register(ctx, item, destDir); err != nil {
 			return services.Wrap(
 				services.ErrConfiguration,

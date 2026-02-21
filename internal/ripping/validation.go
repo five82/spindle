@@ -24,7 +24,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 	logger := logging.WithContext(ctx, r.logger)
 	clean := strings.TrimSpace(path)
 	if clean == "" {
-		logger.Error("ripping validation failed", logging.String("reason", "empty path"))
+		logger.Error("ripping validation failed", logging.String("reason", "empty path"), logging.String(logging.FieldEventType, "rip_validation_failed"))
 		return services.Wrap(
 			services.ErrValidation,
 			"ripping",
@@ -35,7 +35,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 	}
 	info, err := os.Stat(clean)
 	if err != nil {
-		logger.Error("ripping validation failed", logging.String("reason", "stat failure"), logging.Error(err))
+		logger.Error("ripping validation failed", logging.String("reason", "stat failure"), logging.String(logging.FieldEventType, "rip_validation_failed"), logging.String("ripped_file", clean), logging.Error(err))
 		return services.Wrap(
 			services.ErrValidation,
 			"ripping",
@@ -45,7 +45,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 		)
 	}
 	if info.IsDir() {
-		logger.Error("ripping validation failed", logging.String("reason", "path is directory"), logging.String("ripped_file", clean))
+		logger.Error("ripping validation failed", logging.String("reason", "path is directory"), logging.String(logging.FieldEventType, "rip_validation_failed"), logging.String("ripped_file", clean))
 		return services.Wrap(
 			services.ErrValidation,
 			"ripping",
@@ -58,6 +58,8 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 		logger.Error(
 			"ripping validation failed",
 			logging.String("reason", "file too small"),
+			logging.String(logging.FieldEventType, "rip_validation_failed"),
+			logging.String("ripped_file", clean),
 			logging.Int64("size_bytes", info.Size()),
 		)
 		return services.Wrap(
@@ -75,7 +77,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 	}
 	probe, err := probeVideo(ctx, binary, clean)
 	if err != nil {
-		logger.Error("ripping validation failed", logging.String("reason", "ffprobe"), logging.Error(err))
+		logger.Error("ripping validation failed", logging.String("reason", "ffprobe"), logging.String(logging.FieldEventType, "rip_validation_failed"), logging.String("ripped_file", clean), logging.Error(err))
 		return services.Wrap(
 			services.ErrExternalTool,
 			"ripping",
@@ -85,7 +87,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 		)
 	}
 	if probe.VideoStreamCount() == 0 {
-		logger.Error("ripping validation failed", logging.String("reason", "no video stream"))
+		logger.Error("ripping validation failed", logging.String("reason", "no video stream"), logging.String(logging.FieldEventType, "rip_validation_failed"), logging.String("ripped_file", clean))
 		return services.Wrap(
 			services.ErrValidation,
 			"ripping",
@@ -95,7 +97,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 		)
 	}
 	if probe.AudioStreamCount() == 0 {
-		logger.Error("ripping validation failed", logging.String("reason", "no audio stream"))
+		logger.Error("ripping validation failed", logging.String("reason", "no audio stream"), logging.String(logging.FieldEventType, "rip_validation_failed"), logging.String("ripped_file", clean))
 		return services.Wrap(
 			services.ErrValidation,
 			"ripping",
@@ -106,7 +108,7 @@ func (r *Ripper) validateRippedArtifact(ctx context.Context, item *queue.Item, p
 	}
 	duration := probe.DurationSeconds()
 	if duration <= 0 {
-		logger.Error("ripping validation failed", logging.String("reason", "invalid duration"))
+		logger.Error("ripping validation failed", logging.String("reason", "invalid duration"), logging.String(logging.FieldEventType, "rip_validation_failed"), logging.String("ripped_file", clean))
 		return services.Wrap(
 			services.ErrValidation,
 			"ripping",

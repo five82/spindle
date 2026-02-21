@@ -119,13 +119,23 @@ func (c *Client) Rip(ctx context.Context, device, discTitle, destDir string, tit
 	deviceArg := normalizeDeviceArg(device)
 
 	if len(titleIDs) == 0 {
-		return c.executeRip(ripCtx, deviceArg, discTitle, destDir, nil, false, progress)
+		path, err := c.executeRip(ripCtx, deviceArg, discTitle, destDir, nil, false, progress)
+		if err != nil {
+			if ripCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+				return "", fmt.Errorf("makemkv rip timed out after %s: %w", c.ripTimeout, err)
+			}
+			return "", err
+		}
+		return path, nil
 	}
 
 	var lastPath string
 	for _, id := range titleIDs {
 		path, err := c.executeRip(ripCtx, deviceArg, discTitle, destDir, []int{id}, multiTitle, progress)
 		if err != nil {
+			if ripCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+				return "", fmt.Errorf("makemkv rip timed out after %s (title %d): %w", c.ripTimeout, id, err)
+			}
 			return "", fmt.Errorf("makemkv rip title %d: %w", id, err)
 		}
 		lastPath = path
@@ -212,6 +222,18 @@ func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, des
 			return "", fmt.Errorf("makemkv rip: %w", handler.fatalErr)
 		}
 		return "", fmt.Errorf("makemkv rip: %w", err)
+	}
+
+	// Log disc error summary when rip completed with errors
+	if handler.readErrors+handler.bareErrors > 0 && c.logger != nil {
+		c.logger.Warn("makemkv rip completed with disc errors",
+			slog.String("event_type", "makemkv_rip_errors_summary"),
+			slog.String("error_hint", "disc may have physical damage; verify output quality"),
+			slog.String("impact", "ripped files may contain corrupted segments"),
+			slog.Int("read_errors", handler.readErrors),
+			slog.Int("disc_errors", handler.bareErrors),
+			slog.Int("total_errors", handler.readErrors+handler.bareErrors),
+		)
 	}
 
 	// Check for handler-detected fatal errors even when exec.Run succeeds
