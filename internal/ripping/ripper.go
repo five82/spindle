@@ -186,6 +186,13 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if formattedMsg := formatRipProgressMessage(update); formattedMsg != "" {
 			update.Message = formattedMsg
 		}
+		if stageChanged {
+			logger.Info("makemkv phase change",
+				logging.String(logging.FieldEventType, "makemkv_phase_change"),
+				logging.String(logging.FieldProgressStage, update.Stage),
+				logging.String(logging.FieldProgressMessage, update.Message),
+			)
+		}
 		r.applyProgress(ctx, item, update, progressSampler)
 		if percentReached {
 			persistRipSpecIfNeeded()
@@ -344,13 +351,15 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 		titleIDs = r.selectTitleIDs(item, logger)
 		launchAttrs := []logging.Attr{
+			logging.String(logging.FieldEventType, "makemkv_rip_started"),
 			logging.String("destination", destDir),
 			logging.Int("title_count", len(titleIDs)),
+			logging.Duration("rip_timeout", time.Duration(r.cfg.MakeMKV.RipTimeout)*time.Second),
 		}
 		for _, id := range titleIDs {
 			launchAttrs = append(launchAttrs, logging.String(fmt.Sprintf("title_%d", id), fmt.Sprintf("%d", id)))
 		}
-		logger.Debug("launching makemkv rip", logging.Args(launchAttrs...)...)
+		logger.Info("launching makemkv rip", logging.Args(launchAttrs...)...)
 
 		if settleDelay := time.Duration(r.cfg.MakeMKV.DiscSettleDelay) * time.Second; settleDelay > 0 {
 			logger.Info("disc settle delay before rip",
@@ -395,9 +404,12 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		if info, statErr := os.Stat(target); statErr == nil {
 			rippedSize = info.Size()
 		}
-		logger.Debug("makemkv rip finished",
-			logging.Duration("duration", makemkvDuration),
-			logging.Int64("size_bytes", rippedSize))
+		logger.Info("makemkv rip completed",
+			logging.String(logging.FieldEventType, "makemkv_rip_completed"),
+			logging.Duration("makemkv_duration", makemkvDuration),
+			logging.Int64("ripped_size_bytes", rippedSize),
+			logging.String("ripped_file", target),
+		)
 	}
 
 	if target == "" {

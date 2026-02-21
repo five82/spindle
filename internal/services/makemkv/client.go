@@ -165,7 +165,19 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 			messages = append(messages, line)
 			messagesMu.Unlock()
 			if c.logger != nil {
-				c.logger.Debug("makemkv message", slog.String("msg", line))
+				code := parseMSGCode(line)
+				text := parseMSGText(line)
+				if code >= 5000 {
+					c.logger.Warn("makemkv disc error",
+						slog.String("event_type", "makemkv_disc_error"),
+						slog.String("error_hint", "disc may have read errors; check physical media"),
+						slog.String("impact", "rip may produce corrupted or incomplete output"),
+						slog.Int("msg_code", code),
+						slog.String("msg_text", text),
+					)
+				} else {
+					c.logger.Debug("makemkv message", slog.String("msg", line))
+				}
 			}
 		}
 		if progress == nil {
@@ -233,16 +245,20 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 
 		// Log selection decision
 		if c.logger != nil && best != nil {
-			expectedSuffix := ""
+			reason := "largest_file"
 			if len(titleIDs) == 1 {
-				expectedSuffix = fmt.Sprintf("_t%02d.mkv", titleIDs[0])
+				suffix := strings.ToLower(fmt.Sprintf("_t%02d.mkv", titleIDs[0]))
+				if strings.HasSuffix(strings.ToLower(best.path), suffix) {
+					reason = "title_id_match"
+				}
 			}
-			c.logger.Debug("selected output file",
-				slog.String("selected", filepath.Base(best.path)),
-				slog.Int64("size_bytes", best.size),
-				slog.String("expected_suffix", expectedSuffix),
-				slog.String("target_path", destPath),
-				slog.Bool("will_rename", !skipRename && len(titleIDs) <= 1 && best.path != destPath),
+			c.logger.Info("rip output file selection",
+				slog.String("decision_type", "rip_output_selection"),
+				slog.String("decision_result", "selected"),
+				slog.String("decision_reason", reason),
+				slog.String("ripped_file", filepath.Base(best.path)),
+				slog.Int64("ripped_size_bytes", best.size),
+				slog.Int("candidate_count", len(candidates)),
 			)
 		}
 
@@ -490,6 +506,70 @@ func normalizeTitleIDs(ids []int) []int {
 	}
 	sort.Ints(uniq)
 	return uniq
+}
+
+// parseMSGCode extracts the numeric code from a MakeMKV MSG line.
+// Format: MSG:code,flags,count,"message","format",...
+// Returns -1 if the line is not a valid MSG line.
+func parseMSGCode(line string) int {
+	if !strings.HasPrefix(line, "MSG:") {
+		return -1
+	}
+	payload := strings.TrimPrefix(line, "MSG:")
+	comma := strings.IndexByte(payload, ',')
+	if comma < 0 {
+		return -1
+	}
+	code, err := strconv.Atoi(strings.TrimSpace(payload[:comma]))
+	if err != nil {
+		return -1
+	}
+	return code
+}
+
+// parseMSGText extracts the human-readable message from a MakeMKV MSG line.
+// The message is the 4th field (index 3), typically enclosed in quotes.
+// Returns an empty string if the line is malformed.
+func parseMSGText(line string) string {
+	if !strings.HasPrefix(line, "MSG:") {
+		return ""
+	}
+	payload := strings.TrimPrefix(line, "MSG:")
+	// Find the 4th comma-separated field (index 3).
+	// Fields may contain quoted strings with commas inside, so we track quotes.
+	fieldIdx := 0
+	inQuote := false
+	start := 0
+	for i := 0; i < len(payload); i++ {
+		switch payload[i] {
+		case '"':
+			inQuote = !inQuote
+		case ',':
+			if !inQuote {
+				fieldIdx++
+				if fieldIdx == 3 {
+					start = i + 1
+				}
+				if fieldIdx == 4 {
+					return trimMSGField(payload[start:i])
+				}
+			}
+		}
+	}
+	// If we reached end of string while in the 4th field
+	if fieldIdx >= 3 {
+		return trimMSGField(payload[start:])
+	}
+	return ""
+}
+
+// trimMSGField strips surrounding whitespace and quotes from a MSG field value.
+func trimMSGField(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	return s
 }
 
 func parseProgress(line string) (ProgressUpdate, bool) {

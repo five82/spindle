@@ -91,6 +91,7 @@ var infoHighlightKeys = []string{
 	"stage_duration",
 	"scan_duration",
 	"makemkv_duration",
+	"rip_timeout",
 	"tmdb_search_duration",
 	"total_ripped_bytes",
 	"ripped_size_bytes",
@@ -240,6 +241,7 @@ func isDurationKey(key string) bool {
 	return strings.HasSuffix(key, "_duration") ||
 		strings.HasSuffix(key, "_elapsed") ||
 		strings.HasSuffix(key, "_latency") ||
+		strings.HasSuffix(key, "_timeout") ||
 		key == "elapsed" ||
 		key == "duration" ||
 		key == "backoff"
@@ -395,6 +397,8 @@ func displayLabel(key string) string {
 		return "Scan Time"
 	case "makemkv_duration":
 		return "Rip Time"
+	case "rip_timeout":
+		return "Timeout"
 	case "tmdb_search_duration":
 		return "TMDB Lookup"
 	case "total_ripped_bytes", "ripped_size_bytes":
