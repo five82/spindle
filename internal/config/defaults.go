@@ -107,7 +107,7 @@ func Default() Config {
 			OpticalDrive:         defaultOpticalDrive,
 			RipTimeout:           14400, // 4 hours for 4K UHD discs
 			InfoTimeout:          300,
-			DiscSettleDelay:      10, // seconds between disc access commands
+			DiscSettleDelay:      10,  // seconds between disc access commands
 			MinTitleLength:       120, // skip trailers, menus, FBI warnings
 			KeyDBPath:            defaultKeyDBPath,
 			KeyDBDownloadURL:     defaultKeyDBDownloadURL,
