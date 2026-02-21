@@ -39,7 +39,7 @@
 // # Decision Logging
 //
 // Decision logs record choices that affect output. Required fields:
-//   - decision_type: category (e.g., "tmdb_confidence", "preset_decider", "encoding_job_plan")
+//   - decision_type: category (e.g., "tmdb_confidence", "commentary", "encoding_job_plan")
 //   - decision_result: outcome (e.g., "accepted", "rejected", "applied", "fallback")
 //   - decision_reason: why (e.g., "exact_match", "confidence_below_threshold")
 //   - decision_options: alternatives considered (e.g., "accept, reject")

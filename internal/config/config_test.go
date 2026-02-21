@@ -173,9 +173,9 @@ func TestEnvVarOverridesConfigFileForAPIKeys(t *testing.T) {
 			OpenSubtitlesUserToken string `toml:"opensubtitles_user_token"`
 			WhisperXHuggingFace    string `toml:"whisperx_hf_token"`
 		} `toml:"subtitles"`
-		PresetDecider struct {
+		LLM struct {
 			APIKey string `toml:"api_key"`
-		} `toml:"preset_decider"`
+		} `toml:"llm"`
 	}
 	custom := payload{}
 	custom.TMDB.APIKey = "file-tmdb"
@@ -183,7 +183,7 @@ func TestEnvVarOverridesConfigFileForAPIKeys(t *testing.T) {
 	custom.Subtitles.OpenSubtitlesAPIKey = "file-opensub"
 	custom.Subtitles.OpenSubtitlesUserToken = "file-opensub-token"
 	custom.Subtitles.WhisperXHuggingFace = "file-hf"
-	custom.PresetDecider.APIKey = "file-preset"
+	custom.LLM.APIKey = "file-preset"
 
 	data, err := toml.Marshal(custom)
 	if err != nil {

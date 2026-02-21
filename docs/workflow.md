@@ -79,8 +79,7 @@ via `spindle cache process <number>`; restored rips are reprocessed for audio re
 ## Stage 5: Encoding to AV1 (ENCODING -> ENCODED)
 
 1. The encoder builds a job plan from the rip spec and runs Drapto for each episode (or a single file for movies).
-2. When `preset_decider.enabled = true`, an OpenRouter LLM can select a Drapto preset (`clean`, `grain`, or default); otherwise the default profile is used.
-3. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`. The rip spec is updated after each episode so progress is recoverable.
+2. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`. The rip spec is updated after each episode so progress is recoverable.
 4. When encoding completes, the item flips to `ENCODED`. Failures surface as `FAILED` (with `NeedsReview = true` for validation/configuration errors).
 
 ## Stage 6: Audio Analysis (AUDIO_ANALYZING -> AUDIO_ANALYZED)
