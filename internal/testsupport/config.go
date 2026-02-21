@@ -32,6 +32,9 @@ func NewConfig(t testing.TB, opts ...ConfigOption) *config.Config {
 	cfgVal.Paths.APIBind = "127.0.0.1:0"
 	// Disable disc settle delay in tests to avoid test timeouts.
 	cfgVal.MakeMKV.DiscSettleDelay = 0
+	// Use a non-device path so ripping tests skip the drive readiness check
+	// (which requires a real /dev/ device) while still passing health checks.
+	cfgVal.MakeMKV.OpticalDrive = "test:0"
 	// Disable KEYDB in tests to avoid 20m network refreshes.
 	cfgVal.MakeMKV.KeyDBPath = ""
 	cfgVal.MakeMKV.KeyDBDownloadURL = ""
