@@ -152,15 +152,16 @@ func (r *spindleReporter) EncodingComplete(s draptolib.EncodingOutcome) {
 		Type:      EventTypeEncodingComplete,
 		Timestamp: time.Now(),
 		Result: &EncodingResult{
-			InputFile:    s.InputFile,
-			OutputFile:   s.OutputFile,
-			OriginalSize: int64(s.OriginalSize),
-			EncodedSize:  int64(s.EncodedSize),
-			VideoStream:  s.VideoStream,
-			AudioStream:  s.AudioStream,
-			AverageSpeed: float64(s.AverageSpeed),
-			OutputPath:   s.OutputPath,
-			Duration:     s.TotalTime,
+			InputFile:            s.InputFile,
+			OutputFile:           s.OutputFile,
+			OriginalSize:         int64(s.OriginalSize),
+			EncodedSize:          int64(s.EncodedSize),
+			SizeReductionPercent: sizeReduction(s.OriginalSize, s.EncodedSize),
+			VideoStream:          s.VideoStream,
+			AudioStream:          s.AudioStream,
+			AverageSpeed:         float64(s.AverageSpeed),
+			OutputPath:           s.OutputPath,
+			Duration:             s.TotalTime,
 		},
 	})
 }
@@ -232,3 +233,11 @@ func (r *spindleReporter) BatchComplete(s draptolib.BatchSummary) {
 }
 
 var _ draptolib.Reporter = (*spindleReporter)(nil)
+
+// sizeReduction calculates the percentage size reduction from input to output.
+func sizeReduction(inputSize, outputSize uint64) float64 {
+	if inputSize == 0 {
+		return 0
+	}
+	return (float64(inputSize) - float64(outputSize)) / float64(inputSize) * 100
+}
