@@ -351,6 +351,21 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			launchAttrs = append(launchAttrs, logging.String(fmt.Sprintf("title_%d", id), fmt.Sprintf("%d", id)))
 		}
 		logger.Debug("launching makemkv rip", logging.Args(launchAttrs...)...)
+
+		if settleDelay := time.Duration(r.cfg.MakeMKV.DiscSettleDelay) * time.Second; settleDelay > 0 {
+			logger.Info("disc settle delay before rip",
+				logging.String(logging.FieldDecisionType, "disc_settle_delay"),
+				logging.String("decision_result", "waiting"),
+				logging.String("decision_reason", "allow_drive_to_reset_between_scsi_operations"),
+				logging.Duration("delay", settleDelay),
+			)
+			select {
+			case <-time.After(settleDelay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
 		makemkvStart := time.Now()
 		path, err := r.client.Rip(ctx, item.DiscTitle, destDir, titleIDs, progressCB)
 		makemkvDuration = time.Since(makemkvStart)

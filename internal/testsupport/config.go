@@ -30,6 +30,8 @@ func NewConfig(t testing.TB, opts ...ConfigOption) *config.Config {
 	cfgVal.Paths.LogDir = filepath.Join(base, "logs")
 	cfgVal.Paths.ReviewDir = filepath.Join(base, "review")
 	cfgVal.Paths.APIBind = "127.0.0.1:0"
+	// Disable disc settle delay in tests to avoid test timeouts.
+	cfgVal.MakeMKV.DiscSettleDelay = 0
 	// Disable KEYDB in tests to avoid 20m network refreshes.
 	cfgVal.MakeMKV.KeyDBPath = ""
 	cfgVal.MakeMKV.KeyDBDownloadURL = ""

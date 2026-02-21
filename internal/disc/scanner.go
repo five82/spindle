@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Title represents a MakeMKV title entry.
@@ -72,7 +73,8 @@ func (commandExecutor) Run(ctx context.Context, binary string, args []string) ([
 
 // Scanner wraps MakeMKV info commands to gather disc metadata.
 type Scanner struct {
-	binary string
+	binary      string
+	settleDelay time.Duration
 
 	makeMKVCmd    makeMKVInfoCommand
 	makeMKVParser makeMKVOutputParser
@@ -103,6 +105,12 @@ func newScanner(binary string, exec Executor) *Scanner {
 	}
 }
 
+// SetSettleDelay configures the pause between disc access commands.
+// A zero duration disables the delay.
+func (s *Scanner) SetSettleDelay(d time.Duration) {
+	s.settleDelay = d
+}
+
 // Scan executes MakeMKV to gather disc details, with bd_info fallback for title identification.
 func (s *Scanner) Scan(ctx context.Context, device string) (*ScanResult, error) {
 	if s.binary == "" {
@@ -120,6 +128,10 @@ func (s *Scanner) Scan(ctx context.Context, device string) (*ScanResult, error) 
 	}
 	result.RawOutput = string(output)
 
+	if err := s.waitSettleDelay(ctx); err != nil {
+		return nil, err
+	}
+
 	needsBDInfo := shouldQueryBDInfo(result)
 	if info := s.lookupBDInfo(ctx, device); info != nil {
 		result.BDInfo = info
@@ -129,6 +141,20 @@ func (s *Scanner) Scan(ctx context.Context, device string) (*ScanResult, error) 
 	}
 
 	return result, nil
+}
+
+func (s *Scanner) waitSettleDelay(ctx context.Context) error {
+	if s.settleDelay <= 0 {
+		return nil
+	}
+	slog.Default().Debug("disc settle delay before next command",
+		slog.Duration("delay", s.settleDelay))
+	select {
+	case <-time.After(s.settleDelay):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func shouldQueryBDInfo(result *ScanResult) bool {

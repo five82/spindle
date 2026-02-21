@@ -56,6 +56,7 @@ func NewIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger, 
 		)
 	}
 	scanner := disc.NewScanner(cfg.MakemkvBinary())
+	scanner.SetSettleDelay(time.Duration(cfg.MakeMKV.DiscSettleDelay) * time.Second)
 	return NewIdentifierWithDependencies(cfg, store, logger, client, scanner, notifier)
 }
 

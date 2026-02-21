@@ -98,6 +98,7 @@ type MakeMKV struct {
 	OpticalDrive         string `toml:"optical_drive"`
 	RipTimeout           int    `toml:"rip_timeout"`
 	InfoTimeout          int    `toml:"info_timeout"`
+	DiscSettleDelay      int    `toml:"disc_settle_delay"`
 	KeyDBPath            string `toml:"keydb_path"`
 	KeyDBDownloadURL     string `toml:"keydb_download_url"`
 	KeyDBDownloadTimeout int    `toml:"keydb_download_timeout"`
