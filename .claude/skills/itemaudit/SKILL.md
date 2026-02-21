@@ -30,6 +30,36 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
    - Normal logs (fallback): `log_dir/items/<item>.log`
    - Debug logs persist from previous audit runs even if daemon restarted in normal mode
 
+### Stage Gating
+
+After gathering context, determine two things:
+1. The **furthest completed stage** — only run phases that have artifacts to analyze
+2. The **disc source type** — determines whether external validation is applicable
+
+#### Determining Disc Source Type
+
+Disc type is not stored in the queue database. Infer it from the debug logs:
+- `is_blu_ray: true` in `bd_info details` entry → **Blu-ray** (or 4K Blu-ray)
+- DVD fingerprinting uses `VIDEO_TS/*.ifo` files → **DVD**
+- If neither is clear, check `disc_type` fields in early log entries
+
+#### Stage-Phase Matrix
+
+| Item Status | Furthest Stage | Applicable Phases |
+|-------------|----------------|-------------------|
+| `PENDING` / `IDENTIFYING` | None / Scanning | Phase 2 (logs only) |
+| `IDENTIFIED` / Failed during `RIPPING` | Identification complete | Phase 2 + Phase 6 (edition detection from logs only, no external validation) |
+| `RIPPED` / Failed during `ENCODING` | Rip complete | Phase 2, 3, 6 |
+| `ENCODED` / Failed during `AUDIO_ANALYZING` | Encode complete | Phase 2, 3, 4, 5, 6 + external validation (Blu-ray only) |
+| `AUDIO_ANALYZED` / Failed during `SUBTITLING` | Audio analysis complete | Phase 2, 3, 4, 5, 6, 8 + external validation (Blu-ray only) |
+| `SUBTITLED` / `ORGANIZING` / `COMPLETED` | All stages | All phases + external validation (Blu-ray only) |
+
+**Key principles:**
+- External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray or 4K Blu-ray. **Skip external validation entirely for DVDs** — blu-ray.com reviews don't cover DVD releases, and DVD discs lack the detailed audio/video specs that make cross-referencing valuable.
+- For rip failures, the audit focuses on the failure itself — what went wrong, timing patterns, and whether identification was correct.
+
+**For failed items:** Focus the report on diagnosing the failure. Analyze the error, the events leading up to it, and any retry patterns. Do not pad the report with sections that say "N/A - not reached".
+
 ### Phase 2: Log Analysis (All Items)
 
 **Go beyond simple error counts.** Analyze logs for:
@@ -100,35 +130,40 @@ If item has passed encoding stage:
    - Review crop detection: was a crop applied? What were the candidates?
    - Check for warnings or errors in the snapshot
 
-### Phase 5: Crop Detection Validation (Blu-ray/4K Blu-ray)
+### Phase 5: Crop Detection Validation (Post-Encoding Only)
 
-For Blu-ray and 4K Blu-ray content:
+**Skip entirely if item has not passed encoding.** No encoded file = nothing to validate.
+
+For encoded content, validate crop detection:
 
 1. **Extract crop info** from EncodingDetailsJSON:
    - `Crop.required` - was cropping needed?
    - `Crop.crop` - the applied crop filter (e.g., "crop=1920:800:0:140")
    - `Crop.message` - detection summary
 
-2. **Look up disc review on blu-ray.com**:
-   - Search: `site:blu-ray.com "<title>" review` (use identified title from metadata)
-   - Find the official review page
-   - Look for "Video" section mentioning aspect ratio
-   - Common ratios: 2.39:1/2.40:1 (scope), 1.85:1, 1.78:1 (16:9), IMAX variable
+2. **Calculate actual aspect ratio**:
+   - `(video_width - left_crop - right_crop) / (video_height - top_crop - bottom_crop)`
+   - Common ratios: 2.39:1/2.40:1 (scope), 1.85:1, 1.78:1 (16:9), 2.00:1 (IMAX)
+   - Verify the ratio looks reasonable for the content
 
-3. **Cross-reference**:
-   - Does our detected crop produce the expected aspect ratio?
-   - Calculate: `(video_width - left_crop - right_crop) / (video_height - top_crop - bottom_crop)`
-   - 2.39:1 scope = ~2.39, 1.85:1 = ~1.85, 2.00:1 = IMAX
+3. **External cross-reference (Blu-ray/4K Blu-ray only, skip for DVDs)**:
+   - Look up disc review on blu-ray.com
+   - Search: `site:blu-ray.com "<title>" review` (use identified title from metadata)
+   - Find the "Video" section mentioning aspect ratio
    - Flag if our crop differs significantly from the review's stated ratio
 
-4. **Check for IMAX/variable aspect ratio issues**:
+4. **Check for IMAX/variable aspect ratio issues** (Blu-ray only):
    - If crop detection shows "multiple ratios" or low top-candidate percentage
    - Some films have IMAX sequences with different ratios
    - This may be acceptable or may indicate detection issues
 
 ### Phase 6: Edition Detection Validation (Movies Only)
 
-If item is a movie, validate edition detection:
+If item is a movie, validate edition detection. This phase has two tiers:
+- **Log review** (always, if identification completed): Check decisions from logs
+- **External validation** (only if post-encoding): Cross-reference with blu-ray.com
+
+#### Log Review (post-identification)
 
 1. **From logs**: Search for `decision_type=edition_detection` entries
 2. **Expected detection paths**:
@@ -137,16 +172,19 @@ If item is a movie, validate edition detection:
    - `decision_reason=llm_rejected`: LLM determined not an edition
    - `decision_reason=llm_not_configured`: Ambiguous title but no LLM available
 
-3. **Verify detection correctness**:
+3. **Verify detection correctness from available data**:
    - If disc title contains obvious edition markers (Director's Cut, Extended, Unrated, IMAX, etc.), an edition should be detected
    - If cache was used, check for `edition from cache` log entry
-   - Cross-reference with blu-ray.com review to confirm whether disc is actually an alternate edition
+   - Check if multiple feature-length titles with different durations suggest alternate cuts
 
 4. **Verify edition label**:
    - Check `edition_label` in logs matches the actual edition type
    - Known patterns: Director's Cut, Extended Edition, Unrated, Theatrical, Remastered, Special Edition, Anniversary Edition, Ultimate Edition, Final Cut, Redux, IMAX
 
-5. **Verify filename**:
+#### External Validation (post-encoding only)
+
+5. **Cross-reference with blu-ray.com** to confirm whether disc is actually an alternate edition
+6. **Verify filename**:
    - Movie filenames should be: `Title (Year) - Edition.mkv`
    - Check final organized file includes edition suffix when detected
    - Edition should NOT appear in folder name (GetBaseFilename strips it)
@@ -196,7 +234,9 @@ against the WhisperX output via text-based matching.
    - If `edition=mismatch` was accepted, verify no matching edition subtitle was available
    - Note: regular subtitles are always WhisperX-generated, so edition matching only applies to forced subtitles from OpenSubtitles
 
-### Phase 8: Commentary Track Validation
+### Phase 8: Commentary Track Validation (Post-Audio-Analysis Only)
+
+**Skip entirely if item has not passed audio analysis.** No audio analysis = no commentary decisions to validate.
 
 1. **From logs**: Find `commentary track classification` and `commentary detection complete` entries
 2. **Expected behavior**:
@@ -204,7 +244,7 @@ against the WhisperX output via text-based matching.
    - High similarity to primary audio = stereo downmix (excluded)
    - LLM should classify based on content (talking about filmmaking = commentary)
 
-3. **Cross-reference with blu-ray.com**:
+3. **Cross-reference with blu-ray.com** (only if external validation is applicable per stage gating):
    - Check "Audio" section of disc review
    - Note how many commentary tracks the disc actually has
    - Compare against our detection count
@@ -271,12 +311,14 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 
 ## Audit Report Format
 
+**Only include sections applicable to the item's furthest completed stage.** Omit sections for stages the item never reached. For failed items, the report should focus on diagnosing the failure rather than listing empty sections.
+
 ```
 ## Audit Report for Item #<id>
 
 **Title:** <identified_title>
 **Status:** <status> | **NeedsReview:** <bool> | **ReviewReason:** <reason>
-**Media Type:** <movie/tv> | **Source:** <DVD/Blu-ray/4K Blu-ray>
+**Media Type:** <movie/tv> | **Source:** <DVD/Blu-ray/4K Blu-ray> (inferred from logs)
 **Edition:** <edition_label or "none detected">
 **Debug Mode:** active/inactive (debug logs available: yes/no)
 
@@ -340,7 +382,9 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 - Forced subtitle edition match: <match/mismatch/n/a> (only for forced subs from OpenSubtitles)
 - Content spot-check: <pass/concerns>
 
-### External Validation (Blu-ray/4K)
+### External Validation (Blu-ray/4K Only, Post-Encoding Only)
+
+**Omit this entire section if:** (a) item has not passed encoding, OR (b) source is DVD. No encoded artifacts or no reliable external reference = nothing to validate.
 
 #### blu-ray.com Review
 - URL: <review URL if found>
@@ -361,23 +405,40 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 
 ## Execution Checklist
 
-For each audit, complete these steps:
+After Phase 1, determine the furthest completed stage per the Stage Gating table and check only applicable items. **Do not check items beyond the reached stage.**
 
+### Always
 - [ ] Gathered item info and status
+- [ ] Determined furthest completed stage (applied stage gating)
+- [ ] Determined disc source type from logs (DVD / Blu-ray / 4K Blu-ray)
 - [ ] Located and read log files (debug preferred)
 - [ ] Analyzed logs for anomalies beyond simple error counts
-- [ ] If post-ripping: analyzed rip cache metadata
-- [ ] If post-encoding: ran ffprobe and analyzed streams
-- [ ] If post-encoding: verified commentary labeling specifically
-- [ ] If movie: validated edition detection logic
+- [ ] For failed items: diagnosed failure cause, timing, and retry patterns
+
+### Post-Identification (item reached IDENTIFIED or beyond)
+- [ ] If movie: validated edition detection logic from logs
+
+### Post-Ripping (item reached RIPPED or beyond)
+- [ ] Analyzed rip cache metadata
+
+### Post-Encoding (item reached ENCODED or beyond)
+- [ ] Ran ffprobe and analyzed streams
+- [ ] Validated crop detection (aspect ratio sanity check)
+- [ ] Verified commentary labeling specifically
 - [ ] If movie with edition: verified edition in filename
-- [ ] If Blu-ray: looked up blu-ray.com review
-- [ ] If Blu-ray: validated crop detection against review
-- [ ] If Blu-ray: validated commentary count against review
-- [ ] If Blu-ray movie: validated edition detection against review
-- [ ] If post-subtitling: verified subtitles are muxed into MKV
-- [ ] If post-subtitling: verified subtitle track labels (language name, "(Forced)" marker)
-- [ ] If post-subtitling: analyzed subtitle content quality
-- [ ] If movie with edition and forced subs: verified forced subtitle edition matching
+- [ ] If Blu-ray/4K (not DVD): looked up blu-ray.com review
+- [ ] If Blu-ray/4K (not DVD): validated crop detection against review
+- [ ] If Blu-ray/4K (not DVD): validated commentary count against review
+- [ ] If Blu-ray/4K movie (not DVD): validated edition detection against review
+
+### Post-Audio-Analysis (item reached AUDIO_ANALYZED or beyond)
 - [ ] Reviewed LLM decisions (commentary, edition) for reasonableness
-- [ ] Generated comprehensive report with specific findings
+
+### Post-Subtitling (item reached SUBTITLED or beyond)
+- [ ] Verified subtitles are muxed into MKV
+- [ ] Verified subtitle track labels (language name, "(Forced)" marker)
+- [ ] Analyzed subtitle content quality
+- [ ] If movie with edition and forced subs: verified forced subtitle edition matching
+
+### Report
+- [ ] Generated report with only applicable sections (omit sections for unreached stages)
