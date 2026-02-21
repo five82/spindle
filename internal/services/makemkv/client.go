@@ -157,6 +157,7 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 	// Track MakeMKV messages for diagnostic purposes
 	var messages []string
 	var messagesMu sync.Mutex
+	tracker := &progressTracker{}
 
 	if err := c.exec.Run(ctx, c.binary, args, func(line string) {
 		// Capture MSG lines for diagnostics (errors, warnings, info)
@@ -183,7 +184,7 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 		if progress == nil {
 			return
 		}
-		if update, ok := parseProgress(line); ok {
+		if update, ok := tracker.parseLine(line); ok {
 			progress(update)
 		}
 	}); err != nil {
@@ -572,8 +573,26 @@ func trimMSGField(s string) string {
 	return s
 }
 
-func parseProgress(line string) (ProgressUpdate, bool) {
+// progressTracker accumulates MakeMKV phase context from PRGT lines so that
+// PRGV progress values can be attributed to the correct stage (Analyzing vs
+// Ripping). Without this, all progress is reported as "Ripping" even during
+// the disc analysis phase that precedes actual ripping.
+type progressTracker struct {
+	currentPhase string
+}
+
+// parseLine processes a single line of MakeMKV robot output. PRGT lines
+// update internal phase state. PRGV lines produce a ProgressUpdate with the
+// stage resolved from the most recent PRGT context.
+func (t *progressTracker) parseLine(line string) (ProgressUpdate, bool) {
 	line = strings.TrimSpace(line)
+
+	// Track phase context from PRGT lines (Progress Title).
+	if strings.HasPrefix(line, "PRGT:") {
+		t.currentPhase = parsePRGTName(line)
+		return ProgressUpdate{}, false
+	}
+
 	if !strings.HasPrefix(line, "PRGV:") {
 		return ProgressUpdate{}, false
 	}
@@ -599,7 +618,7 @@ func parseProgress(line string) (ProgressUpdate, bool) {
 			total = 0
 		}
 		percent := (total / maximum) * 100
-		update = ProgressUpdate{Stage: "Ripping", Percent: percent}
+		update = ProgressUpdate{Stage: t.resolveStage(), Percent: percent}
 		if len(parts) > 3 {
 			update.Message = strings.TrimSpace(strings.Join(parts[3:], ","))
 		}
@@ -618,6 +637,43 @@ func parseProgress(line string) (ProgressUpdate, bool) {
 	stage := first
 	update = ProgressUpdate{Stage: stage, Percent: percent, Message: message}
 	return update, true
+}
+
+// resolveStage maps the current PRGT phase name to a user-facing stage.
+// MakeMKV uses names like "Saving to MKV file" for ripping and various other
+// names (e.g. "Analyzing") for pre-rip analysis.
+func (t *progressTracker) resolveStage() string {
+	phase := strings.ToLower(t.currentPhase)
+	if strings.Contains(phase, "sav") {
+		return "Ripping"
+	}
+	if phase != "" {
+		return "Analyzing"
+	}
+	// Default to Analyzing when no PRGT has been seen yet - the first PRGV
+	// lines arrive during disc analysis before MakeMKV begins saving.
+	return "Analyzing"
+}
+
+// parsePRGTName extracts the display name from a PRGT line.
+// Format: PRGT:code,id,"name"
+func parsePRGTName(line string) string {
+	payload := strings.TrimPrefix(line, "PRGT:")
+	// The name is the third comma-separated field.
+	idx := strings.IndexByte(payload, ',')
+	if idx < 0 {
+		return ""
+	}
+	rest := payload[idx+1:]
+	idx = strings.IndexByte(rest, ',')
+	if idx < 0 {
+		return ""
+	}
+	name := strings.TrimSpace(rest[idx+1:])
+	if len(name) >= 2 && name[0] == '"' && name[len(name)-1] == '"' {
+		name = name[1 : len(name)-1]
+	}
+	return name
 }
 
 type commandExecutor struct{}
