@@ -12,15 +12,16 @@ import (
 	"spindle/internal/queue"
 )
 
-// RipHooks provides callbacks around the ripping stage to coordinate
-// external resources like disc monitoring.
-type RipHooks interface {
-	// BeforeRip is called before MakeMKV starts reading the disc.
-	// Use this to pause disc monitoring and avoid concurrent device access.
-	BeforeRip()
-	// AfterRip is called after ripping completes (success or failure).
-	// Use this to resume disc monitoring.
-	AfterRip()
+// DiscAccessHooks provides callbacks around stages that access the optical
+// drive (identification and ripping) to coordinate external resources like
+// the netlink monitor and disc detection.
+type DiscAccessHooks interface {
+	// BeforeDiscAccess is called before a stage reads the optical drive.
+	// Use this to pause disc monitoring and close the netlink socket.
+	BeforeDiscAccess()
+	// AfterDiscAccess is called after disc access completes (success or failure).
+	// Use this to reopen the netlink socket and resume disc monitoring.
+	AfterDiscAccess()
 }
 
 // Manager coordinates queue processing using registered stage functions.
@@ -30,7 +31,7 @@ type Manager struct {
 	logger       *slog.Logger
 	pollInterval time.Duration
 	notifier     notifications.Service
-	ripHooks     RipHooks
+	discHooks    DiscAccessHooks
 
 	heartbeat *HeartbeatMonitor
 	bgLogger  *BackgroundLogger
@@ -100,8 +101,8 @@ func NewManagerWithOptions(cfg *config.Config, store *queue.Store, logger *slog.
 	}
 }
 
-// SetRipHooks registers callbacks for disc coordination during ripping.
-// The daemon uses this to pause disc monitoring while MakeMKV reads.
-func (m *Manager) SetRipHooks(hooks RipHooks) {
-	m.ripHooks = hooks
+// SetDiscAccessHooks registers callbacks for disc coordination during
+// stages that access the optical drive (identification and ripping).
+func (m *Manager) SetDiscAccessHooks(hooks DiscAccessHooks) {
+	m.discHooks = hooks
 }

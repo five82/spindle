@@ -95,12 +95,15 @@ func librarySubdirPath(root, child string) string {
 	return filepath.Join(root, child)
 }
 
-func discDetectionStatusLine(daemonRunning, netlinkActive bool, colorize bool) string {
+func discDetectionStatusLine(daemonRunning, netlinkActive, netlinkPausedForDisc bool, colorize bool) string {
 	if netlinkActive {
 		return renderStatusLine("Disc Detection", statusOK, "Netlink monitoring active", colorize)
 	}
 	if !daemonRunning {
 		return renderStatusLine("Disc Detection", statusInfo, "Inactive (daemon not running)", colorize)
+	}
+	if netlinkPausedForDisc {
+		return renderStatusLine("Disc Detection", statusOK, "Netlink paused (disc access in progress)", colorize)
 	}
 	return renderStatusLine("Disc Detection", statusWarn, "Netlink unavailable (manual detection via 'spindle disc detected')", colorize)
 }

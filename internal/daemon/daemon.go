@@ -37,10 +37,11 @@ type Daemon struct {
 	lockPath string
 	lock     *flock.Flock
 
-	running    atomic.Bool
-	discPaused atomic.Bool
-	ctx        context.Context
-	cancel     context.CancelFunc
+	running              atomic.Bool
+	discPaused           atomic.Bool
+	netlinkPausedForDisc atomic.Bool
+	ctx                  context.Context
+	cancel               context.CancelFunc
 
 	depsMu       sync.RWMutex
 	dependencies []DependencyStatus
@@ -49,14 +50,15 @@ type Daemon struct {
 
 // Status represents daemon runtime information.
 type Status struct {
-	Running           bool
-	DiscPaused        bool
-	NetlinkMonitoring bool
-	Workflow          workflow.StatusSummary
-	QueueDBPath       string
-	LockFilePath      string
-	Dependencies      []DependencyStatus
-	PID               int
+	Running              bool
+	DiscPaused           bool
+	NetlinkMonitoring    bool
+	NetlinkPausedForDisc bool
+	Workflow             workflow.StatusSummary
+	QueueDBPath          string
+	LockFilePath         string
+	Dependencies         []DependencyStatus
+	PID                  int
 }
 
 // DependencyStatus reports the availability of an external requirement.
@@ -99,8 +101,8 @@ func New(cfg *config.Config, store *queue.Store, logger *slog.Logger, wf *workfl
 	}
 	daemon.apiSrv = apiSrv
 
-	// Register disc pause hooks to stop monitoring during rips.
-	wf.SetRipHooks(daemon)
+	// Register disc access hooks to stop netlink monitoring during disc I/O.
+	wf.SetDiscAccessHooks(daemon)
 
 	return daemon, nil
 }
@@ -396,14 +398,15 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	}
 
 	return Status{
-		Running:           d.running.Load(),
-		DiscPaused:        d.discPaused.Load(),
-		NetlinkMonitoring: netlinkRunning,
-		Workflow:          summary,
-		QueueDBPath:       filepath.Join(d.cfg.Paths.LogDir, "queue.db"),
-		LockFilePath:      d.lockPath,
-		Dependencies:      dependencies,
-		PID:               os.Getpid(),
+		Running:              d.running.Load(),
+		DiscPaused:           d.discPaused.Load(),
+		NetlinkMonitoring:    netlinkRunning,
+		NetlinkPausedForDisc: d.netlinkPausedForDisc.Load(),
+		Workflow:             summary,
+		QueueDBPath:          filepath.Join(d.cfg.Paths.LogDir, "queue.db"),
+		LockFilePath:         d.lockPath,
+		Dependencies:         dependencies,
+		PID:                  os.Getpid(),
 	}
 }
 
@@ -464,24 +467,50 @@ func (d *Daemon) HandleDiscDetected(ctx context.Context, device string) (*DiscDe
 	return d.monitor.HandleDetectionForDevice(ctx, device)
 }
 
-// BeforeRip implements workflow.RipHooks. Called before MakeMKV starts reading.
-func (d *Daemon) BeforeRip() {
-	if d.PauseDisc() {
-		d.logger.Debug("paused disc monitoring for rip",
-			logging.String(logging.FieldEventType, "disc_monitor_paused"),
-			logging.String("reason", "rip_started"),
+// BeforeDiscAccess implements workflow.DiscAccessHooks. Called before a stage
+// reads the optical drive (identification or ripping).
+// Ordering: set discPaused first (protects disc monitor), then stop netlink (close socket).
+func (d *Daemon) BeforeDiscAccess() {
+	d.PauseDisc()
+	d.netlinkPausedForDisc.Store(true)
+	d.logger.Info("paused disc monitoring for disc access",
+		logging.String(logging.FieldEventType, "disc_monitor_paused"),
+		logging.String("reason", "disc_access_started"),
+	)
+
+	if d.netlink != nil {
+		d.netlink.Stop()
+		d.logger.Info("netlink monitor stopped for disc access",
+			logging.String(logging.FieldEventType, "netlink_stopped_for_disc_access"),
 		)
 	}
 }
 
-// AfterRip implements workflow.RipHooks. Called after ripping completes.
-func (d *Daemon) AfterRip() {
-	if d.ResumeDisc() {
-		d.logger.Debug("resumed disc monitoring after rip",
-			logging.String(logging.FieldEventType, "disc_monitor_resumed"),
-			logging.String("reason", "rip_completed"),
-		)
+// AfterDiscAccess implements workflow.DiscAccessHooks. Called after disc access
+// completes (success or failure).
+// Ordering: restart netlink first (reconnect socket), then clear discPaused (resume disc monitor).
+func (d *Daemon) AfterDiscAccess() {
+	if d.netlink != nil && d.ctx != nil {
+		if err := d.netlink.Start(d.ctx); err != nil {
+			d.logger.Warn("netlink monitor failed to restart after disc access",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "netlink_restart_after_disc_access_failed"),
+				logging.String(logging.FieldImpact, "automatic disc detection unavailable until daemon restart"),
+				logging.String(logging.FieldErrorHint, "disc detection requires manual trigger via spindle disc detected"),
+			)
+		} else {
+			d.logger.Info("netlink monitor restarted after disc access",
+				logging.String(logging.FieldEventType, "netlink_restarted_after_disc_access"),
+			)
+		}
 	}
+
+	d.netlinkPausedForDisc.Store(false)
+	d.ResumeDisc()
+	d.logger.Info("resumed disc monitoring after disc access",
+		logging.String(logging.FieldEventType, "disc_monitor_resumed"),
+		logging.String("reason", "disc_access_completed"),
+	)
 }
 
 func (d *Daemon) runDependencyChecks(ctx context.Context) error {

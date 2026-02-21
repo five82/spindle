@@ -191,6 +191,15 @@ func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, des
 	tracker := &progressTracker{}
 	handler := &msgHandler{logger: c.logger, cancelRip: cancelCause}
 
+	if c.logger != nil {
+		c.logger.Info("starting makemkv rip process",
+			slog.String("event_type", "makemkv_rip_exec_start"),
+			slog.String("binary", c.binary),
+			slog.Any("args", args),
+			slog.String("dest_dir", destDir),
+		)
+	}
+
 	if err := c.exec.Run(ctx, c.binary, args, func(line string) {
 		// Capture MSG lines for diagnostics (errors, warnings, info)
 		if strings.HasPrefix(line, "MSG:") {
@@ -209,6 +218,22 @@ func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, des
 			progress(update)
 		}
 	}); err != nil {
+		// Extract exit code for diagnostics (distinguishes clean failure vs SIGKILL)
+		if c.logger != nil {
+			diagAttrs := []slog.Attr{
+				slog.String("event_type", "makemkv_rip_exec_failed"),
+				slog.String("error", err.Error()),
+			}
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				diagAttrs = append(diagAttrs, slog.Int("exit_code", exitErr.ExitCode()))
+			}
+			if cause := context.Cause(ctx); cause != nil && cause != ctx.Err() {
+				diagAttrs = append(diagAttrs, slog.String("cancel_cause", cause.Error()))
+			}
+			c.logger.Warn("makemkv rip process failed", logging.Args(diagAttrs...)...)
+		}
+
 		// Log captured messages on failure at WARN so they're visible
 		if c.logger != nil && len(messages) > 0 {
 			c.logger.Warn("makemkv messages before failure",

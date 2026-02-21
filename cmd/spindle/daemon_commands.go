@@ -193,7 +193,11 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			if statusResp.Running {
 				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusOK, "Running", colorize))
 				if statusResp.DiscPaused {
-					fmt.Fprintln(stdout, renderStatusLine("Disc Processing", statusWarn, "Paused", colorize))
+					if statusResp.NetlinkPausedForDisc {
+						fmt.Fprintln(stdout, renderStatusLine("Disc Processing", statusOK, "Paused (disc access in progress)", colorize))
+					} else {
+						fmt.Fprintln(stdout, renderStatusLine("Disc Processing", statusWarn, "Paused", colorize))
+					}
 				} else {
 					fmt.Fprintln(stdout, renderStatusLine("Disc Processing", statusOK, "Active", colorize))
 				}
@@ -207,7 +211,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			} else {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusWarn, "Not configured", colorize))
 			}
-			fmt.Fprintln(stdout, discDetectionStatusLine(statusResp.Running, statusResp.NetlinkMonitoring, colorize))
+			fmt.Fprintln(stdout, discDetectionStatusLine(statusResp.Running, statusResp.NetlinkMonitoring, statusResp.NetlinkPausedForDisc, colorize))
 			fmt.Fprintln(stdout)
 
 			for _, line := range renderSectionHeader("Dependencies", colorize) {
