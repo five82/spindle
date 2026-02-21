@@ -19,7 +19,7 @@ import (
 
 // CheckLLM verifies that the LLM API is reachable and the key is valid.
 // It uses a 30-second timeout and a single attempt (no retries).
-func CheckLLM(ctx context.Context, name string, cfg config.LLMConfig) Result {
+func CheckLLM(ctx context.Context, name string, cfg config.LLM) Result {
 	if cfg.APIKey == "" {
 		return Result{Name: name, Detail: "API key missing"}
 	}

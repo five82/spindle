@@ -31,7 +31,9 @@ func (c *Config) normalize() error {
 	if err := c.normalizeLLM(); err != nil {
 		return err
 	}
-	c.normalizeLogging()
+	if err := c.normalizeLogging(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -217,7 +219,7 @@ func (c *Config) normalizeLLM() error {
 	return nil
 }
 
-func (c *Config) normalizeLogging() {
+func (c *Config) normalizeLogging() error {
 	c.Logging.Format = strings.ToLower(strings.TrimSpace(c.Logging.Format))
 	switch c.Logging.Format {
 	case "", "console":
@@ -233,4 +235,5 @@ func (c *Config) normalizeLogging() {
 	if c.Logging.RetentionDays < 0 {
 		c.Logging.RetentionDays = 0
 	}
+	return nil
 }

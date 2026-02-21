@@ -22,7 +22,6 @@ func newQueueCommand(ctx *commandContext) *cobra.Command {
 	queueCmd.AddCommand(newQueueListCommand(ctx))
 	queueCmd.AddCommand(newQueueShowCommand(ctx))
 	queueCmd.AddCommand(newQueueClearCommand(ctx))
-	queueCmd.AddCommand(newQueueClearFailedCommand(ctx))
 	queueCmd.AddCommand(newQueueResetCommand(ctx))
 	queueCmd.AddCommand(newQueueRetryCommand(ctx))
 	queueCmd.AddCommand(newQueueStopCommand(ctx))
@@ -261,26 +260,6 @@ Examples:
 	cmd.Flags().BoolVar(&clearCompleted, "completed", false, "Remove only completed items")
 	cmd.Flags().BoolVar(&clearFailed, "failed", false, "Remove only failed items")
 	return cmd
-}
-
-func newQueueClearFailedCommand(ctx *commandContext) *cobra.Command {
-	return &cobra.Command{
-		Use:   "clear-failed",
-		Short: "Remove failed queue items",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(api queueAPI) error {
-				removed, err := api.ClearFailed(cmd.Context())
-				if err != nil {
-					return err
-				}
-				if ctx.JSONMode() {
-					return writeJSON(cmd, map[string]any{"cleared": removed})
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Cleared %d failed items\n", removed)
-				return nil
-			})
-		},
-	}
 }
 
 func newQueueResetCommand(ctx *commandContext) *cobra.Command {

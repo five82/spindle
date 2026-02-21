@@ -353,47 +353,31 @@ func CreateSample(path string) error {
 	return nil
 }
 
-// LLMConfig contains common LLM settings used across features.
-type LLMConfig struct {
-	APIKey         string
-	BaseURL        string
-	Model          string
-	Referer        string
-	Title          string
-	TimeoutSeconds int
-}
-
 // GetLLM returns the shared LLM connection settings.
-func (c *Config) GetLLM() LLMConfig {
-	return LLMConfig{
-		APIKey:         strings.TrimSpace(c.LLM.APIKey),
-		BaseURL:        strings.TrimSpace(c.LLM.BaseURL),
-		Model:          strings.TrimSpace(c.LLM.Model),
-		Referer:        strings.TrimSpace(c.LLM.Referer),
-		Title:          strings.TrimSpace(c.LLM.Title),
-		TimeoutSeconds: c.LLM.TimeoutSeconds,
-	}
+// Fields are already trimmed by normalization.
+func (c *Config) GetLLM() LLM {
+	return c.LLM
 }
 
 // CommentaryLLM returns the LLM settings for commentary detection.
 // Falls back to [llm] settings when not explicitly configured.
-func (c *Config) CommentaryLLM() LLMConfig {
-	cfg := LLMConfig{
+func (c *Config) CommentaryLLM() LLM {
+	cfg := LLM{
 		APIKey:  strings.TrimSpace(c.Commentary.APIKey),
 		BaseURL: strings.TrimSpace(c.Commentary.BaseURL),
 		Model:   strings.TrimSpace(c.Commentary.Model),
-		Referer: strings.TrimSpace(c.LLM.Referer),
+		Referer: c.LLM.Referer,
 		Title:   defaultCommentaryTitle,
 	}
 	// Fall back to [llm] settings for connection details
 	if cfg.APIKey == "" {
-		cfg.APIKey = strings.TrimSpace(c.LLM.APIKey)
+		cfg.APIKey = c.LLM.APIKey
 	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = strings.TrimSpace(c.LLM.BaseURL)
+		cfg.BaseURL = c.LLM.BaseURL
 	}
 	if cfg.Model == "" {
-		cfg.Model = strings.TrimSpace(c.LLM.Model)
+		cfg.Model = c.LLM.Model
 	}
 	return cfg
 }

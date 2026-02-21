@@ -13,9 +13,10 @@ type Result struct {
 	Detail string
 }
 
-// RunAll executes all applicable preflight checks for the given config.
-// Checks are only run when the corresponding feature is enabled.
-func RunAll(ctx context.Context, cfg *config.Config) []Result {
+// RunFeatureChecks executes preflight checks for enabled features.
+// Only features toggled on in the config are checked (Jellyfin, Commentary LLM, etc.).
+// System-level dependencies (MakeMKV, FFmpeg) are checked separately via CheckSystemDeps.
+func RunFeatureChecks(ctx context.Context, cfg *config.Config) []Result {
 	if cfg == nil {
 		return nil
 	}

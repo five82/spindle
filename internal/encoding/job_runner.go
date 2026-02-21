@@ -89,20 +89,18 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 		}
 
 		item.ActiveEpisodeKey = episodeKey
-		if item.ActiveEpisodeKey != "" {
-			remaining := len(jobs) - skipped
-			current := idx + 1 - skipped
-			item.ProgressMessage = fmt.Sprintf("Starting encode %s (%d/%d)", label, current, remaining)
-			item.ProgressPercent = 0
-			if r.store != nil {
-				if err := r.store.UpdateProgress(ctx, item); err != nil {
-					logger.Warn("failed to persist encoding job start; queue status may lag",
-						logging.Error(err),
-						logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
-						logging.String(logging.FieldErrorHint, "check queue database access"),
-						logging.String(logging.FieldImpact, "queue UI may show stale progress"),
-					)
-				}
+		remaining := len(jobs) - skipped
+		current := idx + 1 - skipped
+		item.ProgressMessage = fmt.Sprintf("Starting encode %s (%d/%d)", label, current, remaining)
+		item.ProgressPercent = 0
+		if r.store != nil {
+			if err := r.store.UpdateProgress(ctx, item); err != nil {
+				logger.Warn("failed to persist encoding job start; queue status may lag",
+					logging.Error(err),
+					logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
+					logging.String(logging.FieldErrorHint, "check queue database access"),
+					logging.String(logging.FieldImpact, "queue UI may show stale progress"),
+				)
 			}
 		}
 

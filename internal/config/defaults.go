@@ -95,8 +95,7 @@ func Default() Config {
 			MaxGiB: defaultRipCacheMaxGiB,
 		},
 		DiscIDCache: DiscIDCache{
-			Enabled: false,
-			Path:    defaultDiscIDCachePath,
+			Path: defaultDiscIDCachePath,
 		},
 		MakeMKV: MakeMKV{
 			OpticalDrive:         defaultOpticalDrive,
@@ -130,7 +129,6 @@ func Default() Config {
 			MinVoteCountExactMatch:  defaultMinVoteCountExactMatch,
 		},
 		Commentary: Commentary{
-			Enabled:             false,
 			WhisperXModel:       defaultCommentaryWhisperXModel,
 			SimilarityThreshold: defaultCommentarySimilarityThreshold,
 			ConfidenceThreshold: defaultCommentaryConfidenceThreshold,

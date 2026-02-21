@@ -43,17 +43,15 @@ func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env r
 		)
 	}
 	if logger != nil {
-		choices := []string{"single_file"}
 		decisionReason := "single_file"
 		if len(jobs) > 0 {
-			choices = append(choices, "episodes")
 			decisionReason = "episode_jobs_available"
 		}
 		attrs := []logging.Attr{
 			logging.String(logging.FieldDecisionType, "encoding_job_plan"),
 			logging.String("decision_result", textutil.Ternary(len(jobs) > 0, "episodes", "single_file")),
 			logging.String("decision_reason", decisionReason),
-			logging.String("decision_options", strings.Join(choices, ", ")),
+			logging.String("decision_options", "single_file, episodes"),
 			logging.Int("job_count", len(jobs)),
 		}
 		attrs = appendEncodeJobLines(attrs, jobs)

@@ -82,21 +82,21 @@ func TestCheckJellyfin_MissingKey(t *testing.T) {
 	}
 }
 
-func TestRunAll_NilConfig(t *testing.T) {
-	results := RunAll(context.Background(), nil)
+func TestRunFeatureChecks_NilConfig(t *testing.T) {
+	results := RunFeatureChecks(context.Background(), nil)
 	if results != nil {
 		t.Fatal("expected nil results for nil config")
 	}
 }
 
-func TestRunAll_MinimalConfig(t *testing.T) {
+func TestRunFeatureChecks_MinimalConfig(t *testing.T) {
 	cfg := config.Default()
 	cfg.Paths.StagingDir = t.TempDir()
 	cfg.Paths.LibraryDir = t.TempDir()
 	cfg.Jellyfin.Enabled = false
 	cfg.Commentary.Enabled = false
 
-	results := RunAll(context.Background(), &cfg)
+	results := RunFeatureChecks(context.Background(), &cfg)
 	// Should have staging + library directory checks
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
@@ -108,7 +108,7 @@ func TestRunAll_MinimalConfig(t *testing.T) {
 	}
 }
 
-func TestRunAll_IncludesJellyfinWhenEnabled(t *testing.T) {
+func TestRunFeatureChecks_IncludesJellyfinWhenEnabled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -122,7 +122,7 @@ func TestRunAll_IncludesJellyfinWhenEnabled(t *testing.T) {
 	cfg.Jellyfin.APIKey = "test"
 	cfg.Commentary.Enabled = false
 
-	results := RunAll(context.Background(), &cfg)
+	results := RunFeatureChecks(context.Background(), &cfg)
 	found := false
 	for _, r := range results {
 		if r.Name == "Jellyfin" {

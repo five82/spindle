@@ -13,7 +13,7 @@ import (
 // runPreflightChecks validates external service readiness before processing an item.
 // Returns nil when all checks pass, or an error describing all failures.
 func (m *Manager) runPreflightChecks(ctx context.Context, logger *slog.Logger) error {
-	results := preflight.RunAll(ctx, m.cfg)
+	results := preflight.RunFeatureChecks(ctx, m.cfg)
 	if len(results) == 0 {
 		return nil
 	}

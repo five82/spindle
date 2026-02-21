@@ -325,7 +325,7 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 			tags:    []string{"review"},
 		})
 	default:
-		return fmt.Errorf("unsupported notification event: %s", event)
+		return nil
 	}
 }
 

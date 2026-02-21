@@ -87,8 +87,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	planner := e.ensurePlanner()
-	jobs, err := planner.Plan(ctx, item, env, encodedDir, logger)
+	jobs, err := e.planner.Plan(ctx, item, env, encodedDir, logger)
 	if err != nil {
 		return err
 	}
@@ -109,29 +108,10 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-// ensurePlanner returns the planner, initializing it lazily if needed.
-// Tests may set e.planner directly to inject a stub implementation.
-func (e *Encoder) ensurePlanner() encodePlanner {
-	if e.planner == nil {
-		e.planner = newEncodePlanner()
-	}
-	return e.planner
-}
-
-// ensureRunner returns the Drapto runner, initializing it lazily if needed.
-// Tests may set e.runner directly to inject a stub implementation.
-func (e *Encoder) ensureRunner() *draptoRunner {
-	if e.runner == nil {
-		e.runner = newDraptoRunner(e.cfg, e.client, e.store)
-	}
-	return e.runner
-}
-
 // ensureJobRunner returns the job runner, initializing it lazily if needed.
-// Tests may set e.jobRunner directly to inject a stub implementation.
 func (e *Encoder) ensureJobRunner() *encodeJobRunner {
 	if e.jobRunner == nil {
-		e.jobRunner = newEncodeJobRunner(e.store, e.ensureRunner())
+		e.jobRunner = newEncodeJobRunner(e.store, e.runner)
 	}
 	return e.jobRunner
 }

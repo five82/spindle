@@ -223,11 +223,12 @@ func (r *spindleReporter) BatchComplete(s draptolib.BatchSummary) {
 		Type:      EventTypeBatchComplete,
 		Timestamp: time.Now(),
 		BatchSummary: &BatchSummary{
-			SuccessfulCount:   s.SuccessfulCount,
-			TotalFiles:        s.TotalFiles,
-			TotalOriginalSize: int64(s.TotalOriginalSize),
-			TotalEncodedSize:  int64(s.TotalEncodedSize),
-			TotalDuration:     s.TotalDuration,
+			SuccessfulCount:       s.SuccessfulCount,
+			TotalFiles:            s.TotalFiles,
+			TotalOriginalSize:     int64(s.TotalOriginalSize),
+			TotalEncodedSize:      int64(s.TotalEncodedSize),
+			TotalDuration:         s.TotalDuration,
+			TotalReductionPercent: sizeReduction(s.TotalOriginalSize, s.TotalEncodedSize),
 		},
 	})
 }

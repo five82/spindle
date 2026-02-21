@@ -13,6 +13,7 @@ import (
 	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
 	"spindle/internal/services"
+	"spindle/internal/textutil"
 )
 
 func (s *Service) extractPrimaryAudio(ctx context.Context, source string, audioIndex int, destination string) error {
@@ -137,7 +138,7 @@ func (s *Service) writeToolLog(name string, args []string, stderr string) string
 		return ""
 	}
 	timestamp := time.Now().UTC().Format("20060102T150405.000Z")
-	toolName := sanitizeToolName(name)
+	toolName := textutil.SanitizeToken(filepath.Base(name))
 	if toolName == "" {
 		toolName = "tool"
 	}
@@ -164,13 +165,4 @@ func (s *Service) writeToolLog(name string, args []string, stderr string) string
 		return ""
 	}
 	return path
-}
-
-func sanitizeToolName(value string) string {
-	base := strings.TrimSpace(filepath.Base(value))
-	if base == "" {
-		return ""
-	}
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", " ", "-")
-	return strings.Trim(replacer.Replace(strings.ToLower(base)), "-")
 }
