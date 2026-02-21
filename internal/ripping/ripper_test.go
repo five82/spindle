@@ -511,7 +511,7 @@ type stubRipperClient struct {
 	lastTitleIDs []int
 }
 
-func (s *stubRipperClient) Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
+func (s *stubRipperClient) Rip(ctx context.Context, device, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
 	s.lastTitleIDs = append([]int(nil), titleIDs...)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", err
@@ -534,7 +534,7 @@ type countingRipperClient struct {
 	failOnSecond bool
 }
 
-func (s *countingRipperClient) Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
+func (s *countingRipperClient) Rip(ctx context.Context, device, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
 	s.calls++
 	if s.failOnSecond && s.calls > 1 {
 		return "", errors.New("unexpected second rip call")
@@ -567,7 +567,7 @@ func newBlockingEpisodeRipperClient() *blockingEpisodeRipperClient {
 	}
 }
 
-func (s *blockingEpisodeRipperClient) Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
+func (s *blockingEpisodeRipperClient) Rip(ctx context.Context, device, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", err
 	}
@@ -627,7 +627,7 @@ func (s *stubNotifier) Publish(ctx context.Context, event notifications.Event, p
 
 type failingRipper struct{}
 
-func (f failingRipper) Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
+func (f failingRipper) Rip(ctx context.Context, device, discTitle, destDir string, titleIDs []int, progress func(makemkv.ProgressUpdate)) (string, error) {
 	return "", errors.New("rip failed")
 }
 

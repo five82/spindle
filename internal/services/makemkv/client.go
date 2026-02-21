@@ -29,7 +29,7 @@ type ProgressUpdate struct {
 
 // Ripper defines the behaviour required by the ripping handler.
 type Ripper interface {
-	Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error)
+	Rip(ctx context.Context, device, discTitle, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error)
 }
 
 // Executor abstracts command execution for testability.
@@ -83,7 +83,7 @@ func New(binary string, ripTimeoutSeconds int, opts ...Option) (*Client, error) 
 }
 
 // Rip executes MakeMKV, returning the resulting file path.
-func (c *Client) Rip(ctx context.Context, discTitle, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error) {
+func (c *Client) Rip(ctx context.Context, device, discTitle, destDir string, titleIDs []int, progress func(ProgressUpdate)) (string, error) {
 	if destDir == "" {
 		return "", errors.New("destination directory required")
 	}
@@ -104,13 +104,15 @@ func (c *Client) Rip(ctx context.Context, discTitle, destDir string, titleIDs []
 		defer cancel()
 	}
 
+	deviceArg := normalizeDeviceArg(device)
+
 	if len(titleIDs) == 0 {
-		return c.executeRip(ripCtx, discTitle, destDir, nil, false, progress)
+		return c.executeRip(ripCtx, deviceArg, discTitle, destDir, nil, false, progress)
 	}
 
 	var lastPath string
 	for _, id := range titleIDs {
-		path, err := c.executeRip(ripCtx, discTitle, destDir, []int{id}, multiTitle, progress)
+		path, err := c.executeRip(ripCtx, deviceArg, discTitle, destDir, []int{id}, multiTitle, progress)
 		if err != nil {
 			return "", fmt.Errorf("makemkv rip title %d: %w", id, err)
 		}
@@ -119,7 +121,7 @@ func (c *Client) Rip(ctx context.Context, discTitle, destDir string, titleIDs []
 	return lastPath, nil
 }
 
-func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titleIDs []int, skipRename bool, progress func(ProgressUpdate)) (string, error) {
+func (c *Client) executeRip(ctx context.Context, deviceArg, discTitle, destDir string, titleIDs []int, skipRename bool, progress func(ProgressUpdate)) (string, error) {
 	sanitized := textutil.SanitizeFileName(discTitle)
 	if sanitized == "" {
 		sanitized = "spindle-disc"
@@ -128,6 +130,7 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 
 	if c.logger != nil {
 		c.logger.Debug("makemkv rip starting",
+			slog.String("device", deviceArg),
 			slog.String("disc_title", discTitle),
 			slog.String("sanitized_title", sanitized),
 			slog.String("expected_output", destPath),
@@ -141,7 +144,7 @@ func (c *Client) executeRip(ctx context.Context, discTitle, destDir string, titl
 	if progress != nil {
 		args = append(args, "--progress=-same")
 	}
-	args = append(args, "mkv", "disc:0")
+	args = append(args, "mkv", deviceArg)
 	if len(titleIDs) == 0 {
 		args = append(args, "all")
 	} else {
@@ -731,4 +734,23 @@ func (commandExecutor) Run(ctx context.Context, binary string, args []string, on
 		return fmt.Errorf("wait command: %w", err)
 	}
 	return nil
+}
+
+// normalizeDeviceArg converts a user-configured device path into the format
+// MakeMKV expects.  "/dev/sr0" becomes "dev:/dev/sr0"; values already prefixed
+// with "dev:" or "disc:" are returned as-is; an empty string falls back to
+// "disc:0" for backwards compatibility.
+func normalizeDeviceArg(device string) string {
+	trimmed := strings.TrimSpace(device)
+	if trimmed == "" {
+		return "disc:0"
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "disc:") || strings.HasPrefix(lower, "dev:") {
+		return trimmed
+	}
+	if strings.HasPrefix(lower, "/dev/") {
+		return "dev:" + trimmed
+	}
+	return trimmed
 }

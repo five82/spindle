@@ -376,7 +376,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		}
 
 		makemkvStart := time.Now()
-		path, err := r.client.Rip(ctx, item.DiscTitle, destDir, titleIDs, progressCB)
+		path, err := r.client.Rip(ctx, r.cfg.MakeMKV.OpticalDrive, item.DiscTitle, destDir, titleIDs, progressCB)
 		makemkvDuration = time.Since(makemkvStart)
 		if err != nil {
 			errorAttrs := []logging.Attr{

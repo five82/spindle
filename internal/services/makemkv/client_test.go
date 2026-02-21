@@ -38,7 +38,7 @@ func TestRipErrorsWhenNoOutputProduced(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	_, err = client.Rip(context.Background(), "Sample", tmp, nil, nil)
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Sample", tmp, nil, nil)
 	if err == nil {
 		t.Fatal("expected error when MakeMKV produces no output")
 	}
@@ -52,7 +52,7 @@ func TestRipReturnsExecutorError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
 	}
-	if _, err := client.Rip(context.Background(), "Sample", t.TempDir(), nil, nil); err == nil {
+	if _, err := client.Rip(context.Background(), "/dev/sr0", "Sample", t.TempDir(), nil, nil); err == nil {
 		t.Fatal("expected error from executor")
 	}
 }
@@ -66,7 +66,7 @@ func TestRipSelectsSpecificTitleAndRenamesOutput(t *testing.T) {
 		t.Fatalf("New returned error: %v", err)
 	}
 
-	path, err := client.Rip(context.Background(), "Sample Movie", destDir, []int{0}, nil)
+	path, err := client.Rip(context.Background(), "/dev/sr0", "Sample Movie", destDir, []int{0}, nil)
 	if err != nil {
 		t.Fatalf("Rip returned error: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestRipSelectsSpecificTitleAndRenamesOutput(t *testing.T) {
 		t.Fatalf("expected executor invocation recorded")
 	}
 	gotArgs := exec.args[0]
-	expectedArgs := []string{"--robot", "mkv", "disc:0", "0", destDir}
+	expectedArgs := []string{"--robot", "mkv", "dev:/dev/sr0", "0", destDir}
 	if !equalStrings(gotArgs, expectedArgs) {
 		t.Fatalf("unexpected makemkv args: got %v want %v", gotArgs, expectedArgs)
 	}
@@ -99,7 +99,7 @@ func TestRipSequentialTitles(t *testing.T) {
 	}
 
 	ids := []int{0, 3, 7}
-	path, err := client.Rip(context.Background(), "Sample Show", destDir, ids, nil)
+	path, err := client.Rip(context.Background(), "/dev/sr0", "Sample Show", destDir, ids, nil)
 	if err != nil {
 		t.Fatalf("Rip returned error: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestRipProgressPhaseAttribution(t *testing.T) {
 	}
 
 	var updates []makemkv.ProgressUpdate
-	_, err = client.Rip(context.Background(), "Test", destDir, []int{0}, func(u makemkv.ProgressUpdate) {
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", destDir, []int{0}, func(u makemkv.ProgressUpdate) {
 		updates = append(updates, u)
 	})
 	if err != nil {
@@ -221,7 +221,7 @@ func TestRipProgressDefaultsToAnalyzingBeforePRGT(t *testing.T) {
 	}
 
 	var updates []makemkv.ProgressUpdate
-	_, err = client.Rip(context.Background(), "Test", destDir, []int{0}, func(u makemkv.ProgressUpdate) {
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", destDir, []int{0}, func(u makemkv.ProgressUpdate) {
 		updates = append(updates, u)
 	})
 	if err != nil {
