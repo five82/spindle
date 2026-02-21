@@ -36,7 +36,7 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
 
 1. **Decision anomalies**:
    - Low confidence scores on decisions that were accepted anyway
-   - Unexpected fallbacks (preset fallback, encoding retries)
+   - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
 
 2. **Timing anomalies**:
@@ -50,7 +50,6 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
    - File sizes that seem wrong for the content
 
 4. **LLM decision review**:
-   - Search for `decision_type=preset_llm` entries
    - Search for `decision_type=commentary` entries
    - Search for `decision_type=edition_detection` entries (movies only)
    - Evaluate if confidence levels and reasons make sense for the content
@@ -214,24 +213,6 @@ against the WhisperX output via text-based matching.
    - Count audio streams with "comment" disposition
    - Verify all are properly labeled (see Phase 4)
 
-### Phase 9: Preset Selection Validation
-
-1. **From logs**: Find `preset_decider` or `preset_llm` decision entries
-2. **Review decision**:
-   - What profile was selected? (clean/grain/default)
-   - What was the confidence?
-   - What was the reasoning?
-
-3. **Cross-reference with content**:
-   - Films with intentional grain (older films, certain directors) should use "grain"
-   - Clean digital productions should use "clean"
-   - If unsure, "default" is appropriate
-
-4. **Flag concerns**:
-   - Low confidence selections that weren't defaulted
-   - Profile that seems wrong for the content type
-   - Fallback to default due to errors
-
 ## Log Access Methods
 
 **Via log files** (daemon may be stopped):
@@ -266,7 +247,6 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Missed edition detection | Identification | No `edition_detection` decision for disc with edition markers | Edition not in filename |
 | Wrong edition label | Identification | `edition_label` doesn't match actual edition type | Incorrect filename/subtitle selection |
 | Edition detection LLM failure | Identification | `event_type=edition_llm_failed` | Ambiguous edition not detected |
-| Preset fallback | Encoding | `alert=preset_decider_fallback` | Suboptimal encoding |
 | Wrong crop detection | Encoding | Aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review | Commentary tracks not preserved |
 | Unlabeled commentary | Audio Analysis | Missing title/disposition in ffprobe | Jellyfin won't recognize tracks |
@@ -286,7 +266,6 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Episode runtime matching | Identification | `decision_type=episode_runtime_match` |
 | Edition marker analysis | Identification | No edition markers detected (DEBUG level) |
 | Track selection | Ripping | `decision_type=track_select` per-track |
-| Preset LLM response | Encoding | `decision_type=preset_llm` full prompt/response |
 | Forced subtitle ranking | Subtitles | `decision_type=subtitle_rank` candidate scores (forced subs only) |
 | Forced subtitle edition scoring | Subtitles | `edition=match` or `edition=mismatch` in forced subtitle ranking reasons |
 
@@ -400,5 +379,5 @@ For each audit, complete these steps:
 - [ ] If post-subtitling: verified subtitle track labels (language name, "(Forced)" marker)
 - [ ] If post-subtitling: analyzed subtitle content quality
 - [ ] If movie with edition and forced subs: verified forced subtitle edition matching
-- [ ] Reviewed LLM decisions (preset, commentary, edition) for reasonableness
+- [ ] Reviewed LLM decisions (commentary, edition) for reasonableness
 - [ ] Generated comprehensive report with specific findings
