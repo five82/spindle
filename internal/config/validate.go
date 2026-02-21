@@ -102,6 +102,9 @@ func (c *Config) validateMakeMKV() error {
 	if c.MakeMKV.KeyDBDownloadTimeout <= 0 {
 		return errors.New("makemkv.keydb_download_timeout must be positive (seconds)")
 	}
+	if c.MakeMKV.MinTitleLength < 0 {
+		return errors.New("makemkv.min_title_length must be >= 0")
+	}
 	return nil
 }
 

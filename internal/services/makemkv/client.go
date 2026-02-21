@@ -56,10 +56,22 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
+// WithMinLength configures the --minlength flag passed to makemkvcon.
+// Titles shorter than the given number of seconds are skipped at the source.
+// A value of 0 or negative disables the flag.
+func WithMinLength(seconds int) Option {
+	return func(c *Client) {
+		if seconds > 0 {
+			c.minLength = seconds
+		}
+	}
+}
+
 // Client wraps MakeMKV CLI interactions.
 type Client struct {
 	binary     string
 	ripTimeout time.Duration
+	minLength  int
 	exec       Executor
 	logger     *slog.Logger
 }
@@ -121,7 +133,10 @@ func (c *Client) Rip(ctx context.Context, device, discTitle, destDir string, tit
 	return lastPath, nil
 }
 
-func (c *Client) executeRip(ctx context.Context, deviceArg, discTitle, destDir string, titleIDs []int, skipRename bool, progress func(ProgressUpdate)) (string, error) {
+func (c *Client) executeRip(parentCtx context.Context, deviceArg, discTitle, destDir string, titleIDs []int, skipRename bool, progress func(ProgressUpdate)) (string, error) {
+	ctx, cancelCause := context.WithCancelCause(parentCtx)
+	defer cancelCause(nil)
+
 	sanitized := textutil.SanitizeFileName(discTitle)
 	if sanitized == "" {
 		sanitized = "spindle-disc"
@@ -144,6 +159,9 @@ func (c *Client) executeRip(ctx context.Context, deviceArg, discTitle, destDir s
 	if progress != nil {
 		args = append(args, "--progress=-same")
 	}
+	if c.minLength > 0 {
+		args = append(args, fmt.Sprintf("--minlength=%d", c.minLength))
+	}
 	args = append(args, "mkv", deviceArg)
 	if len(titleIDs) == 0 {
 		args = append(args, "all")
@@ -161,6 +179,7 @@ func (c *Client) executeRip(ctx context.Context, deviceArg, discTitle, destDir s
 	var messages []string
 	var messagesMu sync.Mutex
 	tracker := &progressTracker{}
+	handler := &msgHandler{logger: c.logger, cancelRip: cancelCause}
 
 	if err := c.exec.Run(ctx, c.binary, args, func(line string) {
 		// Capture MSG lines for diagnostics (errors, warnings, info)
@@ -168,21 +187,7 @@ func (c *Client) executeRip(ctx context.Context, deviceArg, discTitle, destDir s
 			messagesMu.Lock()
 			messages = append(messages, line)
 			messagesMu.Unlock()
-			if c.logger != nil {
-				code := parseMSGCode(line)
-				text := parseMSGText(line)
-				if code >= 5000 {
-					c.logger.Warn("makemkv disc error",
-						slog.String("event_type", "makemkv_disc_error"),
-						slog.String("error_hint", "disc may have read errors; check physical media"),
-						slog.String("impact", "rip may produce corrupted or incomplete output"),
-						slog.Int("msg_code", code),
-						slog.String("msg_text", text),
-					)
-				} else {
-					c.logger.Debug("makemkv message", slog.String("msg", line))
-				}
-			}
+			handler.handleMSG(line)
 		}
 		if progress == nil {
 			return
@@ -198,7 +203,23 @@ func (c *Client) executeRip(ctx context.Context, deviceArg, discTitle, destDir s
 				slog.Any("messages", messages),
 			)
 		}
+		// If the handler detected a fatal condition, use its error for better diagnostics
+		if handler.fatalErr != nil {
+			return "", fmt.Errorf("makemkv rip: %w", handler.fatalErr)
+		}
 		return "", fmt.Errorf("makemkv rip: %w", err)
+	}
+
+	// Check for handler-detected fatal errors even when exec.Run succeeds
+	// (e.g., MakeMKV exits 0 but saved 0 titles)
+	if handler.fatalErr != nil {
+		if c.logger != nil && len(messages) > 0 {
+			c.logger.Debug("makemkv messages (fatal condition detected)",
+				slog.Int("message_count", len(messages)),
+				slog.Any("messages", messages),
+			)
+		}
+		return "", fmt.Errorf("makemkv rip: %w", handler.fatalErr)
 	}
 
 	candidates, err := gatherMKVEntries(destDir)

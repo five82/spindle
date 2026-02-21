@@ -14,6 +14,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/disc"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -38,7 +39,10 @@ type Ripper struct {
 // NewRipper constructs the ripping handler using default dependencies.
 func NewRipper(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Ripper {
 	componentLogger := logging.NewComponentLogger(logger, "makemkv")
-	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKV.RipTimeout, makemkv.WithLogger(componentLogger))
+	client, err := makemkv.New(cfg.MakemkvBinary(), cfg.MakeMKV.RipTimeout,
+		makemkv.WithLogger(componentLogger),
+		makemkv.WithMinLength(cfg.MakeMKV.MinTitleLength),
+	)
 	if err != nil {
 		logger.Warn("makemkv client unavailable; ripping disabled",
 			logging.Error(err),
@@ -349,6 +353,26 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				err,
 			)
 		}
+		devicePath := disc.ExtractDevicePath(r.cfg.MakeMKV.OpticalDrive)
+		if strings.HasPrefix(devicePath, "/dev/") {
+			logger.Debug("checking drive readiness", logging.String("device", devicePath))
+			status, waitErr := disc.WaitForReady(ctx, devicePath)
+			if waitErr != nil {
+				return services.Wrap(services.ErrExternalTool, "ripping",
+					"drive readiness check",
+					fmt.Sprintf("Drive not ready (status: %s); ensure disc is inserted and tray is closed", status),
+					waitErr)
+			}
+			logger.Info("drive ready for ripping",
+				logging.String(logging.FieldEventType, "drive_ready"),
+				logging.String("device", devicePath),
+				logging.String("drive_status", status.String()),
+			)
+		} else {
+			logger.Debug("skipping drive readiness check; no /dev/ device path for configured drive",
+				logging.String("optical_drive", r.cfg.MakeMKV.OpticalDrive))
+		}
+
 		titleIDs = r.selectTitleIDs(item, logger)
 		launchAttrs := []logging.Attr{
 			logging.String(logging.FieldEventType, "makemkv_rip_started"),

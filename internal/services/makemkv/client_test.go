@@ -235,6 +235,207 @@ func TestRipProgressDefaultsToAnalyzingBeforePRGT(t *testing.T) {
 	}
 }
 
+// --- MSG code handling tests ---
+
+// contextAwareExecutor respects context cancellation (simulates how the real
+// executor aborts when the context is cancelled by msgHandler).
+type contextAwareExecutor struct {
+	lines []string
+}
+
+func (e *contextAwareExecutor) Run(ctx context.Context, binary string, args []string, onStdout func(string)) error {
+	destDir := args[len(args)-1]
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
+	for _, line := range e.lines {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if onStdout != nil {
+			onStdout(line)
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	// Create output file unless context was cancelled
+	titleArg := args[len(args)-2]
+	id, _ := strconv.Atoi(titleArg)
+	filePath := filepath.Join(destDir, fmt.Sprintf("title_t%02d.mkv", id))
+	return os.WriteFile(filePath, []byte("rip"), 0o644)
+}
+
+func TestMSGLicenseExpiredAborts(t *testing.T) {
+	exec := &contextAwareExecutor{lines: []string{
+		`MSG:5021,0,1,"This application version is too old","",""`,
+	}}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", t.TempDir(), []int{0}, nil)
+	if err == nil {
+		t.Fatal("expected error for expired license")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "license") &&
+		!strings.Contains(strings.ToLower(err.Error()), "too old") {
+		t.Fatalf("expected license-related error, got: %v", err)
+	}
+}
+
+func TestMSGRipCompletedZeroTitles(t *testing.T) {
+	// MSG:5004 with 0 saved, 0 failed — MakeMKV exits 0 but nothing was saved.
+	exec := &contextAwareExecutor{lines: []string{
+		`MSG:5004,0,2,"Copy complete. 0 titles saved, 0 failed.","%1 titles saved, %2 failed.","0","0"`,
+	}}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", t.TempDir(), []int{0}, nil)
+	if err == nil {
+		t.Fatal("expected error for zero titles saved")
+	}
+	if !strings.Contains(err.Error(), "0 titles") {
+		t.Fatalf("expected zero-titles error, got: %v", err)
+	}
+}
+
+func TestMSGRipCompletedSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	destDir := filepath.Join(tmp, "dest")
+	exec := &progressCapturingExecutor{lines: []string{
+		`MSG:5004,0,2,"Copy complete. 3 titles saved, 0 failed.","%1 titles saved, %2 failed.","3","0"`,
+	}}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", destDir, []int{0}, nil)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+}
+
+func TestMSGReadErrorNonFatal(t *testing.T) {
+	tmp := t.TempDir()
+	destDir := filepath.Join(tmp, "dest")
+	exec := &progressCapturingExecutor{lines: []string{
+		`MSG:2003,0,1,"Read error at sector 12345","",""`,
+	}}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", destDir, []int{0}, nil)
+	if err != nil {
+		t.Fatalf("read error should not be fatal, got: %v", err)
+	}
+}
+
+func TestMSGWriteErrorFatal(t *testing.T) {
+	exec := &contextAwareExecutor{lines: []string{
+		`MSG:2019,0,1,"Write error: No such file or directory","",""`,
+	}}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", t.TempDir(), []int{0}, nil)
+	if err == nil {
+		t.Fatal("expected error for write error with 'No such file'")
+	}
+	if !strings.Contains(err.Error(), "No such file") {
+		t.Fatalf("expected 'No such file' in error, got: %v", err)
+	}
+}
+
+func TestMSGEvalSharewareExpiredAborts(t *testing.T) {
+	exec := &contextAwareExecutor{lines: []string{
+		`MSG:5055,0,1,"Evaluation period has expired","",""`,
+	}}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", t.TempDir(), []int{0}, nil)
+	if err == nil {
+		t.Fatal("expected error for expired shareware")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "license") &&
+		!strings.Contains(strings.ToLower(err.Error()), "expired") {
+		t.Fatalf("expected license-related error, got: %v", err)
+	}
+}
+
+func TestParseMSGSprintf(t *testing.T) {
+	line := `MSG:5004,0,2,"Copy complete. 3 titles saved, 1 failed.","%1 titles saved, %2 failed.","3","1"`
+	saved, failed := makemkv.ParseMSGSprintf(line)
+	if saved != 3 {
+		t.Errorf("expected saved=3, got %d", saved)
+	}
+	if failed != 1 {
+		t.Errorf("expected failed=1, got %d", failed)
+	}
+}
+
+func TestRipMinLengthIncluded(t *testing.T) {
+	tmp := t.TempDir()
+	destDir := filepath.Join(tmp, "dest")
+	exec := &fileCreatingExecutor{}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec), makemkv.WithMinLength(120))
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", destDir, []int{0}, nil)
+	if err != nil {
+		t.Fatalf("Rip returned error: %v", err)
+	}
+	if len(exec.args) != 1 {
+		t.Fatalf("expected 1 invocation, got %d", len(exec.args))
+	}
+	args := exec.args[0]
+	found := false
+	for _, a := range args {
+		if a == "--minlength=120" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected --minlength=120 in args, got %v", args)
+	}
+}
+
+func TestRipMinLengthExcludedWhenZero(t *testing.T) {
+	tmp := t.TempDir()
+	destDir := filepath.Join(tmp, "dest")
+	exec := &fileCreatingExecutor{}
+	client, err := makemkv.New("makemkvcon", 5, makemkv.WithExecutor(exec), makemkv.WithMinLength(0))
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	_, err = client.Rip(context.Background(), "/dev/sr0", "Test", destDir, []int{0}, nil)
+	if err != nil {
+		t.Fatalf("Rip returned error: %v", err)
+	}
+	if len(exec.args) != 1 {
+		t.Fatalf("expected 1 invocation, got %d", len(exec.args))
+	}
+	for _, a := range exec.args[0] {
+		if strings.HasPrefix(a, "--minlength") {
+			t.Fatalf("did not expect --minlength in args when 0, got %v", exec.args[0])
+		}
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

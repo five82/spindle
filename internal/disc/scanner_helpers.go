@@ -67,6 +67,13 @@ func normalizeDeviceArg(device string) string {
 	return trimmed
 }
 
+// ExtractDevicePath returns the raw /dev path from a device string.
+// For "dev:/dev/sr0" returns "/dev/sr0", for "/dev/sr0" returns "/dev/sr0",
+// for "disc:N" returns "" (no raw device path available).
+func ExtractDevicePath(device string) string {
+	return extractDevicePath(device)
+}
+
 func extractDevicePath(device string) string {
 	trimmed := strings.TrimSpace(device)
 	if strings.HasPrefix(trimmed, "/dev/") {
