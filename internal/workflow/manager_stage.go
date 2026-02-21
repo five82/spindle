@@ -101,18 +101,17 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 		return wrapped
 	}
 
-	// Pause disc monitoring and close the netlink socket during stages that
-	// access the optical drive. The active netlink socket interferes with
-	// MakeMKV's libdrive I/O and causes rip failures.
-	discAccess := stage.name == "identifier" || stage.name == "ripper"
-	if discAccess && m.discHooks != nil {
-		m.discHooks.BeforeDiscAccess()
+	// Pause disc monitoring during ripping to avoid concurrent device access
+	// that can cause read errors (L-EC uncorrectable errors).
+	isRipper := stage.name == "ripper"
+	if isRipper && m.ripHooks != nil {
+		m.ripHooks.BeforeRip()
 	}
 
 	execErr := m.executeWithHeartbeat(ctx, handler, item)
 
-	if discAccess && m.discHooks != nil {
-		m.discHooks.AfterDiscAccess()
+	if isRipper && m.ripHooks != nil {
+		m.ripHooks.AfterRip()
 	}
 
 	if execErr != nil {

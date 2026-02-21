@@ -57,48 +57,6 @@ func TestNetlinkMonitorRunning(t *testing.T) {
 	})
 }
 
-func TestNetlinkMonitorStopStartIdempotency(t *testing.T) {
-	t.Run("stop on nil monitor is safe", func(t *testing.T) {
-		var m *netlinkMonitor
-		m.Stop() // must not panic
-	})
-
-	t.Run("start on nil monitor is safe", func(t *testing.T) {
-		var m *netlinkMonitor
-		if err := m.Start(context.Background()); err != nil {
-			t.Fatalf("Start on nil monitor should return nil, got: %v", err)
-		}
-	})
-
-	t.Run("stop on unstarted monitor is safe", func(t *testing.T) {
-		cfg := &config.Config{}
-		cfg.MakeMKV.OpticalDrive = "/dev/sr0"
-		m := newNetlinkMonitor(cfg, nil, nil, nil)
-		m.Stop() // must not panic
-		if m.Running() {
-			t.Error("expected Running() to return false after Stop on unstarted monitor")
-		}
-	})
-
-	t.Run("double stop is safe", func(t *testing.T) {
-		cfg := &config.Config{}
-		cfg.MakeMKV.OpticalDrive = "/dev/sr0"
-		m := newNetlinkMonitor(cfg, nil, nil, nil)
-		m.Stop() // first stop on unstarted
-		m.Stop() // second stop - must not panic
-	})
-
-	t.Run("start after stop without prior start is safe", func(t *testing.T) {
-		cfg := &config.Config{}
-		cfg.MakeMKV.OpticalDrive = "/dev/sr0"
-		m := newNetlinkMonitor(cfg, nil, nil, nil)
-		m.Stop()
-		// Start will try to connect to netlink (will fail in test env without privileges)
-		// but should not panic or return a hard error (non-fatal by design)
-		_ = m.Start(context.Background())
-	})
-}
-
 func TestBuildMatcher(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.MakeMKV.OpticalDrive = "/dev/sr0"
