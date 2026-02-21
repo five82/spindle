@@ -22,21 +22,19 @@ type encodeJob struct {
 }
 
 type encodePlanner interface {
-	Plan(ctx context.Context, item *queue.Item, env ripspec.Envelope, encodedDir string, logger *slog.Logger) ([]encodeJob, presetDecision, error)
+	Plan(ctx context.Context, item *queue.Item, env ripspec.Envelope, encodedDir string, logger *slog.Logger) ([]encodeJob, error)
 }
 
-type defaultEncodePlanner struct {
-	selectPreset func(ctx context.Context, item *queue.Item, sampleSource string, logger *slog.Logger) presetDecision
+type defaultEncodePlanner struct{}
+
+func newEncodePlanner() encodePlanner {
+	return &defaultEncodePlanner{}
 }
 
-func newEncodePlanner(selectPreset func(ctx context.Context, item *queue.Item, sampleSource string, logger *slog.Logger) presetDecision) encodePlanner {
-	return &defaultEncodePlanner{selectPreset: selectPreset}
-}
-
-func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env ripspec.Envelope, encodedDir string, logger *slog.Logger) ([]encodeJob, presetDecision, error) {
+func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env ripspec.Envelope, encodedDir string, logger *slog.Logger) ([]encodeJob, error) {
 	jobs, err := buildEncodeJobs(env, encodedDir)
 	if err != nil {
-		return nil, presetDecision{}, services.Wrap(
+		return nil, services.Wrap(
 			services.ErrValidation,
 			"encoding",
 			"plan encode jobs",
@@ -62,34 +60,7 @@ func (p *defaultEncodePlanner) Plan(ctx context.Context, item *queue.Item, env r
 		logger.Info("encoding job plan", logging.Args(attrs...)...)
 	}
 
-	sampleSource := strings.TrimSpace(item.RippedFile)
-	sampleSourceSource := "ripped_file"
-	if len(jobs) > 0 {
-		sampleSource = strings.TrimSpace(jobs[0].Source)
-		sampleSourceSource = "first_episode_source"
-	}
-	var decision presetDecision
-	if p != nil && p.selectPreset != nil {
-		decision = p.selectPreset(ctx, item, sampleSource, logger)
-	}
-	if profile := strings.TrimSpace(decision.Profile); profile != "" {
-		item.DraptoPresetProfile = profile
-	} else {
-		item.DraptoPresetProfile = "default"
-	}
-	if logger != nil {
-		logger.Info(
-			"encoding preset profile selected",
-			logging.String(logging.FieldDecisionType, "encoding_preset_profile"),
-			logging.String("decision_result", strings.TrimSpace(item.DraptoPresetProfile)),
-			logging.String("decision_reason", textutil.Ternary(decision.Applied, "preset_decider", "default")),
-			logging.String("decision_options", "default, preset_decider"),
-			logging.String("sample_source", sampleSource),
-			logging.String("sample_source_reason", sampleSourceSource),
-		)
-	}
-
-	return jobs, decision, nil
+	return jobs, nil
 }
 
 func buildEncodeJobs(env ripspec.Envelope, encodedDir string) ([]encodeJob, error) {

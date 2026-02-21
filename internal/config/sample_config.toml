@@ -109,16 +109,15 @@ keydb_download_url = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
 keydb_download_timeout = 1500                        # Download timeout in seconds
 
 # ============================================================================
-# PRESET DECIDER (LLM-based encoding preset selection)
+# LLM (shared settings for AI-powered features)
 # ============================================================================
 
-[preset_decider]
-enabled = false                                      # Use LLM to choose Drapto presets per title
-api_key = ""                                         # Required when enabled; or set OPENROUTER_API_KEY
+[llm]
+api_key = ""                                         # OpenRouter API key (or set OPENROUTER_API_KEY env var)
 base_url = "https://openrouter.ai/api/v1/chat/completions"
 model = "google/gemini-3-flash-preview"             # OpenRouter model identifier
 referer = "https://github.com/five82/spindle"        # Sent to OpenRouter for routing/analytics
-title = "Spindle Preset Decider"                     # Display name sent via X-Title header
+title = "Spindle"                                    # Display name sent via X-Title header
 timeout_seconds = 60                                 # HTTP timeout (seconds)
 
 # ============================================================================
@@ -130,7 +129,7 @@ enabled = false                                      # Enable commentary track d
 whisperx_model = "large-v3-turbo"                    # Whisper model for transcription (defaults to subtitles model)
 similarity_threshold = 0.92                          # Cosine similarity above which track is a stereo downmix (not commentary)
 confidence_threshold = 0.80                          # LLM confidence required to classify as commentary
-# LLM settings - if not set, falls back to preset_decider settings above
+# LLM settings - if not set, falls back to [llm] settings above
 # api_key = ""
 # base_url = ""
 # model = ""

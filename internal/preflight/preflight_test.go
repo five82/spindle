@@ -82,32 +82,6 @@ func TestCheckJellyfin_MissingKey(t *testing.T) {
 	}
 }
 
-func TestCommentaryUsesDistinctLLM(t *testing.T) {
-	cfg := config.Default()
-
-	// With no commentary-specific settings, falls back to preset decider = same
-	cfg.PresetDecider.APIKey = "key1"
-	cfg.PresetDecider.BaseURL = "https://example.com"
-	cfg.Commentary.APIKey = ""
-	cfg.Commentary.BaseURL = ""
-	if commentaryUsesDistinctLLM(&cfg) {
-		t.Fatal("expected false when commentary falls back to preset settings")
-	}
-
-	// Distinct API key
-	cfg.Commentary.APIKey = "key2"
-	if !commentaryUsesDistinctLLM(&cfg) {
-		t.Fatal("expected true when commentary has different API key")
-	}
-
-	// Same key, distinct base URL
-	cfg.Commentary.APIKey = ""
-	cfg.Commentary.BaseURL = "https://other.com"
-	if !commentaryUsesDistinctLLM(&cfg) {
-		t.Fatal("expected true when commentary has different base URL")
-	}
-}
-
 func TestRunAll_NilConfig(t *testing.T) {
 	results := RunAll(context.Background(), nil)
 	if results != nil {
@@ -120,7 +94,6 @@ func TestRunAll_MinimalConfig(t *testing.T) {
 	cfg.Paths.StagingDir = t.TempDir()
 	cfg.Paths.LibraryDir = t.TempDir()
 	cfg.Jellyfin.Enabled = false
-	cfg.PresetDecider.Enabled = false
 	cfg.Commentary.Enabled = false
 
 	results := RunAll(context.Background(), &cfg)
@@ -147,7 +120,6 @@ func TestRunAll_IncludesJellyfinWhenEnabled(t *testing.T) {
 	cfg.Jellyfin.Enabled = true
 	cfg.Jellyfin.URL = srv.URL
 	cfg.Jellyfin.APIKey = "test"
-	cfg.PresetDecider.Enabled = false
 	cfg.Commentary.Enabled = false
 
 	results := RunAll(context.Background(), &cfg)

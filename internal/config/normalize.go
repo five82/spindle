@@ -28,7 +28,7 @@ func (c *Config) normalize() error {
 	if err := c.normalizeMakeMKV(); err != nil {
 		return err
 	}
-	if err := c.normalizePresetDecider(); err != nil {
+	if err := c.normalizeLLM(); err != nil {
 		return err
 	}
 	c.normalizeLogging()
@@ -188,35 +188,31 @@ func (c *Config) normalizeMakeMKV() error {
 	return nil
 }
 
-func (c *Config) normalizePresetDecider() error {
-	c.PresetDecider.BaseURL = strings.TrimSpace(c.PresetDecider.BaseURL)
-	if c.PresetDecider.BaseURL == "" {
-		c.PresetDecider.BaseURL = defaultPresetDeciderBaseURL
+func (c *Config) normalizeLLM() error {
+	c.LLM.BaseURL = strings.TrimSpace(c.LLM.BaseURL)
+	if c.LLM.BaseURL == "" {
+		c.LLM.BaseURL = defaultLLMBaseURL
 	}
-	c.PresetDecider.Model = strings.TrimSpace(c.PresetDecider.Model)
-	if c.PresetDecider.Model == "" {
-		c.PresetDecider.Model = defaultPresetDeciderModel
+	c.LLM.Model = strings.TrimSpace(c.LLM.Model)
+	if c.LLM.Model == "" {
+		c.LLM.Model = defaultLLMModel
 	}
-	c.PresetDecider.Referer = strings.TrimSpace(c.PresetDecider.Referer)
-	if c.PresetDecider.Referer == "" {
-		c.PresetDecider.Referer = defaultPresetDeciderReferer
+	c.LLM.Referer = strings.TrimSpace(c.LLM.Referer)
+	if c.LLM.Referer == "" {
+		c.LLM.Referer = defaultLLMReferer
 	}
-	c.PresetDecider.Title = strings.TrimSpace(c.PresetDecider.Title)
-	if c.PresetDecider.Title == "" {
-		c.PresetDecider.Title = defaultPresetDeciderTitle
+	c.LLM.Title = strings.TrimSpace(c.LLM.Title)
+	if c.LLM.Title == "" {
+		c.LLM.Title = defaultLLMTitle
 	}
-	if c.PresetDecider.TimeoutSeconds <= 0 {
-		c.PresetDecider.TimeoutSeconds = defaultPresetDeciderTimeoutSeconds
+	if c.LLM.TimeoutSeconds <= 0 {
+		c.LLM.TimeoutSeconds = defaultLLMTimeoutSeconds
 	}
-	// Environment variables override config file for API keys (security best practice)
-	if value, ok := os.LookupEnv("PRESET_DECIDER_API_KEY"); ok {
-		c.PresetDecider.APIKey = strings.TrimSpace(value)
-	} else if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
-		c.PresetDecider.APIKey = strings.TrimSpace(value)
-	} else if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
-		c.PresetDecider.APIKey = strings.TrimSpace(value)
+	// Environment variable overrides config file for API key (security best practice)
+	if value, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
+		c.LLM.APIKey = strings.TrimSpace(value)
 	} else {
-		c.PresetDecider.APIKey = strings.TrimSpace(c.PresetDecider.APIKey)
+		c.LLM.APIKey = strings.TrimSpace(c.LLM.APIKey)
 	}
 	return nil
 }

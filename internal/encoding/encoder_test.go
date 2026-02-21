@@ -362,13 +362,11 @@ func TestEncoderHealthMissingClient(t *testing.T) {
 }
 
 type stubDraptoClient struct {
-	called        bool
-	presetProfile string
+	called bool
 }
 
 func (s *stubDraptoClient) Encode(ctx context.Context, inputPath, outputDir string, opts drapto.EncodeOptions) (string, error) {
 	s.called = true
-	s.presetProfile = opts.PresetProfile
 	if opts.Progress != nil {
 		opts.Progress(drapto.ProgressUpdate{Stage: "Encoding", Percent: 50, Message: "Halfway"})
 	}

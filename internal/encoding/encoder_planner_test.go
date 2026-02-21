@@ -12,22 +12,21 @@ import (
 )
 
 type fakePlanner struct {
-	jobs     []encodeJob
-	decision presetDecision
-	err      error
-	called   bool
+	jobs   []encodeJob
+	err    error
+	called bool
 }
 
-func (f *fakePlanner) Plan(ctx context.Context, item *queue.Item, env ripspec.Envelope, encodedDir string, logger *slog.Logger) ([]encodeJob, presetDecision, error) {
+func (f *fakePlanner) Plan(ctx context.Context, item *queue.Item, env ripspec.Envelope, encodedDir string, logger *slog.Logger) ([]encodeJob, error) {
 	f.called = true
-	return f.jobs, f.decision, f.err
+	return f.jobs, f.err
 }
 
 func TestEncoderUsesPlannerOverride(t *testing.T) {
 	cfg := testsupport.NewConfig(t, testsupport.WithStubbedBinaries())
 	store := testsupport.MustOpenStore(t, cfg)
 	enc := NewEncoderWithDependencies(cfg, store, slog.Default(), nil, nil)
-	planner := &fakePlanner{jobs: nil, decision: presetDecision{Profile: "grain"}}
+	planner := &fakePlanner{jobs: nil}
 	enc.planner = planner
 	item := &queue.Item{RippedFile: "movie.mkv", RipSpecData: `{}`, Status: queue.StatusIdentified}
 	if err := enc.Execute(context.Background(), item); err == nil {
@@ -36,5 +35,4 @@ func TestEncoderUsesPlannerOverride(t *testing.T) {
 	if !planner.called {
 		t.Fatalf("expected planner to be called")
 	}
-	// Planner may set profile; ensure it runs without panicking for override.
 }

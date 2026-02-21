@@ -413,42 +413,10 @@ func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
 			Detail:      check.Detail,
 		})
 	}
-	if cfg.PresetDecider.Enabled {
-		statuses = append(statuses, presetDeciderDependencyStatus(cfg))
-	}
 	if cfg.Commentary.Enabled {
 		statuses = append(statuses, commentaryLLMDependencyStatus(cfg))
 	}
 	return statuses
-}
-
-func presetDeciderDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
-	status := ipc.DependencyStatus{
-		Name:        "Preset Decider",
-		Description: "LLM-driven Drapto preset selector",
-		Optional:    true,
-	}
-	key := strings.TrimSpace(cfg.PresetDecider.APIKey)
-	if key == "" {
-		status.Detail = "API key missing (set preset_decider_api_key or OPENROUTER_API_KEY)"
-		return status
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	client := llm.NewClient(llm.Config{
-		APIKey:  key,
-		BaseURL: cfg.PresetDecider.BaseURL,
-		Model:   cfg.PresetDecider.Model,
-		Referer: cfg.PresetDecider.Referer,
-		Title:   cfg.PresetDecider.Title,
-	})
-	if err := client.HealthCheck(ctx); err != nil {
-		status.Detail = summarizePresetDeciderError(err)
-		return status
-	}
-	status.Available = true
-	status.Detail = "API reachable"
-	return status
 }
 
 func commentaryLLMDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
@@ -459,7 +427,7 @@ func commentaryLLMDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 	}
 	llmCfg := cfg.CommentaryLLM()
 	if llmCfg.APIKey == "" {
-		status.Detail = "API key missing (set commentary.api_key or preset_decider.api_key)"
+		status.Detail = "API key missing (set commentary.api_key or llm.api_key)"
 		return status
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -472,7 +440,7 @@ func commentaryLLMDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 		Title:   llmCfg.Title,
 	})
 	if err := client.HealthCheck(ctx); err != nil {
-		status.Detail = summarizePresetDeciderError(err)
+		status.Detail = summarizeLLMHealthError(err)
 		return status
 	}
 	status.Available = true
@@ -480,7 +448,7 @@ func commentaryLLMDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 	return status
 }
 
-func summarizePresetDeciderError(err error) string {
+func summarizeLLMHealthError(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "health check timed out (LLM API unresponsive)"
 	}

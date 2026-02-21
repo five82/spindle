@@ -19,7 +19,6 @@ type QueueItem struct {
 	ProcessingLane          string                    `json:"processingLane"`
 	Progress                QueueProgress             `json:"progress"`
 	Encoding                *EncodingStatus           `json:"encoding,omitempty"`
-	DraptoPresetProfile     string                    `json:"draptoPresetProfile,omitempty"`
 	ErrorMessage            string                    `json:"errorMessage"`
 	CreatedAt               string                    `json:"createdAt,omitempty"`
 	UpdatedAt               string                    `json:"updatedAt,omitempty"`

@@ -519,7 +519,7 @@ func (i *Identifier) detectMovieEdition(ctx context.Context, logger *slog.Logger
 	}
 
 	// Step 3: LLM fallback for ambiguous cases
-	llmCfg := i.cfg.PresetLLM()
+	llmCfg := i.cfg.GetLLM()
 	if llmCfg.APIKey == "" {
 		// LLM not configured - skip ambiguous editions
 		logger.Debug("edition detection skipped for ambiguous title",

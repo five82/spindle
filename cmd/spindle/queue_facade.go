@@ -484,7 +484,6 @@ func convertDTOQueueItem(item api.QueueItem) queueItemDetailsView {
 		ProgressStage:   item.Progress.Stage,
 		ProgressPercent: item.Progress.Percent,
 		ProgressMessage: item.Progress.Message,
-		DraptoPreset:    item.DraptoPresetProfile,
 		ErrorMessage:    item.ErrorMessage,
 		NeedsReview:     item.NeedsReview,
 		ReviewReason:    item.ReviewReason,

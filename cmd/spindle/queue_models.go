@@ -15,7 +15,6 @@ type queueItemDetailsView struct {
 	ProgressStage   string             `json:"progress_stage,omitempty"`
 	ProgressPercent float64            `json:"progress_percent,omitempty"`
 	ProgressMessage string             `json:"progress_message,omitempty"`
-	DraptoPreset    string             `json:"drapto_preset"`
 	ErrorMessage    string             `json:"error_message,omitempty"`
 	NeedsReview     bool               `json:"needs_review"`
 	ReviewReason    string             `json:"review_reason,omitempty"`

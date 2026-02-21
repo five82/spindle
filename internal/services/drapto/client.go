@@ -173,6 +173,5 @@ type Client interface {
 
 // EncodeOptions configures how the encoder should run.
 type EncodeOptions struct {
-	Progress      func(ProgressUpdate)
-	PresetProfile string
+	Progress func(ProgressUpdate)
 }

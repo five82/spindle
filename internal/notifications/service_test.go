@@ -73,10 +73,9 @@ func TestNtfyServiceFormatsPayloads(t *testing.T) {
 				"inputBytes":  int64(1000),
 				"outputBytes": int64(500),
 				"files":       1,
-				"preset":      "default",
 			},
 			expectTitle:   "Spindle - Encoded",
-			expectMessage: "🎞️ Encoding complete: The Matrix\nPreset: default\nOutput: 500 B of 1000 B (50.0%)",
+			expectMessage: "🎞️ Encoding complete: The Matrix\nOutput: 500 B of 1000 B (50.0%)",
 			expectTags:    "encode",
 		},
 		{

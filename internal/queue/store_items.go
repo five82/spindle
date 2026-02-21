@@ -93,7 +93,7 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
         SET source_path = ?, disc_title = ?, status = ?, failed_at_status = ?, media_info_json = ?,
             ripped_file = ?, encoded_file = ?, final_file = ?, item_log_path = ?, error_message = ?,
             active_episode_key = ?,
-            updated_at = ?, progress_stage = ?, progress_percent = ?, progress_message = ?, encoding_details_json = ?, drapto_preset_profile = ?,
+            updated_at = ?, progress_stage = ?, progress_percent = ?, progress_message = ?, encoding_details_json = ?,
             rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?, last_heartbeat = ?,
             needs_review = ?, review_reason = ?
          WHERE id = ?`,
@@ -113,7 +113,6 @@ func (s *Store) Update(ctx context.Context, item *Item) error {
 		item.ProgressPercent,
 		nullableString(item.ProgressMessage),
 		nullableString(item.EncodingDetailsJSON),
-		nullableString(item.DraptoPresetProfile),
 		nullableString(item.RipSpecData),
 		nullableString(item.DiscFingerprint),
 		nullableString(item.MetadataJSON),
@@ -160,7 +159,7 @@ func (s *Store) UpdateProgress(ctx context.Context, item *Item) error {
 	if err := s.execWithoutResultRetry(
 		ctx,
 		`UPDATE queue_items
-        SET progress_stage = ?, progress_percent = ?, progress_message = ?, progress_bytes_copied = ?, progress_total_bytes = ?, encoding_details_json = ?, drapto_preset_profile = ?, active_episode_key = ?, updated_at = ?
+        SET progress_stage = ?, progress_percent = ?, progress_message = ?, progress_bytes_copied = ?, progress_total_bytes = ?, encoding_details_json = ?, active_episode_key = ?, updated_at = ?
         WHERE id = ?`,
 		nullableString(item.ProgressStage),
 		item.ProgressPercent,
@@ -168,7 +167,6 @@ func (s *Store) UpdateProgress(ctx context.Context, item *Item) error {
 		item.ProgressBytesCopied,
 		item.ProgressTotalBytes,
 		nullableString(item.EncodingDetailsJSON),
-		nullableString(item.DraptoPresetProfile),
 		nullableString(item.ActiveEpisodeKey),
 		nowTimestamp(),
 		item.ID,

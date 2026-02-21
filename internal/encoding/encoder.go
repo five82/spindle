@@ -26,16 +26,15 @@ import (
 
 // Encoder manages Drapto encoding of ripped files.
 type Encoder struct {
-	store            *queue.Store
-	cfg              *config.Config
-	logger           *slog.Logger
-	client           drapto.Client
-	notifier         notifications.Service
-	cache            *ripcache.Manager
-	presetClassifier presetClassifier
-	runner           *draptoRunner
-	planner          encodePlanner
-	jobRunner        *encodeJobRunner
+	store     *queue.Store
+	cfg       *config.Config
+	logger    *slog.Logger
+	client    drapto.Client
+	notifier  notifications.Service
+	cache     *ripcache.Manager
+	runner    *draptoRunner
+	planner   encodePlanner
+	jobRunner *encodeJobRunner
 }
 
 // NewEncoder constructs the encoding handler.
@@ -54,10 +53,7 @@ func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *
 		cache:    ripcache.NewManager(cfg, logger),
 	}
 	enc.runner = newDraptoRunner(cfg, client, store)
-	if cfg != nil && cfg.PresetDecider.Enabled {
-		enc.presetClassifier = newPresetLLMClassifier(cfg)
-	}
-	enc.planner = newEncodePlanner(enc.selectPreset)
+	enc.planner = newEncodePlanner()
 	enc.SetLogger(logger)
 	return enc
 }
@@ -73,7 +69,6 @@ func (e *Encoder) SetLogger(logger *slog.Logger) {
 func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
 	item.InitProgress("Encoding", "Starting Drapto encoding")
-	item.DraptoPresetProfile = ""
 	logger.Debug("starting encoding preparation")
 	return nil
 }
@@ -93,12 +88,12 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	planner := e.ensurePlanner()
-	jobs, decision, err := planner.Plan(ctx, item, env, encodedDir, logger)
+	jobs, err := planner.Plan(ctx, item, env, encodedDir, logger)
 	if err != nil {
 		return err
 	}
 
-	encodedPaths, err := e.runEncodingJobs(ctx, item, env, jobs, decision, stagingRoot, encodedDir, logger)
+	encodedPaths, err := e.runEncodingJobs(ctx, item, env, jobs, stagingRoot, encodedDir, logger)
 	if err != nil {
 		return err
 	}
@@ -108,8 +103,8 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	e.finalizeEncodedItem(item, env, encodedPaths, decision, logger)
-	e.reportEncodingSummary(ctx, item, encodedPaths, stageStart, decision, logger)
+	e.finalizeEncodedItem(item, env, encodedPaths, logger)
+	e.reportEncodingSummary(ctx, item, encodedPaths, stageStart, logger)
 
 	return nil
 }
@@ -118,7 +113,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 // Tests may set e.planner directly to inject a stub implementation.
 func (e *Encoder) ensurePlanner() encodePlanner {
 	if e.planner == nil {
-		e.planner = newEncodePlanner(e.selectPreset)
+		e.planner = newEncodePlanner()
 	}
 	return e.planner
 }
@@ -209,12 +204,12 @@ func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item,
 }
 
 // runEncodingJobs encodes all jobs (episodes or single file) and returns the output paths and sources used.
-func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
-	return e.ensureJobRunner().Run(ctx, item, env, jobs, decision, stagingRoot, encodedDir, logger)
+func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+	return e.ensureJobRunner().Run(ctx, item, env, jobs, stagingRoot, encodedDir, logger)
 }
 
 // finalizeEncodedItem updates the queue item with encoding results.
-func (e *Encoder) finalizeEncodedItem(item *queue.Item, env ripspec.Envelope, encodedPaths []string, decision presetDecision, logger *slog.Logger) {
+func (e *Encoder) finalizeEncodedItem(item *queue.Item, env ripspec.Envelope, encodedPaths []string, logger *slog.Logger) {
 	if encoded, err := env.Encode(); err == nil {
 		item.RipSpecData = encoded
 	} else {
@@ -238,14 +233,10 @@ func (e *Encoder) finalizeEncodedItem(item *queue.Item, env ripspec.Envelope, en
 	} else {
 		item.ProgressMessage = "Encoded placeholder artifact"
 	}
-
-	if suffix := presetSummary(decision); suffix != "" {
-		item.ProgressMessage = fmt.Sprintf("%s – %s", item.ProgressMessage, suffix)
-	}
 }
 
 // reportEncodingSummary calculates metrics, sends notifications, and logs the summary.
-func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, encodedPaths []string, stageStart time.Time, decision presetDecision, logger *slog.Logger) {
+func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, encodedPaths []string, stageStart time.Time, logger *slog.Logger) {
 	var totalInputBytes, totalOutputBytes int64
 	for _, path := range encodedPaths {
 		if info, err := os.Stat(path); err == nil {
@@ -269,7 +260,6 @@ func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, e
 			"inputBytes":  totalInputBytes,
 			"outputBytes": totalOutputBytes,
 			"files":       len(encodedPaths),
-			"preset":      strings.TrimSpace(item.DraptoPresetProfile),
 		}); err != nil {
 			logger.Debug("encoding notification failed", logging.Error(err))
 		}
@@ -286,7 +276,6 @@ func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, e
 		logging.Int64("output_bytes", totalOutputBytes),
 		logging.Float64("compression_ratio_percent", compressionRatio),
 		logging.Int("files_encoded", len(encodedPaths)),
-		logging.String("preset_profile", strings.TrimSpace(item.DraptoPresetProfile)),
 	}
 	logger.Info("encoding stage summary", logging.Args(summaryAttrs...)...)
 }

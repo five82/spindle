@@ -338,7 +338,6 @@ func TestQueueShowDisplaysFingerprints(t *testing.T) {
 	}
 	requireContains(t, out, "Content Key: tmdb:tv:123")
 	requireContains(t, out, "Fingerprint abc123")
-	requireContains(t, out, "Drapto Preset: Default")
 	requireContains(t, out, "Episodes:")
 	requireContains(t, out, "S05E01")
 }

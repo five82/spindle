@@ -1,4 +1,4 @@
--- Spindle queue schema (version 3)
+-- Spindle queue schema (version 4)
 -- This is a transient database for tracking in-flight jobs.
 -- On schema changes, bump schemaVersion in schema.go and clear the database.
 
@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS queue_items (
     review_reason TEXT,
     item_log_path TEXT,
     encoding_details_json TEXT,
-    drapto_preset_profile TEXT,
     active_episode_key TEXT,
     progress_bytes_copied INTEGER DEFAULT 0,
     progress_total_bytes INTEGER DEFAULT 0

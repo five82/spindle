@@ -1,39 +1,39 @@
 package config
 
 const (
-	defaultStagingDir                  = "~/.local/share/spindle/staging"
-	defaultLibraryDir                  = "~/library"
-	defaultLogDir                      = "~/.local/share/spindle/logs"
-	defaultLogRetentionDays            = 60
-	defaultOpenSubtitlesCacheDir       = "~/.local/share/spindle/cache/opensubtitles"
-	defaultWhisperXCacheDir            = "~/.local/share/spindle/cache/whisperx"
-	defaultReviewDir                   = "~/review"
-	defaultOpticalDrive                = "/dev/sr0"
-	defaultMoviesDir                   = "movies"
-	defaultTVDir                       = "tv"
-	defaultTMDBLanguage                = "en-US"
-	defaultTMDBBaseURL                 = "https://api.themoviedb.org/3"
-	defaultLogFormat                   = "console"
-	defaultLogLevel                    = "info"
-	defaultWorkflowHeartbeatInterval   = 15
-	defaultWorkflowHeartbeatTimeout    = 120
-	defaultAPIBind                     = "127.0.0.1:7487"
-	defaultNotifyMinRipSeconds         = 120
-	defaultNotifyQueueMinItems         = 2
-	defaultNotifyDedupWindowSeconds    = 600
-	defaultJellyfinEnabled             = false
-	defaultKeyDBPath                   = "~/.config/spindle/keydb/KEYDB.cfg"
-	defaultKeyDBDownloadURL            = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
-	defaultKeyDBDownloadTimeout        = 300
-	defaultOpenSubtitlesUserAgent      = "Spindle/dev"
-	defaultWhisperXModel               = "large-v3"
-	defaultRipCacheMaxGiB              = 150
-	defaultDiscIDCachePath             = "~/.cache/spindle/discid_cache.json"
-	defaultPresetDeciderBaseURL        = "https://openrouter.ai/api/v1/chat/completions"
-	defaultPresetDeciderModel          = "google/gemini-3-flash-preview"
-	defaultPresetDeciderReferer        = "https://github.com/five82/spindle"
-	defaultPresetDeciderTitle          = "Spindle Preset Decider"
-	defaultPresetDeciderTimeoutSeconds = 60
+	defaultStagingDir                = "~/.local/share/spindle/staging"
+	defaultLibraryDir                = "~/library"
+	defaultLogDir                    = "~/.local/share/spindle/logs"
+	defaultLogRetentionDays          = 60
+	defaultOpenSubtitlesCacheDir     = "~/.local/share/spindle/cache/opensubtitles"
+	defaultWhisperXCacheDir          = "~/.local/share/spindle/cache/whisperx"
+	defaultReviewDir                 = "~/review"
+	defaultOpticalDrive              = "/dev/sr0"
+	defaultMoviesDir                 = "movies"
+	defaultTVDir                     = "tv"
+	defaultTMDBLanguage              = "en-US"
+	defaultTMDBBaseURL               = "https://api.themoviedb.org/3"
+	defaultLogFormat                 = "console"
+	defaultLogLevel                  = "info"
+	defaultWorkflowHeartbeatInterval = 15
+	defaultWorkflowHeartbeatTimeout  = 120
+	defaultAPIBind                   = "127.0.0.1:7487"
+	defaultNotifyMinRipSeconds       = 120
+	defaultNotifyQueueMinItems       = 2
+	defaultNotifyDedupWindowSeconds  = 600
+	defaultJellyfinEnabled           = false
+	defaultKeyDBPath                 = "~/.config/spindle/keydb/KEYDB.cfg"
+	defaultKeyDBDownloadURL          = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
+	defaultKeyDBDownloadTimeout      = 300
+	defaultOpenSubtitlesUserAgent    = "Spindle/dev"
+	defaultWhisperXModel             = "large-v3"
+	defaultRipCacheMaxGiB            = 150
+	defaultDiscIDCachePath           = "~/.cache/spindle/discid_cache.json"
+	defaultLLMBaseURL                = "https://openrouter.ai/api/v1/chat/completions"
+	defaultLLMModel                  = "google/gemini-3-flash-preview"
+	defaultLLMReferer                = "https://github.com/five82/spindle"
+	defaultLLMTitle                  = "Spindle"
+	defaultLLMTimeoutSeconds         = 60
 
 	// Validation defaults
 	defaultEnforceDraptoValidation = true
@@ -106,12 +106,12 @@ func Default() Config {
 			KeyDBDownloadURL:     defaultKeyDBDownloadURL,
 			KeyDBDownloadTimeout: defaultKeyDBDownloadTimeout,
 		},
-		PresetDecider: PresetDecider{
-			BaseURL:        defaultPresetDeciderBaseURL,
-			Model:          defaultPresetDeciderModel,
-			Referer:        defaultPresetDeciderReferer,
-			Title:          defaultPresetDeciderTitle,
-			TimeoutSeconds: defaultPresetDeciderTimeoutSeconds,
+		LLM: LLM{
+			BaseURL:        defaultLLMBaseURL,
+			Model:          defaultLLMModel,
+			Referer:        defaultLLMReferer,
+			Title:          defaultLLMTitle,
+			TimeoutSeconds: defaultLLMTimeoutSeconds,
 		},
 		Workflow: Workflow{
 			QueuePollInterval:  5,

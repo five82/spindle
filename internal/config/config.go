@@ -103,16 +103,14 @@ type MakeMKV struct {
 	KeyDBDownloadTimeout int    `toml:"keydb_download_timeout"`
 }
 
-// PresetDecider contains configuration for LLM-based encoding preset selection.
-type PresetDecider struct {
-	Enabled bool   `toml:"enabled"`
-	APIKey  string `toml:"api_key"`
-	BaseURL string `toml:"base_url"`
-	Model   string `toml:"model"`
-	Referer string `toml:"referer"`
-	Title   string `toml:"title"`
-	// TimeoutSeconds controls the HTTP timeout when calling the preset LLM.
-	TimeoutSeconds int `toml:"timeout_seconds"`
+// LLM contains shared LLM connection settings used by multiple features.
+type LLM struct {
+	APIKey         string `toml:"api_key"`
+	BaseURL        string `toml:"base_url"`
+	Model          string `toml:"model"`
+	Referer        string `toml:"referer"`
+	Title          string `toml:"title"`
+	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
 // Workflow contains configuration for daemon timing and intervals.
@@ -154,7 +152,7 @@ type Commentary struct {
 	// ConfidenceThreshold is the LLM confidence required to classify a track as
 	// commentary. Default: 0.80
 	ConfidenceThreshold float64 `toml:"confidence_threshold"`
-	// LLM settings - if not set, falls back to preset_decider settings
+	// LLM settings - if not set, falls back to [llm] settings
 	APIKey  string `toml:"api_key"`
 	BaseURL string `toml:"base_url"`
 	Model   string `toml:"model"`
@@ -172,7 +170,7 @@ type Commentary struct {
 //   - RipCache: cached raw rips for re-encoding
 //   - DiscIDCache: disc ID to TMDB ID mapping cache
 //   - MakeMKV: disc ripping settings and keydb
-//   - PresetDecider: LLM-based encoding preset selection
+//   - LLM: shared LLM connection settings for features that need AI
 //   - Commentary: commentary track detection via audio analysis
 //   - Workflow: daemon polling intervals and timeouts
 //   - Logging: log format, level, and retention
@@ -187,7 +185,7 @@ type Config struct {
 	RipCache      RipCache      `toml:"rip_cache"`
 	DiscIDCache   DiscIDCache   `toml:"disc_id_cache"`
 	MakeMKV       MakeMKV       `toml:"makemkv"`
-	PresetDecider PresetDecider `toml:"preset_decider"`
+	LLM           LLM           `toml:"llm"`
 	Commentary    Commentary    `toml:"commentary"`
 	Workflow      Workflow      `toml:"workflow"`
 	Logging       Logging       `toml:"logging"`
@@ -365,38 +363,37 @@ type LLMConfig struct {
 	TimeoutSeconds int
 }
 
-// PresetLLM returns the LLM settings for preset detection.
-func (c *Config) PresetLLM() LLMConfig {
+// GetLLM returns the shared LLM connection settings.
+func (c *Config) GetLLM() LLMConfig {
 	return LLMConfig{
-		APIKey:         strings.TrimSpace(c.PresetDecider.APIKey),
-		BaseURL:        strings.TrimSpace(c.PresetDecider.BaseURL),
-		Model:          strings.TrimSpace(c.PresetDecider.Model),
-		Referer:        strings.TrimSpace(c.PresetDecider.Referer),
-		Title:          strings.TrimSpace(c.PresetDecider.Title),
-		TimeoutSeconds: c.PresetDecider.TimeoutSeconds,
+		APIKey:         strings.TrimSpace(c.LLM.APIKey),
+		BaseURL:        strings.TrimSpace(c.LLM.BaseURL),
+		Model:          strings.TrimSpace(c.LLM.Model),
+		Referer:        strings.TrimSpace(c.LLM.Referer),
+		Title:          strings.TrimSpace(c.LLM.Title),
+		TimeoutSeconds: c.LLM.TimeoutSeconds,
 	}
 }
 
 // CommentaryLLM returns the LLM settings for commentary detection.
-// Falls back to preset_decider settings when not explicitly configured.
+// Falls back to [llm] settings when not explicitly configured.
 func (c *Config) CommentaryLLM() LLMConfig {
 	cfg := LLMConfig{
 		APIKey:  strings.TrimSpace(c.Commentary.APIKey),
 		BaseURL: strings.TrimSpace(c.Commentary.BaseURL),
 		Model:   strings.TrimSpace(c.Commentary.Model),
-		// Use commentary-specific title, falling back to preset_decider settings
-		Referer: strings.TrimSpace(c.PresetDecider.Referer),
+		Referer: strings.TrimSpace(c.LLM.Referer),
 		Title:   defaultCommentaryTitle,
 	}
-	// Fall back to preset_decider settings for connection details
+	// Fall back to [llm] settings for connection details
 	if cfg.APIKey == "" {
-		cfg.APIKey = strings.TrimSpace(c.PresetDecider.APIKey)
+		cfg.APIKey = strings.TrimSpace(c.LLM.APIKey)
 	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = strings.TrimSpace(c.PresetDecider.BaseURL)
+		cfg.BaseURL = strings.TrimSpace(c.LLM.BaseURL)
 	}
 	if cfg.Model == "" {
-		cfg.Model = strings.TrimSpace(c.PresetDecider.Model)
+		cfg.Model = strings.TrimSpace(c.LLM.Model)
 	}
 	return cfg
 }

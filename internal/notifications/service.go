@@ -179,12 +179,7 @@ func (n *ntfyService) Publish(ctx context.Context, event Event, data Payload) er
 		output := payloadInt64(data, "outputBytes")
 		input := payloadInt64(data, "inputBytes")
 		files := payloadInt(data, "files")
-		preset := strings.TrimSpace(payloadString(data, "preset"))
-
 		lines := []string{}
-		if preset != "" {
-			lines = append(lines, fmt.Sprintf("Preset: %s", preset))
-		}
 		if input > 0 && output > 0 {
 			lines = append(lines, fmt.Sprintf("Output: %s of %s (%.1f%%)", logging.FormatBytes(output), logging.FormatBytes(input), ratio))
 		} else if output > 0 {

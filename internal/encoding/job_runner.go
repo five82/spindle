@@ -24,7 +24,7 @@ func newEncodeJobRunner(store *queue.Store, runner *draptoRunner) *encodeJobRunn
 	return &encodeJobRunner{store: store, runner: runner}
 }
 
-func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, max(1, len(jobs)))
 	if logger != nil {
 		runnerAvailable := r != nil && r.runner != nil
@@ -39,13 +39,13 @@ func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec
 	}
 
 	if len(jobs) > 0 {
-		paths, err := r.encodeEpisodes(ctx, item, &env, jobs, decision, stagingRoot, encodedDir, logger)
+		paths, err := r.encodeEpisodes(ctx, item, &env, jobs, stagingRoot, encodedDir, logger)
 		if err != nil {
 			return nil, err
 		}
 		encodedPaths = paths
 	} else {
-		path, err := r.encodeSingleFile(ctx, item, decision, stagingRoot, encodedDir, logger)
+		path, err := r.encodeSingleFile(ctx, item, stagingRoot, encodedDir, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +65,7 @@ func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec
 	return encodedPaths, nil
 }
 
-func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, len(jobs))
 	var lastErr error
 	skipped := 0
@@ -110,7 +110,7 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 		path := ""
 		if r.runner != nil {
 			var err error
-			path, err = r.runner.Encode(ctx, item, sourcePath, encodedDir, label, job.Episode.Key, idx+1, len(jobs), decision.Profile, logger)
+			path, err = r.runner.Encode(ctx, item, sourcePath, encodedDir, label, job.Episode.Key, idx+1, len(jobs), logger)
 			if err != nil {
 				// Record per-episode failure and continue to next episode
 				logger.Error("episode encoding failed",
@@ -183,7 +183,7 @@ func (r *encodeJobRunner) persistRipSpec(ctx context.Context, item *queue.Item, 
 	}
 }
 
-func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item, decision presetDecision, stagingRoot, encodedDir string, logger *slog.Logger) (string, error) {
+func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item, stagingRoot, encodedDir string, logger *slog.Logger) (string, error) {
 	label := strings.TrimSpace(item.DiscTitle)
 	if label == "" {
 		label = "Disc"
@@ -194,7 +194,7 @@ func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item
 	path := ""
 	if r.runner != nil {
 		var err error
-		path, err = r.runner.Encode(ctx, item, sourcePath, encodedDir, label, "", 0, 0, decision.Profile, logger)
+		path, err = r.runner.Encode(ctx, item, sourcePath, encodedDir, label, "", 0, 0, logger)
 		if err != nil {
 			return "", err
 		}

@@ -502,7 +502,6 @@ func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
 	if msg := strings.TrimSpace(item.ProgressMessage); msg != "" {
 		fmt.Fprintf(out, "Progress Message: %s\n", msg)
 	}
-	fmt.Fprintf(out, "Drapto Preset: %s\n", formatPresetLabel(item.DraptoPreset))
 	if item.NeedsReview {
 		reason := strings.TrimSpace(item.ReviewReason)
 		if reason == "" {
@@ -679,19 +678,5 @@ func stopOutcomeString(o queueStopOutcome) string {
 		return "already_failed"
 	default:
 		return "unknown"
-	}
-}
-
-func formatPresetLabel(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	switch value {
-	case "", "default":
-		return "Default"
-	case "clean":
-		return "Clean"
-	case "grain":
-		return "Grain"
-	default:
-		return value
 	}
 }

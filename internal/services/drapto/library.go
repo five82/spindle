@@ -32,15 +32,6 @@ func (l *Library) Encode(ctx context.Context, inputPath, outputDir string, opts 
 		draptolib.WithResponsive(),
 	}
 
-	// Apply preset if specified
-	if profile := strings.TrimSpace(opts.PresetProfile); profile != "" && !strings.EqualFold(profile, "default") {
-		preset, err := draptolib.ParsePreset(profile)
-		if err != nil {
-			return "", err
-		}
-		encoderOpts = append(encoderOpts, draptolib.WithPreset(preset))
-	}
-
 	// Create encoder
 	encoder, err := draptolib.New(encoderOpts...)
 	if err != nil {

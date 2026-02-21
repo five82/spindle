@@ -29,9 +29,6 @@ func (c *Config) Validate() error {
 	if err := c.validateRipCache(); err != nil {
 		return err
 	}
-	if err := c.validatePresetDecider(); err != nil {
-		return err
-	}
 	if err := c.validateNotifications(); err != nil {
 		return err
 	}
@@ -128,13 +125,6 @@ func (c *Config) validateRipCache() error {
 		if c.RipCache.MaxGiB <= 0 {
 			return errors.New("rip_cache.max_gib must be positive when rip_cache.enabled is true")
 		}
-	}
-	return nil
-}
-
-func (c *Config) validatePresetDecider() error {
-	if c.PresetDecider.Enabled && strings.TrimSpace(c.PresetDecider.APIKey) == "" {
-		return errors.New("preset_decider.api_key must be set when preset_decider.enabled is true (or set OPENROUTER_API_KEY)")
 	}
 	return nil
 }

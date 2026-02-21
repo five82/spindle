@@ -27,7 +27,7 @@ func newDraptoRunner(cfg *config.Config, client drapto.Client, store *queue.Stor
 	return &draptoRunner{cfg: cfg, client: client, store: store}
 }
 
-func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath, encodedDir, label, episodeKey string, episodeIndex, episodeCount int, presetProfile string, logger *slog.Logger) (string, error) {
+func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath, encodedDir, label, episodeKey string, episodeIndex, episodeCount int, logger *slog.Logger) (string, error) {
 	if r == nil || r.client == nil {
 		return "", nil
 	}
@@ -46,7 +46,6 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 		"launching drapto encode",
 		logging.String("source_file", sourcePath),
 		logging.String("output_dir", encodedDir),
-		logging.String("preset_profile", presetProfile),
 		logging.String("job", label),
 	)
 	snapshot := loadEncodingSnapshot(jobLogger, item.EncodingDetailsJSON)
@@ -217,8 +216,7 @@ func (r *draptoRunner) Encode(ctx context.Context, item *queue.Item, sourcePath,
 	}
 
 	path, err := r.client.Encode(ctx, sourcePath, encodedDir, drapto.EncodeOptions{
-		Progress:      progressLogger,
-		PresetProfile: presetProfile,
+		Progress: progressLogger,
 	})
 	if err != nil {
 		return "", services.Wrap(

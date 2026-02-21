@@ -199,7 +199,7 @@ func TestEnvVarOverridesConfigFileForAPIKeys(t *testing.T) {
 	t.Setenv("OPENSUBTITLES_API_KEY", "env-opensub")
 	t.Setenv("OPENSUBTITLES_USER_TOKEN", "env-opensub-token")
 	t.Setenv("HF_TOKEN", "env-hf")
-	t.Setenv("PRESET_DECIDER_API_KEY", "env-preset")
+	t.Setenv("OPENROUTER_API_KEY", "env-preset")
 
 	cfg, _, _, err := config.Load(configPath)
 	if err != nil {
@@ -222,8 +222,8 @@ func TestEnvVarOverridesConfigFileForAPIKeys(t *testing.T) {
 	if cfg.Subtitles.WhisperXHuggingFace != "env-hf" {
 		t.Errorf("expected HuggingFace token from env, got %q", cfg.Subtitles.WhisperXHuggingFace)
 	}
-	if cfg.PresetDecider.APIKey != "env-preset" {
-		t.Errorf("expected PresetDecider key from env, got %q", cfg.PresetDecider.APIKey)
+	if cfg.LLM.APIKey != "env-preset" {
+		t.Errorf("expected LLM key from env, got %q", cfg.LLM.APIKey)
 	}
 }
 

@@ -137,7 +137,6 @@ type Item struct {
 	ProgressBytesCopied int64 // Only set during organizing
 	ProgressTotalBytes  int64 // Only set during organizing
 	EncodingDetailsJSON string
-	DraptoPresetProfile string
 	RipSpecData         string
 	DiscFingerprint     string
 	MetadataJSON        string

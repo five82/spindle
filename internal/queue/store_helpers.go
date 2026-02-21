@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const itemColumns = "id, source_path, disc_title, status, failed_at_status, media_info_json, ripped_file, encoded_file, final_file, item_log_path, active_episode_key, error_message, created_at, updated_at, progress_stage, progress_percent, progress_message, progress_bytes_copied, progress_total_bytes, encoding_details_json, drapto_preset_profile, rip_spec_data, disc_fingerprint, metadata_json, last_heartbeat, needs_review, review_reason"
+const itemColumns = "id, source_path, disc_title, status, failed_at_status, media_info_json, ripped_file, encoded_file, final_file, item_log_path, active_episode_key, error_message, created_at, updated_at, progress_stage, progress_percent, progress_message, progress_bytes_copied, progress_total_bytes, encoding_details_json, rip_spec_data, disc_fingerprint, metadata_json, last_heartbeat, needs_review, review_reason"
 
 func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 	var (
@@ -30,7 +30,6 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		progressBytesCopied sql.NullInt64
 		progressTotalBytes  sql.NullInt64
 		encodingDetails     sql.NullString
-		draptoPreset        sql.NullString
 		ripSpec             sql.NullString
 		fingerprint         sql.NullString
 		metadata            sql.NullString
@@ -60,7 +59,6 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		&progressBytesCopied,
 		&progressTotalBytes,
 		&encodingDetails,
-		&draptoPreset,
 		&ripSpec,
 		&fingerprint,
 		&metadata,
@@ -90,7 +88,6 @@ func scanItem(scanner interface{ Scan(dest ...any) error }) (*Item, error) {
 		ProgressBytesCopied: progressBytesCopied.Int64,
 		ProgressTotalBytes:  progressTotalBytes.Int64,
 		EncodingDetailsJSON: encodingDetails.String,
-		DraptoPresetProfile: draptoPreset.String,
 		RipSpecData:         ripSpec.String,
 		DiscFingerprint:     fingerprint.String,
 		MetadataJSON:        metadata.String,
