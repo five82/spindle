@@ -272,8 +272,12 @@ func TestIdentifierAnnotatesTVEpisodes(t *testing.T) {
 	if !strings.Contains(item.RipSpecData, "\"season\":5") {
 		t.Fatalf("expected rip spec to include season annotations, got %s", item.RipSpecData)
 	}
-	if !strings.Contains(item.RipSpecData, "\"episode\":1") {
-		t.Fatalf("expected rip spec to include episode mapping, got %s", item.RipSpecData)
+	// Episodes are now placeholders (episode:0) - definitive assignment deferred to episodeid stage
+	if !strings.Contains(item.RipSpecData, "\"episode\":0") {
+		t.Fatalf("expected rip spec to include placeholder episodes (episode:0), got %s", item.RipSpecData)
+	}
+	if !strings.Contains(item.RipSpecData, "s05_") {
+		t.Fatalf("expected rip spec to include placeholder keys (s05_xxx), got %s", item.RipSpecData)
 	}
 }
 

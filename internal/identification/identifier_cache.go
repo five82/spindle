@@ -80,20 +80,15 @@ func (i *Identifier) completeIdentificationFromCache(
 
 	seasonNumber := cacheEntry.SeasonNumber
 	var episodeMatches map[int]episodeAnnotation
-	var matchedEpisodes []int
 
-	// For TV shows, fetch episode details
+	// For TV shows, build placeholder annotations
 	if mediaType == "tv" {
 		if seasonNumber == 0 {
 			seasonNumber = 1
 		}
-		discNumber := 0
-		if n, ok := extractDiscNumber(item.DiscTitle); ok {
-			discNumber = n
+		if scanResult != nil {
+			episodeMatches = buildPlaceholderAnnotations(scanResult.Titles, seasonNumber)
 		}
-		matches, episodes := i.annotateEpisodes(ctx, logger, tmdbID, seasonNumber, discNumber, scanResult)
-		episodeMatches = matches
-		matchedEpisodes = episodes
 	}
 
 	// Build metadata map
@@ -114,20 +109,6 @@ func (i *Identifier) completeIdentificationFromCache(
 		metadata["first_air_date"] = tmdbResult.FirstAirDate
 	}
 
-	if len(matchedEpisodes) > 0 {
-		metadata["episode_numbers"] = matchedEpisodes
-	}
-	if len(episodeMatches) > 0 {
-		airDates := make([]string, 0, len(episodeMatches))
-		for _, ann := range episodeMatches {
-			if strings.TrimSpace(ann.Air) != "" {
-				airDates = append(airDates, ann.Air)
-			}
-		}
-		if len(airDates) > 0 {
-			metadata["episode_air_dates"] = airDates
-		}
-	}
 	if mediaType == "tv" {
 		metadata["show_title"] = identifiedTitle
 	}
@@ -143,7 +124,7 @@ func (i *Identifier) completeIdentificationFromCache(
 	// Build filename
 	var metaRecord queue.Metadata
 	if mediaType == "tv" {
-		metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, matchedEpisodes, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
+		metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, nil, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
 	} else {
 		metaRecord = queue.NewBasicMetadata(titleWithYear, true)
 		if cacheEntry.Edition != "" {
@@ -190,7 +171,7 @@ func (i *Identifier) completeIdentificationFromCache(
 	}
 
 	// Build rip specs
-	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, episodeMatches, identifiedTitle, item.DiscTitle, metadata)
+	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, episodeMatches, identifiedTitle, item.DiscTitle, discNumber, metadata)
 
 	ripFingerprint := strings.TrimSpace(item.DiscFingerprint)
 	spec := ripspec.Envelope{

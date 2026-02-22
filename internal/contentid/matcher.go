@@ -231,11 +231,19 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 		return false, err
 	}
 	if len(refPrints) == 0 {
-		return false, errors.New("no opensubtitles references downloaded for comparison")
+		m.logger.Warn("no opensubtitles references available",
+			logging.String(logging.FieldEventType, "contentid_no_references"),
+			logging.String(logging.FieldImpact, "episode numbers remain unresolved"),
+			logging.String(logging.FieldErrorHint, "verify OpenSubtitles languages and TMDB metadata"))
+		return false, nil
 	}
 	matches := resolveEpisodeMatches(ripPrints, refPrints)
 	if len(matches) == 0 {
-		return false, errors.New("failed to correlate ripped episodes with opensubtitles references")
+		m.logger.Warn("no episode matches resolved",
+			logging.String(logging.FieldEventType, "contentid_no_matches"),
+			logging.String(logging.FieldImpact, "episode numbers remain unresolved"),
+			logging.String(logging.FieldErrorHint, "check transcript quality and reference subtitle availability"))
+		return false, nil
 	}
 	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches, progress)
 	m.attachMatchAttributes(env, matches)
@@ -857,7 +865,7 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 	}
 
 	totalEpisodes := len(season.Episodes)
-	if discNumber > 0 && totalEpisodes > 0 {
+	if len(set) > 0 && discNumber > 0 && totalEpisodes > 0 {
 		block := len(env.Episodes)
 		if block == 0 {
 			block = 4

@@ -296,9 +296,9 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		if seasonNumber == 0 {
 			seasonNumber = 1
 		}
-		matches, episodes := i.annotateEpisodes(ctx, logger, tmdbID, seasonNumber, input.DiscNumber, input.ScanResult)
-		episodeMatches = matches
-		matchedEpisodes = episodes
+		if input.ScanResult != nil {
+			episodeMatches = buildPlaceholderAnnotations(input.ScanResult.Titles, seasonNumber)
+		}
 	}
 	metadata = map[string]any{
 		"id":             best.ID,
@@ -311,20 +311,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		"vote_count":     best.VoteCount,
 		"movie":          isMovie,
 		"season_number":  seasonNumber,
-	}
-	if len(matchedEpisodes) > 0 {
-		metadata["episode_numbers"] = matchedEpisodes
-	}
-	if len(episodeMatches) > 0 {
-		airDates := make([]string, 0, len(episodeMatches))
-		for _, ann := range episodeMatches {
-			if strings.TrimSpace(ann.Air) != "" {
-				airDates = append(airDates, ann.Air)
-			}
-		}
-		if len(airDates) > 0 {
-			metadata["episode_air_dates"] = airDates
-		}
 	}
 	if mediaType == "tv" {
 		metadata["show_title"] = identifiedTitle
@@ -341,7 +327,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 
 	var metaRecord queue.Metadata
 	if mediaType == "tv" {
-		metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, matchedEpisodes, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
+		metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, nil, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
 	} else {
 		metaRecord = queue.NewBasicMetadata(titleWithYear, true)
 		if editionLabel != "" {

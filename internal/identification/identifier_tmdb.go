@@ -6,7 +6,6 @@ import (
 
 	"log/slog"
 
-	"spindle/internal/disc"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 )
@@ -83,39 +82,4 @@ type episodeAnnotation struct {
 	Episode int
 	Title   string
 	Air     string
-}
-
-func (i *Identifier) annotateEpisodes(ctx context.Context, logger *slog.Logger, tmdbID int64, seasonNumber int, discNumber int, scanResult *disc.ScanResult) (map[int]episodeAnnotation, []int) {
-	if tmdbID == 0 || seasonNumber <= 0 || scanResult == nil || len(scanResult.Titles) == 0 {
-		return nil, nil
-	}
-	if i.tmdbInfo == nil {
-		logger.Warn("tmdb season lookup unavailable",
-			logging.String("reason", "tmdb client missing"),
-			logging.String(logging.FieldEventType, "tmdb_season_lookup_unavailable"),
-			logging.String(logging.FieldErrorHint, "check TMDB client initialization"),
-		)
-		return nil, nil
-	}
-	season, err := i.tmdbInfo.GetSeasonDetails(ctx, tmdbID, seasonNumber)
-	if err != nil {
-		logger.Warn("tmdb season lookup failed",
-			logging.Int64("tmdb_id", tmdbID),
-			logging.Int("season", seasonNumber),
-			logging.Error(err),
-			logging.String("error_message", "Failed to fetch TMDB season details"),
-			logging.String(logging.FieldEventType, "tmdb_season_lookup_failed"),
-			logging.String(logging.FieldErrorHint, "verify TMDB connectivity and API key"),
-		)
-		return nil, nil
-	}
-	if season == nil || len(season.Episodes) == 0 {
-		logger.Debug("tmdb season lookup returned no episodes",
-			logging.Int64("tmdb_id", tmdbID),
-			logging.Int("season", seasonNumber),
-			logging.String("reason", "season has no episodes"))
-		return nil, nil
-	}
-	matches, numbers := mapEpisodesToTitles(scanResult.Titles, season.Episodes, discNumber)
-	return matches, numbers
 }

@@ -51,6 +51,26 @@ func TestEpisodeKey(t *testing.T) {
 	}
 }
 
+func TestPlaceholderKey(t *testing.T) {
+	tests := []struct {
+		season, discIndex int
+		want              string
+	}{
+		{1, 1, "s01_001"},
+		{1, 3, "s01_003"},
+		{2, 10, "s02_010"},
+		{0, 1, "s01_001"},   // season defaults to 1
+		{1, 0, "s01_001"},   // discIndex defaults to 1
+		{-1, -1, "s01_001"}, // both default
+	}
+	for _, tt := range tests {
+		got := PlaceholderKey(tt.season, tt.discIndex)
+		if got != tt.want {
+			t.Errorf("PlaceholderKey(%d, %d) = %q, want %q", tt.season, tt.discIndex, got, tt.want)
+		}
+	}
+}
+
 func TestEpisodeByKeyCaseInsensitive(t *testing.T) {
 	env := Envelope{
 		Episodes: []Episode{{Key: "S01E02", TitleID: 2}},

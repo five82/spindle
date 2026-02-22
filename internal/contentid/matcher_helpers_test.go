@@ -31,12 +31,44 @@ func TestDeriveCandidateEpisodesUsesRipSpecEpisodes(t *testing.T) {
 	}
 }
 
-func TestDeriveCandidateEpisodesUsesDiscBlocks(t *testing.T) {
+func TestDeriveCandidateEpisodesPlaceholdersFallBackToSeason(t *testing.T) {
+	// With Episode=0 placeholders, Tier 1 (rip_spec) produces nothing,
+	// set is empty so Tier 2 (disc_block) is skipped,
+	// and Tier 3 (season_fallback) returns all season episodes.
 	env := &ripspec.Envelope{
 		Episodes: []ripspec.Episode{
-			{Key: "s01e00"},
-			{Key: "s01e00"},
-			{Key: "s01e00"},
+			{Key: "s01_001", Episode: 0},
+			{Key: "s01_002", Episode: 0},
+			{Key: "s01_003", Episode: 0},
+		},
+	}
+	season := &tmdb.SeasonDetails{
+		SeasonNumber: 1,
+		Episodes: []tmdb.Episode{
+			{EpisodeNumber: 1},
+			{EpisodeNumber: 2},
+			{EpisodeNumber: 3},
+			{EpisodeNumber: 4},
+			{EpisodeNumber: 5},
+			{EpisodeNumber: 6},
+			{EpisodeNumber: 7},
+			{EpisodeNumber: 8},
+		},
+	}
+	got := deriveCandidateEpisodes(env, season, 2).Episodes
+	expect := []int{1, 2, 3, 4, 5, 6, 7, 8}
+	if !intSlicesEqual(got, expect) {
+		t.Fatalf("expected %v, got %v", expect, got)
+	}
+}
+
+func TestDeriveCandidateEpisodesUsesDiscBlocksWithResolved(t *testing.T) {
+	// When some episodes ARE resolved, disc_block tier still contributes.
+	env := &ripspec.Envelope{
+		Episodes: []ripspec.Episode{
+			{Key: "s01e04", Episode: 4},
+			{Key: "s01e05", Episode: 5},
+			{Key: "s01e06", Episode: 6},
 		},
 	}
 	season := &tmdb.SeasonDetails{

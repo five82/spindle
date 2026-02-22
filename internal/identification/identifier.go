@@ -377,7 +377,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	// Use queue item fingerprint - it's mandatory at enqueue time
 	ripFingerprint := strings.TrimSpace(item.DiscFingerprint)
 
-	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, episodeMatches, identifiedTitle, title, metadata)
+	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, episodeMatches, identifiedTitle, title, discNumber, metadata)
 
 	spec := ripspec.Envelope{
 		Fingerprint: ripFingerprint,

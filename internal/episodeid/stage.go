@@ -110,6 +110,16 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			reason = "opensubtitles_disabled"
 		}
 		logSkipDecision(logger, reason)
+		if hasUnresolvedEpisodes(env.Episodes) {
+			item.NeedsReview = true
+			if item.ReviewReason == "" {
+				item.ReviewReason = "episode numbers unresolved; content matching unavailable"
+			}
+			logger.Info("flagging item for review",
+				logging.String(logging.FieldDecisionType, "episode_review"),
+				logging.String("decision_result", "needs_review"),
+				logging.String("decision_reason", reason))
+		}
 		setSkipProgress(item, "Skipped (OpenSubtitles disabled)")
 		return nil
 	}
@@ -161,6 +171,18 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			"Failed to correlate episodes with OpenSubtitles; retry once the service is reachable",
 			err,
 		)
+	}
+
+	// Flag for review if matcher ran but couldn't resolve episode numbers
+	if !updated && hasUnresolvedEpisodes(env.Episodes) {
+		item.NeedsReview = true
+		if item.ReviewReason == "" {
+			item.ReviewReason = "episode numbers unresolved; no matching subtitles found"
+		}
+		logger.Info("flagging item for review",
+			logging.String(logging.FieldDecisionType, "episode_review"),
+			logging.String("decision_result", "needs_review"),
+			logging.String("decision_reason", "no_matching_subtitles"))
 	}
 
 	// Update rip spec if matches were found
@@ -236,6 +258,16 @@ func setSkipProgress(item *queue.Item, message string) {
 	item.ProgressMessage = message
 	item.ProgressPercent = 100
 	item.ActiveEpisodeKey = ""
+}
+
+// hasUnresolvedEpisodes returns true if any episode has Episode <= 0.
+func hasUnresolvedEpisodes(episodes []ripspec.Episode) bool {
+	for _, ep := range episodes {
+		if ep.Episode <= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // HealthCheck reports the stage's operational readiness.

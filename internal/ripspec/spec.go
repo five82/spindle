@@ -103,6 +103,18 @@ func (e Envelope) Encode() (string, error) {
 	return string(data), nil
 }
 
+// PlaceholderKey formats a stable placeholder key for an unresolved episode.
+// The underscore separator distinguishes placeholders from resolved keys (e.g. "s01_001" vs "s01e03").
+func PlaceholderKey(season, discIndex int) string {
+	if season <= 0 {
+		season = 1
+	}
+	if discIndex <= 0 {
+		discIndex = 1
+	}
+	return fmt.Sprintf("s%02d_%03d", season, discIndex)
+}
+
 // EpisodeKey formats a deterministic key for an episode.
 func EpisodeKey(season, episode int) string {
 	if season <= 0 && episode <= 0 {

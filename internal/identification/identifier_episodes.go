@@ -2,149 +2,45 @@ package identification
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"spindle/internal/disc"
-	"spindle/internal/identification/tmdb"
 	"spindle/internal/queue"
 )
 
-func mapEpisodesToTitles(titles []disc.Title, episodes []tmdb.Episode, discNumber int) (map[int]episodeAnnotation, []int) {
-	if len(titles) == 0 || len(episodes) == 0 {
-		return nil, nil
+// buildPlaceholderAnnotations creates placeholder episode annotations for each
+// title that passes isEpisodeRuntime. Episode numbers are left at 0 (unresolved)
+// so that the episodeid stage can assign definitive numbers via content matching.
+func buildPlaceholderAnnotations(titles []disc.Title, seasonNumber int) map[int]episodeAnnotation {
+	if len(titles) == 0 || seasonNumber <= 0 {
+		return nil
 	}
-	assigned := make(map[int]episodeAnnotation)
-	used := make([]bool, len(episodes))
-	epTitles := make([]disc.Title, 0, len(titles))
-	for _, title := range titles {
-		if isEpisodeRuntime(title.Duration) {
-			epTitles = append(epTitles, title)
-		}
-	}
-	if len(epTitles) == 0 {
-		return nil, nil
-	}
-	start := estimateEpisodeStart(discNumber, len(epTitles), len(episodes))
-	for _, title := range epTitles {
-		idx := chooseEpisodeForTitle(title.Duration, episodes, used, start)
-		if idx == -1 {
-			continue
-		}
-		used[idx] = true
-		ep := episodes[idx]
-		assigned[title.ID] = episodeAnnotation{
-			Season:  ep.SeasonNumber,
-			Episode: ep.EpisodeNumber,
-			Title:   strings.TrimSpace(ep.Name),
-			Air:     strings.TrimSpace(ep.AirDate),
-		}
-	}
-	if len(assigned) == 0 {
-		return nil, nil
-	}
-	numbers := make([]int, 0, len(assigned))
-	for _, ann := range assigned {
-		if ann.Episode > 0 {
-			numbers = append(numbers, ann.Episode)
-		}
-	}
-	sort.Ints(numbers)
-	return assigned, numbers
-}
-
-func estimateEpisodeStart(discNumber int, discEpisodes int, totalEpisodes int) int {
-	if discNumber <= 1 || discEpisodes <= 0 || totalEpisodes == 0 {
-		return 0
-	}
-	start := (discNumber - 1) * discEpisodes
-	if start >= totalEpisodes {
-		start = totalEpisodes - discEpisodes
-		if start < 0 {
-			start = 0
-		}
-	}
-	return start
-}
-
-func chooseEpisodeForTitle(durationSeconds int, episodes []tmdb.Episode, used []bool, startIndex int) int {
-	if len(episodes) == 0 {
-		return -1
-	}
-	bestIdx := -1
-	bestDelta := int(^uint(0) >> 1)
-	if startIndex < 0 {
-		startIndex = 0
-	}
-	if startIndex > len(episodes) {
-		startIndex = len(episodes)
-	}
-	for idx := startIndex; idx < len(episodes); idx++ {
-		ep := episodes[idx]
-		if idx < len(used) && used[idx] {
-			continue
-		}
-		if ep.SeasonNumber <= 0 {
-			continue
-		}
-		runtime := ep.Runtime
-		if runtime <= 0 {
-			runtime = durationSeconds / 60
-			if runtime == 0 {
-				runtime = 22
-			}
-		}
-		delta := absInt(runtime*60 - durationSeconds)
-		if delta < bestDelta {
-			bestDelta = delta
-			bestIdx = idx
-		}
-	}
-	const maxAcceptableDelta = 5 * 60
-	if bestIdx != -1 && bestDelta <= maxAcceptableDelta {
-		return bestIdx
-	}
-	for idx := 0; idx < len(episodes); idx++ {
-		if idx < startIndex {
-			if idx < len(used) && used[idx] {
-				continue
-			}
-			ep := episodes[idx]
-			delta := episodeDurationDelta(durationSeconds, ep)
-			if delta < bestDelta {
-				bestDelta = delta
-				bestIdx = idx
+	out := make(map[int]episodeAnnotation)
+	for _, t := range titles {
+		if isEpisodeRuntime(t.Duration) {
+			out[t.ID] = episodeAnnotation{
+				Season:  seasonNumber,
+				Episode: 0,
 			}
 		}
 	}
-	if bestIdx != -1 && bestDelta <= maxAcceptableDelta {
-		return bestIdx
+	if len(out) == 0 {
+		return nil
 	}
-	for idx := range episodes {
-		if idx < len(used) && used[idx] {
-			continue
-		}
-		return idx
-	}
-	return -1
+	return out
 }
 
-func episodeDurationDelta(durationSeconds int, ep tmdb.Episode) int {
-	runtime := ep.Runtime
-	if runtime <= 0 {
-		runtime = durationSeconds / 60
-		if runtime == 0 {
-			runtime = 22
-		}
+// PlaceholderOutputBasename generates a placeholder filename for an unresolved episode.
+// Includes disc number when known to prevent filename collisions across discs.
+func PlaceholderOutputBasename(show string, season, discNumber, discIndex int) string {
+	show = strings.TrimSpace(show)
+	if show == "" {
+		show = "Manual Import"
 	}
-	return absInt(runtime*60 - durationSeconds)
-}
-
-func absInt(value int) int {
-	if value < 0 {
-		return -value
+	if discNumber > 0 {
+		return fmt.Sprintf("%s - S%02d Disc %d Episode %03d", show, season, discNumber, discIndex)
 	}
-	return value
+	return fmt.Sprintf("%s - S%02d Episode %03d", show, season, discIndex)
 }
 
 // EpisodeOutputBasename generates a standard episode filename from show, season, and episode.

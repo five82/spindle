@@ -11,12 +11,13 @@ import (
 	"spindle/internal/ripspec"
 )
 
-func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatches map[int]episodeAnnotation, identifiedTitle, fallbackTitle string, metadata map[string]any) ([]ripspec.Title, []ripspec.Episode) {
+func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatches map[int]episodeAnnotation, identifiedTitle, fallbackTitle string, discNumber int, metadata map[string]any) ([]ripspec.Title, []ripspec.Episode) {
 	if scanResult == nil {
 		return nil, nil
 	}
 	episodeSpecs := make([]ripspec.Episode, 0, len(episodeMatches))
 	titleSpecs := make([]ripspec.Title, 0, len(scanResult.Titles))
+	discIndex := 0
 	for _, t := range scanResult.Titles {
 		fp := discfingerprint.TitleHash(t)
 		spec := ripspec.Title{
@@ -29,20 +30,23 @@ func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatc
 			SegmentMap:   t.SegmentMap,
 			TitleHash:    fp,
 		}
-		if annotation, ok := episodeMatches[t.ID]; ok {
+		if annotation, ok := episodeMatches[t.ID]; ok && annotation.Season > 0 {
 			spec.Season = annotation.Season
 			spec.Episode = annotation.Episode
 			spec.EpisodeTitle = annotation.Title
 			spec.EpisodeAirDate = annotation.Air
-			if annotation.Season > 0 && annotation.Episode > 0 {
-				showLabel := identifiedTitle
-				if strings.TrimSpace(showLabel) == "" {
-					if value, ok := metadata["title"].(string); ok && strings.TrimSpace(value) != "" {
-						showLabel = value
-					} else {
-						showLabel = fallbackTitle
-					}
+
+			showLabel := identifiedTitle
+			if strings.TrimSpace(showLabel) == "" {
+				if value, ok := metadata["title"].(string); ok && strings.TrimSpace(value) != "" {
+					showLabel = value
+				} else {
+					showLabel = fallbackTitle
 				}
+			}
+
+			if annotation.Episode > 0 {
+				// Resolved episode
 				episodeSpecs = append(episodeSpecs, ripspec.Episode{
 					Key:            ripspec.EpisodeKey(annotation.Season, annotation.Episode),
 					TitleID:        t.ID,
@@ -53,6 +57,18 @@ func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatc
 					RuntimeSeconds: t.Duration,
 					TitleHash:      fp,
 					OutputBasename: EpisodeOutputBasename(showLabel, annotation.Season, annotation.Episode),
+				})
+			} else {
+				// Placeholder episode (unresolved number)
+				discIndex++
+				episodeSpecs = append(episodeSpecs, ripspec.Episode{
+					Key:            ripspec.PlaceholderKey(annotation.Season, discIndex),
+					TitleID:        t.ID,
+					Season:         annotation.Season,
+					Episode:        0,
+					RuntimeSeconds: t.Duration,
+					TitleHash:      fp,
+					OutputBasename: PlaceholderOutputBasename(showLabel, annotation.Season, discNumber, discIndex),
 				})
 			}
 		}
