@@ -139,12 +139,11 @@ func (s *Service) searchEpisodeWithVariants(ctx context.Context, base opensubtit
 		}
 		if len(resp.Subtitles) == 0 {
 			if s.logger != nil {
-				s.logger.Warn("opensubtitles returned no candidates",
+				s.logger.Info("opensubtitles returned no candidates",
 					logging.Int("season", season),
 					logging.Int("episode", episode),
 					logging.Int("attempt", attempt+1),
 					logging.String(logging.FieldEventType, "opensubtitles_no_candidates"),
-					logging.String(logging.FieldErrorHint, "verify episode metadata and OpenSubtitles language filters"),
 				)
 			}
 			continue

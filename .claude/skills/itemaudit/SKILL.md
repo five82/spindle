@@ -286,19 +286,25 @@ against the WhisperX output via text-based matching.
    - Subtitles significantly shorter = missing content
    - Subtitles significantly longer = wrong subtitle file
 
-6. **Edition-aware forced subtitle selection** (movies only, if movie has edition and forced subs fetched):
+6. **Forced subtitle search outcome** (when disc has forced subtitle flag):
+   - Many discs set the forced subtitle flag even when the content has no foreign language segments. Zero candidates from OpenSubtitles is **common and expected** — classify as **INFO**, not WARNING.
+   - Only classify as **WARNING** if candidates were returned but all rejected during ranking (suggests a filtering or scoring problem).
+   - **Use your knowledge of the title**: If you know the film/show has significant foreign language dialogue (e.g., Inglourious Basterds, Kill Bill, Narcos), a missing forced subtitle is a real gap — escalate to **WARNING**. If the content is predominantly single-language (e.g., South Park, The Office), INFO is correct.
+   - Check `decision_type=forced_subtitle_download` with `decision_result=not_found` — this is the normal "searched and found nothing" outcome.
+
+7. **Edition-aware forced subtitle selection** (movies only, if movie has edition and forced subs fetched):
    - Check logs for `edition=match` or `edition=mismatch` in forced subtitle ranking
    - Selected forced subtitle should match edition when possible (e.g., Director's Cut subtitle for Director's Cut disc)
    - If `edition=mismatch` was accepted, verify no matching edition subtitle was available
    - Note: regular subtitles are always WhisperX-generated, so edition matching only applies to forced subtitles from OpenSubtitles
 
-7. **Per-episode subtitle asset status** (TV only):
+8. **Per-episode subtitle asset status** (TV only):
    - Check each entry in `Assets.Subtitled[]` for `status: "failed"` — failed episodes have `ErrorMsg`
    - Subtitling allows partial success (continues past individual failures), so some episodes may have subtitles while others failed
    - Verify `SubtitlesMuxed` flag per episode — all completed episodes should have `subtitles_muxed: true`
    - Check `subtitle_generation_results` in `Envelope.Attributes` for per-episode result details
 
-8. **Cross-episode subtitle consistency** (TV only):
+9. **Cross-episode subtitle consistency** (TV only):
    - Cue density should be roughly similar across episodes from the same show (within ~50% of each other)
    - All episodes should have the same subtitle language
    - All episodes should have consistent forced subtitle presence (either all have forced subs or none do)
@@ -369,6 +375,8 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | SRT validation issues | Subtitles | `event_type=srt_validation_issues` | Malformed subtitles |
 | Subtitle duration mismatch | Subtitles | Duration delta > 10 minutes | WhisperX timing issue or truncated audio |
 | Sparse subtitles | Subtitles | < 2 cues/minute | WhisperX transcription issue or wrong language |
+| Forced subtitle not found (INFO) | Subtitles | `decision_result=not_found` with zero OpenSubtitles candidates | Expected — disc flag doesn't guarantee foreign content exists |
+| Forced subtitle candidates rejected | Subtitles | OpenSubtitles returned candidates but all rejected during ranking | Filtering or scoring problem |
 | Forced subtitle edition mismatch | Subtitles | `edition=mismatch` on forced sub when matching exists | Wrong forced subtitle for alternate cut |
 | Subtitles not muxed | Subtitles | Sidecar SRT exists but no embedded tracks | Jellyfin may not auto-load |
 | Unlabeled subtitles | Subtitles | Missing or incorrect title in embedded track | Jellyfin won't display track name properly |
