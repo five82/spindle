@@ -523,13 +523,17 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			}
 			continue
 		}
-		candidate := resp.Subtitles[0]
+		candidate, selectedIdx := selectReferenceCandidate(resp.Subtitles, episodeData.Name, season)
 		if m.logger != nil {
+			reason := "top_result"
+			if selectedIdx > 0 {
+				reason = "title_consistency_rerank"
+			}
 			attrs := []logging.Attr{
 				logging.String(logging.FieldEventType, "decision_summary"),
 				logging.String(logging.FieldDecisionType, "opensubtitles_reference_pick"),
 				logging.String("decision_result", "selected"),
-				logging.String("decision_reason", "top_result"),
+				logging.String("decision_reason", reason),
 				logging.String("decision_options", "select, skip"),
 				logging.Int("season", season.SeasonNumber),
 				logging.Int("episode", episodeData.EpisodeNumber),
@@ -538,6 +542,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 				logging.String("language", strings.TrimSpace(candidate.Language)),
 				logging.Int("downloads", candidate.Downloads),
 				logging.String("release", strings.TrimSpace(candidate.Release)),
+			}
+			if selectedIdx > 0 {
+				attrs = append(attrs, logging.Int("skipped_candidates", selectedIdx))
 			}
 			if len(resp.Subtitles) > 1 {
 				attrs = append(attrs, logging.Int("candidate_hidden_count", len(resp.Subtitles)-1))
@@ -637,6 +644,66 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		)
 	}
 	return references, nil
+}
+
+// selectReferenceCandidate picks the best candidate from OpenSubtitles results.
+// It skips candidates whose release name contains a different episode's TMDB
+// title but not the expected episode's title, which indicates mislabeled metadata
+// on OpenSubtitles. Falls back to the top result (highest download count) if all
+// candidates appear suspect.
+func selectReferenceCandidate(candidates []opensubtitles.Subtitle, episodeTitle string, season *tmdb.SeasonDetails) (opensubtitles.Subtitle, int) {
+	if len(candidates) <= 1 {
+		return candidates[0], 0
+	}
+
+	currentTitle := strings.ToLower(strings.TrimSpace(episodeTitle))
+	const minTitleLen = 5
+	if len(currentTitle) < minTitleLen {
+		return candidates[0], 0
+	}
+
+	// Collect TMDB titles from other episodes in the season.
+	var otherTitles []string
+	for _, ep := range season.Episodes {
+		t := strings.ToLower(strings.TrimSpace(ep.Name))
+		if t == currentTitle || len(t) < minTitleLen {
+			continue
+		}
+		otherTitles = append(otherTitles, t)
+	}
+	if len(otherTitles) == 0 {
+		return candidates[0], 0
+	}
+
+	for i, c := range candidates {
+		release := strings.ToLower(strings.TrimSpace(c.Release))
+		if release == "" {
+			// No release name to inspect — no evidence of mislabeling.
+			return c, i
+		}
+
+		// Check whether the release name contains a different episode's title.
+		matchesOther := false
+		for _, other := range otherTitles {
+			if strings.Contains(release, other) {
+				matchesOther = true
+				break
+			}
+		}
+		if !matchesOther {
+			return c, i
+		}
+
+		// Release mentions another episode — accept it anyway if it also
+		// mentions the current episode (ambiguous rather than clearly wrong).
+		if strings.Contains(release, currentTitle) {
+			return c, i
+		}
+		// Skip: release clearly references a different episode.
+	}
+
+	// All candidates look suspect — fall back to the top result.
+	return candidates[0], 0
 }
 
 func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, op func() error) error {

@@ -6,6 +6,7 @@ import (
 	"spindle/internal/identification"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/ripspec"
+	"spindle/internal/subtitles/opensubtitles"
 )
 
 func TestDeriveCandidateEpisodesUsesRipSpecEpisodes(t *testing.T) {
@@ -191,6 +192,112 @@ func TestAttachTranscriptPaths(t *testing.T) {
 		}
 		if _, ok := paths["s01e02"]; ok {
 			t.Fatal("expected blank path to be skipped")
+		}
+	})
+}
+
+func TestSelectReferenceCandidate(t *testing.T) {
+	season := &tmdb.SeasonDetails{
+		SeasonNumber: 5,
+		Episodes: []tmdb.Episode{
+			{EpisodeNumber: 1, Name: "It Hits the Fan"},
+			{EpisodeNumber: 2, Name: "Cripple Fight"},
+			{EpisodeNumber: 3, Name: "Super Best Friends"},
+			{EpisodeNumber: 4, Name: "Scott Tenorman Must Die"},
+		},
+	}
+
+	t.Run("picks first candidate when no mislabeling", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park S05E02 Cripple Fight 720p", Downloads: 500},
+			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200},
+		}
+		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if idx != 0 || got.FileID != 100 {
+			t.Fatalf("expected first candidate (idx=0, FileID=100), got idx=%d, FileID=%d", idx, got.FileID)
+		}
+	})
+
+	t.Run("skips candidate with different episode title", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park 5x02 It Hits The Fan", Downloads: 500},
+			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200},
+		}
+		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if idx != 1 || got.FileID != 101 {
+			t.Fatalf("expected second candidate (idx=1, FileID=101), got idx=%d, FileID=%d", idx, got.FileID)
+		}
+	})
+
+	t.Run("falls back to first when all candidates suspect", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park 5x02 It Hits The Fan", Downloads: 500},
+			{FileID: 101, Release: "South Park 5x02 Super Best Friends", Downloads: 200},
+		}
+		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if idx != 0 || got.FileID != 100 {
+			t.Fatalf("expected fallback to first (idx=0, FileID=100), got idx=%d, FileID=%d", idx, got.FileID)
+		}
+	})
+
+	t.Run("accepts candidate with both current and other title", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park It Hits The Fan and Cripple Fight", Downloads: 500},
+			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200},
+		}
+		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if idx != 0 || got.FileID != 100 {
+			t.Fatalf("expected first candidate (ambiguous, not clearly wrong), got idx=%d, FileID=%d", idx, got.FileID)
+		}
+	})
+
+	t.Run("accepts candidate with empty release", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "", Downloads: 500},
+			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200},
+		}
+		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if idx != 0 || got.FileID != 100 {
+			t.Fatalf("expected first candidate (empty release = no evidence), got idx=%d, FileID=%d", idx, got.FileID)
+		}
+	})
+
+	t.Run("skips check for short episode titles", func(t *testing.T) {
+		shortSeason := &tmdb.SeasonDetails{
+			SeasonNumber: 1,
+			Episodes: []tmdb.Episode{
+				{EpisodeNumber: 1, Name: "Uno"},
+				{EpisodeNumber: 2, Name: "Dos"},
+			},
+		}
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "Show S01E02 Uno", Downloads: 500},
+			{FileID: 101, Release: "Show S01E02 Dos", Downloads: 200},
+		}
+		got, idx := selectReferenceCandidate(candidates, "Dos", shortSeason)
+		if idx != 0 || got.FileID != 100 {
+			t.Fatalf("expected first candidate (short titles bypass check), got idx=%d, FileID=%d", idx, got.FileID)
+		}
+	})
+
+	t.Run("single candidate returns it", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park 5x02 It Hits The Fan", Downloads: 500},
+		}
+		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if idx != 0 || got.FileID != 100 {
+			t.Fatalf("expected only candidate returned, got idx=%d, FileID=%d", idx, got.FileID)
+		}
+	})
+
+	t.Run("case insensitive matching", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "SOUTH PARK 5X02 IT HITS THE FAN", Downloads: 500},
+			{FileID: 101, Release: "south park 5x02 cripple fight", Downloads: 200},
+		}
+		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if idx != 1 || got.FileID != 101 {
+			t.Fatalf("expected second candidate (case-insensitive skip), got idx=%d, FileID=%d", idx, got.FileID)
 		}
 	})
 }
