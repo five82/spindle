@@ -30,6 +30,30 @@ func TestComputeDVDFingerprint(t *testing.T) {
 	}
 }
 
+func TestComputeBluRayFingerprint_IgnoresCertificate(t *testing.T) {
+	// A disc with CERTIFICATE/id.bdmv must still fingerprint using BDMV
+	// metadata (playlists, clips, etc.) rather than just the certificate.
+	// Multi-disc sets share the same certificate, so using it alone causes
+	// fingerprint collisions between different discs in the same set.
+	withCert := filepath.Join("testdata", "bluray_with_cert")
+	withoutCert := filepath.Join("testdata", "bluray")
+
+	fpWith, err := computeBluRayFingerprint(context.Background(), withCert)
+	if err != nil {
+		t.Fatalf("with cert: %v", err)
+	}
+	fpWithout, err := computeBluRayFingerprint(context.Background(), withoutCert)
+	if err != nil {
+		t.Fatalf("without cert: %v", err)
+	}
+
+	// Different BDMV content must produce different fingerprints even if
+	// both discs had the same CERTIFICATE/id.bdmv.
+	if fpWith == fpWithout {
+		t.Fatalf("fingerprints should differ: both produced %s", fpWith)
+	}
+}
+
 func TestComputeManifestFingerprint(t *testing.T) {
 	base := filepath.Join("testdata", "other")
 	got, err := computeManifestFingerprint(context.Background(), base, 4)

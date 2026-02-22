@@ -70,10 +70,10 @@ func computeBluRayFingerprint(ctx context.Context, base string) (string, error) 
 	default:
 	}
 
-	idPath := filepath.Join(base, "CERTIFICATE", "id.bdmv")
-	if exists(idPath) {
-		return hashFileManifest(base, []string{relativePath(base, idPath)}, 0)
-	}
+	// NOTE: CERTIFICATE/id.bdmv is intentionally NOT used alone because
+	// multi-disc sets share the same certificate across all discs, causing
+	// fingerprint collisions. Instead we always hash the full BDMV metadata
+	// (index, MovieObject, playlists, clips) which differs per disc.
 
 	var files []string
 
