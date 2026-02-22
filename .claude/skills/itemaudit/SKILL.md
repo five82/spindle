@@ -49,9 +49,11 @@ Disc type is not stored in the queue database. Infer it from the debug logs:
 |-------------|----------------|-------------------|
 | `PENDING` / `IDENTIFYING` | None / Scanning | Phase 2 (logs only) |
 | `IDENTIFIED` / Failed during `RIPPING` | Identification complete | Phase 2 + Phase 6 (edition detection from logs only, no external validation) |
-| `RIPPED` / Failed during `ENCODING` | Rip complete | Phase 2, 3, 6 |
-| `ENCODED` / Failed during `AUDIO_ANALYZING` | Encode complete | Phase 2, 3, 4, 5, 6 + external validation (Blu-ray only) |
-| `AUDIO_ANALYZED` / Failed during `SUBTITLING` | Audio analysis complete | Phase 2, 3, 4, 5, 6, 8 + external validation (Blu-ray only) |
+| `RIPPED` / Failed during `EPISODE_IDENTIFYING` (TV) or `ENCODING` (movie) | Rip complete | Phase 2, 3, 6 |
+| `EPISODE_IDENTIFYING` (TV only) | Episode ID in progress | Phase 2, 3, 6 |
+| `EPISODE_IDENTIFIED` (TV only) | Episode ID complete | Phase 2, 3, 3b, 6 |
+| `ENCODED` / Failed during `AUDIO_ANALYZING` | Encode complete | Phase 2, 3, [3b TV], 4, 5, 6 + external validation (Blu-ray only) |
+| `AUDIO_ANALYZED` / Failed during `SUBTITLING` | Audio analysis complete | Phase 2, 3, [3b TV], 4, 5, 6, 8 + external validation (Blu-ray only) |
 | `SUBTITLED` / `ORGANIZING` / `COMPLETED` | All stages | All phases + external validation (Blu-ray only) |
 
 **Key principles:**
@@ -84,6 +86,13 @@ Disc type is not stored in the queue database. Infer it from the debug logs:
    - Search for `decision_type=edition_detection` entries (movies only)
    - Evaluate if confidence levels and reasons make sense for the content
 
+5. **TV episode pipeline checks** (TV only):
+   - Search for `decision_type=episode_identification` entries — check if stage was skipped and why (valid reasons: `movie_content`, `opensubtitles_disabled`, `content_matcher_unavailable`)
+   - Search for `event_type=episode_match_low_confidence` — indicates episodes with `MatchConfidence` below 0.70 (accepted but flagged for review)
+   - Check `episode_count` in `event_type=stage_complete` entries for consistency with expected episode count
+   - Look for per-episode encoding or subtitle failures: `Asset.Status = "failed"` entries in logs, and whether the stage continued past them (partial success is allowed)
+   - Search for `decision_type=contentid_matches` to see final episode-to-reference matching results
+
 ### Phase 3: Rip Cache Analysis (Post-Ripping Items)
 
 If item has passed ripping stage, analyze the rip cache:
@@ -97,11 +106,43 @@ If item has passed ripping stage, analyze the rip cache:
    - Track counts and durations look reasonable
    - No orphaned or missing assets
 
+4. **Per-episode asset validation** (TV only):
+   - Parse `Envelope.Episodes[]` — verify each episode has a corresponding entry in `Assets.Ripped[]` with a matching `EpisodeKey`
+   - Check for any ripped assets with `status: "failed"` or missing `Path`
+   - Verify `len(Assets.Ripped)` matches `len(Episodes)` — mismatches indicate lost or extra rips
+   - Cross-reference `Episode.TitleID` with `Asset.TitleID` — each episode should map to a specific disc title (t00X.mkv)
+
+### Phase 3b: Episode Identification Validation (TV Only, Post-Episode-Identification)
+
+**Skip entirely if item is a movie or has not reached `EPISODE_IDENTIFIED`.** Episode identification uses WhisperX transcription + OpenSubtitles text similarity to confirm or correct initial episode ordering.
+
+1. **Content ID method**: Check `content_id_method` attribute in `Envelope.Attributes`
+   - `whisperx_opensubtitles` = full pipeline (WhisperX transcription matched against OpenSubtitles references via cosine similarity)
+   - If absent, episode identification was skipped — check logs for skip reason (`decision_type=episode_identification`, `decision_result=skipped`)
+
+2. **Episode manifest review**: Parse `Envelope.Episodes[]` and check `MatchConfidence` per episode:
+   - **CRITICAL** (< 0.70): Episode ordering likely wrong. The stage flags `NeedsReview` at this threshold. Check if item has `NeedsReview=true` with a review reason mentioning "low episode match confidence"
+   - **WARNING** (0.70-0.80): Marginal confidence — verify by spot-checking episode titles against durations
+   - **OK** (> 0.80): High confidence match
+   - **Zero** (0.0): Episode was not re-identified (kept initial heuristic assignment). This is normal when episode identification was skipped
+
+3. **`content_id_matches` attribute validation**: Check `Envelope.Attributes["content_id_matches"]` for the match details:
+   - Each entry has `episode_key`, `matched_episode`, `score`, `subtitle_file_id`, `subtitle_language`
+   - Verify all episodes have a match entry (missing entries = unmatched episodes)
+   - Check that `matched_episode` numbers form a reasonable sequence (e.g., consecutive episodes from one disc)
+   - The minimum accepted similarity score is 0.58 — scores near this floor warrant scrutiny
+
+4. **Episode sequence continuity**: Check that episode numbers in `Episodes[]` are sequential or at least form a plausible disc block (e.g., episodes 5-8 of a season). Gaps or duplicates indicate matching errors
+
+5. **`episodes_synchronized` flag**: Check `Envelope.Attributes["episodes_synchronized"]` — should be `true` after successful episode identification. If `false` or absent after the stage completed, the match results were not applied
+
 ### Phase 4: Encoded File Analysis (Post-Encoding Items)
 
 If item has passed encoding stage:
 
-1. **Run ffprobe** on the encoded file:
+**For movies** (single encoded file) or **per-episode for TV** (iterate `Assets.Encoded[]`):
+
+1. **Run ffprobe** on each encoded file:
    ```bash
    ffprobe -v error -show_format -show_streams -of json "<encoded_file>"
    ```
@@ -130,6 +171,16 @@ If item has passed encoding stage:
    - Review crop detection: was a crop applied? What were the candidates?
    - Check for warnings or errors in the snapshot
 
+6. **Per-episode asset status** (TV only):
+   - Check each entry in `Assets.Encoded[]` for `status: "failed"` — failed episodes have `ErrorMsg` with the failure reason
+   - Encoding allows partial success (continues past individual failures), so some episodes may be encoded while others failed
+   - Verify `len(Assets.Encoded)` matches `len(Episodes)` — missing entries indicate episodes that were never attempted
+
+7. **Cross-episode consistency** (TV only):
+   - All episodes from the same disc should share: same resolution, same codec, same audio track count
+   - Flag any episode with different resolution or codec as anomalous
+   - Duration spread: episodes from the same season typically have similar runtimes (within ~5 minutes). Outliers may indicate wrong episode assignment
+
 ### Phase 5: Crop Detection Validation (Post-Encoding Only)
 
 **Skip entirely if item has not passed encoding.** No encoded file = nothing to validate.
@@ -156,6 +207,11 @@ For encoded content, validate crop detection:
    - If crop detection shows "multiple ratios" or low top-candidate percentage
    - Some films have IMAX sequences with different ratios
    - This may be acceptable or may indicate detection issues
+
+5. **TV episode crop consistency** (TV only):
+   - All episodes from the same disc share source properties — crop should be identical or very similar across episodes
+   - Spot-check one or two episodes rather than performing full crop validation on every episode
+   - If one episode has a different crop than others, flag as anomalous (likely a detection issue, not intentional)
 
 ### Phase 6: Edition Detection Validation (Movies Only)
 
@@ -197,6 +253,8 @@ Regular subtitles always come from WhisperX transcription (generated from the ac
 Forced (foreign-parts-only) subtitles are fetched from OpenSubtitles when enabled, then aligned
 against the WhisperX output via text-based matching.
 
+**For movies** (single file) or **per-episode for TV** (iterate `Assets.Subtitled[]`):
+
 1. **Locate subtitles**: Check encoded MKV for embedded tracks (preferred) or sidecar SRT files
 2. **For embedded subtitles** (muxed into MKV):
    ```bash
@@ -228,11 +286,23 @@ against the WhisperX output via text-based matching.
    - Subtitles significantly shorter = missing content
    - Subtitles significantly longer = wrong subtitle file
 
-6. **Edition-aware forced subtitle selection** (if movie has edition and forced subs fetched):
+6. **Edition-aware forced subtitle selection** (movies only, if movie has edition and forced subs fetched):
    - Check logs for `edition=match` or `edition=mismatch` in forced subtitle ranking
    - Selected forced subtitle should match edition when possible (e.g., Director's Cut subtitle for Director's Cut disc)
    - If `edition=mismatch` was accepted, verify no matching edition subtitle was available
    - Note: regular subtitles are always WhisperX-generated, so edition matching only applies to forced subtitles from OpenSubtitles
+
+7. **Per-episode subtitle asset status** (TV only):
+   - Check each entry in `Assets.Subtitled[]` for `status: "failed"` — failed episodes have `ErrorMsg`
+   - Subtitling allows partial success (continues past individual failures), so some episodes may have subtitles while others failed
+   - Verify `SubtitlesMuxed` flag per episode — all completed episodes should have `subtitles_muxed: true`
+   - Check `subtitle_generation_results` in `Envelope.Attributes` for per-episode result details
+
+8. **Cross-episode subtitle consistency** (TV only):
+   - Cue density should be roughly similar across episodes from the same show (within ~50% of each other)
+   - All episodes should have the same subtitle language
+   - All episodes should have consistent forced subtitle presence (either all have forced subs or none do)
+   - Flag any episode with dramatically different cue density as potential transcription issue
 
 ### Phase 8: Commentary Track Validation (Post-Audio-Analysis Only)
 
@@ -252,6 +322,11 @@ against the WhisperX output via text-based matching.
 4. **Verify in encoded file**:
    - Count audio streams with "comment" disposition
    - Verify all are properly labeled (see Phase 4)
+
+5. **Cross-episode commentary consistency** (TV only):
+   - Commentary is a per-disc property, not per-episode — all episodes from the same disc should have the same number of audio streams (primary + commentary)
+   - If one episode has different audio stream counts than others, flag as anomalous
+   - TV commentary is less common than movie commentary but does exist (e.g., showrunner commentaries on season premieres/finales)
 
 ## Log Access Methods
 
@@ -297,6 +372,14 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Forced subtitle edition mismatch | Subtitles | `edition=mismatch` on forced sub when matching exists | Wrong forced subtitle for alternate cut |
 | Subtitles not muxed | Subtitles | Sidecar SRT exists but no embedded tracks | Jellyfin may not auto-load |
 | Unlabeled subtitles | Subtitles | Missing or incorrect title in embedded track | Jellyfin won't display track name properly |
+| Low episode match confidence | Episode ID | `event_type=episode_match_low_confidence`, scores < 0.70 | Episodes may be mislabeled (wrong S##E##) |
+| Heuristic-only episode assignment | Episode ID | `content_id_method` absent, `MatchConfidence` = 0.0 | Episode order based on runtime heuristic only, not verified |
+| Episode sequence gaps | Episode ID | Non-sequential episode numbers in `Episodes[]` | Missing episodes or matching error |
+| Per-episode rip failure | Ripping | `Assets.Ripped[]` entry with `status: "failed"` | Episode missing from downstream pipeline |
+| Per-episode encode failure | Encoding | `Assets.Encoded[]` entry with `status: "failed"` | Episode will not appear in Jellyfin |
+| Per-episode subtitle failure | Subtitles | `Assets.Subtitled[]` entry with `status: "failed"` | Episode missing subtitles |
+| Cross-episode resolution mismatch | Encoding | Different resolutions in ffprobe across episodes | Inconsistent quality in Jellyfin |
+| Cross-episode audio mismatch | Encoding | Different audio stream counts across episodes | Inconsistent audio tracks in Jellyfin |
 
 ### DEBUG-Only Patterns
 
@@ -308,6 +391,9 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Track selection | Ripping | `decision_type=track_select` per-track |
 | Forced subtitle ranking | Subtitles | `decision_type=subtitle_rank` candidate scores (forced subs only) |
 | Forced subtitle edition scoring | Subtitles | `edition=match` or `edition=mismatch` in forced subtitle ranking reasons |
+| Content ID candidate selection | Episode ID | `decision_type=contentid_candidates` with candidate sources |
+| Content ID match scores | Episode ID | `decision_type=contentid_matches` with per-episode similarity scores |
+| OpenSubtitles reference search | Episode ID | `decision_type=opensubtitles_reference_search` per-episode results |
 
 ## Audit Report Format
 
@@ -355,7 +441,22 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 - Episode count: <N> (for TV)
 - Anomalies: <any detected>
 
+#### Episode Identification (TV only, if applicable)
+- Content ID method: <whisperx_opensubtitles / skipped (reason)>
+- Episodes synchronized: <yes/no>
+- Episode manifest:
+
+| Episode | Key | TitleID | Confidence | Status |
+|---------|-----|---------|------------|--------|
+| S01E01 | s01e01 | 3 | 0.87 | OK |
+| S01E02 | s01e02 | 5 | 0.72 | WARNING |
+
+- Sequence continuity: <sequential/gaps detected>
+- Low confidence episodes: <count> (list any < 0.80)
+
 #### Encoded File (if applicable)
+
+**Movie:**
 - Path: <path>
 - Duration: <seconds> | Size: <MB>
 - Video: <codec> <resolution> <HDR status>
@@ -365,6 +466,16 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 - Crop applied: <crop filter or "none">
 - Calculated aspect ratio: <ratio>
 
+**TV (per-episode summary):**
+
+| Episode | Duration | Size | Resolution | Codec | Audio Streams | Crop | Status |
+|---------|----------|------|------------|-------|---------------|------|--------|
+| S01E01 | 2580s | 1.2GB | 1920x1080 | AV1 | 1 | none | completed |
+| S01E02 | 2640s | 1.3GB | 1920x1080 | AV1 | 1 | none | completed |
+
+- Cross-episode consistency: <pass/concerns> (resolution, codec, audio count)
+- Failed episodes: <count> (list with error messages if any)
+
 #### Edition Detection (movies only)
 - Detection method: <regex/llm/cache/none>
 - Edition label: <label or "none">
@@ -372,6 +483,8 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 - blu-ray.com confirms edition: <yes/no/not checked>
 
 #### Subtitles (if applicable)
+
+**Movie:**
 - Source: WhisperX (regular always WhisperX; forced from OpenSubtitles if enabled)
 - Muxed into MKV: <yes/no>
 - Subtitle tracks: <count>
@@ -381,6 +494,16 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 - Cue density: <cues/minute>
 - Forced subtitle edition match: <match/mismatch/n/a> (only for forced subs from OpenSubtitles)
 - Content spot-check: <pass/concerns>
+
+**TV (per-episode summary):**
+
+| Episode | Muxed | Tracks | Cue Density | Duration Coverage | Status |
+|---------|-------|--------|-------------|-------------------|--------|
+| S01E01 | yes | 1 | 4.2/min | 98% | completed |
+| S01E02 | yes | 1 | 3.8/min | 97% | completed |
+
+- Cross-episode consistency: <pass/concerns> (cue density, language, forced sub presence)
+- Failed episodes: <count> (list with error messages if any)
 
 ### External Validation (Blu-ray/4K Only, Post-Encoding Only)
 
@@ -411,8 +534,10 @@ After Phase 1, determine the furthest completed stage per the Stage Gating table
 - [ ] Gathered item info and status
 - [ ] Determined furthest completed stage (applied stage gating)
 - [ ] Determined disc source type from logs (DVD / Blu-ray / 4K Blu-ray)
+- [ ] Determined media type (movie / TV)
 - [ ] Located and read log files (debug preferred)
 - [ ] Analyzed logs for anomalies beyond simple error counts
+- [ ] If TV: checked for episode pipeline log patterns (low confidence, per-episode failures)
 - [ ] For failed items: diagnosed failure cause, timing, and retry patterns
 
 ### Post-Identification (item reached IDENTIFIED or beyond)
@@ -420,12 +545,24 @@ After Phase 1, determine the furthest completed stage per the Stage Gating table
 
 ### Post-Ripping (item reached RIPPED or beyond)
 - [ ] Analyzed rip cache metadata
+- [ ] If TV: validated per-episode ripped assets (count, status, EpisodeKey matching)
+
+### Post-Episode-Identification (TV only, item reached EPISODE_IDENTIFIED or beyond)
+- [ ] Checked content ID method (whisperx_opensubtitles or skipped)
+- [ ] Reviewed episode manifest with MatchConfidence scores
+- [ ] Flagged low confidence episodes (CRITICAL < 0.70, WARNING 0.70-0.80)
+- [ ] Verified episode sequence continuity (no gaps or duplicates)
+- [ ] Checked `content_id_matches` attribute completeness
+- [ ] Verified `episodes_synchronized` flag is true
 
 ### Post-Encoding (item reached ENCODED or beyond)
-- [ ] Ran ffprobe and analyzed streams
+- [ ] Ran ffprobe and analyzed streams (per-episode for TV)
 - [ ] Validated crop detection (aspect ratio sanity check)
 - [ ] Verified commentary labeling specifically
 - [ ] If movie with edition: verified edition in filename
+- [ ] If TV: checked per-episode encoded asset status (failed episodes)
+- [ ] If TV: verified cross-episode consistency (resolution, codec, audio count)
+- [ ] If TV: spot-checked crop consistency across episodes
 - [ ] If Blu-ray/4K (not DVD): looked up blu-ray.com review
 - [ ] If Blu-ray/4K (not DVD): validated crop detection against review
 - [ ] If Blu-ray/4K (not DVD): validated commentary count against review
@@ -433,12 +570,16 @@ After Phase 1, determine the furthest completed stage per the Stage Gating table
 
 ### Post-Audio-Analysis (item reached AUDIO_ANALYZED or beyond)
 - [ ] Reviewed LLM decisions (commentary, edition) for reasonableness
+- [ ] If TV: verified cross-episode audio stream count consistency
 
 ### Post-Subtitling (item reached SUBTITLED or beyond)
-- [ ] Verified subtitles are muxed into MKV
+- [ ] Verified subtitles are muxed into MKV (per-episode for TV)
 - [ ] Verified subtitle track labels (language name, "(Forced)" marker)
 - [ ] Analyzed subtitle content quality
 - [ ] If movie with edition and forced subs: verified forced subtitle edition matching
+- [ ] If TV: checked per-episode subtitle asset status (failed episodes, SubtitlesMuxed flags)
+- [ ] If TV: verified cross-episode subtitle consistency (cue density, language, forced sub presence)
 
 ### Report
 - [ ] Generated report with only applicable sections (omit sections for unreached stages)
+- [ ] If TV: used per-episode summary tables for encoded files and subtitles
