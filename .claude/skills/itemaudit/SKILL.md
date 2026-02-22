@@ -88,10 +88,13 @@ Disc type is not stored in the queue database. Infer it from the debug logs:
 
 5. **TV episode pipeline checks** (TV only):
    - Search for `decision_type=episode_identification` entries — check if stage was skipped and why (valid reasons: `movie_content`, `opensubtitles_disabled`, `content_matcher_unavailable`)
+   - Search for `decision_type=episode_review` with `decision_result=needs_review` — indicates episodeid flagged unresolved episodes for manual review
+   - Search for `event_type=contentid_no_references` or `event_type=contentid_no_matches` — soft failures where content matching ran but couldn't resolve episodes (not infrastructure errors)
    - Search for `event_type=episode_match_low_confidence` — indicates episodes with `MatchConfidence` below 0.70 (accepted but flagged for review)
    - Check `episode_count` in `event_type=stage_complete` entries for consistency with expected episode count
    - Look for per-episode encoding or subtitle failures: `Asset.Status = "failed"` entries in logs, and whether the stage continued past them (partial success is allowed)
    - Search for `decision_type=contentid_matches` to see final episode-to-reference matching results
+   - Verify placeholder keys (`s01_001` format) were replaced with resolved keys (`s01e03` format) after episodeid — if placeholders remain, episodes are unresolved
 
 ### Phase 3: Rip Cache Analysis (Post-Ripping Items)
 
@@ -108,13 +111,14 @@ If item has passed ripping stage, analyze the rip cache:
 
 4. **Per-episode asset validation** (TV only):
    - Parse `Envelope.Episodes[]` — verify each episode has a corresponding entry in `Assets.Ripped[]` with a matching `EpisodeKey`
+   - At this stage, episode keys are placeholders (`s01_001`, `s01_002`) with `Episode=0` — this is expected. Definitive episode numbers are assigned later by the episodeid stage
    - Check for any ripped assets with `status: "failed"` or missing `Path`
    - Verify `len(Assets.Ripped)` matches `len(Episodes)` — mismatches indicate lost or extra rips
    - Cross-reference `Episode.TitleID` with `Asset.TitleID` — each episode should map to a specific disc title (t00X.mkv)
 
 ### Phase 3b: Episode Identification Validation (TV Only, Post-Episode-Identification)
 
-**Skip entirely if item is a movie or has not reached `EPISODE_IDENTIFIED`.** Episode identification uses WhisperX transcription + OpenSubtitles text similarity to confirm or correct initial episode ordering.
+**Skip entirely if item is a movie or has not reached `EPISODE_IDENTIFIED`.** The identification stage creates placeholder episodes (`Episode=0`, keys like `s01_001`) without guessing episode numbers. The episodeid stage is the sole source of definitive episode assignment, using WhisperX transcription + OpenSubtitles text similarity. When episodeid cannot resolve numbers (OpenSubtitles disabled or no matches), episodes proceed with placeholder names to `review_dir` via `NeedsReview`.
 
 1. **Content ID method**: Check `content_id_method` attribute in `Envelope.Attributes`
    - `whisperx_opensubtitles` = full pipeline (WhisperX transcription matched against OpenSubtitles references via cosine similarity)
@@ -124,7 +128,7 @@ If item has passed ripping stage, analyze the rip cache:
    - **CRITICAL** (< 0.70): Episode ordering likely wrong. The stage flags `NeedsReview` at this threshold. Check if item has `NeedsReview=true` with a review reason mentioning "low episode match confidence"
    - **WARNING** (0.70-0.80): Marginal confidence — verify by spot-checking episode titles against durations
    - **OK** (> 0.80): High confidence match
-   - **Zero** (0.0): Episode was not re-identified (kept initial heuristic assignment). This is normal when episode identification was skipped
+   - **Zero** (0.0): Episode was not resolved by content matching. If episodeid was skipped (OpenSubtitles disabled), episodes remain as placeholders and `NeedsReview` should be set. If episodeid ran but returned no matches, same outcome
 
 3. **`content_id_matches` attribute validation**: Check `Envelope.Attributes["content_id_matches"]` for the match details:
    - Each entry has `episode_key`, `matched_episode`, `score`, `subtitle_file_id`, `subtitle_language`
@@ -132,7 +136,7 @@ If item has passed ripping stage, analyze the rip cache:
    - Check that `matched_episode` numbers form a reasonable sequence (e.g., consecutive episodes from one disc)
    - The minimum accepted similarity score is 0.58 — scores near this floor warrant scrutiny
 
-4. **Episode sequence continuity**: Check that episode numbers in `Episodes[]` are sequential or at least form a plausible disc block (e.g., episodes 5-8 of a season). Gaps or duplicates indicate matching errors
+4. **Episode sequence continuity**: After successful content matching, check that episode numbers in `Episodes[]` are sequential or at least form a plausible disc block (e.g., episodes 5-8 of a season). Gaps or duplicates indicate matching errors. Before episodeid, all episodes have `Episode=0` — this is expected, not an error
 
 5. **`episodes_synchronized` flag**: Check `Envelope.Attributes["episodes_synchronized"]` — should be `true` after successful episode identification. If `false` or absent after the stage completed, the match results were not applied
 
@@ -364,7 +368,7 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 |---------|-------|----------|--------|
 | Duplicate fingerprint | Identification | `decision_type=duplicate_fingerprint` | Item silently rejected |
 | Low TMDB confidence | Identification | Low score in `decision_type=tmdb_confidence` | Wrong title match |
-| Episode misidentification | Identification | Low score in `decision_type=episode_match` | Wrong S##E## labels |
+| Unresolved placeholder episodes | Episode ID | `Episode=0` with placeholder keys (`s01_001`) after episodeid completes | Episodes land in review_dir with placeholder names |
 | Missed edition detection | Identification | No `edition_detection` decision for disc with edition markers | Edition not in filename |
 | Wrong edition label | Identification | `edition_label` doesn't match actual edition type | Incorrect filename/subtitle selection |
 | Edition detection LLM failure | Identification | `event_type=edition_llm_failed` | Ambiguous edition not detected |
@@ -381,7 +385,8 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Subtitles not muxed | Subtitles | Sidecar SRT exists but no embedded tracks | Jellyfin may not auto-load |
 | Unlabeled subtitles | Subtitles | Missing or incorrect title in embedded track | Jellyfin won't display track name properly |
 | Low episode match confidence | Episode ID | `event_type=episode_match_low_confidence`, scores < 0.70 | Episodes may be mislabeled (wrong S##E##) |
-| Heuristic-only episode assignment | Episode ID | `content_id_method` absent, `MatchConfidence` = 0.0 | Episode order based on runtime heuristic only, not verified |
+| Episodes unresolved (matcher unavailable) | Episode ID | `NeedsReview=true`, reason `"episode numbers unresolved; content matching unavailable"` | Episodes proceed with placeholder names to review_dir |
+| Episodes unresolved (no matches) | Episode ID | `NeedsReview=true`, reason `"episode numbers unresolved; no matching subtitles found"` | Episodes proceed with placeholder names to review_dir |
 | Episode sequence gaps | Episode ID | Non-sequential episode numbers in `Episodes[]` | Missing episodes or matching error |
 | Per-episode rip failure | Ripping | `Assets.Ripped[]` entry with `status: "failed"` | Episode missing from downstream pipeline |
 | Per-episode encode failure | Encoding | `Assets.Encoded[]` entry with `status: "failed"` | Episode will not appear in Jellyfin |
@@ -394,11 +399,13 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 | Pattern | Stage | Evidence |
 |---------|-------|----------|
 | TMDB candidate scoring | Identification | `decision_type=tmdb_search` with all candidates |
-| Episode runtime matching | Identification | `decision_type=episode_runtime_match` |
+| Placeholder episode creation | Identification | Placeholder keys (`s01_001`) and `Episode=0` in rip spec |
 | Edition marker analysis | Identification | No edition markers detected (DEBUG level) |
 | Track selection | Ripping | `decision_type=track_select` per-track |
 | Forced subtitle ranking | Subtitles | `decision_type=subtitle_rank` candidate scores (forced subs only) |
 | Forced subtitle edition scoring | Subtitles | `edition=match` or `edition=mismatch` in forced subtitle ranking reasons |
+| Content ID no references | Episode ID | `event_type=contentid_no_references` — OpenSubtitles had no subtitles to compare |
+| Content ID no matches | Episode ID | `event_type=contentid_no_matches` — transcripts didn't match any references |
 | Content ID candidate selection | Episode ID | `decision_type=contentid_candidates` with candidate sources |
 | Content ID match scores | Episode ID | `decision_type=contentid_matches` with per-episode similarity scores |
 | OpenSubtitles reference search | Episode ID | `decision_type=opensubtitles_reference_search` per-episode results |
@@ -456,8 +463,9 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 
 | Episode | Key | TitleID | Confidence | Status |
 |---------|-----|---------|------------|--------|
-| S01E01 | s01e01 | 3 | 0.87 | OK |
-| S01E02 | s01e02 | 5 | 0.72 | WARNING |
+| S01E03 | s01_001 | 3 | 0.87 | OK (resolved) |
+| S01E04 | s01_002 | 5 | 0.72 | WARNING (resolved) |
+| ??? | s01_003 | 7 | 0.0 | UNRESOLVED (placeholder) |
 
 - Sequence continuity: <sequential/gaps detected>
 - Low confidence episodes: <count> (list any < 0.80)
@@ -557,6 +565,8 @@ After Phase 1, determine the furthest completed stage per the Stage Gating table
 
 ### Post-Episode-Identification (TV only, item reached EPISODE_IDENTIFIED or beyond)
 - [ ] Checked content ID method (whisperx_opensubtitles or skipped)
+- [ ] Checked if episodes were resolved (Episode > 0) or still placeholders (Episode = 0)
+- [ ] If placeholders remain: verified NeedsReview is set with appropriate reason
 - [ ] Reviewed episode manifest with MatchConfidence scores
 - [ ] Flagged low confidence episodes (CRITICAL < 0.70, WARNING 0.70-0.80)
 - [ ] Verified episode sequence continuity (no gaps or duplicates)
