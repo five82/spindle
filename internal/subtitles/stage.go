@@ -111,6 +111,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		totalSegments  int
 		skipped        int
 		failedEpisodes int
+		cachedCount    int
 	)
 	for idx, target := range targets {
 		episodeKey := normalizeEpisodeKey(target.EpisodeKey)
@@ -136,41 +137,51 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			return err
 		}
 		ctxMeta := buildEpisodeContext(baseCtx, target)
-		result, err := s.service.Generate(ctx, GenerateRequest{
-			SourcePath: target.SourcePath,
-			WorkDir:    target.WorkDir,
-			OutputDir:  target.OutputDir,
-			BaseName:   target.BaseName,
-			Context:    ctxMeta,
-			Languages:  append([]string(nil), s.service.languages...),
-		})
-		if err != nil {
-			errMessage := strings.TrimSpace(err.Error())
-			if errMessage == "" {
-				errMessage = "Subtitle generation failed"
-			}
-			if s.logger != nil {
-				s.logger.Warn("subtitle generation failed for episode",
-					logging.Int64("item_id", item.ID),
-					logging.String("episode_key", episodeKey),
-					logging.String("source_file", target.SourcePath),
-					logging.Error(err),
-					logging.String(logging.FieldEventType, "episode_subtitle_failed"),
-					logging.String(logging.FieldErrorHint, "check WhisperX logs and retry"),
-					logging.String(logging.FieldImpact, "subtitles will be missing for this episode, continuing with others"),
-				)
-			}
-			// Record per-episode failure and continue to next episode
-			env.Assets.AddAsset("subtitled", ripspec.Asset{
-				EpisodeKey: target.EpisodeKey,
-				TitleID:    target.TitleID,
-				Path:       "",
-				Status:     ripspec.AssetStatusFailed,
-				ErrorMsg:   errMessage,
+
+		var result GenerateResult
+		cached := false
+		if cachedResult, ok := s.tryReuseCachedTranscript(target, &env); ok {
+			result = cachedResult
+			cached = true
+			cachedCount++
+		} else {
+			var err error
+			result, err = s.service.Generate(ctx, GenerateRequest{
+				SourcePath: target.SourcePath,
+				WorkDir:    target.WorkDir,
+				OutputDir:  target.OutputDir,
+				BaseName:   target.BaseName,
+				Context:    ctxMeta,
+				Languages:  append([]string(nil), s.service.languages...),
 			})
-			failedEpisodes++
-			s.persistRipSpec(ctx, item, &env)
-			continue
+			if err != nil {
+				errMessage := strings.TrimSpace(err.Error())
+				if errMessage == "" {
+					errMessage = "Subtitle generation failed"
+				}
+				if s.logger != nil {
+					s.logger.Warn("subtitle generation failed for episode",
+						logging.Int64("item_id", item.ID),
+						logging.String("episode_key", episodeKey),
+						logging.String("source_file", target.SourcePath),
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "episode_subtitle_failed"),
+						logging.String(logging.FieldErrorHint, "check WhisperX logs and retry"),
+						logging.String(logging.FieldImpact, "subtitles will be missing for this episode, continuing with others"),
+					)
+				}
+				// Record per-episode failure and continue to next episode
+				env.Assets.AddAsset("subtitled", ripspec.Asset{
+					EpisodeKey: target.EpisodeKey,
+					TitleID:    target.TitleID,
+					Path:       "",
+					Status:     ripspec.AssetStatusFailed,
+					ErrorMsg:   errMessage,
+				})
+				failedEpisodes++
+				s.persistRipSpec(ctx, item, &env)
+				continue
+			}
 		}
 		// Validate generated SRT content
 		if issues := ValidateSRTContent(result.SubtitlePath, result.Duration.Seconds()); len(issues) > 0 {
@@ -213,7 +224,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			Status:         ripspec.AssetStatusCompleted,
 			SubtitlesMuxed: subtitlesMuxed,
 		})
-		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, ctxMeta)
+		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, ctxMeta, cached)
 	}
 
 	// Determine final item status based on episode outcomes
@@ -222,7 +233,12 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		return services.Wrap(services.ErrTransient, "subtitles", "execute",
 			fmt.Sprintf("All %d episode(s) failed subtitle generation", totalProcessed), nil)
 	}
-	item.ProgressMessage = fmt.Sprintf("Subtitles generated (%d episodes, %d segments)", successCount, totalSegments)
+	summaryParts := []string{fmt.Sprintf("%d episodes", successCount)}
+	if cachedCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d cached", cachedCount))
+	}
+	summaryParts = append(summaryParts, fmt.Sprintf("%d segments", totalSegments))
+	item.ProgressMessage = fmt.Sprintf("Subtitles generated (%s)", strings.Join(summaryParts, ", "))
 	item.ProgressPercent = 100
 	item.ErrorMessage = ""
 	item.ActiveEpisodeKey = ""
@@ -239,6 +255,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			logging.Duration("stage_duration", time.Since(stageStart)),
 			logging.Int("episodes", len(targets)),
 			logging.Int("whisperx", successCount),
+			logging.Int("cached", cachedCount),
 			logging.Int("segments", totalSegments),
 			logging.Bool("needs_review", item.NeedsReview),
 		}

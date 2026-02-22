@@ -105,6 +105,64 @@ func TestMarkEpisodesSynchronized(t *testing.T) {
 	}
 }
 
+func TestAttachTranscriptPaths(t *testing.T) {
+	t.Run("stores paths correctly", func(t *testing.T) {
+		env := &ripspec.Envelope{}
+		fps := []ripFingerprint{
+			{EpisodeKey: "s01e01", Path: "/tmp/s01e01.srt"},
+			{EpisodeKey: "s01e02", Path: "/tmp/s01e02.srt"},
+		}
+		attachTranscriptPaths(env, fps)
+		raw, ok := env.Attributes["content_id_transcripts"]
+		if !ok {
+			t.Fatal("expected content_id_transcripts attribute")
+		}
+		paths, ok := raw.(map[string]string)
+		if !ok {
+			t.Fatalf("expected map[string]string, got %T", raw)
+		}
+		if paths["s01e01"] != "/tmp/s01e01.srt" {
+			t.Fatalf("unexpected path for s01e01: %q", paths["s01e01"])
+		}
+		if paths["s01e02"] != "/tmp/s01e02.srt" {
+			t.Fatalf("unexpected path for s01e02: %q", paths["s01e02"])
+		}
+	})
+
+	t.Run("empty fingerprints", func(t *testing.T) {
+		env := &ripspec.Envelope{}
+		attachTranscriptPaths(env, nil)
+		if env.Attributes != nil {
+			if _, ok := env.Attributes["content_id_transcripts"]; ok {
+				t.Fatal("expected no content_id_transcripts for empty fingerprints")
+			}
+		}
+	})
+
+	t.Run("nil envelope", func(t *testing.T) {
+		// Should not panic.
+		attachTranscriptPaths(nil, []ripFingerprint{
+			{EpisodeKey: "s01e01", Path: "/tmp/s01e01.srt"},
+		})
+	})
+
+	t.Run("skips blank paths", func(t *testing.T) {
+		env := &ripspec.Envelope{}
+		fps := []ripFingerprint{
+			{EpisodeKey: "s01e01", Path: "/tmp/s01e01.srt"},
+			{EpisodeKey: "s01e02", Path: ""},
+		}
+		attachTranscriptPaths(env, fps)
+		paths := env.Attributes["content_id_transcripts"].(map[string]string)
+		if len(paths) != 1 {
+			t.Fatalf("expected 1 path, got %d", len(paths))
+		}
+		if _, ok := paths["s01e02"]; ok {
+			t.Fatal("expected blank path to be skipped")
+		}
+	})
+}
+
 func intSlicesEqual(a, b []int) bool {
 	if len(a) != len(b) {
 		return false

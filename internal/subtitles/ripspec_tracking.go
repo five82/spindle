@@ -15,7 +15,7 @@ const (
 	subtitleGenerationSummaryKey = "subtitle_generation_summary"
 )
 
-func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string, result GenerateResult) {
+func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string, result GenerateResult, cached bool) {
 	if env == nil {
 		return
 	}
@@ -27,6 +27,9 @@ func recordSubtitleGeneration(env *ripspec.Envelope, episodeKey, language string
 	entry := map[string]any{
 		"episode_key": key,
 		"source":      "whisperx",
+	}
+	if cached {
+		entry["cached"] = true
 	}
 	if strings.TrimSpace(result.SubtitlePath) != "" {
 		entry["subtitle_path"] = strings.TrimSpace(result.SubtitlePath)
@@ -94,14 +97,18 @@ func (s *Stage) persistRipSpec(ctx context.Context, item *queue.Item, env *ripsp
 }
 
 // processGenerationResult handles logging and RipSpec update after successful generation.
-func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, target subtitleTarget, result GenerateResult, env *ripspec.Envelope, hasRipSpec bool, ctxMeta SubtitleContext) {
+func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, target subtitleTarget, result GenerateResult, env *ripspec.Envelope, hasRipSpec bool, ctxMeta SubtitleContext, cached bool) {
 	episodeKey := normalizeEpisodeKey(target.EpisodeKey)
 
 	if s.logger != nil {
+		reason := "whisperx_only"
+		if cached {
+			reason = "contentid_cache_reused"
+		}
 		s.logger.Info("subtitle generation decision",
 			logging.String(logging.FieldDecisionType, "subtitle_generation"),
 			logging.String("decision_result", "whisperx"),
-			logging.String("decision_reason", "whisperx_only"),
+			logging.String("decision_reason", reason),
 			logging.String("episode_key", episodeKey),
 			logging.String("source_file", target.SourcePath),
 			logging.String("subtitle_file", result.SubtitlePath),
@@ -112,6 +119,6 @@ func (s *Stage) processGenerationResult(ctx context.Context, item *queue.Item, t
 	if !hasRipSpec {
 		return
 	}
-	recordSubtitleGeneration(env, episodeKey, ctxMeta.Language, result)
+	recordSubtitleGeneration(env, episodeKey, ctxMeta.Language, result, cached)
 	s.persistRipSpec(ctx, item, env)
 }

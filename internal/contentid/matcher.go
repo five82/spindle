@@ -239,6 +239,7 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	}
 	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches, progress)
 	m.attachMatchAttributes(env, matches)
+	attachTranscriptPaths(env, ripPrints)
 	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
 	if m.logger != nil {
@@ -755,6 +756,24 @@ func (m *Matcher) attachMatchAttributes(env *ripspec.Envelope, matches []matchRe
 	}
 	env.Attributes["content_id_matches"] = payload
 	env.Attributes["content_id_method"] = "whisperx_opensubtitles"
+}
+
+func attachTranscriptPaths(env *ripspec.Envelope, fingerprints []ripFingerprint) {
+	if env == nil || len(fingerprints) == 0 {
+		return
+	}
+	if env.Attributes == nil {
+		env.Attributes = make(map[string]any)
+	}
+	paths := make(map[string]string, len(fingerprints))
+	for _, fp := range fingerprints {
+		if strings.TrimSpace(fp.EpisodeKey) != "" && strings.TrimSpace(fp.Path) != "" {
+			paths[strings.ToLower(strings.TrimSpace(fp.EpisodeKey))] = fp.Path
+		}
+	}
+	if len(paths) > 0 {
+		env.Attributes["content_id_transcripts"] = paths
+	}
 }
 
 func markEpisodesSynchronized(env *ripspec.Envelope) {
