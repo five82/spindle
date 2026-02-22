@@ -253,7 +253,10 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 			if status.Title == "" {
 				status.Title = strings.TrimSpace(t.EpisodeTitle)
 			}
-			if status.Title == "" {
+			if status.Title == "" && ep.Episode > 0 {
+				// Only fall back to MakeMKV title name for resolved episodes.
+				// For placeholders (Episode==0), let Flyer reach OutputBasename
+				// which contains a unique disc index.
 				status.Title = strings.TrimSpace(t.Name)
 			}
 			status.SourceTitle = strings.TrimSpace(t.Name)
