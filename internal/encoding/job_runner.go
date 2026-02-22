@@ -24,7 +24,7 @@ func newEncodeJobRunner(store *queue.Store, runner *draptoRunner) *encodeJobRunn
 	return &encodeJobRunner{store: store, runner: runner}
 }
 
-func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, max(1, len(jobs)))
 	if logger != nil {
 		runnerAvailable := r != nil && r.runner != nil
@@ -39,7 +39,7 @@ func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env ripspec
 	}
 
 	if len(jobs) > 0 {
-		paths, err := r.encodeEpisodes(ctx, item, &env, jobs, stagingRoot, encodedDir, logger)
+		paths, err := r.encodeEpisodes(ctx, item, env, jobs, stagingRoot, encodedDir, logger)
 		if err != nil {
 			return nil, err
 		}

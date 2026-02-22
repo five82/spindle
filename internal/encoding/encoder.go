@@ -92,7 +92,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	encodedPaths, err := e.runEncodingJobs(ctx, item, env, jobs, stagingRoot, encodedDir, logger)
+	encodedPaths, err := e.runEncodingJobs(ctx, item, &env, jobs, stagingRoot, encodedDir, logger)
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	e.finalizeEncodedItem(item, env, encodedPaths, logger)
+	e.finalizeEncodedItem(item, &env, encodedPaths, logger)
 	e.reportEncodingSummary(ctx, item, encodedPaths, stageStart, logger)
 
 	return nil
@@ -184,12 +184,12 @@ func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item,
 }
 
 // runEncodingJobs encodes all jobs (episodes or single file) and returns the output paths and sources used.
-func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
 	return e.ensureJobRunner().Run(ctx, item, env, jobs, stagingRoot, encodedDir, logger)
 }
 
 // finalizeEncodedItem updates the queue item with encoding results.
-func (e *Encoder) finalizeEncodedItem(item *queue.Item, env ripspec.Envelope, encodedPaths []string, logger *slog.Logger) {
+func (e *Encoder) finalizeEncodedItem(item *queue.Item, env *ripspec.Envelope, encodedPaths []string, logger *slog.Logger) {
 	if encoded, err := env.Encode(); err == nil {
 		item.RipSpecData = encoded
 	} else {
