@@ -678,32 +678,30 @@ func selectReferenceCandidate(candidates []opensubtitles.Subtitle, episodeTitle 
 	for i, c := range candidates {
 		release := strings.ToLower(strings.TrimSpace(c.Release))
 		if release == "" {
-			// No release name to inspect — no evidence of mislabeling.
+			// No release name to inspect -- no evidence of mislabeling.
 			return c, i
 		}
-
-		// Check whether the release name contains a different episode's title.
-		matchesOther := false
-		for _, other := range otherTitles {
-			if strings.Contains(release, other) {
-				matchesOther = true
-				break
-			}
-		}
-		if !matchesOther {
-			return c, i
-		}
-
-		// Release mentions another episode — accept it anyway if it also
-		// mentions the current episode (ambiguous rather than clearly wrong).
-		if strings.Contains(release, currentTitle) {
+		referencesOther := containsAnySubstring(release, otherTitles)
+		if !referencesOther || strings.Contains(release, currentTitle) {
+			// Either the release does not mention another episode,
+			// or it mentions both (ambiguous rather than clearly wrong).
 			return c, i
 		}
 		// Skip: release clearly references a different episode.
 	}
 
-	// All candidates look suspect — fall back to the top result.
+	// All candidates look suspect -- fall back to the top result.
 	return candidates[0], 0
+}
+
+// containsAnySubstring reports whether s contains any of the given substrings.
+func containsAnySubstring(s string, substrings []string) bool {
+	for _, sub := range substrings {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Matcher) invokeOpenSubtitles(ctx context.Context, lastCall *time.Time, op func() error) error {
@@ -919,6 +917,7 @@ func (p candidateEpisodePlan) Options() map[string]any {
 
 func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, discNumber int) candidateEpisodePlan {
 	plan := candidateEpisodePlan{}
+	// Tier 1: collect resolved episode numbers from the rip spec.
 	set := make(map[int]struct{}, len(env.Episodes)*2)
 	for _, episode := range env.Episodes {
 		if episode.Episode > 0 {
@@ -931,6 +930,8 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 		plan.Sources = append(plan.Sources, "rip_spec")
 	}
 
+	// Tier 2: supplement resolved episodes with disc-block neighbors.
+	// Only runs when Tier 1 found at least one resolved episode.
 	totalEpisodes := len(season.Episodes)
 	if len(set) > 0 && discNumber > 0 && totalEpisodes > 0 {
 		block := len(env.Episodes)
@@ -955,6 +956,7 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 		}
 	}
 
+	// Tier 3: fall back to full season when no episodes were resolved.
 	if len(set) == 0 {
 		for _, episode := range season.Episodes {
 			plan.SeasonFallback = append(plan.SeasonFallback, episode.EpisodeNumber)

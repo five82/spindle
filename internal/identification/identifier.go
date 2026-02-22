@@ -346,7 +346,6 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	tmdbID := outcome.TMDBID
 	seasonNumber := outcome.SeasonNumber
 	episodeMatches := outcome.EpisodeMatches
-	matchedEpisodes := outcome.MatchedEpisodes
 
 	if contentKey == "" {
 		contentKey = unknownContentKey(item.DiscFingerprint)
@@ -356,9 +355,6 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	if seasonNumber > 0 {
 		metadata["season_number"] = seasonNumber
-	}
-	if len(matchedEpisodes) > 0 {
-		metadata["episode_numbers"] = matchedEpisodes
 	}
 	metadata["media_type"] = mediaType
 	if strings.TrimSpace(item.MetadataJSON) == "" {

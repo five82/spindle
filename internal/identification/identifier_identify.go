@@ -35,7 +35,6 @@ type identifyOutcome struct {
 	TMDBID          int64
 	SeasonNumber    int
 	EpisodeMatches  map[int]episodeAnnotation
-	MatchedEpisodes []int
 	Metadata        map[string]any
 }
 
@@ -59,7 +58,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		tmdbID          int64
 		seasonNumber    int
 		episodeMatches  map[int]episodeAnnotation
-		matchedEpisodes []int
 	)
 	showHintSources := []string{input.Title}
 	if input.DiscLabel != "" {
@@ -174,7 +172,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 			TMDBID:          tmdbID,
 			SeasonNumber:    seasonNumber,
 			EpisodeMatches:  episodeMatches,
-			MatchedEpisodes: matchedEpisodes,
 			Metadata:        metadata,
 		}, nil
 	}
@@ -272,7 +269,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 			TMDBID:          tmdbID,
 			SeasonNumber:    seasonNumber,
 			EpisodeMatches:  episodeMatches,
-			MatchedEpisodes: matchedEpisodes,
 			Metadata:        metadata,
 		}, nil
 	}
@@ -412,7 +408,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		TMDBID:          tmdbID,
 		SeasonNumber:    seasonNumber,
 		EpisodeMatches:  episodeMatches,
-		MatchedEpisodes: matchedEpisodes,
 		Metadata:        metadata,
 	}, nil
 }

@@ -52,13 +52,10 @@ func (e *EpisodeIdentifier) SetLogger(logger *slog.Logger) {
 func (e *EpisodeIdentifier) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
 
-	// Check if this is a TV show - skip for movies
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if metadata.IsMovie() {
 		logSkipDecision(logger, "movie_content")
-		item.ProgressStage = "Episode Identification"
-		item.ProgressMessage = "Skipped (movie content)"
-		item.ProgressPercent = 100
+		setSkipProgress(item, "Skipped (movie content)")
 		return nil
 	}
 
@@ -72,7 +69,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	stageStart := time.Now()
 	logger := logging.WithContext(ctx, e.logger)
 
-	// Check if this is a TV show - skip for movies
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	if metadata.IsMovie() {
 		logSkipDecision(logger, "movie_content")
@@ -80,7 +76,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		return nil
 	}
 
-	// Decode rip spec
 	if strings.TrimSpace(item.RipSpecData) == "" {
 		logSkipDecision(logger, "no_rip_spec")
 		setSkipProgress(item, "Skipped (no rip spec)")
@@ -94,14 +89,12 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		return nil
 	}
 
-	// Check if we have episodes to match
 	if len(env.Episodes) == 0 {
 		logSkipDecision(logger, "no_episodes")
 		setSkipProgress(item, "Skipped (no episodes)")
 		return nil
 	}
 
-	// Check if content matcher is available
 	if e.matcher == nil {
 		reason := "content_matcher_unavailable"
 		if e.cfg == nil {
@@ -124,7 +117,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		return nil
 	}
 
-	// Perform episode matching
 	logger.Debug("correlating episodes with OpenSubtitles references",
 		logging.Int("episode_count", len(env.Episodes)))
 
@@ -145,13 +137,13 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		episodeKey = strings.ToUpper(strings.TrimSpace(episodeKey))
 		switch phase {
 		case "transcribe":
-			item.ProgressMessage = fmt.Sprintf("Phase 1/3 - Generating transcripts (%d/%d – %s)", current, total, episodeKey)
+			item.ProgressMessage = fmt.Sprintf("Phase 1/3 - Generating transcripts (%d/%d - %s)", current, total, episodeKey)
 			item.ProgressPercent = 10 + 40*(float64(current)/float64(max(1, total)))
 		case "reference":
-			item.ProgressMessage = fmt.Sprintf("Phase 2/3 - Downloading references (%d/%d – %s)", current, total, episodeKey)
+			item.ProgressMessage = fmt.Sprintf("Phase 2/3 - Downloading references (%d/%d - %s)", current, total, episodeKey)
 			item.ProgressPercent = 50 + 30*(float64(current)/float64(max(1, total)))
 		case "apply":
-			item.ProgressMessage = fmt.Sprintf("Phase 3/3 - Applying matches (%d/%d – %s)", current, total, episodeKey)
+			item.ProgressMessage = fmt.Sprintf("Phase 3/3 - Applying matches (%d/%d - %s)", current, total, episodeKey)
 			item.ProgressPercent = 80 + 15*(float64(current)/float64(max(1, total)))
 			if encoded, encodeErr := env.Encode(); encodeErr == nil {
 				copy := *item
@@ -173,7 +165,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		)
 	}
 
-	// Flag for review if matcher ran but couldn't resolve episode numbers
 	if !updated && hasUnresolvedEpisodes(env.Episodes) {
 		item.NeedsReview = true
 		if item.ReviewReason == "" {
@@ -185,7 +176,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			logging.String("decision_reason", "no_matching_subtitles"))
 	}
 
-	// Update rip spec if matches were found
 	if updated {
 		encoded, encodeErr := env.Encode()
 		if encodeErr != nil {
