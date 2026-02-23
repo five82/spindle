@@ -611,8 +611,10 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 
 	// Log stage summary with timing and resource metrics
 	var totalRippedBytes int64
-	if info, statErr := os.Stat(target); statErr == nil {
-		totalRippedBytes = info.Size()
+	for _, path := range validationTargets {
+		if info, statErr := os.Stat(strings.TrimSpace(path)); statErr == nil {
+			totalRippedBytes += info.Size()
+		}
 	}
 	summaryAttrs := []logging.Attr{
 		logging.String(logging.FieldEventType, "stage_complete"),

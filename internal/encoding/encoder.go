@@ -103,7 +103,19 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	e.finalizeEncodedItem(item, &env, encodedPaths, logger)
-	e.reportEncodingSummary(ctx, item, encodedPaths, stageStart, logger)
+
+	var inputPaths []string
+	for _, a := range env.Assets.Ripped {
+		if p := strings.TrimSpace(a.Path); p != "" {
+			inputPaths = append(inputPaths, p)
+		}
+	}
+	if len(inputPaths) == 0 {
+		if p := strings.TrimSpace(item.RippedFile); p != "" {
+			inputPaths = []string{p}
+		}
+	}
+	e.reportEncodingSummary(ctx, item, inputPaths, encodedPaths, stageStart, logger)
 
 	return nil
 }
@@ -216,15 +228,17 @@ func (e *Encoder) finalizeEncodedItem(item *queue.Item, env *ripspec.Envelope, e
 }
 
 // reportEncodingSummary calculates metrics, sends notifications, and logs the summary.
-func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, encodedPaths []string, stageStart time.Time, logger *slog.Logger) {
+func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, inputPaths, encodedPaths []string, stageStart time.Time, logger *slog.Logger) {
 	var totalInputBytes, totalOutputBytes int64
 	for _, path := range encodedPaths {
 		if info, err := os.Stat(path); err == nil {
 			totalOutputBytes += info.Size()
 		}
 	}
-	if info, err := os.Stat(strings.TrimSpace(item.RippedFile)); err == nil {
-		totalInputBytes = info.Size()
+	for _, path := range inputPaths {
+		if info, err := os.Stat(path); err == nil {
+			totalInputBytes += info.Size()
+		}
 	}
 
 	var compressionRatio float64
