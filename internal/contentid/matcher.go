@@ -297,38 +297,20 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
 	if m.logger != nil {
-		infoAttrs := buildMatchSummaryAttrs(
-			"decision_summary",
-			"contentid_matches",
-			"selected",
-			"matches_resolved",
-			matches,
-			maxLoggedContentIDMatches,
-		)
-		infoAttrs = append(infoAttrs,
+		contextAttrs := []logging.Attr{
 			logging.String("decision_options", "match, review"),
 			logging.Int("episodes_available", len(env.Episodes)),
 			logging.Int("rip_transcripts", len(ripPrints)),
 			logging.Int("reference_subtitles", len(refPrints)),
 			logging.Int("matched_episodes", len(matches)),
-		)
+		}
+
+		infoAttrs := buildMatchSummaryAttrs("decision_summary", "contentid_matches", "selected", "matches_resolved", matches, maxLoggedContentIDMatches)
+		infoAttrs = append(infoAttrs, contextAttrs...)
 		m.logger.Info("content id alignment complete", logging.Args(infoAttrs...)...)
 
-		debugAttrs := buildMatchSummaryAttrs(
-			"decision_summary_full",
-			"contentid_matches",
-			"selected",
-			"matches_resolved",
-			matches,
-			0,
-		)
-		debugAttrs = append(debugAttrs,
-			logging.String("decision_options", "match, review"),
-			logging.Int("episodes_available", len(env.Episodes)),
-			logging.Int("rip_transcripts", len(ripPrints)),
-			logging.Int("reference_subtitles", len(refPrints)),
-			logging.Int("matched_episodes", len(matches)),
-		)
+		debugAttrs := buildMatchSummaryAttrs("decision_summary_full", "contentid_matches", "selected", "matches_resolved", matches, 0)
+		debugAttrs = append(debugAttrs, contextAttrs...)
 		m.logger.Debug("content id alignment complete", logging.Args(debugAttrs...)...)
 	}
 	return true, nil
@@ -386,9 +368,6 @@ func (m *Matcher) buildContext(item *queue.Item, env *ripspec.Envelope) (episode
 		ctx.Season = 1
 	}
 	ctx.SubtitleCtx = subtitles.BuildSubtitleContext(item)
-	if ctx.SubtitleCtx.MediaType == "" {
-		ctx.SubtitleCtx.MediaType = "tv"
-	}
 	if ctx.SubtitleCtx.TMDBID == 0 {
 		return ctx, errors.New("tmdb id missing from metadata")
 	}
@@ -1118,7 +1097,7 @@ func formatCandidateOptionValue(value any) string {
 		}
 		parts := make([]string, 0, len(typed))
 		for _, v := range typed {
-			parts = append(parts, fmt.Sprintf("%d", v))
+			parts = append(parts, strconv.Itoa(v))
 		}
 		return strings.Join(parts, ", ")
 	default:

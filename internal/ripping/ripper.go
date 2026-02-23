@@ -498,7 +498,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	// When cache is enabled, item.RippedFile points directly to the cache path.
 	// Encoding reads from cache; no working copy is needed.
 
-	validationTargets := []string{}
+	var validationTargets []string
 	if strings.TrimSpace(target) != "" {
 		validationTargets = append(validationTargets, target)
 	}
