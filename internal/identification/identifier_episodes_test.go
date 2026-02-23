@@ -7,10 +7,11 @@ import (
 )
 
 func TestBuildPlaceholderAnnotationsCreatesEntries(t *testing.T) {
+	// Each title needs distinct tracks to produce a unique TitleHash
 	titles := []disc.Title{
-		{ID: 0, Duration: 22 * 60},
-		{ID: 1, Duration: 22 * 60},
-		{ID: 2, Duration: 22 * 60},
+		{ID: 0, Duration: 22 * 60, Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 1, Duration: 23 * 60, Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 2, Duration: 24 * 60, Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
 	}
 	got := buildPlaceholderAnnotations(titles, 5)
 	if len(got) != 3 {
@@ -27,6 +28,29 @@ func TestBuildPlaceholderAnnotationsCreatesEntries(t *testing.T) {
 		if ann.Episode != 0 {
 			t.Fatalf("title %d: expected episode 0 (placeholder), got %d", id, ann.Episode)
 		}
+	}
+}
+
+func TestBuildPlaceholderAnnotationsDeduplicatesByTitleHash(t *testing.T) {
+	// Titles 0 and 2 have identical metadata (same duration, same tracks) so they
+	// produce the same TitleHash. Only the first should be kept.
+	titles := []disc.Title{
+		{ID: 0, Duration: 22 * 60, Name: "ep1", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 1, Duration: 23 * 60, Name: "ep2", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 2, Duration: 22 * 60, Name: "ep1", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+	}
+	got := buildPlaceholderAnnotations(titles, 1)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 annotations (deduped), got %d", len(got))
+	}
+	if _, ok := got[0]; !ok {
+		t.Fatal("expected annotation for title 0 (first occurrence)")
+	}
+	if _, ok := got[1]; !ok {
+		t.Fatal("expected annotation for title 1 (unique)")
+	}
+	if _, ok := got[2]; ok {
+		t.Fatal("title 2 should be deduplicated (same TitleHash as title 0)")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"spindle/internal/disc"
+	discfingerprint "spindle/internal/disc/fingerprint"
 	"spindle/internal/queue"
 )
 
@@ -16,12 +17,19 @@ func buildPlaceholderAnnotations(titles []disc.Title, seasonNumber int) map[int]
 		return nil
 	}
 	out := make(map[int]episodeAnnotation)
+	seen := make(map[string]struct{})
 	for _, t := range titles {
-		if isEpisodeRuntime(t.Duration) {
-			out[t.ID] = episodeAnnotation{
-				Season:  seasonNumber,
-				Episode: 0,
-			}
+		if !isEpisodeRuntime(t.Duration) {
+			continue
+		}
+		fp := discfingerprint.TitleHash(t)
+		if _, dup := seen[fp]; dup {
+			continue
+		}
+		seen[fp] = struct{}{}
+		out[t.ID] = episodeAnnotation{
+			Season:  seasonNumber,
+			Episode: 0,
 		}
 	}
 	if len(out) == 0 {
