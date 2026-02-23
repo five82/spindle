@@ -8,7 +8,8 @@ import (
 )
 
 var (
-	whitespacePattern = regexp.MustCompile(`\s+`)
+	whitespacePattern      = regexp.MustCompile(`\s+`)
+	descriptorNoisePattern = regexp.MustCompile(`(?i)\b(?:TV\s+Series|TV\s+Show|The\s+Complete\s+Series|Complete\s+Series)\b`)
 )
 
 var parenthesesStripper = strings.NewReplacer("(", " ", ")", " ")
@@ -82,10 +83,11 @@ func splitShowSeason(value string) (string, int) {
 		season = s
 	}
 
-	// Remove season/disc markers
+	// Remove season/disc markers and descriptor noise
 	cleaned = seasonPattern.ReplaceAllString(cleaned, " ")
 	cleaned = sPattern.ReplaceAllString(cleaned, " ")
 	cleaned = discNoisePattern.ReplaceAllString(cleaned, " ")
+	cleaned = descriptorNoisePattern.ReplaceAllString(cleaned, " ")
 
 	// Normalize whitespace and clean up
 	cleaned = whitespacePattern.ReplaceAllString(cleaned, " ")

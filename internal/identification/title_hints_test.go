@@ -21,6 +21,37 @@ func TestDeriveShowHintStripsNoiseAndKeepsSeason(t *testing.T) {
 	}
 }
 
+func TestDeriveShowHintStripsDescriptorNoise(t *testing.T) {
+	cases := []struct {
+		input  string
+		hint   string
+		season int
+	}{
+		{
+			input:  "BATMAN_TV_S1_DISC_1 (Batman TV Series - Season 1: Disc 1)",
+			hint:   "Batman",
+			season: 1,
+		},
+		{
+			input:  "SHOW_NAME (Some TV Show Season 2 Disc 3)",
+			hint:   "Some",
+			season: 2,
+		},
+		{
+			input:  "The Complete Series",
+			hint:   "",
+			season: 0,
+		},
+	}
+	for _, tc := range cases {
+		hint, season := deriveShowHint(tc.input)
+		if hint != tc.hint || season != tc.season {
+			t.Errorf("deriveShowHint(%q) = (%q, %d), want (%q, %d)",
+				tc.input, hint, season, tc.hint, tc.season)
+		}
+	}
+}
+
 func TestBuildQueryListDeduplicatesSanitizedVariants(t *testing.T) {
 	queries := buildQueryList("South Park Season 5 (Disc 1)", "South Park Season 5 Disc 1", "  South Park  ")
 	if len(queries) != 2 {
