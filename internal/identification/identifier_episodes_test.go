@@ -31,13 +31,13 @@ func TestBuildPlaceholderAnnotationsCreatesEntries(t *testing.T) {
 	}
 }
 
-func TestBuildPlaceholderAnnotationsDeduplicatesByTitleHash(t *testing.T) {
-	// Titles 0 and 2 have identical metadata (same duration, same tracks) so they
-	// produce the same TitleHash. Only the first should be kept.
+func TestBuildPlaceholderAnnotationsDeduplicatesBySegmentMap(t *testing.T) {
+	// Titles 0 and 2 share the same SegmentMap, so title 2 is deduplicated
+	// even though they could have different TitleHash values.
 	titles := []disc.Title{
-		{ID: 0, Duration: 22 * 60, Name: "ep1", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
-		{ID: 1, Duration: 23 * 60, Name: "ep2", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
-		{ID: 2, Duration: 22 * 60, Name: "ep1", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 0, Duration: 22 * 60, SegmentMap: "00001.m2ts", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 1, Duration: 23 * 60, SegmentMap: "00002.m2ts", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 2, Duration: 22 * 60, SegmentMap: "00001.m2ts", Tracks: []disc.Track{{StreamID: 2, Type: "video", CodecID: "V_MPEG2"}}},
 	}
 	got := buildPlaceholderAnnotations(titles, 1)
 	if len(got) != 2 {
@@ -48,6 +48,55 @@ func TestBuildPlaceholderAnnotationsDeduplicatesByTitleHash(t *testing.T) {
 	}
 	if _, ok := got[1]; !ok {
 		t.Fatal("expected annotation for title 1 (unique)")
+	}
+	if _, ok := got[2]; ok {
+		t.Fatal("title 2 should be deduplicated (same SegmentMap as title 0)")
+	}
+}
+
+func TestBuildPlaceholderAnnotationsSameSegmentMapDifferentTitleHash(t *testing.T) {
+	// Same SegmentMap but different track metadata (different TitleHash).
+	// Should still deduplicate because SegmentMap takes priority.
+	titles := []disc.Title{
+		{ID: 0, Duration: 22 * 60, SegmentMap: "00010.m2ts", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 1, Duration: 22 * 60, SegmentMap: "00010.m2ts", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG2"}, {StreamID: 2, Type: "audio", CodecID: "A_AC3"}}},
+	}
+	got := buildPlaceholderAnnotations(titles, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 annotation (same SegmentMap deduped), got %d", len(got))
+	}
+	if _, ok := got[0]; !ok {
+		t.Fatal("expected annotation for title 0 (first occurrence)")
+	}
+}
+
+func TestBuildPlaceholderAnnotationsDifferentSegmentMapSameDuration(t *testing.T) {
+	// Different SegmentMap values but same duration and tracks.
+	// Both should be kept because they reference different content.
+	titles := []disc.Title{
+		{ID: 0, Duration: 22 * 60, SegmentMap: "00001.m2ts", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 1, Duration: 22 * 60, SegmentMap: "00002.m2ts", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+	}
+	got := buildPlaceholderAnnotations(titles, 1)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 annotations (different SegmentMap), got %d", len(got))
+	}
+}
+
+func TestBuildPlaceholderAnnotationsEmptySegmentMapFallsBackToTitleHash(t *testing.T) {
+	// When SegmentMap is empty (e.g. DVDs), fall back to TitleHash dedup.
+	// Titles 0 and 2 have identical metadata → same TitleHash → deduped.
+	titles := []disc.Title{
+		{ID: 0, Duration: 22 * 60, Name: "ep1", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 1, Duration: 23 * 60, Name: "ep2", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+		{ID: 2, Duration: 22 * 60, Name: "ep1", Tracks: []disc.Track{{StreamID: 1, Type: "video", CodecID: "V_MPEG4"}}},
+	}
+	got := buildPlaceholderAnnotations(titles, 1)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 annotations (TitleHash fallback dedup), got %d", len(got))
+	}
+	if _, ok := got[0]; !ok {
+		t.Fatal("expected annotation for title 0")
 	}
 	if _, ok := got[2]; ok {
 		t.Fatal("title 2 should be deduplicated (same TitleHash as title 0)")

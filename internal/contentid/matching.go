@@ -2,6 +2,7 @@ package contentid
 
 import (
 	"math"
+	"sort"
 )
 
 const minSimilarityScore = 0.58
@@ -146,4 +147,229 @@ func hungarian(cost [][]float64) []int {
 		}
 	}
 	return assign
+}
+
+// blockRefinement describes what refineMatchBlock changed.
+type blockRefinement struct {
+	BlockStart   int
+	BlockEnd     int
+	Displaced    int
+	Gaps         int
+	Reassigned   int
+	NeedsReview  bool
+	ReviewReason string
+}
+
+// refineMatchBlock enforces a contiguous block constraint on episode matches.
+// TV disc episodes should map to a contiguous range (e.g. E01-E12). When
+// high-confidence matches establish a block, outliers (matches outside the block)
+// are reassigned to gap positions within the block.
+//
+// Returns the refined matches and a refinement summary. If no refinement is
+// needed (all matches already contiguous, or insufficient data), the original
+// matches are returned unchanged.
+func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips []ripFingerprint, totalSeasonEpisodes int) ([]matchResult, blockRefinement) {
+	var info blockRefinement
+
+	// Skip refinement for trivial cases.
+	if len(matches) <= 1 {
+		return matches, info
+	}
+
+	// Determine high-confidence matches to establish the expected block.
+	// High confidence = within 0.05 of max score, or top 70%, whichever is
+	// more selective (fewer episodes).
+	scores := make([]float64, len(matches))
+	maxScore := 0.0
+	for i, m := range matches {
+		scores[i] = m.Score
+		if m.Score > maxScore {
+			maxScore = m.Score
+		}
+	}
+	threshold := maxScore - 0.05
+
+	sorted := make([]float64, len(scores))
+	copy(sorted, scores)
+	sort.Float64s(sorted)
+	top70Idx := len(sorted) - int(math.Ceil(float64(len(sorted))*0.7))
+	if top70Idx < 0 {
+		top70Idx = 0
+	}
+	top70Threshold := sorted[top70Idx]
+
+	// Use whichever threshold is more selective (higher).
+	if top70Threshold > threshold {
+		threshold = top70Threshold
+	}
+
+	var highConf []matchResult
+	for _, m := range matches {
+		if m.Score >= threshold {
+			highConf = append(highConf, m)
+		}
+	}
+
+	if len(highConf) < 2 {
+		// Not enough high-confidence matches to establish a block.
+		return matches, info
+	}
+
+	// Determine expected block from high-confidence matches.
+	blockStart := highConf[0].TargetEpisode
+	blockEnd := highConf[0].TargetEpisode
+	for _, m := range highConf[1:] {
+		if m.TargetEpisode < blockStart {
+			blockStart = m.TargetEpisode
+		}
+		if m.TargetEpisode > blockEnd {
+			blockEnd = m.TargetEpisode
+		}
+	}
+
+	// Expand block to cover all rip episodes (disc may have more episodes
+	// than high-confidence matches).
+	expectedSize := len(rips)
+	currentSize := blockEnd - blockStart + 1
+	if currentSize < expectedSize {
+		// Extend to cover expected size, anchored at blockStart.
+		blockEnd = blockStart + expectedSize - 1
+	}
+
+	// Clamp to season bounds.
+	if totalSeasonEpisodes > 0 && blockEnd > totalSeasonEpisodes {
+		blockEnd = totalSeasonEpisodes
+	}
+	if blockStart < 1 {
+		blockStart = 1
+	}
+
+	info.BlockStart = blockStart
+	info.BlockEnd = blockEnd
+
+	// Partition matches: valid (in block) vs displaced (outside block).
+	var valid, displaced []matchResult
+	for _, m := range matches {
+		if m.TargetEpisode >= blockStart && m.TargetEpisode <= blockEnd {
+			valid = append(valid, m)
+		} else {
+			displaced = append(displaced, m)
+		}
+	}
+
+	if len(displaced) == 0 {
+		// All matches already in block — no refinement needed.
+		return matches, info
+	}
+	info.Displaced = len(displaced)
+
+	// Find gaps: episodes in the block with no valid match.
+	validSet := make(map[int]struct{}, len(valid))
+	for _, m := range valid {
+		validSet[m.TargetEpisode] = struct{}{}
+	}
+	var gaps []int
+	for ep := blockStart; ep <= blockEnd; ep++ {
+		if _, ok := validSet[ep]; !ok {
+			gaps = append(gaps, ep)
+		}
+	}
+	info.Gaps = len(gaps)
+
+	if len(gaps) == 0 {
+		// Block is fully covered but some matches point outside.
+		// This is unusual — flag for review but keep original matches.
+		info.NeedsReview = true
+		info.ReviewReason = "displaced matches with no gaps in block"
+		return matches, info
+	}
+
+	if len(displaced) != len(gaps) {
+		// Mismatch between displaced and gaps — flag for review.
+		info.NeedsReview = true
+		info.ReviewReason = "displaced count does not match gap count"
+	}
+
+	// Reassign displaced to gaps using Hungarian matching when reference
+	// fingerprints are available for gap episodes.
+	refByEp := make(map[int]*referenceFingerprint, len(refs))
+	for i := range refs {
+		refByEp[refs[i].EpisodeNumber] = &refs[i]
+	}
+
+	// Build rip fingerprint lookup by episode key.
+	ripByKey := make(map[string]*ripFingerprint, len(rips))
+	for i := range rips {
+		ripByKey[rips[i].EpisodeKey] = &rips[i]
+	}
+
+	// Check if we have reference fingerprints for gap episodes.
+	var gapRefs []*referenceFingerprint
+	for _, ep := range gaps {
+		if ref, ok := refByEp[ep]; ok {
+			gapRefs = append(gapRefs, ref)
+		}
+	}
+
+	reassigned := make([]matchResult, 0, min(len(displaced), len(gaps)))
+
+	if len(gapRefs) == len(gaps) && len(gaps) > 0 && len(displaced) > 0 {
+		// Use Hungarian matching on displaced × gaps.
+		n := max(len(displaced), len(gaps))
+		costMatrix := make([][]float64, n)
+		scoreMatrix := make([][]float64, n)
+		const padCost = 2.0
+		for i := range n {
+			costMatrix[i] = make([]float64, n)
+			scoreMatrix[i] = make([]float64, n)
+			for j := range n {
+				costMatrix[i][j] = padCost
+			}
+		}
+		for i := range len(displaced) {
+			rip := ripByKey[displaced[i].EpisodeKey]
+			for j := range len(gaps) {
+				var score float64
+				if rip != nil && rip.Vector != nil && gapRefs[j] != nil && gapRefs[j].Vector != nil {
+					score = cosineSimilarity(rip.Vector, gapRefs[j].Vector)
+				}
+				scoreMatrix[i][j] = score
+				if score > 0 {
+					costMatrix[i][j] = 1.0 - score
+				}
+			}
+		}
+
+		assign := hungarian(costMatrix)
+		for i, j := range assign {
+			if i >= len(displaced) || j < 0 || j >= len(gaps) {
+				continue
+			}
+			m := displaced[i]
+			m.TargetEpisode = gaps[j]
+			m.Score = scoreMatrix[i][j]
+			if gapRefs[j] != nil {
+				m.SubtitleFileID = gapRefs[j].FileID
+				m.SubtitleLanguage = gapRefs[j].Language
+				m.SubtitleCachePath = gapRefs[j].CachePath
+			}
+			reassigned = append(reassigned, m)
+		}
+	} else {
+		// No reference fingerprints for gaps — assign by position order.
+		limit := min(len(displaced), len(gaps))
+		for i := range limit {
+			m := displaced[i]
+			m.TargetEpisode = gaps[i]
+			m.Score = 0 // no similarity data
+			reassigned = append(reassigned, m)
+		}
+	}
+	info.Reassigned = len(reassigned)
+
+	// Build final result: valid matches + reassigned matches.
+	result := make([]matchResult, 0, len(valid)+len(reassigned))
+	result = append(result, valid...)
+	result = append(result, reassigned...)
+	return result, info
 }

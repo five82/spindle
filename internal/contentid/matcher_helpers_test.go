@@ -1,6 +1,7 @@
 package contentid
 
 import (
+	"fmt"
 	"testing"
 
 	"spindle/internal/identification"
@@ -32,10 +33,11 @@ func TestDeriveCandidateEpisodesUsesRipSpecEpisodes(t *testing.T) {
 	}
 }
 
-func TestDeriveCandidateEpisodesPlaceholdersFallBackToSeason(t *testing.T) {
-	// With Episode=0 placeholders, Tier 1 (rip_spec) produces nothing,
-	// set is empty so Tier 2 (disc_block) is skipped,
-	// and Tier 3 (season_fallback) returns all season episodes.
+func TestDeriveCandidateEpisodesPlaceholdersWithDiscNumberUsesDiscBlock(t *testing.T) {
+	// With Episode=0 placeholders and discNumber=2, Tier 2b (disc_block) should
+	// estimate the disc's episode range instead of falling to full-season Tier 3.
+	// 3 episodes on disc, discNumber=2: block starts at (2-1)*3=3, so indices 1..8
+	// with padding=2: start=(2-1)*3-2=1, end=2*3+2=8 → episodes 2-8.
 	env := &ripspec.Envelope{
 		Episodes: []ripspec.Episode{
 			{Key: "s01_001", Episode: 0},
@@ -56,10 +58,111 @@ func TestDeriveCandidateEpisodesPlaceholdersFallBackToSeason(t *testing.T) {
 			{EpisodeNumber: 8},
 		},
 	}
-	got := deriveCandidateEpisodes(env, season, 2).Episodes
+	plan := deriveCandidateEpisodes(env, season, 2)
+	// Should use disc_block, not season_fallback
+	if len(plan.DiscBlockEpisodes) == 0 {
+		t.Fatal("expected disc_block episodes, got none")
+	}
+	if len(plan.SeasonFallback) != 0 {
+		t.Fatalf("expected no season_fallback, got %v", plan.SeasonFallback)
+	}
+	// Verify the result is a subset of the season (not the full season)
+	if len(plan.Episodes) >= 8 {
+		t.Fatalf("expected disc block to narrow candidates, got all %d", len(plan.Episodes))
+	}
+}
+
+func TestDeriveCandidateEpisodesPlaceholdersDisc1(t *testing.T) {
+	// Disc 1 with 12 episodes, 34-episode season (Batman scenario).
+	// block=12, padding=max(2,3)=3, start=(1-1)*12-3=-3→0, end=1*12+3=15
+	// → episodes 1-15
+	eps := make([]ripspec.Episode, 12)
+	for i := range eps {
+		eps[i] = ripspec.Episode{Key: fmt.Sprintf("s01_%03d", i+1), Episode: 0}
+	}
+	env := &ripspec.Envelope{Episodes: eps}
+	seasonEps := make([]tmdb.Episode, 34)
+	for i := range seasonEps {
+		seasonEps[i] = tmdb.Episode{EpisodeNumber: i + 1}
+	}
+	season := &tmdb.SeasonDetails{SeasonNumber: 1, Episodes: seasonEps}
+	plan := deriveCandidateEpisodes(env, season, 1)
+	if len(plan.DiscBlockEpisodes) == 0 {
+		t.Fatal("expected disc_block episodes for disc 1")
+	}
+	// Should include episodes 1-15 (not all 34)
+	if plan.Episodes[0] != 1 {
+		t.Fatalf("expected first candidate to be 1, got %d", plan.Episodes[0])
+	}
+	if len(plan.Episodes) > 20 {
+		t.Fatalf("expected narrowed candidates, got %d", len(plan.Episodes))
+	}
+	if len(plan.Episodes) < 12 {
+		t.Fatalf("expected at least 12 candidates (disc episodes), got %d", len(plan.Episodes))
+	}
+}
+
+func TestDeriveCandidateEpisodesPlaceholdersNoDiscNumber(t *testing.T) {
+	// With Episode=0 placeholders and discNumber=0, should fall back to
+	// full-season Tier 3 since disc block can't be estimated.
+	env := &ripspec.Envelope{
+		Episodes: []ripspec.Episode{
+			{Key: "s01_001", Episode: 0},
+			{Key: "s01_002", Episode: 0},
+			{Key: "s01_003", Episode: 0},
+		},
+	}
+	season := &tmdb.SeasonDetails{
+		SeasonNumber: 1,
+		Episodes: []tmdb.Episode{
+			{EpisodeNumber: 1},
+			{EpisodeNumber: 2},
+			{EpisodeNumber: 3},
+			{EpisodeNumber: 4},
+			{EpisodeNumber: 5},
+			{EpisodeNumber: 6},
+			{EpisodeNumber: 7},
+			{EpisodeNumber: 8},
+		},
+	}
+	plan := deriveCandidateEpisodes(env, season, 0)
 	expect := []int{1, 2, 3, 4, 5, 6, 7, 8}
-	if !intSlicesEqual(got, expect) {
-		t.Fatalf("expected %v, got %v", expect, got)
+	if !intSlicesEqual(plan.Episodes, expect) {
+		t.Fatalf("expected full season %v, got %v", expect, plan.Episodes)
+	}
+	if len(plan.SeasonFallback) == 0 {
+		t.Fatal("expected season_fallback source")
+	}
+}
+
+func TestDeriveCandidateEpisodesPaddingClampsToSeasonBounds(t *testing.T) {
+	// Disc 3 of a 10-episode season with 3 episodes per disc.
+	// block=3, padding=2, start=(3-1)*3-2=4, end=3*3+2=11→10 (clamped)
+	// → episodes 5-10
+	env := &ripspec.Envelope{
+		Episodes: []ripspec.Episode{
+			{Key: "s01_001", Episode: 0},
+			{Key: "s01_002", Episode: 0},
+			{Key: "s01_003", Episode: 0},
+		},
+	}
+	seasonEps := make([]tmdb.Episode, 10)
+	for i := range seasonEps {
+		seasonEps[i] = tmdb.Episode{EpisodeNumber: i + 1}
+	}
+	season := &tmdb.SeasonDetails{SeasonNumber: 1, Episodes: seasonEps}
+	plan := deriveCandidateEpisodes(env, season, 3)
+	if len(plan.DiscBlockEpisodes) == 0 {
+		t.Fatal("expected disc_block episodes")
+	}
+	// Last candidate should not exceed season size
+	last := plan.Episodes[len(plan.Episodes)-1]
+	if last > 10 {
+		t.Fatalf("candidates should not exceed season bounds, got %d", last)
+	}
+	first := plan.Episodes[0]
+	if first < 1 {
+		t.Fatalf("candidates should not be below 1, got %d", first)
 	}
 }
 

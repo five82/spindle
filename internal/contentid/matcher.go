@@ -22,6 +22,7 @@ import (
 	"spindle/internal/ripspec"
 	"spindle/internal/subtitles"
 	"spindle/internal/subtitles/opensubtitles"
+	"spindle/internal/textutil"
 )
 
 // Matcher coordinates WhisperX transcription and OpenSubtitles comparison to
@@ -237,6 +238,26 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 			logging.String(logging.FieldErrorHint, "verify OpenSubtitles languages and TMDB metadata"))
 		return false, nil
 	}
+	// Apply TF-IDF reweighting so common show vocabulary (e.g. character
+	// names that appear in every episode's subtitles) is downweighted and
+	// episode-distinctive terms drive the similarity scores.
+	// Skip when fewer than 2 references: IDF needs multiple documents to
+	// provide useful discrimination.
+	if len(refPrints) >= 2 {
+		corpus := textutil.NewCorpus()
+		for _, ref := range refPrints {
+			corpus.Add(ref.Vector)
+		}
+		idf := corpus.IDF()
+		if len(idf) > 0 {
+			for i := range ripPrints {
+				ripPrints[i].Vector = ripPrints[i].Vector.WithIDF(idf)
+			}
+			for i := range refPrints {
+				refPrints[i].Vector = refPrints[i].Vector.WithIDF(idf)
+			}
+		}
+	}
 	matches := resolveEpisodeMatches(ripPrints, refPrints)
 	if len(matches) == 0 {
 		m.logger.Warn("no episode matches resolved",
@@ -244,6 +265,31 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 			logging.String(logging.FieldImpact, "episode numbers remain unresolved"),
 			logging.String(logging.FieldErrorHint, "check transcript quality and reference subtitle availability"))
 		return false, nil
+	}
+	// Enforce contiguous block constraint: disc episodes should map to a
+	// consecutive range. Reassign outliers to gaps within the block.
+	matches, refinement := refineMatchBlock(matches, refPrints, ripPrints, len(seasonDetails.Episodes))
+	if refinement.Displaced > 0 {
+		m.logger.Info("content id block refinement applied",
+			logging.String(logging.FieldEventType, "decision_summary"),
+			logging.String(logging.FieldDecisionType, "contentid_block_refinement"),
+			logging.String("decision_result", "refined"),
+			logging.String("decision_reason", "contiguous_block_constraint"),
+			logging.String("decision_options", "refine, skip"),
+			logging.Int("block_start", refinement.BlockStart),
+			logging.Int("block_end", refinement.BlockEnd),
+			logging.Int("displaced", refinement.Displaced),
+			logging.Int("gaps", refinement.Gaps),
+			logging.Int("reassigned", refinement.Reassigned),
+			logging.Bool("needs_review", refinement.NeedsReview),
+		)
+	}
+	if refinement.NeedsReview {
+		if env.Attributes == nil {
+			env.Attributes = make(map[string]any)
+		}
+		env.Attributes["content_id_needs_review"] = true
+		env.Attributes["content_id_review_reason"] = refinement.ReviewReason
 	}
 	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches, progress)
 	m.attachMatchAttributes(env, matches)
@@ -946,6 +992,35 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 			start = 0
 		}
 		for idx := start; idx < totalEpisodes && idx < start+block; idx++ {
+			number := season.Episodes[idx].EpisodeNumber
+			set[number] = struct{}{}
+			plan.DiscBlockEpisodes = append(plan.DiscBlockEpisodes, number)
+		}
+		sort.Ints(plan.DiscBlockEpisodes)
+		if len(plan.DiscBlockEpisodes) > 0 {
+			plan.Sources = append(plan.Sources, "disc_block")
+		}
+	}
+
+	// Tier 2b: disc-block estimate for placeholder episodes.
+	// When Tier 1 found no resolved episodes but we know the disc number,
+	// estimate which episodes belong on this disc rather than searching
+	// the entire season.
+	if len(set) == 0 && discNumber > 0 && totalEpisodes > 0 {
+		block := len(env.Episodes)
+		if block == 0 {
+			block = 4
+		}
+		padding := max(2, block/4)
+		start := (discNumber-1)*block - padding
+		end := discNumber*block + padding
+		if start < 0 {
+			start = 0
+		}
+		if end > totalEpisodes {
+			end = totalEpisodes
+		}
+		for idx := start; idx < end; idx++ {
 			number := season.Episodes[idx].EpisodeNumber
 			set[number] = struct{}{}
 			plan.DiscBlockEpisodes = append(plan.DiscBlockEpisodes, number)

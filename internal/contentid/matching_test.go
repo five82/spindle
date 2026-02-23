@@ -393,6 +393,134 @@ func TestCosineSimilarityEdgeCases(t *testing.T) {
 	})
 }
 
+func TestRefineMatchBlockAllInBlock(t *testing.T) {
+	t.Parallel()
+	// All matches are already within a contiguous block — no changes.
+	matches := []matchResult{
+		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 1, Score: 0.95},
+		{EpisodeKey: "s01e02", TitleID: 2, TargetEpisode: 2, Score: 0.93},
+		{EpisodeKey: "s01e03", TitleID: 3, TargetEpisode: 3, Score: 0.91},
+	}
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01e01", TitleID: 1},
+		{EpisodeKey: "s01e02", TitleID: 2},
+		{EpisodeKey: "s01e03", TitleID: 3},
+	}
+	result, info := refineMatchBlock(matches, nil, rips, 10)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 matches, got %d", len(result))
+	}
+	if info.Displaced != 0 {
+		t.Fatalf("expected 0 displaced, got %d", info.Displaced)
+	}
+}
+
+func TestRefineMatchBlockOutliersReassigned(t *testing.T) {
+	t.Parallel()
+	// 4 matches: 2 high-confidence in block (E1, E2), 2 outliers (E22, E30).
+	// Block should be E1-E4 (4 rips). Outliers reassigned to E3, E4.
+	matches := []matchResult{
+		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 1, Score: 0.97},
+		{EpisodeKey: "s01e02", TitleID: 2, TargetEpisode: 2, Score: 0.95},
+		{EpisodeKey: "s01e03", TitleID: 3, TargetEpisode: 22, Score: 0.88},
+		{EpisodeKey: "s01e04", TitleID: 4, TargetEpisode: 30, Score: 0.87},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 1, Vector: newFingerprint("episode one content alpha beta")},
+		{EpisodeNumber: 2, Vector: newFingerprint("episode two content gamma delta")},
+		{EpisodeNumber: 3, Vector: newFingerprint("episode three content epsilon zeta")},
+		{EpisodeNumber: 4, Vector: newFingerprint("episode four content theta iota")},
+		{EpisodeNumber: 22, Vector: newFingerprint("episode twentytwo far away content")},
+		{EpisodeNumber: 30, Vector: newFingerprint("episode thirty far away content")},
+	}
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint("episode one content alpha beta")},
+		{EpisodeKey: "s01e02", TitleID: 2, Vector: newFingerprint("episode two content gamma delta")},
+		{EpisodeKey: "s01e03", TitleID: 3, Vector: newFingerprint("episode three content epsilon zeta")},
+		{EpisodeKey: "s01e04", TitleID: 4, Vector: newFingerprint("episode four content theta iota")},
+	}
+	result, info := refineMatchBlock(matches, refs, rips, 34)
+	if info.Displaced != 2 {
+		t.Fatalf("expected 2 displaced, got %d", info.Displaced)
+	}
+	if info.Reassigned != 2 {
+		t.Fatalf("expected 2 reassigned, got %d", info.Reassigned)
+	}
+	// Verify reassigned matches target E3 and E4
+	targetSet := make(map[int]bool)
+	for _, m := range result {
+		targetSet[m.TargetEpisode] = true
+	}
+	if !targetSet[3] {
+		t.Error("expected E3 in result after reassignment")
+	}
+	if !targetSet[4] {
+		t.Error("expected E4 in result after reassignment")
+	}
+	// Outliers should no longer point to E22/E30
+	if targetSet[22] {
+		t.Error("E22 should have been displaced")
+	}
+	if targetSet[30] {
+		t.Error("E30 should have been displaced")
+	}
+}
+
+func TestRefineMatchBlockMismatchFlagsReview(t *testing.T) {
+	t.Parallel()
+	// 5 rips mapping to E4, E5, E15, E16, E17. Season only has 6 episodes.
+	// Block E4-E8 → clamped to E4-E6. Valid = E4, E5. Displaced = 3 (E15,E16,E17).
+	// Gaps = 1 (E6). 3 != 1 → needs review.
+	matches := []matchResult{
+		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 4, Score: 0.97},
+		{EpisodeKey: "s01e02", TitleID: 2, TargetEpisode: 5, Score: 0.96},
+		{EpisodeKey: "s01e03", TitleID: 3, TargetEpisode: 15, Score: 0.88},
+		{EpisodeKey: "s01e04", TitleID: 4, TargetEpisode: 16, Score: 0.87},
+		{EpisodeKey: "s01e05", TitleID: 5, TargetEpisode: 17, Score: 0.86},
+	}
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01e01", TitleID: 1},
+		{EpisodeKey: "s01e02", TitleID: 2},
+		{EpisodeKey: "s01e03", TitleID: 3},
+		{EpisodeKey: "s01e04", TitleID: 4},
+		{EpisodeKey: "s01e05", TitleID: 5},
+	}
+	_, info := refineMatchBlock(matches, nil, rips, 6)
+	if !info.NeedsReview {
+		t.Errorf("expected needs_review when displaced != gaps (displaced=%d, gaps=%d)", info.Displaced, info.Gaps)
+	}
+}
+
+func TestRefineMatchBlockNoHighConfidence(t *testing.T) {
+	t.Parallel()
+	// Only 1 match — can't establish a block.
+	matches := []matchResult{
+		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 5, Score: 0.90},
+	}
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01e01", TitleID: 1},
+	}
+	result, info := refineMatchBlock(matches, nil, rips, 10)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 match unchanged, got %d", len(result))
+	}
+	if info.Displaced != 0 {
+		t.Fatalf("expected 0 displaced for single match, got %d", info.Displaced)
+	}
+}
+
+func TestRefineMatchBlockSingleEpisodeSkipped(t *testing.T) {
+	t.Parallel()
+	// Single match (movie-like) — should skip refinement.
+	matches := []matchResult{
+		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 1, Score: 0.99},
+	}
+	result, _ := refineMatchBlock(matches, nil, nil, 1)
+	if len(result) != 1 || result[0].TargetEpisode != 1 {
+		t.Fatalf("expected single match unchanged")
+	}
+}
+
 func TestHungarianAlgorithmEdgeCases(t *testing.T) {
 	t.Parallel()
 

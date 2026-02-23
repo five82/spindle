@@ -22,11 +22,18 @@ func buildPlaceholderAnnotations(titles []disc.Title, seasonNumber int) map[int]
 		if !isEpisodeRuntime(t.Duration) {
 			continue
 		}
-		fp := discfingerprint.TitleHash(t)
-		if _, dup := seen[fp]; dup {
+		// Dedup on SegmentMap (m2ts stream identity) when available.
+		// Titles sharing a segment_map reference identical content even if
+		// playlist metadata differs (different TitleHash). Fall back to
+		// TitleHash for DVDs or discs where SegmentMap is absent.
+		dedupKey := strings.TrimSpace(t.SegmentMap)
+		if dedupKey == "" {
+			dedupKey = discfingerprint.TitleHash(t)
+		}
+		if _, dup := seen[dedupKey]; dup {
 			continue
 		}
-		seen[fp] = struct{}{}
+		seen[dedupKey] = struct{}{}
 		out[t.ID] = episodeAnnotation{
 			Season:  seasonNumber,
 			Episode: 0,

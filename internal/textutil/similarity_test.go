@@ -1,6 +1,7 @@
 package textutil
 
 import (
+	"fmt"
 	"math"
 	"testing"
 )
@@ -194,6 +195,153 @@ func TestFingerprintTokenCount(t *testing.T) {
 				t.Errorf("TokenCount() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCorpusIDF(t *testing.T) {
+	t.Run("common term gets near-zero IDF", func(t *testing.T) {
+		c := NewCorpus()
+		// Add 5 docs that all contain "batman"
+		for i := range 5 {
+			fp := NewFingerprint(fmt.Sprintf("batman episode %d content unique%d", i, i))
+			c.Add(fp)
+		}
+		idf := c.IDF()
+		// "batman" appears in all 5 docs → IDF = log(6/6) = 0
+		batmanIDF := idf["batman"]
+		if batmanIDF > 0.2 {
+			t.Errorf("common term 'batman' IDF = %f, want near 0", batmanIDF)
+		}
+	})
+
+	t.Run("rare term gets high IDF", func(t *testing.T) {
+		c := NewCorpus()
+		c.Add(NewFingerprint("batman riddler puzzle clue mystery"))
+		c.Add(NewFingerprint("batman joker chaos destruction mayhem"))
+		c.Add(NewFingerprint("batman penguin umbrella hideout scheme"))
+		c.Add(NewFingerprint("batman catwoman diamond heist jewels"))
+		idf := c.IDF()
+		// "riddler" appears in 1/4 docs → IDF = log(5/2) ≈ 0.92
+		riddlerIDF := idf["riddler"]
+		batmanIDF := idf["batman"]
+		if riddlerIDF <= batmanIDF {
+			t.Errorf("rare term IDF (%f) should exceed common term IDF (%f)", riddlerIDF, batmanIDF)
+		}
+		if riddlerIDF < 0.5 {
+			t.Errorf("rare term 'riddler' IDF = %f, want > 0.5", riddlerIDF)
+		}
+	})
+
+	t.Run("empty corpus returns nil", func(t *testing.T) {
+		c := NewCorpus()
+		if idf := c.IDF(); idf != nil {
+			t.Errorf("expected nil IDF for empty corpus, got %v", idf)
+		}
+	})
+
+	t.Run("nil corpus returns nil", func(t *testing.T) {
+		var c *Corpus
+		if idf := c.IDF(); idf != nil {
+			t.Errorf("expected nil IDF for nil corpus, got %v", idf)
+		}
+	})
+}
+
+func TestWithIDF(t *testing.T) {
+	t.Run("reweights correctly", func(t *testing.T) {
+		fp := NewFingerprint("batman robin gotham riddler")
+		idf := map[string]float64{
+			"batman":  0.1, // common
+			"robin":   0.1, // common
+			"gotham":  0.1, // common
+			"riddler": 1.5, // rare
+		}
+		weighted := fp.WithIDF(idf)
+		if weighted == nil {
+			t.Fatal("expected non-nil weighted fingerprint")
+		}
+		if weighted.TokenCount() != 4 {
+			t.Fatalf("expected 4 tokens, got %d", weighted.TokenCount())
+		}
+	})
+
+	t.Run("nil fingerprint returns nil", func(t *testing.T) {
+		var fp *Fingerprint
+		got := fp.WithIDF(map[string]float64{"test": 1.0})
+		if got != nil {
+			t.Errorf("expected nil for nil fingerprint, got %v", got)
+		}
+	})
+
+	t.Run("nil IDF returns original", func(t *testing.T) {
+		fp := NewFingerprint("hello world test")
+		got := fp.WithIDF(nil)
+		if got != fp {
+			t.Error("expected original fingerprint returned for nil IDF")
+		}
+	})
+
+	t.Run("zero-weight terms dropped", func(t *testing.T) {
+		fp := NewFingerprint("batman robin riddler")
+		idf := map[string]float64{
+			"batman":  0.0, // zeroed out
+			"robin":   0.0, // zeroed out
+			"riddler": 1.5,
+		}
+		weighted := fp.WithIDF(idf)
+		if weighted == nil {
+			t.Fatal("expected non-nil weighted fingerprint")
+		}
+		if weighted.TokenCount() != 1 {
+			t.Fatalf("expected 1 token after zero-weight drop, got %d", weighted.TokenCount())
+		}
+	})
+
+	t.Run("all terms zeroed returns nil", func(t *testing.T) {
+		fp := NewFingerprint("batman robin gotham")
+		idf := map[string]float64{
+			"batman": 0.0,
+			"robin":  0.0,
+			"gotham": 0.0,
+		}
+		weighted := fp.WithIDF(idf)
+		if weighted != nil {
+			t.Error("expected nil when all terms zeroed out")
+		}
+	})
+}
+
+func TestIDFSeparatesSameShowEpisodes(t *testing.T) {
+	// Simulate Batman scenario: episodes share common vocabulary
+	// but have distinctive guest villain/plot terms.
+	ep1 := NewFingerprint("batman robin gotham city riddler puzzle clue mystery crime")
+	ep2 := NewFingerprint("batman robin gotham city joker chaos laugh destruction mayhem")
+	ep3 := NewFingerprint("batman robin gotham city penguin umbrella hideout lair scheme")
+
+	// Build corpus from all reference episodes
+	corpus := NewCorpus()
+	corpus.Add(ep1)
+	corpus.Add(ep2)
+	corpus.Add(ep3)
+	idf := corpus.IDF()
+
+	// Without IDF, ep1 vs ep2 would be quite similar due to shared vocabulary
+	rawSim := CosineSimilarity(ep1, ep2)
+
+	// With IDF, the shared vocabulary is downweighted
+	ep1w := ep1.WithIDF(idf)
+	ep2w := ep2.WithIDF(idf)
+	idfSim := CosineSimilarity(ep1w, ep2w)
+
+	// IDF-weighted similarity between different episodes should be lower
+	if idfSim >= rawSim {
+		t.Errorf("IDF-weighted cross-episode similarity (%f) should be lower than raw (%f)", idfSim, rawSim)
+	}
+
+	// Same episode with IDF should still be 1.0
+	selfSim := CosineSimilarity(ep1w, ep1w)
+	if selfSim < 0.99 {
+		t.Errorf("IDF-weighted self-similarity = %f, want ~1.0", selfSim)
 	}
 }
 

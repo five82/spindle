@@ -58,3 +58,67 @@ func (f *Fingerprint) TokenCount() int {
 	}
 	return len(f.tokens)
 }
+
+// WithIDF returns a new Fingerprint with TF-IDF weights applied.
+// Each term's count is multiplied by its IDF weight. The norm is recomputed.
+// Terms absent from the IDF map retain their original weight.
+func (f *Fingerprint) WithIDF(idf map[string]float64) *Fingerprint {
+	if f == nil || len(idf) == 0 {
+		return f
+	}
+	weighted := make(map[string]float64, len(f.tokens))
+	var norm float64
+	for token, count := range f.tokens {
+		w := count
+		if idfVal, ok := idf[token]; ok {
+			w *= idfVal
+		}
+		if w == 0 {
+			continue
+		}
+		weighted[token] = w
+		norm += w * w
+	}
+	if len(weighted) == 0 {
+		return nil
+	}
+	return &Fingerprint{
+		tokens: weighted,
+		norm:   math.Sqrt(norm),
+	}
+}
+
+// Corpus collects document frequency statistics for IDF computation.
+type Corpus struct {
+	docCount int
+	docFreq  map[string]int
+}
+
+// NewCorpus creates an empty corpus.
+func NewCorpus() *Corpus {
+	return &Corpus{docFreq: make(map[string]int)}
+}
+
+// Add registers a fingerprint's unique terms in the corpus.
+func (c *Corpus) Add(fp *Fingerprint) {
+	if c == nil || fp == nil {
+		return
+	}
+	c.docCount++
+	for token := range fp.tokens {
+		c.docFreq[token]++
+	}
+}
+
+// IDF computes inverse document frequency weights: log((N+1)/(1+df)) for each term.
+func (c *Corpus) IDF() map[string]float64 {
+	if c == nil || c.docCount == 0 {
+		return nil
+	}
+	idf := make(map[string]float64, len(c.docFreq))
+	n := float64(c.docCount)
+	for term, df := range c.docFreq {
+		idf[term] = math.Log((n + 1) / (1 + float64(df)))
+	}
+	return idf
+}
