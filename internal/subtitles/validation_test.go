@@ -63,6 +63,7 @@ func TestAnalyzeSubtitleStreamsEmpty(t *testing.T) {
 }
 
 func TestAnalyzeSubtitleStreamsWithSubtitles(t *testing.T) {
+	// Correct flagging: regular sub has no default, forced sub has both default and forced
 	streams := []ffprobe.Stream{
 		{CodecType: "video", Index: 0},
 		{CodecType: "audio", Index: 1},
@@ -70,13 +71,13 @@ func TestAnalyzeSubtitleStreamsWithSubtitles(t *testing.T) {
 			CodecType:   "subtitle",
 			Index:       2,
 			Tags:        map[string]string{"language": "eng"},
-			Disposition: map[string]int{"default": 1},
+			Disposition: map[string]int{"default": 0},
 		},
 		{
 			CodecType:   "subtitle",
 			Index:       3,
 			Tags:        map[string]string{"language": "eng"},
-			Disposition: map[string]int{"forced": 1},
+			Disposition: map[string]int{"forced": 1, "default": 1},
 		},
 	}
 
@@ -84,8 +85,11 @@ func TestAnalyzeSubtitleStreamsWithSubtitles(t *testing.T) {
 	if result.SubtitleCount != 2 {
 		t.Errorf("expected 2 subtitle count, got %d", result.SubtitleCount)
 	}
-	if !result.HasDefault {
-		t.Error("expected default track to be present")
+	if result.RegularMarkedDefault {
+		t.Error("regular subtitle should not be marked default")
+	}
+	if !result.ForcedMarkedDefault {
+		t.Error("forced subtitle should be marked default")
 	}
 	if !result.HasRegularSubs {
 		t.Error("expected regular subs to be present")
@@ -95,6 +99,23 @@ func TestAnalyzeSubtitleStreamsWithSubtitles(t *testing.T) {
 	}
 	if !result.LanguageMatch {
 		t.Error("expected language match")
+	}
+}
+
+func TestAnalyzeSubtitleStreamsRegularMarkedDefault(t *testing.T) {
+	// Incorrect flagging: regular sub has default set (should be caught by validation)
+	streams := []ffprobe.Stream{
+		{
+			CodecType:   "subtitle",
+			Index:       0,
+			Tags:        map[string]string{"language": "eng"},
+			Disposition: map[string]int{"default": 1},
+		},
+	}
+
+	result := analyzeSubtitleStreams(streams, "en")
+	if !result.RegularMarkedDefault {
+		t.Error("expected RegularMarkedDefault to be true when regular sub has default flag")
 	}
 }
 

@@ -169,16 +169,16 @@ func TestMuxer_BuildMkvmergeArgs(t *testing.T) {
 			t.Errorf("expected --language 0:eng in args: %v", args)
 		}
 
-		// Verify default-track flag for non-forced
+		// Verify default-track flag is "no" for regular (non-forced) subtitle
 		found = false
 		for i, arg := range args {
-			if arg == "--default-track" && i+1 < len(args) && args[i+1] == "0:yes" {
+			if arg == "--default-track" && i+1 < len(args) && args[i+1] == "0:no" {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("expected --default-track 0:yes in args: %v", args)
+			t.Errorf("expected --default-track 0:no in args: %v", args)
 		}
 	})
 
@@ -208,6 +208,18 @@ func TestMuxer_BuildMkvmergeArgs(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("expected --forced-track 0:yes in args: %v", args)
+		}
+
+		// Verify forced subtitle also gets default-track yes (so players auto-select it)
+		found = false
+		for i, arg := range args {
+			if arg == "--default-track" && i+1 < len(args) && args[i+1] == "0:yes" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected --default-track 0:yes for forced subtitle in args: %v", args)
 		}
 	})
 

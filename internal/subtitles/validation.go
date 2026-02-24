@@ -16,12 +16,13 @@ import (
 
 // muxValidationResult captures the outcome of subtitle muxing verification.
 type muxValidationResult struct {
-	SubtitleCount  int
-	HasDefault     bool     // True if at least one track is marked default
-	LanguageMatch  bool     // True if language metadata matches expected
-	HasRegularSubs bool     // True if non-forced subtitles exist
-	HasForcedSubs  bool     // True if forced subtitles exist
-	LabelIssues    []string // Label validation problems (missing or incorrect titles)
+	SubtitleCount        int
+	RegularMarkedDefault bool     // True if any regular (non-forced) track has the default flag (bad)
+	ForcedMarkedDefault  bool     // True if a forced track has the default flag (good)
+	LanguageMatch        bool     // True if language metadata matches expected
+	HasRegularSubs       bool     // True if non-forced subtitles exist
+	HasForcedSubs        bool     // True if forced subtitles exist
+	LabelIssues          []string // Label validation problems (missing or incorrect titles)
 }
 
 // ValidateMuxedSubtitles verifies that subtitles were correctly muxed into the MKV.
@@ -67,9 +68,13 @@ func ValidateMuxedSubtitles(ctx context.Context, ffprobeBinary, mkvPath string, 
 		))
 	}
 
-	// Verify at least one track is marked default (for regular subs)
-	if result.HasRegularSubs && !result.HasDefault {
-		issues = append(issues, "no subtitle track marked as default")
+	// Regular subs must NOT be marked default (Jellyfin Android TV auto-displays them).
+	// Forced subs SHOULD be marked default so players auto-select them.
+	if result.RegularMarkedDefault {
+		issues = append(issues, "regular subtitle track has default flag set (causes unwanted auto-display in Jellyfin Android TV)")
+	}
+	if result.HasForcedSubs && !result.ForcedMarkedDefault {
+		issues = append(issues, "forced subtitle track is not marked as default (players may not auto-select it)")
 	}
 
 	// Verify language metadata if expected language was provided
@@ -136,13 +141,17 @@ func analyzeSubtitleStreams(streams []ffprobe.Stream, expectedLang string) muxVa
 
 		// Check disposition flags
 		if stream.Disposition != nil {
-			if stream.Disposition["default"] == 1 {
-				result.HasDefault = true
-			}
+			hasDefault := stream.Disposition["default"] == 1
 			if isForced {
 				result.HasForcedSubs = true
+				if hasDefault {
+					result.ForcedMarkedDefault = true
+				}
 			} else {
 				result.HasRegularSubs = true
+				if hasDefault {
+					result.RegularMarkedDefault = true
+				}
 			}
 		} else {
 			// No disposition info, assume regular subtitle
