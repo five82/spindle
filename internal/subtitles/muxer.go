@@ -179,12 +179,14 @@ func (m *Muxer) buildMkvmergeArgs(req MuxRequest, outputPath string) []string {
 		// Track name
 		args = append(args, "--track-name", "0:"+trackName)
 
-		// Default track: yes for regular, no for forced
+		// Jellyfin Android TV auto-displays any track marked default, even when
+		// the user has subtitles disabled. Only forced subs should auto-display,
+		// so they get both default and forced flags; regular subs get neither.
 		if isForced {
-			args = append(args, "--default-track", "0:no")
+			args = append(args, "--default-track", "0:yes")
 			args = append(args, "--forced-track", "0:yes")
 		} else {
-			args = append(args, "--default-track", "0:yes")
+			args = append(args, "--default-track", "0:no")
 		}
 
 		// Add the subtitle file
