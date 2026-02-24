@@ -93,6 +93,49 @@ func episodeAssetPaths(env ripspec.Envelope) []string {
 	return paths
 }
 
+// cacheHasAllEpisodeFiles checks whether dir contains MKV files for every
+// episode title ID in the envelope. Returns the list of missing episode keys,
+// or nil if all are present.
+func cacheHasAllEpisodeFiles(env *ripspec.Envelope, dir string) []string {
+	if env == nil || len(env.Episodes) == 0 {
+		return nil
+	}
+	titleFiles := make(map[int]struct{})
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// If we can't read the directory, report all episodes as missing.
+		missing := make([]string, len(env.Episodes))
+		for i, ep := range env.Episodes {
+			missing[i] = ep.Key
+		}
+		return missing
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(strings.ToLower(entry.Name()), ".mkv") {
+			continue
+		}
+		id, ok := parseTitleID(entry.Name())
+		if !ok {
+			continue
+		}
+		titleFiles[id] = struct{}{}
+	}
+	var missing []string
+	for _, ep := range env.Episodes {
+		if ep.TitleID < 0 {
+			missing = append(missing, ep.Key)
+			continue
+		}
+		if _, ok := titleFiles[ep.TitleID]; !ok {
+			missing = append(missing, ep.Key)
+		}
+	}
+	return missing
+}
+
 func parseTitleID(name string) (int, bool) {
 	match := titleFilePattern.FindStringSubmatch(name)
 	if len(match) != 2 {

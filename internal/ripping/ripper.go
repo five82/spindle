@@ -264,29 +264,54 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			)
 		} else if cachedTarget != "" {
 			if err := r.validateRippedArtifact(ctx, item, cachedTarget, startedAt); err == nil {
-				target = cachedTarget
-				cacheUsed = true
-				cacheStatus = "hit"
-				logger.Info("rip cache decision",
-					logging.String(logging.FieldDecisionType, "rip_cache"),
-					logging.String("decision_result", "hit"),
-					logging.String("decision_reason", "valid_cached_rip_found"),
-					logging.Bool("cache_used", true),
-					logging.String("rip_dir", destDir),
-					logging.String("ripped_file", cachedTarget),
-				)
-				copy := *item
-				copy.ProgressStage = "Ripping"
-				copy.ProgressMessage = "Rip cache hit; skipping MakeMKV rip"
-				if err := r.store.UpdateProgress(ctx, &copy); err != nil {
-					logger.Warn("failed to persist rip cache hit progress; queue status may lag",
-						logging.Error(err),
-						logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
-						logging.String(logging.FieldErrorHint, "check queue database access"),
-						logging.String(logging.FieldImpact, "queue UI may show stale progress"),
+				// For TV episodes, verify cache has files for every episode title ID.
+				if hasEpisodes {
+					if missing := cacheHasAllEpisodeFiles(&env, destDir); len(missing) > 0 {
+						cacheStatus = "incomplete"
+						logger.Info("rip cache decision",
+							logging.String(logging.FieldDecisionType, "rip_cache"),
+							logging.String("decision_result", "incomplete"),
+							logging.String("decision_reason", "missing_episode_files"),
+							logging.String("missing_episodes", strings.Join(missing, ",")),
+							logging.Int("missing_count", len(missing)),
+						)
+						_ = os.RemoveAll(destDir)
+						if mkErr := os.MkdirAll(destDir, 0o755); mkErr != nil {
+							return services.Wrap(
+								services.ErrConfiguration,
+								"ripping",
+								"ensure cache dir",
+								"Failed to recreate rip cache directory after pruning incomplete entry",
+								mkErr,
+							)
+						}
+					}
+				}
+				if cacheStatus != "incomplete" {
+					target = cachedTarget
+					cacheUsed = true
+					cacheStatus = "hit"
+					logger.Info("rip cache decision",
+						logging.String(logging.FieldDecisionType, "rip_cache"),
+						logging.String("decision_result", "hit"),
+						logging.String("decision_reason", "valid_cached_rip_found"),
+						logging.Bool("cache_used", true),
+						logging.String("rip_dir", destDir),
+						logging.String("ripped_file", cachedTarget),
 					)
-				} else {
-					*item = copy
+					copy := *item
+					copy.ProgressStage = "Ripping"
+					copy.ProgressMessage = "Rip cache hit; skipping MakeMKV rip"
+					if err := r.store.UpdateProgress(ctx, &copy); err != nil {
+						logger.Warn("failed to persist rip cache hit progress; queue status may lag",
+							logging.Error(err),
+							logging.String(logging.FieldEventType, "queue_progress_persist_failed"),
+							logging.String(logging.FieldErrorHint, "check queue database access"),
+							logging.String(logging.FieldImpact, "queue UI may show stale progress"),
+						)
+					} else {
+						*item = copy
+					}
 				}
 			} else {
 				cacheStatus = "invalid"
