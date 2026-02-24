@@ -406,7 +406,7 @@ func TestRefineMatchBlockAllInBlock(t *testing.T) {
 		{EpisodeKey: "s01e02", TitleID: 2},
 		{EpisodeKey: "s01e03", TitleID: 3},
 	}
-	result, info := refineMatchBlock(matches, nil, rips, 10)
+	result, info := refineMatchBlock(matches, nil, rips, 10, 0)
 	if len(result) != 3 {
 		t.Fatalf("expected 3 matches, got %d", len(result))
 	}
@@ -439,7 +439,7 @@ func TestRefineMatchBlockOutliersReassigned(t *testing.T) {
 		{EpisodeKey: "s01e03", TitleID: 3, Vector: newFingerprint("episode three content epsilon zeta")},
 		{EpisodeKey: "s01e04", TitleID: 4, Vector: newFingerprint("episode four content theta iota")},
 	}
-	result, info := refineMatchBlock(matches, refs, rips, 34)
+	result, info := refineMatchBlock(matches, refs, rips, 34, 0)
 	if info.Displaced != 2 {
 		t.Fatalf("expected 2 displaced, got %d", info.Displaced)
 	}
@@ -485,7 +485,7 @@ func TestRefineMatchBlockMismatchFlagsReview(t *testing.T) {
 		{EpisodeKey: "s01e04", TitleID: 4},
 		{EpisodeKey: "s01e05", TitleID: 5},
 	}
-	_, info := refineMatchBlock(matches, nil, rips, 6)
+	_, info := refineMatchBlock(matches, nil, rips, 6, 0)
 	if !info.NeedsReview {
 		t.Errorf("expected needs_review when displaced != gaps (displaced=%d, gaps=%d)", info.Displaced, info.Gaps)
 	}
@@ -500,12 +500,153 @@ func TestRefineMatchBlockNoHighConfidence(t *testing.T) {
 	rips := []ripFingerprint{
 		{EpisodeKey: "s01e01", TitleID: 1},
 	}
-	result, info := refineMatchBlock(matches, nil, rips, 10)
+	result, info := refineMatchBlock(matches, nil, rips, 10, 0)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 match unchanged, got %d", len(result))
 	}
 	if info.Displaced != 0 {
 		t.Fatalf("expected 0 displaced for single match, got %d", info.Displaced)
+	}
+}
+
+func TestRefineMatchBlockDisc1ForcesStartAt1(t *testing.T) {
+	t.Parallel()
+	// Batman disc 1: 12 rips, Hungarian matched E02-E12 as high-conf, E01 as low.
+	// Disc 1 should force blockStart=1, keeping E01 inside the block.
+	matches := []matchResult{
+		{EpisodeKey: "s01_012", TitleID: 12, TargetEpisode: 1, Score: 0.62},
+		{EpisodeKey: "s01_001", TitleID: 1, TargetEpisode: 2, Score: 0.95},
+		{EpisodeKey: "s01_002", TitleID: 2, TargetEpisode: 3, Score: 0.94},
+		{EpisodeKey: "s01_003", TitleID: 3, TargetEpisode: 4, Score: 0.93},
+		{EpisodeKey: "s01_004", TitleID: 4, TargetEpisode: 5, Score: 0.92},
+		{EpisodeKey: "s01_005", TitleID: 5, TargetEpisode: 6, Score: 0.91},
+		{EpisodeKey: "s01_006", TitleID: 6, TargetEpisode: 7, Score: 0.90},
+		{EpisodeKey: "s01_007", TitleID: 7, TargetEpisode: 8, Score: 0.89},
+		{EpisodeKey: "s01_008", TitleID: 8, TargetEpisode: 9, Score: 0.93},
+		{EpisodeKey: "s01_009", TitleID: 9, TargetEpisode: 10, Score: 0.92},
+		{EpisodeKey: "s01_010", TitleID: 10, TargetEpisode: 11, Score: 0.91},
+		{EpisodeKey: "s01_011", TitleID: 11, TargetEpisode: 12, Score: 0.90},
+	}
+	rips := make([]ripFingerprint, 12)
+	for i := range rips {
+		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
+	}
+	result, info := refineMatchBlock(matches, nil, rips, 24, 1)
+	if info.BlockStart != 1 {
+		t.Fatalf("expected blockStart=1 for disc 1, got %d", info.BlockStart)
+	}
+	if info.BlockEnd != 12 {
+		t.Fatalf("expected blockEnd=12, got %d", info.BlockEnd)
+	}
+	// E01 should remain in the block — no displacement.
+	targetSet := make(map[int]bool)
+	for _, m := range result {
+		targetSet[m.TargetEpisode] = true
+	}
+	if !targetSet[1] {
+		t.Error("E01 should be in the result (not displaced)")
+	}
+	if info.Displaced != 0 {
+		t.Fatalf("expected 0 displaced for disc 1 anchored block, got %d", info.Displaced)
+	}
+}
+
+func TestRefineMatchBlockDisc2ExpandsDownward(t *testing.T) {
+	t.Parallel()
+	// Disc 2 with 12 rips, actual E13-E24. High-conf E14-E24 (11 matches).
+	// One displaced match originally pointed to E12 (below hcMin=14) → expand downward.
+	matches := []matchResult{
+		{EpisodeKey: "s01_012", TitleID: 12, TargetEpisode: 12, Score: 0.62}, // displaced, below hcMin
+		{EpisodeKey: "s01_001", TitleID: 1, TargetEpisode: 14, Score: 0.95},
+		{EpisodeKey: "s01_002", TitleID: 2, TargetEpisode: 15, Score: 0.94},
+		{EpisodeKey: "s01_003", TitleID: 3, TargetEpisode: 16, Score: 0.93},
+		{EpisodeKey: "s01_004", TitleID: 4, TargetEpisode: 17, Score: 0.92},
+		{EpisodeKey: "s01_005", TitleID: 5, TargetEpisode: 18, Score: 0.91},
+		{EpisodeKey: "s01_006", TitleID: 6, TargetEpisode: 19, Score: 0.90},
+		{EpisodeKey: "s01_007", TitleID: 7, TargetEpisode: 20, Score: 0.89},
+		{EpisodeKey: "s01_008", TitleID: 8, TargetEpisode: 21, Score: 0.93},
+		{EpisodeKey: "s01_009", TitleID: 9, TargetEpisode: 22, Score: 0.92},
+		{EpisodeKey: "s01_010", TitleID: 10, TargetEpisode: 23, Score: 0.91},
+		{EpisodeKey: "s01_011", TitleID: 11, TargetEpisode: 24, Score: 0.90},
+	}
+	rips := make([]ripFingerprint, 12)
+	for i := range rips {
+		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
+	}
+	_, info := refineMatchBlock(matches, nil, rips, 48, 2)
+	if info.BlockStart != 13 {
+		t.Fatalf("expected blockStart=13 (expand downward for disc 2), got %d", info.BlockStart)
+	}
+	if info.BlockEnd != 24 {
+		t.Fatalf("expected blockEnd=24, got %d", info.BlockEnd)
+	}
+}
+
+func TestRefineMatchBlockDisc2ExpandsUpward(t *testing.T) {
+	t.Parallel()
+	// Disc 2 with 4 rips, actual E5-E8. High-conf E5-E7 (3 matches).
+	// One displaced match originally pointed to E10 (above hcMax=7) → expand upward.
+	matches := []matchResult{
+		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 5, Score: 0.95},
+		{EpisodeKey: "s01e02", TitleID: 2, TargetEpisode: 6, Score: 0.94},
+		{EpisodeKey: "s01e03", TitleID: 3, TargetEpisode: 7, Score: 0.93},
+		{EpisodeKey: "s01e04", TitleID: 4, TargetEpisode: 10, Score: 0.62}, // displaced, above hcMax
+	}
+	rips := make([]ripFingerprint, 4)
+	for i := range rips {
+		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
+	}
+	_, info := refineMatchBlock(matches, nil, rips, 20, 2)
+	// validLow = 7-4+1 = 4, validHigh = 5. Displaced points above hcMax → blockStart = validHigh = 5.
+	if info.BlockStart != 5 {
+		t.Fatalf("expected blockStart=5 (expand upward for disc 2), got %d", info.BlockStart)
+	}
+	if info.BlockEnd != 8 {
+		t.Fatalf("expected blockEnd=8, got %d", info.BlockEnd)
+	}
+}
+
+func TestRefineMatchBlockDisc2PreventsStartAt1(t *testing.T) {
+	t.Parallel()
+	// Disc 2 with 4 rips, high-conf at E2-E4. Valid range [1,2].
+	// Even though validLow=1, disc 2+ forces blockStart >= 2.
+	matches := []matchResult{
+		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 2, Score: 0.95},
+		{EpisodeKey: "s01e02", TitleID: 2, TargetEpisode: 3, Score: 0.94},
+		{EpisodeKey: "s01e03", TitleID: 3, TargetEpisode: 4, Score: 0.93},
+		{EpisodeKey: "s01e04", TitleID: 4, TargetEpisode: 1, Score: 0.62}, // displaced, below hcMin
+	}
+	rips := make([]ripFingerprint, 4)
+	for i := range rips {
+		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
+	}
+	_, info := refineMatchBlock(matches, nil, rips, 20, 2)
+	// validLow = max(1, 4-4+1) = 1. But disc 2 clamps to 2.
+	if info.BlockStart < 2 {
+		t.Fatalf("disc 2+ must not start at episode 1, got blockStart=%d", info.BlockStart)
+	}
+}
+
+func TestRefineMatchBlockDiscUnknownPreservesUpwardExpansion(t *testing.T) {
+	t.Parallel()
+	// discNumber=0: should anchor at hcMin and expand upward (existing behavior).
+	matches := []matchResult{
+		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 5, Score: 0.95},
+		{EpisodeKey: "s01e02", TitleID: 2, TargetEpisode: 6, Score: 0.94},
+		{EpisodeKey: "s01e03", TitleID: 3, TargetEpisode: 7, Score: 0.93},
+		{EpisodeKey: "s01e04", TitleID: 4, TargetEpisode: 20, Score: 0.62}, // outlier
+	}
+	rips := make([]ripFingerprint, 4)
+	for i := range rips {
+		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
+	}
+	_, info := refineMatchBlock(matches, nil, rips, 30, 0)
+	// discNumber=0 uses hcMin=5 as blockStart, blockEnd=8.
+	if info.BlockStart != 5 {
+		t.Fatalf("expected blockStart=5 for disc unknown (anchor at hcMin), got %d", info.BlockStart)
+	}
+	if info.BlockEnd != 8 {
+		t.Fatalf("expected blockEnd=8, got %d", info.BlockEnd)
 	}
 }
 
@@ -515,7 +656,7 @@ func TestRefineMatchBlockSingleEpisodeSkipped(t *testing.T) {
 	matches := []matchResult{
 		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 1, Score: 0.99},
 	}
-	result, _ := refineMatchBlock(matches, nil, nil, 1)
+	result, _ := refineMatchBlock(matches, nil, nil, 1, 0)
 	if len(result) != 1 || result[0].TargetEpisode != 1 {
 		t.Fatalf("expected single match unchanged")
 	}

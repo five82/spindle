@@ -168,7 +168,7 @@ type blockRefinement struct {
 // Returns the refined matches and a refinement summary. If no refinement is
 // needed (all matches already contiguous, or insufficient data), the original
 // matches are returned unchanged.
-func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips []ripFingerprint, totalSeasonEpisodes int) ([]matchResult, blockRefinement) {
+func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips []ripFingerprint, totalSeasonEpisodes int, discNumber int) ([]matchResult, blockRefinement) {
 	var info blockRefinement
 
 	// Skip refinement for trivial cases.
@@ -215,26 +215,69 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 		return matches, info
 	}
 
-	// Determine expected block from high-confidence matches.
-	blockStart := highConf[0].TargetEpisode
-	blockEnd := highConf[0].TargetEpisode
+	// Determine high-confidence range.
+	hcMin := highConf[0].TargetEpisode
+	hcMax := highConf[0].TargetEpisode
 	for _, m := range highConf[1:] {
-		if m.TargetEpisode < blockStart {
-			blockStart = m.TargetEpisode
+		if m.TargetEpisode < hcMin {
+			hcMin = m.TargetEpisode
 		}
-		if m.TargetEpisode > blockEnd {
-			blockEnd = m.TargetEpisode
+		if m.TargetEpisode > hcMax {
+			hcMax = m.TargetEpisode
 		}
 	}
 
-	// Expand block to cover all rip episodes (disc may have more episodes
-	// than high-confidence matches).
-	expectedSize := len(rips)
-	currentSize := blockEnd - blockStart + 1
-	if currentSize < expectedSize {
-		// Extend to cover expected size, anchored at blockStart.
-		blockEnd = blockStart + expectedSize - 1
+	// Compute valid start range: the block of numEpisodes contiguous episodes
+	// must contain all high-confidence matches.
+	numEpisodes := len(rips)
+	validLow := hcMax - numEpisodes + 1
+	if validLow < 1 {
+		validLow = 1
 	}
+	validHigh := hcMin
+
+	// Select blockStart based on disc number.
+	var blockStart int
+	switch {
+	case discNumber == 1:
+		// Disc 1 hard rule: always start at episode 1.
+		blockStart = 1
+		if 1 < validLow || 1 > validHigh {
+			info.NeedsReview = true
+			info.ReviewReason = "disc 1 anchor outside valid high-confidence range"
+		}
+	case discNumber >= 2:
+		// Use displaced matches' original targets as directional hints.
+		blockStart = validHigh // default: expand upward (higher end of valid range)
+		highConfSet := make(map[int]struct{}, len(highConf))
+		for _, m := range highConf {
+			highConfSet[m.TargetEpisode] = struct{}{}
+		}
+		for _, m := range matches {
+			if _, ok := highConfSet[m.TargetEpisode]; ok {
+				continue
+			}
+			if m.TargetEpisode < hcMin {
+				// Displaced match pointed below high-conf range: expand downward.
+				blockStart = validLow
+				break
+			}
+			if m.TargetEpisode > hcMax {
+				// Displaced match pointed above high-conf range: expand upward.
+				blockStart = validHigh
+				break
+			}
+		}
+		// Hard constraint: disc 2+ cannot start at episode 1.
+		if blockStart < 2 {
+			blockStart = 2
+		}
+	default:
+		// Disc unknown (0): preserve existing upward-expansion behavior.
+		blockStart = hcMin
+	}
+
+	blockEnd := blockStart + numEpisodes - 1
 
 	// Clamp to season bounds.
 	if totalSeasonEpisodes > 0 && blockEnd > totalSeasonEpisodes {

@@ -268,7 +268,7 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	}
 	// Enforce contiguous block constraint: disc episodes should map to a
 	// consecutive range. Reassign outliers to gaps within the block.
-	matches, refinement := refineMatchBlock(matches, refPrints, ripPrints, len(seasonDetails.Episodes))
+	matches, refinement := refineMatchBlock(matches, refPrints, ripPrints, len(seasonDetails.Episodes), ctxData.DiscNumber)
 	if refinement.Displaced > 0 {
 		m.logger.Info("content id block refinement applied",
 			logging.String(logging.FieldEventType, "decision_summary"),
