@@ -115,6 +115,8 @@ func buildItemSummary(item *queue.Item) ItemSummary {
 }
 
 // statusOrder maps each status to a numeric position in the lifecycle.
+// In-progress statuses (-ing) have the same ordinal as their predecessor
+// so that failing *during* a stage does not grant that stage's phase.
 var statusOrder = map[queue.Status]int{
 	queue.StatusPending:            0,
 	queue.StatusIdentifying:        1,
@@ -131,23 +133,29 @@ var statusOrder = map[queue.Status]int{
 	queue.StatusSubtitled:          12,
 	queue.StatusOrganizing:         13,
 	queue.StatusCompleted:          14,
+	queue.StatusFailed:             -1, // Sentinel; effectiveStatus resolves this
+}
+
+// effectiveStatus returns the status to use for stage gating.
+// For failed items it uses FailedAtStatus; for all others it uses Status directly.
+func effectiveStatus(item *queue.Item) queue.Status {
+	if item.Status == queue.StatusFailed {
+		if item.FailedAtStatus != "" {
+			return item.FailedAtStatus
+		}
+		// Legacy failed items without FailedAtStatus: fall back to pending
+		// so only PhaseLogs is enabled (safe default).
+		return queue.StatusPending
+	}
+	return item.Status
 }
 
 func furthestStage(item *queue.Item) string {
-	status := item.Status
-	// For failed items, use the status where it failed for gating.
-	if status == queue.StatusFailed && item.FailedAtStatus != "" {
-		status = item.FailedAtStatus
-	}
-	return string(status)
+	return string(effectiveStatus(item))
 }
 
 func reachedAtLeast(item *queue.Item, target queue.Status) bool {
-	status := item.Status
-	if status == queue.StatusFailed && item.FailedAtStatus != "" {
-		status = item.FailedAtStatus
-	}
-	return statusOrder[status] >= statusOrder[target]
+	return statusOrder[effectiveStatus(item)] >= statusOrder[target]
 }
 
 func computeStageGate(item *queue.Item, meta *queue.Metadata) StageGate {
