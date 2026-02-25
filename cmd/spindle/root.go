@@ -52,6 +52,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.AddCommand(newStagingCommand(ctx))
 	rootCmd.AddCommand(newDiscCommand(ctx))
 	rootCmd.AddCommand(newDiscIDCommand(ctx))
+	rootCmd.AddCommand(newAuditGatherCommand(ctx))
 
 	return rootCmd
 }

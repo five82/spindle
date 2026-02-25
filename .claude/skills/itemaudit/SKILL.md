@@ -16,64 +16,70 @@ Comprehensive audit of Spindle queue items through multi-layer artifact analysis
 
 ## Philosophy
 
-The goal is to **uncover problems that automated code does not detect**. Quick log scans saying "no warnings, no errors" are insufficient. This skill performs deep, manual analysis of all available artifacts to find anomalies.
+The goal is to **uncover problems that automated code does not detect**. Quick log scans saying "no warnings, no errors" are insufficient. This skill performs deep analysis of all available artifacts to find anomalies.
 
 ## Audit Procedure
 
-### Phase 1: Gather Context
+### Phase 1: Gather Artifacts
 
-1. **Check daemon status**: `spindle status`
-2. **Get item info** (if item specified): `spindle queue show <id>`
-3. **Determine processing stage**: The item's status determines which analyses are applicable
-4. **Locate log files**:
-   - Debug logs (preferred): `log_dir/debug/items/<item>.log`
-   - Normal logs (fallback): `log_dir/items/<item>.log`
-   - Debug logs persist from previous audit runs even if daemon restarted in normal mode
+Run the `audit-gather` subcommand to collect all artifacts in a single pass:
+
+```bash
+spindle audit-gather <item_id>
+```
+
+This returns a JSON report containing:
+- **`item`**: Queue item summary (status, flags, paths, timestamps)
+- **`stage_gate`**: Pre-computed phase applicability (which analyses apply, media type, disc source, edition)
+- **`logs`**: Parsed log entries — decisions, warnings, errors, and stage timing events with raw JSON
+- **`rip_cache`**: Cache metadata (disc title, rip spec, needs_review flag)
+- **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
+- **`encoding`**: Encoding details snapshot (crop, validation, config, result)
+- **`media`**: ffprobe output for each encoded file (streams, format, duration, size)
+- **`errors`**: Any gathering errors (missing logs, parse failures, etc.)
+
+**The `stage_gate` object tells you exactly which phases to run.** Each `phase_*` boolean is pre-computed from the item's status, media type, and disc source. Do not re-derive these — trust the gate.
+
+If `/itemaudit` is invoked without an item ID, run `spindle status` and `spindle queue list` to diagnose daemon-level issues instead.
 
 ### Stage Gating
 
-After gathering context, determine two things:
-1. The **furthest completed stage** — only run phases that have artifacts to analyze
-2. The **disc source type** — determines whether external validation is applicable
+The `stage_gate` object in the audit-gather output contains:
 
-#### Determining Disc Source Type
-
-Disc type is not stored in the queue database. Infer it from the debug logs:
-- `is_blu_ray: true` in `bd_info details` entry → **Blu-ray** (or 4K Blu-ray)
-- DVD fingerprinting uses `VIDEO_TS/*.ifo` files → **DVD**
-- If neither is clear, check `disc_type` fields in early log entries
-
-#### Stage-Phase Matrix
-
-| Item Status | Furthest Stage | Applicable Phases |
-|-------------|----------------|-------------------|
-| `PENDING` / `IDENTIFYING` | None / Scanning | Phase 2 (logs only) |
-| `IDENTIFIED` / Failed during `RIPPING` | Identification complete | Phase 2 + Phase 6 (edition detection from logs only, no external validation) |
-| `RIPPED` / Failed during `EPISODE_IDENTIFYING` (TV) or `ENCODING` (movie) | Rip complete | Phase 2, 3, 6 |
-| `EPISODE_IDENTIFYING` (TV only) | Episode ID in progress | Phase 2, 3, 6 |
-| `EPISODE_IDENTIFIED` (TV only) | Episode ID complete | Phase 2, 3, 3b, 6 |
-| `ENCODED` / Failed during `AUDIO_ANALYZING` | Encode complete | Phase 2, 3, [3b TV], 4, 5, 6 + external validation (Blu-ray only) |
-| `AUDIO_ANALYZED` / Failed during `SUBTITLING` | Audio analysis complete | Phase 2, 3, [3b TV], 4, 5, 6, 8 + external validation (Blu-ray only) |
-| `SUBTITLED` / `ORGANIZING` / `COMPLETED` | All stages | All phases + external validation (Blu-ray only) |
+| Field | Meaning |
+|-------|---------|
+| `furthest_stage` | Status the item reached (or failed at) |
+| `media_type` | `movie` or `tv` |
+| `disc_source` | `bluray`, `4k_bluray`, `dvd`, or `unknown` |
+| `edition` | Detected edition label (empty if none) |
+| `phase_logs` | Always true |
+| `phase_rip_cache` | Post-ripping |
+| `phase_episode_id` | TV only, post-episode-identification |
+| `phase_encoded` | Post-encoding |
+| `phase_crop` | Post-encoding |
+| `phase_edition` | Movies only, post-identification |
+| `phase_subtitles` | Post-subtitling |
+| `phase_commentary` | Post-audio-analysis |
+| `phase_external_validation` | Post-encoding AND non-DVD source |
 
 **Key principles:**
-- External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray or 4K Blu-ray. **Skip external validation entirely for DVDs** — blu-ray.com reviews don't cover DVD releases, and DVD discs lack the detailed audio/video specs that make cross-referencing valuable.
-- For rip failures, the audit focuses on the failure itself — what went wrong, timing patterns, and whether identification was correct.
+- External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray or 4K Blu-ray. **Skip external validation entirely for DVDs.**
+- **For failed items:** Focus the report on diagnosing the failure. Analyze the error, the events leading up to it, and any retry patterns. Do not pad the report with sections that say "N/A - not reached".
 
-**For failed items:** Focus the report on diagnosing the failure. Analyze the error, the events leading up to it, and any retry patterns. Do not pad the report with sections that say "N/A - not reached".
+### Phase 2: Log Analysis (when `phase_logs` is true)
 
-### Phase 2: Log Analysis (All Items)
+Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from the audit-gather output. **Go beyond simple error counts.**
 
-**Go beyond simple error counts.** Analyze logs for:
-
-1. **Decision anomalies**:
+1. **Decision anomalies** (from `logs.decisions`):
    - Low confidence scores on decisions that were accepted anyway
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
+   - Filter by `decision_type` to find specific categories (commentary, edition_detection, tmdb_confidence, etc.)
+   - Use `raw_json` fields when you need full context beyond the extracted fields
 
-2. **Timing anomalies**:
-   - Stages taking unusually long or short
-   - Large gaps between log entries suggesting hangs
+2. **Timing anomalies** (from `logs.stages`):
+   - Stages taking unusually long or short (use `duration_seconds` when available)
+   - Large gaps between stage events suggesting hangs
    - Repeated retry attempts
 
 3. **Data flow anomalies**:
@@ -81,347 +87,260 @@ Disc type is not stored in the queue database. Infer it from the debug logs:
    - Episode counts not matching expectations
    - File sizes that seem wrong for the content
 
-4. **LLM decision review**:
-   - Search for `decision_type=commentary` entries
-   - Search for `decision_type=edition_detection` entries (movies only)
+4. **LLM decision review** (filter `logs.decisions` by `decision_type`):
+   - `decision_type=commentary` entries
+   - `decision_type=edition_detection` entries (movies only)
    - Evaluate if confidence levels and reasons make sense for the content
 
-5. **TV episode pipeline checks** (TV only):
-   - Search for `decision_type=episode_identification` entries — check if stage was skipped and why (valid reasons: `movie_content`, `opensubtitles_disabled`, `content_matcher_unavailable`)
-   - Search for `decision_type=episode_review` with `decision_result=needs_review` — indicates episodeid flagged unresolved episodes for manual review
-   - Search for `event_type=contentid_no_references` or `event_type=contentid_no_matches` — soft failures where content matching ran but couldn't resolve episodes (not infrastructure errors)
-   - Search for `event_type=episode_match_low_confidence` — indicates episodes with `MatchConfidence` below 0.70 (accepted but flagged for review)
-   - Check `episode_count` in `event_type=stage_complete` entries for consistency with expected episode count
-   - Look for per-episode encoding or subtitle failures: `Asset.Status = "failed"` entries in logs, and whether the stage continued past them (partial success is allowed)
-   - Search for `decision_type=contentid_matches` to see final episode-to-reference matching results
-   - Verify placeholder keys (`s01_001` format) were replaced with resolved keys (`s01e03` format) after episodeid — if placeholders remain, episodes are unresolved
+5. **TV episode pipeline checks** (TV only, from `logs.decisions` and `logs.warnings`):
+   - `decision_type=episode_identification` entries — check if stage was skipped and why (valid reasons: `movie_content`, `opensubtitles_disabled`, `content_matcher_unavailable`)
+   - `decision_type=episode_review` with `decision_result=needs_review` — episodeid flagged unresolved episodes
+   - `event_type=contentid_no_references` or `contentid_no_matches` in warnings — soft failures
+   - `event_type=episode_match_low_confidence` — episodes with `MatchConfidence` below 0.70
+   - `decision_type=contentid_matches` — final episode-to-reference matching results
+   - Verify placeholder keys (`s01_001`) were replaced with resolved keys (`s01e03`) after episodeid
 
-### Phase 3: Rip Cache Analysis (Post-Ripping Items)
+### Phase 3: Rip Cache Analysis (when `phase_rip_cache` is true)
 
-If item has passed ripping stage, analyze the rip cache:
+Analyze the `rip_cache` section from audit-gather output:
 
-1. **Locate cache entry**: `{ripcache.dir}/{sanitized-fingerprint}/spindle.cache.json`
-2. **Read and parse** the cache metadata file
-3. **Verify**:
+1. **Verify** `rip_cache.found` is true — if false, cache may have been pruned
+2. **Check metadata**:
    - `disc_title` matches expected content
-   - `rip_spec_data` contains expected episodes/titles
    - `needs_review` flag status and reason
-   - Track counts and durations look reasonable
-   - No orphaned or missing assets
+3. **Per-episode asset validation** (TV only, from `envelope.assets.ripped`):
+   - Verify each episode in `envelope.episodes` has a corresponding `ripped` asset with matching `episode_key`
+   - Pre-episodeid, keys are placeholders (`s01_001`, `s01_002`) with `episode=0` — this is expected
+   - Check for any ripped assets with `status: "failed"` or missing `path`
+   - Verify ripped asset count matches episode count
 
-4. **Per-episode asset validation** (TV only):
-   - Parse `Envelope.Episodes[]` — verify each episode has a corresponding entry in `Assets.Ripped[]` with a matching `EpisodeKey`
-   - At this stage, episode keys are placeholders (`s01_001`, `s01_002`) with `Episode=0` — this is expected. Definitive episode numbers are assigned later by the episodeid stage
-   - Check for any ripped assets with `status: "failed"` or missing `Path`
-   - Verify `len(Assets.Ripped)` matches `len(Episodes)` — mismatches indicate lost or extra rips
-   - Cross-reference `Episode.TitleID` with `Asset.TitleID` — each episode should map to a specific disc title (t00X.mkv)
+### Phase 3b: Episode Identification Validation (when `phase_episode_id` is true)
 
-### Phase 3b: Episode Identification Validation (TV Only, Post-Episode-Identification)
+**TV only.** Analyze `envelope.episodes`, `envelope.attributes`, and `item.needs_review`:
 
-**Skip entirely if item is a movie or has not reached `EPISODE_IDENTIFIED`.** The identification stage creates placeholder episodes (`Episode=0`, keys like `s01_001`) without guessing episode numbers. The episodeid stage is the sole source of definitive episode assignment, using WhisperX transcription + OpenSubtitles text similarity. When episodeid cannot resolve numbers (OpenSubtitles disabled or no matches), episodes proceed with placeholder names to `review_dir` via `NeedsReview`.
+1. **Content ID method**: Check `envelope.attributes["content_id_method"]`
+   - `whisperx_opensubtitles` = full pipeline
+   - If absent, check `logs.decisions` for skip reason
 
-1. **Content ID method**: Check `content_id_method` attribute in `Envelope.Attributes`
-   - `whisperx_opensubtitles` = full pipeline (WhisperX transcription matched against OpenSubtitles references via cosine similarity)
-   - If absent, episode identification was skipped — check logs for skip reason (`decision_type=episode_identification`, `decision_result=skipped`)
-
-2. **Episode manifest review**: Parse `Envelope.Episodes[]` and check `MatchConfidence` per episode:
-   - **CRITICAL** (< 0.70): Episode ordering likely wrong. The stage flags `NeedsReview` at this threshold. Check if item has `NeedsReview=true` with a review reason mentioning "low episode match confidence"
-   - **WARNING** (0.70-0.80): Marginal confidence — verify by spot-checking episode titles against durations
+2. **Episode manifest review**: Check `envelope.episodes[].match_confidence`:
+   - **CRITICAL** (< 0.70): Episode ordering likely wrong. Check `item.needs_review`
+   - **WARNING** (0.70-0.80): Marginal confidence
    - **OK** (> 0.80): High confidence match
-   - **Zero** (0.0): Episode was not resolved by content matching. If episodeid was skipped (OpenSubtitles disabled), episodes remain as placeholders and `NeedsReview` should be set. If episodeid ran but returned no matches, same outcome
+   - **Zero** (0.0): Unresolved episode
 
-3. **`content_id_matches` attribute validation**: Check `Envelope.Attributes["content_id_matches"]` for the match details:
-   - Each entry has `episode_key`, `matched_episode`, `score`, `subtitle_file_id`, `subtitle_language`
-   - Verify all episodes have a match entry (missing entries = unmatched episodes)
-   - Check that `matched_episode` numbers form a reasonable sequence (e.g., consecutive episodes from one disc)
-   - The minimum accepted similarity score is 0.58 — scores near this floor warrant scrutiny
+3. **`content_id_matches` attribute**: Check `envelope.attributes["content_id_matches"]`:
+   - Verify all episodes have a match entry
+   - Check `matched_episode` numbers form a reasonable sequence
+   - Minimum accepted similarity score is 0.58 — scores near this floor warrant scrutiny
 
-4. **Episode sequence continuity**: After successful content matching, check that episode numbers in `Episodes[]` are sequential or at least form a plausible disc block (e.g., episodes 5-8 of a season). Gaps or duplicates indicate matching errors. Before episodeid, all episodes have `Episode=0` — this is expected, not an error
+4. **Episode sequence continuity**: After content matching, episode numbers in `envelope.episodes[]` should be sequential or form a plausible disc block. Gaps or duplicates indicate matching errors
 
-5. **`episodes_synchronized` flag**: Check `Envelope.Attributes["episodes_synchronized"]` — should be `true` after successful episode identification. If `false` or absent after the stage completed, the match results were not applied
+5. **`episodes_synchronized` flag**: Check `envelope.attributes["episodes_synchronized"]` — should be `true` after successful identification
 
-### Phase 4: Encoded File Analysis (Post-Encoding Items)
+### Phase 4: Encoded File Analysis (when `phase_encoded` is true)
 
-If item has passed encoding stage:
+Analyze the `media` array from audit-gather output. Each entry contains full ffprobe results.
 
-**For movies** (single encoded file) or **per-episode for TV** (iterate `Assets.Encoded[]`):
+**For movies** (single entry) or **per-episode for TV** (entries with `episode_key`):
 
-1. **Run ffprobe** on each encoded file:
-   ```bash
-   ffprobe -v error -show_format -show_streams -of json "<encoded_file>"
-   ```
-
-2. **Verify video stream**:
+1. **Verify video stream** (from `media[].probe.streams` where `codec_type=video`):
    - Resolution matches expected (SD/HD/4K)
    - Codec is AV1 (av1/libaom-av1/libsvtav1)
    - Duration matches source within tolerance (~1-2 seconds)
-   - HDR metadata present if expected (color_primaries, transfer_characteristics)
+   - HDR metadata present if expected (color_primaries, transfer_characteristics in tags)
 
-3. **Verify audio streams**:
-   - Primary audio is first and has "default" disposition
-   - Commentary tracks have "comment" disposition AND title contains "Commentary"
+2. **Verify audio streams** (from `media[].probe.streams` where `codec_type=audio`):
+   - Primary audio is first and has `disposition.default=1`
+   - Commentary tracks have `disposition.comment=1` AND title contains "Commentary"
    - Track count matches expected (primary + commentary tracks)
-   - No unexpected stereo downmix tracks that should have been excluded
+   - No unexpected stereo downmix tracks
 
-4. **Check commentary labeling** (recent bug area):
-   - For each audio stream with `disposition.comment=1`, verify:
-     - Stream title exists and contains "Commentary" (case-insensitive)
+3. **Check commentary labeling** (recent bug area):
+   - For each audio stream with `disposition.comment=1`:
+     - Stream `tags.title` exists and contains "Commentary" (case-insensitive)
      - If original title was blank, it should now be exactly "Commentary"
      - If original title existed without "commentary", it should have " (Commentary)" appended
-   - Cross-reference with log entries showing commentary detection count
+   - Cross-reference with commentary decisions in `logs.decisions`
 
-5. **Parse EncodingDetailsJSON** from queue item:
-   - Check `Validation.passed` and individual step results
-   - Review crop detection: was a crop applied? What were the candidates?
-   - Check for warnings or errors in the snapshot
+4. **Check subtitle streams** (from `media[].probe.streams` where `codec_type=subtitle`):
+   - Verify subtitle track exists with correct language
+   - Regular subtitles should have title containing language name (e.g., "English")
+   - Forced subtitles should have `disposition.forced=1` and title containing "(Forced)"
 
-6. **Per-episode asset status** (TV only):
-   - Check each entry in `Assets.Encoded[]` for `status: "failed"` — failed episodes have `ErrorMsg` with the failure reason
-   - Encoding allows partial success (continues past individual failures), so some episodes may be encoded while others failed
-   - Verify `len(Assets.Encoded)` matches `len(Episodes)` — missing entries indicate episodes that were never attempted
+5. **Parse encoding details** from `encoding.snapshot`:
+   - Check `validation.passed` and individual step results
+   - Review crop detection from `crop` fields
+   - Check for `warning` or `error` in snapshot
+
+6. **Per-episode asset status** (TV only, from `envelope.assets.encoded`):
+   - Check for `status: "failed"` entries with `error_msg`
+   - Encoding allows partial success
+   - Verify encoded asset count matches episode count
 
 7. **Cross-episode consistency** (TV only):
-   - All episodes from the same disc should share: same resolution, same codec, same audio track count
-   - Flag any episode with different resolution or codec as anomalous
-   - Duration spread: episodes from the same season typically have similar runtimes (within ~5 minutes). Outliers may indicate wrong episode assignment
+   - All episodes should share: same resolution, same codec, same audio track count
+   - Duration spread should be reasonable for same-season episodes (~5 minute tolerance)
 
-### Phase 5: Crop Detection Validation (Post-Encoding Only)
+### Phase 5: Crop Detection Validation (when `phase_crop` is true)
 
-**Skip entirely if item has not passed encoding.** No encoded file = nothing to validate.
+Analyze `encoding.snapshot.crop` from the audit-gather output:
 
-For encoded content, validate crop detection:
-
-1. **Extract crop info** from EncodingDetailsJSON:
-   - `Crop.required` - was cropping needed?
-   - `Crop.crop` - the applied crop filter (e.g., "crop=1920:800:0:140")
-   - `Crop.message` - detection summary
+1. **Extract crop info**:
+   - `crop.required` — was cropping needed?
+   - `crop.crop` — the applied crop filter (e.g., "crop=1920:800:0:140")
+   - `crop.message` — detection summary
 
 2. **Calculate actual aspect ratio**:
-   - `(video_width - left_crop - right_crop) / (video_height - top_crop - bottom_crop)`
+   - Parse the crop filter values
    - Common ratios: 2.39:1/2.40:1 (scope), 1.85:1, 1.78:1 (16:9), 2.00:1 (IMAX)
-   - Verify the ratio looks reasonable for the content
 
-3. **External cross-reference (Blu-ray/4K Blu-ray only, skip for DVDs)**:
-   - Look up disc review on blu-ray.com
-   - Search: `site:blu-ray.com "<title>" review` (use identified title from metadata)
-   - Find the "Video" section mentioning aspect ratio
+3. **External cross-reference** (only when `phase_external_validation` is true):
+   - Search: `site:blu-ray.com "<title>" review`
    - Flag if our crop differs significantly from the review's stated ratio
 
-4. **Check for IMAX/variable aspect ratio issues** (Blu-ray only):
+4. **IMAX/variable aspect ratio issues**:
    - If crop detection shows "multiple ratios" or low top-candidate percentage
-   - Some films have IMAX sequences with different ratios
-   - This may be acceptable or may indicate detection issues
 
 5. **TV episode crop consistency** (TV only):
-   - All episodes from the same disc share source properties — crop should be identical or very similar across episodes
-   - Spot-check one or two episodes rather than performing full crop validation on every episode
-   - If one episode has a different crop than others, flag as anomalous (likely a detection issue, not intentional)
+   - All episodes from the same disc should have identical or very similar crop
+   - Spot-check one or two episodes rather than performing full validation on every episode
 
-### Phase 6: Edition Detection Validation (Movies Only)
+### Phase 6: Edition Detection Validation (when `phase_edition` is true)
 
-If item is a movie, validate edition detection. This phase has two tiers:
-- **Log review** (always, if identification completed): Check decisions from logs
-- **External validation** (only if post-encoding): Cross-reference with blu-ray.com
+Movies only. Two tiers:
+- **Log review** (always): Check decisions from `logs.decisions`
+- **External validation** (only when `phase_external_validation` is true)
 
-#### Log Review (post-identification)
+#### Log Review
 
-1. **From logs**: Search for `decision_type=edition_detection` entries
+1. **Find `decision_type=edition_detection`** entries in `logs.decisions`
 2. **Expected detection paths**:
-   - `decision_reason=regex_pattern_match`: Known edition detected via pattern (Director's Cut, Extended, etc.)
+   - `decision_reason=regex_pattern_match`: Known edition detected via pattern
    - `decision_reason=llm_confirmed`: Ambiguous edition confirmed by LLM
    - `decision_reason=llm_rejected`: LLM determined not an edition
    - `decision_reason=llm_not_configured`: Ambiguous title but no LLM available
 
-3. **Verify detection correctness from available data**:
+3. **Verify detection correctness**:
    - If disc title contains obvious edition markers (Director's Cut, Extended, Unrated, IMAX, etc.), an edition should be detected
-   - If cache was used, check for `edition from cache` log entry
    - Check if multiple feature-length titles with different durations suggest alternate cuts
+   - Check `stage_gate.edition` for the detected label
 
-4. **Verify edition label**:
-   - Check `edition_label` in logs matches the actual edition type
-   - Known patterns: Director's Cut, Extended Edition, Unrated, Theatrical, Remastered, Special Edition, Anniversary Edition, Ultimate Edition, Final Cut, Redux, IMAX
+4. **Verify edition label** against known patterns: Director's Cut, Extended Edition, Unrated, Theatrical, Remastered, Special Edition, Anniversary Edition, Ultimate Edition, Final Cut, Redux, IMAX
 
-#### External Validation (post-encoding only)
+#### External Validation (only when `phase_external_validation` is true)
 
 5. **Cross-reference with blu-ray.com** to confirm whether disc is actually an alternate edition
 6. **Verify filename**:
-   - Movie filenames should be: `Title (Year) - Edition.mkv`
-   - Check final organized file includes edition suffix when detected
-   - Edition should NOT appear in folder name (GetBaseFilename strips it)
+   - Check `item.final_file` or `item.encoded_file` includes edition suffix
+   - Edition should NOT appear in folder name
 
-### Phase 7: Subtitle Analysis (Post-Subtitling Items)
+### Phase 7: Subtitle Analysis (when `phase_subtitles` is true)
 
-If item has passed subtitling stage:
+Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and subtitle assets from `envelope.assets.subtitled`.
 
-Regular subtitles always come from WhisperX transcription (generated from the actual audio).
-Forced (foreign-parts-only) subtitles are fetched from OpenSubtitles when enabled, then aligned
-against the WhisperX output via text-based matching.
+**For movies** or **per-episode for TV**:
 
-**For movies** (single file) or **per-episode for TV** (iterate `Assets.Subtitled[]`):
+1. **Verify embedded subtitles** from the ffprobe data in `media[]`:
+   - Subtitle track exists with correct language
+   - Check `disposition.default` for main subtitle
+   - Check `disposition.forced` for forced subtitles
+   - **Check labeling**: regular subs have language name in title, forced have "(Forced)"
 
-1. **Locate subtitles**: Check encoded MKV for embedded tracks (preferred) or sidecar SRT files
-2. **For embedded subtitles** (muxed into MKV):
-   ```bash
-   ffprobe -v error -show_streams -select_streams s -of json "<mkv_file>"
-   ```
-   - Verify subtitle track exists with correct language
-   - Check track has "default" disposition if it's the main subtitle
-   - Forced subtitles should have "forced" disposition
-   - **Check subtitle labeling** (similar to commentary labeling):
-     - Regular subtitles should have title containing language name (e.g., "English")
-     - Forced subtitles should have title containing "(Forced)" (e.g., "English (Forced)")
+2. **Forced subtitle search outcome** (from `logs.decisions`):
+   - Find `decision_type=forced_subtitle_download` with `decision_result=not_found`
+   - Zero candidates from OpenSubtitles is **common and expected** — classify as **INFO**, not WARNING
+   - Only classify as **WARNING** if candidates were returned but all rejected
+   - **Use your knowledge of the title**: If the film/show has significant foreign language dialogue (e.g., Inglourious Basterds, Kill Bill, Narcos), a missing forced subtitle is a real gap — escalate to **WARNING**
 
-3. **For sidecar SRT files** (legacy):
-   ```bash
-   head -100 "<srt_file>"  # Check beginning
-   tail -50 "<srt_file>"   # Check ending
-   wc -l "<srt_file>"      # Total lines (rough cue estimate)
-   ```
+3. **Edition-aware forced subtitle selection** (movies only):
+   - Check `logs.decisions` for `edition=match` or `edition=mismatch` in forced subtitle ranking
+   - Selected forced subtitle should match edition when possible
 
-4. **Content quality checks**:
-   - First cue timestamp reasonable (typically within first few minutes)
-   - Last cue timestamp near video duration
-   - Cue density: minimum ~2 cues per minute expected
-   - No obvious encoding issues (mojibake, wrong language)
-   - Dialogue makes sense for the content (spot check a few cues)
+4. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
+   - Check for `status: "failed"` entries with `error_msg`
+   - Verify `subtitles_muxed` flag per episode
+   - Check `envelope.attributes["subtitle_generation_results"]` for per-episode details
 
-5. **Duration alignment**:
-   - Subtitle end time should be within 10 minutes of video duration
-   - Subtitles significantly shorter = missing content
-   - Subtitles significantly longer = wrong subtitle file
+5. **Cross-episode subtitle consistency** (TV only):
+   - All episodes should have same subtitle language and consistent forced subtitle presence
 
-6. **Forced subtitle search outcome** (when disc has forced subtitle flag):
-   - Many discs set the forced subtitle flag even when the content has no foreign language segments. Zero candidates from OpenSubtitles is **common and expected** — classify as **INFO**, not WARNING.
-   - Only classify as **WARNING** if candidates were returned but all rejected during ranking (suggests a filtering or scoring problem).
-   - **Use your knowledge of the title**: If you know the film/show has significant foreign language dialogue (e.g., Inglourious Basterds, Kill Bill, Narcos), a missing forced subtitle is a real gap — escalate to **WARNING**. If the content is predominantly single-language (e.g., South Park, The Office), INFO is correct.
-   - Check `decision_type=forced_subtitle_download` with `decision_result=not_found` — this is the normal "searched and found nothing" outcome.
+### Phase 8: Commentary Track Validation (when `phase_commentary` is true)
 
-7. **Edition-aware forced subtitle selection** (movies only, if movie has edition and forced subs fetched):
-   - Check logs for `edition=match` or `edition=mismatch` in forced subtitle ranking
-   - Selected forced subtitle should match edition when possible (e.g., Director's Cut subtitle for Director's Cut disc)
-   - If `edition=mismatch` was accepted, verify no matching edition subtitle was available
-   - Note: regular subtitles are always WhisperX-generated, so edition matching only applies to forced subtitles from OpenSubtitles
+Analyze commentary decisions from `logs.decisions` and audio streams from `media[]`:
 
-8. **Per-episode subtitle asset status** (TV only):
-   - Check each entry in `Assets.Subtitled[]` for `status: "failed"` — failed episodes have `ErrorMsg`
-   - Subtitling allows partial success (continues past individual failures), so some episodes may have subtitles while others failed
-   - Verify `SubtitlesMuxed` flag per episode — all completed episodes should have `subtitles_muxed: true`
-   - Check `subtitle_generation_results` in `Envelope.Attributes` for per-episode result details
-
-9. **Cross-episode subtitle consistency** (TV only):
-   - Cue density should be roughly similar across episodes from the same show (within ~50% of each other)
-   - All episodes should have the same subtitle language
-   - All episodes should have consistent forced subtitle presence (either all have forced subs or none do)
-   - Flag any episode with dramatically different cue density as potential transcription issue
-
-### Phase 8: Commentary Track Validation (Post-Audio-Analysis Only)
-
-**Skip entirely if item has not passed audio analysis.** No audio analysis = no commentary decisions to validate.
-
-1. **From logs**: Find `commentary track classification` and `commentary detection complete` entries
+1. **From logs**: Find `decision_type=commentary` entries in `logs.decisions`
 2. **Expected behavior**:
    - 2-channel English tracks that aren't stereo downmixes should be candidates
    - High similarity to primary audio = stereo downmix (excluded)
-   - LLM should classify based on content (talking about filmmaking = commentary)
+   - LLM should classify based on content
 
-3. **Cross-reference with blu-ray.com** (only if external validation is applicable per stage gating):
-   - Check "Audio" section of disc review
-   - Note how many commentary tracks the disc actually has
+3. **Cross-reference with blu-ray.com** (only when `phase_external_validation` is true):
+   - Check "Audio" section of disc review for commentary count
    - Compare against our detection count
 
-4. **Verify in encoded file**:
-   - Count audio streams with "comment" disposition
-   - Verify all are properly labeled (see Phase 4)
+4. **Verify in media probes**: Count audio streams with `disposition.comment=1` in `media[].probe.streams`
 
 5. **Cross-episode commentary consistency** (TV only):
-   - Commentary is a per-disc property, not per-episode — all episodes from the same disc should have the same number of audio streams (primary + commentary)
-   - If one episode has different audio stream counts than others, flag as anomalous
-   - TV commentary is less common than movie commentary but does exist (e.g., showrunner commentaries on season premieres/finales)
-
-## Log Access Methods
-
-**Via log files** (daemon may be stopped):
-```bash
-# Debug logs (check first - have richer context)
-cat log_dir/debug/items/YYYYMMDDTHHMMSS-<id>-<slug>.log | jq .
-
-# Normal logs (fallback)
-cat log_dir/items/YYYYMMDDTHHMMSS-<id>-<slug>.log | jq .
-```
-
-**Via API** (daemon running):
-```bash
-# All logs for item
-curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
-  "http://127.0.0.1:7487/api/logs?item=<ID>&lane=*"
-
-# Decision events only
-curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
-  "http://127.0.0.1:7487/api/logs?item=<ID>&decision_type=*&lane=*"
-```
+   - All episodes from the same disc should have same number of audio streams
 
 ## Problem Pattern Catalog
 
 ### Known Patterns to Check
 
-| Pattern | Stage | Evidence | Impact |
-|---------|-------|----------|--------|
-| Duplicate fingerprint | Identification | `decision_type=duplicate_fingerprint` | Item silently rejected |
-| Low TMDB confidence | Identification | Low score in `decision_type=tmdb_confidence` | Wrong title match |
-| Unresolved placeholder episodes | Episode ID | `Episode=0` with placeholder keys (`s01_001`) after episodeid completes | Episodes land in review_dir with placeholder names |
+| Pattern | Stage | Evidence in Audit-Gather Output | Impact |
+|---------|-------|--------------------------------|--------|
+| Duplicate fingerprint | Identification | `logs.decisions` with `decision_type=duplicate_fingerprint` | Item silently rejected |
+| Low TMDB confidence | Identification | `logs.decisions` with `decision_type=tmdb_confidence`, low score | Wrong title match |
+| Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
 | Missed edition detection | Identification | No `edition_detection` decision for disc with edition markers | Edition not in filename |
-| Wrong edition label | Identification | `edition_label` doesn't match actual edition type | Incorrect filename/subtitle selection |
-| Edition detection LLM failure | Identification | `event_type=edition_llm_failed` | Ambiguous edition not detected |
-| Wrong crop detection | Encoding | Aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
-| Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review | Commentary tracks not preserved |
-| Unlabeled commentary | Audio Analysis | Missing title/disposition in ffprobe | Jellyfin won't recognize tracks |
-| Stereo downmix kept | Audio Analysis | Extra 2ch track that matches primary | Unnecessary audio bloat |
-| SRT validation issues | Subtitles | `event_type=srt_validation_issues` | Malformed subtitles |
-| Subtitle duration mismatch | Subtitles | Duration delta > 10 minutes | WhisperX timing issue or truncated audio |
-| Sparse subtitles | Subtitles | < 2 cues/minute | WhisperX transcription issue or wrong language |
-| Forced subtitle not found (INFO) | Subtitles | `decision_result=not_found` with zero OpenSubtitles candidates | Expected — disc flag doesn't guarantee foreign content exists |
-| Forced subtitle candidates rejected | Subtitles | OpenSubtitles returned candidates but all rejected during ranking | Filtering or scoring problem |
-| Forced subtitle edition mismatch | Subtitles | `edition=mismatch` on forced sub when matching exists | Wrong forced subtitle for alternate cut |
-| Subtitles not muxed | Subtitles | Sidecar SRT exists but no embedded tracks | Jellyfin may not auto-load |
-| Unlabeled subtitles | Subtitles | Missing or incorrect title in embedded track | Jellyfin won't display track name properly |
-| Low episode match confidence | Episode ID | `event_type=episode_match_low_confidence`, scores < 0.70 | Episodes may be mislabeled (wrong S##E##) |
-| Episodes unresolved (matcher unavailable) | Episode ID | `NeedsReview=true`, reason `"episode numbers unresolved; content matching unavailable"` | Episodes proceed with placeholder names to review_dir |
-| Episodes unresolved (no matches) | Episode ID | `NeedsReview=true`, reason `"episode numbers unresolved; no matching subtitles found"` | Episodes proceed with placeholder names to review_dir |
-| Episode sequence gaps | Episode ID | Non-sequential episode numbers in `Episodes[]` | Missing episodes or matching error |
-| Per-episode rip failure | Ripping | `Assets.Ripped[]` entry with `status: "failed"` | Episode missing from downstream pipeline |
-| Per-episode encode failure | Encoding | `Assets.Encoded[]` entry with `status: "failed"` | Episode will not appear in Jellyfin |
-| Per-episode subtitle failure | Subtitles | `Assets.Subtitled[]` entry with `status: "failed"` | Episode missing subtitles |
-| Cross-episode resolution mismatch | Encoding | Different resolutions in ffprobe across episodes | Inconsistent quality in Jellyfin |
-| Cross-episode audio mismatch | Encoding | Different audio stream counts across episodes | Inconsistent audio tracks in Jellyfin |
+| Wrong edition label | Identification | `stage_gate.edition` doesn't match actual edition type | Incorrect filename/subtitle |
+| Edition detection LLM failure | Identification | `logs.errors` or `logs.warnings` with `event_type=edition_llm_failed` | Ambiguous edition not detected |
+| Wrong crop detection | Encoding | `encoding.snapshot.crop` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
+| Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
+| Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Jellyfin won't recognize tracks |
+| Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
+| SRT validation issues | Subtitles | `logs.warnings` with `event_type=srt_validation_issues` | Malformed subtitles |
+| Subtitle duration mismatch | Subtitles | Subtitle stream duration vs video duration delta > 10 minutes | WhisperX timing issue |
+| Forced subtitle not found (INFO) | Subtitles | `logs.decisions` with `decision_result=not_found`, zero candidates | Expected for most content |
+| Forced subtitle candidates rejected | Subtitles | Candidates returned but all rejected during ranking | Filtering or scoring problem |
+| Forced subtitle edition mismatch | Subtitles | `edition=mismatch` in forced subtitle ranking | Wrong forced subtitle |
+| Subtitles not muxed | Subtitles | No subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load |
+| Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Jellyfin display issue |
+| Low episode match confidence | Episode ID | `envelope.episodes[].match_confidence` < 0.70 | Episodes may be mislabeled |
+| Episodes unresolved | Episode ID | `item.needs_review=true`, episodes with `episode=0` | Placeholder names in review_dir |
+| Episode sequence gaps | Episode ID | Non-sequential episode numbers in `envelope.episodes[]` | Missing episodes or matching error |
+| Per-episode rip failure | Ripping | `envelope.assets.ripped[]` with `status: "failed"` | Episode missing from pipeline |
+| Per-episode encode failure | Encoding | `envelope.assets.encoded[]` with `status: "failed"` | Episode won't appear in Jellyfin |
+| Per-episode subtitle failure | Subtitles | `envelope.assets.subtitled[]` with `status: "failed"` | Episode missing subtitles |
+| Cross-episode resolution mismatch | Encoding | Different resolutions across `media[]` entries | Inconsistent quality |
+| Cross-episode audio mismatch | Encoding | Different audio stream counts across `media[]` entries | Inconsistent audio tracks |
 
 ### DEBUG-Only Patterns
 
-| Pattern | Stage | Evidence |
-|---------|-------|----------|
-| TMDB candidate scoring | Identification | `decision_type=tmdb_search` with all candidates |
-| Placeholder episode creation | Identification | Placeholder keys (`s01_001`) and `Episode=0` in rip spec |
-| Edition marker analysis | Identification | No edition markers detected (DEBUG level) |
-| Track selection | Ripping | `decision_type=track_select` per-track |
-| Forced subtitle ranking | Subtitles | `decision_type=subtitle_rank` candidate scores (forced subs only) |
-| Forced subtitle edition scoring | Subtitles | `edition=match` or `edition=mismatch` in forced subtitle ranking reasons |
-| Content ID no references | Episode ID | `event_type=contentid_no_references` — OpenSubtitles had no subtitles to compare |
-| Content ID no matches | Episode ID | `event_type=contentid_no_matches` — transcripts didn't match any references |
-| Content ID candidate selection | Episode ID | `decision_type=contentid_candidates` with candidate sources |
-| Content ID match scores | Episode ID | `decision_type=contentid_matches` with per-episode similarity scores |
-| OpenSubtitles reference search | Episode ID | `decision_type=opensubtitles_reference_search` per-episode results |
+These appear in `logs.decisions` only when debug logs are available (`logs.is_debug=true`):
+
+| Pattern | Stage | `decision_type` |
+|---------|-------|-----------------|
+| TMDB candidate scoring | Identification | `tmdb_search` |
+| Placeholder episode creation | Identification | (visible in `envelope.episodes` with `episode=0`) |
+| Track selection | Ripping | `track_select` |
+| Forced subtitle ranking | Subtitles | `subtitle_rank` |
+| Content ID candidate selection | Episode ID | `contentid_candidates` |
+| Content ID match scores | Episode ID | `contentid_matches` |
+| OpenSubtitles reference search | Episode ID | `opensubtitles_reference_search` |
 
 ## Audit Report Format
 
-**Only include sections applicable to the item's furthest completed stage.** Omit sections for stages the item never reached. For failed items, the report should focus on diagnosing the failure rather than listing empty sections.
+**Only include sections applicable to the item's stage gate.** Omit sections for stages the item never reached. For failed items, the report should focus on diagnosing the failure rather than listing empty sections.
 
 ```
 ## Audit Report for Item #<id>
 
-**Title:** <identified_title>
-**Status:** <status> | **NeedsReview:** <bool> | **ReviewReason:** <reason>
-**Media Type:** <movie/tv> | **Source:** <DVD/Blu-ray/4K Blu-ray> (inferred from logs)
-**Edition:** <edition_label or "none detected">
-**Debug Mode:** active/inactive (debug logs available: yes/no)
+**Title:** <item.disc_title>
+**Status:** <item.status> | **NeedsReview:** <item.needs_review> | **ReviewReason:** <item.review_reason>
+**Media Type:** <stage_gate.media_type> | **Source:** <stage_gate.disc_source>
+**Edition:** <stage_gate.edition or "none detected">
+**Debug Logs:** <logs.is_debug>
 
 ### Executive Summary
 <1-2 sentence overview of findings>
@@ -429,7 +348,7 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 ### Issues Found
 
 **[CRITICAL] <Issue Name>**
-- Evidence: <specific log excerpt or measurement>
+- Evidence: <specific data from audit-gather output>
 - Expected: <what should have happened>
 - Actual: <what did happen>
 - Impact: <user-facing consequence>
@@ -444,160 +363,126 @@ curl -H "Authorization: Bearer $SPINDLE_API_TOKEN" \
 ### Artifact Analysis
 
 #### Log Analysis
-- Total log entries: <count>
+- Log path: <logs.path>
+- Total log entries: <logs.total_lines>
 - WARN events: <count> (list if > 0)
 - ERROR events: <count> (list if > 0)
 - Decision events: <summary of key decisions>
-- Timing anomalies: <any detected>
+- Timing anomalies: <any detected from stage events>
 
-#### Rip Cache (if applicable)
-- Cache path: <path>
-- Title count: <N>
-- Episode count: <N> (for TV)
+#### Rip Cache (if phase_rip_cache)
+- Cache path: <rip_cache.path>
+- Found: <rip_cache.found>
 - Anomalies: <any detected>
 
-#### Episode Identification (TV only, if applicable)
-- Content ID method: <whisperx_opensubtitles / skipped (reason)>
-- Episodes synchronized: <yes/no>
+#### Episode Identification (if phase_episode_id)
+- Content ID method: <envelope.attributes.content_id_method>
+- Episodes synchronized: <envelope.attributes.episodes_synchronized>
 - Episode manifest:
 
 | Episode | Key | TitleID | Confidence | Status |
 |---------|-----|---------|------------|--------|
 | S01E03 | s01_001 | 3 | 0.87 | OK (resolved) |
-| S01E04 | s01_002 | 5 | 0.72 | WARNING (resolved) |
-| ??? | s01_003 | 7 | 0.0 | UNRESOLVED (placeholder) |
 
 - Sequence continuity: <sequential/gaps detected>
-- Low confidence episodes: <count> (list any < 0.80)
+- Low confidence episodes: <count>
 
-#### Encoded File (if applicable)
+#### Encoded File (if phase_encoded)
 
 **Movie:**
-- Path: <path>
-- Duration: <seconds> | Size: <MB>
+- Path: <media[0].path>
+- Duration: <media[0].duration_seconds>s | Size: <media[0].size_bytes> bytes
 - Video: <codec> <resolution> <HDR status>
 - Audio streams: <count>
-  - Primary: <description>
-  - Commentary: <count> tracks (labeled: yes/no)
-- Crop applied: <crop filter or "none">
-- Calculated aspect ratio: <ratio>
+- Crop applied: <encoding.snapshot.crop>
 
 **TV (per-episode summary):**
 
-| Episode | Duration | Size | Resolution | Codec | Audio Streams | Crop | Status |
-|---------|----------|------|------------|-------|---------------|------|--------|
-| S01E01 | 2580s | 1.2GB | 1920x1080 | AV1 | 1 | none | completed |
-| S01E02 | 2640s | 1.3GB | 1920x1080 | AV1 | 1 | none | completed |
+| Episode | Duration | Size | Resolution | Codec | Audio Streams | Status |
+|---------|----------|------|------------|-------|---------------|--------|
 
-- Cross-episode consistency: <pass/concerns> (resolution, codec, audio count)
-- Failed episodes: <count> (list with error messages if any)
+- Cross-episode consistency: <pass/concerns>
+- Failed episodes: <count>
 
-#### Edition Detection (movies only)
-- Detection method: <regex/llm/cache/none>
-- Edition label: <label or "none">
-- Filename includes edition: <yes/no>
-- blu-ray.com confirms edition: <yes/no/not checked>
+#### Edition Detection (if phase_edition)
+- Detection method: <from logs.decisions>
+- Edition label: <stage_gate.edition>
+- Filename includes edition: <check item.final_file or item.encoded_file>
 
-#### Subtitles (if applicable)
+#### Subtitles (if phase_subtitles)
+- Subtitle tracks in encoded file: <count and details from media probes>
+- Track labels correct: <yes/no>
+- Forced subtitle outcome: <from logs.decisions>
 
-**Movie:**
-- Source: WhisperX (regular always WhisperX; forced from OpenSubtitles if enabled)
-- Muxed into MKV: <yes/no>
-- Subtitle tracks: <count>
-- Track labels correct: <yes/no> (regular has language name, forced has "(Forced)")
-- SRT sidecar files: <count>
-- Duration coverage: <percentage>
-- Cue density: <cues/minute>
-- Forced subtitle edition match: <match/mismatch/n/a> (only for forced subs from OpenSubtitles)
-- Content spot-check: <pass/concerns>
+#### Commentary (if phase_commentary)
+- Commentary decisions: <from logs.decisions>
+- Commentary tracks in encoded file: <count from media probes>
 
-**TV (per-episode summary):**
-
-| Episode | Muxed | Tracks | Cue Density | Duration Coverage | Status |
-|---------|-------|--------|-------------|-------------------|--------|
-| S01E01 | yes | 1 | 4.2/min | 98% | completed |
-| S01E02 | yes | 1 | 3.8/min | 97% | completed |
-
-- Cross-episode consistency: <pass/concerns> (cue density, language, forced sub presence)
-- Failed episodes: <count> (list with error messages if any)
-
-### External Validation (Blu-ray/4K Only, Post-Encoding Only)
-
-**Omit this entire section if:** (a) item has not passed encoding, OR (b) source is DVD. No encoded artifacts or no reliable external reference = nothing to validate.
+### External Validation (if phase_external_validation)
 
 #### blu-ray.com Review
 - URL: <review URL if found>
 - Listed aspect ratio: <ratio>
 - Listed audio tracks: <description>
-- Listed commentary: <count and description>
-- Edition type: <theatrical/director's cut/extended/etc. or "standard release">
+- Listed commentary: <count>
+- Edition type: <type>
 
 #### Validation Results
 - Aspect ratio match: <yes/no/concern>
 - Commentary count match: <yes/no/concern>
-- Edition detection match: <yes/no/concern> (is our detection correct?)
-- Other notes: <any discrepancies>
+- Edition detection match: <yes/no/concern>
 
 ### Decision Trace
-<key decisions with decision_type, decision_result, decision_reason>
+<key decisions from logs.decisions with decision_type, decision_result, decision_reason>
 ```
 
 ## Execution Checklist
 
-After Phase 1, determine the furthest completed stage per the Stage Gating table and check only applicable items. **Do not check items beyond the reached stage.**
+After running `spindle audit-gather`, check only the phases flagged as `true` in `stage_gate`. **Do not check phases beyond the reached stage.**
 
 ### Always
-- [ ] Gathered item info and status
-- [ ] Determined furthest completed stage (applied stage gating)
-- [ ] Determined disc source type from logs (DVD / Blu-ray / 4K Blu-ray)
-- [ ] Determined media type (movie / TV)
-- [ ] Located and read log files (debug preferred)
-- [ ] Analyzed logs for anomalies beyond simple error counts
-- [ ] If TV: checked for episode pipeline log patterns (low confidence, per-episode failures)
-- [ ] For failed items: diagnosed failure cause, timing, and retry patterns
+- [ ] Ran `spindle audit-gather <id>` and loaded the JSON output
+- [ ] Checked `errors` array for gathering failures
+- [ ] Reviewed `stage_gate` to determine applicable phases
+- [ ] Analyzed `logs` for anomalies beyond simple error counts
+- [ ] If TV: checked for episode pipeline log patterns
+- [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
 
-### Post-Identification (item reached IDENTIFIED or beyond)
-- [ ] If movie: validated edition detection logic from logs
+### Post-Identification (phase_edition)
+- [ ] Validated edition detection logic from `logs.decisions`
 
-### Post-Ripping (item reached RIPPED or beyond)
+### Post-Ripping (phase_rip_cache)
 - [ ] Analyzed rip cache metadata
-- [ ] If TV: validated per-episode ripped assets (count, status, EpisodeKey matching)
+- [ ] If TV: validated per-episode ripped assets in `envelope.assets.ripped`
 
-### Post-Episode-Identification (TV only, item reached EPISODE_IDENTIFIED or beyond)
-- [ ] Checked content ID method (whisperx_opensubtitles or skipped)
-- [ ] Checked if episodes were resolved (Episode > 0) or still placeholders (Episode = 0)
-- [ ] If placeholders remain: verified NeedsReview is set with appropriate reason
+### Post-Episode-Identification (phase_episode_id)
+- [ ] Checked content ID method in `envelope.attributes`
 - [ ] Reviewed episode manifest with MatchConfidence scores
-- [ ] Flagged low confidence episodes (CRITICAL < 0.70, WARNING 0.70-0.80)
-- [ ] Verified episode sequence continuity (no gaps or duplicates)
+- [ ] Verified episode sequence continuity
 - [ ] Checked `content_id_matches` attribute completeness
-- [ ] Verified `episodes_synchronized` flag is true
+- [ ] Verified `episodes_synchronized` flag
 
-### Post-Encoding (item reached ENCODED or beyond)
-- [ ] Ran ffprobe and analyzed streams (per-episode for TV)
-- [ ] Validated crop detection (aspect ratio sanity check)
-- [ ] Verified commentary labeling specifically
+### Post-Encoding (phase_encoded, phase_crop)
+- [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
+- [ ] Validated crop detection from `encoding.snapshot.crop`
+- [ ] Verified commentary labeling
 - [ ] If movie with edition: verified edition in filename
-- [ ] If TV: checked per-episode encoded asset status (failed episodes)
-- [ ] If TV: verified cross-episode consistency (resolution, codec, audio count)
-- [ ] If TV: spot-checked crop consistency across episodes
-- [ ] If Blu-ray/4K (not DVD): looked up blu-ray.com review
-- [ ] If Blu-ray/4K (not DVD): validated crop detection against review
-- [ ] If Blu-ray/4K (not DVD): validated commentary count against review
-- [ ] If Blu-ray/4K movie (not DVD): validated edition detection against review
+- [ ] If TV: checked cross-episode consistency
 
-### Post-Audio-Analysis (item reached AUDIO_ANALYZED or beyond)
-- [ ] Reviewed LLM decisions (commentary, edition) for reasonableness
+### Post-Audio-Analysis (phase_commentary)
+- [ ] Reviewed commentary decisions from `logs.decisions`
 - [ ] If TV: verified cross-episode audio stream count consistency
 
-### Post-Subtitling (item reached SUBTITLED or beyond)
-- [ ] Verified subtitles are muxed into MKV (per-episode for TV)
-- [ ] Verified subtitle track labels (language name, "(Forced)" marker)
-- [ ] Analyzed subtitle content quality
+### Post-Subtitling (phase_subtitles)
+- [ ] Verified subtitle tracks in media probes
+- [ ] Verified subtitle track labels
 - [ ] If movie with edition and forced subs: verified forced subtitle edition matching
-- [ ] If TV: checked per-episode subtitle asset status (failed episodes, SubtitlesMuxed flags)
-- [ ] If TV: verified cross-episode subtitle consistency (cue density, language, forced sub presence)
+- [ ] If TV: checked per-episode subtitle asset status
+
+### External Validation (phase_external_validation)
+- [ ] Looked up blu-ray.com review
+- [ ] Validated crop, commentary count, and edition against review
 
 ### Report
-- [ ] Generated report with only applicable sections (omit sections for unreached stages)
-- [ ] If TV: used per-episode summary tables for encoded files and subtitles
+- [ ] Generated report with only applicable sections
+- [ ] If TV: used per-episode summary tables
