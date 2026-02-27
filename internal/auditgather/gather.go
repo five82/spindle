@@ -170,13 +170,13 @@ func computeStageGate(item *queue.Item, meta *queue.Metadata) StageGate {
 		DiscSource:    "unknown", // Will be refined from logs
 		Edition:       meta.GetEdition(),
 
-		PhaseLogs:     true, // Always applicable
-		PhaseRipCache: reachedAtLeast(item, queue.StatusRipped),
-		PhaseEpisodeID: mediaType == "tv" && reachedAtLeast(item, queue.StatusEpisodeIdentified),
-		PhaseEncoded:  reachedAtLeast(item, queue.StatusEncoded),
-		PhaseCrop:     reachedAtLeast(item, queue.StatusEncoded),
-		PhaseEdition:  mediaType == "movie" && reachedAtLeast(item, queue.StatusIdentified),
-		PhaseSubtitles: reachedAtLeast(item, queue.StatusSubtitled),
+		PhaseLogs:       true, // Always applicable
+		PhaseRipCache:   reachedAtLeast(item, queue.StatusRipped),
+		PhaseEpisodeID:  mediaType == "tv" && reachedAtLeast(item, queue.StatusEpisodeIdentified),
+		PhaseEncoded:    reachedAtLeast(item, queue.StatusEncoded),
+		PhaseCrop:       reachedAtLeast(item, queue.StatusEncoded),
+		PhaseEdition:    mediaType == "movie" && reachedAtLeast(item, queue.StatusIdentified),
+		PhaseSubtitles:  reachedAtLeast(item, queue.StatusSubtitled),
 		PhaseCommentary: reachedAtLeast(item, queue.StatusAudioAnalyzed),
 		// External validation requires encoded files AND non-DVD source.
 		// DiscSource is unknown here; will be updated after log analysis.

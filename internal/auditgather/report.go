@@ -24,23 +24,23 @@ type Report struct {
 
 // ItemSummary captures key queue item fields.
 type ItemSummary struct {
-	ID              int64  `json:"id"`
-	DiscTitle       string `json:"disc_title"`
-	Status          string `json:"status"`
-	FailedAtStatus  string `json:"failed_at_status,omitempty"`
-	ErrorMessage    string `json:"error_message,omitempty"`
-	NeedsReview     bool   `json:"needs_review"`
-	ReviewReason    string `json:"review_reason,omitempty"`
-	DiscFingerprint string `json:"disc_fingerprint,omitempty"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
-	ProgressStage   string `json:"progress_stage,omitempty"`
+	ID              int64   `json:"id"`
+	DiscTitle       string  `json:"disc_title"`
+	Status          string  `json:"status"`
+	FailedAtStatus  string  `json:"failed_at_status,omitempty"`
+	ErrorMessage    string  `json:"error_message,omitempty"`
+	NeedsReview     bool    `json:"needs_review"`
+	ReviewReason    string  `json:"review_reason,omitempty"`
+	DiscFingerprint string  `json:"disc_fingerprint,omitempty"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
+	ProgressStage   string  `json:"progress_stage,omitempty"`
 	ProgressPercent float64 `json:"progress_percent,omitempty"`
-	ProgressMessage string `json:"progress_message,omitempty"`
-	ItemLogPath     string `json:"item_log_path,omitempty"`
-	RippedFile      string `json:"ripped_file,omitempty"`
-	EncodedFile     string `json:"encoded_file,omitempty"`
-	FinalFile       string `json:"final_file,omitempty"`
+	ProgressMessage string  `json:"progress_message,omitempty"`
+	ItemLogPath     string  `json:"item_log_path,omitempty"`
+	RippedFile      string  `json:"ripped_file,omitempty"`
+	EncodedFile     string  `json:"encoded_file,omitempty"`
+	FinalFile       string  `json:"final_file,omitempty"`
 }
 
 // StageGate determines which audit phases are applicable.
@@ -51,14 +51,14 @@ type StageGate struct {
 	Edition       string `json:"edition,omitempty"`
 
 	// Which phases apply to this item.
-	PhaseLogs              bool `json:"phase_logs"`
-	PhaseRipCache          bool `json:"phase_rip_cache"`
-	PhaseEpisodeID         bool `json:"phase_episode_id"`
-	PhaseEncoded           bool `json:"phase_encoded"`
-	PhaseCrop              bool `json:"phase_crop"`
-	PhaseEdition           bool `json:"phase_edition"`
-	PhaseSubtitles         bool `json:"phase_subtitles"`
-	PhaseCommentary        bool `json:"phase_commentary"`
+	PhaseLogs               bool `json:"phase_logs"`
+	PhaseRipCache           bool `json:"phase_rip_cache"`
+	PhaseEpisodeID          bool `json:"phase_episode_id"`
+	PhaseEncoded            bool `json:"phase_encoded"`
+	PhaseCrop               bool `json:"phase_crop"`
+	PhaseEdition            bool `json:"phase_edition"`
+	PhaseSubtitles          bool `json:"phase_subtitles"`
+	PhaseCommentary         bool `json:"phase_commentary"`
 	PhaseExternalValidation bool `json:"phase_external_validation"`
 }
 
@@ -107,20 +107,20 @@ type StageEvent struct {
 
 // RipCacheReport captures the rip cache metadata for a queue item.
 type RipCacheReport struct {
-	Path     string                `json:"path"`
-	Found    bool                  `json:"found"`
+	Path     string                  `json:"path"`
+	Found    bool                    `json:"found"`
 	Metadata *ripcache.EntryMetadata `json:"metadata,omitempty"`
 }
 
 // EnvelopeReport surfaces the parsed ripspec Envelope in a structured way.
 type EnvelopeReport struct {
-	Fingerprint string         `json:"fingerprint,omitempty"`
-	ContentKey  string         `json:"content_key,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+	Fingerprint string            `json:"fingerprint,omitempty"`
+	ContentKey  string            `json:"content_key,omitempty"`
+	Metadata    map[string]any    `json:"metadata,omitempty"`
 	Titles      []ripspec.Title   `json:"titles,omitempty"`
 	Episodes    []ripspec.Episode `json:"episodes,omitempty"`
 	Assets      ripspec.Assets    `json:"assets"`
-	Attributes  map[string]any `json:"attributes,omitempty"`
+	Attributes  map[string]any    `json:"attributes,omitempty"`
 }
 
 // EncodingReport surfaces the encoding details snapshot.
@@ -130,11 +130,11 @@ type EncodingReport struct {
 
 // MediaFileProbe captures ffprobe output for a single media file.
 type MediaFileProbe struct {
-	Path        string        `json:"path"`
-	Role        string        `json:"role"`
-	EpisodeKey  string        `json:"episode_key,omitempty"`
+	Path        string         `json:"path"`
+	Role        string         `json:"role"`
+	EpisodeKey  string         `json:"episode_key,omitempty"`
 	Probe       ffprobe.Result `json:"probe"`
-	SizeBytes   int64         `json:"size_bytes"`
-	DurationSec float64       `json:"duration_seconds"`
-	Error       string        `json:"error,omitempty"`
+	SizeBytes   int64          `json:"size_bytes"`
+	DurationSec float64        `json:"duration_seconds"`
+	Error       string         `json:"error,omitempty"`
 }
