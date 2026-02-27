@@ -548,17 +548,13 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			}
 			continue
 		}
-		candidate, selectedIdx := selectReferenceCandidate(resp.Subtitles, episodeData.Name, season)
+		candidate, selectedIdx, selectionReason := selectReferenceCandidate(resp.Subtitles, episodeData.Name, season)
 		if m.logger != nil {
-			reason := "top_result"
-			if selectedIdx > 0 {
-				reason = "title_consistency_rerank"
-			}
 			attrs := []logging.Attr{
 				logging.String(logging.FieldEventType, "decision_summary"),
 				logging.String(logging.FieldDecisionType, "opensubtitles_reference_pick"),
 				logging.String("decision_result", "selected"),
-				logging.String("decision_reason", reason),
+				logging.String("decision_reason", selectionReason),
 				logging.String("decision_options", "select, skip"),
 				logging.Int("season", season.SeasonNumber),
 				logging.Int("episode", episodeData.EpisodeNumber),
@@ -567,6 +563,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 				logging.String("language", strings.TrimSpace(candidate.Language)),
 				logging.Int("downloads", candidate.Downloads),
 				logging.String("release", strings.TrimSpace(candidate.Release)),
+				logging.Bool("hearing_impaired", candidate.HearingImpaired),
 			}
 			if selectedIdx > 0 {
 				attrs = append(attrs, logging.Int("skipped_candidates", selectedIdx))
@@ -674,17 +671,26 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 // selectReferenceCandidate picks the best candidate from OpenSubtitles results.
 // It skips candidates whose release name contains a different episode's TMDB
 // title but not the expected episode's title, which indicates mislabeled metadata
-// on OpenSubtitles. Falls back to the top result (highest download count) if all
-// candidates appear suspect.
-func selectReferenceCandidate(candidates []opensubtitles.Subtitle, episodeTitle string, season *tmdb.SeasonDetails) (opensubtitles.Subtitle, int) {
+// on OpenSubtitles. Among title-consistent candidates it prefers non-HI subtitles,
+// since HI annotations dilute similarity scores against WhisperX transcripts.
+// Falls back to the top result (highest download count) if all candidates appear
+// suspect.
+//
+// Returned reason values:
+//
+//	"top_result"               – first candidate selected with no reranking
+//	"title_consistency_rerank" – skipped higher-ranked candidates for title mismatch
+//	"non_hi_preferred"         – selected a non-HI candidate over a higher-ranked HI one
+//	"hi_fallback"              – all acceptable candidates are HI; picked the first
+func selectReferenceCandidate(candidates []opensubtitles.Subtitle, episodeTitle string, season *tmdb.SeasonDetails) (opensubtitles.Subtitle, int, string) {
 	if len(candidates) <= 1 {
-		return candidates[0], 0
+		return candidates[0], 0, "top_result"
 	}
 
 	currentTitle := strings.ToLower(strings.TrimSpace(episodeTitle))
 	const minTitleLen = 5
 	if len(currentTitle) < minTitleLen {
-		return candidates[0], 0
+		return preferNonHI(candidates, candidates)
 	}
 
 	// Collect TMDB titles from other episodes in the season.
@@ -697,26 +703,70 @@ func selectReferenceCandidate(candidates []opensubtitles.Subtitle, episodeTitle 
 		otherTitles = append(otherTitles, t)
 	}
 	if len(otherTitles) == 0 {
-		return candidates[0], 0
+		return preferNonHI(candidates, candidates)
 	}
 
+	// Collect candidates that pass the title-consistency check.
+	type indexedCandidate struct {
+		sub opensubtitles.Subtitle
+		idx int
+	}
+	var acceptable []indexedCandidate
 	for i, c := range candidates {
 		release := strings.ToLower(strings.TrimSpace(c.Release))
 		if release == "" {
-			// No release name to inspect -- no evidence of mislabeling.
-			return c, i
+			acceptable = append(acceptable, indexedCandidate{c, i})
+			continue
 		}
 		referencesOther := containsAnySubstring(release, otherTitles)
 		if !referencesOther || strings.Contains(release, currentTitle) {
-			// Either the release does not mention another episode,
-			// or it mentions both (ambiguous rather than clearly wrong).
-			return c, i
+			acceptable = append(acceptable, indexedCandidate{c, i})
+			continue
 		}
 		// Skip: release clearly references a different episode.
 	}
 
-	// All candidates look suspect -- fall back to the top result.
-	return candidates[0], 0
+	if len(acceptable) > 0 {
+		// Among acceptable candidates, prefer non-HI.
+		for j, ac := range acceptable {
+			if !ac.sub.HearingImpaired {
+				reason := "top_result"
+				if j > 0 {
+					// Skipped earlier acceptable candidates because they were HI.
+					reason = "non_hi_preferred"
+				} else if ac.idx > 0 {
+					// First acceptable candidate, but title-consistency skipped earlier originals.
+					reason = "title_consistency_rerank"
+				}
+				return ac.sub, ac.idx, reason
+			}
+		}
+		// All acceptable candidates are HI -- return the first acceptable.
+		first := acceptable[0]
+		reason := "hi_fallback"
+		if first.idx > 0 {
+			reason = "title_consistency_rerank"
+		}
+		return first.sub, first.idx, reason
+	}
+
+	// All candidates look suspect -- prefer non-HI among them.
+	return preferNonHI(candidates, candidates)
+}
+
+// preferNonHI returns the first non-HI candidate from pool, falling back to
+// pool[0] if all are HI. The full candidates slice is used to determine
+// whether the selection index implies reranking.
+func preferNonHI(pool []opensubtitles.Subtitle, candidates []opensubtitles.Subtitle) (opensubtitles.Subtitle, int, string) {
+	for i, c := range pool {
+		if !c.HearingImpaired {
+			if i > 0 {
+				return c, i, "non_hi_preferred"
+			}
+			return c, 0, "top_result"
+		}
+	}
+	return pool[0], 0, "hi_fallback"
 }
 
 // containsAnySubstring reports whether s contains any of the given substrings.

@@ -315,7 +315,7 @@ func TestSelectReferenceCandidate(t *testing.T) {
 			{FileID: 100, Release: "South Park S05E02 Cripple Fight 720p", Downloads: 500},
 			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200},
 		}
-		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		got, idx, _ := selectReferenceCandidate(candidates, "Cripple Fight", season)
 		if idx != 0 || got.FileID != 100 {
 			t.Fatalf("expected first candidate (idx=0, FileID=100), got idx=%d, FileID=%d", idx, got.FileID)
 		}
@@ -326,7 +326,7 @@ func TestSelectReferenceCandidate(t *testing.T) {
 			{FileID: 100, Release: "South Park 5x02 It Hits The Fan", Downloads: 500},
 			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200},
 		}
-		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		got, idx, _ := selectReferenceCandidate(candidates, "Cripple Fight", season)
 		if idx != 1 || got.FileID != 101 {
 			t.Fatalf("expected second candidate (idx=1, FileID=101), got idx=%d, FileID=%d", idx, got.FileID)
 		}
@@ -337,7 +337,7 @@ func TestSelectReferenceCandidate(t *testing.T) {
 			{FileID: 100, Release: "South Park 5x02 It Hits The Fan", Downloads: 500},
 			{FileID: 101, Release: "South Park 5x02 Super Best Friends", Downloads: 200},
 		}
-		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		got, idx, _ := selectReferenceCandidate(candidates, "Cripple Fight", season)
 		if idx != 0 || got.FileID != 100 {
 			t.Fatalf("expected fallback to first (idx=0, FileID=100), got idx=%d, FileID=%d", idx, got.FileID)
 		}
@@ -348,7 +348,7 @@ func TestSelectReferenceCandidate(t *testing.T) {
 			{FileID: 100, Release: "South Park It Hits The Fan and Cripple Fight", Downloads: 500},
 			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200},
 		}
-		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		got, idx, _ := selectReferenceCandidate(candidates, "Cripple Fight", season)
 		if idx != 0 || got.FileID != 100 {
 			t.Fatalf("expected first candidate (ambiguous, not clearly wrong), got idx=%d, FileID=%d", idx, got.FileID)
 		}
@@ -359,7 +359,7 @@ func TestSelectReferenceCandidate(t *testing.T) {
 			{FileID: 100, Release: "", Downloads: 500},
 			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200},
 		}
-		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		got, idx, _ := selectReferenceCandidate(candidates, "Cripple Fight", season)
 		if idx != 0 || got.FileID != 100 {
 			t.Fatalf("expected first candidate (empty release = no evidence), got idx=%d, FileID=%d", idx, got.FileID)
 		}
@@ -377,7 +377,7 @@ func TestSelectReferenceCandidate(t *testing.T) {
 			{FileID: 100, Release: "Show S01E02 Uno", Downloads: 500},
 			{FileID: 101, Release: "Show S01E02 Dos", Downloads: 200},
 		}
-		got, idx := selectReferenceCandidate(candidates, "Dos", shortSeason)
+		got, idx, _ := selectReferenceCandidate(candidates, "Dos", shortSeason)
 		if idx != 0 || got.FileID != 100 {
 			t.Fatalf("expected first candidate (short titles bypass check), got idx=%d, FileID=%d", idx, got.FileID)
 		}
@@ -387,7 +387,7 @@ func TestSelectReferenceCandidate(t *testing.T) {
 		candidates := []opensubtitles.Subtitle{
 			{FileID: 100, Release: "South Park 5x02 It Hits The Fan", Downloads: 500},
 		}
-		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		got, idx, _ := selectReferenceCandidate(candidates, "Cripple Fight", season)
 		if idx != 0 || got.FileID != 100 {
 			t.Fatalf("expected only candidate returned, got idx=%d, FileID=%d", idx, got.FileID)
 		}
@@ -398,9 +398,71 @@ func TestSelectReferenceCandidate(t *testing.T) {
 			{FileID: 100, Release: "SOUTH PARK 5X02 IT HITS THE FAN", Downloads: 500},
 			{FileID: 101, Release: "south park 5x02 cripple fight", Downloads: 200},
 		}
-		got, idx := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		got, idx, _ := selectReferenceCandidate(candidates, "Cripple Fight", season)
 		if idx != 1 || got.FileID != 101 {
 			t.Fatalf("expected second candidate (case-insensitive skip), got idx=%d, FileID=%d", idx, got.FileID)
+		}
+	})
+
+	t.Run("prefers non-HI over HI at same title-consistency level", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park S05E02 Cripple Fight", Downloads: 500, HearingImpaired: true},
+			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200, HearingImpaired: false},
+		}
+		got, idx, reason := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if got.FileID != 101 {
+			t.Fatalf("expected non-HI candidate (FileID=101), got FileID=%d", got.FileID)
+		}
+		if idx != 1 {
+			t.Fatalf("expected idx=1, got %d", idx)
+		}
+		if reason != "non_hi_preferred" {
+			t.Fatalf("expected reason=non_hi_preferred, got %q", reason)
+		}
+	})
+
+	t.Run("falls back to HI when all candidates are HI", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park S05E02 Cripple Fight", Downloads: 500, HearingImpaired: true},
+			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200, HearingImpaired: true},
+		}
+		got, idx, reason := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if got.FileID != 100 {
+			t.Fatalf("expected first HI candidate (FileID=100), got FileID=%d", got.FileID)
+		}
+		if idx != 0 {
+			t.Fatalf("expected idx=0, got %d", idx)
+		}
+		if reason != "hi_fallback" {
+			t.Fatalf("expected reason=hi_fallback, got %q", reason)
+		}
+	})
+
+	t.Run("prefers non-HI even with lower download count", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park S05E02 Cripple Fight", Downloads: 838, HearingImpaired: true},
+			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 42, HearingImpaired: false},
+		}
+		got, _, reason := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if got.FileID != 101 {
+			t.Fatalf("expected non-HI candidate despite fewer downloads (FileID=101), got FileID=%d", got.FileID)
+		}
+		if reason != "non_hi_preferred" {
+			t.Fatalf("expected reason=non_hi_preferred, got %q", reason)
+		}
+	})
+
+	t.Run("title consistency still takes priority over HI avoidance", func(t *testing.T) {
+		candidates := []opensubtitles.Subtitle{
+			{FileID: 100, Release: "South Park 5x02 It Hits The Fan", Downloads: 500, HearingImpaired: false},
+			{FileID: 101, Release: "South Park 5x02 Cripple Fight", Downloads: 200, HearingImpaired: true},
+		}
+		got, idx, _ := selectReferenceCandidate(candidates, "Cripple Fight", season)
+		if got.FileID != 101 {
+			t.Fatalf("expected title-consistent HI candidate (FileID=101), got FileID=%d", got.FileID)
+		}
+		if idx != 1 {
+			t.Fatalf("expected idx=1, got %d", idx)
 		}
 	})
 }
