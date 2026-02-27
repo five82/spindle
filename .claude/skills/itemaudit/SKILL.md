@@ -141,6 +141,8 @@ Analyze the `rip_cache` section from audit-gather output:
 
 Analyze the `media` array from audit-gather output. Each entry contains full ffprobe results.
 
+**TV note:** The encoding snapshot only contains data for the last episode encoded (the snapshot is overwritten per-episode during encoding). Use `media[]` probes for per-episode stream validation. The snapshot is still useful for crop detection, encoding config, and validation results (which are consistent across episodes from the same disc).
+
 **For movies** (single entry) or **per-episode for TV** (entries with `episode_key`):
 
 1. **Verify video stream** (from `media[].probe.streams` where `codec_type=video`):

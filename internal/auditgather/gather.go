@@ -341,13 +341,12 @@ func parseLogLine(line string, report *LogAnalysis) {
 
 	// Collect stage events
 	if strings.HasPrefix(eventType, "stage_") {
-		duration, _ := getFloat(entry, "duration_seconds")
 		report.Stages = append(report.Stages, StageEvent{
 			Timestamp: ts,
 			EventType: eventType,
 			Stage:     getString(entry, "stage"),
 			Message:   msg,
-			Duration:  duration,
+			Duration:  getStageDurationSeconds(entry),
 			RawJSON:   line,
 		})
 	}
@@ -372,6 +371,15 @@ func getFloat(m map[string]any, key string) (float64, bool) {
 	}
 	f, ok := v.(float64)
 	return f, ok
+}
+
+// getStageDurationSeconds extracts stage duration in seconds.
+// The workflow manager logs this as "stage_duration" in nanoseconds (slog.Duration).
+func getStageDurationSeconds(entry map[string]any) float64 {
+	if ns, ok := getFloat(entry, "stage_duration"); ok && ns > 0 {
+		return ns / 1e9
+	}
+	return 0
 }
 
 // inferDiscSourceFromLogs uses the disc source already detected during log parsing.
@@ -465,10 +473,19 @@ func gatherMediaProbes(ctx context.Context, item *queue.Item, env *ripspec.Envel
 			probes = append(probes, probeFile(ctx, path, "final", ""))
 		}
 	} else {
-		// TV: probe each encoded episode asset
+		// TV: probe each encoded episode asset, fall back to final if staging cleaned up
 		for _, asset := range env.Assets.Encoded {
 			if path := strings.TrimSpace(asset.Path); path != "" && asset.Status != ripspec.AssetStatusFailed {
-				probes = append(probes, probeFile(ctx, path, "encoded", asset.EpisodeKey))
+				p := probeFile(ctx, path, "encoded", asset.EpisodeKey)
+				if p.Error != "" {
+					// Staging cleaned up; try final path
+					if final, ok := env.Assets.FindAsset("final", asset.EpisodeKey); ok {
+						if fpath := strings.TrimSpace(final.Path); fpath != "" {
+							p = probeFile(ctx, fpath, "final", asset.EpisodeKey)
+						}
+					}
+				}
+				probes = append(probes, p)
 			}
 		}
 	}
