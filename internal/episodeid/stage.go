@@ -103,7 +103,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			reason = "opensubtitles_disabled"
 		}
 		logSkipDecision(logger, reason)
-		if hasUnresolvedEpisodes(env.Episodes) {
+		if ripspec.HasUnresolvedEpisodes(env.Episodes) {
 			item.NeedsReview = true
 			if item.ReviewReason == "" {
 				item.ReviewReason = "episode numbers unresolved; content matching unavailable"
@@ -165,7 +165,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		)
 	}
 
-	if !updated && hasUnresolvedEpisodes(env.Episodes) {
+	if !updated && ripspec.HasUnresolvedEpisodes(env.Episodes) {
 		item.NeedsReview = true
 		if item.ReviewReason == "" {
 			item.ReviewReason = "episode numbers unresolved; no matching subtitles found"
@@ -194,6 +194,22 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		}
 		item.RipSpecData = encoded
 
+		// Propagate content_id_needs_review from matcher
+		if v, ok := env.Attributes["content_id_needs_review"].(bool); ok && v {
+			item.NeedsReview = true
+			if item.ReviewReason == "" {
+				if reason, ok := env.Attributes["content_id_review_reason"].(string); ok && strings.TrimSpace(reason) != "" {
+					item.ReviewReason = reason
+				} else {
+					item.ReviewReason = "content id flagged for review"
+				}
+			}
+			logger.Info("flagging item for review",
+				logging.String(logging.FieldDecisionType, "episode_review"),
+				logging.String("decision_result", "needs_review"),
+				logging.String("decision_reason", "content_id_needs_review"))
+		}
+
 		// Check for low-confidence episode matches
 		const minMatchConfidence = 0.70
 		var lowConfidenceEpisodes []string
@@ -215,6 +231,22 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			if item.ReviewReason == "" {
 				item.ReviewReason = fmt.Sprintf("low episode match confidence (%d episodes below %.0f%%)", len(lowConfidenceEpisodes), minMatchConfidence*100)
 			}
+		}
+
+		// Check for partial resolution: some episodes matched but others still unresolved
+		if unresolvedCount := ripspec.CountUnresolvedEpisodes(env.Episodes); unresolvedCount > 0 {
+			item.NeedsReview = true
+			if item.ReviewReason == "" {
+				item.ReviewReason = fmt.Sprintf(
+					"partial episode resolution: %d of %d episodes unresolved",
+					unresolvedCount, len(env.Episodes))
+			}
+			logger.Info("flagging item for review",
+				logging.String(logging.FieldDecisionType, "episode_review"),
+				logging.String("decision_result", "needs_review"),
+				logging.String("decision_reason", "partial_resolution"),
+				logging.Int("unresolved_count", unresolvedCount),
+				logging.Int("total_episodes", len(env.Episodes)))
 		}
 	}
 
@@ -248,16 +280,6 @@ func setSkipProgress(item *queue.Item, message string) {
 	item.ProgressMessage = message
 	item.ProgressPercent = 100
 	item.ActiveEpisodeKey = ""
-}
-
-// hasUnresolvedEpisodes returns true if any episode has Episode <= 0.
-func hasUnresolvedEpisodes(episodes []ripspec.Episode) bool {
-	for _, ep := range episodes {
-		if ep.Episode <= 0 {
-			return true
-		}
-	}
-	return false
 }
 
 // HealthCheck reports the stage's operational readiness.

@@ -313,3 +313,34 @@ func (a Assets) CompletedAssetCount(stage string) int {
 	}
 	return count
 }
+
+// HasResolvedEpisodes returns true if any episode has Episode > 0.
+func HasResolvedEpisodes(episodes []Episode) bool {
+	for _, ep := range episodes {
+		if ep.Episode > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// HasUnresolvedEpisodes returns true if any episode has Episode <= 0.
+func HasUnresolvedEpisodes(episodes []Episode) bool {
+	for _, ep := range episodes {
+		if ep.Episode <= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// CountUnresolvedEpisodes returns the number of episodes with Episode <= 0.
+func CountUnresolvedEpisodes(episodes []Episode) int {
+	count := 0
+	for _, ep := range episodes {
+		if ep.Episode <= 0 {
+			count++
+		}
+	}
+	return count
+}

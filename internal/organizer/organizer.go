@@ -117,13 +117,17 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
-	// Check if item needs manual review
-	if item.NeedsReview {
+	// Route to full review unless TV episodes have at least some resolved.
+	if item.NeedsReview && (len(env.Episodes) == 0 || !ripspec.HasResolvedEpisodes(env.Episodes)) {
 		logReviewDecision(logger, "review", "needs_review_flag")
 		logger.Debug("routing item to manual review", logging.String("reason", strings.TrimSpace(item.ReviewReason)))
 		return o.finishReview(ctx, item, stageStart, strings.TrimSpace(item.ReviewReason), encodedSources, nil)
 	}
-	logReviewDecision(logger, "organize", "ready_for_organize")
+	if item.NeedsReview {
+		logReviewDecision(logger, "partial_organize", "partial_episode_resolution")
+	} else {
+		logReviewDecision(logger, "organize", "ready_for_organize")
+	}
 
 	// Resolve metadata
 	meta, err := o.resolveMetadata(ctx, item, logger)

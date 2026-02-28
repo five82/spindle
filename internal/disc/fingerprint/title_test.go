@@ -52,6 +52,42 @@ func TestTitleHashDeterministic(t *testing.T) {
 	}
 }
 
+func TestTitleHashDifferentSegmentMaps(t *testing.T) {
+	base := disc.Title{
+		Name:       "Episode One",
+		Duration:   1800,
+		SegmentMap: "67",
+		Tracks: []disc.Track{
+			{StreamID: 1, Order: 0, Type: disc.TrackTypeVideo, CodecID: "V_H265"},
+			{StreamID: 2, Order: 1, Type: disc.TrackTypeAudio, CodecID: "A_AC3", Language: "eng"},
+		},
+	}
+	fp1 := TitleHash(base)
+
+	other := base
+	other.SegmentMap = "66"
+	fp2 := TitleHash(other)
+
+	if fp1 == fp2 {
+		t.Fatalf("expected different hashes for different SegmentMaps, both got %s", fp1)
+	}
+}
+
+func TestTitleHashEmptySegmentMap(t *testing.T) {
+	base := disc.Title{
+		Name:     "Episode One",
+		Duration: 1800,
+		Tracks: []disc.Track{
+			{StreamID: 1, Order: 0, Type: disc.TrackTypeVideo, CodecID: "V_H265"},
+		},
+	}
+	fp1 := TitleHash(base)
+	fp2 := TitleHash(base)
+	if fp1 != fp2 {
+		t.Fatalf("expected identical hash for empty SegmentMap, got %s vs %s", fp1, fp2)
+	}
+}
+
 func TestTitleHashIgnoresDiscSpecificFields(t *testing.T) {
 	base := disc.Title{
 		Name:     "Episode Two",

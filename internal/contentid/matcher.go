@@ -238,26 +238,14 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 			logging.String(logging.FieldErrorHint, "verify OpenSubtitles languages and TMDB metadata"))
 		return false, nil
 	}
-	// Apply TF-IDF reweighting so common show vocabulary (e.g. character
-	// names that appear in every episode's subtitles) is downweighted and
-	// episode-distinctive terms drive the similarity scores.
-	// Skip when fewer than 2 references: IDF needs multiple documents to
-	// provide useful discrimination.
-	if len(refPrints) >= 2 {
-		corpus := textutil.NewCorpus()
-		for _, ref := range refPrints {
-			corpus.Add(ref.Vector)
-		}
-		idf := corpus.IDF()
-		if len(idf) > 0 {
-			for i := range ripPrints {
-				ripPrints[i].Vector = ripPrints[i].Vector.WithIDF(idf)
-			}
-			for i := range refPrints {
-				refPrints[i].Vector = refPrints[i].Vector.WithIDF(idf)
-			}
-		}
+	// Preserve raw (pre-IDF) vectors for potential expansion retries.
+	for i := range ripPrints {
+		ripPrints[i].RawVector = ripPrints[i].Vector
 	}
+	for i := range refPrints {
+		refPrints[i].RawVector = refPrints[i].Vector
+	}
+	applyIDFWeighting(ripPrints, refPrints)
 	matches := resolveEpisodeMatches(ripPrints, refPrints)
 	if len(matches) == 0 {
 		m.logger.Warn("no episode matches resolved",
@@ -284,6 +272,52 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 			logging.Bool("needs_review", refinement.NeedsReview),
 		)
 	}
+	// Candidate range expansion: if the refined block extends beyond the
+	// original candidate range, fetch missing references and re-match.
+	if refinement.BlockEnd > 0 {
+		refSet := make(map[int]struct{}, len(refPrints))
+		for _, ref := range refPrints {
+			refSet[ref.EpisodeNumber] = struct{}{}
+		}
+		var missingEps []int
+		for ep := refinement.BlockStart; ep <= refinement.BlockEnd; ep++ {
+			if _, inRef := refSet[ep]; !inRef {
+				missingEps = append(missingEps, ep)
+			}
+		}
+		if len(missingEps) > 0 {
+			newRefs, fetchErr := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, missingEps, progress)
+			if fetchErr != nil {
+				m.logger.Warn("candidate range expansion fetch failed",
+					logging.Error(fetchErr),
+					logging.String(logging.FieldEventType, "contentid_range_expansion_failed"),
+					logging.String(logging.FieldImpact, "continuing with partial matches"),
+					logging.String(logging.FieldErrorHint, "check OpenSubtitles connectivity"),
+				)
+			} else if len(newRefs) > 0 {
+				for i := range newRefs {
+					newRefs[i].RawVector = newRefs[i].Vector
+				}
+				refPrints = append(refPrints, newRefs...)
+				applyIDFWeighting(ripPrints, refPrints)
+				matches = resolveEpisodeMatches(ripPrints, refPrints)
+				if len(matches) > 0 {
+					matches, refinement = refineMatchBlock(matches, refPrints, ripPrints, len(seasonDetails.Episodes), ctxData.DiscNumber)
+				}
+				m.logger.Info("content id candidate range expanded",
+					logging.String(logging.FieldEventType, "decision_summary"),
+					logging.String(logging.FieldDecisionType, "contentid_range_expansion"),
+					logging.String("decision_result", "expanded"),
+					logging.String("decision_reason", "block_extends_beyond_candidates"),
+					logging.String("decision_options", "expand, skip"),
+					logging.Int("new_references", len(newRefs)),
+					logging.Int("total_references", len(refPrints)),
+					logging.Int("matches_after", len(matches)),
+				)
+			}
+		}
+	}
+
 	if refinement.NeedsReview {
 		if env.Attributes == nil {
 			env.Attributes = make(map[string]any)
@@ -314,6 +348,31 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 		m.logger.Debug("content id alignment complete", logging.Args(debugAttrs...)...)
 	}
 	return true, nil
+}
+
+// applyIDFWeighting applies TF-IDF reweighting to rip and reference fingerprints.
+// Common show vocabulary (e.g. character names in every episode) is downweighted
+// so episode-distinctive terms drive similarity scores.
+// Requires at least 2 references for IDF to provide useful discrimination.
+// Vectors are rebuilt from RawVector; callers must set RawVector before calling.
+func applyIDFWeighting(ripPrints []ripFingerprint, refPrints []referenceFingerprint) {
+	if len(refPrints) < 2 {
+		return
+	}
+	corpus := textutil.NewCorpus()
+	for _, ref := range refPrints {
+		corpus.Add(ref.RawVector)
+	}
+	idf := corpus.IDF()
+	if len(idf) == 0 {
+		return
+	}
+	for i := range ripPrints {
+		ripPrints[i].Vector = ripPrints[i].RawVector.WithIDF(idf)
+	}
+	for i := range refPrints {
+		refPrints[i].Vector = refPrints[i].RawVector.WithIDF(idf)
+	}
 }
 
 func (m *Matcher) ensureReady() error {

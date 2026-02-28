@@ -14,12 +14,14 @@ type ripFingerprint struct {
 	TitleID    int
 	Path       string
 	Vector     *textutil.Fingerprint
+	RawVector  *textutil.Fingerprint // pre-IDF vector for expansion retries
 }
 
 type referenceFingerprint struct {
 	EpisodeNumber int
 	Title         string
 	Vector        *textutil.Fingerprint
+	RawVector     *textutil.Fingerprint // pre-IDF vector for expansion retries
 	FileID        int64
 	Language      string
 	CachePath     string

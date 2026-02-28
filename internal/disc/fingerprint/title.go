@@ -19,6 +19,7 @@ func TitleHash(title disc.Title) string {
 
 	writeComponent(hasher, strings.ToLower(strings.TrimSpace(title.Name)))
 	writeComponent(hasher, strconv.Itoa(title.Duration))
+	writeComponent(hasher, strings.TrimSpace(title.SegmentMap))
 
 	tracks := append([]disc.Track(nil), title.Tracks...)
 	sort.Slice(tracks, func(i, j int) bool {

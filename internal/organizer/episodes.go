@@ -78,8 +78,19 @@ func formatOrganizeJobValue(job organizeJob) string {
 
 // organizeEpisodes organizes multiple TV episodes into the library.
 func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []organizeJob, logger *slog.Logger, stageStarted time.Time) error {
-	finalPaths := make([]string, 0, len(jobs))
-	step := 80.0 / float64(len(jobs))
+	// Partition: resolved episodes go to library, unresolved go to review.
+	var resolvedJobs []organizeJob
+	var unresolvedSources []string
+	for _, job := range jobs {
+		if job.Episode.Episode > 0 {
+			resolvedJobs = append(resolvedJobs, job)
+		} else {
+			unresolvedSources = append(unresolvedSources, job.Source)
+		}
+	}
+
+	finalPaths := make([]string, 0, len(resolvedJobs))
+	step := 80.0 / float64(max(len(resolvedJobs), 1))
 
 	refreshAllowed, refreshReason := shouldRefreshJellyfin(o.cfg)
 	if o.jellyfin == nil {
@@ -94,8 +105,8 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		lastErr        error
 	)
 
-	for idx, job := range jobs {
-		finalPath, err := o.processEpisode(ctx, item, env, job, idx, len(jobs), skipped, step, logger, stageStarted)
+	for idx, job := range resolvedJobs {
+		finalPath, err := o.processEpisode(ctx, item, env, job, idx, len(resolvedJobs), skipped, step, logger, stageStarted)
 		if err != nil {
 			// Check for library unavailable (terminal condition)
 			if isLibraryUnavailable(err) {
@@ -120,9 +131,32 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 			services.ErrExternalTool,
 			"organizing",
 			"move to library",
-			fmt.Sprintf("All %d episode(s) failed organization", len(jobs)-skipped),
+			fmt.Sprintf("All %d episode(s) failed organization", len(resolvedJobs)-skipped),
 			lastErr,
 		)
+	}
+
+	// Route unresolved episodes to review directory.
+	var reviewedCount int
+	for _, src := range unresolvedSources {
+		if _, err := o.movePathToReview(ctx, item, src); err != nil {
+			logger.Warn("failed to move unresolved episode to review",
+				logging.String("source", src),
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "unresolved_episode_review_failed"),
+				logging.String(logging.FieldImpact, "unresolved episode remains in staging"),
+				logging.String(logging.FieldErrorHint, "check review_dir permissions"),
+			)
+		} else {
+			reviewedCount++
+		}
+	}
+	if reviewedCount > 0 {
+		item.NeedsReview = true
+		if item.ReviewReason == "" {
+			item.ReviewReason = fmt.Sprintf(
+				"%d unresolved episode(s) moved to review", reviewedCount)
+		}
 	}
 
 	// Persist final rip spec state
@@ -142,7 +176,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 	// Batch Jellyfin refresh once after all episodes are organized
 	jellyfinRefreshed := false
 	if refreshAllowed && len(finalPaths) > 0 {
-		if err := o.jellyfin.Refresh(ctx, jobs[0].Metadata); err != nil {
+		if err := o.jellyfin.Refresh(ctx, resolvedJobs[0].Metadata); err != nil {
 			logger.Warn("jellyfin refresh failed; library scan may be stale",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "jellyfin_refresh_failed"),
@@ -157,19 +191,27 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		}
 	}
 
-	item.FinalFile = finalPaths[len(finalPaths)-1]
+	if len(finalPaths) > 0 {
+		item.FinalFile = finalPaths[len(finalPaths)-1]
+	}
 	item.ProgressStage = "Organizing"
 	item.ProgressPercent = 100
 	item.ActiveEpisodeKey = ""
-	if failedEpisodes > 0 {
+	switch {
+	case failedEpisodes > 0 && reviewedCount > 0:
+		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d failed, %d to review)", len(finalPaths), failedEpisodes, reviewedCount)
+	case failedEpisodes > 0:
 		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d failed)", len(finalPaths), failedEpisodes)
-		// Flag for review if some episodes failed
+	case reviewedCount > 0:
+		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d to review)", len(finalPaths), reviewedCount)
+	default:
+		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
+	}
+	if failedEpisodes > 0 {
 		item.NeedsReview = true
 		if item.ReviewReason == "" {
 			item.ReviewReason = fmt.Sprintf("%d episode(s) failed organization", failedEpisodes)
 		}
-	} else {
-		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes)", len(finalPaths))
 	}
 
 	// Log final organization summary
@@ -181,6 +223,7 @@ func (o *Organizer) organizeEpisodes(ctx context.Context, item *queue.Item, env 
 		logging.Int("organized_episodes", len(finalPaths)),
 		logging.Int("failed_episodes", failedEpisodes),
 		logging.Int("skipped_episodes", skipped),
+		logging.Int("reviewed_episodes", reviewedCount),
 		logging.Int("final_asset_count", final),
 	)
 
