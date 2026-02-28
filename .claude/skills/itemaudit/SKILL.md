@@ -37,10 +37,27 @@ This returns a JSON report containing:
 - **`encoding`**: Encoding details snapshot (crop, validation, config, result)
 - **`media`**: ffprobe output for each encoded file (streams, format, duration, size)
 - **`errors`**: Any gathering errors (missing logs, parse failures, etc.)
+- **`analysis`**: Pre-computed summaries — decision groups, episode consistency, crop analysis, episode stats, media stats, asset health, anomaly flags (see Analysis Reference below)
 
 **The `stage_gate` object tells you exactly which phases to run.** Each `phase_*` boolean is pre-computed from the item's status, media type, and disc source. Do not re-derive these — trust the gate.
 
 If `/itemaudit` is invoked without an item ID, run `spindle status` and `spindle queue list` to diagnose daemon-level issues instead.
+
+### Analysis Reference
+
+The `analysis` object (nil if no data) contains pre-computed summaries:
+
+| Field | Present When | Contents |
+|-------|-------------|----------|
+| `decision_groups` | Decisions exist | Groups by (type, result, reason) with count. `entries` included when count=1 or messages vary; nil when all identical. |
+| `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_count), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
+| `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`, `disabled`. |
+| `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
+| `media_stats` | Valid probes exist | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`. |
+| `asset_health` | Assets exist | Per-stage (ripped/encoded/subtitled/final) `total/ok/failed/muxed` counts. |
+| `anomalies` | Issues detected | Pre-flagged issues with `severity` (critical/warning/info), `category`, `message`. |
+
+**Use `analysis.anomalies` as a starting checklist for Issues Found.** Each anomaly is a machine-detected flag -- the LLM's job is to investigate context, assess impact, and add judgment-based findings the code cannot detect.
 
 ### Extraction Strategy
 
@@ -49,15 +66,12 @@ After running `spindle audit-gather`, process the full JSON output through a **s
 The extraction script should:
 
 1. **Summarize metadata**: item fields, stage_gate, gathering errors
-2. **Aggregate decisions by type with counts**: Deduplicate identical repeated decisions into `"type x{count}: summary"` rather than listing each one individually. For example, 12 identical `audio_selection` decisions become one line: `"audio_selection x12: eng mono selected (english_preferred)"`. Only expand individual entries when decisions have different outcomes or notable parameter variations.
+2. **Format pre-computed analysis**: Read `analysis.decision_groups` for deduplicated decisions (groups with `count > 1` and nil `entries` are identical repeats; groups with `entries` have varying messages). Read `analysis.anomalies` for pre-flagged issues. Read `analysis.episode_stats`, `analysis.media_stats`, `analysis.crop_analysis`, `analysis.episode_consistency`, `analysis.asset_health` for pre-computed summaries.
 3. **List all warnings and errors** with full context (these are always few enough to show individually)
 4. **Show stage timing** with computed durations
-5. **Compute cross-episode consistency** (TV only): Group episodes by (resolution, codec, audio_count, audio_langs, subtitle_count, subtitle_langs). Report the majority profile once, then list only episodes that deviate.
-6. **Pre-compute derived values**: crop aspect ratio from crop filter, duration min/max/range, confidence floor/ceiling from episode manifest, size min/max/range
-7. **Summarize episode manifest** with confidence scores and episode numbers
-8. **Flag anomalies** that need deeper investigation: failed assets, low confidence, non-zero warnings/errors, cross-episode inconsistencies
+5. **Summarize episode manifest** with confidence scores and episode numbers
 
-This approach replaces 10+ sequential extraction calls with 1-2, keeping the analysis equally thorough while significantly reducing gathering overhead.
+Steps 2/5/6/8 from the old extraction strategy are now pre-computed in `analysis` -- the script reads and formats them rather than computing them from raw data. This approach replaces 10+ sequential extraction calls with 1-2, keeping the analysis equally thorough while significantly reducing gathering overhead.
 
 ### Stage Gating
 
@@ -139,7 +153,7 @@ Analyze the `rip_cache` section from audit-gather output:
    - `whisperx_opensubtitles` = full pipeline
    - If absent, check `logs.decisions` for skip reason
 
-2. **Episode manifest review**: Check `envelope.episodes[].match_confidence`:
+2. **Episode manifest review**: `analysis.episode_stats` provides pre-computed `confidence_min/max/mean`, `below_070/080/090` counts, `unresolved` count, and `sequence_contiguous` for the overview. Use these for the summary, but still review the full `envelope.episodes[]` manifest for per-episode details. Confidence thresholds:
    - **CRITICAL** (< 0.70): Episode ordering likely wrong. Check `item.needs_review`
    - **WARNING** (0.70-0.80): Marginal confidence
    - **OK** (> 0.80): High confidence match
@@ -150,7 +164,7 @@ Analyze the `rip_cache` section from audit-gather output:
    - Check `matched_episode` numbers form a reasonable sequence
    - Minimum accepted similarity score is 0.58 — scores near this floor warrant scrutiny
 
-4. **Episode sequence continuity**: After content matching, episode numbers in `envelope.episodes[]` should be sequential or form a plausible disc block. Gaps or duplicates indicate matching errors
+4. **Episode sequence continuity**: `analysis.episode_stats.sequence_contiguous` and `episode_range` are pre-computed. If not contiguous, inspect `envelope.episodes[]` for gaps or duplicates indicating matching errors
 
 5. **`episodes_synchronized` flag**: Check `envelope.attributes["episodes_synchronized"]` — should be `true` after successful identification
 
@@ -197,21 +211,17 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
    - Verify encoded asset count matches episode count
 
 7. **Cross-episode consistency** (TV only):
-   - All episodes should share: same resolution, same codec, same audio track count
-   - Duration spread should be reasonable for same-season episodes (~5 minute tolerance)
+   - Use `analysis.episode_consistency` for the overview: `majority_profile` gives the common (video_codec, width, height, audio_streams, subtitle_count), `majority_count`/`total_episodes` show how many match, and `deviations[]` lists episodes with human-readable differences
+   - Use `analysis.media_stats` for duration range (`duration_min_sec/max_sec`) and size range (`size_min_bytes/max_bytes`)
+   - Still inspect individual `media[]` probes for stream-level checks (items 1-6) but use the pre-computed consistency summary for the overview
 
 ### Phase 5: Crop Detection Validation (when `phase_crop` is true)
 
 Analyze `encoding.snapshot.crop` from the audit-gather output:
 
-1. **Extract crop info**:
-   - `crop.required` — was cropping needed?
-   - `crop.crop` — the applied crop filter (e.g., "crop=1920:800:0:140")
-   - `crop.message` — detection summary
+1. **Read pre-computed crop data**: `analysis.crop_analysis` provides `output_width`, `output_height`, `aspect_ratio`, `standard_ratio`, `required`, and `disabled`. Also read `encoding.snapshot.crop.message` for the detection summary.
 
-2. **Calculate actual aspect ratio**:
-   - Parse the crop filter values
-   - Common ratios: 2.39:1/2.40:1 (scope), 1.85:1, 1.78:1 (16:9), 2.00:1 (IMAX)
+2. **Verify aspect ratio**: Common ratios: 2.39:1/2.40:1 (scope), 1.85:1, 1.78:1 (16:9), 2.00:1 (IMAX). Compare `analysis.crop_analysis.standard_ratio` against expected for the content.
 
 3. **External cross-reference** (only when `phase_external_validation` is true):
    - Search: `site:blu-ray.com "<title>" review`
@@ -356,15 +366,15 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 The analysis must remain exhaustive, but the *presentation* should be proportional to findings. Use compact formats for clean data and expand only where anomalies exist.
 
 **Cross-episode data (TV):**
-- When all episodes share identical values for a field, use a single summary line:
+- Build the majority profile line directly from `analysis.episode_consistency.majority_profile` and deviation list from `analysis.episode_consistency.deviations`
+- When all episodes match (`majority_count == total_episodes`), use a single summary line:
   `"All 12 episodes: AV1 1436x1080, 1x Opus mono eng, 1x subrip eng"`
-- Only expand to a per-episode table when episodes DIFFER on that field, and only show the columns that differ
-- Duration and size ranges are always a single line: `"Duration: 1485-1520s | Size: 292-557 MB"`
+- Only expand to a per-episode table when `deviations` is non-empty, and only show the differing fields
+- Duration and size ranges come directly from `analysis.media_stats`: `"Duration: 1485-1520s | Size: 292-557 MB"`
 
 **Decision traces:**
-- Deduplicate identical repeated decisions:
-  `"audio_selection x12: eng mono selected (english_preferred)"`
-- Only show individual entries for decisions with different outcomes, notable parameter variations, or anomalous confidence/scores
+- `analysis.decision_groups` already provides the deduplication -- groups with nil `entries` are identical repeats (show as `"type x{count}: result (reason)"`), groups with `entries` have varying messages
+- Only expand individual entries for decisions with different outcomes, notable parameter variations, or anomalous confidence/scores
 
 **Episode manifest:**
 - Always show the full per-episode table with confidence scores, matched episode numbers, and titles. Episode identification is a core pipeline feature and the manifest is the primary evidence of correctness. This table is never compressed.
@@ -418,7 +428,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Total log entries: <logs.total_lines>
 - WARN events: <count> (list if > 0)
 - ERROR events: <count> (list if > 0)
-- Key decisions: <deduplicated summary — expand only anomalous decisions>
+- Key decisions: <from analysis.decision_groups — expand only anomalous decisions>
 - Timing: <stage timing table>
 
 #### Rip Cache (if phase_rip_cache)
@@ -429,21 +439,22 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 #### Episode Identification (if phase_episode_id)
 - Content ID method: <envelope.attributes.content_id_method>
 - Episodes synchronized: <envelope.attributes.episodes_synchronized>
-- Episode manifest: <summary line if all clean, per-episode table if anomalies>
-- Sequence continuity: <sequential/gaps detected>
+- Confidence overview: <from analysis.episode_stats: min/max/mean, below thresholds, unresolved count>
+- Episode manifest: <full per-episode table with confidence scores>
+- Sequence continuity: <analysis.episode_stats.sequence_contiguous, episode_range>
 
 #### Encoded File (if phase_encoded)
 
 **Movie:**
 - Video: <codec> <resolution> <HDR status> | Duration: <seconds>s | Size: <bytes>
 - Audio: <stream summary>
-- Crop: <crop filter> (<calculated aspect ratio>)
+- Crop: <analysis.crop_analysis.filter> (<analysis.crop_analysis.standard_ratio>)
 - Validation: <passed/failed, expand individual steps only if failed>
 
 **TV:**
-- Common profile: <resolution, codec, audio config, subtitle config>
-- Duration: <min>-<max>s | Size: <min>-<max> MB
-- Cross-episode consistency: <pass, or list deviations>
+- Common profile: <from analysis.episode_consistency.majority_profile>
+- Duration: <analysis.media_stats.duration_min_sec>-<max>s | Size: <analysis.media_stats.size_min_bytes>-<max>
+- Cross-episode consistency: <analysis.episode_consistency — pass if no deviations, else list deviations>
 - Failed episodes: <count, with details if > 0>
 
 #### Edition Detection (if phase_edition)
@@ -464,7 +475,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 <Compact paragraph when all checks pass. Expand into detailed comparison only when mismatches found.>
 
 ### Decision Trace
-<Deduplicated key decisions — type x{count}: result (reason). Expand only anomalous entries.>
+<From analysis.decision_groups — type x{count}: result (reason) for identical groups. Expand entries only for groups with varying messages or anomalous results.>
 ```
 
 ## Execution Checklist
@@ -475,6 +486,7 @@ After running `spindle audit-gather`, check only the phases flagged as `true` in
 - [ ] Ran `spindle audit-gather <id>` and loaded the JSON output
 - [ ] Checked `errors` array for gathering failures
 - [ ] Reviewed `stage_gate` to determine applicable phases
+- [ ] Reviewed `analysis.anomalies` for pre-flagged issues
 - [ ] Analyzed `logs` for anomalies beyond simple error counts
 - [ ] If TV: checked for episode pipeline log patterns
 - [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
@@ -517,4 +529,4 @@ After running `spindle audit-gather`, check only the phases flagged as `true` in
 ### Report
 - [ ] Generated report with only applicable sections
 - [ ] Applied presentation density guidelines (compact for clean data, expanded for anomalies)
-- [ ] Deduplicated repeated identical decisions in trace
+- [ ] Used `analysis.decision_groups` for decision trace
