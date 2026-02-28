@@ -19,7 +19,120 @@ type Report struct {
 	Envelope  *EnvelopeReport  `json:"envelope,omitempty"`
 	Encoding  *EncodingReport  `json:"encoding,omitempty"`
 	Media     []MediaFileProbe `json:"media,omitempty"`
+	Analysis  *Analysis        `json:"analysis,omitempty"`
 	Errors    []string         `json:"errors,omitempty"`
+}
+
+// Analysis contains pre-computed summaries derived from the raw report data.
+// Each sub-analysis is independently nil-safe.
+type Analysis struct {
+	DecisionGroups     []DecisionGroup     `json:"decision_groups,omitempty"`
+	EpisodeConsistency *EpisodeConsistency `json:"episode_consistency,omitempty"`
+	CropAnalysis       *CropAnalysis       `json:"crop_analysis,omitempty"`
+	EpisodeStats       *EpisodeStats       `json:"episode_stats,omitempty"`
+	MediaStats         *MediaStats         `json:"media_stats,omitempty"`
+	AssetHealth        *AssetHealth        `json:"asset_health,omitempty"`
+	Anomalies          []Anomaly           `json:"anomalies,omitempty"`
+}
+
+// DecisionGroup aggregates identical decisions by (type, result, reason).
+type DecisionGroup struct {
+	DecisionType   string        `json:"decision_type"`
+	DecisionResult string        `json:"decision_result"`
+	DecisionReason string        `json:"decision_reason,omitempty"`
+	Count          int           `json:"count"`
+	Entries        []LogDecision `json:"entries,omitempty"`
+}
+
+// EpisodeConsistency compares media profiles across TV episodes.
+type EpisodeConsistency struct {
+	MajorityProfile ProfileSummary     `json:"majority_profile"`
+	MajorityCount   int                `json:"majority_count"`
+	TotalEpisodes   int                `json:"total_episodes"`
+	Deviations      []ProfileDeviation `json:"deviations,omitempty"`
+}
+
+// ProfileSummary describes the media profile of a single file.
+type ProfileSummary struct {
+	VideoCodec    string         `json:"video_codec"`
+	Width         int            `json:"width"`
+	Height        int            `json:"height"`
+	AudioStreams  []AudioProfile `json:"audio_streams,omitempty"`
+	SubtitleCount int            `json:"subtitle_count"`
+}
+
+// AudioProfile describes a single audio stream.
+type AudioProfile struct {
+	Codec         string `json:"codec"`
+	Channels      int    `json:"channels"`
+	ChannelLayout string `json:"channel_layout,omitempty"`
+	Language      string `json:"language,omitempty"`
+	IsDefault     bool   `json:"is_default,omitempty"`
+	IsCommentary  bool   `json:"is_commentary,omitempty"`
+}
+
+// ProfileDeviation records how one episode differs from the majority.
+type ProfileDeviation struct {
+	EpisodeKey  string   `json:"episode_key"`
+	Differences []string `json:"differences"`
+}
+
+// CropAnalysis parses the crop filter and computes aspect ratio.
+type CropAnalysis struct {
+	Filter        string  `json:"filter,omitempty"`
+	OutputWidth   int     `json:"output_width,omitempty"`
+	OutputHeight  int     `json:"output_height,omitempty"`
+	AspectRatio   float64 `json:"aspect_ratio,omitempty"`
+	StandardRatio string  `json:"standard_ratio,omitempty"`
+	Required      bool    `json:"required"`
+	Disabled      bool    `json:"disabled"`
+}
+
+// EpisodeStats summarizes episode identification confidence and coverage.
+type EpisodeStats struct {
+	Count              int     `json:"count"`
+	Matched            int     `json:"matched"`
+	Unresolved         int     `json:"unresolved"`
+	ConfidenceMin      float64 `json:"confidence_min,omitempty"`
+	ConfidenceMax      float64 `json:"confidence_max,omitempty"`
+	ConfidenceMean     float64 `json:"confidence_mean,omitempty"`
+	Below070           int     `json:"below_070"`
+	Below080           int     `json:"below_080"`
+	Below090           int     `json:"below_090"`
+	SequenceContiguous bool    `json:"sequence_contiguous"`
+	EpisodeRange       string  `json:"episode_range,omitempty"`
+}
+
+// MediaStats summarizes duration and size across media probes.
+type MediaStats struct {
+	FileCount      int     `json:"file_count"`
+	DurationMinSec float64 `json:"duration_min_sec,omitempty"`
+	DurationMaxSec float64 `json:"duration_max_sec,omitempty"`
+	SizeMinBytes   int64   `json:"size_min_bytes,omitempty"`
+	SizeMaxBytes   int64   `json:"size_max_bytes,omitempty"`
+}
+
+// AssetHealth counts ok/failed assets per pipeline stage.
+type AssetHealth struct {
+	Ripped    *AssetCounts `json:"ripped,omitempty"`
+	Encoded   *AssetCounts `json:"encoded,omitempty"`
+	Subtitled *AssetCounts `json:"subtitled,omitempty"`
+	Final     *AssetCounts `json:"final,omitempty"`
+}
+
+// AssetCounts tracks total/ok/failed/muxed counts for one stage.
+type AssetCounts struct {
+	Total  int `json:"total"`
+	OK     int `json:"ok"`
+	Failed int `json:"failed"`
+	Muxed  int `json:"muxed,omitempty"`
+}
+
+// Anomaly is a pre-computed red flag detected in the report data.
+type Anomaly struct {
+	Severity string `json:"severity"` // critical, warning, info
+	Category string `json:"category"`
+	Message  string `json:"message"`
 }
 
 // ItemSummary captures key queue item fields.

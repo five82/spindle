@@ -85,6 +85,9 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 		}
 	}
 
+	// Phase 6: Pre-computed analysis
+	r.Analysis = computeAnalysis(r)
+
 	return r, nil
 }
 
