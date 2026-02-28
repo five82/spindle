@@ -12,19 +12,15 @@ func isPlaceholderTitle(title, discLabel string) bool {
 	if t == "" {
 		return true
 	}
-	if t == "unknown disc" || strings.HasPrefix(t, "unknown disc") {
+	if strings.HasPrefix(t, "unknown disc") {
 		return true
 	}
 	if strings.TrimSpace(discLabel) != "" && strings.EqualFold(strings.TrimSpace(title), strings.TrimSpace(discLabel)) {
-		if disc.IsGenericLabel(title) || isTechnicalLabel(title) || looksLikeDiscLabel(title) {
+		if disc.IsGenericLabel(title) || isTechnicalLabel(title) {
 			return true
 		}
 	}
 	return false
-}
-
-func looksLikeDiscLabel(title string) bool {
-	return disc.IsUnusableLabel(title)
 }
 
 func unknownContentKey(fingerprint string) string {

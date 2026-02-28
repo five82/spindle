@@ -2,7 +2,6 @@ package identification
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"spindle/internal/disc"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
-	"spindle/internal/notifications"
 	"spindle/internal/queue"
 	"spindle/internal/services"
 )
@@ -32,10 +30,16 @@ type identifyOutcome struct {
 	ContentKey      string
 	IdentifiedTitle string
 	Year            string
+	ReleaseDate     string
+	FirstAirDate    string
+	Overview        string
 	TMDBID          int64
 	SeasonNumber    int
+	VoteAverage     float64
+	VoteCount       int64
+	Edition         string
 	EpisodeMatches  map[int]episodeAnnotation
-	Metadata        map[string]any
+	Metadata        map[string]any // only populated for unidentified fallback
 }
 
 func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, item *queue.Item, input identifyContext) (identifyOutcome, error) {
@@ -51,7 +55,6 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		metadata["media_type"] = mediaType
 	}
 	contentKey := unknownContentKey(item.DiscFingerprint)
-	identified := false
 	var (
 		identifiedTitle string
 		year            string
@@ -164,7 +167,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 			logging.String("reason", "title is generic/placeholder; cannot perform meaningful search"))
 		i.flagReview(ctx, item, "Disc title placeholder; manual identification required", false)
 		return identifyOutcome{
-			Identified:      identified,
+			Identified:      false,
 			MediaType:       mediaType,
 			ContentKey:      contentKey,
 			IdentifiedTitle: identifiedTitle,
@@ -261,7 +264,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 			i.flagReview(ctx, item, "No confident TMDB match", false)
 		}
 		return identifyOutcome{
-			Identified:      identified,
+			Identified:      false,
 			MediaType:       mediaType,
 			ContentKey:      contentKey,
 			IdentifiedTitle: identifiedTitle,
@@ -273,19 +276,14 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		}, nil
 	}
 
-	identified = true
 	mediaType = determineMediaType(*best, modeUsed)
-	isMovie := mediaType != "tv"
 	identifiedTitle = pickTitle(*best)
-	year = ""
-	titleWithYear := identifiedTitle
 	releaseDate := best.ReleaseDate
 	if mediaType == "tv" && strings.TrimSpace(best.FirstAirDate) != "" {
 		releaseDate = best.FirstAirDate
 	}
 	if releaseDate != "" && len(releaseDate) >= 4 {
 		year = releaseDate[:4]
-		titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
 	}
 	tmdbID = best.ID
 	if mediaType == "tv" {
@@ -296,77 +294,18 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 			episodeMatches = buildPlaceholderAnnotations(input.ScanResult.Titles, seasonNumber)
 		}
 	}
-	metadata = map[string]any{
-		"id":             best.ID,
-		"title":          identifiedTitle,
-		"overview":       best.Overview,
-		"media_type":     mediaType,
-		"release_date":   releaseDate,
-		"first_air_date": best.FirstAirDate,
-		"vote_average":   best.VoteAverage,
-		"vote_count":     best.VoteCount,
-		"movie":          isMovie,
-		"season_number":  seasonNumber,
-	}
-	if mediaType == "tv" {
-		metadata["show_title"] = identifiedTitle
-	}
 
 	// Detect movie edition (Director's Cut, Extended, etc.)
 	var editionLabel string
 	if mediaType == "movie" {
+		titleWithYear := identifiedTitle
+		if year != "" {
+			titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
+		}
 		editionLabel = i.detectMovieEdition(ctx, logger, input.Title, identifiedTitle, titleWithYear)
-		if editionLabel != "" {
-			metadata["edition"] = editionLabel
-		}
 	}
 
-	var metaRecord queue.Metadata
-	if mediaType == "tv" {
-		metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, nil, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
-	} else {
-		metaRecord = queue.NewBasicMetadata(titleWithYear, true)
-		if editionLabel != "" {
-			metaRecord.Edition = editionLabel
-		}
-	}
-	metadata["filename"] = metaRecord.GetFilename()
-	if mediaType == "tv" {
-		metadata["show_title"] = identifiedTitle
-	}
-
-	// Validate metadata before persisting
-	if err := validateMetadataForPersist(identifiedTitle, mediaType, tmdbID); err != nil {
-		logger.Error("metadata validation failed before persist",
-			logging.String(logging.FieldEventType, "metadata_validation_failed"),
-			logging.String("title", identifiedTitle),
-			logging.String("media_type", mediaType),
-			logging.Int64("tmdb_id", tmdbID),
-			logging.Error(err))
-		return identifyOutcome{}, err
-	}
-
-	encodedMetadata, encodeErr := json.Marshal(metadata)
-	if encodeErr != nil {
-		return identifyOutcome{}, services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", encodeErr)
-	}
-	item.MetadataJSON = string(encodedMetadata)
-	// Update DiscTitle to the proper TMDB title with season/year for subsequent stages
-	displayTitle := titleWithYear
-	if mediaType == "tv" {
-		displayTitle = fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber)
-		if strings.TrimSpace(year) != "" {
-			displayTitle = fmt.Sprintf("%s Season %02d (%s)", identifiedTitle, seasonNumber, year)
-		}
-	}
-	item.DiscTitle = displayTitle
-	item.ProgressStage = "Identified"
-	item.ProgressPercent = 100
-	item.ProgressMessage = fmt.Sprintf("Identified as: %s", item.DiscTitle)
-	contentKey = fmt.Sprintf("tmdb:%s:%d", mediaType, tmdbID)
-
-	logger.Info(
-		"disc identified",
+	logger.Info("disc identified",
 		logging.String(logging.FieldDecisionType, "tmdb_identification"),
 		logging.String("decision_result", "identified"),
 		logging.String("decision_reason", "tmdb_match"),
@@ -381,34 +320,21 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		logging.Float64("vote_average", best.VoteAverage),
 		logging.Int64("vote_count", best.VoteCount),
 	)
-	if i.notifier != nil {
-		notifyType := mediaType
-		if notifyType == "" {
-			notifyType = "unknown"
-		}
-		if strings.TrimSpace(year) != "" {
-			payload := notifications.Payload{
-				"title":        identifiedTitle,
-				"year":         strings.TrimSpace(year),
-				"mediaType":    notifyType,
-				"displayTitle": titleWithYear,
-			}
-			if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
-				logger.Debug("identification notification failed", logging.Error(err))
-			}
-		}
-	}
 
 	return identifyOutcome{
-		Identified:      identified,
+		Identified:      true,
 		MediaType:       mediaType,
-		ContentKey:      contentKey,
 		IdentifiedTitle: identifiedTitle,
 		Year:            year,
+		ReleaseDate:     releaseDate,
+		FirstAirDate:    best.FirstAirDate,
+		Overview:        best.Overview,
 		TMDBID:          tmdbID,
 		SeasonNumber:    seasonNumber,
+		VoteAverage:     best.VoteAverage,
+		VoteCount:       best.VoteCount,
+		Edition:         editionLabel,
 		EpisodeMatches:  episodeMatches,
-		Metadata:        metadata,
 	}, nil
 }
 

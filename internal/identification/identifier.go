@@ -3,7 +3,6 @@ package identification
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -301,20 +300,6 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		logger.Debug("disc number detected", logging.Int("disc_number", discNumber))
 	}
 
-	attributes := make(map[string]any)
-	if discNumber > 0 {
-		attributes["disc_number"] = discNumber
-	}
-	hasForcedTrack := scanResult.HasForcedEnglishSubtitles()
-	if hasForcedTrack {
-		attributes["has_forced_subtitle_track"] = true
-	}
-	logger.Info("forced subtitle detection",
-		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
-		logging.String("decision_result", textutil.Ternary(hasForcedTrack, "detected", "none")),
-		logging.String("decision_reason", textutil.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
-		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
-
 	mediaHint, mediaReason := detectMediaKindWithReason(title, discLabel, scanResult)
 	logger.Info("media type detection",
 		logging.String(logging.FieldDecisionType, "media_type_detection"),
@@ -338,14 +323,48 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
+	// Identified path: finalize through shared method.
+	if outcome.Identified {
+		r := identificationResult{
+			IdentifiedTitle: outcome.IdentifiedTitle,
+			MediaType:       outcome.MediaType,
+			TMDBID:          outcome.TMDBID,
+			Year:            outcome.Year,
+			ReleaseDate:     outcome.ReleaseDate,
+			FirstAirDate:    outcome.FirstAirDate,
+			Overview:        outcome.Overview,
+			SeasonNumber:    outcome.SeasonNumber,
+			VoteAverage:     outcome.VoteAverage,
+			VoteCount:       outcome.VoteCount,
+			Edition:         outcome.Edition,
+			EpisodeMatches:  outcome.EpisodeMatches,
+			ScanResult:      scanResult,
+			DiscSources:     discSources,
+			FallbackTitle:   title,
+		}
+		if err := i.finalizeIdentifiedItem(ctx, logger, item, r); err != nil {
+			return err
+		}
+		if discID != "" {
+			i.populateDiscIDCache(logger, discidcache.Entry{
+				DiscID:       discID,
+				TMDBID:       outcome.TMDBID,
+				MediaType:    outcome.MediaType,
+				Title:        outcome.IdentifiedTitle,
+				Edition:      outcome.Edition,
+				SeasonNumber: outcome.SeasonNumber,
+				Year:         outcome.Year,
+				CachedAt:     time.Now(),
+			})
+		}
+		i.logStageSummary(ctx, item, stageStart, true, titleCount, outcome.TMDBID, outcome.MediaType)
+		return nil
+	}
+
+	// Unidentified path: build fallback metadata and rip spec.
 	mediaType := outcome.MediaType
 	contentKey := outcome.ContentKey
 	metadata := outcome.Metadata
-	identified := outcome.Identified
-	identifiedTitle := outcome.IdentifiedTitle
-	tmdbID := outcome.TMDBID
-	seasonNumber := outcome.SeasonNumber
-	episodeMatches := outcome.EpisodeMatches
 
 	if contentKey == "" {
 		contentKey = unknownContentKey(item.DiscFingerprint)
@@ -353,8 +372,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if mediaType == "unknown" && mediaHint == mediaKindTV {
 		mediaType = "tv"
 	}
-	if seasonNumber > 0 {
-		metadata["season_number"] = seasonNumber
+	if outcome.SeasonNumber > 0 {
+		metadata["season_number"] = outcome.SeasonNumber
 	}
 	metadata["media_type"] = mediaType
 	if strings.TrimSpace(item.MetadataJSON) == "" {
@@ -370,10 +389,23 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Use queue item fingerprint - it's mandatory at enqueue time
-	ripFingerprint := strings.TrimSpace(item.DiscFingerprint)
+	// Build attributes for unidentified path.
+	attributes := make(map[string]any)
+	if discNumber > 0 {
+		attributes["disc_number"] = discNumber
+	}
+	hasForcedTrack := scanResult.HasForcedEnglishSubtitles()
+	if hasForcedTrack {
+		attributes["has_forced_subtitle_track"] = true
+	}
+	logger.Info("forced subtitle detection",
+		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
+		logging.String("decision_result", textutil.Ternary(hasForcedTrack, "detected", "none")),
+		logging.String("decision_reason", textutil.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
+		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
 
-	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, episodeMatches, identifiedTitle, title, discNumber, metadata)
+	ripFingerprint := strings.TrimSpace(item.DiscFingerprint)
+	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, outcome.EpisodeMatches, outcome.IdentifiedTitle, title, discNumber, metadata)
 
 	spec := ripspec.Envelope{
 		Fingerprint: ripFingerprint,
@@ -390,60 +422,18 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 	item.RipSpecData = encodedSpec
 
-	if !identified {
-		logger.Info(
-			"prepared unidentified rip specification",
-			logging.String(logging.FieldDecisionType, "identification_outcome"),
-			logging.String("decision_result", "unidentified"),
-			logging.Int("title_count", len(titleSpecs)),
-			logging.String("content_key", contentKey),
-		)
-	} else if selection, ok, candidates, rejects := rippingPrimaryTitleSummary(titleSpecs); ok {
-		attrs := []logging.Attr{
-			logging.String(logging.FieldDecisionType, "primary_title"),
-			logging.String("decision_result", "selected"),
-			logging.String("decision_selected", fmt.Sprintf("%d:%ds", selection.ID, selection.Duration)),
-			logging.Int("candidate_count", len(candidates)),
-			logging.Int("rejected_count", len(rejects)),
-			logging.Int("title_id", selection.ID),
-			logging.Int("duration_seconds", selection.Duration),
-			logging.Int("chapters", selection.Chapters),
-			logging.String("playlist", strings.TrimSpace(selection.Playlist)),
-			logging.Int("segment_count", selection.SegmentCount),
-		}
-		for idx, candidate := range candidates {
-			key := fmt.Sprintf("candidate_%d", idx+1)
-			if id, ok := logging.ParseDecisionID(candidate); ok {
-				key = fmt.Sprintf("candidate_%d", id)
-			}
-			attrs = append(attrs, logging.String(key, candidate))
-		}
-		for idx, reject := range rejects {
-			key := fmt.Sprintf("rejected_%d", idx+1)
-			if id, ok := logging.ParseDecisionID(reject); ok {
-				key = fmt.Sprintf("rejected_%d", id)
-			}
-			attrs = append(attrs, logging.String(key, reject))
-		}
-		logger.Info("primary title decision", logging.Args(attrs...)...)
-	}
+	logger.Info("prepared unidentified rip specification",
+		logging.String(logging.FieldDecisionType, "identification_outcome"),
+		logging.String("decision_result", "unidentified"),
+		logging.Int("title_count", len(titleSpecs)),
+		logging.String("content_key", contentKey),
+	)
 
 	if err := i.validateIdentification(ctx, item); err != nil {
 		return err
 	}
 
-	// Cache successful identification for fast lookup on future discs with same ID
-	if identified && discID != "" {
-		edition := ""
-		if e, ok := metadata["edition"].(string); ok {
-			edition = e
-		}
-		i.populateDiscIDCache(logger, discID, tmdbID, mediaType, identifiedTitle, edition, seasonNumber, outcome.Year)
-	}
-
-	// Log stage summary with timing and key metrics
-	i.logStageSummary(ctx, item, stageStart, identified, titleCount, tmdbID, mediaType)
-
+	i.logStageSummary(ctx, item, stageStart, false, titleCount, 0, mediaType)
 	return nil
 }
 
@@ -527,14 +517,7 @@ func (i *Identifier) detectMovieEdition(ctx context.Context, logger *slog.Logger
 		return ""
 	}
 
-	client := llm.NewClient(llm.Config{
-		APIKey:         llmCfg.APIKey,
-		BaseURL:        llmCfg.BaseURL,
-		Model:          llmCfg.Model,
-		Referer:        llmCfg.Referer,
-		Title:          llmCfg.Title,
-		TimeoutSeconds: llmCfg.TimeoutSeconds,
-	})
+	client := llm.NewClientFrom(llmCfg)
 
 	decision, err := DetectEditionWithLLM(ctx, client, discTitle, titleWithYear)
 	if err != nil {

@@ -2,8 +2,6 @@ package identification
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -13,10 +11,7 @@ import (
 	"spindle/internal/discidcache"
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
-	"spindle/internal/notifications"
 	"spindle/internal/queue"
-	"spindle/internal/ripspec"
-	"spindle/internal/services"
 )
 
 // completeIdentificationFromCache performs identification using a cached disc ID mapping.
@@ -38,7 +33,7 @@ func (i *Identifier) completeIdentificationFromCache(
 	mediaType := cacheEntry.MediaType
 	tmdbID := cacheEntry.TMDBID
 
-	// Fetch fresh metadata from TMDB using the cached ID
+	// Fetch fresh metadata from TMDB using the cached ID.
 	tmdbResult, err := i.fetchTMDBDetails(ctx, mediaType, tmdbID)
 	if err != nil {
 		logger.Warn("failed to fetch details from TMDB",
@@ -50,38 +45,34 @@ func (i *Identifier) completeIdentificationFromCache(
 			logging.String(logging.FieldImpact, "falling back to cached title"))
 	}
 
-	// Build metadata from TMDB response or cached data
-	var identifiedTitle, releaseDate, year string
+	// Resolve identification data from TMDB response or cache fallback.
+	var identifiedTitle, releaseDate, firstAirDate, overview string
 	var voteAverage float64
 	var voteCount int64
 
 	if tmdbResult != nil {
 		identifiedTitle = pickTitle(*tmdbResult)
 		releaseDate = tmdbResult.ReleaseDate
-		if mediaType == "tv" && tmdbResult.FirstAirDate != "" {
-			releaseDate = tmdbResult.FirstAirDate
+		firstAirDate = tmdbResult.FirstAirDate
+		if mediaType == "tv" && firstAirDate != "" {
+			releaseDate = firstAirDate
 		}
+		overview = tmdbResult.Overview
 		voteAverage = tmdbResult.VoteAverage
 		voteCount = tmdbResult.VoteCount
 	} else {
 		identifiedTitle = cacheEntry.Title
 	}
 
+	year := ""
 	if releaseDate != "" && len(releaseDate) >= 4 {
 		year = releaseDate[:4]
 	} else if cacheEntry.Year != "" {
 		year = cacheEntry.Year
 	}
 
-	titleWithYear := identifiedTitle
-	if year != "" {
-		titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
-	}
-
 	seasonNumber := cacheEntry.SeasonNumber
 	var episodeMatches map[int]episodeAnnotation
-
-	// For TV shows, build placeholder annotations
 	if mediaType == "tv" {
 		if seasonNumber == 0 {
 			seasonNumber = 1
@@ -91,29 +82,7 @@ func (i *Identifier) completeIdentificationFromCache(
 		}
 	}
 
-	// Build metadata map
-	metadata := map[string]any{
-		"id":            tmdbID,
-		"title":         identifiedTitle,
-		"media_type":    mediaType,
-		"release_date":  releaseDate,
-		"vote_average":  voteAverage,
-		"vote_count":    voteCount,
-		"movie":         mediaType != "tv",
-		"season_number": seasonNumber,
-		"cached":        true,
-	}
-
-	if tmdbResult != nil {
-		metadata["overview"] = tmdbResult.Overview
-		metadata["first_air_date"] = tmdbResult.FirstAirDate
-	}
-
-	if mediaType == "tv" {
-		metadata["show_title"] = identifiedTitle
-	}
 	if cacheEntry.Edition != "" {
-		metadata["edition"] = cacheEntry.Edition
 		logger.Info("edition from cache",
 			logging.String(logging.FieldDecisionType, "edition_detection"),
 			logging.String("decision_result", "cached"),
@@ -121,75 +90,40 @@ func (i *Identifier) completeIdentificationFromCache(
 			logging.String("edition_label", cacheEntry.Edition))
 	}
 
-	// Build filename
-	var metaRecord queue.Metadata
-	if mediaType == "tv" {
-		metaRecord = queue.NewTVMetadata(identifiedTitle, seasonNumber, nil, fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber))
-	} else {
-		metaRecord = queue.NewBasicMetadata(titleWithYear, true)
-		if cacheEntry.Edition != "" {
-			metaRecord.Edition = cacheEntry.Edition
-		}
-	}
-	metadata["filename"] = metaRecord.GetFilename()
-
-	// Encode and store metadata
-	encodedMetadata, encodeErr := json.Marshal(metadata)
-	if encodeErr != nil {
-		return services.Wrap(services.ErrTransient, "identification", "encode metadata", "Failed to encode TMDB metadata", encodeErr)
-	}
-	item.MetadataJSON = string(encodedMetadata)
-
-	// Update display title
-	displayTitle := titleWithYear
-	if mediaType == "tv" {
-		displayTitle = fmt.Sprintf("%s Season %02d", identifiedTitle, seasonNumber)
-		if year != "" {
-			displayTitle = fmt.Sprintf("%s Season %02d (%s)", identifiedTitle, seasonNumber, year)
-		}
-	}
-	item.DiscTitle = displayTitle
-	item.ProgressStage = "Identified"
-	item.ProgressPercent = 100
-	item.ProgressMessage = fmt.Sprintf("Identified as: %s (cached)", item.DiscTitle)
-
-	contentKey := fmt.Sprintf("tmdb:%s:%d", mediaType, tmdbID)
-
-	// Build attributes
-	attributes := make(map[string]any)
-	discNumber := 0
-	discSources := []string{item.DiscTitle}
+	// Build disc sources for disc number extraction.
+	discSources := []string{strings.TrimSpace(item.DiscTitle)}
 	if scanResult != nil && scanResult.BDInfo != nil {
-		discSources = append(discSources, scanResult.BDInfo.VolumeIdentifier, scanResult.BDInfo.DiscName)
-	}
-	if n, ok := extractDiscNumber(discSources...); ok {
-		discNumber = n
-		attributes["disc_number"] = discNumber
-	}
-	if scanResult.HasForcedEnglishSubtitles() {
-		attributes["has_forced_subtitle_track"] = true
+		if scanResult.BDInfo.VolumeIdentifier != "" {
+			discSources = append(discSources, scanResult.BDInfo.VolumeIdentifier)
+		}
+		if scanResult.BDInfo.DiscName != "" {
+			discSources = append(discSources, scanResult.BDInfo.DiscName)
+		}
 	}
 
-	// Build rip specs
-	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, episodeMatches, identifiedTitle, item.DiscTitle, discNumber, metadata)
-
-	ripFingerprint := strings.TrimSpace(item.DiscFingerprint)
-	spec := ripspec.Envelope{
-		Fingerprint: ripFingerprint,
-		ContentKey:  contentKey,
-		Metadata:    metadata,
-		Attributes:  attributes,
-		Titles:      titleSpecs,
-		Episodes:    episodeSpecs,
+	// Finalize through shared path.
+	r := identificationResult{
+		IdentifiedTitle: identifiedTitle,
+		MediaType:       mediaType,
+		TMDBID:          tmdbID,
+		Year:            year,
+		ReleaseDate:     releaseDate,
+		FirstAirDate:    firstAirDate,
+		Overview:        overview,
+		SeasonNumber:    seasonNumber,
+		VoteAverage:     voteAverage,
+		VoteCount:       voteCount,
+		Edition:         cacheEntry.Edition,
+		Cached:          true,
+		EpisodeMatches:  episodeMatches,
+		ScanResult:      scanResult,
+		DiscSources:     discSources,
+		FallbackTitle:   strings.TrimSpace(item.DiscTitle),
+	}
+	if err := i.finalizeIdentifiedItem(ctx, logger, item, r); err != nil {
+		return err
 	}
 
-	encodedSpec, err := spec.Encode()
-	if err != nil {
-		return services.Wrap(services.ErrTransient, "identification", "encode rip spec", "Failed to serialize rip specification", err)
-	}
-	item.RipSpecData = encodedSpec
-
-	// Log identification
 	logger.Info("disc identified from cache",
 		logging.String(logging.FieldDecisionType, "tmdb_identification"),
 		logging.String("decision_result", "cache_hit"),
@@ -200,64 +134,30 @@ func (i *Identifier) completeIdentificationFromCache(
 		logging.String("media_type", mediaType),
 		logging.Duration("identification_duration", time.Since(stageStart)))
 
-	// Send notification
-	if i.notifier != nil && year != "" {
-		payload := notifications.Payload{
-			"title":        identifiedTitle,
-			"year":         year,
-			"mediaType":    mediaType,
-			"displayTitle": titleWithYear,
-			"cached":       true,
-		}
-		if err := i.notifier.Publish(ctx, notifications.EventIdentificationCompleted, payload); err != nil {
-			logger.Debug("identification notification failed", logging.Error(err))
-		}
-	}
-
-	// Validate and finalize
-	if err := i.validateIdentification(ctx, item); err != nil {
-		return err
-	}
-
 	i.logStageSummary(ctx, item, stageStart, true, titleCount, tmdbID, mediaType)
-
 	return nil
 }
 
 // populateDiscIDCache stores the identification result in the disc ID cache.
-func (i *Identifier) populateDiscIDCache(
-	logger *slog.Logger,
-	discID string,
-	tmdbID int64,
-	mediaType, title, edition string,
-	seasonNumber int,
-	year string,
-) {
-	if i.discIDCache == nil || discID == "" {
+func (i *Identifier) populateDiscIDCache(logger *slog.Logger, entry discidcache.Entry) {
+	if i.discIDCache == nil || entry.DiscID == "" {
 		return
 	}
 
-	entry := discidcache.Entry{
-		DiscID:       discID,
-		TMDBID:       tmdbID,
-		MediaType:    mediaType,
-		Title:        title,
-		Edition:      edition,
-		SeasonNumber: seasonNumber,
-		Year:         year,
-		CachedAt:     time.Now(),
+	if entry.CachedAt.IsZero() {
+		entry.CachedAt = time.Now()
 	}
 
 	if err := i.discIDCache.Store(entry); err != nil {
 		logger.Warn("failed to cache disc id mapping",
 			logging.String(logging.FieldEventType, "discidcache_store_failed"),
 			logging.Error(err),
-			logging.String("disc_id", discID))
+			logging.String("disc_id", entry.DiscID))
 	} else {
 		logger.Debug("cached disc id mapping",
-			logging.String("disc_id", discID),
-			logging.Int64("tmdb_id", tmdbID),
-			logging.String("title", title))
+			logging.String("disc_id", entry.DiscID),
+			logging.Int64("tmdb_id", entry.TMDBID),
+			logging.String("title", entry.Title))
 	}
 }
 

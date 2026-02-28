@@ -29,13 +29,7 @@ func CheckLLM(ctx context.Context, name string, cfg config.LLM) Result {
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	client := llm.NewClient(llm.Config{
-		APIKey:  cfg.APIKey,
-		BaseURL: cfg.BaseURL,
-		Model:   cfg.Model,
-		Referer: cfg.Referer,
-		Title:   cfg.Title,
-	}, llm.WithRetryMaxAttempts(1))
+	client := llm.NewClientFrom(cfg, llm.WithRetryMaxAttempts(1))
 
 	if err := client.HealthCheck(checkCtx); err != nil {
 		return Result{Name: name, Detail: summarizeLLMError(err)}

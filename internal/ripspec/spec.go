@@ -66,6 +66,12 @@ const (
 	AssetStatusFailed    = "failed"
 )
 
+// Attribute key constants for cross-stage communication via Envelope.Attributes.
+const (
+	AttrContentIDNeedsReview  = "content_id_needs_review"
+	AttrContentIDReviewReason = "content_id_review_reason"
+)
+
 // Asset associates an episode with a file path and its processing status.
 type Asset struct {
 	EpisodeKey     string `json:"episode_key"`

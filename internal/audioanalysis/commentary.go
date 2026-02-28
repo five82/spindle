@@ -265,13 +265,7 @@ func (s *Stage) createLLMClient() *llm.Client {
 		return nil
 	}
 
-	return llm.NewClient(llm.Config{
-		APIKey:  llmCfg.APIKey,
-		BaseURL: llmCfg.BaseURL,
-		Model:   llmCfg.Model,
-		Referer: llmCfg.Referer,
-		Title:   llmCfg.Title,
-	})
+	return llm.NewClientFrom(llmCfg)
 }
 
 // classifyWithLLM uses an LLM to determine if a transcript is commentary.

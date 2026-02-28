@@ -332,8 +332,8 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 		if env.Attributes == nil {
 			env.Attributes = make(map[string]any)
 		}
-		env.Attributes["content_id_needs_review"] = true
-		env.Attributes["content_id_review_reason"] = refinement.ReviewReason
+		env.Attributes[ripspec.AttrContentIDNeedsReview] = true
+		env.Attributes[ripspec.AttrContentIDReviewReason] = refinement.ReviewReason
 	}
 
 	// LLM-based second-level verification for low-confidence matches.
@@ -345,11 +345,11 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 				if env.Attributes == nil {
 					env.Attributes = make(map[string]any)
 				}
-				env.Attributes["content_id_needs_review"] = true
-				if existing, ok := env.Attributes["content_id_review_reason"].(string); ok && existing != "" {
-					env.Attributes["content_id_review_reason"] = existing + "; " + vr.ReviewReason
+				env.Attributes[ripspec.AttrContentIDNeedsReview] = true
+				if existing, ok := env.Attributes[ripspec.AttrContentIDReviewReason].(string); ok && existing != "" {
+					env.Attributes[ripspec.AttrContentIDReviewReason] = existing + "; " + vr.ReviewReason
 				} else {
-					env.Attributes["content_id_review_reason"] = vr.ReviewReason
+					env.Attributes[ripspec.AttrContentIDReviewReason] = vr.ReviewReason
 				}
 			}
 		}

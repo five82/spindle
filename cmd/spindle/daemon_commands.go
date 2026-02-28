@@ -433,13 +433,7 @@ func commentaryLLMDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	client := llm.NewClient(llm.Config{
-		APIKey:  llmCfg.APIKey,
-		BaseURL: llmCfg.BaseURL,
-		Model:   llmCfg.Model,
-		Referer: llmCfg.Referer,
-		Title:   llmCfg.Title,
-	})
+	client := llm.NewClientFrom(llmCfg)
 	if err := client.HealthCheck(ctx); err != nil {
 		status.Detail = summarizeLLMHealthError(err)
 		return status

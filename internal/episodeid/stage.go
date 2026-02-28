@@ -33,13 +33,7 @@ func NewEpisodeIdentifier(cfg *config.Config, store *queue.Store, logger *slog.L
 	if cfg != nil && cfg.Subtitles.OpenSubtitlesEnabled {
 		var opts []contentid.Option
 		if llmCfg := cfg.GetLLM(); llmCfg.APIKey != "" {
-			opts = append(opts, contentid.WithLLMClient(llm.NewClient(llm.Config{
-				APIKey:  llmCfg.APIKey,
-				BaseURL: llmCfg.BaseURL,
-				Model:   llmCfg.Model,
-				Referer: llmCfg.Referer,
-				Title:   llmCfg.Title,
-			})))
+			opts = append(opts, contentid.WithLLMClient(llm.NewClientFrom(llmCfg)))
 		}
 		matcher = contentid.NewMatcher(cfg, logger, opts...)
 	}
@@ -116,14 +110,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		}
 		logSkipDecision(logger, reason)
 		if ripspec.HasUnresolvedEpisodes(env.Episodes) {
-			item.NeedsReview = true
-			if item.ReviewReason == "" {
-				item.ReviewReason = "episode numbers unresolved; content matching unavailable"
-			}
-			logger.Info("flagging item for review",
-				logging.String(logging.FieldDecisionType, "episode_review"),
-				logging.String("decision_result", "needs_review"),
-				logging.String("decision_reason", reason))
+			flagForReview(logger, item, "episode numbers unresolved; content matching unavailable", reason)
 		}
 		setSkipProgress(item, "Skipped (OpenSubtitles disabled)")
 		return nil
@@ -178,14 +165,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	}
 
 	if !updated && ripspec.HasUnresolvedEpisodes(env.Episodes) {
-		item.NeedsReview = true
-		if item.ReviewReason == "" {
-			item.ReviewReason = "episode numbers unresolved; no matching subtitles found"
-		}
-		logger.Info("flagging item for review",
-			logging.String(logging.FieldDecisionType, "episode_review"),
-			logging.String("decision_result", "needs_review"),
-			logging.String("decision_reason", "no_matching_subtitles"))
+		flagForReview(logger, item, "episode numbers unresolved; no matching subtitles found", "no_matching_subtitles")
 	}
 
 	if updated {
@@ -207,19 +187,12 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		item.RipSpecData = encoded
 
 		// Propagate content_id_needs_review from matcher
-		if v, ok := env.Attributes["content_id_needs_review"].(bool); ok && v {
-			item.NeedsReview = true
-			if item.ReviewReason == "" {
-				if reason, ok := env.Attributes["content_id_review_reason"].(string); ok && strings.TrimSpace(reason) != "" {
-					item.ReviewReason = reason
-				} else {
-					item.ReviewReason = "content id flagged for review"
-				}
+		if v, ok := env.Attributes[ripspec.AttrContentIDNeedsReview].(bool); ok && v {
+			reason := "content id flagged for review"
+			if r, ok := env.Attributes[ripspec.AttrContentIDReviewReason].(string); ok && strings.TrimSpace(r) != "" {
+				reason = r
 			}
-			logger.Info("flagging item for review",
-				logging.String(logging.FieldDecisionType, "episode_review"),
-				logging.String("decision_result", "needs_review"),
-				logging.String("decision_reason", "content_id_needs_review"))
+			flagForReview(logger, item, reason, "content_id_needs_review")
 		}
 
 		// Check for low-confidence episode matches
@@ -247,16 +220,9 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 
 		// Check for partial resolution: some episodes matched but others still unresolved
 		if unresolvedCount := ripspec.CountUnresolvedEpisodes(env.Episodes); unresolvedCount > 0 {
-			item.NeedsReview = true
-			if item.ReviewReason == "" {
-				item.ReviewReason = fmt.Sprintf(
-					"partial episode resolution: %d of %d episodes unresolved",
-					unresolvedCount, len(env.Episodes))
-			}
-			logger.Info("flagging item for review",
-				logging.String(logging.FieldDecisionType, "episode_review"),
-				logging.String("decision_result", "needs_review"),
-				logging.String("decision_reason", "partial_resolution"),
+			flagForReview(logger, item,
+				fmt.Sprintf("partial episode resolution: %d of %d episodes unresolved", unresolvedCount, len(env.Episodes)),
+				"partial_resolution",
 				logging.Int("unresolved_count", unresolvedCount),
 				logging.Int("total_episodes", len(env.Episodes)))
 		}
@@ -314,6 +280,16 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 	)
 
 	return nil
+}
+
+// flagForReview marks an item for manual review and logs the decision.
+func flagForReview(logger *slog.Logger, item *queue.Item, reason, logReason string, extraAttrs ...logging.Attr) {
+	item.NeedsReview = true
+	if item.ReviewReason == "" {
+		item.ReviewReason = reason
+	}
+	attrs := append(logging.DecisionAttrs("episode_review", "needs_review", logReason), extraAttrs...)
+	logger.Info("flagging item for review", logging.Args(attrs...)...)
 }
 
 // logSkipDecision logs an episode identification skip decision with consistent fields.

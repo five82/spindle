@@ -172,13 +172,7 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 	var llmClient *llm.Client
 	llmCfg := cfg.CommentaryLLM()
 	if llmCfg.APIKey != "" {
-		llmClient = llm.NewClient(llm.Config{
-			APIKey:  llmCfg.APIKey,
-			BaseURL: llmCfg.BaseURL,
-			Model:   llmCfg.Model,
-			Referer: llmCfg.Referer,
-			Title:   llmCfg.Title,
-		})
+		llmClient = llm.NewClientFrom(llmCfg)
 	}
 
 	// Process each candidate

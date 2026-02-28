@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"spindle/internal/config"
 )
 
 const (
@@ -113,6 +115,18 @@ func NewClient(cfg Config, opts ...Option) *Client {
 		client.httpClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	return client
+}
+
+// NewClientFrom creates a Client directly from application LLM configuration.
+func NewClientFrom(cfg config.LLM, opts ...Option) *Client {
+	return NewClient(Config{
+		APIKey:         cfg.APIKey,
+		BaseURL:        cfg.BaseURL,
+		Model:          cfg.Model,
+		Referer:        cfg.Referer,
+		Title:          cfg.Title,
+		TimeoutSeconds: cfg.TimeoutSeconds,
+	}, opts...)
 }
 
 // Classification captures the JSON payload returned by the LLM for preset classification.
