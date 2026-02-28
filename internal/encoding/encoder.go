@@ -102,6 +102,13 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
+	// Pipeline validations: catch problems that were previously audit-only.
+	if len(env.Episodes) > 1 {
+		validateEpisodeConsistency(ctx, item, &env, logger)
+	} else if len(env.Episodes) == 0 {
+		validateCropRatio(item, logger)
+	}
+
 	e.finalizeEncodedItem(item, &env, encodedPaths, logger)
 
 	var inputPaths []string

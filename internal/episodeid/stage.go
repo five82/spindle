@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -247,6 +248,45 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 				logging.String("decision_reason", "partial_resolution"),
 				logging.Int("unresolved_count", unresolvedCount),
 				logging.Int("total_episodes", len(env.Episodes)))
+		}
+
+		// Check episode sequence contiguity: resolved numbers should form
+		// an unbroken sequence (e.g. 1,2,3 not 1,2,5,6).
+		var resolvedNums []int
+		for _, ep := range env.Episodes {
+			if ep.Episode > 0 {
+				resolvedNums = append(resolvedNums, ep.Episode)
+			}
+		}
+		if len(resolvedNums) > 1 {
+			sort.Ints(resolvedNums)
+			contiguous := true
+			for i := 1; i < len(resolvedNums); i++ {
+				if resolvedNums[i] != resolvedNums[i-1]+1 {
+					contiguous = false
+					break
+				}
+			}
+			if !contiguous {
+				item.NeedsReview = true
+				if item.ReviewReason == "" {
+					item.ReviewReason = fmt.Sprintf(
+						"non-contiguous episode sequence: %d-%d",
+						resolvedNums[0], resolvedNums[len(resolvedNums)-1])
+				}
+				attrs := append(logging.DecisionAttrs("episode_contiguity", "needs_review", "sequence_gap"),
+					logging.String(logging.FieldEventType, "episode_sequence_gap"),
+					logging.String(logging.FieldErrorHint, "verify disc contains expected episodes"),
+					logging.String(logging.FieldImpact, "episodes may be from different parts of the season"),
+					logging.Int("resolved_count", len(resolvedNums)),
+					logging.Int("range_start", resolvedNums[0]),
+					logging.Int("range_end", resolvedNums[len(resolvedNums)-1]),
+				)
+				logger.Warn("non-contiguous episode sequence detected", logging.Args(attrs...)...)
+			} else {
+				logger.Info("episode contiguity decision",
+					logging.Args(logging.DecisionAttrs("episode_contiguity", "contiguous", "unbroken_sequence")...)...)
+			}
 		}
 	}
 
