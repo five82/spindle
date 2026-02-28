@@ -79,6 +79,49 @@ func CheckJellyfin(ctx context.Context, baseURL, apiKey string) Result {
 	}
 }
 
+// CheckOpenSubtitles verifies OpenSubtitles API connectivity and API key validity.
+// It hits the lightweight /infos/formats endpoint which requires no auth token.
+func CheckOpenSubtitles(ctx context.Context, baseURL, apiKey, userAgent string) Result {
+	const name = "OpenSubtitles"
+
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		base = "https://api.opensubtitles.com/api/v1"
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		return Result{Name: name, Detail: "missing api key"}
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, base+"/infos/formats", nil)
+	if err != nil {
+		return Result{Name: name, Detail: fmt.Sprintf("unreachable (%v)", err)}
+	}
+	req.Header.Set("Api-Key", strings.TrimSpace(apiKey))
+	if ua := strings.TrimSpace(userAgent); ua != "" {
+		req.Header.Set("User-Agent", ua)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return Result{Name: name, Detail: fmt.Sprintf("unreachable (%v)", err)}
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return Result{Name: name, Passed: true, Detail: "Reachable"}
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return Result{Name: name, Detail: "auth failed (invalid api key)"}
+	default:
+		return Result{Name: name, Detail: fmt.Sprintf("unreachable (%d %s)", resp.StatusCode, http.StatusText(resp.StatusCode))}
+	}
+}
+
 // CheckDirectoryAccess verifies that the directory exists and is readable/writable.
 func CheckDirectoryAccess(name, path string) Result {
 	info, err := os.Stat(path)

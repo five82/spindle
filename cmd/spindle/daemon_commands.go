@@ -202,6 +202,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			}
 			fmt.Fprintln(stdout, detectDiscLine(cfg.MakeMKV.OpticalDrive, colorize))
 			fmt.Fprintln(stdout, jellyfinStatusLine(cfg, colorize))
+			fmt.Fprintln(stdout, openSubtitlesStatusLine(cfg, colorize))
 			if strings.TrimSpace(cfg.Notifications.NtfyTopic) != "" {
 				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusOK, "Configured", colorize))
 			} else {

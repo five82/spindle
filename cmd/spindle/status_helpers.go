@@ -32,6 +32,27 @@ func jellyfinStatusLine(cfg *config.Config, colorize bool) string {
 	return renderStatusLine("Jellyfin", statusWarn, result.Detail, colorize)
 }
 
+func openSubtitlesStatusLine(cfg *config.Config, colorize bool) string {
+	if cfg == nil {
+		return renderStatusLine("OpenSubtitles", statusInfo, "Unknown", colorize)
+	}
+	if !cfg.Subtitles.OpenSubtitlesEnabled {
+		return renderStatusLine("OpenSubtitles", statusInfo, "Disabled", colorize)
+	}
+	if strings.TrimSpace(cfg.Subtitles.OpenSubtitlesAPIKey) == "" {
+		return renderStatusLine("OpenSubtitles", statusWarn, "Missing API key", colorize)
+	}
+	result := preflight.CheckOpenSubtitles(context.Background(),
+		"", // use default base URL
+		cfg.Subtitles.OpenSubtitlesAPIKey,
+		cfg.Subtitles.OpenSubtitlesUserAgent,
+	)
+	if result.Passed {
+		return renderStatusLine("OpenSubtitles", statusOK, result.Detail, colorize)
+	}
+	return renderStatusLine("OpenSubtitles", statusWarn, result.Detail, colorize)
+}
+
 func detectDiscLine(device string, colorize bool) string {
 	device = strings.TrimSpace(device)
 	if device == "" {
