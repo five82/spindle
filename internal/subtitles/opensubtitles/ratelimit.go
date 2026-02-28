@@ -11,9 +11,9 @@ import (
 // Rate limiting configuration for OpenSubtitles API calls.
 const (
 	MinInterval    = time.Second
-	MaxRateRetries = 4
+	MaxRateRetries = 6
 	InitialBackoff = 2 * time.Second
-	MaxBackoff     = 12 * time.Second
+	MaxBackoff     = 60 * time.Second
 )
 
 // SleepWithContext blocks for the given duration, returning early if the
@@ -48,6 +48,12 @@ func IsRetriable(err error) bool {
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "429") || strings.Contains(message, "rate limit") {
 		return true
+	}
+	// Server errors are typically transient (outages, deploys, overload).
+	for _, code := range []string{"502", "503", "504"} {
+		if strings.Contains(message, code) {
+			return true
+		}
 	}
 	timeoutTokens := []string{
 		"timeout",
