@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"spindle/internal/config"
 	"spindle/internal/deps"
 	"spindle/internal/services/llm"
+	"spindle/internal/subtitles/opensubtitles"
 )
 
 // CheckLLM verifies that the LLM API is reachable and the key is valid.
@@ -56,7 +58,7 @@ func CheckJellyfin(ctx context.Context, baseURL, apiKey string) Result {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	var client http.Client
 	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, base+"/Users", nil)
 	if err != nil {
 		return Result{Name: name, Detail: fmt.Sprintf("auth check failed (%v)", err)}
@@ -67,7 +69,10 @@ func CheckJellyfin(ctx context.Context, baseURL, apiKey string) Result {
 	if err != nil {
 		return Result{Name: name, Detail: fmt.Sprintf("auth check failed (%v)", err)}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -86,7 +91,7 @@ func CheckOpenSubtitles(ctx context.Context, baseURL, apiKey, userAgent string) 
 
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
-		base = "https://api.opensubtitles.com/api/v1"
+		base = opensubtitles.DefaultBaseURL
 	}
 	if strings.TrimSpace(apiKey) == "" {
 		return Result{Name: name, Detail: "missing api key"}
@@ -95,7 +100,7 @@ func CheckOpenSubtitles(ctx context.Context, baseURL, apiKey, userAgent string) 
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	var client http.Client
 	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, base+"/infos/formats", nil)
 	if err != nil {
 		return Result{Name: name, Detail: fmt.Sprintf("unreachable (%v)", err)}
@@ -110,7 +115,10 @@ func CheckOpenSubtitles(ctx context.Context, baseURL, apiKey, userAgent string) 
 	if err != nil {
 		return Result{Name: name, Detail: fmt.Sprintf("unreachable (%v)", err)}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	switch resp.StatusCode {
 	case http.StatusOK:

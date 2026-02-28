@@ -192,8 +192,8 @@ func TestNewDefaults(t *testing.T) {
 	if client.userAgent != defaultUserAgent {
 		t.Errorf("userAgent = %q, want %q", client.userAgent, defaultUserAgent)
 	}
-	if client.baseURL.String() != defaultBaseURL {
-		t.Errorf("baseURL = %q, want %q", client.baseURL.String(), defaultBaseURL)
+	if client.baseURL.String() != DefaultBaseURL {
+		t.Errorf("baseURL = %q, want %q", client.baseURL.String(), DefaultBaseURL)
 	}
 }
 

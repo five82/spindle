@@ -690,7 +690,7 @@ func selectReferenceCandidate(candidates []opensubtitles.Subtitle, episodeTitle 
 	currentTitle := strings.ToLower(strings.TrimSpace(episodeTitle))
 	const minTitleLen = 5
 	if len(currentTitle) < minTitleLen {
-		return preferNonHI(candidates, candidates)
+		return preferNonHI(candidates)
 	}
 
 	// Collect TMDB titles from other episodes in the season.
@@ -703,7 +703,7 @@ func selectReferenceCandidate(candidates []opensubtitles.Subtitle, episodeTitle 
 		otherTitles = append(otherTitles, t)
 	}
 	if len(otherTitles) == 0 {
-		return preferNonHI(candidates, candidates)
+		return preferNonHI(candidates)
 	}
 
 	// Collect candidates that pass the title-consistency check.
@@ -751,14 +751,13 @@ func selectReferenceCandidate(candidates []opensubtitles.Subtitle, episodeTitle 
 	}
 
 	// All candidates look suspect -- prefer non-HI among them.
-	return preferNonHI(candidates, candidates)
+	return preferNonHI(candidates)
 }
 
-// preferNonHI returns the first non-HI candidate from pool, falling back to
-// pool[0] if all are HI. The full candidates slice is used to determine
-// whether the selection index implies reranking.
-func preferNonHI(pool []opensubtitles.Subtitle, candidates []opensubtitles.Subtitle) (opensubtitles.Subtitle, int, string) {
-	for i, c := range pool {
+// preferNonHI returns the first non-HI candidate from the slice, falling back
+// to the first element if all are HI.
+func preferNonHI(candidates []opensubtitles.Subtitle) (opensubtitles.Subtitle, int, string) {
+	for i, c := range candidates {
 		if !c.HearingImpaired {
 			if i > 0 {
 				return c, i, "non_hi_preferred"
@@ -766,7 +765,7 @@ func preferNonHI(pool []opensubtitles.Subtitle, candidates []opensubtitles.Subti
 			return c, 0, "top_result"
 		}
 	}
-	return pool[0], 0, "hi_fallback"
+	return candidates[0], 0, "hi_fallback"
 }
 
 // containsAnySubstring reports whether s contains any of the given substrings.

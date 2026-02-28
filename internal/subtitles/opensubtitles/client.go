@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	defaultBaseURL     = "https://api.opensubtitles.com/api/v1"
+	// DefaultBaseURL is the production OpenSubtitles API endpoint.
+	DefaultBaseURL     = "https://api.opensubtitles.com/api/v1"
 	defaultUserAgent   = "Spindle/dev"
 	defaultHTTPTimeout = 45 * time.Second
 )
@@ -50,7 +51,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	base := strings.TrimSpace(cfg.BaseURL)
 	if base == "" {
-		base = defaultBaseURL
+		base = DefaultBaseURL
 	}
 	baseURL, err := url.Parse(base)
 	if err != nil {
