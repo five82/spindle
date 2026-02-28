@@ -63,6 +63,8 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 
 After running `spindle audit-gather`, process the full JSON output through a **single comprehensive extraction script** rather than making many narrow extraction passes. The script should produce one compact output that enables all subsequent analysis phases without further extraction calls.
 
+**Shell mechanics:** Always pass the extraction script via a single-quoted heredoc (`python3 << 'PYEOF'`), never via `python3 -c "..."`. The `-c` form breaks because bash interprets `!`, `\`, and other special characters inside double quotes.
+
 The extraction script should:
 
 1. **Summarize metadata**: item fields, stage_gate, gathering errors
