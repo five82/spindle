@@ -42,6 +42,23 @@ This returns a JSON report containing:
 
 If `/itemaudit` is invoked without an item ID, run `spindle status` and `spindle queue list` to diagnose daemon-level issues instead.
 
+### Extraction Strategy
+
+After running `spindle audit-gather`, process the full JSON output through a **single comprehensive extraction script** rather than making many narrow extraction passes. The script should produce one compact output that enables all subsequent analysis phases without further extraction calls.
+
+The extraction script should:
+
+1. **Summarize metadata**: item fields, stage_gate, gathering errors
+2. **Aggregate decisions by type with counts**: Deduplicate identical repeated decisions into `"type x{count}: summary"` rather than listing each one individually. For example, 12 identical `audio_selection` decisions become one line: `"audio_selection x12: eng mono selected (english_preferred)"`. Only expand individual entries when decisions have different outcomes or notable parameter variations.
+3. **List all warnings and errors** with full context (these are always few enough to show individually)
+4. **Show stage timing** with computed durations
+5. **Compute cross-episode consistency** (TV only): Group episodes by (resolution, codec, audio_count, audio_langs, subtitle_count, subtitle_langs). Report the majority profile once, then list only episodes that deviate.
+6. **Pre-compute derived values**: crop aspect ratio from crop filter, duration min/max/range, confidence floor/ceiling from episode manifest, size min/max/range
+7. **Summarize episode manifest** with confidence scores and episode numbers
+8. **Flag anomalies** that need deeper investigation: failed assets, low confidence, non-zero warnings/errors, cross-episode inconsistencies
+
+This approach replaces 10+ sequential extraction calls with 1-2, keeping the analysis equally thorough while significantly reducing gathering overhead.
+
 ### Stage Gating
 
 The `stage_gate` object in the audit-gather output contains:
@@ -250,9 +267,8 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
 
 2. **Forced subtitle search outcome** (from `logs.decisions`):
    - Find `decision_type=forced_subtitle_download` with `decision_result=not_found`
-   - Zero candidates from OpenSubtitles is **common and expected** — classify as **INFO**, not WARNING
-   - Only classify as **WARNING** if candidates were returned but all rejected
-   - **Use your knowledge of the title**: If the film/show has significant foreign language dialogue (e.g., Inglourious Basterds, Kill Bill, Narcos), a missing forced subtitle is a real gap — escalate to **WARNING**
+   - Zero candidates from OpenSubtitles is **the norm** — do not report this at all (not even as INFO)
+   - Only report as **WARNING** if: (a) candidates were returned but all rejected, OR (b) you know the title has significant foreign language dialogue (e.g., Inglourious Basterds, Kill Bill, Narcos) making the absence a real gap
 
 3. **Edition-aware forced subtitle selection** (movies only):
    - Check `logs.decisions` for `edition=match` or `edition=mismatch` in forced subtitle ranking
@@ -303,7 +319,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
 | SRT validation issues | Subtitles | `logs.warnings` with `event_type=srt_validation_issues` | Malformed subtitles |
 | Subtitle duration mismatch | Subtitles | Subtitle stream duration vs video duration delta > 10 minutes | WhisperX timing issue |
-| Forced subtitle not found (INFO) | Subtitles | `logs.decisions` with `decision_result=not_found`, zero candidates | Expected for most content |
+| Forced subtitle not found | Subtitles | `logs.decisions` with `decision_result=not_found`, zero candidates | Do not report — this is the norm |
 | Forced subtitle candidates rejected | Subtitles | Candidates returned but all rejected during ranking | Filtering or scoring problem |
 | Forced subtitle edition mismatch | Subtitles | `edition=mismatch` in forced subtitle ranking | Wrong forced subtitle |
 | Subtitles not muxed | Subtitles | No subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load |
@@ -334,6 +350,39 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 ## Audit Report Format
 
 **Only include sections applicable to the item's stage gate.** Omit sections for stages the item never reached. For failed items, the report should focus on diagnosing the failure rather than listing empty sections.
+
+### Presentation Density Guidelines
+
+The analysis must remain exhaustive, but the *presentation* should be proportional to findings. Use compact formats for clean data and expand only where anomalies exist.
+
+**Cross-episode data (TV):**
+- When all episodes share identical values for a field, use a single summary line:
+  `"All 12 episodes: AV1 1436x1080, 1x Opus mono eng, 1x subrip eng"`
+- Only expand to a per-episode table when episodes DIFFER on that field, and only show the columns that differ
+- Duration and size ranges are always a single line: `"Duration: 1485-1520s | Size: 292-557 MB"`
+
+**Decision traces:**
+- Deduplicate identical repeated decisions:
+  `"audio_selection x12: eng mono selected (english_preferred)"`
+- Only show individual entries for decisions with different outcomes, notable parameter variations, or anomalous confidence/scores
+
+**Episode manifest:**
+- Always show the full per-episode table with confidence scores, matched episode numbers, and titles. Episode identification is a core pipeline feature and the manifest is the primary evidence of correctness. This table is never compressed.
+
+**External validation:**
+- When all checks confirm, use a compact paragraph rather than multi-level section/subsection structure
+- Only expand into detailed comparison when a mismatch is found
+
+**Do not report as findings (these are normal):**
+- Non-sequential disc title ordering — disc layout varies by manufacturer and is irrelevant once content ID resolves episodes
+- Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
+- Forced subtitle search returning zero candidates (covered in Phase 7)
+- Audio refinement stripping non-English tracks — that's its job
+
+**Stage timing:**
+- Always show the timing table — it's compact and useful for spotting anomalies
+
+### Report Template
 
 ```
 ## Audit Report for Item #<id>
@@ -369,8 +418,8 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 - Total log entries: <logs.total_lines>
 - WARN events: <count> (list if > 0)
 - ERROR events: <count> (list if > 0)
-- Decision events: <summary of key decisions>
-- Timing anomalies: <any detected from stage events>
+- Key decisions: <deduplicated summary — expand only anomalous decisions>
+- Timing: <stage timing table>
 
 #### Rip Cache (if phase_rip_cache)
 - Cache path: <rip_cache.path>
@@ -380,31 +429,22 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 #### Episode Identification (if phase_episode_id)
 - Content ID method: <envelope.attributes.content_id_method>
 - Episodes synchronized: <envelope.attributes.episodes_synchronized>
-- Episode manifest:
-
-| Episode | Key | TitleID | Confidence | Status |
-|---------|-----|---------|------------|--------|
-| S01E03 | s01_001 | 3 | 0.87 | OK (resolved) |
-
+- Episode manifest: <summary line if all clean, per-episode table if anomalies>
 - Sequence continuity: <sequential/gaps detected>
-- Low confidence episodes: <count>
 
 #### Encoded File (if phase_encoded)
 
 **Movie:**
-- Path: <media[0].path>
-- Duration: <media[0].duration_seconds>s | Size: <media[0].size_bytes> bytes
-- Video: <codec> <resolution> <HDR status>
-- Audio streams: <count>
-- Crop applied: <encoding.snapshot.crop>
+- Video: <codec> <resolution> <HDR status> | Duration: <seconds>s | Size: <bytes>
+- Audio: <stream summary>
+- Crop: <crop filter> (<calculated aspect ratio>)
+- Validation: <passed/failed, expand individual steps only if failed>
 
-**TV (per-episode summary):**
-
-| Episode | Duration | Size | Resolution | Codec | Audio Streams | Status |
-|---------|----------|------|------------|-------|---------------|--------|
-
-- Cross-episode consistency: <pass/concerns>
-- Failed episodes: <count>
+**TV:**
+- Common profile: <resolution, codec, audio config, subtitle config>
+- Duration: <min>-<max>s | Size: <min>-<max> MB
+- Cross-episode consistency: <pass, or list deviations>
+- Failed episodes: <count, with details if > 0>
 
 #### Edition Detection (if phase_edition)
 - Detection method: <from logs.decisions>
@@ -412,30 +452,19 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 - Filename includes edition: <check item.final_file or item.encoded_file>
 
 #### Subtitles (if phase_subtitles)
-- Subtitle tracks in encoded file: <count and details from media probes>
-- Track labels correct: <yes/no>
+- Tracks: <count and config from media probes>
+- Labels correct: <yes/no>
 - Forced subtitle outcome: <from logs.decisions>
 
 #### Commentary (if phase_commentary)
-- Commentary decisions: <from logs.decisions>
-- Commentary tracks in encoded file: <count from media probes>
+- Decisions: <from logs.decisions>
+- Tracks in output: <count from media probes>
 
 ### External Validation (if phase_external_validation)
-
-#### blu-ray.com Review
-- URL: <review URL if found>
-- Listed aspect ratio: <ratio>
-- Listed audio tracks: <description>
-- Listed commentary: <count>
-- Edition type: <type>
-
-#### Validation Results
-- Aspect ratio match: <yes/no/concern>
-- Commentary count match: <yes/no/concern>
-- Edition detection match: <yes/no/concern>
+<Compact paragraph when all checks pass. Expand into detailed comparison only when mismatches found.>
 
 ### Decision Trace
-<key decisions from logs.decisions with decision_type, decision_result, decision_reason>
+<Deduplicated key decisions — type x{count}: result (reason). Expand only anomalous entries.>
 ```
 
 ## Execution Checklist
@@ -487,4 +516,5 @@ After running `spindle audit-gather`, check only the phases flagged as `true` in
 
 ### Report
 - [ ] Generated report with only applicable sections
-- [ ] If TV: used per-episode summary tables
+- [ ] Applied presentation density guidelines (compact for clean data, expanded for anomalies)
+- [ ] Deduplicated repeated identical decisions in trace
