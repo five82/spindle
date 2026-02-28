@@ -31,11 +31,11 @@ spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 This produces a JSON report containing:
 - **`item`**: Queue item summary (status, flags, paths, timestamps)
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply, media type, disc source, edition)
-- **`logs`**: Parsed log entries — decisions, warnings, errors, and stage timing events with raw JSON
-- **`rip_cache`**: Cache metadata (disc title, rip spec, needs_review flag)
+- **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), and stage timing events
+- **`rip_cache`**: Cache metadata (disc title, needs_review flag). Serialized rip_spec_data and metadata_json blobs are omitted (already in parsed `envelope`).
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
-- **`encoding`**: Encoding details snapshot (crop, validation, config, result)
-- **`media`**: ffprobe output for each encoded file (streams, format, duration, size)
+- **`encoding`**: Encoding details snapshot (crop, validation, config, result). Preset settings are omitted; validation results capture pass/fail.
+- **`media`**: ffprobe output for encoded files. For TV, only the representative probe (matching majority profile, marked `representative: true`), deviation probes, and error probes are included. `media_omitted` indicates how many clean probes were dropped.
 - **`errors`**: Any gathering errors (missing logs, parse failures, etc.)
 - **`analysis`**: Pre-computed summaries — decision groups, episode consistency, crop analysis, episode stats, media stats, asset health, anomaly flags (see Analysis Reference below)
 
@@ -50,7 +50,7 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 | Field | Present When | Contents |
 |-------|-------------|----------|
 | `decision_groups` | Decisions exist | Groups by (type, result, reason) with count. `entries` included when count=1 or messages vary; nil when all identical. |
-| `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_count), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
+| `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`, `disabled`. |
 | `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
 | `media_stats` | Valid probes exist | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`. |
@@ -121,7 +121,7 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
    - Filter by `decision_type` to find specific categories (commentary, edition_detection, tmdb_confidence, etc.)
-   - Use `raw_json` fields when you need full context beyond the extracted fields
+   - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at `logs.path`)
 
 2. **Timing anomalies** (from `logs.stages`):
    - Stages taking unusually long or short (use `duration_seconds` when available)
@@ -187,9 +187,9 @@ Analyze the `rip_cache` section from audit-gather output:
 
 Analyze the `media` array from audit-gather output. Each entry contains full ffprobe results.
 
-**TV note:** The encoding snapshot only contains data for the last episode encoded (the snapshot is overwritten per-episode during encoding). Use `media[]` probes for per-episode stream validation. The snapshot is still useful for crop detection, encoding config, and validation results (which are consistent across episodes from the same disc).
+**TV note:** The encoding snapshot only contains data for the last episode encoded (the snapshot is overwritten per-episode during encoding). The `media[]` array is compressed for TV: only the representative probe (matching the majority profile, marked `representative: true`), deviation probes, and error probes are included. Use `media_omitted` to see how many clean probes were dropped. The representative probe is sufficient for stream-level checks (items 1-6 below); `analysis.episode_consistency` confirms all omitted episodes match the same profile. The snapshot is still useful for crop detection, encoding config, and validation results (which are consistent across episodes from the same disc).
 
-**For movies** (single entry) or **per-episode for TV** (entries with `episode_key`):
+**For movies** (single entry) or **the representative probe for TV**:
 
 1. **Verify video stream** (from `media[].probe.streams` where `codec_type=video`):
    - Resolution matches expected (SD/HD/4K)
@@ -226,9 +226,9 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
    - Verify encoded asset count matches episode count
 
 7. **Cross-episode consistency** (TV only):
-   - Use `analysis.episode_consistency` for the overview: `majority_profile` gives the common (video_codec, width, height, audio_streams, subtitle_count), `majority_count`/`total_episodes` show how many match, and `deviations[]` lists episodes with human-readable differences
+   - Use `analysis.episode_consistency` for the overview: `majority_profile` gives the common (video_codec, width, height, audio_streams, subtitle_streams), `majority_count`/`total_episodes` show how many match, and `deviations[]` lists episodes with human-readable differences
    - Use `analysis.media_stats` for duration range (`duration_min_sec/max_sec`) and size range (`size_min_bytes/max_bytes`)
-   - Still inspect individual `media[]` probes for stream-level checks (items 1-6) but use the pre-computed consistency summary for the overview
+   - Inspect the representative probe for stream-level checks (items 1-6); omitted probes are confirmed equivalent by the consistency analysis
 
 ### Phase 5: Crop Detection Validation (when `phase_crop` is true)
 
@@ -385,6 +385,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - When all episodes match (`majority_count == total_episodes`), use a single summary line:
   `"All 12 episodes: AV1 1436x1080, 1x Opus mono eng, 1x subrip eng"`
 - Only expand to a per-episode table when `deviations` is non-empty, and only show the differing fields
+- Note: for TV items, `media[]` only contains the representative probe, deviation probes, and error probes. Use `media_omitted` to report how many clean probes were compressed. The representative probe has `representative: true`.
 - Duration and size ranges come directly from `analysis.media_stats`: `"Duration: 1485-1520s | Size: 292-557 MB"`
 
 **Decision traces:**

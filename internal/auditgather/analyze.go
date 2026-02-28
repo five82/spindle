@@ -182,7 +182,6 @@ func computeEpisodeConsistency(probes []MediaFileProbe) *EpisodeConsistency {
 
 func buildProfileSummary(p MediaFileProbe) ProfileSummary {
 	var ps ProfileSummary
-	var subtitleCount int
 	for _, s := range p.Probe.Streams {
 		switch strings.ToLower(s.CodecType) {
 		case "video":
@@ -203,15 +202,19 @@ func buildProfileSummary(p MediaFileProbe) ProfileSummary {
 			}
 			ps.AudioStreams = append(ps.AudioStreams, ap)
 		case "subtitle":
-			subtitleCount++
+			sp := SubtitleProfile{
+				Codec:    s.CodecName,
+				Language: s.Tags["language"],
+				IsForced: s.Disposition["forced"] == 1,
+			}
+			ps.SubtitleStreams = append(ps.SubtitleStreams, sp)
 		}
 	}
-	ps.SubtitleCount = subtitleCount
 	return ps
 }
 
 func profilesEqual(a, b ProfileSummary) bool {
-	if a.VideoCodec != b.VideoCodec || a.Width != b.Width || a.Height != b.Height || a.SubtitleCount != b.SubtitleCount {
+	if a.VideoCodec != b.VideoCodec || a.Width != b.Width || a.Height != b.Height {
 		return false
 	}
 	if len(a.AudioStreams) != len(b.AudioStreams) {
@@ -219,6 +222,14 @@ func profilesEqual(a, b ProfileSummary) bool {
 	}
 	for i := range a.AudioStreams {
 		if a.AudioStreams[i] != b.AudioStreams[i] {
+			return false
+		}
+	}
+	if len(a.SubtitleStreams) != len(b.SubtitleStreams) {
+		return false
+	}
+	for i := range a.SubtitleStreams {
+		if a.SubtitleStreams[i] != b.SubtitleStreams[i] {
 			return false
 		}
 	}
@@ -236,10 +247,91 @@ func describeProfileDifferences(majority, other ProfileSummary) []string {
 	if len(other.AudioStreams) != len(majority.AudioStreams) {
 		diffs = append(diffs, fmt.Sprintf("audio streams: %d (expected %d)", len(other.AudioStreams), len(majority.AudioStreams)))
 	}
-	if other.SubtitleCount != majority.SubtitleCount {
-		diffs = append(diffs, fmt.Sprintf("subtitle streams: %d (expected %d)", other.SubtitleCount, majority.SubtitleCount))
+	if !subtitleStreamsEqual(majority.SubtitleStreams, other.SubtitleStreams) {
+		diffs = append(diffs, fmt.Sprintf("subtitle streams: %s (expected %s)",
+			describeSubtitleStreams(other.SubtitleStreams),
+			describeSubtitleStreams(majority.SubtitleStreams)))
 	}
 	return diffs
+}
+
+func subtitleStreamsEqual(a, b []SubtitleProfile) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func describeSubtitleStreams(streams []SubtitleProfile) string {
+	if len(streams) == 0 {
+		return "none"
+	}
+	var parts []string
+	for _, s := range streams {
+		desc := s.Codec
+		if s.Language != "" {
+			desc += " " + s.Language
+		}
+		if s.IsForced {
+			desc += " (forced)"
+		}
+		parts = append(parts, desc)
+	}
+	return fmt.Sprintf("%d [%s]", len(streams), strings.Join(parts, ", "))
+}
+
+// compressMediaProbes removes redundant clean TV episode probes that match
+// the majority profile. It keeps the first matching clean probe (marked
+// Representative), all deviations, all error probes, and all movie probes.
+// Returns the number of probes omitted.
+func compressMediaProbes(probes []MediaFileProbe, consistency *EpisodeConsistency) ([]MediaFileProbe, int) {
+	if consistency == nil || len(probes) == 0 {
+		return probes, 0
+	}
+
+	majority := consistency.MajorityProfile
+
+	// Build set of deviating episode keys for fast lookup.
+	deviationKeys := make(map[string]bool, len(consistency.Deviations))
+	for _, d := range consistency.Deviations {
+		deviationKeys[d.EpisodeKey] = true
+	}
+
+	var result []MediaFileProbe
+	omitted := 0
+	representativeFound := false
+
+	for _, p := range probes {
+		// Keep: error probes, movie probes (no episode key), deviations.
+		if p.Error != "" || p.EpisodeKey == "" || deviationKeys[p.EpisodeKey] {
+			result = append(result, p)
+			continue
+		}
+
+		profile := buildProfileSummary(p)
+		if !profilesEqual(majority, profile) {
+			// Doesn't match majority (shouldn't happen if consistency is correct,
+			// but keep it to be safe).
+			result = append(result, p)
+			continue
+		}
+
+		// Clean probe matching majority.
+		if !representativeFound {
+			p.Representative = true
+			result = append(result, p)
+			representativeFound = true
+		} else {
+			omitted++
+		}
+	}
+
+	return result, omitted
 }
 
 // analyzeCrop parses a crop filter string and computes aspect ratio.

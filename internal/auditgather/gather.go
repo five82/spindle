@@ -73,6 +73,10 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 		if snapErr != nil {
 			r.addError("parse encoding details: %v", snapErr)
 		} else if !snap.IsZero() {
+			// Strip preset settings; validation results capture pass/fail.
+			if snap.Config != nil {
+				snap.Config.PresetSettings = nil
+			}
 			r.Encoding = &EncodingReport{Snapshot: snap}
 		}
 	}
@@ -87,6 +91,11 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 
 	// Phase 6: Pre-computed analysis
 	r.Analysis = computeAnalysis(r)
+
+	// Phase 7: Compress media probes using consistency analysis.
+	if r.Analysis != nil {
+		r.Media, r.MediaOmitted = compressMediaProbes(r.Media, r.Analysis.EpisodeConsistency)
+	}
 
 	return r, nil
 }
@@ -306,7 +315,7 @@ func parseLogLine(line string, report *LogAnalysis) {
 	ts := getString(entry, "ts")
 	eventType := getString(entry, "event_type")
 
-	// Collect decisions
+	// Collect decisions (structured fields only; extras omitted for compactness)
 	if decType := getString(entry, "decision_type"); decType != "" {
 		report.Decisions = append(report.Decisions, LogDecision{
 			Timestamp:      ts,
@@ -314,11 +323,10 @@ func parseLogLine(line string, report *LogAnalysis) {
 			DecisionResult: getString(entry, "decision_result"),
 			DecisionReason: getString(entry, "decision_reason"),
 			Message:        msg,
-			RawJSON:        line,
 		})
 	}
 
-	// Collect warnings
+	// Collect warnings (extras preserved for diagnostic context)
 	if strings.EqualFold(level, "warn") {
 		report.Warnings = append(report.Warnings, LogEntry{
 			Timestamp: ts,
@@ -326,11 +334,11 @@ func parseLogLine(line string, report *LogAnalysis) {
 			Message:   msg,
 			EventType: eventType,
 			ErrorHint: getString(entry, "error_hint"),
-			RawJSON:   line,
+			Extras:    buildExtras(entry),
 		})
 	}
 
-	// Collect errors
+	// Collect errors (extras preserved for diagnostic context)
 	if strings.EqualFold(level, "error") {
 		report.Errors = append(report.Errors, LogEntry{
 			Timestamp: ts,
@@ -338,11 +346,11 @@ func parseLogLine(line string, report *LogAnalysis) {
 			Message:   msg,
 			EventType: eventType,
 			ErrorHint: getString(entry, "error_hint"),
-			RawJSON:   line,
+			Extras:    buildExtras(entry),
 		})
 	}
 
-	// Collect stage events
+	// Collect stage events (structured fields only; extras omitted for compactness)
 	if strings.HasPrefix(eventType, "stage_") {
 		report.Stages = append(report.Stages, StageEvent{
 			Timestamp: ts,
@@ -350,9 +358,38 @@ func parseLogLine(line string, report *LogAnalysis) {
 			Stage:     getString(entry, "stage"),
 			Message:   msg,
 			Duration:  getStageDurationSeconds(entry),
-			RawJSON:   line,
 		})
 	}
+}
+
+// knownLogKeys are fields already extracted into dedicated struct fields
+// or universal context fields that appear on every log line. buildExtras
+// returns everything else from the parsed log line.
+var knownLogKeys = map[string]bool{
+	// Extracted into struct fields
+	"ts": true, "level": true, "msg": true,
+	"decision_type": true, "decision_result": true, "decision_reason": true,
+	"event_type": true, "error_hint": true, "error": true,
+	"stage": true, "stage_duration": true,
+	// Universal context (same on every line, no audit value)
+	"correlation_id": true, "item_id": true, "lane": true,
+	"session_id": true, "source": true, "component": true,
+}
+
+// buildExtras returns a map of all log line fields not in knownLogKeys.
+// Returns nil when there are no extra fields.
+func buildExtras(entry map[string]any) map[string]any {
+	var extras map[string]any
+	for k, v := range entry {
+		if knownLogKeys[k] {
+			continue
+		}
+		if extras == nil {
+			extras = make(map[string]any)
+		}
+		extras[k] = v
+	}
+	return extras
 }
 
 func getString(m map[string]any, key string) string {
@@ -420,6 +457,10 @@ func gatherRipCache(cfg *config.Config, item *queue.Item) (*RipCacheReport, erro
 	if err != nil {
 		return &RipCacheReport{Path: cachePath, Found: found}, fmt.Errorf("load cache metadata: %w", err)
 	}
+
+	// Clear serialized blobs already available in the parsed envelope.
+	meta.RipSpecData = ""
+	meta.MetadataJSON = ""
 
 	return &RipCacheReport{
 		Path:     cachePath,

@@ -12,15 +12,16 @@ import (
 // analyze a queue item without performing its own file discovery
 // or tool invocation.
 type Report struct {
-	Item      ItemSummary      `json:"item"`
-	StageGate StageGate        `json:"stage_gate"`
-	Logs      *LogAnalysis     `json:"logs,omitempty"`
-	RipCache  *RipCacheReport  `json:"rip_cache,omitempty"`
-	Envelope  *EnvelopeReport  `json:"envelope,omitempty"`
-	Encoding  *EncodingReport  `json:"encoding,omitempty"`
-	Media     []MediaFileProbe `json:"media,omitempty"`
-	Analysis  *Analysis        `json:"analysis,omitempty"`
-	Errors    []string         `json:"errors,omitempty"`
+	Item         ItemSummary      `json:"item"`
+	StageGate    StageGate        `json:"stage_gate"`
+	Logs         *LogAnalysis     `json:"logs,omitempty"`
+	RipCache     *RipCacheReport  `json:"rip_cache,omitempty"`
+	Envelope     *EnvelopeReport  `json:"envelope,omitempty"`
+	Encoding     *EncodingReport  `json:"encoding,omitempty"`
+	Media        []MediaFileProbe `json:"media,omitempty"`
+	MediaOmitted int              `json:"media_omitted,omitempty"`
+	Analysis     *Analysis        `json:"analysis,omitempty"`
+	Errors       []string         `json:"errors,omitempty"`
 }
 
 // Analysis contains pre-computed summaries derived from the raw report data.
@@ -54,11 +55,18 @@ type EpisodeConsistency struct {
 
 // ProfileSummary describes the media profile of a single file.
 type ProfileSummary struct {
-	VideoCodec    string         `json:"video_codec"`
-	Width         int            `json:"width"`
-	Height        int            `json:"height"`
-	AudioStreams  []AudioProfile `json:"audio_streams,omitempty"`
-	SubtitleCount int            `json:"subtitle_count"`
+	VideoCodec      string            `json:"video_codec"`
+	Width           int               `json:"width"`
+	Height          int               `json:"height"`
+	AudioStreams    []AudioProfile    `json:"audio_streams,omitempty"`
+	SubtitleStreams []SubtitleProfile `json:"subtitle_streams,omitempty"`
+}
+
+// SubtitleProfile describes a single subtitle stream.
+type SubtitleProfile struct {
+	Codec    string `json:"codec"`
+	Language string `json:"language,omitempty"`
+	IsForced bool   `json:"is_forced,omitempty"`
 }
 
 // AudioProfile describes a single audio stream.
@@ -189,33 +197,35 @@ type LogAnalysis struct {
 }
 
 // LogDecision captures a structured decision log entry.
+// The type/result/reason/message fields capture audit-critical data;
+// full log line details are available at logs.path if needed.
 type LogDecision struct {
 	Timestamp      string `json:"ts"`
 	DecisionType   string `json:"decision_type"`
 	DecisionResult string `json:"decision_result"`
 	DecisionReason string `json:"decision_reason,omitempty"`
 	Message        string `json:"message"`
-	RawJSON        string `json:"raw_json"`
 }
 
 // LogEntry captures a warning or error log entry.
 type LogEntry struct {
-	Timestamp string `json:"ts"`
-	Level     string `json:"level"`
-	Message   string `json:"message"`
-	EventType string `json:"event_type,omitempty"`
-	ErrorHint string `json:"error_hint,omitempty"`
-	RawJSON   string `json:"raw_json"`
+	Timestamp string         `json:"ts"`
+	Level     string         `json:"level"`
+	Message   string         `json:"message"`
+	EventType string         `json:"event_type,omitempty"`
+	ErrorHint string         `json:"error_hint,omitempty"`
+	Extras    map[string]any `json:"extras,omitempty"`
 }
 
 // StageEvent captures stage start/complete events for timing analysis.
+// The event_type/stage/duration fields capture audit-critical data;
+// full log line details are available at logs.path if needed.
 type StageEvent struct {
 	Timestamp string  `json:"ts"`
 	EventType string  `json:"event_type"`
 	Stage     string  `json:"stage"`
 	Message   string  `json:"message"`
 	Duration  float64 `json:"duration_seconds,omitempty"`
-	RawJSON   string  `json:"raw_json"`
 }
 
 // RipCacheReport captures the rip cache metadata for a queue item.
@@ -243,11 +253,12 @@ type EncodingReport struct {
 
 // MediaFileProbe captures ffprobe output for a single media file.
 type MediaFileProbe struct {
-	Path        string         `json:"path"`
-	Role        string         `json:"role"`
-	EpisodeKey  string         `json:"episode_key,omitempty"`
-	Probe       ffprobe.Result `json:"probe"`
-	SizeBytes   int64          `json:"size_bytes"`
-	DurationSec float64        `json:"duration_seconds"`
-	Error       string         `json:"error,omitempty"`
+	Path           string         `json:"path"`
+	Role           string         `json:"role"`
+	EpisodeKey     string         `json:"episode_key,omitempty"`
+	Representative bool           `json:"representative,omitempty"`
+	Probe          ffprobe.Result `json:"probe"`
+	SizeBytes      int64          `json:"size_bytes"`
+	DurationSec    float64        `json:"duration_seconds"`
+	Error          string         `json:"error,omitempty"`
 }

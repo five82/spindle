@@ -110,6 +110,29 @@ func TestComputeEpisodeConsistency(t *testing.T) {
 				CodecName: ac, CodecType: "audio", Channels: 6, ChannelLayout: "5.1",
 			})
 		}
+		// Add a default subtitle stream.
+		streams = append(streams, ffprobe.Stream{
+			CodecName: "subrip", CodecType: "subtitle",
+			Tags: map[string]string{"language": "eng"},
+		})
+		return MediaFileProbe{
+			EpisodeKey:  key,
+			DurationSec: 2400,
+			SizeBytes:   1000000,
+			Probe:       ffprobe.Result{Streams: streams},
+		}
+	}
+
+	makeProbeWithSubs := func(key, codec string, w, h int, subs []ffprobe.Stream, audioCodecs ...string) MediaFileProbe {
+		streams := []ffprobe.Stream{
+			{CodecName: codec, CodecType: "video", Width: w, Height: h},
+		}
+		for _, ac := range audioCodecs {
+			streams = append(streams, ffprobe.Stream{
+				CodecName: ac, CodecType: "audio", Channels: 6, ChannelLayout: "5.1",
+			})
+		}
+		streams = append(streams, subs...)
 		return MediaFileProbe{
 			EpisodeKey:  key,
 			DurationSec: 2400,
@@ -163,6 +186,44 @@ func TestComputeEpisodeConsistency(t *testing.T) {
 				{EpisodeKey: "s01e02", Error: "fail"},
 			},
 			wantNil: true,
+		},
+		{
+			name: "subtitle codec difference is a deviation",
+			probes: []MediaFileProbe{
+				makeProbeWithSubs("s01e01", "av1", 1920, 1080,
+					[]ffprobe.Stream{{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}}},
+					"opus"),
+				makeProbeWithSubs("s01e02", "av1", 1920, 1080,
+					[]ffprobe.Stream{{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}}},
+					"opus"),
+				makeProbeWithSubs("s01e03", "av1", 1920, 1080,
+					[]ffprobe.Stream{{CodecName: "ass", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}}},
+					"opus"),
+			},
+			wantDeviations: 1,
+		},
+		{
+			name: "forced subtitle difference is a deviation",
+			probes: []MediaFileProbe{
+				makeProbeWithSubs("s01e01", "av1", 1920, 1080,
+					[]ffprobe.Stream{
+						{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}},
+						{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}, Disposition: map[string]int{"forced": 1}},
+					},
+					"opus"),
+				makeProbeWithSubs("s01e02", "av1", 1920, 1080,
+					[]ffprobe.Stream{
+						{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}},
+						{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}, Disposition: map[string]int{"forced": 1}},
+					},
+					"opus"),
+				makeProbeWithSubs("s01e03", "av1", 1920, 1080,
+					[]ffprobe.Stream{
+						{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}},
+					},
+					"opus"),
+			},
+			wantDeviations: 1,
 		},
 	}
 
@@ -595,6 +656,130 @@ func TestDetectAnomalies(t *testing.T) {
 			}
 			if tt.check != nil {
 				tt.check(t, anomalies)
+			}
+		})
+	}
+}
+
+func TestCompressMediaProbes(t *testing.T) {
+	makeProbe := func(key string) MediaFileProbe {
+		return MediaFileProbe{
+			EpisodeKey:  key,
+			DurationSec: 2400,
+			SizeBytes:   1000000,
+			Probe: ffprobe.Result{
+				Streams: []ffprobe.Stream{
+					{CodecName: "av1", CodecType: "video", Width: 1920, Height: 1080},
+					{CodecName: "opus", CodecType: "audio", Channels: 6, ChannelLayout: "5.1"},
+					{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}},
+				},
+			},
+		}
+	}
+
+	majorityProfile := buildProfileSummary(makeProbe("s01e01"))
+
+	tests := []struct {
+		name             string
+		probes           []MediaFileProbe
+		consistency      *EpisodeConsistency
+		wantCount        int
+		wantOmitted      int
+		wantRepresentIdx int // index of representative probe, -1 if none expected
+	}{
+		{
+			name:             "nil consistency passes through",
+			probes:           []MediaFileProbe{makeProbe("s01e01"), makeProbe("s01e02")},
+			consistency:      nil,
+			wantCount:        2,
+			wantOmitted:      0,
+			wantRepresentIdx: -1,
+		},
+		{
+			name:   "keeps representative and omits rest",
+			probes: []MediaFileProbe{makeProbe("s01e01"), makeProbe("s01e02"), makeProbe("s01e03")},
+			consistency: &EpisodeConsistency{
+				MajorityProfile: majorityProfile,
+				MajorityCount:   3,
+				TotalEpisodes:   3,
+			},
+			wantCount:        1,
+			wantOmitted:      2,
+			wantRepresentIdx: 0,
+		},
+		{
+			name: "keeps error probes",
+			probes: []MediaFileProbe{
+				makeProbe("s01e01"),
+				{EpisodeKey: "s01e02", Error: "file not found"},
+				makeProbe("s01e03"),
+			},
+			consistency: &EpisodeConsistency{
+				MajorityProfile: majorityProfile,
+				MajorityCount:   2,
+				TotalEpisodes:   2,
+			},
+			wantCount:        2, // representative + error
+			wantOmitted:      1,
+			wantRepresentIdx: 0,
+		},
+		{
+			name: "keeps deviation probes",
+			probes: []MediaFileProbe{
+				makeProbe("s01e01"),
+				makeProbe("s01e02"),
+				{
+					EpisodeKey:  "s01e03",
+					DurationSec: 2400,
+					SizeBytes:   1000000,
+					Probe: ffprobe.Result{
+						Streams: []ffprobe.Stream{
+							{CodecName: "av1", CodecType: "video", Width: 1280, Height: 720},
+							{CodecName: "opus", CodecType: "audio", Channels: 6, ChannelLayout: "5.1"},
+							{CodecName: "subrip", CodecType: "subtitle", Tags: map[string]string{"language": "eng"}},
+						},
+					},
+				},
+			},
+			consistency: &EpisodeConsistency{
+				MajorityProfile: majorityProfile,
+				MajorityCount:   2,
+				TotalEpisodes:   3,
+				Deviations:      []ProfileDeviation{{EpisodeKey: "s01e03", Differences: []string{"resolution"}}},
+			},
+			wantCount:        2, // representative + deviation
+			wantOmitted:      1,
+			wantRepresentIdx: 0,
+		},
+		{
+			name: "keeps movie probes (no episode key)",
+			probes: []MediaFileProbe{
+				{Path: "/movie.mkv", Role: "encoded", DurationSec: 7200, SizeBytes: 5000000},
+			},
+			consistency: &EpisodeConsistency{
+				MajorityProfile: majorityProfile,
+				MajorityCount:   1,
+				TotalEpisodes:   1,
+			},
+			wantCount:        1,
+			wantOmitted:      0,
+			wantRepresentIdx: -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, omitted := compressMediaProbes(tt.probes, tt.consistency)
+			if len(result) != tt.wantCount {
+				t.Errorf("expected %d probes, got %d", tt.wantCount, len(result))
+			}
+			if omitted != tt.wantOmitted {
+				t.Errorf("expected %d omitted, got %d", tt.wantOmitted, omitted)
+			}
+			if tt.wantRepresentIdx >= 0 && tt.wantRepresentIdx < len(result) {
+				if !result[tt.wantRepresentIdx].Representative {
+					t.Errorf("expected probe at index %d to be representative", tt.wantRepresentIdx)
+				}
 			}
 		})
 	}
