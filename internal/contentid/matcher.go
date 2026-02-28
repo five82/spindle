@@ -35,6 +35,7 @@ type Matcher struct {
 	tmdb      seasonFetcher
 	languages []string
 	cache     *opensubtitles.Cache
+	llm       llmVerifier // optional: second-level episode verification
 }
 
 type subtitleGenerator interface {
@@ -76,6 +77,15 @@ func WithSeasonFetcher(fetcher seasonFetcher) Option {
 	return func(m *Matcher) {
 		if fetcher != nil {
 			m.tmdb = fetcher
+		}
+	}
+}
+
+// WithLLMClient injects an LLM client for second-level episode verification.
+func WithLLMClient(client llmVerifier) Option {
+	return func(m *Matcher) {
+		if client != nil {
+			m.llm = client
 		}
 	}
 }
@@ -325,6 +335,26 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 		env.Attributes["content_id_needs_review"] = true
 		env.Attributes["content_id_review_reason"] = refinement.ReviewReason
 	}
+
+	// LLM-based second-level verification for low-confidence matches.
+	if m.llm != nil {
+		verified, vr := verifyMatches(ctx, m.llm, matches, ripPrints, refPrints, m.logger)
+		matches = verified
+		if vr != nil && vr.Challenged > 0 {
+			if vr.NeedsReview {
+				if env.Attributes == nil {
+					env.Attributes = make(map[string]any)
+				}
+				env.Attributes["content_id_needs_review"] = true
+				if existing, ok := env.Attributes["content_id_review_reason"].(string); ok && existing != "" {
+					env.Attributes["content_id_review_reason"] = existing + "; " + vr.ReviewReason
+				} else {
+					env.Attributes["content_id_review_reason"] = vr.ReviewReason
+				}
+			}
+		}
+	}
+
 	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches, progress)
 	m.attachMatchAttributes(env, matches)
 	attachTranscriptPaths(env, ripPrints)

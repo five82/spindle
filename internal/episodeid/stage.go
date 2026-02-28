@@ -14,6 +14,7 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
+	"spindle/internal/services/llm"
 	"spindle/internal/stage"
 )
 
@@ -30,7 +31,17 @@ type EpisodeIdentifier struct {
 func NewEpisodeIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *EpisodeIdentifier {
 	var matcher *contentid.Matcher
 	if cfg != nil && cfg.Subtitles.OpenSubtitlesEnabled {
-		matcher = contentid.NewMatcher(cfg, logger)
+		var opts []contentid.Option
+		if llmCfg := cfg.GetLLM(); llmCfg.APIKey != "" {
+			opts = append(opts, contentid.WithLLMClient(llm.NewClient(llm.Config{
+				APIKey:  llmCfg.APIKey,
+				BaseURL: llmCfg.BaseURL,
+				Model:   llmCfg.Model,
+				Referer: llmCfg.Referer,
+				Title:   llmCfg.Title,
+			})))
+		}
+		matcher = contentid.NewMatcher(cfg, logger, opts...)
 	}
 	id := &EpisodeIdentifier{
 		cfg:     cfg,
