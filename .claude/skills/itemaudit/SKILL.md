@@ -22,13 +22,13 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
 
 ### Phase 1: Gather Artifacts
 
-Run the `audit-gather` subcommand to collect all artifacts in a single pass:
+Run the `audit-gather` subcommand to collect all artifacts in a single pass, saving to a temp file:
 
 ```bash
-spindle audit-gather <item_id>
+spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 ```
 
-This returns a JSON report containing:
+This produces a JSON report containing:
 - **`item`**: Queue item summary (status, flags, paths, timestamps)
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply, media type, disc source, edition)
 - **`logs`**: Parsed log entries — decisions, warnings, errors, and stage timing events with raw JSON
@@ -63,7 +63,20 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 
 After running `spindle audit-gather`, process the full JSON output through a **single comprehensive extraction script** rather than making many narrow extraction passes. The script should produce one compact output that enables all subsequent analysis phases without further extraction calls.
 
-**Shell mechanics:** Always pass the extraction script via a single-quoted heredoc (`python3 << 'PYEOF'`), never via `python3 -c "..."`. The `-c` form breaks because bash interprets `!`, `\`, and other special characters inside double quotes.
+**Shell mechanics:**
+1. **Save audit-gather output to a temp file first:**
+   ```bash
+   spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
+   ```
+2. **Pass the extraction script via a single-quoted heredoc**, never via `python3 -c "..."` (the `-c` form breaks because bash interprets `!`, `\`, and other special characters inside double quotes):
+   ```bash
+   python3 << 'PYEOF'
+   import json
+   data = json.load(open('/tmp/spindle-audit-<item_id>.json'))
+   # ... extraction logic ...
+   PYEOF
+   ```
+3. **Never pipe JSON into a heredoc script** (`cat file | python3 << 'PYEOF'`). The heredoc and pipe both compete for stdin — the heredoc wins (providing the script), so `json.load(sys.stdin)` gets nothing, or worse the JSON is interpreted as Python code.
 
 The extraction script should:
 
