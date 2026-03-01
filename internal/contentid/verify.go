@@ -80,49 +80,18 @@ func verifyMatches(
 
 		ripPath := findRipPath(rips, m.EpisodeKey)
 		if ripPath == "" {
-			logger.Warn("LLM verification failed, keeping original match",
-				logging.String(logging.FieldEventType, "llm_verification_error"),
-				logging.String(logging.FieldErrorHint, "rip SRT not found; original cosine match retained"),
-				logging.String(logging.FieldImpact, "match not verified by LLM"),
-				logging.String("episode_key", m.EpisodeKey),
-				logging.Int("target_episode", m.TargetEpisode),
-			)
-			vr.NeedsReview = true
-			if vr.ReviewReason == "" {
-				vr.ReviewReason = "llm verification error"
-			}
+			logVerifySkip(logger, vr, m, "rip SRT not found; original cosine match retained", nil)
 			continue
 		}
 		ref, ok := findRef(refs, m.TargetEpisode)
 		if !ok || ref.CachePath == "" {
-			logger.Warn("LLM verification failed, keeping original match",
-				logging.String(logging.FieldEventType, "llm_verification_error"),
-				logging.String(logging.FieldErrorHint, "reference SRT not found; original cosine match retained"),
-				logging.String(logging.FieldImpact, "match not verified by LLM"),
-				logging.String("episode_key", m.EpisodeKey),
-				logging.Int("target_episode", m.TargetEpisode),
-			)
-			vr.NeedsReview = true
-			if vr.ReviewReason == "" {
-				vr.ReviewReason = "llm verification error"
-			}
+			logVerifySkip(logger, vr, m, "reference SRT not found; original cosine match retained", nil)
 			continue
 		}
 
 		ev, err := verifySingleMatch(ctx, client, m, ripPath, ref.CachePath, logger)
 		if err != nil {
-			logger.Warn("LLM verification failed, keeping original match",
-				logging.String(logging.FieldEventType, "llm_verification_error"),
-				logging.String(logging.FieldErrorHint, "LLM call failed; original cosine match retained"),
-				logging.String(logging.FieldImpact, "match not verified by LLM"),
-				logging.String("episode_key", m.EpisodeKey),
-				logging.Int("target_episode", m.TargetEpisode),
-				logging.Error(err),
-			)
-			vr.NeedsReview = true
-			if vr.ReviewReason == "" {
-				vr.ReviewReason = "llm verification error"
-			}
+			logVerifySkip(logger, vr, m, "LLM call failed; original cosine match retained", err)
 			continue
 		}
 		if ev.SameEpisode {
@@ -444,6 +413,26 @@ Target episode: %d
 
 === TRANSCRIPT B (OpenSubtitles reference) ===
 %s`, episodeKey, targetEpisode, whisperXText, referenceText)
+}
+
+// logVerifySkip logs a verification skip, marks the result for review, and
+// optionally includes an error attribute.
+func logVerifySkip(logger *slog.Logger, vr *verifyResult, m matchResult, hint string, err error) {
+	attrs := []logging.Attr{
+		logging.String(logging.FieldEventType, "llm_verification_error"),
+		logging.String(logging.FieldErrorHint, hint),
+		logging.String(logging.FieldImpact, "match not verified by LLM"),
+		logging.String("episode_key", m.EpisodeKey),
+		logging.Int("target_episode", m.TargetEpisode),
+	}
+	if err != nil {
+		attrs = append(attrs, logging.Error(err))
+	}
+	logger.Warn("LLM verification failed, keeping original match", logging.Args(attrs...)...)
+	vr.NeedsReview = true
+	if vr.ReviewReason == "" {
+		vr.ReviewReason = "llm verification error"
+	}
 }
 
 // logVerifySummary logs the overall verification summary.

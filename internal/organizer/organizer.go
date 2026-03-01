@@ -93,7 +93,7 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger.Debug("starting organization")
 
 	// Cross-stage validation: check for missing encoded episodes
-	if missing := env.MissingEpisodes("encoded"); len(missing) > 0 {
+	if missing := env.MissingEpisodes(ripspec.AssetKindEncoded); len(missing) > 0 {
 		logger.Warn("missing encoded episodes at organizer start",
 			logging.Int("missing_count", len(missing)),
 			logging.String("missing_episodes", strings.Join(missing, ",")),

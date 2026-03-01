@@ -67,7 +67,7 @@ func buildEncodeJobs(env ripspec.Envelope, encodedDir string) ([]encodeJob, erro
 	}
 	jobs := make([]encodeJob, 0, len(env.Episodes))
 	for _, episode := range env.Episodes {
-		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, episode.Key)
 		if !ok || strings.TrimSpace(asset.Path) == "" {
 			return nil, fmt.Errorf("missing ripped asset for %s", episode.Key)
 		}

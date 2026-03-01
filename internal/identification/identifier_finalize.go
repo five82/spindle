@@ -52,7 +52,7 @@ func buildAttributes(logger *slog.Logger, scanResult *disc.ScanResult, discSourc
 		}
 	}
 	if discNumber > 0 {
-		attributes["disc_number"] = discNumber
+		attributes[ripspec.AttrDiscNumber] = discNumber
 	}
 	hasForcedTrack := false
 	if scanResult != nil {

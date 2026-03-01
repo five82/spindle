@@ -48,7 +48,7 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger)
 			result.Missing = append(result.Missing, episode.Key)
 			continue
 		}
-		env.Assets.AddAsset("ripped", ripspec.Asset{EpisodeKey: episode.Key, TitleID: episode.TitleID, Path: path})
+		env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{EpisodeKey: episode.Key, TitleID: episode.TitleID, Path: path})
 		result.Assigned++
 	}
 	return result
@@ -61,7 +61,7 @@ func episodeAssetPaths(env ripspec.Envelope) []string {
 	seen := make(map[string]struct{}, len(env.Episodes))
 	var paths []string
 	for _, episode := range env.Episodes {
-		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, episode.Key)
 		if !ok {
 			continue
 		}

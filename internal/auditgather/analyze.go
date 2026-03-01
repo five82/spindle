@@ -625,10 +625,10 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				})
 			}
 		}
-		checkAssetStage("ripped", a.AssetHealth.Ripped)
-		checkAssetStage("encoded", a.AssetHealth.Encoded)
-		checkAssetStage("subtitled", a.AssetHealth.Subtitled)
-		checkAssetStage("final", a.AssetHealth.Final)
+		checkAssetStage(ripspec.AssetKindRipped, a.AssetHealth.Ripped)
+		checkAssetStage(ripspec.AssetKindEncoded, a.AssetHealth.Encoded)
+		checkAssetStage(ripspec.AssetKindSubtitled, a.AssetHealth.Subtitled)
+		checkAssetStage(ripspec.AssetKindFinal, a.AssetHealth.Final)
 	}
 
 	// Cross-episode deviations.

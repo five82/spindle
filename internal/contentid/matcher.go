@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,13 @@ import (
 	"spindle/internal/subtitles"
 	"spindle/internal/subtitles/opensubtitles"
 	"spindle/internal/textutil"
+)
+
+// Progress phase constants reported by MatchWithProgress.
+const (
+	PhaseTranscribe = "transcribe"
+	PhaseReference  = "reference"
+	PhaseApply      = "apply"
 )
 
 // Matcher coordinates WhisperX transcription and OpenSubtitles comparison to
@@ -329,29 +337,15 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	}
 
 	if refinement.NeedsReview {
-		if env.Attributes == nil {
-			env.Attributes = make(map[string]any)
-		}
-		env.Attributes[ripspec.AttrContentIDNeedsReview] = true
-		env.Attributes[ripspec.AttrContentIDReviewReason] = refinement.ReviewReason
+		env.AppendReviewReason(refinement.ReviewReason)
 	}
 
 	// LLM-based second-level verification for low-confidence matches.
 	if m.llm != nil {
 		verified, vr := verifyMatches(ctx, m.llm, matches, ripPrints, refPrints, m.logger)
 		matches = verified
-		if vr != nil && vr.Challenged > 0 {
-			if vr.NeedsReview {
-				if env.Attributes == nil {
-					env.Attributes = make(map[string]any)
-				}
-				env.Attributes[ripspec.AttrContentIDNeedsReview] = true
-				if existing, ok := env.Attributes[ripspec.AttrContentIDReviewReason].(string); ok && existing != "" {
-					env.Attributes[ripspec.AttrContentIDReviewReason] = existing + "; " + vr.ReviewReason
-				} else {
-					env.Attributes[ripspec.AttrContentIDReviewReason] = vr.ReviewReason
-				}
-			}
+		if vr != nil && vr.Challenged > 0 && vr.NeedsReview {
+			env.AppendReviewReason(vr.ReviewReason)
 		}
 	}
 
@@ -465,7 +459,7 @@ func (m *Matcher) buildContext(item *queue.Item, env *ripspec.Envelope) (episode
 		ctx.SubtitleCtx.Title = ctx.ShowTitle
 	}
 	if env != nil && len(env.Attributes) > 0 {
-		if disc, ok := asInt(env.Attributes["disc_number"]); ok {
+		if disc, ok := asInt(env.Attributes[ripspec.AttrDiscNumber]); ok {
 			ctx.DiscNumber = disc
 		}
 	}
@@ -477,17 +471,21 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 	if err := os.MkdirAll(episodeDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create contentid dir: %w", err)
 	}
-	work := make([]ripspec.Episode, 0, len(env.Episodes))
+	type episodeWork struct {
+		episode   ripspec.Episode
+		assetPath string
+	}
+	work := make([]episodeWork, 0, len(env.Episodes))
 	for _, episode := range env.Episodes {
-		asset, ok := env.Assets.FindAsset("ripped", episode.Key)
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, episode.Key)
 		if !ok || strings.TrimSpace(asset.Path) == "" {
 			continue
 		}
-		work = append(work, episode)
+		work = append(work, episodeWork{episode: episode, assetPath: asset.Path})
 	}
 	fingerprints := make([]ripFingerprint, 0, len(work))
-	for idx, episode := range work {
-		asset, _ := env.Assets.FindAsset("ripped", episode.Key)
+	for idx, ew := range work {
+		episode := ew.episode
 		workDir := filepath.Join(episodeDir, episode.Key)
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create workdir %s: %w", workDir, err)
@@ -497,7 +495,7 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 			language = m.languages[0]
 		}
 		req := subtitles.GenerateRequest{
-			SourcePath: asset.Path,
+			SourcePath: ew.assetPath,
 			WorkDir:    workDir,
 			OutputDir:  workDir,
 			BaseName:   fmt.Sprintf("%s-contentid", episode.Key),
@@ -524,7 +522,7 @@ func (m *Matcher) generateEpisodeFingerprints(ctx context.Context, info episodeC
 			Vector:     fp,
 		})
 		if progress != nil {
-			progress("transcribe", idx+1, len(work), episode.Key)
+			progress(PhaseTranscribe, idx+1, len(work), episode.Key)
 		}
 		m.logger.Debug("content id whisperx transcript ready",
 			logging.String("episode_key", episode.Key),
@@ -552,7 +550,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		episodeData, ok := findEpisodeByNumber(season, num)
 		if !ok {
 			if progress != nil {
-				progress("reference", idx+1, len(unique), episodeKey)
+				progress(PhaseReference, idx+1, len(unique), episodeKey)
 			}
 			continue
 		}
@@ -633,7 +631,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 				)
 			}
 			if progress != nil {
-				progress("reference", idx+1, len(unique), episodeKey)
+				progress(PhaseReference, idx+1, len(unique), episodeKey)
 			}
 			continue
 		}
@@ -732,7 +730,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 		fp := newFingerprint(text)
 		if fp == nil {
 			if progress != nil {
-				progress("reference", idx+1, len(unique), episodeKey)
+				progress(PhaseReference, idx+1, len(unique), episodeKey)
 			}
 			return nil, fmt.Errorf("empty opensubtitles transcript for S%02dE%02d", season.SeasonNumber, num)
 		}
@@ -745,7 +743,7 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			CachePath:     cachePath,
 		})
 		if progress != nil {
-			progress("reference", idx+1, len(unique), episodeKey)
+			progress(PhaseReference, idx+1, len(unique), episodeKey)
 		}
 		m.logger.Debug("opensubtitles reference downloaded",
 			logging.Int("season", episodeData.SeasonNumber),
@@ -952,7 +950,7 @@ func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails
 			title.EpisodeAirDate = strings.TrimSpace(target.AirDate)
 		}
 		if progress != nil {
-			progress("apply", idx+1, len(matches), match.EpisodeKey)
+			progress(PhaseApply, idx+1, len(matches), match.EpisodeKey)
 		}
 		m.logger.Debug("content id episode matched",
 			logging.String("episode_key", match.EpisodeKey),
@@ -967,9 +965,6 @@ func (m *Matcher) applyMatches(env *ripspec.Envelope, season *tmdb.SeasonDetails
 func (m *Matcher) attachMatchAttributes(env *ripspec.Envelope, matches []matchResult) {
 	if env == nil || len(matches) == 0 {
 		return
-	}
-	if env.Attributes == nil {
-		env.Attributes = make(map[string]any)
 	}
 	payload := make([]map[string]any, 0, len(matches))
 	for _, match := range matches {
@@ -990,16 +985,13 @@ func (m *Matcher) attachMatchAttributes(env *ripspec.Envelope, matches []matchRe
 		}
 		payload = append(payload, entry)
 	}
-	env.Attributes["content_id_matches"] = payload
-	env.Attributes["content_id_method"] = "whisperx_opensubtitles"
+	env.SetAttribute(ripspec.AttrContentIDMatches, payload)
+	env.SetAttribute(ripspec.AttrContentIDMethod, "whisperx_opensubtitles")
 }
 
 func attachTranscriptPaths(env *ripspec.Envelope, fingerprints []ripFingerprint) {
 	if env == nil || len(fingerprints) == 0 {
 		return
-	}
-	if env.Attributes == nil {
-		env.Attributes = make(map[string]any)
 	}
 	paths := make(map[string]string, len(fingerprints))
 	for _, fp := range fingerprints {
@@ -1008,7 +1000,7 @@ func attachTranscriptPaths(env *ripspec.Envelope, fingerprints []ripFingerprint)
 		}
 	}
 	if len(paths) > 0 {
-		env.Attributes["content_id_transcripts"] = paths
+		env.SetAttribute(ripspec.AttrContentIDTranscripts, paths)
 	}
 }
 
@@ -1016,10 +1008,7 @@ func markEpisodesSynchronized(env *ripspec.Envelope) {
 	if env == nil {
 		return
 	}
-	if env.Attributes == nil {
-		env.Attributes = make(map[string]any)
-	}
-	env.Attributes["episodes_synchronized"] = true
+	env.SetAttribute(ripspec.AttrEpisodesSynchronized, true)
 }
 
 func (m *Matcher) updateMetadata(item *queue.Item, matches []matchResult, season int) {
@@ -1036,7 +1025,7 @@ func (m *Matcher) updateMetadata(item *queue.Item, matches []matchResult, season
 		return
 	}
 	sort.Ints(episodes)
-	episodes = uniqueInts(episodes)
+	episodes = slices.Compact(episodes)
 	var payload map[string]any
 	if strings.TrimSpace(item.MetadataJSON) != "" {
 		if err := json.Unmarshal([]byte(item.MetadataJSON), &payload); err != nil {
@@ -1253,20 +1242,6 @@ func findEpisodeByNumber(season *tmdb.SeasonDetails, number int) (tmdb.Episode, 
 		}
 	}
 	return tmdb.Episode{}, false
-}
-
-func uniqueInts(sorted []int) []int {
-	if len(sorted) == 0 {
-		return nil
-	}
-	result := make([]int, 0, len(sorted))
-	result = append(result, sorted[0])
-	for _, v := range sorted[1:] {
-		if v != result[len(result)-1] {
-			result = append(result, v)
-		}
-	}
-	return result
 }
 
 func asInt(value any) (int, bool) {

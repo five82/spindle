@@ -596,9 +596,9 @@ func (f *queueStoreFacade) RetryEpisode(ctx context.Context, itemID int64, episo
 	}
 
 	// Clear failed assets for this episode
-	env.Assets.ClearFailedAsset("encoded", episodeKey)
-	env.Assets.ClearFailedAsset("subtitled", episodeKey)
-	env.Assets.ClearFailedAsset("final", episodeKey)
+	env.Assets.ClearFailedAsset(ripspec.AssetKindEncoded, episodeKey)
+	env.Assets.ClearFailedAsset(ripspec.AssetKindSubtitled, episodeKey)
+	env.Assets.ClearFailedAsset(ripspec.AssetKindFinal, episodeKey)
 
 	// Re-encode and persist
 	encoded, err := env.Encode()
@@ -634,13 +634,13 @@ func determineRetryStatus(env *ripspec.Envelope, episodeKey string) queue.Status
 	}
 
 	// Check which stage failed (in reverse order of workflow)
-	if asset, ok := env.Assets.FindAsset("final", episodeKey); ok && asset.IsFailed() {
+	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindFinal, episodeKey); ok && asset.IsFailed() {
 		return queue.StatusEncoded // Re-run organizing
 	}
-	if asset, ok := env.Assets.FindAsset("subtitled", episodeKey); ok && asset.IsFailed() {
+	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, episodeKey); ok && asset.IsFailed() {
 		return queue.StatusEncoded // Re-run subtitling
 	}
-	if asset, ok := env.Assets.FindAsset("encoded", episodeKey); ok && asset.IsFailed() {
+	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, episodeKey); ok && asset.IsFailed() {
 		// Check if episode identification was completed
 		if len(env.Episodes) > 0 {
 			return queue.StatusEpisodeIdentified // Re-run encoding after episode ID

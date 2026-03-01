@@ -184,10 +184,10 @@ func TestOrganizerPersistsRipSpecPerEpisode(t *testing.T) {
 	if len(midEnv.Assets.Final) != 1 {
 		t.Fatalf("expected 1 final asset mid-run, got %d", len(midEnv.Assets.Final))
 	}
-	if _, ok := midEnv.Assets.FindAsset("final", ep1Key); !ok {
+	if _, ok := midEnv.Assets.FindAsset(ripspec.AssetKindFinal, ep1Key); !ok {
 		t.Fatalf("expected final asset for %s mid-run", ep1Key)
 	}
-	if _, ok := midEnv.Assets.FindAsset("final", ep2Key); ok {
+	if _, ok := midEnv.Assets.FindAsset(ripspec.AssetKindFinal, ep2Key); ok {
 		t.Fatalf("did not expect final asset for %s mid-run", ep2Key)
 	}
 

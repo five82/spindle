@@ -36,7 +36,7 @@ func buildOrganizeJobs(env ripspec.Envelope, base queue.Metadata) ([]organizeJob
 	}
 	jobs := make([]organizeJob, 0, len(env.Episodes))
 	for _, ep := range env.Episodes {
-		asset, ok := env.Assets.FindAsset("encoded", ep.Key)
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, ep.Key)
 		if !ok || strings.TrimSpace(asset.Path) == "" {
 			return nil, fmt.Errorf("missing encoded asset for %s", ep.Key)
 		}
@@ -239,7 +239,7 @@ func (o *Organizer) processEpisode(ctx context.Context, item *queue.Item, env *r
 	label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
 
 	// Skip already-organized episodes (enables resume after partial failure)
-	if asset, ok := env.Assets.FindAsset("final", episodeKey); ok && asset.IsCompleted() {
+	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindFinal, episodeKey); ok && asset.IsCompleted() {
 		logger.Info("episode organization decision",
 			logging.String(logging.FieldDecisionType, "episode_organization"),
 			logging.String("decision_result", "skipped"),
@@ -318,7 +318,7 @@ func (o *Organizer) recordEpisodeAsset(ctx context.Context, item *queue.Item, en
 	if env == nil {
 		return
 	}
-	env.Assets.AddAsset("final", ripspec.Asset{
+	env.Assets.AddAsset(ripspec.AssetKindFinal, ripspec.Asset{
 		EpisodeKey: episode.Key,
 		TitleID:    episode.TitleID,
 		Path:       path,

@@ -117,7 +117,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		episodeKey := normalizeEpisodeKey(target.EpisodeKey)
 
 		// Skip already-completed subtitled episodes (enables resume after partial failure)
-		if asset, ok := env.Assets.FindAsset("subtitled", episodeKey); ok && asset.IsCompleted() {
+		if asset, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, episodeKey); ok && asset.IsCompleted() {
 			if s.logger != nil {
 				s.logger.Debug("skipping already-subtitled episode",
 					logging.String("episode_key", episodeKey),
@@ -171,7 +171,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 					)
 				}
 				// Record per-episode failure and continue to next episode
-				env.Assets.AddAsset("subtitled", ripspec.Asset{
+				env.Assets.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
 					EpisodeKey: target.EpisodeKey,
 					TitleID:    target.TitleID,
 					Path:       "",
@@ -217,7 +217,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		}
 
 		// Mark as completed when adding successful asset
-		env.Assets.AddAsset("subtitled", ripspec.Asset{
+		env.Assets.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
 			EpisodeKey:     target.EpisodeKey,
 			TitleID:        target.TitleID,
 			Path:           result.SubtitlePath,

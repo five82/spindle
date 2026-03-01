@@ -336,9 +336,9 @@ func indexAssets(assets ripspec.Assets) map[string]episodeAssets {
 			}
 			entry := lookup[key]
 			switch kind {
-			case "ripped":
+			case ripspec.AssetKindRipped:
 				entry.RippedPath = asset.Path
-			case "encoded":
+			case ripspec.AssetKindEncoded:
 				entry.EncodedPath = asset.Path
 				// Track encoded status/error since it's the first per-episode stage
 				if asset.Status != "" {
@@ -347,14 +347,14 @@ func indexAssets(assets ripspec.Assets) map[string]episodeAssets {
 				if asset.ErrorMsg != "" {
 					entry.ErrorMessage = asset.ErrorMsg
 				}
-			case "subtitled":
+			case ripspec.AssetKindSubtitled:
 				entry.SubtitledPath = asset.Path
 				// Override with subtitled status if it failed
 				if asset.Status == ripspec.AssetStatusFailed {
 					entry.Status = asset.Status
 					entry.ErrorMessage = asset.ErrorMsg
 				}
-			case "final":
+			case ripspec.AssetKindFinal:
 				entry.FinalPath = asset.Path
 				// Override with final status if it failed
 				if asset.Status == ripspec.AssetStatusFailed {
@@ -365,10 +365,10 @@ func indexAssets(assets ripspec.Assets) map[string]episodeAssets {
 			lookup[key] = entry
 		}
 	}
-	build("ripped", assets.Ripped)
-	build("encoded", assets.Encoded)
-	build("subtitled", assets.Subtitled)
-	build("final", assets.Final)
+	build(ripspec.AssetKindRipped, assets.Ripped)
+	build(ripspec.AssetKindEncoded, assets.Encoded)
+	build(ripspec.AssetKindSubtitled, assets.Subtitled)
+	build(ripspec.AssetKindFinal, assets.Final)
 	return lookup
 }
 
@@ -401,11 +401,11 @@ func indexMatches(attrs map[string]any) map[string]matchInfo {
 		return nil
 	}
 	var method string
-	if raw, ok := attrs["content_id_method"]; ok {
+	if raw, ok := attrs[ripspec.AttrContentIDMethod]; ok {
 		method = strings.TrimSpace(asString(raw))
 	}
 	var rawMatches []any
-	switch v := attrs["content_id_matches"].(type) {
+	switch v := attrs[ripspec.AttrContentIDMatches].(type) {
 	case []any:
 		rawMatches = v
 	case []map[string]any:
@@ -554,7 +554,7 @@ func deriveSubtitleGeneration(item *queue.Item) *SubtitleGenerationStatus {
 
 func episodesSynced(attrs map[string]any, episodes []ripspec.Episode, metadataJSON string) bool {
 	if len(attrs) > 0 {
-		if raw, ok := attrs["episodes_synchronized"]; ok {
+		if raw, ok := attrs[ripspec.AttrEpisodesSynchronized]; ok {
 			if flag, ok2 := raw.(bool); ok2 {
 				return flag
 			}
@@ -594,13 +594,13 @@ func makeEpisodeStageResolver(item *queue.Item) func(EpisodeStatus) string {
 		// Prefer concrete artefacts over inferred status.
 		switch {
 		case status.FinalPath != "":
-			return "final"
+			return ripspec.AssetKindFinal
 		case status.SubtitledPath != "":
-			return "subtitled"
+			return ripspec.AssetKindSubtitled
 		case status.EncodedPath != "":
-			return "encoded"
+			return ripspec.AssetKindEncoded
 		case status.RippedPath != "":
-			return "ripped"
+			return ripspec.AssetKindRipped
 		case queueStage != "":
 			if activeKey == "" {
 				return queueStage

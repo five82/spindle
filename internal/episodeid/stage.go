@@ -135,13 +135,13 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		}
 		episodeKey = strings.ToUpper(strings.TrimSpace(episodeKey))
 		switch phase {
-		case "transcribe":
+		case contentid.PhaseTranscribe:
 			item.ProgressMessage = fmt.Sprintf("Phase 1/3 - Generating transcripts (%d/%d - %s)", current, total, episodeKey)
 			item.ProgressPercent = 10 + 40*(float64(current)/float64(max(1, total)))
-		case "reference":
+		case contentid.PhaseReference:
 			item.ProgressMessage = fmt.Sprintf("Phase 2/3 - Downloading references (%d/%d - %s)", current, total, episodeKey)
 			item.ProgressPercent = 50 + 30*(float64(current)/float64(max(1, total)))
-		case "apply":
+		case contentid.PhaseApply:
 			item.ProgressMessage = fmt.Sprintf("Phase 3/3 - Applying matches (%d/%d - %s)", current, total, episodeKey)
 			item.ProgressPercent = 80 + 15*(float64(current)/float64(max(1, total)))
 			if encoded, encodeErr := env.Encode(); encodeErr == nil {
@@ -204,7 +204,9 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 			}
 		}
 		if len(lowConfidenceEpisodes) > 0 {
-			logger.Warn("low confidence episode matches detected",
+			flagForReview(logger, item,
+				fmt.Sprintf("low episode match confidence (%d episodes below %.0f%%)", len(lowConfidenceEpisodes), minMatchConfidence*100),
+				"low_confidence",
 				logging.Int("count", len(lowConfidenceEpisodes)),
 				logging.String("episodes", strings.Join(lowConfidenceEpisodes, ", ")),
 				logging.Float64("threshold", minMatchConfidence),
@@ -212,10 +214,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 				logging.String(logging.FieldErrorHint, "verify episode numbers manually before encoding"),
 				logging.String(logging.FieldImpact, "episodes may be incorrectly identified"),
 			)
-			item.NeedsReview = true
-			if item.ReviewReason == "" {
-				item.ReviewReason = fmt.Sprintf("low episode match confidence (%d episodes below %.0f%%)", len(lowConfidenceEpisodes), minMatchConfidence*100)
-			}
 		}
 
 		// Check for partial resolution: some episodes matched but others still unresolved
@@ -245,13 +243,9 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 				}
 			}
 			if !contiguous {
-				item.NeedsReview = true
-				if item.ReviewReason == "" {
-					item.ReviewReason = fmt.Sprintf(
-						"non-contiguous episode sequence: %d-%d",
-						resolvedNums[0], resolvedNums[len(resolvedNums)-1])
-				}
-				attrs := append(logging.DecisionAttrs("episode_contiguity", "needs_review", "sequence_gap"),
+				flagForReview(logger, item,
+					fmt.Sprintf("non-contiguous episode sequence: %d-%d", resolvedNums[0], resolvedNums[len(resolvedNums)-1]),
+					"sequence_gap",
 					logging.String(logging.FieldEventType, "episode_sequence_gap"),
 					logging.String(logging.FieldErrorHint, "verify disc contains expected episodes"),
 					logging.String(logging.FieldImpact, "episodes may be from different parts of the season"),
@@ -259,7 +253,6 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 					logging.Int("range_start", resolvedNums[0]),
 					logging.Int("range_end", resolvedNums[len(resolvedNums)-1]),
 				)
-				logger.Warn("non-contiguous episode sequence detected", logging.Args(attrs...)...)
 			} else {
 				logger.Info("episode contiguity decision",
 					logging.Args(logging.DecisionAttrs("episode_contiguity", "contiguous", "unbroken_sequence")...)...)
@@ -267,9 +260,7 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		}
 	}
 
-	item.ProgressStage = "Episode Identified"
-	item.ProgressMessage = "Episodes correlated with OpenSubtitles"
-	item.ProgressPercent = 100
+	item.SetProgressComplete("Episode Identified", "Episodes correlated with OpenSubtitles")
 	item.ActiveEpisodeKey = ""
 
 	logger.Info("episode identification stage summary",
@@ -303,9 +294,7 @@ func logSkipDecision(logger *slog.Logger, reason string, extraAttrs ...logging.A
 
 // setSkipProgress updates item fields for a skipped stage.
 func setSkipProgress(item *queue.Item, message string) {
-	item.ProgressStage = "Episode Identified"
-	item.ProgressMessage = message
-	item.ProgressPercent = 100
+	item.SetProgressComplete("Episode Identified", message)
 	item.ActiveEpisodeKey = ""
 }
 

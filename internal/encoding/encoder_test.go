@@ -308,10 +308,10 @@ func TestEncoderPersistsRipSpecPerEpisode(t *testing.T) {
 	if len(midEnv.Assets.Encoded) != 1 {
 		t.Fatalf("expected 1 encoded asset mid-run, got %d", len(midEnv.Assets.Encoded))
 	}
-	if _, ok := midEnv.Assets.FindAsset("encoded", ep1Key); !ok {
+	if _, ok := midEnv.Assets.FindAsset(ripspec.AssetKindEncoded, ep1Key); !ok {
 		t.Fatalf("expected encoded asset for %s mid-run", ep1Key)
 	}
-	if _, ok := midEnv.Assets.FindAsset("encoded", ep2Key); ok {
+	if _, ok := midEnv.Assets.FindAsset(ripspec.AssetKindEncoded, ep2Key); ok {
 		t.Fatalf("did not expect encoded asset for %s mid-run", ep2Key)
 	}
 
@@ -331,7 +331,7 @@ func TestEncoderPersistsRipSpecPerEpisode(t *testing.T) {
 	if len(finalEnv.Assets.Encoded) != 2 {
 		t.Fatalf("expected 2 encoded assets final, got %d", len(finalEnv.Assets.Encoded))
 	}
-	if _, ok := finalEnv.Assets.FindAsset("encoded", ep2Key); !ok {
+	if _, ok := finalEnv.Assets.FindAsset(ripspec.AssetKindEncoded, ep2Key); !ok {
 		t.Fatalf("expected encoded asset for %s final", ep2Key)
 	}
 }

@@ -510,22 +510,22 @@ func gatherMediaProbes(ctx context.Context, item *queue.Item, env *ripspec.Envel
 	if meta.IsMovie() {
 		// Single encoded file
 		if path := strings.TrimSpace(item.EncodedFile); path != "" {
-			probes = append(probes, probeFile(ctx, path, "encoded", ""))
+			probes = append(probes, probeFile(ctx, path, ripspec.AssetKindEncoded, ""))
 		}
 		// Final file if different
 		if path := strings.TrimSpace(item.FinalFile); path != "" && path != item.EncodedFile {
-			probes = append(probes, probeFile(ctx, path, "final", ""))
+			probes = append(probes, probeFile(ctx, path, ripspec.AssetKindFinal, ""))
 		}
 	} else {
 		// TV: probe each encoded episode asset, fall back to final if staging cleaned up
 		for _, asset := range env.Assets.Encoded {
 			if path := strings.TrimSpace(asset.Path); path != "" && asset.Status != ripspec.AssetStatusFailed {
-				p := probeFile(ctx, path, "encoded", asset.EpisodeKey)
+				p := probeFile(ctx, path, ripspec.AssetKindEncoded, asset.EpisodeKey)
 				if p.Error != "" {
 					// Staging cleaned up; try final path
-					if final, ok := env.Assets.FindAsset("final", asset.EpisodeKey); ok {
+					if final, ok := env.Assets.FindAsset(ripspec.AssetKindFinal, asset.EpisodeKey); ok {
 						if fpath := strings.TrimSpace(final.Path); fpath != "" {
-							p = probeFile(ctx, fpath, "final", asset.EpisodeKey)
+							p = probeFile(ctx, fpath, ripspec.AssetKindFinal, asset.EpisodeKey)
 						}
 					}
 				}

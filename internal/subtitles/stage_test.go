@@ -104,10 +104,10 @@ func TestStagePersistsRipSpecPerEpisode(t *testing.T) {
 	if len(midEnv.Assets.Subtitled) != 1 {
 		t.Fatalf("expected 1 subtitled asset mid-run, got %d", len(midEnv.Assets.Subtitled))
 	}
-	if _, ok := midEnv.Assets.FindAsset("subtitled", ep1Key); !ok {
+	if _, ok := midEnv.Assets.FindAsset(ripspec.AssetKindSubtitled, ep1Key); !ok {
 		t.Fatalf("expected subtitled asset for %s mid-run", ep1Key)
 	}
-	if _, ok := midEnv.Assets.FindAsset("subtitled", ep2Key); ok {
+	if _, ok := midEnv.Assets.FindAsset(ripspec.AssetKindSubtitled, ep2Key); ok {
 		t.Fatalf("did not expect subtitled asset for %s mid-run", ep2Key)
 	}
 	if midEnv.Attributes == nil {

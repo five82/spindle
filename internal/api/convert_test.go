@@ -26,9 +26,9 @@ func TestFromQueueItemIncludesEpisodes(t *testing.T) {
 			Final:   []ripspec.Asset{{EpisodeKey: ep1, Path: "/final/ep1.mkv"}},
 		},
 		Attributes: map[string]any{
-			"content_id_method":     "whisperx_opensubtitles",
-			"episodes_synchronized": true,
-			"content_id_matches": []map[string]any{{
+			ripspec.AttrContentIDMethod:      "whisperx_opensubtitles",
+			ripspec.AttrEpisodesSynchronized: true,
+			ripspec.AttrContentIDMatches: []map[string]any{{
 				"episode_key":       ep2,
 				"matched_episode":   2,
 				"score":             0.91,

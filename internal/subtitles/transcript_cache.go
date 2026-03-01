@@ -113,14 +113,14 @@ func (s *Stage) tryReuseCachedTranscript(target subtitleTarget, env *ripspec.Env
 }
 
 // lookupTranscriptPath retrieves the cached SRT path for an episode key from
-// env.Attributes["content_id_transcripts"]. It handles both the in-memory
+// env.Attributes[AttrContentIDTranscripts]. It handles both the in-memory
 // map[string]string type and the map[string]any type that results from JSON
 // round-tripping.
 func lookupTranscriptPath(env *ripspec.Envelope, episodeKey string) string {
 	if env == nil || len(env.Attributes) == 0 {
 		return ""
 	}
-	raw, ok := env.Attributes["content_id_transcripts"]
+	raw, ok := env.Attributes[ripspec.AttrContentIDTranscripts]
 	if !ok || raw == nil {
 		return ""
 	}

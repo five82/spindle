@@ -83,16 +83,16 @@ func TestEpisodeByKeyCaseInsensitive(t *testing.T) {
 
 func TestAssetsAddAssetReplacesAndSorts(t *testing.T) {
 	var assets Assets
-	assets.AddAsset("ripped", Asset{EpisodeKey: "s01e02", TitleID: 2, Path: "/tmp/2.mkv"})
-	assets.AddAsset("ripped", Asset{EpisodeKey: "s01e01", TitleID: 1, Path: "/tmp/1.mkv"})
+	assets.AddAsset(AssetKindRipped, Asset{EpisodeKey: "s01e02", TitleID: 2, Path: "/tmp/2.mkv"})
+	assets.AddAsset(AssetKindRipped, Asset{EpisodeKey: "s01e01", TitleID: 1, Path: "/tmp/1.mkv"})
 	if len(assets.Ripped) != 2 || assets.Ripped[0].EpisodeKey != "s01e01" {
 		t.Fatalf("expected assets sorted by key, got %+v", assets.Ripped)
 	}
-	assets.AddAsset("ripped", Asset{EpisodeKey: "s01e01", TitleID: 1, Path: "/tmp/1b.mkv"})
+	assets.AddAsset(AssetKindRipped, Asset{EpisodeKey: "s01e01", TitleID: 1, Path: "/tmp/1b.mkv"})
 	if len(assets.Ripped) != 2 || assets.Ripped[0].Path != "/tmp/1b.mkv" {
 		t.Fatalf("expected asset replacement, got %+v", assets.Ripped)
 	}
-	if _, ok := assets.FindAsset("ripped", "S01E01"); !ok {
+	if _, ok := assets.FindAsset(AssetKindRipped, "S01E01"); !ok {
 		t.Fatalf("expected FindAsset to match case-insensitively")
 	}
 }

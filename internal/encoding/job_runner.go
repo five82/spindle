@@ -75,7 +75,7 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 		label := fmt.Sprintf("S%02dE%02d", job.Episode.Season, job.Episode.Episode)
 
 		// Skip already-completed episodes (enables resume after partial failure)
-		if asset, ok := env.Assets.FindAsset("encoded", episodeKey); ok && asset.IsCompleted() {
+		if asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, episodeKey); ok && asset.IsCompleted() {
 			logger.Info("episode encoding decision",
 				logging.String(logging.FieldDecisionType, "episode_encoding"),
 				logging.String("decision_result", "skipped"),
@@ -116,7 +116,7 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 					logging.Error(err),
 					logging.String(logging.FieldEventType, "episode_encode_failed"),
 				)
-				env.Assets.AddAsset("encoded", ripspec.Asset{
+				env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
 					EpisodeKey: job.Episode.Key,
 					TitleID:    job.Episode.TitleID,
 					Path:       "",
@@ -137,7 +137,7 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "episode_output_failed"),
 			)
-			env.Assets.AddAsset("encoded", ripspec.Asset{
+			env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
 				EpisodeKey: job.Episode.Key,
 				TitleID:    job.Episode.TitleID,
 				Path:       "",
@@ -149,7 +149,7 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 			continue
 		}
 
-		env.Assets.AddAsset("encoded", ripspec.Asset{
+		env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
 			EpisodeKey: job.Episode.Key,
 			TitleID:    job.Episode.TitleID,
 			Path:       finalPath,

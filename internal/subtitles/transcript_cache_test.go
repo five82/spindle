@@ -26,7 +26,7 @@ func TestLookupTranscriptPath_MissingAttribute(t *testing.T) {
 func TestLookupTranscriptPath_MapStringString(t *testing.T) {
 	env := &ripspec.Envelope{
 		Attributes: map[string]any{
-			"content_id_transcripts": map[string]string{
+			ripspec.AttrContentIDTranscripts: map[string]string{
 				"s01e01": "/tmp/s01e01.srt",
 				"s01e02": "/tmp/s01e02.srt",
 			},
@@ -44,7 +44,7 @@ func TestLookupTranscriptPath_MapStringAny(t *testing.T) {
 	// Simulates JSON round-trip where map[string]string becomes map[string]any.
 	env := &ripspec.Envelope{
 		Attributes: map[string]any{
-			"content_id_transcripts": map[string]any{
+			ripspec.AttrContentIDTranscripts: map[string]any{
 				"s01e01": "/tmp/s01e01.srt",
 				"s01e02": "/tmp/s01e02.srt",
 			},
@@ -58,7 +58,7 @@ func TestLookupTranscriptPath_MapStringAny(t *testing.T) {
 func TestLookupTranscriptPath_EmptyKey(t *testing.T) {
 	env := &ripspec.Envelope{
 		Attributes: map[string]any{
-			"content_id_transcripts": map[string]string{"s01e01": "/tmp/s01e01.srt"},
+			ripspec.AttrContentIDTranscripts: map[string]string{"s01e01": "/tmp/s01e01.srt"},
 		},
 	}
 	if got := lookupTranscriptPath(env, ""); got != "" {
@@ -98,7 +98,7 @@ func TestTryReuseCachedTranscript_Hit(t *testing.T) {
 
 	env := &ripspec.Envelope{
 		Attributes: map[string]any{
-			"content_id_transcripts": map[string]string{
+			ripspec.AttrContentIDTranscripts: map[string]string{
 				"s01e01": cachedPath,
 			},
 		},
@@ -139,7 +139,7 @@ func TestTryReuseCachedTranscript_Hit(t *testing.T) {
 func TestTryReuseCachedTranscript_MissingFile(t *testing.T) {
 	env := &ripspec.Envelope{
 		Attributes: map[string]any{
-			"content_id_transcripts": map[string]string{
+			ripspec.AttrContentIDTranscripts: map[string]string{
 				"s01e01": "/nonexistent/path/s01e01.srt",
 			},
 		},
@@ -169,7 +169,7 @@ func TestTryReuseCachedTranscript_EmptySRT(t *testing.T) {
 
 	env := &ripspec.Envelope{
 		Attributes: map[string]any{
-			"content_id_transcripts": map[string]string{
+			ripspec.AttrContentIDTranscripts: map[string]string{
 				"s01e01": cachedPath,
 			},
 		},
@@ -191,7 +191,7 @@ func TestTryReuseCachedTranscript_EmptySRT(t *testing.T) {
 func TestTryReuseCachedTranscript_MovieSkipped(t *testing.T) {
 	env := &ripspec.Envelope{
 		Attributes: map[string]any{
-			"content_id_transcripts": map[string]string{
+			ripspec.AttrContentIDTranscripts: map[string]string{
 				"primary": "/some/path.srt",
 			},
 		},

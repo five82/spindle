@@ -66,11 +66,50 @@ const (
 	AssetStatusFailed    = "failed"
 )
 
+// Asset kind constants identify pipeline stages in AddAsset / FindAsset.
+const (
+	AssetKindRipped    = "ripped"
+	AssetKindEncoded   = "encoded"
+	AssetKindSubtitled = "subtitled"
+	AssetKindFinal     = "final"
+)
+
 // Attribute key constants for cross-stage communication via Envelope.Attributes.
 const (
 	AttrContentIDNeedsReview  = "content_id_needs_review"
 	AttrContentIDReviewReason = "content_id_review_reason"
+	AttrContentIDMatches      = "content_id_matches"
+	AttrContentIDMethod       = "content_id_method"
+	AttrContentIDTranscripts  = "content_id_transcripts"
+	AttrDiscNumber            = "disc_number"
+	AttrEpisodesSynchronized  = "episodes_synchronized"
 )
+
+// SetAttribute sets a key-value pair in the envelope's Attributes map,
+// initializing the map if necessary.
+func (e *Envelope) SetAttribute(key string, value any) {
+	if e == nil {
+		return
+	}
+	if e.Attributes == nil {
+		e.Attributes = make(map[string]any)
+	}
+	e.Attributes[key] = value
+}
+
+// AppendReviewReason sets the content ID needs-review flag and appends the
+// given reason to any existing review reason, separated by "; ".
+func (e *Envelope) AppendReviewReason(reason string) {
+	if e == nil {
+		return
+	}
+	e.SetAttribute(AttrContentIDNeedsReview, true)
+	if existing, ok := e.Attributes[AttrContentIDReviewReason].(string); ok && existing != "" {
+		e.SetAttribute(AttrContentIDReviewReason, existing+"; "+reason)
+	} else {
+		e.SetAttribute(AttrContentIDReviewReason, reason)
+	}
+}
 
 // Asset associates an episode with a file path and its processing status.
 type Asset struct {
@@ -151,13 +190,13 @@ func (a *Assets) AddAsset(kind string, asset Asset) {
 		return
 	}
 	switch strings.ToLower(kind) {
-	case "ripped":
+	case AssetKindRipped:
 		a.Ripped = appendOrReplace(a.Ripped, asset)
-	case "encoded":
+	case AssetKindEncoded:
 		a.Encoded = appendOrReplace(a.Encoded, asset)
-	case "subtitled":
+	case AssetKindSubtitled:
 		a.Subtitled = appendOrReplace(a.Subtitled, asset)
-	case "final":
+	case AssetKindFinal:
 		a.Final = appendOrReplace(a.Final, asset)
 	}
 }
@@ -204,13 +243,13 @@ func (assets *Assets) ClearFailedAsset(kind, key string) {
 
 func (a *Assets) listPtr(kind string) *[]Asset {
 	switch strings.ToLower(kind) {
-	case "ripped":
+	case AssetKindRipped:
 		return &a.Ripped
-	case "encoded":
+	case AssetKindEncoded:
 		return &a.Encoded
-	case "subtitled":
+	case AssetKindSubtitled:
 		return &a.Subtitled
-	case "final":
+	case AssetKindFinal:
 		return &a.Final
 	default:
 		return nil

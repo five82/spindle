@@ -233,10 +233,10 @@ func TestRipperPersistsRipSpecPerEpisode(t *testing.T) {
 	if len(midEnv.Assets.Ripped) != 1 {
 		t.Fatalf("expected 1 ripped asset mid-run, got %d", len(midEnv.Assets.Ripped))
 	}
-	if _, ok := midEnv.Assets.FindAsset("ripped", ep1Key); !ok {
+	if _, ok := midEnv.Assets.FindAsset(ripspec.AssetKindRipped, ep1Key); !ok {
 		t.Fatalf("expected ripped asset for %s mid-run", ep1Key)
 	}
-	if _, ok := midEnv.Assets.FindAsset("ripped", ep2Key); ok {
+	if _, ok := midEnv.Assets.FindAsset(ripspec.AssetKindRipped, ep2Key); ok {
 		t.Fatalf("did not expect ripped asset for %s mid-run", ep2Key)
 	}
 
@@ -256,7 +256,7 @@ func TestRipperPersistsRipSpecPerEpisode(t *testing.T) {
 	if len(finalEnv.Assets.Ripped) != 2 {
 		t.Fatalf("expected 2 ripped assets final, got %d", len(finalEnv.Assets.Ripped))
 	}
-	if _, ok := finalEnv.Assets.FindAsset("ripped", ep2Key); !ok {
+	if _, ok := finalEnv.Assets.FindAsset(ripspec.AssetKindRipped, ep2Key); !ok {
 		t.Fatalf("expected ripped asset for %s final", ep2Key)
 	}
 }
