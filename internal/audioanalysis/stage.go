@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/encoding"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
@@ -171,6 +172,13 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				return err
 			}
 		}
+	}
+
+	// Episode consistency check runs here (after audio refinement + commentary
+	// disposition) so audio stream counts reflect the final output.
+	if len(env.Episodes) > 1 {
+		encoding.ValidateEpisodeConsistency(ctx, item, &env, logger)
+		specDirty = true
 	}
 
 	// Persist updated RipSpec

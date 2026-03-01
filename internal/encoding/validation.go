@@ -13,10 +13,11 @@ import (
 	"spindle/internal/ripspec"
 )
 
-// validateEpisodeConsistency probes all encoded TV episode files and compares
+// ValidateEpisodeConsistency probes all encoded TV episode files and compares
 // their media profiles (video codec, resolution, audio stream count). Deviations
-// from the majority profile flag the item for review.
-func validateEpisodeConsistency(ctx context.Context, item *queue.Item, env *ripspec.Envelope, logger *slog.Logger) {
+// from the majority profile flag the item for review. Called after audio analysis
+// so audio stream counts reflect the final output, not raw Drapto passthrough.
+func ValidateEpisodeConsistency(ctx context.Context, item *queue.Item, env *ripspec.Envelope, logger *slog.Logger) {
 	if env == nil || len(env.Episodes) < 2 {
 		return
 	}

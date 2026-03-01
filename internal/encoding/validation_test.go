@@ -127,7 +127,7 @@ func TestValidateEpisodeConsistency(t *testing.T) {
 				Assets:   ripspec.Assets{Encoded: tt.assets},
 			}
 
-			validateEpisodeConsistency(context.Background(), item, env, logging.NewNop())
+			ValidateEpisodeConsistency(context.Background(), item, env, logging.NewNop())
 
 			if item.NeedsReview != tt.wantReview {
 				t.Errorf("NeedsReview = %v, want %v", item.NeedsReview, tt.wantReview)
