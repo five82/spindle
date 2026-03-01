@@ -471,10 +471,10 @@ func printEpisodeDetails(out io.Writer, item api.QueueItem) {
 			marker = "*"
 		}
 		fmt.Fprintf(out, "  %s%s  %-8s  %s\n", marker, label, stage, title)
-		if path := primaryEpisodePath(ep); path != "" {
+		if path := api.PrimaryEpisodePath(ep); path != "" {
 			fmt.Fprintf(out, "      File: %s\n", path)
 		}
-		if info := episodeSubtitleInfo(ep); info != "" {
+		if info := api.EpisodeSubtitleSummary(ep); info != "" {
 			fmt.Fprintf(out, "      Subtitles: %s\n", info)
 		}
 		if ep.Active {
@@ -489,41 +489,8 @@ func printEpisodeDetails(out io.Writer, item api.QueueItem) {
 	}
 }
 
-func primaryEpisodePath(ep api.EpisodeStatus) string {
-	if strings.TrimSpace(ep.FinalPath) != "" {
-		return strings.TrimSpace(ep.FinalPath)
-	}
-	if strings.TrimSpace(ep.EncodedPath) != "" {
-		return strings.TrimSpace(ep.EncodedPath)
-	}
-	return strings.TrimSpace(ep.RippedPath)
-}
-
-func episodeSubtitleInfo(ep api.EpisodeStatus) string {
-	lang := strings.ToUpper(strings.TrimSpace(ep.SubtitleLanguage))
-	source := strings.TrimSpace(ep.SubtitleSource)
-	score := ep.MatchScore
-	parts := make([]string, 0, 3)
-	if lang != "" {
-		parts = append(parts, lang)
-	}
-	if source != "" {
-		parts = append(parts, source)
-	}
-	if score > 0 {
-		parts = append(parts, fmt.Sprintf("score %.2f", score))
-	}
-	return strings.Join(parts, " · ")
-}
-
 func formatEpisodeLabel(ep api.EpisodeStatus) string {
-	if ep.Season > 0 && ep.Episode > 0 {
-		return fmt.Sprintf("S%02dE%02d", ep.Season, ep.Episode)
-	}
-	if strings.TrimSpace(ep.Key) != "" {
-		return strings.ToUpper(strings.TrimSpace(ep.Key))
-	}
-	return "EP"
+	return api.EpisodeDisplayLabel(ep)
 }
 
 func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {

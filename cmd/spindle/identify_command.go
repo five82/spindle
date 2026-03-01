@@ -66,42 +66,31 @@ Examples:
 				fmt.Fprintf(cmd.OutOrStdout(), "\n")
 			}
 
-			year := api.MetadataYear(result.Item.MetadataJSON)
-			tmdbTitle := api.MetadataTitle(result.Item.MetadataJSON)
-			edition := api.MetadataEdition(result.Item.MetadataJSON)
+			assessment := api.AssessIdentifyDisc(result.Item)
 			fmt.Fprintf(cmd.OutOrStdout(), "\n📊 Identification Results:\n")
 			fmt.Fprintf(cmd.OutOrStdout(), "  Disc Title: %s\n", result.Item.DiscTitle)
-			fmt.Fprintf(cmd.OutOrStdout(), "  TMDB Title: %s\n", tmdbTitle)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Year: %s\n", year)
-			if edition != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Edition: %s\n", edition)
+			fmt.Fprintf(cmd.OutOrStdout(), "  TMDB Title: %s\n", assessment.TMDBTitle)
+			fmt.Fprintf(cmd.OutOrStdout(), "  Year: %s\n", assessment.Year)
+			if assessment.Edition != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Edition: %s\n", assessment.Edition)
 			}
 			if result.Item.ProgressMessage != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Message: %s\n", result.Item.ProgressMessage)
 			}
-			if result.Item.MetadataJSON != "" {
+			if assessment.MetadataPresent {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ✅ Available\n")
-				if filename := api.MetadataFilename(result.Item.MetadataJSON); filename != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s.mkv\n", filename)
-				} else if year != "Unknown" && tmdbTitle != "Unknown" {
-					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s (%s).mkv\n", tmdbTitle, year)
+				if assessment.LibraryFilename != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s\n", assessment.LibraryFilename)
 				}
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ❌ None found\n")
 			}
-			if result.Item.NeedsReview {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Review Required: ⚠️  Yes - %s\n", result.Item.ReviewReason)
+			if assessment.ReviewRequired {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Review Required: ⚠️  Yes - %s\n", assessment.ReviewReason)
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Review Required: ✅ No\n")
 			}
-
-			if result.Item.MetadataJSON != "" && !result.Item.NeedsReview {
-				fmt.Fprintf(cmd.OutOrStdout(), "\n🎬 Identification successful! Disc would proceed to ripping stage.\n")
-			} else if result.Item.NeedsReview {
-				fmt.Fprintf(cmd.OutOrStdout(), "\n⚠️  Identification requires manual review. Check the logs above for details.\n")
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "\n❌ Identification failed. Check the logs above for details.\n")
-			}
+			fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", assessment.OutcomeMessage)
 
 			if summary, err := ripspec.Parse(result.Item.RipSpecData); err != nil {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n⚠️  Unable to parse rip specification for title fingerprints: %v\n", err)

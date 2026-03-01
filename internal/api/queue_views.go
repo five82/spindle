@@ -1,7 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -39,4 +41,44 @@ func parseQueueTime(value string) time.Time {
 // ParseQueueTime exposes queue timestamp parsing for consumers that need display formatting.
 func ParseQueueTime(value string) time.Time {
 	return parseQueueTime(value)
+}
+
+// EpisodeDisplayLabel returns a stable episode label for CLI presentation.
+func EpisodeDisplayLabel(ep EpisodeStatus) string {
+	if ep.Season > 0 && ep.Episode > 0 {
+		return fmt.Sprintf("S%02dE%02d", ep.Season, ep.Episode)
+	}
+	if strings.TrimSpace(ep.Key) != "" {
+		return strings.ToUpper(strings.TrimSpace(ep.Key))
+	}
+	return "EP"
+}
+
+// PrimaryEpisodePath chooses the most complete available asset path.
+func PrimaryEpisodePath(ep EpisodeStatus) string {
+	if strings.TrimSpace(ep.FinalPath) != "" {
+		return strings.TrimSpace(ep.FinalPath)
+	}
+	if strings.TrimSpace(ep.EncodedPath) != "" {
+		return strings.TrimSpace(ep.EncodedPath)
+	}
+	return strings.TrimSpace(ep.RippedPath)
+}
+
+// EpisodeSubtitleSummary returns a compact subtitle summary for CLI output.
+func EpisodeSubtitleSummary(ep EpisodeStatus) string {
+	lang := strings.ToUpper(strings.TrimSpace(ep.SubtitleLanguage))
+	source := strings.TrimSpace(ep.SubtitleSource)
+	score := ep.MatchScore
+	parts := make([]string, 0, 3)
+	if lang != "" {
+		parts = append(parts, lang)
+	}
+	if source != "" {
+		parts = append(parts, source)
+	}
+	if score > 0 {
+		parts = append(parts, fmt.Sprintf("score %.2f", score))
+	}
+	return strings.Join(parts, " · ")
 }

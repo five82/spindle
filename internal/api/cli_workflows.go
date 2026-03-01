@@ -37,6 +37,58 @@ type IdentifyDiscResult struct {
 	Item      *queue.Item
 }
 
+type IdentifyDiscAssessment struct {
+	TMDBTitle       string
+	Year            string
+	Edition         string
+	MetadataPresent bool
+	LibraryFilename string
+	ReviewRequired  bool
+	ReviewReason    string
+	Outcome         string
+	OutcomeMessage  string
+}
+
+// AssessIdentifyDisc derives CLI-facing identification outcomes from queue state.
+func AssessIdentifyDisc(item *queue.Item) IdentifyDiscAssessment {
+	if item == nil {
+		return IdentifyDiscAssessment{
+			TMDBTitle:      "Unknown",
+			Year:           "Unknown",
+			Outcome:        "failed",
+			OutcomeMessage: "❌ Identification failed. Check the logs above for details.",
+		}
+	}
+
+	assessment := IdentifyDiscAssessment{
+		TMDBTitle:       MetadataTitle(item.MetadataJSON),
+		Year:            MetadataYear(item.MetadataJSON),
+		Edition:         MetadataEdition(item.MetadataJSON),
+		MetadataPresent: strings.TrimSpace(item.MetadataJSON) != "",
+		ReviewRequired:  item.NeedsReview,
+		ReviewReason:    strings.TrimSpace(item.ReviewReason),
+	}
+	if filename := MetadataFilename(item.MetadataJSON); filename != "" {
+		assessment.LibraryFilename = filename + ".mkv"
+	} else if assessment.Year != "Unknown" && assessment.TMDBTitle != "Unknown" {
+		assessment.LibraryFilename = fmt.Sprintf("%s (%s).mkv", assessment.TMDBTitle, assessment.Year)
+	}
+
+	switch {
+	case assessment.MetadataPresent && !assessment.ReviewRequired:
+		assessment.Outcome = "success"
+		assessment.OutcomeMessage = "🎬 Identification successful! Disc would proceed to ripping stage."
+	case assessment.ReviewRequired:
+		assessment.Outcome = "review"
+		assessment.OutcomeMessage = "⚠️  Identification requires manual review. Check the logs above for details."
+	default:
+		assessment.Outcome = "failed"
+		assessment.OutcomeMessage = "❌ Identification failed. Check the logs above for details."
+	}
+
+	return assessment
+}
+
 func IdentifyDisc(ctx context.Context, req IdentifyDiscRequest) (IdentifyDiscResult, error) {
 	cfg := req.Config
 	if cfg == nil {

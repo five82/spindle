@@ -131,23 +131,6 @@ func (c *commandContext) withQueueAPI(fn func(queueaccess.Access) error) error {
 	return fn(session.Access)
 }
 
-// withQueueStore provides direct store access (bypassing IPC).
-// Use this for operations that require direct database manipulation.
-func (c *commandContext) withQueueStore(fn func(queueaccess.StoreAccess) error) error {
-	cfg, err := c.ensureConfig()
-	if err != nil {
-		return fmt.Errorf("load config for direct store access: %w", err)
-	}
-
-	store, err := queue.Open(cfg)
-	if err != nil {
-		return fmt.Errorf("open queue store: %w", err)
-	}
-	defer store.Close()
-
-	return fn(queueaccess.NewStoreAccess(store))
-}
-
 func (c *commandContext) dialClient() (*ipc.Client, error) {
 	socket := c.socketPath()
 	client, err := ipc.Dial(socket)

@@ -119,7 +119,7 @@ Use --all to remove all staging directories regardless of queue status.`,
 			if err != nil {
 				return err
 			}
-			return ctx.withQueueStore(func(qa queueaccess.StoreAccess) error {
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 				req := api.CleanStagingRequest{
 					StagingDir: cfg.Paths.StagingDir,
 					CleanAll:   cleanAll,
