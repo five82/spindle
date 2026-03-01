@@ -1,11 +1,9 @@
 package contentid
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
 
 	"spindle/internal/logging"
 	"spindle/internal/services/llm"
@@ -18,7 +16,6 @@ type llmVerifier interface {
 }
 
 const (
-	llmVerifyThreshold  = 0.85  // trigger verification below this score
 	middleWindowHalfSec = 300.0 // 5 min each side = 10 min window
 	maxTranscriptChars  = 6000  // cap per transcript to stay within token budget
 )
@@ -40,7 +37,7 @@ type verifyResult struct {
 }
 
 // verifyMatches runs second-level LLM verification on matches scoring below
-// llmVerifyThreshold. It returns potentially updated matches and a summary.
+// verifyThreshold. It returns potentially updated matches and a summary.
 //
 // Escalation logic:
 //   - 0 below threshold  -> skip verification entirely
@@ -54,6 +51,7 @@ func verifyMatches(
 	rips []ripFingerprint,
 	refs []referenceFingerprint,
 	logger *slog.Logger,
+	verifyThreshold float64,
 ) ([]matchResult, *verifyResult) {
 	if client == nil {
 		return matches, nil
@@ -62,7 +60,7 @@ func verifyMatches(
 	// Partition into confirmed and candidates.
 	var candidates []int // indices into matches
 	for i, m := range matches {
-		if m.Score < llmVerifyThreshold {
+		if m.Score < verifyThreshold {
 			candidates = append(candidates, i)
 		}
 	}
@@ -335,24 +333,41 @@ func rematchRejected(
 		return nil, true
 	}
 
-	// Greedy assignment: sort by confidence descending, assign each pair at most once.
-	usedCandidate := make(map[int]bool)
-	usedReference := make(map[int]bool)
-
-	slices.SortFunc(accepted, func(a, b scored) int {
-		return cmp.Compare(b.confidence, a.confidence) // descending
-	})
-
-	var result []matchResult
+	size := max(len(candidates), len(references))
+	const padCost = 2.0
+	cost := make([][]float64, size)
+	scoreMatrix := make([][]float64, size)
+	explain := make([][]string, size)
+	for i := range size {
+		cost[i] = make([]float64, size)
+		scoreMatrix[i] = make([]float64, size)
+		explain[i] = make([]string, size)
+		for j := range size {
+			cost[i][j] = padCost
+		}
+	}
 	for _, s := range accepted {
-		if usedCandidate[s.candidateIdx] || usedReference[s.referenceIdx] {
+		if s.candidateIdx >= len(candidates) || s.referenceIdx >= len(references) {
 			continue
 		}
-		usedCandidate[s.candidateIdx] = true
-		usedReference[s.referenceIdx] = true
+		scoreMatrix[s.candidateIdx][s.referenceIdx] = s.confidence
+		cost[s.candidateIdx][s.referenceIdx] = 1.0 - s.confidence
+		explain[s.candidateIdx][s.referenceIdx] = s.explanation
+	}
 
-		cand := candidates[s.candidateIdx]
-		ref := references[s.referenceIdx]
+	assign := hungarian(cost)
+	var result []matchResult
+	for ci, ri := range assign {
+		if ci >= len(candidates) || ri < 0 || ri >= len(references) {
+			continue
+		}
+		confidence := scoreMatrix[ci][ri]
+		if confidence <= 0 {
+			continue
+		}
+
+		cand := candidates[ci]
+		ref := references[ri]
 
 		// Find original match to copy TitleID.
 		var titleID int
@@ -367,7 +382,7 @@ func rematchRejected(
 			EpisodeKey:        cand.episodeKey,
 			TitleID:           titleID,
 			TargetEpisode:     ref.episode,
-			Score:             s.confidence,
+			Score:             confidence,
 			SubtitleFileID:    ref.fileID,
 			SubtitleLanguage:  ref.language,
 			SubtitleCachePath: ref.refPath,
@@ -376,10 +391,10 @@ func rematchRejected(
 		logger.Info("episode LLM rematch",
 			logging.String(logging.FieldDecisionType, "episode_llm_rematch"),
 			logging.String("decision_result", "reassigned"),
-			logging.String("decision_reason", s.explanation),
+			logging.String("decision_reason", explain[ci][ri]),
 			logging.String("episode_key", cand.episodeKey),
 			logging.Int("target_episode", ref.episode),
-			logging.Float64("llm_confidence", s.confidence),
+			logging.Float64("llm_confidence", confidence),
 		)
 	}
 

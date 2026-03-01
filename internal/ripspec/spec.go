@@ -76,13 +76,15 @@ const (
 
 // Attribute key constants for cross-stage communication via Envelope.Attributes.
 const (
-	AttrContentIDNeedsReview  = "content_id_needs_review"
-	AttrContentIDReviewReason = "content_id_review_reason"
-	AttrContentIDMatches      = "content_id_matches"
-	AttrContentIDMethod       = "content_id_method"
-	AttrContentIDTranscripts  = "content_id_transcripts"
-	AttrDiscNumber            = "disc_number"
-	AttrEpisodesSynchronized  = "episodes_synchronized"
+	AttrContentIDNeedsReview      = "content_id_needs_review"
+	AttrContentIDReviewReason     = "content_id_review_reason"
+	AttrContentIDMatches          = "content_id_matches"
+	AttrContentIDMethod           = "content_id_method"
+	AttrContentIDTranscripts      = "content_id_transcripts"
+	AttrContentIDSelectedStrategy = "content_id_selected_strategy"
+	AttrContentIDStrategyScores   = "content_id_strategy_scores"
+	AttrDiscNumber                = "disc_number"
+	AttrEpisodesSynchronized      = "episodes_synchronized"
 )
 
 // SetAttribute sets a key-value pair in the envelope's Attributes map,

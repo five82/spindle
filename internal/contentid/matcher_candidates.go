@@ -24,7 +24,8 @@ func (p candidateEpisodePlan) Options() map[string]any {
 	}
 }
 
-func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, discNumber int) candidateEpisodePlan {
+func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, discNumber int, policy Policy) candidateEpisodePlan {
+	policy = policy.normalized()
 	plan := candidateEpisodePlan{}
 	// Tier 1: collect resolved episode numbers from the rip spec.
 	set := make(map[int]struct{}, len(env.Episodes)*2)
@@ -74,7 +75,7 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 		if block == 0 {
 			block = 4
 		}
-		padding := max(2, block/4)
+		padding := max(policy.DiscBlockPaddingMin, block/policy.DiscBlockPaddingDivisor)
 		start := (discNumber-1)*block - padding
 		end := discNumber*block + padding
 		if start < 0 {
@@ -137,32 +138,6 @@ func buildEpisodeRange(start, end int) []int {
 	return episodes
 }
 
-func episodeWindow(episodes []int, fallbackMax int) (int, int) {
-	if len(episodes) == 0 {
-		if fallbackMax > 0 {
-			return 1, fallbackMax
-		}
-		return 0, 0
-	}
-	low := episodes[0]
-	high := episodes[0]
-	for _, episode := range episodes[1:] {
-		if episode < low {
-			low = episode
-		}
-		if episode > high {
-			high = episode
-		}
-	}
-	if low < 1 {
-		low = 1
-	}
-	if fallbackMax > 0 && high > fallbackMax {
-		high = fallbackMax
-	}
-	return low, high
-}
-
 func filterReferencesByEpisodes(refs []referenceFingerprint, episodes []int) []referenceFingerprint {
 	if len(refs) == 0 || len(episodes) == 0 {
 		return nil
@@ -178,21 +153,4 @@ func filterReferencesByEpisodes(refs []referenceFingerprint, episodes []int) []r
 		}
 	}
 	return filtered
-}
-
-func missingEpisodeReferences(refs []referenceFingerprint, episodes []int) []int {
-	if len(episodes) == 0 {
-		return nil
-	}
-	existing := make(map[int]struct{}, len(refs))
-	for _, ref := range refs {
-		existing[ref.EpisodeNumber] = struct{}{}
-	}
-	missing := make([]int, 0)
-	for _, episode := range episodes {
-		if _, ok := existing[episode]; !ok {
-			missing = append(missing, episode)
-		}
-	}
-	return missing
 }

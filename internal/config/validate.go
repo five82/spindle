@@ -35,6 +35,9 @@ func (c *Config) Validate() error {
 	if err := c.validateEncoding(); err != nil {
 		return err
 	}
+	if err := c.validateContentID(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -152,6 +155,35 @@ func (c *Config) validateEncoding() error {
 	if c.Encoding.SVTAv1Preset < 0 || c.Encoding.SVTAv1Preset > 13 {
 		return fmt.Errorf("encoding.svt_av1_preset must be 0-13, got %d", c.Encoding.SVTAv1Preset)
 	}
+	return nil
+}
+
+func (c *Config) validateContentID() error {
+	unitIntervals := map[string]float64{
+		"content_id.min_similarity_score":            c.ContentID.MinSimilarityScore,
+		"content_id.low_confidence_review_threshold": c.ContentID.LowConfidenceReviewThreshold,
+		"content_id.llm_verify_threshold":            c.ContentID.LLMVerifyThreshold,
+		"content_id.anchor_min_score":                c.ContentID.AnchorMinScore,
+		"content_id.anchor_min_score_margin":         c.ContentID.AnchorMinScoreMargin,
+		"content_id.block_high_confidence_delta":     c.ContentID.BlockHighConfidenceDelta,
+		"content_id.block_high_confidence_top_ratio": c.ContentID.BlockHighConfidenceTopRatio,
+	}
+	for key, value := range unitIntervals {
+		if value <= 0 || value >= 1 {
+			return fmt.Errorf("%s must be in the open interval (0,1), got %v", key, value)
+		}
+	}
+
+	if c.ContentID.DiscBlockPaddingMin <= 0 {
+		return fmt.Errorf("content_id.disc_block_padding_min must be positive, got %d", c.ContentID.DiscBlockPaddingMin)
+	}
+	if c.ContentID.DiscBlockPaddingDivisor <= 0 {
+		return fmt.Errorf("content_id.disc_block_padding_divisor must be positive, got %d", c.ContentID.DiscBlockPaddingDivisor)
+	}
+	if c.ContentID.Disc2PlusMinStartEpisode <= 0 {
+		return fmt.Errorf("content_id.disc2_plus_min_start_episode must be positive, got %d", c.ContentID.Disc2PlusMinStartEpisode)
+	}
+
 	return nil
 }
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -41,6 +40,7 @@ type Matcher struct {
 	languages []string
 	cache     *opensubtitles.Cache
 	llm       llmVerifier // optional: second-level episode verification
+	policy    Policy
 }
 
 type subtitleGenerator interface {
@@ -104,9 +104,16 @@ func WithLanguages(langs []string) Option {
 	}
 }
 
+// WithPolicy overrides matching thresholds and rules.
+func WithPolicy(policy Policy) Option {
+	return func(m *Matcher) {
+		m.policy = policy.normalized()
+	}
+}
+
 // NewMatcher constructs a content identification matcher bound to the supplied configuration.
 func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matcher {
-	m := &Matcher{cfg: cfg}
+	m := &Matcher{cfg: cfg, policy: DefaultPolicy()}
 	m.SetLogger(logger)
 	for _, opt := range opts {
 		opt(m)
@@ -167,6 +174,14 @@ func NewMatcher(cfg *config.Config, logger *slog.Logger, opts ...Option) *Matche
 	return m
 }
 
+// Policy returns the matcher's effective policy.
+func (m *Matcher) Policy() Policy {
+	if m == nil {
+		return DefaultPolicy()
+	}
+	return m.policy.normalized()
+}
+
 // SetLogger swaps the matcher logger and propagates the scoped logger to dependencies.
 func (m *Matcher) SetLogger(logger *slog.Logger) {
 	if m == nil {
@@ -224,12 +239,11 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 		ripPrints[i].RawVector = ripPrints[i].Vector
 	}
 
-	candidatePlan := deriveCandidateEpisodes(env, seasonDetails, ctxData.DiscNumber)
-	candidateEpisodes := append([]int(nil), candidatePlan.Episodes...)
-	candidateReason := "derived_from_ripspec"
-	candidateSources := append([]string(nil), candidatePlan.Sources...)
+	candidatePlan := deriveCandidateEpisodes(env, seasonDetails, ctxData.DiscNumber, m.policy)
 	allSeasonEpisodes := seasonEpisodeNumbers(seasonDetails)
 	var allSeasonRefs []referenceFingerprint
+	var selectedAnchor anchorSelection
+	hasAnchor := false
 
 	// Step 1/2: anchor attempts. First anchor uses rip #1, second anchor uses rip #2.
 	// Anchor references are fetched from full-season candidates to recover from
@@ -247,17 +261,22 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 				refs[i].RawVector = refs[i].Vector
 			}
 			allSeasonRefs = refs
-			if anchor, ok := selectAnchorWindow(ripPrints, allSeasonRefs, len(seasonDetails.Episodes)); ok {
-				candidateEpisodes = buildEpisodeRange(anchor.WindowStart, anchor.WindowEnd)
-				candidateReason = "anchor_aligned"
-				candidateSources = []string{anchor.Reason}
+			if anchor, ok := selectAnchorWindow(
+				ripPrints,
+				allSeasonRefs,
+				len(seasonDetails.Episodes),
+				m.policy.AnchorMinScore,
+				m.policy.AnchorMinScoreMargin,
+			); ok {
+				selectedAnchor = anchor
+				hasAnchor = true
 				if m.logger != nil {
 					m.logger.Info("content id anchor selected",
 						logging.String(logging.FieldEventType, "decision_summary"),
 						logging.String(logging.FieldDecisionType, "contentid_anchor"),
 						logging.String("decision_result", "selected"),
 						logging.String("decision_reason", anchor.Reason),
-						logging.String("decision_options", "first_anchor, second_anchor, range_expansion"),
+						logging.String("decision_options", "first_anchor, second_anchor, fallback"),
 						logging.Int("anchor_rip_index", anchor.RipIndex),
 						logging.Int("anchor_episode", anchor.TargetEpisode),
 						logging.Float64("anchor_score", anchor.BestScore),
@@ -273,61 +292,56 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 					logging.String(logging.FieldDecisionType, "contentid_anchor"),
 					logging.String("decision_result", "skipped"),
 					logging.String("decision_reason", anchor.Reason),
-					logging.String("decision_options", "first_anchor, second_anchor, range_expansion"),
+					logging.String("decision_options", "first_anchor, second_anchor, fallback"),
 				)
 			}
 		}
 	}
 
-	if m.logger != nil {
-		options := candidatePlan.Options()
-		attrs := []logging.Attr{
-			logging.String(logging.FieldEventType, "decision_summary"),
-			logging.String(logging.FieldDecisionType, "contentid_candidates"),
-			logging.String("decision_result", "selected"),
-			logging.String("decision_reason", candidateReason),
-			logging.String("decision_options", "match, skip"),
-			logging.Int("selected_count", len(candidateEpisodes)),
-			logging.Int("source_count", len(candidateSources)),
-			logging.Int("disc_number", ctxData.DiscNumber),
-			logging.Int("season_episodes", len(seasonDetails.Episodes)),
-		}
-		for _, episode := range candidateEpisodes {
-			attrs = append(attrs, logging.String(fmt.Sprintf("selected_%02d", episode), fmt.Sprintf("E%02d", episode)))
-		}
-		for idx, source := range candidateSources {
-			attrs = append(attrs, logging.String(fmt.Sprintf("source_%d", idx+1), source))
-		}
-		attrs = appendCandidatePlanOptions(attrs, options)
-		m.logger.Debug("content id candidate episodes", logging.Args(attrs...)...)
-	}
-
-	refPrints := filterReferencesByEpisodes(allSeasonRefs, candidateEpisodes)
-	if len(refPrints) == 0 {
-		refPrints, err = m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, candidateEpisodes, progress)
-		if err != nil {
-			return false, err
-		}
-		for i := range refPrints {
-			refPrints[i].RawVector = refPrints[i].Vector
-		}
-	}
-	if len(refPrints) == 0 {
-		m.logger.Warn("no opensubtitles references available",
-			logging.String(logging.FieldEventType, "contentid_no_references"),
+	strategyAttempts := buildStrategyAttempts(candidatePlan, selectedAnchor, hasAnchor, allSeasonEpisodes)
+	if len(strategyAttempts) == 0 {
+		m.logger.Warn("no content id strategies available",
+			logging.String(logging.FieldEventType, "contentid_no_strategies"),
 			logging.String(logging.FieldImpact, "episode numbers remain unresolved"),
-			logging.String(logging.FieldErrorHint, "verify OpenSubtitles languages and TMDB metadata"))
+			logging.String(logging.FieldErrorHint, "verify rip spec episodes and season metadata"))
 		return false, nil
 	}
 
-	applyIDFWeighting(ripPrints, refPrints)
-	matches := resolveEpisodeMatches(ripPrints, refPrints)
-	var refinement blockRefinement
-	// Enforce contiguous block constraint: disc episodes should map to a
-	// consecutive range. Reassign outliers to gaps within the block.
-	if len(matches) > 0 {
-		matches, refinement = refineMatchBlock(matches, refPrints, ripPrints, len(seasonDetails.Episodes), ctxData.DiscNumber)
+	var outcomes []strategyOutcome
+	var selected strategyOutcome
+	haveSelection := false
+	for _, attempt := range strategyAttempts {
+		outcome, evalErr := m.evaluateStrategy(ctx, ctxData, seasonDetails, ripPrints, allSeasonRefs, attempt, progress)
+		if evalErr != nil {
+			return false, evalErr
+		}
+		outcomes = append(outcomes, outcome)
+		if !haveSelection || betterOutcome(outcome, selected) {
+			selected = outcome
+			haveSelection = true
+		}
 	}
+	if !haveSelection || len(selected.Matches) == 0 {
+		m.logger.Warn("no episode matches resolved",
+			logging.String(logging.FieldEventType, "contentid_no_matches"),
+			logging.String(logging.FieldImpact, "episode numbers remain unresolved"),
+			logging.String(logging.FieldErrorHint, "check transcript quality and reference subtitle availability"))
+		return false, nil
+	}
+
+	matches := selected.Matches
+	refinement := selected.Refinement
+	refPrints := selected.References
+	logStrategySummary(m.logger, outcomes, selected)
+
+	if len(matches) == 0 {
+		m.logger.Warn("no episode matches resolved",
+			logging.String(logging.FieldEventType, "contentid_no_matches"),
+			logging.String(logging.FieldImpact, "episode numbers remain unresolved"),
+			logging.String(logging.FieldErrorHint, "check transcript quality and reference subtitle availability"))
+		return false, nil
+	}
+
 	if refinement.Displaced > 0 {
 		m.logger.Info("content id block refinement applied",
 			logging.String(logging.FieldEventType, "decision_summary"),
@@ -343,97 +357,13 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 			logging.Bool("needs_review", refinement.NeedsReview),
 		)
 	}
-
-	// Step 3: improved range expansion. Expand around the current candidate
-	// window until matches stabilize or we reach full-season coverage.
-	if len(matches) < len(ripPrints) && len(seasonDetails.Episodes) > 0 {
-		bestMatches := matches
-		bestRefinement := refinement
-		bestRefs := append([]referenceFingerprint(nil), refPrints...)
-		low, high := episodeWindow(candidateEpisodes, len(seasonDetails.Episodes))
-		if low == 0 || high == 0 {
-			low, high = episodeWindow(seasonEpisodeNumbers(seasonDetails), len(seasonDetails.Episodes))
-		}
-		step := 2
-		for attempt := 1; attempt <= 4; attempt++ {
-			nextLow := max(1, low-step)
-			nextHigh := min(len(seasonDetails.Episodes), high+step)
-			if nextLow == low && nextHigh == high {
-				step *= 2
-				continue
-			}
-			expandedCandidates := buildEpisodeRange(nextLow, nextHigh)
-			expandedRefs := filterReferencesByEpisodes(allSeasonRefs, expandedCandidates)
-			if len(expandedRefs) == 0 {
-				expandedRefs = append([]referenceFingerprint(nil), bestRefs...)
-				missing := missingEpisodeReferences(expandedRefs, expandedCandidates)
-				if len(missing) > 0 {
-					newRefs, fetchErr := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, missing, progress)
-					if fetchErr != nil {
-						m.logger.Warn("candidate range expansion fetch failed",
-							logging.Error(fetchErr),
-							logging.String(logging.FieldEventType, "contentid_range_expansion_failed"),
-							logging.String(logging.FieldImpact, "continuing with partial matches"),
-							logging.String(logging.FieldErrorHint, "check OpenSubtitles connectivity"),
-						)
-						step *= 2
-						continue
-					}
-					for i := range newRefs {
-						newRefs[i].RawVector = newRefs[i].Vector
-					}
-					expandedRefs = append(expandedRefs, newRefs...)
-				}
-			}
-			applyIDFWeighting(ripPrints, expandedRefs)
-			trialMatches := resolveEpisodeMatches(ripPrints, expandedRefs)
-			var trialRefinement blockRefinement
-			if len(trialMatches) > 0 {
-				trialMatches, trialRefinement = refineMatchBlock(trialMatches, expandedRefs, ripPrints, len(seasonDetails.Episodes), ctxData.DiscNumber)
-			}
-			m.logger.Info("content id candidate range expanded",
-				logging.String(logging.FieldEventType, "decision_summary"),
-				logging.String(logging.FieldDecisionType, "contentid_range_expansion"),
-				logging.String("decision_result", "expanded"),
-				logging.String("decision_reason", "insufficient_matches"),
-				logging.String("decision_options", "expand, stop"),
-				logging.Int("attempt", attempt),
-				logging.Int("window_start", nextLow),
-				logging.Int("window_end", nextHigh),
-				logging.Int("references", len(expandedRefs)),
-				logging.Int("matches_after", len(trialMatches)),
-			)
-			if len(trialMatches) > len(bestMatches) {
-				bestMatches = trialMatches
-				bestRefinement = trialRefinement
-				bestRefs = expandedRefs
-			}
-			low, high = nextLow, nextHigh
-			if len(bestMatches) >= len(ripPrints) {
-				break
-			}
-			step *= 2
-		}
-		matches = bestMatches
-		refinement = bestRefinement
-		refPrints = bestRefs
-	}
-
-	if len(matches) == 0 {
-		m.logger.Warn("no episode matches resolved",
-			logging.String(logging.FieldEventType, "contentid_no_matches"),
-			logging.String(logging.FieldImpact, "episode numbers remain unresolved"),
-			logging.String(logging.FieldErrorHint, "check transcript quality and reference subtitle availability"))
-		return false, nil
-	}
-
 	if refinement.NeedsReview {
 		env.AppendReviewReason(refinement.ReviewReason)
 	}
 
 	// LLM-based second-level verification for low-confidence matches.
 	if m.llm != nil {
-		verified, vr := verifyMatches(ctx, m.llm, matches, ripPrints, refPrints, m.logger)
+		verified, vr := verifyMatches(ctx, m.llm, matches, ripPrints, refPrints, m.logger, m.policy.LLMVerifyThreshold)
 		matches = verified
 		if vr != nil && vr.Challenged > 0 && vr.NeedsReview {
 			env.AppendReviewReason(vr.ReviewReason)
@@ -442,12 +372,14 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 
 	m.applyMatches(env, seasonDetails, ctxData.ShowTitle, matches, progress)
 	m.attachMatchAttributes(env, matches)
+	m.attachStrategyAttributes(env, selected, outcomes)
 	attachTranscriptPaths(env, ripPrints)
 	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
 	if m.logger != nil {
 		contextAttrs := []logging.Attr{
 			logging.String("decision_options", "match, review"),
+			logging.String("selected_strategy", selected.Attempt.Name),
 			logging.Int("episodes_available", len(env.Episodes)),
 			logging.Int("rip_transcripts", len(ripPrints)),
 			logging.Int("reference_subtitles", len(refPrints)),
@@ -664,41 +596,6 @@ func buildMatchSummaryAttrs(eventType, decisionType, result, reason string, matc
 		attrs = append(attrs, logging.String(key, formatMatchSummary(match)))
 	}
 	return attrs
-}
-
-func appendCandidatePlanOptions(attrs []logging.Attr, options map[string]any) []logging.Attr {
-	if len(options) == 0 {
-		return attrs
-	}
-	keys := make([]string, 0, len(options))
-	for key := range options {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	attrs = append(attrs, logging.Int("candidate_count", len(keys)))
-	for _, key := range keys {
-		label := fmt.Sprintf("candidate_%s", key)
-		attrs = append(attrs, logging.String(label, formatCandidateOptionValue(options[key])))
-	}
-	return attrs
-}
-
-func formatCandidateOptionValue(value any) string {
-	switch typed := value.(type) {
-	case nil:
-		return "none"
-	case []int:
-		if len(typed) == 0 {
-			return "none"
-		}
-		parts := make([]string, 0, len(typed))
-		for _, v := range typed {
-			parts = append(parts, strconv.Itoa(v))
-		}
-		return strings.Join(parts, ", ")
-	default:
-		return fmt.Sprint(value)
-	}
 }
 
 func findEpisodeByNumber(season *tmdb.SeasonDetails, number int) (tmdb.Episode, bool) {

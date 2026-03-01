@@ -77,6 +77,12 @@ func TestLoadDefaultConfigUsesEnvTMDBKeyAndExpandsPaths(t *testing.T) {
 	if cfg.Subtitles.OpenSubtitlesLanguages[0] != "en" {
 		t.Fatalf("expected OpenSubtitles default language to be en, got %v", cfg.Subtitles.OpenSubtitlesLanguages)
 	}
+	if cfg.ContentID.MinSimilarityScore != config.Default().ContentID.MinSimilarityScore {
+		t.Fatalf("unexpected content_id.min_similarity_score: got %v want %v", cfg.ContentID.MinSimilarityScore, config.Default().ContentID.MinSimilarityScore)
+	}
+	if cfg.ContentID.LLMVerifyThreshold != config.Default().ContentID.LLMVerifyThreshold {
+		t.Fatalf("unexpected content_id.llm_verify_threshold: got %v want %v", cfg.ContentID.LLMVerifyThreshold, config.Default().ContentID.LLMVerifyThreshold)
+	}
 	if cfg.Workflow.HeartbeatInterval != config.Default().Workflow.HeartbeatInterval {
 		t.Fatalf("unexpected heartbeat interval: %d", cfg.Workflow.HeartbeatInterval)
 	}
@@ -303,5 +309,19 @@ func TestValidateDetectsInvalidValues(t *testing.T) {
 	cfg.Subtitles.OpenSubtitlesLanguages = nil
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error when OpenSubtitles enabled without languages")
+	}
+
+	cfg = config.Default()
+	cfg.TMDB.APIKey = "key"
+	cfg.ContentID.MinSimilarityScore = 1.0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid content_id.min_similarity_score")
+	}
+
+	cfg = config.Default()
+	cfg.TMDB.APIKey = "key"
+	cfg.ContentID.DiscBlockPaddingDivisor = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid content_id.disc_block_padding_divisor")
 	}
 }

@@ -165,6 +165,21 @@ type Commentary struct {
 	Model   string `toml:"model"`
 }
 
+// ContentID contains policy thresholds and rules for episode identification.
+type ContentID struct {
+	MinSimilarityScore           float64 `toml:"min_similarity_score"`
+	LowConfidenceReviewThreshold float64 `toml:"low_confidence_review_threshold"`
+	LLMVerifyThreshold           float64 `toml:"llm_verify_threshold"`
+	AnchorMinScore               float64 `toml:"anchor_min_score"`
+	AnchorMinScoreMargin         float64 `toml:"anchor_min_score_margin"`
+	BlockHighConfidenceDelta     float64 `toml:"block_high_confidence_delta"`
+	BlockHighConfidenceTopRatio  float64 `toml:"block_high_confidence_top_ratio"`
+	DiscBlockPaddingMin          int     `toml:"disc_block_padding_min"`
+	DiscBlockPaddingDivisor      int     `toml:"disc_block_padding_divisor"`
+	Disc1MustStartAtEpisode1     bool    `toml:"disc1_must_start_at_episode1"`
+	Disc2PlusMinStartEpisode     int     `toml:"disc2_plus_min_start_episode"`
+}
+
 // Config encapsulates all configuration values for Spindle.
 //
 // Configuration sections by subsystem:
@@ -180,6 +195,7 @@ type Commentary struct {
 //   - Encoding: Drapto AV1 encoding settings
 //   - LLM: shared LLM connection settings for features that need AI
 //   - Commentary: commentary track detection via audio analysis
+//   - ContentID: episode identification policy thresholds and strategy rules
 //   - Workflow: daemon polling intervals and timeouts
 //   - Logging: log format, level, and retention
 //   - Validation: pipeline validation checks and thresholds
@@ -196,6 +212,7 @@ type Config struct {
 	Encoding      Encoding      `toml:"encoding"`
 	LLM           LLM           `toml:"llm"`
 	Commentary    Commentary    `toml:"commentary"`
+	ContentID     ContentID     `toml:"content_id"`
 	Workflow      Workflow      `toml:"workflow"`
 	Logging       Logging       `toml:"logging"`
 	Validation    Validation    `toml:"validation"`

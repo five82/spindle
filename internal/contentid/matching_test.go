@@ -22,7 +22,7 @@ func TestSelectAnchorWindowFirstAnchor(t *testing.T) {
 		{EpisodeNumber: 30, Vector: newFingerprint("penguin umbrella episode thirty marker")},
 	}
 
-	anchor, ok := selectAnchorWindow(rips, refs, 60)
+	anchor, ok := selectAnchorWindow(rips, refs, 60, DefaultPolicy().AnchorMinScore, DefaultPolicy().AnchorMinScoreMargin)
 	if !ok {
 		t.Fatalf("expected first anchor selection to succeed, got reason=%q", anchor.Reason)
 	}
@@ -52,7 +52,7 @@ func TestSelectAnchorWindowSecondAnchorFallback(t *testing.T) {
 		{EpisodeNumber: 27, Vector: newFingerprint("episode twenty seven marker")},
 	}
 
-	anchor, ok := selectAnchorWindow(rips, refs, 60)
+	anchor, ok := selectAnchorWindow(rips, refs, 60, DefaultPolicy().AnchorMinScore, DefaultPolicy().AnchorMinScoreMargin)
 	if !ok {
 		t.Fatalf("expected second anchor selection to succeed, got reason=%q", anchor.Reason)
 	}
@@ -76,7 +76,7 @@ func TestSelectAnchorWindowFailsWhenBothAnchorsAmbiguous(t *testing.T) {
 		{EpisodeNumber: 20, Vector: newFingerprint("same anchor text")},
 	}
 
-	anchor, ok := selectAnchorWindow(rips, refs, 60)
+	anchor, ok := selectAnchorWindow(rips, refs, 60, DefaultPolicy().AnchorMinScore, DefaultPolicy().AnchorMinScoreMargin)
 	if ok {
 		t.Fatalf("expected ambiguous anchors to fail, got window %d-%d", anchor.WindowStart, anchor.WindowEnd)
 	}
@@ -99,7 +99,7 @@ func TestResolveEpisodeMatchesOptimalAssignment(t *testing.T) {
 	rips := []ripFingerprint{{EpisodeKey: "s05e01", TitleID: 1, Vector: rip1}, {EpisodeKey: "s05e02", TitleID: 2, Vector: rip2}}
 	refs := []referenceFingerprint{ref2, ref1, refCross}
 
-	matches := resolveEpisodeMatches(rips, refs)
+	matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 	if len(matches) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(matches))
 	}
@@ -116,7 +116,7 @@ func TestResolveEpisodeMatchesThreshold(t *testing.T) {
 
 	rip := []ripFingerprint{{EpisodeKey: "s05e01", TitleID: 1, Vector: newFingerprint("barely similar")}}
 	ref := []referenceFingerprint{{EpisodeNumber: 1, Vector: newFingerprint("completely different")}}
-	matches := resolveEpisodeMatches(rip, ref)
+	matches := resolveEpisodeMatches(rip, ref, DefaultPolicy().MinSimilarityScore)
 	if len(matches) != 0 {
 		t.Fatalf("expected no matches below threshold, got %d", len(matches))
 	}
@@ -127,7 +127,7 @@ func TestResolveEpisodeMatchesEmptyInputs(t *testing.T) {
 
 	t.Run("empty rips", func(t *testing.T) {
 		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: newFingerprint("some content here")}}
-		matches := resolveEpisodeMatches(nil, refs)
+		matches := resolveEpisodeMatches(nil, refs, DefaultPolicy().MinSimilarityScore)
 		if matches != nil {
 			t.Fatalf("expected nil for empty rips, got %v", matches)
 		}
@@ -135,14 +135,14 @@ func TestResolveEpisodeMatchesEmptyInputs(t *testing.T) {
 
 	t.Run("empty refs", func(t *testing.T) {
 		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint("some content here")}}
-		matches := resolveEpisodeMatches(rips, nil)
+		matches := resolveEpisodeMatches(rips, nil, DefaultPolicy().MinSimilarityScore)
 		if matches != nil {
 			t.Fatalf("expected nil for empty refs, got %v", matches)
 		}
 	})
 
 	t.Run("both empty", func(t *testing.T) {
-		matches := resolveEpisodeMatches(nil, nil)
+		matches := resolveEpisodeMatches(nil, nil, DefaultPolicy().MinSimilarityScore)
 		if matches != nil {
 			t.Fatalf("expected nil for both empty, got %v", matches)
 		}
@@ -155,7 +155,7 @@ func TestResolveEpisodeMatchesNilVectors(t *testing.T) {
 	t.Run("nil rip vector", func(t *testing.T) {
 		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: nil}}
 		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: newFingerprint("episode one content dialog")}}
-		matches := resolveEpisodeMatches(rips, refs)
+		matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 		if len(matches) != 0 {
 			t.Fatalf("expected no matches with nil rip vector, got %d", len(matches))
 		}
@@ -164,7 +164,7 @@ func TestResolveEpisodeMatchesNilVectors(t *testing.T) {
 	t.Run("nil ref vector", func(t *testing.T) {
 		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint("episode one content dialog")}}
 		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: nil}}
-		matches := resolveEpisodeMatches(rips, refs)
+		matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 		if len(matches) != 0 {
 			t.Fatalf("expected no matches with nil ref vector, got %d", len(matches))
 		}
@@ -179,7 +179,7 @@ func TestResolveEpisodeMatchesPerfectMatch(t *testing.T) {
 	rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: newFingerprint(text)}}
 	refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: newFingerprint(text), FileID: 42, Language: "en"}}
 
-	matches := resolveEpisodeMatches(rips, refs)
+	matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 	if len(matches) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(matches))
 	}
@@ -206,13 +206,13 @@ func TestResolveEpisodeMatchesBoundaryThreshold(t *testing.T) {
 		ref := newFingerprint("hello world this test content shared vocabulary terms different")
 
 		score := cosineSimilarity(rip, ref)
-		if score < minSimilarityScore {
-			t.Skipf("test fingerprints produce score %f below threshold %f, adjust test data", score, minSimilarityScore)
+		if score < DefaultPolicy().MinSimilarityScore {
+			t.Skipf("test fingerprints produce score %f below threshold %f, adjust test data", score, DefaultPolicy().MinSimilarityScore)
 		}
 
 		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: rip}}
 		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: ref}}
-		matches := resolveEpisodeMatches(rips, refs)
+		matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 		if len(matches) != 1 {
 			t.Fatalf("expected match above threshold (score=%f), got %d matches", score, len(matches))
 		}
@@ -224,13 +224,13 @@ func TestResolveEpisodeMatchesBoundaryThreshold(t *testing.T) {
 		ref := newFingerprint("one two three four five six seven eight")
 
 		score := cosineSimilarity(rip, ref)
-		if score >= minSimilarityScore {
-			t.Skipf("test fingerprints produce score %f at or above threshold %f, adjust test data", score, minSimilarityScore)
+		if score >= DefaultPolicy().MinSimilarityScore {
+			t.Skipf("test fingerprints produce score %f at or above threshold %f, adjust test data", score, DefaultPolicy().MinSimilarityScore)
 		}
 
 		rips := []ripFingerprint{{EpisodeKey: "s01e01", TitleID: 1, Vector: rip}}
 		refs := []referenceFingerprint{{EpisodeNumber: 1, Vector: ref}}
-		matches := resolveEpisodeMatches(rips, refs)
+		matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 		if len(matches) != 0 {
 			t.Fatalf("expected no match below threshold (score=%f), got %d matches", score, len(matches))
 		}
@@ -252,7 +252,7 @@ func TestResolveEpisodeMatchesMoreRipsThanRefs(t *testing.T) {
 		{EpisodeNumber: 2, Vector: newFingerprint("episode two different scene another character talking")},
 	}
 
-	matches := resolveEpisodeMatches(rips, refs)
+	matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 	// Should match at most 2 (the number of refs)
 	if len(matches) > 2 {
 		t.Fatalf("expected at most 2 matches, got %d", len(matches))
@@ -283,7 +283,7 @@ func TestResolveEpisodeMatchesMoreRefsThanRips(t *testing.T) {
 		{EpisodeNumber: 4, Vector: newFingerprint("episode four climax action sequence resolution ending")},
 	}
 
-	matches := resolveEpisodeMatches(rips, refs)
+	matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 	if len(matches) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(matches))
 	}
@@ -340,7 +340,7 @@ func TestResolveEpisodeMatchesFullSeason(t *testing.T) {
 		})
 	}
 
-	matches := resolveEpisodeMatches(rips, refs)
+	matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 	if len(matches) != 10 {
 		t.Fatalf("expected 10 matches for full season, got %d", len(matches))
 	}
@@ -374,7 +374,7 @@ func TestResolveEpisodeMatchesSimilarScoresCorrectAssignment(t *testing.T) {
 		{EpisodeNumber: 3, Vector: newFingerprint(common + "gamma gamma gamma distinct")},
 	}
 
-	matches := resolveEpisodeMatches(rips, refs)
+	matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 	if len(matches) != 3 {
 		t.Fatalf("expected 3 matches, got %d", len(matches))
 	}
@@ -405,7 +405,7 @@ func TestResolveEpisodeMatchesPreservesMetadata(t *testing.T) {
 		},
 	}
 
-	matches := resolveEpisodeMatches(rips, refs)
+	matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
 	if len(matches) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(matches))
 	}
@@ -487,7 +487,7 @@ func TestRefineMatchBlockAllInBlock(t *testing.T) {
 		{EpisodeKey: "s01e02", TitleID: 2},
 		{EpisodeKey: "s01e03", TitleID: 3},
 	}
-	result, info := refineMatchBlock(matches, nil, rips, 10, 0)
+	result, info := refineMatchBlock(matches, nil, rips, 10, 0, DefaultPolicy())
 	if len(result) != 3 {
 		t.Fatalf("expected 3 matches, got %d", len(result))
 	}
@@ -520,7 +520,7 @@ func TestRefineMatchBlockOutliersReassigned(t *testing.T) {
 		{EpisodeKey: "s01e03", TitleID: 3, Vector: newFingerprint("episode three content epsilon zeta")},
 		{EpisodeKey: "s01e04", TitleID: 4, Vector: newFingerprint("episode four content theta iota")},
 	}
-	result, info := refineMatchBlock(matches, refs, rips, 34, 0)
+	result, info := refineMatchBlock(matches, refs, rips, 34, 0, DefaultPolicy())
 	if info.Displaced != 2 {
 		t.Fatalf("expected 2 displaced, got %d", info.Displaced)
 	}
@@ -566,7 +566,7 @@ func TestRefineMatchBlockMismatchFlagsReview(t *testing.T) {
 		{EpisodeKey: "s01e04", TitleID: 4},
 		{EpisodeKey: "s01e05", TitleID: 5},
 	}
-	_, info := refineMatchBlock(matches, nil, rips, 6, 0)
+	_, info := refineMatchBlock(matches, nil, rips, 6, 0, DefaultPolicy())
 	if !info.NeedsReview {
 		t.Errorf("expected needs_review when displaced != gaps (displaced=%d, gaps=%d)", info.Displaced, info.Gaps)
 	}
@@ -581,7 +581,7 @@ func TestRefineMatchBlockNoHighConfidence(t *testing.T) {
 	rips := []ripFingerprint{
 		{EpisodeKey: "s01e01", TitleID: 1},
 	}
-	result, info := refineMatchBlock(matches, nil, rips, 10, 0)
+	result, info := refineMatchBlock(matches, nil, rips, 10, 0, DefaultPolicy())
 	if len(result) != 1 {
 		t.Fatalf("expected 1 match unchanged, got %d", len(result))
 	}
@@ -612,7 +612,7 @@ func TestRefineMatchBlockDisc1ForcesStartAt1(t *testing.T) {
 	for i := range rips {
 		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
 	}
-	result, info := refineMatchBlock(matches, nil, rips, 24, 1)
+	result, info := refineMatchBlock(matches, nil, rips, 24, 1, DefaultPolicy())
 	if info.BlockStart != 1 {
 		t.Fatalf("expected blockStart=1 for disc 1, got %d", info.BlockStart)
 	}
@@ -654,7 +654,7 @@ func TestRefineMatchBlockDisc2ExpandsDownward(t *testing.T) {
 	for i := range rips {
 		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
 	}
-	_, info := refineMatchBlock(matches, nil, rips, 48, 2)
+	_, info := refineMatchBlock(matches, nil, rips, 48, 2, DefaultPolicy())
 	if info.BlockStart != 13 {
 		t.Fatalf("expected blockStart=13 (expand downward for disc 2), got %d", info.BlockStart)
 	}
@@ -677,7 +677,7 @@ func TestRefineMatchBlockDisc2ExpandsUpward(t *testing.T) {
 	for i := range rips {
 		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
 	}
-	_, info := refineMatchBlock(matches, nil, rips, 20, 2)
+	_, info := refineMatchBlock(matches, nil, rips, 20, 2, DefaultPolicy())
 	// validLow = 7-4+1 = 4, validHigh = 5. Displaced points above hcMax → blockStart = validHigh = 5.
 	if info.BlockStart != 5 {
 		t.Fatalf("expected blockStart=5 (expand upward for disc 2), got %d", info.BlockStart)
@@ -701,7 +701,7 @@ func TestRefineMatchBlockDisc2PreventsStartAt1(t *testing.T) {
 	for i := range rips {
 		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
 	}
-	_, info := refineMatchBlock(matches, nil, rips, 20, 2)
+	_, info := refineMatchBlock(matches, nil, rips, 20, 2, DefaultPolicy())
 	// validLow = max(1, 4-4+1) = 1. But disc 2 clamps to 2.
 	if info.BlockStart < 2 {
 		t.Fatalf("disc 2+ must not start at episode 1, got blockStart=%d", info.BlockStart)
@@ -721,7 +721,7 @@ func TestRefineMatchBlockDiscUnknownPreservesUpwardExpansion(t *testing.T) {
 	for i := range rips {
 		rips[i] = ripFingerprint{EpisodeKey: matches[i].EpisodeKey, TitleID: matches[i].TitleID}
 	}
-	_, info := refineMatchBlock(matches, nil, rips, 30, 0)
+	_, info := refineMatchBlock(matches, nil, rips, 30, 0, DefaultPolicy())
 	// discNumber=0 uses hcMin=5 as blockStart, blockEnd=8.
 	if info.BlockStart != 5 {
 		t.Fatalf("expected blockStart=5 for disc unknown (anchor at hcMin), got %d", info.BlockStart)
@@ -737,7 +737,7 @@ func TestRefineMatchBlockSingleEpisodeSkipped(t *testing.T) {
 	matches := []matchResult{
 		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 1, Score: 0.99},
 	}
-	result, _ := refineMatchBlock(matches, nil, nil, 1, 0)
+	result, _ := refineMatchBlock(matches, nil, nil, 1, 0, DefaultPolicy())
 	if len(result) != 1 || result[0].TargetEpisode != 1 {
 		t.Fatalf("expected single match unchanged")
 	}

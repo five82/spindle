@@ -6,12 +6,6 @@ import (
 	"strings"
 )
 
-const (
-	minSimilarityScore   = 0.58
-	anchorMinScore       = 0.63
-	anchorMinScoreMargin = 0.03
-)
-
 type anchorSelection struct {
 	RipIndex        int
 	TargetEpisode   int
@@ -26,7 +20,7 @@ type anchorSelection struct {
 // selectAnchorWindow tries a first-anchor and then second-anchor strategy.
 // When successful, it returns a contiguous episode window derived from the
 // confident anchor episode.
-func selectAnchorWindow(rips []ripFingerprint, refs []referenceFingerprint, totalSeasonEpisodes int) (anchorSelection, bool) {
+func selectAnchorWindow(rips []ripFingerprint, refs []referenceFingerprint, totalSeasonEpisodes int, minScore, minMargin float64) (anchorSelection, bool) {
 	if len(rips) == 0 || len(refs) == 0 {
 		return anchorSelection{Reason: "anchor_inputs_unavailable"}, false
 	}
@@ -36,7 +30,7 @@ func selectAnchorWindow(rips []ripFingerprint, refs []referenceFingerprint, tota
 	}
 	var last anchorSelection
 	for _, idx := range indices {
-		attempt, ok := evaluateAnchorSelection(rips, refs, idx, totalSeasonEpisodes)
+		attempt, ok := evaluateAnchorSelection(rips, refs, idx, totalSeasonEpisodes, minScore, minMargin)
 		if ok {
 			return attempt, true
 		}
@@ -48,7 +42,7 @@ func selectAnchorWindow(rips []ripFingerprint, refs []referenceFingerprint, tota
 	return last, false
 }
 
-func evaluateAnchorSelection(rips []ripFingerprint, refs []referenceFingerprint, ripIndex int, totalSeasonEpisodes int) (anchorSelection, bool) {
+func evaluateAnchorSelection(rips []ripFingerprint, refs []referenceFingerprint, ripIndex int, totalSeasonEpisodes int, minScore, minMargin float64) (anchorSelection, bool) {
 	sel := anchorSelection{RipIndex: ripIndex}
 	if ripIndex < 0 || ripIndex >= len(rips) {
 		sel.Reason = "anchor_index_out_of_range"
@@ -90,11 +84,11 @@ func evaluateAnchorSelection(rips []ripFingerprint, refs []referenceFingerprint,
 	sel.SecondBestScore = secondScore
 	sel.ScoreMargin = bestScore - secondScore
 
-	if bestScore < anchorMinScore {
+	if bestScore < minScore {
 		sel.Reason = "anchor_score_below_threshold"
 		return sel, false
 	}
-	if sel.ScoreMargin < anchorMinScoreMargin {
+	if sel.ScoreMargin < minMargin {
 		sel.Reason = "anchor_score_ambiguous"
 		return sel, false
 	}
@@ -129,7 +123,7 @@ func evaluateAnchorSelection(rips []ripFingerprint, refs []referenceFingerprint,
 // resolveEpisodeMatches computes the maximum-weight bipartite matching between ripped
 // episode transcripts and OpenSubtitles references using the Hungarian algorithm.
 // This avoids greedy mis-assignments when multiple pairs have very similar scores.
-func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint) []matchResult {
+func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint, minScore float64) []matchResult {
 	if len(rips) == 0 || len(refs) == 0 {
 		return nil
 	}
@@ -173,7 +167,7 @@ func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint) [
 			continue
 		}
 		score := scores[i][j]
-		if score < minSimilarityScore {
+		if score < minScore {
 			continue
 		}
 		results = append(results, matchResult{
@@ -287,7 +281,8 @@ type blockRefinement struct {
 // Returns the refined matches and a refinement summary. If no refinement is
 // needed (all matches already contiguous, or insufficient data), the original
 // matches are returned unchanged.
-func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips []ripFingerprint, totalSeasonEpisodes int, discNumber int) ([]matchResult, blockRefinement) {
+func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips []ripFingerprint, totalSeasonEpisodes int, discNumber int, policy Policy) ([]matchResult, blockRefinement) {
+	policy = policy.normalized()
 	var info blockRefinement
 
 	// Skip refinement for trivial cases.
@@ -306,12 +301,12 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 			maxScore = m.Score
 		}
 	}
-	threshold := maxScore - 0.05
+	threshold := maxScore - policy.BlockHighConfidenceDelta
 
 	sorted := make([]float64, len(scores))
 	copy(sorted, scores)
 	sort.Float64s(sorted)
-	top70Idx := len(sorted) - int(math.Ceil(float64(len(sorted))*0.7))
+	top70Idx := len(sorted) - int(math.Ceil(float64(len(sorted))*policy.BlockHighConfidenceTopRatio))
 	if top70Idx < 0 {
 		top70Idx = 0
 	}
@@ -360,10 +355,14 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 	switch {
 	case discNumber == 1:
 		// Disc 1 hard rule: always start at episode 1.
-		blockStart = 1
-		if 1 < validLow || 1 > validHigh {
-			info.NeedsReview = true
-			info.ReviewReason = "disc 1 anchor outside valid high-confidence range"
+		if policy.Disc1MustStartAtEpisode1 {
+			blockStart = 1
+			if 1 < validLow || 1 > validHigh {
+				info.NeedsReview = true
+				info.ReviewReason = "disc 1 anchor outside valid high-confidence range"
+			}
+		} else {
+			blockStart = hcMin
 		}
 	case discNumber >= 2:
 		// Use displaced matches' original targets as directional hints.
@@ -388,8 +387,8 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 			}
 		}
 		// Hard constraint: disc 2+ cannot start at episode 1.
-		if blockStart < 2 {
-			blockStart = 2
+		if blockStart < policy.Disc2PlusMinStartEpisode {
+			blockStart = policy.Disc2PlusMinStartEpisode
 		}
 	default:
 		// Disc unknown (0): preserve existing upward-expansion behavior.

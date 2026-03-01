@@ -47,6 +47,19 @@ const (
 	defaultCommentaryConfidenceThreshold = 0.80
 	defaultCommentaryWhisperXModel       = "large-v3-turbo"
 	defaultCommentaryTitle               = "Spindle Commentary Detector"
+
+	// Content ID defaults
+	defaultContentIDMinSimilarityScore           = 0.58
+	defaultContentIDLowConfidenceReviewThreshold = 0.70
+	defaultContentIDLLMVerifyThreshold           = 0.85
+	defaultContentIDAnchorMinScore               = 0.63
+	defaultContentIDAnchorMinScoreMargin         = 0.03
+	defaultContentIDBlockHighConfidenceDelta     = 0.05
+	defaultContentIDBlockHighConfidenceTopRatio  = 0.70
+	defaultContentIDDiscBlockPaddingMin          = 2
+	defaultContentIDDiscBlockPaddingDivisor      = 4
+	defaultContentIDDisc1MustStartAtEpisode1     = true
+	defaultContentIDDisc2PlusMinStartEpisode     = 2
 )
 
 // Default returns a Config populated with repository defaults.
@@ -140,6 +153,19 @@ func Default() Config {
 			WhisperXModel:       defaultCommentaryWhisperXModel,
 			SimilarityThreshold: defaultCommentarySimilarityThreshold,
 			ConfidenceThreshold: defaultCommentaryConfidenceThreshold,
+		},
+		ContentID: ContentID{
+			MinSimilarityScore:           defaultContentIDMinSimilarityScore,
+			LowConfidenceReviewThreshold: defaultContentIDLowConfidenceReviewThreshold,
+			LLMVerifyThreshold:           defaultContentIDLLMVerifyThreshold,
+			AnchorMinScore:               defaultContentIDAnchorMinScore,
+			AnchorMinScoreMargin:         defaultContentIDAnchorMinScoreMargin,
+			BlockHighConfidenceDelta:     defaultContentIDBlockHighConfidenceDelta,
+			BlockHighConfidenceTopRatio:  defaultContentIDBlockHighConfidenceTopRatio,
+			DiscBlockPaddingMin:          defaultContentIDDiscBlockPaddingMin,
+			DiscBlockPaddingDivisor:      defaultContentIDDiscBlockPaddingDivisor,
+			Disc1MustStartAtEpisode1:     defaultContentIDDisc1MustStartAtEpisode1,
+			Disc2PlusMinStartEpisode:     defaultContentIDDisc2PlusMinStartEpisode,
 		},
 	}
 }

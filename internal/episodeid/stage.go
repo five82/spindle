@@ -31,7 +31,7 @@ type EpisodeIdentifier struct {
 func NewEpisodeIdentifier(cfg *config.Config, store *queue.Store, logger *slog.Logger) *EpisodeIdentifier {
 	var matcher *contentid.Matcher
 	if cfg != nil && cfg.Subtitles.OpenSubtitlesEnabled {
-		var opts []contentid.Option
+		opts := []contentid.Option{contentid.WithPolicy(contentIDPolicyFromConfig(cfg))}
 		if llmCfg := cfg.GetLLM(); llmCfg.APIKey != "" {
 			opts = append(opts, contentid.WithLLMClient(llm.NewClientFrom(llmCfg)))
 		}
@@ -44,6 +44,25 @@ func NewEpisodeIdentifier(cfg *config.Config, store *queue.Store, logger *slog.L
 	}
 	id.SetLogger(logger)
 	return id
+}
+
+func contentIDPolicyFromConfig(cfg *config.Config) contentid.Policy {
+	if cfg == nil {
+		return contentid.DefaultPolicy()
+	}
+	return contentid.Policy{
+		MinSimilarityScore:           cfg.ContentID.MinSimilarityScore,
+		LowConfidenceReviewThreshold: cfg.ContentID.LowConfidenceReviewThreshold,
+		LLMVerifyThreshold:           cfg.ContentID.LLMVerifyThreshold,
+		AnchorMinScore:               cfg.ContentID.AnchorMinScore,
+		AnchorMinScoreMargin:         cfg.ContentID.AnchorMinScoreMargin,
+		BlockHighConfidenceDelta:     cfg.ContentID.BlockHighConfidenceDelta,
+		BlockHighConfidenceTopRatio:  cfg.ContentID.BlockHighConfidenceTopRatio,
+		DiscBlockPaddingMin:          cfg.ContentID.DiscBlockPaddingMin,
+		DiscBlockPaddingDivisor:      cfg.ContentID.DiscBlockPaddingDivisor,
+		Disc1MustStartAtEpisode1:     cfg.ContentID.Disc1MustStartAtEpisode1,
+		Disc2PlusMinStartEpisode:     cfg.ContentID.Disc2PlusMinStartEpisode,
+	}
 }
 
 // SetLogger updates the episode identifier's logging destination.
@@ -196,7 +215,10 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		}
 
 		// Check for low-confidence episode matches
-		const minMatchConfidence = 0.70
+		minMatchConfidence := contentid.DefaultPolicy().LowConfidenceReviewThreshold
+		if e.matcher != nil {
+			minMatchConfidence = e.matcher.Policy().LowConfidenceReviewThreshold
+		}
 		var lowConfidenceEpisodes []string
 		for _, ep := range env.Episodes {
 			if ep.MatchConfidence > 0 && ep.MatchConfidence < minMatchConfidence {

@@ -144,6 +144,23 @@ confidence_threshold = 0.80                          # LLM confidence required t
 # model = ""
 
 # ============================================================================
+# EPISODE IDENTIFICATION POLICY (advanced tuning)
+# ============================================================================
+
+[content_id]
+min_similarity_score = 0.58                          # Base transcript similarity floor for accepting a match
+low_confidence_review_threshold = 0.70               # Matches below this are flagged for review
+llm_verify_threshold = 0.85                          # Matches below this are sent to LLM verification
+anchor_min_score = 0.63                              # Minimum score for anchor-window selection
+anchor_min_score_margin = 0.03                       # Minimum margin over second-best anchor score
+block_high_confidence_delta = 0.05                   # High-confidence block window around top match score
+block_high_confidence_top_ratio = 0.70               # Alternate high-confidence cutoff ratio (top N%)
+disc_block_padding_min = 2                           # Minimum episode padding around disc-window estimates
+disc_block_padding_divisor = 4                       # Dynamic padding divisor based on episodes-per-disc
+disc1_must_start_at_episode1 = true                  # Enforce Disc 1 block start at episode 1
+disc2_plus_min_start_episode = 2                     # Minimum block start for Disc 2+ assumptions
+
+# ============================================================================
 # WORKFLOW TUNING
 # ============================================================================
 

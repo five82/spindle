@@ -26,7 +26,7 @@ func TestDeriveCandidateEpisodesUsesRipSpecEpisodes(t *testing.T) {
 			{EpisodeNumber: 4},
 		},
 	}
-	got := deriveCandidateEpisodes(env, season, 0).Episodes
+	got := deriveCandidateEpisodes(env, season, 0, DefaultPolicy()).Episodes
 	expect := []int{2, 4}
 	if !intSlicesEqual(got, expect) {
 		t.Fatalf("expected %v, got %v", expect, got)
@@ -58,7 +58,7 @@ func TestDeriveCandidateEpisodesPlaceholdersWithDiscNumberUsesDiscBlock(t *testi
 			{EpisodeNumber: 8},
 		},
 	}
-	plan := deriveCandidateEpisodes(env, season, 2)
+	plan := deriveCandidateEpisodes(env, season, 2, DefaultPolicy())
 	// Should use disc_block, not season_fallback
 	if len(plan.DiscBlockEpisodes) == 0 {
 		t.Fatal("expected disc_block episodes, got none")
@@ -86,7 +86,7 @@ func TestDeriveCandidateEpisodesPlaceholdersDisc1(t *testing.T) {
 		seasonEps[i] = tmdb.Episode{EpisodeNumber: i + 1}
 	}
 	season := &tmdb.SeasonDetails{SeasonNumber: 1, Episodes: seasonEps}
-	plan := deriveCandidateEpisodes(env, season, 1)
+	plan := deriveCandidateEpisodes(env, season, 1, DefaultPolicy())
 	if len(plan.DiscBlockEpisodes) == 0 {
 		t.Fatal("expected disc_block episodes for disc 1")
 	}
@@ -125,7 +125,7 @@ func TestDeriveCandidateEpisodesPlaceholdersNoDiscNumber(t *testing.T) {
 			{EpisodeNumber: 8},
 		},
 	}
-	plan := deriveCandidateEpisodes(env, season, 0)
+	plan := deriveCandidateEpisodes(env, season, 0, DefaultPolicy())
 	expect := []int{1, 2, 3, 4, 5, 6, 7, 8}
 	if !intSlicesEqual(plan.Episodes, expect) {
 		t.Fatalf("expected full season %v, got %v", expect, plan.Episodes)
@@ -151,7 +151,7 @@ func TestDeriveCandidateEpisodesPaddingClampsToSeasonBounds(t *testing.T) {
 		seasonEps[i] = tmdb.Episode{EpisodeNumber: i + 1}
 	}
 	season := &tmdb.SeasonDetails{SeasonNumber: 1, Episodes: seasonEps}
-	plan := deriveCandidateEpisodes(env, season, 3)
+	plan := deriveCandidateEpisodes(env, season, 3, DefaultPolicy())
 	if len(plan.DiscBlockEpisodes) == 0 {
 		t.Fatal("expected disc_block episodes")
 	}
@@ -188,7 +188,7 @@ func TestDeriveCandidateEpisodesUsesDiscBlocksWithResolved(t *testing.T) {
 			{EpisodeNumber: 8},
 		},
 	}
-	got := deriveCandidateEpisodes(env, season, 2).Episodes
+	got := deriveCandidateEpisodes(env, season, 2, DefaultPolicy()).Episodes
 	expect := []int{4, 5, 6}
 	if !intSlicesEqual(got, expect) {
 		t.Fatalf("expected %v, got %v", expect, got)
@@ -204,7 +204,7 @@ func TestDeriveCandidateEpisodesFallsBackToSeason(t *testing.T) {
 			{EpisodeNumber: 2},
 		},
 	}
-	got := deriveCandidateEpisodes(env, season, 0).Episodes
+	got := deriveCandidateEpisodes(env, season, 0, DefaultPolicy()).Episodes
 	expect := []int{1, 2}
 	if !intSlicesEqual(got, expect) {
 		t.Fatalf("expected %v, got %v", expect, got)

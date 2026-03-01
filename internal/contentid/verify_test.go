@@ -93,7 +93,7 @@ func TestVerifyMatches_HighConfidenceSkipsLLM(t *testing.T) {
 	}
 	rips, refs := makeTestFixtures(t)
 
-	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logger)
+	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logger, DefaultPolicy().LLMVerifyThreshold)
 
 	if mock.calls != 0 {
 		t.Fatalf("expected 0 LLM calls for high-confidence matches, got %d", mock.calls)
@@ -111,7 +111,7 @@ func TestVerifyMatches_NilClient(t *testing.T) {
 		{EpisodeKey: "s01e01", TargetEpisode: 1, Score: 0.75},
 	}
 
-	result, vr := verifyMatches(context.Background(), nil, matches, nil, nil, logging.NewNop())
+	result, vr := verifyMatches(context.Background(), nil, matches, nil, nil, logging.NewNop(), DefaultPolicy().LLMVerifyThreshold)
 	if vr != nil {
 		t.Fatal("expected nil verifyResult for nil client")
 	}
@@ -132,7 +132,7 @@ func TestVerifyMatches_SingleRejectionNeedsReview(t *testing.T) {
 		{EpisodeKey: "s01e03", TargetEpisode: 3, Score: 0.90}, // above threshold
 	}
 
-	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop())
+	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop(), DefaultPolicy().LLMVerifyThreshold)
 
 	if mock.calls != 1 {
 		t.Fatalf("expected 1 LLM call, got %d", mock.calls)
@@ -175,7 +175,7 @@ func TestVerifyMatches_TwoRejectionsAttemptRematch(t *testing.T) {
 		{EpisodeKey: "s01e03", TitleID: 3, TargetEpisode: 3, Score: 0.90}, // above threshold
 	}
 
-	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop())
+	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop(), DefaultPolicy().LLMVerifyThreshold)
 
 	if vr == nil {
 		t.Fatal("expected non-nil verifyResult")
@@ -204,7 +204,7 @@ func TestVerifyMatches_AllRejectedRematchNeedsReview(t *testing.T) {
 		{EpisodeKey: "s01e02", TitleID: 2, TargetEpisode: 2, Score: 0.78},
 	}
 
-	_, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop())
+	_, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop(), DefaultPolicy().LLMVerifyThreshold)
 
 	if vr == nil {
 		t.Fatal("expected non-nil verifyResult")
@@ -225,7 +225,7 @@ func TestVerifyMatches_LLMErrorGracefulDegradation(t *testing.T) {
 		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 1, Score: 0.80},
 	}
 
-	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop())
+	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop(), DefaultPolicy().LLMVerifyThreshold)
 
 	if vr == nil {
 		t.Fatal("expected non-nil verifyResult")
@@ -249,7 +249,7 @@ func TestVerifyMatches_VerifiedMatchesConfirmed(t *testing.T) {
 		{EpisodeKey: "s01e01", TitleID: 1, TargetEpisode: 1, Score: 0.82},
 	}
 
-	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop())
+	result, vr := verifyMatches(context.Background(), mock, matches, rips, refs, logging.NewNop(), DefaultPolicy().LLMVerifyThreshold)
 
 	if vr == nil {
 		t.Fatal("expected non-nil verifyResult")

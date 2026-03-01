@@ -12,9 +12,15 @@
 // confirmed episode mappings so downstream encoding and organizing stages have
 // correct metadata.
 //
-// Matching uses a greedy algorithm with a similarity floor (~0.58). When no
-// match clears the threshold, the original heuristic ordering remains and the
-// item may be flagged for manual review.
+// Matching evaluates ordered candidate strategies (rip-spec seed, anchor window,
+// disc block, then full season). For each strategy, it computes transcript
+// similarity and uses a global Hungarian assignment to map ripped episodes to
+// references. The best strategy is selected by match coverage and confidence,
+// with review flags propagated when refinement or verification detects risk.
+//
+// Low-confidence matches can be verified with an optional LLM pass. Rejected
+// pairs are cross-compared and reassigned using Hungarian assignment to preserve
+// global optimality across ambiguous episodes.
 //
 // Configuration dependencies:
 //   - opensubtitles_enabled, opensubtitles_api_key, opensubtitles_user_agent
