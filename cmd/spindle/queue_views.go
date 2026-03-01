@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"spindle/internal/api"
 )
 
 func buildQueueStatusRows(stats map[string]int) [][]string {
@@ -25,11 +27,11 @@ func buildQueueStatusRows(stats map[string]int) [][]string {
 	return rows
 }
 
-func buildQueueListRows(items []queueItemView) [][]string {
+func buildQueueListRows(items []api.QueueItem) [][]string {
 	if len(items) == 0 {
 		return nil
 	}
-	sorted := make([]queueItemView, len(items))
+	sorted := make([]api.QueueItem, len(items))
 	copy(sorted, items)
 
 	sort.Slice(sorted, func(i, j int) bool {
@@ -66,6 +68,25 @@ func buildQueueListRows(items []queueItemView) [][]string {
 	return rows
 }
 
+// tallyEpisodeTotals counts episode progress from episode status list.
+// Used as a fallback when EpisodeTotals is not provided by the API.
+func tallyEpisodeTotals(episodes []api.EpisodeStatus) api.EpisodeTotals {
+	var totals api.EpisodeTotals
+	for _, ep := range episodes {
+		totals.Planned++
+		if strings.TrimSpace(ep.RippedPath) != "" {
+			totals.Ripped++
+		}
+		if strings.TrimSpace(ep.EncodedPath) != "" {
+			totals.Encoded++
+		}
+		if strings.TrimSpace(ep.FinalPath) != "" {
+			totals.Final++
+		}
+	}
+	return totals
+}
+
 func formatStatusLabel(status string) string {
 	status = strings.TrimSpace(status)
 	if status == "" {
@@ -83,17 +104,11 @@ func formatStatusLabel(status string) string {
 }
 
 func formatDisplayTime(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
+	t := parseQueueTime(strings.TrimSpace(value))
+	if t.IsZero() {
 		return ""
 	}
-	if t, err := time.Parse(time.RFC3339, value); err == nil {
-		return t.UTC().Format("2006-01-02 15:04")
-	}
-	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return t.UTC().Format("2006-01-02 15:04")
-	}
-	return value
+	return t.UTC().Format("2006-01-02 15:04")
 }
 
 func parseQueueTime(value string) time.Time {

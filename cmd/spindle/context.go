@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/api"
 	"spindle/internal/config"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
@@ -141,13 +142,13 @@ func (c *commandContext) withStore(fn func(*ipc.Client, *queue.Store) error) err
 
 func (c *commandContext) withQueueAPI(fn func(queueAPI) error) error {
 	return c.withStore(func(client *ipc.Client, store *queue.Store) error {
-		var api queueAPI
+		var qa queueAPI
 		if client != nil {
-			api = &queueIPCFacade{client: client}
+			qa = &queueIPCAdapter{client: client}
 		} else {
-			api = &queueStoreFacade{store: store}
+			qa = &queueStoreAdapter{store: store, service: api.NewQueueService(store)}
 		}
-		return fn(api)
+		return fn(qa)
 	})
 }
 
@@ -165,7 +166,7 @@ func (c *commandContext) withQueueStore(fn func(queueStoreAPI) error) error {
 	}
 	defer store.Close()
 
-	return fn(&queueStoreFacade{store: store})
+	return fn(&queueStoreAdapter{store: store, service: api.NewQueueService(store)})
 }
 
 func (c *commandContext) dialClient() (*ipc.Client, error) {

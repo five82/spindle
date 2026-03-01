@@ -266,8 +266,8 @@ func TestQueueShowJSON(t *testing.T) {
 	if detail["id"] != float64(item.ID) {
 		t.Fatalf("expected id %d, got %v", item.ID, detail["id"])
 	}
-	if detail["disc_title"] != "Alpha" {
-		t.Fatalf("expected disc_title Alpha, got %v", detail["disc_title"])
+	if detail["discTitle"] != "Alpha" {
+		t.Fatalf("expected discTitle Alpha, got %v", detail["discTitle"])
 	}
 }
 
@@ -293,8 +293,8 @@ func TestQueueShowJSONIncludesEpisodeIdentifiedCount(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &detail); err != nil {
 		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
 	}
-	if detail["episode_identified_count"] != float64(1) {
-		t.Fatalf("expected episode_identified_count 1, got %v", detail["episode_identified_count"])
+	if detail["episodeIdentifiedCount"] != float64(1) {
+		t.Fatalf("expected episodeIdentifiedCount 1, got %v", detail["episodeIdentifiedCount"])
 	}
 }
 

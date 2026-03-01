@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/api"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 )
@@ -70,17 +71,33 @@ func newQueueListCommand(ctx *commandContext) *cobra.Command {
 		Use:   "list",
 		Short: "List queue items",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(api queueAPI) error {
-				items, err := api.List(cmd.Context(), listStatuses)
+			return ctx.withQueueAPI(func(qa queueAPI) error {
+				items, err := qa.List(cmd.Context(), listStatuses)
 				if err != nil {
 					return err
 				}
 
 				if ctx.JSONMode() {
-					if items == nil {
-						items = []queueItemView{}
+					type listItem struct {
+						ID              int64  `json:"id"`
+						DiscTitle       string `json:"discTitle"`
+						SourcePath      string `json:"sourcePath,omitempty"`
+						Status          string `json:"status"`
+						CreatedAt       string `json:"createdAt"`
+						DiscFingerprint string `json:"discFingerprint,omitempty"`
 					}
-					return writeJSON(cmd, items)
+					out := make([]listItem, 0, len(items))
+					for _, item := range items {
+						out = append(out, listItem{
+							ID:              item.ID,
+							DiscTitle:       item.DiscTitle,
+							SourcePath:      item.SourcePath,
+							Status:          item.Status,
+							CreatedAt:       item.CreatedAt,
+							DiscFingerprint: item.DiscFingerprint,
+						})
+					}
+					return writeJSON(cmd, out)
 				}
 
 				if len(items) == 0 {
@@ -112,12 +129,12 @@ func newQueueShowCommand(ctx *commandContext) *cobra.Command {
 			if err != nil || id <= 0 {
 				return fmt.Errorf("invalid item id %q", args[0])
 			}
-			return ctx.withQueueAPI(func(api queueAPI) error {
-				details, err := api.Describe(cmd.Context(), id)
+			return ctx.withQueueAPI(func(qa queueAPI) error {
+				item, err := qa.Describe(cmd.Context(), id)
 				if err != nil {
 					return err
 				}
-				if details == nil || details.ID == 0 {
+				if item == nil || item.ID == 0 {
 					if ctx.JSONMode() {
 						return writeJSON(cmd, map[string]any{"error": "not_found", "id": id})
 					}
@@ -125,9 +142,9 @@ func newQueueShowCommand(ctx *commandContext) *cobra.Command {
 					return nil
 				}
 				if ctx.JSONMode() {
-					return writeJSON(cmd, details)
+					return writeJSON(cmd, item)
 				}
-				printQueueItemDetails(cmd, *details)
+				printQueueItemDetails(cmd, *item)
 				return nil
 			})
 		},
@@ -188,12 +205,12 @@ Examples:
 				return errors.New("specify item IDs or use --all, --completed, or --failed")
 			}
 
-			return ctx.withQueueAPI(func(api queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueAPI) error {
 				out := cmd.OutOrStdout()
 
 				// Handle specific IDs
 				if len(ids) > 0 {
-					result, err := api.RemoveIDs(cmd.Context(), ids)
+					result, err := removeIDs(cmd.Context(), qa, ids)
 					if err != nil {
 						return err
 					}
@@ -230,11 +247,11 @@ Examples:
 				)
 				switch {
 				case clearCompleted:
-					removed, err = api.ClearCompleted(cmd.Context())
+					removed, err = qa.ClearCompleted(cmd.Context())
 				case clearFailed:
-					removed, err = api.ClearFailed(cmd.Context())
+					removed, err = qa.ClearFailed(cmd.Context())
 				case clearAll:
-					removed, err = api.ClearAll(cmd.Context())
+					removed, err = qa.ClearAll(cmd.Context())
 				}
 				if err != nil {
 					return err
@@ -268,8 +285,8 @@ func newQueueResetCommand(ctx *commandContext) *cobra.Command {
 		Use:   "reset-stuck",
 		Short: "Return in-flight items to pending",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(api queueAPI) error {
-				updated, err := api.ResetStuck(cmd.Context())
+			return ctx.withQueueAPI(func(qa queueAPI) error {
+				updated, err := qa.ResetStuck(cmd.Context())
 				if err != nil {
 					return err
 				}
@@ -303,7 +320,7 @@ Examples:
 			ids := make([]int64, 0, len(args))
 			for _, arg := range args {
 				id, err := strconv.ParseInt(arg, 10, 64)
-				if err != nil {
+				if err != nil || id <= 0 {
 					return fmt.Errorf("invalid item id %q", arg)
 				}
 				ids = append(ids, id)
@@ -344,10 +361,10 @@ Examples:
 				})
 			}
 
-			return ctx.withQueueAPI(func(api queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueAPI) error {
 				out := cmd.OutOrStdout()
 				if len(ids) == 0 {
-					updated, err := api.RetryAll(cmd.Context())
+					updated, err := qa.RetryAll(cmd.Context())
 					if err != nil {
 						return err
 					}
@@ -358,7 +375,7 @@ Examples:
 					return nil
 				}
 
-				result, err := api.RetryIDs(cmd.Context(), ids)
+				result, err := retryIDs(cmd.Context(), qa, ids)
 				if err != nil {
 					return err
 				}
@@ -409,9 +426,9 @@ func newQueueStopCommand(ctx *commandContext) *cobra.Command {
 				ids = append(ids, id)
 			}
 
-			return ctx.withQueueAPI(func(api queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueAPI) error {
 				out := cmd.OutOrStdout()
-				result, err := api.StopIDs(cmd.Context(), ids)
+				result, err := stopIDs(cmd.Context(), qa, ids)
 				if err != nil {
 					return err
 				}
@@ -454,7 +471,7 @@ func newQueueStopCommand(ctx *commandContext) *cobra.Command {
 	}
 }
 
-func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
+func printQueueItemDetails(cmd *cobra.Command, item api.QueueItem) {
 	out := cmd.OutOrStdout()
 	title := strings.TrimSpace(item.DiscTitle)
 	if title == "" {
@@ -475,11 +492,11 @@ func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
 	if trimmed := formatFingerprint(item.DiscFingerprint); trimmed != "-" {
 		fmt.Fprintf(out, "Disc Fingerprint: %s\n", trimmed)
 	}
-	progressStage := strings.TrimSpace(item.ProgressStage)
-	if progressStage != "" || item.ProgressPercent > 0 {
-		fmt.Fprintf(out, "Progress: %s (%.0f%%)\n", progressStage, item.ProgressPercent)
+	progressStage := strings.TrimSpace(item.Progress.Stage)
+	if progressStage != "" || item.Progress.Percent > 0 {
+		fmt.Fprintf(out, "Progress: %s (%.0f%%)\n", progressStage, item.Progress.Percent)
 	}
-	if msg := strings.TrimSpace(item.ProgressMessage); msg != "" {
+	if msg := strings.TrimSpace(item.Progress.Message); msg != "" {
 		fmt.Fprintf(out, "Progress Message: %s\n", msg)
 	}
 	if item.NeedsReview {
@@ -508,7 +525,7 @@ func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
 	if value := strings.TrimSpace(item.ItemLogPath); value != "" {
 		fmt.Fprintf(out, "Item Log: %s\n", value)
 	}
-	if strings.TrimSpace(item.MetadataJSON) != "" {
+	if len(item.Metadata) > 0 {
 		fmt.Fprintln(out, "Metadata: present")
 	} else {
 		fmt.Fprintln(out, "Metadata: none")
@@ -518,16 +535,19 @@ func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
 		printEpisodeDetails(out, item)
 	}
 
-	summary, err := ripspec.Parse(item.RipSpecJSON)
+	summary, err := ripspec.Parse(string(item.RipSpec))
 	if err != nil {
-		fmt.Fprintf(out, "\n⚠️  Unable to parse rip specification: %v\n", err)
+		fmt.Fprintf(out, "\n\u26a0\ufe0f  Unable to parse rip specification: %v\n", err)
 		return
 	}
 	printRipSpecFingerprints(out, summary)
 }
 
-func printEpisodeDetails(out io.Writer, item queueItemDetailsView) {
-	totals := item.EpisodeTotals
+func printEpisodeDetails(out io.Writer, item api.QueueItem) {
+	var totals api.EpisodeTotals
+	if item.EpisodeTotals != nil {
+		totals = *item.EpisodeTotals
+	}
 	if totals.Planned == 0 {
 		totals = tallyEpisodeTotals(item.Episodes)
 	}
@@ -545,7 +565,11 @@ func printEpisodeDetails(out io.Writer, item queueItemDetailsView) {
 		}
 		title := strings.TrimSpace(ep.Title)
 		if title == "" {
-			title = "Unlabeled"
+			if ob := strings.TrimSpace(ep.OutputBasename); ob != "" {
+				title = ob
+			} else {
+				title = "Unlabeled"
+			}
 		}
 		marker := " "
 		if ep.Active {
@@ -559,16 +583,18 @@ func printEpisodeDetails(out io.Writer, item queueItemDetailsView) {
 			fmt.Fprintf(out, "      Subtitles: %s\n", info)
 		}
 		if ep.Active {
-			if msg := strings.TrimSpace(ep.ProgressMessage); msg != "" {
-				fmt.Fprintf(out, "      Active: %s\n", msg)
-			} else if ep.ProgressPercent > 0 {
-				fmt.Fprintf(out, "      Active: %.0f%%\n", ep.ProgressPercent)
+			if ep.Progress != nil {
+				if msg := strings.TrimSpace(ep.Progress.Message); msg != "" {
+					fmt.Fprintf(out, "      Active: %s\n", msg)
+				} else if ep.Progress.Percent > 0 {
+					fmt.Fprintf(out, "      Active: %.0f%%\n", ep.Progress.Percent)
+				}
 			}
 		}
 	}
 }
 
-func primaryEpisodePath(ep queueEpisodeView) string {
+func primaryEpisodePath(ep api.EpisodeStatus) string {
 	if strings.TrimSpace(ep.FinalPath) != "" {
 		return strings.TrimSpace(ep.FinalPath)
 	}
@@ -578,7 +604,7 @@ func primaryEpisodePath(ep queueEpisodeView) string {
 	return strings.TrimSpace(ep.RippedPath)
 }
 
-func episodeSubtitleInfo(ep queueEpisodeView) string {
+func episodeSubtitleInfo(ep api.EpisodeStatus) string {
 	lang := strings.ToUpper(strings.TrimSpace(ep.SubtitleLanguage))
 	source := strings.TrimSpace(ep.SubtitleSource)
 	score := ep.MatchScore
@@ -595,7 +621,7 @@ func episodeSubtitleInfo(ep queueEpisodeView) string {
 	return strings.Join(parts, " · ")
 }
 
-func formatEpisodeLabel(ep queueEpisodeView) string {
+func formatEpisodeLabel(ep api.EpisodeStatus) string {
 	if ep.Season > 0 && ep.Episode > 0 {
 		return fmt.Sprintf("S%02dE%02d", ep.Season, ep.Episode)
 	}
@@ -610,8 +636,8 @@ func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {
 		Use:   "health",
 		Short: "Show queue health summary",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(api queueAPI) error {
-				health, err := api.Health(cmd.Context())
+			return ctx.withQueueAPI(func(qa queueAPI) error {
+				health, err := qa.Health(cmd.Context())
 				if err != nil {
 					return err
 				}
@@ -628,35 +654,5 @@ func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {
 				return nil
 			})
 		},
-	}
-}
-
-func retryOutcomeString(o queueRetryOutcome) string {
-	switch o {
-	case queueRetryOutcomeUpdated:
-		return "retried"
-	case queueRetryOutcomeNotFound:
-		return "not_found"
-	case queueRetryOutcomeNotFailed:
-		return "not_failed"
-	case queueRetryOutcomeEpisodeNotFound:
-		return "episode_not_found"
-	default:
-		return "unknown"
-	}
-}
-
-func stopOutcomeString(o queueStopOutcome) string {
-	switch o {
-	case queueStopOutcomeUpdated:
-		return "stopped"
-	case queueStopOutcomeNotFound:
-		return "not_found"
-	case queueStopOutcomeAlreadyCompleted:
-		return "already_completed"
-	case queueStopOutcomeAlreadyFailed:
-		return "already_failed"
-	default:
-		return "unknown"
 	}
 }
