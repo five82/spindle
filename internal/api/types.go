@@ -120,6 +120,24 @@ type DependencyStatus struct {
 	Optional    bool   `json:"optional"`
 	Available   bool   `json:"available"`
 	Detail      string `json:"detail,omitempty"`
+	Severity    string `json:"severity,omitempty"` // ok, warn, error
+}
+
+// StatusLine captures a labeled readiness line for status output.
+type StatusLine struct {
+	Label    string `json:"label"`
+	Severity string `json:"severity"` // info, ok, warn, error
+	Detail   string `json:"detail"`
+}
+
+// DependencySummary captures aggregate dependency readiness.
+type DependencySummary struct {
+	Total           int    `json:"total"`
+	Available       int    `json:"available"`
+	MissingRequired int    `json:"missingRequired"`
+	MissingOptional int    `json:"missingOptional"`
+	Severity        string `json:"severity"` // info, ok, warn, error
+	Detail          string `json:"detail"`
 }
 
 // DaemonStatus aggregates daemon runtime information for API consumers.

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindle/internal/api"
 	"spindle/internal/ipc"
 )
 
@@ -29,11 +30,19 @@ func TestRenderStatusLineWithColor(t *testing.T) {
 
 func TestDependencyLines(t *testing.T) {
 	deps := []ipc.DependencyStatus{
-		{Name: "MakeMKV", Available: false},
-		{Name: "Drapto", Available: true, Command: "drapto"},
-		{Name: "ntfy", Available: false, Optional: true, Detail: "not configured"},
+		{Name: "MakeMKV", Available: false, Severity: "error"},
+		{Name: "Drapto", Available: true, Command: "drapto", Severity: "ok"},
+		{Name: "ntfy", Available: false, Optional: true, Detail: "not configured", Severity: "warn"},
 	}
-	lines := dependencyLines(deps, false)
+	summary := api.DependencySummary{
+		Total:           3,
+		Available:       1,
+		MissingRequired: 1,
+		MissingOptional: 1,
+		Severity:        "error",
+		Detail:          "1/3 available (missing: 1 required, 1 optional)",
+	}
+	lines := dependencyLines(deps, summary, false)
 	if len(lines) != 5 {
 		t.Fatalf("expected 5 lines, got %d", len(lines))
 	}

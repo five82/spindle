@@ -33,17 +33,20 @@ type DependencyStatus = api.DependencyStatus
 
 // StatusResponse represents combined daemon/workflow status information.
 type StatusResponse struct {
-	Running           bool               `json:"running"`
-	DiscPaused        bool               `json:"disc_paused"`
-	NetlinkMonitoring bool               `json:"netlink_monitoring"`
-	QueueStats        map[string]int     `json:"queue_stats"`
-	LastError         string             `json:"last_error"`
-	LastItem          *QueueItem         `json:"last_item"`
-	LockPath          string             `json:"lock_path"`
-	QueueDBPath       string             `json:"queue_db_path"`
-	StageHealth       []StageHealth      `json:"stage_health"`
-	Dependencies      []DependencyStatus `json:"dependencies"`
-	PID               int                `json:"pid"`
+	Running           bool                  `json:"running"`
+	DiscPaused        bool                  `json:"disc_paused"`
+	NetlinkMonitoring bool                  `json:"netlink_monitoring"`
+	QueueStats        map[string]int        `json:"queue_stats"`
+	SystemChecks      []api.StatusLine      `json:"system_checks,omitempty"`
+	LibraryPaths      []api.StatusLine      `json:"library_paths,omitempty"`
+	DependencySummary api.DependencySummary `json:"dependency_summary"`
+	LastError         string                `json:"last_error"`
+	LastItem          *QueueItem            `json:"last_item"`
+	LockPath          string                `json:"lock_path"`
+	QueueDBPath       string                `json:"queue_db_path"`
+	StageHealth       []StageHealth         `json:"stage_health"`
+	Dependencies      []DependencyStatus    `json:"dependencies"`
+	PID               int                   `json:"pid"`
 }
 
 // QueueListRequest filters queue listing by status.

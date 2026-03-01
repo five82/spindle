@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"spindle/internal/api"
 	"spindle/internal/config"
 	"spindle/internal/ipc"
 	"spindle/internal/preflight"
@@ -369,8 +370,24 @@ func BuildStatusSnapshot(ctx context.Context, socketPath string, cfg *config.Con
 	if len(statusResp.Dependencies) == 0 {
 		statusResp.Dependencies = ResolveDependencies(context.Background(), cfg)
 	}
+	for i := range statusResp.Dependencies {
+		if strings.TrimSpace(statusResp.Dependencies[i].Severity) != "" {
+			continue
+		}
+		severity := "ok"
+		if !statusResp.Dependencies[i].Available {
+			severity = "error"
+			if statusResp.Dependencies[i].Optional {
+				severity = "warn"
+			}
+		}
+		statusResp.Dependencies[i].Severity = severity
+	}
 
 	statusResp.QueueStats = queueStats
+	statusResp.SystemChecks = BuildSystemChecks(cfg, statusResp.Running, statusResp.DiscPaused, statusResp.NetlinkMonitoring)
+	statusResp.LibraryPaths = BuildLibraryPathChecks(cfg)
+	statusResp.DependencySummary = BuildDependencySummary(statusResp.Dependencies)
 	return statusResp, nil
 }
 
@@ -390,6 +407,13 @@ func ResolveDependencies(ctx context.Context, cfg *config.Config) []ipc.Dependen
 	checks := preflight.CheckSystemDeps(ctx, cfg)
 	statuses := make([]ipc.DependencyStatus, 0, len(checks)+1)
 	for _, check := range checks {
+		severity := "ok"
+		if !check.Available {
+			severity = "error"
+			if check.Optional {
+				severity = "warn"
+			}
+		}
 		statuses = append(statuses, ipc.DependencyStatus{
 			Name:        check.Name,
 			Command:     check.Command,
@@ -397,6 +421,7 @@ func ResolveDependencies(ctx context.Context, cfg *config.Config) []ipc.Dependen
 			Optional:    check.Optional,
 			Available:   check.Available,
 			Detail:      check.Detail,
+			Severity:    severity,
 		})
 	}
 
@@ -412,6 +437,7 @@ func commentaryLLMDependencyStatus(ctx context.Context, cfg *config.Config) ipc.
 		Name:        "Commentary LLM",
 		Description: "LLM-driven commentary track detection",
 		Optional:    true,
+		Severity:    "warn",
 	}
 	llmCfg := cfg.CommentaryLLM()
 	if llmCfg.APIKey == "" {
@@ -421,5 +447,149 @@ func commentaryLLMDependencyStatus(ctx context.Context, cfg *config.Config) ipc.
 	result := preflight.CheckLLM(ctx, "Commentary LLM", llmCfg)
 	status.Available = result.Passed
 	status.Detail = result.Detail
+	if status.Available {
+		status.Severity = "ok"
+	}
 	return status
+}
+
+// BuildSystemChecks resolves status lines that combine runtime state and config checks.
+func BuildSystemChecks(cfg *config.Config, daemonRunning, discPaused, netlinkActive bool) []api.StatusLine {
+	lines := make([]api.StatusLine, 0, 6)
+	if daemonRunning {
+		lines = append(lines, api.StatusLine{Label: "Spindle", Severity: "ok", Detail: "Running"})
+		if discPaused {
+			lines = append(lines, api.StatusLine{Label: "Disc Processing", Severity: "warn", Detail: "Paused"})
+		} else {
+			lines = append(lines, api.StatusLine{Label: "Disc Processing", Severity: "ok", Detail: "Active"})
+		}
+	} else {
+		lines = append(lines, api.StatusLine{Label: "Spindle", Severity: "warn", Detail: "Not running (run `spindle start`)"})
+	}
+
+	probe := preflight.ProbeDisc(cfg.MakeMKV.OpticalDrive)
+	if !probe.Detected {
+		lines = append(lines, api.StatusLine{Label: "Disc", Severity: "info", Detail: "No disc detected"})
+	} else {
+		lines = append(lines, api.StatusLine{Label: "Disc", Severity: "ok", Detail: probe.DiscDetail()})
+	}
+
+	jellyfin := preflight.CheckJellyfinFromConfig(cfg)
+	switch {
+	case jellyfin.Passed:
+		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: "ok", Detail: jellyfin.Detail})
+	case strings.EqualFold(strings.TrimSpace(jellyfin.Detail), "Unknown"):
+		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: "info", Detail: jellyfin.Detail})
+	default:
+		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: "warn", Detail: jellyfin.Detail})
+	}
+
+	openSubs := preflight.CheckOpenSubtitlesFromConfig(cfg)
+	switch {
+	case openSubs.Passed && strings.EqualFold(strings.TrimSpace(openSubs.Detail), "Disabled"):
+		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: "info", Detail: openSubs.Detail})
+	case openSubs.Passed:
+		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: "ok", Detail: openSubs.Detail})
+	case strings.EqualFold(strings.TrimSpace(openSubs.Detail), "Unknown"):
+		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: "info", Detail: openSubs.Detail})
+	default:
+		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: "warn", Detail: openSubs.Detail})
+	}
+
+	if strings.TrimSpace(cfg.Notifications.NtfyTopic) != "" {
+		lines = append(lines, api.StatusLine{Label: "Notifications", Severity: "ok", Detail: "Configured"})
+	} else {
+		lines = append(lines, api.StatusLine{Label: "Notifications", Severity: "warn", Detail: "Not configured"})
+	}
+
+	if netlinkActive {
+		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: "ok", Detail: "Netlink monitoring active"})
+	} else if !daemonRunning {
+		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: "info", Detail: "Inactive (daemon not running)"})
+	} else {
+		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: "warn", Detail: "Netlink unavailable (manual detection via 'spindle disc detect')"})
+	}
+
+	return lines
+}
+
+// BuildLibraryPathChecks resolves configured library path readiness.
+func BuildLibraryPathChecks(cfg *config.Config) []api.StatusLine {
+	lines := make([]api.StatusLine, 0, 3)
+	for _, dir := range []struct {
+		label string
+		path  string
+	}{
+		{label: "Library", path: cfg.Paths.LibraryDir},
+		{label: "Movies", path: librarySubdirPath(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)},
+		{label: "TV", path: librarySubdirPath(cfg.Paths.LibraryDir, cfg.Library.TVDir)},
+	} {
+		result := preflight.CheckDirectoryAccess(dir.label, dir.path)
+		severity := "error"
+		if result.Passed {
+			severity = "ok"
+		}
+		lines = append(lines, api.StatusLine{
+			Label:    dir.label,
+			Severity: severity,
+			Detail:   result.Detail,
+		})
+	}
+	return lines
+}
+
+// BuildDependencySummary computes aggregate dependency readiness.
+func BuildDependencySummary(deps []ipc.DependencyStatus) api.DependencySummary {
+	if len(deps) == 0 {
+		return api.DependencySummary{
+			Severity: "info",
+			Detail:   "No dependency checks configured",
+		}
+	}
+
+	missingRequired := 0
+	missingOptional := 0
+	for _, dep := range deps {
+		if dep.Available {
+			continue
+		}
+		if dep.Optional {
+			missingOptional++
+		} else {
+			missingRequired++
+		}
+	}
+
+	missingCount := missingRequired + missingOptional
+	available := len(deps) - missingCount
+	severity := "ok"
+	if missingRequired > 0 {
+		severity = "error"
+	} else if missingOptional > 0 {
+		severity = "warn"
+	}
+	detail := fmt.Sprintf("%d/%d available (missing: %d required, %d optional)", available, len(deps), missingRequired, missingOptional)
+	if missingCount == 0 {
+		detail = fmt.Sprintf("%d/%d available", available, len(deps))
+	}
+
+	return api.DependencySummary{
+		Total:           len(deps),
+		Available:       available,
+		MissingRequired: missingRequired,
+		MissingOptional: missingOptional,
+		Severity:        severity,
+		Detail:          detail,
+	}
+}
+
+func librarySubdirPath(root, child string) string {
+	child = strings.TrimSpace(child)
+	if child == "" {
+		return root
+	}
+	if filepath.IsAbs(child) {
+		return child
+	}
+	return filepath.Join(root, child)
 }

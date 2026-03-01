@@ -36,7 +36,6 @@ it is overwritten.`,
 			if device == "" {
 				return fmt.Errorf("no device specified and no optical_drive configured")
 			}
-			cfg.MakeMKV.OpticalDrive = device
 
 			if _, err := ctx.dialClient(); err == nil {
 				return fmt.Errorf("spindle daemon is running; stop it with: spindle stop")

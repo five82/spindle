@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/api"
 	"spindle/internal/daemonctl"
 	"spindle/internal/ipc"
 )
@@ -99,31 +100,15 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			for _, line := range renderSectionHeader("System Status", colorize) {
 				fmt.Fprintln(stdout, line)
 			}
-			if statusResp.Running {
-				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusOK, "Running", colorize))
-				if statusResp.DiscPaused {
-					fmt.Fprintln(stdout, renderStatusLine("Disc Processing", statusWarn, "Paused", colorize))
-				} else {
-					fmt.Fprintln(stdout, renderStatusLine("Disc Processing", statusOK, "Active", colorize))
-				}
-			} else {
-				fmt.Fprintln(stdout, renderStatusLine("Spindle", statusWarn, "Not running (run `spindle start`)", colorize))
+			for _, line := range statusResp.SystemChecks {
+				fmt.Fprintln(stdout, renderStatusLine(line.Label, statusKindFromSeverity(line.Severity), line.Detail, colorize))
 			}
-			fmt.Fprintln(stdout, detectDiscLine(cfg.MakeMKV.OpticalDrive, colorize))
-			fmt.Fprintln(stdout, jellyfinStatusLine(cfg, colorize))
-			fmt.Fprintln(stdout, openSubtitlesStatusLine(cfg, colorize))
-			if strings.TrimSpace(cfg.Notifications.NtfyTopic) != "" {
-				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusOK, "Configured", colorize))
-			} else {
-				fmt.Fprintln(stdout, renderStatusLine("Notifications", statusWarn, "Not configured", colorize))
-			}
-			fmt.Fprintln(stdout, discDetectionStatusLine(statusResp.Running, statusResp.NetlinkMonitoring, colorize))
 			fmt.Fprintln(stdout)
 
 			for _, line := range renderSectionHeader("Dependencies", colorize) {
 				fmt.Fprintln(stdout, line)
 			}
-			for _, line := range dependencyLines(statusResp.Dependencies, colorize) {
+			for _, line := range dependencyLines(statusResp.Dependencies, statusResp.DependencySummary, colorize) {
 				fmt.Fprintln(stdout, line)
 			}
 			fmt.Fprintln(stdout)
@@ -131,15 +116,8 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			for _, line := range renderSectionHeader("Library Paths", colorize) {
 				fmt.Fprintln(stdout, line)
 			}
-			for _, dir := range []struct {
-				label string
-				path  string
-			}{
-				{label: "Library", path: cfg.Paths.LibraryDir},
-				{label: "Movies", path: librarySubdirPath(cfg.Paths.LibraryDir, cfg.Library.MoviesDir)},
-				{label: "TV", path: librarySubdirPath(cfg.Paths.LibraryDir, cfg.Library.TVDir)},
-			} {
-				fmt.Fprintln(stdout, directoryStatusLine(dir.label, dir.path, colorize))
+			for _, line := range statusResp.LibraryPaths {
+				fmt.Fprintln(stdout, renderStatusLine(line.Label, statusKindFromSeverity(line.Severity), line.Detail, colorize))
 			}
 
 			fmt.Fprintln(stdout)
@@ -207,24 +185,9 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 	return []*cobra.Command{startCmd, stopCmd, restartCmd, statusCmd}
 }
 
-func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
-	if len(deps) == 0 {
-		return nil
-	}
+func dependencyLines(deps []ipc.DependencyStatus, summary api.DependencySummary, colorize bool) []string {
 	lines := make([]string, 0, len(deps)+1)
-	missingRequired := 0
-	missingOptional := 0
-	for _, dep := range deps {
-		if dep.Available {
-			continue
-		}
-		if dep.Optional {
-			missingOptional++
-		} else {
-			missingRequired++
-		}
-	}
-	lines = append(lines, dependencySummaryLine(len(deps), missingRequired, missingOptional, colorize))
+	lines = append(lines, renderStatusLine("Summary", statusKindFromSeverity(summary.Severity), summary.Detail, colorize))
 	missing := make([]string, 0)
 	for _, dep := range deps {
 		if dep.Available {
@@ -240,10 +203,7 @@ func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
 		if detail == "" {
 			detail = "not available"
 		}
-		kind := statusError
-		if dep.Optional {
-			kind = statusWarn
-		}
+		kind := statusKindFromSeverity(dep.Severity)
 		lines = append(lines, renderStatusLine(dep.Name, kind, detail, colorize))
 		missing = append(missing, dep.Name)
 	}
@@ -253,22 +213,17 @@ func dependencyLines(deps []ipc.DependencyStatus, colorize bool) []string {
 	return lines
 }
 
-func dependencySummaryLine(total, missingRequired, missingOptional int, colorize bool) string {
-	if total <= 0 {
-		return renderStatusLine("Summary", statusInfo, "No dependency checks configured", colorize)
+func statusKindFromSeverity(severity string) statusKind {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "ok":
+		return statusOK
+	case "warn":
+		return statusWarn
+	case "error":
+		return statusError
+	default:
+		return statusInfo
 	}
-	missingCount := missingRequired + missingOptional
-	available := total - missingCount
-	if missingCount == 0 {
-		return renderStatusLine("Summary", statusOK, fmt.Sprintf("%d/%d available", available, total), colorize)
-	}
-
-	kind := statusWarn
-	if missingRequired > 0 {
-		kind = statusError
-	}
-	detail := fmt.Sprintf("%d/%d available (missing: %d required, %d optional)", available, total, missingRequired, missingOptional)
-	return renderStatusLine("Summary", kind, detail, colorize)
 }
 
 func daemonExecutable() (string, error) {
