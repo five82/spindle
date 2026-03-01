@@ -26,6 +26,17 @@ import (
 	"spindle/internal/textutil"
 )
 
+// cacheDecision tracks the rip cache lookup result.
+type cacheDecision string
+
+const (
+	cacheHit        cacheDecision = "hit"
+	cacheMiss       cacheDecision = "miss"
+	cacheInvalid    cacheDecision = "invalid"
+	cacheError      cacheDecision = "error"
+	cacheIncomplete cacheDecision = "incomplete"
+)
+
 // Ripper manages the MakeMKV ripping workflow.
 type Ripper struct {
 	store    *queue.Store
@@ -251,11 +262,11 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 	}
 
 	cacheUsed := false
-	var cacheStatus string // "hit", "miss", "invalid", "error", or ""
+	var cacheStatus cacheDecision
 	if useCache && existsNonEmptyDir(destDir) {
 		cachedTarget, err := selectCachedRip(destDir)
 		if err != nil {
-			cacheStatus = "error"
+			cacheStatus = cacheError
 			logger.Warn("cache inspection failed; falling back to MakeMKV",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "rip_cache_inspection_failed"),
@@ -267,33 +278,26 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 				// For TV episodes, verify cache has files for every episode title ID.
 				if hasEpisodes {
 					if missing := cacheHasAllEpisodeFiles(&env, destDir); len(missing) > 0 {
-						cacheStatus = "incomplete"
+						cacheStatus = cacheIncomplete
 						logger.Info("rip cache decision",
 							logging.String(logging.FieldDecisionType, "rip_cache"),
-							logging.String("decision_result", "incomplete"),
+							logging.String("decision_result", string(cacheIncomplete)),
 							logging.String("decision_reason", "missing_episode_files"),
 							logging.String("missing_episodes", strings.Join(missing, ",")),
 							logging.Int("missing_count", len(missing)),
 						)
-						_ = os.RemoveAll(destDir)
-						if mkErr := os.MkdirAll(destDir, 0o755); mkErr != nil {
-							return services.Wrap(
-								services.ErrConfiguration,
-								"ripping",
-								"ensure cache dir",
-								"Failed to recreate rip cache directory after pruning incomplete entry",
-								mkErr,
-							)
+						if err := resetCacheDir(destDir, "incomplete"); err != nil {
+							return err
 						}
 					}
 				}
-				if cacheStatus != "incomplete" {
+				if cacheStatus != cacheIncomplete {
 					target = cachedTarget
 					cacheUsed = true
-					cacheStatus = "hit"
+					cacheStatus = cacheHit
 					logger.Info("rip cache decision",
 						logging.String(logging.FieldDecisionType, "rip_cache"),
-						logging.String("decision_result", "hit"),
+						logging.String("decision_result", string(cacheHit)),
 						logging.String("decision_reason", "valid_cached_rip_found"),
 						logging.Bool("cache_used", true),
 						logging.String("rip_dir", destDir),
@@ -314,42 +318,35 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 					}
 				}
 			} else {
-				cacheStatus = "invalid"
+				cacheStatus = cacheInvalid
 				logger.Warn("rip cache invalidated",
 					logging.String(logging.FieldEventType, "rip_cache_invalidated"),
 					logging.String(logging.FieldErrorHint, "cached rip failed validation; will re-rip from disc"),
 					logging.String(logging.FieldImpact, "rip cache entry removed; MakeMKV rip will proceed"),
 					logging.String(logging.FieldDecisionType, "rip_cache"),
-					logging.String("decision_result", "invalid"),
+					logging.String("decision_result", string(cacheInvalid)),
 					logging.String("decision_reason", "cached_rip_failed_validation"),
 					logging.String("rip_dir", destDir),
 					logging.Error(err),
 				)
-				_ = os.RemoveAll(destDir)
-				if mkErr := os.MkdirAll(destDir, 0o755); mkErr != nil {
-					return services.Wrap(
-						services.ErrConfiguration,
-						"ripping",
-						"ensure cache dir",
-						"Failed to recreate rip cache directory after pruning invalid entry",
-						mkErr,
-					)
+				if err := resetCacheDir(destDir, "invalid"); err != nil {
+					return err
 				}
 			}
 		} else {
-			cacheStatus = "miss"
+			cacheStatus = cacheMiss
 		}
 	} else if useCache {
-		cacheStatus = "miss"
+		cacheStatus = cacheMiss
 	}
-	if useCache && cacheStatus != "hit" {
+	if useCache && cacheStatus != cacheHit {
 		cacheCleanup = destDir
 	}
 	// Log cache miss decisions (cache hit is logged above with full context)
-	if useCache && cacheStatus == "miss" {
+	if useCache && cacheStatus == cacheMiss {
 		logger.Info("rip cache decision",
 			logging.String(logging.FieldDecisionType, "rip_cache"),
-			logging.String("decision_result", "miss"),
+			logging.String("decision_result", string(cacheMiss)),
 			logging.String("decision_reason", "no_cached_rip_found"),
 			logging.String("rip_dir", destDir),
 		)
@@ -648,8 +645,8 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 		logging.Int("titles_ripped", len(titleIDs)),
 	}
 	if cacheStatus != "" {
-		summaryAttrs = append(summaryAttrs, logging.String("cache_decision", cacheStatus))
-		summaryAttrs = append(summaryAttrs, logging.Bool("cache_used", cacheStatus == "hit"))
+		summaryAttrs = append(summaryAttrs, logging.String("cache_decision", string(cacheStatus)))
+		summaryAttrs = append(summaryAttrs, logging.Bool("cache_used", cacheStatus == cacheHit))
 	}
 	if makemkvDuration > 0 {
 		summaryAttrs = append(summaryAttrs, logging.Duration("rip_time", makemkvDuration))
@@ -661,12 +658,28 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			"discTitle": item.DiscTitle,
 			"duration":  time.Since(startedAt),
 			"bytes":     totalRippedBytes,
-			"cache":     cacheStatus,
+			"cache":     string(cacheStatus),
 		}); err != nil {
 			logger.Debug("rip completion notification failed", logging.Error(err))
 		}
 	}
 
+	return nil
+}
+
+// resetCacheDir removes and recreates a cache directory after a stale or
+// incomplete entry is detected.
+func resetCacheDir(dir, reason string) error {
+	_ = os.RemoveAll(dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return services.Wrap(
+			services.ErrConfiguration,
+			"ripping",
+			"ensure cache dir",
+			fmt.Sprintf("Failed to recreate rip cache directory after pruning %s entry", reason),
+			err,
+		)
+	}
 	return nil
 }
 

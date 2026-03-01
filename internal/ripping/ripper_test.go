@@ -20,6 +20,7 @@ import (
 	"spindle/internal/ripspec"
 	"spindle/internal/services/makemkv"
 	"spindle/internal/testsupport"
+	"spindle/internal/textutil"
 )
 
 const ripFixtureSize = 11 * 1024 * 1024
@@ -519,7 +520,7 @@ func (s *stubRipperClient) Rip(ctx context.Context, device, discTitle, destDir s
 	if progress != nil {
 		progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 25, Message: "starting"})
 	}
-	path := filepath.Join(destDir, sanitizeTestFileName(discTitle)+".mkv")
+	path := filepath.Join(destDir, textutil.SanitizeFileName(discTitle)+".mkv")
 	if err := writeStubFile(path, ripFixtureSize); err != nil {
 		return "", err
 	}
@@ -545,7 +546,7 @@ func (s *countingRipperClient) Rip(ctx context.Context, device, discTitle, destD
 	if progress != nil {
 		progress(makemkv.ProgressUpdate{Stage: "Ripping", Percent: 10, Message: "cached"})
 	}
-	path := filepath.Join(destDir, sanitizeTestFileName(discTitle)+".mkv")
+	path := filepath.Join(destDir, textutil.SanitizeFileName(discTitle)+".mkv")
 	if err := writeStubFile(path, ripFixtureSize); err != nil {
 		return "", err
 	}
@@ -595,11 +596,6 @@ func (s *blockingEpisodeRipperClient) Rip(ctx context.Context, device, discTitle
 		}
 	}
 	return lastPath, nil
-}
-
-func sanitizeTestFileName(name string) string {
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "", "\"", "", "<", "", ">", "", "|", "")
-	return strings.TrimSpace(replacer.Replace(name))
 }
 
 type stubNotifier struct {

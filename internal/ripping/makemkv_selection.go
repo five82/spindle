@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -70,7 +71,7 @@ func applyMakeMKVSettings(path string, required map[string]string) error {
 	// Apply required settings
 	for key, value := range required {
 		existing[key] = value
-		if !containsKey(order, key) {
+		if !slices.Contains(order, key) {
 			order = append(order, key)
 		}
 	}
@@ -105,7 +106,7 @@ func readMakeMKVSettings(path string) (map[string]string, []string, error) {
 		value := strings.TrimSpace(parts[1])
 		value = strings.Trim(value, "\"")
 		settings[key] = value
-		if !containsKey(order, key) {
+		if !slices.Contains(order, key) {
 			order = append(order, key)
 		}
 	}
@@ -119,7 +120,7 @@ func writeMakeMKVSettings(path string, kv map[string]string, order []string) err
 	keys := make([]string, 0, len(kv))
 	keys = append(keys, order...)
 	for key := range kv {
-		if !containsKey(keys, key) {
+		if !slices.Contains(keys, key) {
 			keys = append(keys, key)
 		}
 	}
@@ -157,13 +158,4 @@ func writeMakeMKVSettings(path string, kv map[string]string, order []string) err
 
 func escapeQuotes(value string) string {
 	return strings.ReplaceAll(value, "\"", "\\\"")
-}
-
-func containsKey(slice []string, key string) bool {
-	for _, item := range slice {
-		if item == key {
-			return true
-		}
-	}
-	return false
 }

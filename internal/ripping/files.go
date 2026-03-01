@@ -2,6 +2,7 @@ package ripping
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -53,12 +54,24 @@ func selectCachedRip(dir string) (string, error) {
 }
 
 func copyPlaceholder(src, dst string) error {
-	sourceData, err := os.ReadFile(src)
+	in, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("read source file: %w", err)
+		return fmt.Errorf("open source file: %w", err)
 	}
-	if err := os.WriteFile(dst, sourceData, 0o644); err != nil {
-		return fmt.Errorf("write placeholder file: %w", err)
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("create placeholder file: %w", err)
+	}
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close placeholder file: %w", cerr)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copy placeholder file: %w", err)
 	}
 	return nil
 }

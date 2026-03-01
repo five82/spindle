@@ -25,8 +25,7 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger)
 	if env == nil || len(env.Episodes) == 0 {
 		return EpisodeAssignResult{}
 	}
-	titleFiles := make(map[int]string)
-	entries, err := os.ReadDir(dir)
+	titleFiles, err := scanTitleFiles(dir)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("failed to inspect rip directory; episode mapping skipped",
@@ -37,20 +36,6 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger)
 			)
 		}
 		return EpisodeAssignResult{}
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(strings.ToLower(name), ".mkv") {
-			continue
-		}
-		id, ok := parseTitleID(name)
-		if !ok {
-			continue
-		}
-		titleFiles[id] = filepath.Join(dir, name)
 	}
 	result := EpisodeAssignResult{}
 	for _, episode := range env.Episodes {
@@ -100,8 +85,7 @@ func cacheHasAllEpisodeFiles(env *ripspec.Envelope, dir string) []string {
 	if env == nil || len(env.Episodes) == 0 {
 		return nil
 	}
-	titleFiles := make(map[int]struct{})
-	entries, err := os.ReadDir(dir)
+	titleFiles, err := scanTitleFiles(dir)
 	if err != nil {
 		// If we can't read the directory, report all episodes as missing.
 		missing := make([]string, len(env.Episodes))
@@ -109,19 +93,6 @@ func cacheHasAllEpisodeFiles(env *ripspec.Envelope, dir string) []string {
 			missing[i] = ep.Key
 		}
 		return missing
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !strings.HasSuffix(strings.ToLower(entry.Name()), ".mkv") {
-			continue
-		}
-		id, ok := parseTitleID(entry.Name())
-		if !ok {
-			continue
-		}
-		titleFiles[id] = struct{}{}
 	}
 	var missing []string
 	for _, ep := range env.Episodes {
@@ -134,6 +105,31 @@ func cacheHasAllEpisodeFiles(env *ripspec.Envelope, dir string) []string {
 		}
 	}
 	return missing
+}
+
+// scanTitleFiles scans dir for MKV files and returns a map of parsed title ID
+// to full file path. Non-MKV files and filenames without a recognizable title
+// ID are silently skipped.
+func scanTitleFiles(dir string) (map[int]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int]string, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(strings.ToLower(entry.Name()), ".mkv") {
+			continue
+		}
+		id, ok := parseTitleID(entry.Name())
+		if !ok {
+			continue
+		}
+		result[id] = filepath.Join(dir, entry.Name())
+	}
+	return result, nil
 }
 
 func parseTitleID(name string) (int, bool) {
