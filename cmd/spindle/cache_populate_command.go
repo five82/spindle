@@ -7,9 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
-	"unicode"
-
 	"github.com/spf13/cobra"
 
 	"spindle/internal/disc"
@@ -21,14 +18,8 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/ripcache"
 	"spindle/internal/ripping"
-	"spindle/internal/services"
-	"spindle/internal/stage"
+	"spindle/internal/stageexec"
 )
-
-type stageHandler interface {
-	Prepare(context.Context, *queue.Item) error
-	Execute(context.Context, *queue.Item) error
-}
 
 func newCacheRipCommand(ctx *commandContext) *cobra.Command {
 	var device string
@@ -80,7 +71,7 @@ it is overwritten.`,
 
 			notifier := notifications.NewService(cfg)
 
-			discLabel, err := getDiscLabel(device)
+			discLabel, err := disc.ReadLabel(cmd.Context(), device, 10*time.Second)
 			if err != nil {
 				logger.Warn("failed to get disc label",
 					logging.Error(err),
@@ -130,7 +121,16 @@ it is overwritten.`,
 			identifier := identification.NewIdentifierWithDependencies(cfg, nil, logger, tmdbClient, scanner, notifier)
 			ripper := ripping.NewRipper(cfg, store, logger, notifier)
 
-			if err := runStage(baseCtx, logger, store, notifier, identifier, "identifier", queue.StatusIdentifying, queue.StatusIdentified, item); err != nil {
+			if err := stageexec.Run(baseCtx, stageexec.Options{
+				Logger:     logger,
+				Store:      store,
+				Notifier:   notifier,
+				Handler:    identifier,
+				StageName:  "identifier",
+				Processing: queue.StatusIdentifying,
+				Done:       queue.StatusIdentified,
+				Item:       item,
+			}); err != nil {
 				return err
 			}
 			if item.Status == queue.StatusFailed {
@@ -148,7 +148,16 @@ it is overwritten.`,
 				return fmt.Errorf("remove existing rip cache entry: %w", err)
 			}
 
-			if err := runStage(baseCtx, logger, store, notifier, ripper, "ripper", queue.StatusRipping, queue.StatusRipped, item); err != nil {
+			if err := stageexec.Run(baseCtx, stageexec.Options{
+				Logger:     logger,
+				Store:      store,
+				Notifier:   notifier,
+				Handler:    ripper,
+				StageName:  "ripper",
+				Processing: queue.StatusRipping,
+				Done:       queue.StatusRipped,
+				Item:       item,
+			}); err != nil {
 				return err
 			}
 			if item.Status == queue.StatusFailed {
@@ -183,123 +192,4 @@ it is overwritten.`,
 	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path (default: configured optical_drive)")
 
 	return cmd
-}
-
-func runStage(ctx context.Context, logger *slog.Logger, store *queue.Store, notifier notifications.Service, handler stageHandler, name string, processing, done queue.Status, item *queue.Item) error {
-	if handler == nil {
-		return fmt.Errorf("stage handler unavailable: %s", name)
-	}
-	stageCtx := logging.WithStage(ctx, name)
-	stageLogger := logging.WithContext(stageCtx, logger)
-	if aware, ok := handler.(stage.LoggerAware); ok {
-		aware.SetLogger(stageLogger)
-	}
-
-	stageLogger.Info(
-		"stage started",
-		logging.String(logging.FieldEventType, "stage_start"),
-		logging.String("processing_status", string(processing)),
-		logging.String("disc_title", strings.TrimSpace(item.DiscTitle)),
-		logging.String("source_file", strings.TrimSpace(item.SourcePath)),
-	)
-
-	setItemProcessingState(item, processing)
-	if err := store.Update(stageCtx, item); err != nil {
-		return fmt.Errorf("persist processing transition: %w", err)
-	}
-
-	if err := handler.Prepare(stageCtx, item); err != nil {
-		return handleStageFailure(stageCtx, stageLogger, store, notifier, name, item, err)
-	}
-	if err := store.Update(stageCtx, item); err != nil {
-		return fmt.Errorf("persist stage preparation: %w", err)
-	}
-
-	if err := handler.Execute(stageCtx, item); err != nil {
-		return handleStageFailure(stageCtx, stageLogger, store, notifier, name, item, err)
-	}
-
-	if item.Status == processing || item.Status == "" {
-		item.Status = done
-	}
-	item.LastHeartbeat = nil
-	if err := store.Update(stageCtx, item); err != nil {
-		return fmt.Errorf("persist stage result: %w", err)
-	}
-
-	stageLogger.Info(
-		"stage completed",
-		logging.String(logging.FieldEventType, "stage_complete"),
-		logging.String("next_status", string(item.Status)),
-		logging.String("progress_stage", strings.TrimSpace(item.ProgressStage)),
-		logging.String("progress_message", strings.TrimSpace(item.ProgressMessage)),
-	)
-
-	return nil
-}
-
-func handleStageFailure(ctx context.Context, logger *slog.Logger, store *queue.Store, notifier notifications.Service, stageName string, item *queue.Item, stageErr error) error {
-	message := "stage failed"
-	if stageErr != nil {
-		details := services.Details(stageErr)
-		message = strings.TrimSpace(details.Message)
-		if message == "" {
-			message = strings.TrimSpace(stageErr.Error())
-		}
-	}
-	item.SetFailed(message)
-
-	logger.Error(
-		"stage failed",
-		logging.String(logging.FieldEventType, "stage_failure"),
-		logging.String("resolved_status", string(queue.StatusFailed)),
-		logging.String("error_message", strings.TrimSpace(message)),
-		logging.Error(stageErr),
-	)
-	if err := store.Update(ctx, item); err != nil {
-		logger.Error("failed to persist stage failure", logging.Error(err))
-	}
-
-	// Send error notification
-	if notifier != nil && stageErr != nil {
-		contextLabel := fmt.Sprintf("%s (item #%d)", stageName, item.ID)
-		if err := notifier.Publish(ctx, notifications.EventError, notifications.Payload{
-			"error":   stageErr,
-			"context": contextLabel,
-		}); err != nil {
-			logger.Debug("stage error notification failed", logging.Error(err))
-		}
-	}
-
-	return stageErr
-}
-
-func setItemProcessingState(item *queue.Item, processing queue.Status) {
-	now := time.Now().UTC()
-	item.Status = processing
-	if item.ProgressStage == "" {
-		item.ProgressStage = deriveStageLabel(processing)
-	}
-	if item.ProgressMessage == "" {
-		item.ProgressMessage = fmt.Sprintf("%s started", deriveStageLabel(processing))
-	}
-	item.ProgressPercent = 0
-	item.ErrorMessage = ""
-	item.LastHeartbeat = &now
-}
-
-func deriveStageLabel(status queue.Status) string {
-	if status == "" {
-		return ""
-	}
-	parts := strings.Fields(strings.ReplaceAll(string(status), "_", " "))
-	for i, part := range parts {
-		if part == "" {
-			continue
-		}
-		runes := []rune(strings.ToLower(part))
-		runes[0] = unicode.ToUpper(runes[0])
-		parts[i] = string(runes)
-	}
-	return strings.Join(parts, " ")
 }

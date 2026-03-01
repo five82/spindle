@@ -2,24 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"spindle/internal/audioanalysis"
 	"spindle/internal/config"
-	"spindle/internal/deps"
-	langpkg "spindle/internal/language"
-	"spindle/internal/media/audio"
-	"spindle/internal/media/ffprobe"
-	"spindle/internal/services/llm"
-	"spindle/internal/services/whisperx"
-	"spindle/internal/textutil"
 )
 
 func newCacheCommentaryCommand(ctx *commandContext) *cobra.Command {
@@ -71,7 +61,7 @@ Example:
 			fmt.Fprintf(out, "\nTarget: %s\n", label)
 			printCommentaryResults(out, result)
 
-			if err := writeCommentaryTranscripts(result, out); err != nil {
+			if err := audioanalysis.WriteDiagnosticTranscripts(result, out); err != nil {
 				return err
 			}
 			return nil
@@ -80,158 +70,15 @@ Example:
 	return cmd
 }
 
-// commentaryDetectionResult captures the full results of commentary detection.
-type commentaryDetectionResult struct {
-	PrimaryIndex        int
-	PrimaryLabel        string
-	PrimaryTranscript   string
-	Candidates          []candidateResult
-	CommentaryIndices   []int
-	SimilarityThreshold float64
-	ConfidenceThreshold float64
-}
-
-// candidateResult captures the detection result for a single candidate track.
-type candidateResult struct {
-	Index        int
-	Language     string
-	Title        string
-	Channels     int
-	Transcript   string
-	Similarity   float64
-	IsDownmix    bool
-	LLMDecision  *audioanalysis.CommentaryDecision
-	IsCommentary bool
-	Reason       string
-}
-
 func resolveCommentaryTarget(ctx *commandContext, arg string, out io.Writer) (string, string, error) {
 	return resolveCacheTarget(ctx, arg, out)
 }
 
-func runCommentaryDetection(ctx context.Context, cfg *config.Config, target string, out io.Writer) (*commentaryDetectionResult, error) {
-	// Probe the target file
-	ffprobeBinary := deps.ResolveFFprobePath(cfg.FFprobeBinary())
-	probe, err := ffprobe.Inspect(ctx, ffprobeBinary, target)
-	if err != nil {
-		return nil, fmt.Errorf("ffprobe inspect: %w", err)
-	}
-
-	// Select primary audio
-	selection := audio.Select(probe.Streams)
-	if selection.PrimaryIndex < 0 {
-		return nil, errors.New("no audio streams found")
-	}
-
-	result := &commentaryDetectionResult{
-		PrimaryIndex:        selection.PrimaryIndex,
-		PrimaryLabel:        selection.PrimaryLabel(),
-		SimilarityThreshold: cfg.Commentary.SimilarityThreshold,
-		ConfidenceThreshold: cfg.Commentary.ConfidenceThreshold,
-	}
-
-	// Find commentary candidates
-	candidates := audioanalysis.FindCommentaryCandidates(probe.Streams, selection.PrimaryIndex)
-	if len(candidates) == 0 {
-		fmt.Fprintln(out, "No commentary candidates found (no 2-channel English/unknown tracks)")
-		return result, nil
-	}
-
-	fmt.Fprintf(out, "Found %d commentary candidate(s)\n", len(candidates))
-
-	// Set up working directory
-	workDir, err := os.MkdirTemp("", "spindle-commentary-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp directory: %w", err)
-	}
-	defer os.RemoveAll(workDir)
-
-	// Initialize WhisperX service
-	whisperSvc := whisperx.NewService(whisperx.Config{
-		Model:       cfg.CommentaryWhisperXModel(),
-		CUDAEnabled: cfg.Subtitles.WhisperXCUDAEnabled,
-		VADMethod:   cfg.Subtitles.WhisperXVADMethod,
-		HFToken:     cfg.Subtitles.WhisperXHuggingFace,
-	}, deps.ResolveFFmpegPath())
-
-	fmt.Fprintf(out, "Transcribing primary audio (track #%d)...\n", selection.PrimaryIndex)
-	primaryDir := filepath.Join(workDir, "primary")
-	primaryTranscript, err := audioanalysis.TranscribeSegment(ctx, whisperSvc, target, selection.PrimaryIndex, primaryDir)
-	if err != nil {
-		return nil, fmt.Errorf("transcribe primary audio: %w", err)
-	}
-	result.PrimaryTranscript = primaryTranscript
-	primaryFingerprint := textutil.NewFingerprint(primaryTranscript)
-
-	// Create LLM client if configured
-	var llmClient *llm.Client
-	llmCfg := cfg.CommentaryLLM()
-	if llmCfg.APIKey != "" {
-		llmClient = llm.NewClientFrom(llmCfg)
-	}
-
-	// Process each candidate
-	for _, stream := range candidates {
-		fmt.Fprintf(out, "Processing candidate track #%d...\n", stream.Index)
-
-		candResult := candidateResult{
-			Index:    stream.Index,
-			Language: langpkg.ExtractFromTags(stream.Tags),
-			Title:    audioanalysis.AudioTitle(stream.Tags),
-			Channels: stream.Channels,
-		}
-
-		// Transcribe candidate
-		candDir := filepath.Join(workDir, fmt.Sprintf("candidate-%d", stream.Index))
-		candidateTranscript, err := audioanalysis.TranscribeSegment(ctx, whisperSvc, target, stream.Index, candDir)
-		if err != nil {
-			candResult.Reason = fmt.Sprintf("transcription failed: %v", err)
-			result.Candidates = append(result.Candidates, candResult)
-			continue
-		}
-		candResult.Transcript = candidateTranscript
-
-		candidateFingerprint := textutil.NewFingerprint(candidateTranscript)
-
-		// Check similarity to primary audio
-		similarity := textutil.CosineSimilarity(primaryFingerprint, candidateFingerprint)
-		candResult.Similarity = similarity
-
-		if similarity >= cfg.Commentary.SimilarityThreshold {
-			candResult.IsDownmix = true
-			candResult.Reason = "stereo_downmix"
-			result.Candidates = append(result.Candidates, candResult)
-			continue
-		}
-
-		// Classify with LLM
-		if llmClient != nil {
-			decision, err := audioanalysis.ClassifyCommentary(ctx, llmClient, filepath.Base(target), "", candidateTranscript)
-			if err != nil {
-				candResult.Reason = fmt.Sprintf("LLM classification failed: %v", err)
-				result.Candidates = append(result.Candidates, candResult)
-				continue
-			}
-
-			candResult.LLMDecision = &decision
-			candResult.IsCommentary = decision.IsCommentary(cfg.Commentary.ConfidenceThreshold)
-			if candResult.IsCommentary {
-				candResult.Reason = "llm_accepted"
-				result.CommentaryIndices = append(result.CommentaryIndices, stream.Index)
-			} else {
-				candResult.Reason = "llm_rejected"
-			}
-		} else {
-			candResult.Reason = "llm_not_configured"
-		}
-
-		result.Candidates = append(result.Candidates, candResult)
-	}
-
-	return result, nil
+func runCommentaryDetection(ctx context.Context, cfg *config.Config, target string, out io.Writer) (*audioanalysis.DiagnosticResult, error) {
+	return audioanalysis.RunDiagnostic(ctx, cfg, target, out)
 }
 
-func printCommentaryResults(out io.Writer, result *commentaryDetectionResult) {
+func printCommentaryResults(out io.Writer, result *audioanalysis.DiagnosticResult) {
 	fmt.Fprintf(out, "Primary Audio: #%d %s\n", result.PrimaryIndex, result.PrimaryLabel)
 	fmt.Fprintf(out, "Similarity Threshold: %.2f\n", result.SimilarityThreshold)
 	fmt.Fprintf(out, "Confidence Threshold: %.2f\n", result.ConfidenceThreshold)
@@ -281,44 +128,4 @@ func printCommentaryResults(out io.Writer, result *commentaryDetectionResult) {
 		}
 		fmt.Fprintf(out, "      Result: %s\n", cand.Reason)
 	}
-}
-
-func writeCommentaryTranscripts(result *commentaryDetectionResult, out io.Writer) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("resolve working directory: %w", err)
-	}
-
-	fmt.Fprintln(out, "\nTranscripts (first 10 minutes):")
-
-	// Write primary audio transcript
-	if result.PrimaryTranscript != "" {
-		filename := fmt.Sprintf("commentary_primary_%d.txt", result.PrimaryIndex)
-		path := filepath.Join(cwd, filename)
-		if err := os.WriteFile(path, []byte(result.PrimaryTranscript), 0o644); err != nil {
-			return fmt.Errorf("write primary transcript: %w", err)
-		}
-		fmt.Fprintf(out, "  primary #%d -> %s\n", result.PrimaryIndex, filename)
-	}
-
-	// Write candidate transcripts
-	for _, cand := range result.Candidates {
-		if cand.Transcript == "" {
-			continue
-		}
-
-		reason := cand.Reason
-		if reason == "" {
-			reason = "unknown"
-		}
-
-		filename := fmt.Sprintf("commentary_candidate_%d_%s.txt", cand.Index, textutil.SanitizeToken(reason))
-		path := filepath.Join(cwd, filename)
-		if err := os.WriteFile(path, []byte(cand.Transcript), 0o644); err != nil {
-			return fmt.Errorf("write candidate transcript: %w", err)
-		}
-		fmt.Fprintf(out, "  candidate #%d -> %s\n", cand.Index, filename)
-	}
-
-	return nil
 }

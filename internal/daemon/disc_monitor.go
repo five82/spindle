@@ -14,6 +14,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/disc"
 	"spindle/internal/disc/fingerprint"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
@@ -318,7 +319,7 @@ func detectDisc(ctx context.Context, runner commandRunner, device string, timeou
 		return nil, fmt.Errorf("lsblk: %w", err)
 	}
 
-	label, fstype := parseLsblkOutput(string(output))
+	label, fstype := disc.ParseLSBLKLabelFSType(string(output))
 	if strings.TrimSpace(label) == "" && strings.TrimSpace(fstype) == "" {
 		return nil, nil
 	}
@@ -330,38 +331,6 @@ func detectDisc(ctx context.Context, runner commandRunner, device string, timeou
 		Type:   discType,
 	}
 	return info, nil
-}
-
-func parseLsblkOutput(output string) (string, string) {
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		data := parseKeyValueLine(line)
-		if len(data) == 0 {
-			continue
-		}
-		return data["LABEL"], data["FSTYPE"]
-	}
-	return "", ""
-}
-
-func parseKeyValueLine(line string) map[string]string {
-	result := make(map[string]string)
-	fields := strings.Fields(line)
-	for _, field := range fields {
-		parts := strings.SplitN(field, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		value = strings.Trim(value, "\"")
-		result[key] = value
-	}
-	return result
 }
 
 func determineDiscType(ctx context.Context, runner commandRunner, device, fstype string, timeout time.Duration) string {

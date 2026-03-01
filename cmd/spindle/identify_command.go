@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -89,7 +88,7 @@ Examples:
 
 			// Get disc label like the daemon does
 			logger.Debug("getting disc label", logging.String("device", device))
-			discLabel, err := getDiscLabel(device)
+			discLabel, err := disc.ReadLabel(cmd.Context(), device, 10*time.Second)
 			if err != nil {
 				logger.Warn("failed to get disc label",
 					logging.Error(err),
@@ -245,47 +244,4 @@ func extractFilenameFromMetadata(metadataJSON string) string {
 // extractEditionFromMetadata extracts the edition field.
 func extractEditionFromMetadata(metadataJSON string) string {
 	return metadataField(metadataJSON, "edition", "")
-}
-
-// getDiscLabel gets the disc label using lsblk, same as the daemon
-func getDiscLabel(device string) (string, error) {
-	if device == "" {
-		return "", fmt.Errorf("no device specified")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	output, err := exec.CommandContext(ctx, "lsblk", "-P", "-o", "LABEL,FSTYPE", device).Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to run lsblk: %w", err)
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Parse lsblk output format: LABEL="label" FSTYPE="filesystem"
-		parts := strings.Fields(line)
-		var label string
-		var fstype string
-
-		for _, part := range parts {
-			if strings.HasPrefix(part, "LABEL=") {
-				label = strings.Trim(part[6:], `"`)
-			} else if strings.HasPrefix(part, "FSTYPE=") {
-				fstype = strings.Trim(part[7:], `"`)
-			}
-		}
-
-		// Return the first non-empty label with a filesystem type
-		if label != "" && fstype != "" {
-			return label, nil
-		}
-	}
-
-	return "", fmt.Errorf("no disc label found")
 }
