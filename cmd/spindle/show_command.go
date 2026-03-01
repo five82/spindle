@@ -13,6 +13,7 @@ import (
 	"spindle/internal/ipc"
 	"spindle/internal/logging"
 	"spindle/internal/logs"
+	"spindle/internal/logstream"
 )
 
 func newShowCommand(ctx *commandContext) *cobra.Command {
@@ -45,63 +46,70 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 				Decision:  decisionFilter,
 				Search:    searchFilter,
 			}
-			if err := streamLogsFromAPI(cmd, cfg, lines, follow, filters); err == nil {
-				return nil
-			} else if !errors.Is(err, errLogAPIUnavailable) {
+			streamClient, err := newLogAPIClient(cfg)
+			if err != nil {
 				return err
 			}
-			if !filters.empty() {
-				return fmt.Errorf("log filters require API access: %w", errLogAPIUnavailable)
+			opts := logstream.Options{
+				Lines:  lines,
+				Follow: follow,
+				Filters: logstream.Filters{
+					Component: filters.Component,
+					Lane:      filters.Lane,
+					RequestID: filters.RequestID,
+					ItemID:    filters.ItemID,
+					Level:     filters.Level,
+					Alert:     filters.Alert,
+					Decision:  filters.Decision,
+					Search:    filters.Search,
+				},
 			}
 
-			initialLimit := lines
-			if initialLimit < 0 {
-				initialLimit = 0
+			printed, err := logstream.Stream(
+				cmd.Context(),
+				streamClient,
+				nil,
+				opts,
+				func(evt api.LogEvent) {
+					fmt.Fprintln(cmd.OutOrStdout(), formatAPILogEvent(evt))
+				},
+				func(line string) {
+					fmt.Fprintln(cmd.OutOrStdout(), line)
+				},
+			)
+			if err == nil {
+				if !follow && !printed {
+					fmt.Fprintln(cmd.OutOrStdout(), "No log entries available")
+				}
+				return nil
 			}
-			initialOffset := int64(-1)
-			if initialLimit == 0 {
-				initialOffset = 0
+			if errors.Is(err, logstream.ErrFiltersRequireAPI) {
+				return fmt.Errorf("log filters require API access: %w", logs.ErrAPIUnavailable)
+			}
+			if !logs.IsAPIUnavailable(err) {
+				return err
 			}
 
 			return ctx.withClient(func(client *ipc.Client) error {
-				ctx := cmd.Context()
-				offset := initialOffset
-				limit := initialLimit
-				waitMillis := 1000
-				printed := false
-
-				for {
-					req := ipc.LogTailRequest{
-						Offset:     offset,
-						Limit:      limit,
-						Follow:     follow,
-						WaitMillis: waitMillis,
-					}
-					resp, err := client.LogTail(req)
-					if err != nil {
-						return fmt.Errorf("tail logs: %w", err)
-					}
-					if resp == nil {
-						return errors.New("log tail response missing")
-					}
-					for _, line := range resp.Lines {
+				printed, streamErr := logstream.Stream(
+					cmd.Context(),
+					streamClient,
+					client,
+					opts,
+					func(evt api.LogEvent) {
+						fmt.Fprintln(cmd.OutOrStdout(), formatAPILogEvent(evt))
+					},
+					func(line string) {
 						fmt.Fprintln(cmd.OutOrStdout(), line)
-						printed = true
-					}
-					offset = resp.Offset
-					limit = 0
-					if !follow {
-						if !printed {
-							fmt.Fprintln(cmd.OutOrStdout(), "No log entries available")
-						}
-						return nil
-					}
-					select {
-					case <-ctx.Done():
-						return nil
-					default:
-					}
+					},
+				)
+				if streamErr != nil {
+					return streamErr
 				}
+				if !follow && !printed {
+					fmt.Fprintln(cmd.OutOrStdout(), "No log entries available")
+				}
+				return nil
 			})
 		},
 	}
@@ -119,60 +127,6 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
-var errLogAPIUnavailable = errors.New("log API unavailable")
-
-func streamLogsFromAPI(cmd *cobra.Command, cfg *config.Config, lines int, follow bool, filters logFilters) error {
-	client, err := newLogAPIClient(cfg)
-	if err != nil {
-		return err
-	}
-	if client == nil {
-		return errLogAPIUnavailable
-	}
-
-	ctx := cmd.Context()
-	query := logs.StreamQuery{
-		Limit:         lines,
-		Tail:          true,
-		Component:     filters.Component,
-		Lane:          filters.Lane,
-		CorrelationID: filters.RequestID,
-		ItemID:        filters.ItemID,
-		Level:         filters.Level,
-		Alert:         filters.Alert,
-		DecisionType:  filters.Decision,
-		Search:        filters.Search,
-	}
-	if query.Limit <= 0 {
-		query.Limit = 200
-	}
-
-	printed := false
-	for {
-		resp, err := client.Fetch(ctx, query)
-		if err != nil {
-			if logs.IsAPIUnavailable(err) {
-				return errLogAPIUnavailable
-			}
-			return err
-		}
-		for _, evt := range resp.Events {
-			fmt.Fprintln(cmd.OutOrStdout(), formatAPILogEvent(evt))
-			printed = true
-		}
-		if !follow {
-			if !printed {
-				fmt.Fprintln(cmd.OutOrStdout(), "No log entries available")
-			}
-			return nil
-		}
-		query.Since = resp.Next
-		query.Limit = 200
-		query.Tail = false
-		query.Follow = true
-	}
-}
-
 type logFilters struct {
 	Component string
 	Lane      string
@@ -182,17 +136,6 @@ type logFilters struct {
 	Alert     string
 	Decision  string
 	Search    string
-}
-
-func (f logFilters) empty() bool {
-	return strings.TrimSpace(f.Component) == "" &&
-		strings.TrimSpace(f.Lane) == "" &&
-		strings.TrimSpace(f.RequestID) == "" &&
-		strings.TrimSpace(f.Level) == "" &&
-		strings.TrimSpace(f.Alert) == "" &&
-		strings.TrimSpace(f.Decision) == "" &&
-		strings.TrimSpace(f.Search) == "" &&
-		f.ItemID == 0
 }
 
 func newLogAPIClient(cfg *config.Config) (*logs.StreamClient, error) {

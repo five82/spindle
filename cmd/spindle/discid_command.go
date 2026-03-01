@@ -1,11 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/api"
 	"spindle/internal/discidcache"
 	"spindle/internal/logging"
 )
@@ -193,12 +194,6 @@ func discIDCacheManager(ctx *commandContext) (*discidcache.Cache, string, error)
 	if err != nil {
 		return nil, "", err
 	}
-	if cfg == nil || !cfg.DiscIDCache.Enabled {
-		return nil, "Disc ID cache is disabled (set disc_id_cache.enabled = true in config.toml)", nil
-	}
-	if strings.TrimSpace(cfg.DiscIDCache.Path) == "" {
-		return nil, "Disc ID cache path is not configured", nil
-	}
 
 	logLevel := ctx.resolvedLogLevel(cfg)
 	logger, err := logging.New(logging.Options{
@@ -211,5 +206,15 @@ func discIDCacheManager(ctx *commandContext) (*discidcache.Cache, string, error)
 	}
 	logger = logger.With(logging.String("component", "cli-discid"))
 
-	return discidcache.NewCache(cfg.DiscIDCache.Path, logger), "", nil
+	cache, err := api.OpenDiscIDCache(cfg, logger)
+	if errors.Is(err, api.ErrDiscIDCacheDisabled) {
+		return nil, "Disc ID cache is disabled (set disc_id_cache.enabled = true in config.toml)", nil
+	}
+	if errors.Is(err, api.ErrDiscIDCacheNotConfigured) {
+		return nil, "Disc ID cache path is not configured", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return cache, "", nil
 }

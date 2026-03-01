@@ -1,14 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/api"
 	"spindle/internal/logging"
 	"spindle/internal/ripcache"
 )
@@ -192,12 +193,6 @@ func cacheManager(ctx *commandContext) (*ripcache.Manager, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if cfg == nil || !cfg.RipCache.Enabled {
-		return nil, "Rip cache is disabled (set rip_cache.enabled = true in config.toml)", nil
-	}
-	if strings.TrimSpace(cfg.RipCache.Dir) == "" {
-		return nil, "Rip cache dir is not configured", nil
-	}
 	logLevel := ctx.resolvedLogLevel(cfg)
 	logger, err := logging.New(logging.Options{
 		Level:       logLevel,
@@ -208,8 +203,16 @@ func cacheManager(ctx *commandContext) (*ripcache.Manager, string, error) {
 		return nil, "", fmt.Errorf("init logger: %w", err)
 	}
 	logger = logger.With(logging.String("component", "cli-cache"))
-	if err := os.MkdirAll(cfg.RipCache.Dir, 0o755); err != nil {
-		return nil, "", fmt.Errorf("ensure cache dir: %w", err)
+
+	manager, err := api.OpenRipCacheManager(cfg, logger)
+	if errors.Is(err, api.ErrRipCacheDisabled) {
+		return nil, "Rip cache is disabled (set rip_cache.enabled = true in config.toml)", nil
 	}
-	return ripcache.NewManager(cfg, logger), "", nil
+	if errors.Is(err, api.ErrRipCacheDirNotConfigured) {
+		return nil, "Rip cache dir is not configured", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return manager, "", nil
 }

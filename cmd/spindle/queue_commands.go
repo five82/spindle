@@ -446,9 +446,6 @@ func printEpisodeDetails(out io.Writer, item api.QueueItem) {
 	if item.EpisodeTotals != nil {
 		totals = *item.EpisodeTotals
 	}
-	if totals.Planned == 0 {
-		totals = api.EpisodeTotalsFromStatuses(item.Episodes)
-	}
 	fmt.Fprintf(out, "  Planned: %d | Ripped: %d | Encoded: %d | Final: %d\n", totals.Planned, totals.Ripped, totals.Encoded, totals.Final)
 	mapping := "pending verification"
 	if item.EpisodesSynced {

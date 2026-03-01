@@ -83,7 +83,11 @@ func newStagingListCommand(ctx *commandContext) *cobra.Command {
 				ageStr := formatDuration(age)
 				sizeStr := logging.FormatBytes(dir.Size)
 				totalSize += dir.Size
-				rows = append(rows, []string{dir.Name[:12], ageStr, sizeStr})
+				fingerprint := dir.Name
+				if len(fingerprint) > 12 {
+					fingerprint = fingerprint[:12]
+				}
+				rows = append(rows, []string{fingerprint, ageStr, sizeStr})
 			}
 
 			table := renderTable(

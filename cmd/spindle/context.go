@@ -116,40 +116,19 @@ func (c *commandContext) withClient(fn func(*ipc.Client) error) error {
 	return fn(client)
 }
 
-// withStore attempts to use IPC if available, falls back to direct store access
-func (c *commandContext) withStore(fn func(*ipc.Client, *queue.Store) error) error {
-	// Try IPC first
-	client, err := c.dialClient()
-	if err == nil {
-		defer client.Close()
-		return fn(client, nil)
-	}
-
-	// If daemon is not running, use direct store access
-	cfg, err := c.ensureConfig()
-	if err != nil {
-		return fmt.Errorf("load config for direct store access: %w", err)
-	}
-
-	store, err := queue.Open(cfg)
-	if err != nil {
-		return fmt.Errorf("open queue store: %w", err)
-	}
-	defer store.Close()
-
-	return fn(nil, store)
-}
-
 func (c *commandContext) withQueueAPI(fn func(queueaccess.Access) error) error {
-	return c.withStore(func(client *ipc.Client, store *queue.Store) error {
-		var qa queueaccess.Access
-		if client != nil {
-			qa = queueaccess.NewIPCAccess(client)
-		} else {
-			qa = queueaccess.NewStoreAccess(store)
+	session, err := queueaccess.OpenWithFallback(c.dialClient, func() (*queue.Store, error) {
+		cfg, cfgErr := c.ensureConfig()
+		if cfgErr != nil {
+			return nil, fmt.Errorf("load config for direct store access: %w", cfgErr)
 		}
-		return fn(qa)
+		return queue.Open(cfg)
 	})
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+	return fn(session.Access)
 }
 
 // withQueueStore provides direct store access (bypassing IPC).
