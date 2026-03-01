@@ -174,15 +174,6 @@ func (c *Client) QueueStop(ids []int64) (*QueueStopResponse, error) {
 	return &resp, nil
 }
 
-// QueueHealth returns queue diagnostics.
-func (c *Client) QueueHealth() (*QueueHealthResponse, error) {
-	var resp QueueHealthResponse
-	if err := c.client.Call("Spindle.QueueHealth", QueueHealthRequest{}, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
 // QueueRemove removes specific items by ID.
 func (c *Client) QueueRemove(ids []int64) (*QueueRemoveResponse, error) {
 	var resp QueueRemoveResponse

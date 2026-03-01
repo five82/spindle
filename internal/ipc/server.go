@@ -400,19 +400,6 @@ func (s *service) LogTail(req LogTailRequest, resp *LogTailResponse) error {
 	return nil
 }
 
-func (s *service) QueueHealth(_ QueueHealthRequest, resp *QueueHealthResponse) error {
-	health, err := s.daemon.QueueHealth(s.ctx)
-	if err != nil {
-		return err
-	}
-	resp.Total = health.Total
-	resp.Pending = health.Pending
-	resp.Processing = health.Processing
-	resp.Failed = health.Failed
-	resp.Completed = health.Completed
-	return nil
-}
-
 func (s *service) DatabaseHealth(_ DatabaseHealthRequest, resp *DatabaseHealthResponse) error {
 	health, err := s.daemon.DatabaseHealth(s.ctx)
 	if err != nil && health.Error == "" {

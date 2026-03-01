@@ -129,9 +129,9 @@ Example:
 				return err
 			}
 
-			var entryNum int
-			if _, err := fmt.Sscanf(args[0], "%d", &entryNum); err != nil || entryNum < 1 {
-				return fmt.Errorf("invalid entry number: %s (must be a positive integer)", args[0])
+			entryNum, err := parseEntryNumber(args[0])
+			if err != nil {
+				return err
 			}
 
 			entry, err := manager.RemoveEntryByNumber(cmd.Context(), entryNum)

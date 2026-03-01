@@ -288,33 +288,6 @@ func TestIPCQueueRetry(t *testing.T) {
 	})
 }
 
-func TestIPCQueueHealth(t *testing.T) {
-	env := setupIPCTest(t)
-
-	// Create items in various states
-	_, _ = env.Store.NewDisc(env.Ctx, "Pending", "fp-pending")
-
-	failed, _ := env.Store.NewDisc(env.Ctx, "Failed", "fp-failed-health")
-	failed.Status = queue.StatusFailed
-	_ = env.Store.Update(env.Ctx, failed)
-
-	t.Run("health stats", func(t *testing.T) {
-		healthResp, err := env.Client.QueueHealth()
-		if err != nil {
-			t.Fatalf("QueueHealth failed: %v", err)
-		}
-		if healthResp.Total != 2 {
-			t.Errorf("expected total 2, got %d", healthResp.Total)
-		}
-		if healthResp.Pending != 1 {
-			t.Errorf("expected pending 1, got %d", healthResp.Pending)
-		}
-		if healthResp.Failed != 1 {
-			t.Errorf("expected failed 1, got %d", healthResp.Failed)
-		}
-	})
-}
-
 func TestIPCDatabaseHealth(t *testing.T) {
 	env := setupIPCTest(t)
 

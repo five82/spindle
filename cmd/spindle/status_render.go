@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/mattn/go-isatty"
+
+	"spindle/internal/api"
 )
 
 type statusKind int
@@ -72,6 +74,19 @@ func statusKindColor(kind statusKind) string {
 		return ansiBlue
 	default:
 		return ""
+	}
+}
+
+func statusKindFromSeverity(severity string) statusKind {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case api.SeverityOK:
+		return statusOK
+	case api.SeverityWarn:
+		return statusWarn
+	case api.SeverityError:
+		return statusError
+	default:
+		return statusInfo
 	}
 }
 

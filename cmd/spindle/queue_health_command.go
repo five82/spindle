@@ -12,8 +12,8 @@ import (
 
 func newQueueHealthCommand(ctx *commandContext) *cobra.Command {
 	return &cobra.Command{
-		Use:   "queue-health",
-		Short: "Check queue database health",
+		Use:   "health",
+		Short: "Check queue database health (schema, integrity, columns)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ctx.withClient(func(client *ipc.Client) error {
 				resp, err := client.DatabaseHealth()

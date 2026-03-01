@@ -30,31 +30,6 @@ func (s *Store) Stats(ctx context.Context) (map[Status]int, error) {
 	return stats, rows.Err()
 }
 
-// Health aggregates queue state for diagnostic output.
-func (s *Store) Health(ctx context.Context) (HealthSummary, error) {
-	stats, err := s.Stats(ctx)
-	if err != nil {
-		return HealthSummary{}, err
-	}
-	health := HealthSummary{}
-	for status, count := range stats {
-		health.Total += count
-		switch status {
-		case StatusPending:
-			health.Pending += count
-		case StatusFailed:
-			health.Failed += count
-		case StatusCompleted:
-			health.Completed += count
-		default:
-			if _, ok := processingStatuses[status]; ok {
-				health.Processing += count
-			}
-		}
-	}
-	return health, nil
-}
-
 // CheckHealth returns diagnostic information about the queue database.
 func (s *Store) CheckHealth(ctx context.Context) (DatabaseHealth, error) {
 	health := DatabaseHealth{

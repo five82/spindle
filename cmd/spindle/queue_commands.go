@@ -27,7 +27,7 @@ func newQueueCommand(ctx *commandContext) *cobra.Command {
 	queueCmd.AddCommand(newQueueResetCommand(ctx))
 	queueCmd.AddCommand(newQueueRetryCommand(ctx))
 	queueCmd.AddCommand(newQueueStopCommand(ctx))
-	queueCmd.AddCommand(newQueueHealthSubcommand(ctx))
+	queueCmd.AddCommand(newQueueHealthCommand(ctx))
 
 	return queueCmd
 }
@@ -486,31 +486,5 @@ func printEpisodeDetails(out io.Writer, item api.QueueItem) {
 				}
 			}
 		}
-	}
-}
-
-func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {
-	return &cobra.Command{
-		Use:   "health",
-		Short: "Show queue health summary",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
-				health, err := qa.Health(cmd.Context())
-				if err != nil {
-					return err
-				}
-				if ctx.JSONMode() {
-					return writeJSON(cmd, health)
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Total: %d\nPending: %d\nProcessing: %d\nFailed: %d\nCompleted: %d\n",
-					health.Total,
-					health.Pending,
-					health.Processing,
-					health.Failed,
-					health.Completed,
-				)
-				return nil
-			})
-		},
 	}
 }

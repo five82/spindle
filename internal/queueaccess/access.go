@@ -23,7 +23,6 @@ type Access interface {
 	Retry(ctx context.Context, ids []int64) (int64, error)
 	RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (api.RetryItemResult, error)
 	Stop(ctx context.Context, ids []int64) (int64, error)
-	Health(ctx context.Context) (queue.HealthSummary, error)
 	ActiveFingerprints(ctx context.Context) (map[string]struct{}, error)
 }
 
@@ -143,14 +142,6 @@ func (a *ipcAccess) Stop(_ context.Context, ids []int64) (int64, error) {
 	return resp.Updated, nil
 }
 
-func (a *ipcAccess) Health(_ context.Context) (queue.HealthSummary, error) {
-	resp, err := a.client.QueueHealth()
-	if err != nil {
-		return queue.HealthSummary{}, err
-	}
-	return queue.HealthSummary(*resp), nil
-}
-
 func (a *ipcAccess) ActiveFingerprints(ctx context.Context) (map[string]struct{}, error) {
 	items, err := a.List(ctx, nil)
 	if err != nil {
@@ -233,10 +224,6 @@ func (a *storeAccess) RetryEpisode(ctx context.Context, itemID int64, episodeKey
 
 func (a *storeAccess) Stop(ctx context.Context, ids []int64) (int64, error) {
 	return a.store.StopItems(ctx, ids...)
-}
-
-func (a *storeAccess) Health(ctx context.Context) (queue.HealthSummary, error) {
-	return a.store.Health(ctx)
 }
 
 func (a *storeAccess) ActiveFingerprints(ctx context.Context) (map[string]struct{}, error) {

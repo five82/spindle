@@ -213,19 +213,6 @@ func dependencyLines(deps []ipc.DependencyStatus, summary api.DependencySummary,
 	return lines
 }
 
-func statusKindFromSeverity(severity string) statusKind {
-	switch strings.ToLower(strings.TrimSpace(severity)) {
-	case api.SeverityOK:
-		return statusOK
-	case api.SeverityWarn:
-		return statusWarn
-	case api.SeverityError:
-		return statusError
-	default:
-		return statusInfo
-	}
-}
-
 func daemonExecutable() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {

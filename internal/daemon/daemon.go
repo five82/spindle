@@ -326,14 +326,6 @@ func (d *Daemon) RemoveQueueItems(ctx context.Context, ids []int64) (int64, erro
 	return removed, nil
 }
 
-// QueueHealth returns aggregate queue diagnostics.
-func (d *Daemon) QueueHealth(ctx context.Context) (queue.HealthSummary, error) {
-	if d.store == nil {
-		return queue.HealthSummary{}, errors.New("queue store unavailable")
-	}
-	return d.store.Health(ctx)
-}
-
 // DatabaseHealth returns detailed database diagnostics.
 func (d *Daemon) DatabaseHealth(ctx context.Context) (queue.DatabaseHealth, error) {
 	if d.store == nil {

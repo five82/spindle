@@ -90,9 +90,9 @@ func TestQueueRetryAndClear(t *testing.T) {
 func TestQueueHealthCommand(t *testing.T) {
 	env := setupCLITestEnv(t)
 
-	out, _, err := runCLI(t, []string{"queue-health"}, env.socketPath, env.configPath)
+	out, _, err := runCLI(t, []string{"queue", "health"}, env.socketPath, env.configPath)
 	if err != nil {
-		t.Fatalf("queue-health: %v", err)
+		t.Fatalf("queue health: %v", err)
 	}
 	requireContains(t, out, "Database path:")
 	requireContains(t, out, "queue_items table present:")
@@ -312,33 +312,6 @@ func TestQueueShowJSONNotFound(t *testing.T) {
 	}
 	if result["error"] != "not_found" {
 		t.Fatalf("expected error=not_found, got %v", result["error"])
-	}
-}
-
-func TestQueueHealthJSON(t *testing.T) {
-	env := setupCLITestEnv(t)
-	ctx := context.Background()
-
-	if _, err := env.store.NewDisc(ctx, "Alpha", "fp-alpha"); err != nil {
-		t.Fatalf("alpha disc: %v", err)
-	}
-
-	out, _, err := runCLI(t, []string{"queue", "health", "--json"}, env.socketPath, env.configPath)
-	if err != nil {
-		t.Fatalf("queue health --json: %v", err)
-	}
-
-	var health map[string]any
-	if err := json.Unmarshal([]byte(out), &health); err != nil {
-		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
-	}
-	for _, key := range []string{"total", "pending", "processing", "failed", "completed"} {
-		if _, ok := health[key]; !ok {
-			t.Fatalf("missing %q key in health JSON", key)
-		}
-	}
-	if health["total"] != float64(1) {
-		t.Fatalf("expected total=1, got %v", health["total"])
 	}
 }
 

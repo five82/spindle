@@ -106,15 +106,6 @@ type DatabaseHealth struct {
 	Error            string
 }
 
-// HealthSummary describes aggregated queue counts per key lifecycle states.
-type HealthSummary struct {
-	Total      int `json:"total"`
-	Pending    int `json:"pending"`
-	Processing int `json:"processing"`
-	Failed     int `json:"failed"`
-	Completed  int `json:"completed"`
-}
-
 // Item represents a queue item persisted in SQLite.
 type Item struct {
 	ID                  int64

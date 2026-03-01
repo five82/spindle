@@ -173,18 +173,6 @@ type TestNotificationResponse struct {
 	Message string `json:"message"`
 }
 
-// QueueHealthRequest fetches aggregate diagnostics.
-type QueueHealthRequest struct{}
-
-// QueueHealthResponse reports queue health information.
-type QueueHealthResponse struct {
-	Total      int `json:"total"`
-	Pending    int `json:"pending"`
-	Processing int `json:"processing"`
-	Failed     int `json:"failed"`
-	Completed  int `json:"completed"`
-}
-
 // QueueRemoveRequest removes specific items by ID.
 type QueueRemoveRequest struct {
 	IDs []int64 `json:"ids"`

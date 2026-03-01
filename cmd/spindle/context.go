@@ -207,6 +207,14 @@ func shouldSkipConfig(cmd *cobra.Command) bool {
 	return false
 }
 
+func parseEntryNumber(arg string) (int, error) {
+	var n int
+	if _, err := fmt.Sscanf(arg, "%d", &n); err != nil || n < 1 {
+		return 0, fmt.Errorf("invalid entry number: %s (must be a positive integer)", arg)
+	}
+	return n, nil
+}
+
 func yesNo(value bool) string {
 	if value {
 		return "yes"
