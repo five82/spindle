@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/api"
 	"spindle/internal/queue"
 )
 
@@ -63,26 +64,26 @@ func bulkClearLabel(all, completed, failed bool) string {
 	}
 }
 
-func writeQueueRetryResultJSON(cmd *cobra.Command, result queueRetryResult) error {
+func writeQueueRetryResultJSON(cmd *cobra.Command, result api.RetryItemsResult) error {
 	type jsonItem struct {
 		ID      int64  `json:"id"`
 		Outcome string `json:"outcome"`
 	}
 	items := make([]jsonItem, 0, len(result.Items))
 	for _, item := range result.Items {
-		items = append(items, jsonItem{ID: item.ID, Outcome: retryOutcomeString(item.Outcome)})
+		items = append(items, jsonItem{ID: item.ID, Outcome: string(item.Outcome)})
 	}
 	return writeJSON(cmd, map[string]any{"items": items})
 }
 
-func printQueueRetryResult(out io.Writer, result queueRetryResult) {
+func printQueueRetryResult(out io.Writer, result api.RetryItemsResult) {
 	for _, item := range result.Items {
 		switch item.Outcome {
-		case queueRetryOutcomeNotFound:
+		case api.RetryItemNotFound:
 			fmt.Fprintf(out, "Item %d not found\n", item.ID)
-		case queueRetryOutcomeNotFailed:
+		case api.RetryItemNotFailed:
 			fmt.Fprintf(out, "Item %d is not in a retryable state (only failed items can be retried)\n", item.ID)
-		case queueRetryOutcomeUpdated:
+		case api.RetryItemUpdated:
 			fmt.Fprintf(out, "Item %d reset for retry\n", item.ID)
 		}
 	}
@@ -111,7 +112,7 @@ func printQueueEpisodeRetryResult(out io.Writer, id int64, episodeKey string, re
 	}
 }
 
-func writeQueueStopResultJSON(cmd *cobra.Command, result queueStopResult) error {
+func writeQueueStopResultJSON(cmd *cobra.Command, result api.StopItemsResult) error {
 	type jsonItem struct {
 		ID          int64  `json:"id"`
 		Outcome     string `json:"outcome"`
@@ -121,23 +122,23 @@ func writeQueueStopResultJSON(cmd *cobra.Command, result queueStopResult) error 
 	for _, item := range result.Items {
 		items = append(items, jsonItem{
 			ID:          item.ID,
-			Outcome:     stopOutcomeString(item.Outcome),
+			Outcome:     string(item.Outcome),
 			PriorStatus: item.PriorStatus,
 		})
 	}
 	return writeJSON(cmd, map[string]any{"items": items})
 }
 
-func printQueueStopResult(out io.Writer, result queueStopResult) {
+func printQueueStopResult(out io.Writer, result api.StopItemsResult) {
 	for _, item := range result.Items {
 		switch item.Outcome {
-		case queueStopOutcomeNotFound:
+		case api.StopItemNotFound:
 			fmt.Fprintf(out, "Item %d not found\n", item.ID)
-		case queueStopOutcomeAlreadyCompleted:
+		case api.StopItemAlreadyCompleted:
 			fmt.Fprintf(out, "Item %d is already completed\n", item.ID)
-		case queueStopOutcomeAlreadyFailed:
+		case api.StopItemAlreadyFailed:
 			fmt.Fprintf(out, "Item %d is already failed\n", item.ID)
-		case queueStopOutcomeUpdated:
+		case api.StopItemUpdated:
 			message := fmt.Sprintf("Item %d stop requested", item.ID)
 			if parsed, ok := queue.ParseStatus(item.PriorStatus); ok && queue.IsProcessingStatus(parsed) {
 				statusLabel := formatStatusLabel(item.PriorStatus)

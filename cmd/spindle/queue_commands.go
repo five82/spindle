@@ -323,7 +323,7 @@ Examples:
 					return nil
 				}
 
-				result, err := retryIDs(cmd.Context(), qa, ids)
+				result, err := api.RetryFailedItemsByID(cmd.Context(), qa, ids)
 				if err != nil {
 					return err
 				}
@@ -355,7 +355,7 @@ func newQueueStopCommand(ctx *commandContext) *cobra.Command {
 
 			return ctx.withQueueAPI(func(qa queueAPI) error {
 				out := cmd.OutOrStdout()
-				result, err := stopIDs(cmd.Context(), qa, ids)
+				result, err := api.StopItemsByID(cmd.Context(), qa, ids)
 				if err != nil {
 					return err
 				}
@@ -447,7 +447,7 @@ func printEpisodeDetails(out io.Writer, item api.QueueItem) {
 		totals = *item.EpisodeTotals
 	}
 	if totals.Planned == 0 {
-		totals = tallyEpisodeTotals(item.Episodes)
+		totals = api.EpisodeTotalsFromStatuses(item.Episodes)
 	}
 	fmt.Fprintf(out, "  Planned: %d | Ripped: %d | Encoded: %d | Final: %d\n", totals.Planned, totals.Ripped, totals.Encoded, totals.Final)
 	mapping := "pending verification"

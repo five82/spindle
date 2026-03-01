@@ -68,25 +68,6 @@ func buildQueueListRows(items []api.QueueItem) [][]string {
 	return rows
 }
 
-// tallyEpisodeTotals counts episode progress from episode status list.
-// Used as a fallback when EpisodeTotals is not provided by the API.
-func tallyEpisodeTotals(episodes []api.EpisodeStatus) api.EpisodeTotals {
-	var totals api.EpisodeTotals
-	for _, ep := range episodes {
-		totals.Planned++
-		if strings.TrimSpace(ep.RippedPath) != "" {
-			totals.Ripped++
-		}
-		if strings.TrimSpace(ep.EncodedPath) != "" {
-			totals.Encoded++
-		}
-		if strings.TrimSpace(ep.FinalPath) != "" {
-			totals.Final++
-		}
-	}
-	return totals
-}
-
 func formatStatusLabel(status string) string {
 	status = strings.TrimSpace(status)
 	if status == "" {

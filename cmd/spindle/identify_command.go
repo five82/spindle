@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -68,9 +66,9 @@ Examples:
 				fmt.Fprintf(cmd.OutOrStdout(), "\n")
 			}
 
-			year := extractYearFromMetadata(result.Item.MetadataJSON)
-			tmdbTitle := extractTitleFromMetadata(result.Item.MetadataJSON)
-			edition := extractEditionFromMetadata(result.Item.MetadataJSON)
+			year := api.MetadataYear(result.Item.MetadataJSON)
+			tmdbTitle := api.MetadataTitle(result.Item.MetadataJSON)
+			edition := api.MetadataEdition(result.Item.MetadataJSON)
 			fmt.Fprintf(cmd.OutOrStdout(), "\n📊 Identification Results:\n")
 			fmt.Fprintf(cmd.OutOrStdout(), "  Disc Title: %s\n", result.Item.DiscTitle)
 			fmt.Fprintf(cmd.OutOrStdout(), "  TMDB Title: %s\n", tmdbTitle)
@@ -83,7 +81,7 @@ Examples:
 			}
 			if result.Item.MetadataJSON != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ✅ Available\n")
-				if filename := extractFilenameFromMetadata(result.Item.MetadataJSON); filename != "" {
+				if filename := api.MetadataFilename(result.Item.MetadataJSON); filename != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s.mkv\n", filename)
 				} else if year != "Unknown" && tmdbTitle != "Unknown" {
 					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s (%s).mkv\n", tmdbTitle, year)
@@ -118,51 +116,4 @@ Examples:
 	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path (default: configured optical_drive)")
 
 	return cmd
-}
-
-// metadataField extracts a string field from JSON metadata.
-// Returns the field value, or fallback if the JSON is empty, invalid, or the field is missing.
-func metadataField(metadataJSON, field, fallback string) string {
-	if metadataJSON == "" {
-		return fallback
-	}
-	var metadata map[string]any
-	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-		return fallback
-	}
-	value, ok := metadata[field].(string)
-	if !ok || value == "" {
-		return fallback
-	}
-	return value
-}
-
-// yearPattern matches a 4-digit year at the start of a string.
-var yearPattern = regexp.MustCompile(`^\d{4}`)
-
-// extractYearFromMetadata extracts the year from the release_date field.
-func extractYearFromMetadata(metadataJSON string) string {
-	releaseDate := metadataField(metadataJSON, "release_date", "")
-	if releaseDate == "" {
-		return "Unknown"
-	}
-	if match := yearPattern.FindString(releaseDate); match != "" {
-		return match
-	}
-	return "Unknown"
-}
-
-// extractTitleFromMetadata extracts the title field.
-func extractTitleFromMetadata(metadataJSON string) string {
-	return metadataField(metadataJSON, "title", "Unknown")
-}
-
-// extractFilenameFromMetadata extracts the filename field.
-func extractFilenameFromMetadata(metadataJSON string) string {
-	return metadataField(metadataJSON, "filename", "")
-}
-
-// extractEditionFromMetadata extracts the edition field.
-func extractEditionFromMetadata(metadataJSON string) string {
-	return metadataField(metadataJSON, "edition", "")
 }

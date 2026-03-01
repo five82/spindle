@@ -5,17 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"spindle/internal/config"
+	"spindle/internal/daemonctl"
 	"spindle/internal/ipc"
-	"spindle/internal/preflight"
 	"spindle/internal/queue"
 )
 
@@ -33,7 +30,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				if launchErr := launchDaemonProcess(cmd, ctx, startDiagnostic); launchErr != nil {
 					return launchErr
 				}
-				client, err = waitForDaemonClient(ctx.socketPath(), 10*time.Second)
+				client, err = daemonctl.WaitForClient(ctx.socketPath(), 10*time.Second)
 				if err != nil {
 					return err
 				}
@@ -101,8 +98,8 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			}
 
 			// Wait for graceful shutdown
-			_ = waitForDaemonShutdown(ctx.socketPath(), 5*time.Second)
-			alive, livePID, aliveErr := daemonProcessInfo(ctx.socketPath())
+			_ = daemonctl.WaitForShutdown(ctx.socketPath(), 5*time.Second)
+			alive, livePID, aliveErr := daemonctl.ProcessInfo(ctx.socketPath())
 			if aliveErr != nil {
 				alive = false
 			}
@@ -113,14 +110,14 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				if currentPID == 0 {
 					currentPID = pid
 				}
-				logDir := deriveLogDir(lockPath, queueDBPath, ctx)
+				logDir := daemonctl.DeriveLogDir(lockPath, queueDBPath, ctx.configValue())
 				if logDir == "" {
 					return fmt.Errorf("unable to determine daemon log directory")
 				}
 				pidPath := filepath.Join(logDir, "spindle.pid")
 				lockFile := filepath.Join(logDir, "spindle.lock")
 				fmt.Fprintf(stdout, "Stopping daemon process (pid %d)...\n", currentPID)
-				_, killErr := forceKillDaemonProcess(pidPath, lockFile, currentPID)
+				_, killErr := daemonctl.ForceKillProcess(pidPath, lockFile, currentPID)
 				if killErr != nil {
 					return fmt.Errorf("failed to stop daemon process: %w", killErr)
 				}
@@ -175,12 +172,12 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				}
 
 				if len(statusResp.Dependencies) == 0 {
-					statusResp.Dependencies = resolveDependencies(cfg)
+					statusResp.Dependencies = daemonctl.ResolveDependencies(context.Background(), cfg)
 				}
 			}
 
 			if len(statusResp.Dependencies) == 0 {
-				statusResp.Dependencies = resolveDependencies(cfg)
+				statusResp.Dependencies = daemonctl.ResolveDependencies(context.Background(), cfg)
 			}
 
 			colorize := shouldColorize(stdout)
@@ -269,8 +266,8 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 				_, _ = client.Stop()
 				_ = client.Close()
 
-				_ = waitForDaemonShutdown(ctx.socketPath(), 5*time.Second)
-				alive, livePID, aliveErr := daemonProcessInfo(ctx.socketPath())
+				_ = daemonctl.WaitForShutdown(ctx.socketPath(), 5*time.Second)
+				alive, livePID, aliveErr := daemonctl.ProcessInfo(ctx.socketPath())
 				if aliveErr != nil {
 					alive = false
 				}
@@ -280,14 +277,14 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 					if currentPID == 0 {
 						currentPID = pid
 					}
-					logDir := deriveLogDir(lockPath, queueDBPath, ctx)
+					logDir := daemonctl.DeriveLogDir(lockPath, queueDBPath, ctx.configValue())
 					if logDir == "" {
 						return fmt.Errorf("unable to determine daemon log directory")
 					}
 					pidPath := filepath.Join(logDir, "spindle.pid")
 					lockFile := filepath.Join(logDir, "spindle.lock")
 					fmt.Fprintf(stdout, "Stopping daemon process (pid %d)...\n", currentPID)
-					_, killErr := forceKillDaemonProcess(pidPath, lockFile, currentPID)
+					_, killErr := daemonctl.ForceKillProcess(pidPath, lockFile, currentPID)
 					if killErr != nil {
 						return fmt.Errorf("failed to stop daemon process: %w", killErr)
 					}
@@ -301,7 +298,7 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 			if launchErr := launchDaemonProcess(cmd, ctx, restartDiagnostic); launchErr != nil {
 				return launchErr
 			}
-			client, err = waitForDaemonClient(ctx.socketPath(), 10*time.Second)
+			client, err = daemonctl.WaitForClient(ctx.socketPath(), 10*time.Second)
 			if err != nil {
 				return err
 			}
@@ -396,183 +393,21 @@ func dependencySummaryLine(total, missingRequired, missingOptional int, colorize
 	return renderStatusLine("Summary", kind, detail, colorize)
 }
 
-func resolveDependencies(cfg *config.Config) []ipc.DependencyStatus {
-	if cfg == nil {
-		return nil
-	}
-	checks := preflight.CheckSystemDeps(context.Background(), cfg)
-	statuses := make([]ipc.DependencyStatus, 0, len(checks))
-	for _, check := range checks {
-		statuses = append(statuses, ipc.DependencyStatus{
-			Name:        check.Name,
-			Command:     check.Command,
-			Description: check.Description,
-			Optional:    check.Optional,
-			Available:   check.Available,
-			Detail:      check.Detail,
-		})
-	}
-	if cfg.Commentary.Enabled {
-		statuses = append(statuses, commentaryLLMDependencyStatus(cfg))
-	}
-	return statuses
-}
-
-func commentaryLLMDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
-	status := ipc.DependencyStatus{
-		Name:        "Commentary LLM",
-		Description: "LLM-driven commentary track detection",
-		Optional:    true,
-	}
-	llmCfg := cfg.CommentaryLLM()
-	if llmCfg.APIKey == "" {
-		status.Detail = "API key missing (set commentary.api_key or llm.api_key)"
-		return status
-	}
-	result := preflight.CheckLLM(context.Background(), "Commentary LLM", llmCfg)
-	status.Available = result.Passed
-	status.Detail = result.Detail
-	return status
-}
-
 func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext, diagnostic bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
-	args := []string{"daemon"}
+	opts := daemonctl.LaunchOptions{Diagnostic: diagnostic}
 	if ctx.socketFlag != nil {
 		if socket := strings.TrimSpace(*ctx.socketFlag); socket != "" {
-			args = append(args, "--socket", socket)
+			opts.SocketPath = socket
 		}
 	}
 	if ctx.configFlag != nil {
 		if config := strings.TrimSpace(*ctx.configFlag); config != "" {
-			args = append(args, "--config", config)
+			opts.ConfigPath = config
 		}
 	}
-	if diagnostic {
-		args = append(args, "--diagnostic")
-	}
-	proc := exec.Command(exe, args...)
-	if err := proc.Start(); err != nil {
-		return fmt.Errorf("launch daemon: %w", err)
-	}
-	return proc.Process.Release()
-}
-
-func waitForDaemonClient(socketPath string, timeout time.Duration) (*ipc.Client, error) {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		client, err := ipc.Dial(socketPath)
-		if err == nil {
-			return client, nil
-		}
-		lastErr = err
-		time.Sleep(200 * time.Millisecond)
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("timeout waiting for daemon")
-	}
-	return nil, fmt.Errorf("daemon failed to start: %w", lastErr)
-}
-
-func waitForDaemonShutdown(socketPath string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		client, err := ipc.Dial(socketPath)
-		if err != nil {
-			if os.IsNotExist(err) || errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
-			lastErr = err
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-		status, statusErr := client.Status()
-		_ = client.Close()
-		if statusErr == nil && !status.Running {
-			return nil
-		}
-		if statusErr != nil {
-			lastErr = statusErr
-		} else {
-			lastErr = fmt.Errorf("daemon still running")
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("timeout waiting for shutdown")
-	}
-	return fmt.Errorf("daemon did not stop: %w", lastErr)
-}
-
-func deriveLogDir(lockPath, queueDBPath string, ctx *commandContext) string {
-	if lockPath != "" {
-		return filepath.Dir(lockPath)
-	}
-	if queueDBPath != "" {
-		return filepath.Dir(queueDBPath)
-	}
-	if cfg := ctx.configValue(); cfg != nil && strings.TrimSpace(cfg.Paths.LogDir) != "" {
-		return cfg.Paths.LogDir
-	}
-	return ""
-}
-
-func forceKillDaemonProcess(pidPath, lockPath string, fallbackPID int) (int, error) {
-	pid := fallbackPID
-	data, err := os.ReadFile(pidPath)
-	if err == nil {
-		pidStr := strings.TrimSpace(string(data))
-		if pidStr != "" {
-			if parsed, parseErr := strconv.Atoi(pidStr); parseErr == nil && parsed > 0 {
-				pid = parsed
-			}
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return 0, fmt.Errorf("read daemon pid file %q: %w", pidPath, err)
-	}
-	if pid <= 0 {
-		return 0, fmt.Errorf("unable to determine daemon pid (pid file: %s)", pidPath)
-	}
-	if pid == os.Getpid() {
-		return 0, fmt.Errorf("refusing to kill current process (pid %d)", pid)
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return 0, fmt.Errorf("locate daemon process %d: %w", pid, err)
-	}
-	if err := proc.Kill(); err != nil {
-		return 0, fmt.Errorf("kill daemon process %d: %w", pid, err)
-	}
-	if err := os.Remove(pidPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return 0, fmt.Errorf("remove pid file %q: %w", pidPath, err)
-	}
-	if lockPath != "" {
-		_ = os.Remove(lockPath)
-	}
-	return pid, nil
-}
-
-func daemonProcessInfo(socketPath string) (bool, int, error) {
-	client, err := ipc.Dial(socketPath)
-	if err != nil {
-		if os.IsNotExist(err) || errors.Is(err, os.ErrNotExist) {
-			return false, 0, nil
-		}
-		return false, 0, err
-	}
-	defer client.Close()
-	status, statusErr := client.Status()
-	if statusErr != nil {
-		return true, 0, statusErr
-	}
-	pid := 0
-	if status != nil {
-		pid = status.PID
-	}
-	return true, pid, nil
+	return daemonctl.Launch(exe, opts)
 }
