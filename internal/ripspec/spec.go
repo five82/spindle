@@ -3,9 +3,7 @@ package ripspec
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"slices"
-	"sort"
 	"strings"
 )
 
@@ -14,11 +12,34 @@ import (
 type Envelope struct {
 	Fingerprint string             `json:"fingerprint"`
 	ContentKey  string             `json:"content_key"`
-	Metadata    map[string]any     `json:"metadata,omitempty"`
+	Metadata    EnvelopeMetadata   `json:"metadata,omitempty"`
 	Titles      []Title            `json:"titles,omitempty"`
 	Episodes    []Episode          `json:"episodes,omitempty"`
 	Assets      Assets             `json:"assets,omitempty"`
 	Attributes  EnvelopeAttributes `json:"attributes,omitempty"`
+}
+
+// EnvelopeMetadata holds structured identification data previously stored as map[string]any.
+type EnvelopeMetadata struct {
+	ID           int64   `json:"id,omitempty"`
+	Title        string  `json:"title,omitempty"`
+	Overview     string  `json:"overview,omitempty"`
+	MediaType    string  `json:"media_type,omitempty"`
+	ShowTitle    string  `json:"show_title,omitempty"`
+	SeriesTitle  string  `json:"series_title,omitempty"`
+	Year         string  `json:"year,omitempty"`
+	ReleaseDate  string  `json:"release_date,omitempty"`
+	FirstAirDate string  `json:"first_air_date,omitempty"`
+	IMDBID       string  `json:"imdb_id,omitempty"`
+	Language     string  `json:"language,omitempty"`
+	SeasonNumber int     `json:"season_number,omitempty"`
+	DiscNumber   int     `json:"disc_number,omitempty"`
+	VoteAverage  float64 `json:"vote_average,omitempty"`
+	VoteCount    int64   `json:"vote_count,omitempty"`
+	Movie        bool    `json:"movie,omitempty"`
+	Cached       bool    `json:"cached,omitempty"`
+	Edition      string  `json:"edition,omitempty"`
+	Filename     string  `json:"filename,omitempty"`
 }
 
 // Title records playlist metadata captured during disc scanning.
@@ -103,7 +124,6 @@ func Parse(raw string) (Envelope, error) {
 	if err := json.Unmarshal([]byte(raw), &env); err != nil {
 		return Envelope{}, err
 	}
-	env.Metadata = cloneMetadata(env.Metadata)
 	env.Titles = slices.Clone(env.Titles)
 	env.Episodes = slices.Clone(env.Episodes)
 	env.Assets = env.Assets.Clone()
@@ -246,23 +266,14 @@ func appendOrReplace(list []Asset, asset Asset) []Asset {
 	}
 	if !replaced {
 		list = append(list, asset)
+		slices.SortStableFunc(list, func(a, b Asset) int {
+			if c := strings.Compare(a.EpisodeKey, b.EpisodeKey); c != 0 {
+				return c
+			}
+			return a.TitleID - b.TitleID
+		})
 	}
-	sort.SliceStable(list, func(i, j int) bool {
-		if list[i].EpisodeKey == list[j].EpisodeKey {
-			return list[i].TitleID < list[j].TitleID
-		}
-		return list[i].EpisodeKey < list[j].EpisodeKey
-	})
 	return list
-}
-
-func cloneMetadata(input map[string]any) map[string]any {
-	if len(input) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(input))
-	maps.Copy(out, input)
-	return out
 }
 
 // Clone creates a deep copy of the assets set.
@@ -305,13 +316,18 @@ func (e *Envelope) AssetCounts() (expected, ripped, encoded, final int) {
 
 // MissingEpisodes returns episode keys that don't have assets at the given stage.
 // For movies, returns nil since there are no episode keys to track.
-func (e *Envelope) MissingEpisodes(stage string) []string {
+func (e *Envelope) MissingEpisodes(stg string) []string {
 	if len(e.Episodes) == 0 {
 		return nil
 	}
+	list := e.Assets.fromKind(stg)
+	existing := make(map[string]struct{}, len(list))
+	for _, asset := range list {
+		existing[strings.ToLower(asset.EpisodeKey)] = struct{}{}
+	}
 	var missing []string
 	for _, ep := range e.Episodes {
-		if _, ok := e.Assets.FindAsset(stage, ep.Key); !ok {
+		if _, ok := existing[strings.ToLower(ep.Key)]; !ok {
 			missing = append(missing, ep.Key)
 		}
 	}

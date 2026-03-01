@@ -57,7 +57,7 @@ func TestStagePersistsRipSpecPerEpisode(t *testing.T) {
 	item.EncodedFile = ep1Encoded
 
 	env := ripspec.Envelope{
-		Metadata: map[string]any{"media_type": "tv"},
+		Metadata: ripspec.EnvelopeMetadata{MediaType: "tv"},
 		Episodes: []ripspec.Episode{
 			{Key: ep1Key, TitleID: 1, Season: season, Episode: 1, EpisodeTitle: "Episode One"},
 			{Key: ep2Key, TitleID: 2, Season: season, Episode: 2, EpisodeTitle: "Episode Two"},

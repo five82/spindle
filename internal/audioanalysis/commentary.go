@@ -297,22 +297,10 @@ func BuildClassificationPrompt(title, year, transcript string) string {
 
 // extractYear retrieves the year from ripspec metadata.
 func extractYear(env *ripspec.Envelope) string {
-	if env == nil || env.Metadata == nil {
+	if env == nil {
 		return ""
 	}
-	y, ok := env.Metadata["year"]
-	if !ok {
-		return ""
-	}
-	switch v := y.(type) {
-	case float64:
-		if v > 0 {
-			return fmt.Sprintf("%.0f", v)
-		}
-	case string:
-		return v
-	}
-	return ""
+	return env.Metadata.Year
 }
 
 // TruncateTranscript limits transcript length for LLM input.

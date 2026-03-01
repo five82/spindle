@@ -378,24 +378,14 @@ func TestExtractYear(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "no year key",
-			env:  &ripspec.Envelope{Metadata: map[string]any{"title": "Test"}},
+			name: "no year field",
+			env:  &ripspec.Envelope{Metadata: ripspec.EnvelopeMetadata{Title: "Test"}},
 			want: "",
 		},
 		{
-			name: "year as float64",
-			env:  &ripspec.Envelope{Metadata: map[string]any{"year": float64(2024)}},
-			want: "2024",
-		},
-		{
-			name: "year as string",
-			env:  &ripspec.Envelope{Metadata: map[string]any{"year": "2023"}},
+			name: "year present",
+			env:  &ripspec.Envelope{Metadata: ripspec.EnvelopeMetadata{Year: "2023"}},
 			want: "2023",
-		},
-		{
-			name: "year as zero float",
-			env:  &ripspec.Envelope{Metadata: map[string]any{"year": float64(0)}},
-			want: "",
 		},
 	}
 

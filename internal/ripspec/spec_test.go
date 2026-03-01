@@ -8,8 +8,8 @@ func TestParseEncodeRoundTrip(t *testing.T) {
 	env := Envelope{
 		Fingerprint: "fp-1",
 		ContentKey:  "content-1",
-		Metadata: map[string]any{
-			"title": "Show",
+		Metadata: EnvelopeMetadata{
+			Title: "Show",
 		},
 		Attributes: EnvelopeAttributes{
 			DiscNumber: 2,
@@ -34,7 +34,7 @@ func TestParseEncodeRoundTrip(t *testing.T) {
 	if decoded.Fingerprint != env.Fingerprint || decoded.ContentKey != env.ContentKey {
 		t.Fatalf("unexpected decoded envelope: %+v", decoded)
 	}
-	if decoded.Metadata["title"] != "Show" || decoded.Attributes.DiscNumber != 2 {
+	if decoded.Metadata.Title != "Show" || decoded.Attributes.DiscNumber != 2 {
 		t.Fatalf("unexpected metadata/attributes: %+v %+v", decoded.Metadata, decoded.Attributes)
 	}
 	if len(decoded.Titles) != 1 || len(decoded.Episodes) != 1 || len(decoded.Assets.Ripped) != 1 {

@@ -181,7 +181,7 @@ func TestRipperPersistsRipSpecPerEpisode(t *testing.T) {
 	ep1Key := ripspec.EpisodeKey(season, 1)
 	ep2Key := ripspec.EpisodeKey(season, 2)
 	env := ripspec.Envelope{
-		Metadata: map[string]any{"media_type": "tv"},
+		Metadata: ripspec.EnvelopeMetadata{MediaType: "tv"},
 		Titles: []ripspec.Title{
 			{ID: 1, Name: "Episode 1", Duration: 1800},
 			{ID: 2, Name: "Episode 2", Duration: 1810},

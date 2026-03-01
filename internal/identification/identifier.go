@@ -364,9 +364,9 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		mediaType = MediaTypeTV
 	}
 	if outcome.SeasonNumber > 0 {
-		metadata["season_number"] = outcome.SeasonNumber
+		metadata.SeasonNumber = outcome.SeasonNumber
 	}
-	metadata["media_type"] = mediaType
+	metadata.MediaType = mediaType
 	if strings.TrimSpace(item.MetadataJSON) == "" {
 		if encoded, err := json.Marshal(metadata); err == nil {
 			item.MetadataJSON = string(encoded)

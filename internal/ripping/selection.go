@@ -33,7 +33,7 @@ func (r *Ripper) selectTitleIDs(item *queue.Item, logger *slog.Logger) []int {
 		}
 		return nil
 	}
-	mediaType := strings.ToLower(strings.TrimSpace(fmt.Sprint(env.Metadata["media_type"])))
+	mediaType := strings.ToLower(strings.TrimSpace(env.Metadata.MediaType))
 	if mediaType == "tv" {
 		ids := uniqueEpisodeTitleIDs(env)
 		if logger != nil {

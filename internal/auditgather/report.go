@@ -239,7 +239,7 @@ type RipCacheReport struct {
 type EnvelopeReport struct {
 	Fingerprint string                     `json:"fingerprint,omitempty"`
 	ContentKey  string                     `json:"content_key,omitempty"`
-	Metadata    map[string]any             `json:"metadata,omitempty"`
+	Metadata    ripspec.EnvelopeMetadata   `json:"metadata,omitempty"`
 	Titles      []ripspec.Title            `json:"titles,omitempty"`
 	Episodes    []ripspec.Episode          `json:"episodes,omitempty"`
 	Assets      ripspec.Assets             `json:"assets"`

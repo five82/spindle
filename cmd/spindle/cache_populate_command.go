@@ -22,15 +22,12 @@ import (
 	"spindle/internal/ripcache"
 	"spindle/internal/ripping"
 	"spindle/internal/services"
+	"spindle/internal/stage"
 )
 
 type stageHandler interface {
 	Prepare(context.Context, *queue.Item) error
 	Execute(context.Context, *queue.Item) error
-}
-
-type loggerAware interface {
-	SetLogger(*slog.Logger)
 }
 
 func newCacheRipCommand(ctx *commandContext) *cobra.Command {
@@ -194,7 +191,7 @@ func runStage(ctx context.Context, logger *slog.Logger, store *queue.Store, noti
 	}
 	stageCtx := logging.WithStage(ctx, name)
 	stageLogger := logging.WithContext(stageCtx, logger)
-	if aware, ok := handler.(loggerAware); ok {
+	if aware, ok := handler.(stage.LoggerAware); ok {
 		aware.SetLogger(stageLogger)
 	}
 

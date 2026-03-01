@@ -60,10 +60,11 @@ func FromQueueItem(item *queue.Item) QueueItem {
 		s := snapshot
 		dto.Encoding = &s
 	}
-	if sg := deriveSubtitleGeneration(item); sg != nil {
+	env := parseItemEnvelope(item)
+	if sg := deriveSubtitleGeneration(env); sg != nil {
 		dto.SubtitleGeneration = sg
 	}
-	if audioDesc, commentaryCount := deriveAudioInfo(item); audioDesc != "" || commentaryCount > 0 {
+	if audioDesc, commentaryCount := deriveAudioInfo(env); audioDesc != "" || commentaryCount > 0 {
 		dto.PrimaryAudioDescription = audioDesc
 		dto.CommentaryCount = commentaryCount
 	}
@@ -80,7 +81,7 @@ func FromQueueItem(item *queue.Item) QueueItem {
 	if raw := item.RipSpecData; raw != "" {
 		dto.RipSpec = json.RawMessage(raw)
 	}
-	if episodes, totals, synced := deriveEpisodeStatuses(item); len(episodes) > 0 {
+	if episodes, totals, synced := deriveEpisodeStatuses(item, env); len(episodes) > 0 {
 		dto.Episodes = episodes
 		if totals.Planned > 0 {
 			t := totals
@@ -214,12 +215,19 @@ func FormatTime(t time.Time) string {
 	return t.UTC().Format(dateTimeFormat)
 }
 
-func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bool) {
+func parseItemEnvelope(item *queue.Item) *ripspec.Envelope {
 	if item == nil || strings.TrimSpace(item.RipSpecData) == "" {
-		return nil, EpisodeTotals{}, false
+		return nil
 	}
 	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil || len(env.Episodes) == 0 {
+	if err != nil {
+		return nil
+	}
+	return &env
+}
+
+func deriveEpisodeStatuses(item *queue.Item, env *ripspec.Envelope) ([]EpisodeStatus, EpisodeTotals, bool) {
+	if env == nil || len(env.Episodes) == 0 {
 		return nil, EpisodeTotals{}, false
 	}
 	titles := indexTitles(env.Titles)
@@ -452,12 +460,8 @@ func indexGeneratedSubtitles(records []ripspec.SubtitleGenRecord) map[string]gen
 	return lookup
 }
 
-func deriveAudioInfo(item *queue.Item) (string, int) {
-	if item == nil || strings.TrimSpace(item.RipSpecData) == "" {
-		return "", 0
-	}
-	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil {
+func deriveAudioInfo(env *ripspec.Envelope) (string, int) {
+	if env == nil {
 		return "", 0
 	}
 	audioDesc := strings.TrimSpace(env.Attributes.PrimaryAudioDescription)
@@ -468,12 +472,8 @@ func deriveAudioInfo(item *queue.Item) (string, int) {
 	return audioDesc, commentaryCount
 }
 
-func deriveSubtitleGeneration(item *queue.Item) *SubtitleGenerationStatus {
-	if item == nil || strings.TrimSpace(item.RipSpecData) == "" {
-		return nil
-	}
-	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil {
+func deriveSubtitleGeneration(env *ripspec.Envelope) *SubtitleGenerationStatus {
+	if env == nil {
 		return nil
 	}
 	var (

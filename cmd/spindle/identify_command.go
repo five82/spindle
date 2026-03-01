@@ -17,6 +17,7 @@ import (
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 )
 
 func newIdentifyCommand(ctx *commandContext) *cobra.Command {
@@ -184,7 +185,7 @@ Examples:
 				fmt.Fprintf(cmd.OutOrStdout(), "\n❌ Identification failed. Check the logs above for details.\n")
 			}
 
-			if summary, err := parseRipSpecSummary(item.RipSpecData); err != nil {
+			if summary, err := ripspec.Parse(item.RipSpecData); err != nil {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n⚠️  Unable to parse rip specification for title fingerprints: %v\n", err)
 			} else {
 				printRipSpecFingerprints(cmd.OutOrStdout(), summary)

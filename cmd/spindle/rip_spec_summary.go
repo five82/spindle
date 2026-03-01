@@ -8,10 +8,6 @@ import (
 	"spindle/internal/ripspec"
 )
 
-func parseRipSpecSummary(raw string) (ripspec.Envelope, error) {
-	return ripspec.Parse(raw)
-}
-
 func printRipSpecFingerprints(out io.Writer, summary ripspec.Envelope) {
 	if out == nil {
 		return

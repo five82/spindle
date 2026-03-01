@@ -28,6 +28,7 @@ import (
 	"spindle/internal/organizer"
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
+	"spindle/internal/stage"
 	"spindle/internal/subtitles"
 	"spindle/internal/workflow"
 )
@@ -175,7 +176,7 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 		return
 	}
 
-	var subtitleStage workflow.StageHandler
+	var subtitleStage stage.Handler
 	if cfg.Subtitles.Enabled {
 		service := subtitles.NewService(cfg, logger)
 		subtitleStage = subtitles.NewGenerator(store, service, logger)

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 )
 
 func newQueueCommand(ctx *commandContext) *cobra.Command {
@@ -517,7 +518,7 @@ func printQueueItemDetails(cmd *cobra.Command, item queueItemDetailsView) {
 		printEpisodeDetails(out, item)
 	}
 
-	summary, err := parseRipSpecSummary(item.RipSpecJSON)
+	summary, err := ripspec.Parse(item.RipSpecJSON)
 	if err != nil {
 		fmt.Fprintf(out, "\n⚠️  Unable to parse rip specification: %v\n", err)
 		return

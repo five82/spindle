@@ -7,6 +7,7 @@ import (
 
 	"spindle/internal/identification"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 )
 
 // SubtitleContext captures metadata required to discover subtitles from external services.
@@ -192,48 +193,44 @@ func parseRipSpecData(raw string, ctx *SubtitleContext) {
 	if strings.TrimSpace(raw) == "" || ctx == nil {
 		return
 	}
-	var spec struct {
-		ContentKey string           `json:"content_key"`
-		Metadata   map[string]any   `json:"metadata"`
-		Titles     []map[string]any `json:"titles"`
-		Extras     map[string]any   `json:"extras"`
-	}
-	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+	env, err := ripspec.Parse(raw)
+	if err != nil {
 		return
 	}
 	if ctx.ContentKey == "" {
-		ctx.ContentKey = strings.TrimSpace(spec.ContentKey)
+		ctx.ContentKey = strings.TrimSpace(env.ContentKey)
 	}
-	assignTMDBIdentifiers(spec.Metadata, ctx)
+	if ctx.MediaType == "" {
+		ctx.MediaType = strings.ToLower(strings.TrimSpace(env.Metadata.MediaType))
+	}
+	if ctx.TMDBID == 0 && env.Metadata.ID > 0 {
+		ctx.TMDBID = env.Metadata.ID
+	}
 	if ctx.TMDBID == 0 {
 		ctx.TMDBID = parseTMDBFromContentKey(ctx.ContentKey)
 	}
 	if ctx.MediaType == "" {
 		ctx.MediaType = parseMediaTypeFromContentKey(ctx.ContentKey)
 	}
-	if ctx.Year == "" && len(spec.Metadata) > 0 {
-		if release, ok := spec.Metadata["release_date"].(string); ok {
+	if ctx.Year == "" {
+		if release := strings.TrimSpace(env.Metadata.ReleaseDate); release != "" {
 			ctx.Year = extractYear(release)
-		} else if year, ok := spec.Metadata["year"].(string); ok {
+		} else if year := strings.TrimSpace(env.Metadata.Year); year != "" {
 			ctx.Year = extractYear(year)
 		}
 	}
-	if ctx.IMDBID == "" && len(spec.Metadata) > 0 {
-		if imdb, ok := spec.Metadata["imdb_id"].(string); ok {
-			ctx.IMDBID = strings.TrimSpace(imdb)
+	if ctx.IMDBID == "" {
+		ctx.IMDBID = strings.TrimSpace(env.Metadata.IMDBID)
+	}
+	if ctx.ShowTitle == "" {
+		if show := strings.TrimSpace(env.Metadata.ShowTitle); show != "" {
+			ctx.ShowTitle = show
+		} else if show := strings.TrimSpace(env.Metadata.SeriesTitle); show != "" {
+			ctx.ShowTitle = show
 		}
 	}
-	if ctx.ShowTitle == "" && len(spec.Metadata) > 0 {
-		if show, ok := spec.Metadata["show_title"].(string); ok {
-			ctx.ShowTitle = strings.TrimSpace(show)
-		} else if show, ok := spec.Metadata["series_title"].(string); ok {
-			ctx.ShowTitle = strings.TrimSpace(show)
-		}
-	}
-	if ctx.Language == "" && len(spec.Metadata) > 0 {
-		if lang, ok := spec.Metadata["language"].(string); ok {
-			ctx.Language = strings.ToLower(strings.TrimSpace(lang))
-		}
+	if ctx.Language == "" {
+		ctx.Language = strings.ToLower(strings.TrimSpace(env.Metadata.Language))
 	}
 }
 

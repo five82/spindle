@@ -11,7 +11,7 @@ import (
 	"spindle/internal/ripspec"
 )
 
-func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatches map[int]episodeAnnotation, identifiedTitle, fallbackTitle string, discNumber int, metadata map[string]any) ([]ripspec.Title, []ripspec.Episode) {
+func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatches map[int]episodeAnnotation, identifiedTitle, fallbackTitle string, discNumber int, metadata ripspec.EnvelopeMetadata) ([]ripspec.Title, []ripspec.Episode) {
 	if scanResult == nil {
 		return nil, nil
 	}
@@ -38,8 +38,8 @@ func buildRipSpecs(logger *slog.Logger, scanResult *disc.ScanResult, episodeMatc
 
 			showLabel := identifiedTitle
 			if strings.TrimSpace(showLabel) == "" {
-				if value, ok := metadata["title"].(string); ok && strings.TrimSpace(value) != "" {
-					showLabel = value
+				if strings.TrimSpace(metadata.Title) != "" {
+					showLabel = metadata.Title
 				} else {
 					showLabel = fallbackTitle
 				}

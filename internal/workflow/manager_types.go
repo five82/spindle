@@ -7,31 +7,23 @@ import (
 	"spindle/internal/stage"
 )
 
-// StageHandler is the narrow contract the manager needs from each stage.
-// This is a type alias for stage.Handler; new code should prefer stage.Handler directly.
-type StageHandler = stage.Handler
-
 // StageSet bundles the concrete workflow handlers the manager orchestrates.
 type StageSet struct {
-	Identifier        StageHandler
-	Ripper            StageHandler
-	AudioAnalysis     StageHandler
-	EpisodeIdentifier StageHandler
-	Encoder           StageHandler
-	Subtitles         StageHandler
-	Organizer         StageHandler
+	Identifier        stage.Handler
+	Ripper            stage.Handler
+	AudioAnalysis     stage.Handler
+	EpisodeIdentifier stage.Handler
+	Encoder           stage.Handler
+	Subtitles         stage.Handler
+	Organizer         stage.Handler
 }
 
 type pipelineStage struct {
 	name             string
-	handler          StageHandler
+	handler          stage.Handler
 	startStatus      queue.Status
 	processingStatus queue.Status
 	doneStatus       queue.Status
-}
-
-type loggerAware interface {
-	SetLogger(*slog.Logger)
 }
 
 type laneKind string

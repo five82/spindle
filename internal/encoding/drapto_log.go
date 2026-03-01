@@ -3,6 +3,7 @@ package encoding
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"log/slog"
@@ -288,6 +289,7 @@ func warnWithJob(logger *slog.Logger, label, message string, attrs ...logging.At
 	if logger == nil {
 		return
 	}
+	attrs = slices.Clone(attrs)
 	if !logging.HasAttrKey(attrs, logging.FieldEventType) {
 		attrs = append(attrs, logging.String(logging.FieldEventType, "drapto_warning"))
 	}

@@ -13,6 +13,7 @@ import (
 
 	"spindle/internal/logging"
 	"spindle/internal/queue"
+	stagepkg "spindle/internal/stage"
 )
 
 func (m *Manager) processItem(ctx context.Context, lane *laneState, laneLogger *slog.Logger, item *queue.Item) error {
@@ -37,7 +38,7 @@ func (m *Manager) processItem(ctx context.Context, lane *laneState, laneLogger *
 	requestID := uuid.NewString()
 	stageCtx := withStageContext(ctx, lane, stage.name, item, requestID)
 	stageLogger := m.stageLoggerForLane(stageCtx, lane, laneLogger, item)
-	if aware, ok := stage.handler.(loggerAware); ok {
+	if aware, ok := stage.handler.(stagepkg.LoggerAware); ok {
 		aware.SetLogger(stageLogger)
 	}
 
@@ -163,7 +164,7 @@ func (m *Manager) executeStage(ctx context.Context, lane *laneState, stageLogger
 	return nil
 }
 
-func (m *Manager) executeWithHeartbeat(ctx context.Context, handler StageHandler, item *queue.Item) error {
+func (m *Manager) executeWithHeartbeat(ctx context.Context, handler stagepkg.Handler, item *queue.Item) error {
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	var hbWG sync.WaitGroup
 	hbWG.Add(1)

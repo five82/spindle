@@ -94,27 +94,23 @@ func (i *Identifier) finalizeIdentifiedItem(
 		titleWithYear = fmt.Sprintf("%s (%s)", r.IdentifiedTitle, r.Year)
 	}
 
-	// Build metadata map.
-	metadata := map[string]any{
-		"id":             r.TMDBID,
-		"title":          r.IdentifiedTitle,
-		"overview":       r.Overview,
-		"media_type":     r.MediaType,
-		"release_date":   r.ReleaseDate,
-		"first_air_date": r.FirstAirDate,
-		"vote_average":   r.VoteAverage,
-		"vote_count":     r.VoteCount,
-		"movie":          r.MediaType != MediaTypeTV,
-		"season_number":  r.SeasonNumber,
-	}
-	if r.Cached {
-		metadata["cached"] = true
+	// Build metadata.
+	metadata := ripspec.EnvelopeMetadata{
+		ID:           r.TMDBID,
+		Title:        r.IdentifiedTitle,
+		Overview:     r.Overview,
+		MediaType:    r.MediaType,
+		ReleaseDate:  r.ReleaseDate,
+		FirstAirDate: r.FirstAirDate,
+		VoteAverage:  r.VoteAverage,
+		VoteCount:    r.VoteCount,
+		Movie:        r.MediaType != MediaTypeTV,
+		SeasonNumber: r.SeasonNumber,
+		Cached:       r.Cached,
+		Edition:      r.Edition,
 	}
 	if r.MediaType == MediaTypeTV {
-		metadata["show_title"] = r.IdentifiedTitle
-	}
-	if r.Edition != "" {
-		metadata["edition"] = r.Edition
+		metadata.ShowTitle = r.IdentifiedTitle
 	}
 
 	// Build filename.
@@ -128,7 +124,7 @@ func (i *Identifier) finalizeIdentifiedItem(
 			metaRecord.Edition = r.Edition
 		}
 	}
-	metadata["filename"] = metaRecord.GetFilename()
+	metadata.Filename = metaRecord.GetFilename()
 
 	// Validate metadata.
 	if err := validateMetadataForPersist(r.IdentifiedTitle, r.MediaType, r.TMDBID); err != nil {

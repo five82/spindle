@@ -12,6 +12,7 @@ import (
 	"spindle/internal/identification/tmdb"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
+	"spindle/internal/ripspec"
 	"spindle/internal/services"
 )
 
@@ -39,20 +40,20 @@ type identifyOutcome struct {
 	VoteCount       int64
 	Edition         string
 	EpisodeMatches  map[int]episodeAnnotation
-	Metadata        map[string]any // only populated for unidentified fallback
+	Metadata        ripspec.EnvelopeMetadata // only populated for unidentified fallback
 }
 
 func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, item *queue.Item, input identifyContext) (identifyOutcome, error) {
 	// Default metadata assumes unidentified content until TMDB lookup succeeds.
-	metadata := map[string]any{
-		"title": strings.TrimSpace(input.Title),
+	metadata := ripspec.EnvelopeMetadata{
+		Title: strings.TrimSpace(input.Title),
 	}
 	if input.DiscNumber > 0 {
-		metadata["disc_number"] = input.DiscNumber
+		metadata.DiscNumber = input.DiscNumber
 	}
 	mediaType := input.MediaHint.String()
 	if mediaType != MediaTypeUnknown {
-		metadata["media_type"] = mediaType
+		metadata.MediaType = mediaType
 	}
 	contentKey := unknownContentKey(item.DiscFingerprint)
 	var (
