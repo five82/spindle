@@ -1,21 +1,15 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"spindle/internal/disc"
-	"spindle/internal/disc/fingerprint"
-	"spindle/internal/identification"
-	"spindle/internal/identification/tmdb"
+	"spindle/internal/api"
 	"spindle/internal/logging"
-	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 )
 
@@ -36,25 +30,14 @@ Examples:
   spindle identify --verbose          # Show detailed debugging output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Load configuration
 			cfg, err := ctx.ensureConfig()
 			if err != nil {
 				return fmt.Errorf("load configuration: %w", err)
 			}
 
-			// Override device if provided
 			if len(args) > 0 {
 				device = strings.TrimSpace(args[0])
 			}
-			if device == "" {
-				device = cfg.MakeMKV.OpticalDrive
-			}
-			if device == "" {
-				return fmt.Errorf("no device specified and no optical_drive configured")
-			}
-			cfg.MakeMKV.OpticalDrive = device
-
-			// Setup logging
 			logLevel := ctx.resolvedLogLevel(cfg)
 			logger, err := logging.New(logging.Options{
 				Level:       logLevel,
@@ -66,103 +49,41 @@ Examples:
 				return fmt.Errorf("setup logging: %w", err)
 			}
 
-			// Create components for identification
-			tmdbClient, err := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
+			result, err := api.IdentifyDisc(cmd.Context(), api.IdentifyDiscRequest{
+				Config: cfg,
+				Device: device,
+				Logger: logger,
+			})
 			if err != nil {
-				logger.Warn("tmdb client initialization failed",
-					logging.Error(err),
-					logging.String(logging.FieldEventType, "tmdb_client_init_failed"),
-					logging.String(logging.FieldErrorHint, "verify tmdb_api_key in config"),
-					logging.String(logging.FieldImpact, "identification cannot proceed"),
-				)
-				return fmt.Errorf("create TMDB client: %w", err)
+				return err
+			}
+			if result.Item == nil {
+				return fmt.Errorf("identification returned no result item")
 			}
 
-			// Create a scanner
-			scanner := disc.NewScanner(cfg.MakemkvBinary())
-
-			// Create identifier with our components
-			identifier := identification.NewIdentifierWithDependencies(
-				cfg, nil, logger, tmdbClient, scanner, nil,
-			)
-
-			// Get disc label like the daemon does
-			logger.Debug("getting disc label", logging.String("device", device))
-			discLabel, err := disc.ReadLabel(cmd.Context(), device, 10*time.Second)
-			if err != nil {
-				logger.Warn("failed to get disc label",
-					logging.Error(err),
-					logging.String(logging.FieldEventType, "disc_label_read_failed"),
-					logging.String(logging.FieldErrorHint, "verify disc is inserted and readable"),
-					logging.String(logging.FieldImpact, "identification may use fallback title"),
-				)
-				discLabel = ""
-			} else {
-				logger.Debug("disc label retrieved", logging.String("device", device), logging.String("label", discLabel))
-			}
-			logger.Info("detected disc label", logging.String("label", discLabel))
-
-			// Create a mock queue item for identification with the same disc label as daemon
-			item := &queue.Item{
-				DiscTitle:  discLabel,
-				SourcePath: "",
-				Status:     queue.StatusPending,
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "🔍 Identifying disc on device: %s\n", device)
-			if discLabel != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "📀 Disc Label: %s\n\n", discLabel)
+			fmt.Fprintf(cmd.OutOrStdout(), "🔍 Identifying disc on device: %s\n", result.Device)
+			if result.DiscLabel != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "📀 Disc Label: %s\n\n", result.DiscLabel)
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n")
 			}
 
-			// Set up context with timeout: info scan + overhead for fingerprint/TMDB
-			overallTimeout := time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second + 5*time.Minute
-			identifyCtx, cancel := context.WithTimeout(context.Background(), overallTimeout)
-			defer cancel()
-
-			// Pre-compute fingerprint so validation can pass even if MakeMKV omits it
-			fingerprintTimeout := 2 * time.Minute
-			computedFingerprint, fpErr := fingerprint.ComputeTimeout(identifyCtx, device, "", fingerprintTimeout)
-			if fpErr != nil {
-				logger.Warn("fingerprint computation failed",
-					logging.Error(fpErr),
-					logging.String(logging.FieldEventType, "fingerprint_compute_failed"),
-					logging.String(logging.FieldErrorHint, "verify disc is readable and not copy-protected"),
-					logging.String(logging.FieldImpact, "rip cache lookup will not work"),
-				)
-			} else if strings.TrimSpace(computedFingerprint) != "" {
-				item.DiscFingerprint = strings.TrimSpace(computedFingerprint)
-				logger.Info("fingerprint computed", logging.String("fingerprint", item.DiscFingerprint))
-			}
-
-			// Run preparation
-			if err := identifier.Prepare(identifyCtx, item); err != nil {
-				return fmt.Errorf("prepare identification: %w", err)
-			}
-
-			// Run identification
-			if err := identifier.Execute(identifyCtx, item); err != nil {
-				return fmt.Errorf("execute identification: %w", err)
-			}
-
-			// Display results
-			year := extractYearFromMetadata(item.MetadataJSON)
-			tmdbTitle := extractTitleFromMetadata(item.MetadataJSON)
-			edition := extractEditionFromMetadata(item.MetadataJSON)
+			year := extractYearFromMetadata(result.Item.MetadataJSON)
+			tmdbTitle := extractTitleFromMetadata(result.Item.MetadataJSON)
+			edition := extractEditionFromMetadata(result.Item.MetadataJSON)
 			fmt.Fprintf(cmd.OutOrStdout(), "\n📊 Identification Results:\n")
-			fmt.Fprintf(cmd.OutOrStdout(), "  Disc Title: %s\n", item.DiscTitle)
+			fmt.Fprintf(cmd.OutOrStdout(), "  Disc Title: %s\n", result.Item.DiscTitle)
 			fmt.Fprintf(cmd.OutOrStdout(), "  TMDB Title: %s\n", tmdbTitle)
 			fmt.Fprintf(cmd.OutOrStdout(), "  Year: %s\n", year)
 			if edition != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Edition: %s\n", edition)
 			}
-			if item.ProgressMessage != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Message: %s\n", item.ProgressMessage)
+			if result.Item.ProgressMessage != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Message: %s\n", result.Item.ProgressMessage)
 			}
-			if item.MetadataJSON != "" {
+			if result.Item.MetadataJSON != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ✅ Available\n")
-				if filename := extractFilenameFromMetadata(item.MetadataJSON); filename != "" {
+				if filename := extractFilenameFromMetadata(result.Item.MetadataJSON); filename != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s.mkv\n", filename)
 				} else if year != "Unknown" && tmdbTitle != "Unknown" {
 					fmt.Fprintf(cmd.OutOrStdout(), "  Library Filename: %s (%s).mkv\n", tmdbTitle, year)
@@ -170,21 +91,21 @@ Examples:
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Metadata: ❌ None found\n")
 			}
-			if item.NeedsReview {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Review Required: ⚠️  Yes - %s\n", item.ReviewReason)
+			if result.Item.NeedsReview {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Review Required: ⚠️  Yes - %s\n", result.Item.ReviewReason)
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "  Review Required: ✅ No\n")
 			}
 
-			if item.MetadataJSON != "" && !item.NeedsReview {
+			if result.Item.MetadataJSON != "" && !result.Item.NeedsReview {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n🎬 Identification successful! Disc would proceed to ripping stage.\n")
-			} else if item.NeedsReview {
+			} else if result.Item.NeedsReview {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n⚠️  Identification requires manual review. Check the logs above for details.\n")
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n❌ Identification failed. Check the logs above for details.\n")
 			}
 
-			if summary, err := ripspec.Parse(item.RipSpecData); err != nil {
+			if summary, err := ripspec.Parse(result.Item.RipSpecData); err != nil {
 				fmt.Fprintf(cmd.OutOrStdout(), "\n⚠️  Unable to parse rip specification for title fingerprints: %v\n", err)
 			} else {
 				printRipSpecFingerprints(cmd.OutOrStdout(), summary)
