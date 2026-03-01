@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/api"
+	"spindle/internal/queueaccess"
 	"spindle/internal/ripspec"
 )
 
@@ -36,8 +37,8 @@ func newQueueStatusCommand(ctx *commandContext) *cobra.Command {
 		Use:   "status",
 		Short: "Show queue status summary",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(api queueAPI) error {
-				stats, err := api.Stats(cmd.Context())
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
+				stats, err := qa.Stats(cmd.Context())
 				if err != nil {
 					return err
 				}
@@ -70,7 +71,7 @@ func newQueueListCommand(ctx *commandContext) *cobra.Command {
 		Use:   "list",
 		Short: "List queue items",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(qa queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 				items, err := qa.List(cmd.Context(), listStatuses)
 				if err != nil {
 					return err
@@ -128,7 +129,7 @@ func newQueueShowCommand(ctx *commandContext) *cobra.Command {
 			if err != nil || id <= 0 {
 				return fmt.Errorf("invalid item id %q", args[0])
 			}
-			return ctx.withQueueAPI(func(qa queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 				item, err := qa.Describe(cmd.Context(), id)
 				if err != nil {
 					return err
@@ -199,7 +200,7 @@ Examples:
 				return errors.New("specify item IDs or use --all, --completed, or --failed")
 			}
 
-			return ctx.withQueueAPI(func(qa queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 				out := cmd.OutOrStdout()
 
 				// Handle specific IDs
@@ -253,7 +254,7 @@ func newQueueResetCommand(ctx *commandContext) *cobra.Command {
 		Use:   "reset-stuck",
 		Short: "Return in-flight items to pending",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(qa queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 				updated, err := qa.ResetStuck(cmd.Context())
 				if err != nil {
 					return err
@@ -294,7 +295,7 @@ Examples:
 				if len(ids) != 1 {
 					return errors.New("--episode requires exactly one item ID")
 				}
-				return ctx.withQueueAPI(func(qa queueAPI) error {
+				return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 					out := cmd.OutOrStdout()
 					result, err := qa.RetryEpisode(cmd.Context(), ids[0], episodeKey)
 					if err != nil {
@@ -308,7 +309,7 @@ Examples:
 				})
 			}
 
-			return ctx.withQueueAPI(func(qa queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 				out := cmd.OutOrStdout()
 				if len(ids) == 0 {
 					updated, err := qa.RetryAll(cmd.Context())
@@ -352,7 +353,7 @@ func newQueueStopCommand(ctx *commandContext) *cobra.Command {
 				return err
 			}
 
-			return ctx.withQueueAPI(func(qa queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 				out := cmd.OutOrStdout()
 				result, err := api.StopItemsByID(cmd.Context(), qa, ids)
 				if err != nil {
@@ -533,7 +534,7 @@ func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {
 		Use:   "health",
 		Short: "Show queue health summary",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ctx.withQueueAPI(func(qa queueAPI) error {
+			return ctx.withQueueAPI(func(qa queueaccess.Access) error {
 				health, err := qa.Health(cmd.Context())
 				if err != nil {
 					return err

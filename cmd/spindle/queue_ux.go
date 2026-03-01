@@ -2,17 +2,19 @@ package main
 
 import (
 	"context"
+
+	"spindle/internal/queueaccess"
 )
 
 // removeIDs removes items by ID, using Remove's return value to distinguish
 // found vs not-found (no pre-check needed).
-func removeIDs(ctx context.Context, api queueAPI, ids []int64) (queueRemoveResult, error) {
+func removeIDs(ctx context.Context, qa queueaccess.Access, ids []int64) (queueRemoveResult, error) {
 	result := queueRemoveResult{
 		Items: make([]queueRemoveItemResult, 0, len(ids)),
 	}
 
 	for _, id := range ids {
-		removed, err := api.Remove(ctx, []int64{id})
+		removed, err := qa.Remove(ctx, []int64{id})
 		if err != nil {
 			return queueRemoveResult{}, err
 		}

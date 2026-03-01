@@ -11,10 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"spindle/internal/api"
 	"spindle/internal/config"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
+	"spindle/internal/queueaccess"
 )
 
 type commandContext struct {
@@ -140,13 +140,13 @@ func (c *commandContext) withStore(fn func(*ipc.Client, *queue.Store) error) err
 	return fn(nil, store)
 }
 
-func (c *commandContext) withQueueAPI(fn func(queueAPI) error) error {
+func (c *commandContext) withQueueAPI(fn func(queueaccess.Access) error) error {
 	return c.withStore(func(client *ipc.Client, store *queue.Store) error {
-		var qa queueAPI
+		var qa queueaccess.Access
 		if client != nil {
-			qa = &queueIPCAdapter{client: client}
+			qa = queueaccess.NewIPCAccess(client)
 		} else {
-			qa = &queueStoreAdapter{store: store, service: api.NewQueueService(store)}
+			qa = queueaccess.NewStoreAccess(store)
 		}
 		return fn(qa)
 	})
@@ -154,7 +154,7 @@ func (c *commandContext) withQueueAPI(fn func(queueAPI) error) error {
 
 // withQueueStore provides direct store access (bypassing IPC).
 // Use this for operations that require direct database manipulation.
-func (c *commandContext) withQueueStore(fn func(queueStoreAPI) error) error {
+func (c *commandContext) withQueueStore(fn func(queueaccess.StoreAccess) error) error {
 	cfg, err := c.ensureConfig()
 	if err != nil {
 		return fmt.Errorf("load config for direct store access: %w", err)
@@ -166,7 +166,7 @@ func (c *commandContext) withQueueStore(fn func(queueStoreAPI) error) error {
 	}
 	defer store.Close()
 
-	return fn(&queueStoreAdapter{store: store, service: api.NewQueueService(store)})
+	return fn(queueaccess.NewStoreAccess(store))
 }
 
 func (c *commandContext) dialClient() (*ipc.Client, error) {

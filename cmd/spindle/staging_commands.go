@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/logging"
+	"spindle/internal/queueaccess"
 	"spindle/internal/staging"
 )
 
@@ -131,8 +132,8 @@ Use --all to remove all staging directories regardless of queue status.`,
 				return printStagingCleanResult(cmd, result, "staging")
 			}
 
-			return ctx.withQueueStore(func(api queueStoreAPI) error {
-				fingerprints, err := api.ActiveFingerprints(cmd.Context())
+			return ctx.withQueueStore(func(qa queueaccess.StoreAccess) error {
+				fingerprints, err := qa.ActiveFingerprints(cmd.Context())
 				if err != nil {
 					return err
 				}
