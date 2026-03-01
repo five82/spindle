@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ import (
 	"spindle/internal/api"
 	"spindle/internal/config"
 	"spindle/internal/ipc"
+	"spindle/internal/logging"
 	"spindle/internal/logs"
 )
 
@@ -210,7 +212,11 @@ func formatAPILogEvent(evt api.LogEvent) string {
 	if component := strings.TrimSpace(evt.Component); component != "" {
 		parts = append(parts, fmt.Sprintf("[%s]", component))
 	}
-	subject := composeSubject(evt.Lane, evt.ItemID, evt.Stage)
+	itemID := ""
+	if evt.ItemID > 0 {
+		itemID = strconv.FormatInt(evt.ItemID, 10)
+	}
+	subject := logging.FormatSubject(evt.Lane, itemID, evt.Stage)
 	line := strings.Join(parts, " ")
 	if subject != "" {
 		line += " " + subject
@@ -237,28 +243,4 @@ func formatAPILogEvent(evt api.LogEvent) string {
 		builder.WriteString(detail.Value)
 	}
 	return builder.String()
-}
-
-func composeSubject(lane string, itemID int64, stage string) string {
-	lane = strings.TrimSpace(lane)
-	stage = strings.TrimSpace(stage)
-	parts := make([]string, 0, 3)
-	if lane != "" {
-		var formatted string
-		if len(lane) > 1 {
-			formatted = strings.ToUpper(lane[:1]) + strings.ToLower(lane[1:])
-		} else {
-			formatted = strings.ToUpper(lane)
-		}
-		parts = append(parts, formatted)
-	}
-	switch {
-	case itemID > 0 && stage != "":
-		parts = append(parts, fmt.Sprintf("Item #%d (%s)", itemID, stage))
-	case itemID > 0:
-		parts = append(parts, fmt.Sprintf("Item #%d", itemID))
-	case stage != "":
-		parts = append(parts, stage)
-	}
-	return strings.Join(parts, " · ")
 }

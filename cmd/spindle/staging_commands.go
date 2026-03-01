@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/api"
 	"spindle/internal/logging"
 	"spindle/internal/queueaccess"
 	"spindle/internal/staging"
@@ -114,34 +115,30 @@ Use --all to remove all staging directories regardless of queue status.`,
 			if err != nil {
 				return err
 			}
-
-			stagingDir := strings.TrimSpace(cfg.Paths.StagingDir)
-			if stagingDir == "" {
-				if ctx.JSONMode() {
-					return writeJSON(cmd, map[string]any{"removed": 0, "errors": []any{}})
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), "Staging directory not configured")
-				return nil
-			}
-
-			if cleanAll {
-				result := staging.CleanStale(cmd.Context(), stagingDir, 0, nil)
-				if ctx.JSONMode() {
-					return writeStagingCleanJSON(cmd, result)
-				}
-				return printStagingCleanResult(cmd, result, "staging")
-			}
-
 			return ctx.withQueueStore(func(qa queueaccess.StoreAccess) error {
-				fingerprints, err := qa.ActiveFingerprints(cmd.Context())
+				req := api.CleanStagingRequest{
+					StagingDir: cfg.Paths.StagingDir,
+					CleanAll:   cleanAll,
+				}
+				if !cleanAll {
+					req.Fingerprints = qa
+				}
+
+				result, err := api.CleanStagingDirectories(cmd.Context(), req)
 				if err != nil {
 					return err
 				}
-				result := staging.CleanOrphaned(cmd.Context(), stagingDir, fingerprints, nil)
-				if ctx.JSONMode() {
-					return writeStagingCleanJSON(cmd, result)
+				if !result.Configured {
+					if ctx.JSONMode() {
+						return writeJSON(cmd, map[string]any{"removed": 0, "errors": []any{}})
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), "Staging directory not configured")
+					return nil
 				}
-				return printStagingCleanResult(cmd, result, "orphaned staging")
+				if ctx.JSONMode() {
+					return writeStagingCleanJSON(cmd, result.Cleanup)
+				}
+				return printStagingCleanResult(cmd, result.Cleanup, result.Scope)
 			})
 		},
 	}

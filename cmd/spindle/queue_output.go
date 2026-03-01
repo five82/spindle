@@ -24,28 +24,24 @@ func parsePositiveIDs(args []string) ([]int64, error) {
 	return ids, nil
 }
 
-func writeQueueRemoveResultJSON(cmd *cobra.Command, result queueRemoveResult) error {
+func writeQueueRemoveResultJSON(cmd *cobra.Command, result api.RemoveItemsResult) error {
 	type jsonItem struct {
 		ID      int64  `json:"id"`
 		Outcome string `json:"outcome"`
 	}
 	items := make([]jsonItem, 0, len(result.Items))
 	for _, item := range result.Items {
-		outcome := "removed"
-		if item.Outcome == queueRemoveOutcomeNotFound {
-			outcome = "not_found"
-		}
-		items = append(items, jsonItem{ID: item.ID, Outcome: outcome})
+		items = append(items, jsonItem{ID: item.ID, Outcome: string(item.Outcome)})
 	}
 	return writeJSON(cmd, map[string]any{"items": items})
 }
 
-func printQueueRemoveResult(out io.Writer, result queueRemoveResult) {
+func printQueueRemoveResult(out io.Writer, result api.RemoveItemsResult) {
 	for _, item := range result.Items {
 		switch item.Outcome {
-		case queueRemoveOutcomeNotFound:
+		case api.RemoveItemNotFound:
 			fmt.Fprintf(out, "Item %d not found\n", item.ID)
-		case queueRemoveOutcomeRemoved:
+		case api.RemoveItemRemoved:
 			fmt.Fprintf(out, "Item %d removed\n", item.ID)
 		}
 	}

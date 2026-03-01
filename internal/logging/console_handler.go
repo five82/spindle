@@ -161,7 +161,7 @@ func writeLogHeader(buf *bytes.Buffer, ts time.Time, level slog.Level, component
 		buf.WriteString(component)
 		buf.WriteByte(']')
 	}
-	if subject := composeSubject(lane, itemID, stage); subject != "" {
+	if subject := FormatSubject(lane, itemID, stage); subject != "" {
 		buf.WriteByte(' ')
 		buf.WriteString(subject)
 	}
@@ -176,31 +176,6 @@ func writeLogHeader(buf *bytes.Buffer, ts time.Time, level slog.Level, component
 		buf.WriteString(strconv.Itoa(src.Line))
 		buf.WriteByte(']')
 	}
-}
-
-func composeSubject(lane, itemID, stage string) string {
-	lane = strings.TrimSpace(lane)
-	itemID = strings.TrimSpace(itemID)
-	stage = strings.TrimSpace(stage)
-	parts := make([]string, 0, 3)
-	if lane != "" {
-		var formattedLane string
-		if len(lane) > 1 {
-			formattedLane = strings.ToUpper(lane[:1]) + strings.ToLower(lane[1:])
-		} else {
-			formattedLane = strings.ToUpper(lane)
-		}
-		parts = append(parts, formattedLane)
-	}
-	switch {
-	case itemID != "" && stage != "":
-		parts = append(parts, "Item #"+itemID+" ("+stage+")")
-	case itemID != "":
-		parts = append(parts, "Item #"+itemID)
-	case stage != "":
-		parts = append(parts, stage)
-	}
-	return strings.Join(parts, " · ")
 }
 
 func (h *prettyHandler) filterRepeatedInfo(key string, fields []infoField, hidden int, level slog.Level) ([]infoField, int) {

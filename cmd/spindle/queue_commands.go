@@ -205,7 +205,7 @@ Examples:
 
 				// Handle specific IDs
 				if len(ids) > 0 {
-					result, err := removeIDs(cmd.Context(), qa, ids)
+					result, err := api.RemoveItemsByID(cmd.Context(), qa, ids)
 					if err != nil {
 						return err
 					}
