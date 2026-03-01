@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	draptolib "github.com/five82/drapto"
+
+	"spindle/internal/api"
 )
 
 func newCacheCropCommand(ctx *commandContext) *cobra.Command {
@@ -70,33 +70,26 @@ func runCropDetection(ctx context.Context, target string) (*draptolib.CropDetect
 }
 
 func printCropResults(out io.Writer, result *draptolib.CropDetectionResult) {
+	insight := api.BuildCropDetectionInsight(result)
+
 	fmt.Fprintln(out, "=== Video Properties ===")
 	fmt.Fprintf(out, "Resolution: %dx%d\n", result.VideoWidth, result.VideoHeight)
-	if result.IsHDR {
-		fmt.Fprintf(out, "Dynamic Range: HDR (threshold=100)\n")
-	} else {
-		fmt.Fprintf(out, "Dynamic Range: SDR (threshold=16)\n")
-	}
+	fmt.Fprintf(out, "Dynamic Range: %s (threshold=%d)\n", insight.DynamicRange, insight.Threshold)
 
 	fmt.Fprintln(out, "\n=== Crop Detection Result ===")
 	fmt.Fprintf(out, "Status: %s\n", result.Message)
 
 	if result.Required {
 		fmt.Fprintf(out, "Crop Filter: %s\n", result.CropFilter)
-		// Calculate cropped dimensions
-		if parts := strings.Split(strings.TrimPrefix(result.CropFilter, "crop="), ":"); len(parts) >= 2 {
-			if w, err := strconv.ParseUint(parts[0], 10, 32); err == nil {
-				if h, err := strconv.ParseUint(parts[1], 10, 32); err == nil {
-					removedHeight := uint64(result.VideoHeight) - h
-					aspectRatio := float64(w) / float64(h)
-					fmt.Fprintf(out, "Output Dimensions: %dx%d (removing %d pixels)\n", w, h, removedHeight)
-					fmt.Fprintf(out, "Aspect Ratio: %.3f:1\n", aspectRatio)
-				}
-			}
+		if insight.OutputDimensions != "" {
+			fmt.Fprintf(out, "Output Dimensions: %s\n", insight.OutputDimensions)
+		}
+		if insight.OutputAspectRatio != "" {
+			fmt.Fprintf(out, "Aspect Ratio: %s\n", insight.OutputAspectRatio)
 		}
 	} else if result.MultipleRatios {
 		fmt.Fprintln(out, "Result: No crop applied (multiple aspect ratios detected)")
-		fmt.Fprintln(out, "Note: No single crop value was found in >80% of samples")
+		fmt.Fprintf(out, "Note: No single crop value was found in >%.0f%% of samples\n", insight.MultipleRatioThreshold)
 	} else {
 		fmt.Fprintln(out, "Result: No crop needed")
 	}
@@ -107,37 +100,20 @@ func printCropResults(out io.Writer, result *draptolib.CropDetectionResult) {
 
 	if len(result.Candidates) > 0 {
 		fmt.Fprintln(out, "\nCrop Candidates (by frequency):")
-		for i, c := range result.Candidates {
-			// Parse crop dimensions for display
-			parts := strings.Split(c.Crop, ":")
-			dimStr := ""
-			if len(parts) >= 2 {
-				if w, err := strconv.ParseUint(parts[0], 10, 32); err == nil {
-					if h, err := strconv.ParseUint(parts[1], 10, 32); err == nil {
-						aspectRatio := float64(w) / float64(h)
-						dimStr = fmt.Sprintf(" -> %dx%d (%.3f:1)", w, h, aspectRatio)
-					}
-				}
-			}
-
+		for i, c := range insight.Candidates {
 			marker := "  "
-			if i == 0 && result.Required {
+			if c.IsPreferred {
 				marker = "* "
 			}
 			fmt.Fprintf(out, "%s%2d. crop=%s  count=%3d (%5.1f%%)%s\n",
-				marker, i+1, c.Crop, c.Count, c.Percent, dimStr)
+				marker, i+1, c.Crop, c.Count, c.Percent, c.Dimensions)
 		}
 
-		// If multiple ratios, show what threshold would have been needed
-		if result.MultipleRatios && len(result.Candidates) > 0 {
-			topPercent := result.Candidates[0].Percent
-			fmt.Fprintf(out, "\nDiagnosis: Top candidate has %.1f%% of samples (need >80%% for auto-crop)\n", topPercent)
-			if topPercent >= 70 {
-				fmt.Fprintln(out, "Suggestion: This is borderline - the film may have minor aspect ratio variations")
-			} else if topPercent >= 50 {
-				fmt.Fprintln(out, "Suggestion: Significant aspect ratio variation detected - may be intentional (e.g., IMAX sequences)")
-			} else {
-				fmt.Fprintln(out, "Suggestion: High variation in detected crops - check if HDR threshold is appropriate")
+		if result.MultipleRatios && len(insight.Candidates) > 0 {
+			fmt.Fprintf(out, "\nDiagnosis: Top candidate has %.1f%% of samples (need >%.0f%% for auto-crop)\n",
+				insight.TopCandidatePercent, insight.MultipleRatioThreshold)
+			if insight.VariationSuggestion != "" {
+				fmt.Fprintf(out, "Suggestion: %s\n", insight.VariationSuggestion)
 			}
 		}
 	}

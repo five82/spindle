@@ -130,14 +130,9 @@ Example:
 				return fmt.Errorf("invalid entry number: %s (must be a positive integer)", args[0])
 			}
 
-			entries := cache.List()
-			if entryNum > len(entries) {
-				return fmt.Errorf("entry number %d out of range (only %d entries exist)", entryNum, len(entries))
-			}
-
-			entry := entries[entryNum-1]
-			if err := cache.Remove(entry.DiscID); err != nil {
-				return fmt.Errorf("remove cache entry: %w", err)
+			entry, err := api.RemoveDiscIDEntryByNumber(cache, entryNum)
+			if err != nil {
+				return err
 			}
 
 			if ctx.JSONMode() {

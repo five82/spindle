@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/api"
-	"spindle/internal/queue"
 )
 
 func parsePositiveIDs(args []string) ([]int64, error) {
@@ -110,16 +109,18 @@ func printQueueEpisodeRetryResult(out io.Writer, id int64, episodeKey string, re
 
 func writeQueueStopResultJSON(cmd *cobra.Command, result api.StopItemsResult) error {
 	type jsonItem struct {
-		ID          int64  `json:"id"`
-		Outcome     string `json:"outcome"`
-		PriorStatus string `json:"prior_status,omitempty"`
+		ID            int64  `json:"id"`
+		Outcome       string `json:"outcome"`
+		PriorStatus   string `json:"prior_status,omitempty"`
+		WasProcessing bool   `json:"was_processing,omitempty"`
 	}
 	items := make([]jsonItem, 0, len(result.Items))
 	for _, item := range result.Items {
 		items = append(items, jsonItem{
-			ID:          item.ID,
-			Outcome:     string(item.Outcome),
-			PriorStatus: item.PriorStatus,
+			ID:            item.ID,
+			Outcome:       string(item.Outcome),
+			PriorStatus:   item.PriorStatus,
+			WasProcessing: item.WasProcessing,
 		})
 	}
 	return writeJSON(cmd, map[string]any{"items": items})
@@ -136,7 +137,7 @@ func printQueueStopResult(out io.Writer, result api.StopItemsResult) {
 			fmt.Fprintf(out, "Item %d is already failed\n", item.ID)
 		case api.StopItemUpdated:
 			message := fmt.Sprintf("Item %d stop requested", item.ID)
-			if parsed, ok := queue.ParseStatus(item.PriorStatus); ok && queue.IsProcessingStatus(parsed) {
+			if item.WasProcessing {
 				statusLabel := formatStatusLabel(item.PriorStatus)
 				message = fmt.Sprintf("Item %d stop requested (currently %s; will halt after current stage)", item.ID, statusLabel)
 			}

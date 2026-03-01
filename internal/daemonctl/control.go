@@ -25,6 +25,21 @@ type LaunchOptions struct {
 	Diagnostic bool
 }
 
+type StartState string
+
+const (
+	StartStateStarted        StartState = "started"
+	StartStateAlreadyRunning StartState = "already_running"
+	StartStateRequested      StartState = "start_requested"
+)
+
+// StartResult captures daemon start orchestration state.
+type StartResult struct {
+	State    StartState
+	Launched bool
+	Message  string
+}
+
 // Launch starts a detached spindle daemon process.
 func Launch(executablePath string, opts LaunchOptions) error {
 	if strings.TrimSpace(executablePath) == "" {
@@ -65,6 +80,54 @@ func WaitForClient(socketPath string, timeout time.Duration) (*ipc.Client, error
 		lastErr = fmt.Errorf("timeout waiting for daemon")
 	}
 	return nil, fmt.Errorf("daemon failed to start: %w", lastErr)
+}
+
+// EnsureStarted launches and/or starts the daemon and returns the resulting state.
+func EnsureStarted(socketPath, executablePath string, opts LaunchOptions, waitTimeout time.Duration) (StartResult, error) {
+	client, err := ipc.Dial(socketPath)
+	launched := false
+	if err != nil {
+		if launchErr := Launch(executablePath, opts); launchErr != nil {
+			return StartResult{}, launchErr
+		}
+		client, err = WaitForClient(socketPath, waitTimeout)
+		if err != nil {
+			return StartResult{}, err
+		}
+		launched = true
+	}
+	defer client.Close()
+
+	statusResp, statusErr := client.Status()
+	if statusErr == nil && statusResp != nil && statusResp.Running {
+		if launched {
+			return StartResult{State: StartStateStarted, Launched: true}, nil
+		}
+		return StartResult{State: StartStateAlreadyRunning}, nil
+	}
+
+	resp, err := client.Start()
+	if err != nil {
+		return StartResult{}, err
+	}
+
+	if resp != nil {
+		message := strings.TrimSpace(resp.Message)
+		if resp.Started {
+			return StartResult{State: StartStateStarted, Launched: launched, Message: message}, nil
+		}
+		if strings.EqualFold(message, "daemon already running") {
+			if launched {
+				return StartResult{State: StartStateStarted, Launched: true, Message: message}, nil
+			}
+			return StartResult{State: StartStateAlreadyRunning, Message: message}, nil
+		}
+		if message != "" {
+			return StartResult{State: StartStateRequested, Launched: launched, Message: message}, nil
+		}
+	}
+
+	return StartResult{State: StartStateRequested, Launched: launched, Message: "Start request sent"}, nil
 }
 
 // WaitForShutdown waits for daemon IPC to disappear or report not-running.
@@ -180,6 +243,13 @@ type StopResult struct {
 	PID              int
 }
 
+// RestartResult captures stop/start outcomes for daemon restart.
+type RestartResult struct {
+	WasRunning bool
+	Stop       StopResult
+	Start      StartResult
+}
+
 // StopAndTerminate requests daemon stop and force-kills the process if still alive after gracePeriod.
 func StopAndTerminate(socketPath string, cfg *config.Config, gracePeriod time.Duration) (StopResult, error) {
 	client, err := ipc.Dial(socketPath)
@@ -234,6 +304,25 @@ func StopAndTerminate(socketPath string, cfg *config.Config, gracePeriod time.Du
 	result.ForcedKill = true
 	result.PID = killedPID
 	return result, nil
+}
+
+// Restart stops the daemon if running, then ensures it is started.
+func Restart(socketPath string, cfg *config.Config, executablePath string, opts LaunchOptions, stopGracePeriod, startWaitTimeout time.Duration) (RestartResult, error) {
+	stopResult, stopErr := StopAndTerminate(socketPath, cfg, stopGracePeriod)
+	if stopErr != nil && !errors.Is(stopErr, ErrDaemonNotRunning) {
+		return RestartResult{}, stopErr
+	}
+
+	startResult, err := EnsureStarted(socketPath, executablePath, opts, startWaitTimeout)
+	if err != nil {
+		return RestartResult{}, err
+	}
+
+	return RestartResult{
+		WasRunning: stopErr == nil,
+		Stop:       stopResult,
+		Start:      startResult,
+	}, nil
 }
 
 // BuildStatusSnapshot collects daemon status and applies offline fallbacks for queue stats and dependencies.

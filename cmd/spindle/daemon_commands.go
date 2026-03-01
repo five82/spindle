@@ -20,44 +20,35 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		Short: "Start the spindle daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stdout := cmd.OutOrStdout()
-			client, err := ctx.dialClient()
-			launched := false
-			if err != nil {
-				fmt.Fprintln(stdout, "Daemon not running, launching...")
-				if launchErr := launchDaemonProcess(cmd, ctx, startDiagnostic); launchErr != nil {
-					return launchErr
-				}
-				client, err = daemonctl.WaitForClient(ctx.socketPath(), 10*time.Second)
-				if err != nil {
-					return err
-				}
-				launched = true
-			}
-			defer client.Close()
-
-			statusResp, statusErr := client.Status()
-			if statusErr == nil && statusResp != nil && statusResp.Running {
-				if launched {
-					fmt.Fprintln(stdout, "Daemon started")
-				} else {
-					fmt.Fprintln(stdout, "Daemon already running")
-				}
-				return nil
-			}
-
-			fmt.Fprintln(stdout, "Starting daemon...")
-			resp, err := client.Start()
+			exe, err := daemonExecutable()
 			if err != nil {
 				return err
 			}
-			switch {
-			case resp.Started:
+
+			result, err := daemonctl.EnsureStarted(
+				ctx.socketPath(),
+				exe,
+				daemonLaunchOptions(ctx, startDiagnostic),
+				10*time.Second,
+			)
+			if err != nil {
+				return err
+			}
+
+			if result.Launched {
+				fmt.Fprintln(stdout, "Daemon not running, launching...")
+			}
+
+			switch result.State {
+			case daemonctl.StartStateStarted:
 				fmt.Fprintln(stdout, "Daemon started")
-			case launched && strings.EqualFold(strings.TrimSpace(resp.Message), "daemon already running"):
-				fmt.Fprintln(stdout, "Daemon started")
-			case strings.TrimSpace(resp.Message) != "":
-				fmt.Fprintln(stdout, resp.Message)
-			default:
+			case daemonctl.StartStateAlreadyRunning:
+				fmt.Fprintln(stdout, "Daemon already running")
+			case daemonctl.StartStateRequested:
+				if strings.TrimSpace(result.Message) != "" {
+					fmt.Fprintln(stdout, result.Message)
+					return nil
+				}
 				fmt.Fprintln(stdout, "Start request sent")
 			}
 			return nil
@@ -174,44 +165,38 @@ func newDaemonCommands(ctx *commandContext) []*cobra.Command {
 		Short: "Restart the spindle daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			stdout := cmd.OutOrStdout()
-
-			stopResult, err := daemonctl.StopAndTerminate(ctx.socketPath(), ctx.configValue(), 5*time.Second)
-			if err != nil && !errors.Is(err, daemonctl.ErrDaemonNotRunning) {
+			exe, err := daemonExecutable()
+			if err != nil {
 				return err
 			}
-			if err == nil {
-				if stopResult.ForcedKill && stopResult.PID > 0 {
-					fmt.Fprintf(stdout, "Stopping daemon process (pid %d)...\n", stopResult.PID)
+
+			result, err := daemonctl.Restart(
+				ctx.socketPath(),
+				ctx.configValue(),
+				exe,
+				daemonLaunchOptions(ctx, restartDiagnostic),
+				5*time.Second,
+				10*time.Second,
+			)
+			if err != nil {
+				return err
+			}
+
+			if result.WasRunning {
+				if result.Stop.ForcedKill && result.Stop.PID > 0 {
+					fmt.Fprintf(stdout, "Stopping daemon process (pid %d)...\n", result.Stop.PID)
 				}
 				fmt.Fprintln(stdout, "Daemon stopped")
 			}
 
-			// Start the daemon
-			fmt.Fprintln(stdout, "Starting daemon...")
-			if launchErr := launchDaemonProcess(cmd, ctx, restartDiagnostic); launchErr != nil {
-				return launchErr
-			}
-			client, err := daemonctl.WaitForClient(ctx.socketPath(), 10*time.Second)
-			if err != nil {
-				return err
-			}
-			defer client.Close()
-
-			statusResp, statusErr := client.Status()
-			if statusErr == nil && statusResp != nil && statusResp.Running {
+			switch result.Start.State {
+			case daemonctl.StartStateStarted, daemonctl.StartStateAlreadyRunning:
 				fmt.Fprintln(stdout, "Daemon restarted")
-				return nil
-			}
-
-			resp, err := client.Start()
-			if err != nil {
-				return err
-			}
-			if resp.Started || strings.EqualFold(strings.TrimSpace(resp.Message), "daemon already running") {
-				fmt.Fprintln(stdout, "Daemon restarted")
-			} else if strings.TrimSpace(resp.Message) != "" {
-				fmt.Fprintln(stdout, resp.Message)
-			} else {
+			case daemonctl.StartStateRequested:
+				if strings.TrimSpace(result.Start.Message) != "" {
+					fmt.Fprintln(stdout, result.Start.Message)
+					return nil
+				}
 				fmt.Fprintln(stdout, "Start request sent")
 			}
 			return nil
@@ -286,11 +271,15 @@ func dependencySummaryLine(total, missingRequired, missingOptional int, colorize
 	return renderStatusLine("Summary", kind, detail, colorize)
 }
 
-func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext, diagnostic bool) error {
+func daemonExecutable() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve executable: %w", err)
+		return "", fmt.Errorf("resolve executable: %w", err)
 	}
+	return exe, nil
+}
+
+func daemonLaunchOptions(ctx *commandContext, diagnostic bool) daemonctl.LaunchOptions {
 	opts := daemonctl.LaunchOptions{Diagnostic: diagnostic}
 	if ctx.socketFlag != nil {
 		if socket := strings.TrimSpace(*ctx.socketFlag); socket != "" {
@@ -302,5 +291,5 @@ func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext, diagnostic boo
 			opts.ConfigPath = config
 		}
 	}
-	return daemonctl.Launch(exe, opts)
+	return opts
 }

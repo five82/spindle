@@ -43,9 +43,10 @@ const (
 )
 
 type StopItemResult struct {
-	ID          int64           `json:"id"`
-	Outcome     StopItemOutcome `json:"outcome"`
-	PriorStatus string          `json:"prior_status,omitempty"`
+	ID            int64           `json:"id"`
+	Outcome       StopItemOutcome `json:"outcome"`
+	PriorStatus   string          `json:"prior_status,omitempty"`
+	WasProcessing bool            `json:"was_processing,omitempty"`
 }
 
 type StopItemsResult struct {
@@ -98,6 +99,7 @@ func StopItemsByID(ctx context.Context, service QueueActionService, ids []int64)
 		}
 		status := item.Status
 		parsed, ok := queue.ParseStatus(status)
+		wasProcessing := ok && queue.IsProcessingStatus(parsed)
 		if ok {
 			switch parsed {
 			case queue.StatusCompleted:
@@ -115,7 +117,12 @@ func StopItemsByID(ctx context.Context, service QueueActionService, ids []int64)
 		}
 		if updated > 0 {
 			result.UpdatedCount += updated
-			result.Items = append(result.Items, StopItemResult{ID: id, Outcome: StopItemUpdated, PriorStatus: status})
+			result.Items = append(result.Items, StopItemResult{
+				ID:            id,
+				Outcome:       StopItemUpdated,
+				PriorStatus:   status,
+				WasProcessing: wasProcessing,
+			})
 			continue
 		}
 		result.Items = append(result.Items, StopItemResult{ID: id, Outcome: StopItemAlreadyFailed, PriorStatus: status})
