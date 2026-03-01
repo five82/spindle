@@ -54,7 +54,7 @@ func (i *Identifier) completeIdentificationFromCache(
 		identifiedTitle = pickTitle(*tmdbResult)
 		releaseDate = tmdbResult.ReleaseDate
 		firstAirDate = tmdbResult.FirstAirDate
-		if mediaType == "tv" && firstAirDate != "" {
+		if mediaType == MediaTypeTV && firstAirDate != "" {
 			releaseDate = firstAirDate
 		}
 		overview = tmdbResult.Overview
@@ -64,16 +64,14 @@ func (i *Identifier) completeIdentificationFromCache(
 		identifiedTitle = cacheEntry.Title
 	}
 
-	year := ""
-	if releaseDate != "" && len(releaseDate) >= 4 {
-		year = releaseDate[:4]
-	} else if cacheEntry.Year != "" {
+	year := yearFromDate(releaseDate)
+	if year == "" && cacheEntry.Year != "" {
 		year = cacheEntry.Year
 	}
 
 	seasonNumber := cacheEntry.SeasonNumber
 	var episodeMatches map[int]episodeAnnotation
-	if mediaType == "tv" {
+	if mediaType == MediaTypeTV {
 		if seasonNumber == 0 {
 			seasonNumber = 1
 		}
@@ -91,15 +89,7 @@ func (i *Identifier) completeIdentificationFromCache(
 	}
 
 	// Build disc sources for disc number extraction.
-	discSources := []string{strings.TrimSpace(item.DiscTitle)}
-	if scanResult != nil && scanResult.BDInfo != nil {
-		if scanResult.BDInfo.VolumeIdentifier != "" {
-			discSources = append(discSources, scanResult.BDInfo.VolumeIdentifier)
-		}
-		if scanResult.BDInfo.DiscName != "" {
-			discSources = append(discSources, scanResult.BDInfo.DiscName)
-		}
-	}
+	discSources := collectDiscSources(scanResult, strings.TrimSpace(item.DiscTitle))
 
 	// Finalize through shared path.
 	r := identificationResult{
@@ -163,7 +153,7 @@ func (i *Identifier) populateDiscIDCache(logger *slog.Logger, entry discidcache.
 
 // fetchTMDBDetails retrieves movie or TV details from TMDB by ID.
 func (i *Identifier) fetchTMDBDetails(ctx context.Context, mediaType string, tmdbID int64) (*tmdb.Result, error) {
-	if mediaType == "tv" {
+	if mediaType == MediaTypeTV {
 		return i.tmdbInfo.GetTVDetails(ctx, tmdbID)
 	}
 	return i.tmdbInfo.GetMovieDetails(ctx, tmdbID)

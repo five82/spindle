@@ -38,7 +38,47 @@ type identificationResult struct {
 	// Context for rip spec and attribute building.
 	ScanResult    *disc.ScanResult
 	DiscSources   []string // candidates for extractDiscNumber
+	DiscNumber    int      // pre-computed disc number (0 = not detected)
 	FallbackTitle string   // fallback show label for rip spec
+}
+
+// buildAttributes constructs the rip spec attributes map from scan results.
+// Returns the attributes and the detected disc number.
+func buildAttributes(logger *slog.Logger, scanResult *disc.ScanResult, discSources []string, discNumber int) map[string]any {
+	attributes := make(map[string]any)
+	if discNumber == 0 {
+		if n, ok := extractDiscNumber(discSources...); ok {
+			discNumber = n
+		}
+	}
+	if discNumber > 0 {
+		attributes["disc_number"] = discNumber
+	}
+	hasForcedTrack := false
+	if scanResult != nil {
+		hasForcedTrack = scanResult.HasForcedEnglishSubtitles()
+	}
+	if hasForcedTrack {
+		attributes["has_forced_subtitle_track"] = true
+	}
+	logger.Info("forced subtitle detection",
+		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
+		logging.String("decision_result", textutil.Ternary(hasForcedTrack, "detected", "none")),
+		logging.String("decision_reason", textutil.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
+		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
+	return attributes
+}
+
+// storeAndValidateEnvelope encodes a rip spec envelope, stores it on the item,
+// and runs post-identification validation.
+func (i *Identifier) storeAndValidateEnvelope(ctx context.Context, item *queue.Item, spec ripspec.Envelope) error {
+	encodedSpec, err := spec.Encode()
+	if err != nil {
+		return services.Wrap(services.ErrTransient, "identification", "encode rip spec",
+			"Failed to serialize rip specification", err)
+	}
+	item.RipSpecData = encodedSpec
+	return i.validateIdentification(ctx, item)
 }
 
 // finalizeIdentifiedItem builds metadata, rip specs, and envelope from resolved
@@ -65,13 +105,13 @@ func (i *Identifier) finalizeIdentifiedItem(
 		"first_air_date": r.FirstAirDate,
 		"vote_average":   r.VoteAverage,
 		"vote_count":     r.VoteCount,
-		"movie":          r.MediaType != "tv",
+		"movie":          r.MediaType != MediaTypeTV,
 		"season_number":  r.SeasonNumber,
 	}
 	if r.Cached {
 		metadata["cached"] = true
 	}
-	if r.MediaType == "tv" {
+	if r.MediaType == MediaTypeTV {
 		metadata["show_title"] = r.IdentifiedTitle
 	}
 	if r.Edition != "" {
@@ -80,7 +120,7 @@ func (i *Identifier) finalizeIdentifiedItem(
 
 	// Build filename.
 	var metaRecord queue.Metadata
-	if r.MediaType == "tv" {
+	if r.MediaType == MediaTypeTV {
 		metaRecord = queue.NewTVMetadata(r.IdentifiedTitle, r.SeasonNumber, nil,
 			fmt.Sprintf("%s Season %02d", r.IdentifiedTitle, r.SeasonNumber))
 	} else {
@@ -112,7 +152,7 @@ func (i *Identifier) finalizeIdentifiedItem(
 
 	// Format display title.
 	displayTitle := titleWithYear
-	if r.MediaType == "tv" {
+	if r.MediaType == MediaTypeTV {
 		displayTitle = fmt.Sprintf("%s Season %02d", r.IdentifiedTitle, r.SeasonNumber)
 		if r.Year != "" {
 			displayTitle = fmt.Sprintf("%s Season %02d (%s)", r.IdentifiedTitle, r.SeasonNumber, r.Year)
@@ -129,46 +169,28 @@ func (i *Identifier) finalizeIdentifiedItem(
 
 	contentKey := fmt.Sprintf("tmdb:%s:%d", r.MediaType, r.TMDBID)
 
-	// Build attributes from scan result.
-	attributes := make(map[string]any)
-	discNumber := 0
-	if n, ok := extractDiscNumber(r.DiscSources...); ok {
-		discNumber = n
-		attributes["disc_number"] = discNumber
+	// Build attributes and rip specs.
+	attributes := buildAttributes(logger, r.ScanResult, r.DiscSources, r.DiscNumber)
+	discNumber := r.DiscNumber
+	if discNumber == 0 {
+		if n, ok := extractDiscNumber(r.DiscSources...); ok {
+			discNumber = n
+		}
 	}
-	hasForcedTrack := false
-	if r.ScanResult != nil {
-		hasForcedTrack = r.ScanResult.HasForcedEnglishSubtitles()
-	}
-	if hasForcedTrack {
-		attributes["has_forced_subtitle_track"] = true
-	}
-	logger.Info("forced subtitle detection",
-		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
-		logging.String("decision_result", textutil.Ternary(hasForcedTrack, "detected", "none")),
-		logging.String("decision_reason", textutil.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
-		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
-
-	// Build rip specs.
 	titleSpecs, episodeSpecs := buildRipSpecs(logger, r.ScanResult, r.EpisodeMatches,
 		r.IdentifiedTitle, r.FallbackTitle, discNumber, metadata)
 
-	// Build and encode envelope.
-	ripFingerprint := strings.TrimSpace(item.DiscFingerprint)
-	spec := ripspec.Envelope{
-		Fingerprint: ripFingerprint,
+	// Encode envelope and validate.
+	if err := i.storeAndValidateEnvelope(ctx, item, ripspec.Envelope{
+		Fingerprint: strings.TrimSpace(item.DiscFingerprint),
 		ContentKey:  contentKey,
 		Metadata:    metadata,
 		Attributes:  attributes,
 		Titles:      titleSpecs,
 		Episodes:    episodeSpecs,
+	}); err != nil {
+		return err
 	}
-	encodedSpec, err := spec.Encode()
-	if err != nil {
-		return services.Wrap(services.ErrTransient, "identification", "encode rip spec",
-			"Failed to serialize rip specification", err)
-	}
-	item.RipSpecData = encodedSpec
 
 	// Log primary title decision.
 	if selection, ok, candidates, rejects := rippingPrimaryTitleSummary(titleSpecs); ok {
@@ -199,11 +221,6 @@ func (i *Identifier) finalizeIdentifiedItem(
 			attrs = append(attrs, logging.String(key, reject))
 		}
 		logger.Info("primary title decision", logging.Args(attrs...)...)
-	}
-
-	// Validate identification.
-	if err := i.validateIdentification(ctx, item); err != nil {
-		return err
 	}
 
 	// Send notification.

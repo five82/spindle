@@ -53,12 +53,10 @@ func LookupTMDBByTitle(ctx context.Context, client *tmdb.Client, logger *slog.Lo
 		MediaType:   strings.ToLower(strings.TrimSpace(best.MediaType)),
 		ReleaseDate: strings.TrimSpace(best.ReleaseDate),
 	}
-	if len(match.ReleaseDate) >= 4 {
-		match.Year = match.ReleaseDate[:4]
-	}
+	match.Year = yearFromDate(match.ReleaseDate)
 
 	if match.MediaType == "" {
-		match.MediaType = "movie"
+		match.MediaType = MediaTypeMovie
 	}
 
 	return match, nil

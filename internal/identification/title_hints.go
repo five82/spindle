@@ -18,6 +18,15 @@ var trailingYearPattern = regexp.MustCompile(`(?i)\s*(?:\(|\b)(\d{4})\)?\s*$`)
 
 var separatorReplacer = strings.NewReplacer("_", " ", "-", " ", "–", " ")
 
+// yearFromDate extracts a 4-character year prefix from a date string (e.g. "2024-05-12" -> "2024").
+func yearFromDate(date string) string {
+	date = strings.TrimSpace(date)
+	if len(date) >= 4 {
+		return date[:4]
+	}
+	return ""
+}
+
 func sanitizeQueryCandidate(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

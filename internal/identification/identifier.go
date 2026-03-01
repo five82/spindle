@@ -18,11 +18,9 @@ import (
 	"spindle/internal/queue"
 	"spindle/internal/ripping"
 	"spindle/internal/ripspec"
-	"spindle/internal/services"
 	"spindle/internal/services/llm"
 	"spindle/internal/stage"
 	"spindle/internal/staging"
-	"spindle/internal/textutil"
 )
 
 // Identifier performs disc identification using MakeMKV scanning and TMDB metadata.
@@ -109,7 +107,7 @@ func (i *Identifier) Prepare(ctx context.Context, item *queue.Item) error {
 	if i.notifier != nil && strings.TrimSpace(item.SourcePath) == "" {
 		title := strings.TrimSpace(item.DiscTitle)
 		if title == "" {
-			title = "Unknown Disc"
+			title = DefaultDiscTitle
 		}
 		if err := i.notifier.Publish(ctx, notifications.EventDiscDetected, notifications.Payload{
 			"discTitle": title,
@@ -254,7 +252,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	}
 
 	if title == "" {
-		title = "Unknown Disc"
+		title = DefaultDiscTitle
 		item.DiscTitle = title
 	}
 
@@ -285,16 +283,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		discLabel = scanResult.BDInfo.VolumeIdentifier
 	}
 
+	discSources := collectDiscSources(scanResult, title, discLabel)
 	discNumber := 0
-	discSources := []string{title, discLabel}
-	if scanResult != nil && scanResult.BDInfo != nil {
-		if scanResult.BDInfo.DiscName != "" {
-			discSources = append(discSources, scanResult.BDInfo.DiscName)
-		}
-		if scanResult.BDInfo.VolumeIdentifier != "" {
-			discSources = append(discSources, scanResult.BDInfo.VolumeIdentifier)
-		}
-	}
 	if n, ok := extractDiscNumber(discSources...); ok {
 		discNumber = n
 		logger.Debug("disc number detected", logging.Int("disc_number", discNumber))
@@ -340,6 +330,7 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 			EpisodeMatches:  outcome.EpisodeMatches,
 			ScanResult:      scanResult,
 			DiscSources:     discSources,
+			DiscNumber:      discNumber,
 			FallbackTitle:   title,
 		}
 		if err := i.finalizeIdentifiedItem(ctx, logger, item, r); err != nil {
@@ -369,8 +360,8 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 	if contentKey == "" {
 		contentKey = unknownContentKey(item.DiscFingerprint)
 	}
-	if mediaType == "unknown" && mediaHint == mediaKindTV {
-		mediaType = "tv"
+	if mediaType == MediaTypeUnknown && mediaHint == mediaKindTV {
+		mediaType = MediaTypeTV
 	}
 	if outcome.SeasonNumber > 0 {
 		metadata["season_number"] = outcome.SeasonNumber
@@ -389,38 +380,20 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Build attributes for unidentified path.
-	attributes := make(map[string]any)
-	if discNumber > 0 {
-		attributes["disc_number"] = discNumber
-	}
-	hasForcedTrack := scanResult.HasForcedEnglishSubtitles()
-	if hasForcedTrack {
-		attributes["has_forced_subtitle_track"] = true
-	}
-	logger.Info("forced subtitle detection",
-		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
-		logging.String("decision_result", textutil.Ternary(hasForcedTrack, "detected", "none")),
-		logging.String("decision_reason", textutil.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
-		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
-
-	ripFingerprint := strings.TrimSpace(item.DiscFingerprint)
+	// Build attributes and rip specs for unidentified path.
+	attributes := buildAttributes(logger, scanResult, discSources, discNumber)
 	titleSpecs, episodeSpecs := buildRipSpecs(logger, scanResult, outcome.EpisodeMatches, outcome.IdentifiedTitle, title, discNumber, metadata)
 
-	spec := ripspec.Envelope{
-		Fingerprint: ripFingerprint,
+	if err := i.storeAndValidateEnvelope(ctx, item, ripspec.Envelope{
+		Fingerprint: strings.TrimSpace(item.DiscFingerprint),
 		ContentKey:  contentKey,
 		Metadata:    metadata,
 		Attributes:  attributes,
 		Titles:      titleSpecs,
 		Episodes:    episodeSpecs,
+	}); err != nil {
+		return err
 	}
-
-	encodedSpec, err := spec.Encode()
-	if err != nil {
-		return services.Wrap(services.ErrTransient, "identification", "encode rip spec", "Failed to serialize rip specification", err)
-	}
-	item.RipSpecData = encodedSpec
 
 	logger.Info("prepared unidentified rip specification",
 		logging.String(logging.FieldDecisionType, "identification_outcome"),
@@ -428,10 +401,6 @@ func (i *Identifier) Execute(ctx context.Context, item *queue.Item) error {
 		logging.Int("title_count", len(titleSpecs)),
 		logging.String("content_key", contentKey),
 	)
-
-	if err := i.validateIdentification(ctx, item); err != nil {
-		return err
-	}
 
 	i.logStageSummary(ctx, item, stageStart, false, titleCount, 0, mediaType)
 	return nil

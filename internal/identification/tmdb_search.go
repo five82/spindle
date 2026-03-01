@@ -61,6 +61,13 @@ func (s *tmdbSearch) search(ctx context.Context, title string, opts tmdb.SearchO
 		return resp, nil
 	}
 
+	// Evict expired entries on cache miss to prevent unbounded growth.
+	for k, entry := range s.cache {
+		if now.After(entry.expires) {
+			delete(s.cache, k)
+		}
+	}
+
 	wait := s.rateLimit - now.Sub(s.lastLookup)
 	if wait > 0 {
 		s.mu.Unlock()

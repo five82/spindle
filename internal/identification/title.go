@@ -11,7 +11,7 @@ import (
 
 func deriveTitle(sourcePath string) string {
 	if sourcePath == "" {
-		return "Unknown Disc"
+		return DefaultDiscTitle
 	}
 	base := filepath.Base(sourcePath)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
@@ -31,7 +31,7 @@ func deriveTitle(sourcePath string) string {
 	}
 	title := strings.TrimSpace(cleaned.String())
 	if title == "" {
-		title = "Unknown Disc"
+		title = DefaultDiscTitle
 	}
 	return cases.Title(language.Und).String(title)
 }

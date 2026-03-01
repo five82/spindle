@@ -51,7 +51,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		metadata["disc_number"] = input.DiscNumber
 	}
 	mediaType := input.MediaHint.String()
-	if mediaType != "unknown" {
+	if mediaType != MediaTypeUnknown {
 		metadata["media_type"] = mediaType
 	}
 	contentKey := unknownContentKey(item.DiscFingerprint)
@@ -62,18 +62,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 		seasonNumber    int
 		episodeMatches  map[int]episodeAnnotation
 	)
-	showHintSources := []string{input.Title}
-	if input.DiscLabel != "" {
-		showHintSources = append(showHintSources, input.DiscLabel)
-	}
-	if input.ScanResult != nil && input.ScanResult.BDInfo != nil {
-		if input.ScanResult.BDInfo.DiscName != "" {
-			showHintSources = append(showHintSources, input.ScanResult.BDInfo.DiscName)
-		}
-		if input.ScanResult.BDInfo.VolumeIdentifier != "" {
-			showHintSources = append(showHintSources, input.ScanResult.BDInfo.VolumeIdentifier)
-		}
-	}
+	showHintSources := collectDiscSources(input.ScanResult, input.Title, input.DiscLabel)
 	showHint, hintedSeason := deriveShowHint(showHintSources...)
 	if seasonNumber == 0 && hintedSeason > 0 {
 		seasonNumber = hintedSeason
@@ -279,14 +268,12 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 	mediaType = determineMediaType(*best, modeUsed)
 	identifiedTitle = pickTitle(*best)
 	releaseDate := best.ReleaseDate
-	if mediaType == "tv" && strings.TrimSpace(best.FirstAirDate) != "" {
+	if mediaType == MediaTypeTV && strings.TrimSpace(best.FirstAirDate) != "" {
 		releaseDate = best.FirstAirDate
 	}
-	if releaseDate != "" && len(releaseDate) >= 4 {
-		year = releaseDate[:4]
-	}
+	year = yearFromDate(releaseDate)
 	tmdbID = best.ID
-	if mediaType == "tv" {
+	if mediaType == MediaTypeTV {
 		if seasonNumber == 0 {
 			seasonNumber = 1
 		}
@@ -297,7 +284,7 @@ func (i *Identifier) identifyWithTMDB(ctx context.Context, logger *slog.Logger, 
 
 	// Detect movie edition (Director's Cut, Extended, etc.)
 	var editionLabel string
-	if mediaType == "movie" {
+	if mediaType == MediaTypeMovie {
 		titleWithYear := identifiedTitle
 		if year != "" {
 			titleWithYear = fmt.Sprintf("%s (%s)", identifiedTitle, year)
@@ -346,9 +333,9 @@ func determineMediaType(result tmdb.Result, mode searchMode) string {
 	}
 	switch mode {
 	case searchModeTV:
-		return "tv"
+		return MediaTypeTV
 	default:
-		return "movie"
+		return MediaTypeMovie
 	}
 }
 
@@ -366,7 +353,7 @@ func validateMetadataForPersist(title, mediaType string, tmdbID int64) error {
 		)
 	}
 
-	if mediaType != "movie" && mediaType != "tv" {
+	if mediaType != MediaTypeMovie && mediaType != MediaTypeTV {
 		return services.Wrap(
 			services.ErrValidation,
 			"identification",

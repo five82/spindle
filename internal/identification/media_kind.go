@@ -8,6 +8,13 @@ import (
 	"spindle/internal/disc"
 )
 
+// Media type string constants used throughout identification and downstream stages.
+const (
+	MediaTypeMovie   = "movie"
+	MediaTypeTV      = "tv"
+	MediaTypeUnknown = "unknown"
+)
+
 type mediaKind int
 
 const (
@@ -19,11 +26,11 @@ const (
 func (k mediaKind) String() string {
 	switch k {
 	case mediaKindMovie:
-		return "movie"
+		return MediaTypeMovie
 	case mediaKindTV:
-		return "tv"
+		return MediaTypeTV
 	default:
-		return "unknown"
+		return MediaTypeUnknown
 	}
 }
 

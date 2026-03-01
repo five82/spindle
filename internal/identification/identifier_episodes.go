@@ -50,7 +50,7 @@ func buildPlaceholderAnnotations(titles []disc.Title, seasonNumber int) map[int]
 func PlaceholderOutputBasename(show string, season, discNumber, discIndex int) string {
 	show = strings.TrimSpace(show)
 	if show == "" {
-		show = "Manual Import"
+		show = DefaultShowLabel
 	}
 	if discNumber > 0 {
 		return fmt.Sprintf("%s - S%02d Disc %d Episode %03d", show, season, discNumber, discIndex)
@@ -62,7 +62,7 @@ func PlaceholderOutputBasename(show string, season, discNumber, discIndex int) s
 func EpisodeOutputBasename(show string, season, episode int) string {
 	show = strings.TrimSpace(show)
 	if show == "" {
-		show = "Manual Import"
+		show = DefaultShowLabel
 	}
 	display := fmt.Sprintf("%s Season %02d", show, season)
 	meta := queue.NewTVMetadata(show, season, []int{episode}, display)
