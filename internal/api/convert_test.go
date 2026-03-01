@@ -69,6 +69,9 @@ func TestFromQueueItemIncludesEpisodes(t *testing.T) {
 	if dto.EpisodeTotals.Final != 1 || dto.EpisodeTotals.Encoded != 1 || dto.EpisodeTotals.Ripped != 1 {
 		t.Fatalf("unexpected totals: %+v", dto.EpisodeTotals)
 	}
+	if dto.EpisodeIdentifiedCount != 2 {
+		t.Fatalf("expected episode identified count 2, got %d", dto.EpisodeIdentifiedCount)
+	}
 	if dto.Episodes[0].Stage != "final" {
 		t.Fatalf("expected first episode to be final, got %s", dto.Episodes[0].Stage)
 	}
@@ -169,5 +172,17 @@ func TestFromQueueItem_FillsEmptyProgressStageFromStatus(t *testing.T) {
 				t.Fatalf("expected stage %q, got %q", tt.want, dto.Progress.Stage)
 			}
 		})
+	}
+}
+
+func TestCountEpisodeIdentified(t *testing.T) {
+	episodes := []EpisodeStatus{
+		{Key: "s01_001", Season: 1, Episode: 0},
+		{Key: "s01_002", Season: 1, Episode: 2},
+		{Key: "s01_003", Season: 1, Episode: 0, MatchScore: 0.91},
+		{Key: "s01_004", Season: 1, Episode: 0, MatchedEpisode: 4},
+	}
+	if got := countEpisodeIdentified(episodes); got != 3 {
+		t.Fatalf("expected identified count 3, got %d", got)
 	}
 }

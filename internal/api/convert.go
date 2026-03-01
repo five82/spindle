@@ -87,6 +87,7 @@ func FromQueueItem(item *queue.Item) QueueItem {
 			t := totals
 			dto.EpisodeTotals = &t
 		}
+		dto.EpisodeIdentifiedCount = countEpisodeIdentified(episodes)
 		dto.EpisodesSynced = synced
 	}
 	return dto
@@ -315,6 +316,16 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 		return strings.Compare(a.Key, b.Key)
 	})
 	return statuses, totals, episodesSynced(env.Attributes, env.Episodes, item.MetadataJSON)
+}
+
+func countEpisodeIdentified(episodes []EpisodeStatus) int {
+	identified := 0
+	for _, ep := range episodes {
+		if ep.MatchedEpisode > 0 || ep.MatchScore > 0 || ep.Episode > 0 {
+			identified++
+		}
+	}
+	return identified
 }
 
 type episodeAssets struct {

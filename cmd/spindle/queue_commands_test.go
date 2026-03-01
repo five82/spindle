@@ -271,6 +271,33 @@ func TestQueueShowJSON(t *testing.T) {
 	}
 }
 
+func TestQueueShowJSONIncludesEpisodeIdentifiedCount(t *testing.T) {
+	env := setupCLITestEnv(t)
+	ctx := context.Background()
+
+	item, err := env.store.NewDisc(ctx, "Alpha", "fp-alpha")
+	if err != nil {
+		t.Fatalf("alpha disc: %v", err)
+	}
+	item.RipSpecData = `{"episodes":[{"key":"s01_001","season":1,"episode":1}]}`
+	if err := env.store.Update(ctx, item); err != nil {
+		t.Fatalf("update item: %v", err)
+	}
+
+	out, _, err := runCLI(t, []string{"queue", "show", fmt.Sprintf("%d", item.ID), "--json"}, env.socketPath, env.configPath)
+	if err != nil {
+		t.Fatalf("queue show --json: %v", err)
+	}
+
+	var detail map[string]any
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
+	}
+	if detail["episode_identified_count"] != float64(1) {
+		t.Fatalf("expected episode_identified_count 1, got %v", detail["episode_identified_count"])
+	}
+}
+
 func TestQueueShowJSONNotFound(t *testing.T) {
 	env := setupCLITestEnv(t)
 

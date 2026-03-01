@@ -11,22 +11,23 @@ type queueItemView struct {
 
 type queueItemDetailsView struct {
 	queueItemView
-	UpdatedAt       string             `json:"updated_at"`
-	ProgressStage   string             `json:"progress_stage,omitempty"`
-	ProgressPercent float64            `json:"progress_percent,omitempty"`
-	ProgressMessage string             `json:"progress_message,omitempty"`
-	ErrorMessage    string             `json:"error_message,omitempty"`
-	NeedsReview     bool               `json:"needs_review"`
-	ReviewReason    string             `json:"review_reason,omitempty"`
-	MetadataJSON    string             `json:"metadata_json,omitempty"`
-	RipSpecJSON     string             `json:"rip_spec_json,omitempty"`
-	RippedFile      string             `json:"ripped_file,omitempty"`
-	EncodedFile     string             `json:"encoded_file,omitempty"`
-	FinalFile       string             `json:"final_file,omitempty"`
-	ItemLogPath     string             `json:"item_log_path,omitempty"`
-	Episodes        []queueEpisodeView `json:"episodes,omitempty"`
-	EpisodeTotals   queueEpisodeTotals `json:"episode_totals,omitempty"`
-	EpisodesSynced  bool               `json:"episodes_synced"`
+	UpdatedAt              string             `json:"updated_at"`
+	ProgressStage          string             `json:"progress_stage,omitempty"`
+	ProgressPercent        float64            `json:"progress_percent,omitempty"`
+	ProgressMessage        string             `json:"progress_message,omitempty"`
+	ErrorMessage           string             `json:"error_message,omitempty"`
+	NeedsReview            bool               `json:"needs_review"`
+	ReviewReason           string             `json:"review_reason,omitempty"`
+	MetadataJSON           string             `json:"metadata_json,omitempty"`
+	RipSpecJSON            string             `json:"rip_spec_json,omitempty"`
+	RippedFile             string             `json:"ripped_file,omitempty"`
+	EncodedFile            string             `json:"encoded_file,omitempty"`
+	FinalFile              string             `json:"final_file,omitempty"`
+	ItemLogPath            string             `json:"item_log_path,omitempty"`
+	Episodes               []queueEpisodeView `json:"episodes,omitempty"`
+	EpisodeTotals          queueEpisodeTotals `json:"episode_totals,omitempty"`
+	EpisodeIdentifiedCount int                `json:"episode_identified_count,omitempty"`
+	EpisodesSynced         bool               `json:"episodes_synced"`
 }
 
 type queueEpisodeView struct {
