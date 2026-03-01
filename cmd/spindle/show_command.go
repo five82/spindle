@@ -1,14 +1,8 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,6 +10,7 @@ import (
 	"spindle/internal/api"
 	"spindle/internal/config"
 	"spindle/internal/ipc"
+	"spindle/internal/logs"
 )
 
 func newShowCommand(ctx *commandContext) *cobra.Command {
@@ -134,7 +129,7 @@ func streamLogsFromAPI(cmd *cobra.Command, cfg *config.Config, lines int, follow
 	}
 
 	ctx := cmd.Context()
-	query := logAPIQuery{
+	query := logs.StreamQuery{
 		Limit:         lines,
 		Tail:          true,
 		Component:     filters.Component,
@@ -154,7 +149,7 @@ func streamLogsFromAPI(cmd *cobra.Command, cfg *config.Config, lines int, follow
 	for {
 		resp, err := client.Fetch(ctx, query)
 		if err != nil {
-			if isLogAPIUnavailable(err) {
+			if logs.IsAPIUnavailable(err) {
 				return errLogAPIUnavailable
 			}
 			return err
@@ -174,26 +169,6 @@ func streamLogsFromAPI(cmd *cobra.Command, cfg *config.Config, lines int, follow
 		query.Tail = false
 		query.Follow = true
 	}
-}
-
-type logAPIClient struct {
-	base *url.URL
-	http *http.Client
-}
-
-type logAPIQuery struct {
-	Since         uint64
-	Limit         int
-	Follow        bool
-	Tail          bool
-	Component     string
-	Lane          string
-	CorrelationID string
-	ItemID        int64
-	Level         string
-	Alert         string
-	DecisionType  string
-	Search        string
 }
 
 type logFilters struct {
@@ -218,91 +193,11 @@ func (f logFilters) empty() bool {
 		f.ItemID == 0
 }
 
-func newLogAPIClient(cfg *config.Config) (*logAPIClient, error) {
+func newLogAPIClient(cfg *config.Config) (*logs.StreamClient, error) {
 	if cfg == nil {
 		return nil, nil
 	}
-	bind := strings.TrimSpace(cfg.Paths.APIBind)
-	if bind == "" {
-		return nil, nil
-	}
-	if !strings.Contains(bind, "://") {
-		bind = "http://" + bind
-	}
-	base, err := url.Parse(bind)
-	if err != nil {
-		return nil, err
-	}
-	base.Path = ""
-	base.RawQuery = ""
-	base.Fragment = ""
-	return &logAPIClient{
-		base: base,
-		http: &http.Client{}, // No timeout - streaming waits indefinitely for events; user cancels with Ctrl+C
-	}, nil
-}
-
-func (c *logAPIClient) Fetch(ctx context.Context, q logAPIQuery) (api.LogStreamResponse, error) {
-	if c == nil {
-		return api.LogStreamResponse{}, errLogAPIUnavailable
-	}
-	values := url.Values{}
-	if q.Since > 0 {
-		values.Set("since", strconv.FormatUint(q.Since, 10))
-	}
-	if q.Limit > 0 {
-		values.Set("limit", strconv.Itoa(q.Limit))
-	}
-	if q.Follow {
-		values.Set("follow", "1")
-	}
-	if q.Tail {
-		values.Set("tail", "1")
-	}
-	if strings.TrimSpace(q.Component) != "" {
-		values.Set("component", q.Component)
-	}
-	if strings.TrimSpace(q.Lane) != "" {
-		values.Set("lane", q.Lane)
-	}
-	if strings.TrimSpace(q.CorrelationID) != "" {
-		values.Set("correlation_id", q.CorrelationID)
-	}
-	if q.ItemID > 0 {
-		values.Set("item", strconv.FormatInt(q.ItemID, 10))
-	}
-	if strings.TrimSpace(q.Level) != "" {
-		values.Set("level", q.Level)
-	}
-	if strings.TrimSpace(q.Alert) != "" {
-		values.Set("alert", q.Alert)
-	}
-	if strings.TrimSpace(q.DecisionType) != "" {
-		values.Set("decision_type", q.DecisionType)
-	}
-	if strings.TrimSpace(q.Search) != "" {
-		values.Set("search", q.Search)
-	}
-
-	endpoint := c.base.ResolveReference(&url.URL{Path: "/api/logs", RawQuery: values.Encode()})
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return api.LogStreamResponse{}, err
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return api.LogStreamResponse{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return api.LogStreamResponse{}, fmt.Errorf("api logs returned status %d", resp.StatusCode)
-	}
-	var payload api.LogStreamResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return api.LogStreamResponse{}, err
-	}
-	return payload, nil
+	return logs.NewStreamClient(cfg.Paths.APIBind)
 }
 
 func formatAPILogEvent(evt api.LogEvent) string {
@@ -366,16 +261,4 @@ func composeSubject(lane string, itemID int64, stage string) string {
 		parts = append(parts, stage)
 	}
 	return strings.Join(parts, " · ")
-}
-
-func isLogAPIUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) && urlErr.Err != nil {
-		err = urlErr.Err
-	}
-	var opErr *net.OpError
-	return errors.As(err, &opErr)
 }

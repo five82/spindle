@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"spindle/internal/api"
 	"spindle/internal/ipc"
 	"spindle/internal/queue"
-	"spindle/internal/ripspec"
 )
 
 type queueAPI interface {
@@ -214,79 +212,27 @@ func (a *queueStoreAdapter) Health(ctx context.Context) (queue.HealthSummary, er
 // RetryEpisode clears a specific episode's failed status and resets the item
 // to the appropriate stage so it can be re-processed.
 func (a *queueStoreAdapter) RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (queueRetryItemResult, error) {
-	item, err := a.store.GetByID(ctx, itemID)
+	result, err := api.RetryFailedEpisode(ctx, a.store, itemID, episodeKey)
 	if err != nil {
 		return queueRetryItemResult{}, err
 	}
-	if item == nil {
+	switch result.Outcome {
+	case api.RetryEpisodeNotFound:
 		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeNotFound}, nil
-	}
-
-	if item.Status != queue.StatusFailed {
+	case api.RetryEpisodeNotFailed:
 		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeNotFailed}, nil
-	}
-
-	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil {
-		return queueRetryItemResult{}, fmt.Errorf("parse rip spec: %w", err)
-	}
-
-	episodeKey = strings.ToLower(strings.TrimSpace(episodeKey))
-	if episodeKey == "" {
+	case api.RetryEpisodeEpisodeNotFound:
 		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeEpisodeNotFound}, nil
+	case api.RetryEpisodeUpdated:
+		return queueRetryItemResult{
+			ID:        itemID,
+			Outcome:   queueRetryOutcomeUpdated,
+			NewStatus: result.NewStatus,
+		}, nil
+	default:
+		return queueRetryItemResult{
+			ID:      itemID,
+			Outcome: queueRetryOutcomeNotFound,
+		}, nil
 	}
-
-	targetStatus := determineRetryStatus(&env, episodeKey)
-	if targetStatus == "" {
-		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeEpisodeNotFound}, nil
-	}
-
-	env.Assets.ClearFailedAsset(ripspec.AssetKindEncoded, episodeKey)
-	env.Assets.ClearFailedAsset(ripspec.AssetKindSubtitled, episodeKey)
-	env.Assets.ClearFailedAsset(ripspec.AssetKindFinal, episodeKey)
-
-	encoded, err := env.Encode()
-	if err != nil {
-		return queueRetryItemResult{}, fmt.Errorf("encode rip spec: %w", err)
-	}
-
-	item.RipSpecData = encoded
-	item.Status = targetStatus
-	item.ErrorMessage = ""
-	item.NeedsReview = false
-	item.ReviewReason = ""
-
-	if err := a.store.Update(ctx, item); err != nil {
-		return queueRetryItemResult{}, fmt.Errorf("update item: %w", err)
-	}
-
-	return queueRetryItemResult{
-		ID:        itemID,
-		Outcome:   queueRetryOutcomeUpdated,
-		NewStatus: string(targetStatus),
-	}, nil
-}
-
-// determineRetryStatus figures out which status to reset the item to based on
-// which asset failed for the given episode.
-func determineRetryStatus(env *ripspec.Envelope, episodeKey string) queue.Status {
-	episode := env.EpisodeByKey(episodeKey)
-	if episode == nil {
-		return ""
-	}
-
-	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindFinal, episodeKey); ok && asset.IsFailed() {
-		return queue.StatusEncoded
-	}
-	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, episodeKey); ok && asset.IsFailed() {
-		return queue.StatusEncoded
-	}
-	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, episodeKey); ok && asset.IsFailed() {
-		if len(env.Episodes) > 0 {
-			return queue.StatusEpisodeIdentified
-		}
-		return queue.StatusRipped
-	}
-
-	return queue.StatusRipped
 }
