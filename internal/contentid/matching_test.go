@@ -4,6 +4,87 @@ import (
 	"testing"
 )
 
+func TestSelectAnchorWindowFirstAnchor(t *testing.T) {
+	t.Parallel()
+
+	rips := []ripFingerprint{
+		{EpisodeKey: "s02_001", Vector: newFingerprint("batman villain puzzler episode twenty five marker")},
+		{EpisodeKey: "s02_002", Vector: newFingerprint("robin riddle episode twenty six marker")},
+		{EpisodeKey: "s02_003", Vector: newFingerprint("alfred cave episode twenty seven marker")},
+		{EpisodeKey: "s02_004", Vector: newFingerprint("gordon signal episode twenty eight marker")},
+		{EpisodeKey: "s02_005", Vector: newFingerprint("catwoman chase episode twenty nine marker")},
+		{EpisodeKey: "s02_006", Vector: newFingerprint("penguin umbrella episode thirty marker")},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 24, Vector: newFingerprint("different content episode twenty four")},
+		{EpisodeNumber: 25, Vector: newFingerprint("batman villain puzzler episode twenty five marker")},
+		{EpisodeNumber: 26, Vector: newFingerprint("robin riddle episode twenty six marker")},
+		{EpisodeNumber: 30, Vector: newFingerprint("penguin umbrella episode thirty marker")},
+	}
+
+	anchor, ok := selectAnchorWindow(rips, refs, 60)
+	if !ok {
+		t.Fatalf("expected first anchor selection to succeed, got reason=%q", anchor.Reason)
+	}
+	if anchor.Reason != "first_anchor" {
+		t.Fatalf("expected first_anchor reason, got %q", anchor.Reason)
+	}
+	if anchor.WindowStart != 25 || anchor.WindowEnd != 30 {
+		t.Fatalf("expected window 25-30, got %d-%d", anchor.WindowStart, anchor.WindowEnd)
+	}
+}
+
+func TestSelectAnchorWindowSecondAnchorFallback(t *testing.T) {
+	t.Parallel()
+
+	rips := []ripFingerprint{
+		{EpisodeKey: "s02_001", Vector: newFingerprint("batman shared ambiguous anchor text")},
+		{EpisodeKey: "s02_002", Vector: newFingerprint("robin exact episode twenty six marker")},
+		{EpisodeKey: "s02_003", Vector: newFingerprint("episode twenty seven marker")},
+		{EpisodeKey: "s02_004", Vector: newFingerprint("episode twenty eight marker")},
+		{EpisodeKey: "s02_005", Vector: newFingerprint("episode twenty nine marker")},
+		{EpisodeKey: "s02_006", Vector: newFingerprint("episode thirty marker")},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 25, Vector: newFingerprint("batman shared ambiguous anchor text")},
+		{EpisodeNumber: 40, Vector: newFingerprint("batman shared ambiguous anchor text")},
+		{EpisodeNumber: 26, Vector: newFingerprint("robin exact episode twenty six marker")},
+		{EpisodeNumber: 27, Vector: newFingerprint("episode twenty seven marker")},
+	}
+
+	anchor, ok := selectAnchorWindow(rips, refs, 60)
+	if !ok {
+		t.Fatalf("expected second anchor selection to succeed, got reason=%q", anchor.Reason)
+	}
+	if anchor.Reason != "second_anchor" {
+		t.Fatalf("expected second_anchor reason, got %q", anchor.Reason)
+	}
+	if anchor.WindowStart != 25 || anchor.WindowEnd != 30 {
+		t.Fatalf("expected window 25-30, got %d-%d", anchor.WindowStart, anchor.WindowEnd)
+	}
+}
+
+func TestSelectAnchorWindowFailsWhenBothAnchorsAmbiguous(t *testing.T) {
+	t.Parallel()
+
+	rips := []ripFingerprint{
+		{EpisodeKey: "s02_001", Vector: newFingerprint("same anchor text")},
+		{EpisodeKey: "s02_002", Vector: newFingerprint("same anchor text")},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 10, Vector: newFingerprint("same anchor text")},
+		{EpisodeNumber: 20, Vector: newFingerprint("same anchor text")},
+	}
+
+	anchor, ok := selectAnchorWindow(rips, refs, 60)
+	if ok {
+		t.Fatalf("expected ambiguous anchors to fail, got window %d-%d", anchor.WindowStart, anchor.WindowEnd)
+	}
+	if anchor.Reason != "anchor_score_ambiguous" {
+		t.Fatalf("expected anchor_score_ambiguous reason, got %q", anchor.Reason)
+	}
+}
+
 func TestResolveEpisodeMatchesOptimalAssignment(t *testing.T) {
 	t.Parallel()
 
