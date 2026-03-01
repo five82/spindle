@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -201,15 +200,8 @@ func discIDCacheManager(ctx *commandContext) (*discidcache.Cache, string, error)
 	}
 	logger = logger.With(logging.String("component", "cli-discid"))
 
-	cache, err := api.OpenDiscIDCache(cfg, logger)
-	if errors.Is(err, api.ErrDiscIDCacheDisabled) {
-		return nil, "Disc ID cache is disabled (set disc_id_cache.enabled = true in config.toml)", nil
-	}
-	if errors.Is(err, api.ErrDiscIDCacheNotConfigured) {
-		return nil, "Disc ID cache path is not configured", nil
-	}
-	if err != nil {
-		return nil, "", err
-	}
-	return cache, "", nil
+	return api.OpenDiscIDCacheForCLI(api.OpenCacheResourceRequest{
+		Config: cfg,
+		Logger: logger,
+	})
 }

@@ -7,8 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"spindle/internal/auditgather"
-	"spindle/internal/queue"
+	"spindle/internal/api"
 )
 
 func newAuditGatherCommand(ctx *commandContext) *cobra.Command {
@@ -34,25 +33,12 @@ analysis rather than artifact discovery.`,
 				return err
 			}
 
-			// Direct store access to get the raw queue.Item (needed for
-			// auditgather.Gather which operates on internal types).
-			store, err := queue.Open(cfg)
+			report, err := api.GatherAuditReport(cmd.Context(), api.GatherAuditReportRequest{
+				Config: cfg,
+				ItemID: id,
+			})
 			if err != nil {
-				return fmt.Errorf("open queue store: %w", err)
-			}
-			defer store.Close()
-
-			item, err := store.GetByID(cmd.Context(), id)
-			if err != nil {
-				return fmt.Errorf("fetch item: %w", err)
-			}
-			if item == nil {
-				return fmt.Errorf("queue item %d not found", id)
-			}
-
-			report, err := auditgather.Gather(cmd.Context(), cfg, item)
-			if err != nil {
-				return fmt.Errorf("gather audit data: %w", err)
+				return err
 			}
 
 			return writeJSON(cmd, report)

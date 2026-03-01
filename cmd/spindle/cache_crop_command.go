@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"time"
@@ -34,7 +33,7 @@ Example:
   spindle cache crop /path/to/file.mkv`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target, label, err := resolveCropTarget(ctx, args[0], cmd.OutOrStdout())
+			target, label, err := resolveCropTarget(cmd, ctx, args[0], cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -44,7 +43,7 @@ Example:
 			fmt.Fprintf(out, "Crop Detection Start: %s\n", start.Format("Jan 2 2006 15:04:05 MST"))
 			fmt.Fprintf(out, "Target: %s\n\n", label)
 
-			result, err := runCropDetection(cmd.Context(), target)
+			result, err := api.RunCropDiagnostic(cmd.Context(), api.RunCropDiagnosticRequest{Target: target})
 
 			end := time.Now()
 			fmt.Fprintf(out, "\nCrop Detection End: %s\n", end.Format("Jan 2 2006 15:04:05 MST"))
@@ -61,12 +60,19 @@ Example:
 	return cmd
 }
 
-func resolveCropTarget(ctx *commandContext, arg string, out io.Writer) (string, string, error) {
-	return resolveCacheTarget(ctx, arg, out)
-}
-
-func runCropDetection(ctx context.Context, target string) (*draptolib.CropDetectionResult, error) {
-	return draptolib.DetectCrop(ctx, target)
+func resolveCropTarget(cmd *cobra.Command, ctx *commandContext, arg string, out io.Writer) (string, string, error) {
+	cfg, err := ctx.ensureConfig()
+	if err != nil {
+		return "", "", err
+	}
+	target, label, warn, err := api.ResolveCacheTarget(cmd.Context(), api.ResolveCacheTargetRequest{
+		Config: cfg,
+		Arg:    arg,
+	})
+	if warn != "" {
+		fmt.Fprintln(out, warn)
+	}
+	return target, label, err
 }
 
 func printCropResults(out io.Writer, result *draptolib.CropDetectionResult) {

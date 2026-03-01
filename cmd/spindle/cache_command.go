@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -204,15 +203,8 @@ func cacheManager(ctx *commandContext) (*ripcache.Manager, string, error) {
 	}
 	logger = logger.With(logging.String("component", "cli-cache"))
 
-	manager, err := api.OpenRipCacheManager(cfg, logger)
-	if errors.Is(err, api.ErrRipCacheDisabled) {
-		return nil, "Rip cache is disabled (set rip_cache.enabled = true in config.toml)", nil
-	}
-	if errors.Is(err, api.ErrRipCacheDirNotConfigured) {
-		return nil, "Rip cache dir is not configured", nil
-	}
-	if err != nil {
-		return nil, "", err
-	}
-	return manager, "", nil
+	return api.OpenRipCacheManagerForCLI(api.OpenCacheResourceRequest{
+		Config: cfg,
+		Logger: logger,
+	})
 }

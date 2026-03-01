@@ -1,15 +1,14 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"spindle/internal/api"
 	"spindle/internal/audioanalysis"
-	"spindle/internal/config"
 )
 
 func newCacheCommentaryCommand(ctx *commandContext) *cobra.Command {
@@ -39,7 +38,7 @@ Example:
 				return err
 			}
 
-			target, label, err := resolveCommentaryTarget(ctx, args[0], cmd.OutOrStdout())
+			target, label, err := resolveCommentaryTarget(cmd, ctx, args[0], cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -48,7 +47,11 @@ Example:
 			start := time.Now()
 			fmt.Fprintf(out, "Commentary Detection Start: %s\n", start.Format("Jan 2 2006 15:04:05 MST"))
 
-			result, err := runCommentaryDetection(cmd.Context(), cfg, target, out)
+			result, err := api.RunCommentaryDiagnostic(cmd.Context(), api.RunCommentaryDiagnosticRequest{
+				Config: cfg,
+				Target: target,
+				Output: out,
+			})
 
 			end := time.Now()
 			fmt.Fprintf(out, "Commentary Detection End: %s\n", end.Format("Jan 2 2006 15:04:05 MST"))
@@ -70,12 +73,19 @@ Example:
 	return cmd
 }
 
-func resolveCommentaryTarget(ctx *commandContext, arg string, out io.Writer) (string, string, error) {
-	return resolveCacheTarget(ctx, arg, out)
-}
-
-func runCommentaryDetection(ctx context.Context, cfg *config.Config, target string, out io.Writer) (*audioanalysis.DiagnosticResult, error) {
-	return audioanalysis.RunDiagnostic(ctx, cfg, target, out)
+func resolveCommentaryTarget(cmd *cobra.Command, ctx *commandContext, arg string, out io.Writer) (string, string, error) {
+	cfg, err := ctx.ensureConfig()
+	if err != nil {
+		return "", "", err
+	}
+	target, label, warn, err := api.ResolveCacheTarget(cmd.Context(), api.ResolveCacheTargetRequest{
+		Config: cfg,
+		Arg:    arg,
+	})
+	if warn != "" {
+		fmt.Fprintln(out, warn)
+	}
+	return target, label, err
 }
 
 func printCommentaryResults(out io.Writer, result *audioanalysis.DiagnosticResult) {

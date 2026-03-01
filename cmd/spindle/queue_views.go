@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"spindle/internal/api"
 )
@@ -31,17 +30,7 @@ func buildQueueListRows(items []api.QueueItem) [][]string {
 	if len(items) == 0 {
 		return nil
 	}
-	sorted := make([]api.QueueItem, len(items))
-	copy(sorted, items)
-
-	sort.Slice(sorted, func(i, j int) bool {
-		ti := parseQueueTime(sorted[i].CreatedAt)
-		tj := parseQueueTime(sorted[j].CreatedAt)
-		if ti.Equal(tj) {
-			return sorted[i].ID > sorted[j].ID
-		}
-		return ti.After(tj)
-	})
+	sorted := api.SortQueueItemsNewestFirst(items)
 
 	rows := make([][]string, 0, len(sorted))
 	for _, item := range sorted {
@@ -85,24 +74,11 @@ func formatStatusLabel(status string) string {
 }
 
 func formatDisplayTime(value string) string {
-	t := parseQueueTime(strings.TrimSpace(value))
+	t := api.ParseQueueTime(strings.TrimSpace(value))
 	if t.IsZero() {
 		return ""
 	}
 	return t.UTC().Format("2006-01-02 15:04")
-}
-
-func parseQueueTime(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	if t, err := time.Parse(time.RFC3339, value); err == nil {
-		return t
-	}
-	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return t
-	}
-	return time.Time{}
 }
 
 func formatFingerprint(value string) string {
