@@ -49,18 +49,18 @@ type ExcludedTrack struct {
 }
 
 // detectCommentary runs the commentary detection pipeline on ripped files.
-func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *ripspec.Envelope, targets []string) (*CommentaryResult, error) {
+func (a *Analyzer) detectCommentary(ctx context.Context, item *queue.Item, env *ripspec.Envelope, targets []string) (*CommentaryResult, error) {
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("no targets for commentary detection")
 	}
 
-	logger := logging.WithContext(ctx, s.logger)
+	logger := logging.WithContext(ctx, a.logger)
 
 	// Use first target for analysis (consistent audio tracks across episodes)
 	targetPath := targets[0]
 
 	// Probe to get audio track info
-	ffprobeBinary := deps.ResolveFFprobePath(s.cfg.FFprobeBinary())
+	ffprobeBinary := deps.ResolveFFprobePath(a.cfg.FFprobeBinary())
 	probe, err := ffprobe.Inspect(ctx, ffprobeBinary, targetPath)
 	if err != nil {
 		return nil, fmt.Errorf("probe for commentary detection: %w", err)
@@ -94,7 +94,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 	)
 
 	// Set up working directory for transcription
-	stagingRoot := item.StagingRoot(s.cfg.Paths.StagingDir)
+	stagingRoot := item.StagingRoot(a.cfg.Paths.StagingDir)
 	workDir := filepath.Join(stagingRoot, "commentary")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create commentary work dir: %w", err)
@@ -105,10 +105,10 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 
 	// Initialize WhisperX service
 	whisperSvc := whisperx.NewService(whisperx.Config{
-		Model:       s.cfg.CommentaryWhisperXModel(),
-		CUDAEnabled: s.cfg.Subtitles.WhisperXCUDAEnabled,
-		VADMethod:   s.cfg.Subtitles.WhisperXVADMethod,
-		HFToken:     s.cfg.Subtitles.WhisperXHuggingFace,
+		Model:       a.cfg.CommentaryWhisperXModel(),
+		CUDAEnabled: a.cfg.Subtitles.WhisperXCUDAEnabled,
+		VADMethod:   a.cfg.Subtitles.WhisperXVADMethod,
+		HFToken:     a.cfg.Subtitles.WhisperXHuggingFace,
 	}, deps.ResolveFFmpegPath())
 
 	// Get transcription of primary audio for comparison
@@ -123,7 +123,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 	var commentaryTracks []CommentaryTrack
 	var excludedTracks []ExcludedTrack
 
-	llmClient := s.createLLMClient()
+	llmClient := a.createLLMClient()
 
 	for _, candidate := range candidates {
 		// Transcribe candidate
@@ -140,7 +140,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 
 		// Check similarity to primary audio
 		similarity := textutil.CosineSimilarity(primaryFingerprint, candidateFingerprint)
-		if similarity >= s.cfg.Commentary.SimilarityThreshold {
+		if similarity >= a.cfg.Commentary.SimilarityThreshold {
 			// This is likely a stereo downmix, not commentary
 			logger.Debug("candidate excluded as stereo downmix",
 				logging.Int("track_index", candidate.Index),
@@ -156,7 +156,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 
 		// Use LLM to classify
 		if llmClient != nil {
-			decision, err := s.classifyWithLLM(ctx, llmClient, candidateTranscript, item, env)
+			decision, err := a.classifyWithLLM(ctx, llmClient, candidateTranscript, item, env)
 			if err != nil {
 				logger.Warn("LLM classification failed; preserving candidate and flagging for review",
 					logging.Int("track_index", candidate.Index),
@@ -177,7 +177,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 				continue
 			}
 
-			isCommentary := decision.IsCommentary(s.cfg.Commentary.ConfidenceThreshold)
+			isCommentary := decision.IsCommentary(a.cfg.Commentary.ConfidenceThreshold)
 			if isCommentary {
 				commentaryTracks = append(commentaryTracks, CommentaryTrack{
 					Index:      candidate.Index,
@@ -255,8 +255,8 @@ func TranscribeSegment(ctx context.Context, svc *whisperx.Service, sourcePath st
 }
 
 // createLLMClient creates an LLM client for commentary classification.
-func (s *Stage) createLLMClient() *llm.Client {
-	llmCfg := s.cfg.CommentaryLLM()
+func (a *Analyzer) createLLMClient() *llm.Client {
+	llmCfg := a.cfg.CommentaryLLM()
 	if llmCfg.APIKey == "" {
 		return nil
 	}
@@ -281,7 +281,7 @@ func ClassifyCommentary(ctx context.Context, client *llm.Client, title, year, tr
 }
 
 // classifyWithLLM uses an LLM to determine if a transcript is commentary.
-func (s *Stage) classifyWithLLM(ctx context.Context, client *llm.Client, transcript string, item *queue.Item, env *ripspec.Envelope) (CommentaryDecision, error) {
+func (a *Analyzer) classifyWithLLM(ctx context.Context, client *llm.Client, transcript string, item *queue.Item, env *ripspec.Envelope) (CommentaryDecision, error) {
 	return ClassifyCommentary(ctx, client, item.DiscTitle, extractYear(env), transcript)
 }
 

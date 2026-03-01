@@ -237,13 +237,13 @@ type RipCacheReport struct {
 
 // EnvelopeReport surfaces the parsed ripspec Envelope in a structured way.
 type EnvelopeReport struct {
-	Fingerprint string            `json:"fingerprint,omitempty"`
-	ContentKey  string            `json:"content_key,omitempty"`
-	Metadata    map[string]any    `json:"metadata,omitempty"`
-	Titles      []ripspec.Title   `json:"titles,omitempty"`
-	Episodes    []ripspec.Episode `json:"episodes,omitempty"`
-	Assets      ripspec.Assets    `json:"assets"`
-	Attributes  map[string]any    `json:"attributes,omitempty"`
+	Fingerprint string                     `json:"fingerprint,omitempty"`
+	ContentKey  string                     `json:"content_key,omitempty"`
+	Metadata    map[string]any             `json:"metadata,omitempty"`
+	Titles      []ripspec.Title            `json:"titles,omitempty"`
+	Episodes    []ripspec.Episode          `json:"episodes,omitempty"`
+	Assets      ripspec.Assets             `json:"assets"`
+	Attributes  ripspec.EnvelopeAttributes `json:"attributes,omitempty"`
 }
 
 // EncodingReport surfaces the encoding details snapshot.

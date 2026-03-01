@@ -23,16 +23,16 @@ const (
 	progressPercentRefine  = 40.0
 )
 
-// Stage integrates audio analysis with the workflow manager.
-type Stage struct {
+// Analyzer integrates audio analysis with the workflow manager.
+type Analyzer struct {
 	store  *queue.Store
 	cfg    *config.Config
 	logger *slog.Logger
 }
 
-// NewStage constructs a workflow stage that performs audio analysis for queue items.
-func NewStage(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Stage {
-	return &Stage{
+// NewAnalyzer constructs a workflow stage that performs audio analysis for queue items.
+func NewAnalyzer(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Analyzer {
+	return &Analyzer{
 		cfg:    cfg,
 		store:  store,
 		logger: logging.NewComponentLogger(logger, "audio-analysis"),
@@ -40,48 +40,47 @@ func NewStage(cfg *config.Config, store *queue.Store, logger *slog.Logger) *Stag
 }
 
 // SetLogger allows the workflow manager to route stage logs into the item-scoped log.
-func (s *Stage) SetLogger(logger *slog.Logger) {
-	if s == nil {
+func (a *Analyzer) SetLogger(logger *slog.Logger) {
+	if a == nil {
 		return
 	}
-	s.logger = logging.NewComponentLogger(logger, "audio-analysis")
+	a.logger = logging.NewComponentLogger(logger, "audio-analysis")
 }
 
 // Prepare primes queue progress fields before executing the stage.
-func (s *Stage) Prepare(ctx context.Context, item *queue.Item) error {
-	if s == nil || s.cfg == nil {
+func (a *Analyzer) Prepare(ctx context.Context, item *queue.Item) error {
+	if a == nil || a.cfg == nil {
 		return services.Wrap(services.ErrConfiguration, "audioanalysis", "prepare", "Audio analysis stage is not configured", nil)
 	}
-	if s.store == nil {
+	if a.store == nil {
 		return services.Wrap(services.ErrConfiguration, "audioanalysis", "prepare", "Queue store unavailable", nil)
 	}
 	item.InitProgress(progressStageAnalyzing, "Phase 1/2 - Preparing audio analysis")
-	return s.store.UpdateProgress(ctx, item)
+	return a.store.UpdateProgress(ctx, item)
 }
 
 // Execute performs audio analysis for the queue item.
 // This includes primary audio selection and (when enabled) commentary track detection.
-func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
+func (a *Analyzer) Execute(ctx context.Context, item *queue.Item) error {
 	stageStart := time.Now()
 
-	if s == nil || s.cfg == nil {
+	if a == nil || a.cfg == nil {
 		return services.Wrap(services.ErrConfiguration, "audioanalysis", "execute", "Audio analysis stage is not configured", nil)
 	}
 	if item == nil {
 		return services.Wrap(services.ErrValidation, "audioanalysis", "execute", "Queue item is nil", nil)
 	}
-	if s.store == nil {
+	if a.store == nil {
 		return services.Wrap(services.ErrConfiguration, "audioanalysis", "execute", "Queue store unavailable", nil)
 	}
 
-	logger := logging.WithContext(ctx, s.logger)
+	logger := logging.WithContext(ctx, a.logger)
 	logger.Debug("starting audio analysis")
 
 	// Parse rip spec to get asset paths
-	env, err := ripspec.Parse(item.RipSpecData)
+	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
-		return services.Wrap(services.ErrValidation, "audioanalysis", "parse rip spec",
-			"Rip specification missing or invalid; rerun identification", err)
+		return err
 	}
 
 	// Build list of targets to analyze (from encoded files)
@@ -98,12 +97,12 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	var commentaryIndices []int
 	specDirty := false
 
-	if s.cfg.Commentary.Enabled {
-		if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Detecting commentary (%d file(s))", len(targets)), progressPercentPrep); err != nil {
+	if a.cfg.Commentary.Enabled {
+		if err := a.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Detecting commentary (%d file(s))", len(targets)), progressPercentPrep); err != nil {
 			return err
 		}
 
-		commentaryResult, err = s.detectCommentary(ctx, item, &env, targets)
+		commentaryResult, err = a.detectCommentary(ctx, item, &env, targets)
 		if err != nil {
 			// Commentary detection failure is non-fatal - log and continue
 			logger.Warn("commentary detection failed; continuing without commentary",
@@ -128,17 +127,17 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	} else {
 		logger.Debug("commentary detection disabled")
-		if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Analyzing audio (%d file(s))", len(targets)), progressPercentPrep); err != nil {
+		if err := a.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Analyzing audio (%d file(s))", len(targets)), progressPercentPrep); err != nil {
 			return err
 		}
 	}
 
 	// Phase 2: Primary audio selection with commentary preservation
-	if err := s.updateProgress(ctx, item, "Phase 2/2 - Selecting audio tracks", progressPercentRefine); err != nil {
+	if err := a.updateProgress(ctx, item, "Phase 2/2 - Selecting audio tracks", progressPercentRefine); err != nil {
 		return err
 	}
 
-	refineResult, err := RefineAudioTargets(ctx, s.cfg, s.logger, targets, commentaryIndices)
+	refineResult, err := RefineAudioTargets(ctx, a.cfg, a.logger, targets, commentaryIndices)
 	if err != nil {
 		return services.Wrap(services.ErrExternalTool, "audioanalysis", "refine audio tracks",
 			"Failed to optimize ripped audio tracks with ffmpeg", err)
@@ -146,10 +145,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 
 	// Store audio info in RipSpec attributes
 	if refineResult.PrimaryAudioDescription != "" {
-		if env.Attributes == nil {
-			env.Attributes = make(map[string]any)
-		}
-		env.Attributes["primary_audio_description"] = refineResult.PrimaryAudioDescription
+		env.Attributes.PrimaryAudioDescription = refineResult.PrimaryAudioDescription
 		specDirty = true
 	}
 
@@ -158,7 +154,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	// Remap commentary indices to reflect post-refinement audio stream positions.
 	if commentaryResult != nil && len(commentaryResult.CommentaryTracks) > 0 {
 		RemapCommentaryIndices(commentaryResult, refineResult.KeptIndices)
-		if err := ApplyCommentaryDisposition(ctx, s.cfg.FFprobeBinary(), s.logger, targets, commentaryResult); err != nil {
+		if err := ApplyCommentaryDisposition(ctx, a.cfg.FFprobeBinary(), a.logger, targets, commentaryResult); err != nil {
 			logger.Warn("failed to set commentary disposition; tracks may not be labeled",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "commentary_disposition_failed"),
@@ -168,7 +164,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		} else {
 			// Validate that commentary labeling was applied correctly
 			expectedCount := len(commentaryResult.CommentaryTracks)
-			if err := ValidateCommentaryLabeling(ctx, s.cfg.FFprobeBinary(), targets, expectedCount, s.logger); err != nil {
+			if err := ValidateCommentaryLabeling(ctx, a.cfg.FFprobeBinary(), targets, expectedCount, a.logger); err != nil {
 				return err
 			}
 		}
@@ -199,7 +195,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	item.ProgressPercent = 100
 	item.ProgressMessage = buildCompletionMessage(refineResult, commentaryResult)
 
-	if err := s.store.UpdateProgress(ctx, item); err != nil {
+	if err := a.store.UpdateProgress(ctx, item); err != nil {
 		return services.Wrap(services.ErrTransient, "audioanalysis", "persist progress",
 			"Failed to persist audio analysis progress", err)
 	}
@@ -209,7 +205,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		logging.String(logging.FieldEventType, "stage_complete"),
 		logging.Duration("stage_duration", time.Since(stageStart)),
 		logging.Int("files_analyzed", len(targets)),
-		logging.Bool("commentary_enabled", s.cfg.Commentary.Enabled),
+		logging.Bool("commentary_enabled", a.cfg.Commentary.Enabled),
 	}
 	if commentaryResult != nil {
 		summaryAttrs = append(summaryAttrs, logging.Int("commentary_tracks", len(commentaryResult.CommentaryTracks)))
@@ -220,15 +216,18 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 }
 
 // HealthCheck reports readiness for the audio analysis stage.
-func (s *Stage) HealthCheck(ctx context.Context) stage.Health {
+func (a *Analyzer) HealthCheck(ctx context.Context) stage.Health {
 	const name = "audioanalysis"
-	if s == nil || s.cfg == nil {
+	if a == nil || a.cfg == nil {
 		return stage.Unhealthy(name, "stage not configured")
+	}
+	if a.store == nil {
+		return stage.Unhealthy(name, "queue store unavailable")
 	}
 	return stage.Healthy(name)
 }
 
-func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) error {
+func (a *Analyzer) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) error {
 	item.ProgressStage = progressStageAnalyzing
 	if strings.TrimSpace(message) != "" {
 		item.ProgressMessage = message
@@ -236,7 +235,7 @@ func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message st
 	if percent >= 0 {
 		item.ProgressPercent = percent
 	}
-	if err := s.store.UpdateProgress(ctx, item); err != nil {
+	if err := a.store.UpdateProgress(ctx, item); err != nil {
 		return services.Wrap(services.ErrTransient, "audioanalysis", "persist progress",
 			"Failed to persist audio analysis progress", err)
 	}
@@ -283,39 +282,32 @@ func storeCommentaryResult(env *ripspec.Envelope, result *CommentaryResult) {
 	if env == nil || result == nil {
 		return
 	}
-	if env.Attributes == nil {
-		env.Attributes = make(map[string]any)
-	}
 
-	analysisData := map[string]any{
-		"primary_track": map[string]any{
-			"index": result.PrimaryTrack.Index,
-		},
+	data := &ripspec.AudioAnalysisData{
+		PrimaryTrack: ripspec.AudioTrackRef{Index: result.PrimaryTrack.Index},
 	}
 
 	if len(result.CommentaryTracks) > 0 {
-		tracks := make([]map[string]any, 0, len(result.CommentaryTracks))
+		data.CommentaryTracks = make([]ripspec.CommentaryTrackRef, 0, len(result.CommentaryTracks))
 		for _, t := range result.CommentaryTracks {
-			tracks = append(tracks, map[string]any{
-				"index":      t.Index,
-				"confidence": t.Confidence,
-				"reason":     t.Reason,
+			data.CommentaryTracks = append(data.CommentaryTracks, ripspec.CommentaryTrackRef{
+				Index:      t.Index,
+				Confidence: t.Confidence,
+				Reason:     t.Reason,
 			})
 		}
-		analysisData["commentary_tracks"] = tracks
 	}
 
 	if len(result.ExcludedTracks) > 0 {
-		excluded := make([]map[string]any, 0, len(result.ExcludedTracks))
+		data.ExcludedTracks = make([]ripspec.ExcludedTrackRef, 0, len(result.ExcludedTracks))
 		for _, t := range result.ExcludedTracks {
-			excluded = append(excluded, map[string]any{
-				"index":      t.Index,
-				"reason":     t.Reason,
-				"similarity": t.Similarity,
+			data.ExcludedTracks = append(data.ExcludedTracks, ripspec.ExcludedTrackRef{
+				Index:      t.Index,
+				Reason:     t.Reason,
+				Similarity: t.Similarity,
 			})
 		}
-		analysisData["excluded_tracks"] = excluded
 	}
 
-	env.Attributes["audio_analysis"] = analysisData
+	env.Attributes.AudioAnalysis = data
 }

@@ -79,15 +79,9 @@ func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, o.logger)
 	stageStart := time.Now()
 
-	env, err := ripspec.Parse(item.RipSpecData)
+	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
-		return services.Wrap(
-			services.ErrValidation,
-			"organizing",
-			"parse rip spec",
-			"Rip specification missing or invalid; rerun identification",
-			err,
-		)
+		return err
 	}
 
 	logger.Debug("starting organization")

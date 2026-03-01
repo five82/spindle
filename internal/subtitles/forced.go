@@ -14,17 +14,17 @@ import (
 // downloads foreign-parts-only subtitles from OpenSubtitles if available.
 // referenceSubtitle is the path to the aligned regular subtitle used for alignment.
 // Returns the path to the downloaded forced subtitle, or empty string if none.
-func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, env *ripspec.Envelope, referenceSubtitle string) string {
-	if s == nil || s.service == nil || env == nil {
+func (g *Generator) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Item, target subtitleTarget, ctxMeta SubtitleContext, env *ripspec.Envelope, referenceSubtitle string) string {
+	if g == nil || g.service == nil || env == nil {
 		return ""
 	}
 
-	hasForcedTrack, _ := env.Attributes["has_forced_subtitle_track"].(bool)
+	hasForcedTrack := env.Attributes.HasForcedSubtitleTrack
 	episodeKey := normalizeEpisodeKey(target.EpisodeKey)
 
 	if !hasForcedTrack {
-		if s.logger != nil {
-			s.logger.Info("forced subtitle search decision",
+		if g.logger != nil {
+			g.logger.Info("forced subtitle search decision",
 				logging.String(logging.FieldDecisionType, "forced_subtitle_search"),
 				logging.String("decision_result", "skipped"),
 				logging.String("decision_reason", "no_forced_track_on_disc"),
@@ -34,9 +34,9 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		return ""
 	}
 
-	if !s.service.shouldUseOpenSubtitles() {
-		if s.logger != nil {
-			s.logger.Info("forced subtitle search decision",
+	if !g.service.shouldUseOpenSubtitles() {
+		if g.logger != nil {
+			g.logger.Info("forced subtitle search decision",
 				logging.String(logging.FieldDecisionType, "forced_subtitle_search"),
 				logging.String("decision_result", "skipped"),
 				logging.String("decision_reason", "opensubtitles_disabled"),
@@ -46,8 +46,8 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		return ""
 	}
 
-	if s.logger != nil {
-		s.logger.Info("forced subtitle search decision",
+	if g.logger != nil {
+		g.logger.Info("forced subtitle search decision",
 			logging.String(logging.FieldDecisionType, "forced_subtitle_search"),
 			logging.String("decision_result", "searching"),
 			logging.String("decision_reason", "disc_has_forced_track"),
@@ -61,13 +61,13 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		OutputDir:  target.OutputDir,
 		BaseName:   target.BaseName,
 		Context:    ctxMeta,
-		Languages:  append([]string(nil), s.service.languages...),
+		Languages:  append([]string(nil), g.service.languages...),
 	}
 
-	plan, err := s.service.prepareGenerationPlan(ctx, req)
+	plan, err := g.service.prepareGenerationPlan(ctx, req)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Debug("forced subtitle plan preparation failed",
+		if g.logger != nil {
+			g.logger.Debug("forced subtitle plan preparation failed",
 				logging.Error(err),
 				logging.String("episode_key", episodeKey),
 			)
@@ -79,10 +79,10 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 	}
 
 	basePath := filepath.Join(target.OutputDir, target.BaseName)
-	forcedPath, err := s.service.tryForcedSubtitles(ctx, plan, req, basePath, referenceSubtitle)
+	forcedPath, err := g.service.tryForcedSubtitles(ctx, plan, req, basePath, referenceSubtitle)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("forced subtitle search failed",
+		if g.logger != nil {
+			g.logger.Warn("forced subtitle search failed",
 				logging.Error(err),
 				logging.String("episode_key", episodeKey),
 				logging.String(logging.FieldEventType, "forced_subtitle_search_failed"),
@@ -93,8 +93,8 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 	}
 
 	if forcedPath == "" {
-		if s.logger != nil {
-			s.logger.Info("forced subtitle download decision",
+		if g.logger != nil {
+			g.logger.Info("forced subtitle download decision",
 				logging.String(logging.FieldDecisionType, "forced_subtitle_download"),
 				logging.String("decision_result", "not_found"),
 				logging.String("decision_reason", "no_foreign_parts_subtitle_available"),
@@ -105,8 +105,8 @@ func (s *Stage) tryForcedSubtitlesForTarget(ctx context.Context, item *queue.Ite
 		return ""
 	}
 
-	if s.logger != nil {
-		s.logger.Info("forced subtitle downloaded successfully",
+	if g.logger != nil {
+		g.logger.Info("forced subtitle downloaded successfully",
 			logging.String(logging.FieldEventType, "forced_subtitle_complete"),
 			logging.String("episode_key", episodeKey),
 			logging.String("forced_subtitle_path", forcedPath),

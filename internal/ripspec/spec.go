@@ -12,13 +12,13 @@ import (
 // Envelope captures the structured payload shared between identification,
 // ripping, encoding, and organizing stages.
 type Envelope struct {
-	Fingerprint string         `json:"fingerprint"`
-	ContentKey  string         `json:"content_key"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Titles      []Title        `json:"titles,omitempty"`
-	Episodes    []Episode      `json:"episodes,omitempty"`
-	Assets      Assets         `json:"assets,omitempty"`
-	Attributes  map[string]any `json:"attributes,omitempty"`
+	Fingerprint string             `json:"fingerprint"`
+	ContentKey  string             `json:"content_key"`
+	Metadata    map[string]any     `json:"metadata,omitempty"`
+	Titles      []Title            `json:"titles,omitempty"`
+	Episodes    []Episode          `json:"episodes,omitempty"`
+	Assets      Assets             `json:"assets,omitempty"`
+	Attributes  EnvelopeAttributes `json:"attributes,omitempty"`
 }
 
 // Title records playlist metadata captured during disc scanning.
@@ -74,43 +74,13 @@ const (
 	AssetKindFinal     = "final"
 )
 
-// Attribute key constants for cross-stage communication via Envelope.Attributes.
-const (
-	AttrContentIDNeedsReview      = "content_id_needs_review"
-	AttrContentIDReviewReason     = "content_id_review_reason"
-	AttrContentIDMatches          = "content_id_matches"
-	AttrContentIDMethod           = "content_id_method"
-	AttrContentIDTranscripts      = "content_id_transcripts"
-	AttrContentIDSelectedStrategy = "content_id_selected_strategy"
-	AttrContentIDStrategyScores   = "content_id_strategy_scores"
-	AttrDiscNumber                = "disc_number"
-	AttrEpisodesSynchronized      = "episodes_synchronized"
-)
-
-// SetAttribute sets a key-value pair in the envelope's Attributes map,
-// initializing the map if necessary.
-func (e *Envelope) SetAttribute(key string, value any) {
-	if e == nil {
-		return
-	}
-	if e.Attributes == nil {
-		e.Attributes = make(map[string]any)
-	}
-	e.Attributes[key] = value
-}
-
 // AppendReviewReason sets the content ID needs-review flag and appends the
 // given reason to any existing review reason, separated by "; ".
 func (e *Envelope) AppendReviewReason(reason string) {
 	if e == nil {
 		return
 	}
-	e.SetAttribute(AttrContentIDNeedsReview, true)
-	if existing, ok := e.Attributes[AttrContentIDReviewReason].(string); ok && existing != "" {
-		e.SetAttribute(AttrContentIDReviewReason, existing+"; "+reason)
-	} else {
-		e.SetAttribute(AttrContentIDReviewReason, reason)
-	}
+	e.Attributes.AppendReviewReason(reason)
 }
 
 // Asset associates an episode with a file path and its processing status.
@@ -134,7 +104,6 @@ func Parse(raw string) (Envelope, error) {
 		return Envelope{}, err
 	}
 	env.Metadata = cloneMetadata(env.Metadata)
-	env.Attributes = cloneMetadata(env.Attributes)
 	env.Titles = slices.Clone(env.Titles)
 	env.Episodes = slices.Clone(env.Episodes)
 	env.Assets = env.Assets.Clone()
@@ -142,7 +111,7 @@ func Parse(raw string) (Envelope, error) {
 }
 
 // Encode serialises the envelope to JSON.
-func (e Envelope) Encode() (string, error) {
+func (e *Envelope) Encode() (string, error) {
 	data, err := json.Marshal(e)
 	if err != nil {
 		return "", err
@@ -318,7 +287,7 @@ func cloneAssets(list []Asset) []Asset {
 // ExpectedCount returns the expected episode/file count.
 // For TV content with episodes, returns len(Episodes).
 // For movies (no episodes), returns 1.
-func (e Envelope) ExpectedCount() int {
+func (e *Envelope) ExpectedCount() int {
 	if len(e.Episodes) > 0 {
 		return len(e.Episodes)
 	}
@@ -326,7 +295,7 @@ func (e Envelope) ExpectedCount() int {
 }
 
 // AssetCounts returns counts for each stage of the pipeline.
-func (e Envelope) AssetCounts() (expected, ripped, encoded, final int) {
+func (e *Envelope) AssetCounts() (expected, ripped, encoded, final int) {
 	expected = e.ExpectedCount()
 	ripped = len(e.Assets.Ripped)
 	encoded = len(e.Assets.Encoded)
@@ -336,7 +305,7 @@ func (e Envelope) AssetCounts() (expected, ripped, encoded, final int) {
 
 // MissingEpisodes returns episode keys that don't have assets at the given stage.
 // For movies, returns nil since there are no episode keys to track.
-func (e Envelope) MissingEpisodes(stage string) []string {
+func (e *Envelope) MissingEpisodes(stage string) []string {
 	if len(e.Episodes) == 0 {
 		return nil
 	}

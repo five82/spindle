@@ -178,22 +178,22 @@ func (m *Matcher) attachStrategyAttributes(env *ripspec.Envelope, selected strat
 		return
 	}
 	if strings.TrimSpace(selected.Attempt.Name) != "" {
-		env.SetAttribute(ripspec.AttrContentIDSelectedStrategy, selected.Attempt.Name)
+		env.Attributes.ContentIDSelectedStrategy = selected.Attempt.Name
 	}
-	payload := make([]map[string]any, 0, len(outcomes))
+	scores := make([]ripspec.StrategyScore, 0, len(outcomes))
 	for _, outcome := range outcomes {
-		payload = append(payload, map[string]any{
-			"strategy":      outcome.Attempt.Name,
-			"reason":        outcome.Attempt.Reason,
-			"episode_count": len(outcome.Attempt.Episodes),
-			"references":    len(outcome.References),
-			"matches":       len(outcome.Matches),
-			"avg_score":     outcome.AverageScore,
-			"needs_review":  outcome.Refinement.NeedsReview,
+		scores = append(scores, ripspec.StrategyScore{
+			Strategy:     outcome.Attempt.Name,
+			Reason:       outcome.Attempt.Reason,
+			EpisodeCount: len(outcome.Attempt.Episodes),
+			References:   len(outcome.References),
+			Matches:      len(outcome.Matches),
+			AvgScore:     outcome.AverageScore,
+			NeedsReview:  outcome.Refinement.NeedsReview,
 		})
 	}
-	if len(payload) > 0 {
-		env.SetAttribute(ripspec.AttrContentIDStrategyScores, payload)
+	if len(scores) > 0 {
+		env.Attributes.ContentIDStrategyScores = scores
 	}
 }
 

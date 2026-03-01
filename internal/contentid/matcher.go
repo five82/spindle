@@ -2,12 +2,10 @@ package contentid
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"log/slog"
@@ -481,10 +479,8 @@ func (m *Matcher) buildContext(item *queue.Item, env *ripspec.Envelope) (episode
 	if ctx.SubtitleCtx.Title == "" {
 		ctx.SubtitleCtx.Title = ctx.ShowTitle
 	}
-	if env != nil && len(env.Attributes) > 0 {
-		if disc, ok := asInt(env.Attributes[ripspec.AttrDiscNumber]); ok {
-			ctx.DiscNumber = disc
-		}
+	if env != nil && env.Attributes.DiscNumber > 0 {
+		ctx.DiscNumber = env.Attributes.DiscNumber
 	}
 	return ctx, nil
 }
@@ -608,28 +604,4 @@ func findEpisodeByNumber(season *tmdb.SeasonDetails, number int) (tmdb.Episode, 
 		}
 	}
 	return tmdb.Episode{}, false
-}
-
-func asInt(value any) (int, bool) {
-	switch v := value.(type) {
-	case float64:
-		return int(v), true
-	case float32:
-		return int(v), true
-	case int:
-		return v, true
-	case int64:
-		return int(v), true
-	case json.Number:
-		if i, err := v.Int64(); err == nil {
-			return int(i), true
-		}
-	case string:
-		if value := strings.TrimSpace(v); value != "" {
-			if i, err := strconv.Atoi(value); err == nil {
-				return i, true
-			}
-		}
-	}
-	return 0, false
 }

@@ -25,11 +25,11 @@ type subtitleTarget struct {
 	Episode      int
 }
 
-func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
-	if item == nil || s == nil || s.service == nil {
+func (g *Generator) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
+	if item == nil || g == nil || g.service == nil {
 		return nil
 	}
-	stagingRoot := strings.TrimSpace(item.StagingRoot(s.service.config.Paths.StagingDir))
+	stagingRoot := strings.TrimSpace(item.StagingRoot(g.service.config.Paths.StagingDir))
 	if stagingRoot == "" {
 		stagingRoot = filepath.Dir(strings.TrimSpace(item.EncodedFile))
 	}
@@ -39,8 +39,8 @@ func (s *Stage) buildSubtitleTargets(item *queue.Item) []subtitleTarget {
 	baseWorkDir := filepath.Join(stagingRoot, "subtitles")
 
 	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil && s.logger != nil {
-		s.logger.Warn("failed to parse rip spec for subtitle targets; continuing with encoded file fallback",
+	if err != nil && g.logger != nil {
+		g.logger.Warn("failed to parse rip spec for subtitle targets; continuing with encoded file fallback",
 			logging.Error(err),
 			logging.String(logging.FieldEventType, "rip_spec_parse_failed"),
 			logging.String(logging.FieldErrorHint, "rerun identification if subtitle targets look wrong"),

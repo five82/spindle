@@ -1,19 +1,15 @@
 package workflow
 
 import (
-	"context"
 	"log/slog"
 
 	"spindle/internal/queue"
 	"spindle/internal/stage"
 )
 
-// StageHandler describes the narrow contract the manager needs from each stage.
-type StageHandler interface {
-	Prepare(context.Context, *queue.Item) error
-	Execute(context.Context, *queue.Item) error
-	HealthCheck(context.Context) stage.Health
-}
+// StageHandler is the narrow contract the manager needs from each stage.
+// This is a type alias for stage.Handler; new code should prefer stage.Handler directly.
+type StageHandler = stage.Handler
 
 // StageSet bundles the concrete workflow handlers the manager orchestrates.
 type StageSet struct {

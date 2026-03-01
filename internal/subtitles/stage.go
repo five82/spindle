@@ -16,8 +16,8 @@ import (
 	"spindle/internal/stage"
 )
 
-// Stage integrates subtitle generation with the workflow manager.
-type Stage struct {
+// Generator integrates subtitle generation with the workflow manager.
+type Generator struct {
 	store   *queue.Store
 	service *Service
 	muxer   *Muxer
@@ -25,23 +25,23 @@ type Stage struct {
 }
 
 // SetLogger allows the workflow manager to route stage logs into the item-scoped log.
-func (s *Stage) SetLogger(logger *slog.Logger) {
-	if s == nil {
+func (g *Generator) SetLogger(logger *slog.Logger) {
+	if g == nil {
 		return
 	}
-	s.logger = logging.NewComponentLogger(logger, "subtitle-stage")
-	if s.service != nil {
-		s.service.SetLogger(logger)
+	g.logger = logging.NewComponentLogger(logger, "subtitle-stage")
+	if g.service != nil {
+		g.service.SetLogger(logger)
 	}
-	if s.muxer != nil {
-		s.muxer.SetLogger(logger)
+	if g.muxer != nil {
+		g.muxer.SetLogger(logger)
 	}
 }
 
-// NewStage constructs a workflow stage that generates subtitles for queue items.
-func NewStage(store *queue.Store, service *Service, logger *slog.Logger) *Stage {
+// NewGenerator constructs a workflow stage that generates subtitles for queue items.
+func NewGenerator(store *queue.Store, service *Service, logger *slog.Logger) *Generator {
 	stageLogger := logging.NewComponentLogger(logger, "subtitle-stage")
-	return &Stage{
+	return &Generator{
 		store:   store,
 		service: service,
 		muxer:   NewMuxer(logger),
@@ -50,33 +50,33 @@ func NewStage(store *queue.Store, service *Service, logger *slog.Logger) *Stage 
 }
 
 // Prepare primes queue progress fields before executing the stage.
-func (s *Stage) Prepare(ctx context.Context, item *queue.Item) error {
-	if s == nil || s.service == nil {
+func (g *Generator) Prepare(ctx context.Context, item *queue.Item) error {
+	if g == nil || g.service == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "prepare", "Subtitle stage is not configured", nil)
 	}
-	if !s.service.config.Subtitles.Enabled {
+	if !g.service.config.Subtitles.Enabled {
 		return nil
 	}
-	if s.store == nil {
+	if g.store == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "prepare", "Queue store unavailable", nil)
 	}
 	item.InitProgress(progressStageGenerating, "Phase 1/2 - Preparing audio")
-	return s.store.UpdateProgress(ctx, item)
+	return g.store.UpdateProgress(ctx, item)
 }
 
 // Execute performs subtitle generation for the queue item.
-func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
+func (g *Generator) Execute(ctx context.Context, item *queue.Item) error {
 	stageStart := time.Now()
-	if s == nil || s.service == nil {
+	if g == nil || g.service == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "execute", "Subtitle stage is not configured", nil)
 	}
 	if item == nil {
 		return services.Wrap(services.ErrValidation, "subtitles", "execute", "Queue item is nil", nil)
 	}
-	if s.store == nil {
+	if g.store == nil {
 		return services.Wrap(services.ErrConfiguration, "subtitles", "execute", "Queue store unavailable", nil)
 	}
-	if !s.service.config.Subtitles.Enabled {
+	if !g.service.config.Subtitles.Enabled {
 		return nil
 	}
 
@@ -86,8 +86,8 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		if parsed, err := ripspec.Parse(raw); err == nil {
 			env = parsed
 			hasRipSpec = true
-		} else if s.logger != nil {
-			s.logger.Warn("failed to parse rip spec for subtitle progress; continuing without progress details",
+		} else if g.logger != nil {
+			g.logger.Warn("failed to parse rip spec for subtitle progress; continuing without progress details",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "rip_spec_parse_failed"),
 				logging.String(logging.FieldErrorHint, "rerun identification if subtitle progress looks wrong"),
@@ -96,11 +96,11 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	targets := s.buildSubtitleTargets(item)
+	targets := g.buildSubtitleTargets(item)
 	if len(targets) == 0 {
 		return services.Wrap(services.ErrValidation, "subtitles", "execute", "No encoded assets available for subtitles", nil)
 	}
-	if err := s.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Preparing subtitles (%d episodes)", len(targets)), progressPercentAfterPrep); err != nil {
+	if err := g.updateProgress(ctx, item, fmt.Sprintf("Phase 1/2 - Preparing subtitles (%d episodes)", len(targets)), progressPercentAfterPrep); err != nil {
 		return err
 	}
 
@@ -118,8 +118,8 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 
 		// Skip already-completed subtitled episodes (enables resume after partial failure)
 		if asset, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, episodeKey); ok && asset.IsCompleted() {
-			if s.logger != nil {
-				s.logger.Debug("skipping already-subtitled episode",
+			if g.logger != nil {
+				g.logger.Debug("skipping already-subtitled episode",
 					logging.String("episode_key", episodeKey),
 					logging.String("subtitle_path", asset.Path),
 				)
@@ -133,34 +133,34 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 		remaining := len(targets) - skipped
 		current := idx + 1 - skipped
 		message := fmt.Sprintf("Phase 2/2 - Generating subtitles (%d/%d – %s)", current, remaining, label)
-		if err := s.updateProgress(ctx, item, message, progressPercentAfterPrep+step*float64(idx)); err != nil {
+		if err := g.updateProgress(ctx, item, message, progressPercentAfterPrep+step*float64(idx)); err != nil {
 			return err
 		}
 		ctxMeta := buildEpisodeContext(baseCtx, target)
 
 		var result GenerateResult
 		cached := false
-		if cachedResult, ok := s.tryReuseCachedTranscript(target, &env); ok {
+		if cachedResult, ok := g.tryReuseCachedTranscript(target, &env); ok {
 			result = cachedResult
 			cached = true
 			cachedCount++
 		} else {
 			var err error
-			result, err = s.service.Generate(ctx, GenerateRequest{
+			result, err = g.service.Generate(ctx, GenerateRequest{
 				SourcePath: target.SourcePath,
 				WorkDir:    target.WorkDir,
 				OutputDir:  target.OutputDir,
 				BaseName:   target.BaseName,
 				Context:    ctxMeta,
-				Languages:  append([]string(nil), s.service.languages...),
+				Languages:  append([]string(nil), g.service.languages...),
 			})
 			if err != nil {
 				errMessage := strings.TrimSpace(err.Error())
 				if errMessage == "" {
 					errMessage = "Subtitle generation failed"
 				}
-				if s.logger != nil {
-					s.logger.Warn("subtitle generation failed for episode",
+				if g.logger != nil {
+					g.logger.Warn("subtitle generation failed for episode",
 						logging.Int64("item_id", item.ID),
 						logging.String("episode_key", episodeKey),
 						logging.String("source_file", target.SourcePath),
@@ -179,14 +179,14 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 					ErrorMsg:   errMessage,
 				})
 				failedEpisodes++
-				s.persistRipSpec(ctx, item, &env)
+				g.persistRipSpec(ctx, item, &env)
 				continue
 			}
 		}
 		// Validate generated SRT content
 		if issues := ValidateSRTContent(result.SubtitlePath, result.Duration.Seconds()); len(issues) > 0 {
-			if s.logger != nil {
-				s.logger.Warn("SRT content validation issues",
+			if g.logger != nil {
+				g.logger.Warn("SRT content validation issues",
 					logging.String("episode_key", episodeKey),
 					logging.String("subtitle_path", result.SubtitlePath),
 					logging.String("issues", strings.Join(issues, "; ")),
@@ -206,14 +206,14 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 
 		// Check for forced subtitles if disc has forced subtitle tracks.
 		// Pass the aligned regular subtitle as reference for subtitle-to-subtitle alignment.
-		if forcedPath := s.tryForcedSubtitlesForTarget(ctx, item, target, ctxMeta, &env, result.SubtitlePath); forcedPath != "" {
+		if forcedPath := g.tryForcedSubtitlesForTarget(ctx, item, target, ctxMeta, &env, result.SubtitlePath); forcedPath != "" {
 			result.ForcedSubtitlePath = forcedPath
 		}
 
 		// Mux subtitles into MKV if configured
 		subtitlesMuxed := false
-		if s.shouldMuxSubtitles() {
-			subtitlesMuxed = s.tryMuxSubtitles(ctx, target, result, &env, episodeKey)
+		if g.shouldMuxSubtitles() {
+			subtitlesMuxed = g.tryMuxSubtitles(ctx, target, result, &env, episodeKey)
 		}
 
 		// Mark as completed when adding successful asset
@@ -224,7 +224,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 			Status:         ripspec.AssetStatusCompleted,
 			SubtitlesMuxed: subtitlesMuxed,
 		})
-		s.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, ctxMeta, cached)
+		g.processGenerationResult(ctx, item, target, result, &env, hasRipSpec, ctxMeta, cached)
 	}
 
 	// Determine final item status based on episode outcomes
@@ -242,14 +242,14 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	item.ProgressPercent = 100
 	item.ErrorMessage = ""
 	item.ActiveEpisodeKey = ""
-	if err := s.store.UpdateProgress(ctx, item); err != nil {
+	if err := g.store.UpdateProgress(ctx, item); err != nil {
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}
 	alertValue := ""
 	if item.NeedsReview {
 		alertValue = "review"
 	}
-	if s.logger != nil {
+	if g.logger != nil {
 		summaryAttrs := []logging.Attr{
 			logging.String(logging.FieldEventType, "stage_complete"),
 			logging.Duration("stage_duration", time.Since(stageStart)),
@@ -265,15 +265,15 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 				logging.String(logging.FieldImpact, "subtitle stage completed with review alerts"),
 				logging.String(logging.FieldErrorHint, "Review subtitle results or rerun spindle gensubtitle for affected episodes"),
 			)
-			s.logger.Warn("subtitle stage summary", logging.Args(summaryAttrs...)...)
+			g.logger.Warn("subtitle stage summary", logging.Args(summaryAttrs...)...)
 		} else {
-			s.logger.Info("subtitle stage summary", logging.Args(summaryAttrs...)...)
+			g.logger.Info("subtitle stage summary", logging.Args(summaryAttrs...)...)
 		}
 	}
 	return nil
 }
 
-func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) error {
+func (g *Generator) updateProgress(ctx context.Context, item *queue.Item, message string, percent float64) error {
 	item.ProgressStage = progressStageGenerating
 	if strings.TrimSpace(message) != "" {
 		item.ProgressMessage = message
@@ -281,7 +281,7 @@ func (s *Stage) updateProgress(ctx context.Context, item *queue.Item, message st
 	if percent >= 0 {
 		item.ProgressPercent = percent
 	}
-	if err := s.store.UpdateProgress(ctx, item); err != nil {
+	if err := g.store.UpdateProgress(ctx, item); err != nil {
 		return services.Wrap(services.ErrTransient, "subtitles", "persist progress", "Failed to persist subtitle progress", err)
 	}
 	return nil
@@ -323,10 +323,13 @@ func episodeProgressLabel(target subtitleTarget) string {
 }
 
 // HealthCheck reports readiness for the subtitle stage.
-func (s *Stage) HealthCheck(ctx context.Context) stage.Health {
+func (g *Generator) HealthCheck(ctx context.Context) stage.Health {
 	const name = "subtitles"
-	if s == nil || s.service == nil {
+	if g == nil || g.service == nil {
 		return stage.Unhealthy(name, "stage not configured")
+	}
+	if g.store == nil {
+		return stage.Unhealthy(name, "queue store unavailable")
 	}
 	return stage.Healthy(name)
 }

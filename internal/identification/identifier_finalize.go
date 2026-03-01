@@ -42,31 +42,30 @@ type identificationResult struct {
 	FallbackTitle string   // fallback show label for rip spec
 }
 
-// buildAttributes constructs the rip spec attributes map from scan results.
-// Returns the attributes and the detected disc number.
-func buildAttributes(logger *slog.Logger, scanResult *disc.ScanResult, discSources []string, discNumber int) map[string]any {
-	attributes := make(map[string]any)
+// buildAttributes constructs typed rip spec attributes from scan results.
+func buildAttributes(logger *slog.Logger, scanResult *disc.ScanResult, discSources []string, discNumber int) ripspec.EnvelopeAttributes {
+	var attrs ripspec.EnvelopeAttributes
 	if discNumber == 0 {
 		if n, ok := extractDiscNumber(discSources...); ok {
 			discNumber = n
 		}
 	}
 	if discNumber > 0 {
-		attributes[ripspec.AttrDiscNumber] = discNumber
+		attrs.DiscNumber = discNumber
 	}
 	hasForcedTrack := false
 	if scanResult != nil {
 		hasForcedTrack = scanResult.HasForcedEnglishSubtitles()
 	}
 	if hasForcedTrack {
-		attributes["has_forced_subtitle_track"] = true
+		attrs.HasForcedSubtitleTrack = true
 	}
 	logger.Info("forced subtitle detection",
 		logging.String(logging.FieldDecisionType, "forced_subtitle_detection"),
 		logging.String("decision_result", textutil.Ternary(hasForcedTrack, "detected", "none")),
 		logging.String("decision_reason", textutil.Ternary(hasForcedTrack, "disc_has_forced_track", "no_forced_track_found")),
 		logging.Bool("has_forced_subtitle_track", hasForcedTrack))
-	return attributes
+	return attrs
 }
 
 // storeAndValidateEnvelope encodes a rip spec envelope, stores it on the item,

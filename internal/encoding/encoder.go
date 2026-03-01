@@ -139,15 +139,9 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 
 // validateAndParseInputs parses the rip spec and ensures ripped files are available.
 func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, logger *slog.Logger) (ripspec.Envelope, error) {
-	env, err := ripspec.Parse(item.RipSpecData)
+	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
-		return ripspec.Envelope{}, services.Wrap(
-			services.ErrValidation,
-			"encoding",
-			"parse rip spec",
-			"Rip specification missing or invalid; rerun identification",
-			err,
-		)
+		return ripspec.Envelope{}, err
 	}
 
 	// Cross-stage validation: check for missing ripped episodes

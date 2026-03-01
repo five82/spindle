@@ -197,7 +197,6 @@ func parseRipSpecData(raw string, ctx *SubtitleContext) {
 		Metadata   map[string]any   `json:"metadata"`
 		Titles     []map[string]any `json:"titles"`
 		Extras     map[string]any   `json:"extras"`
-		Attributes map[string]any   `json:"attributes"`
 	}
 	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 		return

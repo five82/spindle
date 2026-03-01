@@ -17,7 +17,7 @@ func TestLookupTranscriptPath_NilEnvelope(t *testing.T) {
 }
 
 func TestLookupTranscriptPath_MissingAttribute(t *testing.T) {
-	env := &ripspec.Envelope{Attributes: map[string]any{"other": "value"}}
+	env := &ripspec.Envelope{}
 	if got := lookupTranscriptPath(env, "s01e01"); got != "" {
 		t.Fatalf("expected empty, got %q", got)
 	}
@@ -25,8 +25,8 @@ func TestLookupTranscriptPath_MissingAttribute(t *testing.T) {
 
 func TestLookupTranscriptPath_MapStringString(t *testing.T) {
 	env := &ripspec.Envelope{
-		Attributes: map[string]any{
-			ripspec.AttrContentIDTranscripts: map[string]string{
+		Attributes: ripspec.EnvelopeAttributes{
+			ContentIDTranscripts: map[string]string{
 				"s01e01": "/tmp/s01e01.srt",
 				"s01e02": "/tmp/s01e02.srt",
 			},
@@ -40,11 +40,10 @@ func TestLookupTranscriptPath_MapStringString(t *testing.T) {
 	}
 }
 
-func TestLookupTranscriptPath_MapStringAny(t *testing.T) {
-	// Simulates JSON round-trip where map[string]string becomes map[string]any.
+func TestLookupTranscriptPath_CaseInsensitive(t *testing.T) {
 	env := &ripspec.Envelope{
-		Attributes: map[string]any{
-			ripspec.AttrContentIDTranscripts: map[string]any{
+		Attributes: ripspec.EnvelopeAttributes{
+			ContentIDTranscripts: map[string]string{
 				"s01e01": "/tmp/s01e01.srt",
 				"s01e02": "/tmp/s01e02.srt",
 			},
@@ -57,8 +56,8 @@ func TestLookupTranscriptPath_MapStringAny(t *testing.T) {
 
 func TestLookupTranscriptPath_EmptyKey(t *testing.T) {
 	env := &ripspec.Envelope{
-		Attributes: map[string]any{
-			ripspec.AttrContentIDTranscripts: map[string]string{"s01e01": "/tmp/s01e01.srt"},
+		Attributes: ripspec.EnvelopeAttributes{
+			ContentIDTranscripts: map[string]string{"s01e01": "/tmp/s01e01.srt"},
 		},
 	}
 	if got := lookupTranscriptPath(env, ""); got != "" {
@@ -97,14 +96,14 @@ func TestTryReuseCachedTranscript_Hit(t *testing.T) {
 	}
 
 	env := &ripspec.Envelope{
-		Attributes: map[string]any{
-			ripspec.AttrContentIDTranscripts: map[string]string{
+		Attributes: ripspec.EnvelopeAttributes{
+			ContentIDTranscripts: map[string]string{
 				"s01e01": cachedPath,
 			},
 		},
 	}
 
-	stage := &Stage{logger: slog.Default()}
+	stage := &Generator{logger: slog.Default()}
 	target := subtitleTarget{
 		EpisodeKey: "s01e01",
 		OutputDir:  outputDir,
@@ -138,14 +137,14 @@ func TestTryReuseCachedTranscript_Hit(t *testing.T) {
 
 func TestTryReuseCachedTranscript_MissingFile(t *testing.T) {
 	env := &ripspec.Envelope{
-		Attributes: map[string]any{
-			ripspec.AttrContentIDTranscripts: map[string]string{
+		Attributes: ripspec.EnvelopeAttributes{
+			ContentIDTranscripts: map[string]string{
 				"s01e01": "/nonexistent/path/s01e01.srt",
 			},
 		},
 	}
 
-	stage := &Stage{logger: slog.Default()}
+	stage := &Generator{logger: slog.Default()}
 	target := subtitleTarget{
 		EpisodeKey: "s01e01",
 		OutputDir:  t.TempDir(),
@@ -168,14 +167,14 @@ func TestTryReuseCachedTranscript_EmptySRT(t *testing.T) {
 	}
 
 	env := &ripspec.Envelope{
-		Attributes: map[string]any{
-			ripspec.AttrContentIDTranscripts: map[string]string{
+		Attributes: ripspec.EnvelopeAttributes{
+			ContentIDTranscripts: map[string]string{
 				"s01e01": cachedPath,
 			},
 		},
 	}
 
-	stage := &Stage{logger: slog.Default()}
+	stage := &Generator{logger: slog.Default()}
 	target := subtitleTarget{
 		EpisodeKey: "s01e01",
 		OutputDir:  t.TempDir(),
@@ -190,14 +189,14 @@ func TestTryReuseCachedTranscript_EmptySRT(t *testing.T) {
 
 func TestTryReuseCachedTranscript_MovieSkipped(t *testing.T) {
 	env := &ripspec.Envelope{
-		Attributes: map[string]any{
-			ripspec.AttrContentIDTranscripts: map[string]string{
+		Attributes: ripspec.EnvelopeAttributes{
+			ContentIDTranscripts: map[string]string{
 				"primary": "/some/path.srt",
 			},
 		},
 	}
 
-	stage := &Stage{logger: slog.Default()}
+	stage := &Generator{logger: slog.Default()}
 	target := subtitleTarget{
 		EpisodeKey: "", // normalizes to "primary"
 		OutputDir:  t.TempDir(),
@@ -213,7 +212,7 @@ func TestTryReuseCachedTranscript_MovieSkipped(t *testing.T) {
 func TestTryReuseCachedTranscript_NoAttributes(t *testing.T) {
 	env := &ripspec.Envelope{}
 
-	stage := &Stage{logger: slog.Default()}
+	stage := &Generator{logger: slog.Default()}
 	target := subtitleTarget{
 		EpisodeKey: "s01e01",
 		OutputDir:  t.TempDir(),

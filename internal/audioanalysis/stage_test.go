@@ -23,7 +23,7 @@ func testConfig(t *testing.T) *config.Config {
 	return &cfg
 }
 
-func TestNewStage(t *testing.T) {
+func TestNewAnalyzer(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := queue.Open(cfg)
 	if err != nil {
@@ -31,52 +31,65 @@ func TestNewStage(t *testing.T) {
 	}
 	defer store.Close()
 
-	s := NewStage(cfg, store, logging.NewNop())
-	if s == nil {
-		t.Fatal("expected stage to be created")
+	a := NewAnalyzer(cfg, store, logging.NewNop())
+	if a == nil {
+		t.Fatal("expected analyzer to be created")
 	}
-	if s.cfg != cfg {
-		t.Error("stage cfg mismatch")
+	if a.cfg != cfg {
+		t.Error("analyzer cfg mismatch")
 	}
-	if s.store != store {
-		t.Error("stage store mismatch")
+	if a.store != store {
+		t.Error("analyzer store mismatch")
 	}
 }
 
-func TestStage_HealthCheck(t *testing.T) {
+func TestAnalyzer_HealthCheck(t *testing.T) {
 	tests := []struct {
 		name      string
-		stage     *Stage
+		analyzer  *Analyzer
 		wantReady bool
 	}{
 		{
-			name:      "nil stage",
-			stage:     nil,
+			name:      "nil analyzer",
+			analyzer:  nil,
 			wantReady: false,
 		},
 		{
 			name:      "nil config",
-			stage:     &Stage{cfg: nil},
+			analyzer:  &Analyzer{cfg: nil},
 			wantReady: false,
 		},
 		{
-			name:      "valid stage",
-			stage:     &Stage{cfg: &config.Config{}},
-			wantReady: true,
+			name:      "nil store",
+			analyzer:  &Analyzer{cfg: &config.Config{}},
+			wantReady: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			health := tt.stage.HealthCheck(context.Background())
+			health := tt.analyzer.HealthCheck(context.Background())
 			if health.Ready != tt.wantReady {
 				t.Errorf("HealthCheck().Ready = %v, want %v", health.Ready, tt.wantReady)
 			}
 		})
 	}
+	t.Run("valid analyzer", func(t *testing.T) {
+		cfg := testConfig(t)
+		store, err := queue.Open(cfg)
+		if err != nil {
+			t.Fatalf("queue.Open: %v", err)
+		}
+		defer store.Close()
+		a := NewAnalyzer(cfg, store, logging.NewNop())
+		health := a.HealthCheck(context.Background())
+		if !health.Ready {
+			t.Errorf("HealthCheck().Ready = false, want true; detail: %s", health.Detail)
+		}
+	})
 }
 
-func TestStage_SetLogger(t *testing.T) {
+func TestAnalyzer_SetLogger(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := queue.Open(cfg)
 	if err != nil {
@@ -84,35 +97,35 @@ func TestStage_SetLogger(t *testing.T) {
 	}
 	defer store.Close()
 
-	s := NewStage(cfg, store, nil)
-	// Note: NewStage may initialize the logger even with nil input
+	a := NewAnalyzer(cfg, store, nil)
+	// Note: NewAnalyzer may initialize the logger even with nil input
 
 	newLogger := logging.NewNop()
-	s.SetLogger(newLogger)
-	if s.logger == nil {
+	a.SetLogger(newLogger)
+	if a.logger == nil {
 		t.Error("expected logger to be set after SetLogger")
 	}
 }
 
-func TestStage_SetLoggerNilStage(t *testing.T) {
-	var s *Stage
+func TestAnalyzer_SetLoggerNilAnalyzer(t *testing.T) {
+	var a *Analyzer
 	// Should not panic
-	s.SetLogger(logging.NewNop())
+	a.SetLogger(logging.NewNop())
 }
 
-func TestStage_PrepareErrors(t *testing.T) {
+func TestAnalyzer_PrepareErrors(t *testing.T) {
 	tests := []struct {
-		name  string
-		stage *Stage
+		name     string
+		analyzer *Analyzer
 	}{
-		{"nil stage", nil},
-		{"nil config", &Stage{cfg: nil}},
-		{"nil store", &Stage{cfg: &config.Config{}, store: nil}},
+		{"nil analyzer", nil},
+		{"nil config", &Analyzer{cfg: nil}},
+		{"nil store", &Analyzer{cfg: &config.Config{}, store: nil}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.stage.Prepare(context.Background(), &queue.Item{})
+			err := tt.analyzer.Prepare(context.Background(), &queue.Item{})
 			if err == nil {
 				t.Errorf("expected error for %s", tt.name)
 			}
@@ -120,15 +133,15 @@ func TestStage_PrepareErrors(t *testing.T) {
 	}
 }
 
-func TestStage_ExecuteNilStage(t *testing.T) {
-	var s *Stage
-	err := s.Execute(context.Background(), &queue.Item{})
+func TestAnalyzer_ExecuteNilAnalyzer(t *testing.T) {
+	var a *Analyzer
+	err := a.Execute(context.Background(), &queue.Item{})
 	if err == nil {
-		t.Error("expected error for nil stage")
+		t.Error("expected error for nil analyzer")
 	}
 }
 
-func TestStage_ExecuteNilItem(t *testing.T) {
+func TestAnalyzer_ExecuteNilItem(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := queue.Open(cfg)
 	if err != nil {
@@ -136,14 +149,14 @@ func TestStage_ExecuteNilItem(t *testing.T) {
 	}
 	defer store.Close()
 
-	s := NewStage(cfg, store, logging.NewNop())
-	err = s.Execute(context.Background(), nil)
+	a := NewAnalyzer(cfg, store, logging.NewNop())
+	err = a.Execute(context.Background(), nil)
 	if err == nil {
 		t.Error("expected error for nil item")
 	}
 }
 
-func TestStage_ExecuteMissingRipSpec(t *testing.T) {
+func TestAnalyzer_ExecuteMissingRipSpec(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := queue.Open(cfg)
 	if err != nil {
@@ -151,9 +164,9 @@ func TestStage_ExecuteMissingRipSpec(t *testing.T) {
 	}
 	defer store.Close()
 
-	s := NewStage(cfg, store, logging.NewNop())
+	a := NewAnalyzer(cfg, store, logging.NewNop())
 	item := &queue.Item{RipSpecData: ""}
-	err = s.Execute(context.Background(), item)
+	err = a.Execute(context.Background(), item)
 	if err == nil {
 		t.Error("expected error for missing rip spec")
 	}
@@ -291,7 +304,7 @@ func TestStoreCommentaryResult(t *testing.T) {
 			env:    &ripspec.Envelope{},
 			result: nil,
 			check: func(t *testing.T, env *ripspec.Envelope) {
-				if env.Attributes != nil && env.Attributes["audio_analysis"] != nil {
+				if env.Attributes.AudioAnalysis != nil {
 					t.Error("expected no audio_analysis attribute for nil result")
 				}
 			},
@@ -303,19 +316,12 @@ func TestStoreCommentaryResult(t *testing.T) {
 				PrimaryTrack: TrackInfo{Index: 1},
 			},
 			check: func(t *testing.T, env *ripspec.Envelope) {
-				if env.Attributes == nil {
-					t.Fatal("expected Attributes to be initialized")
+				analysis := env.Attributes.AudioAnalysis
+				if analysis == nil {
+					t.Fatal("expected AudioAnalysis to be set")
 				}
-				analysis, ok := env.Attributes["audio_analysis"].(map[string]any)
-				if !ok {
-					t.Fatal("expected audio_analysis map")
-				}
-				primary, ok := analysis["primary_track"].(map[string]any)
-				if !ok {
-					t.Fatal("expected primary_track map")
-				}
-				if primary["index"] != 1 {
-					t.Errorf("primary_track.index = %v, want 1", primary["index"])
+				if analysis.PrimaryTrack.Index != 1 {
+					t.Errorf("primary_track.index = %v, want 1", analysis.PrimaryTrack.Index)
 				}
 			},
 		},
@@ -329,19 +335,18 @@ func TestStoreCommentaryResult(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, env *ripspec.Envelope) {
-				analysis := env.Attributes["audio_analysis"].(map[string]any)
-				tracks, ok := analysis["commentary_tracks"].([]map[string]any)
-				if !ok {
-					t.Fatal("expected commentary_tracks slice")
+				analysis := env.Attributes.AudioAnalysis
+				if analysis == nil {
+					t.Fatal("expected AudioAnalysis to be set")
 				}
-				if len(tracks) != 1 {
-					t.Fatalf("expected 1 commentary track, got %d", len(tracks))
+				if len(analysis.CommentaryTracks) != 1 {
+					t.Fatalf("expected 1 commentary track, got %d", len(analysis.CommentaryTracks))
 				}
-				if tracks[0]["index"] != 2 {
-					t.Errorf("commentary track index = %v, want 2", tracks[0]["index"])
+				if analysis.CommentaryTracks[0].Index != 2 {
+					t.Errorf("commentary track index = %v, want 2", analysis.CommentaryTracks[0].Index)
 				}
-				if tracks[0]["confidence"] != 0.95 {
-					t.Errorf("commentary track confidence = %v, want 0.95", tracks[0]["confidence"])
+				if analysis.CommentaryTracks[0].Confidence != 0.95 {
+					t.Errorf("commentary track confidence = %v, want 0.95", analysis.CommentaryTracks[0].Confidence)
 				}
 			},
 		},
@@ -355,16 +360,15 @@ func TestStoreCommentaryResult(t *testing.T) {
 				},
 			},
 			check: func(t *testing.T, env *ripspec.Envelope) {
-				analysis := env.Attributes["audio_analysis"].(map[string]any)
-				excluded, ok := analysis["excluded_tracks"].([]map[string]any)
-				if !ok {
-					t.Fatal("expected excluded_tracks slice")
+				analysis := env.Attributes.AudioAnalysis
+				if analysis == nil {
+					t.Fatal("expected AudioAnalysis to be set")
 				}
-				if len(excluded) != 1 {
-					t.Fatalf("expected 1 excluded track, got %d", len(excluded))
+				if len(analysis.ExcludedTracks) != 1 {
+					t.Fatalf("expected 1 excluded track, got %d", len(analysis.ExcludedTracks))
 				}
-				if excluded[0]["reason"] != "stereo_downmix" {
-					t.Errorf("excluded track reason = %v, want stereo_downmix", excluded[0]["reason"])
+				if analysis.ExcludedTracks[0].Reason != "stereo_downmix" {
+					t.Errorf("excluded track reason = %v, want stereo_downmix", analysis.ExcludedTracks[0].Reason)
 				}
 			},
 		},

@@ -178,13 +178,13 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 	var subtitleStage workflow.StageHandler
 	if cfg.Subtitles.Enabled {
 		service := subtitles.NewService(cfg, logger)
-		subtitleStage = subtitles.NewStage(store, service, logger)
+		subtitleStage = subtitles.NewGenerator(store, service, logger)
 	}
 
 	mgr.ConfigureStages(workflow.StageSet{
 		Identifier:        identification.NewIdentifier(cfg, store, logger, notifier),
 		Ripper:            ripping.NewRipper(cfg, store, logger, notifier),
-		AudioAnalysis:     audioanalysis.NewStage(cfg, store, logger),
+		AudioAnalysis:     audioanalysis.NewAnalyzer(cfg, store, logger),
 		EpisodeIdentifier: episodeid.NewEpisodeIdentifier(cfg, store, logger),
 		Encoder:           encoding.NewEncoder(cfg, store, logger, notifier),
 		Subtitles:         subtitleStage,

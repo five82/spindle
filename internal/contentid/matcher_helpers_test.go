@@ -221,11 +221,8 @@ func TestEpisodeOutputBasename(t *testing.T) {
 func TestMarkEpisodesSynchronized(t *testing.T) {
 	env := &ripspec.Envelope{}
 	markEpisodesSynchronized(env)
-	if env.Attributes == nil {
-		t.Fatalf("expected attributes to be initialized")
-	}
-	if value, ok := env.Attributes[ripspec.AttrEpisodesSynchronized].(bool); !ok || !value {
-		t.Fatalf("expected episodes_synchronized true, got %#v", env.Attributes[ripspec.AttrEpisodesSynchronized])
+	if !env.Attributes.EpisodesSynchronized {
+		t.Fatalf("expected episodes_synchronized true")
 	}
 }
 
@@ -237,13 +234,9 @@ func TestAttachTranscriptPaths(t *testing.T) {
 			{EpisodeKey: "s01e02", Path: "/tmp/s01e02.srt"},
 		}
 		attachTranscriptPaths(env, fps)
-		raw, ok := env.Attributes[ripspec.AttrContentIDTranscripts]
-		if !ok {
-			t.Fatal("expected content_id_transcripts attribute")
-		}
-		paths, ok := raw.(map[string]string)
-		if !ok {
-			t.Fatalf("expected map[string]string, got %T", raw)
+		paths := env.Attributes.ContentIDTranscripts
+		if len(paths) == 0 {
+			t.Fatal("expected content_id_transcripts to be populated")
 		}
 		if paths["s01e01"] != "/tmp/s01e01.srt" {
 			t.Fatalf("unexpected path for s01e01: %q", paths["s01e01"])
@@ -256,10 +249,8 @@ func TestAttachTranscriptPaths(t *testing.T) {
 	t.Run("empty fingerprints", func(t *testing.T) {
 		env := &ripspec.Envelope{}
 		attachTranscriptPaths(env, nil)
-		if env.Attributes != nil {
-			if _, ok := env.Attributes[ripspec.AttrContentIDTranscripts]; ok {
-				t.Fatal("expected no content_id_transcripts for empty fingerprints")
-			}
+		if len(env.Attributes.ContentIDTranscripts) > 0 {
+			t.Fatal("expected no content_id_transcripts for empty fingerprints")
 		}
 	})
 
@@ -277,7 +268,7 @@ func TestAttachTranscriptPaths(t *testing.T) {
 			{EpisodeKey: "s01e02", Path: ""},
 		}
 		attachTranscriptPaths(env, fps)
-		paths := env.Attributes[ripspec.AttrContentIDTranscripts].(map[string]string)
+		paths := env.Attributes.ContentIDTranscripts
 		if len(paths) != 1 {
 			t.Fatalf("expected 1 path, got %d", len(paths))
 		}

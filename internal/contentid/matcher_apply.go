@@ -61,27 +61,27 @@ func (m *Matcher) attachMatchAttributes(env *ripspec.Envelope, matches []matchRe
 	if env == nil || len(matches) == 0 {
 		return
 	}
-	payload := make([]map[string]any, 0, len(matches))
+	typed := make([]ripspec.ContentIDMatch, 0, len(matches))
 	for _, match := range matches {
-		entry := map[string]any{
-			"episode_key":     match.EpisodeKey,
-			"title_id":        match.TitleID,
-			"matched_episode": match.TargetEpisode,
-			"score":           match.Score,
+		entry := ripspec.ContentIDMatch{
+			EpisodeKey:     match.EpisodeKey,
+			TitleID:        match.TitleID,
+			MatchedEpisode: match.TargetEpisode,
+			Score:          match.Score,
 		}
 		if match.SubtitleFileID > 0 {
-			entry["subtitle_file_id"] = match.SubtitleFileID
+			entry.SubtitleFileID = match.SubtitleFileID
 		}
 		if strings.TrimSpace(match.SubtitleLanguage) != "" {
-			entry["subtitle_language"] = match.SubtitleLanguage
+			entry.SubtitleLanguage = match.SubtitleLanguage
 		}
 		if strings.TrimSpace(match.SubtitleCachePath) != "" {
-			entry["subtitle_cache_path"] = match.SubtitleCachePath
+			entry.SubtitleCachePath = match.SubtitleCachePath
 		}
-		payload = append(payload, entry)
+		typed = append(typed, entry)
 	}
-	env.SetAttribute(ripspec.AttrContentIDMatches, payload)
-	env.SetAttribute(ripspec.AttrContentIDMethod, "whisperx_opensubtitles")
+	env.Attributes.ContentIDMatches = typed
+	env.Attributes.ContentIDMethod = "whisperx_opensubtitles"
 }
 
 func attachTranscriptPaths(env *ripspec.Envelope, fingerprints []ripFingerprint) {
@@ -95,7 +95,7 @@ func attachTranscriptPaths(env *ripspec.Envelope, fingerprints []ripFingerprint)
 		}
 	}
 	if len(paths) > 0 {
-		env.SetAttribute(ripspec.AttrContentIDTranscripts, paths)
+		env.Attributes.ContentIDTranscripts = paths
 	}
 }
 
@@ -103,7 +103,7 @@ func markEpisodesSynchronized(env *ripspec.Envelope) {
 	if env == nil {
 		return
 	}
-	env.SetAttribute(ripspec.AttrEpisodesSynchronized, true)
+	env.Attributes.EpisodesSynchronized = true
 }
 
 func (m *Matcher) updateMetadata(item *queue.Item, matches []matchResult, season int) {

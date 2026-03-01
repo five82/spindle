@@ -265,7 +265,7 @@ func TestExecuteMatchesEpisodes(t *testing.T) {
 	if updated.Episodes[0].OutputBasename == "" {
 		t.Fatalf("expected output basename to be set")
 	}
-	if updated.Attributes == nil || updated.Attributes[ripspec.AttrContentIDMethod] != "whisperx_opensubtitles" {
+	if updated.Attributes.ContentIDMethod != "whisperx_opensubtitles" {
 		t.Fatalf("expected content id attributes to be recorded")
 	}
 	metadata := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)

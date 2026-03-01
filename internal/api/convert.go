@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -225,8 +224,8 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 	}
 	titles := indexTitles(env.Titles)
 	assets := indexAssets(env.Assets)
-	matches := indexMatches(env.Attributes)
-	generated := indexGeneratedSubtitles(env.Attributes)
+	matches := indexMatches(&env.Attributes)
+	generated := indexGeneratedSubtitles(env.Attributes.SubtitleGenerationResults)
 	effectiveStage := makeEpisodeStageResolver(item)
 	statuses := make([]EpisodeStatus, 0, len(env.Episodes))
 	totals := EpisodeTotals{Planned: len(env.Episodes)}
@@ -315,7 +314,7 @@ func deriveEpisodeStatuses(item *queue.Item) ([]EpisodeStatus, EpisodeTotals, bo
 		}
 		return strings.Compare(a.Key, b.Key)
 	})
-	return statuses, totals, episodesSynced(env.Attributes, env.Episodes, item.MetadataJSON)
+	return statuses, totals, episodesSynced(env.Attributes.EpisodesSynchronized, env.Episodes, item.MetadataJSON)
 }
 
 func countEpisodeIdentified(episodes []EpisodeStatus) int {
@@ -407,41 +406,22 @@ type matchInfo struct {
 	MatchedEpisode   int
 }
 
-func indexMatches(attrs map[string]any) map[string]matchInfo {
-	if len(attrs) == 0 {
+func indexMatches(attrs *ripspec.EnvelopeAttributes) map[string]matchInfo {
+	if len(attrs.ContentIDMatches) == 0 {
 		return nil
 	}
-	var method string
-	if raw, ok := attrs[ripspec.AttrContentIDMethod]; ok {
-		method = strings.TrimSpace(asString(raw))
-	}
-	var rawMatches []any
-	switch v := attrs[ripspec.AttrContentIDMatches].(type) {
-	case []any:
-		rawMatches = v
-	case []map[string]any:
-		rawMatches = make([]any, len(v))
-		for i := range v {
-			rawMatches[i] = v[i]
-		}
-	default:
-		return nil
-	}
-	lookup := make(map[string]matchInfo, len(rawMatches))
-	for _, entry := range rawMatches {
-		m, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(asString(m["episode_key"])))
+	method := strings.TrimSpace(attrs.ContentIDMethod)
+	lookup := make(map[string]matchInfo, len(attrs.ContentIDMatches))
+	for _, m := range attrs.ContentIDMatches {
+		key := strings.ToLower(strings.TrimSpace(m.EpisodeKey))
 		if key == "" {
 			continue
 		}
 		lookup[key] = matchInfo{
 			SubtitleSource:   method,
-			SubtitleLanguage: strings.TrimSpace(asString(m["subtitle_language"])),
-			Score:            asFloat(m["score"]),
-			MatchedEpisode:   asInt(m["matched_episode"]),
+			SubtitleLanguage: strings.TrimSpace(m.SubtitleLanguage),
+			Score:            m.Score,
+			MatchedEpisode:   m.MatchedEpisode,
 		}
 	}
 	return lookup
@@ -453,36 +433,20 @@ type generatedSubtitleInfo struct {
 	Decision string
 }
 
-func indexGeneratedSubtitles(attrs map[string]any) map[string]generatedSubtitleInfo {
-	if len(attrs) == 0 {
+func indexGeneratedSubtitles(records []ripspec.SubtitleGenRecord) map[string]generatedSubtitleInfo {
+	if len(records) == 0 {
 		return nil
 	}
-	var rawResults []any
-	switch v := attrs["subtitle_generation_results"].(type) {
-	case []any:
-		rawResults = v
-	case []map[string]any:
-		rawResults = make([]any, len(v))
-		for i := range v {
-			rawResults[i] = v[i]
-		}
-	default:
-		return nil
-	}
-	lookup := make(map[string]generatedSubtitleInfo, len(rawResults))
-	for _, entry := range rawResults {
-		m, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(asString(m["episode_key"])))
+	lookup := make(map[string]generatedSubtitleInfo, len(records))
+	for _, r := range records {
+		key := strings.ToLower(strings.TrimSpace(r.EpisodeKey))
 		if key == "" {
 			continue
 		}
 		lookup[key] = generatedSubtitleInfo{
-			Source:   strings.ToLower(strings.TrimSpace(asString(m["source"]))),
-			Language: strings.ToLower(strings.TrimSpace(asString(m["language"]))),
-			Decision: strings.TrimSpace(asString(m["opensubtitles_decision"])),
+			Source:   strings.ToLower(strings.TrimSpace(r.Source)),
+			Language: strings.ToLower(strings.TrimSpace(r.Language)),
+			Decision: strings.TrimSpace(r.OpenSubtitlesDecision),
 		}
 	}
 	return lookup
@@ -493,24 +457,15 @@ func deriveAudioInfo(item *queue.Item) (string, int) {
 		return "", 0
 	}
 	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil || len(env.Attributes) == 0 {
+	if err != nil {
 		return "", 0
 	}
-	audioDesc := strings.TrimSpace(asString(env.Attributes["primary_audio_description"]))
-	commentaryCount := countCommentaryTracks(env.Attributes)
+	audioDesc := strings.TrimSpace(env.Attributes.PrimaryAudioDescription)
+	commentaryCount := 0
+	if env.Attributes.AudioAnalysis != nil {
+		commentaryCount = len(env.Attributes.AudioAnalysis.CommentaryTracks)
+	}
 	return audioDesc, commentaryCount
-}
-
-func countCommentaryTracks(attrs map[string]any) int {
-	analysis, ok := attrs["audio_analysis"].(map[string]any)
-	if !ok {
-		return 0
-	}
-	tracks, ok := analysis["commentary_tracks"].([]any)
-	if !ok {
-		return 0
-	}
-	return len(tracks)
 }
 
 func deriveSubtitleGeneration(item *queue.Item) *SubtitleGenerationStatus {
@@ -518,25 +473,22 @@ func deriveSubtitleGeneration(item *queue.Item) *SubtitleGenerationStatus {
 		return nil
 	}
 	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil || len(env.Attributes) == 0 {
+	if err != nil {
 		return nil
 	}
 	var (
-		openSubs    int
-		whisperx    int
-		expected    bool
-		fallback    bool
-		haveSummary bool
+		openSubs int
+		whisperx int
+		expected bool
+		fallback bool
 	)
-	if raw, ok := env.Attributes["subtitle_generation_summary"].(map[string]any); ok && len(raw) > 0 {
-		openSubs = asInt(raw["opensubtitles"])
-		whisperx = asInt(raw["whisperx"])
-		expected = asBool(raw["expected_opensubtitles"])
-		fallback = asBool(raw["fallback_used"])
-		haveSummary = true
-	}
-	if !haveSummary {
-		generated := indexGeneratedSubtitles(env.Attributes)
+	if summary := env.Attributes.SubtitleGenerationSummary; summary != nil {
+		openSubs = summary.OpenSubtitles
+		whisperx = summary.WhisperX
+		expected = summary.ExpectedOpenSubtitles
+		fallback = summary.FallbackUsed
+	} else {
+		generated := indexGeneratedSubtitles(env.Attributes.SubtitleGenerationResults)
 		if len(generated) == 0 {
 			return nil
 		}
@@ -548,28 +500,21 @@ func deriveSubtitleGeneration(item *queue.Item) *SubtitleGenerationStatus {
 				whisperx++
 			}
 		}
-		expected = false
-		fallback = false
 	}
 	if openSubs == 0 && whisperx == 0 {
 		return nil
 	}
-	status := &SubtitleGenerationStatus{
+	return &SubtitleGenerationStatus{
 		OpenSubtitles:         openSubs,
 		WhisperX:              whisperx,
 		ExpectedOpenSubtitles: expected,
 		FallbackUsed:          fallback,
 	}
-	return status
 }
 
-func episodesSynced(attrs map[string]any, episodes []ripspec.Episode, metadataJSON string) bool {
-	if len(attrs) > 0 {
-		if raw, ok := attrs[ripspec.AttrEpisodesSynchronized]; ok {
-			if flag, ok2 := raw.(bool); ok2 {
-				return flag
-			}
-		}
+func episodesSynced(synced bool, episodes []ripspec.Episode, metadataJSON string) bool {
+	if synced {
+		return true
 	}
 	if len(episodes) > 0 {
 		synced := true
@@ -636,62 +581,6 @@ func isPerEpisodeQueueStage(queueStage string) bool {
 		string(queue.StatusSubtitling),
 		string(queue.StatusOrganizing):
 		return true
-	default:
-		return false
-	}
-}
-
-func asString(v any) string {
-	switch value := v.(type) {
-	case string:
-		return value
-	case json.Number:
-		return value.String()
-	case fmt.Stringer:
-		return value.String()
-	case float64:
-		return fmt.Sprintf("%g", value)
-	case int:
-		return fmt.Sprintf("%d", value)
-	default:
-		return ""
-	}
-}
-
-func asFloat(v any) float64 {
-	switch value := v.(type) {
-	case float64:
-		return value
-	case json.Number:
-		f, _ := value.Float64()
-		return f
-	case int:
-		return float64(value)
-	default:
-		return 0
-	}
-}
-
-func asInt(v any) int {
-	switch value := v.(type) {
-	case float64:
-		return int(value)
-	case json.Number:
-		i, _ := value.Int64()
-		return int(i)
-	case int:
-		return value
-	default:
-		return 0
-	}
-}
-
-func asBool(v any) bool {
-	switch value := v.(type) {
-	case bool:
-		return value
-	case string:
-		return strings.EqualFold(strings.TrimSpace(value), "true")
 	default:
 		return false
 	}

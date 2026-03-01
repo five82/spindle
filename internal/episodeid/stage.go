@@ -206,9 +206,9 @@ func (e *EpisodeIdentifier) Execute(ctx context.Context, item *queue.Item) error
 		item.RipSpecData = encoded
 
 		// Propagate content_id_needs_review from matcher
-		if v, ok := env.Attributes[ripspec.AttrContentIDNeedsReview].(bool); ok && v {
+		if env.Attributes.ContentIDNeedsReview {
 			reason := "content id flagged for review"
-			if r, ok := env.Attributes[ripspec.AttrContentIDReviewReason].(string); ok && strings.TrimSpace(r) != "" {
+			if r := strings.TrimSpace(env.Attributes.ContentIDReviewReason); r != "" {
 				reason = r
 			}
 			flagForReview(logger, item, reason, "content_id_needs_review")

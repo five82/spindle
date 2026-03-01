@@ -25,29 +25,29 @@ func TestFromQueueItemIncludesEpisodes(t *testing.T) {
 			Encoded: []ripspec.Asset{{EpisodeKey: ep1, Path: "/encoded/ep1.mkv"}},
 			Final:   []ripspec.Asset{{EpisodeKey: ep1, Path: "/final/ep1.mkv"}},
 		},
-		Attributes: map[string]any{
-			ripspec.AttrContentIDMethod:      "whisperx_opensubtitles",
-			ripspec.AttrEpisodesSynchronized: true,
-			ripspec.AttrContentIDMatches: []map[string]any{{
-				"episode_key":       ep2,
-				"matched_episode":   2,
-				"score":             0.91,
-				"subtitle_language": "en",
+		Attributes: ripspec.EnvelopeAttributes{
+			ContentIDMethod:      "whisperx_opensubtitles",
+			EpisodesSynchronized: true,
+			ContentIDMatches: []ripspec.ContentIDMatch{{
+				EpisodeKey:       ep2,
+				MatchedEpisode:   2,
+				Score:            0.91,
+				SubtitleLanguage: "en",
 			}},
-			"subtitle_generation_summary": map[string]any{
-				"opensubtitles":          1,
-				"whisperx":               1,
-				"expected_opensubtitles": true,
-				"fallback_used":          true,
+			SubtitleGenerationSummary: &ripspec.SubtitleGenSummary{
+				OpenSubtitles:         1,
+				WhisperX:              1,
+				ExpectedOpenSubtitles: true,
+				FallbackUsed:          true,
 			},
-			"subtitle_generation_results": []map[string]any{{
-				"episode_key": ep1,
-				"source":      "opensubtitles",
+			SubtitleGenerationResults: []ripspec.SubtitleGenRecord{{
+				EpisodeKey: ep1,
+				Source:     "opensubtitles",
 			}, {
-				"episode_key":            ep2,
-				"source":                 "whisperx",
-				"language":               "en",
-				"opensubtitles_decision": "no_match",
+				EpisodeKey:            ep2,
+				Source:                "whisperx",
+				Language:              "en",
+				OpenSubtitlesDecision: "no_match",
 			}},
 		},
 	}

@@ -40,6 +40,16 @@ func DefaultHTTPTimeout() time.Duration {
 	return defaultHTTPTimeout
 }
 
+// Completer abstracts the LLM completion API so consumers can depend on
+// an interface rather than the concrete *Client (e.g. for testing).
+type Completer interface {
+	CompleteJSON(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+	HealthCheck(ctx context.Context) error
+}
+
+// Verify that *Client satisfies Completer at compile time.
+var _ Completer = (*Client)(nil)
+
 // Client wraps the OpenRouter chat completion API.
 type Client struct {
 	cfg        Config
