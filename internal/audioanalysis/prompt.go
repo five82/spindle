@@ -28,6 +28,12 @@ Given a transcript sample from an audio track, determine if it is commentary.
 
 You must respond ONLY with JSON: {"decision": "commentary" or "not_commentary", "confidence": 0.0-1.0, "reason": "brief explanation"}`
 
+// Commentary decision values returned by the LLM.
+const (
+	DecisionCommentary    = "commentary"
+	DecisionNotCommentary = "not_commentary"
+)
+
 // CommentaryDecision represents the LLM's classification of an audio track.
 type CommentaryDecision struct {
 	Decision   string  `json:"decision"`   // "commentary" or "not_commentary"
@@ -37,5 +43,5 @@ type CommentaryDecision struct {
 
 // IsCommentary returns true if the decision indicates commentary with sufficient confidence.
 func (d CommentaryDecision) IsCommentary(confidenceThreshold float64) bool {
-	return d.Decision == "commentary" && d.Confidence >= confidenceThreshold
+	return d.Decision == DecisionCommentary && d.Confidence >= confidenceThreshold
 }

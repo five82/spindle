@@ -1,6 +1,6 @@
 // Package audioanalysis performs audio track selection and commentary detection.
 //
-// This stage runs after ripping and before encoding. It handles:
+// This stage runs after encoding to operate on smaller encoded files. It handles:
 //
 //  1. Primary audio selection - selecting the best English audio track
 //  2. Commentary detection - identifying commentary tracks via transcription
@@ -19,8 +19,8 @@
 //
 // # Stage Flow
 //
-// RIPPING -> AUDIO_ANALYZING -> AUDIO_ANALYZED -> EPISODE_IDENTIFYING/ENCODING
+// ENCODED -> AUDIO_ANALYZING -> AUDIO_ANALYZED -> SUBTITLING/ORGANIZING
 //
 // The stage stores analysis results in the queue item's RipSpec for use by
-// the encoding and organizing stages.
+// the subtitling and organizing stages.
 package audioanalysis

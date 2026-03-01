@@ -11,7 +11,6 @@ import (
 
 	"log/slog"
 
-	"spindle/internal/config"
 	"spindle/internal/deps"
 	langpkg "spindle/internal/language"
 	"spindle/internal/logging"
@@ -100,6 +99,9 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create commentary work dir: %w", err)
 	}
+	if os.Getenv("SPD_DEBUG_SUBTITLES_KEEP") == "" {
+		defer os.RemoveAll(workDir)
+	}
 
 	// Initialize WhisperX service
 	whisperSvc := whisperx.NewService(whisperx.Config{
@@ -110,7 +112,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 	}, deps.ResolveFFmpegPath())
 
 	// Get transcription of primary audio for comparison
-	primaryTranscript, err := s.transcribeSegment(ctx, whisperSvc, targetPath, primaryIndex, workDir, "primary")
+	primaryTranscript, err := TranscribeSegment(ctx, whisperSvc, targetPath, primaryIndex, filepath.Join(workDir, "primary"))
 	if err != nil {
 		return nil, fmt.Errorf("transcribe primary audio: %w", err)
 	}
@@ -125,7 +127,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 
 	for _, candidate := range candidates {
 		// Transcribe candidate
-		candidateTranscript, err := s.transcribeSegment(ctx, whisperSvc, targetPath, candidate.Index, workDir, fmt.Sprintf("candidate-%d", candidate.Index))
+		candidateTranscript, err := TranscribeSegment(ctx, whisperSvc, targetPath, candidate.Index, filepath.Join(workDir, fmt.Sprintf("candidate-%d", candidate.Index)))
 		if err != nil {
 			logger.Warn("failed to transcribe candidate; skipping",
 				logging.Int("track_index", candidate.Index),
@@ -252,11 +254,6 @@ func TranscribeSegment(ctx context.Context, svc *whisperx.Service, sourcePath st
 	return result.Text, nil
 }
 
-// transcribeSegment transcribes a segment of an audio track into a labeled subdirectory.
-func (s *Stage) transcribeSegment(ctx context.Context, whisperSvc *whisperx.Service, sourcePath string, audioIndex int, workDir, label string) (string, error) {
-	return TranscribeSegment(ctx, whisperSvc, sourcePath, audioIndex, filepath.Join(workDir, label))
-}
-
 // createLLMClient creates an LLM client for commentary classification.
 func (s *Stage) createLLMClient() *llm.Client {
 	llmCfg := s.cfg.CommentaryLLM()
@@ -328,7 +325,7 @@ func TruncateTranscript(transcript string, maxLen int) string {
 
 // ApplyCommentaryDisposition remuxes files to set the "comment" disposition on detected commentary tracks.
 // This ensures Drapto preserves the disposition and Jellyfin recognizes the tracks as commentary.
-func ApplyCommentaryDisposition(ctx context.Context, cfg *config.Config, logger *slog.Logger, targets []string, result *CommentaryResult) error {
+func ApplyCommentaryDisposition(ctx context.Context, ffprobeBinary string, logger *slog.Logger, targets []string, result *CommentaryResult) error {
 	if result == nil || len(result.CommentaryTracks) == 0 {
 		return nil // No commentary tracks to mark
 	}
@@ -341,8 +338,9 @@ func ApplyCommentaryDisposition(ctx context.Context, cfg *config.Config, logger 
 		commentaryIndices[track.Index] = true
 	}
 
+	resolvedProbe := deps.ResolveFFprobePath(ffprobeBinary)
 	for _, path := range targets {
-		if err := applyDispositionToFile(ctx, ffmpegBinary, path, commentaryIndices, logger); err != nil {
+		if err := applyDispositionToFile(ctx, ffmpegBinary, resolvedProbe, path, commentaryIndices, logger); err != nil {
 			return fmt.Errorf("apply commentary disposition to %s: %w", filepath.Base(path), err)
 		}
 	}
@@ -359,12 +357,11 @@ type audioStreamMapping struct {
 }
 
 // applyDispositionToFile remuxes a single file to set commentary disposition.
-func applyDispositionToFile(ctx context.Context, ffmpegBinary, path string, commentaryIndices map[int]bool, logger *slog.Logger) error {
+func applyDispositionToFile(ctx context.Context, ffmpegBinary, ffprobeBinary, path string, commentaryIndices map[int]bool, logger *slog.Logger) error {
 	if len(commentaryIndices) == 0 {
 		return nil
 	}
 
-	ffprobeBinary := deps.ResolveFFprobePath("")
 	probe, err := ffprobe.Inspect(ctx, ffprobeBinary, path)
 	if err != nil {
 		return fmt.Errorf("probe file: %w", err)
@@ -461,7 +458,12 @@ func commentaryLabel(original string) string {
 
 // hasAnyCommentary returns true if any stream in the mappings is commentary.
 func hasAnyCommentary(mappings []audioStreamMapping) bool {
-	return countCommentaryTracks(mappings) > 0
+	for _, m := range mappings {
+		if m.isCommentary {
+			return true
+		}
+	}
+	return false
 }
 
 // countCommentaryTracks returns the number of commentary tracks in the mappings.

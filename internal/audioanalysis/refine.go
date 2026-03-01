@@ -62,14 +62,11 @@ func RefineAudioTargets(ctx context.Context, cfg *config.Config, logger *slog.Lo
 
 func refineAudioTracks(ctx context.Context, cfg *config.Config, logger *slog.Logger, path string, additionalKeep []int) (AudioRefinementResult, error) {
 	logger = logging.WithContext(ctx, logging.NewComponentLogger(logger, "audio-refiner"))
-	if strings.TrimSpace(path) == "" {
-		return AudioRefinementResult{}, fmt.Errorf("refine audio: empty path")
-	}
 	ffprobeBinary := "ffprobe"
 	if cfg != nil {
 		ffprobeBinary = deps.ResolveFFprobePath(cfg.FFprobeBinary())
 	}
-	probe, err := probeVideo(ctx, ffprobeBinary, path)
+	probe, err := ffprobe.Inspect(ctx, ffprobeBinary, path)
 	if err != nil {
 		return AudioRefinementResult{}, fmt.Errorf("inspect ripped audio: %w", err)
 	}
@@ -444,7 +441,7 @@ func validateRemuxedAudio(ctx context.Context, ffprobeBinary, path string, expec
 		return nil // Nothing to validate
 	}
 
-	probe, err := probeVideo(ctx, ffprobeBinary, path)
+	probe, err := ffprobe.Inspect(ctx, ffprobeBinary, path)
 	if err != nil {
 		return fmt.Errorf("probe remuxed file: %w", err)
 	}
@@ -477,15 +474,6 @@ func validateRemuxedAudio(ctx context.Context, ffprobeBinary, path string, expec
 	}
 
 	return nil
-}
-
-// probeVideo runs ffprobe on a video file and returns the parsed result.
-func probeVideo(ctx context.Context, ffprobeBinary, path string) (*ffprobe.Result, error) {
-	result, err := ffprobe.Inspect(ctx, ffprobeBinary, path)
-	if err != nil {
-		return nil, err
-	}
-	return &result, nil
 }
 
 // findAudioDescription returns the formatted audio description for the specified stream index.

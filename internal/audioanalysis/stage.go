@@ -158,7 +158,7 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	// Remap commentary indices to reflect post-refinement audio stream positions.
 	if commentaryResult != nil && len(commentaryResult.CommentaryTracks) > 0 {
 		RemapCommentaryIndices(commentaryResult, refineResult.KeptIndices)
-		if err := ApplyCommentaryDisposition(ctx, s.cfg, s.logger, targets, commentaryResult); err != nil {
+		if err := ApplyCommentaryDisposition(ctx, s.cfg.FFprobeBinary(), s.logger, targets, commentaryResult); err != nil {
 			logger.Warn("failed to set commentary disposition; tracks may not be labeled",
 				logging.Error(err),
 				logging.String(logging.FieldEventType, "commentary_disposition_failed"),
@@ -178,7 +178,6 @@ func (s *Stage) Execute(ctx context.Context, item *queue.Item) error {
 	// disposition) so audio stream counts reflect the final output.
 	if len(env.Episodes) > 1 {
 		encoding.ValidateEpisodeConsistency(ctx, item, &env, logger)
-		specDirty = true
 	}
 
 	// Persist updated RipSpec
