@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -133,7 +132,7 @@ Use --all to remove all staging directories regardless of queue status.`,
 			}
 
 			return ctx.withQueueStore(func(api queueStoreAPI) error {
-				fingerprints, err := collectActiveFingerprints(cmd.Context(), api)
+				fingerprints, err := api.ActiveFingerprints(cmd.Context())
 				if err != nil {
 					return err
 				}
@@ -149,21 +148,6 @@ Use --all to remove all staging directories regardless of queue status.`,
 	cmd.Flags().BoolVar(&cleanAll, "all", false, "Remove all staging directories (including active)")
 
 	return cmd
-}
-
-func collectActiveFingerprints(ctx context.Context, api queueStoreAPI) (map[string]struct{}, error) {
-	items, err := api.List(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("list queue items: %w", err)
-	}
-	fingerprints := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		fp := strings.ToUpper(strings.TrimSpace(item.DiscFingerprint))
-		if fp != "" {
-			fingerprints[fp] = struct{}{}
-		}
-	}
-	return fingerprints, nil
 }
 
 func printStagingCleanResult(cmd *cobra.Command, result staging.CleanStaleResult, label string) error {

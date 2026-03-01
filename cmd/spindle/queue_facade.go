@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"spindle/internal/api"
 	"spindle/internal/ipc"
@@ -22,6 +23,7 @@ type queueAPI interface {
 	RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (api.RetryItemResult, error)
 	Stop(ctx context.Context, ids []int64) (int64, error)
 	Health(ctx context.Context) (queue.HealthSummary, error)
+	ActiveFingerprints(ctx context.Context) (map[string]struct{}, error)
 }
 
 // queueStoreAPI extends queueAPI with operations that require direct store access.
@@ -145,6 +147,21 @@ func (a *queueIPCAdapter) Health(_ context.Context) (queue.HealthSummary, error)
 	return queue.HealthSummary(*resp), nil
 }
 
+func (a *queueIPCAdapter) ActiveFingerprints(ctx context.Context) (map[string]struct{}, error) {
+	items, err := a.List(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	fingerprints := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		fp := strings.ToUpper(strings.TrimSpace(item.DiscFingerprint))
+		if fp != "" {
+			fingerprints[fp] = struct{}{}
+		}
+	}
+	return fingerprints, nil
+}
+
 // --- Store adapter ---
 
 type queueStoreAdapter struct {
@@ -218,4 +235,22 @@ func (a *queueStoreAdapter) Stop(ctx context.Context, ids []int64) (int64, error
 
 func (a *queueStoreAdapter) Health(ctx context.Context) (queue.HealthSummary, error) {
 	return a.store.Health(ctx)
+}
+
+func (a *queueStoreAdapter) ActiveFingerprints(ctx context.Context) (map[string]struct{}, error) {
+	items, err := a.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fingerprints := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		fp := strings.ToUpper(strings.TrimSpace(item.DiscFingerprint))
+		if fp != "" {
+			fingerprints[fp] = struct{}{}
+		}
+	}
+	return fingerprints, nil
 }

@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"spindle/internal/config"
 	"spindle/internal/ipc"
 	"spindle/internal/preflight"
+	"spindle/internal/queue"
 )
 
 // LaunchOptions controls daemon process launch behavior.
@@ -166,6 +168,128 @@ func ForceKillProcess(pidPath, lockPath string, fallbackPID int) (int, error) {
 		_ = os.Remove(lockPath)
 	}
 	return pid, nil
+}
+
+// ErrDaemonNotRunning indicates daemon IPC is unavailable.
+var ErrDaemonNotRunning = errors.New("daemon not running")
+
+// StopResult captures daemon stop/termination outcome.
+type StopResult struct {
+	StopAcknowledged bool
+	ForcedKill       bool
+	PID              int
+}
+
+// StopAndTerminate requests daemon stop and force-kills the process if still alive after gracePeriod.
+func StopAndTerminate(socketPath string, cfg *config.Config, gracePeriod time.Duration) (StopResult, error) {
+	client, err := ipc.Dial(socketPath)
+	if err != nil {
+		if isDaemonUnavailable(err) {
+			return StopResult{}, ErrDaemonNotRunning
+		}
+		return StopResult{}, err
+	}
+	statusResp, statusErr := client.Status()
+	var lockPath, queueDBPath string
+	pid := 0
+	if statusErr == nil && statusResp != nil {
+		lockPath = statusResp.LockPath
+		queueDBPath = statusResp.QueueDBPath
+		pid = statusResp.PID
+	}
+	resp, err := client.Stop()
+	_ = client.Close()
+	if err != nil {
+		return StopResult{}, err
+	}
+	result := StopResult{PID: pid}
+	if resp != nil {
+		result.StopAcknowledged = resp.Stopped
+	}
+
+	_ = WaitForShutdown(socketPath, gracePeriod)
+	alive, livePID, aliveErr := ProcessInfo(socketPath)
+	if aliveErr != nil {
+		alive = false
+	}
+	if !alive {
+		return result, nil
+	}
+
+	currentPID := livePID
+	if currentPID == 0 {
+		currentPID = pid
+	}
+	logDir := DeriveLogDir(lockPath, queueDBPath, cfg)
+	if logDir == "" {
+		return result, fmt.Errorf("unable to determine daemon log directory")
+	}
+	pidPath := filepath.Join(logDir, "spindle.pid")
+	lockFile := filepath.Join(logDir, "spindle.lock")
+	killedPID, killErr := ForceKillProcess(pidPath, lockFile, currentPID)
+	if killErr != nil {
+		return result, fmt.Errorf("failed to stop daemon process: %w", killErr)
+	}
+	_ = os.Remove(socketPath)
+	result.ForcedKill = true
+	result.PID = killedPID
+	return result, nil
+}
+
+// BuildStatusSnapshot collects daemon status and applies offline fallbacks for queue stats and dependencies.
+func BuildStatusSnapshot(ctx context.Context, socketPath string, cfg *config.Config) (*ipc.StatusResponse, error) {
+	if cfg == nil {
+		return nil, errors.New("configuration not available")
+	}
+	statusResp := &ipc.StatusResponse{}
+
+	client, err := ipc.Dial(socketPath)
+	if err == nil {
+		defer client.Close()
+		if resp, statusErr := client.Status(); statusErr == nil && resp != nil {
+			statusResp = resp
+		}
+	}
+
+	queueStats := make(map[string]int, len(statusResp.QueueStats))
+	for k, v := range statusResp.QueueStats {
+		queueStats[k] = v
+	}
+
+	if !statusResp.Running {
+		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+
+		store, openErr := queue.Open(cfg)
+		if openErr == nil {
+			stats, statsErr := store.Stats(queryCtx)
+			_ = store.Close()
+			if statsErr == nil {
+				queueStats = make(map[string]int, len(stats))
+				for status, count := range stats {
+					queueStats[string(status)] = count
+				}
+			}
+		}
+
+		if len(statusResp.Dependencies) == 0 {
+			statusResp.Dependencies = ResolveDependencies(context.Background(), cfg)
+		}
+	}
+
+	if len(statusResp.Dependencies) == 0 {
+		statusResp.Dependencies = ResolveDependencies(context.Background(), cfg)
+	}
+
+	statusResp.QueueStats = queueStats
+	return statusResp, nil
+}
+
+func isDaemonUnavailable(err error) bool {
+	return os.IsNotExist(err) ||
+		errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, syscall.ENOENT) ||
+		errors.Is(err, syscall.ECONNREFUSED)
 }
 
 // ResolveDependencies returns current dependency availability for status output.
