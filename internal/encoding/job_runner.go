@@ -24,28 +24,28 @@ func newEncodeJobRunner(store *queue.Store, runner *draptoRunner) *encodeJobRunn
 	return &encodeJobRunner{store: store, runner: runner}
 }
 
-func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, max(1, len(jobs)))
 	if logger != nil {
 		runnerAvailable := r != nil && r.runner != nil
-		logger.Info(
-			"encoding runner decision",
-			logging.String(logging.FieldDecisionType, "encoding_runner"),
-			logging.String("decision_result", textutil.Ternary(runnerAvailable, "drapto", "placeholder")),
-			logging.String("decision_reason", textutil.Ternary(runnerAvailable, "drapto_client_configured", "drapto_client_unavailable")),
-			logging.String("decision_options", "drapto, placeholder"),
+		attrs := append(
+			logging.DecisionAttrsWithOptions("encoding_runner",
+				textutil.Ternary(runnerAvailable, "drapto", "placeholder"),
+				textutil.Ternary(runnerAvailable, "drapto_client_configured", "drapto_client_unavailable"),
+				"drapto, placeholder"),
 			logging.Int("job_count", len(jobs)),
 		)
+		logger.Info("encoding runner decision", logging.Args(attrs...)...)
 	}
 
 	if len(jobs) > 0 {
-		paths, err := r.encodeEpisodes(ctx, item, env, jobs, stagingRoot, encodedDir, logger)
+		paths, err := r.encodeEpisodes(ctx, item, env, jobs, encodedDir, logger)
 		if err != nil {
 			return nil, err
 		}
 		encodedPaths = paths
 	} else {
-		path, err := r.encodeSingleFile(ctx, item, stagingRoot, encodedDir, logger)
+		path, err := r.encodeSingleFile(ctx, item, encodedDir, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +65,7 @@ func (r *encodeJobRunner) Run(ctx context.Context, item *queue.Item, env *ripspe
 	return encodedPaths, nil
 }
 
-func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
+func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, encodedDir string, logger *slog.Logger) ([]string, error) {
 	encodedPaths := make([]string, 0, len(jobs))
 	var lastErr error
 	skipped := 0
@@ -76,13 +76,11 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 
 		// Skip already-completed episodes (enables resume after partial failure)
 		if asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, episodeKey); ok && asset.IsCompleted() {
-			logger.Info("episode encoding decision",
-				logging.String(logging.FieldDecisionType, "episode_encoding"),
-				logging.String("decision_result", "skipped"),
-				logging.String("decision_reason", "already_encoded"),
+			attrs := append(logging.DecisionAttrs("episode_encoding", "skipped", "already_encoded"),
 				logging.String("episode_key", episodeKey),
 				logging.String("encoded_path", asset.Path),
 			)
+			logger.Info("episode encoding decision", logging.Args(attrs...)...)
 			encodedPaths = append(encodedPaths, asset.Path)
 			skipped++
 			continue
@@ -110,42 +108,16 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 			var err error
 			path, err = r.runner.Encode(ctx, item, sourcePath, encodedDir, label, job.Episode.Key, idx+1, len(jobs), logger)
 			if err != nil {
-				// Record per-episode failure and continue to next episode
-				logger.Error("episode encoding failed",
-					logging.String("episode_key", episodeKey),
-					logging.Error(err),
-					logging.String(logging.FieldEventType, "episode_encode_failed"),
-				)
-				env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
-					EpisodeKey: job.Episode.Key,
-					TitleID:    job.Episode.TitleID,
-					Path:       "",
-					Status:     ripspec.AssetStatusFailed,
-					ErrorMsg:   err.Error(),
-				})
+				r.recordEpisodeFailure(ctx, item, env, &job, episodeKey, err, "episode_encode_failed", "episode encoding failed", logger)
 				lastErr = err
-				r.persistRipSpec(ctx, item, env, logger)
 				continue
 			}
 		}
 
 		finalPath, err := ensureEncodedOutput(path, job.Output, sourcePath)
 		if err != nil {
-			// Record per-episode failure and continue to next episode
-			logger.Error("episode output finalization failed",
-				logging.String("episode_key", episodeKey),
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "episode_output_failed"),
-			)
-			env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
-				EpisodeKey: job.Episode.Key,
-				TitleID:    job.Episode.TitleID,
-				Path:       "",
-				Status:     ripspec.AssetStatusFailed,
-				ErrorMsg:   err.Error(),
-			})
+			r.recordEpisodeFailure(ctx, item, env, &job, episodeKey, err, "episode_output_failed", "episode output finalization failed", logger)
 			lastErr = err
-			r.persistRipSpec(ctx, item, env, logger)
 			continue
 		}
 
@@ -170,6 +142,22 @@ func (r *encodeJobRunner) encodeEpisodes(ctx context.Context, item *queue.Item, 
 	return encodedPaths, nil
 }
 
+func (r *encodeJobRunner) recordEpisodeFailure(ctx context.Context, item *queue.Item, env *ripspec.Envelope, job *encodeJob, episodeKey string, err error, eventType, message string, logger *slog.Logger) {
+	logger.Error(message,
+		logging.String("episode_key", episodeKey),
+		logging.Error(err),
+		logging.String(logging.FieldEventType, eventType),
+	)
+	env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
+		EpisodeKey: job.Episode.Key,
+		TitleID:    job.Episode.TitleID,
+		Path:       "",
+		Status:     ripspec.AssetStatusFailed,
+		ErrorMsg:   err.Error(),
+	})
+	r.persistRipSpec(ctx, item, env, logger)
+}
+
 func (r *encodeJobRunner) persistRipSpec(ctx context.Context, item *queue.Item, env *ripspec.Envelope, logger *slog.Logger) {
 	if err := queue.PersistRipSpec(ctx, r.store, item, env); err != nil {
 		logger.Warn("failed to persist rip spec after episode encode; metadata may be stale",
@@ -181,7 +169,7 @@ func (r *encodeJobRunner) persistRipSpec(ctx context.Context, item *queue.Item, 
 	}
 }
 
-func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item, stagingRoot, encodedDir string, logger *slog.Logger) (string, error) {
+func (r *encodeJobRunner) encodeSingleFile(ctx context.Context, item *queue.Item, encodedDir string, logger *slog.Logger) (string, error) {
 	label := strings.TrimSpace(item.DiscTitle)
 	if label == "" {
 		label = "Disc"

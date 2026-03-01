@@ -167,19 +167,8 @@ func TestValidateCropRatio(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			raw, err := tt.snapshot.Marshal()
-			if err != nil {
-				t.Fatalf("failed to marshal snapshot: %v", err)
-			}
-			item := &queue.Item{EncodingDetailsJSON: raw}
-
 			// validateCropRatio only logs decisions; verify it doesn't panic.
-			validateCropRatio(item, logging.NewNop())
-
-			// No NeedsReview is set by crop ratio (INFO decision only).
-			if item.NeedsReview {
-				t.Error("crop ratio validation should not set NeedsReview")
-			}
+			validateCropRatio(&tt.snapshot, logging.NewNop())
 		})
 	}
 }

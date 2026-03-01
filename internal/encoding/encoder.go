@@ -2,9 +2,7 @@ package encoding
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +20,11 @@ import (
 	"spindle/internal/services"
 	"spindle/internal/services/drapto"
 	"spindle/internal/stage"
+)
+
+const (
+	progressStageEncoding = "Encoding"
+	progressStageEncoded  = "Encoded"
 )
 
 // Encoder manages Drapto encoding of ripped files.
@@ -54,6 +57,7 @@ func NewEncoderWithDependencies(cfg *config.Config, store *queue.Store, logger *
 	}
 	enc.runner = newDraptoRunner(cfg, client, store)
 	enc.planner = newEncodePlanner()
+	enc.jobRunner = newEncodeJobRunner(store, enc.runner)
 	enc.SetLogger(logger)
 	return enc
 }
@@ -68,7 +72,7 @@ func (e *Encoder) SetLogger(logger *slog.Logger) {
 
 func (e *Encoder) Prepare(ctx context.Context, item *queue.Item) error {
 	logger := logging.WithContext(ctx, e.logger)
-	item.InitProgress("Encoding", "Starting Drapto encoding")
+	item.InitProgress(progressStageEncoding, "Starting Drapto encoding")
 	logger.Debug("starting encoding preparation")
 	return nil
 }
@@ -82,7 +86,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	stagingRoot, encodedDir, err := e.prepareEncodedDirectory(ctx, item, logger)
+	encodedDir, err := e.prepareEncodedDirectory(ctx, item, logger)
 	if err != nil {
 		return err
 	}
@@ -92,13 +96,19 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	encodedPaths, err := e.runEncodingJobs(ctx, item, &env, jobs, stagingRoot, encodedDir, logger)
+	encodedPaths, err := e.runEncodingJobs(ctx, item, &env, jobs, encodedDir, logger)
 	if err != nil {
 		return err
 	}
 
+	// Parse encoding snapshot once for all post-encoding consumers.
+	snapshot, snapshotErr := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	if snapshotErr != nil {
+		logger.Debug("failed to unmarshal encoding snapshot; post-encoding checks may be skipped", logging.Error(snapshotErr))
+	}
+
 	// Enforce Drapto's internal validation results
-	if err := e.enforceDraptoValidation(ctx, item, logger); err != nil {
+	if err := e.enforceDraptoValidation(ctx, &snapshot, logger); err != nil {
 		return err
 	}
 
@@ -106,7 +116,7 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 	// Episode consistency is validated after audio analysis (not here) so that
 	// audio stream counts reflect the final output after refinement/stripping.
 	if len(env.Episodes) == 0 {
-		validateCropRatio(item, logger)
+		validateCropRatio(&snapshot, logger)
 	}
 
 	e.finalizeEncodedItem(item, &env, encodedPaths, logger)
@@ -122,17 +132,9 @@ func (e *Encoder) Execute(ctx context.Context, item *queue.Item) error {
 			inputPaths = []string{p}
 		}
 	}
-	e.reportEncodingSummary(ctx, item, inputPaths, encodedPaths, stageStart, logger)
+	e.reportEncodingSummary(ctx, item, &snapshot, inputPaths, encodedPaths, stageStart, logger)
 
 	return nil
-}
-
-// ensureJobRunner returns the job runner, initializing it lazily if needed.
-func (e *Encoder) ensureJobRunner() *encodeJobRunner {
-	if e.jobRunner == nil {
-		e.jobRunner = newEncodeJobRunner(e.store, e.runner)
-	}
-	return e.jobRunner
 }
 
 // validateAndParseInputs parses the rip spec and ensures ripped files are available.
@@ -180,17 +182,17 @@ func (e *Encoder) validateAndParseInputs(ctx context.Context, item *queue.Item, 
 }
 
 // prepareEncodedDirectory creates a clean output directory for encoded files.
-func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item, logger *slog.Logger) (stagingRoot, encodedDir string, err error) {
-	stagingRoot = item.StagingRoot(e.cfg.Paths.StagingDir)
+func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item, logger *slog.Logger) (encodedDir string, err error) {
+	stagingRoot := item.StagingRoot(e.cfg.Paths.StagingDir)
 	if stagingRoot == "" {
 		stagingRoot = filepath.Join(strings.TrimSpace(e.cfg.Paths.StagingDir), fmt.Sprintf("queue-%d", item.ID))
 	}
 	encodedDir = filepath.Join(stagingRoot, "encoded")
 	if err := e.cleanupEncodedDir(logger, encodedDir); err != nil {
-		return "", "", err
+		return "", err
 	}
 	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
-		return "", "", services.Wrap(
+		return "", services.Wrap(
 			services.ErrConfiguration,
 			"encoding",
 			"ensure encoded dir",
@@ -199,12 +201,12 @@ func (e *Encoder) prepareEncodedDirectory(ctx context.Context, item *queue.Item,
 		)
 	}
 	logger.Debug("prepared encoding directory", logging.String("encoded_dir", encodedDir))
-	return stagingRoot, encodedDir, nil
+	return encodedDir, nil
 }
 
 // runEncodingJobs encodes all jobs (episodes or single file) and returns the output paths and sources used.
-func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, stagingRoot, encodedDir string, logger *slog.Logger) ([]string, error) {
-	return e.ensureJobRunner().Run(ctx, item, env, jobs, stagingRoot, encodedDir, logger)
+func (e *Encoder) runEncodingJobs(ctx context.Context, item *queue.Item, env *ripspec.Envelope, jobs []encodeJob, encodedDir string, logger *slog.Logger) ([]string, error) {
+	return e.jobRunner.Run(ctx, item, env, jobs, encodedDir, logger)
 }
 
 // finalizeEncodedItem updates the queue item with encoding results.
@@ -221,7 +223,7 @@ func (e *Encoder) finalizeEncodedItem(item *queue.Item, env *ripspec.Envelope, e
 	}
 
 	item.EncodedFile = encodedPaths[0]
-	item.ProgressStage = "Encoded"
+	item.ProgressStage = progressStageEncoded
 	item.ProgressPercent = 100
 	item.ActiveEpisodeKey = ""
 
@@ -235,7 +237,7 @@ func (e *Encoder) finalizeEncodedItem(item *queue.Item, env *ripspec.Envelope, e
 }
 
 // reportEncodingSummary calculates metrics, sends notifications, and logs the summary.
-func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, inputPaths, encodedPaths []string, stageStart time.Time, logger *slog.Logger) {
+func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, snapshot *encodingstate.Snapshot, inputPaths, encodedPaths []string, stageStart time.Time, logger *slog.Logger) {
 	var totalInputBytes, totalOutputBytes int64
 	for _, path := range encodedPaths {
 		if info, err := os.Stat(path); err == nil {
@@ -266,7 +268,7 @@ func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, i
 		}
 
 		// Check for validation failures and notify
-		e.notifyValidationFailures(ctx, item, logger)
+		e.notifyValidationFailures(ctx, item, snapshot, logger)
 	}
 
 	summaryAttrs := []logging.Attr{
@@ -283,14 +285,8 @@ func (e *Encoder) reportEncodingSummary(ctx context.Context, item *queue.Item, i
 
 // notifyValidationFailures checks the encoding snapshot for validation failures
 // and sends a notification if any validation steps failed.
-func (e *Encoder) notifyValidationFailures(ctx context.Context, item *queue.Item, logger *slog.Logger) {
-	if e.notifier == nil || item == nil {
-		return
-	}
-
-	snapshot, err := encodingstate.Unmarshal(item.EncodingDetailsJSON)
-	if err != nil {
-		logger.Debug("failed to unmarshal encoding snapshot for validation check", logging.Error(err))
+func (e *Encoder) notifyValidationFailures(ctx context.Context, item *queue.Item, snapshot *encodingstate.Snapshot, logger *slog.Logger) {
+	if e.notifier == nil || item == nil || snapshot == nil {
 		return
 	}
 
@@ -320,28 +316,6 @@ func (e *Encoder) cleanupEncodedDir(logger *slog.Logger, encodedDir string) erro
 	encodedDir = strings.TrimSpace(encodedDir)
 	if encodedDir == "" {
 		return nil
-	}
-	info, err := os.Stat(encodedDir)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		return services.Wrap(
-			services.ErrConfiguration,
-			"encoding",
-			"inspect encoded dir",
-			"Failed to inspect previous encoded artifacts",
-			err,
-		)
-	}
-	if !info.IsDir() {
-		return services.Wrap(
-			services.ErrConfiguration,
-			"encoding",
-			"inspect encoded dir",
-			fmt.Sprintf("Expected encoded path %q to be a directory", encodedDir),
-			nil,
-		)
 	}
 	if err := os.RemoveAll(encodedDir); err != nil {
 		return services.Wrap(
@@ -376,16 +350,10 @@ func (e *Encoder) HealthCheck(ctx context.Context) stage.Health {
 // the encoding stage if any validation steps failed. Drapto validates codec,
 // duration, HDR, audio, and A/V sync - we enforce those results here rather
 // than duplicating the checks.
-func (e *Encoder) enforceDraptoValidation(ctx context.Context, item *queue.Item, logger *slog.Logger) error {
+func (e *Encoder) enforceDraptoValidation(ctx context.Context, snapshot *encodingstate.Snapshot, logger *slog.Logger) error {
 	if e.cfg != nil && !e.cfg.Validation.EnforceDraptoValidation {
 		logger.Debug("drapto validation enforcement disabled")
 		return nil
-	}
-
-	snapshot, err := encodingstate.Unmarshal(item.EncodingDetailsJSON)
-	if err != nil {
-		logger.Debug("failed to unmarshal encoding snapshot for validation", logging.Error(err))
-		return nil // No snapshot = can't validate, continue
 	}
 
 	if snapshot.Validation == nil {

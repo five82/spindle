@@ -145,9 +145,8 @@ func ValidateEpisodeConsistency(ctx context.Context, item *queue.Item, env *rips
 
 // validateCropRatio parses the crop filter from the encoding snapshot, computes
 // the aspect ratio, and logs whether it matches a standard ratio. Movies only.
-func validateCropRatio(item *queue.Item, logger *slog.Logger) {
-	snapshot, err := encodingstate.Unmarshal(item.EncodingDetailsJSON)
-	if err != nil || snapshot.Crop == nil {
+func validateCropRatio(snapshot *encodingstate.Snapshot, logger *slog.Logger) {
+	if snapshot == nil || snapshot.Crop == nil {
 		return
 	}
 
