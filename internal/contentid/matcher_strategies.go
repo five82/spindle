@@ -2,8 +2,8 @@ package contentid
 
 import (
 	"context"
-	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"spindle/internal/identification/tmdb"
@@ -84,7 +84,7 @@ func episodeListKey(episodes []int) string {
 	}
 	parts := make([]string, 0, len(episodes))
 	for _, episode := range episodes {
-		parts = append(parts, fmt.Sprintf("%d", episode))
+		parts = append(parts, strconv.Itoa(episode))
 	}
 	return strings.Join(parts, ",")
 }

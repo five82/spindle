@@ -8,35 +8,22 @@ import (
 
 // Validate ensures the configuration is usable.
 func (c *Config) Validate() error {
-	if err := c.validateTMDB(); err != nil {
-		return err
+	validators := []func() error{
+		c.validateTMDB,
+		c.validateLibrary,
+		c.validateJellyfin,
+		c.validateWorkflow,
+		c.validateMakeMKV,
+		c.validateSubtitles,
+		c.validateRipCache,
+		c.validateNotifications,
+		c.validateEncoding,
+		c.validateContentID,
 	}
-	if err := c.validateLibrary(); err != nil {
-		return err
-	}
-	if err := c.validateJellyfin(); err != nil {
-		return err
-	}
-	if err := c.validateWorkflow(); err != nil {
-		return err
-	}
-	if err := c.validateMakeMKV(); err != nil {
-		return err
-	}
-	if err := c.validateSubtitles(); err != nil {
-		return err
-	}
-	if err := c.validateRipCache(); err != nil {
-		return err
-	}
-	if err := c.validateNotifications(); err != nil {
-		return err
-	}
-	if err := c.validateEncoding(); err != nil {
-		return err
-	}
-	if err := c.validateContentID(); err != nil {
-		return err
+	for _, validate := range validators {
+		if err := validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -112,16 +99,17 @@ func (c *Config) validateMakeMKV() error {
 }
 
 func (c *Config) validateSubtitles() error {
-	if c.Subtitles.OpenSubtitlesEnabled {
-		if strings.TrimSpace(c.Subtitles.OpenSubtitlesAPIKey) == "" {
-			return errors.New("subtitles.opensubtitles_api_key must be set when subtitles.opensubtitles_enabled is true")
-		}
-		if strings.TrimSpace(c.Subtitles.OpenSubtitlesUserAgent) == "" {
-			return errors.New("subtitles.opensubtitles_user_agent must be set when subtitles.opensubtitles_enabled is true")
-		}
-		if len(c.Subtitles.OpenSubtitlesLanguages) == 0 {
-			return errors.New("subtitles.opensubtitles_languages must include at least one language when subtitles.opensubtitles_enabled is true")
-		}
+	if !c.Subtitles.OpenSubtitlesEnabled {
+		return nil
+	}
+	if strings.TrimSpace(c.Subtitles.OpenSubtitlesAPIKey) == "" {
+		return errors.New("subtitles.opensubtitles_api_key must be set when subtitles.opensubtitles_enabled is true")
+	}
+	if strings.TrimSpace(c.Subtitles.OpenSubtitlesUserAgent) == "" {
+		return errors.New("subtitles.opensubtitles_user_agent must be set when subtitles.opensubtitles_enabled is true")
+	}
+	if len(c.Subtitles.OpenSubtitlesLanguages) == 0 {
+		return errors.New("subtitles.opensubtitles_languages must include at least one language when subtitles.opensubtitles_enabled is true")
 	}
 	return nil
 }
