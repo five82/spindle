@@ -290,14 +290,13 @@ Examples:
 				return err
 			}
 
-			// Per-episode retry requires direct store access
 			if episodeKey != "" {
 				if len(ids) != 1 {
 					return errors.New("--episode requires exactly one item ID")
 				}
-				return ctx.withQueueStore(func(store queueStoreAPI) error {
+				return ctx.withQueueAPI(func(qa queueAPI) error {
 					out := cmd.OutOrStdout()
-					result, err := store.RetryEpisode(cmd.Context(), ids[0], episodeKey)
+					result, err := qa.RetryEpisode(cmd.Context(), ids[0], episodeKey)
 					if err != nil {
 						return err
 					}

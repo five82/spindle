@@ -9,6 +9,7 @@ import (
 	"net/rpc/jsonrpc"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -246,10 +247,12 @@ func (s *service) QueueDescribe(req QueueDescribeRequest, resp *QueueDescribeRes
 		return err
 	}
 	if item == nil {
-		return fmt.Errorf("queue item %d not found", req.ID)
+		resp.Found = false
+		return nil
 	}
 	dto := api.FromQueueItem(item)
 	if qi := convertQueueItem(&dto); qi != nil {
+		resp.Found = true
 		resp.Item = *qi
 	}
 	return nil
@@ -317,6 +320,32 @@ func (s *service) QueueRetry(req QueueRetryRequest, resp *QueueRetryResponse) er
 	s.log().Info("queue items retried",
 		logging.String(logging.FieldEventType, "queue_retry"),
 		logging.Int64("updated_count", updated))
+	return nil
+}
+
+func (s *service) QueueRetryEpisode(req QueueRetryEpisodeRequest, resp *QueueRetryEpisodeResponse) error {
+	if req.ID <= 0 {
+		return fmt.Errorf("invalid queue item id %d", req.ID)
+	}
+	episodeKey := strings.TrimSpace(req.EpisodeKey)
+	if episodeKey == "" {
+		return errors.New("episode key is required")
+	}
+	s.log().Debug("queue episode retry requested",
+		logging.Int64("item_id", req.ID),
+		logging.String("episode_key", episodeKey),
+	)
+	result, err := s.daemon.RetryFailedEpisode(s.ctx, req.ID, episodeKey)
+	if err != nil {
+		return err
+	}
+	resp.Result = result
+	s.log().Info("queue episode retried",
+		logging.String(logging.FieldEventType, "queue_retry_episode"),
+		logging.Int64("item_id", req.ID),
+		logging.String("episode_key", episodeKey),
+		logging.String("decision_result", string(result.Outcome)),
+	)
 	return nil
 }
 

@@ -89,24 +89,24 @@ func printQueueRetryResult(out io.Writer, result api.RetryItemsResult) {
 	}
 }
 
-func writeQueueEpisodeRetryJSON(cmd *cobra.Command, id int64, episodeKey string, result queueRetryItemResult) error {
+func writeQueueEpisodeRetryJSON(cmd *cobra.Command, id int64, episodeKey string, result api.RetryItemResult) error {
 	return writeJSON(cmd, map[string]any{
 		"id":         id,
 		"episode":    episodeKey,
-		"outcome":    retryOutcomeString(result.Outcome),
+		"outcome":    string(result.Outcome),
 		"new_status": result.NewStatus,
 	})
 }
 
-func printQueueEpisodeRetryResult(out io.Writer, id int64, episodeKey string, result queueRetryItemResult) {
+func printQueueEpisodeRetryResult(out io.Writer, id int64, episodeKey string, result api.RetryItemResult) {
 	switch result.Outcome {
-	case queueRetryOutcomeNotFound:
+	case api.RetryItemNotFound:
 		fmt.Fprintf(out, "Item %d not found\n", id)
-	case queueRetryOutcomeNotFailed:
+	case api.RetryItemNotFailed:
 		fmt.Fprintf(out, "Item %d is not in a retryable state\n", id)
-	case queueRetryOutcomeEpisodeNotFound:
+	case api.RetryItemEpisodeNotFound:
 		fmt.Fprintf(out, "Episode %s not found in item %d\n", episodeKey, id)
-	case queueRetryOutcomeUpdated:
+	case api.RetryItemUpdated:
 		fmt.Fprintf(out, "Episode %s in item %d cleared for retry (item reset to %s)\n",
 			strings.ToUpper(episodeKey), id, result.NewStatus)
 	}

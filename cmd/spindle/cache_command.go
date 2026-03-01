@@ -134,18 +134,9 @@ Example:
 				return fmt.Errorf("invalid entry number: %s (must be a positive integer)", args[0])
 			}
 
-			stats, err := manager.Stats(cmd.Context())
+			entry, err := manager.RemoveEntryByNumber(cmd.Context(), entryNum)
 			if err != nil {
 				return err
-			}
-
-			if entryNum > len(stats.EntrySummaries) {
-				return fmt.Errorf("entry number %d out of range (only %d entries exist)", entryNum, len(stats.EntrySummaries))
-			}
-
-			entry := stats.EntrySummaries[entryNum-1]
-			if err := os.RemoveAll(entry.Directory); err != nil {
-				return fmt.Errorf("remove cache entry: %w", err)
 			}
 
 			if ctx.JSONMode() {
@@ -175,12 +166,11 @@ func newCacheClearCommand(ctx *commandContext) *cobra.Command {
 				return err
 			}
 
-			stats, err := manager.Stats(cmd.Context())
+			removed, freedBytes, err := manager.Clear(cmd.Context())
 			if err != nil {
 				return err
 			}
-
-			if stats.Entries == 0 {
+			if removed == 0 {
 				if ctx.JSONMode() {
 					return writeJSON(cmd, map[string]any{"removed": 0, "freed_bytes": 0})
 				}
@@ -188,16 +178,10 @@ func newCacheClearCommand(ctx *commandContext) *cobra.Command {
 				return nil
 			}
 
-			for _, entry := range stats.EntrySummaries {
-				if err := os.RemoveAll(entry.Directory); err != nil {
-					return fmt.Errorf("remove cache entry %s: %w", entry.Directory, err)
-				}
-			}
-
 			if ctx.JSONMode() {
-				return writeJSON(cmd, map[string]any{"removed": stats.Entries, "freed_bytes": stats.TotalBytes})
+				return writeJSON(cmd, map[string]any{"removed": removed, "freed_bytes": freedBytes})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d cache entries (%s freed)\n", stats.Entries, logging.FormatBytes(stats.TotalBytes))
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed %d cache entries (%s freed)\n", removed, logging.FormatBytes(freedBytes))
 			return nil
 		},
 	}

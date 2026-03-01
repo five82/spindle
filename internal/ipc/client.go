@@ -154,6 +154,16 @@ func (c *Client) QueueRetry(ids []int64) (*QueueRetryResponse, error) {
 	return &resp, nil
 }
 
+// QueueRetryEpisode retries a specific failed episode in a queue item.
+func (c *Client) QueueRetryEpisode(id int64, episodeKey string) (*QueueRetryEpisodeResponse, error) {
+	var resp QueueRetryEpisodeResponse
+	req := QueueRetryEpisodeRequest{ID: id, EpisodeKey: episodeKey}
+	if err := c.client.Call("Spindle.QueueRetryEpisode", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // QueueStop stops queue items.
 func (c *Client) QueueStop(ids []int64) (*QueueStopResponse, error) {
 	var resp QueueStopResponse

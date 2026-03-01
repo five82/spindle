@@ -63,7 +63,8 @@ type QueueDescribeRequest struct {
 
 // QueueDescribeResponse contains a single queue entry.
 type QueueDescribeResponse struct {
-	Item QueueItem `json:"item"`
+	Found bool      `json:"found"`
+	Item  QueueItem `json:"item"`
 }
 
 // QueueClearRequest removes all items.
@@ -106,6 +107,17 @@ type QueueRetryRequest struct {
 // QueueRetryResponse reports number of retried items.
 type QueueRetryResponse struct {
 	Updated int64 `json:"updated"`
+}
+
+// QueueRetryEpisodeRequest retries a single failed episode within an item.
+type QueueRetryEpisodeRequest struct {
+	ID         int64  `json:"id"`
+	EpisodeKey string `json:"episode_key"`
+}
+
+// QueueRetryEpisodeResponse reports per-episode retry outcome.
+type QueueRetryEpisodeResponse struct {
+	Result api.RetryItemResult `json:"result"`
 }
 
 // QueueStopRequest stops queue items. Empty list is invalid.

@@ -1,4 +1,4 @@
-package main
+package daemonrun
 
 import (
 	"context"
@@ -33,18 +33,21 @@ import (
 	"spindle/internal/workflow"
 )
 
-func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
-	if ctx == nil {
-		return fmt.Errorf("command context is required")
+// Options configures daemon process runtime behavior.
+type Options struct {
+	LogLevel    string
+	Development bool
+	Diagnostic  bool
+}
+
+// Run starts the spindle daemon runtime loop.
+func Run(cmdCtx context.Context, cfg *config.Config, opts Options) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
 	}
 
 	signalCtx, cancel := signal.NotifyContext(cmdCtx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-
-	cfg, err := ctx.ensureConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
 
 	runID := time.Now().UTC().Format("20060102T150405.000Z")
 	logPath := filepath.Join(cfg.Paths.LogDir, fmt.Sprintf("spindle-%s.log", runID))
@@ -57,12 +60,10 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 		logHub.AddSink(eventArchive)
 	}
 
-	// Diagnostic mode setup
-	diagnosticMode := ctx.diagnosticMode()
 	var sessionID string
 	var debugLogPath string
 	var debugItemsDir string
-	if diagnosticMode {
+	if opts.Diagnostic {
 		sessionID = uuid.NewString()
 		debugDir := filepath.Join(cfg.Paths.LogDir, "debug")
 		if err := os.MkdirAll(debugDir, 0o755); err != nil {
@@ -75,23 +76,21 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 		}
 	}
 
-	logLevel := ctx.resolvedLogLevel(cfg)
 	loggerOpts := logging.Options{
-		Level:            logLevel,
+		Level:            opts.LogLevel,
 		Format:           cfg.Logging.Format,
 		OutputPaths:      []string{"stdout", logPath},
 		ErrorOutputPaths: []string{"stderr", logPath},
-		Development:      ctx.logDevelopment(cfg),
+		Development:      opts.Development,
 		Stream:           logHub,
-		SessionID:        sessionID, // Empty string if not diagnostic mode
+		SessionID:        sessionID,
 	}
 	logger, err := logging.New(loggerOpts)
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
 
-	// Set up diagnostic DEBUG logger if enabled
-	if diagnosticMode {
+	if opts.Diagnostic {
 		debugLogger, debugErr := logging.New(logging.Options{
 			Level:            "debug",
 			Format:           "json",
@@ -140,7 +139,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 
 	notifier := notifications.NewService(cfg)
 	workflowManager := workflow.NewManagerWithOptions(cfg, store, logger, notifier, logHub,
-		workflow.WithDiagnosticMode(diagnosticMode, debugItemsDir, sessionID))
+		workflow.WithDiagnosticMode(opts.Diagnostic, debugItemsDir, sessionID))
 	registerStages(workflowManager, cfg, store, logger, notifier)
 
 	d, err := daemon.New(cfg, store, logger, workflowManager, logPath, logHub, eventArchive, notifier)
@@ -149,7 +148,7 @@ func runDaemonProcess(cmdCtx context.Context, ctx *commandContext) error {
 	}
 	defer d.Close()
 
-	socketPath := buildSocketPath(cfg)
+	socketPath := filepath.Join(cfg.Paths.LogDir, "spindle.sock")
 	ipcServer, err := ipc.NewServer(signalCtx, socketPath, d, logger)
 	if err != nil {
 		return fmt.Errorf("start IPC server: %w", err)
@@ -193,13 +192,6 @@ func registerStages(mgr *workflow.Manager, cfg *config.Config, store *queue.Stor
 	})
 }
 
-func buildSocketPath(cfg *config.Config) string {
-	if cfg == nil {
-		return filepath.Join("", "spindle.sock")
-	}
-	return filepath.Join(cfg.Paths.LogDir, "spindle.sock")
-}
-
 func ensureCurrentLogPointer(logDir, target string) error {
 	if logDir == "" || target == "" {
 		return nil
@@ -208,7 +200,6 @@ func ensureCurrentLogPointer(logDir, target string) error {
 	if err := os.Remove(current); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove existing log pointer: %w", err)
 	}
-	// Try symlink first, fall back to hardlink
 	if err := os.Symlink(target, current); err == nil {
 		return nil
 	}

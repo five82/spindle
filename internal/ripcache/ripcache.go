@@ -192,6 +192,55 @@ func (m *Manager) Stats(ctx context.Context) (Stats, error) {
 	return s, nil
 }
 
+// RemoveEntryByNumber removes a cache entry using the 1-based numbering from Stats.
+func (m *Manager) RemoveEntryByNumber(ctx context.Context, entryNum int) (EntrySummary, error) {
+	if m == nil {
+		return EntrySummary{}, errors.New("ripcache: manager unavailable")
+	}
+	if entryNum < 1 {
+		return EntrySummary{}, fmt.Errorf("ripcache: invalid entry number %d", entryNum)
+	}
+	stats, err := m.Stats(ctx)
+	if err != nil {
+		return EntrySummary{}, err
+	}
+	if entryNum > len(stats.EntrySummaries) {
+		return EntrySummary{}, fmt.Errorf("ripcache: entry number %d out of range (only %d entries exist)", entryNum, len(stats.EntrySummaries))
+	}
+	entry := stats.EntrySummaries[entryNum-1]
+	if err := os.RemoveAll(entry.Directory); err != nil {
+		return EntrySummary{}, fmt.Errorf("ripcache: remove cache entry: %w", err)
+	}
+	m.logger.InfoContext(ctx, "removed rip cache entry",
+		logging.String("cache_dir", entry.Directory),
+		logging.Int64("entry_size_bytes", entry.SizeBytes),
+	)
+	return entry, nil
+}
+
+// Clear removes all cache entries and returns removed count + estimated freed bytes.
+func (m *Manager) Clear(ctx context.Context) (int, int64, error) {
+	if m == nil {
+		return 0, 0, errors.New("ripcache: manager unavailable")
+	}
+	stats, err := m.Stats(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, entry := range stats.EntrySummaries {
+		if err := os.RemoveAll(entry.Directory); err != nil {
+			return 0, 0, fmt.Errorf("ripcache: remove cache entry %s: %w", entry.Directory, err)
+		}
+	}
+	if stats.Entries > 0 {
+		m.logger.InfoContext(ctx, "cleared rip cache",
+			logging.Int("removed_entries", stats.Entries),
+			logging.Int64("freed_bytes", stats.TotalBytes),
+		)
+	}
+	return stats.Entries, stats.TotalBytes, nil
+}
+
 // Restore copies a cached rip back into the target directory when missing.
 // Returns true when a cache entry was used.
 func (m *Manager) Restore(ctx context.Context, item *queue.Item, targetDir string) (bool, error) {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"spindle/internal/api"
 	"spindle/internal/config"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
@@ -299,6 +300,14 @@ func (d *Daemon) RetryFailed(ctx context.Context, ids []int64) (int64, error) {
 		return 0, errors.New("queue store unavailable")
 	}
 	return d.store.RetryFailed(ctx, ids...)
+}
+
+// RetryFailedEpisode clears failed assets for one episode and rewinds item state.
+func (d *Daemon) RetryFailedEpisode(ctx context.Context, itemID int64, episodeKey string) (api.RetryItemResult, error) {
+	if d.store == nil {
+		return api.RetryItemResult{}, errors.New("queue store unavailable")
+	}
+	return api.RetryFailedEpisodeByID(ctx, d.store, itemID, episodeKey)
 }
 
 // StopQueueItems moves items into review to halt further processing.

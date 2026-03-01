@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"strings"
 
 	"spindle/internal/api"
 	"spindle/internal/ipc"
@@ -20,6 +19,7 @@ type queueAPI interface {
 	ResetStuck(ctx context.Context) (int64, error)
 	RetryAll(ctx context.Context) (int64, error)
 	Retry(ctx context.Context, ids []int64) (int64, error)
+	RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (api.RetryItemResult, error)
 	Stop(ctx context.Context, ids []int64) (int64, error)
 	Health(ctx context.Context) (queue.HealthSummary, error)
 }
@@ -27,7 +27,6 @@ type queueAPI interface {
 // queueStoreAPI extends queueAPI with operations that require direct store access.
 type queueStoreAPI interface {
 	queueAPI
-	RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (queueRetryItemResult, error)
 }
 
 // --- IPC adapter ---
@@ -55,12 +54,9 @@ func (a *queueIPCAdapter) List(_ context.Context, statuses []string) ([]api.Queu
 func (a *queueIPCAdapter) Describe(_ context.Context, id int64) (*api.QueueItem, error) {
 	resp, err := a.client.QueueDescribe(id)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "not found") {
-			return nil, nil
-		}
 		return nil, err
 	}
-	if resp == nil {
+	if resp == nil || !resp.Found {
 		return nil, nil
 	}
 	return &resp.Item, nil
@@ -120,6 +116,17 @@ func (a *queueIPCAdapter) Retry(_ context.Context, ids []int64) (int64, error) {
 		return 0, err
 	}
 	return resp.Updated, nil
+}
+
+func (a *queueIPCAdapter) RetryEpisode(_ context.Context, itemID int64, episodeKey string) (api.RetryItemResult, error) {
+	resp, err := a.client.QueueRetryEpisode(itemID, episodeKey)
+	if err != nil {
+		return api.RetryItemResult{}, err
+	}
+	if resp == nil {
+		return api.RetryItemResult{}, nil
+	}
+	return resp.Result, nil
 }
 
 func (a *queueIPCAdapter) Stop(_ context.Context, ids []int64) (int64, error) {
@@ -201,38 +208,14 @@ func (a *queueStoreAdapter) Retry(ctx context.Context, ids []int64) (int64, erro
 	return a.store.RetryFailed(ctx, ids...)
 }
 
+func (a *queueStoreAdapter) RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (api.RetryItemResult, error) {
+	return api.RetryFailedEpisodeByID(ctx, a.store, itemID, episodeKey)
+}
+
 func (a *queueStoreAdapter) Stop(ctx context.Context, ids []int64) (int64, error) {
 	return a.store.StopItems(ctx, ids...)
 }
 
 func (a *queueStoreAdapter) Health(ctx context.Context) (queue.HealthSummary, error) {
 	return a.store.Health(ctx)
-}
-
-// RetryEpisode clears a specific episode's failed status and resets the item
-// to the appropriate stage so it can be re-processed.
-func (a *queueStoreAdapter) RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (queueRetryItemResult, error) {
-	result, err := api.RetryFailedEpisode(ctx, a.store, itemID, episodeKey)
-	if err != nil {
-		return queueRetryItemResult{}, err
-	}
-	switch result.Outcome {
-	case api.RetryEpisodeNotFound:
-		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeNotFound}, nil
-	case api.RetryEpisodeNotFailed:
-		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeNotFailed}, nil
-	case api.RetryEpisodeEpisodeNotFound:
-		return queueRetryItemResult{ID: itemID, Outcome: queueRetryOutcomeEpisodeNotFound}, nil
-	case api.RetryEpisodeUpdated:
-		return queueRetryItemResult{
-			ID:        itemID,
-			Outcome:   queueRetryOutcomeUpdated,
-			NewStatus: result.NewStatus,
-		}, nil
-	default:
-		return queueRetryItemResult{
-			ID:      itemID,
-			Outcome: queueRetryOutcomeNotFound,
-		}, nil
-	}
 }

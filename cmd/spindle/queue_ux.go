@@ -26,18 +26,3 @@ func removeIDs(ctx context.Context, api queueAPI, ids []int64) (queueRemoveResul
 
 	return result, nil
 }
-
-func retryOutcomeString(o queueRetryOutcome) string {
-	switch o {
-	case queueRetryOutcomeUpdated:
-		return "retried"
-	case queueRetryOutcomeNotFound:
-		return "not_found"
-	case queueRetryOutcomeNotFailed:
-		return "not_failed"
-	case queueRetryOutcomeEpisodeNotFound:
-		return "episode_not_found"
-	default:
-		return "unknown"
-	}
-}

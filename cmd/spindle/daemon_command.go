@@ -1,6 +1,10 @@
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	"spindle/internal/daemonrun"
+)
 
 func newDaemonRunCommand(ctx *commandContext) *cobra.Command {
 	var diagnostic bool
@@ -12,11 +16,15 @@ func newDaemonRunCommand(ctx *commandContext) *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx.diagnostic = &diagnostic
-			// ensure config directories exist before we enter daemon loop
-			if _, err := ctx.ensureConfig(); err != nil {
+			cfg, err := ctx.ensureConfig()
+			if err != nil {
 				return err
 			}
-			return runDaemonProcess(cmd.Context(), ctx)
+			return daemonrun.Run(cmd.Context(), cfg, daemonrun.Options{
+				LogLevel:    ctx.resolvedLogLevel(cfg),
+				Development: ctx.logDevelopment(cfg),
+				Diagnostic:  ctx.diagnosticMode(),
+			})
 		},
 	}
 	cmd.Flags().BoolVar(&diagnostic, "diagnostic", false, "Enable diagnostic mode with separate DEBUG logs")

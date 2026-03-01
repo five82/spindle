@@ -25,6 +25,31 @@ type RetryEpisodeResult struct {
 	EpisodeKey string
 }
 
+// RetryFailedEpisodeByID retries a specific failed episode and maps the result to
+// the shared queue action DTO used by CLI/API callers.
+func RetryFailedEpisodeByID(ctx context.Context, store *queue.Store, itemID int64, episodeKey string) (RetryItemResult, error) {
+	result, err := RetryFailedEpisode(ctx, store, itemID, episodeKey)
+	if err != nil {
+		return RetryItemResult{}, err
+	}
+	switch result.Outcome {
+	case RetryEpisodeUpdated:
+		return RetryItemResult{
+			ID:        itemID,
+			Outcome:   RetryItemUpdated,
+			NewStatus: result.NewStatus,
+		}, nil
+	case RetryEpisodeNotFound:
+		return RetryItemResult{ID: itemID, Outcome: RetryItemNotFound}, nil
+	case RetryEpisodeNotFailed:
+		return RetryItemResult{ID: itemID, Outcome: RetryItemNotFailed}, nil
+	case RetryEpisodeEpisodeNotFound:
+		return RetryItemResult{ID: itemID, Outcome: RetryItemEpisodeNotFound}, nil
+	default:
+		return RetryItemResult{ID: itemID, Outcome: RetryItemNotFound}, nil
+	}
+}
+
 // RetryFailedEpisode clears per-episode failed assets and resets the queue item
 // to the appropriate status for re-processing.
 func RetryFailedEpisode(ctx context.Context, store *queue.Store, itemID int64, episodeKey string) (RetryEpisodeResult, error) {
