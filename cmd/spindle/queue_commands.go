@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/api"
-	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 )
 
@@ -185,14 +184,9 @@ Examples:
 				return errors.New("specify only one of --all, --completed, or --failed")
 			}
 
-			// Parse IDs if provided
-			ids := make([]int64, 0, len(args))
-			for _, arg := range args {
-				id, err := strconv.ParseInt(arg, 10, 64)
-				if err != nil || id <= 0 {
-					return fmt.Errorf("invalid item id %q", arg)
-				}
-				ids = append(ids, id)
+			ids, err := parsePositiveIDs(args)
+			if err != nil {
+				return err
 			}
 
 			// If IDs provided, cannot use filter flags
@@ -215,28 +209,9 @@ Examples:
 						return err
 					}
 					if ctx.JSONMode() {
-						type jsonItem struct {
-							ID      int64  `json:"id"`
-							Outcome string `json:"outcome"`
-						}
-						items := make([]jsonItem, 0, len(result.Items))
-						for _, item := range result.Items {
-							outcome := "removed"
-							if item.Outcome == queueRemoveOutcomeNotFound {
-								outcome = "not_found"
-							}
-							items = append(items, jsonItem{ID: item.ID, Outcome: outcome})
-						}
-						return writeJSON(cmd, map[string]any{"items": items})
+						return writeQueueRemoveResultJSON(cmd, result)
 					}
-					for _, item := range result.Items {
-						switch item.Outcome {
-						case queueRemoveOutcomeNotFound:
-							fmt.Fprintf(out, "Item %d not found\n", item.ID)
-						case queueRemoveOutcomeRemoved:
-							fmt.Fprintf(out, "Item %d removed\n", item.ID)
-						}
-					}
+					printQueueRemoveResult(out, result)
 					return nil
 				}
 
@@ -261,14 +236,7 @@ Examples:
 					return writeJSON(cmd, map[string]any{"cleared": removed})
 				}
 
-				switch {
-				case clearCompleted:
-					fmt.Fprintf(out, "Cleared %d completed items\n", removed)
-				case clearFailed:
-					fmt.Fprintf(out, "Cleared %d failed items\n", removed)
-				case clearAll:
-					fmt.Fprintf(out, "Cleared %d queue items\n", removed)
-				}
+				fmt.Fprintf(out, "Cleared %d %s\n", removed, bulkClearLabel(clearAll, clearCompleted, clearFailed))
 				return nil
 			})
 		},
@@ -317,13 +285,9 @@ Examples:
   spindle queue retry 123 --episode s01e05  # Retry only episode S01E05`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ids := make([]int64, 0, len(args))
-			for _, arg := range args {
-				id, err := strconv.ParseInt(arg, 10, 64)
-				if err != nil || id <= 0 {
-					return fmt.Errorf("invalid item id %q", arg)
-				}
-				ids = append(ids, id)
+			ids, err := parsePositiveIDs(args)
+			if err != nil {
+				return err
 			}
 
 			// Per-episode retry requires direct store access
@@ -338,25 +302,9 @@ Examples:
 						return err
 					}
 					if ctx.JSONMode() {
-						outcome := retryOutcomeString(result.Outcome)
-						return writeJSON(cmd, map[string]any{
-							"id":         ids[0],
-							"episode":    episodeKey,
-							"outcome":    outcome,
-							"new_status": result.NewStatus,
-						})
+						return writeQueueEpisodeRetryJSON(cmd, ids[0], episodeKey, result)
 					}
-					switch result.Outcome {
-					case queueRetryOutcomeNotFound:
-						fmt.Fprintf(out, "Item %d not found\n", ids[0])
-					case queueRetryOutcomeNotFailed:
-						fmt.Fprintf(out, "Item %d is not in a retryable state\n", ids[0])
-					case queueRetryOutcomeEpisodeNotFound:
-						fmt.Fprintf(out, "Episode %s not found in item %d\n", episodeKey, ids[0])
-					case queueRetryOutcomeUpdated:
-						fmt.Fprintf(out, "Episode %s in item %d cleared for retry (item reset to %s)\n",
-							strings.ToUpper(episodeKey), ids[0], result.NewStatus)
-					}
+					printQueueEpisodeRetryResult(out, ids[0], episodeKey, result)
 					return nil
 				})
 			}
@@ -381,27 +329,10 @@ Examples:
 				}
 
 				if ctx.JSONMode() {
-					type jsonItem struct {
-						ID      int64  `json:"id"`
-						Outcome string `json:"outcome"`
-					}
-					items := make([]jsonItem, 0, len(result.Items))
-					for _, item := range result.Items {
-						items = append(items, jsonItem{ID: item.ID, Outcome: retryOutcomeString(item.Outcome)})
-					}
-					return writeJSON(cmd, map[string]any{"items": items})
+					return writeQueueRetryResultJSON(cmd, result)
 				}
 
-				for _, item := range result.Items {
-					switch item.Outcome {
-					case queueRetryOutcomeNotFound:
-						fmt.Fprintf(out, "Item %d not found\n", item.ID)
-					case queueRetryOutcomeNotFailed:
-						fmt.Fprintf(out, "Item %d is not in a retryable state (only failed items can be retried)\n", item.ID)
-					case queueRetryOutcomeUpdated:
-						fmt.Fprintf(out, "Item %d reset for retry\n", item.ID)
-					}
-				}
+				printQueueRetryResult(out, result)
 				return nil
 			})
 		},
@@ -417,13 +348,9 @@ func newQueueStopCommand(ctx *commandContext) *cobra.Command {
 		Short: "Stop processing for specific queue items",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ids := make([]int64, 0, len(args))
-			for _, arg := range args {
-				id, err := strconv.ParseInt(arg, 10, 64)
-				if err != nil || id <= 0 {
-					return fmt.Errorf("invalid item id %q", arg)
-				}
-				ids = append(ids, id)
+			ids, err := parsePositiveIDs(args)
+			if err != nil {
+				return err
 			}
 
 			return ctx.withQueueAPI(func(qa queueAPI) error {
@@ -433,38 +360,9 @@ func newQueueStopCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 				if ctx.JSONMode() {
-					type jsonItem struct {
-						ID          int64  `json:"id"`
-						Outcome     string `json:"outcome"`
-						PriorStatus string `json:"prior_status,omitempty"`
-					}
-					items := make([]jsonItem, 0, len(result.Items))
-					for _, item := range result.Items {
-						items = append(items, jsonItem{
-							ID:          item.ID,
-							Outcome:     stopOutcomeString(item.Outcome),
-							PriorStatus: item.PriorStatus,
-						})
-					}
-					return writeJSON(cmd, map[string]any{"items": items})
+					return writeQueueStopResultJSON(cmd, result)
 				}
-				for _, item := range result.Items {
-					switch item.Outcome {
-					case queueStopOutcomeNotFound:
-						fmt.Fprintf(out, "Item %d not found\n", item.ID)
-					case queueStopOutcomeAlreadyCompleted:
-						fmt.Fprintf(out, "Item %d is already completed\n", item.ID)
-					case queueStopOutcomeAlreadyFailed:
-						fmt.Fprintf(out, "Item %d is already failed\n", item.ID)
-					case queueStopOutcomeUpdated:
-						message := fmt.Sprintf("Item %d stop requested", item.ID)
-						if parsed, ok := queue.ParseStatus(item.PriorStatus); ok && queue.IsProcessingStatus(parsed) {
-							statusLabel := formatStatusLabel(item.PriorStatus)
-							message = fmt.Sprintf("Item %d stop requested (currently %s; will halt after current stage)", item.ID, statusLabel)
-						}
-						fmt.Fprintln(out, message)
-					}
-				}
+				printQueueStopResult(out, result)
 				return nil
 			})
 		},
