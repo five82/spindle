@@ -1,11 +1,11 @@
 package encoding
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"spindle/internal/fileutil"
 	"spindle/internal/services"
 )
 
@@ -29,7 +29,7 @@ func ensureEncodedOutput(tempPath, desiredPath, sourcePath string) (string, erro
 		}
 		return desiredPath, nil
 	}
-	if err := copyFile(sourcePath, desiredPath); err != nil {
+	if err := fileutil.CopyFile(sourcePath, desiredPath); err != nil {
 		return "", services.Wrap(
 			services.ErrTransient,
 			"encoding",
@@ -48,23 +48,4 @@ func deriveEncodedFilename(rippedPath string) string {
 		stem = "encoded"
 	}
 	return stem + ".mkv"
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
 }

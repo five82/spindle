@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"spindle/internal/fileutil"
 	"spindle/internal/logging"
 	"spindle/internal/ripspec"
 )
@@ -71,7 +72,7 @@ func (s *Stage) tryReuseCachedTranscript(target subtitleTarget, env *ripspec.Env
 		}
 		return GenerateResult{}, false
 	}
-	if err := copyFile(cachedPath, destPath); err != nil {
+	if err := fileutil.CopyFile(cachedPath, destPath); err != nil {
 		if s.logger != nil {
 			s.logger.Warn("contentid transcript cache copy failed",
 				logging.String(logging.FieldEventType, "transcript_cache_copy_failed"),

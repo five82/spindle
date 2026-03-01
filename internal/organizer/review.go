@@ -12,6 +12,7 @@ import (
 
 	"log/slog"
 
+	"spindle/internal/fileutil"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -145,7 +146,10 @@ func moveOrCopyFile(logger *slog.Logger, source, target string) error {
 	// Handle cross-device moves
 	var linkErr *os.LinkError
 	if errors.As(renameErr, &linkErr) && errors.Is(linkErr.Err, syscall.EXDEV) {
-		if copyErr := copyFile(source, target); copyErr != nil {
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return services.Wrap(services.ErrTransient, "organizing", "create review dir", "Failed to create review directory for cross-device copy", err)
+		}
+		if copyErr := fileutil.CopyFileVerified(source, target); copyErr != nil {
 			return services.Wrap(services.ErrTransient, "organizing", "copy review file", "Failed to copy file into review directory", copyErr)
 		}
 		if err := os.Remove(source); err != nil {

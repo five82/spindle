@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"spindle/internal/fileutil"
 )
 
 // srtCue represents a single subtitle cue with timing and text.
@@ -248,15 +250,6 @@ func writeSRTCues(path string, cues []srtCue) error {
 	return os.WriteFile(path, []byte(sb.String()), 0644)
 }
 
-// copyFile copies a file from src to dst.
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o644)
-}
-
 // alignForcedToReference adjusts forced subtitle timing based on a reference subtitle.
 // It finds matching cues, calculates a time transformation, and applies it.
 func alignForcedToReference(referencePath, forcedPath, outputPath string) (int, timeTransform, error) {
@@ -273,7 +266,7 @@ func alignForcedToReference(referencePath, forcedPath, outputPath string) (int, 
 	matches := findMatchingCues(refCues, forcedCues)
 	if len(matches) < 2 {
 		// Not enough matches to calculate transformation - copy as-is
-		if err := copyFile(forcedPath, outputPath); err != nil {
+		if err := fileutil.CopyFile(forcedPath, outputPath); err != nil {
 			return 0, timeTransform{}, err
 		}
 		return len(matches), timeTransform{scale: 1.0, offset: 0}, nil
@@ -282,7 +275,7 @@ func alignForcedToReference(referencePath, forcedPath, outputPath string) (int, 
 	transform, ok := calculateTimeTransform(matches)
 	if !ok {
 		// Couldn't calculate transformation - copy as-is
-		if err := copyFile(forcedPath, outputPath); err != nil {
+		if err := fileutil.CopyFile(forcedPath, outputPath); err != nil {
 			return 0, timeTransform{}, err
 		}
 		return len(matches), timeTransform{scale: 1.0, offset: 0}, nil

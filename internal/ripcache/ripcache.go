@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +14,7 @@ import (
 	"log/slog"
 
 	"spindle/internal/config"
+	"spindle/internal/fileutil"
 	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/textutil"
@@ -462,27 +462,8 @@ func copyDir(src, dst string) error {
 			// Skip special files.
 			return nil
 		}
-		return copyFile(path, target, info.Mode())
+		return fileutil.CopyFileMode(path, target, info.Mode())
 	})
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
 }
 
 func sanitize(value string) string {

@@ -15,6 +15,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/disc"
+	"spindle/internal/fileutil"
 	"spindle/internal/logging"
 	"spindle/internal/notifications"
 	"spindle/internal/queue"
@@ -505,7 +506,7 @@ func (r *Ripper) Execute(ctx context.Context, item *queue.Item) (err error) {
 			ext = ".mkv"
 		}
 		target = filepath.Join(destDir, cleaned+ext)
-		if err := copyPlaceholder(sourcePath, target); err != nil {
+		if err := fileutil.CopyFile(sourcePath, target); err != nil {
 			return services.Wrap(services.ErrTransient, "ripping", "stage source", "Failed to copy source into staging", err)
 		}
 		logger.Info(
