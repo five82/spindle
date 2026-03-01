@@ -27,18 +27,13 @@ type Access interface {
 	ActiveFingerprints(ctx context.Context) (map[string]struct{}, error)
 }
 
-// StoreAccess is the direct-store variant of Access.
-type StoreAccess interface {
-	Access
-}
-
 // NewIPCAccess returns an Access backed by daemon IPC.
 func NewIPCAccess(client *ipc.Client) Access {
 	return &ipcAccess{client: client}
 }
 
-// NewStoreAccess returns a StoreAccess backed by direct DB access.
-func NewStoreAccess(store *queue.Store) StoreAccess {
+// NewStoreAccess returns an Access backed by direct DB access.
+func NewStoreAccess(store *queue.Store) Access {
 	return &storeAccess{store: store, service: api.NewQueueService(store)}
 }
 
@@ -233,7 +228,7 @@ func (a *storeAccess) Retry(ctx context.Context, ids []int64) (int64, error) {
 }
 
 func (a *storeAccess) RetryEpisode(ctx context.Context, itemID int64, episodeKey string) (api.RetryItemResult, error) {
-	return api.RetryFailedEpisodeByID(ctx, a.store, itemID, episodeKey)
+	return api.RetryFailedEpisode(ctx, a.store, itemID, episodeKey)
 }
 
 func (a *storeAccess) Stop(ctx context.Context, ids []int64) (int64, error) {
@@ -245,19 +240,5 @@ func (a *storeAccess) Health(ctx context.Context) (queue.HealthSummary, error) {
 }
 
 func (a *storeAccess) ActiveFingerprints(ctx context.Context) (map[string]struct{}, error) {
-	items, err := a.store.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	fingerprints := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		fp := strings.ToUpper(strings.TrimSpace(item.DiscFingerprint))
-		if fp != "" {
-			fingerprints[fp] = struct{}{}
-		}
-	}
-	return fingerprints, nil
+	return a.store.ActiveFingerprints(ctx)
 }

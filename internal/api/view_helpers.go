@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"regexp"
-	"strings"
 )
 
 // MetadataField extracts a string field from metadata JSON.
@@ -51,20 +50,42 @@ func MetadataEdition(metadataJSON string) string {
 	return MetadataField(metadataJSON, "edition", "")
 }
 
-// EpisodeTotalsFromStatuses derives totals from per-episode status payloads.
-func EpisodeTotalsFromStatuses(episodes []EpisodeStatus) EpisodeTotals {
-	var totals EpisodeTotals
-	for _, ep := range episodes {
-		totals.Planned++
-		if strings.TrimSpace(ep.RippedPath) != "" {
-			totals.Ripped++
+// metadataFields holds all commonly extracted metadata fields from a single JSON parse.
+type metadataFields struct {
+	title    string
+	year     string
+	edition  string
+	filename string
+}
+
+// parseMetadataFields extracts all common metadata fields with a single JSON parse.
+func parseMetadataFields(metadataJSON string) metadataFields {
+	if metadataJSON == "" {
+		return metadataFields{title: "Unknown", year: "Unknown"}
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(metadataJSON), &raw); err != nil {
+		return metadataFields{title: "Unknown", year: "Unknown"}
+	}
+
+	str := func(key, fallback string) string {
+		if v, ok := raw[key].(string); ok && v != "" {
+			return v
 		}
-		if strings.TrimSpace(ep.EncodedPath) != "" {
-			totals.Encoded++
-		}
-		if strings.TrimSpace(ep.FinalPath) != "" {
-			totals.Final++
+		return fallback
+	}
+
+	year := "Unknown"
+	if rd := str("release_date", ""); rd != "" {
+		if match := yearPattern.FindString(rd); match != "" {
+			year = match
 		}
 	}
-	return totals
+
+	return metadataFields{
+		title:    str("title", "Unknown"),
+		year:     year,
+		edition:  str("edition", ""),
+		filename: str("filename", ""),
+	}
 }

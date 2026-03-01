@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/api"
-	"spindle/internal/logging"
 	"spindle/internal/ripspec"
 )
 
@@ -36,15 +35,9 @@ Examples:
 			if len(args) > 0 {
 				device = strings.TrimSpace(args[0])
 			}
-			logLevel := ctx.resolvedLogLevel(cfg)
-			logger, err := logging.New(logging.Options{
-				Level:       logLevel,
-				Format:      cfg.Logging.Format,
-				OutputPaths: []string{"stdout"},
-				Development: ctx.logDevelopment(cfg),
-			})
+			logger, err := ctx.newCLILogger(cfg, "", false)
 			if err != nil {
-				return fmt.Errorf("setup logging: %w", err)
+				return err
 			}
 
 			result, err := api.IdentifyDisc(cmd.Context(), api.IdentifyDiscRequest{

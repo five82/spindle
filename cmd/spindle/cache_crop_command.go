@@ -33,7 +33,7 @@ Example:
   spindle cache crop /path/to/file.mkv`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target, label, err := resolveCropTarget(cmd, ctx, args[0], cmd.OutOrStdout())
+			target, label, err := resolveCacheTarget(cmd, ctx, args[0], cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -58,21 +58,6 @@ Example:
 		},
 	}
 	return cmd
-}
-
-func resolveCropTarget(cmd *cobra.Command, ctx *commandContext, arg string, out io.Writer) (string, string, error) {
-	cfg, err := ctx.ensureConfig()
-	if err != nil {
-		return "", "", err
-	}
-	target, label, warn, err := api.ResolveCacheTarget(cmd.Context(), api.ResolveCacheTargetRequest{
-		Config: cfg,
-		Arg:    arg,
-	})
-	if warn != "" {
-		fmt.Fprintln(out, warn)
-	}
-	return target, label, err
 }
 
 func printCropResults(out io.Writer, result *draptolib.CropDetectionResult) {

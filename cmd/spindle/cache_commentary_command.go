@@ -38,7 +38,7 @@ Example:
 				return err
 			}
 
-			target, label, err := resolveCommentaryTarget(cmd, ctx, args[0], cmd.OutOrStdout())
+			target, label, err := resolveCacheTarget(cmd, ctx, args[0], cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -71,21 +71,6 @@ Example:
 		},
 	}
 	return cmd
-}
-
-func resolveCommentaryTarget(cmd *cobra.Command, ctx *commandContext, arg string, out io.Writer) (string, string, error) {
-	cfg, err := ctx.ensureConfig()
-	if err != nil {
-		return "", "", err
-	}
-	target, label, warn, err := api.ResolveCacheTarget(cmd.Context(), api.ResolveCacheTargetRequest{
-		Config: cfg,
-		Arg:    arg,
-	})
-	if warn != "" {
-		fmt.Fprintln(out, warn)
-	}
-	return target, label, err
 }
 
 func printCommentaryResults(out io.Writer, result *audioanalysis.DiagnosticResult) {

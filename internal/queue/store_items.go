@@ -299,6 +299,28 @@ func (s *Store) ClearFailed(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
+// ActiveFingerprints returns the set of non-empty disc fingerprints across all queue items.
+func (s *Store) ActiveFingerprints(ctx context.Context) (map[string]struct{}, error) {
+	ctx = ensureContext(ctx)
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT UPPER(TRIM(disc_fingerprint)) FROM queue_items WHERE TRIM(disc_fingerprint) != ''`)
+	if err != nil {
+		return nil, fmt.Errorf("query active fingerprints: %w", err)
+	}
+	defer rows.Close()
+
+	fingerprints := make(map[string]struct{})
+	for rows.Next() {
+		var fp string
+		if err := rows.Scan(&fp); err != nil {
+			return nil, fmt.Errorf("scan fingerprint: %w", err)
+		}
+		if fp != "" {
+			fingerprints[fp] = struct{}{}
+		}
+	}
+	return fingerprints, rows.Err()
+}
+
 // HasDiscDependentItem reports whether any item is in a disc-dependent stage
 // (identifying or ripping). These stages actively access the optical drive,
 // so concurrent disc detection should be skipped to avoid read errors.

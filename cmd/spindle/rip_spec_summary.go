@@ -33,10 +33,7 @@ func printRipSpecFingerprints(out io.Writer, summary ripspec.Envelope) {
 				name = fmt.Sprintf("S%02dE%02d", title.Season, title.Episode)
 			}
 		}
-		fp := strings.TrimSpace(title.TitleHash)
-		if len(fp) > 24 {
-			fp = fp[:24]
-		}
+		fp := truncateFingerprint(title.TitleHash)
 		fmt.Fprintf(
 			out,
 			"  - Title %d: %s | Duration %dm %ds | Fingerprint %s\n",

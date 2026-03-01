@@ -215,11 +215,11 @@ func dependencyLines(deps []ipc.DependencyStatus, summary api.DependencySummary,
 
 func statusKindFromSeverity(severity string) statusKind {
 	switch strings.ToLower(strings.TrimSpace(severity)) {
-	case "ok":
+	case api.SeverityOK:
 		return statusOK
-	case "warn":
+	case api.SeverityWarn:
 		return statusWarn
-	case "error":
+	case api.SeverityError:
 		return statusError
 	default:
 		return statusInfo

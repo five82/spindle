@@ -10,6 +10,14 @@ import (
 // dateTimeFormat is used for RFC3339 timestamps in API payloads.
 const dateTimeFormat = "2006-01-02T15:04:05.000Z07:00"
 
+// Severity constants for status lines, dependencies, and summary output.
+const (
+	SeverityOK    = "ok"
+	SeverityWarn  = "warn"
+	SeverityError = "error"
+	SeverityInfo  = "info"
+)
+
 // QueueItem describes a queue entry in a transport-friendly format.
 type QueueItem struct {
 	ID                      int64                     `json:"id"`

@@ -60,16 +60,17 @@ func AssessIdentifyDisc(item *queue.Item) IdentifyDiscAssessment {
 		}
 	}
 
+	meta := parseMetadataFields(item.MetadataJSON)
 	assessment := IdentifyDiscAssessment{
-		TMDBTitle:       MetadataTitle(item.MetadataJSON),
-		Year:            MetadataYear(item.MetadataJSON),
-		Edition:         MetadataEdition(item.MetadataJSON),
+		TMDBTitle:       meta.title,
+		Year:            meta.year,
+		Edition:         meta.edition,
 		MetadataPresent: strings.TrimSpace(item.MetadataJSON) != "",
 		ReviewRequired:  item.NeedsReview,
 		ReviewReason:    strings.TrimSpace(item.ReviewReason),
 	}
-	if filename := MetadataFilename(item.MetadataJSON); filename != "" {
-		assessment.LibraryFilename = filename + ".mkv"
+	if meta.filename != "" {
+		assessment.LibraryFilename = meta.filename + ".mkv"
 	} else if assessment.Year != "Unknown" && assessment.TMDBTitle != "Unknown" {
 		assessment.LibraryFilename = fmt.Sprintf("%s (%s).mkv", assessment.TMDBTitle, assessment.Year)
 	}

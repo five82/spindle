@@ -9,79 +9,38 @@ import (
 	"spindle/internal/ripspec"
 )
 
-type RetryEpisodeOutcome int
-
-const (
-	RetryEpisodeUpdated RetryEpisodeOutcome = iota
-	RetryEpisodeNotFound
-	RetryEpisodeNotFailed
-	RetryEpisodeEpisodeNotFound
-)
-
-type RetryEpisodeResult struct {
-	ItemID     int64
-	Outcome    RetryEpisodeOutcome
-	NewStatus  string
-	EpisodeKey string
-}
-
-// RetryFailedEpisodeByID retries a specific failed episode and maps the result to
-// the shared queue action DTO used by CLI/API callers.
-func RetryFailedEpisodeByID(ctx context.Context, store *queue.Store, itemID int64, episodeKey string) (RetryItemResult, error) {
-	result, err := RetryFailedEpisode(ctx, store, itemID, episodeKey)
-	if err != nil {
-		return RetryItemResult{}, err
-	}
-	switch result.Outcome {
-	case RetryEpisodeUpdated:
-		return RetryItemResult{
-			ID:        itemID,
-			Outcome:   RetryItemUpdated,
-			NewStatus: result.NewStatus,
-		}, nil
-	case RetryEpisodeNotFound:
-		return RetryItemResult{ID: itemID, Outcome: RetryItemNotFound}, nil
-	case RetryEpisodeNotFailed:
-		return RetryItemResult{ID: itemID, Outcome: RetryItemNotFailed}, nil
-	case RetryEpisodeEpisodeNotFound:
-		return RetryItemResult{ID: itemID, Outcome: RetryItemEpisodeNotFound}, nil
-	default:
-		return RetryItemResult{ID: itemID, Outcome: RetryItemNotFound}, nil
-	}
-}
-
 // RetryFailedEpisode clears per-episode failed assets and resets the queue item
 // to the appropriate status for re-processing.
-func RetryFailedEpisode(ctx context.Context, store *queue.Store, itemID int64, episodeKey string) (RetryEpisodeResult, error) {
+func RetryFailedEpisode(ctx context.Context, store *queue.Store, itemID int64, episodeKey string) (RetryItemResult, error) {
 	if store == nil {
-		return RetryEpisodeResult{}, fmt.Errorf("queue store is required")
+		return RetryItemResult{}, fmt.Errorf("queue store is required")
 	}
 
 	item, err := store.GetByID(ctx, itemID)
 	if err != nil {
-		return RetryEpisodeResult{}, err
+		return RetryItemResult{}, err
 	}
 	if item == nil {
-		return RetryEpisodeResult{ItemID: itemID, Outcome: RetryEpisodeNotFound}, nil
+		return RetryItemResult{ID: itemID, Outcome: RetryItemNotFound}, nil
 	}
 
 	if item.Status != queue.StatusFailed {
-		return RetryEpisodeResult{ItemID: itemID, Outcome: RetryEpisodeNotFailed}, nil
+		return RetryItemResult{ID: itemID, Outcome: RetryItemNotFailed}, nil
 	}
 
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
-		return RetryEpisodeResult{}, fmt.Errorf("parse rip spec: %w", err)
+		return RetryItemResult{}, fmt.Errorf("parse rip spec: %w", err)
 	}
 
 	episodeKey = strings.ToLower(strings.TrimSpace(episodeKey))
 	if episodeKey == "" {
-		return RetryEpisodeResult{ItemID: itemID, Outcome: RetryEpisodeEpisodeNotFound}, nil
+		return RetryItemResult{ID: itemID, Outcome: RetryItemEpisodeNotFound}, nil
 	}
 
 	targetStatus := determineEpisodeRetryStatus(&env, episodeKey)
 	if targetStatus == "" {
-		return RetryEpisodeResult{ItemID: itemID, Outcome: RetryEpisodeEpisodeNotFound}, nil
+		return RetryItemResult{ID: itemID, Outcome: RetryItemEpisodeNotFound}, nil
 	}
 
 	env.Assets.ClearFailedAsset(ripspec.AssetKindEncoded, episodeKey)
@@ -90,7 +49,7 @@ func RetryFailedEpisode(ctx context.Context, store *queue.Store, itemID int64, e
 
 	encoded, err := env.Encode()
 	if err != nil {
-		return RetryEpisodeResult{}, fmt.Errorf("encode rip spec: %w", err)
+		return RetryItemResult{}, fmt.Errorf("encode rip spec: %w", err)
 	}
 
 	item.RipSpecData = encoded
@@ -100,14 +59,13 @@ func RetryFailedEpisode(ctx context.Context, store *queue.Store, itemID int64, e
 	item.ReviewReason = ""
 
 	if err := store.Update(ctx, item); err != nil {
-		return RetryEpisodeResult{}, fmt.Errorf("update item: %w", err)
+		return RetryItemResult{}, fmt.Errorf("update item: %w", err)
 	}
 
-	return RetryEpisodeResult{
-		ItemID:     itemID,
-		Outcome:    RetryEpisodeUpdated,
-		NewStatus:  string(targetStatus),
-		EpisodeKey: episodeKey,
+	return RetryItemResult{
+		ID:        itemID,
+		Outcome:   RetryItemUpdated,
+		NewStatus: string(targetStatus),
 	}, nil
 }
 

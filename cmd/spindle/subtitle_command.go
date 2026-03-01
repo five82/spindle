@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/api"
-	"spindle/internal/logging"
 )
 
 func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
@@ -32,15 +31,9 @@ func newGenerateSubtitleCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load configuration: %w", err)
 			}
-			logLevel := ctx.resolvedLogLevel(cfg)
-			logger, err := logging.New(logging.Options{
-				Level:       logLevel,
-				Format:      cfg.Logging.Format,
-				OutputPaths: []string{"stdout"},
-				Development: ctx.logDevelopment(cfg),
-			})
+			logger, err := ctx.newCLILogger(cfg, "", false)
 			if err != nil {
-				return fmt.Errorf("init subtitle logger: %w", err)
+				return err
 			}
 
 			result, err := api.GenerateSubtitlesForFile(cmd.Context(), api.GenerateSubtitlesRequest{

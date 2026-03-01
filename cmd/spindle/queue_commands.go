@@ -453,7 +453,7 @@ func printEpisodeDetails(out io.Writer, item api.QueueItem) {
 	}
 	fmt.Fprintf(out, "  Mapping: %s\n", mapping)
 	for _, ep := range item.Episodes {
-		label := formatEpisodeLabel(ep)
+		label := api.EpisodeDisplayLabel(ep)
 		stage := strings.ToUpper(strings.TrimSpace(ep.Stage))
 		if stage == "" {
 			stage = "PLANNED"
@@ -487,10 +487,6 @@ func printEpisodeDetails(out io.Writer, item api.QueueItem) {
 			}
 		}
 	}
-}
-
-func formatEpisodeLabel(ep api.EpisodeStatus) string {
-	return api.EpisodeDisplayLabel(ep)
 }
 
 func newQueueHealthSubcommand(ctx *commandContext) *cobra.Command {

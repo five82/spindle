@@ -374,11 +374,11 @@ func BuildStatusSnapshot(ctx context.Context, socketPath string, cfg *config.Con
 		if strings.TrimSpace(statusResp.Dependencies[i].Severity) != "" {
 			continue
 		}
-		severity := "ok"
+		severity := api.SeverityOK
 		if !statusResp.Dependencies[i].Available {
-			severity = "error"
+			severity = api.SeverityError
 			if statusResp.Dependencies[i].Optional {
-				severity = "warn"
+				severity = api.SeverityWarn
 			}
 		}
 		statusResp.Dependencies[i].Severity = severity
@@ -407,11 +407,11 @@ func ResolveDependencies(ctx context.Context, cfg *config.Config) []ipc.Dependen
 	checks := preflight.CheckSystemDeps(ctx, cfg)
 	statuses := make([]ipc.DependencyStatus, 0, len(checks)+1)
 	for _, check := range checks {
-		severity := "ok"
+		severity := api.SeverityOK
 		if !check.Available {
-			severity = "error"
+			severity = api.SeverityError
 			if check.Optional {
-				severity = "warn"
+				severity = api.SeverityWarn
 			}
 		}
 		statuses = append(statuses, ipc.DependencyStatus{
@@ -437,7 +437,7 @@ func commentaryLLMDependencyStatus(ctx context.Context, cfg *config.Config) ipc.
 		Name:        "Commentary LLM",
 		Description: "LLM-driven commentary track detection",
 		Optional:    true,
-		Severity:    "warn",
+		Severity:    api.SeverityWarn,
 	}
 	llmCfg := cfg.CommentaryLLM()
 	if llmCfg.APIKey == "" {
@@ -448,7 +448,7 @@ func commentaryLLMDependencyStatus(ctx context.Context, cfg *config.Config) ipc.
 	status.Available = result.Passed
 	status.Detail = result.Detail
 	if status.Available {
-		status.Severity = "ok"
+		status.Severity = api.SeverityOK
 	}
 	return status
 }
@@ -457,57 +457,57 @@ func commentaryLLMDependencyStatus(ctx context.Context, cfg *config.Config) ipc.
 func BuildSystemChecks(cfg *config.Config, daemonRunning, discPaused, netlinkActive bool) []api.StatusLine {
 	lines := make([]api.StatusLine, 0, 6)
 	if daemonRunning {
-		lines = append(lines, api.StatusLine{Label: "Spindle", Severity: "ok", Detail: "Running"})
+		lines = append(lines, api.StatusLine{Label: "Spindle", Severity: api.SeverityOK, Detail: "Running"})
 		if discPaused {
-			lines = append(lines, api.StatusLine{Label: "Disc Processing", Severity: "warn", Detail: "Paused"})
+			lines = append(lines, api.StatusLine{Label: "Disc Processing", Severity: api.SeverityWarn, Detail: "Paused"})
 		} else {
-			lines = append(lines, api.StatusLine{Label: "Disc Processing", Severity: "ok", Detail: "Active"})
+			lines = append(lines, api.StatusLine{Label: "Disc Processing", Severity: api.SeverityOK, Detail: "Active"})
 		}
 	} else {
-		lines = append(lines, api.StatusLine{Label: "Spindle", Severity: "warn", Detail: "Not running (run `spindle start`)"})
+		lines = append(lines, api.StatusLine{Label: "Spindle", Severity: api.SeverityWarn, Detail: "Not running (run `spindle start`)"})
 	}
 
 	probe := preflight.ProbeDisc(cfg.MakeMKV.OpticalDrive)
 	if !probe.Detected {
-		lines = append(lines, api.StatusLine{Label: "Disc", Severity: "info", Detail: "No disc detected"})
+		lines = append(lines, api.StatusLine{Label: "Disc", Severity: api.SeverityInfo, Detail: "No disc detected"})
 	} else {
-		lines = append(lines, api.StatusLine{Label: "Disc", Severity: "ok", Detail: probe.DiscDetail()})
+		lines = append(lines, api.StatusLine{Label: "Disc", Severity: api.SeverityOK, Detail: probe.DiscDetail()})
 	}
 
 	jellyfin := preflight.CheckJellyfinFromConfig(cfg)
 	switch {
 	case jellyfin.Passed:
-		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: "ok", Detail: jellyfin.Detail})
+		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: api.SeverityOK, Detail: jellyfin.Detail})
 	case strings.EqualFold(strings.TrimSpace(jellyfin.Detail), "Unknown"):
-		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: "info", Detail: jellyfin.Detail})
+		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: api.SeverityInfo, Detail: jellyfin.Detail})
 	default:
-		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: "warn", Detail: jellyfin.Detail})
+		lines = append(lines, api.StatusLine{Label: "Jellyfin", Severity: api.SeverityWarn, Detail: jellyfin.Detail})
 	}
 
 	openSubs := preflight.CheckOpenSubtitlesFromConfig(cfg)
 	switch {
 	case openSubs.Passed && strings.EqualFold(strings.TrimSpace(openSubs.Detail), "Disabled"):
-		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: "info", Detail: openSubs.Detail})
+		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: api.SeverityInfo, Detail: openSubs.Detail})
 	case openSubs.Passed:
-		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: "ok", Detail: openSubs.Detail})
+		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: api.SeverityOK, Detail: openSubs.Detail})
 	case strings.EqualFold(strings.TrimSpace(openSubs.Detail), "Unknown"):
-		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: "info", Detail: openSubs.Detail})
+		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: api.SeverityInfo, Detail: openSubs.Detail})
 	default:
-		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: "warn", Detail: openSubs.Detail})
+		lines = append(lines, api.StatusLine{Label: "OpenSubtitles", Severity: api.SeverityWarn, Detail: openSubs.Detail})
 	}
 
 	if strings.TrimSpace(cfg.Notifications.NtfyTopic) != "" {
-		lines = append(lines, api.StatusLine{Label: "Notifications", Severity: "ok", Detail: "Configured"})
+		lines = append(lines, api.StatusLine{Label: "Notifications", Severity: api.SeverityOK, Detail: "Configured"})
 	} else {
-		lines = append(lines, api.StatusLine{Label: "Notifications", Severity: "warn", Detail: "Not configured"})
+		lines = append(lines, api.StatusLine{Label: "Notifications", Severity: api.SeverityWarn, Detail: "Not configured"})
 	}
 
 	if netlinkActive {
-		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: "ok", Detail: "Netlink monitoring active"})
+		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: api.SeverityOK, Detail: "Netlink monitoring active"})
 	} else if !daemonRunning {
-		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: "info", Detail: "Inactive (daemon not running)"})
+		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: api.SeverityInfo, Detail: "Inactive (daemon not running)"})
 	} else {
-		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: "warn", Detail: "Netlink unavailable (manual detection via 'spindle disc detect')"})
+		lines = append(lines, api.StatusLine{Label: "Disc Detection", Severity: api.SeverityWarn, Detail: "Netlink unavailable (manual detection via 'spindle disc detect')"})
 	}
 
 	return lines
@@ -525,9 +525,9 @@ func BuildLibraryPathChecks(cfg *config.Config) []api.StatusLine {
 		{label: "TV", path: librarySubdirPath(cfg.Paths.LibraryDir, cfg.Library.TVDir)},
 	} {
 		result := preflight.CheckDirectoryAccess(dir.label, dir.path)
-		severity := "error"
+		severity := api.SeverityError
 		if result.Passed {
-			severity = "ok"
+			severity = api.SeverityOK
 		}
 		lines = append(lines, api.StatusLine{
 			Label:    dir.label,
@@ -542,7 +542,7 @@ func BuildLibraryPathChecks(cfg *config.Config) []api.StatusLine {
 func BuildDependencySummary(deps []ipc.DependencyStatus) api.DependencySummary {
 	if len(deps) == 0 {
 		return api.DependencySummary{
-			Severity: "info",
+			Severity: api.SeverityInfo,
 			Detail:   "No dependency checks configured",
 		}
 	}
@@ -562,11 +562,11 @@ func BuildDependencySummary(deps []ipc.DependencyStatus) api.DependencySummary {
 
 	missingCount := missingRequired + missingOptional
 	available := len(deps) - missingCount
-	severity := "ok"
+	severity := api.SeverityOK
 	if missingRequired > 0 {
-		severity = "error"
+		severity = api.SeverityError
 	} else if missingOptional > 0 {
-		severity = "warn"
+		severity = api.SeverityWarn
 	}
 	detail := fmt.Sprintf("%d/%d available (missing: %d required, %d optional)", available, len(deps), missingRequired, missingOptional)
 	if missingCount == 0 {

@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"spindle/internal/api"
-	"spindle/internal/logging"
 )
 
 func newCacheRipCommand(ctx *commandContext) *cobra.Command {
@@ -41,15 +40,9 @@ it is overwritten.`,
 				return fmt.Errorf("spindle daemon is running; stop it with: spindle stop")
 			}
 
-			logLevel := ctx.resolvedLogLevel(cfg)
-			logger, err := logging.New(logging.Options{
-				Level:       logLevel,
-				Format:      cfg.Logging.Format,
-				OutputPaths: []string{"stdout"},
-				Development: ctx.logDevelopment(cfg),
-			})
+			logger, err := ctx.newCLILogger(cfg, "", false)
 			if err != nil {
-				return fmt.Errorf("setup logging: %w", err)
+				return err
 			}
 
 			result, err := api.PopulateRipCache(cmd.Context(), api.PopulateRipCacheRequest{

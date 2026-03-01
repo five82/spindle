@@ -44,7 +44,7 @@ type Daemon struct {
 	cancel     context.CancelFunc
 
 	depsMu       sync.RWMutex
-	dependencies []DependencyStatus
+	dependencies []api.DependencyStatus
 	notifier     notifications.Service
 }
 
@@ -56,18 +56,8 @@ type Status struct {
 	Workflow          workflow.StatusSummary
 	QueueDBPath       string
 	LockFilePath      string
-	Dependencies      []DependencyStatus
+	Dependencies      []api.DependencyStatus
 	PID               int
-}
-
-// DependencyStatus reports the availability of an external requirement.
-type DependencyStatus struct {
-	Name        string
-	Command     string
-	Description string
-	Optional    bool
-	Available   bool
-	Detail      string
 }
 
 // New constructs a daemon with initialized dependencies.
@@ -307,7 +297,7 @@ func (d *Daemon) RetryFailedEpisode(ctx context.Context, itemID int64, episodeKe
 	if d.store == nil {
 		return api.RetryItemResult{}, errors.New("queue store unavailable")
 	}
-	return api.RetryFailedEpisodeByID(ctx, d.store, itemID, episodeKey)
+	return api.RetryFailedEpisode(ctx, d.store, itemID, episodeKey)
 }
 
 // StopQueueItems moves items into review to halt further processing.
@@ -395,7 +385,7 @@ func (d *Daemon) Status(ctx context.Context) Status {
 	summary := d.workflow.Status(ctx)
 
 	d.depsMu.RLock()
-	dependencies := make([]DependencyStatus, len(d.dependencies))
+	dependencies := make([]api.DependencyStatus, len(d.dependencies))
 	copy(dependencies, d.dependencies)
 	d.depsMu.RUnlock()
 
@@ -496,9 +486,9 @@ func (d *Daemon) AfterRip() {
 func (d *Daemon) runDependencyChecks(ctx context.Context) error {
 	results := preflight.CheckSystemDeps(ctx, d.cfg)
 	d.depsMu.Lock()
-	d.dependencies = make([]DependencyStatus, len(results))
+	d.dependencies = make([]api.DependencyStatus, len(results))
 	for i, result := range results {
-		d.dependencies[i] = DependencyStatus{
+		d.dependencies[i] = api.DependencyStatus{
 			Name:        result.Name,
 			Command:     result.Command,
 			Description: result.Description,

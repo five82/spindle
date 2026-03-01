@@ -122,24 +122,13 @@ func (s *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := s.daemon.Status(r.Context())
-	deps := make([]api.DependencyStatus, len(status.Dependencies))
-	for i, dep := range status.Dependencies {
-		deps[i] = api.DependencyStatus{
-			Name:        dep.Name,
-			Command:     dep.Command,
-			Description: dep.Description,
-			Optional:    dep.Optional,
-			Available:   dep.Available,
-			Detail:      dep.Detail,
-		}
-	}
 	payload := api.DaemonStatus{
 		Running:      status.Running,
 		PID:          status.PID,
 		QueueDBPath:  status.QueueDBPath,
 		LockFilePath: status.LockFilePath,
 		Workflow:     api.FromStatusSummary(status.Workflow),
-		Dependencies: deps,
+		Dependencies: status.Dependencies,
 	}
 	s.writeJSON(w, http.StatusOK, payload)
 }

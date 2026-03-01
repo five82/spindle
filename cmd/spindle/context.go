@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/ipc"
+	"spindle/internal/logging"
 	"spindle/internal/queue"
 	"spindle/internal/queueaccess"
 )
@@ -73,12 +75,20 @@ func (c *commandContext) configValue() *config.Config {
 
 func (c *commandContext) socketPath() string {
 	if c.socketFlag == nil {
-		return defaultSocketPath()
+		return c.resolveSocketPath()
 	}
 	if strings.TrimSpace(*c.socketFlag) == "" {
-		*c.socketFlag = defaultSocketPath()
+		*c.socketFlag = c.resolveSocketPath()
 	}
 	return *c.socketFlag
+}
+
+func (c *commandContext) resolveSocketPath() string {
+	// Use cached config when available to avoid re-parsing.
+	if c.config != nil {
+		return filepath.Join(c.config.Paths.LogDir, "spindle.sock")
+	}
+	return defaultSocketPath()
 }
 
 func (c *commandContext) resolvedLogLevel(cfg *config.Config) string {
@@ -101,6 +111,30 @@ func (c *commandContext) resolvedLogLevel(cfg *config.Config) string {
 func (c *commandContext) logDevelopment(cfg *config.Config) bool {
 	level := strings.ToLower(strings.TrimSpace(c.resolvedLogLevel(cfg)))
 	return level == "debug"
+}
+
+// newCLILogger creates a logger configured for CLI commands. When console is true,
+// it uses "console" format (for lightweight helpers). Otherwise it uses the
+// config-specified format with stdout output.
+func (c *commandContext) newCLILogger(cfg *config.Config, component string, console bool) (*slog.Logger, error) {
+	opts := logging.Options{
+		Level:       c.resolvedLogLevel(cfg),
+		Development: c.logDevelopment(cfg),
+	}
+	if console {
+		opts.Format = "console"
+	} else {
+		opts.Format = cfg.Logging.Format
+		opts.OutputPaths = []string{"stdout"}
+	}
+	logger, err := logging.New(opts)
+	if err != nil {
+		return nil, fmt.Errorf("init logger: %w", err)
+	}
+	if component != "" {
+		logger = logger.With(logging.String("component", component))
+	}
+	return logger, nil
 }
 
 func (c *commandContext) diagnosticMode() bool {

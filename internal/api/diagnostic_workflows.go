@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"strconv"
 	"strings"
 
@@ -17,7 +16,6 @@ import (
 
 type ResolveCacheTargetRequest struct {
 	Config *config.Config
-	Logger *slog.Logger
 	Arg    string
 }
 
@@ -43,7 +41,6 @@ func ResolveCacheTarget(ctx context.Context, req ResolveCacheTargetRequest) (str
 
 	manager, warning, err := OpenRipCacheManagerForCLI(OpenCacheResourceRequest{
 		Config: req.Config,
-		Logger: req.Logger,
 	})
 	if err != nil {
 		return "", "", warning, err

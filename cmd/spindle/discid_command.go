@@ -7,7 +7,6 @@ import (
 
 	"spindle/internal/api"
 	"spindle/internal/discidcache"
-	"spindle/internal/logging"
 )
 
 func newDiscIDCommand(ctx *commandContext) *cobra.Command {
@@ -189,16 +188,10 @@ func discIDCacheManager(ctx *commandContext) (*discidcache.Cache, string, error)
 		return nil, "", err
 	}
 
-	logLevel := ctx.resolvedLogLevel(cfg)
-	logger, err := logging.New(logging.Options{
-		Level:       logLevel,
-		Format:      "console",
-		Development: ctx.logDevelopment(cfg),
-	})
+	logger, err := ctx.newCLILogger(cfg, "cli-discid", true)
 	if err != nil {
-		return nil, "", fmt.Errorf("init logger: %w", err)
+		return nil, "", err
 	}
-	logger = logger.With(logging.String("component", "cli-discid"))
 
 	return api.OpenDiscIDCacheForCLI(api.OpenCacheResourceRequest{
 		Config: cfg,

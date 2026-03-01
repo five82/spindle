@@ -36,16 +36,6 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			filters := logFilters{
-				Component: componentFilter,
-				Lane:      laneFilter,
-				RequestID: requestFilter,
-				ItemID:    itemFilter,
-				Level:     levelFilter,
-				Alert:     alertFilter,
-				Decision:  decisionFilter,
-				Search:    searchFilter,
-			}
 			streamClient, err := newLogAPIClient(cfg)
 			if err != nil {
 				return err
@@ -54,14 +44,14 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 				Lines:  lines,
 				Follow: follow,
 				Filters: logstream.Filters{
-					Component: filters.Component,
-					Lane:      filters.Lane,
-					RequestID: filters.RequestID,
-					ItemID:    filters.ItemID,
-					Level:     filters.Level,
-					Alert:     filters.Alert,
-					Decision:  filters.Decision,
-					Search:    filters.Search,
+					Component: componentFilter,
+					Lane:      laneFilter,
+					RequestID: requestFilter,
+					ItemID:    itemFilter,
+					Level:     levelFilter,
+					Alert:     alertFilter,
+					Decision:  decisionFilter,
+					Search:    searchFilter,
 				},
 			}
 
@@ -125,17 +115,6 @@ func newShowCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().StringVar(&decisionFilter, "decision-type", "", "Filter logs by decision type")
 	cmd.Flags().StringVar(&searchFilter, "search", "", "Search logs by substring")
 	return cmd
-}
-
-type logFilters struct {
-	Component string
-	Lane      string
-	RequestID string
-	ItemID    int64
-	Level     string
-	Alert     string
-	Decision  string
-	Search    string
 }
 
 func newLogAPIClient(cfg *config.Config) (*logs.StreamClient, error) {

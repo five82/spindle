@@ -17,7 +17,7 @@ func TestRetryFailedEpisodeNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RetryFailedEpisode error: %v", err)
 	}
-	if result.Outcome != RetryEpisodeNotFound {
+	if result.Outcome != RetryItemNotFound {
 		t.Fatalf("expected not_found, got %v", result.Outcome)
 	}
 }
@@ -31,7 +31,7 @@ func TestRetryFailedEpisodeNotFailedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RetryFailedEpisode error: %v", err)
 	}
-	if result.Outcome != RetryEpisodeNotFailed {
+	if result.Outcome != RetryItemNotFailed {
 		t.Fatalf("expected not_failed, got %v", result.Outcome)
 	}
 }
@@ -69,7 +69,7 @@ func TestRetryFailedEpisodeUpdatesItemAndClearsFailedAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RetryFailedEpisode error: %v", err)
 	}
-	if result.Outcome != RetryEpisodeUpdated {
+	if result.Outcome != RetryItemUpdated {
 		t.Fatalf("expected updated outcome, got %v", result.Outcome)
 	}
 	if result.NewStatus != string(queue.StatusEpisodeIdentified) {
@@ -113,7 +113,7 @@ func TestRetryFailedEpisodeMissingEpisode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RetryFailedEpisode error: %v", err)
 	}
-	if result.Outcome != RetryEpisodeEpisodeNotFound {
+	if result.Outcome != RetryItemEpisodeNotFound {
 		t.Fatalf("expected episode_not_found, got %v", result.Outcome)
 	}
 }

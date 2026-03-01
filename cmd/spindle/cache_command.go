@@ -187,21 +187,30 @@ func newCacheClearCommand(ctx *commandContext) *cobra.Command {
 	}
 }
 
+func resolveCacheTarget(cmd *cobra.Command, ctx *commandContext, arg string, out io.Writer) (string, string, error) {
+	cfg, err := ctx.ensureConfig()
+	if err != nil {
+		return "", "", err
+	}
+	target, label, warn, err := api.ResolveCacheTarget(cmd.Context(), api.ResolveCacheTargetRequest{
+		Config: cfg,
+		Arg:    arg,
+	})
+	if warn != "" {
+		fmt.Fprintln(out, warn)
+	}
+	return target, label, err
+}
+
 func cacheManager(ctx *commandContext) (*ripcache.Manager, string, error) {
 	cfg, err := ctx.ensureConfig()
 	if err != nil {
 		return nil, "", err
 	}
-	logLevel := ctx.resolvedLogLevel(cfg)
-	logger, err := logging.New(logging.Options{
-		Level:       logLevel,
-		Format:      "console",
-		Development: ctx.logDevelopment(cfg),
-	})
+	logger, err := ctx.newCLILogger(cfg, "cli-cache", true)
 	if err != nil {
-		return nil, "", fmt.Errorf("init logger: %w", err)
+		return nil, "", err
 	}
-	logger = logger.With(logging.String("component", "cli-cache"))
 
 	return api.OpenRipCacheManagerForCLI(api.OpenCacheResourceRequest{
 		Config: cfg,
