@@ -307,14 +307,14 @@ func formatAudioCandidateValue(stream ffprobe.Stream) (string, bool) {
 	if stream.Disposition != nil && stream.Disposition["default"] == 1 {
 		parts = append(parts, "default")
 	}
-	title := strings.TrimSpace(audioTitle(stream.Tags))
+	title := strings.TrimSpace(AudioTitle(stream.Tags))
 	if title != "" {
 		parts = append(parts, title)
 	}
 	return strings.Join(parts, " | "), isEnglish
 }
 
-func audioTitle(tags map[string]string) string {
+func AudioTitle(tags map[string]string) string {
 	if len(tags) == 0 {
 		return ""
 	}

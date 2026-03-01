@@ -111,9 +111,6 @@ func NewClient(cfg Config, opts ...Option) *Client {
 	if client.cfg.BaseURL == "" {
 		client.cfg.BaseURL = "https://openrouter.ai/api/v1/chat/completions"
 	}
-	if client.httpClient == nil {
-		client.httpClient = &http.Client{Timeout: defaultHTTPTimeout}
-	}
 	return client
 }
 
@@ -127,14 +124,6 @@ func NewClientFrom(cfg config.LLM, opts ...Option) *Client {
 		Title:          cfg.Title,
 		TimeoutSeconds: cfg.TimeoutSeconds,
 	}, opts...)
-}
-
-// Classification captures the JSON payload returned by the LLM for preset classification.
-type Classification struct {
-	Profile    string  `json:"profile"`
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
-	Raw        string  `json:"-"`
 }
 
 type httpStatusError struct {
@@ -175,7 +164,7 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 	if userPrompt == "" {
 		return "", errors.New("llm complete: user prompt required")
 	}
-	if strings.TrimSpace(c.cfg.APIKey) == "" {
+	if c.cfg.APIKey == "" {
 		return "", errors.New("llm complete: api key required")
 	}
 	payload := chatCompletionRequest{
@@ -190,39 +179,9 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 	return c.completionContentWithRetry(ctx, payload, "llm complete")
 }
 
-// ClassifyPreset issues a classification request for the supplied description.
-func (c *Client) ClassifyPreset(ctx context.Context, systemPrompt, description string) (Classification, error) {
-	var empty Classification
-	description = strings.TrimSpace(description)
-	if description == "" {
-		return empty, errors.New("llm classify: description required")
-	}
-	if strings.TrimSpace(c.cfg.APIKey) == "" {
-		return empty, errors.New("llm classify: api key required")
-	}
-	content, err := c.CompleteJSON(ctx, systemPrompt, description)
-	if err != nil {
-		return empty, err
-	}
-	var parsed Classification
-	if err := DecodeLLMJSON(content, &parsed); err != nil {
-		return empty, fmt.Errorf("llm classify: parse payload: %w", err)
-	}
-	parsed.Raw = content
-	parsed.Profile = strings.ToLower(strings.TrimSpace(parsed.Profile))
-	if parsed.Confidence < 0 {
-		parsed.Confidence = 0
-	}
-	if parsed.Confidence > 1 {
-		parsed.Confidence = 1
-	}
-	parsed.Reason = strings.TrimSpace(parsed.Reason)
-	return parsed, nil
-}
-
 // HealthCheck issues a fast ping to verify the API key and model are usable.
 func (c *Client) HealthCheck(ctx context.Context) error {
-	if strings.TrimSpace(c.cfg.APIKey) == "" {
+	if c.cfg.APIKey == "" {
 		return errors.New("llm health: api key required")
 	}
 	payload := chatCompletionRequest{
@@ -401,15 +360,11 @@ func firstNonEmpty(values ...string) string {
 
 func (c *Client) sendChatRequestOnce(ctx context.Context, payload chatCompletionRequest) (chatCompletionResponse, []byte, error) {
 	var completion chatCompletionResponse
-	endpoint, err := url.JoinPath(c.cfg.BaseURL, "")
-	if err != nil {
-		return completion, nil, fmt.Errorf("llm request: build url: %w", err)
-	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return completion, nil, fmt.Errorf("llm request: encode body: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL, bytes.NewReader(encoded))
 	if err != nil {
 		return completion, nil, fmt.Errorf("llm request: new request: %w", err)
 	}
@@ -449,9 +404,6 @@ func (c *Client) sendChatRequestOnce(ctx context.Context, payload chatCompletion
 }
 
 func (c *Client) timeoutDuration() time.Duration {
-	if c == nil || c.httpClient == nil {
-		return defaultHTTPTimeout
-	}
 	if c.httpClient.Timeout <= 0 {
 		return defaultHTTPTimeout
 	}
@@ -459,9 +411,6 @@ func (c *Client) timeoutDuration() time.Duration {
 }
 
 func (c *Client) retryAttempts() int {
-	if c == nil {
-		return 1
-	}
 	if c.retryMaxAttempts <= 0 {
 		return 1
 	}
@@ -526,13 +475,11 @@ func (c *Client) retryDelay(ctx context.Context, err error, attempt, maxAttempts
 func (c *Client) backoffDelay(attempt int) time.Duration {
 	base := defaultRetryBaseDelay
 	maxDelay := defaultRetryMaxDelay
-	if c != nil {
-		if c.retryBaseDelay >= 0 {
-			base = c.retryBaseDelay
-		}
-		if c.retryMaxDelay > 0 {
-			maxDelay = c.retryMaxDelay
-		}
+	if c.retryBaseDelay >= 0 {
+		base = c.retryBaseDelay
+	}
+	if c.retryMaxDelay > 0 {
+		maxDelay = c.retryMaxDelay
 	}
 	if base <= 0 {
 		return 0
@@ -560,7 +507,7 @@ func (c *Client) capDelay(delay time.Duration) time.Duration {
 		return 0
 	}
 	maxDelay := defaultRetryMaxDelay
-	if c != nil && c.retryMaxDelay > 0 {
+	if c.retryMaxDelay > 0 {
 		maxDelay = c.retryMaxDelay
 	}
 	if maxDelay > 0 && delay > maxDelay {
@@ -579,7 +526,7 @@ func (c *Client) sleep(ctx context.Context, delay time.Duration) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if c != nil && c.sleeper != nil {
+	if c.sleeper != nil {
 		c.sleeper(delay)
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -616,6 +563,8 @@ func parseRetryAfter(value string) (time.Duration, bool) {
 	}
 	return 0, false
 }
+
+var whitespaceReplacer = strings.NewReplacer("\r", " ", "\n", " ", "\t", " ")
 
 // DecodeLLMJSON decodes JSON from an LLM response, handling common formatting quirks.
 func DecodeLLMJSON(content string, target any) error {
@@ -688,8 +637,7 @@ func summarizePayloadSnippet(content string) string {
 	if trimmed == "" {
 		return "<empty>"
 	}
-	replacer := strings.NewReplacer("\r", " ", "\n", " ", "\t", " ")
-	clean := replacer.Replace(trimmed)
+	clean := whitespaceReplacer.Replace(trimmed)
 	clean = strings.Join(strings.Fields(clean), " ")
 	const limit = 160
 	runes := []rune(clean)

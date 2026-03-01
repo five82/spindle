@@ -72,7 +72,7 @@ func TestClientHealthCheckFailure(t *testing.T) {
 	}
 }
 
-func TestClientClassifyPresetCodeFence(t *testing.T) {
+func TestCompleteJSONCodeFence(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]any{
 			"choices": []any{
@@ -90,22 +90,26 @@ func TestClientClassifyPresetCodeFence(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
-	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
+	content, err := client.CompleteJSON(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
-		t.Fatalf("ClassifyPreset returned error: %v", err)
+		t.Fatalf("CompleteJSON returned error: %v", err)
 	}
-	if classification.Profile != "grain" {
-		t.Fatalf("expected profile grain, got %q", classification.Profile)
+	if !strings.Contains(content, "```") {
+		t.Fatalf("expected raw content to retain code fence, got %q", content)
 	}
-	if classification.Confidence != 0.82 {
-		t.Fatalf("expected confidence 0.82, got %v", classification.Confidence)
+
+	var parsed struct {
+		Profile string `json:"profile"`
 	}
-	if classification.Raw == "" || !strings.Contains(classification.Raw, "```") {
-		t.Fatalf("expected raw payload to retain code fence, got %q", classification.Raw)
+	if err := DecodeLLMJSON(content, &parsed); err != nil {
+		t.Fatalf("DecodeLLMJSON failed: %v", err)
+	}
+	if parsed.Profile != "grain" {
+		t.Fatalf("expected profile grain, got %q", parsed.Profile)
 	}
 }
 
-func TestClientClassifyPresetToolCallsArguments(t *testing.T) {
+func TestCompleteJSONToolCallsArguments(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]any{
 			"choices": []any{
@@ -134,19 +138,26 @@ func TestClientClassifyPresetToolCallsArguments(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
-	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
+	content, err := client.CompleteJSON(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
-		t.Fatalf("ClassifyPreset returned error: %v", err)
+		t.Fatalf("CompleteJSON returned error: %v", err)
 	}
-	if classification.Profile != "clean" {
-		t.Fatalf("expected profile clean, got %q", classification.Profile)
+	if !strings.Contains(content, "\"profile\"") {
+		t.Fatalf("expected content to contain JSON arguments, got %q", content)
 	}
-	if classification.Raw == "" || !strings.Contains(classification.Raw, "\"profile\"") {
-		t.Fatalf("expected raw payload to contain JSON arguments, got %q", classification.Raw)
+
+	var parsed struct {
+		Profile string `json:"profile"`
+	}
+	if err := DecodeLLMJSON(content, &parsed); err != nil {
+		t.Fatalf("DecodeLLMJSON failed: %v", err)
+	}
+	if parsed.Profile != "clean" {
+		t.Fatalf("expected profile clean, got %q", parsed.Profile)
 	}
 }
 
-func TestClientClassifyPresetEmptyContentHasSnippet(t *testing.T) {
+func TestCompleteJSONEmptyContentHasSnippet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]any{
 			"choices": []any{
@@ -169,16 +180,16 @@ func TestClientClassifyPresetEmptyContentHasSnippet(t *testing.T) {
 		WithRetryBackoff(0, 0),
 		WithSleeper(func(time.Duration) {}),
 	)
-	_, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
+	_, err := client.CompleteJSON(context.Background(), "test prompt", "Example Movie")
 	if err == nil {
-		t.Fatal("expected classify to fail")
+		t.Fatal("expected CompleteJSON to fail")
 	}
 	if !strings.Contains(err.Error(), "empty content") || !strings.Contains(err.Error(), "response_snippet=") {
 		t.Fatalf("expected empty-content error to include snippet, got %v", err)
 	}
 }
 
-func TestClientClassifyPresetDeltaContent(t *testing.T) {
+func TestCompleteJSONDeltaContent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]any{
 			"choices": []any{
@@ -197,19 +208,27 @@ func TestClientClassifyPresetDeltaContent(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
-	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
+	content, err := client.CompleteJSON(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
-		t.Fatalf("ClassifyPreset returned error: %v", err)
+		t.Fatalf("CompleteJSON returned error: %v", err)
 	}
-	if classification.Profile != "grain" {
-		t.Fatalf("expected profile grain, got %q", classification.Profile)
+
+	var parsed struct {
+		Profile    string  `json:"profile"`
+		Confidence float64 `json:"confidence"`
 	}
-	if classification.Confidence != 0.74 {
-		t.Fatalf("expected confidence 0.74, got %v", classification.Confidence)
+	if err := DecodeLLMJSON(content, &parsed); err != nil {
+		t.Fatalf("DecodeLLMJSON failed: %v", err)
+	}
+	if parsed.Profile != "grain" {
+		t.Fatalf("expected profile grain, got %q", parsed.Profile)
+	}
+	if parsed.Confidence != 0.74 {
+		t.Fatalf("expected confidence 0.74, got %v", parsed.Confidence)
 	}
 }
 
-func TestClientClassifyPresetLegacyText(t *testing.T) {
+func TestCompleteJSONLegacyText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]any{
 			"choices": []any{
@@ -226,19 +245,27 @@ func TestClientClassifyPresetLegacyText(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(Config{APIKey: "test", BaseURL: server.URL, Model: "demo-model"})
-	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
+	content, err := client.CompleteJSON(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
-		t.Fatalf("ClassifyPreset returned error: %v", err)
+		t.Fatalf("CompleteJSON returned error: %v", err)
 	}
-	if classification.Profile != "clean" {
-		t.Fatalf("expected profile clean, got %q", classification.Profile)
+
+	var parsed struct {
+		Profile    string  `json:"profile"`
+		Confidence float64 `json:"confidence"`
 	}
-	if classification.Confidence != 0.8 {
-		t.Fatalf("expected confidence 0.8, got %v", classification.Confidence)
+	if err := DecodeLLMJSON(content, &parsed); err != nil {
+		t.Fatalf("DecodeLLMJSON failed: %v", err)
+	}
+	if parsed.Profile != "clean" {
+		t.Fatalf("expected profile clean, got %q", parsed.Profile)
+	}
+	if parsed.Confidence != 0.8 {
+		t.Fatalf("expected confidence 0.8, got %v", parsed.Confidence)
 	}
 }
 
-func TestClientRetriesOnHTTP429(t *testing.T) {
+func TestCompleteJSONRetriesOnHTTP429(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -252,7 +279,7 @@ func TestClientRetriesOnHTTP429(t *testing.T) {
 			"choices": []any{
 				map[string]any{
 					"message": map[string]any{
-						"content": `{"profile":"grain","confidence":0.9,"reason":"demo"}`,
+						"content": `{"ok":true}`,
 					},
 				},
 			},
@@ -268,12 +295,12 @@ func TestClientRetriesOnHTTP429(t *testing.T) {
 		WithRetryBackoff(0, 10*time.Second),
 		WithRetryMaxAttempts(5),
 	)
-	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
+	content, err := client.CompleteJSON(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
-		t.Fatalf("ClassifyPreset returned error: %v", err)
+		t.Fatalf("CompleteJSON returned error: %v", err)
 	}
-	if classification.Profile != "grain" {
-		t.Fatalf("expected profile grain, got %q", classification.Profile)
+	if !strings.Contains(content, "ok") {
+		t.Fatalf("expected content to contain ok, got %q", content)
 	}
 	if calls != 2 {
 		t.Fatalf("expected 2 calls, got %d", calls)
@@ -283,13 +310,13 @@ func TestClientRetriesOnHTTP429(t *testing.T) {
 	}
 }
 
-func TestClientRetriesOnEmptyContentThenSucceeds(t *testing.T) {
+func TestCompleteJSONRetriesOnEmptyContentThenSucceeds(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		content := ""
 		if calls >= 3 {
-			content = `{"profile":"clean","confidence":0.75,"reason":"demo"}`
+			content = `{"ok":true}`
 		}
 		payload := map[string]any{
 			"choices": []any{
@@ -311,12 +338,12 @@ func TestClientRetriesOnEmptyContentThenSucceeds(t *testing.T) {
 		WithSleeper(func(time.Duration) {}),
 		WithRetryMaxAttempts(5),
 	)
-	classification, err := client.ClassifyPreset(context.Background(), "test prompt", "Example Movie")
+	content, err := client.CompleteJSON(context.Background(), "test prompt", "Example Movie")
 	if err != nil {
-		t.Fatalf("ClassifyPreset returned error: %v", err)
+		t.Fatalf("CompleteJSON returned error: %v", err)
 	}
-	if classification.Profile != "clean" {
-		t.Fatalf("expected profile clean, got %q", classification.Profile)
+	if !strings.Contains(content, "ok") {
+		t.Fatalf("expected content to contain ok, got %q", content)
 	}
 	if calls != 3 {
 		t.Fatalf("expected 3 calls, got %d", calls)

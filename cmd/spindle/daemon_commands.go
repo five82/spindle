@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +17,6 @@ import (
 	"spindle/internal/ipc"
 	"spindle/internal/preflight"
 	"spindle/internal/queue"
-	"spindle/internal/services/llm"
 )
 
 func newDaemonCommands(ctx *commandContext) []*cobra.Command {
@@ -431,27 +429,10 @@ func commentaryLLMDependencyStatus(cfg *config.Config) ipc.DependencyStatus {
 		status.Detail = "API key missing (set commentary.api_key or llm.api_key)"
 		return status
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	client := llm.NewClientFrom(llmCfg)
-	if err := client.HealthCheck(ctx); err != nil {
-		status.Detail = summarizeLLMHealthError(err)
-		return status
-	}
-	status.Available = true
-	status.Detail = "API reachable"
+	result := preflight.CheckLLM(context.Background(), "Commentary LLM", llmCfg)
+	status.Available = result.Passed
+	status.Detail = result.Detail
 	return status
-}
-
-func summarizeLLMHealthError(err error) string {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "health check timed out (LLM API unresponsive)"
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return "health check timed out (LLM API unreachable)"
-	}
-	return err.Error()
 }
 
 func launchDaemonProcess(cmd *cobra.Command, ctx *commandContext, diagnostic bool) error {

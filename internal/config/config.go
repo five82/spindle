@@ -389,11 +389,12 @@ func (c *Config) GetLLM() LLM {
 // Falls back to [llm] settings when not explicitly configured.
 func (c *Config) CommentaryLLM() LLM {
 	cfg := LLM{
-		APIKey:  strings.TrimSpace(c.Commentary.APIKey),
-		BaseURL: strings.TrimSpace(c.Commentary.BaseURL),
-		Model:   strings.TrimSpace(c.Commentary.Model),
-		Referer: c.LLM.Referer,
-		Title:   defaultCommentaryTitle,
+		APIKey:         strings.TrimSpace(c.Commentary.APIKey),
+		BaseURL:        strings.TrimSpace(c.Commentary.BaseURL),
+		Model:          strings.TrimSpace(c.Commentary.Model),
+		Referer:        c.LLM.Referer,
+		Title:          defaultCommentaryTitle,
+		TimeoutSeconds: c.LLM.TimeoutSeconds,
 	}
 	// Fall back to [llm] settings for connection details
 	if cfg.APIKey == "" {
@@ -406,4 +407,13 @@ func (c *Config) CommentaryLLM() LLM {
 		cfg.Model = c.LLM.Model
 	}
 	return cfg
+}
+
+// CommentaryWhisperXModel returns the WhisperX model for commentary detection,
+// falling back to the subtitles model when not explicitly configured.
+func (c *Config) CommentaryWhisperXModel() string {
+	if m := strings.TrimSpace(c.Commentary.WhisperXModel); m != "" {
+		return m
+	}
+	return c.Subtitles.WhisperXModel
 }

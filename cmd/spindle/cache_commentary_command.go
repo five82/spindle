@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -132,7 +131,7 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 	}
 
 	// Find commentary candidates
-	candidates := findCommentaryCandidates(probe.Streams, selection.PrimaryIndex)
+	candidates := audioanalysis.FindCommentaryCandidates(probe.Streams, selection.PrimaryIndex)
 	if len(candidates) == 0 {
 		fmt.Fprintln(out, "No commentary candidates found (no 2-channel English/unknown tracks)")
 		return result, nil
@@ -148,20 +147,16 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 	defer os.RemoveAll(workDir)
 
 	// Initialize WhisperX service
-	whisperCfg := whisperx.Config{
-		Model:       cfg.Commentary.WhisperXModel,
+	whisperSvc := whisperx.NewService(whisperx.Config{
+		Model:       cfg.CommentaryWhisperXModel(),
 		CUDAEnabled: cfg.Subtitles.WhisperXCUDAEnabled,
 		VADMethod:   cfg.Subtitles.WhisperXVADMethod,
 		HFToken:     cfg.Subtitles.WhisperXHuggingFace,
-	}
-	if whisperCfg.Model == "" {
-		whisperCfg.Model = cfg.Subtitles.WhisperXModel
-	}
-	whisperSvc := whisperx.NewService(whisperCfg, deps.ResolveFFmpegPath())
+	}, deps.ResolveFFmpegPath())
 
 	fmt.Fprintf(out, "Transcribing primary audio (track #%d)...\n", selection.PrimaryIndex)
 	primaryDir := filepath.Join(workDir, "primary")
-	primaryTranscript, err := transcribeSegment(ctx, whisperSvc, target, selection.PrimaryIndex, primaryDir)
+	primaryTranscript, err := audioanalysis.TranscribeSegment(ctx, whisperSvc, target, selection.PrimaryIndex, primaryDir)
 	if err != nil {
 		return nil, fmt.Errorf("transcribe primary audio: %w", err)
 	}
@@ -182,13 +177,13 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 		candResult := candidateResult{
 			Index:    stream.Index,
 			Language: langpkg.ExtractFromTags(stream.Tags),
-			Title:    streamTitle(stream.Tags),
+			Title:    audioanalysis.AudioTitle(stream.Tags),
 			Channels: stream.Channels,
 		}
 
 		// Transcribe candidate
 		candDir := filepath.Join(workDir, fmt.Sprintf("candidate-%d", stream.Index))
-		candidateTranscript, err := transcribeSegment(ctx, whisperSvc, target, stream.Index, candDir)
+		candidateTranscript, err := audioanalysis.TranscribeSegment(ctx, whisperSvc, target, stream.Index, candDir)
 		if err != nil {
 			candResult.Reason = fmt.Sprintf("transcription failed: %v", err)
 			result.Candidates = append(result.Candidates, candResult)
@@ -211,7 +206,7 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 
 		// Classify with LLM
 		if llmClient != nil {
-			decision, err := classifyWithLLM(ctx, llmClient, candidateTranscript, target)
+			decision, err := audioanalysis.ClassifyCommentary(ctx, llmClient, filepath.Base(target), "", candidateTranscript)
 			if err != nil {
 				candResult.Reason = fmt.Sprintf("LLM classification failed: %v", err)
 				result.Candidates = append(result.Candidates, candResult)
@@ -234,70 +229,6 @@ func runCommentaryDetection(ctx context.Context, cfg *config.Config, target stri
 	}
 
 	return result, nil
-}
-
-// findCommentaryCandidates finds English/unknown 2-channel stereo tracks that could be commentary.
-func findCommentaryCandidates(streams []ffprobe.Stream, primaryIndex int) []ffprobe.Stream {
-	var candidates []ffprobe.Stream
-	for _, stream := range streams {
-		if !isCommentaryCandidate(stream, primaryIndex) {
-			continue
-		}
-		candidates = append(candidates, stream)
-	}
-	return candidates
-}
-
-// isCommentaryCandidate returns true if the stream could be a commentary track.
-func isCommentaryCandidate(stream ffprobe.Stream, primaryIndex int) bool {
-	if stream.CodecType != "audio" || stream.Index == primaryIndex || stream.Channels != 2 {
-		return false
-	}
-	lang := langpkg.ExtractFromTags(stream.Tags)
-	return strings.HasPrefix(lang, "en") || lang == "" || lang == "und"
-}
-
-func transcribeSegment(ctx context.Context, whisperSvc *whisperx.Service, sourcePath string, audioIndex int, workDir string) (string, error) {
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return "", fmt.Errorf("create segment dir: %w", err)
-	}
-
-	// Extract and transcribe first 10 minutes
-	const segmentDurationSec = 600
-	result, err := whisperSvc.TranscribeSegment(ctx, sourcePath, audioIndex, 0, segmentDurationSec, workDir, "en")
-	if err != nil {
-		return "", err
-	}
-
-	return result.Text, nil
-}
-
-func classifyWithLLM(ctx context.Context, client *llm.Client, transcript, targetPath string) (audioanalysis.CommentaryDecision, error) {
-	title := filepath.Base(targetPath)
-	userMessage := audioanalysis.BuildClassificationPrompt(title, "", transcript)
-
-	response, err := client.CompleteJSON(ctx, audioanalysis.CommentaryClassificationPrompt, userMessage)
-	if err != nil {
-		return audioanalysis.CommentaryDecision{}, fmt.Errorf("llm completion: %w", err)
-	}
-
-	var decision audioanalysis.CommentaryDecision
-	if err := llm.DecodeLLMJSON(response, &decision); err != nil {
-		return audioanalysis.CommentaryDecision{}, fmt.Errorf("parse llm response: %w", err)
-	}
-	return decision, nil
-}
-
-func streamTitle(tags map[string]string) string {
-	if tags == nil {
-		return ""
-	}
-	for _, key := range []string{"title", "TITLE", "handler_name"} {
-		if v, ok := tags[key]; ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func printCommentaryResults(out io.Writer, result *commentaryDetectionResult) {

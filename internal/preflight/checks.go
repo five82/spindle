@@ -32,7 +32,7 @@ func CheckLLM(ctx context.Context, name string, cfg config.LLM) Result {
 	client := llm.NewClientFrom(cfg, llm.WithRetryMaxAttempts(1))
 
 	if err := client.HealthCheck(checkCtx); err != nil {
-		return Result{Name: name, Detail: summarizeLLMError(err)}
+		return Result{Name: name, Detail: SummarizeLLMError(err)}
 	}
 	return Result{Name: name, Passed: true, Detail: "API reachable"}
 }
@@ -192,8 +192,8 @@ func CheckSystemDeps(ctx context.Context, cfg *config.Config) []deps.Status {
 	return deps.CheckBinaries(requirements)
 }
 
-// summarizeLLMError produces a human-readable summary for LLM health check failures.
-func summarizeLLMError(err error) string {
+// SummarizeLLMError produces a human-readable summary for LLM health check failures.
+func SummarizeLLMError(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "health check timed out (LLM API unresponsive)"
 	}

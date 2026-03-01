@@ -80,7 +80,7 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 	}
 
 	// Find commentary candidates: English 2-channel stereo tracks
-	candidates := findCommentaryCandidates(probe.Streams, primaryIndex)
+	candidates := FindCommentaryCandidates(probe.Streams, primaryIndex)
 	if len(candidates) == 0 {
 		logger.Debug("no commentary candidates found",
 			logging.Int("primary_index", primaryIndex),
@@ -102,16 +102,12 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 	}
 
 	// Initialize WhisperX service
-	whisperCfg := whisperx.Config{
-		Model:       s.cfg.Commentary.WhisperXModel,
+	whisperSvc := whisperx.NewService(whisperx.Config{
+		Model:       s.cfg.CommentaryWhisperXModel(),
 		CUDAEnabled: s.cfg.Subtitles.WhisperXCUDAEnabled,
 		VADMethod:   s.cfg.Subtitles.WhisperXVADMethod,
 		HFToken:     s.cfg.Subtitles.WhisperXHuggingFace,
-	}
-	if whisperCfg.Model == "" {
-		whisperCfg.Model = s.cfg.Subtitles.WhisperXModel
-	}
-	whisperSvc := whisperx.NewService(whisperCfg, deps.ResolveFFmpegPath())
+	}, deps.ResolveFFmpegPath())
 
 	// Get transcription of primary audio for comparison
 	primaryTranscript, err := s.transcribeSegment(ctx, whisperSvc, targetPath, primaryIndex, workDir, "primary")
@@ -219,8 +215,8 @@ func (s *Stage) detectCommentary(ctx context.Context, item *queue.Item, env *rip
 	}, nil
 }
 
-// findCommentaryCandidates finds English 2-channel stereo tracks that could be commentary.
-func findCommentaryCandidates(streams []ffprobe.Stream, primaryIndex int) []ffprobe.Stream {
+// FindCommentaryCandidates finds English 2-channel stereo tracks that could be commentary.
+func FindCommentaryCandidates(streams []ffprobe.Stream, primaryIndex int) []ffprobe.Stream {
 	var candidates []ffprobe.Stream
 	for _, stream := range streams {
 		if !isCommentaryCandidate(stream, primaryIndex) {
@@ -241,21 +237,24 @@ func isCommentaryCandidate(stream ffprobe.Stream, primaryIndex int) bool {
 	return strings.HasPrefix(lang, "en") || lang == "" || lang == "und"
 }
 
-// transcribeSegment transcribes a segment of an audio track.
-func (s *Stage) transcribeSegment(ctx context.Context, whisperSvc *whisperx.Service, sourcePath string, audioIndex int, workDir, label string) (string, error) {
-	segmentDir := filepath.Join(workDir, label)
-	if err := os.MkdirAll(segmentDir, 0o755); err != nil {
+// TranscribeSegment extracts and transcribes the first 10 minutes of an audio track.
+func TranscribeSegment(ctx context.Context, svc *whisperx.Service, sourcePath string, audioIndex int, outputDir string) (string, error) {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return "", fmt.Errorf("create segment dir: %w", err)
 	}
 
-	// Extract and transcribe first 10 minutes
 	const segmentDurationSec = 600
-	result, err := whisperSvc.TranscribeSegment(ctx, sourcePath, audioIndex, 0, segmentDurationSec, segmentDir, "en")
+	result, err := svc.TranscribeSegment(ctx, sourcePath, audioIndex, 0, segmentDurationSec, outputDir, "en")
 	if err != nil {
 		return "", err
 	}
 
 	return result.Text, nil
+}
+
+// transcribeSegment transcribes a segment of an audio track into a labeled subdirectory.
+func (s *Stage) transcribeSegment(ctx context.Context, whisperSvc *whisperx.Service, sourcePath string, audioIndex int, workDir, label string) (string, error) {
+	return TranscribeSegment(ctx, whisperSvc, sourcePath, audioIndex, filepath.Join(workDir, label))
 }
 
 // createLLMClient creates an LLM client for commentary classification.
@@ -268,9 +267,9 @@ func (s *Stage) createLLMClient() *llm.Client {
 	return llm.NewClientFrom(llmCfg)
 }
 
-// classifyWithLLM uses an LLM to determine if a transcript is commentary.
-func (s *Stage) classifyWithLLM(ctx context.Context, client *llm.Client, transcript string, item *queue.Item, env *ripspec.Envelope) (CommentaryDecision, error) {
-	userMessage := BuildClassificationPrompt(item.DiscTitle, extractYear(env), transcript)
+// ClassifyCommentary uses an LLM to determine if a transcript is commentary.
+func ClassifyCommentary(ctx context.Context, client *llm.Client, title, year, transcript string) (CommentaryDecision, error) {
+	userMessage := BuildClassificationPrompt(title, year, transcript)
 
 	response, err := client.CompleteJSON(ctx, CommentaryClassificationPrompt, userMessage)
 	if err != nil {
@@ -282,6 +281,11 @@ func (s *Stage) classifyWithLLM(ctx context.Context, client *llm.Client, transcr
 		return CommentaryDecision{}, fmt.Errorf("parse llm response: %w", err)
 	}
 	return decision, nil
+}
+
+// classifyWithLLM uses an LLM to determine if a transcript is commentary.
+func (s *Stage) classifyWithLLM(ctx context.Context, client *llm.Client, transcript string, item *queue.Item, env *ripspec.Envelope) (CommentaryDecision, error) {
+	return ClassifyCommentary(ctx, client, item.DiscTitle, extractYear(env), transcript)
 }
 
 // BuildClassificationPrompt constructs the user message for LLM classification.
@@ -433,7 +437,7 @@ func buildAudioStreamMappings(streams []ffprobe.Stream, commentaryIndices map[in
 			inputIndex:   stream.Index,
 			outputIndex:  outputIdx,
 			isCommentary: commentaryIndices[outputIdx],
-			title:        audioTitle(stream.Tags),
+			title:        AudioTitle(stream.Tags),
 		})
 		outputIdx++
 	}

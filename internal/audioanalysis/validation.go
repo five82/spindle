@@ -60,7 +60,7 @@ func ValidateCommentaryLabeling(ctx context.Context, ffprobeBinary string, targe
 		commentaryCount++
 
 		// Verify title contains "Commentary" (case-insensitive)
-		title := audioTitle(stream.Tags)
+		title := AudioTitle(stream.Tags)
 		if !strings.Contains(strings.ToLower(title), "commentary") {
 			issues = append(issues, fmt.Sprintf(
 				"audio stream %d has comment disposition but title %q lacks 'Commentary' label",

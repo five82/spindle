@@ -209,7 +209,7 @@ func TestFindCommentaryCandidates(t *testing.T) {
 		{Index: 5, CodecType: "subtitle"},
 	}
 
-	candidates := findCommentaryCandidates(streams, 1) // primary is index 1
+	candidates := FindCommentaryCandidates(streams, 1) // primary is index 1
 
 	if len(candidates) != 2 {
 		t.Fatalf("expected 2 candidates, got %d", len(candidates))
