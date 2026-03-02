@@ -270,55 +270,6 @@ func TestNormalizeEditionLabel(t *testing.T) {
 	}
 }
 
-func TestHasAmbiguousEditionMarker(t *testing.T) {
-	tests := []struct {
-		name      string
-		discTitle string
-		tmdbTitle string
-		want      bool
-	}{
-		{
-			name:      "known pattern - not ambiguous",
-			discTitle: "MOVIE_DIRECTORS_CUT",
-			tmdbTitle: "Movie",
-			want:      false,
-		},
-		{
-			name:      "unknown extra content - ambiguous",
-			discTitle: "LOGAN_NOIR",
-			tmdbTitle: "Logan",
-			want:      true,
-		},
-		{
-			name:      "no extra content - not ambiguous",
-			discTitle: "Logan",
-			tmdbTitle: "Logan",
-			want:      false,
-		},
-		{
-			name:      "only common words extra - not ambiguous",
-			discTitle: "THE_MOVIE_AND",
-			tmdbTitle: "The Movie",
-			want:      false,
-		},
-		{
-			name:      "parenthesized duplicate from keydb - not ambiguous",
-			discTitle: "SCREAM (Scream)",
-			tmdbTitle: "Scream",
-			want:      false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := HasAmbiguousEditionMarker(tt.discTitle, tt.tmdbTitle)
-			if got != tt.want {
-				t.Errorf("HasAmbiguousEditionMarker(%q, %q) = %v, want %v", tt.discTitle, tt.tmdbTitle, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsYearLike(t *testing.T) {
 	tests := []struct {
 		word string

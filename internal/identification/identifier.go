@@ -466,18 +466,18 @@ func (i *Identifier) detectMovieEdition(ctx context.Context, logger *slog.Logger
 		return label
 	}
 
-	// Step 2: Check if there's ambiguous extra content that might be an edition
-	if !HasAmbiguousEditionMarker(discTitle, tmdbTitle) {
+	// Step 2: Check if disc has extra content beyond TMDB title
+	label := ExtractEditionLabel(discTitle, tmdbTitle)
+	if label == "" {
 		logger.Debug("no edition markers detected",
 			logging.String("disc_title", discTitle),
 			logging.String("tmdb_title", tmdbTitle))
 		return ""
 	}
 
-	// Step 3: LLM fallback for ambiguous cases
+	// Step 3: LLM verification for ambiguous markers
 	llmCfg := i.cfg.GetLLM()
 	if llmCfg.APIKey == "" {
-		// LLM not configured - skip ambiguous editions
 		logger.Debug("edition detection skipped for ambiguous title",
 			logging.String(logging.FieldDecisionType, "edition_detection"),
 			logging.String("decision_result", "skipped"),
@@ -509,18 +509,6 @@ func (i *Identifier) detectMovieEdition(ctx context.Context, logger *slog.Logger
 			logging.Bool("is_edition", decision.IsEdition),
 			logging.Float64("confidence", decision.Confidence),
 			logging.String("llm_reason", decision.Reason))
-		return ""
-	}
-
-	// Extract the edition label from the difference
-	label := ExtractEditionLabel(discTitle, tmdbTitle)
-	if label == "" {
-		logger.Warn("edition confirmed but label extraction failed",
-			logging.String(logging.FieldDecisionType, "edition_detection"),
-			logging.String("decision_result", "extraction_failed"),
-			logging.String("decision_reason", "no_label_extracted"),
-			logging.String("disc_title", discTitle),
-			logging.String("tmdb_title", tmdbTitle))
 		return ""
 	}
 

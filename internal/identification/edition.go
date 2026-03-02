@@ -239,15 +239,3 @@ func NormalizeEditionLabel(raw string) string {
 	return strings.Join(words, " ")
 }
 
-// HasAmbiguousEditionMarker returns true if the disc title contains extra content
-// beyond the TMDB title that might indicate an edition, but doesn't match known patterns.
-func HasAmbiguousEditionMarker(discTitle, tmdbTitle string) bool {
-	// First check if it matches known patterns - if so, not ambiguous
-	if _, found := ExtractKnownEdition(discTitle); found {
-		return false
-	}
-
-	// Check if disc has extra words beyond TMDB title
-	label := ExtractEditionLabel(discTitle, tmdbTitle)
-	return label != ""
-}
