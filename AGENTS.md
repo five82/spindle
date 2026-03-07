@@ -18,10 +18,7 @@ Do not modify this header.
 Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata (TMDB), subtitles (WhisperX, forced subs via OpenSubtitles), Jellyfin refresh, and ntfy notifications.
 
 - **Scope**: Single-developer project - avoid over-engineering
-- **Environment**: Go 1.26+, MakeMKV, FFmpeg
 - **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.
-
-Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [EPISODE_IDENTIFYING -> EPISODE_IDENTIFIED] -> ENCODING -> ENCODED -> [AUDIO_ANALYZING -> AUDIO_ANALYZED] -> [SUBTITLING -> SUBTITLED] -> ORGANIZING -> COMPLETED` (with `FAILED` detour and `NeedsReview` flag for review routing).
 
 ## Critical Expectations
 
@@ -32,55 +29,13 @@ Queue lifecycle: `PENDING -> IDENTIFYING -> IDENTIFIED -> RIPPING -> RIPPED -> [
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
 - Keep edits ASCII unless the file already uses extended characters.
 
-## Related Repos
+## Drapto Dependency Workflow
 
-| Repo | Path | Role |
-|------|------|------|
-| spindle | `~/projects/spindle/` | Daemon + CLI + orchestration (this repo) |
-| flyer | `~/projects/flyer/` | Read-only TUI that polls Spindle's API/logs |
-| drapto | `~/projects/drapto/` | Go library for AV1 encoding (imported as `github.com/five82/drapto`) |
-
-**Integration contracts:**
-- Spindle imports Drapto as a Go library and implements its `Reporter` interface for progress events.
-- Flyer is read-only (no queue mutations) and must tolerate Spindle being down.
-
-**Drapto dependency workflow:**
 - Local dev uses `go.work` (gitignored) to reference `../drapto` directly.
 - CI uses the version in `go.mod`. After pushing drapto changes, update spindle:
   ```bash
   go get github.com/five82/drapto@main && go mod tidy
   ```
-- Formal version tags (v1.0.0, etc.) are deferred until the API stabilizes.
-
-## Build, Test, Lint
-
-```bash
-go install ./cmd/spindle              # Build
-go test ./...                         # Test
-go test -race ./...                   # Race detector
-golangci-lint run                     # Lint
-./check-ci.sh                         # Full CI (recommended before handoff)
-```
-
-## Finding Your Way
-
-- **Queue lifecycle**: `internal/queue/` (schema in `schema.sql`, statuses in `status.go`)
-- **Stage implementations**: `internal/{stage}/` (identification, ripping, encoding, etc.)
-- **Cross-stage data**: `internal/ripspec/` - the Envelope passed between all stages
-- **Workflow orchestration**: `internal/workflow/` - two-lane manager (foreground: disc I/O, background: encoding+)
-- **CLI**: `cmd/spindle/` - each command is a file
-- **Config**: `internal/config/config.go` defines fields; `sample_config.toml` is the reference
-- **External services**: `internal/services/{makemkv,drapto,jellyfin,whisperx,llm}/`
-- **Logging contract**: `internal/logging/doc.go` specifies required fields per level
-
-A few packages retain `doc.go` files that document non-obvious design decisions (pipelines, matching algorithms, cross-cutting contracts). Most packages are self-explanatory from their code.
-
-## Common Patterns
-
-- **Error propagation**: Stages return errors -> workflow manager -> `StatusFailed`. Use `services.ServiceError` for classification.
-- **Progress tracking**: `item.SetProgress(stage, message, percent)` for updates; `item.SetProgressComplete(stage, message)` when done.
-- **State transitions**: Only workflow manager calls `store.UpdateStatus()`. Stages return nil to signal completion.
-- **Testing**: `testsupport.NewTestDB()` for temp SQLite; stub external service interfaces.
 
 ## Logging Guidance
 
@@ -100,18 +55,3 @@ A few packages retain `doc.go` files that document non-obvious design decisions 
 ## Database Schema
 
 The queue DB is transient (in-flight jobs only). No migrations - bump `schemaVersion` in `internal/queue/schema.go` on changes.
-
-## Troubleshooting Quick Reference
-
-- **Queue database**: `~/.local/share/spindle/logs/queue.db` (location set by `log_dir` in config)
-- **Queue inspection**: `sqlite3 ~/.local/share/spindle/logs/queue.db 'SELECT id, disc_title, status, progress_stage FROM queue_items;'`
-- **Item logs**: `~/.local/share/spindle/logs/items/` (one log file per item)
-- **Subtitle debugging**: Set `SPD_DEBUG_SUBTITLES_KEEP=1` to retain intermediate files
-- **Daemon issues**: Single-instance enforced in `internal/daemon`; use `spindle stop` to fully terminate
-- **Disc detection**: Use `spindle disc pause` to temporarily stop new disc queueing (resets on restart)
-
-## GitHub
-
-- spindle: https://github.com/five82/spindle
-- drapto: https://github.com/five82/drapto
-- flyer: https://github.com/five82/flyer
