@@ -46,10 +46,7 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 	// Only runs when Tier 1 found at least one resolved episode.
 	totalEpisodes := len(season.Episodes)
 	if len(set) > 0 && discNumber > 0 && totalEpisodes > 0 {
-		block := len(env.Episodes)
-		if block == 0 {
-			block = 4
-		}
+		block := discBlockSize(len(env.Episodes))
 		start := (discNumber - 1) * block
 		if start >= totalEpisodes {
 			start = totalEpisodes - block
@@ -73,10 +70,7 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 	// estimate which episodes belong on this disc rather than searching
 	// the entire season.
 	if len(set) == 0 && discNumber > 0 && totalEpisodes > 0 {
-		block := len(env.Episodes)
-		if block == 0 {
-			block = 4
-		}
+		block := discBlockSize(len(env.Episodes))
 		plan.PassSize = block * 2
 		estimateStart := (discNumber-1)*block + 1 - block/2
 		if estimateStart < 1 {
@@ -128,6 +122,13 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 	return plan
 }
 
+func discBlockSize(discEpisodes int) int {
+	if discEpisodes <= 0 {
+		return 4
+	}
+	return discEpisodes
+}
+
 func buildEpisodePasses(plan candidateEpisodePlan, season *tmdb.SeasonDetails, discEpisodes int) [][]int {
 	allEpisodes := seasonEpisodeNumbers(season)
 	if len(allEpisodes) == 0 {
@@ -144,21 +145,7 @@ func buildEpisodePasses(plan candidateEpisodePlan, season *tmdb.SeasonDetails, d
 		width = len(allEpisodes)
 	}
 
-	startIdx := 0
-	if plan.DiscEstimateStart > 0 {
-		startIdx = plan.DiscEstimateStart - 1
-	} else if len(plan.DiscBlockEpisodes) > 0 {
-		startIdx = plan.DiscBlockEpisodes[0] - 1
-	}
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	if startIdx+width > len(allEpisodes) {
-		startIdx = len(allEpisodes) - width
-	}
-	if startIdx < 0 {
-		startIdx = 0
-	}
+	startIdx := passStartIndex(plan, width, len(allEpisodes))
 
 	passes := make([][]int, 0, 1+len(allEpisodes)/max(1, width))
 	passes = append(passes, append([]int(nil), allEpisodes[startIdx:startIdx+width]...))
@@ -184,6 +171,20 @@ func buildEpisodePasses(plan candidateEpisodePlan, season *tmdb.SeasonDetails, d
 	}
 
 	return passes
+}
+
+func passStartIndex(plan candidateEpisodePlan, width, totalEpisodes int) int {
+	startIdx := 0
+	switch {
+	case plan.DiscEstimateStart > 0:
+		startIdx = plan.DiscEstimateStart - 1
+	case len(plan.DiscBlockEpisodes) > 0:
+		startIdx = plan.DiscBlockEpisodes[0] - 1
+	}
+	if startIdx+width > totalEpisodes {
+		startIdx = totalEpisodes - width
+	}
+	return max(0, startIdx)
 }
 
 func seasonEpisodeNumbers(season *tmdb.SeasonDetails) []int {
