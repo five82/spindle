@@ -2,11 +2,14 @@ package audioanalysis
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"spindle/internal/config"
+	"spindle/internal/encodingstate"
 	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 )
@@ -283,6 +286,91 @@ func TestBuildCompletionMessage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestApplyFinalAudioDetailsToSnapshot(t *testing.T) {
+	snapshot := encodingstate.Snapshot{
+		Video: &encodingstate.Video{
+			AudioDescription: "AC3 mono",
+		},
+		Config: &encodingstate.Config{
+			AudioDescription: "Stream 0: 1ch [64kbps Opus], Stream 1: 1ch [64kbps Opus]",
+		},
+		Validation: &encodingstate.Validation{
+			Passed: true,
+			Steps: []encodingstate.ValidationStep{
+				{Name: "Audio tracks", Passed: true, Details: "2 audio tracks, all Opus"},
+			},
+		},
+		Result: &encodingstate.Result{
+			AudioStream: "Opus (1ch@64k, 1ch@64k)",
+		},
+	}
+
+	probe := ffprobe.Result{
+		Streams: []ffprobe.Stream{
+			{Index: 0, CodecType: "video"},
+			{
+				Index:         1,
+				CodecType:     "audio",
+				CodecName:     "opus",
+				Channels:      1,
+				ChannelLayout: "mono",
+				Disposition:   map[string]int{"default": 1},
+			},
+			{
+				Index:     2,
+				CodecType: "subtitle",
+			},
+		},
+	}
+
+	if !applyFinalAudioDetailsToSnapshot(&snapshot, probe) {
+		t.Fatal("expected snapshot audio details to change")
+	}
+	if snapshot.Video.AudioDescription != "Opus mono" {
+		t.Fatalf("video audio description = %q, want %q", snapshot.Video.AudioDescription, "Opus mono")
+	}
+	if snapshot.Config.AudioDescription != "Opus mono" {
+		t.Fatalf("config audio description = %q, want %q", snapshot.Config.AudioDescription, "Opus mono")
+	}
+	if snapshot.Result.AudioStream != "Opus mono" {
+		t.Fatalf("result audio stream = %q, want %q", snapshot.Result.AudioStream, "Opus mono")
+	}
+	gotStep := snapshot.Validation.Steps[0].Details
+	if gotStep != "1 audio track, Opus" {
+		t.Fatalf("validation audio detail = %q, want %q", gotStep, "1 audio track, Opus")
+	}
+}
+
+func TestApplyFinalAudioDetailsToSnapshotMarshal(t *testing.T) {
+	snapshot := encodingstate.Snapshot{
+		Config: &encodingstate.Config{AudioDescription: "old"},
+		Validation: &encodingstate.Validation{
+			Steps: []encodingstate.ValidationStep{{Name: "Audio tracks", Details: "old"}},
+		},
+		Result: &encodingstate.Result{AudioStream: "old"},
+	}
+	probe := ffprobe.Result{
+		Streams: []ffprobe.Stream{
+			{Index: 1, CodecType: "audio", CodecName: "opus", Channels: 1, ChannelLayout: "mono"},
+		},
+	}
+
+	if !applyFinalAudioDetailsToSnapshot(&snapshot, probe) {
+		t.Fatal("expected snapshot update")
+	}
+	raw, err := snapshot.Marshal()
+	if err != nil {
+		t.Fatalf("snapshot.Marshal(): %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(): %v", err)
+	}
+	if decoded["config"] == nil || decoded["result"] == nil || decoded["validation"] == nil {
+		t.Fatalf("expected config/result/validation in marshaled snapshot: %v", decoded)
 	}
 }
 

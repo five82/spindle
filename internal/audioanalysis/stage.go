@@ -10,7 +10,9 @@ import (
 
 	"spindle/internal/config"
 	"spindle/internal/encoding"
+	"spindle/internal/encodingstate"
 	"spindle/internal/logging"
+	"spindle/internal/media/ffprobe"
 	"spindle/internal/queue"
 	"spindle/internal/ripspec"
 	"spindle/internal/services"
@@ -148,6 +150,9 @@ func (a *Analyzer) Execute(ctx context.Context, item *queue.Item) error {
 		env.Attributes.PrimaryAudioDescription = refineResult.PrimaryAudioDescription
 		specDirty = true
 	}
+	if refreshEncodingSnapshotAudioDetails(ctx, a.cfg, item, targets, logger) {
+		specDirty = true
+	}
 
 	// Apply "comment" disposition to commentary tracks for Jellyfin recognition
 	// Must happen AFTER refinement since disposition is set on the remuxed file.
@@ -264,6 +269,177 @@ func buildAnalysisTargets(env *ripspec.Envelope, item *queue.Item) []string {
 	}
 
 	return targets
+}
+
+func refreshEncodingSnapshotAudioDetails(ctx context.Context, cfg *config.Config, item *queue.Item, targets []string, logger *slog.Logger) bool {
+	if item == nil || strings.TrimSpace(item.EncodingDetailsJSON) == "" {
+		return false
+	}
+
+	snapshot, err := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("failed to parse encoding snapshot during audio analysis",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "encoding_snapshot_parse_failed"),
+				logging.String(logging.FieldErrorHint, "check encoding_details_json schema changes"),
+			)
+		}
+		return false
+	}
+
+	targetPath := snapshotAudioTargetPath(snapshot, item, targets)
+	if targetPath == "" {
+		return false
+	}
+
+	probe, err := ffprobe.Inspect(ctx, cfg.FFprobeBinary(), targetPath)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("failed to refresh encoding snapshot audio details",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "encoding_snapshot_audio_refresh_failed"),
+				logging.String(logging.FieldErrorHint, "check ffprobe access to encoded output"),
+			)
+		}
+		return false
+	}
+
+	if !applyFinalAudioDetailsToSnapshot(&snapshot, probe) {
+		return false
+	}
+
+	raw, err := snapshot.Marshal()
+	if err != nil {
+		if logger != nil {
+			logger.Warn("failed to persist refreshed encoding snapshot audio details",
+				logging.Error(err),
+				logging.String(logging.FieldEventType, "encoding_snapshot_marshal_failed"),
+				logging.String(logging.FieldErrorHint, "check encoding_details_json schema changes"),
+			)
+		}
+		return false
+	}
+	item.EncodingDetailsJSON = raw
+	return true
+}
+
+func snapshotAudioTargetPath(snapshot encodingstate.Snapshot, item *queue.Item, targets []string) string {
+	if snapshot.Result != nil {
+		if path := strings.TrimSpace(snapshot.Result.OutputPath); path != "" {
+			return path
+		}
+	}
+	if item != nil {
+		if path := strings.TrimSpace(item.EncodedFile); path != "" {
+			return path
+		}
+	}
+	for i := len(targets) - 1; i >= 0; i-- {
+		if path := strings.TrimSpace(targets[i]); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func applyFinalAudioDetailsToSnapshot(snapshot *encodingstate.Snapshot, probe ffprobe.Result) bool {
+	if snapshot == nil {
+		return false
+	}
+	primary, summary, validation := summarizeOutputAudio(probe.Streams)
+	if primary == "" && summary == "" && validation == "" {
+		return false
+	}
+
+	changed := false
+	if snapshot.Config != nil && strings.TrimSpace(summary) != "" && snapshot.Config.AudioDescription != summary {
+		snapshot.Config.AudioDescription = summary
+		changed = true
+	}
+	if snapshot.Result != nil && strings.TrimSpace(summary) != "" && snapshot.Result.AudioStream != summary {
+		snapshot.Result.AudioStream = summary
+		changed = true
+	}
+	if snapshot.Validation != nil && setAudioValidationDetails(snapshot.Validation, validation) {
+		changed = true
+	}
+	if snapshot.Video != nil && strings.TrimSpace(primary) != "" && snapshot.Video.AudioDescription != primary {
+		snapshot.Video.AudioDescription = primary
+		changed = true
+	}
+	return changed
+}
+
+func summarizeOutputAudio(streams []ffprobe.Stream) (primary string, summary string, validation string) {
+	audioStreams := make([]ffprobe.Stream, 0)
+	codecCounts := make(map[string]int)
+	descriptions := make([]string, 0)
+	for _, stream := range streams {
+		if !strings.EqualFold(stream.CodecType, "audio") {
+			continue
+		}
+		audioStreams = append(audioStreams, stream)
+		desc := formatAudioDescription(stream)
+		if desc != "" {
+			descriptions = append(descriptions, desc)
+		}
+		codec := normalizeCodecName(stream)
+		if codec == "" {
+			codec = strings.TrimSpace(stream.CodecName)
+		}
+		if codec != "" {
+			codecCounts[codec]++
+		}
+	}
+	if len(audioStreams) == 0 {
+		return "", "", ""
+	}
+
+	primary = findAudioDescription(streams, -1)
+	if primary == "" && len(descriptions) > 0 {
+		primary = descriptions[0]
+	}
+	if len(descriptions) > 0 {
+		summary = strings.Join(descriptions, ", ")
+	}
+	validation = buildAudioValidationDetail(len(audioStreams), codecCounts)
+	return primary, summary, validation
+}
+
+func buildAudioValidationDetail(count int, codecCounts map[string]int) string {
+	if count <= 0 {
+		return ""
+	}
+	if len(codecCounts) == 1 {
+		for codec := range codecCounts {
+			if count == 1 {
+				return fmt.Sprintf("1 audio track, %s", codec)
+			}
+			return fmt.Sprintf("%d audio tracks, all %s", count, codec)
+		}
+	}
+	if count == 1 {
+		return "1 audio track"
+	}
+	return fmt.Sprintf("%d audio tracks", count)
+}
+
+func setAudioValidationDetails(validation *encodingstate.Validation, detail string) bool {
+	if validation == nil || strings.TrimSpace(detail) == "" {
+		return false
+	}
+	for i := range validation.Steps {
+		if validation.Steps[i].Name != "Audio tracks" {
+			continue
+		}
+		if validation.Steps[i].Details == detail {
+			return false
+		}
+		validation.Steps[i].Details = detail
+		return true
+	}
+	return false
 }
 
 func buildCompletionMessage(refine AudioRefinementResult, commentary *CommentaryResult) string {
