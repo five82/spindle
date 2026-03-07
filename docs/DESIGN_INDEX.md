@@ -11,7 +11,7 @@ self-contained and focused on a single domain area.
 | [DESIGN_QUEUE.md](DESIGN_QUEUE.md) | SQLite queue database: schema, item model, status state machine, store operations | 295 |
 | [DESIGN_RIPSPEC.md](DESIGN_RIPSPEC.md) | RipSpec envelope: structure, metadata, titles, episodes, assets, attributes, methods | 210 |
 | [DESIGN_DAEMON.md](DESIGN_DAEMON.md) | Daemon lifecycle, disc detection pipeline, daemon orchestration layer | 350 |
-| [DESIGN_STAGES.md](DESIGN_STAGES.md) | All 7 pipeline stages: identification, ripping, episode ID, encoding, audio analysis, subtitles, organization | 895 |
+| [DESIGN_STAGES.md](DESIGN_STAGES.md) | All 7 pipeline stages: identification, ripping, episode ID, encoding, audio analysis, subtitles, organization | 925 |
 | [DESIGN_INFRASTRUCTURE.md](DESIGN_INFRASTRUCTURE.md) | Logging, notifications, preflight, shared utilities, log access, audit gathering, config validation | 520 |
 
 ## API Reference

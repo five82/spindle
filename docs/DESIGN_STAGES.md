@@ -374,13 +374,34 @@ callback.
 
 ### 4.1 Job Planning
 
+The job planner builds an ordered list of encode jobs from the RipSpec:
+
 1. Parse RipSpec envelope.
 2. For movies: single encoding job (ripped file -> encoded file).
-3. For TV: one encoding job per episode asset.
-4. Skip episodes with already-completed encoded assets (supports resume).
-5. Clear failed assets for retry.
+3. For TV: one encoding job per episode. Each job maps:
+   - **Source**: the episode's ripped asset path (looked up from `AssetRipped`).
+   - **Output**: derived from `Episode.OutputBasename` placed in the encoded
+     directory.
+4. Skip episodes whose encoded asset already exists with `AssetStatusDone`
+   (supports resume after partial failure).
+5. Clear failed assets (`AssetStatusFailed`) so they are re-attempted.
 
-### 4.2 Drapto/SVT-AV1 Integration
+### 4.2 Per-Episode Execution Loop
+
+The job runner iterates encode jobs with per-episode failure isolation:
+
+1. For each job, invoke Drapto to encode `Source` -> `Output`.
+2. **On success**: record `AssetStatusDone` on the episode's encoded asset,
+   persist RipSpec to the database immediately (not batched at stage end).
+   This enables real-time progress visibility via the API.
+3. **On failure**: record `AssetStatusFailed` with the error message on the
+   episode's encoded asset, persist RipSpec, then **continue** to the next
+   episode. A single episode failure does not abort the stage.
+4. **Stage outcome**: the stage fails only if ALL episodes fail
+   (`len(encodedPaths) == 0`). Partial success proceeds to later stages with
+   the successfully encoded episodes.
+
+### 4.3 Drapto/SVT-AV1 Integration
 
 - Drapto is a Go library (not a separate binary).
 - Configured with `svt_av1_preset` (0-13, lower = slower + better quality).
@@ -389,24 +410,35 @@ callback.
 - Drapto outputs a validation report (codec check, duration check, HDR check,
   audio check, A/V sync check).
 
-### 4.3 Progress Streaming with Encoding Snapshot
+### 4.4 Progress Streaming with Encoding Snapshot
 
-- Drapto reports progress via callback.
-- Progress includes: percentage, current frame, total frames, encoding speed (fps),
-  elapsed time, ETA.
-- The encoding snapshot is stored in `encoding_details_json` for API consumers.
-- Snapshot format includes validation results and per-file encoding metrics.
+Drapto reports progress via a callback chain:
 
-### 4.4 Output Organization
+1. **Apply snapshot**: update the encoding snapshot with current Drapto event
+   data (percentage, frame, speed, ETA).
+2. **Update estimated size**: if progress >= 10%, read the output file's
+   current size and extrapolate:
+   `estimatedTotal = currentBytes / (percent / 100)`. Updates
+   `snapshot.CurrentOutputBytes` and `snapshot.EstimatedTotalBytes`.
+   Below 10% the estimate is too unstable and is skipped.
+3. **Throttle DB writes**: persist the snapshot to `encoding_details_json` at
+   most once per **2 seconds** (`progressPersistInterval`). This prevents
+   database write storms during fast-moving encodes while keeping API consumers
+   reasonably current.
+4. **Log sampling**: a `progressSampler` with bucket size 5 suppresses
+   repetitive progress log lines.
+
+Drapto emits 14 event types. Each is routed to an appropriate log level
+(DEBUG for routine progress, INFO for decisions like crop/HDR detection,
+WARN/ERROR for failures) and selectively persisted to the snapshot.
+
+### 4.5 Output Organization
 
 - Encoded files placed in `{staging_dir}/queue-{id}/encoded/`.
 - For TV: one file per episode named by episode key.
 - For movies: single encoded file.
-- **Per-episode persistence**: After each successfully encoded episode, persists
-  RipSpec to the database immediately (not batched at stage end). Enables real-time
-  progress visibility via the API.
 
-### 4.5 Validation
+### 4.6 Validation
 
 1. **Missing ripped episodes**: Detected at start via `MissingEpisodes(ripped)`.
    Warns and flags for review but does not fail.
