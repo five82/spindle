@@ -23,6 +23,9 @@ const (
 	progressStageAnalyzing = "Audio analyzing"
 	progressPercentPrep    = 5.0
 	progressPercentRefine  = 40.0
+
+	// validationStepAudioTracks is the name Drapto uses for the audio track validation step.
+	validationStepAudioTracks = "Audio tracks"
 )
 
 // Analyzer integrates audio analysis with the workflow manager.
@@ -353,11 +356,12 @@ func applyFinalAudioDetailsToSnapshot(snapshot *encodingstate.Snapshot, probe ff
 	}
 
 	changed := false
-	if snapshot.Config != nil && strings.TrimSpace(summary) != "" && snapshot.Config.AudioDescription != summary {
+	hasSummary := strings.TrimSpace(summary) != ""
+	if snapshot.Config != nil && hasSummary && snapshot.Config.AudioDescription != summary {
 		snapshot.Config.AudioDescription = summary
 		changed = true
 	}
-	if snapshot.Result != nil && strings.TrimSpace(summary) != "" && snapshot.Result.AudioStream != summary {
+	if snapshot.Result != nil && hasSummary && snapshot.Result.AudioStream != summary {
 		snapshot.Result.AudioStream = summary
 		changed = true
 	}
@@ -372,14 +376,14 @@ func applyFinalAudioDetailsToSnapshot(snapshot *encodingstate.Snapshot, probe ff
 }
 
 func summarizeOutputAudio(streams []ffprobe.Stream) (primary string, summary string, validation string) {
-	audioStreams := make([]ffprobe.Stream, 0)
+	audioCount := 0
 	codecCounts := make(map[string]int)
 	descriptions := make([]string, 0)
 	for _, stream := range streams {
 		if !strings.EqualFold(stream.CodecType, "audio") {
 			continue
 		}
-		audioStreams = append(audioStreams, stream)
+		audioCount++
 		desc := formatAudioDescription(stream)
 		if desc != "" {
 			descriptions = append(descriptions, desc)
@@ -392,18 +396,15 @@ func summarizeOutputAudio(streams []ffprobe.Stream) (primary string, summary str
 			codecCounts[codec]++
 		}
 	}
-	if len(audioStreams) == 0 {
+	if audioCount == 0 {
 		return "", "", ""
 	}
 
-	primary = findAudioDescription(streams, -1)
-	if primary == "" && len(descriptions) > 0 {
-		primary = descriptions[0]
-	}
 	if len(descriptions) > 0 {
+		primary = descriptions[0]
 		summary = strings.Join(descriptions, ", ")
 	}
-	validation = buildAudioValidationDetail(len(audioStreams), codecCounts)
+	validation = buildAudioValidationDetail(audioCount, codecCounts)
 	return primary, summary, validation
 }
 
@@ -430,7 +431,7 @@ func setAudioValidationDetails(validation *encodingstate.Validation, detail stri
 		return false
 	}
 	for i := range validation.Steps {
-		if validation.Steps[i].Name != "Audio tracks" {
+		if validation.Steps[i].Name != validationStepAudioTracks {
 			continue
 		}
 		if validation.Steps[i].Details == detail {

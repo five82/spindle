@@ -300,7 +300,7 @@ func TestApplyFinalAudioDetailsToSnapshot(t *testing.T) {
 		Validation: &encodingstate.Validation{
 			Passed: true,
 			Steps: []encodingstate.ValidationStep{
-				{Name: "Audio tracks", Passed: true, Details: "2 audio tracks, all Opus"},
+				{Name: validationStepAudioTracks, Passed: true, Details: "2 audio tracks, all Opus"},
 			},
 		},
 		Result: &encodingstate.Result{
@@ -348,7 +348,7 @@ func TestApplyFinalAudioDetailsToSnapshotMarshal(t *testing.T) {
 	snapshot := encodingstate.Snapshot{
 		Config: &encodingstate.Config{AudioDescription: "old"},
 		Validation: &encodingstate.Validation{
-			Steps: []encodingstate.ValidationStep{{Name: "Audio tracks", Details: "old"}},
+			Steps: []encodingstate.ValidationStep{{Name: validationStepAudioTracks, Details: "old"}},
 		},
 		Result: &encodingstate.Result{AudioStream: "old"},
 	}
