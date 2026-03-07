@@ -20,6 +20,16 @@ Spindle is a **personal project** that automates optical disc to Jellyfin librar
 - **Scope**: Single-developer project - avoid over-engineering
 - **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.
 
+## Related Repos
+
+| Repo | Path | Role |
+|------|------|------|
+| drapto | `~/projects/drapto/` | FFmpeg encoding wrapper |
+| spindle | `~/projects/spindle/` | Orchestrator that uses Drapto as a library (this repo) |
+| flyer | `~/projects/flyer/` | Read-only TUI for Spindle |
+
+GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.com/five82/spindle) | [flyer](https://github.com/five82/flyer)
+
 ## Critical Expectations
 
 **Architectural churn is embraced.** Optimize for clarity, not backwards compatibility.
