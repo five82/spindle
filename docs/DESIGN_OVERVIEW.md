@@ -127,22 +127,27 @@ them to appear in Jellyfin without manual intervention.
 Single binary `spindle` with two execution modes:
 
 1. **Daemon mode** (`spindle daemon-run`): Starts the full daemon with disc
-   monitoring, workflow manager, IPC server, and HTTP API server.
-2. **CLI mode**: All other commands. Some require a running daemon (via IPC),
-   others work standalone (direct DB access or local operations).
+   monitoring, workflow manager, and HTTP API server.
+2. **CLI mode**: All other commands. Some require a running daemon (via HTTP
+   API), others work standalone (direct DB access or local operations).
 
-### 4.2 Communication Layers
+### 4.2 Communication Layer
 
 ```
                     +-----------+
                     | CLI User  |
                     +-----+-----+
                           |
+                    +-----v------+
+                    | HTTP API   |
+                    | (REST)     |
+                    +-----+------+
+                          |
               +-----------+-----------+
               |                       |
      +--------v--------+    +--------v--------+
-     | IPC (Unix sock) |    | HTTP API (TCP)  |
-     | JSON-RPC        |    | REST            |
+     | Unix Socket      |    | TCP (optional)  |
+     | (CLI + local)    |    | (Flyer, remote) |
      +--------+--------+    +--------+--------+
               |                       |
               +-----------+-----------+
@@ -159,106 +164,111 @@ Single binary `spindle` with two execution modes:
      +-----------------+    +-----------------+
 ```
 
-**IPC**: Unix domain socket at `{log_dir}/spindle.sock`, JSON-RPC protocol,
-service name "Spindle". Used by CLI for daemon control and queue management.
+**Single HTTP API**: All communication uses HTTP REST endpoints. The server
+listens on:
+- **Unix socket**: `$XDG_RUNTIME_DIR/spindle.sock` (primary, used by CLI)
+- **TCP** (optional): `api_bind` address (e.g., `127.0.0.1:7487`) for remote
+  consumers like Flyer
 
-**HTTP API**: TCP listener at `api_bind` address (default `127.0.0.1:7487`).
-REST endpoints for status, queue, and log streaming. Token auth via `api_token`.
+Both listeners serve the same endpoints and share the same auth model. Token
+auth via `api_token` applies to both.
 
 **Queue access fallback**: When daemon is unavailable, CLI queue commands open
-the SQLite database directly for read operations.
+the SQLite database directly for read-only operations.
 
-> **Rewrite improvement**: Unify IPC + HTTP into a single HTTP API served over
-> Unix socket (with optional TCP bind). The CLI would use the same HTTP endpoints
-> as external consumers. See `API_INTERFACES.md` for details.
+### 4.3 Concurrency Model: Single Pipeline with Disc Semaphore
 
-### 4.3 Concurrency Model: Foreground/Background Lanes
+The workflow manager runs a single processing pipeline. Multiple items can be
+in-flight concurrently (one encoding while another is being identified), but
+the optical drive is a shared resource guarded by a semaphore.
 
-The workflow manager runs two parallel processing lanes:
+**Stage sequence** (per item):
+1. **Identification** (pending -> identification)
+2. **Ripping** (identification -> ripping)
+3. **Episode Identification** (ripping -> episode_identification) [TV only]
+4. **Encoding** (episode_identification/ripping -> encoding)
+5. **Audio Analysis** (encoding -> audio_analysis)
+6. **Subtitle Generation** (audio_analysis -> subtitling)
+7. **Organization** (subtitling -> organizing -> completed)
 
-**Foreground lane** (frees the disc drive quickly):
-1. **Identification** (pending -> identifying -> identified)
-2. **Ripping** (identified -> ripping -> ripped)
+Each stage transitions the item's `stage` field. The `in_progress` flag
+tracks whether work is actively executing (see DESIGN_QUEUE.md Section 4).
 
-**Background lane** (runs while next disc can start):
-3. **Episode Identification** (ripped -> episode_identifying -> episode_identified) [TV only]
-4. **Encoding** (episode_identified/ripped -> encoding -> encoded)
-5. **Audio Analysis** (encoded -> audio_analyzing -> audio_analyzed)
-6. **Subtitle Generation** (audio_analyzed -> subtitling -> subtitled)
-7. **Organization** (subtitled -> organizing -> completed)
+**Disc semaphore**: Identification and ripping require exclusive access to
+the optical drive. A semaphore (capacity 1) prevents concurrent disc access.
+All other stages run freely without acquiring the semaphore.
 
-Each lane runs independently. A disc can be ejected and a new one inserted as soon
-as ripping completes; the background lane continues processing the first disc's
-encoded files while the foreground lane identifies and rips the new disc.
-
-**Lane poll loop** (`runLane()`):
+**Pipeline poll loop** (`run()`):
 1. Check `ctx.Done()` for shutdown.
-2. Run reclaimer (if lane has processing statuses).
-3. Fetch next item via `NextForStatuses()` (FIFO by creation time).
-4. If no item: wait `queue_poll_interval` seconds, loop.
-5. If queue fetch error: log, wait `error_retry_interval` seconds, loop.
-6. Run preflight dependency checks. **Failure halts the lane** (requires daemon
-   restart) to prevent repeated failures against missing binaries.
-7. Process item via `processItem()`.
-8. Loop.
+2. Fetch next ready item via `NextReady()` where `in_progress = 0`, ordered
+   by stage priority (earlier stages first) then creation time (FIFO within
+   same stage).
+3. If no item: wait `queue_poll_interval` seconds, loop.
+4. If queue fetch error: log, wait `error_retry_interval` seconds, loop.
+5. Run preflight dependency checks. **Failure halts the pipeline** (requires
+   daemon restart) to prevent repeated failures against missing binaries.
+6. Spawn goroutine: acquire disc semaphore if needed, set `in_progress = 1`,
+   process item via `processItem()`, advance stage, release semaphore.
+7. Loop (immediately look for next item; don't wait for spawned goroutine).
 
-Foreground lane enables notifications; background lane does not.
+**Stage priority** ensures disc-dependent stages run first (freeing the drive
+for the next disc), while encoding and later stages run concurrently in the
+background.
+
+**Per-item logging**: Items past the identification stage get dedicated log
+files at `{log_dir}/items/{item_id}/{session_id}.log`.
 
 ### 4.4 Stage Configuration Wiring
 
 `ConfigureStages(set StageSet)` registers up to 7 optional stage handlers and
-builds the two processing lanes.
+builds the pipeline stage chain.
 
 **StageSet** (7 optional handlers):
 ```go
 type StageSet struct {
     Identifier        stage.Handler
     Ripper            stage.Handler
-    AudioAnalysis     stage.Handler
     EpisodeIdentifier stage.Handler
     Encoder           stage.Handler
+    AudioAnalysis     stage.Handler
     Subtitles         stage.Handler
     Organizer         stage.Handler
 }
 ```
 
-**Conditional stage ordering** -- background lane start statuses chain dynamically:
-- If `EpisodeIdentifier` present: encoder starts at `episode_identified`;
-  absent: encoder starts at `ripped`.
-- If `AudioAnalysis` present: subtitles starts at `audio_analyzed`;
-  absent: subtitles starts at `encoded`.
-- If `Subtitles` present: organizer starts at `subtitled`;
-  absent: organizer starts at whatever subtitles would have started at.
+**Conditional stage ordering** -- the stage chain is built dynamically:
+- If `EpisodeIdentifier` present: encoding follows `episode_identification`;
+  absent: encoding follows `ripping` directly.
+- If `AudioAnalysis` present: subtitling follows `audio_analysis`;
+  absent: subtitling follows `encoding`.
+- If `Subtitles` present: organizing follows `subtitling`;
+  absent: organizing follows whatever subtitling would have followed.
 
-**laneState** -- per-lane runtime state:
+**pipelineState** -- runtime state:
 ```go
-type laneState struct {
-    kind                 laneKind                     // "foreground" or "background"
-    name                 string
-    stages               []pipelineStage
-    statusOrder          []queue.Status               // ordered for NextForStatuses()
-    stageByStart         map[queue.Status]pipelineStage
-    processingStatuses   []queue.Status               // statuses needing heartbeat
-    logger               *slog.Logger
-    notificationsEnabled bool                         // foreground=true, background=false
-    runReclaimer         bool                         // true if any processing statuses
+type pipelineState struct {
+    stages       []pipelineStage
+    stageOrder   []queue.Stage                // ordered for NextReady()
+    stageByStart map[queue.Stage]pipelineStage
+    discSem      chan struct{}                // capacity 1, guards disc access
+    logger       *slog.Logger
 }
 ```
 
 **pipelineStage** -- single stage descriptor:
 ```go
 type pipelineStage struct {
-    name             string
-    handler          stage.Handler
-    startStatus      queue.Status
-    processingStatus queue.Status
-    doneStatus       queue.Status
+    name        string
+    handler     stage.Handler
+    stage       queue.Stage        // stage value this handler processes
+    nextStage   queue.Stage        // stage to advance to on success
+    needsDisc   bool               // true for identification, ripping
 }
 ```
 
-Lane finalization (`finalize()`) populates the `stageByStart` map, builds the
-`statusOrder` slice, deduplicates `processingStatuses`, and sets
-`runReclaimer = true` if the lane has any processing statuses.
+Pipeline finalization (`finalize()`) populates the `stageByStart` map, builds
+the `stageOrder` slice (disc-dependent stages first), and initializes the disc
+semaphore.
 
 ### 4.5 Stage Handler Interface
 
@@ -285,53 +295,46 @@ type LoggerAware interface {
 The manager's `processItem()` drives daemon-mode execution. The standalone
 `stageexec.Run()` provides a similar path for CLI one-shot workflows.
 
-**Full lifecycle per item** (15 steps with persistence points):
+**Full lifecycle per item** (13 steps with persistence points):
 
-1. Look up stage by `item.Status` in `lane.stageByStart`.
-2. Create request UUID and stage context.
+1. Look up stage handler by `item.Stage` in `pipeline.stageByStart`.
+2. Create request UUID and stage context (child of daemon context).
 3. If handler implements `LoggerAware`, call `SetLogger()`.
 4. **Initialize progress state**: set `ProgressStage` via `deriveStageLabel()`
-   (splits status on underscores, title-cases each word), set default message
-   `"{label} started"`, reset `ProgressPercent` to 0, set `LastHeartbeat` to now.
-5. **Persist** transition to processing status.
+   (title-cases the stage name), set default message `"{label} started"`,
+   reset `ProgressPercent` to 0.
+5. **Set `in_progress = 1`**, persist.
 6. Call `handler.Prepare(ctx, item)`.
 7. **Persist** post-Prepare state changes.
 8. If stage is "ripper" and rip hooks registered: call `BeforeRip()`.
-9. **Execute with heartbeat**: spawn heartbeat goroutine via
-   `executeWithHeartbeat()`, then call `handler.Execute(ctx, item)` (blocking).
-10. Cancel heartbeat context; wait for heartbeat goroutine to finish.
-11. If stage is "ripper" and rip hooks registered: call `AfterRip()`.
-12. **Handle execution error**: if `context.Canceled`, log DEBUG and return.
-    Otherwise call `handleStageFailure()`.
-13. Advance `item.Status` to `stage.doneStatus`. Clear `LastHeartbeat`.
-14. If completed: finalize progress (ensure percent >= 100, non-empty message).
-15. **Persist** final state.
+9. Call `handler.Execute(ctx, item)` (blocking).
+10. If stage is "ripper" and rip hooks registered: call `AfterRip()`.
+11. **Handle execution error**: if `context.Canceled`, log DEBUG, set
+    `in_progress = 0`, persist, and return. Otherwise call
+    `handleStageFailure()`.
+12. Advance `item.Stage` to next stage. Set `in_progress = 0`.
+    If completed: finalize progress (ensure percent >= 100, non-empty message).
+13. **Persist** final state.
 
 **Failure handling** (`handleStageFailure`):
 - Classifies error via `services.Details(err)` which extracts structured
   `ErrorDetails` (Kind, Stage, Operation, Message, Code, Hint, Cause).
-- ErrorKind values: `external`, `validation`, `configuration`, `not_found`,
-  `timeout`, `transient`.
-- Sets `item.Status = failed` with extracted message.
+- See DESIGN_INFRASTRUCTURE.md Section 5 for the full error taxonomy.
+- **Transient** errors are retried (up to 3 times with backoff) before failing.
+- **Fatal** errors fail the item immediately.
+- **Degraded** errors are logged as warnings; processing continues.
+- On failure: sets `item.Stage = failed`, `item.InProgress = 0`.
+- Records `failed_at_stage` for retry routing.
 - Persists, notifies, and checks queue completion.
 
-### 4.7 Heartbeat Concurrency
+### 4.7 Crash Recovery
 
-`executeWithHeartbeat()` creates a child context, spawns a heartbeat goroutine,
-runs the handler's `Execute()`, then cancels the heartbeat context and waits for
-the goroutine to finish.
+Since Spindle is a single binary, a process crash kills all goroutines. On
+startup, the daemon scans for items with `in_progress = 1` and resets them
+to `in_progress = 0`. These items are then picked up by the normal pipeline
+poll loop and re-executed from the beginning of their current stage.
 
-- Heartbeat updates `last_heartbeat` every `heartbeat_interval` seconds.
-- Missed heartbeat updates do not abort the stage -- they only make the item
-  eligible for reclamation if the stage crashes.
-- Progress is sampled during heartbeat ticks (suppressed when unchanged).
-
-**Stale item reclamation** (`ReclaimStaleItems`):
-- Runs at the start of each lane iteration, before fetching the next item.
-- Cutoff: `time.Now().Add(-heartbeatTimeout)`.
-- Items with `last_heartbeat` older than cutoff are reset to their start status
-  per the rollback table (see DESIGN_QUEUE.md Section 1.5).
-- Only runs for lanes with processing statuses (`runReclaimer = true`).
+See DESIGN_QUEUE.md Section 5 for details.
 
 ---
 
@@ -391,7 +394,7 @@ On config load, `EnsureDirectories` creates:
 | `review_dir`             | string | `~/review`                                   | Unidentified files routed for manual review|
 | `opensubtitles_cache_dir`| string | `~/.local/share/spindle/cache/opensubtitles` | OpenSubtitles download cache               |
 | `whisperx_cache_dir`     | string | `~/.local/share/spindle/cache/whisperx`      | WhisperX transcription cache               |
-| `api_bind`               | string | `127.0.0.1:7487`                             | HTTP API listen address                    |
+| `api_bind`               | string | (empty)                                      | Optional TCP listen address for HTTP API   |
 | `api_token`              | string | (empty)                                      | Bearer token for HTTP API auth             |
 
 #### `[tmdb]`
@@ -533,8 +536,6 @@ See `CONTENT_ID_DESIGN.md` for detailed semantics of each field.
 |-----------------------|------|---------|--------------------------------------------|
 | `queue_poll_interval` | int  | 5       | Seconds between queue polls                |
 | `error_retry_interval`| int  | 10      | Seconds to wait after queue fetch error    |
-| `heartbeat_interval`  | int  | 15      | Seconds between heartbeat updates          |
-| `heartbeat_timeout`   | int  | 120     | Seconds before item is considered stale    |
 | `disc_monitor_timeout`| int  | 5       | Disc detection command timeout (seconds)   |
 
 #### `[logging]`
@@ -609,13 +610,15 @@ See `CONTENT_ID_DESIGN.md` for detailed semantics of each field.
 
 ```
 {log_dir}/
-  spindle.log           # Main daemon log
+  spindle.log           # Main daemon log (symlink to current)
   spindle.lock          # Lock file
-  spindle.sock          # IPC Unix socket
   queue.db              # SQLite database
   items/
     {item_id}/
       {session_id}.log  # Per-item log file
+
+$XDG_RUNTIME_DIR/
+  spindle.sock          # HTTP API Unix socket
 ```
 
 ### 6.5 Review Directory

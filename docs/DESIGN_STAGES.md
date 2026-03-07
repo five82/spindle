@@ -334,18 +334,23 @@ numbers, confidence scores, and match metadata.
 
 ### 3.1 Skip Decisions
 
-The stage skips (with logged reason) when:
-1. Movie content (`reason: "movie_content"`)
-2. No rip spec data
-3. Invalid rip spec (parse error)
-4. No episodes in envelope
-5. Matcher unavailable, configuration unavailable, or OpenSubtitles disabled
+The stage uses **content-gated** skipping for movies and **config-gated**
+skipping for TV:
+
+1. Movie content: skip silently (`reason: "movie_content"`). Movies have no
+   episode numbers to resolve.
+2. No rip spec data: skip.
+3. Invalid rip spec (parse error): skip.
+4. No episodes in envelope: skip.
+5. TV content with matcher unavailable, configuration unavailable, or
+   OpenSubtitles disabled: **flag for review** with reason
+   `"episode numbers unresolved; content matching unavailable"` and skip.
+   This is a configuration gap, not a content decision -- the user should
+   enable OpenSubtitles or manually resolve episode numbers.
 
 **Placeholder key retention**: When the stage skips, episode keys remain as
 placeholders (e.g., `s01_001`, `s01_002`). Downstream stages use these
-placeholder keys as-is for file naming and asset tracking. For condition 5,
-if unresolved episodes exist, the item is also flagged for review with reason
-`"episode numbers unresolved; content matching unavailable"`.
+placeholder keys as-is for file naming and asset tracking.
 
 ### 3.2 Review Triggers
 
@@ -698,9 +703,15 @@ actual encode.
    using the first and last matched pairs' start times. This captures both
    constant offsets and framerate scaling (e.g., PAL 25fps -> NTSC 23.976fps
    produces `scale ~= 1.0424`).
-4. **Apply transform**: Transform all forced cue start/end times. Write
+4. **Scale factor validation**: Reject the computed transform if the scale
+   factor deviates more than **5%** from 1.0 (i.e., `scale < 0.95` or
+   `scale > 1.05`). A larger deviation indicates a fundamental mismatch
+   between the forced subtitle and the encode (wrong source, wrong episode,
+   etc.). On rejection, fall back to the identity transform and flag the
+   item for review with reason `"forced subtitle scale factor out of bounds"`.
+5. **Apply transform**: Transform all forced cue start/end times. Write
    adjusted cues to the output SRT file.
-5. **Fallback**: If fewer than 2 matches, copy the forced SRT as-is
+6. **Fallback**: If fewer than 2 matches, copy the forced SRT as-is
    (identity transform: scale=1.0, offset=0).
 
 Returns: `(matchCount, timeTransform, error)`.

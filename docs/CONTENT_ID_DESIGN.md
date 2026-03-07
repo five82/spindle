@@ -331,8 +331,9 @@ episode numbers.
 
 ### 10.2 Disc Block Size
 
-`discBlockSize(discEpisodes)` returns the number of episodes on the disc. If
-zero, defaults to 4.
+`discBlockSize(discEpisodes, numRips)` returns the number of episodes on the
+disc. If zero, defaults to `min(4, numRips)` to avoid searching for more
+episodes than there are ripped titles.
 
 ---
 
@@ -394,8 +395,12 @@ Build an `N x M` matrix (padded to square) where:
 
 ### 12.2 Algorithm
 
-Standard Hungarian algorithm for minimum-cost assignment on the square cost
-matrix. Returns `assignment[i] = j` for each row `i`.
+Standard Hungarian algorithm (O(n^3)) for minimum-cost assignment on the square
+cost matrix. Returns `assignment[i] = j` for each row `i`.
+
+**Implementation**: Direct implementation in Go (~100 lines). Matrix sizes are
+small (typically < 30 episodes per season), so performance is not a concern.
+No external dependency needed.
 
 ### 12.3 Minimum Score Filter
 
@@ -415,8 +420,10 @@ LLM verification runs when:
 ### 13.2 Transcript Extraction
 
 For each low-confidence match:
-1. Extract the middle 10 minutes of dialogue from both the rip SRT and reference
-   SRT files (`middleWindowHalfSec = 300.0` = 5 minutes each side)
+1. Extract the middle portion of dialogue from both the rip SRT and reference
+   SRT files. Window half-size: `min(300.0, totalDuration/2)` seconds (clamped
+   so short episodes don't extend past their boundaries; default
+   `middleWindowHalfSec = 300.0` = 5 minutes each side for episodes >= 10 min).
 2. Truncate each to `maxTranscriptChars = 6000` characters
 
 ### 13.3 LLM Prompt

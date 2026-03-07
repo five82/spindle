@@ -14,23 +14,25 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 1. Load and validate configuration.
 2. Ensure directories exist.
 3. Open SQLite queue database (init schema if needed).
-4. Create workflow manager with configured poll/heartbeat intervals.
+4. Create workflow manager with configured poll interval.
 5. Create notification service.
 6. Create daemon instance with lock file path `filepath.Join(cfg.Paths.LogDir, "spindle.lock")`.
 7. Register rip hooks: `wf.SetRipHooks(daemon)` -- daemon implements BeforeRip/AfterRip.
 8. Create disc monitor (if optical drive configured).
 9. Create netlink monitor (if optical drive configured).
-10. Create IPC server (Unix socket at `{log_dir}/spindle.sock`).
-11. Create HTTP API server (if `api_bind` configured).
+10. Create HTTP API server (Unix socket at `$XDG_RUNTIME_DIR/spindle.sock`,
+    optional TCP bind at `api_bind`).
 
 **Start phase** (in `Start()`):
 1. **Acquire lock file** via `flock.TryLock()` (fail if another instance running).
 2. Run dependency checks (preflight).
-3. Start workflow manager (begins lane processing loops).
-4. Start disc monitor (prepare for detection events). Fatal if fails.
-5. Start netlink monitor (begin listening for udev events). Non-fatal if fails.
-6. Start HTTP API server. Fatal if fails.
-7. Set `running = true` via atomic bool.
+3. **Recover stale items**: Reset `in_progress` on any items left in-progress
+   from a previous crash (see DESIGN_QUEUE.md Section 5).
+4. Start workflow manager (begins pipeline processing loop).
+5. Start disc monitor (prepare for detection events). Fatal if fails.
+6. Start netlink monitor (begin listening for udev events). Non-fatal if fails.
+7. Start HTTP API server (Unix socket + optional TCP). Fatal if fails.
+8. Set `running = true` via atomic bool.
 
 ### 1.2 Shutdown Sequence
 
@@ -38,9 +40,11 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 2. Stop netlink monitor.
 3. Stop disc monitor.
 4. Stop HTTP API server (5-second graceful shutdown).
-5. Stop workflow manager (wait for lane loops to finish).
-6. Mark all active queue items as failed: `FailActiveOnShutdown()` with a
-   **5-second timeout context**. Failure here does not prevent shutdown.
+5. Stop workflow manager (cancels stage contexts; waits for in-flight goroutines).
+6. Mark all in-progress queue items as not-in-progress:
+   `ResetInProgressOnShutdown()` with a **5-second timeout context**. Items
+   retain their current stage so they resume from the correct point on restart.
+   Failure here does not prevent shutdown.
 7. Release lock file via `d.lock.Unlock()`.
 8. Clear context references and set `running = false`.
 
@@ -58,7 +62,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 - `PauseDisc()` / `ResumeDisc()` toggle an `atomic.Bool`.
 - Uses `CompareAndSwap()` so only actual state changes return true.
 - While paused: netlink events are ignored (logged at DEBUG), manual disc detection
-  via IPC returns "disc detection paused".
+  via HTTP API returns "disc detection paused".
 - Ripping automatically pauses disc monitoring (via `BeforeRip` hook) and resumes
   after ripping completes (via `AfterRip` hook).
 
@@ -161,12 +165,17 @@ Output: hex-encoded SHA-256 digest.
 ### 2.6 Duplicate Detection
 
 - Check queue for existing items with same fingerprint that are `IsInWorkflow()`
-  (any status from identified through completed, including all processing states).
+  (any non-terminal stage, including in-progress items).
 - If found: return existing item ID, do not create duplicate.
+- **Identical fingerprints from different disc pressings**: SHA-256 collisions are
+  astronomically unlikely, but identical disc pressings (same files) produce the
+  same fingerprint by design. These are deduplicated silently with a log message
+  at INFO level (`decision_type: "duplicate_detection"`).
 
 ### 2.7 Disc-Dependent Stage Guard
 
-- Before detection, check if any item is in `identifying` or `ripping` status.
+- Before detection, check if any item is in `identification` or `ripping` stage
+  with `in_progress = 1`.
 - If so, skip detection to avoid concurrent disc access (which causes read errors).
 
 ### 2.8 Tray Status Detection
@@ -232,7 +241,7 @@ re-insertion without reprocessing.
 ### 2.13 User-Stopped Item Prevention
 
 When a disc with a known fingerprint is detected and the existing queue item has
-`status = failed` with `IsUserStopReason()` review reason (`"Stop requested by
+`stage = failed` with `IsUserStopReason()` review reason (`"Stop requested by
 user"`):
 
 - The item is NOT reset for reprocessing.
@@ -259,9 +268,8 @@ user"`):
 9. Create workflow manager (with optional diagnostic mode).
 10. Register all 7 stages via `ConfigureStages()`.
 11. Create daemon instance.
-12. Start IPC server on Unix socket.
-13. Call `daemon.Start()`.
-14. Block on signal context until shutdown signal received.
+12. Call `daemon.Start()`.
+13. Block on signal context until shutdown signal received.
 
 **Log retention**: On startup, cleans old log files exceeding
 `logging.retention_days` across 4 targets: daemon logs, event archives,
@@ -285,16 +293,16 @@ CLI-facing daemon lifecycle management used by `spindle start/stop/restart/statu
 - `Launch(executablePath, opts)`: Start daemon as detached background process
   (`spindle daemon-run`). Returns `StartResult` with state (started,
   already_running, start_requested).
-- `WaitForClient(socketPath, timeout)`: Poll for IPC socket availability.
-- `WaitForShutdown(socketPath, timeout)`: Poll until daemon IPC socket
+- `WaitForClient(socketPath, timeout)`: Poll for HTTP API socket availability.
+- `WaitForShutdown(socketPath, timeout)`: Poll until daemon HTTP socket
   disappears.
 
 **Process control:**
 
 - `EnsureStarted(socketPath, cfg, execPath, opts, timeout)`: Idempotent start
   -- returns immediately if already running, otherwise launches and waits.
-- `StopAndTerminate(socketPath, gracePeriod, fallbackPID)`: Send IPC stop,
-  wait for shutdown, force-kill if still alive. Returns `StopResult`.
+- `StopAndTerminate(socketPath, gracePeriod, fallbackPID)`: Send HTTP stop
+  request, wait for shutdown, force-kill if still alive. Returns `StopResult`.
 - `Restart(socketPath, cfg, execPath, opts, stopGrace, startWait)`: Stop then
   start. Returns `RestartResult` with was_running, stop, and start details.
 - `ForceKillProcess(pidPath, lockPath, fallbackPID)`: SIGKILL + cleanup of PID
@@ -302,8 +310,8 @@ CLI-facing daemon lifecycle management used by `spindle start/stop/restart/statu
 
 **Status aggregation:**
 
-- `BuildStatusSnapshot(ctx, socketPath, cfg)`: Combines daemon IPC status with
-  offline fallbacks (direct queue stats, dependency checks).
+- `BuildStatusSnapshot(ctx, socketPath, cfg)`: Combines daemon HTTP API status
+  with offline fallbacks (direct queue stats, dependency checks).
 - `ResolveDependencies(ctx, cfg)`: Check all binary dependencies.
 - `BuildSystemChecks(cfg, daemonRunning, discPaused, netlinkActive)`: System
   status lines for CLI display.
@@ -314,7 +322,7 @@ CLI-facing daemon lifecycle management used by `spindle start/stop/restart/statu
 - `DeriveLogDir(lockPath, queueDBPath, cfg)`: Determine daemon log directory
   from available hints.
 
-**Sentinel error:** `ErrDaemonNotRunning` returned when IPC socket unreachable.
+**Sentinel error:** `ErrDaemonNotRunning` returned when HTTP API socket unreachable.
 
 ### 3.3 One-Shot Stage Execution (`stageexec`)
 
@@ -323,10 +331,10 @@ workflow. Used by CLI commands (`spindle identify`, `spindle gensubtitle`).
 
 `Run(ctx, Options)` executes a stage handler against a queue item:
 
-1. Set item to `Processing` status, persist to store.
+1. Set `in_progress = 1`, persist to store.
 2. Call `Handler.Prepare(ctx, item)` -- persist result.
 3. Call `Handler.Execute(ctx, item)`.
-4. Transition item to `Done` status, clear heartbeat, persist.
+4. Advance to next stage, set `in_progress = 0`, persist.
 
 On failure at any step: mark item as `failed` with error message, notify via
 error event, return the stage error.
@@ -351,12 +359,12 @@ Remove, ResetStuck, RetryAll, Retry, RetryEpisode, Stop, ActiveFingerprints
 
 **Implementations:**
 
-- `NewIPCAccess(client)`: Routes operations through daemon IPC.
+- `NewHTTPAccess(client)`: Routes operations through daemon HTTP API.
 - `NewStoreAccess(store)`: Direct SQLite access (no daemon needed).
 
 **`Session`**: Access handle + cleanup function. `Close()` releases resources
 (closes DB connection for store access).
 
-**`OpenWithFallback(dial, openStore)`**: Try IPC first; if daemon unavailable,
-fall back to direct store access. CLI queue commands use this for offline
-operation.
+**`OpenWithFallback(httpClient, openStore)`**: Try HTTP API first; if daemon
+unavailable, fall back to direct store access. CLI queue commands use this for
+offline operation.

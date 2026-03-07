@@ -12,7 +12,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 - **Driver**: modernc.org/sqlite (pure-Go) with WAL mode
 - **Transient**: No migration system. On schema changes, bump `schemaVersion`
   constant and users clear the database.
-- **Current schema version**: 4
+- **Current schema version**: 5
 
 **Connection pragmas** (applied on every `Open()`):
 
@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS queue_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_path TEXT,
     disc_title TEXT,
-    status TEXT NOT NULL,
-    failed_at_status TEXT,
+    stage TEXT NOT NULL,
+    failed_at_stage TEXT,
     media_info_json TEXT,
     ripped_file TEXT,
     encoded_file TEXT,
@@ -54,29 +54,30 @@ CREATE TABLE IF NOT EXISTS queue_items (
     rip_spec_data TEXT,
     disc_fingerprint TEXT,
     metadata_json TEXT,
-    last_heartbeat TIMESTAMP,
     needs_review INTEGER NOT NULL DEFAULT 0,
     review_reason TEXT,
     item_log_path TEXT,
     encoding_details_json TEXT,
     active_episode_key TEXT,
     progress_bytes_copied INTEGER DEFAULT 0,
-    progress_total_bytes INTEGER DEFAULT 0
+    progress_total_bytes INTEGER DEFAULT 0,
+    drapto_preset_profile TEXT,
+    in_progress INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_queue_status ON queue_items(status);
+CREATE INDEX IF NOT EXISTS idx_queue_stage ON queue_items(stage);
 CREATE INDEX IF NOT EXISTS idx_queue_fingerprint ON queue_items(disc_fingerprint);
 ```
 
-## 3. Item Model (26 columns)
+## 3. Item Model (27 columns)
 
 | Column                | Type      | Purpose                                           |
 |-----------------------|-----------|---------------------------------------------------|
 | `id`                  | INTEGER   | Auto-increment primary key                        |
 | `source_path`         | TEXT      | Original source file path (for file-based input)  |
 | `disc_title`          | TEXT      | Disc label / identified title                     |
-| `status`              | TEXT      | Current pipeline status                           |
-| `failed_at_status`    | TEXT      | Status when failure occurred (for retry routing)  |
+| `stage`               | TEXT      | Current pipeline stage                            |
+| `failed_at_stage`     | TEXT      | Stage when failure occurred (for retry routing)   |
 | `media_info_json`     | TEXT      | Raw media info JSON blob                          |
 | `ripped_file`         | TEXT      | Path to ripped MKV file                           |
 | `encoded_file`        | TEXT      | Path to encoded file                              |
@@ -90,7 +91,6 @@ CREATE INDEX IF NOT EXISTS idx_queue_fingerprint ON queue_items(disc_fingerprint
 | `rip_spec_data`       | TEXT      | JSON-encoded RipSpec envelope                     |
 | `disc_fingerprint`    | TEXT      | SHA-256 hash of disc filesystem metadata          |
 | `metadata_json`       | TEXT      | JSON-encoded TMDB metadata                        |
-| `last_heartbeat`      | TIMESTAMP | Last heartbeat from processing goroutine          |
 | `needs_review`        | INTEGER   | 1 if item requires manual review                  |
 | `review_reason`       | TEXT      | Why review is needed (semicolon-separated)        |
 | `item_log_path`       | TEXT      | Path to per-item log file                         |
@@ -98,133 +98,104 @@ CREATE INDEX IF NOT EXISTS idx_queue_fingerprint ON queue_items(disc_fingerprint
 | `active_episode_key`  | TEXT      | Currently processing episode (e.g., s01e03)       |
 | `progress_bytes_copied`| INTEGER  | Bytes copied during organizing                    |
 | `progress_total_bytes` | INTEGER  | Total bytes to copy during organizing             |
-| `drapto_preset_profile`| TEXT     | Drapto encoding preset profile (health check only)|
+| `drapto_preset_profile`| TEXT     | Drapto encoding preset profile                    |
+| `in_progress`          | INTEGER  | 1 if item is actively being processed             |
 
-Note: `drapto_preset_profile` is listed in the health check expected columns
-(`CheckHealth()`) but is not currently in the schema DDL. A reimplementation
-should include it in the CREATE TABLE to pass health checks.
+## 4. Stage Model (10 stages + in_progress flag)
 
-## 4. Status State Machine (16 statuses)
+Items track their position in the pipeline with a `stage` field (TEXT) and an
+`in_progress` flag (INTEGER, 0 or 1). This replaces the previous 16-status
+model with a simpler representation: the stage says *where* the item is, and
+the flag says *whether work is actively happening*.
+
+**Stage values** (10):
 
 ```
-                              +----------+
-                              | pending  |
-                              +----+-----+
-                                   |
-                              +----v---------+
-                              | identifying  |
-                              +----+---------+
-                                   |
-                              +----v--------+
-                              | identified  |
-                              +----+--------+
-                                   |
-                              +----v-----+
-                              | ripping  |
-                              +----+-----+
-                                   |
-                              +----v----+
-                              | ripped  |----------------------------------+
-                              +----+----+                                  |
-                                   |                                       |
-                         +---------v--------------+                        |
-                         | episode_identifying    | (TV only)              |
-                         +---------+--------------+                        |
-                                   |                                       |
-                         +---------v--------------+                        |
-                         | episode_identified     |                        |
-                         +---------+--------------+                        |
-                                   |                                       |
-                              +----v------+                                |
-                              | encoding  |<-------------------------------+
-                              +----+------+  (movie: ripped -> encoding)
-                                   |
-                              +----v-----+
-                              | encoded  |
-                              +----+-----+
-                                   |
-                         +---------v-----------+
-                         | audio_analyzing     |
-                         +---------+-----------+
-                                   |
-                         +---------v----------+
-                         | audio_analyzed     |
-                         +---------+----------+
-                                   |
-                              +----v--------+
-                              | subtitling  |
-                              +----+--------+
-                                   |
-                              +----v-------+
-                              | subtitled  |
-                              +----+-------+
-                                   |
-                              +----v--------+
-                              | organizing  |
-                              +----+--------+
-                                   |
-                              +----v-------+
-                              | completed  |
-                              +------------+
+pending -> identification -> ripping -> episode_identification (TV only)
+   -> encoding -> audio_analysis -> subtitling -> organizing -> completed
 
-  Any status --> failed (on error)
+Any stage --> failed (on error)
 ```
 
-**Processing lane assignment:**
-- **Foreground**: pending, identifying, identified, ripping
-- **Background**: ripped, audio_analyzing, audio_analyzed, episode_identifying,
-  episode_identified, encoding, encoded, subtitling, subtitled, organizing,
-  completed
-- **Failed**: foreground if no item log path, background otherwise
+| Stage                  | Purpose                                           |
+|------------------------|---------------------------------------------------|
+| `pending`              | Queued, awaiting identification                   |
+| `identification`       | MakeMKV scan + TMDB lookup                        |
+| `ripping`              | MakeMKV rip to staging                            |
+| `episode_identification`| WhisperX + OpenSubtitles episode matching (TV)    |
+| `encoding`             | Drapto AV1 encode                                 |
+| `audio_analysis`       | Audio refinement + commentary detection            |
+| `subtitling`           | WhisperX transcription + forced subs               |
+| `organizing`           | Library copy + Jellyfin refresh                    |
+| `completed`            | Terminal: successfully organized                   |
+| `failed`               | Terminal: error occurred                           |
 
-### Processing Lanes
+**in_progress semantics:**
+- `0`: Item is ready for this stage (waiting to be picked up)
+- `1`: Item is actively being processed by a goroutine
 
-`ProcessingLane` type determines which workflow lane processes an item:
+When a stage completes, the item advances to the next stage with
+`in_progress = 0`. The next pipeline iteration picks it up and sets
+`in_progress = 1` before executing.
 
-| Lane | Constant | Statuses |
-|------|----------|----------|
-| Foreground | `LaneForeground` | pending, identifying, identified, ripping |
-| Background | `LaneBackground` | ripped through completed (all intermediate statuses) |
+**Movie skip**: Movies skip `episode_identification` -- after ripping, stage
+advances directly to `encoding`.
 
-`LaneForItem(item)` assigns lane based on status and metadata:
-- Foreground: statuses up through ripping, plus failed items without an item log path
-- Background: all later statuses (ripped onward including completed), plus failed items with an item log path
-- Nil items default to foreground
+**Stage skip for optional stages**: When `episode_identification`,
+`audio_analysis`, or `subtitling` handlers are absent, stage advancement
+skips directly to the next configured stage.
 
-## 5. Rollback Transitions
+### Stage Priority
 
-When an item is found stale (heartbeat timeout), it rolls back to the previous
-ready state:
+The pipeline poll loop fetches items ordered by stage priority (earlier stages
+first) to free the disc drive as quickly as possible:
 
-| From Status          | Rolls Back To          |
-|----------------------|------------------------|
-| identifying          | pending                |
-| ripping              | identified             |
-| episode_identifying  | ripped                 |
-| encoding             | episode_identified     |
-| audio_analyzing      | encoded                |
-| subtitling           | audio_analyzed         |
-| organizing           | audio_analyzed         |
+| Priority | Stages | Disc Semaphore |
+|----------|--------|----------------|
+| 1 (highest) | pending, identification, ripping | Required |
+| 2 | episode_identification through organizing | Not required |
 
-## 6. Heartbeat Monitoring
+Within the same priority, items are ordered by creation time (FIFO).
 
-- Each processing item gets a background goroutine that updates `last_heartbeat`
-  every `heartbeat_interval` seconds.
-- The reclaimer checks for items with `last_heartbeat` older than
-  `heartbeat_timeout` seconds and transitions them back per the rollback table.
-- Progress is sampled and logged at DEBUG level (suppressed when unchanged).
+## 5. Startup Recovery (replaces heartbeat monitoring)
 
-## 7. Shutdown Behavior
+The daemon is a single binary -- if the process dies, all goroutines die with
+it. There is no distributed coordination requiring heartbeats.
 
-On daemon shutdown, all items in processing statuses (identifying, ripping,
-encoding, etc.) are marked as `failed` with error message "Daemon stopped" and
-`failed_at_status` capturing where they were. This ensures explicit `retry` is
-needed on restart rather than silent auto-resume.
+**On startup**, the daemon scans for stale in-progress items:
+- Any item with `in_progress = 1` was interrupted by a crash or unclean
+  shutdown.
+- These items are reset to `in_progress = 0` (retaining their current stage)
+  so they are picked up again by the pipeline poll loop.
+- Logged at INFO with `decision_type: "startup_recovery"` for each reset item.
+
+**On clean shutdown**, `ResetInProgressOnShutdown()` clears `in_progress` on
+all active items. Items retain their stage so they resume from the correct
+point on next startup.
+
+**Context cancellation**: Each stage execution receives a `context.Context`
+derived from the daemon's root context. When the daemon shuts down, contexts
+are cancelled, and stage handlers observe cancellation via `ctx.Done()`.
+Cleanup logic runs in the handler's deferred functions, not via heartbeat
+rollback.
+
+This eliminates the heartbeat goroutine, heartbeat interval/timeout config,
+and stale item reclamation polling.
+
+## 6. Shutdown Behavior
+
+On daemon shutdown:
+1. Root context is cancelled, which cancels all in-flight stage contexts.
+2. In-flight stage goroutines finish (handlers observe cancellation).
+3. `ResetInProgressOnShutdown()` clears `in_progress` on all active items
+   with a **5-second timeout context**. Items retain their current stage.
+4. On next startup, these items are picked up and re-executed from the
+   beginning of their current stage.
 
 ## 8. Review vs Failed Semantics
 
 - **Failed**: Operation error. Item can be retried with `queue retry`. The
-  `failed_at_status` field records which stage failed for proper retry routing.
+  `failed_at_stage` field records which stage failed for proper retry routing.
 - **Review**: Content ambiguity (unidentified media, low-confidence episode
   matching, missing episodes). Item is routed to review directory. The
   `needs_review` flag and `review_reason` field describe why.
@@ -241,9 +212,8 @@ needed on restart rather than silent auto-resume.
 | `NewDisc(title, fingerprint)` | Insert new pending item (fingerprint required) |
 | `GetByID(id)` | Fetch single item by primary key |
 | `FindByFingerprint(fp)` | Find first item matching a disc fingerprint |
-| `Update(item)` | Full item update (22 mutable columns); applies stop-review override |
+| `Update(item)` | Full item update (mutable columns); applies stop-review override |
 | `UpdateProgress(item)` | Progress-only update (stage, percent, message, bytes, encoding, episode key) |
-| `UpdateHeartbeat(id)` | Touch heartbeat timestamp for liveness |
 | `Remove(id)` | Delete single item |
 | `Clear()` | Delete all items |
 | `ClearCompleted()` | Delete only completed items |
@@ -257,12 +227,12 @@ needed on restart rather than silent auto-resume.
 | `ItemsByStatus(status)` | Items matching a single status, ordered by creation time |
 | `NextForStatuses(statuses...)` | Oldest item matching any status (FIFO queue fetch) |
 | `ActiveFingerprints()` | Set of all non-empty fingerprints in queue (for orphan cleanup) |
-| `HasDiscDependentItem()` | True if any item is in identifying or ripping status |
+| `HasDiscDependentItem()` | True if any item is in identification or ripping stage with in_progress=1 |
 | `Stats()` | Count of items grouped by status |
 | `CheckHealth()` | Full diagnostic: existence, table check, column presence, integrity, total count |
 
 **Stop-review override**: When updating an item, `applyStopReviewOverride()`
-preserves user-initiated stop state. If the stored item has `status=failed` and
+preserves user-initiated stop state. If the stored item has `stage=failed` and
 `review_reason="Stop requested by user"`, the update is forced to maintain that
 state regardless of what the caller sets.
 
@@ -270,10 +240,9 @@ state regardless of what the caller sets.
 
 | Operation | Purpose |
 |-----------|---------|
-| `ResetStuckProcessing()` | Reset all processing items to stage start (no age check) |
-| `ReclaimStaleProcessing(cutoff, statuses...)` | Time-based reclamation with optional status filter |
-| `RetryFailed(ids...)` | Route failed items to retry point using `failed_at_status`; falls back to pending |
-| `FailActiveOnShutdown()` | Mark all non-terminal items as failed with "Daemon stopped" |
+| `ResetInProgress()` | Clear `in_progress` on all items (startup recovery) |
+| `ResetInProgressOnShutdown()` | Clear `in_progress` on all items (clean shutdown) |
+| `RetryFailed(ids...)` | Route failed items to retry point using `failed_at_stage`; falls back to pending |
 | `StopItems(ids...)` | User-initiated stop: mark as failed with review flag |
 
 ## 10. Metadata Helpers

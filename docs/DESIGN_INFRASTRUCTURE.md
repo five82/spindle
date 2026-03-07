@@ -40,7 +40,7 @@ The daemon overrides this to 4096 (`daemonrun/run.go`).
 
 ### 1.3 Per-Item Logs
 
-Background lane items get dedicated log files:
+Items past the identification stage get dedicated log files:
 - Path: `{log_dir}/items/{item_id}/{session_id}.log`
 - Contains all log output from that item's processing stages.
 - Retention: `retention_days` (default 60 days).
@@ -56,7 +56,6 @@ Background lane items get dedicated log files:
   "component": "encoder",
   "stage": "encoding",
   "item_id": 42,
-  "lane": "background",
   "correlation_id": "req-abc123",
   "fields": {"event_type": "stage_start", "decision_type": "..."},
   "details": [{"label": "Input", "value": "/path/to/file.mkv"}]
@@ -117,8 +116,8 @@ The log streaming API supports 3 additional filter types beyond those in
 API_INTERFACES.md Section 3.4:
 - `alert`: Filter by alert flag value.
 - `decision_type`: Filter by decision type attribute.
-- `search`: Substring search across message, component, stage, lane, correlation
-  ID, fields, and details.
+- `search`: Substring search across message, component, stage, correlation ID,
+  fields, and details.
 
 ### 1.11 Retention
 
@@ -433,47 +432,147 @@ command.
 
 ---
 
-## 5. Log Access Layer
+## 5. Error Taxonomy
 
-### 5.1 File Tailing (`logs`)
+All stage errors are classified into three categories that determine the
+workflow manager's response. Stage handlers return typed errors via the
+`services` package.
+
+### 5.1 Error Categories
+
+| Category | Error Type | Behavior | Max Retries | Examples |
+|----------|-----------|----------|-------------|----------|
+| **Transient** | `services.ErrTransient` | Retry with exponential backoff (1s, 2s, 4s) | 3 | Network timeouts, rate limits, temporary disk full, `SQLITE_BUSY` beyond DB retry |
+| **Fatal** | `services.ErrFatal` | Fail the item immediately, record `failed_at_stage` | 0 | MakeMKV read error, ffmpeg non-zero exit, validation failure, missing required file |
+| **Degraded** | `services.ErrDegraded` | Log warning, continue with reduced functionality | N/A | Stable-TS failure (fall back to raw SRT), commentary detection failure, Jellyfin refresh failure, metadata write failure |
+
+### 5.2 Error Classification by Stage
+
+**Identification**:
+- TMDB network timeout -> Transient
+- MakeMKV scan failure -> Fatal
+- bd_info unavailable -> Degraded (proceed without enhanced metadata)
+- TMDB returns no results -> Degraded (use fallback metadata, flag for review)
+
+**Ripping**:
+- MakeMKV `ErrTimeout` -> Fatal (with hint "consider increasing rip_timeout")
+- MakeMKV non-zero exit -> Fatal
+- Drive not ready after 60s -> Fatal
+- Rip cache write failure -> Degraded (rip succeeded, cache is optional)
+
+**Episode Identification**:
+- WhisperX transcription failure -> Fatal (cannot proceed without transcripts)
+- OpenSubtitles rate limit -> Transient
+- OpenSubtitles network error -> Transient
+- No reference matches found -> Degraded (keep placeholder keys, flag for review)
+
+**Encoding**:
+- Drapto non-zero exit (single episode) -> Fatal for that episode, continue others
+- All episodes fail -> Fatal for the item
+- Drapto validation failure (when enforced) -> Fatal
+- Drapto validation failure (when not enforced) -> Degraded (log only)
+
+**Audio Analysis**:
+- FFprobe failure -> Fatal
+- Commentary detection failure -> Degraded (continue without commentary labels)
+- Stereo downmix computation error -> Degraded (skip candidate, continue)
+
+**Subtitles**:
+- WhisperX transcription produces 0 cues -> Transient (may be a temporary issue)
+- Stable-TS formatting failure -> Degraded (fall back to raw WhisperX SRT)
+- OpenSubtitles download failure -> Degraded (skip forced subs)
+- SRT validation issues -> Degraded (flag for review, don't fail)
+
+**Organization**:
+- Target file copy failure -> Fatal
+- Library directory unavailable -> Fatal (route to review)
+- Jellyfin refresh failure -> Degraded (log warning)
+- Subtitle sidecar move failure -> Degraded (log warning)
+
+### 5.3 Stable-TS Error Prefix Mapping
+
+All Stable-TS errors are **Degraded** (fallback to raw WhisperX SRT):
+
+| Error Prefix | Meaning |
+|-------------|---------|
+| `import_error:` | stable-whisper library not installed |
+| `sanitize_error:` | WhisperX JSON format incompatible |
+| `build_result_error:` | Could not construct WhisperResult |
+| `regroup_error:` | Phrase regrouping failed |
+| `srt_render_error:` | SRT output generation failed |
+
+### 5.4 Retry Behavior
+
+When a transient error triggers retry:
+1. Stage execution is attempted up to 3 times total (1 initial + 2 retries).
+2. Backoff: 1s after first failure, 2s after second, 4s after third.
+3. If all retries exhausted: error escalates to Fatal (item fails).
+4. Retry count is logged at INFO with `decision_type: "retry"`.
+5. Retries happen within the same `processItem()` call -- the item stays
+   in `in_progress = 1` during retries.
+
+### 5.5 Error Detail Extraction
+
+`services.Details(err)` extracts structured information from errors:
+
+```go
+type ErrorDetails struct {
+    Kind      ErrorKind   // transient, fatal, degraded
+    Stage     string      // stage name where error occurred
+    Operation string      // specific operation (e.g., "ffprobe", "tmdb_search")
+    Message   string      // human-readable error message
+    Code      int         // exit code for external tools (0 if N/A)
+    Hint      string      // actionable suggestion for the user
+    Cause     error       // underlying error
+}
+```
+
+ErrorKind is inferred from the error type chain (`errors.As`). Untyped errors
+default to Fatal.
+
+---
+
+## 6. Log Access Layer
+
+### 6.1 File Tailing (`logs`)
 
 - `Tail(ctx, path, opts)`: Read lines from a log file.
   - `TailOptions`: Offset (byte position), Limit (max lines), Follow (wait for
     new data), WaitDuration.
   - `TailResult`: Lines, Offset (next byte position for continuation).
 
-### 5.2 HTTP Log Stream Client (`logs`)
+### 6.2 HTTP Log Stream Client (`logs`)
 
-- `StreamClient`: HTTP client for the `/api/logs` endpoint.
-- `NewStreamClient(bind)`: Create client targeting `http://{bind}`.
+- `StreamClient`: HTTP client for the `/api/logs` endpoint over Unix socket.
+- `NewStreamClient(socketPath)`: Create client targeting the daemon socket.
 - `StreamClient.Fetch(ctx, query)`: Fetch structured log events.
 - `StreamQuery`: 12 filter parameters -- Since, Limit, Follow, Tail,
-  Component, Lane, CorrelationID, ItemID, Level, Alert, DecisionType, Search.
+  Component, CorrelationID, ItemID, Level, Alert, DecisionType, Search.
 
 **Error handling:**
 
 - `ErrAPIUnavailable`: Sentinel error when API server is unreachable.
 - `IsAPIUnavailable(err)`: Classification helper.
 
-### 5.3 Log Stream Abstraction (`logstream`)
+### 6.3 Log Stream Abstraction (`logstream`)
 
-`Stream()` provides dual-mode log access with automatic fallback:
+`Stream()` provides log access with automatic fallback:
 
-1. Try HTTP API via `StreamClient.Fetch()`.
-2. If API unavailable and filters don't require API: fall back to IPC
-   `LogTail` (raw line-based tailing).
-3. If filters require API features (structured queries, lane filtering, etc.):
+1. Try HTTP API via `StreamClient.Fetch()` over Unix socket.
+2. If API unavailable and filters don't require structured queries: fall back
+   to direct file tailing (raw line output).
+3. If filters require API features (structured queries, item filtering, etc.):
    return `ErrFiltersRequireAPI`.
 
 ---
 
-## 6. Audit Gathering
+## 7. Audit Gathering
 
 The `auditgather` package provides comprehensive queue item analysis for
 debugging. Used by the CLI `spindle audit-gather` command and the `/itemaudit`
 skill.
 
-### 6.1 Gather Pipeline
+### 7.1 Gather Pipeline
 
 `Gather(ctx, cfg, item)` collects all artifacts for a queue item:
 
@@ -492,29 +591,29 @@ skill.
 
 **Stage gating** (`computeStageGate()`):
 
-Each pipeline status maps to a numeric ordinal. `reachedAtLeast(item, target)`
+Each pipeline stage maps to a numeric ordinal. `reachedAtLeast(item, target)`
 checks whether the item's effective status >= the target ordinal. For failed
-items, `FailedAtStatus` is used instead of `Status` (so a failure during
+items, `FailedAtStage` is used instead of `Stage` (so a failure during
 encoding still enables the rip cache phase).
 
 | Phase Flag | Enabled When |
 |------------|-------------|
 | `PhaseLogs` | Always |
-| `PhaseRipCache` | Reached `ripped` |
-| `PhaseEpisodeID` | TV + reached `episode_identified` |
-| `PhaseEncoded` | Reached `encoded` |
-| `PhaseCrop` | Reached `encoded` |
-| `PhaseEdition` | Movie + reached `identified` |
-| `PhaseSubtitles` | Reached `subtitled` |
-| `PhaseCommentary` | Reached `audio_analyzed` |
-| `PhaseExternalValidation` | Reached `encoded` AND disc source != `dvd` |
+| `PhaseRipCache` | Past `ripping` stage |
+| `PhaseEpisodeID` | TV + past `episode_identification` stage |
+| `PhaseEncoded` | Past `encoding` stage |
+| `PhaseCrop` | Past `encoding` stage |
+| `PhaseEdition` | Movie + past `identification` stage |
+| `PhaseSubtitles` | Past `subtitling` stage |
+| `PhaseCommentary` | Past `audio_analysis` stage |
+| `PhaseExternalValidation` | Past `encoding` stage AND disc source != `dvd` |
 
 Disc source (`DiscSource`) is initially `"unknown"` and refined from log
 analysis after Phase 3. Values: `4k_bluray`, `bluray`, `dvd`, `unknown`.
 Inferred by scanning raw JSON log lines for `is_blu_ray`, UHD indicators,
 or `VIDEO_TS` patterns.
 
-### 6.2 Analysis
+### 7.2 Analysis
 
 Pre-computed summaries derived from gathered data:
 
@@ -530,7 +629,7 @@ Pre-computed summaries derived from gathered data:
 - **Anomalies**: Red flags detected automatically (severity + category +
   message).
 
-### 6.3 Key Types
+### 7.3 Key Types
 
 #### Report (top-level)
 
@@ -553,8 +652,8 @@ Pre-computed summaries derived from gathered data:
 |-------|------|
 | `id` | int64 |
 | `disc_title` | string |
-| `status` | string |
-| `failed_at_status` | string? |
+| `stage` | string |
+| `failed_at_stage` | string? |
 | `error_message` | string? |
 | `needs_review` | bool |
 | `review_reason` | string? |
@@ -573,19 +672,19 @@ Pre-computed summaries derived from gathered data:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `furthest_stage` | string | Highest pipeline status reached |
+| `furthest_stage` | string | Highest pipeline stage reached |
 | `media_type` | string | movie or tv |
 | `disc_source` | string | 4k_bluray, bluray, dvd, unknown |
 | `edition` | string? | Detected edition label |
 | `phase_logs` | bool | Always true |
-| `phase_rip_cache` | bool | Reached ripped |
-| `phase_episode_id` | bool | TV + reached episode_identified |
-| `phase_encoded` | bool | Reached encoded |
-| `phase_crop` | bool | Reached encoded |
-| `phase_edition` | bool | Movie + reached identified |
-| `phase_subtitles` | bool | Reached subtitled |
-| `phase_commentary` | bool | Reached audio_analyzed |
-| `phase_external_validation` | bool | Reached encoded AND not DVD |
+| `phase_rip_cache` | bool | Past ripping stage |
+| `phase_episode_id` | bool | TV + past episode_identification stage |
+| `phase_encoded` | bool | Past encoding stage |
+| `phase_crop` | bool | Past encoding stage |
+| `phase_edition` | bool | Movie + past identification stage |
+| `phase_subtitles` | bool | Past subtitling stage |
+| `phase_commentary` | bool | Past audio_analysis stage |
+| `phase_external_validation` | bool | Past encoding stage AND not DVD |
 
 #### LogAnalysis
 
@@ -675,9 +774,9 @@ Pre-computed summaries derived from gathered data:
 
 ---
 
-## 7. Configuration Validation
+## 8. Configuration Validation
 
-### 7.1 Loading and Normalization
+### 8.1 Loading and Normalization
 
 Config loading (see DESIGN_OVERVIEW.md Section 5.2) is followed by normalization
 and validation:
@@ -688,7 +787,7 @@ and validation:
 2. **Validate**: Check required fields, value ranges, path accessibility,
    and cross-field consistency.
 
-### 7.2 Validation Rules
+### 8.2 Validation Rules
 
 Key validation constraints enforced by `validate.go`:
 
@@ -698,14 +797,12 @@ Key validation constraints enforced by `validate.go`:
 - `makemkv.rip_timeout`: Must be > 0.
 - `makemkv.min_title_length`: Must be >= 0.
 - `workflow.queue_poll_interval`: Must be > 0.
-- `workflow.heartbeat_interval`: Must be > 0.
-- `workflow.heartbeat_timeout`: Must be > heartbeat_interval.
 - `jellyfin.url` and `jellyfin.api_key`: Required when `jellyfin.enabled`.
 - `subtitles.whisperx_hf_token`: Required when subtitles enabled with
   pyannote VAD.
 - `opensubtitles.api_key`: Required when OpenSubtitles enabled.
 
-### 7.3 Config Commands
+### 8.3 Config Commands
 
 CLI config commands don't require a running daemon:
 
@@ -714,7 +811,7 @@ CLI config commands don't require a running daemon:
 - `spindle config validate`: Load, normalize, and validate config. Reports
   all validation errors.
 
-### 7.4 Commands Without Config
+### 8.4 Commands Without Config
 
 Some CLI commands are annotated with `skipConfigLoad` and work without any
 config file. These include: `config init`, `queue health`, and help commands.

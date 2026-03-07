@@ -6,17 +6,22 @@ The daemon owns disc detection and the automated pipeline. Queue commands work w
 
 ## Lifecycle at a Glance
 
-Every item moves through the queue in order. The statuses you will see are:
+Every item moves through the queue in order. Each item has a **stage** and an
+**in_progress** flag. The stages you will see are:
 
 - `PENDING` - disc queued, awaiting identification
-- `IDENTIFYING` -> `IDENTIFIED` - MakeMKV scan + TMDB lookup completed
-- `RIPPING` -> `RIPPED` - video copied to staging; you’ll get a notification so the disc can be ejected manually
-- `EPISODE_IDENTIFYING` -> `EPISODE_IDENTIFIED` *(optional)* - for TV discs with OpenSubtitles enabled, WhisperX + OpenSubtitles correlate ripped files to definitive episode numbers
-- `ENCODING` -> `ENCODED` - Drapto transcodes the rip in the background
-- `AUDIO_ANALYZING` -> `AUDIO_ANALYZED` *(optional)* - detects commentary tracks for exclusion (requires `commentary.enabled = true`)
-- `SUBTITLING` -> `SUBTITLED` *(optional)* - WhisperX transcription generates subtitle sidecars; forced subtitles optionally fetched from OpenSubtitles
-- `ORGANIZING` -> `COMPLETED` - files moved into your library; Jellyfin refresh triggered when configured
+- `IDENTIFICATION` - MakeMKV scan + TMDB lookup
+- `RIPPING` - video copied to staging; you’ll get a notification so the disc can be ejected manually
+- `EPISODE_IDENTIFICATION` *(TV only)* - WhisperX + OpenSubtitles correlate ripped files to definitive episode numbers
+- `ENCODING` - Drapto transcodes the rip in the background
+- `AUDIO_ANALYSIS` *(optional)* - detects commentary tracks for exclusion (requires `commentary.enabled = true`)
+- `SUBTITLING` *(optional)* - WhisperX transcription generates subtitle sidecars; forced subtitles optionally fetched from OpenSubtitles
+- `ORGANIZING` - files moved into your library; Jellyfin refresh triggered when configured
+- `COMPLETED` - all done
 - `FAILED` - an error stopped progress; fix the root cause and retry
+
+The `in_progress` flag indicates whether a stage is actively running. When a
+stage finishes, the item advances to the next stage with `in_progress` cleared.
 
 Items may also have a `NeedsReview` flag set, which routes output to `review_dir` without stopping the workflow.
 
@@ -24,21 +29,19 @@ Use `spindle queue list` to inspect items and `spindle queue health` for lifecyc
 
 ## How the Workflow Runs
 
-Spindle runs two independent lanes:
-
-- **Foreground**: identification and ripping.
-- **Background**: episode identification, encoding, audio analysis (commentary detection), subtitles, and organizing.
-
-This lets you rip disc B while disc A is still encoding or organizing.
+Spindle processes items through a single pipeline. Multiple items can be in
+flight concurrently -- for example, disc A can be encoding while disc B is
+being identified and ripped. The optical drive is guarded by a semaphore so
+only one disc operation (identification or ripping) runs at a time.
 
 ## Stage 1: Disc Detection & Queueing (PENDING)
 
 1. The daemon polls your optical drive (`optical_drive`, default `/dev/sr0`).
 2. When a disc is detected, Spindle fingerprints it and looks for existing queue items.
-3. Existing items are handled based on status:
+3. Existing items are handled based on their stage:
    - **In workflow or completed**: no new work is queued.
    - **Failed or review**: the item is reset to `PENDING` so it can be reprocessed.
-4. New discs are inserted into the queue with status `PENDING`.
+4. New discs are inserted into the queue at stage `PENDING`.
 
 Disc-detected notifications are emitted when identification begins.
 
@@ -53,7 +56,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
    - Writes a rip specification (`rip_spec`) that maps MakeMKV titles to the intended output.
    - Updates `disc_title` to a canonical name (movie: `Title (Year)`, TV: `Show Season XX (Year)` when available).
    - Sends a notification when a year is known.
-4. If no confident match is found (or TMDB lookup fails), the item is marked `NeedsReview` with a reason. The status remains `IDENTIFIED` so downstream stages can still run, and the organizer will route output to `review_dir`.
+4. If no confident match is found (or TMDB lookup fails), the item is marked `NeedsReview` with a reason. The item advances to the next stage so downstream stages can still run, and the organizer will route output to `review_dir`.
 5. Duplicate fingerprints are treated as immediate failure: the item is placed in `FAILED` with `NeedsReview = true` and the workflow stops.
 
 Progress messages in `spindle show --follow` describe the identification steps and any review reasons.
@@ -110,8 +113,44 @@ When `subtitles_enabled = true`, Spindle generates subtitles from the actual aud
 
 ## Review vs Failed
 
-- **`FAILED` status**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, and manual stop requests (`spindle queue stop <id>`). Items stopped by user have `ReviewReason = "Stop requested by user"`. Fix the root cause, then use `spindle queue retry <id>` to requeue.
+- **`FAILED` stage**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, and manual stop requests (`spindle queue stop <id>`). Items stopped by user have `ReviewReason = "Stop requested by user"`. Fix the root cause, then use `spindle queue retry <id>` to requeue.
 - **`NeedsReview` flag**: Workflow continues but final artifacts are routed to `review_dir` instead of the library. The item completes with progress stage "Manual review" so the pipeline stays unblocked. This is used for low-confidence matches, missing metadata, or other issues that need manual attention but shouldn't block processing.
+
+## Recovery Procedures
+
+### Retrying failed items
+
+1. Check the error: `spindle queue show <id>` shows the error message and which stage failed.
+2. Fix the root cause (e.g., disc is readable, network is available, disk space).
+3. Retry: `spindle queue retry <id>`. The item restarts from the failed stage, not from the beginning.
+4. Retry all failed items at once: `spindle queue retry` (no ID).
+
+### Retrying a single failed episode (TV)
+
+If one episode in a batch failed but others succeeded:
+1. `spindle queue retry <id> --episode s01e05` clears only that episode's failed asset.
+2. The item is reprocessed for that episode only; already-completed episodes are skipped.
+
+### Items routed to review
+
+Files in `review_dir` need manual attention:
+1. Check the review reason: `spindle queue show <id>` (look for `ReviewReason`).
+2. Common reasons:
+   - **Low-confidence TMDB match**: The disc title didn't match well. Move the file to the correct library folder manually, or update disc ID cache and retry.
+   - **Unresolved episode numbers**: Episode identification couldn't map all episodes. Check the file names and move to the correct library folder.
+   - **SRT validation issues**: Subtitles may have quality problems. Review the SRT file and fix or regenerate with `spindle gensubtitle`.
+3. After manually organizing files, clear the completed item: `spindle queue clear <id>`.
+
+### Stuck items
+
+If items appear stuck (in-progress but not advancing):
+1. Check if the daemon is running: `spindle status`.
+2. If the daemon crashed, restart it: `spindle start`. Stale in-progress items are automatically recovered on startup.
+3. If the daemon is running but items are stuck: `spindle queue reset-stuck` clears the in-progress flag so items are re-picked up.
+
+### Stopping an item
+
+`spindle queue stop <id>` marks the item as failed with a user-stop reason. The item will not be automatically reprocessed even if the same disc is re-inserted. Use `spindle queue retry <id>` to un-stop it.
 
 ## Monitoring & Control Tips
 

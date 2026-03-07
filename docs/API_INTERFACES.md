@@ -1,13 +1,8 @@
 # API Reference: Interfaces
 
-CLI commands, IPC protocol, and HTTP API for the Spindle system.
+CLI commands and HTTP API for the Spindle system.
 
 See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
-
-> **Rewrite improvement note**: Unify IPC + HTTP into a single HTTP API served
-> over a Unix socket (with optional TCP bind). This eliminates the parallel
-> JSON-RPC layer and reduces the interface surface area. The CLI would use the
-> same HTTP endpoints as external consumers.
 
 ---
 
@@ -21,7 +16,7 @@ Single binary: `spindle`
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--socket` | | string | `$XDG_RUNTIME_DIR/spindle.sock` | Path to the daemon Unix socket |
+| `--socket` | | string | `$XDG_RUNTIME_DIR/spindle.sock` | Path to the daemon HTTP API Unix socket |
 | `--config` | `-c` | string | `$XDG_CONFIG_HOME/spindle/config.toml` | Configuration file path |
 | `--log-level` | | string | (from config) | Log level: debug, info, warn, error |
 | `--verbose` | `-v` | bool | false | Shorthand for `--log-level=debug` |
@@ -89,7 +84,7 @@ List queue items.
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--status` | `-s` | string[] | (all) | Filter by queue status (repeatable) |
+| `--stage` | `-s` | string[] | (all) | Filter by queue stage (repeatable) |
 
 Table columns: ID, Title, Status, Created, Fingerprint.
 
@@ -161,7 +156,6 @@ Display daemon logs.
 | `--follow` | `-f` | bool | false | Follow log output |
 | `--lines` | `-n` | int | 10 | Number of lines to show (0 for all) |
 | `--component` | | string | | Filter by component label |
-| `--lane` | | string | | Filter by workflow lane (foreground/background) |
 | `--request` | | string | | Filter by request/correlation ID |
 | `--item` | `-i` | int64 | 0 | Filter by queue item ID |
 | `--level` | | string | | Minimum log level (debug, info, warn, error) |
@@ -169,8 +163,8 @@ Display daemon logs.
 | `--decision-type` | | string | | Filter by decision type |
 | `--search` | | string | | Search logs by substring |
 
-Transport priority: HTTP API (preferred) -> IPC fallback.
-Filters require API access; IPC only supports raw line tailing.
+Requires daemon HTTP API for full filtering. Falls back to direct file
+tailing when API is unavailable (no structured filtering in fallback mode).
 
 ### 1.6 Workflow Commands
 
@@ -204,7 +198,7 @@ Arguments: `<encoded-file>` -- path to the encoded media file (required).
 
 Send a test notification via the configured ntfy topic.
 
-Requires daemon connection.
+Requires running daemon.
 
 ### 1.7 Disc Commands
 
@@ -377,241 +371,12 @@ Skips config loading (loads its own config internally).
 
 ---
 
-## 2. IPC Protocol
+## 2. HTTP API
 
-### 2.1 Transport
+### 2.1 Server Configuration
 
-- Unix domain socket (path: `$XDG_RUNTIME_DIR/spindle.sock` or `--socket`)
-- Protocol: JSON-RPC 1.0 via `net/rpc/jsonrpc`
-- Service name: `Spindle`
-- Client dial timeout: 2 seconds
-
-### 2.2 Method Catalog
-
-All methods use the form `Spindle.<Method>`.
-
-#### Spindle.Start
-
-Start daemon workflow processing.
-
-```
-Request:  {} (empty)
-Response: { "started": bool, "message": string }
-```
-
-#### Spindle.Stop
-
-Stop daemon workflow processing.
-
-```
-Request:  {} (empty)
-Response: { "stopped": bool }
-```
-
-#### Spindle.Status
-
-Retrieve combined daemon/workflow status.
-
-```
-Request:  {} (empty)
-Response: {
-  "running":              bool,
-  "disc_paused":          bool,
-  "netlink_monitoring":   bool,
-  "queue_stats":          map[string]int,
-  "system_checks":        [{ "label": string, "severity": string, "detail": string }],
-  "library_paths":        [{ "label": string, "severity": string, "detail": string }],
-  "dependency_summary":   { "total": int, "available": int, "missingRequired": int, "missingOptional": int, "severity": string, "detail": string },
-  "last_error":           string,
-  "last_item":            QueueItem | null,
-  "lock_path":            string,
-  "queue_db_path":        string,
-  "stage_health":         [{ "name": string, "ready": bool, "detail": string }],
-  "dependencies":         [{ "name": string, "command": string, "description": string, "optional": bool, "available": bool, "detail": string }],
-  "pid":                  int
-}
-```
-
-#### Spindle.QueueList
-
-List queue items, optionally filtered by status.
-
-```
-Request:  { "statuses": []string }
-Response: { "items": []QueueItem }
-```
-
-#### Spindle.QueueDescribe
-
-Get details for a single queue item.
-
-```
-Request:  { "id": int64 }
-Response: { "found": bool, "item": QueueItem }
-```
-
-#### Spindle.QueueClear
-
-Remove all items from the queue.
-
-```
-Request:  {} (empty)
-Response: { "removed": int64 }
-```
-
-#### Spindle.QueueClearCompleted
-
-Remove only completed items.
-
-```
-Request:  {} (empty)
-Response: { "removed": int64 }
-```
-
-#### Spindle.QueueClearFailed
-
-Remove only failed items.
-
-```
-Request:  {} (empty)
-Response: { "removed": int64 }
-```
-
-#### Spindle.QueueReset
-
-Reset in-flight (stuck) items to pending.
-
-```
-Request:  {} (empty)
-Response: { "updated": int64 }
-```
-
-#### Spindle.QueueRetry
-
-Retry failed items. Empty IDs means all failed items.
-
-```
-Request:  { "ids": []int64 }
-Response: { "updated": int64 }
-```
-
-#### Spindle.QueueRetryEpisode
-
-Retry a single failed episode within a queue item.
-
-```
-Request:  { "id": int64, "episode_key": string }
-Response: { "result": RetryItemResult }
-```
-
-`RetryItemResult` outcome values: `"retried"`, `"not_found"`, `"not_failed"`,
-`"episode_not_found"`.
-
-#### Spindle.QueueStop
-
-Stop processing for specific items.
-
-```
-Request:  { "ids": []int64 }  (at least one required)
-Response: { "updated": int64 }
-```
-
-#### Spindle.QueueRemove
-
-Remove specific items by ID.
-
-```
-Request:  { "ids": []int64 }  (at least one required)
-Response: { "removed": int64 }
-```
-
-#### Spindle.LogTail
-
-Fetch log lines from the daemon log file.
-
-```
-Request:  {
-  "offset":      int64,   // file byte offset (0 = start)
-  "limit":       int,     // max lines to return
-  "follow":      bool,    // wait for new lines
-  "wait_millis": int      // max follow wait (default 1s when follow=true)
-}
-Response: {
-  "lines":  []string,
-  "offset": int64         // next offset for continuation
-}
-```
-
-#### Spindle.DatabaseHealth
-
-Retrieve detailed database diagnostics.
-
-```
-Request:  {} (empty)
-Response: {
-  "db_path":           string,
-  "database_exists":   bool,
-  "database_readable": bool,
-  "schema_version":    string,
-  "table_exists":      bool,
-  "columns_present":   []string,
-  "missing_columns":   []string,
-  "integrity_check":   bool,
-  "total_items":       int,
-  "error":             string
-}
-```
-
-#### Spindle.TestNotification
-
-Trigger a notification test via the daemon.
-
-```
-Request:  {} (empty)
-Response: { "sent": bool, "message": string }
-```
-
-#### Spindle.DiscPause
-
-Pause detection of new disc insertions.
-
-```
-Request:  {} (empty)
-Response: { "paused": bool, "message": string }
-```
-
-#### Spindle.DiscResume
-
-Resume detection of new disc insertions.
-
-```
-Request:  {} (empty)
-Response: { "resumed": bool, "message": string }
-```
-
-#### Spindle.DiscDetect
-
-Trigger disc detection using the configured device.
-
-```
-Request:  {} (empty)
-Response: { "handled": bool, "message": string, "item_id": int64 }
-```
-
-### 2.3 Queue Access Fallback
-
-Queue commands (list, describe, clear, retry, stop, etc.) support direct SQLite
-access when the daemon is not running. The CLI detects daemon unavailability and
-falls back to `queueaccess.Access` which wraps the SQLite store directly. This
-means queue inspection works without a running daemon.
-
----
-
-## 3. HTTP API
-
-### 3.1 Server Configuration
-
-- **Bind address**: `paths.api_bind` (e.g., `127.0.0.1:8484`)
+- **Unix socket**: `$XDG_RUNTIME_DIR/spindle.sock` (always created)
+- **TCP bind** (optional): `paths.api_bind` (e.g., `127.0.0.1:7487`)
 - **Auth token**: `paths.api_token` -- when set, all requests require
   `Authorization: Bearer <token>` header
 - **Server timeouts**:
@@ -620,13 +385,13 @@ means queue inspection works without a running daemon.
   - WriteTimeout: 30s
   - IdleTimeout: 60s
 
-The API server starts only when `api_bind` is configured. It runs alongside
-the daemon and shuts down with 5s grace period.
+The HTTP API serves all communication: CLI commands, Flyer TUI, and any other
+consumers. Both the Unix socket and optional TCP bind serve identical endpoints.
 
-The primary external consumer of this API is **Flyer**, a read-only TUI
+The primary external consumer is **Flyer**, a read-only TUI
 ([github.com/five82/flyer](https://github.com/five82/flyer)).
 
-### 3.2 Authentication
+### 2.2 Authentication
 
 When `api_token` is configured, all endpoints require:
 ```
@@ -638,16 +403,14 @@ Missing or invalid token returns `401 Unauthorized`.
 **Middleware**: Bearer token validation wraps all HTTP handlers. When
 `api_token` is empty, the middleware is a passthrough (no auth required).
 
-All endpoints enforce `GET` only; other methods return `405 Method Not Allowed`.
-
-### 3.3 Error Response Format
+### 2.3 Error Response Format
 
 All errors use JSON:
 ```json
 {"error": "error message"}
 ```
 
-### 3.4 Endpoints
+### 2.4 Read Endpoints
 
 #### GET /api/status
 
@@ -681,7 +444,7 @@ Returns queue items, optionally filtered.
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `status` | string (repeatable) | Filter by queue status |
+| `stage` | string (repeatable) | Filter by queue stage |
 
 **Response** (200):
 ```json
@@ -690,8 +453,8 @@ Returns queue items, optionally filtered.
     {
       "id": 1,
       "discTitle": "MOVIE_TITLE",
-      "status": "completed",
-      "processingLane": "background",
+      "stage": "completed",
+      "inProgress": false,
       "progress": {"stage": "organizing", "percent": 100, "message": "done"},
       ...
     }
@@ -729,23 +492,17 @@ Returns structured log events from the in-memory log stream.
 | `tail` | string | | `1` or `true` to get the latest events (ignores `since`) |
 | `item` | int64 | | Filter by queue item ID |
 | `component` | string | | Filter by component label |
-| `lane` | string | | Filter by lane (`foreground`, `background`, `*` or `all` for both) |
 | `daemon_only` | string | | `1` to show only daemon logs (no item association) |
 | `correlation_id` | string | | Filter by correlation/request ID |
 | `request` | string | | Alias for `correlation_id` |
 | `level` | string | | Minimum log level (debug, info, warn, error) |
 | `alert` | string | | Filter by alert flag value |
 | `decision_type` | string | | Filter by decision type value |
-| `search` | string | | Substring search across message, component, stage, lane, correlation ID, fields, details |
+| `search` | string | | Substring search across message, component, stage, correlation ID, fields, details |
 
 **Query parameter defaults**: `limit` defaults to 200 if invalid or missing.
-`offset` defaults to -1 (end of file) if invalid or missing. Invalid `status`
-values are silently skipped. String filters (`lane`, `component`, `level`,
-etc.) are case-insensitive (compared via `EqualFold`).
-
-**Implicit lane filtering**: When no `item`, `lane`, `daemon_only` filters are
-set, background lane logs are excluded by default. Use `lane=*` or `lane=all`
-to see all lanes.
+String filters (`component`, `level`, etc.) are case-insensitive (compared
+via `EqualFold`).
 
 **Archive fallback**: When `since` points to a sequence older than the in-memory
 stream's first sequence, the event archive on disk is consulted first.
@@ -762,7 +519,6 @@ stream's first sequence, the event archive on disk is consulted first.
       "component": "identifier",
       "stage": "identification",
       "item_id": 5,
-      "lane": "foreground",
       "correlation_id": "abc123",
       "fields": {"event_type": "stage_complete"},
       "details": [{"label": "Title", "value": "Movie Name"}]
@@ -794,17 +550,174 @@ Returns raw log lines from a queue item's log file.
 }
 ```
 
-### 3.5 QueueItem Schema
+#### GET /api/health
 
-The `QueueItem` JSON object appears in both IPC and HTTP responses:
+Returns database health diagnostics.
+
+**Response** (200):
+```json
+{
+  "db_path": "/path/to/queue.db",
+  "database_exists": true,
+  "database_readable": true,
+  "schema_version": "5",
+  "table_exists": true,
+  "columns_present": ["id", "status", ...],
+  "missing_columns": [],
+  "integrity_check": true,
+  "total_items": 42,
+  "error": ""
+}
+```
+
+### 2.5 Mutation Endpoints
+
+#### POST /api/daemon/stop
+
+Stop daemon workflow processing.
+
+**Response** (200):
+```json
+{"stopped": true}
+```
+
+#### POST /api/queue/clear
+
+Remove queue items.
+
+**Request body**:
+```json
+{"scope": "all" | "completed" | "failed"}
+```
+
+**Response** (200):
+```json
+{"removed": 5}
+```
+
+#### POST /api/queue/reset
+
+Reset in-progress items (clear `in_progress` flag).
+
+**Response** (200):
+```json
+{"updated": 2}
+```
+
+#### POST /api/queue/retry
+
+Retry failed items.
+
+**Request body**:
+```json
+{"ids": [1, 2, 3]}
+```
+
+Empty `ids` retries all failed items.
+
+**Response** (200):
+```json
+{"updated": 3}
+```
+
+#### POST /api/queue/retry-episode
+
+Retry a single failed episode within a queue item.
+
+**Request body**:
+```json
+{"id": 1, "episode_key": "s01e05"}
+```
+
+**Response** (200):
+```json
+{"result": "retried"}
+```
+
+Result values: `"retried"`, `"not_found"`, `"not_failed"`, `"episode_not_found"`.
+
+#### POST /api/queue/stop
+
+Stop processing for specific items.
+
+**Request body**:
+```json
+{"ids": [1, 2]}
+```
+
+**Response** (200):
+```json
+{"updated": 2}
+```
+
+#### DELETE /api/queue/{id}
+
+Remove a specific queue item.
+
+**Response** (200):
+```json
+{"removed": 1}
+```
+
+**Response** (404):
+```json
+{"error": "queue item not found"}
+```
+
+#### POST /api/disc/pause
+
+Pause detection of new disc insertions.
+
+**Response** (200):
+```json
+{"paused": true, "message": "Disc detection paused"}
+```
+
+#### POST /api/disc/resume
+
+Resume detection of new disc insertions.
+
+**Response** (200):
+```json
+{"resumed": true, "message": "Disc detection resumed"}
+```
+
+#### POST /api/disc/detect
+
+Trigger disc detection using the configured device.
+
+**Response** (200):
+```json
+{"handled": true, "message": "Disc detected", "item_id": 42}
+```
+
+#### POST /api/test-notify
+
+Send a test notification via configured ntfy topic.
+
+**Response** (200):
+```json
+{"sent": true, "message": "Test notification sent"}
+```
+
+### 2.6 Queue Access Fallback
+
+Queue read commands (list, describe, status) support direct SQLite access when
+the daemon is not running. The CLI detects daemon unavailability and falls back
+to `queueaccess.Access` which wraps the SQLite store directly. Mutation
+operations require a running daemon.
+
+### 2.7 QueueItem Schema
+
+The `QueueItem` JSON object returned by queue endpoints:
 
 ```json
 {
   "id":                      int64,
   "discTitle":               string,
   "sourcePath":              string,
-  "status":                  string,
-  "processingLane":          string,
+  "stage":                   string,
+  "inProgress":              bool,
   "progress": {
     "stage":                 string,
     "percent":               float64,
@@ -870,46 +783,22 @@ The `QueueItem` JSON object appears in both IPC and HTTP responses:
 }
 ```
 
-### 3.6 IPC vs HTTP Availability Matrix
+### 2.8 Log Access
 
-Operations available on each transport:
+The `logs` package provides log access for CLI commands:
 
-| Operation | IPC | HTTP | Notes |
-|-----------|-----|------|-------|
-| Daemon status | `Spindle.Status` | `GET /api/status` | Both |
-| Queue list | `Spindle.QueueList` | `GET /api/queue` | Both |
-| Queue describe | `Spindle.QueueDescribe` | `GET /api/queue/{id}` | Both |
-| Log streaming | `Spindle.LogTail` | `GET /api/logs` | IPC: raw lines; HTTP: structured events |
-| Per-item log tail | -- | `GET /api/logtail` | HTTP only |
-| Queue clear/retry/stop/remove/reset | IPC only | -- | 8 mutation methods |
-| Daemon start/stop | IPC only | -- | `Spindle.Start`, `Spindle.Stop` |
-| Disc pause/resume/detect | IPC only | -- | 3 methods |
-| Database health | IPC only | -- | `Spindle.DatabaseHealth` |
-| Test notification | IPC only | -- | `Spindle.TestNotification` |
-
-**Summary**: HTTP API provides read-only access (status, queue, logs) for
-external consumers like Flyer. All mutation and control operations require IPC.
-
-### 3.7 Log Access Transport Layer
-
-The `logstream` package provides a unified log access interface with automatic
-transport fallback:
-
-1. **Primary**: HTTP API via `StreamClient.Fetch()` -- structured log events
-   with full filtering.
-2. **Fallback**: IPC `LogTail` -- raw line-based tailing (no structured
-   filtering).
-3. **Error**: `ErrFiltersRequireAPI` when filters need API features but API
-   is unavailable.
-
-The `logs` package provides:
-
-- `Tail(ctx, path, opts)`: Direct file tailing with follow support. Used for
-  per-item log files.
-- `StreamClient`: HTTP client for `/api/logs`. Supports all 12 filter
-  parameters from Section 3.4.
+- `StreamClient`: HTTP client for `/api/logs` over Unix socket. Supports all
+  12 filter parameters from Section 2.4.
+- `Tail(ctx, path, opts)`: Direct file tailing with follow support. Used as
+  fallback when daemon is unavailable (limited to raw line output, no
+  structured filtering).
 - `ErrAPIUnavailable` / `IsAPIUnavailable(err)`: Transport error detection.
 
-**Legacy IPC polling**: When falling back to IPC `LogTail`, the stream
-function polls at a fixed 1000ms (1 second) interval. Follow mode uses
-context cancellation for shutdown (no explicit follow timeout).
+The `logstream` package provides automatic fallback:
+
+1. **Primary**: HTTP API via `StreamClient.Fetch()` over Unix socket --
+   structured log events with full filtering.
+2. **Fallback**: Direct file tailing of the daemon log (no structured
+   filtering).
+3. **Error**: `ErrFiltersRequireAPI` when filters need API features but
+   daemon is unavailable.
