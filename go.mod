@@ -1,6 +1,6 @@
 module spindle
 
-go 1.26.0
+go 1.26.1
 
 require (
 	github.com/five82/drapto v0.5.1-0.20260221035919-86e6ab0ad120

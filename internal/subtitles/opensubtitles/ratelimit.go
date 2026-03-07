@@ -10,7 +10,7 @@ import (
 
 // Rate limiting configuration for OpenSubtitles API calls.
 const (
-	MinInterval    = time.Second
+	MinInterval    = 3 * time.Second
 	MaxRateRetries = 6
 	InitialBackoff = 2 * time.Second
 	MaxBackoff     = 60 * time.Second

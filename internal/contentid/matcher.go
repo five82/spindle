@@ -242,23 +242,26 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	var allSeasonRefs []referenceFingerprint
 	var selectedAnchor anchorSelection
 	hasAnchor := false
+	stats := &openSubtitlesStats{}
 
-	// Step 1/2: anchor attempts. First anchor uses rip #1, second anchor uses rip #2.
-	// Anchor references are fetched from full-season candidates to recover from
-	// incorrect disc-range assumptions.
 	if len(allSeasonEpisodes) > 0 {
-		refs, anchorErr := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, allSeasonEpisodes, progress)
-		if anchorErr != nil {
-			m.logger.Warn("content id anchor reference fetch failed",
-				logging.Error(anchorErr),
-				logging.String(logging.FieldEventType, "contentid_anchor_fetch_failed"),
-				logging.String(logging.FieldImpact, "falling back to heuristic candidate ranges"),
-				logging.String(logging.FieldErrorHint, "check OpenSubtitles connectivity and metadata"))
-		} else {
+		passes := buildEpisodePasses(candidatePlan, seasonDetails, len(env.Episodes))
+		for idx, pass := range passes {
+			refs, anchorErr := m.fetchReferenceFingerprints(ctx, ctxData, seasonDetails, pass, progress, stats)
+			if anchorErr != nil {
+				m.logger.Warn("content id anchor reference fetch failed",
+					logging.Error(anchorErr),
+					logging.String(logging.FieldEventType, "contentid_anchor_fetch_failed"),
+					logging.String(logging.FieldImpact, "falling back to heuristic candidate ranges"),
+					logging.String(logging.FieldErrorHint, "check OpenSubtitles connectivity and metadata"),
+					logging.Int("pass_index", idx+1),
+					logging.Int("pass_candidates", len(pass)))
+				break
+			}
 			for i := range refs {
 				refs[i].RawVector = refs[i].Vector
 			}
-			allSeasonRefs = refs
+			allSeasonRefs = append(allSeasonRefs, refs...)
 			if anchor, ok := selectAnchorWindow(
 				ripPrints,
 				allSeasonRefs,
@@ -282,17 +285,30 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 						logging.Float64("anchor_margin", anchor.ScoreMargin),
 						logging.Int("window_start", anchor.WindowStart),
 						logging.Int("window_end", anchor.WindowEnd),
+						logging.Int("pass_index", idx+1),
 					)
 				}
+				break
 			} else if m.logger != nil {
-				m.logger.Info("content id anchor skipped",
+				m.logger.Info("content id anchor deferred",
 					logging.String(logging.FieldEventType, "decision_summary"),
 					logging.String(logging.FieldDecisionType, "contentid_anchor"),
-					logging.String("decision_result", "skipped"),
+					logging.String("decision_result", "deferred"),
 					logging.String("decision_reason", anchor.Reason),
-					logging.String("decision_options", "first_anchor, second_anchor, fallback"),
+					logging.String("decision_options", "expand, select"),
+					logging.Int("pass_index", idx+1),
+					logging.Int("pass_candidates", len(pass)),
 				)
 			}
+		}
+		if !hasAnchor && m.logger != nil {
+			m.logger.Info("content id anchor skipped",
+				logging.String(logging.FieldEventType, "decision_summary"),
+				logging.String(logging.FieldDecisionType, "contentid_anchor"),
+				logging.String("decision_result", "skipped"),
+				logging.String("decision_reason", "anchor_not_selected"),
+				logging.String("decision_options", "expand, fallback"),
+			)
 		}
 	}
 
@@ -309,7 +325,7 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	var selected strategyOutcome
 	haveSelection := false
 	for _, attempt := range strategyAttempts {
-		outcome, evalErr := m.evaluateStrategy(ctx, ctxData, seasonDetails, ripPrints, allSeasonRefs, attempt, progress)
+		outcome, evalErr := m.evaluateStrategy(ctx, ctxData, seasonDetails, ripPrints, allSeasonRefs, attempt, progress, stats)
 		if evalErr != nil {
 			return false, evalErr
 		}
@@ -375,6 +391,12 @@ func (m *Matcher) MatchWithProgress(ctx context.Context, item *queue.Item, env *
 	markEpisodesSynchronized(env)
 	m.updateMetadata(item, matches, ctxData.Season)
 	if m.logger != nil {
+		m.logger.Info("content id opensubtitles usage",
+			logging.String(logging.FieldEventType, "contentid_opensubtitles_usage"),
+			logging.Int("searches", stats.searches),
+			logging.Int("downloads", stats.downloads),
+			logging.Int("cache_hits", stats.cacheHits),
+		)
 		contextAttrs := []logging.Attr{
 			logging.String("decision_options", "match, review"),
 			logging.String("selected_strategy", selected.Attempt.Name),

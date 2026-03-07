@@ -50,3 +50,29 @@ func TestCacheLoadMiss(t *testing.T) {
 		t.Fatalf("expected cache miss")
 	}
 }
+
+func TestCacheStoreAndLoadSearch(t *testing.T) {
+	dir := t.TempDir()
+	cache, err := NewCache(dir, nil)
+	if err != nil {
+		t.Fatalf("NewCache returned error: %v", err)
+	}
+	signature := "tmdb=0|parent=1|season=2|episode=3|query=Show|languages=en"
+	resp := SearchResponse{
+		Subtitles: []Subtitle{{ID: "1", FileID: 99, Language: "en", Release: "Show.S02E03"}},
+		Total:     1,
+	}
+	if err := cache.StoreSearch(signature, resp); err != nil {
+		t.Fatalf("StoreSearch failed: %v", err)
+	}
+	got, ok, err := cache.LoadSearch(signature)
+	if err != nil {
+		t.Fatalf("LoadSearch failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected search cache hit")
+	}
+	if got.Total != 1 || len(got.Subtitles) != 1 || got.Subtitles[0].FileID != 99 {
+		t.Fatalf("unexpected cached search response: %+v", got)
+	}
+}

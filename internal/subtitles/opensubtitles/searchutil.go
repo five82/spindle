@@ -37,7 +37,7 @@ func EpisodeSearchVariants(base SearchRequest, showTitle string, seasonNumber, e
 	unique := make([]SearchRequest, 0, len(variants))
 	seen := make(map[string]struct{}, len(variants))
 	for _, variant := range variants {
-		key := variantSignature(variant)
+		key := VariantSignature(variant)
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -47,7 +47,7 @@ func EpisodeSearchVariants(base SearchRequest, showTitle string, seasonNumber, e
 	return unique
 }
 
-func variantSignature(req SearchRequest) string {
+func VariantSignature(req SearchRequest) string {
 	var builder strings.Builder
 	builder.Grow(128)
 	builder.WriteString("tmdb=")

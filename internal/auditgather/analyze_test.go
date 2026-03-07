@@ -236,11 +236,10 @@ func TestComputeEpisodeConsistency(t *testing.T) {
 				}
 				return
 			}
-			if result == nil {
-				t.Fatal("expected non-nil result")
-			}
-			if len(result.Deviations) != tt.wantDeviations {
-				t.Errorf("expected %d deviations, got %d", tt.wantDeviations, len(result.Deviations))
+			result = requireEpisodeConsistencyResult(t, result)
+			deviations := result.Deviations
+			if len(deviations) != tt.wantDeviations {
+				t.Errorf("expected %d deviations, got %d", tt.wantDeviations, len(deviations))
 			}
 		})
 	}
@@ -354,6 +353,14 @@ func TestComputeEpisodeStats(t *testing.T) {
 			}
 		})
 	}
+}
+
+func requireEpisodeConsistencyResult(t *testing.T, result *EpisodeConsistency) *EpisodeConsistency {
+	t.Helper()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	return result
 }
 
 func TestComputeMediaStats(t *testing.T) {

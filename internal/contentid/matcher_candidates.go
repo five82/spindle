@@ -14,6 +14,8 @@ type candidateEpisodePlan struct {
 	RipSpecEpisodes   []int
 	DiscBlockEpisodes []int
 	SeasonFallback    []int
+	DiscEstimateStart int
+	PassSize          int
 }
 
 func (p candidateEpisodePlan) Options() map[string]any {
@@ -75,6 +77,19 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 		if block == 0 {
 			block = 4
 		}
+		plan.PassSize = block * 2
+		estimateStart := (discNumber-1)*block + 1 - block/2
+		if estimateStart < 1 {
+			estimateStart = 1
+		}
+		maxStart := totalEpisodes - plan.PassSize + 1
+		if maxStart < 1 {
+			maxStart = 1
+		}
+		if estimateStart > maxStart {
+			estimateStart = maxStart
+		}
+		plan.DiscEstimateStart = estimateStart
 		padding := max(policy.DiscBlockPaddingMin, block/policy.DiscBlockPaddingDivisor)
 		start := (discNumber-1)*block - padding
 		end := discNumber*block + padding
@@ -111,6 +126,64 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.SeasonDetails, 
 	sort.Ints(list)
 	plan.Episodes = list
 	return plan
+}
+
+func buildEpisodePasses(plan candidateEpisodePlan, season *tmdb.SeasonDetails, discEpisodes int) [][]int {
+	allEpisodes := seasonEpisodeNumbers(season)
+	if len(allEpisodes) == 0 {
+		return nil
+	}
+	width := plan.PassSize
+	if width <= 0 {
+		width = discEpisodes * 2
+	}
+	if width <= 0 {
+		width = min(12, len(allEpisodes))
+	}
+	if width > len(allEpisodes) {
+		width = len(allEpisodes)
+	}
+
+	startIdx := 0
+	if plan.DiscEstimateStart > 0 {
+		startIdx = plan.DiscEstimateStart - 1
+	} else if len(plan.DiscBlockEpisodes) > 0 {
+		startIdx = plan.DiscBlockEpisodes[0] - 1
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if startIdx+width > len(allEpisodes) {
+		startIdx = len(allEpisodes) - width
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+
+	passes := make([][]int, 0, 1+len(allEpisodes)/max(1, width))
+	passes = append(passes, append([]int(nil), allEpisodes[startIdx:startIdx+width]...))
+
+	left := startIdx
+	right := startIdx + width
+	for left > 0 || right < len(allEpisodes) {
+		pass := make([]int, 0, width)
+		leftStart := max(0, left-discEpisodes)
+		if leftStart < left {
+			pass = append(pass, allEpisodes[leftStart:left]...)
+		}
+		rightEnd := min(len(allEpisodes), right+discEpisodes)
+		if right < rightEnd {
+			pass = append(pass, allEpisodes[right:rightEnd]...)
+		}
+		if len(pass) == 0 {
+			break
+		}
+		passes = append(passes, pass)
+		left = leftStart
+		right = rightEnd
+	}
+
+	return passes
 }
 
 func seasonEpisodeNumbers(season *tmdb.SeasonDetails) []int {
@@ -153,4 +226,25 @@ func filterReferencesByEpisodes(refs []referenceFingerprint, episodes []int) []r
 		}
 	}
 	return filtered
+}
+
+func missingEpisodesForReferences(refs []referenceFingerprint, episodes []int) []int {
+	if len(episodes) == 0 {
+		return nil
+	}
+	if len(refs) == 0 {
+		return append([]int(nil), episodes...)
+	}
+	present := make(map[int]struct{}, len(refs))
+	for _, ref := range refs {
+		present[ref.EpisodeNumber] = struct{}{}
+	}
+	missing := make([]int, 0, len(episodes))
+	for _, episode := range episodes {
+		if _, ok := present[episode]; ok {
+			continue
+		}
+		missing = append(missing, episode)
+	}
+	return missing
 }

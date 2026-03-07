@@ -30,11 +30,10 @@ func TestNewNetlinkMonitor(t *testing.T) {
 		cfg := &config.Config{}
 		cfg.MakeMKV.OpticalDrive = "/dev/sr0"
 		m := newNetlinkMonitor(cfg, nil, nil, nil)
-		if m == nil {
-			t.Fatal("expected non-nil monitor")
-		}
-		if m.device != "/dev/sr0" {
-			t.Errorf("expected device /dev/sr0, got %s", m.device)
+		m = requireNetlinkMonitor(t, m)
+		device := m.device
+		if device != "/dev/sr0" {
+			t.Errorf("expected device /dev/sr0, got %s", device)
 		}
 	})
 }
@@ -118,6 +117,14 @@ func TestBuildMatcher(t *testing.T) {
 	if matcher.Evaluate(removeEvent) {
 		t.Error("expected matcher to reject REMOVE action")
 	}
+}
+
+func requireNetlinkMonitor(t *testing.T, m *netlinkMonitor) *netlinkMonitor {
+	t.Helper()
+	if m == nil {
+		t.Fatal("expected non-nil monitor")
+	}
+	return m
 }
 
 func TestHandleEvent(t *testing.T) {

@@ -111,11 +111,13 @@ func (m *Matcher) evaluateStrategy(
 	allSeasonRefs []referenceFingerprint,
 	attempt strategyAttempt,
 	progress func(phase string, current, total int, episodeKey string),
+	stats *openSubtitlesStats,
 ) (strategyOutcome, error) {
 	out := strategyOutcome{Attempt: attempt}
 	refs := filterReferencesByEpisodes(allSeasonRefs, attempt.Episodes)
-	if len(refs) == 0 {
-		fetched, err := m.fetchReferenceFingerprints(ctx, info, season, attempt.Episodes, progress)
+	missing := missingEpisodesForReferences(refs, attempt.Episodes)
+	if len(missing) > 0 {
+		fetched, err := m.fetchReferenceFingerprints(ctx, info, season, missing, progress, stats)
 		if err != nil {
 			return out, err
 		}
@@ -124,7 +126,7 @@ func (m *Matcher) evaluateStrategy(
 				fetched[i].RawVector = fetched[i].Vector
 			}
 		}
-		refs = fetched
+		refs = append(refs, fetched...)
 	}
 	if len(refs) == 0 {
 		return out, nil

@@ -166,6 +166,31 @@ func TestDeriveCandidateEpisodesPaddingClampsToSeasonBounds(t *testing.T) {
 	}
 }
 
+func TestBuildEpisodePassesExpandsWithoutOverlap(t *testing.T) {
+	eps := make([]tmdb.Episode, 60)
+	for i := range eps {
+		eps[i] = tmdb.Episode{EpisodeNumber: i + 1}
+	}
+	season := &tmdb.SeasonDetails{SeasonNumber: 2, Episodes: eps}
+	plan := candidateEpisodePlan{DiscEstimateStart: 10, PassSize: 12}
+	passes := buildEpisodePasses(plan, season, 6)
+	if len(passes) < 3 {
+		t.Fatalf("expected multiple passes, got %d", len(passes))
+	}
+	expectFirst := []int{10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
+	if !intSlicesEqual(passes[0], expectFirst) {
+		t.Fatalf("expected first pass %v, got %v", expectFirst, passes[0])
+	}
+	expectSecond := []int{4, 5, 6, 7, 8, 9, 22, 23, 24, 25, 26, 27}
+	if !intSlicesEqual(passes[1], expectSecond) {
+		t.Fatalf("expected second pass %v, got %v", expectSecond, passes[1])
+	}
+	expectThird := []int{1, 2, 3, 28, 29, 30, 31, 32, 33}
+	if !intSlicesEqual(passes[2], expectThird) {
+		t.Fatalf("expected third pass %v, got %v", expectThird, passes[2])
+	}
+}
+
 func TestDeriveCandidateEpisodesUsesDiscBlocksWithResolved(t *testing.T) {
 	// When some episodes ARE resolved, disc_block tier still contributes.
 	env := &ripspec.Envelope{

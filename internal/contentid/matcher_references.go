@@ -12,7 +12,13 @@ import (
 	"spindle/internal/subtitles/opensubtitles"
 )
 
-func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeContext, season *tmdb.SeasonDetails, candidates []int, progress func(phase string, current, total int, episodeKey string)) ([]referenceFingerprint, error) {
+type openSubtitlesStats struct {
+	searches  int
+	downloads int
+	cacheHits int
+}
+
+func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeContext, season *tmdb.SeasonDetails, candidates []int, progress func(phase string, current, total int, episodeKey string), stats *openSubtitlesStats) ([]referenceFingerprint, error) {
 	references := make([]referenceFingerprint, 0, len(candidates))
 	unique := make([]int, 0, len(candidates))
 	seen := make(map[int]struct{}, len(candidates))
@@ -57,13 +63,46 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 			foundMatch bool
 		)
 		for attempt, variant := range searchVariants {
+			signature := opensubtitles.VariantSignature(variant)
+			if m.cache != nil {
+				if cached, ok, err := m.cache.LoadSearch(signature); err != nil {
+					m.logger.Warn("opensubtitles search cache load failed",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "opensubtitles_search_cache_load_failed"),
+						logging.String(logging.FieldImpact, "cache miss forces network search"),
+						logging.String(logging.FieldErrorHint, "Check opensubtitles_cache_dir permissions"))
+				} else if ok {
+					resp = cached
+					selected = variant
+					foundMatch = len(resp.Subtitles) > 0
+					if stats != nil {
+						stats.cacheHits++
+					}
+					if foundMatch {
+						break
+					}
+					continue
+				}
+			}
 			searchErr = m.invokeOpenSubtitles(ctx, &lastAPICall, func() error {
 				var err error
 				resp, err = m.openSubs.Search(ctx, variant)
 				return err
 			})
+			if stats != nil {
+				stats.searches++
+			}
 			if searchErr != nil {
 				return nil, fmt.Errorf("opensubtitles search s%02de%02d attempt %d: %w", season.SeasonNumber, num, attempt+1, searchErr)
+			}
+			if m.cache != nil {
+				if err := m.cache.StoreSearch(signature, resp); err != nil {
+					m.logger.Warn("opensubtitles search cache store failed",
+						logging.Error(err),
+						logging.String(logging.FieldEventType, "opensubtitles_search_cache_store_failed"),
+						logging.String(logging.FieldImpact, "future runs will repeat network search"),
+						logging.String(logging.FieldErrorHint, "Check opensubtitles_cache_dir permissions and free space"))
+				}
 			}
 			if len(resp.Subtitles) == 0 {
 				if m.logger != nil {
@@ -157,6 +196,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 				payload = cached.DownloadResult()
 				cachePath = cached.Path
 				cacheHit = true
+				if stats != nil {
+					stats.cacheHits++
+				}
 				m.logger.Debug("opensubtitles cache hit",
 					logging.Int("season", season.SeasonNumber),
 					logging.Int("episode", episodeData.EpisodeNumber),
@@ -171,6 +213,9 @@ func (m *Matcher) fetchReferenceFingerprints(ctx context.Context, info episodeCo
 				return err
 			}); err != nil {
 				return nil, fmt.Errorf("download opensubtitles file %d: %w", candidate.FileID, err)
+			}
+			if stats != nil {
+				stats.downloads++
 			}
 			if m.cache != nil && len(payload.Data) > 0 {
 				entry := opensubtitles.CacheEntry{

@@ -1,6 +1,7 @@
 package opensubtitles
 
 import (
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -155,6 +156,46 @@ func (c *Cache) dataPath(fileID int64) string {
 
 func (c *Cache) metaPath(fileID int64) string {
 	return filepath.Join(c.dir, fmt.Sprintf("%d.json", fileID))
+}
+
+// LoadSearch returns a cached search response for the given request signature.
+func (c *Cache) LoadSearch(signature string) (SearchResponse, bool, error) {
+	if c == nil {
+		return SearchResponse{}, false, errors.New("cache unavailable")
+	}
+	path := c.searchPath(signature)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return SearchResponse{}, false, nil
+		}
+		return SearchResponse{}, false, fmt.Errorf("read search cache: %w", err)
+	}
+	var resp SearchResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return SearchResponse{}, false, fmt.Errorf("decode search cache: %w", err)
+	}
+	return resp, true, nil
+}
+
+// StoreSearch persists a search response for the given request signature.
+func (c *Cache) StoreSearch(signature string, resp SearchResponse) error {
+	if c == nil {
+		return errors.New("cache unavailable")
+	}
+	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+		return fmt.Errorf("ensure cache dir: %w", err)
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("encode search cache: %w", err)
+	}
+	return writeFileAtomic(c.searchPath(signature), data, 0o644)
+}
+
+func (c *Cache) searchPath(signature string) string {
+	sum := sha1.Sum([]byte(strings.TrimSpace(signature)))
+	return filepath.Join(c.dir, fmt.Sprintf("search-%x.json", sum))
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
