@@ -11,7 +11,7 @@ self-contained and focused on a single domain area.
 | [DESIGN_QUEUE.md](DESIGN_QUEUE.md) | SQLite queue database: schema, item model, status state machine, store operations | 295 |
 | [DESIGN_RIPSPEC.md](DESIGN_RIPSPEC.md) | RipSpec envelope: structure, metadata, titles, episodes, assets, attributes, methods | 210 |
 | [DESIGN_DAEMON.md](DESIGN_DAEMON.md) | Daemon lifecycle, disc detection pipeline, daemon orchestration layer | 350 |
-| [DESIGN_STAGES.md](DESIGN_STAGES.md) | All 7 pipeline stages: identification, ripping, episode ID, encoding, audio analysis, subtitles, organization | 510 |
+| [DESIGN_STAGES.md](DESIGN_STAGES.md) | All 7 pipeline stages: identification, ripping, episode ID, encoding, audio analysis, subtitles, organization | 895 |
 | [DESIGN_INFRASTRUCTURE.md](DESIGN_INFRASTRUCTURE.md) | Logging, notifications, preflight, shared utilities, log access, audit gathering, config validation | 520 |
 
 ## API Reference
@@ -38,6 +38,9 @@ self-contained and focused on a single domain area.
 - Stage execution lifecycle -> DESIGN_OVERVIEW.md Section 4.6
 - MakeMKV robot format -> DESIGN_STAGES.md Section 1.1.1
 - Audio track selection -> DESIGN_INFRASTRUCTURE.md Section 4.5
+- Stable-TS post-processing -> DESIGN_STAGES.md Section 6.1.1
+- SRT alignment algorithm -> DESIGN_STAGES.md Section 6.4.2
+- Subtitle candidate ranking -> DESIGN_STAGES.md Section 6.5
 - CLI command reference -> API_INTERFACES.md Section 1
 - HTTP API endpoints -> API_INTERFACES.md Section 3.4
 - External service protocols -> API_SERVICES.md

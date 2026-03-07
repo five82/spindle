@@ -503,12 +503,52 @@ stream counts after commentary handling.
 3. Extract primary audio track from encoded MKV to WAV.
 4. Run WhisperX via `uvx` with configured model, CUDA settings, VAD method.
 5. WhisperX produces aligned SRT and JSON output.
-6. **Hallucination filtering**: `filterTranscriptionOutput()` removes WhisperX
+6. **Stable-TS post-processing**: Format WhisperX JSON segments using an
+   embedded Python script (see Section 6.1.1). On failure, fall back to the
+   raw WhisperX SRT output.
+7. **Hallucination filtering**: `filterTranscriptionOutput()` removes WhisperX
    artifacts and repetitive segments.
-7. **Zero-segment SRT is fatal**: If filtering produces 0 cues, the stage fails
+8. **Zero-segment SRT is fatal**: If filtering produces 0 cues, the stage fails
    with `ErrTransient`.
-8. **Duration fallback**: If `totalSeconds <= 0`, extracts duration from last SRT
+9. **Duration fallback**: If `totalSeconds <= 0`, extracts duration from last SRT
    timestamp.
+
+#### 6.1.1 Stable-TS Post-Processing
+
+An embedded Python script (`stable_ts_formatter.py`, Go-embedded via
+`//go:embed`) reformats WhisperX alignment JSON into higher-quality SRT output
+using the `stable-whisper` library.
+
+**Invocation**: `uvx --from stable-ts python <script> <aligned.json> <output.srt> [--language <lang>]`
+
+**Pipeline steps:**
+
+1. **Load segments**: Parse WhisperX alignment JSON. Accepts both dict format
+   (`{"segments": [...], "language": "..."}`) and bare list format. Also checks
+   `speech_segments` and `detected_language` keys for WhisperX version
+   compatibility.
+2. **Normalize language**: Strip region suffix (e.g., `en-US` -> `en`),
+   lowercase. Default: `"en"` when absent or empty.
+3. **Sanitize segments**: Remove metadata that Stable-TS does not accept:
+   - Strip `chars` key from segments (WhisperX v5+ addition).
+   - For each word entry: rename `score` -> `probability` (WhisperX -> Stable-TS
+     field name), strip `speaker`, `case`, `chars` keys.
+   - Normalize word spacing: first word is trimmed; subsequent words get a
+     leading space unless they start with punctuation (`'`, `)`, `]`, `}`, `?`,
+     `!`, `.`, `,`, `:`, `;`).
+   - Rebuild segment `text` from normalized word tokens.
+4. **Build WhisperResult**: Construct `stable_whisper.WhisperResult` with
+   `force_order=True`, `check_sorted=False`, `show_unsorted=False`.
+5. **Regroup and clamp**: If the result has segments and words, call
+   `regroup(True)` for phrase regrouping and `clamp_max()` to fix overlapping
+   timestamps.
+6. **Render SRT**: `to_srt_vtt()` with `segment_level=True`,
+   `word_level=False`, `min_dur=0.12`, `strip=True`.
+
+**Error handling**: Each step produces a distinct error prefix
+(`import_error:`, `sanitize_error:`, `build_result_error:`, `regroup_error:`,
+`srt_render_error:`) for diagnostics. Any failure causes the caller to fall
+back to the raw WhisperX SRT output.
 
 ### 6.2 WhisperX Hallucination Filtering
 
@@ -557,21 +597,149 @@ SRT validation issues flag items for review but do not fail the stage.
 
 When `opensubtitles_enabled` and the disc has a forced subtitle track indicator:
 1. Search OpenSubtitles for forced/foreign-parts-only subtitles matching TMDB ID.
-2. **Subtitle-to-subtitle alignment**: Forced subtitles aligned against the
-   WhisperX regular subtitle output as reference, not against audio. This is more
-   reliable for sparse forced content.
-3. Store forced subtitle as additional SRT sidecar.
+2. **SRT cleaning**: Downloaded subtitles are cleaned of ad patterns before use
+   (see Section 6.4.1).
+3. **Subtitle-to-subtitle alignment**: Forced subtitles aligned against the
+   WhisperX regular subtitle output as reference, not against audio (see
+   Section 6.4.2).
+4. Store forced subtitle as additional SRT sidecar.
 
 **OpenSubtitles disabled diagnostics** (`openSubtitlesDisabledReason()`):
 Returns granular reason strings: "configuration unavailable",
 "opensubtitles_enabled is false", "opensubtitles_api_key not set".
 
-### 6.5 SRT Generation
+#### 6.4.1 SRT Cleaning
+
+`CleanSRT()` removes advertisement cues and normalizes spacing in downloaded
+SRT subtitles. Applied to all OpenSubtitles downloads before use.
+
+**Ad pattern detection** (`blockIsAdvertisement()`): Extracts text lines from
+each SRT block (skipping index and timing lines), joins them, and tests against
+9 regex patterns:
+
+| Pattern | Matches |
+|---------|---------|
+| `(?i)opensubtitles` | OpenSubtitles watermarks |
+| `(?i)subtitles? by` | Attribution lines |
+| `(?i)synced? and corrected` | Sync attribution |
+| `(?i)advertise (your\|yours?) product` | OpenSubtitles ad CTA |
+| `(?i)http(s)?://` | URLs |
+| `(?i)\bwww\.` | Website references |
+| `(?i)\bsubscene\b` | Subscene site name |
+| `(?i)\byts\b` | YTS site name |
+| `(?i)\byify\b` | YIFY site name |
+
+Matching cues are removed entirely. Surviving blocks have trailing whitespace
+trimmed per line. Returns `CleanStats` with `RemovedCues` count.
+
+**Plain text extraction**: `PlainTextFromSRT()` strips SRT formatting (index
+numbers, timestamps) and returns only dialogue text, one line per cue. Used
+by content ID and commentary detection for text analysis.
+
+#### 6.4.2 SRT Alignment Algorithm
+
+`alignForcedToReference()` adjusts forced subtitle timing to match the
+WhisperX reference output. This handles framerate mismatches (e.g., PAL vs
+NTSC source) and timing offsets between the downloaded subtitle and the
+actual encode.
+
+**Algorithm:**
+
+1. Parse both reference and forced SRT files into `srtCue` lists (index,
+   start/end seconds, text).
+2. **Find matching cues** (`findMatchingCues()`): For each forced cue,
+   find the best-matching reference cue by text similarity:
+   - Normalize text: lowercase, replace newlines with spaces, remove all
+     non-alphanumeric/non-space characters, collapse whitespace.
+   - **Scoring** (highest wins):
+     - `1.0`: Exact normalized text match.
+     - `0.9`: Forced text is a substring of reference text.
+     - `0.8`: Reference text is a substring of forced text.
+     - `overlap * 0.7`: Partial word overlap (requires overlap >= 0.6).
+   - **Time constraint**: After the first match is found, skip reference
+     cues where `|forced.start - ref.start| > 60 seconds`.
+   - **Minimum score**: `0.4` required to accept a match.
+   - **Word overlap** (`wordOverlap()`): Count of matching words divided
+     by the smaller word set size.
+3. **Calculate time transform** (`calculateTimeTransform()`): If >= 2
+   matched pairs exist, compute a linear transform `t_ref = scale * t_forced + offset`
+   using the first and last matched pairs' start times. This captures both
+   constant offsets and framerate scaling (e.g., PAL 25fps -> NTSC 23.976fps
+   produces `scale ~= 1.0424`).
+4. **Apply transform**: Transform all forced cue start/end times. Write
+   adjusted cues to the output SRT file.
+5. **Fallback**: If fewer than 2 matches, copy the forced SRT as-is
+   (identity transform: scale=1.0, offset=0).
+
+Returns: `(matchCount, timeTransform, error)`.
+
+### 6.5 OpenSubtitles Candidate Ranking
+
+`rankSubtitleCandidates()` scores and orders OpenSubtitles search results to
+select the best subtitle file for download. Used by both forced subtitle
+fetching and content ID reference downloads.
+
+**Ranking tiers** (evaluated in order, each sorted by score then downloads):
+
+1. **Preferred language, human-translated**: Best candidates.
+2. **Preferred language, AI-translated**: Acceptable but penalized.
+3. **Fallback language, human-translated**: Non-preferred languages.
+4. **Fallback language, AI-translated**: Last resort.
+
+**Score components** (`scoreSubtitleCandidate()`):
+
+| Factor | Score | Condition |
+|--------|-------|-----------|
+| Downloads | `log1p(downloads)` | Base score from popularity |
+| Release quality | +3.0 | Blu-ray/BDRip/BRRip |
+| Release quality | +2.5 | Remux |
+| Release quality | +1.5 | UHD/2160p/4K |
+| Release quality | +1.0 | 1080p |
+| Release quality | +0.5 | 720p |
+| Release quality | -2.0 | WebRip/WEB-DL |
+| Release quality | -1.0 | HDRip/DVDRip/TVRip/HDTV |
+| Release quality | -4.0 | CAM/Telesync/Telecine/Screener |
+| Release quality | -1.5 | Hardcoded subs |
+| Edition match | +8.0 | Release contains expected edition patterns |
+| Edition mismatch | -6.0 | Edition expected but not in release |
+| Title match | +1.0 / +0.5 / 0 / -10.0 | Exact / contains / partial / mismatch |
+| Year exact | +1.5 | Year matches exactly |
+| Year close | +1.0 | Year within 1 year |
+| Year off | -0.5 | Year 2-3 years away |
+| Year far | -1.5 | Year 4-5 years away |
+| Year wrong | -4.0 | Year >5 years away |
+| Media type mismatch | -1.0 | Movie vs TV mismatch |
+| HD flag | +0.5 | HD source |
+| Hearing impaired | -0.5 | HI annotations |
+| AI translated | -4.0 | Machine translation |
+
+**Hard rejections**: Candidates with title mismatch (`compareTitles()` returns
+`titleMatchNone`) are excluded before scoring.
+
+**Title comparison** (`compareTitles()`): Normalizes both titles (lowercase,
+remove non-alphanumeric), then classifies as:
+- `titleMatchExact`: Identical after normalization.
+- `titleMatchContain`: All words of the shorter title appear in the longer,
+  AND shorter has >= 50% of longer's word count.
+- `titleMatchPartial`: >= 50% word overlap.
+- `titleMatchNone`: Below 50% word overlap.
+
+Common stop words (`the`, `a`, `an`) are excluded from word overlap comparison.
+
+**Edition matching**: Recognizes 12 edition types (Director's Cut, Extended,
+Unrated, Uncut, Theatrical, Remastered, Special Edition, Final Cut, Redux,
+IMAX, Ultimate, Definitive) with variant patterns. Release name separators
+(`.`, `-`, `_`) are normalized to spaces before matching.
+
+**Tiebreaker**: Within the same score, higher download count wins. Within the
+same download count, lower file ID wins (deterministic ordering).
+
+### 6.6 SRT Generation
 
 - Output: SRT file with filtered, time-aligned cues.
 - Naming: `{base}.en.srt` for primary, `{base}.en.forced.srt` for forced.
 
-### 6.6 MKV Muxing
+### 6.7 MKV Muxing
 
 When `mux_into_mkv` is true:
 - Use `mkvmerge` to embed SRT subtitle tracks into the MKV container.
@@ -579,7 +747,57 @@ When `mux_into_mkv` is true:
 - Forced subtitle marked as forced track.
 - Original encoded file is replaced with muxed version.
 
-### 6.7 Resume and Failure Isolation
+### 6.8 Subtitle Context Building
+
+`BuildSubtitleContext()` extracts metadata from the queue item to build a
+`SubtitleContext` struct used for OpenSubtitles lookups. Consolidates data
+from three sources with fallback chains:
+
+**Data sources** (checked in order per field):
+1. `queue.MetadataFromJSON()` -- parsed metadata JSON
+2. Raw `metadata_json` fields -- direct JSON key access
+3. `ripspec.Parse()` -- rip spec envelope fields
+4. Derived values -- inferred from other fields
+
+**Field resolution:**
+
+| Field | Priority Chain |
+|-------|---------------|
+| `Title` | Metadata title -> disc title -> source path |
+| `ShowTitle` | Metadata show_title -> series_title -> derived from title |
+| `MediaType` | Metadata is_movie -> metadata media_type -> rip spec media_type -> `"tv"` default |
+| `TMDBID` | Metadata JSON `id` -> rip spec `Metadata.ID` -> parsed from content key |
+| `ParentTMDBID` | Metadata JSON `parent_tmdb_id` / `series_tmdb_id` / `show_tmdb_id` |
+| `Year` | Metadata JSON `release_date` / `year` -> rip spec release_date/year -> extracted from title |
+| `Season` | Metadata season_number -> rip spec -> default `1` for TV |
+| `Edition` | Rip spec edition -> `ExtractKnownEdition()` from disc title / source path |
+
+**Show title derivation** (`deriveShowTitle()`): Splits title on the first
+occurrence of ` -- `, ` --- `, ` - `, or `: ` and returns the prefix. Used
+when no explicit show title is available.
+
+**Content key parsing**: Extracts TMDB ID and media type from content keys
+in `type:subtype:id` format (e.g., `tv:67890:s01` -> TMDB ID 67890, type `tv`).
+
+### 6.9 Transcript Cache
+
+`tryReuseCachedTranscript()` attempts to reuse WhisperX transcripts generated
+during the content ID stage (Stage 3) to avoid redundant transcription.
+
+**Cache lookup**:
+- Key: episode key (normalized, case-insensitive) from
+  `env.Attributes.ContentIDTranscripts` map.
+- Movies are skipped (episode key `"primary"` has no content ID transcript).
+- Cache path must exist, be non-empty, and contain > 0 valid SRT cues.
+
+**On hit**: Copies the cached SRT to the subtitle output location. Duration
+derived from the last SRT timestamp. Returns `Source: "whisperx"`.
+
+**On miss**: Returns `false`; caller falls back to full WhisperX generation.
+Reasons: file unavailable, empty/unreadable SRT, directory creation failure,
+copy failure. All logged with `decision_type: "transcript_cache"`.
+
+### 6.10 Resume and Failure Isolation
 
 - **Resume support**: Episodes with already-completed subtitle assets are skipped,
   enabling resume after partial failure.
@@ -655,7 +873,19 @@ After successful organization (if `jellyfin.enabled`):
   (not per-episode).
 - Best-effort: log warning on failure, do not fail the stage.
 
-### 7.8 Additional Behaviors
+### 7.8 Edition Filename Validation
+
+`ValidateEditionFilename()` verifies that the edition suffix appears in the
+final filename when edition metadata is present. This catches logic bugs in
+the metadata-to-filename path.
+
+- Checks that the filename (without extension) ends with ` - {Edition}`.
+- On mismatch: returns `ErrValidation` with details. Logged with
+  `event_type: "edition_validation_failed"`.
+- On success: logged with `event_type: "edition_validation_passed"`.
+- Skipped when edition is empty.
+
+### 7.9 Additional Behaviors
 
 - **Metadata fallback**: When metadata title is empty, falls back to disc title,
   then to encoded file basename. Persists the fallback title to the queue item
