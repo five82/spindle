@@ -532,20 +532,146 @@ Pre-computed summaries derived from gathered data:
 
 ### 6.3 Key Types
 
-| Type | Purpose |
-|------|---------|
-| `Report` | Top-level container (25 fields) |
-| `Analysis` | Pre-computed summaries |
-| `ItemSummary` | ID, title, status, timestamps |
-| `StageGate` | Pipeline progress flags |
-| `LogAnalysis` | Parsed log file results |
-| `LogDecision` | Individual logged decision |
-| `LogEntry` | Individual log line |
-| `StageEvent` | Stage start/complete/fail events |
-| `EnvelopeReport` | RipSpec analysis |
-| `MediaFileProbe` | FFprobe result per file |
-| `ProfileSummary` | Episode profile (video, audio, subtitles) |
-| `Anomaly` | Detected issue (severity, category, message) |
+#### Report (top-level)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `item` | ItemSummary | Queue item summary |
+| `stage_gate` | StageGate | Which audit phases apply |
+| `logs` | LogAnalysis? | Parsed per-item log |
+| `rip_cache` | RipCacheReport? | Cached rip data and metadata |
+| `envelope` | EnvelopeReport? | Parsed RipSpec envelope |
+| `encoding` | EncodingReport? | Encoding snapshot |
+| `media` | []MediaFileProbe | FFprobe results per file |
+| `media_omitted` | int | Files skipped (too many) |
+| `analysis` | Analysis? | Pre-computed summaries |
+| `errors` | []string | Non-fatal gather errors |
+
+#### ItemSummary
+
+| Field | Type |
+|-------|------|
+| `id` | int64 |
+| `disc_title` | string |
+| `status` | string |
+| `failed_at_status` | string? |
+| `error_message` | string? |
+| `needs_review` | bool |
+| `review_reason` | string? |
+| `disc_fingerprint` | string? |
+| `created_at` | string (RFC3339) |
+| `updated_at` | string (RFC3339) |
+| `progress_stage` | string? |
+| `progress_percent` | float64? |
+| `progress_message` | string? |
+| `item_log_path` | string? |
+| `ripped_file` | string? |
+| `encoded_file` | string? |
+| `final_file` | string? |
+
+#### StageGate
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `furthest_stage` | string | Highest pipeline status reached |
+| `media_type` | string | movie or tv |
+| `disc_source` | string | 4k_bluray, bluray, dvd, unknown |
+| `edition` | string? | Detected edition label |
+| `phase_logs` | bool | Always true |
+| `phase_rip_cache` | bool | Reached ripped |
+| `phase_episode_id` | bool | TV + reached episode_identified |
+| `phase_encoded` | bool | Reached encoded |
+| `phase_crop` | bool | Reached encoded |
+| `phase_edition` | bool | Movie + reached identified |
+| `phase_subtitles` | bool | Reached subtitled |
+| `phase_commentary` | bool | Reached audio_analyzed |
+| `phase_external_validation` | bool | Reached encoded AND not DVD |
+
+#### LogAnalysis
+
+| Field | Type |
+|-------|------|
+| `path` | string |
+| `is_debug` | bool |
+| `total_lines` | int |
+| `inferred_disc_source` | string? |
+| `decisions` | []LogDecision |
+| `warnings` | []LogEntry |
+| `errors` | []LogEntry |
+| `stages` | []StageEvent |
+
+#### LogDecision
+
+`ts`, `decision_type`, `decision_result`, `decision_reason`, `message` (all strings).
+
+#### LogEntry
+
+`ts`, `level`, `message`, `event_type`, `error_hint` (strings) + `extras` (map).
+
+#### StageEvent
+
+`ts`, `event_type`, `stage`, `message` (strings) + `duration_seconds` (float64).
+
+#### RipCacheReport
+
+`path` (string), `found` (bool), `metadata` (ripcache.EntryMetadata?).
+
+#### EnvelopeReport
+
+`fingerprint`, `content_key` (strings), `metadata` (EnvelopeMetadata),
+`titles` ([]Title), `episodes` ([]Episode), `assets` (Assets),
+`attributes` (EnvelopeAttributes). Types from `ripspec` package.
+
+#### EncodingReport
+
+`snapshot` (encodingstate.Snapshot) -- see Section 4.6.
+
+#### MediaFileProbe
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | string | File path |
+| `role` | string | encoded, final, etc. |
+| `episode_key` | string? | Episode key for TV |
+| `representative` | bool? | True if selected as representative |
+| `probe` | ffprobe.Result | Full ffprobe output |
+| `size_bytes` | int64 | File size |
+| `duration_seconds` | float64 | Duration |
+| `error` | string? | Probe error if any |
+
+#### Analysis
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `decision_groups` | []DecisionGroup | Aggregated decisions (type, result, reason, count) |
+| `episode_consistency` | EpisodeConsistency? | Majority profile + deviations |
+| `crop_analysis` | CropAnalysis? | Filter, dimensions, aspect ratio, standard ratio |
+| `episode_stats` | EpisodeStats? | Matched/unresolved counts, confidence min/max/mean |
+| `media_stats` | MediaStats? | Duration and size ranges |
+| `asset_health` | AssetHealth? | Per-stage counts (ripped/encoded/subtitled/final) |
+| `anomalies` | []Anomaly | Severity + category + message |
+
+#### Supporting Analysis Types
+
+- **DecisionGroup**: `decision_type`, `decision_result`, `decision_reason`,
+  `count`, `entries` ([]LogDecision).
+- **EpisodeConsistency**: `majority_profile` (ProfileSummary),
+  `majority_count`, `total_episodes`, `deviations` ([]ProfileDeviation).
+- **ProfileSummary**: `video_codec`, `width`, `height`,
+  `audio_streams` ([]AudioProfile), `subtitle_streams` ([]SubtitleProfile).
+- **AudioProfile**: `codec`, `channels`, `channel_layout`, `language`,
+  `is_default`, `is_commentary`.
+- **SubtitleProfile**: `codec`, `language`, `is_forced`.
+- **ProfileDeviation**: `episode_key`, `differences` ([]string).
+- **CropAnalysis**: `filter`, `output_width`, `output_height`, `aspect_ratio`,
+  `standard_ratio`, `required`, `disabled`.
+- **EpisodeStats**: `count`, `matched`, `unresolved`, `confidence_min/max/mean`,
+  `below_070/080/090`, `sequence_contiguous`, `episode_range`.
+- **MediaStats**: `file_count`, `duration_min_sec`, `duration_max_sec`,
+  `size_min_bytes`, `size_max_bytes`.
+- **AssetHealth**: `ripped/encoded/subtitled/final` (each AssetCounts?).
+- **AssetCounts**: `total`, `ok`, `failed`, `muxed`.
+- **Anomaly**: `severity` (critical/warning/info), `category`, `message`.
 
 ---
 

@@ -870,7 +870,27 @@ The `QueueItem` JSON object appears in both IPC and HTTP responses:
 }
 ```
 
-### 3.6 Log Access Transport Layer
+### 3.6 IPC vs HTTP Availability Matrix
+
+Operations available on each transport:
+
+| Operation | IPC | HTTP | Notes |
+|-----------|-----|------|-------|
+| Daemon status | `Spindle.Status` | `GET /api/status` | Both |
+| Queue list | `Spindle.QueueList` | `GET /api/queue` | Both |
+| Queue describe | `Spindle.QueueDescribe` | `GET /api/queue/{id}` | Both |
+| Log streaming | `Spindle.LogTail` | `GET /api/logs` | IPC: raw lines; HTTP: structured events |
+| Per-item log tail | -- | `GET /api/logtail` | HTTP only |
+| Queue clear/retry/stop/remove/reset | IPC only | -- | 8 mutation methods |
+| Daemon start/stop | IPC only | -- | `Spindle.Start`, `Spindle.Stop` |
+| Disc pause/resume/detect | IPC only | -- | 3 methods |
+| Database health | IPC only | -- | `Spindle.DatabaseHealth` |
+| Test notification | IPC only | -- | `Spindle.TestNotification` |
+
+**Summary**: HTTP API provides read-only access (status, queue, logs) for
+external consumers like Flyer. All mutation and control operations require IPC.
+
+### 3.7 Log Access Transport Layer
 
 The `logstream` package provides a unified log access interface with automatic
 transport fallback:

@@ -341,6 +341,12 @@ The stage skips (with logged reason) when:
 4. No episodes in envelope
 5. Matcher unavailable, configuration unavailable, or OpenSubtitles disabled
 
+**Placeholder key retention**: When the stage skips, episode keys remain as
+placeholders (e.g., `s01_001`, `s01_002`). Downstream stages use these
+placeholder keys as-is for file naming and asset tracking. For condition 5,
+if unresolved episodes exist, the item is also flagged for review with reason
+`"episode numbers unresolved; content matching unavailable"`.
+
 ### 3.2 Review Triggers
 
 Four conditions flag an item for review after matching:
