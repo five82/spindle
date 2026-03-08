@@ -601,10 +601,7 @@ When `opensubtitles_enabled` and the disc has a forced subtitle track indicator:
 1. Search OpenSubtitles for forced/foreign-parts-only subtitles matching TMDB ID.
 2. **SRT cleaning**: Downloaded subtitles are cleaned of ad patterns before use
    (see Section 6.4.1).
-3. **Subtitle-to-subtitle alignment**: Forced subtitles aligned against the
-   WhisperX regular subtitle output as reference, not against audio (see
-   Section 6.4.2).
-4. Store forced subtitle as additional SRT sidecar.
+3. Store forced subtitle as additional SRT sidecar.
 
 **OpenSubtitles disabled diagnostics** (`openSubtitlesDisabledReason()`):
 Returns granular reason strings: "configuration unavailable",
@@ -638,44 +635,12 @@ trimmed per line. Returns `CleanStats` with `RemovedCues` count.
 numbers, timestamps) and returns only dialogue text, one line per cue. Used
 by content ID and commentary detection for text analysis.
 
-#### 6.4.2 SRT Alignment Algorithm
+#### 6.4.2 Forced Subtitle Timing
 
-`alignForcedToReference()` adjusts forced subtitle timing to match the
-WhisperX reference output. This handles framerate mismatches (e.g., PAL vs
-NTSC source) and timing offsets between the downloaded subtitle and the
-actual encode.
-
-**Algorithm:**
-
-1. Parse both reference and forced SRT files into `srtCue` lists (index,
-   start/end seconds, text).
-2. **Find matching cues** (`findMatchingCues()`): For each forced cue,
-   find the best-matching reference cue by text similarity:
-   - Normalize text: lowercase, replace newlines with spaces, remove all
-     non-alphanumeric/non-space characters, collapse whitespace.
-   - **Match criteria** (first match wins):
-     - Exact normalized text match.
-     - Word overlap >= 0.6 (`wordOverlap()`: count of matching words
-       divided by the smaller word set size).
-   - **Time constraint**: After the first match is found, skip reference
-     cues where `|forced.start - ref.start| > 60 seconds`.
-3. **Calculate time transform** (`calculateTimeTransform()`): If >= 2
-   matched pairs exist, compute a linear transform `t_ref = scale * t_forced + offset`
-   using the first and last matched pairs' start times. This captures both
-   constant offsets and framerate scaling (e.g., PAL 25fps -> NTSC 23.976fps
-   produces `scale ~= 1.0424`).
-4. **Scale factor validation**: Reject the computed transform if the scale
-   factor deviates more than **5%** from 1.0 (i.e., `scale < 0.95` or
-   `scale > 1.05`). A larger deviation indicates a fundamental mismatch
-   between the forced subtitle and the encode (wrong source, wrong episode,
-   etc.). On rejection, fall back to the identity transform and flag the
-   item for review with reason `"forced subtitle scale factor out of bounds"`.
-5. **Apply transform**: Transform all forced cue start/end times. Write
-   adjusted cues to the output SRT file.
-6. **Fallback**: If fewer than 2 matches, copy the forced SRT as-is
-   (identity transform: scale=1.0, offset=0).
-
-Returns: `(matchCount, timeTransform, error)`.
+No alignment is performed. Downloaded forced subtitles are used as-is.
+Most OpenSubtitles forced subs are already correctly timed for the source
+content. If timing drift becomes a problem in practice, add constant-offset
+correction first before considering a full linear transform.
 
 ### 6.5 Forced Subtitle Candidate Ranking
 

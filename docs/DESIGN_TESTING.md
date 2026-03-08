@@ -75,7 +75,7 @@ Cover pure logic with no I/O. Run with `go test ./...`.
 | `contentid` | Hungarian algorithm, contiguity check, candidate set construction |
 | `media/audio` | Track selection scoring, channel count parsing, lossless detection |
 | `language` | ISO code conversion, normalization, edge cases |
-| `subtitle` | SRT parsing, hallucination filtering, SRT alignment, SRT cleaning |
+| `subtitle` | SRT parsing, hallucination filtering, SRT cleaning |
 | `encodingstate` | Snapshot marshal/unmarshal, crop parsing, aspect ratio matching |
 | `config` | Normalization, validation rules, env var overrides, path expansion |
 | `makemkv` | Robot format parsing (TINFO/SINFO/PRGV/MSG lines) |
@@ -117,9 +117,6 @@ internal/makemkv/testdata/
 internal/subtitle/testdata/
   hallucination_input.srt  # SRT with known hallucination patterns
   hallucination_expected.srt
-  alignment_forced.srt     # Forced subtitle alignment test
-  alignment_reference.srt
-  alignment_expected.srt
 internal/contentid/testdata/
   cost_matrix_3x3.json     # Hungarian algorithm test cases
 ```
