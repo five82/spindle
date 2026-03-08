@@ -677,32 +677,21 @@ actual encode.
 
 Returns: `(matchCount, timeTransform, error)`.
 
-### 6.5 OpenSubtitles Candidate Ranking
+### 6.5 Forced Subtitle Candidate Ranking
 
-`rankSubtitleCandidates()` selects the best subtitle file from OpenSubtitles
-search results. Used by forced subtitle fetching (content ID reference
-selection uses its own simpler logic; see CONTENT_ID_DESIGN.md §5.2).
+`rankForcedSubtitleCandidates()` selects the best forced subtitle file from
+OpenSubtitles search results. Content ID reference selection uses its own
+logic; see CONTENT_ID_DESIGN.md §5.2.
 
-**Hard rejections** (excluded before ranking):
-- Title mismatch: `compareTitles()` returns `titleMatchNone`.
-- Garbage sources: CAM, Telesync, Telecine, or Screener in release name.
+Since forced subtitle searches are filtered by TMDB ID, the TMDB match is
+sufficient for content validation. Title comparison is unnecessary here.
 
-**Ranking tiers** (evaluated in order):
+**Filtering**: Exclude garbage sources (CAM, Telesync, Telecine, Screener
+in release name).
 
-1. **Preferred language, human-translated**
-2. **Preferred language, AI-translated**
-3. **Fallback language, human-translated**
-4. **Fallback language, AI-translated**
-
-Within each tier: sort by download count descending (most downloaded = most
-vetted). Tiebreaker: lowest file ID (deterministic ordering).
-
-**Title comparison** (`compareTitles()`): Normalizes both titles (lowercase,
-remove non-alphanumeric, drop stop words `the`/`a`/`an`), then classifies as:
-- `titleMatchExact`: Identical after normalization.
-- `titleMatchContain`: All words of the shorter title appear in the longer,
-  AND shorter has >= 50% of longer's word count.
-- `titleMatchNone`: Below threshold. Hard-rejected.
+**Ranking**: Prefer configured language over fallback languages. Within
+same language preference, sort by download count descending (most downloaded
+= most vetted). Tiebreaker: lowest file ID (deterministic ordering).
 
 ### 6.6 SRT Generation
 
