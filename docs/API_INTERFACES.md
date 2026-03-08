@@ -480,8 +480,7 @@ Returns structured log events parsed from the daemon's JSON log file.
 | `component` | string | | Filter by component label |
 | `lane` | string | | Filter by processing lane |
 | `daemon_only` | string | | `1` to show only daemon logs (no item association) |
-| `correlation_id` | string | | Filter by correlation/request ID |
-| `request` | string | | Alias for `correlation_id` |
+| `request` | string | | Filter by request/correlation ID |
 | `level` | string | | Minimum log level (debug, info, warn, error) |
 
 **Query parameter defaults**: `limit` defaults to 200 if invalid or missing.
@@ -501,7 +500,7 @@ via `EqualFold`).
       "stage": "identification",
       "item_id": 5,
       "lane": "ripping",
-      "correlation_id": "abc123",
+      "request": "abc123",
       "fields": {"event_type": "stage_complete"},
       "details": [{"label": "Title", "value": "Movie Name"}]
     }

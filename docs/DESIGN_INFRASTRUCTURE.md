@@ -37,7 +37,7 @@ Items past the identification stage get dedicated log files:
   "stage": "encoding",
   "item_id": 42,
   "lane": "ripping",
-  "correlation_id": "req-abc123",
+  "request": "req-abc123",
   "fields": {"event_type": "stage_start", "decision_type": "..."},
   "details": [{"label": "Input", "value": "/path/to/file.mkv"}]
 }
@@ -86,7 +86,7 @@ Negative percent values (unknown progress) skip bucket evaluation entirely.
 
 The `/api/logs` endpoint reads the JSON log file and supports server-side
 filtering by: `item` (item ID), `level`, `component`, `lane`,
-`correlation_id`, and `daemon_only`.
+`request`, and `daemon_only`.
 
 ### 1.9 Retention
 
