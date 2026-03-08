@@ -488,18 +488,8 @@ On config load, `EnsureDirectories` creates:
 
 | Field                 | Type   | Default | Purpose                                     |
 |-----------------------|--------|---------|---------------------------------------------|
-| `ntfy_topic`          | string | (empty) | ntfy topic URL (empty disables)             |
+| `ntfy_topic`          | string | (empty) | ntfy topic URL (empty disables all notifications) |
 | `request_timeout`     | int    | 10      | HTTP timeout in seconds                     |
-| `identification`      | bool   | true    | Notify on disc detection + identification   |
-| `rip`                 | bool   | true    | Notify on rip completion                    |
-| `encoding`            | bool   | true    | Notify on encoding completion               |
-| `validation`          | bool   | true    | Notify on validation failure                |
-| `organization`        | bool   | true    | Notify on library organization              |
-| `queue`               | bool   | true    | Notify on queue start/complete              |
-| `review`              | bool   | true    | Notify on items needing review              |
-| `errors`              | bool   | true    | Notify on pipeline errors                   |
-| `min_rip_seconds`     | int    | 120     | Suppress rip notifications shorter than this|
-| `queue_min_items`     | int    | 2       | Suppress queue notifications below count    |
 | `dedup_window_seconds`| int    | 600     | Deduplication window (10 minutes)           |
 
 #### `[subtitles]`

@@ -278,17 +278,14 @@ Tags: <comma_separated_tags>
 
 No authentication (relies on topic URL privacy or server-level auth).
 
-13 event types generate notifications (see DESIGN_INFRASTRUCTURE.md
+12 event types generate notifications (see DESIGN_INFRASTRUCTURE.md
 Section 2.2 for the canonical list):
 - `disc_detected`, `identification_complete`
-- `rip_start`, `rip_complete`
-- `encode_complete`
-- `validation_failed`
-- `pipeline_complete`
+- `rip_complete`, `encode_complete`
+- `validation_failed`, `pipeline_complete`
 - `organize_complete`
 - `queue_started`, `queue_completed`
-- `error`
-- `unidentified_media`
+- `error`, `unidentified_media`
 - `test`
 
 Deduplication: key = `event + label`, window = configurable seconds.

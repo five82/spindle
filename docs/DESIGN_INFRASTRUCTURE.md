@@ -122,41 +122,31 @@ are deleted when all files within them exceed retention.
 - Body: plain text message content.
 - Timeout: `request_timeout` seconds (default **10 seconds**; fallback when <= 0).
 
-**Config gate** -- 8 boolean flags control which event types generate
-notifications: `identification`, `rip`, `encoding`, `validation`,
-`organization`, `queue`, `review`, `errors`.
+Notifications are enabled when `ntfy_topic` is non-empty. All event types
+are sent unconditionally (no per-event config gates).
 
-### 2.2 Event Types (13)
+### 2.2 Event Types
 
-These are the canonical event type names used throughout the codebase:
-
-| Event                      | Config Gate           | Priority | Tags            | Suppression Rules                  |
-|----------------------------|-----------------------|----------|-----------------|------------------------------------|
-| `disc_detected`            | `identification`      | default  | -               | -                                  |
-| `identification_complete`  | `identification`      | default  | identify        | Skip if display title empty        |
-| `rip_start`               | (never sent)          | -        | -               | Always suppressed                  |
-| `rip_complete`            | `rip`                 | default  | rip             | Cache hit + duration < min_rip_seconds|
-| `encode_complete`         | `encoding`            | default  | encode          | Skip placeholder (no client)       |
-| `validation_failed`        | `validation`          | high     | validation,warning | -                               |
-| `pipeline_complete`       | (internal, always sent)| -       | -               | -                                  |
-| `organize_complete`       | `organization`        | default  | organize        | -                                  |
-| `queue_started`            | `queue`               | default  | queue           | count < queue_min_items            |
-| `queue_completed`          | `queue`               | default  | queue           | processed+failed < queue_min_items |
-| `error`                    | `errors`              | high     | error           | -                                  |
-| `unidentified_media`       | `review`              | default  | review          | -                                  |
-| `test`                     | (always)              | low      | test            | -                                  |
+| Event                      | Priority | Tags               |
+|----------------------------|----------|--------------------|
+| `disc_detected`            | default  | -                  |
+| `identification_complete`  | default  | identify           |
+| `rip_complete`             | default  | rip                |
+| `encode_complete`          | default  | encode             |
+| `validation_failed`        | high     | validation,warning |
+| `pipeline_complete`        | default  | -                  |
+| `organize_complete`        | default  | organize           |
+| `queue_started`            | default  | queue              |
+| `queue_completed`          | default  | queue              |
+| `error`                    | high     | error              |
+| `unidentified_media`       | default  | review             |
+| `test`                     | low      | test               |
 
 ### 2.3 Deduplication
 
 - Key: event type + first label field (discTitle/mediaTitle/title/filename/context).
 - Window: `dedup_window_seconds` (default 600 = 10 minutes).
 - Same key within window: suppressed.
-
-### 2.4 Suppression Rules
-
-- `rip_complete` with cache hit: suppress if rip duration < `min_rip_seconds`.
-- `queue_started`/`queue_completed`: suppress if item count < `queue_min_items`.
-- `encode_complete`: suppress if placeholder (no Drapto client).
 
 ---
 
