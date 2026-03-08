@@ -149,7 +149,7 @@ belongs here.
 | Field | Type | Writer | Reader |
 |-------|------|--------|--------|
 | `has_forced_subtitle_track` | bool | Identification | Subtitles |
-| `audio_analysis` | *AudioAnalysisData | Audio Analysis | Encoding |
+| `audio_analysis` | *AudioAnalysisData | Audio Analysis | API/Display |
 | `subtitle_generation_results` | []SubtitleGenRecord | Subtitles | Organization |
 
 **Nested types:**

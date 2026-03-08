@@ -287,7 +287,7 @@ CLI-facing daemon lifecycle management used by `spindle start/stop/restart/statu
 Three functions:
 
 - `Start(executablePath, socketPath, opts, timeout)`: Launch daemon as detached
-  background process (`spindle daemon-run`), poll for HTTP API socket
+  background process (`spindle daemon`), poll for HTTP API socket
   availability. Returns immediately if already running.
 - `Stop(socketPath, gracePeriod, fallbackPID)`: Send HTTP stop request, wait
   for shutdown, force-kill (SIGKILL + PID/lock file cleanup) if still alive.

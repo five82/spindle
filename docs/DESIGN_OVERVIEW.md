@@ -125,7 +125,7 @@ them to appear in Jellyfin without manual intervention.
 
 Single binary `spindle` with two execution modes:
 
-1. **Daemon mode** (`spindle daemon-run`): Starts the full daemon with disc
+1. **Daemon mode** (`spindle daemon`): Starts the full daemon with disc
    monitoring, workflow manager, and HTTP API server.
 2. **CLI mode**: All other commands. Some require a running daemon (via HTTP
    API), others work standalone (direct DB access or local operations).

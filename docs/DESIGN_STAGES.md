@@ -682,11 +682,11 @@ context struct or cross-stage attribute needed.
 `tryReuseCachedTranscript()` attempts to reuse WhisperX transcripts generated
 during the content ID stage (Stage 3) to avoid redundant transcription.
 
-**Cache lookup**:
-- Key: episode key (normalized, case-insensitive) from
-  `env.Attributes.ContentIDTranscripts` map.
-- Movies are skipped (episode key `"primary"` has no content ID transcript).
-- Cache path must exist, be non-empty, and contain > 0 valid SRT cues.
+**Cache lookup**: The shared transcription service cache
+(DESIGN_INFRASTRUCTURE.md S9) keys entries by (file path + audio index +
+model + language). When the subtitle stage requests transcription for a file
+that was already transcribed during content ID, the cache returns a hit
+automatically -- no explicit envelope attribute is needed.
 
 **On hit**: Copies the cached SRT to the subtitle output location. Duration
 derived from the last SRT timestamp. Returns `Source: "whisperx"`.

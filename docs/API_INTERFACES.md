@@ -30,7 +30,7 @@ Start the spindle daemon. If no daemon process is running, launches one.
 
 Behavior:
 - Resolves own executable path for daemon launch
-- Calls `daemonctl.EnsureStarted()` with 10s timeout
+- Calls `daemonctl.Start()` with 10s timeout
 - Reports: "Daemon started", "Daemon already running", or start message
 
 #### `spindle stop`
@@ -38,7 +38,7 @@ Behavior:
 Stop the spindle daemon (completely terminates the process).
 
 Behavior:
-- Calls `daemonctl.StopAndTerminate()` with 5s timeout
+- Calls `daemonctl.Stop()` with 5s timeout
 - If daemon not running, prints "Daemon is not running" (no error)
 - Reports stop acknowledgment and optional forced kill with PID
 

@@ -379,8 +379,8 @@ Deeper service health checks are standalone functions, not part of the
 - `CheckDirectoryAccess(paths)`: Verify read/write/execute on staging,
   library, review dirs.
 
-These do not gate stage execution. Transient service failures are handled
-by the stage's own retry logic.
+These do not gate stage execution. Transient service failures fail the item;
+retry is workflow-level via `spindle queue retry`.
 
 ### 4.8 Dependency Resolution (`deps`)
 
