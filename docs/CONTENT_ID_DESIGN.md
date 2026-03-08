@@ -363,26 +363,18 @@ All thresholds are hardcoded constants in the `Policy` struct (not user-configur
 
 ---
 
-## 14. Attributes Written to Envelope
+## 14. Results Written to Envelope
 
-After successful matching, the following attributes are set on the rip spec
-envelope:
+After successful matching, the episode ID stage updates the envelope:
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `ContentIDMatches` | `[]ContentIDMatch` | Per-episode match details (key, title_id, episode, score, subtitle info) |
-| `ContentIDMethod` | `string` | Always `"whisperx_opensubtitles"` |
-| `ContentIDTranscripts` | `map[string]string` | Episode key -> WhisperX SRT path |
-| `EpisodesSynchronized` | `bool` | Set to `true` after successful matching |
-
-Each `ContentIDMatch` contains:
-- `EpisodeKey`: Rip spec episode key (e.g., `s01_001`)
-- `TitleID`: MakeMKV title number
-- `MatchedEpisode`: Target episode number
-- `Score`: Cosine similarity score
-- `SubtitleFileID`: OpenSubtitles file ID used
-- `SubtitleLanguage`: Language of the matched reference
-- `SubtitleCachePath`: Local cache path of the reference SRT
+1. **Episode resolution**: Each `episodes[]` entry is updated with resolved
+   `episode` number, `episode_title`, and `episode_air_date`. Match confidence
+   scores are stored in `match_confidence`.
+2. **Review flags**: Low-confidence or partial matches call
+   `AppendReviewReason()` on the envelope, which sets the queue-level
+   `needs_review` flag.
+3. **Logging**: Per-episode match details (scores, subtitle file IDs, methods)
+   are logged at INFO level for diagnostics.
 
 Queue item metadata is also updated with `episode_numbers`, `season_number`,
 and `media_type` fields.

@@ -560,7 +560,7 @@ type count reflects the breadth of the audit surface (7 pipeline stages,
    stage events.
 3. **Rip cache**: Check for cached rip data and metadata.
 4. **Envelope**: Parse RipSpec for fingerprint, content key, titles, episodes,
-   assets, attributes. Reads `disc_source` from envelope attributes.
+   assets, attributes. Reads `disc_source` from envelope metadata.
 5. **Encoding**: Extract encoding snapshot.
 6. **Media probes**: FFprobe each encoded/final file. TV: probe each episode
    asset, falling back to final path if staging cleaned up.
@@ -611,7 +611,7 @@ Pre-computed summaries derived from gathered data:
 | `item` | ItemSummary | Queue item summary |
 | `furthest_stage` | string | Highest pipeline stage reached |
 | `media_type` | string | movie or tv |
-| `disc_source` | string | From envelope `disc_source` attribute |
+| `disc_source` | string | From envelope `metadata.disc_source` |
 | `edition` | string? | Detected edition label |
 | `phase_*` | bool | Phase applicability flags (see Section 7.1) |
 | `logs` | LogAnalysis? | Parsed per-item log |

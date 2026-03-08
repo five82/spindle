@@ -189,13 +189,9 @@ After identification:
 1. Build title specs from MakeMKV scan results (filtered by `min_title_length`).
 2. For TV: create episode specs with placeholder keys (e.g., `s01_001`).
 3. Set metadata fields from TMDB response.
-4. Build attributes: disc number, forced subtitle track detection, `disc_source`
-   (values: `4k_bluray`, `bluray`, `dvd`, `unknown` -- determined from disc
-   detection and bd_info results).
-5. Build `SubtitleContext` from resolved metadata (title, media type, TMDB ID,
-   year, season, edition) and store it in envelope attributes. This consolidates
-   all metadata needed for OpenSubtitles lookups at the point where it is
-   authoritatively known, so downstream stages read it directly.
+4. Set `metadata.disc_source` (`4k_bluray`, `bluray`, `dvd`, `unknown` --
+   determined from disc detection and bd_info results).
+5. Set attributes: forced subtitle track detection.
 6. Store serialized envelope in `rip_spec_data`.
 
 ### 1.10 Additional Behaviors
@@ -764,11 +760,9 @@ When `mux_into_mkv` is true:
 
 ### 6.8 Subtitle Context
 
-The subtitle stage reads `SubtitleContext` directly from the envelope
-attributes (written by the identification stage -- see Section 1.9). No
-per-field fallback chains or multi-source reconstruction needed.
-
-See DESIGN_RIPSPEC.md Section 6 for the `SubtitleContext` struct definition.
+The subtitle stage reads metadata directly from the envelope's `metadata`
+section (title, media type, TMDB ID, year, season, edition). No separate
+context struct or cross-stage attribute needed.
 
 ### 6.9 Transcript Cache
 

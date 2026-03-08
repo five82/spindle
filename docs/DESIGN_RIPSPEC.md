@@ -56,7 +56,8 @@ clearly on parse, allowing the user to clear and reprocess them.
   "movie": true,
   "cached": false,
   "edition": "Extended Edition",
-  "filename": "Movie Title (2024) - Extended Edition.mkv"
+  "filename": "Movie Title (2024) - Extended Edition.mkv",
+  "disc_source": "4k_bluray" | "bluray" | "dvd" | "unknown"
 }
 ```
 
@@ -127,35 +128,33 @@ error details for failed assets.
 
 ## 6. Attributes (Cross-Stage Communication)
 
-**EnvelopeAttributes** -- all 11 fields with writer/reader stages:
+Attributes carry data that one stage writes and a later stage reads. Only data
+that cannot be derived from existing envelope fields (metadata, episodes, assets)
+belongs here.
+
+**Removed fields and where they went:**
+- `disc_source` -- moved to `metadata.disc_source`
+- `disc_number` -- already in `metadata.disc_number`
+- `subtitle_context` -- subtitles stage reads `metadata` directly (same data)
+- `content_id_needs_review` / `content_id_review_reason` -- episode ID stage
+  uses `AppendReviewReason()` which sets queue-level `needs_review` flag
+- `content_id_matches` -- episode resolution stored in `episodes[]`; match
+  scores are logged by the episode ID stage
+- `primary_audio_description` -- computed on-demand from `audio_analysis`
+- `subtitle_generation_summary` -- computed on-demand from
+  `subtitle_generation_results`
+
+**EnvelopeAttributes** -- 3 fields with writer/reader stages:
 
 | Field | Type | Writer | Reader |
 |-------|------|--------|--------|
-| `disc_source` | string | Identification | Audit Gathering |
-| `disc_number` | int | Identification | Organization |
 | `has_forced_subtitle_track` | bool | Identification | Subtitles |
-| `subtitle_context` | *SubtitleContext | Identification | Subtitles |
-| `content_id_needs_review` | bool | Episode ID | Organization |
-| `content_id_review_reason` | string | Episode ID | Organization |
-| `content_id_matches` | []ContentIDMatch | Episode ID | Organization |
-| `primary_audio_description` | string | Audio Analysis | API/Display |
 | `audio_analysis` | *AudioAnalysisData | Audio Analysis | Encoding |
 | `subtitle_generation_results` | []SubtitleGenRecord | Subtitles | Organization |
-| `subtitle_generation_summary` | *SubtitleGenSummary | Subtitles | API/Display |
 
 **Nested types:**
 
 ```go
-ContentIDMatch {
-    EpisodeKey        string   // e.g., "s01e03"
-    TitleID           int      // disc title index
-    MatchedEpisode    int      // reference episode number
-    Score             float64  // cosine similarity 0.0-1.0
-    SubtitleFileID    int64    // OpenSubtitles file ID
-    SubtitleLanguage  string
-    SubtitleCachePath string
-}
-
 AudioAnalysisData {
     PrimaryTrack     AudioTrackRef          // {Index int}
     CommentaryTracks []CommentaryTrackRef   // {Index, Confidence, Reason}
@@ -170,25 +169,6 @@ SubtitleGenRecord {
     Segments              int
     Language              string
     OpenSubtitlesDecision string
-}
-
-SubtitleContext {
-    Title         string  // resolved title
-    ShowTitle     string  // TV show title (empty for movies)
-    MediaType     string  // "movie" or "tv"
-    TMDBID        int     // TMDB ID
-    ParentTMDBID  int     // series TMDB ID (TV only)
-    Year          string  // release year
-    Season        int     // season number (TV only)
-    Edition       string  // edition label (if any)
-}
-
-SubtitleGenSummary {
-    Source                string
-    OpenSubtitles         int
-    WhisperX              int
-    ExpectedOpenSubtitles bool
-    FallbackUsed          bool
 }
 ```
 
