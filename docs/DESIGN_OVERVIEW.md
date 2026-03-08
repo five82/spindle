@@ -213,15 +213,9 @@ completion, cancellation, or failure. Stages that do not require a semaphore
    same stage).
 3. If no item: wait 5 seconds, loop.
 4. If queue fetch error: log, wait 10 seconds, loop.
-5. Spawn goroutine: acquire required semaphore(s), run preflight checks for
-   the stage, set `in_progress = 1`, process item via `processItem()`,
-   advance stage, release semaphore(s).
+5. Spawn goroutine: acquire required semaphore(s), set `in_progress = 1`,
+   process item via `processItem()`, advance stage, release semaphore(s).
 6. Loop (immediately look for next item; don't wait for spawned goroutine).
-
-**Preflight per item**: Dependency checks run after semaphore acquisition and
-before stage execution. This catches missing binaries or unavailable services
-before committing to work. Preflight failure marks the item as failed (not
-the entire pipeline), allowing other items at different stages to continue.
 
 **Stage priority** ensures disc-dependent stages run first (freeing the drive
 for the next disc), while encoding and later stages run concurrently in the
@@ -316,20 +310,18 @@ request-scoped context values.
 The manager's `processItem()` drives daemon-mode execution. The standalone
 `stageexec.Run()` provides a similar path for CLI one-shot workflows.
 
-**Lifecycle per item** (6 steps, 2 persistence points):
+**Lifecycle per item** (5 steps, 2 persistence points):
 
 1. Look up stage handler by `item.Stage` in `pipeline.stageByStart`.
    Acquire required semaphore(s) for this stage (blocks until available).
    Create request UUID and stage context (child of daemon context).
    Attach per-item `*slog.Logger` to the context.
-2. **Run preflight checks** for this stage's dependencies. On failure:
-   mark item as failed with hint, release semaphore, return.
-3. Initialize progress state (`ProgressStage`, default message, percent 0).
+2. Initialize progress state (`ProgressStage`, default message, percent 0).
    **Set `in_progress = 1`**, persist.
-4. Call `handler.Prepare(ctx, item)` then `handler.Execute(ctx, item)`.
-5. **Handle error**: if `context.Canceled`, set `in_progress = 0`, persist,
+3. Call `handler.Prepare(ctx, item)` then `handler.Execute(ctx, item)`.
+4. **Handle error**: if `context.Canceled`, set `in_progress = 0`, persist,
    release semaphore, return. Otherwise call `handleStageFailure()`.
-6. Advance `item.Stage` to next stage. Set `in_progress = 0`.
+5. Advance `item.Stage` to next stage. Set `in_progress = 0`.
    If completed: finalize progress (ensure percent >= 100, non-empty message).
    **Persist** final state. Release semaphore.
 
@@ -350,7 +342,7 @@ DESIGN_STAGES.md Section 2.6.
 - Retry is workflow-level: `spindle queue retry <id>` re-runs from the
   failed stage.
 
-**DB write failure during stage execution**: If a persistence step (3, 6)
+**DB write failure during stage execution**: If a persistence step (2, 5)
 fails, the item is marked as failed with the DB error. The in-memory state
 may diverge from the persisted state, but startup recovery (Section 4.7)
 handles this by resetting all `in_progress` flags. The item will be

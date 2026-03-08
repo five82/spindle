@@ -130,11 +130,9 @@ are sent unconditionally (no per-event config gates).
 
 ### 3.1 System Dependencies
 
-Checked at daemon startup, before each item's stage execution (after
-semaphore acquisition), and via `spindle status`. Per-item checks verify
-only the dependencies required by the current stage, not all dependencies.
-A preflight failure marks the item as failed (with a hint about the missing
-dependency) without halting the entire pipeline.
+Checked at daemon startup (fatal if required dependencies missing) and
+via `spindle status`. No per-stage rechecking — binaries do not disappear
+mid-run.
 
 | Dependency | Command       | Optional | Condition                     |
 |------------|---------------|----------|-------------------------------|
