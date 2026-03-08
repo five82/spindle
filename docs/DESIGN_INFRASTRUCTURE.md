@@ -103,8 +103,8 @@ Negative percent values (unknown progress) skip bucket evaluation entirely.
 
 The `/api/logs` endpoint reads the JSON log file and supports server-side
 filtering by: `component`, `level`, `item` (item ID), `correlation_id`,
-`alert`, `decision_type`, and `search` (substring match across message,
-component, stage, correlation ID, fields, and details).
+`daemon_only`, and `search` (substring match across message, component,
+stage, correlation ID, fields, and details).
 
 ### 1.11 Retention
 

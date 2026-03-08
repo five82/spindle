@@ -159,8 +159,6 @@ Display daemon logs.
 | `--request` | | string | | Filter by request/correlation ID |
 | `--item` | `-i` | int64 | 0 | Filter by queue item ID |
 | `--level` | | string | | Minimum log level (debug, info, warn, error) |
-| `--alert` | | string | | Filter by alert flag |
-| `--decision-type` | | string | | Filter by decision type |
 | `--search` | | string | | Search logs by substring |
 
 When daemon is running, uses `/api/logs` for filtered queries. Falls back to
@@ -525,28 +523,6 @@ via `EqualFold`).
 }
 ```
 
-#### GET /api/logtail
-
-Returns raw log lines from a queue item's log file.
-
-**Query parameters**:
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `item` | int64 | (required) | Queue item ID |
-| `offset` | int64 | -1 | File byte offset (-1 for end) |
-| `limit` | int | 200 | Maximum lines to return |
-| `follow` | string | | `1` or `true` to wait for new lines |
-| `wait_ms` | int | 5000 | Follow wait timeout in milliseconds |
-
-**Response** (200):
-```json
-{
-  "lines": ["2025-01-15 10:30:00 INFO ...", ...],
-  "offset": 4096
-}
-```
-
 #### GET /api/health
 
 Returns database health diagnostics.
@@ -608,148 +584,6 @@ data: {"item_id":5,"stage":"encoding","percent":45.2,"message":"Phase 1/1 - Enco
 **Flyer integration**: Flyer uses `/api/events` for real-time encoding progress
 (FPS, ETA, percentage). `/api/logs` is available for batch queries of the log
 file.
-
-### 2.4.2 Operational Endpoints
-
-These endpoints expose cache, staging, and disc ID operations via HTTP for
-remote consumers (e.g., Flyer). They mirror CLI commands that otherwise
-work via direct filesystem/DB access.
-
-#### GET /api/cache/stats
-
-Returns rip cache entries with sizes and ages.
-
-**Response** (200):
-```json
-{
-  "entries": [
-    {
-      "number": 1,
-      "name": "MOVIE_TITLE",
-      "path": "/path/to/cache/entry",
-      "videoCount": 3,
-      "sizeBytes": 52428800000,
-      "lastUpdated": "2025-01-15T10:30:00Z"
-    }
-  ],
-  "totalSizeBytes": 104857600000,
-  "maxSizeBytes": 161061273600,
-  "freeDiskBytes": 500000000000
-}
-```
-
-#### POST /api/cache/process
-
-Queue a cached rip for post-rip processing.
-
-**Request body**:
-```json
-{"number": 1, "allowDuplicate": false}
-```
-
-**Response** (200):
-```json
-{"item_id": 42, "message": "Cached entry queued for processing"}
-```
-
-#### DELETE /api/cache/{number}
-
-Remove a specific cache entry.
-
-**Response** (200):
-```json
-{"removed": 1}
-```
-
-#### GET /api/staging
-
-List staging directories.
-
-**Response** (200):
-```json
-{
-  "directories": [
-    {
-      "name": "ABC123DEF456",
-      "path": "/path/to/staging/ABC123DEF456",
-      "sizeBytes": 10485760000,
-      "modTime": "2025-01-15T10:30:00Z"
-    }
-  ],
-  "totalSizeBytes": 20971520000
-}
-```
-
-#### POST /api/staging/clean
-
-Remove orphaned staging directories.
-
-**Request body**:
-```json
-{"all": false}
-```
-
-**Response** (200):
-```json
-{"removed": 3}
-```
-
-#### GET /api/discid
-
-List all cached disc ID mappings.
-
-**Response** (200):
-```json
-{
-  "entries": [
-    {
-      "number": 1,
-      "discId": "ABC123...",
-      "tmdbId": 12345,
-      "mediaType": "movie",
-      "title": "Movie Title",
-      "season": 0,
-      "cachedAt": "2025-01-15T10:30:00Z"
-    }
-  ]
-}
-```
-
-#### DELETE /api/discid/{number}
-
-Remove a specific disc ID cache entry.
-
-**Response** (200):
-```json
-{"removed": 1}
-```
-
-#### DELETE /api/discid
-
-Remove all disc ID cache entries.
-
-**Response** (200):
-```json
-{"removed": 5}
-```
-
-#### GET /api/audit/{id}
-
-Gather audit artifacts for a queue item. Returns the same structured JSON
-as `spindle audit-gather`.
-
-**Response** (200): See `auditgather.Report` in DESIGN_INFRASTRUCTURE.md Section 7.
-
-#### POST /api/config/validate
-
-Validate the current configuration. Does not modify anything.
-
-**Response** (200):
-```json
-{"valid": true, "errors": [], "path": "/path/to/config.toml"}
-```
-
----
 
 ### 2.5 Mutation Endpoints
 

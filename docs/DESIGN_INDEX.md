@@ -20,7 +20,7 @@ self-contained and focused on a single domain area.
 
 | Document | Contents | ~Lines |
 |----------|----------|--------|
-| [API_INTERFACES.md](API_INTERFACES.md) | CLI commands, HTTP API (Unix socket + optional TCP) | 890 |
+| [API_INTERFACES.md](API_INTERFACES.md) | CLI commands, HTTP API (Unix socket + optional TCP) | 810 |
 | [API_SERVICES.md](API_SERVICES.md) | External service protocols (MakeMKV, TMDB, OpenSubtitles, WhisperX, LLM, Jellyfin, ntfy, FFprobe, KeyDB, MediaInfo, mkvmerge) | 270 |
 
 ## Content ID Algorithm
@@ -52,6 +52,5 @@ self-contained and focused on a single domain area.
 - Error taxonomy -> DESIGN_INFRASTRUCTURE.md Section 5
 - CLI command reference -> API_INTERFACES.md Section 1
 - HTTP API endpoints -> API_INTERFACES.md Section 2.4
-- Operational endpoints (cache/staging/discid) -> API_INTERFACES.md Section 2.4.2
 - SSE live events -> API_INTERFACES.md Section 2.4.1
 - External service protocols -> API_SERVICES.md
