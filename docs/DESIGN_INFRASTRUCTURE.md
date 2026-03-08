@@ -317,27 +317,45 @@ MakeMKV audio extraction before rip.
 
 ### 4.6 Encoding State (`encodingstate`)
 
-Captures Drapto encoding telemetry for queue persistence and display.
+Captures Drapto encoding telemetry for queue persistence and display. Fields
+are flat -- no nested objects except for problems (validation steps, error
+detail). Each field maps directly to a display need in the TUI or API.
 
-**Snapshot** (33 JSON fields): `JobLabel`, `EpisodeKey`, `EpisodeIndex`,
-`EpisodeCount`, `Stage`, `Message`, `Percent`, `ETASeconds`, `Speed`, `FPS`,
-`Bitrate`, `TotalFrames`, `CurrentFrame`, `CurrentOutputBytes`,
-`EstimatedTotalBytes`, `Hardware`, `Video`, `Crop`, `Config`, `Validation`,
-`Warning`, `Error`, `Result`.
+**Snapshot** (22 fields, 2 nested types):
+
+| Field | Type | Set When | Display Use |
+|-------|------|----------|-------------|
+| `percent` | float64 | Live | Progress bar |
+| `eta_seconds` | float64 | Live | ETA display |
+| `fps` | float64 | Live | Throughput indicator |
+| `current_frame` | int64 | Live | Fallback percent calculation |
+| `total_frames` | int64 | Live | Fallback percent calculation |
+| `current_output_bytes` | int64 | Live | "X written" during encode |
+| `estimated_total_bytes` | int64 | Live | Estimated final size (>= 10% progress) |
+| `substage` | string | Live | Substage label: "crop_analysis", "encoding", "validation" |
+| `input_file` | string | Start | Episode matching (which rip is encoding) |
+| `resolution` | string | Start | "1080p" / "2160p" |
+| `dynamic_range` | string | Start | "SDR" / "HDR10" / "Dolby Vision" |
+| `preset` | string | Start | SVT-AV1 preset number |
+| `quality` | string | Start | CRF value |
+| `tune` | string | Start | SVT-AV1 tune parameter |
+| `crop_filter` | string | Start | FFmpeg crop filter (empty = no crop) |
+| `original_size` | int64 | End | Size comparison |
+| `encoded_size` | int64 | End | Size comparison |
+| `size_reduction_percent` | float64 | End | "42% reduction" |
+| `average_speed` | float64 | End | "1.2x avg" |
+| `encode_duration_seconds` | float64 | End | Wall-clock encode time |
+| `warning` | string | Any | Warning message |
+| `error` | *Issue | Any | Structured error detail |
+| `validation` | *Validation | End | Pass/fail with per-step detail |
 
 **Nested types:**
 
 | Type | Fields |
 |------|--------|
-| `Hardware` | Hostname |
-| `Video` | InputFile, OutputFile, Duration, Resolution, Category, DynamicRange, AudioDescription |
-| `Crop` | Message, Crop, Required, Disabled |
-| `Config` | Encoder, Preset, Tune, Quality, PixelFormat, MatrixCoefficients, AudioCodec, AudioDescription, DraptoPreset, PresetSettings, SVTParams |
-| `PresetSetting` | Key, Value |
+| `Issue` | Title, Message, Context, Suggestion |
 | `Validation` | Passed, Steps []ValidationStep |
 | `ValidationStep` | Name, Passed, Details |
-| `Issue` | Title, Message, Context, Suggestion |
-| `Result` | InputFile, OutputFile, OutputPath, OriginalSize, EncodedSize, VideoStream, AudioStream, AverageSpeed, DurationSeconds, SizeReductionPercent |
 
 **Serialization:**
 
@@ -345,7 +363,7 @@ Captures Drapto encoding telemetry for queue persistence and display.
 - `Snapshot.Marshal()`: JSON string (empty string for zero snapshot).
 - `Unmarshal(raw)`: Parse from JSON string.
 
-**Crop analysis:**
+**Crop analysis helpers** (in `auditgather`, not `encodingstate`):
 
 - `ParseCropFilter(filter)`: Extract width and height from "crop=W:H:X:Y" or
   "W:H:X:Y" format.
@@ -564,8 +582,7 @@ replacing what would otherwise be 10+ sequential shell commands.
 4. **Rip cache**: Check for cached rip data and metadata.
 5. **Envelope**: Parse RipSpec for fingerprint, content key, titles, episodes,
    assets, attributes.
-6. **Encoding**: Extract encoding snapshot (preset settings stripped for
-   compactness).
+6. **Encoding**: Extract encoding snapshot.
 7. **Media probes**: FFprobe each encoded/final file. TV: probe each episode
    asset, falling back to final path if staging cleaned up.
 

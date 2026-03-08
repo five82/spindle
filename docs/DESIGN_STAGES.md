@@ -415,12 +415,17 @@ The job runner iterates encode jobs with per-episode failure isolation:
 
 Drapto reports progress via a callback chain:
 
-1. **Apply snapshot**: update the encoding snapshot with current Drapto event
-   data (percentage, frame, speed, ETA).
+1. **Apply snapshot**: update the flat encoding snapshot with current Drapto
+   event data. Live fields: `percent`, `fps`, `eta_seconds`, `current_frame`,
+   `total_frames`, `substage`. One-time fields set at encoding start:
+   `input_file`, `resolution`, `dynamic_range`, `preset`, `quality`, `tune`,
+   `crop_filter`. End fields set on completion: `original_size`,
+   `encoded_size`, `size_reduction_percent`, `average_speed`,
+   `encode_duration_seconds`.
 2. **Update estimated size**: if progress >= 10%, read the output file's
    current size and extrapolate:
    `estimatedTotal = currentBytes / (percent / 100)`. Updates
-   `snapshot.CurrentOutputBytes` and `snapshot.EstimatedTotalBytes`.
+   `current_output_bytes` and `estimated_total_bytes`.
    Below 10% the estimate is too unstable and is skipped.
 3. **Throttle DB writes**: persist the snapshot to `encoding_details_json` at
    most once per **2 seconds** (`progressPersistInterval`). This prevents
@@ -432,6 +437,7 @@ Drapto reports progress via a callback chain:
 Drapto emits 14 event types. Each is routed to an appropriate log level
 (DEBUG for routine progress, INFO for decisions like crop/HDR detection,
 WARN/ERROR for failures) and selectively persisted to the snapshot.
+See DESIGN_INFRASTRUCTURE.md Section 4.6 for the full snapshot schema.
 
 ### 4.5 Output Organization
 

@@ -372,23 +372,23 @@ Drapto is a Go library (not a separate binary) used for SVT-AV1 encoding.
 
 ### Reporter Adapter
 
-`spindleReporter` bridges Drapto's `Reporter` interface to Spindle's
-`ProgressUpdate` type. Maps 14 Drapto event types to Spindle progress updates:
+`spindleReporter` bridges Drapto's `Reporter` interface to the flat
+`encodingstate.Snapshot`. Maps Drapto event types to snapshot fields:
 
-| Event Type | Description |
-|------------|-------------|
-| `hardware` | Host hardware summary (hostname) |
-| `initialization` | Input file analysis (resolution, duration, dynamic range, audio) |
-| `stage_progress` | General stage progress with percent, ETA |
-| `encoding_started` | Encoding begins (total frame count) |
-| `encoding_progress` | Frame-level encoding progress (percent, speed, FPS, bitrate, ETA) |
-| `encoding_config` | Encoder settings (preset, quality, pixel format, SVT-AV1 params) |
-| `crop_result` | Crop detection outcome (candidates, sample counts) |
-| `validation_complete` | Post-encode validation (per-step pass/fail) |
-| `encoding_complete` | Single file result (sizes, reduction %, duration, streams) |
-| `warning` | Non-fatal issue |
-| `error` | Fatal issue (title, message, context, suggestion) |
-| `operation_complete` | Single-file operation finished |
-| `batch_started` | Batch encoding begins (file count, file list, output dir) |
-| `file_progress` | Batch file counter (current/total) |
-| `batch_complete` | Batch summary (success count, total sizes, total duration) |
+| Event Type | Snapshot Fields Updated |
+|------------|------------------------|
+| `initialization` | `input_file`, `resolution`, `dynamic_range` |
+| `stage_progress` | `substage`, `percent`, `eta_seconds` |
+| `encoding_started` | `total_frames` |
+| `encoding_progress` | `percent`, `fps`, `eta_seconds`, `current_frame` |
+| `encoding_config` | `preset`, `quality`, `tune` |
+| `crop_result` | `crop_filter` |
+| `validation_complete` | `validation` |
+| `encoding_complete` | `original_size`, `encoded_size`, `size_reduction_percent`, `average_speed`, `encode_duration_seconds` |
+| `warning` | `warning` |
+| `error` | `error` |
+
+Remaining Drapto events (`hardware`, `operation_complete`, `batch_started`,
+`file_progress`, `batch_complete`) are logged but not persisted to the
+snapshot -- they duplicate information available on the parent queue item
+or are irrelevant for a single-machine deployment.

@@ -739,7 +739,7 @@ The `QueueItem` JSON object returned by queue endpoints:
     "bytesCopied":           int64,
     "totalBytes":            int64
   },
-  "encoding":                EncodingStatus | null,
+  "encoding":                Snapshot | null,
   "errorMessage":            string,
   "createdAt":               string (RFC3339),
   "updatedAt":               string (RFC3339),
