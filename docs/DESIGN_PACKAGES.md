@@ -63,7 +63,7 @@ internal/
   staging/              Staging directory management (list, clean stale/orphaned)
   deps/                 Dependency checking (binary resolution, requirements)
 
-  httpapi/              HTTP API server, route registration, middleware, SSE broadcaster
+  httpapi/              HTTP API server, route registration, middleware
   queueaccess/          Queue access abstraction (HTTP client + direct store)
   logs/                 Log file tailing
   auditgather/          Audit artifact collection and analysis

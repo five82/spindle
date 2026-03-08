@@ -52,5 +52,4 @@ self-contained and focused on a single domain area.
 - Error taxonomy -> DESIGN_INFRASTRUCTURE.md Section 5
 - CLI command reference -> API_INTERFACES.md Section 1
 - HTTP API endpoints -> API_INTERFACES.md Section 2.4
-- SSE live events -> API_INTERFACES.md Section 2.4.1
 - External service protocols -> API_SERVICES.md

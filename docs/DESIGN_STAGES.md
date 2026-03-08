@@ -191,7 +191,11 @@ After identification:
 2. For TV: create episode specs with placeholder keys (e.g., `s01_001`).
 3. Set metadata fields from TMDB response.
 4. Build attributes (disc number, forced subtitle track detection).
-5. Store serialized envelope in `rip_spec_data`.
+5. Build `SubtitleContext` from resolved metadata (title, media type, TMDB ID,
+   year, season, edition) and store it in envelope attributes. This consolidates
+   all metadata needed for OpenSubtitles lookups at the point where it is
+   authoritatively known, so downstream stages read it directly.
+6. Store serialized envelope in `rip_spec_data`.
 
 ### 1.10 Additional Behaviors
 
@@ -761,37 +765,13 @@ When `mux_into_mkv` is true:
 - Forced subtitle marked as forced track.
 - Original encoded file is replaced with muxed version.
 
-### 6.8 Subtitle Context Building
+### 6.8 Subtitle Context
 
-`BuildSubtitleContext()` extracts metadata from the queue item to build a
-`SubtitleContext` struct used for OpenSubtitles lookups. Consolidates data
-from three sources with fallback chains:
+The subtitle stage reads `SubtitleContext` directly from the envelope
+attributes (written by the identification stage -- see Section 1.9). No
+per-field fallback chains or multi-source reconstruction needed.
 
-**Data sources** (checked in order per field):
-1. `queue.MetadataFromJSON()` -- parsed metadata JSON
-2. Raw `metadata_json` fields -- direct JSON key access
-3. `ripspec.Parse()` -- rip spec envelope fields
-4. Derived values -- inferred from other fields
-
-**Field resolution:**
-
-| Field | Priority Chain |
-|-------|---------------|
-| `Title` | Metadata title -> disc title |
-| `ShowTitle` | Metadata show_title -> series_title -> derived from title |
-| `MediaType` | Metadata is_movie -> metadata media_type -> rip spec media_type -> `"tv"` default |
-| `TMDBID` | Metadata JSON `id` -> rip spec `Metadata.ID` -> parsed from content key |
-| `ParentTMDBID` | Metadata JSON `parent_tmdb_id` / `series_tmdb_id` / `show_tmdb_id` |
-| `Year` | Metadata JSON `release_date` / `year` -> rip spec release_date/year -> extracted from title |
-| `Season` | Metadata season_number -> rip spec -> default `1` for TV |
-| `Edition` | Rip spec edition -> `ExtractKnownEdition()` from disc title |
-
-**Show title derivation** (`deriveShowTitle()`): Splits title on the first
-occurrence of ` -- `, ` --- `, ` - `, or `: ` and returns the prefix. Used
-when no explicit show title is available.
-
-**Content key parsing**: Extracts TMDB ID and media type from content keys
-in `type:subtype:id` format (e.g., `tv:67890:s01` -> TMDB ID 67890, type `tv`).
+See DESIGN_RIPSPEC.md Section 6 for the `SubtitleContext` struct definition.
 
 ### 6.9 Transcript Cache
 

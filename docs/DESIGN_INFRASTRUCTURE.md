@@ -16,25 +16,16 @@ Two log handler modes:
   details. Used for CLI and daemon console output.
 - **JSON**: Structured JSON lines. Used for machine-readable logging.
 
-The daemon writes structured JSON log lines to a timestamped log file. An SSE
-broadcaster pushes each log record to connected `/api/events` clients in
-real-time (see API_INTERFACES.md Section 2.4.1).
+The daemon writes structured JSON log lines to a timestamped log file.
 
-### 1.2 SSE Broadcaster
-
-A lightweight in-process pub/sub channel. When a log record is written, it is
-also broadcast to any connected SSE clients. No buffering, no history, no
-on-disk archive. Clients that disconnect and reconnect pick up from the
-current stream position -- there is no replay of missed events.
-
-### 1.3 Per-Item Logs
+### 1.2 Per-Item Logs
 
 Items past the identification stage get dedicated log files:
 - Path: `{log_dir}/items/{item_id}/{session_id}.log`
 - Contains all log output from that item's processing stages.
 - Retention: `retention_days` (default 60 days).
 
-### 1.4 Log Event Structure
+### 1.3 Log Event Structure
 
 ```json
 {
@@ -45,13 +36,14 @@ Items past the identification stage get dedicated log files:
   "component": "encoder",
   "stage": "encoding",
   "item_id": 42,
+  "lane": "ripping",
   "correlation_id": "req-abc123",
   "fields": {"event_type": "stage_start", "decision_type": "..."},
   "details": [{"label": "Input", "value": "/path/to/file.mkv"}]
 }
 ```
 
-### 1.5 Level Semantics
+### 1.4 Level Semantics
 
 | Level | Use For                                                                    |
 |-------|----------------------------------------------------------------------------|
@@ -61,18 +53,18 @@ Items past the identification stage get dedicated log files:
 | WARN  | Degraded behavior (include `event_type`, `error_hint`, `impact`)          |
 | ERROR | Operation failed (include `event_type`, `error_hint`, `error`)            |
 
-### 1.6 Decision Logging
+### 1.5 Decision Logging
 
 All decisions use structured attributes:
 - `decision_type`: Category (e.g., `title_source`, `media_type_detection`)
 - `decision_result`: Outcome (e.g., `updated`, `skipped`, `detected`)
 - `decision_reason`: Why this outcome was chosen
 
-### 1.7 Progress Format
+### 1.6 Progress Format
 
 `"Phase N/M - Action (context)"` -- e.g., `"Phase 2/3 - Ripping selected titles (5 of 12)"`
 
-### 1.8 Stage Overrides
+### 1.7 Stage Overrides
 
 Per-stage log levels via `logging.stage_overrides` map:
 ```toml
@@ -81,7 +73,7 @@ encoder = "debug"
 contentid = "debug"
 ```
 
-### 1.9 Progress Sampling
+### 1.8 Progress Sampling
 
 Bucket-based progress suppression prevents log spam. State machine
 (`ProgressSampler`):
@@ -99,14 +91,13 @@ the bucket is forced to `int(100 / bucketSize)` to guarantee a final emit.
 Negative percent values (unknown progress) skip bucket evaluation entirely.
 `Reset()` clears both `lastStage` and `lastBucket` for new jobs.
 
-### 1.10 Log Filtering
+### 1.9 Log Filtering
 
 The `/api/logs` endpoint reads the JSON log file and supports server-side
-filtering by: `component`, `level`, `item` (item ID), `correlation_id`,
-`daemon_only`, and `search` (substring match across message, component,
-stage, correlation ID, fields, and details).
+filtering by: `item` (item ID), `level`, `component`, `lane`,
+`correlation_id`, and `daemon_only`.
 
-### 1.11 Retention
+### 1.10 Retention
 
 Log files older than `retention_days` are cleaned up. Per-item log directories
 are deleted when all files within them exceed retention.
@@ -556,8 +547,7 @@ default to Fatal.
 
 Used by the CLI `spindle show` command for direct file access when the daemon
 is not running. When the daemon is running, the CLI uses `/api/logs` (which
-reads and filters the same file server-side) or `/api/events` for live
-streaming.
+reads and filters the same file server-side).
 
 ---
 

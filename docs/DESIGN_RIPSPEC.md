@@ -127,12 +127,13 @@ error details for failed assets.
 
 ## 6. Attributes (Cross-Stage Communication)
 
-**EnvelopeAttributes** -- all 14 fields with writer/reader stages:
+**EnvelopeAttributes** -- all 13 fields with writer/reader stages:
 
 | Field | Type | Writer | Reader |
 |-------|------|--------|--------|
 | `disc_number` | int | Identification | Organization |
 | `has_forced_subtitle_track` | bool | Identification | Subtitles |
+| `subtitle_context` | *SubtitleContext | Identification | Subtitles |
 | `content_id_needs_review` | bool | Episode ID | Organization |
 | `content_id_review_reason` | string | Episode ID | Organization |
 | `content_id_matches` | []ContentIDMatch | Episode ID | Organization |
@@ -171,6 +172,17 @@ SubtitleGenRecord {
     Segments              int
     Language              string
     OpenSubtitlesDecision string
+}
+
+SubtitleContext {
+    Title         string  // resolved title
+    ShowTitle     string  // TV show title (empty for movies)
+    MediaType     string  // "movie" or "tv"
+    TMDBID        int     // TMDB ID
+    ParentTMDBID  int     // series TMDB ID (TV only)
+    Year          string  // release year
+    Season        int     // season number (TV only)
+    Edition       string  // edition label (if any)
 }
 
 SubtitleGenSummary {

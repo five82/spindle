@@ -263,8 +263,7 @@ user"`):
    - **SIGUSR1**: Toggle log level between current level and DEBUG. Useful
      for temporary verbose logging without a restart.
 2. Create timestamped log file: `spindle-{YYYYMMDD}T{HHMMSS.sss}Z.log`.
-3. Create SSE broadcaster for real-time log streaming to connected clients.
-4. If diagnostic mode: create separate DEBUG-level JSON log in `debug/`
+3. If diagnostic mode: create separate DEBUG-level JSON log in `debug/`
    subdirectory, assign UUID session ID, use `TeeLogger` to fan out.
 6. Write PID file (`spindle.pid`).
 7. Open queue store.

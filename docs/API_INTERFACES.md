@@ -153,17 +153,17 @@ Display daemon logs.
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--follow` | `-f` | bool | false | Follow log output |
+| `--follow` | `-f` | bool | false | Follow log output (polls `/api/logs`) |
 | `--lines` | `-n` | int | 10 | Number of lines to show (0 for all) |
 | `--component` | | string | | Filter by component label |
+| `--lane` | | string | | Filter by processing lane |
 | `--request` | | string | | Filter by request/correlation ID |
 | `--item` | `-i` | int64 | 0 | Filter by queue item ID |
 | `--level` | | string | | Minimum log level (debug, info, warn, error) |
-| `--search` | | string | | Search logs by substring |
 
 When daemon is running, uses `/api/logs` for filtered queries. Falls back to
 direct file tailing when daemon is unavailable (no structured filtering).
-`--follow` uses the SSE `/api/events` endpoint when daemon is running.
+`--follow` polls `/api/logs` with a sequence cursor.
 
 ### 1.6 Workflow Commands
 
@@ -490,14 +490,15 @@ Returns structured log events parsed from the daemon's JSON log file.
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `limit` | int | 200 | Maximum events to return |
+| `since` | uint64 | | Return events after this sequence number (cursor for polling) |
 | `tail` | string | | `1` or `true` to get the latest events |
 | `item` | int64 | | Filter by queue item ID |
 | `component` | string | | Filter by component label |
+| `lane` | string | | Filter by processing lane |
 | `daemon_only` | string | | `1` to show only daemon logs (no item association) |
 | `correlation_id` | string | | Filter by correlation/request ID |
 | `request` | string | | Alias for `correlation_id` |
 | `level` | string | | Minimum log level (debug, info, warn, error) |
-| `search` | string | | Substring search across message, component, stage, correlation ID, fields, details |
 
 **Query parameter defaults**: `limit` defaults to 200 if invalid or missing.
 String filters (`component`, `level`, etc.) are case-insensitive (compared
@@ -515,13 +516,18 @@ via `EqualFold`).
       "component": "identifier",
       "stage": "identification",
       "item_id": 5,
+      "lane": "ripping",
       "correlation_id": "abc123",
       "fields": {"event_type": "stage_complete"},
       "details": [{"label": "Title", "value": "Movie Name"}]
     }
-  ]
+  ],
+  "next": 43
 }
 ```
+
+The `next` field is the sequence cursor for polling. Pass it as the `since`
+parameter on the next request to get only newer events.
 
 #### GET /api/health
 
@@ -542,48 +548,6 @@ Returns database health diagnostics.
   "error": ""
 }
 ```
-
-### 2.4.1 Server-Sent Events (SSE)
-
-#### GET /api/events
-
-Real-time event stream using Server-Sent Events (SSE). Each log record
-written by the daemon is broadcast to connected SSE clients via a
-lightweight in-process pub/sub channel. This is the primary interface for
-live progress monitoring (used by Flyer).
-
-**Query parameters**:
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `item` | int64 | | Filter by queue item ID |
-| `component` | string | | Filter by component label |
-| `level` | string | | Minimum log level |
-
-**Response** (200, `text/event-stream`):
-
-```
-event: log
-data: {"seq":42,"ts":"2025-01-15T10:30:00.000Z","level":"INFO","msg":"encoding progress","fields":{"percent":45.2}}
-
-event: progress
-data: {"item_id":5,"stage":"encoding","percent":45.2,"message":"Phase 1/1 - Encoding (45%)"}
-```
-
-**Event types:**
-- `log`: Structured log event (same schema as `/api/logs` response items)
-- `progress`: Item progress update (stage, percent, message, encoding snapshot)
-
-**Connection lifecycle:**
-- Client connects, receives events as they occur.
-- Server sends `event: heartbeat` every 30 seconds to keep the connection alive.
-- No replay of missed events on reconnect. Clients reconnect and pick up from
-  the current stream position.
-- Connection closed on daemon shutdown or client disconnect.
-
-**Flyer integration**: Flyer uses `/api/events` for real-time encoding progress
-(FPS, ETA, percentage). `/api/logs` is available for batch queries of the log
-file.
 
 ### 2.5 Mutation Endpoints
 
@@ -799,8 +763,8 @@ The `QueueItem` JSON object returned by queue endpoints:
 
 ### 2.8 Log Access
 
-**Daemon running**: CLI uses `/api/logs` for filtered log queries and
-`/api/events` for live streaming.
+**Daemon running**: CLI uses `/api/logs` for filtered log queries. `--follow`
+polls with a sequence cursor.
 
 **Daemon not running**: CLI falls back to direct file tailing of the daemon
 log file via `logs.Tail()`. No structured filtering in this mode -- raw line
