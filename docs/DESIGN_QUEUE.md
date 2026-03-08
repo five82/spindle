@@ -29,6 +29,11 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 `SQLITE_BUSY`, or `"database is locked"` in error message. Context cancellation
 aborts the retry loop.
 
+**CLI read-only access**: When the CLI opens the database directly (daemon not
+running), it applies `PRAGMA query_only = ON` to prevent accidental writes.
+This ensures the fallback path is strictly read-only and cannot corrupt state
+that the daemon expects to own.
+
 ## 2. Schema
 
 ```sql

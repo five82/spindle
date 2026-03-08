@@ -11,6 +11,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
 ```json
 {
+  "version": 1,
   "fingerprint": "sha256:...",
   "content_key": "movie-12345" | "tv-67890-s01",
   "metadata": { ... },
@@ -20,6 +21,18 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
   "attributes": { ... }
 }
 ```
+
+## 1.1 Envelope Version
+
+The `version` field (integer) enables forward-compatible parsing. `Parse()`
+must check this field and reject envelopes with an unrecognized version rather
+than silently misinterpreting changed fields. The current version is **1**.
+
+When the envelope schema changes (added/renamed/removed fields), bump the
+version number. Items with older envelope versions in the queue will fail
+clearly on parse, allowing the user to clear and reprocess them.
+
+---
 
 ## 2. Metadata
 
@@ -43,7 +56,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
   "movie": true,
   "cached": false,
   "edition": "Extended Edition",
-  "filename": "Movie Title (2024) {edition-Extended Edition}.mkv"
+  "filename": "Movie Title (2024) - Extended Edition.mkv"
 }
 ```
 

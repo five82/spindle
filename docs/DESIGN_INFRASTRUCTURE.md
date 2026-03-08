@@ -434,8 +434,11 @@ The resolved path is verified as an executable file (stat + permission check).
 
 - `ListDirectories(stagingDir)`: List all directories with metadata (`DirInfo`:
   Name, Path, ModTime, SizeBytes).
-- `CleanStale(ctx, stagingDir, maxAge, logger)`: Remove directories older than
-  maxAge. Returns `CleanStaleResult` with removed count and errors.
+- `CleanStale(ctx, stagingDir, maxAge, activeFingerprints, logger)`: Remove
+  directories older than maxAge, skipping directories whose names match an
+  active fingerprint or `queue-*` pattern. The `activeFingerprints` set is
+  obtained from `store.ActiveFingerprints()` before calling. Returns
+  `CleanStaleResult` with removed count and errors.
 - `CleanOrphaned(ctx, stagingDir, activeFingerprints, logger)`: Remove
   directories whose names don't match any active fingerprint or `queue-*`
   format.
@@ -480,6 +483,7 @@ workflow manager's response. Stage handlers return typed errors via the
 - No reference matches found -> Degraded (keep placeholder keys, flag for review)
 
 **Encoding**:
+- Disk full (ENOSPC) -> Fatal (with hint "check available disk space")
 - Drapto non-zero exit (single episode) -> Fatal for that episode, continue others
 - All episodes fail -> Fatal for the item
 - Drapto validation failure (when enforced) -> Fatal

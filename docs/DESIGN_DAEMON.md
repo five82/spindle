@@ -256,7 +256,12 @@ user"`):
 
 `Run(ctx, cfg, opts)` is the main daemon process function:
 
-1. Set up signal handler (SIGINT, SIGTERM) for graceful shutdown.
+1. Set up signal handlers:
+   - **SIGINT, SIGTERM**: Graceful shutdown (cancel context, drain pipeline).
+   - **SIGQUIT**: Dump goroutine stacks to stderr for debugging, then
+     continue running (does not shut down).
+   - **SIGUSR1**: Toggle log level between current level and DEBUG. Useful
+     for temporary verbose logging without a restart.
 2. Create timestamped log file: `spindle-{YYYYMMDD}T{HHMMSS.sss}Z.log`.
 3. Create event archive file (`.events`) for log stream persistence.
 4. Initialize `StreamHub` (4096 event buffer) for real-time log streaming.

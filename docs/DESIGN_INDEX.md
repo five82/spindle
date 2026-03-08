@@ -13,6 +13,8 @@ self-contained and focused on a single domain area.
 | [DESIGN_DAEMON.md](DESIGN_DAEMON.md) | Daemon lifecycle, disc detection pipeline, daemon orchestration layer | 350 |
 | [DESIGN_STAGES.md](DESIGN_STAGES.md) | All 7 pipeline stages: identification, ripping, episode ID, encoding, audio analysis, subtitles, organization | 925 |
 | [DESIGN_INFRASTRUCTURE.md](DESIGN_INFRASTRUCTURE.md) | Logging, notifications, preflight, shared utilities, log access, audit gathering, config validation, shared transcription service | 620 |
+| [DESIGN_PACKAGES.md](DESIGN_PACKAGES.md) | Go package layout, dependency rules, module boundaries, key interfaces | 170 |
+| [DESIGN_TESTING.md](DESIGN_TESTING.md) | Testing strategy, interface boundaries for mocking, test categories, fixtures | 200 |
 
 ## API Reference
 
@@ -44,8 +46,12 @@ self-contained and focused on a single domain area.
 - Stable-TS post-processing -> DESIGN_STAGES.md Section 6.1.1
 - SRT alignment algorithm -> DESIGN_STAGES.md Section 6.4.2
 - Subtitle candidate ranking -> DESIGN_STAGES.md Section 6.5
+- Go package tree -> DESIGN_PACKAGES.md Section 1
+- Dependency layer rules -> DESIGN_PACKAGES.md Section 2
+- Test double interfaces -> DESIGN_TESTING.md Section 2
 - Error taxonomy -> DESIGN_INFRASTRUCTURE.md Section 5
 - CLI command reference -> API_INTERFACES.md Section 1
 - HTTP API endpoints -> API_INTERFACES.md Section 2.4
+- Operational endpoints (cache/staging/discid) -> API_INTERFACES.md Section 2.4.2
 - SSE live events -> API_INTERFACES.md Section 2.4.1
 - External service protocols -> API_SERVICES.md

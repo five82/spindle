@@ -866,11 +866,20 @@ the duration of transcription work.
 2. Check file size >= 5 MB (minimum for valid media file).
 3. Run ffprobe validation on encoded file.
 4. Cross-validate: check for missing encoded episodes.
+5. **Partial file cleanup**: Before copying, check the target library path for
+   files from a previous interrupted attempt. If a target file exists but its
+   size is less than the source file's size, remove it (likely a partial copy
+   from a crash). This ensures idempotent retry of the organization stage.
 
 ### 7.2 Library Path Resolution
 
 **Movies**: `{library_dir}/{movies_dir}/{Title} ({Year})/{Title} ({Year}).mkv`
-- With edition: `{Title} ({Year}) {edition-Edition Name}.mkv`
+- With edition: `{Title} ({Year}) - Edition Name.mkv`
+
+**Edition format**: Jellyfin treats editions as movie versions using a
+` - Label` suffix (space-hyphen-space-label). Examples: `Movie (2024) - Director's Cut.mkv`,
+`Movie (2024) - Extended Edition.mkv`. Labels are freeform text. This is distinct
+from Plex's `{edition-...}` tag format.
 
 **TV**: `{library_dir}/{tv_dir}/{Show Name}/Season {NN}/{Show Name} - S{NN}E{NN} - {Episode Title}.mkv`
 
@@ -924,7 +933,8 @@ After successful organization (if `jellyfin.enabled`):
 final filename when edition metadata is present. This catches logic bugs in
 the metadata-to-filename path.
 
-- Checks that the filename (without extension) ends with ` - {Edition}`.
+- Checks that the filename (without extension) ends with ` - Edition Name`
+  (space-hyphen-space-label, matching Jellyfin's version naming convention).
 - On mismatch: returns `ErrValidation` with details. Logged with
   `event_type: "edition_validation_failed"`.
 - On success: logged with `event_type: "edition_validation_passed"`.
