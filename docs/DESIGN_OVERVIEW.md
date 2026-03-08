@@ -221,9 +221,6 @@ completion, cancellation, or failure. Stages that do not require a semaphore
 for the next disc), while encoding and later stages run concurrently in the
 background.
 
-**Per-item logging**: Items past the identification stage get dedicated log
-files at `{log_dir}/items/{item_id}/{session_id}.log`.
-
 ### 4.4 Stage Configuration Wiring
 
 `ConfigureStages(stages []pipelineStage)` registers an ordered slice of stage
@@ -285,10 +282,11 @@ not gate stage execution because temporary service unavailability is
 better handled by failing the item and retrying via `spindle queue retry`
 than by a pre-check that may itself be stale.
 
-**Per-item logging**: The pipeline manager attaches a per-item `*slog.Logger`
-to the context before calling `Run`. Handlers retrieve it via
+**Per-item logging**: The pipeline manager attaches an `item_id` attribute to
+the logger before calling `Run`. Handlers retrieve it via
 `stage.LoggerFromContext(ctx)`, which falls back to `slog.Default()` if
-absent.
+absent. All log lines for an item share the same `item_id` field, enabling
+filtering from the single daemon log.
 
 ### 4.6 Stage Execution Lifecycle
 
@@ -556,7 +554,7 @@ classification to be available.
 |-------------------|-------------------|-----------|---------------------------------------|
 | `format`          | string            | `console` | Log format: "console" or "json"       |
 | `level`           | string            | `info`    | Default log level                     |
-| `retention_days`  | int               | 60        | Days to retain per-item log files     |
+| `retention_days`  | int               | 60        | Days to retain daemon log files       |
 
 ### 5.7 Hardcoded Constants (Not Configurable)
 
@@ -639,9 +637,6 @@ $XDG_CACHE_HOME/spindle/
   spindle.log           # Main daemon log (symlink to current)
   spindle.lock          # Lock file
   queue.db              # SQLite database
-  items/
-    {item_id}/
-      {session_id}.log  # Per-item log file
 
 $XDG_RUNTIME_DIR/
   spindle.sock          # HTTP API Unix socket

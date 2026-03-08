@@ -58,7 +58,6 @@ CREATE TABLE IF NOT EXISTS queue_items (
     metadata_json TEXT,
     needs_review INTEGER NOT NULL DEFAULT 0,
     review_reason TEXT,
-    item_log_path TEXT,
     drapto_preset_profile TEXT,
     progress_stage TEXT,
     progress_percent REAL DEFAULT 0.0,
@@ -78,7 +77,7 @@ the write frequency (every 2-5 seconds during encoding/ripping) without
 contention issues at this scale. This eliminates the join complexity and lazy
 row creation of a separate progress table.
 
-## 3. Item Model (24 columns)
+## 3. Item Model (23 columns)
 
 | Column                 | Type      | Purpose                                           |
 |------------------------|-----------|---------------------------------------------------|
@@ -98,7 +97,6 @@ row creation of a separate progress table.
 | `metadata_json`        | TEXT      | JSON-encoded TMDB metadata                        |
 | `needs_review`         | INTEGER   | 1 if item requires manual review                  |
 | `review_reason`        | TEXT      | Why review is needed (semicolon-separated)        |
-| `item_log_path`        | TEXT      | Path to per-item log file                         |
 | `drapto_preset_profile`| TEXT      | Drapto encoding preset profile                    |
 | `progress_stage`       | TEXT      | Current stage display name                        |
 | `progress_percent`     | REAL      | Progress percentage (0-100)                       |

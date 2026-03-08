@@ -648,7 +648,6 @@ The `QueueItem` JSON object returned by queue endpoints:
   "rippedFile":              string,
   "encodedFile":             string,
   "finalFile":               string,
-  "itemLogPath":             string,
   "needsReview":             bool,
   "reviewReason":            string,
   "metadata":                object (raw JSON),

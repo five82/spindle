@@ -18,14 +18,7 @@ Two log handler modes:
 
 The daemon writes structured JSON log lines to a timestamped log file.
 
-### 1.2 Per-Item Logs
-
-Items past the identification stage get dedicated log files:
-- Path: `{log_dir}/items/{item_id}/{session_id}.log`
-- Contains all log output from that item's processing stages.
-- Retention: `retention_days` (default 60 days).
-
-### 1.3 Log Event Structure
+### 1.2 Log Event Structure
 
 ```json
 {
@@ -43,7 +36,7 @@ Items past the identification stage get dedicated log files:
 }
 ```
 
-### 1.4 Level Semantics
+### 1.3 Level Semantics
 
 | Level | Use For                                                                    |
 |-------|----------------------------------------------------------------------------|
@@ -53,18 +46,18 @@ Items past the identification stage get dedicated log files:
 | WARN  | Degraded behavior (include `event_type`, `error_hint`, `impact`)          |
 | ERROR | Operation failed (include `event_type`, `error_hint`, `error`)            |
 
-### 1.5 Decision Logging
+### 1.4 Decision Logging
 
 All decisions use structured attributes:
 - `decision_type`: Category (e.g., `title_source`, `media_type_detection`)
 - `decision_result`: Outcome (e.g., `updated`, `skipped`, `detected`)
 - `decision_reason`: Why this outcome was chosen
 
-### 1.6 Progress Format
+### 1.5 Progress Format
 
 `"Phase N/M - Action (context)"` -- e.g., `"Phase 2/3 - Ripping selected titles (5 of 12)"`
 
-### 1.7 Progress Sampling
+### 1.6 Progress Sampling
 
 Bucket-based progress suppression prevents log spam. State machine
 (`ProgressSampler`):
@@ -82,17 +75,16 @@ the bucket is forced to `int(100 / bucketSize)` to guarantee a final emit.
 Negative percent values (unknown progress) skip bucket evaluation entirely.
 `Reset()` clears both `lastStage` and `lastBucket` for new jobs.
 
-### 1.8 Log Filtering
+### 1.7 Log Filtering
 
 The daemon writes a single DEBUG-level JSON log file. The `/api/logs` endpoint
 filters to INFO+ by default, providing clean output for Flyer and CLI consumers.
 Additional server-side filters: `item` (item ID), `component`, `lane`,
 `request`, and `daemon_only`.
 
-### 1.9 Retention
+### 1.8 Retention
 
-Log files older than `retention_days` are cleaned up. Per-item log directories
-are deleted when all files within them exceed retention.
+Daemon log files older than `retention_days` are cleaned up on startup.
 
 ---
 
@@ -361,14 +353,15 @@ type Handler interface {
 }
 ```
 
-**Per-item logging**: The pipeline manager attaches a per-item logger to the
-context before calling `Run`. Handlers retrieve it via:
+**Per-item logging**: The pipeline manager attaches an `item_id` attribute to
+the logger before calling `Run`. Handlers retrieve it via:
 
 ```go
 func LoggerFromContext(ctx context.Context) *slog.Logger
 ```
 
-Returns `slog.Default()` if no logger is attached.
+Returns `slog.Default()` if no logger is attached. All log lines for an item
+share the same `item_id` field, enabling filtering from the single daemon log.
 
 **Helper:**
 
@@ -510,8 +503,8 @@ type count reflects the breadth of the audit surface (7 pipeline stages,
 `Gather(ctx, cfg, item)` collects all artifacts for a queue item:
 
 1. **Item summary**: ID, title, status, timestamps, file paths.
-2. **Log analysis**: Parse per-item log for decisions, warnings, errors,
-   stage events.
+2. **Log analysis**: Filter daemon log by item ID for decisions, warnings,
+   errors, stage events.
 3. **Rip cache**: Check for cached rip data and metadata.
 4. **Envelope**: Parse RipSpec for fingerprint, content key, titles, episodes,
    assets, attributes. Reads `disc_source` from envelope metadata.
@@ -568,7 +561,7 @@ Pre-computed summaries derived from gathered data:
 | `disc_source` | string | From envelope `metadata.disc_source` |
 | `edition` | string? | Detected edition label |
 | `phase_*` | bool | Phase applicability flags (see Section 7.1) |
-| `logs` | LogAnalysis? | Parsed per-item log |
+| `logs` | LogAnalysis? | Log entries filtered by item ID |
 | `rip_cache` | RipCacheReport? | Cached rip data and metadata |
 | `envelope` | EnvelopeReport? | Parsed RipSpec envelope |
 | `encoding` | EncodingReport? | Encoding snapshot |
@@ -594,7 +587,6 @@ Pre-computed summaries derived from gathered data:
 | `progress_stage` | string? |
 | `progress_percent` | float64? |
 | `progress_message` | string? |
-| `item_log_path` | string? |
 | `ripped_file` | string? |
 | `encoded_file` | string? |
 | `final_file` | string? |

@@ -272,9 +272,8 @@ user"`):
 9. Call `daemon.Start()`.
 10. Block on signal context until shutdown signal received.
 
-**Log retention**: On startup, cleans old log files exceeding
-`logging.retention_days` across 3 targets: daemon logs, per-item logs, and
-tool logs.
+**Log retention**: On startup, cleans old daemon log files exceeding
+`logging.retention_days`.
 
 **Current log pointer**: Creates `spindle.log` symlink (with hardlink fallback)
 pointing to the active log file for easy access.
