@@ -280,8 +280,7 @@ pointing to the active log file for easy access.
 
 **Options:**
 
-- `LogLevel`: Override log level.
-- `Development`: Enable development mode logging.
+- `Development`: Enable development mode logging (console format to stderr).
 
 ### 3.2 Daemon Control (`daemonctl`)
 

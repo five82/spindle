@@ -552,8 +552,6 @@ classification to be available.
 
 | Field             | Type              | Default   | Purpose                               |
 |-------------------|-------------------|-----------|---------------------------------------|
-| `format`          | string            | `console` | Log format: "console" or "json"       |
-| `level`           | string            | `info`    | Default log level                     |
 | `retention_days`  | int               | 60        | Days to retain daemon log files       |
 
 ### 5.7 Hardcoded Constants (Not Configurable)
