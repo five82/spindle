@@ -28,10 +28,6 @@ Single binary: `spindle`
 
 Start the spindle daemon. If no daemon process is running, launches one.
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--diagnostic` | bool | false | Enable diagnostic mode with separate DEBUG logs |
-
 Behavior:
 - Resolves own executable path for daemon launch
 - Calls `daemonctl.EnsureStarted()` with 10s timeout
@@ -49,10 +45,6 @@ Behavior:
 #### `spindle restart`
 
 Restart the spindle daemon (stop then start).
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--diagnostic` | bool | false | Enable diagnostic mode with separate DEBUG logs |
 
 Behavior:
 - Stop timeout: 5s, start timeout: 10s

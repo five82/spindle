@@ -84,8 +84,9 @@ Negative percent values (unknown progress) skip bucket evaluation entirely.
 
 ### 1.8 Log Filtering
 
-The `/api/logs` endpoint reads the JSON log file and supports server-side
-filtering by: `item` (item ID), `level`, `component`, `lane`,
+The daemon writes a single DEBUG-level JSON log file. The `/api/logs` endpoint
+filters to INFO+ by default, providing clean output for Flyer and CLI consumers.
+Additional server-side filters: `item` (item ID), `component`, `lane`,
 `request`, and `daemon_only`.
 
 ### 1.9 Retention
@@ -603,7 +604,6 @@ Pre-computed summaries derived from gathered data:
 | Field | Type |
 |-------|------|
 | `path` | string |
-| `is_debug` | bool |
 | `total_lines` | int |
 | `decisions` | []LogDecision |
 | `warnings` | []LogEntry |

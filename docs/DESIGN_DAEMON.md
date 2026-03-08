@@ -259,19 +259,18 @@ user"`):
    - **SIGINT, SIGTERM**: Graceful shutdown (cancel context, drain pipeline).
    - **SIGQUIT**: Dump goroutine stacks to stderr for debugging, then
      continue running (does not shut down).
-   - **SIGUSR1**: Toggle log level between current level and DEBUG. Useful
-     for temporary verbose logging without a restart.
-2. Create timestamped log file: `spindle-{YYYYMMDD}T{HHMMSS.sss}Z.log`.
-3. If diagnostic mode: create separate DEBUG-level JSON log in `debug/`
-   subdirectory, assign UUID session ID, use `TeeLogger` to fan out.
-4. Write PID file (`spindle.pid`).
-5. Open queue store.
-6. Create notification service.
-7. Create workflow manager (with optional diagnostic mode).
-8. Register all 7 stages via `ConfigureStages()`.
-9. Create daemon instance.
-10. Call `daemon.Start()`.
-11. Block on signal context until shutdown signal received.
+   - **SIGUSR1**: Toggle log level between INFO and DEBUG. Useful for
+     reducing log noise temporarily without a restart.
+2. Create timestamped DEBUG-level JSON log file:
+   `spindle-{YYYYMMDD}T{HHMMSS.sss}Z.log`.
+3. Write PID file (`spindle.pid`).
+4. Open queue store.
+5. Create notification service.
+6. Create workflow manager.
+7. Register all 7 stages via `ConfigureStages()`.
+8. Create daemon instance.
+9. Call `daemon.Start()`.
+10. Block on signal context until shutdown signal received.
 
 **Log retention**: On startup, cleans old log files exceeding
 `logging.retention_days` across 3 targets: daemon logs, per-item logs, and
@@ -284,7 +283,6 @@ pointing to the active log file for easy access.
 
 - `LogLevel`: Override log level.
 - `Development`: Enable development mode logging.
-- `Diagnostic`: Enable separate DEBUG log, UUID session tracking.
 
 ### 3.2 Daemon Control (`daemonctl`)
 
