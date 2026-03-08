@@ -209,12 +209,10 @@ extracts the `LABEL` and `FSTYPE` fields from the first non-empty output line.
 
 `IsUnusableLabel()` rejects labels matching these patterns:
 - Empty strings
-- Generic names: `LOGICAL_VOLUME_ID`, `VOLUME_ID`, `DVD_VIDEO`, `BLURAY`,
-  `BD_ROM`, `UNTITLED`, `UNKNOWN DISC`, `VOLUME_`, `DISK_`, `TRACK_`
+- Generic names (case-insensitive): `LOGICAL_VOLUME_ID`, `VOLUME_ID`,
+  `DVD_VIDEO`, `BLURAY`, `BD_ROM`, `UNTITLED`, `UNKNOWN DISC`, `VOLUME_`,
+  `DISK_`, `TRACK_`
 - All digits: `^\d+$`
-- Short codes: 1-4 character uppercase alphanumeric codes
-- Disc patterns: contains "DISC"/"DISK" + underscore
-- Technical uppercase: all uppercase with underscores, length > 8 chars
 
 `ExtractDiscNameFromVolumeID()` cleans volume IDs:
 1. Strip leading digits + underscore prefix
