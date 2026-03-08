@@ -301,8 +301,9 @@ Two methods, no health checks. Preflight dependency checks (binary existence
 via `exec.LookPath`) run per-item before stage execution (see Section 4.6
 step 4). Deeper connectivity checks (TMDB, Jellyfin, OpenSubtitles) are
 standalone functions used by `spindle status` and `/api/status` -- they do
-not gate stage execution because transient retry (Section 4.6 failure
-handling) handles temporary service unavailability better than a pre-check.
+not gate stage execution because temporary service unavailability is
+better handled by failing the item and retrying via `spindle queue retry`
+than by a pre-check that may itself be stale.
 
 **Per-item logging**: The pipeline manager attaches a per-item `*slog.Logger`
 to the context before calling `Prepare` and `Execute`. Handlers retrieve it
@@ -340,15 +341,14 @@ monitoring) are owned by the handler, not the generic lifecycle. See
 DESIGN_STAGES.md Section 2.6.
 
 **Failure handling** (`handleStageFailure`):
-- Classifies error via `services.Details(err)` which extracts structured
-  `ErrorDetails` (Kind, Stage, Operation, Message, Code, Hint, Cause).
-- See DESIGN_INFRASTRUCTURE.md Section 5 for the full error taxonomy.
-- **Transient** errors are retried (up to 3 times with backoff) before failing.
-- **Fatal** errors fail the item immediately.
-- **Degraded** errors are logged as warnings; processing continues.
+- Checks error type: `services.ErrDegraded` is logged as a warning and
+  processing continues. All other errors fail the item.
+- See DESIGN_INFRASTRUCTURE.md Section 5 for the error taxonomy.
 - On failure: sets `item.Stage = failed`, `item.InProgress = 0`.
 - Records `failed_at_stage` for retry routing.
 - Persists, notifies, and checks queue completion.
+- Retry is workflow-level: `spindle queue retry <id>` re-runs from the
+  failed stage.
 
 **DB write failure during stage execution**: If a persistence step (3, 6)
 fails, the item is marked as failed with the DB error. The in-memory state

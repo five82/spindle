@@ -427,89 +427,53 @@ command.
 
 ## 5. Error Taxonomy
 
-All stage errors are classified into three categories that determine the
-workflow manager's response. Stage handlers return typed errors via the
-`services` package.
+Stage handlers return errors via the `services` package. Two outcomes:
+fail the item or warn and continue.
 
-### 5.1 Error Categories
+### 5.1 Error Types
 
-| Category | Error Type | Behavior | Max Retries | Examples |
-|----------|-----------|----------|-------------|----------|
-| **Transient** | `services.ErrTransient` | Retry with exponential backoff (1s, 2s, 4s) | 3 | Network timeouts, rate limits, temporary disk full, `SQLITE_BUSY` beyond DB retry |
-| **Fatal** | `services.ErrFatal` | Fail the item immediately, record `failed_at_stage` | 0 | MakeMKV read error, ffmpeg non-zero exit, validation failure, missing required file |
-| **Degraded** | `services.ErrDegraded` | Log warning, continue with reduced functionality | N/A | Commentary detection failure, Jellyfin refresh failure, metadata write failure |
+| Type | Error | Behavior |
+|------|-------|----------|
+| **Fail** | Any non-degraded error | Fail the item, record `failed_at_stage` |
+| **Warn** | `services.ErrDegraded` | Log warning, continue processing |
 
-### 5.2 Error Classification by Stage
+No in-process retry. Retry is workflow-level: `spindle queue retry <id>`
+re-runs from the failed stage.
 
-**Identification**:
-- TMDB network timeout -> Transient
-- MakeMKV scan failure -> Fatal
-- bd_info unavailable -> Degraded (proceed without enhanced metadata)
-- TMDB returns no results -> Degraded (use fallback metadata, flag for review)
+### 5.2 Degraded Errors (warn and continue)
 
-**Ripping**:
-- MakeMKV `ErrTimeout` -> Fatal (with hint "consider increasing rip_timeout")
-- MakeMKV non-zero exit -> Fatal
-- Drive not ready after 60s -> Fatal
-- Rip cache write failure -> Degraded (rip succeeded, cache is optional)
+Degraded errors are for optional functionality whose failure should not
+block the pipeline:
 
-**Episode Identification**:
-- WhisperX transcription failure -> Fatal (cannot proceed without transcripts)
-- OpenSubtitles rate limit -> Transient
-- OpenSubtitles network error -> Transient
-- No reference matches found -> Degraded (keep placeholder keys, flag for review)
+- bd_info unavailable (proceed without enhanced metadata)
+- TMDB returns no results (use fallback metadata, flag for review)
+- Rip cache write failure (rip succeeded, cache is optional)
+- No episode ID reference matches (keep placeholder keys, flag for review)
+- Commentary detection failure (continue without commentary labels)
+- OpenSubtitles download failure (skip forced subs)
+- SRT validation issues (flag for review, don't fail)
+- Jellyfin refresh failure (log warning)
+- Subtitle sidecar move failure (log warning)
 
-**Encoding**:
-- Disk full (ENOSPC) -> Fatal (with hint "check available disk space")
-- Drapto non-zero exit (single episode) -> Fatal for that episode, continue others
-- All episodes fail -> Fatal for the item
-- Drapto validation failure (when enforced) -> Fatal
-- Drapto validation failure (when not enforced) -> Degraded (log only)
+Everything else (MakeMKV failures, encoding errors, file copy errors,
+WhisperX failures, network errors) fails the item.
 
-**Audio Analysis**:
-- FFprobe failure -> Fatal
-- Commentary detection failure -> Degraded (continue without commentary labels)
-- Stereo downmix computation error -> Degraded (skip candidate, continue)
-
-**Subtitles**:
-- WhisperX transcription produces 0 cues -> Transient (may be a temporary issue)
-- OpenSubtitles download failure -> Degraded (skip forced subs)
-- SRT validation issues -> Degraded (flag for review, don't fail)
-
-**Organization**:
-- Target file copy failure -> Fatal
-- Library directory unavailable -> Fatal (route to review)
-- Jellyfin refresh failure -> Degraded (log warning)
-- Subtitle sidecar move failure -> Degraded (log warning)
-
-### 5.3 Retry Behavior
-
-When a transient error triggers retry:
-1. Stage execution is attempted up to 3 times total (1 initial + 2 retries).
-2. Backoff: 1s after first failure, 2s after second, 4s after third.
-3. If all retries exhausted: error escalates to Fatal (item fails).
-4. Retry count is logged at INFO with `decision_type: "retry"`.
-5. Retries happen within the same `processItem()` call -- the item stays
-   in `in_progress = 1` during retries.
-
-### 5.4 Error Detail Extraction
+### 5.3 Error Detail Extraction
 
 `services.Details(err)` extracts structured information from errors:
 
 ```go
 type ErrorDetails struct {
-    Kind      ErrorKind   // transient, fatal, degraded
     Stage     string      // stage name where error occurred
     Operation string      // specific operation (e.g., "ffprobe", "tmdb_search")
     Message   string      // human-readable error message
-    Code      int         // exit code for external tools (0 if N/A)
     Hint      string      // actionable suggestion for the user
     Cause     error       // underlying error
 }
 ```
 
-ErrorKind is inferred from the error type chain (`errors.As`). Untyped errors
-default to Fatal.
+Untyped errors fail the item by default. `ErrDegraded` is detected via
+`errors.As`.
 
 ---
 
@@ -827,4 +791,4 @@ After WhisperX completes:
 
 1. **Hallucination filtering**: Remove WhisperX artifacts and repetitive
    segments (see DESIGN_STAGES.md Section 6.2).
-2. **Validation**: Zero-segment output returns `ErrTransient`.
+2. **Validation**: Zero-segment output fails the stage.

@@ -548,8 +548,7 @@ transcription work.
 5. WhisperX produces SRT output.
 6. **Hallucination filtering**: `filterTranscriptionOutput()` removes WhisperX
    artifacts and repetitive segments.
-7. **Zero-segment SRT is fatal**: If filtering produces 0 cues, the stage fails
-   with `ErrTransient`.
+7. **Zero-segment SRT is fatal**: If filtering produces 0 cues, the stage fails.
 8. **Duration fallback**: If `totalSeconds <= 0`, extracts duration from last SRT
    timestamp.
 
@@ -577,7 +576,7 @@ watching", "thanks for watching", "please subscribe", "like and subscribe",
 "well be right back", "bye", "bye bye", "see you next time", "see you later".
 
 Cue indices are renumbered sequentially after filtering. Zero surviving cues
-causes the stage to fail with `ErrTransient`.
+causes the stage to fail.
 
 ### 6.3 SRT Validation
 

@@ -19,7 +19,7 @@ internal/
   queue/                SQLite store, Item model, Stage types, metadata helpers
   ripspec/              RipSpec envelope data model, parse/encode, asset tracking
   stage/                Handler interface, context-scoped logger, ParseRipSpec helper
-  services/             Error types (ErrTransient, ErrFatal, ErrDegraded, ErrorDetails)
+  services/             Error types (ErrDegraded, ErrorDetails)
 
   daemon/               Daemon lifecycle, lock file, disc pause/resume
   daemonrun/            Daemon runtime entry point (Run function)
