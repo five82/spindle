@@ -270,11 +270,8 @@ leading/trailing hyphens and underscores trimmed.
 
 **Pruning algorithm** (`prune()`):
 - Triggered after every `Store()` or `Register()` call.
-- Two constraints checked in a loop: total cache size <= `max_gib` AND
-  filesystem free space >= **20%** (`freeSpaceFloor = 0.20`).
-- While either constraint violated: remove the oldest entry (by modification
-  time). The `keepPath` entry is skipped unless it is the sole remaining entry.
-- Free space checked via `Statfs()` syscall (`Bavail * Bsize / Blocks * Bsize`).
+- While total cache size > `max_gib`: remove the oldest entry (by modification
+  time). The just-stored entry is never removed.
 
 **Restore flow** (`Restore()`):
 - Used when re-encoding after a failure: if the target directory is empty/missing
