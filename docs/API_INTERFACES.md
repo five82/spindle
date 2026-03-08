@@ -94,7 +94,7 @@ Show detailed information for a single queue item.
 
 Arguments: `<id>` -- queue item ID (required, exactly 1).
 
-Output includes: ID, title, status, timestamps, source path, disc fingerprint,
+Output includes: ID, title, status, timestamps, disc fingerprint,
 progress, review status, error, file paths (ripped/encoded/final), metadata,
 episode details with per-episode progress and subtitle info, and rip spec
 fingerprints.
@@ -376,8 +376,8 @@ Skips config loading (loads its own config internally).
 ### 2.1 Server Configuration
 
 - **Unix socket**: `$XDG_RUNTIME_DIR/spindle.sock` (always created)
-- **TCP bind** (optional): `paths.api_bind` (e.g., `127.0.0.1:7487`)
-- **Auth token**: `paths.api_token` -- when set, all requests require
+- **TCP bind** (optional): `api.bind` (e.g., `127.0.0.1:7487`)
+- **Auth token**: `api.token` -- when set, all requests require
   `Authorization: Bearer <token>` header
 - **Server timeouts**:
   - ReadHeaderTimeout: 5s
@@ -391,9 +391,14 @@ consumers. Both the Unix socket and optional TCP bind serve identical endpoints.
 The primary external consumer is **Flyer**, a read-only TUI
 ([github.com/five82/flyer](https://github.com/five82/flyer)).
 
+**No API versioning**: This is a single-user, single-TUI project. API
+endpoints use `/api/` prefix without version numbers. Breaking changes are
+coordinated by updating both Spindle and Flyer together. No backwards
+compatibility is maintained across versions.
+
 ### 2.2 Authentication
 
-When `api_token` is configured, all endpoints require:
+When `api.token` is configured, all endpoints require:
 ```
 Authorization: Bearer <token>
 ```
@@ -401,7 +406,7 @@ Authorization: Bearer <token>
 Missing or invalid token returns `401 Unauthorized`.
 
 **Middleware**: Bearer token validation wraps all HTTP handlers. When
-`api_token` is empty, the middleware is a passthrough (no auth required).
+`api.token` is empty, the middleware is a passthrough (no auth required).
 
 ### 2.3 Error Response Format
 
@@ -427,8 +432,7 @@ Returns daemon status.
     "running": true,
     "queueStats": {"pending": 2, "completed": 5},
     "lastError": "",
-    "lastItem": null,
-    "stageHealth": [{"name": "identifier", "ready": true, "detail": ""}]
+    "lastItem": null
   },
   "dependencies": [
     {"name": "makemkvcon", "command": "makemkvcon", "description": "...", "optional": false, "available": true}
@@ -569,6 +573,46 @@ Returns database health diagnostics.
   "error": ""
 }
 ```
+
+### 2.4.1 Server-Sent Events (SSE)
+
+#### GET /api/events
+
+Real-time event stream using Server-Sent Events (SSE). Replaces long-polling
+of `/api/logs?follow=true` for live progress monitoring. The `StreamHub`
+already has pub/sub semantics; this endpoint exposes them as an SSE stream.
+
+**Query parameters**:
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `item` | int64 | | Filter by queue item ID |
+| `component` | string | | Filter by component label |
+| `level` | string | | Minimum log level |
+
+**Response** (200, `text/event-stream`):
+
+```
+event: log
+data: {"seq":42,"ts":"2025-01-15T10:30:00.000Z","level":"INFO","msg":"encoding progress","fields":{"percent":45.2}}
+
+event: progress
+data: {"item_id":5,"stage":"encoding","percent":45.2,"message":"Phase 1/1 - Encoding (45%)"}
+```
+
+**Event types:**
+- `log`: Structured log event (same schema as `/api/logs` response items)
+- `progress`: Item progress update (stage, percent, message, encoding snapshot)
+
+**Connection lifecycle:**
+- Client connects, receives events as they occur.
+- Server sends `event: heartbeat` every 30 seconds to keep the connection alive.
+- Client reconnect uses `Last-Event-ID` header (set to last received `seq`).
+- Connection closed on daemon shutdown or client disconnect.
+
+**Flyer integration**: Flyer should prefer `/api/events` over polling
+`/api/logs?follow=true` for real-time encoding progress (FPS, ETA, percentage).
+The polling endpoint remains available for batch queries and historical data.
 
 ### 2.5 Mutation Endpoints
 
@@ -715,7 +759,6 @@ The `QueueItem` JSON object returned by queue endpoints:
 {
   "id":                      int64,
   "discTitle":               string,
-  "sourcePath":              string,
   "stage":                   string,
   "inProgress":              bool,
   "progress": {

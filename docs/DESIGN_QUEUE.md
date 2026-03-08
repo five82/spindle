@@ -9,7 +9,8 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 ## 1. SQLite Setup
 
 - **Location**: `{log_dir}/queue.db`
-- **Driver**: modernc.org/sqlite (pure-Go) with WAL mode
+- **Driver**: `modernc.org/sqlite` (pure-Go, no CGo). Avoids CGo build
+  complexity with negligible performance difference at this scale.
 - **Transient**: No migration system. On schema changes, bump `schemaVersion`
   constant and users clear the database.
 - **Current schema version**: 5
@@ -37,76 +38,113 @@ CREATE TABLE IF NOT EXISTS schema_version (
 
 CREATE TABLE IF NOT EXISTS queue_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_path TEXT,
     disc_title TEXT,
     stage TEXT NOT NULL,
+    in_progress INTEGER NOT NULL DEFAULT 0,
     failed_at_stage TEXT,
-    media_info_json TEXT,
     ripped_file TEXT,
     encoded_file TEXT,
     final_file TEXT,
     error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    progress_stage TEXT,
-    progress_percent REAL DEFAULT 0.0,
-    progress_message TEXT,
     rip_spec_data TEXT,
     disc_fingerprint TEXT,
     metadata_json TEXT,
     needs_review INTEGER NOT NULL DEFAULT 0,
     review_reason TEXT,
     item_log_path TEXT,
-    encoding_details_json TEXT,
+    drapto_preset_profile TEXT
+);
+
+CREATE TABLE IF NOT EXISTS item_progress (
+    item_id INTEGER PRIMARY KEY REFERENCES queue_items(id) ON DELETE CASCADE,
+    progress_stage TEXT,
+    progress_percent REAL DEFAULT 0.0,
+    progress_message TEXT,
     active_episode_key TEXT,
     progress_bytes_copied INTEGER DEFAULT 0,
     progress_total_bytes INTEGER DEFAULT 0,
-    drapto_preset_profile TEXT,
-    in_progress INTEGER NOT NULL DEFAULT 0
+    encoding_details_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_queue_stage ON queue_items(stage);
 CREATE INDEX IF NOT EXISTS idx_queue_fingerprint ON queue_items(disc_fingerprint);
 ```
 
-## 3. Item Model (27 columns)
+**Table split rationale**: Progress fields change at high frequency (every
+2-5 seconds during encoding/ripping) while core item fields change only at
+stage transitions. Separating them into `queue_items` and `item_progress`
+reduces write contention on the core table and makes the schema more
+navigable. The `item_progress` row is created lazily when a stage first
+reports progress, and deleted with the parent item via `ON DELETE CASCADE`.
+
+## 3. Item Model
+
+### 3.1 Core Fields (`queue_items`, 17 columns)
 
 | Column                | Type      | Purpose                                           |
 |-----------------------|-----------|---------------------------------------------------|
 | `id`                  | INTEGER   | Auto-increment primary key                        |
-| `source_path`         | TEXT      | Original source file path (for file-based input)  |
 | `disc_title`          | TEXT      | Disc label / identified title                     |
 | `stage`               | TEXT      | Current pipeline stage                            |
+| `in_progress`         | INTEGER   | 1 if item is actively being processed             |
 | `failed_at_stage`     | TEXT      | Stage when failure occurred (for retry routing)   |
-| `media_info_json`     | TEXT      | Raw media info JSON blob                          |
 | `ripped_file`         | TEXT      | Path to ripped MKV file                           |
 | `encoded_file`        | TEXT      | Path to encoded file                              |
 | `final_file`          | TEXT      | Path to final organized file                      |
 | `error_message`       | TEXT      | Last error message                                |
 | `created_at`          | TIMESTAMP | Item creation time                                |
 | `updated_at`          | TIMESTAMP | Last update time                                  |
-| `progress_stage`      | TEXT      | Current stage display name                        |
-| `progress_percent`    | REAL      | Progress percentage (0-100)                       |
-| `progress_message`    | TEXT      | Human-readable progress message                   |
 | `rip_spec_data`       | TEXT      | JSON-encoded RipSpec envelope                     |
 | `disc_fingerprint`    | TEXT      | SHA-256 hash of disc filesystem metadata          |
 | `metadata_json`       | TEXT      | JSON-encoded TMDB metadata                        |
 | `needs_review`        | INTEGER   | 1 if item requires manual review                  |
 | `review_reason`       | TEXT      | Why review is needed (semicolon-separated)        |
 | `item_log_path`       | TEXT      | Path to per-item log file                         |
-| `encoding_details_json`| TEXT     | Drapto encoding snapshot JSON                     |
-| `active_episode_key`  | TEXT      | Currently processing episode (e.g., s01e03)       |
-| `progress_bytes_copied`| INTEGER  | Bytes copied during organizing                    |
-| `progress_total_bytes` | INTEGER  | Total bytes to copy during organizing             |
 | `drapto_preset_profile`| TEXT     | Drapto encoding preset profile                    |
-| `in_progress`          | INTEGER  | 1 if item is actively being processed             |
+
+### 3.2 Progress Fields (`item_progress`, 7 columns)
+
+| Column                 | Type      | Purpose                                           |
+|------------------------|-----------|---------------------------------------------------|
+| `item_id`              | INTEGER   | FK to queue_items.id (PK, 1:1)                   |
+| `progress_stage`       | TEXT      | Current stage display name                        |
+| `progress_percent`     | REAL      | Progress percentage (0-100)                       |
+| `progress_message`     | TEXT      | Human-readable progress message                   |
+| `active_episode_key`   | TEXT      | Currently processing episode (e.g., s01e03)       |
+| `progress_bytes_copied`| INTEGER   | Bytes copied during organizing                    |
+| `progress_total_bytes` | INTEGER   | Total bytes to copy during organizing             |
+| `encoding_details_json`| TEXT      | Drapto encoding snapshot JSON                     |
 
 ## 4. Stage Model (10 stages + in_progress flag)
 
 Items track their position in the pipeline with a `stage` field (TEXT) and an
-`in_progress` flag (INTEGER, 0 or 1). This replaces the previous 16-status
-model with a simpler representation: the stage says *where* the item is, and
+`in_progress` flag (INTEGER, 0 or 1). The stage says *where* the item is, and
 the flag says *whether work is actively happening*.
+
+**Type-safe stages in Go:**
+
+```go
+type Stage string
+
+const (
+    StagePending              Stage = "pending"
+    StageIdentification       Stage = "identification"
+    StageRipping              Stage = "ripping"
+    StageEpisodeIdentification Stage = "episode_identification"
+    StageEncoding             Stage = "encoding"
+    StageAudioAnalysis        Stage = "audio_analysis"
+    StageSubtitling           Stage = "subtitling"
+    StageOrganizing           Stage = "organizing"
+    StageCompleted            Stage = "completed"
+    StageFailed               Stage = "failed"
+)
+```
+
+A `ValidTransitions` map enforces that only legal stage transitions are
+possible. Invalid transitions return an error rather than silently corrupting
+state.
 
 **Stage values** (10):
 
@@ -192,6 +230,18 @@ On daemon shutdown:
 4. On next startup, these items are picked up and re-executed from the
    beginning of their current stage.
 
+## 7. NextReady Query
+
+`NextReady(stageOrder []Stage)` is the primary queue fetch used by the
+pipeline poll loop. It returns the oldest item where `in_progress = 0` and
+`stage` is not a terminal stage (`completed`, `failed`), ordered by:
+
+1. Stage priority (position in `stageOrder` slice -- disc-dependent stages first)
+2. Creation time (FIFO within the same stage)
+
+This is built on top of `NextForStatuses()` with the stage order derived
+from the pipeline configuration.
+
 ## 8. Review vs Failed Semantics
 
 - **Failed**: Operation error. Item can be retried with `queue retry`. The
@@ -209,11 +259,11 @@ On daemon shutdown:
 
 | Operation | Purpose |
 |-----------|---------|
-| `NewDisc(title, fingerprint)` | Insert new pending item (fingerprint required) |
-| `GetByID(id)` | Fetch single item by primary key |
+| `NewDisc(title, fingerprint)` | Insert new pending item (disc fingerprint required) |
+| `GetByID(id)` | Fetch single item by primary key (LEFT JOIN item_progress) |
 | `FindByFingerprint(fp)` | Find first item matching a disc fingerprint |
-| `Update(item)` | Full item update (mutable columns); applies stop-review override |
-| `UpdateProgress(item)` | Progress-only update (stage, percent, message, bytes, encoding, episode key) |
+| `Update(item)` | Full item update on `queue_items` (mutable columns); applies stop-review override |
+| `UpdateProgress(item)` | Upsert on `item_progress` (stage, percent, message, bytes, encoding, episode key). High-frequency; does not touch `queue_items` |
 | `Remove(id)` | Delete single item |
 | `Clear()` | Delete all items |
 | `ClearCompleted()` | Delete only completed items |

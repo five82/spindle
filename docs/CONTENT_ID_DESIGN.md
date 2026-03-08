@@ -86,10 +86,11 @@ Ripped Episode Files
 For each episode in the rip spec envelope that has a ripped asset:
 
 1. Create working directory: `<staging_root>/contentid/<episode_key>/`
-2. Build a `subtitles.GenerateRequest` with the ripped file path
-3. Execute WhisperX via the subtitle generator service
-4. Read the generated SRT file and normalize it (strip SRT formatting, clean text)
-5. Create a text fingerprint from the normalized plain text
+2. Invoke the shared transcription service (see DESIGN_INFRASTRUCTURE.md
+   Section 9) with the ripped file path. The `whisperxSem` semaphore is
+   held by the episode identification stage for the duration.
+3. Read the generated SRT file and normalize it (strip SRT formatting, clean text)
+4. Create a text fingerprint from the normalized plain text
 
 ### 4.2 Progress Reporting
 
@@ -139,7 +140,9 @@ Selection reasons: `top_result`, `title_consistency_rerank`, `non_hi_preferred`,
 
 ### 5.4 Rate Limiting
 
-- Minimum 1-second interval between OpenSubtitles API calls (`MinInterval`)
+- Minimum 3-second interval between OpenSubtitles API calls (consistent with
+  the rate limit enforced by the OpenSubtitles client; see API_SERVICES.md
+  Section 3).
 - Retriable errors (rate limits) use exponential backoff with `MaxRateRetries`
 - Backoff: `InitialBackoff * 2^(attempt-1)`, capped at `MaxBackoff`
 

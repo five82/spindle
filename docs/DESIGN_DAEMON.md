@@ -21,7 +21,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 8. Create disc monitor (if optical drive configured).
 9. Create netlink monitor (if optical drive configured).
 10. Create HTTP API server (Unix socket at `$XDG_RUNTIME_DIR/spindle.sock`,
-    optional TCP bind at `api_bind`).
+    optional TCP bind at `api.bind`).
 
 **Start phase** (in `Start()`):
 1. **Acquire lock file** via `flock.TryLock()` (fail if another instance running).
@@ -342,8 +342,9 @@ error event, return the stage error.
 **Options:** Logger, Store, Notifier, Handler, StageName, Processing status,
 Done status, Item.
 
-The `Handler` interface mirrors `stage.Handler` (Prepare + Execute). If the
-handler implements `stage.LoggerAware`, it receives a stage-scoped logger.
+The `Handler` interface mirrors `stage.Handler` (Prepare + Execute). The
+per-item logger is attached to the context (see DESIGN_OVERVIEW.md
+Section 4.5).
 
 ### 3.4 Queue Access Fallback (`queueaccess`)
 

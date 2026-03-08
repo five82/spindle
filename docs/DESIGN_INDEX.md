@@ -12,7 +12,7 @@ self-contained and focused on a single domain area.
 | [DESIGN_RIPSPEC.md](DESIGN_RIPSPEC.md) | RipSpec envelope: structure, metadata, titles, episodes, assets, attributes, methods | 210 |
 | [DESIGN_DAEMON.md](DESIGN_DAEMON.md) | Daemon lifecycle, disc detection pipeline, daemon orchestration layer | 350 |
 | [DESIGN_STAGES.md](DESIGN_STAGES.md) | All 7 pipeline stages: identification, ripping, episode ID, encoding, audio analysis, subtitles, organization | 925 |
-| [DESIGN_INFRASTRUCTURE.md](DESIGN_INFRASTRUCTURE.md) | Logging, notifications, preflight, shared utilities, log access, audit gathering, config validation | 520 |
+| [DESIGN_INFRASTRUCTURE.md](DESIGN_INFRASTRUCTURE.md) | Logging, notifications, preflight, shared utilities, log access, audit gathering, config validation, shared transcription service | 620 |
 
 ## API Reference
 
@@ -36,12 +36,16 @@ self-contained and focused on a single domain area.
 - RipSpec data model -> DESIGN_RIPSPEC.md
 - Disc fingerprinting -> DESIGN_DAEMON.md Section 2.4
 - Stage execution lifecycle -> DESIGN_OVERVIEW.md Section 4.6
+- Stage cancellation contract -> DESIGN_OVERVIEW.md Section 4.6.1
+- Resource semaphores -> DESIGN_OVERVIEW.md Section 4.3
 - MakeMKV robot format -> DESIGN_STAGES.md Section 1.1.1
 - Audio track selection -> DESIGN_INFRASTRUCTURE.md Section 4.5
+- Shared transcription service -> DESIGN_INFRASTRUCTURE.md Section 9
 - Stable-TS post-processing -> DESIGN_STAGES.md Section 6.1.1
 - SRT alignment algorithm -> DESIGN_STAGES.md Section 6.4.2
 - Subtitle candidate ranking -> DESIGN_STAGES.md Section 6.5
 - Error taxonomy -> DESIGN_INFRASTRUCTURE.md Section 5
 - CLI command reference -> API_INTERFACES.md Section 1
 - HTTP API endpoints -> API_INTERFACES.md Section 2.4
+- SSE live events -> API_INTERFACES.md Section 2.4.1
 - External service protocols -> API_SERVICES.md

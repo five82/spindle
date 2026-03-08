@@ -291,10 +291,6 @@ leading/trailing hyphens and underscores trimmed.
   before ripping to ensure the drive is ready.
 - **MakeMKV settings**: `ensureMakeMKVSettings()` configures audio track selection
   before each rip.
-- **Rip source fallback**: If MakeMKV produces no output but `item.SourcePath`
-  exists, copies source file to staging instead of failing.
-  - Filename chain: sanitized item title -> source filename base -> `"spindle-disc"` (ultimate fallback)
-  - Extension: preserves source file extension, defaults to `.mkv` if empty
 - **Progress sampling**: Updates saved to queue at **5-second intervals** to avoid
   SQLite churn.
 - **Rip cache incomplete detection** (TV): Checks all expected title IDs have
@@ -459,6 +455,9 @@ WARN/ERROR for failures) and selectively persisted to the snapshot.
 
 ## 5. Stage: Audio Analysis
 
+This stage performs two distinct operations in sequence: audio track
+refinement (on ripped files) and commentary detection (on encoded files).
+
 ### 5.1 Audio Refinement Algorithm
 
 `RefineAudioTargets()` selects and remuxes audio tracks on ripped files:
@@ -522,10 +521,10 @@ with `event_type: "commentary_detection_failed"` and processing continues.
 **Episode consistency check**: For TV content (> 1 episode), validates audio
 stream counts after commentary handling.
 
-> **Rewrite improvement**: Consolidate WhisperX into a shared transcription
-> service. Currently WhisperX is invoked separately for episode ID, subtitles,
-> and commentary detection with separate caching. A unified transcription service
-> with shared cache would reduce duplication.
+**Transcription**: Commentary detection uses the shared transcription service
+(see DESIGN_INFRASTRUCTURE.md Section 9) to invoke WhisperX. The `whisperxSem`
+semaphore is held by the audio analysis stage for the duration of any
+transcription work.
 
 ---
 
@@ -806,14 +805,14 @@ from three sources with fallback chains:
 
 | Field | Priority Chain |
 |-------|---------------|
-| `Title` | Metadata title -> disc title -> source path |
+| `Title` | Metadata title -> disc title |
 | `ShowTitle` | Metadata show_title -> series_title -> derived from title |
 | `MediaType` | Metadata is_movie -> metadata media_type -> rip spec media_type -> `"tv"` default |
 | `TMDBID` | Metadata JSON `id` -> rip spec `Metadata.ID` -> parsed from content key |
 | `ParentTMDBID` | Metadata JSON `parent_tmdb_id` / `series_tmdb_id` / `show_tmdb_id` |
 | `Year` | Metadata JSON `release_date` / `year` -> rip spec release_date/year -> extracted from title |
 | `Season` | Metadata season_number -> rip spec -> default `1` for TV |
-| `Edition` | Rip spec edition -> `ExtractKnownEdition()` from disc title / source path |
+| `Edition` | Rip spec edition -> `ExtractKnownEdition()` from disc title |
 
 **Show title derivation** (`deriveShowTitle()`): Splits title on the first
 occurrence of ` -- `, ` --- `, ` - `, or `: ` and returns the prefix. Used
@@ -852,7 +851,10 @@ copy failure. All logged with `decision_type: "transcript_cache"`.
 - **SRT validation review**: SRT validation issues (e.g., suspicious segment patterns)
   flag the item for review but do not fail the stage.
 
-> **Rewrite improvement**: See note in Section 5 about shared transcription service.
+**Transcription**: Subtitle generation uses the shared transcription service
+(see DESIGN_INFRASTRUCTURE.md Section 9) to invoke WhisperX and manage
+caching. The `whisperxSem` semaphore is held by the subtitling stage for
+the duration of transcription work.
 
 ---
 

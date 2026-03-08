@@ -65,7 +65,7 @@ them to appear in Jellyfin without manual intervention.
 | Library | Purpose                              |
 |---------|--------------------------------------|
 | Drapto  | Go library for SVT-AV1 encoding     |
-| SQLite  | Queue database (via go-sqlite3)      |
+| SQLite  | Queue database (via modernc.org/sqlite, pure-Go) |
 
 ---
 
@@ -167,20 +167,20 @@ Single binary `spindle` with two execution modes:
 **Single HTTP API**: All communication uses HTTP REST endpoints. The server
 listens on:
 - **Unix socket**: `$XDG_RUNTIME_DIR/spindle.sock` (primary, used by CLI)
-- **TCP** (optional): `api_bind` address (e.g., `127.0.0.1:7487`) for remote
+- **TCP** (optional): `api.bind` address (e.g., `127.0.0.1:7487`) for remote
   consumers like Flyer
 
 Both listeners serve the same endpoints and share the same auth model. Token
-auth via `api_token` applies to both.
+auth via `api.token` applies to both.
 
 **Queue access fallback**: When daemon is unavailable, CLI queue commands open
 the SQLite database directly for read-only operations.
 
-### 4.3 Concurrency Model: Single Pipeline with Disc Semaphore
+### 4.3 Concurrency Model: Single Pipeline with Resource Semaphores
 
 The workflow manager runs a single processing pipeline. Multiple items can be
 in-flight concurrently (one encoding while another is being identified), but
-the optical drive is a shared resource guarded by a semaphore.
+several resources require exclusive access, each guarded by a semaphore.
 
 **Stage sequence** (per item):
 1. **Identification** (pending -> identification)
@@ -194,9 +194,18 @@ the optical drive is a shared resource guarded by a semaphore.
 Each stage transitions the item's `stage` field. The `in_progress` flag
 tracks whether work is actively executing (see DESIGN_QUEUE.md Section 4).
 
-**Disc semaphore**: Identification and ripping require exclusive access to
-the optical drive. A semaphore (capacity 1) prevents concurrent disc access.
-All other stages run freely without acquiring the semaphore.
+**Resource semaphores** (all capacity 1):
+
+| Semaphore | Guards | Stages |
+|-----------|--------|--------|
+| `discSem` | Optical drive | Identification, Ripping |
+| `encodeSem` | SVT-AV1 encoder (CPU-bound) | Encoding |
+| `whisperxSem` | WhisperX GPU/model (shared transcription service) | Episode Identification, Audio Analysis (commentary), Subtitling |
+
+Each semaphore prevents concurrent use of a constrained resource. A stage
+acquires its required semaphore before execution and releases it on
+completion, cancellation, or failure. Stages that do not require a semaphore
+(Organization) run freely.
 
 **Pipeline poll loop** (`run()`):
 1. Check `ctx.Done()` for shutdown.
@@ -205,11 +214,15 @@ All other stages run freely without acquiring the semaphore.
    same stage).
 3. If no item: wait `queue_poll_interval` seconds, loop.
 4. If queue fetch error: log, wait `error_retry_interval` seconds, loop.
-5. Run preflight dependency checks. **Failure halts the pipeline** (requires
-   daemon restart) to prevent repeated failures against missing binaries.
-6. Spawn goroutine: acquire disc semaphore if needed, set `in_progress = 1`,
-   process item via `processItem()`, advance stage, release semaphore.
-7. Loop (immediately look for next item; don't wait for spawned goroutine).
+5. Spawn goroutine: acquire required semaphore(s), run preflight checks for
+   the stage, set `in_progress = 1`, process item via `processItem()`,
+   advance stage, release semaphore(s).
+6. Loop (immediately look for next item; don't wait for spawned goroutine).
+
+**Preflight per item**: Dependency checks run after semaphore acquisition and
+before stage execution. This catches missing binaries or unavailable services
+before committing to work. Preflight failure marks the item as failed (not
+the entire pipeline), allowing other items at different stages to continue.
 
 **Stage priority** ensures disc-dependent stages run first (freeing the drive
 for the next disc), while encoding and later stages run concurrently in the
@@ -250,7 +263,9 @@ type pipelineState struct {
     stages       []pipelineStage
     stageOrder   []queue.Stage                // ordered for NextReady()
     stageByStart map[queue.Stage]pipelineStage
-    discSem      chan struct{}                // capacity 1, guards disc access
+    discSem      chan struct{}                // capacity 1, guards optical drive
+    encodeSem    chan struct{}                // capacity 1, guards SVT-AV1 encoder
+    whisperxSem  chan struct{}                // capacity 1, guards WhisperX GPU
     logger       *slog.Logger
 }
 ```
@@ -263,6 +278,8 @@ type pipelineStage struct {
     stage       queue.Stage        // stage value this handler processes
     nextStage   queue.Stage        // stage to advance to on success
     needsDisc   bool               // true for identification, ripping
+    needsEncode bool               // true for encoding
+    needsWhisperX bool             // true for episode_id, audio_analysis, subtitling
 }
 ```
 
@@ -278,43 +295,50 @@ Every pipeline stage implements:
 type Handler interface {
     Prepare(ctx context.Context, item *queue.Item) error
     Execute(ctx context.Context, item *queue.Item) error
-    HealthCheck(ctx context.Context) Health
 }
 ```
 
-Optional interface for per-item logging:
+Two methods, no health checks. Preflight dependency checks (binary existence
+via `exec.LookPath`) run per-item before stage execution (see Section 4.6
+step 4). Deeper connectivity checks (TMDB, Jellyfin, OpenSubtitles) are
+standalone functions used by `spindle status` and `/api/status` -- they do
+not gate stage execution because transient retry (Section 4.6 failure
+handling) handles temporary service unavailability better than a pre-check.
 
-```go
-type LoggerAware interface {
-    SetLogger(logger *slog.Logger)
-}
-```
+**Per-item logging**: The pipeline manager attaches a per-item `*slog.Logger`
+to the context before calling `Prepare` and `Execute`. Handlers retrieve it
+via `stage.LoggerFromContext(ctx)`, which falls back to `slog.Default()` if
+absent. This replaces mutable `SetLogger()` calls with immutable,
+request-scoped context values.
 
 ### 4.6 Stage Execution Lifecycle
 
 The manager's `processItem()` drives daemon-mode execution. The standalone
 `stageexec.Run()` provides a similar path for CLI one-shot workflows.
 
-**Full lifecycle per item** (13 steps with persistence points):
+**Full lifecycle per item** (14 steps with persistence points):
 
 1. Look up stage handler by `item.Stage` in `pipeline.stageByStart`.
-2. Create request UUID and stage context (child of daemon context).
-3. If handler implements `LoggerAware`, call `SetLogger()`.
-4. **Initialize progress state**: set `ProgressStage` via `deriveStageLabel()`
+2. Acquire required semaphore(s) for this stage (blocks until available).
+3. Create request UUID and stage context (child of daemon context).
+   Attach per-item `*slog.Logger` to the context.
+4. **Run preflight checks** for this stage's dependencies. On failure:
+   mark item as failed with hint, release semaphore, return.
+5. **Initialize progress state**: set `ProgressStage` via `deriveStageLabel()`
    (title-cases the stage name), set default message `"{label} started"`,
    reset `ProgressPercent` to 0.
-5. **Set `in_progress = 1`**, persist.
-6. Call `handler.Prepare(ctx, item)`.
-7. **Persist** post-Prepare state changes.
-8. If stage is "ripper" and rip hooks registered: call `BeforeRip()`.
-9. Call `handler.Execute(ctx, item)` (blocking).
-10. If stage is "ripper" and rip hooks registered: call `AfterRip()`.
-11. **Handle execution error**: if `context.Canceled`, log DEBUG, set
-    `in_progress = 0`, persist, and return. Otherwise call
+6. **Set `in_progress = 1`**, persist.
+7. Call `handler.Prepare(ctx, item)`.
+8. **Persist** post-Prepare state changes.
+9. If stage is "ripper" and rip hooks registered: call `BeforeRip()`.
+10. Call `handler.Execute(ctx, item)` (blocking).
+11. If stage is "ripper" and rip hooks registered: call `AfterRip()`.
+12. **Handle execution error**: if `context.Canceled`, log DEBUG, set
+    `in_progress = 0`, persist, release semaphore, and return. Otherwise call
     `handleStageFailure()`.
-12. Advance `item.Stage` to next stage. Set `in_progress = 0`.
+13. Advance `item.Stage` to next stage. Set `in_progress = 0`.
     If completed: finalize progress (ensure percent >= 100, non-empty message).
-13. **Persist** final state.
+14. **Persist** final state. Release semaphore.
 
 **Failure handling** (`handleStageFailure`):
 - Classifies error via `services.Details(err)` which extracts structured
@@ -326,6 +350,40 @@ The manager's `processItem()` drives daemon-mode execution. The standalone
 - On failure: sets `item.Stage = failed`, `item.InProgress = 0`.
 - Records `failed_at_stage` for retry routing.
 - Persists, notifies, and checks queue completion.
+
+**DB write failure during stage execution**: If a persistence step (6, 8, 14)
+fails, the item is marked as failed with the DB error. The in-memory state
+may diverge from the persisted state, but startup recovery (Section 4.7)
+handles this by resetting all `in_progress` flags. The item will be
+re-executed from the beginning of its current stage on next startup.
+
+### 4.6.1 Stage Cancellation Contract
+
+When the daemon shuts down or an item is stopped, the stage context is
+cancelled. All stage handlers must observe `ctx.Done()` and comply with
+these rules:
+
+**General rules (all stages):**
+1. External processes must be started with `exec.CommandContext(ctx, ...)`
+   so they are killed on cancellation.
+2. Handlers should return promptly after observing cancellation. Return
+   `ctx.Err()` (which will be `context.Canceled`).
+3. Partial work in the staging directory is left as-is. The stage will
+   re-execute from the beginning on retry; resume-capable stages
+   (encoding, subtitles) skip already-completed episodes.
+4. Resource semaphores are released by the manager, not the handler.
+
+**Per-stage cancellation behavior:**
+
+| Stage | On Cancellation |
+|-------|-----------------|
+| Identification | MakeMKV scan killed. No cleanup needed. |
+| Ripping | MakeMKV rip killed. Partial files left in staging (overwritten on retry). |
+| Episode ID | WhisperX killed. Partial transcripts left (reusable on retry). |
+| Encoding | Drapto/FFmpeg killed. Partial output left. Resume skips completed episodes. |
+| Audio Analysis | FFmpeg/WhisperX killed. No persistent side effects. |
+| Subtitling | WhisperX killed. Partial SRTs left. Resume skips completed episodes. |
+| Organization | **Must clean up partial copies.** Incomplete files in the library are dangerous. On cancellation, remove any partially-written target file before returning. |
 
 ### 4.7 Crash Recovery
 
@@ -367,7 +425,7 @@ All secrets can be set via environment variables (overrides config file):
 | `TMDB_API_KEY`             | `tmdb.api_key`                      |
 | `JELLYFIN_API_KEY`         | `jellyfin.api_key`                  |
 | `OPENROUTER_API_KEY`       | `llm.api_key`                       |
-| `SPINDLE_API_TOKEN`        | `paths.api_token`                   |
+| `SPINDLE_API_TOKEN`        | `api.token`                         |
 | `HUGGING_FACE_HUB_TOKEN`  | `subtitles.whisperx_hf_token`       |
 | `HF_TOKEN`                 | `subtitles.whisperx_hf_token` (alternative) |
 | `OPENSUBTITLES_API_KEY`    | `subtitles.opensubtitles_api_key`   |
@@ -394,8 +452,13 @@ On config load, `EnsureDirectories` creates:
 | `review_dir`             | string | `~/review`                                   | Unidentified files routed for manual review|
 | `opensubtitles_cache_dir`| string | `~/.local/share/spindle/cache/opensubtitles` | OpenSubtitles download cache               |
 | `whisperx_cache_dir`     | string | `~/.local/share/spindle/cache/whisperx`      | WhisperX transcription cache               |
-| `api_bind`               | string | (empty)                                      | Optional TCP listen address for HTTP API   |
-| `api_token`              | string | (empty)                                      | Bearer token for HTTP API auth             |
+
+#### `[api]`
+
+| Field                    | Type   | Default                                      | Purpose                                    |
+|--------------------------|--------|----------------------------------------------|--------------------------------------------|
+| `bind`                   | string | (empty)                                      | Optional TCP listen address for HTTP API   |
+| `token`                  | string | (empty)                                      | Bearer token for HTTP API auth             |
 
 #### `[tmdb]`
 
@@ -508,9 +571,15 @@ On config load, `EnsureDirectories` creates:
 | `whisperx_model`       | string  | `large-v3-turbo`   | WhisperX model (falls back to subtitles model)|
 | `similarity_threshold` | float64 | 0.92               | Cosine similarity for stereo downmix check   |
 | `confidence_threshold` | float64 | 0.80               | LLM confidence required for classification   |
-| `api_key`              | string  | (empty)            | LLM API key (falls back to [llm])            |
-| `base_url`             | string  | (empty)            | LLM base URL (falls back to [llm])           |
-| `model`                | string  | (empty)            | LLM model (falls back to [llm])              |
+| `api_key`              | string  | (empty)            | LLM API key (falls back to `[llm].api_key`)  |
+| `base_url`             | string  | (empty)            | LLM base URL (falls back to `[llm].base_url`)|
+| `model`                | string  | (empty)            | LLM model (falls back to `[llm].model`)      |
+
+**LLM fallback chain**: Each `[commentary]` LLM field is resolved independently.
+If `commentary.api_key` is set but `commentary.model` is empty, the API key
+comes from `[commentary]` and the model from `[llm]`. All three fields
+(`api_key`, `base_url`, `model`) must resolve to non-empty values (from either
+section) for commentary LLM classification to be available.
 
 #### `[content_id]`
 

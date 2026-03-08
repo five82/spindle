@@ -120,7 +120,7 @@ Auth headers:
 - `Authorization: Bearer <opensubtitles_user_token>` (optional, for download quota)
 - `User-Agent: <opensubtitles_user_agent>`
 
-Rate limiting: Minimum **3 seconds** between API calls (client-enforced `MinInterval`).
+Rate limiting: Minimum **3 seconds** between API calls (client-enforced).
 
 Exponential backoff: initial **2 seconds**, max **60 seconds**, **6 retries**.
 
@@ -278,12 +278,17 @@ Tags: <comma_separated_tags>
 
 No authentication (relies on topic URL privacy or server-level auth).
 
-13 event types generate notifications:
-- `disc_detected`, `identification_complete`, `identification_failed`
-- `rip_start`, `rip_complete`, `rip_failed`
-- `encode_complete`, `encode_failed`
-- `organize_complete`, `organize_failed`
-- `pipeline_complete`, `pipeline_failed`
+13 event types generate notifications (see DESIGN_INFRASTRUCTURE.md
+Section 2.2 for the canonical list):
+- `disc_detected`, `identification_complete`
+- `rip_start`, `rip_complete`
+- `encode_complete`
+- `validation_failed`
+- `pipeline_complete`
+- `organize_complete`
+- `queue_started`, `queue_completed`
+- `error`
+- `unidentified_media`
 - `test`
 
 Deduplication: key = `event + label`, window = configurable seconds.
@@ -295,6 +300,8 @@ Deduplication: key = `event + label`, window = configurable seconds.
 ```
 ffprobe -v quiet -print_format json -show_format -show_streams <file>
 ```
+
+This is the canonical invocation used everywhere in Spindle.
 
 Used for: media file validation, stream inspection, duration detection,
 codec identification.

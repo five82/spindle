@@ -26,8 +26,7 @@ Fanout handler tees records to multiple downstream handlers when needed.
 
 ### 1.2 Log Streaming: StreamHub / EventArchive
 
-**StreamHub**: In-memory bounded ring buffer (default capacity: 512 events).
-The daemon overrides this to 4096 (`daemonrun/run.go`).
+**StreamHub**: In-memory bounded ring buffer (default capacity: 4096 events).
 - `Publish(event)`: Append event, broadcast to subscribers.
 - `Fetch(since, limit, wait)`: Retrieve events with optional blocking for follow mode.
 - `Tail(limit)`: Get most recent events without blocking.
@@ -141,16 +140,18 @@ notifications: `identification`, `rip`, `encoding`, `validation`,
 
 ### 2.2 Event Types (13)
 
+These are the canonical event type names used throughout the codebase:
+
 | Event                      | Config Gate           | Priority | Tags            | Suppression Rules                  |
 |----------------------------|-----------------------|----------|-----------------|------------------------------------|
 | `disc_detected`            | `identification`      | default  | -               | -                                  |
-| `identification_completed` | `identification`      | default  | identify        | Skip if display title empty        |
-| `rip_started`              | (never sent)          | -        | -               | Always suppressed                  |
-| `rip_completed`            | `rip`                 | default  | rip             | Cache hit + duration < min_rip_seconds|
-| `encoding_completed`       | `encoding`            | default  | encode          | Skip placeholder (no client)       |
+| `identification_complete`  | `identification`      | default  | identify        | Skip if display title empty        |
+| `rip_start`               | (never sent)          | -        | -               | Always suppressed                  |
+| `rip_complete`            | `rip`                 | default  | rip             | Cache hit + duration < min_rip_seconds|
+| `encode_complete`         | `encoding`            | default  | encode          | Skip placeholder (no client)       |
 | `validation_failed`        | `validation`          | high     | validation,warning | -                               |
-| `processing_completed`     | (internal, always sent)| -       | -               | -                                  |
-| `organization_completed`   | `organization`        | default  | organize        | -                                  |
+| `pipeline_complete`       | (internal, always sent)| -       | -               | -                                  |
+| `organize_complete`       | `organization`        | default  | organize        | -                                  |
 | `queue_started`            | `queue`               | default  | queue           | count < queue_min_items            |
 | `queue_completed`          | `queue`               | default  | queue           | processed+failed < queue_min_items |
 | `error`                    | `errors`              | high     | error           | -                                  |
@@ -165,9 +166,9 @@ notifications: `identification`, `rip`, `encoding`, `validation`,
 
 ### 2.4 Suppression Rules
 
-- `rip_completed` with cache hit: suppress if rip duration < `min_rip_seconds`.
+- `rip_complete` with cache hit: suppress if rip duration < `min_rip_seconds`.
 - `queue_started`/`queue_completed`: suppress if item count < `queue_min_items`.
-- `encoding_completed`: suppress if placeholder (no Drapto client).
+- `encode_complete`: suppress if placeholder (no Drapto client).
 
 ---
 
@@ -175,7 +176,11 @@ notifications: `identification`, `rip`, `encoding`, `validation`,
 
 ### 3.1 System Dependencies
 
-Checked at daemon startup and via `spindle status`:
+Checked at daemon startup, before each item's stage execution (after
+semaphore acquisition), and via `spindle status`. Per-item checks verify
+only the dependencies required by the current stage, not all dependencies.
+A preflight failure marks the item as failed (with a hint about the missing
+dependency) without halting the entire pipeline.
 
 | Dependency | Command       | Optional | Condition                     |
 |------------|---------------|----------|-------------------------------|
@@ -272,7 +277,7 @@ Lookup indexes are built at init from code tables supporting ISO 639-1
 
 ### 4.4 Media Inspection (`media/ffprobe`)
 
-Wraps `ffprobe -v error -hide_banner -show_format -show_streams -of json`.
+Wraps `ffprobe -v quiet -print_format json -show_format -show_streams`.
 
 **Types:**
 
@@ -378,28 +383,36 @@ Contract that all pipeline stages must implement:
 type Handler interface {
     Prepare(ctx context.Context, item *queue.Item) error
     Execute(ctx context.Context, item *queue.Item) error
-    HealthCheck(ctx context.Context) Health
 }
 ```
 
-Optional interface for stages that accept a per-item logger:
+**Per-item logging**: The pipeline manager attaches a per-item logger to the
+context before calling `Prepare` and `Execute`. Handlers retrieve it via:
 
 ```go
-type LoggerAware interface {
-    SetLogger(logger *slog.Logger)
-}
+func LoggerFromContext(ctx context.Context) *slog.Logger
 ```
 
-**Health reporting:**
-
-- `Health` struct: `Name string`, `Ready bool`, `Detail string`.
-- `Healthy(name)`: Construct ready status.
-- `Unhealthy(name, detail)`: Construct unhealthy status.
+Returns `slog.Default()` if no logger is attached.
 
 **Helper:**
 
 - `ParseRipSpec(raw)`: Parse rip spec string into `ripspec.Envelope`, returning
   `services.ErrValidation` on failure (standard error for stage Execute methods).
+
+### 4.7.1 Connectivity Checks (standalone)
+
+Deeper service health checks are standalone functions, not part of the
+`Handler` interface. Used by `spindle status` and `GET /api/status`:
+
+- `CheckLLM(ctx, cfg)`: Health check against configured LLM API (30s timeout).
+- `CheckJellyfin(ctx, cfg)`: Auth check via `/Users` endpoint.
+- `CheckOpenSubtitles(ctx, cfg)`: Format info check via `/infos/formats`.
+- `CheckDirectoryAccess(paths)`: Verify read/write/execute on staging,
+  library, review dirs.
+
+These do not gate stage execution. Transient service failures are handled
+by the stage's own retry logic.
 
 ### 4.8 Dependency Resolution (`deps`)
 
@@ -815,3 +828,88 @@ CLI config commands don't require a running daemon:
 
 Some CLI commands are annotated with `skipConfigLoad` and work without any
 config file. These include: `config init`, `queue health`, and help commands.
+
+---
+
+## 9. Shared Transcription Service
+
+### 9.1 Purpose
+
+WhisperX transcription is used by three subsystems: episode identification,
+commentary detection, and subtitle generation. Rather than each subsystem
+invoking WhisperX independently with separate caching, a shared
+`transcription` package provides a unified interface.
+
+### 9.2 Interface
+
+```go
+type Service struct {
+    // Configuration: model, CUDA, VAD method, cache dir, etc.
+}
+
+func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*TranscribeResult, error)
+```
+
+**TranscribeRequest:**
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `InputPath` | string | Path to media file |
+| `AudioIndex` | int | Audio stream index to extract |
+| `Language` | string | Target language code |
+| `OutputDir` | string | Directory for output files |
+| `Model` | string | WhisperX model override (empty = default) |
+
+**TranscribeResult:**
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `SRTPath` | string | Path to generated SRT file |
+| `AlignedJSONPath` | string | Path to WhisperX alignment JSON |
+| `Duration` | float64 | Detected audio duration in seconds |
+| `Segments` | int | Number of SRT cues |
+| `Cached` | bool | True if result came from cache |
+
+### 9.3 Cache Strategy
+
+The cache is keyed by a composite of:
+- SHA-256 of the source file path and audio stream index
+- WhisperX model name
+- Language
+
+Cache directory: `{whisperx_cache_dir}/{cache_key}/`
+
+**Cache operations:**
+- `Lookup(key)`: Check for existing transcription. Validates SRT exists and
+  has > 0 cues.
+- `Store(key, result)`: Copy SRT and alignment JSON to cache directory.
+
+The cache is shared across all three consumers. Episode ID transcripts are
+automatically available for subtitle generation via cache hits, eliminating
+redundant GPU work.
+
+### 9.4 Concurrency
+
+All WhisperX invocations are serialized by the `whisperxSem` semaphore
+(capacity 1) at the pipeline level. The transcription service itself is
+stateless and safe for concurrent use -- the semaphore is held by the
+calling stage, not the service.
+
+### 9.5 Audio Extraction
+
+Audio extraction (FFmpeg WAV conversion) is performed by the service before
+invoking WhisperX:
+
+```
+ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
+```
+
+### 9.6 Post-Processing Pipeline
+
+After WhisperX completes:
+
+1. **Stable-TS formatting**: Reformat alignment JSON into higher-quality SRT
+   (see DESIGN_STAGES.md Section 6.1.1). Fallback: raw WhisperX SRT.
+2. **Hallucination filtering**: Remove WhisperX artifacts and repetitive
+   segments (see DESIGN_STAGES.md Section 6.2).
+3. **Validation**: Zero-segment output returns `ErrTransient`.
