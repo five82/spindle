@@ -342,7 +342,7 @@ response -- no transformation layer between DB and API.
 - `Snapshot.Marshal()`: JSON string (empty string for zero snapshot).
 - `Unmarshal(raw)`: Parse from JSON string.
 
-**Crop analysis helpers** (in `auditgather`, not `encodingstate`):
+**Crop analysis helpers:**
 
 - `ParseCropFilter(filter)`: Extract width and height from "crop=W:H:X:Y" or
   "W:H:X:Y" format.
@@ -356,13 +356,12 @@ Contract that all pipeline stages must implement:
 
 ```go
 type Handler interface {
-    Prepare(ctx context.Context, item *queue.Item) error
-    Execute(ctx context.Context, item *queue.Item) error
+    Run(ctx context.Context, item *queue.Item) error
 }
 ```
 
 **Per-item logging**: The pipeline manager attaches a per-item logger to the
-context before calling `Prepare` and `Execute`. Handlers retrieve it via:
+context before calling `Run`. Handlers retrieve it via:
 
 ```go
 func LoggerFromContext(ctx context.Context) *slog.Logger
@@ -373,7 +372,7 @@ Returns `slog.Default()` if no logger is attached.
 **Helper:**
 
 - `ParseRipSpec(raw)`: Parse rip spec string into `ripspec.Envelope`, returning
-  `services.ErrValidation` on failure (standard error for stage Execute methods).
+  `services.ErrValidation` on failure (standard error for stage `Run` methods).
 
 ### 4.7.1 Connectivity Checks (standalone)
 

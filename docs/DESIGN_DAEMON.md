@@ -264,14 +264,14 @@ user"`):
 2. Create timestamped log file: `spindle-{YYYYMMDD}T{HHMMSS.sss}Z.log`.
 3. If diagnostic mode: create separate DEBUG-level JSON log in `debug/`
    subdirectory, assign UUID session ID, use `TeeLogger` to fan out.
-6. Write PID file (`spindle.pid`).
-7. Open queue store.
-8. Create notification service.
-9. Create workflow manager (with optional diagnostic mode).
-10. Register all 7 stages via `ConfigureStages()`.
-11. Create daemon instance.
-12. Call `daemon.Start()`.
-13. Block on signal context until shutdown signal received.
+4. Write PID file (`spindle.pid`).
+5. Open queue store.
+6. Create notification service.
+7. Create workflow manager (with optional diagnostic mode).
+8. Register all 7 stages via `ConfigureStages()`.
+9. Create daemon instance.
+10. Call `daemon.Start()`.
+11. Block on signal context until shutdown signal received.
 
 **Log retention**: On startup, cleans old log files exceeding
 `logging.retention_days` across 3 targets: daemon logs, per-item logs, and
@@ -290,39 +290,22 @@ pointing to the active log file for easy access.
 
 CLI-facing daemon lifecycle management used by `spindle start/stop/restart/status`.
 
-**Process launch:**
+Three functions:
 
-- `Launch(executablePath, opts)`: Start daemon as detached background process
-  (`spindle daemon-run`). Returns `StartResult` with state (started,
-  already_running, start_requested).
-- `WaitForClient(socketPath, timeout)`: Poll for HTTP API socket availability.
-- `WaitForShutdown(socketPath, timeout)`: Poll until daemon HTTP socket
-  disappears.
+- `Start(executablePath, socketPath, opts, timeout)`: Launch daemon as detached
+  background process (`spindle daemon-run`), poll for HTTP API socket
+  availability. Returns immediately if already running.
+- `Stop(socketPath, gracePeriod, fallbackPID)`: Send HTTP stop request, wait
+  for shutdown, force-kill (SIGKILL + PID/lock file cleanup) if still alive.
+- `IsRunning(socketPath)`: Check daemon reachability via HTTP API socket.
+  Returns PID if reachable.
 
-**Process control:**
+`spindle restart` composes `Stop` then `Start` at the call site.
 
-- `EnsureStarted(socketPath, cfg, execPath, opts, timeout)`: Idempotent start
-  -- returns immediately if already running, otherwise launches and waits.
-- `StopAndTerminate(socketPath, gracePeriod, fallbackPID)`: Send HTTP stop
-  request, wait for shutdown, force-kill if still alive. Returns `StopResult`.
-- `Restart(socketPath, cfg, execPath, opts, stopGrace, startWait)`: Stop then
-  start. Returns `RestartResult` with was_running, stop, and start details.
-- `ForceKillProcess(pidPath, lockPath, fallbackPID)`: SIGKILL + cleanup of PID
-  and lock files.
-
-**Status aggregation:**
-
-- `BuildStatusSnapshot(ctx, socketPath, cfg)`: Combines daemon HTTP API status
-  with offline fallbacks (direct queue stats, dependency checks).
-- `ResolveDependencies(ctx, cfg)`: Check all binary dependencies.
-- `BuildSystemChecks(cfg, daemonRunning, discPaused, netlinkActive)`: System
-  status lines for CLI display.
-- `BuildLibraryPathChecks(cfg)`: Library path readiness.
-- `BuildDependencySummary(deps)`: Aggregate dependency availability
-  (total, available, missing required/optional, severity).
-- `ProcessInfo(socketPath)`: Check daemon reachability and PID.
-- `DeriveLogDir(lockPath, queueDBPath, cfg)`: Determine daemon log directory
-  from available hints.
+Status aggregation (dependency checks, library path validation, system status
+formatting) is handled by the `spindle status` command directly, calling
+`deps.CheckBinaries()` and config validation functions. It does not belong
+in the daemon control package.
 
 **Sentinel error:** `ErrDaemonNotRunning` returned when HTTP API socket unreachable.
 
@@ -334,9 +317,8 @@ workflow. Used by CLI commands (`spindle identify`, `spindle gensubtitle`).
 `Run(ctx, Options)` executes a stage handler against a queue item:
 
 1. Set `in_progress = 1`, persist to store.
-2. Call `Handler.Prepare(ctx, item)` -- persist result.
-3. Call `Handler.Execute(ctx, item)`.
-4. Advance to next stage, set `in_progress = 0`, persist.
+2. Call `Handler.Run(ctx, item)`.
+3. Advance to next stage, set `in_progress = 0`, persist.
 
 On failure at any step: mark item as `failed` with error message, notify via
 error event, return the stage error.
@@ -344,7 +326,7 @@ error event, return the stage error.
 **Options:** Logger, Store, Notifier, Handler, StageName, Processing status,
 Done status, Item.
 
-The `Handler` interface mirrors `stage.Handler` (Prepare + Execute). The
+The `Handler` interface mirrors `stage.Handler` (single `Run` method). The
 per-item logger is attached to the context (see DESIGN_OVERVIEW.md
 Section 4.5).
 

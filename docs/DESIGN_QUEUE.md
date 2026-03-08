@@ -59,11 +59,7 @@ CREATE TABLE IF NOT EXISTS queue_items (
     needs_review INTEGER NOT NULL DEFAULT 0,
     review_reason TEXT,
     item_log_path TEXT,
-    drapto_preset_profile TEXT
-);
-
-CREATE TABLE IF NOT EXISTS item_progress (
-    item_id INTEGER PRIMARY KEY REFERENCES queue_items(id) ON DELETE CASCADE,
+    drapto_preset_profile TEXT,
     progress_stage TEXT,
     progress_percent REAL DEFAULT 0.0,
     progress_message TEXT,
@@ -77,43 +73,33 @@ CREATE INDEX IF NOT EXISTS idx_queue_stage ON queue_items(stage);
 CREATE INDEX IF NOT EXISTS idx_queue_fingerprint ON queue_items(disc_fingerprint);
 ```
 
-**Table split rationale**: Progress fields change at high frequency (every
-2-5 seconds during encoding/ripping) while core item fields change only at
-stage transitions. Separating them into `queue_items` and `item_progress`
-reduces write contention on the core table and makes the schema more
-navigable. The `item_progress` row is created lazily when a stage first
-reports progress, and deleted with the parent item via `ON DELETE CASCADE`.
+Progress fields are on the same table as core fields. SQLite WAL mode handles
+the write frequency (every 2-5 seconds during encoding/ripping) without
+contention issues at this scale. This eliminates the join complexity and lazy
+row creation of a separate progress table.
 
-## 3. Item Model
-
-### 3.1 Core Fields (`queue_items`, 17 columns)
-
-| Column                | Type      | Purpose                                           |
-|-----------------------|-----------|---------------------------------------------------|
-| `id`                  | INTEGER   | Auto-increment primary key                        |
-| `disc_title`          | TEXT      | Disc label / identified title                     |
-| `stage`               | TEXT      | Current pipeline stage                            |
-| `in_progress`         | INTEGER   | 1 if item is actively being processed             |
-| `failed_at_stage`     | TEXT      | Stage when failure occurred (for retry routing)   |
-| `ripped_file`         | TEXT      | Path to ripped MKV file                           |
-| `encoded_file`        | TEXT      | Path to encoded file                              |
-| `final_file`          | TEXT      | Path to final organized file                      |
-| `error_message`       | TEXT      | Last error message                                |
-| `created_at`          | TIMESTAMP | Item creation time                                |
-| `updated_at`          | TIMESTAMP | Last update time                                  |
-| `rip_spec_data`       | TEXT      | JSON-encoded RipSpec envelope                     |
-| `disc_fingerprint`    | TEXT      | SHA-256 hash of disc filesystem metadata          |
-| `metadata_json`       | TEXT      | JSON-encoded TMDB metadata                        |
-| `needs_review`        | INTEGER   | 1 if item requires manual review                  |
-| `review_reason`       | TEXT      | Why review is needed (semicolon-separated)        |
-| `item_log_path`       | TEXT      | Path to per-item log file                         |
-| `drapto_preset_profile`| TEXT     | Drapto encoding preset profile                    |
-
-### 3.2 Progress Fields (`item_progress`, 7 columns)
+## 3. Item Model (24 columns)
 
 | Column                 | Type      | Purpose                                           |
 |------------------------|-----------|---------------------------------------------------|
-| `item_id`              | INTEGER   | FK to queue_items.id (PK, 1:1)                   |
+| `id`                   | INTEGER   | Auto-increment primary key                        |
+| `disc_title`           | TEXT      | Disc label / identified title                     |
+| `stage`                | TEXT      | Current pipeline stage                            |
+| `in_progress`          | INTEGER   | 1 if item is actively being processed             |
+| `failed_at_stage`      | TEXT      | Stage when failure occurred (for retry routing)   |
+| `ripped_file`          | TEXT      | Path to ripped MKV file                           |
+| `encoded_file`         | TEXT      | Path to encoded file                              |
+| `final_file`           | TEXT      | Path to final organized file                      |
+| `error_message`        | TEXT      | Last error message                                |
+| `created_at`           | TIMESTAMP | Item creation time                                |
+| `updated_at`           | TIMESTAMP | Last update time                                  |
+| `rip_spec_data`        | TEXT      | JSON-encoded RipSpec envelope                     |
+| `disc_fingerprint`     | TEXT      | SHA-256 hash of disc filesystem metadata          |
+| `metadata_json`        | TEXT      | JSON-encoded TMDB metadata                        |
+| `needs_review`         | INTEGER   | 1 if item requires manual review                  |
+| `review_reason`        | TEXT      | Why review is needed (semicolon-separated)        |
+| `item_log_path`        | TEXT      | Path to per-item log file                         |
+| `drapto_preset_profile`| TEXT      | Drapto encoding preset profile                    |
 | `progress_stage`       | TEXT      | Current stage display name                        |
 | `progress_percent`     | REAL      | Progress percentage (0-100)                       |
 | `progress_message`     | TEXT      | Human-readable progress message                   |
@@ -147,9 +133,11 @@ const (
 )
 ```
 
-A `ValidTransitions` map enforces that only legal stage transitions are
-possible. Invalid transitions return an error rather than silently corrupting
-state.
+Stage transitions are implicit: each stage advances to the next entry in the
+pipeline's stage slice (see DESIGN_OVERVIEW.md Section 4.4). Any stage can
+transition to `failed` on error. No explicit transition map is needed because
+the pipeline is strictly linear -- the stage slice defines the only valid
+progression.
 
 **Stage values** (10):
 
@@ -265,10 +253,10 @@ from the pipeline configuration.
 | Operation | Purpose |
 |-----------|---------|
 | `NewDisc(title, fingerprint)` | Insert new pending item (disc fingerprint required) |
-| `GetByID(id)` | Fetch single item by primary key (LEFT JOIN item_progress) |
+| `GetByID(id)` | Fetch single item by primary key |
 | `FindByFingerprint(fp)` | Find first item matching a disc fingerprint |
-| `Update(item)` | Full item update on `queue_items` (mutable columns); applies stop-review override |
-| `UpdateProgress(item)` | Upsert on `item_progress` (stage, percent, message, bytes, encoding, episode key). High-frequency; does not touch `queue_items` |
+| `Update(item)` | Full item update (mutable columns); applies stop-review override |
+| `UpdateProgress(item)` | Update only progress columns (stage, percent, message, bytes, encoding, episode key). High-frequency path |
 | `Remove(id)` | Delete single item |
 | `Clear()` | Delete all items |
 | `ClearCompleted()` | Delete only completed items |

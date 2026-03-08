@@ -120,7 +120,7 @@ import packages in higher layers.
 
 ### 3.1 Stage Handler Boundary
 
-All stage handlers implement `stage.Handler` (Prepare + Execute). The
+All stage handlers implement `stage.Handler` (single `Run` method). The
 `workflow` package dispatches via this interface and never imports concrete
 stage packages directly -- they are wired in `daemonrun` via
 `ConfigureStages()`.

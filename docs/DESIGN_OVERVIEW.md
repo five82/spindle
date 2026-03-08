@@ -226,59 +226,46 @@ files at `{log_dir}/items/{item_id}/{session_id}.log`.
 
 ### 4.4 Stage Configuration Wiring
 
-`ConfigureStages(set StageSet)` registers up to 7 optional stage handlers and
-builds the pipeline stage chain.
+`ConfigureStages(stages []pipelineStage)` registers an ordered slice of stage
+handlers and builds the pipeline chain. Absent stages are simply omitted from
+the slice -- no nil checks or conditional ordering needed.
 
-**StageSet** (7 optional handlers):
+**pipelineStage** -- single stage descriptor:
 ```go
-type StageSet struct {
-    Identifier        stage.Handler
-    Ripper            stage.Handler
-    EpisodeIdentifier stage.Handler
-    Encoder           stage.Handler
-    AudioAnalysis     stage.Handler
-    Subtitles         stage.Handler
-    Organizer         stage.Handler
+type Semaphore int
+
+const (
+    SemNone     Semaphore = iota
+    SemDisc                        // guards optical drive
+    SemEncode                      // guards SVT-AV1 encoder
+    SemWhisperX                    // guards WhisperX GPU
+)
+
+type pipelineStage struct {
+    name      string
+    handler   stage.Handler
+    stage     queue.Stage      // stage value this handler processes
+    semaphore Semaphore        // which resource semaphore to acquire
 }
 ```
 
-**Conditional stage ordering** -- the stage chain is built dynamically:
-- If `EpisodeIdentifier` present: encoding follows `episode_identification`;
-  absent: encoding follows `ripping` directly.
-- If `AudioAnalysis` present: subtitling follows `audio_analysis`;
-  absent: subtitling follows `encoding`.
-- If `Subtitles` present: organizing follows `subtitling`;
-  absent: organizing follows whatever subtitling would have followed.
+The `nextStage` for each entry is derived from the next element in the slice
+(last entry advances to `completed`). Stage ordering is implicit in slice
+position.
 
 **pipelineState** -- runtime state:
 ```go
 type pipelineState struct {
-    stages       []pipelineStage
-    stageOrder   []queue.Stage                // ordered for NextReady()
-    stageByStart map[queue.Stage]pipelineStage
-    discSem      chan struct{}                // capacity 1, guards optical drive
-    encodeSem    chan struct{}                // capacity 1, guards SVT-AV1 encoder
-    whisperxSem  chan struct{}                // capacity 1, guards WhisperX GPU
-    logger       *slog.Logger
+    stages     []pipelineStage
+    stageOrder []queue.Stage             // ordered for NextReady()
+    stageMap   map[queue.Stage]int       // stage -> index in stages slice
+    sems       [3]chan struct{}          // disc, encode, whisperx (capacity 1 each)
+    logger     *slog.Logger
 }
 ```
 
-**pipelineStage** -- single stage descriptor:
-```go
-type pipelineStage struct {
-    name        string
-    handler     stage.Handler
-    stage       queue.Stage        // stage value this handler processes
-    nextStage   queue.Stage        // stage to advance to on success
-    needsDisc   bool               // true for identification, ripping
-    needsEncode bool               // true for encoding
-    needsWhisperX bool             // true for episode_id, audio_analysis, subtitling
-}
-```
-
-Pipeline finalization (`finalize()`) populates the `stageByStart` map, builds
-the `stageOrder` slice (disc-dependent stages first), and initializes the disc
-semaphore.
+Pipeline finalization builds `stageMap` from the stages slice, derives
+`stageOrder` (disc-semaphore stages first), and initializes semaphore channels.
 
 ### 4.5 Stage Handler Interface
 
@@ -286,24 +273,22 @@ Every pipeline stage implements:
 
 ```go
 type Handler interface {
-    Prepare(ctx context.Context, item *queue.Item) error
-    Execute(ctx context.Context, item *queue.Item) error
+    Run(ctx context.Context, item *queue.Item) error
 }
 ```
 
-Two methods, no health checks. Preflight dependency checks (binary existence
-via `exec.LookPath`) run per-item before stage execution (see Section 4.6
-step 4). Deeper connectivity checks (TMDB, Jellyfin, OpenSubtitles) are
+Single method, no health checks. Preflight dependency checks (binary existence
+via `exec.LookPath`) run once at daemon startup (see DESIGN_INFRASTRUCTURE.md
+Section 3). Deeper connectivity checks (TMDB, Jellyfin, OpenSubtitles) are
 standalone functions used by `spindle status` and `/api/status` -- they do
 not gate stage execution because temporary service unavailability is
 better handled by failing the item and retrying via `spindle queue retry`
 than by a pre-check that may itself be stale.
 
 **Per-item logging**: The pipeline manager attaches a per-item `*slog.Logger`
-to the context before calling `Prepare` and `Execute`. Handlers retrieve it
-via `stage.LoggerFromContext(ctx)`, which falls back to `slog.Default()` if
-absent. This replaces mutable `SetLogger()` calls with immutable,
-request-scoped context values.
+to the context before calling `Run`. Handlers retrieve it via
+`stage.LoggerFromContext(ctx)`, which falls back to `slog.Default()` if
+absent.
 
 ### 4.6 Stage Execution Lifecycle
 
@@ -312,21 +297,18 @@ The manager's `processItem()` drives daemon-mode execution. The standalone
 
 **Lifecycle per item** (5 steps, 2 persistence points):
 
-1. Look up stage handler by `item.Stage` in `pipeline.stageByStart`.
-   Acquire required semaphore(s) for this stage (blocks until available).
+1. Look up stage handler by `item.Stage` in `pipeline.stageMap`.
+   Acquire required semaphore for this stage (blocks until available).
    Create request UUID and stage context (child of daemon context).
    Attach per-item `*slog.Logger` to the context.
 2. Initialize progress state (`ProgressStage`, default message, percent 0).
    **Set `in_progress = 1`**, persist.
-3. Call `handler.Prepare(ctx, item)` then `handler.Execute(ctx, item)`.
+3. Call `handler.Run(ctx, item)`.
 4. **Handle error**: if `context.Canceled`, set `in_progress = 0`, persist,
    release semaphore, return. Otherwise call `handleStageFailure()`.
 5. Advance `item.Stage` to next stage. Set `in_progress = 0`.
    If completed: finalize progress (ensure percent >= 100, non-empty message).
    **Persist** final state. Release semaphore.
-
-No intermediate persist between Prepare and Execute — crash recovery
-re-runs the stage from the beginning regardless (Section 4.7).
 
 Stage-specific lifecycle concerns (e.g., the ripping handler pausing disc
 monitoring) are owned by the handler, not the generic lifecycle. See

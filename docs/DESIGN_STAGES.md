@@ -198,7 +198,7 @@ After identification:
 
 - **Disc ID cache fast-path**: On cache hit, bypasses both TMDB search and KeyDB
   lookup entirely. Logged with `decision_type: "disc_id_cache"`.
-- **Stale staging cleanup**: At `Prepare()`, removes staging directories older than
+- **Stale staging cleanup**: At stage start, removes staging directories older than
   **48 hours** via `staging.CleanStale()`.
 - **BD info enrichment**: Year from `BDInfo.Year` passed to TMDB search; runtime
   from `Titles[0].Duration / 60` (seconds to minutes) for search refinement.
