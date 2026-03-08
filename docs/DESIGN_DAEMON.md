@@ -17,10 +17,9 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 4. Create workflow manager with configured poll interval.
 5. Create notification service.
 6. Create daemon instance with lock file path `filepath.Join(cfg.Paths.LogDir, "spindle.lock")`.
-7. Register rip hooks: `wf.SetRipHooks(daemon)` -- daemon implements BeforeRip/AfterRip.
-8. Create disc monitor (if optical drive configured).
-9. Create netlink monitor (if optical drive configured).
-10. Create HTTP API server (Unix socket at `$XDG_RUNTIME_DIR/spindle.sock`,
+7. Create disc monitor (if optical drive configured).
+8. Create netlink monitor (if optical drive configured).
+9. Create HTTP API server (Unix socket at `$XDG_RUNTIME_DIR/spindle.sock`,
     optional TCP bind at `api.bind`).
 
 **Start phase** (in `Start()`):
@@ -63,8 +62,8 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 - Uses `CompareAndSwap()` so only actual state changes return true.
 - While paused: netlink events are ignored (logged at DEBUG), manual disc detection
   via HTTP API returns "disc detection paused".
-- Ripping automatically pauses disc monitoring (via `BeforeRip` hook) and resumes
-  after ripping completes (via `AfterRip` hook).
+- The ripping handler pauses disc monitoring before ripping and resumes it
+  after completion (see DESIGN_STAGES.md Section 2.6).
 
 ---
 

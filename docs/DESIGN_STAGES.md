@@ -304,10 +304,12 @@ leading/trailing hyphens and underscores trimmed.
 - **Per-rip-target validation**: Visited map deduplicates targets to prevent
   double-ripping the same title.
 
-### 2.6 Disc Monitor Hooks
+### 2.6 Disc Monitor Pause
 
-- `BeforeRip()`: Pause disc monitoring (prevent concurrent device access).
-- `AfterRip()`: Resume disc monitoring.
+The ripping handler pauses disc monitoring before ripping and resumes it
+after completion (or failure). This prevents the disc monitor from polling
+the drive during MakeMKV operation. The handler calls `PauseDisc()` /
+`ResumeDisc()` directly rather than relying on lifecycle hooks.
 
 ---
 

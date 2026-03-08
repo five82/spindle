@@ -315,29 +315,29 @@ request-scoped context values.
 The manager's `processItem()` drives daemon-mode execution. The standalone
 `stageexec.Run()` provides a similar path for CLI one-shot workflows.
 
-**Full lifecycle per item** (14 steps with persistence points):
+**Lifecycle per item** (6 steps, 2 persistence points):
 
 1. Look up stage handler by `item.Stage` in `pipeline.stageByStart`.
-2. Acquire required semaphore(s) for this stage (blocks until available).
-3. Create request UUID and stage context (child of daemon context).
+   Acquire required semaphore(s) for this stage (blocks until available).
+   Create request UUID and stage context (child of daemon context).
    Attach per-item `*slog.Logger` to the context.
-4. **Run preflight checks** for this stage's dependencies. On failure:
+2. **Run preflight checks** for this stage's dependencies. On failure:
    mark item as failed with hint, release semaphore, return.
-5. **Initialize progress state**: set `ProgressStage` via `deriveStageLabel()`
-   (title-cases the stage name), set default message `"{label} started"`,
-   reset `ProgressPercent` to 0.
-6. **Set `in_progress = 1`**, persist.
-7. Call `handler.Prepare(ctx, item)`.
-8. **Persist** post-Prepare state changes.
-9. If stage is "ripper" and rip hooks registered: call `BeforeRip()`.
-10. Call `handler.Execute(ctx, item)` (blocking).
-11. If stage is "ripper" and rip hooks registered: call `AfterRip()`.
-12. **Handle execution error**: if `context.Canceled`, log DEBUG, set
-    `in_progress = 0`, persist, release semaphore, and return. Otherwise call
-    `handleStageFailure()`.
-13. Advance `item.Stage` to next stage. Set `in_progress = 0`.
-    If completed: finalize progress (ensure percent >= 100, non-empty message).
-14. **Persist** final state. Release semaphore.
+3. Initialize progress state (`ProgressStage`, default message, percent 0).
+   **Set `in_progress = 1`**, persist.
+4. Call `handler.Prepare(ctx, item)` then `handler.Execute(ctx, item)`.
+5. **Handle error**: if `context.Canceled`, set `in_progress = 0`, persist,
+   release semaphore, return. Otherwise call `handleStageFailure()`.
+6. Advance `item.Stage` to next stage. Set `in_progress = 0`.
+   If completed: finalize progress (ensure percent >= 100, non-empty message).
+   **Persist** final state. Release semaphore.
+
+No intermediate persist between Prepare and Execute — crash recovery
+re-runs the stage from the beginning regardless (Section 4.7).
+
+Stage-specific lifecycle concerns (e.g., the ripping handler pausing disc
+monitoring) are owned by the handler, not the generic lifecycle. See
+DESIGN_STAGES.md Section 2.6.
 
 **Failure handling** (`handleStageFailure`):
 - Classifies error via `services.Details(err)` which extracts structured
@@ -350,7 +350,7 @@ The manager's `processItem()` drives daemon-mode execution. The standalone
 - Records `failed_at_stage` for retry routing.
 - Persists, notifies, and checks queue completion.
 
-**DB write failure during stage execution**: If a persistence step (6, 8, 14)
+**DB write failure during stage execution**: If a persistence step (3, 6)
 fails, the item is marked as failed with the DB error. The in-memory state
 may diverge from the persisted state, but startup recovery (Section 4.7)
 handles this by resetting all `in_progress` flags. The item will be
