@@ -72,7 +72,7 @@ Cover pure logic with no I/O. Run with `go test ./...`.
 | `ripspec` | Envelope parse/encode round-trip, asset tracking, episode key generation |
 | `queue` | Stage transitions (valid/invalid), metadata helpers, filename sanitization |
 | `textutil` | Tokenization, TF-IDF, cosine similarity, fingerprinting edge cases |
-| `contentid` | Hungarian algorithm, anchor selection, block refinement, strategy evaluation |
+| `contentid` | Hungarian algorithm, contiguity check, candidate set construction |
 | `media/audio` | Track selection scoring, channel count parsing, lossless detection |
 | `language` | ISO code conversion, normalization, edge cases |
 | `subtitle` | SRT parsing, hallucination filtering, SRT alignment, SRT cleaning |

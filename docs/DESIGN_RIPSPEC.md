@@ -138,8 +138,6 @@ error details for failed assets.
 | `content_id_matches` | []ContentIDMatch | Episode ID | Organization |
 | `content_id_method` | string | Episode ID | -- |
 | `content_id_transcripts` | map[string]string | Episode ID | -- |
-| `content_id_selected_strategy` | string | Episode ID | -- |
-| `content_id_strategy_scores` | []StrategyScore | Episode ID | -- |
 | `episodes_synchronized` | bool | Episode ID | Organization |
 | `primary_audio_description` | string | Audio Analysis | API/Display |
 | `audio_analysis` | *AudioAnalysisData | Audio Analysis | Encoding |
@@ -157,16 +155,6 @@ ContentIDMatch {
     SubtitleFileID    int64    // OpenSubtitles file ID
     SubtitleLanguage  string
     SubtitleCachePath string
-}
-
-StrategyScore {
-    Strategy     string   // e.g., "anchor_window"
-    Reason       string
-    EpisodeCount int
-    References   int
-    Matches      int
-    AvgScore     float64
-    NeedsReview  bool
 }
 
 AudioAnalysisData {

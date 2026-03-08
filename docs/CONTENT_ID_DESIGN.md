@@ -15,7 +15,7 @@ differs from broadcast order. Content ID resolves this by:
 2. Downloading reference subtitles from OpenSubtitles for the target season
 3. Computing text similarity between transcripts and references
 4. Finding the optimal assignment using the Hungarian algorithm
-5. Optionally verifying low-confidence matches with an LLM
+5. Verifying low-confidence or non-contiguous matches with an LLM
 
 The matcher is invoked by the episode identification stage after ripping
 completes. It updates the rip specification envelope in-place with confirmed
@@ -47,34 +47,31 @@ If any prerequisite is missing, the matcher returns early with no changes.
 Ripped Episode Files
         |
         v
-[1. Transcribe] -- WhisperX via uvx generates SRT for each ripped title
+[1. Transcribe] -- WhisperX via shared transcription service
         |
         v
-[2. Fetch References] -- Download OpenSubtitles SRTs for candidate episodes
-        |                  (with caching and search variant fallback)
-        v
-[3. Fingerprint] -- Convert text to TF term-frequency vectors
+[2. Build Candidate Set] -- Determine which episodes to fetch references for
         |
         v
-[4. IDF Weighting] -- Apply TF-IDF across reference corpus to downweight
-        |              common show vocabulary (character names, catchphrases)
-        v
-[5. Anchor Selection] -- Find confident rip->episode mapping using first/second
-        |                  rip titles to narrow the episode search window
-        v
-[6. Build Strategies] -- Generate 4 ordered candidate strategies
+[3. Fetch References] -- Download OpenSubtitles SRTs for candidate episodes
         |
         v
-[7. Evaluate Strategies] -- For each strategy: compute similarity, run
-        |                     Hungarian matching, apply block refinement
-        v
-[8. Select Best] -- Pick strategy by: coverage > avg_score > needs_review
+[4. Fingerprint + IDF] -- TF-IDF cosine similarity between rips and references
         |
         v
-[9. LLM Verification] -- Optional: verify low-confidence matches via LLM
+[5. Hungarian Assignment] -- Optimal one-to-one matching
         |
         v
-[10. Apply Matches] -- Update envelope episodes with confirmed mappings
+[6. Score Filter] -- Discard matches below minimum threshold
+        |
+        v
+[7. Contiguity Check] -- Flag outlier matches for LLM verification
+        |
+        v
+[8. LLM Verification] -- Verify low-confidence and non-contiguous matches
+        |
+        v
+[9. Apply Matches] -- Update envelope episodes with confirmed mappings
 ```
 
 ---
@@ -146,23 +143,35 @@ Selection reasons: `top_result`, `title_consistency_rerank`, `non_hi_preferred`,
 - Retriable errors (rate limits) use exponential backoff with `MaxRateRetries`
 - Backoff: `InitialBackoff * 2^(attempt-1)`, capped at `MaxBackoff`
 
-### 5.5 Progressive Fetching (Episode Passes)
+---
 
-Rather than fetching all season references upfront, the matcher uses progressive
-passes to minimize API calls:
+## 6. Candidate Episode Set
 
-1. `buildEpisodePasses()` creates ordered batches of episode numbers
-2. First pass covers the most likely candidates (from disc block estimate or
-   rip spec episodes)
-3. After each pass, attempt anchor selection
-4. If an anchor is found, stop fetching -- the anchor narrows the search window
-5. Additional passes expand outward from the initial batch
+### 6.1 Single Candidate Set
+
+Rather than evaluating multiple strategies, the matcher builds a single candidate
+episode set using the best available information:
+
+1. **Rip spec episodes**: If the rip spec contains resolved episode numbers
+   (`Episode > 0`), use those plus neighboring episodes as candidates.
+2. **Disc block estimate**: If no resolved episodes but a disc number is known,
+   estimate the episode range from disc position and number of rips.
+3. **Full season fallback**: When neither is available, use all episodes in the
+   season.
+
+All references for the candidate set are fetched before matching begins.
+
+### 6.2 Disc Block Size
+
+`discBlockSize(discEpisodes, numRips)` returns the number of episodes on the
+disc. If zero, defaults to `min(4, numRips)` to avoid searching for more
+episodes than there are ripped titles.
 
 ---
 
-## 6. Text Fingerprinting
+## 7. Text Fingerprinting
 
-### 6.1 Tokenization
+### 7.1 Tokenization
 
 ```
 Input text -> lowercase -> split on non-alphanumeric sequences -> filter tokens < 3 chars
@@ -170,13 +179,13 @@ Input text -> lowercase -> split on non-alphanumeric sequences -> filter tokens 
 
 Regex pattern: `[^a-z0-9]+`
 
-### 6.2 Term-Frequency Vector
+### 7.2 Term-Frequency Vector
 
 A `Fingerprint` stores:
 - `tokens`: `map[string]float64` -- term frequency counts
 - `norm`: L2 norm of the token vector (precomputed)
 
-### 6.3 Cosine Similarity
+### 7.3 Cosine Similarity
 
 ```
 similarity(A, B) = dot(A, B) / (norm(A) * norm(B))
@@ -186,9 +195,9 @@ Returns 0 if either fingerprint is nil or has zero norm.
 
 ---
 
-## 7. IDF Weighting
+## 8. IDF Weighting
 
-### 7.1 Corpus Construction
+### 8.1 Corpus Construction
 
 After downloading reference subtitles, build an IDF corpus from all reference
 fingerprints:
@@ -201,7 +210,7 @@ for _, ref := range references {
 idf := corpus.IDF()
 ```
 
-### 7.2 IDF Computation
+### 8.2 IDF Computation
 
 ```
 IDF(term) = log((N + 1) / (1 + df(term)))
@@ -211,192 +220,28 @@ Where:
 - `N` = total number of documents (reference subtitles)
 - `df(term)` = number of documents containing the term
 
-### 7.3 Weight Application
+### 8.3 Weight Application
 
 Each fingerprint's term frequencies are multiplied by their IDF weights.
 The norm is recomputed. Terms absent from the IDF map retain their original
 weight. Terms with zero weight after IDF are dropped.
 
-### 7.4 Minimum Corpus Size
+### 8.4 Minimum Corpus Size
 
 IDF weighting requires at least 2 references. With fewer, raw term-frequency
 vectors are used directly.
 
-### 7.5 RawVector Preservation
-
-All fingerprints store both `Vector` (current, possibly IDF-weighted) and
-`RawVector` (original term-frequency only). This allows recomputing IDF when
-the reference set changes across strategy evaluations.
-
 ---
 
-## 8. Matching Strategies
+## 9. Global Assignment (Hungarian Algorithm)
 
-### 8.1 Strategy Construction
-
-`buildStrategyAttempts()` creates up to 4 strategies in priority order:
-
-| # | Strategy        | Source                  | Reason                |
-|---|-----------------|-------------------------|-----------------------|
-| 1 | `ripspec_seed`  | Rip spec episode numbers| `derived_from_ripspec` or `disc_block_estimate` |
-| 2 | `anchor_window` | Anchor selection        | `first_anchor` or `second_anchor` |
-| 3 | `disc_block`    | Disc number estimate    | `disc_number_window`  |
-| 4 | `full_season`   | All season episodes     | `season_fallback`     |
-
-### 8.2 Deduplication
-
-Strategies with identical episode lists (after sorting and compacting) are
-deduplicated. The first occurrence wins.
-
-### 8.3 Strategy Evaluation
-
-For each strategy:
-
-1. Filter existing references to the strategy's episode set
-2. Fetch missing references for episodes not yet downloaded
-3. Apply IDF weighting across all references
-4. Run `resolveEpisodeMatches()` (Hungarian algorithm)
-5. Apply `refineMatchBlock()` (contiguous block constraint)
-6. Compute average match score
-
-### 8.4 Strategy Selection
-
-`betterOutcome()` compares strategies in order:
-
-1. **Match count**: More matches wins
-2. **Average score**: Higher average similarity wins
-3. **Needs review**: Strategy not needing review wins
-
----
-
-## 9. Anchor Selection
-
-### 9.1 Purpose
-
-The anchor identifies a high-confidence mapping between a single rip title and
-a reference episode. This narrows the episode search window, reducing the number
-of references that need downloading.
-
-### 9.2 Anchor Evaluation
-
-Tries the first rip title, then the second:
-
-1. Compute cosine similarity between the rip fingerprint and all available
-   reference fingerprints
-2. Track the best score, second-best score, and best-matching episode number
-3. Check thresholds:
-   - `BestScore >= AnchorMinScore` (default: 0.63)
-   - `ScoreMargin >= AnchorMinScoreMargin` (default: 0.03)
-     where `ScoreMargin = BestScore - SecondBestScore`
-
-### 9.3 Window Derivation
-
-When an anchor is found for rip index `idx` matching episode `E`:
-
-```
-windowStart = E - idx
-windowEnd = windowStart + numRips - 1
-```
-
-Clamped to `[1, totalSeasonEpisodes]`.
-
-### 9.4 Failure Reasons
-
-- `anchor_inputs_unavailable`: No rips or refs
-- `anchor_vector_missing`: Rip fingerprint is nil
-- `anchor_no_scored_references`: No valid reference scores
-- `anchor_score_below_threshold`: Best score < `AnchorMinScore`
-- `anchor_score_ambiguous`: Margin < `AnchorMinScoreMargin`
-- `anchor_not_selected`: Neither first nor second anchor succeeded
-
----
-
-## 10. Candidate Episode Planning
-
-### 10.1 Tiered Episode Discovery
-
-`deriveCandidateEpisodes()` builds the initial episode candidate set:
-
-**Tier 1 -- Rip Spec Episodes**: Collect resolved episode numbers from the rip
-spec (episodes with `Episode > 0`).
-
-**Tier 2 -- Disc Block Neighbors** (when Tier 1 found episodes and disc number
-is known): Compute disc block size (= number of rip episodes) and add episodes
-from `(discNumber-1)*blockSize` through `discNumber*blockSize`.
-
-**Tier 2b -- Disc Block Estimate** (when Tier 1 found no episodes but disc number
-is known): Estimate starting position with padding:
-- `padding = max(DiscBlockPaddingMin, blockSize / DiscBlockPaddingDivisor)`
-- Range: `(discNumber-1)*block - padding` through `discNumber*block + padding`
-
-**Tier 3 -- Season Fallback**: When no episodes are resolved, use all season
-episode numbers.
-
-### 10.2 Disc Block Size
-
-`discBlockSize(discEpisodes, numRips)` returns the number of episodes on the
-disc. If zero, defaults to `min(4, numRips)` to avoid searching for more
-episodes than there are ripped titles.
-
----
-
-## 11. Block Refinement
-
-### 11.1 Purpose
-
-TV disc episodes should map to a contiguous range (e.g., E05-E10). When
-high-confidence matches establish a block, outliers (matches outside the block)
-are reassigned to gap positions within the block.
-
-### 11.2 High-Confidence Determination
-
-Two thresholds compute a "high-confidence" cutoff:
-
-1. **Delta threshold**: `maxScore - BlockHighConfidenceDelta` (default: 0.05)
-2. **Top ratio threshold**: Score at the `1 - BlockHighConfidenceTopRatio`
-   percentile (default: top 70%)
-
-The higher (more selective) threshold is used.
-
-Requires at least 2 high-confidence matches to establish a block.
-
-### 11.3 Block Positioning
-
-The block contains `numEpisodes` (= number of rip titles) contiguous episodes
-and must include all high-confidence matches.
-
-**Disc 1**: `blockStart = 1` when `Disc1MustStartAtEpisode1 = true` (default).
-If episode 1 falls outside the valid range of high-confidence matches, flag
-`NeedsReview`.
-
-**Disc 2+**: Default to expanding upward (`blockStart = validHigh`). Check
-displaced matches for directional hints: if a displaced match points below
-the high-confidence range, expand downward instead. Hard constraint:
-`blockStart >= Disc2PlusMinStartEpisode` (default: 2).
-
-**Disc unknown (0)**: Use `hcMin` (lowest high-confidence episode).
-
-### 11.4 Gap Reassignment
-
-1. Partition matches into valid (in block) and displaced (outside block)
-2. Find gap episodes (block positions with no valid match)
-3. If gap count matches displaced count and reference fingerprints exist for
-   gap episodes: use Hungarian matching on displaced x gap references
-4. Otherwise: assign by position order with score = 0
-5. If gaps exist but displaced != gaps, flag `NeedsReview`
-6. If no gaps but displaced exist, flag `NeedsReview` (unusual case)
-
----
-
-## 12. Global Assignment (Hungarian Algorithm)
-
-### 12.1 Cost Matrix
+### 9.1 Cost Matrix
 
 Build an `N x M` matrix (padded to square) where:
 - `cost[i][j] = 1 - cosineSimilarity(rip[i], ref[j])`
 - Padded cells use cost = 2.0 (ensures they are not preferred)
 
-### 12.2 Algorithm
+### 9.2 Algorithm
 
 Standard Hungarian algorithm (O(n^3)) for minimum-cost assignment on the square
 cost matrix. Returns `assignment[i] = j` for each row `i`.
@@ -405,31 +250,54 @@ cost matrix. Returns `assignment[i] = j` for each row `i`.
 small (typically < 30 episodes per season), so performance is not a concern.
 No external dependency needed.
 
-### 12.3 Minimum Score Filter
+### 9.3 Minimum Score Filter
 
 After assignment, discard matches where `score < MinSimilarityScore` (default:
 0.58). These are unconfident enough that no assignment is better than a wrong one.
 
 ---
 
-## 13. LLM Verification
+## 10. Contiguity Check
 
-### 13.1 Trigger Condition
+### 10.1 Purpose
 
-LLM verification runs when:
-- An LLM client is configured (`llm` section in config)
+TV disc episodes should map to a contiguous range (e.g., E05-E10). After
+Hungarian assignment, check whether the matched episodes form a contiguous
+sequence.
+
+### 10.2 Logic
+
+1. Collect all matched episode numbers and sort them.
+2. Check if they form a contiguous range (each consecutive pair differs by 1).
+3. If contiguous: done, no further action.
+4. If not contiguous: flag the outlier matches (episodes outside the longest
+   contiguous subsequence) for LLM verification.
+
+### 10.3 Disc 1 Constraint
+
+When `disc_1_must_start_at_episode_1 = true` (default) and the disc number is 1,
+the contiguous range must start at episode 1. If it doesn't, flag `NeedsReview`.
+
+---
+
+## 11. LLM Verification
+
+### 11.1 Trigger Conditions
+
+LLM verification runs when an LLM client is configured and either:
 - At least one match has `Score < LLMVerifyThreshold` (default: 0.85)
+- At least one match was flagged by the contiguity check
 
-### 13.2 Transcript Extraction
+### 11.2 Transcript Extraction
 
-For each low-confidence match:
+For each match requiring verification:
 1. Extract the middle portion of dialogue from both the rip SRT and reference
    SRT files. Window half-size: `min(300.0, totalDuration/2)` seconds (clamped
    so short episodes don't extend past their boundaries; default
    `middleWindowHalfSec = 300.0` = 5 minutes each side for episodes >= 10 min).
 2. Truncate each to `maxTranscriptChars = 6000` characters
 
-### 13.3 LLM Prompt
+### 11.3 LLM Prompt
 
 System prompt asks the LLM to compare two transcripts and determine if they
 represent the same episode. Response format:
@@ -443,57 +311,45 @@ The prompt explicitly tells the LLM to:
 - Account for WhisperX speech recognition errors
 - Account for localization differences in reference subtitles
 
-### 13.4 Escalation Logic
+### 11.4 Escalation Logic
 
-| Rejections | Action |
-|------------|--------|
-| 0 below threshold | Skip verification entirely |
+| Condition | Action |
+|-----------|--------|
+| 0 matches below threshold | Skip verification entirely |
 | 0 rejections | All verified -- no changes |
-| 1 rejection | `NeedsReview` (single disagreement not enough to rematch) |
-| 2+ rejections | Cross-match rejected episodes against rejected references |
-| All rejected in cross-match | `NeedsReview` |
+| Any rejections | Flag `NeedsReview` |
 
-### 13.5 Cross-Matching (Rematch)
-
-When 2+ matches are rejected:
-
-1. Collect all rejected episode keys and their target episodes
-2. Pre-extract middle transcripts from all involved SRT files
-3. Run N x M LLM comparisons: each rejected rip against each rejected reference
-4. Build a confidence matrix from accepted (same_episode=true) comparisons
-5. Run Hungarian algorithm on the confidence matrix to find optimal reassignment
-6. Apply reassigned matches
+When the LLM rejects matches, the item is flagged for manual review rather than
+attempting algorithmic reassignment. LLM rejections indicate genuine ambiguity
+that automated recovery is unlikely to resolve correctly.
 
 ---
 
-## 14. Review Flags
+## 12. Review Flags
 
-### 14.1 NeedsReview Propagation
+### 12.1 NeedsReview Propagation
 
 Review flags are appended to the rip spec envelope via `env.AppendReviewReason()`.
 Multiple reasons accumulate. The organizer stage routes items with review flags
 to the review directory instead of the main library.
 
-### 14.2 Review Sources
+### 12.2 Review Sources
 
 | Source | Condition |
 |--------|-----------|
-| Block refinement | Disc 1 anchor outside valid high-confidence range |
-| Block refinement | Displaced matches with no gaps in block |
-| Block refinement | Displaced count does not match gap count |
+| Contiguity check | Disc 1 range doesn't start at episode 1 |
+| Contiguity check | Matched episodes are non-contiguous |
 | LLM verification | Verification call failed (kept original match) |
-| LLM verification | Single rejection (not enough to rematch) |
-| LLM verification | All cross-match combinations rejected |
+| LLM verification | Any match rejected by LLM |
 
-### 14.3 Low-Confidence Review
+### 12.3 Low-Confidence Review
 
 Matches below `LowConfidenceReviewThreshold` (default: 0.70) are flagged during
-strategy evaluation (handled by the episode identification stage, not the matcher
-directly).
+matching (handled by the episode identification stage, not the matcher directly).
 
 ---
 
-## 15. Policy Configuration Reference
+## 13. Policy Configuration Reference
 
 All thresholds are in the `Policy` struct, configurable via the `content_id`
 config section.
@@ -503,27 +359,18 @@ config section.
 | `min_similarity_score` | float64 | 0.58 | Minimum cosine similarity for a valid match. Matches below this are discarded. |
 | `low_confidence_review_threshold` | float64 | 0.70 | Matches below this trigger a review flag. |
 | `llm_verify_threshold` | float64 | 0.85 | Matches below this are sent to LLM verification. |
-| `anchor_min_score` | float64 | 0.63 | Minimum score for an anchor rip-to-reference match. |
-| `anchor_min_score_margin` | float64 | 0.03 | Minimum margin between best and second-best anchor scores. |
-| `block_high_confidence_delta` | float64 | 0.05 | Score within this delta of the maximum is "high confidence". |
-| `block_high_confidence_top_ratio` | float64 | 0.70 | Top N% of matches count as "high confidence". |
-| `disc_block_padding_min` | int | 2 | Minimum episode padding when estimating disc blocks. |
-| `disc_block_padding_divisor` | int | 4 | Divisor for computing padding: `blockSize / divisor`. |
-| `disc_1_must_start_at_episode_1` | bool | true | Disc 1 block always starts at episode 1. |
-| `disc_2_plus_min_start_episode` | int | 2 | Minimum start episode for disc 2+. |
+| `disc_1_must_start_at_episode_1` | bool | true | Disc 1 contiguous range must start at episode 1. |
 
-### 15.1 Normalization
+### 13.1 Normalization
 
 `Policy.normalized()` validates all fields and replaces out-of-range values with
 defaults:
 - Float fields must be in `(0, 1)` (exclusive)
-- `BlockHighConfidenceTopRatio` must be in `(0, 1]` (inclusive upper)
-- Integer fields must be `> 0`
 - Boolean fields have no validation
 
 ---
 
-## 16. Attributes Written to Envelope
+## 14. Attributes Written to Envelope
 
 After successful matching, the following attributes are set on the rip spec
 envelope:
@@ -533,8 +380,6 @@ envelope:
 | `ContentIDMatches` | `[]ContentIDMatch` | Per-episode match details (key, title_id, episode, score, subtitle info) |
 | `ContentIDMethod` | `string` | Always `"whisperx_opensubtitles"` |
 | `ContentIDTranscripts` | `map[string]string` | Episode key -> WhisperX SRT path |
-| `ContentIDSelectedStrategy` | `string` | Name of the winning strategy |
-| `ContentIDStrategyScores` | `[]StrategyScore` | All evaluated strategies with scores |
 | `EpisodesSynchronized` | `bool` | Set to `true` after successful matching |
 
 Each `ContentIDMatch` contains:

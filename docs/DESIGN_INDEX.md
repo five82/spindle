@@ -27,7 +27,7 @@ self-contained and focused on a single domain area.
 
 | Document | Contents | ~Lines |
 |----------|----------|--------|
-| [CONTENT_ID_DESIGN.md](CONTENT_ID_DESIGN.md) | Episode identification algorithm: transcription, fingerprinting, matching strategies, LLM verification | 540 |
+| [CONTENT_ID_DESIGN.md](CONTENT_ID_DESIGN.md) | Episode identification algorithm: transcription, fingerprinting, Hungarian matching, LLM verification | 395 |
 
 ## Quick Reference
 

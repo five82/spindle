@@ -580,14 +580,7 @@ See `CONTENT_ID_DESIGN.md` for detailed semantics of each field.
 | `min_similarity_score`             | float64 | 0.58    | Minimum cosine similarity to accept a match    |
 | `low_confidence_review_threshold`  | float64 | 0.70    | Below this, flag for review                    |
 | `llm_verify_threshold`             | float64 | 0.85    | Above this, skip LLM verification              |
-| `anchor_min_score`                 | float64 | 0.63    | Minimum score for anchor episode               |
-| `anchor_min_score_margin`          | float64 | 0.03    | Minimum gap between best and second-best       |
-| `block_high_confidence_delta`      | float64 | 0.05    | High-confidence threshold offset from max      |
-| `block_high_confidence_top_ratio`  | float64 | 0.70    | Top percentage threshold for high-confidence   |
-| `disc_block_padding_min`           | int     | 2       | Minimum padding for disc block strategy        |
-| `disc_block_padding_divisor`       | int     | 4       | Padding divisor for disc block strategy        |
-| `disc1_must_start_at_episode1`     | bool    | true    | Disc 1 always starts at episode 1             |
-| `disc2_plus_min_start_episode`     | int     | 2       | Disc 2+ cannot start before this episode       |
+| `disc_1_must_start_at_episode_1`   | bool    | true    | Disc 1 contiguous range must start at episode 1|
 
 #### `[workflow]`
 
