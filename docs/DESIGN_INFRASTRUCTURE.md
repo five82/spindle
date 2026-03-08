@@ -536,7 +536,7 @@ default to Fatal.
     new data), WaitDuration.
   - `TailResult`: Lines, Offset (next byte position for continuation).
 
-Used by the CLI `spindle show` command for direct file access when the daemon
+Used by the CLI `spindle logs` command for direct file access when the daemon
 is not running. When the daemon is running, the CLI uses `/api/logs` (which
 reads and filters the same file server-side).
 
@@ -792,7 +792,7 @@ CLI config commands don't require a running daemon:
 ### 8.4 Commands Without Config
 
 Some CLI commands are annotated with `skipConfigLoad` and work without any
-config file. These include: `config init`, `queue health`, and help commands.
+config file. These include: `config init` and help commands.
 
 ---
 

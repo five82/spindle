@@ -2,7 +2,7 @@
 
 Stage-by-stage breakdown of what happens after you insert a disc. See the [README](../README.md) for installation and initial setup.
 
-The daemon owns disc detection and the automated pipeline. Queue commands work with or without the daemon; log tailing (`spindle show`) requires a running daemon.
+The daemon owns disc detection and the automated pipeline. Queue commands work with or without the daemon; log tailing (`spindle logs --follow`) requires a running daemon.
 
 ## Lifecycle at a Glance
 
@@ -25,7 +25,7 @@ stage finishes, the item advances to the next stage with `in_progress` cleared.
 
 Items may also have a `needs_review` flag set, which routes output to `review_dir` without stopping the workflow.
 
-Use `spindle queue list` to inspect items and `spindle queue health` for lifecycle totals.
+Use `spindle queue list` to inspect items and `spindle status` for lifecycle totals.
 
 ## How the Workflow Runs
 
@@ -59,7 +59,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
 4. If no confident match is found (or TMDB lookup fails), the item is marked `needs_review` with a reason. The item advances to the next stage so downstream stages can still run, and the organizer will route output to `review_dir`.
 5. Duplicate fingerprints are treated as immediate failure: the item is placed in `failed` with `needs_review = true` and the workflow stops.
 
-Progress messages in `spindle show --follow` describe the identification steps and any review reasons.
+Progress messages in `spindle logs -f` describe the identification steps and any review reasons.
 
 ## Stage 3: Ripping the Disc (ripping)
 
@@ -146,7 +146,6 @@ Files in `review_dir` need manual attention:
 If items appear stuck (in-progress but not advancing):
 1. Check if the daemon is running: `spindle status`.
 2. If the daemon crashed, restart it: `spindle start`. Stale in-progress items are automatically recovered on startup.
-3. If the daemon is running but items are stuck: `spindle queue reset-stuck` clears the in-progress flag so items are re-picked up.
 
 ### Stopping an item
 
@@ -154,12 +153,11 @@ If items appear stuck (in-progress but not advancing):
 
 ## Monitoring & Control Tips
 
-- `spindle show --follow` - tail daemon logs (requires running daemon).
-- `spindle status` - status summary; uses the daemon when available, otherwise inspects the queue database.
-- `spindle queue list`, `spindle queue status`, `spindle queue health` - queue inspection (works with or without daemon).
+- `spindle logs -f` - tail daemon logs (requires running daemon).
+- `spindle status` - status summary including drive readiness and queue counts; uses the daemon when available, otherwise inspects the queue database.
+- `spindle queue list` - queue inspection (works with or without daemon).
 - `spindle queue retry <id>` - retry failed items only.
 - `spindle queue stop <id>` - halt processing for a specific item (takes effect after the current stage if already running).
-- `spindle queue reset-stuck` - return in-flight items to the start of their current stage.
 - `spindle disc pause` / `spindle disc resume` - pause or resume detection of new discs (already-queued items continue processing).
 - `spindle stop` - cleanly stop the daemon.
 

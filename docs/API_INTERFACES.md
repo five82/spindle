@@ -64,19 +64,16 @@ Show system and queue status.
 
 Output sections:
 1. **System Status**: Daemon running state, PID, disc pause, netlink monitoring
-2. **Dependencies**: Per-dependency availability (makemkvcon, ffmpeg, etc.)
-3. **Library Paths**: Movie and TV library path accessibility
-4. **Queue Status**: Table of status counts
+2. **Drive Status**: Optical drive readiness (via ioctl when device is `/dev/srN`)
+3. **Dependencies**: Per-dependency availability (makemkvcon, ffmpeg, etc.)
+4. **Library Paths**: Movie and TV library path accessibility
+5. **Queue Status**: Table of status counts
 
 Works without daemon by falling back to direct DB access for queue stats.
 
 ### 1.4 Queue Commands
 
 Parent: `spindle queue`
-
-#### `spindle queue status`
-
-Show queue status summary as a table of status counts.
 
 #### `spindle queue list`
 
@@ -107,16 +104,11 @@ Remove queue items.
 |------|------|---------|-------------|
 | `--all` | bool | false | Remove all items |
 | `--completed` | bool | false | Remove only completed items |
-| `--failed` | bool | false | Remove only failed items |
 
 Rules:
 - Requires either item IDs or exactly one flag
 - Cannot combine IDs with flags
 - Cannot combine multiple flags
-
-#### `spindle queue reset-stuck`
-
-Return in-flight items (stuck in processing states) to pending.
 
 #### `spindle queue retry [itemID...]`
 
@@ -138,16 +130,9 @@ Stop processing for specific queue items.
 
 Arguments: `<id...>` -- one or more queue item IDs (minimum 1 required).
 
-#### `spindle queue health`
+### 1.5 Logs Command
 
-Check queue database health (schema, integrity, columns).
-
-Requires daemon. Output: database path, existence, readability, schema version,
-table presence, columns, missing columns, integrity check, total items, errors.
-
-### 1.5 Show Command
-
-#### `spindle show`
+#### `spindle logs`
 
 Display daemon logs.
 
@@ -195,9 +180,8 @@ Arguments: `<encoded-file>` -- path to the encoded media file (required).
 
 #### `spindle test-notify`
 
-Send a test notification via the configured ntfy topic.
-
-Requires running daemon.
+Send a test notification via the configured ntfy topic. Sends an HTTP POST
+directly to the ntfy topic URL; does not require a running daemon.
 
 ### 1.7 Disc Commands
 
@@ -215,13 +199,6 @@ Resume detection of new disc insertions. Requires daemon.
 
 Trigger disc detection using the configured optical drive. Requires daemon.
 If daemon is not running, exits silently (no error).
-
-#### `spindle disc status`
-
-Check optical drive readiness via ioctl. No daemon required.
-Requires a raw device path (`/dev/srN`) in config; `disc:N` format not supported.
-
-Reports: device path, drive status string, ready boolean.
 
 ### 1.8 Cache Commands
 
@@ -265,25 +242,6 @@ Arguments: `<number>` -- entry number from `cache stats` (required).
 #### `spindle cache clear`
 
 Remove all cache entries.
-
-#### `spindle cache crop <entry|path>`
-
-Run crop detection on a cached rip file (troubleshooting).
-
-Arguments: Cache entry number or direct path to a video file.
-
-Output: video resolution, HDR status, crop detection result, crop filter,
-sample analysis with candidate distribution.
-
-#### `spindle cache commentary <entry|path>`
-
-Run commentary detection on a cached rip file (troubleshooting).
-
-Arguments: Cache entry number or direct path to a video file/directory.
-
-Output: primary audio track, similarity/confidence thresholds, commentary
-indices, per-candidate details (language, channels, similarity, downmix
-detection, LLM decision), diagnostic transcripts saved to files.
 
 ### 1.9 Config Commands
 
@@ -343,7 +301,33 @@ Remove a specific cache entry by number from `discid list`.
 
 Remove all disc ID cache entries.
 
-### 1.12 Audit Command
+### 1.12 Debug Commands
+
+Parent: `spindle debug`
+
+Standalone diagnostic tools for troubleshooting encoding and audio analysis.
+These run against local files without affecting the queue or requiring a daemon.
+
+#### `spindle debug crop <entry|path>`
+
+Run crop detection on a video file.
+
+Arguments: Cache entry number or direct path to a video file.
+
+Output: video resolution, HDR status, crop detection result, crop filter,
+sample analysis with candidate distribution.
+
+#### `spindle debug commentary <entry|path>`
+
+Run commentary detection on a video file.
+
+Arguments: Cache entry number or direct path to a video file/directory.
+
+Output: primary audio track, similarity/confidence thresholds, commentary
+indices, per-candidate details (language, channels, similarity, downmix
+detection, LLM decision), diagnostic transcripts saved to files.
+
+### 1.13 Audit Command
 
 #### `spindle audit-gather <item-id>`
 
@@ -355,7 +339,7 @@ Output: JSON containing queue metadata, parsed log entries, rip cache contents,
 ripspec envelope, encoding details, ffprobe output for encoded files. Designed
 for consumption by the `itemaudit` skill.
 
-### 1.13 Internal Commands
+### 1.14 Internal Commands
 
 #### `spindle daemon`
 
@@ -529,26 +513,6 @@ via `EqualFold`).
 The `next` field is the sequence cursor for polling. Pass it as the `since`
 parameter on the next request to get only newer events.
 
-#### GET /api/health
-
-Returns database health diagnostics.
-
-**Response** (200):
-```json
-{
-  "db_path": "/path/to/queue.db",
-  "database_exists": true,
-  "database_readable": true,
-  "schema_version": "5",
-  "table_exists": true,
-  "columns_present": ["id", "status", ...],
-  "missing_columns": [],
-  "integrity_check": true,
-  "total_items": 42,
-  "error": ""
-}
-```
-
 ### 2.5 Mutation Endpoints
 
 #### POST /api/daemon/stop
@@ -572,15 +536,6 @@ Remove queue items.
 **Response** (200):
 ```json
 {"removed": 5}
-```
-
-#### POST /api/queue/reset
-
-Reset in-progress items (clear `in_progress` flag).
-
-**Response** (200):
-```json
-{"updated": 2}
 ```
 
 #### POST /api/queue/retry
@@ -670,18 +625,9 @@ Trigger disc detection using the configured device.
 {"handled": true, "message": "Disc detected", "item_id": 42}
 ```
 
-#### POST /api/test-notify
-
-Send a test notification via configured ntfy topic.
-
-**Response** (200):
-```json
-{"sent": true, "message": "Test notification sent"}
-```
-
 ### 2.6 Queue Access Fallback
 
-Queue read commands (list, describe, status) support direct SQLite access when
+Queue read commands (list, show) support direct SQLite access when
 the daemon is not running. The CLI detects daemon unavailability and falls back
 to `queueaccess.Access` which wraps the SQLite store directly. Mutation
 operations require a running daemon.
@@ -763,9 +709,9 @@ The `QueueItem` JSON object returned by queue endpoints:
 
 ### 2.8 Log Access
 
-**Daemon running**: CLI uses `/api/logs` for filtered log queries. `--follow`
-polls with a sequence cursor.
+**Daemon running**: `spindle logs` uses `/api/logs` for filtered log queries.
+`--follow` polls with a sequence cursor.
 
-**Daemon not running**: CLI falls back to direct file tailing of the daemon
-log file via `logs.Tail()`. No structured filtering in this mode -- raw line
-output only.
+**Daemon not running**: `spindle logs` falls back to direct file tailing of
+the daemon log file via `logs.Tail()`. No structured filtering in this mode
+-- raw line output only.

@@ -358,7 +358,7 @@ the daemon running.
 
 ```
 Stats, List, Describe, ClearAll, ClearCompleted, ClearFailed,
-Remove, ResetStuck, RetryAll, Retry, RetryEpisode, Stop, ActiveFingerprints
+Remove, RetryAll, Retry, RetryEpisode, Stop, ActiveFingerprints
 ```
 
 **Implementations:**
