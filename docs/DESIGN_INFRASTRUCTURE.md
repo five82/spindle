@@ -546,8 +546,11 @@ streaming.
 ## 7. Audit Gathering
 
 The `auditgather` package provides comprehensive queue item analysis for
-debugging. Used by the CLI `spindle audit-gather` command and the `/itemaudit`
-skill.
+debugging. Its sole consumer is the `/itemaudit` agent skill (the CLI
+`spindle audit-gather` command exists as that skill's entry point). The
+structured JSON output — stage gates, pre-computed analysis, anomaly
+flags — is designed to let the LLM work efficiently within context limits,
+replacing what would otherwise be 10+ sequential shell commands.
 
 ### 7.1 Gather Pipeline
 
