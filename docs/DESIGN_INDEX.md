@@ -14,7 +14,7 @@ self-contained and focused on a single domain area.
 | [DESIGN_STAGES.md](DESIGN_STAGES.md) | All 7 pipeline stages: identification, ripping, episode ID, encoding, audio analysis, subtitles, organization | 925 |
 | [DESIGN_INFRASTRUCTURE.md](DESIGN_INFRASTRUCTURE.md) | Logging, notifications, preflight, shared utilities, log access, audit gathering, config validation, shared transcription service | 550 |
 | [DESIGN_PACKAGES.md](DESIGN_PACKAGES.md) | Go package layout, dependency rules, module boundaries, key interfaces | 170 |
-| [DESIGN_TESTING.md](DESIGN_TESTING.md) | Testing strategy, interface boundaries for mocking, test categories, fixtures | 200 |
+| [DESIGN_TESTING.md](DESIGN_TESTING.md) | Testing strategy, interface boundaries for test doubles, coverage goals | 120 |
 
 ## API Reference
 
