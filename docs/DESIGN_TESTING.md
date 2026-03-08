@@ -177,7 +177,7 @@ No hard coverage targets. Focus testing effort on:
 2. **Data serialization**: RipSpec round-trips, encoding snapshot, metadata JSON.
 3. **State machines**: Stage transitions, asset status tracking.
 4. **Edge cases in external tool parsing**: MakeMKV robot format variations,
-   ffprobe output quirks, WhisperX alignment JSON formats.
+   ffprobe output quirks, WhisperX SRT output formats.
 
 Low-value test targets (skip unless bugs emerge):
 - HTTP handler routing (thin wrappers around store calls)

@@ -542,53 +542,14 @@ transcription work.
    per-request languages via `NormalizeList()`.
 3. Extract primary audio track from encoded MKV to WAV.
 4. Run WhisperX via `uvx` with configured model, CUDA settings, VAD method.
-5. WhisperX produces aligned SRT and JSON output.
-6. **Stable-TS post-processing**: Format WhisperX JSON segments using an
-   embedded Python script (see Section 6.1.1). On failure, fall back to the
-   raw WhisperX SRT output.
-7. **Hallucination filtering**: `filterTranscriptionOutput()` removes WhisperX
+   Line length controlled by `--max_line_width 42 --max_line_count 2`.
+5. WhisperX produces SRT output.
+6. **Hallucination filtering**: `filterTranscriptionOutput()` removes WhisperX
    artifacts and repetitive segments.
-8. **Zero-segment SRT is fatal**: If filtering produces 0 cues, the stage fails
+7. **Zero-segment SRT is fatal**: If filtering produces 0 cues, the stage fails
    with `ErrTransient`.
-9. **Duration fallback**: If `totalSeconds <= 0`, extracts duration from last SRT
+8. **Duration fallback**: If `totalSeconds <= 0`, extracts duration from last SRT
    timestamp.
-
-#### 6.1.1 Stable-TS Post-Processing
-
-An embedded Python script (`stable_ts_formatter.py`, Go-embedded via
-`//go:embed`) reformats WhisperX alignment JSON into higher-quality SRT output
-using the `stable-whisper` library.
-
-**Invocation**: `uvx --from stable-ts python <script> <aligned.json> <output.srt> [--language <lang>]`
-
-**Pipeline steps:**
-
-1. **Load segments**: Parse WhisperX alignment JSON. Accepts both dict format
-   (`{"segments": [...], "language": "..."}`) and bare list format. Also checks
-   `speech_segments` and `detected_language` keys for WhisperX version
-   compatibility.
-2. **Normalize language**: Strip region suffix (e.g., `en-US` -> `en`),
-   lowercase. Default: `"en"` when absent or empty.
-3. **Sanitize segments**: Remove metadata that Stable-TS does not accept:
-   - Strip `chars` key from segments (WhisperX v5+ addition).
-   - For each word entry: rename `score` -> `probability` (WhisperX -> Stable-TS
-     field name), strip `speaker`, `case`, `chars` keys.
-   - Normalize word spacing: first word is trimmed; subsequent words get a
-     leading space unless they start with punctuation (`'`, `)`, `]`, `}`, `?`,
-     `!`, `.`, `,`, `:`, `;`).
-   - Rebuild segment `text` from normalized word tokens.
-4. **Build WhisperResult**: Construct `stable_whisper.WhisperResult` with
-   `force_order=True`, `check_sorted=False`, `show_unsorted=False`.
-5. **Regroup and clamp**: If the result has segments and words, call
-   `regroup(True)` for phrase regrouping and `clamp_max()` to fix overlapping
-   timestamps.
-6. **Render SRT**: `to_srt_vtt()` with `segment_level=True`,
-   `word_level=False`, `min_dur=0.12`, `strip=True`.
-
-**Error handling**: Each step produces a distinct error prefix
-(`import_error:`, `sanitize_error:`, `build_result_error:`, `regroup_error:`,
-`srt_render_error:`) for diagnostics. Any failure causes the caller to fall
-back to the raw WhisperX SRT output.
 
 ### 6.2 WhisperX Hallucination Filtering
 

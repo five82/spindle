@@ -99,7 +99,7 @@ When `commentary.enabled = true`, Spindle analyzes encoded files to detect and e
 When `subtitles.enabled = true`, Spindle generates subtitles from the actual audio using WhisperX transcription. Subtitles are generated per encoded asset.
 
 1. Spindle extracts the primary audio track.
-2. **WhisperX transcription**: transcribes with the `large-v3` model, aligns with wav2vec2, and formats with Stable-TS. If Stable-TS fails, the raw WhisperX SRT is used.
+2. **WhisperX transcription**: transcribes with the `large-v3` model with line length limits (`--max_line_width 42 --max_line_count 2`).
 3. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the WhisperX output via text-based matching.
 4. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`).
 

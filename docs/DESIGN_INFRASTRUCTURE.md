@@ -437,7 +437,7 @@ workflow manager's response. Stage handlers return typed errors via the
 |----------|-----------|----------|-------------|----------|
 | **Transient** | `services.ErrTransient` | Retry with exponential backoff (1s, 2s, 4s) | 3 | Network timeouts, rate limits, temporary disk full, `SQLITE_BUSY` beyond DB retry |
 | **Fatal** | `services.ErrFatal` | Fail the item immediately, record `failed_at_stage` | 0 | MakeMKV read error, ffmpeg non-zero exit, validation failure, missing required file |
-| **Degraded** | `services.ErrDegraded` | Log warning, continue with reduced functionality | N/A | Stable-TS failure (fall back to raw SRT), commentary detection failure, Jellyfin refresh failure, metadata write failure |
+| **Degraded** | `services.ErrDegraded` | Log warning, continue with reduced functionality | N/A | Commentary detection failure, Jellyfin refresh failure, metadata write failure |
 
 ### 5.2 Error Classification by Stage
 
@@ -473,7 +473,6 @@ workflow manager's response. Stage handlers return typed errors via the
 
 **Subtitles**:
 - WhisperX transcription produces 0 cues -> Transient (may be a temporary issue)
-- Stable-TS formatting failure -> Degraded (fall back to raw WhisperX SRT)
 - OpenSubtitles download failure -> Degraded (skip forced subs)
 - SRT validation issues -> Degraded (flag for review, don't fail)
 
@@ -483,19 +482,7 @@ workflow manager's response. Stage handlers return typed errors via the
 - Jellyfin refresh failure -> Degraded (log warning)
 - Subtitle sidecar move failure -> Degraded (log warning)
 
-### 5.3 Stable-TS Error Prefix Mapping
-
-All Stable-TS errors are **Degraded** (fallback to raw WhisperX SRT):
-
-| Error Prefix | Meaning |
-|-------------|---------|
-| `import_error:` | stable-whisper library not installed |
-| `sanitize_error:` | WhisperX JSON format incompatible |
-| `build_result_error:` | Could not construct WhisperResult |
-| `regroup_error:` | Phrase regrouping failed |
-| `srt_render_error:` | SRT output generation failed |
-
-### 5.4 Retry Behavior
+### 5.3 Retry Behavior
 
 When a transient error triggers retry:
 1. Stage execution is attempted up to 3 times total (1 initial + 2 retries).
@@ -505,7 +492,7 @@ When a transient error triggers retry:
 5. Retries happen within the same `processItem()` call -- the item stays
    in `in_progress = 1` during retries.
 
-### 5.5 Error Detail Extraction
+### 5.4 Error Detail Extraction
 
 `services.Details(err)` extracts structured information from errors:
 
@@ -796,7 +783,6 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 | Field | Type | Purpose |
 |-------|------|---------|
 | `SRTPath` | string | Path to generated SRT file |
-| `AlignedJSONPath` | string | Path to WhisperX alignment JSON |
 | `Duration` | float64 | Detected audio duration in seconds |
 | `Segments` | int | Number of SRT cues |
 | `Cached` | bool | True if result came from cache |
@@ -813,7 +799,7 @@ Cache directory: `~/.local/share/spindle/cache/whisperx/{cache_key}/`
 **Cache operations:**
 - `Lookup(key)`: Check for existing transcription. Validates SRT exists and
   has > 0 cues.
-- `Store(key, result)`: Copy SRT and alignment JSON to cache directory.
+- `Store(key, result)`: Copy SRT to cache directory.
 
 The cache is shared across all three consumers. Episode ID transcripts are
 automatically available for subtitle generation via cache hits, eliminating
@@ -839,8 +825,6 @@ ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn
 
 After WhisperX completes:
 
-1. **Stable-TS formatting**: Reformat alignment JSON into higher-quality SRT
-   (see DESIGN_STAGES.md Section 6.1.1). Fallback: raw WhisperX SRT.
-2. **Hallucination filtering**: Remove WhisperX artifacts and repetitive
+1. **Hallucination filtering**: Remove WhisperX artifacts and repetitive
    segments (see DESIGN_STAGES.md Section 6.2).
-3. **Validation**: Zero-segment output returns `ErrTransient`.
+2. **Validation**: Zero-segment output returns `ErrTransient`.

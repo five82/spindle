@@ -162,6 +162,8 @@ uvx --from whisperx whisperx <input_audio> \
   --language <lang> \
   --output_dir <dir> \
   --output_format srt \
+  --max_line_width 42 \
+  --max_line_count 2 \
   [--compute_type float16 --device cuda]  # when cuda enabled
 ```
 
