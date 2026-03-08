@@ -546,50 +546,51 @@ reads and filters the same file server-side).
 
 The `auditgather` package provides comprehensive queue item analysis for
 debugging. Its sole consumer is the `/itemaudit` agent skill (the CLI
-`spindle audit-gather` command exists as that skill's entry point). The
-structured JSON output — stage gates, pre-computed analysis, anomaly
-flags — is designed to let the LLM work efficiently within context limits,
-replacing what would otherwise be 10+ sequential shell commands.
+`spindle audit-gather` command exists as that skill's entry point).
+
+**Why this complexity is intentional:** The structured JSON output --
+pre-computed analysis, anomaly flags, aggregated decisions -- exists so
+the LLM skill can audit a queue item in a single context window without
+running 10+ sequential shell commands (`sqlite3`, `jq`, `ffprobe`, log
+parsing). Front-loading this work in Go keeps the skill's token budget
+focused on reasoning about the results rather than gathering them. The
+type count reflects the breadth of the audit surface (7 pipeline stages,
+4 asset phases, per-episode media probes), not unnecessary abstraction.
 
 ### 7.1 Gather Pipeline
 
 `Gather(ctx, cfg, item)` collects all artifacts for a queue item:
 
 1. **Item summary**: ID, title, status, timestamps, file paths.
-2. **Stage gate**: Furthest stage reached, media type, disc source, edition,
-   boolean phase flags determining which phases run.
-3. **Log analysis**: Parse per-item log for decisions, warnings, errors,
-   stage events. Extract disc source inference.
-4. **Rip cache**: Check for cached rip data and metadata.
-5. **Envelope**: Parse RipSpec for fingerprint, content key, titles, episodes,
-   assets, attributes.
-6. **Encoding**: Extract encoding snapshot.
-7. **Media probes**: FFprobe each encoded/final file. TV: probe each episode
+2. **Log analysis**: Parse per-item log for decisions, warnings, errors,
+   stage events.
+3. **Rip cache**: Check for cached rip data and metadata.
+4. **Envelope**: Parse RipSpec for fingerprint, content key, titles, episodes,
+   assets, attributes. Reads `disc_source` from envelope attributes.
+5. **Encoding**: Extract encoding snapshot.
+6. **Media probes**: FFprobe each encoded/final file. TV: probe each episode
    asset, falling back to final path if staging cleaned up.
 
-**Stage gating** (`computeStageGate()`):
-
-Each pipeline stage maps to a numeric ordinal. `reachedAtLeast(item, target)`
-checks whether the item's effective status >= the target ordinal. For failed
-items, `FailedAtStage` is used instead of `Stage` (so a failure during
-encoding still enables the rip cache phase).
+**Phase applicability**: The report includes boolean phase flags computed
+from `furthest_stage` + `media_type` + `disc_source` so the skill knows
+which sections of the report are meaningful. These are computed inline
+during gathering, not via a separate type.
 
 | Phase Flag | Enabled When |
 |------------|-------------|
-| `PhaseLogs` | Always |
-| `PhaseRipCache` | Past `ripping` stage |
-| `PhaseEpisodeID` | TV + past `episode_identification` stage |
-| `PhaseEncoded` | Past `encoding` stage |
-| `PhaseCrop` | Past `encoding` stage |
-| `PhaseEdition` | Movie + past `identification` stage |
-| `PhaseSubtitles` | Past `subtitling` stage |
-| `PhaseCommentary` | Past `audio_analysis` stage |
-| `PhaseExternalValidation` | Past `encoding` stage AND disc source != `dvd` |
+| `phase_logs` | Always |
+| `phase_rip_cache` | Past `ripping` stage |
+| `phase_episode_id` | TV + past `episode_identification` stage |
+| `phase_encoded` | Past `encoding` stage |
+| `phase_crop` | Past `encoding` stage |
+| `phase_edition` | Movie + past `identification` stage |
+| `phase_subtitles` | Past `subtitling` stage |
+| `phase_commentary` | Past `audio_analysis` stage |
+| `phase_external_validation` | Past `encoding` stage AND disc source != `dvd` |
 
-Disc source (`DiscSource`) is initially `"unknown"` and refined from log
-analysis after Phase 3. Values: `4k_bluray`, `bluray`, `dvd`, `unknown`.
-Inferred by scanning raw JSON log lines for `is_blu_ray`, UHD indicators,
-or `VIDEO_TS` patterns.
+For failed items, `failed_at_stage` is used instead of `stage` when
+computing the furthest stage reached (so a failure during encoding still
+enables the rip cache phase).
 
 ### 7.2 Analysis
 
@@ -614,7 +615,11 @@ Pre-computed summaries derived from gathered data:
 | Field | Type | Description |
 |-------|------|-------------|
 | `item` | ItemSummary | Queue item summary |
-| `stage_gate` | StageGate | Which audit phases apply |
+| `furthest_stage` | string | Highest pipeline stage reached |
+| `media_type` | string | movie or tv |
+| `disc_source` | string | From envelope `disc_source` attribute |
+| `edition` | string? | Detected edition label |
+| `phase_*` | bool | Phase applicability flags (see Section 7.1) |
 | `logs` | LogAnalysis? | Parsed per-item log |
 | `rip_cache` | RipCacheReport? | Cached rip data and metadata |
 | `envelope` | EnvelopeReport? | Parsed RipSpec envelope |
@@ -646,24 +651,6 @@ Pre-computed summaries derived from gathered data:
 | `encoded_file` | string? |
 | `final_file` | string? |
 
-#### StageGate
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `furthest_stage` | string | Highest pipeline stage reached |
-| `media_type` | string | movie or tv |
-| `disc_source` | string | 4k_bluray, bluray, dvd, unknown |
-| `edition` | string? | Detected edition label |
-| `phase_logs` | bool | Always true |
-| `phase_rip_cache` | bool | Past ripping stage |
-| `phase_episode_id` | bool | TV + past episode_identification stage |
-| `phase_encoded` | bool | Past encoding stage |
-| `phase_crop` | bool | Past encoding stage |
-| `phase_edition` | bool | Movie + past identification stage |
-| `phase_subtitles` | bool | Past subtitling stage |
-| `phase_commentary` | bool | Past audio_analysis stage |
-| `phase_external_validation` | bool | Past encoding stage AND not DVD |
-
 #### LogAnalysis
 
 | Field | Type |
@@ -671,7 +658,6 @@ Pre-computed summaries derived from gathered data:
 | `path` | string |
 | `is_debug` | bool |
 | `total_lines` | int |
-| `inferred_disc_source` | string? |
 | `decisions` | []LogDecision |
 | `warnings` | []LogEntry |
 | `errors` | []LogEntry |
@@ -718,37 +704,19 @@ Pre-computed summaries derived from gathered data:
 
 #### Analysis
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `decision_groups` | []DecisionGroup | Aggregated decisions (type, result, reason, count) |
-| `episode_consistency` | EpisodeConsistency? | Majority profile + deviations |
-| `crop_analysis` | CropAnalysis? | Filter, dimensions, aspect ratio, standard ratio |
-| `episode_stats` | EpisodeStats? | Matched/unresolved counts, confidence min/max/mean |
-| `media_stats` | MediaStats? | Duration and size ranges |
-| `asset_health` | AssetHealth? | Per-stage counts (ripped/encoded/subtitled/final) |
-| `anomalies` | []Anomaly | Severity + category + message |
+The analysis fields use inline struct definitions in Go (not named exported
+types) since each is constructed in exactly one place and consumed only as
+JSON by the skill.
 
-#### Supporting Analysis Types
-
-- **DecisionGroup**: `decision_type`, `decision_result`, `decision_reason`,
-  `count`, `entries` ([]LogDecision).
-- **EpisodeConsistency**: `majority_profile` (ProfileSummary),
-  `majority_count`, `total_episodes`, `deviations` ([]ProfileDeviation).
-- **ProfileSummary**: `video_codec`, `width`, `height`,
-  `audio_streams` ([]AudioProfile), `subtitle_streams` ([]SubtitleProfile).
-- **AudioProfile**: `codec`, `channels`, `channel_layout`, `language`,
-  `is_default`, `is_commentary`.
-- **SubtitleProfile**: `codec`, `language`, `is_forced`.
-- **ProfileDeviation**: `episode_key`, `differences` ([]string).
-- **CropAnalysis**: `filter`, `output_width`, `output_height`, `aspect_ratio`,
-  `standard_ratio`, `required`, `disabled`.
-- **EpisodeStats**: `count`, `matched`, `unresolved`, `confidence_min/max/mean`,
-  `below_070/080/090`, `sequence_contiguous`, `episode_range`.
-- **MediaStats**: `file_count`, `duration_min_sec`, `duration_max_sec`,
-  `size_min_bytes`, `size_max_bytes`.
-- **AssetHealth**: `ripped/encoded/subtitled/final` (each AssetCounts?).
-- **AssetCounts**: `total`, `ok`, `failed`, `muxed`.
-- **Anomaly**: `severity` (critical/warning/info), `category`, `message`.
+| Field | JSON Shape | Description |
+|-------|-----------|-------------|
+| `decision_groups` | `[{decision_type, decision_result, decision_reason, count, entries}]` | Aggregated decisions |
+| `episode_consistency` | `{majority_profile, majority_count, total_episodes, deviations}` | Majority media profile + per-episode deviations |
+| `crop_analysis` | `{filter, output_width, output_height, aspect_ratio, standard_ratio}` | Crop detection results |
+| `episode_stats` | `{count, matched, unresolved, confidence_min/max/mean, sequence_contiguous, episode_range}` | Episode ID summary |
+| `media_stats` | `{file_count, duration_min_sec, duration_max_sec, size_min_bytes, size_max_bytes}` | Duration and size ranges |
+| `asset_health` | `{ripped, encoded, subtitled, final}` each `{total, ok, failed, muxed}` | Per-stage asset counts |
+| `anomalies` | `[{severity, category, message}]` | Auto-detected red flags |
 
 ---
 

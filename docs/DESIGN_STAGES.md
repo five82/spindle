@@ -190,7 +190,9 @@ After identification:
 1. Build title specs from MakeMKV scan results (filtered by `min_title_length`).
 2. For TV: create episode specs with placeholder keys (e.g., `s01_001`).
 3. Set metadata fields from TMDB response.
-4. Build attributes (disc number, forced subtitle track detection).
+4. Build attributes: disc number, forced subtitle track detection, `disc_source`
+   (values: `4k_bluray`, `bluray`, `dvd`, `unknown` -- determined from disc
+   detection and bd_info results).
 5. Build `SubtitleContext` from resolved metadata (title, media type, TMDB ID,
    year, season, edition) and store it in envelope attributes. This consolidates
    all metadata needed for OpenSubtitles lookups at the point where it is

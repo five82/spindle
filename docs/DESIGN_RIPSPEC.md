@@ -127,10 +127,11 @@ error details for failed assets.
 
 ## 6. Attributes (Cross-Stage Communication)
 
-**EnvelopeAttributes** -- all 10 fields with writer/reader stages:
+**EnvelopeAttributes** -- all 11 fields with writer/reader stages:
 
 | Field | Type | Writer | Reader |
 |-------|------|--------|--------|
+| `disc_source` | string | Identification | Audit Gathering |
 | `disc_number` | int | Identification | Organization |
 | `has_forced_subtitle_track` | bool | Identification | Subtitles |
 | `subtitle_context` | *SubtitleContext | Identification | Subtitles |
