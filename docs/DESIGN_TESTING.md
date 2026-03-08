@@ -81,7 +81,7 @@ Cover pure logic with no I/O. Run with `go test ./...`.
 | `makemkv` | Robot format parsing (TINFO/SINFO/PRGV/MSG lines) |
 | `fingerprint` | Hash computation with known inputs |
 | `discmonitor` | Label validation, volume ID extraction |
-| `notify` | Event formatting, suppression rules |
+| `notify` | Event formatting |
 | `opensubtitles` | Candidate ranking, title comparison |
 
 ### 3.2 Integration Tests (build-tagged)

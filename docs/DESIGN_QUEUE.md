@@ -258,7 +258,6 @@ from the pipeline configuration.
 | `Remove(id)` | Delete single item |
 | `Clear()` | Delete all items |
 | `ClearCompleted()` | Delete only completed items |
-| `ClearFailed()` | Delete failed items (excludes user-stopped items) |
 
 **Query operations:**
 

@@ -288,7 +288,7 @@ Captures Drapto encoding telemetry for queue persistence and TUI display.
 The snapshot is served directly as the `encoding` field in the queue API
 response -- no transformation layer between DB and API.
 
-**Snapshot** (27 fields, 3 nested types):
+**Snapshot** (28 fields, 3 nested types):
 
 | Field | Type | Set When | Display Use |
 |-------|------|----------|-------------|

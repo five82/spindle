@@ -18,7 +18,7 @@ Single binary: `spindle`
 |------|-------|------|---------|-------------|
 | `--socket` | | string | `$XDG_RUNTIME_DIR/spindle.sock` | Path to the daemon HTTP API Unix socket |
 | `--config` | `-c` | string | `$XDG_CONFIG_HOME/spindle/config.toml` | Configuration file path |
-| `--log-level` | | string | (from config) | Log level: debug, info, warn, error |
+| `--log-level` | | string | info | Log level: debug, info, warn, error |
 | `--verbose` | `-v` | bool | false | Shorthand for `--log-level=debug` |
 | `--json` | | bool | false | Output in JSON format |
 
@@ -225,6 +225,11 @@ Queue a cached rip for post-rip processing.
 
 Arguments: `<number>` -- entry number from `cache stats` (required).
 
+Cached entries include identification metadata (TMDB results, media type, title).
+When processed, items start at the post-identification stage, skipping
+re-identification. `--allow-duplicate` bypasses the normal fingerprint
+deduplication check, permitting multiple queue items for the same disc.
+
 #### `spindle cache remove <number>`
 
 Remove a specific cache entry by number.
@@ -337,10 +342,6 @@ for consumption by the `itemaudit` skill.
 
 Run the spindle daemon process. Hidden command, not user-facing. Launched by
 `spindle start` via `daemonctl`.
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--diagnostic` | bool | false | Enable diagnostic mode |
 
 Skips config loading (loads its own config internally).
 
@@ -521,7 +522,7 @@ Remove queue items.
 
 **Request body**:
 ```json
-{"scope": "all" | "completed" | "failed"}
+{"scope": "all" | "completed"}
 ```
 
 **Response** (200):
@@ -685,7 +686,6 @@ The `QueueItem` JSON object returned by queue endpoints:
     "final":                 int
   },
   "episodeIdentifiedCount":  int,
-  "episodesSynchronized":    bool,
   "subtitleGeneration": {
     "opensubtitles":           int,
     "whisperx":                int,

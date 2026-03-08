@@ -47,7 +47,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 7. Release lock file via `d.lock.Unlock()`.
 8. Clear context references and set `running = false`.
 
-`Close()` calls `Stop()`, then closes the log archive and queue store.
+`Close()` calls `Stop()`, then closes the queue store.
 
 ### 1.3 Lock File
 
@@ -257,8 +257,11 @@ user"`):
    - **SIGINT, SIGTERM**: Graceful shutdown (cancel context, drain pipeline).
    - **SIGQUIT**: Dump goroutine stacks to stderr for debugging, then
      continue running (does not shut down).
-   - **SIGUSR1**: Toggle log level between INFO and DEBUG. Useful for
-     reducing log noise temporarily without a restart.
+   - **SIGUSR1**: Toggle the minimum level written to the daemon log file
+     between DEBUG and INFO. The daemon log is DEBUG-level by default;
+     SIGUSR1 raises the file handler's `slog.LevelVar` to INFO (suppressing
+     DEBUG lines) or lowers it back to DEBUG. Useful for reducing log noise
+     temporarily without a restart.
 2. Create timestamped DEBUG-level JSON log file:
    `spindle-{YYYYMMDD}T{HHMMSS.sss}Z.log`.
 3. Write PID file (`spindle.pid`).
@@ -332,7 +335,7 @@ the daemon running.
 **`Access` interface** (11 methods):
 
 ```
-Stats, List, Describe, ClearAll, ClearCompleted, ClearFailed,
+Stats, List, Describe, ClearAll, ClearCompleted,
 Remove, RetryAll, Retry, RetryEpisode, Stop, ActiveFingerprints
 ```
 

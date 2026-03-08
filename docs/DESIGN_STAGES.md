@@ -263,6 +263,13 @@ When `rip_cache.enabled`:
 Path is sanitized via `SanitizeFileName()`, spaces replaced with hyphens,
 leading/trailing hyphens and underscores trimmed.
 
+**Method contracts:**
+
+| Method | Purpose |
+|--------|---------|
+| `Store()` | Copy a rip directory into the cache. Used after ripping to a staging area. Triggers pruning. |
+| `Register()` | Mark an already-in-place directory as a cache entry (no copy). Used after `cache rip` where output is written directly to the cache. Triggers pruning. |
+
 **Pruning algorithm** (`prune()`):
 - Triggered after every `Store()` or `Register()` call.
 - While total cache size > `max_gib`: remove the oldest entry (by modification
