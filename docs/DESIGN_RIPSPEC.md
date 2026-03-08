@@ -179,7 +179,7 @@ SubtitleGenRecord {
 | `Parse` | `Parse(raw string) (Envelope, error)` | Deserialize JSON; returns empty envelope on blank input |
 | `Encode` | `Encode() (string, error)` | Serialize to JSON |
 | `EpisodeByKey` | `EpisodeByKey(key string) *Episode` | Case-insensitive lookup; nil if not found |
-| `AppendReviewReason` | `AppendReviewReason(reason string)` | Sets review flag, appends reason with "; " separator |
+| `AppendReviewReason` | `AppendReviewReason(reason string)` | Sets review flag; unmarshals existing JSON array (or `[]` if NULL/empty), appends reason, marshals back |
 | `ExpectedCount` | `ExpectedCount() int` | len(Episodes) for TV, 1 for movies |
 | `AssetCounts` | `AssetCounts() (expected, ripped, encoded, final int)` | Per-stage completion counts |
 | `MissingEpisodes` | `MissingEpisodes(stage string) []string` | Episode keys without assets at stage; nil for movies |

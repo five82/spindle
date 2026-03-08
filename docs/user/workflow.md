@@ -113,7 +113,7 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 
 ## Review vs Failed
 
-- **`failed` stage**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, and manual stop requests (`spindle queue stop <id>`). Items stopped by user have `review_reason = "Stop requested by user"`. Fix the root cause, then use `spindle queue retry <id>` to requeue.
+- **`failed` stage**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, and manual stop requests (`spindle queue stop <id>`). Items stopped by user have `"Stop requested by user"` in their `review_reason` array. Fix the root cause, then use `spindle queue retry <id>` to requeue.
 - **`needs_review` flag**: Workflow continues but final artifacts are routed to `review_dir` instead of the library. The item completes with progress stage "Manual review" so the pipeline stays unblocked. This is used for low-confidence matches, missing metadata, or other issues that need manual attention but shouldn't block processing.
 
 ## Recovery Procedures

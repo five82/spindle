@@ -738,6 +738,16 @@ The cache is keyed by a composite of:
 - WhisperX model name
 - Language
 
+Cache key computation:
+
+```
+key = hex(SHA-256( path + "\x00" + streamIndex + "\x00" + model + "\x00" + language ))
+```
+
+Where `path` is the absolute file path, `streamIndex` is the decimal audio
+stream index, `model` is the WhisperX model name, and `language` is the
+ISO 639-1 code. All components are UTF-8 strings separated by NUL bytes.
+
 Cache directory: `~/.local/share/spindle/cache/whisperx/{cache_key}/`
 
 **Cache operations:**

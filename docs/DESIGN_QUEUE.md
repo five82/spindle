@@ -96,7 +96,7 @@ row creation of a separate progress table.
 | `disc_fingerprint`     | TEXT      | SHA-256 hash of disc filesystem metadata          |
 | `metadata_json`        | TEXT      | JSON-encoded TMDB metadata                        |
 | `needs_review`         | INTEGER   | 1 if item requires manual review                  |
-| `review_reason`        | TEXT      | Why review is needed (semicolon-separated)        |
+| `review_reason`        | TEXT      | Why review is needed (JSON array, e.g. `["reason1", "reason2"]`) |
 | `drapto_preset_profile`| TEXT      | Drapto encoding preset profile                    |
 | `progress_stage`       | TEXT      | Current stage display name                        |
 | `progress_percent`     | REAL      | Progress percentage (0-100)                       |
@@ -273,7 +273,7 @@ from the pipeline configuration.
 
 **Stop-review override**: When updating an item, `applyStopReviewOverride()`
 preserves user-initiated stop state. If the stored item has `stage=failed` and
-`review_reason="Stop requested by user"`, the update is forced to maintain that
+`review_reason` contains `"Stop requested by user"`, the update is forced to maintain that
 state regardless of what the caller sets.
 
 **Transition operations:**

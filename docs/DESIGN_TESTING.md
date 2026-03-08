@@ -57,6 +57,24 @@ REST API clients defined at the consumer site:
 | `ItemStore` | `stage` (or consumer) | `Update(item)`, `UpdateProgress(item)`, `GetByID(id)` | `queue.Store` |
 | `TranscriptionService` | `contentid`, `subtitle` | `Transcribe(ctx, req) (*Result, error)` | `transcription.Service` |
 
+### 2.4 Test Double Summary
+
+| Interface | Package | Double Type | Key Behavior |
+|-----------|---------|-------------|--------------|
+| `queue.Store` | `queue` | In-memory fake | SQLite in `:memory:` mode |
+| `transcription.Service` | `transcription` | Stub | Return canned SRT content |
+| `makemkv.Runner` | `makemkv` | Stub | Return canned robot output |
+| `tmdb.Client` | `tmdb` | Stub | Return canned search/detail JSON |
+| `opensubtitles.Client` | `opensubtitles` | Stub | Return canned subtitle content |
+| `llm.Client` | `llm` | Stub | Return canned classification |
+| `jellyfin.Client` | `jellyfin` | Stub | No-op or record calls |
+| `notify.Client` | `notify` | Stub | Record sent notifications |
+| `ffprobe.Runner` | `ffprobe` | Stub | Return canned probe output |
+| `drapto.Client` | `encoder` | Stub | Return canned encode result |
+
+Stage handler tests follow a consistent pattern: construct handler with stub
+dependencies, call `Run(ctx, item)`, assert item state changes and side effects.
+
 ---
 
 ## 3. Test Categories
