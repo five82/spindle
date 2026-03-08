@@ -124,12 +124,6 @@ are sent unconditionally (no per-event config gates).
 | `unidentified_media`       | default  | review             |
 | `test`                     | low      | test               |
 
-### 2.3 Deduplication
-
-- Key: event type + first label field (discTitle/mediaTitle/title/filename/context).
-- Window: `dedup_window_seconds` (default 600 = 10 minutes).
-- Same key within window: suppressed.
-
 ---
 
 ## 3. Preflight Checks

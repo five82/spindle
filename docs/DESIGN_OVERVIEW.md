@@ -490,7 +490,6 @@ On config load, `EnsureDirectories` creates:
 |-----------------------|--------|---------|---------------------------------------------|
 | `ntfy_topic`          | string | (empty) | ntfy topic URL (empty disables all notifications) |
 | `request_timeout`     | int    | 10      | HTTP timeout in seconds                     |
-| `dedup_window_seconds`| int    | 600     | Deduplication window (10 minutes)           |
 
 #### `[subtitles]`
 
