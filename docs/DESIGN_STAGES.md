@@ -691,16 +691,12 @@ actual encode.
    find the best-matching reference cue by text similarity:
    - Normalize text: lowercase, replace newlines with spaces, remove all
      non-alphanumeric/non-space characters, collapse whitespace.
-   - **Scoring** (highest wins):
-     - `1.0`: Exact normalized text match.
-     - `0.9`: Forced text is a substring of reference text.
-     - `0.8`: Reference text is a substring of forced text.
-     - `overlap * 0.7`: Partial word overlap (requires overlap >= 0.6).
+   - **Match criteria** (first match wins):
+     - Exact normalized text match.
+     - Word overlap >= 0.6 (`wordOverlap()`: count of matching words
+       divided by the smaller word set size).
    - **Time constraint**: After the first match is found, skip reference
      cues where `|forced.start - ref.start| > 60 seconds`.
-   - **Minimum score**: `0.4` required to accept a match.
-   - **Word overlap** (`wordOverlap()`): Count of matching words divided
-     by the smaller word set size.
 3. **Calculate time transform** (`calculateTimeTransform()`): If >= 2
    matched pairs exist, compute a linear transform `t_ref = scale * t_forced + offset`
    using the first and last matched pairs' start times. This captures both
