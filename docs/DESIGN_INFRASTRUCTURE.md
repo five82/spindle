@@ -293,29 +293,34 @@ MakeMKV audio extraction before rip.
 
 ### 4.6 Encoding State (`encodingstate`)
 
-Captures Drapto encoding telemetry for queue persistence and display. Fields
-are flat -- no nested objects except for problems (validation steps, error
-detail). Each field maps directly to a display need in the TUI or API.
+Captures Drapto encoding telemetry for queue persistence and TUI display.
+The snapshot is served directly as the `encoding` field in the queue API
+response -- no transformation layer between DB and API.
 
-**Snapshot** (22 fields, 2 nested types):
+**Snapshot** (27 fields, 3 nested types):
 
 | Field | Type | Set When | Display Use |
 |-------|------|----------|-------------|
 | `percent` | float64 | Live | Progress bar |
 | `eta_seconds` | float64 | Live | ETA display |
 | `fps` | float64 | Live | Throughput indicator |
-| `current_frame` | int64 | Live | Fallback percent calculation |
-| `total_frames` | int64 | Live | Fallback percent calculation |
-| `current_output_bytes` | int64 | Live | "X written" during encode |
+| `current_frame` | int64 | Live | Frame-based progress |
+| `total_frames` | int64 | Live | Frame-based progress |
+| `current_output_bytes` | int64 | Live | Bytes written during encode |
 | `estimated_total_bytes` | int64 | Live | Estimated final size (>= 10% progress) |
 | `substage` | string | Live | Substage label: "crop_analysis", "encoding", "validation" |
 | `input_file` | string | Start | Episode matching (which rip is encoding) |
 | `resolution` | string | Start | "1080p" / "2160p" |
 | `dynamic_range` | string | Start | "SDR" / "HDR10" / "Dolby Vision" |
+| `encoder` | string | Start | Encoder name (e.g., "libsvtav1") |
 | `preset` | string | Start | SVT-AV1 preset number |
 | `quality` | string | Start | CRF value |
 | `tune` | string | Start | SVT-AV1 tune parameter |
+| `audio_codec` | string | Start | Audio codec (e.g., "libopus") |
+| `drapto_preset` | string | Start | Drapto preset name |
 | `crop_filter` | string | Start | FFmpeg crop filter (empty = no crop) |
+| `crop_required` | bool | Start | Whether cropping was needed |
+| `crop_message` | string | Start | Crop detection summary |
 | `original_size` | int64 | End | Size comparison |
 | `encoded_size` | int64 | End | Size comparison |
 | `size_reduction_percent` | float64 | End | "42% reduction" |

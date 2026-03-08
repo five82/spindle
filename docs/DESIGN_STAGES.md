@@ -413,11 +413,12 @@ The job runner iterates encode jobs with per-episode failure isolation:
 
 Drapto reports progress via a callback chain:
 
-1. **Apply snapshot**: update the flat encoding snapshot with current Drapto
+1. **Apply snapshot**: update the encoding snapshot with current Drapto
    event data. Live fields: `percent`, `fps`, `eta_seconds`, `current_frame`,
    `total_frames`, `substage`. One-time fields set at encoding start:
    `input_file`, `resolution`, `dynamic_range`, `preset`, `quality`, `tune`,
-   `crop_filter`. End fields set on completion: `original_size`,
+   `encoder`, `audio_codec`, `drapto_preset`, `crop_filter`, `crop_required`,
+   `crop_message`. End fields set on completion: `original_size`,
    `encoded_size`, `size_reduction_percent`, `average_speed`,
    `encode_duration_seconds`.
 2. **Update estimated size**: if progress >= 10%, read the output file's

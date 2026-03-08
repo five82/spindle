@@ -383,8 +383,8 @@ Drapto is a Go library (not a separate binary) used for SVT-AV1 encoding.
 | `stage_progress` | `substage`, `percent`, `eta_seconds` |
 | `encoding_started` | `total_frames` |
 | `encoding_progress` | `percent`, `fps`, `eta_seconds`, `current_frame` |
-| `encoding_config` | `preset`, `quality`, `tune` |
-| `crop_result` | `crop_filter` |
+| `encoding_config` | `preset`, `quality`, `tune`, `encoder`, `audio_codec`, `drapto_preset` |
+| `crop_result` | `crop_filter`, `crop_required`, `crop_message` |
 | `validation_complete` | `validation` |
 | `encoding_complete` | `original_size`, `encoded_size`, `size_reduction_percent`, `average_speed`, `encode_duration_seconds` |
 | `warning` | `warning` |
