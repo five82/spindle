@@ -449,22 +449,13 @@ block the pipeline:
 Everything else (MakeMKV failures, encoding errors, file copy errors,
 WhisperX failures, network errors) fails the item.
 
-### 5.3 Error Detail Extraction
+### 5.3 Error Wrapping
 
-`services.Details(err)` extracts structured information from errors:
+Standard `fmt.Errorf` with `%w` wrapping. Operation context and actionable
+hints are included in the error message string (e.g.,
+`fmt.Errorf("makemkv rip: timed out; consider increasing rip_timeout: %w", err)`).
 
-```go
-type ErrorDetails struct {
-    Stage     string      // stage name where error occurred
-    Operation string      // specific operation (e.g., "ffprobe", "tmdb_search")
-    Message   string      // human-readable error message
-    Hint      string      // actionable suggestion for the user
-    Cause     error       // underlying error
-}
-```
-
-Untyped errors fail the item by default. `ErrDegraded` is detected via
-`errors.As`.
+`ErrDegraded` is detected via `errors.As`. All other errors fail the item.
 
 ---
 
