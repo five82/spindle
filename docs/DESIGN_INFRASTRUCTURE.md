@@ -16,26 +16,16 @@ Two log handler modes:
   details. Used for CLI and daemon console output.
 - **JSON**: Structured JSON lines. Used for machine-readable logging.
 
-**Handler composition stack** (innermost to outermost):
-1. `newJSONHandler` or `newPrettyHandler` (selected by config format)
-2. `newStreamHandler` (wraps base, feeds StreamHub; skipped when no StreamHub)
-3. `newLevelOverrideHandler` (per-group level overrides; skipped when override empty)
-4. `newSessionIDHandler` (adds `session_id` to every record; skipped when ID empty)
+The daemon writes structured JSON log lines to a timestamped log file. An SSE
+broadcaster pushes each log record to connected `/api/events` clients in
+real-time (see API_INTERFACES.md Section 2.4.1).
 
-Fanout handler tees records to multiple downstream handlers when needed.
+### 1.2 SSE Broadcaster
 
-### 1.2 Log Streaming: StreamHub / EventArchive
-
-**StreamHub**: In-memory bounded ring buffer (default capacity: 4096 events).
-- `Publish(event)`: Append event, broadcast to subscribers.
-- `Fetch(since, limit, wait)`: Retrieve events with optional blocking for follow mode.
-- `Tail(limit)`: Get most recent events without blocking.
-- `AddSink(sink)`: Register external sink for persistence.
-
-**EventArchive**: On-disk persistence of log events.
-- Flushes events from StreamHub to JSONL file.
-- Supports `ReadSince(sequence, limit)` for historical queries.
-- When StreamHub buffer is exhausted, API falls back to archive.
+A lightweight in-process pub/sub channel. When a log record is written, it is
+also broadcast to any connected SSE clients. No buffering, no history, no
+on-disk archive. Clients that disconnect and reconnect pick up from the
+current stream position -- there is no replay of missed events.
 
 ### 1.3 Per-Item Logs
 
@@ -109,14 +99,12 @@ the bucket is forced to `int(100 / bucketSize)` to guarantee a final emit.
 Negative percent values (unknown progress) skip bucket evaluation entirely.
 `Reset()` clears both `lastStage` and `lastBucket` for new jobs.
 
-### 1.10 Log Stream Filters
+### 1.10 Log Filtering
 
-The log streaming API supports 3 additional filter types beyond those in
-API_INTERFACES.md Section 3.4:
-- `alert`: Filter by alert flag value.
-- `decision_type`: Filter by decision type attribute.
-- `search`: Substring search across message, component, stage, correlation ID,
-  fields, and details.
+The `/api/logs` endpoint reads the JSON log file and supports server-side
+filtering by: `component`, `level`, `item` (item ID), `correlation_id`,
+`alert`, `decision_type`, and `search` (substring match across message,
+component, stage, correlation ID, fields, and details).
 
 ### 1.11 Retention
 
@@ -558,28 +546,10 @@ default to Fatal.
     new data), WaitDuration.
   - `TailResult`: Lines, Offset (next byte position for continuation).
 
-### 6.2 HTTP Log Stream Client (`logs`)
-
-- `StreamClient`: HTTP client for the `/api/logs` endpoint over Unix socket.
-- `NewStreamClient(socketPath)`: Create client targeting the daemon socket.
-- `StreamClient.Fetch(ctx, query)`: Fetch structured log events.
-- `StreamQuery`: 12 filter parameters -- Since, Limit, Follow, Tail,
-  Component, CorrelationID, ItemID, Level, Alert, DecisionType, Search.
-
-**Error handling:**
-
-- `ErrAPIUnavailable`: Sentinel error when API server is unreachable.
-- `IsAPIUnavailable(err)`: Classification helper.
-
-### 6.3 Log Stream Abstraction (`logstream`)
-
-`Stream()` provides log access with automatic fallback:
-
-1. Try HTTP API via `StreamClient.Fetch()` over Unix socket.
-2. If API unavailable and filters don't require structured queries: fall back
-   to direct file tailing (raw line output).
-3. If filters require API features (structured queries, item filtering, etc.):
-   return `ErrFiltersRequireAPI`.
+Used by the CLI `spindle show` command for direct file access when the daemon
+is not running. When the daemon is running, the CLI uses `/api/logs` (which
+reads and filters the same file server-side) or `/api/events` for live
+streaming.
 
 ---
 

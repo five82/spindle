@@ -263,9 +263,8 @@ user"`):
    - **SIGUSR1**: Toggle log level between current level and DEBUG. Useful
      for temporary verbose logging without a restart.
 2. Create timestamped log file: `spindle-{YYYYMMDD}T{HHMMSS.sss}Z.log`.
-3. Create event archive file (`.events`) for log stream persistence.
-4. Initialize `StreamHub` (4096 event buffer) for real-time log streaming.
-5. If diagnostic mode: create separate DEBUG-level JSON log in `debug/`
+3. Create SSE broadcaster for real-time log streaming to connected clients.
+4. If diagnostic mode: create separate DEBUG-level JSON log in `debug/`
    subdirectory, assign UUID session ID, use `TeeLogger` to fan out.
 6. Write PID file (`spindle.pid`).
 7. Open queue store.
@@ -277,8 +276,8 @@ user"`):
 13. Block on signal context until shutdown signal received.
 
 **Log retention**: On startup, cleans old log files exceeding
-`logging.retention_days` across 4 targets: daemon logs, event archives,
-per-item logs, and tool logs.
+`logging.retention_days` across 3 targets: daemon logs, per-item logs, and
+tool logs.
 
 **Current log pointer**: Creates `spindle.log` symlink (with hardlink fallback)
 pointing to the active log file for easy access.

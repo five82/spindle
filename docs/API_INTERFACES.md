@@ -163,8 +163,9 @@ Display daemon logs.
 | `--decision-type` | | string | | Filter by decision type |
 | `--search` | | string | | Search logs by substring |
 
-Requires daemon HTTP API for full filtering. Falls back to direct file
-tailing when API is unavailable (no structured filtering in fallback mode).
+When daemon is running, uses `/api/logs` for filtered queries. Falls back to
+direct file tailing when daemon is unavailable (no structured filtering).
+`--follow` uses the SSE `/api/events` endpoint when daemon is running.
 
 ### 1.6 Workflow Commands
 
@@ -484,32 +485,25 @@ Returns a single queue item by ID.
 
 #### GET /api/logs
 
-Returns structured log events from the in-memory log stream.
+Returns structured log events parsed from the daemon's JSON log file.
 
 **Query parameters**:
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `since` | uint64 | 0 | Sequence number to fetch from |
 | `limit` | int | 200 | Maximum events to return |
-| `follow` | string | | `1` or `true` to wait for new events |
-| `tail` | string | | `1` or `true` to get the latest events (ignores `since`) |
+| `tail` | string | | `1` or `true` to get the latest events |
 | `item` | int64 | | Filter by queue item ID |
 | `component` | string | | Filter by component label |
 | `daemon_only` | string | | `1` to show only daemon logs (no item association) |
 | `correlation_id` | string | | Filter by correlation/request ID |
 | `request` | string | | Alias for `correlation_id` |
 | `level` | string | | Minimum log level (debug, info, warn, error) |
-| `alert` | string | | Filter by alert flag value |
-| `decision_type` | string | | Filter by decision type value |
 | `search` | string | | Substring search across message, component, stage, correlation ID, fields, details |
 
 **Query parameter defaults**: `limit` defaults to 200 if invalid or missing.
 String filters (`component`, `level`, etc.) are case-insensitive (compared
 via `EqualFold`).
-
-**Archive fallback**: When `since` points to a sequence older than the in-memory
-stream's first sequence, the event archive on disk is consulted first.
 
 **Response** (200):
 ```json
@@ -527,8 +521,7 @@ stream's first sequence, the event archive on disk is consulted first.
       "fields": {"event_type": "stage_complete"},
       "details": [{"label": "Title", "value": "Movie Name"}]
     }
-  ],
-  "next": 43
+  ]
 }
 ```
 
@@ -578,9 +571,10 @@ Returns database health diagnostics.
 
 #### GET /api/events
 
-Real-time event stream using Server-Sent Events (SSE). Replaces long-polling
-of `/api/logs?follow=true` for live progress monitoring. The `StreamHub`
-already has pub/sub semantics; this endpoint exposes them as an SSE stream.
+Real-time event stream using Server-Sent Events (SSE). Each log record
+written by the daemon is broadcast to connected SSE clients via a
+lightweight in-process pub/sub channel. This is the primary interface for
+live progress monitoring (used by Flyer).
 
 **Query parameters**:
 
@@ -607,12 +601,13 @@ data: {"item_id":5,"stage":"encoding","percent":45.2,"message":"Phase 1/1 - Enco
 **Connection lifecycle:**
 - Client connects, receives events as they occur.
 - Server sends `event: heartbeat` every 30 seconds to keep the connection alive.
-- Client reconnect uses `Last-Event-ID` header (set to last received `seq`).
+- No replay of missed events on reconnect. Clients reconnect and pick up from
+  the current stream position.
 - Connection closed on daemon shutdown or client disconnect.
 
-**Flyer integration**: Flyer should prefer `/api/events` over polling
-`/api/logs?follow=true` for real-time encoding progress (FPS, ETA, percentage).
-The polling endpoint remains available for batch queries and historical data.
+**Flyer integration**: Flyer uses `/api/events` for real-time encoding progress
+(FPS, ETA, percentage). `/api/logs` is available for batch queries of the log
+file.
 
 ### 2.4.2 Operational Endpoints
 
@@ -970,20 +965,9 @@ The `QueueItem` JSON object returned by queue endpoints:
 
 ### 2.8 Log Access
 
-The `logs` package provides log access for CLI commands:
+**Daemon running**: CLI uses `/api/logs` for filtered log queries and
+`/api/events` for live streaming.
 
-- `StreamClient`: HTTP client for `/api/logs` over Unix socket. Supports all
-  12 filter parameters from Section 2.4.
-- `Tail(ctx, path, opts)`: Direct file tailing with follow support. Used as
-  fallback when daemon is unavailable (limited to raw line output, no
-  structured filtering).
-- `ErrAPIUnavailable` / `IsAPIUnavailable(err)`: Transport error detection.
-
-The `logstream` package provides automatic fallback:
-
-1. **Primary**: HTTP API via `StreamClient.Fetch()` over Unix socket --
-   structured log events with full filtering.
-2. **Fallback**: Direct file tailing of the daemon log (no structured
-   filtering).
-3. **Error**: `ErrFiltersRequireAPI` when filters need API features but
-   daemon is unavailable.
+**Daemon not running**: CLI falls back to direct file tailing of the daemon
+log file via `logs.Tail()`. No structured filtering in this mode -- raw line
+output only.

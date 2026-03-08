@@ -63,10 +63,9 @@ internal/
   staging/              Staging directory management (list, clean stale/orphaned)
   deps/                 Dependency checking (binary resolution, requirements)
 
-  httpapi/              HTTP API server, route registration, middleware
+  httpapi/              HTTP API server, route registration, middleware, SSE broadcaster
   queueaccess/          Queue access abstraction (HTTP client + direct store)
-  logs/                 StreamHub, EventArchive, log tailing, StreamClient
-  logstream/            Log access with automatic HTTP/file fallback
+  logs/                 Log file tailing
   auditgather/          Audit artifact collection and analysis
 ```
 
@@ -98,8 +97,7 @@ import packages in higher layers.
 
 ### Layer 5: Orchestration (depend on Layers 1-4)
 
-`workflow`, `stageexec`, `httpapi`, `queueaccess`, `logs`, `logstream`,
-`auditgather`
+`workflow`, `stageexec`, `httpapi`, `queueaccess`, `logs`, `auditgather`
 
 ### Layer 6: Daemon (depend on Layers 1-5)
 

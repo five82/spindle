@@ -35,8 +35,8 @@ them to appear in Jellyfin without manual intervention.
 ### 1.4 Known Consumers
 
 - **Flyer** ([github.com/five82/flyer](https://github.com/five82/flyer)): A read-only
-  TUI that connects to Spindle's HTTP API to display queue status, encoding progress,
-  and log streams. Flyer is a separate project and not part of Spindle itself, but it
+  TUI that connects to Spindle's HTTP API to display queue status and encoding
+  progress via SSE. Flyer is a separate project and not part of Spindle itself, but it
   is the primary external consumer of the API.
 
 ---
