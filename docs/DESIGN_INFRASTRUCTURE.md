@@ -64,16 +64,7 @@ All decisions use structured attributes:
 
 `"Phase N/M - Action (context)"` -- e.g., `"Phase 2/3 - Ripping selected titles (5 of 12)"`
 
-### 1.7 Stage Overrides
-
-Per-stage log levels via `logging.stage_overrides` map:
-```toml
-[logging.stage_overrides]
-encoder = "debug"
-contentid = "debug"
-```
-
-### 1.8 Progress Sampling
+### 1.7 Progress Sampling
 
 Bucket-based progress suppression prevents log spam. State machine
 (`ProgressSampler`):
@@ -91,13 +82,13 @@ the bucket is forced to `int(100 / bucketSize)` to guarantee a final emit.
 Negative percent values (unknown progress) skip bucket evaluation entirely.
 `Reset()` clears both `lastStage` and `lastBucket` for new jobs.
 
-### 1.9 Log Filtering
+### 1.8 Log Filtering
 
 The `/api/logs` endpoint reads the JSON log file and supports server-side
 filtering by: `item` (item ID), `level`, `component`, `lane`,
 `correlation_id`, and `daemon_only`.
 
-### 1.10 Retention
+### 1.9 Retention
 
 Log files older than `retention_days` are cleaned up. Per-item log directories
 are deleted when all files within them exceed retention.

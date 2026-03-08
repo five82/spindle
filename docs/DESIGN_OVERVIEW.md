@@ -597,7 +597,6 @@ See `CONTENT_ID_DESIGN.md` for detailed semantics of each field.
 | `format`          | string            | `console` | Log format: "console" or "json"       |
 | `level`           | string            | `info`    | Default log level                     |
 | `retention_days`  | int               | 60        | Days to retain per-item log files     |
-| `stage_overrides` | map[string]string | (empty)   | Per-stage log level overrides         |
 
 #### `[validation]`
 
