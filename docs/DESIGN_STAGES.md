@@ -717,64 +717,30 @@ Returns: `(matchCount, timeTransform, error)`.
 
 ### 6.5 OpenSubtitles Candidate Ranking
 
-`rankSubtitleCandidates()` scores and orders OpenSubtitles search results to
-select the best subtitle file for download. Used by both forced subtitle
-fetching and content ID reference downloads.
+`rankSubtitleCandidates()` selects the best subtitle file from OpenSubtitles
+search results. Used by forced subtitle fetching (content ID reference
+selection uses its own simpler logic; see CONTENT_ID_DESIGN.md §5.2).
 
-**Ranking tiers** (evaluated in order, each sorted by score then downloads):
+**Hard rejections** (excluded before ranking):
+- Title mismatch: `compareTitles()` returns `titleMatchNone`.
+- Garbage sources: CAM, Telesync, Telecine, or Screener in release name.
 
-1. **Preferred language, human-translated**: Best candidates.
-2. **Preferred language, AI-translated**: Acceptable but penalized.
-3. **Fallback language, human-translated**: Non-preferred languages.
-4. **Fallback language, AI-translated**: Last resort.
+**Ranking tiers** (evaluated in order):
 
-**Score components** (`scoreSubtitleCandidate()`):
+1. **Preferred language, human-translated**
+2. **Preferred language, AI-translated**
+3. **Fallback language, human-translated**
+4. **Fallback language, AI-translated**
 
-| Factor | Score | Condition |
-|--------|-------|-----------|
-| Downloads | `log1p(downloads)` | Base score from popularity |
-| Release quality | +3.0 | Blu-ray/BDRip/BRRip |
-| Release quality | +2.5 | Remux |
-| Release quality | +1.5 | UHD/2160p/4K |
-| Release quality | +1.0 | 1080p |
-| Release quality | +0.5 | 720p |
-| Release quality | -2.0 | WebRip/WEB-DL |
-| Release quality | -1.0 | HDRip/DVDRip/TVRip/HDTV |
-| Release quality | -4.0 | CAM/Telesync/Telecine/Screener |
-| Release quality | -1.5 | Hardcoded subs |
-| Edition match | +8.0 | Release contains expected edition patterns |
-| Edition mismatch | -6.0 | Edition expected but not in release |
-| Title match | +1.0 / +0.5 / 0 / -10.0 | Exact / contains / partial / mismatch |
-| Year exact | +1.5 | Year matches exactly |
-| Year close | +1.0 | Year within 1 year |
-| Year off | -0.5 | Year 2-3 years away |
-| Year far | -1.5 | Year 4-5 years away |
-| Year wrong | -4.0 | Year >5 years away |
-| Media type mismatch | -1.0 | Movie vs TV mismatch |
-| HD flag | +0.5 | HD source |
-| Hearing impaired | -0.5 | HI annotations |
-| AI translated | -4.0 | Machine translation |
-
-**Hard rejections**: Candidates with title mismatch (`compareTitles()` returns
-`titleMatchNone`) are excluded before scoring.
+Within each tier: sort by download count descending (most downloaded = most
+vetted). Tiebreaker: lowest file ID (deterministic ordering).
 
 **Title comparison** (`compareTitles()`): Normalizes both titles (lowercase,
-remove non-alphanumeric), then classifies as:
+remove non-alphanumeric, drop stop words `the`/`a`/`an`), then classifies as:
 - `titleMatchExact`: Identical after normalization.
 - `titleMatchContain`: All words of the shorter title appear in the longer,
   AND shorter has >= 50% of longer's word count.
-- `titleMatchPartial`: >= 50% word overlap.
-- `titleMatchNone`: Below 50% word overlap.
-
-Common stop words (`the`, `a`, `an`) are excluded from word overlap comparison.
-
-**Edition matching**: Recognizes 12 edition types (Director's Cut, Extended,
-Unrated, Uncut, Theatrical, Remastered, Special Edition, Final Cut, Redux,
-IMAX, Ultimate, Definitive) with variant patterns. Release name separators
-(`.`, `-`, `_`) are normalized to spaces before matching.
-
-**Tiebreaker**: Within the same score, higher download count wins. Within the
-same download count, lower file ID wins (deterministic ordering).
+- `titleMatchNone`: Below threshold. Hard-rejected.
 
 ### 6.6 SRT Generation
 

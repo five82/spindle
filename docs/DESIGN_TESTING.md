@@ -82,7 +82,7 @@ Cover pure logic with no I/O. Run with `go test ./...`.
 | `fingerprint` | Hash computation with known inputs |
 | `discmonitor` | Label validation, volume ID extraction |
 | `notify` | Event formatting, deduplication, suppression rules |
-| `opensubtitles` | Candidate ranking, title comparison, edition matching |
+| `opensubtitles` | Candidate ranking, title comparison |
 
 ### 3.2 Integration Tests (build-tagged)
 
