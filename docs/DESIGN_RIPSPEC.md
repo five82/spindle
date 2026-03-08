@@ -127,7 +127,7 @@ error details for failed assets.
 
 ## 6. Attributes (Cross-Stage Communication)
 
-**EnvelopeAttributes** -- all 13 fields with writer/reader stages:
+**EnvelopeAttributes** -- all 10 fields with writer/reader stages:
 
 | Field | Type | Writer | Reader |
 |-------|------|--------|--------|
@@ -137,9 +137,6 @@ error details for failed assets.
 | `content_id_needs_review` | bool | Episode ID | Organization |
 | `content_id_review_reason` | string | Episode ID | Organization |
 | `content_id_matches` | []ContentIDMatch | Episode ID | Organization |
-| `content_id_method` | string | Episode ID | -- |
-| `content_id_transcripts` | map[string]string | Episode ID | -- |
-| `episodes_synchronized` | bool | Episode ID | Organization |
 | `primary_audio_description` | string | Audio Analysis | API/Display |
 | `audio_analysis` | *AudioAnalysisData | Audio Analysis | Encoding |
 | `subtitle_generation_results` | []SubtitleGenRecord | Subtitles | Organization |
