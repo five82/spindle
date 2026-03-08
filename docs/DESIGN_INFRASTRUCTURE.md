@@ -736,7 +736,6 @@ Key validation constraints enforced by `validate.go`:
 - `encoding.svt_av1_preset`: Must be 0-13.
 - `makemkv.rip_timeout`: Must be > 0.
 - `makemkv.min_title_length`: Must be >= 0.
-- `workflow.queue_poll_interval`: Must be > 0.
 - `jellyfin.url` and `jellyfin.api_key`: Required when `jellyfin.enabled`.
 - `subtitles.whisperx_hf_token`: Required when subtitles enabled with
   pyannote VAD.
@@ -804,7 +803,7 @@ The cache is keyed by a composite of:
 - WhisperX model name
 - Language
 
-Cache directory: `{whisperx_cache_dir}/{cache_key}/`
+Cache directory: `~/.local/share/spindle/cache/whisperx/{cache_key}/`
 
 **Cache operations:**
 - `Lookup(key)`: Check for existing transcription. Validates SRT exists and

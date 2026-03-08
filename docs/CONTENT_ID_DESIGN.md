@@ -131,7 +131,8 @@ Selection reasons: `top_result`, `title_consistency_rerank`, `non_hi_preferred`,
 ### 5.3 Download and Caching
 
 - Downloads use format `srt`
-- File cache: keyed by `file_id`, stored under `opensubtitles_cache_dir`
+- File cache: keyed by `file_id`, stored under the auto-derived OpenSubtitles
+  cache directory (`~/.local/share/spindle/cache/opensubtitles`)
 - Search cache: keyed by variant signature, stores search responses
 - Cache hits skip network calls entirely
 
@@ -275,7 +276,7 @@ sequence.
 
 ### 10.3 Disc 1 Constraint
 
-When `disc_1_must_start_at_episode_1 = true` (default) and the disc number is 1,
+When `disc1MustStartAtEpisode1` is true (hardcoded default) and the disc number is 1,
 the contiguous range must start at episode 1. If it doesn't, flag `NeedsReview`.
 
 ---
@@ -349,24 +350,16 @@ matching (handled by the episode identification stage, not the matcher directly)
 
 ---
 
-## 13. Policy Configuration Reference
+## 13. Policy Constants
 
-All thresholds are in the `Policy` struct, configurable via the `content_id`
-config section.
+All thresholds are hardcoded constants in the `Policy` struct (not user-configurable).
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `min_similarity_score` | float64 | 0.58 | Minimum cosine similarity for a valid match. Matches below this are discarded. |
-| `low_confidence_review_threshold` | float64 | 0.70 | Matches below this trigger a review flag. |
-| `llm_verify_threshold` | float64 | 0.85 | Matches below this are sent to LLM verification. |
-| `disc_1_must_start_at_episode_1` | bool | true | Disc 1 contiguous range must start at episode 1. |
-
-### 13.1 Normalization
-
-`Policy.normalized()` validates all fields and replaces out-of-range values with
-defaults:
-- Float fields must be in `(0, 1)` (exclusive)
-- Boolean fields have no validation
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `minSimilarityScore` | 0.58 | Minimum cosine similarity for a valid match. Matches below this are discarded. |
+| `lowConfidenceReviewThreshold` | 0.70 | Matches below this trigger a review flag. |
+| `llmVerifyThreshold` | 0.85 | Matches below this are sent to LLM verification. |
+| `disc1MustStartAtEpisode1` | true | Disc 1 contiguous range must start at episode 1. |
 
 ---
 

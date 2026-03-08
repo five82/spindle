@@ -288,7 +288,9 @@ Section 2.2 for the canonical list):
 - `error`, `unidentified_media`
 - `test`
 
-Deduplication: key = `event + label`, window = configurable seconds.
+All notification types are sent when `ntfy_topic` is set. Rip notifications
+are suppressed for cache hits under 120 seconds. Queue start/finish
+notifications require at least 2 items.
 
 ---
 

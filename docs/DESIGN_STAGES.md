@@ -152,7 +152,7 @@ Heuristics to determine if disc is movie or TV:
 3. If movie hint: search `/search/movie` first, fall back to `/search/multi`.
 4. If TV hint: search `/search/tv` first, fall back to `/search/multi`.
 5. Score results using title similarity, vote count, year proximity.
-6. For exact title matches: require `min_vote_count_exact_match` votes.
+6. For exact title matches: require minimum 5 votes (hardcoded threshold).
 7. Best match above confidence threshold becomes the identification.
 
 ### 1.7 TMDB Confidence Scoring
@@ -165,8 +165,7 @@ where `match = 1.0` if query appears in title (case-insensitive), else `0.0`.
 **Acceptance paths:**
 
 - **Exact match** (title equals query after normalization): requires
-  `voteAverage >= 2.0` AND (when `min_vote_count_exact_match` > 0)
-  `voteCount >= min_vote_count_exact_match`.
+  `voteAverage >= 2.0` AND `voteCount >= 5`.
 - **Non-exact match**: requires `voteAverage >= 3.0` AND
   `score >= 1.3 + (voteCount / 1000.0)`.
 
@@ -355,7 +354,7 @@ placeholder keys as-is for file naming and asset tracking.
 
 Four conditions flag an item for review after matching:
 1. **Content ID flagged**: `ContentIDNeedsReview` set by matching algorithm.
-2. **Low confidence**: Any episode below `low_confidence_review_threshold`.
+2. **Low confidence**: Any episode below the low-confidence review threshold (0.70).
 3. **Partial resolution**: Some episodes still unresolved after matching.
 4. **Non-contiguous sequence**: Resolved episode numbers have gaps (e.g.,
    1, 2, 5, 6 instead of 1, 2, 3, 4).
@@ -452,9 +451,8 @@ See DESIGN_INFRASTRUCTURE.md Section 4.6 for the full snapshot schema.
 
 1. **Missing ripped episodes**: Detected at start via `MissingEpisodes(ripped)`.
    Warns and flags for review but does not fail.
-2. **Drapto validation enforcement**: Conditional on config flag. When
-   `enforce_drapto_validation` is false, validation failures are logged only.
-   When true, the stage fails with detailed step-by-step failure report.
+2. **Drapto validation enforcement**: Always enforced. Validation failures
+   cause the stage to fail with a detailed step-by-step failure report.
 3. **Crop ratio validation**: For movies only, log warnings if crop detection
    produced unusual aspect ratios.
 4. **Encoding snapshot audio refresh**: Re-probes encoded files after encoding to

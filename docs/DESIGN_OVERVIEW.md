@@ -108,8 +108,7 @@ them to appear in Jellyfin without manual intervention.
 - **Default model**: `google/gemini-3-flash-preview`
 - **Auth**: API key via `Authorization: Bearer` header.
 - **Headers**: `HTTP-Referer`, `X-Title` for OpenRouter routing.
-- **Fallback**: Commentary detection falls back to `[llm]` settings when
-  `[commentary]` section doesn't specify its own API key/model.
+- **Usage**: Commentary detection and episode verification use `[llm]` settings.
 
 ### 3.6 KeyDB
 
@@ -212,8 +211,8 @@ completion, cancellation, or failure. Stages that do not require a semaphore
 2. Fetch next ready item via `NextReady()` where `in_progress = 0`, ordered
    by stage priority (earlier stages first) then creation time (FIFO within
    same stage).
-3. If no item: wait `queue_poll_interval` seconds, loop.
-4. If queue fetch error: log, wait `error_retry_interval` seconds, loop.
+3. If no item: wait 5 seconds, loop.
+4. If queue fetch error: log, wait 10 seconds, loop.
 5. Spawn goroutine: acquire required semaphore(s), run preflight checks for
    the stage, set `in_progress = 1`, process item via `processItem()`,
    advance stage, release semaphore(s).
@@ -438,7 +437,8 @@ On config load, `EnsureDirectories` creates:
 - `log_dir` (required, fail on error)
 - `review_dir` (required, fail on error)
 - `library_dir` (best-effort, don't fail -- storage may be offline)
-- `rip_cache.dir` (if cache enabled, fail on error)
+- Auto-derived cache directories as needed (rip cache, OpenSubtitles cache,
+  WhisperX cache)
 
 ### 5.6 Configuration Sections
 
@@ -450,8 +450,12 @@ On config load, `EnsureDirectories` creates:
 | `library_dir`            | string | `~/library`                                  | Root of Jellyfin media library             |
 | `log_dir`                | string | `~/.local/share/spindle/logs`                | Daemon logs, queue DB, lock file, socket   |
 | `review_dir`             | string | `~/review`                                   | Unidentified files routed for manual review|
-| `opensubtitles_cache_dir`| string | `~/.local/share/spindle/cache/opensubtitles` | OpenSubtitles download cache               |
-| `whisperx_cache_dir`     | string | `~/.local/share/spindle/cache/whisperx`      | WhisperX transcription cache               |
+
+**Auto-derived cache directories** (not configurable):
+- OpenSubtitles cache: `~/.local/share/spindle/cache/opensubtitles`
+- WhisperX cache: `~/.local/share/spindle/cache/whisperx`
+- Rip cache: `$XDG_CACHE_HOME/spindle/rips` (when `rip_cache.enabled`)
+- Disc ID cache: `$XDG_CACHE_HOME/spindle/discid_cache.json` (when `disc_id_cache.enabled`)
 
 #### `[api]`
 
@@ -491,6 +495,11 @@ On config load, `EnsureDirectories` creates:
 | `ntfy_topic`          | string | (empty) | ntfy topic URL (empty disables all notifications) |
 | `request_timeout`     | int    | 10      | HTTP timeout in seconds                     |
 
+All notification types (identification, rip, encoding, validation, organization,
+queue, review, errors) are always sent when `ntfy_topic` is set. Rip
+notifications are suppressed for cache hits under 120 seconds. Queue
+start/finish notifications require at least 2 items.
+
 #### `[subtitles]`
 
 | Field                      | Type     | Default                 | Purpose                                |
@@ -509,18 +518,20 @@ On config load, `EnsureDirectories` creates:
 
 #### `[rip_cache]`
 
-| Field     | Type   | Default                         | Purpose                        |
-|-----------|--------|---------------------------------|--------------------------------|
-| `enabled` | bool   | false                           | Enable rip cache               |
-| `dir`     | string | `$XDG_CACHE_HOME/spindle/rips`  | Cache directory path           |
-| `max_gib` | int    | 150                             | Maximum cache size in GiB      |
+| Field     | Type   | Default | Purpose                        |
+|-----------|--------|---------|--------------------------------|
+| `enabled` | bool   | false   | Enable rip cache               |
+| `max_gib` | int    | 150     | Maximum cache size in GiB      |
+
+Directory auto-derived: `$XDG_CACHE_HOME/spindle/rips` (see `[paths]`).
 
 #### `[disc_id_cache]`
 
-| Field     | Type   | Default                              | Purpose                              |
-|-----------|--------|--------------------------------------|--------------------------------------|
-| `enabled` | bool   | false                                | Enable disc ID -> TMDB ID cache      |
-| `path`    | string | `~/.cache/spindle/discid_cache.json` | JSON cache file path                 |
+| Field     | Type   | Default | Purpose                              |
+|-----------|--------|---------|--------------------------------------|
+| `enabled` | bool   | false   | Enable disc ID -> TMDB ID cache      |
+
+Path auto-derived: `$XDG_CACHE_HOME/spindle/discid_cache.json` (see `[paths]`).
 
 #### `[makemkv]`
 
@@ -560,34 +571,10 @@ On config load, `EnsureDirectories` creates:
 | `whisperx_model`       | string  | `large-v3-turbo`   | WhisperX model (falls back to subtitles model)|
 | `similarity_threshold` | float64 | 0.92               | Cosine similarity for stereo downmix check   |
 | `confidence_threshold` | float64 | 0.80               | LLM confidence required for classification   |
-| `api_key`              | string  | (empty)            | LLM API key (falls back to `[llm].api_key`)  |
-| `base_url`             | string  | (empty)            | LLM base URL (falls back to `[llm].base_url`)|
-| `model`                | string  | (empty)            | LLM model (falls back to `[llm].model`)      |
 
-**LLM fallback chain**: Each `[commentary]` LLM field is resolved independently.
-If `commentary.api_key` is set but `commentary.model` is empty, the API key
-comes from `[commentary]` and the model from `[llm]`. All three fields
-(`api_key`, `base_url`, `model`) must resolve to non-empty values (from either
-section) for commentary LLM classification to be available.
-
-#### `[content_id]`
-
-See `CONTENT_ID_DESIGN.md` for detailed semantics of each field.
-
-| Field                              | Type    | Default | Purpose                                        |
-|------------------------------------|---------|---------|------------------------------------------------|
-| `min_similarity_score`             | float64 | 0.58    | Minimum cosine similarity to accept a match    |
-| `low_confidence_review_threshold`  | float64 | 0.70    | Below this, flag for review                    |
-| `llm_verify_threshold`             | float64 | 0.85    | Above this, skip LLM verification              |
-| `disc_1_must_start_at_episode_1`   | bool    | true    | Disc 1 contiguous range must start at episode 1|
-
-#### `[workflow]`
-
-| Field                 | Type | Default | Purpose                                    |
-|-----------------------|------|---------|--------------------------------------------|
-| `queue_poll_interval` | int  | 5       | Seconds between queue polls                |
-| `error_retry_interval`| int  | 10      | Seconds to wait after queue fetch error    |
-| `disc_monitor_timeout`| int  | 5       | Disc detection command timeout (seconds)   |
+Commentary LLM classification uses the `[llm]` settings directly. All three
+`[llm]` fields (`api_key`, `base_url`, `model`) must be set for commentary
+classification to be available.
 
 #### `[logging]`
 
@@ -597,12 +584,25 @@ See `CONTENT_ID_DESIGN.md` for detailed semantics of each field.
 | `level`           | string            | `info`    | Default log level                     |
 | `retention_days`  | int               | 60        | Days to retain per-item log files     |
 
-#### `[validation]`
+### 5.7 Hardcoded Constants (Not Configurable)
 
-| Field                       | Type | Default | Purpose                                   |
-|-----------------------------|------|---------|-------------------------------------------|
-| `enforce_drapto_validation` | bool | true    | Fail encoding if Drapto validation fails  |
-| `min_vote_count_exact_match`| int  | 5       | TMDB vote threshold for exact title match |
+The following values are code constants, not config fields. They were previously
+exposed as config but never changed from defaults in practice.
+
+**Content ID thresholds** (see `CONTENT_ID_DESIGN.md`):
+- `minSimilarityScore = 0.58` -- minimum cosine similarity to accept a match
+- `lowConfidenceReviewThreshold = 0.70` -- below this, flag for review
+- `llmVerifyThreshold = 0.85` -- above this, skip LLM verification
+- `disc1MustStartAtEpisode1 = true`
+
+**Workflow timing:**
+- Queue poll interval: 5 seconds
+- Error retry interval: 10 seconds
+- Disc monitor timeout: 5 seconds
+
+**Validation:**
+- Drapto validation enforcement: always on (fail encoding on validation failure)
+- TMDB exact match minimum vote count: 5
 
 ---
 
@@ -639,21 +639,23 @@ See `CONTENT_ID_DESIGN.md` for detailed semantics of each field.
 
 ### 6.3 Cache Directories
 
+All cache paths are auto-derived (see Section 5.6 `[paths]`).
+
 ```
-{rip_cache_dir}/
-  {fingerprint}/
-    title_00.mkv
+$XDG_CACHE_HOME/spindle/
+  rips/                   # Rip cache (when enabled)
+    {fingerprint}/
+      title_00.mkv
+      ...
+  discid_cache.json       # Disc ID cache (when enabled)
+
+~/.local/share/spindle/cache/
+  opensubtitles/          # OpenSubtitles download cache
+    {tmdb_id}/
+      {season}/
+        {episode}_{language}_{file_id}.srt
+  whisperx/               # WhisperX transcription cache
     ...
-
-{opensubtitles_cache_dir}/
-  {tmdb_id}/
-    {season}/
-      {episode}_{language}_{file_id}.srt
-
-{whisperx_cache_dir}/
-  ...
-
-{disc_id_cache_path}   # Single JSON file
 ```
 
 ### 6.4 Log Directory
