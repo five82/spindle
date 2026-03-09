@@ -154,8 +154,9 @@ When a stage completes, the item advances to the next stage with
 `in_progress = 0`. The next pipeline iteration picks it up and sets
 `in_progress = 1` before executing.
 
-**Movie skip**: Movies skip `episode_identification` -- after ripping, stage
-advances directly to `encoding`.
+**Movie skip**: The `episode_identification` handler returns immediately for
+movies (see DESIGN_STAGES.md Section 3.1). The stage still runs; it just
+completes as a no-op.
 
 **Stage skip for optional stages**: When `episode_identification`,
 `audio_analysis`, or `subtitling` handlers are absent, stage advancement
