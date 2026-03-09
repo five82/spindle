@@ -390,9 +390,11 @@ The job planner builds an ordered list of encode jobs from the RipSpec:
    - **Source**: the episode's ripped asset path (looked up from `AssetRipped`).
    - **Output**: derived from `Episode.OutputBasename` placed in the encoded
      directory.
-4. Skip episodes whose encoded asset already exists with `AssetStatusDone`
-   (supports resume after partial failure).
-5. Clear failed assets (`AssetStatusFailed`) so they are re-attempted.
+4. Skip episodes whose encoded asset is already completed (`IsCompleted()`:
+   non-empty path and status != "failed"). Failed assets naturally fall
+   through because they have an empty path and failed status, so they are
+   re-attempted without explicit clearing. Per-episode retry uses
+   `ClearFailedAsset()` at the API layer (see API_INTERFACES.md).
 
 ### 4.2 Per-Episode Execution Loop
 
@@ -704,8 +706,9 @@ copy failure. All logged with `decision_type: "transcript_cache"`.
 
 ### 6.10 Resume and Failure Isolation
 
-- **Resume support**: Episodes with already-completed subtitle assets are skipped,
-  enabling resume after partial failure.
+- **Resume support**: Episodes whose subtitle asset is already completed
+  (`IsCompleted()`) are skipped. Failed assets are re-attempted without
+  explicit clearing (same predicate as encoding; see Section 4.1).
 - **Per-episode failure isolation**: Individual episode subtitle failures are recorded
   with `AssetStatusFailed` + error message. Processing continues for remaining
   episodes. Stage only fails if ALL episodes fail.
@@ -770,7 +773,9 @@ When `needs_review` is true but some episodes ARE resolved:
 
 ### 7.5 Resume Support
 
-Skips already-organized episodes by checking for existing `final` asset status.
+Skips episodes whose final asset is already completed (`IsCompleted()`).
+Failed assets are re-attempted without explicit clearing (same predicate
+as encoding; see Section 4.1).
 
 ### 7.6 Review Routing
 
