@@ -718,6 +718,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 | `Language` | string | Target language code |
 | `OutputDir` | string | Directory for output files |
 | `Model` | string | WhisperX model override (empty = default) |
+| `ContentKey` | string | Content-stable cache identity (see Section 9.3) |
 
 **TranscribeResult:**
 
@@ -730,20 +731,32 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 
 ### 9.3 Cache Strategy
 
-The cache is keyed by a composite of:
-- SHA-256 of the source file path and audio stream index
-- WhisperX model name
-- Language
+The cache uses **content-stable keys** so that transcripts survive across
+pipeline stages even when the input file path changes (e.g., ripped file
+during episode ID vs encoded file during subtitling — same audio content,
+different paths).
 
 Cache key computation:
 
 ```
-key = hex(SHA-256( path + "\x00" + streamIndex + "\x00" + model + "\x00" + language ))
+key = hex(SHA-256( contentKey + "\x00" + model + "\x00" + language ))
 ```
 
-Where `path` is the absolute file path, `streamIndex` is the decimal audio
-stream index, `model` is the WhisperX model name, and `language` is the
-ISO 639-1 code. All components are UTF-8 strings separated by NUL bytes.
+Where `contentKey` is a caller-supplied identity string that remains stable
+across pipeline stages for the same audio content. Typical values:
+
+| Caller | `ContentKey` value |
+|--------|--------------------|
+| Episode ID | `{disc_fingerprint}:{episode_key}:{audio_index}` |
+| Audio analysis | `{disc_fingerprint}:{episode_key}:{audio_index}` |
+| Subtitles | `{disc_fingerprint}:{episode_key}:{audio_index}` |
+
+All three callers produce the same key for the same episode, so a transcript
+generated during episode ID is a cache hit during subtitling without any
+cross-stage plumbing or envelope attributes.
+
+When `ContentKey` is empty, the service falls back to a path-based key:
+`hex(SHA-256( inputPath + "\x00" + audioIndex + "\x00" + model + "\x00" + language ))`.
 
 Cache directory: `~/.local/share/spindle/cache/whisperx/{cache_key}/`
 
@@ -751,10 +764,6 @@ Cache directory: `~/.local/share/spindle/cache/whisperx/{cache_key}/`
 - `Lookup(key)`: Check for existing transcription. Validates SRT exists and
   has > 0 cues.
 - `Store(key, result)`: Copy SRT to cache directory.
-
-The cache is shared across all three consumers. Episode ID transcripts are
-automatically available for subtitle generation via cache hits, eliminating
-redundant GPU work.
 
 ### 9.4 Concurrency
 

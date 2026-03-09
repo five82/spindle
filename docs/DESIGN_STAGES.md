@@ -690,21 +690,12 @@ context struct or cross-stage attribute needed.
 
 ### 6.9 Transcript Cache
 
-`tryReuseCachedTranscript()` attempts to reuse WhisperX transcripts generated
-during the content ID stage (Stage 3) to avoid redundant transcription.
-
-**Cache lookup**: The shared transcription service cache
-(DESIGN_INFRASTRUCTURE.md S9) keys entries by (file path + audio index +
-model + language). When the subtitle stage requests transcription for a file
-that was already transcribed during content ID, the cache returns a hit
-automatically -- no explicit envelope attribute is needed.
-
-**On hit**: Copies the cached SRT to the subtitle output location. Duration
-derived from the last SRT timestamp. Returns `Source: "whisperx"`.
-
-**On miss**: Returns `false`; caller falls back to full WhisperX generation.
-Reasons: file unavailable, empty/unreadable SRT, directory creation failure,
-copy failure. All logged with `decision_type: "transcript_cache"`.
+The shared transcription service (DESIGN_INFRASTRUCTURE.md S9) uses
+content-stable cache keys (`disc_fingerprint:episode_key:audio_index`).
+Because episode ID (Stage 3) and subtitling (Stage 6) supply the same
+content key for the same episode, the subtitle stage gets automatic cache
+hits even though the input file changed from the ripped file to the encoded
+file. No explicit envelope attribute or cross-stage plumbing is needed.
 
 ### 6.10 Resume and Failure Isolation
 
@@ -714,8 +705,6 @@ copy failure. All logged with `decision_type: "transcript_cache"`.
 - **Per-episode failure isolation**: Individual episode subtitle failures are recorded
   with `AssetStatusFailed` + error message. Processing continues for remaining
   episodes. Stage only fails if ALL episodes fail.
-- **Cached transcript reuse**: Attempts to reuse cached WhisperX transcripts before
-  generating new ones. Tracks cached vs fresh count for summary logging.
 - **SRT validation review**: SRT validation issues (e.g., suspicious segment patterns)
   flag the item for review but do not fail the stage.
 

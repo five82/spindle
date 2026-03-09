@@ -84,8 +84,9 @@ For each episode in the rip spec envelope that has a ripped asset:
 
 1. Create working directory: `<staging_root>/contentid/<episode_key>/`
 2. Invoke the shared transcription service (see DESIGN_INFRASTRUCTURE.md
-   Section 9) with the ripped file path. The `whisperxSem` semaphore is
-   held by the episode identification stage for the duration.
+   Section 9) with the ripped file path and a content-stable `ContentKey`
+   (`disc_fingerprint:episode_key:audio_index`). The `whisperxSem` semaphore
+   is held by the episode identification stage for the duration.
 3. Read the generated SRT file and normalize it (strip SRT formatting, clean text)
 4. Create a text fingerprint from the normalized plain text
 
@@ -96,9 +97,11 @@ Reports: `(current_episode, total_episodes, episode_key)` after each transcript.
 
 ### 4.3 Caching
 
-Transcripts are stored in the staging directory under `contentid/<episode_key>/`.
-The staging directory is tied to the queue item's fingerprint and persists across
-retries of the same disc.
+Transcripts are cached by the shared transcription service using
+content-stable keys (see DESIGN_INFRASTRUCTURE.md Section 9.3). This
+allows later stages (subtitling) to reuse episode ID transcripts without
+re-running WhisperX, even though the input file path changes from the
+ripped file to the encoded file.
 
 ---
 
