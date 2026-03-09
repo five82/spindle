@@ -247,8 +247,8 @@ After identification:
 
 When `rip_cache.enabled`:
 1. **Before ripping**: Check cache for matching fingerprint + title hash.
-   - **Cache hit**: Validate cached files exist and are readable. Use cached path
-     as `ripped_file` without re-ripping.
+   - **Cache hit**: Validate cached files exist and are readable. Record cached
+     paths as ripped assets in the RipSpec envelope without re-ripping.
    - **Cache miss/invalid**: Proceed with normal ripping.
 2. **After ripping**: Copy ripped files to cache directory. Prune cache to stay
    within constraints.

@@ -578,9 +578,6 @@ Pre-computed summaries derived from gathered data:
 | `progress_stage` | string? |
 | `progress_percent` | float64? |
 | `progress_message` | string? |
-| `ripped_file` | string? |
-| `encoded_file` | string? |
-| `final_file` | string? |
 
 #### LogAnalysis
 

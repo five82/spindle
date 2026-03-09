@@ -84,9 +84,8 @@ Show detailed information for a single queue item.
 Arguments: `<id>` -- queue item ID (required, exactly 1).
 
 Output includes: ID, title, status, timestamps, disc fingerprint,
-progress, review status, error, file paths (ripped/encoded/final), metadata,
-episode details with per-episode progress and subtitle info, and rip spec
-fingerprints.
+progress, review status, error, metadata, episode details with per-episode
+asset paths, progress, subtitle info, and rip spec fingerprints.
 
 #### `spindle queue clear [id...]`
 
@@ -646,9 +645,6 @@ The `QueueItem` JSON object returned by queue endpoints:
   "createdAt":               string (RFC3339),
   "updatedAt":               string (RFC3339),
   "discFingerprint":         string,
-  "rippedFile":              string,
-  "encodedFile":             string,
-  "finalFile":               string,
   "needsReview":             bool,
   "reviewReason":            string,
   "metadata":                object (raw JSON),

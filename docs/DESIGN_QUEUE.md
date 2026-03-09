@@ -13,7 +13,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
   complexity with negligible performance difference at this scale.
 - **Transient**: No migration system. On schema changes, bump `schemaVersion`
   constant and users clear the database.
-- **Current schema version**: 5
+- **Current schema version**: 6
 
 **Connection pragmas** (applied on every `Open()`):
 
@@ -47,9 +47,6 @@ CREATE TABLE IF NOT EXISTS queue_items (
     stage TEXT NOT NULL,
     in_progress INTEGER NOT NULL DEFAULT 0,
     failed_at_stage TEXT,
-    ripped_file TEXT,
-    encoded_file TEXT,
-    final_file TEXT,
     error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -77,7 +74,7 @@ the write frequency (every 2-5 seconds during encoding/ripping) without
 contention issues at this scale. This eliminates the join complexity and lazy
 row creation of a separate progress table.
 
-## 3. Item Model (23 columns)
+## 3. Item Model (20 columns)
 
 | Column                 | Type      | Purpose                                           |
 |------------------------|-----------|---------------------------------------------------|
@@ -86,9 +83,6 @@ row creation of a separate progress table.
 | `stage`                | TEXT      | Current pipeline stage                            |
 | `in_progress`          | INTEGER   | 1 if item is actively being processed             |
 | `failed_at_stage`      | TEXT      | Stage when failure occurred (for retry routing)   |
-| `ripped_file`          | TEXT      | Path to ripped MKV file                           |
-| `encoded_file`         | TEXT      | Path to encoded file                              |
-| `final_file`           | TEXT      | Path to final organized file                      |
 | `error_message`        | TEXT      | Last error message                                |
 | `created_at`           | TIMESTAMP | Item creation time                                |
 | `updated_at`           | TIMESTAMP | Last update time                                  |
