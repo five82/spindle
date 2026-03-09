@@ -84,7 +84,7 @@ row creation of a separate progress table.
 | `disc_fingerprint`     | TEXT      | SHA-256 hash of disc filesystem metadata          |
 | `metadata_json`        | TEXT      | Denormalized TMDB metadata for display (see Section 14) |
 | `needs_review`         | INTEGER   | 1 if item requires manual review                  |
-| `review_reason`        | TEXT      | Why review is needed (JSON array, e.g. `["reason1", "reason2"]`) |
+| `review_reason`        | TEXT      | Why review is needed (JSON array, e.g. `["reason1", "reason2"]`). Only column storing a raw JSON array rather than a plain string or JSON object. |
 | `progress_stage`       | TEXT      | Current stage display name                        |
 | `progress_percent`     | REAL      | Progress percentage (0-100)                       |
 | `progress_message`     | TEXT      | Human-readable progress message                   |
