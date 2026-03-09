@@ -94,7 +94,7 @@ row creation of a separate progress table.
 | `updated_at`           | TIMESTAMP | Last update time                                  |
 | `rip_spec_data`        | TEXT      | JSON-encoded RipSpec envelope                     |
 | `disc_fingerprint`     | TEXT      | SHA-256 hash of disc filesystem metadata          |
-| `metadata_json`        | TEXT      | JSON-encoded TMDB metadata                        |
+| `metadata_json`        | TEXT      | Denormalized TMDB metadata for display (see Section 14) |
 | `needs_review`         | INTEGER   | 1 if item requires manual review                  |
 | `review_reason`        | TEXT      | Why review is needed (JSON array, e.g. `["reason1", "reason2"]`) |
 | `drapto_preset_profile`| TEXT      | Drapto encoding preset profile                    |
@@ -290,8 +290,9 @@ state regardless of what the caller sets.
 Queue metadata (`Metadata` struct) provides filesystem path computation for the
 organizer and CLI display:
 
-- `MetadataFromJSON(data, fallback)`: Deserialize from stored JSON with
-  fallback title inference.
+- `MetadataFromJSON(data, fallback)`: Deserialize from `metadata_json` column
+  with fallback title inference. Used by display and path computation only
+  (see Section 14 for ownership rules).
 - `NewBasicMetadata(title, isMovie)`: Construct minimal metadata.
 - `NewTVMetadata(show, season, episodes, display)`: Build TV-specific metadata
   with episode filename generation.
@@ -347,3 +348,36 @@ Three sanitization functions ensure filesystem-safe filenames:
 - TV single episode: `"{Show} - S{NN}E{NN}"` format
 - TV multi-episode range: `"{Show} - S{NN}E{NN}-E{NN}"` format
 - Fallback title: `"Manual Import"` when show title is missing (applied by callers)
+
+## 14. Metadata Ownership
+
+TMDB metadata appears in two places: the `metadata_json` queue column and the
+`metadata` section of the RipSpec envelope (`rip_spec_data`). These serve
+different purposes and have different write rules.
+
+**RipSpec envelope metadata** is authoritative. Stage handlers read metadata
+from the envelope and may update it during processing (e.g., episode ID stage
+writes episode titles). All stage logic uses envelope metadata exclusively.
+
+**`metadata_json`** is a denormalized projection for display and path
+computation. It is written once by the identification stage at the same time
+the initial RipSpec envelope is assembled and persisted. After identification,
+no stage writes to `metadata_json`.
+
+| Concern | Read from | Written by |
+|---------|-----------|------------|
+| Stage logic (TMDB ID, media type, season) | `rip_spec_data.metadata` | Identification (initial), later stages as needed |
+| CLI display (`queue list`, `queue show`) | `metadata_json` | Identification only |
+| Library path computation (organizer) | `metadata_json` via `MetadataFromJSON` | Identification only |
+| HTTP API (`GET /api/queue`) | `metadata_json` | Identification only |
+
+**Why not derive everything from the envelope?** Queue list display needs
+title, media type, and year for every item. Deserializing the full RipSpec
+envelope for each row is unnecessary overhead. The `metadata_json` column
+provides a lightweight, query-friendly projection that avoids touching the
+envelope for display-only operations.
+
+**Invariant**: `metadata_json` must never be updated after identification.
+If metadata changes during later stages (e.g., episode titles resolved),
+those changes live only in the envelope. Display code shows the identification-
+time snapshot, which is correct for title, year, media type, and library paths.
