@@ -11,9 +11,8 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 - **Location**: `{log_dir}/queue.db`
 - **Driver**: `modernc.org/sqlite` (pure-Go, no CGo). Avoids CGo build
   complexity with negligible performance difference at this scale.
-- **Transient**: No migration system. On schema changes, bump `schemaVersion`
-  constant and users clear the database.
-- **Current schema version**: 6
+- **Transient**: No migration system. On startup, `CREATE TABLE IF NOT EXISTS`
+  ensures the table exists. If the schema changes, clear the database.
 
 **Connection pragmas** (applied on every `Open()`):
 
@@ -37,10 +36,6 @@ that the daemon expects to own.
 ## 2. Schema
 
 ```sql
-CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER PRIMARY KEY
-);
-
 CREATE TABLE IF NOT EXISTS queue_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     disc_title TEXT,

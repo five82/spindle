@@ -64,4 +64,4 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 
 ## Database Schema
 
-The queue DB is transient (in-flight jobs only). No migrations - bump `schemaVersion` in `internal/queue/schema.go` on changes.
+The queue DB is transient (in-flight jobs only). No migrations, no schema versioning. If the schema changes, clear the database.
