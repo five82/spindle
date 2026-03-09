@@ -329,9 +329,22 @@ response -- no transformation layer between DB and API.
 | `Validation` | Passed, Steps []ValidationStep |
 | `ValidationStep` | Name, Passed, Details |
 
+**Lifecycle:**
+
+Each encode job (one per movie, one per TV episode) follows a strict
+create-persist-clear cycle. See DESIGN_STAGES.md Section 4.4 for the full
+sequence. Key invariants:
+
+- The snapshot is **reset to zero** before each encode job starts, then
+  force-persisted so API consumers see `encoding: null` during the transition.
+- During encoding, the snapshot is persisted on a 2-second throttle.
+- On completion or error, the snapshot is **force-persisted** (bypasses
+  throttle) so final fields are never lost.
+
 **Serialization:**
 
 - `Snapshot.IsZero()`: True when all fields are zero/empty/nil.
+- `Snapshot.Reset()`: Zero all fields (used at episode boundaries).
 - `Snapshot.Marshal()`: JSON string (empty string for zero snapshot).
 - `Unmarshal(raw)`: Parse from JSON string.
 

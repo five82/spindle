@@ -242,7 +242,7 @@ from the pipeline configuration.
 | `GetByID(id)` | Fetch single item by primary key |
 | `FindByFingerprint(fp)` | Find first item matching a disc fingerprint |
 | `Update(item)` | Full item update (mutable columns); applies stop-review override |
-| `UpdateProgress(item)` | Update only progress columns (stage, percent, message, bytes, encoding, episode key). High-frequency path |
+| `UpdateProgress(item)` | Update only progress columns (stage, percent, message, bytes, encoding, episode key). High-frequency path. Called on the 2-second throttle during encoding, and force-called (bypassing throttle) at episode boundaries (reset) and on completion/error (final state) |
 | `Remove(id)` | Delete single item |
 | `Clear()` | Delete all items |
 | `ClearCompleted()` | Delete only completed items |

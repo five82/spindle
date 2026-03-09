@@ -401,14 +401,22 @@ The job planner builds an ordered list of encode jobs from the RipSpec:
 
 The job runner iterates encode jobs with per-episode failure isolation:
 
-1. For each job, invoke Drapto to encode `Source` -> `Output`.
-2. **On success**: record `AssetStatusDone` on the episode's encoded asset,
-   persist RipSpec to the database immediately (not batched at stage end).
-   This enables real-time progress visibility via the API.
-3. **On failure**: record `AssetStatusFailed` with the error message on the
-   episode's encoded asset, persist RipSpec, then **continue** to the next
-   episode. A single episode failure does not abort the stage.
-4. **Stage outcome**: the stage fails only if ALL episodes fail
+1. **Reset snapshot**: zero the encoding snapshot on the queue item, set
+   `ActiveEpisodeKey` to the current episode key, and force-persist via
+   `store.UpdateProgress(item)`. This gives API consumers (Flyer) a clean
+   transition signal: `encoding: null` + new episode key = "encoding starting."
+2. Invoke Drapto to encode `Source` -> `Output`. Progress callbacks update
+   the snapshot and persist it on the 2-second throttle (see Section 4.4).
+3. **On success**: force-persist the final snapshot (bypasses throttle) so
+   completion fields (`encode_duration_seconds`, `size_reduction_percent`,
+   etc.) are never lost. Record `AssetStatusDone` on the episode's encoded
+   asset, persist RipSpec to the database immediately (not batched at stage
+   end). This enables real-time progress visibility via the API.
+4. **On failure**: force-persist the snapshot with the `error` field populated.
+   Record `AssetStatusFailed` with the error message on the episode's encoded
+   asset, persist RipSpec, then **continue** to the next episode. A single
+   episode failure does not abort the stage.
+5. **Stage outcome**: the stage fails only if ALL episodes fail
    (`len(encodedPaths) == 0`). Partial success proceeds to later stages with
    the successfully encoded episodes.
 
@@ -423,7 +431,21 @@ The job runner iterates encode jobs with per-episode failure isolation:
 
 ### 4.4 Progress Streaming with Encoding Snapshot
 
-Drapto reports progress via a callback chain:
+**Snapshot lifecycle per encode job:**
+
+```
+1. Reset:   item.EncodingSnapshot = zero value
+2. Persist: store.UpdateProgress(item)       // force (Flyer sees encoding: null)
+3. Encode:  drapto.Encode(...)               // callbacks update snapshot
+4. Final:   store.UpdateProgress(item)       // force (completion or error state)
+```
+
+The reset at step 1-2 eliminates stale-data windows between episodes. Without
+it, Flyer would see episode N's completed snapshot while episode N+1 is
+starting up. The force-persist at step 4 ensures completion/error fields are
+never lost to throttle timing.
+
+**Progress callback chain** (steps within the Drapto encode):
 
 1. **Apply snapshot**: update the encoding snapshot with current Drapto
    event data. Live fields: `percent`, `fps`, `eta_seconds`, `current_frame`,
