@@ -1,0 +1,284 @@
+package makemkv
+
+import (
+	"testing"
+	"time"
+)
+
+func TestParseDuration(t *testing.T) {
+	tests := []struct {
+		input string
+		want  time.Duration
+	}{
+		{"1:30:00", 90 * time.Minute},
+		{"0:45:30", 45*time.Minute + 30*time.Second},
+		{"2:00:00", 2 * time.Hour},
+		{"0:00:00", 0},
+		{"0:01:05", time.Minute + 5*time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := parseDuration(tt.input)
+			if got != tt.want {
+				t.Errorf("parseDuration(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseDurationMalformed(t *testing.T) {
+	tests := []string{
+		"",
+		"invalid",
+		"1:30",
+		"a:b:c",
+		"1:2:3:4",
+	}
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			got := parseDuration(input)
+			if got != 0 {
+				t.Errorf("parseDuration(%q) = %v, want 0", input, got)
+			}
+		})
+	}
+}
+
+func TestParseRobotOutputTINFO(t *testing.T) {
+	lines := []string{
+		`TINFO:0,2,0,"Main Feature"`,
+		`TINFO:0,8,0,"25"`,
+		`TINFO:0,9,0,"1:30:00"`,
+		`TINFO:0,10,0,"15000000000"`,
+		`TINFO:0,11,0,"3"`,
+		`TINFO:0,16,0,"00001.mpls,00002.mpls,00003.mpls"`,
+		`TINFO:0,25,0,"00800.mpls"`,
+		`TINFO:1,2,0,"Bonus"`,
+		`TINFO:1,9,0,"0:10:00"`,
+	}
+
+	info := parseRobotOutput(lines)
+
+	if len(info.Titles) != 2 {
+		t.Fatalf("got %d titles, want 2", len(info.Titles))
+	}
+
+	title0 := info.Titles[0]
+	if title0.ID != 0 {
+		t.Errorf("title 0 ID = %d, want 0", title0.ID)
+	}
+	if title0.Name != "Main Feature" {
+		t.Errorf("title 0 Name = %q, want %q", title0.Name, "Main Feature")
+	}
+	if title0.Duration != 90*time.Minute {
+		t.Errorf("title 0 Duration = %v, want %v", title0.Duration, 90*time.Minute)
+	}
+	if title0.Chapters != 25 {
+		t.Errorf("title 0 Chapters = %d, want 25", title0.Chapters)
+	}
+	if title0.SizeBytes != 15000000000 {
+		t.Errorf("title 0 SizeBytes = %d, want 15000000000", title0.SizeBytes)
+	}
+	if title0.SegmentCount != 3 {
+		t.Errorf("title 0 SegmentCount = %d, want 3", title0.SegmentCount)
+	}
+	if title0.SegmentMap != "00001.mpls,00002.mpls,00003.mpls" {
+		t.Errorf("title 0 SegmentMap = %q, want comma-separated playlists", title0.SegmentMap)
+	}
+	if title0.Playlist != "00800.mpls" {
+		t.Errorf("title 0 Playlist = %q, want %q", title0.Playlist, "00800.mpls")
+	}
+
+	title1 := info.Titles[1]
+	if title1.ID != 1 {
+		t.Errorf("title 1 ID = %d, want 1", title1.ID)
+	}
+	if title1.Name != "Bonus" {
+		t.Errorf("title 1 Name = %q, want %q", title1.Name, "Bonus")
+	}
+	if title1.Duration != 10*time.Minute {
+		t.Errorf("title 1 Duration = %v, want %v", title1.Duration, 10*time.Minute)
+	}
+}
+
+func TestParseRobotOutputCINFO(t *testing.T) {
+	lines := []string{
+		`CINFO:2,0,"My Disc Name"`,
+		`CINFO:1,0,"something"`,
+	}
+
+	info := parseRobotOutput(lines)
+
+	if info.Name != "My Disc Name" {
+		t.Errorf("disc Name = %q, want %q", info.Name, "My Disc Name")
+	}
+}
+
+func TestParsePRGV(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		titleID int
+		wantOK  bool
+		wantPct float64
+		wantCur int
+		wantTot int
+	}{
+		{
+			name:    "normal progress",
+			line:    "PRGV:50,100,200",
+			titleID: 3,
+			wantOK:  true,
+			wantPct: 25.0,
+			wantCur: 50,
+			wantTot: 100,
+		},
+		{
+			name:    "complete",
+			line:    "PRGV:200,200,200",
+			titleID: 0,
+			wantOK:  true,
+			wantPct: 100.0,
+			wantCur: 200,
+			wantTot: 200,
+		},
+		{
+			name:    "zero max",
+			line:    "PRGV:0,0,0",
+			titleID: 0,
+			wantOK:  true,
+			wantPct: 0,
+			wantCur: 0,
+			wantTot: 0,
+		},
+		{
+			name:   "not prgv",
+			line:   "TINFO:0,2,0,\"test\"",
+			wantOK: false,
+		},
+		{
+			name:   "malformed",
+			line:   "PRGV:abc",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, ok := parsePRGV(tt.line, tt.titleID)
+			if ok != tt.wantOK {
+				t.Fatalf("parsePRGV ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if p.TitleID != tt.titleID {
+				t.Errorf("TitleID = %d, want %d", p.TitleID, tt.titleID)
+			}
+			if p.Current != tt.wantCur {
+				t.Errorf("Current = %d, want %d", p.Current, tt.wantCur)
+			}
+			if p.Total != tt.wantTot {
+				t.Errorf("Total = %d, want %d", p.Total, tt.wantTot)
+			}
+			if p.Percent != tt.wantPct {
+				t.Errorf("Percent = %f, want %f", p.Percent, tt.wantPct)
+			}
+		})
+	}
+}
+
+func TestParseRobotOutputMalformedLines(t *testing.T) {
+	lines := []string{
+		"",
+		"garbage without colon",
+		"TINFO:",
+		"TINFO:not,enough",
+		"TINFO:abc,2,0,\"value\"",
+		"CINFO:",
+		"CINFO:abc,0,\"value\"",
+		`TINFO:0,2,0,"Valid Title"`,
+		"MSG:1234,0,1,\"Some message\",\"format\"",
+		"DRV:0,2,999,1,\"Blu-ray\",\"/dev/sr0\",\"disc:0\"",
+	}
+
+	info := parseRobotOutput(lines)
+
+	// Should still parse the valid TINFO line despite malformed ones.
+	if len(info.Titles) != 1 {
+		t.Fatalf("got %d titles, want 1", len(info.Titles))
+	}
+	if info.Titles[0].Name != "Valid Title" {
+		t.Errorf("title Name = %q, want %q", info.Titles[0].Name, "Valid Title")
+	}
+}
+
+func TestParseRobotOutputRawLines(t *testing.T) {
+	lines := []string{"line1", "line2"}
+	info := parseRobotOutput(lines)
+	if len(info.RawLines) != 2 {
+		t.Errorf("RawLines length = %d, want 2", len(info.RawLines))
+	}
+}
+
+func TestNormalizeDevice(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", "disc:0"},
+		{"/dev/sr0", "dev:/dev/sr0"},
+		{"disc:0", "disc:0"},
+		{"disc:1", "disc:1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizeDevice(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeDevice(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSplitFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		n      int
+		wantN  int
+		want0  string
+		wantLn string // last field
+	}{
+		{
+			name:   "simple",
+			input:  `0,2,0,"Hello"`,
+			n:      4,
+			wantN:  4,
+			want0:  "0",
+			wantLn: `"Hello"`,
+		},
+		{
+			name:   "quoted comma",
+			input:  `0,16,0,"seg1,seg2,seg3"`,
+			n:      4,
+			wantN:  4,
+			want0:  "0",
+			wantLn: `"seg1,seg2,seg3"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitFields(tt.input, tt.n)
+			if len(got) != tt.wantN {
+				t.Fatalf("splitFields returned %d fields, want %d: %v", len(got), tt.wantN, got)
+			}
+			if got[0] != tt.want0 {
+				t.Errorf("field[0] = %q, want %q", got[0], tt.want0)
+			}
+			if got[len(got)-1] != tt.wantLn {
+				t.Errorf("last field = %q, want %q", got[len(got)-1], tt.wantLn)
+			}
+		})
+	}
+}

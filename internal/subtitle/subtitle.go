@@ -1,0 +1,325 @@
+// Package subtitle implements the subtitle generation stage (Layer 4).
+//
+// Subtitle generation: WhisperX transcription, SRT validation, forced subtitle
+// ranking from OpenSubtitles, MKV muxing, and resume support.
+package subtitle
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/opensubtitles"
+	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stage"
+	"github.com/five82/spindle/internal/transcription"
+)
+
+// Handler implements stage.Handler for subtitle generation.
+type Handler struct {
+	cfg         *config.Config
+	store       *queue.Store
+	osClient    *opensubtitles.Client
+	transcriber *transcription.Service
+}
+
+// New creates a subtitle handler.
+func New(
+	cfg *config.Config,
+	store *queue.Store,
+	osClient *opensubtitles.Client,
+	transcriber *transcription.Service,
+) *Handler {
+	return &Handler{
+		cfg:         cfg,
+		store:       store,
+		osClient:    osClient,
+		transcriber: transcriber,
+	}
+}
+
+// Run executes the subtitle generation stage.
+func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
+	logger := stage.LoggerFromContext(ctx)
+	logger.Info("subtitle stage started", "event_type", "stage_start")
+
+	if !h.cfg.Subtitles.Enabled {
+		logger.Info("subtitles disabled, skipping",
+			"decision_type", "subtitle_skip",
+			"decision_result", "skipped",
+			"decision_reason", "subtitles.enabled = false",
+		)
+		return nil
+	}
+
+	env, err := stage.ParseRipSpec(item.RipSpecData)
+	if err != nil {
+		return err
+	}
+
+	keys := assetKeys(&env)
+	var records []ripspec.SubtitleGenRecord
+
+	for i, key := range keys {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Resume support: skip already-completed subtitled assets.
+		if existing, ok := env.Assets.FindAsset("subtitled", key); ok && existing.IsCompleted() {
+			logger.Info("subtitle already completed, skipping",
+				"decision_type", "subtitle_resume",
+				"decision_result", "skipped",
+				"decision_reason", "already completed",
+				"episode_key", key,
+			)
+			continue
+		}
+
+		asset, ok := env.Assets.FindAsset("encoded", key)
+		if !ok || !asset.IsCompleted() {
+			continue
+		}
+
+		logger.Info(fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", i+1, len(keys), key),
+			"event_type", "subtitle_start",
+		)
+
+		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", i+1, len(keys), key)
+		item.ActiveEpisodeKey = key
+		_ = h.store.UpdateProgress(item)
+
+		// Transcribe.
+		contentKey := fmt.Sprintf("%s:%s:0", item.DiscFingerprint, key)
+		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+			InputPath:  asset.Path,
+			AudioIndex: 0,
+			Language:   "en",
+			ContentKey: contentKey,
+		})
+		if err != nil {
+			return fmt.Errorf("transcribe %s: %w", key, err)
+		}
+
+		record := ripspec.SubtitleGenRecord{
+			EpisodeKey:   key,
+			Source:       "whisperx",
+			Cached:       result.Cached,
+			SubtitlePath: result.SRTPath,
+			Segments:     result.Segments,
+			Language:     "en",
+		}
+
+		// Try forced subtitles from OpenSubtitles (if enabled and disc has forced sub track).
+		if h.osClient != nil && h.cfg.Subtitles.OpenSubtitlesEnabled && env.Attributes.HasForcedSubtitleTrack {
+			h.tryForcedSubs(ctx, logger, &env, key, asset.Path, &record)
+		}
+
+		records = append(records, record)
+
+		// Mux into MKV if configured.
+		srtPath := result.SRTPath
+		subtitledPath := asset.Path // default: same file
+		if h.cfg.Subtitles.MuxIntoMKV {
+			muxedPath, err := h.muxSubtitles(ctx, logger, asset.Path, srtPath, key)
+			if err != nil {
+				logger.Warn("subtitle mux failed",
+					"event_type", "mux_error",
+					"error_hint", err.Error(),
+					"impact", "subtitle remains as sidecar",
+				)
+			} else {
+				subtitledPath = muxedPath
+			}
+		}
+
+		// Record subtitled asset.
+		env.Assets.AddAsset("subtitled", ripspec.Asset{
+			EpisodeKey:     key,
+			Path:           subtitledPath,
+			Status:         "completed",
+			SubtitlesMuxed: h.cfg.Subtitles.MuxIntoMKV,
+		})
+	}
+
+	// Store subtitle generation results.
+	env.Attributes.SubtitleGenerationResults = records
+
+	// Persist.
+	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		return err
+	}
+
+	logger.Info("subtitle stage completed", "event_type", "stage_complete")
+	return nil
+}
+
+// assetKeys returns the episode keys to process. For movies, it returns
+// ["main"]. For TV content, it returns each episode's key.
+func assetKeys(env *ripspec.Envelope) []string {
+	if env.Metadata.MediaType == "movie" {
+		return []string{"main"}
+	}
+	keys := make([]string, 0, len(env.Episodes))
+	for _, ep := range env.Episodes {
+		if ep.Key != "" {
+			keys = append(keys, ep.Key)
+		}
+	}
+	return keys
+}
+
+// tryForcedSubs searches OpenSubtitles for forced subtitle tracks and
+// downloads the best match if found. The record's OpenSubtitlesDecision
+// field is updated with the outcome.
+func (h *Handler) tryForcedSubs(
+	ctx context.Context,
+	logger *slog.Logger,
+	env *ripspec.Envelope,
+	key string,
+	_ string, // videoPath reserved for future hash-based lookup
+	record *ripspec.SubtitleGenRecord,
+) {
+	tmdbID := env.Metadata.ID
+	if tmdbID == 0 {
+		record.OpenSubtitlesDecision = "skipped:no_tmdb_id"
+		return
+	}
+
+	var season, episode int
+	if ep := env.EpisodeByKey(key); ep != nil {
+		season = ep.Season
+		episode = ep.Episode
+	}
+
+	languages := h.cfg.Subtitles.OpenSubtitlesLanguages
+	if len(languages) == 0 {
+		languages = []string{"en"}
+	}
+
+	results, err := h.osClient.Search(ctx, tmdbID, season, episode, languages)
+	if err != nil {
+		logger.Warn("opensubtitles search failed",
+			"event_type", "opensubtitles_error",
+			"error_hint", err.Error(),
+			"impact", "forced subtitle lookup skipped",
+		)
+		record.OpenSubtitlesDecision = "error:search_failed"
+		return
+	}
+
+	// Find the best forced-only subtitle by download count.
+	var best *opensubtitles.SubtitleResult
+	for i := range results {
+		r := &results[i]
+		if !r.Attributes.ForeignPartsOnly {
+			continue
+		}
+		if best == nil || r.Attributes.DownloadCount > best.Attributes.DownloadCount {
+			best = r
+		}
+	}
+
+	if best == nil {
+		logger.Info("no forced subtitles found on OpenSubtitles",
+			"decision_type", "forced_subtitle",
+			"decision_result", "none_available",
+			"decision_reason", "no foreign_parts_only results",
+			"episode_key", key,
+		)
+		record.OpenSubtitlesDecision = "none_available"
+		return
+	}
+
+	if len(best.Attributes.Files) == 0 {
+		record.OpenSubtitlesDecision = "error:no_files"
+		return
+	}
+
+	fileID := best.Attributes.Files[0].FileID
+	destDir := filepath.Dir(record.SubtitlePath)
+	destPath := filepath.Join(destDir, fmt.Sprintf("%s.forced.srt", key))
+
+	if err := h.osClient.DownloadToFile(ctx, fileID, destPath); err != nil {
+		logger.Warn("forced subtitle download failed",
+			"event_type", "opensubtitles_error",
+			"error_hint", err.Error(),
+			"impact", "forced subtitle not available",
+		)
+		record.OpenSubtitlesDecision = "error:download_failed"
+		return
+	}
+
+	// Clean the downloaded SRT.
+	raw, err := os.ReadFile(destPath)
+	if err == nil {
+		cleaned := opensubtitles.CleanSRT(string(raw))
+		if writeErr := os.WriteFile(destPath, []byte(cleaned), 0o644); writeErr != nil {
+			logger.Warn("failed to write cleaned forced SRT",
+				"event_type", "file_write_error",
+				"error_hint", writeErr.Error(),
+				"impact", "forced subtitle may contain HTML tags",
+			)
+		}
+	}
+
+	logger.Info("forced subtitle downloaded",
+		"decision_type", "forced_subtitle",
+		"decision_result", "downloaded",
+		"decision_reason", fmt.Sprintf("best match: %d downloads", best.Attributes.DownloadCount),
+		"episode_key", key,
+	)
+	record.OpenSubtitlesDecision = "downloaded"
+}
+
+// muxSubtitles runs mkvmerge to add an SRT subtitle track to the MKV file.
+// It writes to a temp file and renames on success.
+func (h *Handler) muxSubtitles(
+	ctx context.Context,
+	logger *slog.Logger,
+	videoPath string,
+	srtPath string,
+	key string,
+) (string, error) {
+	dir := filepath.Dir(videoPath)
+	ext := filepath.Ext(videoPath)
+	base := strings.TrimSuffix(filepath.Base(videoPath), ext)
+	outPath := filepath.Join(dir, base+".subtitled"+ext)
+	tmpPath := outPath + ".tmp"
+
+	args := []string{
+		"-o", tmpPath,
+		videoPath,
+		"--language", "0:eng",
+		"--track-name", "0:English",
+		"--default-track", "0:yes",
+		srtPath,
+	}
+
+	cmd := exec.CommandContext(ctx, "mkvmerge", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Clean up partial output.
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("mkvmerge %s: %w: %s", key, err, output)
+	}
+
+	// Rename temp to final.
+	if err := os.Rename(tmpPath, outPath); err != nil {
+		return "", fmt.Errorf("rename muxed file %s: %w", key, err)
+	}
+
+	logger.Info("subtitles muxed into MKV",
+		"event_type", "mux_complete",
+		"episode_key", key,
+		"output_path", outPath,
+	)
+
+	return outPath, nil
+}

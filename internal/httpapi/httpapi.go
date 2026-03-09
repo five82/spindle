@@ -1,0 +1,219 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/five82/spindle/internal/queue"
+)
+
+// Server is the HTTP API server.
+type Server struct {
+	store      *queue.Store
+	token      string
+	logger     *slog.Logger
+	httpServer *http.Server
+	mux        *http.ServeMux
+}
+
+// New creates an HTTP API server.
+func New(store *queue.Store, token string, logger *slog.Logger) *Server {
+	s := &Server{
+		store:  store,
+		token:  token,
+		logger: logger,
+		mux:    http.NewServeMux(),
+	}
+	s.registerRoutes()
+	s.httpServer = &http.Server{
+		Handler:      s.mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+	return s
+}
+
+// ListenUnix starts listening on a Unix socket.
+func (s *Server) ListenUnix(path string) error {
+	_ = os.Remove(path) // Clean up stale socket.
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return fmt.Errorf("listen unix %s: %w", path, err)
+	}
+	go func() { _ = s.httpServer.Serve(ln) }()
+	return nil
+}
+
+// ListenTCP starts listening on a TCP address.
+func (s *Server) ListenTCP(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen tcp %s: %w", addr, err)
+	}
+	go func() { _ = s.httpServer.Serve(ln) }()
+	return nil
+}
+
+// Shutdown gracefully shuts down the server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.httpServer.Shutdown(ctx)
+}
+
+// ServeHTTP implements http.Handler for testing.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) registerRoutes() {
+	s.mux.HandleFunc("GET /api/queue", s.authMiddleware(s.handleQueueList))
+	s.mux.HandleFunc("GET /api/queue/{id}", s.authMiddleware(s.handleQueueGet))
+	s.mux.HandleFunc("POST /api/queue/retry", s.authMiddleware(s.handleQueueRetry))
+	s.mux.HandleFunc("POST /api/queue/stop", s.authMiddleware(s.handleQueueStop))
+	s.mux.HandleFunc("DELETE /api/queue/{id}", s.authMiddleware(s.handleQueueRemove))
+	s.mux.HandleFunc("DELETE /api/queue", s.authMiddleware(s.handleQueueClear))
+	s.mux.HandleFunc("GET /api/status", s.authMiddleware(s.handleStatus))
+	s.mux.HandleFunc("GET /api/health", s.handleHealth) // no auth
+}
+
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.token == "" {
+			next(w, r)
+			return
+		}
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			writeError(w, http.StatusUnauthorized, "missing or invalid authorization header")
+			return
+		}
+		if strings.TrimPrefix(auth, "Bearer ") != s.token {
+			writeError(w, http.StatusUnauthorized, "invalid token")
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) handleQueueList(w http.ResponseWriter, _ *http.Request) {
+	items, err := s.store.List()
+	if err != nil {
+		s.logger.Error("list queue items", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list queue items")
+		return
+	}
+	if items == nil {
+		items = []*queue.Item{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	item, err := s.store.GetByID(id)
+	if err != nil {
+		s.logger.Error("get queue item", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to get queue item")
+		return
+	}
+	if item == nil {
+		writeError(w, http.StatusNotFound, "item not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.store.RetryFailed(body.IDs...); err != nil {
+		s.logger.Error("retry failed items", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to retry items")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleQueueStop(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.store.StopItems(body.IDs...); err != nil {
+		s.logger.Error("stop items", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to stop items")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleQueueRemove(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.store.Remove(id); err != nil {
+		s.logger.Error("remove queue item", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to remove item")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleQueueClear(w http.ResponseWriter, _ *http.Request) {
+	if err := s.store.Clear(); err != nil {
+		s.logger.Error("clear queue", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear queue")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	stats, err := s.store.Stats()
+	if err != nil {
+		s.logger.Error("get queue stats", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get stats")
+		return
+	}
+	// Convert Stage keys to strings for JSON.
+	result := make(map[string]int, len(stats))
+	for k, v := range stats {
+		result[string(k)] = v
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
