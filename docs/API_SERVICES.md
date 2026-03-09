@@ -223,12 +223,15 @@ constrained to `{"type": "json_object"}`.
 
 ### Use Cases
 
+See DESIGN_LLM_PROMPTS.md for exact prompts, response schemas, and failure
+behavior for all three use cases:
+
 1. **Edition detection**: Identify disc editions (Director's Cut, Extended, etc.)
-   from MakeMKV scan output
+   from MakeMKV scan output (Section 1)
 2. **Commentary classification**: Determine if an audio track is commentary
-   based on transcript analysis
+   based on transcript analysis (Section 2)
 3. **Episode verification**: Compare WhisperX and OpenSubtitles transcripts to
-   verify episode matching (see CONTENT_ID_DESIGN.md Section 13)
+   verify episode matching (Section 3)
 
 ### Retry Strategy
 

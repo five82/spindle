@@ -23,6 +23,12 @@ self-contained and focused on a single domain area.
 | [API_INTERFACES.md](API_INTERFACES.md) | CLI commands, HTTP API (Unix socket + optional TCP) | 810 |
 | [API_SERVICES.md](API_SERVICES.md) | External service protocols (MakeMKV, TMDB, OpenSubtitles, WhisperX, LLM, Jellyfin, ntfy, FFprobe, KeyDB, MediaInfo, mkvmerge) | 270 |
 
+## LLM Prompts
+
+| Document | Contents | ~Lines |
+|----------|----------|--------|
+| [DESIGN_LLM_PROMPTS.md](DESIGN_LLM_PROMPTS.md) | Exact system/user prompts, response schemas, trigger conditions, failure behavior for all three LLM use cases | 200 |
+
 ## Content ID Algorithm
 
 | Document | Contents | ~Lines |
@@ -51,4 +57,5 @@ self-contained and focused on a single domain area.
 - Error taxonomy -> DESIGN_INFRASTRUCTURE.md Section 5
 - CLI command reference -> API_INTERFACES.md Section 1
 - HTTP API endpoints -> API_INTERFACES.md Section 2.4
+- LLM prompt specifications -> DESIGN_LLM_PROMPTS.md
 - External service protocols -> API_SERVICES.md

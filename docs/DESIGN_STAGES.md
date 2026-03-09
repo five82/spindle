@@ -179,7 +179,8 @@ For movies, detect alternate editions (Director's Cut, Extended Edition, etc.):
 1. **Regex patterns**: Check disc title for known edition keywords.
 2. **Ambiguous markers**: If extra content in title beyond TMDB title, check with LLM.
 3. **LLM classification**: Ask LLM if disc title represents a special edition
-   (confidence threshold: 0.8).
+   (confidence threshold: 0.8). See DESIGN_LLM_PROMPTS.md Section 1 for the
+   exact prompt and response schema.
 4. **Label extraction**: Extract edition label from difference between disc title
    and TMDB title.
 
@@ -515,8 +516,9 @@ When `commentary.enabled`:
 
 3. **LLM classification**: For remaining candidates:
    - Transcribe candidate audio track with WhisperX (model: `commentary.whisperx_model`).
-   - Send transcript to LLM with classification prompt.
-   - LLM returns: `is_commentary` boolean, `confidence` float, `reason` string.
+   - Send transcript to LLM with classification prompt (see
+     DESIGN_LLM_PROMPTS.md Section 2 for the exact prompt and response schema).
+   - LLM returns: `decision` string, `confidence` float, `reason` string.
    - If confidence >= `confidence_threshold` (default 0.80) and is_commentary:
      mark track as commentary.
 

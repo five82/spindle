@@ -300,17 +300,10 @@ For each match requiring verification:
 
 ### 11.3 LLM Prompt
 
-System prompt asks the LLM to compare two transcripts and determine if they
-represent the same episode. Response format:
-```json
-{"same_episode": true/false, "confidence": 0.0-1.0, "explanation": "brief reason"}
-```
-
-The prompt explicitly tells the LLM to:
-- Focus on whether the same scenes and dialogue events occur
-- Not penalize minor word differences, transcription errors, or timing differences
-- Account for WhisperX speech recognition errors
-- Account for localization differences in reference subtitles
+See DESIGN_LLM_PROMPTS.md Section 3 for the exact system prompt, user prompt
+template, and response schema. The prompt instructs the LLM to compare two
+middle-portion transcripts and determine if they represent the same episode,
+accounting for WhisperX recognition errors and localization differences.
 
 ### 11.4 Escalation Logic
 
