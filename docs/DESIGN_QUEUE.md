@@ -8,7 +8,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
 ## 1. SQLite Setup
 
-- **Location**: `{log_dir}/queue.db`
+- **Location**: `{state_dir}/queue.db`
 - **Driver**: `modernc.org/sqlite` (pure-Go, no CGo). Avoids CGo build
   complexity with negligible performance difference at this scale.
 - **Transient**: No migration system. On startup, `CREATE TABLE IF NOT EXISTS`
@@ -286,15 +286,16 @@ organizer and CLI display:
   with episode filename generation.
 - `IsMovie()`: Determine type from `media_type` field (accepts "movie", "film",
   "tv", "tv_show", "television", "series"), falls back to `movie` bool flag.
-- `GetLibraryPath(root, moviesDir, tvDir)`: Compute target library folder.
-  Movies use `{root}/{moviesDir}/{baseFilename}`. TV uses
+- `GetLibraryPath(root, moviesDir, tvDir)`: Compute target library folder
+  via `SafeJoin` (path traversal guard on TMDB-derived segments). Movies use
+  `{root}/{moviesDir}/{baseFilename}`. TV uses
   `{root}/{tvDir}/{show}/Season {NN}`.
 - `GetFilename()`: Final output filename. Movies: base + edition suffix. TV:
   `{Show} - S{NN}E{NN}` format (range notation for multi-episode).
 - `GetBaseFilename()`: Filename without edition suffix (for shared movie folders).
 
-Filenames are sanitized: colons/hyphens/slashes become spaces, special
-characters removed, whitespace collapsed.
+Filenames are sanitized via `SanitizeDisplayName()`: colons/slashes become
+spaces, special characters removed, whitespace collapsed.
 
 ## 11. Staging Path Computation
 
@@ -302,8 +303,8 @@ characters removed, whitespace collapsed.
 
 1. If `DiscFingerprint` is non-empty: use uppercase fingerprint as directory name.
 2. Otherwise: use `queue-{ID}` as directory name.
-3. Sanitize: replace filesystem-unsafe characters, convert spaces to hyphens,
-   trim leading/trailing hyphens and underscores.
+3. Sanitize via `SanitizePathSegment()`.
+4. Join to base via `SafeJoin(base, segment)` (path traversal guard).
 
 Result: `{staging_dir}/{fingerprint_or_queue_id}/`
 
@@ -316,17 +317,17 @@ column via `store.Update()`. Used by stages that modify the envelope
 
 ## 13. Filename Sanitization
 
-Three sanitization functions ensure filesystem-safe filenames:
+Two sanitization functions with distinct purposes:
 
-**`sanitizeFilename()`** (metadata helper):
-- Replaces `:`, `-`, `/`, `\`, newlines, tabs with spaces
+**`SanitizeDisplayName()`** (human-readable titles for library filenames):
+- Replaces `:`, `/`, `\`, newlines, tabs with spaces
 - Removes `?`, `"`, `<`, `>`, `|`, `*`
 - Collapses consecutive whitespace to single space via `strings.Fields`
 - Falls back to `"manual-import"` if result is empty
 
-**`sanitizeSegment()`** (path helper):
-- Calls `textutil.SanitizeFileName()` for filesystem-unsafe character replacement
-  (slashes/backslashes/colons/asterisks become dashes; `?`, `"`, `<`, `>`, `|` removed)
+**`SanitizePathSegment()`** (directory and file path components):
+- Replaces `/`, `\`, `:`, `*` with dashes
+- Removes `?`, `"`, `<`, `>`, `|`
 - Replaces spaces with hyphens
 - Trims leading/trailing hyphens and underscores
 - Falls back to `"queue"` if result is empty

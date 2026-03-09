@@ -16,7 +16,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 3. Open SQLite queue database (init schema if needed).
 4. Create workflow manager with configured poll interval.
 5. Create notification service.
-6. Create daemon instance with lock file path `filepath.Join(cfg.Paths.LogDir, "spindle.lock")`.
+6. Create daemon instance with lock file path in `$XDG_RUNTIME_DIR/spindle.lock`.
 7. Create disc monitor (if optical drive configured).
 8. Create netlink monitor (if optical drive configured).
 9. Create HTTP API server (Unix socket at `$XDG_RUNTIME_DIR/spindle.sock`,
@@ -51,7 +51,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
 ### 1.3 Lock File
 
-- Path: `{log_dir}/spindle.lock`
+- Path: `$XDG_RUNTIME_DIR/spindle.lock`
 - Uses `flock` (file locking) for mutual exclusion.
 - Prevents multiple daemon instances.
 - Released on clean shutdown.

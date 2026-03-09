@@ -389,7 +389,7 @@ and converted to absolute paths.
 
 ### 5.4 Environment Variable Overrides
 
-All secrets can be set via environment variables (overrides config file):
+**Secrets** (override config file values):
 
 | Env Variable               | Config Field                        |
 |----------------------------|-------------------------------------|
@@ -402,11 +402,20 @@ All secrets can be set via environment variables (overrides config file):
 | `OPENSUBTITLES_API_KEY`    | `subtitles.opensubtitles_api_key`   |
 | `OPENSUBTITLES_USER_TOKEN` | `subtitles.opensubtitles_user_token`|
 
+**Binary path overrides** (checked in order; first non-empty wins):
+
+| Env Variable             | Fallback Env     | Default            |
+|--------------------------|------------------|--------------------|
+| `SPINDLE_FFMPEG_PATH`    | `FFMPEG_PATH`    | PATH lookup, then `ffmpeg`  |
+| `SPINDLE_FFPROBE_PATH`   | `FFPROBE_PATH`   | PATH lookup, then `ffprobe` |
+
+See Section 4.8 of DESIGN_INFRASTRUCTURE.md for the full resolution logic.
+
 ### 5.5 Directory Provisioning
 
 On config load, `EnsureDirectories` creates:
 - `staging_dir` (required, fail on error)
-- `log_dir` (required, fail on error)
+- `state_dir` (required, fail on error)
 - `review_dir` (required, fail on error)
 - `library_dir` (best-effort, don't fail -- storage may be offline)
 - Auto-derived cache directories as needed (rip cache, OpenSubtitles cache,
@@ -418,14 +427,14 @@ On config load, `EnsureDirectories` creates:
 
 | Field                    | Type   | Default                                      | Purpose                                    |
 |--------------------------|--------|----------------------------------------------|--------------------------------------------|
-| `staging_dir`            | string | `~/.local/share/spindle/staging`             | Working directory for in-progress items    |
+| `staging_dir`            | string | `~/.local/share/spindle/staging`             | Working directory for in-progress items (under `$XDG_DATA_HOME`, not cache, because staging files are large and long-lived; tmpwatch-style cleanup would be destructive) |
 | `library_dir`            | string | `~/library`                                  | Root of Jellyfin media library             |
-| `log_dir`                | string | `~/.local/share/spindle/logs`                | Daemon logs, queue DB, lock file, socket   |
+| `state_dir`              | string | `~/.local/state/spindle`                     | Daemon logs and queue DB                   |
 | `review_dir`             | string | `~/review`                                   | Unidentified files routed for manual review|
 
-**Auto-derived cache directories** (not configurable):
-- OpenSubtitles cache: `~/.local/share/spindle/cache/opensubtitles`
-- WhisperX cache: `~/.local/share/spindle/cache/whisperx`
+**Auto-derived cache directories** (not configurable, all under `$XDG_CACHE_HOME/spindle/`):
+- OpenSubtitles cache: `$XDG_CACHE_HOME/spindle/opensubtitles`
+- WhisperX cache: `$XDG_CACHE_HOME/spindle/whisperx`
 - Rip cache: `$XDG_CACHE_HOME/spindle/rips` (when `rip_cache.enabled`)
 - Disc ID cache: `$XDG_CACHE_HOME/spindle/discid_cache.json` (when `disc_id_cache.enabled`)
 
@@ -582,11 +591,13 @@ exposed as config but never changed from defaults in practice.
 
 ```
 {staging_dir}/
-  queue-{id}/
+  {fingerprint}/
     ripped/           # MakeMKV output
       title_00.mkv
-    encoded/          # Drapto output
+    encoded/          # Drapto output + subtitle sidecars
       title_00.mkv    # or episode files
+      title_00.en.srt
+      title_00.en.forced.srt   # only when forced subs found
     contentid/        # WhisperX transcripts for episode ID
       s01_001/
         s01_001-contentid.srt
@@ -618,8 +629,6 @@ $XDG_CACHE_HOME/spindle/
       title_00.mkv
       ...
   discid_cache.json       # Disc ID cache (when enabled)
-
-~/.local/share/spindle/cache/
   opensubtitles/          # OpenSubtitles download cache
     {tmdb_id}/
       {season}/
@@ -628,23 +637,23 @@ $XDG_CACHE_HOME/spindle/
     ...
 ```
 
-### 6.4 Log Directory
+### 6.4 State Directory
 
 ```
-{log_dir}/
+{state_dir}/
   spindle.log           # Main daemon log (symlink to current)
-  spindle.lock          # Lock file
   queue.db              # SQLite database
 
 $XDG_RUNTIME_DIR/
   spindle.sock          # HTTP API Unix socket
+  spindle.lock          # Daemon lock file
 ```
 
 ### 6.5 Review Directory
 
 ```
 {review_dir}/
-  {disc_title}/
+  {sanitized_review_reason}_{8-char_fingerprint_hex}/
     encoded_file.mkv
 ```
 

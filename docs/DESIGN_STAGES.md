@@ -261,8 +261,7 @@ When `rip_cache.enabled`:
 3. Sanitized disc title
 4. `queue-temp` (ultimate fallback)
 
-Path is sanitized via `SanitizeFileName()`, spaces replaced with hyphens,
-leading/trailing hyphens and underscores trimmed.
+Path is sanitized via `SanitizePathSegment()`.
 
 **Method contracts:**
 
@@ -693,8 +692,27 @@ same language preference, sort by download count descending (most downloaded
 
 ### 6.6 SRT Generation
 
-- Output: SRT file with filtered, time-aligned cues.
-- Naming: `{base}.en.srt` for primary, `{base}.en.forced.srt` for forced.
+- **Location**: SRT files are written beside the encoded MKV in the staging
+  `encoded/` directory. `{base}` is the encoded filename without extension.
+- **Naming**: `{base}.en.srt` for primary, `{base}.en.forced.srt` for forced.
+
+Examples:
+
+```
+{staging_dir}/{fingerprint}/encoded/
+  Movie Title (2024).mkv
+  Movie Title (2024).en.srt
+  Movie Title (2024).en.forced.srt      # only when forced subs found
+
+{staging_dir}/{fingerprint}/encoded/
+  Show Name - S01E01.mkv
+  Show Name - S01E01.en.srt
+  Show Name - S01E02.mkv
+  Show Name - S01E02.en.srt
+```
+
+The organizing stage discovers these via base-name prefix matching (Section 7.3)
+and moves them alongside the MKV to the library.
 
 ### 6.7 MKV Muxing
 

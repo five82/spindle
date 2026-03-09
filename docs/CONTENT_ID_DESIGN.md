@@ -135,7 +135,7 @@ Selection reasons: `top_result`, `title_consistency_rerank`, `non_hi_preferred`,
 
 - Downloads use format `srt`
 - File cache: keyed by `file_id`, stored under the auto-derived OpenSubtitles
-  cache directory (`~/.local/share/spindle/cache/opensubtitles`)
+  cache directory (`$XDG_CACHE_HOME/spindle/opensubtitles`)
 - Search cache: keyed by variant signature, stores search responses
 - Cache hits skip network calls entirely
 

@@ -181,9 +181,21 @@ commentary detection):
 
 **Filename sanitization:**
 
-- `SanitizeFileName(name)`: Replace `/\:*` with dashes, remove `?"<>|`, trim.
+- `SanitizeDisplayName(name)`: Replace `:/\` and control chars with spaces,
+  remove `?"<>|*`, collapse whitespace. For human-readable library filenames.
+- `SanitizePathSegment(name)`: Replace `/\:*` with dashes, remove `?"<>|`,
+  spaces to hyphens, trim leading/trailing hyphens and underscores. For
+  directory names and path components.
 - `SanitizeToken(value)`: Lowercase, keep `[a-z0-9_-]`, everything else becomes
   underscore. Returns "unknown" for empty input.
+
+**Path safety:**
+
+- `SafeJoin(base, segment)`: `filepath.Join` + containment check. Returns error
+  if the cleaned result escapes `base`. Defense-in-depth guard at boundaries
+  where external input (disc titles, TMDB metadata) becomes a path component.
+  All path construction from untrusted input must use `SafeJoin` instead of
+  bare `filepath.Join`.
 
 **Generic helper:**
 
@@ -678,7 +690,7 @@ and validation:
 Key validation constraints enforced by `validate.go`:
 
 - `tmdb.api_key`: Required (non-empty).
-- `paths.staging_dir`, `paths.log_dir`, `paths.review_dir`: Required.
+- `paths.staging_dir`, `paths.state_dir`, `paths.review_dir`: Required.
 - `encoding.svt_av1_preset`: Must be 0-13.
 - `makemkv.rip_timeout`: Must be > 0.
 - `makemkv.min_title_length`: Must be >= 0.
@@ -771,7 +783,7 @@ cross-stage plumbing or envelope attributes.
 When `ContentKey` is empty, the service falls back to a path-based key:
 `hex(SHA-256( inputPath + "\x00" + audioIndex + "\x00" + model + "\x00" + language ))`.
 
-Cache directory: `~/.local/share/spindle/cache/whisperx/{cache_key}/`
+Cache directory: `$XDG_CACHE_HOME/spindle/whisperx/{cache_key}/`
 
 **Cache operations:**
 - `Lookup(key)`: Check for existing transcription. Validates SRT exists and
