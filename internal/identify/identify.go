@@ -28,6 +28,15 @@ var editionPatterns = regexp.MustCompile(
 	`(?i)(extended[\s_]+(edition|cut)|director'?s[\s_]+(cut|edition)|unrated|theatrical|special[\s_]+edition|criterion|imax)`,
 )
 
+// discMetadataPattern strips season, disc, volume, and part indicators from disc labels.
+// Examples: "- Season 2", ": Disc 6", "Volume 3", "Part 1", "TV Series".
+var discMetadataPattern = regexp.MustCompile(
+	`(?i)(\s*[-:]\s*)?(season\s+\d+|disc\s+\d+|volume\s+\d+|part\s+\d+|tv\s+series)`,
+)
+
+// trailingPunctPattern cleans up trailing punctuation/whitespace left after stripping.
+var trailingPunctPattern = regexp.MustCompile(`[\s:_-]+$`)
+
 // editionLLMConfidenceThreshold is the minimum confidence for LLM edition detection.
 const editionLLMConfidenceThreshold = 0.8
 
@@ -127,11 +136,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 3: Build title priority chain for TMDB query.
-	queryTitle := h.resolveTitle(item, discInfo)
+	rawTitle := h.resolveTitle(item, discInfo)
+	queryTitle := cleanQueryTitle(rawTitle)
 	logger.Info("title resolved for TMDB search",
 		"decision_type", "title_source",
 		"decision_result", "resolved",
 		"decision_reason", queryTitle,
+		"raw_title", rawTitle,
 	)
 
 	// Step 4: TMDB search.
@@ -233,6 +244,19 @@ func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo) str
 	}
 
 	return "Unknown Disc"
+}
+
+// cleanQueryTitle strips disc metadata (season, disc, volume, "TV Series") from a
+// resolved title to produce a cleaner TMDB search query.
+// Example: "Batman TV Series - Season 2: Disc 6" → "Batman"
+func cleanQueryTitle(title string) string {
+	cleaned := discMetadataPattern.ReplaceAllString(title, "")
+	cleaned = trailingPunctPattern.ReplaceAllString(cleaned, "")
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return title // don't return empty; fall back to original
+	}
+	return cleaned
 }
 
 // detectEdition checks for edition markers in disc title and disc name.

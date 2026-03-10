@@ -73,6 +73,64 @@ func TestResolveTitle_NilDiscInfo(t *testing.T) {
 	}
 }
 
+func TestCleanQueryTitle(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "strips season and disc",
+			input: "Batman TV Series - Season 2: Disc 6",
+			want:  "Batman",
+		},
+		{
+			name:  "strips disc only",
+			input: "The Matrix: Disc 1",
+			want:  "The Matrix",
+		},
+		{
+			name:  "strips season only",
+			input: "Breaking Bad - Season 3",
+			want:  "Breaking Bad",
+		},
+		{
+			name:  "strips TV Series only",
+			input: "Seinfeld TV Series",
+			want:  "Seinfeld",
+		},
+		{
+			name:  "strips volume",
+			input: "Kill Bill Volume 1",
+			want:  "Kill Bill",
+		},
+		{
+			name:  "no metadata to strip",
+			input: "Inception",
+			want:  "Inception",
+		},
+		{
+			name:  "case insensitive",
+			input: "BATMAN tv series - SEASON 2: DISC 6",
+			want:  "BATMAN",
+		},
+		{
+			name:  "falls back to original if result would be empty",
+			input: "Season 1",
+			want:  "Season 1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cleanQueryTitle(tt.input)
+			if got != tt.want {
+				t.Errorf("cleanQueryTitle(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDetectEdition_Regex(t *testing.T) {
 	tests := []struct {
 		name      string
