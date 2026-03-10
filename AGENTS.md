@@ -38,6 +38,8 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 - Prefer maintainable architecture and explicit logging over clever tricks.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
 - Keep edits ASCII unless the file already uses extended characters.
+- When troubleshooting, gather evidence and test. Do not blindly guess.
+- Observability is key. We can not understand what is happening if we can not see it.
 
 ## Drapto Dependency Workflow
 
