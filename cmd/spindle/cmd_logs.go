@@ -14,13 +14,8 @@ import (
 
 func newLogsCmd() *cobra.Command {
 	var (
-		follow    bool
-		lines     int
-		component string
-		lane      string
-		request   string
-		itemID    int64
-		level     string
+		follow bool
+		lines  int
 	)
 	cmd := &cobra.Command{
 		Use:   "logs",
@@ -70,10 +65,5 @@ func newLogsCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output")
 	cmd.Flags().IntVarP(&lines, "lines", "n", 10, "Number of lines to show")
-	cmd.Flags().StringVar(&component, "component", "", "Filter by component label")
-	cmd.Flags().StringVar(&lane, "lane", "", "Filter by processing lane")
-	cmd.Flags().StringVar(&request, "request", "", "Filter by request ID")
-	cmd.Flags().Int64VarP(&itemID, "item", "i", 0, "Filter by queue item ID")
-	cmd.Flags().StringVar(&level, "level", "", "Minimum log level")
 	return cmd
 }

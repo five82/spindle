@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -47,7 +47,7 @@ func newConfigInitCmd() *cobra.Command {
 				}
 			}
 
-			dir := path[:strings.LastIndex(path, "/")]
+			dir := filepath.Dir(path)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return fmt.Errorf("create config dir: %w", err)
 			}
