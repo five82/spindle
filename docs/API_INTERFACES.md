@@ -392,6 +392,16 @@ All errors use JSON:
 
 ### 2.4 Read Endpoints
 
+#### GET /api/health
+
+Unauthenticated health check endpoint. Used by `queueaccess.OpenWithFallback`
+to detect daemon availability.
+
+**Response** (200):
+```json
+{"status": "ok"}
+```
+
 #### GET /api/status
 
 Returns daemon status.

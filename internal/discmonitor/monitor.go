@@ -40,6 +40,9 @@ func New(device string, logger *slog.Logger) *Monitor {
 	}
 }
 
+// Device returns the optical drive device path.
+func (m *Monitor) Device() string { return m.device }
+
 // Pause temporarily stops disc event processing.
 func (m *Monitor) Pause() { m.paused = true }
 

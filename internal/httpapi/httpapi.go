@@ -12,25 +12,30 @@ import (
 	"strings"
 	"time"
 
+	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/queue"
 )
 
 // Server is the HTTP API server.
 type Server struct {
-	store      *queue.Store
-	token      string
-	logger     *slog.Logger
-	httpServer *http.Server
-	mux        *http.ServeMux
+	store       *queue.Store
+	token       string
+	logger      *slog.Logger
+	httpServer  *http.Server
+	mux         *http.ServeMux
+	discMonitor *discmonitor.Monitor
+	shutdownCh  chan struct{}
 }
 
-// New creates an HTTP API server.
-func New(store *queue.Store, token string, logger *slog.Logger) *Server {
+// New creates an HTTP API server. discMon and shutdownCh may be nil.
+func New(store *queue.Store, token string, logger *slog.Logger, discMon *discmonitor.Monitor, shutdownCh chan struct{}) *Server {
 	s := &Server{
-		store:  store,
-		token:  token,
-		logger: logger,
-		mux:    http.NewServeMux(),
+		store:       store,
+		token:       token,
+		logger:      logger,
+		mux:         http.NewServeMux(),
+		discMonitor: discMon,
+		shutdownCh:  shutdownCh,
 	}
 	s.registerRoutes()
 	s.httpServer = &http.Server{
@@ -81,6 +86,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/queue", s.authMiddleware(s.handleQueueClear))
 	s.mux.HandleFunc("GET /api/status", s.authMiddleware(s.handleStatus))
 	s.mux.HandleFunc("GET /api/health", s.handleHealth) // no auth
+	s.mux.HandleFunc("POST /api/daemon/stop", s.authMiddleware(s.handleDaemonStop))
+	s.mux.HandleFunc("POST /api/disc/pause", s.authMiddleware(s.handleDiscPause))
+	s.mux.HandleFunc("POST /api/disc/resume", s.authMiddleware(s.handleDiscResume))
+	s.mux.HandleFunc("POST /api/disc/detect", s.authMiddleware(s.handleDiscDetect))
 }
 
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -206,6 +215,53 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleDaemonStop(w http.ResponseWriter, _ *http.Request) {
+	if s.shutdownCh == nil {
+		writeError(w, http.StatusInternalServerError, "shutdown not supported")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"stopped": true})
+	// Close channel after writing response to signal daemon shutdown.
+	select {
+	case <-s.shutdownCh:
+		// Already closed.
+	default:
+		close(s.shutdownCh)
+	}
+}
+
+func (s *Server) handleDiscPause(w http.ResponseWriter, _ *http.Request) {
+	if s.discMonitor == nil {
+		writeError(w, http.StatusServiceUnavailable, "no optical drive configured")
+		return
+	}
+	s.discMonitor.Pause()
+	writeJSON(w, http.StatusOK, map[string]any{"paused": true})
+}
+
+func (s *Server) handleDiscResume(w http.ResponseWriter, _ *http.Request) {
+	if s.discMonitor == nil {
+		writeError(w, http.StatusServiceUnavailable, "no optical drive configured")
+		return
+	}
+	s.discMonitor.Resume()
+	writeJSON(w, http.StatusOK, map[string]any{"resumed": true})
+}
+
+func (s *Server) handleDiscDetect(w http.ResponseWriter, r *http.Request) {
+	if s.discMonitor == nil {
+		writeError(w, http.StatusServiceUnavailable, "no optical drive configured")
+		return
+	}
+	event, err := discmonitor.ProbeDisc(r.Context(), s.discMonitor.Device())
+	if err != nil {
+		s.logger.Error("disc probe failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "disc probe failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, event)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

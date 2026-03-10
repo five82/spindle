@@ -13,6 +13,7 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/daemon"
 	"github.com/five82/spindle/internal/discidcache"
+	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/jellyfin"
 	"github.com/five82/spindle/internal/keydb"
@@ -93,22 +94,31 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		{Name: "organizing", Handler: organizerHandler, Stage: queue.StageSubtitling, Semaphore: workflow.SemNone},
 	})
 
-	// Create HTTP API.
-	api := httpapi.New(store, cfg.API.Token, logger)
+	// Create disc monitor (if optical drive configured).
+	var discMon *discmonitor.Monitor
+	if cfg.MakeMKV.OpticalDrive != "" {
+		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, logger)
+	}
+
+	// Create HTTP API with shutdown channel.
+	shutdownCh := make(chan struct{})
+	api := httpapi.New(store, cfg.API.Token, logger, discMon, shutdownCh)
 
 	// Create and start daemon.
-	d := daemon.New(cfg, store, manager, api, logger)
+	d := daemon.New(cfg, store, manager, api, discMon, logger)
 	if err := d.Start(ctx); err != nil {
 		return err
 	}
 
-	// Wait for shutdown signal.
+	// Wait for shutdown signal or HTTP stop request.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
 	case sig := <-sigCh:
 		logger.Info("received signal", "signal", sig)
+	case <-shutdownCh:
+		logger.Info("received HTTP stop request")
 	case <-ctx.Done():
 	}
 

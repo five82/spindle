@@ -432,6 +432,10 @@ On config load, `EnsureDirectories` creates:
 | `state_dir`              | string | `~/.local/state/spindle`                     | Daemon logs and queue DB                   |
 | `review_dir`             | string | `~/review`                                   | Unidentified files routed for manual review|
 
+**Auto-derived state paths** (not configurable):
+- Queue database: `{state_dir}/queue.db` via `QueueDBPath()`
+- Daemon log: `{state_dir}/daemon.log` via `DaemonLogPath()`
+
 **Auto-derived cache directories** (not configurable, all under `$XDG_CACHE_HOME/spindle/`):
 - OpenSubtitles cache: `$XDG_CACHE_HOME/spindle/opensubtitles`
 - WhisperX cache: `$XDG_CACHE_HOME/spindle/whisperx`

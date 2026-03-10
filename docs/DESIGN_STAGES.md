@@ -130,6 +130,9 @@ Heuristics to determine if disc is movie or TV:
   for deterministic output.
 - File created lazily on first `Store()` call.
 - Load errors are non-fatal: cache starts empty, logs warning.
+- `List()`: Return all entries sorted by `cached_at` descending.
+- `Remove(fingerprint)`: Delete a single entry by disc fingerprint.
+- `Clear()`: Remove all entries.
 
 **KeyDB Lookup**:
 1. If KeyDB catalog available and disc ID present:
@@ -269,6 +272,9 @@ Path is sanitized via `SanitizePathSegment()`.
 |--------|---------|
 | `Store()` | Copy a rip directory into the cache. Used after ripping to a staging area. Triggers pruning. |
 | `Register()` | Mark an already-in-place directory as a cache entry (no copy). Used after `cache rip` where output is written directly to the cache. Triggers pruning. |
+| `List()` | Return all cache entries sorted newest first (by modification time). |
+| `Remove(fingerprint)` | Delete a single cache entry by fingerprint. |
+| `Clear()` | Remove all cache entries. |
 
 **Pruning algorithm** (`prune()`):
 - Triggered after every `Store()` or `Register()` call.

@@ -26,7 +26,7 @@ func testStore(t *testing.T) *queue.Store {
 
 func TestHealthEndpoint(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "", slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	srv := httpapi.New(store, "", slog.New(slog.NewTextHandler(os.Stderr, nil)), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()
@@ -47,7 +47,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 func TestAuthRejectsMissingToken(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "secret-token", slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	srv := httpapi.New(store, "secret-token", slog.New(slog.NewTextHandler(os.Stderr, nil)), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/queue", nil)
 	w := httptest.NewRecorder()
@@ -60,7 +60,7 @@ func TestAuthRejectsMissingToken(t *testing.T) {
 
 func TestAuthAcceptsValidToken(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "secret-token", slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	srv := httpapi.New(store, "secret-token", slog.New(slog.NewTextHandler(os.Stderr, nil)), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/queue", nil)
 	req.Header.Set("Authorization", "Bearer secret-token")
@@ -74,7 +74,7 @@ func TestAuthAcceptsValidToken(t *testing.T) {
 
 func TestQueueListReturnsEmptyArray(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "", slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	srv := httpapi.New(store, "", slog.New(slog.NewTextHandler(os.Stderr, nil)), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/queue", nil)
 	w := httptest.NewRecorder()
