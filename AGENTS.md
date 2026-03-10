@@ -11,7 +11,6 @@ Do not modify this header.
 - Use the Go toolchain (`go build`, `go test`, `golangci-lint`); avoid alternate build systems.
 - Finish the work you start. Ask before dropping scope or leaving TODOs.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn't.
-- Use Context7 MCP for library/API docs without being asked.
 
 ## Project Snapshot
 
@@ -40,6 +39,7 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 - Keep edits ASCII unless the file already uses extended characters.
 - When troubleshooting, gather evidence and test. Do not blindly guess.
 - Observability is key. We can not understand what is happening if we can not see it.
+- When examining reference code, do not just copy and paste. Understand why it works in the reference implementation, think, and design a solution that works best for this codebase.
 
 ## Drapto Dependency Workflow
 
