@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,18 +17,29 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/five82/drapto"
 	"github.com/five82/spindle/internal/auditgather"
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/daemonctl"
 	"github.com/five82/spindle/internal/daemonrun"
 	"github.com/five82/spindle/internal/deps"
 	"github.com/five82/spindle/internal/discidcache"
+	"github.com/five82/spindle/internal/discmonitor"
+	"github.com/five82/spindle/internal/fingerprint"
+	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/makemkv"
+	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/notify"
+	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/queueaccess"
 	"github.com/five82/spindle/internal/ripcache"
+	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/staging"
+	"github.com/five82/spindle/internal/textutil"
+	"github.com/five82/spindle/internal/tmdb"
+	"github.com/five82/spindle/internal/transcription"
 )
 
 // Global flags.
@@ -606,9 +619,116 @@ func newIdentifyCmd() *cobra.Command {
 			if device == "" {
 				return fmt.Errorf("no device specified")
 			}
-			fmt.Printf("Identifying disc on %s...\n", device)
-			// Stage execution wired in full integration.
-			fmt.Println("(identify stage execution not yet wired)")
+			ctx := context.Background()
+
+			// Probe disc for mount point and label.
+			event, _ := discmonitor.ProbeDisc(ctx, device)
+			var discLabel, mountPath string
+			if event != nil {
+				discLabel = event.Label
+				mountPath = event.MountPath
+			}
+
+			// Generate fingerprint if disc is mounted.
+			var fp string
+			if mountPath != "" {
+				var err error
+				fp, err = fingerprint.Generate(mountPath)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: fingerprint generation failed: %v\n", err)
+				}
+			}
+
+			// Check disc ID cache for fast path.
+			if fp != "" {
+				store, err := discidcache.Open(cfg.DiscIDCachePath())
+				if err == nil {
+					if entry := store.Lookup(fp); entry != nil {
+						fmt.Println("=== Disc ID Cache Hit ===")
+						fmt.Printf("Title:       %s\n", entry.Title)
+						fmt.Printf("TMDB ID:     %d\n", entry.TMDBID)
+						fmt.Printf("Type:        %s\n", entry.MediaType)
+						if entry.Year != "" {
+							fmt.Printf("Year:        %s\n", entry.Year)
+						}
+						if entry.Season > 0 {
+							fmt.Printf("Season:      %d\n", entry.Season)
+						}
+						fmt.Printf("Fingerprint: %s\n", fp)
+						return nil
+					}
+				}
+			}
+
+			// MakeMKV scan.
+			fmt.Printf("Scanning disc on %s...\n", device)
+			discInfo, err := makemkv.Scan(ctx, device,
+				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second)
+			if err != nil {
+				return fmt.Errorf("makemkv scan: %w", err)
+			}
+
+			label := discInfo.Name
+			if label == "" {
+				label = discLabel
+			}
+
+			fmt.Println("\n=== Disc Info ===")
+			fmt.Printf("Label:   %s\n", label)
+			fmt.Printf("Titles:  %d\n", len(discInfo.Titles))
+			if fp != "" {
+				fmt.Printf("Fingerprint: %s\n", fp)
+			}
+			for _, t := range discInfo.Titles {
+				fmt.Printf("  Title %d: %s (%s, %d ch, %s)\n",
+					t.ID, t.Name, t.Duration, t.Chapters, formatBytes(t.SizeBytes))
+			}
+
+			// TMDB search.
+			queryTitle := label
+			if queryTitle == "" {
+				queryTitle = "Unknown Disc"
+			}
+
+			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
+			results, err := tmdbClient.SearchMulti(ctx, queryTitle)
+			if err != nil {
+				return fmt.Errorf("tmdb search: %w", err)
+			}
+
+			fmt.Println("\n=== TMDB Results ===")
+			if len(results) == 0 {
+				fmt.Println("No TMDB results found")
+				return nil
+			}
+
+			best, confidence := tmdb.SelectBestResult(results, queryTitle, "", 5)
+			if best != nil {
+				fmt.Printf("Best match: %s (%s)\n", best.DisplayTitle(), best.Year())
+				fmt.Printf("  Type:       %s\n", best.MediaType)
+				fmt.Printf("  TMDB ID:    %d\n", best.ID)
+				fmt.Printf("  Confidence: %.2f\n", confidence)
+				if best.Overview != "" {
+					overview := best.Overview
+					if len(overview) > 200 {
+						overview = overview[:200] + "..."
+					}
+					fmt.Printf("  Overview:   %s\n", overview)
+				}
+			}
+
+			if len(results) > 1 {
+				fmt.Printf("\nAll results (%d):\n", len(results))
+				for i, r := range results {
+					if i >= 5 {
+						fmt.Printf("  ... and %d more\n", len(results)-5)
+						break
+					}
+					fmt.Printf("  %d. %s (%s) [%s, TMDB %d]\n",
+						i+1, r.DisplayTitle(), r.Year(), r.MediaType, r.ID)
+				}
+			}
+
 			return nil
 		},
 	}
@@ -632,9 +752,105 @@ func newGensubtitleCmd() *cobra.Command {
 			if _, err := os.Stat(file); err != nil {
 				return fmt.Errorf("file not found: %s", file)
 			}
-			fmt.Printf("Generating subtitles for %s...\n", file)
-			// Stage execution wired in full integration.
-			fmt.Println("(gensubtitle stage execution not yet wired)")
+			ctx := context.Background()
+
+			// Set up work directory.
+			cleanupWorkDir := false
+			if workDir == "" {
+				var err error
+				workDir, err = os.MkdirTemp("", "spindle-gensubtitle-*")
+				if err != nil {
+					return fmt.Errorf("create work dir: %w", err)
+				}
+				cleanupWorkDir = true
+				defer func() {
+					if cleanupWorkDir {
+						_ = os.RemoveAll(workDir)
+					}
+				}()
+			}
+
+			// Set up output directory.
+			if output == "" {
+				output = filepath.Dir(file)
+			}
+
+			// Create transcription service.
+			svc := transcription.New(
+				cfg.Subtitles.WhisperXModel,
+				cfg.Subtitles.WhisperXCUDAEnabled,
+				cfg.Subtitles.WhisperXVADMethod,
+				cfg.Subtitles.WhisperXHFToken,
+				cfg.WhisperXCacheDir(),
+			)
+
+			fmt.Printf("Transcribing %s...\n", filepath.Base(file))
+			result, err := svc.Transcribe(ctx, transcription.TranscribeRequest{
+				InputPath:  file,
+				AudioIndex: 0,
+				Language:   "en",
+				OutputDir:  workDir,
+			})
+			if err != nil {
+				return fmt.Errorf("transcription: %w", err)
+			}
+
+			fmt.Printf("Transcription complete: %d segments", result.Segments)
+			if result.Cached {
+				fmt.Print(" (cached)")
+			}
+			fmt.Println()
+
+			// Handle forced subtitles.
+			if fetchForced && cfg.Subtitles.OpenSubtitlesEnabled {
+				osClient := opensubtitles.New(
+					cfg.Subtitles.OpenSubtitlesAPIKey,
+					cfg.Subtitles.OpenSubtitlesUserAgent,
+					cfg.Subtitles.OpenSubtitlesUserToken,
+					"",
+				)
+				if osClient != nil {
+					fmt.Println("Forced subtitle search requires TMDB ID (use pipeline for full support)")
+				}
+			}
+
+			if external || !cfg.Subtitles.MuxIntoMKV {
+				// Copy SRT to output directory as sidecar.
+				base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+				destPath := filepath.Join(output, base+".en.srt")
+				data, err := os.ReadFile(result.SRTPath)
+				if err != nil {
+					return fmt.Errorf("read srt: %w", err)
+				}
+				if err := os.WriteFile(destPath, data, 0o644); err != nil {
+					return fmt.Errorf("write srt: %w", err)
+				}
+				fmt.Printf("Subtitle saved: %s\n", destPath)
+			} else {
+				// Mux into MKV.
+				base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+				outPath := filepath.Join(output, base+".subtitled.mkv")
+				tmpPath := outPath + ".tmp"
+
+				fmt.Printf("Muxing subtitles into %s...\n", filepath.Base(outPath))
+				muxCmd := exec.CommandContext(ctx, "mkvmerge",
+					"-o", tmpPath,
+					file,
+					"--language", "0:eng",
+					"--track-name", "0:English",
+					"--default-track", "0:yes",
+					result.SRTPath,
+				)
+				if muxOut, err := muxCmd.CombinedOutput(); err != nil {
+					_ = os.Remove(tmpPath)
+					return fmt.Errorf("mkvmerge: %w: %s", err, muxOut)
+				}
+				if err := os.Rename(tmpPath, outPath); err != nil {
+					return fmt.Errorf("rename: %w", err)
+				}
+				fmt.Printf("Subtitled file: %s\n", outPath)
+			}
+
 			return nil
 		},
 	}
@@ -756,8 +972,127 @@ func newCacheRipCmd() *cobra.Command {
 			if device == "" {
 				return fmt.Errorf("no device specified")
 			}
-			fmt.Printf("Ripping from %s into cache...\n", device)
-			fmt.Println("(cache rip not yet wired)")
+			ctx := context.Background()
+
+			// Probe disc for mount point.
+			event, err := discmonitor.ProbeDisc(ctx, device)
+			if err != nil {
+				return fmt.Errorf("probe disc: %w", err)
+			}
+			if event.MountPath == "" {
+				return fmt.Errorf("disc not mounted; mount %s first", device)
+			}
+
+			// Generate fingerprint.
+			fp, err := fingerprint.Generate(event.MountPath)
+			if err != nil {
+				return fmt.Errorf("generate fingerprint: %w", err)
+			}
+
+			// Check if already cached.
+			cache := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
+			if cache.HasCache(fp) {
+				fmt.Printf("Disc already cached (fingerprint: %s)\n", truncate(fp, 12))
+				return nil
+			}
+
+			// MakeMKV scan.
+			fmt.Printf("Scanning disc on %s...\n", device)
+			discInfo, err := makemkv.Scan(ctx, device,
+				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second)
+			if err != nil {
+				return fmt.Errorf("makemkv scan: %w", err)
+			}
+
+			discTitle := discInfo.Name
+			if discTitle == "" {
+				discTitle = event.Label
+			}
+			if discTitle == "" {
+				discTitle = "Unknown Disc"
+			}
+
+			fmt.Printf("Disc: %s (%d titles)\n", discTitle, len(discInfo.Titles))
+
+			// TMDB identification (for disc ID cache).
+			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
+			results, searchErr := tmdbClient.SearchMulti(ctx, discTitle)
+			if searchErr == nil && len(results) > 0 {
+				best, _ := tmdb.SelectBestResult(results, discTitle, "", 5)
+				if best != nil {
+					fmt.Printf("TMDB: %s (%s, ID %d)\n", best.DisplayTitle(), best.Year(), best.ID)
+					discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath())
+					if openErr == nil {
+						entry := discidcache.Entry{
+							TMDBID:    best.ID,
+							MediaType: best.MediaType,
+							Title:     best.DisplayTitle(),
+							Year:      best.Year(),
+						}
+						_ = discIDStore.Set(fp, entry)
+					}
+				}
+			}
+
+			// Rip qualifying titles to a temp directory.
+			tempDir, err := os.MkdirTemp("", "spindle-rip-*")
+			if err != nil {
+				return fmt.Errorf("create temp dir: %w", err)
+			}
+			defer func() { _ = os.RemoveAll(tempDir) }()
+
+			var rippedCount int
+			var totalBytes int64
+			for i, title := range discInfo.Titles {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if title.Duration.Seconds() < float64(cfg.MakeMKV.MinTitleLength) {
+					continue
+				}
+
+				fmt.Printf("Ripping title %d/%d (ID %d, %s)...\n",
+					i+1, len(discInfo.Titles), title.ID, title.Duration)
+
+				ripErr := makemkv.Rip(ctx, device, title.ID, tempDir,
+					time.Duration(cfg.MakeMKV.RipTimeout)*time.Second,
+					func(p makemkv.RipProgress) {
+						fmt.Printf("\r  Progress: %.0f%%", p.Percent)
+					},
+				)
+				if ripErr != nil {
+					return fmt.Errorf("rip title %d: %w", title.ID, ripErr)
+				}
+				fmt.Println() // newline after progress
+				rippedCount++
+				totalBytes += title.SizeBytes
+			}
+
+			if rippedCount == 0 {
+				fmt.Println("No qualifying titles to rip")
+				return nil
+			}
+
+			// Register in rip cache.
+			meta := ripcache.EntryMetadata{
+				Fingerprint: fp,
+				DiscTitle:   discTitle,
+				CachedAt:    time.Now(),
+				TitleCount:  rippedCount,
+				TotalBytes:  totalBytes,
+			}
+			if err := cache.Register(fp, tempDir, meta); err != nil {
+				return fmt.Errorf("cache registration: %w", err)
+			}
+
+			// Prune cache if needed.
+			if pruneErr := cache.Prune(); pruneErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: cache prune failed: %v\n", pruneErr)
+			}
+
+			fmt.Printf("\nCached %d titles (%s) for %s\n",
+				rippedCount, formatBytes(totalBytes), discTitle)
+			fmt.Printf("Fingerprint: %s\n", fp)
 			return nil
 		},
 	}
@@ -806,8 +1141,8 @@ func newCacheProcessCmd() *cobra.Command {
 				return fmt.Errorf("invalid entry number: %s", args[0])
 			}
 
-			store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
-			entries, err := store.List()
+			rcStore := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
+			entries, err := rcStore.List()
 			if err != nil {
 				return err
 			}
@@ -816,11 +1151,70 @@ func newCacheProcessCmd() *cobra.Command {
 			}
 
 			entry := entries[num-1]
-			fmt.Printf("Queuing cached rip: %s (fingerprint: %s)\n", entry.DiscTitle, entry.Fingerprint)
-			if allowDuplicate {
-				fmt.Println("(allowing duplicate fingerprint)")
+
+			// Open queue database.
+			qStore, err := queue.Open(cfg.QueueDBPath())
+			if err != nil {
+				return err
 			}
-			fmt.Println("(cache process not yet wired)")
+			defer func() { _ = qStore.Close() }()
+
+			// Check for duplicate fingerprint.
+			if !allowDuplicate {
+				existing, err := qStore.FindByFingerprint(entry.Fingerprint)
+				if err != nil {
+					return fmt.Errorf("check duplicate: %w", err)
+				}
+				if existing != nil {
+					return fmt.Errorf("fingerprint already queued (item %d, stage %s); use --allow-duplicate to override",
+						existing.ID, existing.Stage)
+				}
+			}
+
+			// Create queue item.
+			item, err := qStore.NewDisc(entry.DiscTitle, entry.Fingerprint)
+			if err != nil {
+				return fmt.Errorf("create queue item: %w", err)
+			}
+
+			// Build RipSpec from disc ID cache if available.
+			discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath())
+			if openErr == nil {
+				if idEntry := discIDStore.Lookup(entry.Fingerprint); idEntry != nil {
+					env := ripspec.Envelope{
+						Version:     ripspec.CurrentVersion,
+						Fingerprint: entry.Fingerprint,
+						Metadata: ripspec.Metadata{
+							ID:        idEntry.TMDBID,
+							Title:     idEntry.Title,
+							MediaType: idEntry.MediaType,
+							Year:      idEntry.Year,
+							Movie:     idEntry.MediaType == "movie",
+						},
+					}
+					data, encErr := env.Encode()
+					if encErr == nil {
+						item.RipSpecData = data
+						item.Stage = queue.StageRipping
+						metaJSON, _ := json.Marshal(queue.Metadata{
+							ID:        idEntry.TMDBID,
+							Title:     idEntry.Title,
+							MediaType: idEntry.MediaType,
+							Year:      idEntry.Year,
+							Movie:     idEntry.MediaType == "movie",
+						})
+						item.MetadataJSON = string(metaJSON)
+						_ = qStore.Update(item)
+					}
+				}
+			}
+
+			fpDisplay := entry.Fingerprint
+			if len(fpDisplay) > 12 {
+				fpDisplay = fpDisplay[:12]
+			}
+			fmt.Printf("Queued: %s (item %d, fingerprint: %s)\n",
+				entry.DiscTitle, item.ID, fpDisplay)
 			return nil
 		},
 	}
@@ -1131,9 +1525,38 @@ func newDebugCropCmd() *cobra.Command {
 		Short: "Run crop detection on a video file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			target := args[0]
-			fmt.Printf("Running crop detection on %s...\n", target)
-			fmt.Println("(debug crop not yet wired)")
+			path, err := resolveTarget(args[0])
+			if err != nil {
+				return err
+			}
+			ctx := context.Background()
+
+			fmt.Printf("Running crop detection on %s...\n", filepath.Base(path))
+			result, err := drapto.DetectCrop(ctx, path)
+			if err != nil {
+				return fmt.Errorf("crop detection: %w", err)
+			}
+
+			fmt.Printf("\n=== Crop Detection Results ===\n")
+			fmt.Printf("Resolution:     %dx%d\n", result.VideoWidth, result.VideoHeight)
+			fmt.Printf("HDR:            %v\n", result.IsHDR)
+			fmt.Printf("Crop required:  %v\n", result.Required)
+			if result.CropFilter != "" {
+				fmt.Printf("Crop filter:    %s\n", result.CropFilter)
+			}
+			if result.MultipleRatios {
+				fmt.Println("Multiple ratios: yes (no dominant crop value)")
+			}
+			fmt.Printf("Message:        %s\n", result.Message)
+			fmt.Printf("Total samples:  %d\n", result.TotalSamples)
+
+			if len(result.Candidates) > 0 {
+				fmt.Printf("\nCandidate distribution:\n")
+				for _, c := range result.Candidates {
+					fmt.Printf("  %-24s %3d samples (%.1f%%)\n", c.Crop, c.Count, c.Percent)
+				}
+			}
+
 			return nil
 		},
 	}
@@ -1145,9 +1568,157 @@ func newDebugCommentaryCmd() *cobra.Command {
 		Short: "Run commentary detection on a video file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			target := args[0]
-			fmt.Printf("Running commentary detection on %s...\n", target)
-			fmt.Println("(debug commentary not yet wired)")
+			path, err := resolveTarget(args[0])
+			if err != nil {
+				return err
+			}
+			ctx := context.Background()
+			logger := buildLogger()
+
+			fmt.Printf("Probing %s...\n", filepath.Base(path))
+			probeResult, err := ffprobe.Inspect(ctx, "", path)
+			if err != nil {
+				return fmt.Errorf("ffprobe: %w", err)
+			}
+
+			// Collect audio streams.
+			var audioStreams []ffprobe.Stream
+			for _, s := range probeResult.Streams {
+				if s.CodecType == "audio" {
+					audioStreams = append(audioStreams, s)
+				}
+			}
+
+			if len(audioStreams) == 0 {
+				fmt.Println("No audio streams found")
+				return nil
+			}
+
+			fmt.Printf("\n=== Audio Streams (%d) ===\n", len(audioStreams))
+			for _, s := range audioStreams {
+				title := s.Tags["title"]
+				lang := s.Tags["language"]
+				fmt.Printf("  Stream %d: %s, %d ch, %s", s.Index, s.CodecName, s.Channels, s.ChannelLayout)
+				if lang != "" {
+					fmt.Printf(", lang=%s", lang)
+				}
+				if title != "" {
+					fmt.Printf(", title=%q", title)
+				}
+				fmt.Println()
+			}
+
+			if len(audioStreams) <= 1 {
+				fmt.Println("\nOnly one audio stream; no commentary analysis needed")
+				return nil
+			}
+
+			// Set up transcription and LLM for commentary detection.
+			llmClient := llm.New(
+				cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model,
+				cfg.LLM.Referer, cfg.LLM.Title, cfg.LLM.TimeoutSeconds,
+			)
+			if llmClient == nil {
+				fmt.Println("\nLLM not configured; commentary classification requires LLM")
+				return nil
+			}
+
+			transcriber := transcription.New(
+				cfg.Commentary.WhisperXModel,
+				cfg.Subtitles.WhisperXCUDAEnabled,
+				cfg.Subtitles.WhisperXVADMethod,
+				cfg.Subtitles.WhisperXHFToken,
+				cfg.WhisperXCacheDir(),
+			)
+
+			// Use a synthetic fingerprint for cache keys.
+			debugFP := textutil.SanitizePathSegment(filepath.Base(path))
+
+			fmt.Printf("\n=== Commentary Analysis ===\n")
+			fmt.Printf("Similarity threshold: %.3f\n", cfg.Commentary.SimilarityThreshold)
+			fmt.Printf("Confidence threshold: %.3f\n", cfg.Commentary.ConfidenceThreshold)
+
+			primaryIdx := audioStreams[0].Index
+
+			for _, candidate := range audioStreams[1:] {
+				fmt.Printf("\n--- Stream %d ---\n", candidate.Index)
+				title := candidate.Tags["title"]
+				if title != "" {
+					fmt.Printf("Title:    %s\n", title)
+				}
+				fmt.Printf("Channels: %d (%s)\n", candidate.Channels, candidate.ChannelLayout)
+
+				// Stereo similarity check.
+				primaryKey := fmt.Sprintf("%s-main-audio%d", debugFP, primaryIdx)
+				candidateKey := fmt.Sprintf("%s-main-audio%d", debugFP, candidate.Index)
+
+				primaryResult, pErr := transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+					InputPath:  path,
+					AudioIndex: primaryIdx,
+					Language:   "en",
+					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-%d", debugFP, primaryIdx),
+					ContentKey: primaryKey,
+				})
+				if pErr != nil {
+					logger.Warn("primary transcription failed", "error", pErr)
+					fmt.Printf("Similarity: error (primary transcription failed)\n")
+					continue
+				}
+
+				candidateResult, cErr := transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+					InputPath:  path,
+					AudioIndex: candidate.Index,
+					Language:   "en",
+					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-%d", debugFP, candidate.Index),
+					ContentKey: candidateKey,
+				})
+				if cErr != nil {
+					logger.Warn("candidate transcription failed", "error", cErr)
+					fmt.Printf("Similarity: error (candidate transcription failed)\n")
+					continue
+				}
+
+				primaryText, _ := os.ReadFile(primaryResult.SRTPath)
+				candidateText, _ := os.ReadFile(candidateResult.SRTPath)
+
+				fpA := textutil.NewFingerprint(string(primaryText))
+				fpB := textutil.NewFingerprint(string(candidateText))
+				sim := textutil.CosineSimilarity(fpA, fpB)
+
+				fmt.Printf("Similarity: %.3f", sim)
+				if sim >= cfg.Commentary.SimilarityThreshold {
+					fmt.Printf(" (>= %.3f, likely stereo downmix)\n", cfg.Commentary.SimilarityThreshold)
+					continue
+				}
+				fmt.Println()
+
+				// LLM classification.
+				transcript := string(candidateText)
+				if len(transcript) > 4000 {
+					transcript = transcript[:4000] + "\n[truncated]"
+				}
+
+				var userPrompt strings.Builder
+				if title != "" {
+					fmt.Fprintf(&userPrompt, "Title: %s\n\n", title)
+				}
+				fmt.Fprintf(&userPrompt, "Transcript sample:\n%s", transcript)
+
+				var resp struct {
+					Decision   string  `json:"decision"`
+					Confidence float64 `json:"confidence"`
+					Reason     string  `json:"reason"`
+				}
+				if llmErr := llmClient.CompleteJSON(ctx, commentarySystemPrompt, userPrompt.String(), &resp); llmErr != nil {
+					fmt.Printf("LLM: error (%v)\n", llmErr)
+					continue
+				}
+
+				fmt.Printf("LLM decision:   %s\n", resp.Decision)
+				fmt.Printf("LLM confidence: %.2f\n", resp.Confidence)
+				fmt.Printf("LLM reason:     %s\n", resp.Reason)
+			}
+
 			return nil
 		},
 	}
@@ -1228,6 +1799,74 @@ func newDaemonCmd() *cobra.Command {
 }
 
 // --- Helpers ---
+
+// buildLogger creates a structured logger from the global log level flag.
+func buildLogger() *slog.Logger {
+	level := slog.LevelInfo
+	switch flagLogLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+}
+
+// resolveTarget resolves a cache entry number or direct file path to a file path.
+// If target is a number, looks up the Nth entry in the rip cache and returns the
+// first non-metadata file in that cache entry directory.
+func resolveTarget(target string) (string, error) {
+	if num, err := strconv.Atoi(target); err == nil && num >= 1 {
+		rcStore := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
+		entries, listErr := rcStore.List()
+		if listErr != nil {
+			return "", listErr
+		}
+		if num > len(entries) {
+			return "", fmt.Errorf("entry %d not found (have %d entries)", num, len(entries))
+		}
+		entry := entries[num-1]
+		entryDir := filepath.Join(cfg.RipCacheDir(), entry.Fingerprint)
+		dirEntries, err := os.ReadDir(entryDir)
+		if err != nil {
+			return "", fmt.Errorf("read cache entry: %w", err)
+		}
+		for _, de := range dirEntries {
+			if !de.IsDir() && de.Name() != "metadata.json" {
+				return filepath.Join(entryDir, de.Name()), nil
+			}
+		}
+		return "", fmt.Errorf("no video files in cache entry %d", num)
+	}
+	if _, err := os.Stat(target); err != nil {
+		return "", fmt.Errorf("file not found: %s", target)
+	}
+	return target, nil
+}
+
+// commentarySystemPrompt is the LLM system prompt for commentary classification.
+const commentarySystemPrompt = `You are an assistant that determines if an audio track is commentary or not.
+
+IMPORTANT: Commentary tracks come in two forms:
+1. Commentary-only: People talking about the film without movie audio
+2. Mixed commentary: Movie/TV dialogue plays while commentators talk over it
+
+Both forms are commentary. The presence of movie dialogue does NOT mean it's not commentary.
+
+Commentary tracks include:
+- Director/cast commentary over the film
+- Behind-the-scenes discussion mixed with film audio
+- Any track where people discuss or react to the film while it plays
+
+NOT commentary:
+- Alternate language dubs
+- Audio descriptions for visually impaired
+- Stereo downmix of main audio
+- Isolated music/effects tracks
+
+Respond ONLY with JSON: {"decision": "commentary" or "not_commentary", "confidence": 0.0-1.0, "reason": "brief explanation"}`
 
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {

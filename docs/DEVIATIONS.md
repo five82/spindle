@@ -6,15 +6,6 @@ Deviations from the 12 design specification documents, with reasoning.
 
 ## CLI Commands (API_INTERFACES.md)
 
-### Workflow commands are stub-wired
-
-`spindle identify`, `spindle gensubtitle`, `spindle cache rip`, `spindle cache process`,
-`spindle debug crop`, and `spindle debug commentary` print placeholder messages
-rather than executing full stage logic. These require runtime wiring of stage
-handlers with real external tool dependencies (MakeMKV, FFmpeg, WhisperX) that
-cannot be validated without the actual tools present. The command structure,
-flags, and argument validation are complete.
-
 ### Disc commands use placeholder HTTP calls
 
 `spindle disc pause`, `spindle disc resume`, and `spindle disc detect` print
