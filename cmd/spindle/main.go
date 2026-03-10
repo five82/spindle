@@ -230,8 +230,8 @@ func newStatusCmd() *cobra.Command {
 
 			fmt.Println("\n=== Library Paths ===")
 			if cfg != nil {
-				checkPath("Movies", cfg.Library.MoviesDir)
-				checkPath("TV", cfg.Library.TVDir)
+				checkPath("Movies", filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir))
+				checkPath("TV", filepath.Join(cfg.Paths.LibraryDir, cfg.Library.TVDir))
 			}
 
 			fmt.Println("\n=== Queue Status ===")
