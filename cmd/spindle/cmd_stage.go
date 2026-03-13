@@ -137,7 +137,7 @@ func newIdentifyCmd() *cobra.Command {
 				fmt.Println("Spindle will use this result for metadata.")
 				if best.Overview != "" {
 					overview := best.Overview
-					if len(overview) > 200 {
+					if !flagVerbose && len(overview) > 200 {
 						overview = overview[:200] + "..."
 					}
 					fmt.Printf("  Overview: %s\n", overview)
@@ -145,18 +145,29 @@ func newIdentifyCmd() *cobra.Command {
 			}
 
 			if len(results) > 1 {
+				limit := 5
+				if flagVerbose {
+					limit = len(results)
+				}
 				fmt.Printf("\nOther candidates (%d):\n", len(results)-1)
 				shown := 0
-				for _, r := range results {
+				for i := range results {
+					r := &results[i]
 					if best != nil && r.ID == best.ID && r.MediaType == best.MediaType {
 						continue
 					}
-					if shown >= 5 {
+					if shown >= limit {
 						fmt.Printf("  ... and %d more\n", len(results)-1-shown)
 						break
 					}
-					fmt.Printf("  - %s (%s) [%s, TMDB %d]\n",
-						r.DisplayTitle(), r.Year(), r.MediaType, r.ID)
+					score := tmdb.ScoreResult(r, queryTitle, "", 5)
+					if flagVerbose {
+						fmt.Printf("  - %s (%s) [%s, TMDB %d, score %.2f, votes %d]\n",
+							r.DisplayTitle(), r.Year(), r.MediaType, r.ID, score, r.VoteCount)
+					} else {
+						fmt.Printf("  - %s (%s) [%s, TMDB %d]\n",
+							r.DisplayTitle(), r.Year(), r.MediaType, r.ID)
+					}
 					shown++
 				}
 			}

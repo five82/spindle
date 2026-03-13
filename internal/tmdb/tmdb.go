@@ -232,42 +232,47 @@ func (c *Client) GetSeason(ctx context.Context, tvID, season int) (*Season, erro
 	return &s, nil
 }
 
+// ScoreResult computes the confidence score for a single result against the
+// query. Scoring factors: title exact match (case-insensitive) gives 0.5,
+// partial match gives 0.3, year match gives 0.3, vote count >= minVoteCount
+// gives 0.2.
+func ScoreResult(r *SearchResult, query, year string, minVoteCount int) float64 {
+	queryLower := strings.ToLower(query)
+	var score float64
+
+	titleLower := strings.ToLower(r.DisplayTitle())
+	if titleLower == queryLower {
+		score += 0.5
+	} else if strings.Contains(titleLower, queryLower) || strings.Contains(queryLower, titleLower) {
+		score += 0.3
+	}
+
+	if year != "" && r.Year() == year {
+		score += 0.3
+	}
+
+	if r.VoteCount >= minVoteCount {
+		score += 0.2
+	}
+
+	return score
+}
+
 // SelectBestResult scores each result against the query and returns the best
-// result with its confidence score (0-1). Scoring factors: title exact match
-// (case-insensitive) gives 0.5, partial match gives 0.3, year match gives 0.3,
-// vote count >= minVoteCount gives 0.2. Returns nil, 0 if no results.
+// result with its confidence score (0-1). Returns nil, 0 if no results.
 func SelectBestResult(results []SearchResult, query, year string, minVoteCount int) (*SearchResult, float64) {
 	if len(results) == 0 {
 		return nil, 0
 	}
 
-	queryLower := strings.ToLower(query)
-
 	var bestResult *SearchResult
 	var bestScore float64
 
 	for i := range results {
-		r := &results[i]
-		var score float64
-
-		titleLower := strings.ToLower(r.DisplayTitle())
-		if titleLower == queryLower {
-			score += 0.5
-		} else if strings.Contains(titleLower, queryLower) || strings.Contains(queryLower, titleLower) {
-			score += 0.3
-		}
-
-		if year != "" && r.Year() == year {
-			score += 0.3
-		}
-
-		if r.VoteCount >= minVoteCount {
-			score += 0.2
-		}
-
+		score := ScoreResult(&results[i], query, year, minVoteCount)
 		if score > bestScore {
 			bestScore = score
-			bestResult = r
+			bestResult = &results[i]
 		}
 	}
 
