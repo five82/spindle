@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/five82/spindle/internal/identify"
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/fingerprint"
@@ -103,9 +104,17 @@ func newIdentifyCmd() *cobra.Command {
 			}
 
 			// TMDB search.
-			queryTitle := label
-			if queryTitle == "" {
-				queryTitle = "Unknown Disc"
+			rawTitle := label
+			if rawTitle == "" {
+				rawTitle = "Unknown Disc"
+			}
+			queryTitle := identify.CleanQueryTitle(rawTitle)
+
+			fmt.Printf("\n=== TMDB Search ===\n")
+			if queryTitle != rawTitle {
+				fmt.Printf("Query:   %s (cleaned from %q)\n", queryTitle, rawTitle)
+			} else {
+				fmt.Printf("Query:   %s\n", queryTitle)
 			}
 
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
@@ -117,33 +126,38 @@ func newIdentifyCmd() *cobra.Command {
 			fmt.Println("\n=== TMDB Results ===")
 			if len(results) == 0 {
 				fmt.Println("No TMDB results found")
+				fmt.Println("Spindle will flag this item for manual review.")
 				return nil
 			}
 
 			best, confidence := tmdb.SelectBestResult(results, queryTitle, "", 5)
 			if best != nil {
-				fmt.Printf("Best match: %s (%s)\n", best.DisplayTitle(), best.Year())
-				fmt.Printf("  Type:       %s\n", best.MediaType)
-				fmt.Printf("  TMDB ID:    %d\n", best.ID)
-				fmt.Printf("  Confidence: %.2f\n", confidence)
+				fmt.Printf("Selected: %s (%s) [%s, TMDB %d, confidence %.2f]\n",
+					best.DisplayTitle(), best.Year(), best.MediaType, best.ID, confidence)
+				fmt.Println("Spindle will use this result for metadata.")
 				if best.Overview != "" {
 					overview := best.Overview
 					if len(overview) > 200 {
 						overview = overview[:200] + "..."
 					}
-					fmt.Printf("  Overview:   %s\n", overview)
+					fmt.Printf("  Overview: %s\n", overview)
 				}
 			}
 
 			if len(results) > 1 {
-				fmt.Printf("\nAll results (%d):\n", len(results))
-				for i, r := range results {
-					if i >= 5 {
-						fmt.Printf("  ... and %d more\n", len(results)-5)
+				fmt.Printf("\nOther candidates (%d):\n", len(results)-1)
+				shown := 0
+				for _, r := range results {
+					if best != nil && r.ID == best.ID && r.MediaType == best.MediaType {
+						continue
+					}
+					if shown >= 5 {
+						fmt.Printf("  ... and %d more\n", len(results)-1-shown)
 						break
 					}
-					fmt.Printf("  %d. %s (%s) [%s, TMDB %d]\n",
-						i+1, r.DisplayTitle(), r.Year(), r.MediaType, r.ID)
+					fmt.Printf("  - %s (%s) [%s, TMDB %d]\n",
+						r.DisplayTitle(), r.Year(), r.MediaType, r.ID)
+					shown++
 				}
 			}
 

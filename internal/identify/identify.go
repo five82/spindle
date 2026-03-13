@@ -137,7 +137,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Step 3: Build title priority chain for TMDB query.
 	rawTitle := h.resolveTitle(item, discInfo)
-	queryTitle := cleanQueryTitle(rawTitle)
+	queryTitle := CleanQueryTitle(rawTitle)
 	logger.Info("title resolved for TMDB search",
 		"decision_type", "title_source",
 		"decision_result", "resolved",
@@ -246,10 +246,10 @@ func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo) str
 	return "Unknown Disc"
 }
 
-// cleanQueryTitle strips disc metadata (season, disc, volume, "TV Series") from a
+// CleanQueryTitle strips disc metadata (season, disc, volume, "TV Series") from a
 // resolved title to produce a cleaner TMDB search query.
 // Example: "Batman TV Series - Season 2: Disc 6" → "Batman"
-func cleanQueryTitle(title string) string {
+func CleanQueryTitle(title string) string {
 	cleaned := discMetadataPattern.ReplaceAllString(title, "")
 	cleaned = trailingPunctPattern.ReplaceAllString(cleaned, "")
 	cleaned = strings.TrimSpace(cleaned)

@@ -123,9 +123,9 @@ func TestCleanQueryTitle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := cleanQueryTitle(tt.input)
+			got := CleanQueryTitle(tt.input)
 			if got != tt.want {
-				t.Errorf("cleanQueryTitle(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("CleanQueryTitle(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
