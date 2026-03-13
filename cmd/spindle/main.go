@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -152,6 +153,19 @@ func resolveTarget(target string) (string, error) {
 		return "", fmt.Errorf("file not found: %s", target)
 	}
 	return target, nil
+}
+
+// prettyJSON re-indents a JSON string for display. Returns the original string on error.
+func prettyJSON(s string) string {
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return s
+	}
+	data, err := json.MarshalIndent(v, "             ", "  ")
+	if err != nil {
+		return s
+	}
+	return string(data)
 }
 
 func truncate(s string, maxLen int) string {

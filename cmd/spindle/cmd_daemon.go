@@ -91,6 +91,15 @@ func newStatusCmd() *cobra.Command {
 			} else {
 				fmt.Println("Daemon: stopped")
 			}
+			if flagVerbose {
+				fmt.Printf("Socket: %s\n", sp)
+				fmt.Printf("Lock:   %s\n", lp)
+				if flagConfig != "" {
+					fmt.Printf("Config: %s\n", flagConfig)
+				} else {
+					fmt.Println("Config: (default search path)")
+				}
+			}
 
 			fmt.Println("\n=== Dependencies ===")
 			reqs := []deps.Requirement{
@@ -105,7 +114,11 @@ func newStatusCmd() *cobra.Command {
 				if !s.Available {
 					mark = "MISSING"
 				}
-				fmt.Printf("  %-12s [%s]\n", s.Name, mark)
+				if flagVerbose {
+					fmt.Printf("  %-12s [%s] %s\n", s.Name, mark, s.Detail)
+				} else {
+					fmt.Printf("  %-12s [%s]\n", s.Name, mark)
+				}
 			}
 
 			fmt.Println("\n=== Library Paths ===")
@@ -132,7 +145,7 @@ func newStatusCmd() *cobra.Command {
 				queue.StageOrganizing, queue.StageCompleted, queue.StageFailed,
 			} {
 				count := stats[stage]
-				if count > 0 {
+				if count > 0 || flagVerbose {
 					fmt.Printf("  %-24s %d\n", stage, count)
 				}
 			}

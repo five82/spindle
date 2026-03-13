@@ -194,6 +194,12 @@ func newCacheStatsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			if flagVerbose {
+				fmt.Printf("Cache dir: %s\n", cfg.RipCacheDir())
+				fmt.Printf("Max size:  %d GiB\n", cfg.RipCache.MaxGiB)
+			}
+
 			if len(entries) == 0 {
 				fmt.Println("No cached entries")
 				return nil
@@ -202,10 +208,17 @@ func newCacheStatsCmd() *cobra.Command {
 			var totalBytes int64
 			for i, e := range entries {
 				totalBytes += e.TotalBytes
-				age := time.Since(e.CachedAt).Truncate(time.Minute)
-				fmt.Printf("  %d. %s (%d titles, %s, %s ago)\n",
-					i+1, e.DiscTitle, e.TitleCount,
-					formatBytes(e.TotalBytes), age)
+				if flagVerbose {
+					fmt.Printf("  %d. %s (%d titles, %s, cached %s)\n",
+						i+1, e.DiscTitle, e.TitleCount,
+						formatBytes(e.TotalBytes), e.CachedAt.Format(time.RFC3339))
+					fmt.Printf("     Fingerprint: %s\n", e.Fingerprint)
+				} else {
+					age := time.Since(e.CachedAt).Truncate(time.Minute)
+					fmt.Printf("  %d. %s (%d titles, %s, %s ago)\n",
+						i+1, e.DiscTitle, e.TitleCount,
+						formatBytes(e.TotalBytes), age)
+				}
 			}
 			fmt.Printf("\n%d entries, %s total\n", len(entries), formatBytes(totalBytes))
 			return nil

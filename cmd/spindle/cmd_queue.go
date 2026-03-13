@@ -62,20 +62,41 @@ func newQueueListCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Printf("%-6s %-30s %-24s %-20s %-14s\n", "ID", "Title", "Stage", "Created", "Fingerprint")
-			fmt.Println(strings.Repeat("-", 96))
-			for _, item := range items {
-				fp := item.DiscFingerprint
-				if len(fp) > 12 {
-					fp = fp[:12]
+			if flagVerbose {
+				fmt.Printf("%-6s %-40s %-24s %-20s %-20s %s\n", "ID", "Title", "Stage", "Created", "Updated", "Fingerprint")
+				fmt.Println(strings.Repeat("-", 140))
+				for _, item := range items {
+					fmt.Printf("%-6d %-40s %-24s %-20s %-20s %s\n",
+						item.ID,
+						item.DiscTitle,
+						item.Stage,
+						item.CreatedAt,
+						item.UpdatedAt,
+						item.DiscFingerprint,
+					)
+					if item.ProgressMessage != "" {
+						fmt.Printf("       Progress: %s (%.0f%%)\n", item.ProgressMessage, item.ProgressPercent)
+					}
+					if item.ErrorMessage != "" {
+						fmt.Printf("       Error: %s\n", item.ErrorMessage)
+					}
 				}
-				fmt.Printf("%-6d %-30s %-24s %-20s %-14s\n",
-					item.ID,
-					truncate(item.DiscTitle, 28),
-					item.Stage,
-					item.CreatedAt,
-					fp,
-				)
+			} else {
+				fmt.Printf("%-6s %-30s %-24s %-20s %-14s\n", "ID", "Title", "Stage", "Created", "Fingerprint")
+				fmt.Println(strings.Repeat("-", 96))
+				for _, item := range items {
+					fp := item.DiscFingerprint
+					if len(fp) > 12 {
+						fp = fp[:12]
+					}
+					fmt.Printf("%-6d %-30s %-24s %-20s %-14s\n",
+						item.ID,
+						truncate(item.DiscTitle, 28),
+						item.Stage,
+						item.CreatedAt,
+						fp,
+					)
+				}
 			}
 			return nil
 		},
@@ -119,11 +140,22 @@ func newQueueShowCmd() *cobra.Command {
 			fmt.Printf("ID:          %d\n", item.ID)
 			fmt.Printf("Title:       %s\n", item.DiscTitle)
 			fmt.Printf("Stage:       %s\n", item.Stage)
+			if flagVerbose && item.FailedAtStage != "" {
+				fmt.Printf("FailedAt:    %s\n", item.FailedAtStage)
+			}
 			fmt.Printf("Created:     %s\n", item.CreatedAt)
 			fmt.Printf("Updated:     %s\n", item.UpdatedAt)
 			fmt.Printf("Fingerprint: %s\n", item.DiscFingerprint)
 			if item.ProgressMessage != "" {
 				fmt.Printf("Progress:    %s (%.0f%%)\n", item.ProgressMessage, item.ProgressPercent)
+			}
+			if flagVerbose && item.ProgressTotalBytes > 0 {
+				fmt.Printf("Bytes:       %s / %s\n",
+					formatBytes(item.ProgressBytesCopied),
+					formatBytes(item.ProgressTotalBytes))
+			}
+			if flagVerbose && item.ActiveEpisodeKey != "" {
+				fmt.Printf("Episode:     %s\n", item.ActiveEpisodeKey)
 			}
 			if item.NeedsReview != 0 {
 				fmt.Printf("Review:      %s\n", item.ReviewReason)
@@ -133,6 +165,12 @@ func newQueueShowCmd() *cobra.Command {
 			}
 			if item.MetadataJSON != "" {
 				fmt.Printf("Metadata:    %s\n", item.MetadataJSON)
+			}
+			if flagVerbose && item.RipSpecData != "" {
+				fmt.Printf("RipSpec:     %s\n", prettyJSON(item.RipSpecData))
+			}
+			if flagVerbose && item.EncodingDetailsJSON != "" {
+				fmt.Printf("Encoding:    %s\n", prettyJSON(item.EncodingDetailsJSON))
 			}
 			return nil
 		},
