@@ -42,7 +42,7 @@ func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string) *S
 // TranscribeRequest specifies what to transcribe.
 type TranscribeRequest struct {
 	InputPath  string
-	AudioIndex int
+	AudioIndex int // audio-relative index (maps to ffmpeg 0:a:N)
 	Language   string
 	OutputDir  string
 	Model      string // Override default model
@@ -90,7 +90,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 	wavPath := filepath.Join(req.OutputDir, "audio.wav")
 	ffmpegArgs := []string{
 		"-i", req.InputPath,
-		"-map", fmt.Sprintf("0:%d", req.AudioIndex),
+		"-map", fmt.Sprintf("0:a:%d", req.AudioIndex),
 		"-ac", "1",
 		"-ar", "16000",
 		"-c:a", "pcm_s16le",

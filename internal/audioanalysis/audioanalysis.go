@@ -171,28 +171,35 @@ func (h *Handler) detectCommentary(
 		excluded []ripspec.ExcludedTrackRef
 	)
 
-	// Identify audio stream indices.
-	var audioIndices []int
+	// Identify audio streams with both absolute and audio-relative indices.
+	type audioStream struct {
+		absIndex   int // absolute stream index (for ffprobe metadata)
+		audioIndex int // audio-relative index (for ffmpeg -map 0:a:N)
+	}
+	var audioStreams []audioStream
+	audioCount := 0
 	for i, s := range result.Streams {
 		if s.CodecType == "audio" {
-			audioIndices = append(audioIndices, i)
+			audioStreams = append(audioStreams, audioStream{absIndex: i, audioIndex: audioCount})
+			audioCount++
 		}
 	}
 
-	if len(audioIndices) <= 1 {
+	if len(audioStreams) <= 1 {
 		return nil, nil
 	}
 
-	primaryIdx := audioIndices[0]
+	primaryAudioIdx := audioStreams[0].audioIndex
 
 	// Examine each non-primary audio track.
-	for _, idx := range audioIndices[1:] {
+	for _, as := range audioStreams[1:] {
+		idx := as.absIndex
 		stream := result.Streams[idx]
 
 		// Stereo similarity check: compare transcription fingerprints of
 		// the primary and candidate tracks.
 		if h.transcriber != nil {
-			sim, simErr := h.stereoSimilarity(ctx, path, primaryIdx, idx, fingerprint, epKey)
+			sim, simErr := h.stereoSimilarity(ctx, path, primaryAudioIdx, as.audioIndex, fingerprint, epKey)
 			if simErr != nil {
 				logger.Warn("stereo similarity check failed",
 					"event_type", "commentary_detection_failed",
@@ -218,7 +225,7 @@ func (h *Handler) detectCommentary(
 		}
 
 		// LLM classification via transcription.
-		ref := h.classifyTrack(ctx, logger, path, idx, stream, fingerprint, epKey)
+		ref := h.classifyTrack(ctx, logger, path, as.audioIndex, stream, fingerprint, epKey)
 		if ref != nil {
 			comms = append(comms, *ref)
 		}

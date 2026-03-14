@@ -144,9 +144,9 @@ func newDebugCommentaryCmd() *cobra.Command {
 			fmt.Printf("Similarity threshold: %.3f\n", cfg.Commentary.SimilarityThreshold)
 			fmt.Printf("Confidence threshold: %.3f\n", cfg.Commentary.ConfidenceThreshold)
 
-			primaryIdx := audioStreams[0].Index
-
-			for _, candidate := range audioStreams[1:] {
+			// Use audio-relative indices for ffmpeg -map 0:a:N.
+			for candidateAudioIdx, candidate := range audioStreams[1:] {
+				candidateAudioIdx++ // 0-based: primary=0, first candidate=1
 				fmt.Printf("\n--- Stream %d ---\n", candidate.Index)
 				title := candidate.Tags["title"]
 				if title != "" {
@@ -155,14 +155,14 @@ func newDebugCommentaryCmd() *cobra.Command {
 				fmt.Printf("Channels: %d (%s)\n", candidate.Channels, candidate.ChannelLayout)
 
 				// Stereo similarity check.
-				primaryKey := fmt.Sprintf("%s-main-audio%d", debugFP, primaryIdx)
-				candidateKey := fmt.Sprintf("%s-main-audio%d", debugFP, candidate.Index)
+				primaryKey := fmt.Sprintf("%s-main-audio0", debugFP)
+				candidateKey := fmt.Sprintf("%s-main-audio%d", debugFP, candidateAudioIdx)
 
 				primaryResult, pErr := transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 					InputPath:  path,
-					AudioIndex: primaryIdx,
+					AudioIndex: 0,
 					Language:   "en",
-					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-%d", debugFP, primaryIdx),
+					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-0", debugFP),
 					ContentKey: primaryKey,
 				})
 				if pErr != nil {
@@ -173,9 +173,9 @@ func newDebugCommentaryCmd() *cobra.Command {
 
 				candidateResult, cErr := transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 					InputPath:  path,
-					AudioIndex: candidate.Index,
+					AudioIndex: candidateAudioIdx,
 					Language:   "en",
-					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-%d", debugFP, candidate.Index),
+					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-%d", debugFP, candidateAudioIdx),
 					ContentKey: candidateKey,
 				})
 				if cErr != nil {
