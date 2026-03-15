@@ -213,6 +213,12 @@ func newGensubtitleCmd() *cobra.Command {
 				}()
 			}
 
+			// Resolve input to absolute path for consistent output.
+			absFile, err := filepath.Abs(file)
+			if err == nil {
+				file = absFile
+			}
+
 			// Set up output directory.
 			if output == "" {
 				output = filepath.Dir(file)
@@ -228,17 +234,44 @@ func newGensubtitleCmd() *cobra.Command {
 			)
 
 			fmt.Printf("Transcribing %s...\n", filepath.Base(file))
+
+			// Verbose: show WhisperX config before transcription.
+			if flagVerbose {
+				model, device, vad := svc.Config()
+				fmt.Printf("  Model:      %s\n", model)
+				fmt.Printf("  Device:     %s\n", device)
+				fmt.Printf("  VAD:        %s\n", vad)
+				fmt.Printf("  Language:   en\n")
+			}
+
+			// Progress callback for phase output.
+			progress := func(phase string, elapsed time.Duration) {
+				switch {
+				case phase == "extract" && elapsed == 0:
+					fmt.Print("  Extracting audio...")
+				case phase == "extract" && elapsed > 0:
+					fmt.Printf("done (%s)\n", formatPhaseDuration(elapsed))
+				case phase == "transcribe" && elapsed == 0:
+					fmt.Print("  Running WhisperX...")
+				case phase == "transcribe" && elapsed > 0:
+					fmt.Printf("done (%s)\n", formatPhaseDuration(elapsed))
+				}
+			}
+
 			result, err := svc.Transcribe(ctx, transcription.TranscribeRequest{
 				InputPath:  file,
 				AudioIndex: 0,
 				Language:   "en",
 				OutputDir:  workDir,
-			})
+			}, progress)
 			if err != nil {
 				return fmt.Errorf("transcription: %w", err)
 			}
 
 			fmt.Printf("Transcription complete: %d segments", result.Segments)
+			if result.Duration > 0 {
+				fmt.Printf(", %s", formatContentDuration(result.Duration))
+			}
 			if result.Cached {
 				fmt.Print(" (cached)")
 			}
@@ -268,17 +301,21 @@ func newGensubtitleCmd() *cobra.Command {
 				if err := os.WriteFile(destPath, data, 0o644); err != nil {
 					return fmt.Errorf("write srt: %w", err)
 				}
-				fmt.Printf("Subtitle saved: %s\n", destPath)
+				fmt.Printf("Saved sidecar: %s\n", destPath)
 			} else {
-				// Mux into MKV.
-				base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-				outPath := filepath.Join(output, base+".subtitled.mkv")
-				tmpPath := outPath + ".tmp"
+				// Check for existing subtitle tracks.
+				hasSubs := mkvHasSubtitleTrack(ctx, file)
+				if hasSubs {
+					fmt.Print("Replacing existing subtitle track...")
+				} else {
+					fmt.Print("Muxing subtitle into MKV...")
+				}
 
-				fmt.Printf("Muxing subtitles into %s...\n", filepath.Base(outPath))
+				// Mux into MKV, replacing the original file.
+				tmpPath := file + ".tmp.mkv"
 				muxCmd := exec.CommandContext(ctx, "mkvmerge",
 					"-o", tmpPath,
-					file,
+					"--no-subtitles", file,
 					"--language", "0:eng",
 					"--track-name", "0:English",
 					"--default-track", "0:yes",
@@ -288,10 +325,10 @@ func newGensubtitleCmd() *cobra.Command {
 					_ = os.Remove(tmpPath)
 					return fmt.Errorf("mkvmerge: %w: %s", err, muxOut)
 				}
-				if err := os.Rename(tmpPath, outPath); err != nil {
+				if err := os.Rename(tmpPath, file); err != nil {
 					return fmt.Errorf("rename: %w", err)
 				}
-				fmt.Printf("Subtitled file: %s\n", outPath)
+				fmt.Println("done")
 			}
 
 			return nil
@@ -302,6 +339,48 @@ func newGensubtitleCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&fetchForced, "fetch-forced", false, "Also fetch forced subs from OpenSubtitles")
 	cmd.Flags().BoolVar(&external, "external", false, "Create external SRT sidecar instead of muxing")
 	return cmd
+}
+
+// formatPhaseDuration formats a time.Duration for phase timing display.
+// Uses "1.2s" for < 1 minute, "1m30s" for >= 1 minute.
+func formatPhaseDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	mins := int(d.Minutes())
+	secs := int(d.Seconds()) % 60
+	return fmt.Sprintf("%dm%02ds", mins, secs)
+}
+
+// formatContentDuration formats a duration in seconds as "1h38m12s".
+func formatContentDuration(secs float64) string {
+	total := int(secs)
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%02dm%02ds", h, m, s)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm%02ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
+}
+
+// mkvHasSubtitleTrack returns true if the MKV file contains at least one
+// subtitle track, using mkvmerge --identify.
+func mkvHasSubtitleTrack(ctx context.Context, path string) bool {
+	cmd := exec.CommandContext(ctx, "mkvmerge", "--identify", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "Track ID") && strings.Contains(line, "subtitles") {
+			return true
+		}
+	}
+	return false
 }
 
 func newTestNotifyCmd() *cobra.Command {

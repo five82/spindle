@@ -123,13 +123,14 @@ type AudioAnalysisData struct {
 
 // SubtitleGenRecord captures the result of subtitle generation for one episode.
 type SubtitleGenRecord struct {
-	EpisodeKey            string `json:"episode_key"`
-	Source                string `json:"source"`
-	Cached                bool   `json:"cached,omitempty"`
-	SubtitlePath          string `json:"subtitle_path"`
-	Segments              int    `json:"segments"`
-	Language              string `json:"language"`
-	OpenSubtitlesDecision string `json:"opensubtitles_decision,omitempty"`
+	EpisodeKey            string  `json:"episode_key"`
+	Source                string  `json:"source"`
+	Cached                bool    `json:"cached,omitempty"`
+	SubtitlePath          string  `json:"subtitle_path"`
+	Segments              int     `json:"segments"`
+	DurationSec           float64 `json:"duration_sec,omitempty"`
+	Language              string  `json:"language"`
+	OpenSubtitlesDecision string  `json:"opensubtitles_decision,omitempty"`
 }
 
 // EnvelopeAttributes holds cross-cutting flags and analysis results.

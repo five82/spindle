@@ -131,6 +131,73 @@ func TestCountSRTSegmentsEmpty(t *testing.T) {
 	}
 }
 
+func TestParseSRTDuration(t *testing.T) {
+	dir := t.TempDir()
+	srtPath := filepath.Join(dir, "test.srt")
+	if err := os.WriteFile(srtPath, []byte(sampleSRT), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dur := parseSRTDuration(srtPath)
+	if dur != 12.0 {
+		t.Errorf("expected 12.0s, got %.1f", dur)
+	}
+}
+
+func TestParseSRTDurationLong(t *testing.T) {
+	srt := `1
+00:00:01,000 --> 00:00:04,000
+Hello.
+
+2
+01:38:10,000 --> 01:38:12,456
+Goodbye.
+`
+	dir := t.TempDir()
+	srtPath := filepath.Join(dir, "long.srt")
+	if err := os.WriteFile(srtPath, []byte(srt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dur := parseSRTDuration(srtPath)
+	expected := 1*3600 + 38*60 + 12 + 0.456
+	if dur < expected-0.001 || dur > expected+0.001 {
+		t.Errorf("expected %.3f, got %.3f", expected, dur)
+	}
+}
+
+func TestParseSRTDurationEmpty(t *testing.T) {
+	dir := t.TempDir()
+	srtPath := filepath.Join(dir, "empty.srt")
+	if err := os.WriteFile(srtPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dur := parseSRTDuration(srtPath)
+	if dur != 0 {
+		t.Errorf("expected 0, got %.1f", dur)
+	}
+}
+
+func TestParseSRTTimestamp(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected float64
+	}{
+		{"00:00:01,000", 1.0},
+		{"01:38:12,456", 5892.456},
+		{"00:05:30,500", 330.5},
+		{"invalid", 0},
+		{"", 0},
+	}
+	for _, tt := range tests {
+		got := parseSRTTimestamp(tt.input)
+		if got < tt.expected-0.001 || got > tt.expected+0.001 {
+			t.Errorf("parseSRTTimestamp(%q) = %.3f, want %.3f", tt.input, got, tt.expected)
+		}
+	}
+}
+
 func TestLookupMiss(t *testing.T) {
 	dir := t.TempDir()
 	svc := New("large-v3", false, "silero", "", dir)
@@ -174,6 +241,9 @@ func TestStoreAndLookupRoundTrip(t *testing.T) {
 	}
 	if result.SRTPath == "" {
 		t.Error("expected non-empty SRT path")
+	}
+	if result.Duration != 12.0 {
+		t.Errorf("expected Duration 12.0, got %.1f", result.Duration)
 	}
 
 	// Verify the cached file exists and is readable.

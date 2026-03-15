@@ -228,10 +228,27 @@ func applyDefaults(cfg *Config) {
 // This is handled separately in the TOML unmarshaling since the zero value (false)
 // conflicts with the desired default (true).
 func applyMuxDefault(data []byte, cfg *Config) {
-	// If the TOML data does not contain mux_into_mkv, default to true.
-	if data == nil || !strings.Contains(string(data), "mux_into_mkv") {
+	// Default to true unless the config explicitly sets mux_into_mkv.
+	// We look for an uncommented "mux_into_mkv" line to distinguish
+	// "absent/commented" (apply default true) from "explicitly set to false".
+	if data == nil || !hasUncommentedKey(data, "mux_into_mkv") {
 		cfg.Subtitles.MuxIntoMKV = true
 	}
+}
+
+// hasUncommentedKey returns true if data contains a line with the given key
+// that is not commented out (i.e., not preceded by #).
+func hasUncommentedKey(data []byte, key string) bool {
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.Contains(trimmed, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyEnvOverrides applies environment variable overrides to config fields.

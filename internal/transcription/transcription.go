@@ -2,6 +2,7 @@
 package transcription
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Service provides WhisperX transcription with caching.
@@ -49,12 +51,19 @@ type TranscribeRequest struct {
 	ContentKey string // Content-stable cache identity
 }
 
+// ProgressFunc is called at phase boundaries during transcription.
+// phase is "extract" or "transcribe". elapsed is zero at phase start
+// and non-zero at phase end.
+type ProgressFunc func(phase string, elapsed time.Duration)
+
 // TranscribeResult contains transcription output.
 type TranscribeResult struct {
-	SRTPath  string
-	Duration float64
-	Segments int
-	Cached   bool
+	SRTPath        string
+	Duration       float64       // total SRT duration (seconds) from last cue timestamp
+	Segments       int
+	Cached         bool
+	ExtractTime    time.Duration // time spent on ffmpeg audio extraction
+	TranscribeTime time.Duration // time spent on WhisperX
 }
 
 // Transcribe runs WhisperX transcription with caching.
@@ -64,10 +73,17 @@ type TranscribeResult struct {
 //  2. Check cache. If hit, return cached result.
 //  3. Extract audio via FFmpeg.
 //  4. Run WhisperX via uvx.
-//  5. Read SRT, count segments.
+//  5. Read SRT, count segments, parse duration.
 //  6. Store in cache.
 //  7. Return result.
-func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*TranscribeResult, error) {
+//
+// If progress is non-nil, it is called at the start and end of each phase.
+func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progress ...ProgressFunc) (*TranscribeResult, error) {
+	var onProgress ProgressFunc
+	if len(progress) > 0 {
+		onProgress = progress[0]
+	}
+
 	model := req.Model
 	if model == "" {
 		model = s.model
@@ -87,6 +103,9 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 	}
 
 	// Extract audio via FFmpeg.
+	if onProgress != nil {
+		onProgress("extract", 0)
+	}
 	wavPath := filepath.Join(req.OutputDir, "audio.wav")
 	ffmpegArgs := []string{
 		"-i", req.InputPath,
@@ -99,12 +118,20 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 		wavPath,
 	}
 
+	extractStart := time.Now()
 	ffmpegCmd := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...)
 	if output, err := ffmpegCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("ffmpeg audio extraction: %w: %s", err, output)
 	}
+	extractTime := time.Since(extractStart)
+	if onProgress != nil {
+		onProgress("extract", extractTime)
+	}
 
 	// Run WhisperX via uvx.
+	if onProgress != nil {
+		onProgress("transcribe", 0)
+	}
 	whisperArgs := []string{
 		"whisperx", wavPath,
 		"--model", model,
@@ -122,9 +149,14 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 		whisperArgs = append(whisperArgs, "--hf_token", s.hfToken)
 	}
 
+	transcribeStart := time.Now()
 	whisperCmd := exec.CommandContext(ctx, "uvx", whisperArgs...)
 	if output, err := whisperCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("whisperx transcription: %w: %s", err, output)
+	}
+	transcribeTime := time.Since(transcribeStart)
+	if onProgress != nil {
+		onProgress("transcribe", transcribeTime)
 	}
 
 	// Find SRT output. WhisperX names it after the input wav.
@@ -138,10 +170,15 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 		return nil, fmt.Errorf("count srt segments: %w", err)
 	}
 
+	duration := parseSRTDuration(srtPath)
+
 	result := &TranscribeResult{
-		SRTPath:  srtPath,
-		Segments: segments,
-		Cached:   false,
+		SRTPath:        srtPath,
+		Duration:       duration,
+		Segments:       segments,
+		Cached:         false,
+		ExtractTime:    extractTime,
+		TranscribeTime: transcribeTime,
 	}
 
 	// Store in cache.
@@ -186,6 +223,7 @@ func (s *Service) Lookup(key string) (*TranscribeResult, bool) {
 		}
 		return &TranscribeResult{
 			SRTPath:  srtPath,
+			Duration: parseSRTDuration(srtPath),
 			Segments: segments,
 		}, true
 	}
@@ -211,6 +249,74 @@ func (s *Service) Store(key string, result *TranscribeResult) error {
 	}
 
 	return nil
+}
+
+// parseSRTDuration reads the SRT file and returns the end timestamp of the
+// last cue in seconds. Returns 0 if the file cannot be parsed.
+func parseSRTDuration(path string) float64 {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = f.Close() }()
+
+	var lastEnd float64
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		idx := strings.Index(line, "-->")
+		if idx < 0 {
+			continue
+		}
+		endPart := strings.TrimSpace(line[idx+3:])
+		if secs := parseSRTTimestamp(endPart); secs > 0 {
+			lastEnd = secs
+		}
+	}
+	return lastEnd
+}
+
+// parseSRTTimestamp parses "HH:MM:SS,mmm" into seconds.
+func parseSRTTimestamp(s string) float64 {
+	s = strings.TrimSpace(s)
+	// Expected format: "01:38:12,456"
+	parts := strings.SplitN(s, ":", 3)
+	if len(parts) != 3 {
+		return 0
+	}
+	hours, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0
+	}
+	minutes, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0
+	}
+	secParts := strings.SplitN(parts[2], ",", 2)
+	if len(secParts) != 2 {
+		return 0
+	}
+	secs, err := strconv.Atoi(secParts[0])
+	if err != nil {
+		return 0
+	}
+	millis, err := strconv.Atoi(secParts[1])
+	if err != nil {
+		return 0
+	}
+	return float64(hours)*3600 + float64(minutes)*60 + float64(secs) + float64(millis)/1000
+}
+
+// Config returns the service's WhisperX configuration for display purposes.
+func (s *Service) Config() (model, device, vadMethod string) {
+	model = s.model
+	if s.cudaEnabled {
+		device = "cuda"
+	} else {
+		device = "cpu"
+	}
+	vadMethod = s.vadMethod
+	return
 }
 
 // countSRTSegments counts the number of cues in an SRT file.

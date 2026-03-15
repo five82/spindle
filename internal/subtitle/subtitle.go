@@ -107,12 +107,23 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			return fmt.Errorf("transcribe %s: %w", key, err)
 		}
 
+		logger.Info("transcription complete",
+			"event_type", "transcription_complete",
+			"episode_key", key,
+			"segments", result.Segments,
+			"content_duration_s", result.Duration,
+			"cached", result.Cached,
+			"extract_time_ms", result.ExtractTime.Milliseconds(),
+			"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
+		)
+
 		record := ripspec.SubtitleGenRecord{
 			EpisodeKey:   key,
 			Source:       "whisperx",
 			Cached:       result.Cached,
 			SubtitlePath: result.SRTPath,
 			Segments:     result.Segments,
+			DurationSec:  result.Duration,
 			Language:     "en",
 		}
 
