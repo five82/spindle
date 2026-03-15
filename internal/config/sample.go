@@ -76,10 +76,14 @@ api_key = ""
 # Enable CUDA acceleration
 # whisperx_cuda_enabled = false
 
-# Voice activity detection method
+# Voice activity detection method: "silero" (default) or "pyannote"
+#   silero  - fast, lightweight, no token required
+#   pyannote - better precision with background noise and overlapping speech;
+#              requires whisperx_hf_token to be set
 # whisperx_vad_method = "silero"
 
-# HuggingFace access token (or set HUGGING_FACE_HUB_TOKEN / HF_TOKEN env var)
+# HuggingFace access token, required for pyannote VAD
+# (or set HUGGING_FACE_HUB_TOKEN / HF_TOKEN env var)
 # whisperx_hf_token = ""
 
 # Enable OpenSubtitles integration
