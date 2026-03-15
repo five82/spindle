@@ -8,7 +8,11 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/five82/spindle/internal/queue"
 )
 
 // DiscEvent represents a disc insertion or removal event.
@@ -21,13 +25,16 @@ type DiscEvent struct {
 
 // Monitor watches for optical disc events.
 type Monitor struct {
-	device string
-	logger *slog.Logger
-	paused bool
+	device     string
+	logger     *slog.Logger
+	paused     atomic.Bool
+	mu         sync.Mutex
+	processing bool
+	store      *queue.Store
 }
 
 // New creates a disc monitor for the given device.
-func New(device string, logger *slog.Logger) *Monitor {
+func New(device string, logger *slog.Logger, store *queue.Store) *Monitor {
 	if device == "" {
 		device = "/dev/sr0"
 	}
@@ -37,20 +44,81 @@ func New(device string, logger *slog.Logger) *Monitor {
 	return &Monitor{
 		device: device,
 		logger: logger,
+		store:  store,
 	}
 }
 
 // Device returns the optical drive device path.
 func (m *Monitor) Device() string { return m.device }
 
-// Pause temporarily stops disc event processing.
-func (m *Monitor) Pause() { m.paused = true }
+// PauseDisc atomically pauses disc event processing.
+// Returns true if the state changed (was not already paused).
+func (m *Monitor) PauseDisc() bool { return m.paused.CompareAndSwap(false, true) }
 
-// Resume resumes disc event processing.
-func (m *Monitor) Resume() { m.paused = false }
+// ResumeDisc atomically resumes disc event processing.
+// Returns true if the state changed (was actually paused).
+func (m *Monitor) ResumeDisc() bool { return m.paused.CompareAndSwap(true, false) }
 
 // IsPaused returns whether the monitor is paused.
-func (m *Monitor) IsPaused() bool { return m.paused }
+func (m *Monitor) IsPaused() bool { return m.paused.Load() }
+
+// Detect wraps the full disc detection pipeline with concurrency guards.
+// Returns nil event (not an error) if paused, already processing, or a
+// disc-dependent item is in progress.
+func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
+	if m.IsPaused() {
+		m.logger.Info("disc detection skipped (paused)",
+			"decision_type", "detect_guard",
+			"decision_result", "skipped",
+			"decision_reason", "monitor paused",
+		)
+		return nil, nil
+	}
+
+	if m.store != nil {
+		busy, err := m.store.HasDiscDependentItem()
+		if err != nil {
+			return nil, fmt.Errorf("check disc dependent items: %w", err)
+		}
+		if busy {
+			m.logger.Info("disc detection skipped (disc-dependent item in progress)",
+				"decision_type", "detect_guard",
+				"decision_result", "skipped",
+				"decision_reason", "disc-dependent pipeline stage active",
+			)
+			return nil, nil
+		}
+	}
+
+	m.mu.Lock()
+	if m.processing {
+		m.mu.Unlock()
+		m.logger.Info("disc detection skipped (already processing)",
+			"decision_type", "detect_guard",
+			"decision_result", "skipped",
+			"decision_reason", "detection already in progress",
+		)
+		return nil, nil
+	}
+	m.processing = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.processing = false
+		m.mu.Unlock()
+	}()
+
+	// Create a fingerprint context with 2-minute timeout.
+	fpCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	event, err := ProbeDisc(fpCtx, m.device)
+	if err != nil {
+		return nil, err
+	}
+
+	return event, nil
+}
 
 // ProbeDisc detects a loaded disc via lsblk and returns a DiscEvent.
 // Returns nil if no disc is detected or lsblk reports no block devices.

@@ -89,8 +89,30 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	// Process each encoded asset.
+	// Collect ripped asset paths for audio refinement.
+	rippedKeys := h.assetKeys(&env)
+	var rippedPaths []string
+	for _, key := range rippedKeys {
+		asset, ok := env.Assets.FindAsset("ripped", key)
+		if ok && asset.IsCompleted() {
+			rippedPaths = append(rippedPaths, asset.Path)
+		}
+	}
+
+	// Refine audio targets on ripped assets before processing encoded files.
 	analysisData := &ripspec.AudioAnalysisData{}
+	if len(rippedPaths) > 0 {
+		refinement, refErr := RefineAudioTargets(ctx, logger, rippedPaths, nil)
+		if refErr != nil {
+			logger.Warn("audio refinement failed",
+				"event_type", "audio_refinement_error",
+				"error_hint", refErr.Error(),
+				"impact", "audio refinement skipped, proceeding with all tracks",
+			)
+		} else if refinement != nil && refinement.PrimaryAudioDescription != "" {
+			analysisData.PrimaryDescription = refinement.PrimaryAudioDescription
+		}
+	}
 
 	for _, key := range h.assetKeys(&env) {
 		asset, ok := env.Assets.FindAsset("encoded", key)
@@ -107,7 +129,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		// Select primary audio track.
 		selection := audio.Select(result.Streams)
 		analysisData.PrimaryTrack = ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
-		analysisData.PrimaryDescription = selection.PrimaryLabel()
+		if analysisData.PrimaryDescription == "" {
+			analysisData.PrimaryDescription = selection.PrimaryLabel()
+		}
 
 		logger.Info("primary audio selected",
 			"decision_type", "audio_selection",
@@ -120,6 +144,27 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			comms, excluded := h.detectCommentary(ctx, logger, result, asset.Path, item.DiscFingerprint, key)
 			analysisData.CommentaryTracks = comms
 			analysisData.ExcludedTracks = excluded
+
+			// Apply commentary disposition on encoded files.
+			if len(comms) > 0 {
+				var commentaryIndices []int
+				for _, c := range comms {
+					commentaryIndices = append(commentaryIndices, c.Index)
+				}
+				if err := ApplyCommentaryDisposition(ctx, logger, asset.Path, commentaryIndices); err != nil {
+					logger.Warn("commentary disposition failed",
+						"event_type", "commentary_disposition_error",
+						"error_hint", err.Error(),
+						"impact", "commentary tracks not labeled",
+					)
+				} else if err := ValidateCommentaryLabeling(ctx, asset.Path, commentaryIndices); err != nil {
+					logger.Warn("commentary labeling validation failed",
+						"event_type", "commentary_validation_error",
+						"error_hint", err.Error(),
+						"impact", "commentary labels may be incorrect",
+					)
+				}
+			}
 		}
 
 		// Only process first asset for representative analysis.

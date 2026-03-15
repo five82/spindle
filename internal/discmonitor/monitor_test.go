@@ -106,7 +106,7 @@ func TestValidateLabel(t *testing.T) {
 }
 
 func TestNewDefaults(t *testing.T) {
-	m := New("", nil)
+	m := New("", nil, nil)
 	if m.device != "/dev/sr0" {
 		t.Errorf("default device = %q, want %q", m.device, "/dev/sr0")
 	}
@@ -116,23 +116,33 @@ func TestNewDefaults(t *testing.T) {
 }
 
 func TestNewCustomDevice(t *testing.T) {
-	m := New("/dev/sr1", nil)
+	m := New("/dev/sr1", nil, nil)
 	if m.device != "/dev/sr1" {
 		t.Errorf("device = %q, want %q", m.device, "/dev/sr1")
 	}
 }
 
 func TestPauseResume(t *testing.T) {
-	m := New("", nil)
+	m := New("", nil, nil)
 	if m.IsPaused() {
 		t.Error("new monitor should not be paused")
 	}
-	m.Pause()
-	if !m.IsPaused() {
-		t.Error("monitor should be paused after Pause()")
+	if !m.PauseDisc() {
+		t.Error("PauseDisc should return true when not already paused")
 	}
-	m.Resume()
+	if !m.IsPaused() {
+		t.Error("monitor should be paused after PauseDisc()")
+	}
+	if m.PauseDisc() {
+		t.Error("PauseDisc should return false when already paused")
+	}
+	if !m.ResumeDisc() {
+		t.Error("ResumeDisc should return true when paused")
+	}
 	if m.IsPaused() {
-		t.Error("monitor should not be paused after Resume()")
+		t.Error("monitor should not be paused after ResumeDisc()")
+	}
+	if m.ResumeDisc() {
+		t.Error("ResumeDisc should return false when not paused")
 	}
 }

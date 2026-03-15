@@ -262,8 +262,8 @@ func (s *Server) handleDiscPause(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "no optical drive configured")
 		return
 	}
-	s.discMonitor.Pause()
-	writeJSON(w, http.StatusOK, map[string]any{"paused": true})
+	changed := s.discMonitor.PauseDisc()
+	writeJSON(w, http.StatusOK, map[string]any{"paused": true, "changed": changed})
 }
 
 func (s *Server) handleDiscResume(w http.ResponseWriter, _ *http.Request) {
@@ -271,8 +271,8 @@ func (s *Server) handleDiscResume(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "no optical drive configured")
 		return
 	}
-	s.discMonitor.Resume()
-	writeJSON(w, http.StatusOK, map[string]any{"resumed": true})
+	changed := s.discMonitor.ResumeDisc()
+	writeJSON(w, http.StatusOK, map[string]any{"resumed": true, "changed": changed})
 }
 
 func (s *Server) handleDiscDetect(w http.ResponseWriter, r *http.Request) {
@@ -280,10 +280,14 @@ func (s *Server) handleDiscDetect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "no optical drive configured")
 		return
 	}
-	event, err := discmonitor.ProbeDisc(r.Context(), s.discMonitor.Device())
+	event, err := s.discMonitor.Detect(r.Context())
 	if err != nil {
-		s.logger.Error("disc probe failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "disc probe failed: "+err.Error())
+		s.logger.Error("disc detect failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "disc detect failed: "+err.Error())
+		return
+	}
+	if event == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "skipped"})
 		return
 	}
 	writeJSON(w, http.StatusOK, event)

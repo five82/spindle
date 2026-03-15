@@ -148,6 +148,33 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		discSource = mapDiscSource(ev.DiscType)
 	}
 
+	// Step 2b: BDInfo (Blu-ray discs only, non-fatal).
+	var bdInfo *BDInfoResult
+	if discSource == "bluray" {
+		var bdErr error
+		bdInfo, bdErr = RunBDInfo(ctx, h.cfg.MakeMKV.OpticalDrive)
+		if bdErr != nil {
+			logger.Warn("bd_info failed",
+				"event_type", "bdinfo_error",
+				"error_hint", bdErr.Error(),
+				"impact", "bd_info metadata unavailable",
+			)
+		} else if bdInfo != nil {
+			logger.Info("bd_info results",
+				"decision_type", "bdinfo_scan",
+				"decision_result", "completed",
+				"decision_reason", fmt.Sprintf("disc_id=%s studio=%s year=%s", bdInfo.DiscID, bdInfo.Studio, bdInfo.Year),
+				"disc_name", bdInfo.DiscName,
+				"volume_id", bdInfo.VolumeIdentifier,
+			)
+		}
+
+		// Apply disc_settle_delay between bd_info and MakeMKV scan.
+		if h.cfg.MakeMKV.DiscSettleDelay > 0 {
+			time.Sleep(time.Duration(h.cfg.MakeMKV.DiscSettleDelay) * time.Second)
+		}
+	}
+
 	// Step 3: MakeMKV scan.
 	discInfo, err := makemkv.Scan(ctx, h.cfg.MakeMKV.OpticalDrive,
 		time.Duration(h.cfg.MakeMKV.InfoTimeout)*time.Second)
@@ -156,7 +183,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 4: Build title priority chain for TMDB query.
-	rawTitle := h.resolveTitle(item, discInfo)
+	rawTitle := h.resolveTitle(item, discInfo, bdInfo)
 	queryTitle := CleanQueryTitle(rawTitle)
 	logger.Info("title resolved for TMDB search",
 		"decision_type", "title_source",
@@ -166,12 +193,17 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	)
 
 	// Step 5: TMDB search.
+	// Use BDInfo year as a hint for better TMDB matching.
+	searchYear := ""
+	if bdInfo != nil && bdInfo.Year != "" {
+		searchYear = bdInfo.Year
+	}
 	results, err := h.tmdbClient.SearchMulti(ctx, queryTitle)
 	if err != nil {
 		return fmt.Errorf("tmdb search: %w", err)
 	}
 
-	best, confidence := tmdb.SelectBestResult(results, queryTitle, "", 5)
+	best, confidence := tmdb.SelectBestResult(results, queryTitle, searchYear, 5)
 	if best == nil {
 		logger.Warn("no TMDB results",
 			"event_type", "tmdb_no_results",
@@ -242,25 +274,30 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-// resolveTitle implements the title priority chain: disc label from item,
-// MakeMKV disc name, KeyDB lookup by fingerprint. Returns the first non-empty
-// value, or "Unknown Disc" as a fallback.
-func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo) string {
-	// Priority 1: disc label from queue item.
-	if item.DiscTitle != "" {
-		return item.DiscTitle
-	}
-
-	// Priority 2: MakeMKV disc name.
-	if discInfo != nil && discInfo.Name != "" {
-		return discInfo.Name
-	}
-
-	// Priority 3: KeyDB lookup by fingerprint.
+// resolveTitle implements the title priority chain: KeyDB -> BDInfo disc name
+// -> queue item label -> MakeMKV disc name -> lsblk label (item.DiscTitle) ->
+// "Unknown Disc". Returns the first non-empty value.
+func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo, bdInfo *BDInfoResult) string {
+	// Priority 1: KeyDB lookup by fingerprint.
 	if h.keydbCat != nil && item.DiscFingerprint != "" {
 		if title := h.keydbCat.Lookup(item.DiscFingerprint); title != "" {
 			return title
 		}
+	}
+
+	// Priority 2: BDInfo disc name.
+	if bdInfo != nil && bdInfo.DiscName != "" {
+		return bdInfo.DiscName
+	}
+
+	// Priority 3: MakeMKV disc name.
+	if discInfo != nil && discInfo.Name != "" {
+		return discInfo.Name
+	}
+
+	// Priority 4: disc label from queue item (lsblk label).
+	if item.DiscTitle != "" {
+		return item.DiscTitle
 	}
 
 	return "Unknown Disc"

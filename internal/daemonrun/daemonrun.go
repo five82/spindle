@@ -97,7 +97,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Create disc monitor (if optical drive configured).
 	var discMon *discmonitor.Monitor
 	if cfg.MakeMKV.OpticalDrive != "" {
-		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, logger)
+		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, logger, store)
 	}
 
 	// Create HTTP API with shutdown channel.

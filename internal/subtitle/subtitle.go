@@ -117,14 +117,56 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
 		)
 
+		// Hallucination filtering.
+		srtContent, readErr := os.ReadFile(result.SRTPath)
+		if readErr != nil {
+			return fmt.Errorf("read SRT %s: %w", key, readErr)
+		}
+		videoDuration := result.Duration
+		filtered, filterErr := filterWhisperXOutput(string(srtContent), videoDuration)
+		if filterErr != nil {
+			return fmt.Errorf("hallucination filter %s: %w", key, filterErr)
+		}
+		if writeErr := os.WriteFile(result.SRTPath, []byte(filtered), 0o644); writeErr != nil {
+			return fmt.Errorf("write filtered SRT %s: %w", key, writeErr)
+		}
+
+		filteredCues := parseSRT(filtered)
+		logger.Info("hallucination filter applied",
+			"decision_type", "hallucination_filter",
+			"decision_result", "filtered",
+			"decision_reason", fmt.Sprintf("original=%d filtered=%d cues", result.Segments, len(filteredCues)),
+			"episode_key", key,
+		)
+
+		// SRT validation.
+		validationIssues, valErr := ValidateSRTContent(result.SRTPath, videoDuration)
+		if valErr != nil {
+			logger.Warn("SRT validation failed",
+				"event_type", "srt_validation_error",
+				"error_hint", valErr.Error(),
+				"impact", "validation skipped",
+			)
+		}
+		for _, issue := range validationIssues {
+			logger.Info("SRT validation issue",
+				"decision_type", "srt_validation",
+				"decision_result", issue,
+				"decision_reason", "automated quality check",
+				"episode_key", key,
+			)
+			item.AppendReviewReason("srt_validation: " + issue + " (" + key + ")")
+		}
+
 		record := ripspec.SubtitleGenRecord{
-			EpisodeKey:   key,
-			Source:       "whisperx",
-			Cached:       result.Cached,
-			SubtitlePath: result.SRTPath,
-			Segments:     result.Segments,
-			DurationSec:  result.Duration,
-			Language:     "en",
+			EpisodeKey:       key,
+			Source:           "whisperx",
+			Cached:           result.Cached,
+			SubtitlePath:     result.SRTPath,
+			Segments:         len(filteredCues),
+			DurationSec:      result.Duration,
+			Language:         "en",
+			ValidationIssues: validationIssues,
 		}
 
 		// Try forced subtitles from OpenSubtitles (if enabled and disc has forced sub track).

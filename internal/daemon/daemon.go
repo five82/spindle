@@ -26,6 +26,7 @@ type Daemon struct {
 	manager     *workflow.Manager
 	api         *httpapi.Server
 	discMonitor *discmonitor.Monitor
+	netlinkMon  *discmonitor.NetlinkMonitor
 	lock        *flock.Flock
 	logger      *slog.Logger
 	cancel      context.CancelFunc
@@ -35,7 +36,7 @@ type Daemon struct {
 
 // New creates a new daemon instance. discMon may be nil if no optical drive is configured.
 func New(cfg *config.Config, store *queue.Store, manager *workflow.Manager, api *httpapi.Server, discMon *discmonitor.Monitor, logger *slog.Logger) *Daemon {
-	return &Daemon{
+	d := &Daemon{
 		cfg:         cfg,
 		store:       store,
 		manager:     manager,
@@ -44,6 +45,42 @@ func New(cfg *config.Config, store *queue.Store, manager *workflow.Manager, api 
 		logger:      logger,
 		shutdownCh:  make(chan struct{}),
 	}
+
+	// Create netlink monitor if optical drive is configured.
+	if discMon != nil {
+		d.netlinkMon = discmonitor.NewNetlinkMonitor(
+			discMon.Device(),
+			func(ctx context.Context, device string) {
+				if err := discmonitor.WaitForReady(ctx, device, logger); err != nil {
+					logger.Warn("drive not ready after netlink event",
+						"event_type", "drive_wait_failed",
+						"error_hint", err.Error(),
+						"impact", "disc detection skipped",
+					)
+					return
+				}
+				event, err := discMon.Detect(ctx)
+				if err != nil {
+					logger.Error("disc detection after netlink event failed",
+						"error", err,
+					)
+					return
+				}
+				if event == nil {
+					return // paused, already processing, or no disc
+				}
+				logger.Info("disc detected via netlink",
+					"event_type", "netlink_disc_detected",
+					"label", event.Label,
+					"disc_type", event.DiscType,
+				)
+			},
+			discMon.IsPaused,
+			logger,
+		)
+	}
+
+	return d
 }
 
 // DiscMonitor returns the disc monitor, or nil if none is configured.
@@ -84,6 +121,17 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.logger.Info("HTTP API listening", "addr", d.cfg.API.Bind)
 	}
 
+	// Start netlink monitor (non-fatal).
+	if d.netlinkMon != nil {
+		if err := d.netlinkMon.Start(ctx); err != nil {
+			d.logger.Warn("netlink monitor not started",
+				"event_type", "netlink_start_failed",
+				"error_hint", err.Error(),
+				"impact", "automatic disc detection unavailable, manual detect via API still works",
+			)
+		}
+	}
+
 	// Start workflow manager.
 	ctx, d.cancel = context.WithCancel(ctx)
 	d.wg.Add(1)
@@ -99,6 +147,11 @@ func (d *Daemon) Start(ctx context.Context) error {
 // Stop gracefully stops the daemon.
 func (d *Daemon) Stop() {
 	d.logger.Info("daemon stopping")
+
+	// Stop netlink monitor.
+	if d.netlinkMon != nil {
+		d.netlinkMon.Stop()
+	}
 
 	// Cancel workflow context.
 	if d.cancel != nil {
