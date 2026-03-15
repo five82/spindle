@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/discidcache"
+	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/makemkv"
@@ -36,6 +38,12 @@ var discMetadataPattern = regexp.MustCompile(
 
 // trailingPunctPattern cleans up trailing punctuation/whitespace left after stripping.
 var trailingPunctPattern = regexp.MustCompile(`[\s:_-]+$`)
+
+// seasonPattern extracts a season number from disc titles (e.g., "S01", "Season 1", "SEASON_1").
+var seasonPattern = regexp.MustCompile(`(?i)(?:s|season[\s_]*)(\d+)`)
+
+// discNumberPattern extracts a disc/volume/part number from disc titles (e.g., "Disc 1", "Volume 3", "Part 1").
+var discNumberPattern = regexp.MustCompile(`(?i)(?:disc|volume|part)[\s_]*(\d+)`)
 
 // editionLLMConfidenceThreshold is the minimum confidence for LLM edition detection.
 const editionLLMConfidenceThreshold = 0.8
@@ -128,14 +136,26 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Step 2: MakeMKV scan.
+	// Step 2: Probe disc source type.
+	discSource := "unknown"
+	if ev, err := discmonitor.ProbeDisc(ctx, h.cfg.MakeMKV.OpticalDrive); err != nil {
+		logger.Warn("disc probe failed, defaulting to unknown",
+			"event_type", "disc_probe_error",
+			"error_hint", err.Error(),
+			"impact", "disc_source will be unknown",
+		)
+	} else {
+		discSource = mapDiscSource(ev.DiscType)
+	}
+
+	// Step 3: MakeMKV scan.
 	discInfo, err := makemkv.Scan(ctx, h.cfg.MakeMKV.OpticalDrive,
 		time.Duration(h.cfg.MakeMKV.InfoTimeout)*time.Second)
 	if err != nil {
 		return fmt.Errorf("makemkv scan: %w", err)
 	}
 
-	// Step 3: Build title priority chain for TMDB query.
+	// Step 4: Build title priority chain for TMDB query.
 	rawTitle := h.resolveTitle(item, discInfo)
 	queryTitle := CleanQueryTitle(rawTitle)
 	logger.Info("title resolved for TMDB search",
@@ -145,7 +165,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"raw_title", rawTitle,
 	)
 
-	// Step 4: TMDB search.
+	// Step 5: TMDB search.
 	results, err := h.tmdbClient.SearchMulti(ctx, queryTitle)
 	if err != nil {
 		return fmt.Errorf("tmdb search: %w", err)
@@ -175,7 +195,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"decision_reason", fmt.Sprintf("confidence=%.2f", confidence),
 	)
 
-	// Step 5: Detect edition (movies only, via regex + optional LLM).
+	// Step 6: Detect edition (movies only, via regex + optional LLM).
 	var edition string
 	mediaType := best.MediaType
 	if mediaType == "" {
@@ -185,13 +205,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		edition = h.detectEdition(ctx, logger, item.DiscTitle, discInfo.Name)
 	}
 
-	// Step 6: Build and persist RipSpec envelope.
-	env := h.buildEnvelope(item, discInfo, best, mediaType, edition, confidence)
+	// Step 7: Build and persist RipSpec envelope.
+	env := h.buildEnvelope(item, discInfo, best, mediaType, edition, confidence, discSource)
 	if err := h.persistEnvelope(ctx, item, &env); err != nil {
 		return err
 	}
 
-	// Step 7: Cache disc ID.
+	// Step 8: Cache disc ID.
 	if h.discIDCache != nil && item.DiscFingerprint != "" {
 		entry := discidcache.Entry{
 			TMDBID:    best.ID,
@@ -208,7 +228,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Step 8: Send notification.
+	// Step 9: Send notification.
 	if h.notifier != nil {
 		_ = h.notifier.Send(ctx, notify.EventIdentificationComplete,
 			"Identification Complete",
@@ -257,6 +277,44 @@ func CleanQueryTitle(title string) string {
 		return title // don't return empty; fall back to original
 	}
 	return cleaned
+}
+
+// extractSeasonNumber returns the first season number found in any of the
+// provided sources, or 0 if none match.
+func extractSeasonNumber(sources ...string) int {
+	for _, s := range sources {
+		if m := seasonPattern.FindStringSubmatch(s); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// extractDiscNumber returns the first disc/volume/part number found in any of
+// the provided sources, or 0 if none match.
+func extractDiscNumber(sources ...string) int {
+	for _, s := range sources {
+		if m := discNumberPattern.FindStringSubmatch(s); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// mapDiscSource converts a discmonitor disc type string to a ripspec disc_source value.
+func mapDiscSource(discType string) string {
+	switch discType {
+	case "Blu-ray":
+		return "bluray"
+	case "DVD":
+		return "dvd"
+	default:
+		return "unknown"
+	}
 }
 
 // detectEdition checks for edition markers in disc title and disc name.
@@ -309,21 +367,33 @@ func (h *Handler) buildEnvelope(
 	best *tmdb.SearchResult,
 	mediaType, edition string,
 	confidence float64,
+	discSource string,
 ) ripspec.Envelope {
+	// Extract season and disc numbers from disc title / MakeMKV disc name.
+	var discName string
+	if discInfo != nil {
+		discName = discInfo.Name
+	}
+	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
+	discNum := extractDiscNumber(item.DiscTitle, discName)
+
 	env := ripspec.Envelope{
 		Version:     ripspec.CurrentVersion,
 		Fingerprint: item.DiscFingerprint,
 		Metadata: ripspec.Metadata{
-			ID:          best.ID,
-			Title:       best.DisplayTitle(),
-			Overview:    best.Overview,
-			MediaType:   mediaType,
-			Year:        best.Year(),
-			ReleaseDate: best.ReleaseDate,
-			VoteAverage: best.VoteAverage,
-			VoteCount:   best.VoteCount,
-			Movie:       mediaType == "movie",
-			Edition:     edition,
+			ID:           best.ID,
+			Title:        best.DisplayTitle(),
+			Overview:     best.Overview,
+			MediaType:    mediaType,
+			Year:         best.Year(),
+			ReleaseDate:  best.ReleaseDate,
+			VoteAverage:  best.VoteAverage,
+			VoteCount:    best.VoteCount,
+			Movie:        mediaType == "movie",
+			Edition:      edition,
+			SeasonNumber: seasonNum,
+			DiscNumber:   discNum,
+			DiscSource:   discSource,
 		},
 	}
 
@@ -349,7 +419,36 @@ func (h *Handler) buildEnvelope(
 		}
 	}
 
+	// For TV content, create episode placeholders from eligible titles.
+	if mediaType == "tv" {
+		h.createEpisodePlaceholders(&env)
+	}
+
 	return env
+}
+
+// createEpisodePlaceholders adds episode entries for each title that meets the
+// minimum title length threshold. Each episode gets a placeholder key (e.g.,
+// "s01_001") and is linked to the title's ID for downstream ripping.
+func (h *Handler) createEpisodePlaceholders(env *ripspec.Envelope) {
+	season := env.Metadata.SeasonNumber
+	if season <= 0 {
+		season = 1
+	}
+
+	idx := 0
+	for _, title := range env.Titles {
+		if title.Duration < h.cfg.MakeMKV.MinTitleLength {
+			continue
+		}
+		idx++
+		env.Episodes = append(env.Episodes, ripspec.Episode{
+			Key:            ripspec.PlaceholderKey(season, idx),
+			TitleID:        title.ID,
+			Season:         season,
+			RuntimeSeconds: title.Duration,
+		})
+	}
 }
 
 // buildEnvelopeFromCache constructs a minimal envelope from a disc ID cache entry.
@@ -378,12 +477,22 @@ func (h *Handler) buildFallbackEnvelope(item *queue.Item, discInfo *makemkv.Disc
 		title = "Unknown Disc"
 	}
 
+	// Extract season/disc numbers even for fallback — they indicate TV content.
+	var discName string
+	if discInfo != nil {
+		discName = discInfo.Name
+	}
+	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
+	discNum := extractDiscNumber(item.DiscTitle, discName)
+
 	env := ripspec.Envelope{
 		Version:     ripspec.CurrentVersion,
 		Fingerprint: item.DiscFingerprint,
 		Metadata: ripspec.Metadata{
-			Title:     title,
-			MediaType: "unknown",
+			Title:        title,
+			MediaType:    "unknown",
+			SeasonNumber: seasonNum,
+			DiscNumber:   discNum,
 		},
 	}
 
@@ -401,6 +510,11 @@ func (h *Handler) buildFallbackEnvelope(item *queue.Item, discInfo *makemkv.Disc
 		}
 	}
 
+	// If season number was extracted, this is likely TV — create episode placeholders.
+	if seasonNum > 0 {
+		h.createEpisodePlaceholders(&env)
+	}
+
 	return env
 }
 
@@ -408,13 +522,14 @@ func (h *Handler) buildFallbackEnvelope(item *queue.Item, discInfo *makemkv.Disc
 func (h *Handler) persistEnvelope(ctx context.Context, item *queue.Item, env *ripspec.Envelope) error {
 	// Update metadata_json on the item.
 	meta := queue.Metadata{
-		ID:        env.Metadata.ID,
-		Title:     env.Metadata.Title,
-		MediaType: env.Metadata.MediaType,
-		ShowTitle: env.Metadata.ShowTitle,
-		Year:      env.Metadata.Year,
-		Movie:     env.Metadata.Movie,
-		Edition:   env.Metadata.Edition,
+		ID:           env.Metadata.ID,
+		Title:        env.Metadata.Title,
+		MediaType:    env.Metadata.MediaType,
+		ShowTitle:    env.Metadata.ShowTitle,
+		Year:         env.Metadata.Year,
+		SeasonNumber: env.Metadata.SeasonNumber,
+		Movie:        env.Metadata.Movie,
+		Edition:      env.Metadata.Edition,
 	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {

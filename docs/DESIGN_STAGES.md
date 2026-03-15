@@ -193,8 +193,8 @@ After identification:
 1. Build title specs from MakeMKV scan results (filtered by `min_title_length`).
 2. For TV: create episode specs with placeholder keys (e.g., `s01_001`).
 3. Set metadata fields from TMDB response.
-4. Set `metadata.disc_source` (`4k_bluray`, `bluray`, `dvd`, `unknown` --
-   determined from disc detection and bd_info results).
+4. Set `metadata.disc_source` (`bluray`, `dvd`, `unknown` --
+   determined from disc detection via lsblk probe).
 5. Set attributes: forced subtitle track detection.
 6. Store serialized envelope in `rip_spec_data`.
 

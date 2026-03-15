@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/queue"
@@ -300,7 +301,7 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 		VoteCount:   1000,
 	}
 
-	env := h.buildEnvelope(item, discInfo, best, "movie", "Extended Edition", 0.85)
+	env := h.buildEnvelope(item, discInfo, best, "movie", "Extended Edition", 0.85, "bluray")
 
 	if env.Version != ripspec.CurrentVersion {
 		t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -362,7 +363,7 @@ func TestBuildEnvelope_TV(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(item, discInfo, best, "tv", "", 0.90)
+	env := h.buildEnvelope(item, discInfo, best, "tv", "", 0.90, "bluray")
 
 	if env.Metadata.MediaType != "tv" {
 		t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -454,4 +455,157 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 			t.Errorf("Titles[0].Duration = %d, want 3600", env.Titles[0].Duration)
 		}
 	})
+
+	t.Run("extracts season number and creates episodes", func(t *testing.T) {
+		h := &Handler{cfg: &config.Config{}}
+		h.cfg.MakeMKV.MinTitleLength = 120
+		item := &queue.Item{DiscTitle: "Breaking Bad Season 2"}
+		discInfo := &makemkv.DiscInfo{
+			Titles: []makemkv.TitleInfo{
+				{ID: 0, Name: "Title 1", Duration: 45 * time.Minute},
+				{ID: 1, Name: "Title 2", Duration: 30 * time.Second}, // too short
+				{ID: 2, Name: "Title 3", Duration: 50 * time.Minute},
+			},
+		}
+		env := h.buildFallbackEnvelope(item, discInfo)
+		if env.Metadata.SeasonNumber != 2 {
+			t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)
+		}
+		if len(env.Episodes) != 2 {
+			t.Fatalf("len(Episodes) = %d, want 2", len(env.Episodes))
+		}
+		if env.Episodes[0].Key != "s02_001" {
+			t.Errorf("Episodes[0].Key = %q, want %q", env.Episodes[0].Key, "s02_001")
+		}
+		if env.Episodes[0].TitleID != 0 {
+			t.Errorf("Episodes[0].TitleID = %d, want 0", env.Episodes[0].TitleID)
+		}
+		if env.Episodes[1].Key != "s02_002" {
+			t.Errorf("Episodes[1].Key = %q, want %q", env.Episodes[1].Key, "s02_002")
+		}
+		if env.Episodes[1].TitleID != 2 {
+			t.Errorf("Episodes[1].TitleID = %d, want 2", env.Episodes[1].TitleID)
+		}
+	})
+}
+
+func TestExtractSeasonNumber(t *testing.T) {
+	tests := []struct {
+		name    string
+		sources []string
+		want    int
+	}{
+		{"S01", []string{"BREAKING_BAD_S01"}, 1},
+		{"Season 2", []string{"Breaking Bad Season 2"}, 2},
+		{"SEASON_3", []string{"SHOW_SEASON_3"}, 3},
+		{"case insensitive", []string{"show_s04_disc_1"}, 4},
+		{"first source wins", []string{"S01", "S02"}, 1},
+		{"second source if first empty", []string{"NO_MATCH", "Season 5"}, 5},
+		{"no match", []string{"THE_MATRIX"}, 0},
+		{"empty", []string{""}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractSeasonNumber(tt.sources...)
+			if got != tt.want {
+				t.Errorf("extractSeasonNumber(%v) = %d, want %d", tt.sources, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractDiscNumber(t *testing.T) {
+	tests := []struct {
+		name    string
+		sources []string
+		want    int
+	}{
+		{"Disc 1", []string{"Batman Disc 1"}, 1},
+		{"DISC_2", []string{"SHOW_DISC_2"}, 2},
+		{"Volume 3", []string{"Kill Bill Volume 3"}, 3},
+		{"Part 1", []string{"Harry Potter Part 1"}, 1},
+		{"no match", []string{"THE_MATRIX"}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractDiscNumber(tt.sources...)
+			if got != tt.want {
+				t.Errorf("extractDiscNumber(%v) = %d, want %d", tt.sources, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMapDiscSource(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Blu-ray", "bluray"},
+		{"DVD", "dvd"},
+		{"Unknown", "unknown"},
+		{"", "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := mapDiscSource(tt.input)
+			if got != tt.want {
+				t.Errorf("mapDiscSource(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}}
+	h.cfg.MakeMKV.MinTitleLength = 120
+	item := &queue.Item{
+		DiscFingerprint: "tv123",
+		DiscTitle:       "Show S02 Disc 1",
+	}
+	discInfo := &makemkv.DiscInfo{
+		Name: "Show Disc",
+		Titles: []makemkv.TitleInfo{
+			{ID: 0, Name: "Ep 1", Duration: 45 * time.Minute},
+			{ID: 1, Name: "Short", Duration: 10 * time.Second},
+			{ID: 2, Name: "Ep 2", Duration: 42 * time.Minute},
+			{ID: 3, Name: "Ep 3", Duration: 48 * time.Minute},
+		},
+	}
+	best := &tmdb.SearchResult{
+		ID:           999,
+		Name:         "Test Show",
+		FirstAirDate: "2023-06-01",
+		VoteAverage:  8.0,
+		VoteCount:    500,
+	}
+
+	env := h.buildEnvelope(item, discInfo, best, "tv", "", 0.90, "bluray")
+
+	if env.Metadata.SeasonNumber != 2 {
+		t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)
+	}
+	if env.Metadata.DiscNumber != 1 {
+		t.Errorf("DiscNumber = %d, want 1", env.Metadata.DiscNumber)
+	}
+	if env.Metadata.DiscSource != "bluray" {
+		t.Errorf("DiscSource = %q, want %q", env.Metadata.DiscSource, "bluray")
+	}
+	if len(env.Episodes) != 3 {
+		t.Fatalf("len(Episodes) = %d, want 3", len(env.Episodes))
+	}
+	// Episodes should reference title IDs 0, 2, 3 (skipping short title 1).
+	wantTitleIDs := []int{0, 2, 3}
+	wantKeys := []string{"s02_001", "s02_002", "s02_003"}
+	for i, ep := range env.Episodes {
+		if ep.TitleID != wantTitleIDs[i] {
+			t.Errorf("Episodes[%d].TitleID = %d, want %d", i, ep.TitleID, wantTitleIDs[i])
+		}
+		if ep.Key != wantKeys[i] {
+			t.Errorf("Episodes[%d].Key = %q, want %q", i, ep.Key, wantKeys[i])
+		}
+		if ep.Season != 2 {
+			t.Errorf("Episodes[%d].Season = %d, want 2", i, ep.Season)
+		}
+	}
 }
