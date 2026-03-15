@@ -63,8 +63,6 @@ type EpisodeResponse struct {
 	EncodedPath               string            `json:"encodedPath,omitempty"`
 	SubtitledPath             string            `json:"subtitledPath,omitempty"`
 	FinalPath                 string            `json:"finalPath,omitempty"`
-	SubtitleSource            string            `json:"subtitleSource,omitempty"`
-	SubtitleLanguage          string            `json:"subtitleLanguage,omitempty"`
 	GeneratedSubtitleSource   string            `json:"generatedSubtitleSource,omitempty"`
 	GeneratedSubtitleLanguage string            `json:"generatedSubtitleLanguage,omitempty"`
 	GeneratedSubtitleDecision string            `json:"generatedSubtitleDecision,omitempty"`
@@ -166,22 +164,21 @@ func toItemResponse(item *queue.Item) ItemResponse {
 	// Parse RipSpec to compute derived fields
 	if item.RipSpecData != "" {
 		resp.RipSpec = json.RawMessage(item.RipSpecData)
-		populateRipSpecDerived(&resp, item)
+		env, err := ripspec.Parse(item.RipSpecData)
+		if err == nil {
+			populateRipSpecDerived(&resp, &env, item)
+		}
 	}
 
 	return resp
 }
 
-// populateRipSpecDerived parses the RipSpec envelope and computes
-// episodes, totals, subtitle generation, audio description, etc.
-func populateRipSpecDerived(resp *ItemResponse, item *queue.Item) {
-	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil {
-		return
-	}
+// populateRipSpecDerived computes episodes, totals, subtitle generation,
+// audio description, etc. from a pre-parsed envelope.
+func populateRipSpecDerived(resp *ItemResponse, env *ripspec.Envelope, item *queue.Item) {
 
 	// Episodes
-	resp.Episodes = buildEpisodes(&env, item)
+	resp.Episodes = buildEpisodes(env, item)
 
 	// Episode totals
 	expected, ripped, encoded, final := env.AssetCounts()
@@ -193,11 +190,7 @@ func populateRipSpecDerived(resp *ItemResponse, item *queue.Item) {
 	}
 
 	// Episode identified count
-	for _, ep := range env.Episodes {
-		if ep.Key != "" && strings.Contains(ep.Key, "e") {
-			resp.EpisodeIdentifiedCount++
-		}
-	}
+	resp.EpisodeIdentifiedCount = len(env.Episodes) - ripspec.CountUnresolvedEpisodes(env.Episodes)
 
 	// Subtitle generation
 	if results := env.Attributes.SubtitleGenerationResults; len(results) > 0 {
@@ -237,6 +230,12 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 		titleByID[t.ID] = t
 	}
 
+	// Index subtitle generation results for O(1) lookup per episode.
+	subtitleByKey := make(map[string]ripspec.SubtitleGenRecord, len(env.Attributes.SubtitleGenerationResults))
+	for _, rec := range env.Attributes.SubtitleGenerationResults {
+		subtitleByKey[strings.ToLower(rec.EpisodeKey)] = rec
+	}
+
 	episodes := make([]EpisodeResponse, 0, len(env.Episodes))
 	for _, ep := range env.Episodes {
 		resp := EpisodeResponse{
@@ -274,26 +273,32 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 			resp.RippedPath = a.Path
 			resp.Stage = "ripped"
 		}
-		if a, ok := env.Assets.FindAsset("encoded", ep.Key); ok && a.IsCompleted() {
-			resp.EncodedPath = a.Path
-			resp.Stage = "encoded"
-		} else if a, ok := env.Assets.FindAsset("encoded", ep.Key); ok && a.IsFailed() {
-			resp.Status = "failed"
-			resp.ErrorMessage = a.ErrorMsg
+		if a, ok := env.Assets.FindAsset("encoded", ep.Key); ok {
+			if a.IsCompleted() {
+				resp.EncodedPath = a.Path
+				resp.Stage = "encoded"
+			} else if a.IsFailed() {
+				resp.Status = "failed"
+				resp.ErrorMessage = a.ErrorMsg
+			}
 		}
-		if a, ok := env.Assets.FindAsset("subtitled", ep.Key); ok && a.IsCompleted() {
-			resp.SubtitledPath = a.Path
-			resp.Stage = "subtitled"
-		} else if a, ok := env.Assets.FindAsset("subtitled", ep.Key); ok && a.IsFailed() {
-			resp.Status = "failed"
-			resp.ErrorMessage = a.ErrorMsg
+		if a, ok := env.Assets.FindAsset("subtitled", ep.Key); ok {
+			if a.IsCompleted() {
+				resp.SubtitledPath = a.Path
+				resp.Stage = "subtitled"
+			} else if a.IsFailed() {
+				resp.Status = "failed"
+				resp.ErrorMessage = a.ErrorMsg
+			}
 		}
-		if a, ok := env.Assets.FindAsset("final", ep.Key); ok && a.IsCompleted() {
-			resp.FinalPath = a.Path
-			resp.Stage = "final"
-		} else if a, ok := env.Assets.FindAsset("final", ep.Key); ok && a.IsFailed() {
-			resp.Status = "failed"
-			resp.ErrorMessage = a.ErrorMsg
+		if a, ok := env.Assets.FindAsset("final", ep.Key); ok {
+			if a.IsCompleted() {
+				resp.FinalPath = a.Path
+				resp.Stage = "final"
+			} else if a.IsFailed() {
+				resp.Status = "failed"
+				resp.ErrorMessage = a.ErrorMsg
+			}
 		}
 
 		// Active episode
@@ -302,13 +307,10 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 		}
 
 		// Subtitle generation info per episode
-		for _, rec := range env.Attributes.SubtitleGenerationResults {
-			if strings.EqualFold(rec.EpisodeKey, ep.Key) {
-				resp.GeneratedSubtitleSource = rec.Source
-				resp.GeneratedSubtitleLanguage = rec.Language
-				resp.GeneratedSubtitleDecision = rec.OpenSubtitlesDecision
-				break
-			}
+		if rec, ok := subtitleByKey[strings.ToLower(ep.Key)]; ok {
+			resp.GeneratedSubtitleSource = rec.Source
+			resp.GeneratedSubtitleLanguage = rec.Language
+			resp.GeneratedSubtitleDecision = rec.OpenSubtitlesDecision
 		}
 
 		episodes = append(episodes, resp)
