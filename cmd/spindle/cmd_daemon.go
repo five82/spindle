@@ -110,18 +110,14 @@ func newStatusCmd() *cobra.Command {
 			}
 			statuses := deps.CheckBinaries(reqs)
 			for _, s := range statuses {
-				if s.Available {
-					if flagVerbose {
-						fmt.Printf("  %-12s %s %s\n", s.Name, successStyle("[OK]"), s.Detail)
-					} else {
-						fmt.Printf("  %-12s %s\n", s.Name, successStyle("[OK]"))
-					}
+				mark := successStyle("[OK]")
+				if !s.Available {
+					mark = failStyle("[MISSING]")
+				}
+				if flagVerbose {
+					fmt.Printf("  %-12s %s %s\n", s.Name, mark, s.Detail)
 				} else {
-					if flagVerbose {
-						fmt.Printf("  %-12s %s %s\n", s.Name, failStyle("[MISSING]"), s.Detail)
-					} else {
-						fmt.Printf("  %-12s %s\n", s.Name, failStyle("[MISSING]"))
-					}
+					fmt.Printf("  %-12s %s\n", s.Name, mark)
 				}
 			}
 
