@@ -33,6 +33,7 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 
 **Architectural churn is embraced.** Optimize for clarity, not backwards compatibility.
 
+- Use proper spec driven development methodology. The codebase must follow the spec docs. You can propose updates to the spec but do not make spec doc changes without approval.
 - Break things forward. Remove deprecated paths; no compatibility shims.
 - Prefer maintainable architecture and explicit logging over clever tricks.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
