@@ -12,7 +12,7 @@ func TestAssetKeys_Movie(t *testing.T) {
 		Metadata: ripspec.Metadata{MediaType: "movie"},
 	}
 
-	keys := assetKeys(env)
+	keys := env.AssetKeys()
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 key, got %d", len(keys))
 	}
@@ -31,7 +31,7 @@ func TestAssetKeys_TV(t *testing.T) {
 		},
 	}
 
-	keys := assetKeys(env)
+	keys := env.AssetKeys()
 	if len(keys) != 3 {
 		t.Fatalf("expected 3 keys, got %d", len(keys))
 	}
@@ -48,7 +48,7 @@ func TestAssetKeys_TVNoEpisodes(t *testing.T) {
 		Metadata: ripspec.Metadata{MediaType: "tv"},
 	}
 
-	keys := assetKeys(env)
+	keys := env.AssetKeys()
 	if len(keys) != 0 {
 		t.Fatalf("expected 0 keys, got %d", len(keys))
 	}

@@ -3,18 +3,16 @@ package audioanalysis
 import (
 	"testing"
 
-	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
 func TestAssetKeys_Movie(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}}
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "movie"},
 	}
 
-	keys := h.assetKeys(env)
+	keys := env.AssetKeys()
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 key, got %d", len(keys))
 	}
@@ -24,7 +22,6 @@ func TestAssetKeys_Movie(t *testing.T) {
 }
 
 func TestAssetKeys_TV(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}}
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "tv"},
 		Episodes: []ripspec.Episode{
@@ -34,7 +31,7 @@ func TestAssetKeys_TV(t *testing.T) {
 		},
 	}
 
-	keys := h.assetKeys(env)
+	keys := env.AssetKeys()
 	if len(keys) != 3 {
 		t.Fatalf("expected 3 keys, got %d", len(keys))
 	}
@@ -47,7 +44,6 @@ func TestAssetKeys_TV(t *testing.T) {
 }
 
 func TestAssetKeys_TV_SkipsEmptyKeys(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}}
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "tv"},
 		Episodes: []ripspec.Episode{
@@ -57,7 +53,7 @@ func TestAssetKeys_TV_SkipsEmptyKeys(t *testing.T) {
 		},
 	}
 
-	keys := h.assetKeys(env)
+	keys := env.AssetKeys()
 	if len(keys) != 2 {
 		t.Fatalf("expected 2 keys (skipping empty), got %d", len(keys))
 	}
@@ -78,7 +74,7 @@ func TestBuildCommentaryUserPrompt_WithTitle(t *testing.T) {
 	stream := ffprobe.Stream{
 		Tags: map[string]string{"title": "Director Commentary"},
 	}
-	prompt := buildCommentaryUserPrompt(false, stream, "Some transcript text here.")
+	prompt := buildCommentaryUserPrompt(stream, "Some transcript text here.")
 
 	if !contains(prompt, "Title: Director Commentary") {
 		t.Errorf("expected title in prompt, got:\n%s", prompt)
@@ -92,7 +88,7 @@ func TestBuildCommentaryUserPrompt_NoTitle(t *testing.T) {
 	stream := ffprobe.Stream{
 		Tags: map[string]string{},
 	}
-	prompt := buildCommentaryUserPrompt(false, stream, "Transcript.")
+	prompt := buildCommentaryUserPrompt(stream, "Transcript.")
 
 	if contains(prompt, "Title:") {
 		t.Errorf("expected no title line, got:\n%s", prompt)
@@ -109,7 +105,7 @@ func TestBuildCommentaryUserPrompt_Truncation(t *testing.T) {
 	}
 
 	stream := ffprobe.Stream{Tags: map[string]string{}}
-	prompt := buildCommentaryUserPrompt(false, stream, string(long))
+	prompt := buildCommentaryUserPrompt(stream, string(long))
 
 	if !contains(prompt, "[truncated]") {
 		t.Error("expected truncation marker in prompt")

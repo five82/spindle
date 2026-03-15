@@ -90,9 +90,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Collect ripped asset paths for audio refinement.
-	rippedKeys := h.assetKeys(&env)
+	keys := env.AssetKeys()
 	var rippedPaths []string
-	for _, key := range rippedKeys {
+	for _, key := range keys {
 		asset, ok := env.Assets.FindAsset("ripped", key)
 		if ok && asset.IsCompleted() {
 			rippedPaths = append(rippedPaths, asset.Path)
@@ -114,7 +114,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	for _, key := range h.assetKeys(&env) {
+	for _, key := range keys {
 		asset, ok := env.Assets.FindAsset("encoded", key)
 		if !ok || !asset.IsCompleted() {
 			continue
@@ -181,20 +181,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	logger.Info("audio analysis stage completed", "event_type", "stage_complete")
 	return nil
-}
-
-// assetKeys returns the episode keys for TV content, or ["main"] for movies.
-func (h *Handler) assetKeys(env *ripspec.Envelope) []string {
-	if env.Metadata.MediaType == "movie" {
-		return []string{"main"}
-	}
-	keys := make([]string, 0, len(env.Episodes))
-	for _, ep := range env.Episodes {
-		if ep.Key != "" {
-			keys = append(keys, ep.Key)
-		}
-	}
-	return keys
 }
 
 // detectCommentary examines non-primary audio tracks for commentary content.
@@ -385,11 +371,7 @@ func (h *Handler) classifyTrack(
 	}
 
 	// Build user prompt.
-	userPrompt := buildCommentaryUserPrompt(
-		h.cfg.Subtitles.Enabled, // unused but kept for signature stability
-		stream,
-		string(transcript),
-	)
+	userPrompt := buildCommentaryUserPrompt(stream, string(transcript))
 
 	var resp commentaryLLMResponse
 	if err := h.llmClient.CompleteJSON(ctx, commentarySystemPrompt, userPrompt, &resp); err != nil {
@@ -434,7 +416,7 @@ func (h *Handler) classifyTrack(
 
 // buildCommentaryUserPrompt constructs the user prompt for commentary LLM
 // classification from the stream metadata and transcript text.
-func buildCommentaryUserPrompt(_ bool, stream ffprobe.Stream, transcript string) string {
+func buildCommentaryUserPrompt(stream ffprobe.Stream, transcript string) string {
 	title := strings.TrimSpace(stream.Tags["title"])
 
 	// Truncate transcript if needed.

@@ -65,7 +65,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Determine source stage: prefer "subtitled", fall back to "encoded".
 	sourceStage := "subtitled"
-	keys := assetKeys(&env)
+	keys := env.AssetKeys()
 	if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
 		sourceStage = "encoded"
 	}
@@ -155,18 +155,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-// assetKeys returns the episode keys to organize. Movies use ["main"];
-// TV uses the key from each episode in the envelope.
-func assetKeys(env *ripspec.Envelope) []string {
-	if env.Metadata.MediaType == "movie" {
-		return []string{"main"}
-	}
-	keys := make([]string, 0, len(env.Episodes))
-	for _, ep := range env.Episodes {
-		keys = append(keys, ep.Key)
-	}
-	return keys
-}
 
 // destFilename builds the destination filename for a given asset key.
 // Movies: "{GetFilename()}{ext}". TV: per-episode filename built from
@@ -243,7 +231,7 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 
 	// Determine source stage.
 	sourceStage := "subtitled"
-	keys := assetKeys(env)
+	keys := env.AssetKeys()
 	if len(keys) > 0 {
 		if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
 			sourceStage = "encoded"

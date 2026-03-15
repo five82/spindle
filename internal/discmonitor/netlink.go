@@ -92,6 +92,10 @@ func (n *NetlinkMonitor) monitorLoop(ctx context.Context, fd int) {
 		expectedDev = n.device[idx+1:]
 	}
 
+	// Set read timeout to avoid blocking forever on Recvfrom.
+	_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
+		&unix.Timeval{Sec: 1})
+
 	for {
 		select {
 		case <-n.quit:
@@ -100,10 +104,6 @@ func (n *NetlinkMonitor) monitorLoop(ctx context.Context, fd int) {
 			return
 		default:
 		}
-
-		// Set read deadline to avoid blocking forever.
-		_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
-			&unix.Timeval{Sec: 1})
 
 		nr, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {

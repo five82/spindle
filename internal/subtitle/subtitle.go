@@ -63,7 +63,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	keys := assetKeys(&env)
+	keys := env.AssetKeys()
 	var records []ripspec.SubtitleGenRecord
 
 	for i, key := range keys {
@@ -211,21 +211,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	logger.Info("subtitle stage completed", "event_type", "stage_complete")
 	return nil
-}
-
-// assetKeys returns the episode keys to process. For movies, it returns
-// ["main"]. For TV content, it returns each episode's key.
-func assetKeys(env *ripspec.Envelope) []string {
-	if env.Metadata.MediaType == "movie" {
-		return []string{"main"}
-	}
-	keys := make([]string, 0, len(env.Episodes))
-	for _, ep := range env.Episodes {
-		if ep.Key != "" {
-			keys = append(keys, ep.Key)
-		}
-	}
-	return keys
 }
 
 // tryForcedSubs searches OpenSubtitles for forced subtitle tracks and

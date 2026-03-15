@@ -176,6 +176,21 @@ func (e *Envelope) Encode() (string, error) {
 	return string(data), nil
 }
 
+// AssetKeys returns the episode keys for pipeline stages. Movies return
+// ["main"]; TV returns each episode's non-empty key.
+func (e *Envelope) AssetKeys() []string {
+	if e.Metadata.MediaType == "movie" {
+		return []string{"main"}
+	}
+	keys := make([]string, 0, len(e.Episodes))
+	for _, ep := range e.Episodes {
+		if ep.Key != "" {
+			keys = append(keys, ep.Key)
+		}
+	}
+	return keys
+}
+
 // EpisodeByKey returns a pointer to the episode with the given key
 // (case-insensitive). Returns nil if not found.
 func (e *Envelope) EpisodeByKey(key string) *Episode {
