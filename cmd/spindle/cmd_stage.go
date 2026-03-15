@@ -303,7 +303,11 @@ func newGensubtitleCmd() *cobra.Command {
 				}
 				fmt.Printf("Saved sidecar: %s\n", destPath)
 			} else {
-				fmt.Print("Muxing subtitle into MKV...")
+				if mkvHasSubtitleTrack(ctx, file) {
+					fmt.Print("Replacing existing subtitle track...")
+				} else {
+					fmt.Print("Muxing subtitle into MKV...")
+				}
 
 				// Mux into MKV, replacing the original file.
 				// --no-subtitles strips any existing subtitle tracks before adding the new one.
@@ -350,6 +354,22 @@ func formatPhaseDuration(d time.Duration) string {
 // formatContentDuration formats a duration in seconds as "1h38m12s".
 func formatContentDuration(secs float64) string {
 	return time.Duration(secs * float64(time.Second)).Truncate(time.Second).String()
+}
+
+// mkvHasSubtitleTrack returns true if the MKV file contains at least one
+// subtitle track, using mkvmerge --identify.
+func mkvHasSubtitleTrack(ctx context.Context, path string) bool {
+	cmd := exec.CommandContext(ctx, "mkvmerge", "--identify", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "Track ID") && strings.Contains(line, "subtitles") {
+			return true
+		}
+	}
+	return false
 }
 
 func newTestNotifyCmd() *cobra.Command {

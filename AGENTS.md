@@ -39,6 +39,7 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 - Keep edits ASCII unless the file already uses extended characters.
 - When troubleshooting, gather evidence and test. Do not blindly guess.
 - Observability is key. We can not understand what is happening if we can not see it.
+- Simplification must not remove user-visible functionality. Eliminating a subprocess or code path that produces distinct output (log messages, CLI feedback, status indicators) is a behavior change, not a simplification.
 - When examining reference code, do not just copy and paste. Understand why it works in the reference implementation, think, and design a solution that works best for this codebase.
 
 ## Drapto Dependency Workflow
