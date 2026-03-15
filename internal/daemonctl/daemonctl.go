@@ -3,7 +3,6 @@
 package daemonctl
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/five82/spindle/internal/sockhttp"
 )
 
 // ErrDaemonNotRunning is returned when the daemon is not running.
@@ -84,15 +85,24 @@ func Start(opts StartOptions) error {
 		return fmt.Errorf("start daemon: %w", err)
 	}
 
-	// Detach: we don't wait for the child.
+	// Wait for the child in the background; signal if it exits early.
+	exited := make(chan error, 1)
 	go func() {
-		_ = cmd.Wait()
+		exited <- cmd.Wait()
 		_ = logFile.Close()
 	}()
 
 	// Poll for readiness (10s timeout, 500ms intervals).
 	for range 20 {
 		time.Sleep(500 * time.Millisecond)
+		select {
+		case err := <-exited:
+			if err != nil {
+				return fmt.Errorf("daemon exited during startup: %w", err)
+			}
+			return fmt.Errorf("daemon exited during startup")
+		default:
+		}
 		if IsRunning(opts.LockPath, opts.SocketPath) {
 			return nil
 		}
@@ -115,23 +125,13 @@ func Stop(opts StopOptions) error {
 	}
 
 	// Send POST /api/daemon/stop via Unix socket.
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "unix", opts.SocketPath)
-			},
-		},
-	}
+	client := sockhttp.NewUnixClient(opts.SocketPath, 5*time.Second)
 
 	req, err := http.NewRequest(http.MethodPost, "http://localhost/api/daemon/stop", nil)
 	if err != nil {
 		return fmt.Errorf("create stop request: %w", err)
 	}
-	if opts.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+opts.Token)
-	}
+	sockhttp.SetAuth(req, opts.Token)
 
 	resp, err := client.Do(req)
 	if err != nil {

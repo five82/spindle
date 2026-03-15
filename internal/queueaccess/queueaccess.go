@@ -1,15 +1,14 @@
 package queueaccess
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/sockhttp"
 )
 
 // Access provides read-only queue access.
@@ -45,15 +44,7 @@ func NewHTTPAccess(socketPath, token string) *HTTPAccess {
 	return &HTTPAccess{
 		socketPath: socketPath,
 		token:      token,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					var d net.Dialer
-					return d.DialContext(ctx, "unix", socketPath)
-				},
-			},
-		},
+		client:     sockhttp.NewUnixClient(socketPath, 10*time.Second),
 	}
 }
 
@@ -93,9 +84,7 @@ func (a *HTTPAccess) getJSON(path string, dest any) error {
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	if a.token != "" {
-		req.Header.Set("Authorization", "Bearer "+a.token)
-	}
+	sockhttp.SetAuth(req, a.token)
 
 	resp, err := a.client.Do(req)
 	if err != nil {

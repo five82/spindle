@@ -1,17 +1,16 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/five82/spindle/internal/daemonctl"
+	"github.com/five82/spindle/internal/sockhttp"
 )
 
 func newDiscCmd() *cobra.Command {
@@ -83,22 +82,14 @@ func daemonDiscPost(path string) (string, error) {
 		return "", fmt.Errorf("daemon is not running")
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "unix", sp)
-			},
-		},
-	}
+	client := sockhttp.NewUnixClient(sp, 10*time.Second)
 
 	req, err := http.NewRequest(http.MethodPost, "http://localhost"+path, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
-	if cfg != nil && cfg.API.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.API.Token)
+	if cfg != nil {
+		sockhttp.SetAuth(req, cfg.API.Token)
 	}
 
 	resp, err := client.Do(req)

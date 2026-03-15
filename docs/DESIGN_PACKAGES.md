@@ -64,6 +64,7 @@ internal/
   deps/                 Dependency checking (binary resolution, requirements)
 
   httpapi/              HTTP API server, route registration, middleware
+  sockhttp/             Unix socket HTTP client helpers (shared by daemonctl, queueaccess, CLI)
   queueaccess/          Queue access abstraction (HTTP client + direct store)
   logs/                 Log file tailing
   auditgather/          Audit artifact collection and analysis
