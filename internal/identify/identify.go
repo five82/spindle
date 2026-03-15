@@ -279,11 +279,11 @@ func CleanQueryTitle(title string) string {
 	return cleaned
 }
 
-// extractSeasonNumber returns the first season number found in any of the
-// provided sources, or 0 if none match.
-func extractSeasonNumber(sources ...string) int {
+// extractFirstIntMatch returns the first integer captured by pattern across
+// the provided sources, or 0 if none match.
+func extractFirstIntMatch(pattern *regexp.Regexp, sources ...string) int {
 	for _, s := range sources {
-		if m := seasonPattern.FindStringSubmatch(s); m != nil {
+		if m := pattern.FindStringSubmatch(s); m != nil {
 			if n, err := strconv.Atoi(m[1]); err == nil {
 				return n
 			}
@@ -292,17 +292,16 @@ func extractSeasonNumber(sources ...string) int {
 	return 0
 }
 
+// extractSeasonNumber returns the first season number found in any of the
+// provided sources, or 0 if none match.
+func extractSeasonNumber(sources ...string) int {
+	return extractFirstIntMatch(seasonPattern, sources...)
+}
+
 // extractDiscNumber returns the first disc/volume/part number found in any of
 // the provided sources, or 0 if none match.
 func extractDiscNumber(sources ...string) int {
-	for _, s := range sources {
-		if m := discNumberPattern.FindStringSubmatch(s); m != nil {
-			if n, err := strconv.Atoi(m[1]); err == nil {
-				return n
-			}
-		}
-	}
-	return 0
+	return extractFirstIntMatch(discNumberPattern, sources...)
 }
 
 // mapDiscSource converts a discmonitor disc type string to a ripspec disc_source value.
@@ -360,6 +359,34 @@ func (h *Handler) detectEdition(ctx context.Context, logger *slog.Logger, discTi
 	return ""
 }
 
+// discInfoName returns the disc name from a DiscInfo, or "" if nil.
+func discInfoName(discInfo *makemkv.DiscInfo) string {
+	if discInfo != nil {
+		return discInfo.Name
+	}
+	return ""
+}
+
+// convertTitles converts MakeMKV title info to ripspec titles.
+func convertTitles(discInfo *makemkv.DiscInfo) []ripspec.Title {
+	if discInfo == nil {
+		return nil
+	}
+	titles := make([]ripspec.Title, 0, len(discInfo.Titles))
+	for _, t := range discInfo.Titles {
+		titles = append(titles, ripspec.Title{
+			ID:           t.ID,
+			Name:         t.Name,
+			Duration:     int(t.Duration.Seconds()),
+			Chapters:     t.Chapters,
+			Playlist:     t.Playlist,
+			SegmentCount: t.SegmentCount,
+			SegmentMap:   t.SegmentMap,
+		})
+	}
+	return titles
+}
+
 // buildEnvelope constructs a full RipSpec envelope from scan and TMDB data.
 func (h *Handler) buildEnvelope(
 	item *queue.Item,
@@ -370,10 +397,7 @@ func (h *Handler) buildEnvelope(
 	discSource string,
 ) ripspec.Envelope {
 	// Extract season and disc numbers from disc title / MakeMKV disc name.
-	var discName string
-	if discInfo != nil {
-		discName = discInfo.Name
-	}
+	discName := discInfoName(discInfo)
 	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
 	discNum := extractDiscNumber(item.DiscTitle, discName)
 
@@ -405,19 +429,7 @@ func (h *Handler) buildEnvelope(
 	}
 
 	// Add titles from MakeMKV scan.
-	if discInfo != nil {
-		for _, t := range discInfo.Titles {
-			env.Titles = append(env.Titles, ripspec.Title{
-				ID:           t.ID,
-				Name:         t.Name,
-				Duration:     int(t.Duration.Seconds()),
-				Chapters:     t.Chapters,
-				Playlist:     t.Playlist,
-				SegmentCount: t.SegmentCount,
-				SegmentMap:   t.SegmentMap,
-			})
-		}
-	}
+	env.Titles = convertTitles(discInfo)
 
 	// For TV content, create episode placeholders from eligible titles.
 	if mediaType == "tv" {
@@ -478,10 +490,7 @@ func (h *Handler) buildFallbackEnvelope(item *queue.Item, discInfo *makemkv.Disc
 	}
 
 	// Extract season/disc numbers even for fallback — they indicate TV content.
-	var discName string
-	if discInfo != nil {
-		discName = discInfo.Name
-	}
+	discName := discInfoName(discInfo)
 	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
 	discNum := extractDiscNumber(item.DiscTitle, discName)
 
@@ -496,19 +505,7 @@ func (h *Handler) buildFallbackEnvelope(item *queue.Item, discInfo *makemkv.Disc
 		},
 	}
 
-	if discInfo != nil {
-		for _, t := range discInfo.Titles {
-			env.Titles = append(env.Titles, ripspec.Title{
-				ID:           t.ID,
-				Name:         t.Name,
-				Duration:     int(t.Duration.Seconds()),
-				Chapters:     t.Chapters,
-				Playlist:     t.Playlist,
-				SegmentCount: t.SegmentCount,
-				SegmentMap:   t.SegmentMap,
-			})
-		}
-	}
+	env.Titles = convertTitles(discInfo)
 
 	// If season number was extracted, this is likely TV — create episode placeholders.
 	if seasonNum > 0 {

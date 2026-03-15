@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 
 	"github.com/five82/spindle/internal/config"
@@ -73,7 +72,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	targets := h.selectRipTargets(logger, &env)
 
 	// Rip selected titles, tracking TitleID -> file path mapping.
-	titleFileMap := make(map[int]string) // titleID -> ripped file path
+	titleFileMap := make(map[int]string, len(targets)) // titleID -> ripped file path
 	for i, title := range targets {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -234,15 +233,11 @@ func (h *Handler) mapRippedAssets(env *ripspec.Envelope, dir string, titleFileMa
 	}
 
 	// Movie, unknown, or cache restore: scan directory.
+	// os.ReadDir returns entries sorted by filename.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-
-	// Sort entries by name for deterministic order.
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() < entries[j].Name()
-	})
 
 	for _, entry := range entries {
 		if entry.IsDir() {
