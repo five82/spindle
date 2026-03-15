@@ -70,13 +70,13 @@ func newConfigValidateCmd() *cobra.Command {
 		Short: "Validate configuration file",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if err := cfg.Validate(); err != nil {
-				fmt.Printf("Config: INVALID\n%v\n", err)
+				fmt.Printf("%s\n%v\n", failStyle("Config: INVALID"), err)
 				return err
 			}
 			if err := cfg.EnsureDirectories(); err != nil {
 				return fmt.Errorf("ensure directories: %w", err)
 			}
-			fmt.Println("Config: valid")
+			fmt.Println(successStyle("Config: valid"))
 			return nil
 		},
 	}

@@ -54,7 +54,7 @@ func newIdentifyCmd() *cobra.Command {
 				var err error
 				fp, err = fingerprint.Generate(mountPath)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: fingerprint generation failed: %v\n", err)
+					fmt.Fprintf(os.Stderr, "%s fingerprint generation failed: %v\n", warnStyle("Warning:"), err)
 				}
 			}
 
@@ -63,17 +63,17 @@ func newIdentifyCmd() *cobra.Command {
 				store, err := discidcache.Open(cfg.DiscIDCachePath())
 				if err == nil {
 					if entry := store.Lookup(fp); entry != nil {
-						fmt.Println("=== Disc ID Cache Hit ===")
-						fmt.Printf("Title:       %s\n", entry.Title)
-						fmt.Printf("TMDB ID:     %d\n", entry.TMDBID)
-						fmt.Printf("Type:        %s\n", entry.MediaType)
+						fmt.Println(headerStyle("=== Disc ID Cache Hit ==="))
+						fmt.Printf("%s %s\n", labelStyle("Title:      "), entry.Title)
+						fmt.Printf("%s %d\n", labelStyle("TMDB ID:    "), entry.TMDBID)
+						fmt.Printf("%s %s\n", labelStyle("Type:       "), entry.MediaType)
 						if entry.Year != "" {
-							fmt.Printf("Year:        %s\n", entry.Year)
+							fmt.Printf("%s %s\n", labelStyle("Year:       "), entry.Year)
 						}
 						if entry.Season > 0 {
-							fmt.Printf("Season:      %d\n", entry.Season)
+							fmt.Printf("%s %d\n", labelStyle("Season:     "), entry.Season)
 						}
-						fmt.Printf("Fingerprint: %s\n", fp)
+						fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), dimStyle(fp))
 						return nil
 					}
 				}
@@ -92,11 +92,11 @@ func newIdentifyCmd() *cobra.Command {
 				label = discLabel
 			}
 
-			fmt.Println("\n=== Disc Info ===")
-			fmt.Printf("Label:   %s\n", label)
-			fmt.Printf("Titles:  %d\n", len(discInfo.Titles))
+			fmt.Printf("\n%s\n", headerStyle("=== Disc Info ==="))
+			fmt.Printf("%s %s\n", labelStyle("Label:  "), label)
+			fmt.Printf("%s %d\n", labelStyle("Titles: "), len(discInfo.Titles))
 			if fp != "" {
-				fmt.Printf("Fingerprint: %s\n", fp)
+				fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), dimStyle(fp))
 			}
 			for _, t := range discInfo.Titles {
 				fmt.Printf("  Title %d: %s (%s, %d ch, %s)\n",
@@ -110,11 +110,11 @@ func newIdentifyCmd() *cobra.Command {
 			}
 			queryTitle := identify.CleanQueryTitle(rawTitle)
 
-			fmt.Printf("\n=== TMDB Search ===\n")
+			fmt.Printf("\n%s\n", headerStyle("=== TMDB Search ==="))
 			if queryTitle != rawTitle {
-				fmt.Printf("Query:   %s (cleaned from %q)\n", queryTitle, rawTitle)
+				fmt.Printf("%s %s (cleaned from %q)\n", labelStyle("Query:  "), queryTitle, rawTitle)
 			} else {
-				fmt.Printf("Query:   %s\n", queryTitle)
+				fmt.Printf("%s %s\n", labelStyle("Query:  "), queryTitle)
 			}
 
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
@@ -123,7 +123,7 @@ func newIdentifyCmd() *cobra.Command {
 				return fmt.Errorf("tmdb search: %w", err)
 			}
 
-			fmt.Println("\n=== TMDB Results ===")
+			fmt.Printf("\n%s\n", headerStyle("=== TMDB Results ==="))
 			if len(results) == 0 {
 				fmt.Println("No TMDB results found")
 				fmt.Println("Spindle will flag this item for manual review.")
@@ -132,8 +132,8 @@ func newIdentifyCmd() *cobra.Command {
 
 			best, confidence := tmdb.SelectBestResult(results, queryTitle, "", 5)
 			if best != nil {
-				fmt.Printf("Selected: %s (%s) [%s, TMDB %d, confidence %.2f]\n",
-					best.DisplayTitle(), best.Year(), best.MediaType, best.ID, confidence)
+				fmt.Printf("%s %s (%s) [%s, TMDB %d, confidence %.2f]\n",
+					labelStyle("Selected:"), best.DisplayTitle(), best.Year(), best.MediaType, best.ID, confidence)
 				fmt.Println("Spindle will use this result for metadata.")
 				if best.Overview != "" {
 					overview := best.Overview
@@ -238,10 +238,10 @@ func newGensubtitleCmd() *cobra.Command {
 			// Verbose: show WhisperX config before transcription.
 			if flagVerbose {
 				model, device, vad := svc.Config()
-				fmt.Printf("  Model:      %s\n", model)
-				fmt.Printf("  Device:     %s\n", device)
-				fmt.Printf("  VAD:        %s\n", vad)
-				fmt.Printf("  Language:   en\n")
+				fmt.Printf("  %s %s\n", labelStyle("Model:   "), model)
+				fmt.Printf("  %s %s\n", labelStyle("Device:  "), device)
+				fmt.Printf("  %s %s\n", labelStyle("VAD:     "), vad)
+				fmt.Printf("  %s en\n", labelStyle("Language:"))
 			}
 
 			// Progress callback for phase output.
@@ -250,11 +250,11 @@ func newGensubtitleCmd() *cobra.Command {
 				case phase == "extract" && elapsed == 0:
 					fmt.Print("  Extracting audio...")
 				case phase == "extract" && elapsed > 0:
-					fmt.Printf("done (%s)\n", formatPhaseDuration(elapsed))
+					fmt.Printf("%s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
 				case phase == "transcribe" && elapsed == 0:
 					fmt.Print("  Running WhisperX...")
 				case phase == "transcribe" && elapsed > 0:
-					fmt.Printf("done (%s)\n", formatPhaseDuration(elapsed))
+					fmt.Printf("%s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
 				}
 			}
 
@@ -327,7 +327,7 @@ func newGensubtitleCmd() *cobra.Command {
 				if err := os.Rename(tmpPath, file); err != nil {
 					return fmt.Errorf("rename: %w", err)
 				}
-				fmt.Println("done")
+				fmt.Println(successStyle("done"))
 			}
 
 			return nil
@@ -387,7 +387,7 @@ func newTestNotifyCmd() *cobra.Command {
 			if err := n.Send(ctx, notify.EventTest, "Spindle Test", "Test notification from Spindle"); err != nil {
 				return fmt.Errorf("send notification: %w", err)
 			}
-			fmt.Println("Test notification sent")
+			fmt.Println(successStyle("Test notification sent"))
 			return nil
 		},
 	}

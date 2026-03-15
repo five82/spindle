@@ -22,6 +22,18 @@ Single binary: `spindle`
 | `--verbose` | `-v` | bool | false | Shorthand for `--log-level=debug` |
 | `--json` | | bool | false | Output in JSON format |
 
+### 1.2.1 Color Output
+
+CLI output uses ANSI colors on TTY terminals to highlight headers, labels,
+status indicators, and warnings. Colors auto-disable when output is piped or
+redirected to a file.
+
+To disable colors explicitly, set the `NO_COLOR` environment variable:
+
+```bash
+NO_COLOR=1 spindle status
+```
+
 ### 1.3 Daemon Commands
 
 #### `spindle start`

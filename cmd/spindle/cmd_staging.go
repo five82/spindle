@@ -75,9 +75,9 @@ func newStagingCleanCmd() *cobra.Command {
 				activeFingerprints,
 				logger,
 			)
-			fmt.Printf("Removed %d staging directories\n", result.Removed)
+			fmt.Println(successStyle(fmt.Sprintf("Removed %d staging directories", result.Removed)))
 			for _, e := range result.Errors {
-				fmt.Fprintf(os.Stderr, "Warning: %v\n", e)
+				fmt.Fprintf(os.Stderr, "%s %v\n", warnStyle("Warning:"), e)
 			}
 			return nil
 		},

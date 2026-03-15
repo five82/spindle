@@ -43,18 +43,18 @@ func newDebugCropCmd() *cobra.Command {
 				return fmt.Errorf("crop detection: %w", err)
 			}
 
-			fmt.Printf("\n=== Crop Detection Results ===\n")
-			fmt.Printf("Resolution:     %dx%d\n", result.VideoWidth, result.VideoHeight)
-			fmt.Printf("HDR:            %v\n", result.IsHDR)
-			fmt.Printf("Crop required:  %v\n", result.Required)
+			fmt.Printf("\n%s\n", headerStyle("=== Crop Detection Results ==="))
+			fmt.Printf("%s %dx%d\n", labelStyle("Resolution:    "), result.VideoWidth, result.VideoHeight)
+			fmt.Printf("%s %v\n", labelStyle("HDR:           "), result.IsHDR)
+			fmt.Printf("%s %v\n", labelStyle("Crop required: "), result.Required)
 			if result.CropFilter != "" {
-				fmt.Printf("Crop filter:    %s\n", result.CropFilter)
+				fmt.Printf("%s %s\n", labelStyle("Crop filter:   "), result.CropFilter)
 			}
 			if result.MultipleRatios {
-				fmt.Println("Multiple ratios: yes (no dominant crop value)")
+				fmt.Printf("%s yes (no dominant crop value)\n", labelStyle("Multiple ratios:"))
 			}
-			fmt.Printf("Message:        %s\n", result.Message)
-			fmt.Printf("Total samples:  %d\n", result.TotalSamples)
+			fmt.Printf("%s %s\n", labelStyle("Message:       "), result.Message)
+			fmt.Printf("%s %d\n", labelStyle("Total samples: "), result.TotalSamples)
 
 			if len(result.Candidates) > 0 {
 				fmt.Printf("\nCandidate distribution:\n")
@@ -100,7 +100,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Printf("\n=== Audio Streams (%d) ===\n", len(audioStreams))
+			fmt.Printf("\n%s\n", headerStyle(fmt.Sprintf("=== Audio Streams (%d) ===", len(audioStreams))))
 			for _, s := range audioStreams {
 				title := s.Tags["title"]
 				lang := s.Tags["language"]
@@ -140,19 +140,19 @@ func newDebugCommentaryCmd() *cobra.Command {
 			// Use a synthetic fingerprint for cache keys.
 			debugFP := textutil.SanitizePathSegment(filepath.Base(path))
 
-			fmt.Printf("\n=== Commentary Analysis ===\n")
-			fmt.Printf("Similarity threshold: %.3f\n", cfg.Commentary.SimilarityThreshold)
-			fmt.Printf("Confidence threshold: %.3f\n", cfg.Commentary.ConfidenceThreshold)
+			fmt.Printf("\n%s\n", headerStyle("=== Commentary Analysis ==="))
+			fmt.Printf("%s %.3f\n", labelStyle("Similarity threshold:"), cfg.Commentary.SimilarityThreshold)
+			fmt.Printf("%s %.3f\n", labelStyle("Confidence threshold:"), cfg.Commentary.ConfidenceThreshold)
 
 			// Use audio-relative indices for ffmpeg -map 0:a:N.
 			for candidateAudioIdx, candidate := range audioStreams[1:] {
 				candidateAudioIdx++ // 0-based: primary=0, first candidate=1
-				fmt.Printf("\n--- Stream %d ---\n", candidate.Index)
+				fmt.Printf("\n%s\n", dimStyle(fmt.Sprintf("--- Stream %d ---", candidate.Index)))
 				title := candidate.Tags["title"]
 				if title != "" {
-					fmt.Printf("Title:    %s\n", title)
+					fmt.Printf("%s %s\n", labelStyle("Title:   "), title)
 				}
-				fmt.Printf("Channels: %d (%s)\n", candidate.Channels, candidate.ChannelLayout)
+				fmt.Printf("%s %d (%s)\n", labelStyle("Channels:"), candidate.Channels, candidate.ChannelLayout)
 
 				// Stereo similarity check.
 				primaryKey := fmt.Sprintf("%s-main-audio0", debugFP)
@@ -220,9 +220,9 @@ func newDebugCommentaryCmd() *cobra.Command {
 					continue
 				}
 
-				fmt.Printf("LLM decision:   %s\n", resp.Decision)
-				fmt.Printf("LLM confidence: %.2f\n", resp.Confidence)
-				fmt.Printf("LLM reason:     %s\n", resp.Reason)
+				fmt.Printf("%s %s\n", labelStyle("LLM decision:  "), resp.Decision)
+				fmt.Printf("%s %.2f\n", labelStyle("LLM confidence:"), resp.Confidence)
+				fmt.Printf("%s %s\n", labelStyle("LLM reason:    "), resp.Reason)
 			}
 
 			return nil

@@ -171,12 +171,12 @@ func newCacheRipCmd() *cobra.Command {
 
 			// Prune cache if needed.
 			if pruneErr := cache.Prune(); pruneErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: cache prune failed: %v\n", pruneErr)
+				fmt.Fprintf(os.Stderr, "%s cache prune failed: %v\n", warnStyle("Warning:"), pruneErr)
 			}
 
-			fmt.Printf("\nCached %d titles (%s) for %s\n",
-				rippedCount, formatBytes(totalBytes), discTitle)
-			fmt.Printf("Fingerprint: %s\n", fp)
+			fmt.Printf("\n%s\n", successStyle(fmt.Sprintf("Cached %d titles (%s) for %s",
+				rippedCount, formatBytes(totalBytes), discTitle)))
+			fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), dimStyle(fp))
 			return nil
 		},
 	}
@@ -343,7 +343,7 @@ func newCacheRemoveCmd() *cobra.Command {
 			if err := store.Remove(entry.Fingerprint); err != nil {
 				return err
 			}
-			fmt.Printf("Removed cache entry: %s\n", entry.DiscTitle)
+			fmt.Println(successStyle(fmt.Sprintf("Removed cache entry: %s", entry.DiscTitle)))
 			return nil
 		},
 	}
@@ -358,7 +358,7 @@ func newCacheClearCmd() *cobra.Command {
 			if err := store.Clear(); err != nil {
 				return err
 			}
-			fmt.Println("All cache entries removed")
+			fmt.Println(successStyle("All cache entries removed"))
 			return nil
 		},
 	}

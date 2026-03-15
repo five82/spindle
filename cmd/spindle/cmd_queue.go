@@ -63,8 +63,8 @@ func newQueueListCmd() *cobra.Command {
 			}
 
 			if flagVerbose {
-				fmt.Printf("%-6s %-40s %-24s %-20s %-20s %s\n", "ID", "Title", "Stage", "Created", "Updated", "Fingerprint")
-				fmt.Println(strings.Repeat("-", 140))
+				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-40s %-24s %-20s %-20s %s", "ID", "Title", "Stage", "Created", "Updated", "Fingerprint")))
+				fmt.Println(dimStyle(strings.Repeat("-", 140)))
 				for _, item := range items {
 					fmt.Printf("%-6d %-40s %-24s %-20s %-20s %s\n",
 						item.ID,
@@ -75,15 +75,15 @@ func newQueueListCmd() *cobra.Command {
 						item.DiscFingerprint,
 					)
 					if item.ProgressMessage != "" {
-						fmt.Printf("       Progress: %s (%.0f%%)\n", item.ProgressMessage, item.ProgressPercent)
+						fmt.Printf("       %s %s (%.0f%%)\n", labelStyle("Progress:"), item.ProgressMessage, item.ProgressPercent)
 					}
 					if item.ErrorMessage != "" {
-						fmt.Printf("       Error: %s\n", item.ErrorMessage)
+						fmt.Printf("       %s %s\n", failStyle("Error:"), item.ErrorMessage)
 					}
 				}
 			} else {
-				fmt.Printf("%-6s %-30s %-24s %-20s %-14s\n", "ID", "Title", "Stage", "Created", "Fingerprint")
-				fmt.Println(strings.Repeat("-", 96))
+				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-30s %-24s %-20s %-14s", "ID", "Title", "Stage", "Created", "Fingerprint")))
+				fmt.Println(dimStyle(strings.Repeat("-", 96)))
 				for _, item := range items {
 					fp := item.DiscFingerprint
 					if len(fp) > 12 {
@@ -137,40 +137,40 @@ func newQueueShowCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Printf("ID:          %d\n", item.ID)
-			fmt.Printf("Title:       %s\n", item.DiscTitle)
-			fmt.Printf("Stage:       %s\n", item.Stage)
+			fmt.Printf("%s %d\n", labelStyle("ID:         "), item.ID)
+			fmt.Printf("%s %s\n", labelStyle("Title:      "), item.DiscTitle)
+			fmt.Printf("%s %s\n", labelStyle("Stage:      "), item.Stage)
 			if flagVerbose && item.FailedAtStage != "" {
-				fmt.Printf("FailedAt:    %s\n", item.FailedAtStage)
+				fmt.Printf("%s %s\n", labelStyle("FailedAt:   "), item.FailedAtStage)
 			}
-			fmt.Printf("Created:     %s\n", item.CreatedAt)
-			fmt.Printf("Updated:     %s\n", item.UpdatedAt)
-			fmt.Printf("Fingerprint: %s\n", item.DiscFingerprint)
+			fmt.Printf("%s %s\n", labelStyle("Created:    "), item.CreatedAt)
+			fmt.Printf("%s %s\n", labelStyle("Updated:    "), item.UpdatedAt)
+			fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), item.DiscFingerprint)
 			if item.ProgressMessage != "" {
-				fmt.Printf("Progress:    %s (%.0f%%)\n", item.ProgressMessage, item.ProgressPercent)
+				fmt.Printf("%s %s (%.0f%%)\n", labelStyle("Progress:   "), item.ProgressMessage, item.ProgressPercent)
 			}
 			if flagVerbose && item.ProgressTotalBytes > 0 {
-				fmt.Printf("Bytes:       %s / %s\n",
+				fmt.Printf("%s %s / %s\n", labelStyle("Bytes:      "),
 					formatBytes(item.ProgressBytesCopied),
 					formatBytes(item.ProgressTotalBytes))
 			}
 			if flagVerbose && item.ActiveEpisodeKey != "" {
-				fmt.Printf("Episode:     %s\n", item.ActiveEpisodeKey)
+				fmt.Printf("%s %s\n", labelStyle("Episode:    "), item.ActiveEpisodeKey)
 			}
 			if item.NeedsReview != 0 {
-				fmt.Printf("Review:      %s\n", item.ReviewReason)
+				fmt.Printf("%s %s\n", labelStyle("Review:     "), item.ReviewReason)
 			}
 			if item.ErrorMessage != "" {
-				fmt.Printf("Error:       %s\n", item.ErrorMessage)
+				fmt.Printf("%s %s\n", failStyle("Error:      "), item.ErrorMessage)
 			}
 			if item.MetadataJSON != "" {
-				fmt.Printf("Metadata:    %s\n", item.MetadataJSON)
+				fmt.Printf("%s %s\n", labelStyle("Metadata:   "), item.MetadataJSON)
 			}
 			if flagVerbose && item.RipSpecData != "" {
-				fmt.Printf("RipSpec:     %s\n", prettyJSON(item.RipSpecData))
+				fmt.Printf("%s %s\n", labelStyle("RipSpec:    "), prettyJSON(item.RipSpecData))
 			}
 			if flagVerbose && item.EncodingDetailsJSON != "" {
-				fmt.Printf("Encoding:    %s\n", prettyJSON(item.EncodingDetailsJSON))
+				fmt.Printf("%s %s\n", labelStyle("Encoding:   "), prettyJSON(item.EncodingDetailsJSON))
 			}
 			return nil
 		},
@@ -203,14 +203,14 @@ func newQueueClearCmd() *cobra.Command {
 				if err := store.Clear(); err != nil {
 					return err
 				}
-				fmt.Println("All queue items removed")
+				fmt.Println(successStyle("All queue items removed"))
 				return nil
 			}
 			if flagCompleted {
 				if err := store.ClearCompleted(); err != nil {
 					return err
 				}
-				fmt.Println("Completed queue items removed")
+				fmt.Println(successStyle("Completed queue items removed"))
 				return nil
 			}
 
@@ -220,9 +220,9 @@ func newQueueClearCmd() *cobra.Command {
 					return fmt.Errorf("invalid item ID: %s", arg)
 				}
 				if err := store.Remove(id); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not remove item %d: %v\n", id, err)
+					fmt.Fprintf(os.Stderr, "%s could not remove item %d: %v\n", warnStyle("Warning:"), id, err)
 				} else {
-					fmt.Printf("Removed item %d\n", id)
+					fmt.Println(successStyle(fmt.Sprintf("Removed item %d", id)))
 				}
 			}
 			return nil
@@ -254,7 +254,7 @@ func newQueueRetryCmd() *cobra.Command {
 				if err := store.RetryFailed(); err != nil {
 					return err
 				}
-				fmt.Println("All failed items retried")
+				fmt.Println(successStyle("All failed items retried"))
 				return nil
 			}
 
@@ -270,7 +270,7 @@ func newQueueRetryCmd() *cobra.Command {
 			if err := store.RetryFailed(ids...); err != nil {
 				return err
 			}
-			fmt.Printf("Retried %d item(s)\n", len(ids))
+			fmt.Println(successStyle(fmt.Sprintf("Retried %d item(s)", len(ids))))
 			return nil
 		},
 	}
@@ -302,7 +302,7 @@ func newQueueStopCmd() *cobra.Command {
 			if err := store.StopItems(ids...); err != nil {
 				return err
 			}
-			fmt.Printf("Stopped %d item(s)\n", len(ids))
+			fmt.Println(successStyle(fmt.Sprintf("Stopped %d item(s)", len(ids))))
 			return nil
 		},
 	}

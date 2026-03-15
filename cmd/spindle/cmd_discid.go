@@ -43,7 +43,7 @@ func newDiscIDListCmd() *cobra.Command {
 				if e.Season > 0 {
 					fmt.Printf(", S%02d", e.Season)
 				}
-				fmt.Printf(") [%s]\n", fp)
+				fmt.Printf(") [%s]\n", dimStyle(fp))
 			}
 			fmt.Printf("\n%d entries\n", len(entries))
 			return nil
@@ -75,7 +75,7 @@ func newDiscIDRemoveCmd() *cobra.Command {
 			if err := store.Remove(le.Fingerprint); err != nil {
 				return err
 			}
-			fmt.Printf("Removed: %s\n", le.Entry.Title)
+			fmt.Println(successStyle(fmt.Sprintf("Removed: %s", le.Entry.Title)))
 			return nil
 		},
 	}
@@ -93,7 +93,7 @@ func newDiscIDClearCmd() *cobra.Command {
 			if err := store.Clear(); err != nil {
 				return err
 			}
-			fmt.Println("All disc ID cache entries removed")
+			fmt.Println(successStyle("All disc ID cache entries removed"))
 			return nil
 		},
 	}

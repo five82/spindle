@@ -80,7 +80,7 @@ func main() {
 	)
 
 	if err := root.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s %v\n", failStyle("Error:"), err)
 		os.Exit(1)
 	}
 }
