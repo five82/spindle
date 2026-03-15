@@ -28,7 +28,12 @@ func newStartCmd() *cobra.Command {
 				fmt.Println("Daemon already running")
 				return nil
 			}
-			err := daemonctl.Start(lp, sp)
+			err := daemonctl.Start(daemonctl.StartOptions{
+				LockPath:   lp,
+				SocketPath: sp,
+				LogPath:    cfg.DaemonLogPath(),
+				ConfigFlag: flagConfig,
+			})
 			if err != nil {
 				return err
 			}
@@ -43,8 +48,11 @@ func newStopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the spindle daemon",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			lp, sp := lockPath(), socketPath()
-			err := daemonctl.Stop(lp, sp)
+			err := daemonctl.Stop(daemonctl.StopOptions{
+				LockPath:   lockPath(),
+				SocketPath: socketPath(),
+				Token:      cfg.API.Token,
+			})
 			if errors.Is(err, daemonctl.ErrDaemonNotRunning) {
 				fmt.Println("Daemon is not running")
 				return nil
@@ -64,11 +72,20 @@ func newRestartCmd() *cobra.Command {
 		Short: "Restart the spindle daemon",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			lp, sp := lockPath(), socketPath()
-			err := daemonctl.Stop(lp, sp)
+			err := daemonctl.Stop(daemonctl.StopOptions{
+				LockPath:   lp,
+				SocketPath: sp,
+				Token:      cfg.API.Token,
+			})
 			if err != nil && !errors.Is(err, daemonctl.ErrDaemonNotRunning) {
 				return fmt.Errorf("stop: %w", err)
 			}
-			if err := daemonctl.Start(lp, sp); err != nil {
+			if err := daemonctl.Start(daemonctl.StartOptions{
+				LockPath:   lp,
+				SocketPath: sp,
+				LogPath:    cfg.DaemonLogPath(),
+				ConfigFlag: flagConfig,
+			}); err != nil {
 				return fmt.Errorf("start: %w", err)
 			}
 			fmt.Println("Daemon restarted")

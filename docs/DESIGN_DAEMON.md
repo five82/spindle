@@ -289,12 +289,13 @@ CLI-facing daemon lifecycle management used by `spindle start/stop/restart/statu
 
 Three functions:
 
-- `Start(lockPath, socketPath)`: Check if daemon is already running. If so,
-  return error. Otherwise, return error with instruction to use `spindle daemon`
-  or systemd.
-- `Stop(lockPath, socketPath)`: Send `POST /api/daemon/stop` via Unix socket,
-  then poll `IsRunning()` up to 10 seconds (500ms intervals) waiting for
-  shutdown. Returns error if daemon doesn't stop in time.
+- `Start(opts StartOptions)`: Check if daemon is already running. If so, return
+  error. Otherwise, resolve the current executable, spawn `spindle daemon` as a
+  detached background process (stderr redirected to daemon log file), and poll
+  `IsRunning()` up to 10 seconds for readiness.
+- `Stop(opts StopOptions)`: Send authenticated `POST /api/daemon/stop` via Unix
+  socket, then poll `IsRunning()` up to 10 seconds (500ms intervals) waiting
+  for shutdown. Returns error if daemon doesn't stop in time.
 - `IsRunning(lockPath, socketPath)`: Check lock file and socket reachability.
   Returns true if daemon is running.
 
