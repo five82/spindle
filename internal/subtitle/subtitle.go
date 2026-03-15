@@ -309,7 +309,7 @@ func (h *Handler) muxSubtitles(
 		videoPath,
 		"--language", "0:eng",
 		"--track-name", "0:English",
-		"--default-track", "0:yes",
+		"--default-track-flag", "0:no",
 		srtPath,
 	}
 

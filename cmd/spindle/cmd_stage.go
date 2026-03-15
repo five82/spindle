@@ -317,7 +317,7 @@ func newGensubtitleCmd() *cobra.Command {
 					"--no-subtitles", file,
 					"--language", "0:eng",
 					"--track-name", "0:English",
-					"--default-track", "0:yes",
+					"--default-track-flag", "0:no",
 					result.SRTPath,
 				)
 				if muxOut, err := muxCmd.CombinedOutput(); err != nil {
