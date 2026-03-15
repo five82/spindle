@@ -72,7 +72,7 @@ func TestAuthAcceptsValidToken(t *testing.T) {
 	}
 }
 
-func TestQueueListReturnsEmptyArray(t *testing.T) {
+func TestQueueListReturnsWrappedEmptyArray(t *testing.T) {
 	store := testStore(t)
 	srv := httpapi.New(store, "", slog.New(slog.NewTextHandler(os.Stderr, nil)), nil, nil)
 
@@ -84,11 +84,47 @@ func TestQueueListReturnsEmptyArray(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	var items []json.RawMessage
-	if err := json.NewDecoder(w.Body).Decode(&items); err != nil {
+	var body struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("expected empty array, got %d items", len(items))
+	if len(body.Items) != 0 {
+		t.Fatalf("expected empty items array, got %d items", len(body.Items))
+	}
+}
+
+func TestStatusReturnsStructuredResponse(t *testing.T) {
+	store := testStore(t)
+	srv := httpapi.New(store, "", slog.New(slog.NewTextHandler(os.Stderr, nil)), nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var body struct {
+		Running  bool `json:"running"`
+		PID      int  `json:"pid"`
+		Workflow struct {
+			Running    bool           `json:"running"`
+			QueueStats map[string]int `json:"queueStats"`
+		} `json:"workflow"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if !body.Running {
+		t.Fatal("expected running=true")
+	}
+	if body.PID <= 0 {
+		t.Fatalf("expected positive PID, got %d", body.PID)
+	}
+	if !body.Workflow.Running {
+		t.Fatal("expected workflow.running=true")
 	}
 }

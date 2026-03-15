@@ -140,7 +140,7 @@ belongs here.
   uses `AppendReviewReason()` which sets queue-level `needs_review` flag
 - `content_id_matches` -- episode resolution stored in `episodes[]`; match
   scores are logged by the episode ID stage
-- `primary_audio_description` -- computed on-demand from `audio_analysis`
+- `primary_audio_description` -- stored as `PrimaryDescription` in `AudioAnalysisData` during audio analysis
 - `subtitle_generation_summary` -- computed on-demand from
   `subtitle_generation_results`
 
@@ -156,9 +156,10 @@ belongs here.
 
 ```go
 AudioAnalysisData {
-    PrimaryTrack     AudioTrackRef          // {Index int}
-    CommentaryTracks []CommentaryTrackRef   // {Index, Confidence, Reason}
-    ExcludedTracks   []ExcludedTrackRef     // {Index, Reason, Similarity}
+    PrimaryTrack        AudioTrackRef          // {Index int}
+    PrimaryDescription  string                 // "English | truehd | 8ch | Atmos"
+    CommentaryTracks    []CommentaryTrackRef   // {Index, Confidence, Reason}
+    ExcludedTracks      []ExcludedTrackRef     // {Index, Reason, Similarity}
 }
 
 SubtitleGenRecord {

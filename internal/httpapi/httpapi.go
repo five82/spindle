@@ -16,6 +16,16 @@ import (
 	"github.com/five82/spindle/internal/queue"
 )
 
+// ServerOption configures optional Server settings.
+type ServerOption func(*Server)
+
+// WithStatusInfo sets the status info for the /api/status endpoint.
+func WithStatusInfo(info StatusInfo) ServerOption {
+	return func(s *Server) {
+		s.statusInfo = info
+	}
+}
+
 // Server is the HTTP API server.
 type Server struct {
 	store       *queue.Store
@@ -25,10 +35,11 @@ type Server struct {
 	mux         *http.ServeMux
 	discMonitor *discmonitor.Monitor
 	shutdownCh  chan struct{}
+	statusInfo  StatusInfo
 }
 
 // New creates an HTTP API server. discMon and shutdownCh may be nil.
-func New(store *queue.Store, token string, logger *slog.Logger, discMon *discmonitor.Monitor, shutdownCh chan struct{}) *Server {
+func New(store *queue.Store, token string, logger *slog.Logger, discMon *discmonitor.Monitor, shutdownCh chan struct{}, opts ...ServerOption) *Server {
 	s := &Server{
 		store:       store,
 		token:       token,
@@ -36,6 +47,9 @@ func New(store *queue.Store, token string, logger *slog.Logger, discMon *discmon
 		mux:         http.NewServeMux(),
 		discMonitor: discMon,
 		shutdownCh:  shutdownCh,
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 	s.registerRoutes()
 	s.httpServer = &http.Server{
@@ -118,10 +132,11 @@ func (s *Server) handleQueueList(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list queue items")
 		return
 	}
-	if items == nil {
-		items = []*queue.Item{}
+	responses := make([]ItemResponse, 0, len(items))
+	for _, item := range items {
+		responses = append(responses, toItemResponse(item))
 	}
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, map[string]any{"items": responses})
 }
 
 func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +155,7 @@ func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item)})
 }
 
 func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
@@ -205,12 +220,22 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to get stats")
 		return
 	}
-	// Convert Stage keys to strings for JSON.
-	result := make(map[string]int, len(stats))
+	queueStats := make(map[string]int, len(stats))
 	for k, v := range stats {
-		result[string(k)] = v
+		queueStats[string(k)] = v
 	}
-	writeJSON(w, http.StatusOK, result)
+	resp := StatusAPIResponse{
+		Running:      true,
+		PID:          os.Getpid(),
+		QueueDBPath:  s.statusInfo.QueueDBPath,
+		LockFilePath: s.statusInfo.LockFilePath,
+		Workflow: WorkflowStatus{
+			Running:    true,
+			QueueStats: queueStats,
+		},
+		Dependencies: []any{},
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

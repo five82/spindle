@@ -107,6 +107,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		// Select primary audio track.
 		selection := audio.Select(result.Streams)
 		analysisData.PrimaryTrack = ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
+		analysisData.PrimaryDescription = selection.PrimaryLabel()
 
 		logger.Info("primary audio selected",
 			"decision_type", "audio_selection",

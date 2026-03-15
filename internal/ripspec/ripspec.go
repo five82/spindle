@@ -116,9 +116,10 @@ type ExcludedTrackRef struct {
 
 // AudioAnalysisData holds the results of audio track analysis.
 type AudioAnalysisData struct {
-	PrimaryTrack     AudioTrackRef        `json:"primary_track"`
-	CommentaryTracks []CommentaryTrackRef `json:"commentary_tracks,omitempty"`
-	ExcludedTracks   []ExcludedTrackRef   `json:"excluded_tracks,omitempty"`
+	PrimaryTrack        AudioTrackRef        `json:"primary_track"`
+	PrimaryDescription  string               `json:"primary_description,omitempty"`
+	CommentaryTracks    []CommentaryTrackRef `json:"commentary_tracks,omitempty"`
+	ExcludedTracks      []ExcludedTrackRef   `json:"excluded_tracks,omitempty"`
 }
 
 // SubtitleGenRecord captures the result of subtitle generation for one episode.
