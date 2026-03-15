@@ -85,23 +85,26 @@ func newStatusCmd() *cobra.Command {
 			lp, sp := lockPath(), socketPath()
 			running := daemonctl.IsRunning(lp, sp)
 
-			fmt.Println(headerStyle("=== System Status ==="))
+			fmt.Println(headerStyle("Spindle Status"))
+			fmt.Println()
 			if running {
-				fmt.Printf("%s %s\n", labelStyle("Daemon:"), successStyle("running"))
+				fmt.Printf("  %-12s %s\n", labelStyle("Daemon"), successStyle("running"))
 			} else {
-				fmt.Printf("%s %s\n", labelStyle("Daemon:"), failStyle("stopped"))
+				fmt.Printf("  %-12s %s\n", labelStyle("Daemon"), failStyle("stopped"))
 			}
 			if flagVerbose {
-				fmt.Printf("%s %s\n", labelStyle("Socket:"), sp)
-				fmt.Printf("%s %s\n", labelStyle("Lock:  "), lp)
+				fmt.Printf("  %-12s %s\n", labelStyle("Socket"), dimStyle(sp))
+				fmt.Printf("  %-12s %s\n", labelStyle("Lock"), dimStyle(lp))
 				if flagConfig != "" {
-					fmt.Printf("%s %s\n", labelStyle("Config:"), flagConfig)
+					fmt.Printf("  %-12s %s\n", labelStyle("Config"), dimStyle(flagConfig))
 				} else {
-					fmt.Printf("%s (default search path)\n", labelStyle("Config:"))
+					fmt.Printf("  %-12s %s\n", labelStyle("Config"), dimStyle("(default search path)"))
 				}
 			}
 
-			fmt.Printf("\n%s\n", headerStyle("=== Dependencies ==="))
+			fmt.Println()
+			fmt.Println(headerStyle("Dependencies"))
+			fmt.Println()
 			reqs := []deps.Requirement{
 				{Name: "makemkvcon", Command: "makemkvcon", Description: "MakeMKV CLI", Optional: false},
 				{Name: "ffmpeg", Command: "ffmpeg", Description: "FFmpeg media processor", Optional: false},
@@ -110,34 +113,39 @@ func newStatusCmd() *cobra.Command {
 			}
 			statuses := deps.CheckBinaries(reqs)
 			for _, s := range statuses {
-				mark := successStyle("[OK]")
+				mark := successStyle("✓")
 				if !s.Available {
-					mark = failStyle("[MISSING]")
+					mark = failStyle("✗")
 				}
 				if flagVerbose {
-					fmt.Printf("  %-12s %s %s\n", s.Name, mark, s.Detail)
+					fmt.Printf("  %-12s %s  %s\n", s.Name, mark, dimStyle(s.Detail))
 				} else {
 					fmt.Printf("  %-12s %s\n", s.Name, mark)
 				}
 			}
 
-			fmt.Printf("\n%s\n", headerStyle("=== Library Paths ==="))
+			fmt.Println()
+			fmt.Println(headerStyle("Library Paths"))
+			fmt.Println()
 			if cfg != nil {
 				checkPath("Movies", filepath.Join(cfg.Paths.LibraryDir, cfg.Library.MoviesDir))
 				checkPath("TV", filepath.Join(cfg.Paths.LibraryDir, cfg.Library.TVDir))
 			}
 
-			fmt.Printf("\n%s\n", headerStyle("=== Queue Status ==="))
+			fmt.Println()
+			fmt.Println(headerStyle("Queue"))
+			fmt.Println()
 			acc, err := openQueueAccess()
 			if err != nil {
-				fmt.Println("  Queue unavailable")
+				fmt.Printf("  %s\n", dimStyle("No active queue"))
 				return nil
 			}
 			stats, err := acc.Stats()
 			if err != nil {
-				fmt.Println("  Queue unavailable")
+				fmt.Printf("  %s\n", dimStyle("No active queue"))
 				return nil
 			}
+			hasItems := false
 			for _, stage := range []queue.Stage{
 				queue.StagePending, queue.StageIdentification, queue.StageRipping,
 				queue.StageEpisodeIdentification, queue.StageEncoding,
@@ -147,7 +155,11 @@ func newStatusCmd() *cobra.Command {
 				count := stats[stage]
 				if count > 0 || flagVerbose {
 					fmt.Printf("  %-24s %d\n", labelStyle(stage), count)
+					hasItems = true
 				}
+			}
+			if !hasItems {
+				fmt.Printf("  %s\n", dimStyle("Empty"))
 			}
 			return nil
 		},
@@ -156,13 +168,13 @@ func newStatusCmd() *cobra.Command {
 
 func checkPath(label, path string) {
 	if path == "" {
-		fmt.Printf("  %-8s (not configured)\n", label)
+		fmt.Printf("  %-8s %s\n", label, dimStyle("(not configured)"))
 		return
 	}
 	if _, err := os.Stat(path); err != nil {
-		fmt.Printf("  %-8s %s %s\n", label, path, failStyle("[MISSING]"))
+		fmt.Printf("  %-8s %s  %s\n", label, path, failStyle("✗"))
 	} else {
-		fmt.Printf("  %-8s %s %s\n", label, path, successStyle("[OK]"))
+		fmt.Printf("  %-8s %s  %s\n", label, path, successStyle("✓"))
 	}
 }
 
