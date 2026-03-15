@@ -236,15 +236,15 @@ func applyMuxDefault(data []byte, cfg *Config) {
 	}
 }
 
-// hasUncommentedKey returns true if data contains a line with the given key
-// that is not commented out (i.e., not preceded by #).
+// hasUncommentedKey returns true if data contains an uncommented TOML
+// assignment for the given key (i.e., a line matching "key = ...").
 func hasUncommentedKey(data []byte, key string) bool {
 	for _, line := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if strings.Contains(trimmed, key) {
+		if strings.HasPrefix(trimmed, key) && strings.Contains(trimmed, "=") {
 			return true
 		}
 	}

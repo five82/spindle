@@ -99,52 +99,26 @@ func TestCacheKeyDifferentContentKey(t *testing.T) {
 	}
 }
 
-func TestCountSRTSegments(t *testing.T) {
+func TestAnalyzeSRT(t *testing.T) {
 	dir := t.TempDir()
 	srtPath := filepath.Join(dir, "test.srt")
 	if err := os.WriteFile(srtPath, []byte(sampleSRT), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	count, err := countSRTSegments(srtPath)
+	segments, duration, err := analyzeSRT(srtPath)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if count != 3 {
-		t.Errorf("expected 3 segments, got %d", count)
+	if segments != 3 {
+		t.Errorf("expected 3 segments, got %d", segments)
+	}
+	if duration != 12.0 {
+		t.Errorf("expected duration 12.0s, got %.1f", duration)
 	}
 }
 
-func TestCountSRTSegmentsEmpty(t *testing.T) {
-	dir := t.TempDir()
-	srtPath := filepath.Join(dir, "empty.srt")
-	if err := os.WriteFile(srtPath, []byte(""), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	count, err := countSRTSegments(srtPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("expected 0 segments, got %d", count)
-	}
-}
-
-func TestParseSRTDuration(t *testing.T) {
-	dir := t.TempDir()
-	srtPath := filepath.Join(dir, "test.srt")
-	if err := os.WriteFile(srtPath, []byte(sampleSRT), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	dur := parseSRTDuration(srtPath)
-	if dur != 12.0 {
-		t.Errorf("expected 12.0s, got %.1f", dur)
-	}
-}
-
-func TestParseSRTDurationLong(t *testing.T) {
+func TestAnalyzeSRTLong(t *testing.T) {
 	srt := `1
 00:00:01,000 --> 00:00:04,000
 Hello.
@@ -159,23 +133,35 @@ Goodbye.
 		t.Fatal(err)
 	}
 
-	dur := parseSRTDuration(srtPath)
+	segments, duration, err := analyzeSRT(srtPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if segments != 2 {
+		t.Errorf("expected 2 segments, got %d", segments)
+	}
 	expected := 1*3600 + 38*60 + 12 + 0.456
-	if dur < expected-0.001 || dur > expected+0.001 {
-		t.Errorf("expected %.3f, got %.3f", expected, dur)
+	if duration < expected-0.001 || duration > expected+0.001 {
+		t.Errorf("expected duration %.3f, got %.3f", expected, duration)
 	}
 }
 
-func TestParseSRTDurationEmpty(t *testing.T) {
+func TestAnalyzeSRTEmpty(t *testing.T) {
 	dir := t.TempDir()
 	srtPath := filepath.Join(dir, "empty.srt")
 	if err := os.WriteFile(srtPath, []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	dur := parseSRTDuration(srtPath)
-	if dur != 0 {
-		t.Errorf("expected 0, got %.1f", dur)
+	segments, duration, err := analyzeSRT(srtPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if segments != 0 {
+		t.Errorf("expected 0 segments, got %d", segments)
+	}
+	if duration != 0 {
+		t.Errorf("expected 0 duration, got %.1f", duration)
 	}
 }
 

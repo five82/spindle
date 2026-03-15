@@ -2,7 +2,6 @@
 package transcription
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -165,12 +164,10 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		return nil, fmt.Errorf("srt output not found at %s: %w", srtPath, err)
 	}
 
-	segments, err := countSRTSegments(srtPath)
+	segments, duration, err := analyzeSRT(srtPath)
 	if err != nil {
-		return nil, fmt.Errorf("count srt segments: %w", err)
+		return nil, fmt.Errorf("analyze srt: %w", err)
 	}
-
-	duration := parseSRTDuration(srtPath)
 
 	result := &TranscribeResult{
 		SRTPath:        srtPath,
@@ -217,13 +214,13 @@ func (s *Service) Lookup(key string) (*TranscribeResult, bool) {
 			continue
 		}
 		srtPath := filepath.Join(dir, entry.Name())
-		segments, err := countSRTSegments(srtPath)
+		segments, duration, err := analyzeSRT(srtPath)
 		if err != nil || segments == 0 {
 			continue
 		}
 		return &TranscribeResult{
 			SRTPath:  srtPath,
-			Duration: parseSRTDuration(srtPath),
+			Duration: duration,
 			Segments: segments,
 		}, true
 	}
@@ -251,29 +248,42 @@ func (s *Service) Store(key string, result *TranscribeResult) error {
 	return nil
 }
 
-// parseSRTDuration reads the SRT file and returns the end timestamp of the
-// last cue in seconds. Returns 0 if the file cannot be parsed.
-func parseSRTDuration(path string) float64 {
-	f, err := os.Open(path)
+// analyzeSRT reads an SRT file once and returns both the segment count and
+// the duration (end timestamp of the last cue, in seconds).
+func analyzeSRT(path string) (segments int, duration float64, err error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0
+		return 0, 0, err
 	}
-	defer func() { _ = f.Close() }()
 
-	var lastEnd float64
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		idx := strings.Index(line, "-->")
-		if idx < 0 {
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return 0, 0, nil
+	}
+
+	blocks := strings.Split(content, "\n\n")
+	for _, block := range blocks {
+		block = strings.TrimSpace(block)
+		if block == "" {
 			continue
 		}
-		endPart := strings.TrimSpace(line[idx+3:])
-		if secs := parseSRTTimestamp(endPart); secs > 0 {
-			lastEnd = secs
+		lines := strings.SplitN(block, "\n", 3)
+		// A cue block starts with a sequence number.
+		if _, atoiErr := strconv.Atoi(strings.TrimSpace(lines[0])); atoiErr != nil {
+			continue
+		}
+		segments++
+		// Parse end timestamp from the timing line.
+		if len(lines) >= 2 {
+			if idx := strings.Index(lines[1], "-->"); idx >= 0 {
+				endPart := strings.TrimSpace(lines[1][idx+3:])
+				if secs := parseSRTTimestamp(endPart); secs > 0 {
+					duration = secs
+				}
+			}
 		}
 	}
-	return lastEnd
+	return segments, duration, nil
 }
 
 // parseSRTTimestamp parses "HH:MM:SS,mmm" into seconds.
@@ -319,33 +329,3 @@ func (s *Service) Config() (model, device, vadMethod string) {
 	return
 }
 
-// countSRTSegments counts the number of cues in an SRT file.
-// Cues are blank-line-delimited blocks starting with a number.
-func countSRTSegments(path string) (int, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-
-	content := strings.TrimSpace(string(data))
-	if content == "" {
-		return 0, nil
-	}
-
-	// Split by blank lines (one or more empty lines).
-	blocks := strings.Split(content, "\n\n")
-	count := 0
-	for _, block := range blocks {
-		block = strings.TrimSpace(block)
-		if block == "" {
-			continue
-		}
-		// A cue block starts with a sequence number (digits).
-		firstLine := strings.SplitN(block, "\n", 2)[0]
-		firstLine = strings.TrimSpace(firstLine)
-		if _, err := strconv.Atoi(firstLine); err == nil {
-			count++
-		}
-	}
-	return count, nil
-}
