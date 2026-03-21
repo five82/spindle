@@ -182,7 +182,17 @@ func (c *Config) LockPath() string {
 	return filepath.Join(runtimeDir(), "spindle.lock")
 }
 
-// DaemonLogPath returns the daemon log file path.
+// DaemonLogPath returns the daemon log symlink path (points to the active log file).
 func (c *Config) DaemonLogPath() string {
 	return filepath.Join(c.Paths.StateDir, "daemon.log")
+}
+
+// DaemonLogDir returns the directory where timestamped daemon log files are stored.
+func (c *Config) DaemonLogDir() string {
+	return c.Paths.StateDir
+}
+
+// PIDPath returns the daemon PID file path.
+func (c *Config) PIDPath() string {
+	return filepath.Join(runtimeDir(), "spindle.pid")
 }

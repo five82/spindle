@@ -24,14 +24,16 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
 **Start phase** (in `Start()`):
 1. **Acquire lock file** via `flock.TryLock()` (fail if another instance running).
-2. Run dependency checks (preflight).
-3. **Recover stale items**: Reset `in_progress` on any items left in-progress
+2. **Recover stale items**: Reset `in_progress` on any items left in-progress
    from a previous crash (see DESIGN_QUEUE.md Section 5).
-4. Start workflow manager (begins pipeline processing loop).
-5. Start disc monitor (prepare for detection events). Fatal if fails.
-6. Start netlink monitor (begin listening for udev events). Non-fatal if fails.
-7. Start HTTP API server (Unix socket + optional TCP). Fatal if fails.
-8. Set `running = true` via atomic bool.
+3. Start workflow manager (begins pipeline processing loop).
+4. Start disc monitor (prepare for detection events). Fatal if fails.
+5. Start netlink monitor (begin listening for udev events). Non-fatal if fails.
+6. Start HTTP API server (Unix socket + optional TCP). Fatal if fails.
+7. Set `running = true` via atomic bool.
+
+Note: Dependency checks (`deps.CheckBinaries()`) and status tracking run in
+`daemonrun.Run()` before `daemon.Start()` is called (see Section 3.1).
 
 ### 1.2 Shutdown Sequence
 

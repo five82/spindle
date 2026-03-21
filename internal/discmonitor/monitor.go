@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,31 @@ import (
 
 	"github.com/five82/spindle/internal/queue"
 )
+
+var (
+	leadingDigitPrefixRe = regexp.MustCompile(`^\d+_`)
+	seasonDiscSuffixRe   = regexp.MustCompile(`(?i)_S\d+_DISC_\d+$`)
+	tvSuffixRe           = regexp.MustCompile(`(?i)_TV$`)
+	allDigitsRe          = regexp.MustCompile(`^\d+$`)
+)
+
+// unusableLabels are generic disc labels that provide no useful identification.
+var unusableLabels = []string{
+	"logical_volume_id",
+	"volume_id",
+	"dvd_video",
+	"bluray",
+	"bd_rom",
+	"untitled",
+	"unknown disc",
+}
+
+// unusablePrefixes are label prefixes that indicate generic disc labels.
+var unusablePrefixes = []string{
+	"volume_",
+	"disk_",
+	"track_",
+}
 
 // DiscEvent represents a disc insertion or removal event.
 type DiscEvent struct {
@@ -168,4 +194,80 @@ func ValidateLabel(label string) bool {
 		}
 	}
 	return false
+}
+
+// IsUnusableLabel returns true if the label is semantically useless for
+// identification: empty, a known generic name, a known generic prefix, or
+// all digits.
+func IsUnusableLabel(label string) bool {
+	trimmed := strings.TrimSpace(label)
+	if trimmed == "" {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	for _, g := range unusableLabels {
+		if lower == g {
+			return true
+		}
+	}
+	for _, p := range unusablePrefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+	return allDigitsRe.MatchString(trimmed)
+}
+
+// ExtractDiscNameFromVolumeID cleans a volume ID into a human-readable disc name.
+func ExtractDiscNameFromVolumeID(volumeID string) string {
+	s := leadingDigitPrefixRe.ReplaceAllString(volumeID, "")
+	s = seasonDiscSuffixRe.ReplaceAllString(s, "")
+	s = tvSuffixRe.ReplaceAllString(s, "")
+	s = strings.ReplaceAll(s, "_", " ")
+	return strings.TrimSpace(s)
+}
+
+// shouldRefreshDiscTitle returns true if the disc title is empty or
+// a placeholder that should be replaced when better metadata is available.
+func shouldRefreshDiscTitle(title string) bool {
+	trimmed := strings.TrimSpace(title)
+	return trimmed == "" || strings.EqualFold(trimmed, "Unknown Disc")
+}
+
+// tryRefreshDiscTitle re-reads the disc label and updates the queue item's
+// title if a better label is available. All failures are non-fatal.
+// Called when a previously completed disc is re-inserted with a bad title.
+//
+//nolint:unused // building block for fingerprint-based duplicate detection pipeline
+func tryRefreshDiscTitle(ctx context.Context, store *queue.Store, item *queue.Item, device string, logger *slog.Logger) {
+	event, err := ProbeDisc(ctx, device)
+	if err != nil {
+		logger.Warn("title refresh probe failed",
+			"error", err,
+			"item_id", item.ID,
+		)
+		return
+	}
+	if event == nil || IsUnusableLabel(event.Label) {
+		return
+	}
+	name := ExtractDiscNameFromVolumeID(event.Label)
+	if name == "" || name == item.DiscTitle {
+		return
+	}
+	item.DiscTitle = name
+	if err := store.Update(item); err != nil {
+		logger.Warn("title refresh update failed",
+			"error", err,
+			"item_id", item.ID,
+		)
+		return
+	}
+	logger.Info("disc title refreshed on re-insertion",
+		"decision_type", "title_refresh",
+		"decision_result", "updated",
+		"decision_reason", "better label available from re-inserted disc",
+		"item_id", item.ID,
+		"new_title", name,
+	)
 }

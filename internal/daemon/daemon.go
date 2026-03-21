@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -32,6 +33,7 @@ type Daemon struct {
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 	shutdownCh  chan struct{}
+	running     atomic.Bool
 }
 
 // New creates a new daemon instance. discMon may be nil if no optical drive is configured.
@@ -140,12 +142,17 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.manager.Run(ctx)
 	}()
 
+	d.running.Store(true)
 	d.logger.Info("daemon started")
 	return nil
 }
 
+// IsRunning returns true if the daemon has been started and not yet stopped.
+func (d *Daemon) IsRunning() bool { return d.running.Load() }
+
 // Stop gracefully stops the daemon.
 func (d *Daemon) Stop() {
+	d.running.Store(false)
 	d.logger.Info("daemon stopping")
 
 	// Stop netlink monitor.

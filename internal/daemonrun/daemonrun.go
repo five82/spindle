@@ -8,7 +8,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/daemon"
@@ -39,11 +44,47 @@ import (
 
 // Run starts the daemon and blocks until shutdown signal.
 func Run(ctx context.Context, cfg *config.Config) error {
-	// Set up structured log capture for /api/logs.
+	// Clean old log files before opening a new one.
+	logDir := cfg.DaemonLogDir()
+	cleanOldLogs(logDir, cfg.Logging.RetentionDays)
+
+	// Open timestamped JSON log file.
+	logFileName := fmt.Sprintf("spindle-%s.log", time.Now().UTC().Format("20060102T150405.000Z"))
+	logFilePath := filepath.Join(logDir, logFileName)
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open daemon log: %w", err)
+	}
+	defer func() { _ = logFile.Close() }()
+
+	// Create symlink spindle.log -> active log file.
+	symlinkPath := cfg.DaemonLogPath()
+	_ = os.Remove(symlinkPath)
+	if err := os.Symlink(logFilePath, symlinkPath); err != nil {
+		// Hardlink fallback.
+		_ = os.Link(logFilePath, symlinkPath)
+	}
+
+	// Set up logging: stderr (INFO) + file (DEBUG, toggleable via SIGUSR1).
+	var fileLevel slog.LevelVar
+	fileLevel.Set(slog.LevelDebug)
+	stderrHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
+	fileHandler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: &fileLevel})
+	multi := newMultiHandler(stderrHandler, fileHandler)
+
 	logBuffer := httpapi.NewLogBuffer(0) // default capacity
-	innerHandler := slog.Default().Handler()
-	slog.SetDefault(slog.New(httpapi.NewLogHandler(innerHandler, logBuffer)))
+	slog.SetDefault(slog.New(httpapi.NewLogHandler(multi, logBuffer)))
 	logger := slog.Default()
+
+	// Write PID file.
+	pidPath := cfg.PIDPath()
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		logger.Warn("failed to write PID file", "error", err, "path", pidPath)
+	} else {
+		defer func() { _ = os.Remove(pidPath) }()
+	}
+
+	logger.Info("daemon log file opened", "path", logFilePath)
 
 	// Open queue database.
 	store, err := queue.Open(cfg.QueueDBPath())
@@ -139,6 +180,34 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
+	// SIGQUIT: dump goroutine stacks to stderr (non-fatal, continues running).
+	quitCh := make(chan os.Signal, 1)
+	signal.Notify(quitCh, syscall.SIGQUIT)
+	go func() {
+		for range quitCh {
+			buf := make([]byte, 1<<20) // 1 MiB
+			n := runtime.Stack(buf, true)
+			_, _ = os.Stderr.Write(buf[:n])
+		}
+	}()
+	defer signal.Stop(quitCh)
+
+	// SIGUSR1: toggle daemon log file level between DEBUG and INFO.
+	usr1Ch := make(chan os.Signal, 1)
+	signal.Notify(usr1Ch, syscall.SIGUSR1)
+	go func() {
+		for range usr1Ch {
+			if fileLevel.Level() == slog.LevelDebug {
+				fileLevel.Set(slog.LevelInfo)
+				logger.Info("daemon log level raised to INFO via SIGUSR1")
+			} else {
+				fileLevel.Set(slog.LevelDebug)
+				logger.Info("daemon log level lowered to DEBUG via SIGUSR1")
+			}
+		}
+	}()
+	defer signal.Stop(usr1Ch)
+
 	// Wait for shutdown signal or HTTP stop request.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -153,4 +222,28 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	d.Stop()
 	return d.Close()
+}
+
+// cleanOldLogs removes timestamped daemon log files older than retentionDays.
+func cleanOldLogs(dir string, retentionDays int) {
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "spindle-") || !strings.HasSuffix(e.Name(), ".log") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }

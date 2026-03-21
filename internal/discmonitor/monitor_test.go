@@ -105,6 +105,90 @@ func TestValidateLabel(t *testing.T) {
 	}
 }
 
+func TestIsUnusableLabel(t *testing.T) {
+	tests := []struct {
+		label string
+		want  bool
+	}{
+		// Unusable: empty/whitespace
+		{"", true},
+		{"   ", true},
+		{"\t", true},
+		// Unusable: generic exact matches
+		{"LOGICAL_VOLUME_ID", true},
+		{"logical_volume_id", true},
+		{"VOLUME_ID", true},
+		{"DVD_VIDEO", true},
+		{"BLURAY", true},
+		{"BD_ROM", true},
+		{"UNTITLED", true},
+		{"UNKNOWN DISC", true},
+		{"Unknown Disc", true},
+		// Unusable: generic prefixes
+		{"VOLUME_1", true},
+		{"DISK_01", true},
+		{"TRACK_03", true},
+		// Unusable: all digits
+		{"12345", true},
+		{"0", true},
+		// Usable
+		{"MY_MOVIE", false},
+		{"The Matrix", false},
+		{"DISC1", false},
+		{"a", false},
+	}
+	for _, tt := range tests {
+		got := IsUnusableLabel(tt.label)
+		if got != tt.want {
+			t.Errorf("IsUnusableLabel(%q) = %v, want %v", tt.label, got, tt.want)
+		}
+	}
+}
+
+func TestExtractDiscNameFromVolumeID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"MOVIE_TITLE", "MOVIE TITLE"},
+		{"01_MOVIE_TITLE", "MOVIE TITLE"},
+		{"SHOW_S01_DISC_01", "SHOW"},
+		{"SHOW_TV", "SHOW"},
+		{"01_MY_SHOW_TV", "MY SHOW"},
+		{"JUST_UNDERSCORES", "JUST UNDERSCORES"},
+		{"", ""},
+		{"NOCHANGE", "NOCHANGE"},
+		{"99_TITLE_S02_DISC_03", "TITLE"},
+	}
+	for _, tt := range tests {
+		got := ExtractDiscNameFromVolumeID(tt.input)
+		if got != tt.want {
+			t.Errorf("ExtractDiscNameFromVolumeID(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestShouldRefreshDiscTitle(t *testing.T) {
+	tests := []struct {
+		title string
+		want  bool
+	}{
+		{"", true},
+		{"  ", true},
+		{"Unknown Disc", true},
+		{"unknown disc", true},
+		{"UNKNOWN DISC", true},
+		{"My Movie", false},
+		{"a", false},
+	}
+	for _, tt := range tests {
+		got := shouldRefreshDiscTitle(tt.title)
+		if got != tt.want {
+			t.Errorf("shouldRefreshDiscTitle(%q) = %v, want %v", tt.title, got, tt.want)
+		}
+	}
+}
+
 func TestNewDefaults(t *testing.T) {
 	m := New("", nil, nil)
 	if m.device != "/dev/sr0" {
