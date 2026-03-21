@@ -137,21 +137,31 @@ func (m *Manager) Run(ctx context.Context) {
 		}
 		ps := p.stages[idx]
 
+		// Mark in_progress synchronously before spawning goroutine to prevent
+		// the poll loop from picking up the same item on the next iteration.
+		item.InProgress = 1
+		if err := m.store.Update(item); err != nil {
+			p.logger.Error("persist in_progress failed",
+				"item_id", item.ID,
+				"error", err,
+			)
+			continue
+		}
+
 		go func() {
 			if ps.Semaphore != SemNone {
 				if !m.acquireSem(ctx, ps.Semaphore) {
+					// Release the in_progress flag if we can't acquire the semaphore.
+					item.InProgress = 0
+					if err := m.store.Update(item); err != nil {
+						p.logger.Error("release in_progress after sem cancel failed",
+							"item_id", item.ID,
+							"error", err,
+						)
+					}
 					return
 				}
 				defer m.releaseSem(ps.Semaphore)
-			}
-
-			item.InProgress = 1
-			if err := m.store.Update(item); err != nil {
-				p.logger.Error("persist in_progress failed",
-					"item_id", item.ID,
-					"error", err,
-				)
-				return
 			}
 
 			m.processItem(ctx, item, ps)
