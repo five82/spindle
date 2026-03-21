@@ -270,10 +270,12 @@ func (c *Client) doWithRetry(ctx context.Context, fn func() ([]byte, error)) ([]
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
+			timer := time.NewTimer(retryDelay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return nil, ctx.Err()
-			case <-time.After(retryDelay):
+			case <-timer.C:
 			}
 		}
 
