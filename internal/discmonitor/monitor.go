@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/queue"
 )
 
@@ -144,6 +145,146 @@ func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
 	}
 
 	return event, nil
+}
+
+// EnqueueResult describes the outcome of DetectAndEnqueue.
+type EnqueueResult struct {
+	Item      *queue.Item `json:"item"`
+	Event     *DiscEvent  `json:"event"`
+	Duplicate bool        `json:"duplicate"` // true if an existing in-workflow item was found
+}
+
+// DetectAndEnqueue runs the full disc detection pipeline: probe, fingerprint,
+// duplicate check, and queue submission. Returns nil result (not an error) when
+// detection is skipped (paused, busy, no disc). Per spec:
+//   - Duplicate fingerprint in workflow: return existing item, do not create new.
+//   - User-stopped item: do not reset for reprocessing.
+//   - Completed disc re-insertion: refresh title if unusable.
+func (m *Monitor) DetectAndEnqueue(ctx context.Context) (*EnqueueResult, error) {
+	event, err := m.Detect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if event == nil {
+		return nil, nil
+	}
+
+	m.logger.Info("disc detected, starting enqueue pipeline",
+		"event_type", "disc_detected",
+		"label", event.Label,
+		"disc_type", event.DiscType,
+		"device", event.Device,
+	)
+
+	// Resolve mount point for fingerprinting.
+	mountPoint, cleanup, err := resolveMountPoint(ctx, event.Device, event.MountPath)
+	if err != nil {
+		m.logger.Error("mount resolution failed",
+			"error", err,
+			"device", event.Device,
+			"event_type", "fingerprint_error",
+			"error_hint", "disc may not be mounted; check fstab or mount manually",
+		)
+		return nil, fmt.Errorf("resolve mount point: %w", err)
+	}
+	defer cleanup()
+
+	// Compute fingerprint.
+	fp, err := fingerprint.Generate(mountPoint)
+	if err != nil {
+		m.logger.Error("fingerprint computation failed",
+			"error", err,
+			"mount_point", mountPoint,
+			"event_type", "fingerprint_error",
+			"error_hint", "disc filesystem may be unreadable",
+		)
+		return nil, fmt.Errorf("compute fingerprint: %w", err)
+	}
+
+	m.logger.Info("disc fingerprint computed",
+		"fingerprint", fp,
+		"mount_point", mountPoint,
+		"disc_type", event.DiscType,
+	)
+
+	if m.store == nil {
+		return nil, fmt.Errorf("queue store not configured")
+	}
+
+	// Check for existing item with same fingerprint.
+	existing, err := m.store.FindByFingerprint(fp)
+	if err != nil {
+		return nil, fmt.Errorf("check duplicate fingerprint: %w", err)
+	}
+
+	if existing != nil {
+		return m.handleExistingItem(ctx, existing, event, fp)
+	}
+
+	// Extract title from disc label.
+	title := ExtractDiscNameFromVolumeID(event.Label)
+	if title == "" {
+		title = "Unknown Disc"
+	}
+
+	// Create new queue item.
+	item, err := m.store.NewDisc(title, fp)
+	if err != nil {
+		return nil, fmt.Errorf("create queue item: %w", err)
+	}
+
+	m.logger.Info("disc enqueued",
+		"decision_type", "disc_enqueue",
+		"decision_result", "created",
+		"decision_reason", "new disc fingerprint",
+		"item_id", item.ID,
+		"disc_title", title,
+		"fingerprint", fp,
+	)
+
+	return &EnqueueResult{Item: item, Event: event}, nil
+}
+
+// handleExistingItem processes a disc whose fingerprint already exists in the queue.
+func (m *Monitor) handleExistingItem(ctx context.Context, existing *queue.Item, event *DiscEvent, fp string) (*EnqueueResult, error) {
+	// User-stopped items are not reset for reprocessing.
+	if existing.Stage == queue.StageFailed && strings.Contains(existing.ReviewReason, "Stop requested by user") {
+		m.logger.Info("disc detection skipped (user-stopped item)",
+			"decision_type", "duplicate_detection",
+			"decision_result", "skipped",
+			"decision_reason", "item was intentionally stopped by user",
+			"item_id", existing.ID,
+			"fingerprint", fp,
+		)
+		return &EnqueueResult{Item: existing, Event: event, Duplicate: true}, nil
+	}
+
+	// Terminal items (completed/failed): allow re-insertion title refresh.
+	if existing.Stage == queue.StageCompleted || existing.Stage == queue.StageFailed {
+		if shouldRefreshDiscTitle(existing.DiscTitle) {
+			tryRefreshDiscTitle(ctx, m.store, existing, event.Device, m.logger)
+		}
+		m.logger.Info("disc already processed",
+			"decision_type", "duplicate_detection",
+			"decision_result", "skipped",
+			"decision_reason", "disc already in terminal stage",
+			"item_id", existing.ID,
+			"stage", existing.Stage,
+			"fingerprint", fp,
+		)
+		return &EnqueueResult{Item: existing, Event: event, Duplicate: true}, nil
+	}
+
+	// In-workflow duplicate: return existing item.
+	m.logger.Info("duplicate disc detected",
+		"decision_type", "duplicate_detection",
+		"decision_result", "skipped",
+		"decision_reason", "identical fingerprint already in workflow",
+		"item_id", existing.ID,
+		"stage", existing.Stage,
+		"fingerprint", fp,
+	)
+	return &EnqueueResult{Item: existing, Event: event, Duplicate: true}, nil
 }
 
 // ProbeDisc detects a loaded disc via lsblk and returns a DiscEvent.

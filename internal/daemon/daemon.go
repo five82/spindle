@@ -58,21 +58,16 @@ func New(cfg *config.Config, store *queue.Store, manager *workflow.Manager, api 
 					)
 					return
 				}
-				event, err := discMon.Detect(ctx)
+				result, err := discMon.DetectAndEnqueue(ctx)
 				if err != nil {
 					logger.Error("disc detection after netlink event failed",
 						"error", err,
 					)
 					return
 				}
-				if event == nil {
+				if result == nil {
 					return // paused, already processing, or no disc
 				}
-				logger.Info("disc detected via netlink",
-					"event_type", "netlink_disc_detected",
-					"label", event.Label,
-					"disc_type", event.DiscType,
-				)
 			},
 			discMon.IsPaused,
 			logger,
