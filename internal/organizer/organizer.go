@@ -78,6 +78,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		asset, ok := env.Assets.FindAsset(sourceStage, key)
 		if !ok || !asset.IsCompleted() {
+			logger.Warn("missing or incomplete asset",
+				"event_type", "organize_missing_asset",
+				"error_hint", fmt.Sprintf("no completed %s asset for %s", sourceStage, key),
+				"impact", "episode will not be organized",
+			)
 			continue
 		}
 
@@ -85,16 +90,44 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		destName := destFilename(&meta, key, filepath.Ext(asset.Path))
 		destPath := filepath.Join(libraryPath, destName)
 
+		// Validate edition appears in filename for movies with editions.
+		if meta.IsMovie() && meta.Edition != "" {
+			if err := validateEditionFilename(destName, meta.Edition); err != nil {
+				logger.Error("edition validation failed",
+					"event_type", "edition_validation_failed",
+					"error", err.Error(),
+				)
+				return err
+			}
+			logger.Info("edition validation passed",
+				"event_type", "edition_validation_passed",
+			)
+		}
+
 		// Check if exists and not overwriting.
 		if !h.cfg.Library.OverwriteExisting {
-			if _, err := os.Stat(destPath); err == nil {
-				logger.Info("file exists, skipping",
-					"decision_type", "organize_skip",
-					"decision_result", "skipped",
-					"decision_reason", "file already exists",
-					"path", destPath,
-				)
-				continue
+			if info, err := os.Stat(destPath); err == nil {
+				// Check for partial file from previous interrupted copy.
+				srcInfo, srcErr := os.Stat(asset.Path)
+				if srcErr == nil && info.Size() < srcInfo.Size() {
+					logger.Info("removing partial file from previous attempt",
+						"decision_type", "partial_cleanup",
+						"decision_result", "removed",
+						"decision_reason", fmt.Sprintf("target %d bytes < source %d bytes", info.Size(), srcInfo.Size()),
+						"path", destPath,
+					)
+					if err := os.Remove(destPath); err != nil {
+						return fmt.Errorf("remove partial file %s: %w", destPath, err)
+					}
+				} else {
+					logger.Info("file exists, skipping",
+						"decision_type", "organize_skip",
+						"decision_result", "skipped",
+						"decision_reason", "file already exists",
+						"path", destPath,
+					)
+					continue
+				}
 			}
 		}
 
@@ -267,6 +300,17 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 	}
 
 	logger.Info("review routing completed", "event_type", "stage_complete", "review_path", reviewPath)
+	return nil
+}
+
+// validateEditionFilename verifies that the edition suffix appears in the
+// final filename when edition metadata is present.
+func validateEditionFilename(filename, edition string) error {
+	expected := " - " + textutil.SanitizeDisplayName(edition)
+	base := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if !strings.HasSuffix(base, expected) {
+		return fmt.Errorf("edition validation failed: filename %q missing expected suffix %q", filename, expected)
+	}
 	return nil
 }
 

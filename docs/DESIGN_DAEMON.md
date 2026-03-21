@@ -14,13 +14,18 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 1. Load and validate configuration.
 2. Ensure directories exist.
 3. Open SQLite queue database (init schema if needed).
-4. Create workflow manager with configured poll interval.
-5. Create notification service.
-6. Create daemon instance with lock file path in `$XDG_RUNTIME_DIR/spindle.lock`.
-7. Create disc monitor (if optical drive configured).
-8. Create netlink monitor (if optical drive configured).
-9. Create HTTP API server (Unix socket at `$XDG_RUNTIME_DIR/spindle.sock`,
+4. Create notification service and external clients.
+5. Create optional services (disc ID cache, KeyDB catalog, rip cache).
+6. Create disc monitor (if optical drive configured).
+7. Create stage handlers (receive service references from steps 4-6).
+8. Create workflow manager with configured poll interval; configure stages.
+9. Create daemon instance with lock file path in `$XDG_RUNTIME_DIR/spindle.lock`.
+10. Create netlink monitor (if optical drive configured).
+11. Create HTTP API server (Unix socket at `$XDG_RUNTIME_DIR/spindle.sock`,
     optional TCP bind at `api.bind`).
+
+Note: The disc monitor is created before stage handlers so that the ripper
+handler can receive a reference for `PauseDisc()` / `ResumeDisc()` calls.
 
 **Start phase** (in `Start()`):
 1. **Acquire lock file** via `flock.TryLock()` (fail if another instance running).

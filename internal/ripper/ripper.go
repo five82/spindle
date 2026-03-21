@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
@@ -23,11 +25,12 @@ type Handler struct {
 	store    *queue.Store
 	notifier *notify.Notifier
 	cache    *ripcache.Store
+	monitor  *discmonitor.Monitor
 }
 
 // New creates a ripping handler.
-func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier, cache *ripcache.Store) *Handler {
-	return &Handler{cfg: cfg, store: store, notifier: notifier, cache: cache}
+func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier, cache *ripcache.Store, monitor *discmonitor.Monitor) *Handler {
+	return &Handler{cfg: cfg, store: store, notifier: notifier, cache: cache, monitor: monitor}
 }
 
 // Run executes the ripping stage.
@@ -66,6 +69,28 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Create ripped directory.
 	if err := os.MkdirAll(rippedDir, 0o755); err != nil {
 		return fmt.Errorf("create ripped dir: %w", err)
+	}
+
+	// Pause disc monitor during ripping to prevent polling interference.
+	if h.monitor != nil {
+		h.monitor.PauseDisc()
+		defer h.monitor.ResumeDisc()
+	}
+
+	// Drive readiness check for /dev/ device paths.
+	if strings.HasPrefix(h.cfg.MakeMKV.OpticalDrive, "/dev/") {
+		if err := discmonitor.WaitForReady(ctx, h.cfg.MakeMKV.OpticalDrive, logger); err != nil {
+			return fmt.Errorf("drive readiness: %w", err)
+		}
+	}
+
+	// Ensure MakeMKV settings are configured for track selection.
+	if err := makemkv.EnsureSettings(logger); err != nil {
+		logger.Warn("MakeMKV settings configuration failed",
+			"event_type", "makemkv_settings_warning",
+			"error_hint", err.Error(),
+			"impact", "ripping continues with existing MakeMKV settings",
+		)
 	}
 
 	// Select titles to rip based on media type.

@@ -21,6 +21,7 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/services"
 	"github.com/five82/spindle/internal/stage"
+	"github.com/five82/spindle/internal/staging"
 	"github.com/five82/spindle/internal/tmdb"
 )
 
@@ -118,6 +119,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"event_type", "stage_start",
 		"disc_title", item.DiscTitle,
 	)
+
+	// Clean stale staging directories (older than 48 hours).
+	cleanResult := staging.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
+	if cleanResult.Removed > 0 {
+		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
+	}
 
 	// Step 1: Check disc ID cache for fast path.
 	if h.discIDCache != nil && item.DiscFingerprint != "" {

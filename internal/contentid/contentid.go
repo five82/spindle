@@ -72,8 +72,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger.Info("episode identification stage started", "event_type", "stage_start")
 
 	// Step 1: Transcribe each ripped episode.
+	item.ProgressPercent = 10
+	item.ProgressMessage = "Phase 1/3 - Transcribing episodes"
+	_ = h.store.UpdateProgress(item)
+
+	episodeCount := len(env.Episodes)
 	discFPs := make(map[string]*textutil.Fingerprint)
-	for _, ep := range env.Episodes {
+	for i, ep := range env.Episodes {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -82,6 +87,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		if !ok || !asset.IsCompleted() {
 			continue
 		}
+
+		item.ActiveEpisodeKey = ep.Key
+		item.ProgressPercent = 10 + (40 * float64(i+1) / float64(episodeCount))
+		item.ProgressMessage = fmt.Sprintf("Phase 1/3 - Transcribing (%s)", ep.Key)
+		_ = h.store.UpdateProgress(item)
 
 		contentKey := fmt.Sprintf("%s:%s:0", item.DiscFingerprint, ep.Key)
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
@@ -111,6 +121,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 2: Download reference subtitles from OpenSubtitles.
+	item.ActiveEpisodeKey = ""
+	item.ProgressPercent = 50
+	item.ProgressMessage = "Phase 2/3 - Fetching reference subtitles"
+	_ = h.store.UpdateProgress(item)
+
 	refFPs, err := h.downloadReferences(ctx, logger, &env)
 	if err != nil {
 		logger.Warn("reference download failed",
@@ -147,6 +162,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 4: Build similarity matrix and run Hungarian algorithm.
+	item.ProgressPercent = 80
+	item.ProgressMessage = "Phase 3/3 - Matching episodes"
+	_ = h.store.UpdateProgress(item)
+
 	matches := h.matchEpisodes(logger, weightedDisc, weightedRef, &env)
 
 	// Step 5: Apply matches to envelope.
@@ -156,6 +175,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 		return err
 	}
+
+	item.ProgressPercent = 95
+	item.ProgressMessage = "Phase 3/3 - Episode identification complete"
+	_ = h.store.UpdateProgress(item)
 
 	logger.Info("episode identification stage completed", "event_type", "stage_complete")
 	return nil

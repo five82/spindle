@@ -116,9 +116,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	transcriber := transcription.New(cfg.Subtitles.WhisperXModel, cfg.Subtitles.WhisperXCUDAEnabled, cfg.Subtitles.WhisperXVADMethod, cfg.Subtitles.WhisperXHFToken, cfg.WhisperXCacheDir())
 
+	// Create disc monitor (if optical drive configured).
+	// Created before stage handlers so the ripper can pause/resume detection.
+	var discMon *discmonitor.Monitor
+	if cfg.MakeMKV.OpticalDrive != "" {
+		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, logger, store)
+	}
+
 	// Create stage handlers.
 	identifyHandler := identify.New(cfg, store, tmdbClient, llmClient, notifier, discIDStore, keydbCat)
-	ripperHandler := ripper.New(cfg, store, notifier, ripCacheStore)
+	ripperHandler := ripper.New(cfg, store, notifier, ripCacheStore, discMon)
 	contentidHandler := contentid.New(cfg, store, llmClient, osClient, transcriber)
 	encoderHandler := encoder.New(cfg, store, notifier)
 	audioHandler := audioanalysis.New(cfg, store, llmClient, transcriber)
@@ -157,12 +164,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		{Name: "subtitling", Handler: subtitleHandler, Stage: queue.StageAudioAnalysis, Semaphore: workflow.SemWhisperX},
 		{Name: "organizing", Handler: organizerHandler, Stage: queue.StageSubtitling, Semaphore: workflow.SemNone},
 	})
-
-	// Create disc monitor (if optical drive configured).
-	var discMon *discmonitor.Monitor
-	if cfg.MakeMKV.OpticalDrive != "" {
-		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, logger, store)
-	}
 
 	// Create HTTP API with shutdown channel.
 	shutdownCh := make(chan struct{})

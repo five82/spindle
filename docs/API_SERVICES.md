@@ -55,7 +55,21 @@ MSG codes classify MakeMKV diagnostic output:
 
 ### Settings Configuration
 
-`ensureMakeMKVSettings()` configures audio track selection before each rip.
+`EnsureSettings()` configures required MakeMKV settings before each rip by
+reading and updating `~/.MakeMKV/settings.conf`.
+
+**Required settings:**
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `app_DefaultSelectionString` | `-sel:all,+sel:video,+sel:audio,+sel:subtitle` | Ensure all video, audio, and subtitle tracks are selected for ripping |
+| `app_LibdriveIO` | `true` | Enable libdrive mode for direct disc access (required for UHD discs) |
+
+**Smart-update behavior:** Reads the existing settings file, checks whether all
+required settings match, and only writes the file if an update is needed.
+Existing user settings not in the required set are preserved. The settings
+directory (`~/.MakeMKV/`) is created if absent. Settings write failure is
+non-fatal (logged as warning, ripping continues).
 
 ### Device Argument Normalization
 
