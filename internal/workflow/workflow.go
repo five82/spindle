@@ -40,18 +40,27 @@ type pipelineState struct {
 	logger     *slog.Logger
 }
 
+// StatusObserver receives notifications about item processing outcomes.
+// Implementations must be goroutine-safe.
+type StatusObserver interface {
+	RecordSuccess(item *queue.Item)
+	RecordFailure(item *queue.Item, errMsg string)
+}
+
 // Manager runs the pipeline poll loop.
 type Manager struct {
 	store    *queue.Store
 	notifier *notify.Notifier
 	pipeline *pipelineState
+	observer StatusObserver
 }
 
-// New creates a workflow manager.
-func New(store *queue.Store, notifier *notify.Notifier, logger *slog.Logger) *Manager {
+// New creates a workflow manager. observer may be nil.
+func New(store *queue.Store, notifier *notify.Notifier, logger *slog.Logger, observer StatusObserver) *Manager {
 	return &Manager{
 		store:    store,
 		notifier: notifier,
+		observer: observer,
 		pipeline: &pipelineState{
 			logger: logger,
 		},
@@ -209,6 +218,10 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 			"error", err,
 		)
 	}
+
+	if m.observer != nil {
+		m.observer.RecordSuccess(item)
+	}
 }
 
 // handleStageFailure records failure state, notifies, and checks queue completion.
@@ -232,6 +245,10 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 		itemLogger.Error("persist after failure failed",
 			"error", updateErr,
 		)
+	}
+
+	if m.observer != nil {
+		m.observer.RecordFailure(item, err.Error())
 	}
 
 	if m.notifier != nil {

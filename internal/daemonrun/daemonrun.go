@@ -12,6 +12,7 @@ import (
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/daemon"
+	"github.com/five82/spindle/internal/deps"
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/httpapi"
@@ -38,6 +39,10 @@ import (
 
 // Run starts the daemon and blocks until shutdown signal.
 func Run(ctx context.Context, cfg *config.Config) error {
+	// Set up structured log capture for /api/logs.
+	logBuffer := httpapi.NewLogBuffer(0) // default capacity
+	innerHandler := slog.Default().Handler()
+	slog.SetDefault(slog.New(httpapi.NewLogHandler(innerHandler, logBuffer)))
 	logger := slog.Default()
 
 	// Open queue database.
@@ -82,8 +87,29 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	subtitleHandler := subtitle.New(cfg, store, osClient, transcriber)
 	organizerHandler := organizer.New(cfg, store, jfClient, notifier)
 
+	// Check dependencies and create status tracker.
+	depReqs := []deps.Requirement{
+		{Name: "makemkvcon", Command: "makemkvcon", Description: "MakeMKV CLI", Optional: false},
+		{Name: "ffmpeg", Command: "ffmpeg", Description: "FFmpeg media processor", Optional: false},
+		{Name: "ffprobe", Command: "ffprobe", Description: "FFprobe media analyzer", Optional: false},
+		{Name: "mkvmerge", Command: "mkvmerge", Description: "MKVToolNix merge tool", Optional: false},
+	}
+	depStatuses := deps.CheckBinaries(depReqs)
+	depResponses := make([]httpapi.DependencyResponse, len(depStatuses))
+	for i, s := range depStatuses {
+		depResponses[i] = httpapi.DependencyResponse{
+			Name:        s.Name,
+			Command:     s.Command,
+			Description: s.Description,
+			Optional:    s.Optional,
+			Available:   s.Available,
+			Detail:      s.Detail,
+		}
+	}
+	statusTracker := httpapi.NewStatusTracker(depResponses)
+
 	// Create workflow manager and configure stages.
-	manager := workflow.New(store, notifier, logger)
+	manager := workflow.New(store, notifier, logger, statusTracker)
 	manager.ConfigureStages([]workflow.PipelineStage{
 		{Name: "identification", Handler: identifyHandler, Stage: queue.StagePending, Semaphore: workflow.SemDisc},
 		{Name: "ripping", Handler: ripperHandler, Stage: queue.StageIdentification, Semaphore: workflow.SemDisc},
@@ -103,7 +129,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Create HTTP API with shutdown channel.
 	shutdownCh := make(chan struct{})
 	api := httpapi.New(store, cfg.API.Token, logger, discMon, shutdownCh,
-		httpapi.WithStatusInfo(httpapi.NewStatusInfo(cfg)))
+		httpapi.WithStatusInfo(httpapi.NewStatusInfo(cfg)),
+		httpapi.WithLogBuffer(logBuffer),
+		httpapi.WithStatusTracker(statusTracker))
 
 	// Create and start daemon.
 	d := daemon.New(cfg, store, manager, api, discMon, logger)

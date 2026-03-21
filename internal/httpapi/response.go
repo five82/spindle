@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"strings"
+	"sync"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/queue"
@@ -63,6 +64,8 @@ type EpisodeResponse struct {
 	EncodedPath               string            `json:"encodedPath,omitempty"`
 	SubtitledPath             string            `json:"subtitledPath,omitempty"`
 	FinalPath                 string            `json:"finalPath,omitempty"`
+	SubtitleSource            string            `json:"subtitleSource,omitempty"`
+	SubtitleLanguage          string            `json:"subtitleLanguage,omitempty"`
 	GeneratedSubtitleSource   string            `json:"generatedSubtitleSource,omitempty"`
 	GeneratedSubtitleLanguage string            `json:"generatedSubtitleLanguage,omitempty"`
 	GeneratedSubtitleDecision string            `json:"generatedSubtitleDecision,omitempty"`
@@ -88,12 +91,22 @@ type SubGenResponse struct {
 
 // StatusAPIResponse is the top-level /api/status response.
 type StatusAPIResponse struct {
-	Running      bool           `json:"running"`
-	PID          int            `json:"pid"`
-	QueueDBPath  string         `json:"queueDbPath"`
-	LockFilePath string         `json:"lockFilePath"`
-	Workflow     WorkflowStatus `json:"workflow"`
-	Dependencies []any          `json:"dependencies"`
+	Running      bool                 `json:"running"`
+	PID          int                  `json:"pid"`
+	QueueDBPath  string               `json:"queueDbPath"`
+	LockFilePath string               `json:"lockFilePath"`
+	Workflow     WorkflowStatus       `json:"workflow"`
+	Dependencies []DependencyResponse `json:"dependencies"`
+}
+
+// DependencyResponse reports an external dependency health check.
+type DependencyResponse struct {
+	Name        string `json:"name"`
+	Command     string `json:"command"`
+	Description string `json:"description"`
+	Optional    bool   `json:"optional"`
+	Available   bool   `json:"available"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 // WorkflowStatus aggregates queue stats.
@@ -116,6 +129,43 @@ func NewStatusInfo(cfg *config.Config) StatusInfo {
 		QueueDBPath:  cfg.QueueDBPath(),
 		LockFilePath: cfg.LockPath(),
 	}
+}
+
+// StatusTracker tracks last error, last item, and dependency status.
+// It implements workflow.StatusObserver and is goroutine-safe.
+type StatusTracker struct {
+	mu           sync.RWMutex
+	lastError    string
+	lastItem     *queue.Item
+	dependencies []DependencyResponse
+}
+
+// NewStatusTracker creates a StatusTracker with the given dependency results.
+func NewStatusTracker(deps []DependencyResponse) *StatusTracker {
+	return &StatusTracker{dependencies: deps}
+}
+
+// RecordSuccess records a successfully processed item.
+func (t *StatusTracker) RecordSuccess(item *queue.Item) {
+	t.mu.Lock()
+	t.lastItem = item
+	t.lastError = ""
+	t.mu.Unlock()
+}
+
+// RecordFailure records a failed item and error message.
+func (t *StatusTracker) RecordFailure(item *queue.Item, errMsg string) {
+	t.mu.Lock()
+	t.lastItem = item
+	t.lastError = errMsg
+	t.mu.Unlock()
+}
+
+// Snapshot returns the current status tracking state.
+func (t *StatusTracker) Snapshot() (lastError string, lastItem *queue.Item, deps []DependencyResponse) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lastError, t.lastItem, t.dependencies
 }
 
 // toItemResponse converts a queue.Item to the API response format.
@@ -308,6 +358,8 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 
 		// Subtitle generation info per episode
 		if rec, ok := subtitleByKey[strings.ToLower(ep.Key)]; ok {
+			resp.SubtitleSource = rec.Source
+			resp.SubtitleLanguage = rec.Language
 			resp.GeneratedSubtitleSource = rec.Source
 			resp.GeneratedSubtitleLanguage = rec.Language
 			resp.GeneratedSubtitleDecision = rec.OpenSubtitlesDecision

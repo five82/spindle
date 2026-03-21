@@ -317,7 +317,7 @@ func TestRetryFailedRouting(t *testing.T) {
 	item2.Stage = StageFailed
 	_ = store.Update(item2)
 
-	if err := store.RetryFailed(item1.ID, item2.ID); err != nil {
+	if _, err := store.RetryFailed(item1.ID, item2.ID); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 
@@ -343,7 +343,7 @@ func TestStopItemsAndOverride(t *testing.T) {
 	item.InProgress = 1
 	_ = store.Update(item)
 
-	if err := store.StopItems(item.ID); err != nil {
+	if _, err := store.StopItems(item.ID); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 
@@ -595,7 +595,7 @@ func TestClearAndClearCompleted(t *testing.T) {
 	_ = store.Update(item1)
 
 	// ClearCompleted should only remove completed items.
-	if err := store.ClearCompleted(); err != nil {
+	if _, err := store.ClearCompleted(); err != nil {
 		t.Fatalf("clear completed: %v", err)
 	}
 	all, _ := store.List()
@@ -607,7 +607,7 @@ func TestClearAndClearCompleted(t *testing.T) {
 	}
 
 	// Clear should remove everything.
-	if err := store.Clear(); err != nil {
+	if _, err := store.Clear(); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	all, _ = store.List()

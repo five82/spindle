@@ -200,14 +200,14 @@ func newQueueClearCmd() *cobra.Command {
 			defer func() { _ = store.Close() }()
 
 			if flagAll {
-				if err := store.Clear(); err != nil {
+				if _, err := store.Clear(); err != nil {
 					return err
 				}
 				fmt.Println(successStyle("All queue items removed"))
 				return nil
 			}
 			if flagCompleted {
-				if err := store.ClearCompleted(); err != nil {
+				if _, err := store.ClearCompleted(); err != nil {
 					return err
 				}
 				fmt.Println(successStyle("Completed queue items removed"))
@@ -249,9 +249,31 @@ func newQueueRetryCmd() *cobra.Command {
 				return fmt.Errorf("--episode requires exactly one item ID")
 			}
 
-			if len(args) == 0 && episode == "" {
+			if episode != "" {
+				id, err := strconv.ParseInt(args[0], 10, 64)
+				if err != nil {
+					return fmt.Errorf("invalid item ID: %s", args[0])
+				}
+				result, err := store.RetryEpisode(id, episode)
+				if err != nil {
+					return err
+				}
+				switch result {
+				case "retried":
+					fmt.Println(successStyle(fmt.Sprintf("Retried episode %s on item %d", episode, id)))
+				case "not_found":
+					return fmt.Errorf("item %d not found", id)
+				case "not_failed":
+					return fmt.Errorf("item %d is not in failed state", id)
+				case "episode_not_found":
+					return fmt.Errorf("episode %s not found in item %d", episode, id)
+				}
+				return nil
+			}
+
+			if len(args) == 0 {
 				// Retry all failed.
-				if err := store.RetryFailed(); err != nil {
+				if _, err := store.RetryFailed(); err != nil {
 					return err
 				}
 				fmt.Println(successStyle("All failed items retried"))
@@ -267,7 +289,7 @@ func newQueueRetryCmd() *cobra.Command {
 				ids = append(ids, id)
 			}
 
-			if err := store.RetryFailed(ids...); err != nil {
+			if _, err := store.RetryFailed(ids...); err != nil {
 				return err
 			}
 			fmt.Println(successStyle(fmt.Sprintf("Retried %d item(s)", len(ids))))
@@ -299,7 +321,7 @@ func newQueueStopCmd() *cobra.Command {
 				ids = append(ids, id)
 			}
 
-			if err := store.StopItems(ids...); err != nil {
+			if _, err := store.StopItems(ids...); err != nil {
 				return err
 			}
 			fmt.Println(successStyle(fmt.Sprintf("Stopped %d item(s)", len(ids))))

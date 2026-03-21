@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/five82/spindle/internal/ripspec"
 	_ "modernc.org/sqlite" // Pure-Go SQLite driver.
 )
 
@@ -325,26 +326,32 @@ func (s *Store) Remove(id int64) error {
 	})
 }
 
-// Clear deletes all items from the queue.
-func (s *Store) Clear() error {
-	return retryOnBusy(func() error {
-		_, err := s.db.Exec("DELETE FROM queue_items")
+// Clear deletes all items from the queue. Returns the number removed.
+func (s *Store) Clear() (int64, error) {
+	var count int64
+	err := retryOnBusy(func() error {
+		res, err := s.db.Exec("DELETE FROM queue_items")
 		if err != nil {
 			return fmt.Errorf("clear queue: %w", err)
 		}
+		count, _ = res.RowsAffected()
 		return nil
 	})
+	return count, err
 }
 
-// ClearCompleted deletes only completed items.
-func (s *Store) ClearCompleted() error {
-	return retryOnBusy(func() error {
-		_, err := s.db.Exec("DELETE FROM queue_items WHERE stage = ?", string(StageCompleted))
+// ClearCompleted deletes only completed items. Returns the number removed.
+func (s *Store) ClearCompleted() (int64, error) {
+	var count int64
+	err := retryOnBusy(func() error {
+		res, err := s.db.Exec("DELETE FROM queue_items WHERE stage = ?", string(StageCompleted))
 		if err != nil {
 			return fmt.Errorf("clear completed: %w", err)
 		}
+		count, _ = res.RowsAffected()
 		return nil
 	})
+	return count, err
 }
 
 // List returns items filtered by stages (or all if none given), ordered by created_at.
@@ -544,11 +551,14 @@ func (s *Store) ResetInProgressOnShutdown() error {
 
 // RetryFailed routes failed items back to their retry point.
 // Uses failed_at_stage if set, otherwise falls back to pending.
-func (s *Store) RetryFailed(ids ...int64) error {
+// Returns the number of items actually retried.
+func (s *Store) RetryFailed(ids ...int64) (int, error) {
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
-	return retryOnBusy(func() error {
+	var count int
+	err := retryOnBusy(func() error {
+		count = 0
 		for _, id := range ids {
 			item, err := s.GetByID(id)
 			if err != nil {
@@ -575,17 +585,93 @@ func (s *Store) RetryFailed(ids ...int64) error {
 			if err != nil {
 				return fmt.Errorf("retry failed %d: %w", id, err)
 			}
+			count++
 		}
 		return nil
 	})
+	return count, err
+}
+
+// RetryEpisode clears the failed status of a single episode within a queue item
+// and resets the item for reprocessing. Returns a result string:
+// "retried", "not_found", "not_failed", "episode_not_found".
+func (s *Store) RetryEpisode(id int64, episodeKey string) (string, error) {
+	item, err := s.GetByID(id)
+	if err != nil {
+		return "", fmt.Errorf("retry episode get %d: %w", id, err)
+	}
+	if item == nil {
+		return "not_found", nil
+	}
+	if item.Stage != StageFailed {
+		return "not_failed", nil
+	}
+	if item.RipSpecData == "" {
+		return "episode_not_found", nil
+	}
+
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err != nil {
+		return "", fmt.Errorf("retry episode parse ripspec %d: %w", id, err)
+	}
+
+	// Verify the episode exists.
+	found := false
+	for _, ep := range env.Episodes {
+		if strings.EqualFold(ep.Key, episodeKey) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "episode_not_found", nil
+	}
+
+	// Clear failed assets for this episode across all stages.
+	for _, kind := range []string{"encoded", "subtitled", "final"} {
+		env.Assets.ClearFailedAsset(kind, episodeKey)
+	}
+
+	// Re-serialize ripspec.
+	encoded, err := env.Encode()
+	if err != nil {
+		return "", fmt.Errorf("retry episode encode ripspec %d: %w", id, err)
+	}
+
+	// Reset item to retry from the failed stage.
+	targetStage := StagePending
+	if item.FailedAtStage != "" {
+		targetStage = Stage(item.FailedAtStage)
+	}
+
+	err = retryOnBusy(func() error {
+		_, err := s.db.Exec(`
+			UPDATE queue_items SET
+				stage = ?, in_progress = 0,
+				failed_at_stage = NULL, error_message = NULL,
+				needs_review = 0, review_reason = NULL,
+				rip_spec_data = ?,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?`,
+			string(targetStage), encoded, id,
+		)
+		return err
+	})
+	if err != nil {
+		return "", fmt.Errorf("retry episode update %d: %w", id, err)
+	}
+	return "retried", nil
 }
 
 // StopItems marks items as failed with a "Stop requested by user" review reason.
-func (s *Store) StopItems(ids ...int64) error {
+// Returns the number of items actually stopped.
+func (s *Store) StopItems(ids ...int64) (int, error) {
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
-	return retryOnBusy(func() error {
+	var count int
+	err := retryOnBusy(func() error {
+		count = 0
 		for _, id := range ids {
 			item, err := s.GetByID(id)
 			if err != nil {
@@ -610,9 +696,11 @@ func (s *Store) StopItems(ids ...int64) error {
 			if err != nil {
 				return fmt.Errorf("stop item %d: %w", id, err)
 			}
+			count++
 		}
 		return nil
 	})
+	return count, err
 }
 
 // collectItems reads all items from rows.
