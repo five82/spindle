@@ -139,7 +139,12 @@ func (m *Manager) Run(ctx context.Context) {
 
 		// Mark in_progress synchronously before spawning goroutine to prevent
 		// the poll loop from picking up the same item on the next iteration.
+		// Initialize progress state so external consumers (flyer) know which
+		// stage is active and stale progress from the prior stage is cleared.
 		item.InProgress = 1
+		item.ProgressStage = ps.Name
+		item.ProgressPercent = 0
+		item.ProgressMessage = ""
 		if err := m.store.Update(item); err != nil {
 			p.logger.Error("persist in_progress failed",
 				"item_id", item.ID,
@@ -212,9 +217,12 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		}
 	}
 
-	// Advance to next stage.
+	// Advance to next stage and finalize progress.
 	item.Stage = m.nextStage(item.Stage)
 	item.InProgress = 0
+	item.ProgressStage = ""
+	item.ProgressPercent = 0
+	item.ProgressMessage = ""
 
 	itemLogger.Info("stage completed",
 		"decision_type", "stage_execution",
