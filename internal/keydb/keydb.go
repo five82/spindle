@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,11 +28,16 @@ type Catalog struct {
 }
 
 // Lookup finds a title by disc ID. Returns empty string if not found.
+// The disc ID is normalized (0X prefix stripped, uppercased, validated as 40 hex chars).
 func (c *Catalog) Lookup(discID string) string {
 	if c == nil {
 		return ""
 	}
-	return c.entries[discID]
+	normalized, ok := normalizeDiscID(discID)
+	if !ok {
+		return ""
+	}
+	return c.entries[normalized]
 }
 
 // Size returns the number of entries in the catalog.
@@ -45,12 +51,20 @@ func (c *Catalog) Size() int {
 // LoadFromFile parses a KEYDB.cfg file and returns a Catalog.
 // Lines have the format: discID | title | extra...
 // Comment lines (starting with ;) and malformed lines are skipped.
-func LoadFromFile(path string) (*Catalog, error) {
+// Disc IDs are normalized (0X prefix stripped, uppercased, validated as 40 hex chars).
+// Titles are cleaned via the title extraction chain.
+// If stale is true, the file is older than 7 days and should be re-downloaded.
+func LoadFromFile(path string) (cat *Catalog, stale bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("keydb: open %s: %w", path, err)
+		return nil, false, fmt.Errorf("keydb: open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
+
+	// Check staleness.
+	if info, statErr := f.Stat(); statErr == nil {
+		stale = time.Since(info.ModTime()) > 7*24*time.Hour
+	}
 
 	entries := make(map[string]string)
 	scanner := bufio.NewScanner(f)
@@ -63,18 +77,108 @@ func LoadFromFile(path string) (*Catalog, error) {
 		if len(parts) < 2 {
 			continue
 		}
-		discID := strings.TrimSpace(parts[0])
-		title := strings.TrimSpace(parts[1])
-		if discID == "" || title == "" {
+		rawID := strings.TrimSpace(parts[0])
+		rawTitle := strings.TrimSpace(parts[1])
+		if rawID == "" || rawTitle == "" {
 			continue
 		}
-		entries[discID] = title
+		discID, ok := normalizeDiscID(rawID)
+		if !ok {
+			continue
+		}
+		entries[discID] = cleanTitle(rawTitle)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("keydb: scan %s: %w", path, err)
+		return nil, false, fmt.Errorf("keydb: scan %s: %w", path, err)
 	}
 
-	return &Catalog{entries: entries}, nil
+	return &Catalog{entries: entries}, stale, nil
+}
+
+// normalizeDiscID strips a 0X prefix, validates exactly 40 hex characters,
+// and returns the uppercased ID.
+func normalizeDiscID(raw string) (string, bool) {
+	s := strings.TrimPrefix(raw, "0X")
+	s = strings.TrimPrefix(s, "0x")
+	if len(s) != 40 {
+		return "", false
+	}
+	// Validate hex characters.
+	if _, err := hex.DecodeString(s); err != nil {
+		return "", false
+	}
+	return strings.ToUpper(s), true
+}
+
+// cleanTitle applies the title extraction chain. First non-empty result wins.
+func cleanTitle(raw string) string {
+	if t := extractAlias(raw); t != "" {
+		return t
+	}
+	if t := stripAlias(raw); t != "" {
+		return t
+	}
+	if t := normalizeDuplicateTitle(raw); t != "" {
+		return t
+	}
+	return raw
+}
+
+// extractAlias extracts bracketed content as the title alias.
+// e.g. "Foo [Bar]" -> "Bar"
+func extractAlias(title string) string {
+	start := strings.IndexByte(title, '[')
+	if start < 0 {
+		return ""
+	}
+	end := strings.LastIndexByte(title, ']')
+	if end <= start+1 {
+		return ""
+	}
+	return strings.TrimSpace(title[start+1 : end])
+}
+
+// stripAlias strips everything from the first '[' onward.
+// e.g. "Foo [extra]" -> "Foo"
+func stripAlias(title string) string {
+	idx := strings.IndexByte(title, '[')
+	if idx < 0 {
+		return ""
+	}
+	return strings.TrimSpace(title[:idx])
+}
+
+// normalizeDuplicateTitle unwraps "Title (Title)" patterns where the
+// parenthesized suffix exactly matches the prefix.
+// e.g. "Movie (Movie)" -> "Movie"
+func normalizeDuplicateTitle(title string) string {
+	// Find the last balanced parenthesized group.
+	end := len(title) - 1
+	if end < 2 || title[end] != ')' {
+		return ""
+	}
+	depth := 0
+	start := -1
+	for i := end; i >= 0; i-- {
+		if title[i] == ')' {
+			depth++
+		} else if title[i] == '(' {
+			depth--
+			if depth == 0 {
+				start = i
+				break
+			}
+		}
+	}
+	if start < 1 {
+		return ""
+	}
+	prefix := strings.TrimSpace(title[:start])
+	inner := strings.TrimSpace(title[start+1 : end])
+	if strings.EqualFold(prefix, inner) {
+		return prefix
+	}
+	return ""
 }
 
 // Download fetches a KeyDB zip file from url and extracts KEYDB.cfg into destDir.
@@ -152,18 +256,19 @@ func extractFile(zf *zip.File, dest string) error {
 // LoadOrDownload tries to load a catalog from path. If the file does not exist,
 // it downloads the KeyDB zip from url, extracts it to the directory containing
 // path, then loads the result.
-func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration) (*Catalog, error) {
-	cat, err := LoadFromFile(path)
+func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration) (*Catalog, bool, error) {
+	cat, stale, err := LoadFromFile(path)
 	if err == nil {
-		return cat, nil
+		return cat, stale, nil
 	}
 	if !os.IsNotExist(err) {
-		return nil, err
+		return nil, false, err
 	}
 
 	destDir := filepath.Dir(path)
 	if err := Download(ctx, url, destDir, timeout); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return LoadFromFile(path)
+	cat, stale, err = LoadFromFile(path)
+	return cat, stale, err
 }

@@ -31,7 +31,7 @@ func New(apiKey, baseURL, language string) *Client {
 		apiKey:   apiKey,
 		baseURL:  baseURL,
 		language: language,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   &http.Client{Timeout: 15 * time.Second},
 	}
 }
 

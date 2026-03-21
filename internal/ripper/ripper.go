@@ -90,6 +90,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		err := makemkv.Rip(ctx, h.cfg.MakeMKV.OpticalDrive, title.ID, rippedDir,
 			time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
+			h.cfg.MakeMKV.MinTitleLength,
 			func(p makemkv.RipProgress) {
 				item.ProgressPercent = p.Percent
 				item.ProgressMessage = p.Message

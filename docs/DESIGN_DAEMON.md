@@ -30,7 +30,6 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 4. Start disc monitor (prepare for detection events). Fatal if fails.
 5. Start netlink monitor (begin listening for udev events). Non-fatal if fails.
 6. Start HTTP API server (Unix socket + optional TCP). Fatal if fails.
-7. Set `running = true` via atomic bool.
 
 Note: Dependency checks (`deps.CheckBinaries()`) and status tracking run in
 `daemonrun.Run()` before `daemon.Start()` is called (see Section 3.1).
@@ -47,7 +46,6 @@ Note: Dependency checks (`deps.CheckBinaries()`) and status tracking run in
    retain their current stage so they resume from the correct point on restart.
    Failure here does not prevent shutdown.
 7. Release lock file via `d.lock.Unlock()`.
-8. Clear context references and set `running = false`.
 
 `Close()` calls `Stop()`, then closes the queue store.
 
@@ -266,14 +264,13 @@ user"`):
      temporarily without a restart.
 2. Create timestamped DEBUG-level JSON log file:
    `spindle-{YYYYMMDD}T{HHMMSS.sss}Z.log`.
-3. Write PID file (`spindle.pid`).
-4. Open queue store.
-5. Create notification service.
-6. Create workflow manager.
-7. Register all 7 stages via `ConfigureStages()`.
-8. Create daemon instance.
-9. Call `daemon.Start()`.
-10. Block on signal context until shutdown signal received.
+3. Open queue store.
+4. Create notification service.
+5. Create workflow manager.
+6. Register all 7 stages via `ConfigureStages()`.
+7. Create daemon instance.
+8. Call `daemon.Start()`.
+9. Block on signal context until shutdown signal received.
 
 **Log retention**: On startup, cleans old daemon log files exceeding
 `logging.retention_days`.

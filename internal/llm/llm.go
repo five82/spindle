@@ -50,9 +50,15 @@ func New(apiKey, baseURL, model, referer, title string, timeoutSeconds int) *Cli
 
 // chatRequest is the OpenAI-compatible chat completion request body.
 type chatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
+	Model          string          `json:"model"`
+	Messages       []chatMessage   `json:"messages"`
+	Temperature    float64         `json:"temperature"`
+	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+}
+
+// responseFormat constrains the LLM response to a specific format.
+type responseFormat struct {
+	Type string `json:"type"`
 }
 
 // chatMessage is a single message in the chat completion request.
@@ -84,7 +90,8 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
-		Temperature: 0,
+		Temperature:    0,
+		ResponseFormat: &responseFormat{Type: "json_object"},
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -92,8 +99,8 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	const maxAttempts = 3
-	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
+	const maxAttempts = 5
+	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second}
 
 	var lastErr error
 	for attempt := range maxAttempts {
@@ -168,7 +175,7 @@ func (c *Client) doRequest(ctx context.Context, bodyBytes []byte) (string, error
 
 	if resp.StatusCode != http.StatusOK {
 		httpErr := fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			return "", &retryableError{err: httpErr}
 		}
 		return "", httpErr

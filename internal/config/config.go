@@ -192,7 +192,3 @@ func (c *Config) DaemonLogDir() string {
 	return c.Paths.StateDir
 }
 
-// PIDPath returns the daemon PID file path.
-func (c *Config) PIDPath() string {
-	return filepath.Join(runtimeDir(), "spindle.pid")
-}

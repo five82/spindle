@@ -144,8 +144,8 @@ Selection reasons: `top_result`, `title_consistency_rerank`, `non_hi_preferred`,
 - Minimum 3-second interval between OpenSubtitles API calls (consistent with
   the rate limit enforced by the OpenSubtitles client; see API_SERVICES.md
   Section 3).
-- Retriable errors (rate limits) use exponential backoff with `MaxRateRetries`
-- Backoff: `InitialBackoff * 2^(attempt-1)`, capped at `MaxBackoff`
+- Retriable errors (rate limits, transient server errors) use fixed-delay retry
+  (3 retries, 5-second wait; see API_SERVICES.md Section 3)
 
 ---
 

@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -76,14 +75,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	slog.SetDefault(slog.New(httpapi.NewLogHandler(multi, logBuffer)))
 	logger := slog.Default()
 
-	// Write PID file.
-	pidPath := cfg.PIDPath()
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
-		logger.Warn("failed to write PID file", "error", err, "path", pidPath)
-	} else {
-		defer func() { _ = os.Remove(pidPath) }()
-	}
-
 	logger.Info("daemon log file opened", "path", logFilePath)
 
 	// Open queue database.
@@ -110,7 +101,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	var keydbCat *keydb.Catalog
-	keydbCat, _ = keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath)
+	if cat, stale, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath); loadErr == nil {
+		keydbCat = cat
+		if stale {
+			logger.Warn("keydb catalog is older than 7 days, consider re-downloading",
+				"path", cfg.MakeMKV.KeyDBPath)
+		}
+	}
 
 	var ripCacheStore *ripcache.Store
 	if cfg.RipCache.Enabled {
@@ -190,7 +187,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			_, _ = os.Stderr.Write(buf[:n])
 		}
 	}()
-	defer signal.Stop(quitCh)
+	defer func() { signal.Stop(quitCh); close(quitCh) }()
 
 	// SIGUSR1: toggle daemon log file level between DEBUG and INFO.
 	usr1Ch := make(chan os.Signal, 1)
@@ -206,7 +203,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			}
 		}
 	}()
-	defer signal.Stop(usr1Ch)
+	defer func() { signal.Stop(usr1Ch); close(usr1Ch) }()
 
 	// Wait for shutdown signal or HTTP stop request.
 	sigCh := make(chan os.Signal, 1)

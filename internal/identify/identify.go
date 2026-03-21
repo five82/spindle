@@ -177,7 +177,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Step 3: MakeMKV scan.
 	discInfo, err := makemkv.Scan(ctx, h.cfg.MakeMKV.OpticalDrive,
-		time.Duration(h.cfg.MakeMKV.InfoTimeout)*time.Second)
+		time.Duration(h.cfg.MakeMKV.InfoTimeout)*time.Second,
+		h.cfg.MakeMKV.MinTitleLength)
 	if err != nil {
 		return fmt.Errorf("makemkv scan: %w", err)
 	}

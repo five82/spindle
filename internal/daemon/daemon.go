@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
-	"sync/atomic"
+
 	"time"
 
 	"github.com/gofrs/flock"
@@ -30,10 +30,8 @@ type Daemon struct {
 	netlinkMon  *discmonitor.NetlinkMonitor
 	lock        *flock.Flock
 	logger      *slog.Logger
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	shutdownCh  chan struct{}
-	running     atomic.Bool
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // New creates a new daemon instance. discMon may be nil if no optical drive is configured.
@@ -44,8 +42,7 @@ func New(cfg *config.Config, store *queue.Store, manager *workflow.Manager, api 
 		manager:     manager,
 		api:         api,
 		discMonitor: discMon,
-		logger:      logger,
-		shutdownCh:  make(chan struct{}),
+		logger: logger,
 	}
 
 	// Create netlink monitor if optical drive is configured.
@@ -87,9 +84,6 @@ func New(cfg *config.Config, store *queue.Store, manager *workflow.Manager, api 
 
 // DiscMonitor returns the disc monitor, or nil if none is configured.
 func (d *Daemon) DiscMonitor() *discmonitor.Monitor { return d.discMonitor }
-
-// ShutdownCh returns a channel that is closed when the daemon should stop.
-func (d *Daemon) ShutdownCh() chan struct{} { return d.shutdownCh }
 
 // Start starts the daemon with lock file protection.
 func (d *Daemon) Start(ctx context.Context) error {
@@ -142,17 +136,12 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.manager.Run(ctx)
 	}()
 
-	d.running.Store(true)
 	d.logger.Info("daemon started")
 	return nil
 }
 
-// IsRunning returns true if the daemon has been started and not yet stopped.
-func (d *Daemon) IsRunning() bool { return d.running.Load() }
-
 // Stop gracefully stops the daemon.
 func (d *Daemon) Stop() {
-	d.running.Store(false)
 	d.logger.Info("daemon stopping")
 
 	// Stop netlink monitor.

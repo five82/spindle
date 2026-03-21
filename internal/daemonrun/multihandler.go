@@ -14,9 +14,9 @@ func newMultiHandler(handlers ...slog.Handler) slog.Handler {
 	return &multiHandler{handlers: handlers}
 }
 
-func (m *multiHandler) Enabled(_ context.Context, level slog.Level) bool {
+func (m *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	for _, h := range m.handlers {
-		if h.Enabled(context.Background(), level) {
+		if h.Enabled(ctx, level) {
 			return true
 		}
 	}

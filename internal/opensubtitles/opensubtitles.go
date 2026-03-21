@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -201,45 +202,42 @@ func (c *Client) rateLimit() {
 	c.lastCall = time.Now()
 }
 
-// doGet performs an authenticated HTTP GET request.
+// doGet performs an authenticated HTTP GET request with retry.
 func (c *Client) doGet(ctx context.Context, path string, params url.Values) ([]byte, error) {
 	u := c.baseURL + path
 	if len(params) > 0 {
 		u += "?" + params.Encode()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	c.setHeaders(req)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	return io.ReadAll(resp.Body)
+	return c.doWithRetry(ctx, func() ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		c.setHeaders(req)
+		return c.executeRequest(req)
+	})
 }
 
-// doPost performs an authenticated HTTP POST request with a JSON body.
+// doPost performs an authenticated HTTP POST request with a JSON body and retry.
 func (c *Client) doPost(ctx context.Context, path string, body any) ([]byte, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	c.setHeaders(req)
+	return c.doWithRetry(ctx, func() ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		c.setHeaders(req)
+		return c.executeRequest(req)
+	})
+}
 
+// executeRequest performs a single HTTP request and returns the response body.
+func (c *Client) executeRequest(req *http.Request) ([]byte, error) {
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -247,10 +245,64 @@ func (c *Client) doPost(ctx context.Context, path string, body any) ([]byte, err
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
+		return nil, &statusError{code: resp.StatusCode}
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// statusError records an HTTP status code for retry classification.
+type statusError struct {
+	code int
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("status %d", e.code)
+}
+
+// doWithRetry executes fn with fixed-delay retry on transient errors.
+// Retries up to 3 times with a 5-second wait between attempts.
+// Retriable: status 429, 502, 503, 504, timeouts, and connection errors.
+func (c *Client) doWithRetry(ctx context.Context, fn func() ([]byte, error)) ([]byte, error) {
+	const maxRetries = 3
+	const retryDelay = 5 * time.Second
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(retryDelay):
+			}
+		}
+
+		result, err := fn()
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+		if !isRetryable(err) {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
+}
+
+// isRetryable returns true if the error is transient and worth retrying.
+func isRetryable(err error) bool {
+	var se *statusError
+	if errors.As(err, &se) {
+		switch se.code {
+		case 429, 502, 503, 504:
+			return true
+		}
+		return false
+	}
+	// Retry on timeouts and connection errors.
+	return os.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // setHeaders adds the standard authentication and content-type headers.

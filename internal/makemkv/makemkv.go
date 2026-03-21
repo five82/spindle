@@ -41,12 +41,13 @@ type RipProgress struct {
 // Scan runs makemkvcon info on the given device and parses disc information.
 // The device string is normalized: empty defaults to "disc:0", paths starting
 // with /dev/ become "dev:<path>", and already-prefixed values pass through.
-func Scan(ctx context.Context, device string, timeout time.Duration) (*DiscInfo, error) {
+func Scan(ctx context.Context, device string, timeout time.Duration, minLength int) (*DiscInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	src := normalizeDevice(device)
-	cmd := exec.CommandContext(ctx, "makemkvcon", "--robot", "--progress=-same", "info", src, "--minlength=0")
+	minLenFlag := fmt.Sprintf("--minlength=%d", minLength)
+	cmd := exec.CommandContext(ctx, "makemkvcon", "--robot", "--progress=-same", "info", src, minLenFlag)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -75,13 +76,14 @@ func Scan(ctx context.Context, device string, timeout time.Duration) (*DiscInfo,
 
 // Rip runs makemkvcon mkv to rip a single title from disc to outputDir.
 // The progress callback, if non-nil, is called with progress updates.
-func Rip(ctx context.Context, device string, titleID int, outputDir string, timeout time.Duration, progress func(RipProgress)) error {
+func Rip(ctx context.Context, device string, titleID int, outputDir string, timeout time.Duration, minLength int, progress func(RipProgress)) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	src := normalizeDevice(device)
 	titleStr := strconv.Itoa(titleID)
-	cmd := exec.CommandContext(ctx, "makemkvcon", "--robot", "--progress=-same", "mkv", src, titleStr, outputDir, "--minlength=0")
+	minLenFlag := fmt.Sprintf("--minlength=%d", minLength)
+	cmd := exec.CommandContext(ctx, "makemkvcon", "--robot", "--progress=-same", "mkv", src, titleStr, outputDir, minLenFlag)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

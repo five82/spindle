@@ -83,7 +83,8 @@ func newCacheRipCmd() *cobra.Command {
 			// MakeMKV scan.
 			fmt.Printf("Scanning disc on %s...\n", device)
 			discInfo, err := makemkv.Scan(ctx, device,
-				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second)
+				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second,
+				cfg.MakeMKV.MinTitleLength)
 			if err != nil {
 				return fmt.Errorf("makemkv scan: %w", err)
 			}
@@ -140,6 +141,7 @@ func newCacheRipCmd() *cobra.Command {
 
 				ripErr := makemkv.Rip(ctx, device, title.ID, tempDir,
 					time.Duration(cfg.MakeMKV.RipTimeout)*time.Second,
+					cfg.MakeMKV.MinTitleLength,
 					func(p makemkv.RipProgress) {
 						fmt.Printf("\r  Progress: %.0f%%", p.Percent)
 					},

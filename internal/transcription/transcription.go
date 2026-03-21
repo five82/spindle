@@ -138,6 +138,8 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		"--output_format", "srt",
 		"--output_dir", req.OutputDir,
 		"--vad_method", s.vadMethod,
+		"--max_line_width", "42",
+		"--max_line_count", "2",
 	}
 	if s.cudaEnabled {
 		whisperArgs = append(whisperArgs, "--device", "cuda")

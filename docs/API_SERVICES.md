@@ -91,7 +91,7 @@ Auth: `Authorization: Bearer <tmdb_api_key>`
 
 Language: Configurable (default: `en-US`)
 
-HTTP timeout: **10 seconds** (hardcoded).
+HTTP timeout: **15 seconds** (hardcoded).
 
 ### Endpoints Used
 
@@ -122,7 +122,7 @@ Auth headers:
 
 Rate limiting: Minimum **3 seconds** between API calls (client-enforced).
 
-Exponential backoff: initial **2 seconds**, max **60 seconds**, **6 retries**.
+Fixed-delay retry: **3 retries**, **5 seconds** between attempts.
 
 Retriable conditions: status 429, 502, 503, 504, timeouts, connection errors.
 
@@ -325,23 +325,20 @@ Used during identification to improve TMDB search accuracy.
 
 ### KeyDB Catalog Management
 
-- **Lazy load**: Catalog file loaded on first `Lookup()` call, not at startup.
-- **Async refresh**: When catalog file is older than **7 days**, spawns background
-  goroutine to re-download. Does not block lookups.
-- **Synchronous download**: On first access when no local file exists.
+- **Eager load**: Catalog file loaded at daemon startup.
+- **Staleness warning**: When catalog file is older than **7 days**, logs a
+  warning suggesting re-download.
 - **Hex ID validation**: Strips "0X" prefix, validates exactly **40 hex characters**.
 - **Title extraction** (3-step chain, first non-empty result wins):
   1. `extractAlias()`: If title contains `[brackets]`, extract the bracketed
      content as the alias (e.g., `"Foo [Bar]"` -> `"Bar"`).
   2. `stripAlias()`: If no alias found, strip everything from the first `[`
      onward (e.g., `"Foo [extra]"` -> `"Foo"`).
-  3. `normalizeDuplicateTitle()`: Recursively unwrap `Title (Title)` patterns
-     where the parenthesized suffix exactly matches the prefix
+  3. `normalizeDuplicateTitle()`: Unwrap `Title (Title)` patterns where the
+     parenthesized suffix exactly matches the prefix
      (e.g., `"Movie (Movie)"` -> `"Movie"`). Uses balanced parenthesis
      matching to handle nested cases.
   4. Fallback: raw payload if all transforms produce empty.
-- **Concurrent protection**: `sync.RWMutex` for entries map, `sync.Mutex` for
-  remote refresh, `atomic.Bool` for refresh-in-progress flag.
 
 ---
 
