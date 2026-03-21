@@ -37,24 +37,14 @@ func newQueueListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items, err := acc.List()
+
+			var queueStages []queue.Stage
+			for _, s := range stages {
+				queueStages = append(queueStages, queue.Stage(strings.ToLower(s)))
+			}
+			items, err := acc.List(queueStages...)
 			if err != nil {
 				return err
-			}
-
-			// Filter by stage if specified.
-			if len(stages) > 0 {
-				stageSet := make(map[string]bool)
-				for _, s := range stages {
-					stageSet[strings.ToLower(s)] = true
-				}
-				var filtered []*queue.Item
-				for _, item := range items {
-					if stageSet[strings.ToLower(string(item.Stage))] {
-						filtered = append(filtered, item)
-					}
-				}
-				items = filtered
 			}
 
 			if len(items) == 0 {
@@ -259,13 +249,13 @@ func newQueueRetryCmd() *cobra.Command {
 					return err
 				}
 				switch result {
-				case "retried":
+				case queue.RetryResultRetried:
 					fmt.Println(successStyle(fmt.Sprintf("Retried episode %s on item %d", episode, id)))
-				case "not_found":
+				case queue.RetryResultNotFound:
 					return fmt.Errorf("item %d not found", id)
-				case "not_failed":
+				case queue.RetryResultNotFailed:
 					return fmt.Errorf("item %d is not in failed state", id)
-				case "episode_not_found":
+				case queue.RetryResultEpisodeNotFound:
 					return fmt.Errorf("episode %s not found in item %d", episode, id)
 				}
 				return nil

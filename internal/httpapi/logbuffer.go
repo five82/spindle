@@ -120,9 +120,16 @@ func (b *LogBuffer) Query(opts LogQueryOpts) ([]LogEntry, uint64) {
 		startIdx += b.cap
 	}
 
+	// When Since is set, binary search to skip entries we've already seen.
+	// Sequences are monotonically increasing in ring order.
+	scanStart := 0
+	if opts.Since > 0 {
+		scanStart = b.bsearchSince(startIdx, opts.Since)
+	}
+
 	// Collect matching entries.
 	var results []LogEntry
-	for i := 0; i < b.count; i++ {
+	for i := scanStart; i < b.count; i++ {
 		idx := (startIdx + i) % b.cap
 		e := b.entries[idx]
 
@@ -148,6 +155,22 @@ func (b *LogBuffer) Query(opts LogQueryOpts) ([]LogEntry, uint64) {
 	}
 
 	return results, next
+}
+
+// bsearchSince returns the ring-relative offset of the first entry with seq > since.
+// Must be called under b.mu.RLock. startIdx is the absolute ring index of the oldest entry.
+func (b *LogBuffer) bsearchSince(startIdx int, since uint64) int {
+	lo, hi := 0, b.count
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		idx := (startIdx + mid) % b.cap
+		if b.entries[idx].Seq <= since {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
 }
 
 func (b *LogBuffer) matchesFilter(e LogEntry, opts LogQueryOpts, minLevel int) bool {

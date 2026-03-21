@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/five82/spindle/internal/queue"
@@ -13,7 +14,7 @@ import (
 
 // Access provides read-only queue access.
 type Access interface {
-	List() ([]*queue.Item, error)
+	List(stages ...queue.Stage) ([]*queue.Item, error)
 	GetByID(id int64) (*queue.Item, error)
 	Stats() (map[queue.Stage]int, error)
 }
@@ -23,8 +24,10 @@ type StoreAccess struct {
 	Store *queue.Store
 }
 
-// List returns all queue items.
-func (a *StoreAccess) List() ([]*queue.Item, error) { return a.Store.List() }
+// List returns queue items, optionally filtered by stages.
+func (a *StoreAccess) List(stages ...queue.Stage) ([]*queue.Item, error) {
+	return a.Store.List(stages...)
+}
 
 // GetByID returns a single item by primary key.
 func (a *StoreAccess) GetByID(id int64) (*queue.Item, error) { return a.Store.GetByID(id) }
@@ -48,10 +51,18 @@ func NewHTTPAccess(socketPath, token string) *HTTPAccess {
 	}
 }
 
-// List returns all queue items via HTTP.
-func (a *HTTPAccess) List() ([]*queue.Item, error) {
+// List returns queue items via HTTP, optionally filtered by stages.
+func (a *HTTPAccess) List(stages ...queue.Stage) ([]*queue.Item, error) {
+	path := "/api/queue"
+	if len(stages) > 0 {
+		params := url.Values{}
+		for _, s := range stages {
+			params.Add("stage", string(s))
+		}
+		path += "?" + params.Encode()
+	}
 	var items []*queue.Item
-	if err := a.getJSON("/api/queue", &items); err != nil {
+	if err := a.getJSON(path, &items); err != nil {
 		return nil, err
 	}
 	return items, nil

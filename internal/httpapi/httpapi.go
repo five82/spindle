@@ -218,7 +218,7 @@ func (s *Server) handleQueueRetryEpisode(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to retry episode")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"result": result})
+	writeJSON(w, http.StatusOK, map[string]string{"result": string(result)})
 }
 
 func (s *Server) handleQueueStop(w http.ResponseWriter, r *http.Request) {

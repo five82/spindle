@@ -240,20 +240,25 @@ func (s *Store) FindByFingerprint(fp string) (*Item, error) {
 }
 
 // Update performs a full update of all mutable columns on the item.
-// Applies the stop-review override before writing.
+// Preserves user-initiated stop state: if the stored row has stage=failed
+// with "Stop requested by user" in review_reason, those fields are not overwritten.
 func (s *Store) Update(item *Item) error {
-	if err := s.applyStopReviewOverride(item); err != nil {
-		return err
-	}
-
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE queue_items SET
-				disc_title = ?, stage = ?, in_progress = ?,
+				disc_title = ?, stage = CASE
+					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN stage
+					ELSE ? END,
+				in_progress = ?,
 				failed_at_stage = ?, error_message = ?,
 				updated_at = CURRENT_TIMESTAMP,
 				rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?,
-				needs_review = ?, review_reason = ?,
+				needs_review = CASE
+					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN needs_review
+					ELSE ? END,
+				review_reason = CASE
+					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN review_reason
+					ELSE ? END,
 				progress_stage = ?, progress_percent = ?, progress_message = ?,
 				active_episode_key = ?, progress_bytes_copied = ?, progress_total_bytes = ?,
 				encoding_details_json = ?
@@ -272,25 +277,6 @@ func (s *Store) Update(item *Item) error {
 		}
 		return nil
 	})
-}
-
-// applyStopReviewOverride preserves user-initiated stop state. If the stored
-// item has stage=failed and review_reason contains "Stop requested by user",
-// the item is forced to maintain that state.
-func (s *Store) applyStopReviewOverride(item *Item) error {
-	stored, err := s.GetByID(item.ID)
-	if err != nil {
-		return err
-	}
-	if stored == nil {
-		return nil
-	}
-	if stored.Stage == StageFailed && strings.Contains(stored.ReviewReason, "Stop requested by user") {
-		item.Stage = StageFailed
-		item.NeedsReview = stored.NeedsReview
-		item.ReviewReason = stored.ReviewReason
-	}
-	return nil
 }
 
 // UpdateProgress updates only progress-related columns.
@@ -467,6 +453,20 @@ func (s *Store) Stats() (map[Stage]int, error) {
 	return result, rows.Err()
 }
 
+// HasActiveItems returns true if any item is in a non-terminal stage
+// (not completed or failed).
+func (s *Store) HasActiveItems() (bool, error) {
+	var count int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM queue_items WHERE stage NOT IN (?, ?)",
+		string(StageCompleted), string(StageFailed),
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("has active items: %w", err)
+	}
+	return count > 0, nil
+}
+
 // CheckHealth performs a full diagnostic check on the queue database.
 func (s *Store) CheckHealth() error {
 	// Check table exists.
@@ -592,22 +592,31 @@ func (s *Store) RetryFailed(ids ...int64) (int, error) {
 	return count, err
 }
 
+// RetryResult describes the outcome of a RetryEpisode operation.
+type RetryResult string
+
+const (
+	RetryResultRetried         RetryResult = "retried"
+	RetryResultNotFound        RetryResult = "not_found"
+	RetryResultNotFailed       RetryResult = "not_failed"
+	RetryResultEpisodeNotFound RetryResult = "episode_not_found"
+)
+
 // RetryEpisode clears the failed status of a single episode within a queue item
-// and resets the item for reprocessing. Returns a result string:
-// "retried", "not_found", "not_failed", "episode_not_found".
-func (s *Store) RetryEpisode(id int64, episodeKey string) (string, error) {
+// and resets the item for reprocessing.
+func (s *Store) RetryEpisode(id int64, episodeKey string) (RetryResult, error) {
 	item, err := s.GetByID(id)
 	if err != nil {
 		return "", fmt.Errorf("retry episode get %d: %w", id, err)
 	}
 	if item == nil {
-		return "not_found", nil
+		return RetryResultNotFound, nil
 	}
 	if item.Stage != StageFailed {
-		return "not_failed", nil
+		return RetryResultNotFailed, nil
 	}
 	if item.RipSpecData == "" {
-		return "episode_not_found", nil
+		return RetryResultEpisodeNotFound, nil
 	}
 
 	env, err := ripspec.Parse(item.RipSpecData)
@@ -624,7 +633,7 @@ func (s *Store) RetryEpisode(id int64, episodeKey string) (string, error) {
 		}
 	}
 	if !found {
-		return "episode_not_found", nil
+		return RetryResultEpisodeNotFound, nil
 	}
 
 	// Clear failed assets for this episode across all stages.
@@ -660,7 +669,7 @@ func (s *Store) RetryEpisode(id int64, episodeKey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("retry episode update %d: %w", id, err)
 	}
-	return "retried", nil
+	return RetryResultRetried, nil
 }
 
 // StopItems marks items as failed with a "Stop requested by user" review reason.

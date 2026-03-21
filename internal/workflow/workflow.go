@@ -302,18 +302,15 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 		return
 	}
 
-	items, err := m.store.List()
+	active, err := m.store.HasActiveItems()
 	if err != nil {
 		m.pipeline.logger.Error("check queue completion failed",
 			"error", err,
 		)
 		return
 	}
-
-	for _, it := range items {
-		if it.Stage != queue.StageCompleted && it.Stage != queue.StageFailed {
-			return
-		}
+	if active {
+		return
 	}
 
 	if notifyErr := m.notifier.Send(ctx, notify.EventQueueCompleted, "Queue completed", "All items have finished processing."); notifyErr != nil {

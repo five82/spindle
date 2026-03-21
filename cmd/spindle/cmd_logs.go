@@ -20,29 +20,54 @@ import (
 	"github.com/five82/spindle/internal/sockhttp"
 )
 
+// logFilter holds CLI filter flags for the logs command.
+type logFilter struct {
+	Component string
+	Lane      string
+	Request   string
+	ItemID    int64
+	Level     string
+}
+
+func (f logFilter) hasAny() bool {
+	return f.Component != "" || f.Lane != "" || f.Request != "" || f.ItemID != 0 || f.Level != ""
+}
+
+func (f logFilter) setParams(params url.Values) {
+	if f.Component != "" {
+		params.Set("component", f.Component)
+	}
+	if f.Lane != "" {
+		params.Set("lane", f.Lane)
+	}
+	if f.Request != "" {
+		params.Set("request", f.Request)
+	}
+	if f.ItemID != 0 {
+		params.Set("item", strconv.FormatInt(f.ItemID, 10))
+	}
+	if f.Level != "" {
+		params.Set("level", f.Level)
+	}
+}
+
 func newLogsCmd() *cobra.Command {
 	var (
-		follow    bool
-		lines     int
-		component string
-		lane      string
-		request   string
-		itemID    int64
-		level     string
+		follow bool
+		lines  int
+		filter logFilter
 	)
 	cmd := &cobra.Command{
 		Use:   "logs",
 		Short: "Display daemon logs",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			hasFilters := component != "" || lane != "" || request != "" || itemID != 0 || level != ""
-
 			// When filters are set or follow is requested, use the daemon API.
-			if hasFilters || follow {
+			if filter.hasAny() || follow {
 				lp, sp := lockPath(), socketPath()
 				if !daemonctl.IsRunning(lp, sp) {
 					return fmt.Errorf("daemon is not running (filters require the daemon API)")
 				}
-				return logsFromAPI(sp, lines, follow, component, lane, request, itemID, level)
+				return logsFromAPI(sp, lines, follow, filter)
 			}
 
 			// No filters: tail the log file directly.
@@ -61,43 +86,32 @@ func newLogsCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output")
 	cmd.Flags().IntVarP(&lines, "lines", "n", 10, "Number of lines to show")
-	cmd.Flags().StringVar(&component, "component", "", "Filter by component label")
-	cmd.Flags().StringVar(&lane, "lane", "", "Filter by processing lane")
-	cmd.Flags().StringVar(&request, "request", "", "Filter by request/correlation ID")
-	cmd.Flags().Int64VarP(&itemID, "item", "i", 0, "Filter by queue item ID")
-	cmd.Flags().StringVar(&level, "level", "", "Minimum log level (debug, info, warn, error)")
+	cmd.Flags().StringVar(&filter.Component, "component", "", "Filter by component label")
+	cmd.Flags().StringVar(&filter.Lane, "lane", "", "Filter by processing lane")
+	cmd.Flags().StringVar(&filter.Request, "request", "", "Filter by request/correlation ID")
+	cmd.Flags().Int64VarP(&filter.ItemID, "item", "i", 0, "Filter by queue item ID")
+	cmd.Flags().StringVar(&filter.Level, "level", "", "Minimum log level (debug, info, warn, error)")
 	return cmd
 }
 
 // logsFromAPI fetches logs from the daemon HTTP API.
-func logsFromAPI(socketPath string, limit int, follow bool, component, lane, request string, itemID int64, level string) error {
+func logsFromAPI(socketPath string, limit int, follow bool, filter logFilter) error {
 	client := sockhttp.NewUnixClient(socketPath, 10*time.Second)
 
+	// Build the static portion of the URL once; only "since" varies per poll.
+	baseParams := url.Values{}
+	filter.setParams(baseParams)
+	if limit > 0 {
+		baseParams.Set("limit", strconv.Itoa(limit))
+	}
+	baseParams.Set("tail", "1")
+	baseQuery := baseParams.Encode()
+
 	buildURL := func(since uint64) string {
-		params := url.Values{}
-		if component != "" {
-			params.Set("component", component)
-		}
-		if lane != "" {
-			params.Set("lane", lane)
-		}
-		if request != "" {
-			params.Set("request", request)
-		}
-		if itemID != 0 {
-			params.Set("item", strconv.FormatInt(itemID, 10))
-		}
-		if level != "" {
-			params.Set("level", level)
-		}
-		if limit > 0 {
-			params.Set("limit", strconv.Itoa(limit))
-		}
-		params.Set("tail", "1")
 		if since > 0 {
-			params.Set("since", strconv.FormatUint(since, 10))
+			return "http://localhost/api/logs?" + baseQuery + "&since=" + strconv.FormatUint(since, 10)
 		}
-		return "http://localhost/api/logs?" + params.Encode()
+		return "http://localhost/api/logs?" + baseQuery
 	}
 
 	fetchLogs := func(since uint64) ([]httpapi.LogEntry, uint64, error) {
