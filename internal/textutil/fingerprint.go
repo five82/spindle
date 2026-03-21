@@ -1,124 +1,114 @@
 package textutil
 
-import (
-	"math"
-	"regexp"
-	"strings"
-)
+import "math"
 
-// tokenSplitPattern matches non-alphanumeric character sequences for tokenization.
-var tokenSplitPattern = regexp.MustCompile(`[^a-z0-9]+`)
-
-// Fingerprint represents a term-frequency vector for text similarity comparison.
+// Fingerprint is a term-frequency vector with an L2 norm.
 type Fingerprint struct {
-	tokens map[string]float64
-	norm   float64
+	Terms map[string]float64
+	Norm  float64
 }
 
-// NewFingerprint creates a fingerprint from the provided text.
-// Returns nil if the text produces no valid tokens.
+// NewFingerprint creates an L2-normalized TF vector from text.
+// Returns nil if no valid tokens are produced.
 func NewFingerprint(text string) *Fingerprint {
 	tokens := Tokenize(text)
 	if len(tokens) == 0 {
 		return nil
 	}
-	counts := make(map[string]float64, len(tokens))
-	for _, token := range tokens {
-		counts[token]++
+	terms := make(map[string]float64, len(tokens))
+	for _, t := range tokens {
+		terms[t]++
 	}
-	var norm float64
-	for _, count := range counts {
-		norm += count * count
-	}
-	return &Fingerprint{
-		tokens: counts,
-		norm:   math.Sqrt(norm),
-	}
+	fp := &Fingerprint{Terms: terms}
+	fp.normalize()
+	return fp
 }
 
-// Tokenize splits text into lowercase tokens, filtering short tokens.
-func Tokenize(text string) []string {
-	lowered := strings.ToLower(text)
-	raw := tokenSplitPattern.Split(lowered, -1)
-	terms := make([]string, 0, len(raw))
-	for _, token := range raw {
-		token = strings.TrimSpace(token)
-		if len(token) < 3 {
-			continue
+func (f *Fingerprint) normalize() {
+	var sum float64
+	for _, v := range f.Terms {
+		sum += v * v
+	}
+	f.Norm = math.Sqrt(sum)
+	if f.Norm > 0 {
+		for k := range f.Terms {
+			f.Terms[k] /= f.Norm
 		}
-		terms = append(terms, token)
+		f.Norm = 1.0
 	}
-	return terms
 }
 
-// TokenCount returns the number of unique tokens in the fingerprint.
-func (f *Fingerprint) TokenCount() int {
-	if f == nil {
-		return 0
-	}
-	return len(f.tokens)
-}
-
-// WithIDF returns a new Fingerprint with TF-IDF weights applied.
-// Each term's count is multiplied by its IDF weight. The norm is recomputed.
+// WithIDF applies TF-IDF weights and returns a new fingerprint.
 // Terms absent from the IDF map retain their original weight.
+// Zero-weight terms are dropped. Returns nil if all terms are zeroed.
 func (f *Fingerprint) WithIDF(idf map[string]float64) *Fingerprint {
-	if f == nil || len(idf) == 0 {
-		return f
-	}
-	weighted := make(map[string]float64, len(f.tokens))
-	var norm float64
-	for token, count := range f.tokens {
-		w := count
-		if idfVal, ok := idf[token]; ok {
-			w *= idfVal
-		}
-		if w == 0 {
-			continue
-		}
-		weighted[token] = w
-		norm += w * w
-	}
-	if len(weighted) == 0 {
+	if f == nil {
 		return nil
 	}
-	return &Fingerprint{
-		tokens: weighted,
-		norm:   math.Sqrt(norm),
+	terms := make(map[string]float64, len(f.Terms))
+	for k, v := range f.Terms {
+		weight, ok := idf[k]
+		if !ok {
+			terms[k] = v
+			continue
+		}
+		w := v * weight
+		if w != 0 {
+			terms[k] = w
+		}
 	}
+	if len(terms) == 0 {
+		return nil
+	}
+	fp := &Fingerprint{Terms: terms}
+	fp.normalize()
+	return fp
 }
 
-// Corpus collects document frequency statistics for IDF computation.
+// Corpus tracks document frequency across fingerprints for IDF computation.
 type Corpus struct {
-	docCount int
-	docFreq  map[string]int
+	docFreq map[string]int
+	numDocs int
 }
 
-// NewCorpus creates an empty corpus.
-func NewCorpus() *Corpus {
-	return &Corpus{docFreq: make(map[string]int)}
-}
-
-// Add registers a fingerprint's unique terms in the corpus.
+// Add registers the unique terms in a fingerprint, incrementing their document count.
 func (c *Corpus) Add(fp *Fingerprint) {
-	if c == nil || fp == nil {
+	if fp == nil {
 		return
 	}
-	c.docCount++
-	for token := range fp.tokens {
-		c.docFreq[token]++
+	if c.docFreq == nil {
+		c.docFreq = make(map[string]int)
+	}
+	c.numDocs++
+	for k := range fp.Terms {
+		c.docFreq[k]++
 	}
 }
 
-// IDF computes inverse document frequency weights: log((N+1)/(1+df)) for each term.
+// IDF computes inverse document frequency weights as log((N+1)/(1+df)) for each term.
 func (c *Corpus) IDF() map[string]float64 {
-	if c == nil || c.docCount == 0 {
+	if c.docFreq == nil {
 		return nil
 	}
 	idf := make(map[string]float64, len(c.docFreq))
-	n := float64(c.docCount)
+	n := float64(c.numDocs)
 	for term, df := range c.docFreq {
 		idf[term] = math.Log((n + 1) / (1 + float64(df)))
 	}
 	return idf
+}
+
+// CosineSimilarity computes the cosine similarity between two fingerprints.
+// Returns 0 if either fingerprint is nil or has a zero norm.
+func CosineSimilarity(a, b *Fingerprint) float64 {
+	if a == nil || b == nil || a.Norm == 0 || b.Norm == 0 {
+		return 0
+	}
+	var dot float64
+	for k, va := range a.Terms {
+		if vb, ok := b.Terms[k]; ok {
+			dot += va * vb
+		}
+	}
+	return dot / (a.Norm * b.Norm)
 }

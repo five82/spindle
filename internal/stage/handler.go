@@ -2,19 +2,11 @@ package stage
 
 import (
 	"context"
-	"log/slog"
 
-	"spindle/internal/queue"
+	"github.com/five82/spindle/internal/queue"
 )
 
-// Handler describes the contract the workflow manager needs from each stage.
+// Handler is the interface that all pipeline stages must implement.
 type Handler interface {
-	Prepare(context.Context, *queue.Item) error
-	Execute(context.Context, *queue.Item) error
-	HealthCheck(context.Context) Health
-}
-
-// LoggerAware is implemented by stages that accept a per-item logger.
-type LoggerAware interface {
-	SetLogger(*slog.Logger)
+	Run(ctx context.Context, item *queue.Item) error
 }

@@ -1,78 +1,77 @@
 package config
 
 import (
-	_ "embed"
-	"errors"
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
-//go:embed sample_config.toml
-var sampleConfig string
-
-// Paths contains directory and bind address configuration.
-type Paths struct {
-	StagingDir            string `toml:"staging_dir"`
-	LibraryDir            string `toml:"library_dir"`
-	LogDir                string `toml:"log_dir"`
-	ReviewDir             string `toml:"review_dir"`
-	OpenSubtitlesCacheDir string `toml:"opensubtitles_cache_dir"`
-	WhisperXCacheDir      string `toml:"whisperx_cache_dir"`
-	APIBind               string `toml:"api_bind"`
-	APIToken              string `toml:"api_token"`
+// Config holds all Spindle configuration sections.
+type Config struct {
+	Paths         PathsConfig         `toml:"paths"`
+	API           APIConfig           `toml:"api"`
+	TMDB          TMDBConfig          `toml:"tmdb"`
+	Jellyfin      JellyfinConfig      `toml:"jellyfin"`
+	Library       LibraryConfig       `toml:"library"`
+	Notifications NotificationsConfig `toml:"notifications"`
+	Subtitles     SubtitlesConfig     `toml:"subtitles"`
+	RipCache      RipCacheConfig      `toml:"rip_cache"`
+	DiscIDCache   DiscIDCacheConfig   `toml:"disc_id_cache"`
+	MakeMKV       MakeMKVConfig       `toml:"makemkv"`
+	Encoding      EncodingConfig      `toml:"encoding"`
+	LLM           LLMConfig           `toml:"llm"`
+	Commentary    CommentaryConfig    `toml:"commentary"`
+	Logging       LoggingConfig       `toml:"logging"`
 }
 
-// TMDB contains configuration for The Movie Database API.
-type TMDB struct {
+// PathsConfig defines filesystem paths for staging, library, state, and review.
+type PathsConfig struct {
+	StagingDir string `toml:"staging_dir"`
+	LibraryDir string `toml:"library_dir"`
+	StateDir   string `toml:"state_dir"`
+	ReviewDir  string `toml:"review_dir"`
+}
+
+// APIConfig defines the HTTP API server settings.
+type APIConfig struct {
+	Bind  string `toml:"bind"`
+	Token string `toml:"token"`
+}
+
+// TMDBConfig defines The Movie Database API settings.
+type TMDBConfig struct {
 	APIKey   string `toml:"api_key"`
 	BaseURL  string `toml:"base_url"`
 	Language string `toml:"language"`
 }
 
-// Jellyfin contains configuration for Jellyfin Media Server integration.
-type Jellyfin struct {
+// JellyfinConfig defines Jellyfin server integration settings.
+type JellyfinConfig struct {
 	Enabled bool   `toml:"enabled"`
 	URL     string `toml:"url"`
 	APIKey  string `toml:"api_key"`
 }
 
-// Library contains configuration for the media library structure.
-type Library struct {
+// LibraryConfig defines media library directory structure settings.
+type LibraryConfig struct {
 	MoviesDir         string `toml:"movies_dir"`
 	TVDir             string `toml:"tv_dir"`
 	OverwriteExisting bool   `toml:"overwrite_existing"`
 }
 
-// Notifications contains configuration for ntfy push notifications.
-type Notifications struct {
-	NtfyTopic          string `toml:"ntfy_topic"`
-	RequestTimeout     int    `toml:"request_timeout"`
-	Identification     bool   `toml:"identification"`
-	Rip                bool   `toml:"rip"`
-	Encoding           bool   `toml:"encoding"`
-	Validation         bool   `toml:"validation"`
-	Organization       bool   `toml:"organization"`
-	Queue              bool   `toml:"queue"`
-	Review             bool   `toml:"review"`
-	Errors             bool   `toml:"errors"`
-	MinRipSeconds      int    `toml:"min_rip_seconds"`
-	QueueMinItems      int    `toml:"queue_min_items"`
-	DedupWindowSeconds int    `toml:"dedup_window_seconds"`
+// NotificationsConfig defines ntfy notification settings.
+type NotificationsConfig struct {
+	NtfyTopic      string `toml:"ntfy_topic"`
+	RequestTimeout int    `toml:"request_timeout"`
 }
 
-// Subtitles contains configuration for subtitle generation and retrieval.
-type Subtitles struct {
+// SubtitlesConfig defines subtitle generation pipeline settings.
+type SubtitlesConfig struct {
 	Enabled                bool     `toml:"enabled"`
 	MuxIntoMKV             bool     `toml:"mux_into_mkv"`
 	WhisperXModel          string   `toml:"whisperx_model"`
 	WhisperXCUDAEnabled    bool     `toml:"whisperx_cuda_enabled"`
 	WhisperXVADMethod      string   `toml:"whisperx_vad_method"`
-	WhisperXHuggingFace    string   `toml:"whisperx_hf_token"`
+	WhisperXHFToken        string   `toml:"whisperx_hf_token"`
 	OpenSubtitlesEnabled   bool     `toml:"opensubtitles_enabled"`
 	OpenSubtitlesAPIKey    string   `toml:"opensubtitles_api_key"`
 	OpenSubtitlesUserAgent string   `toml:"opensubtitles_user_agent"`
@@ -80,21 +79,19 @@ type Subtitles struct {
 	OpenSubtitlesLanguages []string `toml:"opensubtitles_languages"`
 }
 
-// RipCache contains configuration for the rip cache.
-type RipCache struct {
-	Enabled bool   `toml:"enabled"`
-	Dir     string `toml:"dir"`
-	MaxGiB  int    `toml:"max_gib"`
+// RipCacheConfig defines rip cache settings.
+type RipCacheConfig struct {
+	Enabled bool `toml:"enabled"`
+	MaxGiB  int  `toml:"max_gib"`
 }
 
-// DiscIDCache contains configuration for the disc ID to TMDB ID cache.
-type DiscIDCache struct {
-	Enabled bool   `toml:"enabled"` // Default: false
-	Path    string `toml:"path"`    // Default: ~/.cache/spindle/discid_cache.json
+// DiscIDCacheConfig defines disc ID cache settings.
+type DiscIDCacheConfig struct {
+	Enabled bool `toml:"enabled"`
 }
 
-// MakeMKV contains configuration for disc ripping.
-type MakeMKV struct {
+// MakeMKVConfig defines MakeMKV ripping settings.
+type MakeMKVConfig struct {
 	OpticalDrive         string `toml:"optical_drive"`
 	RipTimeout           int    `toml:"rip_timeout"`
 	InfoTimeout          int    `toml:"info_timeout"`
@@ -105,8 +102,13 @@ type MakeMKV struct {
 	KeyDBDownloadTimeout int    `toml:"keydb_download_timeout"`
 }
 
-// LLM contains shared LLM connection settings used by multiple features.
-type LLM struct {
+// EncodingConfig defines SVT-AV1 encoding settings.
+type EncodingConfig struct {
+	SVTAV1Preset int `toml:"svt_av1_preset"`
+}
+
+// LLMConfig defines LLM API settings for OpenRouter.
+type LLMConfig struct {
 	APIKey         string `toml:"api_key"`
 	BaseURL        string `toml:"base_url"`
 	Model          string `toml:"model"`
@@ -115,305 +117,72 @@ type LLM struct {
 	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
-// Workflow contains configuration for daemon timing and intervals.
-type Workflow struct {
-	QueuePollInterval  int `toml:"queue_poll_interval"`
-	ErrorRetryInterval int `toml:"error_retry_interval"`
-	HeartbeatInterval  int `toml:"heartbeat_interval"`
-	HeartbeatTimeout   int `toml:"heartbeat_timeout"`
-	DiscMonitorTimeout int `toml:"disc_monitor_timeout"`
-}
-
-// Logging contains configuration for log output.
-type Logging struct {
-	Format         string            `toml:"format"`
-	Level          string            `toml:"level"`
-	RetentionDays  int               `toml:"retention_days"`
-	StageOverrides map[string]string `toml:"stage_overrides"`
-}
-
-// Validation contains configuration for pipeline validation checks.
-type Validation struct {
-	// Encoding validation
-	EnforceDraptoValidation bool `toml:"enforce_drapto_validation"`
-
-	// Identification validation
-	MinVoteCountExactMatch int `toml:"min_vote_count_exact_match"`
-}
-
-// Encoding contains configuration for the Drapto AV1 encoding stage.
-type Encoding struct {
-	SVTAv1Preset int `toml:"svt_av1_preset"`
-}
-
-// Commentary contains configuration for commentary track detection.
-type Commentary struct {
-	// Enabled controls whether commentary detection runs during audio analysis.
-	Enabled bool `toml:"enabled"`
-	// WhisperXModel is the model to use for transcription (e.g., "large-v3-turbo").
-	// If empty, defaults to the subtitles model or "large-v3-turbo".
-	WhisperXModel string `toml:"whisperx_model"`
-	// SimilarityThreshold is the cosine similarity above which a track is considered
-	// a stereo downmix of the primary audio (not commentary). Default: 0.92
+// CommentaryConfig defines commentary track detection settings.
+type CommentaryConfig struct {
+	Enabled             bool    `toml:"enabled"`
+	WhisperXModel       string  `toml:"whisperx_model"`
 	SimilarityThreshold float64 `toml:"similarity_threshold"`
-	// ConfidenceThreshold is the LLM confidence required to classify a track as
-	// commentary. Default: 0.80
 	ConfidenceThreshold float64 `toml:"confidence_threshold"`
-	// LLM settings - if not set, falls back to [llm] settings
-	APIKey  string `toml:"api_key"`
-	BaseURL string `toml:"base_url"`
-	Model   string `toml:"model"`
 }
 
-// ContentID contains policy thresholds and rules for episode identification.
-type ContentID struct {
-	MinSimilarityScore           float64 `toml:"min_similarity_score"`
-	LowConfidenceReviewThreshold float64 `toml:"low_confidence_review_threshold"`
-	LLMVerifyThreshold           float64 `toml:"llm_verify_threshold"`
-	AnchorMinScore               float64 `toml:"anchor_min_score"`
-	AnchorMinScoreMargin         float64 `toml:"anchor_min_score_margin"`
-	BlockHighConfidenceDelta     float64 `toml:"block_high_confidence_delta"`
-	BlockHighConfidenceTopRatio  float64 `toml:"block_high_confidence_top_ratio"`
-	DiscBlockPaddingMin          int     `toml:"disc_block_padding_min"`
-	DiscBlockPaddingDivisor      int     `toml:"disc_block_padding_divisor"`
-	Disc1MustStartAtEpisode1     bool    `toml:"disc1_must_start_at_episode1"`
-	Disc2PlusMinStartEpisode     int     `toml:"disc2_plus_min_start_episode"`
+// LoggingConfig defines log retention settings.
+type LoggingConfig struct {
+	RetentionDays int `toml:"retention_days"`
 }
 
-// Config encapsulates all configuration values for Spindle.
-//
-// Configuration sections by subsystem:
-//   - Paths: directories and API bind address
-//   - TMDB: disc identification via The Movie Database
-//   - Jellyfin: media server library refresh integration
-//   - Library: output directory structure (movies/tv subdirs)
-//   - Notifications: ntfy push notification settings
-//   - Subtitles: OpenSubtitles + WhisperX configuration
-//   - RipCache: cached raw rips for re-encoding
-//   - DiscIDCache: disc ID to TMDB ID mapping cache
-//   - MakeMKV: disc ripping settings and keydb
-//   - Encoding: Drapto AV1 encoding settings
-//   - LLM: shared LLM connection settings for features that need AI
-//   - Commentary: commentary track detection via audio analysis
-//   - ContentID: episode identification policy thresholds and strategy rules
-//   - Workflow: daemon polling intervals and timeouts
-//   - Logging: log format, level, and retention
-//   - Validation: pipeline validation checks and thresholds
-type Config struct {
-	Paths         Paths         `toml:"paths"`
-	TMDB          TMDB          `toml:"tmdb"`
-	Jellyfin      Jellyfin      `toml:"jellyfin"`
-	Library       Library       `toml:"library"`
-	Notifications Notifications `toml:"notifications"`
-	Subtitles     Subtitles     `toml:"subtitles"`
-	RipCache      RipCache      `toml:"rip_cache"`
-	DiscIDCache   DiscIDCache   `toml:"disc_id_cache"`
-	MakeMKV       MakeMKV       `toml:"makemkv"`
-	Encoding      Encoding      `toml:"encoding"`
-	LLM           LLM           `toml:"llm"`
-	Commentary    Commentary    `toml:"commentary"`
-	ContentID     ContentID     `toml:"content_id"`
-	Workflow      Workflow      `toml:"workflow"`
-	Logging       Logging       `toml:"logging"`
-	Validation    Validation    `toml:"validation"`
-}
-
-// DefaultConfigPath returns the absolute path to the default configuration file location.
-func DefaultConfigPath() (string, error) {
-	return expandPath("~/.config/spindle/config.toml")
-}
-
-// Load locates, parses, and validates a configuration file. The returned config has all
-// path fields expanded and normalized.
-func Load(path string) (*Config, string, bool, error) {
-	cfg := Default()
-
-	resolvedPath, exists, err := resolveConfigPath(path)
+// cacheBaseDir returns the XDG cache base directory for Spindle.
+func cacheBaseDir() string {
+	dir, err := os.UserCacheDir()
 	if err != nil {
-		return nil, "", false, err
+		dir = filepath.Join(os.Getenv("HOME"), ".cache")
 	}
-
-	if exists {
-		file, err := os.Open(resolvedPath)
-		if err != nil {
-			return nil, "", false, fmt.Errorf("open config: %w", err)
-		}
-		defer file.Close()
-
-		decoder := toml.NewDecoder(file)
-		if err := decoder.Decode(&cfg); err != nil {
-			return nil, "", false, fmt.Errorf("parse config: %w", err)
-		}
-	}
-
-	if err := cfg.normalize(); err != nil {
-		return nil, "", false, err
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return nil, "", false, err
-	}
-
-	return &cfg, resolvedPath, exists, nil
+	return filepath.Join(dir, "spindle")
 }
 
-func resolveConfigPath(path string) (string, bool, error) {
-	if path != "" {
-		expanded, err := expandPath(path)
-		if err != nil {
-			return "", false, err
-		}
-		_, err = os.Stat(expanded)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return expanded, false, nil
-			}
-			return "", false, fmt.Errorf("stat config: %w", err)
-		}
-		return expanded, true, nil
+// runtimeDir returns XDG_RUNTIME_DIR with /tmp fallback.
+func runtimeDir() string {
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return dir
 	}
-
-	defaultPath, err := expandPath("~/.config/spindle/config.toml")
-	if err != nil {
-		return "", false, err
-	}
-
-	projectPath, err := filepath.Abs("spindle.toml")
-	if err != nil {
-		return "", false, err
-	}
-
-	if info, err := os.Stat(defaultPath); err == nil && !info.IsDir() {
-		return defaultPath, true, nil
-	}
-	if info, err := os.Stat(projectPath); err == nil && !info.IsDir() {
-		return projectPath, true, nil
-	}
-
-	return defaultPath, false, nil
+	return "/tmp"
 }
 
-// EnsureDirectories creates required directories for daemon operation.
-// LibraryDir is created on a best-effort basis so the daemon can run when
-// external storage is temporarily unavailable.
-func (c *Config) EnsureDirectories() error {
-	for _, dir := range []string{c.Paths.StagingDir, c.Paths.LogDir, c.Paths.ReviewDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create directory %q: %w", dir, err)
-		}
-	}
-	if strings.TrimSpace(c.Paths.LibraryDir) != "" {
-		// Best-effort to avoid failing config load when storage is offline.
-		_ = os.MkdirAll(c.Paths.LibraryDir, 0o755)
-	}
-	if c.RipCache.Enabled && strings.TrimSpace(c.RipCache.Dir) != "" {
-		if err := os.MkdirAll(c.RipCache.Dir, 0o755); err != nil {
-			return fmt.Errorf("create rip cache directory %q: %w", c.RipCache.Dir, err)
-		}
-	}
-	return nil
+// OpenSubtitlesCacheDir returns the auto-derived OpenSubtitles cache directory.
+func (c *Config) OpenSubtitlesCacheDir() string {
+	return filepath.Join(cacheBaseDir(), "opensubtitles")
 }
 
-// MakemkvBinary returns the MakeMKV executable name.
-func (c *Config) MakemkvBinary() string {
-	return "makemkvcon"
+// WhisperXCacheDir returns the auto-derived WhisperX transcription cache directory.
+func (c *Config) WhisperXCacheDir() string {
+	return filepath.Join(cacheBaseDir(), "whisperx")
 }
 
-// FFprobeBinary returns the ffprobe executable name used for media validation.
-func (c *Config) FFprobeBinary() string {
-	return "ffprobe"
+// RipCacheDir returns the auto-derived rip cache directory.
+func (c *Config) RipCacheDir() string {
+	return filepath.Join(cacheBaseDir(), "rips")
 }
 
-func expandPath(pathValue string) (string, error) {
-	if pathValue == "" {
-		return pathValue, nil
-	}
-	if strings.HasPrefix(pathValue, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		if pathValue == "~" {
-			pathValue = home
-		} else if len(pathValue) > 1 && (pathValue[1] == '/' || pathValue[1] == '\\') {
-			pathValue = filepath.Join(home, pathValue[2:])
-		}
-	}
-	cleaned := filepath.Clean(pathValue)
-	absolute, err := filepath.Abs(cleaned)
-	if err != nil {
-		return "", fmt.Errorf("resolve absolute path for %q: %w", cleaned, err)
-	}
-	return absolute, nil
+// DiscIDCachePath returns the auto-derived disc ID cache file path.
+func (c *Config) DiscIDCachePath() string {
+	return filepath.Join(cacheBaseDir(), "discid_cache.json")
 }
 
-// ExpandPath exposes the repository path expansion rules for other packages.
-func ExpandPath(pathValue string) (string, error) {
-	return expandPath(pathValue)
+// QueueDBPath returns the queue database path within the state directory.
+func (c *Config) QueueDBPath() string {
+	return filepath.Join(c.Paths.StateDir, "queue.db")
 }
 
-func defaultRipCacheDir() string {
-	if base, ok := os.LookupEnv("XDG_CACHE_HOME"); ok && strings.TrimSpace(base) != "" {
-		return filepath.Join(base, "spindle", "rips")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "~/.cache/spindle/rips"
-	}
-	return filepath.Join(home, ".cache", "spindle", "rips")
+// SocketPath returns the daemon Unix socket path.
+func (c *Config) SocketPath() string {
+	return filepath.Join(runtimeDir(), "spindle.sock")
 }
 
-// CreateSample writes a sample configuration file to the specified location.
-func CreateSample(path string) error {
-	sample := sampleConfig
-
-	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create config directory: %w", err)
-		}
-	}
-
-	if err := os.WriteFile(path, []byte(sample), 0o644); err != nil {
-		return fmt.Errorf("write sample config: %w", err)
-	}
-	return nil
+// LockPath returns the daemon lock file path.
+func (c *Config) LockPath() string {
+	return filepath.Join(runtimeDir(), "spindle.lock")
 }
 
-// GetLLM returns the shared LLM connection settings.
-// Fields are already trimmed by normalization.
-func (c *Config) GetLLM() LLM {
-	return c.LLM
-}
-
-// CommentaryLLM returns the LLM settings for commentary detection.
-// Falls back to [llm] settings when not explicitly configured.
-func (c *Config) CommentaryLLM() LLM {
-	cfg := LLM{
-		APIKey:         strings.TrimSpace(c.Commentary.APIKey),
-		BaseURL:        strings.TrimSpace(c.Commentary.BaseURL),
-		Model:          strings.TrimSpace(c.Commentary.Model),
-		Referer:        c.LLM.Referer,
-		Title:          defaultCommentaryTitle,
-		TimeoutSeconds: c.LLM.TimeoutSeconds,
-	}
-	// Fall back to [llm] settings for connection details
-	if cfg.APIKey == "" {
-		cfg.APIKey = c.LLM.APIKey
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = c.LLM.BaseURL
-	}
-	if cfg.Model == "" {
-		cfg.Model = c.LLM.Model
-	}
-	return cfg
-}
-
-// CommentaryWhisperXModel returns the WhisperX model for commentary detection,
-// falling back to the subtitles model when not explicitly configured.
-func (c *Config) CommentaryWhisperXModel() string {
-	if m := strings.TrimSpace(c.Commentary.WhisperXModel); m != "" {
-		return m
-	}
-	return c.Subtitles.WhisperXModel
+// DaemonLogPath returns the daemon log file path.
+func (c *Config) DaemonLogPath() string {
+	return filepath.Join(c.Paths.StateDir, "daemon.log")
 }

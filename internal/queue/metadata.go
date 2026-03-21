@@ -3,155 +3,79 @@ package queue
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"sort"
 	"strings"
+
+	"github.com/five82/spindle/internal/textutil"
 )
 
-// Metadata provides a minimal implementation of organizer.MetadataProvider.
+// Metadata holds denormalized TMDB metadata for display and path computation.
 type Metadata struct {
-	TitleValue     string `json:"title"`
-	LibraryPath    string `json:"library_path"`
-	FilenameValue  string `json:"filename"`
-	Movie          bool   `json:"movie"`
-	MediaType      string `json:"media_type"`
-	ShowTitle      string `json:"show_title"`
-	SeasonNumber   int    `json:"season_number"`
-	EpisodeNumbers []int  `json:"episode_numbers"`
-	Edition        string `json:"edition,omitempty"`
+	ID           int               `json:"id,omitempty"`
+	Title        string            `json:"title,omitempty"`
+	MediaType    string            `json:"media_type,omitempty"`
+	ShowTitle    string            `json:"show_title,omitempty"`
+	Year         string            `json:"year,omitempty"`
+	SeasonNumber int               `json:"season_number,omitempty"`
+	Movie        bool              `json:"movie,omitempty"`
+	Edition      string            `json:"edition,omitempty"`
+	Episodes     []MetadataEpisode `json:"episodes,omitempty"`
+	DisplayTitle string            `json:"display_title,omitempty"`
 }
 
-// MetadataFromJSON builds metadata from stored JSON, falling back to basic inference.
-
-func MetadataFromJSON(data, fallbackTitle string) Metadata {
-	meta := Metadata{TitleValue: fallbackTitle, FilenameValue: fallbackTitle}
-	_ = json.Unmarshal([]byte(data), &meta)
-	if meta.SeasonNumber < 0 {
-		meta.SeasonNumber = 0
-	}
-	meta.EpisodeNumbers = normalizeEpisodeNumbers(meta.EpisodeNumbers)
-	return meta
+// MetadataEpisode represents a single episode in TV metadata.
+type MetadataEpisode struct {
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
+	Title   string `json:"title,omitempty"`
 }
 
-// NewBasicMetadata constructs a metadata record using the provided title and
-// content type flag. Filenames are sanitized for filesystem safety.
-func NewBasicMetadata(title string, movie bool) Metadata {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = "Manual Import"
+// MetadataFromJSON deserializes metadata from the metadata_json column.
+// On error or empty data, returns basic metadata with the fallback title.
+func MetadataFromJSON(data string, fallbackTitle string) Metadata {
+	if data == "" {
+		return NewBasicMetadata(fallbackTitle, false)
 	}
-	mediaType := "tv"
-	if movie {
-		mediaType = "movie"
+	var m Metadata
+	if err := json.Unmarshal([]byte(data), &m); err != nil {
+		return NewBasicMetadata(fallbackTitle, false)
+	}
+	if m.Title == "" {
+		m.Title = fallbackTitle
+	}
+	return m
+}
+
+// NewBasicMetadata constructs minimal metadata with a title and movie flag.
+func NewBasicMetadata(title string, isMovie bool) Metadata {
+	mt := "tv"
+	if isMovie {
+		mt = "movie"
 	}
 	return Metadata{
-		TitleValue:    title,
-		FilenameValue: sanitizeFilename(title),
-		Movie:         movie,
-		MediaType:     mediaType,
+		Title:     title,
+		MediaType: mt,
+		Movie:     isMovie,
 	}
 }
 
-// NewTVMetadata builds a metadata record for episodic content.
-func NewTVMetadata(showTitle string, season int, episodeNumbers []int, displayTitle string) Metadata {
-	show := strings.TrimSpace(showTitle)
-	if show == "" {
-		show = strings.TrimSpace(displayTitle)
-	}
-	if show == "" {
-		show = "Manual Import"
-	}
-	if season < 1 {
-		season = 1
-	}
-	cleanEpisodes := normalizeEpisodeNumbers(episodeNumbers)
-	filename := buildEpisodeFilename(show, season, cleanEpisodes)
+// NewTVMetadata builds TV-specific metadata with show, season, episodes, and
+// display title.
+func NewTVMetadata(show string, season int, episodes []MetadataEpisode, display string) Metadata {
 	return Metadata{
-		TitleValue:     strings.TrimSpace(displayTitle),
-		FilenameValue:  filename,
-		Movie:          false,
-		MediaType:      "tv",
-		ShowTitle:      show,
-		SeasonNumber:   season,
-		EpisodeNumbers: cleanEpisodes,
+		Title:        show,
+		ShowTitle:    show,
+		MediaType:    "tv",
+		SeasonNumber: season,
+		Episodes:     episodes,
+		DisplayTitle: display,
 	}
 }
 
-// GetBaseFilename returns the filename without any edition suffix.
-// This is used for folder naming so all editions of a movie share one folder.
-func (m Metadata) GetBaseFilename() string {
-	value := m.FilenameValue
-	if strings.TrimSpace(value) == "" {
-		value = m.TitleValue
-	}
-	base := sanitizeFilename(value)
-	// Strip edition suffix if present
-	if edition := strings.TrimSpace(m.Edition); edition != "" {
-		suffix := " - " + edition
-		base = strings.TrimSuffix(base, suffix)
-	}
-	return base
-}
-
-func (m Metadata) GetLibraryPath(root, moviesDir, tvDir string) string {
-	if m.LibraryPath != "" {
-		return m.LibraryPath
-	}
-	if m.IsMovie() {
-		// Use base filename (without edition) for folder name so all editions
-		// of the same movie share one folder per Jellyfin requirements.
-		folder := m.GetBaseFilename()
-		if folder == "" {
-			folder = "Manual Import"
-		}
-		return filepath.Join(root, moviesDir, folder)
-	}
-	show := strings.TrimSpace(m.ShowTitle)
-	if show == "" {
-		show = strings.TrimSpace(m.TitleValue)
-	}
-	if show == "" {
-		show = "Manual Import"
-	}
-	season := m.SeasonNumber
-	if season <= 0 {
-		season = 1
-	}
-	showFolder := sanitizeFilename(show)
-	seasonFolder := fmt.Sprintf("Season %02d", season)
-	return filepath.Join(root, tvDir, showFolder, seasonFolder)
-}
-
-func (m Metadata) GetFilename() string {
-	// Handle TV shows that have explicit show title or episode information
-	if !m.IsMovie() {
-		show := strings.TrimSpace(m.ShowTitle)
-		hasExplicitTVInfo := show != "" || len(m.EpisodeNumbers) > 0
-		if hasExplicitTVInfo {
-			if show == "" {
-				show = strings.TrimSpace(m.TitleValue)
-			}
-			season := m.SeasonNumber
-			if season <= 0 {
-				season = 1
-			}
-			if label := buildEpisodeFilename(show, season, m.EpisodeNumbers); label != "" {
-				return label
-			}
-		}
-	}
-
-	// Fall back to base filename, with edition suffix for movies
-	base := m.GetBaseFilename()
-	if m.IsMovie() && strings.TrimSpace(m.Edition) != "" {
-		return base + " - " + strings.TrimSpace(m.Edition)
-	}
-	return base
-}
-
-func (m Metadata) IsMovie() bool {
-	mediaType := strings.ToLower(strings.TrimSpace(m.MediaType))
-	switch mediaType {
+// IsMovie returns true if the metadata indicates movie content.
+// Checks media_type first ("movie"/"film" = true, "tv"/"tv_show"/"television"/"series" = false),
+// then falls back to the Movie bool field.
+func (m *Metadata) IsMovie() bool {
+	switch strings.ToLower(m.MediaType) {
 	case "movie", "film":
 		return true
 	case "tv", "tv_show", "television", "series":
@@ -160,69 +84,92 @@ func (m Metadata) IsMovie() bool {
 	return m.Movie
 }
 
-func (m Metadata) Title() string      { return m.TitleValue }
-func (m Metadata) GetEdition() string { return strings.TrimSpace(m.Edition) }
-
-func buildEpisodeFilename(show string, season int, episodes []int) string {
-	show = sanitizeFilename(show)
-	if show == "" {
-		return ""
+// GetLibraryPath computes the target library folder via SafeJoin.
+// Movies: {root}/{moviesDir}/{baseFilename}
+// TV: {root}/{tvDir}/{show}/Season {NN}
+func (m *Metadata) GetLibraryPath(root, moviesDir, tvDir string) (string, error) {
+	if m.IsMovie() {
+		base := m.GetBaseFilename()
+		dir, err := textutil.SafeJoin(root, moviesDir)
+		if err != nil {
+			return "", err
+		}
+		return textutil.SafeJoin(dir, base)
 	}
-	if len(episodes) == 0 {
+
+	show := textutil.SanitizeDisplayName(m.ShowTitle)
+	if show == "" || show == "manual-import" {
+		show = textutil.SanitizeDisplayName(m.Title)
+	}
+
+	dir, err := textutil.SafeJoin(root, tvDir)
+	if err != nil {
+		return "", err
+	}
+	dir, err = textutil.SafeJoin(dir, show)
+	if err != nil {
+		return "", err
+	}
+	season := fmt.Sprintf("Season %02d", m.SeasonNumber)
+	return textutil.SafeJoin(dir, season)
+}
+
+// GetFilename returns the final output filename.
+// Movies: base filename + edition suffix.
+// TV: episode format via buildEpisodeFilename.
+func (m *Metadata) GetFilename() string {
+	if m.IsMovie() {
+		base := m.GetBaseFilename()
+		if m.Edition != "" {
+			return base + " - " + textutil.SanitizeDisplayName(m.Edition)
+		}
+		return base
+	}
+	return buildEpisodeFilename(m)
+}
+
+// GetBaseFilename returns the filename without edition suffix.
+func (m *Metadata) GetBaseFilename() string {
+	title := m.Title
+	if m.DisplayTitle != "" {
+		title = m.DisplayTitle
+	}
+	if title == "" {
+		title = "Manual Import"
+	}
+	name := textutil.SanitizeDisplayName(title)
+	if m.Year != "" {
+		name += " (" + m.Year + ")"
+	}
+	return name
+}
+
+// buildEpisodeFilename constructs TV episode filenames.
+// No episodes: "{Show} - Season {NN}"
+// Single episode: "{Show} - S{NN}E{NN}"
+// Multi-episode range: "{Show} - S{NN}E{NN}-E{NN}"
+func buildEpisodeFilename(m *Metadata) string {
+	show := textutil.SanitizeDisplayName(m.ShowTitle)
+	if show == "" || show == "manual-import" {
+		show = textutil.SanitizeDisplayName(m.Title)
+	}
+	if show == "" || show == "manual-import" {
+		show = "Manual Import"
+	}
+
+	season := m.SeasonNumber
+
+	if len(m.Episodes) == 0 {
 		return fmt.Sprintf("%s - Season %02d", show, season)
 	}
-	first := episodes[0]
-	last := episodes[len(episodes)-1]
-	if len(episodes) == 1 || first == last {
-		return fmt.Sprintf("%s - S%02dE%02d", show, season, first)
-	}
-	return fmt.Sprintf("%s - S%02dE%02d-E%02d", show, season, first, last)
-}
 
-func normalizeEpisodeNumbers(numbers []int) []int {
-	filtered := make([]int, 0, len(numbers))
-	for _, n := range numbers {
-		if n <= 0 {
-			continue
-		}
-		filtered = append(filtered, n)
+	if len(m.Episodes) == 1 {
+		ep := m.Episodes[0]
+		return fmt.Sprintf("%s - S%02dE%02d", show, ep.Season, ep.Episode)
 	}
-	if len(filtered) == 0 {
-		return nil
-	}
-	sort.Ints(filtered)
-	result := filtered[:1]
-	for _, n := range filtered[1:] {
-		if n != result[len(result)-1] {
-			result = append(result, n)
-		}
-	}
-	return result
-}
 
-func sanitizeFilename(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "manual-import"
-	}
-	replacer := strings.NewReplacer(
-		":", " ",
-		"-", " ",
-		"/", " ",
-		"\\", " ",
-		"?", "",
-		"\"", "",
-		"<", "",
-		">", "",
-		"|", "",
-		"*", "",
-		"\n", " ",
-		"\t", " ",
-	)
-	value = replacer.Replace(value)
-	fields := strings.Fields(value)
-	if len(fields) == 0 {
-		return "manual-import"
-	}
-	return strings.Join(fields, " ")
+	// Multi-episode range: use first and last episode numbers.
+	first := m.Episodes[0]
+	last := m.Episodes[len(m.Episodes)-1]
+	return fmt.Sprintf("%s - S%02dE%02d-E%02d", show, first.Season, first.Episode, last.Episode)
 }

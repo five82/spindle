@@ -1,6 +1,6 @@
 package textutil
 
-// Ternary is a generic conditional helper that returns a if cond is true, b otherwise.
+// Ternary returns a if cond is true, otherwise b.
 func Ternary[T any](cond bool, a, b T) T {
 	if cond {
 		return a

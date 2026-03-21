@@ -1,162 +1,144 @@
 package language
 
-import "strings"
+import (
+	"strings"
+)
 
+// entry holds the canonical data for a single supported language.
 type entry struct {
-	code2   string   // ISO 639-1 (2-letter)
-	code3   string   // ISO 639-2 primary (3-letter)
-	alt3    string   // ISO 639-2 alternate (e.g. "fre" vs "fra")
-	display string   // Human-readable name
-	words   []string // Full word forms (e.g. "english")
+	DisplayName string   // Human-readable name (e.g. "English")
+	ISO1        string   // ISO 639-1 two-letter code (e.g. "en")
+	ISO2Primary string   // ISO 639-2 primary three-letter code (e.g. "eng")
+	AltCodes    []string // Alternate three-letter codes (e.g. "fre" for French)
 }
 
-var languages = []entry{
-	{"en", "eng", "", "English", []string{"english"}},
-	{"es", "spa", "", "Spanish", []string{"spanish"}},
-	{"fr", "fra", "fre", "French", []string{"french"}},
-	{"de", "deu", "ger", "German", []string{"german"}},
-	{"it", "ita", "", "Italian", []string{"italian"}},
-	{"pt", "por", "", "Portuguese", []string{"portuguese"}},
-	{"ja", "jpn", "", "Japanese", []string{"japanese"}},
-	{"ko", "kor", "", "Korean", []string{"korean"}},
-	{"zh", "zho", "chi", "Chinese", []string{"chinese"}},
-	{"ru", "rus", "", "Russian", []string{"russian"}},
-	{"ar", "ara", "", "Arabic", []string{"arabic"}},
-	{"hi", "hin", "", "Hindi", []string{"hindi"}},
-	{"nl", "nld", "dut", "Dutch", []string{"dutch"}},
-	{"pl", "pol", "", "Polish", []string{"polish"}},
-	{"sv", "swe", "", "Swedish", []string{"swedish"}},
-	{"da", "dan", "", "Danish", []string{"danish"}},
-	{"no", "nor", "", "Norwegian", []string{"norwegian"}},
-	{"fi", "fin", "", "Finnish", []string{"finnish"}},
+// table is the authoritative list of supported languages.
+var table = []entry{
+	{"English", "en", "eng", nil},
+	{"Spanish", "es", "spa", nil},
+	{"French", "fr", "fra", []string{"fre"}},
+	{"German", "de", "deu", []string{"ger"}},
+	{"Italian", "it", "ita", nil},
+	{"Portuguese", "pt", "por", nil},
+	{"Japanese", "ja", "jpn", nil},
+	{"Korean", "ko", "kor", nil},
+	{"Chinese", "zh", "zho", []string{"chi"}},
+	{"Russian", "ru", "rus", nil},
+	{"Arabic", "ar", "ara", nil},
+	{"Hindi", "hi", "hin", nil},
+	{"Dutch", "nl", "nld", []string{"dut"}},
+	{"Polish", "pl", "pol", nil},
+	{"Swedish", "sv", "swe", nil},
+	{"Danish", "da", "dan", nil},
+	{"Norwegian", "no", "nor", []string{"nob", "nno"}},
+	{"Finnish", "fi", "fin", nil},
 }
 
-// Index maps built at init time.
+// Lookup indexes built once at init.
 var (
-	byCode2 map[string]*entry
-	byCode3 map[string]*entry
-	byWord  map[string]*entry
+	// byCode maps any recognized code or word form to an *entry.
+	byCode map[string]*entry
 )
 
 func init() {
-	byCode2 = make(map[string]*entry, len(languages))
-	byCode3 = make(map[string]*entry, len(languages)*2)
-	byWord = make(map[string]*entry, len(languages))
-	for i := range languages {
-		e := &languages[i]
-		byCode2[e.code2] = e
-		byCode3[e.code3] = e
-		if e.alt3 != "" {
-			byCode3[e.alt3] = e
+	byCode = make(map[string]*entry, len(table)*4)
+	for i := range table {
+		e := &table[i]
+		byCode[e.ISO1] = e
+		byCode[e.ISO2Primary] = e
+		for _, alt := range e.AltCodes {
+			byCode[alt] = e
 		}
-		for _, w := range e.words {
-			byWord[w] = e
-		}
+		byCode[strings.ToLower(e.DisplayName)] = e
 	}
 }
 
-func lookup(code string) *entry {
-	code = strings.ToLower(strings.TrimSpace(code))
-	if code == "" {
-		return nil
-	}
-	if e, ok := byCode2[code]; ok {
-		return e
-	}
-	if e, ok := byCode3[code]; ok {
-		return e
-	}
-	if e, ok := byWord[code]; ok {
-		return e
-	}
-	return nil
+// resolve looks up a code (case-insensitive) and returns the entry or nil.
+func resolve(code string) *entry {
+	return byCode[strings.ToLower(strings.TrimSpace(code))]
 }
 
-// ToISO2 converts any recognized language code or word to ISO 639-1 (2-letter).
-// Returns empty string for unrecognized input.
-// If the input is already a 2-letter code (even if unknown), it passes through.
+// ToISO2 converts any recognized code or word form to a two-letter ISO 639-1
+// code. Unknown two-letter codes pass through unchanged. Everything else
+// returns an empty string.
 func ToISO2(code string) string {
-	code = strings.ToLower(strings.TrimSpace(code))
-	if code == "" {
-		return ""
-	}
-	if e := lookup(code); e != nil {
-		return e.code2
+	code = strings.TrimSpace(code)
+	if e := resolve(code); e != nil {
+		return e.ISO1
 	}
 	if len(code) == 2 {
-		return code
+		return strings.ToLower(code)
 	}
 	return ""
 }
 
-// ToISO3 converts any recognized language code to ISO 639-2 (3-letter).
-// Returns "und" for unrecognized 2-letter codes, passes through 3-letter codes.
+// ToISO3 converts any recognized code or word form to a three-letter ISO 639-2
+// primary code. Unknown two-letter codes return "und" (undetermined). Unknown
+// three-letter codes pass through unchanged.
 func ToISO3(code string) string {
-	code = strings.ToLower(strings.TrimSpace(code))
-	if code == "" {
+	code = strings.TrimSpace(code)
+	if e := resolve(code); e != nil {
+		return e.ISO2Primary
+	}
+	lower := strings.ToLower(code)
+	if len(lower) == 3 {
+		return lower
+	}
+	if len(lower) == 2 {
 		return "und"
 	}
-	if e := lookup(code); e != nil {
-		return e.code3
-	}
-	if len(code) == 3 {
-		return code
-	}
-	return "und"
+	return ""
 }
 
-// DisplayName returns a human-readable language name for any recognized code.
-// Returns "Unknown" for empty input, or the uppercased code for unrecognized input.
+// DisplayName returns the human-readable name for a recognized code or word
+// form. Unrecognized codes are returned uppercased.
 func DisplayName(code string) string {
-	if strings.TrimSpace(code) == "" {
-		return "Unknown"
-	}
-	if e := lookup(code); e != nil {
-		return e.display
+	if e := resolve(code); e != nil {
+		return e.DisplayName
 	}
 	return strings.ToUpper(strings.TrimSpace(code))
 }
 
-// ExtractFromTags extracts and normalizes the language from stream metadata tags.
-// Checks common tag keys: language, LANGUAGE, Language, language_ietf, lang, LANG.
+// ExtractFromTags extracts a language code from stream metadata tags. Keys are
+// checked in priority order: language, LANGUAGE, Language, language_ietf, lang,
+// LANG. Null bytes are stripped from values. Returns an empty string when no
+// language tag is found.
 func ExtractFromTags(tags map[string]string) string {
-	if len(tags) == 0 {
-		return ""
-	}
 	keys := []string{"language", "LANGUAGE", "Language", "language_ietf", "lang", "LANG"}
-	for _, key := range keys {
-		if value, ok := tags[key]; ok {
-			value = strings.TrimSpace(strings.ReplaceAll(value, "\u0000", ""))
-			if value != "" {
-				return strings.ToLower(value)
+	for _, k := range keys {
+		if v, ok := tags[k]; ok {
+			v = strings.ReplaceAll(v, "\x00", "")
+			v = strings.TrimSpace(v)
+			if v != "" {
+				return v
 			}
 		}
 	}
 	return ""
 }
 
-// NormalizeList deduplicates and normalizes a list of language codes to ISO 639-1.
+// NormalizeList deduplicates and normalizes a slice of language codes to
+// ISO 639-1. Codes longer than two characters are converted via ToISO2; codes
+// that cannot be resolved are dropped. Order is preserved (first occurrence
+// wins).
 func NormalizeList(languages []string) []string {
-	if len(languages) == 0 {
-		return nil
-	}
-	normalized := make([]string, 0, len(languages))
 	seen := make(map[string]struct{}, len(languages))
-	for _, lang := range languages {
-		trimmed := strings.ToLower(strings.TrimSpace(lang))
-		if trimmed == "" {
+	out := make([]string, 0, len(languages))
+	for _, raw := range languages {
+		var code string
+		if len(strings.TrimSpace(raw)) > 2 {
+			code = ToISO2(raw)
+		} else {
+			code = strings.ToLower(strings.TrimSpace(raw))
+		}
+		if code == "" {
 			continue
 		}
-		if len(trimmed) > 2 {
-			if mapped := ToISO2(trimmed); mapped != "" {
-				trimmed = mapped
-			}
-		}
-		if _, ok := seen[trimmed]; ok {
+		if _, dup := seen[code]; dup {
 			continue
 		}
-		seen[trimmed] = struct{}{}
-		normalized = append(normalized, trimmed)
+		seen[code] = struct{}{}
+		out = append(out, code)
 	}
-	return normalized
+	return out
 }

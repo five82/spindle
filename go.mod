@@ -1,33 +1,30 @@
-module spindle
+module github.com/five82/spindle
 
-go 1.26.1
+go 1.26.0
 
 require (
-	github.com/five82/drapto v0.5.1-0.20260221035919-86e6ab0ad120
+	github.com/fatih/color v1.18.0
+	github.com/five82/drapto v0.5.0
 	github.com/gofrs/flock v0.13.0
-	github.com/google/uuid v1.6.0
-	github.com/jedib0t/go-pretty/v6 v6.7.8
-	github.com/mattn/go-isatty v0.0.20
 	github.com/pelletier/go-toml/v2 v2.2.4
-	github.com/pilebones/go-udev v0.9.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.42.0
-	golang.org/x/text v0.35.0
 	modernc.org/sqlite v1.47.0
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fatih/color v1.18.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/schollz/progressbar/v3 v3.19.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/term v0.29.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

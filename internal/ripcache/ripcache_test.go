@@ -1,182 +1,137 @@
 package ripcache
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"log/slog"
-
-	"spindle/internal/config"
-	"spindle/internal/queue"
 )
 
-func TestStoreAndRestore(t *testing.T) {
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.RipCache.Enabled = true
-	cfg.RipCache.Dir = base
-	cfg.RipCache.MaxGiB = 1
+func TestHasCacheEmptyStore(t *testing.T) {
+	dir := t.TempDir()
+	store := New(dir, 10)
 
-	manager := NewManager(&cfg, slog.Default())
-	if manager == nil {
-		t.Fatalf("expected manager")
+	if store.HasCache("nonexistent") {
+		t.Fatal("expected HasCache to return false for empty store")
+	}
+}
+
+func TestRegisterAndHasCache(t *testing.T) {
+	cacheDir := t.TempDir()
+	srcDir := t.TempDir()
+	store := New(cacheDir, 10)
+
+	// Create a source file to register.
+	if err := os.WriteFile(filepath.Join(srcDir, "title01.mkv"), []byte("video data"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	// Build a fake rip directory.
-	ripDir := filepath.Join(t.TempDir(), "rips")
-	if err := os.MkdirAll(ripDir, 0o755); err != nil {
-		t.Fatalf("mk rip dir: %v", err)
-	}
-	content := []byte("hello world")
-	if err := os.WriteFile(filepath.Join(ripDir, "movie.mkv"), content, 0o644); err != nil {
-		t.Fatalf("write rip file: %v", err)
+	meta := EntryMetadata{
+		Fingerprint: "abc123",
+		DiscTitle:   "Test Disc",
+		CachedAt:    time.Now(),
+		TitleCount:  1,
+		TotalBytes:  10,
 	}
 
-	item := &queue.Item{ID: 42, DiscFingerprint: "abcd1234", DiscTitle: "Demo"}
-	if err := manager.Store(context.Background(), item, ripDir); err != nil {
-		t.Fatalf("store: %v", err)
+	if err := store.Register("abc123", srcDir, meta); err != nil {
+		t.Fatalf("Register: %v", err)
 	}
 
-	restoreDir := filepath.Join(t.TempDir(), "restored")
-	restored, err := manager.Restore(context.Background(), item, restoreDir)
+	if !store.HasCache("abc123") {
+		t.Fatal("expected HasCache to return true after Register")
+	}
+}
+
+func TestRegisterAndRestoreRoundTrip(t *testing.T) {
+	cacheDir := t.TempDir()
+	srcDir := t.TempDir()
+	destDir := t.TempDir()
+	store := New(cacheDir, 10)
+
+	content := []byte("ripped video content")
+	if err := os.WriteFile(filepath.Join(srcDir, "title01.mkv"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := EntryMetadata{
+		Fingerprint: "fp001",
+		DiscTitle:   "Round Trip Disc",
+		CachedAt:    time.Now(),
+		TitleCount:  1,
+		TotalBytes:  int64(len(content)),
+	}
+
+	if err := store.Register("fp001", srcDir, meta); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	restored, err := store.Restore("fp001", destDir)
 	if err != nil {
-		t.Fatalf("restore: %v", err)
+		t.Fatalf("Restore: %v", err)
 	}
-	if !restored {
-		t.Fatalf("expected restore to occur")
+	if restored == nil {
+		t.Fatal("expected metadata, got nil")
 	}
-	data, err := os.ReadFile(filepath.Join(restoreDir, "movie.mkv"))
+	if restored.DiscTitle != "Round Trip Disc" {
+		t.Fatalf("DiscTitle: got %q, want %q", restored.DiscTitle, "Round Trip Disc")
+	}
+
+	got, err := os.ReadFile(filepath.Join(destDir, "title01.mkv"))
 	if err != nil {
 		t.Fatalf("read restored file: %v", err)
 	}
-	if string(data) != string(content) {
-		t.Fatalf("unexpected restored content: %q", data)
+	if string(got) != string(content) {
+		t.Fatalf("content mismatch: got %q, want %q", got, content)
 	}
 }
 
-func TestPruneBySize(t *testing.T) {
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.RipCache.Enabled = true
-	cfg.RipCache.Dir = base
-	cfg.RipCache.MaxGiB = 1 // small budget
+func TestRestoreMissReturnsNil(t *testing.T) {
+	cacheDir := t.TempDir()
+	store := New(cacheDir, 10)
 
-	manager := NewManager(&cfg, slog.Default())
-
-	// Override statfs to ignore free-space logic in this test.
-	manager.statfs = func(string) (uint64, uint64, error) {
-		return 100, 50, nil
-	}
-
-	itemOld := &queue.Item{ID: 1, DiscFingerprint: "old"}
-	itemNew := &queue.Item{ID: 2, DiscFingerprint: "new"}
-
-	makeRip := func(sizeKB int) string {
-		dir := t.TempDir()
-		ripDir := filepath.Join(dir, "rips")
-		if err := os.MkdirAll(ripDir, 0o755); err != nil {
-			t.Fatalf("mk rip dir: %v", err)
-		}
-		data := make([]byte, sizeKB*1024)
-		if err := os.WriteFile(filepath.Join(ripDir, "file.mkv"), data, 0o644); err != nil {
-			t.Fatalf("write rip file: %v", err)
-		}
-		return ripDir
-	}
-
-	if err := manager.Store(context.Background(), itemOld, makeRip(800*1024)); err != nil { // ~0.78 GiB
-		t.Fatalf("store old: %v", err)
-	}
-	// Ensure old entry has an earlier mod time.
-	oldPath := manager.cachePath(itemOld)
-	if err := os.Chtimes(oldPath, time.Now().Add(-2*time.Hour), time.Now().Add(-2*time.Hour)); err != nil {
-		t.Fatalf("chtimes: %v", err)
-	}
-
-	if err := manager.Store(context.Background(), itemNew, makeRip(400*1024)); err != nil {
-		t.Fatalf("store new: %v", err)
-	}
-
-	// Budget 1 GiB => oldest should be pruned.
-	if existsNonEmptyDir(oldPath) {
-		t.Fatalf("expected oldest cache entry to be pruned")
-	}
-	if !existsNonEmptyDir(manager.cachePath(itemNew)) {
-		t.Fatalf("expected newest cache entry to remain")
-	}
-}
-
-func TestStatsIncludesEntrySummaries(t *testing.T) {
-	base := t.TempDir()
-	cfg := config.Default()
-	cfg.RipCache.Enabled = true
-	cfg.RipCache.Dir = base
-	cfg.RipCache.MaxGiB = 1
-
-	manager := NewManager(&cfg, slog.Default())
-	if manager == nil {
-		t.Fatalf("expected manager")
-	}
-
-	writeEntry := func(item *queue.Item, when time.Time, files map[string]int) {
-		dir := manager.cachePath(item)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mk entry dir: %v", err)
-		}
-		for name, size := range files {
-			path := filepath.Join(dir, name)
-			data := make([]byte, size)
-			if err := os.WriteFile(path, data, 0o644); err != nil {
-				t.Fatalf("write file: %v", err)
-			}
-			if err := os.Chtimes(path, when, when); err != nil {
-				t.Fatalf("chtimes file: %v", err)
-			}
-		}
-		if err := os.Chtimes(dir, when, when); err != nil {
-			t.Fatalf("chtimes dir: %v", err)
-		}
-	}
-
-	oldTime := time.Now().Add(-2 * time.Hour)
-	newTime := time.Now().Add(-time.Minute)
-	oldItem := &queue.Item{ID: 1, DiscFingerprint: "old"}
-	newItem := &queue.Item{ID: 2, DiscFingerprint: "new"}
-
-	writeEntry(oldItem, oldTime, map[string]int{"Old Movie (1980).mkv": 128})
-	writeEntry(newItem, newTime, map[string]int{
-		"New Movie (2024).mkv": 256,
-		"Bonus Feature.mkv":    64,
-	})
-
-	stats, err := manager.Stats(context.Background())
+	meta, err := store.Restore("nonexistent", t.TempDir())
 	if err != nil {
-		t.Fatalf("stats: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if got, want := len(stats.EntrySummaries), 2; got != want {
-		t.Fatalf("entry summaries len: got %d want %d", got, want)
+	if meta != nil {
+		t.Fatal("expected nil metadata for cache miss")
 	}
-	first := stats.EntrySummaries[0]
-	if first.Directory != manager.cachePath(newItem) {
-		t.Fatalf("unexpected directory ordering: %s", first.Directory)
+}
+
+func TestGetMetadata(t *testing.T) {
+	cacheDir := t.TempDir()
+	srcDir := t.TempDir()
+	store := New(cacheDir, 10)
+
+	if err := os.WriteFile(filepath.Join(srcDir, "title.mkv"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if first.PrimaryFile != "New Movie (2024).mkv" {
-		t.Fatalf("primary file mismatch: %q", first.PrimaryFile)
+
+	now := time.Now().Truncate(time.Second)
+	meta := EntryMetadata{
+		Fingerprint: "meta01",
+		DiscTitle:   "Metadata Test",
+		CachedAt:    now,
+		TitleCount:  3,
+		TotalBytes:  4,
 	}
-	if first.VideoFileCount != 2 {
-		t.Fatalf("video count mismatch: %d", first.VideoFileCount)
+
+	if err := store.Register("meta01", srcDir, meta); err != nil {
+		t.Fatalf("Register: %v", err)
 	}
-	second := stats.EntrySummaries[1]
-	if second.PrimaryFile != "Old Movie (1980).mkv" {
-		t.Fatalf("second primary mismatch: %q", second.PrimaryFile)
+
+	got, err := store.GetMetadata("meta01")
+	if err != nil {
+		t.Fatalf("GetMetadata: %v", err)
 	}
-	if second.VideoFileCount != 1 {
-		t.Fatalf("second video count mismatch: %d", second.VideoFileCount)
+	if got.Fingerprint != "meta01" {
+		t.Fatalf("Fingerprint: got %q, want %q", got.Fingerprint, "meta01")
 	}
-	if second.Directory != manager.cachePath(oldItem) {
-		t.Fatalf("unexpected second directory: %s", second.Directory)
+	if got.TitleCount != 3 {
+		t.Fatalf("TitleCount: got %d, want 3", got.TitleCount)
+	}
+	if !got.CachedAt.Equal(now) {
+		t.Fatalf("CachedAt: got %v, want %v", got.CachedAt, now)
 	}
 }

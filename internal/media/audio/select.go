@@ -1,15 +1,31 @@
+// Package audio provides audio track selection for the Spindle media pipeline.
+//
+// It selects the single primary English audio track for ripping by scoring
+// candidates on channel count, lossless codec, and default flag.
 package audio
 
 import (
-	"sort"
+	"fmt"
 	"strconv"
 	"strings"
 
-	langpkg "spindle/internal/language"
-	"spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/language"
+	"github.com/five82/spindle/internal/media/ffprobe"
 )
 
-// Selection describes the desired audio layout within a ripped container.
+// candidate holds scoring data for a single audio stream.
+type candidate struct {
+	stream     ffprobe.Stream
+	index      int
+	language   string
+	channels   int
+	isSpatial  bool
+	isLossless bool
+	isDefault  bool
+	score      float64
+}
+
+// Selection holds the result of audio track selection.
 type Selection struct {
 	Primary        ffprobe.Stream
 	PrimaryIndex   int
@@ -17,284 +33,233 @@ type Selection struct {
 	RemovedIndices []int
 }
 
-// PrimaryLabel returns a human-readable summary of the selected primary stream.
+// PrimaryLabel returns a human-readable summary of the primary track:
+// "language | codec | channels | title".
 func (s Selection) PrimaryLabel() string {
-	if s.PrimaryIndex < 0 {
-		return ""
+	lang := language.DisplayName(language.ExtractFromTags(s.Primary.Tags))
+	codec := s.Primary.CodecName
+	ch := s.Primary.Channels
+	title := s.Primary.Tags["title"]
+
+	label := fmt.Sprintf("%s | %s | %dch", lang, codec, ch)
+	if title != "" {
+		label += " | " + title
 	}
-	return formatStreamSummary(s.Primary)
+	return label
 }
 
-// Changed reports whether the selection removes any audio streams compared to the source.
+// Changed reports whether any audio streams are removed compared to the
+// total audio stream count.
 func (s Selection) Changed(totalAudio int) bool {
-	if totalAudio <= 0 {
-		return false
-	}
-	return len(s.KeepIndices) < totalAudio || len(s.RemovedIndices) > 0
+	return len(s.RemovedIndices) > 0 || totalAudio != len(s.KeepIndices)
 }
 
-// Select returns the audio stream layout that preserves a single primary English track
-// only. The function prioritizes tracks by channel count first
-// (8ch > 6ch > 2ch), then source quality (lossless > lossy). Spatial audio metadata
-// (Atmos, DTS:X) is not prioritized since it's stripped during Opus transcoding.
+// Select implements the audio track selection algorithm. It picks the single
+// best English audio track from the provided streams. Non-audio streams are
+// ignored. If no English track is found, the first audio stream is used as
+// a fallback.
 func Select(streams []ffprobe.Stream) Selection {
-	candidates := buildCandidates(streams)
-	if len(candidates) == 0 {
-		return Selection{PrimaryIndex: -1}
-	}
-
-	english := candidates.english()
-	if len(english) == 0 {
-		// No English audio found; fall back to the first available audio stream.
-		english = candidateList{candidates[0]}
-	}
-
-	primary := choosePrimary(english)
-	selection := Selection{
-		Primary:      primary.stream,
-		PrimaryIndex: primary.stream.Index,
-		KeepIndices:  []int{primary.stream.Index},
-	}
-
-	kept := make(map[int]struct{}, len(selection.KeepIndices))
-	for _, idx := range selection.KeepIndices {
-		kept[idx] = struct{}{}
-	}
-
-	removed := make([]int, 0)
-	for _, cand := range candidates {
-		if _, ok := kept[cand.stream.Index]; ok {
+	// Build candidate list from audio streams only.
+	var candidates []candidate
+	for i, st := range streams {
+		if st.CodecType != "audio" {
 			continue
 		}
-		removed = append(removed, cand.stream.Index)
-	}
-	sort.Ints(removed)
-	selection.RemovedIndices = removed
-	return selection
-}
-
-// candidate captures the derived metadata used for audio ranking.
-type candidate struct {
-	stream         ffprobe.Stream
-	order          int
-	language       string
-	title          string
-	isEnglish      bool
-	isSpatial      bool
-	isLossless     bool
-	channels       int
-	defaultFlagged bool
-}
-
-type candidateList []candidate
-
-func (c candidateList) english() candidateList {
-	result := make(candidateList, 0, len(c))
-	for _, cand := range c {
-		if cand.isEnglish {
-			result = append(result, cand)
+		lang := language.ToISO2(language.ExtractFromTags(st.Tags))
+		c := candidate{
+			stream:     st,
+			index:      i,
+			language:   lang,
+			channels:   parseChannelCount(st),
+			isSpatial:  isSpatialAudio(st),
+			isLossless: isLosslessCodec(st),
+			isDefault:  st.Disposition["default"] == 1,
 		}
+		candidates = append(candidates, c)
 	}
-	return result
-}
 
-func choosePrimary(candidates candidateList) candidate {
 	if len(candidates) == 0 {
-		return candidate{}
+		return Selection{}
 	}
-	best := candidates[0]
-	bestScore := scorePrimary(best)
-	for i := 1; i < len(candidates); i++ {
-		score := scorePrimary(candidates[i])
-		if score > bestScore {
-			best = candidates[i]
-			bestScore = score
+
+	// Filter to English candidates.
+	var english []candidate
+	for _, c := range candidates {
+		if strings.HasPrefix(c.language, "en") {
+			english = append(english, c)
 		}
 	}
-	return best
+
+	pool := english
+	if len(pool) == 0 {
+		// Fall back to first available audio stream.
+		pool = candidates[:1]
+	}
+
+	// Score each candidate in the pool.
+	for i := range pool {
+		pool[i].score = scoreCandidate(pool[i], i)
+	}
+
+	// Select the highest-scoring candidate.
+	best := 0
+	for i := 1; i < len(pool); i++ {
+		if pool[i].score > pool[best].score {
+			best = i
+		}
+	}
+	primary := pool[best]
+
+	// Build keep/removed index lists.
+	sel := Selection{
+		Primary:      primary.stream,
+		PrimaryIndex: primary.index,
+		KeepIndices:  []int{primary.index},
+	}
+	for _, c := range candidates {
+		if c.index != primary.index {
+			sel.RemovedIndices = append(sel.RemovedIndices, c.index)
+		}
+	}
+
+	return sel
 }
 
-func scorePrimary(cand candidate) float64 {
-	score := 0.0
+// scoreCandidate computes a score for an audio track candidate.
+// Higher is better.
+func scoreCandidate(c candidate, position int) float64 {
+	var score float64
 
-	// Channel count is most important for Opus transcoding.
-	// More channels preserved = better output quality.
+	// Channel count score.
 	switch {
-	case cand.channels >= 8:
-		score += 1000
-	case cand.channels >= 6:
-		score += 800
-	case cand.channels >= 4:
-		score += 600
-	case cand.channels >= 2:
-		score += 400
+	case c.channels >= 8:
+		score = 1000
+	case c.channels >= 6:
+		score = 800
+	case c.channels >= 4:
+		score = 600
 	default:
-		score += 200
+		score = 400
 	}
 
-	// Source quality matters for transcoding quality.
-	// Lossless source = cleaner transcode to Opus.
-	if cand.isLossless {
+	// Lossless bonus.
+	if c.isLossless {
 		score += 100
-	} else {
-		score += 50
 	}
 
-	// Spatial audio metadata (Atmos, DTS:X) is stripped during Opus transcoding,
-	// so we don't prioritize it. The channel count already captures 7.1/5.1 layout.
-
-	if cand.defaultFlagged {
+	// Default flag bonus.
+	if c.isDefault {
 		score += 5
 	}
 
-	// Prefer earlier tracks when scores tie.
-	score -= float64(cand.order) * 0.1
+	// Stream order tiebreaker (earlier streams slightly preferred).
+	score -= 0.1 * float64(position)
 
 	return score
 }
 
-func buildCandidates(streams []ffprobe.Stream) candidateList {
-	result := make(candidateList, 0)
-	order := 0
-	for _, stream := range streams {
-		if !strings.EqualFold(stream.CodecType, "audio") {
-			continue
-		}
-		cand := candidate{
-			stream:         stream,
-			order:          order,
-			language:       langpkg.ExtractFromTags(stream.Tags),
-			title:          normalizeTitle(stream.Tags),
-			channels:       channelCount(stream),
-			defaultFlagged: stream.Disposition != nil && stream.Disposition["default"] == 1,
-		}
-		cand.isEnglish = strings.HasPrefix(cand.language, "en")
-		cand.isSpatial = detectSpatial(stream, cand.title)
-		cand.isLossless = detectLossless(stream)
-		result = append(result, cand)
-		order++
-	}
-	return result
+// spatialKeywords are patterns that indicate spatial/immersive audio formats.
+var spatialKeywords = []string{
+	"atmos",
+	"dts:x",
+	"dtsx",
+	"dts-x",
+	"auro-3d",
+	"imax enhanced",
 }
 
-func normalizeTitle(tags map[string]string) string {
-	if len(tags) == 0 {
-		return ""
+// isSpatialAudio checks whether a stream uses a spatial audio format.
+func isSpatialAudio(s ffprobe.Stream) bool {
+	fields := []string{
+		s.CodecLong,
+		s.Profile,
+		s.CodecName,
+		s.Tags["title"],
 	}
-	for _, key := range []string{"title", "TITLE", "handler_name", "HANDLER_NAME"} {
-		if value, ok := tags[key]; ok {
-			return strings.ToLower(strings.TrimSpace(value))
-		}
-	}
-	return ""
-}
-
-// layoutChannels maps common channel layout prefixes to their channel counts.
-var layoutChannels = map[string]int{
-	"7.1": 8,
-	"6.1": 7,
-	"5.1": 6,
-	"4.0": 4,
-	"2.1": 3,
-	"2.0": 2,
-	"1.0": 1,
-}
-
-func channelCount(stream ffprobe.Stream) int {
-	if stream.Channels > 0 {
-		return stream.Channels
-	}
-	layout := strings.ToLower(strings.TrimSpace(stream.ChannelLayout))
-	if layout == "" {
-		return 0
-	}
-	for prefix, count := range layoutChannels {
-		if strings.HasPrefix(layout, prefix) {
-			return count
-		}
-	}
-	if strings.Contains(layout, ".") {
-		parts := strings.Split(layout, ".")
-		total := 0
-		for _, part := range parts {
-			part = strings.Trim(part, "abcdefghijklmnopqrstuvwxyz ()")
-			if part == "" {
-				continue
-			}
-			if n, err := strconv.Atoi(part); err == nil {
-				total += n
+	for _, field := range fields {
+		lower := strings.ToLower(field)
+		for _, kw := range spatialKeywords {
+			if strings.Contains(lower, kw) {
+				return true
 			}
 		}
-		if total > 0 {
-			return total
-		}
 	}
-	return 0
+	return false
 }
 
-func detectSpatial(stream ffprobe.Stream, normalizedTitle string) bool {
-	combined := strings.ToLower(strings.Join([]string{
-		stream.CodecLong,
-		stream.Profile,
-		stream.CodecName,
-		normalizedTitle,
-	}, " "))
-	spatialKeywords := []string{
-		"atmos",
-		"dts:x",
-		"dtsx",
-		"dts-x",
-		"auro-3d",
-		"imax enhanced",
+// losslessCodecs is the set of codec names considered lossless.
+var losslessCodecs = map[string]bool{
+	"truehd":     true,
+	"flac":       true,
+	"mlp":        true,
+	"alac":       true,
+	"pcm_s16le":  true,
+	"pcm_s24le":  true,
+	"pcm_s32le":  true,
+	"pcm_bluray": true,
+	"pcm_s24be":  true,
+	"pcm_s16be":  true,
+}
+
+// losslessLongNameKeywords are patterns in codec_long_name that indicate lossless.
+var losslessLongNameKeywords = []string{
+	"lossless",
+	"master audio",
+	"dts-hd",
+}
+
+// isLosslessCodec checks whether a stream uses a lossless audio codec.
+func isLosslessCodec(s ffprobe.Stream) bool {
+	if losslessCodecs[strings.ToLower(s.CodecName)] {
+		return true
 	}
-	for _, keyword := range spatialKeywords {
-		if strings.Contains(combined, keyword) {
+	lower := strings.ToLower(s.CodecLong)
+	for _, kw := range losslessLongNameKeywords {
+		if strings.Contains(lower, kw) {
 			return true
 		}
 	}
 	return false
 }
 
-func detectLossless(stream ffprobe.Stream) bool {
-	name := strings.ToLower(stream.CodecName)
-	long := strings.ToLower(stream.CodecLong)
-	switch name {
-	case "truehd", "flac", "mlp", "alac", "pcm_s16le", "pcm_s24le", "pcm_s32le", "pcm_bluray", "pcm_s24be", "pcm_s16be":
-		return true
+// parseChannelCount extracts the number of audio channels from a stream.
+// It prefers the Channels field; if zero, it parses ChannelLayout.
+func parseChannelCount(s ffprobe.Stream) int {
+	if s.Channels > 0 {
+		return s.Channels
 	}
-	if strings.Contains(long, "lossless") {
-		return true
-	}
-	if strings.Contains(long, "master audio") || strings.Contains(long, "dts-hd") {
-		return true
-	}
-	return false
+	return parseLayoutChannels(s.ChannelLayout)
 }
 
-func formatStreamSummary(stream ffprobe.Stream) string {
-	parts := make([]string, 0, 4)
-	if lang := langpkg.ExtractFromTags(stream.Tags); lang != "" {
-		parts = append(parts, lang)
+// parseLayoutChannels parses a channel layout string into a channel count.
+// Examples: "7.1" -> 8, "5.1(side)" -> 6, "stereo" -> 2, "mono" -> 1.
+func parseLayoutChannels(layout string) int {
+	layout = strings.ToLower(strings.TrimSpace(layout))
+	if layout == "" {
+		return 0
 	}
-	codec := stream.CodecLong
-	if codec == "" {
-		codec = stream.CodecName
+
+	switch layout {
+	case "mono":
+		return 1
+	case "stereo":
+		return 2
 	}
-	if codec != "" {
-		parts = append(parts, codec)
+
+	// Strip parenthetical suffixes like "(side)".
+	if idx := strings.Index(layout, "("); idx >= 0 {
+		layout = layout[:idx]
 	}
-	if stream.Channels > 0 {
-		parts = append(parts, strconv.Itoa(stream.Channels)+"ch")
+
+	// Parse "X.Y" format.
+	parts := strings.SplitN(layout, ".", 2)
+	if len(parts) == 2 {
+		main, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+		sub, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err1 == nil && err2 == nil {
+			return main + sub
+		}
 	}
-	title := ""
-	if stream.Tags != nil {
-		title = stream.Tags["title"]
-	}
-	if title != "" {
-		parts = append(parts, strings.TrimSpace(title))
-	}
-	if len(parts) == 0 {
-		return "audio"
-	}
-	return strings.Join(parts, " | ")
+
+	return 0
 }

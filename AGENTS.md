@@ -11,7 +11,6 @@ Do not modify this header.
 - Use the Go toolchain (`go build`, `go test`, `golangci-lint`); avoid alternate build systems.
 - Finish the work you start. Ask before dropping scope or leaving TODOs.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn't.
-- Use Context7 MCP for library/API docs without being asked.
 
 ## Project Snapshot
 
@@ -20,14 +19,29 @@ Spindle is a **personal project** that automates optical disc to Jellyfin librar
 - **Scope**: Single-developer project - avoid over-engineering
 - **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.
 
+## Related Repos
+
+| Repo | Path | Role |
+|------|------|------|
+| drapto | `~/projects/drapto/` | FFmpeg encoding wrapper |
+| spindle | `~/projects/spindle/` | Orchestrator that uses Drapto as a library (this repo) |
+| flyer | `~/projects/flyer/` | Read-only TUI for Spindle |
+
+GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.com/five82/spindle) | [flyer](https://github.com/five82/flyer)
+
 ## Critical Expectations
 
 **Architectural churn is embraced.** Optimize for clarity, not backwards compatibility.
 
+- Use proper spec driven development methodology. The codebase must follow the spec docs. You can propose updates to the spec but do not make spec doc changes without approval.
 - Break things forward. Remove deprecated paths; no compatibility shims.
 - Prefer maintainable architecture and explicit logging over clever tricks.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
 - Keep edits ASCII unless the file already uses extended characters.
+- When troubleshooting, gather evidence and test. Do not blindly guess.
+- Observability is key. We can not understand what is happening if we can not see it.
+- Simplification must not remove user-visible functionality. Eliminating a subprocess or code path that produces distinct output (log messages, CLI feedback, status indicators) is a behavior change, not a simplification.
+- When examining reference code, do not just copy and paste. Understand why it works in the reference implementation, think, and design a solution that works best for this codebase.
 
 ## Drapto Dependency Workflow
 
@@ -54,4 +68,4 @@ Spindle is a **personal project** that automates optical disc to Jellyfin librar
 
 ## Database Schema
 
-The queue DB is transient (in-flight jobs only). No migrations - bump `schemaVersion` in `internal/queue/schema.go` on changes.
+The queue DB is transient (in-flight jobs only). No migrations, no schema versioning. If the schema changes, clear the database.

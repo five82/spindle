@@ -2,313 +2,288 @@ package organizer
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"log/slog"
-
-	"spindle/internal/config"
-	"spindle/internal/logging"
-	"spindle/internal/media/ffprobe"
-	"spindle/internal/notifications"
-	"spindle/internal/queue"
-	"spindle/internal/ripspec"
-	"spindle/internal/services"
-	"spindle/internal/services/jellyfin"
-	"spindle/internal/stage"
-	"spindle/internal/textutil"
+	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/fileutil"
+	"github.com/five82/spindle/internal/jellyfin"
+	"github.com/five82/spindle/internal/notify"
+	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stage"
+	"github.com/five82/spindle/internal/textutil"
 )
 
-// MetadataProvider describes the media metadata used for organization.
-type MetadataProvider interface {
-	GetLibraryPath(root, moviesDir, tvDir string) string
-	GetFilename() string
-	IsMovie() bool
-	Title() string
-	GetEdition() string
-}
-
-// Organizer moves encoded files into the final library location.
-type Organizer struct {
-	store    *queue.Store
+// Handler implements stage.Handler for organization.
+type Handler struct {
 	cfg      *config.Config
-	logger   *slog.Logger
-	jellyfin jellyfin.Service
-	notifier notifications.Service
+	store    *queue.Store
+	jfClient *jellyfin.Client
+	notifier *notify.Notifier
 }
 
-const (
-	minOrganizedFileSizeBytes = 5 * 1024 * 1024
-)
-
-var organizerProbe = ffprobe.Inspect
-
-// NewOrganizer constructs the organizer stage handler using default dependencies.
-func NewOrganizer(cfg *config.Config, store *queue.Store, logger *slog.Logger, notifier notifications.Service) *Organizer {
-	jellyfinService := jellyfin.NewConfiguredService(cfg)
-	return NewOrganizerWithDependencies(cfg, store, logger, jellyfinService, notifier)
+// New creates an organization handler.
+func New(cfg *config.Config, store *queue.Store, jfClient *jellyfin.Client, notifier *notify.Notifier) *Handler {
+	return &Handler{cfg: cfg, store: store, jfClient: jfClient, notifier: notifier}
 }
 
-// NewOrganizerWithDependencies allows injecting collaborators (used in tests).
-func NewOrganizerWithDependencies(cfg *config.Config, store *queue.Store, logger *slog.Logger, jellyfinClient jellyfin.Service, notifier notifications.Service) *Organizer {
-	org := &Organizer{store: store, cfg: cfg, jellyfin: jellyfinClient, notifier: notifier}
-	org.SetLogger(logger)
-	return org
-}
-
-// SetLogger updates the organizer's logging destination while preserving component labeling.
-func (o *Organizer) SetLogger(logger *slog.Logger) {
-	o.logger = logging.NewComponentLogger(logger, "organizer")
-}
-
-// Prepare initializes progress for the organizing stage.
-func (o *Organizer) Prepare(ctx context.Context, item *queue.Item) error {
-	logger := logging.WithContext(ctx, o.logger)
-	item.InitProgress("Organizing", "Preparing library organization")
-	logger.Debug("starting organization preparation")
-	return nil
-}
-
-// Execute organizes encoded files into the library.
-func (o *Organizer) Execute(ctx context.Context, item *queue.Item) error {
-	logger := logging.WithContext(ctx, o.logger)
-	stageStart := time.Now()
+// Run executes the organization stage.
+func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
+	logger := stage.LoggerFromContext(ctx)
+	logger.Info("organization stage started", "event_type", "stage_start")
 
 	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
 		return err
 	}
 
-	logger.Debug("starting organization")
+	meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 
-	// Cross-stage validation: check for missing encoded episodes
-	if missing := env.MissingEpisodes(ripspec.AssetKindEncoded); len(missing) > 0 {
-		logger.Warn("missing encoded episodes at organizer start",
-			logging.Int("missing_count", len(missing)),
-			logging.String("missing_episodes", strings.Join(missing, ",")),
-			logging.String(logging.FieldEventType, "organizer_missing_encoded"),
-			logging.String(logging.FieldErrorHint, "some episodes failed encoding"),
-		)
-		item.NeedsReview = true
-		if item.ReviewReason == "" {
-			item.ReviewReason = fmt.Sprintf("missing %d encoded episode(s)", len(missing))
-		}
+	// Check if item needs review routing instead of library placement.
+	if item.NeedsReview == 1 {
+		return h.routeToReview(ctx, logger, item, &env, &meta)
 	}
 
-	encodedSources := collectEncodedSources(item, &env)
-	if len(encodedSources) == 0 {
-		return services.Wrap(
-			services.ErrValidation,
-			"organizing",
-			"validate inputs",
-			"No encoded file present for organization; run encoding before organizing or check staging_dir permissions",
-			nil,
-		)
-	}
-
-	// Route to full review unless TV episodes have at least some resolved.
-	if item.NeedsReview && (len(env.Episodes) == 0 || !ripspec.HasResolvedEpisodes(env.Episodes)) {
-		logReviewDecision(logger, "review", "needs_review_flag")
-		logger.Debug("routing item to manual review", logging.String("reason", strings.TrimSpace(item.ReviewReason)))
-		return o.finishReview(ctx, item, stageStart, strings.TrimSpace(item.ReviewReason), encodedSources, nil)
-	}
-	if item.NeedsReview {
-		logReviewDecision(logger, "partial_organize", "partial_episode_resolution")
-	} else {
-		logReviewDecision(logger, "organize", "ready_for_organize")
-	}
-
-	// Resolve metadata
-	meta, err := o.resolveMetadata(ctx, item, logger)
+	// Resolve library path.
+	libraryPath, err := meta.GetLibraryPath(
+		h.cfg.Paths.LibraryDir,
+		h.cfg.Library.MoviesDir,
+		h.cfg.Library.TVDir,
+	)
 	if err != nil {
+		return fmt.Errorf("resolve library path: %w", err)
+	}
+
+	// Create library directory.
+	if err := os.MkdirAll(libraryPath, 0o755); err != nil {
+		return fmt.Errorf("create library dir: %w", err)
+	}
+
+	// Determine source stage: prefer "subtitled", fall back to "encoded".
+	sourceStage := "subtitled"
+	keys := env.AssetKeys()
+	if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
+		sourceStage = "encoded"
+	}
+
+	// Copy each asset to library.
+	for i, key := range keys {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		asset, ok := env.Assets.FindAsset(sourceStage, key)
+		if !ok || !asset.IsCompleted() {
+			continue
+		}
+
+		// Determine destination filename.
+		destName := destFilename(&meta, key, filepath.Ext(asset.Path))
+		destPath := filepath.Join(libraryPath, destName)
+
+		// Check if exists and not overwriting.
+		if !h.cfg.Library.OverwriteExisting {
+			if _, err := os.Stat(destPath); err == nil {
+				logger.Info("file exists, skipping",
+					"decision_type", "organize_skip",
+					"decision_result", "skipped",
+					"decision_reason", "file already exists",
+					"path", destPath,
+				)
+				continue
+			}
+		}
+
+		logger.Info(fmt.Sprintf("Phase %d/%d - Copying to library (%s)", i+1, len(keys), key),
+			"event_type", "organize_copy",
+		)
+
+		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Copying to library (%s)", i+1, len(keys), key)
+		_ = h.store.UpdateProgress(item)
+
+		// Copy with verification.
+		if err := fileutil.CopyFileVerified(asset.Path, destPath); err != nil {
+			// On cancellation, clean up partial file.
+			if ctx.Err() != nil {
+				_ = os.Remove(destPath)
+				return ctx.Err()
+			}
+			return fmt.Errorf("copy %s to library: %w", key, err)
+		}
+
+		// Record final asset.
+		env.Assets.AddAsset("final", ripspec.Asset{
+			EpisodeKey: key,
+			Path:       destPath,
+			Status:     "completed",
+		})
+
+		// Copy subtitle sidecar if exists (non-muxed).
+		copySidecarSubtitle(logger, asset.Path, destPath)
+	}
+
+	// Persist envelope with final asset paths.
+	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 		return err
 	}
 
-	// Build organize jobs for episodes
-	jobs, err := buildOrganizeJobs(env, queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle))
-	if err != nil {
-		return services.Wrap(
-			services.ErrValidation,
-			"organizing",
-			"plan tv organization",
-			"Unable to map encoded episodes to library destinations",
-			err,
-		)
-	}
-
-	// Log job plan
-	attrs := []logging.Attr{
-		logging.String(logging.FieldDecisionType, "organizer_job_plan"),
-		logging.String("decision_result", textutil.Ternary(len(jobs) > 0, "episodes", "single_file")),
-		logging.String("decision_reason", textutil.Ternary(len(jobs) > 0, "episode_assets", "single_media_asset")),
-		logging.String("decision_options", "episodes, single_file"),
-		logging.Int("job_count", len(jobs)),
-	}
-	attrs = appendOrganizeJobLines(attrs, jobs)
-	logger.Info("organizer job plan", logging.Args(attrs...)...)
-
-	// Route to episode or single-file organization
-	if len(jobs) > 0 {
-		return o.organizeEpisodes(ctx, item, &env, jobs, logger, stageStart)
-	}
-	return o.organizeToLibrary(ctx, item, meta, stageStart, &env)
-}
-
-// resolveMetadata resolves and validates metadata for organization.
-func (o *Organizer) resolveMetadata(ctx context.Context, item *queue.Item, logger *slog.Logger) (MetadataProvider, error) {
-	meta := MetadataProvider(queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle))
-
-	if item.MetadataJSON == "" || meta.Title() == "" {
-		fallbackTitle := item.DiscTitle
-		if fallbackTitle == "" {
-			base := strings.TrimSpace(filepath.Base(item.EncodedFile))
-			fallbackTitle = strings.TrimSuffix(base, filepath.Ext(base))
-		}
-		fallbackReason := textutil.Ternary(item.MetadataJSON == "", "metadata_missing", "title_missing")
-		logger.Info(
-			"metadata selection decision",
-			logging.String(logging.FieldDecisionType, "metadata_fallback"),
-			logging.String("decision_result", "fallback_metadata"),
-			logging.String("decision_reason", fallbackReason),
-			logging.String("decision_options", "metadata, fallback"),
-			logging.String("fallback_title", strings.TrimSpace(fallbackTitle)),
-		)
-		basic := queue.NewBasicMetadata(fallbackTitle, true)
-		encoded, err := json.Marshal(basic)
-		if err != nil {
-			return nil, services.Wrap(services.ErrTransient, "organizing", "encode metadata", "Failed to encode fallback metadata", err)
-		}
-		item.MetadataJSON = string(encoded)
-		meta = basic
-		if err := o.store.Update(ctx, item); err != nil {
-			o.logger.Warn("failed to persist fallback metadata; organizer may re-evaluate defaults",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "metadata_persist_failed"),
-				logging.String(logging.FieldErrorHint, "check queue database access"),
-				logging.String(logging.FieldImpact, "metadata may be regenerated on retry"),
+	// Trigger Jellyfin refresh.
+	if h.jfClient != nil {
+		if err := h.jfClient.Refresh(ctx); err != nil {
+			logger.Warn("jellyfin refresh failed",
+				"event_type", "jellyfin_refresh_error",
+				"error_hint", err.Error(),
+				"impact", "library may not show new content immediately",
 			)
+			// Degraded, not fatal.
 		}
 	}
-	return meta, nil
-}
 
-// moveGeneratedSubtitles moves subtitle sidecars to the library.
-// Returns the count of moved subtitle files.
-func (o *Organizer) moveGeneratedSubtitles(ctx context.Context, item *queue.Item, targetPath string) (int, error) {
-	if item == nil {
-		return 0, nil
-	}
-	encodedPath := strings.TrimSpace(item.EncodedFile)
-	if encodedPath == "" {
-		return 0, nil
-	}
-	stagingDir := filepath.Dir(encodedPath)
-	entries, err := os.ReadDir(stagingDir)
-	if err != nil {
-		return 0, fmt.Errorf("enumerate staging dir: %w", err)
-	}
-	base := strings.TrimSuffix(filepath.Base(encodedPath), filepath.Ext(encodedPath))
-	if base == "" {
-		base = strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
-	}
-	destBase := strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
-	destDir := filepath.Dir(targetPath)
-
-	moved := 0
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		lower := strings.ToLower(name)
-		if !strings.HasSuffix(lower, ".srt") {
-			continue
-		}
-		prefix := base + "."
-		if !strings.HasPrefix(name, prefix) {
-			continue
-		}
-		suffix := name[len(prefix):]
-		if suffix == "" {
-			continue
-		}
-		source := filepath.Join(stagingDir, name)
-		destination := filepath.Join(destDir, fmt.Sprintf("%s.%s", destBase, suffix))
-		if o.cfg != nil && o.cfg.Library.OverwriteExisting {
-			if err := os.Remove(destination); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return moved, fmt.Errorf("remove existing subtitle %q: %w", destination, err)
-			}
-		}
-		if err := jellyfin.FileMover(source, destination); err != nil {
-			return moved, fmt.Errorf("move subtitle %q: %w", name, err)
-		}
-		moved++
-	}
-	if o.logger != nil {
-		o.logger.Info("subtitle sidecar move decision",
-			logging.String(logging.FieldDecisionType, "subtitle_sidecar_move"),
-			logging.String("decision_result", textutil.Ternary(moved > 0, "moved", "none_found")),
-			logging.String("decision_reason", textutil.Ternary(moved > 0, "subtitles_found", "no_matching_srt_files")),
-			logging.Int("count", moved),
-			logging.String("destination", destDir),
+	// Notification.
+	if h.notifier != nil {
+		_ = h.notifier.Send(ctx, notify.EventOrganizeComplete,
+			"Organization Complete",
+			fmt.Sprintf("Organized %s to library", item.DiscTitle),
 		)
 	}
-	return moved, nil
+
+	logger.Info("organization stage completed", "event_type", "stage_complete")
+	return nil
 }
 
-// publishCompletionNotifications sends organization and processing completion events.
-func (o *Organizer) publishCompletionNotifications(ctx context.Context, logger *slog.Logger, title, finalPath string, jellyfinRefreshed bool, episodeCount, failedCount int) {
-	if o.notifier == nil {
+
+// destFilename builds the destination filename for a given asset key.
+// Movies: "{GetFilename()}{ext}". TV: per-episode filename built from
+// metadata with sanitized display name.
+func destFilename(meta *queue.Metadata, key, ext string) string {
+	if meta.IsMovie() {
+		return textutil.SanitizeDisplayName(meta.GetFilename()) + ext
+	}
+
+	// For TV, build a per-episode filename from the key.
+	// Parse season/episode from the key (format: "s01e03").
+	season, episode := parseEpisodeKey(key)
+	if season > 0 && episode > 0 {
+		// Build per-episode metadata to get the correct filename.
+		epMeta := queue.Metadata{
+			Title:        meta.Title,
+			ShowTitle:    meta.ShowTitle,
+			MediaType:    "tv",
+			SeasonNumber: meta.SeasonNumber,
+			Episodes: []queue.MetadataEpisode{
+				{Season: season, Episode: episode},
+			},
+			DisplayTitle: meta.DisplayTitle,
+		}
+		return textutil.SanitizeDisplayName(epMeta.GetFilename()) + ext
+	}
+
+	// Fallback: use the key directly as part of the filename.
+	show := textutil.SanitizeDisplayName(meta.ShowTitle)
+	if show == "" || show == "manual-import" {
+		show = textutil.SanitizeDisplayName(meta.Title)
+	}
+	return textutil.SanitizeDisplayName(show+" - "+key) + ext
+}
+
+// parseEpisodeKey extracts season and episode numbers from a key like "s01e03".
+// Returns (0, 0) if the key does not match the expected format.
+func parseEpisodeKey(key string) (season, episode int) {
+	_, err := fmt.Sscanf(strings.ToLower(key), "s%02de%02d", &season, &episode)
+	if err != nil {
+		return 0, 0
+	}
+	return season, episode
+}
+
+// routeToReview copies assets to the review directory for manual inspection.
+// Directory structure: review_dir/{reason}_{fingerprint_prefix}/
+func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *queue.Item, env *ripspec.Envelope, meta *queue.Metadata) error {
+	logger.Info("routing to review",
+		"decision_type", "organize_route",
+		"decision_result", "review",
+		"decision_reason", item.ReviewReason,
+	)
+
+	// Build review subdirectory name.
+	reason := textutil.SanitizePathSegment(item.ReviewReason)
+	fpPrefix := item.DiscFingerprint
+	if len(fpPrefix) > 8 {
+		fpPrefix = fpPrefix[:8]
+	}
+	if fpPrefix == "" {
+		fpPrefix = fmt.Sprintf("id%d", item.ID)
+	}
+	dirName := reason + "_" + fpPrefix
+
+	reviewPath, err := textutil.SafeJoin(h.cfg.Paths.ReviewDir, dirName)
+	if err != nil {
+		return fmt.Errorf("resolve review path: %w", err)
+	}
+
+	if err := os.MkdirAll(reviewPath, 0o755); err != nil {
+		return fmt.Errorf("create review dir: %w", err)
+	}
+
+	// Determine source stage.
+	sourceStage := "subtitled"
+	keys := env.AssetKeys()
+	if len(keys) > 0 {
+		if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
+			sourceStage = "encoded"
+		}
+	}
+
+	for i, key := range keys {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		asset, ok := env.Assets.FindAsset(sourceStage, key)
+		if !ok || !asset.IsCompleted() {
+			continue
+		}
+
+		destName := destFilename(meta, key, filepath.Ext(asset.Path))
+		destPath := filepath.Join(reviewPath, destName)
+
+		logger.Info(fmt.Sprintf("Phase %d/%d - Copying to review (%s)", i+1, len(keys), key),
+			"event_type", "review_copy",
+		)
+
+		if err := fileutil.CopyFileVerified(asset.Path, destPath); err != nil {
+			if ctx.Err() != nil {
+				_ = os.Remove(destPath)
+				return ctx.Err()
+			}
+			return fmt.Errorf("copy %s to review: %w", key, err)
+		}
+
+		copySidecarSubtitle(logger, asset.Path, destPath)
+	}
+
+	logger.Info("review routing completed", "event_type", "stage_complete", "review_path", reviewPath)
+	return nil
+}
+
+// copySidecarSubtitle copies a .en.srt sidecar subtitle file alongside the
+// destination video if one exists next to the source video.
+func copySidecarSubtitle(logger *slog.Logger, srcVideo, destVideo string) {
+	srcSrt := strings.TrimSuffix(srcVideo, filepath.Ext(srcVideo)) + ".en.srt"
+	if _, err := os.Stat(srcSrt); err != nil {
 		return
 	}
-	payload := notifications.Payload{
-		"mediaTitle":        title,
-		"finalFile":         filepath.Base(finalPath),
-		"jellyfinRefreshed": jellyfinRefreshed,
-	}
-	if episodeCount > 0 {
-		payload["episodeCount"] = episodeCount
-		payload["failedCount"] = failedCount
-	}
-	if err := o.notifier.Publish(ctx, notifications.EventOrganizationCompleted, payload); err != nil {
-		logger.Warn("organization notifier failed; completion alert skipped",
-			logging.Error(err),
-			logging.String(logging.FieldEventType, "notify_failed"),
-			logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
-			logging.String(logging.FieldImpact, "user will not receive completion notification"),
+
+	destSrt := strings.TrimSuffix(destVideo, filepath.Ext(destVideo)) + ".en.srt"
+	if err := fileutil.CopyFile(srcSrt, destSrt); err != nil {
+		logger.Warn("failed to copy sidecar subtitle",
+			"event_type", "sidecar_copy_error",
+			"error_hint", err.Error(),
+			"impact", "subtitle file not available in library",
 		)
 	}
-	if episodeCount == 0 {
-		if err := o.notifier.Publish(ctx, notifications.EventProcessingCompleted, notifications.Payload{"title": title}); err != nil {
-			logger.Warn("processing completion notifier failed; completion alert skipped",
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "notify_failed"),
-				logging.String(logging.FieldErrorHint, "check ntfy_topic configuration"),
-				logging.String(logging.FieldImpact, "user will not receive completion notification"),
-			)
-		}
-	}
-}
-
-// HealthCheck verifies organizer prerequisites such as library paths and Jellyfin connectivity configuration.
-func (o *Organizer) HealthCheck(ctx context.Context) stage.Health {
-	const name = "organizer"
-	if o.cfg == nil {
-		return stage.Unhealthy(name, "configuration unavailable")
-	}
-	if strings.TrimSpace(o.cfg.Paths.LibraryDir) == "" {
-		return stage.Unhealthy(name, "library directory not configured")
-	}
-	if strings.TrimSpace(o.cfg.Library.MoviesDir) == "" && strings.TrimSpace(o.cfg.Library.TVDir) == "" {
-		return stage.Unhealthy(name, "library subdirectories not configured")
-	}
-	if o.jellyfin == nil {
-		return stage.Unhealthy(name, "jellyfin client unavailable")
-	}
-	return stage.Healthy(name)
 }

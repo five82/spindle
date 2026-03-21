@@ -1,539 +1,259 @@
+// Package ripcache manages cached rip results for reuse across pipeline runs.
 package ripcache
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
-	"syscall"
 	"time"
-
-	"log/slog"
-
-	"spindle/internal/config"
-	"spindle/internal/fileutil"
-	"spindle/internal/logging"
-	"spindle/internal/queue"
-	"spindle/internal/textutil"
 )
 
-const (
-	// freeSpaceFloor is the minimum free-space ratio we allow before pruning (e.g., 0.20 => 80% full).
-	freeSpaceFloor = 0.20
-)
+// EntryMetadata stores metadata about a cached rip.
+type EntryMetadata struct {
+	Fingerprint string    `json:"fingerprint"`
+	DiscTitle   string    `json:"disc_title"`
+	CachedAt    time.Time `json:"cached_at"`
+	TitleCount  int       `json:"title_count"`
+	TotalBytes  int64     `json:"total_bytes"`
+}
 
-// statfsFunc allows tests to stub filesystem stats.
-type statfsFunc func(path string) (total uint64, free uint64, err error)
-
-// Manager handles storing and pruning ripped artifacts.
-type Manager struct {
-	root     string
+// Store manages the rip cache directory.
+type Store struct {
+	cacheDir string
 	maxBytes int64
-	logger   *slog.Logger
-	statfs   statfsFunc
 }
 
-// Stats describes current cache usage.
-type Stats struct {
-	Entries        int            `json:"entries"`
-	TotalBytes     int64          `json:"total_bytes"`
-	MaxBytes       int64          `json:"max_bytes"`
-	FreeBytes      uint64         `json:"free_bytes"`
-	TotalFSBytes   uint64         `json:"total_fs_bytes"`
-	FreeRatio      float64        `json:"free_ratio"`
-	EntrySummaries []EntrySummary `json:"entry_summaries"`
+// New creates a rip cache store.
+func New(cacheDir string, maxGiB int) *Store {
+	return &Store{
+		cacheDir: cacheDir,
+		maxBytes: int64(maxGiB) * 1024 * 1024 * 1024,
+	}
 }
 
-// EntrySummary surfaces human-friendly details about a rip cache entry so the
-// CLI can show which titles are currently stored.
-type EntrySummary struct {
-	Directory      string    `json:"directory"`
-	SizeBytes      int64     `json:"size_bytes"`
-	ModifiedAt     time.Time `json:"modified_at"`
-	PrimaryFile    string    `json:"primary_file"`
-	VideoFileCount int       `json:"video_file_count"`
-}
+// Register copies ripped files from srcDir into the cache under fingerprint.
+// Metadata is written as metadata.json alongside the cached files.
+func (s *Store) Register(fingerprint, srcDir string, meta EntryMetadata) error {
+	entryDir := filepath.Join(s.cacheDir, fingerprint)
+	if err := os.MkdirAll(entryDir, 0o755); err != nil {
+		return fmt.Errorf("create cache entry dir: %w", err)
+	}
 
-// NewManager builds a cache manager when enabled; returns nil when caching is disabled or misconfigured.
-func NewManager(cfg *config.Config, logger *slog.Logger) *Manager {
-	if cfg == nil || !cfg.RipCache.Enabled {
-		return nil
-	}
-	root := strings.TrimSpace(cfg.RipCache.Dir)
-	if root == "" || cfg.RipCache.MaxGiB <= 0 {
-		return nil
-	}
-	maxBytes := int64(cfg.RipCache.MaxGiB) * 1024 * 1024 * 1024
-	manager := &Manager{
-		root:     root,
-		maxBytes: maxBytes,
-		statfs:   realStatfs,
-	}
-	manager.SetLogger(logger)
-	return manager
-}
-
-// SetLogger refreshes the manager's logging destination (allows per-item log routing).
-func (m *Manager) SetLogger(logger *slog.Logger) {
-	if m == nil {
-		return
-	}
-	m.logger = logging.NewComponentLogger(logger, "ripcache")
-}
-
-// Store copies a rip directory into the cache and triggers pruning.
-// It is primarily used in tests; the normal flow writes directly to cache paths.
-func (m *Manager) Store(ctx context.Context, item *queue.Item, ripDir string) error {
-	if m == nil || item == nil {
-		return nil
-	}
-	src := strings.TrimSpace(ripDir)
-	if src == "" {
-		return errors.New("ripcache: empty rip directory")
-	}
-	info, err := os.Stat(src)
+	entries, err := os.ReadDir(srcDir)
 	if err != nil {
-		return fmt.Errorf("ripcache: inspect rip dir: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("ripcache: rip path %q is not a directory", src)
+		return fmt.Errorf("read source dir: %w", err)
 	}
 
-	dest := m.cachePath(item)
-	// Replace any existing entry for this item.
-	if err := os.RemoveAll(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("ripcache: remove existing cache entry: %w", err)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		srcPath := filepath.Join(srcDir, e.Name())
+		dstPath := filepath.Join(entryDir, e.Name())
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return fmt.Errorf("copy %s: %w", e.Name(), err)
+		}
 	}
-	if err := copyDir(src, dest); err != nil {
-		return fmt.Errorf("ripcache: copy entry: %w", err)
-	}
-	_ = os.Chtimes(dest, time.Now(), time.Now())
 
-	if err := m.prune(ctx, dest); err != nil {
-		return fmt.Errorf("ripcache: prune after store: %w", err)
+	metaPath := filepath.Join(entryDir, "metadata.json")
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
 	}
-	m.logger.InfoContext(ctx, "stored rip cache entry",
-		logging.String("cache_dir", dest),
-		logging.String("disc_fingerprint", strings.TrimSpace(item.DiscFingerprint)),
-	)
+	if err := os.WriteFile(metaPath, data, 0o644); err != nil {
+		return fmt.Errorf("write metadata: %w", err)
+	}
+
 	return nil
 }
 
-// Register marks an already-written cache entry and prunes other entries.
-// keepPath protects the active entry from deletion; if space cannot be freed
-// without removing keepPath, an error is returned.
-func (m *Manager) Register(ctx context.Context, item *queue.Item, keepPath string) error {
-	if m == nil || item == nil {
-		return nil
+// Restore copies cached files for fingerprint into destDir.
+// Returns nil, nil if no cache entry exists for the fingerprint.
+func (s *Store) Restore(fingerprint, destDir string) (*EntryMetadata, error) {
+	entryDir := filepath.Join(s.cacheDir, fingerprint)
+	if _, err := os.Stat(entryDir); os.IsNotExist(err) {
+		return nil, nil
 	}
-	path := strings.TrimSpace(keepPath)
-	if path == "" {
-		return errors.New("ripcache: register path is empty")
+
+	meta, err := s.GetMetadata(fingerprint)
+	if err != nil {
+		return nil, fmt.Errorf("read metadata: %w", err)
 	}
-	now := time.Now()
-	_ = os.Chtimes(path, now, now)
-	if err := m.prune(ctx, path); err != nil {
-		return err
+
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create dest dir: %w", err)
 	}
-	return nil
+
+	entries, err := os.ReadDir(entryDir)
+	if err != nil {
+		return nil, fmt.Errorf("read cache entry dir: %w", err)
+	}
+
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "metadata.json" {
+			continue
+		}
+		srcPath := filepath.Join(entryDir, e.Name())
+		dstPath := filepath.Join(destDir, e.Name())
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return nil, fmt.Errorf("copy %s: %w", e.Name(), err)
+		}
+	}
+
+	return meta, nil
 }
 
-// Prune removes entries based on size and free-space thresholds.
-// keepPath, when provided, will not be deleted unless it is the sole entry and
-// free-space constraints cannot be satisfied.
-func (m *Manager) Prune(ctx context.Context, keepPath string) error {
-	return m.prune(ctx, keepPath)
+// HasCache reports whether a cache entry exists for the given fingerprint.
+func (s *Store) HasCache(fingerprint string) bool {
+	entryDir := filepath.Join(s.cacheDir, fingerprint)
+	info, err := os.Stat(entryDir)
+	return err == nil && info.IsDir()
 }
 
-// Stats returns current cache usage and filesystem free-space info.
-func (m *Manager) Stats(ctx context.Context) (Stats, error) {
-	var s Stats
-	if m == nil {
-		return s, nil
-	}
-	entries, totalSize, err := m.scan()
+// Prune removes the oldest cache entries until total size is under maxBytes.
+func (s *Store) Prune() error {
+	entries, err := os.ReadDir(s.cacheDir)
 	if err != nil {
-		return s, err
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read cache dir: %w", err)
 	}
-	totalFS, freeFS, err := m.statfs(m.root)
-	if err != nil {
-		return s, fmt.Errorf("ripcache: statfs: %w", err)
+
+	type cacheEntry struct {
+		name     string
+		size     int64
+		cachedAt time.Time
 	}
-	ratio := 1.0
-	if totalFS > 0 {
-		ratio = float64(freeFS) / float64(totalFS)
-	}
-	details := make([]EntrySummary, 0, len(entries))
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
-		details = append(details, EntrySummary{
-			Directory:      entry.path,
-			SizeBytes:      entry.sizeBytes,
-			ModifiedAt:     entry.modTime,
-			PrimaryFile:    entry.primary,
-			VideoFileCount: entry.videoCount,
+
+	var all []cacheEntry
+	var totalSize int64
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		meta, err := s.GetMetadata(e.Name())
+		if err != nil {
+			// Skip entries without valid metadata.
+			continue
+		}
+		all = append(all, cacheEntry{
+			name:     e.Name(),
+			size:     meta.TotalBytes,
+			cachedAt: meta.CachedAt,
 		})
+		totalSize += meta.TotalBytes
 	}
-	s = Stats{
-		Entries:        len(entries),
-		TotalBytes:     totalSize,
-		MaxBytes:       m.maxBytes,
-		FreeBytes:      freeFS,
-		TotalFSBytes:   totalFS,
-		FreeRatio:      ratio,
-		EntrySummaries: details,
+
+	if totalSize <= s.maxBytes {
+		return nil
 	}
-	if len(entries) == 0 {
-		m.logger.InfoContext(ctx, "rip cache empty")
+
+	// Sort oldest first.
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].cachedAt.Before(all[j].cachedAt)
+	})
+
+	for _, ce := range all {
+		if totalSize <= s.maxBytes {
+			break
+		}
+		entryDir := filepath.Join(s.cacheDir, ce.name)
+		if err := os.RemoveAll(entryDir); err != nil {
+			return fmt.Errorf("remove cache entry %s: %w", ce.name, err)
+		}
+		totalSize -= ce.size
 	}
-	return s, nil
+
+	return nil
 }
 
-// RemoveEntryByNumber removes a cache entry using the 1-based numbering from Stats.
-func (m *Manager) RemoveEntryByNumber(ctx context.Context, entryNum int) (EntrySummary, error) {
-	if m == nil {
-		return EntrySummary{}, errors.New("ripcache: manager unavailable")
-	}
-	if entryNum < 1 {
-		return EntrySummary{}, fmt.Errorf("ripcache: invalid entry number %d", entryNum)
-	}
-	stats, err := m.Stats(ctx)
+// GetMetadata reads the metadata.json for a cache entry.
+func (s *Store) GetMetadata(fingerprint string) (*EntryMetadata, error) {
+	metaPath := filepath.Join(s.cacheDir, fingerprint, "metadata.json")
+	data, err := os.ReadFile(metaPath)
 	if err != nil {
-		return EntrySummary{}, err
+		return nil, fmt.Errorf("read metadata: %w", err)
 	}
-	if entryNum > len(stats.EntrySummaries) {
-		return EntrySummary{}, fmt.Errorf("ripcache: entry number %d out of range (only %d entries exist)", entryNum, len(stats.EntrySummaries))
+
+	var meta EntryMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("parse metadata: %w", err)
 	}
-	entry := stats.EntrySummaries[entryNum-1]
-	if err := os.RemoveAll(entry.Directory); err != nil {
-		return EntrySummary{}, fmt.Errorf("ripcache: remove cache entry: %w", err)
-	}
-	m.logger.InfoContext(ctx, "removed rip cache entry",
-		logging.String("cache_dir", entry.Directory),
-		logging.Int64("entry_size_bytes", entry.SizeBytes),
-	)
-	return entry, nil
+
+	return &meta, nil
 }
 
-// Clear removes all cache entries and returns removed count + estimated freed bytes.
-func (m *Manager) Clear(ctx context.Context) (int, int64, error) {
-	if m == nil {
-		return 0, 0, errors.New("ripcache: manager unavailable")
-	}
-	stats, err := m.Stats(ctx)
+// List returns metadata for all cache entries, sorted newest first.
+func (s *Store) List() ([]EntryMetadata, error) {
+	entries, err := os.ReadDir(s.cacheDir)
 	if err != nil {
-		return 0, 0, err
-	}
-	for _, entry := range stats.EntrySummaries {
-		if err := os.RemoveAll(entry.Directory); err != nil {
-			return 0, 0, fmt.Errorf("ripcache: remove cache entry %s: %w", entry.Directory, err)
+		if os.IsNotExist(err) {
+			return nil, nil
 		}
-	}
-	if stats.Entries > 0 {
-		m.logger.InfoContext(ctx, "cleared rip cache",
-			logging.Int("removed_entries", stats.Entries),
-			logging.Int64("freed_bytes", stats.TotalBytes),
-		)
-	}
-	return stats.Entries, stats.TotalBytes, nil
-}
-
-// Restore copies a cached rip back into the target directory when missing.
-// Returns true when a cache entry was used.
-func (m *Manager) Restore(ctx context.Context, item *queue.Item, targetDir string) (bool, error) {
-	if m == nil || item == nil {
-		return false, nil
-	}
-	targetDir = strings.TrimSpace(targetDir)
-	if targetDir == "" {
-		return false, errors.New("ripcache: empty target directory")
-	}
-	if existsNonEmptyDir(targetDir) {
-		return false, nil
-	}
-	src := m.cachePath(item)
-	if !existsNonEmptyDir(src) {
-		return false, nil
-	}
-	if err := copyDir(src, targetDir); err != nil {
-		return false, fmt.Errorf("ripcache: restore entry: %w", err)
-	}
-	now := time.Now()
-	_ = os.Chtimes(src, now, now)
-	_ = os.Chtimes(targetDir, now, now)
-
-	m.logger.InfoContext(ctx, "restored rip from cache",
-		logging.String("cache_dir", src),
-		logging.String("target_dir", targetDir),
-		logging.String("disc_fingerprint", strings.TrimSpace(item.DiscFingerprint)),
-	)
-	return true, nil
-}
-
-// prune removes oldest cache entries until both size and free-space thresholds are satisfied.
-func (m *Manager) prune(ctx context.Context, keepPath string) error {
-	entries, totalSize, err := m.scan()
-	if err != nil {
-		return err
+		return nil, fmt.Errorf("read cache dir: %w", err)
 	}
 
-	for len(entries) > 0 {
-		freeOK, err := m.freeSpaceOK()
-		if err != nil {
-			return err
-		}
-		if totalSize <= m.maxBytes && freeOK {
-			return nil
-		}
-		// Remove oldest entry.
-		oldest := entries[0]
-		if samePath(oldest.path, keepPath) && len(entries) == 1 {
-			// Only the active entry exists; cannot prune further.
-			return fmt.Errorf("ripcache: cache over limits and active entry %q cannot be pruned", keepPath)
-		}
-		if samePath(oldest.path, keepPath) {
-			entries = entries[1:]
+	var result []EntryMetadata
+	for _, e := range entries {
+		if !e.IsDir() {
 			continue
 		}
-		if err := os.RemoveAll(oldest.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("ripcache: remove %q: %w", oldest.path, err)
+		meta, err := s.GetMetadata(e.Name())
+		if err != nil {
+			continue
 		}
-		m.logger.InfoContext(ctx, "pruned rip cache entry",
-			logging.String("cache_dir", oldest.path),
-			logging.Int64("entry_size_bytes", oldest.sizeBytes),
-		)
-		totalSize -= oldest.sizeBytes
-		entries = entries[1:]
+		result = append(result, *meta)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CachedAt.After(result[j].CachedAt)
+	})
+	return result, nil
+}
+
+// Remove deletes a cache entry by fingerprint.
+func (s *Store) Remove(fingerprint string) error {
+	entryDir := filepath.Join(s.cacheDir, fingerprint)
+	if _, err := os.Stat(entryDir); os.IsNotExist(err) {
+		return fmt.Errorf("cache entry not found: %s", fingerprint)
+	}
+	return os.RemoveAll(entryDir)
+}
+
+// Clear removes all cache entries.
+func (s *Store) Clear() error {
+	entries, err := os.ReadDir(s.cacheDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read cache dir: %w", err)
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		entryDir := filepath.Join(s.cacheDir, e.Name())
+		if err := os.RemoveAll(entryDir); err != nil {
+			return fmt.Errorf("remove %s: %w", e.Name(), err)
+		}
 	}
 	return nil
 }
 
-type cacheEntry struct {
-	path       string
-	sizeBytes  int64
-	modTime    time.Time
-	primary    string
-	videoCount int
-}
-
-func (m *Manager) scan() ([]cacheEntry, int64, error) {
-	entries := make([]cacheEntry, 0)
-	var total int64
-	rootEntries, err := os.ReadDir(m.root)
+// copyFile copies a single file from src to dst.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return entries, 0, nil
-		}
-		return nil, 0, fmt.Errorf("ripcache: list root: %w", err)
+		return fmt.Errorf("read: %w", err)
 	}
-	for _, entry := range rootEntries {
-		if !entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(m.root, entry.Name())
-		size, mtime, err := dirSizeAndTime(path)
-		if err != nil {
-			m.logger.Warn("ripcache: skip entry; excluded from stats and pruning",
-				logging.String("source_file", path),
-				logging.Error(err),
-				logging.String(logging.FieldEventType, "ripcache_entry_skipped"),
-				logging.String(logging.FieldErrorHint, "inspect cache directory permissions or remove the corrupted entry"),
-			)
-			continue
-		}
-		primary, count := identifyPrimaryFile(path)
-		total += size
-		entries = append(entries, cacheEntry{path: path, sizeBytes: size, modTime: mtime, primary: primary, videoCount: count})
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return fmt.Errorf("write: %w", err)
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].modTime.Before(entries[j].modTime)
-	})
-	return entries, total, nil
-}
-
-var cacheVideoExtensions = map[string]struct{}{
-	".mkv": {},
-	".mp4": {},
-	".m4v": {},
-	".mov": {},
-	".avi": {},
-}
-
-func identifyPrimaryFile(dir string) (string, int) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", 0
-	}
-	type candidate struct {
-		name string
-		size int64
-	}
-	files := make([]candidate, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		if _, ok := cacheVideoExtensions[ext]; !ok {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, candidate{name: entry.Name(), size: info.Size()})
-	}
-	if len(files) == 0 {
-		return "", 0
-	}
-	sort.Slice(files, func(i, j int) bool {
-		if files[i].size == files[j].size {
-			return files[i].name < files[j].name
-		}
-		return files[i].size > files[j].size
-	})
-	return files[0].name, len(files)
-}
-
-func (m *Manager) freeSpaceOK() (bool, error) {
-	total, free, err := m.statfs(m.root)
-	if err != nil {
-		return false, fmt.Errorf("ripcache: statfs: %w", err)
-	}
-	if total == 0 {
-		return true, nil
-	}
-	ratio := float64(free) / float64(total)
-	return ratio >= freeSpaceFloor, nil
-}
-
-func (m *Manager) cachePath(item *queue.Item) string {
-	segment := strings.TrimSpace(item.DiscFingerprint)
-	if segment == "" && item.ID > 0 {
-		segment = fmt.Sprintf("queue-%d", item.ID)
-	}
-	if segment == "" {
-		segment = sanitize(item.DiscTitle)
-	}
-	if segment == "" {
-		segment = "queue-temp"
-	}
-	return filepath.Join(m.root, sanitize(segment))
-}
-
-// Path returns the cache directory for the given queue item.
-func (m *Manager) Path(item *queue.Item) string {
-	if m == nil || item == nil {
-		return ""
-	}
-	return m.cachePath(item)
-}
-
-func samePath(a, b string) bool {
-	if strings.TrimSpace(a) == "" || strings.TrimSpace(b) == "" {
-		return false
-	}
-	ra, errA := filepath.EvalSymlinks(a)
-	rb, errB := filepath.EvalSymlinks(b)
-	if errA == nil {
-		a = ra
-	}
-	if errB == nil {
-		b = rb
-	}
-	return a == b
-}
-
-func dirSizeAndTime(path string) (int64, time.Time, error) {
-	var (
-		size    int64
-		latest  time.Time
-		visited = false
-	)
-	err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		visited = true
-		if !info.IsDir() {
-			size += info.Size()
-		}
-		if info.ModTime().After(latest) {
-			latest = info.ModTime()
-		}
-		return nil
-	})
-	if err != nil {
-		return 0, time.Time{}, err
-	}
-	if !visited {
-		return 0, time.Time{}, errors.New("empty cache entry")
-	}
-	return size, latest, nil
-}
-
-func existsNonEmptyDir(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || !info.IsDir() {
-		return false
-	}
-	entries, err := os.ReadDir(path)
-	return err == nil && len(entries) > 0
-}
-
-func copyDir(src, dst string) error {
-	if src == "" || dst == "" {
-		return errors.New("copyDir: empty path")
-	}
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
-	}
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		if info.Mode().Type() != 0 {
-			// Skip special files.
-			return nil
-		}
-		return fileutil.CopyFileMode(path, target, info.Mode())
-	})
-}
-
-func sanitize(value string) string {
-	value = textutil.SanitizeFileName(value)
-	if value == "" {
-		return ""
-	}
-	value = strings.ReplaceAll(value, " ", "-")
-	value = strings.Trim(value, "-_.")
-	if value == "" {
-		return "queue"
-	}
-	return value
-}
-
-func realStatfs(path string) (uint64, uint64, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
-		return 0, 0, err
-	}
-	total := stat.Blocks * uint64(stat.Bsize)
-	free := stat.Bavail * uint64(stat.Bsize)
-	return total, free, nil
+	return nil
 }

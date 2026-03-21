@@ -1,102 +1,138 @@
 package deps
 
 import (
-	"os"
-	"path/filepath"
-	"runtime"
+	"os/exec"
 	"testing"
 )
 
 func TestCheckBinaries(t *testing.T) {
-	binDir := t.TempDir()
-	present := filepath.Join(binDir, "present")
-	script := []byte("#!/bin/sh\nexit 0\n")
-	if err := os.WriteFile(present, script, 0o755); err != nil {
-		t.Fatalf("write stub: %v", err)
+	tests := []struct {
+		name      string
+		req       Requirement
+		wantAvail bool
+	}{
+		{
+			name: "known binary is available",
+			req: Requirement{
+				Name:        "go",
+				Command:     "go",
+				Description: "Go toolchain",
+			},
+			wantAvail: true,
+		},
+		{
+			name: "unknown binary is not available",
+			req: Requirement{
+				Name:        "nonexistent",
+				Command:     "spindle-nonexistent-binary-xyz",
+				Description: "should not exist",
+			},
+			wantAvail: false,
+		},
+		{
+			name: "optional unknown binary is not available",
+			req: Requirement{
+				Name:        "optional-missing",
+				Command:     "spindle-nonexistent-optional-xyz",
+				Description: "optional missing binary",
+				Optional:    true,
+			},
+			wantAvail: false,
+		},
 	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := CheckBinaries([]Requirement{tt.req})
+			if len(results) != 1 {
+				t.Fatalf("expected 1 result, got %d", len(results))
+			}
+			s := results[0]
+			if s.Available != tt.wantAvail {
+				t.Errorf("Available = %v, want %v (detail: %s)", s.Available, tt.wantAvail, s.Detail)
+			}
+			if s.Name != tt.req.Name {
+				t.Errorf("Name = %q, want %q", s.Name, tt.req.Name)
+			}
+			if s.Available && s.Detail == "" {
+				t.Error("expected non-empty Detail for available binary")
+			}
+			if !s.Available && s.Detail == "" {
+				t.Error("expected non-empty Detail for unavailable binary")
+			}
+		})
+	}
+}
+
+func TestCheckBinaries_preservesOrder(t *testing.T) {
 	reqs := []Requirement{
-		{Name: "Present", Command: present},
-		{Name: "Missing", Command: "clearly-not-present-binary"},
+		{Name: "first", Command: "go", Description: "Go"},
+		{Name: "second", Command: "spindle-nonexistent-xyz", Description: "missing"},
 	}
-
 	results := CheckBinaries(reqs)
-	if len(results) != len(reqs) {
-		t.Fatalf("expected %d results, got %d", len(reqs), len(results))
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
 	}
-
+	if results[0].Name != "first" || results[1].Name != "second" {
+		t.Error("result order does not match input order")
+	}
 	if !results[0].Available {
-		t.Fatalf("expected first requirement to be available, got %#v", results[0])
+		t.Error("expected go to be available")
 	}
-
 	if results[1].Available {
-		t.Fatalf("expected missing binary to be unavailable")
-	}
-	if results[1].Detail == "" {
-		t.Fatalf("expected detail message for missing binary")
-	}
-
-	if results[1].Command != "clearly-not-present-binary" {
-		t.Fatalf("unexpected command recorded: %s", results[1].Command)
-	}
-
-	if results[0].Detail != "" {
-		t.Fatalf("unexpected detail for available dependency: %s", results[0].Detail)
+		t.Error("expected missing binary to be unavailable")
 	}
 }
 
-func TestResolveFFmpegPathFromEnv(t *testing.T) {
-	tmp := t.TempDir()
-	ffmpegPath := filepath.Join(tmp, executableName("ffmpeg"))
-	script := []byte("#!/bin/sh\nexit 0\n")
-	if err := os.WriteFile(ffmpegPath, script, 0o755); err != nil {
-		t.Fatalf("write ffmpeg stub: %v", err)
+func TestResolveFFmpegPath_fallback(t *testing.T) {
+	// With no env vars set, the function should either find ffmpeg on PATH
+	// or return the literal "ffmpeg".
+	got := ResolveFFmpegPath()
+	if got == "" {
+		t.Fatal("ResolveFFmpegPath returned empty string")
 	}
 
-	t.Setenv("SPINDLE_FFMPEG_PATH", ffmpegPath)
-	result := ResolveFFmpegPath()
-	if result != ffmpegPath {
-		t.Fatalf("expected ffmpeg path %q, got %q", ffmpegPath, result)
-	}
-}
-
-func TestResolveFFmpegPathFromPATH(t *testing.T) {
-	tmp := t.TempDir()
-	ffmpegPath := filepath.Join(tmp, executableName("ffmpeg"))
-	script := []byte("#!/bin/sh\nexit 0\n")
-	if err := os.WriteFile(ffmpegPath, script, 0o755); err != nil {
-		t.Fatalf("write ffmpeg stub: %v", err)
-	}
-
-	// Clear env vars and set PATH
-	t.Setenv("SPINDLE_FFMPEG_PATH", "")
-	t.Setenv("FFMPEG_PATH", "")
-	oldPath := os.Getenv("PATH")
-	newPath := tmp
-	if oldPath != "" {
-		newPath = tmp + string(os.PathListSeparator) + oldPath
-	}
-	t.Setenv("PATH", newPath)
-
-	result := ResolveFFmpegPath()
-	if result != ffmpegPath {
-		t.Fatalf("expected ffmpeg path %q, got %q", ffmpegPath, result)
+	// If ffmpeg is on PATH, the result should match LookPath.
+	if p, err := exec.LookPath("ffmpeg"); err == nil {
+		if got != p {
+			t.Errorf("ResolveFFmpegPath() = %q, want %q (from PATH)", got, p)
+		}
+	} else {
+		// ffmpeg not installed; should get the literal fallback.
+		if got != "ffmpeg" {
+			t.Errorf("ResolveFFmpegPath() = %q, want literal %q", got, "ffmpeg")
+		}
 	}
 }
 
-func TestResolveFFmpegPathFallback(t *testing.T) {
-	t.Setenv("SPINDLE_FFMPEG_PATH", "")
-	t.Setenv("FFMPEG_PATH", "")
-	t.Setenv("PATH", "")
+func TestResolveFFprobePath_fallback(t *testing.T) {
+	got := ResolveFFprobePath("ffprobe")
+	if got == "" {
+		t.Fatal("ResolveFFprobePath returned empty string")
+	}
 
-	result := ResolveFFmpegPath()
-	if result != "ffmpeg" {
-		t.Fatalf("expected fallback to 'ffmpeg', got %q", result)
+	if p, err := exec.LookPath("ffprobe"); err == nil {
+		if got != p {
+			t.Errorf("ResolveFFprobePath() = %q, want %q (from PATH)", got, p)
+		}
+	} else {
+		if got != "ffprobe" {
+			t.Errorf("ResolveFFprobePath() = %q, want literal %q", got, "ffprobe")
+		}
 	}
 }
 
-func executableName(base string) string {
-	if runtime.GOOS == "windows" {
-		return base + ".exe"
+func TestResolveFFprobePath_customDefault(t *testing.T) {
+	// When given a custom default name that doesn't exist, the literal
+	// should still be that custom name (not "ffprobe").
+	got := ResolveFFprobePath("my-custom-ffprobe")
+	if p, err := exec.LookPath("my-custom-ffprobe"); err == nil {
+		if got != p {
+			t.Errorf("ResolveFFprobePath() = %q, want %q", got, p)
+		}
+	} else {
+		if got != "my-custom-ffprobe" {
+			t.Errorf("ResolveFFprobePath() = %q, want literal %q", got, "my-custom-ffprobe")
+		}
 	}
-	return base
 }
