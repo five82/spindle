@@ -235,12 +235,15 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"decision_reason", fmt.Sprintf("confidence=%.2f", confidence),
 	)
 
-	// Step 6: Detect edition (movies only, via regex + optional LLM).
-	var edition string
+	// Update disc_title to canonical name per spec.
 	mediaType := best.MediaType
 	if mediaType == "" {
 		mediaType = "movie" // default for single-type searches
 	}
+	item.DiscTitle = canonicalTitle(*best, mediaType, item.DiscTitle, discInfo)
+
+	// Step 6: Detect edition (movies only, via regex + optional LLM).
+	var edition string
 	if mediaType == "movie" {
 		edition = h.detectEdition(ctx, logger, item.DiscTitle, discInfo.Name)
 	}
@@ -272,7 +275,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	if h.notifier != nil {
 		_ = h.notifier.Send(ctx, notify.EventIdentificationComplete,
 			"Identification Complete",
-			fmt.Sprintf("%s identified as %s", item.DiscTitle, best.DisplayTitle()),
+			item.DiscTitle,
 		)
 	}
 
@@ -309,6 +312,29 @@ func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo, bdI
 	}
 
 	return "Unknown Disc"
+}
+
+// canonicalTitle builds the canonical disc title from a TMDB match.
+// Movie: "Title (Year)", TV: "Show Season XX (Year)".
+// Falls back to just the display title if year is unavailable.
+func canonicalTitle(best tmdb.SearchResult, mediaType string, discTitle string, discInfo *makemkv.DiscInfo) string {
+	title := best.DisplayTitle()
+	year := best.Year()
+
+	if mediaType == "tv" {
+		var discName string
+		if discInfo != nil {
+			discName = discInfo.Name
+		}
+		if season := extractSeasonNumber(discTitle, discName); season > 0 {
+			title = fmt.Sprintf("%s Season %02d", title, season)
+		}
+	}
+
+	if year != "" {
+		return fmt.Sprintf("%s (%s)", title, year)
+	}
+	return title
 }
 
 // CleanQueryTitle strips disc metadata (season, disc, volume, "TV Series") from a
