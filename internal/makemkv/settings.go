@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 )
@@ -66,10 +65,10 @@ func applySettings(path string, required map[string]string, logger *slog.Logger)
 
 	// Apply required settings.
 	for key, value := range required {
-		existing[key] = value
-		if !slices.Contains(order, key) {
+		if _, exists := existing[key]; !exists {
 			order = append(order, key)
 		}
+		existing[key] = value
 	}
 
 	logger.Info("updating MakeMKV settings",
@@ -106,10 +105,10 @@ func readSettings(path string) (map[string]string, []string, error) {
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.Trim(strings.TrimSpace(parts[1]), "\"")
-		settings[key] = value
-		if !slices.Contains(order, key) {
+		if _, exists := settings[key]; !exists {
 			order = append(order, key)
 		}
+		settings[key] = value
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, nil, fmt.Errorf("read settings: %w", err)
