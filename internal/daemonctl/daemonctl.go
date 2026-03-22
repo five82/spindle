@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -68,6 +69,10 @@ func Start(opts StartOptions) error {
 	args := []string{"daemon"}
 	if opts.ConfigFlag != "" {
 		args = append(args, "--config", opts.ConfigFlag)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(opts.LogPath), 0o755); err != nil {
+		return fmt.Errorf("create log directory: %w", err)
 	}
 
 	logFile, err := os.OpenFile(opts.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)

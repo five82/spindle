@@ -43,8 +43,13 @@ import (
 
 // Run starts the daemon and blocks until shutdown signal.
 func Run(ctx context.Context, cfg *config.Config) error {
-	// Clean old log files before opening a new one.
+	// Ensure state/log directory exists.
 	logDir := cfg.DaemonLogDir()
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return fmt.Errorf("create log directory: %w", err)
+	}
+
+	// Clean old log files before opening a new one.
 	cleanOldLogs(logDir, cfg.Logging.RetentionDays)
 
 	// Open timestamped JSON log file.
