@@ -114,6 +114,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			continue
 		}
 
+		// Remove stale output from a previous run. The staging directory is
+		// keyed by disc fingerprint, so a re-inserted disc reuses the same
+		// encoded/ directory. Drapto refuses to overwrite existing files.
+		expectedOutput := filepath.Join(encodedDir, filepath.Base(job.inputPath))
+		if err := os.Remove(expectedOutput); err == nil {
+			logger.Info("removed stale encoded file",
+				"decision_type", "encode_cleanup",
+				"decision_result", "removed",
+				"decision_reason", "stale output from previous run",
+				"path", expectedOutput,
+			)
+		}
+
 		logger.Info(fmt.Sprintf("Phase %d/%d - Encoding %s", i+1, len(jobs), filepath.Base(job.inputPath)),
 			"event_type", "encode_start",
 			"episode_key", job.episodeKey,

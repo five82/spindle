@@ -479,9 +479,13 @@ See DESIGN_INFRASTRUCTURE.md Section 4.6 for the full snapshot schema.
 
 ### 4.5 Output Organization
 
-- Encoded files placed in `{staging_dir}/queue-{id}/encoded/`.
+- Encoded files placed in `{staging_dir}/{fingerprint}/encoded/`.
 - For TV: one file per episode named by episode key.
 - For movies: single encoded file.
+- **Stale output cleanup**: Before encoding each job, the expected output file
+  is removed if it already exists. The staging directory is keyed by disc
+  fingerprint, so re-inserting a disc reuses the same directory. Without
+  cleanup, Drapto refuses to overwrite existing files from a prior run.
 
 ### 4.6 Validation
 
