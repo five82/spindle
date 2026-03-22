@@ -728,7 +728,7 @@ and moves them alongside the MKV to the library.
 
 When `mux_into_mkv` is true:
 - Use `mkvmerge` to embed SRT subtitle tracks into the MKV container.
-- Primary subtitle marked as default track.
+- Primary subtitle marked as non-default track (prevents auto-play in clients).
 - Forced subtitle marked as forced track.
 - Original encoded file is replaced with muxed version.
 
