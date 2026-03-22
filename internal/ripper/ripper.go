@@ -144,10 +144,20 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Cache ripped files.
 	if h.cache != nil && item.DiscFingerprint != "" {
+		var totalBytes int64
+		if dirEntries, err := os.ReadDir(rippedDir); err == nil {
+			for _, de := range dirEntries {
+				if info, err := de.Info(); err == nil {
+					totalBytes += info.Size()
+				}
+			}
+		}
 		meta := ripcache.EntryMetadata{
 			Fingerprint: item.DiscFingerprint,
 			DiscTitle:   item.DiscTitle,
+			CachedAt:    time.Now(),
 			TitleCount:  len(env.Titles),
+			TotalBytes:  totalBytes,
 		}
 		if err := h.cache.Register(item.DiscFingerprint, rippedDir, meta); err != nil {
 			logger.Warn("rip cache write failed",
