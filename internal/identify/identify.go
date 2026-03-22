@@ -134,6 +134,17 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_result", "hit",
 				"decision_reason", fmt.Sprintf("cached TMDB ID %d", entry.TMDBID),
 			)
+			// Update disc_title to canonical name from cache.
+			canonTitle := entry.Title
+			if entry.Year != "" {
+				canonTitle = fmt.Sprintf("%s (%s)", canonTitle, entry.Year)
+			}
+			item.DiscTitle = canonTitle
+			logger.Info("disc title updated from cache",
+				"decision_type", "title_source",
+				"decision_result", "updated",
+				"decision_reason", "disc_id_cache_entry",
+			)
 			// Build envelope from cached data and return.
 			env := h.buildEnvelopeFromCache(item, entry)
 			if err := h.persistEnvelope(ctx, item, &env); err != nil {
