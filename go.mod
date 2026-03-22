@@ -3,8 +3,8 @@ module github.com/five82/spindle
 go 1.26.0
 
 require (
-	github.com/fatih/color v1.18.0
-	github.com/five82/drapto v0.5.0
+	github.com/fatih/color v1.19.0
+	github.com/five82/drapto v0.5.1-0.20260321093257-91b4e62fe76e
 	github.com/gofrs/flock v0.13.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/cobra v1.10.2
@@ -16,7 +16,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

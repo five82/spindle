@@ -49,12 +49,20 @@ GOLANGCI_VERSION=$(golangci-lint version --format short 2>/dev/null || golangci-
 print_success "Go $GO_VERSION, golangci-lint $GOLANGCI_VERSION"
 
 print_step "Verifying go.mod is tidy"
-go mod tidy
+GOWORK=off go mod tidy
 if ! git diff --quiet go.mod go.sum 2>/dev/null; then
     print_error "go.mod or go.sum changed after 'go mod tidy'. Commit the changes."
     exit 1
 fi
 print_success "go.mod is tidy"
+
+print_step "Verifying build without go.work (mirrors CI)"
+if GOWORK=off go build ./...; then
+    print_success "CI-equivalent build passed"
+else
+    print_error "Build fails without go.work — update go.mod deps (e.g. go get github.com/five82/drapto@main)"
+    exit 1
+fi
 
 print_step "Running go test ./..."
 if go test ./...; then
