@@ -448,9 +448,7 @@ func (h *Handler) detectEdition(ctx context.Context, logger *slog.Logger, discTi
 // MakeMKV scan and sets the HasForcedSubtitleTrack attribute on the envelope.
 func setForcedSubtitleAttribute(logger *slog.Logger, discInfo *makemkv.DiscInfo, env *ripspec.Envelope) {
 	hasForcedTrack := discInfo.HasForcedEnglishSubtitles()
-	if hasForcedTrack {
-		env.Attributes.HasForcedSubtitleTrack = true
-	}
+	env.Attributes.HasForcedSubtitleTrack = hasForcedTrack
 	result := "none"
 	reason := "no_forced_track_found"
 	if hasForcedTrack {

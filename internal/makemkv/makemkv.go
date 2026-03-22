@@ -352,17 +352,23 @@ func unquote(s string) string {
 // HasForcedEnglishSubtitles returns true if any title has a forced English
 // subtitle track. MakeMKV marks forced tracks with "(forced only)" in the
 // track name (SINFO attribute 30).
+// SINFO attribute IDs used by MakeMKV robot output.
+const (
+	sinfoAttrTrackType = 1  // "Video", "Audio", "Subtitle"
+	sinfoAttrLanguage  = 3  // e.g. "eng"
+	sinfoAttrTrackName = 30 // e.g. "PGS English (forced only)"
+)
+
 func (d *DiscInfo) HasForcedEnglishSubtitles() bool {
 	if d == nil {
 		return false
 	}
 
-	// streamKey identifies a unique stream across SINFO lines.
 	type streamKey struct{ title, stream int }
 	type streamAttrs struct {
-		trackType string // SINFO attr 1: "Video", "Audio", "Subtitle"
-		language  string // SINFO attr 3: e.g. "eng"
-		name      string // SINFO attr 30: track name
+		trackType string
+		language  string
+		name      string
 	}
 
 	streams := make(map[streamKey]*streamAttrs)
@@ -398,20 +404,18 @@ func (d *DiscInfo) HasForcedEnglishSubtitles() bool {
 		}
 
 		switch attrID {
-		case 1:
+		case sinfoAttrTrackType:
 			sa.trackType = value
-		case 3:
+		case sinfoAttrLanguage:
 			sa.language = value
-		case 30:
+		case sinfoAttrTrackName:
 			sa.name = value
-		}
-	}
-
-	for _, sa := range streams {
-		if strings.EqualFold(sa.trackType, "Subtitle") &&
-			strings.HasPrefix(strings.ToLower(sa.language), "eng") &&
-			strings.Contains(strings.ToLower(sa.name), "(forced only)") {
-			return true
+			// Short-circuit: check match as soon as we have the track name.
+			if strings.EqualFold(sa.trackType, "Subtitle") &&
+				strings.HasPrefix(strings.ToLower(sa.language), "eng") &&
+				strings.Contains(strings.ToLower(value), "(forced only)") {
+				return true
+			}
 		}
 	}
 	return false

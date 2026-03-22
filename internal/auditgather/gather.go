@@ -445,7 +445,7 @@ func gatherMediaProbes(ctx context.Context, env *ripspec.Envelope, mediaType str
 
 	if mediaType == "movie" {
 		// Prefer final (most complete, with subtitles), fall back to subtitled, then encoded.
-		p := probeMovieAsset(ctx, env, "main")
+		p := probeBestAsset(ctx, env, "main")
 		if p.Path != "" {
 			probes = append(probes, p)
 		}
@@ -455,7 +455,7 @@ func gatherMediaProbes(ctx context.Context, env *ripspec.Envelope, mediaType str
 			if asset.IsFailed() || strings.TrimSpace(asset.Path) == "" {
 				continue
 			}
-			p := probeMovieAsset(ctx, env, asset.EpisodeKey)
+			p := probeBestAsset(ctx, env, asset.EpisodeKey)
 			if p.Path != "" {
 				probes = append(probes, p)
 			}
@@ -465,8 +465,8 @@ func gatherMediaProbes(ctx context.Context, env *ripspec.Envelope, mediaType str
 	return probes
 }
 
-// probeMovieAsset probes the most complete version of an asset: final > subtitled > encoded.
-func probeMovieAsset(ctx context.Context, env *ripspec.Envelope, episodeKey string) MediaFileProbe {
+// probeBestAsset probes the most complete version of an asset: final > subtitled > encoded.
+func probeBestAsset(ctx context.Context, env *ripspec.Envelope, episodeKey string) MediaFileProbe {
 	for _, stage := range []string{"final", "subtitled", "encoded"} {
 		asset, ok := env.Assets.FindAsset(stage, episodeKey)
 		if !ok || !asset.IsCompleted() {
