@@ -102,6 +102,7 @@ func newStatusCmd() *cobra.Command {
 			lp, sp := lockPath(), socketPath()
 			running := daemonctl.IsRunning(lp, sp)
 
+			fmt.Println()
 			fmt.Println(headerStyle("Spindle Status"))
 			fmt.Println()
 			if running {
