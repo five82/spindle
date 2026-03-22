@@ -186,7 +186,7 @@ func gatherLogs(cfg *config.Config, item *queue.Item) (*LogAnalysis, error) {
 	report := &LogAnalysis{Path: logPath}
 
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -280,13 +280,6 @@ func parseLogLine(line string, itemID int64, report *LogAnalysis) {
 		return
 	}
 
-	// Infer disc source from raw content before filtering by item ID.
-	if report.InferredDiscSource == "" {
-		if src := inferDiscSourceFromJSON(line); src != "" {
-			report.InferredDiscSource = src
-		}
-	}
-
 	var entry map[string]any
 	if err := json.Unmarshal([]byte(line), &entry); err != nil {
 		return
@@ -295,6 +288,13 @@ func parseLogLine(line string, itemID int64, report *LogAnalysis) {
 	// Filter by item_id.
 	if id, ok := getFloat(entry, "item_id"); !ok || int64(id) != itemID {
 		return
+	}
+
+	// Infer disc source from this item's log lines.
+	if report.InferredDiscSource == "" {
+		if src := inferDiscSourceFromJSON(line); src != "" {
+			report.InferredDiscSource = src
+		}
 	}
 
 	level := getString(entry, "level")
@@ -422,13 +422,9 @@ func gatherRipCache(cfg *config.Config, item *queue.Item) *RipCacheReport {
 	store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 	cachePath := filepath.Join(cfg.RipCacheDir(), item.DiscFingerprint)
 
-	if !store.HasCache(item.DiscFingerprint) {
-		return &RipCacheReport{Path: cachePath, Found: false}
-	}
-
 	meta, err := store.GetMetadata(item.DiscFingerprint)
 	if err != nil {
-		return &RipCacheReport{Path: cachePath, Found: true}
+		return &RipCacheReport{Path: cachePath, Found: store.HasCache(item.DiscFingerprint)}
 	}
 
 	return &RipCacheReport{
@@ -489,6 +485,6 @@ func probeFile(ctx context.Context, path, role, episodeKey string) MediaFileProb
 		EpisodeKey:  episodeKey,
 		Probe:       result,
 		SizeBytes:   result.SizeBytes(),
-		DurationSec: result.DurationSeconds(),
+		DurationSeconds: result.DurationSeconds(),
 	}
 }

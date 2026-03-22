@@ -51,7 +51,7 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 |-------|-------------|----------|
 | `decision_groups` | Decisions exist | Groups by (type, result, reason) with count. `entries` included when count=1 or messages vary; nil when all identical. |
 | `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
-| `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`, `disabled`. |
+| `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
 | `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
 | `media_stats` | Valid probes exist | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`. |
 | `asset_health` | Assets exist | Per-stage (ripped/encoded/subtitled/final) `total/ok/failed/muxed` counts. |

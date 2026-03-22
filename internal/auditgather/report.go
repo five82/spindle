@@ -127,7 +127,7 @@ type MediaFileProbe struct {
 	Representative bool            `json:"representative,omitempty"`
 	Probe          *ffprobe.Result `json:"probe,omitempty"`
 	SizeBytes      int64           `json:"size_bytes"`
-	DurationSec    float64         `json:"duration_seconds"`
+	DurationSeconds float64        `json:"duration_seconds"`
 	Error          string          `json:"error,omitempty"`
 }
 
@@ -199,7 +199,6 @@ type CropAnalysis struct {
 	AspectRatio   float64 `json:"aspect_ratio,omitempty"`
 	StandardRatio string  `json:"standard_ratio,omitempty"`
 	Required      bool    `json:"required"`
-	Disabled      bool    `json:"disabled"`
 }
 
 // EpisodeStats holds episode identification summary.

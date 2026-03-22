@@ -214,26 +214,11 @@ func buildProfileSummary(p MediaFileProbe) ProfileSummary {
 }
 
 func profilesEqual(a, b ProfileSummary) bool {
-	if a.VideoCodec != b.VideoCodec || a.Width != b.Width || a.Height != b.Height {
-		return false
-	}
-	if len(a.AudioStreams) != len(b.AudioStreams) {
-		return false
-	}
-	for i := range a.AudioStreams {
-		if a.AudioStreams[i] != b.AudioStreams[i] {
-			return false
-		}
-	}
-	if len(a.SubtitleStreams) != len(b.SubtitleStreams) {
-		return false
-	}
-	for i := range a.SubtitleStreams {
-		if a.SubtitleStreams[i] != b.SubtitleStreams[i] {
-			return false
-		}
-	}
-	return true
+	return a.VideoCodec == b.VideoCodec &&
+		a.Width == b.Width &&
+		a.Height == b.Height &&
+		slices.Equal(a.AudioStreams, b.AudioStreams) &&
+		slices.Equal(a.SubtitleStreams, b.SubtitleStreams)
 }
 
 func describeProfileDifferences(majority, other ProfileSummary) []string {
@@ -247,24 +232,12 @@ func describeProfileDifferences(majority, other ProfileSummary) []string {
 	if len(other.AudioStreams) != len(majority.AudioStreams) {
 		diffs = append(diffs, fmt.Sprintf("audio streams: %d (expected %d)", len(other.AudioStreams), len(majority.AudioStreams)))
 	}
-	if !subtitleStreamsEqual(majority.SubtitleStreams, other.SubtitleStreams) {
+	if !slices.Equal(majority.SubtitleStreams, other.SubtitleStreams) {
 		diffs = append(diffs, fmt.Sprintf("subtitle streams: %s (expected %s)",
 			describeSubtitleStreams(other.SubtitleStreams),
 			describeSubtitleStreams(majority.SubtitleStreams)))
 	}
 	return diffs
-}
-
-func subtitleStreamsEqual(a, b []SubtitleProfile) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func describeSubtitleStreams(streams []SubtitleProfile) string {
@@ -421,8 +394,8 @@ func computeMediaStats(probes []MediaFileProbe) *MediaStats {
 			continue
 		}
 		count++
-		if p.DurationSec > 0 {
-			durations = append(durations, p.DurationSec)
+		if p.DurationSeconds > 0 {
+			durations = append(durations, p.DurationSeconds)
 		}
 		if p.SizeBytes > 0 {
 			sizes = append(sizes, p.SizeBytes)
