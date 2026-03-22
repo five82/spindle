@@ -232,9 +232,9 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
 
 ### Phase 5: Crop Detection Validation (when `phase_crop` is true)
 
-Analyze `encoding.snapshot.crop` from the audit-gather output:
+Analyze crop data from the audit-gather output:
 
-1. **Read pre-computed crop data**: `analysis.crop_analysis` provides `output_width`, `output_height`, `aspect_ratio`, `standard_ratio`, `required`, and `disabled`. Also read `encoding.snapshot.crop.message` for the detection summary.
+1. **Read pre-computed crop data**: `analysis.crop_analysis` provides `output_width`, `output_height`, `aspect_ratio`, `standard_ratio`, and `required`. Also read `encoding.snapshot.crop_message` for the detection summary.
 
 2. **Verify aspect ratio**: Common ratios: 2.39:1/2.40:1 (scope), 1.85:1, 1.78:1 (16:9), 2.00:1 (IMAX). Compare `analysis.crop_analysis.standard_ratio` against expected for the content.
 
@@ -338,7 +338,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Missed edition detection | Identification | No `edition_detection` decision for disc with edition markers | Edition not in filename |
 | Wrong edition label | Identification | `stage_gate.edition` doesn't match actual edition type | Incorrect filename/subtitle |
 | Edition detection LLM failure | Identification | `logs.errors` or `logs.warnings` with `event_type=edition_llm_failed` | Ambiguous edition not detected |
-| Wrong crop detection | Encoding | `encoding.snapshot.crop` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
+| Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
 | Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Jellyfin won't recognize tracks |
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
@@ -523,7 +523,7 @@ After running `spindle audit-gather`, check only the phases flagged as `true` in
 
 ### Post-Encoding (phase_encoded, phase_crop)
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
-- [ ] Validated crop detection from `encoding.snapshot.crop`
+- [ ] Validated crop detection from `encoding.snapshot.crop_filter`
 - [ ] Verified commentary labeling
 - [ ] If movie with edition: verified edition in filename
 - [ ] If TV: checked cross-episode consistency

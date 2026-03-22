@@ -528,10 +528,10 @@ type count reflects the breadth of the audit surface (7 pipeline stages,
 6. **Media probes**: FFprobe each encoded/final file. TV: probe each episode
    asset, falling back to final path if staging cleaned up.
 
-**Phase applicability**: The report includes boolean phase flags computed
-from `furthest_stage` + `media_type` + `disc_source` so the skill knows
-which sections of the report are meaningful. These are computed inline
-during gathering, not via a separate type.
+**Phase applicability**: The report includes a `stage_gate` struct with
+boolean phase flags computed from `furthest_stage` + `media_type` +
+`disc_source` so the skill knows which sections of the report are
+meaningful.
 
 | Phase Flag | Enabled When |
 |------------|-------------|
@@ -572,11 +572,7 @@ Pre-computed summaries derived from gathered data:
 | Field | Type | Description |
 |-------|------|-------------|
 | `item` | ItemSummary | Queue item summary |
-| `furthest_stage` | string | Highest pipeline stage reached |
-| `media_type` | string | movie or tv |
-| `disc_source` | string | From envelope `metadata.disc_source` |
-| `edition` | string? | Detected edition label |
-| `phase_*` | bool | Phase applicability flags (see Section 7.1) |
+| `stage_gate` | StageGate | Furthest stage, media type, disc source, edition, phase flags |
 | `logs` | LogAnalysis? | Log entries filtered by item ID |
 | `rip_cache` | RipCacheReport? | Cached rip data and metadata |
 | `envelope` | EnvelopeReport? | Parsed RipSpec envelope |
@@ -604,12 +600,24 @@ Pre-computed summaries derived from gathered data:
 | `progress_percent` | float64? |
 | `progress_message` | string? |
 
+#### StageGate
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `furthest_stage` | string | Highest pipeline stage reached |
+| `media_type` | string | movie or tv |
+| `disc_source` | string | bluray, 4k_bluray, dvd, or empty |
+| `edition` | string? | Detected edition label |
+| `phase_*` | bool | Phase applicability flags (see Section 7.1) |
+
 #### LogAnalysis
 
 | Field | Type |
 |-------|------|
 | `path` | string |
+| `is_debug` | bool |
 | `total_lines` | int |
+| `inferred_disc_source` | string? |
 | `decisions` | []LogDecision |
 | `warnings` | []LogEntry |
 | `errors` | []LogEntry |

@@ -16,7 +16,7 @@ func newAuditGatherCmd() *cobra.Command {
 		Use:   "audit-gather <item-id>",
 		Short: "Gather audit artifacts for a queue item",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return fmt.Errorf("invalid item ID: %s", args[0])
@@ -36,15 +36,9 @@ func newAuditGatherCmd() *cobra.Command {
 				return fmt.Errorf("queue item %d not found", id)
 			}
 
-			report := auditgather.Report{
-				Item: auditgather.ItemSummary{
-					ID:           item.ID,
-					DiscTitle:    item.DiscTitle,
-					Stage:        string(item.Stage),
-					ErrorMessage: item.ErrorMessage,
-					NeedsReview:  item.NeedsReview != 0,
-					ReviewReason: item.ReviewReason,
-				},
+			report, err := auditgather.Gather(cmd.Context(), cfg, item)
+			if err != nil {
+				return err
 			}
 
 			data, err := json.MarshalIndent(report, "", "  ")
