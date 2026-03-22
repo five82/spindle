@@ -83,7 +83,16 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"decision_reason", fmt.Sprintf("media_type=%s", env.Metadata.MediaType),
 	)
 
-	encoder, err := drapto.New(drapto.WithPreset(drapto.PresetGrain))
+	opts := []drapto.Option{drapto.WithPreset(drapto.PresetGrain)}
+	if h.cfg.Encoding.SVTAV1Preset >= 0 && h.cfg.Encoding.SVTAV1Preset <= 13 {
+		opts = append(opts, drapto.WithSVTAV1Preset(uint8(h.cfg.Encoding.SVTAV1Preset)))
+		logger.Info("SVT-AV1 preset override applied",
+			"decision_type", "encoding_config",
+			"decision_result", fmt.Sprintf("preset %d", h.cfg.Encoding.SVTAV1Preset),
+			"decision_reason", "config svt_av1_preset",
+		)
+	}
+	encoder, err := drapto.New(opts...)
 	if err != nil {
 		return fmt.Errorf("create drapto encoder: %w", err)
 	}

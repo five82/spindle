@@ -97,10 +97,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		// Transcribe.
 		contentKey := fmt.Sprintf("%s:%s:0", item.DiscFingerprint, key)
+		outputDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 			InputPath:  asset.Path,
 			AudioIndex: 0,
 			Language:   "en",
+			OutputDir:  outputDir,
 			ContentKey: contentKey,
 		})
 		if err != nil {
