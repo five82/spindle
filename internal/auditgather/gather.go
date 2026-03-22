@@ -226,14 +226,19 @@ func findLogFile(stateDir, createdAt string) string {
 
 	sort.Strings(logFiles)
 
+	// Normalize createdAt to "YYYY-MM-DD HH:MM:SS" so it matches the format
+	// produced by extractLogTimestamp. createdAt may use "T" separator and
+	// trailing "Z" (e.g. "2026-03-22T02:18:41Z").
+	normalized := strings.Replace(createdAt, "T", " ", 1)
+	if idx := strings.IndexByte(normalized, 'Z'); idx > 0 {
+		normalized = normalized[:idx]
+	}
+
 	// Find the last log file whose timestamp is <= createdAt.
-	// Log filenames encode the timestamp: spindle-20260322T011625.285Z.log
-	// Item createdAt is like: 2026-03-22 01:16:59
-	// We pick the last log file whose name sorts before or at the item creation time.
 	best := logFiles[0] // Default to earliest if none match.
 	for _, path := range logFiles {
 		ts := extractLogTimestamp(filepath.Base(path))
-		if ts <= createdAt {
+		if ts <= normalized {
 			best = path
 		}
 	}
@@ -439,34 +444,40 @@ func gatherMediaProbes(ctx context.Context, env *ripspec.Envelope, mediaType str
 	var probes []MediaFileProbe
 
 	if mediaType == "movie" {
-		// Single encoded file.
-		if asset, ok := env.Assets.FindAsset("encoded", "main"); ok && asset.IsCompleted() {
-			p := probeFile(ctx, asset.Path, "encoded", "")
-			if p.Error != "" {
-				// Staging cleaned up; try final.
-				if final, fok := env.Assets.FindAsset("final", "main"); fok && final.IsCompleted() {
-					p = probeFile(ctx, final.Path, "final", "")
-				}
-			}
+		// Prefer final (most complete, with subtitles), fall back to subtitled, then encoded.
+		p := probeMovieAsset(ctx, env, "main")
+		if p.Path != "" {
 			probes = append(probes, p)
 		}
 	} else {
-		// TV: probe each encoded episode, fall back to final.
+		// TV: probe each episode, preferring final > subtitled > encoded.
 		for _, asset := range env.Assets.Encoded {
 			if asset.IsFailed() || strings.TrimSpace(asset.Path) == "" {
 				continue
 			}
-			p := probeFile(ctx, asset.Path, "encoded", asset.EpisodeKey)
-			if p.Error != "" {
-				if final, ok := env.Assets.FindAsset("final", asset.EpisodeKey); ok && final.IsCompleted() {
-					p = probeFile(ctx, final.Path, "final", asset.EpisodeKey)
-				}
+			p := probeMovieAsset(ctx, env, asset.EpisodeKey)
+			if p.Path != "" {
+				probes = append(probes, p)
 			}
-			probes = append(probes, p)
 		}
 	}
 
 	return probes
+}
+
+// probeMovieAsset probes the most complete version of an asset: final > subtitled > encoded.
+func probeMovieAsset(ctx context.Context, env *ripspec.Envelope, episodeKey string) MediaFileProbe {
+	for _, stage := range []string{"final", "subtitled", "encoded"} {
+		asset, ok := env.Assets.FindAsset(stage, episodeKey)
+		if !ok || !asset.IsCompleted() {
+			continue
+		}
+		p := probeFile(ctx, asset.Path, stage, episodeKey)
+		if p.Error == "" {
+			return p
+		}
+	}
+	return MediaFileProbe{}
 }
 
 func probeFile(ctx context.Context, path, role, episodeKey string) MediaFileProbe {

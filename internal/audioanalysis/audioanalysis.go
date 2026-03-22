@@ -89,44 +89,63 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	// Collect ripped asset paths for audio refinement.
+	// Collect encoded asset paths for audio analysis.
 	keys := env.AssetKeys()
-	var rippedPaths []string
-	for _, key := range keys {
-		asset, ok := env.Assets.FindAsset("ripped", key)
-		if ok && asset.IsCompleted() {
-			rippedPaths = append(rippedPaths, asset.Path)
-		}
-	}
-
-	// Refine audio targets on ripped assets before processing encoded files.
-	analysisData := &ripspec.AudioAnalysisData{}
-	if len(rippedPaths) > 0 {
-		refinement, refErr := RefineAudioTargets(ctx, logger, rippedPaths, nil)
-		if refErr != nil {
-			logger.Warn("audio refinement failed",
-				"event_type", "audio_refinement_error",
-				"error_hint", refErr.Error(),
-				"impact", "audio refinement skipped, proceeding with all tracks",
-			)
-		} else if refinement != nil && refinement.PrimaryAudioDescription != "" {
-			analysisData.PrimaryDescription = refinement.PrimaryAudioDescription
-		}
-	}
-
+	var encodedPaths []string
 	for _, key := range keys {
 		asset, ok := env.Assets.FindAsset("encoded", key)
-		if !ok || !asset.IsCompleted() {
-			continue
+		if ok && asset.IsCompleted() {
+			encodedPaths = append(encodedPaths, asset.Path)
 		}
+	}
+	if len(encodedPaths) == 0 {
+		return fmt.Errorf("no encoded assets available for audio analysis")
+	}
 
-		// Probe the encoded file.
-		result, err := ffprobe.Inspect(ctx, "", asset.Path)
+	analysisData := &ripspec.AudioAnalysisData{}
+
+	// Phase 1: Commentary detection on encoded files.
+	// Must run BEFORE audio refinement so commentary track indices can be
+	// preserved when refinement strips unwanted tracks.
+	var commentaryIndices []int
+	if h.cfg.Commentary.Enabled && h.llmClient != nil {
+		path := encodedPaths[0]
+		result, err := ffprobe.Inspect(ctx, "", path)
 		if err != nil {
-			return fmt.Errorf("ffprobe %s: %w", asset.Path, err)
+			return fmt.Errorf("ffprobe %s: %w", path, err)
 		}
 
-		// Select primary audio track.
+		comms, excluded := h.detectCommentary(ctx, logger, result, path, item.DiscFingerprint, keys[0])
+		analysisData.CommentaryTracks = comms
+		analysisData.ExcludedTracks = excluded
+
+		for _, c := range comms {
+			commentaryIndices = append(commentaryIndices, c.Index)
+		}
+	}
+
+	// Phase 2: Audio refinement on encoded files.
+	// Strips non-English and redundant audio tracks, preserving primary +
+	// commentary tracks via additionalKeep.
+	refinement, refErr := RefineAudioTargets(ctx, logger, encodedPaths, commentaryIndices)
+	if refErr != nil {
+		logger.Warn("audio refinement failed",
+			"event_type", "audio_refinement_error",
+			"error_hint", refErr.Error(),
+			"impact", "audio refinement skipped, proceeding with all tracks",
+		)
+	} else if refinement != nil && refinement.PrimaryAudioDescription != "" {
+		analysisData.PrimaryDescription = refinement.PrimaryAudioDescription
+	}
+
+	// Phase 3: Post-refinement primary audio selection and commentary disposition.
+	{
+		path := encodedPaths[0]
+		result, err := ffprobe.Inspect(ctx, "", path)
+		if err != nil {
+			return fmt.Errorf("ffprobe post-refinement %s: %w", path, err)
+		}
+
 		selection := audio.Select(result.Streams)
 		analysisData.PrimaryTrack = ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
 		if analysisData.PrimaryDescription == "" {
@@ -139,25 +158,22 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"decision_reason", fmt.Sprintf("score-based selection from %d tracks", result.AudioStreamCount()),
 		)
 
-		// Commentary detection (if enabled).
-		if h.cfg.Commentary.Enabled && h.llmClient != nil {
-			comms, excluded := h.detectCommentary(ctx, logger, result, asset.Path, item.DiscFingerprint, key)
-			analysisData.CommentaryTracks = comms
-			analysisData.ExcludedTracks = excluded
-
-			// Apply commentary disposition on encoded files.
-			if len(comms) > 0 {
-				var commentaryIndices []int
-				for _, c := range comms {
-					commentaryIndices = append(commentaryIndices, c.Index)
+		// Remap commentary indices to post-refinement positions and apply disposition.
+		if len(analysisData.CommentaryTracks) > 0 && refinement != nil {
+			remapped := RemapCommentaryIndices(analysisData.CommentaryTracks, refinement.KeptIndices)
+			if len(remapped) > 0 {
+				analysisData.CommentaryTracks = remapped
+				var remappedIndices []int
+				for _, r := range remapped {
+					remappedIndices = append(remappedIndices, r.Index)
 				}
-				if err := ApplyCommentaryDisposition(ctx, logger, asset.Path, commentaryIndices); err != nil {
+				if err := ApplyCommentaryDisposition(ctx, logger, path, remappedIndices); err != nil {
 					logger.Warn("commentary disposition failed",
 						"event_type", "commentary_disposition_error",
 						"error_hint", err.Error(),
 						"impact", "commentary tracks not labeled",
 					)
-				} else if err := ValidateCommentaryLabeling(ctx, asset.Path, commentaryIndices); err != nil {
+				} else if err := ValidateCommentaryLabeling(ctx, path, remappedIndices); err != nil {
 					logger.Warn("commentary labeling validation failed",
 						"event_type", "commentary_validation_error",
 						"error_hint", err.Error(),
@@ -166,9 +182,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				}
 			}
 		}
-
-		// Only process first asset for representative analysis.
-		break
 	}
 
 	// Store analysis in envelope attributes.

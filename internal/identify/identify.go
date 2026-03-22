@@ -232,6 +232,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		item.AppendReviewReason("TMDB: no results found")
 		// Build minimal envelope and continue.
 		env := h.buildFallbackEnvelope(item, discInfo)
+		setForcedSubtitleAttribute(logger, discInfo, &env)
 		if err := h.persistEnvelope(ctx, item, &env); err != nil {
 			return err
 		}
@@ -261,6 +262,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Step 7: Build and persist RipSpec envelope.
 	env := h.buildEnvelope(item, discInfo, best, mediaType, edition, confidence, discSource)
+	setForcedSubtitleAttribute(logger, discInfo, &env)
 	if err := h.persistEnvelope(ctx, item, &env); err != nil {
 		return err
 	}
@@ -268,10 +270,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Step 8: Cache disc ID.
 	if h.discIDCache != nil && item.DiscFingerprint != "" {
 		entry := discidcache.Entry{
-			TMDBID:    best.ID,
-			MediaType: mediaType,
-			Title:     best.DisplayTitle(),
-			Year:      best.Year(),
+			TMDBID:                 best.ID,
+			MediaType:              mediaType,
+			Title:                  best.DisplayTitle(),
+			Year:                   best.Year(),
+			HasForcedSubtitleTrack: env.Attributes.HasForcedSubtitleTrack,
 		}
 		if err := h.discIDCache.Set(item.DiscFingerprint, entry); err != nil {
 			logger.Warn("disc ID cache write failed",
@@ -441,6 +444,27 @@ func (h *Handler) detectEdition(ctx context.Context, logger *slog.Logger, discTi
 	return ""
 }
 
+// setForcedSubtitleAttribute detects forced English subtitle tracks from the
+// MakeMKV scan and sets the HasForcedSubtitleTrack attribute on the envelope.
+func setForcedSubtitleAttribute(logger *slog.Logger, discInfo *makemkv.DiscInfo, env *ripspec.Envelope) {
+	hasForcedTrack := discInfo.HasForcedEnglishSubtitles()
+	if hasForcedTrack {
+		env.Attributes.HasForcedSubtitleTrack = true
+	}
+	result := "none"
+	reason := "no_forced_track_found"
+	if hasForcedTrack {
+		result = "detected"
+		reason = "disc_has_forced_track"
+	}
+	logger.Info("forced subtitle detection",
+		"decision_type", "forced_subtitle_detection",
+		"decision_result", result,
+		"decision_reason", reason,
+		"has_forced_subtitle_track", hasForcedTrack,
+	)
+}
+
 // discInfoName returns the disc name from a DiscInfo, or "" if nil.
 func discInfoName(discInfo *makemkv.DiscInfo) string {
 	if discInfo != nil {
@@ -547,7 +571,7 @@ func (h *Handler) createEpisodePlaceholders(env *ripspec.Envelope) {
 
 // buildEnvelopeFromCache constructs a minimal envelope from a disc ID cache entry.
 func (h *Handler) buildEnvelopeFromCache(item *queue.Item, entry *discidcache.Entry) ripspec.Envelope {
-	return ripspec.Envelope{
+	env := ripspec.Envelope{
 		Version:     ripspec.CurrentVersion,
 		Fingerprint: item.DiscFingerprint,
 		Metadata: ripspec.Metadata{
@@ -559,6 +583,8 @@ func (h *Handler) buildEnvelopeFromCache(item *queue.Item, entry *discidcache.En
 			Cached:    true,
 		},
 	}
+	env.Attributes.HasForcedSubtitleTrack = entry.HasForcedSubtitleTrack
+	return env
 }
 
 // buildFallbackEnvelope constructs an envelope with unknown media type for review.

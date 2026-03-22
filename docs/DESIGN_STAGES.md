@@ -123,7 +123,8 @@ Heuristics to determine if disc is movie or TV:
 - Single JSON file at `disc_id_cache_path` (configured). Non-functional when
   path is empty (all operations become no-ops).
 - `Entry` fields: `disc_id`, `tmdb_id`, `media_type` ("movie"/"tv"), `title`,
-  `edition`, `season_number`, `year`, `cached_at`.
+  `edition`, `season_number`, `year`, `cached_at`,
+  `has_forced_subtitle_track`.
 - Thread-safe via `sync.RWMutex`.
 - Atomic persistence: write to `.tmp` file, then `os.Rename()`.
 - JSON serialized as an array sorted by `cached_at` descending (newest first)
@@ -502,35 +503,16 @@ See DESIGN_INFRASTRUCTURE.md Section 4.6 for the full snapshot schema.
 
 ## 5. Stage: Audio Analysis
 
-This stage performs two distinct operations in sequence: audio track
-refinement (on ripped files) and commentary detection (on encoded files).
+This stage performs commentary detection and audio track refinement, both
+operating on encoded files. Commentary detection runs first so that
+commentary track indices can be preserved when refinement strips unwanted
+tracks.
 
-### 5.1 Audio Refinement Algorithm
+### 5.1 Commentary Detection Pipeline (Phase 1)
 
-`RefineAudioTargets()` selects and remuxes audio tracks on ripped files:
-
-1. Deduplicate input paths. For each unique path:
-2. FFprobe to count audio streams. If <= 1: skip (return single index).
-3. If > 1: call `audio.Select()` for primary track selection.
-4. **Primary selection priority** (scored): English language filter (fall back
-   to first stream if no English) -> channel count (8ch=1000, 6ch=800,
-   4ch=600, 2ch=400) -> lossless codec bonus (+100) -> default flag (+5) ->
-   stream order tiebreaker (-0.1 per position).
-5. Merge `additionalKeep` indices (e.g., commentary tracks) into
-   `KeepIndices`, rebuild `RemovedIndices` excluding them.
-6. If stream set changed OR disposition fix needed (`needsDispositionFix`):
-   remux via FFmpeg with `-map 0:v` + `-map 0:{idx}` for each kept audio
-   index, set first audio as default disposition. Replace original file with
-   remuxed output.
-7. Validate remuxed output via ffprobe (stream count matches expectations).
-
-Returns `AudioRefinementResult` with `PrimaryAudioDescription` and
-`KeptIndices` from the first processed path.
-
-### 5.2 Commentary Detection Pipeline
-
-**Operates on encoded files** (not ripped) -- smaller files mean faster WhisperX
-transcription.
+**Operates on encoded files** -- smaller files mean faster WhisperX
+transcription. Runs before refinement so commentary tracks are identified
+before any tracks are removed.
 
 When `commentary.enabled`:
 
@@ -553,26 +535,50 @@ When `commentary.enabled`:
    - If confidence >= `confidence_threshold` (default 0.80) and is_commentary:
      mark track as commentary.
 
-4. **Commentary disposition** (not removal): Identified commentary tracks are
-   marked with `"comment"` disposition via `ApplyCommentaryDisposition()`, not
-   removed from the file. `ValidateCommentaryLabeling()` verifies the disposition
-   was applied correctly. Track indices are remapped via
-   `RemapCommentaryIndices()` after audio refinement to reflect post-refinement
-   stream positions.
-
-5. **Post-analysis**: `PrimaryAudioDescription` attribute set from refinement
-   result. Encoding snapshot audio refreshed (re-probes encoded files).
-
 **Commentary detection is non-fatal**: If detection fails, a warning is logged
 with `event_type: "commentary_detection_failed"` and processing continues.
-
-**Episode consistency check**: For TV content (> 1 episode), validates audio
-stream counts after commentary handling.
 
 **Transcription**: Commentary detection uses the shared transcription service
 (see DESIGN_INFRASTRUCTURE.md Section 9) to invoke WhisperX. The `whisperxSem`
 semaphore is held by the audio analysis stage for the duration of any
 transcription work.
+
+### 5.2 Audio Refinement Algorithm (Phase 2)
+
+`RefineAudioTargets()` selects and remuxes audio tracks on encoded files:
+
+1. Deduplicate input paths. For each unique path:
+2. FFprobe to count audio streams. If <= 1: skip (return single index).
+3. If > 1: call `audio.Select()` for primary track selection.
+4. **Primary selection priority** (scored): English language filter (fall back
+   to first stream if no English) -> channel count (8ch=1000, 6ch=800,
+   4ch=600, 2ch=400) -> lossless codec bonus (+100) -> default flag (+5) ->
+   stream order tiebreaker (-0.1 per position).
+5. Merge `additionalKeep` indices (e.g., commentary tracks from Phase 1)
+   into `KeepIndices`, rebuild `RemovedIndices` excluding them.
+6. If stream set changed OR disposition fix needed (`needsDispositionFix`):
+   remux via FFmpeg with `-map 0:v` + `-map 0:{idx}` for each kept audio
+   index, set first audio as default disposition. Replace original file with
+   remuxed output.
+7. Validate remuxed output via ffprobe (stream count matches expectations).
+
+Returns `AudioRefinementResult` with `PrimaryAudioDescription` and
+`KeptIndices` from the first processed path.
+
+### 5.3 Post-Refinement (Phase 3)
+
+1. **Primary audio selection**: Re-probe encoded file post-refinement, select
+   primary via `audio.Select()`, set `PrimaryAudioDescription`.
+
+2. **Commentary disposition**: Identified commentary tracks are marked with
+   `"comment"` disposition via `ApplyCommentaryDisposition()`, not removed
+   from the file. Track indices are remapped via `RemapCommentaryIndices()`
+   to reflect post-refinement stream positions.
+   `ValidateCommentaryLabeling()` verifies the disposition was applied
+   correctly.
+
+**Episode consistency check**: For TV content (> 1 episode), validates audio
+stream counts after commentary handling.
 
 ---
 

@@ -241,6 +241,80 @@ func TestNormalizeDevice(t *testing.T) {
 	}
 }
 
+func TestHasForcedEnglishSubtitles(t *testing.T) {
+	tests := []struct {
+		name     string
+		rawLines []string
+		want     bool
+	}{
+		{
+			name: "forced english subtitle",
+			rawLines: []string{
+				`SINFO:0,0,1,6209,"Video"`,
+				`SINFO:0,1,1,6210,"Audio"`,
+				`SINFO:0,1,3,6210,"eng"`,
+				`SINFO:0,2,1,6211,"Subtitle"`,
+				`SINFO:0,2,3,6211,"eng"`,
+				`SINFO:0,2,30,6211,"PGS English (forced only)"`,
+			},
+			want: true,
+		},
+		{
+			name: "forced non-english subtitle",
+			rawLines: []string{
+				`SINFO:0,0,1,6209,"Subtitle"`,
+				`SINFO:0,0,3,6209,"spa"`,
+				`SINFO:0,0,30,6209,"PGS Spanish (forced only)"`,
+			},
+			want: false,
+		},
+		{
+			name: "forced subtitle in second title",
+			rawLines: []string{
+				`SINFO:0,0,1,6209,"Video"`,
+				`SINFO:1,0,1,6209,"Video"`,
+				`SINFO:1,1,1,6210,"Subtitle"`,
+				`SINFO:1,1,3,6210,"eng"`,
+				`SINFO:1,1,30,6210,"Subtitles (forced only)"`,
+			},
+			want: true,
+		},
+		{
+			name: "no forced subtitles",
+			rawLines: []string{
+				`SINFO:0,0,1,6209,"Video"`,
+				`SINFO:0,1,1,6210,"Subtitle"`,
+				`SINFO:0,1,3,6210,"eng"`,
+				`SINFO:0,1,30,6210,"PGS English"`,
+			},
+			want: false,
+		},
+		{
+			name:     "no subtitle tracks",
+			rawLines: []string{`SINFO:0,0,1,6209,"Video"`},
+			want:     false,
+		},
+		{
+			name:     "nil disc info",
+			rawLines: nil,
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var info *DiscInfo
+			if tt.rawLines != nil {
+				info = &DiscInfo{RawLines: tt.rawLines}
+			}
+			got := info.HasForcedEnglishSubtitles()
+			if got != tt.want {
+				t.Errorf("HasForcedEnglishSubtitles() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSplitFields(t *testing.T) {
 	tests := []struct {
 		name   string
