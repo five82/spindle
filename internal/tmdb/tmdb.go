@@ -234,6 +234,15 @@ func (c *Client) GetSeason(ctx context.Context, tvID, season int) (*Season, erro
 	return &s, nil
 }
 
+// Scoring and acceptance constants per spec (DESIGN_STAGES.md section 1.7).
+const (
+	voteAverageDivisor          = 10.0
+	voteCountDivisor            = 1000.0
+	exactMatchMinVoteAverage    = 2.0
+	nonExactMatchMinVoteAverage = 3.0
+	nonExactMatchBaseThreshold  = 1.3
+)
+
 // scoreResult computes the raw score for a single result against the query.
 // Formula per spec: match(0/1) + voteAverage/10 + voteCount/1000.
 func scoreResult(query string, r *SearchResult) float64 {
@@ -243,7 +252,7 @@ func scoreResult(query string, r *SearchResult) float64 {
 	if strings.Contains(titleLower, queryLower) {
 		match = 1.0
 	}
-	return match + (r.VoteAverage / 10.0) + float64(r.VoteCount)/1000.0
+	return match + (r.VoteAverage / voteAverageDivisor) + float64(r.VoteCount)/voteCountDivisor
 }
 
 // normalizeForComparison normalizes a string for title comparison: lowercase,
@@ -261,20 +270,10 @@ func normalizeForComparison(input string) string {
 	return b.String()
 }
 
-// resultReleaseYear extracts the release year from a search result.
-func resultReleaseYear(r *SearchResult) int {
-	date := strings.TrimSpace(r.ReleaseDate)
-	if date == "" {
-		date = strings.TrimSpace(r.FirstAirDate)
-	}
-	if len(date) < 4 {
-		return 0
-	}
-	year, err := strconv.Atoi(date[:4])
-	if err != nil {
-		return 0
-	}
-	return year
+// releaseYear returns the release year of a search result as an int, or 0.
+func releaseYear(r *SearchResult) int {
+	y, _ := strconv.Atoi(r.Year())
+	return y
 }
 
 // SelectBestResult scores each TMDB result and returns the best match, or nil
@@ -301,6 +300,7 @@ func SelectBestResult(results []SearchResult, query string, year, minVoteCountEx
 
 	var best *SearchResult
 	var bestScore float64
+	var bestIsExact bool
 	var bestExact *SearchResult
 	var bestExactScore float64
 
@@ -311,7 +311,7 @@ func SelectBestResult(results []SearchResult, query string, year, minVoteCountEx
 
 		exactMatch := titleNorm == queryNorm
 		if exactMatch && year > 0 {
-			exactMatch = resultReleaseYear(r) == year
+			exactMatch = releaseYear(r) == year
 		}
 
 		if exactMatch && score > bestExactScore {
@@ -321,6 +321,7 @@ func SelectBestResult(results []SearchResult, query string, year, minVoteCountEx
 		if score > bestScore {
 			best = r
 			bestScore = score
+			bestIsExact = exactMatch
 		}
 	}
 
@@ -330,28 +331,25 @@ func SelectBestResult(results []SearchResult, query string, year, minVoteCountEx
 
 	// Prefer exact match over highest-scoring result if it meets thresholds.
 	selected := best
-	if bestExact != nil && bestExact.VoteAverage >= 2.0 &&
+	selectedScore := bestScore
+	selectedExact := bestIsExact
+	if bestExact != nil && bestExact.VoteAverage >= exactMatchMinVoteAverage &&
 		bestExact.VoteCount >= minVoteCountExact {
 		selected = bestExact
+		selectedScore = bestExactScore
+		selectedExact = true
 	}
 
 	// Apply acceptance thresholds.
-	selectedNorm := normalizeForComparison(selected.DisplayTitle())
-	isExact := selectedNorm == queryNorm
-	if isExact && year > 0 {
-		isExact = resultReleaseYear(selected) == year
-	}
-
-	if isExact {
-		if selected.VoteAverage < 2.0 || selected.VoteCount < minVoteCountExact {
+	if selectedExact {
+		if selected.VoteAverage < exactMatchMinVoteAverage || selected.VoteCount < minVoteCountExact {
 			return nil
 		}
 	} else {
-		if selected.VoteAverage < 3.0 {
+		if selected.VoteAverage < nonExactMatchMinVoteAverage {
 			return nil
 		}
-		selectedScore := scoreResult(query, selected)
-		if selectedScore < 1.3+float64(selected.VoteCount)/1000.0 {
+		if selectedScore < nonExactMatchBaseThreshold+float64(selected.VoteCount)/voteCountDivisor {
 			return nil
 		}
 	}

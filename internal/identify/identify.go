@@ -40,9 +40,9 @@ var discMetadataPattern = regexp.MustCompile(
 // trailingPunctPattern cleans up trailing punctuation/whitespace left after stripping.
 var trailingPunctPattern = regexp.MustCompile(`[\s:_-]+$`)
 
-// trailingYearPattern matches a trailing 4-digit year, optionally in parentheses.
-// Examples: "(2005)", "2005", " (2005)".
-var trailingYearPattern = regexp.MustCompile(`(?i)\s*(?:\(|\b)(\d{4})\)?\s*$`)
+// trailingYearPattern matches a trailing 4-digit year in parentheses or standalone.
+// Matches "(2005)" or bare "2005" at word boundary, but not unmatched parens like "2005)".
+var trailingYearPattern = regexp.MustCompile(`(?i)(?:\s*\((\d{4})\)|\s+(\d{4}))\s*$`)
 
 // seasonPattern extracts a season number from disc titles (e.g., "S01", "Season 1", "SEASON_1").
 var seasonPattern = regexp.MustCompile(`(?i)(?:s|season[\s_]*)(\d+)`)
@@ -393,10 +393,18 @@ func splitTitleYear(value string) (string, int) {
 		return "", 0
 	}
 	matches := trailingYearPattern.FindStringSubmatch(trimmed)
-	if len(matches) != 2 {
+	if matches == nil {
 		return trimmed, 0
 	}
-	year, err := strconv.Atoi(matches[1])
+	// Two capture groups: matches[1] is "(YEAR)", matches[2] is bare "YEAR".
+	yearStr := matches[1]
+	if yearStr == "" {
+		yearStr = matches[2]
+	}
+	if yearStr == "" {
+		return trimmed, 0
+	}
+	year, err := strconv.Atoi(yearStr)
 	if err != nil || year < 1880 || year > 2100 {
 		return trimmed, 0
 	}
