@@ -55,7 +55,7 @@ func planJobs(env *ripspec.Envelope) []encodingJob {
 // Run executes the encoding stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger := stage.LoggerFromContext(ctx)
-	logger.Info("encoding stage started", "event_type", "stage_start")
+	logger.Info("encoding stage started", "event_type", "stage_start", "stage", "encoding")
 
 	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
@@ -253,7 +253,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
-	logger.Info("encoding stage completed", "event_type", "stage_complete")
+	logger.Info("encoding stage completed", "event_type", "stage_complete", "stage", "encoding")
 	return nil
 }
 

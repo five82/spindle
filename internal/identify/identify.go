@@ -121,6 +121,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger := stage.LoggerFromContext(ctx)
 	logger.Info("identification stage started",
 		"event_type", "stage_start",
+		"stage", "identification",
 		"disc_title", item.DiscTitle,
 	)
 
@@ -328,6 +329,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	logger.Info("identification stage completed",
 		"event_type", "stage_complete",
+		"stage", "identification",
 	)
 	return nil
 }

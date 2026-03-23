@@ -36,7 +36,7 @@ func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier, cach
 // Run executes the ripping stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger := stage.LoggerFromContext(ctx)
-	logger.Info("ripping stage started", "event_type", "stage_start")
+	logger.Info("ripping stage started", "event_type", "stage_start", "stage", "ripping")
 
 	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
@@ -177,7 +177,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
-	logger.Info("ripping stage completed", "event_type", "stage_complete")
+	logger.Info("ripping stage completed", "event_type", "stage_complete", "stage", "ripping")
 	return nil
 }
 

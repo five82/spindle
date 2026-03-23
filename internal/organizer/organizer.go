@@ -34,7 +34,7 @@ func New(cfg *config.Config, store *queue.Store, jfClient *jellyfin.Client, noti
 // Run executes the organization stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger := stage.LoggerFromContext(ctx)
-	logger.Info("organization stage started", "event_type", "stage_start")
+	logger.Info("organization stage started", "event_type", "stage_start", "stage", "organizing")
 
 	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
@@ -184,7 +184,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
-	logger.Info("organization stage completed", "event_type", "stage_complete")
+	logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
 	return nil
 }
 
@@ -299,7 +299,7 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 		copySidecarSubtitle(logger, asset.Path, destPath)
 	}
 
-	logger.Info("review routing completed", "event_type", "stage_complete", "review_path", reviewPath)
+	logger.Info("review routing completed", "event_type", "stage_complete", "stage", "organizing", "review_path", reviewPath)
 	return nil
 }
 

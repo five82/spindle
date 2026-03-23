@@ -69,7 +69,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return nil
 	}
 
-	logger.Info("episode identification stage started", "event_type", "stage_start")
+	logger.Info("episode identification stage started", "event_type", "stage_start", "stage", "episode_identification")
 
 	// Step 1: Transcribe each ripped episode.
 	item.ProgressPercent = 10
@@ -180,6 +180,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Phase 3/3 - Episode identification complete"
 	_ = h.store.UpdateProgress(item)
 
-	logger.Info("episode identification stage completed", "event_type", "stage_complete")
+	logger.Info("episode identification stage completed", "event_type", "stage_complete", "stage", "episode_identification")
 	return nil
 }

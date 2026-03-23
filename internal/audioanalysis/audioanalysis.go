@@ -82,7 +82,7 @@ func New(
 // Run executes the audio analysis stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger := stage.LoggerFromContext(ctx)
-	logger.Info("audio analysis stage started", "event_type", "stage_start")
+	logger.Info("audio analysis stage started", "event_type", "stage_start", "stage", "audio_analysis")
 
 	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
@@ -192,7 +192,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	logger.Info("audio analysis stage completed", "event_type", "stage_complete")
+	logger.Info("audio analysis stage completed", "event_type", "stage_complete", "stage", "audio_analysis")
 	return nil
 }
 

@@ -47,7 +47,7 @@ func New(
 // Run executes the subtitle generation stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger := stage.LoggerFromContext(ctx)
-	logger.Info("subtitle stage started", "event_type", "stage_start")
+	logger.Info("subtitle stage started", "event_type", "stage_start", "stage", "subtitling")
 
 	if !h.cfg.Subtitles.Enabled {
 		logger.Info("subtitles disabled, skipping",
@@ -211,7 +211,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	logger.Info("subtitle stage completed", "event_type", "stage_complete")
+	logger.Info("subtitle stage completed", "event_type", "stage_complete", "stage", "subtitling")
 	return nil
 }
 
