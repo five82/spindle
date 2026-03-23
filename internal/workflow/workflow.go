@@ -189,6 +189,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		"stage", ps.Name,
 	)
 
+	start := time.Now()
 	err := ps.Handler.Run(ctx, item)
 
 	if err != nil {
@@ -209,10 +210,11 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 				"error_hint", degraded.Msg,
 				"impact", "continuing to next stage",
 				"stage", ps.Name,
+				"stage_duration", time.Since(start),
 			)
 			// Fall through to advance stage.
 		} else {
-			m.handleStageFailure(ctx, item, err, ps)
+			m.handleStageFailure(ctx, item, err, ps, start)
 			return
 		}
 	}
@@ -228,7 +230,9 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		"decision_type", "stage_execution",
 		"decision_result", "completed",
 		"decision_reason", fmt.Sprintf("advancing to %s", item.Stage),
+		"event_type", "stage_complete",
 		"stage", ps.Name,
+		"stage_duration", time.Since(start),
 	)
 
 	if err := m.store.Update(item); err != nil {
@@ -243,7 +247,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 }
 
 // handleStageFailure records failure state, notifies, and checks queue completion.
-func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err error, ps PipelineStage) {
+func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err error, ps PipelineStage, start time.Time) {
 	p := m.pipeline
 	itemLogger := p.logger.With("item_id", item.ID)
 
@@ -257,6 +261,7 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 		"error_hint", ps.Name,
 		"error", err,
 		"stage", ps.Name,
+		"stage_duration", time.Since(start),
 	)
 
 	if updateErr := m.store.Update(item); updateErr != nil {
