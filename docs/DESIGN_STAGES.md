@@ -151,13 +151,17 @@ Heuristics to determine if disc is movie or TV:
 
 ### 1.6 TMDB Search
 
-1. Clean title string for search (remove year, edition markers, normalize).
-2. Search TMDB with cleaned title + optional year hint from bd_info.
-3. If movie hint: search `/search/movie` first, fall back to `/search/multi`.
-4. If TV hint: search `/search/tv` first, fall back to `/search/multi`.
-5. Score results using title similarity, vote count, year proximity.
-6. For exact title matches: require minimum 5 votes (hardcoded threshold).
-7. Best match above confidence threshold becomes the identification.
+1. Extract year from resolved title via trailing year pattern (e.g., "Munich (2005)"
+   -> title "Munich", year 2005). Year extraction priority: BDInfo year, then
+   resolved title year, then item disc title year. Log year source as
+   `decision_type: "year_source"`.
+2. Clean title string for search (remove year, disc metadata, normalize).
+3. Search TMDB with cleaned title.
+4. If movie hint: search `/search/movie` first, fall back to `/search/multi`.
+5. If TV hint: search `/search/tv` first, fall back to `/search/multi`.
+6. Score results using title similarity, vote count, year proximity.
+7. For exact title matches: require minimum 5 votes (hardcoded threshold).
+8. Best match above confidence threshold becomes the identification.
 
 ### 1.7 TMDB Confidence Scoring
 
@@ -175,6 +179,12 @@ where `match = 1.0` if query appears in title (case-insensitive), else `0.0`.
 
 **Preference rule:** An exact match meeting its thresholds is preferred over a
 higher-scoring non-exact result.
+
+**Year-aware exact matching:** When a year is available from the extraction in
+step 1.6, a result is considered an exact match only if the normalized title
+matches AND the result's release year matches the extracted year. This
+disambiguates same-title films from different years (e.g., Munich 2005 vs
+Munich 1972).
 
 ### 1.8 Edition Detection
 
@@ -205,8 +215,11 @@ After identification:
   lookup entirely. Logged with `decision_type: "disc_id_cache"`.
 - **Stale staging cleanup**: At stage start, removes staging directories older than
   **48 hours** via `staging.CleanStale()`.
-- **BD info enrichment**: Year from `BDInfo.Year` passed to TMDB search; runtime
-  from `Titles[0].Duration / 60` (seconds to minutes) for search refinement.
+- **Year enrichment**: Year extracted from multiple sources in priority order:
+  (1) BDInfo.Year, (2) resolved title trailing year, (3) item disc title trailing
+  year. Used for TMDB search refinement and year-aware exact matching. Logged with
+  `decision_type: "year_source"`. Runtime from `Titles[0].Duration / 60` (seconds
+  to minutes) for search refinement.
 - **Title determination decision logging**: All title source changes logged with
   `decision_type: "title_source"`, `decision_result: "updated"`, and source-specific
   `decision_reason` (e.g., `"keydb_contains_authoritative_title_for_disc_id"`).

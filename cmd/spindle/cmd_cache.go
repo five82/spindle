@@ -103,7 +103,7 @@ func newCacheRipCmd() *cobra.Command {
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
 			results, searchErr := tmdbClient.SearchMulti(ctx, discTitle)
 			if searchErr == nil && len(results) > 0 {
-				best, _ := tmdb.SelectBestResult(results, discTitle, "", 5)
+				best := tmdb.SelectBestResult(results, discTitle, 0, 5)
 				if best != nil {
 					fmt.Printf("TMDB: %s (%s, ID %d)\n", best.DisplayTitle(), best.Year(), best.ID)
 					discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath())

@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Client communicates with the TMDB API.
@@ -232,49 +234,127 @@ func (c *Client) GetSeason(ctx context.Context, tvID, season int) (*Season, erro
 	return &s, nil
 }
 
-// ScoreResult computes the confidence score for a single result against the
-// query. Scoring factors: title exact match (case-insensitive) gives 0.5,
-// partial match gives 0.3, year match gives 0.3, vote count >= minVoteCount
-// gives 0.2.
-func ScoreResult(r *SearchResult, query, year string, minVoteCount int) float64 {
-	queryLower := strings.ToLower(query)
-	var score float64
-
+// scoreResult computes the raw score for a single result against the query.
+// Formula per spec: match(0/1) + voteAverage/10 + voteCount/1000.
+func scoreResult(query string, r *SearchResult) float64 {
 	titleLower := strings.ToLower(r.DisplayTitle())
-	if titleLower == queryLower {
-		score += 0.5
-	} else if strings.Contains(titleLower, queryLower) || strings.Contains(queryLower, titleLower) {
-		score += 0.3
+	queryLower := strings.ToLower(query)
+	match := 0.0
+	if strings.Contains(titleLower, queryLower) {
+		match = 1.0
 	}
-
-	if year != "" && r.Year() == year {
-		score += 0.3
-	}
-
-	if r.VoteCount >= minVoteCount {
-		score += 0.2
-	}
-
-	return score
+	return match + (r.VoteAverage / 10.0) + float64(r.VoteCount)/1000.0
 }
 
-// SelectBestResult scores each result against the query and returns the best
-// result with its confidence score (0-1). Returns nil, 0 if no results.
-func SelectBestResult(results []SearchResult, query, year string, minVoteCount int) (*SearchResult, float64) {
+// normalizeForComparison normalizes a string for title comparison: lowercase,
+// replace &/+ with "and", strip non-alphanumeric.
+func normalizeForComparison(input string) string {
+	normalized := strings.ToLower(input)
+	normalized = strings.ReplaceAll(normalized, "&", "and")
+	normalized = strings.ReplaceAll(normalized, "+", "and")
+	var b strings.Builder
+	for _, r := range normalized {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// resultReleaseYear extracts the release year from a search result.
+func resultReleaseYear(r *SearchResult) int {
+	date := strings.TrimSpace(r.ReleaseDate)
+	if date == "" {
+		date = strings.TrimSpace(r.FirstAirDate)
+	}
+	if len(date) < 4 {
+		return 0
+	}
+	year, err := strconv.Atoi(date[:4])
+	if err != nil {
+		return 0
+	}
+	return year
+}
+
+// SelectBestResult scores each TMDB result and returns the best match, or nil
+// if no result meets acceptance thresholds.
+//
+// Scoring formula: match(0/1) + voteAverage/10 + voteCount/1000.
+//
+// Acceptance paths:
+//   - Exact match (normalized title equals query): voteAverage >= 2.0 AND voteCount >= minVoteCountExact.
+//   - Non-exact: voteAverage >= 3.0 AND score >= 1.3 + voteCount/1000.
+//
+// Year-aware matching: when year > 0, an exact title match also requires the
+// result's release year to equal the provided year. This disambiguates
+// same-title films from different years.
+//
+// Preference: an exact match meeting its thresholds is preferred over a
+// higher-scoring non-exact result.
+func SelectBestResult(results []SearchResult, query string, year, minVoteCountExact int) *SearchResult {
 	if len(results) == 0 {
-		return nil, 0
+		return nil
 	}
 
-	var bestResult *SearchResult
+	queryNorm := normalizeForComparison(query)
+
+	var best *SearchResult
 	var bestScore float64
+	var bestExact *SearchResult
+	var bestExactScore float64
 
 	for i := range results {
-		score := ScoreResult(&results[i], query, year, minVoteCount)
+		r := &results[i]
+		score := scoreResult(query, r)
+		titleNorm := normalizeForComparison(r.DisplayTitle())
+
+		exactMatch := titleNorm == queryNorm
+		if exactMatch && year > 0 {
+			exactMatch = resultReleaseYear(r) == year
+		}
+
+		if exactMatch && score > bestExactScore {
+			bestExact = r
+			bestExactScore = score
+		}
 		if score > bestScore {
+			best = r
 			bestScore = score
-			bestResult = &results[i]
 		}
 	}
 
-	return bestResult, bestScore
+	if best == nil {
+		return nil
+	}
+
+	// Prefer exact match over highest-scoring result if it meets thresholds.
+	selected := best
+	if bestExact != nil && bestExact.VoteAverage >= 2.0 &&
+		bestExact.VoteCount >= minVoteCountExact {
+		selected = bestExact
+	}
+
+	// Apply acceptance thresholds.
+	selectedNorm := normalizeForComparison(selected.DisplayTitle())
+	isExact := selectedNorm == queryNorm
+	if isExact && year > 0 {
+		isExact = resultReleaseYear(selected) == year
+	}
+
+	if isExact {
+		if selected.VoteAverage < 2.0 || selected.VoteCount < minVoteCountExact {
+			return nil
+		}
+	} else {
+		if selected.VoteAverage < 3.0 {
+			return nil
+		}
+		selectedScore := scoreResult(query, selected)
+		if selectedScore < 1.3+float64(selected.VoteCount)/1000.0 {
+			return nil
+		}
+	}
+
+	return selected
 }

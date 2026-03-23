@@ -132,6 +132,31 @@ func TestCleanQueryTitle(t *testing.T) {
 	}
 }
 
+func TestSplitTitleYear(t *testing.T) {
+	tests := []struct {
+		input     string
+		wantTitle string
+		wantYear  int
+	}{
+		{"Munich (2005)", "Munich", 2005},
+		{"Munich 2005", "Munich", 2005},
+		{"Munich", "Munich", 0},
+		{"Blade Runner (1982)", "Blade Runner", 1982},
+		{"2001 A Space Odyssey", "2001 A Space Odyssey", 0},
+		{"Munich (1700)", "Munich (1700)", 0},
+		{"", "", 0},
+		{"2005", "2005", 0},
+		{"  Munich (2005)  ", "Munich", 2005},
+	}
+	for _, tt := range tests {
+		gotTitle, gotYear := splitTitleYear(tt.input)
+		if gotTitle != tt.wantTitle || gotYear != tt.wantYear {
+			t.Errorf("splitTitleYear(%q) = (%q, %d), want (%q, %d)",
+				tt.input, gotTitle, gotYear, tt.wantTitle, tt.wantYear)
+		}
+	}
+}
+
 func TestDetectEdition_Regex(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -301,7 +326,7 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 		VoteCount:   1000,
 	}
 
-	env := h.buildEnvelope(item, discInfo, best, "movie", "Extended Edition", 0.85, "bluray")
+	env := h.buildEnvelope(item, discInfo, best, "movie", "Extended Edition", "bluray")
 
 	if env.Version != ripspec.CurrentVersion {
 		t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -363,7 +388,7 @@ func TestBuildEnvelope_TV(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(item, discInfo, best, "tv", "", 0.90, "bluray")
+	env := h.buildEnvelope(item, discInfo, best, "tv", "", "bluray")
 
 	if env.Metadata.MediaType != "tv" {
 		t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -580,7 +605,7 @@ func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(item, discInfo, best, "tv", "", 0.90, "bluray")
+	env := h.buildEnvelope(item, discInfo, best, "tv", "", "bluray")
 
 	if env.Metadata.SeasonNumber != 2 {
 		t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)

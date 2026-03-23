@@ -89,48 +89,108 @@ func TestYear(t *testing.T) {
 	}
 }
 
-func TestSelectBestResult_ExactMatch(t *testing.T) {
+func TestSelectBestResult_ExactMatchAccepted(t *testing.T) {
 	results := []SearchResult{
-		{ID: 1, Title: "Other Movie", ReleaseDate: "2010-01-01", VoteCount: 100},
-		{ID: 2, Title: "Inception", ReleaseDate: "2010-07-16", VoteCount: 5000},
-		{ID: 3, Title: "Inception Returns", ReleaseDate: "2015-01-01", VoteCount: 50},
+		{ID: 1, Title: "Other Movie", VoteAverage: 7.0, VoteCount: 100},
+		{ID: 2, Title: "Inception", ReleaseDate: "2010-07-16", VoteAverage: 8.4, VoteCount: 5000},
 	}
-
-	best, score := SelectBestResult(results, "Inception", "2010", 100)
+	best := SelectBestResult(results, "Inception", 0, 5)
 	if best == nil {
 		t.Fatal("expected a result, got nil")
 	}
 	if best.ID != 2 {
 		t.Errorf("expected ID 2, got %d", best.ID)
 	}
-	// exact title match (0.5) + year match (0.3) + vote count (0.2) = 1.0
-	if score != 1.0 {
-		t.Errorf("expected score 1.0, got %f", score)
-	}
 }
 
-func TestSelectBestResult_NoResults(t *testing.T) {
-	best, score := SelectBestResult(nil, "Inception", "2010", 100)
-	if best != nil {
-		t.Errorf("expected nil, got %+v", best)
-	}
-	if score != 0 {
-		t.Errorf("expected score 0, got %f", score)
-	}
-}
-
-func TestSelectBestResult_YearMatching(t *testing.T) {
+func TestSelectBestResult_ExactMatchRejectedLowVotes(t *testing.T) {
 	results := []SearchResult{
-		{ID: 1, Title: "Dune", ReleaseDate: "1984-12-14", VoteCount: 500},
-		{ID: 2, Title: "Dune", ReleaseDate: "2021-10-22", VoteCount: 500},
+		{ID: 1, Title: "Munich", ReleaseDate: "1972-01-01", VoteAverage: 5.0, VoteCount: 0},
 	}
+	best := SelectBestResult(results, "Munich", 0, 5)
+	if best != nil {
+		t.Errorf("expected nil (below vote threshold), got ID %d", best.ID)
+	}
+}
 
-	best, _ := SelectBestResult(results, "Dune", "2021", 100)
+func TestSelectBestResult_NonExactAccepted(t *testing.T) {
+	// "Inception" contains "inception" — match = 1.0.
+	// score = 1.0 + 8.4/10 + 5000/1000 = 1.0 + 0.84 + 5.0 = 6.84
+	// threshold = 1.3 + 5000/1000 = 6.3 — passes.
+	results := []SearchResult{
+		{ID: 1, Title: "Inception: The Beginning", VoteAverage: 8.4, VoteCount: 5000},
+	}
+	best := SelectBestResult(results, "Inception", 0, 5)
+	if best == nil {
+		t.Fatal("expected a result, got nil")
+	}
+	if best.ID != 1 {
+		t.Errorf("expected ID 1, got %d", best.ID)
+	}
+}
+
+func TestSelectBestResult_NonExactRejectedLowAverage(t *testing.T) {
+	results := []SearchResult{
+		{ID: 1, Title: "Inception: The Beginning", VoteAverage: 2.0, VoteCount: 5000},
+	}
+	best := SelectBestResult(results, "Inception", 0, 5)
+	if best != nil {
+		t.Errorf("expected nil (vote_average below 3.0), got ID %d", best.ID)
+	}
+}
+
+func TestSelectBestResult_ExactPreferredOverHigherScore(t *testing.T) {
+	results := []SearchResult{
+		// Non-exact but higher score due to massive vote count.
+		{ID: 1, Title: "Munich: The Documentary", VoteAverage: 9.0, VoteCount: 50000},
+		// Exact match with lower score.
+		{ID: 2, Title: "Munich", ReleaseDate: "2005-12-23", VoteAverage: 7.0, VoteCount: 3000},
+	}
+	best := SelectBestResult(results, "Munich", 0, 5)
+	if best == nil {
+		t.Fatal("expected a result, got nil")
+	}
+	if best.ID != 2 {
+		t.Errorf("expected exact match ID 2, got %d", best.ID)
+	}
+}
+
+func TestSelectBestResult_YearDisambiguation(t *testing.T) {
+	results := []SearchResult{
+		{ID: 1, Title: "Dune", ReleaseDate: "1984-12-14", VoteAverage: 6.0, VoteCount: 500},
+		{ID: 2, Title: "Dune", ReleaseDate: "2021-10-22", VoteAverage: 7.8, VoteCount: 8000},
+	}
+	best := SelectBestResult(results, "Dune", 2021, 5)
 	if best == nil {
 		t.Fatal("expected a result, got nil")
 	}
 	if best.ID != 2 {
 		t.Errorf("expected ID 2 (2021 version), got %d", best.ID)
+	}
+}
+
+func TestSelectBestResult_NoResults(t *testing.T) {
+	best := SelectBestResult(nil, "Inception", 0, 5)
+	if best != nil {
+		t.Errorf("expected nil, got %+v", best)
+	}
+}
+
+func TestNormalizeForComparison(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"Munich", "munich"},
+		{"Rock & Roll", "rockandroll"},
+		{"C++ Programming", "candandprogramming"},
+		{"Hello, World!", "helloworld"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := normalizeForComparison(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeForComparison(%q) = %q, want %q", tt.input, got, tt.want)
+		}
 	}
 }
 

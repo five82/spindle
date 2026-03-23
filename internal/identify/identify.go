@@ -40,6 +40,10 @@ var discMetadataPattern = regexp.MustCompile(
 // trailingPunctPattern cleans up trailing punctuation/whitespace left after stripping.
 var trailingPunctPattern = regexp.MustCompile(`[\s:_-]+$`)
 
+// trailingYearPattern matches a trailing 4-digit year, optionally in parentheses.
+// Examples: "(2005)", "2005", " (2005)".
+var trailingYearPattern = regexp.MustCompile(`(?i)\s*(?:\(|\b)(\d{4})\)?\s*$`)
+
 // seasonPattern extracts a season number from disc titles (e.g., "S01", "Season 1", "SEASON_1").
 var seasonPattern = regexp.MustCompile(`(?i)(?:s|season[\s_]*)(\d+)`)
 
@@ -211,25 +215,54 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"raw_title", rawTitle,
 	)
 
-	// Step 5: TMDB search.
-	// Use BDInfo year as a hint for better TMDB matching.
-	searchYear := ""
+	// Step 5: Extract year and clean title for TMDB search.
+	// Year priority: BDInfo > resolved title > item disc title.
+	var searchYear int
+	yearSource := ""
 	if bdInfo != nil && bdInfo.Year != "" {
-		searchYear = bdInfo.Year
+		if y, err := strconv.Atoi(bdInfo.Year); err == nil {
+			searchYear = y
+			yearSource = "bdinfo"
+		}
 	}
+	if searchYear == 0 {
+		if cleaned, y := splitTitleYear(queryTitle); y > 0 {
+			searchYear = y
+			queryTitle = cleaned
+			yearSource = "resolved_title"
+		}
+	}
+	if searchYear == 0 {
+		if cleaned, y := splitTitleYear(item.DiscTitle); y > 0 {
+			searchYear = y
+			yearSource = "disc_title"
+			// Only use the cleaned title if queryTitle still contains the year.
+			if queryTitle == item.DiscTitle || queryTitle == CleanQueryTitle(item.DiscTitle) {
+				queryTitle = cleaned
+			}
+		}
+	}
+	if yearSource != "" {
+		logger.Info("year source decision",
+			"decision_type", "year_source",
+			"decision_result", yearSource,
+			"decision_reason", fmt.Sprintf("year=%d", searchYear),
+		)
+	}
+
 	results, err := h.tmdbClient.SearchMulti(ctx, queryTitle)
 	if err != nil {
 		return fmt.Errorf("tmdb search: %w", err)
 	}
 
-	best, confidence := tmdb.SelectBestResult(results, queryTitle, searchYear, 5)
+	best := tmdb.SelectBestResult(results, queryTitle, searchYear, 5)
 	if best == nil {
-		logger.Warn("no TMDB results",
-			"event_type", "tmdb_no_results",
-			"error_hint", "disc title may not match any TMDB entry",
+		logger.Warn("no TMDB match",
+			"event_type", "tmdb_no_match",
+			"error_hint", "no result met confidence threshold",
 			"impact", "item flagged for review",
 		)
-		item.AppendReviewReason("TMDB: no results found")
+		item.AppendReviewReason("TMDB: no confident match found")
 		// Build minimal envelope and continue.
 		env := h.buildFallbackEnvelope(item, discInfo)
 		setForcedSubtitleAttribute(logger, discInfo, &env)
@@ -237,14 +270,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			return err
 		}
 		return &services.ErrDegraded{
-			Msg: "no TMDB results found for: " + queryTitle,
+			Msg: "no TMDB match found for: " + queryTitle,
 		}
 	}
 
 	logger.Info("TMDB match found",
 		"decision_type", "tmdb_match",
 		"decision_result", best.DisplayTitle(),
-		"decision_reason", fmt.Sprintf("confidence=%.2f", confidence),
+		"decision_reason", fmt.Sprintf("tmdb_id=%d year=%s votes=%d", best.ID, best.Year(), best.VoteCount),
 	)
 
 	// Update disc_title to canonical name per spec.
@@ -261,7 +294,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 7: Build and persist RipSpec envelope.
-	env := h.buildEnvelope(item, discInfo, best, mediaType, edition, confidence, discSource)
+	env := h.buildEnvelope(item, discInfo, best, mediaType, edition, discSource)
 	setForcedSubtitleAttribute(logger, discInfo, &env)
 	if err := h.persistEnvelope(ctx, item, &env); err != nil {
 		return err
@@ -349,6 +382,29 @@ func canonicalTitle(best tmdb.SearchResult, mediaType string, discTitle string, 
 		return fmt.Sprintf("%s (%s)", title, year)
 	}
 	return title
+}
+
+// splitTitleYear extracts a trailing year (1880-2100) from a title string.
+// Returns the cleaned title and year, or the original title and 0 if no year found.
+// Examples: "Munich (2005)" → ("Munich", 2005), "Munich" → ("Munich", 0).
+func splitTitleYear(value string) (string, int) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", 0
+	}
+	matches := trailingYearPattern.FindStringSubmatch(trimmed)
+	if len(matches) != 2 {
+		return trimmed, 0
+	}
+	year, err := strconv.Atoi(matches[1])
+	if err != nil || year < 1880 || year > 2100 {
+		return trimmed, 0
+	}
+	cleaned := strings.TrimSpace(trailingYearPattern.ReplaceAllString(trimmed, ""))
+	if cleaned == "" {
+		return trimmed, 0
+	}
+	return cleaned, year
 }
 
 // CleanQueryTitle strips disc metadata (season, disc, volume, "TV Series") from a
@@ -497,7 +553,6 @@ func (h *Handler) buildEnvelope(
 	discInfo *makemkv.DiscInfo,
 	best *tmdb.SearchResult,
 	mediaType, edition string,
-	confidence float64,
 	discSource string,
 ) ripspec.Envelope {
 	// Extract season and disc numbers from disc title / MakeMKV disc name.

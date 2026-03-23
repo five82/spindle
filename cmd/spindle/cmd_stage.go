@@ -131,10 +131,10 @@ func newIdentifyCmd() *cobra.Command {
 				return nil
 			}
 
-			best, confidence := tmdb.SelectBestResult(results, queryTitle, "", 5)
+			best := tmdb.SelectBestResult(results, queryTitle, 0, 5)
 			if best != nil {
-				fmt.Printf("%s %s (%s) [%s, TMDB %d, confidence %.2f]\n",
-					labelStyle("Selected:"), best.DisplayTitle(), best.Year(), best.MediaType, best.ID, confidence)
+				fmt.Printf("%s %s (%s) [%s, TMDB %d, votes %d]\n",
+					labelStyle("Selected:"), best.DisplayTitle(), best.Year(), best.MediaType, best.ID, best.VoteCount)
 				fmt.Println("Spindle will use this result for metadata.")
 				if best.Overview != "" {
 					overview := best.Overview
@@ -161,10 +161,9 @@ func newIdentifyCmd() *cobra.Command {
 						fmt.Printf("  ... and %d more\n", len(results)-1-shown)
 						break
 					}
-					score := tmdb.ScoreResult(r, queryTitle, "", 5)
 					if flagVerbose {
-						fmt.Printf("  - %s (%s) [%s, TMDB %d, score %.2f, votes %d]\n",
-							r.DisplayTitle(), r.Year(), r.MediaType, r.ID, score, r.VoteCount)
+						fmt.Printf("  - %s (%s) [%s, TMDB %d, votes %d, avg %.1f]\n",
+							r.DisplayTitle(), r.Year(), r.MediaType, r.ID, r.VoteCount, r.VoteAverage)
 					} else {
 						fmt.Printf("  - %s (%s) [%s, TMDB %d]\n",
 							r.DisplayTitle(), r.Year(), r.MediaType, r.ID)
