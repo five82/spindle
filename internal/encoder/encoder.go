@@ -182,7 +182,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			})
 			encodeErrors++
 
-			// Persist failure in snapshot.
+			// Persist failure in snapshot (re-read from item to preserve reporter fields).
+			snap, _ = encodingstate.Unmarshal(item.EncodingDetailsJSON)
 			snap.Error = &encodingstate.Issue{
 				Title:   "Encoding failed",
 				Message: encErr.Error(),
@@ -198,7 +199,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			continue
 		}
 
-		// Update snapshot with final fields.
+		// Re-read snapshot from item (reporter callbacks kept it current).
+		snap, _ = encodingstate.Unmarshal(item.EncodingDetailsJSON)
 		snap.Substage = "complete"
 		snap.Percent = 100
 		snap.EncodedSize = int64(result.EncodedSize)
