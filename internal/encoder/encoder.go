@@ -236,6 +236,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
+	// Record encoded file path on item.
+	if n := len(env.Assets.Encoded); n > 0 {
+		item.EncodedFile = env.Assets.Encoded[n-1].Path
+	}
+
 	// Persist envelope.
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 		return err

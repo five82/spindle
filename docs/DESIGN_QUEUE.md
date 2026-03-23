@@ -56,7 +56,10 @@ CREATE TABLE IF NOT EXISTS queue_items (
     active_episode_key TEXT,
     progress_bytes_copied INTEGER DEFAULT 0,
     progress_total_bytes INTEGER DEFAULT 0,
-    encoding_details_json TEXT
+    encoding_details_json TEXT,
+    ripped_file TEXT,
+    encoded_file TEXT,
+    final_file TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_queue_stage ON queue_items(stage);
@@ -68,7 +71,7 @@ the write frequency (every 2-5 seconds during encoding/ripping) without
 contention issues at this scale. This eliminates the join complexity and lazy
 row creation of a separate progress table.
 
-## 3. Item Model (19 columns)
+## 3. Item Model (22 columns)
 
 | Column                 | Type      | Purpose                                           |
 |------------------------|-----------|---------------------------------------------------|
@@ -92,6 +95,9 @@ row creation of a separate progress table.
 | `progress_bytes_copied`| INTEGER   | Bytes copied during organizing                    |
 | `progress_total_bytes` | INTEGER   | Total bytes to copy during organizing             |
 | `encoding_details_json`| TEXT      | Drapto encoding snapshot JSON                     |
+| `ripped_file`          | TEXT      | Path to ripped MKV (staging or cache)             |
+| `encoded_file`         | TEXT      | Path to encoded AV1 file (staging)                |
+| `final_file`           | TEXT      | Path to final file in library or review dir       |
 
 ## 4. Stage Model (10 stages + in_progress flag)
 

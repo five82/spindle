@@ -30,6 +30,9 @@ type Item struct {
 	ProgressBytesCopied int64
 	ProgressTotalBytes  int64
 	EncodingDetailsJSON string
+	RippedFile          string
+	EncodedFile         string
+	FinalFile           string
 }
 
 // StagingRoot computes the per-item working directory under base.

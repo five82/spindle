@@ -154,6 +154,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Path:       destPath,
 			Status:     "completed",
 		})
+		item.FinalFile = destPath
 
 		// Copy subtitle sidecar if exists (non-muxed).
 		copySidecarSubtitle(logger, asset.Path, destPath)
@@ -297,6 +298,7 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 		}
 
 		copySidecarSubtitle(logger, asset.Path, destPath)
+		item.FinalFile = destPath
 	}
 
 	logger.Info("review routing completed", "event_type", "stage_complete", "stage", "organizing", "review_path", reviewPath)

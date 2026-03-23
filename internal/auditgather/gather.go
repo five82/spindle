@@ -141,6 +141,9 @@ func buildItemSummary(item *queue.Item) ItemSummary {
 		ProgressStage:   item.ProgressStage,
 		ProgressPercent: item.ProgressPercent,
 		ProgressMessage: item.ProgressMessage,
+		RippedFile:      item.RippedFile,
+		EncodedFile:     item.EncodedFile,
+		FinalFile:       item.FinalFile,
 	}
 }
 

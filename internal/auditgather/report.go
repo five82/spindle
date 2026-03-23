@@ -36,6 +36,9 @@ type ItemSummary struct {
 	ProgressStage   string  `json:"progress_stage,omitempty"`
 	ProgressPercent float64 `json:"progress_percent,omitempty"`
 	ProgressMessage string  `json:"progress_message,omitempty"`
+	RippedFile      string  `json:"ripped_file,omitempty"`
+	EncodedFile     string  `json:"encoded_file,omitempty"`
+	FinalFile       string  `json:"final_file,omitempty"`
 }
 
 // StageGate determines which audit phases are applicable.

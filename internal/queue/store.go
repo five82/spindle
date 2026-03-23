@@ -32,7 +32,10 @@ CREATE TABLE IF NOT EXISTS queue_items (
     active_episode_key TEXT,
     progress_bytes_copied INTEGER DEFAULT 0,
     progress_total_bytes INTEGER DEFAULT 0,
-    encoding_details_json TEXT
+    encoding_details_json TEXT,
+    ripped_file TEXT,
+    encoded_file TEXT,
+    final_file TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_queue_stage ON queue_items(stage);
@@ -145,7 +148,8 @@ func isBusyError(err error) bool {
 const allColumns = `id, disc_title, stage, in_progress, failed_at_stage, error_message,
     created_at, updated_at, rip_spec_data, disc_fingerprint, metadata_json,
     needs_review, review_reason, progress_stage, progress_percent, progress_message,
-    active_episode_key, progress_bytes_copied, progress_total_bytes, encoding_details_json`
+    active_episode_key, progress_bytes_copied, progress_total_bytes, encoding_details_json,
+    ripped_file, encoded_file, final_file`
 
 // scanItem scans a row into an Item.
 func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
@@ -155,6 +159,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	var ripSpecData, discFingerprint, metadataJSON sql.NullString
 	var reviewReason, progressStage, progressMessage sql.NullString
 	var activeEpisodeKey, encodingDetailsJSON sql.NullString
+	var rippedFile, encodedFile, finalFile sql.NullString
 	var stage string
 
 	err := row.Scan(
@@ -166,6 +171,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 		&progressStage, &it.ProgressPercent, &progressMessage,
 		&activeEpisodeKey, &it.ProgressBytesCopied, &it.ProgressTotalBytes,
 		&encodingDetailsJSON,
+		&rippedFile, &encodedFile, &finalFile,
 	)
 	if err != nil {
 		return nil, err
@@ -185,6 +191,9 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	it.ProgressMessage = progressMessage.String
 	it.ActiveEpisodeKey = activeEpisodeKey.String
 	it.EncodingDetailsJSON = encodingDetailsJSON.String
+	it.RippedFile = rippedFile.String
+	it.EncodedFile = encodedFile.String
+	it.FinalFile = finalFile.String
 
 	return &it, nil
 }
@@ -261,7 +270,8 @@ func (s *Store) Update(item *Item) error {
 					ELSE ? END,
 				progress_stage = ?, progress_percent = ?, progress_message = ?,
 				active_episode_key = ?, progress_bytes_copied = ?, progress_total_bytes = ?,
-				encoding_details_json = ?
+				encoding_details_json = ?,
+				ripped_file = ?, encoded_file = ?, final_file = ?
 			WHERE id = ?`,
 			item.DiscTitle, string(item.Stage), item.InProgress,
 			item.FailedAtStage, item.ErrorMessage,
@@ -270,6 +280,7 @@ func (s *Store) Update(item *Item) error {
 			item.ProgressStage, item.ProgressPercent, item.ProgressMessage,
 			item.ActiveEpisodeKey, item.ProgressBytesCopied, item.ProgressTotalBytes,
 			item.EncodingDetailsJSON,
+			item.RippedFile, item.EncodedFile, item.FinalFile,
 			item.ID,
 		)
 		if err != nil {
@@ -487,6 +498,7 @@ func (s *Store) CheckHealth() error {
 		"progress_stage": false, "progress_percent": false, "progress_message": false,
 		"active_episode_key": false, "progress_bytes_copied": false,
 		"progress_total_bytes": false, "encoding_details_json": false,
+		"ripped_file": false, "encoded_file": false, "final_file": false,
 	}
 
 	rows, err := s.db.Query("PRAGMA table_info(queue_items)")
