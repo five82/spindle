@@ -366,6 +366,11 @@ func (r *spindleReporter) CropResult(s drapto.CropSummary) {
 	snap.CropRequired = s.Required
 	snap.CropMessage = s.Message
 	snap.Substage = "crop_detection"
+	if s.Required {
+		if w, h, parseErr := encodingstate.ParseCropFilter(s.Crop); parseErr == nil {
+			snap.Resolution = fmt.Sprintf("%dx%d", w, h)
+		}
+	}
 	r.item.EncodingDetailsJSON = snap.Marshal()
 	_ = r.store.UpdateProgress(r.item)
 }
