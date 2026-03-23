@@ -112,8 +112,24 @@ func (h *Handler) downloadReferences(
 				"episode", epNum,
 				"error", err,
 			)
+			logger.Debug("reference subtitle search",
+				"decision_type", "opensubtitles_reference_search",
+				"decision_result", "error",
+				"decision_reason", fmt.Sprintf("S%02dE%02d search_error=%v", season, epNum, err),
+			)
 			continue
 		}
+
+		logger.Debug("reference subtitle search",
+			"decision_type", "opensubtitles_reference_search",
+			"decision_result", func() string {
+				if len(results) == 0 {
+					return "empty"
+				}
+				return "found"
+			}(),
+			"decision_reason", fmt.Sprintf("S%02dE%02d results=%d", season, epNum, len(results)),
+		)
 
 		if len(results) == 0 {
 			logger.Info("no reference subtitles found",
@@ -125,7 +141,7 @@ func (h *Handler) downloadReferences(
 		}
 
 		// Pick best candidate: prefer non-HI, highest download count.
-		best := selectBestCandidate(results)
+		best := selectBestCandidate(logger, results)
 		if best == nil || len(best.Attributes.Files) == 0 {
 			continue
 		}
@@ -161,7 +177,7 @@ func (h *Handler) downloadReferences(
 
 // selectBestCandidate picks the best subtitle result, preferring non-HI
 // subtitles with the highest download count.
-func selectBestCandidate(results []opensubtitles.SubtitleResult) *opensubtitles.SubtitleResult {
+func selectBestCandidate(logger *slog.Logger, results []opensubtitles.SubtitleResult) *opensubtitles.SubtitleResult {
 	if len(results) == 0 {
 		return nil
 	}
@@ -178,7 +194,8 @@ func selectBestCandidate(results []opensubtitles.SubtitleResult) *opensubtitles.
 
 	// Prefer non-HI, fall back to HI.
 	candidates := nonHI
-	if len(candidates) == 0 {
+	usedHI := len(candidates) == 0
+	if usedHI {
 		candidates = hi
 	}
 
@@ -189,6 +206,20 @@ func selectBestCandidate(results []opensubtitles.SubtitleResult) *opensubtitles.
 			best = &candidates[i]
 		}
 	}
+
+	for _, r := range results {
+		selected := r.Attributes.DownloadCount == best.Attributes.DownloadCount && r.Attributes.HearingImpaired == best.Attributes.HearingImpaired
+		result := "skipped"
+		if selected {
+			result = "selected"
+		}
+		logger.Debug("content ID candidate",
+			"decision_type", "contentid_candidates",
+			"decision_result", result,
+			"decision_reason", fmt.Sprintf("hi=%v downloads=%d used_hi_pool=%v", r.Attributes.HearingImpaired, r.Attributes.DownloadCount, usedHI),
+		)
+	}
+
 	return best
 }
 
@@ -220,6 +251,11 @@ func (h *Handler) matchEpisodes(
 		scores[i] = make([]float64, len(refEps))
 		for j, ep := range refEps {
 			scores[i][j] = textutil.CosineSimilarity(discFPs[dk], refFPs[ep])
+			logger.Debug("episode similarity score",
+				"decision_type", "contentid_matches",
+				"decision_result", fmt.Sprintf("%s -> E%02d", dk, ep),
+				"decision_reason", fmt.Sprintf("cosine=%.3f threshold=%.2f", scores[i][j], minSimilarityScore),
+			)
 		}
 	}
 

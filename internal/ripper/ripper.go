@@ -59,6 +59,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			)
 			// Map cached files to assets (no titleFileMap for cache path).
 			h.mapRippedAssets(&env, rippedDir, nil)
+			if n := len(env.Assets.Ripped); n > 0 {
+				item.RippedFile = env.Assets.Ripped[n-1].Path
+			}
 			if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 				return err
 			}
@@ -136,6 +139,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Map ripped files to assets using TitleID mapping.
 	h.mapRippedAssets(&env, rippedDir, titleFileMap)
+	if n := len(env.Assets.Ripped); n > 0 {
+		item.RippedFile = env.Assets.Ripped[n-1].Path
+	}
 
 	// Persist envelope.
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
@@ -190,8 +196,18 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) [
 		for i := range env.Titles {
 			t := &env.Titles[i]
 			if t.Duration < h.cfg.MakeMKV.MinTitleLength {
+				logger.Debug("rip candidate below minimum duration",
+					"decision_type", "track_select",
+					"decision_result", "skipped",
+					"decision_reason", fmt.Sprintf("title_id=%d duration=%ds min=%d", t.ID, t.Duration, h.cfg.MakeMKV.MinTitleLength),
+				)
 				continue
 			}
+			logger.Debug("rip candidate evaluated",
+				"decision_type", "track_select",
+				"decision_result", "candidate",
+				"decision_reason", fmt.Sprintf("title_id=%d duration=%ds", t.ID, t.Duration),
+			)
 			if best == nil || t.Duration > best.Duration {
 				best = t
 			}
@@ -220,7 +236,18 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) [
 		var targets []ripspec.Title
 		for _, t := range env.Titles {
 			if needed[t.ID] {
+				logger.Debug("rip candidate evaluated",
+					"decision_type", "track_select",
+					"decision_result", "selected",
+					"decision_reason", fmt.Sprintf("title_id=%d duration=%ds episode_referenced=true", t.ID, t.Duration),
+				)
 				targets = append(targets, t)
+			} else {
+				logger.Debug("rip candidate evaluated",
+					"decision_type", "track_select",
+					"decision_result", "skipped",
+					"decision_reason", fmt.Sprintf("title_id=%d duration=%ds episode_referenced=false", t.ID, t.Duration),
+				)
 			}
 		}
 		logger.Info("TV titles selected for ripping",

@@ -258,12 +258,26 @@ func (h *Handler) tryForcedSubs(
 	var best *opensubtitles.SubtitleResult
 	for i := range results {
 		r := &results[i]
+		result := "skipped"
+		reason := fmt.Sprintf("foreign_parts_only=%v downloads=%d files=%d", r.Attributes.ForeignPartsOnly, r.Attributes.DownloadCount, len(r.Attributes.Files))
 		if !r.Attributes.ForeignPartsOnly {
+			logger.Debug("forced subtitle candidate",
+				"decision_type", "subtitle_rank",
+				"decision_result", result,
+				"decision_reason", reason,
+				"episode_key", key,
+			)
 			continue
 		}
 		if best == nil || r.Attributes.DownloadCount > best.Attributes.DownloadCount {
 			best = r
 		}
+		logger.Debug("forced subtitle candidate",
+			"decision_type", "subtitle_rank",
+			"decision_result", "candidate",
+			"decision_reason", reason,
+			"episode_key", key,
+		)
 	}
 
 	if best == nil {

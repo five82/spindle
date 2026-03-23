@@ -131,7 +131,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
 	}
 
-	// Step 1: Check disc ID cache for fast path.
+	// Step 1: Probe disc source type (lightweight lsblk, always needed).
+	discSource := "unknown"
+	if ev, err := discmonitor.ProbeDisc(ctx, h.cfg.MakeMKV.OpticalDrive); err != nil {
+		logger.Warn("disc probe failed, defaulting to unknown",
+			"event_type", "disc_probe_error",
+			"error_hint", err.Error(),
+			"impact", "disc_source will be unknown",
+		)
+	} else {
+		discSource = mapDiscSource(ev.DiscType)
+	}
+
+	// Step 2: Check disc ID cache for fast path.
 	if h.discIDCache != nil && item.DiscFingerprint != "" {
 		if entry := h.discIDCache.Lookup(item.DiscFingerprint); entry != nil {
 			logger.Info("disc ID cache hit",
@@ -151,7 +163,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_reason", "disc_id_cache_entry",
 			)
 			// Build envelope from cached data and return.
-			env := h.buildEnvelopeFromCache(item, entry)
+			env := h.buildEnvelopeFromCache(item, entry, discSource)
 			if err := h.persistEnvelope(ctx, item, &env); err != nil {
 				return err
 			}
@@ -159,19 +171,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Step 2: Probe disc source type.
-	discSource := "unknown"
-	if ev, err := discmonitor.ProbeDisc(ctx, h.cfg.MakeMKV.OpticalDrive); err != nil {
-		logger.Warn("disc probe failed, defaulting to unknown",
-			"event_type", "disc_probe_error",
-			"error_hint", err.Error(),
-			"impact", "disc_source will be unknown",
-		)
-	} else {
-		discSource = mapDiscSource(ev.DiscType)
-	}
-
-	// Step 2b: BDInfo (Blu-ray discs only, non-fatal).
+	// Step 2b: BDInfo (Blu-ray discs only, non-fatal). Skipped on cache hit above.
 	var bdInfo *BDInfoResult
 	if discSource == "bluray" {
 		var bdErr error
@@ -256,7 +256,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return fmt.Errorf("tmdb search: %w", err)
 	}
 
-	best := tmdb.SelectBestResult(results, queryTitle, searchYear, 5)
+	best := tmdb.SelectBestResult(logger, results, queryTitle, searchYear, 5)
 	if best == nil {
 		logger.Warn("no TMDB match",
 			"event_type", "tmdb_no_match",
@@ -265,7 +265,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 		item.AppendReviewReason("TMDB: no confident match found")
 		// Build minimal envelope and continue.
-		env := h.buildFallbackEnvelope(item, discInfo)
+		env := h.buildFallbackEnvelope(logger, item, discInfo)
 		setForcedSubtitleAttribute(logger, discInfo, &env)
 		if err := h.persistEnvelope(ctx, item, &env); err != nil {
 			return err
@@ -295,7 +295,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 7: Build and persist RipSpec envelope.
-	env := h.buildEnvelope(item, discInfo, best, mediaType, edition, discSource)
+	env := h.buildEnvelope(logger, item, discInfo, best, mediaType, edition, discSource)
 	setForcedSubtitleAttribute(logger, discInfo, &env)
 	if err := h.persistEnvelope(ctx, item, &env); err != nil {
 		return err
@@ -559,6 +559,7 @@ func convertTitles(discInfo *makemkv.DiscInfo) []ripspec.Title {
 
 // buildEnvelope constructs a full RipSpec envelope from scan and TMDB data.
 func (h *Handler) buildEnvelope(
+	logger *slog.Logger,
 	item *queue.Item,
 	discInfo *makemkv.DiscInfo,
 	best *tmdb.SearchResult,
@@ -602,7 +603,7 @@ func (h *Handler) buildEnvelope(
 
 	// For TV content, create episode placeholders from eligible titles.
 	if mediaType == "tv" {
-		h.createEpisodePlaceholders(&env)
+		h.createEpisodePlaceholders(logger, &env)
 	}
 
 	return env
@@ -611,7 +612,7 @@ func (h *Handler) buildEnvelope(
 // createEpisodePlaceholders adds episode entries for each title that meets the
 // minimum title length threshold. Each episode gets a placeholder key (e.g.,
 // "s01_001") and is linked to the title's ID for downstream ripping.
-func (h *Handler) createEpisodePlaceholders(env *ripspec.Envelope) {
+func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.Envelope) {
 	season := env.Metadata.SeasonNumber
 	if season <= 0 {
 		season = 1
@@ -620,6 +621,11 @@ func (h *Handler) createEpisodePlaceholders(env *ripspec.Envelope) {
 	idx := 0
 	for _, title := range env.Titles {
 		if title.Duration < h.cfg.MakeMKV.MinTitleLength {
+			logger.Debug("title below minimum duration for placeholder",
+				"title_id", title.ID,
+				"duration", title.Duration,
+				"min_title_length", h.cfg.MakeMKV.MinTitleLength,
+			)
 			continue
 		}
 		idx++
@@ -630,20 +636,28 @@ func (h *Handler) createEpisodePlaceholders(env *ripspec.Envelope) {
 			RuntimeSeconds: title.Duration,
 		})
 	}
+
+	logger.Debug("episode placeholders created",
+		"season", season,
+		"titles_evaluated", len(env.Titles),
+		"placeholders_created", idx,
+		"min_title_length", h.cfg.MakeMKV.MinTitleLength,
+	)
 }
 
 // buildEnvelopeFromCache constructs a minimal envelope from a disc ID cache entry.
-func (h *Handler) buildEnvelopeFromCache(item *queue.Item, entry *discidcache.Entry) ripspec.Envelope {
+func (h *Handler) buildEnvelopeFromCache(item *queue.Item, entry *discidcache.Entry, discSource string) ripspec.Envelope {
 	env := ripspec.Envelope{
 		Version:     ripspec.CurrentVersion,
 		Fingerprint: item.DiscFingerprint,
 		Metadata: ripspec.Metadata{
-			ID:        entry.TMDBID,
-			Title:     entry.Title,
-			MediaType: entry.MediaType,
-			Year:      entry.Year,
-			Movie:     entry.MediaType == "movie",
-			Cached:    true,
+			ID:         entry.TMDBID,
+			Title:      entry.Title,
+			MediaType:  entry.MediaType,
+			Year:       entry.Year,
+			Movie:      entry.MediaType == "movie",
+			Cached:     true,
+			DiscSource: discSource,
 		},
 	}
 	env.Attributes.HasForcedSubtitleTrack = entry.HasForcedSubtitleTrack
@@ -651,7 +665,7 @@ func (h *Handler) buildEnvelopeFromCache(item *queue.Item, entry *discidcache.En
 }
 
 // buildFallbackEnvelope constructs an envelope with unknown media type for review.
-func (h *Handler) buildFallbackEnvelope(item *queue.Item, discInfo *makemkv.DiscInfo) ripspec.Envelope {
+func (h *Handler) buildFallbackEnvelope(logger *slog.Logger, item *queue.Item, discInfo *makemkv.DiscInfo) ripspec.Envelope {
 	title := item.DiscTitle
 	if title == "" && discInfo != nil {
 		title = discInfo.Name
@@ -680,7 +694,7 @@ func (h *Handler) buildFallbackEnvelope(item *queue.Item, discInfo *makemkv.Disc
 
 	// If season number was extracted, this is likely TV — create episode placeholders.
 	if seasonNum > 0 {
-		h.createEpisodePlaceholders(&env)
+		h.createEpisodePlaceholders(logger, &env)
 	}
 
 	return env

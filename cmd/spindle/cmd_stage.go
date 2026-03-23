@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,7 +132,7 @@ func newIdentifyCmd() *cobra.Command {
 				return nil
 			}
 
-			best := tmdb.SelectBestResult(results, queryTitle, 0, 5)
+			best := tmdb.SelectBestResult(slog.Default(), results, queryTitle, 0, 5)
 			if best != nil {
 				fmt.Printf("%s %s (%s) [%s, TMDB %d, votes %d]\n",
 					labelStyle("Selected:"), best.DisplayTitle(), best.Year(), best.MediaType, best.ID, best.VoteCount)

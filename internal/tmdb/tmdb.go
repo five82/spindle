@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -291,7 +292,7 @@ func releaseYear(r *SearchResult) int {
 //
 // Preference: an exact match meeting its thresholds is preferred over a
 // higher-scoring non-exact result.
-func SelectBestResult(results []SearchResult, query string, year, minVoteCountExact int) *SearchResult {
+func SelectBestResult(logger *slog.Logger, results []SearchResult, query string, year, minVoteCountExact int) *SearchResult {
 	if len(results) == 0 {
 		return nil
 	}
@@ -310,9 +311,17 @@ func SelectBestResult(results []SearchResult, query string, year, minVoteCountEx
 		titleNorm := normalizeForComparison(r.DisplayTitle())
 
 		exactMatch := titleNorm == queryNorm
+		yearMatch := true
 		if exactMatch && year > 0 {
-			exactMatch = releaseYear(r) == year
+			yearMatch = releaseYear(r) == year
+			exactMatch = yearMatch
 		}
+
+		logger.Debug("TMDB candidate scored",
+			"decision_type", "tmdb_search",
+			"decision_result", r.DisplayTitle(),
+			"decision_reason", fmt.Sprintf("score=%.3f exact=%v year_match=%v vote_avg=%.1f vote_count=%d", score, exactMatch, yearMatch, r.VoteAverage, r.VoteCount),
+		)
 
 		if exactMatch && score > bestExactScore {
 			bestExact = r
