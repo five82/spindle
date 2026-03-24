@@ -57,7 +57,7 @@ func TestResolveTitle_PriorityChain(t *testing.T) {
 			h := &Handler{}
 			item := &queue.Item{DiscTitle: tt.itemTitle}
 			discInfo := &makemkv.DiscInfo{Name: tt.discName}
-			got := h.resolveTitle(item, discInfo, nil)
+			got, _ := h.resolveTitle(item, discInfo, nil)
 			if got != tt.want {
 				t.Errorf("resolveTitle() = %q, want %q", got, tt.want)
 			}
@@ -68,7 +68,7 @@ func TestResolveTitle_PriorityChain(t *testing.T) {
 func TestResolveTitle_NilDiscInfo(t *testing.T) {
 	h := &Handler{}
 	item := &queue.Item{DiscTitle: ""}
-	got := h.resolveTitle(item, nil, nil)
+	got, _ := h.resolveTitle(item, nil, nil)
 	if got != "Unknown Disc" {
 		t.Errorf("resolveTitle(nil discInfo) = %q, want %q", got, "Unknown Disc")
 	}

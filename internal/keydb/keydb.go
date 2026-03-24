@@ -44,13 +44,14 @@ func (c *Catalog) Lookup(discID string) string {
 		c.logger.Info("KeyDB lookup hit",
 			"decision_type", "keydb_lookup",
 			"decision_result", "hit",
-			"decision_reason", fmt.Sprintf("disc_id=%s title=%s", normalized, title),
+			"disc_id", normalized,
+			"title", title,
 		)
 	} else {
 		c.logger.Debug("KeyDB lookup miss",
 			"decision_type", "keydb_lookup",
 			"decision_result", "miss",
-			"decision_reason", fmt.Sprintf("disc_id=%s", normalized),
+			"disc_id", normalized,
 		)
 	}
 	return title

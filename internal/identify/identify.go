@@ -146,12 +146,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Step 2: Check disc ID cache for fast path.
 	if h.discIDCache != nil && item.DiscFingerprint != "" {
 		if entry := h.discIDCache.Lookup(item.DiscFingerprint); entry != nil {
-			logger.Info("disc ID cache hit",
-				"decision_type", "disc_id_cache",
-				"decision_result", "hit",
-				"decision_reason", fmt.Sprintf("cached TMDB ID %d", entry.TMDBID),
-			)
-			// Update disc_title to canonical name from cache.
 			canonTitle := entry.Title
 			if entry.Year != "" {
 				canonTitle = fmt.Sprintf("%s (%s)", canonTitle, entry.Year)
@@ -207,16 +201,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 4: Build title priority chain for TMDB query.
-	rawTitle, sourceUsed := h.resolveTitleWithSource(item, discInfo, bdInfo)
+	rawTitle, sourceUsed := h.resolveTitle(item, discInfo, bdInfo)
 	queryTitle := CleanQueryTitle(rawTitle)
-	logger.Info("disc title resolved",
+	logger.Info("title resolved for TMDB search",
 		"decision_type", "title_resolution",
 		"decision_result", sourceUsed,
-		"decision_reason", fmt.Sprintf("title=%q", rawTitle),
-	)
-	logger.Info("title resolved for TMDB search",
-		"decision_type", "title_source",
-		"decision_result", "resolved",
 		"decision_reason", queryTitle,
 		"raw_title", rawTitle,
 	)
@@ -339,38 +328,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	return nil
 }
 
-// resolveTitle implements the title priority chain: KeyDB -> BDInfo disc name
-// -> queue item label -> MakeMKV disc name -> lsblk label (item.DiscTitle) ->
-// "Unknown Disc". Returns the first non-empty value.
-func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo, bdInfo *BDInfoResult) string {
-	// Priority 1: KeyDB lookup by fingerprint.
-	if h.keydbCat != nil && item.DiscFingerprint != "" {
-		if title := h.keydbCat.Lookup(item.DiscFingerprint); title != "" {
-			return title
-		}
-	}
-
-	// Priority 2: BDInfo disc name.
-	if bdInfo != nil && bdInfo.DiscName != "" {
-		return bdInfo.DiscName
-	}
-
-	// Priority 3: MakeMKV disc name.
-	if discInfo != nil && discInfo.Name != "" {
-		return discInfo.Name
-	}
-
-	// Priority 4: disc label from queue item (lsblk label).
-	if item.DiscTitle != "" {
-		return item.DiscTitle
-	}
-
-	return "Unknown Disc"
-}
-
-// resolveTitleWithSource implements the title priority chain and also returns
-// the source that was used. This is used for observability logging.
-func (h *Handler) resolveTitleWithSource(item *queue.Item, discInfo *makemkv.DiscInfo, bdInfo *BDInfoResult) (string, string) {
+// resolveTitle implements the title priority chain and returns both the
+// resolved title and the source that was used for observability.
+func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo, bdInfo *BDInfoResult) (string, string) {
 	if h.keydbCat != nil && item.DiscFingerprint != "" {
 		if title := h.keydbCat.Lookup(item.DiscFingerprint); title != "" {
 			return title, "keydb"

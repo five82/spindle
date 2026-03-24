@@ -69,14 +69,16 @@ func (s *Store) Lookup(fingerprint string) *Entry {
 		s.logger.Info("disc ID cache miss",
 			"decision_type", "disc_id_cache",
 			"decision_result", "miss",
-			"decision_reason", fmt.Sprintf("fingerprint=%s", fingerprint),
+			"fingerprint", fingerprint,
 		)
 		return nil
 	}
 	s.logger.Info("disc ID cache hit",
 		"decision_type", "disc_id_cache",
 		"decision_result", "hit",
-		"decision_reason", fmt.Sprintf("fingerprint=%s tmdb_id=%d media_type=%s", fingerprint, entry.TMDBID, entry.MediaType),
+		"fingerprint", fingerprint,
+		"tmdb_id", entry.TMDBID,
+		"media_type", entry.MediaType,
 	)
 	return &entry
 }
