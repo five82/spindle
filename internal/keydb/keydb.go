@@ -75,7 +75,6 @@ func (c *Catalog) Size() int {
 // Disc IDs are normalized (0X prefix stripped, uppercased, validated as 40 hex chars).
 // Titles are cleaned via the title extraction chain.
 // If stale is true, the file is older than 7 days and should be re-downloaded.
-// If logger is nil, slog.Default() is used.
 func LoadFromFile(path string, logger *slog.Logger) (cat *Catalog, stale bool, err error) {
 	logger = logs.Default(logger)
 
@@ -299,7 +298,6 @@ func extractFile(zf *zip.File, dest string) error {
 // LoadOrDownload tries to load a catalog from path. If the file does not exist,
 // it downloads the KeyDB zip from url, extracts it to the directory containing
 // path, then loads the result.
-// If logger is nil, slog.Default() is used.
 func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration, logger *slog.Logger) (*Catalog, bool, error) {
 	cat, stale, err := LoadFromFile(path, logger)
 	if err == nil {

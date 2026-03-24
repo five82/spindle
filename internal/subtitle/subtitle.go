@@ -210,8 +210,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_result", "skipped",
 				"decision_reason", "mux_into_mkv is disabled",
 			)
-		}
-		if h.cfg.Subtitles.MuxIntoMKV {
+		} else {
 			muxedPath, err := h.muxSubtitles(ctx, logger, asset.Path, srtPath, key)
 			if err != nil {
 				logger.Warn("subtitle mux failed",

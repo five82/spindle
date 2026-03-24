@@ -22,7 +22,6 @@ var fallbackMountPaths = []string{"/media/cdrom", "/media/cdrom0"}
 // It checks (in order): the provided lsblk mount path, /proc/mounts,
 // fallback paths with disc directory structure, and finally auto-mounts.
 // If auto-mounted, the returned cleanup function unmounts the device.
-// If logger is nil, slog.Default() is used.
 func resolveMountPoint(ctx context.Context, device, lsblkMount string, logger *slog.Logger) (mountPoint string, cleanup func(), err error) {
 	logger = logs.Default(logger)
 	noop := func() {}

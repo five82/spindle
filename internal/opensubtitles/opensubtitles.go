@@ -32,7 +32,6 @@ type Client struct {
 }
 
 // New creates an OpenSubtitles client. Returns nil if apiKey is empty.
-// If logger is nil, slog.Default() is used.
 func New(apiKey, userAgent, userToken, baseURL string, logger *slog.Logger) *Client {
 	if apiKey == "" {
 		return nil

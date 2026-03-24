@@ -17,7 +17,6 @@ import (
 
 // Generate creates a disc fingerprint from the mounted filesystem.
 // It tries strategies in order: Blu-ray, DVD, then fallback.
-// If logger is nil, slog.Default() is used.
 func Generate(mountPoint string, logger *slog.Logger) (string, error) {
 	logger = logs.Default(logger)
 

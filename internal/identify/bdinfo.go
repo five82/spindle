@@ -41,7 +41,6 @@ var studioPrefixes = map[string]string{
 
 // RunBDInfo executes bd_info on the given device and returns parsed results.
 // Returns nil (not an error) if bd_info is not installed.
-// If logger is nil, slog.Default() is used.
 func RunBDInfo(ctx context.Context, device string, logger *slog.Logger) (*BDInfoResult, error) {
 	logger = logs.Default(logger)
 

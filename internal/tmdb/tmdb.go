@@ -25,7 +25,7 @@ type Client struct {
 	logger   *slog.Logger
 }
 
-// New creates a TMDB client. If logger is nil, slog.Default() is used.
+// New creates a TMDB client.
 func New(apiKey, baseURL, language string, logger *slog.Logger) *Client {
 	if baseURL == "" {
 		baseURL = "https://api.themoviedb.org/3"
