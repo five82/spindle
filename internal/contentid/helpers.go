@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -113,27 +114,31 @@ func (h *Handler) downloadReferences(
 				"error", err,
 			)
 			logger.Debug("reference subtitle search",
-				"decision_type", "opensubtitles_reference_search",
+				"decision_type", logs.DecisionOpenSubtitlesRefSearch,
 				"decision_result", "error",
-				"decision_reason", fmt.Sprintf("S%02dE%02d search_error=%v", season, epNum, err),
+				"season", season,
+				"episode", epNum,
+				"search_error", err,
 			)
 			continue
 		}
 
 		logger.Debug("reference subtitle search",
-			"decision_type", "opensubtitles_reference_search",
+			"decision_type", logs.DecisionOpenSubtitlesRefSearch,
 			"decision_result", func() string {
 				if len(results) == 0 {
 					return "empty"
 				}
 				return "found"
 			}(),
-			"decision_reason", fmt.Sprintf("S%02dE%02d results=%d", season, epNum, len(results)),
+			"season", season,
+			"episode", epNum,
+			"results", len(results),
 		)
 
 		if len(results) == 0 {
 			logger.Info("no reference subtitles found",
-				"decision_type", "reference_search",
+				"decision_type", logs.DecisionReferenceSearch,
 				"decision_result", "none",
 				"decision_reason", fmt.Sprintf("no results for S%02dE%02d", season, epNum),
 			)
@@ -162,7 +167,7 @@ func (h *Handler) downloadReferences(
 		if fp != nil {
 			refFPs[epNum] = fp
 			logger.Info("reference subtitle downloaded",
-				"decision_type", "reference_download",
+				"decision_type", logs.DecisionReferenceDownload,
 				"decision_result", "success",
 				"decision_reason", fmt.Sprintf("S%02dE%02d from OpenSubtitles", season, epNum),
 			)
@@ -213,9 +218,11 @@ func selectBestCandidate(logger *slog.Logger, results []opensubtitles.SubtitleRe
 			result = "selected"
 		}
 		logger.Debug("content ID candidate",
-			"decision_type", "contentid_candidates",
+			"decision_type", logs.DecisionContentIDCandidates,
 			"decision_result", result,
-			"decision_reason", fmt.Sprintf("hi=%v downloads=%d used_hi_pool=%v", r.Attributes.HearingImpaired, r.Attributes.DownloadCount, usedHI),
+			"hearing_impaired", r.Attributes.HearingImpaired,
+			"downloads", r.Attributes.DownloadCount,
+			"used_hi_pool", usedHI,
 		)
 	}
 
@@ -251,9 +258,10 @@ func (h *Handler) matchEpisodes(
 		for j, ep := range refEps {
 			scores[i][j] = textutil.CosineSimilarity(discFPs[dk], refFPs[ep])
 			logger.Debug("episode similarity score",
-				"decision_type", "contentid_matches",
+				"decision_type", logs.DecisionContentIDMatches,
 				"decision_result", fmt.Sprintf("%s -> E%02d", dk, ep),
-				"decision_reason", fmt.Sprintf("cosine=%.3f threshold=%.2f", scores[i][j], minSimilarityScore),
+				"cosine_similarity", scores[i][j],
+				"threshold", minSimilarityScore,
 			)
 		}
 	}
@@ -277,7 +285,7 @@ func (h *Handler) matchEpisodes(
 			Score:      score,
 		})
 		logger.Info("episode matched",
-			"decision_type", "episode_match",
+			"decision_type", logs.DecisionEpisodeMatch,
 			"decision_result", fmt.Sprintf("%s -> E%02d", discKeys[i], refEps[col]),
 			"decision_reason", fmt.Sprintf("cosine similarity %.3f", score),
 		)

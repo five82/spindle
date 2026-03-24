@@ -11,6 +11,7 @@ import (
 
 	"github.com/five82/drapto"
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/notify"
@@ -79,7 +80,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	logger.Info("encoding plan",
-		"decision_type", "encoding_plan",
+		"decision_type", logs.DecisionEncodingPlan,
 		"decision_result", fmt.Sprintf("%d jobs", len(jobs)),
 		"decision_reason", fmt.Sprintf("media_type=%s", env.Metadata.MediaType),
 	)
@@ -88,7 +89,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	if h.cfg.Encoding.SVTAV1Preset >= 0 && h.cfg.Encoding.SVTAV1Preset <= 13 {
 		opts = append(opts, drapto.WithSVTAV1Preset(uint8(h.cfg.Encoding.SVTAV1Preset)))
 		logger.Info("SVT-AV1 preset override applied",
-			"decision_type", "encoding_config",
+			"decision_type", logs.DecisionEncodingConfig,
 			"decision_result", fmt.Sprintf("preset %d", h.cfg.Encoding.SVTAV1Preset),
 			"decision_reason", "config svt_av1_preset",
 		)
@@ -107,7 +108,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		// Resume: skip already-encoded assets.
 		if existing, found := env.Assets.FindAsset("encoded", job.episodeKey); found && existing.IsCompleted() {
 			logger.Info("skipping already-encoded asset",
-				"decision_type", "encode_resume",
+				"decision_type", logs.DecisionEncodeResume,
 				"decision_result", "skipped",
 				"decision_reason", "asset already completed",
 				"episode_key", job.episodeKey,
@@ -121,7 +122,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		expectedOutput := filepath.Join(encodedDir, filepath.Base(job.inputPath))
 		if err := os.Remove(expectedOutput); err == nil {
 			logger.Info("removed stale encoded file",
-				"decision_type", "encode_cleanup",
+				"decision_type", logs.DecisionEncodeCleanup,
 				"decision_result", "removed",
 				"decision_reason", "stale output from previous run",
 				"path", expectedOutput,
@@ -157,7 +158,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			snap.OriginalSize = probeResult.SizeBytes()
 
 			logger.Info("input file probed",
-				"decision_type", "file_probe",
+				"decision_type", logs.DecisionFileProbe,
 				"decision_result", "success",
 				"decision_reason", fmt.Sprintf("resolution=%s codecs=%s original_size=%d", resolution, strings.Join(codecs, ","), snap.OriginalSize),
 				"episode_key", job.episodeKey,
@@ -247,7 +248,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		if !result.ValidationPassed {
 			item.AppendReviewReason(fmt.Sprintf("validation failed for %s", job.episodeKey))
 			logger.Info("validation failure flagged for review",
-				"decision_type", "validation_failure_route",
+				"decision_type", logs.DecisionValidationFailureRoute,
 				"decision_result", "flagged_for_review",
 				"decision_reason", "encoding validation did not pass",
 				"episode_key", job.episodeKey,
@@ -405,7 +406,7 @@ func (r *spindleReporter) CropResult(s drapto.CropSummary) {
 		decisionResult = "crop_applied"
 	}
 	r.logger.Info("crop detection result",
-		"decision_type", "crop_detection",
+		"decision_type", logs.DecisionCropDetection,
 		"decision_result", decisionResult,
 		"decision_reason", fmt.Sprintf("filter=%s", s.Crop),
 		"episode_key", r.episodeKey,
@@ -446,7 +447,7 @@ func (r *spindleReporter) ValidationComplete(s drapto.ValidationSummary) {
 		decisionResult = "failed"
 	}
 	r.logger.Info("encoding validation result",
-		"decision_type", "encoding_validation",
+		"decision_type", logs.DecisionEncodingValidation,
 		"decision_result", decisionResult,
 		"decision_reason", fmt.Sprintf("steps_passed=%d steps_failed=%d", passed, failed),
 		"episode_key", r.episodeKey,

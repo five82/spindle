@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/audio"
 	"github.com/five82/spindle/internal/media/ffprobe"
 )
@@ -55,7 +56,7 @@ func RefineAudioTargets(
 	if audioCount <= 1 {
 		sel := audio.Select(result.Streams)
 		logger.Info("audio refinement: single track, no remux needed",
-			"decision_type", "audio_refinement",
+			"decision_type", logs.DecisionAudioRefinement,
 			"decision_result", "skipped",
 			"decision_reason", "single audio stream",
 			"path", path,
@@ -89,7 +90,7 @@ func RefineAudioTargets(
 	needsRemux := len(keptIndices) != audioCount
 	if !needsRemux {
 		logger.Info("audio refinement: all tracks kept, no remux needed",
-			"decision_type", "audio_refinement",
+			"decision_type", logs.DecisionAudioRefinement,
 			"decision_result", "skipped",
 			"decision_reason", "all audio tracks selected",
 			"path", path,
@@ -116,7 +117,7 @@ func RefineAudioTargets(
 	}
 
 	logger.Info("audio refinement complete",
-		"decision_type", "audio_refinement",
+		"decision_type", logs.DecisionAudioRefinement,
 		"decision_result", "remuxed",
 		"decision_reason", fmt.Sprintf("kept %d of %d audio tracks", len(keptIndices), audioCount),
 		"path", path,
@@ -162,7 +163,7 @@ func remuxAudioTracks(ctx context.Context, logger *slog.Logger, path string, kep
 
 	logger.Info("audio remux complete",
 		"event_type", "audio_remux",
-		"decision_type", "audio_remux",
+		"decision_type", logs.DecisionAudioRemux,
 		"decision_result", "completed",
 		"decision_reason", fmt.Sprintf("kept %d audio tracks", len(keptAudioIndices)),
 		"path", path,

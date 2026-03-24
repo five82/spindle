@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // requiredSettings defines settings that Spindle ensures are configured.
@@ -72,7 +74,7 @@ func applySettings(path string, required map[string]string, logger *slog.Logger)
 	}
 
 	logger.Info("updating MakeMKV settings",
-		"decision_type", "makemkv_settings",
+		"decision_type", logs.DecisionMakeMKVSettings,
 		"decision_result", "updated",
 		"decision_reason", "required settings not configured",
 		"path", path,

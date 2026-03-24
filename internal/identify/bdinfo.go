@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // BDInfoResult holds parsed output from the bd_info command.
@@ -41,14 +43,12 @@ var studioPrefixes = map[string]string{
 // Returns nil (not an error) if bd_info is not installed.
 // If logger is nil, slog.Default() is used.
 func RunBDInfo(ctx context.Context, device string, logger *slog.Logger) (*BDInfoResult, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 
 	path, err := exec.LookPath("bd_info")
 	if err != nil {
 		logger.Info("bd_info not available",
-			"decision_type", "bdinfo_availability",
+			"decision_type", logs.DecisionBDInfoAvailability,
 			"decision_result", "unavailable",
 			"decision_reason", "not found in PATH",
 		)

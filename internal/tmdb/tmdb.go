@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Client communicates with the TMDB API.
@@ -31,9 +33,7 @@ func New(apiKey, baseURL, language string, logger *slog.Logger) *Client {
 	if language == "" {
 		language = "en-US"
 	}
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	return &Client{
 		apiKey:   apiKey,
 		baseURL:  baseURL,
@@ -323,9 +323,13 @@ func SelectBestResult(logger *slog.Logger, results []SearchResult, query string,
 		}
 
 		logger.Debug("TMDB candidate scored",
-			"decision_type", "tmdb_search",
+			"decision_type", logs.DecisionTMDBSearch,
 			"decision_result", r.DisplayTitle(),
-			"decision_reason", fmt.Sprintf("score=%.3f exact=%v year_match=%v vote_avg=%.1f vote_count=%d", score, exactMatch, yearMatch, r.VoteAverage, r.VoteCount),
+			"score", score,
+			"exact_match", exactMatch,
+			"year_match", yearMatch,
+			"vote_avg", r.VoteAverage,
+			"vote_count", r.VoteCount,
 		)
 
 		if exactMatch && score > bestExactScore {
@@ -350,7 +354,7 @@ func SelectBestResult(logger *slog.Logger, results []SearchResult, query string,
 	if bestExact != nil && bestExact.VoteAverage >= exactMatchMinVoteAverage &&
 		bestExact.VoteCount >= minVoteCountExact {
 		logger.Info("TMDB exact match preferred",
-			"decision_type", "tmdb_match_preference",
+			"decision_type", logs.DecisionTMDBMatchPreference,
 			"decision_result", "exact_preferred",
 			"decision_reason", fmt.Sprintf("exact=%q non_exact=%q", bestExact.DisplayTitle(), best.DisplayTitle()),
 		)
@@ -363,7 +367,7 @@ func SelectBestResult(logger *slog.Logger, results []SearchResult, query string,
 	if selectedExact {
 		if selected.VoteAverage < exactMatchMinVoteAverage || selected.VoteCount < minVoteCountExact {
 			logger.Info("TMDB match rejected",
-				"decision_type", "tmdb_match",
+				"decision_type", logs.DecisionTMDBMatch,
 				"decision_result", "rejected",
 				"decision_reason", fmt.Sprintf("exact match below thresholds: title=%q vote_avg=%.1f vote_count=%d min_vote_avg=%.1f min_vote_count=%d", selected.DisplayTitle(), selected.VoteAverage, selected.VoteCount, exactMatchMinVoteAverage, minVoteCountExact),
 			)
@@ -372,7 +376,7 @@ func SelectBestResult(logger *slog.Logger, results []SearchResult, query string,
 	} else {
 		if selected.VoteAverage < nonExactMatchMinVoteAverage {
 			logger.Info("TMDB match rejected",
-				"decision_type", "tmdb_match",
+				"decision_type", logs.DecisionTMDBMatch,
 				"decision_result", "rejected",
 				"decision_reason", fmt.Sprintf("non-exact match vote_avg too low: title=%q vote_avg=%.1f min=%.1f", selected.DisplayTitle(), selected.VoteAverage, nonExactMatchMinVoteAverage),
 			)
@@ -380,7 +384,7 @@ func SelectBestResult(logger *slog.Logger, results []SearchResult, query string,
 		}
 		if selectedScore < nonExactMatchBaseThreshold+float64(selected.VoteCount)/voteCountDivisor {
 			logger.Info("TMDB match rejected",
-				"decision_type", "tmdb_match",
+				"decision_type", logs.DecisionTMDBMatch,
 				"decision_result", "rejected",
 				"decision_reason", fmt.Sprintf("non-exact match score below threshold: title=%q score=%.3f threshold=%.3f", selected.DisplayTitle(), selectedScore, nonExactMatchBaseThreshold+float64(selected.VoteCount)/voteCountDivisor),
 			)
@@ -389,7 +393,7 @@ func SelectBestResult(logger *slog.Logger, results []SearchResult, query string,
 	}
 
 	logger.Info("TMDB match selected",
-		"decision_type", "tmdb_match",
+		"decision_type", logs.DecisionTMDBMatch,
 		"decision_result", "accepted",
 		"decision_reason", fmt.Sprintf("title=%q score=%.3f exact=%v vote_avg=%.1f vote_count=%d", selected.DisplayTitle(), selectedScore, selectedExact, selected.VoteAverage, selected.VoteCount),
 	)

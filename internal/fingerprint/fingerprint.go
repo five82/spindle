@@ -11,20 +11,20 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Generate creates a disc fingerprint from the mounted filesystem.
 // It tries strategies in order: Blu-ray, DVD, then fallback.
 // If logger is nil, slog.Default() is used.
 func Generate(mountPoint string, logger *slog.Logger) (string, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 
 	// Try Blu-ray first (look for BDMV/index.bdmv).
 	if fp, err := blurayFingerprint(mountPoint); err == nil && fp != "" {
 		logger.Info("disc fingerprint generated",
-			"decision_type", "fingerprint_strategy",
+			"decision_type", logs.DecisionFingerprintStrategy,
 			"decision_result", "bluray",
 			"decision_reason", "BDMV structure detected",
 		)
@@ -34,7 +34,7 @@ func Generate(mountPoint string, logger *slog.Logger) (string, error) {
 	// Try DVD (look for VIDEO_TS).
 	if fp, err := dvdFingerprint(mountPoint); err == nil && fp != "" {
 		logger.Info("disc fingerprint generated",
-			"decision_type", "fingerprint_strategy",
+			"decision_type", logs.DecisionFingerprintStrategy,
 			"decision_result", "dvd",
 			"decision_reason", "VIDEO_TS structure detected",
 		)
@@ -47,7 +47,7 @@ func Generate(mountPoint string, logger *slog.Logger) (string, error) {
 		return "", err
 	}
 	logger.Info("disc fingerprint generated",
-		"decision_type", "fingerprint_strategy",
+		"decision_type", logs.DecisionFingerprintStrategy,
 		"decision_result", "fallback",
 		"decision_reason", "no BDMV or VIDEO_TS structure found",
 	)

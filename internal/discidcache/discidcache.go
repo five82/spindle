@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Entry maps a disc fingerprint to TMDB identification data.
@@ -31,9 +33,7 @@ type Store struct {
 
 // Open loads or creates a disc ID cache at path.
 func Open(path string, logger *slog.Logger) (*Store, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	s := &Store{
 		path:    path,
 		entries: make(map[string]Entry),
@@ -67,14 +67,14 @@ func (s *Store) Lookup(fingerprint string) *Entry {
 	entry, ok := s.entries[fingerprint]
 	if !ok {
 		s.logger.Info("disc ID cache miss",
-			"decision_type", "disc_id_cache",
+			"decision_type", logs.DecisionDiscIDCache,
 			"decision_result", "miss",
 			"fingerprint", fingerprint,
 		)
 		return nil
 	}
 	s.logger.Info("disc ID cache hit",
-		"decision_type", "disc_id_cache",
+		"decision_type", logs.DecisionDiscIDCache,
 		"decision_result", "hit",
 		"fingerprint", fingerprint,
 		"tmdb_id", entry.TMDBID,

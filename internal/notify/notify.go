@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Event represents a notification event type.
@@ -37,9 +39,7 @@ type Notifier struct {
 
 // New creates a Notifier. Returns nil if topic is empty (notifications disabled).
 func New(topic string, timeoutSeconds int, logger *slog.Logger) *Notifier {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	if topic == "" {
 		return nil
 	}

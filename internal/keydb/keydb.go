@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Entry represents a KeyDB catalog entry.
@@ -42,14 +44,14 @@ func (c *Catalog) Lookup(discID string) string {
 	title := c.entries[normalized]
 	if title != "" {
 		c.logger.Info("KeyDB lookup hit",
-			"decision_type", "keydb_lookup",
+			"decision_type", logs.DecisionKeyDBLookup,
 			"decision_result", "hit",
 			"disc_id", normalized,
 			"title", title,
 		)
 	} else {
 		c.logger.Debug("KeyDB lookup miss",
-			"decision_type", "keydb_lookup",
+			"decision_type", logs.DecisionKeyDBLookup,
 			"decision_result", "miss",
 			"disc_id", normalized,
 		)
@@ -73,9 +75,7 @@ func (c *Catalog) Size() int {
 // If stale is true, the file is older than 7 days and should be re-downloaded.
 // If logger is nil, slog.Default() is used.
 func LoadFromFile(path string, logger *slog.Logger) (cat *Catalog, stale bool, err error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 
 	f, err := os.Open(path)
 	if err != nil {

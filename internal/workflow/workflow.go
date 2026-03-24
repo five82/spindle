@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/services"
@@ -183,7 +184,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	ctx = stage.WithLogger(ctx, itemLogger)
 
 	itemLogger.Info("stage started",
-		"decision_type", "stage_execution",
+		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "started",
 		"decision_reason", fmt.Sprintf("item %d ready for %s", item.ID, ps.Name),
 		"stage", ps.Name,
@@ -227,7 +228,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	item.ProgressMessage = ""
 
 	itemLogger.Info("stage completed",
-		"decision_type", "stage_execution",
+		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "completed",
 		"decision_reason", fmt.Sprintf("advancing to %s", item.Stage),
 		"event_type", "stage_complete",

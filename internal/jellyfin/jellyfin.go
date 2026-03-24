@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Client interacts with the Jellyfin API.
@@ -18,9 +20,7 @@ type Client struct {
 
 // New creates a Jellyfin client. Returns nil if url or apiKey is empty.
 func New(url, apiKey string, logger *slog.Logger) *Client {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	if url == "" || apiKey == "" {
 		return nil
 	}

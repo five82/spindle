@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/media/audio"
 	"github.com/five82/spindle/internal/media/ffprobe"
@@ -157,7 +158,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		logger.Info("primary audio selected",
-			"decision_type", "audio_selection",
+			"decision_type", logs.DecisionAudioSelection,
 			"decision_result", selection.PrimaryLabel(),
 			"decision_reason", fmt.Sprintf("score-based selection from %d tracks", result.AudioStreamCount()),
 		)
@@ -167,7 +168,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			originalCount := len(analysisData.CommentaryTracks)
 			remapped := RemapCommentaryIndices(analysisData.CommentaryTracks, refinement.KeptIndices)
 			logger.Info("commentary tracks remapped after refinement",
-				"decision_type", "commentary_remapping",
+				"decision_type", logs.DecisionCommentaryRemapping,
 				"decision_result", fmt.Sprintf("%d tracks survived", len(remapped)),
 				"decision_reason", fmt.Sprintf("original=%d remapped=%d", originalCount, len(remapped)),
 			)
@@ -265,7 +266,7 @@ func (h *Handler) detectCommentary(
 				)
 			} else if sim >= h.cfg.Commentary.SimilarityThreshold {
 				logger.Info("track excluded as stereo downmix",
-					"decision_type", "commentary_stereo_filter",
+					"decision_type", logs.DecisionCommentaryStereoFilter,
 					"decision_result", "excluded",
 					"decision_reason", fmt.Sprintf("similarity %.3f >= threshold %.3f", sim, h.cfg.Commentary.SimilarityThreshold),
 					"track_index", idx,
@@ -414,7 +415,7 @@ func (h *Handler) classifyTrack(
 
 	if resp.Decision == "commentary" && resp.Confidence >= h.cfg.Commentary.ConfidenceThreshold {
 		logger.Info("track classified as commentary",
-			"decision_type", "commentary_classification",
+			"decision_type", logs.DecisionCommentaryClassification,
 			"decision_result", "commentary",
 			"decision_reason", resp.Reason,
 			"track_index", idx,
@@ -428,7 +429,7 @@ func (h *Handler) classifyTrack(
 	}
 
 	logger.Info("track classified as not commentary",
-		"decision_type", "commentary_classification",
+		"decision_type", logs.DecisionCommentaryClassification,
 		"decision_result", "not_commentary",
 		"decision_reason", resp.Reason,
 		"track_index", idx,

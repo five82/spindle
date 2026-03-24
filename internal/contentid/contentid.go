@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
@@ -62,7 +63,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Movies skip episode identification.
 	if env.Metadata.MediaType == "movie" {
 		logger.Info("skipping episode identification for movie",
-			"decision_type", "episode_id_skip",
+			"decision_type", logs.DecisionEpisodeIDSkip,
 			"decision_result", "skipped",
 			"decision_reason", "media type is movie",
 		)

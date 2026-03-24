@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/jellyfin"
 	"github.com/five82/spindle/internal/notify"
@@ -72,7 +73,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		hasSubtitled = false
 	}
 	logger.Info("organization source stage selected",
-		"decision_type", "source_stage_selection",
+		"decision_type", logs.DecisionSourceStageSelection,
 		"decision_result", sourceStage,
 		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
 	)
@@ -118,7 +119,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				srcInfo, srcErr := os.Stat(asset.Path)
 				if srcErr == nil && info.Size() < srcInfo.Size() {
 					logger.Info("removing partial file from previous attempt",
-						"decision_type", "partial_cleanup",
+						"decision_type", logs.DecisionPartialCleanup,
 						"decision_result", "removed",
 						"decision_reason", fmt.Sprintf("target %d bytes < source %d bytes", info.Size(), srcInfo.Size()),
 						"path", destPath,
@@ -128,7 +129,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 					}
 				} else {
 					logger.Info("file exists, skipping",
-						"decision_type", "organize_skip",
+						"decision_type", logs.DecisionOrganizeSkip,
 						"decision_result", "skipped",
 						"decision_reason", "file already exists",
 						"path", destPath,
@@ -253,7 +254,7 @@ func parseEpisodeKey(key string) (season, episode int) {
 // Directory structure: review_dir/{reason}_{fingerprint_prefix}/
 func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *queue.Item, env *ripspec.Envelope, meta *queue.Metadata) error {
 	logger.Info("routing to review",
-		"decision_type", "organize_route",
+		"decision_type", logs.DecisionOrganizeRoute,
 		"decision_result", "review",
 		"decision_reason", item.ReviewReason,
 	)
@@ -289,7 +290,7 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 		}
 	}
 	logger.Info("organization source stage selected",
-		"decision_type", "source_stage_selection",
+		"decision_type", logs.DecisionSourceStageSelection,
 		"decision_result", sourceStage,
 		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
 	)
@@ -375,7 +376,7 @@ func copySidecarSubtitle(logger *slog.Logger, srcVideo, destVideo string) {
 	srcSrt := strings.TrimSuffix(srcVideo, filepath.Ext(srcVideo)) + ".en.srt"
 	if _, err := os.Stat(srcSrt); err != nil {
 		logger.Info("sidecar subtitle not found, skipping",
-			"decision_type", "sidecar_subtitle_copy",
+			"decision_type", logs.DecisionSidecarSubtitleCopy,
 			"decision_result", "skipped",
 			"decision_reason", "source SRT does not exist",
 		)

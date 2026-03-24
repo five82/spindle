@@ -10,6 +10,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/five82/spindle/internal/logs"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -59,7 +61,7 @@ func WaitForReady(ctx context.Context, device string, logger *slog.Logger) error
 
 		if status == StatusDiscOK {
 			logger.Info("drive ready",
-				"decision_type", "drive_wait",
+				"decision_type", logs.DecisionDriveWait,
 				"decision_result", "ready",
 				"decision_reason", fmt.Sprintf("DiscOK after %d polls", i+1),
 				"device", device,

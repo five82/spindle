@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Client sends chat completion requests to an OpenRouter-compatible API.
@@ -35,9 +37,7 @@ func New(apiKey, baseURL, model, referer, title string, timeoutSeconds int, logg
 	if model == "" {
 		model = "google/gemini-3-flash-preview"
 	}
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 60 * time.Second

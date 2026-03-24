@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -51,7 +52,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	if !h.cfg.Subtitles.Enabled {
 		logger.Info("subtitles disabled, skipping",
-			"decision_type", "subtitle_skip",
+			"decision_type", logs.DecisionSubtitleSkip,
 			"decision_result", "skipped",
 			"decision_reason", "subtitles.enabled = false",
 		)
@@ -74,7 +75,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		// Resume support: skip already-completed subtitled assets.
 		if existing, ok := env.Assets.FindAsset("subtitled", key); ok && existing.IsCompleted() {
 			logger.Info("subtitle already completed, skipping",
-				"decision_type", "subtitle_resume",
+				"decision_type", logs.DecisionSubtitleResume,
 				"decision_result", "skipped",
 				"decision_reason", "already completed",
 				"episode_key", key,
@@ -88,7 +89,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		logger.Info("encoded asset selected for transcription",
-			"decision_type", "transcription_asset",
+			"decision_type", logs.DecisionTranscriptionAsset,
 			"decision_result", asset.Path,
 			"decision_reason", fmt.Sprintf("episode_key=%s", key),
 		)
@@ -141,7 +142,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		filteredCues := parseSRT(filtered)
 		logger.Info("hallucination filter applied",
-			"decision_type", "hallucination_filter",
+			"decision_type", logs.DecisionHallucinationFilter,
 			"decision_result", "filtered",
 			"decision_reason", fmt.Sprintf("original=%d filtered=%d cues", result.Segments, len(filteredCues)),
 			"episode_key", key,
@@ -158,7 +159,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 		for _, issue := range validationIssues {
 			logger.Info("SRT validation issue",
-				"decision_type", "srt_validation",
+				"decision_type", logs.DecisionSRTValidation,
 				"decision_result", issue,
 				"decision_reason", "automated quality check",
 				"episode_key", key,
@@ -191,7 +192,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				reason = "no forced subtitle track on disc"
 			}
 			logger.Info("forced subtitle search skipped",
-				"decision_type", "forced_subtitle_search",
+				"decision_type", logs.DecisionForcedSubtitleSearch,
 				"decision_result", "skipped",
 				"decision_reason", reason,
 				"episode_key", key,
@@ -205,7 +206,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		subtitledPath := asset.Path // default: same file
 		if !h.cfg.Subtitles.MuxIntoMKV {
 			logger.Info("subtitle mux skipped",
-				"decision_type", "subtitle_mux",
+				"decision_type", logs.DecisionSubtitleMux,
 				"decision_result", "skipped",
 				"decision_reason", "mux_into_mkv is disabled",
 			)
@@ -305,16 +306,18 @@ func (h *Handler) tryForcedSubs(
 			result = "candidate"
 		}
 		logger.Debug("forced subtitle candidate",
-			"decision_type", "subtitle_rank",
+			"decision_type", logs.DecisionSubtitleRank,
 			"decision_result", result,
-			"decision_reason", fmt.Sprintf("foreign_parts_only=%v downloads=%d files=%d", r.Attributes.ForeignPartsOnly, r.Attributes.DownloadCount, len(r.Attributes.Files)),
+			"foreign_parts_only", r.Attributes.ForeignPartsOnly,
+			"downloads", r.Attributes.DownloadCount,
+			"files", len(r.Attributes.Files),
 			"episode_key", key,
 		)
 	}
 
 	if best != nil {
 		logger.Info("forced subtitle candidate selected",
-			"decision_type", "forced_subtitle_ranking",
+			"decision_type", logs.DecisionForcedSubtitleRanking,
 			"decision_result", "selected",
 			"decision_reason", fmt.Sprintf("candidates=%d best_downloads=%d", len(results), best.Attributes.DownloadCount),
 		)
@@ -322,7 +325,7 @@ func (h *Handler) tryForcedSubs(
 
 	if best == nil {
 		logger.Info("no forced subtitles found on OpenSubtitles",
-			"decision_type", "forced_subtitle",
+			"decision_type", logs.DecisionForcedSubtitle,
 			"decision_result", "none_available",
 			"decision_reason", "no foreign_parts_only results",
 			"episode_key", key,
@@ -364,7 +367,7 @@ func (h *Handler) tryForcedSubs(
 	}
 
 	logger.Info("forced subtitle downloaded",
-		"decision_type", "forced_subtitle",
+		"decision_type", logs.DecisionForcedSubtitle,
 		"decision_result", "downloaded",
 		"decision_reason", fmt.Sprintf("best match: %d downloads", best.Attributes.DownloadCount),
 		"episode_key", key,

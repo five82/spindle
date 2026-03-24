@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // DirInfo describes a staging directory.
@@ -79,7 +81,7 @@ func CleanStale(ctx context.Context, stagingDir string, maxAge time.Duration, ac
 		if isProtected(d.Name, activeFingerprints) {
 			logger.Debug("staging directory preserved",
 				"dir", d.Name,
-				"decision_type", "staging_cleanup",
+				"decision_type", logs.DecisionStagingCleanup,
 				"decision_result", "preserved",
 				"decision_reason", "protected",
 			)
@@ -89,7 +91,7 @@ func CleanStale(ctx context.Context, stagingDir string, maxAge time.Duration, ac
 		if d.ModTime.After(cutoff) {
 			logger.Debug("staging directory preserved",
 				"dir", d.Name,
-				"decision_type", "staging_cleanup",
+				"decision_type", logs.DecisionStagingCleanup,
 				"decision_result", "preserved",
 				"decision_reason", "recent",
 			)
@@ -99,7 +101,7 @@ func CleanStale(ctx context.Context, stagingDir string, maxAge time.Duration, ac
 		logger.Info("removing stale staging directory",
 			"dir", d.Name,
 			"age", time.Since(d.ModTime).Truncate(time.Second),
-			"decision_type", "staging_cleanup",
+			"decision_type", logs.DecisionStagingCleanup,
 			"decision_result", "removed",
 			"decision_reason", "stale",
 		)
@@ -133,7 +135,7 @@ func CleanOrphaned(ctx context.Context, stagingDir string, activeFingerprints ma
 		if isProtected(d.Name, activeFingerprints) {
 			logger.Debug("staging directory preserved",
 				"dir", d.Name,
-				"decision_type", "staging_cleanup",
+				"decision_type", logs.DecisionStagingCleanup,
 				"decision_result", "preserved",
 				"decision_reason", "protected",
 			)
@@ -142,7 +144,7 @@ func CleanOrphaned(ctx context.Context, stagingDir string, activeFingerprints ma
 
 		logger.Info("removing orphaned staging directory",
 			"dir", d.Name,
-			"decision_type", "staging_cleanup",
+			"decision_type", logs.DecisionStagingCleanup,
 			"decision_result", "removed",
 			"decision_reason", "orphaned",
 		)

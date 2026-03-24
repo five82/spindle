@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // fallbackMountPaths are checked when lsblk reports no mount point.
@@ -22,15 +24,13 @@ var fallbackMountPaths = []string{"/media/cdrom", "/media/cdrom0"}
 // If auto-mounted, the returned cleanup function unmounts the device.
 // If logger is nil, slog.Default() is used.
 func resolveMountPoint(ctx context.Context, device, lsblkMount string, logger *slog.Logger) (mountPoint string, cleanup func(), err error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	noop := func() {}
 
 	// 1. Use lsblk-provided mount path if non-empty.
 	if lsblkMount != "" {
 		logger.Info("mount point resolved",
-			"decision_type", "mount_resolution",
+			"decision_type", logs.DecisionMountResolution,
 			"decision_result", "lsblk",
 			"decision_reason", "lsblk reported mount path",
 			"mount_point", lsblkMount,
@@ -45,7 +45,7 @@ func resolveMountPoint(ctx context.Context, device, lsblkMount string, logger *s
 	// 2. Check /proc/mounts for the device (symlink-aware).
 	if mp, err := findInProcMounts(device); err == nil && mp != "" {
 		logger.Info("mount point resolved",
-			"decision_type", "mount_resolution",
+			"decision_type", logs.DecisionMountResolution,
 			"decision_result", "proc_mounts",
 			"decision_reason", "device found in /proc/mounts",
 			"mount_point", mp,
@@ -57,7 +57,7 @@ func resolveMountPoint(ctx context.Context, device, lsblkMount string, logger *s
 	for _, path := range fallbackMountPaths {
 		if hasDiscStructure(path) {
 			logger.Info("mount point resolved",
-				"decision_type", "mount_resolution",
+				"decision_type", logs.DecisionMountResolution,
 				"decision_result", "fallback_path",
 				"decision_reason", "disc structure found at fallback path",
 				"mount_point", path,
@@ -72,7 +72,7 @@ func resolveMountPoint(ctx context.Context, device, lsblkMount string, logger *s
 		return "", noop, fmt.Errorf("auto-mount %s: %w", device, err)
 	}
 	logger.Info("mount point resolved",
-		"decision_type", "mount_resolution",
+		"decision_type", logs.DecisionMountResolution,
 		"decision_result", "auto_mount",
 		"decision_reason", "device auto-mounted via system mount command",
 		"mount_point", mp,

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/keydb"
@@ -152,7 +153,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			}
 			item.DiscTitle = canonTitle
 			logger.Info("disc title updated from cache",
-				"decision_type", "title_source",
+				"decision_type", logs.DecisionTitleSource,
 				"decision_result", "updated",
 				"decision_reason", "disc_id_cache_entry",
 			)
@@ -178,7 +179,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			)
 		} else if bdInfo != nil {
 			logger.Info("bd_info results",
-				"decision_type", "bdinfo_scan",
+				"decision_type", logs.DecisionBDInfoScan,
 				"decision_result", "completed",
 				"decision_reason", fmt.Sprintf("disc_id=%s studio=%s year=%s", bdInfo.DiscID, bdInfo.Studio, bdInfo.Year),
 				"disc_name", bdInfo.DiscName,
@@ -204,7 +205,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	rawTitle, sourceUsed := h.resolveTitle(item, discInfo, bdInfo)
 	queryTitle := CleanQueryTitle(rawTitle)
 	logger.Info("title resolved for TMDB search",
-		"decision_type", "title_resolution",
+		"decision_type", logs.DecisionTitleResolution,
 		"decision_result", sourceUsed,
 		"decision_reason", queryTitle,
 		"raw_title", rawTitle,
@@ -239,7 +240,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 	if yearSource != "" {
 		logger.Info("year source decision",
-			"decision_type", "year_source",
+			"decision_type", logs.DecisionYearSource,
 			"decision_result", yearSource,
 			"decision_reason", fmt.Sprintf("year=%d", searchYear),
 		)
@@ -270,7 +271,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	logger.Info("TMDB match found",
-		"decision_type", "tmdb_match",
+		"decision_type", logs.DecisionTMDBMatch,
 		"decision_result", best.DisplayTitle(),
 		"decision_reason", fmt.Sprintf("tmdb_id=%d year=%s votes=%d", best.ID, best.Year(), best.VoteCount),
 	)
@@ -460,7 +461,7 @@ func (h *Handler) detectEdition(ctx context.Context, logger *slog.Logger, discTi
 	combined := discTitle + " " + discName
 	if match := editionPatterns.FindString(combined); match != "" {
 		logger.Info("edition detected via regex",
-			"decision_type", "edition_detection",
+			"decision_type", logs.DecisionEditionDetection,
 			"decision_result", match,
 			"decision_reason", "regex match",
 		)
@@ -485,7 +486,7 @@ func (h *Handler) detectEdition(ctx context.Context, logger *slog.Logger, discTi
 
 	if resp.IsEdition && resp.Confidence >= editionLLMConfidenceThreshold {
 		logger.Info("edition detected via LLM",
-			"decision_type", "edition_detection",
+			"decision_type", logs.DecisionEditionDetection,
 			"decision_result", resp.Reason,
 			"decision_reason", fmt.Sprintf("confidence=%.2f", resp.Confidence),
 		)
@@ -507,7 +508,7 @@ func setForcedSubtitleAttribute(logger *slog.Logger, discInfo *makemkv.DiscInfo,
 		reason = "disc_has_forced_track"
 	}
 	logger.Info("forced subtitle detection",
-		"decision_type", "forced_subtitle_detection",
+		"decision_type", logs.DecisionForcedSubtitleDetection,
 		"decision_result", result,
 		"decision_reason", reason,
 		"has_forced_subtitle_track", hasForcedTrack,
@@ -623,7 +624,7 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 	}
 
 	logger.Info("episode placeholders created",
-		"decision_type", "episode_placeholders",
+		"decision_type", logs.DecisionEpisodePlaceholders,
 		"decision_result", fmt.Sprintf("%d episodes", idx),
 		"decision_reason", fmt.Sprintf("season=%d titles=%d", season, len(env.Titles)),
 	)

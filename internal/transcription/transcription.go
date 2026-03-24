@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Service provides WhisperX transcription with caching.
@@ -27,9 +29,7 @@ type Service struct {
 
 // New creates a transcription service.
 func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string, logger *slog.Logger) *Service {
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	if model == "" {
 		model = "large-v3"
 	}
@@ -99,7 +99,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	// Check cache.
 	if result, ok := s.Lookup(key); ok {
 		s.logger.Info("transcription cache hit",
-			"decision_type", "transcription_cache",
+			"decision_type", logs.DecisionTranscriptionCache,
 			"decision_result", "hit",
 			"decision_reason", fmt.Sprintf("key=%s segments=%d", key[:12], result.Segments),
 		)
@@ -107,7 +107,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		return result, nil
 	}
 	s.logger.Info("transcription cache miss",
-		"decision_type", "transcription_cache",
+		"decision_type", logs.DecisionTranscriptionCache,
 		"decision_result", "miss",
 		"decision_reason", fmt.Sprintf("key=%s", key[:12]),
 	)

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/five82/spindle/internal/logs"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -125,7 +127,7 @@ func (n *NetlinkMonitor) monitorLoop(ctx context.Context, fd int) {
 		if n.isPaused() {
 			n.logger.Info("disc event ignored (paused)",
 				"event_type", "netlink_event_paused",
-				"decision_type", "disc_event_handling",
+				"decision_type", logs.DecisionDiscEventHandling,
 				"decision_result", "skipped",
 				"decision_reason", "paused",
 				"device", n.device,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/fingerprint"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/queue"
 )
 
@@ -65,9 +66,7 @@ func New(device string, logger *slog.Logger, store *queue.Store) *Monitor {
 	if device == "" {
 		device = "/dev/sr0"
 	}
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	return &Monitor{
 		device: device,
 		logger: logger,
@@ -95,7 +94,7 @@ func (m *Monitor) IsPaused() bool { return m.paused.Load() }
 func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
 	if m.IsPaused() {
 		m.logger.Info("disc detection skipped (paused)",
-			"decision_type", "detect_guard",
+			"decision_type", logs.DecisionDetectGuard,
 			"decision_result", "skipped",
 			"decision_reason", "monitor paused",
 		)
@@ -109,7 +108,7 @@ func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
 		}
 		if busy {
 			m.logger.Info("disc detection skipped (disc-dependent item in progress)",
-				"decision_type", "detect_guard",
+				"decision_type", logs.DecisionDetectGuard,
 				"decision_result", "skipped",
 				"decision_reason", "disc-dependent pipeline stage active",
 			)
@@ -121,7 +120,7 @@ func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
 	if m.processing {
 		m.mu.Unlock()
 		m.logger.Info("disc detection skipped (already processing)",
-			"decision_type", "detect_guard",
+			"decision_type", logs.DecisionDetectGuard,
 			"decision_result", "skipped",
 			"decision_reason", "detection already in progress",
 		)
@@ -234,7 +233,7 @@ func (m *Monitor) DetectAndEnqueue(ctx context.Context) (*EnqueueResult, error) 
 	}
 
 	m.logger.Info("disc enqueued",
-		"decision_type", "disc_enqueue",
+		"decision_type", logs.DecisionDiscEnqueue,
 		"decision_result", "created",
 		"decision_reason", "new disc fingerprint",
 		"item_id", item.ID,
@@ -250,7 +249,7 @@ func (m *Monitor) handleExistingItem(ctx context.Context, existing *queue.Item, 
 	// User-stopped items are not reset for reprocessing.
 	if existing.Stage == queue.StageFailed && strings.Contains(existing.ReviewReason, "Stop requested by user") {
 		m.logger.Info("disc detection skipped (user-stopped item)",
-			"decision_type", "duplicate_detection",
+			"decision_type", logs.DecisionDuplicateDetection,
 			"decision_result", "skipped",
 			"decision_reason", "item was intentionally stopped by user",
 			"item_id", existing.ID,
@@ -265,7 +264,7 @@ func (m *Monitor) handleExistingItem(ctx context.Context, existing *queue.Item, 
 			tryRefreshDiscTitle(ctx, m.store, existing, event.Device, m.logger)
 		}
 		m.logger.Info("disc already processed",
-			"decision_type", "duplicate_detection",
+			"decision_type", logs.DecisionDuplicateDetection,
 			"decision_result", "skipped",
 			"decision_reason", "disc already in terminal stage",
 			"item_id", existing.ID,
@@ -277,7 +276,7 @@ func (m *Monitor) handleExistingItem(ctx context.Context, existing *queue.Item, 
 
 	// In-workflow duplicate: return existing item.
 	m.logger.Info("duplicate disc detected",
-		"decision_type", "duplicate_detection",
+		"decision_type", logs.DecisionDuplicateDetection,
 		"decision_result", "skipped",
 		"decision_reason", "identical fingerprint already in workflow",
 		"item_id", existing.ID,
@@ -405,7 +404,7 @@ func tryRefreshDiscTitle(ctx context.Context, store *queue.Store, item *queue.It
 		return
 	}
 	logger.Info("disc title refreshed on re-insertion",
-		"decision_type", "title_refresh",
+		"decision_type", logs.DecisionTitleRefresh,
 		"decision_result", "updated",
 		"decision_reason", "better label available from re-inserted disc",
 		"item_id", item.ID,

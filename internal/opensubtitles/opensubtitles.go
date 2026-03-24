@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Client communicates with the OpenSubtitles API.
@@ -41,9 +43,7 @@ func New(apiKey, userAgent, userToken, baseURL string, logger *slog.Logger) *Cli
 	if userAgent == "" {
 		userAgent = "Spindle/dev"
 	}
-	if logger == nil {
-		logger = slog.Default()
-	}
+	logger = logs.Default(logger)
 	return &Client{
 		apiKey:    apiKey,
 		userAgent: userAgent,
