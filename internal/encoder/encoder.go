@@ -365,7 +365,14 @@ func (r *spindleReporter) Initialization(s drapto.InitializationSummary) {
 	snap.DynamicRange = s.DynamicRange
 	snap.Substage = "initializing"
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	_ = r.store.UpdateProgress(r.item)
+	if err := r.store.UpdateProgress(r.item); err != nil {
+		r.logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "initialization state not persisted to queue",
+			"impact", "encoding progress not reflected in queue",
+			"error", err,
+		)
+	}
 }
 
 func (r *spindleReporter) EncodingConfig(s drapto.EncodingConfigSummary) {
@@ -381,7 +388,14 @@ func (r *spindleReporter) EncodingConfig(s drapto.EncodingConfigSummary) {
 	snap.DraptoPreset = s.DraptoPreset
 	snap.Substage = "configuring"
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	_ = r.store.UpdateProgress(r.item)
+	if err := r.store.UpdateProgress(r.item); err != nil {
+		r.logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "encoding config state not persisted to queue",
+			"impact", "encoding progress not reflected in queue",
+			"error", err,
+		)
+	}
 }
 
 func (r *spindleReporter) CropResult(s drapto.CropSummary) {
@@ -399,7 +413,14 @@ func (r *spindleReporter) CropResult(s drapto.CropSummary) {
 		}
 	}
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	_ = r.store.UpdateProgress(r.item)
+	if err := r.store.UpdateProgress(r.item); err != nil {
+		r.logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "crop result not persisted to queue",
+			"impact", "encoding progress not reflected in queue",
+			"error", err,
+		)
+	}
 
 	decisionResult := "no_crop"
 	if s.Required {
@@ -432,7 +453,14 @@ func (r *spindleReporter) ValidationComplete(s drapto.ValidationSummary) {
 		Steps:  steps,
 	}
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	_ = r.store.UpdateProgress(r.item)
+	if err := r.store.UpdateProgress(r.item); err != nil {
+		r.logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "validation result not persisted to queue",
+			"impact", "encoding progress not reflected in queue",
+			"error", err,
+		)
+	}
 
 	var passed, failed int
 	for _, step := range s.Steps {
@@ -466,7 +494,14 @@ func (r *spindleReporter) EncodingComplete(s drapto.EncodingOutcome) {
 	snap.AverageSpeed = float64(s.AverageSpeed)
 	snap.EncodeDurationSeconds = s.TotalTime.Seconds()
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	_ = r.store.UpdateProgress(r.item)
+	if err := r.store.UpdateProgress(r.item); err != nil {
+		r.logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "encoding completion not persisted to queue",
+			"impact", "encoding progress not reflected in queue",
+			"error", err,
+		)
+	}
 }
 
 func (r *spindleReporter) Warning(message string) {
@@ -476,7 +511,14 @@ func (r *spindleReporter) Warning(message string) {
 	}
 	snap.Warning = message
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	_ = r.store.UpdateProgress(r.item)
+	if err := r.store.UpdateProgress(r.item); err != nil {
+		r.logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "warning state not persisted to queue",
+			"impact", "encoding progress not reflected in queue",
+			"error", err,
+		)
+	}
 
 	r.logger.Warn("drapto warning",
 		"event_type", "drapto_warning",
@@ -486,6 +528,12 @@ func (r *spindleReporter) Warning(message string) {
 }
 
 func (r *spindleReporter) Error(e drapto.ReporterError) {
+	r.logger.Error("drapto encoding error",
+		"event_type", "drapto_error",
+		"error_hint", e.Message,
+		"error", e.Title,
+	)
+
 	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
 	if err != nil {
 		snap = encodingstate.Snapshot{}
@@ -497,7 +545,14 @@ func (r *spindleReporter) Error(e drapto.ReporterError) {
 		Suggestion: e.Suggestion,
 	}
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	_ = r.store.UpdateProgress(r.item)
+	if err := r.store.UpdateProgress(r.item); err != nil {
+		r.logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "encoding error state not persisted to queue",
+			"impact", "encoding error may not be visible in queue",
+			"error", err,
+		)
+	}
 }
 
 // No-op methods for Reporter interface methods we don't need.

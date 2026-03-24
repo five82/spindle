@@ -375,6 +375,9 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Validation failed but continued | Encoding | `decision_type=validation_failure_route` with `decision_result=flagged_for_review` | Item routed to review |
 | Commentary tracks lost in refinement | Audio Analysis | `decision_type=commentary_remapping` with remapped count 0 | Commentary detection effort wasted |
 | Source stage fallback to encoded | Organization | `decision_type=source_stage_selection` with `decision_result=encoded` when subtitles enabled | Subtitles may be missing from output |
+| Audio selection non-english fallback | Audio Analysis | `decision_type=audio_selection` with `decision_result=fallback_non_english` | Primary audio track is not English |
+| Commentary disposition applied | Audio Analysis | `decision_type=commentary_disposition` with `decision_result=applied` | Commentary tracks marked in output |
+| KeyDB lookup miss | Identification | `decision_type=keydb_lookup` with `decision_result=miss` | Disc ID not in KeyDB, fallback to title parsing |
 
 ### DEBUG-Only Patterns
 
@@ -384,9 +387,7 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 |---------|-------|-----------------|
 | TMDB candidate scoring | Identification | `tmdb_search` (final selection now visible at INFO as `tmdb_match`) |
 | Placeholder episode creation | Identification | (visible in `envelope.episodes` with `episode=0`) |
-| Track selection | Ripping | `track_select` |
-| Forced subtitle ranking | Subtitles | `subtitle_rank` (summary now visible at INFO as `forced_subtitle_ranking`) |
-| KeyDB lookup miss | Identification | `keydb_lookup` (hits are INFO) |
+| Audio candidate scoring | Audio Analysis | Individual candidate scores visible only at DEBUG (selection result is INFO) |
 | OpenSubtitles request details | Subtitles | search query params and result counts |
 | LLM retry details | Various | individual retry attempt timing |
 | Content ID candidate selection | Episode ID | `contentid_candidates` |

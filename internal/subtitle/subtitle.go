@@ -258,6 +258,12 @@ func (h *Handler) tryForcedSubs(
 ) {
 	tmdbID := env.Metadata.ID
 	if tmdbID == 0 {
+		logger.Info("forced subtitle search skipped",
+			"decision_type", logs.DecisionForcedSubtitleSearch,
+			"decision_result", "skipped",
+			"decision_reason", "no TMDB ID available",
+			"episode_key", key,
+		)
 		record.OpenSubtitlesDecision = "skipped:no_tmdb_id"
 		return
 	}
@@ -305,7 +311,7 @@ func (h *Handler) tryForcedSubs(
 		} else {
 			result = "candidate"
 		}
-		logger.Debug("forced subtitle candidate",
+		logger.Info("forced subtitle candidate",
 			"decision_type", logs.DecisionSubtitleRank,
 			"decision_result", result,
 			"foreign_parts_only", r.Attributes.ForeignPartsOnly,
@@ -335,6 +341,12 @@ func (h *Handler) tryForcedSubs(
 	}
 
 	if len(best.Attributes.Files) == 0 {
+		logger.Warn("forced subtitle has no downloadable files",
+			"event_type", "opensubtitles_no_files",
+			"error_hint", "best forced subtitle result has zero files",
+			"impact", "forced subtitle not downloaded",
+			"episode_key", key,
+		)
 		record.OpenSubtitlesDecision = "error:no_files"
 		return
 	}

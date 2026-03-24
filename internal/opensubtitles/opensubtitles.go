@@ -92,6 +92,10 @@ func (c *Client) Search(ctx context.Context, tmdbID int, season, episode int, la
 		return nil, fmt.Errorf("opensubtitles: client not configured")
 	}
 	c.rateLimit()
+	c.logger.Info("OpenSubtitles search started",
+		"event_type", "opensubtitles_search_start",
+		"tmdb_id", tmdbID,
+	)
 
 	params := url.Values{}
 	params.Set("tmdb_id", fmt.Sprintf("%d", tmdbID))
@@ -114,7 +118,11 @@ func (c *Client) Search(ctx context.Context, tmdbID int, season, episode int, la
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("opensubtitles search: decode: %w", err)
 	}
-	c.logger.Debug("OpenSubtitles search completed", "tmdb_id", tmdbID, "results", len(resp.Data))
+	c.logger.Info("OpenSubtitles search completed",
+		"event_type", "opensubtitles_search_complete",
+		"tmdb_id", tmdbID,
+		"results", len(resp.Data),
+	)
 	return resp.Data, nil
 }
 
@@ -148,6 +156,12 @@ func (c *Client) Download(ctx context.Context, fileID int) (*DownloadResponse, e
 
 // DownloadToFile downloads a subtitle and saves it to destPath.
 func (c *Client) DownloadToFile(ctx context.Context, fileID int, destPath string) error {
+	c.logger.Info("downloading subtitle file",
+		"event_type", "opensubtitles_download_start",
+		"file_id", fileID,
+		"dest", destPath,
+	)
+
 	dlResp, err := c.Download(ctx, fileID)
 	if err != nil {
 		return err
@@ -182,7 +196,16 @@ func (c *Client) DownloadToFile(ctx context.Context, fileID int, destPath string
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return fmt.Errorf("opensubtitles fetch: write: %w", err)
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("opensubtitles fetch: close: %w", err)
+	}
+
+	c.logger.Info("subtitle file downloaded",
+		"event_type", "opensubtitles_download_complete",
+		"file_id", fileID,
+		"dest", destPath,
+	)
+	return nil
 }
 
 // CheckHealth verifies connectivity by hitting the /infos/formats endpoint.

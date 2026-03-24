@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/stage"
 )
@@ -26,6 +27,9 @@ func Run(ctx context.Context, item *queue.Item, opts Options) error {
 	ctx = stage.WithLogger(ctx, logger)
 
 	logger.Info("one-shot stage execution started",
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "started",
+		"decision_reason", fmt.Sprintf("one-shot execution of %s", item.Stage),
 		"stage", item.Stage,
 		"disc_title", item.DiscTitle,
 	)
@@ -50,6 +54,11 @@ func Run(ctx context.Context, item *queue.Item, opts Options) error {
 		return fmt.Errorf("stage %s: %w", item.Stage, err)
 	}
 
-	logger.Info("one-shot stage execution completed", "stage", item.Stage)
+	logger.Info("one-shot stage execution completed",
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "completed",
+		"decision_reason", string(item.Stage),
+		"stage", item.Stage,
+	)
 	return nil
 }

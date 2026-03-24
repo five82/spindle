@@ -151,7 +151,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			return fmt.Errorf("ffprobe post-refinement %s: %w", path, err)
 		}
 
-		selection := audio.Select(result.Streams)
+		selection := audio.Select(logger, result.Streams)
 		analysisData.PrimaryTrack = ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
 		if analysisData.PrimaryDescription == "" {
 			analysisData.PrimaryDescription = selection.PrimaryLabel()
@@ -166,7 +166,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		// Remap commentary indices to post-refinement positions and apply disposition.
 		if len(analysisData.CommentaryTracks) > 0 && refinement != nil {
 			originalCount := len(analysisData.CommentaryTracks)
-			remapped := RemapCommentaryIndices(analysisData.CommentaryTracks, refinement.KeptIndices)
+			remapped := RemapCommentaryIndices(logger, analysisData.CommentaryTracks, refinement.KeptIndices)
 			logger.Info("commentary tracks remapped after refinement",
 				"decision_type", logs.DecisionCommentaryRemapping,
 				"decision_result", fmt.Sprintf("%d tracks survived", len(remapped)),
@@ -184,7 +184,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 						"error_hint", err.Error(),
 						"impact", "commentary tracks not labeled",
 					)
-				} else if err := ValidateCommentaryLabeling(ctx, path, remappedIndices); err != nil {
+				} else if err := ValidateCommentaryLabeling(ctx, logger, path, remappedIndices); err != nil {
 					logger.Warn("commentary labeling validation failed",
 						"event_type", "commentary_validation_error",
 						"error_hint", err.Error(),
@@ -242,6 +242,11 @@ func (h *Handler) detectCommentary(
 	}
 
 	if len(audioStreams) <= 1 {
+		logger.Info("commentary detection skipped",
+			"decision_type", logs.DecisionCommentaryClassification,
+			"decision_result", "skipped",
+			"decision_reason", fmt.Sprintf("audio_streams=%d, need >1", len(audioStreams)),
+		)
 		return nil, nil
 	}
 

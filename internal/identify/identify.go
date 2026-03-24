@@ -142,6 +142,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 	} else {
 		discSource = mapDiscSource(ev.DiscType)
+		logger.Info("disc source determined",
+			"decision_type", logs.DecisionBDInfoAvailability,
+			"decision_result", discSource,
+			"decision_reason", fmt.Sprintf("disc_type=%s", ev.DiscType),
+		)
 	}
 
 	// Step 2: Check disc ID cache for fast path.
@@ -194,7 +199,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 3: MakeMKV scan.
-	discInfo, err := makemkv.Scan(ctx, h.cfg.MakeMKV.OpticalDrive,
+	discInfo, err := makemkv.Scan(ctx, logger, h.cfg.MakeMKV.OpticalDrive,
 		time.Duration(h.cfg.MakeMKV.InfoTimeout)*time.Second,
 		h.cfg.MakeMKV.MinTitleLength)
 	if err != nil {
@@ -280,6 +285,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	mediaType := best.MediaType
 	if mediaType == "" {
 		mediaType = "movie" // default for single-type searches
+		logger.Info("media type defaulted to movie",
+			"decision_type", logs.DecisionTMDBMatch,
+			"decision_result", "movie",
+			"decision_reason", "empty media type from search result",
+		)
 	}
 	item.DiscTitle = canonicalTitle(*best, mediaType, item.DiscTitle, discInfo)
 

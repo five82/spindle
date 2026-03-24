@@ -69,6 +69,7 @@ func (s *Store) Lookup(fingerprint string) *Entry {
 		s.logger.Info("disc ID cache miss",
 			"decision_type", logs.DecisionDiscIDCache,
 			"decision_result", "miss",
+			"decision_reason", "fingerprint not in cache",
 			"fingerprint", fingerprint,
 		)
 		return nil
@@ -76,6 +77,7 @@ func (s *Store) Lookup(fingerprint string) *Entry {
 	s.logger.Info("disc ID cache hit",
 		"decision_type", logs.DecisionDiscIDCache,
 		"decision_result", "hit",
+		"decision_reason", fmt.Sprintf("cached tmdb_id=%d", entry.TMDBID),
 		"fingerprint", fingerprint,
 		"tmdb_id", entry.TMDBID,
 		"media_type", entry.MediaType,
@@ -89,7 +91,7 @@ func (s *Store) Set(fingerprint string, entry Entry) error {
 	defer s.mu.Unlock()
 
 	s.entries[fingerprint] = entry
-	s.logger.Debug("disc ID cache entry stored", "fingerprint", fingerprint, "tmdb_id", entry.TMDBID)
+	s.logger.Info("disc ID cache entry stored", "fingerprint", fingerprint, "tmdb_id", entry.TMDBID)
 	return s.persist()
 }
 
@@ -127,7 +129,11 @@ func (s *Store) Remove(fingerprint string) error {
 		return fmt.Errorf("entry not found: %s", fingerprint)
 	}
 	delete(s.entries, fingerprint)
-	return s.persist()
+	if err := s.persist(); err != nil {
+		return err
+	}
+	s.logger.Info("disc ID cache entry removed", "fingerprint", fingerprint)
+	return nil
 }
 
 // Clear removes all entries and persists.
@@ -135,8 +141,13 @@ func (s *Store) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	count := len(s.entries)
 	s.entries = make(map[string]Entry)
-	return s.persist()
+	if err := s.persist(); err != nil {
+		return err
+	}
+	s.logger.Info("disc ID cache cleared", "entries_removed", count)
+	return nil
 }
 
 // persist writes the cache to disk atomically (write tmp, rename).

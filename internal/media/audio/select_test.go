@@ -134,7 +134,7 @@ func TestSelect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sel := Select(tt.streams)
+			sel := Select(nil, tt.streams)
 
 			if len(tt.streams) == 0 {
 				if sel.KeepIndices != nil {

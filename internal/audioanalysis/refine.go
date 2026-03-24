@@ -54,7 +54,7 @@ func RefineAudioTargets(
 
 	audioCount := result.AudioStreamCount()
 	if audioCount <= 1 {
-		sel := audio.Select(result.Streams)
+		sel := audio.Select(logger, result.Streams)
 		logger.Info("audio refinement: single track, no remux needed",
 			"decision_type", logs.DecisionAudioRefinement,
 			"decision_result", "skipped",
@@ -67,7 +67,7 @@ func RefineAudioTargets(
 		}, nil
 	}
 
-	sel := audio.Select(result.Streams)
+	sel := audio.Select(logger, result.Streams)
 
 	// Merge additionalKeep into kept indices.
 	keepSet := make(map[int]bool)
@@ -132,6 +132,13 @@ func RefineAudioTargets(
 // remuxAudioTracks creates a new MKV with only the selected audio tracks,
 // copying all video, subtitle, and data streams.
 func remuxAudioTracks(ctx context.Context, logger *slog.Logger, path string, keptAudioIndices []int) error {
+	logger.Info("audio remux started",
+		"decision_type", logs.DecisionAudioRemux,
+		"decision_result", "started",
+		"decision_reason", fmt.Sprintf("keeping %d audio tracks", len(keptAudioIndices)),
+		"path", path,
+	)
+
 	dir := filepath.Dir(path)
 	tmpPath := filepath.Join(dir, ".refine-"+filepath.Base(path))
 

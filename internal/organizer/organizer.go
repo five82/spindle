@@ -46,6 +46,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Check if item needs review routing instead of library placement.
 	if item.NeedsReview == 1 {
+		logger.Info("item routed to review",
+			"decision_type", logs.DecisionOrganizeRoute,
+			"decision_result", "review",
+			"decision_reason", "needs_review flag set",
+		)
 		return h.routeToReview(ctx, logger, item, &env, &meta)
 	}
 
@@ -103,6 +108,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			if err := validateEditionFilename(destName, meta.Edition); err != nil {
 				logger.Error("edition validation failed",
 					"event_type", "edition_validation_failed",
+					"error_hint", "edition not found in generated filename",
+					"impact", "output file may have wrong name",
 					"error", err.Error(),
 				)
 				return err

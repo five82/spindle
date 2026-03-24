@@ -61,6 +61,8 @@ func New(cfg *config.Config, store *queue.Store, manager *workflow.Manager, api 
 				result, err := discMon.DetectAndEnqueue(ctx)
 				if err != nil {
 					logger.Error("disc detection after netlink event failed",
+						"event_type", "disc_detection_failed",
+						"error_hint", "detect and enqueue after netlink event failed",
 						"error", err,
 					)
 					return
@@ -169,7 +171,11 @@ func (d *Daemon) Stop() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	if err := d.api.Shutdown(shutdownCtx); err != nil {
-		d.logger.Error("api shutdown failed", "error", err)
+		d.logger.Error("api shutdown failed",
+			"event_type", "api_shutdown_failed",
+			"error_hint", "HTTP API shutdown returned error",
+			"error", err,
+		)
 	}
 
 	// Clean up socket.

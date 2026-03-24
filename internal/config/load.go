@@ -2,20 +2,24 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
+
+	"github.com/five82/spindle/internal/logs"
 )
 
 // Load reads, normalizes, and validates config from the search path.
 // Search order: 1) explicit path, 2) ~/.config/spindle/config.toml,
 // 3) ./spindle.toml, 4) all defaults (no error).
-func Load(explicitPath string) (*Config, error) {
+func Load(logger *slog.Logger, explicitPath string) (*Config, error) {
+	logger = logs.Default(logger)
 	cfg := &Config{}
 
-	data, err := findAndRead(explicitPath)
+	data, source, err := findAndRead(explicitPath)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +32,8 @@ func Load(explicitPath string) (*Config, error) {
 
 	applyMuxDefault(data, cfg)
 	applyDefaults(cfg)
-	applyEnvOverrides(cfg)
+
+	envKeys := collectEnvOverrides(cfg)
 
 	if err := normalizePaths(cfg); err != nil {
 		return nil, fmt.Errorf("config: normalize paths: %w", err)
@@ -38,21 +43,31 @@ func Load(explicitPath string) (*Config, error) {
 		return nil, err
 	}
 
+	logger.Info("configuration loaded",
+		"decision_type", logs.DecisionConfigLoad,
+		"decision_result", source,
+		"decision_reason", configSourceReason(source, explicitPath),
+	)
+	if len(envKeys) > 0 {
+		logger.Debug("environment overrides applied", "keys", envKeys)
+	}
+
 	return cfg, nil
 }
 
 // findAndRead locates and reads the config file. Returns nil data if no file found.
-func findAndRead(explicitPath string) ([]byte, error) {
+// The source string describes where config came from: "explicit_path", "search_path", or "defaults_only".
+func findAndRead(explicitPath string) ([]byte, string, error) {
 	if explicitPath != "" {
 		expanded, err := expandHome(explicitPath)
 		if err != nil {
-			return nil, fmt.Errorf("config: expand path %q: %w", explicitPath, err)
+			return nil, "", fmt.Errorf("config: expand path %q: %w", explicitPath, err)
 		}
 		data, err := os.ReadFile(expanded)
 		if err != nil {
-			return nil, fmt.Errorf("config: read %q: %w", expanded, err)
+			return nil, "", fmt.Errorf("config: read %q: %w", expanded, err)
 		}
-		return data, nil
+		return data, "explicit_path", nil
 	}
 
 	// Search order: ~/.config/spindle/config.toml, then ./spindle.toml
@@ -67,12 +82,12 @@ func findAndRead(explicitPath string) ([]byte, error) {
 	for _, path := range candidates {
 		data, err := os.ReadFile(path)
 		if err == nil {
-			return data, nil
+			return data, "search_path", nil
 		}
 	}
 
 	// No config file found; use defaults.
-	return nil, nil
+	return nil, "defaults_only", nil
 }
 
 // applyDefaults sets default values for fields that are empty/zero.
@@ -251,33 +266,56 @@ func hasUncommentedKey(data []byte, key string) bool {
 	return false
 }
 
-// applyEnvOverrides applies environment variable overrides to config fields.
-func applyEnvOverrides(cfg *Config) {
+// collectEnvOverrides applies environment variable overrides to config fields
+// and returns the list of env var names that were applied.
+func collectEnvOverrides(cfg *Config) []string {
+	var applied []string
 	if v := os.Getenv("TMDB_API_KEY"); v != "" {
 		cfg.TMDB.APIKey = v
+		applied = append(applied, "TMDB_API_KEY")
 	}
 	if v := os.Getenv("JELLYFIN_API_KEY"); v != "" {
 		cfg.Jellyfin.APIKey = v
+		applied = append(applied, "JELLYFIN_API_KEY")
 	}
 	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
 		cfg.LLM.APIKey = v
+		applied = append(applied, "OPENROUTER_API_KEY")
 	}
 	if v := os.Getenv("SPINDLE_API_TOKEN"); v != "" {
 		cfg.API.Token = v
+		applied = append(applied, "SPINDLE_API_TOKEN")
 	}
 
 	// HuggingFace token: HUGGING_FACE_HUB_TOKEN takes priority, then HF_TOKEN.
 	if v := os.Getenv("HUGGING_FACE_HUB_TOKEN"); v != "" {
 		cfg.Subtitles.WhisperXHFToken = v
+		applied = append(applied, "HUGGING_FACE_HUB_TOKEN")
 	} else if v := os.Getenv("HF_TOKEN"); v != "" {
 		cfg.Subtitles.WhisperXHFToken = v
+		applied = append(applied, "HF_TOKEN")
 	}
 
 	if v := os.Getenv("OPENSUBTITLES_API_KEY"); v != "" {
 		cfg.Subtitles.OpenSubtitlesAPIKey = v
+		applied = append(applied, "OPENSUBTITLES_API_KEY")
 	}
 	if v := os.Getenv("OPENSUBTITLES_USER_TOKEN"); v != "" {
 		cfg.Subtitles.OpenSubtitlesUserToken = v
+		applied = append(applied, "OPENSUBTITLES_USER_TOKEN")
+	}
+	return applied
+}
+
+// configSourceReason returns a human-readable reason for the config source decision.
+func configSourceReason(source, explicitPath string) string {
+	switch source {
+	case "explicit_path":
+		return "loaded from explicit path: " + explicitPath
+	case "search_path":
+		return "found in config search path"
+	default:
+		return "no config file found, using defaults"
 	}
 }
 

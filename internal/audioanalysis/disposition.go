@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 )
@@ -24,6 +25,12 @@ func ApplyCommentaryDisposition(
 	if len(commentaryAudioIndices) == 0 {
 		return nil
 	}
+
+	logger.Info("applying commentary disposition",
+		"event_type", "commentary_disposition_start",
+		"path", path,
+		"tracks", commentaryAudioIndices,
+	)
 
 	dir := filepath.Dir(path)
 	tmpPath := filepath.Join(dir, ".disposition-"+filepath.Base(path))
@@ -47,7 +54,9 @@ func ApplyCommentaryDisposition(
 	}
 
 	logger.Info("commentary disposition applied",
-		"event_type", "commentary_disposition",
+		"decision_type", logs.DecisionCommentaryDisposition,
+		"decision_result", "applied",
+		"decision_reason", fmt.Sprintf("marked %d tracks as commentary", len(commentaryAudioIndices)),
 		"path", path,
 		"tracks", commentaryAudioIndices,
 	)
@@ -59,9 +68,11 @@ func ApplyCommentaryDisposition(
 // the "comment" disposition set.
 func ValidateCommentaryLabeling(
 	ctx context.Context,
+	logger *slog.Logger,
 	path string,
 	expectedIndices []int,
 ) error {
+	logger = logs.Default(logger)
 	if len(expectedIndices) == 0 {
 		return nil
 	}
@@ -90,15 +101,23 @@ func ValidateCommentaryLabeling(
 		audioIdx++
 	}
 
+	logger.Info("commentary labeling validated",
+		"decision_type", logs.DecisionCommentaryDisposition,
+		"decision_result", "valid",
+		"decision_reason", fmt.Sprintf("verified %d tracks", len(expectedIndices)),
+		"path", path,
+	)
 	return nil
 }
 
 // RemapCommentaryIndices maps original commentary track indices to their new
 // positions within the kept indices after audio refinement.
 func RemapCommentaryIndices(
+	logger *slog.Logger,
 	original []ripspec.CommentaryTrackRef,
 	keptIndices []int,
 ) []ripspec.CommentaryTrackRef {
+	logger = logs.Default(logger)
 	if len(original) == 0 || len(keptIndices) == 0 {
 		return nil
 	}
@@ -120,5 +139,10 @@ func RemapCommentaryIndices(
 		}
 	}
 
+	logger.Info("commentary indices remapped",
+		"decision_type", logs.DecisionCommentaryRemapping,
+		"decision_result", fmt.Sprintf("remapped_%d", len(remapped)),
+		"decision_reason", fmt.Sprintf("original=%d kept=%d", len(original), len(keptIndices)),
+	)
 	return remapped
 }

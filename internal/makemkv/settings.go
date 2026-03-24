@@ -62,6 +62,11 @@ func applySettings(path string, required map[string]string, logger *slog.Logger)
 		}
 	}
 	if !needsUpdate {
+		logger.Info("MakeMKV settings verified",
+			"decision_type", logs.DecisionMakeMKVSettings,
+			"decision_result", "current",
+			"decision_reason", "all required settings already configured",
+		)
 		return nil
 	}
 

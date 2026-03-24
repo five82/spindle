@@ -113,7 +113,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	var keydbCat *keydb.Catalog
 	if cat, stale, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath, logger); loadErr == nil {
 		keydbCat = cat
-		logger.Info("KeyDB catalog loaded", "entries", keydbCat.Size())
+		logger.Debug("KeyDB catalog loaded", "entries", keydbCat.Size())
 		if stale {
 			logger.Warn("keydb catalog is older than 7 days, consider re-downloading",
 				"event_type", "keydb_stale",

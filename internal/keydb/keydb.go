@@ -46,13 +46,15 @@ func (c *Catalog) Lookup(discID string) string {
 		c.logger.Info("KeyDB lookup hit",
 			"decision_type", logs.DecisionKeyDBLookup,
 			"decision_result", "hit",
+			"decision_reason", fmt.Sprintf("matched title=%q", title),
 			"disc_id", normalized,
 			"title", title,
 		)
 	} else {
-		c.logger.Debug("KeyDB lookup miss",
+		c.logger.Info("KeyDB lookup miss",
 			"decision_type", logs.DecisionKeyDBLookup,
 			"decision_result", "miss",
+			"decision_reason", "not in catalog",
 			"disc_id", normalized,
 		)
 	}
@@ -212,7 +214,12 @@ func normalizeDuplicateTitle(title string) string {
 
 // Download fetches a KeyDB zip file from url and extracts KEYDB.cfg into destDir.
 // The destDir is created if it does not exist.
-func Download(ctx context.Context, url, destDir string, timeout time.Duration) error {
+func Download(ctx context.Context, logger *slog.Logger, url, destDir string, timeout time.Duration) error {
+	logger = logs.Default(logger)
+	logger.Info("KeyDB download started",
+		"event_type", "keydb_download_start",
+	)
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -256,7 +263,14 @@ func Download(ctx context.Context, url, destDir string, timeout time.Duration) e
 			if err := os.MkdirAll(destDir, 0o755); err != nil {
 				return fmt.Errorf("keydb: create dir %s: %w", destDir, err)
 			}
-			return extractFile(zf, filepath.Join(destDir, "KEYDB.cfg"))
+			if err := extractFile(zf, filepath.Join(destDir, "KEYDB.cfg")); err != nil {
+				return err
+			}
+			logger.Info("KeyDB download completed",
+				"event_type", "keydb_download_complete",
+				"dest_dir", destDir,
+			)
+			return nil
 		}
 	}
 
@@ -296,7 +310,7 @@ func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration
 	}
 
 	destDir := filepath.Dir(path)
-	if err := Download(ctx, url, destDir, timeout); err != nil {
+	if err := Download(ctx, logger, url, destDir, timeout); err != nil {
 		return nil, false, err
 	}
 	cat, stale, err = LoadFromFile(path, logger)

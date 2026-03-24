@@ -79,7 +79,7 @@ func CleanStale(ctx context.Context, stagingDir string, maxAge time.Duration, ac
 		}
 
 		if isProtected(d.Name, activeFingerprints) {
-			logger.Debug("staging directory preserved",
+			logger.Info("staging directory preserved",
 				"dir", d.Name,
 				"decision_type", logs.DecisionStagingCleanup,
 				"decision_result", "preserved",
@@ -89,7 +89,7 @@ func CleanStale(ctx context.Context, stagingDir string, maxAge time.Duration, ac
 		}
 
 		if d.ModTime.After(cutoff) {
-			logger.Debug("staging directory preserved",
+			logger.Info("staging directory preserved",
 				"dir", d.Name,
 				"decision_type", logs.DecisionStagingCleanup,
 				"decision_result", "preserved",
@@ -133,7 +133,7 @@ func CleanOrphaned(ctx context.Context, stagingDir string, activeFingerprints ma
 		}
 
 		if isProtected(d.Name, activeFingerprints) {
-			logger.Debug("staging directory preserved",
+			logger.Info("staging directory preserved",
 				"dir", d.Name,
 				"decision_type", logs.DecisionStagingCleanup,
 				"decision_result", "preserved",

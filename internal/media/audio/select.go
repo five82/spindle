@@ -6,10 +6,12 @@ package audio
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
 	"github.com/five82/spindle/internal/language"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 )
 
@@ -58,7 +60,9 @@ func (s Selection) Changed(totalAudio int) bool {
 // best English audio track from the provided streams. Non-audio streams are
 // ignored. If no English track is found, the first audio stream is used as
 // a fallback.
-func Select(streams []ffprobe.Stream) Selection {
+func Select(logger *slog.Logger, streams []ffprobe.Stream) Selection {
+	logger = logs.Default(logger)
+
 	// Build candidate list from audio streams only.
 	var candidates []candidate
 	for i, st := range streams {
@@ -91,14 +95,28 @@ func Select(streams []ffprobe.Stream) Selection {
 	}
 
 	pool := english
-	if len(pool) == 0 {
+	fallback := len(pool) == 0
+	if fallback {
 		// Fall back to first available audio stream.
 		pool = candidates[:1]
+		logger.Info("audio selection fallback to non-english",
+			"decision_type", logs.DecisionAudioSelection,
+			"decision_result", "fallback_non_english",
+			"decision_reason", fmt.Sprintf("no english audio among %d candidates", len(candidates)),
+			"fallback_language", pool[0].language,
+		)
 	}
 
 	// Score each candidate in the pool.
 	for i := range pool {
 		pool[i].score = scoreCandidate(pool[i], i)
+		logger.Debug("audio candidate scored",
+			"index", pool[i].index,
+			"language", pool[i].language,
+			"channels", pool[i].channels,
+			"lossless", pool[i].isLossless,
+			"score", pool[i].score,
+		)
 	}
 
 	// Select the highest-scoring candidate.
@@ -121,6 +139,15 @@ func Select(streams []ffprobe.Stream) Selection {
 			sel.RemovedIndices = append(sel.RemovedIndices, c.index)
 		}
 	}
+
+	logger.Info("audio track selected",
+		"decision_type", logs.DecisionAudioSelection,
+		"decision_result", "selected",
+		"decision_reason", sel.PrimaryLabel(),
+		"candidates", len(candidates),
+		"primary_index", primary.index,
+		"primary_score", primary.score,
+	)
 
 	return sel
 }

@@ -200,7 +200,7 @@ func (m *Monitor) DetectAndEnqueue(ctx context.Context) (*EnqueueResult, error) 
 		return nil, fmt.Errorf("compute fingerprint: %w", err)
 	}
 
-	m.logger.Info("disc fingerprint computed",
+	m.logger.Debug("disc fingerprint computed",
 		"fingerprint", fp,
 		"mount_point", mountPoint,
 		"disc_type", event.DiscType,
@@ -383,6 +383,9 @@ func tryRefreshDiscTitle(ctx context.Context, store *queue.Store, item *queue.It
 	event, err := ProbeDisc(ctx, device)
 	if err != nil {
 		logger.Warn("title refresh probe failed",
+			"event_type", "title_refresh_failed",
+			"error_hint", "disc probe for title refresh failed",
+			"impact", "disc title may remain stale",
 			"error", err,
 			"item_id", item.ID,
 		)
@@ -398,6 +401,9 @@ func tryRefreshDiscTitle(ctx context.Context, store *queue.Store, item *queue.It
 	item.DiscTitle = name
 	if err := store.Update(item); err != nil {
 		logger.Warn("title refresh update failed",
+			"event_type", "title_refresh_persist_failed",
+			"error_hint", "failed to persist refreshed title",
+			"impact", "title update lost",
 			"error", err,
 			"item_id", item.ID,
 		)

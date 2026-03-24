@@ -82,7 +82,7 @@ func (n *Notifier) Send(ctx context.Context, event Event, title, message string)
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("notify: status %d", resp.StatusCode)
 	}
-	n.logger.Debug("notification sent", "event_type", string(event), "priority", priority(event))
+	n.logger.Info("notification sent", "event_type", string(event), "priority", priority(event))
 	return nil
 }
 

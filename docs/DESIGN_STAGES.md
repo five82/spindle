@@ -887,3 +887,123 @@ directory (`{staging_dir}/{fingerprint}/`) is removed via `os.RemoveAll`.
 Cleanup failures are logged as warnings (non-fatal) — disk space reclamation
 is best-effort. The existing `staging.CleanStale()` in the identification
 stage remains as a safety net for failed or abandoned items.
+
+---
+
+## 8. Decision Type Catalog
+
+All decision logging uses `decision_type`, `decision_result`, `decision_reason`
+attributes (see DESIGN_INFRASTRUCTURE.md SS1.4). This section catalogs which
+decision types each stage produces. Constants are defined in
+`internal/logs/decision.go`.
+
+### 8.1 Identification Stage
+
+| decision_type | Possible Results | Context |
+|---------------|-----------------|---------|
+| `bdinfo_availability` | disc source value, `unavailable` | Disc type classification |
+| `bdinfo_scan` | `completed` | BDInfo metadata extraction |
+| `title_source` | `updated` | Disc title determination |
+| `title_resolution` | source used | Title resolution from multiple sources |
+| `year_source` | `bdinfo`, `title`, `disc_title` | Year extraction priority |
+| `tmdb_match` | display title, `movie` | TMDB search match acceptance |
+| `tmdb_match_preference` | result | Multi-result preference selection |
+| `tmdb_search` | result | TMDB search execution |
+| `edition_detection` | edition label, reason | LLM edition classification |
+| `forced_subtitle_detection` | `present`, `absent` | Disc forced subtitle check |
+| `episode_placeholders` | episode count | Placeholder episode creation |
+| `disc_id_cache` | `hit`, `miss` | Disc ID cache lookup |
+| `config_load` | `explicit_path`, `search_path`, `defaults_only` | Config source selection |
+
+### 8.2 Ripping Stage
+
+| decision_type | Possible Results | Context |
+|---------------|-----------------|---------|
+| `rip_cache` | `restored` | Rip cache restoration |
+| `disc_monitor_control` | `paused`, `resumed` | Disc monitor pause during rip |
+| `track_select` | `skipped`, `candidate`, `selected` | Title duration filtering |
+| `title_selection` | title summary | Movie/TV title selection |
+| `title_rip` | `completed` | Individual title rip outcome |
+| `file_discovery` | `not_found` | Post-rip file detection |
+| `asset_mapping` | `title_file_map`, `directory_scan` | Ripped file-to-episode mapping |
+
+### 8.3 Episode Identification Stage
+
+| decision_type | Possible Results | Context |
+|---------------|-----------------|---------|
+| `episode_id_skip` | `skipped` | Episode ID stage skip |
+| `episode_match` | match result | Episode-to-reference matching |
+| `contentid_candidates` | candidate count | Content ID candidate selection |
+| `contentid_matches` | match results | Final episode matching |
+| `opensubtitles_reference_search` | result | Reference subtitle search |
+| `reference_download` | result | Reference subtitle download |
+| `reference_search` | result | Reference search execution |
+
+### 8.4 Encoding Stage
+
+| decision_type | Possible Results | Context |
+|---------------|-----------------|---------|
+| `encoding_plan` | job count | Encoding job plan |
+| `encoding_config` | preset info | SVT-AV1 configuration |
+| `encode_resume` | `skipped` | Stale encode file cleanup |
+| `encode_cleanup` | `removed` | Pre-encode file cleanup |
+| `file_probe` | `success` | FFprobe input inspection |
+| `crop_detection` | crop result | Crop filter selection |
+| `encoding_validation` | result | Post-encode validation |
+| `validation_failure_route` | `flagged_for_review` | Validation failure routing |
+
+### 8.5 Audio Analysis Stage
+
+| decision_type | Possible Results | Context |
+|---------------|-----------------|---------|
+| `audio_selection` | `selected`, `fallback_non_english` | Primary audio track selection |
+| `audio_refinement` | `skipped`, `remuxed` | Audio track refinement decision |
+| `audio_remux` | `started`, `completed` | FFmpeg remux execution |
+| `commentary_classification` | `skipped`, `commentary`, `not_commentary` | LLM commentary detection |
+| `commentary_remapping` | `remapped_N` | Post-refinement index remapping |
+| `commentary_disposition` | `applied`, `valid` | FFmpeg disposition setting |
+| `commentary_stereo_filter` | `excluded` | Stereo downmix removal |
+
+### 8.6 Subtitle Stage
+
+| decision_type | Possible Results | Context |
+|---------------|-----------------|---------|
+| `subtitle_skip` | `skipped` | Subtitle stage skip (disabled) |
+| `subtitle_resume` | `skipped` | Subtitle resume from prior run |
+| `transcription_asset` | asset path | Audio extraction target |
+| `transcription_cache` | `hit`, `miss` | Transcription cache lookup |
+| `hallucination_filter` | `filtered` | WhisperX hallucination removal |
+| `srt_validation` | issue summary | SRT quality validation |
+| `subtitle_mux` | `skipped` | MKV muxing decision |
+| `forced_subtitle_search` | `skipped` | Forced subtitle search gate |
+| `forced_subtitle_ranking` | `selected` | Forced subtitle best pick |
+| `subtitle_rank` | `selected`, `candidate` | Per-candidate ranking |
+| `forced_subtitle` | `none_available`, `downloaded` | Forced subtitle outcome |
+| `sidecar_subtitle_copy` | `skipped` | Sidecar SRT copy decision |
+
+### 8.7 Organization Stage
+
+| decision_type | Possible Results | Context |
+|---------------|-----------------|---------|
+| `organize_route` | `review` | Review routing decision |
+| `source_stage_selection` | stage name | Source asset selection |
+| `partial_cleanup` | `removed` | Partial file cleanup |
+| `organize_skip` | `skipped` | File existence skip |
+| `staging_cleanup` | `preserved`, `removed` | Staging directory cleanup |
+
+### 8.8 Infrastructure
+
+| decision_type | Possible Results | Context |
+|---------------|-----------------|---------|
+| `stage_execution` | `started`, `completed` | Stage lifecycle |
+| `disc_enqueue` | `created` | Disc enqueue from monitor |
+| `duplicate_detection` | `skipped` | Duplicate disc skip |
+| `detect_guard` | `skipped` | Detection guard skip |
+| `drive_wait` | `ready` | Drive poll readiness |
+| `disc_event_handling` | `skipped` | Paused event skip |
+| `disc_monitor_control` | `paused`, `resumed` | Monitor pause/resume |
+| `mount_resolution` | `lsblk`, `proc_mounts`, `fallback_path`, `auto_mount` | Mount point resolution |
+| `title_refresh` | `updated` | Post-enqueue title refresh |
+| `fingerprint_strategy` | `bluray`, `dvd`, `fallback` | Disc fingerprint method |
+| `keydb_lookup` | `hit`, `miss` | KeyDB catalog lookup |
+| `makemkv_settings` | `current`, `updated` | MakeMKV settings check |

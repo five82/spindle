@@ -113,6 +113,7 @@ func (m *Manager) Run(ctx context.Context) {
 		if err != nil {
 			p.logger.Error("fetch next item failed",
 				"event_type", "queue_fetch_error",
+				"error_hint", "failed to fetch next queue item",
 				"error", err,
 			)
 			if !sleep(ctx, 10*time.Second) {
@@ -131,6 +132,8 @@ func (m *Manager) Run(ctx context.Context) {
 		idx, ok := p.stageMap[item.Stage]
 		if !ok {
 			p.logger.Error("unknown stage for item",
+				"event_type", "unknown_stage",
+				"error_hint", "stage not in pipeline map",
 				"item_id", item.ID,
 				"stage", item.Stage,
 			)
@@ -148,6 +151,8 @@ func (m *Manager) Run(ctx context.Context) {
 		item.ProgressMessage = ""
 		if err := m.store.Update(item); err != nil {
 			p.logger.Error("persist in_progress failed",
+				"event_type", "progress_persist_failed",
+				"error_hint", "failed to persist in_progress flag",
 				"item_id", item.ID,
 				"error", err,
 			)
@@ -161,6 +166,8 @@ func (m *Manager) Run(ctx context.Context) {
 					item.InProgress = 0
 					if err := m.store.Update(item); err != nil {
 						p.logger.Error("release in_progress after sem cancel failed",
+							"event_type", "progress_persist_failed",
+							"error_hint", "failed to release in_progress after semaphore cancel",
 							"item_id", item.ID,
 							"error", err,
 						)
@@ -198,6 +205,8 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 			item.InProgress = 0
 			if updateErr := m.store.Update(item); updateErr != nil {
 				itemLogger.Error("persist after cancellation failed",
+					"event_type", "cancellation_persist_failed",
+					"error_hint", "failed to persist after cancellation",
 					"error", updateErr,
 				)
 			}
@@ -238,6 +247,8 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 
 	if err := m.store.Update(item); err != nil {
 		itemLogger.Error("persist after stage completion failed",
+			"event_type", "completion_persist_failed",
+			"error_hint", "failed to persist after stage completion",
 			"error", err,
 		)
 	}
@@ -267,6 +278,8 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 
 	if updateErr := m.store.Update(item); updateErr != nil {
 		itemLogger.Error("persist after failure failed",
+			"event_type", "failure_persist_failed",
+			"error_hint", "failed to persist after stage failure",
 			"error", updateErr,
 		)
 	}
@@ -280,6 +293,8 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 		msg := fmt.Sprintf("Item %d failed at %s: %s", item.ID, ps.Name, err.Error())
 		if notifyErr := m.notifier.Send(ctx, notify.EventError, title, msg); notifyErr != nil {
 			itemLogger.Error("failure notification failed",
+				"event_type", "notification_failed",
+				"error_hint", "failure notification delivery failed",
 				"error", notifyErr,
 			)
 		}
@@ -329,6 +344,8 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 	active, err := m.store.HasActiveItems()
 	if err != nil {
 		m.pipeline.logger.Error("check queue completion failed",
+			"event_type", "queue_check_failed",
+			"error_hint", "failed to check for active items",
 			"error", err,
 		)
 		return
@@ -339,6 +356,8 @@ func (m *Manager) checkQueueCompletion(ctx context.Context) {
 
 	if notifyErr := m.notifier.Send(ctx, notify.EventQueueCompleted, "Queue completed", "All items have finished processing."); notifyErr != nil {
 		m.pipeline.logger.Error("queue completion notification failed",
+			"event_type", "notification_failed",
+			"error_hint", "queue completion notification failed",
 			"error", notifyErr,
 		)
 	}

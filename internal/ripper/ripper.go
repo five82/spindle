@@ -124,12 +124,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Ripping title %d", i+1, len(targets), title.ID)
-		_ = h.store.UpdateProgress(item)
+		if err := h.store.UpdateProgress(item); err != nil {
+			logger.Warn("progress persistence failed",
+				"event_type", "progress_persist_failed",
+				"error_hint", "rip progress message not persisted",
+				"impact", "rip progress not reflected in queue",
+				"error", err,
+			)
+		}
 
 		// Snapshot files before rip to detect the new file.
 		before := listMKVFiles(rippedDir)
 
-		err := makemkv.Rip(ctx, h.cfg.MakeMKV.OpticalDrive, title.ID, rippedDir,
+		err := makemkv.Rip(ctx, logger, h.cfg.MakeMKV.OpticalDrive, title.ID, rippedDir,
 			time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
 			h.cfg.MakeMKV.MinTitleLength,
 			func(p makemkv.RipProgress) {
@@ -220,7 +227,7 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) [
 		for i := range env.Titles {
 			t := &env.Titles[i]
 			if t.Duration < h.cfg.MakeMKV.MinTitleLength {
-				logger.Debug("rip candidate below minimum duration",
+				logger.Info("rip candidate below minimum duration",
 					"decision_type", logs.DecisionTrackSelect,
 					"decision_result", "skipped",
 					"title_id", t.ID,
@@ -340,6 +347,11 @@ func (h *Handler) mapRippedAssets(logger *slog.Logger, env *ripspec.Envelope, di
 	// os.ReadDir returns entries sorted by filename.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		logger.Warn("asset mapping directory read failed",
+			"event_type", "asset_mapping_readdir_failed",
+			"error_hint", err.Error(),
+			"impact", "ripped assets may not be tracked",
+		)
 		return
 	}
 
