@@ -40,7 +40,7 @@ func main() {
 				return nil
 			}
 			var err error
-			cfg, err = config.Load(flagConfig, nil)
+			cfg, err = config.Load(flagConfig, buildLogger())
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}

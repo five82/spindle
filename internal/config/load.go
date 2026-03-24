@@ -43,7 +43,7 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 		return nil, err
 	}
 
-	logger.Info("configuration loaded",
+	logger.Debug("configuration loaded",
 		"decision_type", logs.DecisionConfigLoad,
 		"decision_result", source,
 		"decision_reason", configSourceReason(source, explicitPath),
