@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/five82/drapto"
@@ -142,13 +143,25 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		// Probe input to populate initial snapshot fields.
 		if probeResult, probeErr := ffprobe.Inspect(ctx, "", job.inputPath); probeErr == nil {
+			var resolution string
+			var codecs []string
 			for _, s := range probeResult.Streams {
-				if s.CodecType == "video" {
-					snap.Resolution = fmt.Sprintf("%dx%d", s.Width, s.Height)
-					break
+				if s.CodecType == "video" && resolution == "" {
+					resolution = fmt.Sprintf("%dx%d", s.Width, s.Height)
+					snap.Resolution = resolution
+				}
+				if s.CodecName != "" {
+					codecs = append(codecs, s.CodecName)
 				}
 			}
 			snap.OriginalSize = probeResult.SizeBytes()
+
+			logger.Info("input file probed",
+				"decision_type", "file_probe",
+				"decision_result", "success",
+				"decision_reason", fmt.Sprintf("resolution=%s codecs=%s original_size=%d", resolution, strings.Join(codecs, ","), snap.OriginalSize),
+				"episode_key", job.episodeKey,
+			)
 		}
 
 		item.EncodingDetailsJSON = snap.Marshal()
@@ -161,7 +174,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		// Create progress reporter.
-		reporter := newSpindleReporter(item, h.store, logger)
+		reporter := newSpindleReporter(item, h.store, logger, job.episodeKey)
 
 		// Encode.
 		result, encErr := encoder.EncodeWithReporter(ctx, job.inputPath, encodedDir, reporter)
@@ -233,6 +246,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		if !result.ValidationPassed {
 			item.AppendReviewReason(fmt.Sprintf("validation failed for %s", job.episodeKey))
+			logger.Info("validation failure flagged for review",
+				"decision_type", "validation_failure_route",
+				"decision_result", "flagged_for_review",
+				"decision_reason", "encoding validation did not pass",
+				"episode_key", job.episodeKey,
+			)
 		}
 	}
 
@@ -269,19 +288,21 @@ const throttleInterval = 2 * time.Second
 // into encodingstate.Snapshot updates on the queue item. Progress persistence
 // is throttled to every 2 seconds.
 type spindleReporter struct {
-	item     *queue.Item
-	store    *queue.Store
-	logger   *slog.Logger
-	lastPush time.Time
-	now      func() time.Time // injectable clock for testing
+	item       *queue.Item
+	store      *queue.Store
+	logger     *slog.Logger
+	episodeKey string
+	lastPush   time.Time
+	now        func() time.Time // injectable clock for testing
 }
 
-func newSpindleReporter(item *queue.Item, store *queue.Store, logger *slog.Logger) *spindleReporter {
+func newSpindleReporter(item *queue.Item, store *queue.Store, logger *slog.Logger, episodeKey string) *spindleReporter {
 	return &spindleReporter{
-		item:   item,
-		store:  store,
-		logger: logger,
-		now:    time.Now,
+		item:       item,
+		store:      store,
+		logger:     logger,
+		episodeKey: episodeKey,
+		now:        time.Now,
 	}
 }
 
@@ -378,6 +399,17 @@ func (r *spindleReporter) CropResult(s drapto.CropSummary) {
 	}
 	r.item.EncodingDetailsJSON = snap.Marshal()
 	_ = r.store.UpdateProgress(r.item)
+
+	decisionResult := "no_crop"
+	if s.Required {
+		decisionResult = "crop_applied"
+	}
+	r.logger.Info("crop detection result",
+		"decision_type", "crop_detection",
+		"decision_result", decisionResult,
+		"decision_reason", fmt.Sprintf("filter=%s", s.Crop),
+		"episode_key", r.episodeKey,
+	)
 }
 
 func (r *spindleReporter) ValidationComplete(s drapto.ValidationSummary) {
@@ -400,6 +432,25 @@ func (r *spindleReporter) ValidationComplete(s drapto.ValidationSummary) {
 	}
 	r.item.EncodingDetailsJSON = snap.Marshal()
 	_ = r.store.UpdateProgress(r.item)
+
+	var passed, failed int
+	for _, step := range s.Steps {
+		if step.Passed {
+			passed++
+		} else {
+			failed++
+		}
+	}
+	decisionResult := "passed"
+	if !s.Passed {
+		decisionResult = "failed"
+	}
+	r.logger.Info("encoding validation result",
+		"decision_type", "encoding_validation",
+		"decision_result", decisionResult,
+		"decision_reason", fmt.Sprintf("steps_passed=%d steps_failed=%d", passed, failed),
+		"episode_key", r.episodeKey,
+	)
 }
 
 func (r *spindleReporter) EncodingComplete(s drapto.EncodingOutcome) {

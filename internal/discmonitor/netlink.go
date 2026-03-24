@@ -123,8 +123,11 @@ func (n *NetlinkMonitor) monitorLoop(ctx context.Context, fd int) {
 		}
 
 		if n.isPaused() {
-			n.logger.Debug("disc event ignored (paused)",
+			n.logger.Info("disc event ignored (paused)",
 				"event_type", "netlink_event_paused",
+				"decision_type", "disc_event_handling",
+				"decision_result", "skipped",
+				"decision_reason", "paused",
 				"device", n.device,
 			)
 			continue

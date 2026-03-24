@@ -23,7 +23,7 @@ func newDiscIDListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List cached disc ID mappings",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			store, err := discidcache.Open(cfg.DiscIDCachePath())
+			store, err := discidcache.Open(cfg.DiscIDCachePath(), nil)
 			if err != nil {
 				return err
 			}
@@ -62,7 +62,7 @@ func newDiscIDRemoveCmd() *cobra.Command {
 				return fmt.Errorf("invalid entry number: %s", args[0])
 			}
 
-			store, err := discidcache.Open(cfg.DiscIDCachePath())
+			store, err := discidcache.Open(cfg.DiscIDCachePath(), nil)
 			if err != nil {
 				return err
 			}
@@ -86,7 +86,7 @@ func newDiscIDClearCmd() *cobra.Command {
 		Use:   "clear",
 		Short: "Remove all disc ID cache entries",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			store, err := discidcache.Open(cfg.DiscIDCachePath())
+			store, err := discidcache.Open(cfg.DiscIDCachePath(), nil)
 			if err != nil {
 				return err
 			}

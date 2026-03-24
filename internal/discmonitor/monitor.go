@@ -177,7 +177,7 @@ func (m *Monitor) DetectAndEnqueue(ctx context.Context) (*EnqueueResult, error) 
 	)
 
 	// Resolve mount point for fingerprinting.
-	mountPoint, cleanup, err := resolveMountPoint(ctx, event.Device, event.MountPath)
+	mountPoint, cleanup, err := resolveMountPoint(ctx, event.Device, event.MountPath, m.logger)
 	if err != nil {
 		m.logger.Error("mount resolution failed",
 			"error", err,
@@ -190,7 +190,7 @@ func (m *Monitor) DetectAndEnqueue(ctx context.Context) (*EnqueueResult, error) 
 	defer cleanup()
 
 	// Compute fingerprint.
-	fp, err := fingerprint.Generate(mountPoint)
+	fp, err := fingerprint.Generate(mountPoint, m.logger)
 	if err != nil {
 		m.logger.Error("fingerprint computation failed",
 			"error", err,

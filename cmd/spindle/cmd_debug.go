@@ -122,7 +122,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 			// Set up transcription and LLM for commentary detection.
 			llmClient := llm.New(
 				cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model,
-				cfg.LLM.Referer, cfg.LLM.Title, cfg.LLM.TimeoutSeconds,
+				cfg.LLM.Referer, cfg.LLM.Title, cfg.LLM.TimeoutSeconds, nil,
 			)
 			if llmClient == nil {
 				fmt.Println("\nLLM not configured; commentary classification requires LLM")
@@ -135,6 +135,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 				cfg.Subtitles.WhisperXVADMethod,
 				cfg.Subtitles.WhisperXHFToken,
 				cfg.WhisperXCacheDir(),
+				nil,
 			)
 
 			// Use a synthetic fingerprint for cache keys.

@@ -87,6 +87,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			continue
 		}
 
+		logger.Info("encoded asset selected for transcription",
+			"decision_type", "transcription_asset",
+			"decision_result", asset.Path,
+			"decision_reason", fmt.Sprintf("episode_key=%s", key),
+		)
+
 		logger.Info(fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", i+1, len(keys), key),
 			"event_type", "subtitle_start",
 		)
@@ -197,6 +203,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		// Mux into MKV if configured.
 		srtPath := result.SRTPath
 		subtitledPath := asset.Path // default: same file
+		if !h.cfg.Subtitles.MuxIntoMKV {
+			logger.Info("subtitle mux skipped",
+				"decision_type", "subtitle_mux",
+				"decision_result", "skipped",
+				"decision_reason", "mux_into_mkv is disabled",
+			)
+		}
 		if h.cfg.Subtitles.MuxIntoMKV {
 			muxedPath, err := h.muxSubtitles(ctx, logger, asset.Path, srtPath, key)
 			if err != nil {
@@ -296,6 +309,14 @@ func (h *Handler) tryForcedSubs(
 			"decision_result", result,
 			"decision_reason", fmt.Sprintf("foreign_parts_only=%v downloads=%d files=%d", r.Attributes.ForeignPartsOnly, r.Attributes.DownloadCount, len(r.Attributes.Files)),
 			"episode_key", key,
+		)
+	}
+
+	if best != nil {
+		logger.Info("forced subtitle candidate selected",
+			"decision_type", "forced_subtitle_ranking",
+			"decision_result", "selected",
+			"decision_reason", fmt.Sprintf("candidates=%d best_downloads=%d", len(results), best.Attributes.DownloadCount),
 		)
 	}
 

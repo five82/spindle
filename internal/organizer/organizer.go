@@ -66,9 +66,16 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Determine source stage: prefer "subtitled", fall back to "encoded".
 	sourceStage := "subtitled"
 	keys := env.AssetKeys()
+	hasSubtitled := true
 	if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
 		sourceStage = "encoded"
+		hasSubtitled = false
 	}
+	logger.Info("organization source stage selected",
+		"decision_type", "source_stage_selection",
+		"decision_result", sourceStage,
+		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
+	)
 
 	// Copy each asset to library.
 	for i, key := range keys {
@@ -147,6 +154,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			}
 			return fmt.Errorf("copy %s to library: %w", key, err)
 		}
+
+		logger.Info("asset copied to library",
+			"event_type", "asset_copied",
+			"episode_key", key,
+			"dest_path", destPath,
+		)
 
 		// Record final asset.
 		env.Assets.AddAsset("final", ripspec.Asset{
@@ -268,11 +281,18 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 	// Determine source stage.
 	sourceStage := "subtitled"
 	keys := env.AssetKeys()
+	hasSubtitled := true
 	if len(keys) > 0 {
 		if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
 			sourceStage = "encoded"
+			hasSubtitled = false
 		}
 	}
+	logger.Info("organization source stage selected",
+		"decision_type", "source_stage_selection",
+		"decision_result", sourceStage,
+		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
+	)
 
 	for i, key := range keys {
 		if ctx.Err() != nil {
@@ -354,6 +374,11 @@ func (h *Handler) cleanupStaging(ctx context.Context, item *queue.Item) {
 func copySidecarSubtitle(logger *slog.Logger, srcVideo, destVideo string) {
 	srcSrt := strings.TrimSuffix(srcVideo, filepath.Ext(srcVideo)) + ".en.srt"
 	if _, err := os.Stat(srcSrt); err != nil {
+		logger.Info("sidecar subtitle not found, skipping",
+			"decision_type", "sidecar_subtitle_copy",
+			"decision_result", "skipped",
+			"decision_reason", "source SRT does not exist",
+		)
 		return
 	}
 

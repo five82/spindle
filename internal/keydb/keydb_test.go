@@ -47,7 +47,7 @@ func TestLoadFromFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, stale, err := LoadFromFile(path)
+	cat, stale, err := LoadFromFile(path, nil)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestLookupFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path)
+	cat, _, err := LoadFromFile(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestLookupWithPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path)
+	cat, _, err := LoadFromFile(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestLookupNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path)
+	cat, _, err := LoadFromFile(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestMalformedLinesSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path)
+	cat, _, err := LoadFromFile(path, nil)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestCommentLinesSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path)
+	cat, _, err := LoadFromFile(path, nil)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestCommentLinesSkipped(t *testing.T) {
 }
 
 func TestLoadFromFileNotExist(t *testing.T) {
-	_, _, err := LoadFromFile("/nonexistent/path/KEYDB.cfg")
+	_, _, err := LoadFromFile("/nonexistent/path/KEYDB.cfg", nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
@@ -208,7 +208,7 @@ func TestStaleness(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stale, err := LoadFromFile(path)
+	_, stale, err := LoadFromFile(path, nil)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}

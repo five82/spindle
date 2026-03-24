@@ -53,7 +53,7 @@ func newIdentifyCmd() *cobra.Command {
 			var fp string
 			if mountPath != "" {
 				var err error
-				fp, err = fingerprint.Generate(mountPath)
+				fp, err = fingerprint.Generate(mountPath, nil)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "%s fingerprint generation failed: %v\n", warnStyle("Warning:"), err)
 				}
@@ -61,7 +61,7 @@ func newIdentifyCmd() *cobra.Command {
 
 			// Check disc ID cache for fast path.
 			if fp != "" {
-				store, err := discidcache.Open(cfg.DiscIDCachePath())
+				store, err := discidcache.Open(cfg.DiscIDCachePath(), nil)
 				if err == nil {
 					if entry := store.Lookup(fp); entry != nil {
 						fmt.Println(headerStyle("=== Disc ID Cache Hit ==="))
@@ -119,7 +119,7 @@ func newIdentifyCmd() *cobra.Command {
 				fmt.Printf("%s %s\n", labelStyle("Query:  "), queryTitle)
 			}
 
-			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
+			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
 			results, err := tmdbClient.SearchMulti(ctx, queryTitle)
 			if err != nil {
 				return fmt.Errorf("tmdb search: %w", err)
@@ -232,6 +232,7 @@ func newGensubtitleCmd() *cobra.Command {
 				cfg.Subtitles.WhisperXVADMethod,
 				cfg.Subtitles.WhisperXHFToken,
 				cfg.WhisperXCacheDir(),
+				nil,
 			)
 
 			fmt.Printf("Transcribing %s...\n", filepath.Base(file))
@@ -285,6 +286,7 @@ func newGensubtitleCmd() *cobra.Command {
 					cfg.Subtitles.OpenSubtitlesUserAgent,
 					cfg.Subtitles.OpenSubtitlesUserToken,
 					"",
+					nil,
 				)
 				if osClient != nil {
 					fmt.Println("Forced subtitle search requires TMDB ID (use pipeline for full support)")
@@ -378,7 +380,7 @@ func newTestNotifyCmd() *cobra.Command {
 		Use:   "test-notify",
 		Short: "Send a test notification",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			n := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout)
+			n := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, nil)
 			if n == nil {
 				return fmt.Errorf("notifications not configured (no ntfy topic)")
 			}

@@ -9,14 +9,14 @@ import (
 )
 
 func TestNewEmptyTopic(t *testing.T) {
-	n := New("", 10)
+	n := New("", 10, nil)
 	if n != nil {
 		t.Fatal("expected nil notifier for empty topic")
 	}
 }
 
 func TestNewDefaultTimeout(t *testing.T) {
-	n := New("http://example.com/topic", 0)
+	n := New("http://example.com/topic", 0, nil)
 	if n == nil {
 		t.Fatal("expected non-nil notifier")
 	}
@@ -105,7 +105,7 @@ func TestSendHTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n := New(srv.URL, 5)
+	n := New(srv.URL, 5, nil)
 	err := n.Send(context.Background(), EventValidationFailed, "Validation Failed", "file.mkv failed checks")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -134,7 +134,7 @@ func TestSendHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n := New(srv.URL, 5)
+	n := New(srv.URL, 5, nil)
 	err := n.Send(context.Background(), EventError, "Error", "something broke")
 	if err == nil {
 		t.Fatal("expected error for 500 response")
@@ -150,7 +150,7 @@ func TestSendNoTagsHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n := New(srv.URL, 5)
+	n := New(srv.URL, 5, nil)
 	err := n.Send(context.Background(), EventDiscDetected, "Disc", "detected")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

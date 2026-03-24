@@ -20,21 +20,26 @@ type Client struct {
 	baseURL  string
 	language string
 	client   *http.Client
+	logger   *slog.Logger
 }
 
-// New creates a TMDB client.
-func New(apiKey, baseURL, language string) *Client {
+// New creates a TMDB client. If logger is nil, slog.Default() is used.
+func New(apiKey, baseURL, language string, logger *slog.Logger) *Client {
 	if baseURL == "" {
 		baseURL = "https://api.themoviedb.org/3"
 	}
 	if language == "" {
 		language = "en-US"
 	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Client{
 		apiKey:   apiKey,
 		baseURL:  baseURL,
 		language: language,
 		client:   &http.Client{Timeout: 15 * time.Second},
+		logger:   logger,
 	}
 }
 
@@ -344,6 +349,11 @@ func SelectBestResult(logger *slog.Logger, results []SearchResult, query string,
 	selectedExact := bestIsExact
 	if bestExact != nil && bestExact.VoteAverage >= exactMatchMinVoteAverage &&
 		bestExact.VoteCount >= minVoteCountExact {
+		logger.Info("TMDB exact match preferred",
+			"decision_type", "tmdb_match_preference",
+			"decision_result", "exact_preferred",
+			"decision_reason", fmt.Sprintf("exact=%q non_exact=%q", bestExact.DisplayTitle(), best.DisplayTitle()),
+		)
 		selected = bestExact
 		selectedScore = bestExactScore
 		selectedExact = true
@@ -352,16 +362,36 @@ func SelectBestResult(logger *slog.Logger, results []SearchResult, query string,
 	// Apply acceptance thresholds.
 	if selectedExact {
 		if selected.VoteAverage < exactMatchMinVoteAverage || selected.VoteCount < minVoteCountExact {
+			logger.Info("TMDB match rejected",
+				"decision_type", "tmdb_match",
+				"decision_result", "rejected",
+				"decision_reason", fmt.Sprintf("exact match below thresholds: title=%q vote_avg=%.1f vote_count=%d min_vote_avg=%.1f min_vote_count=%d", selected.DisplayTitle(), selected.VoteAverage, selected.VoteCount, exactMatchMinVoteAverage, minVoteCountExact),
+			)
 			return nil
 		}
 	} else {
 		if selected.VoteAverage < nonExactMatchMinVoteAverage {
+			logger.Info("TMDB match rejected",
+				"decision_type", "tmdb_match",
+				"decision_result", "rejected",
+				"decision_reason", fmt.Sprintf("non-exact match vote_avg too low: title=%q vote_avg=%.1f min=%.1f", selected.DisplayTitle(), selected.VoteAverage, nonExactMatchMinVoteAverage),
+			)
 			return nil
 		}
 		if selectedScore < nonExactMatchBaseThreshold+float64(selected.VoteCount)/voteCountDivisor {
+			logger.Info("TMDB match rejected",
+				"decision_type", "tmdb_match",
+				"decision_result", "rejected",
+				"decision_reason", fmt.Sprintf("non-exact match score below threshold: title=%q score=%.3f threshold=%.3f", selected.DisplayTitle(), selectedScore, nonExactMatchBaseThreshold+float64(selected.VoteCount)/voteCountDivisor),
+			)
 			return nil
 		}
 	}
 
+	logger.Info("TMDB match selected",
+		"decision_type", "tmdb_match",
+		"decision_result", "accepted",
+		"decision_reason", fmt.Sprintf("title=%q score=%.3f exact=%v vote_avg=%.1f vote_count=%d", selected.DisplayTitle(), selectedScore, selectedExact, selected.VoteAverage, selected.VoteCount),
+	)
 	return selected
 }

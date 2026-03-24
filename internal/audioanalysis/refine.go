@@ -162,8 +162,10 @@ func remuxAudioTracks(ctx context.Context, logger *slog.Logger, path string, kep
 
 	logger.Info("audio remux complete",
 		"event_type", "audio_remux",
+		"decision_type", "audio_remux",
+		"decision_result", "completed",
+		"decision_reason", fmt.Sprintf("kept %d audio tracks", len(keptAudioIndices)),
 		"path", path,
-		"kept_tracks", len(keptAudioIndices),
 	)
 
 	return nil

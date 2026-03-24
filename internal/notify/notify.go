@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -31,10 +32,14 @@ type Notifier struct {
 	topic   string
 	timeout time.Duration
 	client  *http.Client
+	logger  *slog.Logger
 }
 
 // New creates a Notifier. Returns nil if topic is empty (notifications disabled).
-func New(topic string, timeoutSeconds int) *Notifier {
+func New(topic string, timeoutSeconds int, logger *slog.Logger) *Notifier {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	if topic == "" {
 		return nil
 	}
@@ -46,6 +51,7 @@ func New(topic string, timeoutSeconds int) *Notifier {
 		topic:   topic,
 		timeout: timeout,
 		client:  &http.Client{Timeout: timeout},
+		logger:  logger,
 	}
 }
 
@@ -76,6 +82,7 @@ func (n *Notifier) Send(ctx context.Context, event Event, title, message string)
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("notify: status %d", resp.StatusCode)
 	}
+	n.logger.Debug("notification sent", "event_type", string(event), "priority", priority(event))
 	return nil
 }
 

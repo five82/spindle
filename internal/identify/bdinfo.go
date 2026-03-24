@@ -3,6 +3,7 @@ package identify
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -38,9 +39,19 @@ var studioPrefixes = map[string]string{
 
 // RunBDInfo executes bd_info on the given device and returns parsed results.
 // Returns nil (not an error) if bd_info is not installed.
-func RunBDInfo(ctx context.Context, device string) (*BDInfoResult, error) {
+// If logger is nil, slog.Default() is used.
+func RunBDInfo(ctx context.Context, device string, logger *slog.Logger) (*BDInfoResult, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	path, err := exec.LookPath("bd_info")
 	if err != nil {
+		logger.Info("bd_info not available",
+			"decision_type", "bdinfo_availability",
+			"decision_result", "unavailable",
+			"decision_reason", "not found in PATH",
+		)
 		return nil, nil // graceful degradation
 	}
 
@@ -51,7 +62,16 @@ func RunBDInfo(ctx context.Context, device string) (*BDInfoResult, error) {
 		return nil, fmt.Errorf("bd_info %s: %w", device, err)
 	}
 
-	return parseBDInfoOutput(string(out)), nil
+	result := parseBDInfoOutput(string(out))
+	logger.Debug("bd_info parsed result",
+		"disc_id", result.DiscID,
+		"disc_name", result.DiscName,
+		"volume_id", result.VolumeIdentifier,
+		"year", result.Year,
+		"studio", result.Studio,
+		"is_bluray", result.IsBluRay,
+	)
+	return result, nil
 }
 
 // parseBDInfoOutput parses key-value output from bd_info.

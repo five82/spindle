@@ -245,7 +245,7 @@ func TestGenerate_PrefersBluray(t *testing.T) {
 	mkdirAll(t, vts)
 	writeFile(t, filepath.Join(vts, "VIDEO_TS.IFO"), "ifo")
 
-	genFP, err := Generate(dir)
+	genFP, err := Generate(dir, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestGenerate_FallsThroughToDVD(t *testing.T) {
 	mkdirAll(t, vts)
 	writeFile(t, filepath.Join(vts, "VIDEO_TS.IFO"), "ifo")
 
-	genFP, err := Generate(dir)
+	genFP, err := Generate(dir, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestGenerate_FallsBackToFullContent(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "random.dat"), "stuff")
 
-	genFP, err := Generate(dir)
+	genFP, err := Generate(dir, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}

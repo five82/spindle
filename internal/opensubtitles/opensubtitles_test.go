@@ -9,14 +9,14 @@ import (
 )
 
 func TestNew_EmptyAPIKey_ReturnsNil(t *testing.T) {
-	c := New("", "agent", "token", "")
+	c := New("", "agent", "token", "", nil)
 	if c != nil {
 		t.Fatal("expected nil client when apiKey is empty")
 	}
 }
 
 func TestNew_Defaults(t *testing.T) {
-	c := New("key", "", "", "")
+	c := New("key", "", "", "", nil)
 	if c == nil {
 		t.Fatal("expected non-nil client")
 	}
@@ -87,7 +87,7 @@ func TestSearch_MockServer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("test-key", "TestAgent", "", srv.URL)
+	c := New("test-key", "TestAgent", "", srv.URL, nil)
 	c.rateDelay = 0 // disable rate limiting for tests
 
 	results, err := c.Search(context.Background(), 550, 0, 0, []string{"en"})
@@ -140,7 +140,7 @@ func TestDownload_MockServer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("test-key", "TestAgent", "user-token", srv.URL)
+	c := New("test-key", "TestAgent", "user-token", srv.URL, nil)
 	c.rateDelay = 0
 
 	dlResp, err := c.Download(context.Background(), 456)
@@ -168,7 +168,7 @@ func TestCheckHealth_MockServer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("test-key", "TestAgent", "", srv.URL)
+	c := New("test-key", "TestAgent", "", srv.URL, nil)
 	c.rateDelay = 0
 
 	if err := c.CheckHealth(context.Background()); err != nil {
@@ -190,7 +190,7 @@ func TestCheckHealth_ServerError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("test-key", "TestAgent", "", srv.URL)
+	c := New("test-key", "TestAgent", "", srv.URL, nil)
 	c.rateDelay = 0
 
 	if err := c.CheckHealth(context.Background()); err == nil {

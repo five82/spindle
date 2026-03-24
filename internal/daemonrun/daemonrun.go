@@ -90,27 +90,37 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	defer func() { _ = store.Close() }()
 
 	// Create clients.
-	tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
-	llmClient := llm.New(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.Referer, cfg.LLM.Title, cfg.LLM.TimeoutSeconds)
-	notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout)
-	jfClient := jellyfin.New(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey)
-	osClient := opensubtitles.New(cfg.Subtitles.OpenSubtitlesAPIKey, cfg.Subtitles.OpenSubtitlesUserAgent, cfg.Subtitles.OpenSubtitlesUserToken, "")
+	tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, logger)
+	llmClient := llm.New(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.Referer, cfg.LLM.Title, cfg.LLM.TimeoutSeconds, logger)
+	notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, logger)
+	jfClient := jellyfin.New(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, logger)
+	osClient := opensubtitles.New(cfg.Subtitles.OpenSubtitlesAPIKey, cfg.Subtitles.OpenSubtitlesUserAgent, cfg.Subtitles.OpenSubtitlesUserToken, "", logger)
 
 	// Optional services.
 	var discIDStore *discidcache.Store
 	if cfg.DiscIDCache.Enabled {
-		discIDStore, err = discidcache.Open(cfg.DiscIDCachePath())
+		discIDStore, err = discidcache.Open(cfg.DiscIDCachePath(), logger)
 		if err != nil {
-			logger.Warn("disc ID cache unavailable", "error", err)
+			logger.Warn("disc ID cache unavailable",
+				"event_type", "disc_id_cache_unavailable",
+				"error_hint", "cache file could not be opened",
+				"impact", "disc identification will not use cached results",
+				"error", err,
+			)
 		}
 	}
 
 	var keydbCat *keydb.Catalog
-	if cat, stale, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath); loadErr == nil {
+	if cat, stale, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath, logger); loadErr == nil {
 		keydbCat = cat
+		logger.Info("KeyDB catalog loaded", "entries", keydbCat.Size())
 		if stale {
 			logger.Warn("keydb catalog is older than 7 days, consider re-downloading",
-				"path", cfg.MakeMKV.KeyDBPath)
+				"event_type", "keydb_stale",
+				"error_hint", "catalog file older than 7 days",
+				"impact", "disc identification may use outdated data",
+				"path", cfg.MakeMKV.KeyDBPath,
+			)
 		}
 	}
 
@@ -119,7 +129,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ripCacheStore = ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 	}
 
-	transcriber := transcription.New(cfg.Subtitles.WhisperXModel, cfg.Subtitles.WhisperXCUDAEnabled, cfg.Subtitles.WhisperXVADMethod, cfg.Subtitles.WhisperXHFToken, cfg.WhisperXCacheDir())
+	transcriber := transcription.New(cfg.Subtitles.WhisperXModel, cfg.Subtitles.WhisperXCUDAEnabled, cfg.Subtitles.WhisperXVADMethod, cfg.Subtitles.WhisperXHFToken, cfg.WhisperXCacheDir(), logger)
 
 	// Create disc monitor (if optical drive configured).
 	// Created before stage handlers so the ripper can pause/resume detection.

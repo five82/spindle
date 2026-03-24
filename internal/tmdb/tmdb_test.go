@@ -213,7 +213,7 @@ func TestSearchMovie_HTTPTest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-api-key", srv.URL, "en-US")
+	client := New("test-api-key", srv.URL, "en-US", nil)
 	results, err := client.SearchMovie(context.Background(), "Inception", "2010")
 	if err != nil {
 		t.Fatalf("SearchMovie() error: %v", err)
@@ -255,7 +255,7 @@ func TestGetMovie_HTTPTest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-key", srv.URL, "")
+	client := New("test-key", srv.URL, "", nil)
 	movie, err := client.GetMovie(context.Background(), 27205)
 	if err != nil {
 		t.Fatalf("GetMovie() error: %v", err)
@@ -288,7 +288,7 @@ func TestGetSeason_HTTPTest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-key", srv.URL, "en-US")
+	client := New("test-key", srv.URL, "en-US", nil)
 	season, err := client.GetSeason(context.Background(), 1396, 1)
 	if err != nil {
 		t.Fatalf("GetSeason() error: %v", err)
@@ -315,7 +315,7 @@ func TestAuthHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("my-secret-key", srv.URL, "")
+	client := New("my-secret-key", srv.URL, "", nil)
 	_, err := client.SearchMulti(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("SearchMulti() error: %v", err)

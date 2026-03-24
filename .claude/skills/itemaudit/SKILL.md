@@ -121,6 +121,7 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
    - Filter by `decision_type` to find specific categories (commentary, edition_detection, tmdb_confidence, etc.)
+   - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=transcription_cache` (transcription reuse)
    - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at `logs.path`)
 
 2. **Timing anomalies** (from `logs.stages`):
@@ -136,6 +137,7 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
 4. **LLM decision review** (filter `logs.decisions` by `decision_type`):
    - `decision_type=commentary` entries
    - `decision_type=edition_detection` entries (movies only)
+   - `decision_type=tmdb_match` entries — verify acceptance thresholds are reasonable
    - Evaluate if confidence levels and reasons make sense for the content
 
 5. **TV episode pipeline checks** (TV only, from `logs.decisions` and `logs.warnings`):
@@ -159,6 +161,7 @@ Analyze the `rip_cache` section from audit-gather output:
    - Pre-episodeid, keys are placeholders (`s01_001`, `s01_002`) with `episode=0` — this is expected
    - Check for any ripped assets with `status: "failed"` or missing `path`
    - Verify ripped asset count matches episode count
+4. **Asset mapping strategy** (from `logs.decisions`): Check `decision_type=asset_mapping` — `title_file_map` is the normal path for TV, `directory_scan` is the fallback
 
 ### Phase 3b: Episode Identification Validation (when `phase_episode_id` is true)
 
@@ -219,6 +222,10 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
    - Check `validation.passed` and individual step results
    - Review crop detection from `crop` fields
    - Check for `warning` or `error` in snapshot
+   - Check `decision_type=file_probe` in `logs.decisions` for pre-encoding resolution and codec detection
+   - Check `decision_type=crop_detection` for crop decision visibility
+   - Check `decision_type=encoding_validation` for per-episode validation results
+   - `decision_type=validation_failure_route` with `decision_result=flagged_for_review` indicates validation-failed items routed to review
 
 6. **Per-episode asset status** (TV only, from `envelope.assets.encoded`):
    - Check for `status: "failed"` entries with `error_msg`
@@ -294,6 +301,9 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
    - Find `decision_type=forced_subtitle_download` with `decision_result=not_found`
    - Zero candidates from OpenSubtitles is **the norm** — do not report this at all (not even as INFO)
    - Only report as **WARNING** if: (a) candidates were returned but all rejected, OR (b) you know the title has significant foreign language dialogue (e.g., Inglourious Basterds, Kill Bill, Narcos) making the absence a real gap
+   - `decision_type=forced_subtitle_ranking` shows the selected candidate's download count and total candidates considered
+   - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config
+   - `decision_type=transcription_cache` shows whether WhisperX reused a cached transcription
 
 3. **Edition-aware forced subtitle selection** (movies only):
    - Check `logs.decisions` for `edition=match` or `edition=mismatch` in forced subtitle ranking
@@ -317,13 +327,15 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
    - High similarity to primary audio = stereo downmix (excluded)
    - LLM should classify based on content
 
-3. **Cross-reference with blu-ray.com** (only when `phase_external_validation` is true):
+3. **Refinement impact** (from `logs.decisions`): Check `decision_type=commentary_remapping` — shows how many commentary tracks survived audio refinement. `remapped_count=0` means all commentary tracks were lost during refinement.
+
+4. **Cross-reference with blu-ray.com** (only when `phase_external_validation` is true):
    - Check "Audio" section of disc review for commentary count
    - Compare against our detection count
 
-4. **Verify in media probes**: Count audio streams with `disposition.comment=1` in `media[].probe.streams`
+5. **Verify in media probes**: Count audio streams with `disposition.comment=1` in `media[].probe.streams`
 
-5. **Cross-episode commentary consistency** (TV only):
+6. **Cross-episode commentary consistency** (TV only):
    - All episodes from the same disc should have same number of audio streams
 
 ## Problem Pattern Catalog
@@ -357,6 +369,12 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Per-episode subtitle failure | Subtitles | `envelope.assets.subtitled[]` with `status: "failed"` | Episode missing subtitles |
 | Cross-episode resolution mismatch | Encoding | Different resolutions across `media[]` entries | Inconsistent quality |
 | Cross-episode audio mismatch | Encoding | Different audio stream counts across `media[]` entries | Inconsistent audio tracks |
+| Transcription cache miss on retry | Subtitles/EpisodeID | `decision_type=transcription_cache` with `decision_result=miss` on re-processed item | Re-transcription wasted GPU time |
+| Fingerprint fallback used | Identification | `decision_type=fingerprint_strategy` with `decision_result=fallback` | Disc type detection degraded |
+| TMDB match rejected | Identification | `decision_type=tmdb_match` with `decision_result=rejected` | No content match found |
+| Validation failed but continued | Encoding | `decision_type=validation_failure_route` with `decision_result=flagged_for_review` | Item routed to review |
+| Commentary tracks lost in refinement | Audio Analysis | `decision_type=commentary_remapping` with remapped count 0 | Commentary detection effort wasted |
+| Source stage fallback to encoded | Organization | `decision_type=source_stage_selection` with `decision_result=encoded` when subtitles enabled | Subtitles may be missing from output |
 
 ### DEBUG-Only Patterns
 
@@ -364,10 +382,13 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 
 | Pattern | Stage | `decision_type` |
 |---------|-------|-----------------|
-| TMDB candidate scoring | Identification | `tmdb_search` |
+| TMDB candidate scoring | Identification | `tmdb_search` (final selection now visible at INFO as `tmdb_match`) |
 | Placeholder episode creation | Identification | (visible in `envelope.episodes` with `episode=0`) |
 | Track selection | Ripping | `track_select` |
-| Forced subtitle ranking | Subtitles | `subtitle_rank` |
+| Forced subtitle ranking | Subtitles | `subtitle_rank` (summary now visible at INFO as `forced_subtitle_ranking`) |
+| KeyDB lookup miss | Identification | `keydb_lookup` (hits are INFO) |
+| OpenSubtitles request details | Subtitles | search query params and result counts |
+| LLM retry details | Various | individual retry attempt timing |
 | Content ID candidate selection | Episode ID | `contentid_candidates` |
 | Content ID match scores | Episode ID | `contentid_matches` |
 | OpenSubtitles reference search | Episode ID | `opensubtitles_reference_search` |

@@ -8,28 +8,28 @@ import (
 )
 
 func TestNew_EmptyURL(t *testing.T) {
-	c := New("", "some-key")
+	c := New("", "some-key", nil)
 	if c != nil {
 		t.Fatal("expected nil client when url is empty")
 	}
 }
 
 func TestNew_EmptyAPIKey(t *testing.T) {
-	c := New("http://localhost", "")
+	c := New("http://localhost", "", nil)
 	if c != nil {
 		t.Fatal("expected nil client when apiKey is empty")
 	}
 }
 
 func TestNew_BothEmpty(t *testing.T) {
-	c := New("", "")
+	c := New("", "", nil)
 	if c != nil {
 		t.Fatal("expected nil client when both url and apiKey are empty")
 	}
 }
 
 func TestNew_Valid(t *testing.T) {
-	c := New("http://localhost", "test-key")
+	c := New("http://localhost", "test-key", nil)
 	if c == nil {
 		t.Fatal("expected non-nil client")
 	}
@@ -61,7 +61,7 @@ func TestRefresh_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "test-api-key")
+	c := New(srv.URL, "test-api-key", nil)
 	err := c.Refresh(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -87,7 +87,7 @@ func TestCheckHealth_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "health-key")
+	c := New(srv.URL, "health-key", nil)
 	err := c.CheckHealth(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -109,7 +109,7 @@ func TestRefresh_ErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "key")
+	c := New(srv.URL, "key", nil)
 	err := c.Refresh(context.Background())
 	if err == nil {
 		t.Fatal("expected error on 500 status")
@@ -122,7 +122,7 @@ func TestCheckHealth_ErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "key")
+	c := New(srv.URL, "key", nil)
 	err := c.CheckHealth(context.Background())
 	if err == nil {
 		t.Fatal("expected error on 403 status")

@@ -69,7 +69,7 @@ func newCacheRipCmd() *cobra.Command {
 			}
 
 			// Generate fingerprint.
-			fp, err := fingerprint.Generate(event.MountPath)
+			fp, err := fingerprint.Generate(event.MountPath, nil)
 			if err != nil {
 				return fmt.Errorf("generate fingerprint: %w", err)
 			}
@@ -101,13 +101,13 @@ func newCacheRipCmd() *cobra.Command {
 			fmt.Printf("Disc: %s (%d titles)\n", discTitle, len(discInfo.Titles))
 
 			// TMDB identification (for disc ID cache).
-			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language)
+			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
 			results, searchErr := tmdbClient.SearchMulti(ctx, discTitle)
 			if searchErr == nil && len(results) > 0 {
 				best := tmdb.SelectBestResult(slog.Default(), results, discTitle, 0, 5)
 				if best != nil {
 					fmt.Printf("TMDB: %s (%s, ID %d)\n", best.DisplayTitle(), best.Year(), best.ID)
-					discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath())
+					discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
 					if openErr == nil {
 						entry := discidcache.Entry{
 							TMDBID:    best.ID,
@@ -278,7 +278,7 @@ func newCacheProcessCmd() *cobra.Command {
 			}
 
 			// Build RipSpec from disc ID cache if available.
-			discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath())
+			discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
 			if openErr == nil {
 				if idEntry := discIDStore.Lookup(entry.Fingerprint); idEntry != nil {
 					env := ripspec.Envelope{

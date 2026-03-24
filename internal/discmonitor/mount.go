@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,11 +20,21 @@ var fallbackMountPaths = []string{"/media/cdrom", "/media/cdrom0"}
 // It checks (in order): the provided lsblk mount path, /proc/mounts,
 // fallback paths with disc directory structure, and finally auto-mounts.
 // If auto-mounted, the returned cleanup function unmounts the device.
-func resolveMountPoint(ctx context.Context, device, lsblkMount string) (mountPoint string, cleanup func(), err error) {
+// If logger is nil, slog.Default() is used.
+func resolveMountPoint(ctx context.Context, device, lsblkMount string, logger *slog.Logger) (mountPoint string, cleanup func(), err error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	noop := func() {}
 
 	// 1. Use lsblk-provided mount path if non-empty.
 	if lsblkMount != "" {
+		logger.Info("mount point resolved",
+			"decision_type", "mount_resolution",
+			"decision_result", "lsblk",
+			"decision_reason", "lsblk reported mount path",
+			"mount_point", lsblkMount,
+		)
 		if hasDiscStructure(lsblkMount) {
 			return lsblkMount, noop, nil
 		}
@@ -33,12 +44,24 @@ func resolveMountPoint(ctx context.Context, device, lsblkMount string) (mountPoi
 
 	// 2. Check /proc/mounts for the device (symlink-aware).
 	if mp, err := findInProcMounts(device); err == nil && mp != "" {
+		logger.Info("mount point resolved",
+			"decision_type", "mount_resolution",
+			"decision_result", "proc_mounts",
+			"decision_reason", "device found in /proc/mounts",
+			"mount_point", mp,
+		)
 		return mp, noop, nil
 	}
 
 	// 3. Check fallback paths for disc directory structure.
 	for _, path := range fallbackMountPaths {
 		if hasDiscStructure(path) {
+			logger.Info("mount point resolved",
+				"decision_type", "mount_resolution",
+				"decision_result", "fallback_path",
+				"decision_reason", "disc structure found at fallback path",
+				"mount_point", path,
+			)
 			return path, noop, nil
 		}
 	}
@@ -48,6 +71,12 @@ func resolveMountPoint(ctx context.Context, device, lsblkMount string) (mountPoi
 	if err != nil {
 		return "", noop, fmt.Errorf("auto-mount %s: %w", device, err)
 	}
+	logger.Info("mount point resolved",
+		"decision_type", "mount_resolution",
+		"decision_result", "auto_mount",
+		"decision_reason", "device auto-mounted via system mount command",
+		"mount_point", mp,
+	)
 	return mp, func() {
 		// Best-effort unmount; ignore errors.
 		_ = exec.CommandContext(ctx, "umount", device).Run()

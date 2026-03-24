@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -12,10 +13,14 @@ type Client struct {
 	url    string
 	apiKey string
 	client *http.Client
+	logger *slog.Logger
 }
 
 // New creates a Jellyfin client. Returns nil if url or apiKey is empty.
-func New(url, apiKey string) *Client {
+func New(url, apiKey string, logger *slog.Logger) *Client {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	if url == "" || apiKey == "" {
 		return nil
 	}
@@ -23,6 +28,7 @@ func New(url, apiKey string) *Client {
 		url:    url,
 		apiKey: apiKey,
 		client: &http.Client{Timeout: 30 * time.Second},
+		logger: logger,
 	}
 }
 
@@ -47,6 +53,7 @@ func (c *Client) Refresh(ctx context.Context) error {
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("jellyfin refresh: status %d", resp.StatusCode)
 	}
+	c.logger.Info("Jellyfin library refresh triggered", "event_type", "jellyfin_refresh")
 	return nil
 }
 

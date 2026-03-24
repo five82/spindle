@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -20,10 +21,11 @@ type Client struct {
 	title   string
 	timeout time.Duration
 	client  *http.Client
+	logger  *slog.Logger
 }
 
 // New creates an LLM client. Returns nil if apiKey is empty.
-func New(apiKey, baseURL, model, referer, title string, timeoutSeconds int) *Client {
+func New(apiKey, baseURL, model, referer, title string, timeoutSeconds int, logger *slog.Logger) *Client {
 	if apiKey == "" {
 		return nil
 	}
@@ -32,6 +34,9 @@ func New(apiKey, baseURL, model, referer, title string, timeoutSeconds int) *Cli
 	}
 	if model == "" {
 		model = "google/gemini-3-flash-preview"
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -45,6 +50,7 @@ func New(apiKey, baseURL, model, referer, title string, timeoutSeconds int) *Cli
 		title:   title,
 		timeout: timeout,
 		client:  &http.Client{Timeout: timeout},
+		logger:  logger,
 	}
 }
 
@@ -117,8 +123,21 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 
 		// Only retry on retryable errors.
 		if !isRetryable(err) {
+			c.logger.Warn("LLM request failed (non-retryable)",
+				"event_type", "llm_request_failed",
+				"error_hint", "non-retryable error",
+				"impact", "request abandoned",
+				"error", err.Error(),
+			)
 			return err
 		}
+
+		c.logger.Warn("retrying LLM request",
+			"event_type", "llm_retry",
+			"error_hint", fmt.Sprintf("attempt %d/%d", attempt+1, maxAttempts),
+			"impact", "delayed response",
+			"error", err.Error(),
+		)
 
 		// Don't sleep after the last attempt.
 		if attempt < maxAttempts-1 {

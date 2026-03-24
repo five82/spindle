@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,13 +23,15 @@ type Client struct {
 	userAgent string
 	userToken string
 	baseURL   string
+	logger    *slog.Logger
 	client    *http.Client
 	lastCall  time.Time
 	rateDelay time.Duration
 }
 
 // New creates an OpenSubtitles client. Returns nil if apiKey is empty.
-func New(apiKey, userAgent, userToken, baseURL string) *Client {
+// If logger is nil, slog.Default() is used.
+func New(apiKey, userAgent, userToken, baseURL string, logger *slog.Logger) *Client {
 	if apiKey == "" {
 		return nil
 	}
@@ -38,11 +41,15 @@ func New(apiKey, userAgent, userToken, baseURL string) *Client {
 	if userAgent == "" {
 		userAgent = "Spindle/dev"
 	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Client{
 		apiKey:    apiKey,
 		userAgent: userAgent,
 		userToken: userToken,
 		baseURL:   baseURL,
+		logger:    logger,
 		client:    &http.Client{Timeout: 45 * time.Second},
 		rateDelay: 3 * time.Second,
 	}
@@ -107,6 +114,7 @@ func (c *Client) Search(ctx context.Context, tmdbID int, season, episode int, la
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("opensubtitles search: decode: %w", err)
 	}
+	c.logger.Debug("OpenSubtitles search completed", "tmdb_id", tmdbID, "results", len(resp.Data))
 	return resp.Data, nil
 }
 
@@ -134,6 +142,7 @@ func (c *Client) Download(ctx context.Context, fileID int) (*DownloadResponse, e
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("opensubtitles download: decode: %w", err)
 	}
+	c.logger.Debug("OpenSubtitles download negotiated", "file_id", fileID, "remaining", resp.Remaining)
 	return &resp, nil
 }
 
@@ -197,6 +206,7 @@ func (c *Client) rateLimit() {
 	}
 	elapsed := time.Since(c.lastCall)
 	if elapsed < c.rateDelay {
+		c.logger.Debug("OpenSubtitles rate limit sleep", "sleep_ms", (c.rateDelay - elapsed).Milliseconds())
 		time.Sleep(c.rateDelay - elapsed)
 	}
 	c.lastCall = time.Now()
@@ -270,6 +280,12 @@ func (c *Client) doWithRetry(ctx context.Context, fn func() ([]byte, error)) ([]
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
+			c.logger.Warn("retrying OpenSubtitles request",
+				"event_type", "opensubtitles_retry",
+				"error_hint", fmt.Sprintf("attempt %d/%d", attempt, maxRetries),
+				"impact", "delayed response",
+				"error", lastErr.Error(),
+			)
 			timer := time.NewTimer(retryDelay)
 			select {
 			case <-ctx.Done():
@@ -286,6 +302,12 @@ func (c *Client) doWithRetry(ctx context.Context, fn func() ([]byte, error)) ([]
 
 		lastErr = err
 		if !isRetryable(err) {
+			c.logger.Warn("OpenSubtitles request failed (non-retryable)",
+				"event_type", "opensubtitles_request_failed",
+				"error_hint", "status not retryable",
+				"impact", "request abandoned",
+				"error", err.Error(),
+			)
 			return nil, err
 		}
 	}

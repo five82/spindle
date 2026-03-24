@@ -95,7 +95,11 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	// Startup recovery: reset any stale in-progress items.
 	if err := d.store.ResetInProgress(); err != nil {
-		d.logger.Error("startup recovery failed", "error", err)
+		d.logger.Error("startup recovery failed",
+			"event_type", "startup_recovery_failed",
+			"error_hint", "failed to reset in_progress flags on startup",
+			"error", err,
+		)
 	}
 
 	// Start HTTP API.
@@ -154,7 +158,11 @@ func (d *Daemon) Stop() {
 
 	// Shutdown recovery: clear in-progress flags.
 	if err := d.store.ResetInProgressOnShutdown(); err != nil {
-		d.logger.Error("shutdown recovery failed", "error", err)
+		d.logger.Error("shutdown recovery failed",
+			"event_type", "shutdown_recovery_failed",
+			"error_hint", "failed to reset in_progress flags on shutdown",
+			"error", err,
+		)
 	}
 
 	// Shutdown HTTP API.

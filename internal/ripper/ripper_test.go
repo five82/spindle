@@ -22,7 +22,7 @@ func TestMapRippedAssets_Movie(t *testing.T) {
 	}
 
 	h := &Handler{}
-	h.mapRippedAssets(env, dir, nil)
+	h.mapRippedAssets(testLogger(), env, dir, nil)
 
 	if len(env.Assets.Ripped) != 1 {
 		t.Fatalf("expected 1 ripped asset, got %d", len(env.Assets.Ripped))
@@ -58,7 +58,7 @@ func TestMapRippedAssets_TVEpisodes(t *testing.T) {
 	}
 
 	h := &Handler{}
-	h.mapRippedAssets(env, dir, nil)
+	h.mapRippedAssets(testLogger(), env, dir, nil)
 
 	if len(env.Assets.Ripped) != 3 {
 		t.Fatalf("expected 3 ripped assets, got %d", len(env.Assets.Ripped))
@@ -81,7 +81,7 @@ func TestMapRippedAssets_EmptyDir(t *testing.T) {
 	}
 
 	h := &Handler{}
-	h.mapRippedAssets(env, dir, nil)
+	h.mapRippedAssets(testLogger(), env, dir, nil)
 
 	if len(env.Assets.Ripped) != 0 {
 		t.Fatalf("expected 0 ripped assets, got %d", len(env.Assets.Ripped))
@@ -193,7 +193,7 @@ func TestMapRippedAssets_TVWithTitleFileMap(t *testing.T) {
 	}
 
 	h := &Handler{}
-	h.mapRippedAssets(env, dir, titleFileMap)
+	h.mapRippedAssets(testLogger(), env, dir, titleFileMap)
 
 	if len(env.Assets.Ripped) != 2 {
 		t.Fatalf("expected 2 ripped assets, got %d", len(env.Assets.Ripped))

@@ -186,7 +186,7 @@ func TestParseSRTTimestamp(t *testing.T) {
 
 func TestLookupMiss(t *testing.T) {
 	dir := t.TempDir()
-	svc := New("large-v3", false, "silero", "", dir)
+	svc := New("large-v3", false, "silero", "", dir, nil)
 
 	result, ok := svc.Lookup("nonexistent-key")
 	if ok {
@@ -199,7 +199,7 @@ func TestLookupMiss(t *testing.T) {
 
 func TestStoreAndLookupRoundTrip(t *testing.T) {
 	cacheDir := t.TempDir()
-	svc := New("large-v3", false, "silero", "", cacheDir)
+	svc := New("large-v3", false, "silero", "", cacheDir, nil)
 
 	// Write a sample SRT to a source location.
 	srcDir := t.TempDir()

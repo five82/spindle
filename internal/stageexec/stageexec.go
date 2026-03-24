@@ -39,7 +39,11 @@ func Run(ctx context.Context, item *queue.Item, opts Options) error {
 
 	item.InProgress = 0
 	if updateErr := opts.Store.Update(item); updateErr != nil {
-		logger.Error("failed to clear in_progress", "error", updateErr)
+		logger.Error("failed to clear in_progress",
+			"event_type", "stage_persistence_failed",
+			"error_hint", "failed to clear in_progress flag after stage execution",
+			"error", updateErr,
+		)
 	}
 
 	if err != nil {

@@ -10,7 +10,7 @@ func TestOpenCreatesNewFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
 
-	store, err := Open(path)
+	store, err := Open(path, nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestLookupMiss(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
 
-	store, err := Open(path)
+	store, err := Open(path, nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestSetAndLookup(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
 
-	store, err := Open(path)
+	store, err := Open(path, nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestPersistenceAcrossOpenCalls(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
 
-	store1, err := Open(path)
+	store1, err := Open(path, nil)
 	if err != nil {
 		t.Fatalf("Open (1): %v", err)
 	}
@@ -90,7 +90,7 @@ func TestPersistenceAcrossOpenCalls(t *testing.T) {
 	}
 
 	// Reopen from disk.
-	store2, err := Open(path)
+	store2, err := Open(path, nil)
 	if err != nil {
 		t.Fatalf("Open (2): %v", err)
 	}
@@ -111,7 +111,7 @@ func TestConcurrentAccess(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.json")
 
-	store, err := Open(path)
+	store, err := Open(path, nil)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,10 +22,14 @@ type Service struct {
 	vadMethod   string
 	hfToken     string
 	cacheDir    string
+	logger      *slog.Logger
 }
 
 // New creates a transcription service.
-func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string) *Service {
+func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string, logger *slog.Logger) *Service {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	if model == "" {
 		model = "large-v3"
 	}
@@ -37,6 +42,7 @@ func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string) *S
 		vadMethod:   vadMethod,
 		hfToken:     hfToken,
 		cacheDir:    cacheDir,
+		logger:      logger,
 	}
 }
 
@@ -92,9 +98,19 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 
 	// Check cache.
 	if result, ok := s.Lookup(key); ok {
+		s.logger.Info("transcription cache hit",
+			"decision_type", "transcription_cache",
+			"decision_result", "hit",
+			"decision_reason", fmt.Sprintf("key=%s segments=%d", key[:12], result.Segments),
+		)
 		result.Cached = true
 		return result, nil
 	}
+	s.logger.Info("transcription cache miss",
+		"decision_type", "transcription_cache",
+		"decision_result", "miss",
+		"decision_reason", fmt.Sprintf("key=%s", key[:12]),
+	)
 
 	// Ensure output directory exists.
 	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
@@ -117,6 +133,11 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		wavPath,
 	}
 
+	s.logger.Info("extracting audio for transcription",
+		"event_type", "transcription_extract",
+		"input", req.InputPath,
+		"audio_index", req.AudioIndex,
+	)
 	extractStart := time.Now()
 	ffmpegCmd := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...)
 	if output, err := ffmpegCmd.CombinedOutput(); err != nil {
@@ -150,6 +171,11 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		whisperArgs = append(whisperArgs, "--hf_token", s.hfToken)
 	}
 
+	s.logger.Info("running WhisperX transcription",
+		"event_type", "transcription_whisperx",
+		"model", model,
+		"language", req.Language,
+	)
 	transcribeStart := time.Now()
 	whisperCmd := exec.CommandContext(ctx, "uvx", whisperArgs...)
 	if output, err := whisperCmd.CombinedOutput(); err != nil {
@@ -184,6 +210,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	if err := s.Store(key, result); err != nil {
 		return nil, fmt.Errorf("cache store: %w", err)
 	}
+	s.logger.Debug("transcription result cached", "key", key[:12], "segments", result.Segments)
 
 	return result, nil
 }

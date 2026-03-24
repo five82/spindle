@@ -101,12 +101,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	if len(encodedPaths) == 0 {
 		return fmt.Errorf("no encoded assets available for audio analysis")
 	}
+	logger.Debug("collected encoded assets for analysis", "count", len(encodedPaths))
 
 	analysisData := &ripspec.AudioAnalysisData{}
 
 	// Phase 1: Commentary detection on encoded files.
 	// Must run BEFORE audio refinement so commentary track indices can be
 	// preserved when refinement strips unwanted tracks.
+	logger.Info("Phase 1/3 - Commentary detection")
 	var commentaryIndices []int
 	if h.cfg.Commentary.Enabled && h.llmClient != nil {
 		path := encodedPaths[0]
@@ -127,6 +129,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Phase 2: Audio refinement on encoded files.
 	// Strips non-English and redundant audio tracks, preserving primary +
 	// commentary tracks via additionalKeep.
+	logger.Info("Phase 2/3 - Audio refinement")
 	refinement, refErr := RefineAudioTargets(ctx, logger, encodedPaths, commentaryIndices)
 	if refErr != nil {
 		logger.Warn("audio refinement failed",
@@ -139,6 +142,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Phase 3: Post-refinement primary audio selection and commentary disposition.
+	logger.Info("Phase 3/3 - Post-refinement audio analysis")
 	{
 		path := encodedPaths[0]
 		result, err := ffprobe.Inspect(ctx, "", path)
@@ -160,7 +164,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		// Remap commentary indices to post-refinement positions and apply disposition.
 		if len(analysisData.CommentaryTracks) > 0 && refinement != nil {
+			originalCount := len(analysisData.CommentaryTracks)
 			remapped := RemapCommentaryIndices(analysisData.CommentaryTracks, refinement.KeptIndices)
+			logger.Info("commentary tracks remapped after refinement",
+				"decision_type", "commentary_remapping",
+				"decision_result", fmt.Sprintf("%d tracks survived", len(remapped)),
+				"decision_reason", fmt.Sprintf("original=%d remapped=%d", originalCount, len(remapped)),
+			)
 			if len(remapped) > 0 {
 				analysisData.CommentaryTracks = remapped
 				var remappedIndices []int

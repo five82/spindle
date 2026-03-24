@@ -58,7 +58,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
 			)
 			// Map cached files to assets (no titleFileMap for cache path).
-			h.mapRippedAssets(&env, rippedDir, nil)
+			h.mapRippedAssets(logger, &env, rippedDir, nil)
 			if n := len(env.Assets.Ripped); n > 0 {
 				item.RippedFile = env.Assets.Ripped[n-1].Path
 			}
@@ -77,7 +77,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Pause disc monitor during ripping to prevent polling interference.
 	if h.monitor != nil {
 		h.monitor.PauseDisc()
-		defer h.monitor.ResumeDisc()
+		logger.Info("disc monitor paused for ripping",
+			"decision_type", "disc_monitor_control",
+			"decision_result", "paused",
+			"decision_reason", "ripping requires exclusive disc access",
+		)
+		defer func() {
+			h.monitor.ResumeDisc()
+			logger.Info("disc monitor resumed after ripping",
+				"decision_type", "disc_monitor_control",
+				"decision_result", "resumed",
+				"decision_reason", "ripping complete, restoring disc polling",
+			)
+		}()
 	}
 
 	// Drive readiness check for /dev/ device paths.
@@ -134,11 +146,22 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		newFile := findNewFile(before, after)
 		if newFile != "" {
 			titleFileMap[title.ID] = newFile
+			logger.Info("title rip completed",
+				"decision_type", "title_rip",
+				"decision_result", "completed",
+				"decision_reason", fmt.Sprintf("title_id=%d file=%s", title.ID, newFile),
+			)
+		} else {
+			logger.Info("title rip completed but no new file detected",
+				"decision_type", "file_discovery",
+				"decision_result", "not_found",
+				"decision_reason", fmt.Sprintf("title_id=%d", title.ID),
+			)
 		}
 	}
 
 	// Map ripped files to assets using TitleID mapping.
-	h.mapRippedAssets(&env, rippedDir, titleFileMap)
+	h.mapRippedAssets(logger, &env, rippedDir, titleFileMap)
 	if n := len(env.Assets.Ripped); n > 0 {
 		item.RippedFile = env.Assets.Ripped[n-1].Path
 	}
@@ -277,8 +300,13 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) [
 // mapRippedAssets maps ripped files to envelope assets using TitleID mapping.
 // titleFileMap maps titleID -> file path from the rip loop. When nil (cache
 // restore path), falls back to directory scanning with index-based mapping.
-func (h *Handler) mapRippedAssets(env *ripspec.Envelope, dir string, titleFileMap map[int]string) {
+func (h *Handler) mapRippedAssets(logger *slog.Logger, env *ripspec.Envelope, dir string, titleFileMap map[int]string) {
 	if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 && titleFileMap != nil {
+		logger.Info("asset mapping strategy selected",
+			"decision_type", "asset_mapping",
+			"decision_result", "title_file_map",
+			"decision_reason", fmt.Sprintf("media_type=%s episodes=%d", env.Metadata.MediaType, len(env.Episodes)),
+		)
 		// TV with TitleID mapping: connect files to episodes via TitleID.
 		for _, ep := range env.Episodes {
 			path, ok := titleFileMap[ep.TitleID]
@@ -296,6 +324,11 @@ func (h *Handler) mapRippedAssets(env *ripspec.Envelope, dir string, titleFileMa
 	}
 
 	// Movie, unknown, or cache restore: scan directory.
+	logger.Info("asset mapping strategy selected",
+		"decision_type", "asset_mapping",
+		"decision_result", "directory_scan",
+		"decision_reason", fmt.Sprintf("media_type=%s episodes=%d", env.Metadata.MediaType, len(env.Episodes)),
+	)
 	// os.ReadDir returns entries sorted by filename.
 	entries, err := os.ReadDir(dir)
 	if err != nil {

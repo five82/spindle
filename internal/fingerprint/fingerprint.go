@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,19 +15,43 @@ import (
 
 // Generate creates a disc fingerprint from the mounted filesystem.
 // It tries strategies in order: Blu-ray, DVD, then fallback.
-func Generate(mountPoint string) (string, error) {
+// If logger is nil, slog.Default() is used.
+func Generate(mountPoint string, logger *slog.Logger) (string, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	// Try Blu-ray first (look for BDMV/index.bdmv).
 	if fp, err := blurayFingerprint(mountPoint); err == nil && fp != "" {
+		logger.Info("disc fingerprint generated",
+			"decision_type", "fingerprint_strategy",
+			"decision_result", "bluray",
+			"decision_reason", "BDMV structure detected",
+		)
 		return fp, nil
 	}
 
 	// Try DVD (look for VIDEO_TS).
 	if fp, err := dvdFingerprint(mountPoint); err == nil && fp != "" {
+		logger.Info("disc fingerprint generated",
+			"decision_type", "fingerprint_strategy",
+			"decision_result", "dvd",
+			"decision_reason", "VIDEO_TS structure detected",
+		)
 		return fp, nil
 	}
 
 	// Fallback: hash file content with size cap.
-	return fallbackFingerprint(mountPoint)
+	fp, err := fallbackFingerprint(mountPoint)
+	if err != nil {
+		return "", err
+	}
+	logger.Info("disc fingerprint generated",
+		"decision_type", "fingerprint_strategy",
+		"decision_result", "fallback",
+		"decision_reason", "no BDMV or VIDEO_TS structure found",
+	)
+	return fp, nil
 }
 
 // blurayFingerprint hashes content-significant Blu-ray files: index.bdmv,

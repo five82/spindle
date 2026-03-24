@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ type Entry struct {
 // Catalog holds the parsed KeyDB data.
 type Catalog struct {
 	entries map[string]string // discID -> title
+	logger  *slog.Logger
 }
 
 // Lookup finds a title by disc ID. Returns empty string if not found.
@@ -37,7 +39,21 @@ func (c *Catalog) Lookup(discID string) string {
 	if !ok {
 		return ""
 	}
-	return c.entries[normalized]
+	title := c.entries[normalized]
+	if title != "" {
+		c.logger.Info("KeyDB lookup hit",
+			"decision_type", "keydb_lookup",
+			"decision_result", "hit",
+			"decision_reason", fmt.Sprintf("disc_id=%s title=%s", normalized, title),
+		)
+	} else {
+		c.logger.Debug("KeyDB lookup miss",
+			"decision_type", "keydb_lookup",
+			"decision_result", "miss",
+			"decision_reason", fmt.Sprintf("disc_id=%s", normalized),
+		)
+	}
+	return title
 }
 
 // Size returns the number of entries in the catalog.
@@ -54,7 +70,12 @@ func (c *Catalog) Size() int {
 // Disc IDs are normalized (0X prefix stripped, uppercased, validated as 40 hex chars).
 // Titles are cleaned via the title extraction chain.
 // If stale is true, the file is older than 7 days and should be re-downloaded.
-func LoadFromFile(path string) (cat *Catalog, stale bool, err error) {
+// If logger is nil, slog.Default() is used.
+func LoadFromFile(path string, logger *slog.Logger) (cat *Catalog, stale bool, err error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, false, fmt.Errorf("keydb: open %s: %w", path, err)
@@ -64,6 +85,13 @@ func LoadFromFile(path string) (cat *Catalog, stale bool, err error) {
 	// Check staleness.
 	if info, statErr := f.Stat(); statErr == nil {
 		stale = time.Since(info.ModTime()) > 7*24*time.Hour
+	}
+	if stale {
+		logger.Warn("KeyDB catalog is stale",
+			"event_type", "keydb_stale",
+			"error_hint", "catalog file older than 7 days",
+			"impact", "disc identification may use outdated data",
+		)
 	}
 
 	entries := make(map[string]string)
@@ -92,7 +120,7 @@ func LoadFromFile(path string) (cat *Catalog, stale bool, err error) {
 		return nil, false, fmt.Errorf("keydb: scan %s: %w", path, err)
 	}
 
-	return &Catalog{entries: entries}, stale, nil
+	return &Catalog{entries: entries, logger: logger}, stale, nil
 }
 
 // normalizeDiscID strips a 0X prefix, validates exactly 40 hex characters,
@@ -256,8 +284,9 @@ func extractFile(zf *zip.File, dest string) error {
 // LoadOrDownload tries to load a catalog from path. If the file does not exist,
 // it downloads the KeyDB zip from url, extracts it to the directory containing
 // path, then loads the result.
-func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration) (*Catalog, bool, error) {
-	cat, stale, err := LoadFromFile(path)
+// If logger is nil, slog.Default() is used.
+func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration, logger *slog.Logger) (*Catalog, bool, error) {
+	cat, stale, err := LoadFromFile(path, logger)
 	if err == nil {
 		return cat, stale, nil
 	}
@@ -269,6 +298,6 @@ func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration
 	if err := Download(ctx, url, destDir, timeout); err != nil {
 		return nil, false, err
 	}
-	cat, stale, err = LoadFromFile(path)
+	cat, stale, err = LoadFromFile(path, logger)
 	return cat, stale, err
 }

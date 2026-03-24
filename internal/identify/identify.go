@@ -175,7 +175,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	var bdInfo *BDInfoResult
 	if discSource == "bluray" {
 		var bdErr error
-		bdInfo, bdErr = RunBDInfo(ctx, h.cfg.MakeMKV.OpticalDrive)
+		bdInfo, bdErr = RunBDInfo(ctx, h.cfg.MakeMKV.OpticalDrive, logger)
 		if bdErr != nil {
 			logger.Warn("bd_info failed",
 				"event_type", "bdinfo_error",
@@ -207,8 +207,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 4: Build title priority chain for TMDB query.
-	rawTitle := h.resolveTitle(item, discInfo, bdInfo)
+	rawTitle, sourceUsed := h.resolveTitleWithSource(item, discInfo, bdInfo)
 	queryTitle := CleanQueryTitle(rawTitle)
+	logger.Info("disc title resolved",
+		"decision_type", "title_resolution",
+		"decision_result", sourceUsed,
+		"decision_reason", fmt.Sprintf("title=%q", rawTitle),
+	)
 	logger.Info("title resolved for TMDB search",
 		"decision_type", "title_source",
 		"decision_result", "resolved",
@@ -361,6 +366,26 @@ func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo, bdI
 	}
 
 	return "Unknown Disc"
+}
+
+// resolveTitleWithSource implements the title priority chain and also returns
+// the source that was used. This is used for observability logging.
+func (h *Handler) resolveTitleWithSource(item *queue.Item, discInfo *makemkv.DiscInfo, bdInfo *BDInfoResult) (string, string) {
+	if h.keydbCat != nil && item.DiscFingerprint != "" {
+		if title := h.keydbCat.Lookup(item.DiscFingerprint); title != "" {
+			return title, "keydb"
+		}
+	}
+	if bdInfo != nil && bdInfo.DiscName != "" {
+		return bdInfo.DiscName, "bdinfo"
+	}
+	if discInfo != nil && discInfo.Name != "" {
+		return discInfo.Name, "makemkv"
+	}
+	if item.DiscTitle != "" {
+		return item.DiscTitle, "disc_label"
+	}
+	return "Unknown Disc", "fallback"
 }
 
 // canonicalTitle builds the canonical disc title from a TMDB match.
@@ -637,11 +662,10 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 		})
 	}
 
-	logger.Debug("episode placeholders created",
-		"season", season,
-		"titles_evaluated", len(env.Titles),
-		"placeholders_created", idx,
-		"min_title_length", h.cfg.MakeMKV.MinTitleLength,
+	logger.Info("episode placeholders created",
+		"decision_type", "episode_placeholders",
+		"decision_result", fmt.Sprintf("%d episodes", idx),
+		"decision_reason", fmt.Sprintf("season=%d titles=%d", season, len(env.Titles)),
 	)
 }
 

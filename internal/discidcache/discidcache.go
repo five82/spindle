@@ -5,6 +5,7 @@ package discidcache
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -25,13 +26,18 @@ type Store struct {
 	path    string
 	mu      sync.RWMutex
 	entries map[string]Entry // fingerprint -> entry
+	logger  *slog.Logger
 }
 
 // Open loads or creates a disc ID cache at path.
-func Open(path string) (*Store, error) {
+func Open(path string, logger *slog.Logger) (*Store, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s := &Store{
 		path:    path,
 		entries: make(map[string]Entry),
+		logger:  logger,
 	}
 
 	data, err := os.ReadFile(path)
@@ -60,8 +66,18 @@ func (s *Store) Lookup(fingerprint string) *Entry {
 
 	entry, ok := s.entries[fingerprint]
 	if !ok {
+		s.logger.Info("disc ID cache miss",
+			"decision_type", "disc_id_cache",
+			"decision_result", "miss",
+			"decision_reason", fmt.Sprintf("fingerprint=%s", fingerprint),
+		)
 		return nil
 	}
+	s.logger.Info("disc ID cache hit",
+		"decision_type", "disc_id_cache",
+		"decision_result", "hit",
+		"decision_reason", fmt.Sprintf("fingerprint=%s tmdb_id=%d media_type=%s", fingerprint, entry.TMDBID, entry.MediaType),
+	)
 	return &entry
 }
 
@@ -71,6 +87,7 @@ func (s *Store) Set(fingerprint string, entry Entry) error {
 	defer s.mu.Unlock()
 
 	s.entries[fingerprint] = entry
+	s.logger.Debug("disc ID cache entry stored", "fingerprint", fingerprint, "tmdb_id", entry.TMDBID)
 	return s.persist()
 }
 
