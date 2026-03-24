@@ -326,7 +326,7 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 		VoteCount:   1000,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best,"movie", "Extended Edition", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "movie", "Extended Edition", "bluray")
 
 	if env.Version != ripspec.CurrentVersion {
 		t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -388,7 +388,7 @@ func TestBuildEnvelope_TV(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best,"tv", "", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "", "bluray")
 
 	if env.Metadata.MediaType != "tv" {
 		t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -438,7 +438,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 
 	t.Run("uses item title", func(t *testing.T) {
 		item := &queue.Item{DiscTitle: "My Disc", DiscFingerprint: "fp1"}
-		env := h.buildFallbackEnvelope(discardLogger(), item,nil)
+		env := h.buildFallbackEnvelope(discardLogger(), item, nil)
 		if env.Metadata.Title != "My Disc" {
 			t.Errorf("Title = %q, want %q", env.Metadata.Title, "My Disc")
 		}
@@ -450,7 +450,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 	t.Run("uses disc name when item title empty", func(t *testing.T) {
 		item := &queue.Item{DiscTitle: ""}
 		discInfo := &makemkv.DiscInfo{Name: "Disc Name"}
-		env := h.buildFallbackEnvelope(discardLogger(), item,discInfo)
+		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
 		if env.Metadata.Title != "Disc Name" {
 			t.Errorf("Title = %q, want %q", env.Metadata.Title, "Disc Name")
 		}
@@ -459,7 +459,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 	t.Run("uses Unknown Disc when both empty", func(t *testing.T) {
 		item := &queue.Item{}
 		discInfo := &makemkv.DiscInfo{}
-		env := h.buildFallbackEnvelope(discardLogger(), item,discInfo)
+		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
 		if env.Metadata.Title != "Unknown Disc" {
 			t.Errorf("Title = %q, want %q", env.Metadata.Title, "Unknown Disc")
 		}
@@ -472,7 +472,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 				{ID: 0, Name: "Title 1", Duration: time.Hour},
 			},
 		}
-		env := h.buildFallbackEnvelope(discardLogger(), item,discInfo)
+		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
 		if len(env.Titles) != 1 {
 			t.Fatalf("len(Titles) = %d, want 1", len(env.Titles))
 		}
@@ -492,7 +492,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 				{ID: 2, Name: "Title 3", Duration: 50 * time.Minute},
 			},
 		}
-		env := h.buildFallbackEnvelope(discardLogger(), item,discInfo)
+		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
 		if env.Metadata.SeasonNumber != 2 {
 			t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)
 		}
@@ -605,7 +605,7 @@ func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best,"tv", "", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "", "bluray")
 
 	if env.Metadata.SeasonNumber != 2 {
 		t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)

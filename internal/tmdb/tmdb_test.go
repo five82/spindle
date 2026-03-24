@@ -95,7 +95,7 @@ func TestSelectBestResult_ExactMatchAccepted(t *testing.T) {
 		{ID: 1, Title: "Other Movie", VoteAverage: 7.0, VoteCount: 100},
 		{ID: 2, Title: "Inception", ReleaseDate: "2010-07-16", VoteAverage: 8.4, VoteCount: 5000},
 	}
-	best := SelectBestResult(slog.Default(), results,"Inception", 0, 5)
+	best := SelectBestResult(slog.Default(), results, "Inception", 0, 5)
 	if best == nil {
 		t.Fatal("expected a result, got nil")
 	}
@@ -108,7 +108,7 @@ func TestSelectBestResult_ExactMatchRejectedLowVotes(t *testing.T) {
 	results := []SearchResult{
 		{ID: 1, Title: "Munich", ReleaseDate: "1972-01-01", VoteAverage: 5.0, VoteCount: 0},
 	}
-	best := SelectBestResult(slog.Default(), results,"Munich", 0, 5)
+	best := SelectBestResult(slog.Default(), results, "Munich", 0, 5)
 	if best != nil {
 		t.Errorf("expected nil (below vote threshold), got ID %d", best.ID)
 	}
@@ -121,7 +121,7 @@ func TestSelectBestResult_NonExactAccepted(t *testing.T) {
 	results := []SearchResult{
 		{ID: 1, Title: "Inception: The Beginning", VoteAverage: 8.4, VoteCount: 5000},
 	}
-	best := SelectBestResult(slog.Default(), results,"Inception", 0, 5)
+	best := SelectBestResult(slog.Default(), results, "Inception", 0, 5)
 	if best == nil {
 		t.Fatal("expected a result, got nil")
 	}
@@ -134,7 +134,7 @@ func TestSelectBestResult_NonExactRejectedLowAverage(t *testing.T) {
 	results := []SearchResult{
 		{ID: 1, Title: "Inception: The Beginning", VoteAverage: 2.0, VoteCount: 5000},
 	}
-	best := SelectBestResult(slog.Default(), results,"Inception", 0, 5)
+	best := SelectBestResult(slog.Default(), results, "Inception", 0, 5)
 	if best != nil {
 		t.Errorf("expected nil (vote_average below 3.0), got ID %d", best.ID)
 	}
@@ -147,7 +147,7 @@ func TestSelectBestResult_ExactPreferredOverHigherScore(t *testing.T) {
 		// Exact match with lower score.
 		{ID: 2, Title: "Munich", ReleaseDate: "2005-12-23", VoteAverage: 7.0, VoteCount: 3000},
 	}
-	best := SelectBestResult(slog.Default(), results,"Munich", 0, 5)
+	best := SelectBestResult(slog.Default(), results, "Munich", 0, 5)
 	if best == nil {
 		t.Fatal("expected a result, got nil")
 	}
@@ -161,7 +161,7 @@ func TestSelectBestResult_YearDisambiguation(t *testing.T) {
 		{ID: 1, Title: "Dune", ReleaseDate: "1984-12-14", VoteAverage: 6.0, VoteCount: 500},
 		{ID: 2, Title: "Dune", ReleaseDate: "2021-10-22", VoteAverage: 7.8, VoteCount: 8000},
 	}
-	best := SelectBestResult(slog.Default(), results,"Dune", 2021, 5)
+	best := SelectBestResult(slog.Default(), results, "Dune", 2021, 5)
 	if best == nil {
 		t.Fatal("expected a result, got nil")
 	}
@@ -171,7 +171,7 @@ func TestSelectBestResult_YearDisambiguation(t *testing.T) {
 }
 
 func TestSelectBestResult_NoResults(t *testing.T) {
-	best := SelectBestResult(slog.Default(), nil,"Inception", 0, 5)
+	best := SelectBestResult(slog.Default(), nil, "Inception", 0, 5)
 	if best != nil {
 		t.Errorf("expected nil, got %+v", best)
 	}

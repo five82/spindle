@@ -208,9 +208,8 @@ func selectBestCandidate(logger *slog.Logger, results []opensubtitles.SubtitleRe
 	}
 
 	for _, r := range results {
-		selected := r.Attributes.DownloadCount == best.Attributes.DownloadCount && r.Attributes.HearingImpaired == best.Attributes.HearingImpaired
 		result := "skipped"
-		if selected {
+		if r.ID == best.ID {
 			result = "selected"
 		}
 		logger.Debug("content ID candidate",
