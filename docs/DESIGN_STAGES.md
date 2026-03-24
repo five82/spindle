@@ -875,3 +875,11 @@ the metadata-to-filename path.
   (non-fatal if persistence fails).
 - **Cross-stage missing asset checks**: Warns about missing encoded/subtitled
   assets, flags for review.
+
+### 7.10 Staging Cleanup
+
+After successful organization (library or review routing), the staging
+directory (`{staging_dir}/{fingerprint}/`) is removed via `os.RemoveAll`.
+Cleanup failures are logged as warnings (non-fatal) — disk space reclamation
+is best-effort. The existing `staging.CleanStale()` in the identification
+stage remains as a safety net for failed or abandoned items.

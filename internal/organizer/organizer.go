@@ -185,6 +185,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
+	h.cleanupStaging(ctx, item)
+
 	logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
 	return nil
 }
@@ -301,6 +303,8 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 		item.FinalFile = destPath
 	}
 
+	h.cleanupStaging(ctx, item)
+
 	logger.Info("review routing completed", "event_type", "stage_complete", "stage", "organizing", "review_path", reviewPath)
 	return nil
 }
@@ -314,6 +318,35 @@ func validateEditionFilename(filename, edition string) error {
 		return fmt.Errorf("edition validation failed: filename %q missing expected suffix %q", filename, expected)
 	}
 	return nil
+}
+
+// cleanupStaging removes the staging directory for a completed item.
+// Failures are logged as warnings (non-fatal) — disk space reclamation is
+// best-effort.
+func (h *Handler) cleanupStaging(ctx context.Context, item *queue.Item) {
+	logger := stage.LoggerFromContext(ctx)
+	root, err := item.StagingRoot(h.cfg.Paths.StagingDir)
+	if err != nil {
+		logger.Warn("cannot resolve staging root for cleanup",
+			"event_type", "staging_cleanup_failed",
+			"error_hint", err.Error(),
+			"impact", "disk space not reclaimed; manual cleanup needed",
+		)
+		return
+	}
+	if err := os.RemoveAll(root); err != nil {
+		logger.Warn("failed to clean staging directory; leftover files remain",
+			"staging_root", root,
+			"event_type", "staging_cleanup_failed",
+			"error_hint", "check staging_dir permissions",
+			"impact", "disk space not reclaimed; manual cleanup needed",
+		)
+		return
+	}
+	logger.Info("cleaned staging directory",
+		"event_type", "staging_cleanup",
+		"staging_root", root,
+	)
 }
 
 // copySidecarSubtitle copies a .en.srt sidecar subtitle file alongside the
