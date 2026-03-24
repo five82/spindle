@@ -174,6 +174,22 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		// Try forced subtitles from OpenSubtitles (if enabled and disc has forced sub track).
 		if h.osClient != nil && h.cfg.Subtitles.OpenSubtitlesEnabled && env.Attributes.HasForcedSubtitleTrack {
 			h.tryForcedSubs(ctx, logger, &env, key, asset.Path, &record)
+		} else {
+			var reason string
+			switch {
+			case h.osClient == nil:
+				reason = "opensubtitles client unavailable"
+			case !h.cfg.Subtitles.OpenSubtitlesEnabled:
+				reason = "opensubtitles_enabled is false"
+			default:
+				reason = "no forced subtitle track on disc"
+			}
+			logger.Info("forced subtitle search skipped",
+				"decision_type", "forced_subtitle_search",
+				"decision_result", "skipped",
+				"decision_reason", reason,
+				"episode_key", key,
+			)
 		}
 
 		records = append(records, record)

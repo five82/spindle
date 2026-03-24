@@ -664,6 +664,10 @@ When `opensubtitles_enabled` and the disc has a forced subtitle track indicator:
    (see Section 6.4.1).
 3. Store forced subtitle as additional SRT sidecar.
 
+When any gate condition is not met, log a `forced_subtitle_search` skip decision
+at INFO with the specific reason: "opensubtitles client unavailable",
+"opensubtitles_enabled is false", or "no forced subtitle track on disc".
+
 **OpenSubtitles disabled diagnostics** (`openSubtitlesDisabledReason()`):
 Returns granular reason strings: "configuration unavailable",
 "opensubtitles_enabled is false", "opensubtitles_api_key not set".
