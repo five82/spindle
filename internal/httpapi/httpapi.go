@@ -55,7 +55,7 @@ type Server struct {
 }
 
 // New creates an HTTP API server. discMon and shutdownCh may be nil.
-func New(store *queue.Store, token string, logger *slog.Logger, discMon *discmonitor.Monitor, shutdownCh chan struct{}, opts ...ServerOption) *Server {
+func New(store *queue.Store, token string, discMon *discmonitor.Monitor, shutdownCh chan struct{}, logger *slog.Logger, opts ...ServerOption) *Server {
 	s := &Server{
 		store:       store,
 		token:       token,

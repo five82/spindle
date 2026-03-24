@@ -8,7 +8,7 @@ import (
 )
 
 func newTestManager(stages []PipelineStage) *Manager {
-	m := New(nil, nil, slog.Default(), nil)
+	m := New(nil, nil, nil, slog.Default())
 	m.ConfigureStages(stages)
 	return m
 }

@@ -54,7 +54,7 @@ func RefineAudioTargets(
 
 	audioCount := result.AudioStreamCount()
 	if audioCount <= 1 {
-		sel := audio.Select(logger, result.Streams)
+		sel := audio.Select(result.Streams, logger)
 		logger.Info("audio refinement: single track, no remux needed",
 			"decision_type", logs.DecisionAudioRefinement,
 			"decision_result", "skipped",
@@ -67,7 +67,7 @@ func RefineAudioTargets(
 		}, nil
 	}
 
-	sel := audio.Select(logger, result.Streams)
+	sel := audio.Select(result.Streams, logger)
 
 	// Merge additionalKeep into kept indices.
 	keepSet := make(map[int]bool)

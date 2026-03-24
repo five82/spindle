@@ -136,14 +136,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		// Snapshot files before rip to detect the new file.
 		before := listMKVFiles(rippedDir)
 
-		err := makemkv.Rip(ctx, logger, h.cfg.MakeMKV.OpticalDrive, title.ID, rippedDir,
+		err := makemkv.Rip(ctx, h.cfg.MakeMKV.OpticalDrive, title.ID, rippedDir,
 			time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
 			h.cfg.MakeMKV.MinTitleLength,
 			func(p makemkv.RipProgress) {
 				item.ProgressPercent = p.Percent
 				item.ProgressMessage = p.Message
 				_ = h.store.UpdateProgress(item)
-			},
+			}, logger,
 		)
 		if err != nil {
 			return fmt.Errorf("rip title %d: %w", title.ID, err)

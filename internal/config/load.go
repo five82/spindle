@@ -15,7 +15,7 @@ import (
 // Load reads, normalizes, and validates config from the search path.
 // Search order: 1) explicit path, 2) ~/.config/spindle/config.toml,
 // 3) ./spindle.toml, 4) all defaults (no error).
-func Load(logger *slog.Logger, explicitPath string) (*Config, error) {
+func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	logger = logs.Default(logger)
 	cfg := &Config{}
 

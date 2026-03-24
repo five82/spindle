@@ -62,7 +62,7 @@ type Monitor struct {
 }
 
 // New creates a disc monitor for the given device.
-func New(device string, logger *slog.Logger, store *queue.Store) *Monitor {
+func New(device string, store *queue.Store, logger *slog.Logger) *Monitor {
 	if device == "" {
 		device = "/dev/sr0"
 	}

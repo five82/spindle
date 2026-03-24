@@ -60,7 +60,7 @@ func (s Selection) Changed(totalAudio int) bool {
 // best English audio track from the provided streams. Non-audio streams are
 // ignored. If no English track is found, the first audio stream is used as
 // a fallback.
-func Select(logger *slog.Logger, streams []ffprobe.Stream) Selection {
+func Select(streams []ffprobe.Stream, logger *slog.Logger) Selection {
 	logger = logs.Default(logger)
 
 	// Build candidate list from audio streams only.

@@ -297,7 +297,7 @@ func releaseYear(r *SearchResult) int {
 //
 // Preference: an exact match meeting its thresholds is preferred over a
 // higher-scoring non-exact result.
-func SelectBestResult(logger *slog.Logger, results []SearchResult, query string, year, minVoteCountExact int) *SearchResult {
+func SelectBestResult(results []SearchResult, query string, year, minVoteCountExact int, logger *slog.Logger) *SearchResult {
 	if len(results) == 0 {
 		return nil
 	}

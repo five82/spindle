@@ -83,9 +83,9 @@ func newCacheRipCmd() *cobra.Command {
 
 			// MakeMKV scan.
 			fmt.Printf("Scanning disc on %s...\n", device)
-			discInfo, err := makemkv.Scan(ctx, nil, device,
+			discInfo, err := makemkv.Scan(ctx, device,
 				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second,
-				cfg.MakeMKV.MinTitleLength)
+				cfg.MakeMKV.MinTitleLength, nil)
 			if err != nil {
 				return fmt.Errorf("makemkv scan: %w", err)
 			}
@@ -104,7 +104,7 @@ func newCacheRipCmd() *cobra.Command {
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
 			results, searchErr := tmdbClient.SearchMulti(ctx, discTitle)
 			if searchErr == nil && len(results) > 0 {
-				best := tmdb.SelectBestResult(slog.Default(), results, discTitle, 0, 5)
+				best := tmdb.SelectBestResult(results, discTitle, 0, 5, slog.Default())
 				if best != nil {
 					fmt.Printf("TMDB: %s (%s, ID %d)\n", best.DisplayTitle(), best.Year(), best.ID)
 					discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
@@ -140,12 +140,12 @@ func newCacheRipCmd() *cobra.Command {
 				fmt.Printf("Ripping title %d/%d (ID %d, %s)...\n",
 					i+1, len(discInfo.Titles), title.ID, title.Duration)
 
-				ripErr := makemkv.Rip(ctx, nil, device, title.ID, tempDir,
+				ripErr := makemkv.Rip(ctx, device, title.ID, tempDir,
 					time.Duration(cfg.MakeMKV.RipTimeout)*time.Second,
 					cfg.MakeMKV.MinTitleLength,
 					func(p makemkv.RipProgress) {
 						fmt.Printf("\r  Progress: %.0f%%", p.Percent)
-					},
+					}, nil,
 				)
 				if ripErr != nil {
 					return fmt.Errorf("rip title %d: %w", title.ID, ripErr)

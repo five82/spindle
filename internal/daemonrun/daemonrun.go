@@ -135,7 +135,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Created before stage handlers so the ripper can pause/resume detection.
 	var discMon *discmonitor.Monitor
 	if cfg.MakeMKV.OpticalDrive != "" {
-		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, logger, store)
+		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, store, logger)
 	}
 
 	// Create stage handlers.
@@ -169,7 +169,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	statusTracker := httpapi.NewStatusTracker(depResponses)
 
 	// Create workflow manager and configure stages.
-	manager := workflow.New(store, notifier, logger, statusTracker)
+	manager := workflow.New(store, notifier, statusTracker, logger)
 	manager.ConfigureStages([]workflow.PipelineStage{
 		{Name: "identification", Handler: identifyHandler, Stage: queue.StagePending, Semaphore: workflow.SemDisc},
 		{Name: "ripping", Handler: ripperHandler, Stage: queue.StageIdentification, Semaphore: workflow.SemDisc},
@@ -182,7 +182,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Create HTTP API with shutdown channel.
 	shutdownCh := make(chan struct{})
-	api := httpapi.New(store, cfg.API.Token, logger, discMon, shutdownCh,
+	api := httpapi.New(store, cfg.API.Token, discMon, shutdownCh, logger,
 		httpapi.WithStatusInfo(httpapi.NewStatusInfo(cfg)),
 		httpapi.WithLogBuffer(logBuffer),
 		httpapi.WithStatusTracker(statusTracker))

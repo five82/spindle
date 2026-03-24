@@ -151,7 +151,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			return fmt.Errorf("ffprobe post-refinement %s: %w", path, err)
 		}
 
-		selection := audio.Select(logger, result.Streams)
+		selection := audio.Select(result.Streams, logger)
 		analysisData.PrimaryTrack = ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
 		if analysisData.PrimaryDescription == "" {
 			analysisData.PrimaryDescription = selection.PrimaryLabel()

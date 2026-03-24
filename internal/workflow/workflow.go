@@ -57,7 +57,7 @@ type Manager struct {
 }
 
 // New creates a workflow manager. observer may be nil.
-func New(store *queue.Store, notifier *notify.Notifier, logger *slog.Logger, observer StatusObserver) *Manager {
+func New(store *queue.Store, notifier *notify.Notifier, observer StatusObserver, logger *slog.Logger) *Manager {
 	return &Manager{
 		store:    store,
 		notifier: notifier,

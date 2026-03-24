@@ -213,7 +213,7 @@ func normalizeDuplicateTitle(title string) string {
 
 // Download fetches a KeyDB zip file from url and extracts KEYDB.cfg into destDir.
 // The destDir is created if it does not exist.
-func Download(ctx context.Context, logger *slog.Logger, url, destDir string, timeout time.Duration) error {
+func Download(ctx context.Context, url, destDir string, timeout time.Duration, logger *slog.Logger) error {
 	logger = logs.Default(logger)
 	logger.Info("KeyDB download started",
 		"event_type", "keydb_download_start",
@@ -308,7 +308,7 @@ func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration
 	}
 
 	destDir := filepath.Dir(path)
-	if err := Download(ctx, logger, url, destDir, timeout); err != nil {
+	if err := Download(ctx, url, destDir, timeout, logger); err != nil {
 		return nil, false, err
 	}
 	cat, stale, err = LoadFromFile(path, logger)

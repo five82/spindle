@@ -199,9 +199,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 3: MakeMKV scan.
-	discInfo, err := makemkv.Scan(ctx, logger, h.cfg.MakeMKV.OpticalDrive,
+	discInfo, err := makemkv.Scan(ctx, h.cfg.MakeMKV.OpticalDrive,
 		time.Duration(h.cfg.MakeMKV.InfoTimeout)*time.Second,
-		h.cfg.MakeMKV.MinTitleLength)
+		h.cfg.MakeMKV.MinTitleLength, logger)
 	if err != nil {
 		return fmt.Errorf("makemkv scan: %w", err)
 	}
@@ -256,7 +256,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return fmt.Errorf("tmdb search: %w", err)
 	}
 
-	best := tmdb.SelectBestResult(logger, results, queryTitle, searchYear, 5)
+	best := tmdb.SelectBestResult(results, queryTitle, searchYear, 5, logger)
 	if best == nil {
 		logger.Warn("no TMDB match",
 			"event_type", "tmdb_no_match",

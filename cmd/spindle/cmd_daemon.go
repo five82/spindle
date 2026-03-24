@@ -206,7 +206,7 @@ func newDaemonCmd() *cobra.Command {
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
 			// Daemon loads its own config.
-			daemonCfg, err := config.Load(nil, flagConfig)
+			daemonCfg, err := config.Load(flagConfig, nil)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}

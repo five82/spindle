@@ -44,7 +44,7 @@ type RipProgress struct {
 // Scan runs makemkvcon info on the given device and parses disc information.
 // The device string is normalized: empty defaults to "disc:0", paths starting
 // with /dev/ become "dev:<path>", and already-prefixed values pass through.
-func Scan(ctx context.Context, logger *slog.Logger, device string, timeout time.Duration, minLength int) (*DiscInfo, error) {
+func Scan(ctx context.Context, device string, timeout time.Duration, minLength int, logger *slog.Logger) (*DiscInfo, error) {
 	logger = logs.Default(logger)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -113,7 +113,7 @@ func Scan(ctx context.Context, logger *slog.Logger, device string, timeout time.
 
 // Rip runs makemkvcon mkv to rip a single title from disc to outputDir.
 // The progress callback, if non-nil, is called with progress updates.
-func Rip(ctx context.Context, logger *slog.Logger, device string, titleID int, outputDir string, timeout time.Duration, minLength int, progress func(RipProgress)) error {
+func Rip(ctx context.Context, device string, titleID int, outputDir string, timeout time.Duration, minLength int, progress func(RipProgress), logger *slog.Logger) error {
 	logger = logs.Default(logger)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

@@ -82,9 +82,9 @@ func newIdentifyCmd() *cobra.Command {
 
 			// MakeMKV scan.
 			fmt.Printf("Scanning disc on %s...\n", device)
-			discInfo, err := makemkv.Scan(ctx, nil, device,
+			discInfo, err := makemkv.Scan(ctx, device,
 				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second,
-				cfg.MakeMKV.MinTitleLength)
+				cfg.MakeMKV.MinTitleLength, nil)
 			if err != nil {
 				return fmt.Errorf("makemkv scan: %w", err)
 			}
@@ -132,7 +132,7 @@ func newIdentifyCmd() *cobra.Command {
 				return nil
 			}
 
-			best := tmdb.SelectBestResult(slog.Default(), results, queryTitle, 0, 5)
+			best := tmdb.SelectBestResult(results, queryTitle, 0, 5, slog.Default())
 			if best != nil {
 				fmt.Printf("%s %s (%s) [%s, TMDB %d, votes %d]\n",
 					labelStyle("Selected:"), best.DisplayTitle(), best.Year(), best.MediaType, best.ID, best.VoteCount)

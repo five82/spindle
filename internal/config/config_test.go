@@ -23,7 +23,7 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	// Set TMDB_API_KEY so validation passes.
 	t.Setenv("TMDB_API_KEY", "test-key")
 
-	cfg, err := Load(nil, "")
+	cfg, err := Load("", nil)
 	if err != nil {
 		t.Fatalf("Load with no config file should succeed, got: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestEnvironmentVariableOverrides(t *testing.T) {
 	t.Setenv("OPENSUBTITLES_API_KEY", "os-from-env")
 	t.Setenv("OPENSUBTITLES_USER_TOKEN", "os-user-from-env")
 
-	cfg, err := Load(nil, "")
+	cfg, err := Load("", nil)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestHFTokenFallback(t *testing.T) {
 	t.Setenv("HUGGING_FACE_HUB_TOKEN", "")
 	t.Setenv("HF_TOKEN", "hf-fallback")
 
-	cfg, err := Load(nil, "")
+	cfg, err := Load("", nil)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
@@ -371,7 +371,7 @@ svt_av1_preset = 4
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(nil, configPath)
+	cfg, err := Load(configPath, nil)
 	if err != nil {
 		t.Fatalf("Load from explicit path failed: %v", err)
 	}
@@ -400,7 +400,7 @@ api_key = "from-file"
 
 	t.Setenv("TMDB_API_KEY", "from-env")
 
-	cfg, err := Load(nil, configPath)
+	cfg, err := Load(configPath, nil)
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
