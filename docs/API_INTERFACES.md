@@ -705,10 +705,7 @@ The `QueueItem` JSON object returned by queue endpoints:
   },
   "episodeIdentifiedCount":  int,
   "subtitleGeneration": {
-    "opensubtitles":           int,
-    "whisperx":                int,
-    "expectedOpenSubtitles":   bool,
-    "fallbackUsed":            bool
+    "whisperx":                int
   },
   "primaryAudioDescription": string,
   "commentaryCount":         int

@@ -83,10 +83,7 @@ type TotalsResponse struct {
 
 // SubGenResponse summarizes subtitle generation.
 type SubGenResponse struct {
-	OpenSubtitles         int  `json:"opensubtitles"`
-	WhisperX              int  `json:"whisperx"`
-	ExpectedOpenSubtitles bool `json:"expectedOpenSubtitles"`
-	FallbackUsed          bool `json:"fallbackUsed"`
+	WhisperX int `json:"whisperx"`
 }
 
 // StatusAPIResponse is the top-level /api/status response.
@@ -246,18 +243,9 @@ func populateRipSpecDerived(resp *ItemResponse, env *ripspec.Envelope, item *que
 	if results := env.Attributes.SubtitleGenerationResults; len(results) > 0 {
 		sg := &SubGenResponse{}
 		for _, rec := range results {
-			switch strings.ToLower(rec.Source) {
-			case "opensubtitles":
-				sg.OpenSubtitles++
-			case "whisperx":
+			if strings.EqualFold(rec.Source, "whisperx") {
 				sg.WhisperX++
 			}
-		}
-		if sg.WhisperX > 0 && sg.OpenSubtitles > 0 {
-			sg.FallbackUsed = true
-		} else if sg.WhisperX > 0 {
-			sg.FallbackUsed = true
-			sg.ExpectedOpenSubtitles = true
 		}
 		resp.SubtitleGeneration = sg
 	}
