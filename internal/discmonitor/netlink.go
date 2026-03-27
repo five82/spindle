@@ -79,14 +79,11 @@ func (n *NetlinkMonitor) Stop() {
 func (n *NetlinkMonitor) monitorLoop(ctx context.Context) {
 	defer close(n.done)
 
-	queue := make(chan netlink.UEvent)
-	errs := make(chan error)
+	queue := make(chan netlink.UEvent, 1)
+	errs := make(chan error, 1)
 
 	matcher := n.buildMatcher()
 	monitorQuit := n.conn.Monitor(queue, errs, matcher)
-
-	// Extract expected device name for filtering (e.g., "/dev/sr0").
-	expectedDev := n.device
 
 	for {
 		select {
@@ -97,7 +94,7 @@ func (n *NetlinkMonitor) monitorLoop(ctx context.Context) {
 			close(monitorQuit)
 			return
 		case uevent := <-queue:
-			n.handleEvent(ctx, uevent, expectedDev)
+			n.handleEvent(ctx, uevent)
 		case err := <-errs:
 			n.logger.Warn("netlink monitor error",
 				"event_type", "netlink_monitor_error",
@@ -125,8 +122,8 @@ func (n *NetlinkMonitor) buildMatcher() netlink.Matcher {
 }
 
 // handleEvent processes a matched uevent, filtering by device name.
-func (n *NetlinkMonitor) handleEvent(ctx context.Context, uevent netlink.UEvent, expectedDev string) {
-	devname := extractDeviceName(uevent, expectedDev)
+func (n *NetlinkMonitor) handleEvent(ctx context.Context, uevent netlink.UEvent) {
+	devname := extractDeviceName(uevent)
 	if devname == "" {
 		n.logger.Debug("ignoring event without device name",
 			"action", string(uevent.Action),
@@ -135,10 +132,10 @@ func (n *NetlinkMonitor) handleEvent(ctx context.Context, uevent netlink.UEvent,
 		return
 	}
 
-	if devname != expectedDev {
+	if devname != n.device {
 		n.logger.Debug("ignoring event for non-configured device",
 			"device", devname,
-			"configured_device", expectedDev,
+			"configured_device", n.device,
 		)
 		return
 	}
@@ -162,20 +159,16 @@ func (n *NetlinkMonitor) handleEvent(ctx context.Context, uevent netlink.UEvent,
 }
 
 // extractDeviceName gets the device path from a uevent.
-func extractDeviceName(uevent netlink.UEvent, fallbackDevice string) string {
+// Falls back to constructing from DEVPATH when DEVNAME is absent (some kernel versions omit it).
+func extractDeviceName(uevent netlink.UEvent) string {
 	if devname := uevent.Env["DEVNAME"]; devname != "" {
 		return devname
 	}
 
-	// Try to construct from DEVPATH (e.g., /devices/pci.../block/sr0).
 	devpath := uevent.Env["DEVPATH"]
 	if devpath == "" {
 		return ""
 	}
 
-	parts := strings.Split(devpath, "/")
-	if len(parts) == 0 {
-		return ""
-	}
-	return "/dev/" + parts[len(parts)-1]
+	return "/dev/" + devpath[strings.LastIndex(devpath, "/")+1:]
 }
