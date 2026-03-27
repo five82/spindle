@@ -103,6 +103,16 @@ func TestSelect(t *testing.T) {
 			wantRemoved: []int{1},
 		},
 		{
+			name: "stereo preferred over mono",
+			streams: []ffprobe.Stream{
+				mkStream(0, "aac", "eng", 1),
+				mkStream(1, "aac", "eng", 2),
+			},
+			wantIndex:   1,
+			wantKeep:    []int{1},
+			wantRemoved: []int{0},
+		},
+		{
 			name: "default flag tiebreaker",
 			streams: []ffprobe.Stream{
 				mkStream(0, "aac", "eng", 6),

@@ -271,9 +271,9 @@ MakeMKV audio extraction before rip.
    audio, lossless codec, default flag).
 2. Filter to English candidates (language starts with "en").
 3. If no English found, fall back to first available stream.
-4. Score candidates: channel count (8ch=1000, 6ch=800, 4ch=600, 2ch=400) +
-   lossless bonus (100) + default flag (5) - stream order tiebreaker (0.1 per
-   position).
+4. Score candidates: channel count (8ch=1000, 6ch=800, 4ch=600, 2ch=400,
+   1ch=200) + source quality (lossless=100, lossy=50) + default flag (5) -
+   stream order tiebreaker (0.1 per position).
 5. Select highest-scoring candidate as primary.
 6. All other audio streams are marked for removal.
 

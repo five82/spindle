@@ -165,13 +165,17 @@ func scoreCandidate(c candidate, position int) float64 {
 		score = 800
 	case c.channels >= 4:
 		score = 600
-	default:
+	case c.channels >= 2:
 		score = 400
+	default:
+		score = 200
 	}
 
-	// Lossless bonus.
+	// Source quality bonus (lossless sources produce cleaner transcodes).
 	if c.isLossless {
 		score += 100
+	} else {
+		score += 50
 	}
 
 	// Default flag bonus.
