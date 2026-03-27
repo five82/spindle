@@ -149,13 +149,21 @@ Heuristics to determine if disc is movie or TV:
 4. Disc label from lsblk
 5. Default: "Unknown Disc"
 
+The `identify` CLI command uses the same identification handler as the daemon
+to ensure consistent results. Both paths call `Handler.Identify()`.
+
 ### 1.6 TMDB Search
 
 1. Extract year from resolved title via trailing year pattern (e.g., "Munich (2005)"
    -> title "Munich", year 2005). Year extraction priority: BDInfo year, then
    resolved title year, then item disc title year. Log year source as
    `decision_type: "year_source"`.
-2. Clean title string for search (remove year, disc metadata, normalize).
+2. Clean title string for search:
+   a. Strip disc metadata: season N, disc N, volume N, part N, "TV Series"
+   b. Strip format branding: "Ultra HD Blu-ray", "Blu-ray", "4K Ultra HD",
+      "UHD", "DVD", "BD", and trademark symbols
+   c. Extract year (handled separately as search parameter)
+   d. Clean trailing punctuation and normalize whitespace
 3. Search TMDB with cleaned title.
 4. If movie hint: search `/search/movie` first, fall back to `/search/multi`.
 5. If TV hint: search `/search/tv` first, fall back to `/search/multi`.

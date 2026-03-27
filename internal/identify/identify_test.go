@@ -116,9 +116,49 @@ func TestCleanQueryTitle(t *testing.T) {
 			want:  "BATMAN",
 		},
 		{
+			name:  "strips Ultra HD Blu-ray with trademark",
+			input: "Jackie Brown - Ultra HD Blu-ray\u2122",
+			want:  "Jackie Brown",
+		},
+		{
+			name:  "strips Blu-ray",
+			input: "Jackie Brown - Blu-ray",
+			want:  "Jackie Brown",
+		},
+		{
+			name:  "strips 4K Ultra HD",
+			input: "The Matrix 4K Ultra HD",
+			want:  "The Matrix",
+		},
+		{
+			name:  "strips UHD",
+			input: "Inception - UHD",
+			want:  "Inception",
+		},
+		{
+			name:  "strips DVD",
+			input: "Alien DVD",
+			want:  "Alien",
+		},
+		{
+			name:  "combined disc metadata and format branding",
+			input: "Batman TV Series - Season 2: Disc 6 Blu-ray",
+			want:  "Batman",
+		},
+		{
+			name:  "no false positive on BD within words",
+			input: "Abduction",
+			want:  "Abduction",
+		},
+		{
 			name:  "falls back to original if result would be empty",
 			input: "Season 1",
 			want:  "Season 1",
+		},
+		{
+			name:  "falls back to original for format-only title",
+			input: "Blu-ray",
+			want:  "Blu-ray",
 		},
 	}
 

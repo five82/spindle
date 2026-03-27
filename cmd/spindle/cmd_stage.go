@@ -16,9 +16,10 @@ import (
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/fingerprint"
-	"github.com/five82/spindle/internal/makemkv"
+	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/opensubtitles"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/tmdb"
 	"github.com/five82/spindle/internal/transcription"
 )
@@ -59,107 +60,112 @@ func newIdentifyCmd() *cobra.Command {
 				}
 			}
 
-			// Check disc ID cache for fast path.
-			if fp != "" {
-				store, err := discidcache.Open(cfg.DiscIDCachePath(), nil)
-				if err == nil {
-					if entry := store.Lookup(fp); entry != nil {
-						fmt.Println(headerStyle("=== Disc ID Cache Hit ==="))
-						fmt.Printf("%s %s\n", labelStyle("Title:      "), entry.Title)
-						fmt.Printf("%s %d\n", labelStyle("TMDB ID:    "), entry.TMDBID)
-						fmt.Printf("%s %s\n", labelStyle("Type:       "), entry.MediaType)
-						if entry.Year != "" {
-							fmt.Printf("%s %s\n", labelStyle("Year:       "), entry.Year)
-						}
-						if entry.Season > 0 {
-							fmt.Printf("%s %d\n", labelStyle("Season:     "), entry.Season)
-						}
-						fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), dimStyle(fp))
-						return nil
-					}
-				}
+			// Build logger for identification.
+			var logger *slog.Logger
+			if flagVerbose {
+				logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			} else {
+				logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 			}
 
-			// MakeMKV scan.
+			// Open disc ID cache (optional).
+			discIDStore, _ := discidcache.Open(cfg.DiscIDCachePath(), nil)
+
+			// Load KeyDB catalog (optional).
+			var keydbCat *keydb.Catalog
+			if cat, _, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath, logger); loadErr == nil {
+				keydbCat = cat
+			}
+
+			// Build TMDB client.
+			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
+
+			// Construct the identification handler (nil for store, llm, notifier).
+			handler := identify.New(cfg, nil, tmdbClient, nil, nil, discIDStore, keydbCat)
+
+			// Build a temporary queue item for identification.
+			item := &queue.Item{
+				DiscTitle:       discLabel,
+				DiscFingerprint: fp,
+			}
+
 			fmt.Printf("Scanning disc on %s...\n", device)
-			discInfo, err := makemkv.Scan(ctx, device,
-				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second,
-				cfg.MakeMKV.MinTitleLength, nil)
+			result, err := handler.Identify(ctx, item, logger)
 			if err != nil {
-				return fmt.Errorf("makemkv scan: %w", err)
+				return err
 			}
 
-			label := discInfo.Name
-			if label == "" {
-				label = discLabel
-			}
-
+			// === Disc Info ===
 			fmt.Printf("\n%s\n", headerStyle("=== Disc Info ==="))
-			fmt.Printf("%s %s\n", labelStyle("Label:  "), label)
-			fmt.Printf("%s %d\n", labelStyle("Titles: "), len(discInfo.Titles))
+			if result.DiscInfo != nil {
+				label := result.DiscInfo.Name
+				if label == "" {
+					label = discLabel
+				}
+				fmt.Printf("%s %s\n", labelStyle("Label:  "), label)
+				fmt.Printf("%s %d\n", labelStyle("Titles: "), len(result.DiscInfo.Titles))
+			}
 			if fp != "" {
 				fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), dimStyle(fp))
 			}
-			for _, t := range discInfo.Titles {
-				fmt.Printf("  Title %d: %s (%s, %d ch, %s)\n",
-					t.ID, t.Name, t.Duration, t.Chapters, formatBytes(t.SizeBytes))
+			if result.BDInfo != nil {
+				fmt.Printf("%s %s\n", labelStyle("BDInfo: "), result.BDInfo.DiscName)
+			}
+			fmt.Printf("%s %s\n", labelStyle("Source: "), result.DiscSource)
+			if result.DiscInfo != nil {
+				for _, t := range result.DiscInfo.Titles {
+					fmt.Printf("  Title %d: %s (%s, %d ch, %s)\n",
+						t.ID, t.Name, t.Duration, t.Chapters, formatBytes(t.SizeBytes))
+				}
 			}
 
-			// TMDB search.
-			rawTitle := label
-			if rawTitle == "" {
-				rawTitle = "Unknown Disc"
-			}
-			queryTitle := identify.CleanQueryTitle(rawTitle)
-
+			// === TMDB Search ===
 			fmt.Printf("\n%s\n", headerStyle("=== TMDB Search ==="))
-			if queryTitle != rawTitle {
-				fmt.Printf("%s %s (cleaned from %q)\n", labelStyle("Query:  "), queryTitle, rawTitle)
-			} else {
-				fmt.Printf("%s %s\n", labelStyle("Query:  "), queryTitle)
+			fmt.Printf("%s %s (source: %s)\n", labelStyle("Query:  "), result.QueryTitle, result.TitleSource)
+			if result.QueryTitle != result.RawTitle {
+				fmt.Printf("%s %s\n", labelStyle("Raw:    "), dimStyle(result.RawTitle))
+			}
+			if result.SearchYear > 0 {
+				fmt.Printf("%s %d (source: %s)\n", labelStyle("Year:   "), result.SearchYear, result.YearSource)
 			}
 
-			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
-			results, err := tmdbClient.SearchMulti(ctx, queryTitle)
-			if err != nil {
-				return fmt.Errorf("tmdb search: %w", err)
-			}
-
+			// === TMDB Results ===
 			fmt.Printf("\n%s\n", headerStyle("=== TMDB Results ==="))
-			if len(results) == 0 {
-				fmt.Println("No TMDB results found")
+			if result.Degraded {
+				fmt.Println("No TMDB results met confidence threshold.")
 				fmt.Println("Spindle will flag this item for manual review.")
-				return nil
 			}
 
-			best := tmdb.SelectBestResult(results, queryTitle, 0, 5, slog.Default())
-			if best != nil {
+			if result.Best != nil {
 				fmt.Printf("%s %s (%s) [%s, TMDB %d, votes %d]\n",
-					labelStyle("Selected:"), best.DisplayTitle(), best.Year(), best.MediaType, best.ID, best.VoteCount)
+					labelStyle("Selected:"), result.Best.DisplayTitle(), result.Best.Year(), result.Best.MediaType, result.Best.ID, result.Best.VoteCount)
 				fmt.Println("Spindle will use this result for metadata.")
-				if best.Overview != "" {
-					overview := best.Overview
+				if result.Best.Overview != "" {
+					overview := result.Best.Overview
 					if !flagVerbose && len(overview) > 200 {
 						overview = overview[:200] + "..."
 					}
 					fmt.Printf("  Overview: %s\n", overview)
 				}
+				if result.Edition != "" {
+					fmt.Printf("  Edition: %s\n", result.Edition)
+				}
 			}
 
-			if len(results) > 1 {
+			if len(result.AllResults) > 1 {
 				limit := 5
 				if flagVerbose {
-					limit = len(results)
+					limit = len(result.AllResults)
 				}
-				fmt.Printf("\nOther candidates (%d):\n", len(results)-1)
+				fmt.Printf("\nOther candidates (%d):\n", len(result.AllResults)-1)
 				shown := 0
-				for i := range results {
-					r := &results[i]
-					if best != nil && r.ID == best.ID && r.MediaType == best.MediaType {
+				for i := range result.AllResults {
+					r := &result.AllResults[i]
+					if result.Best != nil && r.ID == result.Best.ID && r.MediaType == result.Best.MediaType {
 						continue
 					}
 					if shown >= limit {
-						fmt.Printf("  ... and %d more\n", len(results)-1-shown)
+						fmt.Printf("  ... and %d more\n", len(result.AllResults)-1-shown)
 						break
 					}
 					if flagVerbose {

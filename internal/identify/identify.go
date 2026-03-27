@@ -38,6 +38,13 @@ var discMetadataPattern = regexp.MustCompile(
 	`(?i)(\s*[-:]\s*)?(season\s+\d+|disc\s+\d+|volume\s+\d+|part\s+\d+|tv\s+series)`,
 )
 
+// formatBrandingPattern strips physical media format descriptors from disc titles.
+// BDInfo often includes format branding that pollutes TMDB search queries.
+// Examples: "Ultra HD Blu-ray™", "Blu-ray", "4K Ultra HD", "UHD", "DVD".
+var formatBrandingPattern = regexp.MustCompile(
+	`(?i)(\s*[-\x{2013}:]\s*)?(?:(?:4K\s+)?Ultra\s+HD(?:\s+Blu[- ]?ray)?|Blu[- ]?ray|\bUHD\b|\bDVD\b|\bBD\b)[\x{2122}\x{00AE}]*`,
+)
+
 // trailingPunctPattern cleans up trailing punctuation/whitespace left after stripping.
 var trailingPunctPattern = regexp.MustCompile(`[\s:_-]+$`)
 
@@ -117,23 +124,34 @@ func New(
 	}
 }
 
-// Run executes the identification stage.
-func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	logger := stage.LoggerFromContext(ctx)
-	logger.Info("identification stage started",
-		"event_type", "stage_start",
-		"stage", "identification",
-		"disc_title", item.DiscTitle,
-	)
+// IdentifyResult holds the results of disc identification without persistence.
+// Used by both the daemon (via Run) and the CLI identify command.
+type IdentifyResult struct {
+	RawTitle    string
+	QueryTitle  string
+	TitleSource string
+	SearchYear  int
+	YearSource  string
+	DiscSource  string
+	MediaType   string
+	Edition     string
+	Best        *tmdb.SearchResult
+	AllResults  []tmdb.SearchResult
+	DiscInfo    *makemkv.DiscInfo
+	BDInfo      *BDInfoResult
+	Envelope    ripspec.Envelope
+	Degraded    bool
+	DegradedMsg string
+}
 
-	// Clean stale staging directories (older than 48 hours).
-	cleanResult := staging.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
-	if cleanResult.Removed > 0 {
-		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
-	}
+// Identify runs the full identification pipeline and returns results
+// without persisting to the queue or sending notifications.
+// Used by both the daemon (via Run) and the CLI identify command.
+func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.Logger) (*IdentifyResult, error) {
+	result := &IdentifyResult{}
 
 	// Step 1: Probe disc source type (lightweight lsblk, always needed).
-	discSource := "unknown"
+	result.DiscSource = "unknown"
 	if ev, err := discmonitor.ProbeDisc(ctx, h.cfg.MakeMKV.OpticalDrive); err != nil {
 		logger.Warn("disc probe failed, defaulting to unknown",
 			"event_type", "disc_probe_error",
@@ -141,10 +159,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"impact", "disc_source will be unknown",
 		)
 	} else {
-		discSource = mapDiscSource(ev.DiscType)
+		result.DiscSource = mapDiscSource(ev.DiscType)
 		logger.Info("disc source determined",
 			"decision_type", logs.DecisionBDInfoAvailability,
-			"decision_result", discSource,
+			"decision_result", result.DiscSource,
 			"decision_reason", fmt.Sprintf("disc_type=%s", ev.DiscType),
 		)
 	}
@@ -162,33 +180,28 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_result", "updated",
 				"decision_reason", "disc_id_cache_entry",
 			)
-			// Build envelope from cached data and return.
-			env := h.buildEnvelopeFromCache(item, entry, discSource)
-			if err := h.persistEnvelope(ctx, item, &env); err != nil {
-				return err
-			}
-			return nil
+			result.Envelope = h.buildEnvelopeFromCache(item, entry, result.DiscSource)
+			return result, nil
 		}
 	}
 
 	// Step 2b: BDInfo (Blu-ray discs only, non-fatal). Skipped on cache hit above.
-	var bdInfo *BDInfoResult
-	if discSource == "bluray" {
+	if result.DiscSource == "bluray" {
 		var bdErr error
-		bdInfo, bdErr = RunBDInfo(ctx, h.cfg.MakeMKV.OpticalDrive, logger)
+		result.BDInfo, bdErr = RunBDInfo(ctx, h.cfg.MakeMKV.OpticalDrive, logger)
 		if bdErr != nil {
 			logger.Warn("bd_info failed",
 				"event_type", "bdinfo_error",
 				"error_hint", bdErr.Error(),
 				"impact", "bd_info metadata unavailable",
 			)
-		} else if bdInfo != nil {
+		} else if result.BDInfo != nil {
 			logger.Info("bd_info results",
 				"decision_type", logs.DecisionBDInfoScan,
 				"decision_result", "completed",
-				"decision_reason", fmt.Sprintf("disc_id=%s studio=%s year=%s", bdInfo.DiscID, bdInfo.Studio, bdInfo.Year),
-				"disc_name", bdInfo.DiscName,
-				"volume_id", bdInfo.VolumeIdentifier,
+				"decision_reason", fmt.Sprintf("disc_id=%s studio=%s year=%s", result.BDInfo.DiscID, result.BDInfo.Studio, result.BDInfo.Year),
+				"disc_name", result.BDInfo.DiscName,
+				"volume_id", result.BDInfo.VolumeIdentifier,
 			)
 		}
 
@@ -199,121 +212,144 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Step 3: MakeMKV scan.
-	discInfo, err := makemkv.Scan(ctx, h.cfg.MakeMKV.OpticalDrive,
+	var err error
+	result.DiscInfo, err = makemkv.Scan(ctx, h.cfg.MakeMKV.OpticalDrive,
 		time.Duration(h.cfg.MakeMKV.InfoTimeout)*time.Second,
 		h.cfg.MakeMKV.MinTitleLength, logger)
 	if err != nil {
-		return fmt.Errorf("makemkv scan: %w", err)
+		return nil, fmt.Errorf("makemkv scan: %w", err)
 	}
 
 	// Step 4: Build title priority chain for TMDB query.
-	rawTitle, sourceUsed := h.resolveTitle(item, discInfo, bdInfo)
-	queryTitle := CleanQueryTitle(rawTitle)
+	result.RawTitle, result.TitleSource = h.resolveTitle(item, result.DiscInfo, result.BDInfo)
+	result.QueryTitle = CleanQueryTitle(result.RawTitle)
 	logger.Info("title resolved for TMDB search",
 		"decision_type", logs.DecisionTitleResolution,
-		"decision_result", sourceUsed,
-		"decision_reason", queryTitle,
-		"raw_title", rawTitle,
+		"decision_result", result.TitleSource,
+		"decision_reason", result.QueryTitle,
+		"raw_title", result.RawTitle,
 	)
 
 	// Step 5: Extract year and clean title for TMDB search.
 	// Year priority: BDInfo > resolved title > item disc title.
-	var searchYear int
-	yearSource := ""
-	if bdInfo != nil && bdInfo.Year != "" {
-		if y, err := strconv.Atoi(bdInfo.Year); err == nil {
-			searchYear = y
-			yearSource = "bdinfo"
+	if result.BDInfo != nil && result.BDInfo.Year != "" {
+		if y, err := strconv.Atoi(result.BDInfo.Year); err == nil {
+			result.SearchYear = y
+			result.YearSource = "bdinfo"
 		}
 	}
-	if searchYear == 0 {
-		if cleaned, y := splitTitleYear(queryTitle); y > 0 {
-			searchYear = y
-			queryTitle = cleaned
-			yearSource = "resolved_title"
+	if result.SearchYear == 0 {
+		if cleaned, y := splitTitleYear(result.QueryTitle); y > 0 {
+			result.SearchYear = y
+			result.QueryTitle = cleaned
+			result.YearSource = "resolved_title"
 		}
 	}
-	if searchYear == 0 {
+	if result.SearchYear == 0 {
 		if cleaned, y := splitTitleYear(item.DiscTitle); y > 0 {
-			searchYear = y
-			yearSource = "disc_title"
+			result.SearchYear = y
+			result.YearSource = "disc_title"
 			// Only use the cleaned title if queryTitle still contains the year.
-			if queryTitle == item.DiscTitle || queryTitle == CleanQueryTitle(item.DiscTitle) {
-				queryTitle = cleaned
+			if result.QueryTitle == item.DiscTitle || result.QueryTitle == CleanQueryTitle(item.DiscTitle) {
+				result.QueryTitle = cleaned
 			}
 		}
 	}
-	if yearSource != "" {
+	if result.YearSource != "" {
 		logger.Info("year source decision",
 			"decision_type", logs.DecisionYearSource,
-			"decision_result", yearSource,
-			"decision_reason", fmt.Sprintf("year=%d", searchYear),
+			"decision_result", result.YearSource,
+			"decision_reason", fmt.Sprintf("year=%d", result.SearchYear),
 		)
 	}
 
-	results, err := h.tmdbClient.SearchMulti(ctx, queryTitle)
+	result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
 	if err != nil {
-		return fmt.Errorf("tmdb search: %w", err)
+		return nil, fmt.Errorf("tmdb search: %w", err)
 	}
 
-	best := tmdb.SelectBestResult(results, queryTitle, searchYear, 5, logger)
-	if best == nil {
+	result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
+	if result.Best == nil {
 		logger.Warn("no TMDB match",
 			"event_type", "tmdb_no_match",
 			"error_hint", "no result met confidence threshold",
 			"impact", "item flagged for review",
 		)
 		item.AppendReviewReason("TMDB: no confident match found")
-		// Build minimal envelope and continue.
-		env := h.buildFallbackEnvelope(logger, item, discInfo)
-		setForcedSubtitleAttribute(logger, discInfo, &env)
-		if err := h.persistEnvelope(ctx, item, &env); err != nil {
-			return err
-		}
-		return &services.ErrDegraded{
-			Msg: "no TMDB match found for: " + queryTitle,
-		}
+		result.Envelope = h.buildFallbackEnvelope(logger, item, result.DiscInfo)
+		setForcedSubtitleAttribute(logger, result.DiscInfo, &result.Envelope)
+		result.Degraded = true
+		result.DegradedMsg = "no TMDB match found for: " + result.QueryTitle
+		return result, nil
 	}
 
 	logger.Info("TMDB match found",
 		"decision_type", logs.DecisionTMDBMatch,
-		"decision_result", best.DisplayTitle(),
-		"decision_reason", fmt.Sprintf("tmdb_id=%d year=%s votes=%d", best.ID, best.Year(), best.VoteCount),
+		"decision_result", result.Best.DisplayTitle(),
+		"decision_reason", fmt.Sprintf("tmdb_id=%d year=%s votes=%d", result.Best.ID, result.Best.Year(), result.Best.VoteCount),
 	)
 
 	// Update disc_title to canonical name per spec.
-	mediaType := best.MediaType
-	if mediaType == "" {
-		mediaType = "movie" // default for single-type searches
+	result.MediaType = result.Best.MediaType
+	if result.MediaType == "" {
+		result.MediaType = "movie" // default for single-type searches
 		logger.Info("media type defaulted to movie",
 			"decision_type", logs.DecisionTMDBMatch,
 			"decision_result", "movie",
 			"decision_reason", "empty media type from search result",
 		)
 	}
-	item.DiscTitle = canonicalTitle(*best, mediaType, item.DiscTitle, discInfo)
+	item.DiscTitle = canonicalTitle(*result.Best, result.MediaType, item.DiscTitle, result.DiscInfo)
 
 	// Step 6: Detect edition (movies only, via regex + optional LLM).
-	var edition string
-	if mediaType == "movie" {
-		edition = h.detectEdition(ctx, logger, item.DiscTitle, discInfo.Name)
+	if result.MediaType == "movie" {
+		result.Edition = h.detectEdition(ctx, logger, item.DiscTitle, result.DiscInfo.Name)
 	}
 
-	// Step 7: Build and persist RipSpec envelope.
-	env := h.buildEnvelope(logger, item, discInfo, best, mediaType, edition, discSource)
-	setForcedSubtitleAttribute(logger, discInfo, &env)
-	if err := h.persistEnvelope(ctx, item, &env); err != nil {
+	// Step 7: Build RipSpec envelope.
+	result.Envelope = h.buildEnvelope(logger, item, result.DiscInfo, result.Best, result.MediaType, result.Edition, result.DiscSource)
+	setForcedSubtitleAttribute(logger, result.DiscInfo, &result.Envelope)
+
+	return result, nil
+}
+
+// Run executes the identification stage.
+func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
+	logger := stage.LoggerFromContext(ctx)
+	logger.Info("identification stage started",
+		"event_type", "stage_start",
+		"stage", "identification",
+		"disc_title", item.DiscTitle,
+	)
+
+	// Clean stale staging directories (older than 48 hours).
+	cleanResult := staging.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
+	if cleanResult.Removed > 0 {
+		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
+	}
+
+	result, err := h.Identify(ctx, item, logger)
+	if err != nil {
 		return err
 	}
 
-	// Step 8: Cache disc ID.
-	if h.discIDCache != nil && item.DiscFingerprint != "" {
+	// Persist envelope.
+	if err := h.persistEnvelope(ctx, item, &result.Envelope); err != nil {
+		return err
+	}
+
+	if result.Degraded {
+		return &services.ErrDegraded{Msg: result.DegradedMsg}
+	}
+
+	// Cache disc ID.
+	if result.Best != nil && h.discIDCache != nil && item.DiscFingerprint != "" {
 		entry := discidcache.Entry{
-			TMDBID:                 best.ID,
-			MediaType:              mediaType,
-			Title:                  best.DisplayTitle(),
-			Year:                   best.Year(),
-			HasForcedSubtitleTrack: env.Attributes.HasForcedSubtitleTrack,
+			TMDBID:                 result.Best.ID,
+			MediaType:              result.MediaType,
+			Title:                  result.Best.DisplayTitle(),
+			Year:                   result.Best.Year(),
+			HasForcedSubtitleTrack: result.Envelope.Attributes.HasForcedSubtitleTrack,
 		}
 		if err := h.discIDCache.Set(item.DiscFingerprint, entry); err != nil {
 			logger.Warn("disc ID cache write failed",
@@ -324,7 +360,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Step 9: Send notification.
+	// Send notification.
 	if h.notifier != nil {
 		_ = h.notifier.Send(ctx, notify.EventIdentificationComplete,
 			"Identification Complete",
@@ -418,6 +454,7 @@ func splitTitleYear(value string) (string, int) {
 // Example: "Batman TV Series - Season 2: Disc 6" → "Batman"
 func CleanQueryTitle(title string) string {
 	cleaned := discMetadataPattern.ReplaceAllString(title, "")
+	cleaned = formatBrandingPattern.ReplaceAllString(cleaned, "")
 	cleaned = trailingPunctPattern.ReplaceAllString(cleaned, "")
 	cleaned = strings.TrimSpace(cleaned)
 	if cleaned == "" {
