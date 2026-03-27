@@ -26,8 +26,33 @@ type Stream struct {
 	Channels      int               `json:"channels"`
 	ChannelLayout string            `json:"channel_layout"`
 	Profile       string            `json:"profile"`
+	PixFmt        string            `json:"pix_fmt"`
+	ColorRange    string            `json:"color_range"`
+	ColorSpace    string            `json:"color_space"`
+	ColorTransfer string            `json:"color_transfer"`
+	ColorPrimaries string           `json:"color_primaries"`
+	SideDataList  []SideData        `json:"side_data_list"`
 	Tags          map[string]string `json:"tags"`
 	Disposition   map[string]int    `json:"disposition"`
+}
+
+// SideData represents a side data entry from ffprobe (e.g. mastering display metadata).
+type SideData struct {
+	Type string `json:"side_data_type"`
+	// Mastering display metadata fields
+	RedX          string `json:"red_x,omitempty"`
+	RedY          string `json:"red_y,omitempty"`
+	GreenX        string `json:"green_x,omitempty"`
+	GreenY        string `json:"green_y,omitempty"`
+	BlueX         string `json:"blue_x,omitempty"`
+	BlueY         string `json:"blue_y,omitempty"`
+	WhitePointX   string `json:"white_point_x,omitempty"`
+	WhitePointY   string `json:"white_point_y,omitempty"`
+	MinLuminance  string `json:"min_luminance,omitempty"`
+	MaxLuminance  string `json:"max_luminance,omitempty"`
+	// Content light level fields
+	MaxContent string `json:"max_content,omitempty"`
+	MaxAverage string `json:"max_average,omitempty"`
 }
 
 // Format holds container-level metadata as reported by ffprobe.

@@ -223,6 +223,7 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
    - Check `validation.passed` and individual step results
    - Review crop detection from `crop` fields
    - Check for `warning` or `error` in snapshot
+   - Check encoding config: `encoder`, `quality` (CRF value), `preset` (SVT-AV1 speed preset), `tune`, `audio_codec`
    - Check `decision_type=file_probe` in `logs.decisions` for pre-encoding resolution and codec detection
    - Check `decision_type=crop_detection` for crop decision visibility
    - Check `decision_type=encoding_validation` for per-episode validation results
@@ -487,11 +488,13 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 **Movie:**
 - Video: <codec> <resolution> <HDR status> | Duration: <seconds>s | Size: <bytes>
 - Audio: <stream summary>
+- Encoding config: <encoding.snapshot.quality> | SVT-AV1 preset <encoding.snapshot.preset> | tune <encoding.snapshot.tune> | <encoding.snapshot.audio_codec>
 - Crop: <analysis.crop_analysis.filter> (<analysis.crop_analysis.standard_ratio>)
 - Validation: <passed/failed, expand individual steps only if failed>
 
 **TV:**
 - Common profile: <from analysis.episode_consistency.majority_profile>
+- Encoding config: <encoding.snapshot.quality> | SVT-AV1 preset <encoding.snapshot.preset> | tune <encoding.snapshot.tune> | <encoding.snapshot.audio_codec>
 - Duration: <analysis.media_stats.duration_min_sec>-<max>s | Size: <analysis.media_stats.size_min_bytes>-<max>
 - Cross-episode consistency: <analysis.episode_consistency — pass if no deviations, else list deviations>
 - Failed episodes: <count, with details if > 0>
