@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,16 +59,13 @@ func newIdentifyCmd() *cobra.Command {
 				}
 			}
 
-			// Build logger for identification.
-			var logger *slog.Logger
-			if flagVerbose {
-				logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-			} else {
-				logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-			}
+			logger := buildLogger()
 
 			// Open disc ID cache (optional).
-			discIDStore, _ := discidcache.Open(cfg.DiscIDCachePath(), nil)
+			discIDStore, cacheErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
+			if cacheErr != nil {
+				logger.Debug("disc ID cache unavailable", "error", cacheErr)
+			}
 
 			// Load KeyDB catalog (optional).
 			var keydbCat *keydb.Catalog
