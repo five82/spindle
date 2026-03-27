@@ -9,15 +9,16 @@ import (
 
 	"github.com/five82/spindle/internal/logs"
 
-	"golang.org/x/sys/unix"
+	"github.com/pilebones/go-udev/netlink"
 )
 
-// NetlinkMonitor listens for udev/netlink events indicating disc insertion.
+// NetlinkMonitor listens for udev netlink events indicating disc insertion.
 type NetlinkMonitor struct {
 	device   string
 	handler  func(ctx context.Context, device string)
 	isPaused func() bool
 	logger   *slog.Logger
+	conn     *netlink.UEventConn
 	quit     chan struct{}
 	done     chan struct{}
 }
@@ -39,11 +40,11 @@ func NewNetlinkMonitor(
 	}
 }
 
-// Start opens a netlink socket and begins monitoring for disc events.
+// Start opens a udev netlink connection and begins monitoring for disc events.
 // Connection failure is non-fatal: logs a warning and returns an error.
 func (n *NetlinkMonitor) Start(ctx context.Context) error {
-	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_DGRAM, unix.NETLINK_KOBJECT_UEVENT)
-	if err != nil {
+	conn := new(netlink.UEventConn)
+	if err := conn.Connect(netlink.UdevEvent); err != nil {
 		n.logger.Warn("netlink socket creation failed",
 			"event_type", "netlink_error",
 			"error_hint", err.Error(),
@@ -52,21 +53,8 @@ func (n *NetlinkMonitor) Start(ctx context.Context) error {
 		return err
 	}
 
-	addr := unix.SockaddrNetlink{
-		Family: unix.AF_NETLINK,
-		Groups: 1, // multicast group for kernel events
-	}
-	if err := unix.Bind(fd, &addr); err != nil {
-		_ = unix.Close(fd)
-		n.logger.Warn("netlink bind failed",
-			"event_type", "netlink_error",
-			"error_hint", err.Error(),
-			"impact", "automatic disc detection unavailable",
-		)
-		return err
-	}
-
-	go n.monitorLoop(ctx, fd)
+	n.conn = conn
+	go n.monitorLoop(ctx)
 	n.logger.Info("netlink monitor started", "device", n.device)
 	return nil
 }
@@ -80,107 +68,114 @@ func (n *NetlinkMonitor) Stop() {
 		close(n.quit)
 	}
 	<-n.done
+
+	if n.conn != nil {
+		_ = n.conn.Close()
+		n.conn = nil
+	}
 }
 
-// monitorLoop reads netlink events and dispatches matching disc events.
-func (n *NetlinkMonitor) monitorLoop(ctx context.Context, fd int) {
+// monitorLoop reads udev netlink events and dispatches matching disc events.
+func (n *NetlinkMonitor) monitorLoop(ctx context.Context) {
 	defer close(n.done)
-	defer func() { _ = unix.Close(fd) }()
 
-	buf := make([]byte, 4096)
-	// Extract expected device name (e.g., "sr0" from "/dev/sr0").
+	queue := make(chan netlink.UEvent)
+	errs := make(chan error)
+
+	matcher := n.buildMatcher()
+	monitorQuit := n.conn.Monitor(queue, errs, matcher)
+
+	// Extract expected device name for filtering (e.g., "/dev/sr0").
 	expectedDev := n.device
-	if idx := strings.LastIndex(n.device, "/"); idx >= 0 {
-		expectedDev = n.device[idx+1:]
-	}
-
-	// Set read timeout to avoid blocking forever on Recvfrom.
-	_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO,
-		&unix.Timeval{Sec: 1})
 
 	for {
 		select {
 		case <-n.quit:
+			close(monitorQuit)
 			return
 		case <-ctx.Done():
+			close(monitorQuit)
 			return
-		default:
-		}
-
-		nr, _, err := unix.Recvfrom(fd, buf, 0)
-		if err != nil {
-			// Timeout or interrupted: just loop again.
-			continue
-		}
-		if nr <= 0 {
-			continue
-		}
-
-		// Parse NUL-separated uevent fields.
-		fields := parseUevent(buf[:nr])
-
-		// Filter for optical disc events.
-		if !isOpticalDiscEvent(fields, expectedDev) {
-			continue
-		}
-
-		if n.isPaused() {
-			n.logger.Info("disc event ignored (paused)",
-				"decision_type", logs.DecisionDiscEventHandling,
-				"decision_result", "skipped",
-				"decision_reason", "paused",
-				"device", n.device,
+		case uevent := <-queue:
+			n.handleEvent(ctx, uevent, expectedDev)
+		case err := <-errs:
+			n.logger.Warn("netlink monitor error",
+				"event_type", "netlink_monitor_error",
+				"error_hint", err.Error(),
+				"impact", "disc detection may be affected",
 			)
-			continue
 		}
+	}
+}
 
-		n.logger.Info("disc event detected via netlink",
-			"event_type", "netlink_disc_event",
-			"device", n.device,
-			"action", fields["ACTION"],
+// buildMatcher creates a matcher for disc insertion events.
+// Matches: SUBSYSTEM=block, ID_CDROM=1, ID_CDROM_MEDIA=1, ACTION=change|add
+func (n *NetlinkMonitor) buildMatcher() netlink.Matcher {
+	action := "change|add"
+	rules := &netlink.RuleDefinitions{}
+	rules.AddRule(netlink.RuleDefinition{
+		Action: &action,
+		Env: map[string]string{
+			"SUBSYSTEM":      "block",
+			"ID_CDROM":       "1",
+			"ID_CDROM_MEDIA": "1",
+		},
+	})
+	return rules
+}
+
+// handleEvent processes a matched uevent, filtering by device name.
+func (n *NetlinkMonitor) handleEvent(ctx context.Context, uevent netlink.UEvent, expectedDev string) {
+	devname := extractDeviceName(uevent, expectedDev)
+	if devname == "" {
+		n.logger.Debug("ignoring event without device name",
+			"action", string(uevent.Action),
+			"kobj", uevent.KObj,
 		)
-		n.handler(ctx, n.device)
+		return
 	}
+
+	if devname != expectedDev {
+		n.logger.Debug("ignoring event for non-configured device",
+			"device", devname,
+			"configured_device", expectedDev,
+		)
+		return
+	}
+
+	if n.isPaused() {
+		n.logger.Info("disc event ignored (paused)",
+			"decision_type", logs.DecisionDiscEventHandling,
+			"decision_result", "skipped",
+			"decision_reason", "paused",
+			"device", n.device,
+		)
+		return
+	}
+
+	n.logger.Info("disc event detected via netlink",
+		"event_type", "netlink_disc_event",
+		"device", n.device,
+		"action", string(uevent.Action),
+	)
+	n.handler(ctx, n.device)
 }
 
-// parseUevent splits a NUL-separated uevent buffer into key=value pairs.
-func parseUevent(data []byte) map[string]string {
-	fields := make(map[string]string)
-	for _, part := range strings.Split(string(data), "\x00") {
-		if k, v, ok := strings.Cut(part, "="); ok {
-			fields[k] = v
-		}
+// extractDeviceName gets the device path from a uevent.
+func extractDeviceName(uevent netlink.UEvent, fallbackDevice string) string {
+	if devname := uevent.Env["DEVNAME"]; devname != "" {
+		return devname
 	}
-	return fields
-}
 
-// isOpticalDiscEvent checks if uevent fields match an optical disc insertion.
-func isOpticalDiscEvent(fields map[string]string, expectedDev string) bool {
-	action := fields["ACTION"]
-	if action != "change" && action != "add" {
-		return false
+	// Try to construct from DEVPATH (e.g., /devices/pci.../block/sr0).
+	devpath := uevent.Env["DEVPATH"]
+	if devpath == "" {
+		return ""
 	}
-	if fields["SUBSYSTEM"] != "block" {
-		return false
-	}
-	if fields["ID_CDROM"] != "1" {
-		return false
-	}
-	if fields["ID_CDROM_MEDIA"] != "1" {
-		return false
-	}
-	// Check device name matches if specified.
-	devname := fields["DEVNAME"]
-	if expectedDev != "" && devname != "" {
-		// DEVNAME may be just "sr0" or "/dev/sr0".
-		devBase := devname
-		if idx := strings.LastIndex(devname, "/"); idx >= 0 {
-			devBase = devname[idx+1:]
-		}
-		if devBase != expectedDev {
-			return false
-		}
-	}
-	return true
-}
 
+	parts := strings.Split(devpath, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return "/dev/" + parts[len(parts)-1]
+}

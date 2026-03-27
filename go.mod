@@ -7,6 +7,7 @@ require (
 	github.com/five82/drapto v0.5.1-0.20260321093257-91b4e62fe76e
 	github.com/gofrs/flock v0.13.0
 	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/pilebones/go-udev v0.9.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.42.0
 	modernc.org/sqlite v1.47.0
