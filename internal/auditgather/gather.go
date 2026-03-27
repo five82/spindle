@@ -410,9 +410,6 @@ func getStageDurationSeconds(entry map[string]any) float64 {
 func inferDiscSourceFromJSON(rawJSON string) string {
 	lower := strings.ToLower(rawJSON)
 	if strings.Contains(lower, `"disc_type":"blu-ray"`) || strings.Contains(lower, `"disc_type": "blu-ray"`) {
-		if strings.Contains(lower, "uhd") || strings.Contains(lower, "2160") {
-			return "4k_bluray"
-		}
 		return "bluray"
 	}
 	if strings.Contains(lower, "video_ts") {

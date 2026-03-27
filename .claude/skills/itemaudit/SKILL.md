@@ -96,7 +96,7 @@ The `stage_gate` object in the audit-gather output contains:
 |-------|---------|
 | `furthest_stage` | Status the item reached (or failed at) |
 | `media_type` | `movie` or `tv` |
-| `disc_source` | `bluray`, `4k_bluray`, `dvd`, or `unknown` |
+| `disc_source` | `bluray`, `dvd`, or `unknown` |
 | `edition` | Detected edition label (empty if none) |
 | `phase_logs` | Always true |
 | `phase_rip_cache` | Post-ripping |
@@ -109,7 +109,8 @@ The `stage_gate` object in the audit-gather output contains:
 | `phase_external_validation` | Post-encoding AND non-DVD source |
 
 **Key principles:**
-- External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray or 4K Blu-ray. **Skip external validation entirely for DVDs.**
+- External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray. **Skip external validation entirely for DVDs.**
+- UHD status is not encoded in `disc_source`. Infer UHD from contextual signals: disc title containing "UHD", 2160p resolutions in bdinfo, or similar markers in the audit data.
 - **For failed items:** Focus the report on diagnosing the failure. Analyze the error, the events leading up to it, and any retry patterns. Do not pad the report with sections that say "N/A - not reached".
 
 ### Phase 2: Log Analysis (when `phase_logs` is true)

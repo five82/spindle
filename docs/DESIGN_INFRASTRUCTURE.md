@@ -606,7 +606,7 @@ Pre-computed summaries derived from gathered data:
 |-------|------|-------------|
 | `furthest_stage` | string | Highest pipeline stage reached |
 | `media_type` | string | movie or tv |
-| `disc_source` | string | bluray, 4k_bluray, dvd, or empty |
+| `disc_source` | string | bluray, dvd, or empty |
 | `edition` | string? | Detected edition label |
 | `phase_*` | bool | Phase applicability flags (see Section 7.1) |
 
