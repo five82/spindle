@@ -174,30 +174,33 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			)
 			if len(remapped) > 0 {
 				analysisData.CommentaryTracks = remapped
-				var remappedIndices []int
+				audioStreams := result.AudioStreams()
+				var targets []CommentaryTarget
 				for _, r := range remapped {
-					remappedIndices = append(remappedIndices, r.Index)
-				}
-				audioTitles := make(map[int]string)
-				audioIdx := 0
-				for _, s := range result.Streams {
-					if s.CodecType == "audio" {
-						audioTitles[audioIdx] = s.Tags["title"]
-						audioIdx++
+					var title string
+					if r.Index < len(audioStreams) {
+						title = audioStreams[r.Index].Tags["title"]
 					}
+					targets = append(targets, CommentaryTarget{Index: r.Index, Title: title})
 				}
-				if err := ApplyCommentaryDisposition(ctx, logger, path, remappedIndices, audioTitles); err != nil {
+				if err := ApplyCommentaryDisposition(ctx, logger, path, targets); err != nil {
 					logger.Warn("commentary disposition failed",
 						"event_type", "commentary_disposition_error",
 						"error_hint", err.Error(),
 						"impact", "commentary tracks not labeled",
 					)
-				} else if err := ValidateCommentaryLabeling(ctx, logger, path, remappedIndices); err != nil {
-					logger.Warn("commentary labeling validation failed",
-						"event_type", "commentary_validation_error",
-						"error_hint", err.Error(),
-						"impact", "commentary labels may be incorrect",
-					)
+				} else {
+					var remappedIndices []int
+					for _, t := range targets {
+						remappedIndices = append(remappedIndices, t.Index)
+					}
+					if err := ValidateCommentaryLabeling(ctx, logger, path, remappedIndices); err != nil {
+						logger.Warn("commentary labeling validation failed",
+							"event_type", "commentary_validation_error",
+							"error_hint", err.Error(),
+							"impact", "commentary labels may be incorrect",
+						)
+					}
 				}
 			}
 		}

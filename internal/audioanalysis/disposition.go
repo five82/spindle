@@ -29,35 +29,44 @@ func commentaryLabel(original string) string {
 	return title + " (Commentary)"
 }
 
+// CommentaryTarget pairs an audio-relative index with its current title.
+type CommentaryTarget struct {
+	Index int
+	Title string
+}
+
 // ApplyCommentaryDisposition sets the "comment" disposition and updates the
 // title metadata on the specified audio tracks in an MKV file using FFmpeg
-// copy-mode remux. audioTitles maps audio-relative indices to their current
-// titles (from the caller's existing probe result).
+// copy-mode remux.
 func ApplyCommentaryDisposition(
 	ctx context.Context,
 	logger *slog.Logger,
 	path string,
-	commentaryAudioIndices []int,
-	audioTitles map[int]string,
+	targets []CommentaryTarget,
 ) error {
-	if len(commentaryAudioIndices) == 0 {
+	if len(targets) == 0 {
 		return nil
+	}
+
+	indices := make([]int, len(targets))
+	for i, t := range targets {
+		indices[i] = t.Index
 	}
 
 	logger.Info("applying commentary disposition",
 		"event_type", "commentary_disposition_start",
 		"path", path,
-		"tracks", commentaryAudioIndices,
+		"tracks", indices,
 	)
 
 	dir := filepath.Dir(path)
 	tmpPath := filepath.Join(dir, ".disposition-"+filepath.Base(path))
 
 	args := []string{"-y", "-i", path, "-map", "0", "-c", "copy"}
-	for _, idx := range commentaryAudioIndices {
-		idxStr := strconv.Itoa(idx)
+	for _, t := range targets {
+		idxStr := strconv.Itoa(t.Index)
 		args = append(args, "-disposition:a:"+idxStr, "comment")
-		label := commentaryLabel(audioTitles[idx])
+		label := commentaryLabel(t.Title)
 		args = append(args, "-metadata:s:a:"+idxStr, "title="+label)
 	}
 	args = append(args, tmpPath)
@@ -77,9 +86,9 @@ func ApplyCommentaryDisposition(
 	logger.Info("commentary disposition applied",
 		"decision_type", logs.DecisionCommentaryDisposition,
 		"decision_result", "applied",
-		"decision_reason", fmt.Sprintf("marked %d tracks as commentary", len(commentaryAudioIndices)),
+		"decision_reason", fmt.Sprintf("marked %d tracks as commentary", len(targets)),
 		"path", path,
-		"tracks", commentaryAudioIndices,
+		"tracks", indices,
 	)
 
 	return nil
@@ -109,11 +118,7 @@ func ValidateCommentaryLabeling(
 	}
 
 	var issues []string
-	audioIdx := 0
-	for _, s := range result.Streams {
-		if s.CodecType != "audio" {
-			continue
-		}
+	for audioIdx, s := range result.AudioStreams() {
 		if expected[audioIdx] {
 			disp, ok := s.Disposition["comment"]
 			if !ok || disp != 1 {
@@ -124,7 +129,6 @@ func ValidateCommentaryLabeling(
 				issues = append(issues, fmt.Sprintf("audio track %d title %q lacks Commentary label", audioIdx, title))
 			}
 		}
-		audioIdx++
 	}
 
 	if len(issues) > 0 {

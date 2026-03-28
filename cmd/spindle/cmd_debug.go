@@ -88,12 +88,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 			}
 
 			// Collect audio streams.
-			var audioStreams []ffprobe.Stream
-			for _, s := range probeResult.Streams {
-				if s.CodecType == "audio" {
-					audioStreams = append(audioStreams, s)
-				}
-			}
+			audioStreams := probeResult.AudioStreams()
 
 			if len(audioStreams) == 0 {
 				fmt.Println("No audio streams found")

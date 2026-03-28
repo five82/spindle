@@ -110,15 +110,20 @@ func (r *Result) VideoStreamCount() int {
 	return n
 }
 
-// AudioStreamCount returns the number of streams with codec_type "audio".
-func (r *Result) AudioStreamCount() int {
-	n := 0
+// AudioStreams returns only the audio streams from the probe result.
+func (r *Result) AudioStreams() []Stream {
+	var out []Stream
 	for _, s := range r.Streams {
 		if s.CodecType == "audio" {
-			n++
+			out = append(out, s)
 		}
 	}
-	return n
+	return out
+}
+
+// AudioStreamCount returns the number of streams with codec_type "audio".
+func (r *Result) AudioStreamCount() int {
+	return len(r.AudioStreams())
 }
 
 // DurationSeconds parses Format.Duration to a float64. Returns 0 on error.
