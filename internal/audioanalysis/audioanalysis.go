@@ -165,13 +165,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		// Remap commentary indices to post-refinement positions and apply disposition.
 		if len(analysisData.CommentaryTracks) > 0 && refinement != nil {
-			originalCount := len(analysisData.CommentaryTracks)
 			remapped := RemapCommentaryIndices(logger, analysisData.CommentaryTracks, refinement.KeptIndices)
-			logger.Info("commentary tracks remapped after refinement",
-				"decision_type", logs.DecisionCommentaryRemapping,
-				"decision_result", fmt.Sprintf("%d tracks survived", len(remapped)),
-				"decision_reason", fmt.Sprintf("original=%d remapped=%d", originalCount, len(remapped)),
-			)
 			if len(remapped) > 0 {
 				analysisData.CommentaryTracks = remapped
 				audioStreams := result.AudioStreams()

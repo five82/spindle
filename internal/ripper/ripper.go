@@ -20,6 +20,8 @@ import (
 	"github.com/five82/spindle/internal/stage"
 )
 
+const driveAvailableMsg = "Drive is available for next disc."
+
 // Handler implements stage.Handler for disc ripping.
 type Handler struct {
 	cfg      *config.Config
@@ -60,7 +62,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			)
 			if h.notifier != nil {
 				msg := fmt.Sprintf("%s (%d titles from cache)", item.DiscTitle, meta.TitleCount)
-				msg += "\nDrive is available for next disc."
+				msg += "\n" + driveAvailableMsg
 				msg += queue.FormatAlsoProcessing(h.store, item.ID)
 				_ = h.notifier.Send(ctx, notify.EventRipCacheHit,
 					"Rip Cache Hit",
@@ -231,7 +233,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Notification.
 	if h.notifier != nil {
 		msg := fmt.Sprintf("Ripped %s (%d titles)", item.DiscTitle, rippedCount)
-		msg += "\nDrive is available for next disc."
+		msg += "\n" + driveAvailableMsg
 		msg += queue.FormatAlsoProcessing(h.store, item.ID)
 		_ = h.notifier.Send(ctx, notify.EventRipComplete,
 			"Rip Complete",
