@@ -427,7 +427,7 @@ Returns daemon status.
   "lockFilePath": "/path/to/spindle.lock",
   "workflow": {
     "running": true,
-    "queueStats": {"pending": 2, "completed": 5},
+    "queueStats": {"identification": 2, "completed": 5},
     "lastError": "",
     "lastItem": null
   },

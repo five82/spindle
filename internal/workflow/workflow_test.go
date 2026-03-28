@@ -15,10 +15,10 @@ func newTestManager(stages []PipelineStage) *Manager {
 
 func TestConfigureStagesBuildsStageMap(t *testing.T) {
 	stages := []PipelineStage{
-		{Name: "identify", Stage: queue.StageIdentification, Semaphore: SemDisc},
-		{Name: "rip", Stage: queue.StageRipping, Semaphore: SemDisc},
-		{Name: "encode", Stage: queue.StageEncoding, Semaphore: SemEncode},
-		{Name: "organize", Stage: queue.StageOrganizing, Semaphore: SemNone},
+		{Stage: queue.StageIdentification, Semaphore: SemDisc},
+		{Stage: queue.StageRipping, Semaphore: SemDisc},
+		{Stage: queue.StageEncoding, Semaphore: SemEncode},
+		{Stage: queue.StageOrganizing, Semaphore: SemNone},
 	}
 
 	m := newTestManager(stages)
@@ -42,10 +42,10 @@ func TestConfigureStagesBuildsStageMap(t *testing.T) {
 
 func TestConfigureStagesDerivesStageOrderDiscFirst(t *testing.T) {
 	stages := []PipelineStage{
-		{Name: "identify", Stage: queue.StageIdentification, Semaphore: SemDisc},
-		{Name: "encode", Stage: queue.StageEncoding, Semaphore: SemEncode},
-		{Name: "rip", Stage: queue.StageRipping, Semaphore: SemDisc},
-		{Name: "organize", Stage: queue.StageOrganizing, Semaphore: SemNone},
+		{Stage: queue.StageIdentification, Semaphore: SemDisc},
+		{Stage: queue.StageEncoding, Semaphore: SemEncode},
+		{Stage: queue.StageRipping, Semaphore: SemDisc},
+		{Stage: queue.StageOrganizing, Semaphore: SemNone},
 	}
 
 	m := newTestManager(stages)
@@ -72,10 +72,10 @@ func TestConfigureStagesDerivesStageOrderDiscFirst(t *testing.T) {
 
 func TestNextStageReturnsCorrectProgression(t *testing.T) {
 	stages := []PipelineStage{
-		{Name: "identify", Stage: queue.StageIdentification, Semaphore: SemDisc},
-		{Name: "rip", Stage: queue.StageRipping, Semaphore: SemDisc},
-		{Name: "encode", Stage: queue.StageEncoding, Semaphore: SemEncode},
-		{Name: "organize", Stage: queue.StageOrganizing, Semaphore: SemNone},
+		{Stage: queue.StageIdentification, Semaphore: SemDisc},
+		{Stage: queue.StageRipping, Semaphore: SemDisc},
+		{Stage: queue.StageEncoding, Semaphore: SemEncode},
+		{Stage: queue.StageOrganizing, Semaphore: SemNone},
 	}
 
 	m := newTestManager(stages)
@@ -99,9 +99,9 @@ func TestNextStageReturnsCorrectProgression(t *testing.T) {
 
 func TestNextStageReturnsCompletedForLastStage(t *testing.T) {
 	stages := []PipelineStage{
-		{Name: "identify", Stage: queue.StageIdentification, Semaphore: SemDisc},
-		{Name: "rip", Stage: queue.StageRipping, Semaphore: SemDisc},
-		{Name: "organize", Stage: queue.StageOrganizing, Semaphore: SemNone},
+		{Stage: queue.StageIdentification, Semaphore: SemDisc},
+		{Stage: queue.StageRipping, Semaphore: SemDisc},
+		{Stage: queue.StageOrganizing, Semaphore: SemNone},
 	}
 
 	m := newTestManager(stages)
@@ -114,7 +114,7 @@ func TestNextStageReturnsCompletedForLastStage(t *testing.T) {
 
 func TestNextStageReturnsCompletedForUnknownStage(t *testing.T) {
 	stages := []PipelineStage{
-		{Name: "identify", Stage: queue.StageIdentification, Semaphore: SemDisc},
+		{Stage: queue.StageIdentification, Semaphore: SemDisc},
 	}
 
 	m := newTestManager(stages)

@@ -26,8 +26,8 @@ func TestNewDiscDefaults(t *testing.T) {
 	if item.ID == 0 {
 		t.Error("expected non-zero ID")
 	}
-	if item.Stage != StagePending {
-		t.Errorf("stage = %q, want %q", item.Stage, StagePending)
+	if item.Stage != StageIdentification {
+		t.Errorf("stage = %q, want %q", item.Stage, StageIdentification)
 	}
 	if item.DiscTitle != "Test Disc" {
 		t.Errorf("disc_title = %q, want %q", item.DiscTitle, "Test Disc")
@@ -190,7 +190,7 @@ func TestListWithAndWithoutFilter(t *testing.T) {
 	}
 
 	// Filter by pending.
-	pending, err := store.List(StagePending)
+	pending, err := store.List(StageIdentification)
 	if err != nil {
 		t.Fatalf("list pending: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestListWithAndWithoutFilter(t *testing.T) {
 	}
 
 	// Filter by multiple statuses.
-	multi, err := store.List(StagePending, StageEncoding)
+	multi, err := store.List(StageIdentification, StageEncoding)
 	if err != nil {
 		t.Fatalf("list multi: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestNextForStatuses(t *testing.T) {
 	_ = store.Update(item1)
 
 	// Should skip item1 (in_progress=1) and return item2.
-	next, err := store.NextForStatuses(StagePending)
+	next, err := store.NextForStatuses(StageIdentification)
 	if err != nil {
 		t.Fatalf("next: %v", err)
 	}
@@ -277,8 +277,8 @@ func TestStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
-	if stats[StagePending] != 2 {
-		t.Errorf("pending = %d, want 2", stats[StagePending])
+	if stats[StageIdentification] != 2 {
+		t.Errorf("pending = %d, want 2", stats[StageIdentification])
 	}
 	if stats[StageEncoding] != 1 {
 		t.Errorf("encoding = %d, want 1", stats[StageEncoding])
@@ -330,8 +330,8 @@ func TestRetryFailedRouting(t *testing.T) {
 	}
 
 	got2, _ := store.GetByID(item2.ID)
-	if got2.Stage != StagePending {
-		t.Errorf("item2 stage = %q, want %q", got2.Stage, StagePending)
+	if got2.Stage != StageIdentification {
+		t.Errorf("item2 stage = %q, want %q", got2.Stage, StageIdentification)
 	}
 }
 

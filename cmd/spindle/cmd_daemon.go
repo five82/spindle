@@ -165,7 +165,7 @@ func newStatusCmd() *cobra.Command {
 			}
 			hasItems := false
 			for _, stage := range []queue.Stage{
-				queue.StagePending, queue.StageIdentification, queue.StageRipping,
+				queue.StageIdentification, queue.StageRipping,
 				queue.StageEpisodeIdentification, queue.StageEncoding,
 				queue.StageAudioAnalysis, queue.StageSubtitling,
 				queue.StageOrganizing, queue.StageCompleted, queue.StageFailed,

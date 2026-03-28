@@ -99,11 +99,13 @@ row creation of a separate progress table.
 | `encoded_file`         | TEXT      | Path to encoded AV1 file (staging)                |
 | `final_file`           | TEXT      | Path to final file in library or review dir       |
 
-## 4. Stage Model (10 stages + in_progress flag)
+## 4. Stage Model (9 stages + in_progress flag)
 
 Items track their position in the pipeline with a `stage` field (TEXT) and an
-`in_progress` flag (INTEGER, 0 or 1). The stage says *where* the item is, and
-the flag says *whether work is actively happening*.
+`in_progress` flag (INTEGER, 0 or 1). The stage says *where* the item is
+(the current or next step), and the flag says *whether work is actively
+happening*. Each pipeline handler owns exactly one stage and picks up items
+whose `stage` matches.
 
 **Type-safe stages in Go:**
 
@@ -111,7 +113,6 @@ the flag says *whether work is actively happening*.
 type Stage string
 
 const (
-    StagePending              Stage = "pending"
     StageIdentification       Stage = "identification"
     StageRipping              Stage = "ripping"
     StageEpisodeIdentification Stage = "episode_identification"
@@ -130,10 +131,10 @@ transition to `failed` on error. No explicit transition map is needed because
 the pipeline is strictly linear -- the stage slice defines the only valid
 progression.
 
-**Stage values** (10):
+**Stage values** (9):
 
 ```
-pending -> identification -> ripping -> episode_identification (TV only)
+identification -> ripping -> episode_identification (TV only)
    -> encoding -> audio_analysis -> subtitling -> organizing -> completed
 
 Any stage --> failed (on error)
@@ -141,8 +142,7 @@ Any stage --> failed (on error)
 
 | Stage                  | Purpose                                           |
 |------------------------|---------------------------------------------------|
-| `pending`              | Queued, awaiting identification                   |
-| `identification`       | MakeMKV scan + TMDB lookup                        |
+| `identification`       | Queued; MakeMKV scan + TMDB lookup                |
 | `ripping`              | MakeMKV rip to staging                            |
 | `episode_identification`| WhisperX + OpenSubtitles episode matching (TV)    |
 | `encoding`             | Drapto AV1 encode                                 |
@@ -244,7 +244,7 @@ from the pipeline configuration.
 
 | Operation | Purpose |
 |-----------|---------|
-| `NewDisc(title, fingerprint)` | Insert new pending item (disc fingerprint required) |
+| `NewDisc(title, fingerprint)` | Insert new item at identification stage (disc fingerprint required) |
 | `GetByID(id)` | Fetch single item by primary key |
 | `FindByFingerprint(fp)` | Find first item matching a disc fingerprint |
 | `Update(item)` | Full item update (mutable columns); applies stop-review override |
@@ -276,7 +276,7 @@ state regardless of what the caller sets.
 |-----------|---------|
 | `ResetInProgress()` | Clear `in_progress` on all items (startup recovery) |
 | `ResetInProgressOnShutdown()` | Clear `in_progress` on all items (clean shutdown) |
-| `RetryFailed(ids...)` | Route failed items to retry point using `failed_at_stage`; falls back to pending |
+| `RetryFailed(ids...)` | Route failed items to retry point using `failed_at_stage`; falls back to identification |
 | `StopItems(ids...)` | User-initiated stop: mark as failed with review flag |
 
 ## 10. Metadata Helpers

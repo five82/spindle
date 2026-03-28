@@ -171,13 +171,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Create workflow manager and configure stages.
 	manager := workflow.New(store, notifier, statusTracker, logger)
 	manager.ConfigureStages([]workflow.PipelineStage{
-		{Name: "identification", Handler: identifyHandler, Stage: queue.StagePending, Semaphore: workflow.SemDisc},
-		{Name: "ripping", Handler: ripperHandler, Stage: queue.StageIdentification, Semaphore: workflow.SemDisc},
-		{Name: "episode_identification", Handler: contentidHandler, Stage: queue.StageRipping, Semaphore: workflow.SemWhisperX},
-		{Name: "encoding", Handler: encoderHandler, Stage: queue.StageEpisodeIdentification, Semaphore: workflow.SemEncode},
-		{Name: "audio_analysis", Handler: audioHandler, Stage: queue.StageEncoding, Semaphore: workflow.SemWhisperX},
-		{Name: "subtitling", Handler: subtitleHandler, Stage: queue.StageAudioAnalysis, Semaphore: workflow.SemWhisperX},
-		{Name: "organizing", Handler: organizerHandler, Stage: queue.StageSubtitling, Semaphore: workflow.SemNone},
+		{Stage: queue.StageIdentification, Handler: identifyHandler, Semaphore: workflow.SemDisc},
+		{Stage: queue.StageRipping, Handler: ripperHandler, Semaphore: workflow.SemDisc},
+		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Semaphore: workflow.SemWhisperX},
+		{Stage: queue.StageEncoding, Handler: encoderHandler, Semaphore: workflow.SemEncode},
+		{Stage: queue.StageAudioAnalysis, Handler: audioHandler, Semaphore: workflow.SemWhisperX},
+		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Semaphore: workflow.SemWhisperX},
+		{Stage: queue.StageOrganizing, Handler: organizerHandler, Semaphore: workflow.SemNone},
 	})
 
 	// Create HTTP API with shutdown channel.

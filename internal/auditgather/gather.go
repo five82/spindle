@@ -20,15 +20,14 @@ import (
 
 // stageOrder maps stages to numeric order for furthest-stage computation.
 var stageOrder = map[queue.Stage]int{
-	queue.StagePending:                0,
-	queue.StageIdentification:         1,
-	queue.StageRipping:                2,
-	queue.StageEpisodeIdentification:  3,
-	queue.StageEncoding:               4,
-	queue.StageAudioAnalysis:          5,
-	queue.StageSubtitling:             6,
-	queue.StageOrganizing:             7,
-	queue.StageCompleted:              8,
+	queue.StageIdentification:         0,
+	queue.StageRipping:                1,
+	queue.StageEpisodeIdentification:  2,
+	queue.StageEncoding:               3,
+	queue.StageAudioAnalysis:          4,
+	queue.StageSubtitling:             5,
+	queue.StageOrganizing:             6,
+	queue.StageCompleted:              7,
 }
 
 // Gather collects all audit artifacts for a queue item.

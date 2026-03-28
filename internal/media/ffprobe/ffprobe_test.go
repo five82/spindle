@@ -112,6 +112,78 @@ func TestEmptyStreams(t *testing.T) {
 	}
 }
 
+func TestFlexString(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"string", `"hello"`, "hello", false},
+		{"integer", `899`, "899", false},
+		{"float", `3.14`, "3.14", false},
+		{"fraction_string", `"1000/1"`, "1000/1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var f FlexString
+			err := f.UnmarshalJSON([]byte(tt.input))
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(f) != tt.want {
+				t.Errorf("got %q, want %q", string(f), tt.want)
+			}
+		})
+	}
+}
+
+func TestSideDataNumericFields(t *testing.T) {
+	// ffprobe emits max_content and max_average as integers, not strings.
+	sample := `{
+		"streams": [{
+			"index": 0, "codec_name": "hevc", "codec_type": "video",
+			"width": 3840, "height": 2160,
+			"side_data_list": [
+				{
+					"side_data_type": "Content light level metadata",
+					"max_content": 899,
+					"max_average": 154
+				},
+				{
+					"side_data_type": "Mastering display metadata",
+					"max_luminance": "1000/1",
+					"min_luminance": "1/10000"
+				}
+			]
+		}],
+		"format": {}
+	}`
+	var result Result
+	if err := json.Unmarshal([]byte(sample), &result); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+	sd := result.Streams[0].SideDataList
+	if len(sd) != 2 {
+		t.Fatalf("side_data_list len = %d, want 2", len(sd))
+	}
+	if string(sd[0].MaxContent) != "899" {
+		t.Errorf("MaxContent = %q, want 899", sd[0].MaxContent)
+	}
+	if string(sd[0].MaxAverage) != "154" {
+		t.Errorf("MaxAverage = %q, want 154", sd[0].MaxAverage)
+	}
+	if sd[1].MaxLuminance != "1000/1" {
+		t.Errorf("MaxLuminance = %q, want 1000/1", sd[1].MaxLuminance)
+	}
+}
+
 func TestJSONParsing(t *testing.T) {
 	sample := `{
 		"streams": [

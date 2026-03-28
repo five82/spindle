@@ -317,7 +317,7 @@ DESIGN_STAGES.md Section 2.6.
   processing continues. All other errors fail the item.
 - See DESIGN_INFRASTRUCTURE.md Section 5 for the error taxonomy.
 - On failure: sets `item.Stage = failed`, `item.InProgress = 0`.
-- Records `failed_at_stage` for retry routing.
+- Records `failed_at_stage` (the stage where failure occurred) for retry routing.
 - Persists, notifies, and checks queue completion.
 - Retry is workflow-level: `spindle queue retry <id>` re-runs from the
   failed stage.

@@ -25,8 +25,10 @@ const (
 )
 
 // PipelineStage describes a single stage in the pipeline.
+// Stage identifies which queue stage this handler owns: the handler picks up
+// items whose item.Stage equals this value, and on success advances the item
+// to the next handler's Stage (or StageCompleted for the last handler).
 type PipelineStage struct {
-	Name      string
 	Handler   stage.Handler
 	Stage     queue.Stage
 	Semaphore Semaphore
@@ -146,7 +148,7 @@ func (m *Manager) Run(ctx context.Context) {
 		// Initialize progress state so external consumers (flyer) know which
 		// stage is active and stale progress from the prior stage is cleared.
 		item.InProgress = 1
-		item.ProgressStage = ps.Name
+		item.ProgressStage = string(ps.Stage)
 		item.ProgressPercent = 0
 		item.ProgressMessage = ""
 		if err := m.store.Update(item); err != nil {
@@ -193,8 +195,8 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	itemLogger.Info("stage started",
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "started",
-		"decision_reason", fmt.Sprintf("item %d ready for %s", item.ID, ps.Name),
-		"stage", ps.Name,
+		"decision_reason", fmt.Sprintf("item %d ready for %s", item.ID, string(ps.Stage)),
+		"stage", string(ps.Stage),
 	)
 
 	start := time.Now()
@@ -219,7 +221,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 				"event_type", "stage_degraded",
 				"error_hint", degraded.Msg,
 				"impact", "continuing to next stage",
-				"stage", ps.Name,
+				"stage", string(ps.Stage),
 				"stage_duration", time.Since(start),
 			)
 			// Fall through to advance stage.
@@ -241,7 +243,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		"decision_result", "completed",
 		"decision_reason", fmt.Sprintf("advancing to %s", item.Stage),
 		"event_type", "stage_complete",
-		"stage", ps.Name,
+		"stage", string(ps.Stage),
 		"stage_duration", time.Since(start),
 	)
 
@@ -270,9 +272,9 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 
 	itemLogger.Error("stage failed",
 		"event_type", "stage_failure",
-		"error_hint", ps.Name,
+		"error_hint", string(ps.Stage),
 		"error", err,
-		"stage", ps.Name,
+		"stage", string(ps.Stage),
 		"stage_duration", time.Since(start),
 	)
 
@@ -289,8 +291,8 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 	}
 
 	if m.notifier != nil {
-		title := fmt.Sprintf("Stage failed: %s", ps.Name)
-		msg := fmt.Sprintf("Item %d failed at %s: %s", item.ID, ps.Name, err.Error())
+		title := fmt.Sprintf("Stage failed: %s", string(ps.Stage))
+		msg := fmt.Sprintf("Item %d failed at %s: %s", item.ID, string(ps.Stage), err.Error())
 		if notifyErr := m.notifier.Send(ctx, notify.EventError, title, msg); notifyErr != nil {
 			itemLogger.Error("failure notification failed",
 				"event_type", "notification_failed",

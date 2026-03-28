@@ -10,6 +10,28 @@ import (
 	"strconv"
 )
 
+// FlexString unmarshals from both JSON strings and numbers, storing the result
+// as a string. ffprobe is inconsistent: mastering display fields (max_luminance)
+// are strings like "1000/1", but content light level fields (max_content,
+// max_average) are plain integers.
+type FlexString string
+
+func (f *FlexString) UnmarshalJSON(b []byte) error {
+	// Try string first.
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*f = FlexString(s)
+		return nil
+	}
+	// Fall back to number.
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err == nil {
+		*f = FlexString(n.String())
+		return nil
+	}
+	return fmt.Errorf("FlexString: cannot unmarshal %s", string(b))
+}
+
 // Stream represents a single elementary stream (video, audio, subtitle, etc.)
 // as reported by ffprobe.
 type Stream struct {
@@ -50,9 +72,9 @@ type SideData struct {
 	WhitePointY   string `json:"white_point_y,omitempty"`
 	MinLuminance  string `json:"min_luminance,omitempty"`
 	MaxLuminance  string `json:"max_luminance,omitempty"`
-	// Content light level fields
-	MaxContent string `json:"max_content,omitempty"`
-	MaxAverage string `json:"max_average,omitempty"`
+	// Content light level fields — ffprobe emits these as integers, not strings.
+	MaxContent FlexString `json:"max_content,omitempty"`
+	MaxAverage FlexString `json:"max_average,omitempty"`
 }
 
 // Format holds container-level metadata as reported by ffprobe.

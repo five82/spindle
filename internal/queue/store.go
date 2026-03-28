@@ -204,7 +204,7 @@ func (s *Store) NewDisc(title, fingerprint string) (*Item, error) {
 	err := retryOnBusy(func() error {
 		res, err := s.db.Exec(
 			`INSERT INTO queue_items (disc_title, stage, disc_fingerprint) VALUES (?, ?, ?)`,
-			title, string(StagePending), fingerprint,
+			title, string(StageIdentification), fingerprint,
 		)
 		if err != nil {
 			return err
@@ -562,7 +562,7 @@ func (s *Store) ResetInProgressOnShutdown() error {
 }
 
 // RetryFailed routes failed items back to their retry point.
-// Uses failed_at_stage if set, otherwise falls back to pending.
+// Uses failed_at_stage if set, otherwise falls back to identification.
 // Returns the number of items actually retried.
 func (s *Store) RetryFailed(ids ...int64) (int, error) {
 	if len(ids) == 0 {
@@ -580,7 +580,7 @@ func (s *Store) RetryFailed(ids ...int64) (int, error) {
 				continue
 			}
 
-			targetStage := StagePending
+			targetStage := StageIdentification
 			if item.FailedAtStage != "" {
 				targetStage = Stage(item.FailedAtStage)
 			}
@@ -660,7 +660,7 @@ func (s *Store) RetryEpisode(id int64, episodeKey string) (RetryResult, error) {
 	}
 
 	// Reset item to retry from the failed stage.
-	targetStage := StagePending
+	targetStage := StageIdentification
 	if item.FailedAtStage != "" {
 		targetStage = Stage(item.FailedAtStage)
 	}

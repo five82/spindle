@@ -4,7 +4,6 @@ package queue
 type Stage string
 
 const (
-	StagePending              Stage = "pending"
 	StageIdentification       Stage = "identification"
 	StageRipping              Stage = "ripping"
 	StageEpisodeIdentification Stage = "episode_identification"

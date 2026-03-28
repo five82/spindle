@@ -9,8 +9,7 @@ The daemon owns disc detection and the automated pipeline. Queue commands work w
 Every item moves through the queue in order. Each item has a **stage** and an
 **in_progress** flag. The stages you will see are:
 
-- `pending` - disc queued, awaiting identification
-- `identification` - MakeMKV scan + TMDB lookup
+- `identification` - disc queued; MakeMKV scan + TMDB lookup
 - `ripping` - video copied to staging; you'll get a notification so the disc can be ejected manually
 - `episode_identification` *(TV only)* - WhisperX + OpenSubtitles correlate ripped files to definitive episode numbers
 - `encoding` - Drapto transcodes the rip in the background
@@ -34,14 +33,13 @@ flight concurrently -- for example, disc A can be encoding while disc B is
 being identified and ripped. The optical drive is guarded by a semaphore so
 only one disc operation (identification or ripping) runs at a time.
 
-## Stage 1: Disc Detection & Queueing (pending)
+## Stage 1: Disc Detection & Queueing (identification)
 
 1. The daemon polls your optical drive (`optical_drive`, default `/dev/sr0`).
 2. When a disc is detected, Spindle fingerprints it and looks for existing queue items.
 3. Existing items are handled based on their stage:
-   - **In workflow or completed**: no new work is queued.
-   - **Failed or review**: the item is reset to `pending` so it can be reprocessed.
-4. New discs are inserted into the queue at stage `pending`.
+   - **In workflow, completed, or failed**: no new work is queued (the disc is already known).
+4. New discs are inserted into the queue at stage `identification`.
 
 Disc-detected notifications are emitted when identification begins.
 
