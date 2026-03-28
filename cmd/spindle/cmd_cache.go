@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -15,10 +14,13 @@ import (
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/fingerprint"
-	"github.com/five82/spindle/internal/makemkv"
+	"github.com/five82/spindle/internal/identify"
+	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
+	"github.com/five82/spindle/internal/ripper"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stageexec"
 	"github.com/five82/spindle/internal/tmdb"
 )
 
@@ -75,110 +77,79 @@ func newCacheRipCmd() *cobra.Command {
 			}
 
 			// Check if already cached.
-			cache := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
-			if cache.HasCache(fp) {
+			ripCacheStore := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
+			if ripCacheStore.HasCache(fp) {
 				fmt.Printf("Disc already cached (fingerprint: %s)\n", truncate(fp, 12))
 				return nil
 			}
 
-			// MakeMKV scan.
-			fmt.Printf("Scanning disc on %s...\n", device)
-			discInfo, err := makemkv.Scan(ctx, device,
-				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second,
-				cfg.MakeMKV.MinTitleLength, nil)
+			logger := buildLogger()
+
+			// Open temporary queue store for stage coordination.
+			qStore, err := queue.Open(cfg.QueueDBPath())
 			if err != nil {
-				return fmt.Errorf("makemkv scan: %w", err)
+				return fmt.Errorf("open queue: %w", err)
 			}
+			defer func() { _ = qStore.Close() }()
 
-			discTitle := discInfo.Name
-			if discTitle == "" {
-				discTitle = event.Label
+			// Create queue item.
+			discLabel := event.Label
+			if discLabel == "" {
+				discLabel = "Unknown Disc"
 			}
-			if discTitle == "" {
-				discTitle = "Unknown Disc"
+			item, err := qStore.NewDisc(discLabel, fp)
+			if err != nil {
+				return fmt.Errorf("create queue item: %w", err)
 			}
+			defer func() { _ = qStore.Remove(item.ID) }()
 
-			fmt.Printf("Disc: %s (%d titles)\n", discTitle, len(discInfo.Titles))
-
-			// TMDB identification (for disc ID cache).
+			// Set up dependencies for identification.
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
-			results, searchErr := tmdbClient.SearchMulti(ctx, discTitle)
-			if searchErr == nil && len(results) > 0 {
-				best := tmdb.SelectBestResult(results, discTitle, 0, 5, slog.Default())
-				if best != nil {
-					fmt.Printf("TMDB: %s (%s, ID %d)\n", best.DisplayTitle(), best.Year(), best.ID)
-					discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
-					if openErr == nil {
-						entry := discidcache.Entry{
-							TMDBID:    best.ID,
-							MediaType: best.MediaType,
-							Title:     best.DisplayTitle(),
-							Year:      best.Year(),
-						}
-						_ = discIDStore.Set(fp, entry)
-					}
-				}
+
+			discIDStore, cacheErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
+			if cacheErr != nil {
+				logger.Debug("disc ID cache unavailable", "error", cacheErr)
 			}
 
-			// Rip qualifying titles to a temp directory.
-			tempDir, err := os.MkdirTemp("", "spindle-rip-*")
-			if err != nil {
-				return fmt.Errorf("create temp dir: %w", err)
-			}
-			defer func() { _ = os.RemoveAll(tempDir) }()
-
-			var rippedCount int
-			var totalBytes int64
-			for i, title := range discInfo.Titles {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				if title.Duration.Seconds() < float64(cfg.MakeMKV.MinTitleLength) {
-					continue
-				}
-
-				fmt.Printf("Ripping title %d/%d (ID %d, %s)...\n",
-					i+1, len(discInfo.Titles), title.ID, title.Duration)
-
-				ripErr := makemkv.Rip(ctx, device, title.ID, tempDir,
-					time.Duration(cfg.MakeMKV.RipTimeout)*time.Second,
-					cfg.MakeMKV.MinTitleLength,
-					func(p makemkv.RipProgress) {
-						fmt.Printf("\r  Progress: %.0f%%", p.Percent)
-					}, nil,
-				)
-				if ripErr != nil {
-					return fmt.Errorf("rip title %d: %w", title.ID, ripErr)
-				}
-				fmt.Println() // newline after progress
-				rippedCount++
-				totalBytes += title.SizeBytes
+			var keydbCat *keydb.Catalog
+			if cat, _, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath, logger); loadErr == nil {
+				keydbCat = cat
 			}
 
-			if rippedCount == 0 {
-				fmt.Println("No qualifying titles to rip")
-				return nil
+			// Run identification stage.
+			fmt.Printf("Identifying disc on %s...\n", device)
+			identifyHandler := identify.New(cfg, qStore, tmdbClient, nil, nil, discIDStore, keydbCat)
+			if err := stageexec.Run(ctx, item, stageexec.Options{
+				Store:   qStore,
+				Handler: identifyHandler,
+				Logger:  logger,
+			}); err != nil {
+				return fmt.Errorf("identification: %w", err)
 			}
 
-			// Register in rip cache.
-			meta := ripcache.EntryMetadata{
-				Fingerprint: fp,
-				DiscTitle:   discTitle,
-				CachedAt:    time.Now(),
-				TitleCount:  rippedCount,
-				TotalBytes:  totalBytes,
+			// Advance to ripping stage.
+			item.Stage = queue.StageRipping
+			if err := qStore.Update(item); err != nil {
+				return fmt.Errorf("advance stage: %w", err)
 			}
-			if err := cache.Register(fp, tempDir, meta); err != nil {
-				return fmt.Errorf("cache registration: %w", err)
+
+			// Run ripping stage.
+			fmt.Printf("Ripping disc...\n")
+			ripperHandler := ripper.New(cfg, qStore, nil, ripCacheStore, nil)
+			if err := stageexec.Run(ctx, item, stageexec.Options{
+				Store:   qStore,
+				Handler: ripperHandler,
+				Logger:  logger,
+			}); err != nil {
+				return fmt.Errorf("ripping: %w", err)
 			}
 
 			// Prune cache if needed.
-			if pruneErr := cache.Prune(); pruneErr != nil {
+			if pruneErr := ripCacheStore.Prune(); pruneErr != nil {
 				fmt.Fprintf(os.Stderr, "%s cache prune failed: %v\n", warnStyle("Warning:"), pruneErr)
 			}
 
-			fmt.Printf("\n%s\n", successStyle(fmt.Sprintf("Cached %d titles (%s) for %s",
-				rippedCount, formatBytes(totalBytes), discTitle)))
+			fmt.Printf("\n%s\n", successStyle(fmt.Sprintf("Cached disc: %s", item.DiscTitle)))
 			fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), dimStyle(fp))
 			return nil
 		},
@@ -211,15 +182,19 @@ func newCacheStatsCmd() *cobra.Command {
 			var totalBytes int64
 			for i, e := range entries {
 				totalBytes += e.TotalBytes
+				titleWord := "titles"
+				if e.TitleCount == 1 {
+					titleWord = "title"
+				}
 				if flagVerbose {
-					fmt.Printf("  %d. %s (%d titles, %s, cached %s)\n",
-						i+1, e.DiscTitle, e.TitleCount,
+					fmt.Printf("  %d. %s (%d %s, %s, cached %s)\n",
+						i+1, e.DiscTitle, e.TitleCount, titleWord,
 						formatBytes(e.TotalBytes), e.CachedAt.Format(time.RFC3339))
 					fmt.Printf("     Fingerprint: %s\n", e.Fingerprint)
 				} else {
 					age := time.Since(e.CachedAt).Truncate(time.Minute)
-					fmt.Printf("  %d. %s (%d titles, %s, %s ago)\n",
-						i+1, e.DiscTitle, e.TitleCount,
+					fmt.Printf("  %d. %s (%d %s, %s, %s ago)\n",
+						i+1, e.DiscTitle, e.TitleCount, titleWord,
 						formatBytes(e.TotalBytes), age)
 				}
 			}
@@ -277,34 +252,42 @@ func newCacheProcessCmd() *cobra.Command {
 				return fmt.Errorf("create queue item: %w", err)
 			}
 
-			// Build RipSpec from disc ID cache if available.
-			discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
-			if openErr == nil {
-				if idEntry := discIDStore.Lookup(entry.Fingerprint); idEntry != nil {
-					env := ripspec.Envelope{
-						Version:     ripspec.CurrentVersion,
-						Fingerprint: entry.Fingerprint,
-						Metadata: ripspec.Metadata{
-							ID:        idEntry.TMDBID,
-							Title:     idEntry.Title,
-							MediaType: idEntry.MediaType,
-							Year:      idEntry.Year,
-							Movie:     idEntry.MediaType == "movie",
-						},
-					}
-					data, encErr := env.Encode()
-					if encErr == nil {
-						item.RipSpecData = data
-						item.Stage = queue.StageRipping
-						metaJSON, _ := json.Marshal(queue.Metadata{
-							ID:        idEntry.TMDBID,
-							Title:     idEntry.Title,
-							MediaType: idEntry.MediaType,
-							Year:      idEntry.Year,
-							Movie:     idEntry.MediaType == "movie",
-						})
-						item.MetadataJSON = string(metaJSON)
-						_ = qStore.Update(item)
+			// Load identification from cache metadata (preferred over disc ID cache).
+			if entry.RipSpecData != "" {
+				item.RipSpecData = entry.RipSpecData
+				item.MetadataJSON = entry.MetadataJSON
+				item.Stage = queue.StageRipping
+				_ = qStore.Update(item)
+			} else {
+				// Fallback: reconstruct from disc ID cache (legacy entries).
+				discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
+				if openErr == nil {
+					if idEntry := discIDStore.Lookup(entry.Fingerprint); idEntry != nil {
+						env := ripspec.Envelope{
+							Version:     ripspec.CurrentVersion,
+							Fingerprint: entry.Fingerprint,
+							Metadata: ripspec.Metadata{
+								ID:        idEntry.TMDBID,
+								Title:     idEntry.Title,
+								MediaType: idEntry.MediaType,
+								Year:      idEntry.Year,
+								Movie:     idEntry.MediaType == "movie",
+							},
+						}
+						data, encErr := env.Encode()
+						if encErr == nil {
+							item.RipSpecData = data
+							item.Stage = queue.StageRipping
+							metaJSON, _ := json.Marshal(queue.Metadata{
+								ID:        idEntry.TMDBID,
+								Title:     idEntry.Title,
+								MediaType: idEntry.MediaType,
+								Year:      idEntry.Year,
+								Movie:     idEntry.MediaType == "movie",
+							})
+							item.MetadataJSON = string(metaJSON)
+							_ = qStore.Update(item)
+						}
 					}
 				}
 			}

@@ -12,11 +12,14 @@ import (
 
 // EntryMetadata stores metadata about a cached rip.
 type EntryMetadata struct {
-	Fingerprint string    `json:"fingerprint"`
-	DiscTitle   string    `json:"disc_title"`
-	CachedAt    time.Time `json:"cached_at"`
-	TitleCount  int       `json:"title_count"`
-	TotalBytes  int64     `json:"total_bytes"`
+	Version      int       `json:"version"`
+	Fingerprint  string    `json:"fingerprint"`
+	DiscTitle    string    `json:"disc_title"`
+	CachedAt     time.Time `json:"cached_at"`
+	TitleCount   int       `json:"title_count"`
+	TotalBytes   int64     `json:"total_bytes"`
+	RipSpecData  string    `json:"ripspec_data,omitempty"`
+	MetadataJSON string    `json:"metadata_json,omitempty"`
 }
 
 // Store manages the rip cache directory.

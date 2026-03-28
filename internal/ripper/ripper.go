@@ -111,6 +111,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Select titles to rip based on media type.
 	targets := h.selectRipTargets(logger, &env)
+	rippedCount := len(targets)
 
 	// Rip selected titles, tracking TitleID -> file path mapping.
 	titleFileMap := make(map[int]string, len(targets)) // titleID -> ripped file path
@@ -190,11 +191,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			}
 		}
 		meta := ripcache.EntryMetadata{
-			Fingerprint: item.DiscFingerprint,
-			DiscTitle:   item.DiscTitle,
-			CachedAt:    time.Now(),
-			TitleCount:  len(env.Titles),
-			TotalBytes:  totalBytes,
+			Version:      1,
+			Fingerprint:  item.DiscFingerprint,
+			DiscTitle:    item.DiscTitle,
+			CachedAt:     time.Now(),
+			TitleCount:   rippedCount,
+			TotalBytes:   totalBytes,
+			RipSpecData:  item.RipSpecData,
+			MetadataJSON: item.MetadataJSON,
 		}
 		if err := h.cache.Register(item.DiscFingerprint, rippedDir, meta); err != nil {
 			logger.Warn("rip cache write failed",
@@ -210,7 +214,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	if h.notifier != nil {
 		_ = h.notifier.Send(ctx, notify.EventRipComplete,
 			"Rip Complete",
-			fmt.Sprintf("Ripped %s (%d titles)", item.DiscTitle, len(env.Titles)),
+			fmt.Sprintf("Ripped %s (%d titles)", item.DiscTitle, rippedCount),
 		)
 	}
 
