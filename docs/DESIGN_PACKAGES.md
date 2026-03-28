@@ -16,7 +16,7 @@ cmd/
 
 internal/
   config/               TOML config loading, normalization, validation
-  queue/                SQLite store, Item model, Stage types, metadata helpers
+  queue/                SQLite store, Item model, Stage types, metadata helpers, notification context
   ripspec/              RipSpec envelope data model, parse/encode, asset tracking
   stage/                Handler interface, context-scoped logger, ParseRipSpec helper
   services/             Error types (ErrDegraded)

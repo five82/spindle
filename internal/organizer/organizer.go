@@ -200,9 +200,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Notification.
 	if h.notifier != nil {
+		msg := fmt.Sprintf("Organized %s to library", item.DiscTitle)
+		msg += queue.FormatAlsoProcessing(h.store, item.ID)
 		_ = h.notifier.Send(ctx, notify.EventOrganizeComplete,
 			"Organization Complete",
-			fmt.Sprintf("Organized %s to library", item.DiscTitle),
+			msg,
 		)
 	}
 

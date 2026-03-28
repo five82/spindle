@@ -464,6 +464,18 @@ func (s *Store) Stats() (map[Stage]int, error) {
 	return result, rows.Err()
 }
 
+// InProgressItems returns all items with in_progress=1, ordered by creation time.
+func (s *Store) InProgressItems() ([]*Item, error) {
+	rows, err := s.db.Query(
+		"SELECT "+allColumns+" FROM queue_items WHERE in_progress = 1 ORDER BY created_at",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("in-progress items: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectItems(rows)
+}
+
 // HasActiveItems returns true if any item is in a non-terminal stage
 // (not completed or failed).
 func (s *Store) HasActiveItems() (bool, error) {

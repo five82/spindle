@@ -262,6 +262,7 @@ from the pipeline configuration.
 | `NextForStatuses(statuses...)` | Oldest item matching any status (FIFO queue fetch) |
 | `ActiveFingerprints()` | Set of all non-empty fingerprints in queue (for orphan cleanup) |
 | `HasDiscDependentItem()` | True if any item is in identification or ripping stage with in_progress=1 |
+| `InProgressItems()` | All items with in_progress=1, ordered by creation time (for notification context) |
 | `Stats()` | Count of items grouped by status |
 | `CheckHealth()` | Full diagnostic: existence, table check, column presence, integrity, total count |
 

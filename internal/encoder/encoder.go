@@ -86,9 +86,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	)
 
 	if h.notifier != nil {
+		msg := fmt.Sprintf("Encoding %s (%d files)", item.DiscTitle, len(jobs))
+		msg += queue.FormatAlsoProcessing(h.store, item.ID)
 		_ = h.notifier.Send(ctx, notify.EventEncodeStarted,
 			"Encode Started",
-			fmt.Sprintf("Encoding %s (%d files)", item.DiscTitle, len(jobs)),
+			msg,
 		)
 	}
 
@@ -292,6 +294,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			msg += fmt.Sprintf(", %.1f%% smaller", reduction)
 		}
 		msg += ")"
+		msg += queue.FormatAlsoProcessing(h.store, item.ID)
 		_ = h.notifier.Send(ctx, notify.EventEncodeComplete,
 			"Encode Complete", msg,
 		)

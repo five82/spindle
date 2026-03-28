@@ -59,9 +59,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
 			)
 			if h.notifier != nil {
+				msg := fmt.Sprintf("%s (%d titles from cache)", item.DiscTitle, meta.TitleCount)
+				msg += "\nDrive is available for next disc."
+				msg += queue.FormatAlsoProcessing(h.store, item.ID)
 				_ = h.notifier.Send(ctx, notify.EventRipCacheHit,
 					"Rip Cache Hit",
-					fmt.Sprintf("%s (%d titles from cache)", item.DiscTitle, meta.TitleCount),
+					msg,
 				)
 			}
 			// Map cached files to assets (no titleFileMap for cache path).
@@ -120,9 +123,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	rippedCount := len(targets)
 
 	if h.notifier != nil && len(targets) > 0 {
+		msg := fmt.Sprintf("Ripping %s (%d titles)", item.DiscTitle, len(targets))
+		msg += queue.FormatAlsoProcessing(h.store, item.ID)
 		_ = h.notifier.Send(ctx, notify.EventRipStarted,
 			"Rip Started",
-			fmt.Sprintf("Ripping %s (%d titles)", item.DiscTitle, len(targets)),
+			msg,
 		)
 	}
 
@@ -225,9 +230,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Notification.
 	if h.notifier != nil {
+		msg := fmt.Sprintf("Ripped %s (%d titles)", item.DiscTitle, rippedCount)
+		msg += "\nDrive is available for next disc."
+		msg += queue.FormatAlsoProcessing(h.store, item.ID)
 		_ = h.notifier.Send(ctx, notify.EventRipComplete,
 			"Rip Complete",
-			fmt.Sprintf("Ripped %s (%d titles)", item.DiscTitle, rippedCount),
+			msg,
 		)
 	}
 

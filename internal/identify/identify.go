@@ -362,9 +362,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Send notification.
 	if h.notifier != nil {
+		msg := item.DiscTitle + queue.FormatAlsoProcessing(h.store, item.ID)
 		_ = h.notifier.Send(ctx, notify.EventIdentificationComplete,
 			"Identification Complete",
-			item.DiscTitle,
+			msg,
 		)
 	}
 
