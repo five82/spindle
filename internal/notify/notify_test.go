@@ -48,6 +48,9 @@ func TestPriority(t *testing.T) {
 		{EventQueueStarted, "default"},
 		{EventQueueCompleted, "default"},
 		{EventError, "high"},
+		{EventRipCacheHit, "low"},
+		{EventRipStarted, "default"},
+		{EventEncodeStarted, "default"},
 		{EventUnidentifiedMedia, "default"},
 		{EventTest, "low"},
 	}
@@ -74,6 +77,9 @@ func TestTags(t *testing.T) {
 		{EventQueueStarted, "queue"},
 		{EventQueueCompleted, "queue"},
 		{EventError, "error"},
+		{EventRipCacheHit, "rip,cache"},
+		{EventRipStarted, "rip"},
+		{EventEncodeStarted, "encode"},
 		{EventUnidentifiedMedia, "review"},
 		{EventTest, "test"},
 	}

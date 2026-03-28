@@ -106,7 +106,10 @@ are sent unconditionally (no per-event config gates).
 |----------------------------|----------|--------------------|
 | `disc_detected`            | default  | -                  |
 | `identification_complete`  | default  | identify           |
+| `rip_cache_hit`            | low      | rip,cache          |
+| `rip_started`              | default  | rip                |
 | `rip_complete`             | default  | rip                |
+| `encode_started`           | default  | encode             |
 | `encode_complete`          | default  | encode             |
 | `validation_failed`        | high     | validation,warning |
 | `pipeline_complete`        | default  | -                  |

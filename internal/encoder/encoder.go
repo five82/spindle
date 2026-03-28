@@ -85,6 +85,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"decision_reason", fmt.Sprintf("media_type=%s", env.Metadata.MediaType),
 	)
 
+	if h.notifier != nil {
+		_ = h.notifier.Send(ctx, notify.EventEncodeStarted,
+			"Encode Started",
+			fmt.Sprintf("Encoding %s (%d files)", item.DiscTitle, len(jobs)),
+		)
+	}
+
 	var opts []drapto.Option
 	if h.cfg.Encoding.SVTAV1Preset >= 0 && h.cfg.Encoding.SVTAV1Preset <= 13 {
 		opts = append(opts, drapto.WithSVTAV1Preset(uint8(h.cfg.Encoding.SVTAV1Preset)))
@@ -100,6 +107,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	var encodeErrors int
+	var totalOriginalSize, totalEncodedSize int64
 	for i, job := range jobs {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -221,6 +229,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		snap.OriginalSize = int64(result.OriginalSize)
 		snap.SizeReductionPercent = result.SizeReductionPercent
 		snap.AverageSpeed = float64(result.EncodingSpeed)
+		totalOriginalSize += int64(result.OriginalSize)
+		totalEncodedSize += int64(result.EncodedSize)
 
 		item.EncodingDetailsJSON = snap.Marshal()
 		if err := h.store.UpdateProgress(item); err != nil {
@@ -272,9 +282,18 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Notification.
 	if h.notifier != nil {
+		snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+		msg := fmt.Sprintf("Encoded %s (%d files", item.DiscTitle, len(jobs))
+		if snap.Resolution != "" {
+			msg += ", " + snap.Resolution
+		}
+		if totalOriginalSize > 0 {
+			reduction := (1 - float64(totalEncodedSize)/float64(totalOriginalSize)) * 100
+			msg += fmt.Sprintf(", %.1f%% smaller", reduction)
+		}
+		msg += ")"
 		_ = h.notifier.Send(ctx, notify.EventEncodeComplete,
-			"Encode Complete",
-			fmt.Sprintf("Encoded %s (%d files)", item.DiscTitle, len(jobs)),
+			"Encode Complete", msg,
 		)
 	}
 

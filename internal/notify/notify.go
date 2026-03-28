@@ -25,6 +25,9 @@ const (
 	EventQueueStarted           Event = "queue_started"
 	EventQueueCompleted         Event = "queue_completed"
 	EventError                  Event = "error"
+	EventRipCacheHit            Event = "rip_cache_hit"
+	EventRipStarted             Event = "rip_started"
+	EventEncodeStarted          Event = "encode_started"
 	EventUnidentifiedMedia      Event = "unidentified_media"
 	EventTest                   Event = "test"
 )
@@ -90,7 +93,7 @@ func priority(event Event) string {
 	switch event {
 	case EventValidationFailed, EventError:
 		return "high"
-	case EventTest:
+	case EventRipCacheHit, EventTest:
 		return "low"
 	default:
 		return "default"
@@ -101,9 +104,11 @@ func tags(event Event) string {
 	switch event {
 	case EventIdentificationComplete:
 		return "identify"
-	case EventRipComplete:
+	case EventRipCacheHit:
+		return "rip,cache"
+	case EventRipStarted, EventRipComplete:
 		return "rip"
-	case EventEncodeComplete:
+	case EventEncodeStarted, EventEncodeComplete:
 		return "encode"
 	case EventValidationFailed:
 		return "validation,warning"

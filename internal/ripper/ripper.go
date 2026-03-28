@@ -58,6 +58,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_result", "restored",
 				"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
 			)
+			if h.notifier != nil {
+				_ = h.notifier.Send(ctx, notify.EventRipCacheHit,
+					"Rip Cache Hit",
+					fmt.Sprintf("%s (%d titles from cache)", item.DiscTitle, meta.TitleCount),
+				)
+			}
 			// Map cached files to assets (no titleFileMap for cache path).
 			h.mapRippedAssets(logger, &env, rippedDir, nil)
 			if n := len(env.Assets.Ripped); n > 0 {
@@ -112,6 +118,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Select titles to rip based on media type.
 	targets := h.selectRipTargets(logger, &env)
 	rippedCount := len(targets)
+
+	if h.notifier != nil && len(targets) > 0 {
+		_ = h.notifier.Send(ctx, notify.EventRipStarted,
+			"Rip Started",
+			fmt.Sprintf("Ripping %s (%d titles)", item.DiscTitle, len(targets)),
+		)
+	}
 
 	// Rip selected titles, tracking TitleID -> file path mapping.
 	titleFileMap := make(map[int]string, len(targets)) // titleID -> ripped file path
