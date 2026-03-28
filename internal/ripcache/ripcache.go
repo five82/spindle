@@ -4,11 +4,21 @@ package ripcache
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
 )
+
+// CopyProgress reports progress during a file copy operation.
+type CopyProgress struct {
+	BytesCopied int64
+	TotalBytes  int64
+}
+
+// ProgressFunc is called during file copy operations to report progress.
+type ProgressFunc func(CopyProgress)
 
 // EntryMetadata stores metadata about a cached rip.
 type EntryMetadata struct {
@@ -38,7 +48,8 @@ func New(cacheDir string, maxGiB int) *Store {
 
 // Register copies ripped files from srcDir into the cache under fingerprint.
 // Metadata is written as metadata.json alongside the cached files.
-func (s *Store) Register(fingerprint, srcDir string, meta EntryMetadata) error {
+// If progress is non-nil, it is called during file copies to report progress.
+func (s *Store) Register(fingerprint, srcDir string, meta EntryMetadata, progress ProgressFunc) error {
 	entryDir := filepath.Join(s.cacheDir, fingerprint)
 	if err := os.MkdirAll(entryDir, 0o755); err != nil {
 		return fmt.Errorf("create cache entry dir: %w", err)
@@ -49,15 +60,29 @@ func (s *Store) Register(fingerprint, srcDir string, meta EntryMetadata) error {
 		return fmt.Errorf("read source dir: %w", err)
 	}
 
+	// Compute total bytes for progress reporting.
+	var totalBytes int64
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			totalBytes += info.Size()
+		}
+	}
+
+	var bytesCopied int64
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
 		srcPath := filepath.Join(srcDir, e.Name())
 		dstPath := filepath.Join(entryDir, e.Name())
-		if err := copyFile(srcPath, dstPath); err != nil {
+		n, err := copyFileWithProgress(srcPath, dstPath, bytesCopied, totalBytes, progress)
+		if err != nil {
 			return fmt.Errorf("copy %s: %w", e.Name(), err)
 		}
+		bytesCopied += n
 	}
 
 	metaPath := filepath.Join(entryDir, "metadata.json")
@@ -74,7 +99,8 @@ func (s *Store) Register(fingerprint, srcDir string, meta EntryMetadata) error {
 
 // Restore copies cached files for fingerprint into destDir.
 // Returns nil, nil if no cache entry exists for the fingerprint.
-func (s *Store) Restore(fingerprint, destDir string) (*EntryMetadata, error) {
+// If progress is non-nil, it is called during file copies to report progress.
+func (s *Store) Restore(fingerprint, destDir string, progress ProgressFunc) (*EntryMetadata, error) {
 	entryDir := filepath.Join(s.cacheDir, fingerprint)
 	if _, err := os.Stat(entryDir); os.IsNotExist(err) {
 		return nil, nil
@@ -94,15 +120,18 @@ func (s *Store) Restore(fingerprint, destDir string) (*EntryMetadata, error) {
 		return nil, fmt.Errorf("read cache entry dir: %w", err)
 	}
 
+	var bytesCopied int64
 	for _, e := range entries {
 		if e.IsDir() || e.Name() == "metadata.json" {
 			continue
 		}
 		srcPath := filepath.Join(entryDir, e.Name())
 		dstPath := filepath.Join(destDir, e.Name())
-		if err := copyFile(srcPath, dstPath); err != nil {
+		n, err := copyFileWithProgress(srcPath, dstPath, bytesCopied, meta.TotalBytes, progress)
+		if err != nil {
 			return nil, fmt.Errorf("copy %s: %w", e.Name(), err)
 		}
+		bytesCopied += n
 	}
 
 	return meta, nil
@@ -249,14 +278,47 @@ func (s *Store) Clear() error {
 	return nil
 }
 
-// copyFile copies a single file from src to dst.
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
+// progressWriter wraps an io.Writer and reports bytes written via a callback.
+type progressWriter struct {
+	w       io.Writer
+	copied  int64
+	total   int64
+	onWrite ProgressFunc
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n, err := pw.w.Write(p)
+	pw.copied += int64(n)
+	if pw.onWrite != nil {
+		pw.onWrite(CopyProgress{BytesCopied: pw.copied, TotalBytes: pw.total})
+	}
+	return n, err
+}
+
+// copyFileWithProgress copies src to dst using streaming I/O, reporting progress.
+// baseOffset is the cumulative bytes already copied in a multi-file operation.
+// Returns the number of bytes copied from this file.
+func copyFileWithProgress(src, dst string, baseOffset, totalBytes int64, progress ProgressFunc) (int64, error) {
+	sf, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("read: %w", err)
+		return 0, fmt.Errorf("open source: %w", err)
 	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
-		return fmt.Errorf("write: %w", err)
+	defer func() { _ = sf.Close() }()
+
+	df, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return 0, fmt.Errorf("create dest: %w", err)
 	}
-	return nil
+	defer func() { _ = df.Close() }()
+
+	var w io.Writer = df
+	if progress != nil {
+		w = &progressWriter{w: df, copied: baseOffset, total: totalBytes, onWrite: progress}
+	}
+
+	n, err := io.Copy(w, sf)
+	if err != nil {
+		return n, fmt.Errorf("copy: %w", err)
+	}
+	return n, df.Close()
 }

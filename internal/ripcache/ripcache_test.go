@@ -34,7 +34,7 @@ func TestRegisterAndHasCache(t *testing.T) {
 		TotalBytes:  10,
 	}
 
-	if err := store.Register("abc123", srcDir, meta); err != nil {
+	if err := store.Register("abc123", srcDir, meta, nil); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
@@ -62,11 +62,11 @@ func TestRegisterAndRestoreRoundTrip(t *testing.T) {
 		TotalBytes:  int64(len(content)),
 	}
 
-	if err := store.Register("fp001", srcDir, meta); err != nil {
+	if err := store.Register("fp001", srcDir, meta, nil); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
-	restored, err := store.Restore("fp001", destDir)
+	restored, err := store.Restore("fp001", destDir, nil)
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -90,12 +90,101 @@ func TestRestoreMissReturnsNil(t *testing.T) {
 	cacheDir := t.TempDir()
 	store := New(cacheDir, 10)
 
-	meta, err := store.Restore("nonexistent", t.TempDir())
+	meta, err := store.Restore("nonexistent", t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if meta != nil {
 		t.Fatal("expected nil metadata for cache miss")
+	}
+}
+
+func TestRegisterProgressCallback(t *testing.T) {
+	cacheDir := t.TempDir()
+	srcDir := t.TempDir()
+	store := New(cacheDir, 10)
+
+	// Create two source files.
+	if err := os.WriteFile(filepath.Join(srcDir, "a.mkv"), []byte("aaaa"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "b.mkv"), []byte("bbbbbb"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := EntryMetadata{
+		Fingerprint: "prog01",
+		DiscTitle:   "Progress Test",
+		CachedAt:    time.Now(),
+		TitleCount:  2,
+		TotalBytes:  10,
+	}
+
+	var reports []CopyProgress
+	progress := func(p CopyProgress) {
+		reports = append(reports, p)
+	}
+
+	if err := store.Register("prog01", srcDir, meta, progress); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	if len(reports) == 0 {
+		t.Fatal("expected progress callbacks, got none")
+	}
+
+	last := reports[len(reports)-1]
+	if last.TotalBytes != 10 {
+		t.Fatalf("TotalBytes: got %d, want 10", last.TotalBytes)
+	}
+	if last.BytesCopied != 10 {
+		t.Fatalf("final BytesCopied: got %d, want 10", last.BytesCopied)
+	}
+}
+
+func TestRestoreProgressCallback(t *testing.T) {
+	cacheDir := t.TempDir()
+	srcDir := t.TempDir()
+	destDir := t.TempDir()
+	store := New(cacheDir, 10)
+
+	content := []byte("restore progress data")
+	if err := os.WriteFile(filepath.Join(srcDir, "title.mkv"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := EntryMetadata{
+		Fingerprint: "prog02",
+		DiscTitle:   "Restore Progress",
+		CachedAt:    time.Now(),
+		TitleCount:  1,
+		TotalBytes:  int64(len(content)),
+	}
+
+	if err := store.Register("prog02", srcDir, meta, nil); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	var reports []CopyProgress
+	progress := func(p CopyProgress) {
+		reports = append(reports, p)
+	}
+
+	restored, err := store.Restore("prog02", destDir, progress)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if restored == nil {
+		t.Fatal("expected metadata, got nil")
+	}
+
+	if len(reports) == 0 {
+		t.Fatal("expected progress callbacks, got none")
+	}
+
+	last := reports[len(reports)-1]
+	if last.BytesCopied != int64(len(content)) {
+		t.Fatalf("final BytesCopied: got %d, want %d", last.BytesCopied, len(content))
 	}
 }
 
@@ -117,7 +206,7 @@ func TestGetMetadata(t *testing.T) {
 		TotalBytes:  4,
 	}
 
-	if err := store.Register("meta01", srcDir, meta); err != nil {
+	if err := store.Register("meta01", srcDir, meta, nil); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 

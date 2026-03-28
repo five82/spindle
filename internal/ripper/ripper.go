@@ -54,7 +54,20 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Check rip cache first.
 	if h.cache != nil && item.DiscFingerprint != "" {
-		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir); err == nil && meta != nil {
+		var lastPush time.Time
+		restoreProgress := func(p ripcache.CopyProgress) {
+			now := time.Now()
+			if now.Sub(lastPush) < 2*time.Second {
+				return
+			}
+			lastPush = now
+			item.ProgressPercent = float64(p.BytesCopied) / float64(p.TotalBytes) * 100
+			item.ProgressBytesCopied = p.BytesCopied
+			item.ProgressTotalBytes = p.TotalBytes
+			item.ProgressMessage = "Restoring from cache..."
+			_ = h.store.UpdateProgress(item)
+		}
+		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, restoreProgress); err == nil && meta != nil {
 			logger.Info("rip cache hit",
 				"decision_type", logs.DecisionRipCache,
 				"decision_result", "restored",
@@ -220,7 +233,20 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			RipSpecData:  item.RipSpecData,
 			MetadataJSON: item.MetadataJSON,
 		}
-		if err := h.cache.Register(item.DiscFingerprint, rippedDir, meta); err != nil {
+		var lastCachePush time.Time
+		cacheProgress := func(p ripcache.CopyProgress) {
+			now := time.Now()
+			if now.Sub(lastCachePush) < 2*time.Second {
+				return
+			}
+			lastCachePush = now
+			item.ProgressPercent = float64(p.BytesCopied) / float64(p.TotalBytes) * 100
+			item.ProgressBytesCopied = p.BytesCopied
+			item.ProgressTotalBytes = p.TotalBytes
+			item.ProgressMessage = "Caching rip..."
+			_ = h.store.UpdateProgress(item)
+		}
+		if err := h.cache.Register(item.DiscFingerprint, rippedDir, meta, cacheProgress); err != nil {
 			logger.Warn("rip cache write failed",
 				"event_type", "cache_write_error",
 				"error_hint", err.Error(),
