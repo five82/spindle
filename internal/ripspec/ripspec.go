@@ -7,7 +7,7 @@ import (
 )
 
 // CurrentVersion is the envelope schema version. Parse rejects any version
-// that is neither 0 (empty/legacy) nor CurrentVersion.
+// that does not match CurrentVersion.
 const CurrentVersion = 1
 
 // Envelope is the central data structure shared across all pipeline stages.
@@ -147,8 +147,8 @@ type EnvelopeAttributes struct {
 // ---------------------------------------------------------------------------
 
 // Parse deserializes JSON into an Envelope. An empty or blank input returns a
-// zero-value Envelope. Parse rejects envelopes whose version is not 0 (empty)
-// or CurrentVersion.
+// zero-value Envelope. Parse rejects envelopes whose version is not
+// CurrentVersion.
 func Parse(raw string) (Envelope, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -160,7 +160,7 @@ func Parse(raw string) (Envelope, error) {
 		return Envelope{}, fmt.Errorf("ripspec: parse envelope: %w", err)
 	}
 
-	if env.Version != 0 && env.Version != CurrentVersion {
+	if env.Version != CurrentVersion {
 		return Envelope{}, fmt.Errorf("ripspec: unrecognized envelope version %d (expected %d)", env.Version, CurrentVersion)
 	}
 

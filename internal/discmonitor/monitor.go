@@ -377,8 +377,6 @@ func shouldRefreshDiscTitle(title string) bool {
 // tryRefreshDiscTitle re-reads the disc label and updates the queue item's
 // title if a better label is available. All failures are non-fatal.
 // Called when a previously completed disc is re-inserted with a bad title.
-//
-//nolint:unused // building block for fingerprint-based duplicate detection pipeline
 func tryRefreshDiscTitle(ctx context.Context, store *queue.Store, item *queue.Item, device string, logger *slog.Logger) {
 	event, err := ProbeDisc(ctx, device)
 	if err != nil {
