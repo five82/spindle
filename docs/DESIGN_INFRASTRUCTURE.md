@@ -82,9 +82,11 @@ filters to INFO+ by default, providing clean output for Flyer and CLI consumers.
 Additional server-side filters: `item` (item ID), `component`, `lane`,
 `request`, and `daemon_only`.
 
-### 1.8 Retention
+### 1.8 Retention and Hydration
 
-Daemon log files older than `retention_days` are cleaned up on startup.
+Daemon log files older than `retention_days` are cleaned up on startup. After
+cleanup, remaining log files are parsed and loaded into the in-memory log buffer
+(most recent 10,000 entries), ensuring log continuity across daemon restarts.
 
 ---
 

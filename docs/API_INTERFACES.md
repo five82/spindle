@@ -481,7 +481,9 @@ Returns a single queue item by ID.
 
 #### GET /api/logs
 
-Returns structured log events parsed from the daemon's JSON log file.
+Returns structured log events from the daemon's in-memory log buffer. On
+startup, the buffer is hydrated from existing log files on disk, so events
+from previous daemon sessions are available.
 
 **Query parameters**:
 

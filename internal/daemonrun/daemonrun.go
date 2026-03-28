@@ -77,6 +77,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	multi := newMultiHandler(stderrHandler, fileHandler)
 
 	logBuffer := httpapi.NewLogBuffer(0) // default capacity
+	if err := logBuffer.HydrateFromDir(logDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: log buffer hydration failed: %v\n", err)
+	}
 	slog.SetDefault(slog.New(httpapi.NewLogHandler(multi, logBuffer)))
 	logger := slog.Default()
 

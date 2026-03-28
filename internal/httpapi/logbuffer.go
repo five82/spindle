@@ -1,8 +1,13 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -295,6 +300,136 @@ func (h *LogHandler) extractAttr(entry *LogEntry, fields map[string]string, a sl
 			fields[key] = val.String()
 		}
 	}
+}
+
+// HydrateFromDir reads all spindle-*.log files in dir, parses JSON log lines,
+// and loads entries into the buffer. Files are processed in lexicographic order
+// (oldest first, since filenames contain timestamps). If total entries exceed
+// buffer capacity, only the most recent entries are retained.
+func (b *LogBuffer) HydrateFromDir(dir string) error {
+	dirEntries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read log directory: %w", err)
+	}
+
+	var entries []LogEntry
+	for _, de := range dirEntries {
+		name := de.Name()
+		if de.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		if !strings.HasPrefix(name, "spindle-") || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		fileEntries, err := parseLogFile(path)
+		if err != nil {
+			continue // skip unreadable files
+		}
+		entries = append(entries, fileEntries...)
+	}
+
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Keep only the most recent entries if we exceed capacity.
+	if len(entries) > b.cap {
+		entries = entries[len(entries)-b.cap:]
+	}
+
+	// Load into buffer under lock.
+	b.mu.Lock()
+	for i, e := range entries {
+		e.Seq = uint64(i + 1)
+		b.entries[i%b.cap] = e
+	}
+	b.count = len(entries)
+	b.head = len(entries) % b.cap
+	b.mu.Unlock()
+	b.nextSeq.Store(uint64(len(entries) + 1))
+
+	return nil
+}
+
+// parseLogFile reads a JSON-lines log file and returns parsed LogEntry values.
+func parseLogFile(path string) ([]LogEntry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	var entries []LogEntry
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	for scanner.Scan() {
+		if e, ok := parseJSONLogLine(scanner.Bytes()); ok {
+			entries = append(entries, e)
+		}
+	}
+	return entries, scanner.Err()
+}
+
+// parseJSONLogLine parses a single slog JSON line into a LogEntry.
+// Returns (entry, false) for malformed lines.
+func parseJSONLogLine(line []byte) (LogEntry, bool) {
+	var raw map[string]any
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return LogEntry{}, false
+	}
+
+	var e LogEntry
+	fields := make(map[string]string)
+
+	for k, v := range raw {
+		switch k {
+		case "time":
+			if s, ok := v.(string); ok {
+				e.Time = s
+			}
+		case "level":
+			if s, ok := v.(string); ok {
+				e.Level = s
+			}
+		case "msg":
+			if s, ok := v.(string); ok {
+				e.Msg = s
+			}
+		case "component":
+			if s, ok := v.(string); ok {
+				e.Component = s
+			}
+		case "stage":
+			if s, ok := v.(string); ok {
+				e.Stage = s
+			}
+		case "item_id":
+			switch val := v.(type) {
+			case float64:
+				e.ItemID = int64(val)
+			case json.Number:
+				if n, err := val.Int64(); err == nil {
+					e.ItemID = n
+				}
+			}
+		case "lane":
+			if s, ok := v.(string); ok {
+				e.Lane = s
+			}
+		case "request":
+			if s, ok := v.(string); ok {
+				e.Request = s
+			}
+		default:
+			fields[k] = fmt.Sprint(v)
+		}
+	}
+
+	if len(fields) > 0 {
+		e.Fields = fields
+	}
+	return e, true
 }
 
 func cloneAttrs(attrs []slog.Attr) []slog.Attr {
