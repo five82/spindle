@@ -195,8 +195,8 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	itemLogger.Info("stage started",
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "started",
-		"decision_reason", fmt.Sprintf("item %d ready for %s", item.ID, string(ps.Stage)),
-		"stage", string(ps.Stage),
+		"decision_reason", fmt.Sprintf("item %d ready for %s", item.ID, ps.Stage),
+		"stage", ps.Stage,
 	)
 
 	start := time.Now()
@@ -221,7 +221,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 				"event_type", "stage_degraded",
 				"error_hint", degraded.Msg,
 				"impact", "continuing to next stage",
-				"stage", string(ps.Stage),
+				"stage", ps.Stage,
 				"stage_duration", time.Since(start),
 			)
 			// Fall through to advance stage.
@@ -243,7 +243,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		"decision_result", "completed",
 		"decision_reason", fmt.Sprintf("advancing to %s", item.Stage),
 		"event_type", "stage_complete",
-		"stage", string(ps.Stage),
+		"stage", ps.Stage,
 		"stage_duration", time.Since(start),
 	)
 
@@ -272,9 +272,9 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 
 	itemLogger.Error("stage failed",
 		"event_type", "stage_failure",
-		"error_hint", string(ps.Stage),
+		"error_hint", ps.Stage,
 		"error", err,
-		"stage", string(ps.Stage),
+		"stage", ps.Stage,
 		"stage_duration", time.Since(start),
 	)
 
@@ -291,8 +291,8 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 	}
 
 	if m.notifier != nil {
-		title := fmt.Sprintf("Stage failed: %s", string(ps.Stage))
-		msg := fmt.Sprintf("Item %d failed at %s: %s", item.ID, string(ps.Stage), err.Error())
+		title := fmt.Sprintf("Stage failed: %s", ps.Stage)
+		msg := fmt.Sprintf("Item %d failed at %s: %s", item.ID, ps.Stage, err.Error())
 		if notifyErr := m.notifier.Send(ctx, notify.EventError, title, msg); notifyErr != nil {
 			itemLogger.Error("failure notification failed",
 				"event_type", "notification_failed",
