@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -19,7 +18,6 @@ import (
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripper"
-	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stageexec"
 	"github.com/five82/spindle/internal/tmdb"
 )
@@ -102,6 +100,11 @@ func newCacheRipCmd() *cobra.Command {
 				return fmt.Errorf("create queue item: %w", err)
 			}
 			defer func() { _ = qStore.Remove(item.ID) }()
+			defer func() {
+				if root, err := item.StagingRoot(cfg.Paths.StagingDir); err == nil {
+					_ = os.RemoveAll(root)
+				}
+			}()
 
 			// Set up dependencies for identification.
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
@@ -252,45 +255,14 @@ func newCacheProcessCmd() *cobra.Command {
 				return fmt.Errorf("create queue item: %w", err)
 			}
 
-			// Load identification from cache metadata (preferred over disc ID cache).
-			if entry.RipSpecData != "" {
-				item.RipSpecData = entry.RipSpecData
-				item.MetadataJSON = entry.MetadataJSON
-				item.Stage = queue.StageRipping
-				_ = qStore.Update(item)
-			} else {
-				// Fallback: reconstruct from disc ID cache (legacy entries).
-				discIDStore, openErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
-				if openErr == nil {
-					if idEntry := discIDStore.Lookup(entry.Fingerprint); idEntry != nil {
-						env := ripspec.Envelope{
-							Version:     ripspec.CurrentVersion,
-							Fingerprint: entry.Fingerprint,
-							Metadata: ripspec.Metadata{
-								ID:        idEntry.TMDBID,
-								Title:     idEntry.Title,
-								MediaType: idEntry.MediaType,
-								Year:      idEntry.Year,
-								Movie:     idEntry.MediaType == "movie",
-							},
-						}
-						data, encErr := env.Encode()
-						if encErr == nil {
-							item.RipSpecData = data
-							item.Stage = queue.StageRipping
-							metaJSON, _ := json.Marshal(queue.Metadata{
-								ID:        idEntry.TMDBID,
-								Title:     idEntry.Title,
-								MediaType: idEntry.MediaType,
-								Year:      idEntry.Year,
-								Movie:     idEntry.MediaType == "movie",
-							})
-							item.MetadataJSON = string(metaJSON)
-							_ = qStore.Update(item)
-						}
-					}
-				}
+			// Load identification from cache metadata.
+			if entry.RipSpecData == "" {
+				return fmt.Errorf("cache entry missing identification data; re-cache with 'spindle cache rip'")
 			}
+			item.RipSpecData = entry.RipSpecData
+			item.MetadataJSON = entry.MetadataJSON
+			item.Stage = queue.StageRipping
+			_ = qStore.Update(item)
 
 			fpDisplay := entry.Fingerprint
 			if len(fpDisplay) > 12 {
