@@ -8,19 +8,37 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
-// ApplyCommentaryDisposition sets the "comment" disposition on the specified
-// audio tracks in an MKV file using FFmpeg copy-mode remux.
+// commentaryLabel formats a stream title for a commentary track.
+// Empty titles become "Commentary". Titles already containing "commentary"
+// (case-insensitive) are unchanged. Otherwise " (Commentary)" is appended.
+func commentaryLabel(original string) string {
+	title := strings.TrimSpace(original)
+	if title == "" {
+		return "Commentary"
+	}
+	if strings.Contains(strings.ToLower(title), "commentary") {
+		return title
+	}
+	return title + " (Commentary)"
+}
+
+// ApplyCommentaryDisposition sets the "comment" disposition and updates the
+// title metadata on the specified audio tracks in an MKV file using FFmpeg
+// copy-mode remux. audioTitles maps audio-relative indices to their current
+// titles (from the caller's existing probe result).
 func ApplyCommentaryDisposition(
 	ctx context.Context,
 	logger *slog.Logger,
 	path string,
 	commentaryAudioIndices []int,
+	audioTitles map[int]string,
 ) error {
 	if len(commentaryAudioIndices) == 0 {
 		return nil
@@ -37,7 +55,10 @@ func ApplyCommentaryDisposition(
 
 	args := []string{"-y", "-i", path, "-map", "0", "-c", "copy"}
 	for _, idx := range commentaryAudioIndices {
-		args = append(args, "-disposition:a:"+strconv.Itoa(idx), "comment")
+		idxStr := strconv.Itoa(idx)
+		args = append(args, "-disposition:a:"+idxStr, "comment")
+		label := commentaryLabel(audioTitles[idx])
+		args = append(args, "-metadata:s:a:"+idxStr, "title="+label)
 	}
 	args = append(args, tmpPath)
 
@@ -65,7 +86,7 @@ func ApplyCommentaryDisposition(
 }
 
 // ValidateCommentaryLabeling verifies that the specified audio tracks have
-// the "comment" disposition set.
+// both the "comment" disposition set and a title containing "Commentary".
 func ValidateCommentaryLabeling(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -87,6 +108,7 @@ func ValidateCommentaryLabeling(
 		expected[idx] = true
 	}
 
+	var issues []string
 	audioIdx := 0
 	for _, s := range result.Streams {
 		if s.CodecType != "audio" {
@@ -95,10 +117,18 @@ func ValidateCommentaryLabeling(
 		if expected[audioIdx] {
 			disp, ok := s.Disposition["comment"]
 			if !ok || disp != 1 {
-				return fmt.Errorf("audio track %d missing comment disposition", audioIdx)
+				issues = append(issues, fmt.Sprintf("audio track %d missing comment disposition", audioIdx))
+			}
+			title := s.Tags["title"]
+			if !strings.Contains(strings.ToLower(title), "commentary") {
+				issues = append(issues, fmt.Sprintf("audio track %d title %q lacks Commentary label", audioIdx, title))
 			}
 		}
 		audioIdx++
+	}
+
+	if len(issues) > 0 {
+		return fmt.Errorf("commentary labeling validation failed: %s", strings.Join(issues, "; "))
 	}
 
 	logger.Info("commentary labeling validated",

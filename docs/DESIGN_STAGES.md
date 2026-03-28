@@ -591,12 +591,17 @@ Returns `AudioRefinementResult` with `PrimaryAudioDescription` and
 1. **Primary audio selection**: Re-probe encoded file post-refinement, select
    primary via `audio.Select()`, set `PrimaryAudioDescription`.
 
-2. **Commentary disposition**: Identified commentary tracks are marked with
-   `"comment"` disposition via `ApplyCommentaryDisposition()`, not removed
-   from the file. Track indices are remapped via `RemapCommentaryIndices()`
-   to reflect post-refinement stream positions.
-   `ValidateCommentaryLabeling()` verifies the disposition was applied
-   correctly.
+2. **Commentary disposition and labeling**: Identified commentary tracks are
+   marked with `"comment"` disposition and their titles updated to include
+   "Commentary" via `ApplyCommentaryDisposition()`, not removed from the
+   file. Title rules: empty title becomes "Commentary"; title already
+   containing "commentary" (case-insensitive) is unchanged; otherwise
+   " (Commentary)" is appended. The caller passes a `map[int]string` of
+   audio-index-to-current-title from the existing post-refinement probe so
+   no additional probe is needed. Track indices are remapped via
+   `RemapCommentaryIndices()` to reflect post-refinement stream positions.
+   `ValidateCommentaryLabeling()` verifies both the disposition and title
+   were applied correctly.
 
 **Episode consistency check**: For TV content (> 1 episode), validates audio
 stream counts after commentary handling.

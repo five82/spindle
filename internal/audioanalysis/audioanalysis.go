@@ -178,7 +178,15 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				for _, r := range remapped {
 					remappedIndices = append(remappedIndices, r.Index)
 				}
-				if err := ApplyCommentaryDisposition(ctx, logger, path, remappedIndices); err != nil {
+				audioTitles := make(map[int]string)
+				audioIdx := 0
+				for _, s := range result.Streams {
+					if s.CodecType == "audio" {
+						audioTitles[audioIdx] = s.Tags["title"]
+						audioIdx++
+					}
+				}
+				if err := ApplyCommentaryDisposition(ctx, logger, path, remappedIndices, audioTitles); err != nil {
 					logger.Warn("commentary disposition failed",
 						"event_type", "commentary_disposition_error",
 						"error_hint", err.Error(),
