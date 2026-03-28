@@ -54,20 +54,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Check rip cache first.
 	if h.cache != nil && item.DiscFingerprint != "" {
-		var lastPush time.Time
-		restoreProgress := func(p ripcache.CopyProgress) {
-			now := time.Now()
-			if now.Sub(lastPush) < 2*time.Second {
-				return
-			}
-			lastPush = now
-			item.ProgressPercent = float64(p.BytesCopied) / float64(p.TotalBytes) * 100
-			item.ProgressBytesCopied = p.BytesCopied
-			item.ProgressTotalBytes = p.TotalBytes
-			item.ProgressMessage = "Restoring from cache..."
-			_ = h.store.UpdateProgress(item)
-		}
-		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, restoreProgress); err == nil && meta != nil {
+		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(item, "Restoring from cache...")); err == nil && meta != nil {
 			logger.Info("rip cache hit",
 				"decision_type", logs.DecisionRipCache,
 				"decision_result", "restored",
@@ -233,20 +220,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			RipSpecData:  item.RipSpecData,
 			MetadataJSON: item.MetadataJSON,
 		}
-		var lastCachePush time.Time
-		cacheProgress := func(p ripcache.CopyProgress) {
-			now := time.Now()
-			if now.Sub(lastCachePush) < 2*time.Second {
-				return
-			}
-			lastCachePush = now
-			item.ProgressPercent = float64(p.BytesCopied) / float64(p.TotalBytes) * 100
-			item.ProgressBytesCopied = p.BytesCopied
-			item.ProgressTotalBytes = p.TotalBytes
-			item.ProgressMessage = "Caching rip..."
-			_ = h.store.UpdateProgress(item)
-		}
-		if err := h.cache.Register(item.DiscFingerprint, rippedDir, meta, cacheProgress); err != nil {
+		if err := h.cache.Register(item.DiscFingerprint, rippedDir, meta, h.cacheProgressFunc(item, "Caching rip...")); err != nil {
 			logger.Warn("rip cache write failed",
 				"event_type", "cache_write_error",
 				"error_hint", err.Error(),
@@ -430,6 +404,23 @@ func (h *Handler) mapRippedAssets(logger *slog.Logger, env *ripspec.Envelope, di
 			Path:       path,
 			Status:     "completed",
 		})
+	}
+}
+
+// cacheProgressFunc returns a throttled progress callback for cache operations.
+func (h *Handler) cacheProgressFunc(item *queue.Item, message string) ripcache.ProgressFunc {
+	var lastPush time.Time
+	return func(p ripcache.CopyProgress) {
+		now := time.Now()
+		if now.Sub(lastPush) < 2*time.Second {
+			return
+		}
+		lastPush = now
+		item.ProgressPercent = float64(p.BytesCopied) / float64(p.TotalBytes) * 100
+		item.ProgressBytesCopied = p.BytesCopied
+		item.ProgressTotalBytes = p.TotalBytes
+		item.ProgressMessage = message
+		_ = h.store.UpdateProgress(item)
 	}
 }
 
