@@ -212,9 +212,7 @@ func applyDefaults(cfg *Config) {
 	// that users wanting preset 0 must explicitly set it.
 	// Actually, preset 0 is extremely slow and no one would use it
 	// unintentionally, so defaulting 0 -> 6 is acceptable.
-	if cfg.Encoding.SVTAV1Preset == 0 {
-		cfg.Encoding.SVTAV1Preset = 6
-	}
+	applyEncodingDefaults(&cfg.Encoding)
 
 	// [llm]
 	if cfg.LLM.BaseURL == "" {
@@ -374,7 +372,7 @@ func normalizePaths(cfg *Config) error {
 // a fresh EncodingConfig. Only the [encoding] section is parsed, avoiding
 // validation of unrelated fields. If SourcePath is empty (defaults-only)
 // or the reload fails, it returns the existing encoding config and any error.
-func ReloadEncoding(cfg *Config, _ *slog.Logger) (EncodingConfig, error) {
+func ReloadEncoding(cfg *Config) (EncodingConfig, error) {
 	if cfg.SourcePath == "" {
 		return cfg.Encoding, nil
 	}
@@ -391,26 +389,10 @@ func ReloadEncoding(cfg *Config, _ *slog.Logger) (EncodingConfig, error) {
 		return cfg.Encoding, fmt.Errorf("reload encoding config: parse: %w", err)
 	}
 
-	// Apply same default as applyDefaults for preset.
-	if partial.Encoding.SVTAV1Preset == 0 {
-		partial.Encoding.SVTAV1Preset = 6
-	}
+	applyEncodingDefaults(&partial.Encoding)
 
-	// Validate encoding fields.
-	if partial.Encoding.SVTAV1Preset < 0 || partial.Encoding.SVTAV1Preset > 13 {
-		return cfg.Encoding, fmt.Errorf("reload encoding config: svt_av1_preset must be 0-13 (got %d)", partial.Encoding.SVTAV1Preset)
-	}
-	for _, pair := range []struct {
-		name string
-		val  int
-	}{
-		{"crf_sd", partial.Encoding.CRFSD},
-		{"crf_hd", partial.Encoding.CRFHD},
-		{"crf_uhd", partial.Encoding.CRFUHD},
-	} {
-		if pair.val < 0 || pair.val > 63 {
-			return cfg.Encoding, fmt.Errorf("reload encoding config: %s must be 0-63 (got %d)", pair.name, pair.val)
-		}
+	if errs := ValidateEncoding(partial.Encoding); len(errs) > 0 {
+		return cfg.Encoding, fmt.Errorf("reload encoding config: %s", strings.Join(errs, "; "))
 	}
 
 	return partial.Encoding, nil

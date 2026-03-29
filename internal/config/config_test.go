@@ -596,7 +596,7 @@ crf_uhd = 32
 		t.Fatal(err)
 	}
 
-	enc, err := ReloadEncoding(cfg, nil)
+	enc, err := ReloadEncoding(cfg)
 	if err != nil {
 		t.Fatalf("ReloadEncoding failed: %v", err)
 	}
@@ -619,7 +619,7 @@ func TestReloadEncodingNoSourcePath(t *testing.T) {
 	cfg := &Config{}
 	cfg.Encoding.SVTAV1Preset = 7
 
-	enc, err := ReloadEncoding(cfg, nil)
+	enc, err := ReloadEncoding(cfg)
 	if err != nil {
 		t.Fatalf("ReloadEncoding should succeed with empty SourcePath, got: %v", err)
 	}
@@ -634,7 +634,7 @@ func TestReloadEncodingFileNotFound(t *testing.T) {
 	}
 	cfg.Encoding.SVTAV1Preset = 7
 
-	enc, err := ReloadEncoding(cfg, nil)
+	enc, err := ReloadEncoding(cfg)
 	if err == nil {
 		t.Fatal("ReloadEncoding should return error for missing file")
 	}
@@ -657,7 +657,7 @@ crf_hd = 99
 	cfg := &Config{SourcePath: configPath}
 	cfg.Encoding.CRFHD = 26
 
-	enc, err := ReloadEncoding(cfg, nil)
+	enc, err := ReloadEncoding(cfg)
 	if err == nil {
 		t.Fatal("ReloadEncoding should return error for invalid CRF")
 	}
