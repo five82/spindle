@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-// fmtTS formats seconds as an SRT timestamp for test data.
-func fmtTS(secs float64) string {
-	total := int(secs * 1000)
-	ms := total % 1000
-	total /= 1000
-	s := total % 60
-	total /= 60
-	m := total % 60
-	h := total / 60
-	return fmt.Sprintf("%02d:%02d:%02d,%03d", h, m, s, ms)
-}
-
 func TestValidateSRTContent_Valid(t *testing.T) {
 	srt := `1
 00:00:01,000 --> 00:00:03,000
@@ -168,7 +156,7 @@ func TestValidateSRTContent_Boundaries(t *testing.T) {
 					start := 900 + (i-1)*14
 					end := start + 3
 					fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", i,
-						fmtTS(float64(start)), fmtTS(float64(end)),
+						formatTimestamp(float64(start)), formatTimestamp(float64(end)),
 						fmt.Sprintf("Line %d", i))
 				}
 				return b.String()
