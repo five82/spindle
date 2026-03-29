@@ -136,9 +136,20 @@ func TestSelect(t *testing.T) {
 				mkStream(1, "aac", "eng", 2),
 				{Index: 2, CodecType: "subtitle", CodecName: "subrip"},
 			},
-			wantIndex:   1,
-			wantKeep:    []int{1},
+			wantIndex:   0,
+			wantKeep:    []int{0},
 			wantRemoved: nil,
+		},
+		{
+			name: "audio-relative indices with video stream prefix",
+			streams: []ffprobe.Stream{
+				{Index: 0, CodecType: "video", CodecName: "hevc"},
+				mkStream(1, "truehd", "eng", 8),
+				mkStream(2, "ac3", "eng", 6),
+			},
+			wantIndex:   0,
+			wantKeep:    []int{0},
+			wantRemoved: []int{1},
 		},
 	}
 

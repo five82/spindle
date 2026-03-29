@@ -65,14 +65,15 @@ func Select(streams []ffprobe.Stream, logger *slog.Logger) Selection {
 
 	// Build candidate list from audio streams only.
 	var candidates []candidate
-	for i, st := range streams {
+	audioIdx := 0
+	for _, st := range streams {
 		if st.CodecType != "audio" {
 			continue
 		}
 		lang := language.ToISO2(language.ExtractFromTags(st.Tags))
 		c := candidate{
 			stream:     st,
-			index:      i,
+			index:      audioIdx,
 			language:   lang,
 			channels:   parseChannelCount(st),
 			isSpatial:  isSpatialAudio(st),
@@ -80,6 +81,7 @@ func Select(streams []ffprobe.Stream, logger *slog.Logger) Selection {
 			isDefault:  st.Disposition["default"] == 1,
 		}
 		candidates = append(candidates, c)
+		audioIdx++
 	}
 
 	if len(candidates) == 0 {
