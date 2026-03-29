@@ -205,6 +205,10 @@ After identification:
 5. Set attributes: forced subtitle track detection.
 6. Store serialized envelope in `rip_spec_data`.
 
+**Disc ID cache fast-path**: When identification hits the disc ID cache, no
+MakeMKV scan runs, so the envelope has no `titles` array. Titles are restored
+from the rip cache's stored envelope during the ripping stage (see 2.4).
+
 ### 1.9 Additional Behaviors
 
 - **Disc ID cache fast-path**: On cache hit, bypasses both TMDB search and KeyDB
@@ -267,6 +271,9 @@ When `rip_cache.enabled`:
 1. **Before ripping**: Check cache for matching fingerprint + title hash.
    - **Cache hit**: Validate cached files exist and are readable. Record cached
      paths as ripped assets in the RipSpec envelope without re-ripping.
+     If the current envelope has no `titles` (disc ID cache fast-path),
+     restore them from the cached envelope's `RipSpecData`. Logged with
+     `decision_type: "rip_cache_titles"`.
    - **Cache miss/invalid**: Proceed with normal ripping.
 2. **After ripping**: Copy ripped files to cache directory. Prune cache to stay
    within constraints.

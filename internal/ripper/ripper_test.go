@@ -1,6 +1,7 @@
 package ripper
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -305,6 +307,83 @@ func TestListMKVFiles(t *testing.T) {
 	files := listMKVFiles(dir)
 	if len(files) != 2 {
 		t.Errorf("expected 2 mkv files, got %d", len(files))
+	}
+}
+
+func TestRestoreTitlesFromCachedRipSpec(t *testing.T) {
+	// Simulate the disc ID cache fast-path: envelope has no titles.
+	env := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "movie"},
+	}
+
+	// Build cached RipSpecData that contains titles (from the original rip).
+	cachedEnv := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "movie"},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 6595, Chapters: 32, Name: "Theatrical"},
+			{ID: 1, Duration: 6801, Chapters: 34, Name: "Director's Cut"},
+		},
+	}
+	cachedData, err := json.Marshal(cachedEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := &ripcache.EntryMetadata{
+		RipSpecData: string(cachedData),
+	}
+
+	// Apply the same restoration logic as the cache-hit path.
+	if len(env.Titles) == 0 && meta.RipSpecData != "" {
+		if parsed, err := ripspec.Parse(meta.RipSpecData); err == nil && len(parsed.Titles) > 0 {
+			env.Titles = parsed.Titles
+		}
+	}
+
+	if len(env.Titles) != 2 {
+		t.Fatalf("expected 2 titles restored, got %d", len(env.Titles))
+	}
+	if env.Titles[0].Name != "Theatrical" {
+		t.Errorf("titles[0].Name = %q, want %q", env.Titles[0].Name, "Theatrical")
+	}
+	if env.Titles[1].Duration != 6801 {
+		t.Errorf("titles[1].Duration = %d, want 6801", env.Titles[1].Duration)
+	}
+}
+
+func TestRestoreTitlesSkippedWhenAlreadyPresent(t *testing.T) {
+	// Envelope already has titles (normal scan path) -- should not be overwritten.
+	env := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "movie"},
+		Titles:   []ripspec.Title{{ID: 0, Duration: 7200, Name: "Original"}},
+	}
+
+	cachedEnv := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "movie"},
+		Titles:   []ripspec.Title{{ID: 0, Duration: 3600, Name: "Cached"}},
+	}
+	cachedData, err := json.Marshal(cachedEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := &ripcache.EntryMetadata{
+		RipSpecData: string(cachedData),
+	}
+
+	if len(env.Titles) == 0 && meta.RipSpecData != "" {
+		if parsed, err := ripspec.Parse(meta.RipSpecData); err == nil && len(parsed.Titles) > 0 {
+			env.Titles = parsed.Titles
+		}
+	}
+
+	if len(env.Titles) != 1 {
+		t.Fatalf("expected 1 title (unchanged), got %d", len(env.Titles))
+	}
+	if env.Titles[0].Name != "Original" {
+		t.Errorf("titles should not be overwritten; got Name=%q, want %q", env.Titles[0].Name, "Original")
 	}
 }
 

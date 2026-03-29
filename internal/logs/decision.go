@@ -50,6 +50,7 @@ const (
 	DecisionReferenceDownload        = "reference_download"
 	DecisionReferenceSearch          = "reference_search"
 	DecisionRipCache                 = "rip_cache"
+	DecisionRipCacheTitles           = "rip_cache_titles"
 	DecisionSidecarSubtitleCopy      = "sidecar_subtitle_copy"
 	DecisionSourceStageSelection     = "source_stage_selection"
 	DecisionSRTValidation            = "srt_validation"

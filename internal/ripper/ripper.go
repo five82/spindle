@@ -78,6 +78,18 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			if n := len(env.Assets.Ripped); n > 0 {
 				item.RippedFile = env.Assets.Ripped[n-1].Path
 			}
+			// Restore titles from cached envelope when identification
+			// used the disc ID cache fast-path (no MakeMKV scan).
+			if len(env.Titles) == 0 && meta.RipSpecData != "" {
+				if cachedEnv, err := ripspec.Parse(meta.RipSpecData); err == nil && len(cachedEnv.Titles) > 0 {
+					env.Titles = cachedEnv.Titles
+					logger.Info("titles restored from rip cache",
+						"decision_type", logs.DecisionRipCacheTitles,
+						"decision_result", "restored",
+						"decision_reason", fmt.Sprintf("%d titles from cached envelope", len(cachedEnv.Titles)),
+					)
+				}
+			}
 			if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 				return err
 			}
