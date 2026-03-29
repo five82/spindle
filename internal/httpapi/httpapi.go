@@ -72,7 +72,7 @@ func New(store *queue.Store, token string, discMon *discmonitor.Monitor, shutdow
 		Handler:           s.mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      3 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 	}
 	return s
