@@ -26,12 +26,6 @@ import (
 	"github.com/five82/spindle/internal/tmdb"
 )
 
-// editionPatterns matches common edition keywords in disc titles.
-// Uses [\s_]+ to handle both space and underscore separators common in disc labels.
-var editionPatterns = regexp.MustCompile(
-	`(?i)(extended[\s_]+(edition|cut)|director'?s[\s_]+(cut|edition)|unrated|theatrical|special[\s_]+edition|criterion|imax)`,
-)
-
 // discMetadataPattern strips season, disc, volume, and part indicators from disc labels.
 // Examples: "- Season 2", ": Disc 6", "Volume 3", "Part 1", "TV Series".
 var discMetadataPattern = regexp.MustCompile(
@@ -57,40 +51,6 @@ var seasonPattern = regexp.MustCompile(`(?i)(?:s|season[\s_]*)(\d+)`)
 
 // discNumberPattern extracts a disc/volume/part number from disc titles (e.g., "Disc 1", "Volume 3", "Part 1").
 var discNumberPattern = regexp.MustCompile(`(?i)(?:disc|volume|part)[\s_]*(\d+)`)
-
-// editionLLMConfidenceThreshold is the minimum confidence for LLM edition detection.
-const editionLLMConfidenceThreshold = 0.8
-
-// editionLLMSystemPrompt is the system prompt for LLM edition classification.
-const editionLLMSystemPrompt = `You determine if a disc is an alternate movie edition (not the standard theatrical release).
-
-Alternate editions include:
-- Director's Cut / Director's Edition
-- Extended Edition / Extended Cut
-- Unrated / Uncut versions
-- Special Editions
-- Remastered versions
-- Anniversary Editions
-- Theatrical vs different cuts
-- Color versions of originally B&W films
-- Black and white versions (like "Noir" editions)
-- IMAX editions
-
-NOT alternate editions:
-- Standard theatrical releases
-- Different regional releases of the same version
-- 4K/UHD remasters (unless labeled as a different cut)
-- Bonus disc content
-- Just year differences in release date
-
-Respond ONLY with JSON: {"is_edition": true/false, "confidence": 0.0-1.0, "reason": "brief explanation"}`
-
-// editionLLMResponse is the JSON response from LLM edition classification.
-type editionLLMResponse struct {
-	IsEdition  bool    `json:"is_edition"`
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
-}
 
 // Handler implements stage.Handler for disc identification.
 type Handler struct {
@@ -134,7 +94,6 @@ type IdentifyResult struct {
 	YearSource  string
 	DiscSource  string
 	MediaType   string
-	Edition     string
 	Best        *tmdb.SearchResult
 	AllResults  []tmdb.SearchResult
 	DiscInfo    *makemkv.DiscInfo
@@ -301,13 +260,8 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 	}
 	item.DiscTitle = canonicalTitle(*result.Best, result.MediaType, item.DiscTitle, result.DiscInfo)
 
-	// Step 6: Detect edition (movies only, via regex + optional LLM).
-	if result.MediaType == "movie" {
-		result.Edition = h.detectEdition(ctx, logger, item.DiscTitle, result.DiscInfo.Name)
-	}
-
-	// Step 7: Build RipSpec envelope.
-	result.Envelope = h.buildEnvelope(logger, item, result.DiscInfo, result.Best, result.MediaType, result.Edition, result.DiscSource)
+	// Step 6: Build RipSpec envelope.
+	result.Envelope = h.buildEnvelope(logger, item, result.DiscInfo, result.Best, result.MediaType, result.DiscSource)
 	setForcedSubtitleAttribute(logger, result.DiscInfo, &result.Envelope)
 
 	return result, nil
@@ -501,49 +455,6 @@ func mapDiscSource(discType string) string {
 	}
 }
 
-// detectEdition checks for edition markers in disc title and disc name.
-// Tries regex first; if no match and LLM is available, tries LLM classification.
-// Returns the detected edition label, or empty string if none detected.
-func (h *Handler) detectEdition(ctx context.Context, logger *slog.Logger, discTitle, discName string) string {
-	// Try regex on both disc title and disc name.
-	combined := discTitle + " " + discName
-	if match := editionPatterns.FindString(combined); match != "" {
-		logger.Info("edition detected via regex",
-			"decision_type", logs.DecisionEditionDetection,
-			"decision_result", match,
-			"decision_reason", "regex match",
-		)
-		return match
-	}
-
-	// If LLM is available and there is extra content to analyze, try LLM.
-	if h.llmClient == nil || discTitle == "" {
-		return ""
-	}
-
-	userPrompt := fmt.Sprintf("Disc: %s\nTMDB: %s", strings.TrimSpace(discTitle), strings.TrimSpace(discName))
-	var resp editionLLMResponse
-	if err := h.llmClient.CompleteJSON(ctx, editionLLMSystemPrompt, userPrompt, &resp); err != nil {
-		logger.Warn("edition LLM classification failed",
-			"event_type", "edition_llm_error",
-			"error_hint", err.Error(),
-			"impact", "falling back to regex-only",
-		)
-		return ""
-	}
-
-	if resp.IsEdition && resp.Confidence >= editionLLMConfidenceThreshold {
-		logger.Info("edition detected via LLM",
-			"decision_type", logs.DecisionEditionDetection,
-			"decision_result", resp.Reason,
-			"decision_reason", fmt.Sprintf("confidence=%.2f", resp.Confidence),
-		)
-		return resp.Reason
-	}
-
-	return ""
-}
-
 // setForcedSubtitleAttribute detects forced English subtitle tracks from the
 // MakeMKV scan and sets the HasForcedSubtitleTrack attribute on the envelope.
 func setForcedSubtitleAttribute(logger *slog.Logger, discInfo *makemkv.DiscInfo, env *ripspec.Envelope) {
@@ -597,7 +508,7 @@ func (h *Handler) buildEnvelope(
 	item *queue.Item,
 	discInfo *makemkv.DiscInfo,
 	best *tmdb.SearchResult,
-	mediaType, edition string,
+	mediaType string,
 	discSource string,
 ) ripspec.Envelope {
 	// Extract season and disc numbers from disc title / MakeMKV disc name.
@@ -618,7 +529,6 @@ func (h *Handler) buildEnvelope(
 			VoteAverage:  best.VoteAverage,
 			VoteCount:    best.VoteCount,
 			Movie:        mediaType == "movie",
-			Edition:      edition,
 			SeasonNumber: seasonNum,
 			DiscNumber:   discNum,
 			DiscSource:   discSource,
@@ -744,7 +654,6 @@ func (h *Handler) persistEnvelope(ctx context.Context, item *queue.Item, env *ri
 		Year:         env.Metadata.Year,
 		SeasonNumber: env.Metadata.SeasonNumber,
 		Movie:        env.Metadata.Movie,
-		Edition:      env.Metadata.Edition,
 	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {

@@ -1,7 +1,6 @@
 package identify
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"testing"
@@ -18,11 +17,6 @@ import (
 // discardLogger returns a logger that discards all output.
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-// testCtx returns a context with a discard logger attached.
-func testCtx() context.Context {
-	return context.Background()
 }
 
 func TestResolveTitle_PriorityChain(t *testing.T) {
@@ -197,144 +191,6 @@ func TestSplitTitleYear(t *testing.T) {
 	}
 }
 
-func TestDetectEdition_Regex(t *testing.T) {
-	tests := []struct {
-		name      string
-		discTitle string
-		discName  string
-		wantEmpty bool
-		wantMatch string
-	}{
-		{
-			name:      "Extended Edition",
-			discTitle: "THE_HOBBIT_EXTENDED_EDITION",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "EXTENDED EDITION",
-		},
-		{
-			name:      "Director's Cut",
-			discTitle: "BLADE_RUNNER_DIRECTOR'S_CUT",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "DIRECTOR'S CUT",
-		},
-		{
-			name:      "Directors Cut no apostrophe",
-			discTitle: "BLADE_RUNNER_DIRECTORS_CUT",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "DIRECTORS CUT",
-		},
-		{
-			name:      "UNRATED",
-			discTitle: "ANCHORMAN_UNRATED",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "UNRATED",
-		},
-		{
-			name:      "Theatrical",
-			discTitle: "ALIEN_THEATRICAL",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "THEATRICAL",
-		},
-		{
-			name:      "Special Edition",
-			discTitle: "STAR_WARS_SPECIAL_EDITION",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "SPECIAL EDITION",
-		},
-		{
-			name:      "Criterion",
-			discTitle: "SEVEN_SAMURAI_CRITERION",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "CRITERION",
-		},
-		{
-			name:      "IMAX",
-			discTitle: "DUNE_IMAX",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "IMAX",
-		},
-		{
-			name:      "Extended Cut",
-			discTitle: "LOTR_EXTENDED_CUT",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "EXTENDED CUT",
-		},
-		{
-			name:      "case insensitive match",
-			discTitle: "hobbit_extended_edition",
-			discName:  "",
-			wantEmpty: false,
-			wantMatch: "extended edition",
-		},
-		{
-			name:      "match in disc name",
-			discTitle: "THE_HOBBIT",
-			discName:  "Extended Edition",
-			wantEmpty: false,
-			wantMatch: "Extended Edition",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := &Handler{} // no LLM client, so LLM path won't run
-			got := h.detectEdition(testCtx(), discardLogger(), tt.discTitle, tt.discName)
-			if tt.wantEmpty {
-				if got != "" {
-					t.Errorf("detectEdition() = %q, want empty", got)
-				}
-				return
-			}
-			if got == "" {
-				t.Errorf("detectEdition() returned empty, want match containing %q", tt.wantMatch)
-			}
-		})
-	}
-}
-
-func TestDetectEdition_NoMatch(t *testing.T) {
-	tests := []struct {
-		name      string
-		discTitle string
-		discName  string
-	}{
-		{
-			name:      "plain movie title",
-			discTitle: "THE_MATRIX",
-			discName:  "",
-		},
-		{
-			name:      "TV show",
-			discTitle: "BREAKING_BAD_S01",
-			discName:  "Breaking Bad",
-		},
-		{
-			name:      "empty titles",
-			discTitle: "",
-			discName:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := &Handler{} // no LLM client
-			got := h.detectEdition(testCtx(), discardLogger(), tt.discTitle, tt.discName)
-			if got != "" {
-				t.Errorf("detectEdition() = %q, want empty", got)
-			}
-		})
-	}
-}
-
 func TestBuildEnvelope_Valid(t *testing.T) {
 	h := &Handler{}
 	item := &queue.Item{
@@ -366,7 +222,7 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 		VoteCount:   1000,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "movie", "Extended Edition", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "movie", "bluray")
 
 	if env.Version != ripspec.CurrentVersion {
 		t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -385,9 +241,6 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 	}
 	if !env.Metadata.Movie {
 		t.Error("Metadata.Movie = false, want true")
-	}
-	if env.Metadata.Edition != "Extended Edition" {
-		t.Errorf("Metadata.Edition = %q, want %q", env.Metadata.Edition, "Extended Edition")
 	}
 	if env.Metadata.Year != "2024" {
 		t.Errorf("Metadata.Year = %q, want %q", env.Metadata.Year, "2024")
@@ -428,7 +281,7 @@ func TestBuildEnvelope_TV(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "bluray")
 
 	if env.Metadata.MediaType != "tv" {
 		t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -645,7 +498,7 @@ func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "bluray")
 
 	if env.Metadata.SeasonNumber != 2 {
 		t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)

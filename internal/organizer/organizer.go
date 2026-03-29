@@ -103,22 +103,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		destName := destFilename(&meta, key, filepath.Ext(asset.Path))
 		destPath := filepath.Join(libraryPath, destName)
 
-		// Validate edition appears in filename for movies with editions.
-		if meta.IsMovie() && meta.Edition != "" {
-			if err := validateEditionFilename(destName, meta.Edition); err != nil {
-				logger.Error("edition validation failed",
-					"event_type", "edition_validation_failed",
-					"error_hint", "edition not found in generated filename",
-					"impact", "output file may have wrong name",
-					"error", err.Error(),
-				)
-				return err
-			}
-			logger.Info("edition validation passed",
-				"event_type", "edition_validation_passed",
-			)
-		}
-
 		// Check if exists and not overwriting.
 		if !h.cfg.Library.OverwriteExisting {
 			if info, err := os.Stat(destPath); err == nil {
@@ -336,17 +320,6 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 	h.cleanupStaging(ctx, item)
 
 	logger.Info("review routing completed", "event_type", "stage_complete", "stage", "organizing", "review_path", reviewPath)
-	return nil
-}
-
-// validateEditionFilename verifies that the edition suffix appears in the
-// final filename when edition metadata is present.
-func validateEditionFilename(filename, edition string) error {
-	expected := " - " + textutil.SanitizeDisplayName(edition)
-	base := strings.TrimSuffix(filename, filepath.Ext(filename))
-	if !strings.HasSuffix(base, expected) {
-		return fmt.Errorf("edition validation failed: filename %q missing expected suffix %q", filename, expected)
-	}
 	return nil
 }
 

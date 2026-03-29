@@ -30,7 +30,7 @@ spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 
 This produces a JSON report containing:
 - **`item`**: Queue item summary (status, flags, paths, timestamps)
-- **`stage_gate`**: Pre-computed phase applicability (which analyses apply, media type, disc source, edition)
+- **`stage_gate`**: Pre-computed phase applicability (which analyses apply, media type, disc source)
 - **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), and stage timing events
 - **`rip_cache`**: Cache metadata (disc title, needs_review flag). Serialized rip_spec_data and metadata_json blobs are omitted (already in parsed `envelope`).
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
@@ -97,13 +97,11 @@ The `stage_gate` object in the audit-gather output contains:
 | `furthest_stage` | Status the item reached (or failed at) |
 | `media_type` | `movie` or `tv` |
 | `disc_source` | `bluray`, `dvd`, or `unknown` |
-| `edition` | Detected edition label (empty if none) |
 | `phase_logs` | Always true |
 | `phase_rip_cache` | Post-ripping |
 | `phase_episode_id` | TV only, post-episode-identification |
 | `phase_encoded` | Post-encoding |
 | `phase_crop` | Post-encoding |
-| `phase_edition` | Movies only, post-identification |
 | `phase_subtitles` | Post-subtitling |
 | `phase_commentary` | Post-audio-analysis |
 | `phase_external_validation` | Post-encoding AND non-DVD source |
@@ -121,7 +119,7 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - Low confidence scores on decisions that were accepted anyway
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
-   - Filter by `decision_type` to find specific categories (commentary, edition_detection, tmdb_confidence, etc.)
+   - Filter by `decision_type` to find specific categories (commentary, tmdb_confidence, etc.)
    - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=transcription_cache` (transcription reuse)
    - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at `logs.path`)
 
@@ -137,7 +135,6 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
 
 4. **LLM decision review** (filter `logs.decisions` by `decision_type`):
    - `decision_type=commentary` entries
-   - `decision_type=edition_detection` entries (movies only)
    - `decision_type=tmdb_match` entries — verify acceptance thresholds are reasonable
    - Evaluate if confidence levels and reasons make sense for the content
 
@@ -258,36 +255,7 @@ Analyze crop data from the audit-gather output:
    - All episodes from the same disc should have identical or very similar crop
    - Spot-check one or two episodes rather than performing full validation on every episode
 
-### Phase 6: Edition Detection Validation (when `phase_edition` is true)
-
-Movies only. Two tiers:
-- **Log review** (always): Check decisions from `logs.decisions`
-- **External validation** (only when `phase_external_validation` is true)
-
-#### Log Review
-
-1. **Find `decision_type=edition_detection`** entries in `logs.decisions`
-2. **Expected detection paths**:
-   - `decision_reason=regex_pattern_match`: Known edition detected via pattern
-   - `decision_reason=llm_confirmed`: Ambiguous edition confirmed by LLM
-   - `decision_reason=llm_rejected`: LLM determined not an edition
-   - `decision_reason=llm_not_configured`: Ambiguous title but no LLM available
-
-3. **Verify detection correctness**:
-   - If disc title contains obvious edition markers (Director's Cut, Extended, Unrated, IMAX, etc.), an edition should be detected
-   - Check if multiple feature-length titles with different durations suggest alternate cuts
-   - Check `stage_gate.edition` for the detected label
-
-4. **Verify edition label** against known patterns: Director's Cut, Extended Edition, Unrated, Theatrical, Remastered, Special Edition, Anniversary Edition, Ultimate Edition, Final Cut, Redux, IMAX
-
-#### External Validation (only when `phase_external_validation` is true)
-
-5. **Cross-reference with blu-ray.com** to confirm whether disc is actually an alternate edition
-6. **Verify filename**:
-   - Check `item.final_file` or `item.encoded_file` includes edition suffix
-   - Edition should NOT appear in folder name
-
-### Phase 7: Subtitle Analysis (when `phase_subtitles` is true)
+### Phase 6: Subtitle Analysis (when `phase_subtitles` is true)
 
 Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and subtitle assets from `envelope.assets.subtitled`.
 
@@ -307,19 +275,15 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config
    - `decision_type=transcription_cache` shows whether WhisperX reused a cached transcription
 
-3. **Edition-aware forced subtitle selection** (movies only):
-   - Check `logs.decisions` for `edition=match` or `edition=mismatch` in forced subtitle ranking
-   - Selected forced subtitle should match edition when possible
-
-4. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
+3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
    - Check for `status: "failed"` entries with `error_msg`
    - Verify `subtitles_muxed` flag per episode
    - Check `envelope.attributes["subtitle_generation_results"]` for per-episode details
 
-5. **Cross-episode subtitle consistency** (TV only):
+4. **Cross-episode subtitle consistency** (TV only):
    - All episodes should have same subtitle language and consistent forced subtitle presence
 
-### Phase 8: Commentary Track Validation (when `phase_commentary` is true)
+### Phase 7: Commentary Track Validation (when `phase_commentary` is true)
 
 Analyze commentary decisions from `logs.decisions` and audio streams from `media[]`:
 
@@ -349,9 +313,6 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Duplicate fingerprint | Identification | `logs.decisions` with `decision_type=duplicate_fingerprint` | Item silently rejected |
 | Low TMDB confidence | Identification | `logs.decisions` with `decision_type=tmdb_confidence`, low score | Wrong title match |
 | Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
-| Missed edition detection | Identification | No `edition_detection` decision for disc with edition markers | Edition not in filename |
-| Wrong edition label | Identification | `stage_gate.edition` doesn't match actual edition type | Incorrect filename/subtitle |
-| Edition detection LLM failure | Identification | `logs.errors` or `logs.warnings` with `event_type=edition_llm_failed` | Ambiguous edition not detected |
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
 | Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Jellyfin won't recognize tracks |
@@ -360,7 +321,6 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Subtitle duration mismatch | Subtitles | Subtitle stream duration vs video duration delta > 10 minutes | WhisperX timing issue |
 | Forced subtitle not found | Subtitles | `logs.decisions` with `decision_result=not_found`, zero candidates | Do not report — this is the norm |
 | Forced subtitle candidates rejected | Subtitles | Candidates returned but all rejected during ranking | Filtering or scoring problem |
-| Forced subtitle edition mismatch | Subtitles | `edition=mismatch` in forced subtitle ranking | Wrong forced subtitle |
 | Subtitles not muxed | Subtitles | No subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load |
 | Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Jellyfin display issue |
 | Low episode match confidence | Episode ID | `envelope.episodes[].match_confidence` < 0.70 | Episodes may be mislabeled |
@@ -440,7 +400,6 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 **Title:** <item.disc_title>
 **Status:** <item.status> | **NeedsReview:** <item.needs_review> | **ReviewReason:** <item.review_reason>
 **Media Type:** <stage_gate.media_type> | **Source:** <stage_gate.disc_source>
-**Edition:** <stage_gate.edition or "none detected">
 **Debug Logs:** <logs.is_debug>
 
 ### Executive Summary
@@ -499,11 +458,6 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Cross-episode consistency: <analysis.episode_consistency — pass if no deviations, else list deviations>
 - Failed episodes: <count, with details if > 0>
 
-#### Edition Detection (if phase_edition)
-- Detection method: <from logs.decisions>
-- Edition label: <stage_gate.edition>
-- Filename includes edition: <check item.final_file or item.encoded_file>
-
 #### Subtitles (if phase_subtitles)
 - Tracks: <count and config from media probes>
 - Labels correct: <yes/no>
@@ -533,9 +487,6 @@ After running `spindle audit-gather`, check only the phases flagged as `true` in
 - [ ] If TV: checked for episode pipeline log patterns
 - [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
 
-### Post-Identification (phase_edition)
-- [ ] Validated edition detection logic from `logs.decisions`
-
 ### Post-Ripping (phase_rip_cache)
 - [ ] Analyzed rip cache metadata
 - [ ] If TV: validated per-episode ripped assets in `envelope.assets.ripped`
@@ -551,7 +502,6 @@ After running `spindle audit-gather`, check only the phases flagged as `true` in
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
 - [ ] Validated crop detection from `encoding.snapshot.crop_filter`
 - [ ] Verified commentary labeling
-- [ ] If movie with edition: verified edition in filename
 - [ ] If TV: checked cross-episode consistency
 
 ### Post-Audio-Analysis (phase_commentary)
@@ -561,12 +511,11 @@ After running `spindle audit-gather`, check only the phases flagged as `true` in
 ### Post-Subtitling (phase_subtitles)
 - [ ] Verified subtitle tracks in media probes
 - [ ] Verified subtitle track labels
-- [ ] If movie with edition and forced subs: verified forced subtitle edition matching
 - [ ] If TV: checked per-episode subtitle asset status
 
 ### External Validation (phase_external_validation)
 - [ ] Looked up blu-ray.com review
-- [ ] Validated crop, commentary count, and edition against review
+- [ ] Validated crop and commentary count against review
 
 ### Report
 - [ ] Generated report with only applicable sections

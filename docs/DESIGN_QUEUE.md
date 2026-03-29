@@ -297,9 +297,8 @@ organizer and CLI display:
   via `SafeJoin` (path traversal guard on TMDB-derived segments). Movies use
   `{root}/{moviesDir}/{baseFilename}`. TV uses
   `{root}/{tvDir}/{show}/Season {NN}`.
-- `GetFilename()`: Final output filename. Movies: base + edition suffix. TV:
+- `GetFilename()`: Final output filename. Movies: base filename. TV:
   `{Show} - S{NN}E{NN}` format (range notation for multi-episode).
-- `GetBaseFilename()`: Filename without edition suffix (for shared movie folders).
 
 Filenames are sanitized via `SanitizeDisplayName()`: colons/slashes become
 spaces, special characters removed, whitespace collapsed.

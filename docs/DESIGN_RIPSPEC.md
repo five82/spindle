@@ -55,8 +55,7 @@ clearly on parse, allowing the user to clear and reprocess them.
   "vote_count": 1234,
   "movie": true,
   "cached": false,
-  "edition": "Extended Edition",
-  "filename": "Movie Title (2024) - Extended Edition.mkv",
+  "filename": "Movie Title (2024).mkv",
   "disc_source": "bluray" | "dvd" | "unknown"
 }
 ```

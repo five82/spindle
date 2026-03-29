@@ -42,7 +42,6 @@ type Metadata struct {
 	VoteCount    int     `json:"vote_count,omitempty"`
 	Movie        bool    `json:"movie,omitempty"`
 	Cached       bool    `json:"cached,omitempty"`
-	Edition      string  `json:"edition,omitempty"`
 	Filename     string  `json:"filename,omitempty"`
 	DiscSource   string  `json:"disc_source,omitempty"`
 }

@@ -481,13 +481,6 @@ func TestGetFilenameMovie(t *testing.T) {
 		t.Errorf("GetFilename() = %q, want %q", got, want)
 	}
 
-	// With edition.
-	m.Edition = "Director's Cut"
-	got = m.GetFilename()
-	want = "The Matrix (1999) - Director's Cut"
-	if got != want {
-		t.Errorf("GetFilename() with edition = %q, want %q", got, want)
-	}
 }
 
 func TestGetFilenameTV(t *testing.T) {

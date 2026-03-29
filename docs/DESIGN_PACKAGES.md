@@ -28,7 +28,7 @@ internal/
 
   stageexec/            One-shot stage execution for CLI commands
 
-  identify/             Stage: identification (MakeMKV scan, TMDB, KeyDB, edition)
+  identify/             Stage: identification (MakeMKV scan, TMDB, KeyDB)
   ripper/               Stage: ripping (MakeMKV rip, cache, progress)
   contentid/            Stage: episode identification (matching, Hungarian, LLM verify)
   encoder/              Stage: encoding (Drapto integration, job planning)

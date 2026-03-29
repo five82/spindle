@@ -17,7 +17,6 @@ type Metadata struct {
 	Year         string            `json:"year,omitempty"`
 	SeasonNumber int               `json:"season_number,omitempty"`
 	Movie        bool              `json:"movie,omitempty"`
-	Edition      string            `json:"edition,omitempty"`
 	Episodes     []MetadataEpisode `json:"episodes,omitempty"`
 	DisplayTitle string            `json:"display_title,omitempty"`
 }
@@ -115,15 +114,10 @@ func (m *Metadata) GetLibraryPath(root, moviesDir, tvDir string) (string, error)
 }
 
 // GetFilename returns the final output filename.
-// Movies: base filename + edition suffix.
-// TV: episode format via buildEpisodeFilename.
+// Movies: base filename. TV: episode format via buildEpisodeFilename.
 func (m *Metadata) GetFilename() string {
 	if m.IsMovie() {
-		base := m.GetBaseFilename()
-		if m.Edition != "" {
-			return base + " - " + textutil.SanitizeDisplayName(m.Edition)
-		}
-		return base
+		return m.GetBaseFilename()
 	}
 	return buildEpisodeFilename(m)
 }

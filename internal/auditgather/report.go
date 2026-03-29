@@ -46,14 +46,11 @@ type StageGate struct {
 	FurthestStage string `json:"furthest_stage"`
 	MediaType     string `json:"media_type"`
 	DiscSource    string `json:"disc_source"`
-	Edition       string `json:"edition,omitempty"`
-
 	PhaseLogs       bool `json:"phase_logs"`
 	PhaseRipCache   bool `json:"phase_rip_cache"`
 	PhaseEpisodeID  bool `json:"phase_episode_id"`
 	PhaseEncoded    bool `json:"phase_encoded"`
 	PhaseCrop       bool `json:"phase_crop"`
-	PhaseEdition    bool `json:"phase_edition"`
 	PhaseSubtitles  bool `json:"phase_subtitles"`
 	PhaseCommentary bool `json:"phase_commentary"`
 	PhaseExtVal     bool `json:"phase_external_validation"`

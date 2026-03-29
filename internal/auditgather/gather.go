@@ -70,7 +70,7 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 	}
 
 	// Compute stage gate.
-	r.StageGate = computeStageGate(item, mediaType, env.Metadata.DiscSource, env.Metadata.Edition)
+	r.StageGate = computeStageGate(item, mediaType, env.Metadata.DiscSource)
 
 	// Log analysis.
 	logReport, logErr := gatherLogs(cfg, item)
@@ -146,7 +146,7 @@ func buildItemSummary(item *queue.Item) ItemSummary {
 	}
 }
 
-func computeStageGate(item *queue.Item, mediaType, discSource, edition string) StageGate {
+func computeStageGate(item *queue.Item, mediaType, discSource string) StageGate {
 	furthest := item.Stage
 	if item.Stage == queue.StageFailed && item.FailedAtStage != "" {
 		furthest = queue.Stage(item.FailedAtStage)
@@ -158,14 +158,12 @@ func computeStageGate(item *queue.Item, mediaType, discSource, edition string) S
 		FurthestStage: string(furthest),
 		MediaType:     mediaType,
 		DiscSource:    discSource,
-		Edition:       edition,
 
 		PhaseLogs:       true,
 		PhaseRipCache:   order >= stageOrder[queue.StageRipping],
 		PhaseEpisodeID:  mediaType == "tv" && order >= stageOrder[queue.StageEpisodeIdentification],
 		PhaseEncoded:    order >= stageOrder[queue.StageEncoding],
 		PhaseCrop:       order >= stageOrder[queue.StageEncoding],
-		PhaseEdition:    mediaType == "movie" && order >= stageOrder[queue.StageIdentification],
 		PhaseSubtitles:  order >= stageOrder[queue.StageSubtitling],
 		PhaseCommentary: order >= stageOrder[queue.StageAudioAnalysis],
 		PhaseExtVal:     order >= stageOrder[queue.StageEncoding] && discSource != "dvd",

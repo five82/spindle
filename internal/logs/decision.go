@@ -24,7 +24,6 @@ const (
 	DecisionDiscMonitorControl       = "disc_monitor_control"
 	DecisionDriveWait                = "drive_wait"
 	DecisionDuplicateDetection       = "duplicate_detection"
-	DecisionEditionDetection         = "edition_detection"
 	DecisionEncodeCleanup            = "encode_cleanup"
 	DecisionEncodeResume             = "encode_resume"
 	DecisionEncodingConfig           = "encoding_config"

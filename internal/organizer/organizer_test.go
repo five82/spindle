@@ -69,22 +69,6 @@ func TestDestFilename_Movie(t *testing.T) {
 	}
 }
 
-func TestDestFilename_MovieWithEdition(t *testing.T) {
-	meta := &queue.Metadata{
-		Title:     "Blade Runner",
-		MediaType: "movie",
-		Year:      "1982",
-		Movie:     true,
-		Edition:   "Final Cut",
-	}
-
-	got := destFilename(meta, "main", ".mkv")
-	want := "Blade Runner (1982) - Final Cut.mkv"
-	if got != want {
-		t.Errorf("expected %q, got %q", want, got)
-	}
-}
-
 func TestDestFilename_TVEpisode(t *testing.T) {
 	meta := &queue.Metadata{
 		Title:        "Breaking Bad",

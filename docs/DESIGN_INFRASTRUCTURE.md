@@ -566,7 +566,6 @@ meaningful.
 | `phase_episode_id` | TV + past `episode_identification` stage |
 | `phase_encoded` | Past `encoding` stage |
 | `phase_crop` | Past `encoding` stage |
-| `phase_edition` | Movie + past `identification` stage |
 | `phase_subtitles` | Past `subtitling` stage |
 | `phase_commentary` | Past `audio_analysis` stage |
 | `phase_external_validation` | Past `encoding` stage AND disc source != `dvd` |
@@ -598,7 +597,7 @@ Pre-computed summaries derived from gathered data:
 | Field | Type | Description |
 |-------|------|-------------|
 | `item` | ItemSummary | Queue item summary |
-| `stage_gate` | StageGate | Furthest stage, media type, disc source, edition, phase flags |
+| `stage_gate` | StageGate | Furthest stage, media type, disc source, phase flags |
 | `logs` | LogAnalysis? | Log entries filtered by item ID |
 | `rip_cache` | RipCacheReport? | Cached rip data and metadata |
 | `envelope` | EnvelopeReport? | Parsed RipSpec envelope |
@@ -633,7 +632,6 @@ Pre-computed summaries derived from gathered data:
 | `furthest_stage` | string | Highest pipeline stage reached |
 | `media_type` | string | movie or tv |
 | `disc_source` | string | bluray, dvd, or empty |
-| `edition` | string? | Detected edition label |
 | `phase_*` | bool | Phase applicability flags (see Section 7.1) |
 
 #### LogAnalysis

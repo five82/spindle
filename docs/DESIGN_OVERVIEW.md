@@ -103,7 +103,7 @@ them to appear in Jellyfin without manual intervention.
 
 ### 3.5 LLM (via OpenRouter)
 
-- **Purpose**: Edition detection, commentary classification, episode verification.
+- **Purpose**: Commentary classification, episode verification.
 - **Base URL**: `https://openrouter.ai/api/v1/chat/completions` (configurable)
 - **Default model**: `google/gemini-3-flash-preview`
 - **Auth**: API key via `Authorization: Bearer` header.

@@ -123,7 +123,7 @@ Heuristics to determine if disc is movie or TV:
 - Single JSON file at `disc_id_cache_path` (configured). Non-functional when
   path is empty (all operations become no-ops).
 - `Entry` fields: `disc_id`, `tmdb_id`, `media_type` ("movie"/"tv"), `title`,
-  `edition`, `season_number`, `year`, `cached_at`,
+  `season_number`, `year`, `cached_at`,
   `has_forced_subtitle_track`.
 - Thread-safe via `sync.RWMutex`.
 - Atomic persistence: write to `.tmp` file, then `os.Rename()`.
@@ -194,19 +194,7 @@ matches AND the result's release year matches the extracted year. This
 disambiguates same-title films from different years (e.g., Munich 2005 vs
 Munich 1972).
 
-### 1.8 Edition Detection
-
-For movies, detect alternate editions (Director's Cut, Extended Edition, etc.):
-
-1. **Regex patterns**: Check disc title for known edition keywords.
-2. **Ambiguous markers**: If extra content in title beyond TMDB title, check with LLM.
-3. **LLM classification**: Ask LLM if disc title represents a special edition
-   (confidence threshold: 0.8). See DESIGN_LLM_PROMPTS.md Section 1 for the
-   exact prompt and response schema.
-4. **Label extraction**: Extract edition label from difference between disc title
-   and TMDB title.
-
-### 1.9 RipSpec Assembly
+### 1.8 RipSpec Assembly
 
 After identification:
 1. Build title specs from MakeMKV scan results (filtered by `min_title_length`).
@@ -217,7 +205,7 @@ After identification:
 5. Set attributes: forced subtitle track detection.
 6. Store serialized envelope in `rip_spec_data`.
 
-### 1.10 Additional Behaviors
+### 1.9 Additional Behaviors
 
 - **Disc ID cache fast-path**: On cache hit, bypasses both TMDB search and KeyDB
   lookup entirely. Logged with `decision_type: "disc_id_cache"`.
@@ -232,7 +220,7 @@ After identification:
   `decision_type: "title_source"`, `decision_result: "updated"`, and source-specific
   `decision_reason` (e.g., `"keydb_contains_authoritative_title_for_disc_id"`).
 
-### 1.11 Failure Modes
+### 1.10 Failure Modes
 
 - **No disc detected**: Skip (disc may have been removed).
 - **Fingerprint computation fails**: Notify error, do not queue.
@@ -779,7 +767,7 @@ When `mux_into_mkv` is true:
 ### 6.8 Subtitle Context
 
 The subtitle stage reads metadata directly from the envelope's `metadata`
-section (title, media type, TMDB ID, year, season, edition). No separate
+section (title, media type, TMDB ID, year, season). No separate
 context struct or cross-stage attribute needed.
 
 ### 6.9 Transcript Cache
@@ -825,12 +813,6 @@ the duration of transcription work.
 ### 7.2 Library Path Resolution
 
 **Movies**: `{library_dir}/{movies_dir}/{Title} ({Year})/{Title} ({Year}).mkv`
-- With edition: `{Title} ({Year}) - Edition Name.mkv`
-
-**Edition format**: Jellyfin treats editions as movie versions using a
-` - Label` suffix (space-hyphen-space-label). Examples: `Movie (2024) - Director's Cut.mkv`,
-`Movie (2024) - Extended Edition.mkv`. Labels are freeform text. This is distinct
-from Plex's `{edition-...}` tag format.
 
 **TV**: `{library_dir}/{tv_dir}/{Show Name}/Season {NN}/{Show Name} - S{NN}E{NN} - {Episode Title}.mkv`
 
@@ -880,20 +862,7 @@ After successful organization (if `jellyfin.enabled`):
   (not per-episode).
 - Best-effort: log warning on failure, do not fail the stage.
 
-### 7.8 Edition Filename Validation
-
-`ValidateEditionFilename()` verifies that the edition suffix appears in the
-final filename when edition metadata is present. This catches logic bugs in
-the metadata-to-filename path.
-
-- Checks that the filename (without extension) ends with ` - Edition Name`
-  (space-hyphen-space-label, matching Jellyfin's version naming convention).
-- On mismatch: returns `ErrValidation` with details. Logged with
-  `event_type: "edition_validation_failed"`.
-- On success: logged with `event_type: "edition_validation_passed"`.
-- Skipped when edition is empty.
-
-### 7.9 Additional Behaviors
+### 7.8 Additional Behaviors
 
 - **Metadata fallback**: When metadata title is empty, falls back to disc title,
   then to encoded file basename. Persists the fallback title to the queue item
@@ -901,7 +870,7 @@ the metadata-to-filename path.
 - **Cross-stage missing asset checks**: Warns about missing encoded/subtitled
   assets, flags for review.
 
-### 7.10 Staging Cleanup
+### 7.9 Staging Cleanup
 
 After successful organization (library or review routing), the staging
 directory (`{staging_dir}/{fingerprint}/`) is removed via `os.RemoveAll`.
@@ -930,7 +899,6 @@ decision types each stage produces. Constants are defined in
 | `tmdb_match` | display title, `movie` | TMDB search match acceptance |
 | `tmdb_match_preference` | result | Multi-result preference selection |
 | `tmdb_search` | result | TMDB search execution |
-| `edition_detection` | edition label, reason | LLM edition classification |
 | `forced_subtitle_detection` | `present`, `absent` | Disc forced subtitle check |
 | `episode_placeholders` | episode count | Placeholder episode creation |
 | `disc_id_cache` | `hit`, `miss` | Disc ID cache lookup |

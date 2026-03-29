@@ -143,9 +143,6 @@ func newIdentifyCmd() *cobra.Command {
 					}
 					fmt.Printf("  Overview: %s\n", overview)
 				}
-				if result.Edition != "" {
-					fmt.Printf("  Edition: %s\n", result.Edition)
-				}
 			}
 
 			if len(result.AllResults) > 1 {
