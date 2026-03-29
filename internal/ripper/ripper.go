@@ -22,6 +22,9 @@ import (
 
 const driveAvailableMsg = "Drive is available for next disc."
 
+// NoTitleOverride means automatic title selection based on media type.
+const NoTitleOverride = -1
+
 // Handler implements stage.Handler for disc ripping.
 type Handler struct {
 	cfg           *config.Config
@@ -29,12 +32,12 @@ type Handler struct {
 	notifier      *notify.Notifier
 	cache         *ripcache.Store
 	monitor       *discmonitor.Monitor
-	TitleOverride int // -1 = auto-select (default); >=0 = rip only this MakeMKV title ID
+	titleOverride int // NoTitleOverride = auto-select; >=0 = rip only this MakeMKV title ID
 }
 
 // New creates a ripping handler.
-func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier, cache *ripcache.Store, monitor *discmonitor.Monitor) *Handler {
-	return &Handler{cfg: cfg, store: store, notifier: notifier, cache: cache, monitor: monitor, TitleOverride: -1}
+func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier, cache *ripcache.Store, monitor *discmonitor.Monitor, titleOverride int) *Handler {
+	return &Handler{cfg: cfg, store: store, notifier: notifier, cache: cache, monitor: monitor, titleOverride: titleOverride}
 }
 
 // Run executes the ripping stage.
@@ -45,25 +48,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	env, err := stage.ParseRipSpec(item.RipSpecData)
 	if err != nil {
 		return err
-	}
-
-	// Validate title override if set.
-	if h.TitleOverride >= 0 {
-		found := false
-		for _, t := range env.Titles {
-			if t.ID == h.TitleOverride {
-				found = true
-				break
-			}
-		}
-		if !found {
-			var ids []string
-			for _, t := range env.Titles {
-				ids = append(ids, fmt.Sprintf("%d (%ds)", t.ID, t.Duration))
-			}
-			return fmt.Errorf("title %d not found on disc; available titles: %s",
-				h.TitleOverride, strings.Join(ids, ", "))
-		}
 	}
 
 	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
@@ -141,7 +125,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Select titles to rip based on media type.
-	targets := h.selectRipTargets(logger, &env)
+	targets, err := h.selectRipTargets(logger, &env)
+	if err != nil {
+		return err
+	}
 	rippedCount := len(targets)
 
 	if h.notifier != nil && len(targets) > 0 {
@@ -266,25 +253,25 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 }
 
 // selectRipTargets determines which titles to rip based on media type.
-func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) []ripspec.Title {
+func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) ([]ripspec.Title, error) {
 	// User-specified title override bypasses media-type selection.
-	if h.TitleOverride >= 0 {
+	if h.titleOverride >= 0 {
 		for _, t := range env.Titles {
-			if t.ID == h.TitleOverride {
+			if t.ID == h.titleOverride {
 				logger.Info("title override selected",
 					"decision_type", logs.DecisionTitleSelection,
 					"decision_result", fmt.Sprintf("title %d (%ds)", t.ID, t.Duration),
 					"decision_reason", "user-specified --title override",
 				)
-				return []ripspec.Title{t}
+				return []ripspec.Title{t}, nil
 			}
 		}
-		logger.Warn("title override not found on disc",
-			"event_type", "title_selection_empty",
-			"error_hint", fmt.Sprintf("--title %d not found in %d disc titles", h.TitleOverride, len(env.Titles)),
-			"impact", "no titles will be ripped",
-		)
-		return nil
+		var ids []string
+		for _, t := range env.Titles {
+			ids = append(ids, fmt.Sprintf("%d (%ds)", t.ID, t.Duration))
+		}
+		return nil, fmt.Errorf("title %d not found on disc; available titles: %s",
+			h.titleOverride, strings.Join(ids, ", "))
 	}
 
 	switch env.Metadata.MediaType {
@@ -319,14 +306,14 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) [
 				"decision_result", fmt.Sprintf("title %d (%ds)", best.ID, best.Duration),
 				"decision_reason", "longest title above minimum duration",
 			)
-			return []ripspec.Title{*best}
+			return []ripspec.Title{*best}, nil
 		}
 		logger.Warn("no titles above minimum duration for movie",
 			"event_type", "title_selection_empty",
 			"error_hint", fmt.Sprintf("min_title_length=%d", h.cfg.MakeMKV.MinTitleLength),
 			"impact", "no titles will be ripped",
 		)
-		return nil
+		return nil, nil
 
 	case "tv":
 		// Rip only titles referenced by episodes.
@@ -360,7 +347,7 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) [
 			"decision_result", fmt.Sprintf("%d titles from %d episodes", len(targets), len(env.Episodes)),
 			"decision_reason", "episode-referenced titles only",
 		)
-		return targets
+		return targets, nil
 
 	default:
 		// Unknown/fallback: rip all titles above MinTitleLength.
@@ -375,7 +362,7 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) [
 			"decision_result", fmt.Sprintf("%d titles above minimum duration", len(targets)),
 			"decision_reason", "unknown media type, using duration filter",
 		)
-		return targets
+		return targets, nil
 	}
 }
 

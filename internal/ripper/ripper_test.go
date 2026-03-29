@@ -93,7 +93,7 @@ func testLogger() *slog.Logger {
 }
 
 func TestSelectRipTargets_Movie(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}, TitleOverride: -1}
+	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
 	h.cfg.MakeMKV.MinTitleLength = 120
 
 	env := &ripspec.Envelope{
@@ -105,7 +105,10 @@ func TestSelectRipTargets_Movie(t *testing.T) {
 		},
 	}
 
-	targets := h.selectRipTargets(testLogger(), env)
+	targets, err := h.selectRipTargets(testLogger(), env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target, got %d", len(targets))
@@ -116,7 +119,7 @@ func TestSelectRipTargets_Movie(t *testing.T) {
 }
 
 func TestSelectRipTargets_TV(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}, TitleOverride: -1}
+	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
 
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "tv"},
@@ -132,7 +135,10 @@ func TestSelectRipTargets_TV(t *testing.T) {
 		},
 	}
 
-	targets := h.selectRipTargets(testLogger(), env)
+	targets, err := h.selectRipTargets(testLogger(), env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(targets) != 2 {
 		t.Fatalf("expected 2 targets, got %d", len(targets))
@@ -146,7 +152,7 @@ func TestSelectRipTargets_TV(t *testing.T) {
 }
 
 func TestSelectRipTargets_Unknown(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}, TitleOverride: -1}
+	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
 	h.cfg.MakeMKV.MinTitleLength = 120
 
 	env := &ripspec.Envelope{
@@ -158,15 +164,18 @@ func TestSelectRipTargets_Unknown(t *testing.T) {
 		},
 	}
 
-	targets := h.selectRipTargets(testLogger(), env)
+	targets, err := h.selectRipTargets(testLogger(), env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(targets) != 2 {
 		t.Fatalf("expected 2 targets, got %d", len(targets))
 	}
 }
 
-func TestSelectRipTargets_TitleOverride(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}, TitleOverride: 1}
+func TestSelectRipTargets_titleOverride(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, titleOverride: 1}
 	h.cfg.MakeMKV.MinTitleLength = 120
 
 	env := &ripspec.Envelope{
@@ -178,7 +187,10 @@ func TestSelectRipTargets_TitleOverride(t *testing.T) {
 		},
 	}
 
-	targets := h.selectRipTargets(testLogger(), env)
+	targets, err := h.selectRipTargets(testLogger(), env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target, got %d", len(targets))
@@ -188,8 +200,8 @@ func TestSelectRipTargets_TitleOverride(t *testing.T) {
 	}
 }
 
-func TestSelectRipTargets_TitleOverrideZero(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}, TitleOverride: 0}
+func TestSelectRipTargets_titleOverrideZero(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, titleOverride: 0}
 
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "movie"},
@@ -199,7 +211,10 @@ func TestSelectRipTargets_TitleOverrideZero(t *testing.T) {
 		},
 	}
 
-	targets := h.selectRipTargets(testLogger(), env)
+	targets, err := h.selectRipTargets(testLogger(), env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 target, got %d", len(targets))
@@ -209,8 +224,8 @@ func TestSelectRipTargets_TitleOverrideZero(t *testing.T) {
 	}
 }
 
-func TestSelectRipTargets_TitleOverrideNotFound(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}, TitleOverride: 99}
+func TestSelectRipTargets_titleOverrideNotFound(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, titleOverride: 99}
 
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "movie"},
@@ -220,8 +235,11 @@ func TestSelectRipTargets_TitleOverrideNotFound(t *testing.T) {
 		},
 	}
 
-	targets := h.selectRipTargets(testLogger(), env)
+	targets, err := h.selectRipTargets(testLogger(), env)
 
+	if err == nil {
+		t.Fatal("expected error for non-existent override, got nil")
+	}
 	if targets != nil {
 		t.Fatalf("expected nil targets for non-existent override, got %d", len(targets))
 	}

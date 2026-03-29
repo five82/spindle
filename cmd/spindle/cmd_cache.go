@@ -135,7 +135,7 @@ func newCacheRipCmd() *cobra.Command {
 			}
 
 			// Interactive title selection when --title flag is set.
-			var titleOverride = -1
+			titleOverride := ripper.NoTitleOverride
 			if selectTitle {
 				env, parseErr := ripspec.Parse(item.RipSpecData)
 				if parseErr != nil {
@@ -186,7 +186,11 @@ func newCacheRipCmd() *cobra.Command {
 						return fmt.Errorf("invalid title ID %q: %w", input, err)
 					}
 					if !validIDs[chosen] {
-						return fmt.Errorf("title %d is not a candidate; valid IDs: %v", chosen, candidateIDs(candidates))
+						var ids []int
+						for _, t := range candidates {
+							ids = append(ids, t.ID)
+						}
+						return fmt.Errorf("title %d is not a candidate; valid IDs: %v", chosen, ids)
 					}
 					titleOverride = chosen
 				}
@@ -201,8 +205,7 @@ func newCacheRipCmd() *cobra.Command {
 
 			// Run ripping stage.
 			fmt.Printf("Ripping disc...\n")
-			ripperHandler := ripper.New(cfg, qStore, nil, ripCacheStore, nil)
-			ripperHandler.TitleOverride = titleOverride
+			ripperHandler := ripper.New(cfg, qStore, nil, ripCacheStore, nil, titleOverride)
 			if err := stageexec.Run(ctx, item, stageexec.Options{
 				Store:   qStore,
 				Handler: ripperHandler,
@@ -224,15 +227,6 @@ func newCacheRipCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path")
 	cmd.Flags().BoolVar(&selectTitle, "title", false, "Interactively select which title to rip")
 	return cmd
-}
-
-// candidateIDs returns the IDs from a slice of titles for error messages.
-func candidateIDs(titles []ripspec.Title) []int {
-	ids := make([]int, len(titles))
-	for i, t := range titles {
-		ids[i] = t.ID
-	}
-	return ids
 }
 
 func newCacheStatsCmd() *cobra.Command {
