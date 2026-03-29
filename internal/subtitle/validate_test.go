@@ -1,10 +1,24 @@
 package subtitle
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// fmtTS formats seconds as an SRT timestamp for test data.
+func fmtTS(secs float64) string {
+	total := int(secs * 1000)
+	ms := total % 1000
+	total /= 1000
+	s := total % 60
+	total /= 60
+	m := total % 60
+	h := total / 60
+	return fmt.Sprintf("%02d:%02d:%02d,%03d", h, m, s, ms)
+}
 
 func TestValidateSRTContent_Valid(t *testing.T) {
 	srt := `1
@@ -105,6 +119,84 @@ Only cue starting very late
 	}
 	if len(issues) < 2 {
 		t.Errorf("expected multiple issues, got %v", issues)
+	}
+}
+
+func TestValidateSRTContent_Boundaries(t *testing.T) {
+	tests := []struct {
+		name       string
+		srt        string
+		duration   float64
+		wantIssues []string // nil means expect no issues
+	}{
+		{
+			name: "duration_exactly_plus_8s_no_issue",
+			// 4 cues, last ends at 38s, video = 30s, difference = 8.0 exactly. Threshold is > 8.
+			// 4 cues / 0.5 min = 8 cues/min — well above sparse threshold.
+			srt:        "1\n00:00:01,000 --> 00:00:03,000\nA\n\n2\n00:00:05,000 --> 00:00:07,000\nB\n\n3\n00:00:10,000 --> 00:00:12,000\nC\n\n4\n00:00:36,000 --> 00:00:38,000\nD\n",
+			duration:   30,
+			wantIssues: nil,
+		},
+		{
+			name: "duration_just_over_8s_flagged",
+			// 4 cues, last ends at 38.001s, video = 30s, difference = 8.001. Threshold is > 8.
+			srt:        "1\n00:00:01,000 --> 00:00:03,000\nA\n\n2\n00:00:05,000 --> 00:00:07,000\nB\n\n3\n00:00:10,000 --> 00:00:12,000\nC\n\n4\n00:00:36,000 --> 00:00:38,001\nD\n",
+			duration:   30,
+			wantIssues: []string{"duration_mismatch"},
+		},
+		{
+			name: "exactly_2_cues_per_min_no_sparse",
+			srt: "1\n00:00:01,000 --> 00:00:03,000\nA\n\n2\n00:00:10,000 --> 00:00:12,000\nB\n\n3\n00:00:20,000 --> 00:00:22,000\nC\n\n4\n00:00:30,000 --> 00:00:32,000\nD\n",
+			// 4 cues in 120s = 2.0 cues/min. Threshold is < 2.
+			duration:   120,
+			wantIssues: nil,
+		},
+		{
+			name: "60s_video_sparse_check_skipped",
+			srt: "1\n00:00:01,000 --> 00:00:03,000\nOnly cue\n",
+			// 1 cue in 60s = 1 cue/min, but sparse check only applies when > 60s.
+			duration:   60,
+			wantIssues: nil,
+		},
+		{
+			name: "first_cue_exactly_900s_no_late",
+			// First cue at 900.0s. Threshold is > 900.
+			// 60+ cues needed for 1800s video at >= 2 cues/min. Use 61 cues starting at 900s.
+			srt: func() string {
+				var b strings.Builder
+				for i := 1; i <= 61; i++ {
+					start := 900 + (i-1)*14
+					end := start + 3
+					fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", i,
+						fmtTS(float64(start)), fmtTS(float64(end)),
+						fmt.Sprintf("Line %d", i))
+				}
+				return b.String()
+			}(),
+			duration:   1800,
+			wantIssues: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempSRT(t, tt.srt)
+			issues, err := ValidateSRTContent(path, tt.duration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantIssues == nil {
+				if len(issues) != 0 {
+					t.Errorf("expected no issues, got %v", issues)
+				}
+				return
+			}
+			for _, want := range tt.wantIssues {
+				if !containsIssue(issues, want) {
+					t.Errorf("expected issue %q in %v", want, issues)
+				}
+			}
+		})
 	}
 }
 

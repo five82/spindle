@@ -221,6 +221,165 @@ func TestFilterWhisperXOutput_EmptyInput(t *testing.T) {
 	}
 }
 
+func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		cues     []srtCue
+		wantLen  int
+		wantText []string // expected surviving cue texts
+	}{
+		{
+			name: "rule1_gap_exactly_10s_preserved",
+			cues: []srtCue{
+				{Index: 1, Start: 10, End: 12, Text: "Thank you"},
+				{Index: 2, Start: 22, End: 24, Text: "Thank you"}, // gap = 10.0
+				{Index: 3, Start: 34, End: 36, Text: "Thank you"}, // gap = 10.0
+			},
+			wantLen:  3,
+			wantText: []string{"Thank you", "Thank you", "Thank you"},
+		},
+		{
+			name: "rule1_gap_just_over_10s_removed",
+			cues: []srtCue{
+				{Index: 1, Start: 10, End: 12, Text: "Thank you"},
+				{Index: 2, Start: 22.001, End: 24, Text: "Thank you"}, // gap = 10.001
+				{Index: 3, Start: 34.002, End: 36, Text: "Thank you"}, // gap = 10.002
+			},
+			wantLen: 0,
+		},
+		{
+			name: "rule2_gap_exactly_30s_removed",
+			cues: []srtCue{
+				{Index: 1, Start: 10, End: 12, Text: "Normal"},
+				{Index: 2, Start: 42, End: 44, Text: "Thank you"}, // gap before = 30.0
+				{Index: 3, Start: 74, End: 76, Text: "More"},       // gap after = 30.0
+			},
+			wantLen:  2,
+			wantText: []string{"Normal", "More"},
+		},
+		{
+			name: "rule2_gap_just_under_30s_preserved",
+			cues: []srtCue{
+				{Index: 1, Start: 10, End: 12, Text: "Normal"},
+				{Index: 2, Start: 41.999, End: 44, Text: "Thank you"}, // gap before = 29.999
+				{Index: 3, Start: 74, End: 76, Text: "More"},
+			},
+			wantLen:  3,
+			wantText: []string{"Normal", "Thank you", "More"},
+		},
+		{
+			name: "rule3_music_gap_exactly_30s_removed",
+			cues: []srtCue{
+				{Index: 1, Start: 10, End: 12, Text: "Normal"},
+				{Index: 2, Start: 42, End: 44, Text: "\u266A"},  // gap before = 30.0
+				{Index: 3, Start: 74, End: 76, Text: "More"},    // gap after = 30.0
+			},
+			wantLen:  2,
+			wantText: []string{"Normal", "More"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := removeIsolatedHallucinations(tt.cues)
+			if len(result) != tt.wantLen {
+				t.Fatalf("got %d cues, want %d", len(result), tt.wantLen)
+			}
+			for i, want := range tt.wantText {
+				if result[i].Text != want {
+					t.Errorf("cue %d text = %q, want %q", i, result[i].Text, want)
+				}
+			}
+		})
+	}
+}
+
+func TestRemoveIsolatedHallucinations_RuleInteraction(t *testing.T) {
+	// Rule 1 removes repeated "thank you" cues, compaction changes gaps,
+	// then Rule 2 removes "bye" which is now isolated by >= 30s.
+	cues := []srtCue{
+		{Index: 1, Start: 0, End: 2, Text: "Dialogue one"},
+		{Index: 2, Start: 15, End: 17, Text: "Thank you"},  // repeated run start
+		{Index: 3, Start: 30, End: 32, Text: "Thank you"},  // gap = 13
+		{Index: 4, Start: 45, End: 47, Text: "Thank you"},  // gap = 13
+		{Index: 5, Start: 100, End: 102, Text: "Dialogue two"},
+		{Index: 6, Start: 140, End: 142, Text: "Bye"},      // gap before = 38, after = 58
+		{Index: 7, Start: 200, End: 202, Text: "Dialogue three"},
+	}
+
+	result := removeIsolatedHallucinations(cues)
+
+	// Rule 1 removes cues 2-4 (3 identical, gaps > 10s).
+	// After compaction: [Dialogue one@0, Dialogue two@100, Bye@140, Dialogue three@200]
+	// Rule 2 removes "Bye" (known phrase, gap before=38s >= 30, gap after=58s >= 30).
+	if len(result) != 3 {
+		t.Fatalf("got %d cues, want 3", len(result))
+	}
+	want := []string{"Dialogue one", "Dialogue two", "Dialogue three"}
+	for i, w := range want {
+		if result[i].Text != w {
+			t.Errorf("cue %d text = %q, want %q", i, result[i].Text, w)
+		}
+	}
+}
+
+func TestRemoveIsolatedHallucinations_MultiLineCue(t *testing.T) {
+	tests := []struct {
+		name     string
+		cues     []srtCue
+		wantLen  int
+		wantText []string
+	}{
+		{
+			name: "multiline_known_phrase_not_matched",
+			// "Thank you\nso much" normalizes to "thank you so much" - not in known phrases.
+			cues: []srtCue{
+				{Index: 1, Start: 10, End: 12, Text: "Normal"},
+				{Index: 2, Start: 50, End: 52, Text: "Thank you\nso much"},
+				{Index: 3, Start: 90, End: 92, Text: "More"},
+			},
+			wantLen:  3,
+			wantText: []string{"Normal", "Thank you\nso much", "More"},
+		},
+		{
+			name: "multiline_first_line_is_known_phrase",
+			// Full normalized text "thank you for everything" is not in the map.
+			cues: []srtCue{
+				{Index: 1, Start: 10, End: 12, Text: "Normal"},
+				{Index: 2, Start: 50, End: 52, Text: "Thank you\nfor everything"},
+				{Index: 3, Start: 90, End: 92, Text: "More"},
+			},
+			wantLen:  3,
+			wantText: []string{"Normal", "Thank you\nfor everything", "More"},
+		},
+		{
+			name: "single_word_known_phrase_removed",
+			// "You" normalizes to "you" which IS in known phrases.
+			cues: []srtCue{
+				{Index: 1, Start: 10, End: 12, Text: "Normal"},
+				{Index: 2, Start: 50, End: 52, Text: "You"},
+				{Index: 3, Start: 90, End: 92, Text: "More"},
+			},
+			wantLen:  2,
+			wantText: []string{"Normal", "More"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := removeIsolatedHallucinations(tt.cues)
+			if len(result) != tt.wantLen {
+				t.Fatalf("got %d cues, want %d", len(result), tt.wantLen)
+			}
+			for i, want := range tt.wantText {
+				if result[i].Text != want {
+					t.Errorf("cue %d text = %q, want %q", i, result[i].Text, want)
+				}
+			}
+		})
+	}
+}
+
 func TestParseTimestamp(t *testing.T) {
 	got := parseTimestamp("01", "23", "45", "678")
 	want := 1*3600 + 23*60 + 45 + 0.678
