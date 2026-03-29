@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -18,6 +20,7 @@ import (
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripper"
+	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stageexec"
 	"github.com/five82/spindle/internal/tmdb"
 )
@@ -39,6 +42,7 @@ func newCacheCmd() *cobra.Command {
 
 func newCacheRipCmd() *cobra.Command {
 	var device string
+	var selectTitle bool
 	cmd := &cobra.Command{
 		Use:   "rip [device]",
 		Short: "Rip a disc into the rip cache",
@@ -130,6 +134,65 @@ func newCacheRipCmd() *cobra.Command {
 				return fmt.Errorf("identification: %w", err)
 			}
 
+			// Interactive title selection when --title flag is set.
+			var titleOverride = -1
+			if selectTitle {
+				env, parseErr := ripspec.Parse(item.RipSpecData)
+				if parseErr != nil {
+					return fmt.Errorf("parse ripspec for title selection: %w", parseErr)
+				}
+
+				// Filter candidates by MinTitleLength (same as movie selection logic).
+				var candidates []ripspec.Title
+				for _, t := range env.Titles {
+					if t.Duration >= cfg.MakeMKV.MinTitleLength {
+						candidates = append(candidates, t)
+					}
+				}
+
+				if len(candidates) == 0 {
+					return fmt.Errorf("no titles above minimum duration (%ds)", cfg.MakeMKV.MinTitleLength)
+				}
+
+				if len(candidates) == 1 {
+					titleOverride = candidates[0].ID
+					dur := time.Duration(candidates[0].Duration) * time.Second
+					fmt.Printf("Only one candidate title: %d (%s)\n", candidates[0].ID, dur.Truncate(time.Second))
+				} else {
+					fmt.Printf("\nCandidate titles:\n")
+					for _, t := range candidates {
+						dur := time.Duration(t.Duration) * time.Second
+						line := fmt.Sprintf("  Title %d: %s", t.ID, dur.Truncate(time.Second))
+						if t.Name != "" {
+							line += fmt.Sprintf(" (%s)", t.Name)
+						}
+						fmt.Println(line)
+					}
+
+					// Build lookup set for validation.
+					validIDs := make(map[int]bool, len(candidates))
+					for _, t := range candidates {
+						validIDs[t.ID] = true
+					}
+
+					fmt.Printf("\nEnter title ID to rip: ")
+					scanner := bufio.NewScanner(os.Stdin)
+					if !scanner.Scan() {
+						return fmt.Errorf("no input received")
+					}
+					input := strings.TrimSpace(scanner.Text())
+					chosen, err := strconv.Atoi(input)
+					if err != nil {
+						return fmt.Errorf("invalid title ID %q: %w", input, err)
+					}
+					if !validIDs[chosen] {
+						return fmt.Errorf("title %d is not a candidate; valid IDs: %v", chosen, candidateIDs(candidates))
+					}
+					titleOverride = chosen
+				}
+				fmt.Println()
+			}
+
 			// Advance to ripping stage.
 			item.Stage = queue.StageRipping
 			if err := qStore.Update(item); err != nil {
@@ -139,6 +202,7 @@ func newCacheRipCmd() *cobra.Command {
 			// Run ripping stage.
 			fmt.Printf("Ripping disc...\n")
 			ripperHandler := ripper.New(cfg, qStore, nil, ripCacheStore, nil)
+			ripperHandler.TitleOverride = titleOverride
 			if err := stageexec.Run(ctx, item, stageexec.Options{
 				Store:   qStore,
 				Handler: ripperHandler,
@@ -158,7 +222,17 @@ func newCacheRipCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path")
+	cmd.Flags().BoolVar(&selectTitle, "title", false, "Interactively select which title to rip")
 	return cmd
+}
+
+// candidateIDs returns the IDs from a slice of titles for error messages.
+func candidateIDs(titles []ripspec.Title) []int {
+	ids := make([]int, len(titles))
+	for i, t := range titles {
+		ids[i] = t.ID
+	}
+	return ids
 }
 
 func newCacheStatsCmd() *cobra.Command {

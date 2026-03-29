@@ -93,7 +93,7 @@ func testLogger() *slog.Logger {
 }
 
 func TestSelectRipTargets_Movie(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}}
+	h := &Handler{cfg: &config.Config{}, TitleOverride: -1}
 	h.cfg.MakeMKV.MinTitleLength = 120
 
 	env := &ripspec.Envelope{
@@ -116,7 +116,7 @@ func TestSelectRipTargets_Movie(t *testing.T) {
 }
 
 func TestSelectRipTargets_TV(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}}
+	h := &Handler{cfg: &config.Config{}, TitleOverride: -1}
 
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "tv"},
@@ -146,7 +146,7 @@ func TestSelectRipTargets_TV(t *testing.T) {
 }
 
 func TestSelectRipTargets_Unknown(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}}
+	h := &Handler{cfg: &config.Config{}, TitleOverride: -1}
 	h.cfg.MakeMKV.MinTitleLength = 120
 
 	env := &ripspec.Envelope{
@@ -162,6 +162,68 @@ func TestSelectRipTargets_Unknown(t *testing.T) {
 
 	if len(targets) != 2 {
 		t.Fatalf("expected 2 targets, got %d", len(targets))
+	}
+}
+
+func TestSelectRipTargets_TitleOverride(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, TitleOverride: 1}
+	h.cfg.MakeMKV.MinTitleLength = 120
+
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{MediaType: "movie"},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 7200},
+			{ID: 1, Duration: 6000},
+			{ID: 2, Duration: 3600},
+		},
+	}
+
+	targets := h.selectRipTargets(testLogger(), env)
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(targets))
+	}
+	if targets[0].ID != 1 {
+		t.Errorf("expected title ID 1 (override), got %d", targets[0].ID)
+	}
+}
+
+func TestSelectRipTargets_TitleOverrideZero(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, TitleOverride: 0}
+
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{MediaType: "movie"},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 3600},
+			{ID: 1, Duration: 7200},
+		},
+	}
+
+	targets := h.selectRipTargets(testLogger(), env)
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(targets))
+	}
+	if targets[0].ID != 0 {
+		t.Errorf("expected title ID 0 (override), got %d", targets[0].ID)
+	}
+}
+
+func TestSelectRipTargets_TitleOverrideNotFound(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, TitleOverride: 99}
+
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{MediaType: "movie"},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 7200},
+			{ID: 1, Duration: 6000},
+		},
+	}
+
+	targets := h.selectRipTargets(testLogger(), env)
+
+	if targets != nil {
+		t.Fatalf("expected nil targets for non-existent override, got %d", len(targets))
 	}
 }
 

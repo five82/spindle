@@ -237,6 +237,10 @@ After identification:
 ### 2.1 Title Selection
 
 - Parse RipSpec envelope from item.
+- **Title override** (`TitleOverride >= 0`): bypass media-type logic and rip only
+  the specified MakeMKV title ID. Validated against envelope titles before
+  ripping; returns an error listing available IDs if not found. Set by the
+  `--title` interactive prompt on `spindle cache rip`.
 - For movies: select primary title (longest duration, filtering out titles shorter
   than `min_title_length`).
 - For TV: rip each episode's mapped title ID.
@@ -911,7 +915,7 @@ decision types each stage produces. Constants are defined in
 | `rip_cache` | `restored` | Rip cache restoration |
 | `disc_monitor_control` | `paused`, `resumed` | Disc monitor pause during rip |
 | `track_select` | `skipped`, `candidate`, `selected` | Title duration filtering |
-| `title_selection` | title summary | Movie/TV title selection |
+| `title_selection` | title summary | Movie/TV title selection or `--title` override |
 | `title_rip` | `completed` | Individual title rip outcome |
 | `file_discovery` | `not_found` | Post-rip file detection |
 | `asset_mapping` | `title_file_map`, `directory_scan` | Ripped file-to-episode mapping |

@@ -216,8 +216,15 @@ Rip a disc into the rip cache without proceeding to encoding.
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--device` | `-d` | string | (configured optical_drive) | Optical device path |
+| `--title` | | bool | false | Interactively select which title to rip |
 
 Refuses to run when daemon is running. Runs identification + ripping stages.
+
+When `--title` is set, candidate titles (above `min_title_length`) are displayed
+after identification and the user is prompted to select one by MakeMKV title ID.
+This is useful for discs with multiple feature-length titles (e.g., director's
+cut and theatrical cut). If only one candidate exists, it is selected
+automatically without prompting.
 
 #### `spindle cache stats`
 

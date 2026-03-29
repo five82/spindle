@@ -71,6 +71,9 @@ If the rip cache is enabled, raw rips are stored for reuse along with the identi
 (disc fingerprint, rip spec, TMDB metadata). Cached entries can be re-queued without inserting a disc
 via `spindle cache process <number>`; restored rips are reprocessed for audio refinement.
 
+For discs with multiple feature-length titles (e.g., director's cut and theatrical cut),
+use `spindle cache rip --title` to interactively select which title to rip.
+
 ## Stage 4: Episode Identification (episode_identification)
 
 1. For TV shows with OpenSubtitles enabled, Spindle compares WhisperX transcripts against OpenSubtitles references to map ripped files to definitive episode numbers.
