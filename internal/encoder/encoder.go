@@ -94,13 +94,48 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
+	// Reload encoding config from disk (changes take effect without restart).
+	encCfg, reloadErr := config.ReloadEncoding(h.cfg, logger)
+	if reloadErr != nil {
+		logger.Warn("encoding config reload failed, using existing config",
+			"event_type", "config_reload_error",
+			"error_hint", reloadErr.Error(),
+			"impact", "encoding will use config from daemon startup",
+		)
+		encCfg = h.cfg.Encoding
+	}
+
 	var opts []drapto.Option
-	if h.cfg.Encoding.SVTAV1Preset >= 0 && h.cfg.Encoding.SVTAV1Preset <= 13 {
-		opts = append(opts, drapto.WithSVTAV1Preset(uint8(h.cfg.Encoding.SVTAV1Preset)))
-		logger.Info("SVT-AV1 preset override applied",
+	if encCfg.SVTAV1Preset >= 0 && encCfg.SVTAV1Preset <= 13 {
+		opts = append(opts, drapto.WithSVTAV1Preset(uint8(encCfg.SVTAV1Preset)))
+		logger.Info("SVT-AV1 preset applied",
 			"decision_type", logs.DecisionEncodingConfig,
-			"decision_result", fmt.Sprintf("preset %d", h.cfg.Encoding.SVTAV1Preset),
+			"decision_result", fmt.Sprintf("preset %d", encCfg.SVTAV1Preset),
 			"decision_reason", "config svt_av1_preset",
+		)
+	}
+	if encCfg.CRFSD > 0 {
+		opts = append(opts, drapto.WithCRFSD(uint8(encCfg.CRFSD)))
+		logger.Info("CRF SD applied",
+			"decision_type", logs.DecisionEncodingConfig,
+			"decision_result", fmt.Sprintf("crf_sd %d", encCfg.CRFSD),
+			"decision_reason", "config crf_sd",
+		)
+	}
+	if encCfg.CRFHD > 0 {
+		opts = append(opts, drapto.WithCRFHD(uint8(encCfg.CRFHD)))
+		logger.Info("CRF HD applied",
+			"decision_type", logs.DecisionEncodingConfig,
+			"decision_result", fmt.Sprintf("crf_hd %d", encCfg.CRFHD),
+			"decision_reason", "config crf_hd",
+		)
+	}
+	if encCfg.CRFUHD > 0 {
+		opts = append(opts, drapto.WithCRFUHD(uint8(encCfg.CRFUHD)))
+		logger.Info("CRF UHD applied",
+			"decision_type", logs.DecisionEncodingConfig,
+			"decision_result", fmt.Sprintf("crf_uhd %d", encCfg.CRFUHD),
+			"decision_reason", "config crf_uhd",
 		)
 	}
 	encoder, err := drapto.New(opts...)

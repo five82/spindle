@@ -450,11 +450,19 @@ The job runner iterates encode jobs with per-episode failure isolation:
 ### 4.3 Drapto/SVT-AV1 Integration
 
 - Drapto is a Go library (not a separate binary).
-- Configured with `svt_av1_preset` (0-13, lower = slower + better quality).
+- Configured with `svt_av1_preset` (0-13, lower = slower + better quality)
+  and per-resolution CRF values (`crf_sd`, `crf_hd`, `crf_uhd`).
 - Drapto handles: crop detection, HDR passthrough, audio stream mapping,
   subtitle stream passthrough, chapter preservation.
 - Drapto outputs a validation report (codec check, duration check, HDR check,
   audio check, A/V sync check).
+
+**Dynamic config reload**: Encoding parameters (`svt_av1_preset`, `crf_sd`,
+`crf_hd`, `crf_uhd`) are re-read from disk at the start of each `Run()`
+call (once per queue item). This allows tuning quality settings between
+encodes without restarting the daemon. All episodes within a single disc
+use the same parameters for consistency. On reload failure, the existing
+config is used with a warning log.
 
 ### 4.4 Progress Streaming with Encoding Snapshot
 

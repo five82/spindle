@@ -533,9 +533,17 @@ Path auto-derived: `$XDG_CACHE_HOME/spindle/discid_cache.json` (see `[paths]`).
 
 #### `[encoding]`
 
-| Field           | Type | Default | Purpose                       |
-|-----------------|------|---------|-------------------------------|
-| `svt_av1_preset`| int  | 6       | SVT-AV1 preset (0-13)        |
+| Field           | Type | Default      | Purpose                                       |
+|-----------------|------|--------------|-----------------------------------------------|
+| `svt_av1_preset`| int  | 6            | SVT-AV1 preset (0-13)                         |
+| `crf_sd`        | int  | (drapto: 24) | CRF for SD (<1920 width); 0 = drapto default  |
+| `crf_hd`        | int  | (drapto: 26) | CRF for HD (>=1920, <3840); 0 = drapto default|
+| `crf_uhd`       | int  | (drapto: 26) | CRF for UHD (>=3840); 0 = drapto default      |
+
+Encoding parameters are re-read from disk before each encode, so changes
+take effect without restarting the daemon. If the reload fails (file
+deleted, parse error, invalid values), the existing config is used with a
+warning log.
 
 #### `[llm]`
 

@@ -19,10 +19,12 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	logger = logs.Default(logger)
 	cfg := &Config{}
 
-	data, source, err := findAndRead(explicitPath)
+	data, source, resolvedPath, err := findAndRead(explicitPath)
 	if err != nil {
 		return nil, err
 	}
+
+	cfg.SourcePath = resolvedPath
 
 	if data != nil {
 		if err := toml.Unmarshal(data, cfg); err != nil {
@@ -57,17 +59,22 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 
 // findAndRead locates and reads the config file. Returns nil data if no file found.
 // The source string describes where config came from: "explicit_path", "search_path", or "defaults_only".
-func findAndRead(explicitPath string) ([]byte, string, error) {
+// The resolvedPath is the absolute filesystem path of the config file (empty for defaults_only).
+func findAndRead(explicitPath string) ([]byte, string, string, error) {
 	if explicitPath != "" {
 		expanded, err := expandHome(explicitPath)
 		if err != nil {
-			return nil, "", fmt.Errorf("config: expand path %q: %w", explicitPath, err)
+			return nil, "", "", fmt.Errorf("config: expand path %q: %w", explicitPath, err)
 		}
-		data, err := os.ReadFile(expanded)
+		abs, err := filepath.Abs(expanded)
 		if err != nil {
-			return nil, "", fmt.Errorf("config: read %q: %w", expanded, err)
+			return nil, "", "", fmt.Errorf("config: resolve absolute path %q: %w", expanded, err)
 		}
-		return data, "explicit_path", nil
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("config: read %q: %w", abs, err)
+		}
+		return data, "explicit_path", abs, nil
 	}
 
 	// Search order: ~/.config/spindle/config.toml, then ./spindle.toml
@@ -82,12 +89,16 @@ func findAndRead(explicitPath string) ([]byte, string, error) {
 	for _, path := range candidates {
 		data, err := os.ReadFile(path)
 		if err == nil {
-			return data, "search_path", nil
+			abs, absErr := filepath.Abs(path)
+			if absErr != nil {
+				abs = path
+			}
+			return data, "search_path", abs, nil
 		}
 	}
 
 	// No config file found; use defaults.
-	return nil, "defaults_only", nil
+	return nil, "defaults_only", "", nil
 }
 
 // applyDefaults sets default values for fields that are empty/zero.
@@ -357,4 +368,50 @@ func normalizePaths(cfg *Config) error {
 	}
 
 	return nil
+}
+
+// ReloadEncoding re-reads the config file at cfg.SourcePath and returns
+// a fresh EncodingConfig. Only the [encoding] section is parsed, avoiding
+// validation of unrelated fields. If SourcePath is empty (defaults-only)
+// or the reload fails, it returns the existing encoding config and any error.
+func ReloadEncoding(cfg *Config, _ *slog.Logger) (EncodingConfig, error) {
+	if cfg.SourcePath == "" {
+		return cfg.Encoding, nil
+	}
+
+	data, err := os.ReadFile(cfg.SourcePath)
+	if err != nil {
+		return cfg.Encoding, fmt.Errorf("reload encoding config: read %q: %w", cfg.SourcePath, err)
+	}
+
+	var partial struct {
+		Encoding EncodingConfig `toml:"encoding"`
+	}
+	if err := toml.Unmarshal(data, &partial); err != nil {
+		return cfg.Encoding, fmt.Errorf("reload encoding config: parse: %w", err)
+	}
+
+	// Apply same default as applyDefaults for preset.
+	if partial.Encoding.SVTAV1Preset == 0 {
+		partial.Encoding.SVTAV1Preset = 6
+	}
+
+	// Validate encoding fields.
+	if partial.Encoding.SVTAV1Preset < 0 || partial.Encoding.SVTAV1Preset > 13 {
+		return cfg.Encoding, fmt.Errorf("reload encoding config: svt_av1_preset must be 0-13 (got %d)", partial.Encoding.SVTAV1Preset)
+	}
+	for _, pair := range []struct {
+		name string
+		val  int
+	}{
+		{"crf_sd", partial.Encoding.CRFSD},
+		{"crf_hd", partial.Encoding.CRFHD},
+		{"crf_uhd", partial.Encoding.CRFUHD},
+	} {
+		if pair.val < 0 || pair.val > 63 {
+			return cfg.Encoding, fmt.Errorf("reload encoding config: %s must be 0-63 (got %d)", pair.name, pair.val)
+		}
+	}
+
+	return partial.Encoding, nil
 }

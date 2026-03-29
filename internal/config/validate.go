@@ -27,6 +27,18 @@ func (c *Config) Validate() error {
 	if c.Encoding.SVTAV1Preset < 0 || c.Encoding.SVTAV1Preset > 13 {
 		errs = append(errs, fmt.Sprintf("encoding.svt_av1_preset must be 0-13 (got %d)", c.Encoding.SVTAV1Preset))
 	}
+	for _, pair := range []struct {
+		name string
+		val  int
+	}{
+		{"encoding.crf_sd", c.Encoding.CRFSD},
+		{"encoding.crf_hd", c.Encoding.CRFHD},
+		{"encoding.crf_uhd", c.Encoding.CRFUHD},
+	} {
+		if pair.val < 0 || pair.val > 63 {
+			errs = append(errs, fmt.Sprintf("%s must be 0-63 (got %d)", pair.name, pair.val))
+		}
+	}
 	if c.MakeMKV.RipTimeout <= 0 {
 		errs = append(errs, fmt.Sprintf("makemkv.rip_timeout must be > 0 (got %d)", c.MakeMKV.RipTimeout))
 	}

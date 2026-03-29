@@ -141,6 +141,16 @@ api_key = ""
 # SVT-AV1 preset (0-13; lower is slower/better quality)
 # svt_av1_preset = 6
 
+# CRF quality per resolution (0-63; lower is higher quality)
+# Drapto defaults: SD=24, HD=26, UHD=26
+# SD: <1920 width | HD: >=1920, <3840 | UHD: >=3840
+# crf_sd = 24
+# crf_hd = 26
+# crf_uhd = 26
+
+# Encoding parameters are re-read from disk before each encode,
+# so changes take effect without restarting the daemon.
+
 [llm]
 # OpenRouter API key (or set OPENROUTER_API_KEY env var)
 # api_key = ""

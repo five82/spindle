@@ -7,6 +7,11 @@ import (
 
 // Config holds all Spindle configuration sections.
 type Config struct {
+	// SourcePath is the resolved filesystem path of the config file that was loaded.
+	// Empty when using defaults only (no config file found).
+	// Used by ReloadEncoding to re-read encoding parameters from disk.
+	SourcePath string `toml:"-"`
+
 	Paths         PathsConfig         `toml:"paths"`
 	API           APIConfig           `toml:"api"`
 	TMDB          TMDBConfig          `toml:"tmdb"`
@@ -105,6 +110,9 @@ type MakeMKVConfig struct {
 // EncodingConfig defines SVT-AV1 encoding settings.
 type EncodingConfig struct {
 	SVTAV1Preset int `toml:"svt_av1_preset"`
+	CRFSD        int `toml:"crf_sd"`
+	CRFHD        int `toml:"crf_hd"`
+	CRFUHD       int `toml:"crf_uhd"`
 }
 
 // LLMConfig defines LLM API settings for OpenRouter.

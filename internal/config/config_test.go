@@ -446,6 +446,229 @@ func TestMakeMKVMinTitleLengthValidation(t *testing.T) {
 	}
 }
 
+func TestValidateCRFRange(t *testing.T) {
+	tests := []struct {
+		name  string
+		sd    int
+		hd    int
+		uhd   int
+		valid bool
+	}{
+		{"all zero (unset)", 0, 0, 0, true},
+		{"valid values", 24, 26, 26, true},
+		{"boundary 63", 63, 63, 63, true},
+		{"sd too high", 64, 26, 26, false},
+		{"hd negative", 24, -1, 26, false},
+		{"uhd too high", 24, 26, 64, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			applyDefaults(cfg)
+			cfg.TMDB.APIKey = "test-key"
+			cfg.Paths.StagingDir = "/tmp/staging"
+			cfg.Paths.StateDir = "/tmp/state"
+			cfg.Paths.ReviewDir = "/tmp/review"
+			cfg.Encoding.CRFSD = tt.sd
+			cfg.Encoding.CRFHD = tt.hd
+			cfg.Encoding.CRFUHD = tt.uhd
+
+			err := cfg.Validate()
+			if tt.valid && err != nil {
+				t.Errorf("should be valid, got error: %v", err)
+			}
+			if !tt.valid && err == nil {
+				t.Error("should be invalid, got no error")
+			}
+		})
+	}
+}
+
+func TestLoadFromExplicitPathWithCRF(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "test.toml")
+	content := `
+[tmdb]
+api_key = "from-file"
+
+[encoding]
+svt_av1_preset = 5
+crf_sd = 22
+crf_hd = 28
+crf_uhd = 30
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath, nil)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Encoding.CRFSD != 22 {
+		t.Errorf("expected crf_sd 22, got %d", cfg.Encoding.CRFSD)
+	}
+	if cfg.Encoding.CRFHD != 28 {
+		t.Errorf("expected crf_hd 28, got %d", cfg.Encoding.CRFHD)
+	}
+	if cfg.Encoding.CRFUHD != 30 {
+		t.Errorf("expected crf_uhd 30, got %d", cfg.Encoding.CRFUHD)
+	}
+}
+
+func TestSourcePathPopulated(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "test.toml")
+	content := `
+[tmdb]
+api_key = "test-key"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath, nil)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.SourcePath == "" {
+		t.Error("SourcePath should be set when loading from explicit path")
+	}
+	if !filepath.IsAbs(cfg.SourcePath) {
+		t.Errorf("SourcePath should be absolute, got %q", cfg.SourcePath)
+	}
+}
+
+func TestSourcePathEmptyForDefaults(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	t.Setenv("HOME", dir)
+	t.Setenv("TMDB_API_KEY", "test-key")
+
+	cfg, err := Load("", nil)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.SourcePath != "" {
+		t.Errorf("SourcePath should be empty for defaults-only, got %q", cfg.SourcePath)
+	}
+}
+
+func TestReloadEncodingHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "test.toml")
+	content := `
+[tmdb]
+api_key = "test-key"
+
+[encoding]
+svt_av1_preset = 8
+crf_hd = 30
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath, nil)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Modify config file on disk.
+	updated := `
+[tmdb]
+api_key = "test-key"
+
+[encoding]
+svt_av1_preset = 5
+crf_hd = 28
+crf_uhd = 32
+`
+	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	enc, err := ReloadEncoding(cfg, nil)
+	if err != nil {
+		t.Fatalf("ReloadEncoding failed: %v", err)
+	}
+
+	if enc.SVTAV1Preset != 5 {
+		t.Errorf("expected reloaded preset 5, got %d", enc.SVTAV1Preset)
+	}
+	if enc.CRFHD != 28 {
+		t.Errorf("expected reloaded crf_hd 28, got %d", enc.CRFHD)
+	}
+	if enc.CRFUHD != 32 {
+		t.Errorf("expected reloaded crf_uhd 32, got %d", enc.CRFUHD)
+	}
+	if enc.CRFSD != 0 {
+		t.Errorf("expected crf_sd 0 (unset), got %d", enc.CRFSD)
+	}
+}
+
+func TestReloadEncodingNoSourcePath(t *testing.T) {
+	cfg := &Config{}
+	cfg.Encoding.SVTAV1Preset = 7
+
+	enc, err := ReloadEncoding(cfg, nil)
+	if err != nil {
+		t.Fatalf("ReloadEncoding should succeed with empty SourcePath, got: %v", err)
+	}
+	if enc.SVTAV1Preset != 7 {
+		t.Errorf("should return existing config, got preset %d", enc.SVTAV1Preset)
+	}
+}
+
+func TestReloadEncodingFileNotFound(t *testing.T) {
+	cfg := &Config{
+		SourcePath: "/nonexistent/config.toml",
+	}
+	cfg.Encoding.SVTAV1Preset = 7
+
+	enc, err := ReloadEncoding(cfg, nil)
+	if err == nil {
+		t.Fatal("ReloadEncoding should return error for missing file")
+	}
+	if enc.SVTAV1Preset != 7 {
+		t.Errorf("should return existing config on error, got preset %d", enc.SVTAV1Preset)
+	}
+}
+
+func TestReloadEncodingInvalidCRF(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "test.toml")
+	content := `
+[encoding]
+crf_hd = 99
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{SourcePath: configPath}
+	cfg.Encoding.CRFHD = 26
+
+	enc, err := ReloadEncoding(cfg, nil)
+	if err == nil {
+		t.Fatal("ReloadEncoding should return error for invalid CRF")
+	}
+	if !strings.Contains(err.Error(), "crf_hd") {
+		t.Errorf("error should mention crf_hd, got: %s", err.Error())
+	}
+	if enc.CRFHD != 26 {
+		t.Errorf("should return existing config on error, got crf_hd %d", enc.CRFHD)
+	}
+}
+
 func TestExpandHome(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
