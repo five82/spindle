@@ -122,7 +122,7 @@ func (m *Metadata) GetFilename() string {
 	return buildEpisodeFilename(m)
 }
 
-// GetBaseFilename returns the filename without edition suffix.
+// GetBaseFilename returns the base filename: "Title (Year)".
 func (m *Metadata) GetBaseFilename() string {
 	title := m.Title
 	if m.DisplayTitle != "" {

@@ -121,7 +121,7 @@ func newCacheRipCmd() *cobra.Command {
 
 			// Run identification stage.
 			fmt.Printf("Identifying disc on %s...\n", device)
-			identifyHandler := identify.New(cfg, qStore, tmdbClient, nil, nil, discIDStore, keydbCat)
+			identifyHandler := identify.New(cfg, qStore, tmdbClient, nil, discIDStore, keydbCat)
 			if err := stageexec.Run(ctx, item, stageexec.Options{
 				Store:   qStore,
 				Handler: identifyHandler,

@@ -15,7 +15,7 @@ import (
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/keydb"
-	"github.com/five82/spindle/internal/llm"
+
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
@@ -57,7 +57,6 @@ type Handler struct {
 	cfg         *config.Config
 	store       *queue.Store
 	tmdbClient  *tmdb.Client
-	llmClient   *llm.Client
 	notifier    *notify.Notifier
 	discIDCache *discidcache.Store
 	keydbCat    *keydb.Catalog
@@ -68,7 +67,6 @@ func New(
 	cfg *config.Config,
 	store *queue.Store,
 	tmdbClient *tmdb.Client,
-	llmClient *llm.Client,
 	notifier *notify.Notifier,
 	discIDCache *discidcache.Store,
 	keydbCat *keydb.Catalog,
@@ -77,7 +75,6 @@ func New(
 		cfg:         cfg,
 		store:       store,
 		tmdbClient:  tmdbClient,
-		llmClient:   llmClient,
 		notifier:    notifier,
 		discIDCache: discIDCache,
 		keydbCat:    keydbCat,

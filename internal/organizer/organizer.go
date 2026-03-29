@@ -200,11 +200,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 
 // destFilename builds the destination filename for a given asset key.
-// Movies: "{GetFilename()}{ext}". TV: per-episode filename built from
-// metadata with sanitized display name.
 func destFilename(meta *queue.Metadata, key, ext string) string {
 	if meta.IsMovie() {
-		return textutil.SanitizeDisplayName(meta.GetFilename()) + ext
+		return meta.GetFilename() + ext
 	}
 
 	// For TV, build a per-episode filename from the key.

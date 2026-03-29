@@ -40,7 +40,7 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 		Item: buildItemSummary(item),
 	}
 
-	// Parse envelope for media type, disc source, edition.
+	// Parse envelope for media type and disc source.
 	var env ripspec.Envelope
 	if item.RipSpecData != "" {
 		if err := json.Unmarshal([]byte(item.RipSpecData), &env); err != nil {
