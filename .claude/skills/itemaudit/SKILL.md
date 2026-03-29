@@ -85,6 +85,7 @@ The extraction script should:
 3. **List all warnings and errors** with full context (these are always few enough to show individually)
 4. **Show stage timing** with computed durations
 5. **Summarize episode manifest** with confidence scores and episode numbers
+6. **Title selection** (movies): List `envelope.titles` with id, duration, and chapters to identify feature-length candidates and which was ripped
 
 Steps 2/5/6/8 from the old extraction strategy are now pre-computed in `analysis` -- the script reads and formats them rather than computing them from raw data. This approach replaces 10+ sequential extraction calls with 1-2, keeping the analysis equally thorough while significantly reducing gathering overhead.
 
@@ -154,7 +155,14 @@ Analyze the `rip_cache` section from audit-gather output:
 2. **Check metadata**:
    - `disc_title` matches expected content
    - `needs_review` flag status and reason
-3. **Per-episode asset validation** (TV only, from `envelope.assets.ripped`):
+3. **Title selection analysis** (movies only, from `envelope.titles`):
+   - Identify feature-length titles: titles with `chapters > 1` AND `duration > 3600` seconds
+   - When multiple feature-length titles exist, the pipeline selects the longest — this is expected behavior and typically corresponds to the director's cut or extended edition
+   - Report which cut was selected: note the selected title's duration and the durations of other feature-length candidates. Example: "Selected title 2 (6801s / 113.4 min, director's cut) over title 1 (6595s / 109.9 min, theatrical cut)"
+   - The ripped asset filename (from `envelope.assets.ripped[].path`) often contains a title index (e.g., `_t02`) that maps to the `envelope.titles[].id`
+   - Include this in the Rip Cache section of the report, not as an issue — it is informational context about what was ripped
+   - If only one feature-length title exists, note it briefly ("single feature-length title on disc")
+4. **Per-episode asset validation** (TV only, from `envelope.assets.ripped`):
    - Verify each episode in `envelope.episodes` has a corresponding `ripped` asset with matching `episode_key`
    - Pre-episodeid, keys are placeholders (`s01_001`, `s01_002`) with `episode=0` — this is expected
    - Check for any ripped assets with `status: "failed"` or missing `path`
@@ -433,6 +441,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 #### Rip Cache (if phase_rip_cache)
 - Cache path: <rip_cache.path>
 - Found: <rip_cache.found>
+- Title selection (movie): <feature-length title count, which was selected, durations of candidates>
 - Anomalies: <any detected>
 
 #### Episode Identification (if phase_episode_id)
