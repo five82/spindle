@@ -104,10 +104,23 @@ Note: Dependency checks (`deps.CheckBinaries()`) and status tracking run in
 
 The disc monitor wraps fingerprinting and queue submission with concurrency guards.
 
+**Two detection modes:**
+
+- `DetectAsync()` (HTTP API path): Guard checks and lsblk probe run
+  synchronously (~2 seconds). Mount resolution, fingerprinting, and queue
+  insertion run in a background goroutine with a 2-minute timeout detached
+  from the HTTP request context. Returns immediately with probe result.
+- `DetectAndEnqueue()` (netlink path): Fully synchronous detection and
+  enqueue pipeline. Used by the netlink handler which already runs in its
+  own goroutine.
+
+**Concurrency guards (shared by both modes):**
+
 - `processing` bool (mutex-protected) prevents concurrent disc detection.
-- Fingerprint timeout: **2 minutes** (`fingerprint.ComputeTimeout` with
-  `2*time.Minute`).
-- On fingerprint failure: notifies via `errorNotifier.FingerprintFailed()` callback.
+  Set during probe, cleared only after the full pipeline (including background
+  enqueue) completes.
+- Fingerprint timeout: **2 minutes** (background goroutine uses
+  `context.Background()` with `context.WithTimeout`).
 - Before detection, checks `HasDiscDependentItem()` to avoid concurrent disc access.
 
 ### 2.4 Disc Fingerprinting

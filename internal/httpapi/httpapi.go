@@ -406,17 +406,13 @@ func (s *Server) handleDiscDetect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "no optical drive configured")
 		return
 	}
-	result, err := s.discMonitor.DetectAndEnqueue(r.Context())
+	resp, err := s.discMonitor.DetectAsync(r.Context())
 	if err != nil {
 		s.logger.Error("disc detect failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "disc detect failed: "+err.Error())
 		return
 	}
-	if result == nil {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "skipped"})
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

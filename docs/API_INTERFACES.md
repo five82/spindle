@@ -640,11 +640,18 @@ Resume detection of new disc insertions.
 
 #### POST /api/disc/detect
 
-Trigger disc detection using the configured device.
+Trigger disc detection using the configured device. Guard checks and disc probe
+run synchronously; fingerprinting and queue insertion continue asynchronously in
+the daemon. Use `spindle queue list` to see the resulting queue item.
 
 **Response** (200):
 ```json
-{"handled": true, "message": "Disc detected", "item_id": 42}
+{"handled": true, "message": "Disc detected: MOVIE_TITLE (Blu-ray)"}
+```
+
+When detection is skipped (paused, busy, no disc):
+```json
+{"handled": false, "message": "disc detection paused"}
 ```
 
 ### 2.6 Queue Access Fallback

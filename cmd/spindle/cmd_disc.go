@@ -82,7 +82,7 @@ func daemonDiscPost(path string) (string, error) {
 		return "", fmt.Errorf("daemon is not running")
 	}
 
-	client := sockhttp.NewUnixClient(sp, 3*time.Minute)
+	client := sockhttp.NewUnixClient(sp, 10*time.Second)
 
 	req, err := http.NewRequest(http.MethodPost, "http://localhost"+path, nil)
 	if err != nil {
