@@ -62,21 +62,20 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 			maxDuration = t.Duration
 		}
 	}
-	window := make([]ripspec.Title, 0, len(candidates))
+	featureLength := make([]ripspec.Title, 0, len(candidates))
 	for _, t := range candidates {
 		if t.Duration >= maxDuration-durationToleranceSeconds {
-			window = append(window, t)
+			featureLength = append(featureLength, t)
 		}
 	}
-	featureLength := window
-	tmp := make([]ripspec.Title, 0, len(window))
-	for _, t := range window {
+	featureOnly := make([]ripspec.Title, 0, len(featureLength))
+	for _, t := range featureLength {
 		if t.Duration >= minPrimaryRuntimeSeconds {
-			tmp = append(tmp, t)
+			featureOnly = append(featureOnly, t)
 		}
 	}
-	if len(tmp) > 0 {
-		featureLength = tmp
+	if len(featureOnly) > 0 {
+		featureLength = featureOnly
 	}
 
 	// Prefer titles with chapter metadata.
@@ -104,15 +103,15 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 
 	// Prefer the most common fingerprint if duplicates exist.
 	fingerprintFreq := make(map[string]int)
-	for _, t := range titles {
+	for _, t := range featureLength {
 		fp := strings.TrimSpace(t.TitleHash)
 		if fp != "" {
 			fingerprintFreq[fp]++
 		}
 	}
 	bestFreq := 0
-	for _, t := range featureLength {
-		if freq := fingerprintFreq[strings.TrimSpace(t.TitleHash)]; freq > bestFreq {
+	for _, freq := range fingerprintFreq {
+		if freq > bestFreq {
 			bestFreq = freq
 		}
 	}
@@ -207,10 +206,11 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 
 	// Check runtime variance - if playlists differ by more than the threshold,
 	// they are likely different cuts (theatrical vs director's), not language variants.
-	var minDuration, maxDuration int
-	for i, c := range candidates {
+	minDuration := candidates[0].title.Duration
+	maxDuration := minDuration
+	for _, c := range candidates[1:] {
 		dur := c.title.Duration
-		if i == 0 || dur < minDuration {
+		if dur < minDuration {
 			minDuration = dur
 		}
 		if dur > maxDuration {
@@ -240,9 +240,15 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 }
 
 func bestByInt(list []ripspec.Title, score func(ripspec.Title) int) []ripspec.Title {
+	if len(list) == 0 {
+		return nil
+	}
+	scores := make([]int, len(list))
 	best := 0
-	for _, t := range list {
-		if v := score(t); v > best {
+	for i, t := range list {
+		v := score(t)
+		scores[i] = v
+		if v > best {
 			best = v
 		}
 	}
@@ -250,8 +256,8 @@ func bestByInt(list []ripspec.Title, score func(ripspec.Title) int) []ripspec.Ti
 		return nil
 	}
 	out := make([]ripspec.Title, 0, len(list))
-	for _, t := range list {
-		if score(t) == best {
+	for i, t := range list {
+		if scores[i] == best {
 			out = append(out, t)
 		}
 	}
