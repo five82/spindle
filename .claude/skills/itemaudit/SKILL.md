@@ -157,8 +157,13 @@ Analyze the `rip_cache` section from audit-gather output:
    - `needs_review` flag status and reason
 3. **Title selection analysis** (movies only, from `envelope.titles`):
    - Identify feature-length titles: titles with `chapters > 1` AND `duration > 3600` seconds
-   - When multiple feature-length titles exist, the pipeline selects the longest — this is expected behavior and typically corresponds to the director's cut or extended edition
-   - Report which cut was selected: note the selected title's duration and the durations of other feature-length candidates. Example: "Selected title 2 (6801s / 113.4 min, director's cut) over title 1 (6595s / 109.9 min, theatrical cut)"
+   - The pipeline uses multi-stage selection (`ChoosePrimaryTitle`), not simply the longest title:
+     - **Disney multi-language detection**: when 2+ feature-length 800-series playlists (00800-00899) exist with runtimes within 30 seconds, the pipeline prefers the lowest playlist number (00800.mpls = English). The selected title may be *shorter* than alternatives — this is correct behavior for Disney/Pixar/Marvel/Star Wars multi-language discs where language variants differ only in localized title cards and credits.
+     - **Different cuts**: when 800-series playlists differ by >30 seconds, treated as different cuts (theatrical vs director's) and longest is preferred.
+     - Additional tiebreakers: chapter count, MPLS over M2TS, segment count, TitleHash fingerprint frequency.
+   - Check `decision_reason` in logs: `"primary_title_selector"` indicates the multi-stage algorithm was used.
+   - Report which title was selected with playlist and duration context. Example: "Selected title 0 (00800.mpls, 6151s / 102.5 min, English) over title 1 (00801.mpls, 6181s / 103.0 min) and title 3 (00802.mpls, 6181s / 103.0 min) via Disney multi-language heuristic"
+   - **Flag for review**: if a non-800 playlist was selected when 800-series alternatives exist with similar runtimes (possible mis-selection)
    - The ripped asset filename (from `envelope.assets.ripped[].path`) often contains a title index (e.g., `_t02`) that maps to the `envelope.titles[].id`
    - Include this in the Rip Cache section of the report, not as an issue — it is informational context about what was ripped
    - If only one feature-length title exists, note it briefly ("single feature-length title on disc")

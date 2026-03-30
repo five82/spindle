@@ -288,41 +288,30 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 
 	switch env.Metadata.MediaType {
 	case "movie":
-		// Select the single longest title above MinTitleLength.
-		var best *ripspec.Title
-		for i := range env.Titles {
-			t := &env.Titles[i]
-			if t.Duration < h.cfg.MakeMKV.MinTitleLength {
-				logger.Info("rip candidate below minimum duration",
-					"decision_type", logs.DecisionTrackSelect,
-					"decision_result", "skipped",
-					"title_id", t.ID,
-					"duration_s", t.Duration,
-					"min_title_length_s", h.cfg.MakeMKV.MinTitleLength,
-				)
-				continue
-			}
-			logger.Debug("rip candidate evaluated",
-				"decision_type", logs.DecisionTrackSelect,
-				"decision_result", "candidate",
-				"title_id", t.ID,
-				"duration_s", t.Duration,
-			)
-			if best == nil || t.Duration > best.Duration {
-				best = t
-			}
-		}
-		if best != nil {
-			logger.Info("primary title selected for movie",
+		selection, ok, candidates, rejects := PrimaryTitleDecisionSummary(env.Titles)
+		if ok {
+			attrs := []any{
 				"decision_type", logs.DecisionTitleSelection,
-				"decision_result", fmt.Sprintf("title %d (%ds)", best.ID, best.Duration),
-				"decision_reason", "longest title above minimum duration",
-			)
-			return []ripspec.Title{*best}, nil
+				"decision_result", fmt.Sprintf("title %d (%ds)", selection.ID, selection.Duration),
+				"decision_reason", "primary_title_selector",
+				"title_id", selection.ID,
+				"duration_seconds", selection.Duration,
+				"playlist", strings.TrimSpace(selection.Playlist),
+				"candidate_count", len(candidates),
+				"rejected_count", len(rejects),
+			}
+			for i, c := range candidates {
+				attrs = append(attrs, fmt.Sprintf("candidate_%d", i+1), c)
+			}
+			for i, r := range rejects {
+				attrs = append(attrs, fmt.Sprintf("rejected_%d", i+1), r)
+			}
+			logger.Info("primary title decision", attrs...)
+			return []ripspec.Title{selection}, nil
 		}
 		logger.Warn("no titles above minimum duration for movie",
 			"event_type", "title_selection_empty",
-			"error_hint", fmt.Sprintf("min_title_length=%d", h.cfg.MakeMKV.MinTitleLength),
+			"error_hint", "no valid candidates after filtering",
 			"impact", "no titles will be ripped",
 		)
 		return nil, nil

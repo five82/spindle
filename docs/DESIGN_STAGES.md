@@ -245,8 +245,19 @@ from the rip cache's stored envelope during the ripping stage (see 2.4).
   the specified MakeMKV title ID. Validated against envelope titles before
   ripping; returns an error listing available IDs if not found. Set by the
   `--title` interactive prompt on `spindle cache rip`.
-- For movies: select primary title (longest duration, filtering out titles shorter
-  than `min_title_length`).
+- For movies: select primary title via multi-stage filtering:
+  1. Validate candidates (positive ID and duration).
+  2. Disney multi-language detection: when 2+ feature-length 800-series playlists
+     (00800-00899) exist with runtimes within 30 seconds, prefer the lowest playlist
+     number (00800.mpls = English). Runtimes differing by >30s indicate different
+     cuts (theatrical vs director's), so normal selection applies instead.
+  3. Duration window: keep titles within 2 seconds of the longest candidate.
+  4. Feature-length filter: prefer titles >= 20 minutes.
+  5. Chapter preference: prefer titles with the most chapters.
+  6. MPLS preference: prefer `.mpls` playlists over raw `.m2ts` entries.
+  7. Segment count preference: prefer playlists with the most segments.
+  8. Fingerprint frequency: when TitleHash duplicates exist, prefer the most common.
+  9. Final tiebreaker: longest duration, then lowest title ID.
 - For TV: rip each episode's mapped title ID.
 
 ### 2.2 MakeMKV Execution
