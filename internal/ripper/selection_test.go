@@ -100,3 +100,36 @@ func TestChoosePrimaryTitleRuntimeThreshold(t *testing.T) {
 		t.Fatalf("expected ID 1 (longer) at 31s, got ID %d", selection.ID)
 	}
 }
+
+func TestChoosePrimaryTitleDisneyUHDMultiLanguage(t *testing.T) {
+	// UHD discs report a numeric index in Playlist and the MPLS name in SegmentMap.
+	// Toy Story 3 UHD: 00800.mpls = English, 00801.mpls = Spanish, 00802.mpls = French.
+	titles := []ripspec.Title{
+		{ID: 0, Duration: 6151, Chapters: 20, Playlist: "46", SegmentMap: "00800.mpls", SegmentCount: 20},
+		{ID: 1, Duration: 6181, Chapters: 20, Playlist: "47", SegmentMap: "00802.mpls", SegmentCount: 20},
+		{ID: 3, Duration: 6181, Chapters: 20, Playlist: "47", SegmentMap: "00801.mpls", SegmentCount: 20},
+	}
+	selection, ok := ChoosePrimaryTitle(titles)
+	if !ok {
+		t.Fatalf("ChoosePrimaryTitle returned false")
+	}
+	if selection.ID != 0 {
+		t.Fatalf("expected ID 0 (00800.mpls English via SegmentMap), got ID %d", selection.ID)
+	}
+}
+
+func TestChoosePrimaryTitleIgnoresCommaSegmentMap(t *testing.T) {
+	// SegmentMap with multiple comma-separated entries should NOT trigger the 800-series heuristic.
+	titles := []ripspec.Title{
+		{ID: 0, Duration: 7200, Chapters: 20, Playlist: "10", SegmentMap: "00800.mpls,00801.mpls", SegmentCount: 20},
+		{ID: 1, Duration: 7200, Chapters: 20, Playlist: "11", SegmentMap: "00802.mpls,00803.mpls", SegmentCount: 20},
+	}
+	selection, ok := ChoosePrimaryTitle(titles)
+	if !ok {
+		t.Fatalf("ChoosePrimaryTitle returned false")
+	}
+	// Should fall through to normal selection (lowest ID as tiebreaker), not Disney heuristic.
+	if selection.ID != 0 {
+		t.Fatalf("expected ID 0 from normal selection, got ID %d", selection.ID)
+	}
+}

@@ -251,6 +251,9 @@ from the rip cache's stored envelope during the ripping stage (see 2.4).
      (00800-00899) exist with runtimes within 30 seconds, prefer the lowest playlist
      number (00800.mpls = English). Runtimes differing by >30s indicate different
      cuts (theatrical vs director's), so normal selection applies instead.
+     The 800-series pattern is checked in the `playlist` field first; if that field
+     contains a numeric index (common on UHD discs), `segment_map` is checked as a
+     fallback when it holds a single (non-comma-separated) MPLS filename.
   3. Duration window: keep titles within 2 seconds of the longest candidate.
   4. Feature-length filter: prefer titles >= 20 minutes.
   5. Chapter preference: prefer titles with the most chapters.

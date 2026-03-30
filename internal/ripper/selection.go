@@ -160,6 +160,23 @@ func PrimaryTitleDecisionSummary(titles []ripspec.Title) (ripspec.Title, bool, [
 	return selection, ok, candidates, rejects
 }
 
+// parse800SeriesNum extracts the 800-series number from an MPLS filename like "00800.mpls".
+// Returns the number (e.g. 800) and true if the string matches the 008XX.mpls pattern
+// with a value in [800, 900); otherwise returns 0, false.
+func parse800SeriesNum(s string) (int, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if !strings.HasPrefix(s, "008") || !strings.HasSuffix(s, ".mpls") {
+		return 0, false
+	}
+	numStr := strings.TrimPrefix(s, "00")
+	numStr = strings.TrimSuffix(numStr, ".mpls")
+	num, err := strconv.Atoi(numStr)
+	if err != nil || num < 800 || num >= 900 {
+		return 0, false
+	}
+	return num, true
+}
+
 // filterPreferredPlaylistFeatureLength returns feature-length titles with the preferred 800-series playlist.
 // Disney/Pixar discs use 00800.mpls for English, 00801 for Spanish, 00802 for French.
 // The English version is often slightly shorter due to language-specific credits.
@@ -179,12 +196,16 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 		if t.Duration < minRuntime {
 			continue
 		}
-		pl := strings.ToLower(strings.TrimSpace(t.Playlist))
-		// Match 008XX.mpls pattern (800-899 range).
-		if strings.HasPrefix(pl, "008") && strings.HasSuffix(pl, ".mpls") {
-			numStr := strings.TrimPrefix(pl, "00")
-			numStr = strings.TrimSuffix(numStr, ".mpls")
-			if num, err := strconv.Atoi(numStr); err == nil && num >= 800 && num < 900 {
+		// Try Playlist first (standard BD: "00800.mpls").
+		if num, ok := parse800SeriesNum(t.Playlist); ok {
+			candidates = append(candidates, scored{title: t, num: num})
+			continue
+		}
+		// Fallback for UHD: Playlist is a numeric index, MPLS name is in SegmentMap.
+		// Only use SegmentMap when it holds a single value (not comma-separated).
+		sm := strings.TrimSpace(t.SegmentMap)
+		if sm != "" && !strings.Contains(sm, ",") {
+			if num, ok := parse800SeriesNum(sm); ok {
 				candidates = append(candidates, scored{title: t, num: num})
 			}
 		}
