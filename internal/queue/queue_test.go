@@ -361,12 +361,12 @@ func TestStopItemsAndOverride(t *testing.T) {
 	}
 	found := false
 	for _, r := range reasons {
-		if r == "Stop requested by user" {
+		if r == ReviewReasonUserStopped {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("review_reason %q does not contain 'Stop requested by user'", got.ReviewReason)
+		t.Errorf("review_reason %q does not contain %q", got.ReviewReason, ReviewReasonUserStopped)
 	}
 
 	// Test stop-review override: try to update stage away from failed.

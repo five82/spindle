@@ -716,7 +716,7 @@ func (s *Store) StopItems(ids ...int64) (int, error) {
 
 			item.Stage = StageFailed
 			item.InProgress = 0
-			item.AppendReviewReason("Stop requested by user")
+			item.AppendReviewReason(ReviewReasonUserStopped)
 
 			_, err = s.db.Exec(`
 				UPDATE queue_items SET

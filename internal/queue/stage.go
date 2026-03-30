@@ -14,3 +14,7 @@ const (
 	StageCompleted            Stage = "completed"
 	StageFailed               Stage = "failed"
 )
+
+// ReviewReasonUserStopped is the review reason appended when a user manually
+// stops an item via "spindle queue stop".
+const ReviewReasonUserStopped = "Stop requested by user"

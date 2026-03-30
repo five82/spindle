@@ -88,23 +88,24 @@ func (m *Monitor) ResumeDisc() bool { return m.paused.CompareAndSwap(true, false
 // IsPaused returns whether the monitor is paused.
 func (m *Monitor) IsPaused() bool { return m.paused.Load() }
 
-// Detect wraps the full disc detection pipeline with concurrency guards.
-// Returns nil event (not an error) if paused, already processing, or a
-// disc-dependent item is in progress.
-func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
+// acquireForDetection runs the shared guard checks (paused, disc-busy,
+// already-processing) and sets the processing flag on success. Returns a
+// human-readable skip reason or "" if the caller may proceed. When "" is
+// returned the caller owns the processing flag and must clear it.
+func (m *Monitor) acquireForDetection() (skipReason string, _ error) {
 	if m.IsPaused() {
 		m.logger.Info("disc detection skipped (paused)",
 			"decision_type", logs.DecisionDetectGuard,
 			"decision_result", "skipped",
 			"decision_reason", "monitor paused",
 		)
-		return nil, nil
+		return "disc detection paused", nil
 	}
 
 	if m.store != nil {
 		busy, err := m.store.HasDiscDependentItem()
 		if err != nil {
-			return nil, fmt.Errorf("check disc dependent items: %w", err)
+			return "", fmt.Errorf("check disc dependent items: %w", err)
 		}
 		if busy {
 			m.logger.Info("disc detection skipped (disc-dependent item in progress)",
@@ -112,7 +113,7 @@ func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
 				"decision_result", "skipped",
 				"decision_reason", "disc-dependent pipeline stage active",
 			)
-			return nil, nil
+			return "disc in use by active workflow", nil
 		}
 	}
 
@@ -124,15 +125,32 @@ func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
 			"decision_result", "skipped",
 			"decision_reason", "detection already in progress",
 		)
-		return nil, nil
+		return "already processing a disc", nil
 	}
 	m.processing = true
 	m.mu.Unlock()
-	defer func() {
-		m.mu.Lock()
-		m.processing = false
-		m.mu.Unlock()
-	}()
+	return "", nil
+}
+
+// releaseProcessing clears the processing flag.
+func (m *Monitor) releaseProcessing() {
+	m.mu.Lock()
+	m.processing = false
+	m.mu.Unlock()
+}
+
+// Detect wraps the full disc detection pipeline with concurrency guards.
+// Returns nil event (not an error) if paused, already processing, or a
+// disc-dependent item is in progress.
+func (m *Monitor) Detect(ctx context.Context) (*DiscEvent, error) {
+	skip, err := m.acquireForDetection()
+	if err != nil {
+		return nil, err
+	}
+	if skip != "" {
+		return nil, nil
+	}
+	defer m.releaseProcessing()
 
 	// Create a fingerprint context with 2-minute timeout.
 	fpCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -159,58 +177,25 @@ type DetectResponse struct {
 // insertion. The processing mutex spans the entire pipeline (set here, cleared
 // when the background goroutine completes).
 func (m *Monitor) DetectAsync(ctx context.Context) (*DetectResponse, error) {
-	if m.IsPaused() {
-		m.logger.Info("disc detection skipped (paused)",
-			"decision_type", logs.DecisionDetectGuard,
-			"decision_result", "skipped",
-			"decision_reason", "monitor paused",
-		)
-		return &DetectResponse{Handled: false, Message: "disc detection paused"}, nil
+	skip, err := m.acquireForDetection()
+	if err != nil {
+		return nil, err
 	}
-
-	if m.store != nil {
-		busy, err := m.store.HasDiscDependentItem()
-		if err != nil {
-			return nil, fmt.Errorf("check disc dependent items: %w", err)
-		}
-		if busy {
-			m.logger.Info("disc detection skipped (disc-dependent item in progress)",
-				"decision_type", logs.DecisionDetectGuard,
-				"decision_result", "skipped",
-				"decision_reason", "disc-dependent pipeline stage active",
-			)
-			return &DetectResponse{Handled: false, Message: "disc in use by active workflow"}, nil
-		}
+	if skip != "" {
+		return &DetectResponse{Handled: false, Message: skip}, nil
 	}
-
-	m.mu.Lock()
-	if m.processing {
-		m.mu.Unlock()
-		m.logger.Info("disc detection skipped (already processing)",
-			"decision_type", logs.DecisionDetectGuard,
-			"decision_result", "skipped",
-			"decision_reason", "detection already in progress",
-		)
-		return &DetectResponse{Handled: false, Message: "already processing a disc"}, nil
-	}
-	m.processing = true
-	m.mu.Unlock()
-	// Do NOT defer processing = false here; the background goroutine owns the reset.
+	// Do NOT defer releaseProcessing here; the background goroutine owns the reset.
 
 	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	event, err := ProbeDisc(probeCtx, m.device)
 	if err != nil {
-		m.mu.Lock()
-		m.processing = false
-		m.mu.Unlock()
+		m.releaseProcessing()
 		return nil, err
 	}
 	if event == nil {
-		m.mu.Lock()
-		m.processing = false
-		m.mu.Unlock()
+		m.releaseProcessing()
 		return &DetectResponse{Handled: false, Message: "no disc detected in drive"}, nil
 	}
 
@@ -233,11 +218,7 @@ func (m *Monitor) DetectAsync(ctx context.Context) (*DetectResponse, error) {
 // fingerprinting, duplicate check, queue insertion) in a background goroutine.
 // All errors are logged; there is no caller to return them to.
 func (m *Monitor) enqueueBackground(event *DiscEvent) {
-	defer func() {
-		m.mu.Lock()
-		m.processing = false
-		m.mu.Unlock()
-	}()
+	defer m.releaseProcessing()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -289,7 +270,7 @@ func (m *Monitor) enqueueBackground(event *DiscEvent) {
 	}
 
 	if existing != nil {
-		m.handleExistingItemBackground(ctx, existing, event, fp)
+		m.logDuplicateDecision(ctx, existing, event, fp)
 		return
 	}
 
@@ -319,11 +300,12 @@ func (m *Monitor) enqueueBackground(event *DiscEvent) {
 	)
 }
 
-// handleExistingItemBackground logs the outcome for a duplicate fingerprint
-// detected during background enqueue.
-func (m *Monitor) handleExistingItemBackground(ctx context.Context, existing *queue.Item, event *DiscEvent, fp string) {
+// logDuplicateDecision handles the decision logic for a disc whose fingerprint
+// already exists in the queue. It logs the outcome and optionally refreshes the
+// disc title for terminal items. Used by both sync and async code paths.
+func (m *Monitor) logDuplicateDecision(ctx context.Context, existing *queue.Item, event *DiscEvent, fp string) {
 	// User-stopped items are not reset for reprocessing.
-	if existing.Stage == queue.StageFailed && strings.Contains(existing.ReviewReason, "Stop requested by user") {
+	if existing.Stage == queue.StageFailed && strings.Contains(existing.ReviewReason, queue.ReviewReasonUserStopped) {
 		m.logger.Info("disc detection skipped (user-stopped item)",
 			"decision_type", logs.DecisionDuplicateDetection,
 			"decision_result", "skipped",
@@ -461,43 +443,7 @@ func (m *Monitor) DetectAndEnqueue(ctx context.Context) (*EnqueueResult, error) 
 
 // handleExistingItem processes a disc whose fingerprint already exists in the queue.
 func (m *Monitor) handleExistingItem(ctx context.Context, existing *queue.Item, event *DiscEvent, fp string) (*EnqueueResult, error) {
-	// User-stopped items are not reset for reprocessing.
-	if existing.Stage == queue.StageFailed && strings.Contains(existing.ReviewReason, "Stop requested by user") {
-		m.logger.Info("disc detection skipped (user-stopped item)",
-			"decision_type", logs.DecisionDuplicateDetection,
-			"decision_result", "skipped",
-			"decision_reason", "item was intentionally stopped by user",
-			"item_id", existing.ID,
-			"fingerprint", fp,
-		)
-		return &EnqueueResult{Item: existing, Event: event, Duplicate: true}, nil
-	}
-
-	// Terminal items (completed/failed): allow re-insertion title refresh.
-	if existing.Stage == queue.StageCompleted || existing.Stage == queue.StageFailed {
-		if shouldRefreshDiscTitle(existing.DiscTitle) {
-			tryRefreshDiscTitle(ctx, m.store, existing, event.Device, m.logger)
-		}
-		m.logger.Info("disc already processed",
-			"decision_type", logs.DecisionDuplicateDetection,
-			"decision_result", "skipped",
-			"decision_reason", "disc already in terminal stage",
-			"item_id", existing.ID,
-			"stage", existing.Stage,
-			"fingerprint", fp,
-		)
-		return &EnqueueResult{Item: existing, Event: event, Duplicate: true}, nil
-	}
-
-	// In-workflow duplicate: return existing item.
-	m.logger.Info("duplicate disc detected",
-		"decision_type", logs.DecisionDuplicateDetection,
-		"decision_result", "skipped",
-		"decision_reason", "identical fingerprint already in workflow",
-		"item_id", existing.ID,
-		"stage", existing.Stage,
-		"fingerprint", fp,
-	)
+	m.logDuplicateDecision(ctx, existing, event, fp)
 	return &EnqueueResult{Item: existing, Event: event, Duplicate: true}, nil
 }
 
