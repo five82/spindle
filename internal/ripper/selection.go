@@ -21,6 +21,19 @@ const (
 	maxLanguageVariantRuntimeDiff = 30
 )
 
+// partitionValidTitles splits titles into valid candidates (ID >= 0, Duration > 0) and rejects.
+func partitionValidTitles(titles []ripspec.Title) (valid, rejected []ripspec.Title) {
+	valid = make([]ripspec.Title, 0, len(titles))
+	for _, t := range titles {
+		if t.ID < 0 || t.Duration <= 0 {
+			rejected = append(rejected, t)
+			continue
+		}
+		valid = append(valid, t)
+	}
+	return valid, rejected
+}
+
 // ChoosePrimaryTitle selects the best title for a movie rip using multi-stage filtering:
 //  1. Validate candidates (ID >= 0, Duration > 0)
 //  2. Disney 800-series multi-language playlist detection
@@ -32,17 +45,7 @@ const (
 //  8. TitleHash fingerprint frequency (most common hash)
 //  9. Sort by duration desc, ID asc
 func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
-	if len(titles) == 0 {
-		return ripspec.Title{}, false
-	}
-
-	candidates := make([]ripspec.Title, 0, len(titles))
-	for _, t := range titles {
-		if t.ID < 0 || t.Duration <= 0 {
-			continue
-		}
-		candidates = append(candidates, t)
-	}
+	candidates, _ := partitionValidTitles(titles)
 	if len(candidates) == 0 {
 		return ripspec.Title{}, false
 	}
@@ -103,8 +106,10 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 
 	// Prefer the most common fingerprint if duplicates exist.
 	fingerprintFreq := make(map[string]int)
-	for _, t := range featureLength {
+	trimmedHashes := make([]string, len(featureLength))
+	for i, t := range featureLength {
 		fp := strings.TrimSpace(t.TitleHash)
+		trimmedHashes[i] = fp
 		if fp != "" {
 			fingerprintFreq[fp]++
 		}
@@ -117,8 +122,8 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 	}
 	if bestFreq > 1 {
 		filtered := make([]ripspec.Title, 0, len(featureLength))
-		for _, t := range featureLength {
-			if fingerprintFreq[strings.TrimSpace(t.TitleHash)] == bestFreq {
+		for i, t := range featureLength {
+			if fingerprintFreq[trimmedHashes[i]] == bestFreq {
 				filtered = append(filtered, t)
 			}
 		}
@@ -141,23 +146,23 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 // PrimaryTitleDecisionSummary returns the primary selection plus candidate and rejection summaries.
 func PrimaryTitleDecisionSummary(titles []ripspec.Title) (ripspec.Title, bool, []string, []string) {
 	selection, ok := ChoosePrimaryTitle(titles)
-	candidates := make([]string, 0, len(titles))
-	rejects := make([]string, 0)
-	for _, t := range titles {
-		if t.ID < 0 {
-			rejects = append(rejects, fmt.Sprintf("%d:invalid_id", t.ID))
-			continue
-		}
-		if t.Duration <= 0 {
-			rejects = append(rejects, fmt.Sprintf("%d:duration<=0", t.ID))
-			continue
-		}
-		candidates = append(candidates, fmt.Sprintf("%d:%ds ch=%d seg=%d playlist=%s",
+	valid, rejected := partitionValidTitles(titles)
+	candidateStrs := make([]string, 0, len(valid))
+	for _, t := range valid {
+		candidateStrs = append(candidateStrs, fmt.Sprintf("%d:%ds ch=%d seg=%d playlist=%s",
 			t.ID, t.Duration, t.Chapters, t.SegmentCount, strings.TrimSpace(t.Playlist)))
 	}
-	sort.Strings(candidates)
-	sort.Strings(rejects)
-	return selection, ok, candidates, rejects
+	rejectStrs := make([]string, 0, len(rejected))
+	for _, t := range rejected {
+		reason := "invalid_id"
+		if t.ID >= 0 {
+			reason = "duration<=0"
+		}
+		rejectStrs = append(rejectStrs, fmt.Sprintf("%d:%s", t.ID, reason))
+	}
+	sort.Strings(candidateStrs)
+	sort.Strings(rejectStrs)
+	return selection, ok, candidateStrs, rejectStrs
 }
 
 // parse800SeriesNum extracts the 800-series number from an MPLS filename like "00800.mpls".
