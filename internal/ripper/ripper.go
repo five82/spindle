@@ -314,7 +314,7 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 			"error_hint", "no valid candidates after filtering",
 			"impact", "no titles will be ripped",
 		)
-		return nil, nil
+		return nil, fmt.Errorf("no titles above minimum duration for movie (%d titles in envelope)", len(env.Titles))
 
 	case "tv":
 		// Rip only titles referenced by episodes.

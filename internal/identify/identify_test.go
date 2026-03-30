@@ -298,32 +298,99 @@ func TestBuildEnvelope_TV(t *testing.T) {
 }
 
 func TestBuildEnvelopeFromCache(t *testing.T) {
-	h := &Handler{}
-	item := &queue.Item{DiscFingerprint: "cached-fp"}
-	entry := &discidcache.Entry{
-		TMDBID:    42,
-		MediaType: "movie",
-		Title:     "Cached Movie",
-		Year:      "2022",
-	}
+	t.Run("movie with scan results", func(t *testing.T) {
+		h := &Handler{cfg: &config.Config{}}
+		item := &queue.Item{DiscFingerprint: "cached-fp"}
+		entry := &discidcache.Entry{
+			TMDBID:    42,
+			MediaType: "movie",
+			Title:     "Cached Movie",
+			Year:      "2022",
+		}
+		discInfo := &makemkv.DiscInfo{
+			Titles: []makemkv.TitleInfo{
+				{ID: 0, Name: "Feature", Duration: 2 * time.Hour, Chapters: 20},
+				{ID: 1, Name: "Extras", Duration: 10 * time.Minute, Chapters: 1},
+			},
+		}
 
-	env := h.buildEnvelopeFromCache(item, entry, "bluray")
+		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, discInfo, "bluray")
 
-	if env.Version != ripspec.CurrentVersion {
-		t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
-	}
-	if env.Metadata.ID != 42 {
-		t.Errorf("ID = %d, want 42", env.Metadata.ID)
-	}
-	if env.Metadata.Title != "Cached Movie" {
-		t.Errorf("Title = %q, want %q", env.Metadata.Title, "Cached Movie")
-	}
-	if !env.Metadata.Cached {
-		t.Error("Cached = false, want true")
-	}
-	if !env.Metadata.Movie {
-		t.Error("Movie = false, want true")
-	}
+		if env.Version != ripspec.CurrentVersion {
+			t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
+		}
+		if env.Metadata.ID != 42 {
+			t.Errorf("ID = %d, want 42", env.Metadata.ID)
+		}
+		if env.Metadata.Title != "Cached Movie" {
+			t.Errorf("Title = %q, want %q", env.Metadata.Title, "Cached Movie")
+		}
+		if !env.Metadata.Cached {
+			t.Error("Cached = false, want true")
+		}
+		if !env.Metadata.Movie {
+			t.Error("Movie = false, want true")
+		}
+		if len(env.Titles) != 2 {
+			t.Fatalf("len(Titles) = %d, want 2", len(env.Titles))
+		}
+		if env.Titles[0].Duration != 7200 {
+			t.Errorf("Titles[0].Duration = %d, want 7200", env.Titles[0].Duration)
+		}
+	})
+
+	t.Run("tv creates episode placeholders", func(t *testing.T) {
+		h := &Handler{cfg: &config.Config{}}
+		h.cfg.MakeMKV.MinTitleLength = 120
+		item := &queue.Item{DiscFingerprint: "cached-fp", DiscTitle: "Show S01"}
+		entry := &discidcache.Entry{
+			TMDBID:    99,
+			MediaType: "tv",
+			Title:     "Cached Show",
+			Year:      "2023",
+		}
+		discInfo := &makemkv.DiscInfo{
+			Titles: []makemkv.TitleInfo{
+				{ID: 0, Name: "Ep1", Duration: 30 * time.Minute},
+				{ID: 1, Name: "Ep2", Duration: 30 * time.Minute},
+			},
+		}
+
+		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, discInfo, "bluray")
+
+		if env.Metadata.MediaType != "tv" {
+			t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
+		}
+		if env.Metadata.ShowTitle != "Cached Show" {
+			t.Errorf("ShowTitle = %q, want %q", env.Metadata.ShowTitle, "Cached Show")
+		}
+		if len(env.Titles) != 2 {
+			t.Fatalf("len(Titles) = %d, want 2", len(env.Titles))
+		}
+		if len(env.Episodes) != 2 {
+			t.Fatalf("len(Episodes) = %d, want 2", len(env.Episodes))
+		}
+		if env.Episodes[0].Season != 1 {
+			t.Errorf("Episodes[0].Season = %d, want 1", env.Episodes[0].Season)
+		}
+	})
+
+	t.Run("nil discInfo produces empty titles", func(t *testing.T) {
+		h := &Handler{cfg: &config.Config{}}
+		item := &queue.Item{DiscFingerprint: "cached-fp"}
+		entry := &discidcache.Entry{
+			TMDBID:    42,
+			MediaType: "movie",
+			Title:     "Cached Movie",
+			Year:      "2022",
+		}
+
+		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, nil, "bluray")
+
+		if len(env.Titles) != 0 {
+			t.Errorf("len(Titles) = %d, want 0 for nil discInfo", len(env.Titles))
+		}
+	})
 }
 
 func TestBuildFallbackEnvelope(t *testing.T) {

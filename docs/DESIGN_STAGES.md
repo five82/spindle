@@ -205,9 +205,10 @@ After identification:
 5. Set attributes: forced subtitle track detection.
 6. Store serialized envelope in `rip_spec_data`.
 
-**Disc ID cache fast-path**: When identification hits the disc ID cache, no
-MakeMKV scan runs, so the envelope has no `titles` array. Titles are restored
-from the rip cache's stored envelope during the ripping stage (see 2.4).
+**Disc ID cache fast-path**: The MakeMKV scan (and BDInfo for Blu-rays) always
+runs before the disc ID cache check. On cache hit, the TMDB search and KeyDB
+lookup are skipped, but scan results populate the envelope's `titles` array
+and episode placeholders normally.
 
 ### 1.9 Additional Behaviors
 

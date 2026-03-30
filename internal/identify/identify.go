@@ -123,25 +123,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		)
 	}
 
-	// Step 2: Check disc ID cache for fast path.
-	if h.discIDCache != nil && item.DiscFingerprint != "" {
-		if entry := h.discIDCache.Lookup(item.DiscFingerprint); entry != nil {
-			canonTitle := entry.Title
-			if entry.Year != "" {
-				canonTitle = fmt.Sprintf("%s (%s)", canonTitle, entry.Year)
-			}
-			item.DiscTitle = canonTitle
-			logger.Info("disc title updated from cache",
-				"decision_type", logs.DecisionTitleSource,
-				"decision_result", "updated",
-				"decision_reason", "disc_id_cache_entry",
-			)
-			result.Envelope = h.buildEnvelopeFromCache(item, entry, result.DiscSource)
-			return result, nil
-		}
-	}
-
-	// Step 2b: BDInfo (Blu-ray discs only, non-fatal). Skipped on cache hit above.
+	// Step 2: BDInfo (Blu-ray discs only, non-fatal).
 	if result.DiscSource == "bluray" {
 		var bdErr error
 		result.BDInfo, bdErr = RunBDInfo(ctx, h.cfg.MakeMKV.OpticalDrive, logger)
@@ -167,7 +149,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		}
 	}
 
-	// Step 3: MakeMKV scan.
+	// Step 3: MakeMKV scan (always runs -- titles are needed for ripping).
 	var err error
 	result.DiscInfo, err = makemkv.Scan(ctx, h.cfg.MakeMKV.OpticalDrive,
 		time.Duration(h.cfg.MakeMKV.InfoTimeout)*time.Second,
@@ -176,7 +158,26 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		return nil, fmt.Errorf("makemkv scan: %w", err)
 	}
 
-	// Step 4: Build title priority chain for TMDB query.
+	// Step 4: Check disc ID cache (skips TMDB search and KeyDB lookup, not the scan).
+	if h.discIDCache != nil && item.DiscFingerprint != "" {
+		if entry := h.discIDCache.Lookup(item.DiscFingerprint); entry != nil {
+			canonTitle := entry.Title
+			if entry.Year != "" {
+				canonTitle = fmt.Sprintf("%s (%s)", canonTitle, entry.Year)
+			}
+			item.DiscTitle = canonTitle
+			logger.Info("disc title updated from cache",
+				"decision_type", logs.DecisionTitleSource,
+				"decision_result", "updated",
+				"decision_reason", "disc_id_cache_entry",
+			)
+			result.Envelope = h.buildEnvelopeFromCache(logger, item, entry, result.DiscInfo, result.DiscSource)
+			setForcedSubtitleAttribute(logger, result.DiscInfo, &result.Envelope)
+			return result, nil
+		}
+	}
+
+	// Step 5: Build title priority chain for TMDB query.
 	result.RawTitle, result.TitleSource = h.resolveTitle(item, result.DiscInfo, result.BDInfo)
 	result.QueryTitle = CleanQueryTitle(result.RawTitle)
 	logger.Info("title resolved for TMDB search",
@@ -585,22 +586,44 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 	)
 }
 
-// buildEnvelopeFromCache constructs a minimal envelope from a disc ID cache entry.
-func (h *Handler) buildEnvelopeFromCache(item *queue.Item, entry *discidcache.Entry, discSource string) ripspec.Envelope {
+// buildEnvelopeFromCache constructs an envelope from a disc ID cache entry
+// and MakeMKV scan results. The cache provides TMDB metadata (skipping the
+// TMDB search), while the scan provides title data for ripping.
+func (h *Handler) buildEnvelopeFromCache(logger *slog.Logger, item *queue.Item, entry *discidcache.Entry, discInfo *makemkv.DiscInfo, discSource string) ripspec.Envelope {
+	discName := discInfoName(discInfo)
+	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
+	discNum := extractDiscNumber(item.DiscTitle, discName)
+
 	env := ripspec.Envelope{
 		Version:     ripspec.CurrentVersion,
 		Fingerprint: item.DiscFingerprint,
 		Metadata: ripspec.Metadata{
-			ID:         entry.TMDBID,
-			Title:      entry.Title,
-			MediaType:  entry.MediaType,
-			Year:       entry.Year,
-			Movie:      entry.MediaType == "movie",
-			Cached:     true,
-			DiscSource: discSource,
+			ID:           entry.TMDBID,
+			Title:        entry.Title,
+			MediaType:    entry.MediaType,
+			Year:         entry.Year,
+			Movie:        entry.MediaType == "movie",
+			Cached:       true,
+			DiscSource:   discSource,
+			SeasonNumber: seasonNum,
+			DiscNumber:   discNum,
 		},
 	}
+
+	if entry.MediaType == "tv" {
+		env.Metadata.ShowTitle = entry.Title
+	}
+
 	env.Attributes.HasForcedSubtitleTrack = entry.HasForcedSubtitleTrack
+
+	// Populate titles from MakeMKV scan results.
+	env.Titles = convertTitles(discInfo)
+
+	// For TV content, create episode placeholders from eligible titles.
+	if entry.MediaType == "tv" {
+		h.createEpisodePlaceholders(logger, &env)
+	}
+
 	return env
 }
 
