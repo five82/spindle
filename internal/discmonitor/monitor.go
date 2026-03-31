@@ -214,16 +214,24 @@ func (m *Monitor) DetectAsync(ctx context.Context) (*DetectResponse, error) {
 	}, nil
 }
 
-// enqueueBackground runs the slow portion of disc detection (mount resolution,
-// fingerprinting, duplicate check, queue insertion) in a background goroutine.
-// All errors are logged; there is no caller to return them to.
+// enqueueBackground runs enqueuePipeline in a background goroutine with a
+// detached 2-minute timeout. All errors are logged; there is no caller to
+// return them to.
 func (m *Monitor) enqueueBackground(event *DiscEvent) {
 	defer m.releaseProcessing()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Resolve mount point for fingerprinting.
+	if _, err := m.enqueuePipeline(ctx, event); err != nil {
+		m.logger.Error("background enqueue failed", "error", err)
+	}
+}
+
+// enqueuePipeline runs the mount → fingerprint → duplicate-check → queue-insert
+// pipeline. Shared by both the synchronous (DetectAndEnqueue) and asynchronous
+// (enqueueBackground) code paths.
+func (m *Monitor) enqueuePipeline(ctx context.Context, event *DiscEvent) (*EnqueueResult, error) {
 	mountPoint, cleanup, err := resolveMountPoint(ctx, event.Device, event.MountPath, m.logger)
 	if err != nil {
 		m.logger.Error("mount resolution failed",
@@ -232,11 +240,10 @@ func (m *Monitor) enqueueBackground(event *DiscEvent) {
 			"event_type", "fingerprint_error",
 			"error_hint", "disc may not be mounted; check fstab or mount manually",
 		)
-		return
+		return nil, fmt.Errorf("resolve mount point: %w", err)
 	}
 	defer cleanup()
 
-	// Compute fingerprint.
 	fp, err := fingerprint.Generate(mountPoint, m.logger)
 	if err != nil {
 		m.logger.Error("fingerprint computation failed",
@@ -245,7 +252,7 @@ func (m *Monitor) enqueueBackground(event *DiscEvent) {
 			"event_type", "fingerprint_error",
 			"error_hint", "disc filesystem may be unreadable",
 		)
-		return
+		return nil, fmt.Errorf("compute fingerprint: %w", err)
 	}
 
 	m.logger.Debug("disc fingerprint computed",
@@ -255,39 +262,27 @@ func (m *Monitor) enqueueBackground(event *DiscEvent) {
 	)
 
 	if m.store == nil {
-		m.logger.Error("queue store not configured", "event_type", "enqueue_error")
-		return
+		return nil, fmt.Errorf("queue store not configured")
 	}
 
-	// Check for existing item with same fingerprint.
 	existing, err := m.store.FindByFingerprint(fp)
 	if err != nil {
-		m.logger.Error("duplicate fingerprint check failed",
-			"error", err,
-			"event_type", "enqueue_error",
-		)
-		return
+		return nil, fmt.Errorf("check duplicate fingerprint: %w", err)
 	}
 
 	if existing != nil {
 		m.logDuplicateDecision(ctx, existing, event, fp)
-		return
+		return &EnqueueResult{Item: existing, Event: event, Duplicate: true}, nil
 	}
 
-	// Extract title from disc label.
 	title := ExtractDiscNameFromVolumeID(event.Label)
 	if title == "" {
 		title = "Unknown Disc"
 	}
 
-	// Create new queue item.
 	item, err := m.store.NewDisc(title, fp)
 	if err != nil {
-		m.logger.Error("failed to create queue item",
-			"error", err,
-			"event_type", "enqueue_error",
-		)
-		return
+		return nil, fmt.Errorf("create queue item: %w", err)
 	}
 
 	m.logger.Info("disc enqueued",
@@ -298,6 +293,8 @@ func (m *Monitor) enqueueBackground(event *DiscEvent) {
 		"disc_title", title,
 		"fingerprint", fp,
 	)
+
+	return &EnqueueResult{Item: item, Event: event}, nil
 }
 
 // logDuplicateDecision handles the decision logic for a disc whose fingerprint
@@ -372,79 +369,7 @@ func (m *Monitor) DetectAndEnqueue(ctx context.Context) (*EnqueueResult, error) 
 		"device", event.Device,
 	)
 
-	// Resolve mount point for fingerprinting.
-	mountPoint, cleanup, err := resolveMountPoint(ctx, event.Device, event.MountPath, m.logger)
-	if err != nil {
-		m.logger.Error("mount resolution failed",
-			"error", err,
-			"device", event.Device,
-			"event_type", "fingerprint_error",
-			"error_hint", "disc may not be mounted; check fstab or mount manually",
-		)
-		return nil, fmt.Errorf("resolve mount point: %w", err)
-	}
-	defer cleanup()
-
-	// Compute fingerprint.
-	fp, err := fingerprint.Generate(mountPoint, m.logger)
-	if err != nil {
-		m.logger.Error("fingerprint computation failed",
-			"error", err,
-			"mount_point", mountPoint,
-			"event_type", "fingerprint_error",
-			"error_hint", "disc filesystem may be unreadable",
-		)
-		return nil, fmt.Errorf("compute fingerprint: %w", err)
-	}
-
-	m.logger.Debug("disc fingerprint computed",
-		"fingerprint", fp,
-		"mount_point", mountPoint,
-		"disc_type", event.DiscType,
-	)
-
-	if m.store == nil {
-		return nil, fmt.Errorf("queue store not configured")
-	}
-
-	// Check for existing item with same fingerprint.
-	existing, err := m.store.FindByFingerprint(fp)
-	if err != nil {
-		return nil, fmt.Errorf("check duplicate fingerprint: %w", err)
-	}
-
-	if existing != nil {
-		return m.handleExistingItem(ctx, existing, event, fp)
-	}
-
-	// Extract title from disc label.
-	title := ExtractDiscNameFromVolumeID(event.Label)
-	if title == "" {
-		title = "Unknown Disc"
-	}
-
-	// Create new queue item.
-	item, err := m.store.NewDisc(title, fp)
-	if err != nil {
-		return nil, fmt.Errorf("create queue item: %w", err)
-	}
-
-	m.logger.Info("disc enqueued",
-		"decision_type", logs.DecisionDiscEnqueue,
-		"decision_result", "created",
-		"decision_reason", "new disc fingerprint",
-		"item_id", item.ID,
-		"disc_title", title,
-		"fingerprint", fp,
-	)
-
-	return &EnqueueResult{Item: item, Event: event}, nil
-}
-
-// handleExistingItem processes a disc whose fingerprint already exists in the queue.
-func (m *Monitor) handleExistingItem(ctx context.Context, existing *queue.Item, event *DiscEvent, fp string) (*EnqueueResult, error) {
-	m.logDuplicateDecision(ctx, existing, event, fp)
-	return &EnqueueResult{Item: existing, Event: event, Duplicate: true}, nil
+	return m.enqueuePipeline(ctx, event)
 }
 
 // ProbeDisc detects a loaded disc via lsblk and returns a DiscEvent.
