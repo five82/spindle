@@ -52,6 +52,10 @@ var seasonPattern = regexp.MustCompile(`(?i)(?:s|season[\s_]*)(\d+)`)
 // discNumberPattern extracts a disc/volume/part number from disc titles (e.g., "Disc 1", "Volume 3", "Part 1").
 var discNumberPattern = regexp.MustCompile(`(?i)(?:disc|volume|part)[\s_]*(\d+)`)
 
+// tvHintPattern detects TV content indicators in disc titles.
+// Matches "TV Series", "Season N", or "S01"/"S1" preceded by a non-letter (or start of string).
+var tvHintPattern = regexp.MustCompile(`(?i)(tv\s+series|season[\s_]*\d+|(?:^|[^a-zA-Z])s\d{1,2}(?:[^a-zA-Z0-9]|$))`)
+
 // Handler implements stage.Handler for disc identification.
 type Handler struct {
 	cfg         *config.Config
@@ -220,12 +224,50 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		)
 	}
 
-	result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
-	if err != nil {
-		return nil, fmt.Errorf("tmdb search: %w", err)
+	// Detect media type hint from raw title per spec section 1.6.
+	// TV hint -> search /search/tv first; fall back to /search/multi.
+	mediaHint := detectMediaTypeHint(result.RawTitle)
+	yearStr := ""
+	if result.SearchYear > 0 {
+		yearStr = strconv.Itoa(result.SearchYear)
 	}
 
-	result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
+	switch mediaHint {
+	case "tv":
+		logger.Info("media type hint detected",
+			"decision_type", logs.DecisionTitleResolution,
+			"decision_result", "tv",
+			"decision_reason", fmt.Sprintf("raw_title=%q", result.RawTitle),
+		)
+		result.AllResults, err = h.tmdbClient.SearchTV(ctx, result.QueryTitle, yearStr)
+		if err != nil {
+			return nil, fmt.Errorf("tmdb search (tv): %w", err)
+		}
+		// SearchTV doesn't set MediaType; stamp it so downstream knows.
+		for i := range result.AllResults {
+			result.AllResults[i].MediaType = "tv"
+		}
+		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
+		if result.Best == nil {
+			// Fall back to multi search.
+			logger.Info("TV-hinted search found no match, falling back to multi",
+				"decision_type", logs.DecisionTMDBSearch,
+				"decision_result", "fallback_multi",
+				"decision_reason", "no tv match above threshold",
+			)
+			result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
+			if err != nil {
+				return nil, fmt.Errorf("tmdb search (multi fallback): %w", err)
+			}
+			result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
+		}
+	default:
+		result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
+		if err != nil {
+			return nil, fmt.Errorf("tmdb search: %w", err)
+		}
+		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
+	}
 	if result.Best == nil {
 		logger.Warn("no TMDB match",
 			"event_type", "tmdb_no_match",
@@ -414,6 +456,16 @@ func CleanQueryTitle(title string) string {
 		return title // don't return empty; fall back to original
 	}
 	return cleaned
+}
+
+// detectMediaTypeHint examines the raw disc title for TV or movie indicators.
+// Returns "tv", "movie", or "" (no hint). Per spec section 1.6, this hint
+// controls which TMDB search endpoint is tried first.
+func detectMediaTypeHint(rawTitle string) string {
+	if tvHintPattern.MatchString(rawTitle) {
+		return "tv"
+	}
+	return ""
 }
 
 // extractFirstIntMatch returns the first integer captured by pattern across

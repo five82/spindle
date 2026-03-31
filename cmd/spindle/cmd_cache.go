@@ -119,7 +119,8 @@ func newCacheRipCmd() *cobra.Command {
 			}
 
 			var keydbCat *keydb.Catalog
-			if cat, _, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath, logger); loadErr == nil {
+			if cat, _, loadErr := keydb.LoadOrDownload(ctx, cfg.MakeMKV.KeyDBPath, cfg.MakeMKV.KeyDBDownloadURL,
+				time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout)*time.Second, logger); loadErr == nil {
 				keydbCat = cat
 			}
 

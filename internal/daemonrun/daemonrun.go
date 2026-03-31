@@ -114,17 +114,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	var keydbCat *keydb.Catalog
-	if cat, stale, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath, logger); loadErr == nil {
+	if cat, _, loadErr := keydb.LoadOrDownload(ctx, cfg.MakeMKV.KeyDBPath, cfg.MakeMKV.KeyDBDownloadURL,
+		time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout)*time.Second, logger); loadErr == nil {
 		keydbCat = cat
 		logger.Debug("KeyDB catalog loaded", "entries", keydbCat.Size())
-		if stale {
-			logger.Warn("keydb catalog is older than 7 days, consider re-downloading",
-				"event_type", "keydb_stale",
-				"error_hint", "catalog file older than 7 days",
-				"impact", "disc identification may use outdated data",
-				"path", cfg.MakeMKV.KeyDBPath,
-			)
-		}
 	}
 
 	var ripCacheStore *ripcache.Store

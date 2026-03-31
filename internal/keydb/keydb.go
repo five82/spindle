@@ -88,14 +88,6 @@ func LoadFromFile(path string, logger *slog.Logger) (cat *Catalog, stale bool, e
 	if info, statErr := f.Stat(); statErr == nil {
 		stale = time.Since(info.ModTime()) > 7*24*time.Hour
 	}
-	if stale {
-		logger.Warn("KeyDB catalog is stale",
-			"event_type", "keydb_stale",
-			"error_hint", "catalog file older than 7 days",
-			"impact", "disc identification may use outdated data",
-		)
-	}
-
 	entries := make(map[string]string)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -295,21 +287,44 @@ func extractFile(zf *zip.File, dest string) error {
 	return nil
 }
 
-// LoadOrDownload tries to load a catalog from path. If the file does not exist,
-// it downloads the KeyDB zip from url, extracts it to the directory containing
-// path, then loads the result.
+// LoadOrDownload tries to load a catalog from path. If the file does not exist
+// or is stale (older than 7 days), it downloads a fresh copy from url, extracts
+// it to the directory containing path, then loads the result.
 func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration, logger *slog.Logger) (*Catalog, bool, error) {
+	logger = logs.Default(logger)
+
 	cat, stale, err := LoadFromFile(path, logger)
-	if err == nil {
-		return cat, stale, nil
-	}
-	if !os.IsNotExist(err) {
+	if err != nil && !os.IsNotExist(err) {
 		return nil, false, err
 	}
 
+	missing := os.IsNotExist(err)
+	if !missing && !stale {
+		return cat, false, nil
+	}
+
+	reason := "file_missing"
+	if stale {
+		reason = "catalog_stale"
+	}
+	logger.Info("KeyDB catalog needs refresh",
+		"decision_type", "keydb_refresh",
+		"decision_result", reason,
+		"decision_reason", fmt.Sprintf("path=%s", path),
+	)
+
 	destDir := filepath.Dir(path)
-	if err := Download(ctx, url, destDir, timeout, logger); err != nil {
-		return nil, false, err
+	if dlErr := Download(ctx, url, destDir, timeout, logger); dlErr != nil {
+		// If we have a stale catalog, use it rather than failing.
+		if cat != nil {
+			logger.Warn("KeyDB download failed, using stale catalog",
+				"event_type", "keydb_download_error",
+				"error_hint", dlErr.Error(),
+				"impact", "disc identification may use outdated data",
+			)
+			return cat, true, nil
+		}
+		return nil, false, dlErr
 	}
 	cat, stale, err = LoadFromFile(path, logger)
 	return cat, stale, err

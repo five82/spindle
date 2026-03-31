@@ -139,7 +139,8 @@ Heuristics to determine if disc is movie or TV:
 1. If KeyDB catalog available and disc ID present:
 2. Parse KeyDB.cfg for disc ID entry.
 3. If found: use authoritative title from KeyDB (overrides disc label).
-4. Download KeyDB if not present locally (with timeout).
+4. Download KeyDB if not present locally or stale (older than 7 days), with
+   timeout. If download fails and a stale catalog exists, use it with a warning.
 
 ### 1.5 Title Determination Priority
 

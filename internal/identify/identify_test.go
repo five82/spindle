@@ -474,6 +474,30 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 	})
 }
 
+func TestDetectMediaTypeHint(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"TV Series keyword", "Batman TV Series - Season 3: Disc 1", "tv"},
+		{"season pattern", "Breaking Bad - Season 2", "tv"},
+		{"S prefix", "BATMAN_S03_DISC_1", "tv"},
+		{"case insensitive TV Series", "seinfeld tv series", "tv"},
+		{"no hint for movie", "Inception", ""},
+		{"no hint for disc only", "The Matrix: Disc 1", ""},
+		{"no false positive on words containing s+digits", "S1mone", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectMediaTypeHint(tt.input)
+			if got != tt.want {
+				t.Errorf("detectMediaTypeHint(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractSeasonNumber(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -67,9 +67,10 @@ func newIdentifyCmd() *cobra.Command {
 				logger.Debug("disc ID cache unavailable", "error", cacheErr)
 			}
 
-			// Load KeyDB catalog (optional).
+			// Load KeyDB catalog (optional, auto-refreshes if stale).
 			var keydbCat *keydb.Catalog
-			if cat, _, loadErr := keydb.LoadFromFile(cfg.MakeMKV.KeyDBPath, logger); loadErr == nil {
+			if cat, _, loadErr := keydb.LoadOrDownload(ctx, cfg.MakeMKV.KeyDBPath, cfg.MakeMKV.KeyDBDownloadURL,
+				time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout)*time.Second, logger); loadErr == nil {
 				keydbCat = cat
 			}
 
