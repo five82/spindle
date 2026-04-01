@@ -609,14 +609,19 @@ func (h *Handler) buildEnvelope(
 	return env
 }
 
-// createEpisodePlaceholders adds episode entries for each title that meets the
-// minimum title length threshold. Each episode gets a placeholder key (e.g.,
-// "s01_001") and is linked to the title's ID for downstream ripping.
+// createEpisodePlaceholders adds episode entries for each unique title that
+// meets the minimum title length threshold. Duplicate titles (same segment map
+// or title hash) are skipped -- TV Blu-rays commonly contain multiple playlists
+// for the same episode. Each episode gets a placeholder key (e.g., "s01_001")
+// and is linked to the title's ID for downstream ripping.
 func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.Envelope) {
 	season := env.Metadata.SeasonNumber
 	if season <= 0 {
 		season = 1
 	}
+
+	seen := make(map[string]int) // dedup key -> first title ID
+	var duplicates int
 
 	idx := 0
 	for _, title := range env.Titles {
@@ -628,6 +633,29 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 			)
 			continue
 		}
+
+		// Dedup on SegmentMap (m2ts stream identity) when available.
+		// Titles sharing a segment map reference identical content even
+		// if playlist metadata differs. Fall back to TitleHash for DVDs
+		// where SegmentMap is absent.
+		dedupKey := strings.TrimSpace(title.SegmentMap)
+		if dedupKey == "" {
+			dedupKey = strings.TrimSpace(title.TitleHash)
+		}
+		if dedupKey != "" {
+			if firstID, dup := seen[dedupKey]; dup {
+				duplicates++
+				logger.Info("duplicate TV title skipped",
+					"decision_type", logs.DecisionDuplicateDetection,
+					"decision_result", "skipped",
+					"decision_reason", fmt.Sprintf("title %d matches title %d (key=%s)",
+						title.ID, firstID, dedupKey),
+				)
+				continue
+			}
+			seen[dedupKey] = title.ID
+		}
+
 		idx++
 		env.Episodes = append(env.Episodes, ripspec.Episode{
 			Key:            ripspec.PlaceholderKey(season, idx),
@@ -640,7 +668,7 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 	logger.Info("episode placeholders created",
 		"decision_type", logs.DecisionEpisodePlaceholders,
 		"decision_result", fmt.Sprintf("%d episodes", idx),
-		"decision_reason", fmt.Sprintf("season=%d titles=%d", season, len(env.Titles)),
+		"decision_reason", fmt.Sprintf("season=%d titles=%d duplicates=%d", season, len(env.Titles), duplicates),
 	)
 }
 

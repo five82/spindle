@@ -3,6 +3,8 @@ package contentid
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/logs"
@@ -95,10 +97,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		_ = h.store.UpdateProgress(item)
 
 		contentKey := fmt.Sprintf("%s:%s:0", item.DiscFingerprint, ep.Key)
+		outputDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-contentid-%s-%s", item.DiscFingerprint, ep.Key))
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 			InputPath:  asset.Path,
 			AudioIndex: 0,
 			Language:   "en",
+			OutputDir:  outputDir,
 			ContentKey: contentKey,
 		})
 		if err != nil {

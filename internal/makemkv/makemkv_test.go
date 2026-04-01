@@ -50,9 +50,9 @@ func TestParseRobotOutputTINFO(t *testing.T) {
 		`TINFO:0,8,0,"25"`,
 		`TINFO:0,9,0,"1:30:00"`,
 		`TINFO:0,10,0,"15000000000"`,
-		`TINFO:0,11,0,"3"`,
-		`TINFO:0,16,0,"00001.mpls,00002.mpls,00003.mpls"`,
-		`TINFO:0,25,0,"00800.mpls"`,
+		`TINFO:0,16,0,"00800.mpls"`,
+		`TINFO:0,25,0,"3"`,
+		`TINFO:0,26,0,"00001.m2ts,00002.m2ts,00003.m2ts"`,
 		`TINFO:1,2,0,"Bonus"`,
 		`TINFO:1,9,0,"0:10:00"`,
 	}
@@ -79,14 +79,14 @@ func TestParseRobotOutputTINFO(t *testing.T) {
 	if title0.SizeBytes != 15000000000 {
 		t.Errorf("title 0 SizeBytes = %d, want 15000000000", title0.SizeBytes)
 	}
+	if title0.Playlist != "00800.mpls" {
+		t.Errorf("title 0 Playlist = %q, want %q", title0.Playlist, "00800.mpls")
+	}
 	if title0.SegmentCount != 3 {
 		t.Errorf("title 0 SegmentCount = %d, want 3", title0.SegmentCount)
 	}
-	if title0.SegmentMap != "00001.mpls,00002.mpls,00003.mpls" {
-		t.Errorf("title 0 SegmentMap = %q, want comma-separated playlists", title0.SegmentMap)
-	}
-	if title0.Playlist != "00800.mpls" {
-		t.Errorf("title 0 Playlist = %q, want %q", title0.Playlist, "00800.mpls")
+	if title0.SegmentMap != "00001.m2ts,00002.m2ts,00003.m2ts" {
+		t.Errorf("title 0 SegmentMap = %q, want m2ts segment references", title0.SegmentMap)
 	}
 
 	title1 := info.Titles[1]

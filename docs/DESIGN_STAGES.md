@@ -219,7 +219,11 @@ Munich 1972).
 
 After identification:
 1. Build title specs from MakeMKV scan results (filtered by `min_title_length`).
-2. For TV: create episode specs with placeholder keys (e.g., `s01_001`).
+2. For TV: deduplicate titles by segment map (m2ts identity) before creating
+   episode specs with placeholder keys (e.g., `s01_001`). Titles sharing a
+   segment map reference identical content even if playlist metadata differs
+   (common on TV Blu-rays with multiple language playlists). Falls back to
+   title hash for DVDs where segment map is absent.
 3. Set metadata fields from TMDB response.
 4. Set `metadata.disc_source` (`bluray`, `dvd`, `unknown` --
    determined from disc detection via lsblk probe).
@@ -273,9 +277,9 @@ and episode placeholders normally.
      (00800-00899) exist with runtimes within 30 seconds, prefer the lowest playlist
      number (00800.mpls = English). Runtimes differing by >30s indicate different
      cuts (theatrical vs director's), so normal selection applies instead.
-     The 800-series pattern is checked in the `playlist` field first; if that field
-     contains a numeric index (common on UHD discs), `segment_map` is checked as a
-     fallback when it holds a single (non-comma-separated) MPLS filename.
+     The 800-series pattern is checked in the `playlist` field (MPLS filename).
+     A `segment_map` fallback exists for cases where `playlist` holds a numeric
+     index instead of an MPLS filename.
   3. Duration window: keep titles within 2 seconds of the longest candidate.
   4. Feature-length filter: prefer titles >= 20 minutes.
   5. Chapter preference: prefer titles with the most chapters.
@@ -283,7 +287,7 @@ and episode placeholders normally.
   7. Segment count preference: prefer playlists with the most segments.
   8. Fingerprint frequency: when TitleHash duplicates exist, prefer the most common.
   9. Final tiebreaker: longest duration, then lowest title ID.
-- For TV: rip each episode's mapped title ID.
+- For TV: rip each episode's mapped title ID (deduplicated during identification).
 
 ### 2.2 MakeMKV Execution
 

@@ -306,12 +306,12 @@ func parseTINFO(body string, titles map[int]*titleAttrs) {
 		ta.duration = parseDuration(value)
 	case 10:
 		ta.sizeBytes, _ = strconv.ParseInt(value, 10, 64)
-	case 11:
-		ta.segmentCount, _ = strconv.Atoi(value)
 	case 16:
-		ta.segmentMap = value
-	case 25:
 		ta.playlist = value
+	case 25:
+		ta.segmentCount, _ = strconv.Atoi(value)
+	case 26:
+		ta.segmentMap = value
 	}
 }
 

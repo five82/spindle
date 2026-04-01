@@ -618,3 +618,102 @@ func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateEpisodePlaceholders_DeduplicatesBySegmentMap(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}}
+	h.cfg.MakeMKV.MinTitleLength = 120
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 1320, SegmentMap: "00001.m2ts"},
+			{ID: 1, Duration: 1380, SegmentMap: "00002.m2ts"},
+			{ID: 2, Duration: 1320, SegmentMap: "00001.m2ts"}, // duplicate of title 0
+		},
+	}
+	h.createEpisodePlaceholders(discardLogger(), env)
+
+	if len(env.Episodes) != 2 {
+		t.Fatalf("len(Episodes) = %d, want 2 (title 2 should be deduped)", len(env.Episodes))
+	}
+	if env.Episodes[0].TitleID != 0 {
+		t.Errorf("Episodes[0].TitleID = %d, want 0", env.Episodes[0].TitleID)
+	}
+	if env.Episodes[1].TitleID != 1 {
+		t.Errorf("Episodes[1].TitleID = %d, want 1", env.Episodes[1].TitleID)
+	}
+}
+
+func TestCreateEpisodePlaceholders_DifferentSegmentMapSameDuration(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}}
+	h.cfg.MakeMKV.MinTitleLength = 120
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 1320, SegmentMap: "00001.m2ts"},
+			{ID: 1, Duration: 1320, SegmentMap: "00002.m2ts"},
+		},
+	}
+	h.createEpisodePlaceholders(discardLogger(), env)
+
+	if len(env.Episodes) != 2 {
+		t.Fatalf("len(Episodes) = %d, want 2 (different SegmentMap = different content)", len(env.Episodes))
+	}
+}
+
+func TestCreateEpisodePlaceholders_FallsBackToTitleHash(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}}
+	h.cfg.MakeMKV.MinTitleLength = 120
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 1320, TitleHash: "abc123"},
+			{ID: 1, Duration: 1380, TitleHash: "def456"},
+			{ID: 2, Duration: 1320, TitleHash: "abc123"}, // duplicate by hash
+		},
+	}
+	h.createEpisodePlaceholders(discardLogger(), env)
+
+	if len(env.Episodes) != 2 {
+		t.Fatalf("len(Episodes) = %d, want 2 (TitleHash fallback dedup)", len(env.Episodes))
+	}
+	if env.Episodes[0].TitleID != 0 {
+		t.Errorf("Episodes[0].TitleID = %d, want 0", env.Episodes[0].TitleID)
+	}
+	if env.Episodes[1].TitleID != 1 {
+		t.Errorf("Episodes[1].TitleID = %d, want 1", env.Episodes[1].TitleID)
+	}
+}
+
+func TestCreateEpisodePlaceholders_NoDedupWhenBothKeysEmpty(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}}
+	h.cfg.MakeMKV.MinTitleLength = 120
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 1320},
+			{ID: 1, Duration: 1320},
+		},
+	}
+	h.createEpisodePlaceholders(discardLogger(), env)
+
+	if len(env.Episodes) != 2 {
+		t.Fatalf("len(Episodes) = %d, want 2 (no dedup when keys empty)", len(env.Episodes))
+	}
+}
+
+func TestCreateEpisodePlaceholders_SegmentMapTakesPriorityOverTitleHash(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}}
+	h.cfg.MakeMKV.MinTitleLength = 120
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 1320, SegmentMap: "00010.m2ts", TitleHash: "aaa"},
+			{ID: 1, Duration: 1320, SegmentMap: "00010.m2ts", TitleHash: "bbb"},
+		},
+	}
+	h.createEpisodePlaceholders(discardLogger(), env)
+
+	if len(env.Episodes) != 1 {
+		t.Fatalf("len(Episodes) = %d, want 1 (same SegmentMap dedupes despite different TitleHash)", len(env.Episodes))
+	}
+}
