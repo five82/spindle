@@ -162,26 +162,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		return nil, fmt.Errorf("makemkv scan: %w", err)
 	}
 
-	// Step 4: Check disc ID cache (skips TMDB search and KeyDB lookup, not the scan).
-	if h.discIDCache != nil && item.DiscFingerprint != "" {
-		if entry := h.discIDCache.Lookup(item.DiscFingerprint); entry != nil {
-			canonTitle := entry.Title
-			if entry.Year != "" {
-				canonTitle = fmt.Sprintf("%s (%s)", canonTitle, entry.Year)
-			}
-			item.DiscTitle = canonTitle
-			logger.Info("disc title updated from cache",
-				"decision_type", logs.DecisionTitleSource,
-				"decision_result", "updated",
-				"decision_reason", "disc_id_cache_entry",
-			)
-			result.Envelope = h.buildEnvelopeFromCache(logger, item, entry, result.DiscInfo, result.DiscSource)
-			setForcedSubtitleAttribute(logger, result.DiscInfo, &result.Envelope)
-			return result, nil
-		}
-	}
-
-	// Step 5: Build title priority chain for TMDB query.
+	// Step 4: Resolve title (needed before cache check for validation).
 	result.RawTitle, result.TitleSource = h.resolveTitle(item, result.DiscInfo, result.BDInfo)
 	result.QueryTitle = CleanQueryTitle(result.RawTitle)
 	logger.Info("title resolved for TMDB search",
@@ -191,7 +172,39 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		"raw_title", result.RawTitle,
 	)
 
-	// Step 5: Extract year and clean title for TMDB search.
+	// Step 5: Check disc ID cache (skips TMDB search and KeyDB lookup, not the scan).
+	// Validate cached media type against fresh disc metadata to prevent stale entries
+	// from overriding unambiguous disc signals (e.g., TV hint vs cached movie).
+	if h.discIDCache != nil && item.DiscFingerprint != "" {
+		if entry := h.discIDCache.Lookup(item.DiscFingerprint); entry != nil {
+			mediaHint := detectMediaTypeHint(result.RawTitle)
+			if mediaHint == "tv" && entry.MediaType == "movie" {
+				logger.Warn("disc ID cache invalidated: TV hint contradicts cached movie type",
+					"decision_type", logs.DecisionDiscIDCache,
+					"decision_result", "invalidated",
+					"decision_reason", fmt.Sprintf("raw_title=%q has TV hint but cache says movie", result.RawTitle),
+				)
+				_ = h.discIDCache.Remove(item.DiscFingerprint)
+				// Fall through to full identification.
+			} else {
+				canonTitle := entry.Title
+				if entry.Year != "" {
+					canonTitle = fmt.Sprintf("%s (%s)", canonTitle, entry.Year)
+				}
+				item.DiscTitle = canonTitle
+				logger.Info("disc title updated from cache",
+					"decision_type", logs.DecisionTitleSource,
+					"decision_result", "updated",
+					"decision_reason", "disc_id_cache_entry",
+				)
+				result.Envelope = h.buildEnvelopeFromCache(logger, item, entry, result.DiscInfo, result.DiscSource)
+				setForcedSubtitleAttribute(logger, result.DiscInfo, &result.Envelope)
+				return result, nil
+			}
+		}
+	}
+
+	// Step 6: Extract year and clean title for TMDB search.
 	// Year priority: BDInfo > resolved title > item disc title.
 	if result.BDInfo != nil && result.BDInfo.Year != "" {
 		if y, err := strconv.Atoi(result.BDInfo.Year); err == nil {
@@ -227,29 +240,24 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 	// Detect media type hint from raw title per spec section 1.6.
 	// TV hint -> search /search/tv first; fall back to /search/multi.
 	mediaHint := detectMediaTypeHint(result.RawTitle)
-	yearStr := ""
-	if result.SearchYear > 0 {
-		yearStr = strconv.Itoa(result.SearchYear)
-	}
 
 	switch mediaHint {
 	case "tv":
 		logger.Info("media type hint detected",
-			"decision_type", logs.DecisionTitleResolution,
+			"decision_type", logs.DecisionTMDBSearch,
 			"decision_result", "tv",
 			"decision_reason", fmt.Sprintf("raw_title=%q", result.RawTitle),
 		)
+		yearStr := ""
+		if result.SearchYear > 0 {
+			yearStr = strconv.Itoa(result.SearchYear)
+		}
 		result.AllResults, err = h.tmdbClient.SearchTV(ctx, result.QueryTitle, yearStr)
 		if err != nil {
 			return nil, fmt.Errorf("tmdb search (tv): %w", err)
 		}
-		// SearchTV doesn't set MediaType; stamp it so downstream knows.
-		for i := range result.AllResults {
-			result.AllResults[i].MediaType = "tv"
-		}
 		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
 		if result.Best == nil {
-			// Fall back to multi search.
 			logger.Info("TV-hinted search found no match, falling back to multi",
 				"decision_type", logs.DecisionTMDBSearch,
 				"decision_result", "fallback_multi",
@@ -458,9 +466,9 @@ func CleanQueryTitle(title string) string {
 	return cleaned
 }
 
-// detectMediaTypeHint examines the raw disc title for TV or movie indicators.
-// Returns "tv", "movie", or "" (no hint). Per spec section 1.6, this hint
-// controls which TMDB search endpoint is tried first.
+// detectMediaTypeHint examines the raw disc title for TV indicators.
+// Returns "tv" or "" (no hint). Per spec section 1.6, this hint controls
+// which TMDB search endpoint is tried first.
 func detectMediaTypeHint(rawTitle string) string {
 	if tvHintPattern.MatchString(rawTitle) {
 		return "tv"

@@ -43,23 +43,29 @@ func newIdentifyCmd() *cobra.Command {
 
 			// Probe disc for mount point and label.
 			event, _ := discmonitor.ProbeDisc(ctx, device)
-			var discLabel, mountPath string
+			var discLabel string
+			var lsblkMount string
 			if event != nil {
 				discLabel = event.Label
-				mountPath = event.MountPath
-			}
-
-			// Generate fingerprint if disc is mounted.
-			var fp string
-			if mountPath != "" {
-				var err error
-				fp, err = fingerprint.Generate(mountPath, nil)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "%s fingerprint generation failed: %v\n", warnStyle("Warning:"), err)
-				}
+				lsblkMount = event.MountPath
 			}
 
 			logger := buildLogger()
+
+			// Resolve mount point (same as daemon) for fingerprint generation.
+			// This ensures spindle identify and the daemon produce identical results.
+			var fp string
+			mountPoint, cleanup, mountErr := discmonitor.ResolveMountPoint(ctx, device, lsblkMount, logger)
+			if mountErr != nil {
+				fmt.Fprintf(os.Stderr, "%s mount resolution failed, proceeding without fingerprint: %v\n", warnStyle("Warning:"), mountErr)
+			} else {
+				defer cleanup()
+				var fpErr error
+				fp, fpErr = fingerprint.Generate(mountPoint, logger)
+				if fpErr != nil {
+					fmt.Fprintf(os.Stderr, "%s fingerprint generation failed: %v\n", warnStyle("Warning:"), fpErr)
+				}
+			}
 
 			// Open disc ID cache (optional).
 			discIDStore, cacheErr := discidcache.Open(cfg.DiscIDCachePath(), nil)
@@ -67,10 +73,10 @@ func newIdentifyCmd() *cobra.Command {
 				logger.Debug("disc ID cache unavailable", "error", cacheErr)
 			}
 
-			// Load KeyDB catalog (optional, auto-refreshes if stale).
+			// Load KeyDB catalog (optional).
 			var keydbCat *keydb.Catalog
 			if cat, _, loadErr := keydb.LoadOrDownload(ctx, cfg.MakeMKV.KeyDBPath, cfg.MakeMKV.KeyDBDownloadURL,
-				time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout)*time.Second, logger); loadErr == nil {
+				cfg.MakeMKV.KeyDBTimeout(), logger); loadErr == nil {
 				keydbCat = cat
 			}
 

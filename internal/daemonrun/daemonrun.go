@@ -115,7 +115,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	var keydbCat *keydb.Catalog
 	if cat, _, loadErr := keydb.LoadOrDownload(ctx, cfg.MakeMKV.KeyDBPath, cfg.MakeMKV.KeyDBDownloadURL,
-		time.Duration(cfg.MakeMKV.KeyDBDownloadTimeout)*time.Second, logger); loadErr == nil {
+		cfg.MakeMKV.KeyDBTimeout(), logger); loadErr == nil {
 		keydbCat = cat
 		logger.Debug("KeyDB catalog loaded", "entries", keydbCat.Size())
 	}

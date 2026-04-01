@@ -194,6 +194,9 @@ func (c *Client) SearchTV(ctx context.Context, query, year string) ([]SearchResu
 	if err := c.get(ctx, "/search/tv", params, &resp); err != nil {
 		return nil, err
 	}
+	for i := range resp.Results {
+		resp.Results[i].MediaType = "tv"
+	}
 	return resp.Results, nil
 }
 

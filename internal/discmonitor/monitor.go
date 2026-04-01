@@ -232,7 +232,7 @@ func (m *Monitor) enqueueBackground(event *DiscEvent) {
 // pipeline. Shared by both the synchronous (DetectAndEnqueue) and asynchronous
 // (enqueueBackground) code paths.
 func (m *Monitor) enqueuePipeline(ctx context.Context, event *DiscEvent) (*EnqueueResult, error) {
-	mountPoint, cleanup, err := resolveMountPoint(ctx, event.Device, event.MountPath, m.logger)
+	mountPoint, cleanup, err := ResolveMountPoint(ctx, event.Device, event.MountPath, m.logger)
 	if err != nil {
 		m.logger.Error("mount resolution failed",
 			"error", err,

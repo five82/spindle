@@ -135,6 +135,13 @@ Heuristics to determine if disc is movie or TV:
 - `Remove(fingerprint)`: Delete a single entry by disc fingerprint.
 - `Clear()`: Remove all entries.
 
+**Cache validation**: After a cache hit, `detectMediaTypeHint()` runs against
+the freshly resolved raw title from the current disc scan. If the hint is "tv"
+but the cached media type is "movie", the cache entry is invalidated (removed)
+and full identification proceeds. This prevents stale cache entries from
+overriding unambiguous disc metadata. Logged with `decision_type: "disc_id_cache"`,
+`decision_result: "invalidated"`.
+
 **KeyDB Lookup**:
 1. If KeyDB catalog available and disc ID present:
 2. Parse KeyDB.cfg for disc ID entry.
@@ -150,8 +157,21 @@ Heuristics to determine if disc is movie or TV:
 4. Disc label from lsblk
 5. Default: "Unknown Disc"
 
-The `identify` CLI command uses the same identification handler as the daemon
-to ensure consistent results. Both paths call `Handler.Identify()`.
+**CLI/daemon consistency requirement.** The `spindle identify` CLI command and
+the daemon identification stage must use the same code path and produce
+identical results for the same disc. `spindle identify` exists so the user can
+preview exactly how the daemon will identify a disc before committing to a full
+pipeline run. If the two paths can diverge, the command provides false assurance
+and loses its purpose.
+
+To guarantee this:
+- Both paths call `Handler.Identify()` with the same inputs.
+- The CLI uses `ResolveMountPoint()` to resolve the disc mount point and
+  generate a fingerprint, matching the daemon's mount resolution and
+  fingerprint generation path. This ensures the disc ID cache is consulted
+  identically in both paths.
+- Neither path may add pre-processing, filtering, or caching logic that the
+  other does not also execute.
 
 ### 1.6 TMDB Search
 

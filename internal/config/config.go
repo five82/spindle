@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Config holds all Spindle configuration sections.
@@ -105,6 +106,11 @@ type MakeMKVConfig struct {
 	KeyDBPath            string `toml:"keydb_path"`
 	KeyDBDownloadURL     string `toml:"keydb_download_url"`
 	KeyDBDownloadTimeout int    `toml:"keydb_download_timeout"`
+}
+
+// KeyDBTimeout returns the KeyDB download timeout as a time.Duration.
+func (m MakeMKVConfig) KeyDBTimeout() time.Duration {
+	return time.Duration(m.KeyDBDownloadTimeout) * time.Second
 }
 
 // EncodingConfig defines SVT-AV1 encoding settings.

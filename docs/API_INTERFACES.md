@@ -165,8 +165,11 @@ Identify a disc and show TMDB matching details.
 
 Arguments: Optional `[device]` positional argument (overrides `--device`).
 
-Runs identification stage without affecting the queue. Shows disc label, TMDB
-results, metadata, library filename, review status, and rip spec fingerprints.
+Runs the same identification pipeline as the daemon, including mount resolution,
+fingerprint generation, disc ID cache lookup, and TMDB search. Results are
+displayed without affecting the queue. This command must produce identical
+identification results to the daemon for the same disc (see DESIGN_STAGES.md
+section 1.5).
 
 #### `spindle gensubtitle <encoded-file>`
 
