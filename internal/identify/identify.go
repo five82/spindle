@@ -172,12 +172,14 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		"raw_title", result.RawTitle,
 	)
 
+	// Detect media type hint once; used for both cache validation and TMDB search routing.
+	mediaHint := detectMediaTypeHint(result.RawTitle)
+
 	// Step 5: Check disc ID cache (skips TMDB search and KeyDB lookup, not the scan).
 	// Validate cached media type against fresh disc metadata to prevent stale entries
 	// from overriding unambiguous disc signals (e.g., TV hint vs cached movie).
 	if h.discIDCache != nil && item.DiscFingerprint != "" {
 		if entry := h.discIDCache.Lookup(item.DiscFingerprint); entry != nil {
-			mediaHint := detectMediaTypeHint(result.RawTitle)
 			if mediaHint == "tv" && entry.MediaType == "movie" {
 				logger.Warn("disc ID cache invalidated: TV hint contradicts cached movie type",
 					"decision_type", logs.DecisionDiscIDCache,
@@ -236,10 +238,6 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 			"decision_reason", fmt.Sprintf("year=%d", result.SearchYear),
 		)
 	}
-
-	// Detect media type hint from raw title per spec section 1.6.
-	// TV hint -> search /search/tv first; fall back to /search/multi.
-	mediaHint := detectMediaTypeHint(result.RawTitle)
 
 	switch mediaHint {
 	case "tv":
