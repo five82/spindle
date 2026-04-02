@@ -181,6 +181,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 	}
 
+	// Build title-to-episode lookup for active episode tracking.
+	titleEpisodeKey := make(map[int]string, len(env.Episodes))
+	for _, ep := range env.Episodes {
+		titleEpisodeKey[ep.TitleID] = ep.Key
+	}
+
 	// Rip selected titles, tracking TitleID -> file path mapping.
 	titleFileMap := make(map[int]string, len(targets)) // titleID -> ripped file path
 	for i, title := range targets {
@@ -192,6 +198,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"event_type", "rip_title_start",
 		)
 
+		item.ActiveEpisodeKey = titleEpisodeKey[title.ID]
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Ripping title %d", i+1, len(targets), title.ID)
 		if err := h.store.UpdateProgress(item); err != nil {
 			logger.Warn("progress persistence failed",
@@ -236,6 +243,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			)
 		}
 	}
+
+	item.ActiveEpisodeKey = ""
 
 	// Map ripped files to assets and validate.
 	if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir); err != nil {

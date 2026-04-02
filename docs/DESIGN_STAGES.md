@@ -304,6 +304,9 @@ and episode placeholders normally.
 - MakeMKV outputs progress lines to stdout.
 - Parser extracts percentage from `PRGV` lines.
 - Progress updates saved to queue item at regular intervals.
+- For TV content, `ActiveEpisodeKey` is set to the episode matching the
+  current title before each rip and included in every progress update.
+  Cleared after the ripping loop completes.
 
 ### 2.4 Rip Cache
 
