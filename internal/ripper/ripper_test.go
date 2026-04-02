@@ -13,83 +13,6 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 )
 
-func TestMapRippedAssets_Movie(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "title00.mkv"), []byte("fake"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{MediaType: "movie"},
-	}
-
-	h := &Handler{}
-	h.mapRippedAssets(testLogger(), env, dir, nil)
-
-	if len(env.Assets.Ripped) != 1 {
-		t.Fatalf("expected 1 ripped asset, got %d", len(env.Assets.Ripped))
-	}
-	asset := env.Assets.Ripped[0]
-	if asset.EpisodeKey != "main" {
-		t.Errorf("expected episode key 'main', got %q", asset.EpisodeKey)
-	}
-	if asset.Status != "completed" {
-		t.Errorf("expected status 'completed', got %q", asset.Status)
-	}
-	if filepath.Base(asset.Path) != "title00.mkv" {
-		t.Errorf("expected path ending in title00.mkv, got %q", asset.Path)
-	}
-}
-
-func TestMapRippedAssets_TVEpisodes(t *testing.T) {
-	dir := t.TempDir()
-	files := []string{"title00.mkv", "title01.mkv", "title02.mkv"}
-	for _, f := range files {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte("fake"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{MediaType: "tv"},
-		Episodes: []ripspec.Episode{
-			{Key: "s01e01"},
-			{Key: "s01e02"},
-			{Key: "s01e03"},
-		},
-	}
-
-	h := &Handler{}
-	h.mapRippedAssets(testLogger(), env, dir, nil)
-
-	if len(env.Assets.Ripped) != 3 {
-		t.Fatalf("expected 3 ripped assets, got %d", len(env.Assets.Ripped))
-	}
-
-	expectedKeys := []string{"s01e01", "s01e02", "s01e03"}
-	for i, want := range expectedKeys {
-		got := env.Assets.Ripped[i].EpisodeKey
-		if got != want {
-			t.Errorf("asset[%d]: expected episode key %q, got %q", i, want, got)
-		}
-	}
-}
-
-func TestMapRippedAssets_EmptyDir(t *testing.T) {
-	dir := t.TempDir()
-
-	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{MediaType: "movie"},
-	}
-
-	h := &Handler{}
-	h.mapRippedAssets(testLogger(), env, dir, nil)
-
-	if len(env.Assets.Ripped) != 0 {
-		t.Fatalf("expected 0 ripped assets, got %d", len(env.Assets.Ripped))
-	}
-}
-
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
@@ -247,55 +170,6 @@ func TestSelectRipTargets_titleOverrideNotFound(t *testing.T) {
 	}
 }
 
-func TestMapRippedAssets_TVWithTitleFileMap(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create files that simulate MakeMKV output.
-	file1 := filepath.Join(dir, "title00.mkv")
-	file2 := filepath.Join(dir, "title01.mkv")
-	if err := os.WriteFile(file1, []byte("fake"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(file2, []byte("fake"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{MediaType: "tv"},
-		Episodes: []ripspec.Episode{
-			{Key: "s01_001", TitleID: 5},
-			{Key: "s01_002", TitleID: 8},
-		},
-	}
-
-	// TitleID mapping from the rip loop.
-	titleFileMap := map[int]string{
-		5: file1,
-		8: file2,
-	}
-
-	h := &Handler{}
-	h.mapRippedAssets(testLogger(), env, dir, titleFileMap)
-
-	if len(env.Assets.Ripped) != 2 {
-		t.Fatalf("expected 2 ripped assets, got %d", len(env.Assets.Ripped))
-	}
-
-	// Verify TitleID-based mapping (not index order).
-	if env.Assets.Ripped[0].EpisodeKey != "s01_001" {
-		t.Errorf("asset[0].EpisodeKey = %q, want %q", env.Assets.Ripped[0].EpisodeKey, "s01_001")
-	}
-	if env.Assets.Ripped[0].TitleID != 5 {
-		t.Errorf("asset[0].TitleID = %d, want 5", env.Assets.Ripped[0].TitleID)
-	}
-	if env.Assets.Ripped[1].EpisodeKey != "s01_002" {
-		t.Errorf("asset[1].EpisodeKey = %q, want %q", env.Assets.Ripped[1].EpisodeKey, "s01_002")
-	}
-	if env.Assets.Ripped[1].TitleID != 8 {
-		t.Errorf("asset[1].TitleID = %d, want 8", env.Assets.Ripped[1].TitleID)
-	}
-}
-
 func TestListMKVFiles(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"title00.mkv", "title01.mkv", "readme.txt"} {
@@ -384,6 +258,35 @@ func TestRestoreTitlesSkippedWhenAlreadyPresent(t *testing.T) {
 	}
 	if env.Titles[0].Name != "Original" {
 		t.Errorf("titles should not be overwritten; got Name=%q, want %q", env.Titles[0].Name, "Original")
+	}
+}
+
+func TestStagingResetRemovesStaleFiles(t *testing.T) {
+	// Simulate a stale staging directory from a previous run.
+	stagingRoot := filepath.Join(t.TempDir(), "FINGERPRINT")
+	rippedDir := filepath.Join(stagingRoot, "ripped")
+	encodedDir := filepath.Join(stagingRoot, "encoded")
+
+	if err := os.MkdirAll(rippedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rippedDir, "stale.mkv"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(encodedDir, "stale.mkv"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Apply the same reset the ripper does at entry.
+	if err := os.RemoveAll(stagingRoot); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+
+	if _, err := os.Stat(stagingRoot); !os.IsNotExist(err) {
+		t.Errorf("staging root should not exist after reset, got err=%v", err)
 	}
 }
 

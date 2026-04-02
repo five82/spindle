@@ -21,9 +21,12 @@ func TestRegisterAndHasCache(t *testing.T) {
 	srcDir := t.TempDir()
 	store := New(cacheDir, 10)
 
-	// Create a source file to register.
 	if err := os.WriteFile(filepath.Join(srcDir, "title01.mkv"), []byte("video data"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+
+	if err := store.Register("abc123", srcDir, nil); err != nil {
+		t.Fatalf("Register: %v", err)
 	}
 
 	meta := EntryMetadata{
@@ -33,9 +36,8 @@ func TestRegisterAndHasCache(t *testing.T) {
 		TitleCount:  1,
 		TotalBytes:  10,
 	}
-
-	if err := store.Register("abc123", srcDir, meta, nil); err != nil {
-		t.Fatalf("Register: %v", err)
+	if err := store.WriteMetadata("abc123", meta); err != nil {
+		t.Fatalf("WriteMetadata: %v", err)
 	}
 
 	if !store.HasCache("abc123") {
@@ -54,6 +56,10 @@ func TestRegisterAndRestoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := store.Register("fp001", srcDir, nil); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
 	meta := EntryMetadata{
 		Fingerprint: "fp001",
 		DiscTitle:   "Round Trip Disc",
@@ -61,9 +67,8 @@ func TestRegisterAndRestoreRoundTrip(t *testing.T) {
 		TitleCount:  1,
 		TotalBytes:  int64(len(content)),
 	}
-
-	if err := store.Register("fp001", srcDir, meta, nil); err != nil {
-		t.Fatalf("Register: %v", err)
+	if err := store.WriteMetadata("fp001", meta); err != nil {
+		t.Fatalf("WriteMetadata: %v", err)
 	}
 
 	restored, err := store.Restore("fp001", destDir, nil)
@@ -104,7 +109,6 @@ func TestRegisterProgressCallback(t *testing.T) {
 	srcDir := t.TempDir()
 	store := New(cacheDir, 10)
 
-	// Create two source files.
 	if err := os.WriteFile(filepath.Join(srcDir, "a.mkv"), []byte("aaaa"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -112,20 +116,12 @@ func TestRegisterProgressCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	meta := EntryMetadata{
-		Fingerprint: "prog01",
-		DiscTitle:   "Progress Test",
-		CachedAt:    time.Now(),
-		TitleCount:  2,
-		TotalBytes:  10,
-	}
-
 	var reports []CopyProgress
 	progress := func(p CopyProgress) {
 		reports = append(reports, p)
 	}
 
-	if err := store.Register("prog01", srcDir, meta, progress); err != nil {
+	if err := store.Register("prog01", srcDir, progress); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
@@ -153,6 +149,10 @@ func TestRestoreProgressCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := store.Register("prog02", srcDir, nil); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
 	meta := EntryMetadata{
 		Fingerprint: "prog02",
 		DiscTitle:   "Restore Progress",
@@ -160,9 +160,8 @@ func TestRestoreProgressCallback(t *testing.T) {
 		TitleCount:  1,
 		TotalBytes:  int64(len(content)),
 	}
-
-	if err := store.Register("prog02", srcDir, meta, nil); err != nil {
-		t.Fatalf("Register: %v", err)
+	if err := store.WriteMetadata("prog02", meta); err != nil {
+		t.Fatalf("WriteMetadata: %v", err)
 	}
 
 	var reports []CopyProgress
@@ -190,12 +189,7 @@ func TestRestoreProgressCallback(t *testing.T) {
 
 func TestGetMetadata(t *testing.T) {
 	cacheDir := t.TempDir()
-	srcDir := t.TempDir()
 	store := New(cacheDir, 10)
-
-	if err := os.WriteFile(filepath.Join(srcDir, "title.mkv"), []byte("data"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	now := time.Now().Truncate(time.Second)
 	meta := EntryMetadata{
@@ -206,8 +200,8 @@ func TestGetMetadata(t *testing.T) {
 		TotalBytes:  4,
 	}
 
-	if err := store.Register("meta01", srcDir, meta, nil); err != nil {
-		t.Fatalf("Register: %v", err)
+	if err := store.WriteMetadata("meta01", meta); err != nil {
+		t.Fatalf("WriteMetadata: %v", err)
 	}
 
 	got, err := store.GetMetadata("meta01")
@@ -222,5 +216,80 @@ func TestGetMetadata(t *testing.T) {
 	}
 	if !got.CachedAt.Equal(now) {
 		t.Fatalf("CachedAt: got %v, want %v", got.CachedAt, now)
+	}
+}
+
+func TestMetadataFilenameIsSpindleCacheJSON(t *testing.T) {
+	cacheDir := t.TempDir()
+	store := New(cacheDir, 10)
+
+	meta := EntryMetadata{DiscTitle: "filename test"}
+	if err := store.WriteMetadata("fp01", meta); err != nil {
+		t.Fatalf("WriteMetadata: %v", err)
+	}
+
+	// Verify the file is named spindle.cache.json, not metadata.json.
+	expected := filepath.Join(cacheDir, "fp01", "spindle.cache.json")
+	if _, err := os.Stat(expected); err != nil {
+		t.Fatalf("expected %s to exist: %v", expected, err)
+	}
+
+	old := filepath.Join(cacheDir, "fp01", "metadata.json")
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("metadata.json should not exist, got err=%v", err)
+	}
+}
+
+func TestWriteMetadataIsAtomic(t *testing.T) {
+	cacheDir := t.TempDir()
+	store := New(cacheDir, 10)
+
+	meta := EntryMetadata{DiscTitle: "atomic test"}
+	if err := store.WriteMetadata("fp01", meta); err != nil {
+		t.Fatalf("WriteMetadata: %v", err)
+	}
+
+	// No temp files should be left behind.
+	entries, err := os.ReadDir(filepath.Join(cacheDir, "fp01"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != metadataFileName {
+			t.Errorf("unexpected file in cache entry dir: %s", e.Name())
+		}
+	}
+}
+
+func TestRestoreSkipsMetadataSidecar(t *testing.T) {
+	cacheDir := t.TempDir()
+	srcDir := t.TempDir()
+	destDir := t.TempDir()
+	store := New(cacheDir, 10)
+
+	content := []byte("video data")
+	if err := os.WriteFile(filepath.Join(srcDir, "title.mkv"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Register("fp01", srcDir, nil); err != nil {
+		t.Fatal(err)
+	}
+	meta := EntryMetadata{TotalBytes: int64(len(content))}
+	if err := store.WriteMetadata("fp01", meta); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Restore("fp01", destDir, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Metadata sidecar should NOT be copied to destDir.
+	if _, err := os.Stat(filepath.Join(destDir, metadataFileName)); !os.IsNotExist(err) {
+		t.Error("metadata sidecar should not be copied to restore destination")
+	}
+	// But the MKV should be there.
+	if _, err := os.Stat(filepath.Join(destDir, "title.mkv")); err != nil {
+		t.Errorf("restored file missing: %v", err)
 	}
 }

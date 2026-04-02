@@ -56,44 +56,73 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 	rippedDir := filepath.Join(stagingRoot, "ripped")
 
+	// Staging directories are ephemeral. Wipe any leftover state from a
+	// previous run so file discovery starts clean. The rip cache is the
+	// durable layer; staging has no reuse value between pipeline runs.
+	if err := os.RemoveAll(stagingRoot); err != nil {
+		return fmt.Errorf("reset staging dir: %w", err)
+	}
+	logger.Info("staging directory reset for clean rip",
+		"decision_type", logs.DecisionStagingCleanup,
+		"decision_result", "reset",
+		"decision_reason", "ephemeral staging",
+	)
+
 	// Check rip cache first.
 	if h.cache != nil && item.DiscFingerprint != "" {
 		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(item, "Restoring from cache...")); err == nil && meta != nil {
-			logger.Info("rip cache hit",
-				"decision_type", logs.DecisionRipCache,
-				"decision_result", "restored",
-				"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
-			)
-			if h.notifier != nil {
-				msg := fmt.Sprintf("%s (%d titles from cache)", item.DiscTitle, meta.TitleCount)
-				msg += "\n" + driveAvailableMsg
-				msg += queue.FormatAlsoProcessing(h.store, item.ID)
-				_ = h.notifier.Send(ctx, notify.EventRipCacheHit,
-					"Rip Cache Hit",
-					msg,
-				)
-			}
-			// Map cached files to assets (no titleFileMap for cache path).
-			h.mapRippedAssets(logger, &env, rippedDir, nil)
-			if n := len(env.Assets.Ripped); n > 0 {
-				item.RippedFile = env.Assets.Ripped[n-1].Path
-			}
-			// Restore titles from cached envelope when identification
-			// used the disc ID cache fast-path (no MakeMKV scan).
-			if len(env.Titles) == 0 && meta.RipSpecData != "" {
-				if cachedEnv, err := ripspec.Parse(meta.RipSpecData); err == nil && len(cachedEnv.Titles) > 0 {
-					env.Titles = cachedEnv.Titles
-					logger.Info("titles restored from rip cache",
-						"decision_type", logs.DecisionRipCacheTitles,
-						"decision_result", "restored",
-						"decision_reason", fmt.Sprintf("%d titles from cached envelope", len(cachedEnv.Titles)),
+			// TV: verify all episode files are present in cache.
+			cacheUsable := true
+			if len(env.Episodes) > 0 {
+				if missing := cacheHasAllEpisodeFiles(&env, rippedDir); len(missing) > 0 {
+					cacheUsable = false
+					logger.Info("rip cache incomplete",
+						"decision_type", logs.DecisionRipCache,
+						"decision_result", "incomplete",
+						"decision_reason", "missing_episode_files",
+						"missing_episodes", strings.Join(missing, ","),
+						"missing_count", len(missing),
 					)
 				}
 			}
-			if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
-				return err
+
+			if cacheUsable {
+				logger.Info("rip cache hit",
+					"decision_type", logs.DecisionRipCache,
+					"decision_result", "restored",
+					"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
+				)
+				if h.notifier != nil {
+					msg := fmt.Sprintf("%s (%d titles from cache)", item.DiscTitle, meta.TitleCount)
+					msg += "\n" + driveAvailableMsg
+					msg += queue.FormatAlsoProcessing(h.store, item.ID)
+					_ = h.notifier.Send(ctx, notify.EventRipCacheHit,
+						"Rip Cache Hit",
+						msg,
+					)
+				}
+				// Map cached files to assets via title ID parsing.
+				if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir); err != nil {
+					return err
+				}
+				// Restore titles from cached envelope when identification
+				// used the disc ID cache fast-path (no MakeMKV scan).
+				if len(env.Titles) == 0 && meta.RipSpecData != "" {
+					if cachedEnv, err := ripspec.Parse(meta.RipSpecData); err == nil && len(cachedEnv.Titles) > 0 {
+						env.Titles = cachedEnv.Titles
+						logger.Info("titles restored from rip cache",
+							"decision_type", logs.DecisionRipCacheTitles,
+							"decision_result", "restored",
+							"decision_reason", fmt.Sprintf("%d titles from cached envelope", len(cachedEnv.Titles)),
+						)
+					}
+				}
+				if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+					return err
+				}
+				return nil
 			}
-			return nil
+			// Cache incomplete — fall through to fresh rip.
 		}
 	}
 
@@ -208,10 +237,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Map ripped files to assets using TitleID mapping.
-	h.mapRippedAssets(logger, &env, rippedDir, titleFileMap)
-	if n := len(env.Assets.Ripped); n > 0 {
-		item.RippedFile = env.Assets.Ripped[n-1].Path
+	// Map ripped files to assets and validate.
+	if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir); err != nil {
+		return err
 	}
 
 	// Persist envelope.
@@ -239,13 +267,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			RipSpecData:  item.RipSpecData,
 			MetadataJSON: item.MetadataJSON,
 		}
-		if err := h.cache.Register(item.DiscFingerprint, rippedDir, meta, h.cacheProgressFunc(item, "Caching rip...")); err != nil {
+		if err := h.cache.Register(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(item, "Caching rip...")); err != nil {
 			logger.Warn("rip cache write failed",
 				"event_type", "cache_write_error",
 				"error_hint", err.Error(),
 				"impact", "no cache for next rip of this disc",
 			)
 			// Degraded, not fatal.
+		} else if err := h.cache.WriteMetadata(item.DiscFingerprint, meta); err != nil {
+			logger.Warn("rip cache metadata write failed",
+				"event_type", "cache_metadata_error",
+				"error_hint", err.Error(),
+				"impact", "cache entry may not be reused",
+			)
 		}
 	}
 
@@ -367,72 +401,72 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 	}
 }
 
-// mapRippedAssets maps ripped files to envelope assets using TitleID mapping.
-// titleFileMap maps titleID -> file path from the rip loop. When nil (cache
-// restore path), falls back to directory scanning with index-based mapping.
-func (h *Handler) mapRippedAssets(logger *slog.Logger, env *ripspec.Envelope, dir string, titleFileMap map[int]string) {
-	if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 && titleFileMap != nil {
+// mapAndValidateAssets maps ripped files to envelope assets and validates them.
+// For TV content, uses title ID parsing from filenames. For movies, scans the
+// directory for the first MKV. Validates all mapped assets with ffprobe.
+func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger, env *ripspec.Envelope, item *queue.Item, dir string) error {
+	if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
 		logger.Info("asset mapping strategy selected",
 			"decision_type", logs.DecisionAssetMapping,
-			"decision_result", "title_file_map",
+			"decision_result", "title_id_scan",
 			"decision_reason", fmt.Sprintf("media_type=%s episodes=%d", env.Metadata.MediaType, len(env.Episodes)),
 		)
-		// TV with TitleID mapping: connect files to episodes via TitleID.
-		for _, ep := range env.Episodes {
-			path, ok := titleFileMap[ep.TitleID]
-			if !ok {
+		result := assignEpisodeAssets(env, dir, logger)
+		if result.Assigned == 0 {
+			return fmt.Errorf("episode asset mapping: zero matches (expected %d episodes)", len(env.Episodes))
+		}
+		if len(result.Missing) > 0 {
+			reason := fmt.Sprintf("missing %d episode(s): %s", len(result.Missing), strings.Join(result.Missing, ", "))
+			item.AppendReviewReason(reason)
+			logger.Warn("partial episode asset mapping",
+				"event_type", "episode_files_missing",
+				"error_hint", "check MakeMKV output for failed titles",
+				"impact", "some episodes will be missing from final output",
+				"assigned", result.Assigned,
+				"missing_count", len(result.Missing),
+				"missing_episodes", strings.Join(result.Missing, ","),
+			)
+		}
+	} else {
+		// Movie or unknown: scan directory for MKV files.
+		logger.Info("asset mapping strategy selected",
+			"decision_type", logs.DecisionAssetMapping,
+			"decision_result", "directory_scan",
+			"decision_reason", fmt.Sprintf("media_type=%s", env.Metadata.MediaType),
+		)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return fmt.Errorf("asset mapping: read dir: %w", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
 				continue
 			}
 			env.Assets.AddAsset("ripped", ripspec.Asset{
-				EpisodeKey: ep.Key,
-				TitleID:    ep.TitleID,
-				Path:       path,
+				EpisodeKey: "main",
+				Path:       filepath.Join(dir, entry.Name()),
 				Status:     "completed",
 			})
 		}
-		return
 	}
 
-	// Movie, unknown, or cache restore: scan directory.
-	logger.Info("asset mapping strategy selected",
-		"decision_type", logs.DecisionAssetMapping,
-		"decision_result", "directory_scan",
-		"decision_reason", fmt.Sprintf("media_type=%s episodes=%d", env.Metadata.MediaType, len(env.Episodes)),
-	)
-	// os.ReadDir returns entries sorted by filename.
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		logger.Warn("asset mapping directory read failed",
-			"event_type", "asset_mapping_readdir_failed",
-			"error_hint", err.Error(),
-			"impact", "ripped assets may not be tracked",
-		)
-		return
+	if n := len(env.Assets.Ripped); n > 0 {
+		item.RippedFile = env.Assets.Ripped[n-1].Path
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
+	// Validate all ripped artifacts with ffprobe.
+	visited := make(map[string]struct{})
+	for _, asset := range env.Assets.Ripped {
+		if _, seen := visited[asset.Path]; seen {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name())
-
-		var episodeKey string
-		if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
-			// Cache restore fallback: map files in order to episodes.
-			idx := len(env.Assets.Ripped)
-			if idx < len(env.Episodes) {
-				episodeKey = env.Episodes[idx].Key
-			}
-		} else {
-			episodeKey = "main"
+		visited[asset.Path] = struct{}{}
+		if err := h.validateRippedArtifact(ctx, asset.Path); err != nil {
+			return fmt.Errorf("ripped artifact invalid (%s): %w", filepath.Base(asset.Path), err)
 		}
-
-		env.Assets.AddAsset("ripped", ripspec.Asset{
-			EpisodeKey: episodeKey,
-			Path:       path,
-			Status:     "completed",
-		})
 	}
+
+	return nil
 }
 
 // cacheProgressFunc returns a throttled progress callback for cache operations.

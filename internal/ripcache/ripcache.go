@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const metadataFileName = "spindle.cache.json"
+
 // CopyProgress reports progress during a file copy operation.
 type CopyProgress struct {
 	BytesCopied int64
@@ -47,9 +49,9 @@ func New(cacheDir string, maxGiB int) *Store {
 }
 
 // Register copies ripped files from srcDir into the cache under fingerprint.
-// Metadata is written as metadata.json alongside the cached files.
 // If progress is non-nil, it is called during file copies to report progress.
-func (s *Store) Register(fingerprint, srcDir string, meta EntryMetadata, progress ProgressFunc) error {
+// Metadata is NOT written here; call WriteMetadata separately.
+func (s *Store) Register(fingerprint, srcDir string, progress ProgressFunc) error {
 	entryDir := filepath.Join(s.cacheDir, fingerprint)
 	if err := os.MkdirAll(entryDir, 0o755); err != nil {
 		return fmt.Errorf("create cache entry dir: %w", err)
@@ -85,13 +87,31 @@ func (s *Store) Register(fingerprint, srcDir string, meta EntryMetadata, progres
 		bytesCopied += n
 	}
 
-	metaPath := filepath.Join(entryDir, "metadata.json")
+	return nil
+}
+
+// WriteMetadata writes the metadata sidecar for a cache entry via atomic
+// temp-file + rename. Returns error but callers should treat failure as
+// non-fatal (the cached files are still usable without metadata).
+func (s *Store) WriteMetadata(fingerprint string, meta EntryMetadata) error {
+	entryDir := filepath.Join(s.cacheDir, fingerprint)
+	if err := os.MkdirAll(entryDir, 0o755); err != nil {
+		return fmt.Errorf("ensure cache entry dir: %w", err)
+	}
+
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
-	if err := os.WriteFile(metaPath, data, 0o644); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
+
+	metaPath := filepath.Join(entryDir, metadataFileName)
+	tmp := filepath.Join(entryDir, fmt.Sprintf(".spindle-cache-%d.tmp", time.Now().UnixNano()))
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write metadata temp: %w", err)
+	}
+	if err := os.Rename(tmp, metaPath); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename metadata: %w", err)
 	}
 
 	return nil
@@ -122,7 +142,7 @@ func (s *Store) Restore(fingerprint, destDir string, progress ProgressFunc) (*En
 
 	var bytesCopied int64
 	for _, e := range entries {
-		if e.IsDir() || e.Name() == "metadata.json" {
+		if e.IsDir() || e.Name() == metadataFileName {
 			continue
 		}
 		srcPath := filepath.Join(entryDir, e.Name())
@@ -203,9 +223,9 @@ func (s *Store) Prune() error {
 	return nil
 }
 
-// GetMetadata reads the metadata.json for a cache entry.
+// GetMetadata reads the metadata sidecar for a cache entry.
 func (s *Store) GetMetadata(fingerprint string) (*EntryMetadata, error) {
-	metaPath := filepath.Join(s.cacheDir, fingerprint, "metadata.json")
+	metaPath := filepath.Join(s.cacheDir, fingerprint, metadataFileName)
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		return nil, fmt.Errorf("read metadata: %w", err)
