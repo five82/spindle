@@ -32,6 +32,7 @@ const (
 	DecisionEpisodeIDSkip            = "episode_id_skip"
 	DecisionEpisodeMatch             = "episode_match"
 	DecisionEpisodePlaceholders      = "episode_placeholders"
+	DecisionEpisodeRuntimeFilter     = "episode_runtime_filter"
 	DecisionFileDiscovery            = "file_discovery"
 	DecisionFileProbe                = "file_probe"
 	DecisionFingerprintStrategy      = "fingerprint_strategy"

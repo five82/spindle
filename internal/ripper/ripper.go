@@ -465,14 +465,44 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 
 	// Validate all ripped artifacts with ffprobe.
 	visited := make(map[string]struct{})
-	for _, asset := range env.Assets.Ripped {
+	var validationErrors int
+	for i, asset := range env.Assets.Ripped {
 		if _, seen := visited[asset.Path]; seen {
 			continue
 		}
 		visited[asset.Path] = struct{}{}
 		if err := h.validateRippedArtifact(ctx, asset.Path); err != nil {
+			if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
+				// Per-episode failure isolation: mark failed, continue.
+				logger.Warn("ripped episode failed validation",
+					"event_type", "rip_validation_failed",
+					"error_hint", err.Error(),
+					"impact", "episode excluded from pipeline",
+					"episode_key", asset.EpisodeKey,
+					"path", asset.Path,
+				)
+				env.Assets.Ripped[i].Status = "failed"
+				env.Assets.Ripped[i].ErrorMsg = err.Error()
+				validationErrors++
+				continue
+			}
+			// Movies: fatal (single title).
 			return fmt.Errorf("ripped artifact invalid (%s): %w", filepath.Base(asset.Path), err)
 		}
+	}
+
+	if env.Metadata.MediaType == "tv" && validationErrors > 0 {
+		valid := len(visited) - validationErrors
+		if valid == 0 {
+			return fmt.Errorf("all %d ripped episodes failed validation", validationErrors)
+		}
+		reason := fmt.Sprintf("%d episode(s) failed rip validation", validationErrors)
+		item.AppendReviewReason(reason)
+		logger.Warn("partial rip validation",
+			"event_type", "rip_validation_partial",
+			"error_hint", "some episodes failed ffprobe validation",
+			"impact", fmt.Sprintf("%d of %d episodes excluded", validationErrors, len(visited)),
+		)
 	}
 
 	return nil

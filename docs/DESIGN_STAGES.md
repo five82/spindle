@@ -219,11 +219,13 @@ Munich 1972).
 
 After identification:
 1. Build title specs from MakeMKV scan results (filtered by `min_title_length`).
-2. For TV: deduplicate titles by segment map (m2ts identity) before creating
-   episode specs with placeholder keys (e.g., `s01_001`). Titles sharing a
-   segment map reference identical content even if playlist metadata differs
-   (common on TV Blu-rays with multiple language playlists). Falls back to
-   title hash for DVDs where segment map is absent.
+2. For TV: filter duration outliers — titles whose duration is less than half
+   the median of all candidate titles are excluded as bonus features or menus.
+   Then deduplicate by segment map (m2ts identity) before creating episode
+   specs with placeholder keys (e.g., `s01_001`). Titles sharing a segment
+   map reference identical content even if playlist metadata differs (common
+   on TV Blu-rays with multiple language playlists). Falls back to title hash
+   for DVDs where segment map is absent.
 3. Set metadata fields from TMDB response.
 4. Set `metadata.disc_source` (`bluray`, `dvd`, `unknown` --
    determined from disc detection via lsblk probe).
@@ -373,6 +375,10 @@ Path is sanitized via `SanitizePathSegment()`.
 - **Episode asset mapping** post-rip: `assignEpisodeAssets()` maps ripped files to
   episodes. On zero matches: fails with validation error. On partial match: warns
   and routes to review.
+- **Per-episode rip validation** (TV): Validation failures mark the individual
+  asset as failed and continue to the next episode (failure isolation). If all
+  episodes fail validation, the item fails. Partial success warns and routes to
+  review. Movies remain fatal on any validation failure.
 - **Rip cache registration** post-rip: `Register()` + `WriteMetadata()`. Metadata
   write failure is non-fatal (logs warning).
 - **Rip timeout distinction**: Timeout errors produce `ErrTimeout` (with hint

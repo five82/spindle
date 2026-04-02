@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -620,6 +621,9 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 		season = 1
 	}
 
+	// Compute median duration of titles passing MinTitleLength for outlier detection.
+	medianDur := medianTitleDuration(env.Titles, h.cfg.MakeMKV.MinTitleLength)
+
 	seen := make(map[string]int) // dedup key -> first title ID
 	var duplicates int
 
@@ -630,6 +634,19 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 				"title_id", title.ID,
 				"duration", title.Duration,
 				"min_title_length", h.cfg.MakeMKV.MinTitleLength,
+			)
+			continue
+		}
+
+		// Episode runtime filter: skip titles whose duration is less than
+		// half the median of all candidate titles. This excludes bonus
+		// features and menus without hardcoding an episode-length window.
+		if medianDur > 0 && title.Duration < medianDur/2 {
+			logger.Info("title duration outlier filtered",
+				"decision_type", logs.DecisionEpisodeRuntimeFilter,
+				"decision_result", "skipped",
+				"decision_reason", fmt.Sprintf("title %d duration %ds < half median %ds",
+					title.ID, title.Duration, medianDur),
 			)
 			continue
 		}
@@ -670,6 +687,22 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 		"decision_result", fmt.Sprintf("%d episodes", idx),
 		"decision_reason", fmt.Sprintf("season=%d titles=%d duplicates=%d", season, len(env.Titles), duplicates),
 	)
+}
+
+// medianTitleDuration returns the median duration of titles whose duration
+// is at least minDur. Returns 0 if no titles qualify.
+func medianTitleDuration(titles []ripspec.Title, minDur int) int {
+	var durations []int
+	for _, t := range titles {
+		if t.Duration >= minDur {
+			durations = append(durations, t.Duration)
+		}
+	}
+	if len(durations) == 0 {
+		return 0
+	}
+	slices.Sort(durations)
+	return durations[len(durations)/2]
 }
 
 // buildEnvelopeFromCache constructs an envelope from a disc ID cache entry

@@ -717,3 +717,27 @@ func TestCreateEpisodePlaceholders_SegmentMapTakesPriorityOverTitleHash(t *testi
 		t.Fatalf("len(Episodes) = %d, want 1 (same SegmentMap dedupes despite different TitleHash)", len(env.Episodes))
 	}
 }
+
+func TestCreateEpisodePlaceholders_FiltersOutlierDurations(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}}
+	h.cfg.MakeMKV.MinTitleLength = 120
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{SeasonNumber: 3},
+		Titles: []ripspec.Title{
+			{ID: 0, Duration: 1520, SegmentMap: "00001.m2ts"}, // ~25 min episode
+			{ID: 1, Duration: 1516, SegmentMap: "00002.m2ts"}, // ~25 min episode
+			{ID: 2, Duration: 1519, SegmentMap: "00003.m2ts"}, // ~25 min episode
+			{ID: 24, Duration: 340, SegmentMap: "00024.m2ts"},  // 5.7 min bonus (< half median)
+		},
+	}
+	h.createEpisodePlaceholders(discardLogger(), env)
+
+	if len(env.Episodes) != 3 {
+		t.Fatalf("len(Episodes) = %d, want 3 (title 24 at 340s should be filtered as duration outlier)", len(env.Episodes))
+	}
+	for _, ep := range env.Episodes {
+		if ep.TitleID == 24 {
+			t.Errorf("title 24 (340s bonus feature) should have been excluded as duration outlier")
+		}
+	}
+}
