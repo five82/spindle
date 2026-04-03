@@ -219,6 +219,57 @@ func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 	}
 }
 
+func TestDetectTVRoutingAnomalies_FlagsCleanEpisodesInReview(t *testing.T) {
+	r := &Report{
+		Paths: AuditPaths{ReviewDir: "/review"},
+		Envelope: &EnvelopeReport{
+			Metadata: ripspec.Metadata{MediaType: "tv"},
+			Episodes: []ripspec.Episode{
+				{Key: "s01e01", Episode: 1},
+				{Key: "s01e02", Episode: 2, NeedsReview: true},
+			},
+			Assets: ripspec.Assets{Final: []ripspec.Asset{
+				{EpisodeKey: "s01e01", Path: "/review/show/Show - S01E01.mkv", Status: "completed"},
+				{EpisodeKey: "s01e02", Path: "/review/show/Show - S01E02.mkv", Status: "completed"},
+			}},
+		},
+	}
+	anomalies := detectTVRoutingAnomalies(r)
+	found := false
+	for _, an := range anomalies {
+		if an.Message == "1 clean resolved episode(s) routed to review" {
+			found = true
+			if an.Severity != "critical" {
+				t.Fatalf("severity = %s, want critical", an.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected routing anomaly for clean episode in review")
+	}
+}
+
+func TestDetectTVRoutingAnomalies_FlagsReviewEpisodesInLibrary(t *testing.T) {
+	r := &Report{
+		Paths: AuditPaths{ReviewDir: "/review"},
+		Envelope: &EnvelopeReport{
+			Metadata: ripspec.Metadata{MediaType: "tv"},
+			Episodes: []ripspec.Episode{{Key: "s01e02", Episode: 2, NeedsReview: true}},
+			Assets:   ripspec.Assets{Final: []ripspec.Asset{{EpisodeKey: "s01e02", Path: "/library/tv/Show/Season 01/Show - S01E02.mkv", Status: "completed"}}},
+		},
+	}
+	anomalies := detectTVRoutingAnomalies(r)
+	found := false
+	for _, an := range anomalies {
+		if an.Message == "1 review-required episode(s) routed to library" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected routing anomaly for review episode in library")
+	}
+}
+
 func TestCompressMediaProbes(t *testing.T) {
 	majority := ProfileSummary{VideoCodec: "av1", Width: 1920, Height: 1080}
 

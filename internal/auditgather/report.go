@@ -11,6 +11,7 @@ import (
 type Report struct {
 	Item         ItemSummary      `json:"item"`
 	StageGate    StageGate        `json:"stage_gate"`
+	Paths        AuditPaths       `json:"paths"`
 	Logs         *LogAnalysis     `json:"logs,omitempty"`
 	RipCache     *RipCacheReport  `json:"rip_cache,omitempty"`
 	Envelope     *EnvelopeReport  `json:"envelope,omitempty"`
@@ -19,6 +20,12 @@ type Report struct {
 	MediaOmitted int              `json:"media_omitted,omitempty"`
 	Analysis     *Analysis        `json:"analysis,omitempty"`
 	Errors       []string         `json:"errors,omitempty"`
+}
+
+// AuditPaths exposes configured output roots used by routing validation.
+type AuditPaths struct {
+	ReviewDir  string `json:"review_dir,omitempty"`
+	LibraryDir string `json:"library_dir,omitempty"`
 }
 
 // ItemSummary holds queue item identification and status fields.
@@ -43,17 +50,17 @@ type ItemSummary struct {
 
 // StageGate determines which audit phases are applicable.
 type StageGate struct {
-	FurthestStage string `json:"furthest_stage"`
-	MediaType     string `json:"media_type"`
-	DiscSource    string `json:"disc_source"`
-	PhaseLogs       bool `json:"phase_logs"`
-	PhaseRipCache   bool `json:"phase_rip_cache"`
-	PhaseEpisodeID  bool `json:"phase_episode_id"`
-	PhaseEncoded    bool `json:"phase_encoded"`
-	PhaseCrop       bool `json:"phase_crop"`
-	PhaseSubtitles  bool `json:"phase_subtitles"`
-	PhaseCommentary bool `json:"phase_commentary"`
-	PhaseExtVal     bool `json:"phase_external_validation"`
+	FurthestStage   string `json:"furthest_stage"`
+	MediaType       string `json:"media_type"`
+	DiscSource      string `json:"disc_source"`
+	PhaseLogs       bool   `json:"phase_logs"`
+	PhaseRipCache   bool   `json:"phase_rip_cache"`
+	PhaseEpisodeID  bool   `json:"phase_episode_id"`
+	PhaseEncoded    bool   `json:"phase_encoded"`
+	PhaseCrop       bool   `json:"phase_crop"`
+	PhaseSubtitles  bool   `json:"phase_subtitles"`
+	PhaseCommentary bool   `json:"phase_commentary"`
+	PhaseExtVal     bool   `json:"phase_external_validation"`
 }
 
 // LogAnalysis holds log entries filtered by item ID.
@@ -121,14 +128,14 @@ type EncodingReport struct {
 
 // MediaFileProbe holds FFprobe results for a single media file.
 type MediaFileProbe struct {
-	Path           string          `json:"path"`
-	Role           string          `json:"role"`
-	EpisodeKey     string          `json:"episode_key,omitempty"`
-	Representative bool            `json:"representative,omitempty"`
-	Probe          *ffprobe.Result `json:"probe,omitempty"`
-	SizeBytes      int64           `json:"size_bytes"`
-	DurationSeconds float64        `json:"duration_seconds"`
-	Error          string          `json:"error,omitempty"`
+	Path            string          `json:"path"`
+	Role            string          `json:"role"`
+	EpisodeKey      string          `json:"episode_key,omitempty"`
+	Representative  bool            `json:"representative,omitempty"`
+	Probe           *ffprobe.Result `json:"probe,omitempty"`
+	SizeBytes       int64           `json:"size_bytes"`
+	DurationSeconds float64         `json:"duration_seconds"`
+	Error           string          `json:"error,omitempty"`
 }
 
 // Analysis holds pre-computed summaries derived from gathered data.
@@ -161,10 +168,10 @@ type EpisodeConsistency struct {
 
 // ProfileSummary describes a media file's stream characteristics.
 type ProfileSummary struct {
-	VideoCodec     string            `json:"video_codec"`
-	Width          int               `json:"width"`
-	Height         int               `json:"height"`
-	AudioStreams   []AudioProfile    `json:"audio_streams,omitempty"`
+	VideoCodec      string            `json:"video_codec"`
+	Width           int               `json:"width"`
+	Height          int               `json:"height"`
+	AudioStreams    []AudioProfile    `json:"audio_streams,omitempty"`
 	SubtitleStreams []SubtitleProfile `json:"subtitle_streams,omitempty"`
 }
 

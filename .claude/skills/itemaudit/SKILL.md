@@ -146,6 +146,7 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - `event_type=episode_match_low_confidence` — episodes with `MatchConfidence` below 0.70
    - `decision_type=contentid_matches` — final episode-to-reference matching results
    - Verify placeholder keys (`s01_001`) were replaced with resolved keys (`s01e03`) after episodeid
+   - **Do not stop at episode-ID quality.** If organizer/review routing is implicated, compare per-episode review state against final destinations.
 
 ### Phase 3: Rip Cache Analysis (when `phase_rip_cache` is true)
 
@@ -178,9 +179,11 @@ Analyze the `rip_cache` section from audit-gather output:
 
 **TV only.** Analyze `envelope.episodes`, `envelope.attributes`, and `item.needs_review`:
 
-1. **Content ID method**: Check `envelope.attributes["content_id_method"]`
-   - `whisperx_opensubtitles` = full pipeline
-   - If absent, check `logs.decisions` for skip reason
+1. **Content ID provenance**: Check `envelope.attributes.content_id`
+   - `method` should describe the matching path used
+   - `reference_source` should explain where references came from
+   - `episodes_synchronized` should be `true` after successful identification
+   - `completed` distinguishes successful completion from degraded early exit
 
 2. **Episode manifest review**: `analysis.episode_stats` provides pre-computed `confidence_min/max/mean`, `below_070/080/090` counts, `unresolved` count, and `sequence_contiguous` for the overview. Use these for the summary, but still review the full `envelope.episodes[]` manifest for per-episode details. Confidence thresholds:
    - **CRITICAL** (< 0.70): Episode ordering likely wrong. Check `item.needs_review`
@@ -188,14 +191,28 @@ Analyze the `rip_cache` section from audit-gather output:
    - **OK** (> 0.80): High confidence match
    - **Zero** (0.0): Unresolved episode
 
-3. **`content_id_matches` attribute**: Check `envelope.attributes["content_id_matches"]`:
-   - Verify all episodes have a match entry
-   - Check `matched_episode` numbers form a reasonable sequence
+3. **Canonical match outcomes live in `episodes[]`**:
+   - Verify all episodes have sensible resolved/unresolved state
+   - Review `match_confidence`, `needs_review`, and `review_reason` per episode
    - Minimum accepted similarity score is 0.58 — scores near this floor warrant scrutiny
 
 4. **Episode sequence continuity**: `analysis.episode_stats.sequence_contiguous` and `episode_range` are pre-computed. If not contiguous, inspect `envelope.episodes[]` for gaps or duplicates indicating matching errors
 
-5. **`episodes_synchronized` flag**: Check `envelope.attributes["episodes_synchronized"]` — should be `true` after successful identification
+### Phase 3c: Final Output Routing Validation (post-organizing items, especially TV with review flags)
+
+Analyze the actual final routing outcome, not just item-level review flags:
+
+1. **Read `envelope.assets.final`** and map final paths by `episode_key`.
+2. **For TV, compute expected destination per episode**:
+   - resolved + no episode review flag -> library
+   - unresolved -> review
+   - resolved + episode review flag -> review
+3. **Compare expected vs actual destination** using final paths and, when needed, direct filesystem inspection of the review/library directories.
+4. **Escalate any mismatch as a primary finding**, especially:
+   - all episodes routed to review when only a subset required review
+   - review-required episodes routed to library
+   - missing final outputs for episodes that should have been organized
+5. If the structured audit data is incomplete or suspicious, **inspect the actual directories on disk** rather than assuming the envelope tells the whole story.
 
 ### Phase 4: Encoded File Analysis (when `phase_encoded` is true)
 

@@ -3,6 +3,7 @@ package auditgather
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -12,6 +13,90 @@ import (
 )
 
 // computeAnalysis derives pre-computed summaries from the collected report data.
+func normalizeAuditPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
+func pathWithinRoot(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	path = normalizeAuditPath(path)
+	root = normalizeAuditPath(root)
+	if path == root {
+		return true
+	}
+	return strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
+func detectTVRoutingAnomalies(r *Report) []Anomaly {
+	if r == nil || r.Envelope == nil || r.Envelope.Metadata.MediaType != "tv" {
+		return nil
+	}
+	finalByKey := make(map[string]ripspec.Asset)
+	for _, asset := range r.Envelope.Assets.Final {
+		if asset.EpisodeKey != "" {
+			finalByKey[strings.ToLower(asset.EpisodeKey)] = asset
+		}
+	}
+
+	var anomalies []Anomaly
+	misroutedToReview := 0
+	misroutedToLibrary := 0
+	missingFinal := 0
+	cleanEpisodes := 0
+	for _, ep := range r.Envelope.Episodes {
+		if ep.Key == "" {
+			continue
+		}
+		expectedReview := ep.Episode <= 0 || ep.NeedsReview
+		if !expectedReview {
+			cleanEpisodes++
+		}
+		asset, ok := finalByKey[strings.ToLower(ep.Key)]
+		if !ok || !asset.IsCompleted() || asset.Path == "" {
+			missingFinal++
+			continue
+		}
+		inReview := pathWithinRoot(asset.Path, r.Paths.ReviewDir)
+		if expectedReview && !inReview {
+			misroutedToLibrary++
+		}
+		if !expectedReview && inReview {
+			misroutedToReview++
+		}
+	}
+	if misroutedToReview > 0 {
+		severity := "warning"
+		if cleanEpisodes > 0 && misroutedToReview == cleanEpisodes {
+			severity = "critical"
+		}
+		anomalies = append(anomalies, Anomaly{
+			Severity: severity,
+			Category: "organization",
+			Message:  fmt.Sprintf("%d clean resolved episode(s) routed to review", misroutedToReview),
+		})
+	}
+	if misroutedToLibrary > 0 {
+		anomalies = append(anomalies, Anomaly{
+			Severity: "critical",
+			Category: "organization",
+			Message:  fmt.Sprintf("%d review-required episode(s) routed to library", misroutedToLibrary),
+		})
+	}
+	if missingFinal > 0 && len(finalByKey) > 0 {
+		anomalies = append(anomalies, Anomaly{
+			Severity: "warning",
+			Category: "organization",
+			Message:  fmt.Sprintf("%d episode(s) missing final routed asset", missingFinal),
+		})
+	}
+	return anomalies
+}
+
 func computeAnalysis(r *Report) *Analysis {
 	a := &Analysis{}
 
@@ -40,6 +125,7 @@ func computeAnalysis(r *Report) *Analysis {
 	}
 
 	a.Anomalies = detectAnomalies(r, a)
+	a.Anomalies = append(a.Anomalies, detectTVRoutingAnomalies(r)...)
 
 	// Return nil if everything is empty.
 	if len(a.DecisionGroups) == 0 &&

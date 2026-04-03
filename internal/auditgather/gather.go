@@ -20,14 +20,14 @@ import (
 
 // stageOrder maps stages to numeric order for furthest-stage computation.
 var stageOrder = map[queue.Stage]int{
-	queue.StageIdentification:         0,
-	queue.StageRipping:                1,
-	queue.StageEpisodeIdentification:  2,
-	queue.StageEncoding:               3,
-	queue.StageAudioAnalysis:          4,
-	queue.StageSubtitling:             5,
-	queue.StageOrganizing:             6,
-	queue.StageCompleted:              7,
+	queue.StageIdentification:        0,
+	queue.StageRipping:               1,
+	queue.StageEpisodeIdentification: 2,
+	queue.StageEncoding:              3,
+	queue.StageAudioAnalysis:         4,
+	queue.StageSubtitling:            5,
+	queue.StageOrganizing:            6,
+	queue.StageCompleted:             7,
 }
 
 // Gather collects all audit artifacts for a queue item.
@@ -38,6 +38,10 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 
 	r := &Report{
 		Item: buildItemSummary(item),
+		Paths: AuditPaths{
+			ReviewDir:  cfg.Paths.ReviewDir,
+			LibraryDir: cfg.Paths.LibraryDir,
+		},
 	}
 
 	// Parse envelope for media type and disc source.
@@ -488,11 +492,11 @@ func probeFile(ctx context.Context, path, role, episodeKey string) MediaFileProb
 		}
 	}
 	return MediaFileProbe{
-		Path:        path,
-		Role:        role,
-		EpisodeKey:  episodeKey,
-		Probe:       result,
-		SizeBytes:   result.SizeBytes(),
+		Path:            path,
+		Role:            role,
+		EpisodeKey:      episodeKey,
+		Probe:           result,
+		SizeBytes:       result.SizeBytes(),
 		DurationSeconds: result.DurationSeconds(),
 	}
 }
