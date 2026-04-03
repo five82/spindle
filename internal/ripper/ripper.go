@@ -239,26 +239,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_reason", fmt.Sprintf("title_id=%d file=%s", title.ID, newFile),
 			)
 			if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
-				asset := ripspec.Asset{
+				env.Assets.AddAsset("ripped", ripspec.Asset{
 					EpisodeKey: episodeKey,
 					TitleID:    title.ID,
 					Path:       newFile,
 					Status:     "completed",
-				}
-				if err := h.validateRippedArtifact(ctx, newFile); err != nil {
-					asset.Path = ""
-					asset.Status = "failed"
-					asset.ErrorMsg = err.Error()
-					item.AppendReviewReason(fmt.Sprintf("rip validation failed for %s", episodeKey))
-					logger.Warn("ripped episode failed validation",
-						"event_type", "rip_validation_failed",
-						"error_hint", err.Error(),
-						"impact", "episode excluded from pipeline",
-						"episode_key", episodeKey,
-						"path", newFile,
-					)
-				}
-				env.Assets.AddAsset("ripped", asset)
+				})
 				item.RippedFile = newFile
 				if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 					return err
