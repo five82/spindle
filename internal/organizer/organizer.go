@@ -2,11 +2,14 @@ package organizer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/fileutil"
@@ -240,6 +243,44 @@ func reviewPathForItem(reviewDir string, item *queue.Item) string {
 	return path
 }
 
+func throttledProgressUpdater(store *queue.Store, item *queue.Item, minInterval time.Duration) func() {
+	var lastUpdate time.Time
+	return func() {
+		if store == nil || item == nil {
+			return
+		}
+		now := time.Now()
+		if !lastUpdate.IsZero() && now.Sub(lastUpdate) < minInterval {
+			return
+		}
+		lastUpdate = now
+		_ = store.UpdateProgress(item)
+	}
+}
+
+func moveOrCopyWithProgress(src, dst string, progress fileutil.ProgressFunc) error {
+	if err := os.Rename(src, dst); err == nil {
+		if progress != nil {
+			if info, statErr := os.Stat(dst); statErr == nil {
+				progress(fileutil.CopyProgress{BytesCopied: info.Size(), TotalBytes: info.Size()})
+			}
+		}
+		return nil
+	} else {
+		var linkErr *os.LinkError
+		if !errors.As(err, &linkErr) || !errors.Is(linkErr.Err, syscall.EXDEV) {
+			return fmt.Errorf("move file: %w", err)
+		}
+	}
+	if err := fileutil.CopyFileVerifiedWithProgress(src, dst, progress); err != nil {
+		return err
+	}
+	if err := os.Remove(src); err != nil {
+		return fmt.Errorf("remove source after copy: %w", err)
+	}
+	return nil
+}
+
 func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item *queue.Item, env *ripspec.Envelope, meta *queue.Metadata, sourceStage, destDir string, keys []string, target string) (string, int, error) {
 	if len(keys) == 0 {
 		return "", 0, nil
@@ -252,6 +293,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item
 	var completedBytes int64
 	copied := 0
 	lastPath := ""
+	pushProgress := throttledProgressUpdater(h.store, item, 250*time.Millisecond)
 	for i, key := range keys {
 		if ctx.Err() != nil {
 			return "", copied, ctx.Err()
@@ -307,11 +349,15 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item
 		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
 		_ = h.store.UpdateProgress(item)
 
-		if err := fileutil.CopyFileVerifiedWithProgress(asset.Path, destPath, func(p fileutil.CopyProgress) {
+		transfer := fileutil.CopyFileVerifiedWithProgress
+		if target == "review" {
+			transfer = moveOrCopyWithProgress
+		}
+		if err := transfer(asset.Path, destPath, func(p fileutil.CopyProgress) {
 			item.ProgressBytesCopied = completedBytes + p.BytesCopied
 			item.ProgressTotalBytes = totalBytes
 			item.ProgressPercent = overallBytePercent(item.ProgressBytesCopied, totalBytes)
-			_ = h.store.UpdateProgress(item)
+			pushProgress()
 		}); err != nil {
 			if ctx.Err() != nil {
 				_ = os.Remove(destPath)
@@ -340,6 +386,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item
 		item.ProgressBytesCopied = completedBytes
 		item.ProgressTotalBytes = totalBytes
 		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
+		_ = h.store.UpdateProgress(item)
 	}
 	return lastPath, copied, nil
 }

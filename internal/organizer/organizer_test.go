@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
@@ -170,5 +171,39 @@ func TestPartitionTVOrganizationKeys(t *testing.T) {
 	}
 	if len(reviewKeys) != 2 || reviewKeys[0] != "s01e02" || reviewKeys[1] != "s01_003" {
 		t.Fatalf("reviewKeys = %#v, want [s01e02 s01_003]", reviewKeys)
+	}
+}
+
+func TestMoveOrCopyWithProgressRenamesOnSameDevice(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	dst := filepath.Join(dir, "dst.mkv")
+	data := []byte("test payload")
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	var last fileutil.CopyProgress
+	if err := moveOrCopyWithProgress(src, dst, func(p fileutil.CopyProgress) {
+		calls++
+		last = p
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists after rename, err=%v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(data) {
+		t.Fatalf("destination contents = %q, want %q", got, data)
+	}
+	if calls != 1 {
+		t.Fatalf("progress calls = %d, want 1", calls)
+	}
+	if last.BytesCopied != int64(len(data)) || last.TotalBytes != int64(len(data)) {
+		t.Fatalf("progress = %+v, want copied=total=%d", last, len(data))
 	}
 }

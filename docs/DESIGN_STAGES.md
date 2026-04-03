@@ -961,6 +961,11 @@ as encoding; see Section 4.1).
 If `needs_review` is true and no TV episodes are safe to place (or the item is a
 movie requiring review):
 - Move encoded files to `{review_dir}/` instead of library.
+- **Transfer strategy**: organizer should prefer same-filesystem rename/move
+  semantics for review routing. Fall back to copy only when the destination is
+  on another filesystem or rename is otherwise unavailable.
+- **Progress reporting** during fallback copies must remain observable without
+  introducing excessive persistence overhead.
 - **Review directory**: sanitized review reason prefix + 8-char hex fingerprint
   suffix.
 - **TV review filenames** retain episode identity (for example `Show - S01E03.mkv`)
