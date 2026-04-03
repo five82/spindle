@@ -160,6 +160,31 @@ func TestFindAssetSuccessAndMiss(t *testing.T) {
 	}
 }
 
+func TestRemapEpisodeKeys(t *testing.T) {
+	assets := Assets{
+		Ripped: []Asset{{EpisodeKey: "s01_001", Path: "/rip/ep1.mkv", Status: "completed"}},
+		Encoded: []Asset{{EpisodeKey: "s01_001", Path: "/enc/ep1.mkv", Status: "completed"}},
+		Subtitled: []Asset{{EpisodeKey: "s01_001", Path: "/sub/ep1.mkv", Status: "completed"}},
+		Final: []Asset{{EpisodeKey: "s01_001", Path: "/final/ep1.mkv", Status: "completed"}},
+	}
+
+	assets.RemapEpisodeKeys(map[string]string{"s01_001": "s01e03"})
+
+	for _, stage := range []string{"ripped", "encoded", "subtitled", "final"} {
+		asset, ok := assets.FindAsset(stage, "s01e03")
+		if !ok {
+			t.Fatalf("FindAsset(%q, remapped key) = false, want true", stage)
+		}
+		if asset.EpisodeKey != "s01e03" {
+			t.Fatalf("stage %s EpisodeKey = %q, want s01e03", stage, asset.EpisodeKey)
+		}
+	}
+
+	if _, ok := assets.FindAsset("encoded", "s01_001"); ok {
+		t.Fatal("old encoded key still present after remap")
+	}
+}
+
 func TestPlaceholderKey(t *testing.T) {
 	tests := []struct {
 		season, disc int

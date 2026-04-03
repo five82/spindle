@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/five82/spindle/internal/opensubtitles"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/textutil"
 )
@@ -199,6 +200,42 @@ func TestReadSRTTextMissing(t *testing.T) {
 	got := readSRTText("/nonexistent/path.srt")
 	if got != "" {
 		t.Errorf("expected empty string for missing file, got %q", got)
+	}
+}
+
+func TestApplyMatchesRemapsAssetKeys(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := &Handler{}
+	item := &queue.Item{}
+	env := &ripspec.Envelope{
+		Episodes: []ripspec.Episode{
+			{Key: "s03_001", Season: 3},
+			{Key: "s03_002", Season: 3},
+		},
+		Assets: ripspec.Assets{
+			Ripped: []ripspec.Asset{
+				{EpisodeKey: "s03_001", Path: "/rip/1.mkv", Status: "completed"},
+				{EpisodeKey: "s03_002", Path: "/rip/2.mkv", Status: "completed"},
+			},
+		},
+	}
+
+	h.applyMatches(logger, env, []Match{
+		{DiscKey: "s03_001", EpisodeNum: 3, Score: 0.91},
+		{DiscKey: "s03_002", EpisodeNum: 4, Score: 0.88},
+	}, item)
+
+	if env.Episodes[0].Key != "s03e03" || env.Episodes[1].Key != "s03e04" {
+		t.Fatalf("episode keys not remapped: %+v", env.Episodes)
+	}
+	if _, ok := env.Assets.FindAsset("ripped", "s03e03"); !ok {
+		t.Fatal("ripped asset for s03e03 not found after applyMatches remap")
+	}
+	if _, ok := env.Assets.FindAsset("ripped", "s03e04"); !ok {
+		t.Fatal("ripped asset for s03e04 not found after applyMatches remap")
+	}
+	if _, ok := env.Assets.FindAsset("ripped", "s03_001"); ok {
+		t.Fatal("old ripped key s03_001 still found after applyMatches remap")
 	}
 }
 

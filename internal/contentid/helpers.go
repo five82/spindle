@@ -338,9 +338,11 @@ func (h *Handler) applyMatches(
 
 	unresolvedCount := 0
 	lowConfCount := 0
+	assetKeyRemap := make(map[string]string)
 
 	for i := range env.Episodes {
 		ep := &env.Episodes[i]
+		originalKey := ep.Key
 		m, ok := matchMap[ep.Key]
 		if !ok {
 			unresolvedCount++
@@ -350,6 +352,9 @@ func (h *Handler) applyMatches(
 		ep.Episode = m.EpisodeNum
 		ep.MatchConfidence = m.Score
 		ep.Key = ripspec.EpisodeKey(ep.Season, m.EpisodeNum)
+		if ep.Key != "" && ep.Key != originalKey {
+			assetKeyRemap[originalKey] = ep.Key
+		}
 
 		if m.Score < lowConfidenceReviewThreshold {
 			lowConfCount++
@@ -360,6 +365,8 @@ func (h *Handler) applyMatches(
 			)
 		}
 	}
+
+	env.Assets.RemapEpisodeKeys(assetKeyRemap)
 
 	if unresolvedCount > 0 {
 		item.AppendReviewReason(

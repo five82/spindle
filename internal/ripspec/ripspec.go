@@ -304,6 +304,35 @@ func (as *Assets) FindAsset(kind, key string) (Asset, bool) {
 	return Asset{}, false
 }
 
+// RemapEpisodeKeys rewrites asset episode keys according to the provided old->new
+// mapping. Matching is case-insensitive. Assets whose keys are not present in the
+// mapping are left unchanged.
+func (as *Assets) RemapEpisodeKeys(remap map[string]string) {
+	if len(remap) == 0 {
+		return
+	}
+
+	normalized := make(map[string]string, len(remap))
+	for oldKey, newKey := range remap {
+		if oldKey == "" || newKey == "" {
+			continue
+		}
+		normalized[strings.ToLower(oldKey)] = newKey
+	}
+
+	for _, kind := range []string{"ripped", "encoded", "subtitled", "final"} {
+		sp := as.stageSlice(kind)
+		if sp == nil {
+			continue
+		}
+		for i := range *sp {
+			if newKey, ok := normalized[strings.ToLower((*sp)[i].EpisodeKey)]; ok {
+				(*sp)[i].EpisodeKey = newKey
+			}
+		}
+	}
+}
+
 // ClearFailedAsset resets the status, error message, and path for a failed
 // asset so it can be retried.
 func (as *Assets) ClearFailedAsset(kind, key string) {
