@@ -1,11 +1,19 @@
 package contentid
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/five82/spindle/internal/opensubtitles"
+	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/textutil"
 )
 
@@ -219,6 +227,81 @@ func TestIsDigitsOnly(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Fingerprint + IDF + cosine similarity integration
 // ---------------------------------------------------------------------------
+
+func TestDownloadReferencesReturnsErrorOnOperationalFailure(t *testing.T) {
+	var downloadCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/subtitles":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{
+					"id": "1",
+					"attributes": map[string]any{
+						"language":           "en",
+						"download_count":     10,
+						"hearing_impaired":   false,
+						"foreign_parts_only": false,
+						"files":              []map[string]any{{"file_id": 123, "file_name": "test.srt"}},
+					},
+				}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/download":
+			downloadCalls++
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"message":"service unavailable"}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	client := opensubtitles.New("test-key", "TestAgent", "token", srv.URL, nil)
+	h := &Handler{osClient: client}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{ID: 2287, SeasonNumber: 3},
+		Episodes: []ripspec.Episode{{Key: "s03_001"}},
+	}
+
+	refs, err := h.downloadReferences(context.Background(), logger, env)
+	if err == nil {
+		t.Fatal("expected operational OpenSubtitles failure to be returned")
+	}
+	if refs != nil {
+		t.Fatalf("expected nil refs on operational failure, got %#v", refs)
+	}
+	if downloadCalls != 4 {
+		t.Fatalf("expected 4 download attempts (initial + retries), got %d", downloadCalls)
+	}
+}
+
+func TestDownloadReferencesAllowsNoResultsWithoutError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/subtitles" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	client := opensubtitles.New("test-key", "TestAgent", "token", srv.URL, nil)
+	h := &Handler{osClient: client}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{ID: 2287, SeasonNumber: 3},
+		Episodes: []ripspec.Episode{{Key: "s03_001"}},
+	}
+
+	refs, err := h.downloadReferences(context.Background(), logger, env)
+	if err != nil {
+		t.Fatalf("expected no error for empty search results, got %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("expected no refs, got %d", len(refs))
+	}
+}
 
 func TestFingerprintIDFIntegration(t *testing.T) {
 	// Two similar documents and one different.

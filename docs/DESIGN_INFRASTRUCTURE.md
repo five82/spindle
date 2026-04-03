@@ -490,7 +490,7 @@ block the pipeline:
 - bd_info unavailable (proceed without enhanced metadata)
 - TMDB returns no results (use fallback metadata, flag for review)
 - Rip cache write failure (rip succeeded, cache is optional)
-- No episode ID reference matches (keep placeholder keys, flag for review)
+- No episode ID reference matches after successful reference acquisition (keep placeholder keys, flag for review)
 - Commentary detection failure (continue without commentary labels)
 - OpenSubtitles download failure (skip forced subs)
 - SRT validation issues (flag for review, don't fail)
@@ -498,7 +498,8 @@ block the pipeline:
 - Subtitle sidecar move failure (log warning)
 
 Everything else (MakeMKV failures, encoding errors, file copy errors,
-WhisperX failures, network errors) fails the item.
+WhisperX failures, network errors, and episode-identification reference
+acquisition failures) fails the item.
 
 ### 5.3 Error Wrapping
 

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/llm"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/services"
@@ -133,13 +133,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	refFPs, err := h.downloadReferences(ctx, logger, &env)
 	if err != nil {
-		logger.Warn("reference download failed",
+		logger.Error("reference download failed",
 			"event_type", "reference_download_error",
 			"error_hint", err.Error(),
-			"impact", "episodes remain unresolved",
+			"impact", "episode identification stopped; retry required",
 		)
-		item.AppendReviewReason("Episode ID: reference download failed")
-		return &services.ErrDegraded{Msg: "reference download failed: " + err.Error()}
+		return fmt.Errorf("episode identification reference acquisition: %w", err)
 	}
 
 	if len(refFPs) == 0 {

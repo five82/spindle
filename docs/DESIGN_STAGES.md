@@ -437,9 +437,18 @@ skipping for TV:
 placeholders (e.g., `s01_001`, `s01_002`). Downstream stages use these
 placeholder keys as-is for file naming and asset tracking.
 
-### 3.2 Review Triggers
+### 3.2 Failure vs Review Outcomes
 
-Four conditions flag an item for review after matching:
+**Hard failure**: Episode identification fails the item when operational
+reference acquisition fails (for example OpenSubtitles search/download errors,
+auth failures, or other service/network issues that prevent the stage from
+obtaining references at all). These are retryable workflow failures, not
+content ambiguity. The item stops at `failed`, records `failed_at_stage =
+episode_identification`, and `spindle queue retry <id>` restarts from this
+stage.
+
+**Review**: After successful reference acquisition, four conditions flag an
+item for review instead of failing it:
 1. **Content ID flagged**: `ContentIDNeedsReview` set by matching algorithm.
 2. **Low confidence**: Any episode below the low-confidence review threshold (0.70).
 3. **Partial resolution**: Some episodes still unresolved after matching.

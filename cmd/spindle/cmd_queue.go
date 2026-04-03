@@ -263,10 +263,11 @@ func newQueueRetryCmd() *cobra.Command {
 
 			if len(args) == 0 {
 				// Retry all failed.
-				if _, err := store.RetryFailed(); err != nil {
+				count, err := store.RetryFailed()
+				if err != nil {
 					return err
 				}
-				fmt.Println(successStyle("All failed items retried"))
+				fmt.Println(successStyle(fmt.Sprintf("Retried %d failed item(s)", count)))
 				return nil
 			}
 
@@ -279,10 +280,14 @@ func newQueueRetryCmd() *cobra.Command {
 				ids = append(ids, id)
 			}
 
-			if _, err := store.RetryFailed(ids...); err != nil {
+			count, err := store.RetryFailed(ids...)
+			if err != nil {
 				return err
 			}
-			fmt.Println(successStyle(fmt.Sprintf("Retried %d item(s)", len(ids))))
+			if count == 0 {
+				return fmt.Errorf("no failed items were retried")
+			}
+			fmt.Println(successStyle(fmt.Sprintf("Retried %d failed item(s)", count)))
 			return nil
 		},
 	}

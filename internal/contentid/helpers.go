@@ -64,6 +64,10 @@ func isDigitsOnly(s string) bool {
 
 // downloadReferences downloads reference subtitles from OpenSubtitles
 // for each episode in the season. Returns a map of episode number to fingerprint.
+//
+// Content ambiguity (empty search results) is not an error: callers can route
+// unresolved episodes to review. Operational failures talking to
+// OpenSubtitles are returned as errors so the stage fails and can be retried.
 func (h *Handler) downloadReferences(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -101,6 +105,15 @@ func (h *Handler) downloadReferences(
 
 	refFPs := make(map[int]*textutil.Fingerprint)
 	languages := []string{"en"}
+	var firstOperationalErr error
+	operationalErrCount := 0
+
+	recordOperationalError := func(err error) {
+		operationalErrCount++
+		if firstOperationalErr == nil {
+			firstOperationalErr = err
+		}
+	}
 
 	for _, epNum := range episodeNums {
 		if ctx.Err() != nil {
@@ -109,6 +122,7 @@ func (h *Handler) downloadReferences(
 
 		results, err := h.osClient.Search(ctx, tmdbID, season, epNum, languages)
 		if err != nil {
+			recordOperationalError(err)
 			logger.Warn("OpenSubtitles search failed",
 				"episode", epNum,
 				"error", err,
@@ -155,6 +169,7 @@ func (h *Handler) downloadReferences(
 		destDir := os.TempDir()
 		destPath := fmt.Sprintf("%s/spindle_ref_s%02de%02d.srt", destDir, season, epNum)
 		if err := h.osClient.DownloadToFile(ctx, best.Attributes.Files[0].FileID, destPath); err != nil {
+			recordOperationalError(err)
 			logger.Warn("reference subtitle download failed",
 				"episode", epNum,
 				"error", err,
@@ -175,6 +190,10 @@ func (h *Handler) downloadReferences(
 
 		// Clean up temp file.
 		_ = os.Remove(destPath)
+	}
+
+	if len(refFPs) == 0 && firstOperationalErr != nil {
+		return nil, fmt.Errorf("OpenSubtitles reference acquisition failed for %d episode(s): %w", operationalErrCount, firstOperationalErr)
 	}
 
 	return refFPs, nil

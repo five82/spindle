@@ -232,8 +232,9 @@ from the pipeline configuration.
 - **Failed**: Operation error. Item can be retried with `queue retry`. The
   `failed_at_stage` field records which stage failed for proper retry routing.
 - **Review**: Content ambiguity (unidentified media, low-confidence episode
-  matching, missing episodes). Item is routed to review directory. The
-  `needs_review` flag and `review_reason` field describe why.
+  matching, missing episodes, or no reference matches after successful
+  episode-identification reference acquisition). Item is routed to review
+  directory. The `needs_review` flag and `review_reason` field describe why.
 - An item can have `needs_review=true` and still be in a processing status
   (partial episode resolution continues processing resolved episodes while
   flagging the item for review).

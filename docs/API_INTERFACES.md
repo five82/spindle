@@ -123,7 +123,7 @@ Retry failed queue items.
 
 Behavior:
 - No IDs, no `--episode`: retry all failed items
-- IDs without `--episode`: retry specified items from the beginning
+- IDs without `--episode`: retry specified failed items from the failed stage
 - ID with `--episode`: clear only the specified episode's failed status
   (requires exactly one ID)
 

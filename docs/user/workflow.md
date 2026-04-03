@@ -122,8 +122,8 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 
 ## Review vs Failed
 
-- **`failed` stage**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, and manual stop requests (`spindle queue stop <id>`). Items stopped by user have `"Stop requested by user"` in their `review_reason` array. Fix the root cause, then use `spindle queue retry <id>` to requeue.
-- **`needs_review` flag**: Workflow continues but final artifacts are routed to `review_dir` instead of the library. The item completes with progress stage "Manual review" so the pipeline stays unblocked. This is used for low-confidence matches, missing metadata, or other issues that need manual attention but shouldn't block processing.
+- **`failed` stage**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, manual stop requests (`spindle queue stop <id>`), and episode-identification reference acquisition failures (for example OpenSubtitles service/auth/network problems). Items stopped by user have `"Stop requested by user"` in their `review_reason` array. Fix the root cause, then use `spindle queue retry <id>` to requeue.
+- **`needs_review` flag**: Workflow continues but final artifacts are routed to `review_dir` instead of the library. The item completes with progress stage "Manual review" so the pipeline stays unblocked. This is used for low-confidence matches, missing metadata, unresolved episode numbers after successful episode-ID reference acquisition, or other issues that need manual attention but shouldn't block processing.
 
 ## Recovery Procedures
 
@@ -146,7 +146,7 @@ Files in `review_dir` need manual attention:
 1. Check the review reason: `spindle queue show <id>` (look for `review_reason`).
 2. Common reasons:
    - **Low-confidence TMDB match**: The disc title didn't match well. Move the file to the correct library folder manually, or update disc ID cache and retry.
-   - **Unresolved episode numbers**: Episode identification couldn't map all episodes. Check the file names and move to the correct library folder.
+   - **Unresolved episode numbers**: Episode identification ran successfully but couldn't map all episodes confidently. Check the file names and move to the correct library folder.
    - **SRT validation issues**: Subtitles may have quality problems. Review the SRT file and fix or regenerate with `spindle gensubtitle`.
 3. After manually organizing files, clear the completed item: `spindle queue clear <id>`.
 
