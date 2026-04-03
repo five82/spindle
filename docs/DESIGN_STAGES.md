@@ -939,9 +939,14 @@ the duration of transcription work.
 
 ### 7.4 Partial Episode Organization
 
-When `needs_review` is true but some episodes ARE resolved:
-- **Resolved episodes organized normally** to the library.
-- **Unresolved episodes routed to review** simultaneously.
+When `needs_review` is true but some TV episodes are still safe to place:
+- **Resolved episodes without episode-level review flags** are organized
+  normally to the library.
+- **Resolved episodes with episode-level review flags** are routed to review.
+  Example: low-confidence content-ID matches.
+- **Unresolved episodes** are routed to review simultaneously.
+- Queue-level `needs_review` is an aggregate signal for UI/reporting; for TV it
+  does **not** imply whole-item review routing.
 - Per-episode failure isolation: each episode processed independently. Failure of
   one episode does not prevent others. Stage fails only if ALL episodes fail.
 
@@ -953,10 +958,13 @@ as encoding; see Section 4.1).
 
 ### 7.6 Review Routing
 
-If `needs_review` is true and no episodes are resolved:
+If `needs_review` is true and no TV episodes are safe to place (or the item is a
+movie requiring review):
 - Move encoded files to `{review_dir}/` instead of library.
-- **Review filename**: sanitized review reason prefix + 8-char hex fingerprint
-  suffix. Up to **10,000** collision attempts with counter suffix.
+- **Review directory**: sanitized review reason prefix + 8-char hex fingerprint
+  suffix.
+- **TV review filenames** retain episode identity (for example `Show - S01E03.mkv`)
+  so manual correction is straightforward.
 - Notify via `EventUnidentifiedMedia`.
 
 **Library unavailable**: Terminal condition. Routes to review with specific

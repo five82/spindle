@@ -43,150 +43,82 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
-
-	// Check if item needs review routing instead of library placement.
-	if item.NeedsReview == 1 {
-		logger.Info("item routed to review",
-			"decision_type", logs.DecisionOrganizeRoute,
-			"decision_result", "review",
-			"decision_reason", "needs_review flag set",
-		)
-		return h.routeToReview(ctx, logger, item, &env, &meta)
-	}
-
-	// Resolve library path.
-	libraryPath, err := meta.GetLibraryPath(
-		h.cfg.Paths.LibraryDir,
-		h.cfg.Library.MoviesDir,
-		h.cfg.Library.TVDir,
-	)
-	if err != nil {
-		return fmt.Errorf("resolve library path: %w", err)
-	}
-
-	// Create library directory.
-	if err := os.MkdirAll(libraryPath, 0o755); err != nil {
-		return fmt.Errorf("create library dir: %w", err)
-	}
-
-	// Determine source stage: prefer "subtitled", fall back to "encoded".
-	sourceStage := "subtitled"
 	keys := env.AssetKeys()
-	hasSubtitled := true
-	if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
-		sourceStage = "encoded"
-		hasSubtitled = false
-	}
+	sourceStage, hasSubtitled := resolveSourceStage(&env, keys)
 	logger.Info("organization source stage selected",
 		"decision_type", logs.DecisionSourceStageSelection,
 		"decision_result", sourceStage,
 		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
 	)
 
-	// Copy each asset to library.
-	totalBytes := totalCompletedStageBytes(&env, sourceStage, keys)
-	var completedBytes int64
-	for i, key := range keys {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		asset, ok := env.Assets.FindAsset(sourceStage, key)
-		if !ok || !asset.IsCompleted() {
-			logger.Warn("missing or incomplete asset",
-				"event_type", "organize_missing_asset",
-				"error_hint", fmt.Sprintf("no completed %s asset for %s", sourceStage, key),
-				"impact", "episode will not be organized",
+	if item.NeedsReview == 1 {
+		if env.Metadata.MediaType != "tv" || !ripspec.HasResolvedEpisodes(env.Episodes) {
+			logger.Info("item routed to review",
+				"decision_type", logs.DecisionOrganizeRoute,
+				"decision_result", "review",
+				"decision_reason", "needs_review flag set with no clean resolved tv episodes",
 			)
-			continue
+			return h.routeToReview(ctx, logger, item, &env, &meta, sourceStage, keys)
 		}
 
-		// Determine destination filename.
-		destName := destFilename(&meta, key, filepath.Ext(asset.Path))
-		destPath := filepath.Join(libraryPath, destName)
-
-		// Check if exists and not overwriting.
-		if !h.cfg.Library.OverwriteExisting {
-			if info, err := os.Stat(destPath); err == nil {
-				// Check for partial file from previous interrupted copy.
-				srcInfo, srcErr := os.Stat(asset.Path)
-				if srcErr == nil && info.Size() < srcInfo.Size() {
-					logger.Info("removing partial file from previous attempt",
-						"decision_type", logs.DecisionPartialCleanup,
-						"decision_result", "removed",
-						"decision_reason", fmt.Sprintf("target %d bytes < source %d bytes", info.Size(), srcInfo.Size()),
-						"path", destPath,
-					)
-					if err := os.Remove(destPath); err != nil {
-						return fmt.Errorf("remove partial file %s: %w", destPath, err)
-					}
-				} else {
-					logger.Info("file exists, skipping",
-						"decision_type", logs.DecisionOrganizeSkip,
-						"decision_result", "skipped",
-						"decision_reason", "file already exists",
-						"path", destPath,
-					)
-					continue
-				}
-			}
+		libraryKeys, reviewKeys := partitionTVOrganizationKeys(&env)
+		if len(libraryKeys) == 0 {
+			logger.Info("item routed to review",
+				"decision_type", logs.DecisionOrganizeRoute,
+				"decision_result", "review",
+				"decision_reason", "all resolved episodes flagged for review",
+			)
+			return h.routeToReview(ctx, logger, item, &env, &meta, sourceStage, reviewKeys)
 		}
-
-		logger.Info(fmt.Sprintf("Phase %d/%d - Copying to library (%s)", i+1, len(keys), key),
-			"event_type", "organize_copy",
+		logger.Info("item partially organized",
+			"decision_type", logs.DecisionOrganizeRoute,
+			"decision_result", "partial_library_review",
+			"decision_reason", fmt.Sprintf("clean_episodes=%d review_episodes=%d", len(libraryKeys), len(reviewKeys)),
 		)
 
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Copying to library (%s)", i+1, len(keys), key)
-		item.ProgressBytesCopied = completedBytes
-		item.ProgressTotalBytes = totalBytes
-		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
-		_ = h.store.UpdateProgress(item)
-
-		// Copy with verification.
-		if err := fileutil.CopyFileVerifiedWithProgress(asset.Path, destPath, func(p fileutil.CopyProgress) {
-			item.ProgressBytesCopied = completedBytes + p.BytesCopied
-			item.ProgressTotalBytes = totalBytes
-			item.ProgressPercent = overallBytePercent(item.ProgressBytesCopied, totalBytes)
-			_ = h.store.UpdateProgress(item)
-		}); err != nil {
-			// On cancellation, clean up partial file.
-			if ctx.Err() != nil {
-				_ = os.Remove(destPath)
-				return ctx.Err()
-			}
-			return fmt.Errorf("copy %s to library: %w", key, err)
-		}
-
-		logger.Info("asset copied to library",
-			"event_type", "asset_copied",
-			"episode_key", key,
-			"dest_path", destPath,
+		libraryPath, err := meta.GetLibraryPath(
+			h.cfg.Paths.LibraryDir,
+			h.cfg.Library.MoviesDir,
+			h.cfg.Library.TVDir,
 		)
-
-		// Record final asset.
-		env.Assets.AddAsset("final", ripspec.Asset{
-			EpisodeKey: key,
-			Path:       destPath,
-			Status:     "completed",
-		})
-		item.FinalFile = destPath
-		if info, statErr := os.Stat(asset.Path); statErr == nil {
-			completedBytes += info.Size()
+		if err != nil {
+			return fmt.Errorf("resolve library path: %w", err)
 		}
-		item.ProgressBytesCopied = completedBytes
-		item.ProgressTotalBytes = totalBytes
-		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
+		if err := os.MkdirAll(libraryPath, 0o755); err != nil {
+			return fmt.Errorf("create library dir: %w", err)
+		}
+		if _, _, err := h.copyAssetsToDir(ctx, logger, item, &env, &meta, sourceStage, libraryPath, libraryKeys, "library"); err != nil {
+			return err
+		}
+		if len(reviewKeys) > 0 {
+			if _, _, err := h.copyAssetsToDir(ctx, logger, item, &env, &meta, sourceStage, reviewPathForItem(h.cfg.Paths.ReviewDir, item), reviewKeys, "review"); err != nil {
+				return err
+			}
+		}
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
 		}
-
-		// Copy subtitle sidecar if exists (non-muxed).
-		copySidecarSubtitle(logger, asset.Path, destPath)
-	}
-
-	// Persist envelope with final asset paths.
-	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
-		return err
+		item.ProgressPercent = 100
+		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d to review)", len(libraryKeys), len(reviewKeys))
+		_ = h.store.UpdateProgress(item)
+	} else {
+		libraryPath, err := meta.GetLibraryPath(
+			h.cfg.Paths.LibraryDir,
+			h.cfg.Library.MoviesDir,
+			h.cfg.Library.TVDir,
+		)
+		if err != nil {
+			return fmt.Errorf("resolve library path: %w", err)
+		}
+		if err := os.MkdirAll(libraryPath, 0o755); err != nil {
+			return fmt.Errorf("create library dir: %w", err)
+		}
+		if _, _, err := h.copyAssetsToDir(ctx, logger, item, &env, &meta, sourceStage, libraryPath, keys, "library"); err != nil {
+			return err
+		}
+		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+			return err
+		}
 	}
 
 	// Trigger Jellyfin refresh.
@@ -204,6 +136,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Notification.
 	if h.notifier != nil {
 		msg := fmt.Sprintf("Organized %s to library", item.DiscTitle)
+		if item.NeedsReview == 1 && env.Metadata.MediaType == "tv" {
+			msg = fmt.Sprintf("Organized clean episodes for %s; some episodes routed to review", item.DiscTitle)
+		}
 		msg += queue.FormatAlsoProcessing(h.store, item.ID)
 		_ = h.notifier.Send(ctx, notify.EventOrganizeComplete,
 			"Organization Complete",
@@ -259,17 +194,37 @@ func parseEpisodeKey(key string) (season, episode int) {
 	return season, episode
 }
 
-// routeToReview copies assets to the review directory for manual inspection.
-// Directory structure: review_dir/{reason}_{fingerprint_prefix}/
-func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *queue.Item, env *ripspec.Envelope, meta *queue.Metadata) error {
-	logger.Info("routing to review",
-		"decision_type", logs.DecisionOrganizeRoute,
-		"decision_result", "review",
-		"decision_reason", item.ReviewReason,
-	)
+func resolveSourceStage(env *ripspec.Envelope, keys []string) (string, bool) {
+	sourceStage := "subtitled"
+	hasSubtitled := true
+	if len(keys) == 0 {
+		return sourceStage, hasSubtitled
+	}
+	if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
+		return "encoded", false
+	}
+	return sourceStage, hasSubtitled
+}
 
-	// Build review subdirectory name.
+func partitionTVOrganizationKeys(env *ripspec.Envelope) (libraryKeys, reviewKeys []string) {
+	for _, ep := range env.Episodes {
+		if ep.Key == "" {
+			continue
+		}
+		if ep.Episode > 0 && !ep.NeedsReview {
+			libraryKeys = append(libraryKeys, ep.Key)
+		} else {
+			reviewKeys = append(reviewKeys, ep.Key)
+		}
+	}
+	return libraryKeys, reviewKeys
+}
+
+func reviewPathForItem(reviewDir string, item *queue.Item) string {
 	reason := textutil.SanitizePathSegment(item.ReviewReason)
+	if reason == "" {
+		reason = "manual-review"
+	}
 	fpPrefix := item.DiscFingerprint
 	if len(fpPrefix) > 8 {
 		fpPrefix = fpPrefix[:8]
@@ -278,51 +233,75 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 		fpPrefix = fmt.Sprintf("id%d", item.ID)
 	}
 	dirName := reason + "_" + fpPrefix
-
-	reviewPath, err := textutil.SafeJoin(h.cfg.Paths.ReviewDir, dirName)
+	path, err := textutil.SafeJoin(reviewDir, dirName)
 	if err != nil {
-		return fmt.Errorf("resolve review path: %w", err)
+		return filepath.Join(reviewDir, dirName)
 	}
+	return path
+}
 
-	if err := os.MkdirAll(reviewPath, 0o755); err != nil {
-		return fmt.Errorf("create review dir: %w", err)
+func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item *queue.Item, env *ripspec.Envelope, meta *queue.Metadata, sourceStage, destDir string, keys []string, target string) (string, int, error) {
+	if len(keys) == 0 {
+		return "", 0, nil
 	}
-
-	// Determine source stage.
-	sourceStage := "subtitled"
-	keys := env.AssetKeys()
-	hasSubtitled := true
-	if len(keys) > 0 {
-		if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
-			sourceStage = "encoded"
-			hasSubtitled = false
-		}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", 0, fmt.Errorf("create %s dir: %w", target, err)
 	}
-	logger.Info("organization source stage selected",
-		"decision_type", logs.DecisionSourceStageSelection,
-		"decision_result", sourceStage,
-		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
-	)
 
 	totalBytes := totalCompletedStageBytes(env, sourceStage, keys)
 	var completedBytes int64
+	copied := 0
+	lastPath := ""
 	for i, key := range keys {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return "", copied, ctx.Err()
 		}
 
 		asset, ok := env.Assets.FindAsset(sourceStage, key)
 		if !ok || !asset.IsCompleted() {
+			logger.Warn("missing or incomplete asset",
+				"event_type", "organize_missing_asset",
+				"error_hint", fmt.Sprintf("no completed %s asset for %s", sourceStage, key),
+				"impact", fmt.Sprintf("episode will not be copied to %s", target),
+			)
 			continue
 		}
 
 		destName := destFilename(meta, key, filepath.Ext(asset.Path))
-		destPath := filepath.Join(reviewPath, destName)
+		destPath := filepath.Join(destDir, destName)
+		if target == "library" && !h.cfg.Library.OverwriteExisting {
+			if info, err := os.Stat(destPath); err == nil {
+				srcInfo, srcErr := os.Stat(asset.Path)
+				if srcErr == nil && info.Size() < srcInfo.Size() {
+					logger.Info("removing partial file from previous attempt",
+						"decision_type", logs.DecisionPartialCleanup,
+						"decision_result", "removed",
+						"decision_reason", fmt.Sprintf("target %d bytes < source %d bytes", info.Size(), srcInfo.Size()),
+						"path", destPath,
+					)
+					if err := os.Remove(destPath); err != nil {
+						return "", copied, fmt.Errorf("remove partial file %s: %w", destPath, err)
+					}
+				} else {
+					logger.Info("file exists, skipping",
+						"decision_type", logs.DecisionOrganizeSkip,
+						"decision_result", "skipped",
+						"decision_reason", "file already exists",
+						"path", destPath,
+					)
+					continue
+				}
+			}
+		}
 
-		logger.Info(fmt.Sprintf("Phase %d/%d - Copying to review (%s)", i+1, len(keys), key),
-			"event_type", "review_copy",
+		eventType := "organize_copy"
+		if target == "review" {
+			eventType = "review_copy"
+		}
+		logger.Info(fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key),
+			"event_type", eventType,
 		)
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Copying to review (%s)", i+1, len(keys), key)
+		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key)
 		item.ProgressBytesCopied = completedBytes
 		item.ProgressTotalBytes = totalBytes
 		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
@@ -336,19 +315,50 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 		}); err != nil {
 			if ctx.Err() != nil {
 				_ = os.Remove(destPath)
-				return ctx.Err()
+				return "", copied, ctx.Err()
 			}
-			return fmt.Errorf("copy %s to review: %w", key, err)
+			return "", copied, fmt.Errorf("copy %s to %s: %w", key, target, err)
 		}
 
+		logger.Info("asset copied",
+			"event_type", "asset_copied",
+			"episode_key", key,
+			"dest_path", destPath,
+			"organize_target", target,
+		)
 		copySidecarSubtitle(logger, asset.Path, destPath)
+		env.Assets.AddAsset("final", ripspec.Asset{EpisodeKey: key, Path: destPath, Status: "completed"})
+		if err := queue.PersistRipSpec(ctx, h.store, item, env); err != nil {
+			return "", copied, err
+		}
 		item.FinalFile = destPath
+		lastPath = destPath
+		copied++
 		if info, statErr := os.Stat(asset.Path); statErr == nil {
 			completedBytes += info.Size()
 		}
 		item.ProgressBytesCopied = completedBytes
 		item.ProgressTotalBytes = totalBytes
 		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
+	}
+	return lastPath, copied, nil
+}
+
+// routeToReview copies assets to the review directory for manual inspection.
+// Directory structure: review_dir/{reason}_{fingerprint_prefix}/
+func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *queue.Item, env *ripspec.Envelope, meta *queue.Metadata, sourceStage string, keys []string) error {
+	logger.Info("routing to review",
+		"decision_type", logs.DecisionOrganizeRoute,
+		"decision_result", "review",
+		"decision_reason", item.ReviewReason,
+	)
+
+	reviewPath := reviewPathForItem(h.cfg.Paths.ReviewDir, item)
+	if _, _, err := h.copyAssetsToDir(ctx, logger, item, env, meta, sourceStage, reviewPath, keys, "review"); err != nil {
+		return err
+	}
+	if err := queue.PersistRipSpec(ctx, h.store, item, env); err != nil {
+		return err
 	}
 
 	h.cleanupStaging(ctx, item)

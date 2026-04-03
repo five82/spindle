@@ -12,28 +12,28 @@ import (
 
 // ItemResponse is the API representation of a queue item (spec Section 2.7).
 type ItemResponse struct {
-	ID                      int64              `json:"id"`
-	DiscTitle               string             `json:"discTitle"`
-	Stage                   string             `json:"stage"`
-	InProgress              bool               `json:"inProgress"`
-	FailedAtStage           string             `json:"failedAtStage,omitempty"`
-	ErrorMessage            string             `json:"errorMessage,omitempty"`
-	CreatedAt               string             `json:"createdAt"`
-	UpdatedAt               string             `json:"updatedAt"`
-	DiscFingerprint         string             `json:"discFingerprint,omitempty"`
-	NeedsReview             bool               `json:"needsReview"`
-	ReviewReason            string             `json:"reviewReason,omitempty"`
-	Metadata                json.RawMessage    `json:"metadata,omitempty"`
-	RipSpec                 json.RawMessage    `json:"ripSpec,omitempty"`
-	ActiveEpisodeKey        string             `json:"activeEpisodeKey,omitempty"`
-	Progress                ProgressResponse   `json:"progress"`
-	Encoding                json.RawMessage    `json:"encoding,omitempty"`
-	Episodes                []EpisodeResponse  `json:"episodes,omitempty"`
-	EpisodeTotals           *TotalsResponse    `json:"episodeTotals,omitempty"`
-	EpisodeIdentifiedCount  int                `json:"episodeIdentifiedCount,omitempty"`
-	SubtitleGeneration      *SubGenResponse    `json:"subtitleGeneration,omitempty"`
-	PrimaryAudioDescription string             `json:"primaryAudioDescription,omitempty"`
-	CommentaryCount         int                `json:"commentaryCount,omitempty"`
+	ID                      int64             `json:"id"`
+	DiscTitle               string            `json:"discTitle"`
+	Stage                   string            `json:"stage"`
+	InProgress              bool              `json:"inProgress"`
+	FailedAtStage           string            `json:"failedAtStage,omitempty"`
+	ErrorMessage            string            `json:"errorMessage,omitempty"`
+	CreatedAt               string            `json:"createdAt"`
+	UpdatedAt               string            `json:"updatedAt"`
+	DiscFingerprint         string            `json:"discFingerprint,omitempty"`
+	NeedsReview             bool              `json:"needsReview"`
+	ReviewReason            string            `json:"reviewReason,omitempty"`
+	Metadata                json.RawMessage   `json:"metadata,omitempty"`
+	RipSpec                 json.RawMessage   `json:"ripSpec,omitempty"`
+	ActiveEpisodeKey        string            `json:"activeEpisodeKey,omitempty"`
+	Progress                ProgressResponse  `json:"progress"`
+	Encoding                json.RawMessage   `json:"encoding,omitempty"`
+	Episodes                []EpisodeResponse `json:"episodes,omitempty"`
+	EpisodeTotals           *TotalsResponse   `json:"episodeTotals,omitempty"`
+	EpisodeIdentifiedCount  int               `json:"episodeIdentifiedCount,omitempty"`
+	SubtitleGeneration      *SubGenResponse   `json:"subtitleGeneration,omitempty"`
+	PrimaryAudioDescription string            `json:"primaryAudioDescription,omitempty"`
+	CommentaryCount         int               `json:"commentaryCount,omitempty"`
 }
 
 // ProgressResponse nests progress fields.
@@ -71,6 +71,8 @@ type EpisodeResponse struct {
 	GeneratedSubtitleDecision string            `json:"generatedSubtitleDecision,omitempty"`
 	MatchScore                float64           `json:"matchScore,omitempty"`
 	MatchedEpisode            int               `json:"matchedEpisode,omitempty"`
+	NeedsReview               bool              `json:"needsReview,omitempty"`
+	ReviewReason              string            `json:"reviewReason,omitempty"`
 }
 
 // TotalsResponse holds per-stage completion counts.
@@ -286,6 +288,8 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 			SourceTitleID:  ep.TitleID,
 			OutputBasename: ep.OutputBasename,
 			MatchScore:     ep.MatchConfidence,
+			NeedsReview:    ep.NeedsReview,
+			ReviewReason:   ep.ReviewReason,
 		}
 
 		if ep.Episode > 0 {

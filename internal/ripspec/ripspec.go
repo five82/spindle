@@ -74,6 +74,8 @@ type Episode struct {
 	TitleHash       string  `json:"title_hash,omitempty"`
 	OutputBasename  string  `json:"output_basename,omitempty"`
 	MatchConfidence float64 `json:"match_confidence,omitempty"`
+	NeedsReview     bool    `json:"needs_review,omitempty"`
+	ReviewReason    string  `json:"review_reason,omitempty"`
 }
 
 // Asset represents a single file artifact at a pipeline stage.
@@ -115,10 +117,10 @@ type ExcludedTrackRef struct {
 
 // AudioAnalysisData holds the results of audio track analysis.
 type AudioAnalysisData struct {
-	PrimaryTrack        AudioTrackRef        `json:"primary_track"`
-	PrimaryDescription  string               `json:"primary_description,omitempty"`
-	CommentaryTracks    []CommentaryTrackRef `json:"commentary_tracks,omitempty"`
-	ExcludedTracks      []ExcludedTrackRef   `json:"excluded_tracks,omitempty"`
+	PrimaryTrack       AudioTrackRef        `json:"primary_track"`
+	PrimaryDescription string               `json:"primary_description,omitempty"`
+	CommentaryTracks   []CommentaryTrackRef `json:"commentary_tracks,omitempty"`
+	ExcludedTracks     []ExcludedTrackRef   `json:"excluded_tracks,omitempty"`
 }
 
 // SubtitleGenRecord captures the result of subtitle generation for one episode.
@@ -236,6 +238,24 @@ func (e *Envelope) MissingEpisodes(stage string) []string {
 		}
 	}
 	return missing
+}
+
+// AppendReviewReason marks an episode for review and appends a human-readable
+// reason, separated by "; " when multiple reasons accumulate.
+func (e *Episode) AppendReviewReason(reason string) {
+	if e == nil {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return
+	}
+	e.NeedsReview = true
+	if existing := strings.TrimSpace(e.ReviewReason); existing != "" {
+		e.ReviewReason = existing + "; " + reason
+	} else {
+		e.ReviewReason = reason
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -414,25 +434,25 @@ func EpisodeKey(season, episode int) string {
 	return fmt.Sprintf("s%02de%02d", season, episode)
 }
 
-// HasResolvedEpisodes returns true if any episode has a non-empty Key whose
-// format matches an episode key (contains "e") rather than a placeholder.
+// HasResolvedEpisodes returns true if any episode has a resolved episode
+// number (> 0).
 func HasResolvedEpisodes(episodes []Episode) bool {
 	for _, ep := range episodes {
-		if ep.Key != "" && strings.Contains(ep.Key, "e") {
+		if ep.Episode > 0 {
 			return true
 		}
 	}
 	return false
 }
 
-// HasUnresolvedEpisodes returns true if any episode has an empty Key or a
-// placeholder key (no "e" separator).
+// HasUnresolvedEpisodes returns true if any episode has not been resolved to
+// an episode number.
 func HasUnresolvedEpisodes(episodes []Episode) bool {
 	return countUnresolved(episodes) > 0
 }
 
-// CountUnresolvedEpisodes returns the number of episodes with empty or
-// placeholder keys.
+// CountUnresolvedEpisodes returns the number of episodes without a resolved
+// episode number.
 func CountUnresolvedEpisodes(episodes []Episode) int {
 	return countUnresolved(episodes)
 }
@@ -440,7 +460,7 @@ func CountUnresolvedEpisodes(episodes []Episode) int {
 func countUnresolved(episodes []Episode) int {
 	count := 0
 	for _, ep := range episodes {
-		if ep.Key == "" || !strings.Contains(ep.Key, "e") {
+		if ep.Episode <= 0 {
 			count++
 		}
 	}

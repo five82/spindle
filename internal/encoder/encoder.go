@@ -293,6 +293,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 
 		if !result.ValidationPassed {
+			if ep := env.EpisodeByKey(job.episodeKey); ep != nil {
+				ep.AppendReviewReason("Encoding validation failed")
+			}
 			item.AppendReviewReason(fmt.Sprintf("validation failed for %s", job.episodeKey))
 			logger.Info("validation failure flagged for review",
 				"decision_type", logs.DecisionValidationFailureRoute,

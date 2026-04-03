@@ -326,9 +326,11 @@ that automated recovery is unlikely to resolve correctly.
 
 ### 12.1 NeedsReview Propagation
 
-Review flags are appended to the rip spec envelope via `env.AppendReviewReason()`.
-Multiple reasons accumulate. The organizer stage routes items with review flags
-to the review directory instead of the main library.
+Review flags are written to individual `episodes[]` entries via
+`episode.AppendReviewReason()`. Multiple reasons accumulate per episode. The
+queue item also receives aggregate `needs_review` / `review_reason` state for
+status reporting. For TV, the organizer uses the episode-level flags to split
+clean episodes to the library and flagged episodes to the review directory.
 
 ### 12.2 Review Sources
 
@@ -366,11 +368,16 @@ After successful matching, the episode ID stage updates the envelope:
 1. **Episode resolution**: Each `episodes[]` entry is updated with resolved
    `episode` number, `episode_title`, and `episode_air_date`. Match confidence
    scores are stored in `match_confidence`.
-2. **Review flags**: Low-confidence or partial matches call
-   `AppendReviewReason()` on the envelope, which sets the queue-level
-   `needs_review` flag.
+2. **Episode review flags**: Low-confidence or unresolved matches mark the
+   specific `episodes[]` entry with `needs_review=true` and a `review_reason`.
+   Queue-level `needs_review` is also set as an aggregate signal when any
+   episode is flagged.
 3. **Logging**: Per-episode match details (scores, subtitle file IDs, methods)
    are logged at INFO level for diagnostics.
+
+Organizer behavior for TV consumes these episode-level flags directly:
+clean resolved episodes go to the library, while unresolved or flagged episodes
+are routed to review.
 
 Queue item metadata is also updated with `episode_numbers`, `season_number`,
 and `media_type` fields.

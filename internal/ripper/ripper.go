@@ -452,6 +452,11 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 		}
 		if len(result.Missing) > 0 {
 			reason := fmt.Sprintf("missing %d episode(s): %s", len(result.Missing), strings.Join(result.Missing, ", "))
+			for _, key := range result.Missing {
+				if ep := env.EpisodeByKey(key); ep != nil {
+					ep.AppendReviewReason("Rip asset missing")
+				}
+			}
 			item.AppendReviewReason(reason)
 			logger.Warn("partial episode asset mapping",
 				"event_type", "episode_files_missing",
@@ -521,6 +526,13 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 		valid := len(visited) - validationErrors
 		if valid == 0 {
 			return fmt.Errorf("all %d ripped episodes failed validation", validationErrors)
+		}
+		for _, asset := range env.Assets.Ripped {
+			if asset.IsFailed() {
+				if ep := env.EpisodeByKey(asset.EpisodeKey); ep != nil {
+					ep.AppendReviewReason("Rip validation failed")
+				}
+			}
 		}
 		reason := fmt.Sprintf("%d episode(s) failed rip validation", validationErrors)
 		item.AppendReviewReason(reason)

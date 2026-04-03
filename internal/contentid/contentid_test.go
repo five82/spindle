@@ -239,6 +239,27 @@ func TestApplyMatchesRemapsAssetKeys(t *testing.T) {
 	}
 }
 
+func TestApplyMatchesFlagsEpisodeLevelReview(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := &Handler{}
+	item := &queue.Item{}
+	env := &ripspec.Envelope{
+		Episodes: []ripspec.Episode{{Key: "s03_001", Season: 3}},
+	}
+
+	h.applyMatches(logger, env, []Match{{DiscKey: "s03_001", EpisodeNum: 1, Score: 0.63}}, item)
+
+	if !env.Episodes[0].NeedsReview {
+		t.Fatal("episode NeedsReview = false, want true")
+	}
+	if env.Episodes[0].ReviewReason == "" {
+		t.Fatal("episode ReviewReason = empty, want populated")
+	}
+	if item.NeedsReview != 1 {
+		t.Fatalf("item.NeedsReview = %d, want 1", item.NeedsReview)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // isDigitsOnly
 // ---------------------------------------------------------------------------

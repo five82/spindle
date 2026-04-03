@@ -497,6 +497,22 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		}
 	}
 
+	if r.Envelope != nil {
+		reviewCount := 0
+		for _, ep := range r.Envelope.Episodes {
+			if ep.NeedsReview {
+				reviewCount++
+			}
+		}
+		if reviewCount > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "warning",
+				Category: "episodes",
+				Message:  fmt.Sprintf("%d episode(s) explicitly flagged for review", reviewCount),
+			})
+		}
+	}
+
 	// Episode stats anomalies.
 	if a.EpisodeStats != nil {
 		if a.EpisodeStats.Unresolved > 0 {

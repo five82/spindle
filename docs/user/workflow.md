@@ -117,13 +117,13 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 1. Spindle moves encoded artifacts into your library using TMDB metadata. Movies land under `library_dir/movies`, TV under `library_dir/tv/<Show>/Season XX/`.
 2. Organizing progress is byte-based across the total copy workload, so dashboards can show both percent and bytes copied while files are being placed.
 3. Final assets are written back into the rip spec after each copied item so completed counts can advance live.
-4. When `needs_review` is set, or when the library target is unavailable, outputs are moved to `review_dir` instead. The queue item still completes, but progress is labeled "Manual review".
+4. When `needs_review` is set, or when the library target is unavailable, review routing is applied. Movies go fully to `review_dir`. TV is organized per episode: clean resolved episodes go to the library, while unresolved or episode-flagged outputs go to `review_dir`. The queue item still completes.
 5. Jellyfin scans are triggered after organizing when credentials are supplied.
 
 ## Review vs Failed
 
 - **`failed` stage**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, manual stop requests (`spindle queue stop <id>`), and episode-identification reference acquisition failures (for example OpenSubtitles service/auth/network problems). Items stopped by user have `"Stop requested by user"` in their `review_reason` array. Fix the root cause, then use `spindle queue retry <id>` to requeue.
-- **`needs_review` flag**: Workflow continues but final artifacts are routed to `review_dir` instead of the library. The item completes with progress stage "Manual review" so the pipeline stays unblocked. This is used for low-confidence matches, missing metadata, unresolved episode numbers after successful episode-ID reference acquisition, or other issues that need manual attention but shouldn't block processing.
+- **`needs_review` flag**: Workflow continues but manual-review routing is enabled instead of failing the entire pipeline. For movies this means the final artifact goes to `review_dir`. For TV, the flag is aggregate: clean resolved episodes may still land in the library while unresolved or episode-flagged outputs go to `review_dir`. This is used for low-confidence matches, missing metadata, unresolved episode numbers after successful episode-ID reference acquisition, or other issues that need manual attention but shouldn't block processing.
 
 ## Recovery Procedures
 

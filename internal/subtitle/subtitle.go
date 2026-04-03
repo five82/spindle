@@ -179,6 +179,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_reason", "automated quality check",
 				"episode_key", key,
 			)
+			if ep := env.EpisodeByKey(key); ep != nil {
+				ep.AppendReviewReason("Subtitle validation: " + issue)
+			}
 			item.AppendReviewReason("srt_validation: " + issue + " (" + key + ")")
 		}
 

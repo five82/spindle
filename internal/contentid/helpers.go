@@ -346,6 +346,7 @@ func (h *Handler) applyMatches(
 		m, ok := matchMap[ep.Key]
 		if !ok {
 			unresolvedCount++
+			ep.AppendReviewReason("Episode ID: unresolved")
 			continue
 		}
 
@@ -358,6 +359,7 @@ func (h *Handler) applyMatches(
 
 		if m.Score < lowConfidenceReviewThreshold {
 			lowConfCount++
+			ep.AppendReviewReason(fmt.Sprintf("Episode ID: confidence %.3f below threshold %.2f", m.Score, lowConfidenceReviewThreshold))
 			logger.Warn("low confidence episode match",
 				"event_type", "low_confidence_match",
 				"error_hint", fmt.Sprintf("%s matched E%02d with score %.3f", ep.Key, m.EpisodeNum, m.Score),

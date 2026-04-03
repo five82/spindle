@@ -135,13 +135,15 @@ belongs here.
 - `disc_source` -- moved to `metadata.disc_source`
 - `disc_number` -- already in `metadata.disc_number`
 - `subtitle_context` -- subtitles stage reads `metadata` directly (same data)
-- `content_id_needs_review` / `content_id_review_reason` -- episode ID stage
-  uses `AppendReviewReason()` which sets queue-level `needs_review` flag
 - `content_id_matches` -- episode resolution stored in `episodes[]`; match
   scores are logged by the episode ID stage
 - `primary_audio_description` -- stored as `PrimaryDescription` in `AudioAnalysisData` during audio analysis
 - `subtitle_generation_summary` -- computed on-demand from
   `subtitle_generation_results`
+
+**Episode review fields** now live on `episodes[]` rather than in envelope
+attributes. Queue-level `needs_review` remains an aggregate flag; per-episode
+routing decisions come from `episodes[].needs_review` and `episodes[].review_reason`.
 
 **EnvelopeAttributes** -- 3 fields with writer/reader stages:
 
@@ -154,6 +156,21 @@ belongs here.
 **Nested types:**
 
 ```go
+Episode {
+    Key             string
+    TitleID         int
+    Season          int
+    Episode         int
+    EpisodeTitle    string
+    EpisodeAirDate  string
+    RuntimeSeconds  int
+    TitleHash       string
+    OutputBasename  string
+    MatchConfidence float64
+    NeedsReview     bool
+    ReviewReason    string
+}
+
 AudioAnalysisData {
     PrimaryTrack        AudioTrackRef          // {Index int}
     PrimaryDescription  string                 // "English | truehd | 8ch | Atmos"
@@ -179,7 +196,7 @@ SubtitleGenRecord {
 | `Parse` | `Parse(raw string) (Envelope, error)` | Deserialize JSON; returns empty envelope on blank input |
 | `Encode` | `Encode() (string, error)` | Serialize to JSON |
 | `EpisodeByKey` | `EpisodeByKey(key string) *Episode` | Case-insensitive lookup; nil if not found |
-| `AppendReviewReason` | `AppendReviewReason(reason string)` | Sets review flag; unmarshals existing JSON array (or `[]` if NULL/empty), appends reason, marshals back |
+| `Episode.AppendReviewReason` | `AppendReviewReason(reason string)` | Sets the episode-level review flag and appends a human-readable reason |
 | `ExpectedCount` | `ExpectedCount() int` | len(Episodes) for TV, 1 for movies |
 | `AssetCounts` | `AssetCounts() (expected, ripped, encoded, final int)` | Per-stage completion counts |
 | `MissingEpisodes` | `MissingEpisodes(stage string) []string` | Episode keys without assets at stage; nil for movies |

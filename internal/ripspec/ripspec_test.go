@@ -134,6 +134,18 @@ func TestAddAssetAppendAndReplace(t *testing.T) {
 	}
 }
 
+func TestEpisodeAppendReviewReason(t *testing.T) {
+	ep := &Episode{}
+	ep.AppendReviewReason("low confidence")
+	ep.AppendReviewReason("sequence gap")
+	if !ep.NeedsReview {
+		t.Fatal("NeedsReview = false, want true")
+	}
+	if ep.ReviewReason != "low confidence; sequence gap" {
+		t.Fatalf("ReviewReason = %q", ep.ReviewReason)
+	}
+}
+
 func TestFindAssetSuccessAndMiss(t *testing.T) {
 	assets := Assets{
 		Encoded: []Asset{
@@ -162,10 +174,10 @@ func TestFindAssetSuccessAndMiss(t *testing.T) {
 
 func TestRemapEpisodeKeys(t *testing.T) {
 	assets := Assets{
-		Ripped: []Asset{{EpisodeKey: "s01_001", Path: "/rip/ep1.mkv", Status: "completed"}},
-		Encoded: []Asset{{EpisodeKey: "s01_001", Path: "/enc/ep1.mkv", Status: "completed"}},
+		Ripped:    []Asset{{EpisodeKey: "s01_001", Path: "/rip/ep1.mkv", Status: "completed"}},
+		Encoded:   []Asset{{EpisodeKey: "s01_001", Path: "/enc/ep1.mkv", Status: "completed"}},
 		Subtitled: []Asset{{EpisodeKey: "s01_001", Path: "/sub/ep1.mkv", Status: "completed"}},
-		Final: []Asset{{EpisodeKey: "s01_001", Path: "/final/ep1.mkv", Status: "completed"}},
+		Final:     []Asset{{EpisodeKey: "s01_001", Path: "/final/ep1.mkv", Status: "completed"}},
 	}
 
 	assets.RemapEpisodeKeys(map[string]string{"s01_001": "s01e03"})
@@ -225,16 +237,16 @@ func TestEpisodeKeyFormatting(t *testing.T) {
 
 func TestHasResolvedEpisodes(t *testing.T) {
 	resolved := []Episode{
-		{Key: "s01e01"},
-		{Key: "s01e02"},
+		{Key: "s01e01", Episode: 1},
+		{Key: "s01e02", Episode: 2},
 	}
 	if !HasResolvedEpisodes(resolved) {
 		t.Error("HasResolvedEpisodes = false, want true")
 	}
 
 	unresolved := []Episode{
-		{Key: "s01_001"},
-		{Key: "s01_002"},
+		{Key: "s01_001", Episode: 0},
+		{Key: "s01_002", Episode: 0},
 	}
 	if HasResolvedEpisodes(unresolved) {
 		t.Error("HasResolvedEpisodes = true for placeholders, want false")
@@ -247,23 +259,23 @@ func TestHasResolvedEpisodes(t *testing.T) {
 
 func TestHasUnresolvedEpisodes(t *testing.T) {
 	unresolved := []Episode{
-		{Key: "s01_001"},
+		{Key: "s01_001", Episode: 0},
 	}
 	if !HasUnresolvedEpisodes(unresolved) {
 		t.Error("HasUnresolvedEpisodes = false for placeholder, want true")
 	}
 
 	mixed := []Episode{
-		{Key: "s01e01"},
-		{Key: "s01_002"},
+		{Key: "s01e01", Episode: 1},
+		{Key: "s01_002", Episode: 0},
 	}
 	if !HasUnresolvedEpisodes(mixed) {
 		t.Error("HasUnresolvedEpisodes = false for mixed, want true")
 	}
 
 	resolved := []Episode{
-		{Key: "s01e01"},
-		{Key: "s01e02"},
+		{Key: "s01e01", Episode: 1},
+		{Key: "s01e02", Episode: 2},
 	}
 	if HasUnresolvedEpisodes(resolved) {
 		t.Error("HasUnresolvedEpisodes = true for resolved, want false")
@@ -450,10 +462,10 @@ func TestClearFailedAsset(t *testing.T) {
 
 func TestCountUnresolvedEpisodes(t *testing.T) {
 	episodes := []Episode{
-		{Key: "s01e01"},
-		{Key: "s01_001"},
-		{Key: ""},
-		{Key: "s01e04"},
+		{Key: "s01e01", Episode: 1},
+		{Key: "s01_001", Episode: 0},
+		{Key: "", Episode: 0},
+		{Key: "s01e04", Episode: 4},
 	}
 	got := CountUnresolvedEpisodes(episodes)
 	if got != 2 {

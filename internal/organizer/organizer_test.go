@@ -157,3 +157,18 @@ func TestTotalCompletedStageBytes(t *testing.T) {
 		t.Fatalf("totalCompletedStageBytes() = %d, want 10", got)
 	}
 }
+
+func TestPartitionTVOrganizationKeys(t *testing.T) {
+	env := &ripspec.Envelope{Episodes: []ripspec.Episode{
+		{Key: "s01e01", Episode: 1},
+		{Key: "s01e02", Episode: 2, NeedsReview: true},
+		{Key: "s01_003", Episode: 0},
+	}}
+	libraryKeys, reviewKeys := partitionTVOrganizationKeys(env)
+	if len(libraryKeys) != 1 || libraryKeys[0] != "s01e01" {
+		t.Fatalf("libraryKeys = %#v, want [s01e01]", libraryKeys)
+	}
+	if len(reviewKeys) != 2 || reviewKeys[0] != "s01e02" || reviewKeys[1] != "s01_003" {
+		t.Fatalf("reviewKeys = %#v, want [s01e02 s01_003]", reviewKeys)
+	}
+}
