@@ -57,15 +57,18 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
 4. If no confident match is found (or TMDB lookup fails), the item is marked `needs_review` with a reason. The item advances to the next stage so downstream stages can still run, and the organizer will route output to `review_dir`.
 5. Duplicate fingerprints are treated as immediate failure: the item is placed in `failed` with `needs_review = true` and the workflow stops.
 
+The queue also reports coarse identification progress for cleanup, scanning/metadata resolution, and finalization so dashboards can show stage activity even though identification is not a stream-oriented stage.
+
 Progress messages in `spindle logs -f` describe the identification steps and any review reasons.
 
 ## Stage 3: Ripping the Disc (ripping)
 
 1. Identified items flow into the MakeMKV ripper. The queue updates to `ripping` and streams progress as `makemkvcon` runs.
-2. Video files are written to `<staging_dir>/<fingerprint-or-queue-id>/ripped/`.
-3. Rips are post-processed to keep the primary audio stream (preferring English when available); other audio streams are dropped.
-4. When ripping succeeds, the item advances to the next stage and an ntfy notification fires so you know the drive is free to eject manually.
-5. If MakeMKV fails or the disc is defective, the item becomes `failed` with the error recorded in the queue.
+2. For discs with multiple rip targets (for example TV episodes), the displayed percent is cumulative across the whole ripping stage, not just the current title.
+3. Video files are written to `<staging_dir>/<fingerprint-or-queue-id>/ripped/`.
+4. Ripped assets are written back into the rip spec after each title finishes so dashboards can advance ripped counts live.
+5. When ripping succeeds, the item advances to the next stage and an ntfy notification fires so you know the drive is free to eject manually.
+6. If MakeMKV fails or the disc is defective, the item becomes `failed` with the error recorded in the queue.
 
 If the rip cache is enabled, raw rips are stored for reuse along with the identification metadata
 (disc fingerprint, rip spec, TMDB metadata). Cached entries can be re-queued without inserting a disc
@@ -83,8 +86,9 @@ use `spindle cache rip --title` to interactively select which title to rip.
 ## Stage 5: Encoding to AV1 (encoding)
 
 1. The encoder builds a job plan from the rip spec and runs Drapto for each episode (or a single file for movies).
-2. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`. The rip spec is updated after each episode so progress is recoverable.
-3. When encoding completes, the item advances to the next stage. Failures surface as `failed` (with `needs_review = true` for validation/configuration errors).
+2. For multi-file encodes, the displayed percent is cumulative across the whole encoding stage, not just the current file.
+3. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`. The rip spec is updated after each episode so progress is recoverable and encoded counts can advance live.
+4. When encoding completes, the item advances to the next stage. Failures surface as `failed` (with `needs_review = true` for validation/configuration errors).
 
 ## Stage 6: Audio Analysis (audio_analysis)
 
@@ -92,8 +96,9 @@ When `commentary.enabled = true`, Spindle analyzes encoded files to detect and e
 
 1. Extracts audio from each encoded asset.
 2. Uses WhisperX transcription and LLM classification to identify commentary vs. primary audio tracks.
-3. Updates the rip spec with analysis results for downstream stages.
-4. Skipped when commentary detection is disabled or no encoded assets exist.
+3. Reports coarse phase progress for commentary detection, refinement, post-refinement analysis, and persistence.
+4. Updates the rip spec with analysis results for downstream stages.
+5. Skipped when commentary detection is disabled or no encoded assets exist.
 
 ## Stage 7: Subtitle Generation (subtitling)
 
@@ -101,16 +106,19 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 
 1. Spindle extracts the primary audio track.
 2. **WhisperX transcription**: transcribes with the `large-v3` model with line length limits (`--max_line_width 42 --max_line_count 2`).
-3. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the WhisperX output via text-based matching.
-4. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`).
+3. Subtitling progress is cumulative across the full subtitle stage, and completed subtitle assets are persisted after each item so counts can advance live.
+4. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the WhisperX output via text-based matching.
+5. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`).
 
 `spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename and uses TMDB for metadata context.
 
 ## Stage 8: Organizing & Jellyfin Refresh (organizing -> completed)
 
 1. Spindle moves encoded artifacts into your library using TMDB metadata. Movies land under `library_dir/movies`, TV under `library_dir/tv/<Show>/Season XX/`.
-2. When `needs_review` is set, or when the library target is unavailable, outputs are moved to `review_dir` instead. The queue item still completes, but progress is labeled "Manual review".
-3. Jellyfin scans are triggered after organizing when credentials are supplied.
+2. Organizing progress is byte-based across the total copy workload, so dashboards can show both percent and bytes copied while files are being placed.
+3. Final assets are written back into the rip spec after each copied item so completed counts can advance live.
+4. When `needs_review` is set, or when the library target is unavailable, outputs are moved to `review_dir` instead. The queue item still completes, but progress is labeled "Manual review".
+5. Jellyfin scans are triggered after organizing when credentials are supplied.
 
 ## Review vs Failed
 

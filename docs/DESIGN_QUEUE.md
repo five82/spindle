@@ -89,7 +89,7 @@ row creation of a separate progress table.
 | `needs_review`         | INTEGER   | 1 if item requires manual review                  |
 | `review_reason`        | TEXT      | Why review is needed (JSON array, e.g. `["reason1", "reason2"]`). Only column storing a raw JSON array rather than a plain string or JSON object. |
 | `progress_stage`       | TEXT      | Current stage display name                        |
-| `progress_percent`     | REAL      | Progress percentage (0-100)                       |
+| `progress_percent`     | REAL      | Progress percentage (0-100); for multi-target stages this is aggregate whole-stage progress, not just the current target |
 | `progress_message`     | TEXT      | Human-readable progress message                   |
 | `active_episode_key`   | TEXT      | Currently processing episode (e.g., s01e03)       |
 | `progress_bytes_copied`| INTEGER   | Bytes copied during organizing                    |
@@ -248,7 +248,7 @@ from the pipeline configuration.
 | `GetByID(id)` | Fetch single item by primary key |
 | `FindByFingerprint(fp)` | Find first item matching a disc fingerprint |
 | `Update(item)` | Full item update (mutable columns); applies stop-review override |
-| `UpdateProgress(item)` | Update only progress columns (stage, percent, message, bytes, encoding, episode key). High-frequency path. Called on the 2-second throttle during encoding, and force-called (bypassing throttle) at episode boundaries (reset) and on completion/error (final state) |
+| `UpdateProgress(item)` | Update only progress columns (stage, percent, message, bytes, encoding, episode key). High-frequency path. Used for live stage progress. For multi-target stages, callers persist aggregate stage progress and may also force updates at target boundaries so API consumers can advance counts during the active stage. |
 | `Remove(id)` | Delete single item |
 | `Clear()` | Delete all items |
 | `ClearCompleted()` | Delete only completed items |

@@ -19,6 +19,18 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func TestUpdateProgress(t *testing.T) {
+	h := &Handler{}
+	item := &queue.Item{}
+	h.updateProgress(item, 42, "Phase 2/3 - Scanning disc and resolving metadata")
+	if item.ProgressPercent != 42 {
+		t.Fatalf("ProgressPercent = %f, want 42", item.ProgressPercent)
+	}
+	if item.ProgressMessage != "Phase 2/3 - Scanning disc and resolving metadata" {
+		t.Fatalf("ProgressMessage = %q", item.ProgressMessage)
+	}
+}
+
 func TestResolveTitle_PriorityChain(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -727,7 +739,7 @@ func TestCreateEpisodePlaceholders_FiltersOutlierDurations(t *testing.T) {
 			{ID: 0, Duration: 1520, SegmentMap: "00001.m2ts"}, // ~25 min episode
 			{ID: 1, Duration: 1516, SegmentMap: "00002.m2ts"}, // ~25 min episode
 			{ID: 2, Duration: 1519, SegmentMap: "00003.m2ts"}, // ~25 min episode
-			{ID: 24, Duration: 340, SegmentMap: "00024.m2ts"},  // 5.7 min bonus (< half median)
+			{ID: 24, Duration: 340, SegmentMap: "00024.m2ts"}, // 5.7 min bonus (< half median)
 		},
 	}
 	h.createEpisodePlaceholders(discardLogger(), env)

@@ -9,6 +9,15 @@ import (
 	"os"
 )
 
+// CopyProgress reports bytes copied during a verified copy.
+type CopyProgress struct {
+	BytesCopied int64
+	TotalBytes  int64
+}
+
+// ProgressFunc receives verified copy progress updates.
+type ProgressFunc func(CopyProgress)
+
 // removeBestEffort removes a file, ignoring any error. Used for cleanup on
 // failure paths where the original error is more important.
 func removeBestEffort(path string) {
@@ -50,6 +59,12 @@ func CopyFileMode(src, dst string, mode os.FileMode) error {
 // verification. On mismatch the destination file is removed and an error is returned.
 // Uses 0o644 permissions.
 func CopyFileVerified(src, dst string) error {
+	return CopyFileVerifiedWithProgress(src, dst, nil)
+}
+
+// CopyFileVerifiedWithProgress is like CopyFileVerified but reports byte progress
+// during the copy.
+func CopyFileVerifiedWithProgress(src, dst string, progress ProgressFunc) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
@@ -74,7 +89,11 @@ func CopyFileVerified(src, dst string) error {
 	teeReader := io.TeeReader(bufio.NewReader(srcFile), srcHash)
 
 	// Hash destination bytes as they are written.
-	multiWriter := io.MultiWriter(dstFile, dstHash)
+	writer := io.Writer(dstFile)
+	if progress != nil {
+		writer = &progressWriter{w: writer, total: srcSize, onWrite: progress}
+	}
+	multiWriter := io.MultiWriter(writer, dstHash)
 
 	written, err := io.Copy(multiWriter, teeReader)
 	if err != nil {
@@ -101,4 +120,23 @@ func CopyFileVerified(src, dst string) error {
 	}
 
 	return nil
+}
+
+// progressWriter wraps a writer and reports cumulative copy progress.
+type progressWriter struct {
+	w       io.Writer
+	copied  int64
+	total   int64
+	onWrite ProgressFunc
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n, err := pw.w.Write(p)
+	if n > 0 {
+		pw.copied += int64(n)
+		if pw.onWrite != nil {
+			pw.onWrite(CopyProgress{BytesCopied: pw.copied, TotalBytes: pw.total})
+		}
+	}
+	return n, err
 }

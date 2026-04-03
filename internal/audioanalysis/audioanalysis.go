@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/llm"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/audio"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/queue"
@@ -105,6 +105,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger.Debug("collected encoded assets for analysis", "count", len(encodedPaths))
 
 	analysisData := &ripspec.AudioAnalysisData{}
+	item.ActiveEpisodeKey = keys[0]
+	h.updateProgress(item, 5, "Phase 1/3 - Commentary detection")
 
 	// Phase 1: Commentary detection on encoded files.
 	// Must run BEFORE audio refinement so commentary track indices can be
@@ -130,6 +132,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Phase 2: Audio refinement on encoded files.
 	// Strips non-English and redundant audio tracks, preserving primary +
 	// commentary tracks via additionalKeep.
+	h.updateProgress(item, 40, "Phase 2/3 - Audio refinement")
 	logger.Info("Phase 2/3 - Audio refinement")
 	refinement, refErr := RefineAudioTargets(ctx, logger, encodedPaths, commentaryIndices)
 	if refErr != nil {
@@ -143,6 +146,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Phase 3: Post-refinement primary audio selection and commentary disposition.
+	h.updateProgress(item, 75, "Phase 3/3 - Post-refinement audio analysis")
 	logger.Info("Phase 3/3 - Post-refinement audio analysis")
 	{
 		path := encodedPaths[0]
@@ -203,6 +207,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Store analysis in envelope attributes.
 	env.Attributes.AudioAnalysis = analysisData
 
+	h.updateProgress(item, 95, "Phase 3/3 - Persisting audio analysis")
+
 	// Persist.
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 		return err
@@ -210,6 +216,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	logger.Info("audio analysis stage completed", "event_type", "stage_complete", "stage", "audio_analysis")
 	return nil
+}
+
+func (h *Handler) updateProgress(item *queue.Item, percent float64, message string) {
+	item.ProgressPercent = percent
+	item.ProgressMessage = message
+	if h.store != nil {
+		_ = h.store.UpdateProgress(item)
+	}
 }
 
 // detectCommentary examines non-primary audio tracks for commentary content.

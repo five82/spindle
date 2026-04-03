@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/discmonitor"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
@@ -187,8 +187,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		titleEpisodeKey[ep.TitleID] = ep.Key
 	}
 
-	// Rip selected titles, tracking TitleID -> file path mapping.
-	titleFileMap := make(map[int]string, len(targets)) // titleID -> ripped file path
+	// Rip selected titles one by one, persisting per-title progress so external
+	// consumers can show both aggregate stage progress and completed episode
+	// counts while the stage is still running.
 	for i, title := range targets {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -199,6 +200,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 
 		item.ActiveEpisodeKey = titleEpisodeKey[title.ID]
+		item.ProgressPercent = overallRipPercent(i, len(targets), 0)
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Ripping title %d", i+1, len(targets), title.ID)
 		if err := h.store.UpdateProgress(item); err != nil {
 			logger.Warn("progress persistence failed",
@@ -216,8 +218,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
 			h.cfg.MakeMKV.MinTitleLength,
 			func(p makemkv.RipProgress) {
-				item.ProgressPercent = p.Percent
-				item.ProgressMessage = p.Message
+				item.ProgressPercent = overallRipPercent(i, len(targets), p.Percent)
+				if strings.TrimSpace(p.Message) != "" {
+					item.ProgressMessage = p.Message
+				}
 				_ = h.store.UpdateProgress(item)
 			}, logger,
 		)
@@ -229,17 +233,53 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		after := listMKVFiles(rippedDir)
 		newFile := findNewFile(before, after)
 		if newFile != "" {
-			titleFileMap[title.ID] = newFile
 			logger.Info("title rip completed",
 				"decision_type", logs.DecisionTitleRip,
 				"decision_result", "completed",
 				"decision_reason", fmt.Sprintf("title_id=%d file=%s", title.ID, newFile),
 			)
+			if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
+				asset := ripspec.Asset{
+					EpisodeKey: episodeKey,
+					TitleID:    title.ID,
+					Path:       newFile,
+					Status:     "completed",
+				}
+				if err := h.validateRippedArtifact(ctx, newFile); err != nil {
+					asset.Path = ""
+					asset.Status = "failed"
+					asset.ErrorMsg = err.Error()
+					item.AppendReviewReason(fmt.Sprintf("rip validation failed for %s", episodeKey))
+					logger.Warn("ripped episode failed validation",
+						"event_type", "rip_validation_failed",
+						"error_hint", err.Error(),
+						"impact", "episode excluded from pipeline",
+						"episode_key", episodeKey,
+						"path", newFile,
+					)
+				}
+				env.Assets.AddAsset("ripped", asset)
+				item.RippedFile = newFile
+				if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+					return err
+				}
+			}
 		} else {
 			logger.Info("title rip completed but no new file detected",
 				"decision_type", logs.DecisionFileDiscovery,
 				"decision_result", "not_found",
 				"decision_reason", fmt.Sprintf("title_id=%d", title.ID),
+			)
+		}
+
+		item.ProgressPercent = overallRipPercent(i+1, len(targets), 0)
+		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Ripped title %d", i+1, len(targets), title.ID)
+		if err := h.store.UpdateProgress(item); err != nil {
+			logger.Warn("progress persistence failed",
+				"event_type", "progress_persist_failed",
+				"error_hint", "rip completion progress not persisted",
+				"impact", "rip progress not reflected in queue",
+				"error", err,
 			)
 		}
 	}
@@ -548,4 +588,27 @@ func findNewFile(before, after map[string]bool) string {
 		}
 	}
 	return ""
+}
+
+func overallRipPercent(completedTitles, totalTitles int, currentTitlePercent float64) float64 {
+	if totalTitles <= 0 {
+		return 0
+	}
+	if completedTitles < 0 {
+		completedTitles = 0
+	}
+	if completedTitles > totalTitles {
+		completedTitles = totalTitles
+	}
+	if currentTitlePercent < 0 {
+		currentTitlePercent = 0
+	}
+	if currentTitlePercent > 100 {
+		currentTitlePercent = 100
+	}
+	progress := float64(completedTitles) + (currentTitlePercent / 100)
+	if progress > float64(totalTitles) {
+		progress = float64(totalTitles)
+	}
+	return progress / float64(totalTitles) * 100
 }

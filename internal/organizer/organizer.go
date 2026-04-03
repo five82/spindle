@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/jellyfin"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -84,6 +84,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	)
 
 	// Copy each asset to library.
+	totalBytes := totalCompletedStageBytes(&env, sourceStage, keys)
+	var completedBytes int64
 	for i, key := range keys {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -135,10 +137,18 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Copying to library (%s)", i+1, len(keys), key)
+		item.ProgressBytesCopied = completedBytes
+		item.ProgressTotalBytes = totalBytes
+		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
 		_ = h.store.UpdateProgress(item)
 
 		// Copy with verification.
-		if err := fileutil.CopyFileVerified(asset.Path, destPath); err != nil {
+		if err := fileutil.CopyFileVerifiedWithProgress(asset.Path, destPath, func(p fileutil.CopyProgress) {
+			item.ProgressBytesCopied = completedBytes + p.BytesCopied
+			item.ProgressTotalBytes = totalBytes
+			item.ProgressPercent = overallBytePercent(item.ProgressBytesCopied, totalBytes)
+			_ = h.store.UpdateProgress(item)
+		}); err != nil {
 			// On cancellation, clean up partial file.
 			if ctx.Err() != nil {
 				_ = os.Remove(destPath)
@@ -160,6 +170,15 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Status:     "completed",
 		})
 		item.FinalFile = destPath
+		if info, statErr := os.Stat(asset.Path); statErr == nil {
+			completedBytes += info.Size()
+		}
+		item.ProgressBytesCopied = completedBytes
+		item.ProgressTotalBytes = totalBytes
+		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
+		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+			return err
+		}
 
 		// Copy subtitle sidecar if exists (non-muxed).
 		copySidecarSubtitle(logger, asset.Path, destPath)
@@ -197,7 +216,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
 	return nil
 }
-
 
 // destFilename builds the destination filename for a given asset key.
 func destFilename(meta *queue.Metadata, key, ext string) string {
@@ -286,6 +304,8 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
 	)
 
+	totalBytes := totalCompletedStageBytes(env, sourceStage, keys)
+	var completedBytes int64
 	for i, key := range keys {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -302,8 +322,18 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 		logger.Info(fmt.Sprintf("Phase %d/%d - Copying to review (%s)", i+1, len(keys), key),
 			"event_type", "review_copy",
 		)
+		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Copying to review (%s)", i+1, len(keys), key)
+		item.ProgressBytesCopied = completedBytes
+		item.ProgressTotalBytes = totalBytes
+		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
+		_ = h.store.UpdateProgress(item)
 
-		if err := fileutil.CopyFileVerified(asset.Path, destPath); err != nil {
+		if err := fileutil.CopyFileVerifiedWithProgress(asset.Path, destPath, func(p fileutil.CopyProgress) {
+			item.ProgressBytesCopied = completedBytes + p.BytesCopied
+			item.ProgressTotalBytes = totalBytes
+			item.ProgressPercent = overallBytePercent(item.ProgressBytesCopied, totalBytes)
+			_ = h.store.UpdateProgress(item)
+		}); err != nil {
 			if ctx.Err() != nil {
 				_ = os.Remove(destPath)
 				return ctx.Err()
@@ -313,6 +343,12 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 
 		copySidecarSubtitle(logger, asset.Path, destPath)
 		item.FinalFile = destPath
+		if info, statErr := os.Stat(asset.Path); statErr == nil {
+			completedBytes += info.Size()
+		}
+		item.ProgressBytesCopied = completedBytes
+		item.ProgressTotalBytes = totalBytes
+		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
 	}
 
 	h.cleanupStaging(ctx, item)
@@ -348,6 +384,36 @@ func (h *Handler) cleanupStaging(ctx context.Context, item *queue.Item) {
 		"event_type", "staging_cleanup",
 		"staging_root", root,
 	)
+}
+
+func totalCompletedStageBytes(env *ripspec.Envelope, stage string, keys []string) int64 {
+	if env == nil {
+		return 0
+	}
+	var total int64
+	for _, key := range keys {
+		asset, ok := env.Assets.FindAsset(stage, key)
+		if !ok || !asset.IsCompleted() {
+			continue
+		}
+		if info, err := os.Stat(asset.Path); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
+}
+
+func overallBytePercent(copiedBytes, totalBytes int64) float64 {
+	if totalBytes <= 0 {
+		return 0
+	}
+	if copiedBytes < 0 {
+		copiedBytes = 0
+	}
+	if copiedBytes > totalBytes {
+		copiedBytes = totalBytes
+	}
+	return float64(copiedBytes) / float64(totalBytes) * 100
 }
 
 // copySidecarSubtitle copies a .en.srt sidecar subtitle file alongside the

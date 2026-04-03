@@ -181,3 +181,31 @@ func TestCopyFileVerified(t *testing.T) {
 		}
 	})
 }
+
+func TestCopyFileVerifiedWithProgress(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.bin")
+	dst := filepath.Join(dir, "dst.bin")
+	content := make([]byte, 1<<16)
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int
+	var last CopyProgress
+	if err := CopyFileVerifiedWithProgress(src, dst, func(p CopyProgress) {
+		calls++
+		last = p
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls == 0 {
+		t.Fatal("expected progress callbacks")
+	}
+	if last.BytesCopied != int64(len(content)) {
+		t.Fatalf("BytesCopied = %d, want %d", last.BytesCopied, len(content))
+	}
+	if last.TotalBytes != int64(len(content)) {
+		t.Fatalf("TotalBytes = %d, want %d", last.TotalBytes, len(content))
+	}
+}

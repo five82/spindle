@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -181,6 +182,31 @@ func TestListMKVFiles(t *testing.T) {
 	files := listMKVFiles(dir)
 	if len(files) != 2 {
 		t.Errorf("expected 2 mkv files, got %d", len(files))
+	}
+}
+
+func TestOverallRipPercent(t *testing.T) {
+	tests := []struct {
+		name       string
+		completed  int
+		total      int
+		currentPct float64
+		want       float64
+	}{
+		{name: "first title half done", completed: 0, total: 12, currentPct: 50, want: 4.166666666666667},
+		{name: "ninth title one third done", completed: 9, total: 12, currentPct: 33.333333333333336, want: 77.77777777777779},
+		{name: "all titles done", completed: 12, total: 12, currentPct: 0, want: 100},
+		{name: "clamps over 100", completed: 11, total: 12, currentPct: 250, want: 100},
+		{name: "invalid total", completed: 1, total: 0, currentPct: 50, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := overallRipPercent(tt.completed, tt.total, tt.currentPct)
+			if math.Abs(got-tt.want) > 1e-9 {
+				t.Fatalf("overallRipPercent(%d, %d, %f) = %f, want %f", tt.completed, tt.total, tt.currentPct, got, tt.want)
+			}
+		})
 	}
 }
 

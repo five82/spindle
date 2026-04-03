@@ -4,8 +4,21 @@ import (
 	"testing"
 
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
+
+func TestUpdateProgress(t *testing.T) {
+	h := &Handler{}
+	item := &queue.Item{}
+	h.updateProgress(item, 75, "Phase 3/3 - Post-refinement audio analysis")
+	if item.ProgressPercent != 75 {
+		t.Fatalf("ProgressPercent = %f, want 75", item.ProgressPercent)
+	}
+	if item.ProgressMessage != "Phase 3/3 - Post-refinement audio analysis" {
+		t.Fatalf("ProgressMessage = %q", item.ProgressMessage)
+	}
+}
 
 func TestAssetKeys_Movie(t *testing.T) {
 	env := &ripspec.Envelope{

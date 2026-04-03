@@ -1,6 +1,9 @@
 package organizer
 
 import (
+	"math"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/five82/spindle/internal/queue"
@@ -102,9 +105,9 @@ func TestDestFilename_TVFallback(t *testing.T) {
 
 func TestParseEpisodeKey(t *testing.T) {
 	tests := []struct {
-		key            string
-		wantSeason     int
-		wantEpisode    int
+		key         string
+		wantSeason  int
+		wantEpisode int
 	}{
 		{"s01e03", 1, 3},
 		{"S02E10", 2, 10},
@@ -118,5 +121,39 @@ func TestParseEpisodeKey(t *testing.T) {
 			t.Errorf("parseEpisodeKey(%q) = (%d, %d), want (%d, %d)",
 				tt.key, s, e, tt.wantSeason, tt.wantEpisode)
 		}
+	}
+}
+
+func TestOverallBytePercent(t *testing.T) {
+	if got := overallBytePercent(50, 200); math.Abs(got-25) > 1e-9 {
+		t.Fatalf("overallBytePercent() = %f, want 25", got)
+	}
+	if got := overallBytePercent(250, 200); math.Abs(got-100) > 1e-9 {
+		t.Fatalf("overallBytePercent clamp = %f, want 100", got)
+	}
+	if got := overallBytePercent(50, 0); got != 0 {
+		t.Fatalf("overallBytePercent zero total = %f, want 0", got)
+	}
+}
+
+func TestTotalCompletedStageBytes(t *testing.T) {
+	dir := t.TempDir()
+	file1 := filepath.Join(dir, "one.mkv")
+	file2 := filepath.Join(dir, "two.mkv")
+	if err := os.WriteFile(file1, []byte("1234"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file2, []byte("123456"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := &ripspec.Envelope{Assets: ripspec.Assets{Encoded: []ripspec.Asset{
+		{EpisodeKey: "s01e01", Path: file1, Status: "completed"},
+		{EpisodeKey: "s01e02", Path: file2, Status: "completed"},
+		{EpisodeKey: "s01e03", Path: filepath.Join(dir, "missing.mkv"), Status: "completed"},
+		{EpisodeKey: "s01e04", Path: "", Status: "failed"},
+	}}}
+	got := totalCompletedStageBytes(env, "encoded", []string{"s01e01", "s01e02", "s01e03", "s01e04"})
+	if got != 10 {
+		t.Fatalf("totalCompletedStageBytes() = %d, want 10", got)
 	}
 }

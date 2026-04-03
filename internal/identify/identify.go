@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/keydb"
+	"github.com/five82/spindle/internal/logs"
 
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/notify"
@@ -323,11 +323,15 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"disc_title", item.DiscTitle,
 	)
 
+	h.updateProgress(item, 5, "Phase 1/3 - Cleaning stale staging")
+
 	// Clean stale staging directories (older than 48 hours).
 	cleanResult := staging.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
 	if cleanResult.Removed > 0 {
 		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
 	}
+
+	h.updateProgress(item, 20, "Phase 2/3 - Scanning disc and resolving metadata")
 
 	result, err := h.Identify(ctx, item, logger)
 	if err != nil {
@@ -335,6 +339,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Persist envelope.
+	h.updateProgress(item, 85, "Phase 3/3 - Finalizing identification")
 	if err := h.persistEnvelope(ctx, item, &result.Envelope); err != nil {
 		return err
 	}
@@ -375,6 +380,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"stage", "identification",
 	)
 	return nil
+}
+
+func (h *Handler) updateProgress(item *queue.Item, percent float64, message string) {
+	item.ProgressPercent = percent
+	item.ProgressMessage = message
+	if h.store != nil {
+		_ = h.store.UpdateProgress(item)
+	}
 }
 
 // resolveTitle implements the title priority chain and returns both the

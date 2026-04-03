@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -165,6 +166,30 @@ func TestProgressThrottle_FirstCallAlwaysProceeds(t *testing.T) {
 	now := reporter.now()
 	if now.Sub(reporter.lastPush) < throttleInterval {
 		t.Error("first call should always proceed regardless of throttle interval")
+	}
+}
+
+func TestOverallEncodePercent(t *testing.T) {
+	tests := []struct {
+		name       string
+		completed  int
+		total      int
+		currentPct float64
+		want       float64
+	}{
+		{name: "first job half done", completed: 0, total: 12, currentPct: 50, want: 4.166666666666667},
+		{name: "ninth job one third done", completed: 9, total: 12, currentPct: 33.333333333333336, want: 77.77777777777779},
+		{name: "all jobs complete", completed: 12, total: 12, currentPct: 0, want: 100},
+		{name: "invalid total", completed: 1, total: 0, currentPct: 50, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := overallEncodePercent(tt.completed, tt.total, tt.currentPct)
+			if math.Abs(got-tt.want) > 1e-9 {
+				t.Fatalf("overallEncodePercent(%d, %d, %f) = %f, want %f", tt.completed, tt.total, tt.currentPct, got, tt.want)
+			}
+		})
 	}
 }
 

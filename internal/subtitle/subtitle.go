@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/logs"
@@ -100,6 +101,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", i+1, len(keys), key)
 		item.ActiveEpisodeKey = key
+		item.ProgressPercent = overallSubtitlePercent(i, len(keys), 0)
 		_ = h.store.UpdateProgress(item)
 
 		// Transcribe.
@@ -111,6 +113,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Language:   "en",
 			OutputDir:  outputDir,
 			ContentKey: contentKey,
+		}, func(phase string, elapsed time.Duration) {
+			item.ProgressPercent = overallSubtitlePercent(i, len(keys), subtitlePhasePercent(phase, elapsed))
+			switch phase {
+			case "extract":
+				if elapsed == 0 {
+					item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Extracting audio (%s)", i+1, len(keys), key)
+				}
+			case "transcribe":
+				if elapsed == 0 {
+					item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Transcribing audio (%s)", i+1, len(keys), key)
+				}
+			}
+			_ = h.store.UpdateProgress(item)
 		})
 		if err != nil {
 			return fmt.Errorf("transcribe %s: %w", key, err)
@@ -230,6 +245,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Status:         "completed",
 			SubtitlesMuxed: h.cfg.Subtitles.MuxIntoMKV,
 		})
+		item.ProgressPercent = overallSubtitlePercent(i+1, len(keys), 0)
+		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generated subtitles (%s)", i+1, len(keys), key)
+		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+			return err
+		}
 	}
 
 	// Store subtitle generation results.
@@ -242,6 +262,47 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	logger.Info("subtitle stage completed", "event_type", "stage_complete", "stage", "subtitling")
 	return nil
+}
+
+func overallSubtitlePercent(completedItems, totalItems int, currentItemPercent float64) float64 {
+	if totalItems <= 0 {
+		return 0
+	}
+	if completedItems < 0 {
+		completedItems = 0
+	}
+	if completedItems > totalItems {
+		completedItems = totalItems
+	}
+	if currentItemPercent < 0 {
+		currentItemPercent = 0
+	}
+	if currentItemPercent > 100 {
+		currentItemPercent = 100
+	}
+	progress := float64(completedItems) + (currentItemPercent / 100)
+	if progress > float64(totalItems) {
+		progress = float64(totalItems)
+	}
+	return progress / float64(totalItems) * 100
+}
+
+func subtitlePhasePercent(phase string, elapsed time.Duration) float64 {
+	phase = strings.ToLower(strings.TrimSpace(phase))
+	switch phase {
+	case "extract":
+		if elapsed > 0 {
+			return 25
+		}
+		return 10
+	case "transcribe":
+		if elapsed > 0 {
+			return 90
+		}
+		return 35
+	default:
+		return 0
+	}
 }
 
 // tryForcedSubs searches OpenSubtitles for forced subtitle tracks and

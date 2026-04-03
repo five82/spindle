@@ -11,8 +11,8 @@ import (
 
 	"github.com/five82/drapto"
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/encodingstate"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
@@ -171,6 +171,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 
 		item.ActiveEpisodeKey = job.episodeKey
+		item.ProgressPercent = overallEncodePercent(i, len(jobs), 0)
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Encoding %s", i+1, len(jobs), filepath.Base(job.inputPath))
 
 		// Reset encoding snapshot and force-persist.
@@ -211,7 +212,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		// Create progress reporter.
-		reporter := newSpindleReporter(item, h.store, logger, job.episodeKey)
+		reporter := newSpindleReporter(item, h.store, logger, job.episodeKey, i, len(jobs))
 
 		// Encode.
 		result, encErr := encoder.EncodeWithReporter(ctx, job.inputPath, encodedDir, reporter)
@@ -239,12 +240,16 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				Message: encErr.Error(),
 			}
 			item.EncodingDetailsJSON = snap.Marshal()
+			item.ProgressPercent = overallEncodePercent(i+1, len(jobs), 0)
 			if persistErr := h.store.UpdateProgress(item); persistErr != nil {
 				logger.Warn("failed to persist error snapshot",
 					"event_type", "progress_persist_error",
 					"error_hint", persistErr.Error(),
 					"impact", "error state not reflected in progress",
 				)
+			}
+			if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+				return err
 			}
 			continue
 		}
@@ -261,6 +266,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		totalEncodedSize += int64(result.EncodedSize)
 
 		item.EncodingDetailsJSON = snap.Marshal()
+		item.ProgressPercent = overallEncodePercent(i+1, len(jobs), 0)
 		if err := h.store.UpdateProgress(item); err != nil {
 			logger.Warn("failed to persist final snapshot",
 				"event_type", "progress_persist_error",
@@ -275,6 +281,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Path:       result.OutputFile,
 			Status:     "completed",
 		})
+		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+			return err
+		}
 
 		logger.Info("encoding completed",
 			"event_type", "encode_complete",
@@ -337,21 +346,25 @@ const throttleInterval = 2 * time.Second
 // into encodingstate.Snapshot updates on the queue item. Progress persistence
 // is throttled to every 2 seconds.
 type spindleReporter struct {
-	item       *queue.Item
-	store      *queue.Store
-	logger     *slog.Logger
-	episodeKey string
-	lastPush   time.Time
-	now        func() time.Time // injectable clock for testing
+	item          *queue.Item
+	store         *queue.Store
+	logger        *slog.Logger
+	episodeKey    string
+	completedJobs int
+	totalJobs     int
+	lastPush      time.Time
+	now           func() time.Time // injectable clock for testing
 }
 
-func newSpindleReporter(item *queue.Item, store *queue.Store, logger *slog.Logger, episodeKey string) *spindleReporter {
+func newSpindleReporter(item *queue.Item, store *queue.Store, logger *slog.Logger, episodeKey string, completedJobs int, totalJobs int) *spindleReporter {
 	return &spindleReporter{
-		item:       item,
-		store:      store,
-		logger:     logger,
-		episodeKey: episodeKey,
-		now:        time.Now,
+		item:          item,
+		store:         store,
+		logger:        logger,
+		episodeKey:    episodeKey,
+		completedJobs: completedJobs,
+		totalJobs:     totalJobs,
+		now:           time.Now,
 	}
 }
 
@@ -376,7 +389,7 @@ func (r *spindleReporter) EncodingProgress(p drapto.ProgressSnapshot) {
 	snap.TotalFrames = int64(p.TotalFrames)
 
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	r.item.ProgressPercent = float64(p.Percent)
+	r.item.ProgressPercent = overallEncodePercent(r.completedJobs, r.totalJobs, float64(p.Percent))
 	if err := r.store.UpdateProgress(r.item); err != nil {
 		r.logger.Warn("failed to persist encoding progress",
 			"event_type", "progress_persist_error",
@@ -575,6 +588,29 @@ func (r *spindleReporter) Warning(message string) {
 	)
 }
 
+func overallEncodePercent(completedJobs, totalJobs int, currentJobPercent float64) float64 {
+	if totalJobs <= 0 {
+		return 0
+	}
+	if completedJobs < 0 {
+		completedJobs = 0
+	}
+	if completedJobs > totalJobs {
+		completedJobs = totalJobs
+	}
+	if currentJobPercent < 0 {
+		currentJobPercent = 0
+	}
+	if currentJobPercent > 100 {
+		currentJobPercent = 100
+	}
+	progress := float64(completedJobs) + (currentJobPercent / 100)
+	if progress > float64(totalJobs) {
+		progress = float64(totalJobs)
+	}
+	return progress / float64(totalJobs) * 100
+}
+
 func (r *spindleReporter) Error(e drapto.ReporterError) {
 	r.logger.Error("drapto encoding error",
 		"event_type", "drapto_error",
@@ -604,9 +640,9 @@ func (r *spindleReporter) Error(e drapto.ReporterError) {
 }
 
 // No-op methods for Reporter interface methods we don't need.
-func (r *spindleReporter) Hardware(drapto.HardwareSummary)             {}
-func (r *spindleReporter) StageProgress(drapto.StageProgress)          {}
-func (r *spindleReporter) OperationComplete(string)                    {}
-func (r *spindleReporter) BatchStarted(drapto.BatchStartInfo)          {}
-func (r *spindleReporter) FileProgress(drapto.FileProgressContext)     {}
-func (r *spindleReporter) BatchComplete(drapto.BatchSummary)           {}
+func (r *spindleReporter) Hardware(drapto.HardwareSummary)         {}
+func (r *spindleReporter) StageProgress(drapto.StageProgress)      {}
+func (r *spindleReporter) OperationComplete(string)                {}
+func (r *spindleReporter) BatchStarted(drapto.BatchStartInfo)      {}
+func (r *spindleReporter) FileProgress(drapto.FileProgressContext) {}
+func (r *spindleReporter) BatchComplete(drapto.BatchSummary)       {}

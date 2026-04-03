@@ -305,10 +305,16 @@ and episode placeholders normally.
 
 - MakeMKV outputs progress lines to stdout.
 - Parser extracts percentage from `PRGV` lines.
-- Progress updates saved to queue item at regular intervals.
+- Progress updates saved to the queue item use **aggregate whole-stage rip
+  progress**. For multi-title rips, the current title's `PRGV` percent is
+  converted into cumulative progress across all selected titles.
+- Progress is force-updated at title boundaries so API consumers can observe
+  stage advancement even between MakeMKV progress bursts.
 - For TV content, `ActiveEpisodeKey` is set to the episode matching the
   current title before each rip and included in every progress update.
   Cleared after the ripping loop completes.
+- Completed ripped assets are persisted after each title finishes so API
+  consumers can advance per-episode ripped counts while the stage is active.
 
 ### 2.4 Rip Cache
 
@@ -528,6 +534,12 @@ it, Flyer would see episode N's completed snapshot while episode N+1 is
 starting up. The force-persist at step 4 ensures completion/error fields are
 never lost to throttle timing.
 
+In addition to `encoding_details_json`, the queue item's `progress_percent`
+tracks **aggregate whole-stage encoding progress**. For multi-episode encodes,
+the active file's frame progress is converted into cumulative progress across
+all planned jobs. Encoded assets are also persisted after each job completion
+or failure so API consumers can advance encoded counts during the active stage.
+
 **Progress callback chain** (steps within the Drapto encode):
 
 1. **Apply snapshot**: update the encoding snapshot with current Drapto
@@ -642,7 +654,20 @@ transcription work.
 Returns `AudioRefinementResult` with `PrimaryAudioDescription` and
 `KeptIndices` from the first processed path.
 
-### 5.3 Post-Refinement (Phase 3)
+### 5.3 Progress Reporting
+
+Audio analysis uses coarse phase-based queue progress rather than frame-based
+or byte-based telemetry. The stage persists progress messages and percentage at
+major phase boundaries:
+- Phase 1/3 - Commentary detection
+- Phase 2/3 - Audio refinement
+- Phase 3/3 - Post-refinement audio analysis
+- Final persistence of analysis results
+
+When analysis operates on episode assets, `ActiveEpisodeKey` is set to the
+primary analyzed episode so API consumers can show stage context.
+
+### 5.4 Post-Refinement (Phase 3)
 
 1. **Primary audio selection**: Re-probe encoded file post-refinement, select
    primary via `audio.Select()`, set `PrimaryAudioDescription`.
@@ -725,7 +750,16 @@ Duration check is asymmetric: subtitles shorter than video are allowed up to
 
 SRT validation issues flag items for review but do not fail the stage.
 
-### 6.4 OpenSubtitles Forced Subs
+### 6.4 Progress Reporting
+
+Subtitle generation persists **aggregate whole-stage subtitle progress**. Each
+subtitle job contributes to the overall percent, and transcription phase
+callbacks update progress messages for coarse sub-steps such as audio
+extraction and transcription. Completed subtitled assets are persisted after
+each job so API consumers can advance per-episode subtitle counts while the
+stage is active.
+
+### 6.5 OpenSubtitles Forced Subs
 
 When `opensubtitles_enabled` and the disc has a forced subtitle track indicator:
 1. Search OpenSubtitles for forced/foreign-parts-only subtitles matching TMDB ID.
@@ -880,6 +914,9 @@ the duration of transcription work.
 
 - Copy file from staging to library location.
 - Report progress via `progress_bytes_copied` and `progress_total_bytes` fields.
+- `progress_percent` reflects **aggregate whole-stage organizing progress**
+  derived from total bytes copied across all files, not just the current file's
+  local copy state.
 - If `overwrite_existing` is true: remove existing file before copy.
 - **Cross-device move fallback**: If `os.Rename()` fails with `EXDEV` (cross-filesystem),
   falls back to `CopyFileVerified()` + source removal.
@@ -888,7 +925,8 @@ the duration of transcription work.
 - **Subtitle sidecar matching**: Finds `.srt` files by base name prefix and moves
   them alongside the main file to the library. Sidecar move is skipped when
   `subtitles.mux_into_mkv` is true (subtitles already embedded in MKV).
-- Per-episode asset recorded to RipSpec after each episode.
+- Per-episode final asset recorded to RipSpec after each episode so API
+  consumers can advance completed counts during the active stage.
 
 ### 7.4 Partial Episode Organization
 
