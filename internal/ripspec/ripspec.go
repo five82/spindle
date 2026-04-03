@@ -136,11 +136,29 @@ type SubtitleGenRecord struct {
 	ValidationIssues      []string `json:"validation_issues,omitempty"`
 }
 
+// ContentIDSummary captures envelope-level provenance for the episode
+// identification stage without duplicating per-episode outcomes already stored
+// in Episodes.
+type ContentIDSummary struct {
+	Method               string  `json:"method,omitempty"`
+	ReferenceSource      string  `json:"reference_source,omitempty"`
+	ReferenceEpisodes    int     `json:"reference_episodes,omitempty"`
+	TranscribedEpisodes  int     `json:"transcribed_episodes,omitempty"`
+	MatchedEpisodes      int     `json:"matched_episodes,omitempty"`
+	UnresolvedEpisodes   int     `json:"unresolved_episodes,omitempty"`
+	LowConfidenceCount   int     `json:"low_confidence_count,omitempty"`
+	ReviewThreshold      float64 `json:"review_threshold,omitempty"`
+	SequenceContiguous   bool    `json:"sequence_contiguous,omitempty"`
+	EpisodesSynchronized bool    `json:"episodes_synchronized,omitempty"`
+	Completed            bool    `json:"completed,omitempty"`
+}
+
 // EnvelopeAttributes holds cross-cutting flags and analysis results.
 type EnvelopeAttributes struct {
 	HasForcedSubtitleTrack    bool                `json:"has_forced_subtitle_track,omitempty"`
 	AudioAnalysis             *AudioAnalysisData  `json:"audio_analysis,omitempty"`
 	SubtitleGenerationResults []SubtitleGenRecord `json:"subtitle_generation_results,omitempty"`
+	ContentID                 *ContentIDSummary   `json:"content_id,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

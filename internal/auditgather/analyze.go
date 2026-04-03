@@ -511,6 +511,29 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Message:  fmt.Sprintf("%d episode(s) explicitly flagged for review", reviewCount),
 			})
 		}
+		if r.StageGate.PhaseEpisodeID && r.Envelope.Metadata.MediaType == "tv" {
+			summary := r.Envelope.Attributes.ContentID
+			switch {
+			case summary == nil:
+				anomalies = append(anomalies, Anomaly{
+					Severity: "warning",
+					Category: "episodes",
+					Message:  "episode identification provenance summary missing from envelope attributes",
+				})
+			case summary.Method == "" || summary.ReferenceSource == "":
+				anomalies = append(anomalies, Anomaly{
+					Severity: "warning",
+					Category: "episodes",
+					Message:  "episode identification provenance summary is incomplete",
+				})
+			case !summary.Completed && summary.EpisodesSynchronized:
+				anomalies = append(anomalies, Anomaly{
+					Severity: "warning",
+					Category: "episodes",
+					Message:  "episode identification provenance summary has inconsistent completion state",
+				})
+			}
+		}
 	}
 
 	// Episode stats anomalies.

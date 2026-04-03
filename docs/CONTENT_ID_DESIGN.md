@@ -332,7 +332,27 @@ queue item also receives aggregate `needs_review` / `review_reason` state for
 status reporting. For TV, the organizer uses the episode-level flags to split
 clean episodes to the library and flagged episodes to the review directory.
 
-### 12.2 Review Sources
+### 12.2 Provenance Storage
+
+Per-episode outcomes live in `episodes[]` and are the canonical source for
+resolved episode numbers, confidence, and review status. Envelope attributes do
+**not** duplicate per-episode matches. Instead, `attributes.content_id` stores a
+compact run-level summary for auditability and tooling.
+
+Expected `attributes.content_id` fields:
+- `method`
+- `reference_source`
+- `reference_episodes`
+- `transcribed_episodes`
+- `matched_episodes`
+- `unresolved_episodes`
+- `low_confidence_count`
+- `review_threshold`
+- `sequence_contiguous`
+- `episodes_synchronized`
+- `completed`
+
+### 12.3 Review Sources
 
 | Source | Condition |
 |--------|-----------|
@@ -341,7 +361,7 @@ clean episodes to the library and flagged episodes to the review directory.
 | LLM verification | Verification call failed (kept original match) |
 | LLM verification | Any match rejected by LLM |
 
-### 12.3 Low-Confidence Review
+### 12.4 Low-Confidence Review
 
 Matches below `LowConfidenceReviewThreshold` (default: 0.70) are flagged during
 matching (handled by the episode identification stage, not the matcher directly).
@@ -372,7 +392,11 @@ After successful matching, the episode ID stage updates the envelope:
    specific `episodes[]` entry with `needs_review=true` and a `review_reason`.
    Queue-level `needs_review` is also set as an aggregate signal when any
    episode is flagged.
-3. **Logging**: Per-episode match details (scores, subtitle file IDs, methods)
+3. **Envelope provenance summary**: Run-level provenance is persisted in
+   `attributes.content_id`, including the matching method, reference source,
+   reference/transcript counts, low-confidence count, contiguity result, and
+   whether the envelope episodes were synchronized from the run.
+4. **Logging**: Per-episode match details (scores, subtitle file IDs, methods)
    are logged at INFO level for diagnostics.
 
 Organizer behavior for TV consumes these episode-level flags directly:

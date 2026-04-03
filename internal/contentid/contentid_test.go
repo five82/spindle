@@ -260,6 +260,33 @@ func TestApplyMatchesFlagsEpisodeLevelReview(t *testing.T) {
 	}
 }
 
+func TestBuildContentIDSummary(t *testing.T) {
+	env := &ripspec.Envelope{Episodes: []ripspec.Episode{
+		{Key: "s01e01", Episode: 1, MatchConfidence: 0.91},
+		{Key: "s01e02", Episode: 2, MatchConfidence: 0.64, NeedsReview: true},
+		{Key: "s01_003", Episode: 0, NeedsReview: true},
+	}}
+	summary := buildContentIDSummary(env, []Match{{DiscKey: "s01_001", EpisodeNum: 1, Score: 0.91}, {DiscKey: "s01_002", EpisodeNum: 2, Score: 0.64}}, 3, 4)
+	if summary == nil {
+		t.Fatal("summary = nil")
+	}
+	if summary.Method != "whisperx_tfidf_hungarian" {
+		t.Fatalf("Method = %q", summary.Method)
+	}
+	if summary.ReferenceSource != "opensubtitles" {
+		t.Fatalf("ReferenceSource = %q", summary.ReferenceSource)
+	}
+	if summary.MatchedEpisodes != 2 || summary.UnresolvedEpisodes != 1 {
+		t.Fatalf("matched/unresolved = %d/%d", summary.MatchedEpisodes, summary.UnresolvedEpisodes)
+	}
+	if summary.LowConfidenceCount != 1 {
+		t.Fatalf("LowConfidenceCount = %d, want 1", summary.LowConfidenceCount)
+	}
+	if !summary.Completed || !summary.EpisodesSynchronized {
+		t.Fatal("summary completion flags not set")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // isDigitsOnly
 // ---------------------------------------------------------------------------

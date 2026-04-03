@@ -11,6 +11,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/services"
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/textutil"
@@ -121,7 +122,18 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"error_hint", "all transcriptions produced empty fingerprints",
 			"impact", "episodes remain unresolved",
 		)
+		env.Attributes.ContentID = &ripspec.ContentIDSummary{
+			Method:               "whisperx_tfidf_hungarian",
+			ReferenceSource:      "opensubtitles",
+			TranscribedEpisodes:  0,
+			ReviewThreshold:      lowConfidenceReviewThreshold,
+			EpisodesSynchronized: false,
+			Completed:            false,
+		}
 		item.AppendReviewReason("Episode ID: no valid transcriptions")
+		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+			return err
+		}
 		return &services.ErrDegraded{Msg: "no valid transcriptions"}
 	}
 
@@ -142,7 +154,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	if len(refFPs) == 0 {
+		env.Attributes.ContentID = &ripspec.ContentIDSummary{
+			Method:               "whisperx_tfidf_hungarian",
+			ReferenceSource:      "opensubtitles",
+			TranscribedEpisodes:  len(discFPs),
+			ReferenceEpisodes:    0,
+			ReviewThreshold:      lowConfidenceReviewThreshold,
+			EpisodesSynchronized: false,
+			Completed:            false,
+		}
 		item.AppendReviewReason("Episode ID: no reference subtitles found")
+		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+			return err
+		}
 		return &services.ErrDegraded{Msg: "no reference subtitles found"}
 	}
 
@@ -174,6 +198,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Step 5: Apply matches to envelope.
 	h.applyMatches(logger, &env, matches, item)
+	env.Attributes.ContentID = buildContentIDSummary(&env, matches, len(discFPs), len(refFPs))
 
 	// Persist.
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {

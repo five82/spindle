@@ -145,13 +145,14 @@ belongs here.
 attributes. Queue-level `needs_review` remains an aggregate flag; per-episode
 routing decisions come from `episodes[].needs_review` and `episodes[].review_reason`.
 
-**EnvelopeAttributes** -- 3 fields with writer/reader stages:
+**EnvelopeAttributes** -- 4 fields with writer/reader stages:
 
 | Field | Type | Writer | Reader |
 |-------|------|--------|--------|
 | `has_forced_subtitle_track` | bool | Identification | Subtitles |
 | `audio_analysis` | *AudioAnalysisData | Audio Analysis | API/Display |
 | `subtitle_generation_results` | []SubtitleGenRecord | Subtitles | Organization |
+| `content_id` | *ContentIDSummary | Episode ID | Audit/API/Display |
 
 **Nested types:**
 
@@ -186,6 +187,20 @@ SubtitleGenRecord {
     Segments              int
     Language              string
     OpenSubtitlesDecision string
+}
+
+ContentIDSummary {
+    Method                string  // e.g. "whisperx_tfidf_hungarian"
+    ReferenceSource       string  // e.g. "opensubtitles"
+    ReferenceEpisodes     int
+    TranscribedEpisodes   int
+    MatchedEpisodes       int
+    UnresolvedEpisodes    int
+    LowConfidenceCount    int
+    ReviewThreshold       float64
+    SequenceContiguous    bool
+    EpisodesSynchronized  bool
+    Completed             bool
 }
 ```
 

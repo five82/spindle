@@ -322,6 +322,33 @@ func (h *Handler) matchEpisodes(
 	return matches
 }
 
+func buildContentIDSummary(env *ripspec.Envelope, matches []Match, transcribedCount, referenceCount int) *ripspec.ContentIDSummary {
+	if env == nil {
+		return nil
+	}
+	summary := &ripspec.ContentIDSummary{
+		Method:               "whisperx_tfidf_hungarian",
+		ReferenceSource:      "opensubtitles",
+		ReferenceEpisodes:    referenceCount,
+		TranscribedEpisodes:  transcribedCount,
+		ReviewThreshold:      lowConfidenceReviewThreshold,
+		SequenceContiguous:   checkContiguity(matches),
+		EpisodesSynchronized: true,
+		Completed:            true,
+	}
+	for _, ep := range env.Episodes {
+		if ep.Episode > 0 {
+			summary.MatchedEpisodes++
+		} else {
+			summary.UnresolvedEpisodes++
+		}
+		if ep.MatchConfidence > 0 && ep.MatchConfidence < lowConfidenceReviewThreshold {
+			summary.LowConfidenceCount++
+		}
+	}
+	return summary
+}
+
 // applyMatches updates episode records in the envelope with matched episode
 // numbers and confidence scores. Flags unresolved episodes for review.
 func (h *Handler) applyMatches(

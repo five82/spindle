@@ -175,6 +175,50 @@ func TestDetectAnomalies_CleanItem(t *testing.T) {
 	}
 }
 
+func TestDetectAnomalies_MissingContentIDSummary(t *testing.T) {
+	r := &Report{
+		StageGate: StageGate{PhaseEpisodeID: true},
+		Envelope: &EnvelopeReport{
+			Metadata: ripspec.Metadata{MediaType: "tv"},
+			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}},
+		},
+	}
+	anomalies := detectAnomalies(r, &Analysis{})
+	found := false
+	for _, an := range anomalies {
+		if an.Message == "episode identification provenance summary missing from envelope attributes" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected missing content ID summary anomaly")
+	}
+}
+
+func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
+	r := &Report{
+		StageGate: StageGate{PhaseEpisodeID: true},
+		Envelope: &EnvelopeReport{
+			Metadata: ripspec.Metadata{MediaType: "tv"},
+			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}},
+			Attributes: ripspec.EnvelopeAttributes{ContentID: &ripspec.ContentIDSummary{
+				Method:               "whisperx_tfidf_hungarian",
+				ReferenceSource:      "opensubtitles",
+				EpisodesSynchronized: true,
+				Completed:            true,
+			}},
+		},
+	}
+	anomalies := detectAnomalies(r, &Analysis{})
+	for _, an := range anomalies {
+		if an.Message == "episode identification provenance summary missing from envelope attributes" ||
+			an.Message == "episode identification provenance summary is incomplete" {
+			t.Fatalf("unexpected provenance anomaly: %+v", an)
+		}
+	}
+}
+
 func TestCompressMediaProbes(t *testing.T) {
 	majority := ProfileSummary{VideoCodec: "av1", Width: 1920, Height: 1080}
 
