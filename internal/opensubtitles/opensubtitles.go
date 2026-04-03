@@ -40,7 +40,7 @@ func New(apiKey, userAgent, userToken, baseURL string, logger *slog.Logger) *Cli
 		baseURL = "https://api.opensubtitles.com/api/v1"
 	}
 	if userAgent == "" {
-		userAgent = "Spindle/dev"
+		userAgent = "Spindle/dev v0.1.0"
 	}
 	logger = logs.Default(logger)
 	return &Client{
@@ -351,8 +351,9 @@ func isRetryable(err error) bool {
 	return os.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded)
 }
 
-// setHeaders adds the standard authentication and content-type headers.
+// setHeaders adds the standard authentication and content negotiation headers.
 func (c *Client) setHeaders(req *http.Request) {
+	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Api-Key", c.apiKey)
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Content-Type", "application/json")

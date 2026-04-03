@@ -151,7 +151,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Subtitles.WhisperXVADMethod = "silero"
 	}
 	if cfg.Subtitles.OpenSubtitlesUserAgent == "" {
-		cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/dev"
+		cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/dev v0.1.0"
 	}
 	if len(cfg.Subtitles.OpenSubtitlesLanguages) == 0 {
 		cfg.Subtitles.OpenSubtitlesLanguages = []string{"en"}

@@ -93,7 +93,8 @@ api_key = ""
 # opensubtitles_api_key = ""
 
 # User-Agent for OpenSubtitles requests
-# opensubtitles_user_agent = "Spindle/dev"
+# Include an app version to satisfy OpenSubtitles expectations.
+# opensubtitles_user_agent = "Spindle/dev v0.1.0"
 
 # OpenSubtitles user token for downloads (or set OPENSUBTITLES_USER_TOKEN env var)
 # opensubtitles_user_token = ""

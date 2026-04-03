@@ -23,7 +23,7 @@ func TestNew_Defaults(t *testing.T) {
 	if c.baseURL != "https://api.opensubtitles.com/api/v1" {
 		t.Errorf("unexpected baseURL: %s", c.baseURL)
 	}
-	if c.userAgent != "Spindle/dev" {
+	if c.userAgent != "Spindle/dev v0.1.0" {
 		t.Errorf("unexpected userAgent: %s", c.userAgent)
 	}
 }
@@ -65,6 +65,9 @@ func TestSearch_MockServer(t *testing.T) {
 		}
 		if r.Header.Get("Api-Key") != "test-key" {
 			t.Errorf("missing Api-Key header")
+		}
+		if r.Header.Get("Accept") != "*/*" {
+			t.Errorf("missing Accept header: %q", r.Header.Get("Accept"))
 		}
 
 		resp := searchResponse{
@@ -115,6 +118,16 @@ func TestDownload_MockServer(t *testing.T) {
 		}
 		if r.URL.Path != "/download" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		if r.Header.Get("Api-Key") != "test-key" {
+			t.Errorf("missing Api-Key header")
+		}
+		if r.Header.Get("Authorization") != "Bearer user-token" {
+			t.Errorf("unexpected Authorization header: %q", r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("Accept") != "*/*" {
+			t.Errorf("missing Accept header: %q", r.Header.Get("Accept"))
 		}
 
 		var reqBody struct {
