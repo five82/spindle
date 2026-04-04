@@ -113,7 +113,7 @@ func TestApplyMatchesRemapsAssetKeys(t *testing.T) {
 		Assets:   ripspec.Assets{Ripped: []ripspec.Asset{{EpisodeKey: "s03_001", Path: "/rip/1.mkv", Status: "completed"}, {EpisodeKey: "s03_002", Path: "/rip/2.mkv", Status: "completed"}}},
 	}
 	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 3, Name: "Three"}, {EpisodeNumber: 4, Name: "Four"}}}
-	h.applyMatches(logger, env, 3, season, "Batman", []matchResult{{EpisodeKey: "s03_001", TargetEpisode: 3, Score: 0.91}, {EpisodeKey: "s03_002", TargetEpisode: 4, Score: 0.88}}, nil)
+	h.applyMatches(logger, env, 3, season, []matchResult{{EpisodeKey: "s03_001", TargetEpisode: 3, Score: 0.91}, {EpisodeKey: "s03_002", TargetEpisode: 4, Score: 0.88}}, nil)
 	if env.Episodes[0].Key != "s03e03" || env.Episodes[1].Key != "s03e04" {
 		t.Fatalf("episode keys not remapped: %+v", env.Episodes)
 	}

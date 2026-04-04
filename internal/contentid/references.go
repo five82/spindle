@@ -19,7 +19,6 @@ func (h *Handler) fetchReferenceFingerprints(
 	item *queue.Item,
 	seasonNum int,
 	tmdbID int,
-	showTitle string,
 	season *tmdb.Season,
 	episodes []int,
 	cache map[int]referenceFingerprint,

@@ -33,6 +33,7 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	}
 
 	applyMuxDefault(data, cfg)
+	applyContentIDBoolDefaults(data, cfg)
 	applyDefaults(cfg)
 
 	envKeys := collectEnvOverrides(cfg)
@@ -289,6 +290,12 @@ func applyMuxDefault(data []byte, cfg *Config) {
 	// "absent/commented" (apply default true) from "explicitly set to false".
 	if data == nil || !hasUncommentedKey(data, "mux_into_mkv") {
 		cfg.Subtitles.MuxIntoMKV = true
+	}
+}
+
+func applyContentIDBoolDefaults(data []byte, cfg *Config) {
+	if data == nil || !hasUncommentedKey(data, "disc1_must_start_at_episode1") {
+		cfg.ContentID.Disc1MustStartAtEpisode1 = true
 	}
 }
 

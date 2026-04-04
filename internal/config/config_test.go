@@ -55,6 +55,9 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	if cfg.Commentary.SimilarityThreshold != 0.92 {
 		t.Errorf("expected default similarity threshold 0.92, got %f", cfg.Commentary.SimilarityThreshold)
 	}
+	if !cfg.ContentID.Disc1MustStartAtEpisode1 {
+		t.Error("expected disc1_must_start_at_episode1 default true")
+	}
 }
 
 func TestValidateMissingRequiredFields(t *testing.T) {
@@ -483,6 +486,51 @@ func TestValidateCRFRange(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadContentIDBoolDefaultAndOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("default true when absent", func(t *testing.T) {
+		configPath := filepath.Join(dir, "contentid-default.toml")
+		content := `
+[tmdb]
+api_key = "from-file"
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath, nil)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if !cfg.ContentID.Disc1MustStartAtEpisode1 {
+			t.Fatal("expected disc1_must_start_at_episode1 to default true")
+		}
+	})
+
+	t.Run("explicit false preserved", func(t *testing.T) {
+		configPath := filepath.Join(dir, "contentid-false.toml")
+		content := `
+[tmdb]
+api_key = "from-file"
+
+[content_id]
+disc1_must_start_at_episode1 = false
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := Load(configPath, nil)
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if cfg.ContentID.Disc1MustStartAtEpisode1 {
+			t.Fatal("expected explicit false to be preserved")
+		}
+	})
 }
 
 func TestLoadFromExplicitPathWithCRF(t *testing.T) {

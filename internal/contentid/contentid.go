@@ -96,17 +96,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	if seasonNum <= 0 {
 		seasonNum = 1
 	}
-	showTitle := strings.TrimSpace(env.Metadata.ShowTitle)
-	if showTitle == "" {
-		showTitle = strings.TrimSpace(env.Metadata.SeriesTitle)
-	}
-	if showTitle == "" {
-		showTitle = strings.TrimSpace(env.Metadata.Title)
-	}
-	if showTitle == "" {
-		showTitle = strings.TrimSpace(item.DiscTitle)
-	}
-
 	season, err := h.tmdbClient.GetSeason(ctx, env.Metadata.ID, seasonNum)
 	if err != nil {
 		logger.Error("tmdb season lookup failed",
@@ -174,7 +163,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	passes := buildEpisodePasses(plan, season, len(env.Episodes))
 	for idx, pass := range passes {
-		refs, fetchErr := h.fetchReferenceFingerprints(ctx, item, seasonNum, env.Metadata.ID, showTitle, season, pass, refCache)
+		refs, fetchErr := h.fetchReferenceFingerprints(ctx, item, seasonNum, env.Metadata.ID, season, pass, refCache)
 		if fetchErr != nil {
 			logger.Warn("content id anchor reference fetch failed",
 				"event_type", "contentid_anchor_fetch_failed",
@@ -226,7 +215,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	var selected strategyOutcome
 	haveSelection := false
 	for _, attempt := range attempts {
-		outcome, evalErr := h.evaluateStrategy(ctx, item, seasonNum, env.Metadata.ID, showTitle, season, env.Metadata.DiscNumber, ripPrints, allSeasonRefs, refCache, attempt)
+		outcome, evalErr := h.evaluateStrategy(ctx, item, seasonNum, env.Metadata.ID, season, env.Metadata.DiscNumber, ripPrints, allSeasonRefs, refCache, attempt)
 		if evalErr != nil {
 			return evalErr
 		}
@@ -270,7 +259,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Phase 3/3 - Matching episodes"
 	_ = h.store.UpdateProgress(item)
 
-	h.applyMatches(logger, &env, seasonNum, season, showTitle, matches, item)
+	h.applyMatches(logger, &env, seasonNum, season, matches, item)
 	env.Attributes.ContentID = buildContentIDSummary(&env, matches, len(ripPrints), len(selected.References), h.policy.LowConfidenceReviewThreshold)
 
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
@@ -354,7 +343,6 @@ func (h *Handler) evaluateStrategy(
 	item *queue.Item,
 	seasonNum int,
 	tmdbID int,
-	showTitle string,
 	season *tmdb.Season,
 	discNumber int,
 	ripPrints []ripFingerprint,
@@ -366,7 +354,7 @@ func (h *Handler) evaluateStrategy(
 	refs := filterReferencesByEpisodes(allSeasonRefs, attempt.Episodes)
 	missing := missingEpisodesForReferences(refs, attempt.Episodes)
 	if len(missing) > 0 {
-		fetched, err := h.fetchReferenceFingerprints(ctx, item, seasonNum, tmdbID, showTitle, season, missing, refCache)
+		fetched, err := h.fetchReferenceFingerprints(ctx, item, seasonNum, tmdbID, season, missing, refCache)
 		if err != nil {
 			return out, fmt.Errorf("fetch strategy references: %w", err)
 		}
@@ -443,7 +431,6 @@ func (h *Handler) applyMatches(
 	env *ripspec.Envelope,
 	seasonNum int,
 	season *tmdb.Season,
-	showTitle string,
 	matches []matchResult,
 	item *queue.Item,
 ) {
