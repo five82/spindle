@@ -324,6 +324,7 @@ func parseLogLine(line string, itemID int64, report *LogAnalysis) {
 			DecisionResult: getString(entry, "decision_result"),
 			DecisionReason: getString(entry, "decision_reason"),
 			Message:        msg,
+			Extras:         buildExtras(entry),
 		})
 	}
 

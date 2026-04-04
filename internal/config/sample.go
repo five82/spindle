@@ -184,6 +184,32 @@ api_key = ""
 # LLM confidence required for classification
 # confidence_threshold = 0.80
 
+[content_id]
+# Minimum cosine similarity required to keep a match
+# min_similarity_score = 0.58
+
+# Matches below this are routed to review unless verification lifts confidence
+# low_confidence_review_threshold = 0.70
+
+# Matches below this are sent to LLM verification when LLM is configured
+# llm_verify_threshold = 0.85
+
+# Anchor selection thresholds for candidate window estimation
+# anchor_min_score = 0.63
+# anchor_min_score_margin = 0.03
+
+# High-confidence block refinement thresholds
+# block_high_confidence_delta = 0.05
+# block_high_confidence_top_ratio = 0.70
+
+# Disc block estimation padding
+# disc_block_padding_min = 2
+# disc_block_padding_divisor = 4
+
+# Disc numbering constraints
+# disc1_must_start_at_episode1 = true
+# disc2_plus_min_start_episode = 2
+
 [logging]
 # Days to retain daemon log files
 # retention_days = 60

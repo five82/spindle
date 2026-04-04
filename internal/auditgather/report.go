@@ -77,11 +77,12 @@ type LogAnalysis struct {
 
 // LogDecision captures a single decision from the log.
 type LogDecision struct {
-	TS             string `json:"ts"`
-	DecisionType   string `json:"decision_type"`
-	DecisionResult string `json:"decision_result"`
-	DecisionReason string `json:"decision_reason,omitempty"`
-	Message        string `json:"message"`
+	TS             string         `json:"ts"`
+	DecisionType   string         `json:"decision_type"`
+	DecisionResult string         `json:"decision_result"`
+	DecisionReason string         `json:"decision_reason,omitempty"`
+	Message        string         `json:"message"`
+	Extras         map[string]any `json:"extras,omitempty"`
 }
 
 // LogEntry captures a warning or error log entry.

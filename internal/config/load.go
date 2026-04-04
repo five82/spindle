@@ -242,6 +242,38 @@ func applyDefaults(cfg *Config) {
 		cfg.Commentary.ConfidenceThreshold = 0.80
 	}
 
+	// [content_id]
+	if cfg.ContentID.MinSimilarityScore == 0 {
+		cfg.ContentID.MinSimilarityScore = 0.58
+	}
+	if cfg.ContentID.LowConfidenceReviewThreshold == 0 {
+		cfg.ContentID.LowConfidenceReviewThreshold = 0.70
+	}
+	if cfg.ContentID.LLMVerifyThreshold == 0 {
+		cfg.ContentID.LLMVerifyThreshold = 0.85
+	}
+	if cfg.ContentID.AnchorMinScore == 0 {
+		cfg.ContentID.AnchorMinScore = 0.63
+	}
+	if cfg.ContentID.AnchorMinScoreMargin == 0 {
+		cfg.ContentID.AnchorMinScoreMargin = 0.03
+	}
+	if cfg.ContentID.BlockHighConfidenceDelta == 0 {
+		cfg.ContentID.BlockHighConfidenceDelta = 0.05
+	}
+	if cfg.ContentID.BlockHighConfidenceTopRatio == 0 {
+		cfg.ContentID.BlockHighConfidenceTopRatio = 0.70
+	}
+	if cfg.ContentID.DiscBlockPaddingMin == 0 {
+		cfg.ContentID.DiscBlockPaddingMin = 2
+	}
+	if cfg.ContentID.DiscBlockPaddingDivisor == 0 {
+		cfg.ContentID.DiscBlockPaddingDivisor = 4
+	}
+	if cfg.ContentID.Disc2PlusMinStartEpisode == 0 {
+		cfg.ContentID.Disc2PlusMinStartEpisode = 2
+	}
+
 	// [logging]
 	if cfg.Logging.RetentionDays == 0 {
 		cfg.Logging.RetentionDays = 60

@@ -2,8 +2,10 @@ package auditgather
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -182,13 +184,35 @@ func messagesVary(entries []LogDecision) bool {
 	if len(entries) <= 1 {
 		return false
 	}
-	first := entries[0].Message
+	firstMsg := entries[0].Message
+	firstExtras := maps.Clone(entries[0].Extras)
 	for _, e := range entries[1:] {
-		if e.Message != first {
+		if e.Message != firstMsg {
+			return true
+		}
+		if !reflect.DeepEqual(e.Extras, firstExtras) {
 			return true
 		}
 	}
 	return false
+}
+
+func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambiguous, clear int) {
+	for _, d := range decisions {
+		if d.DecisionType != "episode_match" || d.Extras == nil {
+			continue
+		}
+		quality, _ := d.Extras["confidence_quality"].(string)
+		switch quality {
+		case "contested":
+			contested++
+		case "ambiguous":
+			ambiguous++
+		case "clear":
+			clear++
+		}
+	}
+	return contested, ambiguous, clear
 }
 
 // computeEpisodeConsistency compares media profiles across TV episodes.
@@ -579,6 +603,28 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Severity: "warning",
 				Category: "logs",
 				Message:  fmt.Sprintf("%d warning(s) in item log", n),
+			})
+		}
+		contested, ambiguous, clear := countDecisionConfidenceQualities(r.Logs.Decisions)
+		if contested > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "warning",
+				Category: "episodes",
+				Message:  fmt.Sprintf("%d episode match decision(s) marked contested", contested),
+			})
+		}
+		if ambiguous > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "info",
+				Category: "episodes",
+				Message:  fmt.Sprintf("%d episode match decision(s) marked ambiguous", ambiguous),
+			})
+		}
+		if clear > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "info",
+				Category: "episodes",
+				Message:  fmt.Sprintf("%d episode match decision(s) marked clear", clear),
 			})
 		}
 	}

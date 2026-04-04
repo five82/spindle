@@ -26,6 +26,7 @@ type Config struct {
 	Encoding      EncodingConfig      `toml:"encoding"`
 	LLM           LLMConfig           `toml:"llm"`
 	Commentary    CommentaryConfig    `toml:"commentary"`
+	ContentID     ContentIDConfig     `toml:"content_id"`
 	Logging       LoggingConfig       `toml:"logging"`
 }
 
@@ -139,6 +140,21 @@ type CommentaryConfig struct {
 	ConfidenceThreshold float64 `toml:"confidence_threshold"`
 }
 
+// ContentIDConfig defines episode identification policy thresholds.
+type ContentIDConfig struct {
+	MinSimilarityScore           float64 `toml:"min_similarity_score"`
+	LowConfidenceReviewThreshold float64 `toml:"low_confidence_review_threshold"`
+	LLMVerifyThreshold           float64 `toml:"llm_verify_threshold"`
+	AnchorMinScore               float64 `toml:"anchor_min_score"`
+	AnchorMinScoreMargin         float64 `toml:"anchor_min_score_margin"`
+	BlockHighConfidenceDelta     float64 `toml:"block_high_confidence_delta"`
+	BlockHighConfidenceTopRatio  float64 `toml:"block_high_confidence_top_ratio"`
+	DiscBlockPaddingMin          int     `toml:"disc_block_padding_min"`
+	DiscBlockPaddingDivisor      int     `toml:"disc_block_padding_divisor"`
+	Disc1MustStartAtEpisode1     bool    `toml:"disc1_must_start_at_episode1"`
+	Disc2PlusMinStartEpisode     int     `toml:"disc2_plus_min_start_episode"`
+}
+
 // LoggingConfig defines log retention settings.
 type LoggingConfig struct {
 	RetentionDays int `toml:"retention_days"`
@@ -205,4 +221,3 @@ func (c *Config) DaemonLogPath() string {
 func (c *Config) DaemonLogDir() string {
 	return c.Paths.StateDir
 }
-
