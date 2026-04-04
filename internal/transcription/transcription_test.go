@@ -1,9 +1,13 @@
 package transcription
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/five82/spindle/internal/media/ffprobe"
 )
 
 const sampleSRT = `1
@@ -194,6 +198,60 @@ func TestLookupMiss(t *testing.T) {
 	}
 	if result != nil {
 		t.Errorf("expected nil result on miss")
+	}
+}
+
+func TestSelectPrimaryAudioTrack(t *testing.T) {
+	origInspect := inspectMedia
+	t.Cleanup(func() { inspectMedia = origInspect })
+
+	inspectMedia = func(ctx context.Context, binary, path string) (*ffprobe.Result, error) {
+		if path == "" {
+			return nil, fmt.Errorf("missing path")
+		}
+		return &ffprobe.Result{Streams: []ffprobe.Stream{
+			{Index: 0, CodecType: "video", CodecName: "h264"},
+			{Index: 1, CodecType: "audio", CodecName: "ac3", Channels: 2, Tags: map[string]string{"language": "ita"}, Disposition: map[string]int{}},
+			{Index: 2, CodecType: "audio", CodecName: "ac3", Channels: 6, Tags: map[string]string{"language": "eng", "title": "English 5.1"}, Disposition: map[string]int{"default": 1}},
+		}}, nil
+	}
+
+	svc := New("large-v3", false, "silero", "", t.TempDir(), nil)
+	selected, err := svc.SelectPrimaryAudioTrack(context.Background(), "/tmp/input.mkv", "en")
+	if err != nil {
+		t.Fatalf("SelectPrimaryAudioTrack() error = %v", err)
+	}
+	if selected.Index != 1 {
+		t.Fatalf("Index = %d, want 1", selected.Index)
+	}
+	if selected.Language != "en" {
+		t.Fatalf("Language = %q, want en", selected.Language)
+	}
+	if selected.Label == "" {
+		t.Fatal("expected non-empty label")
+	}
+}
+
+func TestSelectPrimaryAudioTrackFallsBackLanguage(t *testing.T) {
+	origInspect := inspectMedia
+	t.Cleanup(func() { inspectMedia = origInspect })
+
+	inspectMedia = func(ctx context.Context, binary, path string) (*ffprobe.Result, error) {
+		return &ffprobe.Result{Streams: []ffprobe.Stream{
+			{Index: 0, CodecType: "audio", CodecName: "ac3", Channels: 2, Tags: map[string]string{}, Disposition: map[string]int{"default": 1}},
+		}}, nil
+	}
+
+	svc := New("large-v3", false, "silero", "", t.TempDir(), nil)
+	selected, err := svc.SelectPrimaryAudioTrack(context.Background(), "/tmp/input.mkv", "english")
+	if err != nil {
+		t.Fatalf("SelectPrimaryAudioTrack() error = %v", err)
+	}
+	if selected.Index != 0 {
+		t.Fatalf("Index = %d, want 0", selected.Index)
+	}
+	if selected.Language != "en" {
+		t.Fatalf("Language = %q, want en", selected.Language)
 	}
 }
 

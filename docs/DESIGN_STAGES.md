@@ -412,7 +412,7 @@ OpenSubtitles references.
 
 See `CONTENT_ID_DESIGN.md` for the complete algorithm specification.
 
-**Inputs**: Ripped files with placeholder episode keys, TMDB ID, season number.
+**Inputs**: Ripped files with placeholder episode keys, TMDB ID, season number. Each ripped file is probed and episode identification transcribes the selected primary audio stream rather than assuming audio stream 0.
 
 **Outputs**: Updated episode keys in RipSpec envelope with resolved episode
 numbers, confidence scores, and match metadata.
@@ -454,6 +454,8 @@ item for review instead of failing it:
 3. **Partial resolution**: Some episodes still unresolved after matching.
 4. **Non-contiguous sequence**: Resolved episode numbers have gaps (e.g.,
    1, 2, 5, 6 instead of 1, 2, 3, 4).
+
+**Primary audio rule**: Episode identification uses the shared audio-selection policy before WhisperX transcription. The selected audio-relative index is included in the transcription cache key (`{disc_fingerprint}:{episode_key}:{audio_index}`) so cached transcripts remain tied to the actual stream that was transcribed.
 
 ### 3.3 Progress Phases
 

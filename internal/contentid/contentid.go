@@ -306,11 +306,15 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.I
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create workdir %s: %w", workDir, err)
 		}
-		contentKey := fmt.Sprintf("%s:%s:0", item.DiscFingerprint, ep.Key)
+		selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
+		if err != nil {
+			return nil, fmt.Errorf("select audio %s: %w", ep.Key, err)
+		}
+		contentKey := fmt.Sprintf("%s:%s:%d", item.DiscFingerprint, ep.Key, selectedAudio.Index)
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 			InputPath:  asset.Path,
-			AudioIndex: 0,
-			Language:   "en",
+			AudioIndex: selectedAudio.Index,
+			Language:   selectedAudio.Language,
 			OutputDir:  workDir,
 			ContentKey: contentKey,
 		})

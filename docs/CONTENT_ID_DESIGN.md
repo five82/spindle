@@ -83,12 +83,19 @@ Ripped Episode Files
 For each episode in the rip spec envelope that has a ripped asset:
 
 1. Create working directory: `<staging_root>/contentid/<episode_key>/`
-2. Invoke the shared transcription service (see DESIGN_INFRASTRUCTURE.md
+2. Probe the ripped MKV and run the shared primary-audio selection policy.
+   Content ID must transcribe the **selected primary audio stream**, not blindly
+   `0:a:0`, because multi-language TV discs often place non-English dubs first.
+3. Derive the WhisperX language from the selected stream's language tag when
+   available; otherwise fall back to the caller default (`en`).
+4. Invoke the shared transcription service (see DESIGN_INFRASTRUCTURE.md
    Section 9) with the ripped file path and a content-stable `ContentKey`
-   (`disc_fingerprint:episode_key:audio_index`). The `whisperxSem` semaphore
-   is held by the episode identification stage for the duration.
-3. Read the generated SRT file and normalize it (strip SRT formatting, clean text)
-4. Create a text fingerprint from the normalized plain text
+   (`disc_fingerprint:episode_key:audio_index`). The selected audio index is
+   part of the cache identity so retries do not reuse transcripts from the
+   wrong stream after audio-selection fixes. The `whisperxSem` semaphore is held
+   by the episode identification stage for the duration.
+5. Read the generated SRT file and normalize it (strip SRT formatting, clean text)
+6. Create a text fingerprint from the normalized plain text
 
 ### 4.2 Progress Reporting
 
@@ -102,6 +109,10 @@ content-stable keys (see DESIGN_INFRASTRUCTURE.md Section 9.3). This
 allows later stages (subtitling) to reuse episode ID transcripts without
 re-running WhisperX, even though the input file path changes from the
 ripped file to the encoded file.
+
+The cache key must include the **selected audio-relative stream index**. Two
+transcripts from the same file but different audio tracks are different inputs
+and must never collide.
 
 ---
 

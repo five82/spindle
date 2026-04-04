@@ -772,7 +772,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 | Field | Type | Purpose |
 |-------|------|---------|
 | `InputPath` | string | Path to media file |
-| `AudioIndex` | int | Audio stream index to extract |
+| `AudioIndex` | int | Selected audio-relative stream index to extract |
 | `Language` | string | Target language code |
 | `OutputDir` | string | Directory for output files |
 | `Model` | string | WhisperX model override (empty = default) |
@@ -801,7 +801,9 @@ key = hex(SHA-256( contentKey + "\x00" + model + "\x00" + language ))
 ```
 
 Where `contentKey` is a caller-supplied identity string that remains stable
-across pipeline stages for the same audio content. Typical values:
+across pipeline stages for the same audio content. Callers must determine the
+primary audio stream first and include that selected audio-relative index in the
+key. Typical values:
 
 | Caller | `ContentKey` value |
 |--------|--------------------|

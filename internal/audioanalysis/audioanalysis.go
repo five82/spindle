@@ -269,10 +269,22 @@ func (h *Handler) detectCommentary(
 		return nil, nil
 	}
 
-	primaryAudioIdx := audioStreams[0].audioIndex
+	selection := audio.Select(result.Streams, logger)
+	primaryAudioIdx := selection.PrimaryIndex
+	if primaryAudioIdx < 0 {
+		logger.Info("commentary detection skipped",
+			"decision_type", logs.DecisionCommentaryClassification,
+			"decision_result", "skipped",
+			"decision_reason", "no primary audio selected",
+		)
+		return nil, nil
+	}
 
 	// Examine each non-primary audio track.
-	for _, as := range audioStreams[1:] {
+	for _, as := range audioStreams {
+		if as.audioIndex == primaryAudioIdx {
+			continue
+		}
 		idx := as.absIndex
 		stream := result.Streams[idx]
 
@@ -296,7 +308,7 @@ func (h *Handler) detectCommentary(
 					"track_index", idx,
 				)
 				excluded = append(excluded, ripspec.ExcludedTrackRef{
-					Index:      idx,
+					Index:      as.audioIndex,
 					Reason:     "stereo downmix of primary",
 					Similarity: sim,
 				})

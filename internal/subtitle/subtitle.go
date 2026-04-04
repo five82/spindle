@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
@@ -105,12 +106,16 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		_ = h.store.UpdateProgress(item)
 
 		// Transcribe.
-		contentKey := fmt.Sprintf("%s:%s:0", item.DiscFingerprint, key)
+		selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
+		if err != nil {
+			return fmt.Errorf("select audio %s: %w", key, err)
+		}
+		contentKey := fmt.Sprintf("%s:%s:%d", item.DiscFingerprint, key, selectedAudio.Index)
 		outputDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 			InputPath:  asset.Path,
-			AudioIndex: 0,
-			Language:   "en",
+			AudioIndex: selectedAudio.Index,
+			Language:   selectedAudio.Language,
 			OutputDir:  outputDir,
 			ContentKey: contentKey,
 		}, func(phase string, elapsed time.Duration) {
@@ -192,7 +197,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			SubtitlePath:     result.SRTPath,
 			Segments:         len(filteredCues),
 			DurationSec:      result.Duration,
-			Language:         "en",
+			Language:         selectedAudio.Language,
 			ValidationIssues: validationIssues,
 		}
 
@@ -229,7 +234,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_reason", "mux_into_mkv is disabled",
 			)
 		} else {
-			muxedPath, err := h.muxSubtitles(ctx, logger, asset.Path, srtPath, key)
+			muxedPath, err := h.muxSubtitles(ctx, logger, asset.Path, srtPath, key, selectedAudio.Language)
 			if err != nil {
 				logger.Warn("subtitle mux failed",
 					"event_type", "mux_error",
@@ -458,6 +463,7 @@ func (h *Handler) muxSubtitles(
 	videoPath string,
 	srtPath string,
 	key string,
+	subtitleLanguage string,
 ) (string, error) {
 	dir := filepath.Dir(videoPath)
 	ext := filepath.Ext(videoPath)
@@ -465,11 +471,20 @@ func (h *Handler) muxSubtitles(
 	outPath := filepath.Join(dir, base+".subtitled"+ext)
 	tmpPath := outPath + ".tmp"
 
+	languageCode := language.ToISO3(subtitleLanguage)
+	if languageCode == "" || languageCode == "und" {
+		languageCode = "eng"
+	}
+	trackName := language.DisplayName(subtitleLanguage)
+	if strings.TrimSpace(trackName) == "" {
+		trackName = "English"
+	}
+
 	args := []string{
 		"-o", tmpPath,
 		videoPath,
-		"--language", "0:eng",
-		"--track-name", "0:English",
+		"--language", "0:" + languageCode,
+		"--track-name", "0:" + trackName,
 		"--default-track-flag", "0:no",
 		srtPath,
 	}
