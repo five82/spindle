@@ -21,10 +21,10 @@ type AudioRefinementResult struct {
 }
 
 // RefineAudioTargets selects and keeps only the desired audio tracks in MKV
-// files. For files with <= 1 audio stream, no remux is needed and the single
-// stream info is returned. For multi-audio files, the primary track is
-// selected via audio.Select(), merged with additionalKeep indices, and a
-// copy-mode remux is performed.
+// files. Each unique path is probed and, when needed, remuxed so the selected
+// primary track becomes the first audio stream and the only default audio
+// stream. Additional keep indices (e.g. commentary) are preserved when valid
+// for a given file.
 func RefineAudioTargets(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -45,88 +45,127 @@ func RefineAudioTargets(
 		}
 	}
 
-	// Process the first path as the representative sample for audio selection.
-	path := unique[0]
-	result, err := ffprobe.Inspect(ctx, "", path)
-	if err != nil {
-		return nil, fmt.Errorf("ffprobe %s: %w", path, err)
-	}
+	var out AudioRefinementResult
+	for i, path := range unique {
+		result, err := ffprobe.Inspect(ctx, "", path)
+		if err != nil {
+			return nil, fmt.Errorf("ffprobe %s: %w", path, err)
+		}
 
-	audioCount := result.AudioStreamCount()
-	if audioCount <= 1 {
+		audioCount := result.AudioStreamCount()
 		sel := audio.Select(result.Streams, logger)
-		logger.Info("audio refinement: single track, no remux needed",
-			"decision_type", logs.DecisionAudioRefinement,
-			"decision_result", "skipped",
-			"decision_reason", "single audio stream",
-			"path", path,
-		)
-		return &AudioRefinementResult{
-			PrimaryAudioDescription: sel.PrimaryLabel(),
-			KeptIndices:             []int{0},
-		}, nil
+		if audioCount == 0 {
+			logger.Info("audio refinement: no audio streams",
+				"decision_type", logs.DecisionAudioRefinement,
+				"decision_result", "skipped",
+				"decision_reason", "no audio streams",
+				"path", path,
+			)
+			if i == 0 {
+				out = AudioRefinementResult{}
+			}
+			continue
+		}
+
+		keptIndices := buildKeptIndices(audioCount, sel.PrimaryIndex, additionalKeep)
+		needsRemux := len(keptIndices) != audioCount || needsDispositionFix(result, sel.PrimaryIndex)
+		if !needsRemux {
+			logger.Info("audio refinement: no remux needed",
+				"decision_type", logs.DecisionAudioRefinement,
+				"decision_result", "skipped",
+				"decision_reason", "audio tracks and default disposition already correct",
+				"path", path,
+			)
+		} else {
+			if err := remuxAudioTracks(ctx, logger, path, keptIndices); err != nil {
+				return nil, fmt.Errorf("remux %s: %w", path, err)
+			}
+			if err := validateRemuxedAudio(ctx, path, len(keptIndices)); err != nil {
+				return nil, err
+			}
+			logger.Info("audio refinement complete",
+				"decision_type", logs.DecisionAudioRefinement,
+				"decision_result", "remuxed",
+				"decision_reason", fmt.Sprintf("kept %d of %d audio tracks", len(keptIndices), audioCount),
+				"path", path,
+			)
+		}
+
+		if i == 0 {
+			out = AudioRefinementResult{
+				PrimaryAudioDescription: sel.PrimaryLabel(),
+				KeptIndices:             keptIndices,
+			}
+		}
 	}
 
-	sel := audio.Select(result.Streams, logger)
+	return &out, nil
+}
 
-	// Merge additionalKeep into kept indices.
-	keepSet := make(map[int]bool)
-	for _, idx := range sel.KeepIndices {
-		keepSet[idx] = true
+func buildKeptIndices(audioCount, primaryIndex int, additionalKeep []int) []int {
+	if audioCount <= 0 {
+		return nil
 	}
+
+	keepSet := map[int]bool{primaryIndex: true}
 	for _, idx := range additionalKeep {
-		keepSet[idx] = true
+		if idx >= 0 && idx < audioCount {
+			keepSet[idx] = true
+		}
 	}
 
-	// Build final kept indices sorted.
-	var keptIndices []int
+	keptIndices := []int{primaryIndex}
 	for i := 0; i < audioCount; i++ {
+		if i == primaryIndex {
+			continue
+		}
 		if keepSet[i] {
 			keptIndices = append(keptIndices, i)
 		}
 	}
+	return keptIndices
+}
 
-	// Check if remux is needed.
-	needsRemux := len(keptIndices) != audioCount
-	if !needsRemux {
-		logger.Info("audio refinement: all tracks kept, no remux needed",
-			"decision_type", logs.DecisionAudioRefinement,
-			"decision_result", "skipped",
-			"decision_reason", "all audio tracks selected",
-			"path", path,
-		)
-		return &AudioRefinementResult{
-			PrimaryAudioDescription: sel.PrimaryLabel(),
-			KeptIndices:             keptIndices,
-		}, nil
+func needsDispositionFix(result *ffprobe.Result, primaryIndex int) bool {
+	audioStreams := result.AudioStreams()
+	if len(audioStreams) == 0 {
+		return false
 	}
-
-	// Remux with only selected tracks.
-	if err := remuxAudioTracks(ctx, logger, path, keptIndices); err != nil {
-		return nil, fmt.Errorf("remux %s: %w", path, err)
+	if primaryIndex != 0 {
+		return true
 	}
+	for i, st := range audioStreams {
+		isDefault := st.Disposition["default"] == 1
+		if i == 0 && !isDefault {
+			return true
+		}
+		if i > 0 && isDefault {
+			return true
+		}
+	}
+	return false
+}
 
-	// Validate.
+func validateRemuxedAudio(ctx context.Context, path string, expectedAudio int) error {
 	postResult, err := ffprobe.Inspect(ctx, "", path)
 	if err != nil {
-		return nil, fmt.Errorf("post-remux ffprobe %s: %w", path, err)
+		return fmt.Errorf("post-remux ffprobe %s: %w", path, err)
 	}
 	postAudio := postResult.AudioStreamCount()
-	if postAudio != len(keptIndices) {
-		return nil, fmt.Errorf("post-remux audio count %d != expected %d", postAudio, len(keptIndices))
+	if postAudio != expectedAudio {
+		return fmt.Errorf("post-remux audio count %d != expected %d for %s", postAudio, expectedAudio, path)
 	}
-
-	logger.Info("audio refinement complete",
-		"decision_type", logs.DecisionAudioRefinement,
-		"decision_result", "remuxed",
-		"decision_reason", fmt.Sprintf("kept %d of %d audio tracks", len(keptIndices), audioCount),
-		"path", path,
-	)
-
-	return &AudioRefinementResult{
-		PrimaryAudioDescription: sel.PrimaryLabel(),
-		KeptIndices:             keptIndices,
-	}, nil
+	audioStreams := postResult.AudioStreams()
+	for i, st := range audioStreams {
+		isDefault := st.Disposition["default"] == 1
+		if i == 0 && !isDefault {
+			return fmt.Errorf("post-remux first audio stream is not default for %s", path)
+		}
+		if i > 0 && isDefault {
+			return fmt.Errorf("post-remux non-primary audio stream %d is still default for %s", i, path)
+		}
+	}
+	return nil
 }
 
 // remuxAudioTracks creates a new MKV with only the selected audio tracks,
@@ -151,8 +190,8 @@ func remuxAudioTracks(ctx context.Context, logger *slog.Logger, path string, kep
 	}
 	// Map subtitles and data if present.
 	args = append(args, "-map", "0:s?", "-map", "0:d?")
-	// Copy codecs, set first audio as default.
-	args = append(args, "-c", "copy", "-disposition:a:0", "default")
+	// Copy codecs, clear inherited audio defaults, then set first mapped audio as default.
+	args = append(args, "-c", "copy", "-disposition:a", "0", "-disposition:a:0", "default")
 	args = append(args, tmpPath)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)

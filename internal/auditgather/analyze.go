@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/encodingstate"
+	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -99,6 +100,49 @@ func detectTVRoutingAnomalies(r *Report) []Anomaly {
 	return anomalies
 }
 
+func detectDefaultAudioLanguageAnomalies(r *Report) []Anomaly {
+	if r == nil {
+		return nil
+	}
+
+	var anomalies []Anomaly
+	for _, media := range r.Media {
+		if media.Probe == nil {
+			continue
+		}
+		audioStreams := media.Probe.AudioStreams()
+		if len(audioStreams) < 2 {
+			continue
+		}
+
+		hasEnglish := false
+		defaultLang := ""
+		for _, st := range audioStreams {
+			langCode := language.ToISO2(language.ExtractFromTags(st.Tags))
+			if strings.HasPrefix(langCode, "en") {
+				hasEnglish = true
+			}
+			if st.Disposition["default"] == 1 && defaultLang == "" {
+				defaultLang = langCode
+			}
+		}
+		if !hasEnglish || defaultLang == "" || strings.HasPrefix(defaultLang, "en") {
+			continue
+		}
+
+		target := media.Path
+		if media.EpisodeKey != "" {
+			target = media.EpisodeKey
+		}
+		anomalies = append(anomalies, Anomaly{
+			Severity: "warning",
+			Category: "media",
+			Message:  fmt.Sprintf("non-English default audio language %q despite English audio present: %s", defaultLang, target),
+		})
+	}
+	return anomalies
+}
+
 func computeAnalysis(r *Report) *Analysis {
 	a := &Analysis{}
 
@@ -128,6 +172,7 @@ func computeAnalysis(r *Report) *Analysis {
 
 	a.Anomalies = detectAnomalies(r, a)
 	a.Anomalies = append(a.Anomalies, detectTVRoutingAnomalies(r)...)
+	a.Anomalies = append(a.Anomalies, detectDefaultAudioLanguageAnomalies(r)...)
 
 	// Return nil if everything is empty.
 	if len(a.DecisionGroups) == 0 &&

@@ -655,10 +655,14 @@ transcription work.
 5. Merge `additionalKeep` indices (e.g., commentary tracks from Phase 1)
    into `KeepIndices`, rebuild `RemovedIndices` excluding them.
 6. If stream set changed OR disposition fix needed (`needsDispositionFix`):
-   remux via FFmpeg with `-map 0:v` + `-map 0:{idx}` for each kept audio
-   index, set first audio as default disposition. Replace original file with
-   remuxed output.
-7. Validate remuxed output via ffprobe (stream count matches expectations).
+   remux that path via FFmpeg with `-map 0:v` + `-map 0:{idx}` for each kept
+   audio index, ordering mapped audio with the selected primary first. Clear
+   inherited default dispositions on all mapped audio streams, then set only
+   the first mapped audio stream as default. Replace the original file with
+   the remuxed output.
+7. Validate every remuxed output via ffprobe (stream count matches
+   expectations; first audio is default; no later audio stream remains
+   default).
 
 Returns `AudioRefinementResult` with `PrimaryAudioDescription` and
 `KeptIndices` from the first processed path.

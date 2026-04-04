@@ -322,3 +322,45 @@ func TestCompressMediaProbes_NilConsistency(t *testing.T) {
 		t.Errorf("result count: got %d, want 1", len(result))
 	}
 }
+
+func TestDetectDefaultAudioLanguageAnomalies_FlagsNonEnglishDefault(t *testing.T) {
+	r := &Report{Media: []MediaFileProbe{{
+		EpisodeKey: "s03_009",
+		Path:       "/review/Batman - s03_009.mkv",
+		Probe: &ffprobe.Result{Streams: []ffprobe.Stream{
+			{CodecType: "audio", Tags: map[string]string{"language": "ita"}, Disposition: map[string]int{"default": 1}},
+			{CodecType: "audio", Tags: map[string]string{"language": "eng"}, Disposition: map[string]int{"default": 0}},
+			{CodecType: "audio", Tags: map[string]string{"language": "ger"}, Disposition: map[string]int{"default": 0}},
+		}},
+	}}}
+
+	anomalies := detectDefaultAudioLanguageAnomalies(r)
+	if len(anomalies) != 1 {
+		t.Fatalf("expected 1 anomaly, got %d", len(anomalies))
+	}
+	if anomalies[0].Severity != "warning" {
+		t.Fatalf("severity = %s, want warning", anomalies[0].Severity)
+	}
+	if anomalies[0].Category != "media" {
+		t.Fatalf("category = %s, want media", anomalies[0].Category)
+	}
+	want := "non-English default audio language \"it\" despite English audio present: s03_009"
+	if anomalies[0].Message != want {
+		t.Fatalf("message = %q, want %q", anomalies[0].Message, want)
+	}
+}
+
+func TestDetectDefaultAudioLanguageAnomalies_IgnoresEnglishDefault(t *testing.T) {
+	r := &Report{Media: []MediaFileProbe{{
+		EpisodeKey: "s03e21",
+		Probe: &ffprobe.Result{Streams: []ffprobe.Stream{
+			{CodecType: "audio", Tags: map[string]string{"language": "eng"}, Disposition: map[string]int{"default": 1}},
+			{CodecType: "audio", Tags: map[string]string{"language": "ita"}, Disposition: map[string]int{"default": 0}},
+		}},
+	}}}
+
+	anomalies := detectDefaultAudioLanguageAnomalies(r)
+	if len(anomalies) != 0 {
+		t.Fatalf("expected 0 anomalies, got %d: %+v", len(anomalies), anomalies)
+	}
+}
