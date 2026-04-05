@@ -488,7 +488,7 @@ Degraded errors are for optional functionality whose failure should not
 block the pipeline:
 
 - bd_info unavailable (proceed without enhanced metadata)
-- TMDB returns no results (use fallback metadata, flag for review)
+- TMDB returns no results (use fallback metadata, flag for review; TV-hinted discs fail at identification, non-TV/unknown discs continue degraded)
 - Rip cache write failure (rip succeeded, cache is optional)
 - No episode ID reference matches after successful reference acquisition (keep placeholder keys, flag for review)
 - Commentary detection failure (continue without commentary labels)

@@ -96,6 +96,7 @@ type IdentifyResult struct {
 	YearSource  string
 	DiscSource  string
 	MediaType   string
+	MediaHint   string
 	Best        *tmdb.SearchResult
 	AllResults  []tmdb.SearchResult
 	DiscInfo    *makemkv.DiscInfo
@@ -103,6 +104,8 @@ type IdentifyResult struct {
 	Envelope    ripspec.Envelope
 	Degraded    bool
 	DegradedMsg string
+	Fatal       bool
+	FatalMsg    string
 }
 
 // Identify runs the full identification pipeline and returns results
@@ -175,6 +178,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 
 	// Detect media type hint once; used for both cache validation and TMDB search routing.
 	mediaHint := detectMediaTypeHint(result.RawTitle)
+	result.MediaHint = mediaHint
 
 	// Step 5: Check disc ID cache (skips TMDB search and KeyDB lookup, not the scan).
 	// Validate cached media type against fresh disc metadata to prevent stale entries
@@ -276,14 +280,23 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
 	}
 	if result.Best == nil {
+		impact := "item flagged for review"
+		if noTMDBMatchIsFatal(mediaHint) {
+			impact = "item failed at identification"
+		}
 		logger.Warn("no TMDB match",
 			"event_type", "tmdb_no_match",
 			"error_hint", "no result met confidence threshold",
-			"impact", "item flagged for review",
+			"impact", impact,
 		)
 		item.AppendReviewReason("TMDB: no confident match found")
 		result.Envelope = h.buildFallbackEnvelope(logger, item, result.DiscInfo)
 		setForcedSubtitleAttribute(logger, result.DiscInfo, &result.Envelope)
+		if noTMDBMatchIsFatal(mediaHint) {
+			result.Fatal = true
+			result.FatalMsg = "no TMDB match found for TV disc: " + result.QueryTitle
+			return result, nil
+		}
 		result.Degraded = true
 		result.DegradedMsg = "no TMDB match found for: " + result.QueryTitle
 		return result, nil
@@ -344,6 +357,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
+	if result.Fatal {
+		return fmt.Errorf("identification fatal: %s", result.FatalMsg)
+	}
 	if result.Degraded {
 		return &services.ErrDegraded{Msg: result.DegradedMsg}
 	}
@@ -481,6 +497,10 @@ func CleanQueryTitle(title string) string {
 // detectMediaTypeHint examines the raw disc title for TV indicators.
 // Returns "tv" or "" (no hint). Per spec section 1.6, this hint controls
 // which TMDB search endpoint is tried first.
+func noTMDBMatchIsFatal(mediaHint string) bool {
+	return mediaHint == "tv"
+}
+
 func detectMediaTypeHint(rawTitle string) string {
 	if tvHintPattern.MatchString(rawTitle) {
 		return "tv"

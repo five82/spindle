@@ -30,7 +30,7 @@ spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 
 This produces a JSON report containing:
 - **`item`**: Queue item summary (status, flags, paths, timestamps)
-- **`stage_gate`**: Pre-computed phase applicability (which analyses apply, media type, disc source)
+- **`stage_gate`**: Pre-computed phase applicability (which analyses apply, resolved media type, media hint, disc source)
 - **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), and stage timing events
 - **`rip_cache`**: Cache metadata (disc title, needs_review flag). Serialized rip_spec_data and metadata_json blobs are omitted (already in parsed `envelope`).
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
@@ -52,7 +52,7 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 | `decision_groups` | Decisions exist | Groups by (type, result, reason) with count. `entries` included when count=1 or messages vary; nil when all identical. |
 | `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
-| `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
+| `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
 | `media_stats` | Valid probes exist | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`. |
 | `asset_health` | Assets exist | Per-stage (ripped/encoded/subtitled/final) `total/ok/failed/muxed` counts. |
 | `anomalies` | Issues detected | Pre-flagged issues with `severity` (critical/warning/info), `category`, `message`. |
@@ -84,7 +84,7 @@ The extraction script should:
 2. **Format pre-computed analysis**: Read `analysis.decision_groups` for deduplicated decisions (groups with `count > 1` and nil `entries` are identical repeats; groups with `entries` have varying messages). Read `analysis.anomalies` for pre-flagged issues. Read `analysis.episode_stats`, `analysis.media_stats`, `analysis.crop_analysis`, `analysis.episode_consistency`, `analysis.asset_health` for pre-computed summaries.
 3. **List all warnings and errors** with full context (these are always few enough to show individually)
 4. **Show stage timing** with computed durations
-5. **Summarize episode manifest** with confidence scores and episode numbers
+5. **Summarize episode manifest** with confidence scores and episode numbers. If `analysis.episode_stats.placeholder_only` is true and `phase_episode_id` is false, label it clearly as a **placeholder episode inventory**, not a resolved episode manifest.
 6. **Title selection** (movies): List `envelope.titles` with id, duration, and chapters to identify feature-length candidates and which was ripped
 
 Steps 2/5/6/8 from the old extraction strategy are now pre-computed in `analysis` -- the script reads and formats them rather than computing them from raw data. This approach replaces 10+ sequential extraction calls with 1-2, keeping the analysis equally thorough while significantly reducing gathering overhead.
@@ -96,7 +96,8 @@ The `stage_gate` object in the audit-gather output contains:
 | Field | Meaning |
 |-------|---------|
 | `furthest_stage` | Status the item reached (or failed at) |
-| `media_type` | `movie` or `tv` |
+| `media_type` | Resolved media type: `movie`, `tv`, or `unknown` |
+| `media_hint` | Hint inferred before/without full identification (for example `tv` on a failed TMDB lookup) |
 | `disc_source` | `bluray`, `dvd`, or `unknown` |
 | `phase_logs` | Always true |
 | `phase_rip_cache` | Post-ripping |
@@ -111,6 +112,7 @@ The `stage_gate` object in the audit-gather output contains:
 - External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray. **Skip external validation entirely for DVDs.**
 - UHD status is not encoded in `disc_source`. Infer UHD from contextual signals: disc title containing "UHD", 2160p resolutions in bdinfo, or similar markers in the audit data.
 - **For failed items:** Focus the report on diagnosing the failure. Analyze the error, the events leading up to it, and any retry patterns. Do not pad the report with sections that say "N/A - not reached".
+- **TV-hinted no-TMDB-match is now fatal at identification.** Expect these items to fail before ripping rather than continue as degraded TV review items.
 
 ### Phase 2: Log Analysis (when `phase_logs` is true)
 
@@ -185,7 +187,7 @@ Analyze the `rip_cache` section from audit-gather output:
    - `episodes_synchronized` should be `true` after successful identification
    - `completed` distinguishes successful completion from degraded early exit
 
-2. **Episode manifest review**: `analysis.episode_stats` provides pre-computed `confidence_min/max/mean`, `below_070/080/090` counts, `unresolved` count, and `sequence_contiguous` for the overview. Use these for the summary, but still review the full `envelope.episodes[]` manifest for per-episode details. Confidence thresholds:
+2. **Episode manifest review**: `analysis.episode_stats` provides pre-computed `confidence_min/max/mean`, `below_070/080/090` counts, `unresolved` count, `placeholder_only`, and `sequence_contiguous` for the overview. Use these for the summary, but still review the full `envelope.episodes[]` manifest for per-episode details. Confidence thresholds:
    - **CRITICAL** (< 0.70): Episode ordering likely wrong. Check `item.needs_review`
    - **WARNING** (0.70-0.80): Marginal confidence
    - **OK** (> 0.80): High confidence match
@@ -470,7 +472,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Content ID method: <envelope.attributes.content_id_method>
 - Episodes synchronized: <envelope.attributes.episodes_synchronized>
 - Confidence overview: <from analysis.episode_stats: min/max/mean, below thresholds, unresolved count>
-- Episode manifest: <full per-episode table with confidence scores>
+- Episode manifest: <full per-episode table with confidence scores; if `placeholder_only=true` and episodeid has not run yet, label this as a placeholder episode inventory>
 - Sequence continuity: <analysis.episode_stats.sequence_contiguous, episode_range>
 
 #### Encoded File (if phase_encoded)

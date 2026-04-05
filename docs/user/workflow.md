@@ -54,7 +54,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
    - Writes a rip specification (`rip_spec`) that maps MakeMKV titles to the intended output.
    - Updates `disc_title` to a canonical name (movie: `Title (Year)`, TV: `Show Season XX (Year)` when available).
    - Sends a notification when a year is known.
-4. If no confident match is found (or TMDB lookup fails), the item is marked `needs_review` with a reason. The item advances to the next stage so downstream stages can still run, and the organizer will route output to `review_dir`.
+4. If no confident match is found (or TMDB lookup fails), the item is marked `needs_review` with a reason. **TV-hinted discs fail at identification and do not advance to ripping.** Non-TV/unknown discs continue as degraded items so downstream stages can still run, and the organizer will route output to `review_dir`.
 5. Duplicate fingerprints are treated as immediate failure: the item is placed in `failed` with `needs_review = true` and the workflow stops.
 
 The queue also reports coarse identification progress for cleanup, scanning/metadata resolution, and finalization so dashboards can show stage activity even though identification is not a stream-oriented stage.

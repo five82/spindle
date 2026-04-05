@@ -52,6 +52,7 @@ type ItemSummary struct {
 type StageGate struct {
 	FurthestStage   string `json:"furthest_stage"`
 	MediaType       string `json:"media_type"`
+	MediaHint       string `json:"media_hint,omitempty"`
 	DiscSource      string `json:"disc_source"`
 	PhaseLogs       bool   `json:"phase_logs"`
 	PhaseRipCache   bool   `json:"phase_rip_cache"`
@@ -69,6 +70,7 @@ type LogAnalysis struct {
 	IsDebug            bool          `json:"is_debug"`
 	TotalLines         int           `json:"total_lines"`
 	InferredDiscSource string        `json:"inferred_disc_source,omitempty"`
+	InferredMediaHint  string        `json:"inferred_media_hint,omitempty"`
 	Decisions          []LogDecision `json:"decisions,omitempty"`
 	Warnings           []LogEntry    `json:"warnings,omitempty"`
 	Errors             []LogEntry    `json:"errors,omitempty"`
@@ -214,6 +216,7 @@ type EpisodeStats struct {
 	Count              int     `json:"count"`
 	Matched            int     `json:"matched"`
 	Unresolved         int     `json:"unresolved"`
+	PlaceholderOnly    bool    `json:"placeholder_only,omitempty"`
 	ConfidenceMin      float64 `json:"confidence_min,omitempty"`
 	ConfidenceMax      float64 `json:"confidence_max,omitempty"`
 	ConfidenceMean     float64 `json:"confidence_mean,omitempty"`

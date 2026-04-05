@@ -557,6 +557,26 @@ func TestExtractDiscNumber(t *testing.T) {
 	}
 }
 
+func TestNoTMDBMatchIsFatal(t *testing.T) {
+	tests := []struct {
+		name      string
+		mediaHint string
+		want      bool
+	}{
+		{name: "tv hint is fatal", mediaHint: "tv", want: true},
+		{name: "movie hint is not fatal", mediaHint: "movie", want: false},
+		{name: "unknown hint is not fatal", mediaHint: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := noTMDBMatchIsFatal(tt.mediaHint); got != tt.want {
+				t.Fatalf("noTMDBMatchIsFatal(%q) = %v, want %v", tt.mediaHint, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMapDiscSource(t *testing.T) {
 	tests := []struct {
 		input string

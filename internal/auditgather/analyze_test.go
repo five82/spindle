@@ -1,6 +1,7 @@
 package auditgather
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/five82/spindle/internal/media/ffprobe"
@@ -64,6 +65,41 @@ func TestAggregateDecisions_MultipleGroups(t *testing.T) {
 	}
 	if groups[1].DecisionType != "rip_cache" {
 		t.Errorf("expected second group rip_cache, got %s", groups[1].DecisionType)
+	}
+}
+
+func TestDecisionGroupJSONUsesDecisionFieldNames(t *testing.T) {
+	groups := aggregateDecisions([]LogDecision{{
+		DecisionType:   "tmdb_search",
+		DecisionResult: "fallback_multi",
+		DecisionReason: "no tv match above threshold",
+		Message:        "TV-hinted search found no match, falling back to multi",
+	}})
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+
+	blob, err := json.Marshal(groups[0])
+	if err != nil {
+		t.Fatalf("marshal decision group: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(blob, &got); err != nil {
+		t.Fatalf("unmarshal decision group: %v", err)
+	}
+
+	if got["decision_type"] != "tmdb_search" {
+		t.Fatalf("decision_type = %v, want tmdb_search", got["decision_type"])
+	}
+	if got["decision_result"] != "fallback_multi" {
+		t.Fatalf("decision_result = %v, want fallback_multi", got["decision_result"])
+	}
+	if got["decision_reason"] != "no tv match above threshold" {
+		t.Fatalf("decision_reason = %v, want no tv match above threshold", got["decision_reason"])
+	}
+	if _, ok := got["type"]; ok {
+		t.Fatalf("unexpected shorthand field 'type' present in json: %s", string(blob))
 	}
 }
 
@@ -138,6 +174,33 @@ func TestComputeEpisodeStats_Unresolved(t *testing.T) {
 	}
 	if stats.Unresolved != 2 {
 		t.Errorf("unresolved: got %d, want 2", stats.Unresolved)
+	}
+	if !stats.PlaceholderOnly {
+		t.Error("expected placeholder_only for unresolved placeholder manifest")
+	}
+}
+
+func TestDetectAnomalies_PreEpisodeIDPlaceholdersAreInformational(t *testing.T) {
+	r := &Report{
+		StageGate: StageGate{PhaseEpisodeID: false, MediaHint: "tv"},
+	}
+	a := &Analysis{EpisodeStats: &EpisodeStats{Count: 2, Unresolved: 2, PlaceholderOnly: true}}
+
+	anomalies := detectAnomalies(r, a)
+	found := false
+	for _, an := range anomalies {
+		if an.Message == "2 placeholder episode(s) in pre-episode-identification manifest" {
+			found = true
+			if an.Severity != "info" {
+				t.Fatalf("severity = %s, want info", an.Severity)
+			}
+		}
+		if an.Message == "2 unresolved episode(s)" {
+			t.Fatal("unexpected unresolved anomaly for pre-episode-identification placeholders")
+		}
+	}
+	if !found {
+		t.Fatal("expected placeholder manifest anomaly")
 	}
 }
 
@@ -216,6 +279,33 @@ func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 			an.Message == "episode identification provenance summary is incomplete" {
 			t.Fatalf("unexpected provenance anomaly: %+v", an)
 		}
+	}
+}
+
+func TestDetectFallbackTitleSelectionAnomalies_FlagsBroadTVFallback(t *testing.T) {
+	r := &Report{
+		Logs: &LogAnalysis{
+			Decisions: []LogDecision{
+				{DecisionType: "tmdb_search", DecisionResult: "tv"},
+				{DecisionType: "title_selection", DecisionReason: "unknown media type, using duration filter"},
+			},
+			Warnings: []LogEntry{{EventType: "tmdb_no_match"}},
+		},
+		Envelope: &EnvelopeReport{
+			Titles:   []ripspec.Title{{ID: 0}, {ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}, {ID: 6}, {ID: 7}},
+			Episodes: []ripspec.Episode{{RuntimeSeconds: 140}, {RuntimeSeconds: 150}, {RuntimeSeconds: 2700}},
+		},
+	}
+
+	anomalies := detectFallbackTitleSelectionAnomalies(r)
+	if len(anomalies) != 1 {
+		t.Fatalf("expected 1 anomaly, got %d", len(anomalies))
+	}
+	if anomalies[0].Category != "title_selection" {
+		t.Fatalf("category = %s, want title_selection", anomalies[0].Category)
+	}
+	if anomalies[0].Severity != "critical" {
+		t.Fatalf("severity = %s, want critical", anomalies[0].Severity)
 	}
 }
 

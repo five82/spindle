@@ -258,8 +258,10 @@ and episode placeholders normally.
 - **Fingerprint computation fails**: Notify error, do not queue.
 - **Duplicate fingerprint in workflow**: Return existing item, do not create new.
 - **TMDB search fails or returns no results**: Build fallback metadata with
-  fallback title, generate placeholder episodes, route to review. Does not fail
-  the item.
+  fallback title and route to review. **TV-hinted discs fail at identification**
+  after the fallback envelope is persisted; non-TV/unknown discs continue as
+  degraded items. Placeholder episodes may still be generated in the fallback
+  envelope when a season number is present.
 - **MakeMKV scan timeout**: Fail item.
 
 ---

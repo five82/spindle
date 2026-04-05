@@ -73,8 +73,10 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 		}
 	}
 
+	mediaHint := inferMediaHintFromMetadata(mediaType)
+
 	// Compute stage gate.
-	r.StageGate = computeStageGate(item, mediaType, env.Metadata.DiscSource)
+	r.StageGate = computeStageGate(item, mediaType, mediaHint, env.Metadata.DiscSource)
 
 	// Log analysis.
 	logReport, logErr := gatherLogs(cfg, item)
@@ -84,10 +86,15 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 		r.Logs = logReport
 	}
 
-	// Refine disc source from logs if still unknown.
-	if r.StageGate.DiscSource == "" && r.Logs != nil && r.Logs.InferredDiscSource != "" {
-		r.StageGate.DiscSource = r.Logs.InferredDiscSource
-		r.StageGate.PhaseExtVal = r.StageGate.PhaseEncoded && r.StageGate.DiscSource != "dvd"
+	// Refine context from logs when envelope metadata is incomplete.
+	if r.Logs != nil {
+		if r.StageGate.DiscSource == "" && r.Logs.InferredDiscSource != "" {
+			r.StageGate.DiscSource = r.Logs.InferredDiscSource
+			r.StageGate.PhaseExtVal = r.StageGate.PhaseEncoded && r.StageGate.DiscSource != "dvd"
+		}
+		if r.StageGate.MediaHint == "" && r.Logs.InferredMediaHint != "" {
+			r.StageGate.MediaHint = r.Logs.InferredMediaHint
+		}
 	}
 
 	// Rip cache.
@@ -150,7 +157,7 @@ func buildItemSummary(item *queue.Item) ItemSummary {
 	}
 }
 
-func computeStageGate(item *queue.Item, mediaType, discSource string) StageGate {
+func computeStageGate(item *queue.Item, mediaType, mediaHint, discSource string) StageGate {
 	furthest := item.Stage
 	if item.Stage == queue.StageFailed && item.FailedAtStage != "" {
 		furthest = queue.Stage(item.FailedAtStage)
@@ -161,6 +168,7 @@ func computeStageGate(item *queue.Item, mediaType, discSource string) StageGate 
 	return StageGate{
 		FurthestStage: string(furthest),
 		MediaType:     mediaType,
+		MediaHint:     mediaHint,
 		DiscSource:    discSource,
 
 		PhaseLogs:       true,
@@ -195,7 +203,7 @@ func gatherLogs(cfg *config.Config, item *queue.Item) (*LogAnalysis, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		report.TotalLines++
-		parseLogLine(line, item.ID, report)
+		parseLogLine(line, item, report)
 	}
 	if err := scanner.Err(); err != nil {
 		return report, fmt.Errorf("scan log: %w", err)
@@ -282,8 +290,9 @@ var knownLogKeys = map[string]bool{
 }
 
 // parseLogLine extracts structured data from a single JSON log line.
-// Only lines matching the given itemID are included.
-func parseLogLine(line string, itemID int64, report *LogAnalysis) {
+// Lines are associated with the item by item_id when present, otherwise by
+// stable identifiers such as disc fingerprint or disc title/label fields.
+func parseLogLine(line string, item *queue.Item, report *LogAnalysis) {
 	line = strings.TrimSpace(line)
 	if line == "" || line[0] != '{' {
 		return
@@ -294,15 +303,19 @@ func parseLogLine(line string, itemID int64, report *LogAnalysis) {
 		return
 	}
 
-	// Filter by item_id.
-	if id, ok := getFloat(entry, "item_id"); !ok || int64(id) != itemID {
+	if !logLineMatchesItem(entry, item) {
 		return
 	}
 
-	// Infer disc source from this item's log lines.
+	// Infer disc source and media hint from this item's log lines.
 	if report.InferredDiscSource == "" {
-		if src := inferDiscSourceFromJSON(line); src != "" {
+		if src := inferDiscSource(entry); src != "" {
 			report.InferredDiscSource = src
+		}
+	}
+	if report.InferredMediaHint == "" {
+		if hint := inferMediaHint(entry); hint != "" {
+			report.InferredMediaHint = hint
 		}
 	}
 
@@ -409,11 +422,72 @@ func getStageDurationSeconds(entry map[string]any) float64 {
 	return 0
 }
 
-func inferDiscSourceFromJSON(rawJSON string) string {
-	lower := strings.ToLower(rawJSON)
-	if strings.Contains(lower, `"disc_type":"blu-ray"`) || strings.Contains(lower, `"disc_type": "blu-ray"`) {
-		return "bluray"
+func logLineMatchesItem(entry map[string]any, item *queue.Item) bool {
+	if item == nil {
+		return false
 	}
+	if id, ok := getFloat(entry, "item_id"); ok && int64(id) == item.ID {
+		return true
+	}
+	if fp := getString(entry, "fingerprint"); fp != "" && item.DiscFingerprint != "" && strings.EqualFold(strings.TrimSpace(fp), strings.TrimSpace(item.DiscFingerprint)) {
+		return true
+	}
+	for _, key := range []string{"disc_title", "label", "volume_id", "raw_title"} {
+		if sameAuditString(getString(entry, key), item.DiscTitle) {
+			return true
+		}
+	}
+	return false
+}
+
+func inferMediaHintFromMetadata(mediaType string) string {
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "movie", "tv":
+		return strings.ToLower(strings.TrimSpace(mediaType))
+	default:
+		return ""
+	}
+}
+
+func sameAuditString(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return strings.EqualFold(a, b)
+}
+
+func inferMediaHint(entry map[string]any) string {
+	if getString(entry, "decision_type") == "tmdb_search" {
+		switch strings.ToLower(strings.TrimSpace(getString(entry, "decision_result"))) {
+		case "tv", "movie":
+			return strings.ToLower(strings.TrimSpace(getString(entry, "decision_result")))
+		}
+	}
+	return ""
+}
+
+func inferDiscSource(entry map[string]any) string {
+	if discType := strings.ToLower(strings.TrimSpace(getString(entry, "disc_type"))); discType != "" {
+		switch discType {
+		case "blu-ray", "bluray", "bd":
+			return "bluray"
+		case "dvd":
+			return "dvd"
+		}
+	}
+	if getString(entry, "decision_type") == "bdinfo_availability" {
+		switch strings.ToLower(strings.TrimSpace(getString(entry, "decision_result"))) {
+		case "bluray":
+			return "bluray"
+		case "dvd":
+			return "dvd"
+		case "unknown":
+			return "unknown"
+		}
+	}
+	lower := strings.ToLower(getString(entry, "decision_reason") + " " + getString(entry, "msg") + " " + getString(entry, "device"))
 	if strings.Contains(lower, "video_ts") {
 		return "dvd"
 	}

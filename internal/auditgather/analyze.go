@@ -171,6 +171,7 @@ func computeAnalysis(r *Report) *Analysis {
 	}
 
 	a.Anomalies = detectAnomalies(r, a)
+	a.Anomalies = append(a.Anomalies, detectFallbackTitleSelectionAnomalies(r)...)
 	a.Anomalies = append(a.Anomalies, detectTVRoutingAnomalies(r)...)
 	a.Anomalies = append(a.Anomalies, detectDefaultAudioLanguageAnomalies(r)...)
 
@@ -240,6 +241,55 @@ func messagesVary(entries []LogDecision) bool {
 		}
 	}
 	return false
+}
+
+func detectFallbackTitleSelectionAnomalies(r *Report) []Anomaly {
+	if r == nil || r.Logs == nil || r.Envelope == nil {
+		return nil
+	}
+
+	tvHinted := false
+	noTMDBMatch := false
+	broadFallbackSelection := false
+	for _, d := range r.Logs.Decisions {
+		switch {
+		case d.DecisionType == "tmdb_search" && d.DecisionResult == "tv":
+			tvHinted = true
+		case d.DecisionType == "title_selection" && d.DecisionReason == "unknown media type, using duration filter":
+			broadFallbackSelection = true
+		}
+	}
+	for _, w := range r.Logs.Warnings {
+		if w.EventType == "tmdb_no_match" {
+			noTMDBMatch = true
+			break
+		}
+	}
+	if !tvHinted || !noTMDBMatch || !broadFallbackSelection {
+		return nil
+	}
+
+	totalTitles := len(r.Envelope.Titles)
+	shortLike := 0
+	for _, ep := range r.Envelope.Episodes {
+		if ep.RuntimeSeconds > 0 && ep.RuntimeSeconds < 600 {
+			shortLike++
+		}
+	}
+	severity := "warning"
+	if totalTitles >= 8 || shortLike >= 3 {
+		severity = "critical"
+	}
+	message := fmt.Sprintf("TV-hinted disc with no TMDB match fell back to broad title selection (%d titles", totalTitles)
+	if shortLike > 0 {
+		message += fmt.Sprintf(", %d short/extras-like", shortLike)
+	}
+	message += ")"
+	return []Anomaly{{
+		Severity: severity,
+		Category: "title_selection",
+		Message:  message,
+	}}
 }
 
 func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambiguous, clear int) {
@@ -482,7 +532,7 @@ func computeEpisodeStats(episodes []ripspec.Episode) *EpisodeStats {
 		return nil
 	}
 
-	stats := &EpisodeStats{Count: len(episodes)}
+	stats := &EpisodeStats{Count: len(episodes), PlaceholderOnly: true}
 	var confidences []float64
 	var episodeNumbers []int
 
@@ -490,8 +540,12 @@ func computeEpisodeStats(episodes []ripspec.Episode) *EpisodeStats {
 		if ep.Episode > 0 {
 			stats.Matched++
 			episodeNumbers = append(episodeNumbers, ep.Episode)
+			stats.PlaceholderOnly = false
 		} else {
 			stats.Unresolved++
+		}
+		if ep.MatchConfidence > 0 || ep.NeedsReview || ep.ReviewReason != "" {
+			stats.PlaceholderOnly = false
 		}
 		if ep.MatchConfidence > 0 {
 			confidences = append(confidences, ep.MatchConfidence)
@@ -715,7 +769,13 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 
 	// Episode stats anomalies.
 	if a.EpisodeStats != nil {
-		if a.EpisodeStats.Unresolved > 0 {
+		if a.EpisodeStats.PlaceholderOnly && !r.StageGate.PhaseEpisodeID {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "info",
+				Category: "episodes",
+				Message:  fmt.Sprintf("%d placeholder episode(s) in pre-episode-identification manifest", a.EpisodeStats.Unresolved),
+			})
+		} else if a.EpisodeStats.Unresolved > 0 {
 			anomalies = append(anomalies, Anomaly{
 				Severity: "critical",
 				Category: "episodes",
