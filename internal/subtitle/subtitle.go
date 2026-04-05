@@ -20,6 +20,7 @@ import (
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/transcription"
 )
@@ -160,7 +161,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			return fmt.Errorf("write filtered SRT %s: %w", key, writeErr)
 		}
 
-		filteredCues := parseSRT(filtered)
+		filteredCues := srtutil.Parse(filtered)
 		logger.Info("hallucination filter applied",
 			"decision_type", logs.DecisionHallucinationFilter,
 			"decision_result", "filtered",

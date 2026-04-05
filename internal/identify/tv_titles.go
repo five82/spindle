@@ -18,12 +18,11 @@ const (
 )
 
 type tvTitleDecision struct {
-	Title        ripspec.Title
-	Selected     bool
-	Reason       string
-	DuplicateOf  int
-	ClusterID    int
-	CandidateSec int
+	Title       ripspec.Title
+	Selected    bool
+	Reason      string
+	DuplicateOf int
+	ClusterID   int
 }
 
 type tvTitleSelectionResult struct {
@@ -56,12 +55,12 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 	seen := make(map[string]int)
 
 	for _, title := range titles {
-		decision := tvTitleDecision{Title: title, CandidateSec: title.Duration}
+		decision := tvTitleDecision{Title: title}
+		key := dedupKey(title)
 		switch {
 		case title.Duration < minTitleLength:
 			decision.Reason = "below_min_title_length"
-		case dedupKey(title) != "":
-			key := dedupKey(title)
+		case key != "":
 			if firstID, dup := seen[key]; dup {
 				decision.Reason = "duplicate_title"
 				decision.DuplicateOf = firstID

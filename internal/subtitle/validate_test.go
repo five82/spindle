@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/five82/spindle/internal/srtutil"
 )
 
 func TestValidateSRTContent_Valid(t *testing.T) {
@@ -156,7 +158,7 @@ func TestValidateSRTContent_Boundaries(t *testing.T) {
 					start := 900 + (i-1)*14
 					end := start + 3
 					fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", i,
-						formatTimestamp(float64(start)), formatTimestamp(float64(end)),
+						srtutil.FormatTimestamp(float64(start)), srtutil.FormatTimestamp(float64(end)),
 						fmt.Sprintf("Line %d", i))
 				}
 				return b.String()

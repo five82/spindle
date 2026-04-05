@@ -22,23 +22,28 @@ type episodeAssignResult struct {
 }
 
 // assignEpisodeAssets maps ripped files in dir to episodes by parsing title IDs
-// from filenames and matching against each episode's TitleID.
-func assignEpisodeAssets(env *ripspec.Envelope, dir string, logger *slog.Logger) episodeAssignResult {
+// from filenames and matching against each episode's TitleID. If titleFiles is
+// non-nil, it is used as the pre-scanned view of dir and no filesystem scan is
+// performed; otherwise dir is scanned.
+func assignEpisodeAssets(env *ripspec.Envelope, dir string, titleFiles map[int]string, logger *slog.Logger) episodeAssignResult {
 	if env == nil || len(env.Episodes) == 0 {
 		return episodeAssignResult{}
 	}
 
-	titleFiles, err := scanTitleFiles(dir)
-	if err != nil {
-		if logger != nil {
-			logger.Warn("failed to scan rip directory for episode mapping",
-				"dir", dir,
-				"error", err,
-				"event_type", "rip_dir_scan_failed",
-				"error_hint", "check staging directory permissions",
-			)
+	if titleFiles == nil {
+		scanned, err := scanTitleFiles(dir)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("failed to scan rip directory for episode mapping",
+					"dir", dir,
+					"error", err,
+					"event_type", "rip_dir_scan_failed",
+					"error_hint", "check staging directory permissions",
+				)
+			}
+			return episodeAssignResult{}
 		}
-		return episodeAssignResult{}
+		titleFiles = scanned
 	}
 
 	var result episodeAssignResult
@@ -103,10 +108,13 @@ func parseTitleID(name string) (int, bool) {
 }
 
 // cacheHasAllEpisodeFiles checks that every episode's TitleID has a
-// corresponding MKV file in dir. Returns a list of missing episode keys.
-func cacheHasAllEpisodeFiles(env *ripspec.Envelope, dir string) []string {
+// corresponding MKV file in dir. It returns the scanned title-file map (so
+// callers can thread it into assignEpisodeAssets and avoid a second scan) and
+// a list of missing episode keys. On scan error, titleFiles is nil and every
+// episode is reported as missing.
+func cacheHasAllEpisodeFiles(env *ripspec.Envelope, dir string) (map[int]string, []string) {
 	if env == nil || len(env.Episodes) == 0 {
-		return nil
+		return nil, nil
 	}
 	titleFiles, err := scanTitleFiles(dir)
 	if err != nil {
@@ -114,7 +122,7 @@ func cacheHasAllEpisodeFiles(env *ripspec.Envelope, dir string) []string {
 		for i, ep := range env.Episodes {
 			missing[i] = ep.Key
 		}
-		return missing
+		return nil, missing
 	}
 	var missing []string
 	for _, ep := range env.Episodes {
@@ -126,5 +134,5 @@ func cacheHasAllEpisodeFiles(env *ripspec.Envelope, dir string) []string {
 			missing = append(missing, ep.Key)
 		}
 	}
-	return missing
+	return titleFiles, missing
 }

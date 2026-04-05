@@ -77,7 +77,7 @@ func TestAssignEpisodeAssets(t *testing.T) {
 		},
 	}
 
-	result := assignEpisodeAssets(env, dir, testLogger())
+	result := assignEpisodeAssets(env, dir, nil, testLogger())
 
 	if result.Assigned != 3 {
 		t.Fatalf("expected 3 assigned, got %d", result.Assigned)
@@ -111,7 +111,7 @@ func TestAssignEpisodeAssets_Partial(t *testing.T) {
 		},
 	}
 
-	result := assignEpisodeAssets(env, dir, testLogger())
+	result := assignEpisodeAssets(env, dir, nil, testLogger())
 
 	if result.Assigned != 1 {
 		t.Fatalf("expected 1 assigned, got %d", result.Assigned)
@@ -130,7 +130,7 @@ func TestAssignEpisodeAssets_Empty(t *testing.T) {
 		},
 	}
 
-	result := assignEpisodeAssets(env, dir, testLogger())
+	result := assignEpisodeAssets(env, dir, nil, testLogger())
 
 	if result.Assigned != 0 {
 		t.Fatalf("expected 0 assigned, got %d", result.Assigned)
@@ -155,9 +155,12 @@ func TestCacheHasAllEpisodeFiles(t *testing.T) {
 		},
 	}
 
-	missing := cacheHasAllEpisodeFiles(env, dir)
+	titleFiles, missing := cacheHasAllEpisodeFiles(env, dir)
 	if len(missing) != 0 {
 		t.Fatalf("expected no missing, got %v", missing)
+	}
+	if len(titleFiles) != 2 {
+		t.Fatalf("expected 2 title files, got %d", len(titleFiles))
 	}
 }
 
@@ -174,8 +177,11 @@ func TestCacheHasAllEpisodeFiles_Missing(t *testing.T) {
 		},
 	}
 
-	missing := cacheHasAllEpisodeFiles(env, dir)
+	titleFiles, missing := cacheHasAllEpisodeFiles(env, dir)
 	if len(missing) != 1 || missing[0] != "s01_002" {
 		t.Fatalf("expected missing=[s01_002], got %v", missing)
+	}
+	if len(titleFiles) != 1 {
+		t.Fatalf("expected 1 title file, got %d", len(titleFiles))
 	}
 }

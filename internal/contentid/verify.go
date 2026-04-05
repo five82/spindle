@@ -1,14 +1,13 @@
 package contentid
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/five82/spindle/internal/llm"
+	"github.com/five82/spindle/internal/srtutil"
 )
 
 const (
@@ -149,23 +148,17 @@ Target episode: %d
 %s`, episodeKey, targetEpisode, whisperXText, referenceText)
 }
 
-type srtCue struct {
-	start float64
-	end   float64
-	text  string
-}
-
 func extractMiddleTranscript(srtPath string) (string, error) {
-	cues, err := parseSRTCues(srtPath)
+	cues, err := srtutil.ParseFile(srtPath)
 	if err != nil {
 		return "", err
 	}
 	if len(cues) == 0 {
 		return "", fmt.Errorf("no subtitle cues found")
 	}
-	total := cues[len(cues)-1].end
+	total := cues[len(cues)-1].End
 	mid := total / 2
-	start := maxFloat(0, mid-middleWindowHalfSec)
+	start := max(0, mid-middleWindowHalfSec)
 	end := mid + middleWindowHalfSec
 	if total < 2*middleWindowHalfSec {
 		start = 0
@@ -173,13 +166,14 @@ func extractMiddleTranscript(srtPath string) (string, error) {
 	}
 	var sb strings.Builder
 	for _, cue := range cues {
-		if cue.end < start || cue.start > end {
+		if cue.End < start || cue.Start > end {
 			continue
 		}
+		text := strings.ReplaceAll(cue.Text, "\n", " ")
 		if sb.Len() > 0 {
 			sb.WriteByte(' ')
 		}
-		sb.WriteString(cue.text)
+		sb.WriteString(text)
 		if sb.Len() >= maxTranscriptChars {
 			break
 		}
@@ -195,57 +189,3 @@ func extractMiddleTranscript(srtPath string) (string, error) {
 	return text, nil
 }
 
-func parseSRTCues(path string) ([]srtCue, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	var cues []srtCue
-	scanner := bufio.NewScanner(f)
-	var current *srtCue
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			if current != nil && current.text != "" {
-				cues = append(cues, *current)
-			}
-			current = nil
-			continue
-		}
-		if isDigitsOnly(line) {
-			continue
-		}
-		if parts := strings.Split(line, "-->"); len(parts) == 2 {
-			current = &srtCue{start: parseSRTTime(strings.TrimSpace(parts[0])), end: parseSRTTime(strings.TrimSpace(parts[1]))}
-			continue
-		}
-		if current == nil {
-			continue
-		}
-		if current.text != "" {
-			current.text += " "
-		}
-		current.text += line
-	}
-	if current != nil && current.text != "" {
-		cues = append(cues, *current)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return cues, nil
-}
-
-func parseSRTTime(s string) float64 {
-	var h, m, sec, ms int
-	_, _ = fmt.Sscanf(s, "%d:%d:%d,%d", &h, &m, &sec, &ms)
-	return float64(h*3600+m*60+sec) + float64(ms)/1000
-}
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
-}

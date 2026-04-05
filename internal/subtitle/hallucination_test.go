@@ -3,6 +3,8 @@ package subtitle
 import (
 	"strings"
 	"testing"
+
+	"github.com/five82/spindle/internal/srtutil"
 )
 
 func TestParseSRT_Basic(t *testing.T) {
@@ -14,7 +16,7 @@ Hello world
 00:00:05,000 --> 00:00:07,000
 Second cue
 `
-	cues := parseSRT(content)
+	cues := srtutil.Parse(content)
 	if len(cues) != 2 {
 		t.Fatalf("expected 2 cues, got %d", len(cues))
 	}
@@ -33,12 +35,12 @@ Second cue
 }
 
 func TestFormatSRT_Roundtrip(t *testing.T) {
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 1.0, End: 3.0, Text: "Hello"},
 		{Index: 2, Start: 5.5, End: 7.5, Text: "World"},
 	}
-	output := formatSRT(cues)
-	reparsed := parseSRT(output)
+	output := srtutil.Format(cues)
+	reparsed := srtutil.Parse(output)
 	if len(reparsed) != 2 {
 		t.Fatalf("roundtrip produced %d cues, want 2", len(reparsed))
 	}
@@ -67,7 +69,7 @@ func TestNormalizeText(t *testing.T) {
 
 func TestRemoveIsolatedHallucinations_RepeatedPhrase(t *testing.T) {
 	// 4 consecutive "thank you" cues with >10s gaps between each.
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Thank you"},
 		{Index: 2, Start: 25, End: 27, Text: "Thank you"},
 		{Index: 3, Start: 40, End: 42, Text: "Thank you"},
@@ -81,7 +83,7 @@ func TestRemoveIsolatedHallucinations_RepeatedPhrase(t *testing.T) {
 
 func TestRemoveIsolatedHallucinations_PreservesCloseRepeats(t *testing.T) {
 	// Repeated text but gaps <= 10s: should be preserved.
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Thank you"},
 		{Index: 2, Start: 15, End: 17, Text: "Thank you"},
 		{Index: 3, Start: 20, End: 22, Text: "Thank you"},
@@ -94,7 +96,7 @@ func TestRemoveIsolatedHallucinations_PreservesCloseRepeats(t *testing.T) {
 
 func TestRemoveIsolatedHallucinations_KnownPhrase(t *testing.T) {
 	// Isolated known phrase with >= 30s gaps on both sides.
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Normal dialogue"},
 		{Index: 2, Start: 50, End: 52, Text: "Thank you"},
 		{Index: 3, Start: 90, End: 92, Text: "More dialogue"},
@@ -110,7 +112,7 @@ func TestRemoveIsolatedHallucinations_KnownPhrase(t *testing.T) {
 
 func TestRemoveIsolatedHallucinations_PreservesNonIsolated(t *testing.T) {
 	// Known phrase but gaps < 30s: should be preserved.
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Normal"},
 		{Index: 2, Start: 20, End: 22, Text: "Thank you"},
 		{Index: 3, Start: 30, End: 32, Text: "More"},
@@ -123,7 +125,7 @@ func TestRemoveIsolatedHallucinations_PreservesNonIsolated(t *testing.T) {
 
 func TestRemoveIsolatedHallucinations_MusicPattern(t *testing.T) {
 	// Isolated music symbol cue.
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Normal"},
 		{Index: 2, Start: 50, End: 52, Text: "\u266A \u266B"},
 		{Index: 3, Start: 90, End: 92, Text: "More"},
@@ -135,7 +137,7 @@ func TestRemoveIsolatedHallucinations_MusicPattern(t *testing.T) {
 }
 
 func TestSweepTrailingHallucinations_RemovesInLast300s(t *testing.T) {
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 100, End: 102, Text: "Dialogue"},
 		{Index: 2, Start: 500, End: 502, Text: "More dialogue"},
 		{Index: 3, Start: 550, End: 552, Text: "Thank you"},
@@ -149,7 +151,7 @@ func TestSweepTrailingHallucinations_RemovesInLast300s(t *testing.T) {
 }
 
 func TestSweepTrailingHallucinations_ShortVideoSkipped(t *testing.T) {
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Thank you"},
 	}
 	result := sweepTrailingHallucinations(cues, 300)
@@ -181,7 +183,7 @@ Goodbye
 		t.Fatalf("filterWhisperXOutput: %v", err)
 	}
 
-	cues := parseSRT(result)
+	cues := srtutil.Parse(result)
 	if len(cues) != 3 {
 		t.Fatalf("expected 3 cues after filtering, got %d", len(cues))
 	}
@@ -224,13 +226,13 @@ func TestFilterWhisperXOutput_EmptyInput(t *testing.T) {
 func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 	tests := []struct {
 		name     string
-		cues     []srtCue
+		cues     []srtutil.Cue
 		wantLen  int
 		wantText []string // expected surviving cue texts
 	}{
 		{
 			name: "rule1_gap_exactly_10s_preserved",
-			cues: []srtCue{
+			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Thank you"},
 				{Index: 2, Start: 22, End: 24, Text: "Thank you"}, // gap = 10.0
 				{Index: 3, Start: 34, End: 36, Text: "Thank you"}, // gap = 10.0
@@ -240,7 +242,7 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 		},
 		{
 			name: "rule1_gap_just_over_10s_removed",
-			cues: []srtCue{
+			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Thank you"},
 				{Index: 2, Start: 22.001, End: 24, Text: "Thank you"}, // gap = 10.001
 				{Index: 3, Start: 34.002, End: 36, Text: "Thank you"}, // gap = 10.002
@@ -249,7 +251,7 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 		},
 		{
 			name: "rule2_gap_exactly_30s_removed",
-			cues: []srtCue{
+			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Normal"},
 				{Index: 2, Start: 42, End: 44, Text: "Thank you"}, // gap before = 30.0
 				{Index: 3, Start: 74, End: 76, Text: "More"},       // gap after = 30.0
@@ -259,7 +261,7 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 		},
 		{
 			name: "rule2_gap_just_under_30s_preserved",
-			cues: []srtCue{
+			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Normal"},
 				{Index: 2, Start: 41.999, End: 44, Text: "Thank you"}, // gap before = 29.999
 				{Index: 3, Start: 74, End: 76, Text: "More"},
@@ -269,7 +271,7 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 		},
 		{
 			name: "rule3_music_gap_exactly_30s_removed",
-			cues: []srtCue{
+			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Normal"},
 				{Index: 2, Start: 42, End: 44, Text: "\u266A"},  // gap before = 30.0
 				{Index: 3, Start: 74, End: 76, Text: "More"},    // gap after = 30.0
@@ -297,7 +299,7 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 func TestRemoveIsolatedHallucinations_RuleInteraction(t *testing.T) {
 	// Rule 1 removes repeated "thank you" cues, compaction changes gaps,
 	// then Rule 2 removes "bye" which is now isolated by >= 30s.
-	cues := []srtCue{
+	cues := []srtutil.Cue{
 		{Index: 1, Start: 0, End: 2, Text: "Dialogue one"},
 		{Index: 2, Start: 15, End: 17, Text: "Thank you"},  // repeated run start
 		{Index: 3, Start: 30, End: 32, Text: "Thank you"},  // gap = 13
@@ -326,14 +328,14 @@ func TestRemoveIsolatedHallucinations_RuleInteraction(t *testing.T) {
 func TestRemoveIsolatedHallucinations_MultiLineCue(t *testing.T) {
 	tests := []struct {
 		name     string
-		cues     []srtCue
+		cues     []srtutil.Cue
 		wantLen  int
 		wantText []string
 	}{
 		{
 			name: "multiline_known_phrase_not_matched",
 			// "Thank you\nso much" normalizes to "thank you so much" - not in known phrases.
-			cues: []srtCue{
+			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Normal"},
 				{Index: 2, Start: 50, End: 52, Text: "Thank you\nso much"},
 				{Index: 3, Start: 90, End: 92, Text: "More"},
@@ -344,7 +346,7 @@ func TestRemoveIsolatedHallucinations_MultiLineCue(t *testing.T) {
 		{
 			name: "multiline_first_line_is_known_phrase",
 			// Full normalized text "thank you for everything" is not in the map.
-			cues: []srtCue{
+			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Normal"},
 				{Index: 2, Start: 50, End: 52, Text: "Thank you\nfor everything"},
 				{Index: 3, Start: 90, End: 92, Text: "More"},
@@ -355,7 +357,7 @@ func TestRemoveIsolatedHallucinations_MultiLineCue(t *testing.T) {
 		{
 			name: "single_word_known_phrase_removed",
 			// "You" normalizes to "you" which IS in known phrases.
-			cues: []srtCue{
+			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Normal"},
 				{Index: 2, Start: 50, End: 52, Text: "You"},
 				{Index: 3, Start: 90, End: 92, Text: "More"},
@@ -380,18 +382,3 @@ func TestRemoveIsolatedHallucinations_MultiLineCue(t *testing.T) {
 	}
 }
 
-func TestParseTimestamp(t *testing.T) {
-	got := parseTimestamp("01", "23", "45", "678")
-	want := 1*3600 + 23*60 + 45 + 0.678
-	if got != want {
-		t.Errorf("parseTimestamp = %f, want %f", got, want)
-	}
-}
-
-func TestFormatTimestamp(t *testing.T) {
-	got := formatTimestamp(3723.456)
-	want := "01:02:03,456"
-	if got != want {
-		t.Errorf("formatTimestamp = %q, want %q", got, want)
-	}
-}

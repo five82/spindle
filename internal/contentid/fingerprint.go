@@ -1,13 +1,13 @@
 package contentid
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/five82/spindle/internal/opensubtitles"
+	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/textutil"
 )
 
@@ -46,39 +46,14 @@ type matchResult struct {
 	SubtitlePath         string
 }
 
-var srtTimestampRe = regexp.MustCompile(`^\d{2}:\d{2}:\d{2},\d{3}\s*-->`)
-
-// readSRTText reads an SRT file and extracts only the text lines,
-// skipping sequence numbers, timestamps, and empty lines.
+// readSRTText reads an SRT file and returns the concatenated cue text,
+// suitable for TF-IDF fingerprinting. Returns "" on I/O error.
 func readSRTText(path string) string {
-	f, err := os.Open(path)
+	cues, err := srtutil.ParseFile(path)
 	if err != nil {
 		return ""
 	}
-	defer func() { _ = f.Close() }()
-
-	var sb strings.Builder
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || isDigitsOnly(line) || srtTimestampRe.MatchString(line) {
-			continue
-		}
-		if sb.Len() > 0 {
-			sb.WriteByte(' ')
-		}
-		sb.WriteString(line)
-	}
-	return sb.String()
-}
-
-func isDigitsOnly(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
+	return srtutil.PlainText(cues)
 }
 
 func loadPlainText(path string) (string, error) {
@@ -91,37 +66,20 @@ func loadPlainText(path string) (string, error) {
 
 func normalizeSubtitlePayload(content string) (string, error) {
 	cleaned := opensubtitles.CleanSRT(content)
-	trimmed := strings.TrimSpace(extractPlainText(cleaned))
+	trimmed := strings.TrimSpace(srtutil.PlainText(srtutil.Parse(cleaned)))
 	if trimmed == "" {
 		return "", fmt.Errorf("subtitle payload contained no text")
 	}
 	return trimmed, nil
 }
 
-func extractPlainText(content string) string {
-	var sb strings.Builder
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || isDigitsOnly(line) || srtTimestampRe.MatchString(line) {
-			continue
-		}
-		if sb.Len() > 0 {
-			sb.WriteByte(' ')
-		}
-		sb.WriteString(line)
-	}
-	return sb.String()
-}
-
+// cloneRipFingerprints and cloneReferenceFingerprints return shallow copies so
+// each strategy attempt can safely reapply IDF weighting via applyIDFWeighting
+// without leaking weights from one strategy into the next.
 func cloneRipFingerprints(in []ripFingerprint) []ripFingerprint {
-	out := make([]ripFingerprint, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }
 
 func cloneReferenceFingerprints(in []referenceFingerprint) []referenceFingerprint {
-	out := make([]referenceFingerprint, len(in))
-	copy(out, in)
-	return out
+	return slices.Clone(in)
 }

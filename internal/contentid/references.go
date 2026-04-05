@@ -14,6 +14,12 @@ import (
 	"github.com/five82/spindle/internal/tmdb"
 )
 
+// fetchReferenceFingerprints fetches OpenSubtitles reference subtitles for the
+// requested episodes. The loop is intentionally sequential: the shared
+// opensubtitles.Client enforces a 3 s floor between requests via an
+// unsynchronized lastCall field, so parallel calls would either race on that
+// field or — if a mutex were added — serialize back to the same wall-clock
+// latency as this loop. Keep it sequential.
 func (h *Handler) fetchReferenceFingerprints(
 	ctx context.Context,
 	item *queue.Item,

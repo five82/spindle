@@ -2,6 +2,8 @@ package subtitle
 
 import (
 	"os"
+
+	"github.com/five82/spindle/internal/srtutil"
 )
 
 // ValidateSRTContent checks SRT content for quality issues. Returns a list of
@@ -13,7 +15,7 @@ func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) 
 		return nil, err
 	}
 
-	cues := parseSRT(string(content))
+	cues := srtutil.Parse(string(content))
 	var issues []string
 
 	// Check: no cues at all.

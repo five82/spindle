@@ -8,6 +8,39 @@ import (
 	"github.com/five82/spindle/internal/textutil"
 )
 
+// buildHungarianMatrices builds a square (size × size) cost matrix padded with
+// padCost outside the live (n × m) region, together with a parallel scores
+// matrix. score(i, j) is called for i < n && j < m and must return a cosine
+// similarity in [0, 1]; non-positive scores leave the cell at padCost.
+func buildHungarianMatrices(n, m int, score func(i, j int) float64) (cost, scores [][]float64) {
+	const padCost = 2.0
+	size := max(n, m)
+	cost = make([][]float64, size)
+	scores = make([][]float64, size)
+	for i := 0; i < size; i++ {
+		cost[i] = make([]float64, size)
+		scores[i] = make([]float64, size)
+		for j := 0; j < size; j++ {
+			cost[i][j] = padCost
+		}
+	}
+	for i := 0; i < n; i++ {
+		for j := 0; j < m; j++ {
+			s := score(i, j)
+			scores[i][j] = s
+			if s <= 0 {
+				continue
+			}
+			c := 1.0 - s
+			if c < 0 {
+				c = 0
+			}
+			cost[i][j] = c
+		}
+	}
+	return cost, scores
+}
+
 type anchorSelection struct {
 	RipIndex        int
 	TargetEpisode   int
@@ -20,11 +53,6 @@ type anchorSelection struct {
 }
 
 type blockRefinement struct {
-	BlockStart   int
-	BlockEnd     int
-	Displaced    int
-	Gaps         int
-	Reassigned   int
 	NeedsReview  bool
 	ReviewReason string
 }
@@ -132,33 +160,11 @@ func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint, m
 	}
 	n := len(rips)
 	m := len(refs)
-	size := maxInt(n, m)
-	const padCost = 2.0
-	cost := make([][]float64, size)
-	scores := make([][]float64, size)
-	for i := 0; i < size; i++ {
-		cost[i] = make([]float64, size)
-		scores[i] = make([]float64, size)
-		for j := 0; j < size; j++ {
-			cost[i][j] = padCost
-		}
-	}
-	for i, rip := range rips {
-		for j, ref := range refs {
-			score := textSimilarity(rip.Vector, ref.Vector)
-			scores[i][j] = score
-			if score <= 0 {
-				continue
-			}
-			c := 1.0 - score
-			if c < 0 {
-				c = 0
-			}
-			cost[i][j] = c
-		}
-	}
+	cost, scores := buildHungarianMatrices(n, m, func(i, j int) float64 {
+		return textSimilarity(rips[i].Vector, refs[j].Vector)
+	})
 	assign := hungarian(cost)
-	results := make([]matchResult, 0, minInt(len(rips), len(refs)))
+	results := make([]matchResult, 0, min(len(rips), len(refs)))
 	for i, j := range assign {
 		if i >= n || j < 0 || j >= m {
 			continue
@@ -357,8 +363,6 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 	if blockStart < 1 {
 		blockStart = 1
 	}
-	info.BlockStart = blockStart
-	info.BlockEnd = blockEnd
 	var valid, displaced []matchResult
 	for _, m := range matches {
 		if m.TargetEpisode >= blockStart && m.TargetEpisode <= blockEnd {
@@ -370,7 +374,6 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 	if len(displaced) == 0 {
 		return matches, info
 	}
-	info.Displaced = len(displaced)
 	validSet := make(map[int]struct{}, len(valid))
 	for _, m := range valid {
 		validSet[m.TargetEpisode] = struct{}{}
@@ -381,7 +384,6 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 			gaps = append(gaps, ep)
 		}
 	}
-	info.Gaps = len(gaps)
 	if len(gaps) == 0 {
 		info.NeedsReview = true
 		info.ReviewReason = "displaced matches with no gaps in block"
@@ -399,33 +401,16 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 	for i := range rips {
 		ripByKey[rips[i].EpisodeKey] = &rips[i]
 	}
-	reassigned := make([]matchResult, 0, minInt(len(displaced), len(gaps)))
+	reassigned := make([]matchResult, 0, min(len(displaced), len(gaps)))
 	if len(gaps) > 0 && len(displaced) > 0 {
-		n := maxInt(len(displaced), len(gaps))
-		cost := make([][]float64, n)
-		scoreMatrix := make([][]float64, n)
-		const padCost = 2.0
-		for i := 0; i < n; i++ {
-			cost[i] = make([]float64, n)
-			scoreMatrix[i] = make([]float64, n)
-			for j := 0; j < n; j++ {
-				cost[i][j] = padCost
-			}
-		}
-		for i := range displaced {
+		cost, scoreMatrix := buildHungarianMatrices(len(displaced), len(gaps), func(i, j int) float64 {
 			rip := ripByKey[displaced[i].EpisodeKey]
-			for j := range gaps {
-				ref := refByEp[gaps[j]]
-				var score float64
-				if rip != nil && rip.Vector != nil && ref != nil && ref.Vector != nil {
-					score = textSimilarity(rip.Vector, ref.Vector)
-				}
-				scoreMatrix[i][j] = score
-				if score > 0 {
-					cost[i][j] = 1.0 - score
-				}
+			ref := refByEp[gaps[j]]
+			if rip == nil || rip.Vector == nil || ref == nil || ref.Vector == nil {
+				return 0
 			}
-		}
+			return textSimilarity(rip.Vector, ref.Vector)
+		})
 		assign := hungarian(cost)
 		for i, j := range assign {
 			if i >= len(displaced) || j < 0 || j >= len(gaps) {
@@ -442,7 +427,6 @@ func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips [
 			reassigned = append(reassigned, m)
 		}
 	}
-	info.Reassigned = len(reassigned)
 	result := make([]matchResult, 0, len(valid)+len(reassigned))
 	result = append(result, valid...)
 	result = append(result, reassigned...)
@@ -517,16 +501,3 @@ func textSimilarity(a, b *textutil.Fingerprint) float64 {
 	return textutil.CosineSimilarity(a, b)
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

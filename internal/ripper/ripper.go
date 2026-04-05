@@ -71,10 +71,15 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Check rip cache first.
 	if h.cache != nil && item.DiscFingerprint != "" {
 		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(item, "Restoring from cache...")); err == nil && meta != nil {
-			// TV: verify all episode files are present in cache.
+			// TV: verify all episode files are present in cache. The scan
+			// result is reused below via mapAndValidateAssets to avoid a
+			// second ReadDir on the same directory.
 			cacheUsable := true
+			var cachedTitleFiles map[int]string
 			if len(env.Episodes) > 0 {
-				if missing := cacheHasAllEpisodeFiles(&env, rippedDir); len(missing) > 0 {
+				files, missing := cacheHasAllEpisodeFiles(&env, rippedDir)
+				cachedTitleFiles = files
+				if len(missing) > 0 {
 					cacheUsable = false
 					logger.Info("rip cache incomplete",
 						"decision_type", logs.DecisionRipCache,
@@ -102,7 +107,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 					)
 				}
 				// Map cached files to assets via title ID parsing.
-				if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir); err != nil {
+				if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir, cachedTitleFiles); err != nil {
 					return err
 				}
 				// Restore titles from cached envelope when identification
@@ -290,7 +295,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	item.ActiveEpisodeKey = ""
 
 	// Map ripped files to assets and validate.
-	if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir); err != nil {
+	if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir, nil); err != nil {
 		return err
 	}
 
@@ -455,15 +460,17 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 
 // mapAndValidateAssets maps ripped files to envelope assets and validates them.
 // For TV content, uses title ID parsing from filenames. For movies, scans the
-// directory for the first MKV. Validates all mapped assets with ffprobe.
-func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger, env *ripspec.Envelope, item *queue.Item, dir string) error {
+// directory for the first MKV. Validates all mapped assets with ffprobe. When
+// titleFiles is non-nil, it is used as a pre-scanned view of dir (set by the
+// rip-cache hit path to avoid rescanning).
+func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger, env *ripspec.Envelope, item *queue.Item, dir string, titleFiles map[int]string) error {
 	if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
 		logger.Info("asset mapping strategy selected",
 			"decision_type", logs.DecisionAssetMapping,
 			"decision_result", "title_id_scan",
 			"decision_reason", fmt.Sprintf("media_type=%s episodes=%d", env.Metadata.MediaType, len(env.Episodes)),
 		)
-		result := assignEpisodeAssets(env, dir, logger)
+		result := assignEpisodeAssets(env, dir, titleFiles, logger)
 		if result.Assigned == 0 {
 			return fmt.Errorf("episode asset mapping: zero matches (expected %d episodes)", len(env.Episodes))
 		}

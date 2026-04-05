@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/srtutil"
 )
 
 // Service provides WhisperX transcription with caching.
@@ -306,44 +307,13 @@ func analyzeSRT(path string) (segments int, duration float64, err error) {
 		if len(lines) >= 2 {
 			if idx := strings.Index(lines[1], "-->"); idx >= 0 {
 				endPart := strings.TrimSpace(lines[1][idx+3:])
-				if secs := parseSRTTimestamp(endPart); secs > 0 {
+				if secs := srtutil.ParseTimestamp(endPart); secs > 0 {
 					duration = secs
 				}
 			}
 		}
 	}
 	return segments, duration, nil
-}
-
-// parseSRTTimestamp parses "HH:MM:SS,mmm" into seconds.
-func parseSRTTimestamp(s string) float64 {
-	s = strings.TrimSpace(s)
-	// Expected format: "01:38:12,456"
-	parts := strings.SplitN(s, ":", 3)
-	if len(parts) != 3 {
-		return 0
-	}
-	hours, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0
-	}
-	minutes, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return 0
-	}
-	secParts := strings.SplitN(parts[2], ",", 2)
-	if len(secParts) != 2 {
-		return 0
-	}
-	secs, err := strconv.Atoi(secParts[0])
-	if err != nil {
-		return 0
-	}
-	millis, err := strconv.Atoi(secParts[1])
-	if err != nil {
-		return 0
-	}
-	return float64(hours)*3600 + float64(minutes)*60 + float64(secs) + float64(millis)/1000
 }
 
 // Config returns the service's WhisperX configuration for display purposes.

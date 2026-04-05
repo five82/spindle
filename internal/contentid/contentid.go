@@ -78,13 +78,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger.Info("episode identification stage started", "event_type", "stage_start", "stage", "episode_identification")
 
 	if h.transcriber == nil || h.osClient == nil || h.tmdbClient == nil {
-		env.Attributes.ContentID = &ripspec.ContentIDSummary{
-			Method:               "whisperx_tfidf_hungarian",
-			ReferenceSource:      "opensubtitles",
-			ReviewThreshold:      h.policy.LowConfidenceReviewThreshold,
-			EpisodesSynchronized: false,
-			Completed:            false,
-		}
+		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
 		item.AppendReviewReason("Episode ID: content matcher unavailable")
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
@@ -106,13 +100,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return fmt.Errorf("episode identification tmdb season acquisition: %w", err)
 	}
 	if season == nil || len(season.Episodes) == 0 {
-		env.Attributes.ContentID = &ripspec.ContentIDSummary{
-			Method:               "whisperx_tfidf_hungarian",
-			ReferenceSource:      "opensubtitles",
-			ReviewThreshold:      h.policy.LowConfidenceReviewThreshold,
-			EpisodesSynchronized: false,
-			Completed:            false,
-		}
+		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
 		item.AppendReviewReason("Episode ID: TMDB season contains no episodes")
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
@@ -135,14 +123,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"error_hint", "all transcriptions produced empty fingerprints",
 			"impact", "episodes remain unresolved",
 		)
-		env.Attributes.ContentID = &ripspec.ContentIDSummary{
-			Method:               "whisperx_tfidf_hungarian",
-			ReferenceSource:      "opensubtitles",
-			TranscribedEpisodes:  0,
-			ReviewThreshold:      h.policy.LowConfidenceReviewThreshold,
-			EpisodesSynchronized: false,
-			Completed:            false,
-		}
+		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
 		item.AppendReviewReason("Episode ID: no valid transcriptions")
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
@@ -196,15 +177,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	attempts := buildStrategyAttempts(plan, selectedAnchor, hasAnchor, allSeasonEpisodes)
 	if len(attempts) == 0 {
 		item.AppendReviewReason("Episode ID: no candidate strategies available")
-		env.Attributes.ContentID = &ripspec.ContentIDSummary{
-			Method:               "whisperx_tfidf_hungarian",
-			ReferenceSource:      "opensubtitles",
-			TranscribedEpisodes:  len(ripPrints),
-			ReferenceEpisodes:    len(allSeasonRefs),
-			ReviewThreshold:      h.policy.LowConfidenceReviewThreshold,
-			EpisodesSynchronized: false,
-			Completed:            false,
-		}
+		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, len(ripPrints), len(allSeasonRefs))
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
 		}
@@ -230,15 +203,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	matches := selected.Matches
 	refinement := selected.Refinement
 	if len(matches) == 0 {
-		env.Attributes.ContentID = &ripspec.ContentIDSummary{
-			Method:               "whisperx_tfidf_hungarian",
-			ReferenceSource:      "opensubtitles",
-			TranscribedEpisodes:  len(ripPrints),
-			ReferenceEpisodes:    len(selected.References),
-			ReviewThreshold:      h.policy.LowConfidenceReviewThreshold,
-			EpisodesSynchronized: false,
-			Completed:            false,
-		}
+		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, len(ripPrints), len(selected.References))
 		item.AppendReviewReason("Episode ID: no reference subtitles found")
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
@@ -277,7 +242,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.Item, env *ripspec.Envelope) ([]ripFingerprint, error) {
 	logger := stage.LoggerFromContext(ctx)
-	episodeCount := maxInt(len(env.Episodes), 1)
+	episodeCount := max(len(env.Episodes), 1)
 	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
 		return nil, err
@@ -401,6 +366,21 @@ func mergeReferences(existing, additional []referenceFingerprint) []referenceFin
 		out = append(out, merged[ep])
 	}
 	return out
+}
+
+// newDegradedContentIDSummary builds a ContentIDSummary for failure/early-exit
+// paths where episode identification did not complete. Callers pass whatever
+// counts they have so far (0 when nothing has happened yet).
+func newDegradedContentIDSummary(policy Policy, transcribed, references int) *ripspec.ContentIDSummary {
+	return &ripspec.ContentIDSummary{
+		Method:               "whisperx_tfidf_hungarian",
+		ReferenceSource:      "opensubtitles",
+		ReviewThreshold:      policy.LowConfidenceReviewThreshold,
+		TranscribedEpisodes:  transcribed,
+		ReferenceEpisodes:    references,
+		EpisodesSynchronized: false,
+		Completed:            false,
+	}
 }
 
 func buildContentIDSummary(env *ripspec.Envelope, matches []matchResult, transcribedCount, referenceCount int, reviewThreshold float64) *ripspec.ContentIDSummary {

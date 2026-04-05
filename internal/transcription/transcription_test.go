@@ -169,25 +169,6 @@ func TestAnalyzeSRTEmpty(t *testing.T) {
 	}
 }
 
-func TestParseSRTTimestamp(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected float64
-	}{
-		{"00:00:01,000", 1.0},
-		{"01:38:12,456", 5892.456},
-		{"00:05:30,500", 330.5},
-		{"invalid", 0},
-		{"", 0},
-	}
-	for _, tt := range tests {
-		got := parseSRTTimestamp(tt.input)
-		if got < tt.expected-0.001 || got > tt.expected+0.001 {
-			t.Errorf("parseSRTTimestamp(%q) = %.3f, want %.3f", tt.input, got, tt.expected)
-		}
-	}
-}
-
 func TestLookupMiss(t *testing.T) {
 	dir := t.TempDir()
 	svc := New("large-v3", false, "silero", "", dir, nil)
