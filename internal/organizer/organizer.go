@@ -162,8 +162,8 @@ func destFilename(meta *queue.Metadata, key, ext string) string {
 	}
 
 	// For TV, build a per-episode filename from the key.
-	// Parse season/episode from the key (format: "s01e03").
-	season, episode := parseEpisodeKey(key)
+	// Parse season/episode from the key (format: "s01e03" or "s01e01-e02").
+	season, episode, episodeEnd := parseEpisodeKey(key)
 	if season > 0 && episode > 0 {
 		// Build per-episode metadata to get the correct filename.
 		epMeta := queue.Metadata{
@@ -171,9 +171,7 @@ func destFilename(meta *queue.Metadata, key, ext string) string {
 			ShowTitle:    meta.ShowTitle,
 			MediaType:    "tv",
 			SeasonNumber: meta.SeasonNumber,
-			Episodes: []queue.MetadataEpisode{
-				{Season: season, Episode: episode},
-			},
+			Episodes:     []queue.MetadataEpisode{{Season: season, Episode: episode, EpisodeEnd: episodeEnd}},
 			DisplayTitle: meta.DisplayTitle,
 		}
 		return textutil.SanitizeDisplayName(epMeta.GetFilename()) + ext
@@ -187,14 +185,17 @@ func destFilename(meta *queue.Metadata, key, ext string) string {
 	return textutil.SanitizeDisplayName(show+" - "+key) + ext
 }
 
-// parseEpisodeKey extracts season and episode numbers from a key like "s01e03".
-// Returns (0, 0) if the key does not match the expected format.
-func parseEpisodeKey(key string) (season, episode int) {
-	_, err := fmt.Sscanf(strings.ToLower(key), "s%02de%02d", &season, &episode)
-	if err != nil {
-		return 0, 0
+// parseEpisodeKey extracts season and episode numbers from a key like "s01e03"
+// or "s01e01-e02". Returns zeros if the key does not match the expected format.
+func parseEpisodeKey(key string) (season, episode, episodeEnd int) {
+	lower := strings.ToLower(key)
+	if _, err := fmt.Sscanf(lower, "s%02de%02d-e%02d", &season, &episode, &episodeEnd); err == nil {
+		return season, episode, episodeEnd
 	}
-	return season, episode
+	if _, err := fmt.Sscanf(lower, "s%02de%02d", &season, &episode); err == nil {
+		return season, episode, 0
+	}
+	return 0, 0, 0
 }
 
 func resolveSourceStage(env *ripspec.Envelope, keys []string) (string, bool) {

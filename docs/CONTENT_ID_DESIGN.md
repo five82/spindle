@@ -170,7 +170,13 @@ episode set using the best available information:
 1. **Rip spec episodes**: If the rip spec contains resolved episode numbers
    (`Episode > 0`), use those plus neighboring episodes as candidates.
 2. **Disc block estimate**: If no resolved episodes but a disc number is known,
-   estimate the episode range from disc position and number of rips.
+   estimate the episode range from disc position and number of ripped placeholder assets.
+   Those placeholder assets come from identification-time TV title selection, which keeps
+   the dominant long-form runtime cluster, excludes likely extras, and may preserve a
+   probable double-length title as a single unresolved placeholder asset. For disc 1,
+   a probable opening double-length title increases the block estimate by one represented
+   episode so the matcher can fetch the extra reference episode needed for a later
+   `SxxExx-Eyy` range decision.
 3. **Full season fallback**: When neither is available, use all episodes in the
    season.
 
@@ -397,8 +403,13 @@ All thresholds are hardcoded constants in the `Policy` struct (not user-configur
 After successful matching, the episode ID stage updates the envelope:
 
 1. **Episode resolution**: Each `episodes[]` entry is updated with resolved
-   `episode` number, `episode_title`, and `episode_air_date`. Match confidence
-   scores are stored in `match_confidence`.
+   `episode` number, optional `episode_end` for range assets, `episode_title`,
+   and `episode_air_date`. Match confidence scores are stored in
+   `match_confidence`. The current implementation supports a conservative
+   opening-double inference for disc 1: when the first placeholder title has a
+   probable double-length runtime profile and the resolved single-episode
+   matches form an opening contiguous run, the first entry is promoted to a
+   range key like `s01e01-e02` and later entries are shifted accordingly.
 2. **Episode review flags**: Low-confidence or unresolved matches mark the
    specific `episodes[]` entry with `needs_review=true` and a `review_reason`.
    Queue-level `needs_review` is also set as an aggregate signal when any

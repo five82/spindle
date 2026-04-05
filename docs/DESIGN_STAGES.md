@@ -423,10 +423,11 @@ OpenSubtitles references.
 
 See `CONTENT_ID_DESIGN.md` for the complete algorithm specification.
 
-**Inputs**: Ripped files with placeholder episode keys, TMDB ID, season number. Each ripped file is probed and episode identification transcribes the selected primary audio stream rather than assuming audio stream 0.
+**Inputs**: Ripped files with placeholder episode keys, TMDB ID, season number. Placeholder keys are created during identification from the TV title-selection result rather than blindly from every title above a minimum duration: identification deduplicates equivalent playlists, keeps the dominant long-form runtime cluster, excludes likely extras, and may preserve a probable double-length title as a single placeholder asset. Each ripped file is probed and episode identification transcribes the selected primary audio stream rather than assuming audio stream 0.
 
 **Outputs**: Updated episode keys in RipSpec envelope with resolved episode
-numbers, confidence scores, and match metadata.
+numbers, optional episode ranges for multi-episode assets, confidence scores,
+and match metadata.
 
 ### 3.1 Skip Decisions
 
@@ -490,7 +491,7 @@ The job planner builds an ordered list of encode jobs from the RipSpec:
 
 1. Parse RipSpec envelope.
 2. For movies: single encoding job (ripped file -> encoded file).
-3. For TV: one encoding job per episode. Each job maps:
+3. For TV: one encoding job per planned episode asset. Most assets represent a single episode; range assets such as `s01e01-e02` still produce one encode job because they correspond to one physical source file. Each job maps:
    - **Source**: the episode's ripped asset path (looked up from `AssetRipped`).
    - **Output**: derived from `Episode.OutputBasename` placed in the encoded
      directory.

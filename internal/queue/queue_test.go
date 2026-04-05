@@ -504,6 +504,14 @@ func TestGetFilenameTV(t *testing.T) {
 		t.Errorf("GetFilename() single = %q, want %q", got, want)
 	}
 
+	// Single asset spanning a range.
+	m.Episodes = []MetadataEpisode{{Season: 1, Episode: 1, EpisodeEnd: 2}}
+	got = m.GetFilename()
+	want = "Breaking Bad - S01E01-E02"
+	if got != want {
+		t.Errorf("GetFilename() range = %q, want %q", got, want)
+	}
+
 	// Multi-episode.
 	m.Episodes = []MetadataEpisode{
 		{Season: 1, Episode: 3},

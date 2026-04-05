@@ -50,8 +50,9 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.Season, discNum
 	}
 
 	totalEpisodes := len(season.Episodes)
+	blockEpisodes := discBlockSize(env.Episodes)
 	if len(set) > 0 && discNumber > 0 && totalEpisodes > 0 {
-		block := discBlockSize(len(env.Episodes))
+		block := blockEpisodes
 		start := (discNumber - 1) * block
 		if start >= totalEpisodes {
 			start = totalEpisodes - block
@@ -71,7 +72,7 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.Season, discNum
 	}
 
 	if len(set) == 0 && discNumber > 0 && totalEpisodes > 0 {
-		block := discBlockSize(len(env.Episodes))
+		block := blockEpisodes
 		plan.PassSize = block * 2
 		estimateStart := (discNumber-1)*block + 1 - block/2
 		if estimateStart < 1 {
@@ -123,11 +124,39 @@ func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.Season, discNum
 	return plan
 }
 
-func discBlockSize(discEpisodes int) int {
+func discBlockSize(episodes []ripspec.Episode) int {
+	discEpisodes := len(episodes)
 	if discEpisodes <= 0 {
 		return 4
 	}
+	if probableOpeningDoubleEpisode(episodes) {
+		return discEpisodes + 1
+	}
 	return discEpisodes
+}
+
+func probableOpeningDoubleEpisode(episodes []ripspec.Episode) bool {
+	if len(episodes) < 3 {
+		return false
+	}
+	first := episodes[0].RuntimeSeconds
+	if first <= 0 {
+		return false
+	}
+	var rest []int
+	for _, ep := range episodes[1:] {
+		if ep.RuntimeSeconds > 0 {
+			rest = append(rest, ep.RuntimeSeconds)
+		}
+	}
+	if len(rest) < 2 {
+		return false
+	}
+	sort.Ints(rest)
+	median := rest[len(rest)/2]
+	minDur := int(float64(median) * 1.8)
+	maxDur := int(float64(median) * 2.4)
+	return first >= minDur && first <= maxDur
 }
 
 func buildEpisodePasses(plan candidateEpisodePlan, season *tmdb.Season, discEpisodes int) [][]int {

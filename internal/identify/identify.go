@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -658,72 +657,73 @@ func (h *Handler) buildEnvelope(
 	return env
 }
 
-// createEpisodePlaceholders adds episode entries for each unique title that
-// meets the minimum title length threshold. Duplicate titles (same segment map
-// or title hash) are skipped -- TV Blu-rays commonly contain multiple playlists
-// for the same episode. Each episode gets a placeholder key (e.g., "s01_001")
-// and is linked to the title's ID for downstream ripping.
+// createEpisodePlaceholders adds episode entries for selected TV titles.
+// Selection is based on minimum duration, duplicate suppression, and runtime
+// clustering that prefers the dominant long-form program group while preserving
+// probable double-length episodes.
 func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.Envelope) {
 	season := env.Metadata.SeasonNumber
 	if season <= 0 {
 		season = 1
 	}
 
-	// Compute median duration of titles passing MinTitleLength for outlier detection.
-	medianDur := medianTitleDuration(env.Titles, h.cfg.MakeMKV.MinTitleLength)
-
-	seen := make(map[string]int) // dedup key -> first title ID
-	var duplicates int
-
-	idx := 0
-	for _, title := range env.Titles {
-		if title.Duration < h.cfg.MakeMKV.MinTitleLength {
-			logger.Debug("title below minimum duration for placeholder",
-				"title_id", title.ID,
-				"duration", title.Duration,
+	selection := selectTVEpisodeTitles(env.Titles, h.cfg.MakeMKV.MinTitleLength)
+	for _, decision := range selection.Decisions {
+		switch {
+		case decision.Selected:
+			logger.Info("tv title selected",
+				"decision_type", logs.DecisionTitleSelection,
+				"decision_result", "selected",
+				"decision_reason", decision.Reason,
+				"title_id", decision.Title.ID,
+				"duration", decision.Title.Duration,
+				"cluster_id", decision.ClusterID,
+			)
+		case decision.Reason == "below_min_title_length":
+			logger.Debug("tv title excluded",
+				"decision_type", logs.DecisionTitleSelection,
+				"decision_result", "excluded",
+				"decision_reason", decision.Reason,
+				"title_id", decision.Title.ID,
+				"duration", decision.Title.Duration,
 				"min_title_length", h.cfg.MakeMKV.MinTitleLength,
 			)
-			continue
-		}
-
-		// Episode runtime filter: skip titles whose duration is less than
-		// half the median of all candidate titles. This excludes bonus
-		// features and menus without hardcoding an episode-length window.
-		if medianDur > 0 && title.Duration < medianDur/2 {
-			logger.Info("title duration outlier filtered",
-				"decision_type", logs.DecisionEpisodeRuntimeFilter,
+		case decision.Reason == "duplicate_title":
+			logger.Info("duplicate TV title skipped",
+				"decision_type", logs.DecisionDuplicateDetection,
 				"decision_result", "skipped",
-				"decision_reason", fmt.Sprintf("title %d duration %ds < half median %ds",
-					title.ID, title.Duration, medianDur),
+				"decision_reason", fmt.Sprintf("title %d matches title %d", decision.Title.ID, decision.DuplicateOf),
+				"title_id", decision.Title.ID,
+				"duplicate_of", decision.DuplicateOf,
 			)
-			continue
+		default:
+			logger.Info("tv title excluded",
+				"decision_type", logs.DecisionTitleSelection,
+				"decision_result", "excluded",
+				"decision_reason", decision.Reason,
+				"title_id", decision.Title.ID,
+				"duration", decision.Title.Duration,
+				"cluster_id", decision.ClusterID,
+			)
 		}
+	}
+	if selection.Ambiguous {
+		logger.Warn("TV title selection ambiguous",
+			"event_type", "tv_title_selection_ambiguous",
+			"error_hint", summarizeAmbiguity(selection.AmbiguityReasons),
+			"impact", "rip plan may include or exclude incorrect titles",
+		)
+	}
 
-		// Dedup on SegmentMap (m2ts stream identity) when available.
-		// Titles sharing a segment map reference identical content even
-		// if playlist metadata differs. Fall back to TitleHash for DVDs
-		// where SegmentMap is absent.
-		dedupKey := strings.TrimSpace(title.SegmentMap)
-		if dedupKey == "" {
-			dedupKey = strings.TrimSpace(title.TitleHash)
-		}
-		if dedupKey != "" {
-			if firstID, dup := seen[dedupKey]; dup {
-				duplicates++
-				logger.Info("duplicate TV title skipped",
-					"decision_type", logs.DecisionDuplicateDetection,
-					"decision_result", "skipped",
-					"decision_reason", fmt.Sprintf("title %d matches title %d (key=%s)",
-						title.ID, firstID, dedupKey),
-				)
-				continue
-			}
-			seen[dedupKey] = title.ID
-		}
+	logger.Info("tv title selection summary",
+		"decision_type", logs.DecisionTitleSelection,
+		"decision_result", describeTVSelection(selection),
+		"decision_reason", fmt.Sprintf("duplicates=%d extras=%d double_candidates=%d", selection.DuplicateCount, selection.ExtraCount, selection.AmbiguousLongCount),
+	)
 
-		idx++
+	for idx, title := range selection.SelectedTitles {
 		env.Episodes = append(env.Episodes, ripspec.Episode{
-			Key:            ripspec.PlaceholderKey(season, idx),
+			Key:            ripspec.PlaceholderKey(season, idx+1),
 			TitleID:        title.ID,
 			Season:         season,
 			RuntimeSeconds: title.Duration,
@@ -732,25 +732,9 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 
 	logger.Info("episode placeholders created",
 		"decision_type", logs.DecisionEpisodePlaceholders,
-		"decision_result", fmt.Sprintf("%d episodes", idx),
-		"decision_reason", fmt.Sprintf("season=%d titles=%d duplicates=%d", season, len(env.Titles), duplicates),
+		"decision_result", fmt.Sprintf("%d episodes", len(selection.SelectedTitles)),
+		"decision_reason", fmt.Sprintf("season=%d titles=%d duplicates=%d", season, len(env.Titles), selection.DuplicateCount),
 	)
-}
-
-// medianTitleDuration returns the median duration of titles whose duration
-// is at least minDur. Returns 0 if no titles qualify.
-func medianTitleDuration(titles []ripspec.Title, minDur int) int {
-	var durations []int
-	for _, t := range titles {
-		if t.Duration >= minDur {
-			durations = append(durations, t.Duration)
-		}
-	}
-	if len(durations) == 0 {
-		return 0
-	}
-	slices.Sort(durations)
-	return durations[len(durations)/2]
 }
 
 // buildEnvelopeFromCache constructs an envelope from a disc ID cache entry

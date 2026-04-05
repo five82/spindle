@@ -234,6 +234,7 @@ ContentIDSummary {
 |----------|---------|
 | `PlaceholderKey(season, discIndex)` | Format `s01_001`; defaults to 1 if <= 0 |
 | `EpisodeKey(season, episode)` | Format `s01e03`; returns "" if both <= 0 |
+| `EpisodeRangeKey(season, start, end)` | Format `s01e01-e02`; falls back to `EpisodeKey` when end <= start |
 | `HasResolvedEpisodes(episodes)` | Any episode with Episode > 0 |
 | `HasUnresolvedEpisodes(episodes)` | Any episode with Episode <= 0 |
 | `CountUnresolvedEpisodes(episodes)` | Count episodes with Episode <= 0 |

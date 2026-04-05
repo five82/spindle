@@ -500,6 +500,7 @@ func (h *Handler) applyMatches(
 			)
 		}
 	}
+	applyOpeningDoubleEpisode(logger, env, seasonNum, env.Metadata.DiscNumber, episodeDetails, assetKeyRemap)
 	env.Assets.RemapEpisodeKeys(assetKeyRemap)
 
 	if unresolvedCount > 0 {
@@ -508,4 +509,66 @@ func (h *Handler) applyMatches(
 	if lowConfCount > 0 {
 		item.AppendReviewReason(fmt.Sprintf("Episode ID: %d matches below confidence threshold %.2f", lowConfCount, h.policy.LowConfidenceReviewThreshold))
 	}
+}
+
+func applyOpeningDoubleEpisode(logger *slog.Logger, env *ripspec.Envelope, seasonNum, discNumber int, details map[int]tmdb.Episode, assetKeyRemap map[string]string) {
+	if discNumber != 1 || !probableOpeningDoubleEpisode(env.Episodes) || len(env.Episodes) < 3 {
+		return
+	}
+	for _, ep := range env.Episodes {
+		if ep.Episode <= 0 {
+			return
+		}
+	}
+	start := env.Episodes[0].Episode
+	if start != 1 && start != 2 {
+		return
+	}
+	for i := 1; i < len(env.Episodes); i++ {
+		if env.Episodes[i].Episode != start+i {
+			return
+		}
+	}
+
+	originalKey := env.Episodes[0].Key
+	env.Episodes[0].Episode = 1
+	env.Episodes[0].EpisodeEnd = 2
+	env.Episodes[0].Key = ripspec.EpisodeRangeKey(seasonNum, 1, 2)
+	if ep1, ok1 := details[1]; ok1 {
+		if ep2, ok2 := details[2]; ok2 {
+			env.Episodes[0].EpisodeTitle = strings.TrimSpace(ep1.Name + " / " + ep2.Name)
+		}
+	}
+	if env.Episodes[0].Key != originalKey {
+		assetKeyRemap[originalKey] = env.Episodes[0].Key
+		for old, next := range assetKeyRemap {
+			if next == originalKey {
+				assetKeyRemap[old] = env.Episodes[0].Key
+			}
+		}
+	}
+	if start == 1 {
+		for i := 1; i < len(env.Episodes); i++ {
+			oldKey := env.Episodes[i].Key
+			env.Episodes[i].Episode++
+			env.Episodes[i].Key = ripspec.EpisodeKey(seasonNum, env.Episodes[i].Episode)
+			if title, ok := details[env.Episodes[i].Episode]; ok {
+				env.Episodes[i].EpisodeTitle = strings.TrimSpace(title.Name)
+				env.Episodes[i].EpisodeAirDate = strings.TrimSpace(title.AirDate)
+			}
+			if env.Episodes[i].Key != oldKey {
+				assetKeyRemap[oldKey] = env.Episodes[i].Key
+				for old, next := range assetKeyRemap {
+					if next == oldKey {
+						assetKeyRemap[old] = env.Episodes[i].Key
+					}
+				}
+			}
+		}
+	}
+	logger.Info("opening double-length episode inferred",
+		"decision_type", logs.DecisionEpisodeMatch,
+		"decision_result", env.Episodes[0].Key,
+		"decision_reason", "disc 1 opening title runtime matches double-episode profile",
+	)
 }

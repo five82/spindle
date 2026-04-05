@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -783,26 +784,172 @@ func TestCreateEpisodePlaceholders_SegmentMapTakesPriorityOverTitleHash(t *testi
 	}
 }
 
-func TestCreateEpisodePlaceholders_FiltersOutlierDurations(t *testing.T) {
+func TestSelectTVEpisodeTitles(t *testing.T) {
+	tests := []struct {
+		name           string
+		minTitleLength int
+		titles         []ripspec.Title
+		wantIDs        []int
+		wantAmbiguous  bool
+		wantDoubleLong int
+		wantDuplicates int
+		wantExtras     int
+		wantReasonByID map[int]string
+	}{
+		{
+			name:           "half hour episodes with extras",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 22 * 60},
+				{ID: 1, Duration: 23 * 60},
+				{ID: 2, Duration: 22 * 60},
+				{ID: 3, Duration: 3 * 60},
+				{ID: 4, Duration: 4 * 60},
+			},
+			wantIDs:        []int{0, 1, 2},
+			wantExtras:     2,
+			wantReasonByID: map[int]string{3: "runtime_cluster_extra", 4: "runtime_cluster_extra"},
+		},
+		{
+			name:           "45 minute episodes with extras",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 45 * 60},
+				{ID: 1, Duration: 46 * 60},
+				{ID: 2, Duration: 44 * 60},
+				{ID: 3, Duration: 5 * 60},
+				{ID: 4, Duration: 3 * 60},
+			},
+			wantIDs:    []int{0, 1, 2},
+			wantExtras: 2,
+		},
+		{
+			name:           "double length pilot plus normal episodes and extras",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 91 * 60},
+				{ID: 1, Duration: 45 * 60},
+				{ID: 2, Duration: 45 * 60},
+				{ID: 3, Duration: 5 * 60},
+				{ID: 4, Duration: 4 * 60},
+				{ID: 5, Duration: 2 * 60},
+			},
+			wantIDs:        []int{0, 1, 2},
+			wantDoubleLong: 1,
+			wantExtras:     3,
+			wantReasonByID: map[int]string{0: "probable_double_episode_candidate"},
+		},
+		{
+			name:           "duplicate playlists dedupe by segment map",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 45 * 60, SegmentMap: "00001.m2ts"},
+				{ID: 1, Duration: 45 * 60, SegmentMap: "00001.m2ts"},
+				{ID: 2, Duration: 46 * 60, SegmentMap: "00002.m2ts"},
+			},
+			wantIDs:        []int{0, 2},
+			wantDuplicates: 1,
+			wantReasonByID: map[int]string{1: "duplicate_title"},
+		},
+		{
+			name:           "mixed long form disc still prefers dominant runtime cluster",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 24 * 60},
+				{ID: 1, Duration: 48 * 60},
+				{ID: 2, Duration: 50 * 60},
+				{ID: 3, Duration: 52 * 60},
+			},
+			wantIDs:    []int{1, 2, 3},
+			wantExtras: 1,
+		},
+		{
+			name:           "single long feature on tv hinted disc stays ambiguous",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 90 * 60},
+				{ID: 1, Duration: 5 * 60},
+				{ID: 2, Duration: 4 * 60},
+			},
+			wantIDs:       []int{0},
+			wantAmbiguous: true,
+			wantExtras:    2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := selectTVEpisodeTitles(tt.titles, tt.minTitleLength)
+			if got.Ambiguous != tt.wantAmbiguous {
+				t.Fatalf("Ambiguous = %v, want %v (reasons=%v)", got.Ambiguous, tt.wantAmbiguous, got.AmbiguityReasons)
+			}
+			if got.AmbiguousLongCount != tt.wantDoubleLong {
+				t.Fatalf("AmbiguousLongCount = %d, want %d", got.AmbiguousLongCount, tt.wantDoubleLong)
+			}
+			if got.DuplicateCount != tt.wantDuplicates {
+				t.Fatalf("DuplicateCount = %d, want %d", got.DuplicateCount, tt.wantDuplicates)
+			}
+			if got.ExtraCount != tt.wantExtras {
+				t.Fatalf("ExtraCount = %d, want %d", got.ExtraCount, tt.wantExtras)
+			}
+			var gotIDs []int
+			for _, title := range got.SelectedTitles {
+				gotIDs = append(gotIDs, title.ID)
+			}
+			if !reflect.DeepEqual(gotIDs, tt.wantIDs) {
+				t.Fatalf("SelectedTitles IDs = %v, want %v", gotIDs, tt.wantIDs)
+			}
+			for id, wantReason := range tt.wantReasonByID {
+				found := false
+				for _, decision := range got.Decisions {
+					if decision.Title.ID == id {
+						found = true
+						if decision.Reason != wantReason {
+							t.Fatalf("title %d reason = %q, want %q", id, decision.Reason, wantReason)
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("decision for title %d not found", id)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 	h := &Handler{cfg: &config.Config{}}
 	h.cfg.MakeMKV.MinTitleLength = 120
 	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{SeasonNumber: 3},
+		Metadata: ripspec.Metadata{SeasonNumber: 1},
 		Titles: []ripspec.Title{
-			{ID: 0, Duration: 1520, SegmentMap: "00001.m2ts"}, // ~25 min episode
-			{ID: 1, Duration: 1516, SegmentMap: "00002.m2ts"}, // ~25 min episode
-			{ID: 2, Duration: 1519, SegmentMap: "00003.m2ts"}, // ~25 min episode
-			{ID: 24, Duration: 340, SegmentMap: "00024.m2ts"}, // 5.7 min bonus (< half median)
+			{ID: 0, Duration: 91*60 + 4, SegmentMap: "01000.m2ts"},
+			{ID: 1, Duration: 45*60 + 30},
+			{ID: 2, Duration: 45*60 + 34},
+			{ID: 3, Duration: 91*60 + 21, SegmentMap: "01000.m2ts"},
+			{ID: 4, Duration: 2*60 + 20},
+			{ID: 5, Duration: 2*60 + 39},
+			{ID: 6, Duration: 2*60 + 39},
+			{ID: 7, Duration: 2*60 + 20},
+			{ID: 8, Duration: 2*60 + 20},
+			{ID: 9, Duration: 2*60 + 20},
+			{ID: 10, Duration: 2*60 + 20},
+			{ID: 11, Duration: 2*60 + 20},
+			{ID: 12, Duration: 4*60 + 7},
+			{ID: 13, Duration: 2*60 + 44},
+			{ID: 14, Duration: 23*60 + 46},
+			{ID: 15, Duration: 5 * 60},
 		},
 	}
 	h.createEpisodePlaceholders(discardLogger(), env)
 
 	if len(env.Episodes) != 3 {
-		t.Fatalf("len(Episodes) = %d, want 3 (title 24 at 340s should be filtered as duration outlier)", len(env.Episodes))
+		t.Fatalf("len(Episodes) = %d, want 3", len(env.Episodes))
 	}
-	for _, ep := range env.Episodes {
-		if ep.TitleID == 24 {
-			t.Errorf("title 24 (340s bonus feature) should have been excluded as duration outlier")
+	wantTitleIDs := []int{0, 1, 2}
+	for i, ep := range env.Episodes {
+		if ep.TitleID != wantTitleIDs[i] {
+			t.Fatalf("Episodes[%d].TitleID = %d, want %d", i, ep.TitleID, wantTitleIDs[i])
 		}
 	}
 }

@@ -50,6 +50,7 @@ type EpisodeResponse struct {
 	Key                       string            `json:"key"`
 	Season                    int               `json:"season"`
 	Episode                   int               `json:"episode"`
+	EpisodeEnd                int               `json:"episodeEnd,omitempty"`
 	Title                     string            `json:"title,omitempty"`
 	Stage                     string            `json:"stage"`
 	Status                    string            `json:"status,omitempty"`
@@ -71,6 +72,7 @@ type EpisodeResponse struct {
 	GeneratedSubtitleDecision string            `json:"generatedSubtitleDecision,omitempty"`
 	MatchScore                float64           `json:"matchScore,omitempty"`
 	MatchedEpisode            int               `json:"matchedEpisode,omitempty"`
+	MatchedEpisodeEnd         int               `json:"matchedEpisodeEnd,omitempty"`
 	NeedsReview               bool              `json:"needsReview,omitempty"`
 	ReviewReason              string            `json:"reviewReason,omitempty"`
 }
@@ -282,6 +284,7 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 			Key:            ep.Key,
 			Season:         ep.Season,
 			Episode:        ep.Episode,
+			EpisodeEnd:     ep.EpisodeEnd,
 			Title:          ep.EpisodeTitle,
 			Stage:          "planned",
 			RuntimeSeconds: ep.RuntimeSeconds,
@@ -294,6 +297,7 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 
 		if ep.Episode > 0 {
 			resp.MatchedEpisode = ep.Episode
+			resp.MatchedEpisodeEnd = ep.EpisodeEnd
 		}
 
 		// Title fallback

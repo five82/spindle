@@ -48,7 +48,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
 ## Stage 2: Content Identification (identification)
 
 1. Spindle scans the disc with MakeMKV, capturing the fingerprint and title list.
-2. Identification uses KeyDB (if configured), optional overrides, and heuristics to decide TV vs movie. For Blu-rays, KeyDB and the disc ID cache are keyed by the BDInfo disc ID; the separate disc fingerprint is still used for queue identity and duplicate detection. Heuristics include season markers ("Season", `Sxx`), "complete series" strings, and discs dominated by episode-length titles (~18-35 minutes).
+2. Identification uses KeyDB (if configured), optional overrides, and heuristics to decide TV vs movie. For Blu-rays, KeyDB and the disc ID cache are keyed by the BDInfo disc ID; the separate disc fingerprint is still used for queue identity and duplicate detection. Heuristics include season markers ("Season", `Sxx`), "complete series" strings, and discs dominated by episode-length titles. For TV discs, placeholder rip targets are built from MakeMKV titles using duplicate suppression plus runtime clustering: Spindle keeps the dominant long-form program cluster, excludes likely extras, and preserves probable double-length episode titles as single placeholder assets.
 3. TMDB search runs using the derived title/season hints. If a confident match is found, Spindle:
    - Stores metadata in `metadata_json`.
    - Writes a rip specification (`rip_spec`) that maps MakeMKV titles to the intended output.
@@ -80,12 +80,12 @@ use `spindle cache rip --title` to interactively select which title to rip.
 ## Stage 4: Episode Identification (episode_identification)
 
 1. For TV shows with OpenSubtitles enabled, Spindle compares WhisperX transcripts against OpenSubtitles references to map ripped files to definitive episode numbers.
-2. Results are written back into the rip specification so encoding/organizing use correct episode labels.
+2. Results are written back into the rip specification so encoding/organizing use correct episode labels. The current implementation also supports a conservative disc-1 opening double-length inference: when the first selected title has a probable double-episode runtime profile and the resolved sequence supports it, Spindle can promote that title to a range like `S01E01-E02`.
 3. Movies, discs without OpenSubtitles enabled, or invalid rip specs skip this stage and proceed to encoding.
 
 ## Stage 5: Encoding to AV1 (encoding)
 
-1. The encoder builds a job plan from the rip spec and runs Drapto for each episode (or a single file for movies).
+1. The encoder builds a job plan from the rip spec and runs Drapto for each planned TV asset (usually one episode, but possibly a conservative range asset such as `S01E01-E02`) or a single file for movies.
 2. For multi-file encodes, the displayed percent is cumulative across the whole encoding stage, not just the current file.
 3. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`. The rip spec is updated after each episode so progress is recoverable and encoded counts can advance live.
 4. When encoding completes, the item advances to the next stage. Failures surface as `failed` (with `needs_review = true` for validation/configuration errors).

@@ -88,6 +88,21 @@ func TestDestFilename_TVEpisode(t *testing.T) {
 	}
 }
 
+func TestDestFilename_TVRange(t *testing.T) {
+	meta := &queue.Metadata{
+		Title:        "Breaking Bad",
+		ShowTitle:    "Breaking Bad",
+		MediaType:    "tv",
+		SeasonNumber: 1,
+	}
+
+	got := destFilename(meta, "s01e01-e02", ".mkv")
+	want := "Breaking Bad - S01E01-E02.mkv"
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
 func TestDestFilename_TVFallback(t *testing.T) {
 	meta := &queue.Metadata{
 		Title:        "Some Show",
@@ -106,21 +121,23 @@ func TestDestFilename_TVFallback(t *testing.T) {
 
 func TestParseEpisodeKey(t *testing.T) {
 	tests := []struct {
-		key         string
-		wantSeason  int
-		wantEpisode int
+		key            string
+		wantSeason     int
+		wantEpisode    int
+		wantEpisodeEnd int
 	}{
-		{"s01e03", 1, 3},
-		{"S02E10", 2, 10},
-		{"s01_001", 0, 0},
-		{"main", 0, 0},
-		{"", 0, 0},
+		{"s01e03", 1, 3, 0},
+		{"S02E10", 2, 10, 0},
+		{"s01e01-e02", 1, 1, 2},
+		{"s01_001", 0, 0, 0},
+		{"main", 0, 0, 0},
+		{"", 0, 0, 0},
 	}
 	for _, tt := range tests {
-		s, e := parseEpisodeKey(tt.key)
-		if s != tt.wantSeason || e != tt.wantEpisode {
-			t.Errorf("parseEpisodeKey(%q) = (%d, %d), want (%d, %d)",
-				tt.key, s, e, tt.wantSeason, tt.wantEpisode)
+		s, e, end := parseEpisodeKey(tt.key)
+		if s != tt.wantSeason || e != tt.wantEpisode || end != tt.wantEpisodeEnd {
+			t.Errorf("parseEpisodeKey(%q) = (%d, %d, %d), want (%d, %d, %d)",
+				tt.key, s, e, end, tt.wantSeason, tt.wantEpisode, tt.wantEpisodeEnd)
 		}
 	}
 }

@@ -540,6 +540,9 @@ func computeEpisodeStats(episodes []ripspec.Episode) *EpisodeStats {
 		if ep.Episode > 0 {
 			stats.Matched++
 			episodeNumbers = append(episodeNumbers, ep.Episode)
+			if ep.EpisodeLast() > ep.Episode {
+				episodeNumbers = append(episodeNumbers, ep.EpisodeLast())
+			}
 			stats.PlaceholderOnly = false
 		} else {
 			stats.Unresolved++

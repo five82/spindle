@@ -109,6 +109,7 @@ func TestApplyMatchesRemapsAssetKeys(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := &Handler{policy: DefaultPolicy()}
 	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{DiscNumber: 2},
 		Episodes: []ripspec.Episode{{Key: "s03_001", Season: 3}, {Key: "s03_002", Season: 3}},
 		Assets:   ripspec.Assets{Ripped: []ripspec.Asset{{EpisodeKey: "s03_001", Path: "/rip/1.mkv", Status: "completed"}, {EpisodeKey: "s03_002", Path: "/rip/2.mkv", Status: "completed"}}},
 	}
@@ -119,5 +120,34 @@ func TestApplyMatchesRemapsAssetKeys(t *testing.T) {
 	}
 	if _, ok := env.Assets.FindAsset("ripped", "s03e03"); !ok {
 		t.Fatal("ripped asset for s03e03 not found after remap")
+	}
+}
+
+func TestApplyMatches_InfersOpeningDoubleEpisode(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := &Handler{policy: DefaultPolicy()}
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{DiscNumber: 1},
+		Episodes: []ripspec.Episode{
+			{Key: "s01_001", Season: 1, RuntimeSeconds: 91 * 60},
+			{Key: "s01_002", Season: 1, RuntimeSeconds: 45 * 60},
+			{Key: "s01_003", Season: 1, RuntimeSeconds: 45 * 60},
+		},
+		Assets: ripspec.Assets{Ripped: []ripspec.Asset{
+			{EpisodeKey: "s01_001", Path: "/rip/1.mkv", Status: "completed"},
+			{EpisodeKey: "s01_002", Path: "/rip/2.mkv", Status: "completed"},
+			{EpisodeKey: "s01_003", Path: "/rip/3.mkv", Status: "completed"},
+		}},
+	}
+	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 1, Name: "Pilot Part 1"}, {EpisodeNumber: 2, Name: "Pilot Part 2"}, {EpisodeNumber: 3, Name: "Third"}, {EpisodeNumber: 4, Name: "Fourth"}}}
+	h.applyMatches(logger, env, 1, season, []matchResult{{EpisodeKey: "s01_001", TargetEpisode: 1, Score: 0.91}, {EpisodeKey: "s01_002", TargetEpisode: 2, Score: 0.88}, {EpisodeKey: "s01_003", TargetEpisode: 3, Score: 0.89}}, nil)
+	if env.Episodes[0].Key != "s01e01-e02" || env.Episodes[0].Episode != 1 || env.Episodes[0].EpisodeEnd != 2 {
+		t.Fatalf("opening episode not converted to range: %+v", env.Episodes[0])
+	}
+	if env.Episodes[1].Episode != 3 || env.Episodes[2].Episode != 4 {
+		t.Fatalf("later episodes not shifted: %+v", env.Episodes)
+	}
+	if _, ok := env.Assets.FindAsset("ripped", "s01e01-e02"); !ok {
+		t.Fatal("ripped asset for s01e01-e02 not found after remap")
 	}
 }

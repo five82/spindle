@@ -235,6 +235,15 @@ func TestEpisodeKeyFormatting(t *testing.T) {
 	}
 }
 
+func TestEpisodeRangeKey(t *testing.T) {
+	if got := EpisodeRangeKey(1, 1, 2); got != "s01e01-e02" {
+		t.Fatalf("EpisodeRangeKey() = %q, want s01e01-e02", got)
+	}
+	if got := EpisodeRangeKey(1, 3, 3); got != "s01e03" {
+		t.Fatalf("EpisodeRangeKey() fallback = %q, want s01e03", got)
+	}
+}
+
 func TestHasResolvedEpisodes(t *testing.T) {
 	resolved := []Episode{
 		{Key: "s01e01", Episode: 1},

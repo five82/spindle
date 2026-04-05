@@ -68,6 +68,7 @@ type Episode struct {
 	TitleID         int     `json:"title_id"`
 	Season          int     `json:"season"`
 	Episode         int     `json:"episode"`
+	EpisodeEnd      int     `json:"episode_end,omitempty"`
 	EpisodeTitle    string  `json:"episode_title,omitempty"`
 	EpisodeAirDate  string  `json:"episode_air_date,omitempty"`
 	RuntimeSeconds  int     `json:"runtime_seconds,omitempty"`
@@ -450,6 +451,27 @@ func EpisodeKey(season, episode int) string {
 		return ""
 	}
 	return fmt.Sprintf("s%02de%02d", season, episode)
+}
+
+// EpisodeRangeKey formats an episode range key as "s01e01-e02".
+// If end <= start, it falls back to EpisodeKey.
+func EpisodeRangeKey(season, start, end int) string {
+	if end <= start {
+		return EpisodeKey(season, start)
+	}
+	if season <= 0 && start <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("s%02de%02d-e%02d", season, start, end)
+}
+
+// EpisodeLast returns the last resolved episode number represented by the entry.
+// For single-episode entries this is Episode. Unresolved entries return 0.
+func (e Episode) EpisodeLast() int {
+	if e.EpisodeEnd > e.Episode {
+		return e.EpisodeEnd
+	}
+	return e.Episode
 }
 
 // HasResolvedEpisodes returns true if any episode has a resolved episode

@@ -23,9 +23,10 @@ type Metadata struct {
 
 // MetadataEpisode represents a single episode in TV metadata.
 type MetadataEpisode struct {
-	Season  int    `json:"season"`
-	Episode int    `json:"episode"`
-	Title   string `json:"title,omitempty"`
+	Season     int    `json:"season"`
+	Episode    int    `json:"episode"`
+	EpisodeEnd int    `json:"episode_end,omitempty"`
+	Title      string `json:"title,omitempty"`
 }
 
 // MetadataFromJSON deserializes metadata from the metadata_json column.
@@ -159,11 +160,18 @@ func buildEpisodeFilename(m *Metadata) string {
 
 	if len(m.Episodes) == 1 {
 		ep := m.Episodes[0]
+		if ep.EpisodeEnd > ep.Episode {
+			return fmt.Sprintf("%s - S%02dE%02d-E%02d", show, ep.Season, ep.Episode, ep.EpisodeEnd)
+		}
 		return fmt.Sprintf("%s - S%02dE%02d", show, ep.Season, ep.Episode)
 	}
 
 	// Multi-episode range: use first and last episode numbers.
 	first := m.Episodes[0]
 	last := m.Episodes[len(m.Episodes)-1]
-	return fmt.Sprintf("%s - S%02dE%02d-E%02d", show, first.Season, first.Episode, last.Episode)
+	lastEpisode := last.Episode
+	if last.EpisodeEnd > lastEpisode {
+		lastEpisode = last.EpisodeEnd
+	}
+	return fmt.Sprintf("%s - S%02dE%02d-E%02d", show, first.Season, first.Episode, lastEpisode)
 }
