@@ -10,7 +10,7 @@ require (
 	github.com/pilebones/go-udev v0.9.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.42.0
-	modernc.org/sqlite v1.48.0
+	modernc.org/sqlite v1.48.1
 )
 
 require (
