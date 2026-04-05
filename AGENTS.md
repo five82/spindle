@@ -37,6 +37,7 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 - Do not just look for the easiest solution or fix. Find the best and most maintainable path forward.
 - Break things forward. Remove deprecated paths; no compatibility shims.
 - Prefer maintainable architecture and explicit logging over clever tricks.
+- Prefer minimalism. Identify and close real gaps. Simplify. Avoid overengineering. Avoid chasing edge cases that we are unlikely to encounter.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
 - Keep edits ASCII unless the file already uses extended characters.
 - When troubleshooting, gather evidence and test. Do not blindly guess.
