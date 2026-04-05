@@ -132,7 +132,7 @@ Heuristics to determine if disc is movie or TV:
 - File created lazily on first `Store()` call.
 - Load errors are non-fatal: cache starts empty, logs warning.
 - `List()`: Return all entries sorted by `cached_at` descending.
-- `Remove(fingerprint)`: Delete a single entry by disc fingerprint.
+- `Remove(disc_id)`: Delete a single entry by Blu-ray disc ID.
 - `Clear()`: Remove all entries.
 
 **Cache validation**: After a cache hit, `detectMediaTypeHint()` runs against
@@ -143,11 +143,19 @@ overriding unambiguous disc metadata. Logged with `decision_type: "disc_id_cache
 `decision_result: "invalidated"`.
 
 **KeyDB Lookup**:
-1. If KeyDB catalog available and disc ID present:
-2. Parse KeyDB.cfg for disc ID entry.
+1. If KeyDB catalog available and BDInfo returned a Blu-ray `disc_id`:
+2. Parse KeyDB.cfg for that disc ID entry.
 3. If found: use authoritative title from KeyDB (overrides disc label).
 4. Download KeyDB if not present locally or stale (older than 7 days), with
    timeout. If download fails and a stale catalog exists, use it with a warning.
+
+**Identifier separation**:
+- `disc_id` is the Blu-ray identifier from BDInfo and is the key for both KeyDB
+  lookup and the disc ID cache.
+- `disc_fingerprint` is the filesystem/content fingerprint used for queue item
+  identity, duplicate detection, and rip cache organization.
+- These identifiers are intentionally different and must not be substituted for
+  one another.
 
 ### 1.5 Title Determination Priority
 
@@ -168,8 +176,9 @@ To guarantee this:
 - Both paths call `Handler.Identify()` with the same inputs.
 - The CLI uses `ResolveMountPoint()` to resolve the disc mount point and
   generate a fingerprint, matching the daemon's mount resolution and
-  fingerprint generation path. This ensures the disc ID cache is consulted
-  identically in both paths.
+  fingerprint generation path. This keeps queue/rip identity consistent across
+  both paths. Disc ID cache and KeyDB lookup remain keyed by `BDInfo.DiscID` in
+  both the CLI and daemon paths.
 - Neither path may add pre-processing, filtering, or caching logic that the
   other does not also execute.
 
@@ -347,7 +356,7 @@ Path is sanitized via `SanitizePathSegment()`.
 | `Store()` | Copy a rip directory into the cache. Used after ripping to a staging area. Triggers pruning. |
 | `Register()` | Mark an already-in-place directory as a cache entry (no copy). Used after `cache rip` where output is written directly to the cache. Triggers pruning. |
 | `List()` | Return all cache entries sorted newest first (by modification time). |
-| `Remove(fingerprint)` | Delete a single cache entry by fingerprint. |
+| `Remove(disc_id)` | Delete a single cache entry by Blu-ray disc ID. |
 | `Clear()` | Remove all cache entries. |
 
 **Pruning algorithm** (`prune()`):
@@ -1029,7 +1038,7 @@ decision types each stage produces. Constants are defined in
 | `tmdb_search` | result | TMDB search execution |
 | `forced_subtitle_detection` | `present`, `absent` | Disc forced subtitle check |
 | `episode_placeholders` | episode count | Placeholder episode creation |
-| `disc_id_cache` | `hit`, `miss` | Disc ID cache lookup |
+| `disc_id_cache` | `hit`, `miss` | Disc ID cache lookup by Blu-ray disc ID |
 | `config_load` | `explicit_path`, `search_path`, `defaults_only` | Config source selection |
 
 ### 8.2 Ripping Stage

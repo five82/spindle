@@ -34,16 +34,16 @@ func newDiscIDListCmd() *cobra.Command {
 			}
 
 			for i, le := range entries {
-				fp := le.Fingerprint
-				if len(fp) > 12 {
-					fp = fp[:12]
+				discID := le.DiscID
+				if len(discID) > 12 {
+					discID = discID[:12]
 				}
 				e := le.Entry
 				fmt.Printf("  %d. %s (TMDB %d, %s", i+1, e.Title, e.TMDBID, e.MediaType)
 				if e.Season > 0 {
 					fmt.Printf(", S%02d", e.Season)
 				}
-				fmt.Printf(") [%s]\n", dimStyle(fp))
+				fmt.Printf(") [%s]\n", dimStyle(discID))
 			}
 			fmt.Printf("\n%d entries\n", len(entries))
 			return nil
@@ -72,7 +72,7 @@ func newDiscIDRemoveCmd() *cobra.Command {
 			}
 
 			le := entries[num-1]
-			if err := store.Remove(le.Fingerprint); err != nil {
+			if err := store.Remove(le.DiscID); err != nil {
 				return err
 			}
 			fmt.Println(successStyle(fmt.Sprintf("Removed: %s", le.Entry.Title)))

@@ -48,7 +48,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
 ## Stage 2: Content Identification (identification)
 
 1. Spindle scans the disc with MakeMKV, capturing the fingerprint and title list.
-2. Identification uses KeyDB (if configured), optional overrides, and heuristics to decide TV vs movie. Heuristics include season markers ("Season", `Sxx`), "complete series" strings, and discs dominated by episode-length titles (~18-35 minutes).
+2. Identification uses KeyDB (if configured), optional overrides, and heuristics to decide TV vs movie. For Blu-rays, KeyDB and the disc ID cache are keyed by the BDInfo disc ID; the separate disc fingerprint is still used for queue identity and duplicate detection. Heuristics include season markers ("Season", `Sxx`), "complete series" strings, and discs dominated by episode-length titles (~18-35 minutes).
 3. TMDB search runs using the derived title/season hints. If a confident match is found, Spindle:
    - Stores metadata in `metadata_json`.
    - Writes a rip specification (`rip_spec`) that maps MakeMKV titles to the intended output.
@@ -145,7 +145,7 @@ If one episode in a batch failed but others succeeded:
 Files in `review_dir` need manual attention:
 1. Check the review reason: `spindle queue show <id>` (look for `review_reason`).
 2. Common reasons:
-   - **Low-confidence TMDB match**: The disc title didn't match well. Move the file to the correct library folder manually, or update disc ID cache and retry.
+   - **Low-confidence TMDB match**: The disc title didn't match well. Move the file to the correct library folder manually, or update the Blu-ray disc ID cache / KeyDB inputs and retry.
    - **Unresolved episode numbers**: Episode identification ran successfully but couldn't map all episodes confidently. Check the file names and move to the correct library folder.
    - **SRT validation issues**: Subtitles may have quality problems. Review the SRT file and fix or regenerate with `spindle gensubtitle`.
 3. After manually organizing files, clear the completed item: `spindle queue clear <id>`.

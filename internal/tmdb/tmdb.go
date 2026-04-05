@@ -258,7 +258,7 @@ func scoreResult(query string, r *SearchResult) float64 {
 	titleLower := strings.ToLower(r.DisplayTitle())
 	queryLower := strings.ToLower(query)
 	match := 0.0
-	if strings.Contains(titleLower, queryLower) {
+	if strings.Contains(titleLower, queryLower) || queryMatchesTitleAlias(query, r.DisplayTitle()) {
 		match = 1.0
 	}
 	return match + (r.VoteAverage / voteAverageDivisor) + float64(r.VoteCount)/voteCountDivisor
@@ -277,6 +277,73 @@ func normalizeForComparison(input string) string {
 		}
 	}
 	return b.String()
+}
+
+func tokenizeForComparison(input string) []string {
+	lower := strings.ToLower(input)
+	var tokens []string
+	var b strings.Builder
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, b.String())
+		b.Reset()
+	}
+	for _, r := range lower {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return tokens
+}
+
+func acronym(tokens []string) string {
+	var b strings.Builder
+	for _, token := range tokens {
+		for _, r := range token {
+			b.WriteRune(r)
+			break
+		}
+	}
+	return b.String()
+}
+
+// queryMatchesTitleAlias reports whether the query tokens can be aligned to the
+// title tokens, allowing a query token to match either an exact title token or
+// the acronym of one or more consecutive title tokens. This lets queries like
+// "Star Trek TNG" match titles like "Star Trek The Next Generation" while
+// keeping the logic deterministic and title-based.
+func queryMatchesTitleAlias(query, title string) bool {
+	queryTokens := tokenizeForComparison(query)
+	titleTokens := tokenizeForComparison(title)
+	if len(queryTokens) == 0 || len(titleTokens) == 0 {
+		return false
+	}
+
+	var match func(qi, ti int) bool
+	match = func(qi, ti int) bool {
+		if qi == len(queryTokens) {
+			return ti == len(titleTokens)
+		}
+		if ti >= len(titleTokens) {
+			return false
+		}
+		if queryTokens[qi] == titleTokens[ti] && match(qi+1, ti+1) {
+			return true
+		}
+		for end := ti + 1; end <= len(titleTokens); end++ {
+			if queryTokens[qi] == acronym(titleTokens[ti:end]) && match(qi+1, end) {
+				return true
+			}
+		}
+		return false
+	}
+
+	return match(0, 0)
 }
 
 // releaseYear returns the release year of a search result as an int, or 0.

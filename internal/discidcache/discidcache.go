@@ -1,5 +1,5 @@
-// Package discidcache provides a JSON file-backed cache mapping disc
-// fingerprints to TMDB identification data.
+// Package discidcache provides a JSON file-backed cache mapping Blu-ray
+// disc IDs to TMDB identification data.
 package discidcache
 
 import (
@@ -13,7 +13,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 )
 
-// Entry maps a disc fingerprint to TMDB identification data.
+// Entry maps a disc ID to TMDB identification data.
 type Entry struct {
 	TMDBID                 int    `json:"tmdb_id"`
 	MediaType              string `json:"media_type"`
@@ -27,7 +27,7 @@ type Entry struct {
 type Store struct {
 	path    string
 	mu      sync.RWMutex
-	entries map[string]Entry // fingerprint -> entry
+	entries map[string]Entry // disc_id -> entry
 	logger  *slog.Logger
 }
 
@@ -59,18 +59,18 @@ func Open(path string, logger *slog.Logger) (*Store, error) {
 	return s, nil
 }
 
-// Lookup finds an entry by fingerprint. Returns nil if not found.
-func (s *Store) Lookup(fingerprint string) *Entry {
+// Lookup finds an entry by disc ID. Returns nil if not found.
+func (s *Store) Lookup(discID string) *Entry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	entry, ok := s.entries[fingerprint]
+	entry, ok := s.entries[discID]
 	if !ok {
 		s.logger.Info("disc ID cache miss",
 			"decision_type", logs.DecisionDiscIDCache,
 			"decision_result", "miss",
-			"decision_reason", "fingerprint not in cache",
-			"fingerprint", fingerprint,
+			"decision_reason", "disc_id not in cache",
+			"disc_id", discID,
 		)
 		return nil
 	}
@@ -78,7 +78,7 @@ func (s *Store) Lookup(fingerprint string) *Entry {
 		"decision_type", logs.DecisionDiscIDCache,
 		"decision_result", "hit",
 		"decision_reason", fmt.Sprintf("cached tmdb_id=%d", entry.TMDBID),
-		"fingerprint", fingerprint,
+		"disc_id", discID,
 		"tmdb_id", entry.TMDBID,
 		"media_type", entry.MediaType,
 	)
@@ -86,29 +86,29 @@ func (s *Store) Lookup(fingerprint string) *Entry {
 }
 
 // Set adds or updates an entry and persists the cache atomically.
-func (s *Store) Set(fingerprint string, entry Entry) error {
+func (s *Store) Set(discID string, entry Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.entries[fingerprint] = entry
-	s.logger.Info("disc ID cache entry stored", "fingerprint", fingerprint, "tmdb_id", entry.TMDBID)
+	s.entries[discID] = entry
+	s.logger.Info("disc ID cache entry stored", "disc_id", discID, "tmdb_id", entry.TMDBID)
 	return s.persist()
 }
 
-// ListEntry is a disc ID cache entry with its fingerprint, for display.
+// ListEntry is a disc ID cache entry with its disc ID, for display.
 type ListEntry struct {
-	Fingerprint string
-	Entry       Entry
+	DiscID string
+	Entry  Entry
 }
 
-// List returns all entries as a slice, sorted by fingerprint.
+// List returns all entries as a slice, sorted by disc ID.
 func (s *Store) List() []ListEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	result := make([]ListEntry, 0, len(s.entries))
-	for fp, e := range s.entries {
-		result = append(result, ListEntry{Fingerprint: fp, Entry: e})
+	for discID, e := range s.entries {
+		result = append(result, ListEntry{DiscID: discID, Entry: e})
 	}
 	return result
 }
@@ -120,19 +120,19 @@ func (s *Store) Size() int {
 	return len(s.entries)
 }
 
-// Remove deletes an entry by fingerprint and persists.
-func (s *Store) Remove(fingerprint string) error {
+// Remove deletes an entry by disc ID and persists.
+func (s *Store) Remove(discID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.entries[fingerprint]; !ok {
-		return fmt.Errorf("entry not found: %s", fingerprint)
+	if _, ok := s.entries[discID]; !ok {
+		return fmt.Errorf("entry not found: %s", discID)
 	}
-	delete(s.entries, fingerprint)
+	delete(s.entries, discID)
 	if err := s.persist(); err != nil {
 		return err
 	}
-	s.logger.Info("disc ID cache entry removed", "fingerprint", fingerprint)
+	s.logger.Info("disc ID cache entry removed", "disc_id", discID)
 	return nil
 }
 

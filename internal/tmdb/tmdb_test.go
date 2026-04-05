@@ -195,6 +195,42 @@ func TestNormalizeForComparison(t *testing.T) {
 	}
 }
 
+func TestQueryMatchesTitleAlias(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		title string
+		want  bool
+	}{
+		{name: "exact tokens", query: "Breaking Bad", title: "Breaking Bad", want: true},
+		{name: "acronym suffix", query: "Star Trek TNG", title: "Star Trek: The Next Generation", want: true},
+		{name: "digit in acronym", query: "Star Trek DS9", title: "Star Trek: Deep Space Nine", want: false},
+		{name: "different series", query: "Star Trek VOY", title: "Star Trek: The Next Generation", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := queryMatchesTitleAlias(tt.query, tt.title)
+			if got != tt.want {
+				t.Fatalf("queryMatchesTitleAlias(%q, %q) = %v, want %v", tt.query, tt.title, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectBestResult_AliasMatchAccepted(t *testing.T) {
+	results := []SearchResult{
+		{ID: 1, Name: "Star Trek: The Next Generation", FirstAirDate: "1987-09-28", VoteAverage: 8.4, VoteCount: 1775, MediaType: "tv"},
+		{ID: 2, Name: "Star Trek", FirstAirDate: "1966-09-08", VoteAverage: 7.8, VoteCount: 900, MediaType: "tv"},
+	}
+	best := SelectBestResult(results, "Star Trek TNG", 0, 5, slog.Default())
+	if best == nil {
+		t.Fatal("expected a result, got nil")
+	}
+	if best.ID != 1 {
+		t.Fatalf("expected ID 1, got %d", best.ID)
+	}
+}
+
 func TestSearchMovie_HTTPTest(t *testing.T) {
 	var capturedAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

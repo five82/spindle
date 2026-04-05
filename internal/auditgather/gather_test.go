@@ -6,11 +6,11 @@ import (
 	"github.com/five82/spindle/internal/queue"
 )
 
-func TestParseLogLine_MatchesFingerprintWithoutItemID(t *testing.T) {
+func TestParseLogLine_MatchesDiscIDCacheDecisionByItemID(t *testing.T) {
 	item := &queue.Item{ID: 24, DiscFingerprint: "abc123", DiscTitle: "STAR TREK TNG S1 D1"}
 	report := &LogAnalysis{}
 
-	parseLogLine(`{"time":"2026-04-04T21:41:09Z","level":"INFO","msg":"disc ID cache miss","decision_type":"disc_id_cache","decision_result":"miss","decision_reason":"fingerprint not in cache","fingerprint":"abc123"}`,
+	parseLogLine(`{"time":"2026-04-04T21:41:09Z","level":"INFO","msg":"disc ID cache miss","item_id":24,"decision_type":"disc_id_cache","decision_result":"miss","decision_reason":"disc_id not in cache","disc_id":"DCB2FF29F40C9CD4702BC163A3F4511A492E54A4"}`,
 		item, report)
 
 	if len(report.Decisions) != 1 {

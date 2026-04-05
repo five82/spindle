@@ -3,11 +3,14 @@ package identify
 import (
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/discidcache"
+	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -77,6 +80,30 @@ func TestResolveTitle_NilDiscInfo(t *testing.T) {
 	got, _ := h.resolveTitle(item, nil, nil)
 	if got != "Unknown Disc" {
 		t.Errorf("resolveTitle(nil discInfo) = %q, want %q", got, "Unknown Disc")
+	}
+}
+
+func TestResolveTitle_UsesKeyDBDiscID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "KEYDB.cfg")
+	discID := "DCB2FF29F40C9CD4702BC163A3F4511A492E54A4"
+	if err := os.WriteFile(path, []byte(discID+" | Star Trek: The Next Generation | extra\n"), 0o644); err != nil {
+		t.Fatalf("write keydb: %v", err)
+	}
+	cat, _, err := keydb.LoadFromFile(path, discardLogger())
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+
+	h := &Handler{keydbCat: cat}
+	item := &queue.Item{DiscTitle: "STAR TREK TNG S1 D1", DiscFingerprint: "not-the-disc-id"}
+	bdInfo := &BDInfoResult{DiscID: discID, DiscName: "BDINFO NAME"}
+	got, source := h.resolveTitle(item, &makemkv.DiscInfo{Name: "MAKEMKV NAME"}, bdInfo)
+	if got != "Star Trek: The Next Generation" {
+		t.Fatalf("resolveTitle() = %q, want %q", got, "Star Trek: The Next Generation")
+	}
+	if source != "keydb" {
+		t.Fatalf("source = %q, want keydb", source)
 	}
 }
 
@@ -155,6 +182,11 @@ func TestCleanQueryTitle(t *testing.T) {
 			name:  "no false positive on BD within words",
 			input: "Abduction",
 			want:  "Abduction",
+		},
+		{
+			name:  "strips shorthand season and disc markers",
+			input: "STAR TREK TNG S1 D1",
+			want:  "STAR TREK TNG",
 		},
 		{
 			name:  "falls back to original if result would be empty",
@@ -545,6 +577,7 @@ func TestExtractDiscNumber(t *testing.T) {
 		{"DISC_2", []string{"SHOW_DISC_2"}, 2},
 		{"Volume 3", []string{"Kill Bill Volume 3"}, 3},
 		{"Part 1", []string{"Harry Potter Part 1"}, 1},
+		{"D1 shorthand", []string{"STAR TREK TNG S1 D1"}, 1},
 		{"no match", []string{"THE_MATRIX"}, 0},
 	}
 	for _, tt := range tests {

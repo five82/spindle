@@ -28,9 +28,10 @@ import (
 )
 
 // discMetadataPattern strips season, disc, volume, and part indicators from disc labels.
-// Examples: "- Season 2", ": Disc 6", "Volume 3", "Part 1", "TV Series".
+// Supports both longhand and common shorthand forms such as "Season 2", "S2",
+// "Disc 6", and "D1".
 var discMetadataPattern = regexp.MustCompile(
-	`(?i)(\s*[-:]\s*)?(season\s+\d+|disc\s+\d+|volume\s+\d+|part\s+\d+|tv\s+series)`,
+	`(?i)\b(?:season[\s_]*\d+|s\d{1,2}|disc[\s_]*\d+|d\d{1,2}|volume[\s_]*\d+|part[\s_]*\d+|tv\s+series)\b`,
 )
 
 // formatBrandingPattern strips physical media format descriptors from disc titles.
@@ -50,8 +51,8 @@ var trailingYearPattern = regexp.MustCompile(`(?i)(?:\s*\((\d{4})\)|\s+(\d{4}))\
 // seasonPattern extracts a season number from disc titles (e.g., "S01", "Season 1", "SEASON_1").
 var seasonPattern = regexp.MustCompile(`(?i)(?:s|season[\s_]*)(\d+)`)
 
-// discNumberPattern extracts a disc/volume/part number from disc titles (e.g., "Disc 1", "Volume 3", "Part 1").
-var discNumberPattern = regexp.MustCompile(`(?i)(?:disc|volume|part)[\s_]*(\d+)`)
+// discNumberPattern extracts a disc/volume/part number from disc titles (e.g., "Disc 1", "Volume 3", "Part 1", "D1").
+var discNumberPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:disc[\s_]*|volume[\s_]*|part[\s_]*|d)(\d{1,2})(?:$|[^a-z0-9])`)
 
 // tvHintPattern detects TV content indicators in disc titles.
 // Matches "TV Series", "Season N", or "S01"/"S1" preceded by a non-letter (or start of string).
@@ -180,18 +181,24 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 	mediaHint := detectMediaTypeHint(result.RawTitle)
 	result.MediaHint = mediaHint
 
+	discID := ""
+	if result.BDInfo != nil {
+		discID = strings.TrimSpace(result.BDInfo.DiscID)
+	}
+
 	// Step 5: Check disc ID cache (skips TMDB search and KeyDB lookup, not the scan).
 	// Validate cached media type against fresh disc metadata to prevent stale entries
 	// from overriding unambiguous disc signals (e.g., TV hint vs cached movie).
-	if h.discIDCache != nil && item.DiscFingerprint != "" {
-		if entry := h.discIDCache.Lookup(item.DiscFingerprint); entry != nil {
+	if h.discIDCache != nil && discID != "" {
+		if entry := h.discIDCache.Lookup(discID); entry != nil {
 			if mediaHint == "tv" && entry.MediaType == "movie" {
 				logger.Warn("disc ID cache invalidated: TV hint contradicts cached movie type",
 					"decision_type", logs.DecisionDiscIDCache,
 					"decision_result", "invalidated",
 					"decision_reason", fmt.Sprintf("raw_title=%q has TV hint but cache says movie", result.RawTitle),
+					"disc_id", discID,
 				)
-				_ = h.discIDCache.Remove(item.DiscFingerprint)
+				_ = h.discIDCache.Remove(discID)
 				// Fall through to full identification.
 			} else {
 				canonTitle := entry.Title
@@ -203,6 +210,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 					"decision_type", logs.DecisionTitleSource,
 					"decision_result", "updated",
 					"decision_reason", "disc_id_cache_entry",
+					"disc_id", discID,
 				)
 				result.Envelope = h.buildEnvelopeFromCache(logger, item, entry, result.DiscInfo, result.DiscSource)
 				setForcedSubtitleAttribute(logger, result.DiscInfo, &result.Envelope)
@@ -365,7 +373,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Cache disc ID.
-	if result.Best != nil && h.discIDCache != nil && item.DiscFingerprint != "" {
+	cacheDiscID := ""
+	if result.BDInfo != nil {
+		cacheDiscID = strings.TrimSpace(result.BDInfo.DiscID)
+	}
+	if result.Best != nil && h.discIDCache != nil && cacheDiscID != "" {
 		entry := discidcache.Entry{
 			TMDBID:                 result.Best.ID,
 			MediaType:              result.MediaType,
@@ -373,11 +385,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Year:                   result.Best.Year(),
 			HasForcedSubtitleTrack: result.Envelope.Attributes.HasForcedSubtitleTrack,
 		}
-		if err := h.discIDCache.Set(item.DiscFingerprint, entry); err != nil {
+		if err := h.discIDCache.Set(cacheDiscID, entry); err != nil {
 			logger.Warn("disc ID cache write failed",
 				"event_type", "cache_write_error",
 				"error_hint", err.Error(),
 				"impact", "cache miss on next insert",
+				"disc_id", cacheDiscID,
 			)
 		}
 	}
@@ -409,9 +422,11 @@ func (h *Handler) updateProgress(item *queue.Item, percent float64, message stri
 // resolveTitle implements the title priority chain and returns both the
 // resolved title and the source that was used for observability.
 func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo, bdInfo *BDInfoResult) (string, string) {
-	if h.keydbCat != nil && item.DiscFingerprint != "" {
-		if title := h.keydbCat.Lookup(item.DiscFingerprint); title != "" {
-			return title, "keydb"
+	if h.keydbCat != nil && bdInfo != nil {
+		if discID := strings.TrimSpace(bdInfo.DiscID); discID != "" {
+			if title := h.keydbCat.Lookup(discID); title != "" {
+				return title, "keydb"
+			}
 		}
 	}
 	if bdInfo != nil && bdInfo.DiscName != "" {

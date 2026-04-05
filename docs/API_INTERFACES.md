@@ -166,10 +166,10 @@ Identify a disc and show TMDB matching details.
 Arguments: Optional `[device]` positional argument (overrides `--device`).
 
 Runs the same identification pipeline as the daemon, including mount resolution,
-fingerprint generation, disc ID cache lookup, and TMDB search. Results are
-displayed without affecting the queue. This command must produce identical
-identification results to the daemon for the same disc (see DESIGN_STAGES.md
-section 1.5).
+fingerprint generation, BDInfo disc ID extraction, KeyDB lookup, disc ID cache
+lookup, and TMDB search. Results are displayed without affecting the queue.
+This command must produce identical identification results to the daemon for the
+same disc (see DESIGN_STAGES.md section 1.5).
 
 #### `spindle gensubtitle <encoded-file>`
 
@@ -309,11 +309,11 @@ Manages the disc ID cache (Blu-ray disc ID to TMDB ID mappings).
 #### `spindle discid list`
 
 List all cached disc ID mappings. Numbered, sorted by most recently cached.
-Shows title, TMDB ID, media type, season, disc ID (truncated), cached date.
+Shows title, TMDB ID, media type, season, and Blu-ray disc ID (truncated), plus cached date.
 
 #### `spindle discid remove <number>`
 
-Remove a specific cache entry by number from `discid list`.
+Remove a specific cache entry by number from `discid list`. Entries are keyed by Blu-ray disc ID, not by disc fingerprint.
 
 #### `spindle discid clear`
 
