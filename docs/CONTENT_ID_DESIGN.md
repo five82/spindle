@@ -173,7 +173,9 @@ episode set using the best available information:
    estimate the episode range from disc position and number of ripped placeholder assets.
    Those placeholder assets come from identification-time TV title selection, which keeps
    the dominant long-form runtime cluster, excludes likely extras, and may preserve a
-   probable double-length title as a single unresolved placeholder asset. For disc 1,
+   probable double-length title as a single unresolved placeholder asset. If a combined
+   double-length playlist and split episode-length playlists represent the same content
+   family, only the combined placeholder asset is preserved. For disc 1,
    a probable opening double-length title increases the block estimate by one represented
    episode so the matcher can fetch the extra reference episode needed for a later
    `SxxExx-Eyy` range decision.

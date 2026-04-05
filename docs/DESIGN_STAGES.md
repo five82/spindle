@@ -233,8 +233,11 @@ After identification:
    Then deduplicate by segment map (m2ts identity) before creating episode
    specs with placeholder keys (e.g., `s01_001`). Titles sharing a segment
    map reference identical content even if playlist metadata differs (common
-   on TV Blu-rays with multiple language playlists). Falls back to title hash
-   for DVDs where segment map is absent.
+   on TV Blu-rays with multiple language playlists). When a double-length
+   playlist's segment map is the union of two selected episode-length
+   playlists, treat them as alternate representations of the same content
+   family and preserve only the combined placeholder asset. Falls back to
+   title hash for DVDs where segment map is absent.
 3. Set metadata fields from TMDB response.
 4. Set `metadata.disc_source` (`bluray`, `dvd`, `unknown` --
    determined from disc detection via lsblk probe).
