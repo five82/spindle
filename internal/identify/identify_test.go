@@ -840,6 +840,21 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			wantReasonByID: map[int]string{0: "probable_double_episode_candidate"},
 		},
 		{
+			name:           "combined playlist replaces split pilot halves when segment union matches",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 5464, SegmentMap: "1,2,64"},
+				{ID: 1, Duration: 2730, SegmentMap: "2,64"},
+				{ID: 2, Duration: 2734, SegmentMap: "1,64"},
+				{ID: 3, Duration: 140, SegmentMap: "29,30"},
+			},
+			wantIDs:        []int{0},
+			wantAmbiguous:  false,
+			wantDoubleLong: 1,
+			wantExtras:     3,
+			wantReasonByID: map[int]string{0: "combined_double_episode_candidate", 1: "runtime_cluster_extra", 2: "runtime_cluster_extra", 3: "runtime_cluster_extra"},
+		},
+		{
 			name:           "duplicate playlists dedupe by segment map",
 			minTitleLength: 120,
 			titles: []ripspec.Title{

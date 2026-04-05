@@ -2,7 +2,9 @@ package identify
 
 import (
 	"fmt"
+	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/five82/spindle/internal/ripspec"
@@ -117,10 +119,17 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		}
 		return a.title.Duration - b.title.Duration
 	})
-	if len(qualifyingDoubleCandidates) > 0 {
+	result.AmbiguousLongCount = len(qualifyingDoubleCandidates)
+	combinedFamilyResolved := false
+	if combined, components, ok := chooseCombinedDoubleEpisodeTitle(primary.candidates, qualifyingDoubleCandidates); ok {
+		selectedByIndex[combined.decisionIndex] = "combined_double_episode_candidate"
+		for _, component := range components {
+			delete(selectedByIndex, component.decisionIndex)
+		}
+		combinedFamilyResolved = true
+	} else if len(qualifyingDoubleCandidates) > 0 {
 		selectedByIndex[qualifyingDoubleCandidates[0].decisionIndex] = "probable_double_episode_candidate"
 	}
-	result.AmbiguousLongCount = len(qualifyingDoubleCandidates)
 
 	for _, cluster := range clusters {
 		for _, candidate := range cluster.candidates {
@@ -164,7 +173,7 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "competing_runtime_clusters")
 	}
-	if len(candidates) > 0 && result.ExtraCount*2 > len(candidates) {
+	if len(candidates) > 0 && result.ExtraCount*2 > len(candidates) && !combinedFamilyResolved {
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "extras_dominate_candidates")
 	}
@@ -321,6 +330,69 @@ func dedupKey(title ripspec.Title) string {
 		return key
 	}
 	return strings.TrimSpace(title.TitleHash)
+}
+
+func chooseCombinedDoubleEpisodeTitle(primary []tvTitleCandidate, doubles []tvTitleCandidate) (tvTitleCandidate, []tvTitleCandidate, bool) {
+	for _, combined := range doubles {
+		combinedSegs, ok := parseSegmentSet(combined.title.SegmentMap)
+		if !ok {
+			continue
+		}
+		for i := 0; i < len(primary); i++ {
+			for j := i + 1; j < len(primary); j++ {
+				a := primary[i]
+				b := primary[j]
+				segA, okA := parseSegmentSet(a.title.SegmentMap)
+				segB, okB := parseSegmentSet(b.title.SegmentMap)
+				if !okA || !okB {
+					continue
+				}
+				if maps.Equal(segA, combinedSegs) || maps.Equal(segB, combinedSegs) {
+					continue
+				}
+				union := maps.Clone(segA)
+				maps.Copy(union, segB)
+				if !maps.Equal(union, combinedSegs) {
+					continue
+				}
+				if !durationsLookCombined(a.title.Duration, b.title.Duration, combined.title.Duration) {
+					continue
+				}
+				return combined, []tvTitleCandidate{a, b}, true
+			}
+		}
+	}
+	return tvTitleCandidate{}, nil, false
+}
+
+func parseSegmentSet(segmentMap string) (map[int]struct{}, bool) {
+	segmentMap = strings.TrimSpace(segmentMap)
+	if segmentMap == "" {
+		return nil, false
+	}
+	parts := strings.Split(segmentMap, ",")
+	result := make(map[int]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, false
+		}
+		result[value] = struct{}{}
+	}
+	return result, len(result) > 0
+}
+
+func durationsLookCombined(a, b, combined int) bool {
+	if a <= 0 || b <= 0 || combined <= 0 {
+		return false
+	}
+	delta := abs((a + b) - combined)
+	threshold := max(90, combined/20)
+	return delta <= threshold
 }
 
 func summarizeAmbiguity(reasons []string) string {
