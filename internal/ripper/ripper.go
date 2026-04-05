@@ -229,33 +229,50 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			return fmt.Errorf("rip title %d: %w", title.ID, err)
 		}
 
-		// Find the new file produced by this rip.
+		// Find the new file produced by this rip. makemkv.Rip already
+		// verifies that at least one new file appeared and refuses to
+		// return nil on zero output, but we re-check here as defense in
+		// depth — this is the single error surface the ripper stage
+		// presents regardless of how a future refactor reshuffles
+		// responsibility.
 		after := listMKVFiles(rippedDir)
 		newFile := findNewFile(before, after)
-		if newFile != "" {
-			logger.Info("title rip completed",
-				"decision_type", logs.DecisionTitleRip,
-				"decision_result", "completed",
-				"decision_reason", fmt.Sprintf("title_id=%d file=%s", title.ID, newFile),
-			)
-			if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
-				env.Assets.AddAsset("ripped", ripspec.Asset{
-					EpisodeKey: episodeKey,
-					TitleID:    title.ID,
-					Path:       newFile,
-					Status:     "completed",
-				})
-				item.RippedFile = newFile
-				if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
-					return err
-				}
-			}
-		} else {
-			logger.Info("title rip completed but no new file detected",
+		if newFile == "" {
+			logger.Error("title rip produced no new file",
 				"decision_type", logs.DecisionFileDiscovery,
 				"decision_result", "not_found",
 				"decision_reason", fmt.Sprintf("title_id=%d", title.ID),
+				"event_type", "rip_output_missing",
+				"error_hint", "makemkv rip returned success but no new mkv appeared in staging",
+				"title_id", title.ID,
+				"ripped_dir", rippedDir,
 			)
+			return fmt.Errorf("rip title %d: no new mkv file in %s after rip", title.ID, rippedDir)
+		}
+
+		var newFileSize int64
+		if fi, statErr := os.Stat(newFile); statErr == nil {
+			newFileSize = fi.Size()
+		}
+		logger.Info("title rip completed",
+			"decision_type", logs.DecisionTitleRip,
+			"decision_result", "completed",
+			"decision_reason", fmt.Sprintf("title_id=%d file=%s size=%d", title.ID, newFile, newFileSize),
+			"title_id", title.ID,
+			"file", newFile,
+			"size_bytes", newFileSize,
+		)
+		if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
+			env.Assets.AddAsset("ripped", ripspec.Asset{
+				EpisodeKey: episodeKey,
+				TitleID:    title.ID,
+				Path:       newFile,
+				Status:     "completed",
+			})
+			item.RippedFile = newFile
+			if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+				return err
+			}
 		}
 
 		item.ProgressPercent = overallRipPercent(i+1, len(targets), 0)

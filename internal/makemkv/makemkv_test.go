@@ -1,6 +1,8 @@
 package makemkv
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -354,5 +356,143 @@ func TestSplitFields(t *testing.T) {
 				t.Errorf("last field = %q, want %q", got[len(got)-1], tt.wantLn)
 			}
 		})
+	}
+}
+
+func TestParseMSG(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		wantOK     bool
+		wantCode   int
+		wantFlags  int
+		wantMsg    string
+		wantParams []string
+		wantError  bool
+	}{
+		{
+			name:      "startup info",
+			line:      `MSG:1005,0,1,"MakeMKV v1.18.3 linux(x64-release) started","%1 started","MakeMKV v1.18.3 linux(x64-release)"`,
+			wantOK:    true,
+			wantCode:  1005,
+			wantFlags: 0,
+			wantMsg:   "MakeMKV v1.18.3 linux(x64-release) started",
+			wantParams: []string{
+				"MakeMKV v1.18.3 linux(x64-release)",
+			},
+		},
+		{
+			name:       "copy complete summary",
+			line:       `MSG:5036,0,2,"Copy complete. 1 titles saved, 0 failed.","Copy complete. %1 titles saved, %2 failed.","1","0"`,
+			wantOK:     true,
+			wantCode:   5036,
+			wantFlags:  0,
+			wantMsg:    "Copy complete. 1 titles saved, 0 failed.",
+			wantParams: []string{"1", "0"},
+		},
+		{
+			name:      "error flag set",
+			line:      `MSG:2024,1,1,"Failed to save title","Failed to save title %1","1"`,
+			wantOK:    true,
+			wantCode:  2024,
+			wantFlags: 1,
+			wantError: true,
+			wantMsg:   "Failed to save title",
+			wantParams: []string{
+				"1",
+			},
+		},
+		{
+			name:     "non-MSG prefix ignored",
+			line:     `PRGV:100,200,65536`,
+			wantOK:   false,
+		},
+		{
+			name:     "malformed",
+			line:     `MSG:not,a,number`,
+			wantOK:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, ok := parseMSG(tt.line)
+			if ok != tt.wantOK {
+				t.Fatalf("parseMSG ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if msg.code != tt.wantCode {
+				t.Errorf("code = %d, want %d", msg.code, tt.wantCode)
+			}
+			if msg.flags != tt.wantFlags {
+				t.Errorf("flags = %d, want %d", msg.flags, tt.wantFlags)
+			}
+			if msg.message != tt.wantMsg {
+				t.Errorf("message = %q, want %q", msg.message, tt.wantMsg)
+			}
+			if msg.isError() != tt.wantError {
+				t.Errorf("isError = %v, want %v", msg.isError(), tt.wantError)
+			}
+			if len(msg.params) != len(tt.wantParams) {
+				t.Fatalf("params len = %d, want %d (%v)", len(msg.params), len(tt.wantParams), msg.params)
+			}
+			for i, p := range tt.wantParams {
+				if msg.params[i] != p {
+					t.Errorf("params[%d] = %q, want %q", i, msg.params[i], p)
+				}
+			}
+		})
+	}
+}
+
+func TestSplitAllFieldsQuotedCommas(t *testing.T) {
+	// MSG lines can have many comma-separated params; splitAllFields
+	// must preserve quoted commas as literal characters inside a field.
+	fields := splitAllFields(`5036,0,2,"Copy complete. 1 titles saved, 0 failed.","%1 saved, %2 failed","1","0"`)
+	if len(fields) != 7 {
+		t.Fatalf("expected 7 fields, got %d: %v", len(fields), fields)
+	}
+	if fields[3] != `"Copy complete. 1 titles saved, 0 failed."` {
+		t.Errorf("fields[3] = %q", fields[3])
+	}
+	if fields[5] != `"1"` || fields[6] != `"0"` {
+		t.Errorf("param fields = %q, %q", fields[5], fields[6])
+	}
+}
+
+func TestSnapshotAndNewMKVFiles(t *testing.T) {
+	dir := t.TempDir()
+	// Missing dir is fine.
+	if got := snapshotMKVFiles(filepath.Join(dir, "does-not-exist")); len(got) != 0 {
+		t.Errorf("expected empty snapshot for missing dir, got %v", got)
+	}
+
+	// Seed one existing file.
+	if err := os.WriteFile(filepath.Join(dir, "title_t01.mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Unrelated file must be ignored.
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	before := snapshotMKVFiles(dir)
+	if _, ok := before["title_t01.mkv"]; !ok || len(before) != 1 {
+		t.Fatalf("expected 1 mkv in snapshot, got %v", before)
+	}
+
+	// No new files yet.
+	if got := newMKVFiles(dir, before); len(got) != 0 {
+		t.Errorf("expected no new files, got %v", got)
+	}
+
+	// Add a new mkv and verify it's detected.
+	if err := os.WriteFile(filepath.Join(dir, "title_t00.mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	got := newMKVFiles(dir, before)
+	if len(got) != 1 || got[0] != "title_t00.mkv" {
+		t.Errorf("expected [title_t00.mkv], got %v", got)
 	}
 }

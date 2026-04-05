@@ -855,6 +855,33 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			wantReasonByID: map[int]string{0: "combined_double_episode_candidate", 1: "runtime_cluster_extra", 2: "runtime_cluster_extra", 3: "runtime_cluster_extra"},
 		},
 		{
+			// TNG S1 D1 real disc layout: two viable double candidates
+			// (multi-segment composite 00027.mpls and single-segment
+			// precomposed 00040.mpls), both ~91min. The single-segment
+			// playlist must win because seamless-branch composites have
+			// been observed to silently fail during rip.
+			name:           "prefers single-segment playlist when two doubles qualify",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 5464, SegmentCount: 3, SegmentMap: "1,2,64", Playlist: "00027.mpls"},
+				{ID: 1, Duration: 2730, SegmentCount: 2, SegmentMap: "2,64", Playlist: "00042.mpls"},
+				{ID: 2, Duration: 2734, SegmentCount: 2, SegmentMap: "1,64", Playlist: "00041.mpls"},
+				{ID: 3, Duration: 5481, SegmentCount: 1, SegmentMap: "0", Playlist: "00040.mpls"},
+				{ID: 4, Duration: 140, SegmentCount: 2, SegmentMap: "29,30", Playlist: "00013.mpls"},
+			},
+			wantIDs:        []int{3},
+			wantAmbiguous:  false,
+			wantDoubleLong: 2,
+			wantExtras:     4,
+			wantReasonByID: map[int]string{
+				3: "combined_double_episode_candidate",
+				0: "runtime_cluster_extra",
+				1: "runtime_cluster_extra",
+				2: "runtime_cluster_extra",
+				4: "runtime_cluster_extra",
+			},
+		},
+		{
 			name:           "duplicate playlists dedupe by segment map",
 			minTitleLength: 120,
 			titles: []ripspec.Title{

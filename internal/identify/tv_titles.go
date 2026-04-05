@@ -113,16 +113,24 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 			}
 		}
 	}
-	slices.SortFunc(qualifyingDoubleCandidates, func(a, b tvTitleCandidate) int {
-		if a.title.ID != b.title.ID {
-			return a.title.ID - b.title.ID
-		}
-		return a.title.Duration - b.title.Duration
-	})
+	// Sort double candidates by rip-safety preference: fewer playlist
+	// segments first (single-segment precomposed playlists avoid
+	// seamless-branch key failures that silently corrupt composite
+	// rips), then by playlist number (lower mpls is typically the
+	// primary authoring), then by title ID and duration.
+	slices.SortFunc(qualifyingDoubleCandidates, compareDoubleCandidatesByRipSafety)
 	result.AmbiguousLongCount = len(qualifyingDoubleCandidates)
 	combinedFamilyResolved := false
-	if combined, components, ok := chooseCombinedDoubleEpisodeTitle(primary.candidates, qualifyingDoubleCandidates); ok {
-		selectedByIndex[combined.decisionIndex] = "combined_double_episode_candidate"
+	// chooseCombinedDoubleEpisodeTitle proves "these halves and some
+	// long candidate are the same pilot" via segment-union matching.
+	// Its match is used only as a family-detection signal — the actual
+	// rip target is the safest entry in the sorted double list, which
+	// may be a different encoding of the same pilot (e.g. a
+	// single-segment precomposed playlist sitting alongside a
+	// multi-segment composite).
+	if _, components, ok := chooseCombinedDoubleEpisodeTitle(primary.candidates, qualifyingDoubleCandidates); ok {
+		ripTarget := qualifyingDoubleCandidates[0]
+		selectedByIndex[ripTarget.decisionIndex] = "combined_double_episode_candidate"
 		for _, component := range components {
 			delete(selectedByIndex, component.decisionIndex)
 		}
@@ -177,12 +185,53 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "extras_dominate_candidates")
 	}
-	if len(qualifyingDoubleCandidates) >= 2 {
+	// Only flag ambiguity when we could not resolve the combined family
+	// via segment-union matching. When the combined match succeeded,
+	// additional qualifying doubles are alternate encodings of the
+	// same episode (e.g. a multi-segment composite alongside a
+	// single-segment precomposed playlist) that were deliberately
+	// deselected — not a real ambiguity.
+	if len(qualifyingDoubleCandidates) >= 2 && !combinedFamilyResolved {
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "multiple_double_episode_candidates")
 	}
 
 	return result
+}
+
+// compareDoubleCandidatesByRipSafety orders qualifying double-episode
+// candidates so that the safest-to-rip variant comes first:
+//  1. Fewer playlist segments (prefer single-segment precomposed
+//     playlists over seamless-branched composites).
+//  2. Lower playlist number (typically the primary authoring).
+//  3. Lower title ID.
+//  4. Shorter duration (stable final tiebreak).
+func compareDoubleCandidatesByRipSafety(a, b tvTitleCandidate) int {
+	aSegs := segmentCount(a.title)
+	bSegs := segmentCount(b.title)
+	if aSegs != bSegs {
+		return aSegs - bSegs
+	}
+	if cmp := strings.Compare(a.title.Playlist, b.title.Playlist); cmp != 0 {
+		return cmp
+	}
+	if a.title.ID != b.title.ID {
+		return a.title.ID - b.title.ID
+	}
+	return a.title.Duration - b.title.Duration
+}
+
+// segmentCount returns the best available segment count for a title,
+// falling back to parsing SegmentMap when SegmentCount is unset.
+func segmentCount(title ripspec.Title) int {
+	if title.SegmentCount > 0 {
+		return title.SegmentCount
+	}
+	segs, ok := parseSegmentSet(title.SegmentMap)
+	if !ok {
+		return 0
+	}
+	return len(segs)
 }
 
 func buildTVTitleClusters(sorted []tvTitleCandidate) []tvTitleCluster {

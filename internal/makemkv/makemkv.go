@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -111,8 +113,38 @@ func Scan(ctx context.Context, device string, timeout time.Duration, minLength i
 	return info, nil
 }
 
+// MakeMKV robot-protocol MSG flag bits (from AP_iMSG_Flags).
+// Only the low byte carries semantic flags; upper bits are UI hints.
+const (
+	msgFlagError   = 0x01
+	msgFlagWarning = 0x02
+	msgFlagDebug   = 0x04
+)
+
+// MakeMKV MSG code for the final "Copy complete" summary line.
+// Format params: %1 = titles saved, %2 = titles failed.
+const msgCodeCopyComplete = 5036
+
+// ripMessage is a parsed MSG line from makemkvcon rip output.
+type ripMessage struct {
+	code    int
+	flags   int
+	message string
+	params  []string
+}
+
+func (m ripMessage) isError() bool   { return m.flags&msgFlagError != 0 }
+func (m ripMessage) isWarning() bool { return m.flags&msgFlagWarning != 0 }
+
 // Rip runs makemkvcon mkv to rip a single title from disc to outputDir.
 // The progress callback, if non-nil, is called with progress updates.
+//
+// Unlike a naive `cmd.Wait()` check, this also parses MSG lines from the
+// robot output to surface error/warning diagnostics, extracts the final
+// "Copy complete" saved/failed counts, and verifies that an output file
+// actually appeared on disk. makemkvcon has been observed to exit 0
+// while producing no output (for example, on seamless-branch key
+// failures), so exit status alone is not a reliable success signal.
 func Rip(ctx context.Context, device string, titleID int, outputDir string, timeout time.Duration, minLength int, progress func(RipProgress), logger *slog.Logger) error {
 	logger = logs.Default(logger)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -128,6 +160,10 @@ func Rip(ctx context.Context, device string, titleID int, outputDir string, time
 		"title_id", titleID,
 		"output_dir", outputDir,
 	)
+
+	// Snapshot existing .mkv files so we can identify the new one
+	// produced by this rip (independent of file name heuristics).
+	existing := snapshotMKVFiles(outputDir)
 
 	cmd := exec.CommandContext(ctx, "makemkvcon", "--robot", "--progress=-same", "mkv", src, titleStr, outputDir, minLenFlag)
 
@@ -150,12 +186,53 @@ func Rip(ctx context.Context, device string, titleID int, outputDir string, time
 		return fmt.Errorf("makemkv rip: start: %w", err)
 	}
 
+	var (
+		errorMsgs     []ripMessage
+		warningMsgs   []ripMessage
+		savedCount    = -1 // -1 = unknown (no MSG:5036 seen)
+		failedCount   = -1
+		lastErrorText string
+	)
+
 	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if progress != nil {
 			if p, ok := parsePRGV(line, titleID); ok {
 				progress(p)
+				continue
+			}
+		}
+		if msg, ok := parseMSG(line); ok {
+			switch {
+			case msg.isError():
+				errorMsgs = append(errorMsgs, msg)
+				lastErrorText = msg.message
+				logger.Warn("MakeMKV rip reported error message",
+					"event_type", "makemkv_rip_message",
+					"msg_code", msg.code,
+					"msg_flags", msg.flags,
+					"message", msg.message,
+					"title_id", titleID,
+				)
+			case msg.isWarning():
+				warningMsgs = append(warningMsgs, msg)
+				logger.Debug("MakeMKV rip reported warning message",
+					"event_type", "makemkv_rip_message",
+					"msg_code", msg.code,
+					"msg_flags", msg.flags,
+					"message", msg.message,
+					"title_id", titleID,
+				)
+			}
+			if msg.code == msgCodeCopyComplete && len(msg.params) >= 2 {
+				if n, err := strconv.Atoi(msg.params[0]); err == nil {
+					savedCount = n
+				}
+				if n, err := strconv.Atoi(msg.params[1]); err == nil {
+					failedCount = n
+				}
 			}
 		}
 	}
@@ -168,22 +245,103 @@ func Rip(ctx context.Context, device string, titleID int, outputDir string, time
 		return fmt.Errorf("makemkv rip: read output: %w", err)
 	}
 
-	if err := cmd.Wait(); err != nil {
+	waitErr := cmd.Wait()
+	if waitErr != nil {
 		logger.Error("MakeMKV rip failed",
 			"event_type", "makemkv_rip_error",
 			"error_hint", "makemkvcon rip exited with error",
-			"error", err,
+			"error", waitErr,
 			"title_id", titleID,
+			"error_msg_count", len(errorMsgs),
+			"last_error_message", lastErrorText,
 		)
-		return fmt.Errorf("makemkv rip: %w", err)
+		return fmt.Errorf("makemkv rip: %w (error_messages=%d, last=%q)", waitErr, len(errorMsgs), lastErrorText)
+	}
+
+	// Verify output: exit 0 is not sufficient. A successful rip must
+	// produce at least one new .mkv file and, if the final summary was
+	// captured, show saved>=1.
+	newFiles := newMKVFiles(outputDir, existing)
+	if len(newFiles) == 0 {
+		logger.Error("MakeMKV rip produced no output",
+			"event_type", "makemkv_rip_error",
+			"error_hint", "makemkvcon exited 0 but no new MKV file appeared",
+			"title_id", titleID,
+			"output_dir", outputDir,
+			"saved_count", savedCount,
+			"failed_count", failedCount,
+			"error_msg_count", len(errorMsgs),
+			"warning_msg_count", len(warningMsgs),
+			"last_error_message", lastErrorText,
+		)
+		return fmt.Errorf("makemkv rip: makemkvcon exited 0 but produced no output (saved=%d failed=%d errors=%d last=%q)",
+			savedCount, failedCount, len(errorMsgs), lastErrorText)
+	}
+	if savedCount == 0 {
+		logger.Error("MakeMKV rip summary reports zero saved",
+			"event_type", "makemkv_rip_error",
+			"error_hint", "makemkvcon final summary shows zero titles saved",
+			"title_id", titleID,
+			"saved_count", savedCount,
+			"failed_count", failedCount,
+			"new_files", len(newFiles),
+			"last_error_message", lastErrorText,
+		)
+		return fmt.Errorf("makemkv rip: summary reports zero saved (failed=%d errors=%d last=%q)",
+			failedCount, len(errorMsgs), lastErrorText)
 	}
 
 	logger.Info("MakeMKV rip completed",
 		"event_type", "makemkv_rip_complete",
 		"device", src,
 		"title_id", titleID,
+		"saved_count", savedCount,
+		"failed_count", failedCount,
+		"new_files", len(newFiles),
+		"warning_msg_count", len(warningMsgs),
 	)
 	return nil
+}
+
+// snapshotMKVFiles returns the set of .mkv file names present in dir.
+// Returns an empty set if the directory does not exist yet.
+func snapshotMKVFiles(dir string) map[string]struct{} {
+	result := make(map[string]struct{})
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return result
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.EqualFold(filepath.Ext(e.Name()), ".mkv") {
+			result[e.Name()] = struct{}{}
+		}
+	}
+	return result
+}
+
+// newMKVFiles returns .mkv file names in dir that are not in existing.
+func newMKVFiles(dir string, existing map[string]struct{}) []string {
+	var out []string
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.EqualFold(filepath.Ext(e.Name()), ".mkv") {
+			continue
+		}
+		if _, was := existing[e.Name()]; was {
+			continue
+		}
+		out = append(out, e.Name())
+	}
+	return out
 }
 
 // normalizeDevice converts a device string to the format expected by makemkvcon.
@@ -324,6 +482,72 @@ type titleAttrs struct {
 	segmentCount int
 	segmentMap   string
 	playlist     string
+}
+
+// parseMSG parses a MSG robot-protocol line.
+//
+// Format: MSG:code,flags,count,"message","format",param1,param2,...
+//
+// `count` is the number of format parameters that follow the "message"
+// and "format" fields. The leading fields are always present; extra
+// fields beyond count are ignored.
+func parseMSG(line string) (ripMessage, bool) {
+	prefix, body, ok := splitRobotLine(line)
+	if !ok || prefix != "MSG" {
+		return ripMessage{}, false
+	}
+	// Split aggressively — MSG lines can have many comma-separated
+	// params. splitFields stops at n-1 and puts the remainder into the
+	// last field, which would glue all params together. Do a manual
+	// quote-aware split instead.
+	fields := splitAllFields(body)
+	if len(fields) < 4 {
+		return ripMessage{}, false
+	}
+	code, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return ripMessage{}, false
+	}
+	flags, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return ripMessage{}, false
+	}
+	// fields[2] = param count, fields[3] = "message"
+	msg := ripMessage{
+		code:    code,
+		flags:   flags,
+		message: unquote(fields[3]),
+	}
+	// Params begin after message (index 3) and format (index 4).
+	if len(fields) > 5 {
+		for _, f := range fields[5:] {
+			msg.params = append(msg.params, unquote(f))
+		}
+	}
+	return msg, true
+}
+
+// splitAllFields splits a comma-separated robot-protocol body into all
+// fields, honoring double-quoted values that may contain commas.
+func splitAllFields(s string) []string {
+	var fields []string
+	var current strings.Builder
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '"':
+			inQuote = !inQuote
+			current.WriteByte(ch)
+		case ch == ',' && !inQuote:
+			fields = append(fields, current.String())
+			current.Reset()
+		default:
+			current.WriteByte(ch)
+		}
+	}
+	fields = append(fields, current.String())
+	return fields
 }
 
 // parsePRGV parses a PRGV progress line and returns a RipProgress.
