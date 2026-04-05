@@ -95,7 +95,7 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		selectedByIndex[candidate.decisionIndex] = "primary_runtime_cluster"
 	}
 
-	doubleCandidates := 0
+	qualifyingDoubleCandidates := make([]tvTitleCandidate, 0)
 	if len(primary.candidates) >= 2 && primary.median > 0 {
 		minDur := int(float64(primary.median) * tvDoubleMinRatio)
 		maxDur := int(float64(primary.median) * tvDoubleMaxRatio)
@@ -106,13 +106,21 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 			for _, candidate := range cluster.candidates {
 				dur := candidate.title.Duration
 				if dur >= minDur && dur <= maxDur {
-					selectedByIndex[candidate.decisionIndex] = "probable_double_episode_candidate"
-					doubleCandidates++
+					qualifyingDoubleCandidates = append(qualifyingDoubleCandidates, candidate)
 				}
 			}
 		}
 	}
-	result.AmbiguousLongCount = doubleCandidates
+	slices.SortFunc(qualifyingDoubleCandidates, func(a, b tvTitleCandidate) int {
+		if a.title.ID != b.title.ID {
+			return a.title.ID - b.title.ID
+		}
+		return a.title.Duration - b.title.Duration
+	})
+	if len(qualifyingDoubleCandidates) > 0 {
+		selectedByIndex[qualifyingDoubleCandidates[0].decisionIndex] = "probable_double_episode_candidate"
+	}
+	result.AmbiguousLongCount = len(qualifyingDoubleCandidates)
 
 	for _, cluster := range clusters {
 		for _, candidate := range cluster.candidates {
@@ -160,7 +168,7 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "extras_dominate_candidates")
 	}
-	if doubleCandidates >= 2 {
+	if len(qualifyingDoubleCandidates) >= 2 {
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "multiple_double_episode_candidates")
 	}
@@ -202,6 +210,10 @@ func buildTVTitleClusters(sorted []tvTitleCandidate) []tvTitleCluster {
 }
 
 func choosePrimaryTVTitleCluster(clusters []tvTitleCluster) tvTitleCluster {
+	if paired, ok := choosePrimaryTVTitleClusterForDoublePattern(clusters); ok {
+		return paired
+	}
+
 	maxTotal := 0
 	for _, cluster := range clusters {
 		if cluster.total > maxTotal {
@@ -221,14 +233,62 @@ func choosePrimaryTVTitleCluster(clusters []tvTitleCluster) tvTitleCluster {
 
 	best := eligible[0]
 	for _, cluster := range eligible[1:] {
-		if len(cluster.candidates) > len(best.candidates) ||
-			(len(cluster.candidates) == len(best.candidates) && cluster.median > best.median) ||
-			(len(cluster.candidates) == len(best.candidates) && cluster.median == best.median && cluster.total > best.total) ||
-			(len(cluster.candidates) == len(best.candidates) && cluster.median == best.median && cluster.total == best.total && cluster.minTitleID < best.minTitleID) {
+		if betterPrimaryTVCluster(cluster, best) {
 			best = cluster
 		}
 	}
 	return best
+}
+
+func choosePrimaryTVTitleClusterForDoublePattern(clusters []tvTitleCluster) (tvTitleCluster, bool) {
+	var best tvTitleCluster
+	found := false
+	for _, shorter := range clusters {
+		if len(shorter.candidates) < 2 || shorter.median <= 0 {
+			continue
+		}
+		minDur := int(float64(shorter.median) * tvDoubleMinRatio)
+		maxDur := int(float64(shorter.median) * tvDoubleMaxRatio)
+		for _, longer := range clusters {
+			if longer.id == shorter.id {
+				continue
+			}
+			if longer.median < minDur || longer.median > maxDur {
+				continue
+			}
+			if !found || betterDoublePatternPrimary(shorter, best) {
+				best = shorter
+				found = true
+			}
+		}
+	}
+	return best, found
+}
+
+func betterDoublePatternPrimary(candidate, best tvTitleCluster) bool {
+	if len(candidate.candidates) != len(best.candidates) {
+		return len(candidate.candidates) > len(best.candidates)
+	}
+	if candidate.median != best.median {
+		return candidate.median < best.median
+	}
+	if candidate.total != best.total {
+		return candidate.total > best.total
+	}
+	return candidate.minTitleID < best.minTitleID
+}
+
+func betterPrimaryTVCluster(candidate, best tvTitleCluster) bool {
+	if len(candidate.candidates) != len(best.candidates) {
+		return len(candidate.candidates) > len(best.candidates)
+	}
+	if candidate.median != best.median {
+		return candidate.median > best.median
+	}
+	if candidate.total != best.total {
+		return candidate.total > best.total
+	}
+	return candidate.minTitleID < best.minTitleID
 }
 
 func hasNearEqualPrimaryCluster(clusters []tvTitleCluster, primary tvTitleCluster) bool {
