@@ -26,12 +26,13 @@ type DiscInfo struct {
 type TitleInfo struct {
 	ID           int
 	Name         string
-	Duration     time.Duration
+	Duration     int
 	Chapters     int
 	SizeBytes    int64
 	SegmentCount int
 	SegmentMap   string
 	Playlist     string
+	Tracks       []Track
 }
 
 // RipProgress reports ripping progress.
@@ -376,6 +377,8 @@ func parseRobotOutput(lines []string) *DiscInfo {
 			parseCINFO(body, info)
 		case "TINFO":
 			parseTINFO(body, titles)
+		case "SINFO":
+			parseSINFO(body, titles)
 		}
 	}
 
@@ -392,6 +395,12 @@ func parseRobotOutput(lines []string) *DiscInfo {
 			if !ok {
 				continue
 			}
+			tracks := make([]Track, 0, len(ta.trackOrder))
+			for _, sid := range ta.trackOrder {
+				if t, ok := ta.tracks[sid]; ok {
+					tracks = append(tracks, *t)
+				}
+			}
 			info.Titles = append(info.Titles, TitleInfo{
 				ID:           id,
 				Name:         ta.name,
@@ -401,6 +410,7 @@ func parseRobotOutput(lines []string) *DiscInfo {
 				SegmentCount: ta.segmentCount,
 				SegmentMap:   ta.segmentMap,
 				Playlist:     ta.playlist,
+				Tracks:       tracks,
 			})
 		}
 	}
@@ -473,15 +483,101 @@ func parseTINFO(body string, titles map[int]*titleAttrs) {
 	}
 }
 
+// parseSINFO parses SINFO (stream info) lines into Track structures on titleAttrs.
+// Format: titleID,streamID,attrID,reserved,"value"
+func parseSINFO(body string, titles map[int]*titleAttrs) {
+	fields := splitFields(body, 5)
+	if len(fields) < 5 {
+		return
+	}
+	titleID, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return
+	}
+	streamID, err := strconv.Atoi(strings.TrimSpace(fields[1]))
+	if err != nil {
+		return
+	}
+	attrID, err := strconv.Atoi(strings.TrimSpace(fields[2]))
+	if err != nil {
+		return
+	}
+	value := unquote(fields[4])
+
+	ta := titles[titleID]
+	if ta == nil {
+		ta = &titleAttrs{}
+		titles[titleID] = ta
+	}
+
+	track := ta.ensureTrack(streamID)
+	if track.Attributes == nil {
+		track.Attributes = make(map[int]string)
+	}
+	if value != "" {
+		track.Attributes[attrID] = value
+	}
+
+	switch attrID {
+	case 1:
+		track.Type = classifyTrackType(value)
+	case 2:
+		if track.Name == "" {
+			track.Name = value
+		}
+	case 3, 28:
+		if track.Language == "" {
+			track.Language = strings.ToLower(value)
+		}
+	case 4, 29:
+		if track.LanguageName == "" {
+			track.LanguageName = value
+		}
+	case 5:
+		track.CodecID = value
+	case 6:
+		track.CodecShort = value
+	case 7:
+		track.CodecLong = value
+	case 13:
+		track.BitRate = value
+	case 14:
+		if ch, err := strconv.Atoi(value); err == nil && ch > 0 {
+			track.ChannelCount = ch
+		}
+	case 30:
+		track.Name = value
+	case 40:
+		track.ChannelLayout = value
+	}
+}
+
 // titleAttrs accumulates raw title attributes during parsing.
 type titleAttrs struct {
 	name         string
-	duration     time.Duration
+	duration     int
 	chapters     int
 	sizeBytes    int64
 	segmentCount int
 	segmentMap   string
 	playlist     string
+	tracks       map[int]*Track
+	trackOrder   []int
+}
+
+// ensureTrack returns the track for the given stream ID, creating it if needed.
+func (ta *titleAttrs) ensureTrack(streamID int) *Track {
+	if ta.tracks == nil {
+		ta.tracks = make(map[int]*Track)
+	}
+	if track, ok := ta.tracks[streamID]; ok {
+		return track
+	}
+	track := &Track{StreamID: streamID, Type: TrackTypeUnknown}
+	track.Order = len(ta.trackOrder)
+	ta.tracks[streamID] = track
+	ta.trackOrder = append(ta.trackOrder, streamID)
+	return track
 }
 
 // parseMSG parses a MSG robot-protocol line.
@@ -587,8 +683,9 @@ func parsePRGV(line string, titleID int) (RipProgress, bool) {
 	}, true
 }
 
-// parseDuration parses a duration string in "H:MM:SS" format.
-func parseDuration(s string) time.Duration {
+// parseDuration parses a duration string in "H:MM:SS" format and returns
+// the total number of seconds.
+func parseDuration(s string) int {
 	parts := strings.Split(s, ":")
 	if len(parts) != 3 {
 		return 0
@@ -605,7 +702,7 @@ func parseDuration(s string) time.Duration {
 	if err != nil {
 		return 0
 	}
-	return time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(sec)*time.Second
+	return h*3600 + m*60 + sec
 }
 
 // splitFields splits a comma-separated string into at most n fields.
@@ -646,70 +743,14 @@ func unquote(s string) string {
 }
 
 // HasForcedEnglishSubtitles returns true if any title has a forced English
-// subtitle track. MakeMKV marks forced tracks with "(forced only)" in the
-// track name (SINFO attribute 30).
-// SINFO attribute IDs used by MakeMKV robot output.
-const (
-	sinfoAttrTrackType = 1  // "Video", "Audio", "Subtitle"
-	sinfoAttrLanguage  = 3  // e.g. "eng"
-	sinfoAttrTrackName = 30 // e.g. "PGS English (forced only)"
-)
-
+// subtitle track. Uses structured Track data populated during scan.
 func (d *DiscInfo) HasForcedEnglishSubtitles() bool {
 	if d == nil {
 		return false
 	}
-
-	type streamKey struct{ title, stream int }
-	type streamAttrs struct {
-		trackType string
-		language  string
-		name      string
-	}
-
-	streams := make(map[streamKey]*streamAttrs)
-
-	for _, line := range d.RawLines {
-		prefix, body, ok := splitRobotLine(line)
-		if !ok || prefix != "SINFO" {
-			continue
-		}
-		fields := splitFields(body, 5)
-		if len(fields) < 5 {
-			continue
-		}
-		titleID, err := strconv.Atoi(fields[0])
-		if err != nil {
-			continue
-		}
-		streamID, err := strconv.Atoi(fields[1])
-		if err != nil {
-			continue
-		}
-		attrID, err := strconv.Atoi(fields[2])
-		if err != nil {
-			continue
-		}
-		value := unquote(fields[4])
-
-		key := streamKey{titleID, streamID}
-		sa := streams[key]
-		if sa == nil {
-			sa = &streamAttrs{}
-			streams[key] = sa
-		}
-
-		switch attrID {
-		case sinfoAttrTrackType:
-			sa.trackType = value
-		case sinfoAttrLanguage:
-			sa.language = value
-		case sinfoAttrTrackName:
-			sa.name = value
-			// Short-circuit: check match as soon as we have the track name.
-			if strings.EqualFold(sa.trackType, "Subtitle") &&
-				strings.HasPrefix(strings.ToLower(sa.language), "eng") &&
-				strings.Contains(strings.ToLower(value), "(forced only)") {
+	for _, title := range d.Titles {
+		for _, track := range title.Tracks {
+			if track.IsForced() && strings.HasPrefix(strings.ToLower(track.Language), "eng") {
 				return true
 			}
 		}

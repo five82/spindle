@@ -57,11 +57,11 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, titleFiles map[int]s
 			result.Missing = append(result.Missing, ep.Key)
 			continue
 		}
-		env.Assets.AddAsset("ripped", ripspec.Asset{
+		env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{
 			EpisodeKey: ep.Key,
 			TitleID:    ep.TitleID,
 			Path:       path,
-			Status:     "completed",
+			Status:     ripspec.AssetStatusCompleted,
 		})
 		result.Assigned++
 	}

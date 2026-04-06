@@ -142,7 +142,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		// Resume: skip already-encoded assets.
-		if existing, found := env.Assets.FindAsset("encoded", job.episodeKey); found && existing.IsCompleted() {
+		if existing, found := env.Assets.FindAsset(ripspec.AssetKindEncoded, job.episodeKey); found && existing.IsCompleted() {
 			logger.Info("skipping already-encoded asset",
 				"decision_type", logs.DecisionEncodeResume,
 				"decision_result", "skipped",
@@ -225,10 +225,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			)
 
 			// Record failed asset, continue to next job (failure isolation).
-			env.Assets.AddAsset("encoded", ripspec.Asset{
+			env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
 				EpisodeKey: job.episodeKey,
 				Path:       "",
-				Status:     "failed",
+				Status:     ripspec.AssetStatusFailed,
 				ErrorMsg:   encErr.Error(),
 			})
 			encodeErrors++
@@ -276,10 +276,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		// Add encoded asset to envelope.
-		env.Assets.AddAsset("encoded", ripspec.Asset{
+		env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
 			EpisodeKey: job.episodeKey,
 			Path:       result.OutputFile,
-			Status:     "completed",
+			Status:     ripspec.AssetStatusCompleted,
 		})
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err

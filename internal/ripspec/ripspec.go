@@ -89,6 +89,21 @@ type Asset struct {
 	ErrorMsg       string `json:"error_msg,omitempty"`
 }
 
+// Asset status constants.
+const (
+	AssetStatusPending   = "pending"
+	AssetStatusCompleted = "completed"
+	AssetStatusFailed    = "failed"
+)
+
+// Asset kind constants identify pipeline stages.
+const (
+	AssetKindRipped    = "ripped"
+	AssetKindEncoded   = "encoded"
+	AssetKindSubtitled = "subtitled"
+	AssetKindFinal     = "final"
+)
+
 // Assets holds per-stage asset lists.
 type Assets struct {
 	Ripped    []Asset `json:"ripped,omitempty"`
@@ -235,9 +250,9 @@ func (e *Envelope) ExpectedCount() int {
 // expected, ripped, encoded, final.
 func (e *Envelope) AssetCounts() (expected, ripped, encoded, final int) {
 	expected = e.ExpectedCount()
-	ripped = e.Assets.CompletedAssetCount("ripped")
-	encoded = e.Assets.CompletedAssetCount("encoded")
-	final = e.Assets.CompletedAssetCount("final")
+	ripped = e.Assets.CompletedAssetCount(AssetKindRipped)
+	encoded = e.Assets.CompletedAssetCount(AssetKindEncoded)
+	final = e.Assets.CompletedAssetCount(AssetKindFinal)
 	return
 }
 
@@ -284,12 +299,12 @@ func (e *Episode) AppendReviewReason(reason string) {
 // IsCompleted returns true when the asset has a non-empty path and its status
 // is not "failed".
 func (a *Asset) IsCompleted() bool {
-	return a.Path != "" && a.Status != "failed"
+	return a.Path != "" && a.Status != AssetStatusFailed
 }
 
 // IsFailed returns true when the asset status is "failed".
 func (a *Asset) IsFailed() bool {
-	return a.Status == "failed"
+	return a.Status == AssetStatusFailed
 }
 
 // ---------------------------------------------------------------------------
@@ -299,13 +314,13 @@ func (a *Asset) IsFailed() bool {
 // stageSlice returns a pointer to the slice for the given stage kind.
 func (as *Assets) stageSlice(kind string) *[]Asset {
 	switch kind {
-	case "ripped":
+	case AssetKindRipped:
 		return &as.Ripped
-	case "encoded":
+	case AssetKindEncoded:
 		return &as.Encoded
-	case "subtitled":
+	case AssetKindSubtitled:
 		return &as.Subtitled
-	case "final":
+	case AssetKindFinal:
 		return &as.Final
 	default:
 		return nil
@@ -359,7 +374,7 @@ func (as *Assets) RemapEpisodeKeys(remap map[string]string) {
 		normalized[strings.ToLower(oldKey)] = newKey
 	}
 
-	for _, kind := range []string{"ripped", "encoded", "subtitled", "final"} {
+	for _, kind := range []string{AssetKindRipped, AssetKindEncoded, AssetKindSubtitled, AssetKindFinal} {
 		sp := as.stageSlice(kind)
 		if sp == nil {
 			continue

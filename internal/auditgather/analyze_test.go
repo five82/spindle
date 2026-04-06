@@ -319,8 +319,8 @@ func TestDetectTVRoutingAnomalies_FlagsCleanEpisodesInReview(t *testing.T) {
 				{Key: "s01e02", Episode: 2, NeedsReview: true},
 			},
 			Assets: ripspec.Assets{Final: []ripspec.Asset{
-				{EpisodeKey: "s01e01", Path: "/review/show/Show - S01E01.mkv", Status: "completed"},
-				{EpisodeKey: "s01e02", Path: "/review/show/Show - S01E02.mkv", Status: "completed"},
+				{EpisodeKey: "s01e01", Path: "/review/show/Show - S01E01.mkv", Status: ripspec.AssetStatusCompleted},
+				{EpisodeKey: "s01e02", Path: "/review/show/Show - S01E02.mkv", Status: ripspec.AssetStatusCompleted},
 			}},
 		},
 	}
@@ -345,7 +345,7 @@ func TestDetectTVRoutingAnomalies_FlagsReviewEpisodesInLibrary(t *testing.T) {
 		Envelope: &EnvelopeReport{
 			Metadata: ripspec.Metadata{MediaType: "tv"},
 			Episodes: []ripspec.Episode{{Key: "s01e02", Episode: 2, NeedsReview: true}},
-			Assets:   ripspec.Assets{Final: []ripspec.Asset{{EpisodeKey: "s01e02", Path: "/library/tv/Show/Season 01/Show - S01E02.mkv", Status: "completed"}}},
+			Assets:   ripspec.Assets{Final: []ripspec.Asset{{EpisodeKey: "s01e02", Path: "/library/tv/Show/Season 01/Show - S01E02.mkv", Status: ripspec.AssetStatusCompleted}}},
 		},
 	}
 	anomalies := detectTVRoutingAnomalies(r)

@@ -661,7 +661,7 @@ func (s *Store) RetryEpisode(id int64, episodeKey string) (RetryResult, error) {
 	}
 
 	// Clear failed assets for this episode across all stages.
-	for _, kind := range []string{"encoded", "subtitled", "final"} {
+	for _, kind := range []string{ripspec.AssetKindEncoded, ripspec.AssetKindSubtitled, ripspec.AssetKindFinal} {
 		env.Assets.ClearFailedAsset(kind, episodeKey)
 	}
 

@@ -315,11 +315,11 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 		}
 
 		// Asset paths and stage progression
-		if a, ok := env.Assets.FindAsset("ripped", ep.Key); ok && a.IsCompleted() {
+		if a, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, ep.Key); ok && a.IsCompleted() {
 			resp.RippedPath = a.Path
 			resp.Stage = "ripped"
 		}
-		if a, ok := env.Assets.FindAsset("encoded", ep.Key); ok {
+		if a, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, ep.Key); ok {
 			if a.IsCompleted() {
 				resp.EncodedPath = a.Path
 				resp.Stage = "encoded"
@@ -328,7 +328,7 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 				resp.ErrorMessage = a.ErrorMsg
 			}
 		}
-		if a, ok := env.Assets.FindAsset("subtitled", ep.Key); ok {
+		if a, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, ep.Key); ok {
 			if a.IsCompleted() {
 				resp.SubtitledPath = a.Path
 				resp.Stage = "subtitled"
@@ -337,7 +337,7 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 				resp.ErrorMessage = a.ErrorMsg
 			}
 		}
-		if a, ok := env.Assets.FindAsset("final", ep.Key); ok {
+		if a, ok := env.Assets.FindAsset(ripspec.AssetKindFinal, ep.Key); ok {
 			if a.IsCompleted() {
 				resp.FinalPath = a.Path
 				resp.Stage = "final"

@@ -165,12 +165,12 @@ func TestTotalCompletedStageBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := &ripspec.Envelope{Assets: ripspec.Assets{Encoded: []ripspec.Asset{
-		{EpisodeKey: "s01e01", Path: file1, Status: "completed"},
-		{EpisodeKey: "s01e02", Path: file2, Status: "completed"},
-		{EpisodeKey: "s01e03", Path: filepath.Join(dir, "missing.mkv"), Status: "completed"},
-		{EpisodeKey: "s01e04", Path: "", Status: "failed"},
+		{EpisodeKey: "s01e01", Path: file1, Status: ripspec.AssetStatusCompleted},
+		{EpisodeKey: "s01e02", Path: file2, Status: ripspec.AssetStatusCompleted},
+		{EpisodeKey: "s01e03", Path: filepath.Join(dir, "missing.mkv"), Status: ripspec.AssetStatusCompleted},
+		{EpisodeKey: "s01e04", Path: "", Status: ripspec.AssetStatusFailed},
 	}}}
-	got := totalCompletedStageBytes(env, "encoded", []string{"s01e01", "s01e02", "s01e03", "s01e04"})
+	got := totalCompletedStageBytes(env, ripspec.AssetKindEncoded, []string{"s01e01", "s01e02", "s01e03", "s01e04"})
 	if got != 10 {
 		t.Fatalf("totalCompletedStageBytes() = %d, want 10", got)
 	}

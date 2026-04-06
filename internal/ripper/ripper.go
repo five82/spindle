@@ -268,11 +268,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"size_bytes", newFileSize,
 		)
 		if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
-			env.Assets.AddAsset("ripped", ripspec.Asset{
+			env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{
 				EpisodeKey: episodeKey,
 				TitleID:    title.ID,
 				Path:       newFile,
-				Status:     "completed",
+				Status:     ripspec.AssetStatusCompleted,
 			})
 			item.RippedFile = newFile
 			if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
@@ -506,10 +506,10 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 			if entry.IsDir() {
 				continue
 			}
-			env.Assets.AddAsset("ripped", ripspec.Asset{
+			env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{
 				EpisodeKey: "main",
 				Path:       filepath.Join(dir, entry.Name()),
-				Status:     "completed",
+				Status:     ripspec.AssetStatusCompleted,
 			})
 		}
 	}
@@ -536,7 +536,7 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 					"episode_key", asset.EpisodeKey,
 					"path", asset.Path,
 				)
-				env.Assets.Ripped[i].Status = "failed"
+				env.Assets.Ripped[i].Status = ripspec.AssetStatusFailed
 				env.Assets.Ripped[i].ErrorMsg = err.Error()
 				validationErrors++
 				continue

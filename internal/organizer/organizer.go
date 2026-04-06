@@ -199,13 +199,13 @@ func parseEpisodeKey(key string) (season, episode, episodeEnd int) {
 }
 
 func resolveSourceStage(env *ripspec.Envelope, keys []string) (string, bool) {
-	sourceStage := "subtitled"
+	sourceStage := ripspec.AssetKindSubtitled
 	hasSubtitled := true
 	if len(keys) == 0 {
 		return sourceStage, hasSubtitled
 	}
-	if _, ok := env.Assets.FindAsset("subtitled", keys[0]); !ok {
-		return "encoded", false
+	if _, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, keys[0]); !ok {
+		return ripspec.AssetKindEncoded, false
 	}
 	return sourceStage, hasSubtitled
 }
@@ -374,7 +374,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item
 			"organize_target", target,
 		)
 		copySidecarSubtitle(logger, asset.Path, destPath)
-		env.Assets.AddAsset("final", ripspec.Asset{EpisodeKey: key, Path: destPath, Status: "completed"})
+		env.Assets.AddAsset(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath, Status: ripspec.AssetStatusCompleted})
 		if err := queue.PersistRipSpec(ctx, h.store, item, env); err != nil {
 			return "", copied, err
 		}

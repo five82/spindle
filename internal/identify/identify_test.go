@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/discidcache"
@@ -247,13 +246,13 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 			{
 				ID:       0,
 				Name:     "Main Feature",
-				Duration: 2 * time.Hour,
+				Duration: 7200,
 				Chapters: 20,
 			},
 			{
 				ID:       1,
 				Name:     "Bonus",
-				Duration: 30 * time.Minute,
+				Duration: 1800,
 				Chapters: 5,
 			},
 		},
@@ -354,8 +353,8 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 		}
 		discInfo := &makemkv.DiscInfo{
 			Titles: []makemkv.TitleInfo{
-				{ID: 0, Name: "Feature", Duration: 2 * time.Hour, Chapters: 20},
-				{ID: 1, Name: "Extras", Duration: 10 * time.Minute, Chapters: 1},
+				{ID: 0, Name: "Feature", Duration: 7200, Chapters: 20},
+				{ID: 1, Name: "Extras", Duration: 600, Chapters: 1},
 			},
 		}
 
@@ -396,8 +395,8 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 		}
 		discInfo := &makemkv.DiscInfo{
 			Titles: []makemkv.TitleInfo{
-				{ID: 0, Name: "Ep1", Duration: 30 * time.Minute},
-				{ID: 1, Name: "Ep2", Duration: 30 * time.Minute},
+				{ID: 0, Name: "Ep1", Duration: 1800},
+				{ID: 1, Name: "Ep2", Duration: 1800},
 			},
 		}
 
@@ -474,7 +473,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 		item := &queue.Item{DiscTitle: "Test"}
 		discInfo := &makemkv.DiscInfo{
 			Titles: []makemkv.TitleInfo{
-				{ID: 0, Name: "Title 1", Duration: time.Hour},
+				{ID: 0, Name: "Title 1", Duration: 3600},
 			},
 		}
 		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
@@ -492,9 +491,9 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 		item := &queue.Item{DiscTitle: "Breaking Bad Season 2"}
 		discInfo := &makemkv.DiscInfo{
 			Titles: []makemkv.TitleInfo{
-				{ID: 0, Name: "Title 1", Duration: 45 * time.Minute},
-				{ID: 1, Name: "Title 2", Duration: 30 * time.Second}, // too short
-				{ID: 2, Name: "Title 3", Duration: 50 * time.Minute},
+				{ID: 0, Name: "Title 1", Duration: 2700},
+				{ID: 1, Name: "Title 2", Duration: 30}, // too short
+				{ID: 2, Name: "Title 3", Duration: 3000},
 			},
 		}
 		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
@@ -641,10 +640,10 @@ func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
 	discInfo := &makemkv.DiscInfo{
 		Name: "Show Disc",
 		Titles: []makemkv.TitleInfo{
-			{ID: 0, Name: "Ep 1", Duration: 45 * time.Minute},
-			{ID: 1, Name: "Short", Duration: 10 * time.Second},
-			{ID: 2, Name: "Ep 2", Duration: 42 * time.Minute},
-			{ID: 3, Name: "Ep 3", Duration: 48 * time.Minute},
+			{ID: 0, Name: "Ep 1", Duration: 2700},
+			{ID: 1, Name: "Short", Duration: 10},
+			{ID: 2, Name: "Ep 2", Duration: 2520},
+			{ID: 3, Name: "Ep 3", Duration: 2880},
 		},
 	}
 	best := &tmdb.SearchResult{

@@ -257,7 +257,7 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.I
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		asset, ok := env.Assets.FindAsset("ripped", ep.Key)
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, ep.Key)
 		if !ok || !asset.IsCompleted() {
 			continue
 		}

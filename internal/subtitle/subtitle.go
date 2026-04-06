@@ -76,7 +76,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		// Resume support: skip already-completed subtitled assets.
-		if existing, ok := env.Assets.FindAsset("subtitled", key); ok && existing.IsCompleted() {
+		if existing, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, key); ok && existing.IsCompleted() {
 			logger.Info("subtitle already completed, skipping",
 				"decision_type", logs.DecisionSubtitleResume,
 				"decision_result", "skipped",
@@ -86,7 +86,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			continue
 		}
 
-		asset, ok := env.Assets.FindAsset("encoded", key)
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, key)
 		if !ok || !asset.IsCompleted() {
 			continue
 		}
@@ -248,10 +248,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		// Record subtitled asset.
-		env.Assets.AddAsset("subtitled", ripspec.Asset{
+		env.Assets.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
 			EpisodeKey:     key,
 			Path:           subtitledPath,
-			Status:         "completed",
+			Status:         ripspec.AssetStatusCompleted,
 			SubtitlesMuxed: h.cfg.Subtitles.MuxIntoMKV,
 		})
 		item.ProgressPercent = overallSubtitlePercent(i+1, len(keys), 0)

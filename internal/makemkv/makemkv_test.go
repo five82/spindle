@@ -4,19 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestParseDuration(t *testing.T) {
 	tests := []struct {
 		input string
-		want  time.Duration
+		want  int
 	}{
-		{"1:30:00", 90 * time.Minute},
-		{"0:45:30", 45*time.Minute + 30*time.Second},
-		{"2:00:00", 2 * time.Hour},
+		{"1:30:00", 5400},
+		{"0:45:30", 2730},
+		{"2:00:00", 7200},
 		{"0:00:00", 0},
-		{"0:01:05", time.Minute + 5*time.Second},
+		{"0:01:05", 65},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -72,8 +71,8 @@ func TestParseRobotOutputTINFO(t *testing.T) {
 	if title0.Name != "Main Feature" {
 		t.Errorf("title 0 Name = %q, want %q", title0.Name, "Main Feature")
 	}
-	if title0.Duration != 90*time.Minute {
-		t.Errorf("title 0 Duration = %v, want %v", title0.Duration, 90*time.Minute)
+	if title0.Duration != 5400 {
+		t.Errorf("title 0 Duration = %d, want 5400", title0.Duration)
 	}
 	if title0.Chapters != 25 {
 		t.Errorf("title 0 Chapters = %d, want 25", title0.Chapters)
@@ -98,8 +97,8 @@ func TestParseRobotOutputTINFO(t *testing.T) {
 	if title1.Name != "Bonus" {
 		t.Errorf("title 1 Name = %q, want %q", title1.Name, "Bonus")
 	}
-	if title1.Duration != 10*time.Minute {
-		t.Errorf("title 1 Duration = %v, want %v", title1.Duration, 10*time.Minute)
+	if title1.Duration != 600 {
+		t.Errorf("title 1 Duration = %d, want 600", title1.Duration)
 	}
 }
 
@@ -245,75 +244,145 @@ func TestNormalizeDevice(t *testing.T) {
 
 func TestHasForcedEnglishSubtitles(t *testing.T) {
 	tests := []struct {
-		name     string
-		rawLines []string
-		want     bool
+		name  string
+		info  *DiscInfo
+		want  bool
 	}{
 		{
 			name: "forced english subtitle",
-			rawLines: []string{
-				`SINFO:0,0,1,6209,"Video"`,
-				`SINFO:0,1,1,6210,"Audio"`,
-				`SINFO:0,1,3,6210,"eng"`,
-				`SINFO:0,2,1,6211,"Subtitle"`,
-				`SINFO:0,2,3,6211,"eng"`,
-				`SINFO:0,2,30,6211,"PGS English (forced only)"`,
-			},
+			info: &DiscInfo{Titles: []TitleInfo{{
+				ID: 0,
+				Tracks: []Track{
+					{StreamID: 0, Type: TrackTypeVideo, Name: "Video"},
+					{StreamID: 1, Type: TrackTypeAudio, Language: "eng", Name: "Audio"},
+					{StreamID: 2, Type: TrackTypeSubtitle, Language: "eng", Name: "PGS English (forced only)"},
+				},
+			}}},
 			want: true,
 		},
 		{
 			name: "forced non-english subtitle",
-			rawLines: []string{
-				`SINFO:0,0,1,6209,"Subtitle"`,
-				`SINFO:0,0,3,6209,"spa"`,
-				`SINFO:0,0,30,6209,"PGS Spanish (forced only)"`,
-			},
+			info: &DiscInfo{Titles: []TitleInfo{{
+				ID: 0,
+				Tracks: []Track{
+					{StreamID: 0, Type: TrackTypeSubtitle, Language: "spa", Name: "PGS Spanish (forced only)"},
+				},
+			}}},
 			want: false,
 		},
 		{
 			name: "forced subtitle in second title",
-			rawLines: []string{
-				`SINFO:0,0,1,6209,"Video"`,
-				`SINFO:1,0,1,6209,"Video"`,
-				`SINFO:1,1,1,6210,"Subtitle"`,
-				`SINFO:1,1,3,6210,"eng"`,
-				`SINFO:1,1,30,6210,"Subtitles (forced only)"`,
-			},
+			info: &DiscInfo{Titles: []TitleInfo{
+				{ID: 0, Tracks: []Track{{StreamID: 0, Type: TrackTypeVideo, Name: "Video"}}},
+				{ID: 1, Tracks: []Track{
+					{StreamID: 0, Type: TrackTypeVideo, Name: "Video"},
+					{StreamID: 1, Type: TrackTypeSubtitle, Language: "eng", Name: "Subtitles (forced only)"},
+				}},
+			}},
 			want: true,
 		},
 		{
 			name: "no forced subtitles",
-			rawLines: []string{
-				`SINFO:0,0,1,6209,"Video"`,
-				`SINFO:0,1,1,6210,"Subtitle"`,
-				`SINFO:0,1,3,6210,"eng"`,
-				`SINFO:0,1,30,6210,"PGS English"`,
-			},
+			info: &DiscInfo{Titles: []TitleInfo{{
+				ID: 0,
+				Tracks: []Track{
+					{StreamID: 0, Type: TrackTypeVideo, Name: "Video"},
+					{StreamID: 1, Type: TrackTypeSubtitle, Language: "eng", Name: "PGS English"},
+				},
+			}}},
 			want: false,
 		},
 		{
-			name:     "no subtitle tracks",
-			rawLines: []string{`SINFO:0,0,1,6209,"Video"`},
-			want:     false,
+			name: "no subtitle tracks",
+			info: &DiscInfo{Titles: []TitleInfo{{
+				ID:     0,
+				Tracks: []Track{{StreamID: 0, Type: TrackTypeVideo, Name: "Video"}},
+			}}},
+			want: false,
 		},
 		{
-			name:     "nil disc info",
-			rawLines: nil,
-			want:     false,
+			name: "nil disc info",
+			info: nil,
+			want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var info *DiscInfo
-			if tt.rawLines != nil {
-				info = &DiscInfo{RawLines: tt.rawLines}
-			}
-			got := info.HasForcedEnglishSubtitles()
+			got := tt.info.HasForcedEnglishSubtitles()
 			if got != tt.want {
 				t.Errorf("HasForcedEnglishSubtitles() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseRobotOutputSINFO(t *testing.T) {
+	lines := []string{
+		`TINFO:0,2,0,"Main Feature"`,
+		`TINFO:0,9,0,"1:30:00"`,
+		`SINFO:0,0,1,6209,"Video"`,
+		`SINFO:0,0,5,6209,"V_MPEG4"`,
+		`SINFO:0,1,1,6210,"Audio"`,
+		`SINFO:0,1,3,6210,"eng"`,
+		`SINFO:0,1,4,6210,"English"`,
+		`SINFO:0,1,5,6210,"A_DTS"`,
+		`SINFO:0,1,6,6210,"DTS"`,
+		`SINFO:0,1,14,6210,"8"`,
+		`SINFO:0,1,40,6210,"7.1"`,
+		`SINFO:0,2,1,6211,"Subtitle"`,
+		`SINFO:0,2,3,6211,"eng"`,
+		`SINFO:0,2,30,6211,"PGS English (forced only)"`,
+	}
+
+	info := parseRobotOutput(lines)
+
+	if len(info.Titles) != 1 {
+		t.Fatalf("got %d titles, want 1", len(info.Titles))
+	}
+	title := info.Titles[0]
+	if len(title.Tracks) != 3 {
+		t.Fatalf("got %d tracks, want 3", len(title.Tracks))
+	}
+
+	video := title.Tracks[0]
+	if video.Type != TrackTypeVideo {
+		t.Errorf("track 0 Type = %q, want %q", video.Type, TrackTypeVideo)
+	}
+	if video.CodecID != "V_MPEG4" {
+		t.Errorf("track 0 CodecID = %q, want %q", video.CodecID, "V_MPEG4")
+	}
+
+	audio := title.Tracks[1]
+	if audio.Type != TrackTypeAudio {
+		t.Errorf("track 1 Type = %q, want %q", audio.Type, TrackTypeAudio)
+	}
+	if audio.Language != "eng" {
+		t.Errorf("track 1 Language = %q, want %q", audio.Language, "eng")
+	}
+	if audio.ChannelCount != 8 {
+		t.Errorf("track 1 ChannelCount = %d, want 8", audio.ChannelCount)
+	}
+	if audio.ChannelLayout != "7.1" {
+		t.Errorf("track 1 ChannelLayout = %q, want %q", audio.ChannelLayout, "7.1")
+	}
+	if !audio.IsAudio() {
+		t.Error("track 1 IsAudio() = false, want true")
+	}
+
+	sub := title.Tracks[2]
+	if sub.Type != TrackTypeSubtitle {
+		t.Errorf("track 2 Type = %q, want %q", sub.Type, TrackTypeSubtitle)
+	}
+	if !sub.IsForced() {
+		t.Error("track 2 IsForced() = false, want true")
+	}
+	if sub.Name != "PGS English (forced only)" {
+		t.Errorf("track 2 Name = %q, want %q", sub.Name, "PGS English (forced only)")
+	}
+
+	if !info.HasForcedEnglishSubtitles() {
+		t.Error("HasForcedEnglishSubtitles() = false, want true")
 	}
 }
 

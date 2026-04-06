@@ -106,7 +106,7 @@ func TestAddAssetAppendAndReplace(t *testing.T) {
 	var assets Assets
 
 	a1 := Asset{EpisodeKey: "s01e01", Path: "/ripped/ep1.mkv", Status: "ok"}
-	assets.AddAsset("ripped", a1)
+	assets.AddAsset(AssetKindRipped, a1)
 
 	if len(assets.Ripped) != 1 {
 		t.Fatalf("Ripped len = %d, want 1", len(assets.Ripped))
@@ -117,7 +117,7 @@ func TestAddAssetAppendAndReplace(t *testing.T) {
 
 	// Replace existing
 	a2 := Asset{EpisodeKey: "s01e01", Path: "/ripped/ep1_v2.mkv", Status: "ok"}
-	assets.AddAsset("ripped", a2)
+	assets.AddAsset(AssetKindRipped, a2)
 
 	if len(assets.Ripped) != 1 {
 		t.Fatalf("after replace: Ripped len = %d, want 1", len(assets.Ripped))
@@ -128,7 +128,7 @@ func TestAddAssetAppendAndReplace(t *testing.T) {
 
 	// Append different key
 	a3 := Asset{EpisodeKey: "s01e02", Path: "/ripped/ep2.mkv", Status: "ok"}
-	assets.AddAsset("ripped", a3)
+	assets.AddAsset(AssetKindRipped, a3)
 	if len(assets.Ripped) != 2 {
 		t.Fatalf("after append: Ripped len = %d, want 2", len(assets.Ripped))
 	}
@@ -153,7 +153,7 @@ func TestFindAssetSuccessAndMiss(t *testing.T) {
 		},
 	}
 
-	found, ok := assets.FindAsset("encoded", "s01e05")
+	found, ok := assets.FindAsset(AssetKindEncoded, "s01e05")
 	if !ok {
 		t.Fatal("FindAsset returned false for existing asset")
 	}
@@ -161,7 +161,7 @@ func TestFindAssetSuccessAndMiss(t *testing.T) {
 		t.Errorf("Path = %q, want /enc/ep5.mkv", found.Path)
 	}
 
-	_, ok = assets.FindAsset("encoded", "s01e99")
+	_, ok = assets.FindAsset(AssetKindEncoded, "s01e99")
 	if ok {
 		t.Error("FindAsset returned true for missing asset")
 	}
@@ -174,15 +174,15 @@ func TestFindAssetSuccessAndMiss(t *testing.T) {
 
 func TestRemapEpisodeKeys(t *testing.T) {
 	assets := Assets{
-		Ripped:    []Asset{{EpisodeKey: "s01_001", Path: "/rip/ep1.mkv", Status: "completed"}},
-		Encoded:   []Asset{{EpisodeKey: "s01_001", Path: "/enc/ep1.mkv", Status: "completed"}},
-		Subtitled: []Asset{{EpisodeKey: "s01_001", Path: "/sub/ep1.mkv", Status: "completed"}},
-		Final:     []Asset{{EpisodeKey: "s01_001", Path: "/final/ep1.mkv", Status: "completed"}},
+		Ripped:    []Asset{{EpisodeKey: "s01_001", Path: "/rip/ep1.mkv", Status: AssetStatusCompleted}},
+		Encoded:   []Asset{{EpisodeKey: "s01_001", Path: "/enc/ep1.mkv", Status: AssetStatusCompleted}},
+		Subtitled: []Asset{{EpisodeKey: "s01_001", Path: "/sub/ep1.mkv", Status: AssetStatusCompleted}},
+		Final:     []Asset{{EpisodeKey: "s01_001", Path: "/final/ep1.mkv", Status: AssetStatusCompleted}},
 	}
 
 	assets.RemapEpisodeKeys(map[string]string{"s01_001": "s01e03"})
 
-	for _, stage := range []string{"ripped", "encoded", "subtitled", "final"} {
+	for _, stage := range []string{AssetKindRipped, AssetKindEncoded, AssetKindSubtitled, AssetKindFinal} {
 		asset, ok := assets.FindAsset(stage, "s01e03")
 		if !ok {
 			t.Fatalf("FindAsset(%q, remapped key) = false, want true", stage)
@@ -192,7 +192,7 @@ func TestRemapEpisodeKeys(t *testing.T) {
 		}
 	}
 
-	if _, ok := assets.FindAsset("encoded", "s01_001"); ok {
+	if _, ok := assets.FindAsset(AssetKindEncoded, "s01_001"); ok {
 		t.Fatal("old encoded key still present after remap")
 	}
 }
@@ -366,7 +366,7 @@ func TestMissingEpisodes(t *testing.T) {
 		},
 	}
 
-	missing := env.MissingEpisodes("ripped")
+	missing := env.MissingEpisodes(AssetKindRipped)
 	if len(missing) != 2 {
 		t.Fatalf("MissingEpisodes len = %d, want 2", len(missing))
 	}
@@ -376,7 +376,7 @@ func TestMissingEpisodes(t *testing.T) {
 
 	// Movies always return nil.
 	movieEnv := Envelope{Metadata: Metadata{MediaType: "movie"}}
-	if movieEnv.MissingEpisodes("ripped") != nil {
+	if movieEnv.MissingEpisodes(AssetKindRipped) != nil {
 		t.Error("MissingEpisodes for movie should be nil")
 	}
 }
@@ -395,7 +395,7 @@ func TestCloneIndependence(t *testing.T) {
 
 	// Mutate clone.
 	cloned.Ripped[0].Path = "/changed.mkv"
-	cloned.AddAsset("encoded", Asset{EpisodeKey: "s01e02", Path: "/e/2.mkv", Status: "ok"})
+	cloned.AddAsset(AssetKindEncoded, Asset{EpisodeKey: "s01e02", Path: "/e/2.mkv", Status: "ok"})
 
 	if orig.Ripped[0].Path != "/r/1.mkv" {
 		t.Error("Clone mutation affected original Ripped path")
@@ -409,13 +409,13 @@ func TestCompletedAssetCount(t *testing.T) {
 	assets := Assets{
 		Ripped: []Asset{
 			{EpisodeKey: "s01e01", Path: "/r/1.mkv", Status: "ok"},
-			{EpisodeKey: "s01e02", Path: "/r/2.mkv", Status: "failed"},
+			{EpisodeKey: "s01e02", Path: "/r/2.mkv", Status: AssetStatusFailed},
 			{EpisodeKey: "s01e03", Path: "", Status: "ok"},
 			{EpisodeKey: "s01e04", Path: "/r/4.mkv", Status: "ok"},
 		},
 	}
 
-	got := assets.CompletedAssetCount("ripped")
+	got := assets.CompletedAssetCount(AssetKindRipped)
 	if got != 2 {
 		t.Errorf("CompletedAssetCount = %d, want 2", got)
 	}
@@ -434,7 +434,7 @@ func TestAssetIsCompletedAndIsFailed(t *testing.T) {
 		t.Error("IsFailed = true for valid asset")
 	}
 
-	failed := Asset{Path: "/file.mkv", Status: "failed"}
+	failed := Asset{Path: "/file.mkv", Status: AssetStatusFailed}
 	if failed.IsCompleted() {
 		t.Error("IsCompleted = true for failed asset")
 	}
@@ -451,11 +451,11 @@ func TestAssetIsCompletedAndIsFailed(t *testing.T) {
 func TestClearFailedAsset(t *testing.T) {
 	assets := Assets{
 		Encoded: []Asset{
-			{EpisodeKey: "s01e01", Path: "/e/1.mkv", Status: "failed", ErrorMsg: "encode error"},
+			{EpisodeKey: "s01e01", Path: "/e/1.mkv", Status: AssetStatusFailed, ErrorMsg: "encode error"},
 		},
 	}
 
-	assets.ClearFailedAsset("encoded", "s01e01")
+	assets.ClearFailedAsset(AssetKindEncoded, "s01e01")
 
 	a := assets.Encoded[0]
 	if a.Status != "" {

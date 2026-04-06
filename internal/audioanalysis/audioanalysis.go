@@ -94,7 +94,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	keys := env.AssetKeys()
 	var encodedPaths []string
 	for _, key := range keys {
-		asset, ok := env.Assets.FindAsset("encoded", key)
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, key)
 		if ok && asset.IsCompleted() {
 			encodedPaths = append(encodedPaths, asset.Path)
 		}

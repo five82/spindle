@@ -117,8 +117,8 @@ func newIdentifyCmd() *cobra.Command {
 			fmt.Printf("%s %s\n", labelStyle("Source: "), result.DiscSource)
 			if result.DiscInfo != nil {
 				for _, t := range result.DiscInfo.Titles {
-					fmt.Printf("  Title %d: %s (%s, %d ch, %s)\n",
-						t.ID, t.Name, t.Duration, t.Chapters, formatBytes(t.SizeBytes))
+					fmt.Printf("  Title %d: %s (%d:%02d:%02d, %d ch, %s)\n",
+						t.ID, t.Name, t.Duration/3600, (t.Duration%3600)/60, t.Duration%60, t.Chapters, formatBytes(t.SizeBytes))
 				}
 			}
 

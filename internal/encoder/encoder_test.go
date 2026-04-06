@@ -15,7 +15,7 @@ func TestPlanJobs_MovieProducesOneJob(t *testing.T) {
 		Metadata: ripspec.Metadata{MediaType: "movie"},
 		Assets: ripspec.Assets{
 			Ripped: []ripspec.Asset{
-				{EpisodeKey: "main", Path: "/tmp/ripped/title00.mkv", Status: "completed"},
+				{EpisodeKey: "main", Path: "/tmp/ripped/title00.mkv", Status: ripspec.AssetStatusCompleted},
 			},
 		},
 	}
@@ -42,9 +42,9 @@ func TestPlanJobs_TVProducesNJobs(t *testing.T) {
 		},
 		Assets: ripspec.Assets{
 			Ripped: []ripspec.Asset{
-				{EpisodeKey: "s01e01", Path: "/tmp/ripped/title00.mkv", Status: "completed"},
-				{EpisodeKey: "s01e02", Path: "/tmp/ripped/title01.mkv", Status: "completed"},
-				{EpisodeKey: "s01e03", Path: "/tmp/ripped/title02.mkv", Status: "completed"},
+				{EpisodeKey: "s01e01", Path: "/tmp/ripped/title00.mkv", Status: ripspec.AssetStatusCompleted},
+				{EpisodeKey: "s01e02", Path: "/tmp/ripped/title01.mkv", Status: ripspec.AssetStatusCompleted},
+				{EpisodeKey: "s01e03", Path: "/tmp/ripped/title02.mkv", Status: ripspec.AssetStatusCompleted},
 			},
 		},
 	}
@@ -67,9 +67,9 @@ func TestPlanJobs_SkipsFailedAssets(t *testing.T) {
 		Metadata: ripspec.Metadata{MediaType: "tv"},
 		Assets: ripspec.Assets{
 			Ripped: []ripspec.Asset{
-				{EpisodeKey: "s01e01", Path: "/tmp/ripped/title00.mkv", Status: "completed"},
-				{EpisodeKey: "s01e02", Path: "", Status: "failed", ErrorMsg: "rip error"},
-				{EpisodeKey: "s01e03", Path: "/tmp/ripped/title02.mkv", Status: "completed"},
+				{EpisodeKey: "s01e01", Path: "/tmp/ripped/title00.mkv", Status: ripspec.AssetStatusCompleted},
+				{EpisodeKey: "s01e02", Path: "", Status: ripspec.AssetStatusFailed, ErrorMsg: "rip error"},
+				{EpisodeKey: "s01e03", Path: "/tmp/ripped/title02.mkv", Status: ripspec.AssetStatusCompleted},
 			},
 		},
 	}

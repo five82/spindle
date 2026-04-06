@@ -543,7 +543,7 @@ func gatherMediaProbes(ctx context.Context, env *ripspec.Envelope, mediaType str
 
 // probeBestAsset probes the most complete version of an asset: final > subtitled > encoded.
 func probeBestAsset(ctx context.Context, env *ripspec.Envelope, episodeKey string) MediaFileProbe {
-	for _, stage := range []string{"final", "subtitled", "encoded"} {
+	for _, stage := range []string{ripspec.AssetKindFinal, ripspec.AssetKindSubtitled, ripspec.AssetKindEncoded} {
 		asset, ok := env.Assets.FindAsset(stage, episodeKey)
 		if !ok || !asset.IsCompleted() {
 			continue
