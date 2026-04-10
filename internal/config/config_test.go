@@ -226,7 +226,7 @@ func TestSampleConfigIsValidTOML(t *testing.T) {
 	expectedSections := []string{
 		"tmdb", "paths", "api", "jellyfin", "library",
 		"notifications", "subtitles", "rip_cache", "disc_id_cache",
-		"makemkv", "encoding", "llm", "commentary", "logging",
+		"makemkv", "encoding", "llm", "commentary", "content_id", "logging",
 	}
 	for _, section := range expectedSections {
 		if _, ok := parsed[section]; !ok {
