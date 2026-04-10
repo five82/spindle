@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
@@ -57,7 +56,6 @@ func New(
 var _ stage.Handler = (*Handler)(nil)
 
 // Run executes the episode identification stage.
-// Returns immediately for movies (no-op).
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger := stage.LoggerFromContext(ctx)
 
@@ -136,87 +134,71 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	item.ProgressMessage = "Phase 2/3 - Fetching reference subtitles"
 	_ = h.store.UpdateProgress(item)
 
-	plan := deriveCandidateEpisodes(&env, season, env.Metadata.DiscNumber, h.policy)
-	allSeasonEpisodes := seasonEpisodeNumbers(season)
+	plan := deriveCandidateEpisodes(&env, season, env.Metadata.DiscNumber)
 	refCache := make(map[int]referenceFingerprint)
-	allSeasonRefs := make([]referenceFingerprint, 0)
-	selectedAnchor, hasAnchor := anchorSelection{}, false
-
-	passes := buildEpisodePasses(plan, season, len(env.Episodes))
-	for idx, pass := range passes {
-		refs, fetchErr := h.fetchReferenceFingerprints(ctx, item, seasonNum, env.Metadata.ID, season, pass, refCache)
-		if fetchErr != nil {
-			logger.Warn("content id anchor reference fetch failed",
-				"event_type", "contentid_anchor_fetch_failed",
-				"error_hint", fetchErr.Error(),
-				"impact", "falling back to heuristic candidate ranges",
-			)
-			break
-		}
-		allSeasonRefs = mergeReferences(allSeasonRefs, refs)
-		if anchor, ok := selectAnchorWindow(ripPrints, allSeasonRefs, len(season.Episodes), h.policy.AnchorMinScore, h.policy.AnchorMinScoreMargin); ok {
-			selectedAnchor = anchor
-			hasAnchor = true
-			logger.Info("content id anchor selected",
-				"decision_type", "contentid_anchor",
-				"decision_result", "selected",
-				"decision_reason", anchor.Reason,
-				"anchor_rip_index", anchor.RipIndex,
-				"anchor_episode", anchor.TargetEpisode,
-				"anchor_score", anchor.BestScore,
-				"anchor_second_score", anchor.SecondBestScore,
-				"anchor_margin", anchor.ScoreMargin,
-				"window_start", anchor.WindowStart,
-				"window_end", anchor.WindowEnd,
-				"pass_index", idx+1,
-			)
-			break
-		}
+	refs, err := h.fetchReferenceFingerprints(ctx, item, seasonNum, env.Metadata.ID, season, plan.InitialEpisodes, refCache)
+	if err != nil {
+		return fmt.Errorf("fetch initial references: %w", err)
 	}
-
-	attempts := buildStrategyAttempts(plan, selectedAnchor, hasAnchor, allSeasonEpisodes)
-	if len(attempts) == 0 {
-		item.AppendReviewReason("Episode ID: no candidate strategies available")
-		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, len(ripPrints), len(allSeasonRefs))
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
-			return err
-		}
-		return &services.ErrDegraded{Msg: "no candidate strategies available"}
-	}
-
-	var outcomes []strategyOutcome
-	var selected strategyOutcome
-	haveSelection := false
-	for _, attempt := range attempts {
-		outcome, evalErr := h.evaluateStrategy(ctx, item, seasonNum, env.Metadata.ID, season, env.Metadata.DiscNumber, ripPrints, allSeasonRefs, refCache, attempt)
-		if evalErr != nil {
-			return evalErr
-		}
-		outcomes = append(outcomes, outcome)
-		if !haveSelection || betterOutcome(outcome, selected) {
-			selected = outcome
-			haveSelection = true
-		}
-	}
-	logStrategySummary(logger, outcomes, selected)
-
-	matches := selected.Matches
-	if len(matches) == 0 {
-		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, len(ripPrints), len(selected.References))
+	if len(refs) == 0 {
+		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, len(ripPrints), 0)
 		item.AppendReviewReason("Episode ID: no reference subtitles found")
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
 		}
-		return &services.ErrDegraded{Msg: "no episode matches resolved"}
-	}
-	if selected.Diagnostics.NeedsReview && selected.Diagnostics.ReviewReason != "" {
-		item.AppendReviewReason("Episode ID: " + selected.Diagnostics.ReviewReason)
+		return &services.ErrDegraded{Msg: "no reference subtitles found"}
 	}
 
-	verifiedMatches, verifyResult := verifyMatches(ctx, h.llmClient, matches, ripPrints, selected.References, logger, h.policy.LLMVerifyThreshold)
+	resolution := resolveEpisodeClaims(ripPrints, refs, h.policy)
+	if expand, reason := shouldExpandCandidateScope(plan, resolution, len(ripPrints)); expand {
+		logger.Info("content ID reference scope expanded",
+			"decision_type", logs.DecisionContentIDCandidates,
+			"decision_result", "expanded",
+			"decision_reason", reason,
+			"initial_episode_count", len(plan.InitialEpisodes),
+			"expanded_episode_count", len(plan.ExpandedEpisodes),
+		)
+		expandedRefs, fetchErr := h.fetchReferenceFingerprints(ctx, item, seasonNum, env.Metadata.ID, season, plan.ExpandedEpisodes, refCache)
+		if fetchErr != nil {
+			return fmt.Errorf("fetch expanded references: %w", fetchErr)
+		}
+		if len(expandedRefs) > 0 {
+			refs = expandedRefs
+			resolution = resolveEpisodeClaims(ripPrints, refs, h.policy)
+		}
+	}
+
+	logger.Info("content ID match resolution computed",
+		"decision_type", logs.DecisionContentIDMatches,
+		"decision_result", "resolved",
+		"decision_reason", "content_first_claim_ranking",
+		"clear_matches", resolution.ClearMatchCount,
+		"ambiguous_rips", resolution.AmbiguousCount,
+		"contested_rips", resolution.ContestedCount,
+		"suspect_references", resolution.SuspectReferenceCount,
+	)
+
+	matches := append([]matchResult(nil), resolution.Accepted...)
+	verifiedMatches, remainingPending, verifyResult := verifyMatches(ctx, h.llmClient, matches, resolution.PendingByRip, ripPrints, refs, logger)
 	matches = verifiedMatches
 	if verifyResult != nil && verifyResult.NeedsReview && verifyResult.ReviewReason != "" {
 		item.AppendReviewReason("Episode ID: " + verifyResult.ReviewReason)
+	}
+
+	if reconciled, ok := reconcileSingleHole(matches, remainingPending, refs, h.policy); ok {
+		matches = reconciled
+		logger.Info("content ID single-hole reconciliation applied",
+			"decision_type", logs.DecisionContentIDMatches,
+			"decision_result", "reconciled",
+			"decision_reason", "single_unresolved_rip_and_single_missing_episode",
+		)
+	}
+
+	for _, reason := range structuralReviewReasons(matches, env.Metadata.DiscNumber) {
+		item.AppendReviewReason("Episode ID: " + reason)
+	}
+	if hasSuspectAcceptedMatch(matches) {
+		item.AppendReviewReason("Episode ID: one or more matches rely on suspect references")
 	}
 
 	item.ProgressPercent = 80
@@ -224,7 +206,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	_ = h.store.UpdateProgress(item)
 
 	h.applyMatches(logger, &env, seasonNum, season, matches, item)
-	env.Attributes.ContentID = buildContentIDSummary(&env, matches, len(ripPrints), len(selected.References), h.policy.LowConfidenceReviewThreshold)
+	env.Attributes.ContentID = buildContentIDSummary(&env, matches, len(ripPrints), len(refs), h.policy.LowConfidenceReviewThreshold)
 
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 		return err
@@ -297,7 +279,7 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.I
 			Vector:     fp,
 			RawVector:  fp,
 		})
-		logger.Debug("content id whisperx transcript ready",
+		logger.Debug("content ID WhisperX transcript ready",
 			"episode_key", ep.Key,
 			"subtitle_file", result.SRTPath,
 			"token_count", len(fp.Terms),
@@ -306,70 +288,9 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.I
 	return prints, nil
 }
 
-func (h *Handler) evaluateStrategy(
-	ctx context.Context,
-	item *queue.Item,
-	seasonNum int,
-	tmdbID int,
-	season *tmdb.Season,
-	discNumber int,
-	ripPrints []ripFingerprint,
-	allSeasonRefs []referenceFingerprint,
-	refCache map[int]referenceFingerprint,
-	attempt strategyAttempt,
-) (strategyOutcome, error) {
-	out := strategyOutcome{Attempt: attempt}
-	refs := filterReferencesByEpisodes(allSeasonRefs, attempt.Episodes)
-	missing := missingEpisodesForReferences(refs, attempt.Episodes)
-	if len(missing) > 0 {
-		fetched, err := h.fetchReferenceFingerprints(ctx, item, seasonNum, tmdbID, season, missing, refCache)
-		if err != nil {
-			return out, fmt.Errorf("fetch strategy references: %w", err)
-		}
-		refs = mergeReferences(refs, fetched)
-	}
-	if len(refs) == 0 {
-		return out, nil
-	}
-
-	weightedRips := cloneRipFingerprints(ripPrints)
-	weightedRefs := cloneReferenceFingerprints(refs)
-	applyIDFWeighting(weightedRips, weightedRefs)
-	matches, diagnostics := decodeOrderedEpisodeMatches(weightedRips, weightedRefs, discNumber, len(season.Episodes), h.policy)
-	out.References = weightedRefs
-	out.Matches = matches
-	out.Diagnostics = diagnostics
-	out.AverageScore = averageMatchScore(matches)
-	out.AverageConfidence = averageMatchConfidence(matches)
-	return out, nil
-}
-
-func mergeReferences(existing, additional []referenceFingerprint) []referenceFingerprint {
-	merged := make(map[int]referenceFingerprint, len(existing)+len(additional))
-	for _, ref := range existing {
-		merged[ref.EpisodeNumber] = ref
-	}
-	for _, ref := range additional {
-		merged[ref.EpisodeNumber] = ref
-	}
-	episodes := make([]int, 0, len(merged))
-	for ep := range merged {
-		episodes = append(episodes, ep)
-	}
-	sort.Ints(episodes)
-	out := make([]referenceFingerprint, 0, len(episodes))
-	for _, ep := range episodes {
-		out = append(out, merged[ep])
-	}
-	return out
-}
-
-// newDegradedContentIDSummary builds a ContentIDSummary for failure/early-exit
-// paths where episode identification did not complete. Callers pass whatever
-// counts they have so far (0 when nothing has happened yet).
 func newDegradedContentIDSummary(policy Policy, transcribed, references int) *ripspec.ContentIDSummary {
 	return &ripspec.ContentIDSummary{
-		Method:               "whisperx_tfidf_ordered_dp",
+		Method:               "whisperx_tfidf_content_matcher",
 		ReferenceSource:      "opensubtitles",
 		ReviewThreshold:      policy.LowConfidenceReviewThreshold,
 		TranscribedEpisodes:  transcribed,
@@ -384,7 +305,7 @@ func buildContentIDSummary(env *ripspec.Envelope, matches []matchResult, transcr
 		return nil
 	}
 	summary := &ripspec.ContentIDSummary{
-		Method:               "whisperx_tfidf_ordered_dp",
+		Method:               "whisperx_tfidf_content_matcher",
 		ReferenceSource:      "opensubtitles",
 		ReferenceEpisodes:    referenceCount,
 		TranscribedEpisodes:  transcribedCount,
@@ -450,52 +371,43 @@ func (h *Handler) applyMatches(
 		logger.Info("episode matched",
 			"decision_type", logs.DecisionEpisodeMatch,
 			"decision_result", fmt.Sprintf("%s -> E%02d", originalKey, m.TargetEpisode),
-			"decision_reason", fmt.Sprintf("ordered path %s window %d-%d", m.Orientation, m.WindowStart, m.WindowEnd),
+			"decision_reason", m.AcceptedBy,
 			"match_score", m.Score,
 			"match_confidence", m.Confidence,
 			"confidence_quality", m.ConfidenceQuality,
-			"runner_up_episode", m.RunnerUpEpisode,
-			"runner_up_score", m.RunnerUpScore,
-			"score_margin", m.ScoreMargin,
+			"rip_runner_up_episode", m.RunnerUpEpisode,
+			"rip_runner_up_score", m.RunnerUpScore,
+			"rip_score_margin", m.ScoreMargin,
+			"episode_runner_up_key", m.EpisodeRunnerUpKey,
+			"episode_runner_up_score", m.EpisodeRunnerUpScore,
+			"episode_score_margin", m.EpisodeScoreMargin,
 			"neighbor_runner_up_episode", m.NeighborRunnerUpEpisode,
 			"neighbor_runner_up_score", m.NeighborRunnerUpScore,
 			"neighbor_score_margin", m.NeighborScoreMargin,
-			"reverse_runner_up_key", m.ReverseRunnerUpKey,
-			"reverse_runner_up_score", m.ReverseRunnerUpScore,
-			"reverse_score_margin", m.ReverseScoreMargin,
-			"path_score", m.PathScore,
-			"path_margin", m.PathMargin,
-			"internal_gap_count", m.InternalGapCount,
-			"unresolved_count", m.UnresolvedCount,
-			"sequence_contiguous", m.SequenceContiguous,
+			"reference_suspect", m.ReferenceSuspect,
+			"reference_suspect_reason", m.ReferenceSuspectReason,
 		)
 		if m.Confidence < h.policy.LowConfidenceReviewThreshold {
 			lowConfCount++
 			ep.AppendReviewReason(fmt.Sprintf("Episode ID: confidence %.3f below threshold %.2f", m.Confidence, h.policy.LowConfidenceReviewThreshold))
 			logger.Warn("low confidence episode match",
 				"event_type", "low_confidence_match",
-				"error_hint", fmt.Sprintf("%s matched E%02d with confidence %.3f and score %.3f (runner-up E%02d %.3f, neighbor E%02d %.3f, path margin %.3f)", ep.Key, m.TargetEpisode, m.Confidence, m.Score, m.RunnerUpEpisode, m.RunnerUpScore, m.NeighborRunnerUpEpisode, m.NeighborRunnerUpScore, m.PathMargin),
+				"error_hint", fmt.Sprintf("%s matched E%02d with confidence %.3f and score %.3f", ep.Key, m.TargetEpisode, m.Confidence, m.Score),
 				"impact", "match may be incorrect",
 				"confidence_quality", m.ConfidenceQuality,
 				"match_score", m.Score,
 				"match_confidence", m.Confidence,
-				"runner_up_episode", m.RunnerUpEpisode,
-				"runner_up_score", m.RunnerUpScore,
-				"score_margin", m.ScoreMargin,
+				"rip_runner_up_episode", m.RunnerUpEpisode,
+				"rip_runner_up_score", m.RunnerUpScore,
+				"rip_score_margin", m.ScoreMargin,
+				"episode_runner_up_key", m.EpisodeRunnerUpKey,
+				"episode_runner_up_score", m.EpisodeRunnerUpScore,
+				"episode_score_margin", m.EpisodeScoreMargin,
 				"neighbor_runner_up_episode", m.NeighborRunnerUpEpisode,
 				"neighbor_runner_up_score", m.NeighborRunnerUpScore,
 				"neighbor_score_margin", m.NeighborScoreMargin,
-				"reverse_runner_up_key", m.ReverseRunnerUpKey,
-				"reverse_runner_up_score", m.ReverseRunnerUpScore,
-				"reverse_score_margin", m.ReverseScoreMargin,
-				"path_margin", m.PathMargin,
+				"reference_suspect", m.ReferenceSuspect,
 			)
-		}
-		if m.NeedsVerification && m.VerificationReason != "" {
-			ep.AppendReviewReason("Episode ID: ambiguity requires verification")
-			if item != nil {
-				item.AppendReviewReason("Episode ID: ambiguity requires verification")
-			}
 		}
 	}
 	applyOpeningDoubleEpisode(logger, env, seasonNum, env.Metadata.DiscNumber, episodeDetails, assetKeyRemap)
@@ -507,6 +419,46 @@ func (h *Handler) applyMatches(
 	if item != nil && lowConfCount > 0 {
 		item.AppendReviewReason(fmt.Sprintf("Episode ID: %d matches below confidence threshold %.2f", lowConfCount, h.policy.LowConfidenceReviewThreshold))
 	}
+}
+
+func structuralReviewReasons(matches []matchResult, discNumber int) []string {
+	if len(matches) == 0 {
+		return nil
+	}
+	episodes := assignedEpisodes(matches)
+	if len(episodes) == 0 {
+		return nil
+	}
+	reasons := make([]string, 0, 2)
+	if discNumber == 1 && episodes[0] > 1 {
+		reasons = append(reasons, fmt.Sprintf("disc 1 matched subset starts at episode %d", episodes[0]))
+	}
+	if fragmentedEpisodeSubset(episodes) {
+		reasons = append(reasons, "accepted episode subset is fragmented")
+	}
+	return reasons
+}
+
+func fragmentedEpisodeSubset(episodes []int) bool {
+	if len(episodes) < 3 {
+		return false
+	}
+	gaps := 0
+	for i := 1; i < len(episodes); i++ {
+		if episodes[i]-episodes[i-1] > 1 {
+			gaps++
+		}
+	}
+	return gaps > 1
+}
+
+func hasSuspectAcceptedMatch(matches []matchResult) bool {
+	for _, match := range matches {
+		if match.ReferenceSuspect {
+			return true
+		}
+	}
+	return false
 }
 
 func applyOpeningDoubleEpisode(logger *slog.Logger, env *ripspec.Envelope, seasonNum, discNumber int, details map[int]tmdb.Episode, assetKeyRemap map[string]string) {

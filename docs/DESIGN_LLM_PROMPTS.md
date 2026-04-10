@@ -95,7 +95,7 @@ LLM failure is non-fatal but conservative:
 
 ## 2. Episode Verification
 
-**Stage**: Episode Identification (CONTENT_ID_DESIGN.md Section 11)
+**Stage**: Episode Identification (CONTENT_ID_DESIGN.md Section 10)
 **Package**: `contentid`
 **Verify threshold**: `llmVerifyThreshold` (default 0.85)
 
@@ -152,23 +152,28 @@ Where:
 ### 2.4 Trigger Conditions
 
 Verification runs when an LLM client is configured and at least one match is
-ambiguous after structured decoding: derived confidence is below
-`llmVerifyThreshold` (0.85), path ambiguity is high, or the decoder raised a
-structural flag.
+ambiguous after content-first matching: derived confidence is below
+`llmVerifyThreshold` (0.85), runner-up separation is weak, duplicate
+competition remains unresolved, or a final unresolved tail needs pairwise
+transcript confirmation. The stage verifies only the top one or two plausible
+episode pairs per unresolved or contested rip; it does not perform broad
+cross-product verification across a season.
 
 ### 2.5 Escalation Logic
 
 | Condition | Action |
 |-----------|--------|
 | 0 ambiguous matches | Skip verification entirely |
-| All verified | No changes beyond confidence updates |
-| 1+ rejections | Flag for review; keep original matches |
+| Pair verified | Accept that already-proposed pair; log `llm_confidence` for observability only |
+| 1+ rejections or failures | Leave those pairs unresolved and flag for review |
 
 ### 2.6 Failure Behavior
 
-LLM call failure during verification: original cosine match is retained, item
-flagged for review. The match is kept because a network error should not
-discard a plausible algorithmic match.
+LLM call failure during verification leaves the challenged pair unresolved and
+flags the item for review. In the content-first rewrite, the LLM acts as a
+narrow accept/reject gate for already-proposed ambiguous pairs; it does not
+numerically boost `match_confidence`, and it does not trigger a second global
+matching pass.
 
 There is no LLM cross-matching fallback in the production TV matcher path.
 Ambiguity that remains after verification is sent to review.

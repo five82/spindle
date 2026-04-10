@@ -1,463 +1,619 @@
 # Content ID Design
 
-Episode identification subsystem for mapping disc titles to broadcast episode
-numbers using transcript similarity matching.
+Episode identification subsystem for mapping ripped TV titles to canonical TMDB
+season/episode numbers using transcript similarity against OpenSubtitles
+references.
 
 ---
 
 ## 1. Purpose
 
-Physical Blu-ray/DVD discs store TV episodes as generic titles (Title00.mkv,
-Title01.mkv, etc.) with no episode metadata. Disc title ordering frequently
-differs from broadcast order. Content ID resolves this by:
+Physical Blu-ray and DVD TV discs store episodes as generic titles such as
+`Title00.mkv` with no canonical episode metadata. Disc title order often differs
+from broadcast order, and subtitle releases may use alternate numbering schemes
+for split pilots or other anomalies.
 
-1. Transcribing each ripped title using WhisperX speech-to-text
-2. Downloading reference subtitles from OpenSubtitles for the target season
-3. Computing text similarity between transcripts and references
-4. Decoding the best ordered contiguous episode path with structured dynamic programming
-5. Verifying ambiguous matches with an LLM
+Content ID exists to answer one question reliably:
 
-The matcher is invoked by the episode identification stage after ripping
-completes. It updates the rip specification envelope in-place with confirmed
-episode mappings so downstream encoding and organizing stages have correct
-metadata.
+**Which canonical TMDB episode does each ripped title contain?**
+
+The design is intentionally **content-first**:
+
+1. Transcribe each ripped title with WhisperX.
+2. Build an initial plausible TMDB episode set and expand once only if coverage
+   is weak.
+3. Fetch OpenSubtitles references for those canonical episodes.
+4. Compare transcript content against reference subtitle content.
+5. Resolve most episodes from transcript similarity alone.
+6. Use the LLM only for ambiguous transcript-vs-transcript pair checks.
+7. Use season-set reconciliation and weak ordering hints only after content
+   matching, never as the primary solver.
+
+This stage updates the rip spec envelope in place so downstream encoding,
+subtitling, and organizing have canonical episode metadata.
 
 ---
 
-## 2. Prerequisites
+## 2. Design Principles
+
+### 2.1 Content is primary
+
+TV episode identification is primarily a transcript similarity problem.
+Ordering, disc number, and season structure are supporting evidence only.
+
+### 2.2 Canonical numbering comes from TMDB
+
+TMDB season/episode numbers are the canonical output numbering for Spindle.
+OpenSubtitles metadata and release names are advisory only.
+
+### 2.3 Reference numbering anomalies are expected
+
+OpenSubtitles release names may use alternate numbering, especially for split
+pilots. For example, a subtitle release named `S01E08 Justice` can still be a
+valid reference for canonical TMDB `S01E07 Justice` if the title and transcript
+content match.
+
+### 2.4 The LLM has a narrow job
+
+The LLM compares two transcripts and answers:
+
+- are these the same episode?
+- how confident are you?
+
+It is not a hidden global solver, not a cross-matcher, and not a substitute for
+canonical numbering rules.
+
+### 2.5 Review is preferred over clever fallback stacks
+
+There is one production TV matching pipeline. If transcript evidence remains
+ambiguous after content matching, reference validation, LLM verification, and
+set reconciliation, the item is sent to review.
+
+### 2.6 Deterministic confidence comes from deterministic signals
+
+`match_confidence` is derived from deterministic matcher evidence.
+LLM output may gate acceptance of an ambiguous pair, but LLM confidence does not
+numerically inflate stored `match_confidence` in the initial rewrite.
+
+---
+
+## 3. Preconditions
 
 Content ID requires all of the following:
 
-- **TV content**: `media_type` is `tv` in queue item metadata
-- **OpenSubtitles enabled**: `subtitles.opensubtitles_enabled = true`
-- **OpenSubtitles API key**: `subtitles.opensubtitles_api_key` configured
-- **Ripped files**: At least one episode with a ripped asset path in the envelope
-- **TMDB ID**: Present in queue item metadata (used for season episode list)
-- **Season number**: Derived from metadata, envelope episodes, or defaults to 1
-- **WhisperX**: `uvx` binary available for transcription
-- **TMDB client**: For fetching season details (episode list)
+- `media_type = tv`
+- OpenSubtitles enabled and configured
+- a TMDB ID on the queue item
+- at least one ripped TV title in the envelope
+- WhisperX available
+- TMDB season metadata available
 
-If any prerequisite is missing, the matcher returns early with no changes.
+If prerequisites are missing, the stage returns early without episode
+resolution.
 
 ---
 
-## 3. Pipeline Overview
+## 4. Pipeline Overview
 
 ```
 Ripped Episode Files
         |
         v
-[1. Transcribe] -- WhisperX via shared transcription service
+[1. Transcribe] -- WhisperX on selected primary audio
         |
         v
-[2. Build Candidate Set] -- Determine which episodes to fetch references for
+[2. Build Initial Candidate Episode Set] -- derive likely TMDB episode numbers
         |
         v
-[3. Fetch References] -- Download OpenSubtitles SRTs for candidate episodes
+[3. Fetch + Validate References] -- OpenSubtitles search and metadata scoring
         |
         v
-[4. Fingerprint + IDF] -- TF-IDF cosine similarity between rips and references
+[4. Expand Reference Scope Once If Needed] -- broader set only when coverage is weak
         |
         v
-[5. Ordered Decoder] -- Windowed structured path search over rip/episode order
+[5. Fingerprint + Similarity] -- TF-IDF cosine similarity between rip and refs
         |
         v
-[6. Confidence Derivation] -- Split raw score from derived confidence
+[6. Rank Claims + Accept Clear Matches] -- strongest non-conflicting content claims
         |
         v
-[7. Structural Validation] -- Check contiguity, gaps, and disc-1 constraints
+[7. LLM Verification] -- same-episode check for a few ambiguous pairs only
         |
         v
-[8. LLM Verification] -- Verify ambiguous matches
+[8. Set Reconciliation] -- fill the final obvious hole only under strict guardrails
         |
         v
-[9. Apply Matches] -- Update envelope episodes with confirmed mappings
+[9. Weak Structural Checks] -- review-only sanity checks, not primary solver
+        |
+        v
+[10. Apply Matches] -- update envelope episodes and review flags
 ```
 
 ---
 
-## 4. Transcription
+## 5. Transcription
 
-### 4.1 WhisperX Execution
+### 5.1 Audio selection
 
-For each episode in the rip spec envelope that has a ripped asset:
+Each ripped title is probed and transcribed from the selected primary audio
+stream, not blindly from `0:a:0`.
 
-1. Create working directory: `<staging_root>/contentid/<episode_key>/`
-2. Probe the ripped MKV and run the shared primary-audio selection policy.
-   Content ID must transcribe the **selected primary audio stream**, not blindly
-   `0:a:0`, because multi-language TV discs often place non-English dubs first.
-3. Derive the WhisperX language from the selected stream's language tag when
-   available; otherwise fall back to the caller default (`en`).
-4. Invoke the shared transcription service (see DESIGN_INFRASTRUCTURE.md
-   Section 9) with the ripped file path and a content-stable `ContentKey`
-   (`disc_fingerprint:episode_key:audio_index`). The selected audio index is
-   part of the cache identity so retries do not reuse transcripts from the
-   wrong stream after audio-selection fixes. The `whisperxSem` semaphore is held
-   by the episode identification stage for the duration.
-5. Read the generated SRT file and normalize it (strip SRT formatting, clean text)
-6. Create a text fingerprint from the normalized plain text
+### 5.2 WhisperX output
 
-### 4.2 Progress Reporting
+For each ripped episode asset:
 
-Phase: `transcribe`
-Reports: `(current_episode, total_episodes, episode_key)` after each transcript.
+1. Create `<staging_root>/contentid/<episode_key>/`
+2. Run the shared transcription service
+3. Read the generated SRT
+4. Normalize plain text for fingerprinting
+5. Store the transcript path and fingerprint
 
-### 4.3 Caching
+### 5.3 Cache identity
 
-Transcripts are cached by the shared transcription service using
-content-stable keys (see DESIGN_INFRASTRUCTURE.md Section 9.3). This
-allows later stages (subtitling) to reuse episode ID transcripts without
-re-running WhisperX, even though the input file path changes from the
-ripped file to the encoded file.
+The transcription cache key must include:
 
-The cache key must include the **selected audio-relative stream index**. Two
-transcripts from the same file but different audio tracks are different inputs
-and must never collide.
+- disc fingerprint
+- episode key
+- selected audio-relative stream index
+
+This prevents collisions when the same file is transcribed from different audio
+tracks.
 
 ---
 
-## 5. Reference Downloads
+## 6. Candidate Episode Set and Reference Scope
 
-### 5.1 OpenSubtitles Search Strategy
+The matcher builds a **plausible season candidate set** before reference fetch.
+This is not the final solver; it only bounds reference acquisition.
 
-For each candidate episode number, the matcher:
+### 6.1 Initial candidate set
 
-1. Builds a primary `SearchRequest` with: `parent_tmdb_id`, `query` (show title),
-   `languages`, `season`, `episode`, `media_type=episode`, `year` (air date year)
-2. Generates search variants via `EpisodeSearchVariants()` which produces
-   alternative queries (different ID fields, query text) to handle OpenSubtitles
-   metadata inconsistencies
-3. Tries each variant in order, stopping at the first that returns results
+Initial candidate episodes come from the best available signals, in order:
 
-### 5.2 Reference Selection
+1. already resolved episode numbers in the envelope
+2. disc number and ripped title count
+3. nearby season windows around strong transcript anchors
+4. full-season fallback when no narrower set is trustworthy
 
-From the returned subtitle candidates, `selectReferenceCandidate()` picks the best:
+The candidate set should be broad enough to tolerate disc-order anomalies.
+It must not assume disc title order equals broadcast order.
 
-1. **Title consistency check**: Skip candidates whose release name contains a
-   different episode's TMDB title but not the expected episode's title
-2. **Hearing-impaired preference**: Among title-consistent candidates, prefer
-   non-HI subtitles (HI annotations dilute similarity against WhisperX transcripts)
-3. **Fallback**: If all candidates look suspect, pick the first non-HI or first HI
+### 6.2 Progressive scope expansion
 
-Selection reasons: `top_result`, `title_consistency_rerank`, `non_hi_preferred`,
-`hi_fallback`
+The runtime matcher uses one progressive fetch flow, not multiple competing
+runtime strategies.
 
-### 5.3 Download and Caching
+Behavior:
 
-- Downloads use format `srt`
-- File cache: keyed by `file_id`, stored under the auto-derived OpenSubtitles
-  cache directory (`$XDG_CACHE_HOME/spindle/opensubtitles`)
-- Search cache: keyed by variant signature, stores search responses
-- Cache hits skip network calls entirely
+1. build an initial likely candidate set
+2. fetch and validate references for that set
+3. if confident coverage is weak, expand once to a broader set or full season
+4. stop and match against the final fetched set
 
-### 5.4 Rate Limiting
+Weak coverage may include:
 
-- Minimum 3-second interval between OpenSubtitles API calls (consistent with
-  the rate limit enforced by the OpenSubtitles client; see API_SERVICES.md
-  Section 3).
-- Retriable errors (rate limits, transient server errors) use fixed-delay retry
-  (3 retries, 5-second wait; see API_SERVICES.md Section 3)
+- too few usable references
+- too few clear content claims
+- obviously suspect reference quality
+
+The matcher must not score several strategy outcomes and choose among them as a
+hidden second-layer solver.
 
 ---
 
-## 6. Candidate Episode Set
+## 7. OpenSubtitles Reference Acquisition
 
-### 6.1 Single Candidate Set
+### 7.1 Search
 
-Rather than evaluating multiple strategies, the matcher builds a single candidate
-episode set using the best available information:
+For each candidate TMDB episode number, search OpenSubtitles with:
 
-1. **Rip spec episodes**: If the rip spec contains resolved episode numbers
-   (`Episode > 0`), use those plus neighboring episodes as candidates.
-2. **Disc block estimate**: If no resolved episodes but a disc number is known,
-   estimate the episode range from disc position and number of ripped placeholder assets.
-   Those placeholder assets come from identification-time TV title selection, which keeps
-   the dominant long-form runtime cluster, excludes likely extras, and may preserve a
-   probable double-length title as a single unresolved placeholder asset. If a combined
-   double-length playlist and split episode-length playlists represent the same content
-   family, only the combined placeholder asset is preserved. For disc 1,
-   a probable opening double-length title increases the block estimate by one represented
-   episode so the matcher can fetch the extra reference episode needed for a later
-   `SxxExx-Eyy` range decision.
-3. **Full season fallback**: When neither is available, use all episodes in the
-   season.
+- parent TMDB ID
+- season number
+- episode number
+- configured languages
+- show title query text
 
-All references for the candidate set are fetched before matching begins.
+### 7.2 Candidate selection goals
 
-### 6.2 Disc Block Size
+OpenSubtitles search results are noisy. The selector must prefer references that
+best represent the **target episode content**, not merely the most downloaded
+result.
 
-`discBlockSize(discEpisodes, numRips)` returns the number of episodes on the
-disc. If zero, defaults to `min(4, numRips)` to avoid searching for more
-episodes than there are ripped titles.
+### 7.3 Reference validation rules
 
----
+Each subtitle candidate is scored using metadata from:
 
-## 7. Text Fingerprinting
+- release name
+- file name
+- hearing-impaired flag
+- download count
+- TMDB episode title for the target episode
+- TMDB episode titles for nearby episodes in the same season
 
-### 7.1 Tokenization
+The selector should:
 
-```
-Input text -> lowercase -> split on non-alphanumeric sequences -> filter tokens < 3 chars
-```
+1. reward exact target episode title matches
+2. reward exact season/episode markers when present
+3. prefer non-HI over HI when other evidence is comparable
+4. use download count as a supporting signal, not the sole selector
+5. heavily penalize candidates whose release or file name explicitly names a
+   different episode title from the same season
+6. penalize broad multi-episode packs when a specific single-episode release is
+   available
 
-Regex pattern: `[^a-z0-9]+`
+### 7.4 Alternate numbering tolerance
 
-### 7.2 Term-Frequency Vector
+Split-pilot and similar numbering anomalies are expected.
+A candidate that names the correct episode title but uses an alternate numeric
+label may still be valid.
 
-A `Fingerprint` stores:
-- `tokens`: `map[string]float64` -- term frequency counts
-- `norm`: L2 norm of the token vector (precomputed)
+Example:
 
-### 7.3 Cosine Similarity
+- canonical TMDB target: `S01E07 Justice`
+- OpenSubtitles release name: `S01E08 Justice`
 
-```
-similarity(A, B) = dot(A, B) / (norm(A) * norm(B))
-```
+This is acceptable evidence if the title and transcript content agree.
+By contrast, a candidate named `S01E07 Lonely Among Us` is not acceptable for
+Justice even though the numeric tag appears closer.
 
-Returns 0 if either fingerprint is nil or has zero norm.
+### 7.5 Weak-reference handling
 
----
+The selector may accept at most one working reference per canonical episode, but
+that reference must be treated as **trusted** or **suspect**.
 
-## 8. IDF Weighting
+If the best candidate is still weak or suspicious, the stage must either:
 
-### 8.1 Corpus Construction
+1. fall back to the next-best candidate for that same canonical episode, or
+2. mark the episode reference as suspect and prevent it from producing a
+   high-confidence clear match on its own
 
-After downloading reference subtitles, build an IDF corpus from all reference
-fingerprints:
+A suspicious best candidate must not silently become a strong reference merely
+because it outranked worse garbage.
 
-```go
-corpus := NewCorpus()
-for _, ref := range references {
-    corpus.Add(ref.RawVector)
-}
-idf := corpus.IDF()
-```
+### 7.6 Reference quality is observable
 
-### 8.2 IDF Computation
+Reference selection decisions must be logged at INFO level with enough detail to
+see:
 
-```
-IDF(term) = log((N + 1) / (1 + df(term)))
-```
-
-Where:
-- `N` = total number of documents (reference subtitles)
-- `df(term)` = number of documents containing the term
-
-### 8.3 Weight Application
-
-Each fingerprint's term frequencies are multiplied by their IDF weights.
-The norm is recomputed. Terms absent from the IDF map retain their original
-weight. Terms with zero weight after IDF are dropped.
-
-### 8.4 Minimum Corpus Size
-
-IDF weighting requires at least 2 references. With fewer, raw term-frequency
-vectors are used directly.
+- why a candidate was chosen
+- whether alternate numbering was tolerated
+- whether conflicting titles were rejected
+- whether the chosen reference remained suspect
 
 ---
 
-## 9. Ordered Structured Decoding
+## 8. Text Fingerprinting
 
-### 9.1 Candidate Windows
+### 8.1 Tokenization
 
-The matcher evaluates plausible contiguous candidate windows from the season
-rather than solving an unrestricted assignment problem across all references at
-once.
+Input text is:
 
-Candidate windows are derived from:
-- rip-spec hints when episode numbers already exist
-- disc-number heuristics
-- anchor selection from high-signal rip/reference similarities
-- full-season fallback when narrower windows are not trustworthy
+- lowercased
+- split on non-alphanumeric boundaries
+- stripped of very short tokens
 
-### 9.2 Decoder
+### 8.2 Fingerprints
 
-Within each candidate window, the matcher runs an **ordered dynamic-programming
-sequence decoder** over rip order and episode order.
+A fingerprint stores term frequencies and a precomputed L2 norm.
 
-The decoder scores paths using:
-- **emission score**: transcript/reference cosine similarity normalized around
-  `MinSimilarityScore`
-- **reference skip penalty**: discourages gaps inside the chosen episode block
-- **unresolved penalty**: allows leaving a rip unmatched when forcing a match
-  would be less trustworthy
+### 8.3 Similarity
 
-The production TV path uses **one matcher**: ordered structured decoding.
-Spindle does **not** keep a permanent runtime fallback matcher for TV.
+Similarity is cosine similarity between rip and reference fingerprints.
 
-### 9.3 Window Selection and Path Margin
+### 8.4 IDF weighting
 
-The best decoded path is selected across all candidate windows. The matcher also
-records the next-best path score and stores a **path margin**:
-
-- `path_margin = best_path_score - second_best_path_score`
-
-Small path margins indicate ambiguous block-level decisions and feed both
-confidence scoring and LLM verification.
+IDF weighting is computed from the fetched reference set and applied to both rip
+and reference vectors. With fewer than two references, raw term-frequency
+vectors are used.
 
 ---
 
-## 10. Contiguity and Structural Validation
+## 9. Content-First Matching
 
-### 10.1 Purpose
+### 9.1 Claim matrix
 
-TV disc episodes should still resolve to a contiguous season block (for example
-E05-E10), but contiguity is now a **primary decoder property** rather than a
-post-hoc repair step layered on unrestricted assignment.
+For each ripped title and each fetched reference episode, compute:
 
-### 10.2 Logic
+- raw cosine similarity (`match_score`)
+- rip-side runner-up margin
+- episode-side runner-up margin
+- nearby-episode ambiguity margin
+- reference-quality penalties
 
-After decoding, the stage validates the structured path:
-1. Collect matched episode numbers.
-2. Check whether they form a contiguous range.
-3. Check structural diagnostics such as internal skipped episodes, unresolved
-   holes, and disc-1 start violations.
-4. If the ordered path is structurally suspicious, lower confidence and/or send
-   the item to verification/review.
+These values describe how strongly the content supports a match.
 
-### 10.3 Disc 1 Constraint
+### 9.2 Claim ranking
 
-When `disc1MustStartAtEpisode1` is true and the disc number is 1, the selected
-ordered path must begin at episode 1. If it does not, the item is flagged for
-review.
+All rip/reference pairs above `minSimilarityScore` become provisional claims.
+Each claim gets a deterministic strength derived from score, margins, and
+quality penalties.
 
----
+The matcher then:
 
-## 11. LLM Verification
+1. sorts claims strongest-first
+2. greedily accepts non-conflicting claims that satisfy clear-match rules
+3. leaves conflicting or weak claims unresolved for later verification
 
-### 11.1 Trigger Conditions
+This provides one-to-one uniqueness without a global ordered path decoder.
 
-LLM verification runs when an LLM client is configured and at least one match
-is ambiguous after structured decoding. Triggers include:
-- derived `match_confidence < LLMVerifyThreshold` (default: 0.85)
-- small `path_margin`
-- small adjacent-episode `neighbor_margin`
-- structural flags from the ordered path (for example internal gaps or disc-1
-  violations)
+### 9.3 Clear-match acceptance
 
-### 11.2 Transcript Extraction
+A rip/reference pair may be accepted directly when all of the following hold:
 
-For each match requiring verification:
-1. Extract the middle portion of dialogue from both the rip SRT and reference
-   SRT files. Window half-size: `min(300.0, totalDuration/2)` seconds (clamped
-   so short episodes don't extend past their boundaries; default
-   `middleWindowHalfSec = 300.0` = 5 minutes each side for episodes >= 10 min).
-2. Truncate each to `maxTranscriptChars = 6000` characters
+1. the raw score is above `minSimilarityScore`
+2. the rip-side margin is strong enough to separate the claim from that rip's
+   runner-up candidates
+3. the episode-side margin is strong enough to separate the claim from other
+   rips competing for the same canonical episode
+4. nearby episodes are not close competitors
+5. the chosen reference is not marked too suspect to trust directly
+6. no stronger accepted claim already owns that canonical episode
 
-### 11.3 LLM Prompt
+### 9.4 Ambiguous pairs
 
-See DESIGN_LLM_PROMPTS.md Section 3 for the exact system prompt, user prompt
-template, and response schema. The prompt instructs the LLM to compare two
-middle-portion transcripts and determine if they represent the same episode,
-accounting for WhisperX recognition errors and localization differences.
+Pairs that do not meet clear-match criteria remain unresolved and move to the
+verification stage. Ambiguous pairs are not forced into a global path merely to
+complete a sequence.
 
-### 11.4 Escalation Logic
+### 9.5 One-to-one uniqueness
 
-| Condition | Action |
-|-----------|--------|
-| 0 ambiguous matches | Skip verification entirely |
-| Verification confirms match | Keep assignment and raise confidence if warranted |
-| Verification fails or rejects | Flag `NeedsReview` |
+Canonical episode numbers are unique per item. If multiple rips compete for the
+same reference episode, the strongest clear claim wins. Other competitors remain
+ambiguous or unresolved unless later confirmed by narrow pairwise verification.
 
-When the LLM rejects matches, the item is flagged for manual review rather than
-attempting algorithmic reassignment. Ambiguity escalates to review instead of a
-second production matcher.
+### 9.6 Ordering is not the primary solver
+
+The runtime matcher must not require all accepted matches to form a monotone
+forward or reverse path. Disc order may be arbitrary.
 
 ---
 
-## 12. Review Flags
+## 10. LLM Verification
 
-### 12.1 NeedsReview Propagation
+### 10.1 Trigger conditions
 
-Review flags are written to individual `episodes[]` entries via
-`episode.AppendReviewReason()`. Multiple reasons accumulate per episode. The
-queue item also receives aggregate `needs_review` / `review_reason` state for
-status reporting. For TV, the organizer uses the episode-level flags to split
-clean episodes to the library and flagged episodes to the review directory.
+LLM verification runs only for ambiguous pairs when an LLM client is
+configured.
 
-### 12.2 Provenance Storage
+Typical triggers:
 
-Per-episode outcomes live in `episodes[]` and are the canonical source for
-resolved episode numbers, confidence, and review status. Envelope attributes do
-**not** duplicate per-episode matches. Instead, `attributes.content_id` stores a
-compact run-level summary for auditability and tooling.
+- low derived confidence on a provisional claim
+- weak separation from runner-up candidates
+- duplicate competition for the same canonical episode
+- a final unresolved tail where only a small number of episode candidates
+  remain plausible
 
-Expected `attributes.content_id` fields:
-- `method`
-- `reference_source`
-- `reference_episodes`
-- `transcribed_episodes`
-- `matched_episodes`
-- `unresolved_episodes`
-- `low_confidence_count`
-- `review_threshold`
-- `sequence_contiguous`
-- `episodes_synchronized`
-- `completed`
+### 10.2 Verification breadth
 
-### 12.3 Review Sources
+The LLM is a narrow ambiguity resolver.
+For each unresolved or contested rip, the stage should verify only the top one
+or two plausible episode pairs.
 
-| Source | Condition |
-|--------|-----------|
-| Structured decoder | Disc 1 path doesn't start at episode 1 |
-| Structured decoder | Matched episodes are non-contiguous or contain internal gaps |
-| Confidence model | Derived confidence falls below review threshold |
-| LLM verification | Verification call failed |
-| LLM verification | Any match rejected by LLM |
+The runtime matcher must not perform broad cross-product LLM verification across
+an entire season.
 
-### 12.4 Low-Confidence Review
+### 10.3 Prompt goal
 
-Matches below `LowConfidenceReviewThreshold` (default: 0.70) are flagged during
-matching (handled by the episode identification stage, not the matcher directly).
+The prompt compares two transcripts and decides whether they are the same
+episode.
+
+The LLM is not asked to:
+
+- infer global season order
+- repair the whole assignment set
+- renumber the season
+- choose among many episodes at once
+
+### 10.4 Inputs
+
+For each challenged pair, extract the middle portion of:
+
+- the WhisperX transcript from the rip
+- the OpenSubtitles reference transcript
+
+### 10.5 Output
+
+The LLM returns:
+
+- `same_episode: true|false`
+- `confidence: 0.0-1.0`
+- `explanation`
+
+### 10.6 Acceptance semantics
+
+A positive LLM result allows an already-proposed ambiguous pair to be accepted
+as describing the same episode content.
+It does **not** replace canonical episode-numbering rules, and it does **not**
+numerically raise stored `match_confidence` in the initial rewrite.
+
+`llm_confidence` is logged for observability, not used as a direct numeric input
+into `match_confidence`.
+
+### 10.7 Failure behavior
+
+If the LLM fails, times out, or rejects the pair, that pair remains unresolved
+and the item is flagged for review rather than invoking a second hidden
+matcher.
 
 ---
 
-## 13. Policy Constants
+## 11. Set Reconciliation
 
-Key policy values live in the `Policy` struct.
+After clear matches and LLM-verified matches are accepted, the stage performs a
+small reconciliation pass.
 
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `minSimilarityScore` | 0.58 | Baseline similarity used by the ordered decoder emission score. |
-| `lowConfidenceReviewThreshold` | 0.70 | Derived confidence below this triggers a review flag. |
-| `llmVerifyThreshold` | 0.85 | Derived confidence below this triggers LLM verification. |
-| `referenceSkipPenalty` | 0.12 | Penalty for skipping reference episodes inside a candidate window. |
-| `unresolvedPenalty` | 0.08 | Penalty for leaving a rip unresolved. |
-| `scoreMarginTarget` | 0.05 | Desired separation from the forward runner-up. |
-| `reverseMarginTarget` | 0.05 | Desired separation from the reverse runner-up. |
-| `neighborMarginTarget` | 0.03 | Desired separation from adjacent episodes. |
-| `pathMarginTarget` | 0.12 | Desired separation from the next-best decoded path. |
-| `disc1MustStartAtEpisode1` | true | Disc 1 ordered path must start at episode 1. |
+### 11.1 Missing-episode completion
+
+Single-hole completion is allowed only when all of the following are true:
+
+1. exactly one ripped title remains unresolved
+2. exactly one canonical episode remains unassigned in the relevant fetched
+   season subset
+3. accepted matches already define `N-1` members of a contiguous `N`-episode
+   subset, or otherwise leave one obvious canonical hole in the fetched scope
+4. the unresolved rip is not strongly contradicted by another content claim
+5. the accepted set is already trustworthy enough that the remainder is the
+   obvious completion, not a guess
+
+### 11.2 Purpose
+
+Set reconciliation uses the fact that a TV disc often contains a finite season
+subset, for example:
+
+- confidently resolved: `4, 5, 6, 8`
+- one rip unresolved
+- one canonical episode missing: `7`
+
+In that case the remaining rip may be assigned to `7`.
+
+### 11.3 Limits
+
+Set reconciliation is a completion step, not a substitute for transcript
+matching. If more than one rip or more than one episode remains unresolved, or
+if the unresolved rip still has strong contradictory content evidence, the item
+stays ambiguous and may require review.
 
 ---
 
-## 14. Results Written to Envelope
+## 12. Weak Structural Checks
 
-After successful matching, the episode ID stage updates the envelope:
+Ordering and contiguity remain useful as **sanity checks**, not as the primary
+matching engine.
 
-1. **Episode resolution**: Each `episodes[]` entry is updated with resolved
-   `episode` number, optional `episode_end` for range assets, `episode_title`,
-   and `episode_air_date`. The stage stores both raw `match_score` and derived
-   `match_confidence`. The current implementation supports a conservative
-   opening-double inference for disc 1: when the first placeholder title has a
-   probable double-length runtime profile and the resolved single-episode
-   matches form an opening contiguous run, the first entry is promoted to a
-   range key like `s01e01-e02` and later entries are shifted accordingly.
-2. **Episode review flags**: Low-confidence or unresolved matches mark the
-   specific `episodes[]` entry with `needs_review=true` and a `review_reason`.
-   Queue-level `needs_review` is also set as an aggregate signal when any
-   episode is flagged.
-3. **Envelope provenance summary**: Run-level provenance is persisted in
-   `attributes.content_id`, including the matching method, reference source,
-   reference/transcript counts, low-confidence count, contiguity result, and
-   whether the envelope episodes were synchronized from the run.
-4. **Logging**: Per-episode match details (raw score, derived confidence,
-   runner-up margins, neighbor ambiguity, path margin, subtitle file IDs,
-   and method) are logged at INFO level for diagnostics.
+Structural checks may flag review when:
 
-Organizer behavior for TV consumes these episode-level flags directly:
-clean resolved episodes go to the library, while unresolved or flagged episodes
-are routed to review.
+- disc 1 appears not to start at episode 1
+- accepted matches imply an implausible or highly fragmented season subset
+- accepted set conflicts with the declared disc number in a strong way
 
-Queue item metadata is also updated with `episode_numbers`, `season_number`,
-and `media_type` fields.
+These checks must not override strong content matches on their own.
+
+---
+
+## 13. Confidence Model
+
+### 13.1 Two separate numbers
+
+Each accepted match stores:
+
+- `match_score`: raw transcript similarity signal
+- `match_confidence`: derived trust in the final canonical assignment
+
+These are not the same thing.
+
+### 13.2 Deterministic confidence inputs
+
+In the initial rewrite, `match_confidence` is derived from deterministic
+signals only, such as:
+
+- raw similarity score
+- rip-side runner-up margin
+- episode-side runner-up margin
+- nearby-episode ambiguity
+- duplicate competition
+- whether the selected reference was suspect
+- whether the match required ambiguity escalation
+- whether it was assigned only by final set reconciliation
+
+### 13.3 LLM confidence is not part of numeric confidence
+
+An LLM `same_episode=true` result may allow an ambiguous pair to be accepted,
+but `llm_confidence` is logged for observability only. It does not numerically
+increase stored `match_confidence` in the initial rewrite.
+
+---
+
+## 14. Review Conditions
+
+The stage flags review when any of the following remain true after matching:
+
+1. one or more episodes unresolved
+2. one or more matches below the review-confidence threshold
+3. LLM verification rejected or failed on an ambiguous pair
+4. reference quality is too suspect to trust the result
+5. set reconciliation could not complete the season subset cleanly
+
+Review is the preferred outcome when content signals are insufficient.
+
+---
+
+## 15. Envelope Results
+
+After matching, the stage updates the envelope:
+
+1. resolve `episodes[]` entries to canonical TMDB season/episode numbers where
+   possible
+2. store `episode_title` and `episode_air_date`
+3. store both `match_score` and `match_confidence`
+4. flag unresolved or suspect episodes with episode-level review reasons
+5. store compact run-level provenance in `attributes.content_id`
+
+Organizer behavior for TV uses episode-level review flags directly.
+
+---
+
+## 16. Required Logging
+
+At INFO level, content ID must log:
+
+- reference candidate selection decisions and reasons
+- suspect-reference decisions and fallback attempts
+- accepted episode matches with raw score and derived confidence
+- ambiguous matches sent to LLM verification
+- LLM verification outcomes
+- unresolved episodes
+- set-reconciliation decisions
+- review-triggering structural anomalies
+
+Decision logs should always include:
+
+- `decision_type`
+- `decision_result`
+- `decision_reason`
+
+---
+
+## 17. Policy Defaults
+
+The exact numeric defaults live in the `Policy` struct, but the intended public
+behavior is driven by a small set of thresholds:
+
+- `minSimilarityScore`: minimum raw content similarity worth considering
+- `clearMatchMargin`: minimum separation required for a direct clear match
+- `llmVerifyThreshold`: below this, LLM verification may be considered
+- `lowConfidenceReviewThreshold`: below this, review is required
+
+Additional diagnostics such as reverse-side competition or nearby-episode
+ambiguity may exist internally, but they should not expand into a large family
+of path-decoder-style public knobs.
+
+---
+
+## 18. Non-Goals
+
+The production TV matcher does **not**:
+
+- assume disc titles are in broadcast order
+- require a forward or reverse monotone path
+- choose among multiple runtime decoder strategies
+- use the LLM as a global reassignment engine
+- perform broad LLM cross-product verification across many episode pairs
+- trust OpenSubtitles release numbering over TMDB canonical numbering
+- hide ambiguity by inflating confidence to `1.0`
+
+---
+
+## 19. Summary
+
+Spindle TV episode identification is a **content-first, canonically numbered,
+review-friendly** pipeline:
+
+- OpenSubtitles provides noisy reference candidates
+- TMDB provides canonical numbering
+- transcript similarity resolves the majority of matches
+- references are fetched progressively with at most one scope expansion
+- strongest non-conflicting content claims are accepted first
+- the LLM handles only a few ambiguous pairwise comparisons
+- set reconciliation fills only the final obvious hole
+- ordering is weak evidence only
+- unresolved ambiguity goes to review

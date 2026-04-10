@@ -1,12 +1,18 @@
 package contentid
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/five82/spindle/internal/llm"
+	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/textutil"
 	"github.com/five82/spindle/internal/tmdb"
@@ -33,23 +39,262 @@ This is a test.
 	}
 }
 
-func TestSelectAnchorWindowFirstAnchor(t *testing.T) {
+func TestSelectReferenceCandidatePrefersSpecificEpisodeReleaseOverSeasonPack(t *testing.T) {
+	season := &tmdb.Season{Episodes: []tmdb.Episode{
+		{EpisodeNumber: 4, Name: "The Last Outpost"},
+		{EpisodeNumber: 5, Name: "Where No One Has Gone Before"},
+		{EpisodeNumber: 6, Name: "Lonely Among Us"},
+		{EpisodeNumber: 7, Name: "Justice"},
+	}}
+	results := []opensubtitles.SubtitleResult{
+		{
+			ID: "season-pack",
+			Attributes: opensubtitles.SubtitleAttributes{
+				Release:       "Star Trek TNG S01E01-06",
+				DownloadCount: 27788,
+				Files:         []opensubtitles.SubtitleFile{{FileID: 1, FileName: "StarTrek_TNG_S01E05"}},
+			},
+		},
+		{
+			ID: "specific-release",
+			Attributes: opensubtitles.SubtitleAttributes{
+				Release:       "Star Trek TNG S01E05 Where No One Has Gone Before DVD NonHI",
+				DownloadCount: 643,
+				Files:         []opensubtitles.SubtitleFile{{FileID: 2, FileName: "Star Trek TNG S01E05 Where No One Has Gone Before.srt"}},
+			},
+		},
+	}
+	choice := selectReferenceCandidate(results, season, 1, 5)
+	if choice.Result == nil {
+		t.Fatal("choice.Result = nil")
+	}
+	if choice.Result.ID != "specific-release" {
+		t.Fatalf("selected %q, want %q", choice.Result.ID, "specific-release")
+	}
+	if choice.Suspect {
+		t.Fatal("specific release should not be suspect")
+	}
+}
+
+func TestSelectReferenceCandidateRejectsConflictingEpisodeTitle(t *testing.T) {
+	season := &tmdb.Season{Episodes: []tmdb.Episode{
+		{EpisodeNumber: 6, Name: "Lonely Among Us"},
+		{EpisodeNumber: 7, Name: "Justice"},
+	}}
+	results := []opensubtitles.SubtitleResult{
+		{
+			ID: "wrong-title",
+			Attributes: opensubtitles.SubtitleAttributes{
+				Release:       "Star Trek The Next Generation S01 AC3 DVDRip DivX AMC",
+				DownloadCount: 30703,
+				Files:         []opensubtitles.SubtitleFile{{FileID: 1, FileName: "Star Trek - The Next Generation - 1.07 - Lonely Among Us"}},
+			},
+		},
+		{
+			ID: "right-title",
+			Attributes: opensubtitles.SubtitleAttributes{
+				Release:       "Star Trek TNG S01E07 Justice DVD NonHI",
+				DownloadCount: 234,
+				Files:         []opensubtitles.SubtitleFile{{FileID: 2, FileName: "Star Trek TNG S01E07 Justice.srt"}},
+			},
+		},
+	}
+	choice := selectReferenceCandidate(results, season, 1, 7)
+	if choice.Result == nil {
+		t.Fatal("choice.Result = nil")
+	}
+	if choice.Result.ID != "right-title" {
+		t.Fatalf("selected %q, want %q", choice.Result.ID, "right-title")
+	}
+}
+
+func TestSelectReferenceCandidateMarksSuspectWhenNoGoodFallbackExists(t *testing.T) {
+	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 5, Name: "Where No One Has Gone Before"}}}
+	results := []opensubtitles.SubtitleResult{
+		{
+			ID: "season-pack-only",
+			Attributes: opensubtitles.SubtitleAttributes{
+				Release:       "Star Trek TNG S01E01-10",
+				DownloadCount: 5000,
+				Files:         []opensubtitles.SubtitleFile{{FileID: 1, FileName: "Star Trek TNG S01E01-10 pack.srt"}},
+			},
+		},
+	}
+	choice := selectReferenceCandidate(results, season, 1, 5)
+	if choice.Result == nil {
+		t.Fatal("choice.Result = nil")
+	}
+	if !choice.Suspect {
+		t.Fatal("expected single season-pack candidate to be suspect")
+	}
+}
+
+func TestResolveEpisodeClaimsIgnoresDiscOrder(t *testing.T) {
+	policy := DefaultPolicy()
 	rips := []ripFingerprint{
-		{EpisodeKey: "s02_001", Vector: textutil.NewFingerprint("batman villain puzzler episode twenty five marker")},
-		{EpisodeKey: "s02_002", Vector: textutil.NewFingerprint("robin riddle episode twenty six marker")},
-		{EpisodeKey: "s02_003", Vector: textutil.NewFingerprint("alfred cave episode twenty seven marker")},
+		{EpisodeKey: "s01_001", TitleID: 1, Vector: textutil.NewFingerprint("justice edo rubicun wesley shore leave unique seven"), RawVector: textutil.NewFingerprint("justice edo rubicun wesley shore leave unique seven")},
+		{EpisodeKey: "s01_002", TitleID: 2, Vector: textutil.NewFingerprint("battle ferengi bok stargazer unique eight"), RawVector: textutil.NewFingerprint("battle ferengi bok stargazer unique eight")},
+		{EpisodeKey: "s01_003", TitleID: 3, Vector: textutil.NewFingerprint("lonely among us antikans selay unique six"), RawVector: textutil.NewFingerprint("lonely among us antikans selay unique six")},
+		{EpisodeKey: "s01_004", TitleID: 4, Vector: textutil.NewFingerprint("where no one kosinski traveler unique five"), RawVector: textutil.NewFingerprint("where no one kosinski traveler unique five")},
+		{EpisodeKey: "s01_005", TitleID: 5, Vector: textutil.NewFingerprint("last outpost ferengi portal tkon unique four"), RawVector: textutil.NewFingerprint("last outpost ferengi portal tkon unique four")},
 	}
 	refs := []referenceFingerprint{
-		{EpisodeNumber: 24, Vector: textutil.NewFingerprint("different content episode twenty four")},
-		{EpisodeNumber: 25, Vector: textutil.NewFingerprint("batman villain puzzler episode twenty five marker")},
-		{EpisodeNumber: 26, Vector: textutil.NewFingerprint("robin riddle episode twenty six marker")},
+		{EpisodeNumber: 4, Vector: textutil.NewFingerprint("last outpost ferengi portal tkon unique four"), RawVector: textutil.NewFingerprint("last outpost ferengi portal tkon unique four")},
+		{EpisodeNumber: 5, Vector: textutil.NewFingerprint("where no one kosinski traveler unique five"), RawVector: textutil.NewFingerprint("where no one kosinski traveler unique five")},
+		{EpisodeNumber: 6, Vector: textutil.NewFingerprint("lonely among us antikans selay unique six"), RawVector: textutil.NewFingerprint("lonely among us antikans selay unique six")},
+		{EpisodeNumber: 7, Vector: textutil.NewFingerprint("justice edo rubicun wesley shore leave unique seven"), RawVector: textutil.NewFingerprint("justice edo rubicun wesley shore leave unique seven")},
+		{EpisodeNumber: 8, Vector: textutil.NewFingerprint("battle ferengi bok stargazer unique eight"), RawVector: textutil.NewFingerprint("battle ferengi bok stargazer unique eight")},
 	}
-	anchor, ok := selectAnchorWindow(rips, refs, 40, DefaultPolicy().AnchorMinScore, DefaultPolicy().AnchorMinScoreMargin)
+	resolution := resolveEpisodeClaims(rips, refs, policy)
+	if len(resolution.Accepted) != 5 {
+		t.Fatalf("expected 5 accepted matches, got %d", len(resolution.Accepted))
+	}
+	got := make(map[string]int, len(resolution.Accepted))
+	for _, match := range resolution.Accepted {
+		got[match.EpisodeKey] = match.TargetEpisode
+	}
+	want := map[string]int{
+		"s01_001": 7,
+		"s01_002": 8,
+		"s01_003": 6,
+		"s01_004": 5,
+		"s01_005": 4,
+	}
+	for key, episode := range want {
+		if got[key] != episode {
+			t.Fatalf("%s matched to E%02d, want E%02d", key, got[key], episode)
+		}
+	}
+}
+
+func TestResolveEpisodeClaimsLeavesAdjacentAmbiguityForVerification(t *testing.T) {
+	policy := DefaultPolicy()
+	policy.MinSimilarityScore = 0.10
+	rips := []ripFingerprint{{
+		EpisodeKey: "s01_001",
+		TitleID:    1,
+		Vector:     textutil.NewFingerprint("alpha bravo charlie delta"),
+		RawVector:  textutil.NewFingerprint("alpha bravo charlie delta"),
+	}}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 7, Vector: textutil.NewFingerprint("alpha bravo charlie justice"), RawVector: textutil.NewFingerprint("alpha bravo charlie justice")},
+		{EpisodeNumber: 8, Vector: textutil.NewFingerprint("alpha bravo delta battle"), RawVector: textutil.NewFingerprint("alpha bravo delta battle")},
+	}
+	resolution := resolveEpisodeClaims(rips, refs, policy)
+	if len(resolution.Accepted) != 0 {
+		t.Fatalf("expected 0 clear matches, got %d: %+v", len(resolution.Accepted), resolution.Accepted)
+	}
+	pending := resolution.PendingByRip["s01_001"]
+	if len(pending) == 0 {
+		t.Fatalf("expected pending verification candidates, got resolution=%+v", resolution)
+	}
+	if !pending[0].NeedsVerification {
+		t.Fatal("expected top candidate to require verification")
+	}
+}
+
+func TestVerifyMatchesConfirmsPairWithoutInflatingConfidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"message": map[string]any{
+					"content": `{"same_episode":true,"confidence":0.99,"explanation":"same dialogue"}`,
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := llm.New("test-key", server.URL, "test-model", "", "", 5, nil)
+	ripPath := writeTestSRT(t, "1\n00:10:00,000 --> 00:10:02,000\nJustice dialogue\n")
+	refPath := writeTestSRT(t, "1\n00:10:00,000 --> 00:10:02,000\nJustice dialogue\n")
+	candidate := matchResult{
+		EpisodeKey:    "s01_001",
+		TargetEpisode: 7,
+		Score:         0.82,
+		Confidence:    0.81,
+		Strength:      0.81,
+	}
+	accepted, remaining, result := verifyMatches(context.Background(), client, nil, map[string][]matchResult{
+		"s01_001": {candidate},
+	}, []ripFingerprint{{EpisodeKey: "s01_001", Path: ripPath}}, []referenceFingerprint{{EpisodeNumber: 7, CachePath: refPath}}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if result == nil || result.Verified != 1 {
+		t.Fatalf("expected one verified match, got %+v", result)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("expected no remaining pending candidates, got %+v", remaining)
+	}
+	if len(accepted) != 1 {
+		t.Fatalf("expected one accepted match, got %d", len(accepted))
+	}
+	if accepted[0].Confidence != 0.81 {
+		t.Fatalf("expected confidence to remain 0.81, got %.2f", accepted[0].Confidence)
+	}
+	if accepted[0].AcceptedBy != "llm_verified" {
+		t.Fatalf("accepted_by = %q, want llm_verified", accepted[0].AcceptedBy)
+	}
+}
+
+func TestReconcileSingleHoleFillsObviousMissingEpisode(t *testing.T) {
+	policy := DefaultPolicy()
+	matches := []matchResult{
+		{EpisodeKey: "s01_001", TargetEpisode: 4, Confidence: 0.92},
+		{EpisodeKey: "s01_002", TargetEpisode: 5, Confidence: 0.93},
+		{EpisodeKey: "s01_003", TargetEpisode: 6, Confidence: 0.94},
+		{EpisodeKey: "s01_005", TargetEpisode: 8, Confidence: 0.91},
+	}
+	pending := map[string][]matchResult{
+		"s01_004": {
+			{EpisodeKey: "s01_004", TargetEpisode: 7, Score: 0.78, Confidence: 0.80},
+		},
+	}
+	refs := []referenceFingerprint{{EpisodeNumber: 7}}
+	reconciled, ok := reconcileSingleHole(matches, pending, refs, policy)
 	if !ok {
-		t.Fatalf("expected anchor selection to succeed, got reason=%q", anchor.Reason)
+		t.Fatal("expected single-hole reconciliation to succeed")
 	}
-	if anchor.WindowStart != 25 || anchor.WindowEnd != 27 {
-		t.Fatalf("window = %d-%d, want 25-27", anchor.WindowStart, anchor.WindowEnd)
+	if len(reconciled) != 5 {
+		t.Fatalf("expected 5 matches after reconciliation, got %d", len(reconciled))
+	}
+	found := false
+	for _, match := range reconciled {
+		if match.EpisodeKey == "s01_004" {
+			found = true
+			if match.TargetEpisode != 7 {
+				t.Fatalf("reconciled episode = %d, want 7", match.TargetEpisode)
+			}
+			if match.AcceptedBy != "single_hole_reconciliation" {
+				t.Fatalf("accepted_by = %q, want single_hole_reconciliation", match.AcceptedBy)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("reconciled match for s01_004 not found")
+	}
+}
+
+func TestReconcileSingleHoleRefusesStrongContradiction(t *testing.T) {
+	policy := DefaultPolicy()
+	matches := []matchResult{
+		{EpisodeKey: "s01_001", TargetEpisode: 4, Confidence: 0.92},
+		{EpisodeKey: "s01_002", TargetEpisode: 5, Confidence: 0.93},
+		{EpisodeKey: "s01_003", TargetEpisode: 6, Confidence: 0.94},
+		{EpisodeKey: "s01_005", TargetEpisode: 8, Confidence: 0.91},
+	}
+	pending := map[string][]matchResult{
+		"s01_004": {
+			{EpisodeKey: "s01_004", TargetEpisode: 8, Score: 0.92, Confidence: 0.90},
+			{EpisodeKey: "s01_004", TargetEpisode: 7, Score: 0.70, Confidence: 0.72},
+		},
+	}
+	refs := []referenceFingerprint{{EpisodeNumber: 7}}
+	_, ok := reconcileSingleHole(matches, pending, refs, policy)
+	if ok {
+		t.Fatal("expected strong contradictory content to block reconciliation")
 	}
 }
 
@@ -89,7 +334,7 @@ func TestApplyMatchesRemapsAssetKeys(t *testing.T) {
 	}
 }
 
-func TestApplyMatches_InfersOpeningDoubleEpisode(t *testing.T) {
+func TestApplyMatchesInfersOpeningDoubleEpisode(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := &Handler{policy: DefaultPolicy()}
 	env := &ripspec.Envelope{
@@ -118,57 +363,11 @@ func TestApplyMatches_InfersOpeningDoubleEpisode(t *testing.T) {
 	}
 }
 
-func TestShouldVerifyMatchUsesDerivedConfidenceAndAmbiguity(t *testing.T) {
-	if !shouldVerifyMatch(matchResult{EpisodeKey: "s01_002", Confidence: 0.95, NeedsVerification: true}, DefaultPolicy().LLMVerifyThreshold) {
-		t.Fatal("expected ambiguity-flagged high-confidence match to be verified")
+func writeTestSRT(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "sample.srt")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if shouldVerifyMatch(matchResult{EpisodeKey: "s01_003", Confidence: 0.95}, DefaultPolicy().LLMVerifyThreshold) {
-		t.Fatal("unexpected verification for clear high-confidence match")
-	}
-	if !shouldVerifyMatch(matchResult{EpisodeKey: "s01_003", Confidence: 0.60}, DefaultPolicy().LLMVerifyThreshold) {
-		t.Fatal("expected low-confidence match to be verified")
-	}
-}
-
-func TestDeriveMatchConfidencePenalizesAdjacentAmbiguity(t *testing.T) {
-	confidence, _, needsVerify, _ := deriveMatchConfidence(0.93, 0.01, 0.01, 0.005, 0.03, orderedPath{}, DefaultPolicy())
-	if confidence >= 0.90 {
-		t.Fatalf("expected ambiguous high-score match confidence < 0.90, got %.3f", confidence)
-	}
-	if !needsVerify {
-		t.Fatal("expected ambiguous neighboring match to require verification")
-	}
-}
-
-func TestDecodeOrderedEpisodeMatchesChoosesContiguousForwardWindow(t *testing.T) {
-	policy := DefaultPolicy()
-	rips := []ripFingerprint{
-		{EpisodeKey: "s01_001", TitleID: 1, Vector: textutil.NewFingerprint("outpost alpha beta gamma unique four")},
-		{EpisodeKey: "s01_002", TitleID: 2, Vector: textutil.NewFingerprint("where delta epsilon zeta unique five")},
-		{EpisodeKey: "s01_003", TitleID: 3, Vector: textutil.NewFingerprint("lonely eta theta iota unique six")},
-	}
-	refs := []referenceFingerprint{
-		{EpisodeNumber: 3, Vector: textutil.NewFingerprint("different episode three text")},
-		{EpisodeNumber: 4, Vector: textutil.NewFingerprint("outpost alpha beta gamma unique four")},
-		{EpisodeNumber: 5, Vector: textutil.NewFingerprint("where delta epsilon zeta unique five")},
-		{EpisodeNumber: 6, Vector: textutil.NewFingerprint("lonely eta theta iota unique six")},
-		{EpisodeNumber: 7, Vector: textutil.NewFingerprint("different episode seven text")},
-	}
-	matches, diag := decodeOrderedEpisodeMatches(rips, refs, 2, 26, policy)
-	if len(matches) != 3 {
-		t.Fatalf("expected 3 matches, got %d", len(matches))
-	}
-	if diag.WindowStart != 4 || diag.WindowEnd != 6 {
-		t.Fatalf("window = %d-%d, want 4-6", diag.WindowStart, diag.WindowEnd)
-	}
-	got := make(map[string]int, len(matches))
-	for _, m := range matches {
-		got[m.EpisodeKey] = m.TargetEpisode
-	}
-	want := map[string]int{"s01_001": 4, "s01_002": 5, "s01_003": 6}
-	for key, episode := range want {
-		if got[key] != episode {
-			t.Fatalf("%s matched to E%02d, want E%02d", key, got[key], episode)
-		}
-	}
+	return path
 }

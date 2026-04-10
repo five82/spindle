@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/five82/spindle/internal/llm"
@@ -28,109 +29,194 @@ type verifyResult struct {
 	Challenged   int
 	Verified     int
 	Rejected     int
+	Failed       int
 	NeedsReview  bool
 	ReviewReason string
 }
 
-func verifyMatches(ctx context.Context, client *llm.Client, matches []matchResult, rips []ripFingerprint, refs []referenceFingerprint, logger *slog.Logger, verifyThreshold float64) ([]matchResult, *verifyResult) {
-	if client == nil {
-		return matches, nil
+func verifyMatches(ctx context.Context, client *llm.Client, accepted []matchResult, pendingByRip map[string][]matchResult, rips []ripFingerprint, refs []referenceFingerprint, logger *slog.Logger) ([]matchResult, map[string][]matchResult, *verifyResult) {
+	remaining := clonePendingByRip(pendingByRip)
+	if client == nil || len(pendingByRip) == 0 {
+		return accepted, remaining, nil
 	}
-	var candidates []int
-	for i, m := range matches {
-		if shouldVerifyMatch(m, verifyThreshold) {
-			candidates = append(candidates, i)
-		}
+
+	result := &verifyResult{}
+	updated := append([]matchResult(nil), accepted...)
+	acceptedRips := make(map[string]struct{}, len(updated))
+	acceptedEpisodes := make(map[int]struct{}, len(updated))
+	for _, match := range updated {
+		acceptedRips[strings.ToLower(match.EpisodeKey)] = struct{}{}
+		acceptedEpisodes[match.TargetEpisode] = struct{}{}
 	}
-	if len(candidates) == 0 {
-		return matches, nil
-	}
-	result := &verifyResult{Challenged: len(candidates)}
-	updated := append([]matchResult(nil), matches...)
-	for _, idx := range candidates {
-		m := matches[idx]
-		ripPath := findRipPath(rips, m.EpisodeKey)
-		refPath := findRefPath(refs, m.TargetEpisode)
-		if ripPath == "" || refPath == "" {
-			result.NeedsReview = true
-			if result.ReviewReason == "" {
-				result.ReviewReason = "LLM verification skipped due to missing transcript"
-			}
+
+	queue := verificationQueue(pendingByRip, acceptedRips)
+	for _, entry := range queue {
+		if _, ok := acceptedRips[strings.ToLower(entry.EpisodeKey)]; ok {
 			continue
 		}
-		ripText, err := extractMiddleTranscript(ripPath)
-		if err != nil {
+		for _, candidate := range entry.Candidates {
+			if _, ok := acceptedEpisodes[candidate.TargetEpisode]; ok {
+				remaining[entry.EpisodeKey] = removeCandidateEpisode(remaining[entry.EpisodeKey], candidate.TargetEpisode)
+				continue
+			}
+			result.Challenged++
+			ripPath := findRipPath(rips, candidate.EpisodeKey)
+			refPath := findRefPath(refs, candidate.TargetEpisode)
+			if ripPath == "" || refPath == "" {
+				result.Failed++
+				result.NeedsReview = true
+				if result.ReviewReason == "" {
+					result.ReviewReason = "LLM verification failed for ambiguous episode pair"
+				}
+				remaining[entry.EpisodeKey] = removeCandidateEpisode(remaining[entry.EpisodeKey], candidate.TargetEpisode)
+				continue
+			}
+			ripText, err := extractMiddleTranscript(ripPath)
+			if err != nil {
+				result.Failed++
+				result.NeedsReview = true
+				if result.ReviewReason == "" {
+					result.ReviewReason = "LLM verification failed for ambiguous episode pair"
+				}
+				remaining[entry.EpisodeKey] = removeCandidateEpisode(remaining[entry.EpisodeKey], candidate.TargetEpisode)
+				continue
+			}
+			refText, err := extractMiddleTranscript(refPath)
+			if err != nil {
+				result.Failed++
+				result.NeedsReview = true
+				if result.ReviewReason == "" {
+					result.ReviewReason = "LLM verification failed for ambiguous episode pair"
+				}
+				remaining[entry.EpisodeKey] = removeCandidateEpisode(remaining[entry.EpisodeKey], candidate.TargetEpisode)
+				continue
+			}
+			userPrompt := buildVerificationPrompt(ripText, refText, candidate.EpisodeKey, candidate.TargetEpisode)
+			var ev episodeVerification
+			if err := client.CompleteJSON(ctx, verificationPrompt, userPrompt, &ev); err != nil {
+				result.Failed++
+				result.NeedsReview = true
+				if result.ReviewReason == "" {
+					result.ReviewReason = "LLM verification failed for ambiguous episode pair"
+				}
+				remaining[entry.EpisodeKey] = removeCandidateEpisode(remaining[entry.EpisodeKey], candidate.TargetEpisode)
+				if logger != nil {
+					logger.Info("episode LLM verification",
+						"decision_type", "contentid_llm_verification",
+						"decision_result", "failed",
+						"decision_reason", err.Error(),
+						"episode_key", candidate.EpisodeKey,
+						"target_episode", candidate.TargetEpisode,
+						"match_score", candidate.Score,
+						"match_confidence", candidate.Confidence,
+					)
+				}
+				continue
+			}
+			if ev.SameEpisode {
+				verified := candidate
+				verified.AcceptedBy = "llm_verified"
+				verified.NeedsVerification = false
+				verified.VerificationReason = ""
+				updated = append(updated, verified)
+				acceptedRips[strings.ToLower(verified.EpisodeKey)] = struct{}{}
+				acceptedEpisodes[verified.TargetEpisode] = struct{}{}
+				delete(remaining, entry.EpisodeKey)
+				result.Verified++
+				if logger != nil {
+					logger.Info("episode LLM verification",
+						"decision_type", "contentid_llm_verification",
+						"decision_result", "confirmed",
+						"decision_reason", ev.Explanation,
+						"episode_key", candidate.EpisodeKey,
+						"target_episode", candidate.TargetEpisode,
+						"match_score", candidate.Score,
+						"match_confidence", candidate.Confidence,
+						"llm_confidence", ev.Confidence,
+					)
+				}
+				break
+			}
+			result.Rejected++
 			result.NeedsReview = true
 			if result.ReviewReason == "" {
-				result.ReviewReason = "LLM verification failed extracting rip transcript"
+				result.ReviewReason = "LLM rejected ambiguous episode pair"
 			}
-			continue
-		}
-		refText, err := extractMiddleTranscript(refPath)
-		if err != nil {
-			result.NeedsReview = true
-			if result.ReviewReason == "" {
-				result.ReviewReason = "LLM verification failed extracting reference transcript"
-			}
-			continue
-		}
-		userPrompt := buildVerificationPrompt(ripText, refText, m.EpisodeKey, m.TargetEpisode)
-		var ev episodeVerification
-		if err := client.CompleteJSON(ctx, verificationPrompt, userPrompt, &ev); err != nil {
-			result.NeedsReview = true
-			if result.ReviewReason == "" {
-				result.ReviewReason = "LLM verification request failed"
-			}
-			continue
-		}
-		if ev.SameEpisode {
-			result.Verified++
-			updated[idx].NeedsVerification = false
-			updated[idx].VerificationReason = ""
-			if ev.Confidence > updated[idx].Confidence {
-				updated[idx].Confidence = ev.Confidence
-			}
+			remaining[entry.EpisodeKey] = removeCandidateEpisode(remaining[entry.EpisodeKey], candidate.TargetEpisode)
 			if logger != nil {
 				logger.Info("episode LLM verification",
 					"decision_type", "contentid_llm_verification",
-					"decision_result", "confirmed",
+					"decision_result", "rejected",
 					"decision_reason", ev.Explanation,
-					"episode_key", m.EpisodeKey,
-					"target_episode", m.TargetEpisode,
-					"match_score", m.Score,
-					"match_confidence", m.Confidence,
+					"episode_key", candidate.EpisodeKey,
+					"target_episode", candidate.TargetEpisode,
+					"match_score", candidate.Score,
+					"match_confidence", candidate.Confidence,
 					"llm_confidence", ev.Confidence,
 				)
 			}
-			continue
-		}
-		result.Rejected++
-		result.NeedsReview = true
-		result.ReviewReason = fmt.Sprintf("LLM rejected match for %s -> E%02d", m.EpisodeKey, m.TargetEpisode)
-		if logger != nil {
-			logger.Info("episode LLM verification",
-				"decision_type", "contentid_llm_verification",
-				"decision_result", "rejected",
-				"decision_reason", ev.Explanation,
-				"episode_key", m.EpisodeKey,
-				"target_episode", m.TargetEpisode,
-				"match_score", m.Score,
-				"match_confidence", m.Confidence,
-				"llm_confidence", ev.Confidence,
-			)
 		}
 	}
-	return updated, result
+	return updated, remaining, result
 }
 
-func shouldVerifyMatch(m matchResult, verifyThreshold float64) bool {
-	if m.Confidence < verifyThreshold {
-		return true
+type verificationEntry struct {
+	EpisodeKey string
+	Candidates []matchResult
+	Strength   float64
+}
+
+func verificationQueue(pendingByRip map[string][]matchResult, acceptedRips map[string]struct{}) []verificationEntry {
+	queue := make([]verificationEntry, 0, len(pendingByRip))
+	for episodeKey, candidates := range pendingByRip {
+		if _, ok := acceptedRips[strings.ToLower(episodeKey)]; ok {
+			continue
+		}
+		if len(candidates) > maxVerificationCandidatesPerRip {
+			candidates = append([]matchResult(nil), candidates[:maxVerificationCandidatesPerRip]...)
+		} else {
+			candidates = append([]matchResult(nil), candidates...)
+		}
+		strength := 0.0
+		if len(candidates) > 0 {
+			strength = candidates[0].Strength
+		}
+		queue = append(queue, verificationEntry{EpisodeKey: episodeKey, Candidates: candidates, Strength: strength})
 	}
-	if m.NeedsVerification {
-		return true
+	sort.Slice(queue, func(i, j int) bool {
+		if queue[i].Strength != queue[j].Strength {
+			return queue[i].Strength > queue[j].Strength
+		}
+		return queue[i].EpisodeKey < queue[j].EpisodeKey
+	})
+	return queue
+}
+
+func clonePendingByRip(in map[string][]matchResult) map[string][]matchResult {
+	if len(in) == 0 {
+		return nil
 	}
-	return false
+	out := make(map[string][]matchResult, len(in))
+	for key, candidates := range in {
+		out[key] = append([]matchResult(nil), candidates...)
+	}
+	return out
+}
+
+func removeCandidateEpisode(candidates []matchResult, episode int) []matchResult {
+	if len(candidates) == 0 {
+		return nil
+	}
+	out := candidates[:0]
+	for _, candidate := range candidates {
+		if candidate.TargetEpisode != episode {
+			out = append(out, candidate)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func findRipPath(rips []ripFingerprint, key string) string {
@@ -172,7 +258,7 @@ func extractMiddleTranscript(srtPath string) (string, error) {
 	}
 	total := cues[len(cues)-1].End
 	mid := total / 2
-	start := max(0, mid-middleWindowHalfSec)
+	start := max(0.0, mid-middleWindowHalfSec)
 	end := mid + middleWindowHalfSec
 	if total < 2*middleWindowHalfSec {
 		start = 0

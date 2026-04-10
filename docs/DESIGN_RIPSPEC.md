@@ -192,7 +192,7 @@ SubtitleGenRecord {
 }
 
 ContentIDSummary {
-    Method                string  // e.g. "whisperx_tfidf_ordered_dp"
+    Method                string  // e.g. "whisperx_tfidf_content_matcher"
     ReferenceSource       string  // e.g. "opensubtitles"
     ReferenceEpisodes     int
     TranscribedEpisodes   int

@@ -143,16 +143,9 @@ type CommentaryConfig struct {
 // ContentIDConfig defines episode identification policy thresholds.
 type ContentIDConfig struct {
 	MinSimilarityScore           float64 `toml:"min_similarity_score"`
+	ClearMatchMargin             float64 `toml:"clear_match_margin"`
 	LowConfidenceReviewThreshold float64 `toml:"low_confidence_review_threshold"`
 	LLMVerifyThreshold           float64 `toml:"llm_verify_threshold"`
-	AnchorMinScore               float64 `toml:"anchor_min_score"`
-	AnchorMinScoreMargin         float64 `toml:"anchor_min_score_margin"`
-	BlockHighConfidenceDelta     float64 `toml:"block_high_confidence_delta"`
-	BlockHighConfidenceTopRatio  float64 `toml:"block_high_confidence_top_ratio"`
-	DiscBlockPaddingMin          int     `toml:"disc_block_padding_min"`
-	DiscBlockPaddingDivisor      int     `toml:"disc_block_padding_divisor"`
-	Disc1MustStartAtEpisode1     bool    `toml:"disc1_must_start_at_episode1"`
-	Disc2PlusMinStartEpisode     int     `toml:"disc2_plus_min_start_episode"`
 }
 
 // LoggingConfig defines log retention settings.

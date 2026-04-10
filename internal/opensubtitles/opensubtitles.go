@@ -63,6 +63,7 @@ type SubtitleResult struct {
 // SubtitleAttributes contains metadata about a subtitle.
 type SubtitleAttributes struct {
 	Language         string         `json:"language"`
+	Release          string         `json:"release"`
 	DownloadCount    int            `json:"download_count"`
 	ForeignPartsOnly bool           `json:"foreign_parts_only"`
 	HearingImpaired  bool           `json:"hearing_impaired"`

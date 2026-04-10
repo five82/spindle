@@ -1,117 +1,109 @@
 package contentid
 
 import (
-	"log/slog"
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/tmdb"
 )
 
 type candidateEpisodePlan struct {
-	Episodes          []int
-	RipSpecEpisodes   []int
-	DiscBlockEpisodes []int
-	SeasonFallback    []int
-	DiscEstimateStart int
-	PassSize          int
+	InitialEpisodes []int
+	ExpandedEpisodes []int
+	InitialReason   string
 }
 
-type strategyAttempt struct {
-	Name     string
-	Reason   string
-	Episodes []int
+func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.Season, discNumber int) candidateEpisodePlan {
+	allEpisodes := seasonEpisodeNumbers(season)
+	if len(allEpisodes) == 0 {
+		return candidateEpisodePlan{}
+	}
+
+	plan := candidateEpisodePlan{
+		ExpandedEpisodes: append([]int(nil), allEpisodes...),
+	}
+
+	if initial := resolvedEpisodeScope(env, allEpisodes); len(initial) > 0 {
+		plan.InitialEpisodes = initial
+		plan.InitialReason = "resolved_episode_scope"
+		return plan
+	}
+
+	if discScoped := discBlockScope(env, allEpisodes, discNumber); len(discScoped) > 0 {
+		plan.InitialEpisodes = discScoped
+		plan.InitialReason = "disc_block_estimate"
+		return plan
+	}
+
+	width := min(len(allEpisodes), max(len(env.Episodes)*2, 1))
+	plan.InitialEpisodes = append([]int(nil), allEpisodes[:width]...)
+	plan.InitialReason = "season_prefix_fallback"
+	return plan
 }
 
-type strategyOutcome struct {
-	Attempt           strategyAttempt
-	References        []referenceFingerprint
-	Matches           []matchResult
-	Diagnostics       decodeDiagnostics
-	AverageScore      float64
-	AverageConfidence float64
+func shouldExpandCandidateScope(plan candidateEpisodePlan, resolution matchResolution, ripCount int) (bool, string) {
+	if len(plan.ExpandedEpisodes) == 0 || sameEpisodeSet(plan.InitialEpisodes, plan.ExpandedEpisodes) {
+		return false, ""
+	}
+	if len(resolution.Accepted) < ripCount {
+		return true, "initial_scope_left_unresolved_titles"
+	}
+	if resolution.SuspectReferenceCount > 0 {
+		return true, "initial_scope_contains_suspect_references"
+	}
+	return false, ""
 }
 
-func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.Season, discNumber int, policy Policy) candidateEpisodePlan {
-	policy = policy.normalized()
-	plan := candidateEpisodePlan{}
-	set := make(map[int]struct{}, len(env.Episodes)*2)
+func resolvedEpisodeScope(env *ripspec.Envelope, allEpisodes []int) []int {
+	if env == nil || len(env.Episodes) == 0 || len(allEpisodes) == 0 {
+		return nil
+	}
+	resolved := make([]int, 0, len(env.Episodes))
 	for _, episode := range env.Episodes {
 		if episode.Episode > 0 {
-			set[episode.Episode] = struct{}{}
-			plan.RipSpecEpisodes = append(plan.RipSpecEpisodes, episode.Episode)
+			resolved = append(resolved, episode.Episode)
 		}
 	}
-	sort.Ints(plan.RipSpecEpisodes)
+	if len(resolved) == 0 {
+		return nil
+	}
+	sort.Ints(resolved)
+	resolved = compactInts(resolved)
+	width := max(len(env.Episodes), len(resolved))
+	start := resolved[0]
+	end := resolved[len(resolved)-1]
+	for end-start+1 < width {
+		if end < allEpisodes[len(allEpisodes)-1] {
+			end++
+		}
+		if end-start+1 >= width {
+			break
+		}
+		if start > allEpisodes[0] {
+			start--
+		}
+		if start == allEpisodes[0] && end == allEpisodes[len(allEpisodes)-1] {
+			break
+		}
+	}
+	return intersectEpisodeRange(allEpisodes, start, end)
+}
 
-	totalEpisodes := len(season.Episodes)
-	blockEpisodes := discBlockSize(env.Episodes)
-	if len(set) > 0 && discNumber > 0 && totalEpisodes > 0 {
-		block := blockEpisodes
-		start := (discNumber - 1) * block
-		if start >= totalEpisodes {
-			start = totalEpisodes - block
-		}
-		if start < 0 {
-			start = 0
-		}
-		for idx := start; idx < totalEpisodes && idx < start+block; idx++ {
-			number := season.Episodes[idx].EpisodeNumber
-			set[number] = struct{}{}
-			plan.DiscBlockEpisodes = append(plan.DiscBlockEpisodes, number)
-		}
-		sort.Ints(plan.DiscBlockEpisodes)
+func discBlockScope(env *ripspec.Envelope, allEpisodes []int, discNumber int) []int {
+	if len(allEpisodes) == 0 || discNumber <= 0 {
+		return nil
 	}
-
-	if len(set) == 0 && discNumber > 0 && totalEpisodes > 0 {
-		block := blockEpisodes
-		plan.PassSize = block * 2
-		estimateStart := (discNumber-1)*block + 1 - block/2
-		if estimateStart < 1 {
-			estimateStart = 1
-		}
-		maxStart := totalEpisodes - plan.PassSize + 1
-		if maxStart < 1 {
-			maxStart = 1
-		}
-		if estimateStart > maxStart {
-			estimateStart = maxStart
-		}
-		plan.DiscEstimateStart = estimateStart
-		padding := max(policy.DiscBlockPaddingMin, block/policy.DiscBlockPaddingDivisor)
-		start := (discNumber-1)*block - padding
-		end := discNumber*block + padding
-		if start < 0 {
-			start = 0
-		}
-		if end > totalEpisodes {
-			end = totalEpisodes
-		}
-		for idx := start; idx < end; idx++ {
-			number := season.Episodes[idx].EpisodeNumber
-			set[number] = struct{}{}
-			plan.DiscBlockEpisodes = append(plan.DiscBlockEpisodes, number)
-		}
-		sort.Ints(plan.DiscBlockEpisodes)
+	block := discBlockSize(env.Episodes)
+	padding := max(2, block/4)
+	start := (discNumber-1)*block + 1 - padding
+	end := discNumber*block + padding
+	if start < allEpisodes[0] {
+		start = allEpisodes[0]
 	}
-
-	if len(set) == 0 {
-		for _, episode := range season.Episodes {
-			plan.SeasonFallback = append(plan.SeasonFallback, episode.EpisodeNumber)
-			set[episode.EpisodeNumber] = struct{}{}
-		}
-		sort.Ints(plan.SeasonFallback)
+	if end > allEpisodes[len(allEpisodes)-1] {
+		end = allEpisodes[len(allEpisodes)-1]
 	}
-
-	list := make([]int, 0, len(set))
-	for number := range set {
-		list = append(list, number)
-	}
-	sort.Ints(list)
-	plan.Episodes = list
-	return plan
+	return intersectEpisodeRange(allEpisodes, start, end)
 }
 
 func discBlockSize(episodes []ripspec.Episode) int {
@@ -149,61 +141,6 @@ func probableOpeningDoubleEpisode(episodes []ripspec.Episode) bool {
 	return first >= minDur && first <= maxDur
 }
 
-func buildEpisodePasses(plan candidateEpisodePlan, season *tmdb.Season, discEpisodes int) [][]int {
-	allEpisodes := seasonEpisodeNumbers(season)
-	if len(allEpisodes) == 0 {
-		return nil
-	}
-	width := plan.PassSize
-	if width <= 0 {
-		width = discEpisodes * 2
-	}
-	if width <= 0 {
-		width = min(12, len(allEpisodes))
-	}
-	if width > len(allEpisodes) {
-		width = len(allEpisodes)
-	}
-	startIdx := passStartIndex(plan, width, len(allEpisodes))
-	passes := make([][]int, 0, 1+len(allEpisodes)/max(1, width))
-	passes = append(passes, append([]int(nil), allEpisodes[startIdx:startIdx+width]...))
-
-	left := startIdx
-	right := startIdx + width
-	for left > 0 || right < len(allEpisodes) {
-		pass := make([]int, 0, width)
-		leftStart := max(0, left-discEpisodes)
-		if leftStart < left {
-			pass = append(pass, allEpisodes[leftStart:left]...)
-		}
-		rightEnd := min(len(allEpisodes), right+discEpisodes)
-		if right < rightEnd {
-			pass = append(pass, allEpisodes[right:rightEnd]...)
-		}
-		if len(pass) == 0 {
-			break
-		}
-		passes = append(passes, pass)
-		left = leftStart
-		right = rightEnd
-	}
-	return passes
-}
-
-func passStartIndex(plan candidateEpisodePlan, width, totalEpisodes int) int {
-	startIdx := 0
-	switch {
-	case plan.DiscEstimateStart > 0:
-		startIdx = plan.DiscEstimateStart - 1
-	case len(plan.DiscBlockEpisodes) > 0:
-		startIdx = plan.DiscBlockEpisodes[0] - 1
-	}
-	if startIdx+width > totalEpisodes {
-		startIdx = totalEpisodes - width
-	}
-	return max(0, startIdx)
-}
-
 func seasonEpisodeNumbers(season *tmdb.Season) []int {
 	if season == nil || len(season.Episodes) == 0 {
 		return nil
@@ -218,96 +155,14 @@ func seasonEpisodeNumbers(season *tmdb.Season) []int {
 	return compactInts(episodes)
 }
 
-func buildEpisodeRange(start, end int) []int {
-	if start <= 0 || end < start {
-		return nil
-	}
-	episodes := make([]int, 0, end-start+1)
-	for episode := start; episode <= end; episode++ {
-		episodes = append(episodes, episode)
-	}
-	return episodes
-}
-
-func filterReferencesByEpisodes(refs []referenceFingerprint, episodes []int) []referenceFingerprint {
-	if len(refs) == 0 || len(episodes) == 0 {
-		return nil
-	}
-	include := make(map[int]struct{}, len(episodes))
-	for _, episode := range episodes {
-		include[episode] = struct{}{}
-	}
-	filtered := make([]referenceFingerprint, 0, len(episodes))
-	for _, ref := range refs {
-		if _, ok := include[ref.EpisodeNumber]; ok {
-			filtered = append(filtered, ref)
+func intersectEpisodeRange(allEpisodes []int, start, end int) []int {
+	out := make([]int, 0, end-start+1)
+	for _, episode := range allEpisodes {
+		if episode >= start && episode <= end {
+			out = append(out, episode)
 		}
-	}
-	return filtered
-}
-
-func missingEpisodesForReferences(refs []referenceFingerprint, episodes []int) []int {
-	if len(episodes) == 0 {
-		return nil
-	}
-	if len(refs) == 0 {
-		return append([]int(nil), episodes...)
-	}
-	present := make(map[int]struct{}, len(refs))
-	for _, ref := range refs {
-		present[ref.EpisodeNumber] = struct{}{}
-	}
-	missing := make([]int, 0, len(episodes))
-	for _, episode := range episodes {
-		if _, ok := present[episode]; !ok {
-			missing = append(missing, episode)
-		}
-	}
-	return missing
-}
-
-func buildStrategyAttempts(plan candidateEpisodePlan, anchor anchorSelection, hasAnchor bool, allSeasonEpisodes []int) []strategyAttempt {
-	attempts := make([]strategyAttempt, 0, 4)
-	if len(plan.Episodes) > 0 {
-		reason := "derived_from_ripspec"
-		if len(plan.RipSpecEpisodes) == 0 && len(plan.DiscBlockEpisodes) > 0 {
-			reason = "disc_block_estimate"
-		}
-		attempts = append(attempts, strategyAttempt{Name: "ripspec_seed", Reason: reason, Episodes: append([]int(nil), plan.Episodes...)})
-	}
-	if hasAnchor {
-		attempts = append(attempts, strategyAttempt{Name: "anchor_window", Reason: anchor.Reason, Episodes: buildEpisodeRange(anchor.WindowStart, anchor.WindowEnd)})
-	}
-	if len(plan.DiscBlockEpisodes) > 0 {
-		attempts = append(attempts, strategyAttempt{Name: "disc_block", Reason: "disc_number_window", Episodes: append([]int(nil), plan.DiscBlockEpisodes...)})
-	}
-	if len(allSeasonEpisodes) > 0 {
-		attempts = append(attempts, strategyAttempt{Name: "full_season", Reason: "season_fallback", Episodes: append([]int(nil), allSeasonEpisodes...)})
-	}
-	seen := make(map[string]struct{}, len(attempts))
-	out := make([]strategyAttempt, 0, len(attempts))
-	for _, attempt := range attempts {
-		sort.Ints(attempt.Episodes)
-		attempt.Episodes = compactInts(attempt.Episodes)
-		if len(attempt.Episodes) == 0 {
-			continue
-		}
-		key := episodeListKey(attempt.Episodes)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, attempt)
 	}
 	return out
-}
-
-func episodeListKey(episodes []int) string {
-	parts := make([]string, 0, len(episodes))
-	for _, ep := range episodes {
-		parts = append(parts, strconv.Itoa(ep))
-	}
-	return strings.Join(parts, ",")
 }
 
 func compactInts(values []int) []int {
@@ -323,80 +178,14 @@ func compactInts(values []int) []int {
 	return out
 }
 
-func averageMatchScore(matches []matchResult) float64 {
-	if len(matches) == 0 {
-		return 0
+func sameEpisodeSet(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	total := 0.0
-	for _, match := range matches {
-		total += match.Score
-	}
-	return total / float64(len(matches))
-}
-
-func averageMatchConfidence(matches []matchResult) float64 {
-	if len(matches) == 0 {
-		return 0
-	}
-	total := 0.0
-	for _, match := range matches {
-		total += match.Confidence
-	}
-	return total / float64(len(matches))
-}
-
-func betterOutcome(candidate, current strategyOutcome) bool {
-	if len(candidate.Matches) != len(current.Matches) {
-		return len(candidate.Matches) > len(current.Matches)
-	}
-	if candidate.Diagnostics.UnresolvedCount != current.Diagnostics.UnresolvedCount {
-		return candidate.Diagnostics.UnresolvedCount < current.Diagnostics.UnresolvedCount
-	}
-	if candidate.Diagnostics.InternalGapCount != current.Diagnostics.InternalGapCount {
-		return candidate.Diagnostics.InternalGapCount < current.Diagnostics.InternalGapCount
-	}
-	if candidate.Diagnostics.NeedsReview != current.Diagnostics.NeedsReview {
-		return !candidate.Diagnostics.NeedsReview
-	}
-	if candidate.AverageConfidence != current.AverageConfidence {
-		return candidate.AverageConfidence > current.AverageConfidence
-	}
-	if candidate.Diagnostics.PathMargin != current.Diagnostics.PathMargin {
-		return candidate.Diagnostics.PathMargin > current.Diagnostics.PathMargin
-	}
-	if candidate.AverageScore != current.AverageScore {
-		return candidate.AverageScore > current.AverageScore
-	}
-	return false
-}
-
-func logStrategySummary(logger *slog.Logger, outcomes []strategyOutcome, selected strategyOutcome) {
-	if logger == nil {
-		return
-	}
-	for _, outcome := range outcomes {
-		result := "evaluated"
-		if outcome.Attempt.Name == selected.Attempt.Name {
-			result = "selected"
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
-		logger.Info("content id strategy evaluation",
-			"decision_type", "contentid_strategy",
-			"decision_result", result,
-			"decision_reason", outcome.Attempt.Reason,
-			"strategy", outcome.Attempt.Name,
-			"episode_window_size", len(outcome.Attempt.Episodes),
-			"references", len(outcome.References),
-			"matches", len(outcome.Matches),
-			"average_score", outcome.AverageScore,
-			"average_confidence", outcome.AverageConfidence,
-			"path_score", outcome.Diagnostics.PathScore,
-			"path_margin", outcome.Diagnostics.PathMargin,
-			"orientation", outcome.Diagnostics.Orientation,
-			"window_start", outcome.Diagnostics.WindowStart,
-			"window_end", outcome.Diagnostics.WindowEnd,
-			"internal_gap_count", outcome.Diagnostics.InternalGapCount,
-			"unresolved_count", outcome.Diagnostics.UnresolvedCount,
-			"needs_review", outcome.Diagnostics.NeedsReview,
-		)
 	}
+	return true
 }

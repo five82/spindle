@@ -33,7 +33,6 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	}
 
 	applyMuxDefault(data, cfg)
-	applyContentIDBoolDefaults(data, cfg)
 	applyDefaults(cfg)
 
 	envKeys := collectEnvOverrides(cfg)
@@ -247,32 +246,14 @@ func applyDefaults(cfg *Config) {
 	if cfg.ContentID.MinSimilarityScore == 0 {
 		cfg.ContentID.MinSimilarityScore = 0.58
 	}
+	if cfg.ContentID.ClearMatchMargin == 0 {
+		cfg.ContentID.ClearMatchMargin = 0.05
+	}
 	if cfg.ContentID.LowConfidenceReviewThreshold == 0 {
 		cfg.ContentID.LowConfidenceReviewThreshold = 0.70
 	}
 	if cfg.ContentID.LLMVerifyThreshold == 0 {
 		cfg.ContentID.LLMVerifyThreshold = 0.85
-	}
-	if cfg.ContentID.AnchorMinScore == 0 {
-		cfg.ContentID.AnchorMinScore = 0.63
-	}
-	if cfg.ContentID.AnchorMinScoreMargin == 0 {
-		cfg.ContentID.AnchorMinScoreMargin = 0.03
-	}
-	if cfg.ContentID.BlockHighConfidenceDelta == 0 {
-		cfg.ContentID.BlockHighConfidenceDelta = 0.05
-	}
-	if cfg.ContentID.BlockHighConfidenceTopRatio == 0 {
-		cfg.ContentID.BlockHighConfidenceTopRatio = 0.70
-	}
-	if cfg.ContentID.DiscBlockPaddingMin == 0 {
-		cfg.ContentID.DiscBlockPaddingMin = 2
-	}
-	if cfg.ContentID.DiscBlockPaddingDivisor == 0 {
-		cfg.ContentID.DiscBlockPaddingDivisor = 4
-	}
-	if cfg.ContentID.Disc2PlusMinStartEpisode == 0 {
-		cfg.ContentID.Disc2PlusMinStartEpisode = 2
 	}
 
 	// [logging]
@@ -290,12 +271,6 @@ func applyMuxDefault(data []byte, cfg *Config) {
 	// "absent/commented" (apply default true) from "explicitly set to false".
 	if data == nil || !hasUncommentedKey(data, "mux_into_mkv") {
 		cfg.Subtitles.MuxIntoMKV = true
-	}
-}
-
-func applyContentIDBoolDefaults(data []byte, cfg *Config) {
-	if data == nil || !hasUncommentedKey(data, "disc1_must_start_at_episode1") {
-		cfg.ContentID.Disc1MustStartAtEpisode1 = true
 	}
 }
 

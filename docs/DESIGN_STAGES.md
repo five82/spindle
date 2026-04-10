@@ -421,8 +421,10 @@ the drive during MakeMKV operation. The handler calls `PauseDisc()` /
 **Applies to**: TV content only (skipped for movies).
 
 This stage resolves placeholder episode keys (e.g., `s01_001`) to actual episode
-numbers (e.g., `s01e03`) using WhisperX transcription compared against
-OpenSubtitles references.
+numbers (e.g., `s01e03`) using a content-first matcher: WhisperX transcription
+compared against OpenSubtitles references, with one progressive reference-scope
+expansion if needed and LLM verification only for a few ambiguous transcript
+pairs.
 
 See `CONTENT_ID_DESIGN.md` for the complete algorithm specification.
 
@@ -465,17 +467,20 @@ stage.
 **Review**: After successful reference acquisition, review is used for content
 ambiguity rather than as a hard failure. The stage flags an item for review
 when any of the following hold:
-1. **Structured decoder flagged ambiguity**: the ordered path has a disc-1
-   start violation, non-contiguous output, or other structural anomaly.
-2. **Low confidence**: Any episode falls below the low-confidence review
+1. **Low confidence**: Any episode falls below the low-confidence review
    threshold (0.70) after derived-confidence scoring.
-3. **Partial resolution**: Some episodes remain unresolved after matching.
-4. **Verification escalation**: LLM verification fails, is rejected, or leaves
-   the match untrustworthy.
+2. **Partial resolution**: Some episodes remain unresolved after matching.
+3. **Verification escalation**: LLM verification fails or rejects an ambiguous
+   pair, leaving it unresolved.
+4. **Weak structural sanity checks fail**: disc-number or season-shape checks
+   suggest the accepted set is suspicious, but these checks do not act as the
+   primary solver.
+5. **Reference trust is weak**: the best available OpenSubtitles reference is
+   still too suspect to support a trustworthy assignment.
 
-The stage uses one production TV matcher. If the structured decoder remains
-untrustworthy, the item is sent to review instead of invoking a second
-production matcher.
+The stage uses one production TV matcher, but that matcher is content-first.
+Ordering and contiguity are weak review signals, not the primary decision path,
+and LLM confidence does not numerically inflate stored match confidence.
 
 **Primary audio rule**: Episode identification uses the shared audio-selection policy before WhisperX transcription. The selected audio-relative index is included in the transcription cache key (`{disc_fingerprint}:{episode_key}:{audio_index}`) so cached transcripts remain tied to the actual stream that was transcribed.
 

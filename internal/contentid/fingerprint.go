@@ -20,13 +20,16 @@ type ripFingerprint struct {
 }
 
 type referenceFingerprint struct {
-	EpisodeNumber int
-	Title         string
-	Vector        *textutil.Fingerprint
-	RawVector     *textutil.Fingerprint
-	FileID        int
-	Language      string
-	CachePath     string
+	EpisodeNumber  int
+	Title          string
+	Vector         *textutil.Fingerprint
+	RawVector      *textutil.Fingerprint
+	FileID         int
+	Language       string
+	CachePath      string
+	Suspect        bool
+	SuspectReason  string
+	CandidateScore float64
 }
 
 type matchResult struct {
@@ -36,28 +39,24 @@ type matchResult struct {
 	Score                   float64
 	Confidence              float64
 	ConfidenceQuality       string
+	Strength                float64
 	RunnerUpEpisode         int
 	RunnerUpScore           float64
 	ScoreMargin             float64
-	ReverseRunnerUpKey      string
-	ReverseRunnerUpScore    float64
-	ReverseScoreMargin      float64
+	EpisodeRunnerUpKey      string
+	EpisodeRunnerUpScore    float64
+	EpisodeScoreMargin      float64
 	NeighborRunnerUpEpisode int
 	NeighborRunnerUpScore   float64
 	NeighborScoreMargin     float64
-	PathScore               float64
-	PathMargin              float64
-	InternalGapCount        int
-	UnresolvedCount         int
-	SequenceContiguous      bool
-	WindowStart             int
-	WindowEnd               int
-	Orientation             string
+	AcceptedBy              string
 	NeedsVerification       bool
 	VerificationReason      string
 	SubtitleFileID          int
 	SubtitleLanguage        string
 	SubtitlePath            string
+	ReferenceSuspect        bool
+	ReferenceSuspectReason  string
 }
 
 // readSRTText reads an SRT file and returns the concatenated cue text,
@@ -88,8 +87,7 @@ func normalizeSubtitlePayload(content string) (string, error) {
 }
 
 // cloneRipFingerprints and cloneReferenceFingerprints return shallow copies so
-// each strategy attempt can safely reapply IDF weighting via applyIDFWeighting
-// without leaking weights from one strategy into the next.
+// weighting can be applied without mutating the original fingerprints.
 func cloneRipFingerprints(in []ripFingerprint) []ripFingerprint {
 	return slices.Clone(in)
 }
