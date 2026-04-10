@@ -26,11 +26,12 @@ type strategyAttempt struct {
 }
 
 type strategyOutcome struct {
-	Attempt      strategyAttempt
-	References   []referenceFingerprint
-	Matches      []matchResult
-	Refinement   blockRefinement
-	AverageScore float64
+	Attempt           strategyAttempt
+	References        []referenceFingerprint
+	Matches           []matchResult
+	Diagnostics       decodeDiagnostics
+	AverageScore      float64
+	AverageConfidence float64
 }
 
 func deriveCandidateEpisodes(env *ripspec.Envelope, season *tmdb.Season, discNumber int, policy Policy) candidateEpisodePlan {
@@ -333,15 +334,38 @@ func averageMatchScore(matches []matchResult) float64 {
 	return total / float64(len(matches))
 }
 
+func averageMatchConfidence(matches []matchResult) float64 {
+	if len(matches) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, match := range matches {
+		total += match.Confidence
+	}
+	return total / float64(len(matches))
+}
+
 func betterOutcome(candidate, current strategyOutcome) bool {
 	if len(candidate.Matches) != len(current.Matches) {
 		return len(candidate.Matches) > len(current.Matches)
 	}
+	if candidate.Diagnostics.UnresolvedCount != current.Diagnostics.UnresolvedCount {
+		return candidate.Diagnostics.UnresolvedCount < current.Diagnostics.UnresolvedCount
+	}
+	if candidate.Diagnostics.InternalGapCount != current.Diagnostics.InternalGapCount {
+		return candidate.Diagnostics.InternalGapCount < current.Diagnostics.InternalGapCount
+	}
+	if candidate.Diagnostics.NeedsReview != current.Diagnostics.NeedsReview {
+		return !candidate.Diagnostics.NeedsReview
+	}
+	if candidate.AverageConfidence != current.AverageConfidence {
+		return candidate.AverageConfidence > current.AverageConfidence
+	}
+	if candidate.Diagnostics.PathMargin != current.Diagnostics.PathMargin {
+		return candidate.Diagnostics.PathMargin > current.Diagnostics.PathMargin
+	}
 	if candidate.AverageScore != current.AverageScore {
 		return candidate.AverageScore > current.AverageScore
-	}
-	if candidate.Refinement.NeedsReview != current.Refinement.NeedsReview {
-		return !candidate.Refinement.NeedsReview
 	}
 	return false
 }
@@ -364,7 +388,15 @@ func logStrategySummary(logger *slog.Logger, outcomes []strategyOutcome, selecte
 			"references", len(outcome.References),
 			"matches", len(outcome.Matches),
 			"average_score", outcome.AverageScore,
-			"needs_review", outcome.Refinement.NeedsReview,
+			"average_confidence", outcome.AverageConfidence,
+			"path_score", outcome.Diagnostics.PathScore,
+			"path_margin", outcome.Diagnostics.PathMargin,
+			"orientation", outcome.Diagnostics.Orientation,
+			"window_start", outcome.Diagnostics.WindowStart,
+			"window_end", outcome.Diagnostics.WindowEnd,
+			"internal_gap_count", outcome.Diagnostics.InternalGapCount,
+			"unresolved_count", outcome.Diagnostics.UnresolvedCount,
+			"needs_review", outcome.Diagnostics.NeedsReview,
 		)
 	}
 }

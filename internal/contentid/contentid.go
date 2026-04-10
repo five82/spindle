@@ -201,7 +201,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logStrategySummary(logger, outcomes, selected)
 
 	matches := selected.Matches
-	refinement := selected.Refinement
 	if len(matches) == 0 {
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, len(ripPrints), len(selected.References))
 		item.AppendReviewReason("Episode ID: no reference subtitles found")
@@ -210,8 +209,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 		return &services.ErrDegraded{Msg: "no episode matches resolved"}
 	}
-	if refinement.NeedsReview && refinement.ReviewReason != "" {
-		item.AppendReviewReason("Episode ID: " + refinement.ReviewReason)
+	if selected.Diagnostics.NeedsReview && selected.Diagnostics.ReviewReason != "" {
+		item.AppendReviewReason("Episode ID: " + selected.Diagnostics.ReviewReason)
 	}
 
 	verifiedMatches, verifyResult := verifyMatches(ctx, h.llmClient, matches, ripPrints, selected.References, logger, h.policy.LLMVerifyThreshold)
@@ -336,15 +335,12 @@ func (h *Handler) evaluateStrategy(
 	weightedRips := cloneRipFingerprints(ripPrints)
 	weightedRefs := cloneReferenceFingerprints(refs)
 	applyIDFWeighting(weightedRips, weightedRefs)
-	matches := resolveEpisodeMatches(weightedRips, weightedRefs, h.policy.MinSimilarityScore)
-	refinement := blockRefinement{}
-	if len(matches) > 0 {
-		matches, refinement = refineMatchBlock(matches, weightedRefs, weightedRips, len(season.Episodes), discNumber, h.policy)
-	}
+	matches, diagnostics := decodeOrderedEpisodeMatches(weightedRips, weightedRefs, discNumber, len(season.Episodes), h.policy)
 	out.References = weightedRefs
 	out.Matches = matches
-	out.Refinement = refinement
+	out.Diagnostics = diagnostics
 	out.AverageScore = averageMatchScore(matches)
+	out.AverageConfidence = averageMatchConfidence(matches)
 	return out, nil
 }
 
@@ -373,7 +369,7 @@ func mergeReferences(existing, additional []referenceFingerprint) []referenceFin
 // counts they have so far (0 when nothing has happened yet).
 func newDegradedContentIDSummary(policy Policy, transcribed, references int) *ripspec.ContentIDSummary {
 	return &ripspec.ContentIDSummary{
-		Method:               "whisperx_tfidf_hungarian",
+		Method:               "whisperx_tfidf_ordered_dp",
 		ReferenceSource:      "opensubtitles",
 		ReviewThreshold:      policy.LowConfidenceReviewThreshold,
 		TranscribedEpisodes:  transcribed,
@@ -388,7 +384,7 @@ func buildContentIDSummary(env *ripspec.Envelope, matches []matchResult, transcr
 		return nil
 	}
 	summary := &ripspec.ContentIDSummary{
-		Method:               "whisperx_tfidf_hungarian",
+		Method:               "whisperx_tfidf_ordered_dp",
 		ReferenceSource:      "opensubtitles",
 		ReferenceEpisodes:    referenceCount,
 		TranscribedEpisodes:  transcribedCount,
@@ -445,7 +441,8 @@ func (h *Handler) applyMatches(
 		ep.Episode = m.TargetEpisode
 		ep.EpisodeTitle = strings.TrimSpace(details.Name)
 		ep.EpisodeAirDate = strings.TrimSpace(details.AirDate)
-		ep.MatchConfidence = m.Score
+		ep.MatchScore = m.Score
+		ep.MatchConfidence = m.Confidence
 		ep.Key = ripspec.EpisodeKey(seasonNum, m.TargetEpisode)
 		if ep.Key != "" && ep.Key != originalKey {
 			assetKeyRemap[originalKey] = ep.Key
@@ -453,40 +450,61 @@ func (h *Handler) applyMatches(
 		logger.Info("episode matched",
 			"decision_type", logs.DecisionEpisodeMatch,
 			"decision_result", fmt.Sprintf("%s -> E%02d", originalKey, m.TargetEpisode),
-			"decision_reason", fmt.Sprintf("cosine similarity %.3f", m.Score),
+			"decision_reason", fmt.Sprintf("ordered path %s window %d-%d", m.Orientation, m.WindowStart, m.WindowEnd),
 			"match_score", m.Score,
+			"match_confidence", m.Confidence,
 			"confidence_quality", m.ConfidenceQuality,
 			"runner_up_episode", m.RunnerUpEpisode,
 			"runner_up_score", m.RunnerUpScore,
 			"score_margin", m.ScoreMargin,
+			"neighbor_runner_up_episode", m.NeighborRunnerUpEpisode,
+			"neighbor_runner_up_score", m.NeighborRunnerUpScore,
+			"neighbor_score_margin", m.NeighborScoreMargin,
 			"reverse_runner_up_key", m.ReverseRunnerUpKey,
 			"reverse_runner_up_score", m.ReverseRunnerUpScore,
 			"reverse_score_margin", m.ReverseScoreMargin,
+			"path_score", m.PathScore,
+			"path_margin", m.PathMargin,
+			"internal_gap_count", m.InternalGapCount,
+			"unresolved_count", m.UnresolvedCount,
+			"sequence_contiguous", m.SequenceContiguous,
 		)
-		if m.Score < h.policy.LowConfidenceReviewThreshold {
+		if m.Confidence < h.policy.LowConfidenceReviewThreshold {
 			lowConfCount++
-			ep.AppendReviewReason(fmt.Sprintf("Episode ID: confidence %.3f below threshold %.2f", m.Score, h.policy.LowConfidenceReviewThreshold))
+			ep.AppendReviewReason(fmt.Sprintf("Episode ID: confidence %.3f below threshold %.2f", m.Confidence, h.policy.LowConfidenceReviewThreshold))
 			logger.Warn("low confidence episode match",
 				"event_type", "low_confidence_match",
-				"error_hint", fmt.Sprintf("%s matched E%02d with score %.3f (runner-up E%02d %.3f, margin %.3f)", ep.Key, m.TargetEpisode, m.Score, m.RunnerUpEpisode, m.RunnerUpScore, m.ScoreMargin),
+				"error_hint", fmt.Sprintf("%s matched E%02d with confidence %.3f and score %.3f (runner-up E%02d %.3f, neighbor E%02d %.3f, path margin %.3f)", ep.Key, m.TargetEpisode, m.Confidence, m.Score, m.RunnerUpEpisode, m.RunnerUpScore, m.NeighborRunnerUpEpisode, m.NeighborRunnerUpScore, m.PathMargin),
 				"impact", "match may be incorrect",
 				"confidence_quality", m.ConfidenceQuality,
+				"match_score", m.Score,
+				"match_confidence", m.Confidence,
 				"runner_up_episode", m.RunnerUpEpisode,
 				"runner_up_score", m.RunnerUpScore,
 				"score_margin", m.ScoreMargin,
+				"neighbor_runner_up_episode", m.NeighborRunnerUpEpisode,
+				"neighbor_runner_up_score", m.NeighborRunnerUpScore,
+				"neighbor_score_margin", m.NeighborScoreMargin,
 				"reverse_runner_up_key", m.ReverseRunnerUpKey,
 				"reverse_runner_up_score", m.ReverseRunnerUpScore,
 				"reverse_score_margin", m.ReverseScoreMargin,
+				"path_margin", m.PathMargin,
 			)
+		}
+		if m.NeedsVerification && m.VerificationReason != "" {
+			ep.AppendReviewReason("Episode ID: ambiguity requires verification")
+			if item != nil {
+				item.AppendReviewReason("Episode ID: ambiguity requires verification")
+			}
 		}
 	}
 	applyOpeningDoubleEpisode(logger, env, seasonNum, env.Metadata.DiscNumber, episodeDetails, assetKeyRemap)
 	env.Assets.RemapEpisodeKeys(assetKeyRemap)
 
-	if unresolvedCount > 0 {
+	if item != nil && unresolvedCount > 0 {
 		item.AppendReviewReason(fmt.Sprintf("Episode ID: %d of %d episodes unresolved", unresolvedCount, len(env.Episodes)))
 	}
-	if lowConfCount > 0 {
+	if item != nil && lowConfCount > 0 {
 		item.AppendReviewReason(fmt.Sprintf("Episode ID: %d matches below confidence threshold %.2f", lowConfCount, h.policy.LowConfidenceReviewThreshold))
 	}
 }

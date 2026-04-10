@@ -74,6 +74,7 @@ type Episode struct {
 	RuntimeSeconds  int     `json:"runtime_seconds,omitempty"`
 	TitleHash       string  `json:"title_hash,omitempty"`
 	OutputBasename  string  `json:"output_basename,omitempty"`
+	MatchScore      float64 `json:"match_score,omitempty"`
 	MatchConfidence float64 `json:"match_confidence,omitempty"`
 	NeedsReview     bool    `json:"needs_review,omitempty"`
 	ReviewReason    string  `json:"review_reason,omitempty"`

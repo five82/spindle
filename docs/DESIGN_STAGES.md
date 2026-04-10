@@ -429,8 +429,8 @@ See `CONTENT_ID_DESIGN.md` for the complete algorithm specification.
 **Inputs**: Ripped files with placeholder episode keys, TMDB ID, season number. Placeholder keys are created during identification from the TV title-selection result rather than blindly from every title above a minimum duration: identification deduplicates equivalent playlists, keeps the dominant long-form runtime cluster, excludes likely extras, and may preserve a probable double-length title as a single placeholder asset. Each ripped file is probed and episode identification transcribes the selected primary audio stream rather than assuming audio stream 0.
 
 **Outputs**: Updated episode keys in RipSpec envelope with resolved episode
-numbers, optional episode ranges for multi-episode assets, confidence scores,
-and match metadata.
+numbers, optional episode ranges for multi-episode assets, raw match scores,
+derived confidence scores, and match metadata.
 
 ### 3.1 Skip Decisions
 
@@ -462,13 +462,20 @@ content ambiguity. The item stops at `failed`, records `failed_at_stage =
 episode_identification`, and `spindle queue retry <id>` restarts from this
 stage.
 
-**Review**: After successful reference acquisition, four conditions flag an
-item for review instead of failing it:
-1. **Content ID flagged**: `ContentIDNeedsReview` set by matching algorithm.
-2. **Low confidence**: Any episode below the low-confidence review threshold (0.70).
-3. **Partial resolution**: Some episodes still unresolved after matching.
-4. **Non-contiguous sequence**: Resolved episode numbers have gaps (e.g.,
-   1, 2, 5, 6 instead of 1, 2, 3, 4).
+**Review**: After successful reference acquisition, review is used for content
+ambiguity rather than as a hard failure. The stage flags an item for review
+when any of the following hold:
+1. **Structured decoder flagged ambiguity**: the ordered path has a disc-1
+   start violation, non-contiguous output, or other structural anomaly.
+2. **Low confidence**: Any episode falls below the low-confidence review
+   threshold (0.70) after derived-confidence scoring.
+3. **Partial resolution**: Some episodes remain unresolved after matching.
+4. **Verification escalation**: LLM verification fails, is rejected, or leaves
+   the match untrustworthy.
+
+The stage uses one production TV matcher. If the structured decoder remains
+untrustworthy, the item is sent to review instead of invoking a second
+production matcher.
 
 **Primary audio rule**: Episode identification uses the shared audio-selection policy before WhisperX transcription. The selected audio-relative index is included in the transcription cache key (`{disc_fingerprint}:{episode_key}:{audio_index}`) so cached transcripts remain tied to the actual stream that was transcribed.
 

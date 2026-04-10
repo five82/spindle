@@ -33,16 +33,6 @@ This is a test.
 	}
 }
 
-func TestHungarianIdentityMatrix(t *testing.T) {
-	cost := [][]float64{{0, 1, 1}, {1, 0, 1}, {1, 1, 0}}
-	assign := hungarian(cost)
-	for i, col := range assign {
-		if col != i {
-			t.Fatalf("row %d assigned %d, want %d", i, col, i)
-		}
-	}
-}
-
 func TestSelectAnchorWindowFirstAnchor(t *testing.T) {
 	rips := []ripFingerprint{
 		{EpisodeKey: "s02_001", Vector: textutil.NewFingerprint("batman villain puzzler episode twenty five marker")},
@@ -60,30 +50,6 @@ func TestSelectAnchorWindowFirstAnchor(t *testing.T) {
 	}
 	if anchor.WindowStart != 25 || anchor.WindowEnd != 27 {
 		t.Fatalf("window = %d-%d, want 25-27", anchor.WindowStart, anchor.WindowEnd)
-	}
-}
-
-func TestResolveEpisodeMatchesOptimalAssignment(t *testing.T) {
-	rip1 := textutil.NewFingerprint("alpha beta gamma intro theme park")
-	rip2 := textutil.NewFingerprint("delta epsilon zeta magic heroes rescue mission")
-	rips := []ripFingerprint{
-		{EpisodeKey: "s05e01", TitleID: 1, Vector: rip1},
-		{EpisodeKey: "s05e02", TitleID: 2, Vector: rip2},
-	}
-	refs := []referenceFingerprint{
-		{EpisodeNumber: 2, Vector: textutil.NewFingerprint("delta epsilon zeta heroes rescue mission magic")},
-		{EpisodeNumber: 1, Vector: textutil.NewFingerprint("alpha beta gamma park theme opening")},
-		{EpisodeNumber: 3, Vector: textutil.NewFingerprint("alpha beta gamma park magic heroes rescue mission")},
-	}
-	matches := resolveEpisodeMatches(rips, refs, DefaultPolicy().MinSimilarityScore)
-	if len(matches) != 2 {
-		t.Fatalf("expected 2 matches, got %d", len(matches))
-	}
-	want := map[string]int{"s05e01": 1, "s05e02": 2}
-	for _, m := range matches {
-		if want[m.EpisodeKey] != m.TargetEpisode {
-			t.Fatalf("unexpected match: %+v", m)
-		}
 	}
 }
 
@@ -149,5 +115,60 @@ func TestApplyMatches_InfersOpeningDoubleEpisode(t *testing.T) {
 	}
 	if _, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, "s01e01-e02"); !ok {
 		t.Fatal("ripped asset for s01e01-e02 not found after remap")
+	}
+}
+
+func TestShouldVerifyMatchUsesDerivedConfidenceAndAmbiguity(t *testing.T) {
+	if !shouldVerifyMatch(matchResult{EpisodeKey: "s01_002", Confidence: 0.95, NeedsVerification: true}, DefaultPolicy().LLMVerifyThreshold) {
+		t.Fatal("expected ambiguity-flagged high-confidence match to be verified")
+	}
+	if shouldVerifyMatch(matchResult{EpisodeKey: "s01_003", Confidence: 0.95}, DefaultPolicy().LLMVerifyThreshold) {
+		t.Fatal("unexpected verification for clear high-confidence match")
+	}
+	if !shouldVerifyMatch(matchResult{EpisodeKey: "s01_003", Confidence: 0.60}, DefaultPolicy().LLMVerifyThreshold) {
+		t.Fatal("expected low-confidence match to be verified")
+	}
+}
+
+func TestDeriveMatchConfidencePenalizesAdjacentAmbiguity(t *testing.T) {
+	confidence, _, needsVerify, _ := deriveMatchConfidence(0.93, 0.01, 0.01, 0.005, 0.03, orderedPath{}, DefaultPolicy())
+	if confidence >= 0.90 {
+		t.Fatalf("expected ambiguous high-score match confidence < 0.90, got %.3f", confidence)
+	}
+	if !needsVerify {
+		t.Fatal("expected ambiguous neighboring match to require verification")
+	}
+}
+
+func TestDecodeOrderedEpisodeMatchesChoosesContiguousForwardWindow(t *testing.T) {
+	policy := DefaultPolicy()
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01_001", TitleID: 1, Vector: textutil.NewFingerprint("outpost alpha beta gamma unique four")},
+		{EpisodeKey: "s01_002", TitleID: 2, Vector: textutil.NewFingerprint("where delta epsilon zeta unique five")},
+		{EpisodeKey: "s01_003", TitleID: 3, Vector: textutil.NewFingerprint("lonely eta theta iota unique six")},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 3, Vector: textutil.NewFingerprint("different episode three text")},
+		{EpisodeNumber: 4, Vector: textutil.NewFingerprint("outpost alpha beta gamma unique four")},
+		{EpisodeNumber: 5, Vector: textutil.NewFingerprint("where delta epsilon zeta unique five")},
+		{EpisodeNumber: 6, Vector: textutil.NewFingerprint("lonely eta theta iota unique six")},
+		{EpisodeNumber: 7, Vector: textutil.NewFingerprint("different episode seven text")},
+	}
+	matches, diag := decodeOrderedEpisodeMatches(rips, refs, 2, 26, policy)
+	if len(matches) != 3 {
+		t.Fatalf("expected 3 matches, got %d", len(matches))
+	}
+	if diag.WindowStart != 4 || diag.WindowEnd != 6 {
+		t.Fatalf("window = %d-%d, want 4-6", diag.WindowStart, diag.WindowEnd)
+	}
+	got := make(map[string]int, len(matches))
+	for _, m := range matches {
+		got[m.EpisodeKey] = m.TargetEpisode
+	}
+	want := map[string]int{"s01_001": 4, "s01_002": 5, "s01_003": 6}
+	for key, episode := range want {
+		if got[key] != episode {
+			t.Fatalf("%s matched to E%02d, want E%02d", key, got[key], episode)
+		}
 	}
 }

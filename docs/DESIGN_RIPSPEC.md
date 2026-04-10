@@ -96,7 +96,8 @@ For TV content, each episode maps to a disc title:
   "runtime_seconds": 2700,
   "title_hash": "abc123",
   "output_basename": "Show Name - S01E03 - Episode Name",
-  "match_confidence": 0.87
+  "match_score": 0.91,
+  "match_confidence": 0.72
 }
 ```
 
@@ -135,8 +136,8 @@ belongs here.
 - `disc_source` -- moved to `metadata.disc_source`
 - `disc_number` -- already in `metadata.disc_number`
 - `subtitle_context` -- subtitles stage reads `metadata` directly (same data)
-- `content_id_matches` -- episode resolution stored in `episodes[]`; match
-  scores are logged by the episode ID stage
+- `content_id_matches` -- episode resolution stored in `episodes[]`; raw match
+  scores and derived confidence are stored on each episode and logged by the episode ID stage
 - `primary_audio_description` -- stored as `PrimaryDescription` in `AudioAnalysisData` during audio analysis
 - `subtitle_generation_summary` -- computed on-demand from
   `subtitle_generation_results`
@@ -167,6 +168,7 @@ Episode {
     RuntimeSeconds  int
     TitleHash       string
     OutputBasename  string
+    MatchScore      float64
     MatchConfidence float64
     NeedsReview     bool
     ReviewReason    string
@@ -190,7 +192,7 @@ SubtitleGenRecord {
 }
 
 ContentIDSummary {
-    Method                string  // e.g. "whisperx_tfidf_hungarian"
+    Method                string  // e.g. "whisperx_tfidf_ordered_dp"
     ReferenceSource       string  // e.g. "opensubtitles"
     ReferenceEpisodes     int
     TranscribedEpisodes   int

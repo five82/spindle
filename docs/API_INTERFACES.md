@@ -714,6 +714,7 @@ The `QueueItem` JSON object returned by queue endpoints:
     "generatedSubtitleLanguage": string,
     "generatedSubtitleDecision": string,
     "matchScore":                float64,
+    "matchConfidence":           float64,
     "matchedEpisode":            int
   }],
   "episodeTotals": {

@@ -1,45 +1,11 @@
 package contentid
 
 import (
-	"math"
 	"sort"
 	"strings"
 
 	"github.com/five82/spindle/internal/textutil"
 )
-
-// buildHungarianMatrices builds a square (size × size) cost matrix padded with
-// padCost outside the live (n × m) region, together with a parallel scores
-// matrix. score(i, j) is called for i < n && j < m and must return a cosine
-// similarity in [0, 1]; non-positive scores leave the cell at padCost.
-func buildHungarianMatrices(n, m int, score func(i, j int) float64) (cost, scores [][]float64) {
-	const padCost = 2.0
-	size := max(n, m)
-	cost = make([][]float64, size)
-	scores = make([][]float64, size)
-	for i := 0; i < size; i++ {
-		cost[i] = make([]float64, size)
-		scores[i] = make([]float64, size)
-		for j := 0; j < size; j++ {
-			cost[i][j] = padCost
-		}
-	}
-	for i := 0; i < n; i++ {
-		for j := 0; j < m; j++ {
-			s := score(i, j)
-			scores[i][j] = s
-			if s <= 0 {
-				continue
-			}
-			c := 1.0 - s
-			if c < 0 {
-				c = 0
-			}
-			cost[i][j] = c
-		}
-	}
-	return cost, scores
-}
 
 type anchorSelection struct {
 	RipIndex        int
@@ -50,11 +16,6 @@ type anchorSelection struct {
 	WindowStart     int
 	WindowEnd       int
 	Reason          string
-}
-
-type blockRefinement struct {
-	NeedsReview  bool
-	ReviewReason string
 }
 
 func selectAnchorWindow(rips []ripFingerprint, refs []referenceFingerprint, totalSeasonEpisodes int, minScore, minMargin float64) (anchorSelection, bool) {
@@ -154,296 +115,17 @@ func evaluateAnchorSelection(rips []ripFingerprint, refs []referenceFingerprint,
 	return sel, true
 }
 
-func resolveEpisodeMatches(rips []ripFingerprint, refs []referenceFingerprint, minScore float64) []matchResult {
-	if len(rips) == 0 || len(refs) == 0 {
-		return nil
-	}
-	n := len(rips)
-	m := len(refs)
-	cost, scores := buildHungarianMatrices(n, m, func(i, j int) float64 {
-		return textSimilarity(rips[i].Vector, refs[j].Vector)
-	})
-	assign := hungarian(cost)
-	results := make([]matchResult, 0, min(len(rips), len(refs)))
-	for i, j := range assign {
-		if i >= n || j < 0 || j >= m {
-			continue
-		}
-		score := scores[i][j]
-		if score < minScore {
-			continue
-		}
-		runnerUpEpisode, runnerUpScore := bestAlternateReference(scores, refs, i, j)
-		reverseRunnerUpKey, reverseRunnerUpScore := bestAlternateRip(scores, rips, i, j)
-		scoreMargin := score - runnerUpScore
-		reverseMargin := score - reverseRunnerUpScore
-		results = append(results, matchResult{
-			EpisodeKey:           rips[i].EpisodeKey,
-			TitleID:              rips[i].TitleID,
-			TargetEpisode:        refs[j].EpisodeNumber,
-			Score:                score,
-			ConfidenceQuality:    classifyConfidenceQuality(score, scoreMargin, reverseMargin),
-			RunnerUpEpisode:      runnerUpEpisode,
-			RunnerUpScore:        runnerUpScore,
-			ScoreMargin:          scoreMargin,
-			ReverseRunnerUpKey:   reverseRunnerUpKey,
-			ReverseRunnerUpScore: reverseRunnerUpScore,
-			ReverseScoreMargin:   reverseMargin,
-			SubtitleFileID:       refs[j].FileID,
-			SubtitleLanguage:     refs[j].Language,
-			SubtitlePath:         refs[j].CachePath,
-		})
-	}
-	return results
-}
-
-// hungarian solves the assignment problem for a square cost matrix (minimization).
-// Returns assignment[row] = column, or -1 when unassigned.
-func hungarian(cost [][]float64) []int {
-	n := len(cost)
-	if n == 0 {
-		return nil
-	}
-	m := len(cost[0])
-	if m != n {
-		return nil
-	}
-	u := make([]float64, n+1)
-	v := make([]float64, n+1)
-	p := make([]int, n+1)
-	way := make([]int, n+1)
-	for i := 1; i <= n; i++ {
-		p[0] = i
-		j0 := 0
-		minv := make([]float64, n+1)
-		used := make([]bool, n+1)
-		for j := 0; j <= n; j++ {
-			minv[j] = math.Inf(1)
-		}
-		for {
-			used[j0] = true
-			i0 := p[j0]
-			delta := math.Inf(1)
-			j1 := 0
-			for j := 1; j <= n; j++ {
-				if used[j] {
-					continue
-				}
-				cur := cost[i0-1][j-1] - u[i0] - v[j]
-				if cur < minv[j] {
-					minv[j] = cur
-					way[j] = j0
-				}
-				if minv[j] < delta {
-					delta = minv[j]
-					j1 = j
-				}
-			}
-			for j := 0; j <= n; j++ {
-				if used[j] {
-					u[p[j]] += delta
-					v[j] -= delta
-				} else {
-					minv[j] -= delta
-				}
-			}
-			j0 = j1
-			if p[j0] == 0 {
-				break
-			}
-		}
-		for {
-			j1 := way[j0]
-			p[j0] = p[j1]
-			j0 = j1
-			if j0 == 0 {
-				break
-			}
-		}
-	}
-	assign := make([]int, n)
-	for i := range assign {
-		assign[i] = -1
-	}
-	for j := 1; j <= n; j++ {
-		if p[j] > 0 && p[j]-1 < n {
-			assign[p[j]-1] = j - 1
-		}
-	}
-	return assign
-}
-
-func refineMatchBlock(matches []matchResult, refs []referenceFingerprint, rips []ripFingerprint, totalSeasonEpisodes int, discNumber int, policy Policy) ([]matchResult, blockRefinement) {
-	policy = policy.normalized()
-	var info blockRefinement
-	if len(matches) <= 1 {
-		return matches, info
-	}
-	scores := make([]float64, len(matches))
-	maxScore := 0.0
-	for i, m := range matches {
-		scores[i] = m.Score
-		if m.Score > maxScore {
-			maxScore = m.Score
-		}
-	}
-	threshold := maxScore - policy.BlockHighConfidenceDelta
-	sorted := make([]float64, len(scores))
-	copy(sorted, scores)
-	sort.Float64s(sorted)
-	topIdx := len(sorted) - int(math.Ceil(float64(len(sorted))*policy.BlockHighConfidenceTopRatio))
-	if topIdx < 0 {
-		topIdx = 0
-	}
-	topThreshold := sorted[topIdx]
-	if topThreshold > threshold {
-		threshold = topThreshold
-	}
-	var highConf []matchResult
-	for _, m := range matches {
-		if m.Score >= threshold {
-			highConf = append(highConf, m)
-		}
-	}
-	if len(highConf) < 2 {
-		return matches, info
-	}
-	hcMin, hcMax := highConf[0].TargetEpisode, highConf[0].TargetEpisode
-	for _, m := range highConf[1:] {
-		if m.TargetEpisode < hcMin {
-			hcMin = m.TargetEpisode
-		}
-		if m.TargetEpisode > hcMax {
-			hcMax = m.TargetEpisode
-		}
-	}
-	numEpisodes := len(rips)
-	validLow := hcMax - numEpisodes + 1
-	if validLow < 1 {
-		validLow = 1
-	}
-	validHigh := hcMin
-	var blockStart int
-	switch {
-	case discNumber == 1:
-		blockStart = 1
-		if policy.Disc1MustStartAtEpisode1 && (1 < validLow || 1 > validHigh) {
-			info.NeedsReview = true
-			info.ReviewReason = "disc 1 anchor outside valid high-confidence range"
-		}
-	case discNumber >= 2:
-		blockStart = validHigh
-		highSet := make(map[int]struct{}, len(highConf))
-		for _, m := range highConf {
-			highSet[m.TargetEpisode] = struct{}{}
-		}
-		for _, m := range matches {
-			if _, ok := highSet[m.TargetEpisode]; ok {
-				continue
-			}
-			if m.TargetEpisode < hcMin {
-				blockStart = validLow
-				break
-			}
-			if m.TargetEpisode > hcMax {
-				blockStart = validHigh
-				break
-			}
-		}
-		if blockStart < policy.Disc2PlusMinStartEpisode {
-			blockStart = policy.Disc2PlusMinStartEpisode
-		}
-	default:
-		blockStart = hcMin
-	}
-	blockEnd := blockStart + numEpisodes - 1
-	if totalSeasonEpisodes > 0 && blockEnd > totalSeasonEpisodes {
-		blockEnd = totalSeasonEpisodes
-	}
-	if blockStart < 1 {
-		blockStart = 1
-	}
-	var valid, displaced []matchResult
-	for _, m := range matches {
-		if m.TargetEpisode >= blockStart && m.TargetEpisode <= blockEnd {
-			valid = append(valid, m)
-		} else {
-			displaced = append(displaced, m)
-		}
-	}
-	if len(displaced) == 0 {
-		return matches, info
-	}
-	validSet := make(map[int]struct{}, len(valid))
-	for _, m := range valid {
-		validSet[m.TargetEpisode] = struct{}{}
-	}
-	var gaps []int
-	for ep := blockStart; ep <= blockEnd; ep++ {
-		if _, ok := validSet[ep]; !ok {
-			gaps = append(gaps, ep)
-		}
-	}
-	if len(gaps) == 0 {
-		info.NeedsReview = true
-		info.ReviewReason = "displaced matches with no gaps in block"
-		return matches, info
-	}
-	if len(displaced) != len(gaps) {
-		info.NeedsReview = true
-		info.ReviewReason = "displaced count does not match gap count"
-	}
-	refByEp := make(map[int]*referenceFingerprint, len(refs))
-	for i := range refs {
-		refByEp[refs[i].EpisodeNumber] = &refs[i]
-	}
-	ripByKey := make(map[string]*ripFingerprint, len(rips))
-	for i := range rips {
-		ripByKey[rips[i].EpisodeKey] = &rips[i]
-	}
-	reassigned := make([]matchResult, 0, min(len(displaced), len(gaps)))
-	if len(gaps) > 0 && len(displaced) > 0 {
-		cost, scoreMatrix := buildHungarianMatrices(len(displaced), len(gaps), func(i, j int) float64 {
-			rip := ripByKey[displaced[i].EpisodeKey]
-			ref := refByEp[gaps[j]]
-			if rip == nil || rip.Vector == nil || ref == nil || ref.Vector == nil {
-				return 0
-			}
-			return textSimilarity(rip.Vector, ref.Vector)
-		})
-		assign := hungarian(cost)
-		for i, j := range assign {
-			if i >= len(displaced) || j < 0 || j >= len(gaps) {
-				continue
-			}
-			m := displaced[i]
-			m.TargetEpisode = gaps[j]
-			m.Score = scoreMatrix[i][j]
-			if ref := refByEp[gaps[j]]; ref != nil {
-				m.SubtitleFileID = ref.FileID
-				m.SubtitleLanguage = ref.Language
-				m.SubtitlePath = ref.CachePath
-			}
-			reassigned = append(reassigned, m)
-		}
-	}
-	result := make([]matchResult, 0, len(valid)+len(reassigned))
-	result = append(result, valid...)
-	result = append(result, reassigned...)
-	return result, info
-}
-
 func checkContiguity(matches []matchResult) bool {
 	if len(matches) < 2 {
 		return true
 	}
-	eps := make([]int, len(matches))
-	for i, m := range matches {
-		eps[i] = m.TargetEpisode
+	episodes := make([]int, len(matches))
+	for i, match := range matches {
+		episodes[i] = match.TargetEpisode
 	}
-	sort.Ints(eps)
-	for i := 1; i < len(eps); i++ {
-		if eps[i]-eps[i-1] != 1 {
+	sort.Ints(episodes)
+	for i := 1; i < len(episodes); i++ {
+		if episodes[i]-episodes[i-1] != 1 {
 			return false
 		}
 	}
@@ -486,18 +168,6 @@ func bestAlternateRip(scores [][]float64, rips []ripFingerprint, assignedRipIdx,
 	return rips[bestIdx].EpisodeKey, bestScore
 }
 
-func classifyConfidenceQuality(score, scoreMargin, reverseMargin float64) string {
-	switch {
-	case score >= 0.75 && scoreMargin >= 0.05 && reverseMargin >= 0.05:
-		return "clear"
-	case score < DefaultPolicy().LowConfidenceReviewThreshold || (scoreMargin < 0.02 && reverseMargin < 0.02):
-		return "contested"
-	default:
-		return "ambiguous"
-	}
-}
-
 func textSimilarity(a, b *textutil.Fingerprint) float64 {
 	return textutil.CosineSimilarity(a, b)
 }
-

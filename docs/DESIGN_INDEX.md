@@ -33,7 +33,7 @@ self-contained and focused on a single domain area.
 
 | Document | Contents | ~Lines |
 |----------|----------|--------|
-| [CONTENT_ID_DESIGN.md](CONTENT_ID_DESIGN.md) | Episode identification algorithm: transcription, fingerprinting, Hungarian matching, LLM verification | 395 |
+| [CONTENT_ID_DESIGN.md](CONTENT_ID_DESIGN.md) | Episode identification algorithm: transcription, fingerprinting, ordered structured decoding, and LLM verification | 395 |
 
 ## Quick Reference
 

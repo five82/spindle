@@ -15,6 +15,15 @@ type Policy struct {
 	DiscBlockPaddingDivisor      int
 	Disc1MustStartAtEpisode1     bool
 	Disc2PlusMinStartEpisode     int
+	ReferenceSkipPenalty         float64
+	UnresolvedPenalty            float64
+	WindowMaxSlack               int
+	ScoreMarginTarget            float64
+	ReverseMarginTarget          float64
+	NeighborMarginTarget         float64
+	PathMarginTarget             float64
+	VerifyNeighborMargin         float64
+	VerifyPathMargin             float64
 }
 
 // DefaultPolicy returns conservative defaults tuned for multi-episode TV discs.
@@ -31,6 +40,15 @@ func DefaultPolicy() Policy {
 		DiscBlockPaddingDivisor:      4,
 		Disc1MustStartAtEpisode1:     true,
 		Disc2PlusMinStartEpisode:     2,
+		ReferenceSkipPenalty:         0.12,
+		UnresolvedPenalty:            0.08,
+		WindowMaxSlack:               2,
+		ScoreMarginTarget:            0.05,
+		ReverseMarginTarget:          0.05,
+		NeighborMarginTarget:         0.03,
+		PathMarginTarget:             0.12,
+		VerifyNeighborMargin:         0.02,
+		VerifyPathMargin:             0.08,
 	}
 }
 
@@ -104,6 +122,33 @@ func (p Policy) normalized() Policy {
 	}
 	if p.Disc2PlusMinStartEpisode <= 0 {
 		p.Disc2PlusMinStartEpisode = d.Disc2PlusMinStartEpisode
+	}
+	if p.ReferenceSkipPenalty <= 0 {
+		p.ReferenceSkipPenalty = d.ReferenceSkipPenalty
+	}
+	if p.UnresolvedPenalty <= 0 {
+		p.UnresolvedPenalty = d.UnresolvedPenalty
+	}
+	if p.WindowMaxSlack <= 0 {
+		p.WindowMaxSlack = d.WindowMaxSlack
+	}
+	if p.ScoreMarginTarget <= 0 {
+		p.ScoreMarginTarget = d.ScoreMarginTarget
+	}
+	if p.ReverseMarginTarget <= 0 {
+		p.ReverseMarginTarget = d.ReverseMarginTarget
+	}
+	if p.NeighborMarginTarget <= 0 {
+		p.NeighborMarginTarget = d.NeighborMarginTarget
+	}
+	if p.PathMarginTarget <= 0 {
+		p.PathMarginTarget = d.PathMarginTarget
+	}
+	if p.VerifyNeighborMargin <= 0 {
+		p.VerifyNeighborMargin = d.VerifyNeighborMargin
+	}
+	if p.VerifyPathMargin <= 0 {
+		p.VerifyPathMargin = d.VerifyPathMargin
 	}
 	return p
 }

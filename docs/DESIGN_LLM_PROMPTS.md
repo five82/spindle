@@ -151,19 +151,18 @@ Where:
 
 ### 2.4 Trigger Conditions
 
-Verification runs when an LLM client is configured and at least one cosine
-similarity match scores below `llmVerifyThreshold` (0.85) or was flagged by
-the contiguity check.
+Verification runs when an LLM client is configured and at least one match is
+ambiguous after structured decoding: derived confidence is below
+`llmVerifyThreshold` (0.85), path ambiguity is high, or the decoder raised a
+structural flag.
 
 ### 2.5 Escalation Logic
 
 | Condition | Action |
 |-----------|--------|
-| 0 below threshold | Skip verification entirely |
-| All verified | No changes |
-| 1 rejection | Flag for review; keep original matches |
-| 2+ rejections | Cross-match: N x M LLM comparisons across rejected episodes and references, greedy assignment via Hungarian algorithm |
-| All cross-matches rejected | Flag for review |
+| 0 ambiguous matches | Skip verification entirely |
+| All verified | No changes beyond confidence updates |
+| 1+ rejections | Flag for review; keep original matches |
 
 ### 2.6 Failure Behavior
 
@@ -171,8 +170,8 @@ LLM call failure during verification: original cosine match is retained, item
 flagged for review. The match is kept because a network error should not
 discard a plausible algorithmic match.
 
-LLM call failure during cross-matching: that combination is skipped. If all
-combinations fail, the item is flagged for review.
+There is no LLM cross-matching fallback in the production TV matcher path.
+Ambiguity that remains after verification is sent to review.
 
 ---
 

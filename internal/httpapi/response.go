@@ -71,6 +71,7 @@ type EpisodeResponse struct {
 	GeneratedSubtitleLanguage string            `json:"generatedSubtitleLanguage,omitempty"`
 	GeneratedSubtitleDecision string            `json:"generatedSubtitleDecision,omitempty"`
 	MatchScore                float64           `json:"matchScore,omitempty"`
+	MatchConfidence           float64           `json:"matchConfidence,omitempty"`
 	MatchedEpisode            int               `json:"matchedEpisode,omitempty"`
 	MatchedEpisodeEnd         int               `json:"matchedEpisodeEnd,omitempty"`
 	NeedsReview               bool              `json:"needsReview,omitempty"`
@@ -281,18 +282,19 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 	episodes := make([]EpisodeResponse, 0, len(env.Episodes))
 	for _, ep := range env.Episodes {
 		resp := EpisodeResponse{
-			Key:            ep.Key,
-			Season:         ep.Season,
-			Episode:        ep.Episode,
-			EpisodeEnd:     ep.EpisodeEnd,
-			Title:          ep.EpisodeTitle,
-			Stage:          "planned",
-			RuntimeSeconds: ep.RuntimeSeconds,
-			SourceTitleID:  ep.TitleID,
-			OutputBasename: ep.OutputBasename,
-			MatchScore:     ep.MatchConfidence,
-			NeedsReview:    ep.NeedsReview,
-			ReviewReason:   ep.ReviewReason,
+			Key:             ep.Key,
+			Season:          ep.Season,
+			Episode:         ep.Episode,
+			EpisodeEnd:      ep.EpisodeEnd,
+			Title:           ep.EpisodeTitle,
+			Stage:           "planned",
+			RuntimeSeconds:  ep.RuntimeSeconds,
+			SourceTitleID:   ep.TitleID,
+			OutputBasename:  ep.OutputBasename,
+			MatchScore:      ep.MatchScore,
+			MatchConfidence: ep.MatchConfidence,
+			NeedsReview:     ep.NeedsReview,
+			ReviewReason:    ep.ReviewReason,
 		}
 
 		if ep.Episode > 0 {

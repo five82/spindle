@@ -30,7 +30,7 @@ internal/
 
   identify/             Stage: identification (MakeMKV scan, TMDB, KeyDB)
   ripper/               Stage: ripping (MakeMKV rip, cache, progress)
-  contentid/            Stage: episode identification (matching, Hungarian, LLM verify)
+  contentid/            Stage: episode identification (ordered sequence matching, ambiguity assessment, LLM verification)
   encoder/              Stage: encoding (Drapto integration, job planning)
   audioanalysis/        Stage: audio analysis (refinement, commentary detection)
   subtitle/             Stage: subtitle generation (WhisperX, forced subs, SRT)

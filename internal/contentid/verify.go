@@ -38,7 +38,7 @@ func verifyMatches(ctx context.Context, client *llm.Client, matches []matchResul
 	}
 	var candidates []int
 	for i, m := range matches {
-		if m.Score < verifyThreshold {
+		if shouldVerifyMatch(m, verifyThreshold) {
 			candidates = append(candidates, i)
 		}
 	}
@@ -85,8 +85,10 @@ func verifyMatches(ctx context.Context, client *llm.Client, matches []matchResul
 		}
 		if ev.SameEpisode {
 			result.Verified++
-			if ev.Confidence > updated[idx].Score {
-				updated[idx].Score = ev.Confidence
+			updated[idx].NeedsVerification = false
+			updated[idx].VerificationReason = ""
+			if ev.Confidence > updated[idx].Confidence {
+				updated[idx].Confidence = ev.Confidence
 			}
 			if logger != nil {
 				logger.Info("episode LLM verification",
@@ -96,6 +98,7 @@ func verifyMatches(ctx context.Context, client *llm.Client, matches []matchResul
 					"episode_key", m.EpisodeKey,
 					"target_episode", m.TargetEpisode,
 					"match_score", m.Score,
+					"match_confidence", m.Confidence,
 					"llm_confidence", ev.Confidence,
 				)
 			}
@@ -112,11 +115,22 @@ func verifyMatches(ctx context.Context, client *llm.Client, matches []matchResul
 				"episode_key", m.EpisodeKey,
 				"target_episode", m.TargetEpisode,
 				"match_score", m.Score,
+				"match_confidence", m.Confidence,
 				"llm_confidence", ev.Confidence,
 			)
 		}
 	}
 	return updated, result
+}
+
+func shouldVerifyMatch(m matchResult, verifyThreshold float64) bool {
+	if m.Confidence < verifyThreshold {
+		return true
+	}
+	if m.NeedsVerification {
+		return true
+	}
+	return false
 }
 
 func findRipPath(rips []ripFingerprint, key string) string {
@@ -188,4 +202,3 @@ func extractMiddleTranscript(srtPath string) (string, error) {
 	}
 	return text, nil
 }
-

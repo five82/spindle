@@ -30,20 +30,34 @@ type referenceFingerprint struct {
 }
 
 type matchResult struct {
-	EpisodeKey           string
-	TitleID              int
-	TargetEpisode        int
-	Score                float64
-	ConfidenceQuality    string
-	RunnerUpEpisode      int
-	RunnerUpScore        float64
-	ScoreMargin          float64
-	ReverseRunnerUpKey   string
-	ReverseRunnerUpScore float64
-	ReverseScoreMargin   float64
-	SubtitleFileID       int
-	SubtitleLanguage     string
-	SubtitlePath         string
+	EpisodeKey              string
+	TitleID                 int
+	TargetEpisode           int
+	Score                   float64
+	Confidence              float64
+	ConfidenceQuality       string
+	RunnerUpEpisode         int
+	RunnerUpScore           float64
+	ScoreMargin             float64
+	ReverseRunnerUpKey      string
+	ReverseRunnerUpScore    float64
+	ReverseScoreMargin      float64
+	NeighborRunnerUpEpisode int
+	NeighborRunnerUpScore   float64
+	NeighborScoreMargin     float64
+	PathScore               float64
+	PathMargin              float64
+	InternalGapCount        int
+	UnresolvedCount         int
+	SequenceContiguous      bool
+	WindowStart             int
+	WindowEnd               int
+	Orientation             string
+	NeedsVerification       bool
+	VerificationReason      string
+	SubtitleFileID          int
+	SubtitleLanguage        string
+	SubtitlePath            string
 }
 
 // readSRTText reads an SRT file and returns the concatenated cue text,

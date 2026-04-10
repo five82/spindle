@@ -14,8 +14,8 @@ differs from broadcast order. Content ID resolves this by:
 1. Transcribing each ripped title using WhisperX speech-to-text
 2. Downloading reference subtitles from OpenSubtitles for the target season
 3. Computing text similarity between transcripts and references
-4. Finding the optimal assignment using the Hungarian algorithm
-5. Verifying low-confidence or non-contiguous matches with an LLM
+4. Decoding the best ordered contiguous episode path with structured dynamic programming
+5. Verifying ambiguous matches with an LLM
 
 The matcher is invoked by the episode identification stage after ripping
 completes. It updates the rip specification envelope in-place with confirmed
@@ -59,16 +59,16 @@ Ripped Episode Files
 [4. Fingerprint + IDF] -- TF-IDF cosine similarity between rips and references
         |
         v
-[5. Hungarian Assignment] -- Optimal one-to-one matching
+[5. Ordered Decoder] -- Windowed structured path search over rip/episode order
         |
         v
-[6. Score Filter] -- Discard matches below minimum threshold
+[6. Confidence Derivation] -- Split raw score from derived confidence
         |
         v
-[7. Contiguity Check] -- Flag outlier matches for LLM verification
+[7. Structural Validation] -- Check contiguity, gaps, and disc-1 constraints
         |
         v
-[8. LLM Verification] -- Verify low-confidence and non-contiguous matches
+[8. LLM Verification] -- Verify ambiguous matches
         |
         v
 [9. Apply Matches] -- Update envelope episodes with confirmed mappings
@@ -256,50 +256,70 @@ vectors are used directly.
 
 ---
 
-## 9. Global Assignment (Hungarian Algorithm)
+## 9. Ordered Structured Decoding
 
-### 9.1 Cost Matrix
+### 9.1 Candidate Windows
 
-Build an `N x M` matrix (padded to square) where:
-- `cost[i][j] = 1 - cosineSimilarity(rip[i], ref[j])`
-- Padded cells use cost = 2.0 (ensures they are not preferred)
+The matcher evaluates plausible contiguous candidate windows from the season
+rather than solving an unrestricted assignment problem across all references at
+once.
 
-### 9.2 Algorithm
+Candidate windows are derived from:
+- rip-spec hints when episode numbers already exist
+- disc-number heuristics
+- anchor selection from high-signal rip/reference similarities
+- full-season fallback when narrower windows are not trustworthy
 
-Standard Hungarian algorithm (O(n^3)) for minimum-cost assignment on the square
-cost matrix. Returns `assignment[i] = j` for each row `i`.
+### 9.2 Decoder
 
-**Implementation**: Direct implementation in Go (~100 lines). Matrix sizes are
-small (typically < 30 episodes per season), so performance is not a concern.
-No external dependency needed.
+Within each candidate window, the matcher runs an **ordered dynamic-programming
+sequence decoder** over rip order and episode order.
 
-### 9.3 Minimum Score Filter
+The decoder scores paths using:
+- **emission score**: transcript/reference cosine similarity normalized around
+  `MinSimilarityScore`
+- **reference skip penalty**: discourages gaps inside the chosen episode block
+- **unresolved penalty**: allows leaving a rip unmatched when forcing a match
+  would be less trustworthy
 
-After assignment, discard matches where `score < MinSimilarityScore` (default:
-0.58). These are unconfident enough that no assignment is better than a wrong one.
+The production TV path uses **one matcher**: ordered structured decoding.
+Spindle does **not** keep a permanent runtime fallback matcher for TV.
+
+### 9.3 Window Selection and Path Margin
+
+The best decoded path is selected across all candidate windows. The matcher also
+records the next-best path score and stores a **path margin**:
+
+- `path_margin = best_path_score - second_best_path_score`
+
+Small path margins indicate ambiguous block-level decisions and feed both
+confidence scoring and LLM verification.
 
 ---
 
-## 10. Contiguity Check
+## 10. Contiguity and Structural Validation
 
 ### 10.1 Purpose
 
-TV disc episodes should map to a contiguous range (e.g., E05-E10). After
-Hungarian assignment, check whether the matched episodes form a contiguous
-sequence.
+TV disc episodes should still resolve to a contiguous season block (for example
+E05-E10), but contiguity is now a **primary decoder property** rather than a
+post-hoc repair step layered on unrestricted assignment.
 
 ### 10.2 Logic
 
-1. Collect all matched episode numbers and sort them.
-2. Check if they form a contiguous range (each consecutive pair differs by 1).
-3. If contiguous: done, no further action.
-4. If not contiguous: flag the outlier matches (episodes outside the longest
-   contiguous subsequence) for LLM verification.
+After decoding, the stage validates the structured path:
+1. Collect matched episode numbers.
+2. Check whether they form a contiguous range.
+3. Check structural diagnostics such as internal skipped episodes, unresolved
+   holes, and disc-1 start violations.
+4. If the ordered path is structurally suspicious, lower confidence and/or send
+   the item to verification/review.
 
 ### 10.3 Disc 1 Constraint
 
-When `disc1MustStartAtEpisode1` is true (hardcoded default) and the disc number is 1,
-the contiguous range must start at episode 1. If it doesn't, flag `NeedsReview`.
+When `disc1MustStartAtEpisode1` is true and the disc number is 1, the selected
+ordered path must begin at episode 1. If it does not, the item is flagged for
+review.
 
 ---
 
@@ -307,9 +327,13 @@ the contiguous range must start at episode 1. If it doesn't, flag `NeedsReview`.
 
 ### 11.1 Trigger Conditions
 
-LLM verification runs when an LLM client is configured and either:
-- At least one match has `Score < LLMVerifyThreshold` (default: 0.85)
-- At least one match was flagged by the contiguity check
+LLM verification runs when an LLM client is configured and at least one match
+is ambiguous after structured decoding. Triggers include:
+- derived `match_confidence < LLMVerifyThreshold` (default: 0.85)
+- small `path_margin`
+- small adjacent-episode `neighbor_margin`
+- structural flags from the ordered path (for example internal gaps or disc-1
+  violations)
 
 ### 11.2 Transcript Extraction
 
@@ -331,13 +355,13 @@ accounting for WhisperX recognition errors and localization differences.
 
 | Condition | Action |
 |-----------|--------|
-| 0 matches below threshold | Skip verification entirely |
-| 0 rejections | All verified -- no changes |
-| Any rejections | Flag `NeedsReview` |
+| 0 ambiguous matches | Skip verification entirely |
+| Verification confirms match | Keep assignment and raise confidence if warranted |
+| Verification fails or rejects | Flag `NeedsReview` |
 
 When the LLM rejects matches, the item is flagged for manual review rather than
-attempting algorithmic reassignment. LLM rejections indicate genuine ambiguity
-that automated recovery is unlikely to resolve correctly.
+attempting algorithmic reassignment. Ambiguity escalates to review instead of a
+second production matcher.
 
 ---
 
@@ -375,9 +399,10 @@ Expected `attributes.content_id` fields:
 
 | Source | Condition |
 |--------|-----------|
-| Contiguity check | Disc 1 range doesn't start at episode 1 |
-| Contiguity check | Matched episodes are non-contiguous |
-| LLM verification | Verification call failed (kept original match) |
+| Structured decoder | Disc 1 path doesn't start at episode 1 |
+| Structured decoder | Matched episodes are non-contiguous or contain internal gaps |
+| Confidence model | Derived confidence falls below review threshold |
+| LLM verification | Verification call failed |
 | LLM verification | Any match rejected by LLM |
 
 ### 12.4 Low-Confidence Review
@@ -389,14 +414,20 @@ matching (handled by the episode identification stage, not the matcher directly)
 
 ## 13. Policy Constants
 
-All thresholds are hardcoded constants in the `Policy` struct (not user-configurable).
+Key policy values live in the `Policy` struct.
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `minSimilarityScore` | 0.58 | Minimum cosine similarity for a valid match. Matches below this are discarded. |
-| `lowConfidenceReviewThreshold` | 0.70 | Matches below this trigger a review flag. |
-| `llmVerifyThreshold` | 0.85 | Matches below this are sent to LLM verification. |
-| `disc1MustStartAtEpisode1` | true | Disc 1 contiguous range must start at episode 1. |
+| `minSimilarityScore` | 0.58 | Baseline similarity used by the ordered decoder emission score. |
+| `lowConfidenceReviewThreshold` | 0.70 | Derived confidence below this triggers a review flag. |
+| `llmVerifyThreshold` | 0.85 | Derived confidence below this triggers LLM verification. |
+| `referenceSkipPenalty` | 0.12 | Penalty for skipping reference episodes inside a candidate window. |
+| `unresolvedPenalty` | 0.08 | Penalty for leaving a rip unresolved. |
+| `scoreMarginTarget` | 0.05 | Desired separation from the forward runner-up. |
+| `reverseMarginTarget` | 0.05 | Desired separation from the reverse runner-up. |
+| `neighborMarginTarget` | 0.03 | Desired separation from adjacent episodes. |
+| `pathMarginTarget` | 0.12 | Desired separation from the next-best decoded path. |
+| `disc1MustStartAtEpisode1` | true | Disc 1 ordered path must start at episode 1. |
 
 ---
 
@@ -406,7 +437,7 @@ After successful matching, the episode ID stage updates the envelope:
 
 1. **Episode resolution**: Each `episodes[]` entry is updated with resolved
    `episode` number, optional `episode_end` for range assets, `episode_title`,
-   and `episode_air_date`. Match confidence scores are stored in
+   and `episode_air_date`. The stage stores both raw `match_score` and derived
    `match_confidence`. The current implementation supports a conservative
    opening-double inference for disc 1: when the first placeholder title has a
    probable double-length runtime profile and the resolved single-episode
@@ -420,8 +451,9 @@ After successful matching, the episode ID stage updates the envelope:
    `attributes.content_id`, including the matching method, reference source,
    reference/transcript counts, low-confidence count, contiguity result, and
    whether the envelope episodes were synchronized from the run.
-4. **Logging**: Per-episode match details (scores, subtitle file IDs, methods)
-   are logged at INFO level for diagnostics.
+4. **Logging**: Per-episode match details (raw score, derived confidence,
+   runner-up margins, neighbor ambiguity, path margin, subtitle file IDs,
+   and method) are logged at INFO level for diagnostics.
 
 Organizer behavior for TV consumes these episode-level flags directly:
 clean resolved episodes go to the library, while unresolved or flagged episodes
