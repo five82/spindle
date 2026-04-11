@@ -416,7 +416,6 @@ For each challenged pair, extract the middle portion of:
 The LLM returns:
 
 - `same_episode: true|false`
-- `confidence: 0.0-1.0`
 - `explanation`
 
 ### 10.6 Acceptance semantics
@@ -426,8 +425,8 @@ as describing the same episode content.
 It does **not** replace canonical episode-numbering rules, and it does **not**
 numerically raise stored `match_confidence` in the initial rewrite.
 
-`llm_confidence` is logged for observability, not used as a direct numeric input
-into `match_confidence`.
+The LLM is treated as a narrow boolean verification gate for ambiguous pairs.
+Stored `match_confidence` remains fully deterministic.
 
 ### 10.7 Failure behavior
 
@@ -515,11 +514,11 @@ signals only, such as:
 - whether the match required ambiguity escalation
 - whether it was assigned only by final set reconciliation
 
-### 13.3 LLM confidence is not part of numeric confidence
+### 13.3 LLM verification is not part of numeric confidence
 
 An LLM `same_episode=true` result may allow an ambiguous pair to be accepted,
-but `llm_confidence` is logged for observability only. It does not numerically
-increase stored `match_confidence` in the initial rewrite.
+but it does not numerically increase stored `match_confidence` in the initial
+rewrite.
 
 ---
 

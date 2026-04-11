@@ -202,7 +202,7 @@ func TestVerifyMatchesConfirmsPairWithoutInflatingConfidence(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{
 				"message": map[string]any{
-					"content": `{"same_episode":true,"confidence":0.99,"explanation":"same dialogue"}`,
+					"content": `{"same_episode":true,"explanation":"same dialogue"}`,
 				},
 			}},
 		})

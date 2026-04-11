@@ -107,14 +107,14 @@ You compare two TV episode transcripts to determine if they are from the same ep
 TRANSCRIPT A is a WhisperX speech-to-text transcription from a Blu-ray disc.
 TRANSCRIPT B is a reference subtitle from OpenSubtitles for a specific episode.
 
-Both cover only the middle portion of the episode (approximately 10 minutes).
+Both are extracted from the middle portion of the episode, typically about 10 minutes, though shorter transcripts may use the full available duration.
 WhisperX transcripts may contain speech recognition errors.
-Reference subtitles may differ in exact wording due to localization.
+Reference subtitles may differ in exact wording due to subtitle conventions, release differences, or localization.
 
 Focus on whether the same scenes and dialogue events occur in both.
 Do NOT penalize minor word differences, transcription errors, or timing differences.
 
-Respond ONLY with JSON: {"same_episode": true/false, "confidence": 0.0-1.0, "explanation": "brief reason"}
+Respond ONLY with JSON: {"same_episode": true/false, "explanation": "brief reason"}
 ```
 
 ### 2.2 User Prompt
@@ -133,20 +133,19 @@ Target episode: {target_episode}
 Where:
 - `{episode_key}` is the rip's placeholder key (e.g., `s01_001`)
 - `{target_episode}` is the candidate episode number (e.g., `3`)
-- Each transcript is the middle ~10 minutes of dialogue, extracted via
-  `MiddleSRTRange` with half-window `min(300s, totalDuration/2)`, truncated
-  to 6000 characters
+- Each transcript is a middle-focused dialogue excerpt extracted with a
+  300-second half-window; short transcripts may use the full available
+  duration, and excerpts are truncated to 6000 characters
 
 ### 2.3 Response Schema
 
 ```json
-{"same_episode": true, "confidence": 0.91, "explanation": "Both transcripts contain the same courtroom scene dialogue"}
+{"same_episode": true, "explanation": "Both transcripts contain the same courtroom scene dialogue"}
 ```
 
 | Field | Type | Values |
 |-------|------|--------|
 | `same_episode` | bool | `true` / `false` |
-| `confidence` | float | 0.0 - 1.0 |
 | `explanation` | string | Brief reason |
 
 ### 2.4 Trigger Conditions
@@ -164,7 +163,7 @@ cross-product verification across a season.
 | Condition | Action |
 |-----------|--------|
 | 0 ambiguous matches | Skip verification entirely |
-| Pair verified | Accept that already-proposed pair; log `llm_confidence` for observability only |
+| Pair verified | Accept that already-proposed pair |
 | 1+ rejections or failures | Leave those pairs unresolved and flag for review |
 
 ### 2.6 Failure Behavior
@@ -186,12 +185,9 @@ Both prompts share these conventions:
 
 1. **JSON-only response**: Every system prompt ends with an explicit response
    format instruction.
-2. **Confidence score**: Every response includes a 0.0-1.0 confidence value.
-3. **Explanation field**: Every response includes a brief human-readable reason.
-4. **Temperature 0**: Deterministic output for reproducibility.
-5. **Threshold-gated acceptance**: Each use site compares confidence against a
-   threshold before accepting the LLM's decision.
-6. **Non-fatal on failure**: No LLM failure causes a pipeline abort. Each call
+2. **Explanation field**: Every response includes a brief human-readable reason.
+3. **Temperature 0**: Deterministic output for reproducibility.
+4. **Non-fatal on failure**: No LLM failure causes a pipeline abort. Each call
    site has a defined fallback (conservative preserve, or retain original
    match).
 

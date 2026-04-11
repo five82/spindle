@@ -26,13 +26,12 @@ Reference subtitles may differ in exact wording due to subtitle conventions, rel
 Focus on whether the same scenes and dialogue events occur in both.
 Do NOT penalize minor word differences, transcription errors, or timing differences.
 
-Respond ONLY with JSON: {"same_episode": true/false, "confidence": 0.0-1.0, "explanation": "brief reason"}`
+Respond ONLY with JSON: {"same_episode": true/false, "explanation": "brief reason"}`
 )
 
 type episodeVerification struct {
-	SameEpisode bool    `json:"same_episode"`
-	Confidence  float64 `json:"confidence"`
-	Explanation string  `json:"explanation"`
+	SameEpisode bool   `json:"same_episode"`
+	Explanation string `json:"explanation"`
 }
 
 type verifyResult struct {
@@ -142,7 +141,6 @@ func verifyMatches(ctx context.Context, client *llm.Client, accepted []matchResu
 						"target_episode", candidate.TargetEpisode,
 						"match_score", candidate.Score,
 						"match_confidence", candidate.Confidence,
-						"llm_confidence", ev.Confidence,
 					)
 				}
 				break
@@ -162,7 +160,6 @@ func verifyMatches(ctx context.Context, client *llm.Client, accepted []matchResu
 					"target_episode", candidate.TargetEpisode,
 					"match_score", candidate.Score,
 					"match_confidence", candidate.Confidence,
-					"llm_confidence", ev.Confidence,
 				)
 			}
 		}
