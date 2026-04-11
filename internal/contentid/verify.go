@@ -14,8 +14,18 @@ import (
 const (
 	middleWindowHalfSec = 300.0
 	maxTranscriptChars  = 6000
-	verificationPrompt  = `You compare two subtitle transcripts and determine whether they represent the same TV episode.
-Account for transcription errors, subtitle paraphrasing, and minor formatting differences.
+	verificationPrompt  = `You compare two TV episode transcripts to determine if they are from the same episode.
+
+TRANSCRIPT A is a WhisperX speech-to-text transcription from a Blu-ray disc.
+TRANSCRIPT B is a reference subtitle from OpenSubtitles for a specific episode.
+
+Both are extracted from the middle portion of the episode, typically about 10 minutes, though shorter transcripts may use the full available duration.
+WhisperX transcripts may contain speech recognition errors.
+Reference subtitles may differ in exact wording due to subtitle conventions, release differences, or localization.
+
+Focus on whether the same scenes and dialogue events occur in both.
+Do NOT penalize minor word differences, transcription errors, or timing differences.
+
 Respond ONLY with JSON: {"same_episode": true/false, "confidence": 0.0-1.0, "explanation": "brief reason"}`
 )
 
