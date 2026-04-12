@@ -357,17 +357,18 @@ func (m *Manager) maybeStartQueueCycle(ctx context.Context, logger *slog.Logger)
 	}
 
 	m.queueNotifyMu.Lock()
+	defer m.queueNotifyMu.Unlock()
 	if m.queueCycleActive {
-		m.queueNotifyMu.Unlock()
+		return
+	}
+
+	msg := fmt.Sprintf("Queue is active with %d items in progress or waiting.", activeCount)
+	if err := notify.SendLogged(ctx, m.notifier, logger, notify.EventQueueStarted, "Queue started", msg,
+		"active_count", activeCount,
+	); err != nil {
 		return
 	}
 	m.queueCycleActive = true
-	m.queueNotifyMu.Unlock()
-
-	msg := fmt.Sprintf("Queue is active with %d items in progress or waiting.", activeCount)
-	_ = notify.SendLogged(ctx, m.notifier, logger, notify.EventQueueStarted, "Queue started", msg,
-		"active_count", activeCount,
-	)
 }
 
 // maybeCompleteQueueCycle sends queue_completed when a started backlog cycle drains.
@@ -390,8 +391,8 @@ func (m *Manager) maybeCompleteQueueCycle(ctx context.Context, logger *slog.Logg
 	}
 
 	m.queueNotifyMu.Lock()
+	defer m.queueNotifyMu.Unlock()
 	if !m.queueCycleActive {
-		m.queueNotifyMu.Unlock()
 		logger.Info("queue completion notification suppressed",
 			"event_type", "notification_suppressed",
 			"notification_event", string(notify.EventQueueCompleted),
@@ -399,10 +400,11 @@ func (m *Manager) maybeCompleteQueueCycle(ctx context.Context, logger *slog.Logg
 		)
 		return
 	}
-	m.queueCycleActive = false
-	m.queueNotifyMu.Unlock()
 
-	_ = notify.SendLogged(ctx, m.notifier, logger, notify.EventQueueCompleted, "Queue completed", "All queued items finished processing.")
+	if err := notify.SendLogged(ctx, m.notifier, logger, notify.EventQueueCompleted, "Queue completed", "All queued items finished processing."); err != nil {
+		return
+	}
+	m.queueCycleActive = false
 }
 
 // sleep waits for the given duration or until ctx is cancelled.

@@ -172,6 +172,80 @@ func TestQueueCycleNotificationsRequireBacklogAndPair(t *testing.T) {
 	}
 }
 
+func TestQueueStartNotificationRetriesAfterFailure(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
+
+	_, _ = store.NewDisc("A", "fp1")
+	_, _ = store.NewDisc("B", "fp2")
+
+	manager.maybeStartQueueCycle(context.Background(), logger)
+	if manager.queueCycleActive {
+		t.Fatal("queue cycle should remain inactive after failed queue_started notification")
+	}
+
+	manager.maybeStartQueueCycle(context.Background(), logger)
+	if !manager.queueCycleActive {
+		t.Fatal("queue cycle should become active after successful retry")
+	}
+	if attempts != 2 {
+		t.Fatalf("queue_started attempts = %d, want 2", attempts)
+	}
+}
+
+func TestQueueCompletionNotificationRetriesAfterFailure(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
+	manager.queueCycleActive = true
+
+	manager.maybeCompleteQueueCycle(context.Background(), logger)
+	if !manager.queueCycleActive {
+		t.Fatal("queue cycle should remain active after failed queue_completed notification")
+	}
+
+	manager.maybeCompleteQueueCycle(context.Background(), logger)
+	if manager.queueCycleActive {
+		t.Fatal("queue cycle should clear after successful queue_completed notification")
+	}
+	if attempts != 2 {
+		t.Fatalf("queue_completed attempts = %d, want 2", attempts)
+	}
+}
+
 func TestQueueCompletionSuppressedWithoutStartedCycle(t *testing.T) {
 	var events []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
