@@ -131,7 +131,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Created before stage handlers so the ripper can pause/resume detection.
 	var discMon *discmonitor.Monitor
 	if cfg.MakeMKV.OpticalDrive != "" {
-		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, store, logger)
+		discMon = discmonitor.New(cfg.MakeMKV.OpticalDrive, store, notifier, logger)
 	}
 
 	// Create stage handlers.

@@ -295,19 +295,22 @@ Tags: <comma_separated_tags>
 
 No authentication (relies on topic URL privacy or server-level auth).
 
-12 event types generate notifications (see DESIGN_INFRASTRUCTURE.md
-Section 2.2 for the canonical list):
-- `disc_detected`, `identification_complete`
-- `rip_complete`, `encode_complete`
-- `validation_failed`, `pipeline_complete`
-- `organize_complete`
+11 event types generate notifications (see DESIGN_INFRASTRUCTURE.md
+Section 2.3 for the canonical list):
+- `item_queued`, `identification_complete`
+- `rip_cache_hit`, `rip_complete`
+- `encode_complete`
+- `review_required`, `pipeline_complete`
 - `queue_started`, `queue_completed`
-- `error`, `unidentified_media`
-- `test`
+- `error`, `test`
 
-All notification types are sent when `ntfy_topic` is set. Rip notifications
-are suppressed for cache hits under 120 seconds. Queue start/finish
-notifications require at least 2 items.
+Behavior notes:
+- Notifications are outcome-focused; stage-start events are not pushed.
+- Validation and quality issues roll up into the terminal `review_required`
+  notification instead of emitting per-issue alerts.
+- `queue_started` and `queue_completed` are paired backlog-cycle notifications.
+  `queue_started` requires at least 2 active items, and `queue_completed` is
+  only emitted if a matching `queue_started` was already sent for that cycle.
 
 ---
 

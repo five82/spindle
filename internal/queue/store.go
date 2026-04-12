@@ -467,7 +467,7 @@ func (s *Store) Stats() (map[Stage]int, error) {
 // InProgressItems returns all items with in_progress=1, ordered by creation time.
 func (s *Store) InProgressItems() ([]*Item, error) {
 	rows, err := s.db.Query(
-		"SELECT "+allColumns+" FROM queue_items WHERE in_progress = 1 ORDER BY created_at",
+		"SELECT " + allColumns + " FROM queue_items WHERE in_progress = 1 ORDER BY created_at",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("in-progress items: %w", err)
@@ -476,14 +476,23 @@ func (s *Store) InProgressItems() ([]*Item, error) {
 	return collectItems(rows)
 }
 
-// HasActiveItems returns true if any item is in a non-terminal stage
-// (not completed or failed).
-func (s *Store) HasActiveItems() (bool, error) {
+// ActiveItemCount returns the number of items in non-terminal stages.
+func (s *Store) ActiveItemCount() (int, error) {
 	var count int
 	err := s.db.QueryRow(
 		"SELECT COUNT(*) FROM queue_items WHERE stage NOT IN (?, ?)",
 		string(StageCompleted), string(StageFailed),
 	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("active item count: %w", err)
+	}
+	return count, nil
+}
+
+// HasActiveItems returns true if any item is in a non-terminal stage
+// (not completed or failed).
+func (s *Store) HasActiveItems() (bool, error) {
+	count, err := s.ActiveItemCount()
 	if err != nil {
 		return false, fmt.Errorf("has active items: %w", err)
 	}

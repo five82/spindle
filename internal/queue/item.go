@@ -71,3 +71,72 @@ func (it *Item) AppendReviewReason(reason string) {
 	}
 	it.ReviewReason = string(data)
 }
+
+// ReviewReasons returns the parsed review reasons. Invalid JSON returns nil.
+func (it *Item) ReviewReasons() []string {
+	if strings.TrimSpace(it.ReviewReason) == "" {
+		return nil
+	}
+	var reasons []string
+	if err := json.Unmarshal([]byte(it.ReviewReason), &reasons); err != nil {
+		return nil
+	}
+	return reasons
+}
+
+// PrimaryReviewReason returns the first review reason, if any.
+func (it *Item) PrimaryReviewReason() string {
+	reasons := it.ReviewReasons()
+	if len(reasons) == 0 {
+		return ""
+	}
+	return reasons[0]
+}
+
+// ReviewSummary returns a compact review summary, capped to maxReasons entries.
+func (it *Item) ReviewSummary(maxReasons int) string {
+	reasons := it.ReviewReasons()
+	if len(reasons) == 0 {
+		return ""
+	}
+	if maxReasons <= 0 || maxReasons >= len(reasons) {
+		return strings.Join(reasons, "; ")
+	}
+	summary := strings.Join(reasons[:maxReasons], "; ")
+	remaining := len(reasons) - maxReasons
+	if remaining > 0 {
+		summary += fmt.Sprintf("; +%d more", remaining)
+	}
+	return summary
+}
+
+// DisplayTitle returns the best available user-facing title for the item.
+func (it *Item) DisplayTitle() string {
+	if title := strings.TrimSpace(it.DiscTitle); title != "" {
+		return title
+	}
+
+	meta := MetadataFromJSON(it.MetadataJSON, "")
+	if title := strings.TrimSpace(meta.DisplayTitle); title != "" {
+		if meta.Year != "" && !strings.Contains(title, "(") {
+			return title + " (" + meta.Year + ")"
+		}
+		return title
+	}
+	if title := strings.TrimSpace(meta.ShowTitle); title != "" {
+		if meta.SeasonNumber > 0 {
+			return fmt.Sprintf("%s Season %02d", title, meta.SeasonNumber)
+		}
+		return title
+	}
+	if title := strings.TrimSpace(meta.Title); title != "" {
+		if meta.Year != "" {
+			return title + " (" + meta.Year + ")"
+		}
+		return title
+	}
+	if it.ID > 0 {
+		return fmt.Sprintf("Item %d", it.ID)
+	}
+	return "Unknown Item"
+}

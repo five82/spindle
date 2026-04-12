@@ -41,7 +41,9 @@ only one disc operation (identification or ripping) runs at a time.
    - **In workflow, completed, or failed**: no new work is queued (the disc is already known).
 4. New discs are inserted into the queue at stage `identification`.
 
-Disc-detected notifications are emitted when identification begins.
+When a new queue item is actually created, Spindle emits an item-queued
+notification. Duplicate or already-known discs do not generate that queue
+acceptance notification.
 
 Use `spindle disc pause` to temporarily stop queueing new discs without stopping the daemon. This is useful when you need to swap drives or perform maintenance. Use `spindle disc resume` to resume detection. The pause state resets when the daemon restarts.
 
@@ -53,7 +55,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
    - Stores metadata in `metadata_json`.
    - Writes a rip specification (`rip_spec`) that maps MakeMKV titles to the intended output.
    - Updates `disc_title` to a canonical name (movie: `Title (Year)`, TV: `Show Season XX (Year)` when available).
-   - Sends a notification when a year is known.
+   - Sends an identification-complete notification.
 4. If no confident match is found (or TMDB lookup fails), the item is marked `needs_review` with a reason. **TV-hinted discs fail at identification and do not advance to ripping.** Non-TV/unknown discs continue as degraded items so downstream stages can still run, and the organizer will route output to `review_dir`.
 5. Duplicate fingerprints are treated as immediate failure: the item is placed in `failed` with `needs_review = true` and the workflow stops.
 
@@ -179,4 +181,4 @@ If items appear stuck (in-progress but not advancing):
 
 ## Notifications
 
-If `ntfy_topic` is set, Spindle posts compact notifications at key steps: disc detected, disc identified (with year when available), rip completed, encoding completed, library import completed, and any errors. You can test the channel any time with `spindle test-notify`.
+If `ntfy_topic` is set, Spindle posts compact notifications at key steps: item queued, identification completed, rip cache hit, rip completed (including drive-available notice), encoding completed, final clean completion, final review-required completion, queue backlog start/finish, and fatal errors. Items routed to `review_dir` are treated as a problem outcome and generate an explicit review-required notification rather than looking like a clean success. You can test the channel any time with `spindle test-notify`.

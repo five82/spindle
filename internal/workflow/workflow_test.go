@@ -1,9 +1,15 @@
 package workflow
 
 import (
+	"context"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
+	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 )
 
@@ -122,5 +128,73 @@ func TestNextStageReturnsCompletedForUnknownStage(t *testing.T) {
 	got := m.nextStage(queue.Stage("nonexistent"))
 	if got != queue.StageCompleted {
 		t.Errorf("nextStage(nonexistent) = %q, want %q", got, queue.StageCompleted)
+	}
+}
+
+func TestQueueCycleNotificationsRequireBacklogAndPair(t *testing.T) {
+	var events []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		events = append(events, r.Header.Get("Title"))
+		_, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
+
+	item1, _ := store.NewDisc("A", "fp1")
+	item2, _ := store.NewDisc("B", "fp2")
+
+	manager.maybeStartQueueCycle(context.Background(), logger)
+	if len(events) != 1 || events[0] != "Queue started" {
+		t.Fatalf("events after start = %v, want [Queue started]", events)
+	}
+
+	manager.maybeStartQueueCycle(context.Background(), logger)
+	if len(events) != 1 {
+		t.Fatalf("queue_started duplicated: %v", events)
+	}
+
+	item1.Stage = queue.StageCompleted
+	_ = store.Update(item1)
+	item2.Stage = queue.StageCompleted
+	_ = store.Update(item2)
+	manager.maybeCompleteQueueCycle(context.Background(), logger)
+	if len(events) != 2 || events[1] != "Queue completed" {
+		t.Fatalf("events after complete = %v, want [Queue started Queue completed]", events)
+	}
+}
+
+func TestQueueCompletionSuppressedWithoutStartedCycle(t *testing.T) {
+	var events []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		events = append(events, r.Header.Get("Title"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
+
+	item, _ := store.NewDisc("A", "fp1")
+	item.Stage = queue.StageCompleted
+	_ = store.Update(item)
+
+	manager.maybeCompleteQueueCycle(context.Background(), logger)
+	if len(events) != 0 {
+		t.Fatalf("unexpected queue notification(s): %v", events)
 	}
 }

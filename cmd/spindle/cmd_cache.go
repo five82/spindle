@@ -17,6 +17,7 @@ import (
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/identify"
 	"github.com/five82/spindle/internal/keydb"
+	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripper"
@@ -299,6 +300,8 @@ func newCacheProcessCmd() *cobra.Command {
 
 			entry := entries[num-1]
 
+			logger := buildLogger()
+
 			// Open queue database.
 			qStore, err := queue.Open(cfg.QueueDBPath())
 			if err != nil {
@@ -332,6 +335,13 @@ func newCacheProcessCmd() *cobra.Command {
 			item.MetadataJSON = entry.MetadataJSON
 			item.Stage = queue.StageRipping
 			_ = qStore.Update(item)
+
+			notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, logger)
+			_ = notify.SendLogged(context.Background(), notifier, logger, notify.EventItemQueued,
+				"Queued: "+item.DisplayTitle(),
+				"Accepted for processing from rip cache.",
+				"item_id", item.ID,
+			)
 
 			fpDisplay := entry.Fingerprint
 			if len(fpDisplay) > 12 {

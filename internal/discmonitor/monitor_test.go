@@ -190,7 +190,7 @@ func TestShouldRefreshDiscTitle(t *testing.T) {
 }
 
 func TestNewDefaults(t *testing.T) {
-	m := New("", nil, nil)
+	m := New("", nil, nil, nil)
 	if m.device != "/dev/sr0" {
 		t.Errorf("default device = %q, want %q", m.device, "/dev/sr0")
 	}
@@ -200,14 +200,14 @@ func TestNewDefaults(t *testing.T) {
 }
 
 func TestNewCustomDevice(t *testing.T) {
-	m := New("/dev/sr1", nil, nil)
+	m := New("/dev/sr1", nil, nil, nil)
 	if m.device != "/dev/sr1" {
 		t.Errorf("device = %q, want %q", m.device, "/dev/sr1")
 	}
 }
 
 func TestPauseResume(t *testing.T) {
-	m := New("", nil, nil)
+	m := New("", nil, nil, nil)
 	if m.IsPaused() {
 		t.Error("new monitor should not be paused")
 	}

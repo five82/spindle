@@ -15,20 +15,16 @@ import (
 type Event string
 
 const (
-	EventDiscDetected           Event = "disc_detected"
+	EventItemQueued             Event = "item_queued"
 	EventIdentificationComplete Event = "identification_complete"
+	EventRipCacheHit            Event = "rip_cache_hit"
 	EventRipComplete            Event = "rip_complete"
 	EventEncodeComplete         Event = "encode_complete"
-	EventValidationFailed       Event = "validation_failed"
+	EventReviewRequired         Event = "review_required"
 	EventPipelineComplete       Event = "pipeline_complete"
-	EventOrganizeComplete       Event = "organize_complete"
 	EventQueueStarted           Event = "queue_started"
 	EventQueueCompleted         Event = "queue_completed"
 	EventError                  Event = "error"
-	EventRipCacheHit            Event = "rip_cache_hit"
-	EventRipStarted             Event = "rip_started"
-	EventEncodeStarted          Event = "encode_started"
-	EventUnidentifiedMedia      Event = "unidentified_media"
 	EventTest                   Event = "test"
 )
 
@@ -85,13 +81,12 @@ func (n *Notifier) Send(ctx context.Context, event Event, title, message string)
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("notify: status %d", resp.StatusCode)
 	}
-	n.logger.Info("notification sent", "event_type", string(event), "priority", priority(event))
 	return nil
 }
 
 func priority(event Event) string {
 	switch event {
-	case EventValidationFailed, EventError:
+	case EventReviewRequired, EventError:
 		return "high"
 	case EventRipCacheHit, EventTest:
 		return "low"
@@ -102,24 +97,22 @@ func priority(event Event) string {
 
 func tags(event Event) string {
 	switch event {
+	case EventItemQueued, EventQueueStarted, EventQueueCompleted:
+		return "queue"
 	case EventIdentificationComplete:
 		return "identify"
 	case EventRipCacheHit:
 		return "rip,cache"
-	case EventRipStarted, EventRipComplete:
+	case EventRipComplete:
 		return "rip"
-	case EventEncodeStarted, EventEncodeComplete:
+	case EventEncodeComplete:
 		return "encode"
-	case EventValidationFailed:
-		return "validation,warning"
-	case EventOrganizeComplete:
-		return "organize"
-	case EventQueueStarted, EventQueueCompleted:
-		return "queue"
+	case EventReviewRequired:
+		return "review,warning"
+	case EventPipelineComplete:
+		return "complete"
 	case EventError:
 		return "error"
-	case EventUnidentifiedMedia:
-		return "review"
 	case EventTest:
 		return "test"
 	default:

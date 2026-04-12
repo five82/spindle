@@ -38,20 +38,16 @@ func TestPriority(t *testing.T) {
 		event Event
 		want  string
 	}{
-		{EventDiscDetected, "default"},
+		{EventItemQueued, "default"},
 		{EventIdentificationComplete, "default"},
+		{EventRipCacheHit, "low"},
 		{EventRipComplete, "default"},
 		{EventEncodeComplete, "default"},
-		{EventValidationFailed, "high"},
+		{EventReviewRequired, "high"},
 		{EventPipelineComplete, "default"},
-		{EventOrganizeComplete, "default"},
 		{EventQueueStarted, "default"},
 		{EventQueueCompleted, "default"},
 		{EventError, "high"},
-		{EventRipCacheHit, "low"},
-		{EventRipStarted, "default"},
-		{EventEncodeStarted, "default"},
-		{EventUnidentifiedMedia, "default"},
 		{EventTest, "low"},
 	}
 	for _, tt := range tests {
@@ -67,20 +63,16 @@ func TestTags(t *testing.T) {
 		event Event
 		want  string
 	}{
-		{EventDiscDetected, ""},
+		{EventItemQueued, "queue"},
 		{EventIdentificationComplete, "identify"},
+		{EventRipCacheHit, "rip,cache"},
 		{EventRipComplete, "rip"},
 		{EventEncodeComplete, "encode"},
-		{EventValidationFailed, "validation,warning"},
-		{EventPipelineComplete, ""},
-		{EventOrganizeComplete, "organize"},
+		{EventReviewRequired, "review,warning"},
+		{EventPipelineComplete, "complete"},
 		{EventQueueStarted, "queue"},
 		{EventQueueCompleted, "queue"},
 		{EventError, "error"},
-		{EventRipCacheHit, "rip,cache"},
-		{EventRipStarted, "rip"},
-		{EventEncodeStarted, "encode"},
-		{EventUnidentifiedMedia, "review"},
 		{EventTest, "test"},
 	}
 	for _, tt := range tests {
@@ -112,25 +104,25 @@ func TestSendHTTP(t *testing.T) {
 	defer srv.Close()
 
 	n := New(srv.URL, 5, nil)
-	err := n.Send(context.Background(), EventValidationFailed, "Validation Failed", "file.mkv failed checks")
+	err := n.Send(context.Background(), EventReviewRequired, "Review Required", "file.mkv needs review")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if gotTitle != "Validation Failed" {
-		t.Errorf("title = %q, want %q", gotTitle, "Validation Failed")
+	if gotTitle != "Review Required" {
+		t.Errorf("title = %q, want %q", gotTitle, "Review Required")
 	}
 	if gotPriority != "high" {
 		t.Errorf("priority = %q, want %q", gotPriority, "high")
 	}
-	if gotTags != "validation,warning" {
-		t.Errorf("tags = %q, want %q", gotTags, "validation,warning")
+	if gotTags != "review,warning" {
+		t.Errorf("tags = %q, want %q", gotTags, "review,warning")
 	}
 	if gotUserAgent != "Spindle-Go/0.1.0" {
 		t.Errorf("user-agent = %q, want %q", gotUserAgent, "Spindle-Go/0.1.0")
 	}
-	if gotBody != "file.mkv failed checks" {
-		t.Errorf("body = %q, want %q", gotBody, "file.mkv failed checks")
+	if gotBody != "file.mkv needs review" {
+		t.Errorf("body = %q, want %q", gotBody, "file.mkv needs review")
 	}
 }
 
@@ -157,11 +149,11 @@ func TestSendNoTagsHeader(t *testing.T) {
 	defer srv.Close()
 
 	n := New(srv.URL, 5, nil)
-	err := n.Send(context.Background(), EventDiscDetected, "Disc", "detected")
+	err := n.Send(context.Background(), Event("unknown"), "Disc", "detected")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotTagsPresent {
-		t.Error("Tags header should not be set for disc_detected event")
+		t.Error("Tags header should not be set for unknown event")
 	}
 }

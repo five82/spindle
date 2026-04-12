@@ -97,15 +97,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 					"decision_result", "restored",
 					"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
 				)
-				if h.notifier != nil {
-					msg := fmt.Sprintf("%s (%d titles from cache)", item.DiscTitle, meta.TitleCount)
-					msg += "\n" + driveAvailableMsg
-					msg += queue.FormatAlsoProcessing(h.store, item.ID)
-					_ = h.notifier.Send(ctx, notify.EventRipCacheHit,
-						"Rip Cache Hit",
-						msg,
-					)
-				}
+				msg := fmt.Sprintf("%s (%d titles from cache)", item.DisplayTitle(), meta.TitleCount)
+				msg += "\n" + driveAvailableMsg
+				msg += queue.FormatAlsoProcessing(h.store, item.ID)
+				_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipCacheHit,
+					"Rip Cache Hit: "+item.DisplayTitle(),
+					msg,
+					"item_id", item.ID,
+				)
 				// Map cached files to assets via title ID parsing.
 				if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir, cachedTitleFiles); err != nil {
 					return err
@@ -176,15 +175,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 	rippedCount := len(targets)
-
-	if h.notifier != nil && len(targets) > 0 {
-		msg := fmt.Sprintf("Ripping %s (%d titles)", item.DiscTitle, len(targets))
-		msg += queue.FormatAlsoProcessing(h.store, item.ID)
-		_ = h.notifier.Send(ctx, notify.EventRipStarted,
-			"Rip Started",
-			msg,
-		)
-	}
 
 	// Build title-to-episode lookup for active episode tracking.
 	titleEpisodeKey := make(map[int]string, len(env.Episodes))
@@ -341,15 +331,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Notification.
-	if h.notifier != nil {
-		msg := fmt.Sprintf("Ripped %s (%d titles)", item.DiscTitle, rippedCount)
-		msg += "\n" + driveAvailableMsg
-		msg += queue.FormatAlsoProcessing(h.store, item.ID)
-		_ = h.notifier.Send(ctx, notify.EventRipComplete,
-			"Rip Complete",
-			msg,
-		)
-	}
+	msg := fmt.Sprintf("Ripped %s (%d titles)", item.DisplayTitle(), rippedCount)
+	msg += "\n" + driveAvailableMsg
+	msg += queue.FormatAlsoProcessing(h.store, item.ID)
+	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipComplete,
+		"Rip Complete: "+item.DisplayTitle(),
+		msg,
+		"item_id", item.ID,
+	)
 
 	logger.Info("ripping stage completed", "event_type", "stage_complete", "stage", "ripping")
 	return nil

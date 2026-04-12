@@ -395,13 +395,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Send notification.
-	if h.notifier != nil {
-		msg := item.DiscTitle + queue.FormatAlsoProcessing(h.store, item.ID)
-		_ = h.notifier.Send(ctx, notify.EventIdentificationComplete,
-			"Identification Complete",
-			msg,
-		)
-	}
+	msg := item.DisplayTitle() + queue.FormatAlsoProcessing(h.store, item.ID)
+	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventIdentificationComplete,
+		"Identification Complete: "+item.DisplayTitle(),
+		msg,
+		"item_id", item.ID,
+	)
 
 	logger.Info("identification stage completed",
 		"event_type", "stage_complete",

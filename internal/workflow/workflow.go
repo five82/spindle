@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/five82/spindle/internal/logs"
@@ -19,9 +20,9 @@ type Semaphore int
 
 const (
 	SemNone     Semaphore = iota
-	SemDisc                       // guards optical drive
-	SemEncode                     // guards SVT-AV1 encoder
-	SemWhisperX                   // guards WhisperX GPU
+	SemDisc               // guards optical drive
+	SemEncode             // guards SVT-AV1 encoder
+	SemWhisperX           // guards WhisperX GPU
 )
 
 // PipelineStage describes a single stage in the pipeline.
@@ -52,10 +53,12 @@ type StatusObserver interface {
 
 // Manager runs the pipeline poll loop.
 type Manager struct {
-	store    *queue.Store
-	notifier *notify.Notifier
-	pipeline *pipelineState
-	observer StatusObserver
+	store            *queue.Store
+	notifier         *notify.Notifier
+	pipeline         *pipelineState
+	observer         StatusObserver
+	queueNotifyMu    sync.Mutex
+	queueCycleActive bool
 }
 
 // New creates a workflow manager. observer may be nil.
@@ -198,6 +201,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		"decision_reason", fmt.Sprintf("item %d ready for %s", item.ID, ps.Stage),
 		"stage", ps.Stage,
 	)
+	m.maybeStartQueueCycle(ctx, itemLogger)
 
 	start := time.Now()
 	err := ps.Handler.Run(ctx, item)
@@ -258,6 +262,8 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	if m.observer != nil {
 		m.observer.RecordSuccess(item)
 	}
+
+	m.maybeCompleteQueueCycle(ctx, itemLogger)
 }
 
 // handleStageFailure records failure state, notifies, and checks queue completion.
@@ -290,19 +296,14 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 		m.observer.RecordFailure(item, err.Error())
 	}
 
-	if m.notifier != nil {
-		title := fmt.Sprintf("Stage failed: %s", ps.Stage)
-		msg := fmt.Sprintf("Item %d failed at %s: %s", item.ID, ps.Stage, err.Error())
-		if notifyErr := m.notifier.Send(ctx, notify.EventError, title, msg); notifyErr != nil {
-			itemLogger.Error("failure notification failed",
-				"event_type", "notification_failed",
-				"error_hint", "failure notification delivery failed",
-				"error", notifyErr,
-			)
-		}
-	}
+	title := fmt.Sprintf("Failed: %s during %s", item.DisplayTitle(), queue.HumanStage(ps.Stage))
+	msg := fmt.Sprintf("Processing stopped.\nStage: %s\nReason: %s\nItem ID: %d", queue.HumanStage(ps.Stage), err.Error(), item.ID)
+	_ = notify.SendLogged(ctx, m.notifier, itemLogger, notify.EventError, title, msg,
+		"item_id", item.ID,
+		"stage", ps.Stage,
+	)
 
-	m.checkQueueCompletion(ctx)
+	m.maybeCompleteQueueCycle(ctx, itemLogger)
 }
 
 // nextStage returns the stage following current in the pipeline.
@@ -336,33 +337,72 @@ func (m *Manager) releaseSem(sem Semaphore) {
 	<-m.pipeline.sems[sem-1]
 }
 
-// checkQueueCompletion sends a queue_completed notification if no
-// non-terminal items remain.
-func (m *Manager) checkQueueCompletion(ctx context.Context) {
-	if m.notifier == nil {
+// maybeStartQueueCycle sends queue_started once per backlog cycle.
+func (m *Manager) maybeStartQueueCycle(ctx context.Context, logger *slog.Logger) {
+	if m.notifier == nil || m.store == nil {
 		return
 	}
 
-	active, err := m.store.HasActiveItems()
+	activeCount, err := m.store.ActiveItemCount()
 	if err != nil {
-		m.pipeline.logger.Error("check queue completion failed",
+		logger.Error("check queue start failed",
 			"event_type", "queue_check_failed",
-			"error_hint", "failed to check for active items",
+			"error_hint", "failed to count active queue items",
 			"error", err,
 		)
 		return
 	}
-	if active {
+	if activeCount < 2 {
 		return
 	}
 
-	if notifyErr := m.notifier.Send(ctx, notify.EventQueueCompleted, "Queue completed", "All items have finished processing."); notifyErr != nil {
-		m.pipeline.logger.Error("queue completion notification failed",
-			"event_type", "notification_failed",
-			"error_hint", "queue completion notification failed",
-			"error", notifyErr,
-		)
+	m.queueNotifyMu.Lock()
+	if m.queueCycleActive {
+		m.queueNotifyMu.Unlock()
+		return
 	}
+	m.queueCycleActive = true
+	m.queueNotifyMu.Unlock()
+
+	msg := fmt.Sprintf("Queue is active with %d items in progress or waiting.", activeCount)
+	_ = notify.SendLogged(ctx, m.notifier, logger, notify.EventQueueStarted, "Queue started", msg,
+		"active_count", activeCount,
+	)
+}
+
+// maybeCompleteQueueCycle sends queue_completed when a started backlog cycle drains.
+func (m *Manager) maybeCompleteQueueCycle(ctx context.Context, logger *slog.Logger) {
+	if m.notifier == nil || m.store == nil {
+		return
+	}
+
+	activeCount, err := m.store.ActiveItemCount()
+	if err != nil {
+		logger.Error("check queue completion failed",
+			"event_type", "queue_check_failed",
+			"error_hint", "failed to count active queue items",
+			"error", err,
+		)
+		return
+	}
+	if activeCount > 0 {
+		return
+	}
+
+	m.queueNotifyMu.Lock()
+	if !m.queueCycleActive {
+		m.queueNotifyMu.Unlock()
+		logger.Info("queue completion notification suppressed",
+			"event_type", "notification_suppressed",
+			"notification_event", string(notify.EventQueueCompleted),
+			"decision_reason", "no queue_started notification was sent for this cycle",
+		)
+		return
+	}
+	m.queueCycleActive = false
+	m.queueNotifyMu.Unlock()
+
+	_ = notify.SendLogged(ctx, m.notifier, logger, notify.EventQueueCompleted, "Queue completed", "All queued items finished processing.")
 }
 
 // sleep waits for the given duration or until ctx is cancelled.

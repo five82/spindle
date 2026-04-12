@@ -85,15 +85,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"decision_reason", fmt.Sprintf("media_type=%s", env.Metadata.MediaType),
 	)
 
-	if h.notifier != nil {
-		msg := fmt.Sprintf("Encoding %s (%d files)", item.DiscTitle, len(jobs))
-		msg += queue.FormatAlsoProcessing(h.store, item.ID)
-		_ = h.notifier.Send(ctx, notify.EventEncodeStarted,
-			"Encode Started",
-			msg,
-		)
-	}
-
 	// Reload encoding config from disk (changes take effect without restart).
 	encCfg, reloadErr := config.ReloadEncoding(h.cfg)
 	if reloadErr != nil {
@@ -321,22 +312,22 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Notification.
-	if h.notifier != nil {
-		snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
-		msg := fmt.Sprintf("Encoded %s (%d files", item.DiscTitle, len(jobs))
-		if snap.Resolution != "" {
-			msg += ", " + snap.Resolution
-		}
-		if totalOriginalSize > 0 {
-			reduction := (1 - float64(totalEncodedSize)/float64(totalOriginalSize)) * 100
-			msg += fmt.Sprintf(", %.1f%% smaller", reduction)
-		}
-		msg += ")"
-		msg += queue.FormatAlsoProcessing(h.store, item.ID)
-		_ = h.notifier.Send(ctx, notify.EventEncodeComplete,
-			"Encode Complete", msg,
-		)
+	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	msg := fmt.Sprintf("Encoded %s (%d files", item.DisplayTitle(), len(jobs))
+	if snap.Resolution != "" {
+		msg += ", " + snap.Resolution
 	}
+	if totalOriginalSize > 0 {
+		reduction := (1 - float64(totalEncodedSize)/float64(totalOriginalSize)) * 100
+		msg += fmt.Sprintf(", %.1f%% smaller", reduction)
+	}
+	msg += ")"
+	msg += queue.FormatAlsoProcessing(h.store, item.ID)
+	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventEncodeComplete,
+		"Encode Complete: "+item.DisplayTitle(),
+		msg,
+		"item_id", item.ID,
+	)
 
 	logger.Info("encoding stage completed", "event_type", "stage_complete", "stage", "encoding")
 	return nil

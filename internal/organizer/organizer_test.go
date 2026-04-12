@@ -1,12 +1,18 @@
 package organizer
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/five82/spindle/internal/fileutil"
+	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
@@ -222,5 +228,67 @@ func TestMoveOrCopyWithProgressRenamesOnSameDevice(t *testing.T) {
 	}
 	if last.BytesCopied != int64(len(data)) || last.TotalBytes != int64(len(data)) {
 		t.Fatalf("progress = %+v, want copied=total=%d", last, len(data))
+	}
+}
+
+func TestSendTerminalNotificationCleanSuccess(t *testing.T) {
+	var gotTitle, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTitle = r.Header.Get("Title")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := &Handler{store: store, notifier: notify.New(srv.URL, 5, logger)}
+	item := &queue.Item{ID: 1, DiscTitle: "Avatar (2009)"}
+
+	h.sendTerminalNotification(context.Background(), logger, item, 1, 0)
+
+	if gotTitle != "Completed: Avatar (2009)" {
+		t.Fatalf("title = %q, want %q", gotTitle, "Completed: Avatar (2009)")
+	}
+	if gotBody != "Imported to library." {
+		t.Fatalf("body = %q, want %q", gotBody, "Imported to library.")
+	}
+}
+
+func TestSendTerminalNotificationReviewRequired(t *testing.T) {
+	var gotTitle, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTitle = r.Header.Get("Title")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := &Handler{store: store, notifier: notify.New(srv.URL, 5, logger)}
+	item := &queue.Item{ID: 2, DiscTitle: "Unknown Disc"}
+	item.AppendReviewReason("low-confidence identification")
+
+	h.sendTerminalNotification(context.Background(), logger, item, 0, 1)
+
+	if gotTitle != "Review required: Unknown Disc" {
+		t.Fatalf("title = %q, want %q", gotTitle, "Review required: Unknown Disc")
+	}
+	want := "Completed with issues. Output routed to review (1 item(s)).\nReason: low-confidence identification"
+	if gotBody != want {
+		t.Fatalf("body = %q, want %q", gotBody, want)
 	}
 }

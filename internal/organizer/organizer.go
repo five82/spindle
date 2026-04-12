@@ -54,6 +54,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
 	)
 
+	libraryCount := 0
+	reviewCount := 0
+
 	if item.NeedsReview == 1 {
 		if env.Metadata.MediaType != "tv" || !ripspec.HasResolvedEpisodes(env.Episodes) {
 			logger.Info("item routed to review",
@@ -61,7 +64,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_result", "review",
 				"decision_reason", "needs_review flag set with no clean resolved tv episodes",
 			)
-			return h.routeToReview(ctx, logger, item, &env, &meta, sourceStage, keys)
+			if err := h.routeToReview(ctx, logger, item, &env, &meta, sourceStage, keys); err != nil {
+				return err
+			}
+			reviewCount = len(keys)
+			h.sendTerminalNotification(ctx, logger, item, libraryCount, reviewCount)
+			logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
+			return nil
 		}
 
 		libraryKeys, reviewKeys := partitionTVOrganizationKeys(&env)
@@ -71,7 +80,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_result", "review",
 				"decision_reason", "all resolved episodes flagged for review",
 			)
-			return h.routeToReview(ctx, logger, item, &env, &meta, sourceStage, reviewKeys)
+			if err := h.routeToReview(ctx, logger, item, &env, &meta, sourceStage, reviewKeys); err != nil {
+				return err
+			}
+			reviewCount = len(reviewKeys)
+			h.sendTerminalNotification(ctx, logger, item, libraryCount, reviewCount)
+			logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
+			return nil
 		}
 		logger.Info("item partially organized",
 			"decision_type", logs.DecisionOrganizeRoute,
@@ -101,8 +116,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
 		}
+		libraryCount = len(libraryKeys)
+		reviewCount = len(reviewKeys)
 		item.ProgressPercent = 100
-		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d to review)", len(libraryKeys), len(reviewKeys))
+		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d to review)", libraryCount, reviewCount)
 		_ = h.store.UpdateProgress(item)
 	} else {
 		libraryPath, err := meta.GetLibraryPath(
@@ -116,8 +133,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		if err := os.MkdirAll(libraryPath, 0o755); err != nil {
 			return fmt.Errorf("create library dir: %w", err)
 		}
-		if _, _, err := h.copyAssetsToDir(ctx, logger, item, &env, &meta, sourceStage, libraryPath, keys, "library"); err != nil {
+		if _, copied, err := h.copyAssetsToDir(ctx, logger, item, &env, &meta, sourceStage, libraryPath, keys, "library"); err != nil {
 			return err
+		} else {
+			libraryCount = copied
 		}
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 			return err
@@ -136,19 +155,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Notification.
-	if h.notifier != nil {
-		msg := fmt.Sprintf("Organized %s to library", item.DiscTitle)
-		if item.NeedsReview == 1 && env.Metadata.MediaType == "tv" {
-			msg = fmt.Sprintf("Organized clean episodes for %s; some episodes routed to review", item.DiscTitle)
-		}
-		msg += queue.FormatAlsoProcessing(h.store, item.ID)
-		_ = h.notifier.Send(ctx, notify.EventOrganizeComplete,
-			"Organization Complete",
-			msg,
-		)
-	}
-
+	h.sendTerminalNotification(ctx, logger, item, libraryCount, reviewCount)
 	h.cleanupStaging(ctx, item)
 
 	logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
@@ -441,6 +448,44 @@ func (h *Handler) cleanupStaging(ctx context.Context, item *queue.Item) {
 	logger.Info("cleaned staging directory",
 		"event_type", "staging_cleanup",
 		"staging_root", root,
+	)
+}
+
+func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Logger, item *queue.Item, libraryCount, reviewCount int) {
+	alsoProcessing := queue.FormatAlsoProcessing(h.store, item.ID)
+
+	if reviewCount > 0 || item.NeedsReview == 1 {
+		title := "Review required: " + item.DisplayTitle()
+		var msg string
+		switch {
+		case libraryCount > 0 && reviewCount > 0:
+			msg = fmt.Sprintf("Completed with issues. %d items imported to the library, %d sent to review.", libraryCount, reviewCount)
+		case reviewCount > 0:
+			msg = fmt.Sprintf("Completed with issues. Output routed to review (%d item(s)).", reviewCount)
+		default:
+			msg = "Completed with issues. Review is required before library import."
+		}
+		if reason := item.ReviewSummary(2); reason != "" {
+			msg += "\nReason: " + reason
+		}
+		msg += alsoProcessing
+		_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventReviewRequired, title, msg,
+			"item_id", item.ID,
+			"library_count", libraryCount,
+			"review_count", reviewCount,
+		)
+		return
+	}
+
+	title := "Completed: " + item.DisplayTitle()
+	msg := "Imported to library."
+	if libraryCount > 1 {
+		msg = fmt.Sprintf("Imported %d items to the library.", libraryCount)
+	}
+	msg += alsoProcessing
+	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventPipelineComplete, title, msg,
+		"item_id", item.ID,
+		"library_count", libraryCount,
 	)
 }
 

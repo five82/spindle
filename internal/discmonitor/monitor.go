@@ -15,6 +15,7 @@ import (
 
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 )
 
@@ -55,6 +56,7 @@ type DiscEvent struct {
 type Monitor struct {
 	device     string
 	logger     *slog.Logger
+	notifier   *notify.Notifier
 	paused     atomic.Bool
 	mu         sync.Mutex
 	processing bool
@@ -62,15 +64,16 @@ type Monitor struct {
 }
 
 // New creates a disc monitor for the given device.
-func New(device string, store *queue.Store, logger *slog.Logger) *Monitor {
+func New(device string, store *queue.Store, notifier *notify.Notifier, logger *slog.Logger) *Monitor {
 	if device == "" {
 		device = "/dev/sr0"
 	}
 	logger = logs.Default(logger)
 	return &Monitor{
-		device: device,
-		logger: logger,
-		store:  store,
+		device:   device,
+		logger:   logger,
+		notifier: notifier,
+		store:    store,
 	}
 }
 
@@ -292,6 +295,13 @@ func (m *Monitor) enqueuePipeline(ctx context.Context, event *DiscEvent) (*Enque
 		"item_id", item.ID,
 		"disc_title", title,
 		"fingerprint", fp,
+	)
+
+	msg := fmt.Sprintf("Accepted for processing from %s media.", event.DiscType)
+	_ = notify.SendLogged(ctx, m.notifier, m.logger, notify.EventItemQueued,
+		"Queued: "+item.DisplayTitle(),
+		msg,
+		"item_id", item.ID,
 	)
 
 	return &EnqueueResult{Item: item, Event: event}, nil

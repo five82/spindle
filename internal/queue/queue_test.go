@@ -681,3 +681,54 @@ func TestPersistRipSpec(t *testing.T) {
 		t.Errorf("rip_spec_data = %q, want %q", got.RipSpecData, `{"tracks":[1,2]}`)
 	}
 }
+
+func TestDisplayTitleUsesDiscTitleFirst(t *testing.T) {
+	item := &Item{DiscTitle: "Avatar (2009)", ID: 7}
+	if got := item.DisplayTitle(); got != "Avatar (2009)" {
+		t.Fatalf("DisplayTitle() = %q, want %q", got, "Avatar (2009)")
+	}
+}
+
+func TestReviewSummaryCapsReasons(t *testing.T) {
+	item := &Item{}
+	item.AppendReviewReason("low confidence identification")
+	item.AppendReviewReason("subtitle validation")
+	item.AppendReviewReason("missing metadata")
+
+	if got := item.ReviewSummary(2); got != "low confidence identification; subtitle validation; +1 more" {
+		t.Fatalf("ReviewSummary() = %q", got)
+	}
+}
+
+func TestHumanStage(t *testing.T) {
+	if got := HumanStage(StageEpisodeIdentification); got != "episode ID" {
+		t.Fatalf("HumanStage() = %q, want %q", got, "episode ID")
+	}
+}
+
+func TestFormatAlsoProcessingHumanizesAndCaps(t *testing.T) {
+	store := openTestStore(t)
+	item1, _ := store.NewDisc("Avatar (2009)", "fp1")
+	item2, _ := store.NewDisc("Breaking Bad Season 01", "fp2")
+	item3, _ := store.NewDisc("Fringe Season 01", "fp3")
+	item4, _ := store.NewDisc("The Matrix (1999)", "fp4")
+
+	item1.InProgress = 1
+	item1.Stage = StageRipping
+	_ = store.Update(item1)
+	item2.InProgress = 1
+	item2.Stage = StageEncoding
+	_ = store.Update(item2)
+	item3.InProgress = 1
+	item3.Stage = StageSubtitling
+	_ = store.Update(item3)
+	item4.InProgress = 1
+	item4.Stage = StageAudioAnalysis
+	_ = store.Update(item4)
+
+	got := FormatAlsoProcessing(store, item1.ID)
+	want := "\nAlso processing: Breaking Bad Season 01 (encoding), Fringe Season 01 (subtitles), +1 more"
+	if got != want {
+		t.Fatalf("FormatAlsoProcessing() = %q, want %q", got, want)
+	}
+}

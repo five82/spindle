@@ -18,15 +18,17 @@ func FormatAlsoProcessing(store *Store, excludeID int64) string {
 		if it.ID == excludeID {
 			continue
 		}
-		title := it.DiscTitle
-		if title == "" {
-			title = fmt.Sprintf("Item %d", it.ID)
-		}
-		others = append(others, fmt.Sprintf("%s (%s)", title, it.Stage))
+		others = append(others, fmt.Sprintf("%s (%s)", it.DisplayTitle(), HumanStage(it.Stage)))
 	}
 
 	if len(others) == 0 {
 		return ""
+	}
+
+	const maxVisible = 2
+	if len(others) > maxVisible {
+		remaining := len(others) - maxVisible
+		others = append(others[:maxVisible], fmt.Sprintf("+%d more", remaining))
 	}
 
 	return "\nAlso processing: " + strings.Join(others, ", ")

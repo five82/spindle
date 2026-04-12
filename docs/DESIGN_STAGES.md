@@ -1003,7 +1003,9 @@ movie requiring review):
   suffix.
 - **TV review filenames** retain episode identity (for example `Show - S01E03.mkv`)
   so manual correction is straightforward.
-- Notify via `EventUnidentifiedMedia`.
+- Emit terminal `review_required` notification. Validation and review reasons
+  are aggregated into that final problem outcome instead of sending per-issue
+  notifications.
 
 **Library unavailable**: Terminal condition. Routes to review with specific
 reason. Stops processing remaining episodes.

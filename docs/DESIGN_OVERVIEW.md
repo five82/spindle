@@ -480,10 +480,12 @@ On config load, `EnsureDirectories` creates:
 | `ntfy_topic`          | string | (empty) | ntfy topic URL (empty disables all notifications) |
 | `request_timeout`     | int    | 10      | HTTP timeout in seconds                     |
 
-All notification types (identification, rip, encoding, validation, organization,
-queue, review, errors) are always sent when `ntfy_topic` is set. Rip
-notifications are suppressed for cache hits under 120 seconds. Queue
-start/finish notifications require at least 2 items.
+When `ntfy_topic` is set, Spindle sends a compact set of milestone and outcome
+notifications: item queued, identification complete, rip cache hit, rip
+complete, encode complete, final clean success, final review-required outcome,
+queue backlog start/finish, fatal errors, and test sends. Queue start/finish
+notifications are backlog-cycle events: they only fire for meaningful queue
+activity and are sent as a matched pair.
 
 #### `[subtitles]`
 
