@@ -1,7 +1,6 @@
 package subtitle
 
 import (
-	"os"
 	"strings"
 
 	"github.com/five82/spindle/internal/srtutil"
@@ -20,14 +19,16 @@ const (
 // issue strings (empty means passed). Issues flag for review but do not fail
 // the stage.
 func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) {
-	content, err := os.ReadFile(srtPath)
+	cues, err := srtutil.ParseFile(srtPath)
 	if err != nil {
 		return nil, err
 	}
+	return validateCues(cues, videoSeconds), nil
+}
 
-	cues := srtutil.Parse(string(content))
+func validateCues(cues []srtutil.Cue, videoSeconds float64) []string {
 	if len(cues) == 0 {
-		return []string{"empty_subtitle_file"}, nil
+		return []string{"empty_subtitle_file"}
 	}
 
 	seen := make(map[string]bool)
@@ -85,7 +86,7 @@ func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) 
 		}
 	}
 
-	return issues, nil
+	return issues
 }
 
 func splitCueLines(text string) []string {

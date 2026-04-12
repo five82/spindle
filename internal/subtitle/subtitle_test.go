@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/transcription"
 )
 
 func TestOverallSubtitlePercent(t *testing.T) {
@@ -31,16 +32,16 @@ func TestOverallSubtitlePercent(t *testing.T) {
 }
 
 func TestSubtitlePhasePercent(t *testing.T) {
-	if got := subtitlePhasePercent("extract", 0); got != 10 {
+	if got := subtitlePhasePercent(transcription.PhaseExtract, 0); got != 10 {
 		t.Fatalf("extract start = %f, want 10", got)
 	}
-	if got := subtitlePhasePercent("extract", time.Second); got != 25 {
+	if got := subtitlePhasePercent(transcription.PhaseExtract, time.Second); got != 25 {
 		t.Fatalf("extract done = %f, want 25", got)
 	}
-	if got := subtitlePhasePercent("transcribe", 0); got != 35 {
+	if got := subtitlePhasePercent(transcription.PhaseTranscribe, 0); got != 35 {
 		t.Fatalf("transcribe start = %f, want 35", got)
 	}
-	if got := subtitlePhasePercent("transcribe", time.Second); got != 90 {
+	if got := subtitlePhasePercent(transcription.PhaseTranscribe, time.Second); got != 90 {
 		t.Fatalf("transcribe done = %f, want 90", got)
 	}
 }

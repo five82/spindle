@@ -272,15 +272,15 @@ func newGensubtitleCmd() *cobra.Command {
 			// Progress callback for phase output. Keep each progress event on its
 			// own line so structured logs emitted by dependencies do not visually
 			// collide with inline CLI status text.
-			progress := func(phase string, elapsed time.Duration) {
+			progress := func(phase transcription.Phase, elapsed time.Duration) {
 				switch {
-				case phase == "extract" && elapsed == 0:
+				case phase == transcription.PhaseExtract && elapsed == 0:
 					fmt.Println("  Extracting audio...")
-				case phase == "extract" && elapsed > 0:
+				case phase == transcription.PhaseExtract && elapsed > 0:
 					fmt.Printf("  Extracting audio %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
-				case phase == "transcribe" && elapsed == 0:
+				case phase == transcription.PhaseTranscribe && elapsed == 0:
 					fmt.Println("  Running WhisperX...")
-				case phase == "transcribe" && elapsed > 0:
+				case phase == transcription.PhaseTranscribe && elapsed > 0:
 					fmt.Printf("  Running WhisperX %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
 				}
 			}

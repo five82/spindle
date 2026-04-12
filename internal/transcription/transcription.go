@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/srtutil"
 )
@@ -57,10 +58,18 @@ type TranscribeRequest struct {
 	ContentKey string // Content-stable cache identity
 }
 
+// Phase identifies a transcription progress phase.
+type Phase string
+
+const (
+	PhaseExtract    Phase = "extract"
+	PhaseTranscribe Phase = "transcribe"
+)
+
 // ProgressFunc is called at phase boundaries during transcription.
-// phase is "extract" or "transcribe". elapsed is zero at phase start
+// phase is the current transcription phase. elapsed is zero at phase start
 // and non-zero at phase end.
-type ProgressFunc func(phase string, elapsed time.Duration)
+type ProgressFunc func(phase Phase, elapsed time.Duration)
 
 // TranscribeResult contains canonical transcription output.
 type TranscribeResult struct {
@@ -121,7 +130,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 
 	// Extract audio via FFmpeg.
 	if onProgress != nil {
-		onProgress("extract", 0)
+		onProgress(PhaseExtract, 0)
 	}
 	wavPath := filepath.Join(req.OutputDir, "audio.wav")
 	ffmpegArgs := []string{
@@ -147,12 +156,12 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	}
 	extractTime := time.Since(extractStart)
 	if onProgress != nil {
-		onProgress("extract", extractTime)
+		onProgress(PhaseExtract, extractTime)
 	}
 
 	// Run WhisperX via uvx.
 	if onProgress != nil {
-		onProgress("transcribe", 0)
+		onProgress(PhaseTranscribe, 0)
 	}
 	whisperArgs := []string{
 		"whisperx", wavPath,
@@ -183,7 +192,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	}
 	transcribeTime := time.Since(transcribeStart)
 	if onProgress != nil {
-		onProgress("transcribe", transcribeTime)
+		onProgress(PhaseTranscribe, transcribeTime)
 	}
 
 	// Find canonical WhisperX outputs. WhisperX names them after the input wav.
@@ -298,13 +307,9 @@ func copyCacheArtifact(srcPath, dir, kind string) error {
 	if strings.TrimSpace(srcPath) == "" {
 		return fmt.Errorf("missing %s artifact path", kind)
 	}
-	src, err := os.ReadFile(srcPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", kind, err)
-	}
 	dst := filepath.Join(dir, filepath.Base(srcPath))
-	if err := os.WriteFile(dst, src, 0o644); err != nil {
-		return fmt.Errorf("write cached %s: %w", kind, err)
+	if err := fileutil.CopyFile(srcPath, dst); err != nil {
+		return fmt.Errorf("cache %s artifact: %w", kind, err)
 	}
 	return nil
 }
@@ -312,39 +317,14 @@ func copyCacheArtifact(srcPath, dir, kind string) error {
 // analyzeSRT reads an SRT file once and returns both the segment count and
 // the duration (end timestamp of the last cue, in seconds).
 func analyzeSRT(path string) (segments int, duration float64, err error) {
-	data, err := os.ReadFile(path)
+	cues, err := srtutil.ParseFile(path)
 	if err != nil {
 		return 0, 0, err
 	}
-
-	content := strings.TrimSpace(string(data))
-	if content == "" {
+	if len(cues) == 0 {
 		return 0, 0, nil
 	}
-
-	blocks := strings.Split(content, "\n\n")
-	for _, block := range blocks {
-		block = strings.TrimSpace(block)
-		if block == "" {
-			continue
-		}
-		lines := strings.SplitN(block, "\n", 3)
-		// A cue block starts with a sequence number.
-		if _, atoiErr := strconv.Atoi(strings.TrimSpace(lines[0])); atoiErr != nil {
-			continue
-		}
-		segments++
-		// Parse end timestamp from the timing line.
-		if len(lines) >= 2 {
-			if idx := strings.Index(lines[1], "-->"); idx >= 0 {
-				endPart := strings.TrimSpace(lines[1][idx+3:])
-				if secs := srtutil.ParseTimestamp(endPart); secs > 0 {
-					duration = secs
-				}
-			}
-		}
-	}
-	return segments, duration, nil
+	return len(cues), cues[len(cues)-1].End, nil
 }
 
 // Config returns the service's WhisperX configuration for display purposes.

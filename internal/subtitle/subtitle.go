@@ -127,14 +127,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Language:   selectedAudio.Language,
 			OutputDir:  workDir,
 			ContentKey: contentKey,
-		}, func(phase string, elapsed time.Duration) {
+		}, func(phase transcription.Phase, elapsed time.Duration) {
 			item.ProgressPercent = overallSubtitlePercent(i, len(keys), subtitlePhasePercent(phase, elapsed))
 			switch phase {
-			case "extract":
+			case transcription.PhaseExtract:
 				if elapsed == 0 {
 					item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Extracting audio (%s)", i+1, len(keys), key)
 				}
-			case "transcribe":
+			case transcription.PhaseTranscribe:
 				if elapsed == 0 {
 					item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Transcribing audio (%s)", i+1, len(keys), key)
 				}
@@ -178,27 +178,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"episode_key", key,
 		)
 
-		formattedData, readErr := os.ReadFile(formatting.DisplayPath)
+		formattedCues, readErr := srtutil.ParseFile(formatting.DisplayPath)
 		if readErr != nil {
 			failedCount++
 			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("read formatted subtitle: %v", readErr))
 			continue
 		}
-		formattedCues := srtutil.Parse(string(formattedData))
 		if len(formattedCues) == 0 {
 			failedCount++
 			h.recordSubtitleFailure(ctx, logger, item, &env, key, "formatted subtitle produced zero cues")
 			continue
 		}
 
-		validationIssues, valErr := ValidateSRTContent(formatting.DisplayPath, result.Duration)
-		if valErr != nil {
-			logger.Warn("SRT validation failed",
-				"event_type", "srt_validation_error",
-				"error_hint", valErr.Error(),
-				"impact", "validation skipped",
-			)
-		}
+		validationIssues := validateCues(formattedCues, result.Duration)
 		for _, issue := range validationIssues {
 			logger.Info("SRT validation issue",
 				"decision_type", logs.DecisionSRTValidation,
@@ -317,15 +309,14 @@ func overallSubtitlePercent(completedItems, totalItems int, currentItemPercent f
 	return progress / float64(totalItems) * 100
 }
 
-func subtitlePhasePercent(phase string, elapsed time.Duration) float64 {
-	phase = strings.ToLower(strings.TrimSpace(phase))
+func subtitlePhasePercent(phase transcription.Phase, elapsed time.Duration) float64 {
 	switch phase {
-	case "extract":
+	case transcription.PhaseExtract:
 		if elapsed > 0 {
 			return 25
 		}
 		return 10
-	case "transcribe":
+	case transcription.PhaseTranscribe:
 		if elapsed > 0 {
 			return 90
 		}
