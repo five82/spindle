@@ -57,6 +57,7 @@ const (
 	DecisionSRTValidation            = "srt_validation"
 	DecisionStageExecution           = "stage_execution"
 	DecisionStagingCleanup           = "staging_cleanup"
+	DecisionSubtitleFormatting       = "subtitle_formatting"
 	DecisionSubtitleMux              = "subtitle_mux"
 	DecisionSubtitleRank             = "subtitle_rank"
 	DecisionSubtitleResume           = "subtitle_resume"

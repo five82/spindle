@@ -1,6 +1,7 @@
 // Package subtitle implements the subtitle generation stage (Layer 4).
 //
-// Subtitle generation: WhisperX transcription, SRT validation, forced subtitle
+// Subtitle generation: canonical WhisperX transcription reuse, hallucination
+// filtering, Stable-TS display formatting, SRT validation, forced subtitle
 // ranking from OpenSubtitles, MKV muxing, and resume support.
 package subtitle
 
@@ -68,14 +69,18 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	keys := env.AssetKeys()
-	var records []ripspec.SubtitleGenRecord
+	var (
+		records     []ripspec.SubtitleGenRecord
+		attempted   int
+		succeeded   int
+		failedCount int
+	)
 
 	for i, key := range keys {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		// Resume support: skip already-completed subtitled assets.
 		if existing, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, key); ok && existing.IsCompleted() {
 			logger.Info("subtitle already completed, skipping",
 				"decision_type", logs.DecisionSubtitleResume,
@@ -90,6 +95,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		if !ok || !asset.IsCompleted() {
 			continue
 		}
+		attempted++
 
 		logger.Info("encoded asset selected for transcription",
 			"decision_type", logs.DecisionTranscriptionAsset,
@@ -106,18 +112,20 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		item.ProgressPercent = overallSubtitlePercent(i, len(keys), 0)
 		_ = h.store.UpdateProgress(item)
 
-		// Transcribe.
 		selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
 		if err != nil {
-			return fmt.Errorf("select audio %s: %w", key, err)
+			failedCount++
+			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("select audio: %v", err))
+			continue
 		}
+
 		contentKey := fmt.Sprintf("%s:%s:%d", item.DiscFingerprint, key, selectedAudio.Index)
-		outputDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
+		workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 			InputPath:  asset.Path,
 			AudioIndex: selectedAudio.Index,
 			Language:   selectedAudio.Language,
-			OutputDir:  outputDir,
+			OutputDir:  workDir,
 			ContentKey: contentKey,
 		}, func(phase string, elapsed time.Duration) {
 			item.ProgressPercent = overallSubtitlePercent(i, len(keys), subtitlePhasePercent(phase, elapsed))
@@ -134,7 +142,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			_ = h.store.UpdateProgress(item)
 		})
 		if err != nil {
-			return fmt.Errorf("transcribe %s: %w", key, err)
+			failedCount++
+			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("transcribe: %v", err))
+			continue
 		}
 
 		logger.Info("transcription complete",
@@ -147,30 +157,41 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
 		)
 
-		// Hallucination filtering.
-		srtContent, readErr := os.ReadFile(result.SRTPath)
-		if readErr != nil {
-			return fmt.Errorf("read SRT %s: %w", key, readErr)
+		displayPath := displaySubtitlePath(asset.Path, selectedAudio.Language)
+		formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: result.JSONPath}, workDir, displayPath, result.Duration, selectedAudio.Language)
+		if err != nil {
+			failedCount++
+			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("format subtitle: %v", err))
+			continue
 		}
-		videoDuration := result.Duration
-		filtered, filterErr := filterWhisperXOutput(string(srtContent), videoDuration)
-		if filterErr != nil {
-			return fmt.Errorf("hallucination filter %s: %w", key, filterErr)
-		}
-		if writeErr := os.WriteFile(result.SRTPath, []byte(filtered), 0o644); writeErr != nil {
-			return fmt.Errorf("write filtered SRT %s: %w", key, writeErr)
-		}
-
-		filteredCues := srtutil.Parse(filtered)
+		logger.Info("subtitle formatting complete",
+			"decision_type", logs.DecisionSubtitleFormatting,
+			"decision_result", formatting.FormatterDecision,
+			"decision_reason", fmt.Sprintf("original_segments=%d filtered_segments=%d", formatting.OriginalSegments, formatting.FilteredSegments),
+			"episode_key", key,
+			"subtitle_file", formatting.DisplayPath,
+		)
 		logger.Info("hallucination filter applied",
 			"decision_type", logs.DecisionHallucinationFilter,
 			"decision_result", "filtered",
-			"decision_reason", fmt.Sprintf("original=%d filtered=%d cues", result.Segments, len(filteredCues)),
+			"decision_reason", fmt.Sprintf("original=%d filtered=%d segments", formatting.OriginalSegments, formatting.FilteredSegments),
 			"episode_key", key,
 		)
 
-		// SRT validation.
-		validationIssues, valErr := ValidateSRTContent(result.SRTPath, videoDuration)
+		formattedData, readErr := os.ReadFile(formatting.DisplayPath)
+		if readErr != nil {
+			failedCount++
+			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("read formatted subtitle: %v", readErr))
+			continue
+		}
+		formattedCues := srtutil.Parse(string(formattedData))
+		if len(formattedCues) == 0 {
+			failedCount++
+			h.recordSubtitleFailure(ctx, logger, item, &env, key, "formatted subtitle produced zero cues")
+			continue
+		}
+
+		validationIssues, valErr := ValidateSRTContent(formatting.DisplayPath, result.Duration)
 		if valErr != nil {
 			logger.Warn("SRT validation failed",
 				"event_type", "srt_validation_error",
@@ -195,14 +216,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			EpisodeKey:       key,
 			Source:           "whisperx",
 			Cached:           result.Cached,
-			SubtitlePath:     result.SRTPath,
-			Segments:         len(filteredCues),
+			SubtitlePath:     formatting.DisplayPath,
+			Segments:         len(formattedCues),
 			DurationSec:      result.Duration,
 			Language:         selectedAudio.Language,
 			ValidationIssues: validationIssues,
 		}
 
-		// Try forced subtitles from OpenSubtitles (if enabled and disc has forced sub track).
 		if h.osClient != nil && h.cfg.Subtitles.OpenSubtitlesEnabled && env.Attributes.HasForcedSubtitleTrack {
 			h.tryForcedSubs(ctx, logger, &env, key, asset.Path, &record)
 		} else {
@@ -225,9 +245,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		records = append(records, record)
 
-		// Mux into MKV if configured.
-		srtPath := result.SRTPath
-		subtitledPath := asset.Path // default: same file
+		srtPath := formatting.DisplayPath
+		subtitledPath := asset.Path
+		subtitlesMuxed := false
 		if !h.cfg.Subtitles.MuxIntoMKV {
 			logger.Info("subtitle mux skipped",
 				"decision_type", logs.DecisionSubtitleMux,
@@ -244,16 +264,17 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				)
 			} else {
 				subtitledPath = muxedPath
+				subtitlesMuxed = true
 			}
 		}
 
-		// Record subtitled asset.
 		env.Assets.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
 			EpisodeKey:     key,
 			Path:           subtitledPath,
 			Status:         ripspec.AssetStatusCompleted,
-			SubtitlesMuxed: h.cfg.Subtitles.MuxIntoMKV,
+			SubtitlesMuxed: subtitlesMuxed,
 		})
+		succeeded++
 		item.ProgressPercent = overallSubtitlePercent(i+1, len(keys), 0)
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generated subtitles (%s)", i+1, len(keys), key)
 		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
@@ -261,12 +282,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	// Store subtitle generation results.
 	env.Attributes.SubtitleGenerationResults = records
-
-	// Persist.
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 		return err
+	}
+	if attempted > 0 && succeeded == 0 && failedCount > 0 {
+		return fmt.Errorf("all %d subtitle job(s) failed", attempted)
 	}
 
 	logger.Info("subtitle stage completed", "event_type", "stage_complete", "stage", "subtitling")
@@ -314,6 +335,37 @@ func subtitlePhasePercent(phase string, elapsed time.Duration) float64 {
 	}
 }
 
+func (h *Handler) recordSubtitleFailure(
+	ctx context.Context,
+	logger *slog.Logger,
+	item *queue.Item,
+	env *ripspec.Envelope,
+	key string,
+	errMsg string,
+) {
+	errMsg = strings.TrimSpace(errMsg)
+	if errMsg == "" {
+		errMsg = "subtitle generation failed"
+	}
+	logger.Error("subtitle generation failed for episode",
+		"event_type", "episode_subtitle_failed",
+		"episode_key", key,
+		"error_hint", errMsg,
+		"error", errMsg,
+		"impact", "subtitle missing for this episode; continuing with others",
+	)
+	env.Assets.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
+		EpisodeKey: key,
+		Status:     ripspec.AssetStatusFailed,
+		ErrorMsg:   errMsg,
+	})
+	if ep := env.EpisodeByKey(key); ep != nil {
+		ep.AppendReviewReason("Subtitle generation failed: " + errMsg)
+	}
+	item.AppendReviewReason("subtitle_failure: " + errMsg + " (" + key + ")")
+	_ = queue.PersistRipSpec(ctx, h.store, item, env)
+}
+
 // tryForcedSubs searches OpenSubtitles for forced subtitle tracks and
 // downloads the best match if found. The record's OpenSubtitlesDecision
 // field is updated with the outcome.
@@ -322,7 +374,7 @@ func (h *Handler) tryForcedSubs(
 	logger *slog.Logger,
 	env *ripspec.Envelope,
 	key string,
-	_ string, // videoPath reserved for future hash-based lookup
+	videoPath string,
 	record *ripspec.SubtitleGenRecord,
 ) {
 	tmdbID := env.Metadata.ID
@@ -421,8 +473,7 @@ func (h *Handler) tryForcedSubs(
 	}
 
 	fileID := best.Attributes.Files[0].FileID
-	destDir := filepath.Dir(record.SubtitlePath)
-	destPath := filepath.Join(destDir, fmt.Sprintf("%s.forced.srt", key))
+	destPath := displayForcedSubtitlePath(videoPath, record.Language)
 
 	if err := h.osClient.DownloadToFile(ctx, fileID, destPath); err != nil {
 		logger.Warn("forced subtitle download failed",

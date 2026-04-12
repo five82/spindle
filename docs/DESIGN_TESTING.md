@@ -62,7 +62,7 @@ REST API clients defined at the consumer site:
 | Interface | Double Type | Key Behavior |
 |-----------|-------------|--------------|
 | `queue.Store` | In-memory fake | SQLite in `:memory:` mode |
-| `transcription.Service` | Stub | Return canned SRT content |
+| `transcription.Service` | Stub | Return canned canonical WhisperX artifacts (SRT + JSON) |
 | `makemkv.Runner` | Stub | Return canned robot output |
 | `tmdb.Client` | Stub | Return canned search/detail JSON |
 | `opensubtitles.Client` | Stub | Return canned subtitle content |
@@ -81,12 +81,18 @@ dependencies, call `Run(ctx, item)`, assert item state changes and side effects.
 
 No hard coverage targets. Focus testing effort on:
 
-1. **Algorithms**: Content ID matching, audio selection, SRT filtering — these
+1. **Algorithms**: Content ID matching, audio selection, subtitle filtering/formatting, and SRT validation — these
    have the highest bug density and are hardest to debug in production.
 2. **Data serialization**: RipSpec round-trips, encoding snapshot, metadata JSON.
 3. **State machines**: Stage transitions, asset status tracking.
 4. **Edge cases in external tool parsing**: MakeMKV robot format variations,
-   ffprobe output quirks, WhisperX SRT output formats.
+   ffprobe output quirks, WhisperX SRT/JSON output formats, subtitle formatter invocation.
+
+**Subtitle-specific expectations:**
+- Test that canonical transcript artifacts remain unchanged when subtitle formatting runs.
+- Test that display subtitle output is derived separately from canonical cached transcript artifacts.
+- Add cross-stage regression coverage so subtitle formatting changes cannot silently change episode-identification inputs.
+- Prefer golden fixtures for real-world bad wrapping / hallucination cases.
 
 Low-value test targets (skip unless bugs emerge):
 - HTTP handler routing (thin wrappers around store calls)

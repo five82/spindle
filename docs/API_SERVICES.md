@@ -175,13 +175,14 @@ uvx --from whisperx whisperx <input_audio> \
   --model large-v3 \
   --language <lang> \
   --output_dir <dir> \
-  --output_format srt \
-  --max_line_width 42 \
-  --max_line_count 2 \
+  --output_format all \
   [--compute_type float16 --device cuda]  # when cuda enabled
 ```
 
 GPU acceleration controlled by `subtitles.whisperx_cuda_enabled`.
+
+WhisperX output is treated as the **canonical transcript**. Final display SRTs
+are produced later by the subtitle stage from WhisperX JSON/alignment output.
 
 ### Audio Extraction (Pre-Processing)
 
@@ -197,6 +198,23 @@ Parameters:
 - `-c:a pcm_s16le`: PCM 16-bit signed little-endian
 - `-vn -sn -dn`: Strip video, subtitle, and data streams
 - `-map 0:{audioIndex}`: Select specific audio track by stream index
+
+### Subtitle Formatting (Stable-TS)
+
+Subtitle generation formats viewer-facing SRTs by invoking Stable-TS via `uvx`
+against the canonical WhisperX JSON/alignment output:
+
+```
+uvx --from stable-ts-whisperless python -c <embedded_formatter_script> \
+  <input.json> <output.srt> --language <lang>
+```
+
+Behavior:
+- Stable-TS regrouping/line breaking is the supported subtitle-formatting path.
+- Subtitle formatting consumes derived working JSON; canonical cached transcript
+  artifacts remain unchanged.
+- If formatting fails, that subtitle job fails explicitly rather than silently
+  falling back to the old raw-wrap behavior.
 
 ### Environment Handling
 

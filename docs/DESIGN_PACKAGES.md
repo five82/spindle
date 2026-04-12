@@ -33,10 +33,10 @@ internal/
   contentid/            Stage: episode identification (content-first transcript matching, reference validation, ambiguity assessment, LLM verification)
   encoder/              Stage: encoding (Drapto integration, job planning)
   audioanalysis/        Stage: audio analysis (refinement, commentary detection)
-  subtitle/             Stage: subtitle generation (WhisperX, forced subs, SRT)
+  subtitle/             Stage: subtitle generation (display formatting/regrouping, forced subs, SRT validation/muxing)
   organizer/            Stage: organization (library copy, review routing, Jellyfin)
 
-  transcription/        Shared WhisperX transcription service with caching
+  transcription/        Shared WhisperX canonical transcription service with caching
 
   makemkv/              MakeMKV CLI wrapper (scan, rip, robot format parser)
   tmdb/                 TMDB REST API client

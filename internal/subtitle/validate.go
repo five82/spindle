@@ -2,8 +2,18 @@ package subtitle
 
 import (
 	"os"
+	"strings"
 
 	"github.com/five82/spindle/internal/srtutil"
+)
+
+const (
+	maxSubtitleLinesPerCue  = 2
+	maxSubtitleCharsPerLine = 42
+	maxSubtitleReadingSpeed = 25.0
+	minSubtitleCueDuration  = 0.5
+	maxSubtitleCueDuration  = 7.0
+	unbalancedLineDelta     = 16
 )
 
 // ValidateSRTContent checks SRT content for quality issues. Returns a list of
@@ -16,31 +26,101 @@ func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) 
 	}
 
 	cues := srtutil.Parse(string(content))
-	var issues []string
-
-	// Check: no cues at all.
 	if len(cues) == 0 {
 		return []string{"empty_subtitle_file"}, nil
 	}
 
-	// Check: last cue end exceeds video duration by more than 8 seconds.
-	lastEnd := cues[len(cues)-1].End
-	if lastEnd > videoSeconds+8 {
-		issues = append(issues, "duration_mismatch")
+	seen := make(map[string]bool)
+	var issues []string
+	addIssue := func(issue string) {
+		if issue == "" || seen[issue] {
+			return
+		}
+		seen[issue] = true
+		issues = append(issues, issue)
 	}
 
-	// Check: sparse subtitles (< 2 cues per minute for videos > 60s).
+	lastEnd := cues[len(cues)-1].End
+	if lastEnd > videoSeconds+8 {
+		addIssue("duration_mismatch")
+	}
 	if videoSeconds > 60 {
 		cuesPerMin := float64(len(cues)) / (videoSeconds / 60)
 		if cuesPerMin < 2 {
-			issues = append(issues, "sparse_subtitles")
+			addIssue("sparse_subtitles")
+		}
+	}
+	if cues[0].Start > 900 {
+		addIssue("late_first_cue")
+	}
+
+	for i, cue := range cues {
+		lines := splitCueLines(cue.Text)
+		if len(lines) > maxSubtitleLinesPerCue {
+			addIssue("too_many_lines")
+		}
+		if hasOverlongLine(lines) {
+			addIssue("line_too_long")
+		}
+		if hasUnbalancedLineBreak(lines) {
+			addIssue("unbalanced_line_breaks")
+		}
+		duration := cue.End - cue.Start
+		if duration > 0 {
+			chars := len([]rune(strings.Join(lines, " ")))
+			if float64(chars)/duration > maxSubtitleReadingSpeed {
+				addIssue("high_reading_speed")
+			}
+		}
+		if strings.TrimSpace(cue.Text) != "" {
+			if duration > 0 && duration < minSubtitleCueDuration {
+				addIssue("short_cue_duration")
+			}
+			if duration > maxSubtitleCueDuration {
+				addIssue("long_cue_duration")
+			}
+		}
+		if i > 0 && cue.Start < cues[i-1].End {
+			addIssue("overlapping_cues")
 		}
 	}
 
-	// Check: first cue starts very late (> 900 seconds / 15 minutes).
-	if cues[0].Start > 900 {
-		issues = append(issues, "late_first_cue")
-	}
-
 	return issues, nil
+}
+
+func splitCueLines(text string) []string {
+	raw := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		lines = append(lines, trimmed)
+	}
+	return lines
+}
+
+func hasOverlongLine(lines []string) bool {
+	for _, line := range lines {
+		if len([]rune(line)) > maxSubtitleCharsPerLine {
+			return true
+		}
+	}
+	return false
+}
+
+func hasUnbalancedLineBreak(lines []string) bool {
+	if len(lines) != 2 {
+		return false
+	}
+	left := len([]rune(lines[0]))
+	right := len([]rune(lines[1]))
+	if left == 0 || right == 0 {
+		return false
+	}
+	if left < right {
+		left, right = right, left
+	}
+	return left-right > unbalancedLineDelta
 }

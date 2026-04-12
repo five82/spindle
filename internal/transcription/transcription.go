@@ -1,4 +1,4 @@
-// Package transcription provides shared WhisperX transcription with caching.
+// Package transcription provides shared canonical WhisperX transcription with caching.
 package transcription
 
 import (
@@ -62,10 +62,11 @@ type TranscribeRequest struct {
 // and non-zero at phase end.
 type ProgressFunc func(phase string, elapsed time.Duration)
 
-// TranscribeResult contains transcription output.
+// TranscribeResult contains canonical transcription output.
 type TranscribeResult struct {
 	SRTPath        string
-	Duration       float64       // total SRT duration (seconds) from last cue timestamp
+	JSONPath       string
+	Duration       float64 // total SRT duration (seconds) from last cue timestamp
 	Segments       int
 	Cached         bool
 	ExtractTime    time.Duration // time spent on ffmpeg audio extraction
@@ -157,11 +158,9 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		"whisperx", wavPath,
 		"--model", model,
 		"--language", req.Language,
-		"--output_format", "srt",
+		"--output_format", "all",
 		"--output_dir", req.OutputDir,
 		"--vad_method", s.vadMethod,
-		"--max_line_width", "42",
-		"--max_line_count", "2",
 	}
 	if s.cudaEnabled {
 		whisperArgs = append(whisperArgs, "--device", "cuda")
@@ -187,10 +186,14 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		onProgress("transcribe", transcribeTime)
 	}
 
-	// Find SRT output. WhisperX names it after the input wav.
+	// Find canonical WhisperX outputs. WhisperX names them after the input wav.
 	srtPath := filepath.Join(req.OutputDir, "audio.srt")
 	if _, err := os.Stat(srtPath); err != nil {
 		return nil, fmt.Errorf("srt output not found at %s: %w", srtPath, err)
+	}
+	jsonPath := filepath.Join(req.OutputDir, "audio.json")
+	if _, err := os.Stat(jsonPath); err != nil {
+		return nil, fmt.Errorf("json output not found at %s: %w", jsonPath, err)
 	}
 
 	segments, duration, err := analyzeSRT(srtPath)
@@ -200,6 +203,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 
 	result := &TranscribeResult{
 		SRTPath:        srtPath,
+		JSONPath:       jsonPath,
 		Duration:       duration,
 		Segments:       segments,
 		Cached:         false,
@@ -230,51 +234,78 @@ func cacheKey(req TranscribeRequest, model string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// Lookup checks the cache for a previously stored transcription result.
-// It returns the result and true if a valid cached SRT exists with > 0 cues.
+// Lookup checks the cache for a previously stored canonical transcription result.
+// It returns the result and true if valid cached SRT and JSON artifacts exist
+// and the SRT has > 0 cues.
 func (s *Service) Lookup(key string) (*TranscribeResult, bool) {
 	dir := filepath.Join(s.cacheDir, key)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	srtPath, jsonPath, ok := cacheArtifactPaths(dir)
+	if !ok {
 		return nil, false
 	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".srt") {
-			continue
-		}
-		srtPath := filepath.Join(dir, entry.Name())
-		segments, duration, err := analyzeSRT(srtPath)
-		if err != nil || segments == 0 {
-			continue
-		}
-		return &TranscribeResult{
-			SRTPath:  srtPath,
-			Duration: duration,
-			Segments: segments,
-		}, true
+	segments, duration, err := analyzeSRT(srtPath)
+	if err != nil || segments == 0 {
+		return nil, false
 	}
-	return nil, false
+	return &TranscribeResult{
+		SRTPath:  srtPath,
+		JSONPath: jsonPath,
+		Duration: duration,
+		Segments: segments,
+	}, true
 }
 
-// Store copies the SRT from a transcription result into the cache directory
-// under the given key.
+// Store copies canonical transcription artifacts into the cache directory under
+// the given key.
 func (s *Service) Store(key string, result *TranscribeResult) error {
 	dir := filepath.Join(s.cacheDir, key)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create cache dir: %w", err)
 	}
+	if err := copyCacheArtifact(result.SRTPath, dir, "srt"); err != nil {
+		return err
+	}
+	if err := copyCacheArtifact(result.JSONPath, dir, "json"); err != nil {
+		return err
+	}
+	return nil
+}
 
-	src, err := os.ReadFile(result.SRTPath)
+func cacheArtifactPaths(dir string) (srtPath, jsonPath string, ok bool) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("read srt: %w", err)
+		return "", "", false
 	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		switch {
+		case strings.HasSuffix(entry.Name(), ".srt"):
+			srtPath = path
+		case strings.HasSuffix(entry.Name(), ".json"):
+			jsonPath = path
+		}
+	}
+	if srtPath == "" || jsonPath == "" {
+		return "", "", false
+	}
+	return srtPath, jsonPath, true
+}
 
-	dst := filepath.Join(dir, filepath.Base(result.SRTPath))
+func copyCacheArtifact(srcPath, dir, kind string) error {
+	if strings.TrimSpace(srcPath) == "" {
+		return fmt.Errorf("missing %s artifact path", kind)
+	}
+	src, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", kind, err)
+	}
+	dst := filepath.Join(dir, filepath.Base(srcPath))
 	if err := os.WriteFile(dst, src, 0o644); err != nil {
-		return fmt.Errorf("write cached srt: %w", err)
+		return fmt.Errorf("write cached %s: %w", kind, err)
 	}
-
 	return nil
 }
 
@@ -327,4 +358,3 @@ func (s *Service) Config() (model, device, vadMethod string) {
 	vadMethod = s.vadMethod
 	return
 }
-

@@ -13,7 +13,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
 Spindle automates the complete workflow from optical disc to Jellyfin media library:
 disc detection, ripping (MakeMKV), encoding (Drapto/SVT-AV1), metadata lookup (TMDB),
-subtitle generation (WhisperX + OpenSubtitles forced subs), commentary detection,
+subtitle generation (WhisperX canonical transcription + Stable-TS display formatting + OpenSubtitles forced subs), commentary detection,
 episode identification, and library organization with Jellyfin refresh.
 
 ### 1.2 Scope
@@ -57,7 +57,7 @@ them to appear in Jellyfin without manual intervention.
 | Binary     | Purpose                                            | When Required                  |
 |------------|----------------------------------------------------|--------------------------------|
 | `bd_info`  | Enhanced Blu-ray metadata (disc name, year, studio)| Always optional; improves ID   |
-| `uvx`      | WhisperX-driven transcription (Python runner)      | When subtitles.enabled = true  |
+| `uvx`      | WhisperX transcription + Stable-TS subtitle formatting packages | When subtitles.enabled = true  |
 | `mkvmerge` | Muxing subtitles into MKV containers               | When subtitles.mux_into_mkv = true |
 
 ### 2.3 Library Dependencies

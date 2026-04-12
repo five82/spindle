@@ -519,11 +519,12 @@ func overallBytePercent(copiedBytes, totalBytes int64) float64 {
 	return float64(copiedBytes) / float64(totalBytes) * 100
 }
 
-// copySidecarSubtitle copies a .en.srt sidecar subtitle file alongside the
-// destination video if one exists next to the source video.
+// copySidecarSubtitle copies sidecar SRT files that share the source video's
+// basename alongside the destination video.
 func copySidecarSubtitle(logger *slog.Logger, srcVideo, destVideo string) {
-	srcSrt := strings.TrimSuffix(srcVideo, filepath.Ext(srcVideo)) + ".en.srt"
-	if _, err := os.Stat(srcSrt); err != nil {
+	srcBase := strings.TrimSuffix(srcVideo, filepath.Ext(srcVideo))
+	matches, err := filepath.Glob(srcBase + ".*.srt")
+	if err != nil || len(matches) == 0 {
 		logger.Info("sidecar subtitle not found, skipping",
 			"decision_type", logs.DecisionSidecarSubtitleCopy,
 			"decision_result", "skipped",
@@ -532,12 +533,16 @@ func copySidecarSubtitle(logger *slog.Logger, srcVideo, destVideo string) {
 		return
 	}
 
-	destSrt := strings.TrimSuffix(destVideo, filepath.Ext(destVideo)) + ".en.srt"
-	if err := fileutil.CopyFile(srcSrt, destSrt); err != nil {
-		logger.Warn("failed to copy sidecar subtitle",
-			"event_type", "sidecar_copy_error",
-			"error_hint", err.Error(),
-			"impact", "subtitle file not available in library",
-		)
+	destBase := strings.TrimSuffix(destVideo, filepath.Ext(destVideo))
+	for _, srcSrt := range matches {
+		suffix := strings.TrimPrefix(srcSrt, srcBase)
+		destSrt := destBase + suffix
+		if err := fileutil.CopyFile(srcSrt, destSrt); err != nil {
+			logger.Warn("failed to copy sidecar subtitle",
+				"event_type", "sidecar_copy_error",
+				"error_hint", err.Error(),
+				"impact", "subtitle file not available in library",
+			)
+		}
 	}
 }

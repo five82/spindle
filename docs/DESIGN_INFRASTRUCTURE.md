@@ -173,7 +173,7 @@ mid-run.
 | FFprobe    | `ffprobe`     | No       | Always required               |
 | MediaInfo  | `mediainfo`   | No       | Always required               |
 | bd_info    | `bd_info`     | Yes      | Always optional               |
-| uvx        | `uvx`         | No*      | When subtitles.enabled        |
+| uvx        | `uvx`         | No*      | When subtitles.enabled (WhisperX + Stable-TS formatter packages) |
 | mkvmerge   | `mkvmerge`    | No*      | When subtitles.mux_into_mkv   |
 
 *Conditionally required based on config.
@@ -795,7 +795,8 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `SRTPath` | string | Path to generated SRT file |
+| `SRTPath` | string | Path to canonical WhisperX SRT file |
+| `JSONPath` | string | Path to canonical WhisperX JSON/alignment output |
 | `Duration` | float64 | Detected audio duration in seconds |
 | `Segments` | int | Number of SRT cues |
 | `Cached` | bool | True if result came from cache |
@@ -834,9 +835,10 @@ When `ContentKey` is empty, the service falls back to a path-based key:
 Cache directory: `$XDG_CACHE_HOME/spindle/whisperx/{cache_key}/`
 
 **Cache operations:**
-- `Lookup(key)`: Check for existing transcription. Validates SRT exists and
-  has > 0 cues.
-- `Store(key, result)`: Copy SRT to cache directory.
+- `Lookup(key)`: Check for existing canonical transcription. Validates both SRT
+  and JSON artifacts exist, and the SRT has > 0 cues.
+- `Store(key, result)`: Copy canonical SRT and JSON artifacts to the cache
+  directory.
 
 ### 9.4 Concurrency
 
@@ -858,6 +860,10 @@ ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn
 
 After WhisperX completes:
 
-1. **Hallucination filtering**: Remove WhisperX artifacts and repetitive
-   segments (see DESIGN_STAGES.md Section 6.2).
-2. **Validation**: Zero-segment output fails the stage.
+1. The transcription service stores **canonical transcript artifacts** only
+   (raw SRT + JSON/alignment output).
+2. Subtitle-specific hallucination filtering, Stable-TS formatting, and final
+   display-SRT validation happen in the `subtitle` package, not in the shared
+   transcription service.
+3. Formatted display subtitles are derived outputs and are not part of the
+   shared transcription cache contract.

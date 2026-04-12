@@ -182,6 +182,21 @@ func TestLookupMiss(t *testing.T) {
 	}
 }
 
+func TestLookupRejectsCacheWithoutJSON(t *testing.T) {
+	dir := t.TempDir()
+	keyDir := filepath.Join(dir, "cache-key")
+	if err := os.MkdirAll(keyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "audio.srt"), []byte(sampleSRT), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := New("large-v3", false, "silero", "", dir, nil)
+	if result, ok := svc.Lookup("cache-key"); ok || result != nil {
+		t.Fatalf("expected cache miss when JSON artifact is missing, got %+v", result)
+	}
+}
+
 func TestSelectPrimaryAudioTrack(t *testing.T) {
 	origInspect := inspectMedia
 	t.Cleanup(func() { inspectMedia = origInspect })
@@ -247,8 +262,14 @@ func TestStoreAndLookupRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	jsonPath := filepath.Join(srcDir, "audio.json")
+	if err := os.WriteFile(jsonPath, []byte(`{"segments":[{"start":1.0,"end":4.0,"text":"Hello, world."}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	original := &TranscribeResult{
 		SRTPath:  srtPath,
+		JSONPath: jsonPath,
 		Segments: 3,
 	}
 
@@ -267,6 +288,9 @@ func TestStoreAndLookupRoundTrip(t *testing.T) {
 	if result.SRTPath == "" {
 		t.Error("expected non-empty SRT path")
 	}
+	if result.JSONPath == "" {
+		t.Error("expected non-empty JSON path")
+	}
 	if result.Duration != 12.0 {
 		t.Errorf("expected Duration 12.0, got %.1f", result.Duration)
 	}
@@ -278,5 +302,12 @@ func TestStoreAndLookupRoundTrip(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Error("cached SRT is empty")
+	}
+	jsonData, err := os.ReadFile(result.JSONPath)
+	if err != nil {
+		t.Fatalf("cached JSON not readable: %v", err)
+	}
+	if len(jsonData) == 0 {
+		t.Error("cached JSON is empty")
 	}
 }

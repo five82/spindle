@@ -112,6 +112,77 @@ Only cue starting very late
 	}
 }
 
+func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
+	t.Run("too_many_lines", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:04,000\nLine one\nLine two\nLine three\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsIssue(issues, "too_many_lines") {
+			t.Fatalf("expected too_many_lines, got %v", issues)
+		}
+	})
+
+	t.Run("line_too_long", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:04,000\nThis line is deliberately written to exceed the configured subtitle width limit.\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsIssue(issues, "line_too_long") {
+			t.Fatalf("expected line_too_long, got %v", issues)
+		}
+	})
+
+	t.Run("unbalanced_line_breaks", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:04,000\nThis line is much longer than\nshort\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsIssue(issues, "unbalanced_line_breaks") {
+			t.Fatalf("expected unbalanced_line_breaks, got %v", issues)
+		}
+	})
+
+	t.Run("high_reading_speed", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:01,500\nThis subtitle has far too many characters for half a second.\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsIssue(issues, "high_reading_speed") {
+			t.Fatalf("expected high_reading_speed, got %v", issues)
+		}
+	})
+
+	t.Run("cue_duration_issues", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:01,300\nShort\n\n2\n00:00:05,000 --> 00:00:13,500\nLong enough to flag\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsIssue(issues, "short_cue_duration") {
+			t.Fatalf("expected short_cue_duration, got %v", issues)
+		}
+		if !containsIssue(issues, "long_cue_duration") {
+			t.Fatalf("expected long_cue_duration, got %v", issues)
+		}
+	})
+
+	t.Run("overlapping_cues", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:03,000\nFirst\n\n2\n00:00:02,500 --> 00:00:04,000\nSecond\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsIssue(issues, "overlapping_cues") {
+			t.Fatalf("expected overlapping_cues, got %v", issues)
+		}
+	})
+}
+
 func TestValidateSRTContent_Boundaries(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -136,14 +207,14 @@ func TestValidateSRTContent_Boundaries(t *testing.T) {
 		},
 		{
 			name: "exactly_2_cues_per_min_no_sparse",
-			srt: "1\n00:00:01,000 --> 00:00:03,000\nA\n\n2\n00:00:10,000 --> 00:00:12,000\nB\n\n3\n00:00:20,000 --> 00:00:22,000\nC\n\n4\n00:00:30,000 --> 00:00:32,000\nD\n",
+			srt:  "1\n00:00:01,000 --> 00:00:03,000\nA\n\n2\n00:00:10,000 --> 00:00:12,000\nB\n\n3\n00:00:20,000 --> 00:00:22,000\nC\n\n4\n00:00:30,000 --> 00:00:32,000\nD\n",
 			// 4 cues in 120s = 2.0 cues/min. Threshold is < 2.
 			duration:   120,
 			wantIssues: nil,
 		},
 		{
 			name: "60s_video_sparse_check_skipped",
-			srt: "1\n00:00:01,000 --> 00:00:03,000\nOnly cue\n",
+			srt:  "1\n00:00:01,000 --> 00:00:03,000\nOnly cue\n",
 			// 1 cue in 60s = 1 cue/min, but sparse check only applies when > 60s.
 			duration:   60,
 			wantIssues: nil,
