@@ -15,7 +15,7 @@ Review and correct transcription errors in MKV-embedded subtitles.
 
 ## Overview
 
-This skill extracts the primary (non-forced) SRT subtitle from an MKV file, reviews it for obvious transcription errors, presents proposed corrections for user approval, applies the approved edits, and muxes the corrected subtitle back into the MKV.
+This skill extracts the primary (non-forced) SRT subtitle from an MKV file, reviews it for obvious transcription errors, applies conservative high-confidence corrections automatically, reports what it changed, and muxes the corrected subtitle back into the MKV.
 
 Spindle currently generates subtitle tracks from canonical transcription artifacts using a Parakeet backend plus Stable-TS formatting. In practice, the most common quality issues are no longer classic isolated hallucination spam; they are now more often high-confidence lexical substitutions, mangled proper nouns, malformed captain's-log lines, command-phrase errors, and occasional end-of-scene nonsense.
 
@@ -120,7 +120,7 @@ When auditing Parakeet-generated subtitles, pay extra attention to these recurri
 | Diegetic singing | Characters singing on-screen is valid dialogue and should stay |
 | Ambiguous exclamations | Short cues like "Oh!" or "No!" during dialogue scenes are likely real speech |
 
-### Phase 3: Present Proposed Edits
+### Phase 3: Report and Apply Conservative Edits
 
 Present findings in this format:
 
@@ -132,40 +132,35 @@ Present findings in this format:
 **First cue:** <timestamp> | **Last cue:** <timestamp>
 **Estimated credits region:** after <timestamp>
 
-### Proposed Edits
+### Applied Edits
 
 Found <N> issues (<M> total cues affected):
 
 **1. [<Error Type>] Cue #<number> (<timestamp>)**
 - Current: `<current text>`
-- Proposed: `<corrected text>` (or REMOVE if the cue should be deleted)
+- Applied: `<corrected text>` (or REMOVE if the cue was deleted)
 - Reason: <brief explanation>
 
 **2. [<Error Type>] Cues #<start>-#<end> (<timestamp_start> - <timestamp_end>)**
 - Current: <N> consecutive cues containing `<summary of content>`
-- Proposed: REMOVE all <N> cues
+- Applied: REMOVE all <N> cues
 - Reason: <brief explanation>
 ...
 ```
 
 **Batching:** Consecutive cues with the same error type (e.g., a run of credits lyrics or a cluster of hallucinations) should be batched into a single numbered item listing the cue range. This keeps the report readable.
 
-**After presenting**, ask the user which edits to apply:
-- "Apply all" - apply every proposed edit
-- "Apply selected" - let user specify which numbered edits to apply
-- "Cancel" - discard all changes
-
-### Phase 4: Apply Approved Edits
+**No approval pause:** Do not ask the user to approve, select, or confirm subtitle edits. Apply all conservative, high-confidence edits automatically. If no edits are warranted, report that no changes are needed and stop without remuxing.
 
 1. Read the SRT file from `/tmp/subtitleaudit_<basename>.srt`
-2. Apply the approved edits:
+2. Apply the edits:
    - For text corrections: replace the cue text
    - For cue removals: delete the entire cue block (index line, timestamp line, text lines, blank separator)
 3. After removals, **re-index cue numbers** sequentially (1, 2, 3, ...)
 4. Write the edited file to `/tmp/subtitleaudit_<basename>_edited.srt`
-5. Show a summary: "Applied N edits (M cues removed, K cues modified). Ready to mux back into MKV."
+5. Show a summary: "Applied N edits (M cues removed, K cues modified). Proceeding to mux back into MKV."
 
-### Phase 5: Mux Edited Subtitle Back into MKV
+### Phase 4: Mux Edited Subtitle Back into MKV
 
 1. **Reconstruct all subtitle tracks** for muxing. The goal is to replace ONLY the primary subtitle while preserving all other subtitle tracks exactly as they were.
 
@@ -201,19 +196,18 @@ Found <N> issues (<M> total cues affected):
 5. **File size sanity check**:
    Compare the muxed file size against the original. They should be within ~1MB of each other (subtitle changes are tiny relative to video/audio). A large discrepancy indicates a muxing problem -- abort and report.
 
-6. **Replace the original**:
-   - Ask user for confirmation: "Replace original file at `<path>`?"
-   - On confirmation:
-     ```bash
-     mv "/tmp/subtitleaudit_<basename>_muxed.mkv" "<original_mkv_path>"
-     ```
-   - On decline: report the muxed file location for manual handling
+6. **Replace the original automatically after verification**:
+   ```bash
+   mv "/tmp/subtitleaudit_<basename>_muxed.mkv" "<original_mkv_path>"
+   ```
+   - Do not ask for confirmation once the muxed file has passed verification and the size sanity check
+   - If the replace fails, report the error and leave the verified muxed file in `/tmp/` for manual recovery
 
 7. **Clean up temp files**:
    ```bash
    rm -f /tmp/subtitleaudit_<basename>*.srt
    ```
-   (Only clean up SRT temps; if user declined the replace, keep the muxed MKV.)
+   - After a successful replace, also remove any now-unneeded temp muxed MKV if one remains
 
 ## Error Handling
 
@@ -221,10 +215,11 @@ Found <N> issues (<M> total cues affected):
 - If extraction fails, report the ffmpeg error and stop.
 - If muxing fails, report the mkvmerge error. The original file is untouched (muxing goes to a temp file first).
 - Never modify the original MKV until the muxed replacement is verified.
+- If no high-confidence edits are found, report that no changes were made and leave the original file untouched.
 
 ## Guiding Principles
 
 1. **Conservative edits only.** A false positive (bad "correction") is worse than a missed error. When in doubt, skip it.
 2. **Original file safety.** The original MKV is never modified in-place. All work happens on temp files, and the replacement is atomic (mv).
 3. **Preserve all tracks.** Video, audio, and non-primary subtitle tracks must pass through unchanged.
-4. **User controls everything.** Every edit requires approval. The final file replacement requires explicit confirmation.
+4. **No approval pauses.** Apply conservative, high-confidence edits automatically and replace the original only after the muxed result has been verified.
