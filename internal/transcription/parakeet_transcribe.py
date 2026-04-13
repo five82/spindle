@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, help="Directory for audio.srt/audio.json")
     parser.add_argument("--model", default="nvidia/parakeet-tdt-0.6b-v2")
     parser.add_argument("--device", default="cuda", choices=["auto", "cuda", "cpu"])
-    parser.add_argument("--dtype", default="fp32", choices=["bf16", "fp32"])
+    parser.add_argument("--dtype", default="bf16", choices=["bf16", "fp32"])
     parser.add_argument("--language", default="en")
     parser.add_argument("--long-audio-threshold-sec", type=float, default=480.0)
     return parser.parse_args()

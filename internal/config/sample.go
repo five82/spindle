@@ -77,7 +77,7 @@ api_key = ""
 # transcription_device = "auto"
 
 # Transcription precision: "bf16" is usually faster; "fp32" still uses the GPU but favors reliability over speed
-# transcription_precision = "fp32"
+# transcription_precision = "bf16"
 
 # Enable OpenSubtitles integration
 # opensubtitles_enabled = false
