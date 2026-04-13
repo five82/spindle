@@ -151,7 +151,6 @@ func TestValidateSubtitlesTranscriptionConfig(t *testing.T) {
 	cfg.Paths.StateDir = "/tmp/state"
 	cfg.Paths.ReviewDir = "/tmp/review"
 	cfg.Subtitles.Enabled = true
-	cfg.Subtitles.TranscriptionEngine = "bogus"
 	cfg.Subtitles.TranscriptionDevice = "tpu"
 	cfg.Subtitles.TranscriptionPrecision = "fp16"
 
@@ -160,9 +159,6 @@ func TestValidateSubtitlesTranscriptionConfig(t *testing.T) {
 		t.Fatal("Validate should fail with invalid transcription settings")
 	}
 	errMsg := err.Error()
-	if !strings.Contains(errMsg, "subtitles.transcription_engine") {
-		t.Errorf("expected error about subtitles.transcription_engine, got: %s", errMsg)
-	}
 	if !strings.Contains(errMsg, "subtitles.transcription_device") {
 		t.Errorf("expected error about subtitles.transcription_device, got: %s", errMsg)
 	}
@@ -170,7 +166,6 @@ func TestValidateSubtitlesTranscriptionConfig(t *testing.T) {
 		t.Errorf("expected error about subtitles.transcription_precision, got: %s", errMsg)
 	}
 
-	cfg.Subtitles.TranscriptionEngine = "parakeet"
 	cfg.Subtitles.TranscriptionDevice = "auto"
 	cfg.Subtitles.TranscriptionPrecision = "bf16"
 	if err := cfg.Validate(); err != nil {

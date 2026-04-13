@@ -242,7 +242,6 @@ func newGensubtitleCmd() *cobra.Command {
 
 			// Create transcription service.
 			svc := transcription.New(transcription.Config{
-				Engine:    cfg.Subtitles.TranscriptionEngine,
 				Model:     cfg.Subtitles.TranscriptionModel,
 				Device:    cfg.Subtitles.TranscriptionDevice,
 				Precision: cfg.Subtitles.TranscriptionPrecision,
@@ -254,8 +253,8 @@ func newGensubtitleCmd() *cobra.Command {
 
 			// Verbose: show transcription config before transcription.
 			if flagVerbose {
-				engine, model, device, precision := svc.Config()
-				fmt.Printf("  %s %s\n", labelStyle("Engine:  "), engine)
+				model, device, precision := svc.Config()
+				fmt.Printf("  %s %s\n", labelStyle("Engine:  "), "parakeet")
 				fmt.Printf("  %s %s\n", labelStyle("Model:   "), model)
 				fmt.Printf("  %s %s\n", labelStyle("Device:  "), device)
 				fmt.Printf("  %s %s\n", labelStyle("Precision:"), precision)

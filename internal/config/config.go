@@ -75,7 +75,6 @@ type NotificationsConfig struct {
 type SubtitlesConfig struct {
 	Enabled                bool     `toml:"enabled"`
 	MuxIntoMKV             bool     `toml:"mux_into_mkv"`
-	TranscriptionEngine    string   `toml:"transcription_engine"`
 	TranscriptionModel     string   `toml:"transcription_model"`
 	TranscriptionDevice    string   `toml:"transcription_device"`
 	TranscriptionPrecision string   `toml:"transcription_precision"`

@@ -742,7 +742,6 @@ Key validation constraints enforced by `validate.go`:
 - `makemkv.rip_timeout`: Must be > 0.
 - `makemkv.min_title_length`: Must be >= 0.
 - `jellyfin.url` and `jellyfin.api_key`: Required when `jellyfin.enabled`.
-- `subtitles.transcription_engine`: Must be `parakeet`.
 - `subtitles.transcription_device`: Must be `auto`, `cuda`, or `cpu`.
 - `subtitles.transcription_precision`: Must be `bf16` or `fp32`.
 - `subtitles.opensubtitles_api_key`: Required when OpenSubtitles enabled.

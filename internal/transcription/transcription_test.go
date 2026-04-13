@@ -30,7 +30,7 @@ func TestCacheKeyWithContentKey(t *testing.T) {
 		Language:   "en",
 		ContentKey: "stable-content-id",
 	}
-	key := cacheKey(req, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	key := cacheKey(req, "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if key == "" {
 		t.Fatal("expected non-empty cache key")
 	}
@@ -41,7 +41,7 @@ func TestCacheKeyWithContentKey(t *testing.T) {
 		Language:   "en",
 		ContentKey: "stable-content-id",
 	}
-	key2 := cacheKey(req2, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	key2 := cacheKey(req2, "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if key != key2 {
 		t.Errorf("content-stable keys should match: %s != %s", key, key2)
 	}
@@ -53,7 +53,7 @@ func TestCacheKeyWithoutContentKey(t *testing.T) {
 		AudioIndex: 1,
 		Language:   "en",
 	}
-	key := cacheKey(req, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	key := cacheKey(req, "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if key == "" {
 		t.Fatal("expected non-empty cache key")
 	}
@@ -63,26 +63,17 @@ func TestCacheKeyWithoutContentKey(t *testing.T) {
 		AudioIndex: 1,
 		Language:   "en",
 	}
-	key2 := cacheKey(req2, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	key2 := cacheKey(req2, "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if key == key2 {
 		t.Errorf("path-based keys should differ for different paths")
-	}
-}
-
-func TestCacheKeyIncludesEngine(t *testing.T) {
-	req := TranscribeRequest{ContentKey: "disc-abc-title-1", Language: "en"}
-	parakeet := cacheKey(req, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
-	other := cacheKey(req, "other", "nvidia/parakeet-tdt-0.6b-v2", "en")
-	if parakeet == other {
-		t.Fatal("cache key should differ when engine changes")
 	}
 }
 
 func TestCacheKeySameContentKeySameModelLanguage(t *testing.T) {
 	req1 := TranscribeRequest{ContentKey: "disc-abc-title-1", Language: "en"}
 	req2 := TranscribeRequest{ContentKey: "disc-abc-title-1", Language: "en"}
-	k1 := cacheKey(req1, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
-	k2 := cacheKey(req2, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	k1 := cacheKey(req1, "nvidia/parakeet-tdt-0.6b-v2", "en")
+	k2 := cacheKey(req2, "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if k1 != k2 {
 		t.Errorf("same content key, model, language should produce same key: %s != %s", k1, k2)
 	}
@@ -91,8 +82,8 @@ func TestCacheKeySameContentKeySameModelLanguage(t *testing.T) {
 func TestCacheKeyDifferentContentKey(t *testing.T) {
 	req1 := TranscribeRequest{ContentKey: "disc-abc-title-1", Language: "en"}
 	req2 := TranscribeRequest{ContentKey: "disc-xyz-title-2", Language: "en"}
-	k1 := cacheKey(req1, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
-	k2 := cacheKey(req2, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	k1 := cacheKey(req1, "nvidia/parakeet-tdt-0.6b-v2", "en")
+	k2 := cacheKey(req2, "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if k1 == k2 {
 		t.Errorf("different content keys should produce different cache keys")
 	}

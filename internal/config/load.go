@@ -144,9 +144,6 @@ func applyDefaults(cfg *Config) {
 	}
 
 	// [subtitles]
-	if cfg.Subtitles.TranscriptionEngine == "" {
-		cfg.Subtitles.TranscriptionEngine = "parakeet"
-	}
 	if cfg.Subtitles.TranscriptionModel == "" {
 		cfg.Subtitles.TranscriptionModel = "nvidia/parakeet-tdt-0.6b-v2"
 	}

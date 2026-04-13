@@ -126,7 +126,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	transcriber := transcription.New(transcription.Config{
-		Engine:    cfg.Subtitles.TranscriptionEngine,
 		Model:     cfg.Subtitles.TranscriptionModel,
 		Device:    cfg.Subtitles.TranscriptionDevice,
 		Precision: cfg.Subtitles.TranscriptionPrecision,

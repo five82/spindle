@@ -129,7 +129,6 @@ func newDebugCommentaryCmd() *cobra.Command {
 				commentaryModel = cfg.Subtitles.TranscriptionModel
 			}
 			transcriber := transcription.New(transcription.Config{
-				Engine:    cfg.Subtitles.TranscriptionEngine,
 				Model:     commentaryModel,
 				Device:    cfg.Subtitles.TranscriptionDevice,
 				Precision: cfg.Subtitles.TranscriptionPrecision,

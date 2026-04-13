@@ -20,8 +20,8 @@ type runtimeEnv struct {
 	rootDir string
 }
 
-func newRuntimeEnv(cacheDir, engine string) *runtimeEnv {
-	return &runtimeEnv{rootDir: filepath.Join(cacheDir, "runtime", engine)}
+func newRuntimeEnv(cacheDir string) *runtimeEnv {
+	return &runtimeEnv{rootDir: filepath.Join(cacheDir, "runtime", transcriptionBackendName)}
 }
 
 func (r *runtimeEnv) venvDir() string {
@@ -53,7 +53,7 @@ func (s *Service) ensureRuntime(ctx context.Context) (pythonPath, helperPath str
 		s.logger.Info("transcription runtime ready",
 			"decision_type", "transcription_runtime",
 			"decision_result", "reused",
-			"decision_reason", fmt.Sprintf("engine=%s root=%s", s.engine, r.rootDir),
+			"decision_reason", fmt.Sprintf("backend=%s root=%s", transcriptionBackendName, r.rootDir),
 		)
 		return pythonPath, helperPath, nil
 	}
@@ -71,7 +71,7 @@ func (s *Service) ensureRuntime(ctx context.Context) (pythonPath, helperPath str
 	s.logger.Info("bootstrapping transcription runtime",
 		"decision_type", "transcription_runtime",
 		"decision_result", "bootstrapped",
-		"decision_reason", fmt.Sprintf("engine=%s root=%s", s.engine, r.rootDir),
+		"decision_reason", fmt.Sprintf("backend=%s root=%s", transcriptionBackendName, r.rootDir),
 	)
 
 	pythonCmd := strings.TrimSpace(os.Getenv("SPINDLE_TRANSCRIPTION_PYTHON"))

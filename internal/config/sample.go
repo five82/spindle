@@ -70,9 +70,6 @@ api_key = ""
 # Embed subtitles in MKV container
 # mux_into_mkv = true
 
-# Transcription engine
-# transcription_engine = "parakeet"
-
 # Transcription model name
 # transcription_model = "nvidia/parakeet-tdt-0.6b-v2"
 

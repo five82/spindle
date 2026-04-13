@@ -44,11 +44,6 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Subtitles.Enabled {
-		switch c.Subtitles.TranscriptionEngine {
-		case "parakeet":
-		default:
-			errs = append(errs, fmt.Sprintf("subtitles.transcription_engine must be parakeet (got %q)", c.Subtitles.TranscriptionEngine))
-		}
 		switch c.Subtitles.TranscriptionDevice {
 		case "auto", "cuda", "cpu":
 		default:

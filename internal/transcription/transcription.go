@@ -21,15 +21,14 @@ import (
 )
 
 const (
-	defaultEngine    = "parakeet"
-	defaultModel     = "nvidia/parakeet-tdt-0.6b-v2"
-	defaultDevice    = "auto"
-	defaultPrecision = "bf16"
+	transcriptionBackendName = "parakeet"
+	defaultModel             = "nvidia/parakeet-tdt-0.6b-v2"
+	defaultDevice            = "auto"
+	defaultPrecision         = "bf16"
 )
 
 // Config defines transcription service settings.
 type Config struct {
-	Engine    string
 	Model     string
 	Device    string
 	Precision string
@@ -39,7 +38,6 @@ type Config struct {
 
 // Service provides canonical transcription with caching.
 type Service struct {
-	engine    string
 	model     string
 	device    string
 	precision string
@@ -51,10 +49,6 @@ type Service struct {
 // New creates a transcription service.
 func New(cfg Config) *Service {
 	logger := logs.Default(cfg.Logger)
-	engine := strings.ToLower(strings.TrimSpace(cfg.Engine))
-	if engine == "" {
-		engine = defaultEngine
-	}
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
 		model = defaultModel
@@ -68,13 +62,12 @@ func New(cfg Config) *Service {
 		precision = defaultPrecision
 	}
 	return &Service{
-		engine:    engine,
 		model:     model,
 		device:    device,
 		precision: precision,
 		cacheDir:  cfg.CacheDir,
 		logger:    logger,
-		runtime:   newRuntimeEnv(cfg.CacheDir, engine),
+		runtime:   newRuntimeEnv(cfg.CacheDir),
 	}
 }
 
@@ -118,7 +111,7 @@ type TranscribeResult struct {
 //  1. Compute cache key.
 //  2. Check cache. If hit, return cached result.
 //  3. Extract audio via FFmpeg.
-//  4. Run the configured transcription engine.
+//  4. Run the Parakeet transcription backend.
 //  5. Read SRT, count segments, parse duration.
 //  6. Store in cache.
 //  7. Return result.
@@ -139,13 +132,13 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		return nil, err
 	}
 
-	key := cacheKey(req, s.engine, model, language)
+	key := cacheKey(req, model, language)
 
 	if result, ok := s.Lookup(key); ok {
 		s.logger.Info("transcription cache hit",
 			"decision_type", logs.DecisionTranscriptionCache,
 			"decision_result", "hit",
-			"decision_reason", fmt.Sprintf("engine=%s key=%s segments=%d", s.engine, key[:12], result.Segments),
+			"decision_reason", fmt.Sprintf("backend=%s key=%s segments=%d", transcriptionBackendName, key[:12], result.Segments),
 		)
 		result.Cached = true
 		return result, nil
@@ -153,7 +146,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	s.logger.Info("transcription cache miss",
 		"decision_type", logs.DecisionTranscriptionCache,
 		"decision_result", "miss",
-		"decision_reason", fmt.Sprintf("engine=%s key=%s", s.engine, key[:12]),
+		"decision_reason", fmt.Sprintf("backend=%s key=%s", transcriptionBackendName, key[:12]),
 	)
 
 	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
@@ -209,7 +202,7 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 
 	s.logger.Info("running Parakeet transcription",
 		"event_type", "transcription_parakeet",
-		"engine", s.engine,
+		"engine", transcriptionBackendName,
 		"model", model,
 		"device", s.device,
 		"precision", s.precision,
@@ -267,12 +260,12 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 // cacheKey computes a deterministic cache key for a transcription request.
 // If ContentKey is non-empty, it is used for content-stable caching.
 // Otherwise, the input path and audio index are used as a fallback.
-func cacheKey(req TranscribeRequest, engine, model, language string) string {
+func cacheKey(req TranscribeRequest, model, language string) string {
 	var input string
 	if req.ContentKey != "" {
-		input = engine + "\x00" + req.ContentKey + "\x00" + model + "\x00" + language
+		input = transcriptionBackendName + "\x00" + req.ContentKey + "\x00" + model + "\x00" + language
 	} else {
-		input = engine + "\x00" + req.InputPath + "\x00" + strconv.Itoa(req.AudioIndex) + "\x00" + model + "\x00" + language
+		input = transcriptionBackendName + "\x00" + req.InputPath + "\x00" + strconv.Itoa(req.AudioIndex) + "\x00" + model + "\x00" + language
 	}
 	h := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(h[:])
@@ -381,18 +374,13 @@ func normalizeLanguage(value string) string {
 }
 
 func (s *Service) validateLanguage(language string) error {
-	switch s.engine {
-	case defaultEngine:
-		if language != "en" {
-			return fmt.Errorf("parakeet-tdt-0.6b-v2 only supports English audio (got language=%s)", language)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported transcription engine %q", s.engine)
+	if language != "en" {
+		return fmt.Errorf("parakeet-tdt-0.6b-v2 only supports English audio (got language=%s)", language)
 	}
+	return nil
 }
 
 // Config returns the service configuration for display purposes.
-func (s *Service) Config() (engine, model, device, precision string) {
-	return s.engine, s.model, s.device, s.precision
+func (s *Service) Config() (model, device, precision string) {
+	return s.model, s.device, s.precision
 }

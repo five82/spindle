@@ -492,7 +492,6 @@ activity and are sent as a matched pair.
 |----------------------------|----------|-------------------------|----------------------------------------|
 | `enabled`                  | bool     | false                            | Enable subtitle generation pipeline    |
 | `mux_into_mkv`             | bool     | true                             | Embed subtitles in MKV container       |
-| `transcription_engine`     | string   | `parakeet`                       | Transcription backend                  |
 | `transcription_model`      | string   | `nvidia/parakeet-tdt-0.6b-v2`    | Parakeet model name                    |
 | `transcription_device`     | string   | `auto`                           | Runtime device: `auto`, `cuda`, `cpu`  |
 | `transcription_precision`  | string   | `bf16`                           | Runtime precision: `bf16` or `fp32`    |
