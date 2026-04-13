@@ -28,7 +28,7 @@ func (c *Config) EnsureDirectories() error {
 	optional := []string{
 		c.Paths.LibraryDir,
 		c.OpenSubtitlesCacheDir(),
-		c.WhisperXCacheDir(),
+		c.TranscriptionCacheDir(),
 	}
 	if c.RipCache.Enabled {
 		optional = append(optional, c.RipCacheDir())

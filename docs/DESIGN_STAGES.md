@@ -421,7 +421,7 @@ the drive during MakeMKV operation. The handler calls `PauseDisc()` /
 **Applies to**: TV content only (skipped for movies).
 
 This stage resolves placeholder episode keys (e.g., `s01_001`) to actual episode
-numbers (e.g., `s01e03`) using a content-first matcher: WhisperX transcription
+numbers (e.g., `s01e03`) using a content-first matcher: canonical transcription
 compared against OpenSubtitles references, with one progressive reference-scope
 expansion if needed and LLM verification only for a few ambiguous transcript
 pairs.
@@ -482,7 +482,7 @@ The stage uses one production TV matcher, but that matcher is content-first.
 Ordering and contiguity are weak review signals, not the primary decision path,
 and LLM confidence does not numerically inflate stored match confidence.
 
-**Primary audio rule**: Episode identification uses the shared audio-selection policy before WhisperX transcription. The selected audio-relative index is included in the transcription cache key (`{disc_fingerprint}:{episode_key}:{audio_index}`) so cached transcripts remain tied to the actual stream that was transcribed.
+**Primary audio rule**: Episode identification uses the shared audio-selection policy before transcription. The selected audio-relative index is included in the transcription cache key (`{disc_fingerprint}:{episode_key}:{audio_index}`) so cached transcripts remain tied to the actual stream that was transcribed.
 
 ### 3.3 Progress Phases
 
@@ -637,7 +637,7 @@ tracks.
 
 ### 5.1 Commentary Detection Pipeline (Phase 1)
 
-**Operates on encoded files** -- smaller files mean faster WhisperX
+**Operates on encoded files** -- smaller files mean faster Parakeet
 transcription. Runs before refinement so commentary tracks are identified
 before any tracks are removed.
 
@@ -655,7 +655,7 @@ When `commentary.enabled`:
      "stereo downmix of primary" -- NOT commentary. Exclude from further analysis.
 
 3. **LLM classification**: For remaining candidates:
-   - Transcribe candidate audio track with WhisperX (model: `commentary.whisperx_model`).
+   - Transcribe candidate audio track with the transcription service (model: `commentary.transcription_model`).
    - Send transcript to LLM with classification prompt (see
      DESIGN_LLM_PROMPTS.md Section 2 for the exact prompt and response schema).
    - LLM returns: `decision` string, `confidence` float, `reason` string.
@@ -666,7 +666,7 @@ When `commentary.enabled`:
 with `event_type: "commentary_detection_failed"` and processing continues.
 
 **Transcription**: Commentary detection uses the shared transcription service
-(see DESIGN_INFRASTRUCTURE.md Section 9) to invoke WhisperX. The `whisperxSem`
+(see DESIGN_INFRASTRUCTURE.md Section 9) to invoke Parakeet. The `transcriptionSem`
 semaphore is held by the audio analysis stage for the duration of any
 transcription work.
 
@@ -733,16 +733,16 @@ stream counts after commentary handling.
 
 ## 6. Stage: Subtitle Generation
 
-### 6.1 WhisperX Transcription
+### 6.1 Parakeet Transcription
 
-1. **HF token lazy validation**: Token checked on first `Generate()` call via
-   `sync.Once`; fallback logging deduplicated.
-2. **Language merging**: Config default languages (`["en"]`) merged with
-   per-request languages via `NormalizeList()`.
-3. Extract primary audio track from encoded MKV to WAV.
-4. Run WhisperX via `uvx` with configured model, CUDA settings, and VAD method.
-5. WhisperX produces **canonical transcript artifacts**: raw SRT plus richer
-   JSON/alignment output.
+1. Select the primary audio track using the shared audio-selection policy.
+2. Extract that audio track from the encoded MKV to mono 16 kHz WAV.
+3. Call the shared transcription service with configured engine, model, device,
+   precision, language, output dir, and content-stable cache key.
+4. The service bootstraps or reuses the managed Parakeet runtime under
+   `$XDG_CACHE_HOME/spindle/transcription/runtime/parakeet/`.
+5. The embedded helper runs Parakeet TDT 0.6B v2 and writes **canonical
+   transcript artifacts**: `audio.srt` plus `audio.json`.
 6. The shared transcription cache stores canonical artifacts only. These are
    reused across episode identification, commentary detection, and subtitling.
 7. Subtitle generation derives a **display subtitle** from the canonical JSON by
@@ -750,16 +750,16 @@ stream counts after commentary handling.
    `subtitle` package.
 8. **Formatter failure is explicit**: subtitle formatting failure marks that
    episode subtitle job failed; no permanent raw-SRT compatibility path is kept.
-9. **Duration fallback**: If `totalSeconds <= 0`, extracts duration from last SRT
-   timestamp.
+9. **Language constraint**: Parakeet TDT 0.6B v2 is English-only, so non-English
+   requests fail explicitly rather than silently producing degraded output.
 
-### 6.2 WhisperX Hallucination Filtering
+### 6.2 Transcription Hallucination Filtering
 
-The subtitle stage applies the WhisperX hallucination rules to **derived
-subtitle-working transcript data** before display formatting. Canonical cached
-transcript artifacts remain unchanged.
+The subtitle stage applies hallucination rules to **derived subtitle-working
+transcript data** before display formatting. Canonical cached transcript
+artifacts remain unchanged.
 
-Filtering removes WhisperX artifacts in two passes:
+Filtering removes transcription artifacts in two passes:
 
 **Pass 1 -- Isolated/repeated removal** (`removeIsolatedHallucinations`):
 
@@ -885,7 +885,7 @@ same language preference, sort by download count descending (most downloaded
 ### 6.6 SRT Generation
 
 - **Canonical vs display artifacts**:
-  - canonical WhisperX SRT/JSON artifacts live in the transcription cache/work
+  - canonical transcription SRT/JSON artifacts live in the transcription cache/work
     area and are reused across stages
   - final display SRTs are generated by the subtitle stage from canonical JSON
     and written beside the encoded MKV in the staging directory
@@ -951,8 +951,8 @@ cross-stage cache contract.
   flag the item for review but do not fail the stage.
 
 **Transcription**: Subtitle generation uses the shared transcription service
-(see DESIGN_INFRASTRUCTURE.md Section 9) to invoke WhisperX and manage
-caching. The `whisperxSem` semaphore is held by the subtitling stage for
+(see DESIGN_INFRASTRUCTURE.md Section 9) to invoke Parakeet and manage
+caching. The `transcriptionSem` semaphore is held by the subtitling stage for
 the duration of transcription work.
 
 ---
@@ -1141,7 +1141,7 @@ decision types each stage produces. Constants are defined in
 | `transcription_asset` | asset path | Audio extraction target |
 | `transcription_cache` | `hit`, `miss` | Transcription cache lookup |
 | `subtitle_formatting` | `formatted`, `failed` | Stable-TS display subtitle formatting |
-| `hallucination_filter` | `filtered` | WhisperX hallucination removal |
+| `hallucination_filter` | `filtered` | Transcription hallucination removal |
 | `srt_validation` | issue summary | SRT quality validation |
 | `subtitle_mux` | `skipped` | MKV muxing decision |
 | `forced_subtitle_search` | `skipped` | Forced subtitle search gate |

@@ -43,9 +43,21 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Subtitles.Enabled && c.Subtitles.WhisperXVADMethod != "silero" {
-		if c.Subtitles.WhisperXHFToken == "" {
-			errs = append(errs, "subtitles.whisperx_hf_token is required when subtitles enabled with non-silero VAD method")
+	if c.Subtitles.Enabled {
+		switch c.Subtitles.TranscriptionEngine {
+		case "parakeet":
+		default:
+			errs = append(errs, fmt.Sprintf("subtitles.transcription_engine must be parakeet (got %q)", c.Subtitles.TranscriptionEngine))
+		}
+		switch c.Subtitles.TranscriptionDevice {
+		case "auto", "cuda", "cpu":
+		default:
+			errs = append(errs, fmt.Sprintf("subtitles.transcription_device must be auto, cuda, or cpu (got %q)", c.Subtitles.TranscriptionDevice))
+		}
+		switch c.Subtitles.TranscriptionPrecision {
+		case "bf16", "fp32":
+		default:
+			errs = append(errs, fmt.Sprintf("subtitles.transcription_precision must be bf16 or fp32 (got %q)", c.Subtitles.TranscriptionPrecision))
 		}
 	}
 

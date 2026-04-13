@@ -75,10 +75,10 @@ type NotificationsConfig struct {
 type SubtitlesConfig struct {
 	Enabled                bool     `toml:"enabled"`
 	MuxIntoMKV             bool     `toml:"mux_into_mkv"`
-	WhisperXModel          string   `toml:"whisperx_model"`
-	WhisperXCUDAEnabled    bool     `toml:"whisperx_cuda_enabled"`
-	WhisperXVADMethod      string   `toml:"whisperx_vad_method"`
-	WhisperXHFToken        string   `toml:"whisperx_hf_token"`
+	TranscriptionEngine    string   `toml:"transcription_engine"`
+	TranscriptionModel     string   `toml:"transcription_model"`
+	TranscriptionDevice    string   `toml:"transcription_device"`
+	TranscriptionPrecision string   `toml:"transcription_precision"`
 	OpenSubtitlesEnabled   bool     `toml:"opensubtitles_enabled"`
 	OpenSubtitlesAPIKey    string   `toml:"opensubtitles_api_key"`
 	OpenSubtitlesUserAgent string   `toml:"opensubtitles_user_agent"`
@@ -135,7 +135,7 @@ type LLMConfig struct {
 // CommentaryConfig defines commentary track detection settings.
 type CommentaryConfig struct {
 	Enabled             bool    `toml:"enabled"`
-	WhisperXModel       string  `toml:"whisperx_model"`
+	TranscriptionModel  string  `toml:"transcription_model"`
 	SimilarityThreshold float64 `toml:"similarity_threshold"`
 	ConfidenceThreshold float64 `toml:"confidence_threshold"`
 }
@@ -175,9 +175,9 @@ func (c *Config) OpenSubtitlesCacheDir() string {
 	return filepath.Join(cacheBaseDir(), "opensubtitles")
 }
 
-// WhisperXCacheDir returns the auto-derived WhisperX transcription cache directory.
-func (c *Config) WhisperXCacheDir() string {
-	return filepath.Join(cacheBaseDir(), "whisperx")
+// TranscriptionCacheDir returns the auto-derived transcription cache directory.
+func (c *Config) TranscriptionCacheDir() string {
+	return filepath.Join(cacheBaseDir(), "transcription")
 }
 
 // RipCacheDir returns the auto-derived rip cache directory.

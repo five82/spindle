@@ -144,11 +144,17 @@ func applyDefaults(cfg *Config) {
 	}
 
 	// [subtitles]
-	if cfg.Subtitles.WhisperXModel == "" {
-		cfg.Subtitles.WhisperXModel = "large-v3"
+	if cfg.Subtitles.TranscriptionEngine == "" {
+		cfg.Subtitles.TranscriptionEngine = "parakeet"
 	}
-	if cfg.Subtitles.WhisperXVADMethod == "" {
-		cfg.Subtitles.WhisperXVADMethod = "silero"
+	if cfg.Subtitles.TranscriptionModel == "" {
+		cfg.Subtitles.TranscriptionModel = "nvidia/parakeet-tdt-0.6b-v2"
+	}
+	if cfg.Subtitles.TranscriptionDevice == "" {
+		cfg.Subtitles.TranscriptionDevice = "auto"
+	}
+	if cfg.Subtitles.TranscriptionPrecision == "" {
+		cfg.Subtitles.TranscriptionPrecision = "bf16"
 	}
 	if cfg.Subtitles.OpenSubtitlesUserAgent == "" {
 		cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/dev v0.1.0"
@@ -232,9 +238,6 @@ func applyDefaults(cfg *Config) {
 	}
 
 	// [commentary]
-	if cfg.Commentary.WhisperXModel == "" {
-		cfg.Commentary.WhisperXModel = "large-v3-turbo"
-	}
 	if cfg.Commentary.SimilarityThreshold == 0 {
 		cfg.Commentary.SimilarityThreshold = 0.92
 	}
@@ -308,15 +311,6 @@ func collectEnvOverrides(cfg *Config) []string {
 	if v := os.Getenv("SPINDLE_API_TOKEN"); v != "" {
 		cfg.API.Token = v
 		applied = append(applied, "SPINDLE_API_TOKEN")
-	}
-
-	// HuggingFace token: HUGGING_FACE_HUB_TOKEN takes priority, then HF_TOKEN.
-	if v := os.Getenv("HUGGING_FACE_HUB_TOKEN"); v != "" {
-		cfg.Subtitles.WhisperXHFToken = v
-		applied = append(applied, "HUGGING_FACE_HUB_TOKEN")
-	} else if v := os.Getenv("HF_TOKEN"); v != "" {
-		cfg.Subtitles.WhisperXHFToken = v
-		applied = append(applied, "HF_TOKEN")
 	}
 
 	if v := os.Getenv("OPENSUBTITLES_API_KEY"); v != "" {

@@ -19,7 +19,7 @@ Content ID exists to answer one question reliably:
 
 The design is intentionally **content-first**:
 
-1. Transcribe each ripped title with WhisperX.
+1. Transcribe each ripped title with the transcription service.
 2. Build an initial plausible TMDB episode set and expand once only if coverage
    is weak.
 3. Fetch OpenSubtitles references for those canonical episodes.
@@ -85,7 +85,7 @@ Content ID requires all of the following:
 - OpenSubtitles enabled and configured
 - a TMDB ID on the queue item
 - at least one ripped TV title in the envelope
-- WhisperX available
+- transcription runtime available
 - TMDB season metadata available
 
 If prerequisites are missing, the stage returns early without episode
@@ -99,7 +99,7 @@ resolution.
 Ripped Episode Files
         |
         v
-[1. Transcribe] -- WhisperX on selected primary audio
+[1. Transcribe] -- Parakeet on selected primary audio
         |
         v
 [2. Build Initial Candidate Episode Set] -- derive likely TMDB episode numbers
@@ -138,7 +138,7 @@ Ripped Episode Files
 Each ripped title is probed and transcribed from the selected primary audio
 stream, not blindly from `0:a:0`.
 
-### 5.2 WhisperX output
+### 5.2 transcription output
 
 For each ripped episode asset:
 
@@ -408,7 +408,7 @@ The LLM is not asked to:
 
 For each challenged pair, extract the middle portion of:
 
-- the WhisperX transcript from the rip
+- the transcription artifact from the rip
 - the OpenSubtitles reference transcript
 
 ### 10.5 Output

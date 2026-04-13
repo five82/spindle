@@ -14,7 +14,7 @@ def _load_segments(path: str):
         segments = payload
         language = None
     else:
-        raise SystemExit("unsupported whisperx payload")
+        raise SystemExit("unsupported transcription payload")
 
     if not segments:
         raise SystemExit("no segments provided")
@@ -72,7 +72,7 @@ def _sanitize_segments(raw_segments):
                     word["word"] = normalized
                     text_parts.append(word["word"])
                 normalized_words.append(word)
-            if text_parts:
+            if not segment.get("text") and text_parts:
                 segment["text"] = "".join(text_parts).strip()
             segment["words"] = normalized_words
         sanitized.append(segment)
@@ -83,7 +83,7 @@ def _sanitize_segments(raw_segments):
 
 def main() -> None:
     parser = argparse.ArgumentParser("stable-ts-post")
-    parser.add_argument("aligned_json", help="WhisperX alignment JSON file")
+    parser.add_argument("aligned_json", help="Canonical transcription JSON file")
     parser.add_argument("output_srt", help="Path to write formatted SRT")
     parser.add_argument("--language", default=None, help="Override language code")
     args = parser.parse_args()

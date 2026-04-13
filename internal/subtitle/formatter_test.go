@@ -22,11 +22,11 @@ func TestDisplaySubtitlePath(t *testing.T) {
 	}
 }
 
-func TestFilterWhisperXJSON_RemovesIsolatedHallucination(t *testing.T) {
+func TestFilterTranscriptionJSON_RemovesIsolatedHallucination(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "audio.json")
 	dst := filepath.Join(dir, "audio.filtered.json")
-	payload := whisperXPayload{
+	payload := transcriptionPayload{
 		Language: "en",
 		Segments: []map[string]any{
 			{"start": 10.0, "end": 12.0, "text": "Normal dialogue"},
@@ -41,9 +41,9 @@ func TestFilterWhisperXJSON_RemovesIsolatedHallucination(t *testing.T) {
 	if err := os.WriteFile(src, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	original, filtered, err := filterWhisperXJSON(src, dst, 1200)
+	original, filtered, err := filterTranscriptionJSON(src, dst, 1200)
 	if err != nil {
-		t.Fatalf("filterWhisperXJSON() error = %v", err)
+		t.Fatalf("filterTranscriptionJSON() error = %v", err)
 	}
 	if original != 3 || filtered != 2 {
 		t.Fatalf("counts = %d/%d, want 3/2", original, filtered)
@@ -52,7 +52,7 @@ func TestFilterWhisperXJSON_RemovesIsolatedHallucination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out whisperXPayload
+	var out transcriptionPayload
 	if err := json.Unmarshal(filteredData, &out); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 
 	dir := t.TempDir()
 	jsonPath := filepath.Join(dir, "audio.json")
-	payload := whisperXPayload{
+	payload := transcriptionPayload{
 		Language: "en",
 		Segments: []map[string]any{{
 			"start": 1.0,
@@ -87,6 +87,18 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 	runStableTS = func(ctx context.Context, args []string) ([]byte, error) {
 		if len(args) < 9 {
 			t.Fatalf("unexpected args: %v", args)
+		}
+		filteredPath := args[5]
+		filteredData, err := os.ReadFile(filteredPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var filtered transcriptionPayload
+		if err := json.Unmarshal(filteredData, &filtered); err != nil {
+			t.Fatal(err)
+		}
+		if got := filtered.Segments[0]["text"]; got != "General Kenobi" {
+			t.Fatalf("expected segment text to be preserved, got %v", got)
 		}
 		outputPath := args[6]
 		if err := os.WriteFile(outputPath, []byte("1\n00:00:01,000 --> 00:00:03,000\nGeneral Kenobi\n"), 0o644); err != nil {

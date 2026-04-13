@@ -173,7 +173,8 @@ mid-run.
 | FFprobe    | `ffprobe`     | No       | Always required               |
 | MediaInfo  | `mediainfo`   | No       | Always required               |
 | bd_info    | `bd_info`     | Yes      | Always optional               |
-| uvx        | `uvx`         | No*      | When subtitles.enabled (WhisperX + Stable-TS formatter packages) |
+| uv         | `uv`          | No*      | When subtitles.enabled (managed Parakeet runtime bootstrap) |
+| uvx        | `uvx`         | No*      | When subtitles.enabled (Stable-TS formatter package runner) |
 | mkvmerge   | `mkvmerge`    | No*      | When subtitles.mux_into_mkv   |
 
 *Conditionally required based on config.
@@ -511,7 +512,7 @@ block the pipeline:
 - Subtitle sidecar move failure (log warning)
 
 Everything else (MakeMKV failures, encoding errors, file copy errors,
-WhisperX failures, network errors, and episode-identification reference
+Parakeet failures, network errors, and episode-identification reference
 acquisition failures) fails the item.
 
 ### 5.3 Error Wrapping
@@ -741,9 +742,10 @@ Key validation constraints enforced by `validate.go`:
 - `makemkv.rip_timeout`: Must be > 0.
 - `makemkv.min_title_length`: Must be >= 0.
 - `jellyfin.url` and `jellyfin.api_key`: Required when `jellyfin.enabled`.
-- `subtitles.whisperx_hf_token`: Required when subtitles enabled with
-  pyannote VAD.
-- `opensubtitles.api_key`: Required when OpenSubtitles enabled.
+- `subtitles.transcription_engine`: Must be `parakeet`.
+- `subtitles.transcription_device`: Must be `auto`, `cuda`, or `cpu`.
+- `subtitles.transcription_precision`: Must be `bf16` or `fp32`.
+- `subtitles.opensubtitles_api_key`: Required when OpenSubtitles enabled.
 
 ### 8.3 Config Commands
 
@@ -765,16 +767,16 @@ config file. These include: `config init` and help commands.
 
 ### 9.1 Purpose
 
-WhisperX transcription is used by three subsystems: episode identification,
+Canonical transcription is used by three subsystems: episode identification,
 commentary detection, and subtitle generation. Rather than each subsystem
-invoking WhisperX independently with separate caching, a shared
+invoking the backend independently with separate caching, a shared
 `transcription` package provides a unified interface.
 
 ### 9.2 Interface
 
 ```go
 type Service struct {
-    // Configuration: model, CUDA, VAD method, cache dir, etc.
+    // Configuration: engine, model, device, precision, cache dir, logger.
 }
 
 func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*TranscribeResult, error)
@@ -788,15 +790,15 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 | `AudioIndex` | int | Selected audio-relative stream index to extract |
 | `Language` | string | Target language code |
 | `OutputDir` | string | Directory for output files |
-| `Model` | string | WhisperX model override (empty = default) |
+| `Model` | string | Parakeet model override (empty = default) |
 | `ContentKey` | string | Content-stable cache identity (see Section 9.3) |
 
 **TranscribeResult:**
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `SRTPath` | string | Path to canonical WhisperX SRT file |
-| `JSONPath` | string | Path to canonical WhisperX JSON/alignment output |
+| `SRTPath` | string | Path to canonical transcription SRT file |
+| `JSONPath` | string | Path to canonical transcription JSON output |
 | `Duration` | float64 | Detected audio duration in seconds |
 | `Segments` | int | Number of SRT cues |
 | `Cached` | bool | True if result came from cache |
@@ -811,7 +813,7 @@ different paths).
 Cache key computation:
 
 ```
-key = hex(SHA-256( contentKey + "\x00" + model + "\x00" + language ))
+key = hex(SHA-256( engine + "\x00" + contentKey + "\x00" + model + "\x00" + language ))
 ```
 
 Where `contentKey` is a caller-supplied identity string that remains stable
@@ -830,9 +832,9 @@ generated during episode ID is a cache hit during subtitling without any
 cross-stage plumbing or envelope attributes.
 
 When `ContentKey` is empty, the service falls back to a path-based key:
-`hex(SHA-256( inputPath + "\x00" + audioIndex + "\x00" + model + "\x00" + language ))`.
+`hex(SHA-256( engine + "\x00" + inputPath + "\x00" + audioIndex + "\x00" + model + "\x00" + language ))`.
 
-Cache directory: `$XDG_CACHE_HOME/spindle/whisperx/{cache_key}/`
+Cache directory: `$XDG_CACHE_HOME/spindle/transcription/{cache_key}/`
 
 **Cache operations:**
 - `Lookup(key)`: Check for existing canonical transcription. Validates both SRT
@@ -840,28 +842,58 @@ Cache directory: `$XDG_CACHE_HOME/spindle/whisperx/{cache_key}/`
 - `Store(key, result)`: Copy canonical SRT and JSON artifacts to the cache
   directory.
 
-### 9.4 Concurrency
+### 9.4 Runtime Bootstrap and Concurrency
 
-All WhisperX invocations are serialized by the `whisperxSem` semaphore
-(capacity 1) at the pipeline level. The transcription service itself is
-stateless and safe for concurrent use -- the semaphore is held by the
-calling stage, not the service.
+All transcription work is serialized by the `transcriptionSem` semaphore
+(capacity 1) at the pipeline level. The transcription service itself is safe
+for concurrent use; runtime bootstrap is internally synchronized and stage-level
+serialization prevents concurrent GPU/model use.
+
+For the Parakeet backend, the service manages a persistent runtime under:
+
+- `$XDG_CACHE_HOME/spindle/transcription/runtime/parakeet/.venv`
+- embedded helper script: `parakeet_transcribe.py`
+- bootstrap stamp file for runtime versioning
+
+Bootstrap flow:
+
+1. `uv venv --python <python>` creates the venv.
+2. `uv pip install` installs bootstrap tools.
+3. `uv pip install nemo-toolkit[asr,cu13]>=2.4.0,<3` (or CPU variant) installs runtime packages.
+4. A Python import check validates `torch` + `nemo.collections.asr`.
+
+Runtime overrides:
+
+- `SPINDLE_TRANSCRIPTION_PYTHON`: Python interpreter passed to `uv venv`
+- `SPINDLE_TRANSCRIPTION_NEMO_SPEC`: override package install spec
 
 ### 9.5 Audio Extraction
 
 Audio extraction (FFmpeg WAV conversion) is performed by the service before
-invoking WhisperX:
+invoking the helper:
 
 ```
 ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
 ```
 
-### 9.6 Post-Processing Pipeline
+### 9.6 Backend Contract
 
-After WhisperX completes:
+The current backend is `parakeet` with default model
+`nvidia/parakeet-tdt-0.6b-v2`.
+
+Behavior:
+
+- language validation is explicit: Parakeet TDT 0.6B v2 is English-only
+- `device` may be `auto`, `cuda`, or `cpu`
+- `precision` may be `bf16` or `fp32`
+- helper output contract is canonical `audio.srt` + `audio.json`
+
+### 9.7 Post-Processing Pipeline
+
+After transcription completes:
 
 1. The transcription service stores **canonical transcript artifacts** only
-   (raw SRT + JSON/alignment output).
+   (raw SRT + JSON output).
 2. Subtitle-specific hallucination filtering, Stable-TS formatting, and final
    display-SRT validation happen in the `subtitle` package, not in the shared
    transcription service.

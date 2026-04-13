@@ -73,6 +73,7 @@ const (
 	DecisionTrackSelect              = "track_select"
 	DecisionTranscriptionAsset       = "transcription_asset"
 	DecisionTranscriptionCache       = "transcription_cache"
+	DecisionTranscriptionPrecision   = "transcription_precision"
 	DecisionValidationFailureRoute   = "validation_failure_route"
 	DecisionYearSource               = "year_source"
 )

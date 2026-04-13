@@ -19,10 +19,10 @@ import (
 type Semaphore int
 
 const (
-	SemNone     Semaphore = iota
-	SemDisc               // guards optical drive
-	SemEncode             // guards SVT-AV1 encoder
-	SemWhisperX           // guards WhisperX GPU
+	SemNone          Semaphore = iota
+	SemDisc                    // guards optical drive
+	SemEncode                  // guards SVT-AV1 encoder
+	SemTranscription           // guards shared transcription runtime
 )
 
 // PipelineStage describes a single stage in the pipeline.
@@ -40,7 +40,7 @@ type pipelineState struct {
 	stages     []PipelineStage
 	stageOrder []queue.Stage
 	stageMap   map[queue.Stage]int
-	sems       [3]chan struct{} // disc, encode, whisperx (capacity 1 each)
+	sems       [3]chan struct{} // disc, encode, transcription (capacity 1 each)
 	logger     *slog.Logger
 }
 

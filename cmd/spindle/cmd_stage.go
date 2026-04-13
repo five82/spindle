@@ -241,23 +241,24 @@ func newGensubtitleCmd() *cobra.Command {
 			}
 
 			// Create transcription service.
-			svc := transcription.New(
-				cfg.Subtitles.WhisperXModel,
-				cfg.Subtitles.WhisperXCUDAEnabled,
-				cfg.Subtitles.WhisperXVADMethod,
-				cfg.Subtitles.WhisperXHFToken,
-				cfg.WhisperXCacheDir(),
-				cmdLogger,
-			)
+			svc := transcription.New(transcription.Config{
+				Engine:    cfg.Subtitles.TranscriptionEngine,
+				Model:     cfg.Subtitles.TranscriptionModel,
+				Device:    cfg.Subtitles.TranscriptionDevice,
+				Precision: cfg.Subtitles.TranscriptionPrecision,
+				CacheDir:  cfg.TranscriptionCacheDir(),
+				Logger:    cmdLogger,
+			})
 
 			fmt.Printf("Preparing subtitles for %s...\n", filepath.Base(file))
 
-			// Verbose: show WhisperX config before transcription.
+			// Verbose: show transcription config before transcription.
 			if flagVerbose {
-				model, device, vad := svc.Config()
+				engine, model, device, precision := svc.Config()
+				fmt.Printf("  %s %s\n", labelStyle("Engine:  "), engine)
 				fmt.Printf("  %s %s\n", labelStyle("Model:   "), model)
 				fmt.Printf("  %s %s\n", labelStyle("Device:  "), device)
-				fmt.Printf("  %s %s\n", labelStyle("VAD:     "), vad)
+				fmt.Printf("  %s %s\n", labelStyle("Precision:"), precision)
 				fmt.Printf("  %s en\n", labelStyle("Language:"))
 			}
 
@@ -279,9 +280,9 @@ func newGensubtitleCmd() *cobra.Command {
 				case phase == transcription.PhaseExtract && elapsed > 0:
 					fmt.Printf("  Extracting audio %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
 				case phase == transcription.PhaseTranscribe && elapsed == 0:
-					fmt.Println("  Running WhisperX...")
+					fmt.Println("  Running Parakeet...")
 				case phase == transcription.PhaseTranscribe && elapsed > 0:
-					fmt.Printf("  Running WhisperX %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
+					fmt.Printf("  Running Parakeet %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
 				}
 			}
 

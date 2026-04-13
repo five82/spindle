@@ -125,7 +125,14 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ripCacheStore = ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 	}
 
-	transcriber := transcription.New(cfg.Subtitles.WhisperXModel, cfg.Subtitles.WhisperXCUDAEnabled, cfg.Subtitles.WhisperXVADMethod, cfg.Subtitles.WhisperXHFToken, cfg.WhisperXCacheDir(), logger)
+	transcriber := transcription.New(transcription.Config{
+		Engine:    cfg.Subtitles.TranscriptionEngine,
+		Model:     cfg.Subtitles.TranscriptionModel,
+		Device:    cfg.Subtitles.TranscriptionDevice,
+		Precision: cfg.Subtitles.TranscriptionPrecision,
+		CacheDir:  cfg.TranscriptionCacheDir(),
+		Logger:    logger,
+	})
 
 	// Create disc monitor (if optical drive configured).
 	// Created before stage handlers so the ripper can pause/resume detection.
@@ -169,10 +176,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	manager.ConfigureStages([]workflow.PipelineStage{
 		{Stage: queue.StageIdentification, Handler: identifyHandler, Semaphore: workflow.SemDisc},
 		{Stage: queue.StageRipping, Handler: ripperHandler, Semaphore: workflow.SemDisc},
-		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Semaphore: workflow.SemWhisperX},
+		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Semaphore: workflow.SemTranscription},
 		{Stage: queue.StageEncoding, Handler: encoderHandler, Semaphore: workflow.SemEncode},
-		{Stage: queue.StageAudioAnalysis, Handler: audioHandler, Semaphore: workflow.SemWhisperX},
-		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Semaphore: workflow.SemWhisperX},
+		{Stage: queue.StageAudioAnalysis, Handler: audioHandler, Semaphore: workflow.SemTranscription},
+		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Semaphore: workflow.SemTranscription},
 		{Stage: queue.StageOrganizing, Handler: organizerHandler, Semaphore: workflow.SemNone},
 	})
 

@@ -32,7 +32,7 @@ These wrap CLI tools that stage handlers invoke:
 |-----------|---------|---------|---------|
 | `MakeMKVRunner` | `makemkv` | `Scan(ctx, device) (*ScanResult, error)`, `Rip(ctx, device, titleID, outDir) error` | `identify`, `ripper` |
 | `FFprobeRunner` | `media/ffprobe` | `Inspect(ctx, path) (*Result, error)` | Multiple stages |
-| `WhisperXRunner` | `transcription` | `Run(ctx, input, opts) (*RawOutput, error)` | `transcription` |
+| `TranscriptionRunner` | `transcription` | `Run(ctx, input, opts) (*RawOutput, error)` | `transcription` |
 | `MkvmergeRunner` | `subtitle` | `Mux(ctx, input, subs, output) error` | `subtitle` |
 
 In production, these are concrete structs that shell out via `exec.CommandContext`.
@@ -62,7 +62,7 @@ REST API clients defined at the consumer site:
 | Interface | Double Type | Key Behavior |
 |-----------|-------------|--------------|
 | `queue.Store` | In-memory fake | SQLite in `:memory:` mode |
-| `transcription.Service` | Stub | Return canned canonical WhisperX artifacts (SRT + JSON) |
+| `transcription.Service` | Stub | Return canned canonical transcription artifacts (SRT + JSON) |
 | `makemkv.Runner` | Stub | Return canned robot output |
 | `tmdb.Client` | Stub | Return canned search/detail JSON |
 | `opensubtitles.Client` | Stub | Return canned subtitle content |
@@ -86,7 +86,7 @@ No hard coverage targets. Focus testing effort on:
 2. **Data serialization**: RipSpec round-trips, encoding snapshot, metadata JSON.
 3. **State machines**: Stage transitions, asset status tracking.
 4. **Edge cases in external tool parsing**: MakeMKV robot format variations,
-   ffprobe output quirks, WhisperX SRT/JSON output formats, subtitle formatter invocation.
+   ffprobe output quirks, transcription SRT/JSON output formats, subtitle formatter invocation.
 
 **Subtitle-specific expectations:**
 - Test that canonical transcript artifacts remain unchanged when subtitle formatting runs.

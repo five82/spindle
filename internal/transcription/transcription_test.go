@@ -30,19 +30,18 @@ func TestCacheKeyWithContentKey(t *testing.T) {
 		Language:   "en",
 		ContentKey: "stable-content-id",
 	}
-	key := cacheKey(req, "large-v3")
+	key := cacheKey(req, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if key == "" {
 		t.Fatal("expected non-empty cache key")
 	}
 
-	// Content key should NOT depend on input path.
 	req2 := TranscribeRequest{
 		InputPath:  "/different/path.mkv",
 		AudioIndex: 2,
 		Language:   "en",
 		ContentKey: "stable-content-id",
 	}
-	key2 := cacheKey(req2, "large-v3")
+	key2 := cacheKey(req2, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if key != key2 {
 		t.Errorf("content-stable keys should match: %s != %s", key, key2)
 	}
@@ -54,52 +53,64 @@ func TestCacheKeyWithoutContentKey(t *testing.T) {
 		AudioIndex: 1,
 		Language:   "en",
 	}
-	key := cacheKey(req, "large-v3")
+	key := cacheKey(req, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if key == "" {
 		t.Fatal("expected non-empty cache key")
 	}
 
-	// Different path should produce different key.
 	req2 := TranscribeRequest{
 		InputPath:  "/different/path.mkv",
 		AudioIndex: 1,
 		Language:   "en",
 	}
-	key2 := cacheKey(req2, "large-v3")
+	key2 := cacheKey(req2, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if key == key2 {
 		t.Errorf("path-based keys should differ for different paths")
 	}
 }
 
+func TestCacheKeyIncludesEngine(t *testing.T) {
+	req := TranscribeRequest{ContentKey: "disc-abc-title-1", Language: "en"}
+	parakeet := cacheKey(req, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	other := cacheKey(req, "other", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	if parakeet == other {
+		t.Fatal("cache key should differ when engine changes")
+	}
+}
+
 func TestCacheKeySameContentKeySameModelLanguage(t *testing.T) {
-	req1 := TranscribeRequest{
-		ContentKey: "disc-abc-title-1",
-		Language:   "en",
-	}
-	req2 := TranscribeRequest{
-		ContentKey: "disc-abc-title-1",
-		Language:   "en",
-	}
-	k1 := cacheKey(req1, "large-v3")
-	k2 := cacheKey(req2, "large-v3")
+	req1 := TranscribeRequest{ContentKey: "disc-abc-title-1", Language: "en"}
+	req2 := TranscribeRequest{ContentKey: "disc-abc-title-1", Language: "en"}
+	k1 := cacheKey(req1, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	k2 := cacheKey(req2, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if k1 != k2 {
 		t.Errorf("same content key, model, language should produce same key: %s != %s", k1, k2)
 	}
 }
 
 func TestCacheKeyDifferentContentKey(t *testing.T) {
-	req1 := TranscribeRequest{
-		ContentKey: "disc-abc-title-1",
-		Language:   "en",
-	}
-	req2 := TranscribeRequest{
-		ContentKey: "disc-xyz-title-2",
-		Language:   "en",
-	}
-	k1 := cacheKey(req1, "large-v3")
-	k2 := cacheKey(req2, "large-v3")
+	req1 := TranscribeRequest{ContentKey: "disc-abc-title-1", Language: "en"}
+	req2 := TranscribeRequest{ContentKey: "disc-xyz-title-2", Language: "en"}
+	k1 := cacheKey(req1, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
+	k2 := cacheKey(req2, "parakeet", "nvidia/parakeet-tdt-0.6b-v2", "en")
 	if k1 == k2 {
 		t.Errorf("different content keys should produce different cache keys")
+	}
+}
+
+func TestValidateLanguageRejectsNonEnglishForParakeet(t *testing.T) {
+	svc := New(Config{CacheDir: t.TempDir()})
+	if err := svc.validateLanguage("es"); err == nil {
+		t.Fatal("expected non-English language to be rejected for parakeet")
+	}
+}
+
+func TestPrefixedOutputLine(t *testing.T) {
+	output := "noise\nprecision_fallback: bf16 transcription failed with dtype mismatch; retrying in fp32\nmore noise\n"
+	got := prefixedOutputLine(output, "precision_fallback:")
+	want := "bf16 transcription failed with dtype mismatch; retrying in fp32"
+	if got != want {
+		t.Fatalf("prefixedOutputLine() = %q, want %q", got, want)
 	}
 }
 
@@ -171,7 +182,7 @@ func TestAnalyzeSRTEmpty(t *testing.T) {
 
 func TestLookupMiss(t *testing.T) {
 	dir := t.TempDir()
-	svc := New("large-v3", false, "silero", "", dir, nil)
+	svc := New(Config{CacheDir: dir})
 
 	result, ok := svc.Lookup("nonexistent-key")
 	if ok {
@@ -191,7 +202,7 @@ func TestLookupRejectsCacheWithoutJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(keyDir, "audio.srt"), []byte(sampleSRT), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := New("large-v3", false, "silero", "", dir, nil)
+	svc := New(Config{CacheDir: dir})
 	if result, ok := svc.Lookup("cache-key"); ok || result != nil {
 		t.Fatalf("expected cache miss when JSON artifact is missing, got %+v", result)
 	}
@@ -212,7 +223,7 @@ func TestSelectPrimaryAudioTrack(t *testing.T) {
 		}}, nil
 	}
 
-	svc := New("large-v3", false, "silero", "", t.TempDir(), nil)
+	svc := New(Config{CacheDir: t.TempDir()})
 	selected, err := svc.SelectPrimaryAudioTrack(context.Background(), "/tmp/input.mkv", "en")
 	if err != nil {
 		t.Fatalf("SelectPrimaryAudioTrack() error = %v", err)
@@ -238,7 +249,7 @@ func TestSelectPrimaryAudioTrackFallsBackLanguage(t *testing.T) {
 		}}, nil
 	}
 
-	svc := New("large-v3", false, "silero", "", t.TempDir(), nil)
+	svc := New(Config{CacheDir: t.TempDir()})
 	selected, err := svc.SelectPrimaryAudioTrack(context.Background(), "/tmp/input.mkv", "english")
 	if err != nil {
 		t.Fatalf("SelectPrimaryAudioTrack() error = %v", err)
@@ -253,9 +264,8 @@ func TestSelectPrimaryAudioTrackFallsBackLanguage(t *testing.T) {
 
 func TestStoreAndLookupRoundTrip(t *testing.T) {
 	cacheDir := t.TempDir()
-	svc := New("large-v3", false, "silero", "", cacheDir, nil)
+	svc := New(Config{CacheDir: cacheDir})
 
-	// Write a sample SRT to a source location.
 	srcDir := t.TempDir()
 	srtPath := filepath.Join(srcDir, "audio.srt")
 	if err := os.WriteFile(srtPath, []byte(sampleSRT), 0o644); err != nil {
@@ -295,7 +305,6 @@ func TestStoreAndLookupRoundTrip(t *testing.T) {
 		t.Errorf("expected Duration 12.0, got %.1f", result.Duration)
 	}
 
-	// Verify the cached file exists and is readable.
 	data, err := os.ReadFile(result.SRTPath)
 	if err != nil {
 		t.Fatalf("cached SRT not readable: %v", err)

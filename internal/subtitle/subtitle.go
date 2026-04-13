@@ -1,6 +1,6 @@
 // Package subtitle implements the subtitle generation stage (Layer 4).
 //
-// Subtitle generation: canonical WhisperX transcription reuse, hallucination
+// Subtitle generation: canonical transcription reuse, hallucination
 // filtering, Stable-TS display formatting, SRT validation, forced subtitle
 // ranking from OpenSubtitles, MKV muxing, and resume support.
 package subtitle
@@ -206,7 +206,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		record := ripspec.SubtitleGenRecord{
 			EpisodeKey:       key,
-			Source:           "whisperx",
+			Source:           "parakeet",
 			Cached:           result.Cached,
 			SubtitlePath:     formatting.DisplayPath,
 			Segments:         len(formattedCues),

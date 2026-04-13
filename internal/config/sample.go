@@ -70,21 +70,17 @@ api_key = ""
 # Embed subtitles in MKV container
 # mux_into_mkv = true
 
-# WhisperX model name
-# whisperx_model = "large-v3"
+# Transcription engine
+# transcription_engine = "parakeet"
 
-# Enable CUDA acceleration
-# whisperx_cuda_enabled = false
+# Transcription model name
+# transcription_model = "nvidia/parakeet-tdt-0.6b-v2"
 
-# Voice activity detection method: "silero" (default) or "pyannote"
-#   silero  - fast, lightweight, no token required
-#   pyannote - better precision with background noise and overlapping speech;
-#              requires whisperx_hf_token to be set
-# whisperx_vad_method = "silero"
+# Transcription device: "auto", "cuda", or "cpu"
+# transcription_device = "auto"
 
-# HuggingFace access token, required for pyannote VAD
-# (or set HUGGING_FACE_HUB_TOKEN / HF_TOKEN env var)
-# whisperx_hf_token = ""
+# Transcription precision: "bf16" or "fp32"
+# transcription_precision = "bf16"
 
 # Enable OpenSubtitles integration
 # opensubtitles_enabled = false
@@ -175,8 +171,8 @@ api_key = ""
 # Enable commentary track detection
 # enabled = false
 
-# WhisperX model for commentary analysis
-# whisperx_model = "large-v3-turbo"
+# Commentary transcription model override (empty uses subtitles.transcription_model)
+# transcription_model = ""
 
 # Cosine similarity threshold for stereo downmix check
 # similarity_threshold = 0.92

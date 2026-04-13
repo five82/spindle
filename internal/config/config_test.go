@@ -143,7 +143,7 @@ func TestValidateJellyfinConditional(t *testing.T) {
 	}
 }
 
-func TestValidateSubtitlesHFToken(t *testing.T) {
+func TestValidateSubtitlesTranscriptionConfig(t *testing.T) {
 	cfg := &Config{}
 	applyDefaults(cfg)
 	cfg.TMDB.APIKey = "test-key"
@@ -151,21 +151,30 @@ func TestValidateSubtitlesHFToken(t *testing.T) {
 	cfg.Paths.StateDir = "/tmp/state"
 	cfg.Paths.ReviewDir = "/tmp/review"
 	cfg.Subtitles.Enabled = true
-	cfg.Subtitles.WhisperXVADMethod = "pyannote"
+	cfg.Subtitles.TranscriptionEngine = "bogus"
+	cfg.Subtitles.TranscriptionDevice = "tpu"
+	cfg.Subtitles.TranscriptionPrecision = "fp16"
 
 	err := cfg.Validate()
 	if err == nil {
-		t.Fatal("Validate should fail when subtitles enabled with pyannote but no HF token")
+		t.Fatal("Validate should fail with invalid transcription settings")
 	}
-	if !strings.Contains(err.Error(), "whisperx_hf_token") {
-		t.Errorf("expected error about whisperx_hf_token, got: %s", err.Error())
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "subtitles.transcription_engine") {
+		t.Errorf("expected error about subtitles.transcription_engine, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "subtitles.transcription_device") {
+		t.Errorf("expected error about subtitles.transcription_device, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "subtitles.transcription_precision") {
+		t.Errorf("expected error about subtitles.transcription_precision, got: %s", errMsg)
 	}
 
-	// Should pass with silero VAD method (default).
-	cfg.Subtitles.WhisperXVADMethod = "silero"
-	err = cfg.Validate()
-	if err != nil {
-		t.Fatalf("Validate should pass with silero VAD, got: %v", err)
+	cfg.Subtitles.TranscriptionEngine = "parakeet"
+	cfg.Subtitles.TranscriptionDevice = "auto"
+	cfg.Subtitles.TranscriptionPrecision = "bf16"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate should pass with valid transcription settings, got: %v", err)
 	}
 }
 
@@ -252,7 +261,7 @@ func TestAutoDerivedPaths(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "/tmp/test-cache")
 	// Force os.UserCacheDir to use our env (it reads XDG_CACHE_HOME on Linux).
 	opensubDir := cfg.OpenSubtitlesCacheDir()
-	whisperDir := cfg.WhisperXCacheDir()
+	transcriptionDir := cfg.TranscriptionCacheDir()
 	ripDir := cfg.RipCacheDir()
 	discIDPath := cfg.DiscIDCachePath()
 
@@ -260,8 +269,8 @@ func TestAutoDerivedPaths(t *testing.T) {
 	if !strings.Contains(opensubDir, "opensubtitles") {
 		t.Errorf("OpenSubtitlesCacheDir should contain 'opensubtitles', got %q", opensubDir)
 	}
-	if !strings.Contains(whisperDir, "whisperx") {
-		t.Errorf("WhisperXCacheDir should contain 'whisperx', got %q", whisperDir)
+	if !strings.Contains(transcriptionDir, "transcription") {
+		t.Errorf("TranscriptionCacheDir should contain 'transcription', got %q", transcriptionDir)
 	}
 	if !strings.Contains(ripDir, "rips") {
 		t.Errorf("RipCacheDir should contain 'rips', got %q", ripDir)
@@ -304,7 +313,6 @@ func TestEnvironmentVariableOverrides(t *testing.T) {
 	t.Setenv("JELLYFIN_API_KEY", "jf-from-env")
 	t.Setenv("OPENROUTER_API_KEY", "or-from-env")
 	t.Setenv("SPINDLE_API_TOKEN", "api-from-env")
-	t.Setenv("HUGGING_FACE_HUB_TOKEN", "hf-from-env")
 	t.Setenv("OPENSUBTITLES_API_KEY", "os-from-env")
 	t.Setenv("OPENSUBTITLES_USER_TOKEN", "os-user-from-env")
 
@@ -325,37 +333,11 @@ func TestEnvironmentVariableOverrides(t *testing.T) {
 	if cfg.API.Token != "api-from-env" {
 		t.Errorf("API token not set from env: %q", cfg.API.Token)
 	}
-	if cfg.Subtitles.WhisperXHFToken != "hf-from-env" {
-		t.Errorf("HF token not set from env: %q", cfg.Subtitles.WhisperXHFToken)
-	}
 	if cfg.Subtitles.OpenSubtitlesAPIKey != "os-from-env" {
 		t.Errorf("OpenSubtitles API key not set from env: %q", cfg.Subtitles.OpenSubtitlesAPIKey)
 	}
 	if cfg.Subtitles.OpenSubtitlesUserToken != "os-user-from-env" {
 		t.Errorf("OpenSubtitles user token not set from env: %q", cfg.Subtitles.OpenSubtitlesUserToken)
-	}
-}
-
-func TestHFTokenFallback(t *testing.T) {
-	dir := t.TempDir()
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
-	t.Setenv("HOME", dir)
-
-	t.Setenv("TMDB_API_KEY", "test-key")
-	t.Setenv("HUGGING_FACE_HUB_TOKEN", "")
-	t.Setenv("HF_TOKEN", "hf-fallback")
-
-	cfg, err := Load("", nil)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-
-	if cfg.Subtitles.WhisperXHFToken != "hf-fallback" {
-		t.Errorf("HF_TOKEN fallback not used: %q", cfg.Subtitles.WhisperXHFToken)
 	}
 }
 

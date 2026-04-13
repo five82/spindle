@@ -1,4 +1,4 @@
-// Package transcription provides shared canonical WhisperX transcription with caching.
+// Package transcription provides shared canonical transcription with caching.
 package transcription
 
 import (
@@ -15,36 +15,66 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/fileutil"
+	internallang "github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/srtutil"
 )
 
-// Service provides WhisperX transcription with caching.
+const (
+	defaultEngine    = "parakeet"
+	defaultModel     = "nvidia/parakeet-tdt-0.6b-v2"
+	defaultDevice    = "auto"
+	defaultPrecision = "bf16"
+)
+
+// Config defines transcription service settings.
+type Config struct {
+	Engine    string
+	Model     string
+	Device    string
+	Precision string
+	CacheDir  string
+	Logger    *slog.Logger
+}
+
+// Service provides canonical transcription with caching.
 type Service struct {
-	model       string
-	cudaEnabled bool
-	vadMethod   string
-	hfToken     string
-	cacheDir    string
-	logger      *slog.Logger
+	engine    string
+	model     string
+	device    string
+	precision string
+	cacheDir  string
+	logger    *slog.Logger
+	runtime   *runtimeEnv
 }
 
 // New creates a transcription service.
-func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string, logger *slog.Logger) *Service {
-	logger = logs.Default(logger)
-	if model == "" {
-		model = "large-v3"
+func New(cfg Config) *Service {
+	logger := logs.Default(cfg.Logger)
+	engine := strings.ToLower(strings.TrimSpace(cfg.Engine))
+	if engine == "" {
+		engine = defaultEngine
 	}
-	if vadMethod == "" {
-		vadMethod = "silero"
+	model := strings.TrimSpace(cfg.Model)
+	if model == "" {
+		model = defaultModel
+	}
+	device := strings.ToLower(strings.TrimSpace(cfg.Device))
+	if device == "" {
+		device = defaultDevice
+	}
+	precision := strings.ToLower(strings.TrimSpace(cfg.Precision))
+	if precision == "" {
+		precision = defaultPrecision
 	}
 	return &Service{
-		model:       model,
-		cudaEnabled: cudaEnabled,
-		vadMethod:   vadMethod,
-		hfToken:     hfToken,
-		cacheDir:    cacheDir,
-		logger:      logger,
+		engine:    engine,
+		model:     model,
+		device:    device,
+		precision: precision,
+		cacheDir:  cfg.CacheDir,
+		logger:    logger,
+		runtime:   newRuntimeEnv(cfg.CacheDir, engine),
 	}
 }
 
@@ -79,16 +109,16 @@ type TranscribeResult struct {
 	Segments       int
 	Cached         bool
 	ExtractTime    time.Duration // time spent on ffmpeg audio extraction
-	TranscribeTime time.Duration // time spent on WhisperX
+	TranscribeTime time.Duration // time spent on Parakeet transcription
 }
 
-// Transcribe runs WhisperX transcription with caching.
+// Transcribe runs canonical transcription with caching.
 //
 // Steps:
 //  1. Compute cache key.
 //  2. Check cache. If hit, return cached result.
 //  3. Extract audio via FFmpeg.
-//  4. Run WhisperX via uvx.
+//  4. Run the configured transcription engine.
 //  5. Read SRT, count segments, parse duration.
 //  6. Store in cache.
 //  7. Return result.
@@ -100,19 +130,22 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		onProgress = progress[0]
 	}
 
-	model := req.Model
+	model := strings.TrimSpace(req.Model)
 	if model == "" {
 		model = s.model
 	}
+	language := normalizeLanguage(req.Language)
+	if err := s.validateLanguage(language); err != nil {
+		return nil, err
+	}
 
-	key := cacheKey(req, model)
+	key := cacheKey(req, s.engine, model, language)
 
-	// Check cache.
 	if result, ok := s.Lookup(key); ok {
 		s.logger.Info("transcription cache hit",
 			"decision_type", logs.DecisionTranscriptionCache,
 			"decision_result", "hit",
-			"decision_reason", fmt.Sprintf("key=%s segments=%d", key[:12], result.Segments),
+			"decision_reason", fmt.Sprintf("engine=%s key=%s segments=%d", s.engine, key[:12], result.Segments),
 		)
 		result.Cached = true
 		return result, nil
@@ -120,15 +153,13 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	s.logger.Info("transcription cache miss",
 		"decision_type", logs.DecisionTranscriptionCache,
 		"decision_result", "miss",
-		"decision_reason", fmt.Sprintf("key=%s", key[:12]),
+		"decision_reason", fmt.Sprintf("engine=%s key=%s", s.engine, key[:12]),
 	)
 
-	// Ensure output directory exists.
 	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
 
-	// Extract audio via FFmpeg.
 	if onProgress != nil {
 		onProgress(PhaseExtract, 0)
 	}
@@ -159,43 +190,50 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		onProgress(PhaseExtract, extractTime)
 	}
 
-	// Run WhisperX via uvx.
 	if onProgress != nil {
 		onProgress(PhaseTranscribe, 0)
 	}
-	whisperArgs := []string{
-		"whisperx", wavPath,
+	pythonPath, helperPath, err := s.ensureRuntime(ctx)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{
+		helperPath,
+		"--input", wavPath,
+		"--output-dir", req.OutputDir,
 		"--model", model,
-		"--language", req.Language,
-		"--output_format", "all",
-		"--output_dir", req.OutputDir,
-		"--vad_method", s.vadMethod,
-	}
-	if s.cudaEnabled {
-		whisperArgs = append(whisperArgs, "--device", "cuda")
-	} else {
-		whisperArgs = append(whisperArgs, "--device", "cpu")
-	}
-	if s.hfToken != "" {
-		whisperArgs = append(whisperArgs, "--hf_token", s.hfToken)
+		"--device", s.device,
+		"--dtype", s.precision,
+		"--language", language,
 	}
 
-	s.logger.Info("running WhisperX transcription",
-		"event_type", "transcription_whisperx",
+	s.logger.Info("running Parakeet transcription",
+		"event_type", "transcription_parakeet",
+		"engine", s.engine,
 		"model", model,
-		"language", req.Language,
+		"device", s.device,
+		"precision", s.precision,
+		"language", language,
 	)
 	transcribeStart := time.Now()
-	whisperCmd := exec.CommandContext(ctx, "uvx", whisperArgs...)
-	if output, err := whisperCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("whisperx transcription: %w: %s", err, output)
+	output, err := runCommand(ctx, pythonPath, args, s.runtimeEnv())
+	if err != nil {
+		return nil, fmt.Errorf("parakeet transcription: %w: %s", err, strings.TrimSpace(output))
+	}
+	if reason := prefixedOutputLine(output, "precision_fallback:"); reason != "" {
+		s.logger.Info("transcription precision adjusted",
+			"decision_type", logs.DecisionTranscriptionPrecision,
+			"decision_result", "fallback_to_fp32",
+			"decision_reason", strings.TrimSpace(reason),
+			"requested_precision", s.precision,
+			"effective_precision", "fp32",
+		)
 	}
 	transcribeTime := time.Since(transcribeStart)
 	if onProgress != nil {
 		onProgress(PhaseTranscribe, transcribeTime)
 	}
 
-	// Find canonical WhisperX outputs. WhisperX names them after the input wav.
 	srtPath := filepath.Join(req.OutputDir, "audio.srt")
 	if _, err := os.Stat(srtPath); err != nil {
 		return nil, fmt.Errorf("srt output not found at %s: %w", srtPath, err)
@@ -219,25 +257,22 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		ExtractTime:    extractTime,
 		TranscribeTime: transcribeTime,
 	}
-
-	// Store in cache.
 	if err := s.Store(key, result); err != nil {
 		return nil, fmt.Errorf("cache store: %w", err)
 	}
 	s.logger.Debug("transcription result cached", "key", key[:12], "segments", result.Segments)
-
 	return result, nil
 }
 
 // cacheKey computes a deterministic cache key for a transcription request.
 // If ContentKey is non-empty, it is used for content-stable caching.
 // Otherwise, the input path and audio index are used as a fallback.
-func cacheKey(req TranscribeRequest, model string) string {
+func cacheKey(req TranscribeRequest, engine, model, language string) string {
 	var input string
 	if req.ContentKey != "" {
-		input = req.ContentKey + "\x00" + model + "\x00" + req.Language
+		input = engine + "\x00" + req.ContentKey + "\x00" + model + "\x00" + language
 	} else {
-		input = req.InputPath + "\x00" + strconv.Itoa(req.AudioIndex) + "\x00" + model + "\x00" + req.Language
+		input = engine + "\x00" + req.InputPath + "\x00" + strconv.Itoa(req.AudioIndex) + "\x00" + model + "\x00" + language
 	}
 	h := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(h[:])
@@ -278,6 +313,16 @@ func (s *Service) Store(key string, result *TranscribeResult) error {
 		return err
 	}
 	return nil
+}
+
+func prefixedOutputLine(output, prefix string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
 }
 
 func cacheArtifactPaths(dir string) (srtPath, jsonPath string, ok bool) {
@@ -327,14 +372,27 @@ func analyzeSRT(path string) (segments int, duration float64, err error) {
 	return len(cues), cues[len(cues)-1].End, nil
 }
 
-// Config returns the service's WhisperX configuration for display purposes.
-func (s *Service) Config() (model, device, vadMethod string) {
-	model = s.model
-	if s.cudaEnabled {
-		device = "cuda"
-	} else {
-		device = "cpu"
+func normalizeLanguage(value string) string {
+	lang := internallang.ToISO2(strings.TrimSpace(value))
+	if lang == "" {
+		return "en"
 	}
-	vadMethod = s.vadMethod
-	return
+	return lang
+}
+
+func (s *Service) validateLanguage(language string) error {
+	switch s.engine {
+	case defaultEngine:
+		if language != "en" {
+			return fmt.Errorf("parakeet-tdt-0.6b-v2 only supports English audio (got language=%s)", language)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported transcription engine %q", s.engine)
+	}
+}
+
+// Config returns the service configuration for display purposes.
+func (s *Service) Config() (engine, model, device, precision string) {
+	return s.engine, s.model, s.device, s.precision
 }

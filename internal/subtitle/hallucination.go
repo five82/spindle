@@ -10,7 +10,7 @@ import (
 )
 
 // knownHallucinationPhrases contains normalized text commonly hallucinated
-// by WhisperX on silence or noise.
+// by speech-to-text models on silence or noise.
 var knownHallucinationPhrases = map[string]bool{
 	"thank you":                 true,
 	"thanks for watching":       true,
@@ -34,9 +34,9 @@ type indexedTimedCue struct {
 	Text  string
 }
 
-// filterWhisperXOutput applies hallucination filtering to SRT content.
+// filterTranscriptionOutput applies hallucination filtering to SRT content.
 // Returns filtered SRT content or an error if zero cues survive.
-func filterWhisperXOutput(srtContent string, videoSeconds float64) (string, error) {
+func filterTranscriptionOutput(srtContent string, videoSeconds float64) (string, error) {
 	cues := srtutil.Parse(srtContent)
 	if len(cues) == 0 {
 		return "", fmt.Errorf("no cues found in SRT content")

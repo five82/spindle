@@ -124,14 +124,17 @@ func newDebugCommentaryCmd() *cobra.Command {
 				return nil
 			}
 
-			transcriber := transcription.New(
-				cfg.Commentary.WhisperXModel,
-				cfg.Subtitles.WhisperXCUDAEnabled,
-				cfg.Subtitles.WhisperXVADMethod,
-				cfg.Subtitles.WhisperXHFToken,
-				cfg.WhisperXCacheDir(),
-				nil,
-			)
+			commentaryModel := cfg.Commentary.TranscriptionModel
+			if commentaryModel == "" {
+				commentaryModel = cfg.Subtitles.TranscriptionModel
+			}
+			transcriber := transcription.New(transcription.Config{
+				Engine:    cfg.Subtitles.TranscriptionEngine,
+				Model:     commentaryModel,
+				Device:    cfg.Subtitles.TranscriptionDevice,
+				Precision: cfg.Subtitles.TranscriptionPrecision,
+				CacheDir:  cfg.TranscriptionCacheDir(),
+			})
 
 			// Use a synthetic fingerprint for cache keys.
 			debugFP := textutil.SanitizePathSegment(filepath.Base(path))

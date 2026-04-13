@@ -16,11 +16,11 @@ const (
 	maxTranscriptChars  = 6000
 	verificationPrompt  = `You compare two TV episode transcripts to determine if they are from the same episode.
 
-TRANSCRIPT A is a WhisperX speech-to-text transcription from a Blu-ray disc.
+TRANSCRIPT A is a Parakeet speech-to-text transcription from a Blu-ray disc.
 TRANSCRIPT B is a reference subtitle from OpenSubtitles for a specific episode.
 
 Both are extracted from the middle portion of the episode, typically about 10 minutes, though shorter transcripts may use the full available duration.
-WhisperX transcripts may contain speech recognition errors.
+Transcripts may contain speech recognition errors.
 Reference subtitles may differ in exact wording due to subtitle conventions, release differences, or localization.
 
 Focus on whether the same scenes and dialogue events occur in both.
@@ -248,7 +248,7 @@ func buildVerificationPrompt(whisperXText, referenceText, episodeKey string, tar
 	return fmt.Sprintf(`Episode key: %s
 Target episode: %d
 
-=== TRANSCRIPT A (WhisperX from disc) ===
+=== TRANSCRIPT A (Parakeet from disc) ===
 %s
 
 === TRANSCRIPT B (OpenSubtitles reference) ===

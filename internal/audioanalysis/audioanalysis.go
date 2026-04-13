@@ -396,13 +396,13 @@ func (h *Handler) classifyTrack(
 		AudioIndex: idx,
 		Language:   "en",
 		OutputDir:  tempOutputDir(fingerprint, epKey, idx),
-		Model:      h.cfg.Commentary.WhisperXModel,
+		Model:      h.cfg.Commentary.TranscriptionModel,
 		ContentKey: contentKey,
 	})
 	if err != nil {
 		logger.Warn("commentary transcription failed, conservatively marking as commentary",
 			"event_type", "commentary_detection_failed",
-			"error_hint", "whisperx transcription error",
+			"error_hint", "transcription error",
 			"impact", "track preserved as commentary",
 			"error", err,
 			"track_index", idx,

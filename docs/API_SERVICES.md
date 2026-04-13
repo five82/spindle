@@ -166,27 +166,60 @@ HTTP timeout: **45 seconds** (hardcoded `defaultHTTPTimeout`).
 
 ---
 
-## 4. WhisperX CLI
+## 4. Transcription Runtime (Parakeet backend)
 
-Invoked via `uvx` (Python package runner):
+Canonical transcription is produced by the shared `transcription` package using
+an embedded Python helper plus a managed runtime bootstrapped with `uv`.
+The current backend is NVIDIA **Parakeet TDT 0.6B v2**.
+
+### Runtime Bootstrap
+
+On first use, the service creates a persistent runtime under:
 
 ```
-uvx --from whisperx whisperx <input_audio> \
-  --model large-v3 \
-  --language <lang> \
-  --output_dir <dir> \
-  --output_format all \
-  [--compute_type float16 --device cuda]  # when cuda enabled
+$XDG_CACHE_HOME/spindle/transcription/runtime/parakeet/
+  .venv/
+  parakeet_transcribe.py
+  bootstrap.stamp
 ```
 
-GPU acceleration controlled by `subtitles.whisperx_cuda_enabled`.
+Bootstrap commands:
 
-WhisperX output is treated as the **canonical transcript**. Final display SRTs
-are produced later by the subtitle stage from WhisperX JSON/alignment output.
+```
+uv venv --python <python> <runtime_root>/.venv
+uv pip install --python <venv_python> --upgrade pip setuptools wheel
+uv pip install --python <venv_python> nemo-toolkit[asr,cu13]>=2.4.0,<3
+```
+
+CPU-only installs use `nemo-toolkit[asr]>=2.4.0,<3`.
+
+Runtime overrides:
+- `SPINDLE_TRANSCRIPTION_PYTHON`: Python interpreter for `uv venv`
+- `SPINDLE_TRANSCRIPTION_NEMO_SPEC`: override package install spec
+
+### Helper Invocation
+
+The Go service invokes the embedded helper with:
+
+```
+<venv_python> parakeet_transcribe.py \
+  --input <input.wav> \
+  --output-dir <dir> \
+  --model nvidia/parakeet-tdt-0.6b-v2 \
+  --device <auto|cuda|cpu> \
+  --dtype <bf16|fp32> \
+  --language en
+```
+
+Behavior:
+- language is validated explicitly; Parakeet TDT 0.6B v2 is English-only
+- `device=auto` prefers CUDA when available
+- `bf16` uses CUDA autocast; helper retries in `fp32` on dtype mismatch
+- output contract is canonical `audio.srt` + `audio.json`
 
 ### Audio Extraction (Pre-Processing)
 
-Before invoking WhisperX, audio is extracted from the source MKV via FFmpeg:
+Before invoking the helper, audio is extracted from the source MKV via FFmpeg:
 
 ```
 ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
@@ -197,12 +230,22 @@ Parameters:
 - `-ar 16000`: Resample to 16 kHz
 - `-c:a pcm_s16le`: PCM 16-bit signed little-endian
 - `-vn -sn -dn`: Strip video, subtitle, and data streams
-- `-map 0:{audioIndex}`: Select specific audio track by stream index
+- `-map 0:a:<audioIndex>`: Select specific audio track by audio-relative index
+
+### Canonical Output Contract
+
+The transcription backend writes:
+
+- `audio.srt`: canonical transcript SRT
+- `audio.json`: canonical transcript JSON with top-level `language` and `segments`
+
+These artifacts are treated as the canonical transcript. Final display SRTs are
+produced later by the subtitle stage from the canonical JSON.
 
 ### Subtitle Formatting (Stable-TS)
 
 Subtitle generation formats viewer-facing SRTs by invoking Stable-TS via `uvx`
-against the canonical WhisperX JSON/alignment output:
+against derived working JSON based on the canonical transcript:
 
 ```
 uvx --from stable-ts-whisperless python -c <embedded_formatter_script> \
@@ -214,16 +257,14 @@ Behavior:
 - Subtitle formatting consumes derived working JSON; canonical cached transcript
   artifacts remain unchanged.
 - If formatting fails, that subtitle job fails explicitly rather than silently
-  falling back to the old raw-wrap behavior.
+  falling back to raw transcript wrapping.
 
 ### Environment Handling
 
-- **Torch compatibility**: Sets `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` unconditionally
-  to work around Torch 2.6+ default change that breaks WhisperX/pyannote.
-- **CUDA index URL**: When CUDA enabled, passes CUDA-optimized PyPI index URL
-  (`--index-url`) with standard PyPI as fallback (`--extra-index-url`).
-- **VAD method**: Runtime-reconfigurable via `SetVADMethod()`; defaults to `silero`,
-  can switch to `pyannote` (requires HF token).
+- **Torch compatibility**: Sets `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` to work
+  around Torch 2.6+ load behavior changes.
+- **Model/download cache**: Sets `HF_HOME=$XDG_CACHE_HOME/spindle/huggingface`.
+- **Python cache root**: Sets `XDG_CACHE_HOME=$XDG_CACHE_HOME/spindle`.
 
 ---
 
@@ -260,7 +301,7 @@ behavior for all three use cases:
 
 1. **Commentary classification**: Determine if an audio track is commentary
    based on transcript analysis (Section 1)
-2. **Episode verification**: Compare WhisperX and OpenSubtitles transcripts to
+2. **Episode verification**: Compare canonical transcription and OpenSubtitles transcripts to
    verify episode matching (Section 2)
 
 ### Retry Strategy
