@@ -494,7 +494,7 @@ activity and are sent as a matched pair.
 | `mux_into_mkv`             | bool     | true                             | Embed subtitles in MKV container       |
 | `transcription_model`      | string   | `nvidia/parakeet-tdt-0.6b-v2`    | Parakeet model name                    |
 | `transcription_device`     | string   | `auto`                           | Runtime device: `auto`, `cuda`, `cpu`  |
-| `transcription_precision`  | string   | `bf16`                           | Runtime precision: `bf16` or `fp32`    |
+| `transcription_precision`  | string   | `fp32`                           | Runtime precision: `bf16` is usually faster; `fp32` still uses the GPU but favors reliability over speed |
 | `opensubtitles_enabled`    | bool     | false                            | Enable OpenSubtitles integration       |
 | `opensubtitles_api_key`    | string   | (empty)                          | OpenSubtitles API key                  |
 | `opensubtitles_user_agent` | string   | `Spindle/dev v0.1.0`             | User-Agent for OpenSubtitles requests  |

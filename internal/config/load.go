@@ -151,7 +151,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Subtitles.TranscriptionDevice = "auto"
 	}
 	if cfg.Subtitles.TranscriptionPrecision == "" {
-		cfg.Subtitles.TranscriptionPrecision = "bf16"
+		cfg.Subtitles.TranscriptionPrecision = "fp32"
 	}
 	if cfg.Subtitles.OpenSubtitlesUserAgent == "" {
 		cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/dev v0.1.0"

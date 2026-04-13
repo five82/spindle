@@ -24,7 +24,7 @@ const (
 	transcriptionBackendName = "parakeet"
 	defaultModel             = "nvidia/parakeet-tdt-0.6b-v2"
 	defaultDevice            = "auto"
-	defaultPrecision         = "bf16"
+	defaultPrecision         = "fp32"
 )
 
 // Config defines transcription service settings.

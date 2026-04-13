@@ -52,6 +52,9 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	if cfg.Logging.RetentionDays != 60 {
 		t.Errorf("expected default retention days 60, got %d", cfg.Logging.RetentionDays)
 	}
+	if cfg.Subtitles.TranscriptionPrecision != "fp32" {
+		t.Errorf("expected default transcription precision fp32, got %q", cfg.Subtitles.TranscriptionPrecision)
+	}
 	if cfg.Commentary.SimilarityThreshold != 0.92 {
 		t.Errorf("expected default similarity threshold 0.92, got %f", cfg.Commentary.SimilarityThreshold)
 	}
@@ -167,7 +170,7 @@ func TestValidateSubtitlesTranscriptionConfig(t *testing.T) {
 	}
 
 	cfg.Subtitles.TranscriptionDevice = "auto"
-	cfg.Subtitles.TranscriptionPrecision = "bf16"
+	cfg.Subtitles.TranscriptionPrecision = "fp32"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate should pass with valid transcription settings, got: %v", err)
 	}
