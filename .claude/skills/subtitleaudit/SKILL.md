@@ -1,13 +1,13 @@
 ---
 name: subtitleaudit
-description: Audit and fix WhisperX transcription errors in MKV subtitle tracks. Use /subtitleaudit <path_to.mkv> to review and correct the primary embedded subtitle.
+description: Audit and fix transcription errors in MKV subtitle tracks. Use /subtitleaudit <path_to.mkv> to review and correct the primary embedded subtitle.
 user-invocable: true
 argument-hint: <path_to.mkv>
 ---
 
 # Subtitle Audit Skill
 
-Review and correct WhisperX transcription errors in MKV-embedded subtitles.
+Review and correct transcription errors in MKV-embedded subtitles.
 
 ## Usage
 
@@ -15,7 +15,9 @@ Review and correct WhisperX transcription errors in MKV-embedded subtitles.
 
 ## Overview
 
-This skill extracts the primary (non-forced) SRT subtitle from an MKV file, reviews it for obvious WhisperX transcription errors, presents proposed corrections for user approval, applies the approved edits, and muxes the corrected subtitle back into the MKV.
+This skill extracts the primary (non-forced) SRT subtitle from an MKV file, reviews it for obvious transcription errors, presents proposed corrections for user approval, applies the approved edits, and muxes the corrected subtitle back into the MKV.
+
+Spindle currently generates subtitle tracks from canonical transcription artifacts using a Parakeet backend plus Stable-TS formatting. In practice, the most common quality issues are no longer classic isolated hallucination spam; they are now more often high-confidence lexical substitutions, mangled proper nouns, malformed captain's-log lines, command-phrase errors, and occasional end-of-scene nonsense.
 
 ## Prerequisites
 
@@ -42,6 +44,7 @@ Required tools (verify before proceeding):
    - Look for subtitle streams (codec_type: "subtitle", codec_name: "subrip" or "srt")
    - The primary subtitle is the one with `disposition.default=1` AND `disposition.forced=0`
    - If no default is set, pick the first non-forced subtitle stream
+   - For Spindle-generated files, expect a single English SubRip track, often titled `English`, non-forced, and sometimes not marked default. That is still the primary subtitle for audit.
    - If the only subtitle stream has `disposition.forced=1`, abort with message: "Only a forced subtitle track found - no primary subtitle to audit."
    - If no subtitle streams exist, abort with message: "No subtitle tracks found in this file."
 
@@ -55,6 +58,7 @@ Required tools (verify before proceeding):
 5. **Record stream metadata** for later muxing:
    - Language code (from `tags.language` or stream metadata)
    - Track title (from `tags.title`)
+   - Default flag and forced flag for every subtitle stream
    - Whether forced subtitle tracks also exist (for re-muxing)
    - Total number of subtitle streams and their properties
 
@@ -74,7 +78,14 @@ Required tools (verify before proceeding):
 
 **Reading large SRT files:** SRT files for feature-length films are typically too large to read in a single pass. Read the file in chunks (2000 lines at a time) to cover the full file. Do not skip sections.
 
-Analyze the file for **obvious** WhisperX transcription errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors.
+Analyze the file for **obvious** transcription errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors. This skill is intended for Spindle's generated subtitle tracks and is currently most relevant to Parakeet-produced subtitles.
+
+When auditing Parakeet-generated subtitles, pay extra attention to these recurring failure patterns:
+- captain's log / supplemental / stardate lines mangled into near-homophones (`Blog`, `Vlog`, `Block`, `started`)
+- Star Trek terminology and command phrases (`Sickbay`, `warp eight`, ship names, species names)
+- obscene or absurd substitutions in otherwise serious dialogue
+- short final-scene lines that collapse into nonsense despite good timing
+- inconsistent spelling of the same in-universe name within the same episode
 
 **DO flag these (high confidence):**
 
@@ -85,7 +96,10 @@ Analyze the file for **obvious** WhisperX transcription errors. Err heavily on t
 | Background music bleed | Soundtrack lyrics incorrectly transcribed as dialogue mid-film. Telltale signs: poetic/lyrical phrasing that doesn't fit the scene's conversation, multiple consecutive cues forming verse/chorus patterns, cues during montages or transitions. Be careful: dialogue may be interleaved with music cues in the same scene. | "He's a goat, he's a god, he's a man, he's a guru" from a Nick Cave song playing on a car stereo |
 | Misattributed sound effects | Non-dialogue sounds transcribed as if they were speech. Obvious cases only: clearly non-verbal sounds rendered as words. | "BOOM!" transcribed as dialogue when it's a sound effect |
 | Garbled nonsense | Words/phrases that are clearly not English or make no sense in context | "the flibberty jibbet of cromulence" when context makes no sense |
-| Obvious homophones | Wrong word where audio context makes the correct word unambiguous | "their" vs "there" vs "they're" when sentence grammar makes it clear |
+| Obvious homophones / near-homophones | Wrong word where audio context makes the correct word unambiguous | "their" vs "there" vs "they're" when sentence grammar makes it clear |
+| Formulaic line corruption | Highly repeated franchise or episode-structure lines that are obviously mangled | "Captain Blog started 41249.3" for a captain's log / stardate line |
+| Established-term corruption | A known term in the same episode is transcribed inconsistently in one obviously wrong spot | `Sikbay` when nearby cues or common franchise usage make `Sickbay` unambiguous |
+| Obscene accidental substitution | A profanity appears where the surrounding scene strongly indicates a non-profane technical noun or phrase | a serious bridge line rendered with an obviously wrong profanity |
 | Broken cues | Empty cues, cues with only whitespace, or cues with only punctuation | A cue containing just "..." or " " |
 | Encoding artifacts | Mojibake or corrupted characters | "donâ€™t" instead of "don't" |
 | Repeated cues | Adjacent cues with identical or near-identical text and overlapping timestamps | Same line appearing twice in a row |
@@ -95,14 +109,14 @@ Analyze the file for **obvious** WhisperX transcription errors. Err heavily on t
 
 | Skip | Why |
 |------|-----|
-| Proper noun spelling | WhisperX may have the correct uncommon spelling; we can't verify without the script |
+| Proper noun spelling | The transcription model may have the correct uncommon spelling; we can't verify without the script. Exception: if the same name/term appears elsewhere in the same file with a clearly dominant spelling and one variant is obvious nonsense, you may flag the nonsense variant |
 | Grammar "corrections" | The dialogue may be intentionally ungrammatical (dialect, character voice) |
 | Punctuation style | Comma placement, semicolons vs periods -- these are style choices |
 | Timing adjustments | Timestamp corrections require audio reference we don't have |
 | Rephrasing for clarity | The transcription may be accurate even if awkward |
 | Line break choices | How text is split across lines is a formatting preference |
 | Capitalization of dialogue | Some transcriptions use sentence case, others don't -- both are valid |
-| Suspected mishearings | Unless the correct word is unambiguous from surrounding text, don't guess |
+| Suspected mishearings | Unless the correct word is unambiguous from surrounding text, repeated episode usage, or an extremely formulaic line, don't guess |
 | Diegetic singing | Characters singing on-screen is valid dialogue and should stay |
 | Ambiguous exclamations | Short cues like "Oh!" or "No!" during dialogue scenes are likely real speech |
 
@@ -165,14 +179,15 @@ Found <N> issues (<M> total cues affected):
    ```bash
    mkvmerge -o "/tmp/subtitleaudit_<basename>_muxed.mkv" \
      -S "<mkv_file>" \
-     --language 0:<lang3> --track-name "0:<title>" --default-track-flag 0:yes \
+     --language 0:<lang3> --track-name "0:<title>" --default-track-flag 0:<yes|no> --forced-display-flag 0:<yes|no> \
      "/tmp/subtitleaudit_<basename>_edited.srt" \
-     [--language 0:<lang3> --track-name "0:<forced_title>" --default-track-flag 0:no --forced-display-flag 0:yes \
-     "/tmp/subtitleaudit_<basename>_forced.srt"]
+     [--language 0:<lang3> --track-name "0:<other_title>" --default-track-flag 0:<yes|no> --forced-display-flag 0:<yes|no> \
+     "/tmp/subtitleaudit_<basename>_other.srt"]
    ```
    - Use the original language codes and track titles captured in Phase 1
    - `-S` strips existing subtitles from the source
-   - Preserve the original disposition flags (default, forced)
+   - Preserve the original disposition flags exactly as found (default, forced)
+   - Do **not** assume the primary generated English subtitle is marked default
    - Use ISO 639-2 (3-letter) language codes for mkvmerge
 
 4. **Verify the muxed file**:
@@ -181,7 +196,7 @@ Found <N> issues (<M> total cues affected):
    ```
    - Confirm subtitle track count matches original
    - Confirm language codes and titles are correct
-   - Confirm disposition flags are correct
+   - Confirm disposition flags are correct and unchanged from the original intent
 
 5. **File size sanity check**:
    Compare the muxed file size against the original. They should be within ~1MB of each other (subtitle changes are tiny relative to video/audio). A large discrepancy indicates a muxing problem -- abort and report.
