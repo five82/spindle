@@ -31,19 +31,19 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 
 ## Critical Expectations
 
-**Architectural churn is embraced.** Optimize for clarity, not backwards compatibility.
+**Favor clear forward progress over backwards compatibility.**
 
-- Use proper spec driven development methodology. The codebase must follow the spec docs. You can propose updates to the spec but do not make spec doc changes without approval.
-- Do not just look for the easiest solution or fix. Find the best and most maintainable path forward.
+- Follow the spec docs. Propose spec changes when needed, but do not edit spec documents without approval.
+- Prefer the most maintainable solution, not the quickest patch.
 - Break things forward. Remove deprecated paths; no compatibility shims.
 - Prefer maintainable architecture and explicit logging over clever tricks.
 - Prefer minimalism. Identify and close real gaps. Simplify. Avoid overengineering. Avoid chasing edge cases that we are unlikely to encounter.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
-- Keep edits ASCII unless the file already uses extended characters.
-- When troubleshooting, gather evidence and test. Do not blindly guess.
-- Observability is key. We can not understand what is happening if we can not see it.
-- Simplification must not remove user-visible functionality. Eliminating a subprocess or code path that produces distinct output (log messages, CLI feedback, status indicators) is a behavior change, not a simplification.
-- When examining reference code, do not just copy and paste. Understand why it works in the reference implementation, think, and design a solution that works best for this codebase.
+- Prefer ASCII edits unless the file already uses non-ASCII characters.
+- When troubleshooting, gather evidence first and verify with tests.
+- Prioritize observability. If we cannot see a decision or failure, we cannot debug it.
+- Behavior-preserving simplification only. Any user-visible behavior change requires explicit approval.
+- Do not cargo-cult reference code. Understand why it works, then design the right solution for this codebase.
 
 ## Drapto Dependency Workflow
 
