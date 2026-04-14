@@ -279,7 +279,7 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.I
 			Vector:     fp,
 			RawVector:  fp,
 		})
-		logger.Debug("content ID WhisperX transcript ready",
+		logger.Debug("content ID transcript ready",
 			"episode_key", ep.Key,
 			"subtitle_file", result.SRTPath,
 			"token_count", len(fp.Terms),
@@ -290,7 +290,7 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.I
 
 func newDegradedContentIDSummary(policy Policy, transcribed, references int) *ripspec.ContentIDSummary {
 	return &ripspec.ContentIDSummary{
-		Method:               "whisperx_tfidf_content_matcher",
+		Method:               "qwen3_asr_tfidf_content_matcher",
 		ReferenceSource:      "opensubtitles",
 		ReviewThreshold:      policy.LowConfidenceReviewThreshold,
 		TranscribedEpisodes:  transcribed,
@@ -305,7 +305,7 @@ func buildContentIDSummary(env *ripspec.Envelope, matches []matchResult, transcr
 		return nil
 	}
 	summary := &ripspec.ContentIDSummary{
-		Method:               "whisperx_tfidf_content_matcher",
+		Method:               "qwen3_asr_tfidf_content_matcher",
 		ReferenceSource:      "opensubtitles",
 		ReferenceEpisodes:    referenceCount,
 		TranscribedEpisodes:  transcribedCount,

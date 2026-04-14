@@ -144,10 +144,10 @@ Any stage --> failed (on error)
 |------------------------|---------------------------------------------------|
 | `identification`       | Queued; MakeMKV scan + TMDB lookup                |
 | `ripping`              | MakeMKV rip to staging                            |
-| `episode_identification`| WhisperX + OpenSubtitles episode matching (TV)    |
+| `episode_identification`| Qwen3-ASR + OpenSubtitles episode matching (TV)    |
 | `encoding`             | Drapto AV1 encode                                 |
 | `audio_analysis`       | Audio refinement + commentary detection            |
-| `subtitling`           | WhisperX transcription + forced subs               |
+| `subtitling`           | Qwen3-ASR transcription + forced subs               |
 | `organizing`           | Library copy + Jellyfin refresh                    |
 | `completed`            | Terminal: successfully organized                   |
 | `failed`               | Terminal: error occurred                           |

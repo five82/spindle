@@ -33,6 +33,7 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	}
 
 	applyMuxDefault(data, cfg)
+	applyTranscriptionDefaults(data, cfg)
 	applyDefaults(cfg)
 
 	envKeys := collectEnvOverrides(cfg)
@@ -144,12 +145,6 @@ func applyDefaults(cfg *Config) {
 	}
 
 	// [subtitles]
-	if cfg.Subtitles.WhisperXModel == "" {
-		cfg.Subtitles.WhisperXModel = "large-v3"
-	}
-	if cfg.Subtitles.WhisperXVADMethod == "" {
-		cfg.Subtitles.WhisperXVADMethod = "silero"
-	}
 	if cfg.Subtitles.OpenSubtitlesUserAgent == "" {
 		cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/dev v0.1.0"
 	}
@@ -168,6 +163,22 @@ func applyDefaults(cfg *Config) {
 	// must explicitly set mux_into_mkv = false to disable it.
 	// We handle this via a separate mechanism below.
 
+	// [transcription]
+	if cfg.Transcription.ASRModel == "" {
+		cfg.Transcription.ASRModel = "Qwen/Qwen3-ASR-1.7B"
+	}
+	if cfg.Transcription.ForcedAlignerModel == "" {
+		cfg.Transcription.ForcedAlignerModel = "Qwen/Qwen3-ForcedAligner-0.6B"
+	}
+	if cfg.Transcription.Device == "" {
+		cfg.Transcription.Device = "cuda:0"
+	}
+	if cfg.Transcription.DType == "" {
+		cfg.Transcription.DType = "bfloat16"
+	}
+	if cfg.Transcription.MaxInferenceBatchSize == 0 {
+		cfg.Transcription.MaxInferenceBatchSize = 1
+	}
 	// [rip_cache]
 	if cfg.RipCache.MaxGiB == 0 {
 		cfg.RipCache.MaxGiB = 150
@@ -232,9 +243,6 @@ func applyDefaults(cfg *Config) {
 	}
 
 	// [commentary]
-	if cfg.Commentary.WhisperXModel == "" {
-		cfg.Commentary.WhisperXModel = "large-v3-turbo"
-	}
 	if cfg.Commentary.SimilarityThreshold == 0 {
 		cfg.Commentary.SimilarityThreshold = 0.92
 	}
@@ -274,6 +282,13 @@ func applyMuxDefault(data []byte, cfg *Config) {
 	}
 }
 
+// applyTranscriptionDefaults handles bool defaults for the transcription section.
+func applyTranscriptionDefaults(data []byte, cfg *Config) {
+	if data == nil || !hasUncommentedKey(data, "use_flash_attention") {
+		cfg.Transcription.UseFlashAttention = true
+	}
+}
+
 // hasUncommentedKey returns true if data contains an uncommented TOML
 // assignment for the given key (i.e., a line matching "key = ...").
 func hasUncommentedKey(data []byte, key string) bool {
@@ -308,15 +323,6 @@ func collectEnvOverrides(cfg *Config) []string {
 	if v := os.Getenv("SPINDLE_API_TOKEN"); v != "" {
 		cfg.API.Token = v
 		applied = append(applied, "SPINDLE_API_TOKEN")
-	}
-
-	// HuggingFace token: HUGGING_FACE_HUB_TOKEN takes priority, then HF_TOKEN.
-	if v := os.Getenv("HUGGING_FACE_HUB_TOKEN"); v != "" {
-		cfg.Subtitles.WhisperXHFToken = v
-		applied = append(applied, "HUGGING_FACE_HUB_TOKEN")
-	} else if v := os.Getenv("HF_TOKEN"); v != "" {
-		cfg.Subtitles.WhisperXHFToken = v
-		applied = append(applied, "HF_TOKEN")
 	}
 
 	if v := os.Getenv("OPENSUBTITLES_API_KEY"); v != "" {

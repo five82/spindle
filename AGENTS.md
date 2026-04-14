@@ -14,7 +14,7 @@ Do not modify this header.
 
 ## Project Snapshot
 
-Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata (TMDB), subtitles (WhisperX, forced subs via OpenSubtitles), Jellyfin refresh, and ntfy notifications.
+Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata (TMDB), subtitles (Qwen3-ASR, forced subs via OpenSubtitles), Jellyfin refresh, and ntfy notifications.
 
 - **Scope**: Single-developer project - avoid over-engineering
 - **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.

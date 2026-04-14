@@ -21,7 +21,7 @@ self-contained and focused on a single domain area.
 | Document | Contents | ~Lines |
 |----------|----------|--------|
 | [API_INTERFACES.md](API_INTERFACES.md) | CLI commands, HTTP API (Unix socket + optional TCP) | 810 |
-| [API_SERVICES.md](API_SERVICES.md) | External service protocols (MakeMKV, TMDB, OpenSubtitles, WhisperX, LLM, Jellyfin, ntfy, FFprobe, KeyDB, MediaInfo, mkvmerge) | 270 |
+| [API_SERVICES.md](API_SERVICES.md) | External service protocols (MakeMKV, TMDB, OpenSubtitles, Qwen3-ASR, LLM, Jellyfin, ntfy, FFprobe, KeyDB, MediaInfo, mkvmerge) | 270 |
 
 ## LLM Prompts
 

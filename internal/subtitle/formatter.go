@@ -17,7 +17,7 @@ var runStableTS = func(ctx context.Context, args []string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-type whisperXPayload struct {
+type canonicalTranscriptPayload struct {
 	Language         string           `json:"language,omitempty"`
 	DetectedLanguage string           `json:"detected_language,omitempty"`
 	Segments         []map[string]any `json:"segments,omitempty"`
@@ -29,11 +29,14 @@ func formatSubtitleFromCanonical(ctx context.Context, canonical transcriptionArt
 		return formatResult{}, fmt.Errorf("create subtitle work dir: %w", err)
 	}
 	filteredJSONPath := filepath.Join(workDir, "audio.filtered.json")
-	originalSegments, filteredSegments, err := filterWhisperXJSON(canonical.JSONPath, filteredJSONPath, videoSeconds)
+	originalSegments, filteredSegments, err := filterCanonicalTranscriptJSON(canonical.JSONPath, filteredJSONPath, videoSeconds)
 	if err != nil {
 		return formatResult{}, err
 	}
 	if err := runStableTSFormatter(ctx, filteredJSONPath, displayPath, subtitleLanguage); err != nil {
+		return formatResult{}, err
+	}
+	if err := regroupFormattedSubtitle(displayPath); err != nil {
 		return formatResult{}, err
 	}
 	return formatResult{
@@ -56,7 +59,7 @@ type formatResult struct {
 }
 
 // FormatRequest describes how to build a display subtitle from canonical
-// WhisperX artifacts.
+// transcript artifacts.
 type FormatRequest struct {
 	CanonicalJSONPath string
 	WorkDir           string
@@ -72,18 +75,14 @@ type FormatResult struct {
 	FilteredSegments int
 }
 
-// FormatDisplaySubtitle derives a display subtitle from canonical WhisperX
+// FormatDisplaySubtitle derives a display subtitle from canonical transcript
 // artifacts using subtitle-package filtering and Stable-TS formatting.
 func FormatDisplaySubtitle(ctx context.Context, req FormatRequest) (*FormatResult, error) {
 	result, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: req.CanonicalJSONPath}, req.WorkDir, req.DisplayPath, req.VideoSeconds, req.Language)
 	if err != nil {
 		return nil, err
 	}
-	return &FormatResult{
-		DisplayPath:      result.DisplayPath,
-		OriginalSegments: result.OriginalSegments,
-		FilteredSegments: result.FilteredSegments,
-	}, nil
+	return &FormatResult{DisplayPath: result.DisplayPath, OriginalSegments: result.OriginalSegments, FilteredSegments: result.FilteredSegments}, nil
 }
 
 // DisplaySubtitlePath returns the standard sidecar subtitle path for a video.
@@ -108,13 +107,7 @@ func runStableTSFormatter(ctx context.Context, jsonPath, outputPath, subtitleLan
 	if lang == "" {
 		lang = "en"
 	}
-	args := []string{
-		"--from", stableTSPackage,
-		"python", "-c", stableTSFormatterScript,
-		jsonPath,
-		tmpPath,
-		"--language", lang,
-	}
+	args := []string{"--from", stableTSPackage, "python", "-c", stableTSFormatterScript, jsonPath, tmpPath, "--language", lang}
 	output, err := runStableTS(ctx, args)
 	if err != nil {
 		return fmt.Errorf("stable-ts formatter: %w: %s", err, strings.TrimSpace(string(output)))
@@ -125,13 +118,13 @@ func runStableTSFormatter(ctx context.Context, jsonPath, outputPath, subtitleLan
 	return nil
 }
 
-func filterWhisperXJSON(srcPath, destPath string, videoSeconds float64) (originalSegments, filteredSegments int, err error) {
-	payload, field, segments, err := loadWhisperXPayload(srcPath)
+func filterCanonicalTranscriptJSON(srcPath, destPath string, videoSeconds float64) (originalSegments, filteredSegments int, err error) {
+	payload, field, segments, err := loadCanonicalTranscriptPayload(srcPath)
 	if err != nil {
 		return 0, 0, err
 	}
 	originalSegments = len(segments)
-	filtered, err := filterWhisperXSegments(segments, videoSeconds)
+	filtered, err := filterCanonicalTranscriptSegments(segments, videoSeconds)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -142,25 +135,25 @@ func filterWhisperXJSON(srcPath, destPath string, videoSeconds float64) (origina
 	case "speech_segments":
 		payload.SpeechSegments = filtered
 	default:
-		return 0, 0, fmt.Errorf("unsupported whisperx segment field %q", field)
+		return 0, 0, fmt.Errorf("unsupported canonical transcript segment field %q", field)
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return 0, 0, fmt.Errorf("marshal filtered whisperx payload: %w", err)
+		return 0, 0, fmt.Errorf("marshal filtered canonical transcript payload: %w", err)
 	}
 	if err := os.WriteFile(destPath, data, 0o644); err != nil {
-		return 0, 0, fmt.Errorf("write filtered whisperx payload: %w", err)
+		return 0, 0, fmt.Errorf("write filtered canonical transcript payload: %w", err)
 	}
 	return originalSegments, filteredSegments, nil
 }
 
-func loadWhisperXPayload(path string) (payload whisperXPayload, field string, segments []map[string]any, err error) {
+func loadCanonicalTranscriptPayload(path string) (payload canonicalTranscriptPayload, field string, segments []map[string]any, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return payload, "", nil, fmt.Errorf("read whisperx json: %w", err)
+		return payload, "", nil, fmt.Errorf("read canonical transcript json: %w", err)
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return payload, "", nil, fmt.Errorf("parse whisperx json: %w", err)
+		return payload, "", nil, fmt.Errorf("parse canonical transcript json: %w", err)
 	}
 	switch {
 	case len(payload.Segments) > 0:
@@ -168,11 +161,11 @@ func loadWhisperXPayload(path string) (payload whisperXPayload, field string, se
 	case len(payload.SpeechSegments) > 0:
 		return payload, "speech_segments", payload.SpeechSegments, nil
 	default:
-		return payload, "", nil, fmt.Errorf("whisperx json contained no segments")
+		return payload, "", nil, fmt.Errorf("canonical transcript json contained no segments")
 	}
 }
 
-func filterWhisperXSegments(segments []map[string]any, videoSeconds float64) ([]map[string]any, error) {
+func filterCanonicalTranscriptSegments(segments []map[string]any, videoSeconds float64) ([]map[string]any, error) {
 	indexed := make([]indexedTimedCue, 0, len(segments))
 	for i, segment := range segments {
 		cue, err := cueFromSegment(i, segment)
@@ -181,7 +174,7 @@ func filterWhisperXSegments(segments []map[string]any, videoSeconds float64) ([]
 		}
 		indexed = append(indexed, cue)
 	}
-	filtered, err := filterIndexedHallucinations(indexed, videoSeconds)
+	filtered, err := filterIndexedArtifacts(indexed, videoSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -195,11 +188,11 @@ func filterWhisperXSegments(segments []map[string]any, videoSeconds float64) ([]
 func cueFromSegment(index int, segment map[string]any) (indexedTimedCue, error) {
 	start, ok := floatValue(segment["start"])
 	if !ok {
-		return indexedTimedCue{}, fmt.Errorf("whisperx segment %d missing valid start", index)
+		return indexedTimedCue{}, fmt.Errorf("canonical transcript segment %d missing valid start", index)
 	}
 	end, ok := floatValue(segment["end"])
 	if !ok {
-		return indexedTimedCue{}, fmt.Errorf("whisperx segment %d missing valid end", index)
+		return indexedTimedCue{}, fmt.Errorf("canonical transcript segment %d missing valid end", index)
 	}
 	text, _ := segment["text"].(string)
 	return indexedTimedCue{Orig: index, Start: start, End: end, Text: text}, nil

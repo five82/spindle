@@ -24,7 +24,7 @@ Some unresolved cases may fail for reasons that are difficult for the current
 pairwise verifier:
 
 - weak transcript overlap in the middle excerpt
-- noisy WhisperX output
+- noisy Qwen3-ASR output
 - poor or mismatched OpenSubtitles references
 - no valid OpenSubtitles reference transcript for one or more candidate episodes
 - adjacent episodes with thin distinguishing dialogue
@@ -126,7 +126,7 @@ reviewed easily.
 
 The review helper would receive:
 
-- the middle excerpt from the WhisperX transcript for the unresolved rip
+- the middle excerpt from the Qwen3-ASR transcript for the unresolved rip
 - a bounded list of candidate episodes
 - for each candidate episode:
   - TMDB episode number
@@ -199,7 +199,7 @@ Recommended evaluation set:
 - adjacent or easily confused episodes
 - recap-heavy episodes
 - generic-dialogue excerpts
-- poor WhisperX transcripts
+- poor Qwen3-ASR transcripts
 - weak or mismatched subtitle references
 - episodes with no valid OpenSubtitles reference transcript
 - items that currently land in review after existing verification

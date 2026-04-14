@@ -59,7 +59,7 @@ Where:
 - `{transcript}` is truncated to 4000 characters with `\n[truncated]` appended
   if truncation occurs
 
-The transcript is a WhisperX transcription of the first 10 minutes of the
+The transcript is a Qwen3-ASR transcription of the first 10 minutes of the
 candidate audio track.
 
 ### 1.3 Response Schema
@@ -104,11 +104,11 @@ LLM failure is non-fatal but conservative:
 ```
 You compare two TV episode transcripts to determine if they are from the same episode.
 
-TRANSCRIPT A is a WhisperX speech-to-text transcription from a Blu-ray disc.
+TRANSCRIPT A is a Qwen3-ASR speech-to-text transcription from a Blu-ray disc.
 TRANSCRIPT B is a reference subtitle from OpenSubtitles for a specific episode.
 
 Both are extracted from the middle portion of the episode, typically about 10 minutes, though shorter transcripts may use the full available duration.
-WhisperX transcripts may contain speech recognition errors.
+Qwen3-ASR transcripts may contain speech recognition errors.
 Reference subtitles may differ in exact wording due to subtitle conventions, release differences, or localization.
 
 Focus on whether the same scenes and dialogue events occur in both.
@@ -123,8 +123,8 @@ Respond ONLY with JSON: {"same_episode": true/false, "explanation": "brief reaso
 Episode key: {episode_key}
 Target episode: {target_episode}
 
-=== TRANSCRIPT A (WhisperX from disc) ===
-{whisperx_text}
+=== TRANSCRIPT A (Qwen3-ASR from disc) ===
+{qwen_text}
 
 === TRANSCRIPT B (OpenSubtitles reference) ===
 {reference_text}

@@ -1,4 +1,4 @@
-// Package transcription provides shared canonical WhisperX transcription with caching.
+// Package transcription provides shared canonical transcription with caching.
 package transcription
 
 import (
@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/five82/spindle/internal/fileutil"
@@ -19,43 +20,72 @@ import (
 	"github.com/five82/spindle/internal/srtutil"
 )
 
-// Service provides WhisperX transcription with caching.
+// Options configures the transcription service.
+type Options struct {
+	ASRModel              string
+	ForcedAlignerModel    string
+	Device                string
+	DType                 string
+	UseFlashAttention     bool
+	MaxInferenceBatchSize int
+	CacheDir              string
+	RuntimeDir            string
+}
+
+// Service provides shared Qwen3-ASR transcription with caching.
 type Service struct {
-	model       string
-	cudaEnabled bool
-	vadMethod   string
-	hfToken     string
-	cacheDir    string
-	logger      *slog.Logger
+	opts     Options
+	cacheDir string
+	runtime  *Runtime
+	worker   workerClient
+	logger   *slog.Logger
+	mu       sync.Mutex
 }
 
 // New creates a transcription service.
-func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string, logger *slog.Logger) *Service {
+func New(opts Options, logger *slog.Logger) *Service {
 	logger = logs.Default(logger)
-	if model == "" {
-		model = "large-v3"
+	if opts.ASRModel == "" {
+		opts.ASRModel = "Qwen/Qwen3-ASR-1.7B"
 	}
-	if vadMethod == "" {
-		vadMethod = "silero"
+	if opts.ForcedAlignerModel == "" {
+		opts.ForcedAlignerModel = "Qwen/Qwen3-ForcedAligner-0.6B"
 	}
-	return &Service{
-		model:       model,
-		cudaEnabled: cudaEnabled,
-		vadMethod:   vadMethod,
-		hfToken:     hfToken,
-		cacheDir:    cacheDir,
-		logger:      logger,
+	if opts.Device == "" {
+		opts.Device = "cuda:0"
 	}
+	if opts.DType == "" {
+		opts.DType = "bfloat16"
+	}
+	if opts.MaxInferenceBatchSize <= 0 {
+		opts.MaxInferenceBatchSize = 1
+	}
+	service := &Service{
+		opts:     opts,
+		cacheDir: opts.CacheDir,
+		runtime:  newRuntime(opts.RuntimeDir, logger),
+		logger:   logger,
+	}
+	service.worker = newSubprocessWorker(service.runtime, workerConfig{
+		ASRModel:              opts.ASRModel,
+		ForcedAlignerModel:    opts.ForcedAlignerModel,
+		Device:                opts.Device,
+		DType:                 opts.DType,
+		UseFlashAttention:     opts.UseFlashAttention,
+		MaxInferenceBatchSize: opts.MaxInferenceBatchSize,
+	}, logger)
+	return service
 }
 
 // TranscribeRequest specifies what to transcribe.
 type TranscribeRequest struct {
-	InputPath  string
-	AudioIndex int // audio-relative index (maps to ffmpeg 0:a:N)
-	Language   string
-	OutputDir  string
-	Model      string // Override default model
-	ContentKey string // Content-stable cache identity
+	InputPath        string
+	AudioIndex       int // audio-relative index (maps to ffmpeg 0:a:N)
+	Language         string
+	OutputDir        string
+	Model            string // Optional ASR model override
+	ContentKey       string // Content-stable cache identity
+	RequireAlignment bool   // Fail when aligned subtitle timestamps are unavailable
 }
 
 // Phase identifies a transcription progress phase.
@@ -79,21 +109,32 @@ type TranscribeResult struct {
 	Segments       int
 	Cached         bool
 	ExtractTime    time.Duration // time spent on ffmpeg audio extraction
-	TranscribeTime time.Duration // time spent on WhisperX
+	TranscribeTime time.Duration // time spent on Qwen3-ASR
 }
 
-// Transcribe runs WhisperX transcription with caching.
-//
-// Steps:
-//  1. Compute cache key.
-//  2. Check cache. If hit, return cached result.
-//  3. Extract audio via FFmpeg.
-//  4. Run WhisperX via uvx.
-//  5. Read SRT, count segments, parse duration.
-//  6. Store in cache.
-//  7. Return result.
-//
-// If progress is non-nil, it is called at the start and end of each phase.
+// RuntimeStatus reports transcription runtime health.
+func (s *Service) RuntimeStatus(ctx context.Context) (*RuntimeStatus, error) {
+	return s.runtime.HealthCheck(ctx, workerConfig{
+		ASRModel:              s.opts.ASRModel,
+		ForcedAlignerModel:    s.opts.ForcedAlignerModel,
+		Device:                s.opts.Device,
+		DType:                 s.opts.DType,
+		UseFlashAttention:     s.opts.UseFlashAttention,
+		MaxInferenceBatchSize: s.opts.MaxInferenceBatchSize,
+	})
+}
+
+// Close stops the managed transcription worker.
+func (s *Service) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.worker == nil {
+		return nil
+	}
+	return s.worker.Close()
+}
+
+// Transcribe runs Qwen3-ASR transcription with caching.
 func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progress ...ProgressFunc) (*TranscribeResult, error) {
 	var onProgress ProgressFunc
 	if len(progress) > 0 {
@@ -102,12 +143,13 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 
 	model := req.Model
 	if model == "" {
-		model = s.model
+		model = s.opts.ASRModel
+	}
+	if model != s.opts.ASRModel {
+		return nil, fmt.Errorf("per-request ASR model override unsupported; configure transcription.asr_model instead")
 	}
 
-	key := cacheKey(req, model)
-
-	// Check cache.
+	key := cacheKey(req, model, s.opts.ForcedAlignerModel)
 	if result, ok := s.Lookup(key); ok {
 		s.logger.Info("transcription cache hit",
 			"decision_type", logs.DecisionTranscriptionCache,
@@ -123,12 +165,10 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		"decision_reason", fmt.Sprintf("key=%s", key[:12]),
 	)
 
-	// Ensure output directory exists.
 	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
 
-	// Extract audio via FFmpeg.
 	if onProgress != nil {
 		onProgress(PhaseExtract, 0)
 	}
@@ -143,7 +183,6 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		"-y",
 		wavPath,
 	}
-
 	s.logger.Info("extracting audio for transcription",
 		"event_type", "transcription_extract",
 		"input", req.InputPath,
@@ -159,93 +198,81 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		onProgress(PhaseExtract, extractTime)
 	}
 
-	// Run WhisperX via uvx.
 	if onProgress != nil {
 		onProgress(PhaseTranscribe, 0)
 	}
-	whisperArgs := []string{
-		"whisperx", wavPath,
-		"--model", model,
-		"--language", req.Language,
-		"--output_format", "all",
-		"--output_dir", req.OutputDir,
-		"--vad_method", s.vadMethod,
+	langName, alignedSupported := qwenLanguageName(req.Language)
+	if langName == "" {
+		langName = "English"
 	}
-	if s.cudaEnabled {
-		whisperArgs = append(whisperArgs, "--device", "cuda")
-	} else {
-		whisperArgs = append(whisperArgs, "--device", "cpu")
+	if req.RequireAlignment && !alignedSupported {
+		return nil, fmt.Errorf("subtitle alignment unsupported for language %q", req.Language)
 	}
-	if s.hfToken != "" {
-		whisperArgs = append(whisperArgs, "--hf_token", s.hfToken)
-	}
-
-	s.logger.Info("running WhisperX transcription",
-		"event_type", "transcription_whisperx",
-		"model", model,
+	returnTimestamps := alignedSupported
+	s.logger.Info("running Qwen3-ASR transcription",
+		"event_type", "transcription_qwen3_asr",
+		"asr_model", model,
+		"forced_aligner_model", s.opts.ForcedAlignerModel,
 		"language", req.Language,
+		"return_timestamps", returnTimestamps,
 	)
 	transcribeStart := time.Now()
-	whisperCmd := exec.CommandContext(ctx, "uvx", whisperArgs...)
-	if output, err := whisperCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("whisperx transcription: %w: %s", err, output)
+	resp, err := s.worker.Transcribe(ctx, workerTranscribeRequest{
+		AudioPath:        wavPath,
+		Language:         langName,
+		ReturnTimeStamps: returnTimestamps,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("qwen3 transcription: %w", err)
 	}
 	transcribeTime := time.Since(transcribeStart)
 	if onProgress != nil {
 		onProgress(PhaseTranscribe, transcribeTime)
 	}
-
-	// Find canonical WhisperX outputs. WhisperX names them after the input wav.
-	srtPath := filepath.Join(req.OutputDir, "audio.srt")
-	if _, err := os.Stat(srtPath); err != nil {
-		return nil, fmt.Errorf("srt output not found at %s: %w", srtPath, err)
+	resp.Text = normalizeWorkerText(resp.Text)
+	if strings.TrimSpace(resp.Text) == "" && len(resp.TimeStamps) > 0 {
+		var b strings.Builder
+		for _, stamp := range resp.TimeStamps {
+			b.WriteString(stamp.Text)
+		}
+		resp.Text = normalizeWorkerText(b.String())
 	}
-	jsonPath := filepath.Join(req.OutputDir, "audio.json")
-	if _, err := os.Stat(jsonPath); err != nil {
-		return nil, fmt.Errorf("json output not found at %s: %w", jsonPath, err)
+	if req.RequireAlignment && len(resp.TimeStamps) == 0 {
+		return nil, fmt.Errorf("qwen3 forced aligner returned no timestamps for language %q", req.Language)
 	}
-
-	segments, duration, err := analyzeSRT(srtPath)
+	artifacts, err := buildTranscriptArtifacts(req.OutputDir, req.Language, resp)
 	if err != nil {
-		return nil, fmt.Errorf("analyze srt: %w", err)
+		return nil, err
 	}
-
 	result := &TranscribeResult{
-		SRTPath:        srtPath,
-		JSONPath:       jsonPath,
-		Duration:       duration,
-		Segments:       segments,
+		SRTPath:        artifacts.SRTPath,
+		JSONPath:       artifacts.JSONPath,
+		Duration:       artifacts.Duration,
+		Segments:       artifacts.Segments,
 		Cached:         false,
 		ExtractTime:    extractTime,
 		TranscribeTime: transcribeTime,
 	}
-
-	// Store in cache.
 	if err := s.Store(key, result); err != nil {
 		return nil, fmt.Errorf("cache store: %w", err)
 	}
 	s.logger.Debug("transcription result cached", "key", key[:12], "segments", result.Segments)
-
 	return result, nil
 }
 
 // cacheKey computes a deterministic cache key for a transcription request.
-// If ContentKey is non-empty, it is used for content-stable caching.
-// Otherwise, the input path and audio index are used as a fallback.
-func cacheKey(req TranscribeRequest, model string) string {
-	var input string
+func cacheKey(req TranscribeRequest, asrModel, forcedAlignerModel string) string {
+	parts := []string{canonicalSchemaVersion, asrModel, forcedAlignerModel, req.Language}
 	if req.ContentKey != "" {
-		input = req.ContentKey + "\x00" + model + "\x00" + req.Language
+		parts = append(parts, req.ContentKey)
 	} else {
-		input = req.InputPath + "\x00" + strconv.Itoa(req.AudioIndex) + "\x00" + model + "\x00" + req.Language
+		parts = append(parts, req.InputPath, strconv.Itoa(req.AudioIndex))
 	}
-	h := sha256.Sum256([]byte(input))
+	h := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(h[:])
 }
 
 // Lookup checks the cache for a previously stored canonical transcription result.
-// It returns the result and true if valid cached SRT and JSON artifacts exist
-// and the SRT has > 0 cues.
 func (s *Service) Lookup(key string) (*TranscribeResult, bool) {
 	dir := filepath.Join(s.cacheDir, key)
 	srtPath, jsonPath, ok := cacheArtifactPaths(dir)
@@ -256,16 +283,10 @@ func (s *Service) Lookup(key string) (*TranscribeResult, bool) {
 	if err != nil || segments == 0 {
 		return nil, false
 	}
-	return &TranscribeResult{
-		SRTPath:  srtPath,
-		JSONPath: jsonPath,
-		Duration: duration,
-		Segments: segments,
-	}, true
+	return &TranscribeResult{SRTPath: srtPath, JSONPath: jsonPath, Duration: duration, Segments: segments}, true
 }
 
-// Store copies canonical transcription artifacts into the cache directory under
-// the given key.
+// Store copies canonical transcription artifacts into the cache directory under the given key.
 func (s *Service) Store(key string, result *TranscribeResult) error {
 	dir := filepath.Join(s.cacheDir, key)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -314,8 +335,7 @@ func copyCacheArtifact(srcPath, dir, kind string) error {
 	return nil
 }
 
-// analyzeSRT reads an SRT file once and returns both the segment count and
-// the duration (end timestamp of the last cue, in seconds).
+// analyzeSRT reads an SRT file once and returns both the segment count and the duration.
 func analyzeSRT(path string) (segments int, duration float64, err error) {
 	cues, err := srtutil.ParseFile(path)
 	if err != nil {
@@ -327,14 +347,7 @@ func analyzeSRT(path string) (segments int, duration float64, err error) {
 	return len(cues), cues[len(cues)-1].End, nil
 }
 
-// Config returns the service's WhisperX configuration for display purposes.
-func (s *Service) Config() (model, device, vadMethod string) {
-	model = s.model
-	if s.cudaEnabled {
-		device = "cuda"
-	} else {
-		device = "cpu"
-	}
-	vadMethod = s.vadMethod
-	return
+// Config returns the service configuration for display/debug output.
+func (s *Service) Config() Options {
+	return s.opts
 }

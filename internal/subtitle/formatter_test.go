@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/five82/spindle/internal/srtutil"
 )
 
 func TestDisplaySubtitlePath(t *testing.T) {
@@ -22,15 +24,15 @@ func TestDisplaySubtitlePath(t *testing.T) {
 	}
 }
 
-func TestFilterWhisperXJSON_RemovesIsolatedHallucination(t *testing.T) {
+func TestFilterCanonicalTranscriptJSON_RemovesIsolatedMusicCue(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "audio.json")
 	dst := filepath.Join(dir, "audio.filtered.json")
-	payload := whisperXPayload{
+	payload := canonicalTranscriptPayload{
 		Language: "en",
 		Segments: []map[string]any{
 			{"start": 10.0, "end": 12.0, "text": "Normal dialogue"},
-			{"start": 50.0, "end": 52.0, "text": "Thank you"},
+			{"start": 50.0, "end": 52.0, "text": "♪"},
 			{"start": 90.0, "end": 92.0, "text": "More dialogue"},
 		},
 	}
@@ -41,9 +43,9 @@ func TestFilterWhisperXJSON_RemovesIsolatedHallucination(t *testing.T) {
 	if err := os.WriteFile(src, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	original, filtered, err := filterWhisperXJSON(src, dst, 1200)
+	original, filtered, err := filterCanonicalTranscriptJSON(src, dst, 1200)
 	if err != nil {
-		t.Fatalf("filterWhisperXJSON() error = %v", err)
+		t.Fatalf("filterCanonicalTranscriptJSON() error = %v", err)
 	}
 	if original != 3 || filtered != 2 {
 		t.Fatalf("counts = %d/%d, want 3/2", original, filtered)
@@ -52,12 +54,63 @@ func TestFilterWhisperXJSON_RemovesIsolatedHallucination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out whisperXPayload
+	var out canonicalTranscriptPayload
 	if err := json.Unmarshal(filteredData, &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(out.Segments) != 2 {
 		t.Fatalf("expected 2 segments, got %d", len(out.Segments))
+	}
+}
+
+func TestWrapCueText_BalancesLongLine(t *testing.T) {
+	got := wrapCueText("Captain's log, Stardate four one three eight six point four.")
+	want := "Captain's log, Stardate four\none three eight six point four."
+	if got != want {
+		t.Fatalf("wrapCueText() = %q, want %q", got, want)
+	}
+}
+
+func TestRegroupDisplayCues_MergesTinyAdjacentFragments(t *testing.T) {
+	cues := regroupDisplayCues([]srtutil.Cue{
+		{Index: 1, Start: 0, End: 0.5, Text: "Anything"},
+		{Index: 2, Start: 0.5, End: 1.5, Text: "on that design, Data?"},
+	})
+	if len(cues) != 1 {
+		t.Fatalf("expected 1 merged cue, got %d", len(cues))
+	}
+	if cues[0].Text != "Anything on that design, Data?" {
+		t.Fatalf("merged cue text = %q", cues[0].Text)
+	}
+}
+
+func TestRegroupDisplayCues_WrapsLongCueWithoutOrphanLine(t *testing.T) {
+	cues := regroupDisplayCues([]srtutil.Cue{{Index: 1, Start: 0, End: 4.4, Text: "which automatic scanners recorded, providing us with the long awaited opportunity to"}})
+	if len(cues) != 1 {
+		t.Fatalf("expected 1 cue, got %d", len(cues))
+	}
+	lines := strings.Split(cues[0].Text, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 wrapped lines, got %d", len(lines))
+	}
+	if len([]rune(lines[1])) <= 3 {
+		t.Fatalf("unexpected orphan second line: %q", lines[1])
+	}
+}
+
+func TestRegroupDisplayCues_SplitsMultiSentenceCue(t *testing.T) {
+	cues := regroupDisplayCues([]srtutil.Cue{{Index: 1, Start: 0, End: 6, Text: "First sentence continues here. Second sentence continues for a while."}})
+	if len(cues) != 2 {
+		t.Fatalf("expected 2 cues, got %d", len(cues))
+	}
+	if cues[0].Text != "First sentence continues here." {
+		t.Fatalf("first cue text = %q", cues[0].Text)
+	}
+	if cues[1].Text != "Second sentence continues for a while." {
+		t.Fatalf("second cue text = %q", cues[1].Text)
+	}
+	if cues[0].End <= cues[0].Start || cues[1].End <= cues[1].Start {
+		t.Fatal("expected positive cue durations")
 	}
 }
 
@@ -67,7 +120,7 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 
 	dir := t.TempDir()
 	jsonPath := filepath.Join(dir, "audio.json")
-	payload := whisperXPayload{
+	payload := canonicalTranscriptPayload{
 		Language: "en",
 		Segments: []map[string]any{{
 			"start": 1.0,
@@ -88,8 +141,20 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 		if len(args) < 9 {
 			t.Fatalf("unexpected args: %v", args)
 		}
+		filteredJSONPath := args[5]
+		filteredData, err := os.ReadFile(filteredJSONPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var filtered canonicalTranscriptPayload
+		if err := json.Unmarshal(filteredData, &filtered); err != nil {
+			t.Fatal(err)
+		}
+		if got := filtered.Segments[0]["text"]; got != "General Kenobi" {
+			t.Fatalf("filtered segment text = %v, want %q", got, "General Kenobi")
+		}
 		outputPath := args[6]
-		if err := os.WriteFile(outputPath, []byte("1\n00:00:01,000 --> 00:00:03,000\nGeneral Kenobi\n"), 0o644); err != nil {
+		if err := os.WriteFile(outputPath, []byte("1\n00:00:01,000 --> 00:00:03,000\nThis is a deliberately long subtitle line for wrapping\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return []byte("ok"), nil
@@ -110,7 +175,8 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(contents), "General Kenobi") {
-		t.Fatalf("formatted subtitle missing expected content: %s", string(contents))
+	formatted := string(contents)
+	if !strings.Contains(formatted, "This is a deliberately long\nsubtitle line for wrapping") {
+		t.Fatalf("formatted subtitle missing expected regrouped line break: %s", formatted)
 	}
 }

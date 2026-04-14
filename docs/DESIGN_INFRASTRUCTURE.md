@@ -173,7 +173,7 @@ mid-run.
 | FFprobe    | `ffprobe`     | No       | Always required               |
 | MediaInfo  | `mediainfo`   | No       | Always required               |
 | bd_info    | `bd_info`     | Yes      | Always optional               |
-| uvx        | `uvx`         | No*      | When subtitles.enabled (WhisperX + Stable-TS formatter packages) |
+| uvx        | `uvx`         | No*      | When subtitles.enabled (Qwen3-ASR + Stable-TS formatter packages) |
 | mkvmerge   | `mkvmerge`    | No*      | When subtitles.mux_into_mkv   |
 
 *Conditionally required based on config.
@@ -511,7 +511,7 @@ block the pipeline:
 - Subtitle sidecar move failure (log warning)
 
 Everything else (MakeMKV failures, encoding errors, file copy errors,
-WhisperX failures, network errors, and episode-identification reference
+Qwen3-ASR failures, network errors, and episode-identification reference
 acquisition failures) fails the item.
 
 ### 5.3 Error Wrapping
@@ -741,9 +741,18 @@ Key validation constraints enforced by `validate.go`:
 - `makemkv.rip_timeout`: Must be > 0.
 - `makemkv.min_title_length`: Must be >= 0.
 - `jellyfin.url` and `jellyfin.api_key`: Required when `jellyfin.enabled`.
-- `subtitles.whisperx_hf_token`: Required when subtitles enabled with
-  pyannote VAD.
-- `opensubtitles.api_key`: Required when OpenSubtitles enabled.
+- `transcription.asr_model`: Required.
+- `transcription.forced_aligner_model`: Required when subtitles enabled.
+- `transcription.device`: Required.
+- `transcription.dtype`: Required.
+- `transcription.max_inference_batch_size`: Must be > 0.
+- `subtitles.opensubtitles_api_key`: Required when OpenSubtitles enabled.
+
+### 8.x Shared transcription runtime
+
+Spindle uses a persistent local Python worker to keep `Qwen3-ASR` and
+`Qwen3-ForcedAligner` loaded across requests. The worker accepts JSON-line
+commands over stdin/stdout and returns transcript text plus timestamp items.
 
 ### 8.3 Config Commands
 
@@ -765,16 +774,16 @@ config file. These include: `config init` and help commands.
 
 ### 9.1 Purpose
 
-WhisperX transcription is used by three subsystems: episode identification,
+Qwen3-ASR transcription is used by three subsystems: episode identification,
 commentary detection, and subtitle generation. Rather than each subsystem
-invoking WhisperX independently with separate caching, a shared
+invoking Qwen3-ASR independently with separate caching, a shared
 `transcription` package provides a unified interface.
 
 ### 9.2 Interface
 
 ```go
 type Service struct {
-    // Configuration: model, CUDA, VAD method, cache dir, etc.
+    // Configuration: ASR model, forced aligner model, device, dtype, cache dir, etc.
 }
 
 func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*TranscribeResult, error)
@@ -788,15 +797,16 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 | `AudioIndex` | int | Selected audio-relative stream index to extract |
 | `Language` | string | Target language code |
 | `OutputDir` | string | Directory for output files |
-| `Model` | string | WhisperX model override (empty = default) |
+| `Model` | string | Reserved for future use; current implementation uses `transcription.asr_model` |
 | `ContentKey` | string | Content-stable cache identity (see Section 9.3) |
+| `RequireAlignment` | bool | Fail if aligned timestamps are unavailable |
 
 **TranscribeResult:**
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `SRTPath` | string | Path to canonical WhisperX SRT file |
-| `JSONPath` | string | Path to canonical WhisperX JSON/alignment output |
+| `SRTPath` | string | Path to canonical transcript SRT file |
+| `JSONPath` | string | Path to canonical transcript JSON/alignment output |
 | `Duration` | float64 | Detected audio duration in seconds |
 | `Segments` | int | Number of SRT cues |
 | `Cached` | bool | True if result came from cache |
@@ -811,7 +821,7 @@ different paths).
 Cache key computation:
 
 ```
-key = hex(SHA-256( contentKey + "\x00" + model + "\x00" + language ))
+key = hex(SHA-256( schemaVersion + "\x00" + asrModel + "\x00" + forcedAlignerModel + "\x00" + language + "\x00" + contentKey ))
 ```
 
 Where `contentKey` is a caller-supplied identity string that remains stable
@@ -832,7 +842,10 @@ cross-stage plumbing or envelope attributes.
 When `ContentKey` is empty, the service falls back to a path-based key:
 `hex(SHA-256( inputPath + "\x00" + audioIndex + "\x00" + model + "\x00" + language ))`.
 
-Cache directory: `$XDG_CACHE_HOME/spindle/whisperx/{cache_key}/`
+Cache directory: `$XDG_CACHE_HOME/spindle/transcription/{cache_key}/`
+
+Cache key includes the content identity or path fallback, ASR model, forced
+aligner model, language, and the canonical artifact schema version.
 
 **Cache operations:**
 - `Lookup(key)`: Check for existing canonical transcription. Validates both SRT
@@ -842,7 +855,7 @@ Cache directory: `$XDG_CACHE_HOME/spindle/whisperx/{cache_key}/`
 
 ### 9.4 Concurrency
 
-All WhisperX invocations are serialized by the `whisperxSem` semaphore
+All transcription work is serialized by the `transcriptionSem` semaphore
 (capacity 1) at the pipeline level. The transcription service itself is
 stateless and safe for concurrent use -- the semaphore is held by the
 calling stage, not the service.
@@ -850,7 +863,7 @@ calling stage, not the service.
 ### 9.5 Audio Extraction
 
 Audio extraction (FFmpeg WAV conversion) is performed by the service before
-invoking WhisperX:
+invoking the transcription worker:
 
 ```
 ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
@@ -858,11 +871,11 @@ ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn
 
 ### 9.6 Post-Processing Pipeline
 
-After WhisperX completes:
+After the worker returns:
 
 1. The transcription service stores **canonical transcript artifacts** only
    (raw SRT + JSON/alignment output).
-2. Subtitle-specific hallucination filtering, Stable-TS formatting, and final
+2. Subtitle-specific artifact filtering, Stable-TS formatting, and final
    display-SRT validation happen in the `subtitle` package, not in the shared
    transcription service.
 3. Formatted display subtitles are derived outputs and are not part of the

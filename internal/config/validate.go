@@ -43,10 +43,20 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Subtitles.Enabled && c.Subtitles.WhisperXVADMethod != "silero" {
-		if c.Subtitles.WhisperXHFToken == "" {
-			errs = append(errs, "subtitles.whisperx_hf_token is required when subtitles enabled with non-silero VAD method")
-		}
+	if c.Transcription.ASRModel == "" {
+		errs = append(errs, "transcription.asr_model is required")
+	}
+	if c.Subtitles.Enabled && c.Transcription.ForcedAlignerModel == "" {
+		errs = append(errs, "transcription.forced_aligner_model is required when subtitles enabled")
+	}
+	if c.Transcription.Device == "" {
+		errs = append(errs, "transcription.device is required")
+	}
+	if c.Transcription.DType == "" {
+		errs = append(errs, "transcription.dtype is required")
+	}
+	if c.Transcription.MaxInferenceBatchSize <= 0 {
+		errs = append(errs, fmt.Sprintf("transcription.max_inference_batch_size must be > 0 (got %d)", c.Transcription.MaxInferenceBatchSize))
 	}
 
 	if c.Subtitles.OpenSubtitlesEnabled {

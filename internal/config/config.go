@@ -20,6 +20,7 @@ type Config struct {
 	Library       LibraryConfig       `toml:"library"`
 	Notifications NotificationsConfig `toml:"notifications"`
 	Subtitles     SubtitlesConfig     `toml:"subtitles"`
+	Transcription TranscriptionConfig `toml:"transcription"`
 	RipCache      RipCacheConfig      `toml:"rip_cache"`
 	DiscIDCache   DiscIDCacheConfig   `toml:"disc_id_cache"`
 	MakeMKV       MakeMKVConfig       `toml:"makemkv"`
@@ -75,15 +76,21 @@ type NotificationsConfig struct {
 type SubtitlesConfig struct {
 	Enabled                bool     `toml:"enabled"`
 	MuxIntoMKV             bool     `toml:"mux_into_mkv"`
-	WhisperXModel          string   `toml:"whisperx_model"`
-	WhisperXCUDAEnabled    bool     `toml:"whisperx_cuda_enabled"`
-	WhisperXVADMethod      string   `toml:"whisperx_vad_method"`
-	WhisperXHFToken        string   `toml:"whisperx_hf_token"`
 	OpenSubtitlesEnabled   bool     `toml:"opensubtitles_enabled"`
 	OpenSubtitlesAPIKey    string   `toml:"opensubtitles_api_key"`
 	OpenSubtitlesUserAgent string   `toml:"opensubtitles_user_agent"`
 	OpenSubtitlesUserToken string   `toml:"opensubtitles_user_token"`
 	OpenSubtitlesLanguages []string `toml:"opensubtitles_languages"`
+}
+
+// TranscriptionConfig defines the shared ASR/forced-alignment runtime.
+type TranscriptionConfig struct {
+	ASRModel              string `toml:"asr_model"`
+	ForcedAlignerModel    string `toml:"forced_aligner_model"`
+	Device                string `toml:"device"`
+	DType                 string `toml:"dtype"`
+	UseFlashAttention     bool   `toml:"use_flash_attention"`
+	MaxInferenceBatchSize int    `toml:"max_inference_batch_size"`
 }
 
 // RipCacheConfig defines rip cache settings.
@@ -135,7 +142,6 @@ type LLMConfig struct {
 // CommentaryConfig defines commentary track detection settings.
 type CommentaryConfig struct {
 	Enabled             bool    `toml:"enabled"`
-	WhisperXModel       string  `toml:"whisperx_model"`
 	SimilarityThreshold float64 `toml:"similarity_threshold"`
 	ConfidenceThreshold float64 `toml:"confidence_threshold"`
 }
@@ -175,9 +181,14 @@ func (c *Config) OpenSubtitlesCacheDir() string {
 	return filepath.Join(cacheBaseDir(), "opensubtitles")
 }
 
-// WhisperXCacheDir returns the auto-derived WhisperX transcription cache directory.
-func (c *Config) WhisperXCacheDir() string {
-	return filepath.Join(cacheBaseDir(), "whisperx")
+// TranscriptionCacheDir returns the auto-derived transcription cache directory.
+func (c *Config) TranscriptionCacheDir() string {
+	return filepath.Join(cacheBaseDir(), "transcription")
+}
+
+// TranscriptionRuntimeDir returns the managed Python runtime root.
+func (c *Config) TranscriptionRuntimeDir() string {
+	return filepath.Join(cacheBaseDir(), "qwen3-runtime")
 }
 
 // RipCacheDir returns the auto-derived rip cache directory.

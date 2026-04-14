@@ -88,7 +88,7 @@ type TotalsResponse struct {
 
 // SubGenResponse summarizes subtitle generation.
 type SubGenResponse struct {
-	WhisperX int `json:"whisperx"`
+	Qwen3ASR int `json:"qwen3_asr"`
 }
 
 // StatusAPIResponse is the top-level /api/status response.
@@ -248,8 +248,8 @@ func populateRipSpecDerived(resp *ItemResponse, env *ripspec.Envelope, item *que
 	if results := env.Attributes.SubtitleGenerationResults; len(results) > 0 {
 		sg := &SubGenResponse{}
 		for _, rec := range results {
-			if strings.EqualFold(rec.Source, "whisperx") {
-				sg.WhisperX++
+			if strings.EqualFold(rec.Source, "qwen3_asr") {
+				sg.Qwen3ASR++
 			}
 		}
 		resp.SubtitleGeneration = sg

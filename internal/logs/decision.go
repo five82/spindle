@@ -40,7 +40,7 @@ const (
 	DecisionForcedSubtitleDetection  = "forced_subtitle_detection"
 	DecisionForcedSubtitleRanking    = "forced_subtitle_ranking"
 	DecisionForcedSubtitleSearch     = "forced_subtitle_search"
-	DecisionHallucinationFilter      = "hallucination_filter"
+	DecisionSubtitleArtifactFilter   = "subtitle_artifact_filter"
 	DecisionKeyDBLookup              = "keydb_lookup"
 	DecisionMakeMKVSettings          = "makemkv_settings"
 	DecisionMountResolution          = "mount_resolution"

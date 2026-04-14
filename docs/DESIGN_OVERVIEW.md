@@ -13,7 +13,7 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
 Spindle automates the complete workflow from optical disc to Jellyfin media library:
 disc detection, ripping (MakeMKV), encoding (Drapto/SVT-AV1), metadata lookup (TMDB),
-subtitle generation (WhisperX canonical transcription + Stable-TS display formatting + OpenSubtitles forced subs), commentary detection,
+subtitle generation (Qwen3-ASR canonical transcription + Stable-TS display formatting + OpenSubtitles forced subs), commentary detection,
 episode identification, and library organization with Jellyfin refresh.
 
 ### 1.2 Scope
@@ -57,7 +57,7 @@ them to appear in Jellyfin without manual intervention.
 | Binary     | Purpose                                            | When Required                  |
 |------------|----------------------------------------------------|--------------------------------|
 | `bd_info`  | Enhanced Blu-ray metadata (disc name, year, studio)| Always optional; improves ID   |
-| `uvx`      | WhisperX transcription + Stable-TS subtitle formatting packages | When subtitles.enabled = true  |
+| `uvx`      | Qwen3-ASR transcription + Stable-TS subtitle formatting packages | When subtitles.enabled = true  |
 | `mkvmerge` | Muxing subtitles into MKV containers               | When subtitles.mux_into_mkv = true |
 
 ### 2.3 Library Dependencies
@@ -199,7 +199,7 @@ tracks whether work is actively executing (see DESIGN_QUEUE.md Section 4).
 |-----------|--------|--------|
 | `discSem` | Optical drive | Identification, Ripping |
 | `encodeSem` | SVT-AV1 encoder (CPU-bound) | Encoding |
-| `whisperxSem` | WhisperX GPU/model (shared transcription service) | Episode Identification, Audio Analysis (commentary), Subtitling |
+| `transcriptionSem` | Qwen3-ASR GPU/model (shared transcription service) | Episode Identification, Audio Analysis (commentary), Subtitling |
 
 Each semaphore prevents concurrent use of a constrained resource. A stage
 acquires its required semaphore before execution and releases it on
@@ -235,7 +235,7 @@ const (
     SemNone     Semaphore = iota
     SemDisc                        // guards optical drive
     SemEncode                      // guards SVT-AV1 encoder
-    SemWhisperX                    // guards WhisperX GPU
+    SemQwen3-ASR                    // guards Qwen3-ASR GPU
 )
 
 type pipelineStage struct {
@@ -256,7 +256,7 @@ type pipelineState struct {
     stages     []pipelineStage
     stageOrder []queue.Stage             // ordered for NextReady()
     stageMap   map[queue.Stage]int       // stage -> index in stages slice
-    sems       [3]chan struct{}          // disc, encode, whisperx (capacity 1 each)
+    sems       [3]chan struct{}          // disc, encode, transcription (capacity 1 each)
     logger     *slog.Logger
 }
 ```
@@ -350,10 +350,10 @@ these rules:
 |-------|-----------------|
 | Identification | MakeMKV scan killed. No cleanup needed. |
 | Ripping | MakeMKV rip killed. Partial files left in staging (overwritten on retry). |
-| Episode ID | WhisperX killed. Partial transcripts left (reusable on retry). |
+| Episode ID | Qwen3-ASR killed. Partial transcripts left (reusable on retry). |
 | Encoding | Drapto/FFmpeg killed. Partial output left. Resume skips completed episodes. |
-| Audio Analysis | FFmpeg/WhisperX killed. No persistent side effects. |
-| Subtitling | WhisperX killed. Partial SRTs left. Resume skips completed episodes. |
+| Audio Analysis | FFmpeg/Qwen3-ASR killed. No persistent side effects. |
+| Subtitling | Qwen3-ASR killed. Partial SRTs left. Resume skips completed episodes. |
 | Organization | **Must clean up partial copies.** Incomplete files in the library are dangerous. On cancellation, remove any partially-written target file before returning. |
 
 ### 4.7 Crash Recovery
@@ -397,8 +397,6 @@ and converted to absolute paths.
 | `JELLYFIN_API_KEY`         | `jellyfin.api_key`                  |
 | `OPENROUTER_API_KEY`       | `llm.api_key`                       |
 | `SPINDLE_API_TOKEN`        | `api.token`                         |
-| `HUGGING_FACE_HUB_TOKEN`  | `subtitles.whisperx_hf_token`       |
-| `HF_TOKEN`                 | `subtitles.whisperx_hf_token` (alternative) |
 | `OPENSUBTITLES_API_KEY`    | `subtitles.opensubtitles_api_key`   |
 | `OPENSUBTITLES_USER_TOKEN` | `subtitles.opensubtitles_user_token`|
 
@@ -419,7 +417,7 @@ On config load, `EnsureDirectories` creates:
 - `review_dir` (required, fail on error)
 - `library_dir` (best-effort, don't fail -- storage may be offline)
 - Auto-derived cache directories as needed (rip cache, OpenSubtitles cache,
-  WhisperX cache)
+  Qwen3-ASR cache)
 
 ### 5.6 Configuration Sections
 
@@ -438,7 +436,7 @@ On config load, `EnsureDirectories` creates:
 
 **Auto-derived cache directories** (not configurable, all under `$XDG_CACHE_HOME/spindle/`):
 - OpenSubtitles cache: `$XDG_CACHE_HOME/spindle/opensubtitles`
-- WhisperX cache: `$XDG_CACHE_HOME/spindle/whisperx`
+- transcription cache: `$XDG_CACHE_HOME/spindle/transcription`
 - Rip cache: `$XDG_CACHE_HOME/spindle/rips` (when `rip_cache.enabled`)
 - Disc ID cache: `$XDG_CACHE_HOME/spindle/discid_cache.json` (when `disc_id_cache.enabled`)
 
@@ -493,15 +491,25 @@ activity and are sent as a matched pair.
 |----------------------------|----------|-------------------------|----------------------------------------|
 | `enabled`                  | bool     | false                   | Enable subtitle generation pipeline    |
 | `mux_into_mkv`             | bool     | true                    | Embed subtitles in MKV container       |
-| `whisperx_model`           | string   | `large-v3`              | WhisperX model name                    |
-| `whisperx_cuda_enabled`    | bool     | false                   | Enable CUDA acceleration               |
-| `whisperx_vad_method`      | string   | `silero`                | Voice activity detection method        |
-| `whisperx_hf_token`        | string   | (empty)                 | HuggingFace access token               |
 | `opensubtitles_enabled`    | bool     | false                   | Enable OpenSubtitles integration       |
 | `opensubtitles_api_key`    | string   | (empty)                 | OpenSubtitles API key                  |
 | `opensubtitles_user_agent` | string   | `Spindle/dev`           | User-Agent for OpenSubtitles requests  |
 | `opensubtitles_user_token` | string   | (empty)                 | OpenSubtitles user token for downloads |
 | `opensubtitles_languages`  | []string | `["en"]`                | Preferred subtitle languages           |
+
+#### `[transcription]`
+
+| Field                   | Type   | Default                               | Purpose                                      |
+|-------------------------|--------|---------------------------------------|----------------------------------------------|
+| `asr_model`             | string | `Qwen/Qwen3-ASR-1.7B`                 | Shared ASR model for transcription           |
+| `forced_aligner_model`  | string | `Qwen/Qwen3-ForcedAligner-0.6B`       | Timestamp/forced-alignment model             |
+| `device`                | string | `cuda:0`                              | Runtime device for the persistent worker     |
+| `dtype`                 | string | `bfloat16`                            | Torch dtype used by the worker               |
+| `use_flash_attention`   | bool   | true                                  | Require Flash Attention 2 for runtime startup |
+| `max_inference_batch_size` | int | 1                                     | Chunk batch size for ASR/alignment inference |
+
+This section configures the shared transcription runtime used by subtitles,
+episode identification, and commentary analysis.
 
 #### `[rip_cache]`
 
@@ -563,7 +571,6 @@ warning log.
 | Field                  | Type    | Default            | Purpose                                      |
 |------------------------|---------|--------------------|----------------------------------------------|
 | `enabled`              | bool    | false              | Enable commentary track detection            |
-| `whisperx_model`       | string  | `large-v3-turbo`   | WhisperX model (falls back to subtitles model)|
 | `similarity_threshold` | float64 | 0.92               | Cosine similarity for stereo downmix check   |
 | `confidence_threshold` | float64 | 0.80               | LLM confidence required for classification   |
 
@@ -612,7 +619,7 @@ exposed as config but never changed from defaults in practice.
       title_00.mkv    # or episode files
       title_00.en.srt
       title_00.en.forced.srt   # only when forced subs found
-    contentid/        # WhisperX transcripts for episode ID
+    contentid/        # Canonical transcripts for episode ID
       s01_001/
         s01_001-contentid.srt
 ```
@@ -647,7 +654,7 @@ $XDG_CACHE_HOME/spindle/
     {tmdb_id}/
       {season}/
         {episode}_{language}_{file_id}.srt
-  whisperx/               # WhisperX transcription cache
+  transcription/          # Canonical transcription cache
     ...
 ```
 

@@ -173,7 +173,7 @@ same disc (see DESIGN_STAGES.md section 1.5).
 
 #### `spindle gensubtitle <encoded-file>`
 
-Create subtitles for an encoded media file using WhisperX.
+Create subtitles for an encoded media file using Qwen3-ASR.
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
@@ -725,7 +725,7 @@ The `QueueItem` JSON object returned by queue endpoints:
   },
   "episodeIdentifiedCount":  int,
   "subtitleGeneration": {
-    "whisperx":                int
+    "qwen3_asr":                int
   },
   "primaryAudioDescription": string,
   "commentaryCount":         int

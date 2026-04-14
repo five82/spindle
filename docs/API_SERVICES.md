@@ -166,27 +166,33 @@ HTTP timeout: **45 seconds** (hardcoded `defaultHTTPTimeout`).
 
 ---
 
-## 4. WhisperX CLI
+## 4. Qwen3-ASR + Qwen3-ForcedAligner runtime
 
-Invoked via `uvx` (Python package runner):
+Spindle uses a **persistent local Python worker** for transcription rather than
+spawning a fresh ad-hoc Python transcription process per request.
 
-```
-uvx --from whisperx whisperx <input_audio> \
-  --model large-v3 \
-  --language <lang> \
-  --output_dir <dir> \
-  --output_format all \
-  [--compute_type float16 --device cuda]  # when cuda enabled
-```
+Runtime shape:
 
-GPU acceleration controlled by `subtitles.whisperx_cuda_enabled`.
+1. Go extracts mono 16 kHz WAV audio from the source media.
+2. `internal/transcription` sends the WAV path and language hint to the worker.
+3. The worker keeps `Qwen3-ASR` and `Qwen3-ForcedAligner` loaded.
+4. The worker returns transcript text plus aligned timestamp items.
+5. Go writes the canonical transcript artifacts:
+   - `audio.srt`
+   - `audio.json`
 
-WhisperX output is treated as the **canonical transcript**. Final display SRTs
-are produced later by the subtitle stage from WhisperX JSON/alignment output.
+Configured via:
+
+- `transcription.asr_model`
+- `transcription.forced_aligner_model`
+- `transcription.device`
+- `transcription.dtype`
+- `transcription.use_flash_attention`
+- `transcription.max_inference_batch_size`
 
 ### Audio Extraction (Pre-Processing)
 
-Before invoking WhisperX, audio is extracted from the source MKV via FFmpeg:
+Before invoking the worker, audio is extracted from the source MKV via FFmpeg:
 
 ```
 ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
@@ -202,7 +208,7 @@ Parameters:
 ### Subtitle Formatting (Stable-TS)
 
 Subtitle generation formats viewer-facing SRTs by invoking Stable-TS via `uvx`
-against the canonical WhisperX JSON/alignment output:
+against the canonical transcript JSON/alignment output:
 
 ```
 uvx --from stable-ts-whisperless python -c <embedded_formatter_script> \
@@ -216,14 +222,18 @@ Behavior:
 - If formatting fails, that subtitle job fails explicitly rather than silently
   falling back to the old raw-wrap behavior.
 
-### Environment Handling
+### Runtime Environment Handling
 
-- **Torch compatibility**: Sets `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` unconditionally
-  to work around Torch 2.6+ default change that breaks WhisperX/pyannote.
-- **CUDA index URL**: When CUDA enabled, passes CUDA-optimized PyPI index URL
-  (`--index-url`) with standard PyPI as fallback (`--extra-index-url`).
-- **VAD method**: Runtime-reconfigurable via `SetVADMethod()`; defaults to `silero`,
-  can switch to `pyannote` (requires HF token).
+- **Managed Python runtime**: Spindle can use a managed local virtualenv rooted
+  under `$XDG_CACHE_HOME/spindle/qwen3-runtime`.
+- **Runtime health checks** verify Python availability, `torch`, `qwen_asr`, and
+  CUDA visibility.
+- **CUDA execution** is controlled by `transcription.device` and `transcription.dtype`.
+- **Flash Attention** is required when `transcription.use_flash_attention = true`.
+  Runtime bootstrap and worker startup fail if `flash-attn` is not installed or
+  model initialization cannot use Flash Attention 2.
+- **Inference batching** is controlled by `transcription.max_inference_batch_size`.
+  Lower values reduce VRAM usage during chunked ASR/alignment at the cost of throughput.
 
 ---
 
@@ -260,7 +270,7 @@ behavior for all three use cases:
 
 1. **Commentary classification**: Determine if an audio track is commentary
    based on transcript analysis (Section 1)
-2. **Episode verification**: Compare WhisperX and OpenSubtitles transcripts to
+2. **Episode verification**: Compare Qwen3-ASR and OpenSubtitles transcripts to
    verify episode matching (Section 2)
 
 ### Retry Strategy

@@ -21,7 +21,7 @@ type SelectedAudio struct {
 
 // SelectPrimaryAudioTrack probes a media file, runs the shared audio-selection
 // policy, and returns the selected audio-relative index plus a normalized
-// language suitable for WhisperX.
+// language suitable for the transcription runtime.
 func (s *Service) SelectPrimaryAudioTrack(ctx context.Context, inputPath, fallbackLanguage string) (SelectedAudio, error) {
 	probe, err := inspectMedia(ctx, "", inputPath)
 	if err != nil {

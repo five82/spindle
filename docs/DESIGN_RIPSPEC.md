@@ -183,7 +183,7 @@ AudioAnalysisData {
 
 SubtitleGenRecord {
     EpisodeKey            string
-    Source                string  // "whisperx" or "opensubtitles"
+    Source                string  // "qwen3_asr" or "opensubtitles"
     Cached                bool
     SubtitlePath          string
     Segments              int
@@ -192,7 +192,7 @@ SubtitleGenRecord {
 }
 
 ContentIDSummary {
-    Method                string  // e.g. "whisperx_tfidf_content_matcher"
+    Method                string  // e.g. "qwen3_asr_tfidf_content_matcher"
     ReferenceSource       string  // e.g. "opensubtitles"
     ReferenceEpisodes     int
     TranscribedEpisodes   int

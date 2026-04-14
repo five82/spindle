@@ -16,11 +16,11 @@ const (
 	maxTranscriptChars  = 6000
 	verificationPrompt  = `You compare two TV episode transcripts to determine if they are from the same episode.
 
-TRANSCRIPT A is a WhisperX speech-to-text transcription from a Blu-ray disc.
+TRANSCRIPT A is a Qwen3-ASR speech-to-text transcription from a Blu-ray disc.
 TRANSCRIPT B is a reference subtitle from OpenSubtitles for a specific episode.
 
 Both are extracted from the middle portion of the episode, typically about 10 minutes, though shorter transcripts may use the full available duration.
-WhisperX transcripts may contain speech recognition errors.
+Qwen3-ASR transcripts may contain speech recognition errors.
 Reference subtitles may differ in exact wording due to subtitle conventions, release differences, or localization.
 
 Focus on whether the same scenes and dialogue events occur in both.
@@ -244,15 +244,15 @@ func findRefPath(refs []referenceFingerprint, episode int) string {
 	return ""
 }
 
-func buildVerificationPrompt(whisperXText, referenceText, episodeKey string, targetEpisode int) string {
+func buildVerificationPrompt(qwenText, referenceText, episodeKey string, targetEpisode int) string {
 	return fmt.Sprintf(`Episode key: %s
 Target episode: %d
 
-=== TRANSCRIPT A (WhisperX from disc) ===
+=== TRANSCRIPT A (Qwen3-ASR from disc) ===
 %s
 
 === TRANSCRIPT B (OpenSubtitles reference) ===
-%s`, episodeKey, targetEpisode, whisperXText, referenceText)
+%s`, episodeKey, targetEpisode, qwenText, referenceText)
 }
 
 func extractMiddleTranscript(srtPath string) (string, error) {

@@ -266,7 +266,7 @@ func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 			Metadata: ripspec.Metadata{MediaType: "tv"},
 			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}},
 			Attributes: ripspec.EnvelopeAttributes{ContentID: &ripspec.ContentIDSummary{
-				Method:               "whisperx_tfidf_hungarian",
+				Method:               "qwen3_asr_tfidf_content_matcher",
 				ReferenceSource:      "opensubtitles",
 				EpisodesSynchronized: true,
 				Completed:            true,

@@ -70,22 +70,6 @@ api_key = ""
 # Embed subtitles in MKV container
 # mux_into_mkv = true
 
-# WhisperX model name
-# whisperx_model = "large-v3"
-
-# Enable CUDA acceleration
-# whisperx_cuda_enabled = false
-
-# Voice activity detection method: "silero" (default) or "pyannote"
-#   silero  - fast, lightweight, no token required
-#   pyannote - better precision with background noise and overlapping speech;
-#              requires whisperx_hf_token to be set
-# whisperx_vad_method = "silero"
-
-# HuggingFace access token, required for pyannote VAD
-# (or set HUGGING_FACE_HUB_TOKEN / HF_TOKEN env var)
-# whisperx_hf_token = ""
-
 # Enable OpenSubtitles integration
 # opensubtitles_enabled = false
 
@@ -101,6 +85,26 @@ api_key = ""
 
 # Preferred subtitle languages
 # opensubtitles_languages = ["en"]
+
+[transcription]
+# Shared ASR model used by subtitles, content ID, and commentary analysis
+# asr_model = "Qwen/Qwen3-ASR-1.7B"
+
+# Forced aligner model used for timestamped subtitle generation
+# forced_aligner_model = "Qwen/Qwen3-ForcedAligner-0.6B"
+
+# Runtime device for Qwen inference
+# device = "cuda:0"
+
+# Torch dtype for Qwen inference
+# dtype = "bfloat16"
+
+# Require Flash Attention 2 for transcription runtime startup
+# use_flash_attention = true
+
+# Maximum number of chunked ASR/alignment inputs per inference batch.
+# Lower values reduce VRAM usage; 1 is the safest default for 16 GB GPUs.
+# max_inference_batch_size = 1
 
 [rip_cache]
 # Enable rip cache
@@ -174,9 +178,6 @@ api_key = ""
 [commentary]
 # Enable commentary track detection
 # enabled = false
-
-# WhisperX model for commentary analysis
-# whisperx_model = "large-v3-turbo"
 
 # Cosine similarity threshold for stereo downmix check
 # similarity_threshold = 0.92

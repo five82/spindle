@@ -3,6 +3,63 @@ import json
 from pathlib import Path
 
 
+def _normalize_token(value: str) -> str:
+    return "".join(ch.lower() for ch in value if ch.isalnum())
+
+
+def _parse_text_words(text: str):
+    words = []
+    start = None
+    for idx, ch in enumerate(text):
+        if ch.isalnum() or ch in ("'", "’", "-"):
+            if start is None:
+                start = idx
+        elif start is not None:
+            token = text[start:idx]
+            norm = _normalize_token(token)
+            if norm:
+                words.append({"start": start, "norm": norm})
+            start = None
+    if start is not None:
+        token = text[start:]
+        norm = _normalize_token(token)
+        if norm:
+            words.append({"start": start, "norm": norm})
+    return words
+
+
+def _project_words_from_text(existing_text: str, words):
+    if not existing_text or not isinstance(words, list):
+        return words
+    text_words = _parse_text_words(existing_text)
+    if not text_words:
+        return words
+    projected = []
+    word_index = 0
+    for entry in words:
+        token = entry.get("word")
+        norm = _normalize_token(token if isinstance(token, str) else "")
+        if not norm:
+            projected.append(dict(entry))
+            continue
+        match = -1
+        for idx in range(word_index, len(text_words)):
+            if text_words[idx]["norm"] == norm:
+                match = idx
+                break
+        if match == -1:
+            return words
+        start = text_words[match]["start"]
+        end = len(existing_text)
+        if match + 1 < len(text_words):
+            end = text_words[match + 1]["start"]
+        updated = dict(entry)
+        updated["word"] = existing_text[start:end]
+        projected.append(updated)
+        word_index = match + 1
+    return projected
+
+
 def _load_segments(path: str):
     with open(path, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -14,7 +71,7 @@ def _load_segments(path: str):
         segments = payload
         language = None
     else:
-        raise SystemExit("unsupported whisperx payload")
+        raise SystemExit("unsupported canonical transcript payload")
 
     if not segments:
         raise SystemExit("no segments provided")
@@ -41,8 +98,10 @@ def _sanitize_segments(raw_segments):
             continue
         segment = dict(entry)
         segment.pop("chars", None)
+        existing_text = segment.get("text") if isinstance(segment.get("text"), str) else ""
         words = segment.get("words")
         if isinstance(words, list):
+            words = _project_words_from_text(existing_text, words)
             normalized_words = []
             text_parts = []
             for idx, word_entry in enumerate(words):
@@ -72,7 +131,9 @@ def _sanitize_segments(raw_segments):
                     word["word"] = normalized
                     text_parts.append(word["word"])
                 normalized_words.append(word)
-            if text_parts:
+            if existing_text.strip():
+                segment["text"] = " ".join(existing_text.split())
+            elif text_parts:
                 segment["text"] = "".join(text_parts).strip()
             segment["words"] = normalized_words
         sanitized.append(segment)
@@ -83,7 +144,7 @@ def _sanitize_segments(raw_segments):
 
 def main() -> None:
     parser = argparse.ArgumentParser("stable-ts-post")
-    parser.add_argument("aligned_json", help="WhisperX alignment JSON file")
+    parser.add_argument("aligned_json", help="Canonical transcript JSON file")
     parser.add_argument("output_srt", help="Path to write formatted SRT")
     parser.add_argument("--language", default=None, help="Override language code")
     args = parser.parse_args()

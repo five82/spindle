@@ -9,21 +9,6 @@ import (
 	"github.com/five82/spindle/internal/srtutil"
 )
 
-// knownHallucinationPhrases contains normalized text commonly hallucinated
-// by WhisperX on silence or noise.
-var knownHallucinationPhrases = map[string]bool{
-	"thank you":                 true,
-	"thanks for watching":       true,
-	"please subscribe":          true,
-	"like and subscribe":        true,
-	"you":                       true,
-	"bye":                       true,
-	"thank you for watching":    true,
-	"subscribe":                 true,
-	"thanks":                    true,
-	"see you in the next video": true,
-}
-
 // musicPattern matches cues containing only music symbols and whitespace.
 var musicPattern = regexp.MustCompile(`^[\s\x{00B6}\x{266A}\x{266B}*]+$`)
 
@@ -34,9 +19,9 @@ type indexedTimedCue struct {
 	Text  string
 }
 
-// filterWhisperXOutput applies hallucination filtering to SRT content.
-// Returns filtered SRT content or an error if zero cues survive.
-func filterWhisperXOutput(srtContent string, videoSeconds float64) (string, error) {
+// filterCanonicalTranscriptOutput applies generic ASR artifact filtering to SRT
+// content. Returns filtered SRT content or an error if zero cues survive.
+func filterCanonicalTranscriptOutput(srtContent string, videoSeconds float64) (string, error) {
 	cues := srtutil.Parse(srtContent)
 	if len(cues) == 0 {
 		return "", fmt.Errorf("no cues found in SRT content")
@@ -45,7 +30,7 @@ func filterWhisperXOutput(srtContent string, videoSeconds float64) (string, erro
 	for i, cue := range cues {
 		indexed = append(indexed, indexedTimedCue{Orig: i, Start: cue.Start, End: cue.End, Text: cue.Text})
 	}
-	filtered, err := filterIndexedHallucinations(indexed, videoSeconds)
+	filtered, err := filterIndexedArtifacts(indexed, videoSeconds)
 	if err != nil {
 		return "", err
 	}
@@ -58,29 +43,28 @@ func filterWhisperXOutput(srtContent string, videoSeconds float64) (string, erro
 	return srtutil.Format(result), nil
 }
 
-func filterIndexedHallucinations(cues []indexedTimedCue, videoSeconds float64) ([]indexedTimedCue, error) {
+func filterIndexedArtifacts(cues []indexedTimedCue, videoSeconds float64) ([]indexedTimedCue, error) {
 	if len(cues) == 0 {
 		return nil, fmt.Errorf("no cues found in SRT content")
 	}
-	cues = removeIsolatedHallucinationsIndexed(cues)
-	cues = sweepTrailingHallucinationsIndexed(cues, videoSeconds)
+	cues = removeIsolatedArtifactsIndexed(cues)
+	cues = sweepTrailingArtifactsIndexed(cues, videoSeconds)
 	if len(cues) == 0 {
-		return nil, fmt.Errorf("all cues removed by hallucination filter")
+		return nil, fmt.Errorf("all cues removed by subtitle artifact filter")
 	}
 	return cues, nil
 }
 
-// removeIsolatedHallucinations removes:
+// removeIsolatedArtifacts removes:
 //  1. Runs of 3+ consecutive cues with identical normalized text where each
 //     inter-cue gap exceeds 10 seconds.
-//  2. Cues with known hallucination phrases isolated by >= 30s gaps on both sides.
-//  3. Cues matching music patterns isolated by >= 30s gaps on both sides.
-func removeIsolatedHallucinations(cues []srtutil.Cue) []srtutil.Cue {
+//  2. Cues matching music patterns isolated by >= 30s gaps on both sides.
+func removeIsolatedArtifacts(cues []srtutil.Cue) []srtutil.Cue {
 	indexed := make([]indexedTimedCue, 0, len(cues))
 	for i, cue := range cues {
 		indexed = append(indexed, indexedTimedCue{Orig: i, Start: cue.Start, End: cue.End, Text: cue.Text})
 	}
-	filtered := removeIsolatedHallucinationsIndexed(indexed)
+	filtered := removeIsolatedArtifactsIndexed(indexed)
 	result := make([]srtutil.Cue, 0, len(filtered))
 	for _, cue := range filtered {
 		result = append(result, cues[cue.Orig])
@@ -88,7 +72,7 @@ func removeIsolatedHallucinations(cues []srtutil.Cue) []srtutil.Cue {
 	return result
 }
 
-func removeIsolatedHallucinationsIndexed(cues []indexedTimedCue) []indexedTimedCue {
+func removeIsolatedArtifactsIndexed(cues []indexedTimedCue) []indexedTimedCue {
 	if len(cues) == 0 {
 		return cues
 	}
@@ -124,17 +108,6 @@ func removeIsolatedHallucinationsIndexed(cues []indexedTimedCue) []indexedTimedC
 	cues = compactIndexedCues(cues, remove)
 	remove = make([]bool, len(cues))
 	for i, cue := range cues {
-		norm := normalizeText(cue.Text)
-		if !knownHallucinationPhrases[norm] {
-			continue
-		}
-		if gapBeforeIndexedCue(cues, i) >= 30 && gapAfterIndexedCue(cues, i) >= 30 {
-			remove[i] = true
-		}
-	}
-	cues = compactIndexedCues(cues, remove)
-	remove = make([]bool, len(cues))
-	for i, cue := range cues {
 		if !musicPattern.MatchString(cue.Text) {
 			continue
 		}
@@ -145,14 +118,14 @@ func removeIsolatedHallucinationsIndexed(cues []indexedTimedCue) []indexedTimedC
 	return compactIndexedCues(cues, remove)
 }
 
-// sweepTrailingHallucinations removes known phrase and music pattern cues in
+// sweepTrailingArtifacts removes obvious trailing non-speech artifacts in
 // the last 300 seconds of a video. Only applies when videoSeconds >= 600.
-func sweepTrailingHallucinations(cues []srtutil.Cue, videoSeconds float64) []srtutil.Cue {
+func sweepTrailingArtifacts(cues []srtutil.Cue, videoSeconds float64) []srtutil.Cue {
 	indexed := make([]indexedTimedCue, 0, len(cues))
 	for i, cue := range cues {
 		indexed = append(indexed, indexedTimedCue{Orig: i, Start: cue.Start, End: cue.End, Text: cue.Text})
 	}
-	filtered := sweepTrailingHallucinationsIndexed(indexed, videoSeconds)
+	filtered := sweepTrailingArtifactsIndexed(indexed, videoSeconds)
 	result := make([]srtutil.Cue, 0, len(filtered))
 	for _, cue := range filtered {
 		result = append(result, cues[cue.Orig])
@@ -160,7 +133,7 @@ func sweepTrailingHallucinations(cues []srtutil.Cue, videoSeconds float64) []srt
 	return result
 }
 
-func sweepTrailingHallucinationsIndexed(cues []indexedTimedCue, videoSeconds float64) []indexedTimedCue {
+func sweepTrailingArtifactsIndexed(cues []indexedTimedCue, videoSeconds float64) []indexedTimedCue {
 	if videoSeconds < 600 || len(cues) == 0 {
 		return cues
 	}
@@ -170,8 +143,7 @@ func sweepTrailingHallucinationsIndexed(cues []indexedTimedCue, videoSeconds flo
 		if cue.Start < threshold {
 			continue
 		}
-		norm := normalizeText(cue.Text)
-		if knownHallucinationPhrases[norm] || musicPattern.MatchString(cue.Text) {
+		if musicPattern.MatchString(cue.Text) {
 			remove[i] = true
 		}
 	}

@@ -36,7 +36,7 @@ internal/
   subtitle/             Stage: subtitle generation (display formatting/regrouping, forced subs, SRT validation/muxing)
   organizer/            Stage: organization (library copy, review routing, Jellyfin)
 
-  transcription/        Shared WhisperX canonical transcription service with caching
+  transcription/        Shared Qwen3-ASR canonical transcription service with caching
 
   makemkv/              MakeMKV CLI wrapper (scan, rip, robot format parser)
   tmdb/                 TMDB REST API client
@@ -146,7 +146,7 @@ DESIGN_TESTING.md).
 The `transcription.Service` is shared by `contentid`, `audioanalysis`, and
 `subtitle`. Each stage receives the same `*transcription.Service` instance
 via constructor injection. The service is stateless; concurrency is managed
-by the `whisperxSem` semaphore at the workflow level.
+by the `transcriptionSem` semaphore at the workflow level.
 
 ---
 

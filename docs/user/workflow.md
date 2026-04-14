@@ -11,10 +11,10 @@ Every item moves through the queue in order. Each item has a **stage** and an
 
 - `identification` - disc queued; MakeMKV scan + TMDB lookup
 - `ripping` - video copied to staging; you'll get a notification so the disc can be ejected manually
-- `episode_identification` *(TV only)* - WhisperX + OpenSubtitles correlate ripped files to definitive episode numbers
+- `episode_identification` *(TV only)* - Qwen3-ASR + OpenSubtitles correlate ripped files to definitive episode numbers
 - `encoding` - Drapto transcodes the rip in the background
 - `audio_analysis` *(optional)* - detects commentary tracks for exclusion (requires `commentary.enabled = true`)
-- `subtitling` *(optional)* - WhisperX transcription generates subtitle sidecars; forced subtitles optionally fetched from OpenSubtitles
+- `subtitling` *(optional)* - Qwen3-ASR transcription generates subtitle sidecars; forced subtitles optionally fetched from OpenSubtitles
 - `organizing` - files moved into your library; Jellyfin refresh triggered when configured
 - `completed` - all done
 - `failed` - an error stopped progress; fix the root cause and retry
@@ -81,7 +81,7 @@ use `spindle cache rip --title` to interactively select which title to rip.
 
 ## Stage 4: Episode Identification (episode_identification)
 
-1. For TV shows with OpenSubtitles enabled, Spindle compares WhisperX transcripts against OpenSubtitles references to map ripped files to definitive episode numbers.
+1. For TV shows with OpenSubtitles enabled, Spindle compares Qwen3-ASR transcripts against OpenSubtitles references to map ripped files to definitive episode numbers.
 2. Results are written back into the rip specification so encoding/organizing use correct episode labels. The current implementation also supports a conservative disc-1 opening double-length inference: when the first selected title has a probable double-episode runtime profile and the resolved sequence supports it, Spindle can promote that title to a range like `S01E01-E02`.
 3. Movies, discs without OpenSubtitles enabled, or invalid rip specs skip this stage and proceed to encoding.
 
@@ -97,20 +97,20 @@ use `spindle cache rip --title` to interactively select which title to rip.
 When `commentary.enabled = true`, Spindle analyzes encoded files to detect and exclude commentary tracks before subtitle generation.
 
 1. Extracts audio from each encoded asset.
-2. Uses WhisperX transcription and LLM classification to identify commentary vs. primary audio tracks.
+2. Uses Qwen3-ASR transcription and LLM classification to identify commentary vs. primary audio tracks.
 3. Reports coarse phase progress for commentary detection, refinement, post-refinement analysis, and persistence.
 4. Updates the rip spec with analysis results for downstream stages.
 5. Skipped when commentary detection is disabled or no encoded assets exist.
 
 ## Stage 7: Subtitle Generation (subtitling)
 
-When `subtitles.enabled = true`, Spindle generates subtitles from the actual audio using WhisperX transcription. Subtitles are generated per encoded asset.
+When `subtitles.enabled = true`, Spindle generates subtitles from the actual audio using Qwen3-ASR transcription. Subtitles are generated per encoded asset.
 
 1. Spindle extracts the primary audio track.
-2. **WhisperX transcription**: generates canonical transcript artifacts (raw SRT + JSON/alignment output).
-3. **Subtitle formatting**: the subtitle stage filters WhisperX hallucination artifacts from derived working transcript data, then uses Stable-TS regrouping/formatting to produce the final viewer-facing SRT.
+2. **Qwen3-ASR transcription**: generates canonical transcript artifacts (raw SRT + JSON/alignment output).
+3. **Subtitle formatting**: the subtitle stage filters generic subtitle artifacts from derived working transcript data, then uses Stable-TS regrouping/formatting to produce the final viewer-facing SRT.
 4. Subtitling progress is cumulative across the full subtitle stage, and completed subtitle assets are persisted after each item so counts can advance live.
-5. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the WhisperX output via text-based matching.
+5. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the Qwen3-ASR output via text-based matching.
 6. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). If subtitle formatting fails for an episode, that episode is recorded as a subtitle failure and processing continues with other episodes when possible.
 
 `spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename and uses TMDB for metadata context.

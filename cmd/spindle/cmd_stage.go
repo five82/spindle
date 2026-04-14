@@ -241,23 +241,29 @@ func newGensubtitleCmd() *cobra.Command {
 			}
 
 			// Create transcription service.
-			svc := transcription.New(
-				cfg.Subtitles.WhisperXModel,
-				cfg.Subtitles.WhisperXCUDAEnabled,
-				cfg.Subtitles.WhisperXVADMethod,
-				cfg.Subtitles.WhisperXHFToken,
-				cfg.WhisperXCacheDir(),
-				cmdLogger,
-			)
+			svc := transcription.New(transcription.Options{
+				ASRModel:              cfg.Transcription.ASRModel,
+				ForcedAlignerModel:    cfg.Transcription.ForcedAlignerModel,
+				Device:                cfg.Transcription.Device,
+				DType:                 cfg.Transcription.DType,
+				UseFlashAttention:     cfg.Transcription.UseFlashAttention,
+				MaxInferenceBatchSize: cfg.Transcription.MaxInferenceBatchSize,
+				CacheDir:              cfg.TranscriptionCacheDir(),
+				RuntimeDir:            cfg.TranscriptionRuntimeDir(),
+			}, cmdLogger)
+			defer func() { _ = svc.Close() }()
 
 			fmt.Printf("Preparing subtitles for %s...\n", filepath.Base(file))
 
-			// Verbose: show WhisperX config before transcription.
+			// Verbose: show transcription runtime config before transcription.
 			if flagVerbose {
-				model, device, vad := svc.Config()
-				fmt.Printf("  %s %s\n", labelStyle("Model:   "), model)
-				fmt.Printf("  %s %s\n", labelStyle("Device:  "), device)
-				fmt.Printf("  %s %s\n", labelStyle("VAD:     "), vad)
+				cfg := svc.Config()
+				fmt.Printf("  %s %s\n", labelStyle("ASR:     "), cfg.ASRModel)
+				fmt.Printf("  %s %s\n", labelStyle("Aligner: "), cfg.ForcedAlignerModel)
+				fmt.Printf("  %s %s\n", labelStyle("Device:  "), cfg.Device)
+				fmt.Printf("  %s %s\n", labelStyle("DType:   "), cfg.DType)
+				fmt.Printf("  %s %v\n", labelStyle("FlashAtt:"), cfg.UseFlashAttention)
+				fmt.Printf("  %s %d\n", labelStyle("Batch:   "), cfg.MaxInferenceBatchSize)
 				fmt.Printf("  %s en\n", labelStyle("Language:"))
 			}
 
@@ -279,17 +285,18 @@ func newGensubtitleCmd() *cobra.Command {
 				case phase == transcription.PhaseExtract && elapsed > 0:
 					fmt.Printf("  Extracting audio %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
 				case phase == transcription.PhaseTranscribe && elapsed == 0:
-					fmt.Println("  Running WhisperX...")
+					fmt.Println("  Running Qwen3-ASR...")
 				case phase == transcription.PhaseTranscribe && elapsed > 0:
-					fmt.Printf("  Running WhisperX %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
+					fmt.Printf("  Running Qwen3-ASR %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
 				}
 			}
 
 			result, err := svc.Transcribe(ctx, transcription.TranscribeRequest{
-				InputPath:  file,
-				AudioIndex: selectedAudio.Index,
-				Language:   selectedAudio.Language,
-				OutputDir:  workDir,
+				InputPath:        file,
+				AudioIndex:       selectedAudio.Index,
+				Language:         selectedAudio.Language,
+				OutputDir:        workDir,
+				RequireAlignment: true,
 			}, progress)
 			if err != nil {
 				return fmt.Errorf("transcription: %w", err)

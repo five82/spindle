@@ -21,7 +21,7 @@ func newDebugCmd() *cobra.Command {
 		Use:   "debug",
 		Short: "Diagnostic tools",
 	}
-	cmd.AddCommand(newDebugCropCmd(), newDebugCommentaryCmd())
+	cmd.AddCommand(newDebugCropCmd(), newDebugCommentaryCmd(), newDebugTranscriptionCmd())
 	return cmd
 }
 
@@ -124,14 +124,17 @@ func newDebugCommentaryCmd() *cobra.Command {
 				return nil
 			}
 
-			transcriber := transcription.New(
-				cfg.Commentary.WhisperXModel,
-				cfg.Subtitles.WhisperXCUDAEnabled,
-				cfg.Subtitles.WhisperXVADMethod,
-				cfg.Subtitles.WhisperXHFToken,
-				cfg.WhisperXCacheDir(),
-				nil,
-			)
+			transcriber := transcription.New(transcription.Options{
+				ASRModel:              cfg.Transcription.ASRModel,
+				ForcedAlignerModel:    cfg.Transcription.ForcedAlignerModel,
+				Device:                cfg.Transcription.Device,
+				DType:                 cfg.Transcription.DType,
+				UseFlashAttention:     cfg.Transcription.UseFlashAttention,
+				MaxInferenceBatchSize: cfg.Transcription.MaxInferenceBatchSize,
+				CacheDir:              cfg.TranscriptionCacheDir(),
+				RuntimeDir:            cfg.TranscriptionRuntimeDir(),
+			}, nil)
+			defer func() { _ = transcriber.Close() }()
 
 			// Use a synthetic fingerprint for cache keys.
 			debugFP := textutil.SanitizePathSegment(filepath.Base(path))
@@ -221,6 +224,56 @@ func newDebugCommentaryCmd() *cobra.Command {
 				fmt.Printf("%s %s\n", labelStyle("LLM reason:    "), resp.Reason)
 			}
 
+			return nil
+		},
+	}
+}
+
+func newDebugTranscriptionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "transcription",
+		Short: "Show transcription runtime configuration and health",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			ctx := context.Background()
+			svc := transcription.New(transcription.Options{
+				ASRModel:              cfg.Transcription.ASRModel,
+				ForcedAlignerModel:    cfg.Transcription.ForcedAlignerModel,
+				Device:                cfg.Transcription.Device,
+				DType:                 cfg.Transcription.DType,
+				UseFlashAttention:     cfg.Transcription.UseFlashAttention,
+				MaxInferenceBatchSize: cfg.Transcription.MaxInferenceBatchSize,
+				CacheDir:              cfg.TranscriptionCacheDir(),
+				RuntimeDir:            cfg.TranscriptionRuntimeDir(),
+			}, nil)
+			defer func() { _ = svc.Close() }()
+			cfg := svc.Config()
+			fmt.Printf("%s\n", headerStyle("=== Transcription Runtime ==="))
+			fmt.Printf("%s %s\n", labelStyle("ASR model:       "), cfg.ASRModel)
+			fmt.Printf("%s %s\n", labelStyle("Aligner model:   "), cfg.ForcedAlignerModel)
+			fmt.Printf("%s %s\n", labelStyle("Device:          "), cfg.Device)
+			fmt.Printf("%s %s\n", labelStyle("DType:           "), cfg.DType)
+			fmt.Printf("%s %v\n", labelStyle("Flash attention: "), cfg.UseFlashAttention)
+			fmt.Printf("%s %d\n", labelStyle("Batch size:      "), cfg.MaxInferenceBatchSize)
+			fmt.Printf("%s %s\n", labelStyle("Cache dir:       "), cfg.CacheDir)
+			fmt.Printf("%s %s\n", labelStyle("Runtime dir:     "), cfg.RuntimeDir)
+			status, err := svc.RuntimeStatus(ctx)
+			if err != nil {
+				fmt.Printf("%s %v\n", labelStyle("Health:          "), err)
+				return nil
+			}
+			fmt.Printf("%s %s\n", labelStyle("Python:          "), status.PythonPath)
+			fmt.Printf("%s %s\n", labelStyle("Worker script:   "), status.WorkerScriptPath)
+			fmt.Printf("%s %v\n", labelStyle("CUDA visible:    "), status.CUDAVisible)
+			fmt.Printf("%s %d\n", labelStyle("CUDA devices:    "), status.DeviceCount)
+			if status.TorchVersion != "" {
+				fmt.Printf("%s %s\n", labelStyle("Torch version:   "), status.TorchVersion)
+			}
+			if status.QwenASRVersion != "" {
+				fmt.Printf("%s %s\n", labelStyle("qwen-asr:        "), status.QwenASRVersion)
+			}
+			if status.FlashAttentionVersion != "" {
+				fmt.Printf("%s %s\n", labelStyle("flash-attn:      "), status.FlashAttentionVersion)
+			}
 			return nil
 		},
 	}

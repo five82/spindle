@@ -1,6 +1,6 @@
 // Package srtutil provides a minimal SRT (SubRip) parser/formatter shared by
 // the packages that need to read or write subtitle cues — subtitle filtering,
-// WhisperX transcription, OpenSubtitles reference comparison, and content-ID
+// transcription, OpenSubtitles reference comparison, and content-ID
 // fingerprinting. It intentionally does not do tag/HTML stripping; callers
 // that need that should run opensubtitles.CleanSRT ahead of Parse.
 package srtutil

@@ -52,6 +52,24 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	if cfg.Logging.RetentionDays != 60 {
 		t.Errorf("expected default retention days 60, got %d", cfg.Logging.RetentionDays)
 	}
+	if cfg.Transcription.ASRModel != "Qwen/Qwen3-ASR-1.7B" {
+		t.Errorf("expected default ASR model, got %q", cfg.Transcription.ASRModel)
+	}
+	if cfg.Transcription.ForcedAlignerModel != "Qwen/Qwen3-ForcedAligner-0.6B" {
+		t.Errorf("expected default forced aligner model, got %q", cfg.Transcription.ForcedAlignerModel)
+	}
+	if cfg.Transcription.Device != "cuda:0" {
+		t.Errorf("expected default transcription device cuda:0, got %q", cfg.Transcription.Device)
+	}
+	if cfg.Transcription.DType != "bfloat16" {
+		t.Errorf("expected default transcription dtype bfloat16, got %q", cfg.Transcription.DType)
+	}
+	if !cfg.Transcription.UseFlashAttention {
+		t.Error("expected flash attention default true")
+	}
+	if cfg.Transcription.MaxInferenceBatchSize != 1 {
+		t.Errorf("expected default transcription max inference batch size 1, got %d", cfg.Transcription.MaxInferenceBatchSize)
+	}
 	if cfg.Commentary.SimilarityThreshold != 0.92 {
 		t.Errorf("expected default similarity threshold 0.92, got %f", cfg.Commentary.SimilarityThreshold)
 	}
@@ -143,29 +161,30 @@ func TestValidateJellyfinConditional(t *testing.T) {
 	}
 }
 
-func TestValidateSubtitlesHFToken(t *testing.T) {
+func TestValidateTranscriptionConfig(t *testing.T) {
 	cfg := &Config{}
 	applyDefaults(cfg)
 	cfg.TMDB.APIKey = "test-key"
 	cfg.Paths.StagingDir = "/tmp/staging"
 	cfg.Paths.StateDir = "/tmp/state"
 	cfg.Paths.ReviewDir = "/tmp/review"
-	cfg.Subtitles.Enabled = true
-	cfg.Subtitles.WhisperXVADMethod = "pyannote"
 
+	cfg.Transcription.ASRModel = ""
 	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("Validate should fail when subtitles enabled with pyannote but no HF token")
-	}
-	if !strings.Contains(err.Error(), "whisperx_hf_token") {
-		t.Errorf("expected error about whisperx_hf_token, got: %s", err.Error())
+	if err == nil || !strings.Contains(err.Error(), "transcription.asr_model") {
+		t.Fatalf("expected asr_model validation error, got: %v", err)
 	}
 
-	// Should pass with silero VAD method (default).
-	cfg.Subtitles.WhisperXVADMethod = "silero"
+	applyDefaults(cfg)
+	cfg.TMDB.APIKey = "test-key"
+	cfg.Paths.StagingDir = "/tmp/staging"
+	cfg.Paths.StateDir = "/tmp/state"
+	cfg.Paths.ReviewDir = "/tmp/review"
+	cfg.Subtitles.Enabled = true
+	cfg.Transcription.ForcedAlignerModel = ""
 	err = cfg.Validate()
-	if err != nil {
-		t.Fatalf("Validate should pass with silero VAD, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "transcription.forced_aligner_model") {
+		t.Fatalf("expected forced_aligner_model validation error, got: %v", err)
 	}
 }
 
@@ -225,7 +244,7 @@ func TestSampleConfigIsValidTOML(t *testing.T) {
 	// Should contain all major sections.
 	expectedSections := []string{
 		"tmdb", "paths", "api", "jellyfin", "library",
-		"notifications", "subtitles", "rip_cache", "disc_id_cache",
+		"notifications", "subtitles", "transcription", "rip_cache", "disc_id_cache",
 		"makemkv", "encoding", "llm", "commentary", "content_id", "logging",
 	}
 	for _, section := range expectedSections {
@@ -252,7 +271,7 @@ func TestAutoDerivedPaths(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "/tmp/test-cache")
 	// Force os.UserCacheDir to use our env (it reads XDG_CACHE_HOME on Linux).
 	opensubDir := cfg.OpenSubtitlesCacheDir()
-	whisperDir := cfg.WhisperXCacheDir()
+	transcriptionDir := cfg.TranscriptionCacheDir()
 	ripDir := cfg.RipCacheDir()
 	discIDPath := cfg.DiscIDCachePath()
 
@@ -260,11 +279,14 @@ func TestAutoDerivedPaths(t *testing.T) {
 	if !strings.Contains(opensubDir, "opensubtitles") {
 		t.Errorf("OpenSubtitlesCacheDir should contain 'opensubtitles', got %q", opensubDir)
 	}
-	if !strings.Contains(whisperDir, "whisperx") {
-		t.Errorf("WhisperXCacheDir should contain 'whisperx', got %q", whisperDir)
+	if !strings.Contains(transcriptionDir, "transcription") {
+		t.Errorf("TranscriptionCacheDir should contain 'transcription', got %q", transcriptionDir)
 	}
 	if !strings.Contains(ripDir, "rips") {
 		t.Errorf("RipCacheDir should contain 'rips', got %q", ripDir)
+	}
+	if !strings.Contains(cfg.TranscriptionRuntimeDir(), "qwen3-runtime") {
+		t.Errorf("TranscriptionRuntimeDir should contain 'qwen3-runtime', got %q", cfg.TranscriptionRuntimeDir())
 	}
 	if !strings.Contains(discIDPath, "discid_cache.json") {
 		t.Errorf("DiscIDCachePath should contain 'discid_cache.json', got %q", discIDPath)
@@ -304,7 +326,6 @@ func TestEnvironmentVariableOverrides(t *testing.T) {
 	t.Setenv("JELLYFIN_API_KEY", "jf-from-env")
 	t.Setenv("OPENROUTER_API_KEY", "or-from-env")
 	t.Setenv("SPINDLE_API_TOKEN", "api-from-env")
-	t.Setenv("HUGGING_FACE_HUB_TOKEN", "hf-from-env")
 	t.Setenv("OPENSUBTITLES_API_KEY", "os-from-env")
 	t.Setenv("OPENSUBTITLES_USER_TOKEN", "os-user-from-env")
 
@@ -325,37 +346,11 @@ func TestEnvironmentVariableOverrides(t *testing.T) {
 	if cfg.API.Token != "api-from-env" {
 		t.Errorf("API token not set from env: %q", cfg.API.Token)
 	}
-	if cfg.Subtitles.WhisperXHFToken != "hf-from-env" {
-		t.Errorf("HF token not set from env: %q", cfg.Subtitles.WhisperXHFToken)
-	}
 	if cfg.Subtitles.OpenSubtitlesAPIKey != "os-from-env" {
 		t.Errorf("OpenSubtitles API key not set from env: %q", cfg.Subtitles.OpenSubtitlesAPIKey)
 	}
 	if cfg.Subtitles.OpenSubtitlesUserToken != "os-user-from-env" {
 		t.Errorf("OpenSubtitles user token not set from env: %q", cfg.Subtitles.OpenSubtitlesUserToken)
-	}
-}
-
-func TestHFTokenFallback(t *testing.T) {
-	dir := t.TempDir()
-	origDir, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
-	t.Setenv("HOME", dir)
-
-	t.Setenv("TMDB_API_KEY", "test-key")
-	t.Setenv("HUGGING_FACE_HUB_TOKEN", "")
-	t.Setenv("HF_TOKEN", "hf-fallback")
-
-	cfg, err := Load("", nil)
-	if err != nil {
-		t.Fatalf("Load failed: %v", err)
-	}
-
-	if cfg.Subtitles.WhisperXHFToken != "hf-fallback" {
-		t.Errorf("HF_TOKEN fallback not used: %q", cfg.Subtitles.WhisperXHFToken)
 	}
 }
 

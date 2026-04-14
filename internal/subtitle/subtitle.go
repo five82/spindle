@@ -1,6 +1,6 @@
 // Package subtitle implements the subtitle generation stage (Layer 4).
 //
-// Subtitle generation: canonical WhisperX transcription reuse, hallucination
+// Subtitle generation: canonical transcript reuse, generic ASR artifact
 // filtering, Stable-TS display formatting, SRT validation, forced subtitle
 // ranking from OpenSubtitles, MKV muxing, and resume support.
 package subtitle
@@ -122,11 +122,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		contentKey := fmt.Sprintf("%s:%s:%d", item.DiscFingerprint, key, selectedAudio.Index)
 		workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
-			InputPath:  asset.Path,
-			AudioIndex: selectedAudio.Index,
-			Language:   selectedAudio.Language,
-			OutputDir:  workDir,
-			ContentKey: contentKey,
+			InputPath:        asset.Path,
+			AudioIndex:       selectedAudio.Index,
+			Language:         selectedAudio.Language,
+			OutputDir:        workDir,
+			ContentKey:       contentKey,
+			RequireAlignment: true,
 		}, func(phase transcription.Phase, elapsed time.Duration) {
 			item.ProgressPercent = overallSubtitlePercent(i, len(keys), subtitlePhasePercent(phase, elapsed))
 			switch phase {
@@ -171,8 +172,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"episode_key", key,
 			"subtitle_file", formatting.DisplayPath,
 		)
-		logger.Info("hallucination filter applied",
-			"decision_type", logs.DecisionHallucinationFilter,
+		logger.Info("subtitle artifact filter applied",
+			"decision_type", logs.DecisionSubtitleArtifactFilter,
 			"decision_result", "filtered",
 			"decision_reason", fmt.Sprintf("original=%d filtered=%d segments", formatting.OriginalSegments, formatting.FilteredSegments),
 			"episode_key", key,
@@ -206,7 +207,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 		record := ripspec.SubtitleGenRecord{
 			EpisodeKey:       key,
-			Source:           "whisperx",
+			Source:           "qwen3_asr",
 			Cached:           result.Cached,
 			SubtitlePath:     formatting.DisplayPath,
 			Segments:         len(formattedCues),
