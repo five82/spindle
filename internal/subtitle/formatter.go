@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/five82/spindle/internal/language"
@@ -29,11 +30,11 @@ func formatSubtitleFromCanonical(ctx context.Context, canonical transcriptionArt
 		return formatResult{}, fmt.Errorf("create subtitle work dir: %w", err)
 	}
 	filteredJSONPath := filepath.Join(workDir, "audio.filtered.json")
-	originalSegments, filteredSegments, err := filterCanonicalTranscriptJSON(canonical.JSONPath, filteredJSONPath, videoSeconds)
+	formatterJSONPath, originalSegments, filteredSegments, err := filterCanonicalTranscriptJSON(canonical.JSONPath, filteredJSONPath, videoSeconds)
 	if err != nil {
 		return formatResult{}, err
 	}
-	if err := runStableTSFormatter(ctx, filteredJSONPath, displayPath, subtitleLanguage); err != nil {
+	if err := runStableTSFormatter(ctx, formatterJSONPath, displayPath, subtitleLanguage); err != nil {
 		return formatResult{}, err
 	}
 	if err := regroupFormattedSubtitle(displayPath); err != nil {
@@ -118,33 +119,36 @@ func runStableTSFormatter(ctx context.Context, jsonPath, outputPath, subtitleLan
 	return nil
 }
 
-func filterCanonicalTranscriptJSON(srcPath, destPath string, videoSeconds float64) (originalSegments, filteredSegments int, err error) {
+func filterCanonicalTranscriptJSON(srcPath, destPath string, videoSeconds float64) (jsonPath string, originalSegments, filteredSegments int, err error) {
 	payload, field, segments, err := loadCanonicalTranscriptPayload(srcPath)
 	if err != nil {
-		return 0, 0, err
+		return "", 0, 0, err
 	}
 	originalSegments = len(segments)
 	filtered, err := filterCanonicalTranscriptSegments(segments, videoSeconds)
 	if err != nil {
-		return 0, 0, err
+		return "", 0, 0, err
 	}
 	filteredSegments = len(filtered)
+	if reflect.DeepEqual(filtered, segments) {
+		return srcPath, originalSegments, filteredSegments, nil
+	}
 	switch field {
 	case "segments":
 		payload.Segments = filtered
 	case "speech_segments":
 		payload.SpeechSegments = filtered
 	default:
-		return 0, 0, fmt.Errorf("unsupported canonical transcript segment field %q", field)
+		return "", 0, 0, fmt.Errorf("unsupported canonical transcript segment field %q", field)
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return 0, 0, fmt.Errorf("marshal filtered canonical transcript payload: %w", err)
+		return "", 0, 0, fmt.Errorf("marshal filtered canonical transcript payload: %w", err)
 	}
 	if err := os.WriteFile(destPath, data, 0o644); err != nil {
-		return 0, 0, fmt.Errorf("write filtered canonical transcript payload: %w", err)
+		return "", 0, 0, fmt.Errorf("write filtered canonical transcript payload: %w", err)
 	}
-	return originalSegments, filteredSegments, nil
+	return destPath, originalSegments, filteredSegments, nil
 }
 
 func loadCanonicalTranscriptPayload(path string) (payload canonicalTranscriptPayload, field string, segments []map[string]any, err error) {

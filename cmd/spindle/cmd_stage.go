@@ -241,16 +241,7 @@ func newGensubtitleCmd() *cobra.Command {
 			}
 
 			// Create transcription service.
-			svc := transcription.New(transcription.Options{
-				ASRModel:              cfg.Transcription.ASRModel,
-				ForcedAlignerModel:    cfg.Transcription.ForcedAlignerModel,
-				Device:                cfg.Transcription.Device,
-				DType:                 cfg.Transcription.DType,
-				UseFlashAttention:     cfg.Transcription.UseFlashAttention,
-				MaxInferenceBatchSize: cfg.Transcription.MaxInferenceBatchSize,
-				CacheDir:              cfg.TranscriptionCacheDir(),
-				RuntimeDir:            cfg.TranscriptionRuntimeDir(),
-			}, cmdLogger)
+			svc := transcription.New(cfg.TranscriptionOptions(), cmdLogger)
 			defer func() { _ = svc.Close() }()
 
 			fmt.Printf("Preparing subtitles for %s...\n", filepath.Base(file))

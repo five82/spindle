@@ -17,15 +17,19 @@ const (
 )
 
 func regroupFormattedSubtitle(path string) error {
-	cues, err := srtutil.ParseFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read formatted subtitle for regrouping: %w", err)
 	}
+	cues := srtutil.Parse(string(data))
 	if len(cues) == 0 {
 		return nil
 	}
-	regrouped := regroupDisplayCues(cues)
-	if err := os.WriteFile(path, []byte(srtutil.Format(regrouped)), 0o644); err != nil {
+	formatted := srtutil.Format(regroupDisplayCues(cues))
+	if formatted == string(data) {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(formatted), 0o644); err != nil {
 		return fmt.Errorf("write regrouped subtitle: %w", err)
 	}
 	return nil

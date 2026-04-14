@@ -125,16 +125,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ripCacheStore = ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 	}
 
-	transcriber := transcription.New(transcription.Options{
-		ASRModel:              cfg.Transcription.ASRModel,
-		ForcedAlignerModel:    cfg.Transcription.ForcedAlignerModel,
-		Device:                cfg.Transcription.Device,
-		DType:                 cfg.Transcription.DType,
-		UseFlashAttention:     cfg.Transcription.UseFlashAttention,
-		MaxInferenceBatchSize: cfg.Transcription.MaxInferenceBatchSize,
-		CacheDir:              cfg.TranscriptionCacheDir(),
-		RuntimeDir:            cfg.TranscriptionRuntimeDir(),
-	}, logger)
+	transcriber := transcription.New(cfg.TranscriptionOptions(), logger)
 	defer func() { _ = transcriber.Close() }()
 
 	// Create disc monitor (if optical drive configured).

@@ -124,16 +124,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 				return nil
 			}
 
-			transcriber := transcription.New(transcription.Options{
-				ASRModel:              cfg.Transcription.ASRModel,
-				ForcedAlignerModel:    cfg.Transcription.ForcedAlignerModel,
-				Device:                cfg.Transcription.Device,
-				DType:                 cfg.Transcription.DType,
-				UseFlashAttention:     cfg.Transcription.UseFlashAttention,
-				MaxInferenceBatchSize: cfg.Transcription.MaxInferenceBatchSize,
-				CacheDir:              cfg.TranscriptionCacheDir(),
-				RuntimeDir:            cfg.TranscriptionRuntimeDir(),
-			}, nil)
+			transcriber := transcription.New(cfg.TranscriptionOptions(), nil)
 			defer func() { _ = transcriber.Close() }()
 
 			// Use a synthetic fingerprint for cache keys.
@@ -235,16 +226,7 @@ func newDebugTranscriptionCmd() *cobra.Command {
 		Short: "Show transcription runtime configuration and health",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			ctx := context.Background()
-			svc := transcription.New(transcription.Options{
-				ASRModel:              cfg.Transcription.ASRModel,
-				ForcedAlignerModel:    cfg.Transcription.ForcedAlignerModel,
-				Device:                cfg.Transcription.Device,
-				DType:                 cfg.Transcription.DType,
-				UseFlashAttention:     cfg.Transcription.UseFlashAttention,
-				MaxInferenceBatchSize: cfg.Transcription.MaxInferenceBatchSize,
-				CacheDir:              cfg.TranscriptionCacheDir(),
-				RuntimeDir:            cfg.TranscriptionRuntimeDir(),
-			}, nil)
+			svc := transcription.New(cfg.TranscriptionOptions(), nil)
 			defer func() { _ = svc.Close() }()
 			cfg := svc.Config()
 			fmt.Printf("%s\n", headerStyle("=== Transcription Runtime ==="))

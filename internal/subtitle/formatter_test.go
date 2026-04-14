@@ -43,9 +43,12 @@ func TestFilterCanonicalTranscriptJSON_RemovesIsolatedMusicCue(t *testing.T) {
 	if err := os.WriteFile(src, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	original, filtered, err := filterCanonicalTranscriptJSON(src, dst, 1200)
+	jsonPath, original, filtered, err := filterCanonicalTranscriptJSON(src, dst, 1200)
 	if err != nil {
 		t.Fatalf("filterCanonicalTranscriptJSON() error = %v", err)
+	}
+	if jsonPath != dst {
+		t.Fatalf("json path = %q, want %q", jsonPath, dst)
 	}
 	if original != 3 || filtered != 2 {
 		t.Fatalf("counts = %d/%d, want 3/2", original, filtered)
@@ -60,6 +63,36 @@ func TestFilterCanonicalTranscriptJSON_RemovesIsolatedMusicCue(t *testing.T) {
 	}
 	if len(out.Segments) != 2 {
 		t.Fatalf("expected 2 segments, got %d", len(out.Segments))
+	}
+}
+
+func TestFilterCanonicalTranscriptJSON_ReusesSourceWhenUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "audio.json")
+	dst := filepath.Join(dir, "audio.filtered.json")
+	payload := canonicalTranscriptPayload{
+		Language: "en",
+		Segments: []map[string]any{{"start": 10.0, "end": 12.0, "text": "Normal dialogue"}},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jsonPath, original, filtered, err := filterCanonicalTranscriptJSON(src, dst, 1200)
+	if err != nil {
+		t.Fatalf("filterCanonicalTranscriptJSON() error = %v", err)
+	}
+	if jsonPath != src {
+		t.Fatalf("json path = %q, want %q", jsonPath, src)
+	}
+	if original != 1 || filtered != 1 {
+		t.Fatalf("counts = %d/%d, want 1/1", original, filtered)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("expected no filtered copy, got err=%v", err)
 	}
 }
 
@@ -141,8 +174,10 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 		if len(args) < 9 {
 			t.Fatalf("unexpected args: %v", args)
 		}
-		filteredJSONPath := args[5]
-		filteredData, err := os.ReadFile(filteredJSONPath)
+		if got := args[5]; got != jsonPath {
+			t.Fatalf("formatter json path = %q, want %q", got, jsonPath)
+		}
+		filteredData, err := os.ReadFile(args[5])
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/five82/spindle/internal/transcription"
 )
 
 // Config holds all Spindle configuration sections.
@@ -189,6 +191,20 @@ func (c *Config) TranscriptionCacheDir() string {
 // TranscriptionRuntimeDir returns the managed Python runtime root.
 func (c *Config) TranscriptionRuntimeDir() string {
 	return filepath.Join(cacheBaseDir(), "qwen3-runtime")
+}
+
+// TranscriptionOptions returns the shared transcription service configuration.
+func (c *Config) TranscriptionOptions() transcription.Options {
+	return transcription.Options{
+		ASRModel:              c.Transcription.ASRModel,
+		ForcedAlignerModel:    c.Transcription.ForcedAlignerModel,
+		Device:                c.Transcription.Device,
+		DType:                 c.Transcription.DType,
+		UseFlashAttention:     c.Transcription.UseFlashAttention,
+		MaxInferenceBatchSize: c.Transcription.MaxInferenceBatchSize,
+		CacheDir:              c.TranscriptionCacheDir(),
+		RuntimeDir:            c.TranscriptionRuntimeDir(),
+	}
 }
 
 // RipCacheDir returns the auto-derived rip cache directory.

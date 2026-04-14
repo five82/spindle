@@ -304,6 +304,43 @@ func TestAutoDerivedPaths(t *testing.T) {
 	}
 }
 
+func TestTranscriptionOptions(t *testing.T) {
+	cfg := &Config{}
+	cfg.Transcription.ASRModel = "Qwen/Qwen3-ASR-4B"
+	cfg.Transcription.ForcedAlignerModel = "Qwen/Qwen3-ForcedAligner-0.6B"
+	cfg.Transcription.Device = "cpu"
+	cfg.Transcription.DType = "float32"
+	cfg.Transcription.UseFlashAttention = false
+	cfg.Transcription.MaxInferenceBatchSize = 3
+
+	t.Setenv("XDG_CACHE_HOME", "/tmp/test-cache")
+	opts := cfg.TranscriptionOptions()
+	if opts.ASRModel != cfg.Transcription.ASRModel {
+		t.Fatalf("ASRModel = %q, want %q", opts.ASRModel, cfg.Transcription.ASRModel)
+	}
+	if opts.ForcedAlignerModel != cfg.Transcription.ForcedAlignerModel {
+		t.Fatalf("ForcedAlignerModel = %q, want %q", opts.ForcedAlignerModel, cfg.Transcription.ForcedAlignerModel)
+	}
+	if opts.Device != cfg.Transcription.Device {
+		t.Fatalf("Device = %q, want %q", opts.Device, cfg.Transcription.Device)
+	}
+	if opts.DType != cfg.Transcription.DType {
+		t.Fatalf("DType = %q, want %q", opts.DType, cfg.Transcription.DType)
+	}
+	if opts.UseFlashAttention != cfg.Transcription.UseFlashAttention {
+		t.Fatalf("UseFlashAttention = %v, want %v", opts.UseFlashAttention, cfg.Transcription.UseFlashAttention)
+	}
+	if opts.MaxInferenceBatchSize != cfg.Transcription.MaxInferenceBatchSize {
+		t.Fatalf("MaxInferenceBatchSize = %d, want %d", opts.MaxInferenceBatchSize, cfg.Transcription.MaxInferenceBatchSize)
+	}
+	if opts.CacheDir != cfg.TranscriptionCacheDir() {
+		t.Fatalf("CacheDir = %q, want %q", opts.CacheDir, cfg.TranscriptionCacheDir())
+	}
+	if opts.RuntimeDir != cfg.TranscriptionRuntimeDir() {
+		t.Fatalf("RuntimeDir = %q, want %q", opts.RuntimeDir, cfg.TranscriptionRuntimeDir())
+	}
+}
+
 func TestSocketPathFallback(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	cfg := &Config{}
