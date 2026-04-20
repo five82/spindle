@@ -41,12 +41,12 @@ func TestFilterWhisperXJSON_RemovesIsolatedHallucination(t *testing.T) {
 	if err := os.WriteFile(src, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	original, filtered, err := filterWhisperXJSON(src, dst, 1200)
+	stats, err := filterWhisperXJSON(src, dst, 1200)
 	if err != nil {
 		t.Fatalf("filterWhisperXJSON() error = %v", err)
 	}
-	if original != 3 || filtered != 2 {
-		t.Fatalf("counts = %d/%d, want 3/2", original, filtered)
+	if stats.OriginalSegments != 3 || stats.FilteredSegments != 2 {
+		t.Fatalf("counts = %d/%d, want 3/2", stats.OriginalSegments, stats.FilteredSegments)
 	}
 	filteredData, err := os.ReadFile(dst)
 	if err != nil {
@@ -58,6 +58,65 @@ func TestFilterWhisperXJSON_RemovesIsolatedHallucination(t *testing.T) {
 	}
 	if len(out.Segments) != 2 {
 		t.Fatalf("expected 2 segments, got %d", len(out.Segments))
+	}
+}
+
+func TestFilterWhisperXJSON_RemovesLowInformationLongSegment(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "audio.json")
+	dst := filepath.Join(dir, "audio.filtered.json")
+	payload := whisperXPayload{
+		Language: "en",
+		Segments: []map[string]any{
+			{"start": 10.0, "end": 12.0, "text": "Normal dialogue"},
+			{"start": 50.0, "end": 65.0, "text": "all", "words": []map[string]any{{"word": "all", "start": 50.0, "end": 65.0, "probability": 0.22}}},
+			{"start": 90.0, "end": 92.0, "text": "More dialogue"},
+		},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := filterWhisperXJSON(src, dst, 1200)
+	if err != nil {
+		t.Fatalf("filterWhisperXJSON() error = %v", err)
+	}
+	if stats.RemovedBySegmentHeuristics != 1 {
+		t.Fatalf("RemovedBySegmentHeuristics = %d, want 1", stats.RemovedBySegmentHeuristics)
+	}
+	filteredData, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out whisperXPayload
+	if err := json.Unmarshal(filteredData, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Segments) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(out.Segments))
+	}
+}
+
+func TestFilterWhisperXJSON_DoesNotMutateCanonicalSource(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "audio.json")
+	dst := filepath.Join(dir, "audio.filtered.json")
+	original := `{"language":"en","segments":[{"start":10,"end":12,"text":"Normal dialogue"},{"start":50,"end":65,"text":"all","words":[{"word":"all","start":50,"end":65,"probability":0.22}]},{"start":90,"end":92,"text":"More dialogue"}]}`
+	if err := os.WriteFile(src, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := filterWhisperXJSON(src, dst, 1200); err != nil {
+		t.Fatalf("filterWhisperXJSON() error = %v", err)
+	}
+	srcData, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(srcData) != original {
+		t.Fatalf("canonical source mutated: got %s", string(srcData))
 	}
 }
 
@@ -105,6 +164,12 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 	}
 	if result.OriginalSegments != 1 || result.FilteredSegments != 1 {
 		t.Fatalf("segment counts = %d/%d, want 1/1", result.OriginalSegments, result.FilteredSegments)
+	}
+	if result.RemovedByTextRules != 0 || result.RemovedBySegmentHeuristics != 0 {
+		t.Fatalf("unexpected removals: %+v", result)
+	}
+	if result.SplitCues != 0 || result.WrappedCues != 0 || result.RetimedCues != 0 {
+		t.Fatalf("unexpected post-processing: %+v", result)
 	}
 	contents, err := os.ReadFile(displayPath)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/five82/spindle/internal/media/ffprobe"
@@ -248,6 +249,29 @@ func TestSelectPrimaryAudioTrackFallsBackLanguage(t *testing.T) {
 	}
 	if selected.Language != "en" {
 		t.Fatalf("Language = %q, want en", selected.Language)
+	}
+}
+
+func TestBuildWhisperXInvocation(t *testing.T) {
+	svc := New("large-v3", true, "pyannote", "hf-token", t.TempDir(), nil)
+	invocation := svc.buildWhisperXInvocation("/tmp/audio.wav", "/tmp/out", "large-v3", "en")
+	if invocation.TranscriptionProfileName != transcriptionProfileID {
+		t.Fatalf("profile = %q, want %q", invocation.TranscriptionProfileName, transcriptionProfileID)
+	}
+	if invocation.Device != "cuda" {
+		t.Fatalf("device = %q, want cuda", invocation.Device)
+	}
+	if invocation.ComputeType != "float16" {
+		t.Fatalf("compute type = %q, want float16", invocation.ComputeType)
+	}
+	joined := strings.Join(invocation.Args, " ")
+	for _, want := range []string{"--from whisperx", "--audio /tmp/audio.wav", "--output-dir /tmp/out", "--vad-method pyannote", "--batch-size 16", "--chunk-size 30", "--vad-onset 0.500", "--vad-offset 0.363", "--condition-on-previous-text false", "--hf-token hf-token"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("invocation args missing %q: %s", want, joined)
+		}
+	}
+	if !strings.Contains(strings.Join(invocation.Env, " "), "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1") {
+		t.Fatalf("expected torch compatibility env in %v", invocation.Env)
 	}
 }
 

@@ -791,6 +791,10 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 | `Model` | string | WhisperX model override (empty = default) |
 | `ContentKey` | string | Content-stable cache identity (see Section 9.3) |
 
+The service applies a shared embedded WhisperX wrapper/profile internally. That
+profile is not a user-facing request field, but it is part of cache identity so
+canonical-transcript behavior changes invalidate old cache entries.
+
 **TranscribeResult:**
 
 | Field | Type | Purpose |
@@ -811,7 +815,7 @@ different paths).
 Cache key computation:
 
 ```
-key = hex(SHA-256( contentKey + "\x00" + model + "\x00" + language ))
+key = hex(SHA-256( contentKey + "\x00" + model + "\x00" + language + "\x00" + transcription_profile_version ))
 ```
 
 Where `contentKey` is a caller-supplied identity string that remains stable
@@ -830,7 +834,7 @@ generated during episode ID is a cache hit during subtitling without any
 cross-stage plumbing or envelope attributes.
 
 When `ContentKey` is empty, the service falls back to a path-based key:
-`hex(SHA-256( inputPath + "\x00" + audioIndex + "\x00" + model + "\x00" + language ))`.
+`hex(SHA-256( inputPath + "\x00" + audioIndex + "\x00" + model + "\x00" + language + "\x00" + transcription_profile_version ))`.
 
 Cache directory: `$XDG_CACHE_HOME/spindle/whisperx/{cache_key}/`
 
@@ -856,7 +860,21 @@ invoking WhisperX:
 ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
 ```
 
-### 9.6 Post-Processing Pipeline
+### 9.6 Canonical Transcript Contract
+
+The transcription service invokes WhisperX through an embedded wrapper that
+sets the shared long-form transcription profile explicitly. This includes owned
+VAD merge controls rather than relying on WhisperX CLI defaults. Canonical JSON
+is expected to preserve enough downstream signal for subtitle decisions,
+including:
+
+- segment timing/text,
+- word timing,
+- confidence-like word metadata when WhisperX provides it,
+- segment-level decode metadata such as average log probability when available,
+- raw speech-segment timing when available.
+
+### 9.7 Post-Processing Pipeline
 
 After WhisperX completes:
 
@@ -865,5 +883,7 @@ After WhisperX completes:
 2. Subtitle-specific hallucination filtering, Stable-TS formatting, and final
    display-SRT validation happen in the `subtitle` package, not in the shared
    transcription service.
-3. Formatted display subtitles are derived outputs and are not part of the
+3. The subtitle stage prefers actual encoded-media duration for filtering and
+   validation; transcript-tail duration is only a fallback.
+4. Formatted display subtitles are derived outputs and are not part of the
    shared transcription cache contract.

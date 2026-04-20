@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/five82/spindle/internal/language"
 )
@@ -29,18 +30,27 @@ func formatSubtitleFromCanonical(ctx context.Context, canonical transcriptionArt
 		return formatResult{}, fmt.Errorf("create subtitle work dir: %w", err)
 	}
 	filteredJSONPath := filepath.Join(workDir, "audio.filtered.json")
-	originalSegments, filteredSegments, err := filterWhisperXJSON(canonical.JSONPath, filteredJSONPath, videoSeconds)
+	stats, err := filterWhisperXJSON(canonical.JSONPath, filteredJSONPath, videoSeconds)
 	if err != nil {
 		return formatResult{}, err
 	}
 	if err := runStableTSFormatter(ctx, filteredJSONPath, displayPath, subtitleLanguage); err != nil {
 		return formatResult{}, err
 	}
+	postStats, err := postProcessDisplaySRT(displayPath, videoSeconds)
+	if err != nil {
+		return formatResult{}, err
+	}
 	return formatResult{
-		DisplayPath:       displayPath,
-		OriginalSegments:  originalSegments,
-		FilteredSegments:  filteredSegments,
-		FormatterDecision: "formatted",
+		DisplayPath:                displayPath,
+		OriginalSegments:           stats.OriginalSegments,
+		FilteredSegments:           stats.FilteredSegments,
+		RemovedByTextRules:         stats.RemovedByTextRules,
+		RemovedBySegmentHeuristics: stats.RemovedBySegmentHeuristics,
+		SplitCues:                  postStats.SplitCues,
+		WrappedCues:                postStats.WrappedCues,
+		RetimedCues:                postStats.RetimedCues,
+		FormatterDecision:          "formatted",
 	}, nil
 }
 
@@ -49,10 +59,23 @@ type transcriptionArtifacts struct {
 }
 
 type formatResult struct {
-	DisplayPath       string
-	OriginalSegments  int
-	FilteredSegments  int
-	FormatterDecision string
+	DisplayPath                string
+	OriginalSegments           int
+	FilteredSegments           int
+	RemovedByTextRules         int
+	RemovedBySegmentHeuristics int
+	SplitCues                  int
+	WrappedCues                int
+	RetimedCues                int
+	FormatterDecision          string
+}
+
+// filterStats summarizes derived-subtitle filtering decisions.
+type filterStats struct {
+	OriginalSegments           int
+	FilteredSegments           int
+	RemovedByTextRules         int
+	RemovedBySegmentHeuristics int
 }
 
 // FormatRequest describes how to build a display subtitle from canonical
@@ -70,6 +93,9 @@ type FormatResult struct {
 	DisplayPath      string
 	OriginalSegments int
 	FilteredSegments int
+	SplitCues        int
+	WrappedCues      int
+	RetimedCues      int
 }
 
 // FormatDisplaySubtitle derives a display subtitle from canonical WhisperX
@@ -83,6 +109,9 @@ func FormatDisplaySubtitle(ctx context.Context, req FormatRequest) (*FormatResul
 		DisplayPath:      result.DisplayPath,
 		OriginalSegments: result.OriginalSegments,
 		FilteredSegments: result.FilteredSegments,
+		SplitCues:        result.SplitCues,
+		WrappedCues:      result.WrappedCues,
+		RetimedCues:      result.RetimedCues,
 	}, nil
 }
 
@@ -125,33 +154,31 @@ func runStableTSFormatter(ctx context.Context, jsonPath, outputPath, subtitleLan
 	return nil
 }
 
-func filterWhisperXJSON(srcPath, destPath string, videoSeconds float64) (originalSegments, filteredSegments int, err error) {
+func filterWhisperXJSON(srcPath, destPath string, videoSeconds float64) (filterStats, error) {
 	payload, field, segments, err := loadWhisperXPayload(srcPath)
 	if err != nil {
-		return 0, 0, err
+		return filterStats{}, err
 	}
-	originalSegments = len(segments)
-	filtered, err := filterWhisperXSegments(segments, videoSeconds)
+	filtered, stats, err := filterWhisperXSegments(segments, videoSeconds)
 	if err != nil {
-		return 0, 0, err
+		return filterStats{}, err
 	}
-	filteredSegments = len(filtered)
 	switch field {
 	case "segments":
 		payload.Segments = filtered
 	case "speech_segments":
 		payload.SpeechSegments = filtered
 	default:
-		return 0, 0, fmt.Errorf("unsupported whisperx segment field %q", field)
+		return filterStats{}, fmt.Errorf("unsupported whisperx segment field %q", field)
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return 0, 0, fmt.Errorf("marshal filtered whisperx payload: %w", err)
+		return filterStats{}, fmt.Errorf("marshal filtered whisperx payload: %w", err)
 	}
 	if err := os.WriteFile(destPath, data, 0o644); err != nil {
-		return 0, 0, fmt.Errorf("write filtered whisperx payload: %w", err)
+		return filterStats{}, fmt.Errorf("write filtered whisperx payload: %w", err)
 	}
-	return originalSegments, filteredSegments, nil
+	return stats, nil
 }
 
 func loadWhisperXPayload(path string) (payload whisperXPayload, field string, segments []map[string]any, err error) {
@@ -172,24 +199,37 @@ func loadWhisperXPayload(path string) (payload whisperXPayload, field string, se
 	}
 }
 
-func filterWhisperXSegments(segments []map[string]any, videoSeconds float64) ([]map[string]any, error) {
+func filterWhisperXSegments(segments []map[string]any, videoSeconds float64) ([]map[string]any, filterStats, error) {
 	indexed := make([]indexedTimedCue, 0, len(segments))
 	for i, segment := range segments {
 		cue, err := cueFromSegment(i, segment)
 		if err != nil {
-			return nil, err
+			return nil, filterStats{}, err
 		}
 		indexed = append(indexed, cue)
 	}
 	filtered, err := filterIndexedHallucinations(indexed, videoSeconds)
 	if err != nil {
-		return nil, err
+		return nil, filterStats{}, err
+	}
+	stats := filterStats{
+		OriginalSegments:   len(segments),
+		RemovedByTextRules: len(segments) - len(filtered),
 	}
 	result := make([]map[string]any, 0, len(filtered))
 	for _, cue := range filtered {
-		result = append(result, segments[cue.Orig])
+		segment := segments[cue.Orig]
+		if shouldDropSegmentByHeuristic(cue, segment) {
+			stats.RemovedBySegmentHeuristics++
+			continue
+		}
+		result = append(result, segment)
 	}
-	return result, nil
+	if len(result) == 0 {
+		return nil, filterStats{}, fmt.Errorf("all cues removed by hallucination filter")
+	}
+	stats.FilteredSegments = len(result)
+	return result, stats, nil
 }
 
 func cueFromSegment(index int, segment map[string]any) (indexedTimedCue, error) {
@@ -203,6 +243,86 @@ func cueFromSegment(index int, segment map[string]any) (indexedTimedCue, error) 
 	}
 	text, _ := segment["text"].(string)
 	return indexedTimedCue{Orig: index, Start: start, End: end, Text: text}, nil
+}
+
+type segmentMetrics struct {
+	LexicalWords   int
+	AvgProbability float64
+	HasProbability bool
+	TextRunes      int
+}
+
+func shouldDropSegmentByHeuristic(cue indexedTimedCue, segment map[string]any) bool {
+	duration := cue.End - cue.Start
+	if duration <= 0 {
+		return false
+	}
+	metrics := computeSegmentMetrics(cue.Text, segment)
+	if metrics.LexicalWords == 0 {
+		return false
+	}
+	if duration >= 12 && metrics.LexicalWords <= 2 {
+		return true
+	}
+	if duration >= 8 && metrics.LexicalWords <= 1 && metrics.TextRunes <= 24 {
+		return true
+	}
+	if metrics.HasProbability {
+		if duration >= 5 && metrics.LexicalWords <= 3 && metrics.AvgProbability < 0.35 {
+			return true
+		}
+		if duration >= 3.5 && metrics.LexicalWords <= 1 && metrics.AvgProbability < 0.45 && metrics.TextRunes <= 20 {
+			return true
+		}
+	}
+	return false
+}
+
+func computeSegmentMetrics(text string, segment map[string]any) segmentMetrics {
+	metrics := segmentMetrics{TextRunes: utf8.RuneCountInString(strings.TrimSpace(text))}
+	tokens := lexicalTokens(text)
+	metrics.LexicalWords = len(tokens)
+	words, ok := segment["words"].([]any)
+	if !ok || len(words) == 0 {
+		return metrics
+	}
+	var (
+		tokenCount int
+		sumProb    float64
+		probCount  int
+	)
+	for _, entry := range words {
+		word, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		token, _ := word["word"].(string)
+		if len(lexicalTokens(token)) > 0 {
+			tokenCount += len(lexicalTokens(token))
+		}
+		if prob, ok := segmentProbability(word); ok {
+			sumProb += prob
+			probCount++
+		}
+	}
+	if tokenCount > metrics.LexicalWords {
+		metrics.LexicalWords = tokenCount
+	}
+	if probCount > 0 {
+		metrics.HasProbability = true
+		metrics.AvgProbability = sumProb / float64(probCount)
+	}
+	return metrics
+}
+
+func segmentProbability(word map[string]any) (float64, bool) {
+	if prob, ok := floatValue(word["probability"]); ok {
+		return prob, true
+	}
+	if prob, ok := floatValue(word["score"]); ok {
+		return prob, true
+	}
+	return 0, false
 }
 
 func floatValue(v any) (float64, bool) {

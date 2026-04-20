@@ -92,6 +92,10 @@ No hard coverage targets. Focus testing effort on:
 - Test that canonical transcript artifacts remain unchanged when subtitle formatting runs.
 - Test that display subtitle output is derived separately from canonical cached transcript artifacts.
 - Add cross-stage regression coverage so subtitle formatting changes cannot silently change episode-identification inputs.
+- Test the embedded WhisperX wrapper contract: explicit transcription profile, VAD-method forwarding, explicit VAD/decode profile arguments, and confidence-preserving canonical JSON handling.
+- Test that subtitle filtering/validation prefer actual media duration over transcript-tail duration, with transcript duration used only as fallback.
+- Test severe validation gating so obviously broken subtitle output fails the episode subtitle job and does not mux into MKV.
+- Add regression coverage for final display-only subtitle repair (fallback cue splitting/wrapping and limited gap-aware timing expansion) so readability improvements do not mutate canonical transcript artifacts.
 - Prefer golden fixtures for real-world bad wrapping / hallucination cases.
 
 Low-value test targets (skip unless bugs emerge):

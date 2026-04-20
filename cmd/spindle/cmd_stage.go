@@ -18,6 +18,7 @@ import (
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/identify"
 	"github.com/five82/spindle/internal/keydb"
+	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
@@ -309,19 +310,20 @@ func newGensubtitleCmd() *cobra.Command {
 
 			displayPath := subtitle.DisplaySubtitlePath(filepath.Join(workDir, filepath.Base(file)), selectedAudio.Language)
 			finalSidecarPath := subtitle.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), selectedAudio.Language)
+			videoSeconds := resolveCLIPrimaryVideoDuration(ctx, file, result.Duration)
 			fmt.Print("  Formatting subtitles...")
 			formatStart := time.Now()
 			formatted, err := subtitle.FormatDisplaySubtitle(ctx, subtitle.FormatRequest{
 				CanonicalJSONPath: result.JSONPath,
 				WorkDir:           workDir,
 				DisplayPath:       displayPath,
-				VideoSeconds:      result.Duration,
+				VideoSeconds:      videoSeconds,
 				Language:          selectedAudio.Language,
 			})
 			if err != nil {
 				return fmt.Errorf("format subtitles: %w", err)
 			}
-			fmt.Printf("%s (%d -> %d segments, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatPhaseDuration(time.Since(formatStart)))
+			fmt.Printf("%s (%d -> %d segments, split %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
 
 			// Handle forced subtitles.
 			if fetchForced && cfg.Subtitles.OpenSubtitlesEnabled {
@@ -435,4 +437,15 @@ func newTestNotifyCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func resolveCLIPrimaryVideoDuration(ctx context.Context, path string, fallback float64) float64 {
+	result, err := ffprobe.Inspect(ctx, "", path)
+	if err != nil {
+		return fallback
+	}
+	if seconds := result.DurationSeconds(); seconds > 0 {
+		return seconds
+	}
+	return fallback
 }

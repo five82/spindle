@@ -114,8 +114,20 @@ def main() -> None:
     if getattr(result_wrapper, "has_segments", False):
         try:
             if getattr(result_wrapper, "has_words", False):
+                result_wrapper.clamp_max(medium_factor=2.5, max_dur=1.5)
                 result_wrapper.regroup(True)
-                result_wrapper.clamp_max()
+                result_wrapper.split_by_duration(
+                    max_dur=6.5,
+                    even_split=False,
+                    ignore_special_periods=True,
+                )
+                result_wrapper.split_by_length(
+                    max_chars=68,
+                    max_words=13,
+                    even_split=False,
+                    ignore_special_periods=True,
+                )
+                result_wrapper.clamp_max(medium_factor=2.5, max_dur=1.5)
         except Exception as exc:  # pragma: no cover
             raise SystemExit(f"regroup_error:{exc}") from exc
 

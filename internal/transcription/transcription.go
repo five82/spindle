@@ -75,11 +75,21 @@ type ProgressFunc func(phase Phase, elapsed time.Duration)
 type TranscribeResult struct {
 	SRTPath        string
 	JSONPath       string
-	Duration       float64 // total SRT duration (seconds) from last cue timestamp
+	Duration       float64 // transcript-tail duration from last SRT cue timestamp
 	Segments       int
 	Cached         bool
 	ExtractTime    time.Duration // time spent on ffmpeg audio extraction
 	TranscribeTime time.Duration // time spent on WhisperX
+}
+
+type whisperXInvocation struct {
+	Args                     []string
+	Env                      []string
+	Device                   string
+	ComputeType              string
+	ConditionOnPreviousText  bool
+	SpeechRegionsOnly        bool
+	TranscriptionProfileName string
 }
 
 // Transcribe runs WhisperX transcription with caching.
@@ -159,34 +169,22 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		onProgress(PhaseExtract, extractTime)
 	}
 
-	// Run WhisperX via uvx.
+	// Run WhisperX via the embedded wrapper.
 	if onProgress != nil {
 		onProgress(PhaseTranscribe, 0)
 	}
-	whisperArgs := []string{
-		"whisperx", wavPath,
-		"--model", model,
-		"--language", req.Language,
-		"--output_format", "all",
-		"--output_dir", req.OutputDir,
-		"--vad_method", s.vadMethod,
-	}
-	if s.cudaEnabled {
-		whisperArgs = append(whisperArgs, "--device", "cuda")
-	} else {
-		whisperArgs = append(whisperArgs, "--device", "cpu")
-	}
-	if s.hfToken != "" {
-		whisperArgs = append(whisperArgs, "--hf_token", s.hfToken)
-	}
-
+	invocation := s.buildWhisperXInvocation(wavPath, req.OutputDir, model, req.Language)
 	s.logger.Info("running WhisperX transcription",
 		"event_type", "transcription_whisperx",
+		"decision_type", "transcription_profile",
+		"decision_result", invocation.TranscriptionProfileName,
+		"decision_reason", fmt.Sprintf("vad_method=%s device=%s compute_type=%s speech_regions_only=%t condition_on_previous_text=%t batch_size=%d chunk_size=%d", s.vadMethod, invocation.Device, invocation.ComputeType, invocation.SpeechRegionsOnly, invocation.ConditionOnPreviousText, whisperXBatchSize, whisperXVADChunkSize),
 		"model", model,
 		"language", req.Language,
 	)
 	transcribeStart := time.Now()
-	whisperCmd := exec.CommandContext(ctx, "uvx", whisperArgs...)
+	whisperCmd := exec.CommandContext(ctx, whisperXCommand, invocation.Args...)
+	whisperCmd.Env = invocation.Env
 	if output, err := whisperCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("whisperx transcription: %w: %s", err, output)
 	}
@@ -229,15 +227,54 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	return result, nil
 }
 
+func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language string) whisperXInvocation {
+	device := "cpu"
+	computeType := "int8"
+	if s.cudaEnabled {
+		device = "cuda"
+		computeType = "float16"
+	}
+	args := []string{
+		"--from", whisperXPackage,
+		"python", "-c", whisperXWrapperScript,
+		"--audio", wavPath,
+		"--output-dir", outputDir,
+		"--model", model,
+		"--language", language,
+		"--vad-method", s.vadMethod,
+		"--device", device,
+		"--compute-type", computeType,
+		"--batch-size", strconv.Itoa(whisperXBatchSize),
+		"--chunk-size", strconv.Itoa(whisperXVADChunkSize),
+		"--vad-onset", fmt.Sprintf("%.3f", whisperXVADOnset),
+		"--vad-offset", fmt.Sprintf("%.3f", whisperXVADOffset),
+		"--condition-on-previous-text", "false",
+	}
+	env := append(os.Environ(), "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1")
+	if s.hfToken != "" {
+		args = append(args, "--hf-token", s.hfToken)
+		env = append(env, "HUGGING_FACE_HUB_TOKEN="+s.hfToken, "HF_TOKEN="+s.hfToken)
+	}
+	return whisperXInvocation{
+		Args:                     args,
+		Env:                      env,
+		Device:                   device,
+		ComputeType:              computeType,
+		ConditionOnPreviousText:  false,
+		SpeechRegionsOnly:        true,
+		TranscriptionProfileName: transcriptionProfileID,
+	}
+}
+
 // cacheKey computes a deterministic cache key for a transcription request.
 // If ContentKey is non-empty, it is used for content-stable caching.
 // Otherwise, the input path and audio index are used as a fallback.
 func cacheKey(req TranscribeRequest, model string) string {
 	var input string
 	if req.ContentKey != "" {
-		input = req.ContentKey + "\x00" + model + "\x00" + req.Language
+		input = req.ContentKey + "\x00" + model + "\x00" + req.Language + "\x00" + transcriptionProfileID
 	} else {
-		input = req.InputPath + "\x00" + strconv.Itoa(req.AudioIndex) + "\x00" + model + "\x00" + req.Language
+		input = req.InputPath + "\x00" + strconv.Itoa(req.AudioIndex) + "\x00" + model + "\x00" + req.Language + "\x00" + transcriptionProfileID
 	}
 	h := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(h[:])

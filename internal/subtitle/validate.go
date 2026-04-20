@@ -2,6 +2,7 @@ package subtitle
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/five82/spindle/internal/srtutil"
 )
@@ -16,8 +17,8 @@ const (
 )
 
 // ValidateSRTContent checks SRT content for quality issues. Returns a list of
-// issue strings (empty means passed). Issues flag for review but do not fail
-// the stage.
+// issue strings (empty means passed). Severe issues are handled by the subtitle
+// stage via validateCuesDetailed.
 func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) {
 	cues, err := srtutil.ParseFile(srtPath)
 	if err != nil {
@@ -26,19 +27,38 @@ func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) 
 	return validateCues(cues, videoSeconds), nil
 }
 
+type validationResult struct {
+	Issues       []string
+	SevereIssues []string
+}
+
 func validateCues(cues []srtutil.Cue, videoSeconds float64) []string {
+	return validateCuesDetailed(cues, videoSeconds).Issues
+}
+
+func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationResult {
 	if len(cues) == 0 {
-		return []string{"empty_subtitle_file"}
+		return validationResult{Issues: []string{"empty_subtitle_file"}, SevereIssues: []string{"empty_subtitle_file"}}
 	}
 
 	seen := make(map[string]bool)
+	severeSeen := make(map[string]bool)
 	var issues []string
+	var severe []string
 	addIssue := func(issue string) {
 		if issue == "" || seen[issue] {
 			return
 		}
 		seen[issue] = true
 		issues = append(issues, issue)
+	}
+	addSevere := func(issue string) {
+		addIssue(issue)
+		if issue == "" || severeSeen[issue] {
+			return
+		}
+		severeSeen[issue] = true
+		severe = append(severe, issue)
 	}
 
 	lastEnd := cues[len(cues)-1].End
@@ -68,7 +88,7 @@ func validateCues(cues []srtutil.Cue, videoSeconds float64) []string {
 		}
 		duration := cue.End - cue.Start
 		if duration > 0 {
-			chars := len([]rune(strings.Join(lines, " ")))
+			chars := utf8.RuneCountInString(strings.Join(lines, " "))
 			if float64(chars)/duration > maxSubtitleReadingSpeed {
 				addIssue("high_reading_speed")
 			}
@@ -80,13 +100,16 @@ func validateCues(cues []srtutil.Cue, videoSeconds float64) []string {
 			if duration > maxSubtitleCueDuration {
 				addIssue("long_cue_duration")
 			}
+			if isLowInformationLongCue(cue.Text, duration) {
+				addSevere("low_information_long_cue")
+			}
 		}
 		if i > 0 && cue.Start < cues[i-1].End {
-			addIssue("overlapping_cues")
+			addSevere("overlapping_cues")
 		}
 	}
 
-	return issues
+	return validationResult{Issues: issues, SevereIssues: severe}
 }
 
 func splitCueLines(text string) []string {
@@ -124,4 +147,23 @@ func hasUnbalancedLineBreak(lines []string) bool {
 		left, right = right, left
 	}
 	return left-right > unbalancedLineDelta
+}
+
+func isLowInformationLongCue(text string, duration float64) bool {
+	if duration <= 0 {
+		return false
+	}
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	wordCount := lexicalWordCount(trimmed)
+	textRunes := utf8.RuneCountInString(trimmed)
+	if duration >= 12 && wordCount <= 2 {
+		return true
+	}
+	if duration >= 8 && wordCount <= 1 && textRunes <= 24 {
+		return true
+	}
+	return false
 }

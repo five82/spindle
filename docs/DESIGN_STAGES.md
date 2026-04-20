@@ -735,33 +735,45 @@ stream counts after commentary handling.
 
 ### 6.1 WhisperX Transcription
 
-1. **HF token lazy validation**: Token checked on first `Generate()` call via
-   `sync.Once`; fallback logging deduplicated.
-2. **Language merging**: Config default languages (`["en"]`) merged with
-   per-request languages via `NormalizeList()`.
-3. Extract primary audio track from encoded MKV to WAV.
-4. Run WhisperX via `uvx` with configured model, CUDA settings, and VAD method.
-5. WhisperX produces **canonical transcript artifacts**: raw SRT plus richer
+1. Extract primary audio track from encoded MKV to WAV.
+2. Invoke WhisperX through a **Spindle-owned embedded Python wrapper** rather
+   than relying on bare CLI defaults.
+3. The wrapper applies the shared long-form transcription profile explicitly:
+   - configured VAD method,
+   - VAD-guided speech-region transcription,
+   - explicit VAD merge controls (chunk size / onset / offset),
+   - `condition_on_previous_text = false`,
+   - explicit device / compute type,
+   - alignment plus word timing / score preservation when available.
+4. WhisperX produces **canonical transcript artifacts**: raw SRT plus richer
    JSON/alignment output.
+5. Canonical JSON is expected to preserve enough downstream signal for subtitle
+   decisions, including segment timing, word timing, and confidence-like
+   metadata when WhisperX provides it. Segment-level decode metadata such as
+   average log probability should be preserved when available.
 6. The shared transcription cache stores canonical artifacts only. These are
    reused across episode identification, commentary detection, and subtitling.
-7. Subtitle generation derives a **display subtitle** from the canonical JSON by
-   applying hallucination filtering and Stable-TS regrouping/formatting in the
+7. Cache keys include an internal transcription-profile/version component so a
+   behavior change in canonical transcription invalidates stale cached outputs.
+8. Subtitle generation derives a **display subtitle** from the canonical JSON by
+   applying subtitle-only filtering, Stable-TS regrouping/formatting, and a
+   final display-only readability pass (fallback cue splitting/wrapping plus
+   limited gap-aware timing expansion for short/high-CPS cues) in the
    `subtitle` package.
-8. **Formatter failure is explicit**: subtitle formatting failure marks that
+9. **Formatter failure is explicit**: subtitle formatting failure marks that
    episode subtitle job failed; no permanent raw-SRT compatibility path is kept.
-9. **Duration fallback**: If `totalSeconds <= 0`, extracts duration from last SRT
-   timestamp.
+10. **Duration source**: subtitle filtering/validation use actual encoded-media
+    duration when available; transcript-tail duration is only a fallback.
 
 ### 6.2 WhisperX Hallucination Filtering
 
-The subtitle stage applies the WhisperX hallucination rules to **derived
-subtitle-working transcript data** before display formatting. Canonical cached
-transcript artifacts remain unchanged.
+The subtitle stage applies hallucination rules to **derived subtitle-working
+transcript data** before display formatting. Canonical cached transcript
+artifacts remain unchanged.
 
-Filtering removes WhisperX artifacts in two passes:
+Filtering removes WhisperX artifacts in three layers:
 
-**Pass 1 -- Isolated/repeated removal** (`removeIsolatedHallucinations`):
+**Layer 1 -- Isolated/repeated text cleanup** (`removeIsolatedHallucinations`):
 
 - **Repeated hallucinations**: 3+ consecutive cues with identical normalized
   text where each inter-cue gap > 10 seconds. All cues in the run removed.
@@ -770,15 +782,25 @@ Filtering removes WhisperX artifacts in two passes:
 - **Music-only**: isolated cues containing only music symbols
   (`\u00B6`, `\u266A`, `\u266B`, `*`) and whitespace.
 
-**Pass 2 -- Trailing sweep** (`sweepTrailingHallucinations`):
+**Layer 2 -- Trailing sweep** (`sweepTrailingHallucinations`):
 
 - Only runs when `videoSeconds >= 600` (2x the 300s window).
 - In the last 300 seconds of the video: removes hallucination phrases and
   music-only cues without requiring isolation (credits section cleanup).
 
-**Known hallucination phrases** (normalized): "thank you", "thank you for
-watching", "thanks for watching", "please subscribe", "like and subscribe",
-"well be right back", "bye", "bye bye", "see you next time", "see you later".
+**Layer 3 -- Segment-quality heuristics**:
+
+Applied to derived WhisperX JSON/alignment segments before Stable-TS. These
+rules are intentionally subtitle-specific and may use segment duration, word
+count, and confidence-like metadata. Current heuristics target patterns such as:
+
+- very low-information text held on screen for an unusually long duration,
+- few-word long holds with low average confidence,
+- similar silence-adjacent junk that is unlikely to be valid dialogue.
+
+Representative known hallucination phrases include items such as "thank you",
+"thank you for watching", "thanks for watching", "please subscribe",
+"like and subscribe", "bye", and "see you in the next video".
 
 Zero surviving cues after filtering causes that subtitle job to fail.
 
@@ -799,12 +821,18 @@ Returns a list of issue strings (empty = passed):
 | High reading speed | cue text / duration > 25 CPS | `high_reading_speed` |
 | Short cue duration | non-empty cue duration < 0.5s | `short_cue_duration` |
 | Long cue duration | non-empty cue duration > 7s | `long_cue_duration` |
+| Low-information long cue | very short dialogue held for an unusually long time | `low_information_long_cue` |
 | Overlap | cue starts before previous cue ends | `overlapping_cues` |
 
 Duration check is asymmetric: subtitles shorter than video are allowed up to
 600s (credits), but subtitles longer than video only tolerate 8s drift.
 
-SRT validation issues flag items for review but do not fail the stage.
+Validation severity is split into two outcomes:
+
+- **Review issues**: appended to review reasons and subtitle-generation records.
+- **Severe issues**: subtitle generation for that episode fails and MKV muxing is
+  skipped. Severe issues currently include empty output, overlapping cues, and
+  low-information long cues that indicate likely hallucinated display output.
 
 ### 6.4 Progress Reporting
 

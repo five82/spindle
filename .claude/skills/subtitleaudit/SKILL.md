@@ -1,13 +1,13 @@
 ---
 name: subtitleaudit
-description: Audit and fix WhisperX transcription errors in MKV subtitle tracks. Use /subtitleaudit <path_to.mkv> to review and correct the primary embedded subtitle.
+description: Audit and fix obvious, title-specific WhisperX transcription errors in an MKV's primary embedded subtitle track. Use /subtitleaudit <path_to.mkv> to review and correct the primary non-forced display subtitle.
 user-invocable: true
 argument-hint: <path_to.mkv>
 ---
 
 # Subtitle Audit Skill
 
-Review and correct WhisperX transcription errors in MKV-embedded subtitles.
+Review and correct obvious WhisperX transcription errors in the primary embedded display subtitle of an MKV.
 
 ## Usage
 
@@ -15,7 +15,9 @@ Review and correct WhisperX transcription errors in MKV-embedded subtitles.
 
 ## Overview
 
-This skill extracts the primary (non-forced) SRT subtitle from an MKV file, reviews it for obvious WhisperX transcription errors, presents proposed corrections for user approval, applies the approved edits, and muxes the corrected subtitle back into the MKV.
+This skill extracts the primary (non-forced) display subtitle from an MKV file, reviews it for obvious WhisperX transcription/content errors, presents proposed corrections for user approval, applies the approved edits, and muxes the corrected subtitle back into the MKV.
+
+This skill is for title-specific cleanup after the generic subtitle pipeline has already handled wrapping, splitting, retiming, and validation. It edits only the derived display subtitle track that viewers see. Do not edit or replace cached WhisperX canonical artifacts under `~/.cache/spindle/whisperx`.
 
 ## Prerequisites
 
@@ -74,7 +76,9 @@ Required tools (verify before proceeding):
 
 **Reading large SRT files:** SRT files for feature-length films are typically too large to read in a single pass. Read the file in chunks (2000 lines at a time) to cover the full file. Do not skip sections.
 
-Analyze the file for **obvious** WhisperX transcription errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors.
+Analyze the file for **obvious** WhisperX transcription/content errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors.
+
+Focus on residual title-specific problems that the generic pipeline cannot safely fix. Do not use this skill to re-litigate generic subtitle formatting behavior.
 
 **DO flag these (high confidence):**
 
@@ -102,6 +106,10 @@ Analyze the file for **obvious** WhisperX transcription errors. Err heavily on t
 | Rephrasing for clarity | The transcription may be accurate even if awkward |
 | Line break choices | How text is split across lines is a formatting preference |
 | Capitalization of dialogue | Some transcriptions use sentence case, others don't -- both are valid |
+| Line wrapping / line balance | Generic display formatting is owned by the subtitle pipeline, not this skill |
+| Cue splitting / merging for readability | Generic segmentation trade-offs belong in code, not title-specific manual edits |
+| CPS / duration / retiming tweaks | Unless the text itself is clearly junk, timing polish should stay in the pipeline |
+| Generic subtitle mechanics | Do not manually chase issues that should be fixed once in code for all titles |
 | Suspected mishearings | Unless the correct word is unambiguous from surrounding text, don't guess |
 | Diegetic singing | Characters singing on-screen is valid dialogue and should stay |
 | Ambiguous exclamations | Short cues like "Oh!" or "No!" during dialogue scenes are likely real speech |
@@ -210,6 +218,7 @@ Found <N> issues (<M> total cues affected):
 ## Guiding Principles
 
 1. **Conservative edits only.** A false positive (bad "correction") is worse than a missed error. When in doubt, skip it.
-2. **Original file safety.** The original MKV is never modified in-place. All work happens on temp files, and the replacement is atomic (mv).
-3. **Preserve all tracks.** Video, audio, and non-primary subtitle tracks must pass through unchanged.
-4. **User controls everything.** Every edit requires approval. The final file replacement requires explicit confirmation.
+2. **Display-only edits.** Edit only the extracted display subtitle track. Never modify cached canonical WhisperX artifacts.
+3. **Original file safety.** The original MKV is never modified in-place. All work happens on temp files, and the replacement is atomic (mv).
+4. **Preserve all tracks.** Video, audio, and non-primary subtitle tracks must pass through unchanged.
+5. **User controls everything.** Every edit requires approval. The final file replacement requires explicit confirmation.

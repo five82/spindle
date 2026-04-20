@@ -18,6 +18,7 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -25,6 +26,8 @@ import (
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/transcription"
 )
+
+var inspectSubtitleMedia = ffprobe.Inspect
 
 // Handler implements stage.Handler for subtitle generation.
 type Handler struct {
@@ -157,8 +160,16 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
 		)
 
+		videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, asset.Path, result.Duration)
+		logger.Info("subtitle duration selected",
+			"decision_type", "subtitle_duration_source",
+			"decision_result", durationSource,
+			"decision_reason", fmt.Sprintf("video_seconds=%.3f transcript_seconds=%.3f", videoSeconds, result.Duration),
+			"episode_key", key,
+		)
+
 		displayPath := displaySubtitlePath(asset.Path, selectedAudio.Language)
-		formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: result.JSONPath}, workDir, displayPath, result.Duration, selectedAudio.Language)
+		formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: result.JSONPath}, workDir, displayPath, videoSeconds, selectedAudio.Language)
 		if err != nil {
 			failedCount++
 			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("format subtitle: %v", err))
@@ -167,14 +178,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		logger.Info("subtitle formatting complete",
 			"decision_type", logs.DecisionSubtitleFormatting,
 			"decision_result", formatting.FormatterDecision,
-			"decision_reason", fmt.Sprintf("original_segments=%d filtered_segments=%d", formatting.OriginalSegments, formatting.FilteredSegments),
+			"decision_reason", fmt.Sprintf("original_segments=%d filtered_segments=%d text_rules_removed=%d heuristic_removed=%d split_cues=%d wrapped_cues=%d retimed_cues=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics, formatting.SplitCues, formatting.WrappedCues, formatting.RetimedCues),
 			"episode_key", key,
 			"subtitle_file", formatting.DisplayPath,
 		)
 		logger.Info("hallucination filter applied",
 			"decision_type", logs.DecisionHallucinationFilter,
 			"decision_result", "filtered",
-			"decision_reason", fmt.Sprintf("original=%d filtered=%d segments", formatting.OriginalSegments, formatting.FilteredSegments),
+			"decision_reason", fmt.Sprintf("original=%d filtered=%d text_rules_removed=%d heuristic_removed=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics),
 			"episode_key", key,
 		)
 
@@ -190,8 +201,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			continue
 		}
 
-		validationIssues := validateCues(formattedCues, result.Duration)
-		for _, issue := range validationIssues {
+		validation := validateCuesDetailed(formattedCues, videoSeconds)
+		for _, issue := range validation.Issues {
 			logger.Info("SRT validation issue",
 				"decision_type", logs.DecisionSRTValidation,
 				"decision_result", issue,
@@ -210,9 +221,22 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Cached:           result.Cached,
 			SubtitlePath:     formatting.DisplayPath,
 			Segments:         len(formattedCues),
-			DurationSec:      result.Duration,
+			DurationSec:      videoSeconds,
 			Language:         selectedAudio.Language,
-			ValidationIssues: validationIssues,
+			ValidationIssues: validation.Issues,
+		}
+		if len(validation.SevereIssues) > 0 {
+			records = append(records, record)
+			logger.Warn("subtitle validation failed",
+				"decision_type", logs.DecisionSRTValidation,
+				"decision_result", "failed",
+				"decision_reason", strings.Join(validation.SevereIssues, ", "),
+				"episode_key", key,
+				"impact", "subtitle job failed; mux skipped",
+			)
+			failedCount++
+			h.recordSubtitleFailure(ctx, logger, item, &env, key, "severe subtitle validation: "+strings.Join(validation.SevereIssues, ", "))
+			continue
 		}
 
 		if h.osClient != nil && h.cfg.Subtitles.OpenSubtitlesEnabled && env.Attributes.HasForcedSubtitleTrack {
@@ -284,6 +308,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	logger.Info("subtitle stage completed", "event_type", "stage_complete", "stage", "subtitling")
 	return nil
+}
+
+func resolveSubtitleVideoDuration(ctx context.Context, videoPath string, fallback float64) (seconds float64, source string) {
+	probe, err := inspectSubtitleMedia(ctx, "", videoPath)
+	if err == nil {
+		if duration := probe.DurationSeconds(); duration > 0 {
+			return duration, "media_probe"
+		}
+	}
+	if fallback > 0 {
+		return fallback, "transcript_fallback"
+	}
+	return 0, "unknown"
 }
 
 func overallSubtitlePercent(completedItems, totalItems int, currentItemPercent float64) float64 {

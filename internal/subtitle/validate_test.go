@@ -171,6 +171,17 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 		}
 	})
 
+	t.Run("low_information_long_cue", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:13,500\nall\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsIssue(issues, "low_information_long_cue") {
+			t.Fatalf("expected low_information_long_cue, got %v", issues)
+		}
+	})
+
 	t.Run("overlapping_cues", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:03,000\nFirst\n\n2\n00:00:02,500 --> 00:00:04,000\nSecond\n")
 		issues, err := ValidateSRTContent(path, 30)
@@ -181,6 +192,17 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 			t.Fatalf("expected overlapping_cues, got %v", issues)
 		}
 	})
+}
+
+func TestValidateCuesDetailed_SevereIssues(t *testing.T) {
+	cues := []srtutil.Cue{{Index: 1, Start: 1, End: 13.5, Text: "all"}}
+	result := validateCuesDetailed(cues, 30)
+	if !containsIssue(result.Issues, "low_information_long_cue") {
+		t.Fatalf("expected low_information_long_cue, got %v", result.Issues)
+	}
+	if !containsIssue(result.SevereIssues, "low_information_long_cue") {
+		t.Fatalf("expected severe low_information_long_cue, got %v", result.SevereIssues)
+	}
 }
 
 func TestValidateSRTContent_Boundaries(t *testing.T) {

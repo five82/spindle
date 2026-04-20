@@ -168,21 +168,36 @@ HTTP timeout: **45 seconds** (hardcoded `defaultHTTPTimeout`).
 
 ## 4. WhisperX CLI
 
-Invoked via `uvx` (Python package runner):
+Invoked via `uvx` (Python package runner) through an embedded Spindle-owned
+Python wrapper rather than relying on bare WhisperX CLI defaults:
 
 ```
-uvx --from whisperx whisperx <input_audio> \
+uvx --from whisperx python -c <embedded_transcription_script> \
+  --audio <input_audio> \
+  --output-dir <dir> \
   --model large-v3 \
   --language <lang> \
-  --output_dir <dir> \
-  --output_format all \
-  [--compute_type float16 --device cuda]  # when cuda enabled
+  --vad-method <silero|pyannote> \
+  --device <cpu|cuda> \
+  --compute-type <int8|float16>
 ```
 
-GPU acceleration controlled by `subtitles.whisperx_cuda_enabled`.
+GPU acceleration is controlled by `subtitles.whisperx_cuda_enabled`.
+
+The wrapper sets the shared transcription profile explicitly for long-form
+media work instead of inheriting WhisperX defaults. In particular it:
+
+- enables VAD-guided speech-region transcription,
+- sets explicit VAD merge controls (chunk size / onset / offset),
+- sets `condition_on_previous_text = false`,
+- runs alignment and preserves word timing plus score/probability metadata when
+  available,
+- preserves segment-level decode metadata such as average log probability when
+  available,
+- writes canonical artifacts as `audio.srt` and `audio.json`.
 
 WhisperX output is treated as the **canonical transcript**. Final display SRTs
-are produced later by the subtitle stage from WhisperX JSON/alignment output.
+are produced later by the subtitle stage from canonical JSON/alignment output.
 
 ### Audio Extraction (Pre-Processing)
 
@@ -211,19 +226,26 @@ uvx --from stable-ts-whisperless python -c <embedded_formatter_script> \
 
 Behavior:
 - Stable-TS regrouping/line breaking is the supported subtitle-formatting path.
+- After Stable-TS renders the display SRT, Spindle may apply a final
+  display-only readability repair pass that fallback-splits/re-wraps cue text
+  and expands short cues into nearby silence gaps when that improves reading
+  speed without mutating canonical cached transcript artifacts.
 - Subtitle formatting consumes derived working JSON; canonical cached transcript
   artifacts remain unchanged.
+- Subtitle filtering and validation use the actual encoded-media duration when
+  available; transcript-tail duration is only a fallback.
 - If formatting fails, that subtitle job fails explicitly rather than silently
   falling back to the old raw-wrap behavior.
 
 ### Environment Handling
 
-- **Torch compatibility**: Sets `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` unconditionally
-  to work around Torch 2.6+ default change that breaks WhisperX/pyannote.
-- **CUDA index URL**: When CUDA enabled, passes CUDA-optimized PyPI index URL
-  (`--index-url`) with standard PyPI as fallback (`--extra-index-url`).
-- **VAD method**: Runtime-reconfigurable via `SetVADMethod()`; defaults to `silero`,
-  can switch to `pyannote` (requires HF token).
+- **Torch compatibility**: Sets `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` for the
+  WhisperX wrapper process to work around Torch 2.6+ loading changes that break
+  WhisperX/pyannote.
+- **VAD method**: Controlled by `subtitles.whisperx_vad_method`; defaults to
+  `silero`, can switch to `pyannote` (requires HF token).
+- **HF token**: Passed through to the wrapper when configured so pyannote VAD
+  can authenticate.
 
 ---
 
