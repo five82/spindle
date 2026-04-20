@@ -265,7 +265,7 @@ func TestBuildWhisperXInvocation(t *testing.T) {
 		t.Fatalf("compute type = %q, want float16", invocation.ComputeType)
 	}
 	joined := strings.Join(invocation.Args, " ")
-	for _, want := range []string{"--from whisperx", "--audio /tmp/audio.wav", "--output-dir /tmp/out", "--vad-method pyannote", "--batch-size 16", "--chunk-size 30", "--vad-onset 0.500", "--vad-offset 0.363", "--condition-on-previous-text false", "--hf-token hf-token"} {
+	for _, want := range []string{"--from whisperx", "--audio /tmp/audio.wav", "--output-dir /tmp/out", "--vad-method pyannote", "--batch-size 16", "--chunk-size 30", "--vad-onset 0.500", "--vad-offset 0.363", "--condition-on-previous-text false", "--transcription-profile-name whisperx_wrapper_v2", "--hf-token hf-token"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("invocation args missing %q: %s", want, joined)
 		}

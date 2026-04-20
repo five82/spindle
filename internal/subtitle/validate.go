@@ -150,19 +150,21 @@ func hasUnbalancedLineBreak(lines []string) bool {
 }
 
 func isLowInformationLongCue(text string, duration float64) bool {
-	if duration <= 0 {
-		return false
-	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return false
 	}
-	wordCount := lexicalWordCount(trimmed)
-	textRunes := utf8.RuneCountInString(trimmed)
-	if duration >= 12 && wordCount <= 2 {
+	return isLowInformationLongCueMetrics(duration, lexicalWordCount(trimmed), utf8.RuneCountInString(trimmed))
+}
+
+func isLowInformationLongCueMetrics(duration float64, lexicalWords, textRunes int) bool {
+	if duration <= 0 || lexicalWords == 0 {
+		return false
+	}
+	if duration >= 12 && lexicalWords <= 2 {
 		return true
 	}
-	if duration >= 8 && wordCount <= 1 && textRunes <= 24 {
+	if duration >= 8 && lexicalWords <= 1 && textRunes <= 24 {
 		return true
 	}
 	return false

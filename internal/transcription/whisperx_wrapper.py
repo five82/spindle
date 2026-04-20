@@ -77,6 +77,7 @@ def main() -> None:
     parser.add_argument("--vad-offset", type=float, default=0.363)
     parser.add_argument("--hf-token", default="")
     parser.add_argument("--condition-on-previous-text", type=_bool_arg, default=False)
+    parser.add_argument("--transcription-profile-name", required=True)
     args = parser.parse_args()
 
     try:
@@ -110,20 +111,6 @@ def main() -> None:
             vad_options=vad_options,
             use_auth_token=args.hf_token or None,
         )
-    except TypeError:
-        try:
-            model = whisperx.load_model(
-                args.model,
-                args.device,
-                compute_type=args.compute_type,
-                language=args.language,
-                asr_options=asr_options,
-                vad_method=args.vad_method,
-                vad_options=vad_options,
-                use_auth_token=args.hf_token or None,
-            )
-        except Exception as exc:  # pragma: no cover
-            raise SystemExit(f"load_model_error:{exc}") from exc
     except Exception as exc:  # pragma: no cover
         raise SystemExit(f"load_model_error:{exc}") from exc
 
@@ -160,7 +147,7 @@ def main() -> None:
         "segments": _clean_json(aligned_segments),
         "speech_segments": _clean_json(raw_segments),
         "transcription_profile": {
-            "name": "whisperx_wrapper_v2",
+            "name": args.transcription_profile_name,
             "vad_method": args.vad_method,
             "device": args.device,
             "compute_type": args.compute_type,

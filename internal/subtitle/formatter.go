@@ -254,17 +254,8 @@ type segmentMetrics struct {
 
 func shouldDropSegmentByHeuristic(cue indexedTimedCue, segment map[string]any) bool {
 	duration := cue.End - cue.Start
-	if duration <= 0 {
-		return false
-	}
 	metrics := computeSegmentMetrics(cue.Text, segment)
-	if metrics.LexicalWords == 0 {
-		return false
-	}
-	if duration >= 12 && metrics.LexicalWords <= 2 {
-		return true
-	}
-	if duration >= 8 && metrics.LexicalWords <= 1 && metrics.TextRunes <= 24 {
+	if isLowInformationLongCueMetrics(duration, metrics.LexicalWords, metrics.TextRunes) {
 		return true
 	}
 	if metrics.HasProbability {
@@ -297,9 +288,7 @@ func computeSegmentMetrics(text string, segment map[string]any) segmentMetrics {
 			continue
 		}
 		token, _ := word["word"].(string)
-		if len(lexicalTokens(token)) > 0 {
-			tokenCount += len(lexicalTokens(token))
-		}
+		tokenCount += len(lexicalTokens(token))
 		if prob, ok := segmentProbability(word); ok {
 			sumProb += prob
 			probCount++

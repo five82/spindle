@@ -249,6 +249,7 @@ func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language st
 		"--vad-onset", fmt.Sprintf("%.3f", whisperXVADOnset),
 		"--vad-offset", fmt.Sprintf("%.3f", whisperXVADOffset),
 		"--condition-on-previous-text", "false",
+		"--transcription-profile-name", transcriptionProfileID,
 	}
 	env := append(os.Environ(), "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1")
 	if s.hfToken != "" {
