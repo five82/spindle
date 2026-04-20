@@ -15,7 +15,7 @@ Review and correct obvious WhisperX transcription errors in the primary embedded
 
 ## Overview
 
-This skill extracts the primary (non-forced) display subtitle from an MKV file, reviews it for obvious WhisperX transcription/content errors, presents proposed corrections for user approval, applies the approved edits, and muxes the corrected subtitle back into the MKV.
+This skill extracts the primary (non-forced) display subtitle from an MKV file, reviews it for obvious WhisperX transcription/content errors, presents the planned corrections, applies them automatically, and muxes the corrected subtitle back into the MKV.
 
 This skill is for title-specific cleanup after the generic subtitle pipeline has already handled wrapping, splitting, retiming, and validation. It edits only the derived display subtitle track that viewers see. Do not edit or replace cached WhisperX canonical artifacts under `~/.cache/spindle/whisperx`.
 
@@ -144,15 +144,15 @@ Found <N> issues (<M> total cues affected):
 
 **Batching:** Consecutive cues with the same error type (e.g., a run of credits lyrics or a cluster of hallucinations) should be batched into a single numbered item listing the cue range. This keeps the report readable.
 
-**After presenting**, ask the user which edits to apply:
-- "Apply all" - apply every proposed edit
-- "Apply selected" - let user specify which numbered edits to apply
-- "Cancel" - discard all changes
+**After presenting**, continue automatically:
+- If no issues were found, report that no changes are needed and stop.
+- If issues were found, apply every proposed edit without waiting for user confirmation.
+- Keep the report concise but explicit so the user can see exactly what changed.
 
-### Phase 4: Apply Approved Edits
+### Phase 4: Apply Edits
 
 1. Read the SRT file from `/tmp/subtitleaudit_<basename>.srt`
-2. Apply the approved edits:
+2. Apply all proposed edits:
    - For text corrections: replace the cue text
    - For cue removals: delete the entire cue block (index line, timestamp line, text lines, blank separator)
 3. After removals, **re-index cue numbers** sequentially (1, 2, 3, ...)
@@ -195,18 +195,18 @@ Found <N> issues (<M> total cues affected):
    Compare the muxed file size against the original. They should be within ~1MB of each other (subtitle changes are tiny relative to video/audio). A large discrepancy indicates a muxing problem -- abort and report.
 
 6. **Replace the original**:
-   - Ask user for confirmation: "Replace original file at `<path>`?"
-   - On confirmation:
+   - Do this automatically only after the muxed file has been verified successfully.
+   - Replace atomically:
      ```bash
      mv "/tmp/subtitleaudit_<basename>_muxed.mkv" "<original_mkv_path>"
      ```
-   - On decline: report the muxed file location for manual handling
+   - Report that the original file was replaced.
 
 7. **Clean up temp files**:
    ```bash
    rm -f /tmp/subtitleaudit_<basename>*.srt
    ```
-   (Only clean up SRT temps; if user declined the replace, keep the muxed MKV.)
+   (The muxed MKV is consumed by the atomic replacement on success. If replacement fails, keep the muxed MKV and report its path.)
 
 ## Error Handling
 
@@ -221,4 +221,4 @@ Found <N> issues (<M> total cues affected):
 2. **Display-only edits.** Edit only the extracted display subtitle track. Never modify cached canonical WhisperX artifacts.
 3. **Original file safety.** The original MKV is never modified in-place. All work happens on temp files, and the replacement is atomic (mv).
 4. **Preserve all tracks.** Video, audio, and non-primary subtitle tracks must pass through unchanged.
-5. **User controls everything.** Every edit requires approval. The final file replacement requires explicit confirmation.
+5. **Non-interactive execution.** Once the skill identifies high-confidence fixes, it should apply them automatically and replace the original only after verification succeeds.
