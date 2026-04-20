@@ -26,6 +26,18 @@ Required tools (verify before proceeding):
 - `ffmpeg` - Subtitle extraction
 - `mkvmerge` - Subtitle muxing
 
+Optional reference verification (use only as a fallback to confirm suspicious cues):
+- Spindle config with OpenSubtitles credentials, loaded with Spindle's normal config search order:
+  1. explicit path if provided
+  2. `~/.config/spindle/config.toml`
+  3. `./spindle.toml`
+- `subtitles.opensubtitles_api_key`
+- `subtitles.opensubtitles_user_agent`
+- `subtitles.opensubtitles_user_token` (preferred for downloads)
+- `tmdb.api_key` for canonical TV episode lookup
+
+OpenSubtitles is a comparison source only. Never replace the embedded subtitle wholesale from an external download.
+
 ## Procedure
 
 ### Phase 1: Probe and Extract
@@ -79,6 +91,48 @@ Required tools (verify before proceeding):
 Analyze the file for **obvious** WhisperX transcription/content errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors.
 
 Focus on residual title-specific problems that the generic pipeline cannot safely fix. Do not use this skill to re-litigate generic subtitle formatting behavior.
+
+#### Optional OpenSubtitles verification fallback
+
+Use this only when local context suggests a likely error but an external reference would materially increase confidence.
+
+**When to use it:**
+- transcript web fetches fail or are unavailable
+- a cue looks like an obvious homophone or garble, but you want confirmation
+- several nearby cues are suspicious and context from the embedded subtitle alone is thin
+
+**When NOT to use it:**
+- to rewrite stylistic differences
+- to replace the embedded subtitle wholesale
+- when the target episode/movie identity is ambiguous
+
+**TV episode matching policy:**
+Use the same canonical-selection philosophy as Spindle's episode identification:
+- TMDB is the canonical numbering source
+- OpenSubtitles release numbering and filenames are advisory only
+- prefer the most probable candidate, not the first available one
+
+For TV files, derive the show title and `SxxEyy` from the filename/path when possible, then:
+1. Load Spindle config and credentials.
+2. Resolve the series against TMDB and fetch season metadata for the target season.
+3. Search OpenSubtitles by `tmdb_id`, `season_number`, `episode_number`, and configured languages.
+4. Select the best candidate using the same logic Spindle uses for episode ID reference acquisition:
+   - reward candidate text/release names that contain the target episode title
+   - reward exact episode markers like `S01E05`, `1x05`, or `1.05`
+   - strongly penalize candidates that mention a different episode title from the same season
+   - strongly penalize likely multi-episode packs
+   - prefer non-hearing-impaired subtitles when otherwise similar
+   - use download count only as a secondary signal
+5. If every candidate is suspect, either use the best one only as a weak confidence check or skip external verification entirely.
+
+**Movie policy:**
+There is no direct episode-ID equivalent for movies. Only use OpenSubtitles as a weak comparison source when you can derive a confident title/year match from the filename/path and the result is clearly the same cut. Otherwise skip it.
+
+**Comparison rules:**
+- Compare only suspicious cue windows and nearby context, not the entire file line-by-line.
+- Treat OpenSubtitles as confirmatory evidence, not source of truth.
+- Only apply an edit when the embedded subtitle context already points to the same correction or the external match is exceptionally clear.
+- If embedded and external subtitles disagree in a way that could be release/style variance, do not edit.
 
 **DO flag these (high confidence):**
 
@@ -222,3 +276,4 @@ Found <N> issues (<M> total cues affected):
 3. **Original file safety.** The original MKV is never modified in-place. All work happens on temp files, and the replacement is atomic (mv).
 4. **Preserve all tracks.** Video, audio, and non-primary subtitle tracks must pass through unchanged.
 5. **Non-interactive execution.** Once the skill identifies high-confidence fixes, it should apply them automatically and replace the original only after verification succeeds.
+6. **External references are advisory.** TMDB provides canonical TV episode identity; OpenSubtitles provides noisy comparison text. Never let OpenSubtitles override canonical identity or drive speculative edits by itself.
