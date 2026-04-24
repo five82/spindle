@@ -96,6 +96,10 @@ No hard coverage targets. Focus testing effort on:
 - Test that subtitle filtering/validation prefer actual media duration over transcript-tail duration, with transcript duration used only as fallback.
 - Test severe validation gating so obviously broken subtitle output fails the episode subtitle job and does not mux into MKV.
 - Add regression coverage for final display-only subtitle repair (fallback cue splitting/wrapping and limited gap-aware timing expansion) so readability improvements do not mutate canonical transcript artifacts.
+- Test line-break scoring preferences: punctuation boundaries, conjunction/preposition boundaries, avoidance of one/two-word top lines, and avoidance of obvious article/noun, pronoun/verb, auxiliary/verb, and first/last-name splits.
+- Test readability validation thresholds: high reading speed above 20 CPS, short cue duration below 5/6s, long cue duration above 7s, maximum two lines, and 42 characters per line.
+- Test aggregate subtitle QC metrics for deterministic cue counts, max CPS, p95 CPS, high-CPS counts, short/long duration counts, overlong-line counts, and unbalanced-line counts for a fixed cue list.
+- Test that generic formatting/QC changes do not perform content rewriting, paraphrasing, SDH authoring, or automatic lyric removal.
 - Prefer golden fixtures for real-world bad wrapping / hallucination cases.
 
 Low-value test targets (skip unless bugs emerge):

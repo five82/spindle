@@ -202,6 +202,25 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		validation := validateCuesDetailed(formattedCues, videoSeconds)
+		stats := validation.Stats
+		logger.Info("SRT validation QC summary",
+			"decision_type", logs.DecisionSRTValidation,
+			"decision_result", "qc_summary",
+			"decision_reason", fmt.Sprintf("cue_count=%d max_cps=%.2f p95_cps=%.2f high_cps_cues=%d short_duration_cues=%d long_duration_cues=%d overlong_line_cues=%d unbalanced_line_break_cues=%d split_cues=%d wrapped_cues=%d retimed_cues=%d", stats.CueCount, stats.MaxCPS, stats.P95CPS, stats.HighCPSCues, stats.ShortDurationCues, stats.LongDurationCues, stats.OverlongLineCues, stats.UnbalancedLineBreakCues, formatting.SplitCues, formatting.WrappedCues, formatting.RetimedCues),
+			"episode_key", key,
+			"cue_count", stats.CueCount,
+			"max_cps", stats.MaxCPS,
+			"p95_cps", stats.P95CPS,
+			"high_cps_cues", stats.HighCPSCues,
+			"short_duration_cues", stats.ShortDurationCues,
+			"long_duration_cues", stats.LongDurationCues,
+			"overlong_line_cues", stats.OverlongLineCues,
+			"unbalanced_line_break_cues", stats.UnbalancedLineBreakCues,
+			"too_many_line_cues", stats.TooManyLineCues,
+			"split_cues", formatting.SplitCues,
+			"wrapped_cues", formatting.WrappedCues,
+			"retimed_cues", formatting.RetimedCues,
+		)
 		for _, issue := range validation.Issues {
 			logger.Info("SRT validation issue",
 				"decision_type", logs.DecisionSRTValidation,

@@ -80,9 +80,10 @@ OpenSubtitles is a comparison source only. Never replace the embedded subtitle w
    - First cue: <timestamp>
    - Last cue: <timestamp>
    - Cue density: <N> cues/min
+   - QC observations: <N> high-CPS cues, <N> short-duration cues, <N> overlong-line cues
    - Estimated credits region: after ~<timestamp> (last ~5-8 min of video)
    ```
-   The credits region estimate is the video duration minus ~5-8 minutes. Cues in this region that aren't clearly dialogue deserve extra scrutiny.
+   The credits region estimate is the video duration minus ~5-8 minutes. Cues in this region that aren't clearly dialogue deserve extra scrutiny. QC observations guide review only; do not manually polish timing or line wrapping unless the text itself is clearly junk.
 
 ### Phase 2: Review for Transcription Errors
 
@@ -90,7 +91,9 @@ OpenSubtitles is a comparison source only. Never replace the embedded subtitle w
 
 Analyze the file for **obvious** WhisperX transcription/content errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors.
 
-Focus on residual title-specific problems that the generic pipeline cannot safely fix. Do not use this skill to re-litigate generic subtitle formatting behavior.
+Focus on residual title-specific problems that the generic pipeline cannot safely fix. Do not use this skill to re-litigate generic subtitle formatting behavior. Netflix/general timed-text guidance is background only; do not perform broad style normalization, paraphrasing, grammar cleanup, number/date style edits, punctuation preferences, or capitalization changes unless the cue is clearly corrupted or nonsensical.
+
+If many cues show generic formatting/QC issues (line length, line balance, CPS, short duration, or retiming), report that as a pipeline problem instead of manually editing the title.
 
 #### Optional OpenSubtitles verification fallback
 
@@ -139,8 +142,8 @@ There is no direct episode-ID equivalent for movies. Only use OpenSubtitles as a
 | Error Type | Description | Example |
 |------------|-------------|---------|
 | Residual hallucinations | The same short phrase appearing 3+ times throughout the file in isolation -- not part of a conversation, often surrounded by large timestamp gaps (30s+) on both sides. Common phrases: "Thank you.", "Thanks for watching.", "Subscribe.", "See you next time." | "Thank you." appearing 11 times scattered across the file, each time with no surrounding dialogue |
-| Credits music/lyrics | Cues after the final scene's dialogue that contain song lyrics. Use the estimated credits region from Phase 1 to identify these. After the last clear dialogue line, any cues with poetic/lyrical phrasing are almost certainly credits music. | Cues after 01:44:00 in a 01:51:00 movie containing "Down upon us and it flows like water" |
-| Background music bleed | Soundtrack lyrics incorrectly transcribed as dialogue mid-film. Telltale signs: poetic/lyrical phrasing that doesn't fit the scene's conversation, multiple consecutive cues forming verse/chorus patterns, cues during montages or transitions. Be careful: dialogue may be interleaved with music cues in the same scene. | "He's a goat, he's a god, he's a man, he's a guru" from a Nick Cave song playing on a car stereo |
+| Credits music/lyrics | Obvious WhisperX music bleed after the final scene's dialogue. Use the estimated credits region from Phase 1 to identify these, but do not automatically remove all lyrics. Remove only lyric runs that local context makes clearly non-dialogue and non-plot. | Cues after 01:44:00 in a 01:51:00 movie containing unrelated verse/chorus lyrics after all narrative dialogue has ended |
+| Background music bleed | Soundtrack lyrics incorrectly transcribed as dialogue mid-film. Telltale signs: poetic/lyrical phrasing that doesn't fit the scene's conversation, multiple consecutive cues forming verse/chorus patterns, cues during montages or transitions. Be careful: dialogue may be interleaved with music cues in the same scene. Preserve diegetic singing, on-screen singing, musicals, performances, karaoke, music documentaries, quoted lyrics, and plot-relevant lyrics. When unsure, skip. | "He's a goat, he's a god, he's a man, he's a guru" from a Nick Cave song playing on a car stereo |
 | Misattributed sound effects | Non-dialogue sounds transcribed as if they were speech. Obvious cases only: clearly non-verbal sounds rendered as words. | "BOOM!" transcribed as dialogue when it's a sound effect |
 | Garbled nonsense | Words/phrases that are clearly not English or make no sense in context | "the flibberty jibbet of cromulence" when context makes no sense |
 | Obvious homophones | Wrong word where audio context makes the correct word unambiguous | "their" vs "there" vs "they're" when sentence grammar makes it clear |
@@ -156,6 +159,7 @@ There is no direct episode-ID equivalent for movies. Only use OpenSubtitles as a
 | Proper noun spelling | WhisperX may have the correct uncommon spelling; we can't verify without the script |
 | Grammar "corrections" | The dialogue may be intentionally ungrammatical (dialect, character voice) |
 | Punctuation style | Comma placement, semicolons vs periods -- these are style choices |
+| Broad style normalization | Netflix/general timed-text style rules are not a license to rewrite otherwise valid cues |
 | Timing adjustments | Timestamp corrections require audio reference we don't have |
 | Rephrasing for clarity | The transcription may be accurate even if awkward |
 | Line break choices | How text is split across lines is a formatting preference |
@@ -165,7 +169,7 @@ There is no direct episode-ID equivalent for movies. Only use OpenSubtitles as a
 | CPS / duration / retiming tweaks | Unless the text itself is clearly junk, timing polish should stay in the pipeline |
 | Generic subtitle mechanics | Do not manually chase issues that should be fixed once in code for all titles |
 | Suspected mishearings | Unless the correct word is unambiguous from surrounding text, don't guess |
-| Diegetic singing | Characters singing on-screen is valid dialogue and should stay |
+| Diegetic singing / plot-relevant lyrics | Characters singing on-screen, musical/performance/karaoke/music-documentary content, quoted lyrics, and plot-relevant songs are valid content and should stay |
 | Ambiguous exclamations | Short cues like "Oh!" or "No!" during dialogue scenes are likely real speech |
 
 ### Phase 3: Present Proposed Edits

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/five82/spindle/internal/srtutil"
@@ -93,19 +94,11 @@ func bestTwoLineBreak(words []string, maxChars int) (int, bool) {
 	}
 	bestIdx := 0
 	bestScore := int(^uint(0) >> 1)
-	bestOverflow := int(^uint(0) >> 1)
 	for i := 1; i < len(words); i++ {
 		left := strings.Join(words[:i], " ")
 		right := strings.Join(words[i:], " ")
-		leftLen := utf8.RuneCountInString(left)
-		rightLen := utf8.RuneCountInString(right)
-		overflow := max(0, leftLen-maxChars) + max(0, rightLen-maxChars)
-		score := max(leftLen, rightLen)
-		if overflow == 0 {
-			score = absInt(leftLen - rightLen)
-		}
-		if overflow < bestOverflow || (overflow == bestOverflow && score < bestScore) {
-			bestOverflow = overflow
+		score := displayLineBreakScore(words, i, left, right, maxChars)
+		if score < bestScore {
 			bestScore = score
 			bestIdx = i
 		}
@@ -114,6 +107,111 @@ func bestTwoLineBreak(words []string, maxChars int) (int, bool) {
 		return 0, false
 	}
 	return bestIdx, true
+}
+
+func displayLineBreakScore(words []string, breakAt int, left, right string, maxChars int) int {
+	leftLen := utf8.RuneCountInString(left)
+	rightLen := utf8.RuneCountInString(right)
+	leftWords := breakAt
+	rightWords := len(words) - breakAt
+	overflow := max(0, leftLen-maxChars) + max(0, rightLen-maxChars)
+
+	// Start with fit and shape. Overflow dominates all style preferences; when
+	// both lines fit, prefer balanced or slightly bottom-heavy lines.
+	score := overflow * 10000
+	score += absInt(leftLen-rightLen) * 8
+	if leftLen > rightLen {
+		score += (leftLen - rightLen) * 3
+	}
+	if leftWords <= 2 && len(words) > 4 {
+		score += 240
+	}
+	if rightWords <= 1 && len(words) > 3 {
+		score += 180
+	}
+	if absInt(leftLen-rightLen) > unbalancedLineDelta {
+		score += 120
+	}
+
+	prev := words[breakAt-1]
+	next := words[breakAt]
+	prevNorm := normalizedBreakWord(prev)
+	nextNorm := normalizedBreakWord(next)
+
+	if cueBreakPreferred(prev) {
+		score -= 90
+	}
+	if displayBreakConjunctions[nextNorm] {
+		score -= 55
+	}
+	if displayBreakPrepositions[nextNorm] {
+		score -= 35
+	}
+
+	if displayBreakDeterminers[prevNorm] {
+		score += 100
+	}
+	if displayBreakAuxiliaries[prevNorm] {
+		score += 90
+	}
+	if displayBreakSubjectPronouns[prevNorm] {
+		score += 80
+	}
+	if titleCaseNameLike(prev) && titleCaseNameLike(next) {
+		score += 45
+	}
+
+	return score
+}
+
+func normalizedBreakWord(word string) string {
+	word = strings.Trim(word, " \t\r\n\"'()[]{}<>.,?!;:")
+	return strings.ToLower(word)
+}
+
+func titleCaseNameLike(word string) bool {
+	word = strings.Trim(word, " \t\r\n\"'()[]{}<>.,?!;:")
+	runes := []rune(word)
+	if len(runes) < 2 || len(runes) > 20 {
+		return false
+	}
+	if !unicode.IsUpper(runes[0]) {
+		return false
+	}
+	for _, r := range runes[1:] {
+		if !unicode.IsLetter(r) && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+var displayBreakConjunctions = map[string]bool{
+	"and": true, "but": true, "or": true, "so": true, "yet": true, "for": true, "nor": true,
+	"because": true, "although": true, "though": true, "while": true, "if": true, "when": true,
+}
+
+var displayBreakPrepositions = map[string]bool{
+	"in": true, "on": true, "at": true, "to": true, "from": true, "with": true, "by": true, "for": true,
+	"of": true, "about": true, "into": true, "over": true, "under": true, "before": true, "after": true,
+	"through": true, "between": true, "without": true, "within": true,
+}
+
+var displayBreakDeterminers = map[string]bool{
+	"a": true, "an": true, "the": true,
+	"my": true, "your": true, "his": true, "her": true, "its": true, "our": true, "their": true,
+}
+
+var displayBreakAuxiliaries = map[string]bool{
+	"am": true, "is": true, "are": true, "was": true, "were": true, "be": true, "been": true, "being": true,
+	"do": true, "does": true, "did": true, "have": true, "has": true, "had": true,
+	"will": true, "would": true, "can": true, "could": true, "shall": true, "should": true, "may": true,
+	"might": true, "must": true, "not": true, "don't": true, "doesn't": true, "didn't": true, "can't": true,
+	"won't": true, "wouldn't": true, "shouldn't": true, "couldn't": true,
+}
+
+var displayBreakSubjectPronouns = map[string]bool{
+	"i": true, "you": true, "he": true, "she": true, "it": true, "we": true, "they": true,
 }
 
 func splitDisplayCues(cues []srtutil.Cue) ([]srtutil.Cue, int) {
@@ -177,10 +275,14 @@ func splitDisplayCue(cue srtutil.Cue) []srtutil.Cue {
 		remainingParts := len(chunks) - i - 1
 		minRemaining := float64(remainingParts) * minSubtitleCueDuration
 		partDuration := duration * float64(chunkRunes) / float64(totalRunes)
-		partDuration = max(partDuration, minSubtitleCueDuration)
-		partDuration = min(partDuration, remainingDuration-minRemaining)
-		if partDuration < minSubtitleCueDuration {
-			partDuration = minSubtitleCueDuration
+		if remainingDuration >= minRemaining+minSubtitleCueDuration {
+			partDuration = max(partDuration, minSubtitleCueDuration)
+			partDuration = min(partDuration, remainingDuration-minRemaining)
+		} else {
+			partDuration = remainingDuration / float64(remainingParts+1)
+		}
+		if partDuration <= 0 {
+			partDuration = remainingDuration / float64(remainingParts+1)
 		}
 		part.Start = start
 		part.End = start + partDuration

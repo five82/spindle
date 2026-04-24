@@ -194,6 +194,89 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 	})
 }
 
+func TestValidateSRTContent_ReadabilityThresholds(t *testing.T) {
+	t.Run("reading_speed_over_20_cps_flagged", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:02,000\n123456789012345678901\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsIssue(issues, "high_reading_speed") {
+			t.Fatalf("expected high_reading_speed, got %v", issues)
+		}
+	})
+
+	t.Run("reading_speed_at_20_cps_allowed", func(t *testing.T) {
+		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:02,000\n12345678901234567890\n")
+		issues, err := ValidateSRTContent(path, 30)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if containsIssue(issues, "high_reading_speed") {
+			t.Fatalf("did not expect high_reading_speed, got %v", issues)
+		}
+	})
+
+	t.Run("minimum_duration_boundary_allowed", func(t *testing.T) {
+		result := validateCuesDetailed([]srtutil.Cue{{Index: 1, Start: 0, End: minSubtitleCueDuration, Text: "Ok"}}, 30)
+		if containsIssue(result.Issues, "short_cue_duration") {
+			t.Fatalf("did not expect short_cue_duration, got %v", result.Issues)
+		}
+	})
+
+	t.Run("below_minimum_duration_flagged", func(t *testing.T) {
+		result := validateCuesDetailed([]srtutil.Cue{{Index: 1, Start: 0, End: minSubtitleCueDuration - 0.001, Text: "Ok"}}, 30)
+		if !containsIssue(result.Issues, "short_cue_duration") {
+			t.Fatalf("expected short_cue_duration, got %v", result.Issues)
+		}
+	})
+}
+
+func TestValidateCuesDetailed_QCStats(t *testing.T) {
+	cues := []srtutil.Cue{
+		{Index: 1, Start: 0, End: 1, Text: strings.Repeat("a", 10)},
+		{Index: 2, Start: 2, End: 3, Text: strings.Repeat("b", 25)},
+		{Index: 3, Start: 4, End: 4.5, Text: "Short"},
+		{Index: 4, Start: 5, End: 13, Text: "Long enough"},
+		{Index: 5, Start: 14, End: 17, Text: strings.Repeat("c", maxSubtitleCharsPerLine+1)},
+		{Index: 6, Start: 18, End: 20, Text: "This line is much longer than\nshort"},
+		{Index: 7, Start: 21, End: 23, Text: "one\ntwo\nthree"},
+	}
+	result := validateCuesDetailed(cues, 30)
+	stats := result.Stats
+	if stats.CueCount != len(cues) {
+		t.Fatalf("CueCount = %d, want %d", stats.CueCount, len(cues))
+	}
+	if stats.HighCPSCues != 1 {
+		t.Fatalf("HighCPSCues = %d, want 1", stats.HighCPSCues)
+	}
+	if stats.ShortDurationCues != 1 {
+		t.Fatalf("ShortDurationCues = %d, want 1", stats.ShortDurationCues)
+	}
+	if stats.LongDurationCues != 1 {
+		t.Fatalf("LongDurationCues = %d, want 1", stats.LongDurationCues)
+	}
+	if stats.OverlongLineCues != 1 {
+		t.Fatalf("OverlongLineCues = %d, want 1", stats.OverlongLineCues)
+	}
+	if stats.UnbalancedLineBreakCues != 1 {
+		t.Fatalf("UnbalancedLineBreakCues = %d, want 1", stats.UnbalancedLineBreakCues)
+	}
+	if stats.TooManyLineCues != 1 {
+		t.Fatalf("TooManyLineCues = %d, want 1", stats.TooManyLineCues)
+	}
+	if stats.MaxCPS != 25 || stats.P95CPS != 25 {
+		t.Fatalf("MaxCPS/P95CPS = %.2f/%.2f, want 25.00/25.00", stats.MaxCPS, stats.P95CPS)
+	}
+}
+
+func TestCalculateSubtitleQCStats_Empty(t *testing.T) {
+	stats := calculateSubtitleQCStats(nil)
+	if stats.CueCount != 0 || stats.MaxCPS != 0 || stats.P95CPS != 0 {
+		t.Fatalf("empty stats = %+v, want zero values", stats)
+	}
+}
+
 func TestValidateCuesDetailed_SevereIssues(t *testing.T) {
 	cues := []srtutil.Cue{{Index: 1, Start: 1, End: 13.5, Text: "all"}}
 	result := validateCuesDetailed(cues, 30)

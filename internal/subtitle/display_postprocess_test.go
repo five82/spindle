@@ -24,6 +24,73 @@ func TestWrapDisplayCueText_BalancesTwoLines(t *testing.T) {
 	}
 }
 
+func TestBestTwoLineBreak_Heuristics(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		wantA string
+		wantB string
+	}{
+		{
+			name:  "breaks after punctuation",
+			text:  "I tried to warn you, but nobody wanted to listen",
+			wantA: "I tried to warn you,",
+			wantB: "but nobody wanted to listen",
+		},
+		{
+			name:  "breaks before conjunction",
+			text:  "We can stay right here and wait for the others",
+			wantA: "We can stay right here",
+			wantB: "and wait for the others",
+		},
+		{
+			name:  "breaks before preposition",
+			text:  "We hid the package safely under the old bridge",
+			wantA: "We hid the package safely",
+			wantB: "under the old bridge",
+		},
+		{
+			name:  "avoids article noun split",
+			text:  "This is the old bridge we talked about yesterday",
+			wantA: "This is the old bridge",
+			wantB: "we talked about yesterday",
+		},
+		{
+			name:  "avoids pronoun verb split",
+			text:  "I know what she said about the missing package",
+			wantA: "I know what she said",
+			wantB: "about the missing package",
+		},
+		{
+			name:  "avoids auxiliary verb split",
+			text:  "They said we should leave before anyone finds us",
+			wantA: "They said we should leave",
+			wantB: "before anyone finds us",
+		},
+		{
+			name:  "avoids two word top line",
+			text:  "All right, we should leave before anyone finds us tonight",
+			wantA: "All right, we should leave",
+			wantB: "before anyone finds us tonight",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			words := strings.Fields(tt.text)
+			breakAt, ok := bestTwoLineBreak(words, maxSubtitleCharsPerLine)
+			if !ok {
+				t.Fatalf("bestTwoLineBreak() returned !ok")
+			}
+			gotA := strings.Join(words[:breakAt], " ")
+			gotB := strings.Join(words[breakAt:], " ")
+			if gotA != tt.wantA || gotB != tt.wantB {
+				t.Fatalf("break = %q / %q, want %q / %q", gotA, gotB, tt.wantA, tt.wantB)
+			}
+		})
+	}
+}
+
 func TestSplitDisplayCue_KeepsReadableCueIntact(t *testing.T) {
 	cue := srtutil.Cue{
 		Index: 1,
@@ -54,6 +121,30 @@ func TestSplitDisplayCue_BreaksOverfullCue(t *testing.T) {
 	for _, part := range parts {
 		if got := utf8.RuneCountInString(normalizeCueWhitespace(part.Text)); got > preferredDisplayMaxCueChars {
 			t.Fatalf("part too long: %d chars in %q", got, part.Text)
+		}
+	}
+}
+
+func TestSplitDisplayCue_ShortOverfullCuePreservesMonotonicTiming(t *testing.T) {
+	cue := srtutil.Cue{
+		Index: 1,
+		Start: 10,
+		End:   11,
+		Text:  "This is a very long subtitle cue that has to be split even though the original timing is too short for every part to meet the preferred minimum duration.",
+	}
+	parts := splitDisplayCue(cue)
+	if len(parts) < 2 {
+		t.Fatalf("expected short overfull cue to split, got %d part(s)", len(parts))
+	}
+	if parts[0].Start != cue.Start || parts[len(parts)-1].End != cue.End {
+		t.Fatalf("split cue timing not preserved: first %.3f last %.3f", parts[0].Start, parts[len(parts)-1].End)
+	}
+	for i, part := range parts {
+		if part.End < part.Start {
+			t.Fatalf("part %d has inverted timing: %.3f --> %.3f", i, part.Start, part.End)
+		}
+		if i > 0 && part.Start < parts[i-1].End {
+			t.Fatalf("part %d overlaps previous: %.3f < %.3f", i, part.Start, parts[i-1].End)
 		}
 	}
 }

@@ -1,6 +1,8 @@
 package subtitle
 
 import (
+	"math"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -10,8 +12,8 @@ import (
 const (
 	maxSubtitleLinesPerCue  = 2
 	maxSubtitleCharsPerLine = 42
-	maxSubtitleReadingSpeed = 25.0
-	minSubtitleCueDuration  = 0.5
+	maxSubtitleReadingSpeed = 20.0
+	minSubtitleCueDuration  = 5.0 / 6.0
 	maxSubtitleCueDuration  = 7.0
 	unbalancedLineDelta     = 16
 )
@@ -30,6 +32,19 @@ func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) 
 type validationResult struct {
 	Issues       []string
 	SevereIssues []string
+	Stats        subtitleQCStats
+}
+
+type subtitleQCStats struct {
+	CueCount                int
+	MaxCPS                  float64
+	P95CPS                  float64
+	HighCPSCues             int
+	ShortDurationCues       int
+	LongDurationCues        int
+	OverlongLineCues        int
+	UnbalancedLineBreakCues int
+	TooManyLineCues         int
 }
 
 func validateCues(cues []srtutil.Cue, videoSeconds float64) []string {
@@ -41,6 +56,7 @@ func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationRe
 		return validationResult{Issues: []string{"empty_subtitle_file"}, SevereIssues: []string{"empty_subtitle_file"}}
 	}
 
+	stats := calculateSubtitleQCStats(cues)
 	seen := make(map[string]bool)
 	severeSeen := make(map[string]bool)
 	var issues []string
@@ -87,11 +103,8 @@ func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationRe
 			addIssue("unbalanced_line_breaks")
 		}
 		duration := cue.End - cue.Start
-		if duration > 0 {
-			chars := utf8.RuneCountInString(strings.Join(lines, " "))
-			if float64(chars)/duration > maxSubtitleReadingSpeed {
-				addIssue("high_reading_speed")
-			}
+		if cueReadingSpeed(cue) > maxSubtitleReadingSpeed {
+			addIssue("high_reading_speed")
 		}
 		if strings.TrimSpace(cue.Text) != "" {
 			if duration > 0 && duration < minSubtitleCueDuration {
@@ -109,7 +122,79 @@ func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationRe
 		}
 	}
 
-	return validationResult{Issues: issues, SevereIssues: severe}
+	return validationResult{Issues: issues, SevereIssues: severe, Stats: stats}
+}
+
+func calculateSubtitleQCStats(cues []srtutil.Cue) subtitleQCStats {
+	stats := subtitleQCStats{CueCount: len(cues)}
+	if len(cues) == 0 {
+		return stats
+	}
+	cpsValues := make([]float64, 0, len(cues))
+	for _, cue := range cues {
+		lines := splitCueLines(cue.Text)
+		if len(lines) > maxSubtitleLinesPerCue {
+			stats.TooManyLineCues++
+		}
+		if hasOverlongLine(lines) {
+			stats.OverlongLineCues++
+		}
+		if hasUnbalancedLineBreak(lines) {
+			stats.UnbalancedLineBreakCues++
+		}
+
+		duration := cue.End - cue.Start
+		if strings.TrimSpace(cue.Text) != "" {
+			if duration > 0 && duration < minSubtitleCueDuration {
+				stats.ShortDurationCues++
+			}
+			if duration > maxSubtitleCueDuration {
+				stats.LongDurationCues++
+			}
+		}
+
+		cps := cueReadingSpeed(cue)
+		cpsValues = append(cpsValues, cps)
+		if cps > stats.MaxCPS {
+			stats.MaxCPS = cps
+		}
+		if cps > maxSubtitleReadingSpeed {
+			stats.HighCPSCues++
+		}
+	}
+	sort.Float64s(cpsValues)
+	stats.P95CPS = percentileNearestRank(cpsValues, 0.95)
+	return stats
+}
+
+func cueReadingSpeed(cue srtutil.Cue) float64 {
+	duration := cue.End - cue.Start
+	if duration <= 0 {
+		return 0
+	}
+	lines := splitCueLines(cue.Text)
+	chars := utf8.RuneCountInString(strings.Join(lines, " "))
+	return float64(chars) / duration
+}
+
+func percentileNearestRank(sortedValues []float64, percentile float64) float64 {
+	if len(sortedValues) == 0 {
+		return 0
+	}
+	if percentile <= 0 {
+		return sortedValues[0]
+	}
+	if percentile >= 1 {
+		return sortedValues[len(sortedValues)-1]
+	}
+	idx := int(math.Ceil(percentile*float64(len(sortedValues)))) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sortedValues) {
+		idx = len(sortedValues) - 1
+	}
+	return sortedValues[idx]
 }
 
 func splitCueLines(text string) []string {

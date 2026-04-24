@@ -49,8 +49,8 @@ self-contained and focused on a single domain area.
 - MakeMKV robot format -> DESIGN_STAGES.md Section 1.1.1
 - Audio track selection -> DESIGN_INFRASTRUCTURE.md Section 4.5
 - Shared transcription service -> DESIGN_INFRASTRUCTURE.md Section 9
-- Forced subtitle timing -> DESIGN_STAGES.md Section 6.4.2
-- Subtitle candidate ranking -> DESIGN_STAGES.md Section 6.5
+- Forced subtitle timing -> DESIGN_STAGES.md Section 6.6.2
+- Subtitle candidate ranking -> DESIGN_STAGES.md Section 6.7
 - Go package tree -> DESIGN_PACKAGES.md Section 1
 - Dependency layer rules -> DESIGN_PACKAGES.md Section 2
 - Test double interfaces -> DESIGN_TESTING.md Section 2

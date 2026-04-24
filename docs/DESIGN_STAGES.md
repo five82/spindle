@@ -759,7 +759,10 @@ stream counts after commentary handling.
    applying subtitle-only filtering, Stable-TS regrouping/formatting, and a
    final display-only readability pass (fallback cue splitting/wrapping plus
    limited gap-aware timing expansion for short/high-CPS cues) in the
-   `subtitle` package.
+   `subtitle` package. This display formatting may split, wrap, and retime cues
+   for readability, and it prefers readable display boundaries over exact
+   preservation of WhisperX segment boundaries. It does not rewrite,
+   paraphrase, or grammatically correct transcript content.
 9. **Formatter failure is explicit**: subtitle formatting failure marks that
    episode subtitle job failed; no permanent raw-SRT compatibility path is kept.
 10. **Duration source**: subtitle filtering/validation use actual encoded-media
@@ -818,8 +821,8 @@ Returns a list of issue strings (empty = passed):
 | Too many lines | cue has > 2 non-empty lines | `too_many_lines` |
 | Overlong line | any cue line exceeds 42 characters | `line_too_long` |
 | Unbalanced line break | 2-line cue has strongly imbalanced line lengths | `unbalanced_line_breaks` |
-| High reading speed | cue text / duration > 25 CPS | `high_reading_speed` |
-| Short cue duration | non-empty cue duration < 0.5s | `short_cue_duration` |
+| High reading speed | cue text / duration > 20 CPS | `high_reading_speed` |
+| Short cue duration | non-empty cue duration < 5/6s (~0.833s) | `short_cue_duration` |
 | Long cue duration | non-empty cue duration > 7s | `long_cue_duration` |
 | Low-information long cue | very short dialogue held for an unusually long time | `low_information_long_cue` |
 | Overlap | cue starts before previous cue ends | `overlapping_cues` |
@@ -830,11 +833,46 @@ Duration check is asymmetric: subtitles shorter than video are allowed up to
 Validation severity is split into two outcomes:
 
 - **Review issues**: appended to review reasons and subtitle-generation records.
+  High-CPS and short-duration cues remain review/QC issues because rapid
+  dialogue is not always repairable without creating overlaps or changing text.
 - **Severe issues**: subtitle generation for that episode fails and MKV muxing is
   skipped. Severe issues currently include empty output, overlapping cues, and
   low-information long cues that indicate likely hallucinated display output.
 
-### 6.4 Progress Reporting
+SRT validation logs an aggregate QC summary at INFO for every formatted display
+subtitle. The summary includes total cues, max CPS, p95 CPS, cues over 20 CPS,
+cues under 5/6s, cues over 7s, overlong-line cues, unbalanced two-line cues,
+too-many-line cues, split cues, wrapped cues, and retimed cues.
+
+### 6.4 Display Subtitle Style Profile
+
+Spindle's generated primary display subtitle is dialogue-first. It follows a
+simple practical style profile derived from Netflix/general timed-text guidance
+where that guidance is useful for a home Jellyfin workflow:
+
+- Keep one line when text fits within 42 characters.
+- Use two lines only when needed.
+- Prefer breakpoints after punctuation.
+- Prefer breakpoints before conjunctions and common prepositions.
+- Prefer balanced or slightly bottom-heavy two-line shapes.
+- Avoid one/two-word top lines when a reasonable alternative exists.
+- Avoid splitting simple grammatical units when cheap to detect, including
+  article + noun, determiner + noun, first + last names, subject pronoun + verb,
+  auxiliary/negation + verb, and prepositional phrases.
+
+These are lightweight heuristic preferences, not a parser. Do not add external
+NLP dependencies for line breaking.
+
+Generated primary subtitles are not full SDH/caption tracks. The generic
+pipeline does not attempt automatic speaker IDs, sound effects, lyric
+classification, or broad lyric removal. WhisperX-rendered background/end-credit
+lyrics are suspicious when emitted as ordinary dialogue without music-note or
+italic context, but automatic removal is too risky for musicals, performances,
+diegetic singing, karaoke, music documentaries, and plot-relevant songs. Keep
+existing high-confidence hallucination/junk filters; leave lyric judgement to
+manual subtitle audit.
+
+### 6.5 Progress Reporting
 
 Subtitle generation persists **aggregate whole-stage subtitle progress**. Each
 subtitle job contributes to the overall percent, and transcription phase
@@ -843,12 +881,12 @@ extraction and transcription. Completed subtitled assets are persisted after
 each job so API consumers can advance per-episode subtitle counts while the
 stage is active.
 
-### 6.5 OpenSubtitles Forced Subs
+### 6.6 OpenSubtitles Forced Subs
 
 When `opensubtitles_enabled` and the disc has a forced subtitle track indicator:
 1. Search OpenSubtitles for forced/foreign-parts-only subtitles matching TMDB ID.
 2. **SRT cleaning**: Downloaded subtitles are cleaned of ad patterns before use
-   (see Section 6.4.1).
+   (see Section 6.6.1).
 3. Store forced subtitle as additional SRT sidecar.
 
 When any gate condition is not met, log a `forced_subtitle_search` skip decision
@@ -859,7 +897,7 @@ at INFO with the specific reason: "opensubtitles client unavailable",
 Returns granular reason strings: "configuration unavailable",
 "opensubtitles_enabled is false", "opensubtitles_api_key not set".
 
-#### 6.4.1 SRT Cleaning
+#### 6.6.1 SRT Cleaning
 
 `CleanSRT()` removes advertisement cues and normalizes spacing in downloaded
 SRT subtitles. Applied to all OpenSubtitles downloads before use.
@@ -887,14 +925,14 @@ trimmed per line. Returns `CleanStats` with `RemovedCues` count.
 numbers, timestamps) and returns only dialogue text, one line per cue. Used
 by content ID and commentary detection for text analysis.
 
-#### 6.4.2 Forced Subtitle Timing
+#### 6.6.2 Forced Subtitle Timing
 
 No alignment is performed. Downloaded forced subtitles are used as-is.
 Most OpenSubtitles forced subs are already correctly timed for the source
 content. If timing drift becomes a problem in practice, add constant-offset
 correction first before considering a full linear transform.
 
-### 6.5 Forced Subtitle Candidate Ranking
+### 6.7 Forced Subtitle Candidate Ranking
 
 `rankForcedSubtitleCandidates()` selects the best forced subtitle file from
 OpenSubtitles search results. Content ID reference selection uses its own
@@ -910,7 +948,7 @@ in release name).
 same language preference, sort by download count descending (most downloaded
 = most vetted). Tiebreaker: lowest file ID (deterministic ordering).
 
-### 6.6 SRT Generation
+### 6.8 SRT Generation
 
 - **Canonical vs display artifacts**:
   - canonical WhisperX SRT/JSON artifacts live in the transcription cache/work
@@ -940,7 +978,7 @@ Examples:
 The organizing stage discovers these via base-name prefix matching (Section 7.3)
 and moves them alongside the MKV to the library.
 
-### 6.7 MKV Muxing
+### 6.9 MKV Muxing
 
 When `mux_into_mkv` is true:
 - Use `mkvmerge` to embed SRT subtitle tracks into the MKV container.
@@ -948,13 +986,13 @@ When `mux_into_mkv` is true:
 - Forced subtitle marked as forced track.
 - Original encoded file is replaced with muxed version.
 
-### 6.8 Subtitle Context
+### 6.10 Subtitle Context
 
 The subtitle stage reads metadata directly from the envelope's `metadata`
 section (title, media type, TMDB ID, year, season). No separate
 context struct or cross-stage attribute needed.
 
-### 6.9 Transcript Cache
+### 6.11 Transcript Cache
 
 The shared transcription service (DESIGN_INFRASTRUCTURE.md S9) uses
 content-stable cache keys (`disc_fingerprint:episode_key:audio_index`).
@@ -967,7 +1005,7 @@ The cache stores **canonical transcript artifacts only** (raw SRT + JSON).
 Formatted display subtitles are derived outputs and are not part of the
 cross-stage cache contract.
 
-### 6.10 Resume and Failure Isolation
+### 6.12 Resume and Failure Isolation
 
 - **Resume support**: Episodes whose subtitle asset is already completed
   (`IsCompleted()`) are skipped. Failed assets are re-attempted without
@@ -1170,7 +1208,7 @@ decision types each stage produces. Constants are defined in
 | `transcription_cache` | `hit`, `miss` | Transcription cache lookup |
 | `subtitle_formatting` | `formatted`, `failed` | Stable-TS display subtitle formatting |
 | `hallucination_filter` | `filtered` | WhisperX hallucination removal |
-| `srt_validation` | issue summary | SRT quality validation |
+| `srt_validation` | `qc_summary`, issue summary | SRT quality validation and aggregate QC metrics |
 | `subtitle_mux` | `skipped` | MKV muxing decision |
 | `forced_subtitle_search` | `skipped` | Forced subtitle search gate |
 | `forced_subtitle_ranking` | `selected` | Forced subtitle best pick |
