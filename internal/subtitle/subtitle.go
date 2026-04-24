@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,6 +29,8 @@ import (
 )
 
 var inspectSubtitleMedia = ffprobe.Inspect
+
+var forcedSubtitleGarbageReleasePattern = regexp.MustCompile(`(?i)(^|[^a-z0-9])(cam|camrip|hdcam|telesync|ts|hdts|telecine|tc|hdtc|screener|scr|dvdscr)([^a-z0-9]|$)`)
 
 // Handler implements stage.Handler for subtitle generation.
 type Handler struct {
@@ -73,7 +76,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	keys := env.AssetKeys()
 	var (
-		records     []ripspec.SubtitleGenRecord
 		attempted   int
 		succeeded   int
 		failedCount int
@@ -245,7 +247,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			ValidationIssues: validation.Issues,
 		}
 		if len(validation.SevereIssues) > 0 {
-			records = append(records, record)
+			upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
 			logger.Warn("subtitle validation failed",
 				"decision_type", logs.DecisionSRTValidation,
 				"decision_result", "failed",
@@ -278,7 +280,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			)
 		}
 
-		records = append(records, record)
+		upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
 
 		srtPath := formatting.DisplayPath
 		subtitledPath := asset.Path
@@ -317,7 +319,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	env.Attributes.SubtitleGenerationResults = records
 	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
 		return err
 	}
@@ -413,6 +414,70 @@ func (h *Handler) recordSubtitleFailure(
 	_ = queue.PersistRipSpec(ctx, h.store, item, env)
 }
 
+func upsertSubtitleGenRecord(records *[]ripspec.SubtitleGenRecord, record ripspec.SubtitleGenRecord) {
+	for i := range *records {
+		if strings.EqualFold((*records)[i].EpisodeKey, record.EpisodeKey) {
+			(*records)[i] = record
+			return
+		}
+	}
+	*records = append(*records, record)
+}
+
+func rankForcedSubtitleCandidates(results []opensubtitles.SubtitleResult, preferredLanguages []string) (int, bool) {
+	preferredLanguages = language.NormalizeList(preferredLanguages)
+	if len(preferredLanguages) == 0 {
+		preferredLanguages = []string{"en"}
+	}
+
+	bestIndex := -1
+	for i, result := range results {
+		if !result.Attributes.ForeignPartsOnly || forcedSubtitleGarbageSource(result) {
+			continue
+		}
+		if bestIndex < 0 || forcedSubtitleCandidateBetter(result, results[bestIndex], preferredLanguages) {
+			bestIndex = i
+		}
+	}
+	return bestIndex, bestIndex >= 0
+}
+
+func forcedSubtitleCandidateBetter(candidate, incumbent opensubtitles.SubtitleResult, preferredLanguages []string) bool {
+	candidateRank := forcedSubtitleLanguageRank(candidate.Attributes.Language, preferredLanguages)
+	incumbentRank := forcedSubtitleLanguageRank(incumbent.Attributes.Language, preferredLanguages)
+	if candidateRank != incumbentRank {
+		return candidateRank < incumbentRank
+	}
+	if candidate.Attributes.DownloadCount != incumbent.Attributes.DownloadCount {
+		return candidate.Attributes.DownloadCount > incumbent.Attributes.DownloadCount
+	}
+	return firstForcedSubtitleFileID(candidate) < firstForcedSubtitleFileID(incumbent)
+}
+
+func forcedSubtitleLanguageRank(subtitleLanguage string, preferredLanguages []string) int {
+	code := language.ToISO2(subtitleLanguage)
+	if code == "" {
+		code = strings.ToLower(strings.TrimSpace(subtitleLanguage))
+	}
+	for i, preferred := range preferredLanguages {
+		if code == preferred {
+			return i
+		}
+	}
+	return len(preferredLanguages)
+}
+
+func firstForcedSubtitleFileID(result opensubtitles.SubtitleResult) int {
+	if len(result.Attributes.Files) == 0 {
+		return int(^uint(0) >> 1)
+	}
+	return result.Attributes.Files[0].FileID
+}
+
+func forcedSubtitleGarbageSource(result opensubtitles.SubtitleResult) bool {
+	return forcedSubtitleGarbageReleasePattern.MatchString(result.Attributes.Release)
+}
+
 // tryForcedSubs searches OpenSubtitles for forced subtitle tracks and
 // downloads the best match if found. The record's OpenSubtitlesDecision
 // field is updated with the outcome.
@@ -458,38 +523,33 @@ func (h *Handler) tryForcedSubs(
 		return
 	}
 
-	// Find the best forced-only subtitle by download count.
-	var best *opensubtitles.SubtitleResult
-	for i := range results {
-		r := &results[i]
-		if !r.Attributes.ForeignPartsOnly {
-			continue
-		}
-		if best == nil || r.Attributes.DownloadCount > best.Attributes.DownloadCount {
-			best = r
-		}
-	}
+	bestIndex, hasBest := rankForcedSubtitleCandidates(results, languages)
 
-	for _, r := range results {
+	for i, r := range results {
 		var result string
-		if !r.Attributes.ForeignPartsOnly {
+		switch {
+		case !r.Attributes.ForeignPartsOnly || forcedSubtitleGarbageSource(r):
 			result = "skipped"
-		} else if best != nil && r.ID == best.ID {
+		case hasBest && i == bestIndex:
 			result = "selected"
-		} else {
+		default:
 			result = "candidate"
 		}
 		logger.Info("forced subtitle candidate",
 			"decision_type", logs.DecisionSubtitleRank,
 			"decision_result", result,
 			"foreign_parts_only", r.Attributes.ForeignPartsOnly,
+			"language", r.Attributes.Language,
 			"downloads", r.Attributes.DownloadCount,
 			"files", len(r.Attributes.Files),
+			"release", r.Attributes.Release,
 			"episode_key", key,
 		)
 	}
 
-	if best != nil {
+	var best *opensubtitles.SubtitleResult
+	if hasBest {
+		best = &results[bestIndex]
 		logger.Info("forced subtitle candidate selected",
 			"decision_type", logs.DecisionForcedSubtitleRanking,
 			"decision_result", "selected",

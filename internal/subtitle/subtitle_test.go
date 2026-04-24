@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/transcription"
 )
@@ -106,6 +107,73 @@ func TestAssetKeys_TVNoEpisodes(t *testing.T) {
 	if len(keys) != 0 {
 		t.Fatalf("expected 0 keys for TV with no episodes, got %d", len(keys))
 	}
+}
+
+func TestUpsertSubtitleGenRecordReplacesExisting(t *testing.T) {
+	records := []ripspec.SubtitleGenRecord{
+		{EpisodeKey: "S01E01", SubtitlePath: "old.srt", Language: "en"},
+		{EpisodeKey: "S01E02", SubtitlePath: "keep.srt", Language: "en"},
+	}
+
+	upsertSubtitleGenRecord(&records, ripspec.SubtitleGenRecord{EpisodeKey: "s01e01", SubtitlePath: "new.srt", Language: "en"})
+
+	if len(records) != 2 {
+		t.Fatalf("len(records) = %d, want 2", len(records))
+	}
+	if records[0].SubtitlePath != "new.srt" {
+		t.Fatalf("record was not replaced: %+v", records[0])
+	}
+	if records[1].SubtitlePath != "keep.srt" {
+		t.Fatalf("unrelated record changed: %+v", records[1])
+	}
+}
+
+func TestRankForcedSubtitleCandidates(t *testing.T) {
+	mkResult := func(id, lang, release string, downloads, fileID int) opensubtitles.SubtitleResult {
+		return opensubtitles.SubtitleResult{
+			ID: id,
+			Attributes: opensubtitles.SubtitleAttributes{
+				Language:         lang,
+				Release:          release,
+				DownloadCount:    downloads,
+				ForeignPartsOnly: true,
+				Files:            []opensubtitles.SubtitleFile{{FileID: fileID}},
+			},
+		}
+	}
+
+	t.Run("prefers configured language before downloads", func(t *testing.T) {
+		results := []opensubtitles.SubtitleResult{
+			mkResult("spanish", "es", "BluRay", 500, 20),
+			mkResult("english", "en", "BluRay", 50, 30),
+		}
+		idx, ok := rankForcedSubtitleCandidates(results, []string{"en", "es"})
+		if !ok || idx != 1 {
+			t.Fatalf("rankForcedSubtitleCandidates() = %d, %v; want 1, true", idx, ok)
+		}
+	})
+
+	t.Run("filters garbage release", func(t *testing.T) {
+		results := []opensubtitles.SubtitleResult{
+			mkResult("cam", "en", "CAM", 500, 20),
+			mkResult("bluray", "en", "BluRay", 50, 30),
+		}
+		idx, ok := rankForcedSubtitleCandidates(results, []string{"en"})
+		if !ok || idx != 1 {
+			t.Fatalf("rankForcedSubtitleCandidates() = %d, %v; want 1, true", idx, ok)
+		}
+	})
+
+	t.Run("uses file id tiebreaker", func(t *testing.T) {
+		results := []opensubtitles.SubtitleResult{
+			mkResult("later", "en", "BluRay", 50, 30),
+			mkResult("earlier", "en", "BluRay", 50, 20),
+		}
+		idx, ok := rankForcedSubtitleCandidates(results, []string{"en"})
+		if !ok || idx != 1 {
+			t.Fatalf("rankForcedSubtitleCandidates() = %d, %v; want 1, true", idx, ok)
+		}
+	})
 }
 
 func TestResolveSubtitleVideoDuration(t *testing.T) {
