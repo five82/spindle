@@ -854,12 +854,12 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			wantReasonByID: map[int]string{0: "combined_double_episode_candidate", 1: "runtime_cluster_extra", 2: "runtime_cluster_extra", 3: "runtime_cluster_extra"},
 		},
 		{
-			// TNG S1 D1 real disc layout: two viable double candidates
-			// (multi-segment composite 00027.mpls and single-segment
-			// precomposed 00040.mpls), both ~91min. The single-segment
-			// playlist must win because seamless-branch composites have
-			// been observed to silently fail during rip.
-			name:           "prefers single-segment playlist when two doubles qualify",
+			// TNG S1 D1 real disc layout: 00027.mpls is a play-all
+			// segment-union playlist for two regular episodes, while
+			// 00040.mpls is an independent feature-length pilot. Keep the
+			// pilot plus the two regular episodes rather than treating the
+			// independent title as an unproven alternate encoding.
+			name:           "keeps independent double and regular episodes when play-all qualifies",
 			minTitleLength: 120,
 			titles: []ripspec.Title{
 				{ID: 0, Duration: 5464, SegmentCount: 3, SegmentMap: "1,2,64", Playlist: "00027.mpls"},
@@ -868,15 +868,15 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 				{ID: 3, Duration: 5481, SegmentCount: 1, SegmentMap: "0", Playlist: "00040.mpls"},
 				{ID: 4, Duration: 140, SegmentCount: 2, SegmentMap: "29,30", Playlist: "00013.mpls"},
 			},
-			wantIDs:        []int{3},
+			wantIDs:        []int{3, 1, 2},
 			wantAmbiguous:  false,
 			wantDoubleLong: 2,
-			wantExtras:     4,
+			wantExtras:     2,
 			wantReasonByID: map[int]string{
-				3: "combined_double_episode_candidate",
+				3: "probable_double_episode_candidate",
 				0: "runtime_cluster_extra",
-				1: "runtime_cluster_extra",
-				2: "runtime_cluster_extra",
+				1: "primary_runtime_cluster",
+				2: "primary_runtime_cluster",
 				4: "runtime_cluster_extra",
 			},
 		},
@@ -964,22 +964,22 @@ func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{SeasonNumber: 1},
 		Titles: []ripspec.Title{
-			{ID: 0, Duration: 91*60 + 4, SegmentMap: "01000.m2ts"},
-			{ID: 1, Duration: 45*60 + 30},
-			{ID: 2, Duration: 45*60 + 34},
-			{ID: 3, Duration: 91*60 + 21, SegmentMap: "01000.m2ts"},
-			{ID: 4, Duration: 2*60 + 20},
-			{ID: 5, Duration: 2*60 + 39},
-			{ID: 6, Duration: 2*60 + 39},
-			{ID: 7, Duration: 2*60 + 20},
-			{ID: 8, Duration: 2*60 + 20},
-			{ID: 9, Duration: 2*60 + 20},
-			{ID: 10, Duration: 2*60 + 20},
-			{ID: 11, Duration: 2*60 + 20},
-			{ID: 12, Duration: 4*60 + 7},
-			{ID: 13, Duration: 2*60 + 44},
-			{ID: 14, Duration: 23*60 + 46},
-			{ID: 15, Duration: 5 * 60},
+			{ID: 0, Duration: 5464, SegmentCount: 3, SegmentMap: "1,2,64", Playlist: "00027.mpls"},
+			{ID: 1, Duration: 2730, SegmentCount: 2, SegmentMap: "2,64", Playlist: "00042.mpls"},
+			{ID: 2, Duration: 2734, SegmentCount: 2, SegmentMap: "1,64", Playlist: "00041.mpls"},
+			{ID: 3, Duration: 5481, SegmentCount: 1, SegmentMap: "0", Playlist: "00040.mpls"},
+			{ID: 4, Duration: 140, SegmentCount: 2, SegmentMap: "29,30", Playlist: "00013.mpls"},
+			{ID: 5, Duration: 159, SegmentCount: 2, SegmentMap: "95,92", Playlist: "00107.mpls"},
+			{ID: 6, Duration: 159, SegmentCount: 2, SegmentMap: "94,92", Playlist: "00108.mpls"},
+			{ID: 7, Duration: 140, SegmentCount: 2, SegmentMap: "35,36", Playlist: "00015.mpls"},
+			{ID: 8, Duration: 140, SegmentCount: 2, SegmentMap: "33,34", Playlist: "00014.mpls"},
+			{ID: 9, Duration: 140, SegmentCount: 2, SegmentMap: "27,28", Playlist: "00083.mpls"},
+			{ID: 10, Duration: 140, SegmentCount: 2, SegmentMap: "31,32", Playlist: "00012.mpls"},
+			{ID: 11, Duration: 140, SegmentCount: 2, SegmentMap: "37,38", Playlist: "00011.mpls"},
+			{ID: 12, Duration: 247, SegmentCount: 1, SegmentMap: "83", Playlist: "00083.m2ts"},
+			{ID: 13, Duration: 164, SegmentCount: 1, SegmentMap: "79", Playlist: "00079.m2ts"},
+			{ID: 14, Duration: 1426, SegmentCount: 1, SegmentMap: "78", Playlist: "00078.m2ts"},
+			{ID: 15, Duration: 300, SegmentCount: 1, SegmentMap: "68", Playlist: "00068.m2ts"},
 		},
 	}
 	h.createEpisodePlaceholders(discardLogger(), env)
@@ -987,7 +987,7 @@ func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 	if len(env.Episodes) != 3 {
 		t.Fatalf("len(Episodes) = %d, want 3", len(env.Episodes))
 	}
-	wantTitleIDs := []int{0, 1, 2}
+	wantTitleIDs := []int{3, 1, 2}
 	for i, ep := range env.Episodes {
 		if ep.TitleID != wantTitleIDs[i] {
 			t.Fatalf("Episodes[%d].TitleID = %d, want %d", i, ep.TitleID, wantTitleIDs[i])

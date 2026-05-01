@@ -92,8 +92,9 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 	clusters := buildTVTitleClusters(sorted)
 	primary := choosePrimaryTVTitleCluster(clusters)
 	selectedByIndex := make(map[int]string, len(primary.candidates))
+	selectedReasonByTitleID := make(map[int]string, len(primary.candidates))
 	for _, candidate := range primary.candidates {
-		selectedByIndex[candidate.decisionIndex] = "primary_runtime_cluster"
+		selectTVCandidate(selectedByIndex, selectedReasonByTitleID, candidate, "primary_runtime_cluster")
 	}
 
 	qualifyingDoubleCandidates := make([]tvTitleCandidate, 0)
@@ -120,22 +121,33 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 	slices.SortFunc(qualifyingDoubleCandidates, compareDoubleCandidatesByRipSafety)
 	result.AmbiguousLongCount = len(qualifyingDoubleCandidates)
 	combinedFamilyResolved := false
-	// chooseCombinedDoubleEpisodeTitle proves "these halves and some
-	// long candidate are the same pilot" via segment-union matching.
-	// Its match is used only as a family-detection signal — the actual
-	// rip target is the safest entry in the sorted double list, which
-	// may be a different encoding of the same pilot (e.g. a
-	// single-segment precomposed playlist sitting alongside a
-	// multi-segment composite).
-	if _, components, ok := chooseCombinedDoubleEpisodeTitle(primary.candidates, qualifyingDoubleCandidates); ok {
-		ripTarget := qualifyingDoubleCandidates[0]
-		selectedByIndex[ripTarget.decisionIndex] = "combined_double_episode_candidate"
-		for _, component := range components {
-			delete(selectedByIndex, component.decisionIndex)
+	// chooseCombinedDoubleEpisodeTitle proves that a long candidate is a
+	// segment-union playlist for two primary-cluster titles. Collapse the
+	// components only when that union candidate is the only double-length
+	// option. If another independent double-length title exists, keep the
+	// primary components and the independent double; otherwise a play-all
+	// playlist can hide real episodes on discs with an opening feature-length
+	// episode plus two regular episodes.
+	if combined, components, ok := chooseCombinedDoubleEpisodeTitle(primary.candidates, qualifyingDoubleCandidates); ok {
+		independentDoubles := doubleCandidatesExcluding(qualifyingDoubleCandidates, combined)
+		if len(independentDoubles) == 0 {
+			selectTVCandidate(selectedByIndex, selectedReasonByTitleID, combined, "combined_double_episode_candidate")
+			for _, component := range components {
+				delete(selectedByIndex, component.decisionIndex)
+				delete(selectedReasonByTitleID, component.title.ID)
+			}
+		} else {
+			// The segment-union title is a play-all playlist for the primary
+			// episodes when another independent double-length title is present.
+			// Keep the single episodes and the independent double instead of
+			// assuming the independent title is an unproven alternate encoding.
+			for _, candidate := range independentDoubles {
+				selectTVCandidate(selectedByIndex, selectedReasonByTitleID, candidate, "probable_double_episode_candidate")
+			}
 		}
 		combinedFamilyResolved = true
 	} else if len(qualifyingDoubleCandidates) > 0 {
-		selectedByIndex[qualifyingDoubleCandidates[0].decisionIndex] = "probable_double_episode_candidate"
+		selectTVCandidate(selectedByIndex, selectedReasonByTitleID, qualifyingDoubleCandidates[0], "probable_double_episode_candidate")
 	}
 
 	for _, cluster := range clusters {
@@ -158,6 +170,9 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		}
 	}
 	slices.SortFunc(result.SelectedTitles, func(a, b ripspec.Title) int {
+		if priorityA, priorityB := selectedTitleOrderPriority(selectedReasonByTitleID[a.ID]), selectedTitleOrderPriority(selectedReasonByTitleID[b.ID]); priorityA != priorityB {
+			return priorityA - priorityB
+		}
 		return a.ID - b.ID
 	})
 
@@ -184,12 +199,10 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "extras_dominate_candidates")
 	}
-	// Only flag ambiguity when we could not resolve the combined family
-	// via segment-union matching. When the combined match succeeded,
-	// additional qualifying doubles are alternate encodings of the
-	// same episode (e.g. a multi-segment composite alongside a
-	// single-segment precomposed playlist) that were deliberately
-	// deselected — not a real ambiguity.
+	// Only flag ambiguity when we could not resolve the double-length
+	// relationship. A segment-union match is resolved either by collapsing
+	// split components into the union title or by keeping independent
+	// double-length content alongside the primary single episodes.
 	if len(qualifyingDoubleCandidates) >= 2 && !combinedFamilyResolved {
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "multiple_double_episode_candidates")
@@ -198,11 +211,37 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 	return result
 }
 
+func selectTVCandidate(selectedByIndex map[int]string, selectedReasonByTitleID map[int]string, candidate tvTitleCandidate, reason string) {
+	selectedByIndex[candidate.decisionIndex] = reason
+	selectedReasonByTitleID[candidate.title.ID] = reason
+}
+
+func doubleCandidatesExcluding(candidates []tvTitleCandidate, excluded tvTitleCandidate) []tvTitleCandidate {
+	result := make([]tvTitleCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.decisionIndex == excluded.decisionIndex {
+			continue
+		}
+		result = append(result, candidate)
+	}
+	return result
+}
+
+func selectedTitleOrderPriority(reason string) int {
+	switch reason {
+	case "combined_double_episode_candidate", "probable_double_episode_candidate":
+		return 0
+	case "primary_runtime_cluster":
+		return 1
+	default:
+		return 2
+	}
+}
+
 // compareDoubleCandidatesByRipSafety orders qualifying double-episode
-// candidates so that the safest-to-rip variant comes first:
-//  1. Fewer playlist segments (prefer single-segment precomposed
-//     playlists over seamless-branched composites).
-//  2. Lower playlist number (typically the primary authoring).
+// candidates so that deterministic choices prefer simpler playlists first:
+//  1. Fewer playlist segments.
+//  2. Lower playlist number.
 //  3. Lower title ID.
 //  4. Shorter duration (stable final tiebreak).
 func compareDoubleCandidatesByRipSafety(a, b tvTitleCandidate) int {
