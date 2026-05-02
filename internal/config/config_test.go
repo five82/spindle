@@ -252,16 +252,12 @@ func TestAutoDerivedPaths(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "/tmp/test-cache")
 	// Force os.UserCacheDir to use our env (it reads XDG_CACHE_HOME on Linux).
 	opensubDir := cfg.OpenSubtitlesCacheDir()
-	whisperDir := cfg.WhisperXCacheDir()
 	ripDir := cfg.RipCacheDir()
 	discIDPath := cfg.DiscIDCachePath()
 
 	// These use cacheBaseDir() which calls os.UserCacheDir().
 	if !strings.Contains(opensubDir, "opensubtitles") {
 		t.Errorf("OpenSubtitlesCacheDir should contain 'opensubtitles', got %q", opensubDir)
-	}
-	if !strings.Contains(whisperDir, "whisperx") {
-		t.Errorf("WhisperXCacheDir should contain 'whisperx', got %q", whisperDir)
 	}
 	if !strings.Contains(ripDir, "rips") {
 		t.Errorf("RipCacheDir should contain 'rips', got %q", ripDir)

@@ -90,7 +90,7 @@ No hard coverage targets. Focus testing effort on:
 
 **Subtitle-specific expectations:**
 - Test that canonical transcript artifacts remain unchanged when subtitle formatting runs.
-- Test that display subtitle output is derived separately from canonical cached transcript artifacts.
+- Test that display subtitle output is derived separately from canonical WhisperX artifacts.
 - Add cross-stage regression coverage so subtitle formatting changes cannot silently change episode-identification inputs.
 - Test the embedded WhisperX wrapper contract: explicit transcription profile, VAD-method forwarding, explicit VAD/decode profile arguments, and confidence-preserving canonical JSON handling.
 - Test that subtitle filtering/validation prefer actual media duration over transcript-tail duration, with transcript duration used only as fallback.

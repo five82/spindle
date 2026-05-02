@@ -184,7 +184,6 @@ AudioAnalysisData {
 SubtitleGenRecord {
     EpisodeKey            string
     Source                string  // "whisperx" or "opensubtitles"
-    Cached                bool
     SubtitlePath          string
     Segments              int
     Language              string

@@ -175,11 +175,6 @@ func (c *Config) OpenSubtitlesCacheDir() string {
 	return filepath.Join(cacheBaseDir(), "opensubtitles")
 }
 
-// WhisperXCacheDir returns the auto-derived WhisperX transcription cache directory.
-func (c *Config) WhisperXCacheDir() string {
-	return filepath.Join(cacheBaseDir(), "whisperx")
-}
-
 // RipCacheDir returns the auto-derived rip cache directory.
 func (c *Config) RipCacheDir() string {
 	return filepath.Join(cacheBaseDir(), "rips")

@@ -129,7 +129,6 @@ func newDebugCommentaryCmd() *cobra.Command {
 				cfg.Subtitles.WhisperXCUDAEnabled,
 				cfg.Subtitles.WhisperXVADMethod,
 				cfg.Subtitles.WhisperXHFToken,
-				cfg.WhisperXCacheDir(),
 				nil,
 			)
 
@@ -151,15 +150,11 @@ func newDebugCommentaryCmd() *cobra.Command {
 				fmt.Printf("%s %d (%s)\n", labelStyle("Channels:"), candidate.Channels, candidate.ChannelLayout)
 
 				// Stereo similarity check.
-				primaryKey := fmt.Sprintf("%s-main-audio0", debugFP)
-				candidateKey := fmt.Sprintf("%s-main-audio%d", debugFP, candidateAudioIdx)
-
 				primaryResult, pErr := transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 					InputPath:  path,
 					AudioIndex: 0,
 					Language:   "en",
 					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-0", debugFP),
-					ContentKey: primaryKey,
 				})
 				if pErr != nil {
 					logger.Warn("primary transcription failed", "error", pErr)
@@ -172,7 +167,6 @@ func newDebugCommentaryCmd() *cobra.Command {
 					AudioIndex: candidateAudioIdx,
 					Language:   "en",
 					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-%d", debugFP, candidateAudioIdx),
-					ContentKey: candidateKey,
 				})
 				if cErr != nil {
 					logger.Warn("candidate transcription failed", "error", cErr)

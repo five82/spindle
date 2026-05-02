@@ -125,7 +125,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ripCacheStore = ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 	}
 
-	transcriber := transcription.New(cfg.Subtitles.WhisperXModel, cfg.Subtitles.WhisperXCUDAEnabled, cfg.Subtitles.WhisperXVADMethod, cfg.Subtitles.WhisperXHFToken, cfg.WhisperXCacheDir(), logger)
+	transcriber := transcription.New(cfg.Subtitles.WhisperXModel, cfg.Subtitles.WhisperXCUDAEnabled, cfg.Subtitles.WhisperXVADMethod, cfg.Subtitles.WhisperXHFToken, logger)
 
 	// Create disc monitor (if optical drive configured).
 	// Created before stage handlers so the ripper can pause/resume detection.

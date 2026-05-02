@@ -229,9 +229,9 @@ Behavior:
 - After Stable-TS renders the display SRT, Spindle may apply a final
   display-only readability repair pass that fallback-splits/re-wraps cue text
   and expands short cues into nearby silence gaps when that improves reading
-  speed without mutating canonical cached transcript artifacts.
-- Subtitle formatting consumes derived working JSON; canonical cached transcript
-  artifacts remain unchanged.
+  speed without mutating canonical WhisperX artifacts.
+- Subtitle formatting consumes derived working JSON; canonical WhisperX artifacts
+  in the stage work area remain unchanged.
 - Subtitle filtering and validation use the actual encoded-media duration when
   available; transcript-tail duration is only a fallback.
 - If formatting fails, that subtitle job fails explicitly rather than silently

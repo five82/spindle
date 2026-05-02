@@ -247,7 +247,6 @@ func newGensubtitleCmd() *cobra.Command {
 				cfg.Subtitles.WhisperXCUDAEnabled,
 				cfg.Subtitles.WhisperXVADMethod,
 				cfg.Subtitles.WhisperXHFToken,
-				cfg.WhisperXCacheDir(),
 				cmdLogger,
 			)
 
@@ -300,13 +299,7 @@ func newGensubtitleCmd() *cobra.Command {
 			if result.Duration > 0 {
 				fmt.Printf(", %s", formatContentDuration(result.Duration))
 			}
-			if result.Cached {
-				fmt.Print(" (cached)")
-			}
 			fmt.Println()
-			if result.Cached {
-				fmt.Println("  Using cached canonical transcript artifacts...")
-			}
 
 			displayPath := subtitle.DisplaySubtitlePath(filepath.Join(workDir, filepath.Base(file)), selectedAudio.Language)
 			finalSidecarPath := subtitle.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), selectedAudio.Language)

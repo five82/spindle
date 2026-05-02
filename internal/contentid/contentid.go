@@ -256,13 +256,11 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.I
 		if err != nil {
 			return nil, fmt.Errorf("select audio %s: %w", ep.Key, err)
 		}
-		contentKey := fmt.Sprintf("%s:%s:%d", item.DiscFingerprint, ep.Key, selectedAudio.Index)
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 			InputPath:  asset.Path,
 			AudioIndex: selectedAudio.Index,
 			Language:   selectedAudio.Language,
 			OutputDir:  workDir,
-			ContentKey: contentKey,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("transcribe %s: %w", ep.Key, err)

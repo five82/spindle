@@ -144,7 +144,6 @@ type AudioAnalysisData struct {
 type SubtitleGenRecord struct {
 	EpisodeKey            string   `json:"episode_key"`
 	Source                string   `json:"source"`
-	Cached                bool     `json:"cached,omitempty"`
 	SubtitlePath          string   `json:"subtitle_path"`
 	Segments              int      `json:"segments"`
 	DurationSec           float64  `json:"duration_sec,omitempty"`

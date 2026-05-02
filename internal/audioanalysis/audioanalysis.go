@@ -335,15 +335,11 @@ func (h *Handler) stereoSimilarity(
 	primaryIdx, candidateIdx int,
 	fingerprint, epKey string,
 ) (float64, error) {
-	primaryKey := fmt.Sprintf("%s-%s-audio%d", fingerprint, epKey, primaryIdx)
-	candidateKey := fmt.Sprintf("%s-%s-audio%d", fingerprint, epKey, candidateIdx)
-
 	primaryResult, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 		InputPath:  path,
 		AudioIndex: primaryIdx,
 		Language:   "en",
 		OutputDir:  tempOutputDir(fingerprint, epKey, primaryIdx),
-		ContentKey: primaryKey,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("transcribe primary: %w", err)
@@ -354,7 +350,6 @@ func (h *Handler) stereoSimilarity(
 		AudioIndex: candidateIdx,
 		Language:   "en",
 		OutputDir:  tempOutputDir(fingerprint, epKey, candidateIdx),
-		ContentKey: candidateKey,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("transcribe candidate: %w", err)
@@ -390,14 +385,12 @@ func (h *Handler) classifyTrack(
 		return nil
 	}
 
-	contentKey := fmt.Sprintf("%s-%s-audio%d", fingerprint, epKey, idx)
 	result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 		InputPath:  path,
 		AudioIndex: idx,
 		Language:   "en",
 		OutputDir:  tempOutputDir(fingerprint, epKey, idx),
 		Model:      h.cfg.Commentary.WhisperXModel,
-		ContentKey: contentKey,
 	})
 	if err != nil {
 		logger.Warn("commentary transcription failed, conservatively marking as commentary",

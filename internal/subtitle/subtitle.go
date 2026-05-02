@@ -124,14 +124,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			continue
 		}
 
-		contentKey := fmt.Sprintf("%s:%s:%d", item.DiscFingerprint, key, selectedAudio.Index)
 		workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
 		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 			InputPath:  asset.Path,
 			AudioIndex: selectedAudio.Index,
 			Language:   selectedAudio.Language,
 			OutputDir:  workDir,
-			ContentKey: contentKey,
 		}, func(phase transcription.Phase, elapsed time.Duration) {
 			item.ProgressPercent = overallSubtitlePercent(i, len(keys), subtitlePhasePercent(phase, elapsed))
 			switch phase {
@@ -157,7 +155,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"episode_key", key,
 			"segments", result.Segments,
 			"content_duration_s", result.Duration,
-			"cached", result.Cached,
 			"extract_time_ms", result.ExtractTime.Milliseconds(),
 			"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
 		)
@@ -252,7 +249,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		record := ripspec.SubtitleGenRecord{
 			EpisodeKey:       key,
 			Source:           "whisperx",
-			Cached:           result.Cached,
 			SubtitlePath:     formatting.DisplayPath,
 			Segments:         len(formattedCues),
 			DurationSec:      videoSeconds,

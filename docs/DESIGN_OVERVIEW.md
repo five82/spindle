@@ -418,8 +418,7 @@ On config load, `EnsureDirectories` creates:
 - `state_dir` (required, fail on error)
 - `review_dir` (required, fail on error)
 - `library_dir` (best-effort, don't fail -- storage may be offline)
-- Auto-derived cache directories as needed (rip cache, OpenSubtitles cache,
-  WhisperX cache)
+- Auto-derived cache directories as needed (rip cache, OpenSubtitles cache)
 
 ### 5.6 Configuration Sections
 
@@ -438,7 +437,6 @@ On config load, `EnsureDirectories` creates:
 
 **Auto-derived cache directories** (not configurable, all under `$XDG_CACHE_HOME/spindle/`):
 - OpenSubtitles cache: `$XDG_CACHE_HOME/spindle/opensubtitles`
-- WhisperX cache: `$XDG_CACHE_HOME/spindle/whisperx`
 - Rip cache: `$XDG_CACHE_HOME/spindle/rips` (when `rip_cache.enabled`)
 - Disc ID cache: `$XDG_CACHE_HOME/spindle/discid_cache.json` (when `disc_id_cache.enabled`)
 
@@ -647,8 +645,6 @@ $XDG_CACHE_HOME/spindle/
     {tmdb_id}/
       {season}/
         {episode}_{language}_{file_id}.srt
-  whisperx/               # WhisperX transcription cache
-    ...
 ```
 
 ### 6.4 State Directory

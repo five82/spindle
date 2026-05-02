@@ -1,36 +1,31 @@
-// Package transcription provides shared canonical WhisperX transcription with caching.
+// Package transcription provides shared canonical WhisperX transcription.
 package transcription
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/srtutil"
 )
 
-// Service provides WhisperX transcription with caching.
+// Service provides WhisperX transcription.
 type Service struct {
 	model       string
 	cudaEnabled bool
 	vadMethod   string
 	hfToken     string
-	cacheDir    string
 	logger      *slog.Logger
 }
 
 // New creates a transcription service.
-func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string, logger *slog.Logger) *Service {
+func New(model string, cudaEnabled bool, vadMethod, hfToken string, logger *slog.Logger) *Service {
 	logger = logs.Default(logger)
 	if model == "" {
 		model = "large-v3"
@@ -43,7 +38,6 @@ func New(model string, cudaEnabled bool, vadMethod, hfToken, cacheDir string, lo
 		cudaEnabled: cudaEnabled,
 		vadMethod:   vadMethod,
 		hfToken:     hfToken,
-		cacheDir:    cacheDir,
 		logger:      logger,
 	}
 }
@@ -55,7 +49,6 @@ type TranscribeRequest struct {
 	Language   string
 	OutputDir  string
 	Model      string // Override default model
-	ContentKey string // Content-stable cache identity
 }
 
 // Phase identifies a transcription progress phase.
@@ -77,7 +70,6 @@ type TranscribeResult struct {
 	JSONPath       string
 	Duration       float64 // transcript-tail duration from last SRT cue timestamp
 	Segments       int
-	Cached         bool
 	ExtractTime    time.Duration // time spent on ffmpeg audio extraction
 	TranscribeTime time.Duration // time spent on WhisperX
 }
@@ -92,16 +84,13 @@ type whisperXInvocation struct {
 	TranscriptionProfileName string
 }
 
-// Transcribe runs WhisperX transcription with caching.
+// Transcribe runs WhisperX transcription.
 //
 // Steps:
-//  1. Compute cache key.
-//  2. Check cache. If hit, return cached result.
-//  3. Extract audio via FFmpeg.
-//  4. Run WhisperX via uvx.
-//  5. Read SRT, count segments, parse duration.
-//  6. Store in cache.
-//  7. Return result.
+//  1. Extract audio via FFmpeg.
+//  2. Run WhisperX via uvx.
+//  3. Read SRT, count segments, parse duration.
+//  4. Return result.
 //
 // If progress is non-nil, it is called at the start and end of each phase.
 func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progress ...ProgressFunc) (*TranscribeResult, error) {
@@ -114,24 +103,6 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	if model == "" {
 		model = s.model
 	}
-
-	key := cacheKey(req, model)
-
-	// Check cache.
-	if result, ok := s.Lookup(key); ok {
-		s.logger.Info("transcription cache hit",
-			"decision_type", logs.DecisionTranscriptionCache,
-			"decision_result", "hit",
-			"decision_reason", fmt.Sprintf("key=%s segments=%d", key[:12], result.Segments),
-		)
-		result.Cached = true
-		return result, nil
-	}
-	s.logger.Info("transcription cache miss",
-		"decision_type", logs.DecisionTranscriptionCache,
-		"decision_result", "miss",
-		"decision_reason", fmt.Sprintf("key=%s", key[:12]),
-	)
 
 	// Ensure output directory exists.
 	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
@@ -213,16 +184,9 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		JSONPath:       jsonPath,
 		Duration:       duration,
 		Segments:       segments,
-		Cached:         false,
 		ExtractTime:    extractTime,
 		TranscribeTime: transcribeTime,
 	}
-
-	// Store in cache.
-	if err := s.Store(key, result); err != nil {
-		return nil, fmt.Errorf("cache store: %w", err)
-	}
-	s.logger.Debug("transcription result cached", "key", key[:12], "segments", result.Segments)
 
 	return result, nil
 }
@@ -265,91 +229,6 @@ func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language st
 		SpeechRegionsOnly:        true,
 		TranscriptionProfileName: transcriptionProfileID,
 	}
-}
-
-// cacheKey computes a deterministic cache key for a transcription request.
-// If ContentKey is non-empty, it is used for content-stable caching.
-// Otherwise, the input path and audio index are used as a fallback.
-func cacheKey(req TranscribeRequest, model string) string {
-	var input string
-	if req.ContentKey != "" {
-		input = req.ContentKey + "\x00" + model + "\x00" + req.Language + "\x00" + transcriptionProfileID
-	} else {
-		input = req.InputPath + "\x00" + strconv.Itoa(req.AudioIndex) + "\x00" + model + "\x00" + req.Language + "\x00" + transcriptionProfileID
-	}
-	h := sha256.Sum256([]byte(input))
-	return hex.EncodeToString(h[:])
-}
-
-// Lookup checks the cache for a previously stored canonical transcription result.
-// It returns the result and true if valid cached SRT and JSON artifacts exist
-// and the SRT has > 0 cues.
-func (s *Service) Lookup(key string) (*TranscribeResult, bool) {
-	dir := filepath.Join(s.cacheDir, key)
-	srtPath, jsonPath, ok := cacheArtifactPaths(dir)
-	if !ok {
-		return nil, false
-	}
-	segments, duration, err := analyzeSRT(srtPath)
-	if err != nil || segments == 0 {
-		return nil, false
-	}
-	return &TranscribeResult{
-		SRTPath:  srtPath,
-		JSONPath: jsonPath,
-		Duration: duration,
-		Segments: segments,
-	}, true
-}
-
-// Store copies canonical transcription artifacts into the cache directory under
-// the given key.
-func (s *Service) Store(key string, result *TranscribeResult) error {
-	dir := filepath.Join(s.cacheDir, key)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create cache dir: %w", err)
-	}
-	if err := copyCacheArtifact(result.SRTPath, dir, "srt"); err != nil {
-		return err
-	}
-	if err := copyCacheArtifact(result.JSONPath, dir, "json"); err != nil {
-		return err
-	}
-	return nil
-}
-
-func cacheArtifactPaths(dir string) (srtPath, jsonPath string, ok bool) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", "", false
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		switch {
-		case strings.HasSuffix(entry.Name(), ".srt"):
-			srtPath = path
-		case strings.HasSuffix(entry.Name(), ".json"):
-			jsonPath = path
-		}
-	}
-	if srtPath == "" || jsonPath == "" {
-		return "", "", false
-	}
-	return srtPath, jsonPath, true
-}
-
-func copyCacheArtifact(srcPath, dir, kind string) error {
-	if strings.TrimSpace(srcPath) == "" {
-		return fmt.Errorf("missing %s artifact path", kind)
-	}
-	dst := filepath.Join(dir, filepath.Base(srcPath))
-	if err := fileutil.CopyFile(srcPath, dst); err != nil {
-		return fmt.Errorf("cache %s artifact: %w", kind, err)
-	}
-	return nil
 }
 
 // analyzeSRT reads an SRT file once and returns both the segment count and

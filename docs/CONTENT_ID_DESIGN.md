@@ -148,16 +148,11 @@ For each ripped episode asset:
 4. Normalize plain text for fingerprinting
 5. Store the transcript path and fingerprint
 
-### 5.3 Cache identity
+### 5.3 Cache policy
 
-The transcription cache key must include:
-
-- disc fingerprint
-- episode key
-- selected audio-relative stream index
-
-This prevents collisions when the same file is transcribed from different audio
-tracks.
+Episode-identification transcripts are not persisted in a shared WhisperX cache.
+The matcher transcribes the current ripped asset directly so stale transcripts
+from earlier title-selection decisions cannot contaminate a retry.
 
 ---
 

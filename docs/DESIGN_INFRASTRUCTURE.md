@@ -789,11 +789,9 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*Trans
 | `Language` | string | Target language code |
 | `OutputDir` | string | Directory for output files |
 | `Model` | string | WhisperX model override (empty = default) |
-| `ContentKey` | string | Content-stable cache identity (see Section 9.3) |
 
 The service applies a shared embedded WhisperX wrapper/profile internally. That
-profile is not a user-facing request field, but it is part of cache identity so
-canonical-transcript behavior changes invalidate old cache entries.
+profile is not a user-facing request field.
 
 **TranscribeResult:**
 
@@ -803,46 +801,13 @@ canonical-transcript behavior changes invalidate old cache entries.
 | `JSONPath` | string | Path to canonical WhisperX JSON/alignment output |
 | `Duration` | float64 | Detected audio duration in seconds |
 | `Segments` | int | Number of SRT cues |
-| `Cached` | bool | True if result came from cache |
 
-### 9.3 Cache Strategy
+### 9.3 Cache Policy
 
-The cache uses **content-stable keys** so that transcripts survive across
-pipeline stages even when the input file path changes (e.g., ripped file
-during episode ID vs encoded file during subtitling — same audio content,
-different paths).
-
-Cache key computation:
-
-```
-key = hex(SHA-256( contentKey + "\x00" + model + "\x00" + language + "\x00" + transcription_profile_version ))
-```
-
-Where `contentKey` is a caller-supplied identity string that remains stable
-across pipeline stages for the same audio content. Callers must determine the
-primary audio stream first and include that selected audio-relative index in the
-key. Typical values:
-
-| Caller | `ContentKey` value |
-|--------|--------------------|
-| Episode ID | `{disc_fingerprint}:{episode_key}:{audio_index}` |
-| Audio analysis | `{disc_fingerprint}:{episode_key}:{audio_index}` |
-| Subtitles | `{disc_fingerprint}:{episode_key}:{audio_index}` |
-
-All three callers produce the same key for the same episode, so a transcript
-generated during episode ID is a cache hit during subtitling without any
-cross-stage plumbing or envelope attributes.
-
-When `ContentKey` is empty, the service falls back to a path-based key:
-`hex(SHA-256( inputPath + "\x00" + audioIndex + "\x00" + model + "\x00" + language + "\x00" + transcription_profile_version ))`.
-
-Cache directory: `$XDG_CACHE_HOME/spindle/whisperx/{cache_key}/`
-
-**Cache operations:**
-- `Lookup(key)`: Check for existing canonical transcription. Validates both SRT
-  and JSON artifacts exist, and the SRT has > 0 cues.
-- `Store(key, result)`: Copy canonical SRT and JSON artifacts to the cache
-  directory.
+The transcription service does not persist WhisperX outputs in a shared cache.
+Each caller transcribes its current input asset directly. This avoids stale
+transcript reuse when retries change title selection, episode keys, or stage
+assets. Canonical SRT/JSON artifacts are stage work products only.
 
 ### 9.4 Concurrency
 
@@ -878,12 +843,12 @@ including:
 
 After WhisperX completes:
 
-1. The transcription service stores **canonical transcript artifacts** only
-   (raw SRT + JSON/alignment output).
+1. The transcription service writes **canonical transcript artifacts** only
+   (raw SRT + JSON/alignment output) into the caller-provided work directory.
 2. Subtitle-specific hallucination filtering, Stable-TS formatting, and final
    display-SRT validation happen in the `subtitle` package, not in the shared
    transcription service.
 3. The subtitle stage prefers actual encoded-media duration for filtering and
    validation; transcript-tail duration is only a fallback.
 4. Formatted display subtitles are derived outputs and are not part of the
-   shared transcription cache contract.
+   shared transcription service contract.

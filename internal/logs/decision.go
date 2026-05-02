@@ -72,7 +72,6 @@ const (
 	DecisionTMDBSearch               = "tmdb_search"
 	DecisionTrackSelect              = "track_select"
 	DecisionTranscriptionAsset       = "transcription_asset"
-	DecisionTranscriptionCache       = "transcription_cache"
 	DecisionValidationFailureRoute   = "validation_failure_route"
 	DecisionYearSource               = "year_source"
 )
