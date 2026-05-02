@@ -120,8 +120,9 @@ Heuristics to determine if disc is movie or TV:
 4. After successful TMDB identification: write entry to disc ID cache.
 
 **Disc ID cache storage**:
-- Single JSON file at `disc_id_cache_path` (configured). Non-functional when
-  path is empty (all operations become no-ops).
+- Single JSON file at the auto-derived `Config.DiscIDCachePath()` location
+  (`$XDG_CACHE_HOME/spindle/discid_cache.json`). Non-functional when the path
+  cannot be opened (identification continues without cache).
 - `Entry` fields: `disc_id`, `tmdb_id`, `media_type` ("movie"/"tv"), `title`,
   `season_number`, `year`, `cached_at`,
   `has_forced_subtitle_track`.
@@ -1010,16 +1011,11 @@ context struct or cross-stage attribute needed.
 
 ### 6.11 Transcript Cache
 
-The shared transcription service (DESIGN_INFRASTRUCTURE.md S9) uses
-content-stable cache keys (`disc_fingerprint:episode_key:audio_index`).
-Because episode ID (Stage 3) and subtitling (Stage 6) supply the same
-content key for the same episode, the subtitle stage gets automatic cache
-hits even though the input file changed from the ripped file to the encoded
-file. No explicit envelope attribute or cross-stage plumbing is needed.
-
-The cache stores **canonical transcript artifacts only** (raw SRT + JSON).
-Formatted display subtitles are derived outputs and are not part of the
-cross-stage cache contract.
+There is no shared WhisperX transcript cache. The shared transcription service
+(DESIGN_INFRASTRUCTURE.md Section 9) gives all stages the same wrapper/profile
+and canonical output contract, but each stage transcribes its current input
+asset directly. Canonical transcript artifacts (raw SRT + JSON) live only in
+the stage work directory for the current run.
 
 ### 6.12 Resume and Failure Isolation
 

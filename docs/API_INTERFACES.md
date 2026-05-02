@@ -486,7 +486,7 @@ Returns a single queue item by ID.
 
 **Response** (404):
 ```json
-{"error": "queue item not found"}
+{"error": "item not found"}
 ```
 
 #### GET /api/logs
@@ -611,16 +611,12 @@ Stop processing for specific items.
 
 #### DELETE /api/queue/{id}
 
-Remove a specific queue item.
+Remove a specific queue item. The current store delete operation is idempotent;
+a valid numeric ID returns success even if no row existed.
 
 **Response** (200):
 ```json
 {"removed": 1}
-```
-
-**Response** (404):
-```json
-{"error": "queue item not found"}
 ```
 
 #### POST /api/disc/pause
@@ -629,7 +625,7 @@ Pause detection of new disc insertions.
 
 **Response** (200):
 ```json
-{"paused": true, "message": "Disc detection paused"}
+{"paused": true, "changed": true}
 ```
 
 #### POST /api/disc/resume
@@ -638,7 +634,7 @@ Resume detection of new disc insertions.
 
 **Response** (200):
 ```json
-{"resumed": true, "message": "Disc detection resumed"}
+{"resumed": true, "changed": true}
 ```
 
 #### POST /api/disc/detect
@@ -659,10 +655,14 @@ When detection is skipped (paused, busy, no disc):
 
 ### 2.6 Queue Access Fallback
 
-Queue read commands (list, show) support direct SQLite access when
-the daemon is not running. The CLI detects daemon unavailability and falls back
-to `queueaccess.Access` which wraps the SQLite store directly. Mutation
-operations require a running daemon.
+Queue read commands (`queue list`, `queue show`, and status queue counts) prefer
+the daemon HTTP API when available and fall back to direct read-only SQLite
+access when the daemon is not running.
+
+Queue mutation commands (`queue clear`, `queue retry`, `queue stop`) open the
+SQLite queue store directly and therefore also work without a daemon. Commands
+that control daemon behavior (`disc pause/resume/detect`, daemon stop) still
+require a running daemon.
 
 ### 2.7 QueueItem Schema
 
@@ -674,6 +674,9 @@ The `QueueItem` JSON object returned by queue endpoints:
   "discTitle":               string,
   "stage":                   string,
   "inProgress":              bool,
+  "failedAtStage":           string,
+  "errorMessage":            string,
+  "activeEpisodeKey":        string,
   "progress": {
     "stage":                 string,
     "percent":               float64,
@@ -682,7 +685,6 @@ The `QueueItem` JSON object returned by queue endpoints:
     "totalBytes":            int64
   },
   "encoding":                Snapshot | null,
-  "errorMessage":            string,
   "createdAt":               string (RFC3339),
   "updatedAt":               string (RFC3339),
   "discFingerprint":         string,
@@ -694,6 +696,7 @@ The `QueueItem` JSON object returned by queue endpoints:
     "key":                       string,
     "season":                    int,
     "episode":                   int,
+    "episodeEnd":                int,
     "title":                     string,
     "stage":                     string,
     "status":                    string,
@@ -715,7 +718,10 @@ The `QueueItem` JSON object returned by queue endpoints:
     "generatedSubtitleDecision": string,
     "matchScore":                float64,
     "matchConfidence":           float64,
-    "matchedEpisode":            int
+    "matchedEpisode":            int,
+    "matchedEpisodeEnd":         int,
+    "needsReview":               bool,
+    "reviewReason":              string
   }],
   "episodeTotals": {
     "planned":               int,

@@ -293,7 +293,7 @@ user"`):
 **Log retention**: On startup, cleans old daemon log files exceeding
 `logging.retention_days`.
 
-**Current log pointer**: Creates `spindle.log` symlink (with hardlink fallback)
+**Current log pointer**: Creates `daemon.log` symlink (with hardlink fallback)
 pointing to the active log file for easy access.
 
 **Options:**
@@ -348,24 +348,25 @@ Section 4.5).
 
 ### 3.4 Queue Access Fallback (`queueaccess`)
 
-Provides a unified interface for queue operations that works with or without
-the daemon running.
+Provides a read-oriented queue access interface for CLI display paths that works
+with or without the daemon running.
 
-**`Access` interface** (11 methods):
+**`Access` interface**:
 
 ```
-Stats, List, Describe, ClearAll, ClearCompleted,
-Remove, RetryAll, Retry, RetryEpisode, Stop, ActiveFingerprints
+List(stages ...queue.Stage) ([]*queue.Item, error)
+GetByID(id int64) (*queue.Item, error)
+Stats() (map[queue.Stage]int, error)
 ```
 
 **Implementations:**
 
-- `NewHTTPAccess(client)`: Routes operations through daemon HTTP API.
-- `NewStoreAccess(store)`: Direct SQLite access (no daemon needed).
+- `NewHTTPAccess(socketPath, token)`: Routes read operations through daemon HTTP API.
+- `StoreAccess`: Direct read-only SQLite access when the daemon is unavailable.
 
-**`Session`**: Access handle + cleanup function. `Close()` releases resources
-(closes DB connection for store access).
+**`OpenWithFallback(socketPath, token, dbPath)`**: Probe `/api/health`; if the
+daemon is reachable, use HTTP access, otherwise open the queue DB read-only.
 
-**`OpenWithFallback(httpClient, openStore)`**: Try HTTP API first; if daemon
-unavailable, fall back to direct store access. CLI queue commands use this for
-offline operation.
+Queue mutation CLI commands do not use `queueaccess`; they open the queue store
+directly so `queue clear`, `queue retry`, and `queue stop` work without a
+daemon.

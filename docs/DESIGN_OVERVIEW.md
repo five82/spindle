@@ -48,17 +48,16 @@ them to appear in Jellyfin without manual intervention.
 | Binary       | Purpose                                    |
 |--------------|--------------------------------------------|
 | `makemkvcon` | Disc scanning and MKV ripping              |
-| `ffmpeg`     | Audio/video encoding (via Drapto library)  |
+| `ffmpeg`     | Audio/video encoding (via Drapto library) and audio extraction |
 | `ffprobe`    | Media file inspection and validation       |
-| `mediainfo`  | Metadata inspection for disc titles        |
 
-### 2.2 Optional Binaries
+### 2.2 Optional / Feature-Specific Binaries
 
-| Binary     | Purpose                                            | When Required                  |
+| Binary     | Purpose                                            | When Needed                    |
 |------------|----------------------------------------------------|--------------------------------|
-| `bd_info`  | Enhanced Blu-ray metadata (disc name, year, studio)| Always optional; improves ID   |
-| `uvx`      | WhisperX transcription + Stable-TS subtitle formatting packages | When subtitles.enabled = true  |
-| `mkvmerge` | Muxing subtitles into MKV containers               | When subtitles.mux_into_mkv = true |
+| `bd_info`  | Enhanced Blu-ray metadata (disc name, year, studio)| Optional; improves ID          |
+| `uvx`      | WhisperX transcription + Stable-TS subtitle formatting packages | Needed by WhisperX-backed features (`subtitles.enabled`, TV episode ID, commentary) |
+| `mkvmerge` | Muxing subtitles into MKV containers               | Needed when `subtitles.mux_into_mkv = true` |
 
 ### 2.3 Library Dependencies
 
@@ -497,7 +496,7 @@ activity and are sent as a matched pair.
 | `whisperx_hf_token`        | string   | (empty)                 | HuggingFace access token               |
 | `opensubtitles_enabled`    | bool     | false                   | Enable OpenSubtitles integration       |
 | `opensubtitles_api_key`    | string   | (empty)                 | OpenSubtitles API key                  |
-| `opensubtitles_user_agent` | string   | `Spindle/dev`           | User-Agent for OpenSubtitles requests  |
+| `opensubtitles_user_agent` | string   | `Spindle/dev v0.1.0`    | User-Agent for OpenSubtitles requests  |
 | `opensubtitles_user_token` | string   | (empty)                 | OpenSubtitles user token for downloads |
 | `opensubtitles_languages`  | []string | `["en"]`                | Preferred subtitle languages           |
 
@@ -569,6 +568,17 @@ Commentary LLM classification uses the `[llm]` settings directly. All three
 `[llm]` fields (`api_key`, `base_url`, `model`) must be set for commentary
 classification to be available.
 
+#### `[content_id]`
+
+Policy thresholds for TV episode identification. See `CONTENT_ID_DESIGN.md` for semantics.
+
+| Field                             | Type    | Default | Purpose                                      |
+|-----------------------------------|---------|---------|----------------------------------------------|
+| `min_similarity_score`            | float64 | 0.58    | Minimum cosine similarity to keep a claim    |
+| `clear_match_margin`              | float64 | 0.05    | Minimum separation for a direct clear match  |
+| `low_confidence_review_threshold` | float64 | 0.70    | Below this, flag matched episode for review  |
+| `llm_verify_threshold`            | float64 | 0.85    | At/above this, LLM verification is skipped   |
+
 #### `[logging]`
 
 | Field             | Type              | Default   | Purpose                               |
@@ -577,13 +587,9 @@ classification to be available.
 
 ### 5.7 Hardcoded Constants (Not Configurable)
 
-The following values are code constants, not config fields. They were previously
-exposed as config but never changed from defaults in practice.
+The following values are code constants, not config fields.
 
-**Content ID thresholds** (see `CONTENT_ID_DESIGN.md`):
-- `minSimilarityScore = 0.58` -- minimum cosine similarity to accept a match
-- `lowConfidenceReviewThreshold = 0.70` -- below this, flag for review
-- `llmVerifyThreshold = 0.85` -- above this, skip LLM verification
+**Content ID behavior** (see `CONTENT_ID_DESIGN.md`):
 - `disc1MustStartAtEpisode1 = true`
 
 **Workflow timing:**
@@ -651,8 +657,9 @@ $XDG_CACHE_HOME/spindle/
 
 ```
 {state_dir}/
-  spindle.log           # Main daemon log (symlink to current)
-  queue.db              # SQLite database
+  spindle-{timestamp}.log  # One JSON log file per daemon start
+  daemon.log              # Symlink/hardlink to the current daemon log
+  queue.db                # SQLite database
 
 $XDG_RUNTIME_DIR/
   spindle.sock          # HTTP API Unix socket

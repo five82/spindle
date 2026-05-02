@@ -149,7 +149,7 @@ Retriable conditions: status 429, 502, 503, 504, timeouts, connection errors.
 | GET | `/infos/formats` | Health check |
 
 Search also supports: `parent_tmdb_id`, `query`, `type`, `year` parameters.
-Multiple search variants are tried per episode (see CONTENT_ID_DESIGN.md Section 5.1).
+Multiple search variants are tried per episode (see CONTENT_ID_DESIGN.md Section 7.1).
 
 ### Download Flow (2-Step Negotiation)
 
@@ -397,18 +397,7 @@ Used during identification to improve TMDB search accuracy.
 
 ---
 
-## 10. MediaInfo
-
-```
-mediainfo --Output=JSON <file>
-```
-
-Used for: detailed track metadata inspection during identification and encoding
-validation.
-
----
-
-## 11. mkvmerge
+## 10. mkvmerge
 
 ```
 mkvmerge -o <output.mkv> <input.mkv> --language 0:<lang> --track-name 0:<name> <subtitle.srt>
@@ -419,7 +408,7 @@ Used for muxing subtitle tracks into MKV containers when
 
 ---
 
-## 12. Drapto Encoding Library
+## 11. Drapto Encoding Library
 
 Drapto is a Go library (not a separate binary) used for SVT-AV1 encoding.
 

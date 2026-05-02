@@ -5,6 +5,9 @@ stages. It is serialized as JSON in the `rip_spec_data` column.
 
 See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
+Implementation source of truth: `internal/ripspec/ripspec.go`. Keep this
+document synchronized with that file when envelope fields change.
+
 ---
 
 ## 1. Structure
@@ -91,13 +94,16 @@ For TV content, each episode maps to a disc title:
   "title_id": 0,
   "season": 1,
   "episode": 3,
+  "episode_end": 0,
   "episode_title": "Episode Name",
   "episode_air_date": "2024-03-15",
   "runtime_seconds": 2700,
   "title_hash": "abc123",
   "output_basename": "Show Name - S01E03 - Episode Name",
   "match_score": 0.91,
-  "match_confidence": 0.72
+  "match_confidence": 0.72,
+  "needs_review": false,
+  "review_reason": ""
 }
 ```
 
@@ -121,7 +127,7 @@ ripping respectively. An episode is **unresolved** when `episode <= 0`.
 
 Each asset also carries a `title_id` field linking back to the MakeMKV title index.
 
-**Asset fields**: `episode_key`, `title_id`, `path`, `status`, `error_msg`.
+**Asset fields**: `episode_key`, `title_id`, `path`, `status`, `subtitles_muxed`, `error_msg`.
 
 Asset statuses: `pending`, `completed`, `failed`. The `error_msg` field carries per-episode
 error details for failed assets.
@@ -163,6 +169,7 @@ Episode {
     TitleID         int
     Season          int
     Episode         int
+    EpisodeEnd      int
     EpisodeTitle    string
     EpisodeAirDate  string
     RuntimeSeconds  int
@@ -186,8 +193,10 @@ SubtitleGenRecord {
     Source                string  // "whisperx" or "opensubtitles"
     SubtitlePath          string
     Segments              int
+    DurationSec           float64
     Language              string
     OpenSubtitlesDecision string
+    ValidationIssues      []string
 }
 
 ContentIDSummary {
@@ -211,6 +220,7 @@ ContentIDSummary {
 |--------|-----------|---------|
 | `Parse` | `Parse(raw string) (Envelope, error)` | Deserialize JSON; returns empty envelope on blank input |
 | `Encode` | `Encode() (string, error)` | Serialize to JSON |
+| `AssetKeys` | `AssetKeys() []string` | Asset keys for stages (`main` for movies, episode keys for TV) |
 | `EpisodeByKey` | `EpisodeByKey(key string) *Episode` | Case-insensitive lookup; nil if not found |
 | `Episode.AppendReviewReason` | `AppendReviewReason(reason string)` | Sets the episode-level review flag and appends a human-readable reason |
 | `ExpectedCount` | `ExpectedCount() int` | len(Episodes) for TV, 1 for movies |

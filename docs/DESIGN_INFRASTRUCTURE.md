@@ -162,28 +162,33 @@ Behavior rules:
 
 ### 3.1 System Dependencies
 
-Checked at daemon startup (fatal if required dependencies missing) and
-via `spindle status`. No per-stage rechecking — binaries do not disappear
-mid-run.
+Dependency checks are informational status probes, not daemon-startup gates. The
+daemon can start with missing optional/feature-specific tools; the stage that
+needs a missing tool fails or degrades with an explicit error.
 
-| Dependency | Command       | Optional | Condition                     |
-|------------|---------------|----------|-------------------------------|
-| MakeMKV    | `makemkvcon`  | No       | Always required               |
-| FFmpeg     | `ffmpeg`      | No       | Always required               |
-| FFprobe    | `ffprobe`     | No       | Always required               |
-| MediaInfo  | `mediainfo`   | No       | Always required               |
-| bd_info    | `bd_info`     | Yes      | Always optional               |
-| uvx        | `uvx`         | No*      | When subtitles.enabled (WhisperX + Stable-TS formatter packages) |
-| mkvmerge   | `mkvmerge`    | No*      | When subtitles.mux_into_mkv   |
+`spindle status` and daemon status currently report:
 
-*Conditionally required based on config.
+| Dependency | Command       | Condition                     |
+|------------|---------------|-------------------------------|
+| MakeMKV    | `makemkvcon`  | Always needed for scan/rip    |
+| FFmpeg     | `ffmpeg`      | Always needed by Drapto/audio extraction |
+| FFprobe    | `ffprobe`     | Always needed for media inspection |
+| mkvmerge   | `mkvmerge`    | Needed when `subtitles.mux_into_mkv = true` |
 
-### 3.2 Runtime Checks (via `spindle status`)
+Feature-specific tools not currently included in the status dependency table:
 
-- **LLM connectivity**: Health check against configured LLM API (30s timeout).
-- **Jellyfin connectivity**: Auth check via `/Users` endpoint.
-- **OpenSubtitles connectivity**: Format info check via `/infos/formats`.
-- **Directory access**: Verify read/write/execute on staging, library, review dirs.
+| Dependency | Command | Condition |
+|------------|---------|-----------|
+| bd_info | `bd_info` | Optional; improves Blu-ray identification |
+| uvx | `uvx` | Needed by WhisperX/Stable-TS features |
+
+### 3.2 Runtime Checks
+
+`spindle status` reports daemon state, dependency lookup results, configured
+library path accessibility, and queue counts. Client packages also expose
+standalone health checks for external services (`/Users` for Jellyfin,
+`/infos/formats` for OpenSubtitles), but those checks are not part of the
+current default status output.
 
 ### 3.3 Disc Probing
 
@@ -198,7 +203,7 @@ mid-run.
 ## 4. Shared Utility Libraries
 
 These packages provide foundational building blocks used across multiple stages.
-A clean room rewrite must replicate their behavior.
+Implementations must preserve their documented behavior.
 
 ### 4.1 Text Processing (`textutil`)
 
@@ -766,15 +771,15 @@ config file. These include: `config init` and help commands.
 ### 9.1 Purpose
 
 WhisperX transcription is used by three subsystems: episode identification,
-commentary detection, and subtitle generation. Rather than each subsystem
-invoking WhisperX independently with separate caching, a shared
-`transcription` package provides a unified interface.
+commentary detection, and subtitle generation. A shared `transcription` package
+provides one wrapper/profile and output contract for all callers. It does not
+provide cross-stage transcript caching.
 
 ### 9.2 Interface
 
 ```go
 type Service struct {
-    // Configuration: model, CUDA, VAD method, cache dir, etc.
+    // Configuration: default model, CUDA, VAD method, HF token, logger.
 }
 
 func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest) (*TranscribeResult, error)

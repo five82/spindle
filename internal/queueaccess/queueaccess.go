@@ -51,6 +51,84 @@ func NewHTTPAccess(socketPath, token string) *HTTPAccess {
 	}
 }
 
+type queueListResponse struct {
+	Items []queueItemResponse `json:"items"`
+}
+
+type queueGetResponse struct {
+	Item queueItemResponse `json:"item"`
+}
+
+type statusResponse struct {
+	Workflow struct {
+		QueueStats map[string]int `json:"queueStats"`
+	} `json:"workflow"`
+}
+
+type queueItemResponse struct {
+	ID               int64            `json:"id"`
+	DiscTitle        string           `json:"discTitle"`
+	Stage            string           `json:"stage"`
+	InProgress       bool             `json:"inProgress"`
+	FailedAtStage    string           `json:"failedAtStage"`
+	ErrorMessage     string           `json:"errorMessage"`
+	CreatedAt        string           `json:"createdAt"`
+	UpdatedAt        string           `json:"updatedAt"`
+	DiscFingerprint  string           `json:"discFingerprint"`
+	NeedsReview      bool             `json:"needsReview"`
+	ReviewReason     string           `json:"reviewReason"`
+	Metadata         json.RawMessage  `json:"metadata"`
+	RipSpec          json.RawMessage  `json:"ripSpec"`
+	ActiveEpisodeKey string           `json:"activeEpisodeKey"`
+	Progress         progressResponse `json:"progress"`
+	Encoding         json.RawMessage  `json:"encoding"`
+}
+
+type progressResponse struct {
+	Stage       string  `json:"stage"`
+	Percent     float64 `json:"percent"`
+	Message     string  `json:"message"`
+	BytesCopied int64   `json:"bytesCopied"`
+	TotalBytes  int64   `json:"totalBytes"`
+}
+
+func (r queueItemResponse) toQueueItem() *queue.Item {
+	item := &queue.Item{
+		ID:                  r.ID,
+		DiscTitle:           r.DiscTitle,
+		Stage:               queue.Stage(r.Stage),
+		FailedAtStage:       r.FailedAtStage,
+		ErrorMessage:        r.ErrorMessage,
+		CreatedAt:           r.CreatedAt,
+		UpdatedAt:           r.UpdatedAt,
+		DiscFingerprint:     r.DiscFingerprint,
+		ReviewReason:        r.ReviewReason,
+		ActiveEpisodeKey:    r.ActiveEpisodeKey,
+		ProgressStage:       r.Progress.Stage,
+		ProgressPercent:     r.Progress.Percent,
+		ProgressMessage:     r.Progress.Message,
+		ProgressBytesCopied: r.Progress.BytesCopied,
+		ProgressTotalBytes:  r.Progress.TotalBytes,
+	}
+	if r.InProgress {
+		item.InProgress = 1
+	}
+	if r.NeedsReview {
+		item.NeedsReview = 1
+	}
+	item.MetadataJSON = rawJSONToString(r.Metadata)
+	item.RipSpecData = rawJSONToString(r.RipSpec)
+	item.EncodingDetailsJSON = rawJSONToString(r.Encoding)
+	return item
+}
+
+func rawJSONToString(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}
+
 // List returns queue items via HTTP, optionally filtered by stages.
 func (a *HTTPAccess) List(stages ...queue.Stage) ([]*queue.Item, error) {
 	path := "/api/queue"
@@ -61,30 +139,34 @@ func (a *HTTPAccess) List(stages ...queue.Stage) ([]*queue.Item, error) {
 		}
 		path += "?" + params.Encode()
 	}
-	var items []*queue.Item
-	if err := a.getJSON(path, &items); err != nil {
+	var resp queueListResponse
+	if err := a.getJSON(path, &resp); err != nil {
 		return nil, err
+	}
+	items := make([]*queue.Item, 0, len(resp.Items))
+	for _, item := range resp.Items {
+		items = append(items, item.toQueueItem())
 	}
 	return items, nil
 }
 
 // GetByID returns a single item by ID via HTTP.
 func (a *HTTPAccess) GetByID(id int64) (*queue.Item, error) {
-	var item queue.Item
-	if err := a.getJSON(fmt.Sprintf("/api/queue/%d", id), &item); err != nil {
+	var resp queueGetResponse
+	if err := a.getJSON(fmt.Sprintf("/api/queue/%d", id), &resp); err != nil {
 		return nil, err
 	}
-	return &item, nil
+	return resp.Item.toQueueItem(), nil
 }
 
 // Stats returns item counts grouped by stage via HTTP.
 func (a *HTTPAccess) Stats() (map[queue.Stage]int, error) {
-	var raw map[string]int
-	if err := a.getJSON("/api/status", &raw); err != nil {
+	var resp statusResponse
+	if err := a.getJSON("/api/status", &resp); err != nil {
 		return nil, err
 	}
-	result := make(map[queue.Stage]int, len(raw))
-	for k, v := range raw {
+	result := make(map[queue.Stage]int, len(resp.Workflow.QueueStats))
+	for k, v := range resp.Workflow.QueueStats {
 		result[queue.Stage(k)] = v
 	}
 	return result, nil

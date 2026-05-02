@@ -19,7 +19,7 @@ This repository is shared as is. Spindle is a personal tool I built for my own e
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.26+, MakeMKV, ffmpeg, mediainfo. Optional: mkvmerge (for subtitle muxing).
+Prerequisites: Go 1.26+, MakeMKV, ffmpeg, ffprobe. Optional: mkvmerge (for subtitle muxing), uvx (for WhisperX subtitles/commentary/episode ID), bd_info (for improved Blu-ray identification).
 
 ## Configure
 
@@ -39,7 +39,7 @@ staging_dir = "~/Media/Staging"
 api_key = "your-tmdb-key"
 ```
 
-See `sample_config.toml` for all options (Jellyfin, subtitles, notifications, rip cache, etc.).
+Run `spindle config init --path ./spindle.toml` to generate a fully commented sample config with all options (Jellyfin, subtitles, notifications, rip cache, etc.).
 
 ## Run
 
@@ -47,13 +47,13 @@ See `sample_config.toml` for all options (Jellyfin, subtitles, notifications, ri
 spindle config validate   # check config
 spindle start             # launch daemon
 spindle status            # check daemon and dependencies
-spindle show --follow     # tail logs
+spindle logs --follow     # tail logs
 ```
 
 Once the daemon reports `RIPPED`, eject the disc manually; encoding and organization continue in the background.
 
 ## Documentation
 
-- [docs/workflow.md](docs/workflow.md) - stage-by-stage lifecycle
-- `sample_config.toml` - all config options with comments
+- [docs/user/workflow.md](docs/user/workflow.md) - stage-by-stage lifecycle
+- `spindle config init` - generate all config options with comments
 - `spindle --help` - command reference

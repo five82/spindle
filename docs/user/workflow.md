@@ -1,6 +1,6 @@
 # Spindle Workflow Guide
 
-Stage-by-stage breakdown of what happens after you insert a disc. See the [README](../README.md) for installation and initial setup.
+Stage-by-stage breakdown of what happens after you insert a disc. See the [README](../../README.md) for installation and initial setup.
 
 The daemon owns disc detection and the automated pipeline. Queue commands work with or without the daemon; log tailing (`spindle logs --follow`) requires a running daemon.
 
@@ -180,7 +180,7 @@ If items appear stuck (in-progress but not advancing):
 - **Staging**: `<staging_dir>/<fingerprint-or-queue-id>/ripped/` for MakeMKV output, `<staging_dir>/<fingerprint-or-queue-id>/encoded/` for Drapto output while waiting on organization. Subtitle sidecars land beside encoded media.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in config.
 - **Review**: `<review_dir>/` holds outputs that require manual attention. Items routed here still complete so the pipeline stays unblocked.
-- **State**: `<state_dir>/` stores `spindle-*.log` (one per daemon start, DEBUG-level JSON), `spindle.log` symlink to the latest run (when available), and the queue database (`queue.db`). Log retention is controlled by `[logging].retention_days` in `config.toml` (default 60; set 0 to disable pruning).
+- **State**: `<state_dir>/` stores `spindle-*.log` (one per daemon start, DEBUG-level JSON), `daemon.log` symlink/hardlink to the latest run (when available), and the queue database (`queue.db`). Log retention is controlled by `[logging].retention_days` in `config.toml` (default 60; set 0 to disable pruning).
 
 ## Notifications
 

@@ -28,10 +28,11 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 `SQLITE_BUSY`, or `"database is locked"` in error message. Context cancellation
 aborts the retry loop.
 
-**CLI read-only access**: When the CLI opens the database directly (daemon not
-running), it applies `PRAGMA query_only = ON` to prevent accidental writes.
-This ensures the fallback path is strictly read-only and cannot corrupt state
-that the daemon expects to own.
+**CLI direct access**: Queue read fallback opens SQLite read-only and applies
+`PRAGMA query_only = ON`. Queue mutation commands (`clear`, `retry`, `stop`)
+open the normal read-write store directly so they can operate without the
+daemon. These direct mutation paths are intentionally limited to queue state;
+daemon/disc-control operations still require the daemon HTTP API.
 
 ## 2. Schema
 
@@ -71,7 +72,7 @@ the write frequency (every 2-5 seconds during encoding/ripping) without
 contention issues at this scale. This eliminates the join complexity and lazy
 row creation of a separate progress table.
 
-## 3. Item Model (22 columns)
+## 3. Item Model (23 columns)
 
 | Column                 | Type      | Purpose                                           |
 |------------------------|-----------|---------------------------------------------------|
