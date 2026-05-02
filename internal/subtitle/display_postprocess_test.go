@@ -174,6 +174,45 @@ func TestRetimeDisplayCues_ExpandsShortCueIntoGapBudgets(t *testing.T) {
 	}
 }
 
+func TestRetimeDisplayCues_TrimsLowInformationLongCue(t *testing.T) {
+	cues := []srtutil.Cue{{
+		Index: 1,
+		Start: 10,
+		End:   30,
+		Text:  "Not getting feedback on the beam, sir.",
+	}}
+	changed := retimeDisplayCues(cues, 60)
+	if changed != 1 {
+		t.Fatalf("retimeDisplayCues() changed %d cues, want 1", changed)
+	}
+	if duration := cues[0].End - cues[0].Start; duration > maxSubtitleCueDuration {
+		t.Fatalf("expected cue duration <= %.1f, got %.3f", maxSubtitleCueDuration, duration)
+	}
+	if cues[0].Start != 10 {
+		t.Fatalf("expected trim to preserve cue start, got %.3f", cues[0].Start)
+	}
+}
+
+func TestRetimeDisplayCues_UsesGapFreedByLongCueTrim(t *testing.T) {
+	cues := []srtutil.Cue{
+		{Index: 1, Start: 0.0, End: 10.0, Text: "Waiting here."},
+		{Index: 2, Start: 10.5, End: 11.0, Text: "This is much too fast to read."},
+	}
+	changed := retimeDisplayCues(cues, 20)
+	if changed != 2 {
+		t.Fatalf("retimeDisplayCues() changed %d cues, want 2", changed)
+	}
+	if cues[0].End > maxSubtitleCueDuration {
+		t.Fatalf("expected first cue to be trimmed, got end %.3f", cues[0].End)
+	}
+	if !(cues[1].Start < 10.5 && cues[1].End > 11.0) {
+		t.Fatalf("expected second cue to expand into freed gap, got %.3f --> %.3f", cues[1].Start, cues[1].End)
+	}
+	if cues[1].Start < cues[0].End {
+		t.Fatalf("cue overlaps trimmed previous: %.3f < %.3f", cues[1].Start, cues[0].End)
+	}
+}
+
 func TestPostProcessDisplayCues_WrapsAndRetimes(t *testing.T) {
 	cues := []srtutil.Cue{{
 		Index: 1,

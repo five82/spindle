@@ -108,11 +108,12 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 
 1. Spindle extracts the primary audio track.
 2. **WhisperX transcription**: generates canonical transcript artifacts (raw SRT + JSON/alignment output) through a Spindle-owned wrapper that applies VAD-guided long-form transcription settings.
-3. **Subtitle formatting**: the subtitle stage filters WhisperX hallucination artifacts from derived working transcript data, uses Stable-TS regrouping/formatting, then applies a final display-only readability pass to fallback-split/wrap cues and modestly expand short cues into nearby silence gaps when helpful.
+3. **Subtitle formatting**: the subtitle stage filters WhisperX hallucination artifacts from derived working transcript data, uses Stable-TS regrouping/formatting, then applies a final display-only readability pass to fallback-split/wrap cues, modestly expand short cues into nearby silence gaps, and conservatively trim low-information long holds when helpful.
 4. Subtitle filtering and validation use the actual encoded-media duration when available; transcript-tail duration is only a fallback.
-5. Subtitling progress is cumulative across the full subtitle stage, and completed subtitle assets are persisted after each item so counts can advance live.
-6. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the WhisperX output via text-based matching.
-7. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). If subtitle formatting fails, or if severe subtitle validation issues are detected for an episode, that episode is recorded as a subtitle failure and processing continues with other episodes when possible.
+5. Spindle intentionally does not use PGS subtitles as final library output. Final primary display subtitles are SRT because SRT works better with Jellyfin and downstream tooling.
+6. Subtitling progress is cumulative across the full subtitle stage, and completed subtitle assets are persisted after each item so counts can advance live.
+7. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the WhisperX output via text-based matching.
+8. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). If subtitle formatting fails, or if severe subtitle validation issues are detected for an episode, that episode is recorded as a subtitle failure and processing continues with other episodes when possible.
 
 `spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename and uses TMDB for metadata context.
 

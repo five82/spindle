@@ -19,6 +19,8 @@ This skill extracts the primary (non-forced) display subtitle from an MKV file, 
 
 This skill is for title-specific cleanup after the generic subtitle pipeline has already handled wrapping, splitting, retiming, and validation. It edits only the derived display subtitle track that viewers see. Do not edit or replace cached WhisperX canonical artifacts under `~/.cache/spindle/whisperx`.
 
+Spindle intentionally does not use PGS subtitles as final library output. If a source disc or MKV contains PGS subtitle streams, do not choose them for cleanup or mux them as the primary display subtitle. Audit and preserve SRT display subtitles only.
+
 ## Prerequisites
 
 Required tools (verify before proceeding):

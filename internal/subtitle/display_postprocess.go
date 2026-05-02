@@ -18,7 +18,11 @@ const (
 	preferredDisplayMaxCueWords   = 16
 	preferredDisplayMaxCueDur     = 8.5
 	displayCueGapPadding          = 0.04
-	maxDisplayExtensionPerSide    = 1.25
+	maxDisplayExtensionPerSide    = 2.0
+	longCueTrimReadingSpeed       = 18.0
+	longCueTrimMinDuration        = 2.0
+	longCueTrimMaxWords           = 12
+	longCueTrimMaxCPS             = 12.0
 )
 
 type displayPostProcessStats struct {
@@ -366,6 +370,8 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 		videoSeconds = cues[len(cues)-1].End
 	}
 
+	changed := trimLongDisplayCues(cues)
+
 	beforeBudget := make([]float64, len(cues))
 	afterBudget := make([]float64, len(cues))
 	beforeBudget[0] = min(maxDisplayExtensionPerSide, max(0, cues[0].Start-displayCueGapPadding))
@@ -381,27 +387,16 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 	}
 	afterBudget[len(cues)-1] = min(maxDisplayExtensionPerSide, max(0, videoSeconds-cues[len(cues)-1].End-displayCueGapPadding))
 
-	var changed int
 	for i := range cues {
 		text := normalizeCueWhitespace(cues[i].Text)
 		if text == "" {
 			continue
 		}
 		duration := cues[i].End - cues[i].Start
-		if duration <= 0 {
+		if duration <= 0 || duration > maxSubtitleCueDuration {
 			continue
 		}
 		chars := utf8.RuneCountInString(text)
-		if duration > maxSubtitleCueDuration {
-			if lexicalWordCount(text) <= 5 {
-				target := min(maxSubtitleCueDuration, max(preferredSubtitleCueDuration, float64(chars)/preferredSubtitleReadingSpeed))
-				if target < duration-0.10 {
-					cues[i].End = min(cues[i].End, cues[i].Start+target)
-					changed++
-				}
-			}
-			continue
-		}
 		target := max(duration, preferredSubtitleCueDuration, float64(chars)/preferredSubtitleReadingSpeed)
 		target = min(target, maxSubtitleCueDuration)
 		need := target - duration
@@ -442,6 +437,46 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 		}
 	}
 	return changed
+}
+
+func trimLongDisplayCues(cues []srtutil.Cue) int {
+	var changed int
+	for i := range cues {
+		text := normalizeCueWhitespace(cues[i].Text)
+		if text == "" {
+			continue
+		}
+		duration := cues[i].End - cues[i].Start
+		if !shouldTrimLongDisplayCue(text, duration) {
+			continue
+		}
+		target := longDisplayCueTargetDuration(text)
+		if target < duration-0.10 {
+			cues[i].End = cues[i].Start + target
+			changed++
+		}
+	}
+	return changed
+}
+
+func shouldTrimLongDisplayCue(text string, duration float64) bool {
+	if duration <= maxSubtitleCueDuration {
+		return false
+	}
+	words := lexicalWordCount(text)
+	if words == 0 || words > longCueTrimMaxWords {
+		return false
+	}
+	chars := utf8.RuneCountInString(text)
+	if chars == 0 {
+		return false
+	}
+	return float64(chars)/duration <= longCueTrimMaxCPS
+}
+
+func longDisplayCueTargetDuration(text string) float64 {
+	chars := utf8.RuneCountInString(text)
+	return min(maxSubtitleCueDuration, max(longCueTrimMinDuration, float64(chars)/longCueTrimReadingSpeed))
 }
 
 func absInt(v int) int {

@@ -16,6 +16,13 @@ const (
 	minSubtitleCueDuration  = 5.0 / 6.0
 	maxSubtitleCueDuration  = 7.0
 	unbalancedLineDelta     = 16
+
+	reviewHighReadingSpeedP95Threshold = 24.0
+	reviewHighReadingSpeedCueRatio     = 0.35
+	reviewShortCueDurationRatio        = 0.10
+	reviewLongCueDurationRatio         = 0.05
+	reviewLineFormattingRatio          = 0.05
+	reviewLineFormattingMinCues        = 10
 )
 
 // ValidateSRTContent checks SRT content for quality issues. Returns a list of
@@ -31,6 +38,7 @@ func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) 
 
 type validationResult struct {
 	Issues       []string
+	ReviewIssues []string
 	SevereIssues []string
 	Stats        subtitleQCStats
 }
@@ -53,7 +61,7 @@ func validateCues(cues []srtutil.Cue, videoSeconds float64) []string {
 
 func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationResult {
 	if len(cues) == 0 {
-		return validationResult{Issues: []string{"empty_subtitle_file"}, SevereIssues: []string{"empty_subtitle_file"}}
+		return validationResult{Issues: []string{"empty_subtitle_file"}, ReviewIssues: []string{"empty_subtitle_file"}, SevereIssues: []string{"empty_subtitle_file"}}
 	}
 
 	stats := calculateSubtitleQCStats(cues)
@@ -122,7 +130,57 @@ func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationRe
 		}
 	}
 
-	return validationResult{Issues: issues, SevereIssues: severe, Stats: stats}
+	return validationResult{Issues: issues, ReviewIssues: subtitleReviewIssues(issues, severe, stats), SevereIssues: severe, Stats: stats}
+}
+
+func subtitleReviewIssues(issues, severe []string, stats subtitleQCStats) []string {
+	if len(issues) == 0 {
+		return nil
+	}
+	severeSet := make(map[string]bool, len(severe))
+	for _, issue := range severe {
+		severeSet[issue] = true
+	}
+	var review []string
+	for _, issue := range issues {
+		if severeSet[issue] || subtitleIssueRequiresReview(issue, stats) {
+			review = append(review, issue)
+		}
+	}
+	return review
+}
+
+func subtitleIssueRequiresReview(issue string, stats subtitleQCStats) bool {
+	switch issue {
+	case "duration_mismatch", "sparse_subtitles", "late_first_cue":
+		return true
+	case "high_reading_speed":
+		return stats.P95CPS > reviewHighReadingSpeedP95Threshold || cueRatio(stats.HighCPSCues, stats.CueCount) > reviewHighReadingSpeedCueRatio
+	case "short_cue_duration":
+		return cueRatio(stats.ShortDurationCues, stats.CueCount) > reviewShortCueDurationRatio
+	case "long_cue_duration":
+		return cueRatio(stats.LongDurationCues, stats.CueCount) > reviewLongCueDurationRatio
+	case "too_many_lines", "line_too_long", "unbalanced_line_breaks":
+		count := 0
+		switch issue {
+		case "too_many_lines":
+			count = stats.TooManyLineCues
+		case "line_too_long":
+			count = stats.OverlongLineCues
+		case "unbalanced_line_breaks":
+			count = stats.UnbalancedLineBreakCues
+		}
+		return count >= reviewLineFormattingMinCues && cueRatio(count, stats.CueCount) > reviewLineFormattingRatio
+	default:
+		return false
+	}
+}
+
+func cueRatio(count, total int) float64 {
+	if total <= 0 || count <= 0 {
+		return 0
+	}
+	return float64(count) / float64(total)
 }
 
 func calculateSubtitleQCStats(cues []srtutil.Cue) subtitleQCStats {

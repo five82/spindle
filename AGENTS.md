@@ -42,6 +42,11 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 - Simplification must not remove user-visible functionality. Eliminating a subprocess or code path that produces distinct output (log messages, CLI feedback, status indicators) is a behavior change, not a simplification.
 - When examining reference code, do not just copy and paste. Understand why it works in the reference implementation, think, and design a solution that works best for this codebase.
 
+## Subtitle Policy
+
+- Do not use PGS subtitles as final library output. Spindle's Jellyfin-facing subtitle output is SRT.
+- Source subtitle tracks may be detected for metadata/forced-subtitle signals, but primary display subtitles are generated/handled as SRT.
+
 ## Drapto Dependency Workflow
 
 - Local dev uses `go.work` (gitignored) to reference `../drapto` directly.

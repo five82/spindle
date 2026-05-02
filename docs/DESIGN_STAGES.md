@@ -545,7 +545,8 @@ The job runner iterates encode jobs with per-episode failure isolation:
 - Configured with `svt_av1_preset` (0-13, lower = slower + better quality)
   and per-resolution CRF values (`crf_sd`, `crf_hd`, `crf_uhd`).
 - Drapto handles: crop detection, HDR passthrough, audio stream mapping,
-  subtitle stream passthrough, chapter preservation.
+  chapter preservation. Spindle does not use PGS subtitle streams as final
+  subtitles; Jellyfin-facing subtitle output is SRT only.
 - Drapto outputs a validation report (codec check, duration check, HDR check,
   audio check, A/V sync check).
 
@@ -757,12 +758,13 @@ stream counts after commentary handling.
    behavior change in canonical transcription invalidates stale cached outputs.
 8. Subtitle generation derives a **display subtitle** from the canonical JSON by
    applying subtitle-only filtering, Stable-TS regrouping/formatting, and a
-   final display-only readability pass (fallback cue splitting/wrapping plus
-   limited gap-aware timing expansion for short/high-CPS cues) in the
-   `subtitle` package. This display formatting may split, wrap, and retime cues
-   for readability, and it prefers readable display boundaries over exact
-   preservation of WhisperX segment boundaries. It does not rewrite,
-   paraphrase, or grammatically correct transcript content.
+   final display-only readability pass (fallback cue splitting/wrapping, limited
+   gap-aware timing expansion for short/high-CPS cues, and conservative trimming
+   of low-information long holds) in the `subtitle` package. This display
+   formatting may split, wrap, and retime cues for readability, and it prefers
+   readable display boundaries over exact preservation of WhisperX segment
+   boundaries. It does not rewrite, paraphrase, or grammatically correct
+   transcript content.
 9. **Formatter failure is explicit**: subtitle formatting failure marks that
    episode subtitle job failed; no permanent raw-SRT compatibility path is kept.
 10. **Duration source**: subtitle filtering/validation use actual encoded-media
@@ -830,11 +832,15 @@ Returns a list of issue strings (empty = passed):
 Duration check is asymmetric: subtitles shorter than video are allowed up to
 600s (credits), but subtitles longer than video only tolerate 8s drift.
 
-Validation severity is split into two outcomes:
+Validation severity is split into three outcomes:
 
-- **Review issues**: appended to review reasons and subtitle-generation records.
-  High-CPS and short-duration cues remain review/QC issues because rapid
-  dialogue is not always repairable without creating overlaps or changing text.
+- **Observed QC issues**: recorded in subtitle-generation records and logged at
+  INFO, but do not necessarily route the episode to review. Minor timing and
+  readability artifacts are expected in WhisperX-derived display subtitles.
+- **Review issues**: appended to review reasons only when the issue is structural
+  or systemic. Duration mismatch, sparse subtitles, and late first cue always
+  require review. High-CPS, short-duration, long-duration, and line-formatting
+  issues require review only after aggregate thresholds are crossed.
 - **Severe issues**: subtitle generation for that episode fails and MKV muxing is
   skipped. Severe issues currently include empty output, overlapping cues, and
   low-information long cues that indicate likely hallucinated display output.
@@ -842,13 +848,20 @@ Validation severity is split into two outcomes:
 SRT validation logs an aggregate QC summary at INFO for every formatted display
 subtitle. The summary includes total cues, max CPS, p95 CPS, cues over 20 CPS,
 cues under 5/6s, cues over 7s, overlong-line cues, unbalanced two-line cues,
-too-many-line cues, split cues, wrapped cues, and retimed cues.
+too-many-line cues, split cues, wrapped cues, and retimed cues. Per-issue logs
+also include whether the observed issue requires review.
 
 ### 6.4 Display Subtitle Style Profile
 
-Spindle's generated primary display subtitle is dialogue-first. It follows a
-simple practical style profile derived from Netflix/general timed-text guidance
-where that guidance is useful for a home Jellyfin workflow:
+Spindle's generated primary display subtitle is dialogue-first and SRT-only.
+PGS subtitle streams from source discs are intentionally not used for final
+library output because SRT works better with Jellyfin and downstream tooling.
+The pipeline may detect source subtitle tracks for metadata/forced-subtitle
+signals, but final primary display subtitles are generated SRT tracks.
+
+Spindle's generated primary display subtitle follows a simple practical style
+profile derived from Netflix/general timed-text guidance where that guidance is
+useful for a home Jellyfin workflow:
 
 - Keep one line when text fits within 42 characters.
 - Use two lines only when needed.

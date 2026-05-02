@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/five82/spindle/internal/fileutil"
@@ -194,6 +195,41 @@ func TestPartitionTVOrganizationKeys(t *testing.T) {
 	}
 	if len(reviewKeys) != 2 || reviewKeys[0] != "s01e02" || reviewKeys[1] != "s01_003" {
 		t.Fatalf("reviewKeys = %#v, want [s01e02 s01_003]", reviewKeys)
+	}
+}
+
+func TestReviewPathForItemUsesBoundedPrimaryReviewReason(t *testing.T) {
+	item := &queue.Item{ID: 9, DiscFingerprint: "5483099ec8089977f7b31644c5898356b4173617ab9a2f62d997a6187d95cf91"}
+	item.AppendReviewReason("srt_validation: high_reading_speed (s01e01)")
+	item.AppendReviewReason("srt_validation: short_cue_duration (s01e01)")
+
+	got := reviewPathForItem("/review", item)
+	want := filepath.Join("/review", "srt_validation-high_reading_speed-(s01e01)_5483099e")
+	if got != want {
+		t.Fatalf("reviewPathForItem() = %q, want %q", got, want)
+	}
+}
+
+func TestReviewPathForItemCapsLongReason(t *testing.T) {
+	item := &queue.Item{ID: 9, DiscFingerprint: "5483099ec8089977f7b31644c5898356b4173617ab9a2f62d997a6187d95cf91"}
+	item.AppendReviewReason("subtitle validation: " + strings.Repeat("very-long-reason-", 20))
+
+	dirName := filepath.Base(reviewPathForItem("/review", item))
+	maxDirBytes := reviewReasonDirMaxBytes + 1 + 8
+	if len(dirName) > maxDirBytes {
+		t.Fatalf("review dir name length = %d, want <= %d (%q)", len(dirName), maxDirBytes, dirName)
+	}
+	if !strings.HasSuffix(dirName, "_5483099e") {
+		t.Fatalf("review dir name = %q, want fingerprint suffix", dirName)
+	}
+}
+
+func TestReviewPathForItemUsesManualReviewFallback(t *testing.T) {
+	item := &queue.Item{ID: 7}
+	got := reviewPathForItem("/review", item)
+	want := filepath.Join("/review", "manual-review_id7")
+	if got != want {
+		t.Fatalf("reviewPathForItem() = %q, want %q", got, want)
 	}
 }
 

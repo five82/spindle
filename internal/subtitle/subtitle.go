@@ -223,13 +223,26 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"wrapped_cues", formatting.WrappedCues,
 			"retimed_cues", formatting.RetimedCues,
 		)
+		reviewIssueSet := make(map[string]bool, len(validation.ReviewIssues))
+		for _, issue := range validation.ReviewIssues {
+			reviewIssueSet[issue] = true
+		}
 		for _, issue := range validation.Issues {
+			requiresReview := reviewIssueSet[issue]
+			decisionReason := "automated quality check below review threshold"
+			if requiresReview {
+				decisionReason = "automated quality check requires review"
+			}
 			logger.Info("SRT validation issue",
 				"decision_type", logs.DecisionSRTValidation,
 				"decision_result", issue,
-				"decision_reason", "automated quality check",
+				"decision_reason", decisionReason,
 				"episode_key", key,
+				"requires_review", requiresReview,
 			)
+			if !requiresReview {
+				continue
+			}
 			if ep := env.EpisodeByKey(key); ep != nil {
 				ep.AppendReviewReason("Subtitle validation: " + issue)
 			}

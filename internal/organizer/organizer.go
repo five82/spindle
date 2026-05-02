@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/fileutil"
@@ -21,6 +22,8 @@ import (
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/textutil"
 )
+
+const reviewReasonDirMaxBytes = 96
 
 // Handler implements stage.Handler for organization.
 type Handler struct {
@@ -232,10 +235,7 @@ func partitionTVOrganizationKeys(env *ripspec.Envelope) (libraryKeys, reviewKeys
 }
 
 func reviewPathForItem(reviewDir string, item *queue.Item) string {
-	reason := textutil.SanitizePathSegment(item.ReviewReason)
-	if reason == "" {
-		reason = "manual-review"
-	}
+	reason := reviewReasonDirSegment(item)
 	fpPrefix := item.DiscFingerprint
 	if len(fpPrefix) > 8 {
 		fpPrefix = fpPrefix[:8]
@@ -249,6 +249,43 @@ func reviewPathForItem(reviewDir string, item *queue.Item) string {
 		return filepath.Join(reviewDir, dirName)
 	}
 	return path
+}
+
+func reviewReasonDirSegment(item *queue.Item) string {
+	var raw string
+	if item != nil {
+		raw = strings.TrimSpace(item.PrimaryReviewReason())
+		if raw == "" {
+			raw = strings.TrimSpace(item.ReviewReason)
+		}
+	}
+	if raw == "" {
+		return "manual-review"
+	}
+	reason := textutil.SanitizePathSegment(raw)
+	reason = truncatePathSegmentBytes(reason, reviewReasonDirMaxBytes)
+	if reason == "" {
+		return "manual-review"
+	}
+	return reason
+}
+
+func truncatePathSegmentBytes(segment string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(segment) <= maxBytes {
+		return segment
+	}
+	end := 0
+	for i, r := range segment {
+		next := i + utf8.RuneLen(r)
+		if next > maxBytes {
+			break
+		}
+		end = next
+	}
+	return strings.Trim(segment[:end], "-_")
 }
 
 func throttledProgressUpdater(store *queue.Store, item *queue.Item, minInterval time.Duration) func() {

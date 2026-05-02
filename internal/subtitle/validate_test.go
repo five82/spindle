@@ -277,6 +277,60 @@ func TestCalculateSubtitleQCStats_Empty(t *testing.T) {
 	}
 }
 
+func TestValidateCuesDetailed_MinorQCDoesNotRequireReview(t *testing.T) {
+	var cues []srtutil.Cue
+	start := 0.0
+	addCue := func(duration float64, text string) {
+		cues = append(cues, srtutil.Cue{Index: len(cues) + 1, Start: start, End: start + duration, Text: text})
+		start += duration + 1
+	}
+	for range 65 {
+		addCue(2, "normal text")
+	}
+	for range 26 {
+		addCue(1, strings.Repeat("a", 21))
+	}
+	for range 5 {
+		addCue(0.7, "Ok")
+	}
+	for range 4 {
+		addCue(8, "Long enough here")
+	}
+
+	result := validateCuesDetailed(cues, start+5)
+	for _, want := range []string{"high_reading_speed", "short_cue_duration", "long_cue_duration"} {
+		if !containsIssue(result.Issues, want) {
+			t.Fatalf("expected observed issue %q in %v", want, result.Issues)
+		}
+		if containsIssue(result.ReviewIssues, want) {
+			t.Fatalf("did not expect minor issue %q to require review; review issues=%v stats=%+v", want, result.ReviewIssues, result.Stats)
+		}
+	}
+}
+
+func TestValidateCuesDetailed_SystemicQCRequiresReview(t *testing.T) {
+	var cues []srtutil.Cue
+	start := 0.0
+	addCue := func(duration float64, text string) {
+		cues = append(cues, srtutil.Cue{Index: len(cues) + 1, Start: start, End: start + duration, Text: text})
+		start += duration + 1
+	}
+	for range 60 {
+		addCue(2, "normal text")
+	}
+	for range 40 {
+		addCue(1, strings.Repeat("a", 25))
+	}
+
+	result := validateCuesDetailed(cues, start+5)
+	if !containsIssue(result.Issues, "high_reading_speed") {
+		t.Fatalf("expected observed high_reading_speed, got %v", result.Issues)
+	}
+	if !containsIssue(result.ReviewIssues, "high_reading_speed") {
+		t.Fatalf("expected systemic high_reading_speed to require review; review issues=%v stats=%+v", result.ReviewIssues, result.Stats)
+	}
+}
+
 func TestValidateCuesDetailed_SevereIssues(t *testing.T) {
 	cues := []srtutil.Cue{{Index: 1, Start: 1, End: 13.5, Text: "all"}}
 	result := validateCuesDetailed(cues, 30)
