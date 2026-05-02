@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/queueops"
 )
 
 func newQueueCmd() *cobra.Command {
@@ -244,18 +245,18 @@ func newQueueRetryCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("invalid item ID: %s", args[0])
 				}
-				result, err := store.RetryEpisode(id, episode)
+				result, err := queueops.RetryEpisode(store, id, episode)
 				if err != nil {
 					return err
 				}
 				switch result {
-				case queue.RetryResultRetried:
+				case queueops.RetryResultRetried:
 					fmt.Println(successStyle(fmt.Sprintf("Retried episode %s on item %d", episode, id)))
-				case queue.RetryResultNotFound:
+				case queueops.RetryResultNotFound:
 					return fmt.Errorf("item %d not found", id)
-				case queue.RetryResultNotFailed:
+				case queueops.RetryResultNotFailed:
 					return fmt.Errorf("item %d is not in failed state", id)
-				case queue.RetryResultEpisodeNotFound:
+				case queueops.RetryResultEpisodeNotFound:
 					return fmt.Errorf("episode %s not found in item %d", episode, id)
 				}
 				return nil

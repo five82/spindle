@@ -189,16 +189,16 @@ func TestListWithAndWithoutFilter(t *testing.T) {
 		t.Errorf("list all = %d items, want 2", len(all))
 	}
 
-	// Filter by pending.
-	pending, err := store.List(StageIdentification)
+	// Filter by identification stage.
+	identification, err := store.List(StageIdentification)
 	if err != nil {
-		t.Fatalf("list pending: %v", err)
+		t.Fatalf("list identification: %v", err)
 	}
-	if len(pending) != 1 {
-		t.Errorf("list pending = %d items, want 1", len(pending))
+	if len(identification) != 1 {
+		t.Errorf("list identification = %d items, want 1", len(identification))
 	}
-	if pending[0].ID != item1.ID {
-		t.Errorf("pending item id = %d, want %d", pending[0].ID, item1.ID)
+	if identification[0].ID != item1.ID {
+		t.Errorf("identification item id = %d, want %d", identification[0].ID, item1.ID)
 	}
 
 	// Filter by multiple statuses.
@@ -278,7 +278,7 @@ func TestStats(t *testing.T) {
 		t.Fatalf("stats: %v", err)
 	}
 	if stats[StageIdentification] != 2 {
-		t.Errorf("pending = %d, want 2", stats[StageIdentification])
+		t.Errorf("identification = %d, want 2", stats[StageIdentification])
 	}
 	if stats[StageEncoding] != 1 {
 		t.Errorf("encoding = %d, want 1", stats[StageEncoding])
@@ -299,6 +299,45 @@ func TestResetInProgress(t *testing.T) {
 	got, _ := store.GetByID(item.ID)
 	if got.InProgress != 0 {
 		t.Errorf("in_progress = %d, want 0", got.InProgress)
+	}
+}
+
+func TestRetryFailedAll(t *testing.T) {
+	store := openTestStore(t)
+
+	failed1, _ := store.NewDisc("A", "fp1")
+	failed1.Stage = StageFailed
+	failed1.FailedAtStage = string(StageEncoding)
+	_ = store.Update(failed1)
+
+	failed2, _ := store.NewDisc("B", "fp2")
+	failed2.Stage = StageFailed
+	failed2.FailedAtStage = string(StageSubtitling)
+	_ = store.Update(failed2)
+
+	active, _ := store.NewDisc("C", "fp3")
+	active.Stage = StageRipping
+	_ = store.Update(active)
+
+	count, err := store.RetryFailed()
+	if err != nil {
+		t.Fatalf("retry all failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("retry count = %d, want 2", count)
+	}
+
+	got1, _ := store.GetByID(failed1.ID)
+	if got1.Stage != StageEncoding {
+		t.Errorf("failed1 stage = %q, want %q", got1.Stage, StageEncoding)
+	}
+	got2, _ := store.GetByID(failed2.ID)
+	if got2.Stage != StageSubtitling {
+		t.Errorf("failed2 stage = %q, want %q", got2.Stage, StageSubtitling)
+	}
+	gotActive, _ := store.GetByID(active.ID)
+	if gotActive.Stage != StageRipping {
+		t.Errorf("active stage = %q, want %q", gotActive.Stage, StageRipping)
 	}
 }
 

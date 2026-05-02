@@ -1,5 +1,7 @@
 # System Design: Daemon and Disc Detection
 
+Status: Normative spec.
+
 Daemon lifecycle, disc detection pipeline, and daemon orchestration layer.
 
 See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.

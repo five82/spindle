@@ -1,7 +1,11 @@
 # System Design: Infrastructure
 
+Status: Normative spec.
+
 Logging, notifications, preflight checks, shared utility libraries, log access,
-audit gathering, and configuration validation.
+audit gathering, and configuration validation. External tool/service wire
+protocols are owned by `API_SERVICES.md`; this document only records how shared
+infrastructure uses them.
 
 See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 

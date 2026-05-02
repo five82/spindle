@@ -8,10 +8,22 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 )
+
+type stubHandler struct {
+	run func(context.Context, *queue.Item) error
+}
+
+func (h stubHandler) Run(ctx context.Context, item *queue.Item) error {
+	if h.run != nil {
+		return h.run(ctx, item)
+	}
+	return nil
+}
 
 func newTestManager(stages []PipelineStage) *Manager {
 	m := New(nil, nil, nil, slog.Default())
@@ -128,6 +140,80 @@ func TestNextStageReturnsCompletedForUnknownStage(t *testing.T) {
 	got := m.nextStage(queue.Stage("nonexistent"))
 	if got != queue.StageCompleted {
 		t.Errorf("nextStage(nonexistent) = %q, want %q", got, queue.StageCompleted)
+	}
+}
+
+func TestCompletedItemKeepsTerminalProgress(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	item, _ := store.NewDisc("A", "fp1")
+	item.Stage = queue.StageOrganizing
+	if err := store.Update(item); err != nil {
+		t.Fatalf("update item: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{}, Semaphore: SemNone}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := store.GetByID(item.ID)
+		if err != nil {
+			t.Fatalf("get item: %v", err)
+		}
+		if got.Stage == queue.StageCompleted {
+			if got.ProgressStage != string(queue.StageCompleted) {
+				t.Fatalf("progress stage = %q, want %q", got.ProgressStage, queue.StageCompleted)
+			}
+			if got.ProgressPercent != 100 {
+				t.Fatalf("progress percent = %v, want 100", got.ProgressPercent)
+			}
+			if got.ProgressMessage != "Completed" {
+				t.Fatalf("progress message = %q, want Completed", got.ProgressMessage)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("item did not complete")
+}
+
+func TestFinalPersistenceFailureSignalsWorkflowStop(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	item, _ := store.NewDisc("A", "fp1")
+	item.Stage = queue.StageOrganizing
+	_ = store.Update(item)
+	_ = store.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{}, Semaphore: SemNone}})
+
+	manager.processItem(context.Background(), item, manager.pipeline.stages[0])
+
+	select {
+	case <-manager.persistenceFailures:
+	case <-time.After(time.Second):
+		t.Fatal("expected persistence failure signal")
 	}
 }
 

@@ -1,5 +1,7 @@
 # System Design: Testing Strategy
 
+Status: Normative spec.
+
 Test approach and interface boundaries for test doubles.
 
 See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.

@@ -1,6 +1,8 @@
 # System Design: Queue Database
 
-SQLite queue database schema, item model, status state machine, and store operations.
+Status: Normative spec.
+
+SQLite queue database schema, item model, stage state machine, and store operations.
 
 See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
@@ -100,6 +102,12 @@ row creation of a separate progress table.
 | `encoded_file`         | TEXT      | Path to encoded AV1 file (staging)                |
 | `final_file`           | TEXT      | Path to final file in library or review dir       |
 
+Progress fields describe active stage work. When an item reaches `completed`,
+the workflow persists terminal progress (`progress_stage = "completed"`,
+`progress_percent = 100`, non-empty completion message) so API/CLI consumers do
+not need special-case blank progress. Non-terminal stage advancement clears
+stage progress before the next stage starts.
+
 ## 4. Stage Model (9 stages + in_progress flag)
 
 Items track their position in the pipeline with a `stage` field (TEXT) and an
@@ -176,7 +184,7 @@ first) to free the disc drive as quickly as possible:
 
 | Priority | Stages | Disc Semaphore |
 |----------|--------|----------------|
-| 1 (highest) | pending, identification, ripping | Required |
+| 1 (highest) | identification, ripping | Required |
 | 2 | episode_identification through organizing | Not required |
 
 Within the same priority, items are ordered by creation time (FIFO).
@@ -216,17 +224,19 @@ On daemon shutdown:
 4. On next startup, these items are picked up and re-executed from the
    beginning of their current stage.
 
-## 7. NextReady Query
+## 7. NextForStatuses Query
 
-`NextReady(stageOrder []Stage)` is the primary queue fetch used by the
-pipeline poll loop. It returns the oldest item where `in_progress = 0` and
-`stage` is not a terminal stage (`completed`, `failed`), ordered by:
+`NextForStatuses(stageOrder...)` is the primary queue fetch used by the
+pipeline poll loop. The workflow passes the stage order derived from its
+configured stage slice, with disc-dependent stages first. It returns the oldest
+item where `in_progress = 0` and `stage` is in the supplied stage set, ordered
+by creation time.
+
+The workflow constructs `stageOrder` so earlier stages are queried first,
+therefore effective ordering is:
 
 1. Stage priority (position in `stageOrder` slice -- disc-dependent stages first)
 2. Creation time (FIFO within the same stage)
-
-This is built on top of `NextForStatuses()` with the stage order derived
-from the pipeline configuration.
 
 ## 8. Review vs Failed Semantics
 
@@ -261,11 +271,13 @@ from the pipeline configuration.
 |-----------|---------|
 | `List(statuses...)` | Items filtered by status set (or all), ordered by creation time |
 | `ItemsByStatus(status)` | Items matching a single status, ordered by creation time |
-| `NextForStatuses(statuses...)` | Oldest item matching any status (FIFO queue fetch) |
+| `NextForStatuses(statuses...)` | Oldest ready item matching any status in the supplied priority order |
 | `ActiveFingerprints()` | Set of all non-empty fingerprints in queue (for orphan cleanup) |
 | `HasDiscDependentItem()` | True if any item is in identification or ripping stage with in_progress=1 |
 | `InProgressItems()` | All items with in_progress=1, ordered by creation time (for notification context) |
-| `Stats()` | Count of items grouped by status |
+| `ActiveItemCount()` | Count of non-terminal items |
+| `HasActiveItems()` | True if any non-terminal item exists |
+| `Stats()` | Count of items grouped by stage |
 | `CheckHealth()` | Full diagnostic: existence, table check, column presence, integrity, total count |
 
 **Stop-review override**: When updating an item, `applyStopReviewOverride()`
@@ -279,8 +291,13 @@ state regardless of what the caller sets.
 |-----------|---------|
 | `ResetInProgress()` | Clear `in_progress` on all items (startup recovery) |
 | `ResetInProgressOnShutdown()` | Clear `in_progress` on all items (clean shutdown) |
-| `RetryFailed(ids...)` | Route failed items to retry point using `failed_at_stage`; falls back to identification |
+| `RetryFailed(ids...)` | Route failed items to retry point using `failed_at_stage`; no IDs retries all failed items; falls back to identification |
+| `RetryWithRipSpec(id, targetStage, ripSpecData)` | Route one failed item to retry point while replacing opaque RipSpec payload |
 | `StopItems(ids...)` | User-initiated stop: mark as failed with review flag |
+
+Episode-specific retry is implemented in `queueops.RetryEpisode(store, id,
+episodeKey)` because it must parse and mutate the RipSpec envelope. The queue
+store remains responsible only for row storage and stage routing.
 
 ## 10. Metadata Helpers
 

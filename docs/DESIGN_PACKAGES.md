@@ -1,5 +1,7 @@
 # System Design: Go Package Layout
 
+Status: Normative spec.
+
 Module path: `github.com/five82/spindle`
 
 Package structure, dependency rules, and module boundaries for the Go codebase.
@@ -65,7 +67,8 @@ internal/
 
   httpapi/              HTTP API server, route registration, middleware
   sockhttp/             Unix socket HTTP client helpers (shared by daemonctl, queueaccess, CLI)
-  queueaccess/          Queue access abstraction (HTTP client + direct store)
+  queueaccess/          Read-only queue access abstraction (HTTP client + direct store)
+  queueops/             Higher-level queue mutations that need RipSpec awareness
   logs/                 Log file tailing
   auditgather/          Audit artifact collection and analysis
 ```
@@ -85,9 +88,9 @@ import packages in higher layers.
 
 `config`, `queue`, `ripspec`, `stage`
 
-### Layer 3: External Clients (depend on Layers 1-2)
+### Layer 3: Domain Services and External Clients (depend on Layers 1-2)
 
-`tmdb`, `opensubtitles`, `llm`, `jellyfin`, `notify`, `keydb`,
+`queueops`, `tmdb`, `opensubtitles`, `llm`, `jellyfin`, `notify`, `keydb`,
 `makemkv`, `fingerprint`, `discmonitor`, `media/ffprobe`, `media/audio`,
 `ripcache`, `discidcache`, `staging`, `transcription`
 
@@ -128,10 +131,14 @@ stage packages directly -- they are wired in `daemonrun` via
 
 ### 3.2 Queue Store Boundary
 
-The `queue.Store` interface is the sole access point for SQLite operations.
-Stage handlers receive `*queue.Item` values and call `store.Update()` /
+`queue.Store` is the concrete access point for SQLite operations. Stage
+handlers receive `*queue.Item` values and call `store.Update()` /
 `store.UpdateProgress()` to persist changes. Direct SQL is confined to the
 `queue` package.
+
+The queue store treats `rip_spec_data` as opaque text. Operations that need to
+parse or mutate the RipSpec envelope live outside `queue` (for example,
+`queueops.RetryEpisode`).
 
 ### 3.3 External Client Boundary
 

@@ -1,5 +1,7 @@
 # System Design: Overview
 
+Status: Normative spec.
+
 Introduction, external dependencies, services, architecture, configuration, and
 filesystem layout for the Spindle system.
 
@@ -181,7 +183,7 @@ in-flight concurrently (one encoding while another is being identified), but
 several resources require exclusive access, each guarded by a semaphore.
 
 **Stage sequence** (per item):
-1. **Identification** (pending -> identification)
+1. **Identification** (queued item at `identification`)
 2. **Ripping** (identification -> ripping)
 3. **Episode Identification** (ripping -> episode_identification) [TV only]
 4. **Encoding** (episode_identification/ripping -> encoding)
@@ -207,13 +209,14 @@ completion, cancellation, or failure. Stages that do not require a semaphore
 
 **Pipeline poll loop** (`run()`):
 1. Check `ctx.Done()` for shutdown.
-2. Fetch next ready item via `NextReady()` where `in_progress = 0`, ordered
-   by stage priority (earlier stages first) then creation time (FIFO within
-   same stage).
+2. Fetch next ready item via `NextForStatuses(stageOrder...)` where
+   `in_progress = 0`; `stageOrder` is derived from the configured stage slice
+   with disc-dependent stages first.
 3. If no item: wait 5 seconds, loop.
 4. If queue fetch error: log, wait 10 seconds, loop.
-5. Spawn goroutine: acquire required semaphore(s), set `in_progress = 1`,
-   process item via `processItem()`, advance stage, release semaphore(s).
+5. Set `in_progress = 1` synchronously, then spawn goroutine to acquire the
+   required semaphore(s), process item via `processItem()`, advance stage, and
+   release semaphore(s).
 6. Loop (immediately look for next item; don't wait for spawned goroutine).
 
 **Stage priority** ensures disc-dependent stages run first (freeing the drive
@@ -253,7 +256,7 @@ position.
 ```go
 type pipelineState struct {
     stages     []pipelineStage
-    stageOrder []queue.Stage             // ordered for NextReady()
+    stageOrder []queue.Stage             // ordered for NextForStatuses()
     stageMap   map[queue.Stage]int       // stage -> index in stages slice
     sems       [3]chan struct{}          // disc, encode, whisperx (capacity 1 each)
     logger     *slog.Logger
@@ -295,17 +298,20 @@ The manager's `processItem()` drives daemon-mode execution. The standalone
 **Lifecycle per item** (5 steps, 2 persistence points):
 
 1. Look up stage handler by `item.Stage` in `pipeline.stageMap`.
-   Acquire required semaphore for this stage (blocks until available).
-   Create request UUID and stage context (child of daemon context).
-   Attach per-item `*slog.Logger` to the context.
-2. Initialize progress state (`ProgressStage`, default message, percent 0).
-   **Set `in_progress = 1`**, persist.
+   Initialize progress state (`ProgressStage`, percent 0, empty message).
+   **Set `in_progress = 1`**, persist synchronously before spawning stage work
+   so the poll loop cannot pick the same item twice.
+2. Acquire the required semaphore for this stage (blocks until available).
+   Create the stage context (child of daemon context) and attach per-item
+   `*slog.Logger` to the context.
 3. Call `handler.Run(ctx, item)`.
 4. **Handle error**: if `context.Canceled`, set `in_progress = 0`, persist,
    release semaphore, return. Otherwise call `handleStageFailure()`.
-5. Advance `item.Stage` to next stage. Set `in_progress = 0`.
-   If completed: finalize progress (ensure percent >= 100, non-empty message).
-   **Persist** final state. Release semaphore.
+5. Advance `item.Stage` to next stage. Set `in_progress = 0` and clear
+   `active_episode_key`. If the next stage is non-terminal, clear stage
+   progress. If the next stage is `completed`, persist terminal progress:
+   `progress_stage = "completed"`, `progress_percent = 100`, and a non-empty
+   completion message. **Persist** final state. Release semaphore.
 
 Stage-specific lifecycle concerns (e.g., the ripping handler pausing disc
 monitoring) are owned by the handler, not the generic lifecycle. See
@@ -321,11 +327,17 @@ DESIGN_STAGES.md Section 2.6.
 - Retry is workflow-level: `spindle queue retry <id>` re-runs from the
   failed stage.
 
-**DB write failure during stage execution**: If a persistence step (2, 5)
-fails, the item is marked as failed with the DB error. The in-memory state
-may diverge from the persisted state, but startup recovery (Section 4.7)
-handles this by resetting all `in_progress` flags. The item will be
-re-executed from the beginning of its current stage on next startup.
+**DB write failure during stage execution**:
+- If the pre-stage `in_progress = 1` persistence fails, the stage is not run.
+  The workflow logs the error, clears the in-memory flag, backs off, and lets a
+  later poll retry the item.
+- If final success/failure state cannot be persisted after a handler has run,
+  the workflow treats this as a critical queue persistence failure, logs an
+  error, sends an error notification when possible, cancels stage contexts, and
+  stops the workflow manager. The item is not marked failed because the DB has
+  already proven unreliable.
+- Startup/shutdown recovery resets stale `in_progress` flags so interrupted
+  items can be re-executed from the beginning of their persisted current stage.
 
 ### 4.6.1 Stage Cancellation Contract
 

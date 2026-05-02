@@ -1,5 +1,7 @@
 # Spindle Workflow Guide
 
+Status: User guide. Normative behavior is defined by the design specs.
+
 Stage-by-stage breakdown of what happens after you insert a disc. See the [README](../../README.md) for installation and initial setup.
 
 The daemon owns disc detection and the automated pipeline. Queue commands work with or without the daemon; log tailing (`spindle logs --follow`) requires a running daemon.
@@ -50,7 +52,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
 ## Stage 2: Content Identification (identification)
 
 1. Spindle scans the disc with MakeMKV, capturing the fingerprint and title list.
-2. Identification uses KeyDB (if configured), optional overrides, and heuristics to decide TV vs movie. For Blu-rays, KeyDB and the disc ID cache are keyed by the BDInfo disc ID; the separate disc fingerprint is still used for queue identity and duplicate detection. Heuristics include season markers ("Season", `Sxx`), "complete series" strings, and discs dominated by episode-length titles. For TV discs, placeholder rip targets are built from MakeMKV titles using duplicate suppression plus runtime clustering: Spindle keeps the dominant long-form program cluster, excludes likely extras, preserves probable independent double-length episode titles as single placeholder assets, and distinguishes play-all union playlists from overlapping split variants. A double-length union playlist with disjoint component episode playlists is excluded as a play-all extra; an overlapping combined/split family is collapsed into the combined placeholder to avoid duplicated shared content.
+2. Identification uses KeyDB (if configured), the Blu-ray disc ID cache, and media heuristics to decide TV vs movie. For TV discs, Spindle selects likely episode titles and excludes obvious extras/play-all duplicates. Detailed title-selection rules live in `DESIGN_STAGES.md`.
 3. TMDB search runs using the derived title/season hints. If a confident match is found, Spindle:
    - Stores metadata in `metadata_json`.
    - Writes a rip specification (`rip_spec`) that maps MakeMKV titles to the intended output.
@@ -108,7 +110,7 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 
 1. Spindle extracts the primary audio track.
 2. **WhisperX transcription**: generates canonical transcript artifacts (raw SRT + JSON/alignment output) through a Spindle-owned wrapper that applies VAD-guided long-form transcription settings.
-3. **Subtitle formatting**: the subtitle stage filters WhisperX hallucination artifacts from derived working transcript data, uses Stable-TS regrouping/formatting, then applies a final display-only readability pass to fallback-split/wrap cues, modestly expand short cues into nearby silence gaps, and conservatively trim low-information long holds when helpful.
+3. **Subtitle formatting**: the subtitle stage filters obvious WhisperX artifacts, uses Stable-TS formatting, and applies a final readability pass. Detailed formatting rules live in `DESIGN_STAGES.md`.
 4. Subtitle filtering and validation use the actual encoded-media duration when available; transcript-tail duration is only a fallback.
 5. Spindle intentionally does not use PGS subtitles as final library output. Final primary display subtitles are SRT because SRT works better with Jellyfin and downstream tooling.
 6. Subtitling progress is cumulative across the full subtitle stage, and completed subtitle assets are persisted after each item so counts can advance live.

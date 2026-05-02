@@ -53,22 +53,25 @@ type StatusObserver interface {
 
 // Manager runs the pipeline poll loop.
 type Manager struct {
-	store            *queue.Store
-	notifier         *notify.Notifier
-	pipeline         *pipelineState
-	observer         StatusObserver
-	queueNotifyMu    sync.Mutex
-	queueCycleActive bool
+	store                  *queue.Store
+	notifier               *notify.Notifier
+	pipeline               *pipelineState
+	observer               StatusObserver
+	queueNotifyMu          sync.Mutex
+	queueCycleActive       bool
+	persistenceFailures    chan error
+	persistenceFailureOnce sync.Once
 }
 
 // New creates a workflow manager. observer may be nil.
 func New(store *queue.Store, notifier *notify.Notifier, observer StatusObserver, logger *slog.Logger) *Manager {
 	return &Manager{
-		store:    store,
-		notifier: notifier,
-		observer: observer,
+		store:               store,
+		notifier:            notifier,
+		observer:            observer,
+		persistenceFailures: make(chan error, 1),
 		pipeline: &pipelineState{
-			logger: logger,
+			logger: logs.Default(logger),
 		},
 	}
 }
@@ -106,10 +109,24 @@ func (m *Manager) ConfigureStages(stages []PipelineStage) {
 // Run executes the pipeline poll loop until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) {
 	p := m.pipeline
+	runCtx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-runCtx.Done():
+			return
+		case err := <-m.persistenceFailures:
+			p.logger.Error("workflow stopped after queue persistence failure",
+				"event_type", "queue_persistence_critical",
+				"error_hint", "queue state could not be persisted; workflow is stopping to avoid untracked side effects",
+				"error", err,
+			)
+			cancel()
 			return
 		default:
 		}
@@ -121,14 +138,14 @@ func (m *Manager) Run(ctx context.Context) {
 				"error_hint", "failed to fetch next queue item",
 				"error", err,
 			)
-			if !sleep(ctx, 10*time.Second) {
+			if !sleep(runCtx, 10*time.Second) {
 				return
 			}
 			continue
 		}
 
 		if item == nil {
-			if !sleep(ctx, 5*time.Second) {
+			if !sleep(runCtx, 5*time.Second) {
 				return
 			}
 			continue
@@ -161,12 +178,18 @@ func (m *Manager) Run(ctx context.Context) {
 				"item_id", item.ID,
 				"error", err,
 			)
+			item.InProgress = 0
+			if !sleep(runCtx, 10*time.Second) {
+				return
+			}
 			continue
 		}
 
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			if ps.Semaphore != SemNone {
-				if !m.acquireSem(ctx, ps.Semaphore) {
+				if !m.acquireSem(runCtx, ps.Semaphore) {
 					// Release the in_progress flag if we can't acquire the semaphore.
 					item.InProgress = 0
 					if err := m.store.Update(item); err != nil {
@@ -182,7 +205,7 @@ func (m *Manager) Run(ctx context.Context) {
 				defer m.releaseSem(ps.Semaphore)
 			}
 
-			m.processItem(ctx, item, ps)
+			m.processItem(runCtx, item, ps)
 		}()
 	}
 }
@@ -238,9 +261,16 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	// Advance to next stage and finalize progress.
 	item.Stage = m.nextStage(item.Stage)
 	item.InProgress = 0
-	item.ProgressStage = ""
-	item.ProgressPercent = 0
-	item.ProgressMessage = ""
+	item.ActiveEpisodeKey = ""
+	if item.Stage == queue.StageCompleted {
+		item.ProgressStage = string(queue.StageCompleted)
+		item.ProgressPercent = 100
+		item.ProgressMessage = "Completed"
+	} else {
+		item.ProgressStage = ""
+		item.ProgressPercent = 0
+		item.ProgressMessage = ""
+	}
 
 	itemLogger.Info("stage completed",
 		"decision_type", logs.DecisionStageExecution,
@@ -252,11 +282,15 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	)
 
 	if err := m.store.Update(item); err != nil {
-		itemLogger.Error("persist after stage completion failed",
-			"event_type", "completion_persist_failed",
-			"error_hint", "failed to persist after stage completion",
-			"error", err,
+		if m.observer != nil {
+			m.observer.RecordFailure(item, "queue persistence failed: "+err.Error())
+		}
+		m.reportPersistenceFailure(itemLogger, err,
+			"completion_persist_failed",
+			"failed to persist after stage completion",
+			item.ID,
 		)
+		return
 	}
 
 	if m.observer != nil {
@@ -285,11 +319,15 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 	)
 
 	if updateErr := m.store.Update(item); updateErr != nil {
-		itemLogger.Error("persist after failure failed",
-			"event_type", "failure_persist_failed",
-			"error_hint", "failed to persist after stage failure",
-			"error", updateErr,
+		if m.observer != nil {
+			m.observer.RecordFailure(item, "queue persistence failed: "+updateErr.Error())
+		}
+		m.reportPersistenceFailure(itemLogger, updateErr,
+			"failure_persist_failed",
+			"failed to persist after stage failure",
+			item.ID,
 		)
+		return
 	}
 
 	if m.observer != nil {
@@ -304,6 +342,29 @@ func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err 
 	)
 
 	m.maybeCompleteQueueCycle(ctx, itemLogger)
+}
+
+func (m *Manager) reportPersistenceFailure(logger *slog.Logger, err error, eventType, hint string, itemID int64) {
+	m.persistenceFailureOnce.Do(func() {
+		logger.Error("queue persistence failed; workflow will stop",
+			"event_type", eventType,
+			"error_hint", hint,
+			"impact", "workflow stopping to avoid untracked side effects",
+			"error", err,
+		)
+
+		select {
+		case m.persistenceFailures <- err:
+		default:
+		}
+
+		_ = notify.SendLogged(context.Background(), m.notifier, logger, notify.EventError,
+			"Workflow paused: queue persistence failed",
+			fmt.Sprintf("Spindle could not persist queue state and stopped workflow processing to avoid untracked side effects.\nItem ID: %d\nReason: %s", itemID, err.Error()),
+			"item_id", itemID,
+			"source_event_type", eventType,
+		)
+	})
 }
 
 // nextStage returns the stage following current in the pipeline.

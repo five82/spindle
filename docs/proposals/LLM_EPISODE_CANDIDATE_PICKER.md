@@ -1,5 +1,7 @@
 # Spec Proposal: Bounded LLM Episode Candidate Picker
 
+Status: Proposal, deferred. Not normative until accepted into the design specs.
+
 Status: Draft proposal only. Not approved. Not implemented.
 
 ## Summary

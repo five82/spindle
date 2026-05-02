@@ -1,10 +1,14 @@
 # System Design: LLM Prompts
 
+Status: Normative spec.
+
 All LLM interactions use the `CompleteJSON` interface (system prompt + user
 prompt -> JSON response). Temperature is hardcoded to 0 for deterministic
 output. See API_SERVICES.md Section 5 for the client protocol.
 
-See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
+See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map. This
+spec owns exact LLM prompt text and response schemas; trigger policy is
+summarized here and owned by the relevant feature spec.
 
 ---
 

@@ -1,5 +1,7 @@
 # System Design: RipSpec Envelope
 
+Status: Normative spec.
+
 The RipSpec envelope is the central data structure shared across all pipeline
 stages. It is serialized as JSON in the `rip_spec_data` column.
 
@@ -214,38 +216,19 @@ ContentIDSummary {
 }
 ```
 
-## 7. Envelope Methods
+## 7. Behavior Contracts
 
-| Method | Signature | Purpose |
-|--------|-----------|---------|
-| `Parse` | `Parse(raw string) (Envelope, error)` | Deserialize JSON; returns empty envelope on blank input |
-| `Encode` | `Encode() (string, error)` | Serialize to JSON |
-| `AssetKeys` | `AssetKeys() []string` | Asset keys for stages (`main` for movies, episode keys for TV) |
-| `EpisodeByKey` | `EpisodeByKey(key string) *Episode` | Case-insensitive lookup; nil if not found |
-| `Episode.AppendReviewReason` | `AppendReviewReason(reason string)` | Sets the episode-level review flag and appends a human-readable reason |
-| `ExpectedCount` | `ExpectedCount() int` | len(Episodes) for TV, 1 for movies |
-| `AssetCounts` | `AssetCounts() (expected, ripped, encoded, final int)` | Per-stage completion counts |
-| `MissingEpisodes` | `MissingEpisodes(stage string) []string` | Episode keys without assets at stage; nil for movies |
+The exact method set is owned by `internal/ripspec/ripspec.go`. The stable
+contracts other packages rely on are:
 
-**Asset methods:**
-
-| Method | Purpose |
-|--------|---------|
-| `AddAsset(kind, asset)` | Append or replace asset for episode key |
-| `FindAsset(kind, key)` | Locate by stage and key; returns (Asset, bool) |
-| `IsCompleted()` | Path non-empty and status != "failed" |
-| `IsFailed()` | Status == "failed" |
-| `ClearFailedAsset(kind, key)` | Reset status/error/path for retry |
-| `CompletedAssetCount(stage)` | Count of non-failed assets with non-empty path at given stage |
-| `Clone()` | Deep copy all asset lists |
-
-**Helper functions:**
-
-| Function | Purpose |
-|----------|---------|
-| `PlaceholderKey(season, discIndex)` | Format `s01_001`; defaults to 1 if <= 0 |
-| `EpisodeKey(season, episode)` | Format `s01e03`; returns "" if both <= 0 |
-| `EpisodeRangeKey(season, start, end)` | Format `s01e01-e02`; falls back to `EpisodeKey` when end <= start |
-| `HasResolvedEpisodes(episodes)` | Any episode with Episode > 0 |
-| `HasUnresolvedEpisodes(episodes)` | Any episode with Episode <= 0 |
-| `CountUnresolvedEpisodes(episodes)` | Count episodes with Episode <= 0 |
+- `Parse` rejects unknown envelope versions and returns an empty envelope for
+  blank input.
+- `Encode` serializes the envelope without changing semantic content.
+- Episode key lookups and asset lookups are case-insensitive.
+- Movies use the synthetic asset key `main`; TV uses episode keys.
+- `Episode.AppendReviewReason` sets the episode-level review flag and appends a
+  human-readable reason without overwriting prior reasons.
+- Asset completion means path is non-empty and status is not `failed`.
+- Failed assets can be cleared for retry without deleting the episode entry.
+- Placeholder keys use `s01_001`; resolved episode keys use `s01e03`; range keys
+  use `s01e01-e02`.

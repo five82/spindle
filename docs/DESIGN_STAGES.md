@@ -1,9 +1,14 @@
 # System Design: Pipeline Stages
 
+Status: Normative spec.
+
 All seven pipeline stages: identification, ripping, episode identification,
 encoding, audio analysis, subtitle generation, and organization.
 
-See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
+See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map. This
+spec owns stage contracts and decisions; external command/API protocols are
+owned by `API_SERVICES.md`, and detailed episode matching policy is owned by
+`CONTENT_ID_DESIGN.md`.
 
 ---
 

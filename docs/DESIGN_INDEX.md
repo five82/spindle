@@ -1,9 +1,16 @@
 # Design Document Index
 
+Status: Normative index.
+
 Complete specification for Spindle's current implementation. Each document owns a
 single domain area; avoid duplicating detailed behavior across documents. When a
 field/schema is backed by Go structs, the referenced source file is the final
 implementation source of truth.
+
+Documentation status markers:
+- **Normative spec**: expected design behavior for implementation work.
+- **User guide**: operational guidance; defer to normative specs for internals.
+- **Proposal**: non-normative until accepted into the design specs.
 
 ## System Design
 
@@ -36,6 +43,24 @@ implementation source of truth.
 | Document | Owns |
 |----------|------|
 | [CONTENT_ID_DESIGN.md](CONTENT_ID_DESIGN.md) | Episode identification algorithm: transcription, reference acquisition, matching, confidence, review conditions, LLM verification |
+
+## Non-Normative Supporting Docs
+
+| Document | Status | Purpose |
+|----------|--------|---------|
+| [user/workflow.md](user/workflow.md) | User guide | Operator-facing workflow and recovery guide |
+| [proposals/LLM_EPISODE_CANDIDATE_PICKER.md](proposals/LLM_EPISODE_CANDIDATE_PICKER.md) | Deferred proposal | Candidate future LLM fallback design; not implemented |
+
+## Ownership Rules
+
+- Put exact CLI commands and HTTP schemas only in `API_INTERFACES.md`.
+- Put external tool/service wire protocols only in `API_SERVICES.md`.
+- Put stage inputs, outputs, skip/failure semantics, and decision catalog only
+  in `DESIGN_STAGES.md`.
+- Put detailed episode matching policy only in `CONTENT_ID_DESIGN.md`.
+- Put exact LLM prompts only in `DESIGN_LLM_PROMPTS.md`.
+- Put Go struct-backed data models in the implementation first, then summarize
+  stable semantics in the owning spec.
 
 ## Quick Reference
 

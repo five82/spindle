@@ -1,8 +1,13 @@
 # Content ID Design
 
+Status: Normative spec.
+
 Episode identification subsystem for mapping ripped TV titles to canonical TMDB
 season/episode numbers using transcript similarity against OpenSubtitles
 references.
+
+This spec owns episode-identification algorithm policy. Exact LLM prompt text
+lives in `DESIGN_LLM_PROMPTS.md`.
 
 ---
 

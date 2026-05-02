@@ -14,6 +14,7 @@ import (
 
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/queueops"
 )
 
 // ServerOption configures optional Server settings.
@@ -42,16 +43,16 @@ func WithStatusTracker(tracker *StatusTracker) ServerOption {
 
 // Server is the HTTP API server.
 type Server struct {
-	store       *queue.Store
-	token       string
-	logger      *slog.Logger
-	httpServer  *http.Server
-	mux         *http.ServeMux
-	discMonitor *discmonitor.Monitor
-	shutdownCh  chan struct{}
-	statusInfo     StatusInfo
-	logBuffer      *LogBuffer
-	statusTracker  *StatusTracker
+	store         *queue.Store
+	token         string
+	logger        *slog.Logger
+	httpServer    *http.Server
+	mux           *http.ServeMux
+	discMonitor   *discmonitor.Monitor
+	shutdownCh    chan struct{}
+	statusInfo    StatusInfo
+	logBuffer     *LogBuffer
+	statusTracker *StatusTracker
 }
 
 // New creates an HTTP API server. discMon and shutdownCh may be nil.
@@ -212,7 +213,7 @@ func (s *Server) handleQueueRetryEpisode(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "id and episode_key are required")
 		return
 	}
-	result, err := s.store.RetryEpisode(body.ID, body.EpisodeKey)
+	result, err := queueops.RetryEpisode(s.store, body.ID, body.EpisodeKey)
 	if err != nil {
 		s.logger.Error("retry episode", "error", err, "id", body.ID, "episode_key", body.EpisodeKey)
 		writeError(w, http.StatusInternalServerError, "failed to retry episode")

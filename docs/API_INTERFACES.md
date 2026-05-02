@@ -1,8 +1,12 @@
 # API Reference: Interfaces
 
+Status: Normative spec.
+
 CLI commands and HTTP API for the Spindle system.
 
-See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
+See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map. This
+reference owns CLI and HTTP API surface area; internal stage behavior is owned
+by the design specs.
 
 ---
 
@@ -17,7 +21,7 @@ Single binary: `spindle`
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--socket` | | string | `$XDG_RUNTIME_DIR/spindle.sock` | Path to the daemon HTTP API Unix socket |
-| `--config` | `-c` | string | `$XDG_CONFIG_HOME/spindle/config.toml` | Configuration file path |
+| `--config` | `-c` | string | default search path | Configuration file path |
 | `--log-level` | | string | info | Log level: debug, info, warn, error |
 | `--verbose` | `-v` | bool | false | Shorthand for `--log-level=debug` |
 | `--json` | | bool | false | Output in JSON format |
@@ -67,11 +71,10 @@ Behavior:
 Show system and queue status.
 
 Output sections:
-1. **System Status**: Daemon running state, PID, disc pause, netlink monitoring
-2. **Drive Status**: Optical drive readiness (via ioctl when device is `/dev/srN`)
-3. **Dependencies**: Per-dependency availability (makemkvcon, ffmpeg, etc.)
-4. **Library Paths**: Movie and TV library path accessibility
-5. **Queue Status**: Table of status counts
+1. **Spindle Status**: Daemon running state, plus socket/lock/config in verbose mode
+2. **Dependencies**: Per-dependency availability (makemkvcon, ffmpeg, ffprobe, mkvmerge)
+3. **Library Paths**: Movie and TV library path accessibility
+4. **Queue**: Table of stage counts
 
 Works without daemon by falling back to direct DB access for queue stats.
 
@@ -87,7 +90,7 @@ List queue items.
 |------|-------|------|---------|-------------|
 | `--stage` | `-s` | string[] | (all) | Filter by queue stage (repeatable) |
 
-Table columns: ID, Title, Status, Created, Fingerprint.
+Table columns: ID, Title, Stage, Created, Fingerprint.
 
 #### `spindle queue show <id>`
 
@@ -95,9 +98,9 @@ Show detailed information for a single queue item.
 
 Arguments: `<id>` -- queue item ID (required, exactly 1).
 
-Output includes: ID, title, status, timestamps, disc fingerprint,
-progress, review status, error, metadata, episode details with per-episode
-asset paths, progress, subtitle info, and rip spec fingerprints.
+Output includes: ID, title, stage, timestamps, disc fingerprint,
+progress, review status, error, and metadata. Verbose output includes the raw
+RipSpec envelope and encoding snapshot when present.
 
 #### `spindle queue clear [id...]`
 
@@ -374,12 +377,12 @@ Skips config loading (loads its own config internally).
 
 - **Unix socket**: `$XDG_RUNTIME_DIR/spindle.sock` (always created)
 - **TCP bind** (optional): `api.bind` (e.g., `127.0.0.1:7487`)
-- **Auth token**: `api.token` -- when set, all requests require
-  `Authorization: Bearer <token>` header
+- **Auth token**: `api.token` -- when set, API requests require
+  `Authorization: Bearer <token>` header except unauthenticated health checks
 - **Server timeouts**:
   - ReadHeaderTimeout: 5s
   - ReadTimeout: 15s
-  - WriteTimeout: 30s
+  - WriteTimeout: 3m
   - IdleTimeout: 60s
 
 The HTTP API serves all communication: CLI commands, Flyer TUI, and any other
@@ -395,7 +398,7 @@ compatibility is maintained across versions.
 
 ### 2.2 Authentication
 
-When `api.token` is configured, all endpoints require:
+When `api.token` is configured, all endpoints except `GET /api/health` require:
 ```
 Authorization: Bearer <token>
 ```

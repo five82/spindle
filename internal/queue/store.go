@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/five82/spindle/internal/ripspec"
 	_ "modernc.org/sqlite" // Pure-Go SQLite driver.
 )
 
@@ -198,7 +197,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	return &it, nil
 }
 
-// NewDisc inserts a new pending queue item and returns it with its ID.
+// NewDisc inserts a new queue item at the identification stage and returns it with its ID.
 func (s *Store) NewDisc(title, fingerprint string) (*Item, error) {
 	var id int64
 	err := retryOnBusy(func() error {
@@ -587,7 +586,17 @@ func (s *Store) ResetInProgressOnShutdown() error {
 // Returns the number of items actually retried.
 func (s *Store) RetryFailed(ids ...int64) (int, error) {
 	if len(ids) == 0 {
-		return 0, nil
+		items, err := s.List(StageFailed)
+		if err != nil {
+			return 0, fmt.Errorf("list failed items: %w", err)
+		}
+		ids = make([]int64, 0, len(items))
+		for _, item := range items {
+			ids = append(ids, item.ID)
+		}
+		if len(ids) == 0 {
+			return 0, nil
+		}
 	}
 	var count int
 	err := retryOnBusy(func() error {
@@ -625,68 +634,11 @@ func (s *Store) RetryFailed(ids ...int64) (int, error) {
 	return count, err
 }
 
-// RetryResult describes the outcome of a RetryEpisode operation.
-type RetryResult string
-
-const (
-	RetryResultRetried         RetryResult = "retried"
-	RetryResultNotFound        RetryResult = "not_found"
-	RetryResultNotFailed       RetryResult = "not_failed"
-	RetryResultEpisodeNotFound RetryResult = "episode_not_found"
-)
-
-// RetryEpisode clears the failed status of a single episode within a queue item
-// and resets the item for reprocessing.
-func (s *Store) RetryEpisode(id int64, episodeKey string) (RetryResult, error) {
-	item, err := s.GetByID(id)
-	if err != nil {
-		return "", fmt.Errorf("retry episode get %d: %w", id, err)
-	}
-	if item == nil {
-		return RetryResultNotFound, nil
-	}
-	if item.Stage != StageFailed {
-		return RetryResultNotFailed, nil
-	}
-	if item.RipSpecData == "" {
-		return RetryResultEpisodeNotFound, nil
-	}
-
-	env, err := ripspec.Parse(item.RipSpecData)
-	if err != nil {
-		return "", fmt.Errorf("retry episode parse ripspec %d: %w", id, err)
-	}
-
-	// Verify the episode exists.
-	found := false
-	for _, ep := range env.Episodes {
-		if strings.EqualFold(ep.Key, episodeKey) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return RetryResultEpisodeNotFound, nil
-	}
-
-	// Clear failed assets for this episode across all stages.
-	for _, kind := range []string{ripspec.AssetKindEncoded, ripspec.AssetKindSubtitled, ripspec.AssetKindFinal} {
-		env.Assets.ClearFailedAsset(kind, episodeKey)
-	}
-
-	// Re-serialize ripspec.
-	encoded, err := env.Encode()
-	if err != nil {
-		return "", fmt.Errorf("retry episode encode ripspec %d: %w", id, err)
-	}
-
-	// Reset item to retry from the failed stage.
-	targetStage := StageIdentification
-	if item.FailedAtStage != "" {
-		targetStage = Stage(item.FailedAtStage)
-	}
-
-	err = retryOnBusy(func() error {
+// RetryWithRipSpec routes one failed item to targetStage while replacing its
+// opaque RipSpec payload. Higher-level packages own any RipSpec parsing needed
+// before calling this method.
+func (s *Store) RetryWithRipSpec(id int64, targetStage Stage, ripSpecData string) error {
+	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE queue_items SET
 				stage = ?, in_progress = 0,
@@ -695,14 +647,13 @@ func (s *Store) RetryEpisode(id int64, episodeKey string) (RetryResult, error) {
 				rip_spec_data = ?,
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?`,
-			string(targetStage), encoded, id,
+			string(targetStage), ripSpecData, id,
 		)
-		return err
+		if err != nil {
+			return fmt.Errorf("retry with ripspec %d: %w", id, err)
+		}
+		return nil
 	})
-	if err != nil {
-		return "", fmt.Errorf("retry episode update %d: %w", id, err)
-	}
-	return RetryResultRetried, nil
 }
 
 // StopItems marks items as failed with a "Stop requested by user" review reason.

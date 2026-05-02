@@ -1,8 +1,12 @@
 # API Reference: External Service Protocols
 
+Status: Normative spec.
+
 Protocols and integration details for all external services used by Spindle.
 
-See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
+See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map. This
+reference owns external tool/service protocols only; stage policy lives in
+`DESIGN_STAGES.md` and algorithm policy lives in `CONTENT_ID_DESIGN.md`.
 
 ---
 
