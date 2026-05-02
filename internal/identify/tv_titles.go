@@ -120,17 +120,17 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 	// primary authoring), then by title ID and duration.
 	slices.SortFunc(qualifyingDoubleCandidates, compareDoubleCandidatesByRipSafety)
 	result.AmbiguousLongCount = len(qualifyingDoubleCandidates)
+	excludedReasonByIndex := make(map[int]string)
 	combinedFamilyResolved := false
 	// chooseCombinedDoubleEpisodeTitle proves that a long candidate is a
-	// segment-union playlist for two primary-cluster titles. Collapse the
-	// components only when that union candidate is the only double-length
-	// option. If another independent double-length title exists, keep the
-	// primary components and the independent double; otherwise a play-all
-	// playlist can hide real episodes on discs with an opening feature-length
-	// episode plus two regular episodes.
+	// segment-union playlist for two primary-cluster titles. When the component
+	// playlists are disjoint, the union is a play-all playlist for two real
+	// episodes, so keep the individual episodes. Collapse to the union only for
+	// overlapping component playlists where selecting both components would
+	// duplicate shared content.
 	if combined, components, ok := chooseCombinedDoubleEpisodeTitle(primary.candidates, qualifyingDoubleCandidates); ok {
 		independentDoubles := doubleCandidatesExcluding(qualifyingDoubleCandidates, combined)
-		if len(independentDoubles) == 0 {
+		if len(independentDoubles) == 0 && tvComponentsOverlap(components) {
 			selectTVCandidate(selectedByIndex, selectedReasonByTitleID, combined, "combined_double_episode_candidate")
 			for _, component := range components {
 				delete(selectedByIndex, component.decisionIndex)
@@ -138,9 +138,9 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 			}
 		} else {
 			// The segment-union title is a play-all playlist for the primary
-			// episodes when another independent double-length title is present.
-			// Keep the single episodes and the independent double instead of
-			// assuming the independent title is an unproven alternate encoding.
+			// episodes. Keep the single episodes, and keep any independent
+			// double-length content alongside them.
+			excludedReasonByIndex[combined.decisionIndex] = "combined_play_all_extra"
 			for _, candidate := range independentDoubles {
 				selectTVCandidate(selectedByIndex, selectedReasonByTitleID, candidate, "probable_double_episode_candidate")
 			}
@@ -157,6 +157,11 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 			if reason, ok := selectedByIndex[candidate.decisionIndex]; ok {
 				decision.Selected = true
 				decision.Reason = reason
+				continue
+			}
+			if reason, ok := excludedReasonByIndex[candidate.decisionIndex]; ok {
+				decision.Reason = reason
+				result.ExtraCount++
 				continue
 			}
 			decision.Reason = "runtime_cluster_extra"
@@ -225,6 +230,23 @@ func doubleCandidatesExcluding(candidates []tvTitleCandidate, excluded tvTitleCa
 		result = append(result, candidate)
 	}
 	return result
+}
+
+func tvComponentsOverlap(components []tvTitleCandidate) bool {
+	seen := make(map[int]struct{})
+	for _, component := range components {
+		segments, ok := parseSegmentSet(component.title.SegmentMap)
+		if !ok {
+			return false
+		}
+		for segment := range segments {
+			if _, exists := seen[segment]; exists {
+				return true
+			}
+			seen[segment] = struct{}{}
+		}
+	}
+	return false
 }
 
 func selectedTitleOrderPriority(reason string) int {

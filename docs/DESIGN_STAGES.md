@@ -235,9 +235,12 @@ After identification:
    map reference identical content even if playlist metadata differs (common
    on TV Blu-rays with multiple language playlists). When a double-length
    playlist's segment map is the union of two selected episode-length
-   playlists, treat them as alternate representations of the same content
-   family and preserve only the combined placeholder asset. Falls back to
-   title hash for DVDs where segment map is absent.
+   playlists, distinguish play-all playlists from overlapping split variants:
+   if the component episode playlists are disjoint, keep the individual
+   episode playlists and exclude the union as a play-all extra; if the
+   components overlap, preserve the combined placeholder asset to avoid
+   duplicated shared content. Falls back to title hash for DVDs where segment
+   map is absent.
 3. Set metadata fields from TMDB response.
 4. Set `metadata.disc_source` (`bluray`, `dvd`, `unknown` --
    determined from disc detection via lsblk probe).
