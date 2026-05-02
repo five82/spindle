@@ -29,7 +29,8 @@ Required tools (verify before proceeding):
 - `mkvmerge` - Subtitle muxing
 
 Optional reference verification (use only as a fallback to confirm suspicious cues):
-- Spindle config with OpenSubtitles credentials, loaded with Spindle's normal config search order:
+- Prefer already-downloaded Spindle episode-identification reference subtitles when available; no network credentials are needed for local references.
+- Spindle config with OpenSubtitles credentials, loaded with Spindle's normal config search order, is needed only if a local reference is not available and an API fallback would materially improve confidence:
   1. explicit path if provided
   2. `~/.config/spindle/config.toml`
   3. `./spindle.toml`
@@ -38,7 +39,7 @@ Optional reference verification (use only as a fallback to confirm suspicious cu
 - `subtitles.opensubtitles_user_token` (preferred for downloads)
 - `tmdb.api_key` for canonical TV episode lookup
 
-OpenSubtitles is a comparison source only. Never replace the embedded subtitle wholesale from an external download.
+OpenSubtitles is a comparison source only. Never replace the embedded subtitle wholesale from an external download. Use the OpenSubtitles API for downloads; do not scrape subtitle websites.
 
 ## Procedure
 
@@ -97,14 +98,19 @@ Focus on residual title-specific problems that the generic pipeline cannot safel
 
 If many cues show generic formatting/QC issues (line length, line balance, CPS, short duration, or retiming), report that as a pipeline problem instead of manually editing the title.
 
-#### Optional OpenSubtitles verification fallback
+#### Optional reference verification fallback
 
 Use this only when local context suggests a likely error but an external reference would materially increase confidence.
 
+**Reference lookup order:**
+1. First look for Spindle's already-downloaded episode-identification reference subtitles for TV episodes. These are usually under the queue item's staging root at `contentid/references/sXXeYY-<file_id>.srt` while staging is still present. If a future global OpenSubtitles cache exists, prefer that as well.
+2. If no local reference is available, and the target episode/movie identity is confident, use the OpenSubtitles API with credentials from Spindle config.
+3. Do not fetch or scrape public subtitle web pages directly.
+
 **When to use it:**
-- transcript web fetches fail or are unavailable
 - a cue looks like an obvious homophone or garble, but you want confirmation
 - several nearby cues are suspicious and context from the embedded subtitle alone is thin
+- local Spindle references are available and can cheaply confirm a suspicious cue window
 
 **When NOT to use it:**
 - to rewrite stylistic differences
@@ -118,17 +124,18 @@ Use the same canonical-selection philosophy as Spindle's episode identification:
 - prefer the most probable candidate, not the first available one
 
 For TV files, derive the show title and `SxxEyy` from the filename/path when possible, then:
-1. Load Spindle config and credentials.
-2. Resolve the series against TMDB and fetch season metadata for the target season.
-3. Search OpenSubtitles by `tmdb_id`, `season_number`, `episode_number`, and configured languages.
-4. Select the best candidate using the same logic Spindle uses for episode ID reference acquisition:
+1. Look for a matching local reference subtitle first. If multiple local references match, prefer exact `sXXeYY` filenames and the one associated with the same queue item/staging root when known.
+2. If no local reference is found, load Spindle config and credentials.
+3. Resolve the series against TMDB and fetch season metadata for the target season.
+4. Search OpenSubtitles by `tmdb_id`, `season_number`, `episode_number`, and configured languages.
+5. Select the best candidate using the same logic Spindle uses for episode ID reference acquisition:
    - reward candidate text/release names that contain the target episode title
    - reward exact episode markers like `S01E05`, `1x05`, or `1.05`
    - strongly penalize candidates that mention a different episode title from the same season
    - strongly penalize likely multi-episode packs
    - prefer non-hearing-impaired subtitles when otherwise similar
    - use download count only as a secondary signal
-5. If every candidate is suspect, either use the best one only as a weak confidence check or skip external verification entirely.
+6. If every candidate is suspect, either use the best one only as a weak confidence check or skip external verification entirely.
 
 **Movie policy:**
 There is no direct episode-ID equivalent for movies. Only use OpenSubtitles as a weak comparison source when you can derive a confident title/year match from the filename/path and the result is clearly the same cut. Otherwise skip it.
