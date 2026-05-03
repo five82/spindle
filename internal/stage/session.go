@@ -57,11 +57,33 @@ func (s *Session) Save() error {
 	if s == nil || s.Item == nil || s.Env == nil {
 		return fmt.Errorf("stage session: incomplete save state")
 	}
+	s.SyncAssetPaths()
 	ctx := s.Ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return queue.PersistRipSpec(ctx, s.Store, s.Item, s.Env)
+}
+
+// SyncAssetPaths projects completed RipSpec assets into the queue item's compact
+// summary path fields. The RipSpec remains the source of truth; these fields
+// support quick CLI and audit display without reparsing the envelope.
+func (s *Session) SyncAssetPaths() {
+	if s == nil || s.Item == nil || s.Env == nil {
+		return
+	}
+	s.Item.RippedFile = lastCompletedAssetPath(s.Env.Assets.Ripped)
+	s.Item.EncodedFile = lastCompletedAssetPath(s.Env.Assets.Encoded)
+	s.Item.FinalFile = lastCompletedAssetPath(s.Env.Assets.Final)
+}
+
+func lastCompletedAssetPath(assets []ripspec.Asset) string {
+	for i := len(assets) - 1; i >= 0; i-- {
+		if assets[i].IsCompleted() {
+			return assets[i].Path
+		}
+	}
+	return ""
 }
 
 // ProgressOption customizes a progress update.
@@ -167,5 +189,6 @@ func (s *Session) AddEpisodeReviewReason(key, reason string) bool {
 func (s *Session) AddAsset(kind string, asset ripspec.Asset) {
 	if s != nil && s.Env != nil {
 		s.Env.Assets.AddAsset(kind, asset)
+		s.SyncAssetPaths()
 	}
 }

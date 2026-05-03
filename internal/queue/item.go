@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/textutil"
 )
 
@@ -116,7 +117,7 @@ func (it *Item) DisplayTitle() string {
 		return title
 	}
 
-	meta := MetadataFromJSON(it.MetadataJSON, "")
+	meta := mediameta.FromJSON(it.MetadataJSON, "")
 	if title := strings.TrimSpace(meta.DisplayTitle); title != "" {
 		if meta.Year != "" && !strings.Contains(title, "(") {
 			return title + " (" + meta.Year + ")"

@@ -123,9 +123,11 @@ Jellyfin, and ntfy.
 The current package layout is intentionally simple:
 
 - `cmd/spindle`: CLI entry point and command definitions.
-- `internal/config`, `queue`, `ripspec`, `stage`: core configuration, data, and
-  stage abstractions. `stage.Session` centralizes per-stage RipSpec persistence,
-  progress updates, active episode bookkeeping, and review-state mutation.
+- `internal/config`, `queue`, `ripspec`, `stage`, `mediameta`: core
+  configuration, data, and stage abstractions. `mediameta` owns media naming
+  and library-path projection. `stage.Session` centralizes per-stage RipSpec
+  persistence, asset-to-queue path projection, progress updates, active episode
+  bookkeeping, and review-state mutation.
 - `internal/daemon`, `daemonrun`, `daemonctl`, `workflow`, `stageexec`: runtime
   orchestration and daemon control.
 - `internal/identify`, `ripper`, `contentid`, `encoder`, `audioanalysis`,

@@ -16,6 +16,7 @@ import (
 	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/jellyfin"
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -45,7 +46,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger.Info("organization stage started", "event_type", "stage_start", "stage", "organizing")
 	env := sess.Env
 
-	meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
+	meta := mediameta.FromJSON(item.MetadataJSON, item.DiscTitle)
 	keys := env.AssetKeys()
 	sourceStage, hasSubtitled := resolveSourceStage(env, keys)
 	logger.Info("organization source stage selected",
@@ -94,7 +95,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"decision_reason", fmt.Sprintf("clean_episodes=%d review_episodes=%d", len(libraryKeys), len(reviewKeys)),
 		)
 
-		libraryPath, err := meta.GetLibraryPath(
+		libraryPath, err := meta.LibraryPath(
 			h.cfg.Paths.LibraryDir,
 			h.cfg.Library.MoviesDir,
 			h.cfg.Library.TVDir,
@@ -120,7 +121,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		reviewCount = len(reviewKeys)
 		_ = sess.Progress(100, fmt.Sprintf("Available in library (%d episodes, %d to review)", libraryCount, reviewCount))
 	} else {
-		libraryPath, err := meta.GetLibraryPath(
+		libraryPath, err := meta.LibraryPath(
 			h.cfg.Paths.LibraryDir,
 			h.cfg.Library.MoviesDir,
 			h.cfg.Library.TVDir,
@@ -158,49 +159,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
 	return nil
-}
-
-// destFilename builds the destination filename for a given asset key.
-func destFilename(meta *queue.Metadata, key, ext string) string {
-	if meta.IsMovie() {
-		return meta.GetFilename() + ext
-	}
-
-	// For TV, build a per-episode filename from the key.
-	// Parse season/episode from the key (format: "s01e03" or "s01e01-e02").
-	season, episode, episodeEnd := parseEpisodeKey(key)
-	if season > 0 && episode > 0 {
-		// Build per-episode metadata to get the correct filename.
-		epMeta := queue.Metadata{
-			Title:        meta.Title,
-			ShowTitle:    meta.ShowTitle,
-			MediaType:    "tv",
-			SeasonNumber: meta.SeasonNumber,
-			Episodes:     []queue.MetadataEpisode{{Season: season, Episode: episode, EpisodeEnd: episodeEnd}},
-			DisplayTitle: meta.DisplayTitle,
-		}
-		return textutil.SanitizeDisplayName(epMeta.GetFilename()) + ext
-	}
-
-	// Fallback: use the key directly as part of the filename.
-	show := textutil.SanitizeDisplayName(meta.ShowTitle)
-	if show == "" || show == "manual-import" {
-		show = textutil.SanitizeDisplayName(meta.Title)
-	}
-	return textutil.SanitizeDisplayName(show+" - "+key) + ext
-}
-
-// parseEpisodeKey extracts season and episode numbers from a key like "s01e03"
-// or "s01e01-e02". Returns zeros if the key does not match the expected format.
-func parseEpisodeKey(key string) (season, episode, episodeEnd int) {
-	lower := strings.ToLower(key)
-	if _, err := fmt.Sscanf(lower, "s%02de%02d-e%02d", &season, &episode, &episodeEnd); err == nil {
-		return season, episode, episodeEnd
-	}
-	if _, err := fmt.Sscanf(lower, "s%02de%02d", &season, &episode); err == nil {
-		return season, episode, 0
-	}
-	return 0, 0, 0
 }
 
 func resolveSourceStage(env *ripspec.Envelope, keys []string) (string, bool) {
@@ -322,7 +280,7 @@ func moveOrCopyWithProgress(src, dst string, progress fileutil.ProgressFunc) err
 	return nil
 }
 
-func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *queue.Metadata, sourceStage, destDir string, keys []string, target string) (string, int, error) {
+func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *mediameta.Metadata, sourceStage, destDir string, keys []string, target string) (string, int, error) {
 	item := sess.Item
 	env := sess.Env
 	if len(keys) == 0 {
@@ -352,7 +310,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 			continue
 		}
 
-		destName := destFilename(meta, key, filepath.Ext(asset.Path))
+		destName := mediameta.DestFilename(meta, key, filepath.Ext(asset.Path))
 		destPath := filepath.Join(destDir, destName)
 		if target == "library" && !h.cfg.Library.OverwriteExisting {
 			if info, err := os.Stat(destPath); err == nil {
@@ -412,11 +370,10 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 			"organize_target", target,
 		)
 		copySidecarSubtitle(logger, asset.Path, destPath)
-		sess.AddAsset(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath, Status: ripspec.AssetStatusCompleted})
+		sess.RecordAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath})
 		if err := sess.Save(); err != nil {
 			return "", copied, err
 		}
-		item.FinalFile = destPath
 		lastPath = destPath
 		copied++
 		if info, statErr := os.Stat(asset.Path); statErr == nil {
@@ -429,7 +386,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 
 // routeToReview copies assets to the review directory for manual inspection.
 // Directory structure: review_dir/{reason}_{fingerprint_prefix}/
-func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *queue.Metadata, sourceStage string, keys []string) error {
+func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *mediameta.Metadata, sourceStage string, keys []string) error {
 	item := sess.Item
 	logger.Info("routing to review",
 		"decision_type", logs.DecisionOrganizeRoute,

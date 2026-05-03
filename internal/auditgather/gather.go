@@ -13,6 +13,7 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
@@ -65,7 +66,7 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 	// Fall back to metadata JSON for media type if envelope unavailable.
 	mediaType := env.Metadata.MediaType
 	if mediaType == "" {
-		meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
+		meta := mediameta.FromJSON(item.MetadataJSON, item.DiscTitle)
 		if meta.Movie {
 			mediaType = "movie"
 		} else {

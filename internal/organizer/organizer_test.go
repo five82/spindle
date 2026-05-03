@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/five82/spindle/internal/fileutil"
+	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -66,14 +67,14 @@ func TestAssetKeys_TVNoEpisodes(t *testing.T) {
 }
 
 func TestDestFilename_Movie(t *testing.T) {
-	meta := &queue.Metadata{
+	meta := &mediameta.Metadata{
 		Title:     "The Matrix",
 		MediaType: "movie",
 		Year:      "1999",
 		Movie:     true,
 	}
 
-	got := destFilename(meta, "main", ".mkv")
+	got := mediameta.DestFilename(meta, "main", ".mkv")
 	want := "The Matrix (1999).mkv"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
@@ -81,14 +82,14 @@ func TestDestFilename_Movie(t *testing.T) {
 }
 
 func TestDestFilename_TVEpisode(t *testing.T) {
-	meta := &queue.Metadata{
+	meta := &mediameta.Metadata{
 		Title:        "Breaking Bad",
 		ShowTitle:    "Breaking Bad",
 		MediaType:    "tv",
 		SeasonNumber: 1,
 	}
 
-	got := destFilename(meta, "s01e03", ".mkv")
+	got := mediameta.DestFilename(meta, "s01e03", ".mkv")
 	want := "Breaking Bad - S01E03.mkv"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
@@ -96,14 +97,14 @@ func TestDestFilename_TVEpisode(t *testing.T) {
 }
 
 func TestDestFilename_TVRange(t *testing.T) {
-	meta := &queue.Metadata{
+	meta := &mediameta.Metadata{
 		Title:        "Breaking Bad",
 		ShowTitle:    "Breaking Bad",
 		MediaType:    "tv",
 		SeasonNumber: 1,
 	}
 
-	got := destFilename(meta, "s01e01-e02", ".mkv")
+	got := mediameta.DestFilename(meta, "s01e01-e02", ".mkv")
 	want := "Breaking Bad - S01E01-E02.mkv"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
@@ -111,7 +112,7 @@ func TestDestFilename_TVRange(t *testing.T) {
 }
 
 func TestDestFilename_TVFallback(t *testing.T) {
-	meta := &queue.Metadata{
+	meta := &mediameta.Metadata{
 		Title:        "Some Show",
 		ShowTitle:    "Some Show",
 		MediaType:    "tv",
@@ -119,7 +120,7 @@ func TestDestFilename_TVFallback(t *testing.T) {
 	}
 
 	// Non-standard key that does not parse as sNNeNN.
-	got := destFilename(meta, "s01_001", ".mkv")
+	got := mediameta.DestFilename(meta, "s01_001", ".mkv")
 	want := "Some Show - s01_001.mkv"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
@@ -141,7 +142,7 @@ func TestParseEpisodeKey(t *testing.T) {
 		{"", 0, 0, 0},
 	}
 	for _, tt := range tests {
-		s, e, end := parseEpisodeKey(tt.key)
+		s, e, end := mediameta.ParseEpisodeKey(tt.key)
 		if s != tt.wantSeason || e != tt.wantEpisode || end != tt.wantEpisodeEnd {
 			t.Errorf("parseEpisodeKey(%q) = (%d, %d, %d), want (%d, %d, %d)",
 				tt.key, s, e, end, tt.wantSeason, tt.wantEpisode, tt.wantEpisodeEnd)

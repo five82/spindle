@@ -267,10 +267,8 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		}
 	}
 
-	// Record encoded file path on item.
-	if n := len(env.Assets.Encoded); n > 0 {
-		item.EncodedFile = env.Assets.Encoded[n-1].Path
-	}
+	// Project completed asset paths into queue convenience fields, then persist.
+	sess.SyncAssetPaths()
 
 	// Persist envelope.
 	if err := sess.Save(); err != nil {

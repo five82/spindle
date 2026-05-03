@@ -252,13 +252,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"size_bytes", newFileSize,
 		)
 		if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
-			sess.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{
+			sess.RecordAssetSuccess(ripspec.AssetKindRipped, ripspec.Asset{
 				EpisodeKey: episodeKey,
 				TitleID:    title.ID,
 				Path:       newFile,
-				Status:     ripspec.AssetStatusCompleted,
 			})
-			item.RippedFile = newFile
 			if err := sess.Save(); err != nil {
 				return err
 			}
@@ -446,7 +444,6 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 // rip-cache hit path to avoid rescanning).
 func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger, sess *stage.Session, dir string, titleFiles map[int]string) error {
 	env := sess.Env
-	item := sess.Item
 	if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
 		logger.Info("asset mapping strategy selected",
 			"decision_type", logs.DecisionAssetMapping,
@@ -495,9 +492,7 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 		}
 	}
 
-	if n := len(env.Assets.Ripped); n > 0 {
-		item.RippedFile = env.Assets.Ripped[n-1].Path
-	}
+	sess.SyncAssetPaths()
 
 	// Validate all ripped artifacts with ffprobe.
 	visited := make(map[string]struct{})

@@ -17,6 +17,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 
 	"github.com/five82/spindle/internal/makemkv"
+	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -809,7 +810,7 @@ func (h *Handler) buildFallbackEnvelope(logger *slog.Logger, item *queue.Item, d
 // persistEnvelope updates the item's metadata_json and persists the RipSpec.
 func (h *Handler) persistEnvelope(sess *stage.Session) error {
 	// Update metadata_json on the item.
-	meta := queue.Metadata{
+	meta := mediameta.Metadata{
 		ID:           sess.Env.Metadata.ID,
 		Title:        sess.Env.Metadata.Title,
 		MediaType:    sess.Env.Metadata.MediaType,
