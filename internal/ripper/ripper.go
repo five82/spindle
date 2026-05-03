@@ -42,14 +42,55 @@ func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier, cach
 
 // Run executes the ripping stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
-	item := sess.Item
 	logger := sess.Logger
 	logger.Info("ripping stage started", "event_type", "stage_start", "stage", "ripping")
-	env := sess.Env
+
+	rippedDir, err := h.prepareRipStaging(sess)
+	if err != nil {
+		return err
+	}
+
+	if restored, err := h.restoreFromRipCache(ctx, sess, rippedDir); restored || err != nil {
+		return err
+	}
+
+	cleanup, err := h.prepareFreshRip(ctx, sess, rippedDir)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	targets, err := h.selectRipTargets(logger, sess.Env)
+	if err != nil {
+		return err
+	}
+
+	if err := h.ripTitles(ctx, sess, rippedDir, targets); err != nil {
+		return err
+	}
+	_ = sess.ClearActiveEpisode()
+
+	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, nil); err != nil {
+		return err
+	}
+	if err := sess.Save(); err != nil {
+		return err
+	}
+
+	h.cacheFreshRip(logger, sess, rippedDir, len(targets))
+	h.notifyRipComplete(ctx, logger, sess.Item, len(targets))
+
+	logger.Info("ripping stage completed", "event_type", "stage_complete", "stage", "ripping")
+	return nil
+}
+
+func (h *Handler) prepareRipStaging(sess *stage.Session) (string, error) {
+	item := sess.Item
+	logger := sess.Logger
 
 	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
-		return fmt.Errorf("staging root: %w", err)
+		return "", fmt.Errorf("staging root: %w", err)
 	}
 	rippedDir := filepath.Join(stagingRoot, "ripped")
 
@@ -57,82 +98,103 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	// previous run so file discovery starts clean. The rip cache is the
 	// durable layer; staging has no reuse value between pipeline runs.
 	if err := os.RemoveAll(stagingRoot); err != nil {
-		return fmt.Errorf("reset staging dir: %w", err)
+		return "", fmt.Errorf("reset staging dir: %w", err)
 	}
 	logger.Info("staging directory reset for clean rip",
 		"decision_type", logs.DecisionStagingCleanup,
 		"decision_result", "reset",
 		"decision_reason", "ephemeral staging",
 	)
+	return rippedDir, nil
+}
 
-	// Check rip cache first.
-	if h.cache != nil && item.DiscFingerprint != "" {
-		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(sess, "Restoring from cache...")); err == nil && meta != nil {
-			// TV: verify all episode files are present in cache. The scan
-			// result is reused below via mapAndValidateAssets to avoid a
-			// second ReadDir on the same directory.
-			cacheUsable := true
-			var cachedTitleFiles map[int]string
-			if len(env.Episodes) > 0 {
-				files, missing := cacheHasAllEpisodeFiles(env, rippedDir)
-				cachedTitleFiles = files
-				if len(missing) > 0 {
-					cacheUsable = false
-					logger.Info("rip cache incomplete",
-						"decision_type", logs.DecisionRipCache,
-						"decision_result", "incomplete",
-						"decision_reason", "missing_episode_files",
-						"missing_episodes", strings.Join(missing, ","),
-						"missing_count", len(missing),
-					)
-				}
-			}
+func (h *Handler) restoreFromRipCache(ctx context.Context, sess *stage.Session, rippedDir string) (bool, error) {
+	item := sess.Item
+	logger := sess.Logger
+	env := sess.Env
+	if h.cache == nil || item.DiscFingerprint == "" {
+		return false, nil
+	}
 
-			if cacheUsable {
-				logger.Info("rip cache hit",
-					"decision_type", logs.DecisionRipCache,
-					"decision_result", "restored",
-					"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
-				)
-				msg := fmt.Sprintf("%s (%d titles from cache)", item.DisplayTitle(), meta.TitleCount)
-				msg += "\n" + driveAvailableMsg
-				msg += queue.FormatAlsoProcessing(h.store, item.ID)
-				_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipCacheHit,
-					"Rip Cache Hit: "+item.DisplayTitle(),
-					msg,
-					"item_id", item.ID,
-				)
-				// Map cached files to assets via title ID parsing.
-				if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, cachedTitleFiles); err != nil {
-					return err
-				}
-				// Restore titles from cached envelope when identification
-				// used the disc ID cache fast-path (no MakeMKV scan).
-				if len(env.Titles) == 0 && meta.RipSpecData != "" {
-					if cachedEnv, err := ripspec.Parse(meta.RipSpecData); err == nil && len(cachedEnv.Titles) > 0 {
-						env.Titles = cachedEnv.Titles
-						logger.Info("titles restored from rip cache",
-							"decision_type", logs.DecisionRipCacheTitles,
-							"decision_result", "restored",
-							"decision_reason", fmt.Sprintf("%d titles from cached envelope", len(cachedEnv.Titles)),
-						)
-					}
-				}
-				if err := sess.Save(); err != nil {
-					return err
-				}
-				return nil
-			}
-			// Cache incomplete — fall through to fresh rip.
+	meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(sess, "Restoring from cache..."))
+	if err != nil || meta == nil {
+		return false, nil
+	}
+
+	// TV: verify all episode files are present in cache. The scan result is
+	// reused below via mapAndValidateAssets to avoid a second ReadDir on the
+	// same directory.
+	cacheUsable := true
+	var cachedTitleFiles map[int]string
+	if len(env.Episodes) > 0 {
+		files, missing := cacheHasAllEpisodeFiles(env, rippedDir)
+		cachedTitleFiles = files
+		if len(missing) > 0 {
+			cacheUsable = false
+			logger.Info("rip cache incomplete",
+				"decision_type", logs.DecisionRipCache,
+				"decision_result", "incomplete",
+				"decision_reason", "missing_episode_files",
+				"missing_episodes", strings.Join(missing, ","),
+				"missing_count", len(missing),
+			)
 		}
 	}
-
-	// Create ripped directory.
-	if err := os.MkdirAll(rippedDir, 0o755); err != nil {
-		return fmt.Errorf("create ripped dir: %w", err)
+	if !cacheUsable {
+		return false, nil
 	}
 
-	// Pause disc monitor during ripping to prevent polling interference.
+	logger.Info("rip cache hit",
+		"decision_type", logs.DecisionRipCache,
+		"decision_result", "restored",
+		"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
+	)
+	msg := fmt.Sprintf("%s (%d titles from cache)", item.DisplayTitle(), meta.TitleCount)
+	msg += "\n" + driveAvailableMsg
+	msg += queue.FormatAlsoProcessing(h.store, item.ID)
+	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipCacheHit,
+		"Rip Cache Hit: "+item.DisplayTitle(),
+		msg,
+		"item_id", item.ID,
+	)
+
+	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, cachedTitleFiles); err != nil {
+		return true, err
+	}
+	h.restoreTitlesFromCachedEnvelope(logger, env, meta.RipSpecData)
+	if err := sess.Save(); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func (h *Handler) restoreTitlesFromCachedEnvelope(logger *slog.Logger, env *ripspec.Envelope, ripSpecData string) {
+	// Restore titles from cached envelope when identification used the disc ID
+	// cache fast-path (no MakeMKV scan).
+	if len(env.Titles) != 0 || ripSpecData == "" {
+		return
+	}
+	cachedEnv, err := ripspec.Parse(ripSpecData)
+	if err != nil || len(cachedEnv.Titles) == 0 {
+		return
+	}
+	env.Titles = cachedEnv.Titles
+	logger.Info("titles restored from rip cache",
+		"decision_type", logs.DecisionRipCacheTitles,
+		"decision_result", "restored",
+		"decision_reason", fmt.Sprintf("%d titles from cached envelope", len(cachedEnv.Titles)),
+	)
+}
+
+func (h *Handler) prepareFreshRip(ctx context.Context, sess *stage.Session, rippedDir string) (func(), error) {
+	logger := sess.Logger
+	noop := func() {}
+
+	if err := os.MkdirAll(rippedDir, 0o755); err != nil {
+		return noop, fmt.Errorf("create ripped dir: %w", err)
+	}
+
+	cleanup := noop
 	if h.monitor != nil {
 		h.monitor.PauseDisc()
 		logger.Info("disc monitor paused for ripping",
@@ -140,24 +202,23 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"decision_result", "paused",
 			"decision_reason", "ripping requires exclusive disc access",
 		)
-		defer func() {
+		cleanup = func() {
 			h.monitor.ResumeDisc()
 			logger.Info("disc monitor resumed after ripping",
 				"decision_type", logs.DecisionDiscMonitorControl,
 				"decision_result", "resumed",
 				"decision_reason", "ripping complete, restoring disc polling",
 			)
-		}()
-	}
-
-	// Drive readiness check for /dev/ device paths.
-	if strings.HasPrefix(h.cfg.MakeMKV.OpticalDrive, "/dev/") {
-		if err := discmonitor.WaitForReady(ctx, h.cfg.MakeMKV.OpticalDrive, logger); err != nil {
-			return fmt.Errorf("drive readiness: %w", err)
 		}
 	}
 
-	// Ensure MakeMKV settings are configured for track selection.
+	if strings.HasPrefix(h.cfg.MakeMKV.OpticalDrive, "/dev/") {
+		if err := discmonitor.WaitForReady(ctx, h.cfg.MakeMKV.OpticalDrive, logger); err != nil {
+			cleanup()
+			return noop, fmt.Errorf("drive readiness: %w", err)
+		}
+	}
+
 	if err := makemkv.EnsureSettings(logger); err != nil {
 		logger.Warn("MakeMKV settings configuration failed",
 			"event_type", "makemkv_settings_warning",
@@ -165,17 +226,12 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"impact", "ripping continues with existing MakeMKV settings",
 		)
 	}
+	return cleanup, nil
+}
 
-	// Select titles to rip based on media type.
-	targets, err := h.selectRipTargets(logger, env)
-	if err != nil {
-		return err
-	}
-	rippedCount := len(targets)
-
-	// Build title-to-episode lookup for active episode tracking.
-	titleEpisodeKey := make(map[int]string, len(env.Episodes))
-	for _, ep := range env.Episodes {
+func (h *Handler) ripTitles(ctx context.Context, sess *stage.Session, rippedDir string, targets []ripspec.Title) error {
+	titleEpisodeKey := make(map[int]string, len(sess.Env.Episodes))
+	for _, ep := range sess.Env.Episodes {
 		titleEpisodeKey[ep.TitleID] = ep.Key
 	}
 
@@ -186,140 +242,144 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-
-		logger.Info(fmt.Sprintf("Phase %d/%d - Ripping title %d", i+1, len(targets), title.ID),
-			"event_type", "rip_title_start",
-		)
-
-		if err := sess.Progress(overallRipPercent(i, len(targets), 0), fmt.Sprintf("Phase %d/%d - Ripping title %d", i+1, len(targets), title.ID), stage.WithActiveEpisode(titleEpisodeKey[title.ID])); err != nil {
-			logger.Warn("progress persistence failed",
-				"event_type", "progress_persist_failed",
-				"error_hint", "rip progress message not persisted",
-				"impact", "rip progress not reflected in queue",
-				"error", err,
-			)
-		}
-
-		// Snapshot files before rip to detect the new file.
-		before := listMKVFiles(rippedDir)
-
-		err := makemkv.Rip(ctx, h.cfg.MakeMKV.OpticalDrive, title.ID, rippedDir,
-			time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
-			h.cfg.MakeMKV.MinTitleLength,
-			func(p makemkv.RipProgress) {
-				message := item.ProgressMessage
-				if strings.TrimSpace(p.Message) != "" {
-					message = p.Message
-				}
-				_ = sess.Progress(overallRipPercent(i, len(targets), p.Percent), message)
-			}, logger,
-		)
-		if err != nil {
-			return fmt.Errorf("rip title %d: %w", title.ID, err)
-		}
-
-		// Find the new file produced by this rip. makemkv.Rip already
-		// verifies that at least one new file appeared and refuses to
-		// return nil on zero output, but we re-check here as defense in
-		// depth — this is the single error surface the ripper stage
-		// presents regardless of how a future refactor reshuffles
-		// responsibility.
-		after := listMKVFiles(rippedDir)
-		newFile := findNewFile(before, after)
-		if newFile == "" {
-			logger.Error("title rip produced no new file",
-				"decision_type", logs.DecisionFileDiscovery,
-				"decision_result", "not_found",
-				"decision_reason", fmt.Sprintf("title_id=%d", title.ID),
-				"event_type", "rip_output_missing",
-				"error_hint", "makemkv rip returned success but no new mkv appeared in staging",
-				"title_id", title.ID,
-				"ripped_dir", rippedDir,
-			)
-			return fmt.Errorf("rip title %d: no new mkv file in %s after rip", title.ID, rippedDir)
-		}
-
-		var newFileSize int64
-		if fi, statErr := os.Stat(newFile); statErr == nil {
-			newFileSize = fi.Size()
-		}
-		logger.Info("title rip completed",
-			"decision_type", logs.DecisionTitleRip,
-			"decision_result", "completed",
-			"decision_reason", fmt.Sprintf("title_id=%d file=%s size=%d", title.ID, newFile, newFileSize),
-			"title_id", title.ID,
-			"file", newFile,
-			"size_bytes", newFileSize,
-		)
-		if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
-			if err := sess.SaveAssetSuccess(ripspec.AssetKindRipped, ripspec.Asset{
-				EpisodeKey: episodeKey,
-				TitleID:    title.ID,
-				Path:       newFile,
-			}); err != nil {
-				return err
-			}
-		}
-
-		if err := sess.Progress(overallRipPercent(i+1, len(targets), 0), fmt.Sprintf("Phase %d/%d - Ripped title %d", i+1, len(targets), title.ID)); err != nil {
-			logger.Warn("progress persistence failed",
-				"event_type", "progress_persist_failed",
-				"error_hint", "rip completion progress not persisted",
-				"impact", "rip progress not reflected in queue",
-				"error", err,
-			)
+		if err := h.ripTitle(ctx, sess, rippedDir, title, i, len(targets), titleEpisodeKey[title.ID]); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	_ = sess.ClearActiveEpisode()
+func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir string, title ripspec.Title, index, total int, episodeKey string) error {
+	item := sess.Item
+	logger := sess.Logger
 
-	// Map ripped files to assets and validate.
-	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, nil); err != nil {
+	logger.Info(fmt.Sprintf("Phase %d/%d - Ripping title %d", index+1, total, title.ID),
+		"event_type", "rip_title_start",
+	)
+
+	if err := sess.Progress(overallRipPercent(index, total, 0), fmt.Sprintf("Phase %d/%d - Ripping title %d", index+1, total, title.ID), stage.WithActiveEpisode(episodeKey)); err != nil {
+		logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "rip progress message not persisted",
+			"impact", "rip progress not reflected in queue",
+			"error", err,
+		)
+	}
+
+	before := listMKVFiles(rippedDir)
+	err := makemkv.Rip(ctx, h.cfg.MakeMKV.OpticalDrive, title.ID, rippedDir,
+		time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
+		h.cfg.MakeMKV.MinTitleLength,
+		func(p makemkv.RipProgress) {
+			message := item.ProgressMessage
+			if strings.TrimSpace(p.Message) != "" {
+				message = p.Message
+			}
+			_ = sess.Progress(overallRipPercent(index, total, p.Percent), message)
+		}, logger,
+	)
+	if err != nil {
+		return fmt.Errorf("rip title %d: %w", title.ID, err)
+	}
+
+	newFile, err := h.discoverNewRippedFile(logger, rippedDir, title.ID, before)
+	if err != nil {
 		return err
 	}
-
-	// Persist envelope.
-	if err := sess.Save(); err != nil {
-		return err
+	if episodeKey != "" {
+		if err := sess.SaveAssetSuccess(ripspec.AssetKindRipped, ripspec.Asset{
+			EpisodeKey: episodeKey,
+			TitleID:    title.ID,
+			Path:       newFile,
+		}); err != nil {
+			return err
+		}
 	}
 
-	// Cache ripped files.
-	if h.cache != nil && item.DiscFingerprint != "" {
-		var totalBytes int64
-		if dirEntries, err := os.ReadDir(rippedDir); err == nil {
-			for _, de := range dirEntries {
-				if info, err := de.Info(); err == nil {
-					totalBytes += info.Size()
-				}
+	if err := sess.Progress(overallRipPercent(index+1, total, 0), fmt.Sprintf("Phase %d/%d - Ripped title %d", index+1, total, title.ID)); err != nil {
+		logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "rip completion progress not persisted",
+			"impact", "rip progress not reflected in queue",
+			"error", err,
+		)
+	}
+	return nil
+}
+
+func (h *Handler) discoverNewRippedFile(logger *slog.Logger, rippedDir string, titleID int, before map[string]bool) (string, error) {
+	after := listMKVFiles(rippedDir)
+	newFile := findNewFile(before, after)
+	if newFile == "" {
+		logger.Error("title rip produced no new file",
+			"decision_type", logs.DecisionFileDiscovery,
+			"decision_result", "not_found",
+			"decision_reason", fmt.Sprintf("title_id=%d", titleID),
+			"event_type", "rip_output_missing",
+			"error_hint", "makemkv rip returned success but no new mkv appeared in staging",
+			"title_id", titleID,
+			"ripped_dir", rippedDir,
+		)
+		return "", fmt.Errorf("rip title %d: no new mkv file in %s after rip", titleID, rippedDir)
+	}
+
+	var newFileSize int64
+	if fi, statErr := os.Stat(newFile); statErr == nil {
+		newFileSize = fi.Size()
+	}
+	logger.Info("title rip completed",
+		"decision_type", logs.DecisionTitleRip,
+		"decision_result", "completed",
+		"decision_reason", fmt.Sprintf("title_id=%d file=%s size=%d", titleID, newFile, newFileSize),
+		"title_id", titleID,
+		"file", newFile,
+		"size_bytes", newFileSize,
+	)
+	return newFile, nil
+}
+
+func (h *Handler) cacheFreshRip(logger *slog.Logger, sess *stage.Session, rippedDir string, rippedCount int) {
+	item := sess.Item
+	if h.cache == nil || item.DiscFingerprint == "" {
+		return
+	}
+
+	var totalBytes int64
+	if dirEntries, err := os.ReadDir(rippedDir); err == nil {
+		for _, de := range dirEntries {
+			if info, err := de.Info(); err == nil {
+				totalBytes += info.Size()
 			}
 		}
-		meta := ripcache.EntryMetadata{
-			Version:      1,
-			Fingerprint:  item.DiscFingerprint,
-			DiscTitle:    item.DiscTitle,
-			CachedAt:     time.Now(),
-			TitleCount:   rippedCount,
-			TotalBytes:   totalBytes,
-			RipSpecData:  item.RipSpecData,
-			MetadataJSON: item.MetadataJSON,
-		}
-		if err := h.cache.Register(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(sess, "Caching rip...")); err != nil {
-			logger.Warn("rip cache write failed",
-				"event_type", "cache_write_error",
-				"error_hint", err.Error(),
-				"impact", "no cache for next rip of this disc",
-			)
-			// Degraded, not fatal.
-		} else if err := h.cache.WriteMetadata(item.DiscFingerprint, meta); err != nil {
-			logger.Warn("rip cache metadata write failed",
-				"event_type", "cache_metadata_error",
-				"error_hint", err.Error(),
-				"impact", "cache entry may not be reused",
-			)
-		}
 	}
+	meta := ripcache.EntryMetadata{
+		Version:      1,
+		Fingerprint:  item.DiscFingerprint,
+		DiscTitle:    item.DiscTitle,
+		CachedAt:     time.Now(),
+		TitleCount:   rippedCount,
+		TotalBytes:   totalBytes,
+		RipSpecData:  item.RipSpecData,
+		MetadataJSON: item.MetadataJSON,
+	}
+	if err := h.cache.Register(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(sess, "Caching rip...")); err != nil {
+		logger.Warn("rip cache write failed",
+			"event_type", "cache_write_error",
+			"error_hint", err.Error(),
+			"impact", "no cache for next rip of this disc",
+		)
+		return
+	}
+	if err := h.cache.WriteMetadata(item.DiscFingerprint, meta); err != nil {
+		logger.Warn("rip cache metadata write failed",
+			"event_type", "cache_metadata_error",
+			"error_hint", err.Error(),
+			"impact", "cache entry may not be reused",
+		)
+	}
+}
 
-	// Notification.
+func (h *Handler) notifyRipComplete(ctx context.Context, logger *slog.Logger, item *queue.Item, rippedCount int) {
 	msg := fmt.Sprintf("Ripped %s (%d titles)", item.DisplayTitle(), rippedCount)
 	msg += "\n" + driveAvailableMsg
 	msg += queue.FormatAlsoProcessing(h.store, item.ID)
@@ -328,9 +388,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		msg,
 		"item_id", item.ID,
 	)
-
-	logger.Info("ripping stage completed", "event_type", "stage_complete", "stage", "ripping")
-	return nil
 }
 
 // selectRipTargets determines which titles to rip based on media type.

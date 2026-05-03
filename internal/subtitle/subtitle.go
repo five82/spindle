@@ -55,7 +55,6 @@ func New(
 
 // Run executes the subtitle generation stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
-	item := sess.Item
 	logger := sess.Logger
 	logger.Info("subtitle stage started", "event_type", "stage_start", "stage", "subtitling")
 
@@ -68,9 +67,28 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return nil
 	}
 
-	env := sess.Env
+	jobs, skippedCompleted := h.planSubtitleJobs(sess)
+	h.logSkippedSubtitleJobs(logger, skippedCompleted)
 
-	jobs, skippedCompleted := sess.PendingKeyedAssetJobs(ripspec.AssetKindEncoded, ripspec.AssetKindSubtitled)
+	summary, err := h.processSubtitleJobs(ctx, sess, jobs)
+	if err != nil {
+		return err
+	}
+
+	return h.finishSubtitleStage(sess, summary)
+}
+
+type subtitleRunSummary struct {
+	attempted int
+	succeeded int
+	failed    int
+}
+
+func (h *Handler) planSubtitleJobs(sess *stage.Session) ([]stage.AssetJob, []string) {
+	return sess.PendingKeyedAssetJobs(ripspec.AssetKindEncoded, ripspec.AssetKindSubtitled)
+}
+
+func (h *Handler) logSkippedSubtitleJobs(logger *slog.Logger, skippedCompleted []string) {
 	for _, key := range skippedCompleted {
 		logger.Info("subtitle already completed, skipping",
 			"decision_type", logs.DecisionSubtitleResume,
@@ -79,261 +97,341 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"episode_key", key,
 		)
 	}
+}
 
-	var (
-		attempted   int
-		succeeded   int
-		failedCount int
-	)
-
+func (h *Handler) processSubtitleJobs(ctx context.Context, sess *stage.Session, jobs []stage.AssetJob) (subtitleRunSummary, error) {
+	var summary subtitleRunSummary
 	for _, job := range jobs {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return summary, ctx.Err()
 		}
 
-		key := job.Key
-		asset := job.Input
-		attempted++
-
-		logger.Info("encoded asset selected for transcription",
-			"decision_type", logs.DecisionTranscriptionAsset,
-			"decision_result", asset.Path,
-			"decision_reason", fmt.Sprintf("episode_key=%s", key),
-		)
-
-		item.ProgressMessage = job.PhaseMessage("Generating subtitles (" + key + ")")
-		logger.Info(item.ProgressMessage,
-			"event_type", "subtitle_start",
-		)
-		_ = sess.Progress(job.Percent(0), item.ProgressMessage, stage.WithActiveEpisode(key))
-
-		selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
+		summary.attempted++
+		succeeded, err := h.processSubtitleJob(ctx, sess, job)
 		if err != nil {
-			failedCount++
-			h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("select audio: %v", err))
-			continue
+			return summary, err
 		}
-
-		workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
-		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
-			InputPath:  asset.Path,
-			AudioIndex: selectedAudio.Index,
-			Language:   selectedAudio.Language,
-			OutputDir:  workDir,
-		}, func(phase transcription.Phase, elapsed time.Duration) {
-			message := item.ProgressMessage
-			switch phase {
-			case transcription.PhaseExtract:
-				if elapsed == 0 {
-					message = job.PhaseMessage("Extracting audio (" + key + ")")
-				}
-			case transcription.PhaseTranscribe:
-				if elapsed == 0 {
-					message = job.PhaseMessage("Transcribing audio (" + key + ")")
-				}
-			}
-			_ = sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
-		})
-		if err != nil {
-			failedCount++
-			h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("transcribe: %v", err))
-			continue
-		}
-
-		logger.Info("transcription complete",
-			"event_type", "transcription_complete",
-			"episode_key", key,
-			"segments", result.Segments,
-			"content_duration_s", result.Duration,
-			"extract_time_ms", result.ExtractTime.Milliseconds(),
-			"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
-		)
-
-		videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, asset.Path, result.Duration)
-		logger.Info("subtitle duration selected",
-			"decision_type", "subtitle_duration_source",
-			"decision_result", durationSource,
-			"decision_reason", fmt.Sprintf("video_seconds=%.3f transcript_seconds=%.3f", videoSeconds, result.Duration),
-			"episode_key", key,
-		)
-
-		displayPath := displaySubtitlePath(asset.Path, selectedAudio.Language)
-		formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: result.JSONPath}, workDir, displayPath, videoSeconds, selectedAudio.Language)
-		if err != nil {
-			failedCount++
-			h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("format subtitle: %v", err))
-			continue
-		}
-		logger.Info("subtitle formatting complete",
-			"decision_type", logs.DecisionSubtitleFormatting,
-			"decision_result", formatting.FormatterDecision,
-			"decision_reason", fmt.Sprintf("original_segments=%d filtered_segments=%d text_rules_removed=%d heuristic_removed=%d split_cues=%d wrapped_cues=%d retimed_cues=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics, formatting.SplitCues, formatting.WrappedCues, formatting.RetimedCues),
-			"episode_key", key,
-			"subtitle_file", formatting.DisplayPath,
-		)
-		logger.Info("hallucination filter applied",
-			"decision_type", logs.DecisionHallucinationFilter,
-			"decision_result", "filtered",
-			"decision_reason", fmt.Sprintf("original=%d filtered=%d text_rules_removed=%d heuristic_removed=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics),
-			"episode_key", key,
-		)
-
-		formattedCues, readErr := srtutil.ParseFile(formatting.DisplayPath)
-		if readErr != nil {
-			failedCount++
-			h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("read formatted subtitle: %v", readErr))
-			continue
-		}
-		if len(formattedCues) == 0 {
-			failedCount++
-			h.recordSubtitleFailure(logger, sess, key, "formatted subtitle produced zero cues")
-			continue
-		}
-
-		validation := validateCuesDetailed(formattedCues, videoSeconds)
-		stats := validation.Stats
-		logger.Info("SRT validation QC summary",
-			"decision_type", logs.DecisionSRTValidation,
-			"decision_result", "qc_summary",
-			"decision_reason", fmt.Sprintf("cue_count=%d max_cps=%.2f p95_cps=%.2f high_cps_cues=%d short_duration_cues=%d long_duration_cues=%d overlong_line_cues=%d unbalanced_line_break_cues=%d split_cues=%d wrapped_cues=%d retimed_cues=%d", stats.CueCount, stats.MaxCPS, stats.P95CPS, stats.HighCPSCues, stats.ShortDurationCues, stats.LongDurationCues, stats.OverlongLineCues, stats.UnbalancedLineBreakCues, formatting.SplitCues, formatting.WrappedCues, formatting.RetimedCues),
-			"episode_key", key,
-			"cue_count", stats.CueCount,
-			"max_cps", stats.MaxCPS,
-			"p95_cps", stats.P95CPS,
-			"high_cps_cues", stats.HighCPSCues,
-			"short_duration_cues", stats.ShortDurationCues,
-			"long_duration_cues", stats.LongDurationCues,
-			"overlong_line_cues", stats.OverlongLineCues,
-			"unbalanced_line_break_cues", stats.UnbalancedLineBreakCues,
-			"too_many_line_cues", stats.TooManyLineCues,
-			"split_cues", formatting.SplitCues,
-			"wrapped_cues", formatting.WrappedCues,
-			"retimed_cues", formatting.RetimedCues,
-		)
-		reviewIssueSet := make(map[string]bool, len(validation.ReviewIssues))
-		for _, issue := range validation.ReviewIssues {
-			reviewIssueSet[issue] = true
-		}
-		for _, issue := range validation.Issues {
-			requiresReview := reviewIssueSet[issue]
-			if !requiresReview {
-				logger.Debug("SRT validation observation",
-					"decision_type", logs.DecisionSRTValidation,
-					"decision_result", issue,
-					"decision_reason", "automated quality check below review threshold",
-					"episode_key", key,
-					"requires_review", false,
-				)
-				continue
-			}
-			logger.Info("SRT validation issue",
-				"decision_type", logs.DecisionSRTValidation,
-				"decision_result", issue,
-				"decision_reason", "automated quality check requires review",
-				"episode_key", key,
-				"requires_review", true,
-			)
-			sess.AddEpisodeReviewReason(key, "Subtitle validation: "+issue)
-			sess.AddReviewReason("srt_validation: " + issue + " (" + key + ")")
-		}
-
-		record := ripspec.SubtitleGenRecord{
-			EpisodeKey:       key,
-			Source:           "whisperx",
-			SubtitlePath:     formatting.DisplayPath,
-			Segments:         len(formattedCues),
-			DurationSec:      videoSeconds,
-			Language:         selectedAudio.Language,
-			ValidationResult: subtitleValidationResult(validation),
-			QCObservations:   validation.Issues,
-			ReviewIssues:     validation.ReviewIssues,
-			SevereIssues:     validation.SevereIssues,
-		}
-		if len(validation.SevereIssues) > 0 {
-			upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
-			logger.Warn("subtitle validation failed",
-				"decision_type", logs.DecisionSRTValidation,
-				"decision_result", "failed",
-				"decision_reason", strings.Join(validation.SevereIssues, ", "),
-				"episode_key", key,
-				"impact", "subtitle job failed; mux skipped",
-			)
-			failedCount++
-			h.recordSubtitleFailure(logger, sess, key, "severe subtitle validation: "+strings.Join(validation.SevereIssues, ", "))
-			continue
-		}
-
-		if h.osClient != nil && h.cfg.Subtitles.OpenSubtitlesEnabled && env.Attributes.HasForcedSubtitleTrack {
-			h.tryForcedSubs(ctx, logger, env, key, asset.Path, &record)
+		if succeeded {
+			summary.succeeded++
 		} else {
-			var reason string
-			switch {
-			case h.osClient == nil:
-				reason = "opensubtitles client unavailable"
-			case !h.cfg.Subtitles.OpenSubtitlesEnabled:
-				reason = "opensubtitles_enabled is false"
-			default:
-				reason = "no forced subtitle track on disc"
-			}
-			logger.Info("forced subtitle search skipped",
-				"decision_type", logs.DecisionForcedSubtitleSearch,
-				"decision_result", "skipped",
-				"decision_reason", reason,
-				"episode_key", key,
-			)
-		}
-
-		upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
-
-		srtPath := formatting.DisplayPath
-		subtitledPath := asset.Path
-		subtitlesMuxed := false
-		if !h.cfg.Subtitles.MuxIntoMKV {
-			logger.Info("subtitle mux skipped",
-				"decision_type", logs.DecisionSubtitleMux,
-				"decision_result", "skipped",
-				"decision_reason", "mux_into_mkv is disabled",
-			)
-		} else {
-			muxedPath, err := h.muxSubtitles(ctx, logger, asset.Path, srtPath, key, selectedAudio.Language)
-			if err != nil {
-				logger.Warn("subtitle mux failed",
-					"event_type", "mux_error",
-					"error_hint", err.Error(),
-					"impact", "subtitle remains as sidecar",
-				)
-			} else {
-				subtitledPath = muxedPath
-				subtitlesMuxed = true
-			}
-		}
-
-		succeeded++
-		if err := sess.Progress(job.CompletionPercent(), job.PhaseMessage("Generated subtitles ("+key+")")); err != nil {
-			logger.Warn("progress persistence failed",
-				"event_type", "progress_persist_failed",
-				"error_hint", "subtitle completion progress not persisted",
-				"impact", "subtitle progress not reflected in queue",
-				"error", err,
-			)
-		}
-		if err := sess.SaveAssetSuccess(ripspec.AssetKindSubtitled, ripspec.Asset{
-			EpisodeKey:     key,
-			Path:           subtitledPath,
-			SubtitlesMuxed: subtitlesMuxed,
-		}); err != nil {
-			return err
+			summary.failed++
 		}
 	}
+	return summary, nil
+}
 
+func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, job stage.AssetJob) (bool, error) {
+	logger := sess.Logger
+	key := job.Key
+	asset := job.Input
+
+	h.startSubtitleJob(sess, job)
+
+	selectedAudio, transcript, workDir, err := h.transcribeSubtitleJob(ctx, sess, job)
+	if err != nil {
+		h.recordSubtitleFailure(logger, sess, key, err.Error())
+		return false, nil
+	}
+
+	record, err := h.createDisplaySubtitle(ctx, sess, job, selectedAudio, transcript, workDir)
+	if err != nil {
+		h.recordSubtitleFailure(logger, sess, key, err.Error())
+		return false, nil
+	}
+	if len(record.SevereIssues) > 0 {
+		severeReason := strings.Join(record.SevereIssues, ", ")
+		upsertSubtitleGenRecord(&sess.Env.Attributes.SubtitleGenerationResults, record)
+		logger.Warn("subtitle validation failed",
+			"decision_type", logs.DecisionSRTValidation,
+			"decision_result", "failed",
+			"decision_reason", severeReason,
+			"episode_key", key,
+			"impact", "subtitle job failed; mux skipped",
+		)
+		h.recordSubtitleFailure(logger, sess, key, "severe subtitle validation: "+severeReason)
+		return false, nil
+	}
+
+	h.applyForcedSubtitleDecision(ctx, logger, sess.Env, key, asset.Path, &record)
+	upsertSubtitleGenRecord(&sess.Env.Attributes.SubtitleGenerationResults, record)
+
+	subtitledPath, subtitlesMuxed := h.resolveSubtitledOutput(ctx, logger, asset.Path, record.SubtitlePath, key, selectedAudio.Language)
+	if err := h.saveSubtitleJobSuccess(logger, sess, job, subtitledPath, subtitlesMuxed); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
+	logger := sess.Logger
+	item := sess.Item
+	key := job.Key
+
+	logger.Info("encoded asset selected for transcription",
+		"decision_type", logs.DecisionTranscriptionAsset,
+		"decision_result", job.Input.Path,
+		"decision_reason", fmt.Sprintf("episode_key=%s", key),
+	)
+
+	item.ProgressMessage = job.PhaseMessage("Generating subtitles (" + key + ")")
+	logger.Info(item.ProgressMessage,
+		"event_type", "subtitle_start",
+	)
+	_ = sess.Progress(job.Percent(0), item.ProgressMessage, stage.WithActiveEpisode(key))
+}
+
+func (h *Handler) transcribeSubtitleJob(
+	ctx context.Context,
+	sess *stage.Session,
+	job stage.AssetJob,
+) (transcription.SelectedAudio, *transcription.TranscribeResult, string, error) {
+	item := sess.Item
+	asset := job.Input
+	key := job.Key
+
+	selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
+	if err != nil {
+		return transcription.SelectedAudio{}, nil, "", fmt.Errorf("select audio: %w", err)
+	}
+
+	workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
+	result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+		InputPath:  asset.Path,
+		AudioIndex: selectedAudio.Index,
+		Language:   selectedAudio.Language,
+		OutputDir:  workDir,
+	}, func(phase transcription.Phase, elapsed time.Duration) {
+		message := item.ProgressMessage
+		switch phase {
+		case transcription.PhaseExtract:
+			if elapsed == 0 {
+				message = job.PhaseMessage("Extracting audio (" + key + ")")
+			}
+		case transcription.PhaseTranscribe:
+			if elapsed == 0 {
+				message = job.PhaseMessage("Transcribing audio (" + key + ")")
+			}
+		}
+		_ = sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
+	})
+	if err != nil {
+		return transcription.SelectedAudio{}, nil, "", fmt.Errorf("transcribe: %w", err)
+	}
+
+	sess.Logger.Info("transcription complete",
+		"event_type", "transcription_complete",
+		"episode_key", key,
+		"segments", result.Segments,
+		"content_duration_s", result.Duration,
+		"extract_time_ms", result.ExtractTime.Milliseconds(),
+		"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
+	)
+
+	return selectedAudio, result, workDir, nil
+}
+
+func (h *Handler) createDisplaySubtitle(
+	ctx context.Context,
+	sess *stage.Session,
+	job stage.AssetJob,
+	selectedAudio transcription.SelectedAudio,
+	transcript *transcription.TranscribeResult,
+	workDir string,
+) (ripspec.SubtitleGenRecord, error) {
+	logger := sess.Logger
+	key := job.Key
+	asset := job.Input
+
+	videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, asset.Path, transcript.Duration)
+	logger.Info("subtitle duration selected",
+		"decision_type", "subtitle_duration_source",
+		"decision_result", durationSource,
+		"decision_reason", fmt.Sprintf("video_seconds=%.3f transcript_seconds=%.3f", videoSeconds, transcript.Duration),
+		"episode_key", key,
+	)
+
+	displayPath := displaySubtitlePath(asset.Path, selectedAudio.Language)
+	formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: transcript.JSONPath}, workDir, displayPath, videoSeconds, selectedAudio.Language)
+	if err != nil {
+		return ripspec.SubtitleGenRecord{}, fmt.Errorf("format subtitle: %w", err)
+	}
+	h.logSubtitleFormatting(logger, key, formatting)
+
+	formattedCues, readErr := srtutil.ParseFile(formatting.DisplayPath)
+	if readErr != nil {
+		return ripspec.SubtitleGenRecord{}, fmt.Errorf("read formatted subtitle: %w", readErr)
+	}
+	if len(formattedCues) == 0 {
+		return ripspec.SubtitleGenRecord{}, fmt.Errorf("formatted subtitle produced zero cues")
+	}
+
+	validation := validateCuesDetailed(formattedCues, videoSeconds)
+	h.logSubtitleValidation(logger, key, validation, formatting)
+	h.applySubtitleReviewIssues(logger, sess, key, validation)
+
+	record := ripspec.SubtitleGenRecord{
+		EpisodeKey:       key,
+		Source:           "whisperx",
+		SubtitlePath:     formatting.DisplayPath,
+		Segments:         len(formattedCues),
+		DurationSec:      videoSeconds,
+		Language:         selectedAudio.Language,
+		ValidationResult: subtitleValidationResult(validation),
+		QCObservations:   validation.Issues,
+		ReviewIssues:     validation.ReviewIssues,
+		SevereIssues:     validation.SevereIssues,
+	}
+
+	return record, nil
+}
+
+func (h *Handler) logSubtitleFormatting(logger *slog.Logger, key string, formatting formatResult) {
+	logger.Info("subtitle formatting complete",
+		"decision_type", logs.DecisionSubtitleFormatting,
+		"decision_result", formatting.FormatterDecision,
+		"decision_reason", fmt.Sprintf("original_segments=%d filtered_segments=%d text_rules_removed=%d heuristic_removed=%d split_cues=%d wrapped_cues=%d retimed_cues=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics, formatting.SplitCues, formatting.WrappedCues, formatting.RetimedCues),
+		"episode_key", key,
+		"subtitle_file", formatting.DisplayPath,
+	)
+	logger.Info("hallucination filter applied",
+		"decision_type", logs.DecisionHallucinationFilter,
+		"decision_result", "filtered",
+		"decision_reason", fmt.Sprintf("original=%d filtered=%d text_rules_removed=%d heuristic_removed=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics),
+		"episode_key", key,
+	)
+}
+
+func (h *Handler) logSubtitleValidation(logger *slog.Logger, key string, validation validationResult, formatting formatResult) {
+	stats := validation.Stats
+	logger.Info("SRT validation QC summary",
+		"decision_type", logs.DecisionSRTValidation,
+		"decision_result", "qc_summary",
+		"decision_reason", fmt.Sprintf("cue_count=%d max_cps=%.2f p95_cps=%.2f high_cps_cues=%d short_duration_cues=%d long_duration_cues=%d overlong_line_cues=%d unbalanced_line_break_cues=%d split_cues=%d wrapped_cues=%d retimed_cues=%d", stats.CueCount, stats.MaxCPS, stats.P95CPS, stats.HighCPSCues, stats.ShortDurationCues, stats.LongDurationCues, stats.OverlongLineCues, stats.UnbalancedLineBreakCues, formatting.SplitCues, formatting.WrappedCues, formatting.RetimedCues),
+		"episode_key", key,
+		"cue_count", stats.CueCount,
+		"max_cps", stats.MaxCPS,
+		"p95_cps", stats.P95CPS,
+		"high_cps_cues", stats.HighCPSCues,
+		"short_duration_cues", stats.ShortDurationCues,
+		"long_duration_cues", stats.LongDurationCues,
+		"overlong_line_cues", stats.OverlongLineCues,
+		"unbalanced_line_break_cues", stats.UnbalancedLineBreakCues,
+		"too_many_line_cues", stats.TooManyLineCues,
+		"split_cues", formatting.SplitCues,
+		"wrapped_cues", formatting.WrappedCues,
+		"retimed_cues", formatting.RetimedCues,
+	)
+}
+
+func (h *Handler) applySubtitleReviewIssues(logger *slog.Logger, sess *stage.Session, key string, validation validationResult) {
+	reviewIssueSet := make(map[string]bool, len(validation.ReviewIssues))
+	for _, issue := range validation.ReviewIssues {
+		reviewIssueSet[issue] = true
+	}
+	for _, issue := range validation.Issues {
+		requiresReview := reviewIssueSet[issue]
+		if !requiresReview {
+			logger.Debug("SRT validation observation",
+				"decision_type", logs.DecisionSRTValidation,
+				"decision_result", issue,
+				"decision_reason", "automated quality check below review threshold",
+				"episode_key", key,
+				"requires_review", false,
+			)
+			continue
+		}
+		logger.Info("SRT validation issue",
+			"decision_type", logs.DecisionSRTValidation,
+			"decision_result", issue,
+			"decision_reason", "automated quality check requires review",
+			"episode_key", key,
+			"requires_review", true,
+		)
+		sess.AddEpisodeReviewReason(key, "Subtitle validation: "+issue)
+		sess.AddReviewReason("srt_validation: " + issue + " (" + key + ")")
+	}
+}
+
+func (h *Handler) applyForcedSubtitleDecision(
+	ctx context.Context,
+	logger *slog.Logger,
+	env *ripspec.Envelope,
+	key string,
+	assetPath string,
+	record *ripspec.SubtitleGenRecord,
+) {
+	if h.osClient != nil && h.cfg.Subtitles.OpenSubtitlesEnabled && env.Attributes.HasForcedSubtitleTrack {
+		h.tryForcedSubs(ctx, logger, env, key, assetPath, record)
+		return
+	}
+
+	var reason string
+	switch {
+	case h.osClient == nil:
+		reason = "opensubtitles client unavailable"
+	case !h.cfg.Subtitles.OpenSubtitlesEnabled:
+		reason = "opensubtitles_enabled is false"
+	default:
+		reason = "no forced subtitle track on disc"
+	}
+	logger.Info("forced subtitle search skipped",
+		"decision_type", logs.DecisionForcedSubtitleSearch,
+		"decision_result", "skipped",
+		"decision_reason", reason,
+		"episode_key", key,
+	)
+}
+
+func (h *Handler) resolveSubtitledOutput(ctx context.Context, logger *slog.Logger, assetPath, srtPath, key, language string) (string, bool) {
+	subtitledPath := assetPath
+	subtitlesMuxed := false
+	if !h.cfg.Subtitles.MuxIntoMKV {
+		logger.Info("subtitle mux skipped",
+			"decision_type", logs.DecisionSubtitleMux,
+			"decision_result", "skipped",
+			"decision_reason", "mux_into_mkv is disabled",
+		)
+		return subtitledPath, subtitlesMuxed
+	}
+
+	muxedPath, err := h.muxSubtitles(ctx, logger, assetPath, srtPath, key, language)
+	if err != nil {
+		logger.Warn("subtitle mux failed",
+			"event_type", "mux_error",
+			"error_hint", err.Error(),
+			"impact", "subtitle remains as sidecar",
+		)
+		return subtitledPath, subtitlesMuxed
+	}
+	return muxedPath, true
+}
+
+func (h *Handler) saveSubtitleJobSuccess(logger *slog.Logger, sess *stage.Session, job stage.AssetJob, subtitledPath string, subtitlesMuxed bool) error {
+	key := job.Key
+	if err := sess.Progress(job.CompletionPercent(), job.PhaseMessage("Generated subtitles ("+key+")")); err != nil {
+		logger.Warn("progress persistence failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "subtitle completion progress not persisted",
+			"impact", "subtitle progress not reflected in queue",
+			"error", err,
+		)
+	}
+	return sess.SaveAssetSuccess(ripspec.AssetKindSubtitled, ripspec.Asset{
+		EpisodeKey:     key,
+		Path:           subtitledPath,
+		SubtitlesMuxed: subtitlesMuxed,
+	})
+}
+
+func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSummary) error {
 	if err := sess.Save(); err != nil {
 		return err
 	}
-	if attempted > 0 && succeeded == 0 && failedCount > 0 {
-		return fmt.Errorf("all %d subtitle job(s) failed", attempted)
+	if summary.attempted > 0 && summary.succeeded == 0 && summary.failed > 0 {
+		return fmt.Errorf("all %d subtitle job(s) failed", summary.attempted)
 	}
 
-	logger.Info("subtitle stage completed", "event_type", "stage_complete", "stage", "subtitling")
+	sess.Logger.Info("subtitle stage completed", "event_type", "stage_complete", "stage", "subtitling")
 	return nil
 }
 
