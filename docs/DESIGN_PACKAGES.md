@@ -38,7 +38,7 @@ internal/
   subtitle/             Stage: subtitle generation (display formatting/regrouping, forced subs, SRT validation/muxing)
   organizer/            Stage: organization (library copy, review routing, Jellyfin)
 
-  transcription/        Shared WhisperX canonical transcription service (no shared cache)
+  transcription/        Shared WhisperX canonical transcription service
 
   makemkv/              MakeMKV CLI wrapper (scan, rip, robot format parser)
   tmdb/                 TMDB REST API client

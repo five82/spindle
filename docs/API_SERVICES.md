@@ -238,8 +238,7 @@ Behavior:
   in the stage work area remain unchanged.
 - Subtitle filtering and validation use the actual encoded-media duration when
   available; transcript-tail duration is only a fallback.
-- If formatting fails, that subtitle job fails explicitly rather than silently
-  falling back to the old raw-wrap behavior.
+- If formatting fails, that subtitle job fails explicitly.
 
 ### Environment Handling
 

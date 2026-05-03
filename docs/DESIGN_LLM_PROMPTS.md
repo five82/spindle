@@ -173,13 +173,11 @@ cross-product verification across a season.
 ### 2.6 Failure Behavior
 
 LLM call failure during verification leaves the challenged pair unresolved and
-flags the item for review. In the content-first rewrite, the LLM acts as a
-narrow accept/reject gate for already-proposed ambiguous pairs; it does not
-numerically boost `match_confidence`, and it does not trigger a second global
-matching pass.
+flags the item for review. The LLM acts as a narrow accept/reject gate for
+already-proposed ambiguous pairs; it does not numerically boost
+`match_confidence`, and it does not trigger a second global matching pass.
 
-There is no LLM cross-matching fallback in the production TV matcher path.
-Ambiguity that remains after verification is sent to review.
+Remaining ambiguity after verification is sent to review.
 
 ---
 

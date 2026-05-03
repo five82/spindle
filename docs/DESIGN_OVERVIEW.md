@@ -360,7 +360,7 @@ these rules:
 |-------|-----------------|
 | Identification | MakeMKV scan killed. No cleanup needed. |
 | Ripping | MakeMKV rip killed. Partial files left in staging (overwritten on retry). |
-| Episode ID | WhisperX killed. Transcripts are regenerated fresh on retry (no shared cache). |
+| Episode ID | WhisperX killed. Transcription restarts on retry. |
 | Encoding | Drapto/FFmpeg killed. Partial output left. Resume skips completed episodes. |
 | Audio Analysis | FFmpeg/WhisperX killed. No persistent side effects. |
 | Subtitling | WhisperX killed. Partial SRTs left. Resume skips completed episodes. |

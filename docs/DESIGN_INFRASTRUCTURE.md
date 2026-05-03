@@ -776,8 +776,7 @@ config file. These include: `config init` and help commands.
 
 WhisperX transcription is used by three subsystems: episode identification,
 commentary detection, and subtitle generation. A shared `transcription` package
-provides one wrapper/profile and output contract for all callers. It does not
-provide cross-stage transcript caching.
+provides one wrapper/profile and output contract for all callers.
 
 ### 9.2 Interface
 

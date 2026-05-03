@@ -78,7 +78,7 @@ set reconciliation, the item is sent to review.
 
 `match_confidence` is derived from deterministic matcher evidence.
 LLM output may gate acceptance of an ambiguous pair, but LLM confidence does not
-numerically inflate stored `match_confidence` in the initial rewrite.
+numerically inflate stored `match_confidence`.
 
 ---
 
@@ -153,12 +153,6 @@ For each ripped episode asset:
 3. Read the generated SRT
 4. Normalize plain text for fingerprinting
 5. Store the transcript path and fingerprint
-
-### 5.3 Cache policy
-
-Episode-identification transcripts are not persisted in a shared WhisperX cache.
-The matcher transcribes the current ripped asset directly so stale transcripts
-from earlier title-selection decisions cannot contaminate a retry.
 
 ---
 
@@ -424,7 +418,7 @@ The LLM returns:
 A positive LLM result allows an already-proposed ambiguous pair to be accepted
 as describing the same episode content.
 It does **not** replace canonical episode-numbering rules, and it does **not**
-numerically raise stored `match_confidence` in the initial rewrite.
+numerically raise stored `match_confidence`.
 
 The LLM is treated as a narrow boolean verification gate for ambiguous pairs.
 Stored `match_confidence` remains fully deterministic.
@@ -503,8 +497,7 @@ These are not the same thing.
 
 ### 13.2 Deterministic confidence inputs
 
-In the initial rewrite, `match_confidence` is derived from deterministic
-signals only, such as:
+`match_confidence` is derived from deterministic signals only, such as:
 
 - raw similarity score
 - rip-side runner-up margin
@@ -518,8 +511,7 @@ signals only, such as:
 ### 13.3 LLM verification is not part of numeric confidence
 
 An LLM `same_episode=true` result may allow an ambiguous pair to be accepted,
-but it does not numerically increase stored `match_confidence` in the initial
-rewrite.
+but it does not numerically increase stored `match_confidence`.
 
 ---
 
