@@ -13,7 +13,9 @@ import (
 
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/opensubtitles"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/textutil"
 	"github.com/five82/spindle/internal/tmdb"
 )
@@ -126,6 +128,41 @@ func TestSelectReferenceCandidateMarksSuspectWhenNoGoodFallbackExists(t *testing
 	}
 	if !choice.Suspect {
 		t.Fatal("expected single season-pack candidate to be suspect")
+	}
+}
+
+func TestHasExactEpisodeMarkerRequiresEpisodeBoundary(t *testing.T) {
+	tests := []struct {
+		text    string
+		season  int
+		episode int
+		want    bool
+	}{
+		{text: "Show.S01E01.720p", season: 1, episode: 1, want: true},
+		{text: "Show 1x1 HDTV", season: 1, episode: 1, want: true},
+		{text: "Show - 1.01 - Pilot", season: 1, episode: 1, want: true},
+		{text: "Show.S01E10.720p", season: 1, episode: 1, want: false},
+		{text: "Show 1x10 HDTV", season: 1, episode: 1, want: false},
+		{text: "Show - 1.10 - Finale", season: 1, episode: 1, want: false},
+	}
+	for _, tt := range tests {
+		got := hasExactEpisodeMarker(tt.text, tt.season, tt.episode)
+		if got != tt.want {
+			t.Fatalf("hasExactEpisodeMarker(%q, %d, %d) = %v, want %v", tt.text, tt.season, tt.episode, got, tt.want)
+		}
+	}
+}
+
+func TestRunSkipsNonTVContent(t *testing.T) {
+	env := ripspec.Envelope{Version: ripspec.CurrentVersion, Metadata: ripspec.Metadata{MediaType: "unknown"}}
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{}
+	ctx := stage.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := h.Run(ctx, &queue.Item{RipSpecData: string(data)}); err != nil {
+		t.Fatalf("Run returned error for non-TV content: %v", err)
 	}
 }
 

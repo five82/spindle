@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -30,11 +31,11 @@ type candidateChoice struct {
 }
 
 type candidateDiagnostics struct {
-	HasTargetTitle     bool
-	HasExactMarker     bool
+	HasTargetTitle      bool
+	HasExactMarker      bool
 	HasConflictingTitle bool
-	MultiEpisodePack   bool
-	NonHI              bool
+	MultiEpisodePack    bool
+	NonHI               bool
 }
 
 // fetchReferenceFingerprints fetches OpenSubtitles reference subtitles for the
@@ -135,11 +136,11 @@ func selectReferenceCandidate(results []opensubtitles.SubtitleResult, season *tm
 	for i := range results {
 		score, diag := scoreSubtitleCandidate(results[i], season, seasonNum, episodeNum)
 		evals = append(evals, candidateChoice{
-			Result:       &results[i],
-			Score:        score,
-			Suspect:      isSuspectCandidate(diag, score),
-			Reason:       suspectReason(diag, score),
-			Diagnostics:  diag,
+			Result:      &results[i],
+			Score:       score,
+			Suspect:     isSuspectCandidate(diag, score),
+			Reason:      suspectReason(diag, score),
+			Diagnostics: diag,
 		})
 	}
 	sort.Slice(evals, func(i, j int) bool {
@@ -276,19 +277,20 @@ func normalizeCandidateText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+var episodeMarkerPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?:^|[^a-z0-9])s0*(\d{1,2})e0*(\d{1,3})(?:$|[^a-z0-9])`),
+	regexp.MustCompile(`(?:^|[^a-z0-9])0*(\d{1,2})[x.]0*(\d{1,3})(?:$|[^a-z0-9])`),
+}
+
 func hasExactEpisodeMarker(text string, seasonNum, episodeNum int) bool {
 	text = strings.ToLower(text)
-	patterns := []string{
-		fmt.Sprintf("s%02de%02d", seasonNum, episodeNum),
-		fmt.Sprintf("s%de%d", seasonNum, episodeNum),
-		fmt.Sprintf("%dx%02d", seasonNum, episodeNum),
-		fmt.Sprintf("%dx%d", seasonNum, episodeNum),
-		fmt.Sprintf("%d.%02d", seasonNum, episodeNum),
-		fmt.Sprintf("%d.%d", seasonNum, episodeNum),
-	}
-	for _, pattern := range patterns {
-		if strings.Contains(text, pattern) {
-			return true
+	for _, pattern := range episodeMarkerPatterns {
+		for _, match := range pattern.FindAllStringSubmatch(text, -1) {
+			season, seasonErr := strconv.Atoi(match[1])
+			episode, episodeErr := strconv.Atoi(match[2])
+			if seasonErr == nil && episodeErr == nil && season == seasonNum && episode == episodeNum {
+				return true
+			}
 		}
 	}
 	return false

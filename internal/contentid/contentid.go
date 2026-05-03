@@ -64,11 +64,24 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return err
 	}
 
-	if env.Metadata.MediaType == "movie" {
+	mediaType := strings.ToLower(strings.TrimSpace(env.Metadata.MediaType))
+	switch mediaType {
+	case "tv":
+	case "movie":
 		logger.Info("skipping episode identification for movie",
 			"decision_type", logs.DecisionEpisodeIDSkip,
 			"decision_result", "skipped",
 			"decision_reason", "media type is movie",
+		)
+		return nil
+	default:
+		if mediaType == "" {
+			mediaType = "unknown"
+		}
+		logger.Info("skipping episode identification for non-TV content",
+			"decision_type", logs.DecisionEpisodeIDSkip,
+			"decision_result", "skipped",
+			"decision_reason", fmt.Sprintf("media type is %s", mediaType),
 		)
 		return nil
 	}
@@ -364,9 +377,7 @@ func (h *Handler) applyMatches(
 		ep.MatchScore = m.Score
 		ep.MatchConfidence = m.Confidence
 		ep.Key = ripspec.EpisodeKey(seasonNum, m.TargetEpisode)
-		if ep.Key != "" && ep.Key != originalKey {
-			assetKeyRemap[originalKey] = ep.Key
-		}
+		recordAssetKeyRemap(assetKeyRemap, originalKey, ep.Key)
 		logger.Info("episode matched",
 			"decision_type", logs.DecisionEpisodeMatch,
 			"decision_result", fmt.Sprintf("%s -> E%02d", originalKey, m.TargetEpisode),
@@ -461,6 +472,18 @@ func hasSuspectAcceptedMatch(matches []matchResult) bool {
 	return false
 }
 
+func recordAssetKeyRemap(remap map[string]string, oldKey, newKey string) {
+	if oldKey == "" || newKey == "" || oldKey == newKey {
+		return
+	}
+	remap[oldKey] = newKey
+	for priorOld, priorNew := range remap {
+		if priorNew == oldKey {
+			remap[priorOld] = newKey
+		}
+	}
+}
+
 func applyOpeningDoubleEpisode(logger *slog.Logger, env *ripspec.Envelope, seasonNum, discNumber int, details map[int]tmdb.Episode, assetKeyRemap map[string]string) {
 	if discNumber != 1 || !probableOpeningDoubleEpisode(env.Episodes) || len(env.Episodes) < 3 {
 		return
@@ -489,14 +512,7 @@ func applyOpeningDoubleEpisode(logger *slog.Logger, env *ripspec.Envelope, seaso
 			env.Episodes[0].EpisodeTitle = strings.TrimSpace(ep1.Name + " / " + ep2.Name)
 		}
 	}
-	if env.Episodes[0].Key != originalKey {
-		assetKeyRemap[originalKey] = env.Episodes[0].Key
-		for old, next := range assetKeyRemap {
-			if next == originalKey {
-				assetKeyRemap[old] = env.Episodes[0].Key
-			}
-		}
-	}
+	recordAssetKeyRemap(assetKeyRemap, originalKey, env.Episodes[0].Key)
 	if start == 1 {
 		for i := 1; i < len(env.Episodes); i++ {
 			oldKey := env.Episodes[i].Key
@@ -506,14 +522,7 @@ func applyOpeningDoubleEpisode(logger *slog.Logger, env *ripspec.Envelope, seaso
 				env.Episodes[i].EpisodeTitle = strings.TrimSpace(title.Name)
 				env.Episodes[i].EpisodeAirDate = strings.TrimSpace(title.AirDate)
 			}
-			if env.Episodes[i].Key != oldKey {
-				assetKeyRemap[oldKey] = env.Episodes[i].Key
-				for old, next := range assetKeyRemap {
-					if next == oldKey {
-						assetKeyRemap[old] = env.Episodes[i].Key
-					}
-				}
-			}
+			recordAssetKeyRemap(assetKeyRemap, oldKey, env.Episodes[i].Key)
 		}
 	}
 	logger.Info("opening double-length episode inferred",
