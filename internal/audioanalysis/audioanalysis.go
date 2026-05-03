@@ -60,7 +60,6 @@ type commentaryLLMResponse struct {
 // Handler implements stage.Handler for audio analysis.
 type Handler struct {
 	cfg         *config.Config
-	store       *queue.Store
 	llmClient   *llm.Client
 	transcriber *transcription.Service
 }
@@ -68,24 +67,20 @@ type Handler struct {
 // New creates an audio analysis handler.
 func New(
 	cfg *config.Config,
-	store *queue.Store,
+	_ *queue.Store,
 	llmClient *llm.Client,
 	transcriber *transcription.Service,
 ) *Handler {
 	return &Handler{
 		cfg:         cfg,
-		store:       store,
 		llmClient:   llmClient,
 		transcriber: transcriber,
 	}
 }
 
 // Run executes the audio analysis stage.
-func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	sess, err := stage.NewSession(ctx, h.store, item)
-	if err != nil {
-		return err
-	}
+func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
+	item := sess.Item
 	logger := sess.Logger
 	logger.Info("audio analysis stage started", "event_type", "stage_start", "stage", "audio_analysis")
 	env := sess.Env

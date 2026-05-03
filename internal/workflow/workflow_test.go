@@ -12,15 +12,16 @@ import (
 
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/stage"
 )
 
 type stubHandler struct {
-	run func(context.Context, *queue.Item) error
+	run func(context.Context, *stage.Session) error
 }
 
-func (h stubHandler) Run(ctx context.Context, item *queue.Item) error {
+func (h stubHandler) Run(ctx context.Context, sess *stage.Session) error {
 	if h.run != nil {
-		return h.run(ctx, item)
+		return h.run(ctx, sess)
 	}
 	return nil
 }

@@ -721,6 +721,36 @@ func TestPersistRipSpec(t *testing.T) {
 	}
 }
 
+func TestPersistRipSpecDoesNotChangeLifecycleFields(t *testing.T) {
+	store := openTestStore(t)
+	item, _ := store.NewDisc("Test", "fp1")
+	item.Stage = StageEncoding
+	item.InProgress = 1
+	item.FailedAtStage = string(StageRipping)
+	item.ErrorMessage = "existing error"
+	if err := store.Update(item); err != nil {
+		t.Fatalf("initial update: %v", err)
+	}
+
+	item.Stage = StageCompleted
+	item.InProgress = 0
+	item.FailedAtStage = ""
+	item.ErrorMessage = ""
+	item.AppendReviewReason("needs review")
+	enc := &stubEncoder{data: `{"version":1}`}
+	if err := PersistRipSpec(context.Background(), store, item, enc); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+
+	got, _ := store.GetByID(item.ID)
+	if got.Stage != StageEncoding || got.InProgress != 1 || got.FailedAtStage != string(StageRipping) || got.ErrorMessage != "existing error" {
+		t.Fatalf("lifecycle fields changed: stage=%q in_progress=%d failed_at=%q error=%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
+	}
+	if got.RipSpecData != `{"version":1}` || got.NeedsReview != 1 {
+		t.Fatalf("work state not persisted: rip_spec=%q needs_review=%d", got.RipSpecData, got.NeedsReview)
+	}
+}
+
 func TestDisplayTitleUsesDiscTitleFirst(t *testing.T) {
 	item := &Item{DiscTitle: "Avatar (2009)", ID: 7}
 	if got := item.DisplayTitle(); got != "Avatar (2009)" {

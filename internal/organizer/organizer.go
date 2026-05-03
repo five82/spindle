@@ -39,11 +39,8 @@ func New(cfg *config.Config, store *queue.Store, jfClient *jellyfin.Client, noti
 }
 
 // Run executes the organization stage.
-func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	sess, err := stage.NewSession(ctx, h.store, item)
-	if err != nil {
-		return err
-	}
+func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
+	item := sess.Item
 	logger := sess.Logger
 	logger.Info("organization stage started", "event_type", "stage_start", "stage", "organizing")
 	env := sess.Env

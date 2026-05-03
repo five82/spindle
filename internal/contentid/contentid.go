@@ -24,7 +24,6 @@ import (
 // Handler implements stage.Handler for episode identification.
 type Handler struct {
 	cfg         *config.Config
-	store       *queue.Store
 	llmClient   *llm.Client
 	osClient    *opensubtitles.Client
 	tmdbClient  *tmdb.Client
@@ -35,7 +34,7 @@ type Handler struct {
 // New creates an episode identification handler.
 func New(
 	cfg *config.Config,
-	store *queue.Store,
+	_ *queue.Store,
 	llmClient *llm.Client,
 	osClient *opensubtitles.Client,
 	tmdbClient *tmdb.Client,
@@ -43,7 +42,6 @@ func New(
 ) *Handler {
 	return &Handler{
 		cfg:         cfg,
-		store:       store,
 		llmClient:   llmClient,
 		osClient:    osClient,
 		tmdbClient:  tmdbClient,
@@ -56,11 +54,8 @@ func New(
 var _ stage.Handler = (*Handler)(nil)
 
 // Run executes the episode identification stage.
-func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	sess, err := stage.NewSession(ctx, h.store, item)
-	if err != nil {
-		return err
-	}
+func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
+	item := sess.Item
 	logger := sess.Logger
 	env := sess.Env
 

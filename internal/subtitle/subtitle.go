@@ -35,7 +35,6 @@ var forcedSubtitleGarbageReleasePattern = regexp.MustCompile(`(?i)(^|[^a-z0-9])(
 // Handler implements stage.Handler for subtitle generation.
 type Handler struct {
 	cfg         *config.Config
-	store       *queue.Store
 	osClient    *opensubtitles.Client
 	transcriber *transcription.Service
 }
@@ -43,21 +42,21 @@ type Handler struct {
 // New creates a subtitle handler.
 func New(
 	cfg *config.Config,
-	store *queue.Store,
+	_ *queue.Store,
 	osClient *opensubtitles.Client,
 	transcriber *transcription.Service,
 ) *Handler {
 	return &Handler{
 		cfg:         cfg,
-		store:       store,
 		osClient:    osClient,
 		transcriber: transcriber,
 	}
 }
 
 // Run executes the subtitle generation stage.
-func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	logger := stage.LoggerFromContext(ctx)
+func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
+	item := sess.Item
+	logger := sess.Logger
 	logger.Info("subtitle stage started", "event_type", "stage_start", "stage", "subtitling")
 
 	if !h.cfg.Subtitles.Enabled {
@@ -69,11 +68,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return nil
 	}
 
-	sess, err := stage.NewSession(ctx, h.store, item)
-	if err != nil {
-		return err
-	}
-	logger = sess.Logger
 	env := sess.Env
 
 	jobs, skippedCompleted := sess.PendingKeyedAssetJobs(ripspec.AssetKindEncoded, ripspec.AssetKindSubtitled)

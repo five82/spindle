@@ -74,8 +74,11 @@ The Go type is the source of truth for exact fields and helper methods:
 ## Concurrency and recovery
 
 Spindle runs a single logical queue pipeline and uses semaphores to protect
-scarce resources such as the optical drive, encoder, and WhisperX work. Stage
-handlers receive a context and must stop cleanly when it is canceled.
+scarce resources such as the optical drive, encoder, and WhisperX work. Workflow
+creates a `stage.Session` for each stage invocation; handlers use that session
+for queue-visible state such as RipSpec persistence, progress, review state, and
+active episode bookkeeping. Handlers receive a context and must stop cleanly when
+it is canceled.
 
 On daemon startup, any item left `in_progress` from a crash is returned to a
 retryable state for its current stage. Stages are expected to be resumable or to

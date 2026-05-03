@@ -39,11 +39,8 @@ func planJobs(env *ripspec.Envelope) []stage.AssetJob {
 }
 
 // Run executes the encoding stage.
-func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	sess, err := stage.NewSession(ctx, h.store, item)
-	if err != nil {
-		return err
-	}
+func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
+	item := sess.Item
 	logger := sess.Logger
 	logger.Info("encoding stage started", "event_type", "stage_start", "stage", "encoding")
 	env := sess.Env

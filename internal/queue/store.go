@@ -289,6 +289,41 @@ func (s *Store) Update(item *Item) error {
 	})
 }
 
+// UpdateWorkState updates queue-visible work products without changing
+// lifecycle-owned fields such as stage, in_progress, failed_at_stage, or
+// error_message. Stage handlers use this through stage.Session so saving a
+// RipSpec or review update cannot accidentally advance, retry, or un-fail an
+// item.
+func (s *Store) UpdateWorkState(item *Item) error {
+	return retryOnBusy(func() error {
+		_, err := s.db.Exec(`
+			UPDATE queue_items SET
+				disc_title = ?,
+				updated_at = CURRENT_TIMESTAMP,
+				rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?,
+				needs_review = CASE
+					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN needs_review
+					ELSE ? END,
+				review_reason = CASE
+					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN review_reason
+					ELSE ? END,
+				active_episode_key = ?, encoding_details_json = ?,
+				ripped_file = ?, encoded_file = ?, final_file = ?
+			WHERE id = ?`,
+			item.DiscTitle,
+			item.RipSpecData, item.DiscFingerprint, item.MetadataJSON,
+			item.NeedsReview, item.ReviewReason,
+			item.ActiveEpisodeKey, item.EncodingDetailsJSON,
+			item.RippedFile, item.EncodedFile, item.FinalFile,
+			item.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("update work state item %d: %w", item.ID, err)
+		}
+		return nil
+	})
+}
+
 // UpdateProgress updates only progress-related columns.
 func (s *Store) UpdateProgress(item *Item) error {
 	return retryOnBusy(func() error {

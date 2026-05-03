@@ -226,8 +226,14 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	)
 	m.maybeStartQueueCycle(ctx, itemLogger)
 
+	sess, err := stage.NewSession(ctx, m.store, item)
 	start := time.Now()
-	err := ps.Handler.Run(ctx, item)
+	if err != nil {
+		m.handleStageFailure(ctx, item, err, ps, start)
+		return
+	}
+
+	err = ps.Handler.Run(ctx, sess)
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {

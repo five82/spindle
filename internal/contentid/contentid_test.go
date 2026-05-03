@@ -161,7 +161,11 @@ func TestRunSkipsNonTVContent(t *testing.T) {
 	}
 	h := &Handler{}
 	ctx := stage.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err := h.Run(ctx, &queue.Item{RipSpecData: string(data)}); err != nil {
+	sess, err := stage.NewSession(ctx, nil, &queue.Item{RipSpecData: string(data)})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if err := h.Run(ctx, sess); err != nil {
 		t.Fatalf("Run returned error for non-TV content: %v", err)
 	}
 }
