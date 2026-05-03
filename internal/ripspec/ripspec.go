@@ -149,7 +149,10 @@ type SubtitleGenRecord struct {
 	DurationSec           float64  `json:"duration_sec,omitempty"`
 	Language              string   `json:"language"`
 	OpenSubtitlesDecision string   `json:"opensubtitles_decision,omitempty"`
-	ValidationIssues      []string `json:"validation_issues,omitempty"`
+	ValidationResult      string   `json:"validation_result,omitempty"`
+	QCObservations        []string `json:"qc_observations,omitempty"`
+	ReviewIssues          []string `json:"review_issues,omitempty"`
+	SevereIssues          []string `json:"severe_issues,omitempty"`
 }
 
 // ContentIDSummary captures envelope-level provenance for the episode

@@ -1030,8 +1030,10 @@ the stage work directory for the current run.
 - **Per-episode failure isolation**: Individual episode subtitle failures are recorded
   with `AssetStatusFailed` + error message. Processing continues for remaining
   episodes. This includes formatter failures. Stage only fails if ALL episodes fail.
-- **SRT validation review**: SRT validation issues (e.g., suspicious segment patterns)
-  flag the item for review but do not fail the stage.
+- **SRT validation tiers**: Below-threshold QC observations are persisted as
+  telemetry only. Review issues flag the item/episode for review. Severe issues
+  fail that episode's subtitle asset; processing continues for remaining episodes
+  and the stage only fails if all attempted episodes fail.
 
 **Transcription**: Subtitle generation uses the shared transcription service
 (see DESIGN_INFRASTRUCTURE.md Section 9) to invoke WhisperX. The `whisperxSem`

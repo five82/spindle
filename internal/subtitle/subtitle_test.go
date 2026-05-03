@@ -50,6 +50,25 @@ func TestSubtitlePhasePercent(t *testing.T) {
 	}
 }
 
+func TestSubtitleValidationResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		validation validationResult
+		want       string
+	}{
+		{name: "observations only pass", validation: validationResult{Issues: []string{"high_reading_speed"}}, want: "passed"},
+		{name: "review issues need review", validation: validationResult{ReviewIssues: []string{"high_reading_speed"}}, want: "needs_review"},
+		{name: "severe issues fail", validation: validationResult{ReviewIssues: []string{"overlapping_cues"}, SevereIssues: []string{"overlapping_cues"}}, want: "failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := subtitleValidationResult(tt.validation); got != tt.want {
+				t.Fatalf("subtitleValidationResult() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAssetKeys_Movie(t *testing.T) {
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "movie"},

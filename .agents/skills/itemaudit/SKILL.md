@@ -311,6 +311,8 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
    - Check for `status: "failed"` entries with `error_msg`
    - Verify `subtitles_muxed` flag per episode
    - Check `envelope.attributes["subtitle_generation_results"]` for per-episode details
+   - Treat `validation_result` as the actionable summary: `passed` is clean, `needs_review` is actionable, `failed` means subtitle generation failed
+   - Treat `qc_observations` as telemetry only. Do not list below-threshold observations (for example `high_reading_speed`, `short_cue_duration`, `long_cue_duration`) as Issues Found unless they also appear in `review_issues`/`severe_issues`, caused review routing, or created a visible subtitle problem.
 
 4. **Cross-episode subtitle consistency** (TV only):
    - All episodes should have same subtitle language and consistent forced subtitle presence
@@ -349,7 +351,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
 | Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Jellyfin won't recognize tracks |
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
-| SRT validation issues | Subtitles | `logs.warnings` with `event_type=srt_validation_issues` | Malformed subtitles |
+| SRT validation review/failure | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review` or `failed`; `review_issues`/`severe_issues` populated; review routing present | Malformed or low-quality subtitles requiring action |
 | Subtitle duration mismatch | Subtitles | Subtitle stream duration vs video duration delta > 10 minutes | WhisperX timing issue |
 | Forced subtitle not found | Subtitles | `logs.decisions` with `decision_result=not_found`, zero candidates | Do not report — this is the norm |
 | Forced subtitle candidates rejected | Subtitles | Candidates returned but all rejected during ranking | Filtering or scoring problem |
@@ -396,6 +398,11 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 
 The analysis must remain exhaustive, but the *presentation* should be proportional to findings. Use compact formats for clean data and expand only where anomalies exist.
 
+**Issues Found actionability:**
+- Only put items in **Issues Found** when there is a real defect, user-visible impact, review/failure routing, an unexpected mismatch, or a near-threshold condition worth monitoring.
+- Do not promote normal telemetry into an INFO finding. If no corrective action is needed, keep it in the relevant Artifact Analysis section as neutral context or omit it.
+- Use `[INFO]` findings sparingly for unusual/borderline observations, not for expected below-threshold QC flags.
+
 **Cross-episode data (TV):**
 - Build the majority profile line directly from `analysis.episode_consistency.majority_profile` and deviation list from `analysis.episode_consistency.deviations`
 - When all episodes match (`majority_count == total_episodes`), use a single summary line:
@@ -420,6 +427,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
 - Forced subtitle search returning zero candidates (covered in Phase 7)
 - Audio refinement stripping non-English tracks — that's its job
+- Subtitle `qc_observations` that are below review thresholds and have `validation_result=passed`
 
 **Stage timing:**
 - Always show the timing table — it's compact and useful for spotting anomalies
@@ -494,6 +502,8 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 #### Subtitles (if phase_subtitles)
 - Tracks: <count and config from media probes>
 - Labels correct: <yes/no>
+- Validation result: <from subtitle_generation_results.validation_result; list review_issues/severe_issues only when populated>
+- QC observations: <optional neutral summary; omit if uninteresting and below thresholds>
 - Forced subtitle outcome: <from logs.decisions>
 
 #### Commentary (if phase_commentary)

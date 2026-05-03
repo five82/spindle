@@ -154,7 +154,7 @@ Files in `review_dir` need manual attention:
 2. Common reasons:
    - **Low-confidence TMDB match**: The disc title didn't match well. Move the file to the correct library folder manually, or update the Blu-ray disc ID cache / KeyDB inputs and retry.
    - **Unresolved episode numbers**: Episode identification ran successfully but couldn't map all episodes confidently. Check the file names and move to the correct library folder.
-   - **SRT validation issues**: Subtitles may have quality problems. Review the SRT file and fix or regenerate with `spindle gensubtitle`.
+   - **SRT validation review issues**: Subtitles may have quality problems. Review the SRT file and fix or regenerate with `spindle gensubtitle`. Routine below-threshold QC observations do not route items to review.
 3. After manually organizing files, clear the completed item: `spindle queue clear <id>`.
 
 ### Stuck items

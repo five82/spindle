@@ -515,7 +515,7 @@ block the pipeline:
 - No episode ID reference matches after successful reference acquisition (keep placeholder keys, flag for review)
 - Commentary detection failure (continue without commentary labels)
 - OpenSubtitles download failure (skip forced subs)
-- SRT validation issues (flag for review, don't fail)
+- SRT validation review issues (flag for review; severe subtitle validation fails that episode only)
 - Jellyfin refresh failure (log warning)
 - Subtitle sidecar move failure (log warning)
 

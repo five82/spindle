@@ -198,7 +198,10 @@ SubtitleGenRecord {
     DurationSec           float64
     Language              string
     OpenSubtitlesDecision string
-    ValidationIssues      []string
+    ValidationResult      string   // "passed", "needs_review", or "failed"
+    QCObservations        []string // below-threshold quality observations; not actionable by themselves
+    ReviewIssues          []string // validation issues that require review/routing action
+    SevereIssues          []string // validation failures that fail the subtitle job
 }
 
 ContentIDSummary {

@@ -226,20 +226,23 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 		for _, issue := range validation.Issues {
 			requiresReview := reviewIssueSet[issue]
-			decisionReason := "automated quality check below review threshold"
-			if requiresReview {
-				decisionReason = "automated quality check requires review"
+			if !requiresReview {
+				logger.Debug("SRT validation observation",
+					"decision_type", logs.DecisionSRTValidation,
+					"decision_result", issue,
+					"decision_reason", "automated quality check below review threshold",
+					"episode_key", key,
+					"requires_review", false,
+				)
+				continue
 			}
 			logger.Info("SRT validation issue",
 				"decision_type", logs.DecisionSRTValidation,
 				"decision_result", issue,
-				"decision_reason", decisionReason,
+				"decision_reason", "automated quality check requires review",
 				"episode_key", key,
-				"requires_review", requiresReview,
+				"requires_review", true,
 			)
-			if !requiresReview {
-				continue
-			}
 			if ep := env.EpisodeByKey(key); ep != nil {
 				ep.AppendReviewReason("Subtitle validation: " + issue)
 			}
@@ -253,7 +256,10 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Segments:         len(formattedCues),
 			DurationSec:      videoSeconds,
 			Language:         selectedAudio.Language,
-			ValidationIssues: validation.Issues,
+			ValidationResult: subtitleValidationResult(validation),
+			QCObservations:   validation.Issues,
+			ReviewIssues:     validation.ReviewIssues,
+			SevereIssues:     validation.SevereIssues,
 		}
 		if len(validation.SevereIssues) > 0 {
 			upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
@@ -431,6 +437,17 @@ func upsertSubtitleGenRecord(records *[]ripspec.SubtitleGenRecord, record ripspe
 		}
 	}
 	*records = append(*records, record)
+}
+
+func subtitleValidationResult(validation validationResult) string {
+	switch {
+	case len(validation.SevereIssues) > 0:
+		return "failed"
+	case len(validation.ReviewIssues) > 0:
+		return "needs_review"
+	default:
+		return "passed"
+	}
 }
 
 func rankForcedSubtitleCandidates(results []opensubtitles.SubtitleResult, preferredLanguages []string) (int, bool) {
