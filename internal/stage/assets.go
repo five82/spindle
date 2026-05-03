@@ -1,6 +1,10 @@
 package stage
 
-import "github.com/five82/spindle/internal/ripspec"
+import (
+	"fmt"
+
+	"github.com/five82/spindle/internal/ripspec"
+)
 
 // AssetJob describes one per-asset unit of stage work. ProgressIndex is
 // zero-based and ProgressTotal is the denominator to use for user-facing
@@ -16,6 +20,21 @@ type AssetJob struct {
 
 // Number returns the one-based job number for progress messages.
 func (j AssetJob) Number() int { return j.ProgressIndex + 1 }
+
+// Percent converts a per-job percent into total stage progress for this job.
+func (j AssetJob) Percent(currentJobPercent float64) float64 {
+	return OverallPercent(j.ProgressIndex, j.ProgressTotal, currentJobPercent)
+}
+
+// CompletionPercent returns total stage progress after this job is complete.
+func (j AssetJob) CompletionPercent() float64 {
+	return OverallPercent(j.ProgressIndex+1, j.ProgressTotal, 0)
+}
+
+// PhaseMessage formats a user-visible stage progress message.
+func (j AssetJob) PhaseMessage(action string) string {
+	return fmt.Sprintf("Phase %d/%d - %s", j.Number(), j.ProgressTotal, action)
+}
 
 // CompletedAssetJobs returns one job for each completed asset at inputKind.
 // Jobs preserve the asset slice order. This supports stages such as encoding
@@ -102,6 +121,18 @@ func (s *Session) RecordAssetFailure(kind, key, errMsg string) {
 		Status:     ripspec.AssetStatusFailed,
 		ErrorMsg:   errMsg,
 	})
+}
+
+// SaveAssetSuccess records a completed asset and persists the session state.
+func (s *Session) SaveAssetSuccess(kind string, asset ripspec.Asset) error {
+	s.RecordAssetSuccess(kind, asset)
+	return s.Save()
+}
+
+// SaveAssetFailure records a failed asset and persists the session state.
+func (s *Session) SaveAssetFailure(kind, key, errMsg string) error {
+	s.RecordAssetFailure(kind, key, errMsg)
+	return s.Save()
 }
 
 // OverallPercent converts per-item progress into total stage progress for a

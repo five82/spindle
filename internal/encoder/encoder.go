@@ -66,6 +66,51 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"decision_reason", fmt.Sprintf("media_type=%s", env.Metadata.MediaType),
 	)
 
+	encoder, err := h.newEncoder(logger)
+	if err != nil {
+		return err
+	}
+
+	summary, err := h.encodeJobs(ctx, sess, encoder, encodedDir, jobs)
+	if err != nil {
+		return err
+	}
+
+	// Project completed asset paths into queue convenience fields, then persist.
+	sess.SyncAssetPaths()
+
+	// Persist envelope.
+	if err := sess.Save(); err != nil {
+		return err
+	}
+
+	if summary.errors > 0 {
+		return fmt.Errorf("encoding failed for %d of %d jobs", summary.errors, len(jobs))
+	}
+
+	// Notification.
+	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	msg := fmt.Sprintf("Encoded %s (%d files", item.DisplayTitle(), len(jobs))
+	if snap.Resolution != "" {
+		msg += ", " + snap.Resolution
+	}
+	if summary.originalSize > 0 {
+		reduction := (1 - float64(summary.encodedSize)/float64(summary.originalSize)) * 100
+		msg += fmt.Sprintf(", %.1f%% smaller", reduction)
+	}
+	msg += ")"
+	msg += queue.FormatAlsoProcessing(h.store, item.ID)
+	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventEncodeComplete,
+		"Encode Complete: "+item.DisplayTitle(),
+		msg,
+		"item_id", item.ID,
+	)
+
+	logger.Info("encoding stage completed", "event_type", "stage_complete", "stage", "encoding")
+	return nil
+}
+
+func (h *Handler) newEncoder(logger *slog.Logger) (*drapto.Encoder, error) {
 	// Reload encoding config from disk (changes take effect without restart).
 	encCfg, reloadErr := config.ReloadEncoding(h.cfg)
 	if reloadErr != nil {
@@ -92,28 +137,46 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		{"crf_hd", encCfg.CRFHD, drapto.WithCRFHD},
 		{"crf_uhd", encCfg.CRFUHD, drapto.WithCRFUHD},
 	} {
-		if crf.val > 0 {
-			opts = append(opts, crf.opt(uint8(crf.val)))
-			logger.Info("CRF override applied",
-				"decision_type", logs.DecisionEncodingConfig,
-				"decision_result", fmt.Sprintf("%s %d", crf.name, crf.val),
-				"decision_reason", fmt.Sprintf("config %s", crf.name),
-			)
+		if crf.val <= 0 {
+			continue
 		}
+		opts = append(opts, crf.opt(uint8(crf.val)))
+		logger.Info("CRF override applied",
+			"decision_type", logs.DecisionEncodingConfig,
+			"decision_result", fmt.Sprintf("%s %d", crf.name, crf.val),
+			"decision_reason", fmt.Sprintf("config %s", crf.name),
+		)
 	}
+
 	encoder, err := drapto.New(opts...)
 	if err != nil {
-		return fmt.Errorf("create drapto encoder: %w", err)
+		return nil, fmt.Errorf("create drapto encoder: %w", err)
 	}
+	return encoder, nil
+}
 
-	var encodeErrors int
-	var totalOriginalSize, totalEncodedSize int64
+type encodeSummary struct {
+	errors       int
+	originalSize int64
+	encodedSize  int64
+}
+
+type encodeJobResult struct {
+	failed       bool
+	originalSize int64
+	encodedSize  int64
+}
+
+func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encoder *drapto.Encoder, encodedDir string, jobs []stage.AssetJob) (encodeSummary, error) {
+	logger := sess.Logger
+	env := sess.Env
+	var summary encodeSummary
+
 	for _, job := range jobs {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return summary, ctx.Err()
 		}
 
-		// Resume: skip already-encoded assets.
 		if existing, found := env.Assets.FindAsset(ripspec.AssetKindEncoded, job.Key); found && existing.IsCompleted() {
 			logger.Info("skipping already-encoded asset",
 				"decision_type", logs.DecisionEncodeResume,
@@ -124,181 +187,170 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			continue
 		}
 
-		// Remove stale output from a previous run. The staging directory is
-		// keyed by disc fingerprint, so a re-inserted disc reuses the same
-		// encoded/ directory. Drapto refuses to overwrite existing files.
-		expectedOutput := filepath.Join(encodedDir, filepath.Base(job.Input.Path))
-		if err := os.Remove(expectedOutput); err == nil {
-			logger.Info("removed stale encoded file",
-				"decision_type", logs.DecisionEncodeCleanup,
-				"decision_result", "removed",
-				"decision_reason", "stale output from previous run",
-				"path", expectedOutput,
-			)
+		result, err := h.encodeJob(ctx, sess, encoder, encodedDir, job)
+		if err != nil {
+			return summary, err
 		}
-
-		logger.Info(fmt.Sprintf("Phase %d/%d - Encoding %s", job.ProgressIndex+1, job.ProgressTotal, filepath.Base(job.Input.Path)),
-			"event_type", "encode_start",
-			"episode_key", job.Key,
-		)
-
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Encoding %s", job.ProgressIndex+1, job.ProgressTotal, filepath.Base(job.Input.Path))
-		_ = sess.Progress(overallEncodePercent(job.ProgressIndex, job.ProgressTotal, 0), item.ProgressMessage, stage.WithActiveEpisode(job.Key))
-
-		// Reset encoding snapshot and force-persist.
-		var snap encodingstate.Snapshot
-		snap.InputFile = filepath.Base(job.Input.Path)
-		snap.Substage = "initializing"
-
-		// Probe input to populate initial snapshot fields.
-		if probeResult, probeErr := ffprobe.Inspect(ctx, "", job.Input.Path); probeErr == nil {
-			var resolution string
-			var codecs []string
-			for _, s := range probeResult.Streams {
-				if s.CodecType == "video" && resolution == "" {
-					resolution = fmt.Sprintf("%dx%d", s.Width, s.Height)
-					snap.Resolution = resolution
-				}
-				if s.CodecName != "" {
-					codecs = append(codecs, s.CodecName)
-				}
-			}
-			snap.OriginalSize = probeResult.SizeBytes()
-
-			logger.Info("input file probed",
-				"decision_type", logs.DecisionFileProbe,
-				"decision_result", "success",
-				"decision_reason", fmt.Sprintf("resolution=%s codecs=%s original_size=%d", resolution, strings.Join(codecs, ","), snap.OriginalSize),
-				"episode_key", job.Key,
-			)
-		}
-
-		item.EncodingDetailsJSON = snap.Marshal()
-		if err := sess.Progress(item.ProgressPercent, item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
-			logger.Warn("failed to persist initial snapshot",
-				"event_type", "progress_persist_error",
-				"error_hint", err.Error(),
-				"impact", "progress display may be stale",
-			)
-		}
-
-		// Create progress reporter.
-		reporter := newSpindleReporter(item, h.store, logger, job.Key, job.ProgressIndex, job.ProgressTotal)
-
-		// Encode.
-		result, encErr := encoder.EncodeWithReporter(ctx, job.Input.Path, encodedDir, reporter)
-		if encErr != nil {
-			logger.Error("encoding failed",
-				"event_type", "encode_error",
-				"error_hint", encErr.Error(),
-				"error", encErr,
-				"episode_key", job.Key,
-			)
-
-			// Record failed asset, continue to next job (failure isolation).
-			sess.RecordAssetFailure(ripspec.AssetKindEncoded, job.Key, encErr.Error())
-			encodeErrors++
-
-			// Persist failure in snapshot (re-read from item to preserve reporter fields).
-			snap, _ = encodingstate.Unmarshal(item.EncodingDetailsJSON)
-			snap.Error = &encodingstate.Issue{
-				Title:   "Encoding failed",
-				Message: encErr.Error(),
-			}
-			item.EncodingDetailsJSON = snap.Marshal()
-			if persistErr := sess.Progress(overallEncodePercent(job.ProgressIndex+1, job.ProgressTotal, 0), item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); persistErr != nil {
-				logger.Warn("failed to persist error snapshot",
-					"event_type", "progress_persist_error",
-					"error_hint", persistErr.Error(),
-					"impact", "error state not reflected in progress",
-				)
-			}
-			if err := sess.Save(); err != nil {
-				return err
-			}
+		if result.failed {
+			summary.errors++
 			continue
 		}
+		summary.originalSize += result.originalSize
+		summary.encodedSize += result.encodedSize
+	}
+	return summary, nil
+}
 
-		// Re-read snapshot from item (reporter callbacks kept it current).
-		snap, _ = encodingstate.Unmarshal(item.EncodingDetailsJSON)
-		snap.Substage = "complete"
-		snap.Percent = 100
-		snap.EncodedSize = int64(result.EncodedSize)
-		snap.OriginalSize = int64(result.OriginalSize)
-		snap.SizeReductionPercent = result.SizeReductionPercent
-		snap.AverageSpeed = float64(result.EncodingSpeed)
-		totalOriginalSize += int64(result.OriginalSize)
-		totalEncodedSize += int64(result.EncodedSize)
+func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encoder *drapto.Encoder, encodedDir string, job stage.AssetJob) (encodeJobResult, error) {
+	item := sess.Item
+	logger := sess.Logger
 
-		item.EncodingDetailsJSON = snap.Marshal()
-		if err := sess.Progress(overallEncodePercent(job.ProgressIndex+1, job.ProgressTotal, 0), item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
-			logger.Warn("failed to persist final snapshot",
-				"event_type", "progress_persist_error",
-				"error_hint", err.Error(),
-				"impact", "final progress not reflected",
-			)
-		}
-
-		// Add encoded asset to envelope.
-		sess.RecordAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{
-			EpisodeKey: job.Key,
-			Path:       result.OutputFile,
-		})
-		if err := sess.Save(); err != nil {
-			return err
-		}
-
-		logger.Info("encoding completed",
-			"event_type", "encode_complete",
-			"episode_key", job.Key,
-			"size_reduction_percent", fmt.Sprintf("%.1f", result.SizeReductionPercent),
-			"validation_passed", result.ValidationPassed,
+	// Remove stale output from a previous run. The staging directory is
+	// keyed by disc fingerprint, so a re-inserted disc reuses the same
+	// encoded/ directory. Drapto refuses to overwrite existing files.
+	expectedOutput := filepath.Join(encodedDir, filepath.Base(job.Input.Path))
+	if err := os.Remove(expectedOutput); err == nil {
+		logger.Info("removed stale encoded file",
+			"decision_type", logs.DecisionEncodeCleanup,
+			"decision_result", "removed",
+			"decision_reason", "stale output from previous run",
+			"path", expectedOutput,
 		)
+	}
 
-		if !result.ValidationPassed {
-			sess.AddEpisodeReviewReason(job.Key, "Encoding validation failed")
-			sess.AddReviewReason(fmt.Sprintf("validation failed for %s", job.Key))
-			logger.Info("validation failure flagged for review",
-				"decision_type", logs.DecisionValidationFailureRoute,
-				"decision_result", "flagged_for_review",
-				"decision_reason", "encoding validation did not pass",
-				"episode_key", job.Key,
-			)
+	item.ProgressMessage = job.PhaseMessage("Encoding " + filepath.Base(job.Input.Path))
+	logger.Info(item.ProgressMessage,
+		"event_type", "encode_start",
+		"episode_key", job.Key,
+	)
+	_ = sess.Progress(job.Percent(0), item.ProgressMessage, stage.WithActiveEpisode(job.Key))
+
+	// Reset encoding snapshot and force-persist.
+	snap := h.initialEncodingSnapshot(ctx, logger, job)
+	item.EncodingDetailsJSON = snap.Marshal()
+	if err := sess.Progress(item.ProgressPercent, item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
+		logger.Warn("failed to persist initial snapshot",
+			"event_type", "progress_persist_error",
+			"error_hint", err.Error(),
+			"impact", "progress display may be stale",
+		)
+	}
+
+	reporter := newSpindleReporter(item, h.store, logger, job.Key, job.ProgressIndex, job.ProgressTotal)
+	result, encErr := encoder.EncodeWithReporter(ctx, job.Input.Path, encodedDir, reporter)
+	if encErr != nil {
+		return encodeJobResult{failed: true}, h.handleEncodeFailure(logger, sess, job, encErr)
+	}
+
+	return h.handleEncodeSuccess(logger, sess, job, result)
+}
+
+func (h *Handler) initialEncodingSnapshot(ctx context.Context, logger *slog.Logger, job stage.AssetJob) encodingstate.Snapshot {
+	snap := encodingstate.Snapshot{
+		InputFile: filepath.Base(job.Input.Path),
+		Substage:  "initializing",
+	}
+
+	probeResult, probeErr := ffprobe.Inspect(ctx, "", job.Input.Path)
+	if probeErr != nil {
+		return snap
+	}
+
+	var resolution string
+	var codecs []string
+	for _, s := range probeResult.Streams {
+		if s.CodecType == "video" && resolution == "" {
+			resolution = fmt.Sprintf("%dx%d", s.Width, s.Height)
+			snap.Resolution = resolution
+		}
+		if s.CodecName != "" {
+			codecs = append(codecs, s.CodecName)
 		}
 	}
+	snap.OriginalSize = probeResult.SizeBytes()
 
-	// Project completed asset paths into queue convenience fields, then persist.
-	sess.SyncAssetPaths()
+	logger.Info("input file probed",
+		"decision_type", logs.DecisionFileProbe,
+		"decision_result", "success",
+		"decision_reason", fmt.Sprintf("resolution=%s codecs=%s original_size=%d", resolution, strings.Join(codecs, ","), snap.OriginalSize),
+		"episode_key", job.Key,
+	)
+	return snap
+}
 
-	// Persist envelope.
-	if err := sess.Save(); err != nil {
-		return err
-	}
-
-	if encodeErrors > 0 {
-		return fmt.Errorf("encoding failed for %d of %d jobs", encodeErrors, len(jobs))
-	}
-
-	// Notification.
-	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
-	msg := fmt.Sprintf("Encoded %s (%d files", item.DisplayTitle(), len(jobs))
-	if snap.Resolution != "" {
-		msg += ", " + snap.Resolution
-	}
-	if totalOriginalSize > 0 {
-		reduction := (1 - float64(totalEncodedSize)/float64(totalOriginalSize)) * 100
-		msg += fmt.Sprintf(", %.1f%% smaller", reduction)
-	}
-	msg += ")"
-	msg += queue.FormatAlsoProcessing(h.store, item.ID)
-	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventEncodeComplete,
-		"Encode Complete: "+item.DisplayTitle(),
-		msg,
-		"item_id", item.ID,
+func (h *Handler) handleEncodeFailure(logger *slog.Logger, sess *stage.Session, job stage.AssetJob, encErr error) error {
+	logger.Error("encoding failed",
+		"event_type", "encode_error",
+		"error_hint", encErr.Error(),
+		"error", encErr,
+		"episode_key", job.Key,
 	)
 
-	logger.Info("encoding stage completed", "event_type", "stage_complete", "stage", "encoding")
-	return nil
+	item := sess.Item
+	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	snap.Error = &encodingstate.Issue{
+		Title:   "Encoding failed",
+		Message: encErr.Error(),
+	}
+	item.EncodingDetailsJSON = snap.Marshal()
+	if persistErr := sess.Progress(job.CompletionPercent(), item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); persistErr != nil {
+		logger.Warn("failed to persist error snapshot",
+			"event_type", "progress_persist_error",
+			"error_hint", persistErr.Error(),
+			"impact", "error state not reflected in progress",
+		)
+	}
+	return sess.SaveAssetFailure(ripspec.AssetKindEncoded, job.Key, encErr.Error())
+}
+
+func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, job stage.AssetJob, result *drapto.Result) (encodeJobResult, error) {
+	item := sess.Item
+	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	snap.Substage = "complete"
+	snap.Percent = 100
+	snap.EncodedSize = int64(result.EncodedSize)
+	snap.OriginalSize = int64(result.OriginalSize)
+	snap.SizeReductionPercent = result.SizeReductionPercent
+	snap.AverageSpeed = float64(result.EncodingSpeed)
+
+	item.EncodingDetailsJSON = snap.Marshal()
+	if err := sess.Progress(job.CompletionPercent(), item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
+		logger.Warn("failed to persist final snapshot",
+			"event_type", "progress_persist_error",
+			"error_hint", err.Error(),
+			"impact", "final progress not reflected",
+		)
+	}
+
+	if err := sess.SaveAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{
+		EpisodeKey: job.Key,
+		Path:       result.OutputFile,
+	}); err != nil {
+		return encodeJobResult{}, err
+	}
+
+	logger.Info("encoding completed",
+		"event_type", "encode_complete",
+		"episode_key", job.Key,
+		"size_reduction_percent", fmt.Sprintf("%.1f", result.SizeReductionPercent),
+		"validation_passed", result.ValidationPassed,
+	)
+
+	if !result.ValidationPassed {
+		sess.AddEpisodeReviewReason(job.Key, "Encoding validation failed")
+		sess.AddReviewReason(fmt.Sprintf("validation failed for %s", job.Key))
+		logger.Info("validation failure flagged for review",
+			"decision_type", logs.DecisionValidationFailureRoute,
+			"decision_result", "flagged_for_review",
+			"decision_reason", "encoding validation did not pass",
+			"episode_key", job.Key,
+		)
+	}
+
+	return encodeJobResult{
+		originalSize: int64(result.OriginalSize),
+		encodedSize:  int64(result.EncodedSize),
+	}, nil
 }
 
 // throttleInterval is the minimum interval between progress persists.

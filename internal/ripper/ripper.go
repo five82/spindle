@@ -252,12 +252,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"size_bytes", newFileSize,
 		)
 		if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
-			sess.RecordAssetSuccess(ripspec.AssetKindRipped, ripspec.Asset{
+			if err := sess.SaveAssetSuccess(ripspec.AssetKindRipped, ripspec.Asset{
 				EpisodeKey: episodeKey,
 				TitleID:    title.ID,
 				Path:       newFile,
-			})
-			if err := sess.Save(); err != nil {
+			}); err != nil {
 				return err
 			}
 		}

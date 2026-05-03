@@ -370,8 +370,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 			"organize_target", target,
 		)
 		copySidecarSubtitle(logger, asset.Path, destPath)
-		sess.RecordAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath})
-		if err := sess.Save(); err != nil {
+		if err := sess.SaveAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath}); err != nil {
 			return "", copied, err
 		}
 		lastPath = destPath

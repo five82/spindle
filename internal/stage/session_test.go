@@ -85,6 +85,45 @@ func TestSessionSyncAssetPaths(t *testing.T) {
 	}
 }
 
+func TestSessionSaveAssetHelpersPersistEnvelope(t *testing.T) {
+	item := &queue.Item{}
+	s, err := NewSession(context.Background(), nil, item)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	s.SetEnvelope(&ripspec.Envelope{Version: ripspec.CurrentVersion})
+
+	if err := s.SaveAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{EpisodeKey: "s01e01", Path: "encoded.mkv"}); err != nil {
+		t.Fatalf("SaveAssetSuccess: %v", err)
+	}
+	parsed, err := ripspec.Parse(item.RipSpecData)
+	if err != nil {
+		t.Fatalf("parse after success: %v", err)
+	}
+	asset, ok := parsed.Assets.FindAsset(ripspec.AssetKindEncoded, "s01e01")
+	if !ok || !asset.IsCompleted() || asset.Path != "encoded.mkv" {
+		t.Fatalf("encoded asset not persisted: %#v found=%v", asset, ok)
+	}
+	if item.EncodedFile != "encoded.mkv" {
+		t.Fatalf("EncodedFile = %q, want encoded.mkv", item.EncodedFile)
+	}
+
+	if err := s.SaveAssetFailure(ripspec.AssetKindEncoded, "s01e01", "encode failed"); err != nil {
+		t.Fatalf("SaveAssetFailure: %v", err)
+	}
+	parsed, err = ripspec.Parse(item.RipSpecData)
+	if err != nil {
+		t.Fatalf("parse after failure: %v", err)
+	}
+	asset, ok = parsed.Assets.FindAsset(ripspec.AssetKindEncoded, "s01e01")
+	if !ok || !asset.IsFailed() || asset.ErrorMsg != "encode failed" {
+		t.Fatalf("failed asset not persisted: %#v found=%v", asset, ok)
+	}
+	if item.EncodedFile != "" {
+		t.Fatalf("EncodedFile after failure = %q, want empty", item.EncodedFile)
+	}
+}
+
 func TestSessionReviewHelpers(t *testing.T) {
 	item := &queue.Item{}
 	s, err := NewSession(context.Background(), nil, item)

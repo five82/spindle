@@ -101,12 +101,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"decision_reason", fmt.Sprintf("episode_key=%s", key),
 		)
 
-		logger.Info(fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", job.Number(), job.ProgressTotal, key),
+		item.ProgressMessage = job.PhaseMessage("Generating subtitles (" + key + ")")
+		logger.Info(item.ProgressMessage,
 			"event_type", "subtitle_start",
 		)
-
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", job.Number(), job.ProgressTotal, key)
-		_ = sess.Progress(overallSubtitlePercent(job.ProgressIndex, job.ProgressTotal, 0), item.ProgressMessage, stage.WithActiveEpisode(key))
+		_ = sess.Progress(job.Percent(0), item.ProgressMessage, stage.WithActiveEpisode(key))
 
 		selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
 		if err != nil {
@@ -126,14 +125,14 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			switch phase {
 			case transcription.PhaseExtract:
 				if elapsed == 0 {
-					message = fmt.Sprintf("Phase %d/%d - Extracting audio (%s)", job.Number(), job.ProgressTotal, key)
+					message = job.PhaseMessage("Extracting audio (" + key + ")")
 				}
 			case transcription.PhaseTranscribe:
 				if elapsed == 0 {
-					message = fmt.Sprintf("Phase %d/%d - Transcribing audio (%s)", job.Number(), job.ProgressTotal, key)
+					message = job.PhaseMessage("Transcribing audio (" + key + ")")
 				}
 			}
-			_ = sess.Progress(overallSubtitlePercent(job.ProgressIndex, job.ProgressTotal, subtitlePhasePercent(phase, elapsed)), message)
+			_ = sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
 		})
 		if err != nil {
 			failedCount++
@@ -309,13 +308,8 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			}
 		}
 
-		sess.RecordAssetSuccess(ripspec.AssetKindSubtitled, ripspec.Asset{
-			EpisodeKey:     key,
-			Path:           subtitledPath,
-			SubtitlesMuxed: subtitlesMuxed,
-		})
 		succeeded++
-		if err := sess.Progress(overallSubtitlePercent(job.ProgressIndex+1, job.ProgressTotal, 0), fmt.Sprintf("Phase %d/%d - Generated subtitles (%s)", job.Number(), job.ProgressTotal, key)); err != nil {
+		if err := sess.Progress(job.CompletionPercent(), job.PhaseMessage("Generated subtitles ("+key+")")); err != nil {
 			logger.Warn("progress persistence failed",
 				"event_type", "progress_persist_failed",
 				"error_hint", "subtitle completion progress not persisted",
@@ -323,7 +317,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 				"error", err,
 			)
 		}
-		if err := sess.Save(); err != nil {
+		if err := sess.SaveAssetSuccess(ripspec.AssetKindSubtitled, ripspec.Asset{
+			EpisodeKey:     key,
+			Path:           subtitledPath,
+			SubtitlesMuxed: subtitlesMuxed,
+		}); err != nil {
 			return err
 		}
 	}

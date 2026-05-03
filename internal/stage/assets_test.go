@@ -70,3 +70,19 @@ func TestOverallPercentClampsInputs(t *testing.T) {
 		t.Fatalf("OverallPercent zero total = %f, want 0", got)
 	}
 }
+
+func TestAssetJobProgressHelpers(t *testing.T) {
+	job := AssetJob{ProgressIndex: 1, ProgressTotal: 4}
+	if got := job.Number(); got != 2 {
+		t.Fatalf("Number() = %d, want 2", got)
+	}
+	if got := job.Percent(50); got != 37.5 {
+		t.Fatalf("Percent() = %f, want 37.5", got)
+	}
+	if got := job.CompletionPercent(); got != 50 {
+		t.Fatalf("CompletionPercent() = %f, want 50", got)
+	}
+	if got := job.PhaseMessage("Encoding title00.mkv"); got != "Phase 2/4 - Encoding title00.mkv" {
+		t.Fatalf("PhaseMessage() = %q", got)
+	}
+}
