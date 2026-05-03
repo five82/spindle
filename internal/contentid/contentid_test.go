@@ -167,6 +167,18 @@ func TestResolveEpisodeClaimsIgnoresDiscOrder(t *testing.T) {
 	}
 }
 
+func TestPolicyNormalizedResetsInvalidConfidenceThresholdRelationship(t *testing.T) {
+	policy := DefaultPolicy()
+	policy.LowConfidenceReviewThreshold = 0.90
+	normalized := policy.normalized()
+	if normalized.LowConfidenceReviewThreshold != DefaultPolicy().LowConfidenceReviewThreshold {
+		t.Fatalf("low confidence threshold = %.2f, want %.2f", normalized.LowConfidenceReviewThreshold, DefaultPolicy().LowConfidenceReviewThreshold)
+	}
+	if normalized.DecisiveAutoAcceptThreshold <= normalized.LowConfidenceReviewThreshold || normalized.DecisiveAutoAcceptThreshold > normalized.ClearConfidenceThreshold {
+		t.Fatalf("normalized confidence thresholds remain invalid: %+v", normalized)
+	}
+}
+
 func TestDeriveMatchConfidenceLabelsDecisiveLowSimilarity(t *testing.T) {
 	policy := DefaultPolicy()
 	confidence, quality, needsVerify, reason := deriveMatchConfidence(0.821, 0.75, 0.76, 0.77, false, policy)

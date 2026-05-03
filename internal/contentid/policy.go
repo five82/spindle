@@ -2,6 +2,13 @@ package contentid
 
 import "github.com/five82/spindle/internal/config"
 
+const (
+	ConfidenceQualityClear                 = "clear"
+	ConfidenceQualityDecisiveLowSimilarity = "decisive_low_similarity"
+	ConfidenceQualityAmbiguous             = "ambiguous"
+	ConfidenceQualityContested             = "contested"
+)
+
 // Policy centralizes content ID thresholds.
 type Policy struct {
 	MinSimilarityScore           float64
@@ -63,7 +70,14 @@ func (p Policy) normalized() Policy {
 		p.ClearConfidenceThreshold = d.ClearConfidenceThreshold
 	}
 	if p.DecisiveAutoAcceptThreshold <= p.LowConfidenceReviewThreshold || p.DecisiveAutoAcceptThreshold > p.ClearConfidenceThreshold {
+		p.LowConfidenceReviewThreshold = d.LowConfidenceReviewThreshold
 		p.DecisiveAutoAcceptThreshold = d.DecisiveAutoAcceptThreshold
+		p.ClearConfidenceThreshold = d.ClearConfidenceThreshold
 	}
 	return p
+}
+
+// ClassifyConfidenceQuality classifies an episode match confidence using the supplied policy.
+func ClassifyConfidenceQuality(confidence, ripMargin, episodeMargin, neighborMargin float64, referenceSuspect bool, policy Policy) string {
+	return classifyDerivedConfidence(confidence, ripMargin, episodeMargin, neighborMargin, referenceSuspect, policy)
 }

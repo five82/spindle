@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/five82/spindle/internal/contentid"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/ripspec"
@@ -298,13 +299,13 @@ func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambig
 			continue
 		}
 		switch episodeMatchConfidenceQuality(d) {
-		case "contested":
+		case contentid.ConfidenceQualityContested:
 			contested++
-		case "ambiguous":
+		case contentid.ConfidenceQualityAmbiguous:
 			ambiguous++
-		case "decisive_low_similarity":
+		case contentid.ConfidenceQualityDecisiveLowSimilarity:
 			decisiveLowSimilarity++
-		case "clear":
+		case contentid.ConfidenceQualityClear:
 			clear++
 		}
 	}
@@ -313,36 +314,37 @@ func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambig
 
 func episodeMatchConfidenceQuality(d LogDecision) string {
 	quality, _ := d.Extras["confidence_quality"].(string)
-	if quality != "ambiguous" && quality != "" {
+	if quality != contentid.ConfidenceQualityAmbiguous && quality != "" {
 		return quality
 	}
 	confidence, ok := d.Extras["match_confidence"].(float64)
-	if !ok || confidence < 0.80 || confidence >= 0.85 {
+	if !ok {
 		return quality
 	}
 	ripMargin, ok := d.Extras["rip_score_margin"].(float64)
-	if !ok || ripMargin < 0.05 {
+	if !ok {
 		return quality
 	}
 	episodeMargin, ok := d.Extras["episode_score_margin"].(float64)
-	if !ok || episodeMargin < 0.05 {
+	if !ok {
 		return quality
 	}
 	neighborMargin, ok := d.Extras["neighbor_score_margin"].(float64)
-	if !ok || neighborMargin < 0.025 {
+	if !ok {
 		return quality
 	}
 	referenceSuspect, _ := d.Extras["reference_suspect"].(bool)
-	if referenceSuspect {
+	derived := contentid.ClassifyConfidenceQuality(confidence, ripMargin, episodeMargin, neighborMargin, referenceSuspect, contentid.DefaultPolicy())
+	if derived != contentid.ConfidenceQualityDecisiveLowSimilarity {
 		return quality
 	}
-	return "decisive_low_similarity"
+	return derived
 }
 
 func countDecisiveLowSimilarityInConfidenceBand(decisions []LogDecision, minConfidence, maxConfidence float64) int {
 	count := 0
 	for _, d := range decisions {
-		if d.DecisionType != "episode_match" || d.Extras == nil || episodeMatchConfidenceQuality(d) != "decisive_low_similarity" {
+		if d.DecisionType != "episode_match" || d.Extras == nil || episodeMatchConfidenceQuality(d) != contentid.ConfidenceQualityDecisiveLowSimilarity {
 			continue
 		}
 		confidence, ok := d.Extras["match_confidence"].(float64)

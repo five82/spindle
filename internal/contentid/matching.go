@@ -73,7 +73,7 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 		}
 		match := claim.Match
 		match.AcceptedBy = "clear_claim"
-		if match.ConfidenceQuality == "decisive_low_similarity" {
+		if match.ConfidenceQuality == ConfidenceQualityDecisiveLowSimilarity {
 			match.AcceptedBy = "decisive_low_similarity_claim"
 			decisiveLowSimilarityAccepted++
 		} else {
@@ -100,9 +100,9 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 		if len(candidates) > 0 {
 			pendingByRip[rip.EpisodeKey] = candidates
 			switch {
-			case candidates[0].ConfidenceQuality == "decisive_low_similarity" && len(candidates) == 1:
+			case candidates[0].ConfidenceQuality == ConfidenceQualityDecisiveLowSimilarity && len(candidates) == 1:
 				decisiveLowSimilarity++
-			case candidates[0].ConfidenceQuality == "contested" || len(candidates) > 1:
+			case candidates[0].ConfidenceQuality == ConfidenceQualityContested || len(candidates) > 1:
 				contested++
 			default:
 				ambiguous++
@@ -413,8 +413,8 @@ func deriveMatchConfidence(score, ripMargin, episodeMargin, neighborMargin float
 	if confidence < policy.DecisiveAutoAcceptThreshold {
 		reasons = append(reasons, "confidence_below_auto_accept_threshold")
 	}
-	quality := classifyDerivedConfidence(confidence, ripMargin, episodeMargin, neighborMargin, referenceSuspect, policy)
 	hasClearMargins := ripMargin >= policy.ClearMatchMargin && episodeMargin >= policy.ClearMatchMargin && neighborMargin >= policy.ClearMatchMargin/2
+	quality := classifyDerivedConfidenceWithNormalizedPolicy(confidence, hasClearMargins, neighborMargin, referenceSuspect, policy)
 	needsVerify := referenceSuspect || confidence < policy.DecisiveAutoAcceptThreshold || !hasClearMargins
 	return confidence, quality, needsVerify, strings.Join(reasons, ",")
 }
@@ -454,15 +454,19 @@ func classifyDerivedConfidence(confidence, ripMargin, episodeMargin, neighborMar
 	hasClearMargins := ripMargin >= policy.ClearMatchMargin &&
 		episodeMargin >= policy.ClearMatchMargin &&
 		neighborMargin >= policy.ClearMatchMargin/2
+	return classifyDerivedConfidenceWithNormalizedPolicy(confidence, hasClearMargins, neighborMargin, referenceSuspect, policy)
+}
+
+func classifyDerivedConfidenceWithNormalizedPolicy(confidence float64, hasClearMargins bool, neighborMargin float64, referenceSuspect bool, policy Policy) string {
 	switch {
 	case !referenceSuspect && confidence >= policy.ClearConfidenceThreshold && hasClearMargins:
-		return "clear"
+		return ConfidenceQualityClear
 	case !referenceSuspect && confidence >= policy.DecisiveAutoAcceptThreshold && hasClearMargins:
-		return "decisive_low_similarity"
+		return ConfidenceQualityDecisiveLowSimilarity
 	case referenceSuspect || confidence < policy.LowConfidenceReviewThreshold || neighborMargin < policy.ClearMatchMargin*0.4:
-		return "contested"
+		return ConfidenceQualityContested
 	default:
-		return "ambiguous"
+		return ConfidenceQualityAmbiguous
 	}
 }
 
