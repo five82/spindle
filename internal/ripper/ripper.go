@@ -592,24 +592,5 @@ func findNewFile(before, after map[string]bool) string {
 }
 
 func overallRipPercent(completedTitles, totalTitles int, currentTitlePercent float64) float64 {
-	if totalTitles <= 0 {
-		return 0
-	}
-	if completedTitles < 0 {
-		completedTitles = 0
-	}
-	if completedTitles > totalTitles {
-		completedTitles = totalTitles
-	}
-	if currentTitlePercent < 0 {
-		currentTitlePercent = 0
-	}
-	if currentTitlePercent > 100 {
-		currentTitlePercent = 100
-	}
-	progress := float64(completedTitles) + (currentTitlePercent / 100)
-	if progress > float64(totalTitles) {
-		progress = float64(totalTitles)
-	}
-	return progress / float64(totalTitles) * 100
+	return stage.OverallPercent(completedTitles, totalTitles, currentTitlePercent)
 }

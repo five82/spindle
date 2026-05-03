@@ -24,11 +24,11 @@ func TestPlanJobs_MovieProducesOneJob(t *testing.T) {
 	if len(jobs) != 1 {
 		t.Fatalf("expected 1 job for movie, got %d", len(jobs))
 	}
-	if jobs[0].episodeKey != "main" {
-		t.Errorf("expected episode key 'main', got %q", jobs[0].episodeKey)
+	if jobs[0].Key != "main" {
+		t.Errorf("expected episode key 'main', got %q", jobs[0].Key)
 	}
-	if jobs[0].inputPath != "/tmp/ripped/title00.mkv" {
-		t.Errorf("expected input path '/tmp/ripped/title00.mkv', got %q", jobs[0].inputPath)
+	if jobs[0].Input.Path != "/tmp/ripped/title00.mkv" {
+		t.Errorf("expected input path '/tmp/ripped/title00.mkv', got %q", jobs[0].Input.Path)
 	}
 }
 
@@ -56,8 +56,8 @@ func TestPlanJobs_TVProducesNJobs(t *testing.T) {
 
 	expectedKeys := []string{"s01e01", "s01e02", "s01e03"}
 	for i, want := range expectedKeys {
-		if jobs[i].episodeKey != want {
-			t.Errorf("job[%d]: expected episode key %q, got %q", i, want, jobs[i].episodeKey)
+		if jobs[i].Key != want {
+			t.Errorf("job[%d]: expected episode key %q, got %q", i, want, jobs[i].Key)
 		}
 	}
 }
@@ -78,11 +78,11 @@ func TestPlanJobs_SkipsFailedAssets(t *testing.T) {
 	if len(jobs) != 2 {
 		t.Fatalf("expected 2 jobs (skipping failed), got %d", len(jobs))
 	}
-	if jobs[0].episodeKey != "s01e01" {
-		t.Errorf("job[0]: expected 's01e01', got %q", jobs[0].episodeKey)
+	if jobs[0].Key != "s01e01" {
+		t.Errorf("job[0]: expected 's01e01', got %q", jobs[0].Key)
 	}
-	if jobs[1].episodeKey != "s01e03" {
-		t.Errorf("job[1]: expected 's01e03', got %q", jobs[1].episodeKey)
+	if jobs[1].Key != "s01e03" {
+		t.Errorf("job[1]: expected 's01e03', got %q", jobs[1].Key)
 	}
 }
 

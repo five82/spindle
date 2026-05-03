@@ -76,32 +76,29 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger = sess.Logger
 	env := sess.Env
 
-	keys := env.AssetKeys()
+	jobs, skippedCompleted := sess.PendingKeyedAssetJobs(ripspec.AssetKindEncoded, ripspec.AssetKindSubtitled)
+	for _, key := range skippedCompleted {
+		logger.Info("subtitle already completed, skipping",
+			"decision_type", logs.DecisionSubtitleResume,
+			"decision_result", "skipped",
+			"decision_reason", "already completed",
+			"episode_key", key,
+		)
+	}
+
 	var (
 		attempted   int
 		succeeded   int
 		failedCount int
 	)
 
-	for i, key := range keys {
+	for _, job := range jobs {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		if existing, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, key); ok && existing.IsCompleted() {
-			logger.Info("subtitle already completed, skipping",
-				"decision_type", logs.DecisionSubtitleResume,
-				"decision_result", "skipped",
-				"decision_reason", "already completed",
-				"episode_key", key,
-			)
-			continue
-		}
-
-		asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, key)
-		if !ok || !asset.IsCompleted() {
-			continue
-		}
+		key := job.Key
+		asset := job.Input
 		attempted++
 
 		logger.Info("encoded asset selected for transcription",
@@ -110,12 +107,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"decision_reason", fmt.Sprintf("episode_key=%s", key),
 		)
 
-		logger.Info(fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", i+1, len(keys), key),
+		logger.Info(fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", job.Number(), job.ProgressTotal, key),
 			"event_type", "subtitle_start",
 		)
 
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", i+1, len(keys), key)
-		_ = sess.Progress(overallSubtitlePercent(i, len(keys), 0), item.ProgressMessage, stage.WithActiveEpisode(key))
+		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", job.Number(), job.ProgressTotal, key)
+		_ = sess.Progress(overallSubtitlePercent(job.ProgressIndex, job.ProgressTotal, 0), item.ProgressMessage, stage.WithActiveEpisode(key))
 
 		selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
 		if err != nil {
@@ -135,14 +132,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			switch phase {
 			case transcription.PhaseExtract:
 				if elapsed == 0 {
-					message = fmt.Sprintf("Phase %d/%d - Extracting audio (%s)", i+1, len(keys), key)
+					message = fmt.Sprintf("Phase %d/%d - Extracting audio (%s)", job.Number(), job.ProgressTotal, key)
 				}
 			case transcription.PhaseTranscribe:
 				if elapsed == 0 {
-					message = fmt.Sprintf("Phase %d/%d - Transcribing audio (%s)", i+1, len(keys), key)
+					message = fmt.Sprintf("Phase %d/%d - Transcribing audio (%s)", job.Number(), job.ProgressTotal, key)
 				}
 			}
-			_ = sess.Progress(overallSubtitlePercent(i, len(keys), subtitlePhasePercent(phase, elapsed)), message)
+			_ = sess.Progress(overallSubtitlePercent(job.ProgressIndex, job.ProgressTotal, subtitlePhasePercent(phase, elapsed)), message)
 		})
 		if err != nil {
 			failedCount++
@@ -318,14 +315,13 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			}
 		}
 
-		sess.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
+		sess.RecordAssetSuccess(ripspec.AssetKindSubtitled, ripspec.Asset{
 			EpisodeKey:     key,
 			Path:           subtitledPath,
-			Status:         ripspec.AssetStatusCompleted,
 			SubtitlesMuxed: subtitlesMuxed,
 		})
 		succeeded++
-		if err := sess.Progress(overallSubtitlePercent(i+1, len(keys), 0), fmt.Sprintf("Phase %d/%d - Generated subtitles (%s)", i+1, len(keys), key)); err != nil {
+		if err := sess.Progress(overallSubtitlePercent(job.ProgressIndex+1, job.ProgressTotal, 0), fmt.Sprintf("Phase %d/%d - Generated subtitles (%s)", job.Number(), job.ProgressTotal, key)); err != nil {
 			logger.Warn("progress persistence failed",
 				"event_type", "progress_persist_failed",
 				"error_hint", "subtitle completion progress not persisted",
@@ -363,26 +359,7 @@ func resolveSubtitleVideoDuration(ctx context.Context, videoPath string, fallbac
 }
 
 func overallSubtitlePercent(completedItems, totalItems int, currentItemPercent float64) float64 {
-	if totalItems <= 0 {
-		return 0
-	}
-	if completedItems < 0 {
-		completedItems = 0
-	}
-	if completedItems > totalItems {
-		completedItems = totalItems
-	}
-	if currentItemPercent < 0 {
-		currentItemPercent = 0
-	}
-	if currentItemPercent > 100 {
-		currentItemPercent = 100
-	}
-	progress := float64(completedItems) + (currentItemPercent / 100)
-	if progress > float64(totalItems) {
-		progress = float64(totalItems)
-	}
-	return progress / float64(totalItems) * 100
+	return stage.OverallPercent(completedItems, totalItems, currentItemPercent)
 }
 
 func subtitlePhasePercent(phase transcription.Phase, elapsed time.Duration) float64 {
@@ -419,11 +396,7 @@ func (h *Handler) recordSubtitleFailure(
 		"error", errMsg,
 		"impact", "subtitle missing for this episode; continuing with others",
 	)
-	sess.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
-		EpisodeKey: key,
-		Status:     ripspec.AssetStatusFailed,
-		ErrorMsg:   errMsg,
-	})
+	sess.RecordAssetFailure(ripspec.AssetKindSubtitled, key, errMsg)
 	sess.AddEpisodeReviewReason(key, "Subtitle generation failed: "+errMsg)
 	sess.AddReviewReason("subtitle_failure: " + errMsg + " (" + key + ")")
 	_ = sess.Save()
