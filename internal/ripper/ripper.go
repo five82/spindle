@@ -42,13 +42,13 @@ func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier, cach
 
 // Run executes the ripping stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	logger := stage.LoggerFromContext(ctx)
-	logger.Info("ripping stage started", "event_type", "stage_start", "stage", "ripping")
-
-	env, err := stage.ParseRipSpec(item.RipSpecData)
+	sess, err := stage.NewSession(ctx, h.store, item)
 	if err != nil {
 		return err
 	}
+	logger := sess.Logger
+	logger.Info("ripping stage started", "event_type", "stage_start", "stage", "ripping")
+	env := sess.Env
 
 	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
@@ -70,14 +70,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	// Check rip cache first.
 	if h.cache != nil && item.DiscFingerprint != "" {
-		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(item, "Restoring from cache...")); err == nil && meta != nil {
+		if meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(sess, "Restoring from cache...")); err == nil && meta != nil {
 			// TV: verify all episode files are present in cache. The scan
 			// result is reused below via mapAndValidateAssets to avoid a
 			// second ReadDir on the same directory.
 			cacheUsable := true
 			var cachedTitleFiles map[int]string
 			if len(env.Episodes) > 0 {
-				files, missing := cacheHasAllEpisodeFiles(&env, rippedDir)
+				files, missing := cacheHasAllEpisodeFiles(env, rippedDir)
 				cachedTitleFiles = files
 				if len(missing) > 0 {
 					cacheUsable = false
@@ -106,7 +106,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 					"item_id", item.ID,
 				)
 				// Map cached files to assets via title ID parsing.
-				if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir, cachedTitleFiles); err != nil {
+				if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, cachedTitleFiles); err != nil {
 					return err
 				}
 				// Restore titles from cached envelope when identification
@@ -121,7 +121,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 						)
 					}
 				}
-				if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+				if err := sess.Save(); err != nil {
 					return err
 				}
 				return nil
@@ -170,7 +170,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Select titles to rip based on media type.
-	targets, err := h.selectRipTargets(logger, &env)
+	targets, err := h.selectRipTargets(logger, env)
 	if err != nil {
 		return err
 	}
@@ -194,10 +194,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"event_type", "rip_title_start",
 		)
 
-		item.ActiveEpisodeKey = titleEpisodeKey[title.ID]
-		item.ProgressPercent = overallRipPercent(i, len(targets), 0)
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Ripping title %d", i+1, len(targets), title.ID)
-		if err := h.store.UpdateProgress(item); err != nil {
+		if err := sess.Progress(overallRipPercent(i, len(targets), 0), fmt.Sprintf("Phase %d/%d - Ripping title %d", i+1, len(targets), title.ID), stage.WithActiveEpisode(titleEpisodeKey[title.ID])); err != nil {
 			logger.Warn("progress persistence failed",
 				"event_type", "progress_persist_failed",
 				"error_hint", "rip progress message not persisted",
@@ -213,11 +210,11 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
 			h.cfg.MakeMKV.MinTitleLength,
 			func(p makemkv.RipProgress) {
-				item.ProgressPercent = overallRipPercent(i, len(targets), p.Percent)
+				message := item.ProgressMessage
 				if strings.TrimSpace(p.Message) != "" {
-					item.ProgressMessage = p.Message
+					message = p.Message
 				}
-				_ = h.store.UpdateProgress(item)
+				_ = sess.Progress(overallRipPercent(i, len(targets), p.Percent), message)
 			}, logger,
 		)
 		if err != nil {
@@ -258,21 +255,19 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"size_bytes", newFileSize,
 		)
 		if episodeKey := titleEpisodeKey[title.ID]; episodeKey != "" {
-			env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{
+			sess.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{
 				EpisodeKey: episodeKey,
 				TitleID:    title.ID,
 				Path:       newFile,
 				Status:     ripspec.AssetStatusCompleted,
 			})
 			item.RippedFile = newFile
-			if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+			if err := sess.Save(); err != nil {
 				return err
 			}
 		}
 
-		item.ProgressPercent = overallRipPercent(i+1, len(targets), 0)
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Ripped title %d", i+1, len(targets), title.ID)
-		if err := h.store.UpdateProgress(item); err != nil {
+		if err := sess.Progress(overallRipPercent(i+1, len(targets), 0), fmt.Sprintf("Phase %d/%d - Ripped title %d", i+1, len(targets), title.ID)); err != nil {
 			logger.Warn("progress persistence failed",
 				"event_type", "progress_persist_failed",
 				"error_hint", "rip completion progress not persisted",
@@ -282,15 +277,15 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 	}
 
-	item.ActiveEpisodeKey = ""
+	_ = sess.ClearActiveEpisode()
 
 	// Map ripped files to assets and validate.
-	if err := h.mapAndValidateAssets(ctx, logger, &env, item, rippedDir, nil); err != nil {
+	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, nil); err != nil {
 		return err
 	}
 
 	// Persist envelope.
-	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+	if err := sess.Save(); err != nil {
 		return err
 	}
 
@@ -314,7 +309,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			RipSpecData:  item.RipSpecData,
 			MetadataJSON: item.MetadataJSON,
 		}
-		if err := h.cache.Register(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(item, "Caching rip...")); err != nil {
+		if err := h.cache.Register(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(sess, "Caching rip...")); err != nil {
 			logger.Warn("rip cache write failed",
 				"event_type", "cache_write_error",
 				"error_hint", err.Error(),
@@ -452,7 +447,9 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 // directory for the first MKV. Validates all mapped assets with ffprobe. When
 // titleFiles is non-nil, it is used as a pre-scanned view of dir (set by the
 // rip-cache hit path to avoid rescanning).
-func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger, env *ripspec.Envelope, item *queue.Item, dir string, titleFiles map[int]string) error {
+func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger, sess *stage.Session, dir string, titleFiles map[int]string) error {
+	env := sess.Env
+	item := sess.Item
 	if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
 		logger.Info("asset mapping strategy selected",
 			"decision_type", logs.DecisionAssetMapping,
@@ -466,11 +463,9 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 		if len(result.Missing) > 0 {
 			reason := fmt.Sprintf("missing %d episode(s): %s", len(result.Missing), strings.Join(result.Missing, ", "))
 			for _, key := range result.Missing {
-				if ep := env.EpisodeByKey(key); ep != nil {
-					ep.AppendReviewReason("Rip asset missing")
-				}
+				sess.AddEpisodeReviewReason(key, "Rip asset missing")
 			}
-			item.AppendReviewReason(reason)
+			sess.AddReviewReason(reason)
 			logger.Warn("partial episode asset mapping",
 				"event_type", "episode_files_missing",
 				"error_hint", "check MakeMKV output for failed titles",
@@ -542,13 +537,11 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 		}
 		for _, asset := range env.Assets.Ripped {
 			if asset.IsFailed() {
-				if ep := env.EpisodeByKey(asset.EpisodeKey); ep != nil {
-					ep.AppendReviewReason("Rip validation failed")
-				}
+				sess.AddEpisodeReviewReason(asset.EpisodeKey, "Rip validation failed")
 			}
 		}
 		reason := fmt.Sprintf("%d episode(s) failed rip validation", validationErrors)
-		item.AppendReviewReason(reason)
+		sess.AddReviewReason(reason)
 		logger.Warn("partial rip validation",
 			"event_type", "rip_validation_partial",
 			"error_hint", "some episodes failed ffprobe validation",
@@ -560,7 +553,7 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 }
 
 // cacheProgressFunc returns a throttled progress callback for cache operations.
-func (h *Handler) cacheProgressFunc(item *queue.Item, message string) ripcache.ProgressFunc {
+func (h *Handler) cacheProgressFunc(sess *stage.Session, message string) ripcache.ProgressFunc {
 	var lastPush time.Time
 	return func(p ripcache.CopyProgress) {
 		now := time.Now()
@@ -568,11 +561,8 @@ func (h *Handler) cacheProgressFunc(item *queue.Item, message string) ripcache.P
 			return
 		}
 		lastPush = now
-		item.ProgressPercent = float64(p.BytesCopied) / float64(p.TotalBytes) * 100
-		item.ProgressBytesCopied = p.BytesCopied
-		item.ProgressTotalBytes = p.TotalBytes
-		item.ProgressMessage = message
-		_ = h.store.UpdateProgress(item)
+		percent := float64(p.BytesCopied) / float64(p.TotalBytes) * 100
+		_ = sess.Progress(percent, message, stage.WithProgressBytes(p.BytesCopied, p.TotalBytes))
 	}
 }
 

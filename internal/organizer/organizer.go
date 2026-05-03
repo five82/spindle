@@ -40,17 +40,17 @@ func New(cfg *config.Config, store *queue.Store, jfClient *jellyfin.Client, noti
 
 // Run executes the organization stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	logger := stage.LoggerFromContext(ctx)
-	logger.Info("organization stage started", "event_type", "stage_start", "stage", "organizing")
-
-	env, err := stage.ParseRipSpec(item.RipSpecData)
+	sess, err := stage.NewSession(ctx, h.store, item)
 	if err != nil {
 		return err
 	}
+	logger := sess.Logger
+	logger.Info("organization stage started", "event_type", "stage_start", "stage", "organizing")
+	env := sess.Env
 
 	meta := queue.MetadataFromJSON(item.MetadataJSON, item.DiscTitle)
 	keys := env.AssetKeys()
-	sourceStage, hasSubtitled := resolveSourceStage(&env, keys)
+	sourceStage, hasSubtitled := resolveSourceStage(env, keys)
 	logger.Info("organization source stage selected",
 		"decision_type", logs.DecisionSourceStageSelection,
 		"decision_result", sourceStage,
@@ -67,7 +67,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"decision_result", "review",
 				"decision_reason", "needs_review flag set with no clean resolved tv episodes",
 			)
-			if err := h.routeToReview(ctx, logger, item, &env, &meta, sourceStage, keys); err != nil {
+			if err := h.routeToReview(ctx, logger, sess, &meta, sourceStage, keys); err != nil {
 				return err
 			}
 			reviewCount = len(keys)
@@ -76,14 +76,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			return nil
 		}
 
-		libraryKeys, reviewKeys := partitionTVOrganizationKeys(&env)
+		libraryKeys, reviewKeys := partitionTVOrganizationKeys(env)
 		if len(libraryKeys) == 0 {
 			logger.Info("item routed to review",
 				"decision_type", logs.DecisionOrganizeRoute,
 				"decision_result", "review",
 				"decision_reason", "all resolved episodes flagged for review",
 			)
-			if err := h.routeToReview(ctx, logger, item, &env, &meta, sourceStage, reviewKeys); err != nil {
+			if err := h.routeToReview(ctx, logger, sess, &meta, sourceStage, reviewKeys); err != nil {
 				return err
 			}
 			reviewCount = len(reviewKeys)
@@ -108,22 +108,20 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		if err := os.MkdirAll(libraryPath, 0o755); err != nil {
 			return fmt.Errorf("create library dir: %w", err)
 		}
-		if _, _, err := h.copyAssetsToDir(ctx, logger, item, &env, &meta, sourceStage, libraryPath, libraryKeys, "library"); err != nil {
+		if _, _, err := h.copyAssetsToDir(ctx, logger, sess, &meta, sourceStage, libraryPath, libraryKeys, "library"); err != nil {
 			return err
 		}
 		if len(reviewKeys) > 0 {
-			if _, _, err := h.copyAssetsToDir(ctx, logger, item, &env, &meta, sourceStage, reviewPathForItem(h.cfg.Paths.ReviewDir, item), reviewKeys, "review"); err != nil {
+			if _, _, err := h.copyAssetsToDir(ctx, logger, sess, &meta, sourceStage, reviewPathForItem(h.cfg.Paths.ReviewDir, item), reviewKeys, "review"); err != nil {
 				return err
 			}
 		}
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		if err := sess.Save(); err != nil {
 			return err
 		}
 		libraryCount = len(libraryKeys)
 		reviewCount = len(reviewKeys)
-		item.ProgressPercent = 100
-		item.ProgressMessage = fmt.Sprintf("Available in library (%d episodes, %d to review)", libraryCount, reviewCount)
-		_ = h.store.UpdateProgress(item)
+		_ = sess.Progress(100, fmt.Sprintf("Available in library (%d episodes, %d to review)", libraryCount, reviewCount))
 	} else {
 		libraryPath, err := meta.GetLibraryPath(
 			h.cfg.Paths.LibraryDir,
@@ -136,12 +134,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		if err := os.MkdirAll(libraryPath, 0o755); err != nil {
 			return fmt.Errorf("create library dir: %w", err)
 		}
-		if _, copied, err := h.copyAssetsToDir(ctx, logger, item, &env, &meta, sourceStage, libraryPath, keys, "library"); err != nil {
+		if _, copied, err := h.copyAssetsToDir(ctx, logger, sess, &meta, sourceStage, libraryPath, keys, "library"); err != nil {
 			return err
 		} else {
 			libraryCount = copied
 		}
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		if err := sess.Save(); err != nil {
 			return err
 		}
 	}
@@ -288,10 +286,10 @@ func truncatePathSegmentBytes(segment string, maxBytes int) string {
 	return strings.Trim(segment[:end], "-_")
 }
 
-func throttledProgressUpdater(store *queue.Store, item *queue.Item, minInterval time.Duration) func() {
+func throttledProgressUpdater(sess *stage.Session, minInterval time.Duration) func() {
 	var lastUpdate time.Time
 	return func() {
-		if store == nil || item == nil {
+		if sess == nil || sess.Item == nil {
 			return
 		}
 		now := time.Now()
@@ -299,7 +297,8 @@ func throttledProgressUpdater(store *queue.Store, item *queue.Item, minInterval 
 			return
 		}
 		lastUpdate = now
-		_ = store.UpdateProgress(item)
+		_ = sess.Progress(sess.Item.ProgressPercent, sess.Item.ProgressMessage,
+			stage.WithProgressBytes(sess.Item.ProgressBytesCopied, sess.Item.ProgressTotalBytes))
 	}
 }
 
@@ -326,7 +325,9 @@ func moveOrCopyWithProgress(src, dst string, progress fileutil.ProgressFunc) err
 	return nil
 }
 
-func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item *queue.Item, env *ripspec.Envelope, meta *queue.Metadata, sourceStage, destDir string, keys []string, target string) (string, int, error) {
+func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *queue.Metadata, sourceStage, destDir string, keys []string, target string) (string, int, error) {
+	item := sess.Item
+	env := sess.Env
 	if len(keys) == 0 {
 		return "", 0, nil
 	}
@@ -338,7 +339,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item
 	var completedBytes int64
 	copied := 0
 	lastPath := ""
-	pushProgress := throttledProgressUpdater(h.store, item, 250*time.Millisecond)
+	pushProgress := throttledProgressUpdater(sess, 250*time.Millisecond)
 	for i, key := range keys {
 		if ctx.Err() != nil {
 			return "", copied, ctx.Err()
@@ -388,11 +389,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item
 		logger.Info(fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key),
 			"event_type", eventType,
 		)
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key)
-		item.ProgressBytesCopied = completedBytes
-		item.ProgressTotalBytes = totalBytes
-		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
-		_ = h.store.UpdateProgress(item)
+		_ = sess.Progress(overallBytePercent(completedBytes, totalBytes), fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key), stage.WithProgressBytes(completedBytes, totalBytes))
 
 		transfer := fileutil.CopyFileVerifiedWithProgress
 		if target == "review" {
@@ -418,8 +415,8 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item
 			"organize_target", target,
 		)
 		copySidecarSubtitle(logger, asset.Path, destPath)
-		env.Assets.AddAsset(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath, Status: ripspec.AssetStatusCompleted})
-		if err := queue.PersistRipSpec(ctx, h.store, item, env); err != nil {
+		sess.AddAsset(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath, Status: ripspec.AssetStatusCompleted})
+		if err := sess.Save(); err != nil {
 			return "", copied, err
 		}
 		item.FinalFile = destPath
@@ -428,17 +425,15 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, item
 		if info, statErr := os.Stat(asset.Path); statErr == nil {
 			completedBytes += info.Size()
 		}
-		item.ProgressBytesCopied = completedBytes
-		item.ProgressTotalBytes = totalBytes
-		item.ProgressPercent = overallBytePercent(completedBytes, totalBytes)
-		_ = h.store.UpdateProgress(item)
+		_ = sess.Progress(overallBytePercent(completedBytes, totalBytes), item.ProgressMessage, stage.WithProgressBytes(completedBytes, totalBytes))
 	}
 	return lastPath, copied, nil
 }
 
 // routeToReview copies assets to the review directory for manual inspection.
 // Directory structure: review_dir/{reason}_{fingerprint_prefix}/
-func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *queue.Item, env *ripspec.Envelope, meta *queue.Metadata, sourceStage string, keys []string) error {
+func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *queue.Metadata, sourceStage string, keys []string) error {
+	item := sess.Item
 	logger.Info("routing to review",
 		"decision_type", logs.DecisionOrganizeRoute,
 		"decision_result", "review",
@@ -446,10 +441,10 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, item *
 	)
 
 	reviewPath := reviewPathForItem(h.cfg.Paths.ReviewDir, item)
-	if _, _, err := h.copyAssetsToDir(ctx, logger, item, env, meta, sourceStage, reviewPath, keys, "review"); err != nil {
+	if _, _, err := h.copyAssetsToDir(ctx, logger, sess, meta, sourceStage, reviewPath, keys, "review"); err != nil {
 		return err
 	}
-	if err := queue.PersistRipSpec(ctx, h.store, item, env); err != nil {
+	if err := sess.Save(); err != nil {
 		return err
 	}
 

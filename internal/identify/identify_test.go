@@ -22,18 +22,6 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func TestUpdateProgress(t *testing.T) {
-	h := &Handler{}
-	item := &queue.Item{}
-	h.updateProgress(item, 42, "Phase 2/3 - Scanning disc and resolving metadata")
-	if item.ProgressPercent != 42 {
-		t.Fatalf("ProgressPercent = %f, want 42", item.ProgressPercent)
-	}
-	if item.ProgressMessage != "Phase 2/3 - Scanning disc and resolving metadata" {
-		t.Fatalf("ProgressMessage = %q", item.ProgressMessage)
-	}
-}
-
 func TestResolveTitle_PriorityChain(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -82,13 +82,13 @@ func New(
 
 // Run executes the audio analysis stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	logger := stage.LoggerFromContext(ctx)
-	logger.Info("audio analysis stage started", "event_type", "stage_start", "stage", "audio_analysis")
-
-	env, err := stage.ParseRipSpec(item.RipSpecData)
+	sess, err := stage.NewSession(ctx, h.store, item)
 	if err != nil {
 		return err
 	}
+	logger := sess.Logger
+	logger.Info("audio analysis stage started", "event_type", "stage_start", "stage", "audio_analysis")
+	env := sess.Env
 
 	// Collect encoded asset paths for audio analysis.
 	keys := env.AssetKeys()
@@ -105,8 +105,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	logger.Debug("collected encoded assets for analysis", "count", len(encodedPaths))
 
 	analysisData := &ripspec.AudioAnalysisData{}
-	item.ActiveEpisodeKey = keys[0]
-	h.updateProgress(item, 5, "Phase 1/3 - Commentary detection")
+	_ = sess.Progress(5, "Phase 1/3 - Commentary detection", stage.WithActiveEpisode(keys[0]))
 
 	// Phase 1: Commentary detection on encoded files.
 	// Must run BEFORE audio refinement so commentary track indices can be
@@ -132,7 +131,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Phase 2: Audio refinement on encoded files.
 	// Strips non-English and redundant audio tracks, preserving primary +
 	// commentary tracks via additionalKeep.
-	h.updateProgress(item, 40, "Phase 2/3 - Audio refinement")
+	_ = sess.Progress(40, "Phase 2/3 - Audio refinement")
 	logger.Info("Phase 2/3 - Audio refinement")
 	refinement, refErr := RefineAudioTargets(ctx, logger, encodedPaths, commentaryIndices)
 	if refErr != nil {
@@ -146,7 +145,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Phase 3: Post-refinement primary audio selection and commentary disposition.
-	h.updateProgress(item, 75, "Phase 3/3 - Post-refinement audio analysis")
+	_ = sess.Progress(75, "Phase 3/3 - Post-refinement audio analysis")
 	logger.Info("Phase 3/3 - Post-refinement audio analysis")
 	{
 		path := encodedPaths[0]
@@ -207,23 +206,15 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	// Store analysis in envelope attributes.
 	env.Attributes.AudioAnalysis = analysisData
 
-	h.updateProgress(item, 95, "Phase 3/3 - Persisting audio analysis")
+	_ = sess.Progress(95, "Phase 3/3 - Persisting audio analysis")
 
 	// Persist.
-	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+	if err := sess.Save(); err != nil {
 		return err
 	}
 
 	logger.Info("audio analysis stage completed", "event_type", "stage_complete", "stage", "audio_analysis")
 	return nil
-}
-
-func (h *Handler) updateProgress(item *queue.Item, percent float64, message string) {
-	item.ProgressPercent = percent
-	item.ProgressMessage = message
-	if h.store != nil {
-		_ = h.store.UpdateProgress(item)
-	}
 }
 
 // detectCommentary examines non-primary audio tracks for commentary content.

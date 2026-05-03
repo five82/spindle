@@ -9,7 +9,7 @@ type RipSpecEncoder interface {
 }
 
 // PersistRipSpec encodes the rip spec and writes it to the item's rip_spec_data
-// column via store.Update.
+// column via store.Update. When store is nil, it only updates the item in memory.
 func PersistRipSpec(ctx context.Context, store *Store, item *Item, encoder RipSpecEncoder) error {
 	select {
 	case <-ctx.Done():
@@ -22,5 +22,8 @@ func PersistRipSpec(ctx context.Context, store *Store, item *Item, encoder RipSp
 		return err
 	}
 	item.RipSpecData = data
+	if store == nil {
+		return nil
+	}
 	return store.Update(item)
 }

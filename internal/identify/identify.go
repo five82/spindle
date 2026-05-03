@@ -336,14 +336,18 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 
 // Run executes the identification stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	logger := stage.LoggerFromContext(ctx)
+	sess, err := stage.NewSession(ctx, h.store, item)
+	if err != nil {
+		return err
+	}
+	logger := sess.Logger
 	logger.Info("identification stage started",
 		"event_type", "stage_start",
 		"stage", "identification",
 		"disc_title", item.DiscTitle,
 	)
 
-	h.updateProgress(item, 5, "Phase 1/3 - Cleaning stale staging")
+	_ = sess.Progress(5, "Phase 1/3 - Cleaning stale staging")
 
 	// Clean stale staging directories (older than 48 hours).
 	cleanResult := staging.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
@@ -351,7 +355,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
 	}
 
-	h.updateProgress(item, 20, "Phase 2/3 - Scanning disc and resolving metadata")
+	_ = sess.Progress(20, "Phase 2/3 - Scanning disc and resolving metadata")
 
 	result, err := h.Identify(ctx, item, logger)
 	if err != nil {
@@ -359,8 +363,9 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Persist envelope.
-	h.updateProgress(item, 85, "Phase 3/3 - Finalizing identification")
-	if err := h.persistEnvelope(ctx, item, &result.Envelope); err != nil {
+	_ = sess.Progress(85, "Phase 3/3 - Finalizing identification")
+	sess.SetEnvelope(&result.Envelope)
+	if err := h.persistEnvelope(sess); err != nil {
 		return err
 	}
 
@@ -407,14 +412,6 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"stage", "identification",
 	)
 	return nil
-}
-
-func (h *Handler) updateProgress(item *queue.Item, percent float64, message string) {
-	item.ProgressPercent = percent
-	item.ProgressMessage = message
-	if h.store != nil {
-		_ = h.store.UpdateProgress(item)
-	}
 }
 
 // resolveTitle implements the title priority chain and returns both the
@@ -813,23 +810,23 @@ func (h *Handler) buildFallbackEnvelope(logger *slog.Logger, item *queue.Item, d
 }
 
 // persistEnvelope updates the item's metadata_json and persists the RipSpec.
-func (h *Handler) persistEnvelope(ctx context.Context, item *queue.Item, env *ripspec.Envelope) error {
+func (h *Handler) persistEnvelope(sess *stage.Session) error {
 	// Update metadata_json on the item.
 	meta := queue.Metadata{
-		ID:           env.Metadata.ID,
-		Title:        env.Metadata.Title,
-		MediaType:    env.Metadata.MediaType,
-		ShowTitle:    env.Metadata.ShowTitle,
-		Year:         env.Metadata.Year,
-		SeasonNumber: env.Metadata.SeasonNumber,
-		Movie:        env.Metadata.Movie,
+		ID:           sess.Env.Metadata.ID,
+		Title:        sess.Env.Metadata.Title,
+		MediaType:    sess.Env.Metadata.MediaType,
+		ShowTitle:    sess.Env.Metadata.ShowTitle,
+		Year:         sess.Env.Metadata.Year,
+		SeasonNumber: sess.Env.Metadata.SeasonNumber,
+		Movie:        sess.Env.Metadata.Movie,
 	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
-	item.MetadataJSON = string(metaJSON)
+	sess.Item.MetadataJSON = string(metaJSON)
 
-	// Persist RipSpec via queue helper.
-	return queue.PersistRipSpec(ctx, h.store, item, env)
+	// Persist RipSpec via the stage session.
+	return sess.Save()
 }

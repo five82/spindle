@@ -57,12 +57,12 @@ var _ stage.Handler = (*Handler)(nil)
 
 // Run executes the episode identification stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	logger := stage.LoggerFromContext(ctx)
-
-	env, err := stage.ParseRipSpec(item.RipSpecData)
+	sess, err := stage.NewSession(ctx, h.store, item)
 	if err != nil {
 		return err
 	}
+	logger := sess.Logger
+	env := sess.Env
 
 	mediaType := strings.ToLower(strings.TrimSpace(env.Metadata.MediaType))
 	switch mediaType {
@@ -90,8 +90,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 
 	if h.transcriber == nil || h.osClient == nil || h.tmdbClient == nil {
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
-		item.AppendReviewReason("Episode ID: content matcher unavailable")
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		sess.AddReviewReason("Episode ID: content matcher unavailable")
+		if err := sess.Save(); err != nil {
 			return err
 		}
 		return &services.ErrDegraded{Msg: "content matcher unavailable"}
@@ -112,19 +112,16 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 	if season == nil || len(season.Episodes) == 0 {
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
-		item.AppendReviewReason("Episode ID: TMDB season contains no episodes")
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		sess.AddReviewReason("Episode ID: TMDB season contains no episodes")
+		if err := sess.Save(); err != nil {
 			return err
 		}
 		return &services.ErrDegraded{Msg: "tmdb season contains no episodes"}
 	}
 
-	item.ActiveEpisodeKey = ""
-	item.ProgressPercent = 10
-	item.ProgressMessage = "Phase 1/3 - Transcribing episodes"
-	_ = h.store.UpdateProgress(item)
+	_ = sess.Progress(10, "Phase 1/3 - Transcribing episodes", stage.WithActiveEpisode(""))
 
-	ripPrints, err := h.generateEpisodeFingerprints(ctx, item, &env)
+	ripPrints, err := h.generateEpisodeFingerprints(ctx, sess, env)
 	if err != nil {
 		return err
 	}
@@ -135,19 +132,16 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"impact", "episodes remain unresolved",
 		)
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
-		item.AppendReviewReason("Episode ID: no valid transcriptions")
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		sess.AddReviewReason("Episode ID: no valid transcriptions")
+		if err := sess.Save(); err != nil {
 			return err
 		}
 		return &services.ErrDegraded{Msg: "no valid transcriptions"}
 	}
 
-	item.ActiveEpisodeKey = ""
-	item.ProgressPercent = 50
-	item.ProgressMessage = "Phase 2/3 - Fetching reference subtitles"
-	_ = h.store.UpdateProgress(item)
+	_ = sess.Progress(50, "Phase 2/3 - Fetching reference subtitles", stage.WithActiveEpisode(""))
 
-	plan := deriveCandidateEpisodes(&env, season, env.Metadata.DiscNumber)
+	plan := deriveCandidateEpisodes(env, season, env.Metadata.DiscNumber)
 	refCache := make(map[int]referenceFingerprint)
 	refs, err := h.fetchReferenceFingerprints(ctx, item, seasonNum, env.Metadata.ID, season, plan.InitialEpisodes, refCache)
 	if err != nil {
@@ -155,8 +149,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 	if len(refs) == 0 {
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, len(ripPrints), 0)
-		item.AppendReviewReason("Episode ID: no reference subtitles found")
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		sess.AddReviewReason("Episode ID: no reference subtitles found")
+		if err := sess.Save(); err != nil {
 			return err
 		}
 		return &services.ErrDegraded{Msg: "no reference subtitles found"}
@@ -196,7 +190,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	verifiedMatches, remainingPending, verifyResult := verifyMatches(ctx, h.llmClient, matches, resolution.PendingByRip, ripPrints, refs, logger)
 	matches = verifiedMatches
 	if verifyResult != nil && verifyResult.NeedsReview && verifyResult.ReviewReason != "" {
-		item.AppendReviewReason("Episode ID: " + verifyResult.ReviewReason)
+		sess.AddReviewReason("Episode ID: " + verifyResult.ReviewReason)
 	}
 
 	if reconciled, ok := reconcileSingleHole(matches, remainingPending, refs, h.policy); ok {
@@ -209,34 +203,30 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	for _, reason := range structuralReviewReasons(matches, env.Metadata.DiscNumber) {
-		item.AppendReviewReason("Episode ID: " + reason)
+		sess.AddReviewReason("Episode ID: " + reason)
 	}
 	if hasSuspectAcceptedMatch(matches) {
-		item.AppendReviewReason("Episode ID: one or more matches rely on suspect references")
+		sess.AddReviewReason("Episode ID: one or more matches rely on suspect references")
 	}
 
-	item.ProgressPercent = 80
-	item.ProgressMessage = "Phase 3/3 - Matching episodes"
-	_ = h.store.UpdateProgress(item)
+	_ = sess.Progress(80, "Phase 3/3 - Matching episodes")
 
-	h.applyMatches(logger, &env, seasonNum, season, matches, item)
-	env.Attributes.ContentID = buildContentIDSummary(&env, matches, len(ripPrints), len(refs), h.policy.LowConfidenceReviewThreshold)
+	h.applyMatches(logger, env, seasonNum, season, matches, sess)
+	env.Attributes.ContentID = buildContentIDSummary(env, matches, len(ripPrints), len(refs), h.policy.LowConfidenceReviewThreshold)
 
-	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+	if err := sess.Save(); err != nil {
 		return err
 	}
 
-	item.ActiveEpisodeKey = ""
-	item.ProgressPercent = 95
-	item.ProgressMessage = "Phase 3/3 - Episode identification complete"
-	_ = h.store.UpdateProgress(item)
+	_ = sess.Progress(95, "Phase 3/3 - Episode identification complete", stage.WithActiveEpisode(""))
 
 	logger.Info("episode identification stage completed", "event_type", "stage_complete", "stage", "episode_identification")
 	return nil
 }
 
-func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.Item, env *ripspec.Envelope) ([]ripFingerprint, error) {
-	logger := stage.LoggerFromContext(ctx)
+func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.Session, env *ripspec.Envelope) ([]ripFingerprint, error) {
+	logger := sess.Logger
+	item := sess.Item
 	episodeCount := max(len(env.Episodes), 1)
 	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
@@ -257,10 +247,7 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, item *queue.I
 			continue
 		}
 
-		item.ActiveEpisodeKey = ep.Key
-		item.ProgressPercent = 10 + (40 * float64(idx+1) / float64(episodeCount))
-		item.ProgressMessage = fmt.Sprintf("Phase 1/3 - Transcribing (%s)", ep.Key)
-		_ = h.store.UpdateProgress(item)
+		_ = sess.Progress(10+(40*float64(idx+1)/float64(episodeCount)), fmt.Sprintf("Phase 1/3 - Transcribing (%s)", ep.Key), stage.WithActiveEpisode(ep.Key))
 
 		workDir := filepath.Join(episodeDir, ep.Key)
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -345,7 +332,7 @@ func (h *Handler) applyMatches(
 	seasonNum int,
 	season *tmdb.Season,
 	matches []matchResult,
-	item *queue.Item,
+	sess *stage.Session,
 ) {
 	matchMap := make(map[string]matchResult, len(matches))
 	for _, m := range matches {
@@ -424,11 +411,11 @@ func (h *Handler) applyMatches(
 	applyOpeningDoubleEpisode(logger, env, seasonNum, env.Metadata.DiscNumber, episodeDetails, assetKeyRemap)
 	env.Assets.RemapEpisodeKeys(assetKeyRemap)
 
-	if item != nil && unresolvedCount > 0 {
-		item.AppendReviewReason(fmt.Sprintf("Episode ID: %d of %d episodes unresolved", unresolvedCount, len(env.Episodes)))
+	if unresolvedCount > 0 {
+		sess.AddReviewReason(fmt.Sprintf("Episode ID: %d of %d episodes unresolved", unresolvedCount, len(env.Episodes)))
 	}
-	if item != nil && lowConfCount > 0 {
-		item.AppendReviewReason(fmt.Sprintf("Episode ID: %d matches below confidence threshold %.2f", lowConfCount, h.policy.LowConfidenceReviewThreshold))
+	if lowConfCount > 0 {
+		sess.AddReviewReason(fmt.Sprintf("Episode ID: %d matches below confidence threshold %.2f", lowConfCount, h.policy.LowConfidenceReviewThreshold))
 	}
 }
 

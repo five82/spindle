@@ -69,10 +69,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return nil
 	}
 
-	env, err := stage.ParseRipSpec(item.RipSpecData)
+	sess, err := stage.NewSession(ctx, h.store, item)
 	if err != nil {
 		return err
 	}
+	logger = sess.Logger
+	env := sess.Env
 
 	keys := env.AssetKeys()
 	var (
@@ -113,14 +115,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generating subtitles (%s)", i+1, len(keys), key)
-		item.ActiveEpisodeKey = key
-		item.ProgressPercent = overallSubtitlePercent(i, len(keys), 0)
-		_ = h.store.UpdateProgress(item)
+		_ = sess.Progress(overallSubtitlePercent(i, len(keys), 0), item.ProgressMessage, stage.WithActiveEpisode(key))
 
 		selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
 		if err != nil {
 			failedCount++
-			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("select audio: %v", err))
+			h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("select audio: %v", err))
 			continue
 		}
 
@@ -131,22 +131,22 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			Language:   selectedAudio.Language,
 			OutputDir:  workDir,
 		}, func(phase transcription.Phase, elapsed time.Duration) {
-			item.ProgressPercent = overallSubtitlePercent(i, len(keys), subtitlePhasePercent(phase, elapsed))
+			message := item.ProgressMessage
 			switch phase {
 			case transcription.PhaseExtract:
 				if elapsed == 0 {
-					item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Extracting audio (%s)", i+1, len(keys), key)
+					message = fmt.Sprintf("Phase %d/%d - Extracting audio (%s)", i+1, len(keys), key)
 				}
 			case transcription.PhaseTranscribe:
 				if elapsed == 0 {
-					item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Transcribing audio (%s)", i+1, len(keys), key)
+					message = fmt.Sprintf("Phase %d/%d - Transcribing audio (%s)", i+1, len(keys), key)
 				}
 			}
-			_ = h.store.UpdateProgress(item)
+			_ = sess.Progress(overallSubtitlePercent(i, len(keys), subtitlePhasePercent(phase, elapsed)), message)
 		})
 		if err != nil {
 			failedCount++
-			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("transcribe: %v", err))
+			h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("transcribe: %v", err))
 			continue
 		}
 
@@ -171,7 +171,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: result.JSONPath}, workDir, displayPath, videoSeconds, selectedAudio.Language)
 		if err != nil {
 			failedCount++
-			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("format subtitle: %v", err))
+			h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("format subtitle: %v", err))
 			continue
 		}
 		logger.Info("subtitle formatting complete",
@@ -191,12 +191,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		formattedCues, readErr := srtutil.ParseFile(formatting.DisplayPath)
 		if readErr != nil {
 			failedCount++
-			h.recordSubtitleFailure(ctx, logger, item, &env, key, fmt.Sprintf("read formatted subtitle: %v", readErr))
+			h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("read formatted subtitle: %v", readErr))
 			continue
 		}
 		if len(formattedCues) == 0 {
 			failedCount++
-			h.recordSubtitleFailure(ctx, logger, item, &env, key, "formatted subtitle produced zero cues")
+			h.recordSubtitleFailure(logger, sess, key, "formatted subtitle produced zero cues")
 			continue
 		}
 
@@ -243,10 +243,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"episode_key", key,
 				"requires_review", true,
 			)
-			if ep := env.EpisodeByKey(key); ep != nil {
-				ep.AppendReviewReason("Subtitle validation: " + issue)
-			}
-			item.AppendReviewReason("srt_validation: " + issue + " (" + key + ")")
+			sess.AddEpisodeReviewReason(key, "Subtitle validation: "+issue)
+			sess.AddReviewReason("srt_validation: " + issue + " (" + key + ")")
 		}
 
 		record := ripspec.SubtitleGenRecord{
@@ -271,12 +269,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				"impact", "subtitle job failed; mux skipped",
 			)
 			failedCount++
-			h.recordSubtitleFailure(ctx, logger, item, &env, key, "severe subtitle validation: "+strings.Join(validation.SevereIssues, ", "))
+			h.recordSubtitleFailure(logger, sess, key, "severe subtitle validation: "+strings.Join(validation.SevereIssues, ", "))
 			continue
 		}
 
 		if h.osClient != nil && h.cfg.Subtitles.OpenSubtitlesEnabled && env.Attributes.HasForcedSubtitleTrack {
-			h.tryForcedSubs(ctx, logger, &env, key, asset.Path, &record)
+			h.tryForcedSubs(ctx, logger, env, key, asset.Path, &record)
 		} else {
 			var reason string
 			switch {
@@ -320,21 +318,27 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			}
 		}
 
-		env.Assets.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
+		sess.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
 			EpisodeKey:     key,
 			Path:           subtitledPath,
 			Status:         ripspec.AssetStatusCompleted,
 			SubtitlesMuxed: subtitlesMuxed,
 		})
 		succeeded++
-		item.ProgressPercent = overallSubtitlePercent(i+1, len(keys), 0)
-		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Generated subtitles (%s)", i+1, len(keys), key)
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		if err := sess.Progress(overallSubtitlePercent(i+1, len(keys), 0), fmt.Sprintf("Phase %d/%d - Generated subtitles (%s)", i+1, len(keys), key)); err != nil {
+			logger.Warn("progress persistence failed",
+				"event_type", "progress_persist_failed",
+				"error_hint", "subtitle completion progress not persisted",
+				"impact", "subtitle progress not reflected in queue",
+				"error", err,
+			)
+		}
+		if err := sess.Save(); err != nil {
 			return err
 		}
 	}
 
-	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+	if err := sess.Save(); err != nil {
 		return err
 	}
 	if attempted > 0 && succeeded == 0 && failedCount > 0 {
@@ -399,10 +403,8 @@ func subtitlePhasePercent(phase transcription.Phase, elapsed time.Duration) floa
 }
 
 func (h *Handler) recordSubtitleFailure(
-	ctx context.Context,
 	logger *slog.Logger,
-	item *queue.Item,
-	env *ripspec.Envelope,
+	sess *stage.Session,
 	key string,
 	errMsg string,
 ) {
@@ -417,16 +419,14 @@ func (h *Handler) recordSubtitleFailure(
 		"error", errMsg,
 		"impact", "subtitle missing for this episode; continuing with others",
 	)
-	env.Assets.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
+	sess.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
 		EpisodeKey: key,
 		Status:     ripspec.AssetStatusFailed,
 		ErrorMsg:   errMsg,
 	})
-	if ep := env.EpisodeByKey(key); ep != nil {
-		ep.AppendReviewReason("Subtitle generation failed: " + errMsg)
-	}
-	item.AppendReviewReason("subtitle_failure: " + errMsg + " (" + key + ")")
-	_ = queue.PersistRipSpec(ctx, h.store, item, env)
+	sess.AddEpisodeReviewReason(key, "Subtitle generation failed: "+errMsg)
+	sess.AddReviewReason("subtitle_failure: " + errMsg + " (" + key + ")")
+	_ = sess.Save()
 }
 
 func upsertSubtitleGenRecord(records *[]ripspec.SubtitleGenRecord, record ripspec.SubtitleGenRecord) {

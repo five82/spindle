@@ -56,13 +56,13 @@ func planJobs(env *ripspec.Envelope) []encodingJob {
 
 // Run executes the encoding stage.
 func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
-	logger := stage.LoggerFromContext(ctx)
-	logger.Info("encoding stage started", "event_type", "stage_start", "stage", "encoding")
-
-	env, err := stage.ParseRipSpec(item.RipSpecData)
+	sess, err := stage.NewSession(ctx, h.store, item)
 	if err != nil {
 		return err
 	}
+	logger := sess.Logger
+	logger.Info("encoding stage started", "event_type", "stage_start", "stage", "encoding")
+	env := sess.Env
 
 	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
@@ -74,7 +74,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		return fmt.Errorf("create encoded dir: %w", err)
 	}
 
-	jobs := planJobs(&env)
+	jobs := planJobs(env)
 	if len(jobs) == 0 {
 		return fmt.Errorf("no ripped assets to encode")
 	}
@@ -161,9 +161,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			"episode_key", job.episodeKey,
 		)
 
-		item.ActiveEpisodeKey = job.episodeKey
-		item.ProgressPercent = overallEncodePercent(i, len(jobs), 0)
 		item.ProgressMessage = fmt.Sprintf("Phase %d/%d - Encoding %s", i+1, len(jobs), filepath.Base(job.inputPath))
+		_ = sess.Progress(overallEncodePercent(i, len(jobs), 0), item.ProgressMessage, stage.WithActiveEpisode(job.episodeKey))
 
 		// Reset encoding snapshot and force-persist.
 		var snap encodingstate.Snapshot
@@ -194,7 +193,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		item.EncodingDetailsJSON = snap.Marshal()
-		if err := h.store.UpdateProgress(item); err != nil {
+		if err := sess.Progress(item.ProgressPercent, item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
 			logger.Warn("failed to persist initial snapshot",
 				"event_type", "progress_persist_error",
 				"error_hint", err.Error(),
@@ -216,7 +215,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 			)
 
 			// Record failed asset, continue to next job (failure isolation).
-			env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
+			sess.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
 				EpisodeKey: job.episodeKey,
 				Path:       "",
 				Status:     ripspec.AssetStatusFailed,
@@ -231,15 +230,14 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 				Message: encErr.Error(),
 			}
 			item.EncodingDetailsJSON = snap.Marshal()
-			item.ProgressPercent = overallEncodePercent(i+1, len(jobs), 0)
-			if persistErr := h.store.UpdateProgress(item); persistErr != nil {
+			if persistErr := sess.Progress(overallEncodePercent(i+1, len(jobs), 0), item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); persistErr != nil {
 				logger.Warn("failed to persist error snapshot",
 					"event_type", "progress_persist_error",
 					"error_hint", persistErr.Error(),
 					"impact", "error state not reflected in progress",
 				)
 			}
-			if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+			if err := sess.Save(); err != nil {
 				return err
 			}
 			continue
@@ -257,8 +255,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		totalEncodedSize += int64(result.EncodedSize)
 
 		item.EncodingDetailsJSON = snap.Marshal()
-		item.ProgressPercent = overallEncodePercent(i+1, len(jobs), 0)
-		if err := h.store.UpdateProgress(item); err != nil {
+		if err := sess.Progress(overallEncodePercent(i+1, len(jobs), 0), item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
 			logger.Warn("failed to persist final snapshot",
 				"event_type", "progress_persist_error",
 				"error_hint", err.Error(),
@@ -267,12 +264,12 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		}
 
 		// Add encoded asset to envelope.
-		env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
+		sess.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{
 			EpisodeKey: job.episodeKey,
 			Path:       result.OutputFile,
 			Status:     ripspec.AssetStatusCompleted,
 		})
-		if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+		if err := sess.Save(); err != nil {
 			return err
 		}
 
@@ -284,10 +281,8 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		)
 
 		if !result.ValidationPassed {
-			if ep := env.EpisodeByKey(job.episodeKey); ep != nil {
-				ep.AppendReviewReason("Encoding validation failed")
-			}
-			item.AppendReviewReason(fmt.Sprintf("validation failed for %s", job.episodeKey))
+			sess.AddEpisodeReviewReason(job.episodeKey, "Encoding validation failed")
+			sess.AddReviewReason(fmt.Sprintf("validation failed for %s", job.episodeKey))
 			logger.Info("validation failure flagged for review",
 				"decision_type", logs.DecisionValidationFailureRoute,
 				"decision_result", "flagged_for_review",
@@ -303,7 +298,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 	}
 
 	// Persist envelope.
-	if err := queue.PersistRipSpec(ctx, h.store, item, &env); err != nil {
+	if err := sess.Save(); err != nil {
 		return err
 	}
 
