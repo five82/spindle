@@ -42,6 +42,9 @@ func TestMarkStartedInitializesActiveProgress(t *testing.T) {
 	}
 	item.ProgressPercent = 72
 	item.ProgressMessage = "old"
+	item.ActiveEpisodeKey = "s01e02"
+	item.ProgressBytesCopied = 10
+	item.ProgressTotalBytes = 20
 
 	if err := MarkStarted(store, item, queue.StageEncoding); err != nil {
 		t.Fatalf("MarkStarted: %v", err)
@@ -52,6 +55,9 @@ func TestMarkStartedInitializesActiveProgress(t *testing.T) {
 	}
 	if got.InProgress != 1 || got.ProgressStage != string(queue.StageEncoding) || got.ProgressPercent != 0 || got.ProgressMessage != "" {
 		t.Fatalf("started state = in_progress:%d stage:%q percent:%v message:%q", got.InProgress, got.ProgressStage, got.ProgressPercent, got.ProgressMessage)
+	}
+	if got.ActiveEpisodeKey != "" || got.ProgressBytesCopied != 0 || got.ProgressTotalBytes != 0 {
+		t.Fatalf("stale progress not cleared = episode:%q bytes:%d/%d", got.ActiveEpisodeKey, got.ProgressBytesCopied, got.ProgressTotalBytes)
 	}
 }
 

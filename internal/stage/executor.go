@@ -50,6 +50,9 @@ func MarkStarted(store *queue.Store, item *queue.Item, stage queue.Stage) error 
 	item.ProgressStage = string(stage)
 	item.ProgressPercent = 0
 	item.ProgressMessage = ""
+	item.ActiveEpisodeKey = ""
+	item.ProgressBytesCopied = 0
+	item.ProgressTotalBytes = 0
 	if store == nil {
 		return nil
 	}
