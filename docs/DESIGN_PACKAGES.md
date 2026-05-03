@@ -59,6 +59,7 @@ internal/
   discidcache/          Disc ID -> TMDB ID JSON cache
 
   textutil/             Text processing (TF-IDF, tokenization, cosine, sanitization)
+  srtutil/              SRT timestamp parsing, formatting, and validation
   fileutil/             File operations (copy, verified copy)
   language/             Language code normalization (ISO 639-1/2/3)
   encodingstate/        Encoding snapshot state (Drapto telemetry)
@@ -69,7 +70,7 @@ internal/
   sockhttp/             Unix socket HTTP client helpers (shared by daemonctl, queueaccess, CLI)
   queueaccess/          Read-only queue access abstraction (HTTP client + direct store)
   queueops/             Higher-level queue mutations that need RipSpec awareness
-  logs/                 Log file tailing
+  logs/                 Decision type constants and log file tailing
   auditgather/          Audit artifact collection and analysis
 ```
 
@@ -80,9 +81,9 @@ internal/
 Dependency flow is strictly top-down. Packages in lower layers must never
 import packages in higher layers.
 
-### Layer 1: Foundation (no internal imports)
+### Layer 1: Foundation (no internal imports, or only other Layer 1)
 
-`services`, `textutil`, `fileutil`, `language`, `encodingstate`, `deps`
+`logs` (decision constants), `services`, `textutil`, `srtutil`, `fileutil`, `language`, `encodingstate`, `deps`
 
 ### Layer 2: Data Models (depend on Layer 1 only)
 
@@ -101,7 +102,7 @@ import packages in higher layers.
 
 ### Layer 5: Orchestration (depend on Layers 1-4)
 
-`workflow`, `stageexec`, `httpapi`, `queueaccess`, `logs`, `auditgather`
+`workflow`, `stageexec`, `httpapi`, `sockhttp`, `queueaccess`, `auditgather`
 
 ### Layer 6: Daemon (depend on Layers 1-5)
 

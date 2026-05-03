@@ -2,7 +2,7 @@
 
 Status: Normative spec.
 
-Test approach and interface boundaries for test doubles.
+Test approach, seams, and coverage priorities for the Spindle codebase.
 
 See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 
@@ -11,100 +11,116 @@ See [DESIGN_INDEX.md](DESIGN_INDEX.md) for the complete document map.
 ## 1. Principles
 
 - **Table-driven tests** as the default pattern for all logic with multiple cases.
-- **No test frameworks** beyond the standard library (`testing`, `testing/fstest`).
-  Use `t.Helper()`, `t.Run()` subtests, and `t.Parallel()` where safe.
-- **Test what matters**: Business logic, algorithms, and data transformations.
-  Skip testing thin wrappers around standard library calls.
+- **No test frameworks** beyond the standard library (`testing`, `testing/fstest`,
+  `net/http/httptest`). Use `t.Helper()`, `t.Run()` subtests, and
+  `t.Parallel()` where safe.
+- **Test what matters**: Algorithms, data transformations, state machines, and
+  parsing. Skip testing thin wrappers around standard library calls.
 - **Golden files** for complex output (SRT generation, robot format parsing).
   Store in `testdata/` directories alongside tests.
 
----
+## 2. Test Seams
 
-## 2. Interface Boundaries for Test Doubles
+Production code uses concrete types, not consumer-defined interfaces. The
+primary test seams are:
 
-External tools and services are the primary testing boundary. Each external
-dependency gets a consumer-defined interface at the call site, allowing test
-doubles without modifying production code.
+### 2.1 Package-Level Function Variables
 
-### 2.1 External Tool Interfaces
+External tool calls are wrapped in package-level `var` assigned at init time.
+Tests swap these for stubs and restore via `t.Cleanup`:
 
-These wrap CLI tools that stage handlers invoke:
+```go
+var inspectMedia = ffprobe.Inspect
 
-| Interface | Package | Methods | Used By |
-|-----------|---------|---------|---------|
-| `MakeMKVRunner` | `makemkv` | `Scan(ctx, device) (*ScanResult, error)`, `Rip(ctx, device, titleID, outDir) error` | `identify`, `ripper` |
-| `FFprobeRunner` | `media/ffprobe` | `Inspect(ctx, path) (*Result, error)` | Multiple stages |
-| `WhisperXRunner` | `transcription` | `Run(ctx, input, opts) (*RawOutput, error)` | `transcription` |
-| `MkvmergeRunner` | `subtitle` | `Mux(ctx, input, subs, output) error` | `subtitle` |
+func TestFoo(t *testing.T) {
+    orig := inspectMedia
+    t.Cleanup(func() { inspectMedia = orig })
+    inspectMedia = func(ctx context.Context, binary, path string) (*ffprobe.Result, error) {
+        return &ffprobe.Result{...}, nil
+    }
+    // ... test logic ...
+}
+```
 
-In production, these are concrete structs that shell out via `exec.CommandContext`.
-In tests, they are replaced with stubs that return canned responses.
+Known seams:
 
-### 2.2 Service Client Interfaces
+| Variable | Package | Wraps |
+|----------|---------|-------|
+| `inspectMedia` | `transcription` | `ffprobe.Inspect` |
+| `inspectSubtitleMedia` | `subtitle` | `ffprobe.Inspect` |
 
-REST API clients defined at the consumer site:
+### 2.2 In-Memory SQLite
 
-| Interface | Defined In | Methods | Wraps |
-|-----------|-----------|---------|-------|
-| `TMDBSearcher` | `identify` | `SearchMovie(...)`, `SearchTV(...)`, `GetSeasonDetails(...)` | `tmdb.Client` |
-| `SubtitleFetcher` | `contentid`, `subtitle` | `Search(...)`, `Download(...)` | `opensubtitles.Client` |
-| `LLMClassifier` | `identify`, `audioanalysis`, `contentid` | `Classify(ctx, prompt) (*Response, error)` | `llm.Client` |
-| `LibraryRefresher` | `organizer` | `Refresh(ctx) error` | `jellyfin.Client` |
-| `Notifier` | `workflow` | `Notify(ctx, event) error` | `notify.Service` |
+Queue store tests open SQLite in `:memory:` mode for fast, isolated state
+machine and query tests.
 
-### 2.3 Infrastructure Interfaces
+### 2.3 HTTP Test Servers
 
-| Interface | Defined In | Methods | Wraps |
-|-----------|-----------|---------|-------|
-| `ItemStore` | `stage` (or consumer) | `Update(item)`, `UpdateProgress(item)`, `GetByID(id)` | `queue.Store` |
-| `TranscriptionService` | `contentid`, `subtitle` | `Transcribe(ctx, req) (*Result, error)` | `transcription.Service` |
+API client tests (TMDB, OpenSubtitles, LLM, Jellyfin) use `httptest.NewServer`
+to provide canned JSON responses matching real API schemas.
 
-### 2.4 Test Double Summary
+### 2.4 Temp Directory Fixtures
 
-| Interface | Double Type | Key Behavior |
-|-----------|-------------|--------------|
-| `queue.Store` | In-memory fake | SQLite in `:memory:` mode |
-| `transcription.Service` | Stub | Return canned canonical WhisperX artifacts (SRT + JSON) |
-| `makemkv.Runner` | Stub | Return canned robot output |
-| `tmdb.Client` | Stub | Return canned search/detail JSON |
-| `opensubtitles.Client` | Stub | Return canned subtitle content |
-| `llm.Client` | Stub | Return canned classification |
-| `jellyfin.Client` | Stub | No-op or record calls |
-| `notify.Client` | Stub | Record sent notifications |
-| `ffprobe.Runner` | Stub | Return canned probe output |
-| `drapto.Client` | Stub | Return canned encode result |
+Tests that need file artifacts (SRT parsing, rip spec round-trips, content ID
+fingerprinting) create test data in `t.TempDir()` directories with known
+content.
 
-Stage handler tests follow a consistent pattern: construct handler with stub
-dependencies, call `Run(ctx, item)`, assert item state changes and side effects.
+### 2.5 Functional Tests (Transcription, Formatter)
 
----
+The embedded WhisperX wrapper script and Stable-TS formatter script are tested
+by invoking the script directly with test audio and comparing output against
+expectations. These are not mocked; they test the actual Python code path.
 
-## 3. Coverage Goals
+## 3. Coverage Priorities
 
-No hard coverage targets. Focus testing effort on:
+Focus testing effort on high-value areas:
 
-1. **Algorithms**: Content ID matching, audio selection, subtitle filtering/formatting, and SRT validation — these
-   have the highest bug density and are hardest to debug in production.
-2. **Data serialization**: RipSpec round-trips, encoding snapshot, metadata JSON.
-3. **State machines**: Stage transitions, asset status tracking.
-4. **Edge cases in external tool parsing**: MakeMKV robot format variations,
-   ffprobe output quirks, WhisperX SRT/JSON output formats, subtitle formatter invocation.
+1. **Algorithms**: Content ID matching (`contentid`), audio selection
+   (`media/audio`), subtitle filtering/validation (`subtitle`), SRT parsing
+   (`srtutil`), and text fingerprinting (`textutil`). These have the highest
+   bug density and are hardest to debug in production.
 
-**Subtitle-specific expectations:**
-- Test that canonical transcript artifacts remain unchanged when subtitle formatting runs.
-- Test that display subtitle output is derived separately from canonical WhisperX artifacts.
-- Add cross-stage regression coverage so subtitle formatting changes cannot silently change episode-identification inputs.
-- Test the embedded WhisperX wrapper contract: explicit transcription profile, VAD-method forwarding, explicit VAD/decode profile arguments, and confidence-preserving canonical JSON handling.
-- Test that subtitle filtering/validation prefer actual media duration over transcript-tail duration, with transcript duration used only as fallback.
-- Test severe validation gating so obviously broken subtitle output fails the episode subtitle job and does not mux into MKV.
-- Add regression coverage for final display-only subtitle repair (fallback cue splitting/wrapping and limited gap-aware timing expansion) so readability improvements do not mutate canonical transcript artifacts.
-- Test line-break scoring preferences: punctuation boundaries, conjunction/preposition boundaries, avoidance of one/two-word top lines, and avoidance of obvious article/noun, pronoun/verb, auxiliary/verb, and first/last-name splits.
-- Test readability validation thresholds: high reading speed above 20 CPS, short cue duration below 5/6s, long cue duration above 7s, maximum two lines, and 42 characters per line.
-- Test aggregate subtitle QC metrics for deterministic cue counts, max CPS, p95 CPS, high-CPS counts, short/long duration counts, overlong-line counts, and unbalanced-line counts for a fixed cue list.
-- Test that generic formatting/QC changes do not perform content rewriting, paraphrasing, SDH authoring, or automatic lyric removal.
-- Prefer golden fixtures for real-world bad wrapping / hallucination cases.
+2. **Data serialization**: RipSpec round-trips (`ripspec`), encoding snapshot,
+   metadata JSON.
 
-Low-value test targets (skip unless bugs emerge):
-- HTTP handler routing (thin wrappers around store calls)
-- Notification formatting (change frequently, low risk)
-- CLI flag parsing (Cobra handles this)
+3. **State machines**: Stage transitions, asset status tracking, episode key
+   resolution.
+
+4. **External tool output parsing**: MakeMKV robot format (`makemkv`), ffprobe
+   JSON (`media/ffprobe`), BDInfo key-value output (`identify`).
+
+5. **Subtitle-specific**: Canonical artifact preservation, display formatting,
+   readability validation, hallucination filtering. Prefer golden fixtures for
+   real-world bad wrapping and hallucination cases. Test:
+   - Canonical transcript artifacts remain unchanged across formatting.
+   - Display/subtitle output is derived separately from canonical artifacts.
+   - WhisperX wrapper contract: explicit transcription profile, VAD-method
+     forwarding, VAD/decode profile arguments, confidence-preserving JSON.
+   - Severe validation gating: broken subtitle output fails the episode job and
+     does not mux into MKV.
+   - Readability repair: fallback cue splitting/wrapping and gap-aware timing
+     expansion do not mutate canonical artifacts.
+   - Validation thresholds: 20 CPS max reading speed, 5/6s min cue duration,
+     7s max cue duration, max 2 lines, 42 chars per line.
+   - Aggregate QC metrics: cue counts, max/p95 CPS, high-CPS counts,
+     short/long duration counts, overlong/unbalanced line counts.
+   - Formatting/QC changes do not perform content rewriting, paraphrasing, SDH
+     authoring, or lyric removal.
+
+**Stage handler contract tests** follow a consistent pattern: construct handler
+with real or stub dependencies, call `Run(ctx, item)`, assert item state
+changes and side effects.
+
+## 4. Cross-Stage Regression
+
+Subtitle formatting and content ID algorithms must not silently regress each
+other. Tests that exercise content ID matching should use canonical transcript
+artifacts produced by the real transcription path (or golden fixtures of them)
+rather than simplified test transcripts.
+
+## 5. Low-Value Test Targets
+
+Skip unless bugs emerge:
+- HTTP handler routing (thin wrappers around store calls).
+- Notification formatting (changes frequently, low risk).
+- CLI flag parsing (Cobra handles this).

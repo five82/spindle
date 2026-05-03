@@ -229,7 +229,7 @@ background.
 handlers and builds the pipeline chain. Absent stages are simply omitted from
 the slice -- no nil checks or conditional ordering needed.
 
-**pipelineStage** -- single stage descriptor:
+**PipelineStage** -- single stage descriptor:
 ```go
 type Semaphore int
 
@@ -240,11 +240,10 @@ const (
     SemWhisperX                    // guards WhisperX GPU
 )
 
-type pipelineStage struct {
-    name      string
-    handler   stage.Handler
-    stage     queue.Stage      // stage value this handler processes
-    semaphore Semaphore        // which resource semaphore to acquire
+type PipelineStage struct {
+    Handler   stage.Handler
+    Stage     queue.Stage      // stage value this handler processes
+    Semaphore Semaphore        // which resource semaphore to acquire
 }
 ```
 
@@ -255,7 +254,7 @@ position.
 **pipelineState** -- runtime state:
 ```go
 type pipelineState struct {
-    stages     []pipelineStage
+    stages     []PipelineStage
     stageOrder []queue.Stage             // ordered for NextForStatuses()
     stageMap   map[queue.Stage]int       // stage -> index in stages slice
     sems       [3]chan struct{}          // disc, encode, whisperx (capacity 1 each)
@@ -361,7 +360,7 @@ these rules:
 |-------|-----------------|
 | Identification | MakeMKV scan killed. No cleanup needed. |
 | Ripping | MakeMKV rip killed. Partial files left in staging (overwritten on retry). |
-| Episode ID | WhisperX killed. Partial transcripts left (reusable on retry). |
+| Episode ID | WhisperX killed. Transcripts are regenerated fresh on retry (no shared cache). |
 | Encoding | Drapto/FFmpeg killed. Partial output left. Resume skips completed episodes. |
 | Audio Analysis | FFmpeg/WhisperX killed. No persistent side effects. |
 | Subtitling | WhisperX killed. Partial SRTs left. Resume skips completed episodes. |
@@ -628,9 +627,7 @@ The following values are code constants, not config fields.
       title_00.mkv    # or episode files
       title_00.en.srt
       title_00.en.forced.srt   # only when forced subs found
-    contentid/        # WhisperX transcripts for episode ID
-      s01_001/
-        s01_001-contentid.srt
+    contentid/        # WhisperX transcripts for episode ID (per-episode dirs with audio.srt/json/wav)
 ```
 
 ### 6.2 Library Directory
@@ -659,10 +656,6 @@ $XDG_CACHE_HOME/spindle/
       title_00.mkv
       ...
   discid_cache.json       # Disc ID cache (when enabled)
-  opensubtitles/          # OpenSubtitles download cache
-    {tmdb_id}/
-      {season}/
-        {episode}_{language}_{file_id}.srt
 ```
 
 ### 6.4 State Directory

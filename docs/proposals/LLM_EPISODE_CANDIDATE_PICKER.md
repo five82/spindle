@@ -2,8 +2,6 @@
 
 Status: Proposal, deferred. Not normative until accepted into the design specs.
 
-Status: Draft proposal only. Not approved. Not implemented.
-
 ## Summary
 
 This proposal describes a possible fallback for TV episode identification after the

@@ -83,7 +83,7 @@ use `spindle cache rip --title` to interactively select which title to rip.
 
 ## Stage 4: Episode Identification (episode_identification)
 
-1. For TV shows with OpenSubtitles enabled, Spindle compares WhisperX transcripts against OpenSubtitles references to map ripped files to definitive episode numbers.
+1. For TV shows with an OpenSubtitles API key configured, Spindle compares WhisperX transcripts against OpenSubtitles reference subtitles to map ripped files to definitive episode numbers.
 2. Results are written back into the rip specification so encoding/organizing use correct episode labels. The current implementation also supports a conservative disc-1 opening double-length inference: when the first selected title has a probable double-episode runtime profile and the resolved sequence supports it, Spindle can promote that title to a range like `S01E01-E02`.
 3. Movies, discs without OpenSubtitles enabled, or invalid rip specs skip this stage and proceed to encoding.
 
@@ -114,7 +114,7 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 4. Subtitle filtering and validation use the actual encoded-media duration when available; transcript-tail duration is only a fallback.
 5. Spindle intentionally does not use PGS subtitles as final library output. Final primary display subtitles are SRT because SRT works better with Jellyfin and downstream tooling.
 6. Subtitling progress is cumulative across the full subtitle stage, and completed subtitle assets are persisted after each item so counts can advance live.
-7. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are fetched from OpenSubtitles and aligned against the WhisperX output via text-based matching.
+7. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are downloaded from OpenSubtitles and used as-is (no alignment against WhisperX output).
 8. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). If subtitle formatting fails, or if severe subtitle validation issues are detected for an episode, that episode is recorded as a subtitle failure and processing continues with other episodes when possible.
 
 `spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename and uses TMDB for metadata context.

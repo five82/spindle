@@ -87,7 +87,8 @@ numerically inflate stored `match_confidence` in the initial rewrite.
 Content ID requires all of the following:
 
 - `media_type = tv`
-- OpenSubtitles enabled and configured
+- OpenSubtitles API key configured (the `opensubtitles_enabled` flag gates
+  forced-subtitle fetching; it is not a precondition for episode identification)
 - a TMDB ID on the queue item
 - at least one ripped TV title in the envelope
 - WhisperX available

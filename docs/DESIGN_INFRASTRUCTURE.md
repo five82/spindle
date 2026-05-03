@@ -831,7 +831,7 @@ Audio extraction (FFmpeg WAV conversion) is performed by the service before
 invoking WhisperX:
 
 ```
-ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
+ffmpeg -i <input> -map 0:a:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
 ```
 
 ### 9.6 Canonical Transcript Contract

@@ -208,7 +208,7 @@ are produced later by the subtitle stage from canonical JSON/alignment output.
 Before invoking WhisperX, audio is extracted from the source MKV via FFmpeg:
 
 ```
-ffmpeg -i <input> -map 0:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
+ffmpeg -i <input> -map 0:a:<audioIndex> -ac 1 -ar 16000 -c:a pcm_s16le -vn -sn -dn <output.wav>
 ```
 
 Parameters:
@@ -216,7 +216,7 @@ Parameters:
 - `-ar 16000`: Resample to 16 kHz
 - `-c:a pcm_s16le`: PCM 16-bit signed little-endian
 - `-vn -sn -dn`: Strip video, subtitle, and data streams
-- `-map 0:{audioIndex}`: Select specific audio track by stream index
+- `-map 0:a:{audioIndex}`: Select specific audio track (audio-relative index)
 
 ### Subtitle Formatting (Stable-TS)
 
