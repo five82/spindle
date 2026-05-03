@@ -252,8 +252,11 @@ func applyDefaults(cfg *Config) {
 	if cfg.ContentID.LowConfidenceReviewThreshold == 0 {
 		cfg.ContentID.LowConfidenceReviewThreshold = 0.70
 	}
-	if cfg.ContentID.LLMVerifyThreshold == 0 {
-		cfg.ContentID.LLMVerifyThreshold = 0.85
+	if cfg.ContentID.DecisiveAutoAcceptThreshold == 0 {
+		cfg.ContentID.DecisiveAutoAcceptThreshold = 0.80
+	}
+	if cfg.ContentID.ClearConfidenceThreshold == 0 {
+		cfg.ContentID.ClearConfidenceThreshold = 0.85
 	}
 
 	// [logging]

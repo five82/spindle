@@ -194,8 +194,11 @@ api_key = ""
 # Matches below this are routed to review
 # low_confidence_review_threshold = 0.70
 
-# Ambiguous matches below this may be sent to LLM verification
-# llm_verify_threshold = 0.85
+# Strong-margin matches at or above this are accepted without LLM verification
+# decisive_auto_accept_threshold = 0.80
+
+# Strong-margin matches at or above this are labeled clear instead of decisive_low_similarity
+# clear_confidence_threshold = 0.85
 
 [logging]
 # Days to retain daemon log files

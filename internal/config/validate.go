@@ -100,11 +100,15 @@ func ValidateContentID(cid ContentIDConfig) []string {
 		{"content_id.min_similarity_score", cid.MinSimilarityScore},
 		{"content_id.clear_match_margin", cid.ClearMatchMargin},
 		{"content_id.low_confidence_review_threshold", cid.LowConfidenceReviewThreshold},
-		{"content_id.llm_verify_threshold", cid.LLMVerifyThreshold},
+		{"content_id.decisive_auto_accept_threshold", cid.DecisiveAutoAcceptThreshold},
+		{"content_id.clear_confidence_threshold", cid.ClearConfidenceThreshold},
 	} {
 		if pair.val <= 0 || pair.val >= 1 {
 			errs = append(errs, fmt.Sprintf("%s must be > 0 and < 1 (got %.2f)", pair.name, pair.val))
 		}
+	}
+	if cid.DecisiveAutoAcceptThreshold <= cid.LowConfidenceReviewThreshold || cid.DecisiveAutoAcceptThreshold > cid.ClearConfidenceThreshold {
+		errs = append(errs, "content_id.decisive_auto_accept_threshold must be > low_confidence_review_threshold and <= clear_confidence_threshold")
 	}
 	return errs
 }

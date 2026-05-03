@@ -78,15 +78,37 @@ A match has two related but separate ideas:
 Ordering can support a decision but is not the primary solver. Spindle should not
 force a sequential assignment when content evidence disagrees.
 
+Episode match logs include a confidence quality:
+
+- `clear`: high confidence and clear margins over alternatives.
+- `decisive_low_similarity`: transcript similarity is below the clear-match
+  threshold, but still above the deterministic auto-accept threshold and margins
+  over all alternatives are strong. This means the match is not confused with
+  another episode; it is accepted without LLM verification.
+- `ambiguous`: one or more margins are not strong enough for deterministic
+  acceptance.
+- `contested`: confidence is below review threshold, a reference is suspect, or
+  the closest neighboring episode is too close.
+
 Accepted matches record provenance such as deterministic clear match or LLM
 verified match. Unresolved or conflicting matches should preserve enough context
-for audit/review.
+for audit/review. The `contentid_matches` decision should distinguish
+`ambiguous_rips`, `decisive_low_similarity_rips`, and `contested_rips` so audit
+reports do not confuse decisive lower-similarity matches with real assignment
+ambiguity. When a candidate is challenged by the LLM, logs should include
+`verification_reason` / `verification_trigger` values explaining why the pair was
+challenged, such as `rip_margin` or
+`confidence_below_auto_accept_threshold`.
 
 ## LLM verification
 
 The LLM compares two transcript excerpts and answers whether they are from the
 same episode. Inputs are bounded to the candidate rip/reference pair Spindle
-provides.
+provides. Candidates are challenged when assignment margins are
+ambiguous/contested, references are suspect, or confidence falls below
+`decisive_auto_accept_threshold`. Strong-margin matches between
+`decisive_auto_accept_threshold` and `clear_confidence_threshold` are accepted as
+`decisive_low_similarity` instead of spending LLM calls on non-ambiguous cases.
 
 The LLM must not:
 
@@ -120,7 +142,8 @@ thresholds include:
 - `min_similarity_score`
 - `clear_match_margin`
 - `low_confidence_review_threshold`
-- `llm_verify_threshold`
+- `decisive_auto_accept_threshold`
+- `clear_confidence_threshold`
 
 Exact defaults live in `internal/config` and the generated sample config from
 `spindle config init`.

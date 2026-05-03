@@ -174,6 +174,7 @@ func (h *Handler) Run(ctx context.Context, item *queue.Item) error {
 		"decision_reason", "content_first_claim_ranking",
 		"clear_matches", resolution.ClearMatchCount,
 		"ambiguous_rips", resolution.AmbiguousCount,
+		"decisive_low_similarity_rips", resolution.DecisiveLowSimilarityCount,
 		"contested_rips", resolution.ContestedCount,
 		"suspect_references", resolution.SuspectReferenceCount,
 	)
@@ -373,6 +374,7 @@ func (h *Handler) applyMatches(
 			"match_score", m.Score,
 			"match_confidence", m.Confidence,
 			"confidence_quality", m.ConfidenceQuality,
+			"verification_reason", m.VerificationReason,
 			"rip_runner_up_episode", m.RunnerUpEpisode,
 			"rip_runner_up_score", m.RunnerUpScore,
 			"rip_score_margin", m.ScoreMargin,

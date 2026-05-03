@@ -114,6 +114,8 @@ func verifyMatches(ctx context.Context, client *llm.Client, accepted []matchResu
 						"decision_type", "contentid_llm_verification",
 						"decision_result", "failed",
 						"decision_reason", err.Error(),
+						"verification_trigger", candidate.VerificationReason,
+						"confidence_quality", candidate.ConfidenceQuality,
 						"episode_key", candidate.EpisodeKey,
 						"target_episode", candidate.TargetEpisode,
 						"match_score", candidate.Score,
@@ -126,7 +128,6 @@ func verifyMatches(ctx context.Context, client *llm.Client, accepted []matchResu
 				verified := candidate
 				verified.AcceptedBy = "llm_verified"
 				verified.NeedsVerification = false
-				verified.VerificationReason = ""
 				updated = append(updated, verified)
 				acceptedRips[strings.ToLower(verified.EpisodeKey)] = struct{}{}
 				acceptedEpisodes[verified.TargetEpisode] = struct{}{}
@@ -137,6 +138,8 @@ func verifyMatches(ctx context.Context, client *llm.Client, accepted []matchResu
 						"decision_type", "contentid_llm_verification",
 						"decision_result", "confirmed",
 						"decision_reason", ev.Explanation,
+						"verification_trigger", candidate.VerificationReason,
+						"confidence_quality", candidate.ConfidenceQuality,
 						"episode_key", candidate.EpisodeKey,
 						"target_episode", candidate.TargetEpisode,
 						"match_score", candidate.Score,
@@ -156,6 +159,8 @@ func verifyMatches(ctx context.Context, client *llm.Client, accepted []matchResu
 					"decision_type", "contentid_llm_verification",
 					"decision_result", "rejected",
 					"decision_reason", ev.Explanation,
+					"verification_trigger", candidate.VerificationReason,
+					"confidence_quality", candidate.ConfidenceQuality,
 					"episode_key", candidate.EpisodeKey,
 					"target_episode", candidate.TargetEpisode,
 					"match_score", candidate.Score,

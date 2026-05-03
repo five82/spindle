@@ -167,6 +167,69 @@ func TestResolveEpisodeClaimsIgnoresDiscOrder(t *testing.T) {
 	}
 }
 
+func TestDeriveMatchConfidenceLabelsDecisiveLowSimilarity(t *testing.T) {
+	policy := DefaultPolicy()
+	confidence, quality, needsVerify, reason := deriveMatchConfidence(0.821, 0.75, 0.76, 0.77, false, policy)
+	if confidence != 0.821 {
+		t.Fatalf("confidence = %.3f, want 0.821", confidence)
+	}
+	if quality != "decisive_low_similarity" {
+		t.Fatalf("quality = %q, want decisive_low_similarity", quality)
+	}
+	if needsVerify {
+		t.Fatal("did not expect LLM verification because decisive margins meet auto-accept threshold")
+	}
+	if reason != "" {
+		t.Fatalf("reason = %q, want empty", reason)
+	}
+}
+
+func TestDeriveMatchConfidenceLabelsAmbiguousMargin(t *testing.T) {
+	policy := DefaultPolicy()
+	_, quality, needsVerify, reason := deriveMatchConfidence(0.90, 0.03, 0.20, 0.20, false, policy)
+	if quality != "ambiguous" {
+		t.Fatalf("quality = %q, want ambiguous", quality)
+	}
+	if !needsVerify {
+		t.Fatal("expected LLM verification because rip margin is below clear threshold")
+	}
+	if reason != "rip_margin" {
+		t.Fatalf("reason = %q, want rip_margin", reason)
+	}
+}
+
+func TestDeriveMatchConfidenceRequiresVerificationBelowAutoAcceptThreshold(t *testing.T) {
+	policy := DefaultPolicy()
+	_, quality, needsVerify, reason := deriveMatchConfidence(0.79, 0.75, 0.76, 0.77, false, policy)
+	if quality != "ambiguous" {
+		t.Fatalf("quality = %q, want ambiguous", quality)
+	}
+	if !needsVerify {
+		t.Fatal("expected LLM verification because confidence is below auto-accept threshold")
+	}
+	if reason != "confidence_below_auto_accept_threshold" {
+		t.Fatalf("reason = %q, want confidence_below_auto_accept_threshold", reason)
+	}
+}
+
+func TestIsAutoAcceptedClaimAllowsDecisiveLowSimilarity(t *testing.T) {
+	policy := DefaultPolicy()
+	match := matchResult{
+		Score:               0.821,
+		Confidence:          0.821,
+		ScoreMargin:         0.75,
+		EpisodeScoreMargin:  0.76,
+		NeighborScoreMargin: 0.77,
+	}
+	if !isAutoAcceptedClaim(match, policy) {
+		t.Fatal("expected strong-margin decisive low-similarity match to be auto-accepted")
+	}
+	match.Confidence = 0.79
+	if isAutoAcceptedClaim(match, policy) {
+		t.Fatal("did not expect below-threshold match to be auto-accepted")
+	}
+}
+
 func TestResolveEpisodeClaimsLeavesAdjacentAmbiguityForVerification(t *testing.T) {
 	policy := DefaultPolicy()
 	policy.MinSimilarityScore = 0.10

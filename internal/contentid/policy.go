@@ -7,7 +7,8 @@ type Policy struct {
 	MinSimilarityScore           float64
 	ClearMatchMargin             float64
 	LowConfidenceReviewThreshold float64
-	LLMVerifyThreshold           float64
+	DecisiveAutoAcceptThreshold  float64
+	ClearConfidenceThreshold     float64
 }
 
 // DefaultPolicy returns conservative defaults for the content-first TV matcher.
@@ -16,7 +17,8 @@ func DefaultPolicy() Policy {
 		MinSimilarityScore:           0.58,
 		ClearMatchMargin:             0.05,
 		LowConfidenceReviewThreshold: 0.70,
-		LLMVerifyThreshold:           0.85,
+		DecisiveAutoAcceptThreshold:  0.80,
+		ClearConfidenceThreshold:     0.85,
 	}
 }
 
@@ -34,8 +36,11 @@ func policyFromConfig(cfg *config.Config) Policy {
 	if cfg.ContentID.LowConfidenceReviewThreshold > 0 {
 		p.LowConfidenceReviewThreshold = cfg.ContentID.LowConfidenceReviewThreshold
 	}
-	if cfg.ContentID.LLMVerifyThreshold > 0 {
-		p.LLMVerifyThreshold = cfg.ContentID.LLMVerifyThreshold
+	if cfg.ContentID.DecisiveAutoAcceptThreshold > 0 {
+		p.DecisiveAutoAcceptThreshold = cfg.ContentID.DecisiveAutoAcceptThreshold
+	}
+	if cfg.ContentID.ClearConfidenceThreshold > 0 {
+		p.ClearConfidenceThreshold = cfg.ContentID.ClearConfidenceThreshold
 	}
 	return p.normalized()
 }
@@ -51,8 +56,14 @@ func (p Policy) normalized() Policy {
 	if p.LowConfidenceReviewThreshold <= 0 || p.LowConfidenceReviewThreshold >= 1 {
 		p.LowConfidenceReviewThreshold = d.LowConfidenceReviewThreshold
 	}
-	if p.LLMVerifyThreshold <= 0 || p.LLMVerifyThreshold >= 1 {
-		p.LLMVerifyThreshold = d.LLMVerifyThreshold
+	if p.DecisiveAutoAcceptThreshold <= 0 || p.DecisiveAutoAcceptThreshold >= 1 {
+		p.DecisiveAutoAcceptThreshold = d.DecisiveAutoAcceptThreshold
+	}
+	if p.ClearConfidenceThreshold <= 0 || p.ClearConfidenceThreshold >= 1 {
+		p.ClearConfidenceThreshold = d.ClearConfidenceThreshold
+	}
+	if p.DecisiveAutoAcceptThreshold <= p.LowConfidenceReviewThreshold || p.DecisiveAutoAcceptThreshold > p.ClearConfidenceThreshold {
+		p.DecisiveAutoAcceptThreshold = d.DecisiveAutoAcceptThreshold
 	}
 	return p
 }

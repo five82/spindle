@@ -292,22 +292,68 @@ func detectFallbackTitleSelectionAnomalies(r *Report) []Anomaly {
 	}}
 }
 
-func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambiguous, clear int) {
+func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambiguous, decisiveLowSimilarity, clear int) {
 	for _, d := range decisions {
 		if d.DecisionType != "episode_match" || d.Extras == nil {
 			continue
 		}
-		quality, _ := d.Extras["confidence_quality"].(string)
-		switch quality {
+		switch episodeMatchConfidenceQuality(d) {
 		case "contested":
 			contested++
 		case "ambiguous":
 			ambiguous++
+		case "decisive_low_similarity":
+			decisiveLowSimilarity++
 		case "clear":
 			clear++
 		}
 	}
-	return contested, ambiguous, clear
+	return contested, ambiguous, decisiveLowSimilarity, clear
+}
+
+func episodeMatchConfidenceQuality(d LogDecision) string {
+	quality, _ := d.Extras["confidence_quality"].(string)
+	if quality != "ambiguous" && quality != "" {
+		return quality
+	}
+	confidence, ok := d.Extras["match_confidence"].(float64)
+	if !ok || confidence < 0.80 || confidence >= 0.85 {
+		return quality
+	}
+	ripMargin, ok := d.Extras["rip_score_margin"].(float64)
+	if !ok || ripMargin < 0.05 {
+		return quality
+	}
+	episodeMargin, ok := d.Extras["episode_score_margin"].(float64)
+	if !ok || episodeMargin < 0.05 {
+		return quality
+	}
+	neighborMargin, ok := d.Extras["neighbor_score_margin"].(float64)
+	if !ok || neighborMargin < 0.025 {
+		return quality
+	}
+	referenceSuspect, _ := d.Extras["reference_suspect"].(bool)
+	if referenceSuspect {
+		return quality
+	}
+	return "decisive_low_similarity"
+}
+
+func countDecisiveLowSimilarityInConfidenceBand(decisions []LogDecision, minConfidence, maxConfidence float64) int {
+	count := 0
+	for _, d := range decisions {
+		if d.DecisionType != "episode_match" || d.Extras == nil || episodeMatchConfidenceQuality(d) != "decisive_low_similarity" {
+			continue
+		}
+		confidence, ok := d.Extras["match_confidence"].(float64)
+		if !ok {
+			continue
+		}
+		if confidence >= minConfidence && confidence < maxConfidence {
+			count++
+		}
+	}
+	return count
 }
 
 // computeEpisodeConsistency compares media profiles across TV episodes.
@@ -707,7 +753,7 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Message:  fmt.Sprintf("%d warning(s) in item log", n),
 			})
 		}
-		contested, ambiguous, clear := countDecisionConfidenceQualities(r.Logs.Decisions)
+		contested, ambiguous, decisiveLowSimilarity, clear := countDecisionConfidenceQualities(r.Logs.Decisions)
 		if contested > 0 {
 			anomalies = append(anomalies, Anomaly{
 				Severity: "warning",
@@ -720,6 +766,13 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Severity: "info",
 				Category: "episodes",
 				Message:  fmt.Sprintf("%d episode match decision(s) marked ambiguous", ambiguous),
+			})
+		}
+		if decisiveLowSimilarity > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "info",
+				Category: "episodes",
+				Message:  fmt.Sprintf("%d episode match decision(s) had decisive margins but lower transcript similarity", decisiveLowSimilarity),
 			})
 		}
 		if clear > 0 {
@@ -802,10 +855,14 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		}
 		below090only := a.EpisodeStats.Below090 - a.EpisodeStats.Below080
 		if below090only > 0 {
+			message := fmt.Sprintf("%d episode(s) with confidence below 0.90", below090only)
+			if r.Logs != nil && countDecisiveLowSimilarityInConfidenceBand(r.Logs.Decisions, 0.80, 0.90) == below090only {
+				message = fmt.Sprintf("%d decisive episode match(es) below 0.90 with strong margins", below090only)
+			}
 			anomalies = append(anomalies, Anomaly{
 				Severity: "info",
 				Category: "episodes",
-				Message:  fmt.Sprintf("%d episode(s) with confidence below 0.90", below090only),
+				Message:  message,
 			})
 		}
 		if !a.EpisodeStats.SequenceContiguous && a.EpisodeStats.Matched > 0 {

@@ -504,6 +504,9 @@ api_key = "from-file"
 		if cfg.ContentID.ClearMatchMargin != 0.05 {
 			t.Fatalf("expected clear_match_margin default 0.05, got %f", cfg.ContentID.ClearMatchMargin)
 		}
+		if cfg.ContentID.DecisiveAutoAcceptThreshold != 0.80 {
+			t.Fatalf("expected decisive_auto_accept_threshold default 0.80, got %f", cfg.ContentID.DecisiveAutoAcceptThreshold)
+		}
 	})
 
 	t.Run("explicit override preserved", func(t *testing.T) {
@@ -514,6 +517,7 @@ api_key = "from-file"
 
 [content_id]
 clear_match_margin = 0.08
+decisive_auto_accept_threshold = 0.82
 `
 		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -525,6 +529,9 @@ clear_match_margin = 0.08
 		}
 		if cfg.ContentID.ClearMatchMargin != 0.08 {
 			t.Fatalf("expected explicit clear_match_margin to be preserved, got %f", cfg.ContentID.ClearMatchMargin)
+		}
+		if cfg.ContentID.DecisiveAutoAcceptThreshold != 0.82 {
+			t.Fatalf("expected explicit decisive_auto_accept_threshold to be preserved, got %f", cfg.ContentID.DecisiveAutoAcceptThreshold)
 		}
 	})
 }

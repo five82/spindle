@@ -454,3 +454,53 @@ func TestDetectDefaultAudioLanguageAnomalies_IgnoresEnglishDefault(t *testing.T)
 		t.Fatalf("expected 0 anomalies, got %d: %+v", len(anomalies), anomalies)
 	}
 }
+
+func TestCountDecisionConfidenceQualitiesIncludesDecisiveLowSimilarity(t *testing.T) {
+	decisions := []LogDecision{
+		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "clear"}},
+		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "decisive_low_similarity", "match_confidence": 0.821}},
+		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "ambiguous"}},
+		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "contested"}},
+		{DecisionType: "tmdb_match", Extras: map[string]any{"confidence_quality": "clear"}},
+	}
+
+	contested, ambiguous, decisive, clear := countDecisionConfidenceQualities(decisions)
+	if contested != 1 || ambiguous != 1 || decisive != 1 || clear != 1 {
+		t.Fatalf("counts = contested:%d ambiguous:%d decisive:%d clear:%d", contested, ambiguous, decisive, clear)
+	}
+}
+
+func TestCountDecisiveLowSimilarityInConfidenceBand(t *testing.T) {
+	decisions := []LogDecision{
+		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "decisive_low_similarity", "match_confidence": 0.821}},
+		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "decisive_low_similarity", "match_confidence": 0.945}},
+		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "ambiguous", "match_confidence": 0.830}},
+	}
+
+	got := countDecisiveLowSimilarityInConfidenceBand(decisions, 0.80, 0.90)
+	if got != 1 {
+		t.Fatalf("decisive low-similarity count = %d, want 1", got)
+	}
+}
+
+func TestEpisodeMatchConfidenceQualityInfersLegacyDecisiveLowSimilarity(t *testing.T) {
+	decision := LogDecision{DecisionType: "episode_match", Extras: map[string]any{
+		"confidence_quality":    "ambiguous",
+		"match_confidence":      0.821,
+		"rip_score_margin":      0.751,
+		"episode_score_margin":  0.769,
+		"neighbor_score_margin": 0.775,
+		"reference_suspect":     false,
+	}}
+
+	got := episodeMatchConfidenceQuality(decision)
+	if got != "decisive_low_similarity" {
+		t.Fatalf("quality = %q, want decisive_low_similarity", got)
+	}
+
+	decision.Extras["match_confidence"] = 0.790
+	got = episodeMatchConfidenceQuality(decision)
+	if got != "ambiguous" {
+		t.Fatalf("quality below auto-accept threshold = %q, want ambiguous", got)
+	}
+}

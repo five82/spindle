@@ -145,8 +145,8 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - `decision_type=episode_identification` entries — check if stage was skipped and why (valid reasons: `movie_content`, `opensubtitles_disabled`, `content_matcher_unavailable`)
    - `decision_type=episode_review` with `decision_result=needs_review` — episodeid flagged unresolved episodes
    - `event_type=contentid_no_references` or `contentid_no_matches` in warnings — soft failures
-   - `event_type=episode_match_low_confidence` — episodes with `MatchConfidence` below 0.70
-   - `decision_type=contentid_matches` — final episode-to-reference matching results
+   - `event_type=low_confidence_match` — episodes with `MatchConfidence` below 0.70
+   - `decision_type=contentid_matches` — final episode-to-reference matching results; compare `ambiguous_rips`, `decisive_low_similarity_rips`, and `contested_rips`
    - Verify placeholder keys (`s01_001`) were replaced with resolved keys (`s01e03`) after episodeid
    - **Do not stop at episode-ID quality.** If organizer/review routing is implicated, compare per-episode review state against final destinations.
 
@@ -192,6 +192,7 @@ Analyze the `rip_cache` section from audit-gather output:
    - **WARNING** (0.70-0.80): Marginal confidence
    - **OK** (> 0.80): High confidence match
    - **Zero** (0.0): Unresolved episode
+   - For `logs.decisions` with `decision_type=episode_match`, inspect `confidence_quality` before treating an accepted score as risky. `decisive_low_similarity` means text similarity is lower than a clear match but runner-up margins are strong enough for deterministic acceptance; it should not require `decision_reason=llm_verified`. `ambiguous` means margins were not decisive. `contested` is review-worthy.
 
 3. **Canonical match outcomes live in `episodes[]`**:
    - Verify all episodes have sensible resolved/unresolved state
@@ -358,6 +359,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Subtitles not muxed | Subtitles | No subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load |
 | Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Jellyfin display issue |
 | Low episode match confidence | Episode ID | `envelope.episodes[].match_confidence` < 0.70 | Episodes may be mislabeled |
+| Decisive low-similarity episode match | Episode ID | `decision_type=episode_match` with `confidence_quality=decisive_low_similarity` and strong margins | Usually not a defect; explain as lower transcript/reference overlap rather than confusion with another episode |
 | Episodes unresolved | Episode ID | `item.needs_review=true`, episodes with `episode=0` | Placeholder names in review_dir |
 | Episode sequence gaps | Episode ID | Non-sequential episode numbers in `envelope.episodes[]` | Missing episodes or matching error |
 | Per-episode rip failure | Ripping | `envelope.assets.ripped[]` with `status: "failed"` | Episode missing from pipeline |
@@ -414,6 +416,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 **Decision traces:**
 - `analysis.decision_groups` already provides the deduplication -- groups with nil `entries` are identical repeats (show as `"type x{count}: result (reason)"`), groups with `entries` have varying messages
 - Only expand individual entries for decisions with different outcomes, notable parameter variations, or anomalous confidence/scores
+- For episode matches below 0.90, use `confidence_quality` and margins from `episode_match` extras to distinguish true ambiguity from `decisive_low_similarity` (strong margins, weaker transcript overlap). Do not file a finding for `decisive_low_similarity` when margins are strong and no review routing occurred.
 
 **Episode manifest:**
 - Always show the full per-episode table with confidence scores, matched episode numbers, and titles. Episode identification is a core pipeline feature and the manifest is the primary evidence of correctness. This table is never compressed.

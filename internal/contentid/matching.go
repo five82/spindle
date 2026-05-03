@@ -11,20 +11,21 @@ import (
 const maxVerificationCandidatesPerRip = 2
 
 type provisionalClaim struct {
-	RipIndex int
-	RefIndex int
-	Match    matchResult
-	Clear    bool
+	RipIndex   int
+	RefIndex   int
+	Match      matchResult
+	AutoAccept bool
 }
 
 type matchResolution struct {
-	Accepted            []matchResult
-	PendingByRip        map[string][]matchResult
-	UnresolvedKeys      []string
-	ClearMatchCount     int
-	AmbiguousCount      int
-	ContestedCount      int
-	SuspectReferenceCount int
+	Accepted                   []matchResult
+	PendingByRip               map[string][]matchResult
+	UnresolvedKeys             []string
+	ClearMatchCount            int
+	AmbiguousCount             int
+	DecisiveLowSimilarityCount int
+	ContestedCount             int
+	SuspectReferenceCount      int
 }
 
 func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, policy Policy) matchResolution {
@@ -58,8 +59,10 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	acceptedByRip := make(map[string]struct{}, len(rips))
 	acceptedEpisodes := make(map[int]struct{}, len(refs))
 	accepted := make([]matchResult, 0, len(rips))
+	clearAccepted := 0
+	decisiveLowSimilarityAccepted := 0
 	for _, claim := range claims {
-		if !claim.Clear {
+		if !claim.AutoAccept {
 			continue
 		}
 		if _, ok := acceptedByRip[strings.ToLower(claim.Match.EpisodeKey)]; ok {
@@ -70,6 +73,12 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 		}
 		match := claim.Match
 		match.AcceptedBy = "clear_claim"
+		if match.ConfidenceQuality == "decisive_low_similarity" {
+			match.AcceptedBy = "decisive_low_similarity_claim"
+			decisiveLowSimilarityAccepted++
+		} else {
+			clearAccepted++
+		}
 		match.NeedsVerification = false
 		match.VerificationReason = ""
 		accepted = append(accepted, match)
@@ -81,6 +90,7 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	unresolved := make([]string, 0, len(rips))
 	contested := 0
 	ambiguous := 0
+	decisiveLowSimilarity := 0
 	for _, rip := range rips {
 		key := strings.ToLower(rip.EpisodeKey)
 		if _, ok := acceptedByRip[key]; ok {
@@ -89,9 +99,13 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 		candidates := topPendingClaimsForRip(claims, rip.EpisodeKey, acceptedEpisodes)
 		if len(candidates) > 0 {
 			pendingByRip[rip.EpisodeKey] = candidates
-			ambiguous++
-			if len(candidates) > 1 {
+			switch {
+			case candidates[0].ConfidenceQuality == "decisive_low_similarity" && len(candidates) == 1:
+				decisiveLowSimilarity++
+			case candidates[0].ConfidenceQuality == "contested" || len(candidates) > 1:
 				contested++
+			default:
+				ambiguous++
 			}
 		}
 		unresolved = append(unresolved, rip.EpisodeKey)
@@ -105,13 +119,14 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	}
 
 	return matchResolution{
-		Accepted:              accepted,
-		PendingByRip:          pendingByRip,
-		UnresolvedKeys:        unresolved,
-		ClearMatchCount:       len(accepted),
-		AmbiguousCount:        ambiguous,
-		ContestedCount:        contested,
-		SuspectReferenceCount: suspectRefCount,
+		Accepted:                   accepted,
+		PendingByRip:               pendingByRip,
+		UnresolvedKeys:             unresolved,
+		ClearMatchCount:            clearAccepted,
+		AmbiguousCount:             ambiguous,
+		DecisiveLowSimilarityCount: decisiveLowSimilarityAccepted + decisiveLowSimilarity,
+		ContestedCount:             contested,
+		SuspectReferenceCount:      suspectRefCount,
 	}
 }
 
@@ -156,10 +171,10 @@ func buildClaims(rips []ripFingerprint, refs []referenceFingerprint, scores [][]
 			}
 			match.Strength = claimStrength(match)
 			claims = append(claims, provisionalClaim{
-				RipIndex: i,
-				RefIndex: j,
-				Match:    match,
-				Clear:    isClearClaim(match, policy),
+				RipIndex:   i,
+				RefIndex:   j,
+				Match:      match,
+				AutoAccept: isAutoAcceptedClaim(match, policy),
 			})
 		}
 	}
@@ -216,7 +231,7 @@ func reconcileSingleHole(matches []matchResult, candidatesByRip map[string][]mat
 	reconciled := missingClaim
 	reconciled.AcceptedBy = "single_hole_reconciliation"
 	reconciled.Confidence = clamp01(reconciled.Confidence - 0.08)
-	reconciled.ConfidenceQuality = classifyDerivedConfidence(reconciled.Confidence, reconciled.ScoreMargin, reconciled.EpisodeScoreMargin, reconciled.NeighborScoreMargin, reconciled.ReferenceSuspect)
+	reconciled.ConfidenceQuality = classifyDerivedConfidence(reconciled.Confidence, reconciled.ScoreMargin, reconciled.EpisodeScoreMargin, reconciled.NeighborScoreMargin, reconciled.ReferenceSuspect, policy)
 	reconciled.NeedsVerification = false
 	reconciled.VerificationReason = ""
 	return append(matches, reconciled), true
@@ -292,7 +307,7 @@ func hasStrongContradiction(candidates []matchResult, missingEpisode int, missin
 	if best.Score >= missingClaim.Score+policy.ClearMatchMargin {
 		return true
 	}
-	return best.Confidence >= policy.LLMVerifyThreshold && best.TargetEpisode != missingEpisode
+	return best.Confidence >= policy.ClearConfidenceThreshold && best.TargetEpisode != missingEpisode
 }
 
 func hasReferenceEpisode(refs []referenceFingerprint, episode int) bool {
@@ -384,8 +399,9 @@ func buildScoreMatrix(rips []ripFingerprint, refs []referenceFingerprint) [][]fl
 }
 
 func deriveMatchConfidence(score, ripMargin, episodeMargin, neighborMargin float64, referenceSuspect bool, policy Policy) (float64, string, bool, string) {
+	policy = policy.normalized()
 	confidence := score
-	reasons := make([]string, 0, 4)
+	reasons := make([]string, 0, 5)
 	confidence -= marginPenalty(ripMargin, policy.ClearMatchMargin, 0.20, "rip_margin", &reasons)
 	confidence -= marginPenalty(episodeMargin, policy.ClearMatchMargin, 0.18, "episode_margin", &reasons)
 	confidence -= marginPenalty(neighborMargin, policy.ClearMatchMargin/2, 0.16, "neighbor_margin", &reasons)
@@ -394,18 +410,22 @@ func deriveMatchConfidence(score, ripMargin, episodeMargin, neighborMargin float
 		reasons = append(reasons, "suspect_reference")
 	}
 	confidence = clamp01(confidence)
-	quality := classifyDerivedConfidence(confidence, ripMargin, episodeMargin, neighborMargin, referenceSuspect)
-	needsVerify := referenceSuspect || confidence < policy.LLMVerifyThreshold || ripMargin < policy.ClearMatchMargin || episodeMargin < policy.ClearMatchMargin || neighborMargin < policy.ClearMatchMargin/2
+	if confidence < policy.DecisiveAutoAcceptThreshold {
+		reasons = append(reasons, "confidence_below_auto_accept_threshold")
+	}
+	quality := classifyDerivedConfidence(confidence, ripMargin, episodeMargin, neighborMargin, referenceSuspect, policy)
+	hasClearMargins := ripMargin >= policy.ClearMatchMargin && episodeMargin >= policy.ClearMatchMargin && neighborMargin >= policy.ClearMatchMargin/2
+	needsVerify := referenceSuspect || confidence < policy.DecisiveAutoAcceptThreshold || !hasClearMargins
 	return confidence, quality, needsVerify, strings.Join(reasons, ",")
 }
 
-func isClearClaim(match matchResult, policy Policy) bool {
+func isAutoAcceptedClaim(match matchResult, policy Policy) bool {
 	return match.Score >= policy.MinSimilarityScore &&
 		match.ScoreMargin >= policy.ClearMatchMargin &&
 		match.EpisodeScoreMargin >= policy.ClearMatchMargin &&
 		match.NeighborScoreMargin >= policy.ClearMatchMargin/2 &&
 		!match.ReferenceSuspect &&
-		match.Confidence >= policy.LLMVerifyThreshold
+		match.Confidence >= policy.DecisiveAutoAcceptThreshold
 }
 
 func claimStrength(match matchResult) float64 {
@@ -429,11 +449,17 @@ func marginPenalty(margin, target, weight float64, label string, reasons *[]stri
 	return weight * (target - max(0.0, margin)) / target
 }
 
-func classifyDerivedConfidence(confidence, ripMargin, episodeMargin, neighborMargin float64, referenceSuspect bool) string {
+func classifyDerivedConfidence(confidence, ripMargin, episodeMargin, neighborMargin float64, referenceSuspect bool, policy Policy) string {
+	policy = policy.normalized()
+	hasClearMargins := ripMargin >= policy.ClearMatchMargin &&
+		episodeMargin >= policy.ClearMatchMargin &&
+		neighborMargin >= policy.ClearMatchMargin/2
 	switch {
-	case !referenceSuspect && confidence >= 0.85 && ripMargin >= 0.05 && episodeMargin >= 0.05 && neighborMargin >= 0.025:
+	case !referenceSuspect && confidence >= policy.ClearConfidenceThreshold && hasClearMargins:
 		return "clear"
-	case referenceSuspect || confidence < DefaultPolicy().LowConfidenceReviewThreshold || neighborMargin < 0.02:
+	case !referenceSuspect && confidence >= policy.DecisiveAutoAcceptThreshold && hasClearMargins:
+		return "decisive_low_similarity"
+	case referenceSuspect || confidence < policy.LowConfidenceReviewThreshold || neighborMargin < policy.ClearMatchMargin*0.4:
 		return "contested"
 	default:
 		return "ambiguous"
