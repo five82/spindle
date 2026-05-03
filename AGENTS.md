@@ -30,7 +30,7 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 
 **Architectural churn is embraced.** Optimize for clarity, not backwards compatibility.
 
-- Use proper spec driven development methodology. The codebase must follow the spec docs. You can propose updates to the spec but do not make spec doc changes without approval.
+- Use lightweight spec driven development. Active docs in `docs/` define user/API/architecture/operations contracts; code and tests define exact implementation behavior. Update active docs when a change affects those contracts, otherwise prefer focused tests over prose. Deleted rewrite specs are historical only in git history.
 - Do not just look for the easiest solution or fix. Find the best and most maintainable path forward.
 - Break things forward. Remove deprecated paths; no compatibility shims.
 - Prefer maintainable architecture and explicit logging over clever tricks.

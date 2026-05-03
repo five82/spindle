@@ -315,7 +315,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		"decision_reason", fmt.Sprintf("tmdb_id=%d year=%s votes=%d", result.Best.ID, result.Best.Year(), result.Best.VoteCount),
 	)
 
-	// Update disc_title to canonical name per spec.
+	// Update disc_title to a canonical display name.
 	result.MediaType = result.Best.MediaType
 	if result.MediaType == "" {
 		result.MediaType = "movie" // default for single-type searches
@@ -507,9 +507,7 @@ func CleanQueryTitle(title string) string {
 	return cleaned
 }
 
-// detectMediaTypeHint examines the raw disc title for TV indicators.
-// Returns "tv" or "" (no hint). Per spec section 1.6, this hint controls
-// which TMDB search endpoint is tried first.
+// noTMDBMatchIsFatal reports whether a missing TMDB match should stop the item.
 func noTMDBMatchIsFatal(mediaHint string) bool {
 	return mediaHint == "tv"
 }

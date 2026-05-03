@@ -1,0 +1,132 @@
+# TV Content Identification
+
+Status: Active contract.
+
+TV discs often expose episodes as generic titles without canonical episode
+numbers. Spindle's content ID stage maps ripped TV title files to TMDB season and
+episode numbers using transcript similarity against reference subtitles.
+
+Exact scoring and data structures live in `internal/contentid` and its tests.
+This document captures the intended behavior and review policy.
+
+## Principles
+
+- **Content is primary.** Match dialogue and scene content before trusting disc
+  order, title number, or subtitle release numbering.
+- **TMDB is canonical.** Final season/episode numbers come from TMDB metadata.
+- **Reference numbering can be wrong.** Subtitle releases may split pilots,
+  merge episodes, or use alternate numbering.
+- **The LLM has a narrow job.** It verifies ambiguous transcript pairs; it does
+  not invent episode identities from memory.
+- **Review beats clever fallback stacks.** When evidence is weak or conflicted,
+  route to review instead of silently assigning a low-confidence match.
+- **Observable decisions matter.** Candidate selection, reference acquisition,
+  match outcomes, LLM verification, and review routing should be logged.
+
+## Preconditions
+
+The stage runs for TV items after ripping. It expects:
+
+- A valid RipSpec envelope with TV metadata and expected episodes.
+- Completed ripped assets for selected title files.
+- TMDB metadata sufficient to know the target season/episode set.
+- WhisperX transcription support.
+- An OpenSubtitles API key so reference subtitles can be fetched.
+
+Movies skip this stage. TV items without required API clients are marked for
+review with degraded behavior and continue to encoding; they are not treated as
+cleanly identified. Runtime transcription or reference-acquisition errors fail
+the stage so the operator can fix the external dependency and retry.
+
+## Pipeline
+
+At a high level the stage:
+
+1. Selects primary audio for each ripped title.
+2. Produces a canonical transcript with WhisperX.
+3. Builds the target episode candidate set from TMDB metadata.
+4. Searches OpenSubtitles for reference subtitles for candidate episodes.
+5. Validates and normalizes reference subtitles.
+6. Fingerprints ripped transcripts and references.
+7. Builds a claim matrix of rip-to-reference similarity.
+8. Accepts clear deterministic matches.
+9. Uses one-to-one constraints to avoid assigning the same rip or target episode
+   twice.
+10. Challenges ambiguous pairs with the LLM when configured and appropriate.
+11. Persists episode mapping, confidence, provenance, and review state into the
+    RipSpec envelope.
+
+## Reference acquisition
+
+OpenSubtitles references are evidence, not authority. The stage may search
+multiple variants for an episode and should reject references that are empty,
+obviously unrelated, wrong language, or too weak to support matching.
+
+Weak or missing references should be visible in logs and may trigger review.
+
+## Matching semantics
+
+A match has two related but separate ideas:
+
+- **Similarity score**: deterministic transcript/reference similarity.
+- **Confidence**: strength of the assignment considering score, margin,
+  uniqueness, and supporting evidence.
+
+Ordering can support a decision but is not the primary solver. Spindle should not
+force a sequential assignment when content evidence disagrees.
+
+Accepted matches record provenance such as deterministic clear match or LLM
+verified match. Unresolved or conflicting matches should preserve enough context
+for audit/review.
+
+## LLM verification
+
+The LLM compares two transcript excerpts and answers whether they are from the
+same episode. Inputs are bounded to the candidate rip/reference pair Spindle
+provides.
+
+The LLM must not:
+
+- Choose from the whole series.
+- Invent episode titles or numbers.
+- Override deterministic evidence without being asked to verify a specific pair.
+
+If LLM verification fails, rejects a candidate, or cannot resolve ambiguity, the
+item should be routed to review rather than guessed.
+
+## Review conditions
+
+Route TV episode identification to review when any of these materially affect the
+result:
+
+- Expected episodes cannot be matched to ripped titles.
+- Multiple plausible assignments conflict.
+- Similarity or confidence is below the configured acceptance thresholds.
+- References are missing, weak, or contradictory.
+- LLM verification fails or rejects an ambiguous pair.
+- The final mapping violates one-to-one assignment constraints.
+
+Review is not failure by itself. It means Spindle produced the best available
+mapping but requires operator confirmation.
+
+## Configuration
+
+Content ID policy is controlled by the `[content_id]` config section. Important
+thresholds include:
+
+- `min_similarity_score`
+- `clear_match_margin`
+- `low_confidence_review_threshold`
+- `llm_verify_threshold`
+
+Exact defaults live in `internal/config` and the generated sample config from
+`spindle config init`.
+
+## Implementation pointers
+
+- Stage handler and matching: `internal/contentid`.
+- Shared transcription: `internal/transcription`.
+- OpenSubtitles client: `internal/opensubtitles`.
+- LLM client: `internal/llm`.
+- Envelope fields: `internal/ripspec`.
+- Audit support: `internal/auditgather`.

@@ -10,7 +10,7 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 )
 
-// ItemResponse is the API representation of a queue item (spec Section 2.7).
+// ItemResponse is the HTTP API representation of a queue item.
 type ItemResponse struct {
 	ID                      int64             `json:"id"`
 	DiscTitle               string            `json:"discTitle"`
@@ -193,7 +193,7 @@ func toItemResponse(item *queue.Item) ItemResponse {
 		},
 	}
 
-	// ReviewReason: DB stores JSON array, spec wants string — flatten to joined string
+	// ReviewReason: DB stores a JSON array; the API exposes a joined string.
 	if item.ReviewReason != "" {
 		var reasons []string
 		if err := json.Unmarshal([]byte(item.ReviewReason), &reasons); err == nil && len(reasons) > 0 {
@@ -203,17 +203,17 @@ func toItemResponse(item *queue.Item) ItemResponse {
 		}
 	}
 
-	// MetadataJSON → json.RawMessage
+	// MetadataJSON -> json.RawMessage
 	if item.MetadataJSON != "" {
 		resp.Metadata = json.RawMessage(item.MetadataJSON)
 	}
 
-	// EncodingDetailsJSON → json.RawMessage (pass through as Snapshot)
+	// EncodingDetailsJSON -> json.RawMessage (pass through as snapshot JSON)
 	if item.EncodingDetailsJSON != "" {
 		resp.Encoding = json.RawMessage(item.EncodingDetailsJSON)
 	}
 
-	// Parse RipSpec to compute derived fields
+	// Parse RipSpec to compute derived fields.
 	if item.RipSpecData != "" {
 		resp.RipSpec = json.RawMessage(item.RipSpecData)
 		env, err := ripspec.Parse(item.RipSpecData)

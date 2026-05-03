@@ -1,6 +1,6 @@
 # Spindle Workflow Guide
 
-Status: User guide. Normative behavior is defined by the design specs.
+Status: Active contract / user guide. Exact implementation behavior is defined by code and tests.
 
 Stage-by-stage breakdown of what happens after you insert a disc. See the [README](../../README.md) for installation and initial setup.
 
@@ -15,7 +15,7 @@ Every item moves through the queue in order. Each item has a **stage** and an
 - `ripping` - video copied to staging; you'll get a notification so the disc can be ejected manually
 - `episode_identification` *(TV only)* - WhisperX + OpenSubtitles correlate ripped files to definitive episode numbers
 - `encoding` - Drapto transcodes the rip in the background
-- `audio_analysis` *(optional)* - detects commentary tracks for exclusion (requires `commentary.enabled = true`)
+- `audio_analysis` - refines encoded audio; optionally detects commentary when `commentary.enabled = true`
 - `subtitling` *(optional)* - WhisperX transcription generates subtitle sidecars; forced subtitles optionally fetched from OpenSubtitles
 - `organizing` - files moved into your library; Jellyfin refresh triggered when configured
 - `completed` - all done
@@ -37,7 +37,7 @@ only one disc operation (identification or ripping) runs at a time.
 
 ## Stage 1: Disc Detection & Queueing (identification)
 
-1. The daemon polls your optical drive (`optical_drive`, default `/dev/sr0`).
+1. The daemon listens for disc-insertion events on your optical drive (`optical_drive`, default `/dev/sr0`); detection can also be triggered manually.
 2. When a disc is detected, Spindle fingerprints it and looks for existing queue items.
 3. Existing items are handled based on their stage:
    - **In workflow, completed, or failed**: no new work is queued (the disc is already known).
@@ -52,14 +52,14 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
 ## Stage 2: Content Identification (identification)
 
 1. Spindle scans the disc with MakeMKV, capturing the fingerprint and title list.
-2. Identification uses KeyDB (if configured), the Blu-ray disc ID cache, and media heuristics to decide TV vs movie. For TV discs, Spindle selects likely episode titles and excludes obvious extras/play-all duplicates. Detailed title-selection rules live in `DESIGN_STAGES.md`.
+2. Identification uses KeyDB (if configured), the Blu-ray disc ID cache, and media heuristics to decide TV vs movie. For TV discs, Spindle selects likely episode titles and excludes obvious extras/play-all duplicates.
 3. TMDB search runs using the derived title/season hints. If a confident match is found, Spindle:
    - Stores metadata in `metadata_json`.
    - Writes a rip specification (`rip_spec`) that maps MakeMKV titles to the intended output.
    - Updates `disc_title` to a canonical name (movie: `Title (Year)`, TV: `Show Season XX (Year)` when available).
    - Sends an identification-complete notification.
 4. If no confident match is found (or TMDB lookup fails), the item is marked `needs_review` with a reason. **TV-hinted discs fail at identification and do not advance to ripping.** Non-TV/unknown discs continue as degraded items so downstream stages can still run, and the organizer will route output to `review_dir`.
-5. Duplicate fingerprints are treated as immediate failure: the item is placed in `failed` with `needs_review = true` and the workflow stops.
+5. Duplicate fingerprints are normally skipped during disc detection before a new item reaches identification.
 
 The queue also reports coarse identification progress for cleanup, scanning/metadata resolution, and finalization so dashboards can show stage activity even though identification is not a stream-oriented stage.
 
@@ -85,7 +85,7 @@ use `spindle cache rip --title` to interactively select which title to rip.
 
 1. For TV shows with an OpenSubtitles API key configured, Spindle compares WhisperX transcripts against OpenSubtitles reference subtitles to map ripped files to definitive episode numbers.
 2. Results are written back into the rip specification so encoding/organizing use correct episode labels. The current implementation also supports a conservative disc-1 opening double-length inference: when the first selected title has a probable double-episode runtime profile and the resolved sequence supports it, Spindle can promote that title to a range like `S01E01-E02`.
-3. Movies, discs without OpenSubtitles enabled, or invalid rip specs skip this stage and proceed to encoding.
+3. Movies skip this stage. TV items without required API clients (for example, no OpenSubtitles API key) are marked for review with degraded behavior and proceed to encoding. Runtime transcription/reference-acquisition errors and invalid rip specs fail the stage and require retry after the root cause is fixed.
 
 ## Stage 5: Encoding to AV1 (encoding)
 
@@ -96,13 +96,13 @@ use `spindle cache rip --title` to interactively select which title to rip.
 
 ## Stage 6: Audio Analysis (audio_analysis)
 
-When `commentary.enabled = true`, Spindle analyzes encoded files to detect and exclude commentary tracks before subtitle generation.
+Spindle analyzes encoded files before subtitle generation so downstream stages have refined audio and primary-track metadata. Commentary detection is optional.
 
-1. Extracts audio from each encoded asset.
-2. Uses WhisperX transcription and LLM classification to identify commentary vs. primary audio tracks.
-3. Reports coarse phase progress for commentary detection, refinement, post-refinement analysis, and persistence.
-4. Updates the rip spec with analysis results for downstream stages.
-5. Skipped when commentary detection is disabled or no encoded assets exist.
+1. Collects encoded assets and starts coarse phase progress.
+2. When `commentary.enabled = true` and an LLM client is configured, uses WhisperX transcription and LLM classification to identify commentary tracks for exclusion.
+3. Runs audio refinement to strip non-English/redundant tracks while preserving primary audio and any detected commentary tracks.
+4. Performs post-refinement primary-audio selection and commentary disposition.
+5. Updates the rip spec with analysis results for downstream stages. If no encoded assets are available, the stage fails because there is nothing to analyze.
 
 ## Stage 7: Subtitle Generation (subtitling)
 
@@ -110,7 +110,7 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 
 1. Spindle extracts the primary audio track.
 2. **WhisperX transcription**: generates canonical transcript artifacts (raw SRT + JSON/alignment output) through a Spindle-owned wrapper that applies VAD-guided long-form transcription settings.
-3. **Subtitle formatting**: the subtitle stage filters obvious WhisperX artifacts, uses Stable-TS formatting, and applies a final readability pass. Detailed formatting rules live in `DESIGN_STAGES.md`.
+3. **Subtitle formatting**: the subtitle stage filters obvious WhisperX artifacts, uses Stable-TS formatting, and applies a final readability pass.
 4. Subtitle filtering and validation use the actual encoded-media duration when available; transcript-tail duration is only a fallback.
 5. Spindle intentionally does not use PGS subtitles as final library output. Final primary display subtitles are SRT because SRT works better with Jellyfin and downstream tooling.
 6. Subtitling progress is cumulative across the full subtitle stage, and completed subtitle assets are persisted after each item so counts can advance live.
@@ -124,12 +124,12 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 1. Spindle moves encoded artifacts into your library using TMDB metadata. Movies land under `library_dir/movies`, TV under `library_dir/tv/<Show>/Season XX/`.
 2. Organizing progress is byte-based across the total copy workload, so dashboards can show both percent and bytes copied while files are being placed.
 3. Final assets are written back into the rip spec after each copied item so completed counts can advance live.
-4. When `needs_review` is set, or when the library target is unavailable, review routing is applied. Movies go fully to `review_dir`. TV is organized per episode: clean resolved episodes go to the library, while unresolved or episode-flagged outputs go to `review_dir`. The queue item still completes.
+4. When `needs_review` is set, review routing is applied. Movies go fully to `review_dir`. TV is organized per episode: clean resolved episodes go to the library, while unresolved or episode-flagged outputs go to `review_dir`. The queue item still completes.
 5. Jellyfin scans are triggered after organizing when credentials are supplied.
 
 ## Review vs Failed
 
-- **`failed` stage**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, duplicate fingerprints, manual stop requests (`spindle queue stop <id>`), and episode-identification reference acquisition failures (for example OpenSubtitles service/auth/network problems). Items stopped by user have `"Stop requested by user"` in their `review_reason` array. Fix the root cause, then use `spindle queue retry <id>` to requeue.
+- **`failed` stage**: Something went wrong and the workflow stopped. This includes external tool failures, read errors, validation issues, manual stop requests (`spindle queue stop <id>`), and episode-identification transcription/reference acquisition failures (for example WhisperX or OpenSubtitles service/auth/network problems). Items stopped by user have `"Stop requested by user"` in their `review_reason` array. Fix the root cause, then use `spindle queue retry <id>` to requeue.
 - **`needs_review` flag**: Workflow continues but manual-review routing is enabled instead of failing the entire pipeline. For movies this means the final artifact goes to `review_dir`. For TV, the flag is aggregate: clean resolved episodes may still land in the library while unresolved or episode-flagged outputs go to `review_dir`. This is used for low-confidence matches, missing metadata, unresolved episode numbers after successful episode-ID reference acquisition, or other issues that need manual attention but shouldn't block processing.
 
 ## Recovery Procedures
@@ -170,7 +170,7 @@ If items appear stuck (in-progress but not advancing):
 ## Monitoring & Control Tips
 
 - `spindle logs -f` - tail daemon logs (requires running daemon).
-- `spindle status` - status summary including drive readiness and queue counts; uses the daemon when available, otherwise inspects the queue database.
+- `spindle status` - status summary including daemon state, dependency checks, library paths, and queue counts; uses the daemon when available, otherwise inspects the queue database.
 - `spindle queue list` - queue inspection (works with or without daemon).
 - `spindle queue retry <id>` - retry failed items only.
 - `spindle queue stop <id>` - halt processing for a specific item (takes effect after the current stage if already running).

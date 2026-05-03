@@ -243,7 +243,7 @@ func (c *Client) GetSeason(ctx context.Context, tvID, season int) (*Season, erro
 	return &s, nil
 }
 
-// Scoring and acceptance constants per spec (DESIGN_STAGES.md section 1.7).
+// Scoring and acceptance constants for TMDB search result ranking.
 const (
 	voteAverageDivisor          = 10.0
 	voteCountDivisor            = 1000.0
@@ -253,7 +253,7 @@ const (
 )
 
 // scoreResult computes the raw score for a single result against the query.
-// Formula per spec: match(0/1) + voteAverage/10 + voteCount/1000.
+// Formula: exact-title match bonus + voteAverage/10 + voteCount/1000.
 func scoreResult(query string, r *SearchResult) float64 {
 	titleLower := strings.ToLower(r.DisplayTitle())
 	queryLower := strings.ToLower(query)

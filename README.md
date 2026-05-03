@@ -19,7 +19,7 @@ This repository is shared as is. Spindle is a personal tool I built for my own e
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.26+, MakeMKV, ffmpeg, ffprobe. Optional: mkvmerge (for subtitle muxing), uvx (for WhisperX subtitles/commentary/episode ID), bd_info (for improved Blu-ray identification).
+Prerequisites: Go 1.26+, MakeMKV, ffmpeg, ffprobe. `spindle status` also checks for mkvmerge, which is needed for default subtitle muxing. Optional feature tools include uvx (for WhisperX subtitles/commentary/episode ID) and bd_info (for improved Blu-ray identification).
 
 ## Configure
 
@@ -50,10 +50,13 @@ spindle status            # check daemon and dependencies
 spindle logs --follow     # tail logs
 ```
 
-Once the daemon reports `RIPPED`, eject the disc manually; encoding and organization continue in the background.
+Once ripping completes and the drive-available notification appears, eject the disc manually; encoding and organization continue in the background.
 
 ## Documentation
 
-- [docs/user/workflow.md](docs/user/workflow.md) - stage-by-stage lifecycle
+- [docs/README.md](docs/README.md) - documentation map and source-of-truth policy
+- [docs/user/workflow.md](docs/user/workflow.md) - stage-by-stage lifecycle and recovery
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - system architecture overview
+- [docs/API.md](docs/API.md) - HTTP API and stable CLI workflows
 - `spindle config init` - generate all config options with comments
 - `spindle --help` - command reference

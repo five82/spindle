@@ -1,6 +1,6 @@
 # Spec Proposal: Bounded LLM Episode Candidate Picker
 
-Status: Proposal, deferred. Not normative until accepted into the design specs.
+Status: Proposal, deferred. Not active behavior unless accepted by an ADR and implementation change.
 
 ## Summary
 
@@ -66,7 +66,7 @@ We are explicitly not implementing this now for the following reasons:
    candidate picker may look attractive in theory but fail in practice when the
    metadata does not contain the needed scene-level anchors.
 
-5. **The spec prefers review over clever fallback stacks**
+5. **Current policy prefers review over clever fallback stacks**
    Spindle currently prefers surfacing ambiguity for review rather than layering
    increasingly clever hidden matchers. This proposal should not be adopted
    unless testing shows a clear practical benefit.

@@ -359,10 +359,9 @@ type EnqueueResult struct {
 
 // DetectAndEnqueue runs the full disc detection pipeline: probe, fingerprint,
 // duplicate check, and queue submission. Returns nil result (not an error) when
-// detection is skipped (paused, busy, no disc). Per spec:
-//   - Duplicate fingerprint in workflow: return existing item, do not create new.
-//   - User-stopped item: do not reset for reprocessing.
-//   - Completed disc re-insertion: refresh title if unusable.
+// detection is skipped (paused, busy, no disc). Duplicate fingerprints are not
+// queued again, user-stopped items are not reset for reprocessing, and completed
+// disc re-insertion may refresh an unusable title.
 func (m *Monitor) DetectAndEnqueue(ctx context.Context) (*EnqueueResult, error) {
 	event, err := m.Detect(ctx)
 	if err != nil {
