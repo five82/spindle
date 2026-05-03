@@ -52,7 +52,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
 ## Stage 2: Content Identification (identification)
 
 1. Spindle scans the disc with MakeMKV, capturing the fingerprint and title list.
-2. Identification uses KeyDB (if configured), the Blu-ray disc ID cache, and media heuristics to decide TV vs movie. For TV discs, Spindle selects likely episode titles and excludes obvious extras/play-all duplicates.
+2. Identification uses KeyDB (if configured), the Blu-ray disc ID cache, and media heuristics to decide TV vs movie. For TV discs, Spindle selects likely episode titles and excludes obvious extras/play-all duplicates, including hidden double-length playlists that only concatenate already-selected episode segments.
 3. TMDB search runs using the derived title/season hints. If a confident match is found, Spindle:
    - Stores metadata in `metadata_json`.
    - Writes a rip specification (`rip_spec`) that maps MakeMKV titles to the intended output.
@@ -85,7 +85,7 @@ use `spindle cache rip --title` to interactively select which title to rip.
 
 1. For TV shows with an OpenSubtitles API key configured, Spindle compares WhisperX transcripts against OpenSubtitles reference subtitles to map ripped files to definitive episode numbers.
 2. Results are written back into the rip specification so encoding/organizing use correct episode labels. The current implementation also supports a conservative disc-1 opening double-length inference: when the first selected title has a probable double-episode runtime profile and the resolved sequence supports it, Spindle can promote that title to a range like `S01E01-E02`.
-3. Movies skip this stage. TV items without required API clients (for example, no OpenSubtitles API key) are marked for review with degraded behavior and proceed to encoding. Runtime transcription/reference-acquisition errors and invalid rip specs fail the stage and require retry after the root cause is fixed.
+3. Movies skip this stage. TV items without required API clients (for example, no OpenSubtitles API key) are marked for review with degraded behavior and proceed to encoding. Transient OpenSubtitles failures are retried; runtime transcription/reference-acquisition errors that remain after retry and invalid rip specs fail the stage and require retry after the root cause is fixed.
 
 ## Stage 5: Encoding to AV1 (encoding)
 
@@ -114,7 +114,7 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 4. Subtitle filtering and validation use the actual encoded-media duration when available; transcript-tail duration is only a fallback.
 5. Spindle intentionally does not use PGS subtitles as final library output. Final primary display subtitles are SRT because SRT works better with Jellyfin and downstream tooling.
 6. Subtitling progress is cumulative across the full subtitle stage, and completed subtitle assets are persisted after each item so counts can advance live.
-7. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are downloaded from OpenSubtitles and used as-is (no alignment against WhisperX output).
+7. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are downloaded from OpenSubtitles with retry for transient service/network failures and used as-is (no alignment against WhisperX output).
 8. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). If subtitle formatting fails, or if severe subtitle validation issues are detected for an episode, that episode is recorded as a subtitle failure and processing continues with other episodes when possible.
 
 `spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename and uses TMDB for metadata context.

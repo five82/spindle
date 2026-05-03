@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -205,8 +207,56 @@ func TestCheckHealth_ServerError(t *testing.T) {
 
 	c := New("test-key", "TestAgent", "", srv.URL, nil)
 	c.rateDelay = 0
+	c.retryDelay = 0
 
 	if err := c.CheckHealth(context.Background()); err == nil {
 		t.Fatal("expected error for 500 response")
+	}
+}
+
+func TestDownloadToFile_RetriesTransientFetchFailure(t *testing.T) {
+	var fetchAttempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/download":
+			resp := DownloadResponse{
+				Link:      "http://" + r.Host + "/file.srt",
+				Remaining: 99,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		case "/file.srt":
+			fetchAttempts++
+			if fetchAttempts == 1 {
+				w.WriteHeader(522)
+				_, _ = w.Write([]byte("cloudflare timeout"))
+				return
+			}
+			_, _ = w.Write([]byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n"))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New("test-key", "TestAgent", "user-token", srv.URL, nil)
+	c.rateDelay = 0
+	c.retryDelay = 0
+
+	dest := filepath.Join(t.TempDir(), "subtitle.srt")
+	if err := c.DownloadToFile(context.Background(), 456, dest); err != nil {
+		t.Fatalf("DownloadToFile failed: %v", err)
+	}
+
+	if fetchAttempts != 2 {
+		t.Fatalf("expected 2 fetch attempts, got %d", fetchAttempts)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read downloaded subtitle: %v", err)
+	}
+	want := "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+	if string(got) != want {
+		t.Fatalf("downloaded subtitle mismatch:\ngot:  %q\nwant: %q", got, want)
 	}
 }

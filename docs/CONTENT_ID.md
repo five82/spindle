@@ -35,8 +35,9 @@ The stage runs for TV items after ripping. It expects:
 
 Movies skip this stage. TV items without required API clients are marked for
 review with degraded behavior and continue to encoding; they are not treated as
-cleanly identified. Runtime transcription or reference-acquisition errors fail
-the stage so the operator can fix the external dependency and retry.
+cleanly identified. Transient OpenSubtitles HTTP/network failures are retried;
+runtime transcription or reference-acquisition errors that remain after retry
+fail the stage so the operator can fix the external dependency and retry.
 
 ## Pipeline
 
@@ -60,7 +61,9 @@ At a high level the stage:
 
 OpenSubtitles references are evidence, not authority. The stage may search
 multiple variants for an episode and should reject references that are empty,
-obviously unrelated, wrong language, or too weak to support matching.
+obviously unrelated, wrong language, or too weak to support matching. Transient
+OpenSubtitles API and subtitle-file fetch failures are retried before being
+reported as reference-acquisition failures.
 
 Weak or missing references should be visible in logs and may trigger review.
 

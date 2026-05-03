@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/five82/spindle/internal/logs"
@@ -21,14 +23,16 @@ import (
 
 // Client communicates with the OpenSubtitles API.
 type Client struct {
-	apiKey    string
-	userAgent string
-	userToken string
-	baseURL   string
-	logger    *slog.Logger
-	client    *http.Client
-	lastCall  time.Time
-	rateDelay time.Duration
+	apiKey     string
+	userAgent  string
+	userToken  string
+	baseURL    string
+	logger     *slog.Logger
+	client     *http.Client
+	lastCall   time.Time
+	rateDelay  time.Duration
+	maxRetries int
+	retryDelay time.Duration
 }
 
 // New creates an OpenSubtitles client. Returns nil if apiKey is empty.
@@ -44,13 +48,15 @@ func New(apiKey, userAgent, userToken, baseURL string, logger *slog.Logger) *Cli
 	}
 	logger = logs.Default(logger)
 	return &Client{
-		apiKey:    apiKey,
-		userAgent: userAgent,
-		userToken: userToken,
-		baseURL:   baseURL,
-		logger:    logger,
-		client:    &http.Client{Timeout: 45 * time.Second},
-		rateDelay: 3 * time.Second,
+		apiKey:     apiKey,
+		userAgent:  userAgent,
+		userToken:  userToken,
+		baseURL:    baseURL,
+		logger:     logger,
+		client:     &http.Client{Timeout: 45 * time.Second},
+		rateDelay:  3 * time.Second,
+		maxRetries: 3,
+		retryDelay: 5 * time.Second,
 	}
 }
 
@@ -167,37 +173,8 @@ func (c *Client) DownloadToFile(ctx context.Context, fileID int, destPath string
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dlResp.Link, nil)
-	if err != nil {
-		return fmt.Errorf("opensubtitles fetch: create request: %w", err)
-	}
-	req.Header.Set("User-Agent", c.userAgent)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
+	if err := c.downloadLinkToFile(ctx, dlResp.Link, destPath); err != nil {
 		return fmt.Errorf("opensubtitles fetch: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("opensubtitles fetch: status %d", resp.StatusCode)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return fmt.Errorf("opensubtitles fetch: create dir: %w", err)
-	}
-
-	f, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("opensubtitles fetch: create file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		return fmt.Errorf("opensubtitles fetch: write: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("opensubtitles fetch: close: %w", err)
 	}
 
 	c.logger.Info("subtitle file downloaded",
@@ -233,6 +210,61 @@ func (c *Client) rateLimit() {
 		time.Sleep(c.rateDelay - elapsed)
 	}
 	c.lastCall = time.Now()
+}
+
+// downloadLinkToFile fetches a negotiated subtitle URL with retry and atomically
+// replaces destPath only after a complete download.
+func (c *Client) downloadLinkToFile(ctx context.Context, link, destPath string) error {
+	_, err := c.doWithRetry(ctx, func() ([]byte, error) {
+		if err := c.downloadLinkToFileOnce(ctx, link, destPath); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+	return err
+}
+
+func (c *Client) downloadLinkToFileOnce(ctx context.Context, link, destPath string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		return &statusError{code: resp.StatusCode}
+	}
+
+	dir := filepath.Dir(destPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create dir: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(dir, filepath.Base(destPath)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close: %w", err)
+	}
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+
+	return nil
 }
 
 // doGet performs an authenticated HTTP GET request with retry.
@@ -294,22 +326,19 @@ func (e *statusError) Error() string {
 }
 
 // doWithRetry executes fn with fixed-delay retry on transient errors.
-// Retries up to 3 times with a 5-second wait between attempts.
-// Retriable: status 429, 502, 503, 504, timeouts, and connection errors.
+// Retriable: rate limiting, 5xx service/proxy failures, timeouts, connection
+// errors, and interrupted response bodies.
 func (c *Client) doWithRetry(ctx context.Context, fn func() ([]byte, error)) ([]byte, error) {
-	const maxRetries = 3
-	const retryDelay = 5 * time.Second
-
 	var lastErr error
-	for attempt := 0; attempt <= maxRetries; attempt++ {
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
 			c.logger.Warn("retrying OpenSubtitles request",
 				"event_type", "opensubtitles_retry",
-				"error_hint", fmt.Sprintf("attempt %d/%d", attempt, maxRetries),
+				"error_hint", fmt.Sprintf("attempt %d/%d", attempt, c.maxRetries),
 				"impact", "delayed response",
 				"error", lastErr.Error(),
 			)
-			timer := time.NewTimer(retryDelay)
+			timer := time.NewTimer(c.retryDelay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -335,7 +364,7 @@ func (c *Client) doWithRetry(ctx context.Context, fn func() ([]byte, error)) ([]
 		}
 	}
 
-	return nil, fmt.Errorf("after %d retries: %w", maxRetries, lastErr)
+	return nil, fmt.Errorf("after %d retries: %w", c.maxRetries, lastErr)
 }
 
 // isRetryable returns true if the error is transient and worth retrying.
@@ -343,13 +372,23 @@ func isRetryable(err error) bool {
 	var se *statusError
 	if errors.As(err, &se) {
 		switch se.code {
-		case 429, 502, 503, 504:
+		case 429, 500, 502, 503, 504, 520, 521, 522, 523, 524:
 			return true
 		}
 		return false
 	}
-	// Retry on timeouts and connection errors.
-	return os.IsTimeout(err) || errors.Is(err, context.DeadlineExceeded)
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// Retry on timeouts, canceled upstream reads, dropped connections, and
+	// interrupted response bodies.
+	return os.IsTimeout(err) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNREFUSED)
 }
 
 // setHeaders adds the standard authentication and content negotiation headers.

@@ -49,6 +49,11 @@ type tvTitleCluster struct {
 	minTitleID int
 }
 
+type combinedDoubleCandidate struct {
+	candidate  tvTitleCandidate
+	components []tvTitleCandidate
+}
+
 func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSelectionResult {
 	result := tvTitleSelectionResult{Decisions: make([]tvTitleDecision, 0, len(titles))}
 	candidates := make([]tvTitleCandidate, 0, len(titles))
@@ -122,31 +127,36 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 	result.AmbiguousLongCount = len(qualifyingDoubleCandidates)
 	excludedReasonByIndex := make(map[int]string)
 	combinedFamilyResolved := false
-	// chooseCombinedDoubleEpisodeTitle proves that a long candidate is a
-	// segment-union playlist for two primary-cluster titles. When the component
-	// playlists are disjoint, the union is a play-all playlist for two real
-	// episodes, so keep the individual episodes. Collapse to the union only for
-	// overlapping component playlists where selecting both components would
-	// duplicate shared content.
-	if combined, components, ok := chooseCombinedDoubleEpisodeTitle(primary.candidates, qualifyingDoubleCandidates); ok {
-		independentDoubles := doubleCandidatesExcluding(qualifyingDoubleCandidates, combined)
-		if len(independentDoubles) == 0 && tvComponentsOverlap(components) {
-			selectTVCandidate(selectedByIndex, selectedReasonByTitleID, combined, "combined_double_episode_candidate")
-			for _, component := range components {
-				delete(selectedByIndex, component.decisionIndex)
-				delete(selectedReasonByTitleID, component.title.ID)
-			}
-		} else {
-			// The segment-union title is a play-all playlist for the primary
-			// episodes. Keep the single episodes, and keep any independent
-			// double-length content alongside them.
-			excludedReasonByIndex[combined.decisionIndex] = "combined_play_all_extra"
-			for _, candidate := range independentDoubles {
-				selectTVCandidate(selectedByIndex, selectedReasonByTitleID, candidate, "probable_double_episode_candidate")
-			}
+	combinedDoubles, independentDoubles := classifyDoubleEpisodeCandidates(primary.candidates, qualifyingDoubleCandidates)
+	for _, combined := range combinedDoubles {
+		excludedReasonByIndex[combined.candidate.decisionIndex] = "combined_play_all_extra"
+	}
+	switch {
+	case len(independentDoubles) > 0:
+		// Keep proven independent double-length content, but do not also keep
+		// hidden play-all playlists that merely concatenate already-selected
+		// primary episodes.
+		for _, candidate := range independentDoubles {
+			selectTVCandidate(selectedByIndex, selectedReasonByTitleID, candidate, "probable_double_episode_candidate")
+		}
+		combinedFamilyResolved = len(combinedDoubles) > 0
+	case len(combinedDoubles) == 1 && tvComponentsOverlap(combinedDoubles[0].components):
+		// A single overlapping segment-union title with no independent double
+		// candidate is probably a split double episode where the combined title is
+		// the safer artifact. Collapse the split components to the combined title.
+		combined := combinedDoubles[0]
+		selectTVCandidate(selectedByIndex, selectedReasonByTitleID, combined.candidate, "combined_double_episode_candidate")
+		delete(excludedReasonByIndex, combined.candidate.decisionIndex)
+		for _, component := range combined.components {
+			delete(selectedByIndex, component.decisionIndex)
+			delete(selectedReasonByTitleID, component.title.ID)
 		}
 		combinedFamilyResolved = true
-	} else if len(qualifyingDoubleCandidates) > 0 {
+	case len(combinedDoubles) > 0:
+		// Multiple double-length titles that are explainable by primary episode
+		// segments are alternate play-all playlists, not additional episodes.
+		combinedFamilyResolved = true
+	case len(qualifyingDoubleCandidates) > 0:
 		selectTVCandidate(selectedByIndex, selectedReasonByTitleID, qualifyingDoubleCandidates[0], "probable_double_episode_candidate")
 	}
 
@@ -221,15 +231,18 @@ func selectTVCandidate(selectedByIndex map[int]string, selectedReasonByTitleID m
 	selectedReasonByTitleID[candidate.title.ID] = reason
 }
 
-func doubleCandidatesExcluding(candidates []tvTitleCandidate, excluded tvTitleCandidate) []tvTitleCandidate {
-	result := make([]tvTitleCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		if candidate.decisionIndex == excluded.decisionIndex {
+func classifyDoubleEpisodeCandidates(primary, doubles []tvTitleCandidate) ([]combinedDoubleCandidate, []tvTitleCandidate) {
+	combined := make([]combinedDoubleCandidate, 0)
+	independent := make([]tvTitleCandidate, 0)
+	for _, candidate := range doubles {
+		components, ok := combinedDoubleEpisodeComponents(primary, candidate)
+		if !ok {
+			independent = append(independent, candidate)
 			continue
 		}
-		result = append(result, candidate)
+		combined = append(combined, combinedDoubleCandidate{candidate: candidate, components: components})
 	}
-	return result
+	return combined, independent
 }
 
 func tvComponentsOverlap(components []tvTitleCandidate) bool {
@@ -441,37 +454,60 @@ func dedupKey(title ripspec.Title) string {
 	return strings.TrimSpace(title.TitleHash)
 }
 
-func chooseCombinedDoubleEpisodeTitle(primary []tvTitleCandidate, doubles []tvTitleCandidate) (tvTitleCandidate, []tvTitleCandidate, bool) {
-	for _, combined := range doubles {
-		combinedSegs, ok := parseSegmentSet(combined.title.SegmentMap)
-		if !ok {
-			continue
-		}
-		for i := 0; i < len(primary); i++ {
-			for j := i + 1; j < len(primary); j++ {
-				a := primary[i]
-				b := primary[j]
-				segA, okA := parseSegmentSet(a.title.SegmentMap)
-				segB, okB := parseSegmentSet(b.title.SegmentMap)
-				if !okA || !okB {
-					continue
-				}
-				if maps.Equal(segA, combinedSegs) || maps.Equal(segB, combinedSegs) {
-					continue
-				}
-				union := maps.Clone(segA)
-				maps.Copy(union, segB)
-				if !maps.Equal(union, combinedSegs) {
-					continue
-				}
-				if !durationsLookCombined(a.title.Duration, b.title.Duration, combined.title.Duration) {
-					continue
-				}
-				return combined, []tvTitleCandidate{a, b}, true
+func combinedDoubleEpisodeComponents(primary []tvTitleCandidate, combined tvTitleCandidate) ([]tvTitleCandidate, bool) {
+	combinedSegs, ok := parseSegmentSet(combined.title.SegmentMap)
+	if !ok {
+		return nil, false
+	}
+	for i := 0; i < len(primary); i++ {
+		for j := i + 1; j < len(primary); j++ {
+			a := primary[i]
+			b := primary[j]
+			segA, okA := parseSegmentSet(a.title.SegmentMap)
+			segB, okB := parseSegmentSet(b.title.SegmentMap)
+			if !okA || !okB {
+				continue
 			}
+			if maps.Equal(segA, combinedSegs) || maps.Equal(segB, combinedSegs) {
+				continue
+			}
+			if !segmentsLookCombined(segA, segB, combinedSegs) {
+				continue
+			}
+			if !durationsLookCombined(a.title.Duration, b.title.Duration, combined.title.Duration) {
+				continue
+			}
+			return []tvTitleCandidate{a, b}, true
 		}
 	}
-	return tvTitleCandidate{}, nil, false
+	return nil, false
+}
+
+func segmentsLookCombined(a, b, combined map[int]struct{}) bool {
+	union := maps.Clone(a)
+	maps.Copy(union, b)
+	if maps.Equal(union, combined) {
+		return true
+	}
+
+	// Some Blu-ray playlists share a small common segment on each individual
+	// episode title. The hidden combined playlist may omit that shared segment
+	// rather than representing the exact map union, while still being just a
+	// play-all concat of the two episode titles. Treat the symmetric difference
+	// as combined too so it can be excluded instead of selected as another
+	// episode.
+	symmetricDifference := make(map[int]struct{}, len(union))
+	for segment := range a {
+		if _, inB := b[segment]; !inB {
+			symmetricDifference[segment] = struct{}{}
+		}
+	}
+	for segment := range b {
+		if _, inA := a[segment]; !inA {
+			symmetricDifference[segment] = struct{}{}
+		}
+	}
+	return len(symmetricDifference) > 0 && maps.Equal(symmetricDifference, combined)
 }
 
 func parseSegmentSet(segmentMap string) (map[int]struct{}, bool) {
