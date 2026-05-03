@@ -11,7 +11,6 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
-	"github.com/five82/spindle/internal/services"
 	"github.com/five82/spindle/internal/stage"
 )
 
@@ -167,11 +166,7 @@ func (m *Manager) Run(ctx context.Context) {
 		// the poll loop from picking up the same item on the next iteration.
 		// Initialize progress state so external consumers (flyer) know which
 		// stage is active and stale progress from the prior stage is cleared.
-		item.InProgress = 1
-		item.ProgressStage = string(ps.Stage)
-		item.ProgressPercent = 0
-		item.ProgressMessage = ""
-		if err := m.store.Update(item); err != nil {
+		if err := stage.MarkStarted(m.store, item, ps.Stage); err != nil {
 			p.logger.Error("persist in_progress failed",
 				"event_type", "progress_persist_failed",
 				"error_hint", "failed to persist in_progress flag",
@@ -226,56 +221,53 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	)
 	m.maybeStartQueueCycle(ctx, itemLogger)
 
-	sess, err := stage.NewSession(ctx, m.store, item)
-	start := time.Now()
-	if err != nil {
-		m.handleStageFailure(ctx, item, err, ps, start)
+	res, err := stage.ExecuteStarted(ctx, item, stage.ExecuteOptions{
+		Store:              m.store,
+		Handler:            ps.Handler,
+		Logger:             p.logger,
+		Stage:              ps.Stage,
+		NextStage:          m.nextStage(item.Stage),
+		Advance:            true,
+		MarkFailed:         true,
+		DegradedSucceeds:   true,
+		PersistenceIsFatal: true,
+	})
+	if res.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			itemLogger.Error("persist after cancellation failed",
+				"event_type", "cancellation_persist_failed",
+				"error_hint", "failed to persist after cancellation",
+				"error", err,
+			)
+		}
 		return
 	}
-
-	err = ps.Handler.Run(ctx, sess)
-
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			item.InProgress = 0
-			if updateErr := m.store.Update(item); updateErr != nil {
-				itemLogger.Error("persist after cancellation failed",
-					"event_type", "cancellation_persist_failed",
-					"error_hint", "failed to persist after cancellation",
-					"error", updateErr,
-				)
+		var persistenceErr *stage.PersistenceError
+		if errors.As(err, &persistenceErr) {
+			if m.observer != nil {
+				m.observer.RecordFailure(item, "queue persistence failed: "+persistenceErr.Err.Error())
 			}
+			eventType := "completion_persist_failed"
+			hint := "failed to persist after stage completion"
+			if res.Failed {
+				eventType = "failure_persist_failed"
+				hint = "failed to persist after stage failure"
+			}
+			m.reportPersistenceFailure(itemLogger, persistenceErr.Err, eventType, hint, item.ID)
 			return
 		}
-
-		var degraded *services.ErrDegraded
-		if errors.As(err, &degraded) {
-			itemLogger.Warn("stage completed with degraded behavior",
-				"event_type", "stage_degraded",
-				"error_hint", degraded.Msg,
-				"impact", "continuing to next stage",
-				"stage", ps.Stage,
-				"stage_duration", time.Since(start),
-			)
-			// Fall through to advance stage.
-		} else {
-			m.handleStageFailure(ctx, item, err, ps, start)
-			return
-		}
+		m.recordStageFailure(ctx, item, err, ps, res.Duration)
+		return
 	}
-
-	// Advance to next stage and finalize progress.
-	item.Stage = m.nextStage(item.Stage)
-	item.InProgress = 0
-	item.ActiveEpisodeKey = ""
-	if item.Stage == queue.StageCompleted {
-		item.ProgressStage = string(queue.StageCompleted)
-		item.ProgressPercent = 100
-		item.ProgressMessage = "Completed"
-	} else {
-		item.ProgressStage = ""
-		item.ProgressPercent = 0
-		item.ProgressMessage = ""
+	if res.Degraded {
+		itemLogger.Warn("stage completed with degraded behavior",
+			"event_type", "stage_degraded",
+			"error_hint", res.DegradedMsg,
+			"impact", "continuing to next stage",
+			"stage", ps.Stage,
+			"stage_duration", res.Duration,
+		)
 	}
 
 	itemLogger.Info("stage completed",
@@ -284,20 +276,8 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		"decision_reason", fmt.Sprintf("advancing to %s", item.Stage),
 		"event_type", "stage_complete",
 		"stage", ps.Stage,
-		"stage_duration", time.Since(start),
+		"stage_duration", res.Duration,
 	)
-
-	if err := m.store.Update(item); err != nil {
-		if m.observer != nil {
-			m.observer.RecordFailure(item, "queue persistence failed: "+err.Error())
-		}
-		m.reportPersistenceFailure(itemLogger, err,
-			"completion_persist_failed",
-			"failed to persist after stage completion",
-			item.ID,
-		)
-		return
-	}
 
 	if m.observer != nil {
 		m.observer.RecordSuccess(item)
@@ -306,35 +286,19 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	m.maybeCompleteQueueCycle(ctx, itemLogger)
 }
 
-// handleStageFailure records failure state, notifies, and checks queue completion.
-func (m *Manager) handleStageFailure(ctx context.Context, item *queue.Item, err error, ps PipelineStage, start time.Time) {
+// recordStageFailure records observer/notification state after stage.ExecuteStarted
+// has persisted the failed queue state.
+func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err error, ps PipelineStage, duration time.Duration) {
 	p := m.pipeline
 	itemLogger := p.logger.With("item_id", item.ID)
-
-	item.Stage = queue.StageFailed
-	item.InProgress = 0
-	item.FailedAtStage = string(ps.Stage)
-	item.ErrorMessage = err.Error()
 
 	itemLogger.Error("stage failed",
 		"event_type", "stage_failure",
 		"error_hint", ps.Stage,
 		"error", err,
 		"stage", ps.Stage,
-		"stage_duration", time.Since(start),
+		"stage_duration", duration,
 	)
-
-	if updateErr := m.store.Update(item); updateErr != nil {
-		if m.observer != nil {
-			m.observer.RecordFailure(item, "queue persistence failed: "+updateErr.Error())
-		}
-		m.reportPersistenceFailure(itemLogger, updateErr,
-			"failure_persist_failed",
-			"failed to persist after stage failure",
-			item.ID,
-		)
-		return
-	}
 
 	if m.observer != nil {
 		m.observer.RecordFailure(item, err.Error())

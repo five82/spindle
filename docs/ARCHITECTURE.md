@@ -75,8 +75,9 @@ The Go type is the source of truth for exact fields and helper methods:
 
 Spindle runs a single logical queue pipeline and uses semaphores to protect
 scarce resources such as the optical drive, encoder, and WhisperX work. Workflow
-creates a `stage.Session` for each stage invocation; handlers use that session
-for queue-visible state such as RipSpec persistence, progress, review state, and
+delegates stage lifecycle finalization to the `stage` package, which creates a
+`stage.Session` for each stage invocation. Handlers use that session for
+queue-visible state such as RipSpec persistence, progress, review state, and
 active episode bookkeeping. Handlers receive a context and must stop cleanly when
 it is canceled.
 
@@ -127,7 +128,8 @@ The current package layout is intentionally simple:
   configuration, data, and stage abstractions. `mediameta` owns media naming
   and library-path projection. `stage.Session` centralizes per-stage RipSpec
   persistence, asset-to-queue path projection, progress updates, active episode
-  bookkeeping, and review-state mutation.
+  bookkeeping, and review-state mutation; the stage executor centralizes common
+  in-progress, completion, degraded, cancellation, and failure persistence.
 - `internal/daemon`, `daemonrun`, `daemonctl`, `workflow`, `stageexec`: runtime
   orchestration and daemon control.
 - `internal/identify`, `ripper`, `contentid`, `encoder`, `audioanalysis`,

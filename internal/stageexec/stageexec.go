@@ -34,25 +34,17 @@ func Run(ctx context.Context, item *queue.Item, opts Options) error {
 		"disc_title", item.DiscTitle,
 	)
 
-	item.InProgress = 1
-	if err := opts.Store.Update(item); err != nil {
+	if err := stage.MarkStarted(opts.Store, item, item.Stage); err != nil {
 		return fmt.Errorf("set in_progress: %w", err)
 	}
 
-	sess, err := stage.NewSession(ctx, opts.Store, item)
-	if err == nil {
-		err = opts.Handler.Run(ctx, sess)
-	}
-
-	item.InProgress = 0
-	if updateErr := opts.Store.Update(item); updateErr != nil {
-		logger.Error("failed to clear in_progress",
-			"event_type", "stage_persistence_failed",
-			"error_hint", "failed to clear in_progress flag after stage execution",
-			"error", updateErr,
-		)
-	}
-
+	_, err := stage.ExecuteStarted(ctx, item, stage.ExecuteOptions{
+		Store:   opts.Store,
+		Handler: opts.Handler,
+		Logger:  opts.Logger,
+		Stage:   item.Stage,
+		Advance: false,
+	})
 	if err != nil {
 		return fmt.Errorf("stage %s: %w", item.Stage, err)
 	}
