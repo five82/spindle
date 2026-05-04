@@ -20,7 +20,6 @@ import (
 	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/notify"
-	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/subtitle"
 	"github.com/five82/spindle/internal/tmdb"
@@ -192,10 +191,14 @@ func newIdentifyCmd() *cobra.Command {
 
 func newGensubtitleCmd() *cobra.Command {
 	var (
-		output      string
-		workDir     string
-		fetchForced bool
-		external    bool
+		output          string
+		workDir         string
+		fetchForced     bool
+		external        bool
+		forcedTMDBID    int
+		forcedMediaType string
+		forcedSeason    int
+		forcedEpisode   int
 	)
 	cmd := &cobra.Command{
 		Use:   "gensubtitle <encoded-file>",
@@ -234,11 +237,32 @@ func newGensubtitleCmd() *cobra.Command {
 			if output == "" {
 				output = filepath.Dir(file)
 			}
+			sidecarMode := external || !cfg.Subtitles.MuxIntoMKV
 
 			// Keep standalone command output quiet unless verbose mode is enabled.
 			var cmdLogger *slog.Logger
 			if !flagVerbose {
 				cmdLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+			}
+
+			forcedMeta := standaloneSubtitleMetadata{}
+			if fetchForced && cfg.Subtitles.OpenSubtitlesEnabled {
+				forcedMeta = resolveStandaloneSubtitleMetadata(ctx, cfg, cmdLogger, file, standaloneSubtitleOptions{
+					TMDBID:    forcedTMDBID,
+					MediaType: forcedMediaType,
+					Season:    forcedSeason,
+					Episode:   forcedEpisode,
+				})
+				if flagVerbose {
+					fmt.Printf("  %s %s", labelStyle("Title:   "), forcedMeta.Title)
+					if forcedMeta.Year != "" {
+						fmt.Printf(" (%s)", forcedMeta.Year)
+					}
+					if forcedMeta.TMDBID > 0 {
+						fmt.Printf(" [TMDB %d]", forcedMeta.TMDBID)
+					}
+					fmt.Println()
+				}
 			}
 
 			// Create transcription service.
@@ -318,21 +342,34 @@ func newGensubtitleCmd() *cobra.Command {
 			}
 			fmt.Printf("%s (%d -> %d segments, split %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
 
-			// Handle forced subtitles.
-			if fetchForced && cfg.Subtitles.OpenSubtitlesEnabled {
-				osClient := opensubtitles.New(
-					cfg.Subtitles.OpenSubtitlesAPIKey,
-					cfg.Subtitles.OpenSubtitlesUserAgent,
-					cfg.Subtitles.OpenSubtitlesUserToken,
-					"",
-					nil,
-				)
-				if osClient != nil {
-					fmt.Println("Forced subtitle search requires TMDB ID (use pipeline for full support)")
+			forcedPath := ""
+			if fetchForced {
+				switch {
+				case !cfg.Subtitles.OpenSubtitlesEnabled:
+					fmt.Println("Forced subtitle search skipped: opensubtitles_enabled is false")
+				case forcedMeta.TMDBID == 0:
+					fmt.Println("Forced subtitle search skipped: no TMDB ID available")
+				default:
+					forcedVideoPath := filepath.Join(workDir, filepath.Base(file))
+					if sidecarMode {
+						forcedVideoPath = filepath.Join(output, filepath.Base(file))
+					}
+					forced, err := fetchStandaloneForcedSubtitle(ctx, cmdLogger, cfg, forcedVideoPath, selectedAudio.Language, forcedMeta)
+					if err != nil {
+						return err
+					}
+					forcedPath = forced.Path
+					if forcedPath != "" {
+						fmt.Printf("Forced subtitle ready: %s\n", forcedPath)
+					} else if forced.Decision == "none_available" {
+						fmt.Println("Forced subtitle search completed: no forced subtitle found")
+					} else if strings.HasPrefix(forced.Decision, "error:") {
+						fmt.Printf("Forced subtitle search failed: %s\n", strings.TrimPrefix(forced.Decision, "error:"))
+					}
 				}
 			}
 
-			if external || !cfg.Subtitles.MuxIntoMKV {
+			if sidecarMode {
 				data, err := os.ReadFile(displayPath)
 				if err != nil {
 					return fmt.Errorf("read formatted srt: %w", err)
@@ -341,30 +378,28 @@ func newGensubtitleCmd() *cobra.Command {
 					return fmt.Errorf("write formatted srt: %w", err)
 				}
 				fmt.Printf("Saved sidecar: %s\n", finalSidecarPath)
+				if forcedPath != "" {
+					fmt.Printf("Saved forced sidecar: %s\n", forcedPath)
+				}
 			} else {
 				if mkvHasSubtitleTrack(ctx, file) {
-					fmt.Print("Replacing existing subtitle track...")
+					if forcedPath != "" {
+						fmt.Print("Replacing existing subtitle tracks...")
+					} else {
+						fmt.Print("Replacing existing subtitle track...")
+					}
+				} else if forcedPath != "" {
+					fmt.Print("Muxing subtitles into MKV...")
 				} else {
 					fmt.Print("Muxing subtitle into MKV...")
 				}
 
-				// Mux into MKV, replacing the original file.
-				// --no-subtitles strips any existing subtitle tracks before adding the new one.
-				tmpPath := file + ".tmp.mkv"
-				muxCmd := exec.CommandContext(ctx, "mkvmerge",
-					"-o", tmpPath,
-					"--no-subtitles", file,
-					"--language", "0:eng",
-					"--track-name", "0:English",
-					"--default-track-flag", "0:no",
-					displayPath,
-				)
-				if muxOut, err := muxCmd.CombinedOutput(); err != nil {
-					_ = os.Remove(tmpPath)
-					return fmt.Errorf("mkvmerge: %w: %s", err, muxOut)
+				tracks := []cliSubtitleMuxTrack{{Path: displayPath, Language: selectedAudio.Language}}
+				if forcedPath != "" {
+					tracks = append(tracks, cliSubtitleMuxTrack{Path: forcedPath, Language: selectedAudio.Language, Forced: true})
 				}
-				if err := os.Rename(tmpPath, file); err != nil {
-					return fmt.Errorf("rename: %w", err)
+				if err := muxCLISubtitleTracks(ctx, file, tracks); err != nil {
+					return err
 				}
 				fmt.Println(successStyle("done"))
 			}
@@ -375,6 +410,10 @@ func newGensubtitleCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output directory")
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory")
 	cmd.Flags().BoolVar(&fetchForced, "fetch-forced", false, "Also fetch forced subs from OpenSubtitles")
+	cmd.Flags().IntVar(&forcedTMDBID, "tmdb-id", 0, "TMDB ID to use for standalone forced subtitle lookup")
+	cmd.Flags().StringVar(&forcedMediaType, "media-type", "", "Media type for standalone forced subtitle lookup (movie or tv)")
+	cmd.Flags().IntVar(&forcedSeason, "season", 0, "TV season number for standalone forced subtitle lookup")
+	cmd.Flags().IntVar(&forcedEpisode, "episode", 0, "TV episode number for standalone forced subtitle lookup")
 	cmd.Flags().BoolVar(&external, "external", false, "Create external SRT sidecar instead of muxing")
 	return cmd
 }

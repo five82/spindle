@@ -574,129 +574,32 @@ func (h *Handler) tryForcedSubs(
 	videoPath string,
 	record *ripspec.SubtitleGenRecord,
 ) {
-	tmdbID := env.Metadata.ID
-	if tmdbID == 0 {
-		logger.Info("forced subtitle search skipped",
-			"decision_type", logs.DecisionForcedSubtitleSearch,
-			"decision_result", "skipped",
-			"decision_reason", "no TMDB ID available",
-			"episode_key", key,
-		)
-		record.OpenSubtitlesDecision = "skipped:no_tmdb_id"
-		return
-	}
-
 	var season, episode int
 	if ep := env.EpisodeByKey(key); ep != nil {
 		season = ep.Season
 		episode = ep.Episode
 	}
 
-	languages := h.cfg.Subtitles.OpenSubtitlesLanguages
-	if len(languages) == 0 {
-		languages = []string{"en"}
-	}
-
-	results, err := h.osClient.Search(ctx, tmdbID, season, episode, languages)
+	result, err := FetchForcedSubtitle(ctx, logger, h.cfg, h.osClient, ForcedLookupRequest{
+		VideoPath:  videoPath,
+		TMDBID:     env.Metadata.ID,
+		Season:     season,
+		Episode:    episode,
+		Language:   record.Language,
+		Languages:  h.cfg.Subtitles.OpenSubtitlesLanguages,
+		EpisodeKey: key,
+	})
 	if err != nil {
-		logger.Warn("opensubtitles search failed",
+		logger.Warn("forced subtitle lookup failed",
 			"event_type", "opensubtitles_error",
 			"error_hint", err.Error(),
 			"impact", "forced subtitle lookup skipped",
-		)
-		record.OpenSubtitlesDecision = "error:search_failed"
-		return
-	}
-
-	bestIndex, hasBest := rankForcedSubtitleCandidates(results, languages)
-
-	for i, r := range results {
-		var result string
-		switch {
-		case !r.Attributes.ForeignPartsOnly || forcedSubtitleGarbageSource(r):
-			result = "skipped"
-		case hasBest && i == bestIndex:
-			result = "selected"
-		default:
-			result = "candidate"
-		}
-		logger.Info("forced subtitle candidate",
-			"decision_type", logs.DecisionSubtitleRank,
-			"decision_result", result,
-			"foreign_parts_only", r.Attributes.ForeignPartsOnly,
-			"language", r.Attributes.Language,
-			"downloads", r.Attributes.DownloadCount,
-			"files", len(r.Attributes.Files),
-			"release", r.Attributes.Release,
 			"episode_key", key,
 		)
-	}
-
-	var best *opensubtitles.SubtitleResult
-	if hasBest {
-		best = &results[bestIndex]
-		logger.Info("forced subtitle candidate selected",
-			"decision_type", logs.DecisionForcedSubtitleRanking,
-			"decision_result", "selected",
-			"decision_reason", fmt.Sprintf("candidates=%d best_downloads=%d", len(results), best.Attributes.DownloadCount),
-		)
-	}
-
-	if best == nil {
-		logger.Info("no forced subtitles found on OpenSubtitles",
-			"decision_type", logs.DecisionForcedSubtitle,
-			"decision_result", "none_available",
-			"decision_reason", "no foreign_parts_only results",
-			"episode_key", key,
-		)
-		record.OpenSubtitlesDecision = "none_available"
+		record.OpenSubtitlesDecision = "error:lookup_failed"
 		return
 	}
-
-	if len(best.Attributes.Files) == 0 {
-		logger.Warn("forced subtitle has no downloadable files",
-			"event_type", "opensubtitles_no_files",
-			"error_hint", "best forced subtitle result has zero files",
-			"impact", "forced subtitle not downloaded",
-			"episode_key", key,
-		)
-		record.OpenSubtitlesDecision = "error:no_files"
-		return
-	}
-
-	fileID := best.Attributes.Files[0].FileID
-	destPath := displayForcedSubtitlePath(videoPath, record.Language)
-
-	if err := h.osClient.DownloadToFile(ctx, fileID, destPath); err != nil {
-		logger.Warn("forced subtitle download failed",
-			"event_type", "opensubtitles_error",
-			"error_hint", err.Error(),
-			"impact", "forced subtitle not available",
-		)
-		record.OpenSubtitlesDecision = "error:download_failed"
-		return
-	}
-
-	// Clean the downloaded SRT.
-	raw, err := os.ReadFile(destPath)
-	if err == nil {
-		cleaned := opensubtitles.CleanSRT(string(raw))
-		if writeErr := os.WriteFile(destPath, []byte(cleaned), 0o644); writeErr != nil {
-			logger.Warn("failed to write cleaned forced SRT",
-				"event_type", "file_write_error",
-				"error_hint", writeErr.Error(),
-				"impact", "forced subtitle may contain HTML tags",
-			)
-		}
-	}
-
-	logger.Info("forced subtitle downloaded",
-		"decision_type", logs.DecisionForcedSubtitle,
-		"decision_result", "downloaded",
-		"decision_reason", fmt.Sprintf("best match: %d downloads", best.Attributes.DownloadCount),
-		"episode_key", key,
-	)
-	record.OpenSubtitlesDecision = "downloaded"
+	record.OpenSubtitlesDecision = result.Decision
 }
 
 // muxSubtitles runs mkvmerge to add an SRT subtitle track to the MKV file.

@@ -117,7 +117,7 @@ When `subtitles.enabled = true`, Spindle generates subtitles from the actual aud
 7. **Forced subtitles** (optional): when OpenSubtitles is configured and a forced subtitle track is detected, foreign-parts-only subtitles are downloaded from OpenSubtitles with retry for transient service/network failures and used as-is (no alignment against WhisperX output).
 8. SRTs are written beside the encoded media as `<basename>.<lang>.srt` (for example, `Movie.en.srt`). If subtitle formatting fails, or if severe subtitle validation issues are detected for an episode, that episode is recorded as a subtitle failure and processing continues with other episodes when possible.
 
-`spindle gensubtitle /path/to/video.mkv` runs the same pipeline for an existing encode. It derives a title from the filename and uses TMDB for metadata context.
+`spindle gensubtitle /path/to/video.mkv` generates display subtitles for an existing encode. With `--fetch-forced`, it derives title/year or TV season/episode context from the filename, uses TMDB metadata when configured, and searches OpenSubtitles using the credentials and languages from `config.toml`. Use `--tmdb-id`, `--media-type`, `--season`, and `--episode` when filename inference is insufficient. By default, generated regular and forced subtitles are muxed into MKV output when subtitle muxing is enabled; `--external` writes sidecar SRT files instead.
 
 ## Stage 8: Organizing & Jellyfin Refresh (organizing -> completed)
 
