@@ -312,7 +312,7 @@ func (m *Monitor) enqueuePipeline(ctx context.Context, event *DiscEvent) (*Enque
 // disc title for terminal items. Used by both sync and async code paths.
 func (m *Monitor) logDuplicateDecision(ctx context.Context, existing *queue.Item, event *DiscEvent, fp string) {
 	// User-stopped items are not reset for reprocessing.
-	if existing.Stage == queue.StageFailed && strings.Contains(existing.ReviewReason, queue.ReviewReasonUserStopped) {
+	if existing.Stage == queue.StageFailed && existing.UserStopped() {
 		m.logger.Info("disc detection skipped (user-stopped item)",
 			"decision_type", logs.DecisionDuplicateDetection,
 			"decision_result", "skipped",

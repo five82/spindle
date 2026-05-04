@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS queue_items (
     active_episode_key TEXT,
     progress_bytes_copied INTEGER DEFAULT 0,
     progress_total_bytes INTEGER DEFAULT 0,
-    encoding_details_json TEXT
+    encoding_details_json TEXT,
+    user_stopped INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_queue_stage ON queue_items(stage);
@@ -121,7 +122,8 @@ func isBusyError(err error) bool {
 const allColumns = `id, disc_title, stage, in_progress, failed_at_stage, error_message,
     created_at, updated_at, rip_spec_data, disc_fingerprint, metadata_json,
     needs_review, review_reason, progress_stage, progress_percent, progress_message,
-    active_episode_key, progress_bytes_copied, progress_total_bytes, encoding_details_json`
+    active_episode_key, progress_bytes_copied, progress_total_bytes, encoding_details_json,
+    user_stopped`
 
 // scanItem scans a row into an Item.
 func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
@@ -141,7 +143,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 		&it.NeedsReview, &reviewReason,
 		&progressStage, &it.ProgressPercent, &progressMessage,
 		&activeEpisodeKey, &it.ProgressBytesCopied, &it.ProgressTotalBytes,
-		&encodingDetailsJSON,
+		&encodingDetailsJSON, &it.userStopped,
 	)
 	if err != nil {
 		return nil, err
@@ -163,6 +165,20 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	it.EncodingDetailsJSON = encodingDetailsJSON.String
 
 	return &it, nil
+}
+
+func (s *Store) refreshItem(item *Item) error {
+	if s == nil || item == nil || item.ID == 0 {
+		return nil
+	}
+	fresh, err := s.GetByID(item.ID)
+	if err != nil {
+		return err
+	}
+	if fresh != nil {
+		*item = *fresh
+	}
+	return nil
 }
 
 // NewDisc inserts a new queue item at the identification stage and returns it with its ID.
@@ -294,50 +310,67 @@ func (s *Store) MoveToStage(item *Item, stage Stage) error {
 }
 
 // CompleteStage finalizes a successful stage execution. If advance is true,
-// the item moves to nextStage; otherwise only in_progress is cleared.
+// the item moves to nextStage; otherwise only in_progress is cleared. A
+// user-stopped item keeps its failed/stopped state even if a handler finishes
+// after the stop request.
 func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
-	item.InProgress = 0
-	if advance {
-		item.Stage = nextStage
-		item.ActiveEpisodeKey = ""
-		if item.Stage == StageCompleted {
-			item.ProgressStage = string(StageCompleted)
-			item.ProgressPercent = 100
-			item.ProgressMessage = "Completed"
-		} else {
-			item.ProgressStage = ""
-			item.ProgressPercent = 0
-			item.ProgressMessage = ""
-		}
-	}
 	if s == nil {
+		item.InProgress = 0
+		if advance {
+			item.Stage = nextStage
+			item.ActiveEpisodeKey = ""
+			if item.Stage == StageCompleted {
+				item.ProgressStage = string(StageCompleted)
+				item.ProgressPercent = 100
+				item.ProgressMessage = "Completed"
+			} else {
+				item.ProgressStage = ""
+				item.ProgressPercent = 0
+				item.ProgressMessage = ""
+			}
+		}
 		return nil
 	}
 	if !advance {
 		return s.ClearInProgress(item)
 	}
-	stopped := "%" + ReviewReasonUserStopped + "%"
+
+	targetStage := nextStage
+	progressStage := ""
+	progressPercent := 0.0
+	progressMessage := ""
+	if targetStage == StageCompleted {
+		progressStage = string(StageCompleted)
+		progressPercent = 100
+		progressMessage = "Completed"
+	}
+
 	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`
+		res, err := s.db.Exec(`
 			UPDATE queue_items SET
-				stage = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN stage ELSE ? END,
-				in_progress = 0,
-				active_episode_key = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN active_episode_key ELSE '' END,
-				progress_stage = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN progress_stage ELSE ? END,
-				progress_percent = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN progress_percent ELSE ? END,
-				progress_message = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN progress_message ELSE ? END,
+				stage = ?, in_progress = 0, active_episode_key = '',
+				progress_stage = ?, progress_percent = ?, progress_message = ?,
 				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?`,
-			stopped, string(item.Stage),
-			stopped,
-			stopped, item.ProgressStage,
-			stopped, item.ProgressPercent,
-			stopped, item.ProgressMessage,
-			item.ID,
+			WHERE id = ? AND user_stopped = 0`,
+			string(targetStage), progressStage, progressPercent, progressMessage, item.ID,
 		)
 		if err != nil {
 			return fmt.Errorf("complete stage item %d: %w", item.ID, err)
 		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("complete stage item %d rows affected: %w", item.ID, err)
+		}
+		if rows == 0 {
+			return s.refreshItem(item)
+		}
+		item.Stage = targetStage
+		item.InProgress = 0
+		item.ActiveEpisodeKey = ""
+		item.ProgressStage = progressStage
+		item.ProgressPercent = progressPercent
+		item.ProgressMessage = progressMessage
+		item.userStopped = 0
 		return nil
 	})
 }
@@ -345,31 +378,37 @@ func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
 // FailStage marks an item failed at a specific stage unless the item has
 // already been explicitly stopped by the user.
 func (s *Store) FailStage(item *Item, failedAt Stage, errMsg string) error {
-	item.Stage = StageFailed
-	item.InProgress = 0
-	item.FailedAtStage = string(failedAt)
-	item.ErrorMessage = errMsg
 	if s == nil {
+		item.Stage = StageFailed
+		item.InProgress = 0
+		item.FailedAtStage = string(failedAt)
+		item.ErrorMessage = errMsg
 		return nil
 	}
-	stopped := "%" + ReviewReasonUserStopped + "%"
 	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`
+		res, err := s.db.Exec(`
 			UPDATE queue_items SET
-				stage = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN stage ELSE ? END,
-				in_progress = 0,
-				failed_at_stage = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN failed_at_stage ELSE ? END,
-				error_message = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN error_message ELSE ? END,
+				stage = ?, in_progress = 0,
+				failed_at_stage = ?, error_message = ?,
 				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?`,
-			stopped, string(StageFailed),
-			stopped, string(failedAt),
-			stopped, errMsg,
-			item.ID,
+			WHERE id = ? AND user_stopped = 0`,
+			string(StageFailed), string(failedAt), errMsg, item.ID,
 		)
 		if err != nil {
 			return fmt.Errorf("fail item %d at %s: %w", item.ID, failedAt, err)
 		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("fail item %d at %s rows affected: %w", item.ID, failedAt, err)
+		}
+		if rows == 0 {
+			return s.refreshItem(item)
+		}
+		item.Stage = StageFailed
+		item.InProgress = 0
+		item.FailedAtStage = string(failedAt)
+		item.ErrorMessage = errMsg
+		item.userStopped = 0
 		return nil
 	})
 }
@@ -396,19 +435,14 @@ func (s *Store) UpdateDiscTitle(item *Item, title string) error {
 // item.
 func (s *Store) UpdateWorkState(item *Item) error {
 	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`
+		res, err := s.db.Exec(`
 			UPDATE queue_items SET
 				disc_title = ?,
 				updated_at = CURRENT_TIMESTAMP,
 				rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?,
-				needs_review = CASE
-					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN needs_review
-					ELSE ? END,
-				review_reason = CASE
-					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN review_reason
-					ELSE ? END,
+				needs_review = ?, review_reason = ?,
 				active_episode_key = ?, encoding_details_json = ?
-			WHERE id = ?`,
+			WHERE id = ? AND user_stopped = 0`,
 			item.DiscTitle,
 			item.RipSpecData, item.DiscFingerprint, item.MetadataJSON,
 			item.NeedsReview, item.ReviewReason,
@@ -418,6 +452,13 @@ func (s *Store) UpdateWorkState(item *Item) error {
 		if err != nil {
 			return fmt.Errorf("update work state item %d: %w", item.ID, err)
 		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("update work state item %d rows affected: %w", item.ID, err)
+		}
+		if rows == 0 {
+			return s.refreshItem(item)
+		}
 		return nil
 	})
 }
@@ -425,13 +466,13 @@ func (s *Store) UpdateWorkState(item *Item) error {
 // UpdateProgress updates only progress-related columns.
 func (s *Store) UpdateProgress(item *Item) error {
 	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`
+		res, err := s.db.Exec(`
 			UPDATE queue_items SET
 				progress_stage = ?, progress_percent = ?, progress_message = ?,
 				progress_bytes_copied = ?, progress_total_bytes = ?,
 				encoding_details_json = ?, active_episode_key = ?,
 				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?`,
+			WHERE id = ? AND user_stopped = 0`,
 			item.ProgressStage, item.ProgressPercent, item.ProgressMessage,
 			item.ProgressBytesCopied, item.ProgressTotalBytes,
 			item.EncodingDetailsJSON, item.ActiveEpisodeKey,
@@ -439,6 +480,13 @@ func (s *Store) UpdateProgress(item *Item) error {
 		)
 		if err != nil {
 			return fmt.Errorf("update progress item %d: %w", item.ID, err)
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("update progress item %d rows affected: %w", item.ID, err)
+		}
+		if rows == 0 {
+			return s.refreshItem(item)
 		}
 		return nil
 	})
@@ -636,6 +684,7 @@ func (s *Store) CheckHealth() error {
 		"progress_stage": false, "progress_percent": false, "progress_message": false,
 		"active_episode_key": false, "progress_bytes_copied": false,
 		"progress_total_bytes": false, "encoding_details_json": false,
+		"user_stopped": false,
 	}
 
 	rows, err := s.db.Query("PRAGMA table_info(queue_items)")
@@ -736,7 +785,7 @@ func (s *Store) RetryFailed(ids ...int64) (int, error) {
 				UPDATE queue_items SET
 					stage = ?, in_progress = 0,
 					failed_at_stage = NULL, error_message = NULL,
-					needs_review = 0, review_reason = NULL,
+					needs_review = 0, review_reason = NULL, user_stopped = 0,
 					updated_at = CURRENT_TIMESTAMP
 				WHERE id = ?`,
 				string(targetStage), id,
@@ -760,7 +809,7 @@ func (s *Store) RetryWithRipSpec(id int64, targetStage Stage, ripSpecData string
 			UPDATE queue_items SET
 				stage = ?, in_progress = 0,
 				failed_at_stage = NULL, error_message = NULL,
-				needs_review = 0, review_reason = NULL,
+				needs_review = 0, review_reason = NULL, user_stopped = 0,
 				rip_spec_data = ?,
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?`,
@@ -793,12 +842,13 @@ func (s *Store) StopItems(ids ...int64) (int, error) {
 
 			item.Stage = StageFailed
 			item.InProgress = 0
+			item.userStopped = 1
 			item.AppendReviewReason(ReviewReasonUserStopped)
 
 			_, err = s.db.Exec(`
 				UPDATE queue_items SET
 					stage = ?, in_progress = 0,
-					needs_review = ?, review_reason = ?,
+					needs_review = ?, review_reason = ?, user_stopped = 1,
 					updated_at = CURRENT_TIMESTAMP
 				WHERE id = ?`,
 				string(StageFailed), item.NeedsReview, item.ReviewReason, id,

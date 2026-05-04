@@ -32,6 +32,7 @@ type ExecuteResult struct {
 	DegradedMsg string
 	Canceled    bool
 	Failed      bool
+	UserStopped bool
 }
 
 // PersistenceError reports a queue write failure during stage lifecycle
@@ -73,6 +74,9 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 					return res, persistErr
 				}
 			}
+			if item.UserStopped() {
+				res.UserStopped = true
+			}
 			return res, err
 		}
 
@@ -95,6 +99,11 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 					}
 				}
 			}
+			if item.UserStopped() {
+				res.UserStopped = true
+				res.Failed = false
+				return res, nil
+			}
 			return res, err
 		}
 	}
@@ -103,6 +112,9 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 		if persistErr := maybePersistenceError(opts, "persist stage completion", updateErr); persistErr != nil {
 			return res, persistErr
 		}
+	}
+	if item.UserStopped() {
+		res.UserStopped = true
 	}
 	return res, nil
 }

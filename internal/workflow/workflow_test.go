@@ -26,6 +26,16 @@ func (h stubHandler) Run(ctx context.Context, sess *stage.Session) error {
 	return nil
 }
 
+type stubObserver struct {
+	successes int
+	failures  int
+}
+
+func (o *stubObserver) RecordSuccess(*queue.Item) { o.successes++ }
+func (o *stubObserver) RecordFailure(*queue.Item, string) {
+	o.failures++
+}
+
 func newTestManager(stages []PipelineStage) *Manager {
 	m := New(nil, nil, nil, slog.Default())
 	m.ConfigureStages(stages)
@@ -192,6 +202,45 @@ func TestCompletedItemKeepsTerminalProgress(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("item did not complete")
+}
+
+func TestUserStoppedItemIsNotRecordedAsStageSuccess(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	item, _ := store.NewDisc("A", "fp1")
+	if err := store.MoveToStage(item, queue.StageOrganizing); err != nil {
+		t.Fatalf("move item: %v", err)
+	}
+	if err := store.StartStage(item, queue.StageOrganizing); err != nil {
+		t.Fatalf("start stage: %v", err)
+	}
+
+	observer := &stubObserver{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, observer, logger)
+	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{
+		run: func(context.Context, *stage.Session) error {
+			_, err := store.StopItems(item.ID)
+			return err
+		},
+	}, Semaphore: SemNone}})
+
+	manager.processItem(context.Background(), item, manager.pipeline.stages[0])
+
+	if observer.successes != 0 || observer.failures != 0 {
+		t.Fatalf("observer successes=%d failures=%d, want no stage outcome", observer.successes, observer.failures)
+	}
+	got, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
+	}
+	if !got.UserStopped() || got.Stage != queue.StageFailed {
+		t.Fatalf("item stage=%q user_stopped=%v, want stopped failure", got.Stage, got.UserStopped())
+	}
 }
 
 func TestFinalPersistenceFailureSignalsWorkflowStop(t *testing.T) {

@@ -31,6 +31,12 @@ type Item struct {
 	ProgressBytesCopied int64
 	ProgressTotalBytes  int64
 	EncodingDetailsJSON string
+	userStopped         int
+}
+
+// UserStopped reports whether the item was explicitly stopped by the user.
+func (it *Item) UserStopped() bool {
+	return it != nil && it.userStopped != 0
 }
 
 // StagingRoot computes the per-item working directory under base.

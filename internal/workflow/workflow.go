@@ -241,6 +241,17 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		}
 		return
 	}
+	if res.UserStopped {
+		itemLogger.Info("stage result ignored after user stop",
+			"decision_type", logs.DecisionStageExecution,
+			"decision_result", "user_stopped",
+			"decision_reason", "item was explicitly stopped before stage finalization",
+			"stage", ps.Stage,
+			"stage_duration", res.Duration,
+		)
+		m.maybeCompleteQueueCycle(ctx, itemLogger)
+		return
+	}
 	if err != nil {
 		var persistenceErr *stage.PersistenceError
 		if errors.As(err, &persistenceErr) {

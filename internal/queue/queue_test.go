@@ -392,6 +392,9 @@ func TestStopItemsAndOverride(t *testing.T) {
 	if got.NeedsReview != 1 {
 		t.Errorf("needs_review = %d, want 1", got.NeedsReview)
 	}
+	if !got.UserStopped() {
+		t.Errorf("user stopped flag not set")
+	}
 
 	var reasons []string
 	if err := json.Unmarshal([]byte(got.ReviewReason), &reasons); err != nil {
@@ -423,8 +426,11 @@ func TestLifecycleMethodsDoNotOverrideUserStoppedItem(t *testing.T) {
 		t.Fatalf("complete stopped item: %v", err)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != StageFailed || got.ReviewReason == "" {
-		t.Fatalf("completion overrode stopped item: stage=%q review=%q", got.Stage, got.ReviewReason)
+	if got.Stage != StageFailed || got.ReviewReason == "" || !got.UserStopped() {
+		t.Fatalf("completion overrode stopped item: stage=%q review=%q user_stopped=%v", got.Stage, got.ReviewReason, got.UserStopped())
+	}
+	if item.Stage != StageFailed || !item.UserStopped() {
+		t.Fatalf("completion left in-memory item inconsistent: stage=%q user_stopped=%v", item.Stage, item.UserStopped())
 	}
 
 	if err := store.FailStage(item, StageEncoding, "encode failed"); err != nil {
@@ -433,6 +439,20 @@ func TestLifecycleMethodsDoNotOverrideUserStoppedItem(t *testing.T) {
 	got, _ = store.GetByID(item.ID)
 	if got.ErrorMessage != "" || got.FailedAtStage != "" {
 		t.Fatalf("failure overrode stopped item details: failed_at=%q err=%q", got.FailedAtStage, got.ErrorMessage)
+	}
+	if item.ErrorMessage != "" || item.FailedAtStage != "" || !item.UserStopped() {
+		t.Fatalf("failure left in-memory item inconsistent: failed_at=%q err=%q user_stopped=%v", item.FailedAtStage, item.ErrorMessage, item.UserStopped())
+	}
+
+	item.DiscTitle = "Changed by handler"
+	item.RipSpecData = `{"version":1}`
+	item.AppendReviewReason("handler review")
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatalf("update stopped work state: %v", err)
+	}
+	got, _ = store.GetByID(item.ID)
+	if got.DiscTitle != "A" || got.RipSpecData != "" || got.ReviewSummary(0) != ReviewReasonUserStopped {
+		t.Fatalf("work state overrode stopped item: title=%q ripspec=%q review=%q", got.DiscTitle, got.RipSpecData, got.ReviewReason)
 	}
 }
 
