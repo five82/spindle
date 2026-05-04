@@ -4,15 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/subtitle"
 	"github.com/five82/spindle/internal/tmdb"
@@ -232,56 +229,4 @@ func fetchStandaloneForcedSubtitle(ctx context.Context, logger *slog.Logger, cfg
 		Language:  languageCode,
 		Languages: cfg.Subtitles.OpenSubtitlesLanguages,
 	})
-}
-
-type cliSubtitleMuxTrack struct {
-	Path     string
-	Language string
-	Forced   bool
-}
-
-func muxCLISubtitleTracks(ctx context.Context, videoPath string, tracks []cliSubtitleMuxTrack) error {
-	if len(tracks) == 0 {
-		return nil
-	}
-	tmpPath := videoPath + ".tmp.mkv"
-	args := buildCLISubtitleMuxArgs(tmpPath, videoPath, tracks)
-	cmd := exec.CommandContext(ctx, "mkvmerge", args...)
-	if muxOut, err := cmd.CombinedOutput(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("mkvmerge: %w: %s", err, muxOut)
-	}
-	if err := os.Rename(tmpPath, videoPath); err != nil {
-		return fmt.Errorf("rename: %w", err)
-	}
-	return nil
-}
-
-func buildCLISubtitleMuxArgs(outputPath, videoPath string, tracks []cliSubtitleMuxTrack) []string {
-	args := []string{"-o", outputPath, "--no-subtitles", videoPath}
-	for _, track := range tracks {
-		lang := language.ToISO3(track.Language)
-		if lang == "" || lang == "und" {
-			lang = "eng"
-		}
-		name := language.DisplayName(track.Language)
-		if strings.TrimSpace(name) == "" {
-			name = "English"
-		}
-		defaultFlag := "0:no"
-		forcedFlag := "0:no"
-		if track.Forced {
-			name += " (Forced)"
-			defaultFlag = "0:yes"
-			forcedFlag = "0:yes"
-		}
-		args = append(args,
-			"--language", "0:"+lang,
-			"--track-name", "0:"+name,
-			"--default-track-flag", defaultFlag,
-			"--forced-track", forcedFlag,
-			track.Path,
-		)
-	}
-	return args
 }

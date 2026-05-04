@@ -53,18 +53,3 @@ func TestFilterStandaloneTMDBResultsPrefersExpectedMediaType(t *testing.T) {
 		t.Fatalf("filterStandaloneTMDBResults() = %#v, want %#v", got, want)
 	}
 }
-
-func TestBuildCLISubtitleMuxArgsRegularAndForced(t *testing.T) {
-	got := buildCLISubtitleMuxArgs("/tmp/out.mkv", "/media/movie.mkv", []cliSubtitleMuxTrack{
-		{Path: "/tmp/movie.en.srt", Language: "en"},
-		{Path: "/tmp/movie.en.forced.srt", Language: "en", Forced: true},
-	})
-	want := []string{
-		"-o", "/tmp/out.mkv", "--no-subtitles", "/media/movie.mkv",
-		"--language", "0:eng", "--track-name", "0:English", "--default-track-flag", "0:no", "--forced-track", "0:no", "/tmp/movie.en.srt",
-		"--language", "0:eng", "--track-name", "0:English (Forced)", "--default-track-flag", "0:yes", "--forced-track", "0:yes", "/tmp/movie.en.forced.srt",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("buildCLISubtitleMuxArgs() = %#v, want %#v", got, want)
-	}
-}

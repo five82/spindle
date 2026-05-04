@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -382,7 +381,7 @@ func newGensubtitleCmd() *cobra.Command {
 					fmt.Printf("Saved forced sidecar: %s\n", forcedPath)
 				}
 			} else {
-				if mkvHasSubtitleTrack(ctx, file) {
+				if subtitle.MKVHasSubtitleTrack(ctx, file) {
 					if forcedPath != "" {
 						fmt.Print("Replacing existing subtitle tracks...")
 					} else {
@@ -394,11 +393,11 @@ func newGensubtitleCmd() *cobra.Command {
 					fmt.Print("Muxing subtitle into MKV...")
 				}
 
-				tracks := []cliSubtitleMuxTrack{{Path: displayPath, Language: selectedAudio.Language}}
+				tracks := []subtitle.MuxTrack{{Path: displayPath, Language: selectedAudio.Language}}
 				if forcedPath != "" {
-					tracks = append(tracks, cliSubtitleMuxTrack{Path: forcedPath, Language: selectedAudio.Language, Forced: true})
+					tracks = append(tracks, subtitle.MuxTrack{Path: forcedPath, Language: selectedAudio.Language, Forced: true})
 				}
-				if err := muxCLISubtitleTracks(ctx, file, tracks); err != nil {
+				if _, err := subtitle.MuxSubtitleTracks(ctx, subtitle.MuxRequest{VideoPath: file, OutputPath: file, Tracks: tracks, ReplaceExisting: true}); err != nil {
 					return err
 				}
 				fmt.Println(successStyle("done"))
@@ -432,22 +431,6 @@ func formatPhaseDuration(d time.Duration) string {
 // formatContentDuration formats a duration in seconds as "1h38m12s".
 func formatContentDuration(secs float64) string {
 	return time.Duration(secs * float64(time.Second)).Truncate(time.Second).String()
-}
-
-// mkvHasSubtitleTrack returns true if the MKV file contains at least one
-// subtitle track, using mkvmerge --identify.
-func mkvHasSubtitleTrack(ctx context.Context, path string) bool {
-	cmd := exec.CommandContext(ctx, "mkvmerge", "--identify", path)
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "Track ID") && strings.Contains(line, "subtitles") {
-			return true
-		}
-	}
-	return false
 }
 
 func newTestNotifyCmd() *cobra.Command {

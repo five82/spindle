@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -614,44 +613,24 @@ func (h *Handler) muxSubtitles(
 	ext := filepath.Ext(videoPath)
 	base := strings.TrimSuffix(filepath.Base(videoPath), ext)
 	outPath := filepath.Join(dir, base+".subtitled"+ext)
-	tmpPath := outPath + ".tmp"
 
-	languageCode := language.ToISO3(subtitleLanguage)
-	if languageCode == "" || languageCode == "und" {
-		languageCode = "eng"
-	}
-	trackName := language.DisplayName(subtitleLanguage)
-	if strings.TrimSpace(trackName) == "" {
-		trackName = "English"
-	}
-
-	args := []string{
-		"-o", tmpPath,
-		videoPath,
-		"--language", "0:" + languageCode,
-		"--track-name", "0:" + trackName,
-		"--default-track-flag", "0:no",
-		srtPath,
-	}
-
-	cmd := exec.CommandContext(ctx, "mkvmerge", args...)
-	output, err := cmd.CombinedOutput()
+	muxedPath, err := MuxSubtitleTracks(ctx, MuxRequest{
+		VideoPath:  videoPath,
+		OutputPath: outPath,
+		Tracks: []MuxTrack{{
+			Path:     srtPath,
+			Language: subtitleLanguage,
+		}},
+	})
 	if err != nil {
-		// Clean up partial output.
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("mkvmerge %s: %w: %s", key, err, output)
-	}
-
-	// Rename temp to final.
-	if err := os.Rename(tmpPath, outPath); err != nil {
-		return "", fmt.Errorf("rename muxed file %s: %w", key, err)
+		return "", fmt.Errorf("mux subtitles %s: %w", key, err)
 	}
 
 	logger.Info("subtitles muxed into MKV",
 		"event_type", "mux_complete",
 		"episode_key", key,
-		"output_path", outPath,
+		"output_path", muxedPath,
 	)
 
-	return outPath, nil
+	return muxedPath, nil
 }
