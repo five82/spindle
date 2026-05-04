@@ -18,9 +18,8 @@ Spindle ships as one Go binary with several roles:
 - **Daemon**: monitors the optical drive, owns pipeline execution, exposes the
   HTTP API, writes logs, and sends notifications.
 - **HTTP API**: local control/read API used by the CLI and by external consumers
-  such as Flyer.
-- **Direct DB fallback**: queue read/mutation commands can work when the daemon
-  is unavailable by opening the queue database directly where safe.
+  such as Flyer. Normal queue access goes through this API; the daemon owns
+  queue database reads and mutations.
 
 The daemon normally listens on a Unix socket. TCP binding exists for explicit
 configuration but the default deployment is local-only.
@@ -139,6 +138,6 @@ The current package layout is intentionally simple:
 - `internal/media/*`, `transcription`, `ripcache`, `discidcache`, `staging`,
   `fingerprint`, `discmonitor`: domain services.
 - `internal/httpapi`, `sockhttp`, `queueaccess`, `queueops`, `logs`,
-  `auditgather`: control, access, and diagnostics.
+  `auditgather`: HTTP control, daemon access, and diagnostics.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for dependency rules and change policy.

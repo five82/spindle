@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/staging"
 )
 
@@ -60,10 +59,19 @@ func newStagingCleanCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			var activeFingerprints map[string]struct{}
 			if !flagAll {
-				store, err := queue.OpenReadOnly(cfg.QueueDBPath())
-				if err == nil {
-					activeFingerprints, _ = store.ActiveFingerprints()
-					_ = store.Close()
+				acc, err := openQueueAccess()
+				if err != nil {
+					return err
+				}
+				items, err := acc.List()
+				if err != nil {
+					return err
+				}
+				activeFingerprints = make(map[string]struct{})
+				for _, item := range items {
+					if item.DiscFingerprint != "" {
+						activeFingerprints[item.DiscFingerprint] = struct{}{}
+					}
 				}
 			}
 

@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/five82/spindle/internal/daemonctl"
 	"github.com/five82/spindle/internal/queue"
-	"github.com/five82/spindle/internal/queueops"
 )
 
 func newQueueCmd() *cobra.Command {
@@ -184,21 +184,28 @@ func newQueueClearCmd() *cobra.Command {
 				return fmt.Errorf("provide item IDs, --all, or --completed")
 			}
 
-			store, err := queue.Open(cfg.QueueDBPath())
+			if flagAll && !daemonctl.IsRunning(lockPath(), socketPath()) {
+				if err := clearQueueDBFiles(cfg.QueueDBPath()); err != nil {
+					return err
+				}
+				fmt.Println(successStyle("Queue database files removed"))
+				return nil
+			}
+
+			acc, err := openQueueAccess()
 			if err != nil {
 				return err
 			}
-			defer func() { _ = store.Close() }()
 
 			if flagAll {
-				if _, err := store.Clear(); err != nil {
+				if _, err := acc.Clear("all"); err != nil {
 					return err
 				}
 				fmt.Println(successStyle("All queue items removed"))
 				return nil
 			}
 			if flagCompleted {
-				if _, err := store.ClearCompleted(); err != nil {
+				if _, err := acc.Clear("completed"); err != nil {
 					return err
 				}
 				fmt.Println(successStyle("Completed queue items removed"))
@@ -210,7 +217,7 @@ func newQueueClearCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("invalid item ID: %s", arg)
 				}
-				if err := store.Remove(id); err != nil {
+				if _, err := acc.Remove(id); err != nil {
 					fmt.Fprintf(os.Stderr, "%s could not remove item %d: %v\n", warnStyle("Warning:"), id, err)
 				} else {
 					fmt.Println(successStyle(fmt.Sprintf("Removed item %d", id)))
@@ -230,14 +237,13 @@ func newQueueRetryCmd() *cobra.Command {
 		Use:   "retry [id...]",
 		Short: "Retry failed queue items",
 		RunE: func(_ *cobra.Command, args []string) error {
-			store, err := queue.Open(cfg.QueueDBPath())
-			if err != nil {
-				return err
-			}
-			defer func() { _ = store.Close() }()
-
 			if episode != "" && len(args) != 1 {
 				return fmt.Errorf("--episode requires exactly one item ID")
+			}
+
+			acc, err := openQueueAccess()
+			if err != nil {
+				return err
 			}
 
 			if episode != "" {
@@ -245,26 +251,28 @@ func newQueueRetryCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("invalid item ID: %s", args[0])
 				}
-				result, err := queueops.RetryEpisode(store, id, episode)
+				result, err := acc.RetryEpisode(id, episode)
 				if err != nil {
 					return err
 				}
 				switch result {
-				case queueops.RetryResultRetried:
+				case "retried":
 					fmt.Println(successStyle(fmt.Sprintf("Retried episode %s on item %d", episode, id)))
-				case queueops.RetryResultNotFound:
+				case "not_found":
 					return fmt.Errorf("item %d not found", id)
-				case queueops.RetryResultNotFailed:
+				case "not_failed":
 					return fmt.Errorf("item %d is not in failed state", id)
-				case queueops.RetryResultEpisodeNotFound:
+				case "episode_not_found":
 					return fmt.Errorf("episode %s not found in item %d", episode, id)
+				default:
+					return fmt.Errorf("unexpected retry result: %s", result)
 				}
 				return nil
 			}
 
 			if len(args) == 0 {
 				// Retry all failed.
-				count, err := store.RetryFailed()
+				count, err := acc.Retry()
 				if err != nil {
 					return err
 				}
@@ -281,7 +289,7 @@ func newQueueRetryCmd() *cobra.Command {
 				ids = append(ids, id)
 			}
 
-			count, err := store.RetryFailed(ids...)
+			count, err := acc.Retry(ids...)
 			if err != nil {
 				return err
 			}
@@ -302,11 +310,10 @@ func newQueueStopCmd() *cobra.Command {
 		Short: "Stop processing for specific queue items",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			store, err := queue.Open(cfg.QueueDBPath())
+			acc, err := openQueueAccess()
 			if err != nil {
 				return err
 			}
-			defer func() { _ = store.Close() }()
 
 			var ids []int64
 			for _, arg := range args {
@@ -317,11 +324,20 @@ func newQueueStopCmd() *cobra.Command {
 				ids = append(ids, id)
 			}
 
-			if _, err := store.StopItems(ids...); err != nil {
+			if _, err := acc.Stop(ids...); err != nil {
 				return err
 			}
 			fmt.Println(successStyle(fmt.Sprintf("Stopped %d item(s)", len(ids))))
 			return nil
 		},
 	}
+}
+
+func clearQueueDBFiles(dbPath string) error {
+	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
+	return nil
 }

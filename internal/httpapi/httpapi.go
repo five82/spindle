@@ -116,6 +116,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/queue/retry", s.authMiddleware(s.handleQueueRetry))
 	s.mux.HandleFunc("POST /api/queue/retry-episode", s.authMiddleware(s.handleQueueRetryEpisode))
 	s.mux.HandleFunc("POST /api/queue/stop", s.authMiddleware(s.handleQueueStop))
+	s.mux.HandleFunc("POST /api/queue/enqueue-cached", s.authMiddleware(s.handleQueueEnqueueCached))
 	s.mux.HandleFunc("DELETE /api/queue/{id}", s.authMiddleware(s.handleQueueRemove))
 	s.mux.HandleFunc("POST /api/queue/clear", s.authMiddleware(s.handleQueueClear))
 	s.mux.HandleFunc("GET /api/logs", s.authMiddleware(s.handleLogs))
@@ -237,6 +238,54 @@ func (s *Server) handleQueueStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"updated": count})
+}
+
+func (s *Server) handleQueueEnqueueCached(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DiscTitle      string `json:"disc_title"`
+		Fingerprint    string `json:"fingerprint"`
+		RipSpecData    string `json:"rip_spec_data"`
+		MetadataJSON   string `json:"metadata_json"`
+		AllowDuplicate bool   `json:"allow_duplicate"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	body.DiscTitle = strings.TrimSpace(body.DiscTitle)
+	body.Fingerprint = strings.TrimSpace(body.Fingerprint)
+	if body.DiscTitle == "" || body.Fingerprint == "" || strings.TrimSpace(body.RipSpecData) == "" {
+		writeError(w, http.StatusBadRequest, "disc_title, fingerprint, and rip_spec_data are required")
+		return
+	}
+	if !body.AllowDuplicate {
+		existing, err := s.store.FindByFingerprint(body.Fingerprint)
+		if err != nil {
+			s.logger.Error("check duplicate cached enqueue", "error", err, "fingerprint", body.Fingerprint)
+			writeError(w, http.StatusInternalServerError, "failed to check duplicate fingerprint")
+			return
+		}
+		if existing != nil {
+			writeError(w, http.StatusConflict, fmt.Sprintf("fingerprint already queued (item %d, stage %s); use --allow-duplicate to override", existing.ID, existing.Stage))
+			return
+		}
+	}
+	item, err := s.store.NewDisc(body.DiscTitle, body.Fingerprint)
+	if err != nil {
+		s.logger.Error("enqueue cached rip", "error", err, "fingerprint", body.Fingerprint)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue cached rip")
+		return
+	}
+	item.RipSpecData = body.RipSpecData
+	item.MetadataJSON = body.MetadataJSON
+	item.Stage = queue.StageRipping
+	if err := s.store.Update(item); err != nil {
+		_ = s.store.Remove(item.ID)
+		s.logger.Error("update cached enqueue", "error", err, "item_id", item.ID)
+		writeError(w, http.StatusInternalServerError, "failed to finalize cached rip queue item")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item)})
 }
 
 func (s *Server) handleQueueRemove(w http.ResponseWriter, r *http.Request) {

@@ -4,7 +4,7 @@ Status: Active contract / user guide. Exact implementation behavior is defined b
 
 Stage-by-stage breakdown of what happens after you insert a disc. See the [README](../../README.md) for installation and initial setup.
 
-The daemon owns disc detection and the automated pipeline. Queue commands work with or without the daemon; log tailing (`spindle logs --follow`) requires a running daemon.
+The daemon owns disc detection, queue access, and the automated pipeline. Queue commands require a running daemon except `spindle queue clear --all`, which can reset the transient queue while the daemon is stopped. Log tailing (`spindle logs --follow`) requires a running daemon.
 
 ## Lifecycle at a Glance
 
@@ -75,7 +75,7 @@ Progress messages in `spindle logs -f` describe the identification steps and any
 6. If MakeMKV fails or the disc is defective, the item becomes `failed` with the error recorded in the queue.
 
 If the rip cache is enabled, raw rips are stored for reuse along with the identification metadata
-(disc fingerprint, rip spec, TMDB metadata). Cached entries can be re-queued without inserting a disc
+(disc fingerprint, rip spec, TMDB metadata). Cached entries can be re-queued through the running daemon without inserting a disc
 via `spindle cache process <number>`; restored rips are reprocessed for audio refinement.
 
 For discs with multiple feature-length titles (e.g., director's cut and theatrical cut),
@@ -155,13 +155,14 @@ Files in `review_dir` need manual attention:
    - **Low-confidence TMDB match**: The disc title didn't match well. Move the file to the correct library folder manually, or update the Blu-ray disc ID cache / KeyDB inputs and retry.
    - **Unresolved episode numbers**: Episode identification ran successfully but couldn't map all episodes confidently. Check the file names and move to the correct library folder.
    - **SRT validation review issues**: Subtitles may have quality problems. Review the SRT file and fix or regenerate with `spindle gensubtitle`. Routine below-threshold QC observations do not route items to review.
-3. After manually organizing files, clear the completed item: `spindle queue clear <id>`.
+3. After manually organizing files, clear the completed item while the daemon is running: `spindle queue clear <id>`.
 
 ### Stuck items
 
 If items appear stuck (in-progress but not advancing):
-1. Check if the daemon is running: `spindle status`.
+1. Check if the daemon is running: `spindle status`. When stopped, this reports only `Daemon stopped`.
 2. If the daemon crashed, restart it: `spindle start`. Stale in-progress items are automatically recovered on startup.
+3. If you want to discard the transient queue while the daemon is stopped, run `spindle queue clear --all`. This deletes only the queue DB files, not staging or media outputs.
 
 ### Stopping an item
 
@@ -170,8 +171,8 @@ If items appear stuck (in-progress but not advancing):
 ## Monitoring & Control Tips
 
 - `spindle logs -f` - tail daemon logs (requires running daemon).
-- `spindle status` - status summary including daemon state, dependency checks, library paths, and queue counts; uses the daemon when available, otherwise inspects the queue database.
-- `spindle queue list` - queue inspection (works with or without daemon).
+- `spindle status` - reports `Daemon stopped` when the daemon is not running; otherwise shows daemon state, dependency checks, library paths, and queue counts from the daemon API.
+- `spindle queue list` - queue inspection through the daemon API.
 - `spindle queue retry <id>` - retry failed items only.
 - `spindle queue stop <id>` - halt processing for a specific item (takes effect after the current stage if already running).
 - `spindle disc pause` / `spindle disc resume` - pause or resume detection of new discs (already-queued items continue processing).

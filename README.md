@@ -46,7 +46,7 @@ Run `spindle config init --path ./spindle.toml` to generate a fully commented sa
 ```bash
 spindle config validate   # check config
 spindle start             # launch daemon
-spindle status            # check daemon and dependencies
+spindle status            # check daemon; running daemon reports dependencies and queue
 spindle logs --follow     # tail logs
 ```
 

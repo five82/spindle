@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/five82/spindle/internal/httpapi"
@@ -92,6 +93,59 @@ func TestQueueListReturnsWrappedEmptyArray(t *testing.T) {
 	}
 	if len(body.Items) != 0 {
 		t.Fatalf("expected empty items array, got %d items", len(body.Items))
+	}
+}
+
+func TestQueueEnqueueCachedCreatesRippingItem(t *testing.T) {
+	store := testStore(t)
+	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	body := `{"disc_title":"Cached Disc","fingerprint":"fp1","rip_spec_data":"{\"version\":1}","metadata_json":"{\"title\":\"Cached Disc\"}"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/queue/enqueue-cached", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Item struct {
+			ID          int64  `json:"id"`
+			Stage       string `json:"stage"`
+			Fingerprint string `json:"discFingerprint"`
+		} `json:"item"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if resp.Item.ID == 0 || resp.Item.Stage != string(queue.StageRipping) || resp.Item.Fingerprint != "fp1" {
+		t.Fatalf("unexpected item response: %+v", resp.Item)
+	}
+
+	item, err := store.GetByID(resp.Item.ID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
+	}
+	if item == nil || item.Stage != queue.StageRipping || item.RipSpecData == "" || item.MetadataJSON == "" {
+		t.Fatalf("cached item not persisted correctly: %+v", item)
+	}
+}
+
+func TestQueueEnqueueCachedRejectsDuplicate(t *testing.T) {
+	store := testStore(t)
+	if _, err := store.NewDisc("Existing", "fp1"); err != nil {
+		t.Fatalf("new disc: %v", err)
+	}
+	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	body := `{"disc_title":"Cached Disc","fingerprint":"fp1","rip_spec_data":"{\"version\":1}"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/queue/enqueue-cached", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

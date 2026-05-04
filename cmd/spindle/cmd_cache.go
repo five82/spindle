@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/queueaccess"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripper"
 	"github.com/five82/spindle/internal/ripspec"
@@ -88,10 +90,15 @@ func newCacheRipCmd() *cobra.Command {
 
 			logger := buildLogger()
 
-			// Open temporary queue store for stage coordination.
-			qStore, err := queue.Open(cfg.QueueDBPath())
+			// Open a temporary queue store for one-shot stage coordination.
+			tempQueueDir, err := os.MkdirTemp("", "spindle-cache-rip-queue-*")
 			if err != nil {
-				return fmt.Errorf("open queue: %w", err)
+				return fmt.Errorf("create temporary queue: %w", err)
+			}
+			defer func() { _ = os.RemoveAll(tempQueueDir) }()
+			qStore, err := queue.Open(filepath.Join(tempQueueDir, "queue.db"))
+			if err != nil {
+				return fmt.Errorf("open temporary queue: %w", err)
 			}
 			defer func() { _ = qStore.Close() }()
 
@@ -302,39 +309,25 @@ func newCacheProcessCmd() *cobra.Command {
 
 			logger := buildLogger()
 
-			// Open queue database.
-			qStore, err := queue.Open(cfg.QueueDBPath())
-			if err != nil {
-				return err
-			}
-			defer func() { _ = qStore.Close() }()
-
-			// Check for duplicate fingerprint.
-			if !allowDuplicate {
-				existing, err := qStore.FindByFingerprint(entry.Fingerprint)
-				if err != nil {
-					return fmt.Errorf("check duplicate: %w", err)
-				}
-				if existing != nil {
-					return fmt.Errorf("fingerprint already queued (item %d, stage %s); use --allow-duplicate to override",
-						existing.ID, existing.Stage)
-				}
-			}
-
-			// Create queue item.
-			item, err := qStore.NewDisc(entry.DiscTitle, entry.Fingerprint)
-			if err != nil {
-				return fmt.Errorf("create queue item: %w", err)
-			}
-
 			// Load identification from cache metadata.
 			if entry.RipSpecData == "" {
 				return fmt.Errorf("cache entry missing identification data; re-cache with 'spindle cache rip'")
 			}
-			item.RipSpecData = entry.RipSpecData
-			item.MetadataJSON = entry.MetadataJSON
-			item.Stage = queue.StageRipping
-			_ = qStore.Update(item)
+
+			acc, err := openQueueAccess()
+			if err != nil {
+				return err
+			}
+			item, err := acc.EnqueueCached(queueaccess.EnqueueCachedRequest{
+				DiscTitle:      entry.DiscTitle,
+				Fingerprint:    entry.Fingerprint,
+				RipSpecData:    entry.RipSpecData,
+				MetadataJSON:   entry.MetadataJSON,
+				AllowDuplicate: allowDuplicate,
+			})
+			if err != nil {
+				return err
+			}
 
 			notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, logger)
 			_ = notify.SendLogged(context.Background(), notifier, logger, notify.EventItemQueued,

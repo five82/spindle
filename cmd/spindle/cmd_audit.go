@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/five82/spindle/internal/auditgather"
-	"github.com/five82/spindle/internal/queue"
 )
 
 func newAuditGatherCmd() *cobra.Command {
@@ -22,13 +21,12 @@ func newAuditGatherCmd() *cobra.Command {
 				return fmt.Errorf("invalid item ID: %s", args[0])
 			}
 
-			store, err := queue.OpenReadOnly(cfg.QueueDBPath())
+			acc, err := openQueueAccess()
 			if err != nil {
 				return err
 			}
-			defer func() { _ = store.Close() }()
 
-			item, err := store.GetByID(id)
+			item, err := acc.GetByID(id)
 			if err != nil {
 				return err
 			}

@@ -1,7 +1,9 @@
 package queueaccess
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,43 +14,53 @@ import (
 	"github.com/five82/spindle/internal/sockhttp"
 )
 
-// Access provides read-only queue access.
+// ErrDaemonUnavailable is returned when the daemon HTTP API cannot be reached.
+var ErrDaemonUnavailable = errors.New("daemon is not running; run spindle start")
+
+// Access provides daemon-backed queue access.
 type Access interface {
 	List(stages ...queue.Stage) ([]*queue.Item, error)
 	GetByID(id int64) (*queue.Item, error)
 	Stats() (map[queue.Stage]int, error)
+	Status() (*Status, error)
+	Retry(ids ...int64) (int, error)
+	RetryEpisode(id int64, episodeKey string) (string, error)
+	Stop(ids ...int64) (int, error)
+	EnqueueCached(req EnqueueCachedRequest) (*queue.Item, error)
+	Clear(scope string) (int64, error)
+	Remove(id int64) (int64, error)
 }
-
-// StoreAccess wraps a direct queue.Store.
-type StoreAccess struct {
-	Store *queue.Store
-}
-
-// List returns queue items, optionally filtered by stages.
-func (a *StoreAccess) List(stages ...queue.Stage) ([]*queue.Item, error) {
-	return a.Store.List(stages...)
-}
-
-// GetByID returns a single item by primary key.
-func (a *StoreAccess) GetByID(id int64) (*queue.Item, error) { return a.Store.GetByID(id) }
-
-// Stats returns item counts grouped by stage.
-func (a *StoreAccess) Stats() (map[queue.Stage]int, error) { return a.Store.Stats() }
 
 // HTTPAccess connects to the daemon HTTP API.
 type HTTPAccess struct {
-	socketPath string
-	token      string
-	client     *http.Client
+	token  string
+	client *http.Client
 }
 
 // NewHTTPAccess creates an HTTP-based queue accessor.
 func NewHTTPAccess(socketPath, token string) *HTTPAccess {
 	return &HTTPAccess{
-		socketPath: socketPath,
-		token:      token,
-		client:     sockhttp.NewUnixClient(socketPath, 10*time.Second),
+		token:  token,
+		client: sockhttp.NewUnixClient(socketPath, 10*time.Second),
 	}
+}
+
+// OpenHTTP verifies that the daemon API is reachable and returns an HTTP accessor.
+func OpenHTTP(socketPath, token string) (*HTTPAccess, error) {
+	a := NewHTTPAccess(socketPath, token)
+	req, err := http.NewRequest(http.MethodGet, "http://localhost/api/health", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create health request: %w", err)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, ErrDaemonUnavailable
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, ErrDaemonUnavailable
+	}
+	return a, nil
 }
 
 type queueListResponse struct {
@@ -59,10 +71,82 @@ type queueGetResponse struct {
 	Item queueItemResponse `json:"item"`
 }
 
-type statusResponse struct {
-	Workflow struct {
-		QueueStats map[string]int `json:"queueStats"`
-	} `json:"workflow"`
+type queueRetryResponse struct {
+	Updated int `json:"updated"`
+}
+
+type queueClearResponse struct {
+	Removed int64 `json:"removed"`
+}
+
+type queueRetryEpisodeResponse struct {
+	Result string `json:"result"`
+}
+
+type queueEnqueueCachedResponse struct {
+	Item queueItemResponse `json:"item"`
+}
+
+// EnqueueCachedRequest describes a cached rip queue request.
+type EnqueueCachedRequest struct {
+	DiscTitle      string `json:"disc_title"`
+	Fingerprint    string `json:"fingerprint"`
+	RipSpecData    string `json:"rip_spec_data"`
+	MetadataJSON   string `json:"metadata_json"`
+	AllowDuplicate bool   `json:"allow_duplicate"`
+}
+
+// Status is the daemon status response used by CLI rendering.
+type Status struct {
+	Running      bool
+	PID          int
+	QueueDBPath  string
+	LockFilePath string
+	Workflow     WorkflowStatus
+	Dependencies []DependencyStatus
+}
+
+// WorkflowStatus is the daemon workflow status used by CLI rendering.
+type WorkflowStatus struct {
+	Running    bool
+	QueueStats map[queue.Stage]int
+	LastError  string
+	LastItem   *queue.Item
+}
+
+// DependencyStatus reports an external dependency health check.
+type DependencyStatus struct {
+	Name        string
+	Command     string
+	Description string
+	Optional    bool
+	Available   bool
+	Detail      string
+}
+
+type statusAPIResponse struct {
+	Running      bool                       `json:"running"`
+	PID          int                        `json:"pid"`
+	QueueDBPath  string                     `json:"queueDbPath"`
+	LockFilePath string                     `json:"lockFilePath"`
+	Workflow     workflowStatusAPIResponse  `json:"workflow"`
+	Dependencies []dependencyStatusResponse `json:"dependencies"`
+}
+
+type workflowStatusAPIResponse struct {
+	Running    bool               `json:"running"`
+	QueueStats map[string]int     `json:"queueStats"`
+	LastError  string             `json:"lastError"`
+	LastItem   *queueItemResponse `json:"lastItem"`
+}
+
+type dependencyStatusResponse struct {
+	Name        string `json:"name"`
+	Command     string `json:"command"`
+	Description string `json:"description"`
+	Optional    bool   `json:"optional"`
+	Available   bool   `json:"available"`
+	Detail      string `json:"detail"`
 }
 
 type queueItemResponse struct {
@@ -161,15 +245,103 @@ func (a *HTTPAccess) GetByID(id int64) (*queue.Item, error) {
 
 // Stats returns item counts grouped by stage via HTTP.
 func (a *HTTPAccess) Stats() (map[queue.Stage]int, error) {
-	var resp statusResponse
+	status, err := a.Status()
+	if err != nil {
+		return nil, err
+	}
+	return status.Workflow.QueueStats, nil
+}
+
+// Status returns daemon status via HTTP.
+func (a *HTTPAccess) Status() (*Status, error) {
+	var resp statusAPIResponse
 	if err := a.getJSON("/api/status", &resp); err != nil {
 		return nil, err
 	}
-	result := make(map[queue.Stage]int, len(resp.Workflow.QueueStats))
+
+	stats := make(map[queue.Stage]int, len(resp.Workflow.QueueStats))
 	for k, v := range resp.Workflow.QueueStats {
-		result[queue.Stage(k)] = v
+		stats[queue.Stage(k)] = v
 	}
-	return result, nil
+
+	var lastItem *queue.Item
+	if resp.Workflow.LastItem != nil {
+		lastItem = resp.Workflow.LastItem.toQueueItem()
+	}
+
+	deps := make([]DependencyStatus, 0, len(resp.Dependencies))
+	for _, dep := range resp.Dependencies {
+		deps = append(deps, DependencyStatus(dep))
+	}
+
+	return &Status{
+		Running:      resp.Running,
+		PID:          resp.PID,
+		QueueDBPath:  resp.QueueDBPath,
+		LockFilePath: resp.LockFilePath,
+		Workflow: WorkflowStatus{
+			Running:    resp.Workflow.Running,
+			QueueStats: stats,
+			LastError:  resp.Workflow.LastError,
+			LastItem:   lastItem,
+		},
+		Dependencies: deps,
+	}, nil
+}
+
+// Retry retries failed queue items via HTTP. No IDs means retry all failed items.
+func (a *HTTPAccess) Retry(ids ...int64) (int, error) {
+	var resp queueRetryResponse
+	if err := a.postJSON("/api/queue/retry", map[string]any{"ids": ids}, &resp); err != nil {
+		return 0, err
+	}
+	return resp.Updated, nil
+}
+
+// RetryEpisode retries a single failed episode via HTTP.
+func (a *HTTPAccess) RetryEpisode(id int64, episodeKey string) (string, error) {
+	var resp queueRetryEpisodeResponse
+	body := map[string]any{"id": id, "episode_key": episodeKey}
+	if err := a.postJSON("/api/queue/retry-episode", body, &resp); err != nil {
+		return "", err
+	}
+	return resp.Result, nil
+}
+
+// Stop marks queue items stopped via HTTP.
+func (a *HTTPAccess) Stop(ids ...int64) (int, error) {
+	var resp queueRetryResponse
+	if err := a.postJSON("/api/queue/stop", map[string]any{"ids": ids}, &resp); err != nil {
+		return 0, err
+	}
+	return resp.Updated, nil
+}
+
+// EnqueueCached queues a cached rip for processing via HTTP.
+func (a *HTTPAccess) EnqueueCached(req EnqueueCachedRequest) (*queue.Item, error) {
+	var resp queueEnqueueCachedResponse
+	if err := a.postJSON("/api/queue/enqueue-cached", req, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Item.toQueueItem(), nil
+}
+
+// Clear clears queue items by scope via HTTP.
+func (a *HTTPAccess) Clear(scope string) (int64, error) {
+	var resp queueClearResponse
+	if err := a.postJSON("/api/queue/clear", map[string]any{"scope": scope}, &resp); err != nil {
+		return 0, err
+	}
+	return resp.Removed, nil
+}
+
+// Remove removes a queue item by ID via HTTP.
+func (a *HTTPAccess) Remove(id int64) (int64, error) {
+	var resp queueClearResponse
+	if err := a.deleteJSON(fmt.Sprintf("/api/queue/%d", id), &resp); err != nil {
+		return 0, err
+	}
+	return resp.Removed, nil
 }
 
 func (a *HTTPAccess) getJSON(path string, dest any) error {
@@ -177,44 +349,61 @@ func (a *HTTPAccess) getJSON(path string, dest any) error {
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
+	return a.doJSON(req, dest)
+}
+
+func (a *HTTPAccess) postJSON(path string, body any, dest any) error {
+	var buf bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+			return fmt.Errorf("encode request body: %w", err)
+		}
+	}
+	req, err := http.NewRequest(http.MethodPost, "http://localhost"+path, &buf)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return a.doJSON(req, dest)
+}
+
+func (a *HTTPAccess) deleteJSON(path string, dest any) error {
+	req, err := http.NewRequest(http.MethodDelete, "http://localhost"+path, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	return a.doJSON(req, dest)
+}
+
+func (a *HTTPAccess) doJSON(req *http.Request, dest any) error {
 	sockhttp.SetAuth(req, a.token)
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("http get %s: %w", path, err)
+		return ErrDaemonUnavailable
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("http %s: status %d: %s", path, resp.StatusCode, body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response from %s: %w", req.URL.Path, err)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
-		return fmt.Errorf("decode response from %s: %w", path, err)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
+			return fmt.Errorf("http %s: status %d: %s", req.URL.Path, resp.StatusCode, errResp.Error)
+		}
+		return fmt.Errorf("http %s: status %d: %s", req.URL.Path, resp.StatusCode, string(body))
+	}
+
+	if dest == nil {
+		return nil
+	}
+	if err := json.Unmarshal(body, dest); err != nil {
+		return fmt.Errorf("decode response from %s: %w", req.URL.Path, err)
 	}
 	return nil
-}
-
-// OpenWithFallback tries HTTP first, falls back to direct store.
-func OpenWithFallback(socketPath, token, dbPath string) (Access, error) {
-	ha := NewHTTPAccess(socketPath, token)
-	// Try a quick health check to see if the daemon is running.
-	req, err := http.NewRequest(http.MethodGet, "http://localhost/api/health", nil)
-	if err == nil {
-		resp, err := ha.client.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return ha, nil
-			}
-		}
-	}
-
-	// Fall back to direct store access.
-	store, err := queue.OpenReadOnly(dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("fallback to direct store: %w", err)
-	}
-	return &StoreAccess{Store: store}, nil
 }

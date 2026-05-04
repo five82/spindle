@@ -14,7 +14,6 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/daemonctl"
 	"github.com/five82/spindle/internal/daemonrun"
-	"github.com/five82/spindle/internal/deps"
 	"github.com/five82/spindle/internal/queue"
 )
 
@@ -100,16 +99,24 @@ func newStatusCmd() *cobra.Command {
 		Short: "Show system and queue status",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			lp, sp := lockPath(), socketPath()
-			running := daemonctl.IsRunning(lp, sp)
+			if !daemonctl.IsRunning(lp, sp) {
+				fmt.Println("Daemon stopped")
+				return nil
+			}
+
+			acc, err := openQueueAccess()
+			if err != nil {
+				return err
+			}
+			status, err := acc.Status()
+			if err != nil {
+				return err
+			}
 
 			fmt.Println()
 			fmt.Println(headerStyle("Spindle Status"))
 			fmt.Println()
-			if running {
-				fmt.Printf("  %-12s %s\n", labelStyle("Daemon"), successStyle("running"))
-			} else {
-				fmt.Printf("  %-12s %s\n", labelStyle("Daemon"), failStyle("stopped"))
-			}
+			fmt.Printf("  %-12s %s\n", labelStyle("Daemon"), successStyle("running"))
 			if flagVerbose {
 				fmt.Printf("  %-12s %s\n", labelStyle("Socket"), dimStyle(sp))
 				fmt.Printf("  %-12s %s\n", labelStyle("Lock"), dimStyle(lp))
@@ -118,19 +125,15 @@ func newStatusCmd() *cobra.Command {
 				} else {
 					fmt.Printf("  %-12s %s\n", labelStyle("Config"), dimStyle("(default search path)"))
 				}
+				if status.PID > 0 {
+					fmt.Printf("  %-12s %d\n", labelStyle("PID"), status.PID)
+				}
 			}
 
 			fmt.Println()
 			fmt.Println(headerStyle("Dependencies"))
 			fmt.Println()
-			reqs := []deps.Requirement{
-				{Name: "makemkvcon", Command: "makemkvcon", Description: "MakeMKV CLI", Optional: false},
-				{Name: "ffmpeg", Command: "ffmpeg", Description: "FFmpeg media processor", Optional: false},
-				{Name: "ffprobe", Command: "ffprobe", Description: "FFprobe media analyzer", Optional: false},
-				{Name: "mkvmerge", Command: "mkvmerge", Description: "MKVToolNix merge tool", Optional: false},
-			}
-			statuses := deps.CheckBinaries(reqs)
-			for _, s := range statuses {
+			for _, s := range status.Dependencies {
 				mark := successStyle("✓")
 				if !s.Available {
 					mark = failStyle("✗")
@@ -153,16 +156,7 @@ func newStatusCmd() *cobra.Command {
 			fmt.Println()
 			fmt.Println(headerStyle("Queue"))
 			fmt.Println()
-			acc, err := openQueueAccess()
-			if err != nil {
-				fmt.Printf("  %s\n", dimStyle("No active queue"))
-				return nil
-			}
-			stats, err := acc.Stats()
-			if err != nil {
-				fmt.Printf("  %s\n", dimStyle("No active queue"))
-				return nil
-			}
+			stats := status.Workflow.QueueStats
 			hasItems := false
 			for _, stage := range []queue.Stage{
 				queue.StageIdentification, queue.StageRipping,

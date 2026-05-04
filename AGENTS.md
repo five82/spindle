@@ -14,7 +14,7 @@ This file provides guidance when working with code in this repository.
 Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata (TMDB), subtitles (WhisperX, forced subs via OpenSubtitles), Jellyfin refresh, and ntfy notifications.
 
 - **Scope**: Single-developer project - avoid over-engineering
-- **Operation**: Daemon + optional direct DB access. Queue commands work without daemon.
+- **Operation**: Daemon-owned queue access through the HTTP API. Queue commands require the daemon except stopped-daemon `queue clear --all`, which deletes the transient queue DB files.
 
 ## Related Repos
 

@@ -104,9 +104,9 @@ func lockPath() string {
 	return ""
 }
 
-// openQueueAccess opens queue access with HTTP fallback to direct DB.
+// openQueueAccess opens daemon HTTP queue access.
 func openQueueAccess() (queueaccess.Access, error) {
-	return queueaccess.OpenWithFallback(socketPath(), cfg.API.Token, cfg.QueueDBPath())
+	return queueaccess.OpenHTTP(socketPath(), cfg.API.Token)
 }
 
 // buildLogger creates a structured logger from the global log level flag.

@@ -29,16 +29,17 @@ spindle disc detect
 
 Operational notes:
 
-- Queue list/show/status commands use the daemon when available and fall back to
-  direct read-only DB access when it is not.
-- Queue retry/clear/stop commands mutate the queue database directly and work
-  without the daemon.
+- Queue list/show/retry/clear/stop commands use the daemon HTTP API.
+- Queue commands require a running daemon except `spindle queue clear --all`,
+  which may be used while the daemon is stopped to delete the transient queue DB
+  files.
 - `spindle logs --follow` and filtered log queries require the daemon because
   they use the HTTP log API.
 - `spindle start` launches the daemon if one is not already running.
 - `spindle stop` is successful even when no daemon is running.
-- `spindle status` reports daemon state, dependency checks, library path status,
-  and queue counts.
+- `spindle status` reports only `Daemon stopped` when the daemon is not running.
+  When the daemon is running, it reports daemon state, dependency checks,
+  library path status, and queue counts.
 
 See [user/workflow.md](user/workflow.md) for the operator lifecycle and recovery
 procedures.
@@ -78,6 +79,7 @@ All JSON responses use `Content-Type: application/json`.
 | POST | `/api/queue/retry` | Retry failed queue items |
 | POST | `/api/queue/retry-episode` | Retry one failed TV episode asset |
 | POST | `/api/queue/stop` | Mark queue items stopped by user |
+| POST | `/api/queue/enqueue-cached` | Queue a cached rip for processing |
 | DELETE | `/api/queue/{id}` | Remove one queue item |
 | POST | `/api/disc/pause` | Pause automatic disc detection |
 | POST | `/api/disc/resume` | Resume automatic disc detection |
@@ -100,11 +102,14 @@ POST /api/queue/retry-episode
 
 POST /api/queue/stop
 {"ids":[1,2,3]}
+
+POST /api/queue/enqueue-cached
+{"disc_title":"Title","fingerprint":"abc","rip_spec_data":"{...}","metadata_json":"{...}","allow_duplicate":false}
 ```
 
 An empty `ids` array for retry means retry all failed items. Mutation responses
 return a small result object such as `{"updated":2}`, `{"removed":1}`, or
-`{"result":"..."}`.
+`{"result":"..."}`. Cached enqueue returns `{"item":queueItem}`.
 
 ### Logs query
 
@@ -214,10 +219,10 @@ Important fields:
 | `workflow.lastItem` | Last processed queue item |
 | `dependencies[]` | Dependency check results |
 
-### Direct DB access
+### Queue access model
 
-The CLI reads the queue database directly when the daemon is unavailable for
-read-only queue/status commands. Some queue mutation commands also use direct DB
-access so recovery is possible without a daemon. This is an implementation
-detail for the CLI; external consumers should prefer the daemon HTTP API when
-possible.
+The daemon HTTP API is the normal queue access path for the CLI and external
+consumers. The daemon owns queue database reads and mutations.
+
+The queue DB is transient. If the daemon is stopped and the queue must be reset,
+`spindle queue clear --all` deletes the queue DB files directly.
