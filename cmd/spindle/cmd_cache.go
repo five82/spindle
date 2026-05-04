@@ -134,7 +134,7 @@ func newCacheRipCmd() *cobra.Command {
 
 			// Run identification stage.
 			fmt.Printf("Identifying disc on %s...\n", device)
-			identifyHandler := identify.New(cfg, qStore, tmdbClient, nil, discIDStore, keydbCat)
+			identifyHandler := identify.New(cfg, tmdbClient, nil, discIDStore, keydbCat)
 			if err := stageexec.Run(ctx, item, stageexec.Options{
 				Store:   qStore,
 				Handler: identifyHandler,
@@ -214,7 +214,7 @@ func newCacheRipCmd() *cobra.Command {
 
 			// Run ripping stage.
 			fmt.Printf("Ripping disc...\n")
-			ripperHandler := ripper.New(cfg, qStore, nil, ripCacheStore, nil, titleOverride)
+			ripperHandler := ripper.New(cfg, nil, ripCacheStore, nil, titleOverride)
 			if err := stageexec.Run(ctx, item, stageexec.Options{
 				Store:   qStore,
 				Handler: ripperHandler,

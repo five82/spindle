@@ -17,6 +17,7 @@ import (
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stage"
 )
 
 func TestAssetKeys_Movie(t *testing.T) {
@@ -285,10 +286,11 @@ func TestSendTerminalNotificationCleanSuccess(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := &Handler{store: store, notifier: notify.New(srv.URL, 5, logger)}
+	h := &Handler{notifier: notify.New(srv.URL, 5, logger)}
 	item := &queue.Item{ID: 1, DiscTitle: "Avatar (2009)"}
+	sess := &stage.Session{Store: store, Item: item}
 
-	h.sendTerminalNotification(context.Background(), logger, item, 1, 0)
+	h.sendTerminalNotification(context.Background(), logger, sess, 1, 0)
 
 	if gotTitle != "Completed: Avatar (2009)" {
 		t.Fatalf("title = %q, want %q", gotTitle, "Completed: Avatar (2009)")
@@ -315,11 +317,12 @@ func TestSendTerminalNotificationReviewRequired(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := &Handler{store: store, notifier: notify.New(srv.URL, 5, logger)}
+	h := &Handler{notifier: notify.New(srv.URL, 5, logger)}
 	item := &queue.Item{ID: 2, DiscTitle: "Unknown Disc"}
 	item.AppendReviewReason("low-confidence identification")
+	sess := &stage.Session{Store: store, Item: item}
 
-	h.sendTerminalNotification(context.Background(), logger, item, 0, 1)
+	h.sendTerminalNotification(context.Background(), logger, sess, 0, 1)
 
 	if gotTitle != "Review required: Unknown Disc" {
 		t.Fatalf("title = %q, want %q", gotTitle, "Review required: Unknown Disc")

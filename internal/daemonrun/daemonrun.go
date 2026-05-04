@@ -135,13 +135,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// Create stage handlers.
-	identifyHandler := identify.New(cfg, store, tmdbClient, notifier, discIDStore, keydbCat)
-	ripperHandler := ripper.New(cfg, store, notifier, ripCacheStore, discMon, ripper.NoTitleOverride)
-	contentidHandler := contentid.New(cfg, store, llmClient, osClient, tmdbClient, transcriber)
-	encoderHandler := encoder.New(cfg, store, notifier)
-	audioHandler := audioanalysis.New(cfg, store, llmClient, transcriber)
-	subtitleHandler := subtitle.New(cfg, store, osClient, transcriber)
-	organizerHandler := organizer.New(cfg, store, jfClient, notifier)
+	identifyHandler := identify.New(cfg, tmdbClient, notifier, discIDStore, keydbCat)
+	ripperHandler := ripper.New(cfg, notifier, ripCacheStore, discMon, ripper.NoTitleOverride)
+	contentidHandler := contentid.New(cfg, llmClient, osClient, tmdbClient, transcriber)
+	encoderHandler := encoder.New(cfg, notifier)
+	audioHandler := audioanalysis.New(cfg, llmClient, transcriber)
+	subtitleHandler := subtitle.New(cfg, osClient, transcriber)
+	organizerHandler := organizer.New(cfg, jfClient, notifier)
 
 	// Check dependencies and create status tracker.
 	depReqs := []deps.Requirement{

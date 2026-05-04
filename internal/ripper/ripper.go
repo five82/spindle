@@ -28,7 +28,6 @@ const NoTitleOverride = -1
 // Handler implements stage.Handler for disc ripping.
 type Handler struct {
 	cfg           *config.Config
-	store         *queue.Store
 	notifier      *notify.Notifier
 	cache         *ripcache.Store
 	monitor       *discmonitor.Monitor
@@ -36,8 +35,8 @@ type Handler struct {
 }
 
 // New creates a ripping handler.
-func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier, cache *ripcache.Store, monitor *discmonitor.Monitor, titleOverride int) *Handler {
-	return &Handler{cfg: cfg, store: store, notifier: notifier, cache: cache, monitor: monitor, titleOverride: titleOverride}
+func New(cfg *config.Config, notifier *notify.Notifier, cache *ripcache.Store, monitor *discmonitor.Monitor, titleOverride int) *Handler {
+	return &Handler{cfg: cfg, notifier: notifier, cache: cache, monitor: monitor, titleOverride: titleOverride}
 }
 
 // Run executes the ripping stage.
@@ -78,7 +77,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	h.cacheFreshRip(logger, sess, rippedDir, len(targets))
-	h.notifyRipComplete(ctx, logger, sess.Item, len(targets))
+	h.notifyRipComplete(ctx, logger, sess, len(targets))
 
 	logger.Info("ripping stage completed", "event_type", "stage_complete", "stage", "ripping")
 	return nil
@@ -151,7 +150,7 @@ func (h *Handler) restoreFromRipCache(ctx context.Context, sess *stage.Session, 
 	)
 	msg := fmt.Sprintf("%s (%d titles from cache)", item.DisplayTitle(), meta.TitleCount)
 	msg += "\n" + driveAvailableMsg
-	msg += queue.FormatAlsoProcessing(h.store, item.ID)
+	msg += queue.FormatAlsoProcessing(sess.Store, item.ID)
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipCacheHit,
 		"Rip Cache Hit: "+item.DisplayTitle(),
 		msg,
@@ -379,10 +378,11 @@ func (h *Handler) cacheFreshRip(logger *slog.Logger, sess *stage.Session, ripped
 	}
 }
 
-func (h *Handler) notifyRipComplete(ctx context.Context, logger *slog.Logger, item *queue.Item, rippedCount int) {
+func (h *Handler) notifyRipComplete(ctx context.Context, logger *slog.Logger, sess *stage.Session, rippedCount int) {
+	item := sess.Item
 	msg := fmt.Sprintf("Ripped %s (%d titles)", item.DisplayTitle(), rippedCount)
 	msg += "\n" + driveAvailableMsg
-	msg += queue.FormatAlsoProcessing(h.store, item.ID)
+	msg += queue.FormatAlsoProcessing(sess.Store, item.ID)
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipComplete,
 		"Rip Complete: "+item.DisplayTitle(),
 		msg,

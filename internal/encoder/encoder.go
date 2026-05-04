@@ -23,13 +23,12 @@ import (
 // Handler implements stage.Handler for encoding.
 type Handler struct {
 	cfg      *config.Config
-	store    *queue.Store
 	notifier *notify.Notifier
 }
 
 // New creates an encoding handler.
-func New(cfg *config.Config, store *queue.Store, notifier *notify.Notifier) *Handler {
-	return &Handler{cfg: cfg, store: store, notifier: notifier}
+func New(cfg *config.Config, notifier *notify.Notifier) *Handler {
+	return &Handler{cfg: cfg, notifier: notifier}
 }
 
 // planJobs determines the encoding jobs from the envelope's ripped assets.
@@ -99,7 +98,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		msg += fmt.Sprintf(", %.1f%% smaller", reduction)
 	}
 	msg += ")"
-	msg += queue.FormatAlsoProcessing(h.store, item.ID)
+	msg += queue.FormatAlsoProcessing(sess.Store, item.ID)
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventEncodeComplete,
 		"Encode Complete: "+item.DisplayTitle(),
 		msg,
@@ -236,7 +235,7 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encoder *d
 		)
 	}
 
-	reporter := newSpindleReporter(item, h.store, logger, job.Key, job.ProgressIndex, job.ProgressTotal)
+	reporter := newSpindleReporter(sess, logger, job.Key, job.ProgressIndex, job.ProgressTotal)
 	result, encErr := encoder.EncodeWithReporter(ctx, job.Input.Path, encodedDir, reporter)
 	if encErr != nil {
 		return encodeJobResult{failed: true}, h.handleEncodeFailure(logger, sess, job, encErr)
@@ -360,8 +359,8 @@ const throttleInterval = 2 * time.Second
 // into encodingstate.Snapshot updates on the queue item. Progress persistence
 // is throttled to every 2 seconds.
 type spindleReporter struct {
+	sess          *stage.Session
 	item          *queue.Item
-	store         *queue.Store
 	logger        *slog.Logger
 	episodeKey    string
 	completedJobs int
@@ -370,10 +369,10 @@ type spindleReporter struct {
 	now           func() time.Time // injectable clock for testing
 }
 
-func newSpindleReporter(item *queue.Item, store *queue.Store, logger *slog.Logger, episodeKey string, completedJobs int, totalJobs int) *spindleReporter {
+func newSpindleReporter(sess *stage.Session, logger *slog.Logger, episodeKey string, completedJobs int, totalJobs int) *spindleReporter {
 	return &spindleReporter{
-		item:          item,
-		store:         store,
+		sess:          sess,
+		item:          sess.Item,
 		logger:        logger,
 		episodeKey:    episodeKey,
 		completedJobs: completedJobs,
@@ -389,7 +388,7 @@ func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot)) e
 	}
 	mutate(&snap)
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	return r.store.UpdateProgress(r.item)
+	return r.sess.Progress(r.item.ProgressPercent, r.item.ProgressMessage, stage.WithEncodingDetails(r.item.EncodingDetailsJSON))
 }
 
 func (r *spindleReporter) EncodingProgress(p drapto.ProgressSnapshot) {

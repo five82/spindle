@@ -12,7 +12,6 @@ import (
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
-	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/services"
 	"github.com/five82/spindle/internal/stage"
@@ -34,7 +33,6 @@ type Handler struct {
 // New creates an episode identification handler.
 func New(
 	cfg *config.Config,
-	_ *queue.Store,
 	llmClient *llm.Client,
 	osClient *opensubtitles.Client,
 	tmdbClient *tmdb.Client,

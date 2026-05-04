@@ -61,7 +61,6 @@ var tvHintPattern = regexp.MustCompile(`(?i)(tv\s+series|season[\s_]*\d+|(?:^|[^
 // Handler implements stage.Handler for disc identification.
 type Handler struct {
 	cfg         *config.Config
-	store       *queue.Store
 	tmdbClient  *tmdb.Client
 	notifier    *notify.Notifier
 	discIDCache *discidcache.Store
@@ -71,7 +70,6 @@ type Handler struct {
 // New creates an identification handler.
 func New(
 	cfg *config.Config,
-	store *queue.Store,
 	tmdbClient *tmdb.Client,
 	notifier *notify.Notifier,
 	discIDCache *discidcache.Store,
@@ -79,7 +77,6 @@ func New(
 ) *Handler {
 	return &Handler{
 		cfg:         cfg,
-		store:       store,
 		tmdbClient:  tmdbClient,
 		notifier:    notifier,
 		discIDCache: discIDCache,
@@ -398,7 +395,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	// Send notification.
-	msg := item.DisplayTitle() + queue.FormatAlsoProcessing(h.store, item.ID)
+	msg := item.DisplayTitle() + queue.FormatAlsoProcessing(sess.Store, item.ID)
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventIdentificationComplete,
 		"Identification Complete: "+item.DisplayTitle(),
 		msg,

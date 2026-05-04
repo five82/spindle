@@ -29,14 +29,13 @@ const reviewReasonDirMaxBytes = 96
 // Handler implements stage.Handler for organization.
 type Handler struct {
 	cfg      *config.Config
-	store    *queue.Store
 	jfClient *jellyfin.Client
 	notifier *notify.Notifier
 }
 
 // New creates an organization handler.
-func New(cfg *config.Config, store *queue.Store, jfClient *jellyfin.Client, notifier *notify.Notifier) *Handler {
-	return &Handler{cfg: cfg, store: store, jfClient: jfClient, notifier: notifier}
+func New(cfg *config.Config, jfClient *jellyfin.Client, notifier *notify.Notifier) *Handler {
+	return &Handler{cfg: cfg, jfClient: jfClient, notifier: notifier}
 }
 
 // Run executes the organization stage.
@@ -69,7 +68,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 				return err
 			}
 			reviewCount = len(keys)
-			h.sendTerminalNotification(ctx, logger, item, libraryCount, reviewCount)
+			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
 			logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
 			return nil
 		}
@@ -85,7 +84,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 				return err
 			}
 			reviewCount = len(reviewKeys)
-			h.sendTerminalNotification(ctx, logger, item, libraryCount, reviewCount)
+			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
 			logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
 			return nil
 		}
@@ -154,7 +153,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		}
 	}
 
-	h.sendTerminalNotification(ctx, logger, item, libraryCount, reviewCount)
+	h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
 	h.cleanupStaging(ctx, item)
 
 	logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
@@ -436,8 +435,9 @@ func (h *Handler) cleanupStaging(ctx context.Context, item *queue.Item) {
 	)
 }
 
-func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Logger, item *queue.Item, libraryCount, reviewCount int) {
-	alsoProcessing := queue.FormatAlsoProcessing(h.store, item.ID)
+func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Logger, sess *stage.Session, libraryCount, reviewCount int) {
+	item := sess.Item
+	alsoProcessing := queue.FormatAlsoProcessing(sess.Store, item.ID)
 
 	if reviewCount > 0 || item.NeedsReview == 1 {
 		title := "Review required: " + item.DisplayTitle()

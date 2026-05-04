@@ -86,8 +86,8 @@ func newIdentifyCmd() *cobra.Command {
 			// Build TMDB client.
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
 
-			// Construct the identification handler (nil for store and notifier).
-			handler := identify.New(cfg, nil, tmdbClient, nil, discIDStore, keydbCat)
+			// Construct the identification handler (nil for notifier).
+			handler := identify.New(cfg, tmdbClient, nil, discIDStore, keydbCat)
 
 			// Build a temporary queue item for identification.
 			item := &queue.Item{

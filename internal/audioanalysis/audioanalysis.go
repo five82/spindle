@@ -12,7 +12,6 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/audio"
 	"github.com/five82/spindle/internal/media/ffprobe"
-	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/textutil"
@@ -67,7 +66,6 @@ type Handler struct {
 // New creates an audio analysis handler.
 func New(
 	cfg *config.Config,
-	_ *queue.Store,
 	llmClient *llm.Client,
 	transcriber *transcription.Service,
 ) *Handler {

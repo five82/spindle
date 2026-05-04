@@ -99,11 +99,9 @@ func TestPlanJobs_EmptyRippedAssets(t *testing.T) {
 
 func TestProgressThrottle_SuppressesWithinInterval(t *testing.T) {
 	item := &queue.Item{ID: 1}
-	// Use a nil store; we track calls via the clock.
 	reporter := &spindleReporter{
-		item:  item,
-		store: nil,
-		now:   time.Now,
+		item: item,
+		now:  time.Now,
 	}
 
 	baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -123,11 +121,9 @@ func TestProgressThrottle_SuppressesWithinInterval(t *testing.T) {
 		}
 	}
 
-	// Mock store that tracks UpdateProgress calls.
 	progressCalls := 0
-	reporter.store = nil // We can't call store methods with nil store.
 
-	// Instead, test the throttle logic directly by checking lastPush updates.
+	// Test the throttle logic directly by checking lastPush updates.
 	// First call: should proceed (lastPush is zero).
 	reporter.lastPush = time.Time{} // zero
 	now1 := reporter.now()

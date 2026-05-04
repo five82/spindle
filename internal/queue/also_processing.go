@@ -8,6 +8,9 @@ import (
 // FormatAlsoProcessing returns a suffix describing other in-progress items,
 // excluding the item with excludeID. Returns empty string if no others are active.
 func FormatAlsoProcessing(store *Store, excludeID int64) string {
+	if store == nil {
+		return ""
+	}
 	items, err := store.InProgressItems()
 	if err != nil {
 		return ""
