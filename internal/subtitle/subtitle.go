@@ -448,10 +448,6 @@ func resolveSubtitleVideoDuration(ctx context.Context, videoPath string, fallbac
 	return 0, "unknown"
 }
 
-func overallSubtitlePercent(completedItems, totalItems int, currentItemPercent float64) float64 {
-	return stage.OverallPercent(completedItems, totalItems, currentItemPercent)
-}
-
 func subtitlePhasePercent(phase transcription.Phase, elapsed time.Duration) float64 {
 	switch phase {
 	case transcription.PhaseExtract:

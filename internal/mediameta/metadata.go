@@ -60,18 +60,6 @@ func NewBasic(title string, isMovie bool) Metadata {
 	}
 }
 
-// NewTV builds TV-specific metadata with show, season, episodes, and display title.
-func NewTV(show string, season int, episodes []Episode, display string) Metadata {
-	return Metadata{
-		Title:        show,
-		ShowTitle:    show,
-		MediaType:    "tv",
-		SeasonNumber: season,
-		Episodes:     episodes,
-		DisplayTitle: display,
-	}
-}
-
 // IsMovie returns true if the metadata indicates movie content.
 func (m *Metadata) IsMovie() bool {
 	switch strings.ToLower(m.MediaType) {

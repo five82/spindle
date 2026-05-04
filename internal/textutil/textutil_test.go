@@ -307,25 +307,6 @@ func TestSafeJoin(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Ternary
-// ---------------------------------------------------------------------------
-
-func TestTernary(t *testing.T) {
-	if got := Ternary(true, "yes", "no"); got != "yes" {
-		t.Errorf("Ternary(true) = %q, want %q", got, "yes")
-	}
-	if got := Ternary(false, "yes", "no"); got != "no" {
-		t.Errorf("Ternary(false) = %q, want %q", got, "no")
-	}
-	if got := Ternary(true, 1, 2); got != 1 {
-		t.Errorf("Ternary(true, 1, 2) = %d, want 1", got)
-	}
-	if got := Ternary(false, 1, 2); got != 2 {
-		t.Errorf("Ternary(false, 1, 2) = %d, want 2", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 

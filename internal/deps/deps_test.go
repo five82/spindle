@@ -1,9 +1,6 @@
 package deps
 
-import (
-	"os/exec"
-	"testing"
-)
+import "testing"
 
 func TestCheckBinaries(t *testing.T) {
 	tests := []struct {
@@ -81,58 +78,5 @@ func TestCheckBinaries_preservesOrder(t *testing.T) {
 	}
 	if results[1].Available {
 		t.Error("expected missing binary to be unavailable")
-	}
-}
-
-func TestResolveFFmpegPath_fallback(t *testing.T) {
-	// With no env vars set, the function should either find ffmpeg on PATH
-	// or return the literal "ffmpeg".
-	got := ResolveFFmpegPath()
-	if got == "" {
-		t.Fatal("ResolveFFmpegPath returned empty string")
-	}
-
-	// If ffmpeg is on PATH, the result should match LookPath.
-	if p, err := exec.LookPath("ffmpeg"); err == nil {
-		if got != p {
-			t.Errorf("ResolveFFmpegPath() = %q, want %q (from PATH)", got, p)
-		}
-	} else {
-		// ffmpeg not installed; should get the literal fallback.
-		if got != "ffmpeg" {
-			t.Errorf("ResolveFFmpegPath() = %q, want literal %q", got, "ffmpeg")
-		}
-	}
-}
-
-func TestResolveFFprobePath_fallback(t *testing.T) {
-	got := ResolveFFprobePath("ffprobe")
-	if got == "" {
-		t.Fatal("ResolveFFprobePath returned empty string")
-	}
-
-	if p, err := exec.LookPath("ffprobe"); err == nil {
-		if got != p {
-			t.Errorf("ResolveFFprobePath() = %q, want %q (from PATH)", got, p)
-		}
-	} else {
-		if got != "ffprobe" {
-			t.Errorf("ResolveFFprobePath() = %q, want literal %q", got, "ffprobe")
-		}
-	}
-}
-
-func TestResolveFFprobePath_customDefault(t *testing.T) {
-	// When given a custom default name that doesn't exist, the literal
-	// should still be that custom name (not "ffprobe").
-	got := ResolveFFprobePath("my-custom-ffprobe")
-	if p, err := exec.LookPath("my-custom-ffprobe"); err == nil {
-		if got != p {
-			t.Errorf("ResolveFFprobePath() = %q, want %q", got, p)
-		}
-	} else {
-		if got != "my-custom-ffprobe" {
-			t.Errorf("ResolveFFprobePath() = %q, want literal %q", got, "my-custom-ffprobe")
-		}
 	}
 }

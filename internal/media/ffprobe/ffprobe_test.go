@@ -93,15 +93,6 @@ func TestBitRate(t *testing.T) {
 	}
 }
 
-func TestRawJSON(t *testing.T) {
-	raw := []byte(`{"streams":[],"format":{}}`)
-	r := &Result{rawJSON: raw}
-	got := r.RawJSON()
-	if string(got) != string(raw) {
-		t.Errorf("RawJSON() = %s, want %s", got, raw)
-	}
-}
-
 func TestEmptyStreams(t *testing.T) {
 	r := &Result{}
 	if got := r.VideoStreamCount(); got != 0 {
@@ -234,8 +225,6 @@ func TestJSONParsing(t *testing.T) {
 	if err := json.Unmarshal([]byte(sample), &result); err != nil {
 		t.Fatalf("failed to parse sample JSON: %v", err)
 	}
-	result.rawJSON = []byte(sample)
-
 	if got := len(result.Streams); got != 3 {
 		t.Fatalf("stream count = %d, want 3", got)
 	}
@@ -282,9 +271,5 @@ func TestJSONParsing(t *testing.T) {
 	}
 	if def, ok := result.Streams[0].Disposition["default"]; !ok || def != 1 {
 		t.Errorf("stream 0 default disposition = %d, want 1", def)
-	}
-
-	if string(result.RawJSON()) != sample {
-		t.Error("RawJSON() does not match original input")
 	}
 }

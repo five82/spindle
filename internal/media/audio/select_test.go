@@ -10,11 +10,11 @@ import (
 // mkStream is a test helper that builds an audio stream with common defaults.
 func mkStream(index int, codec, lang string, channels int, opts ...func(*ffprobe.Stream)) ffprobe.Stream {
 	s := ffprobe.Stream{
-		Index:     index,
-		CodecName: codec,
-		CodecType: "audio",
-		Channels:  channels,
-		Tags:      map[string]string{"language": lang},
+		Index:       index,
+		CodecName:   codec,
+		CodecType:   "audio",
+		Channels:    channels,
+		Tags:        map[string]string{"language": lang},
 		Disposition: map[string]int{},
 	}
 	for _, opt := range opts {
@@ -41,12 +41,6 @@ func withCodecLong(name string) func(*ffprobe.Stream) {
 	}
 }
 
-func withProfile(profile string) func(*ffprobe.Stream) {
-	return func(s *ffprobe.Stream) {
-		s.Profile = profile
-	}
-}
-
 func withLayout(layout string) func(*ffprobe.Stream) {
 	return func(s *ffprobe.Stream) {
 		s.ChannelLayout = layout
@@ -56,11 +50,11 @@ func withLayout(layout string) func(*ffprobe.Stream) {
 
 func TestSelect(t *testing.T) {
 	tests := []struct {
-		name           string
-		streams        []ffprobe.Stream
-		wantIndex      int
-		wantKeep       []int
-		wantRemoved    []int
+		name        string
+		streams     []ffprobe.Stream
+		wantIndex   int
+		wantKeep    []int
+		wantRemoved []int
 	}{
 		{
 			name: "single English stream selected",
@@ -177,49 +171,6 @@ func TestSelect(t *testing.T) {
 	}
 }
 
-func TestIsSpatialAudio(t *testing.T) {
-	tests := []struct {
-		name   string
-		stream ffprobe.Stream
-		want   bool
-	}{
-		{
-			name:   "atmos in title",
-			stream: mkStream(0, "truehd", "eng", 8, withTitle("TrueHD Atmos 7.1")),
-			want:   true,
-		},
-		{
-			name:   "atmos in codec long name",
-			stream: mkStream(0, "truehd", "eng", 8, withCodecLong("TrueHD Atmos")),
-			want:   true,
-		},
-		{
-			name: "dts:x in profile",
-			stream: mkStream(0, "dts", "eng", 8, withProfile("DTS:X")),
-			want: true,
-		},
-		{
-			name:   "imax enhanced in title",
-			stream: mkStream(0, "dts", "eng", 6, withTitle("DTS IMAX Enhanced")),
-			want:   true,
-		},
-		{
-			name:   "not spatial",
-			stream: mkStream(0, "ac3", "eng", 6),
-			want:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isSpatialAudio(tt.stream)
-			if got != tt.want {
-				t.Errorf("isSpatialAudio() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsLosslessCodec(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -280,9 +231,9 @@ func TestIsLosslessCodec(t *testing.T) {
 
 func TestParseChannelCount(t *testing.T) {
 	tests := []struct {
-		name    string
-		stream  ffprobe.Stream
-		want    int
+		name   string
+		stream ffprobe.Stream
+		want   int
 	}{
 		{
 			name:   "channels field preferred",
@@ -360,52 +311,6 @@ func TestPrimaryLabel(t *testing.T) {
 			got := tt.sel.PrimaryLabel()
 			if got != tt.want {
 				t.Errorf("PrimaryLabel() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestChanged(t *testing.T) {
-	tests := []struct {
-		name       string
-		sel        Selection
-		totalAudio int
-		want       bool
-	}{
-		{
-			name: "no change single stream",
-			sel: Selection{
-				KeepIndices:    []int{0},
-				RemovedIndices: nil,
-			},
-			totalAudio: 1,
-			want:       false,
-		},
-		{
-			name: "streams removed",
-			sel: Selection{
-				KeepIndices:    []int{0},
-				RemovedIndices: []int{1, 2},
-			},
-			totalAudio: 3,
-			want:       true,
-		},
-		{
-			name: "total mismatch",
-			sel: Selection{
-				KeepIndices:    []int{0},
-				RemovedIndices: nil,
-			},
-			totalAudio: 3,
-			want:       true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.sel.Changed(tt.totalAudio)
-			if got != tt.want {
-				t.Errorf("Changed(%d) = %v, want %v", tt.totalAudio, got, tt.want)
 			}
 		})
 	}

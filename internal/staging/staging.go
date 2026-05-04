@@ -115,49 +115,6 @@ func CleanStale(ctx context.Context, stagingDir string, maxAge time.Duration, ac
 	return result
 }
 
-// CleanOrphaned removes directories whose names do not match any active
-// fingerprint or the "queue-*" format.
-func CleanOrphaned(ctx context.Context, stagingDir string, activeFingerprints map[string]struct{}, logger *slog.Logger) CleanStaleResult {
-	var result CleanStaleResult
-
-	dirs, err := ListDirectories(stagingDir)
-	if err != nil {
-		result.Errors = append(result.Errors, err)
-		return result
-	}
-
-	for _, d := range dirs {
-		if ctx.Err() != nil {
-			result.Errors = append(result.Errors, ctx.Err())
-			return result
-		}
-
-		if isProtected(d.Name, activeFingerprints) {
-			logger.Info("staging directory preserved",
-				"dir", d.Name,
-				"decision_type", logs.DecisionStagingCleanup,
-				"decision_result", "preserved",
-				"decision_reason", "protected",
-			)
-			continue
-		}
-
-		logger.Info("removing orphaned staging directory",
-			"dir", d.Name,
-			"decision_type", logs.DecisionStagingCleanup,
-			"decision_result", "removed",
-			"decision_reason", "orphaned",
-		)
-		if err := os.RemoveAll(d.Path); err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("remove %s: %w", d.Name, err))
-			continue
-		}
-		result.Removed++
-	}
-
-	return result
-}
-
 // isProtected reports whether a directory name should be skipped during cleanup.
 func isProtected(name string, activeFingerprints map[string]struct{}) bool {
 	if strings.HasPrefix(name, "queue-") {

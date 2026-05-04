@@ -94,7 +94,6 @@ type progressUpdate struct {
 	bytesCopied   *int64
 	totalBytes    *int64
 	encodingJSON  *string
-	progressStage *string
 }
 
 // WithActiveEpisode sets active_episode_key during a progress update.
@@ -113,11 +112,6 @@ func WithProgressBytes(copied, total int64) ProgressOption {
 // WithEncodingDetails sets the encoded telemetry JSON during a progress update.
 func WithEncodingDetails(json string) ProgressOption {
 	return func(u *progressUpdate) { u.encodingJSON = &json }
-}
-
-// WithProgressStage sets the progress stage string during a progress update.
-func WithProgressStage(stage string) ProgressOption {
-	return func(u *progressUpdate) { u.progressStage = &stage }
 }
 
 // Progress updates the item progress fields and persists them with UpdateProgress.
@@ -145,9 +139,6 @@ func (s *Session) Progress(percent float64, message string, opts ...ProgressOpti
 	}
 	if update.encodingJSON != nil {
 		s.Item.EncodingDetailsJSON = *update.encodingJSON
-	}
-	if update.progressStage != nil {
-		s.Item.ProgressStage = *update.progressStage
 	}
 	if s.Store == nil {
 		return nil

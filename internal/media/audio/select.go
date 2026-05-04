@@ -21,7 +21,6 @@ type candidate struct {
 	index      int
 	language   string
 	channels   int
-	isSpatial  bool
 	isLossless bool
 	isDefault  bool
 	score      float64
@@ -50,12 +49,6 @@ func (s Selection) PrimaryLabel() string {
 	return label
 }
 
-// Changed reports whether any audio streams are removed compared to the
-// total audio stream count.
-func (s Selection) Changed(totalAudio int) bool {
-	return len(s.RemovedIndices) > 0 || totalAudio != len(s.KeepIndices)
-}
-
 // Select implements the audio track selection algorithm. It picks the single
 // best English audio track from the provided streams. Non-audio streams are
 // ignored. If no English track is found, the first audio stream is used as
@@ -76,7 +69,6 @@ func Select(streams []ffprobe.Stream, logger *slog.Logger) Selection {
 			index:      audioIdx,
 			language:   lang,
 			channels:   parseChannelCount(st),
-			isSpatial:  isSpatialAudio(st),
 			isLossless: isLosslessCodec(st),
 			isDefault:  st.Disposition["default"] == 1,
 		}
@@ -189,35 +181,6 @@ func scoreCandidate(c candidate, position int) float64 {
 	score -= 0.1 * float64(position)
 
 	return score
-}
-
-// spatialKeywords are patterns that indicate spatial/immersive audio formats.
-var spatialKeywords = []string{
-	"atmos",
-	"dts:x",
-	"dtsx",
-	"dts-x",
-	"auro-3d",
-	"imax enhanced",
-}
-
-// isSpatialAudio checks whether a stream uses a spatial audio format.
-func isSpatialAudio(s ffprobe.Stream) bool {
-	fields := []string{
-		s.CodecLong,
-		s.Profile,
-		s.CodecName,
-		s.Tags["title"],
-	}
-	for _, field := range fields {
-		lower := strings.ToLower(field)
-		for _, kw := range spatialKeywords {
-			if strings.Contains(lower, kw) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // losslessCodecs is the set of codec names considered lossless.

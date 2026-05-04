@@ -3,7 +3,6 @@ package subtitle
 import (
 	"context"
 	"fmt"
-	"math"
 	"testing"
 	"time"
 
@@ -12,28 +11,6 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/transcription"
 )
-
-func TestOverallSubtitlePercent(t *testing.T) {
-	tests := []struct {
-		name       string
-		completed  int
-		total      int
-		currentPct float64
-		want       float64
-	}{
-		{name: "first item half done", completed: 0, total: 4, currentPct: 50, want: 12.5},
-		{name: "three complete", completed: 3, total: 4, currentPct: 0, want: 75},
-		{name: "all complete", completed: 4, total: 4, currentPct: 0, want: 100},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := overallSubtitlePercent(tt.completed, tt.total, tt.currentPct)
-			if math.Abs(got-tt.want) > 1e-9 {
-				t.Fatalf("overallSubtitlePercent() = %f, want %f", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestSubtitlePhasePercent(t *testing.T) {
 	if got := subtitlePhasePercent(transcription.PhaseExtract, 0); got != 10 {
