@@ -11,6 +11,7 @@ import (
 
 	"github.com/five82/spindle/internal/daemonctl"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/queueops"
 )
 
 func newQueueCmd() *cobra.Command {
@@ -256,13 +257,13 @@ func newQueueRetryCmd() *cobra.Command {
 					return err
 				}
 				switch result {
-				case "retried":
+				case queueops.RetryResultRetried:
 					fmt.Println(successStyle(fmt.Sprintf("Retried episode %s on item %d", episode, id)))
-				case "not_found":
+				case queueops.RetryResultNotFound:
 					return fmt.Errorf("item %d not found", id)
-				case "not_failed":
+				case queueops.RetryResultNotFailed:
 					return fmt.Errorf("item %d is not in failed state", id)
-				case "episode_not_found":
+				case queueops.RetryResultEpisodeNotFound:
 					return fmt.Errorf("episode %s not found in item %d", episode, id)
 				default:
 					return fmt.Errorf("unexpected retry result: %s", result)

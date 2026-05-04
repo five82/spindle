@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/queueops"
 	"github.com/five82/spindle/internal/sockhttp"
 )
 
@@ -24,7 +25,7 @@ type Access interface {
 	Stats() (map[queue.Stage]int, error)
 	Status() (*Status, error)
 	Retry(ids ...int64) (int, error)
-	RetryEpisode(id int64, episodeKey string) (string, error)
+	RetryEpisode(id int64, episodeKey string) (queueops.RetryResult, error)
 	Stop(ids ...int64) (int, error)
 	EnqueueCached(req EnqueueCachedRequest) (*queue.Item, error)
 	Clear(scope string) (int64, error)
@@ -80,7 +81,7 @@ type queueClearResponse struct {
 }
 
 type queueRetryEpisodeResponse struct {
-	Result string `json:"result"`
+	Result queueops.RetryResult `json:"result"`
 }
 
 type queueEnqueueCachedResponse struct {
@@ -299,7 +300,7 @@ func (a *HTTPAccess) Retry(ids ...int64) (int, error) {
 }
 
 // RetryEpisode retries a single failed episode via HTTP.
-func (a *HTTPAccess) RetryEpisode(id int64, episodeKey string) (string, error) {
+func (a *HTTPAccess) RetryEpisode(id int64, episodeKey string) (queueops.RetryResult, error) {
 	var resp queueRetryEpisodeResponse
 	body := map[string]any{"id": id, "episode_key": episodeKey}
 	if err := a.postJSON("/api/queue/retry-episode", body, &resp); err != nil {
