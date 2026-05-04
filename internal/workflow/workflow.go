@@ -166,14 +166,14 @@ func (m *Manager) Run(ctx context.Context) {
 		// the poll loop from picking up the same item on the next iteration.
 		// Initialize progress state so external consumers (flyer) know which
 		// stage is active and stale progress from the prior stage is cleared.
-		if err := stage.MarkStarted(m.store, item, ps.Stage); err != nil {
+		if err := m.store.StartStage(item, ps.Stage); err != nil {
 			p.logger.Error("persist in_progress failed",
 				"event_type", "progress_persist_failed",
 				"error_hint", "failed to persist in_progress flag",
 				"item_id", item.ID,
 				"error", err,
 			)
-			item.InProgress = 0
+			_ = m.store.ClearInProgress(item)
 			if !sleep(runCtx, 10*time.Second) {
 				return
 			}
@@ -186,8 +186,7 @@ func (m *Manager) Run(ctx context.Context) {
 			if ps.Semaphore != SemNone {
 				if !m.acquireSem(runCtx, ps.Semaphore) {
 					// Release the in_progress flag if we can't acquire the semaphore.
-					item.InProgress = 0
-					if err := m.store.Update(item); err != nil {
+					if err := m.store.ClearInProgress(item); err != nil {
 						p.logger.Error("release in_progress after sem cancel failed",
 							"event_type", "progress_persist_failed",
 							"error_hint", "failed to release in_progress after semaphore cancel",

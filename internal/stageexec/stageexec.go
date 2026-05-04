@@ -34,7 +34,7 @@ func Run(ctx context.Context, item *queue.Item, opts Options) error {
 		"disc_title", item.DiscTitle,
 	)
 
-	if err := stage.MarkStarted(opts.Store, item, item.Stage); err != nil {
+	if err := opts.Store.StartStage(item, item.Stage); err != nil {
 		return fmt.Errorf("set in_progress: %w", err)
 	}
 

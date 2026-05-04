@@ -43,6 +43,21 @@ func TestNewDiscDefaults(t *testing.T) {
 	}
 }
 
+func TestNewCachedRipStartsAtRipping(t *testing.T) {
+	store := openTestStore(t)
+
+	item, err := store.NewCachedRip("Cached Disc", "fp-cache", `{"version":1}`, `{"title":"Cached Disc"}`)
+	if err != nil {
+		t.Fatalf("new cached rip: %v", err)
+	}
+	if item.Stage != StageRipping {
+		t.Fatalf("stage = %q, want %q", item.Stage, StageRipping)
+	}
+	if item.RipSpecData != `{"version":1}` || item.MetadataJSON == "" {
+		t.Fatalf("cached work state not persisted: rip_spec=%q metadata=%q", item.RipSpecData, item.MetadataJSON)
+	}
+}
+
 func TestGetByIDFound(t *testing.T) {
 	store := openTestStore(t)
 
@@ -103,20 +118,21 @@ func TestFindByFingerprint(t *testing.T) {
 	}
 }
 
-func TestUpdateAndVerify(t *testing.T) {
+func TestLifecycleAndTitleUpdates(t *testing.T) {
 	store := openTestStore(t)
 
 	item, err := store.NewDisc("Original", "fp1")
 	if err != nil {
 		t.Fatalf("new disc: %v", err)
 	}
-
-	item.Stage = StageEncoding
-	item.InProgress = 1
-	item.DiscTitle = "Updated Title"
-	item.ErrorMessage = "some error"
-	if err := store.Update(item); err != nil {
-		t.Fatalf("update: %v", err)
+	if err := store.MoveToStage(item, StageEncoding); err != nil {
+		t.Fatalf("move stage: %v", err)
+	}
+	if err := store.StartStage(item, StageEncoding); err != nil {
+		t.Fatalf("start stage: %v", err)
+	}
+	if err := store.UpdateDiscTitle(item, "Updated Title"); err != nil {
+		t.Fatalf("update title: %v", err)
 	}
 
 	got, err := store.GetByID(item.ID)
@@ -131,9 +147,6 @@ func TestUpdateAndVerify(t *testing.T) {
 	}
 	if got.DiscTitle != "Updated Title" {
 		t.Errorf("title = %q, want %q", got.DiscTitle, "Updated Title")
-	}
-	if got.ErrorMessage != "some error" {
-		t.Errorf("error_message = %q, want %q", got.ErrorMessage, "some error")
 	}
 }
 
@@ -177,8 +190,7 @@ func TestListWithAndWithoutFilter(t *testing.T) {
 
 	item1, _ := store.NewDisc("A", "fp1")
 	item2, _ := store.NewDisc("B", "fp2")
-	item2.Stage = StageEncoding
-	_ = store.Update(item2)
+	_ = store.MoveToStage(item2, StageEncoding)
 
 	// All items.
 	all, err := store.List()
@@ -217,8 +229,7 @@ func TestNextForStatuses(t *testing.T) {
 	item1, _ := store.NewDisc("A", "fp1")
 	item2, _ := store.NewDisc("B", "fp2")
 	// Mark item1 as in progress.
-	item1.InProgress = 1
-	_ = store.Update(item1)
+	_ = store.StartStage(item1, StageIdentification)
 
 	// Should skip item1 (in_progress=1) and return item2.
 	next, err := store.NextForStatuses(StageIdentification)
@@ -270,8 +281,7 @@ func TestStats(t *testing.T) {
 	_, _ = store.NewDisc("A", "fp1")
 	_, _ = store.NewDisc("B", "fp2")
 	item3, _ := store.NewDisc("C", "fp3")
-	item3.Stage = StageEncoding
-	_ = store.Update(item3)
+	_ = store.MoveToStage(item3, StageEncoding)
 
 	stats, err := store.Stats()
 	if err != nil {
@@ -289,8 +299,7 @@ func TestResetInProgress(t *testing.T) {
 	store := openTestStore(t)
 
 	item, _ := store.NewDisc("A", "fp1")
-	item.InProgress = 1
-	_ = store.Update(item)
+	_ = store.StartStage(item, StageIdentification)
 
 	if err := store.ResetInProgress(); err != nil {
 		t.Fatalf("reset: %v", err)
@@ -306,18 +315,13 @@ func TestRetryFailedAll(t *testing.T) {
 	store := openTestStore(t)
 
 	failed1, _ := store.NewDisc("A", "fp1")
-	failed1.Stage = StageFailed
-	failed1.FailedAtStage = string(StageEncoding)
-	_ = store.Update(failed1)
+	_ = store.FailStage(failed1, StageEncoding, "encode error")
 
 	failed2, _ := store.NewDisc("B", "fp2")
-	failed2.Stage = StageFailed
-	failed2.FailedAtStage = string(StageSubtitling)
-	_ = store.Update(failed2)
+	_ = store.FailStage(failed2, StageSubtitling, "subtitle error")
 
 	active, _ := store.NewDisc("C", "fp3")
-	active.Stage = StageRipping
-	_ = store.Update(active)
+	_ = store.MoveToStage(active, StageRipping)
 
 	count, err := store.RetryFailed()
 	if err != nil {
@@ -346,15 +350,11 @@ func TestRetryFailedRouting(t *testing.T) {
 
 	// Item with failed_at_stage set.
 	item1, _ := store.NewDisc("A", "fp1")
-	item1.Stage = StageFailed
-	item1.FailedAtStage = string(StageEncoding)
-	item1.ErrorMessage = "encode error"
-	_ = store.Update(item1)
+	_ = store.FailStage(item1, StageEncoding, "encode error")
 
 	// Item without failed_at_stage.
 	item2, _ := store.NewDisc("B", "fp2")
-	item2.Stage = StageFailed
-	_ = store.Update(item2)
+	_, _ = store.StopItems(item2.ID)
 
 	if _, err := store.RetryFailed(item1.ID, item2.ID); err != nil {
 		t.Fatalf("retry: %v", err)
@@ -378,9 +378,8 @@ func TestStopItemsAndOverride(t *testing.T) {
 	store := openTestStore(t)
 
 	item, _ := store.NewDisc("A", "fp1")
-	item.Stage = StageEncoding
-	item.InProgress = 1
-	_ = store.Update(item)
+	_ = store.MoveToStage(item, StageEncoding)
+	_ = store.StartStage(item, StageEncoding)
 
 	if _, err := store.StopItems(item.ID); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -408,15 +407,32 @@ func TestStopItemsAndOverride(t *testing.T) {
 		t.Errorf("review_reason %q does not contain %q", got.ReviewReason, ReviewReasonUserStopped)
 	}
 
-	// Test stop-review override: try to update stage away from failed.
-	got.Stage = StageEncoding
-	if err := store.Update(got); err != nil {
-		t.Fatalf("update after stop: %v", err)
+}
+
+func TestLifecycleMethodsDoNotOverrideUserStoppedItem(t *testing.T) {
+	store := openTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+	if err := store.StartStage(item, StageEncoding); err != nil {
+		t.Fatalf("start stage: %v", err)
+	}
+	if _, err := store.StopItems(item.ID); err != nil {
+		t.Fatalf("stop item: %v", err)
 	}
 
-	overridden, _ := store.GetByID(item.ID)
-	if overridden.Stage != StageFailed {
-		t.Errorf("override: stage = %q, want %q (stop-review override)", overridden.Stage, StageFailed)
+	if err := store.CompleteStage(item, StageCompleted, true); err != nil {
+		t.Fatalf("complete stopped item: %v", err)
+	}
+	got, _ := store.GetByID(item.ID)
+	if got.Stage != StageFailed || got.ReviewReason == "" {
+		t.Fatalf("completion overrode stopped item: stage=%q review=%q", got.Stage, got.ReviewReason)
+	}
+
+	if err := store.FailStage(item, StageEncoding, "encode failed"); err != nil {
+		t.Fatalf("fail stopped item: %v", err)
+	}
+	got, _ = store.GetByID(item.ID)
+	if got.ErrorMessage != "" || got.FailedAtStage != "" {
+		t.Fatalf("failure overrode stopped item details: failed_at=%q err=%q", got.FailedAtStage, got.ErrorMessage)
 	}
 }
 
@@ -493,8 +509,7 @@ func TestClearAndClearCompleted(t *testing.T) {
 
 	item1, _ := store.NewDisc("A", "fp1")
 	item2, _ := store.NewDisc("B", "fp2")
-	item1.Stage = StageCompleted
-	_ = store.Update(item1)
+	_ = store.MoveToStage(item1, StageCompleted)
 
 	// ClearCompleted should only remove completed items.
 	if _, err := store.ClearCompleted(); err != nil {
@@ -545,9 +560,7 @@ func TestHasDiscDependentItem(t *testing.T) {
 
 	// Item in identification, in progress.
 	item, _ := store.NewDisc("A", "fp1")
-	item.Stage = StageIdentification
-	item.InProgress = 1
-	_ = store.Update(item)
+	_ = store.StartStage(item, StageIdentification)
 
 	has, err = store.HasDiscDependentItem()
 	if err != nil {
@@ -586,12 +599,8 @@ func TestPersistRipSpec(t *testing.T) {
 func TestPersistRipSpecDoesNotChangeLifecycleFields(t *testing.T) {
 	store := openTestStore(t)
 	item, _ := store.NewDisc("Test", "fp1")
-	item.Stage = StageEncoding
-	item.InProgress = 1
-	item.FailedAtStage = string(StageRipping)
-	item.ErrorMessage = "existing error"
-	if err := store.Update(item); err != nil {
-		t.Fatalf("initial update: %v", err)
+	if err := store.FailStage(item, StageRipping, "existing error"); err != nil {
+		t.Fatalf("initial failure: %v", err)
 	}
 
 	item.Stage = StageCompleted
@@ -605,7 +614,7 @@ func TestPersistRipSpecDoesNotChangeLifecycleFields(t *testing.T) {
 	}
 
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != StageEncoding || got.InProgress != 1 || got.FailedAtStage != string(StageRipping) || got.ErrorMessage != "existing error" {
+	if got.Stage != StageFailed || got.InProgress != 0 || got.FailedAtStage != string(StageRipping) || got.ErrorMessage != "existing error" {
 		t.Fatalf("lifecycle fields changed: stage=%q in_progress=%d failed_at=%q error=%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
 	}
 	if got.RipSpecData != `{"version":1}` || got.NeedsReview != 1 {
@@ -644,18 +653,14 @@ func TestFormatAlsoProcessingHumanizesAndCaps(t *testing.T) {
 	item3, _ := store.NewDisc("Fringe Season 01", "fp3")
 	item4, _ := store.NewDisc("The Matrix (1999)", "fp4")
 
-	item1.InProgress = 1
-	item1.Stage = StageRipping
-	_ = store.Update(item1)
-	item2.InProgress = 1
-	item2.Stage = StageEncoding
-	_ = store.Update(item2)
-	item3.InProgress = 1
-	item3.Stage = StageSubtitling
-	_ = store.Update(item3)
-	item4.InProgress = 1
-	item4.Stage = StageAudioAnalysis
-	_ = store.Update(item4)
+	_ = store.MoveToStage(item1, StageRipping)
+	_ = store.StartStage(item1, StageRipping)
+	_ = store.MoveToStage(item2, StageEncoding)
+	_ = store.StartStage(item2, StageEncoding)
+	_ = store.MoveToStage(item3, StageSubtitling)
+	_ = store.StartStage(item3, StageSubtitling)
+	_ = store.MoveToStage(item4, StageAudioAnalysis)
+	_ = store.StartStage(item4, StageAudioAnalysis)
 
 	got := FormatAlsoProcessing(store, item1.ID)
 	want := "\nAlso processing: Breaking Bad Season 01 (encoding), Fringe Season 01 (subtitles), +1 more"

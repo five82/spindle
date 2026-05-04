@@ -152,9 +152,8 @@ func TestCompletedItemKeepsTerminalProgress(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	item, _ := store.NewDisc("A", "fp1")
-	item.Stage = queue.StageOrganizing
-	if err := store.Update(item); err != nil {
-		t.Fatalf("update item: %v", err)
+	if err := store.MoveToStage(item, queue.StageOrganizing); err != nil {
+		t.Fatalf("move item: %v", err)
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -201,8 +200,7 @@ func TestFinalPersistenceFailureSignalsWorkflowStop(t *testing.T) {
 		t.Fatalf("open queue: %v", err)
 	}
 	item, _ := store.NewDisc("A", "fp1")
-	item.Stage = queue.StageOrganizing
-	_ = store.Update(item)
+	_ = store.MoveToStage(item, queue.StageOrganizing)
 	_ = store.Close()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -249,10 +247,8 @@ func TestQueueCycleNotificationsRequireBacklogAndPair(t *testing.T) {
 		t.Fatalf("queue_started duplicated: %v", events)
 	}
 
-	item1.Stage = queue.StageCompleted
-	_ = store.Update(item1)
-	item2.Stage = queue.StageCompleted
-	_ = store.Update(item2)
+	_ = store.MoveToStage(item1, queue.StageCompleted)
+	_ = store.MoveToStage(item2, queue.StageCompleted)
 	manager.maybeCompleteQueueCycle(context.Background(), logger)
 	if len(events) != 2 || events[1] != "Queue completed" {
 		t.Fatalf("events after complete = %v, want [Queue started Queue completed]", events)
@@ -351,8 +347,7 @@ func TestQueueCompletionSuppressedWithoutStartedCycle(t *testing.T) {
 	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
 
 	item, _ := store.NewDisc("A", "fp1")
-	item.Stage = queue.StageCompleted
-	_ = store.Update(item)
+	_ = store.MoveToStage(item, queue.StageCompleted)
 
 	manager.maybeCompleteQueueCycle(context.Background(), logger)
 	if len(events) != 0 {

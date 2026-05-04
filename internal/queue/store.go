@@ -167,11 +167,20 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 
 // NewDisc inserts a new queue item at the identification stage and returns it with its ID.
 func (s *Store) NewDisc(title, fingerprint string) (*Item, error) {
+	return s.insertItem(title, fingerprint, StageIdentification, "", "")
+}
+
+// NewCachedRip inserts a cached-rip queue item directly at the ripping stage.
+func (s *Store) NewCachedRip(title, fingerprint, ripSpecData, metadataJSON string) (*Item, error) {
+	return s.insertItem(title, fingerprint, StageRipping, ripSpecData, metadataJSON)
+}
+
+func (s *Store) insertItem(title, fingerprint string, stage Stage, ripSpecData, metadataJSON string) (*Item, error) {
 	var id int64
 	err := retryOnBusy(func() error {
 		res, err := s.db.Exec(
-			`INSERT INTO queue_items (disc_title, stage, disc_fingerprint) VALUES (?, ?, ?)`,
-			title, string(StageIdentification), fingerprint,
+			`INSERT INTO queue_items (disc_title, stage, disc_fingerprint, rip_spec_data, metadata_json) VALUES (?, ?, ?, ?, ?)`,
+			title, string(stage), fingerprint, ripSpecData, metadataJSON,
 		)
 		if err != nil {
 			return err
@@ -180,7 +189,7 @@ func (s *Store) NewDisc(title, fingerprint string) (*Item, error) {
 		return err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("new disc: %w", err)
+		return nil, fmt.Errorf("new %s item: %w", stage, err)
 	}
 	return s.GetByID(id)
 }
@@ -215,41 +224,166 @@ func (s *Store) FindByFingerprint(fp string) (*Item, error) {
 	return it, nil
 }
 
-// Update performs a full update of all mutable columns on the item.
-// Preserves user-initiated stop state: if the stored row has stage=failed
-// with "Stop requested by user" in review_reason, those fields are not overwritten.
-func (s *Store) Update(item *Item) error {
+// StartStage marks an item as actively processing a stage and resets stale
+// progress from the previous stage.
+func (s *Store) StartStage(item *Item, stage Stage) error {
+	item.InProgress = 1
+	item.ProgressStage = string(stage)
+	item.ProgressPercent = 0
+	item.ProgressMessage = ""
+	item.ActiveEpisodeKey = ""
+	item.ProgressBytesCopied = 0
+	item.ProgressTotalBytes = 0
+	if s == nil {
+		return nil
+	}
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE queue_items SET
-				disc_title = ?, stage = CASE
-					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN stage
-					ELSE ? END,
-				in_progress = ?,
-				failed_at_stage = ?, error_message = ?,
-				updated_at = CURRENT_TIMESTAMP,
-				rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?,
-				needs_review = CASE
-					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN needs_review
-					ELSE ? END,
-				review_reason = CASE
-					WHEN stage = 'failed' AND review_reason LIKE '%Stop requested by user%' THEN review_reason
-					ELSE ? END,
-				progress_stage = ?, progress_percent = ?, progress_message = ?,
-				active_episode_key = ?, progress_bytes_copied = ?, progress_total_bytes = ?,
-				encoding_details_json = ?
+				in_progress = 1,
+				progress_stage = ?, progress_percent = 0, progress_message = '',
+				active_episode_key = '', progress_bytes_copied = 0, progress_total_bytes = 0,
+				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?`,
-			item.DiscTitle, string(item.Stage), item.InProgress,
-			item.FailedAtStage, item.ErrorMessage,
-			item.RipSpecData, item.DiscFingerprint, item.MetadataJSON,
-			item.NeedsReview, item.ReviewReason,
-			item.ProgressStage, item.ProgressPercent, item.ProgressMessage,
-			item.ActiveEpisodeKey, item.ProgressBytesCopied, item.ProgressTotalBytes,
-			item.EncodingDetailsJSON,
+			string(stage), item.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("start %s item %d: %w", stage, item.ID, err)
+		}
+		return nil
+	})
+}
+
+// ClearInProgress releases an item's active-processing flag without changing
+// stage ownership or work products.
+func (s *Store) ClearInProgress(item *Item) error {
+	item.InProgress = 0
+	if s == nil {
+		return nil
+	}
+	return retryOnBusy(func() error {
+		_, err := s.db.Exec(`UPDATE queue_items SET in_progress = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, item.ID)
+		if err != nil {
+			return fmt.Errorf("clear in_progress item %d: %w", item.ID, err)
+		}
+		return nil
+	})
+}
+
+// MoveToStage routes an item to a new stage without touching work products.
+func (s *Store) MoveToStage(item *Item, stage Stage) error {
+	item.Stage = stage
+	item.InProgress = 0
+	if s == nil {
+		return nil
+	}
+	return retryOnBusy(func() error {
+		_, err := s.db.Exec(`
+			UPDATE queue_items SET
+				stage = ?, in_progress = 0,
+				failed_at_stage = NULL, error_message = NULL,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?`,
+			string(stage), item.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("move item %d to %s: %w", item.ID, stage, err)
+		}
+		return nil
+	})
+}
+
+// CompleteStage finalizes a successful stage execution. If advance is true,
+// the item moves to nextStage; otherwise only in_progress is cleared.
+func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
+	item.InProgress = 0
+	if advance {
+		item.Stage = nextStage
+		item.ActiveEpisodeKey = ""
+		if item.Stage == StageCompleted {
+			item.ProgressStage = string(StageCompleted)
+			item.ProgressPercent = 100
+			item.ProgressMessage = "Completed"
+		} else {
+			item.ProgressStage = ""
+			item.ProgressPercent = 0
+			item.ProgressMessage = ""
+		}
+	}
+	if s == nil {
+		return nil
+	}
+	if !advance {
+		return s.ClearInProgress(item)
+	}
+	stopped := "%" + ReviewReasonUserStopped + "%"
+	return retryOnBusy(func() error {
+		_, err := s.db.Exec(`
+			UPDATE queue_items SET
+				stage = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN stage ELSE ? END,
+				in_progress = 0,
+				active_episode_key = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN active_episode_key ELSE '' END,
+				progress_stage = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN progress_stage ELSE ? END,
+				progress_percent = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN progress_percent ELSE ? END,
+				progress_message = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN progress_message ELSE ? END,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?`,
+			stopped, string(item.Stage),
+			stopped,
+			stopped, item.ProgressStage,
+			stopped, item.ProgressPercent,
+			stopped, item.ProgressMessage,
 			item.ID,
 		)
 		if err != nil {
-			return fmt.Errorf("update item %d: %w", item.ID, err)
+			return fmt.Errorf("complete stage item %d: %w", item.ID, err)
+		}
+		return nil
+	})
+}
+
+// FailStage marks an item failed at a specific stage unless the item has
+// already been explicitly stopped by the user.
+func (s *Store) FailStage(item *Item, failedAt Stage, errMsg string) error {
+	item.Stage = StageFailed
+	item.InProgress = 0
+	item.FailedAtStage = string(failedAt)
+	item.ErrorMessage = errMsg
+	if s == nil {
+		return nil
+	}
+	stopped := "%" + ReviewReasonUserStopped + "%"
+	return retryOnBusy(func() error {
+		_, err := s.db.Exec(`
+			UPDATE queue_items SET
+				stage = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN stage ELSE ? END,
+				in_progress = 0,
+				failed_at_stage = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN failed_at_stage ELSE ? END,
+				error_message = CASE WHEN stage = 'failed' AND review_reason LIKE ? THEN error_message ELSE ? END,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?`,
+			stopped, string(StageFailed),
+			stopped, string(failedAt),
+			stopped, errMsg,
+			item.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("fail item %d at %s: %w", item.ID, failedAt, err)
+		}
+		return nil
+	})
+}
+
+// UpdateDiscTitle changes only the queue item's display title.
+func (s *Store) UpdateDiscTitle(item *Item, title string) error {
+	item.DiscTitle = title
+	if s == nil {
+		return nil
+	}
+	return retryOnBusy(func() error {
+		_, err := s.db.Exec(`UPDATE queue_items SET disc_title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, title, item.ID)
+		if err != nil {
+			return fmt.Errorf("update title item %d: %w", item.ID, err)
 		}
 		return nil
 	})

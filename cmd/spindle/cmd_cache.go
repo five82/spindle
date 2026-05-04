@@ -207,8 +207,7 @@ func newCacheRipCmd() *cobra.Command {
 			}
 
 			// Advance to ripping stage.
-			item.Stage = queue.StageRipping
-			if err := qStore.Update(item); err != nil {
+			if err := qStore.MoveToStage(item, queue.StageRipping); err != nil {
 				return fmt.Errorf("advance stage: %w", err)
 			}
 

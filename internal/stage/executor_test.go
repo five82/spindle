@@ -34,7 +34,7 @@ func openExecutorTestStore(t *testing.T) *queue.Store {
 	return store
 }
 
-func TestMarkStartedInitializesActiveProgress(t *testing.T) {
+func TestStartStageInitializesActiveProgress(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, err := store.NewDisc("A", "fp1")
 	if err != nil {
@@ -46,8 +46,8 @@ func TestMarkStartedInitializesActiveProgress(t *testing.T) {
 	item.ProgressBytesCopied = 10
 	item.ProgressTotalBytes = 20
 
-	if err := MarkStarted(store, item, queue.StageEncoding); err != nil {
-		t.Fatalf("MarkStarted: %v", err)
+	if err := store.StartStage(item, queue.StageEncoding); err != nil {
+		t.Fatalf("StartStage: %v", err)
 	}
 	got, err := store.GetByID(item.ID)
 	if err != nil {
@@ -64,12 +64,11 @@ func TestMarkStartedInitializesActiveProgress(t *testing.T) {
 func TestExecuteStartedAdvancesAndSetsCompletedProgress(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	item.Stage = queue.StageOrganizing
-	if err := store.Update(item); err != nil {
-		t.Fatalf("update item: %v", err)
+	if err := store.MoveToStage(item, queue.StageOrganizing); err != nil {
+		t.Fatalf("move item: %v", err)
 	}
-	if err := MarkStarted(store, item, queue.StageOrganizing); err != nil {
-		t.Fatalf("MarkStarted: %v", err)
+	if err := store.StartStage(item, queue.StageOrganizing); err != nil {
+		t.Fatalf("StartStage: %v", err)
 	}
 
 	_, err := ExecuteStarted(context.Background(), item, ExecuteOptions{
@@ -92,8 +91,8 @@ func TestExecuteStartedAdvancesAndSetsCompletedProgress(t *testing.T) {
 func TestExecuteStartedMarksFailureWhenConfigured(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := MarkStarted(store, item, queue.StageIdentification); err != nil {
-		t.Fatalf("MarkStarted: %v", err)
+	if err := store.StartStage(item, queue.StageIdentification); err != nil {
+		t.Fatalf("StartStage: %v", err)
 	}
 	stageErr := errors.New("boom")
 

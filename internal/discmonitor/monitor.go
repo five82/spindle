@@ -467,8 +467,7 @@ func tryRefreshDiscTitle(ctx context.Context, store *queue.Store, item *queue.It
 	if name == "" || name == item.DiscTitle {
 		return
 	}
-	item.DiscTitle = name
-	if err := store.Update(item); err != nil {
+	if err := store.UpdateDiscTitle(item, name); err != nil {
 		logger.Warn("title refresh update failed",
 			"event_type", "title_refresh_persist_failed",
 			"error_hint", "failed to persist refreshed title",

@@ -270,19 +270,10 @@ func (s *Server) handleQueueEnqueueCached(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	item, err := s.store.NewDisc(body.DiscTitle, body.Fingerprint)
+	item, err := s.store.NewCachedRip(body.DiscTitle, body.Fingerprint, body.RipSpecData, body.MetadataJSON)
 	if err != nil {
 		s.logger.Error("enqueue cached rip", "error", err, "fingerprint", body.Fingerprint)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue cached rip")
-		return
-	}
-	item.RipSpecData = body.RipSpecData
-	item.MetadataJSON = body.MetadataJSON
-	item.Stage = queue.StageRipping
-	if err := s.store.Update(item); err != nil {
-		_ = s.store.Remove(item.ID)
-		s.logger.Error("update cached enqueue", "error", err, "item_id", item.ID)
-		writeError(w, http.StatusInternalServerError, "failed to finalize cached rip queue item")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item)})

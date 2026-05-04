@@ -44,21 +44,6 @@ type PersistenceError struct {
 func (e *PersistenceError) Error() string { return fmt.Sprintf("%s: %v", e.Op, e.Err) }
 func (e *PersistenceError) Unwrap() error { return e.Err }
 
-// MarkStarted initializes queue-visible active stage state and persists it.
-func MarkStarted(store *queue.Store, item *queue.Item, stage queue.Stage) error {
-	item.InProgress = 1
-	item.ProgressStage = string(stage)
-	item.ProgressPercent = 0
-	item.ProgressMessage = ""
-	item.ActiveEpisodeKey = ""
-	item.ProgressBytesCopied = 0
-	item.ProgressTotalBytes = 0
-	if store == nil {
-		return nil
-	}
-	return store.Update(item)
-}
-
 // ExecuteStarted runs a handler for an item already marked in progress, then
 // persists success, failure, cancellation, or one-shot completion state.
 func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) (res ExecuteResult, err error) {
@@ -83,8 +68,7 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			res.Canceled = true
-			item.InProgress = 0
-			if updateErr := updateItem(opts.Store, item); updateErr != nil {
+			if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {
 				if persistErr := maybePersistenceError(opts, "clear in_progress after cancellation", updateErr); persistErr != nil {
 					return res, persistErr
 				}
@@ -99,18 +83,13 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 		} else {
 			res.Failed = opts.MarkFailed
 			if opts.MarkFailed {
-				item.Stage = queue.StageFailed
-				item.InProgress = 0
-				item.FailedAtStage = string(stageName)
-				item.ErrorMessage = err.Error()
-				if updateErr := updateItem(opts.Store, item); updateErr != nil {
+				if updateErr := opts.Store.FailStage(item, stageName, err.Error()); updateErr != nil {
 					if persistErr := maybePersistenceError(opts, "persist stage failure", updateErr); persistErr != nil {
 						return res, persistErr
 					}
 				}
 			} else {
-				item.InProgress = 0
-				if updateErr := updateItem(opts.Store, item); updateErr != nil {
+				if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {
 					if persistErr := maybePersistenceError(opts, "clear in_progress after stage error", updateErr); persistErr != nil {
 						return res, persistErr
 					}
@@ -120,33 +99,12 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 		}
 	}
 
-	item.InProgress = 0
-	if opts.Advance {
-		item.Stage = opts.NextStage
-		item.ActiveEpisodeKey = ""
-		if item.Stage == queue.StageCompleted {
-			item.ProgressStage = string(queue.StageCompleted)
-			item.ProgressPercent = 100
-			item.ProgressMessage = "Completed"
-		} else {
-			item.ProgressStage = ""
-			item.ProgressPercent = 0
-			item.ProgressMessage = ""
-		}
-	}
-	if updateErr := updateItem(opts.Store, item); updateErr != nil {
+	if updateErr := opts.Store.CompleteStage(item, opts.NextStage, opts.Advance); updateErr != nil {
 		if persistErr := maybePersistenceError(opts, "persist stage completion", updateErr); persistErr != nil {
 			return res, persistErr
 		}
 	}
 	return res, nil
-}
-
-func updateItem(store *queue.Store, item *queue.Item) error {
-	if store == nil {
-		return nil
-	}
-	return store.Update(item)
 }
 
 func maybePersistenceError(opts ExecuteOptions, op string, err error) error {
