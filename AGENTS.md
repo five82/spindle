@@ -8,12 +8,13 @@ This file provides guidance when working with code in this repository.
 - Use the Go toolchain (`go build`, `go test`, `golangci-lint`); avoid alternate build systems.
 - Finish the work you start. Ask before dropping scope or leaving TODOs.
 - Before handing work back, run `./check-ci.sh` or explain why you couldn't.
+- Prefer deletion, consolidation, and stronger invariants over additive fixes.
 
 ## Project Snapshot
 
 Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata (TMDB), subtitles (WhisperX, forced subs via OpenSubtitles), Jellyfin refresh, and ntfy notifications.
 
-- **Scope**: Single-developer project - avoid over-engineering
+- **Scope**: Single-developer project — avoid over-engineering.
 - **Operation**: Daemon-owned queue access through the HTTP API. Queue commands require the daemon except stopped-daemon `queue clear --all`, which deletes the transient queue DB files.
 
 ## Related Repos
@@ -28,19 +29,61 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 
 ## Critical Expectations
 
-**Architectural churn is embraced.** Optimize for clarity, not backwards compatibility.
+Architectural churn is embraced. Optimize for clarity, not backwards compatibility.
 
-- Use lightweight spec driven development. Active docs in `docs/` define user/API/architecture/operations contracts; code and tests define exact implementation behavior. Update active docs when a change affects those contracts, otherwise prefer focused tests over prose. Deleted rewrite specs are historical only in git history.
-- Do not just look for the easiest solution or fix. Find the best and most maintainable path forward.
+- Find the smallest maintainable change. Prefer stronger invariants, deletion, and consolidation over new code.
 - Break things forward. Remove deprecated paths; no compatibility shims.
+- Simplify by reducing concepts, branches, states, and files. Do not simplify by adding abstraction layers.
 - Prefer maintainable architecture and explicit logging over clever tricks.
-- Prefer minimalism. Identify and close real gaps. Simplify. Avoid overengineering. Avoid chasing edge cases that we are unlikely to encounter.
+- Identify and close real gaps. Avoid over-engineering and unlikely edge cases.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
 - Keep edits ASCII unless the file already uses extended characters.
 - When troubleshooting, gather evidence and test. Do not blindly guess.
-- Observability is key. We can not understand what is happening if we can not see it.
-- Simplification must not remove user-visible functionality. Eliminating a subprocess or code path that produces distinct output (log messages, CLI feedback, status indicators) is a behavior change, not a simplification.
-- When examining reference code, do not just copy and paste. Understand why it works in the reference implementation, think, and design a solution that works best for this codebase.
+- Observability is key. If a decision changes what happens next, it must be visible without enabling DEBUG.
+- Simplification must not remove user-visible functionality. Eliminating a code path that produces distinct output (log messages, CLI feedback, status indicators) is a behavior change, not a simplification.
+- When examining reference code, understand why it works before adapting it. Do not copy-paste.
+
+## Complexity Budget
+
+Spindle is feature-complete. Production code growth is suspect by default.
+
+Before implementing any fix or refactor:
+1. Reproduce or identify the failing behavior.
+2. Identify the invariant that should make the bug impossible.
+3. Look for existing code that becomes redundant if that invariant is enforced.
+4. Apply the smallest maintainable change.
+
+Rules:
+- Tests may grow freely. Production LOC should be flat or negative.
+- Do not add new packages, interfaces, exported symbols, config flags, background workers, queues, caches, registries, or abstraction layers unless they clearly reduce total complexity.
+- Avoid helper sprawl: do not extract single-use helpers unless they represent a real domain concept.
+- If adding production code, explain what existing complexity it replaces or why deletion wasn't enough.
+
+Before handing back non-trivial work, summarize:
+- Production lines added/deleted
+- Tests added/changed
+- New exported symbols, packages, config flags, or goroutines
+- Code paths removed or simplified
+- Why the change fixes the class of issue rather than masking one symptom
+
+## Refactor Policy
+
+Refactors must reduce conceptual surface area.
+
+Good refactors:
+- Remove a code path
+- Collapse duplicate logic
+- Make invalid states unrepresentable
+- Reduce exported API surface
+- Move behavior closer to the owning domain concept
+- Improve logging of real decisions without changing behavior
+
+Suspicious refactors:
+- Introduce new interfaces without multiple real implementations
+- Add managers, processors, registries, factories, or builders
+- Split small cohesive files into many tiny files
+- Add configuration to avoid making a design decision
+- Preserve old behavior through compatibility layers
 
 ## Subtitle Policy
 
@@ -59,16 +102,14 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 
 | Level | Use For |
 |-------|---------|
-| INFO | All decisions that affect output: stage start/complete, track selection, preset choice, skip decisions, fallback logic, cache hits |
+| INFO  | All decisions that affect output: stage start/complete, track selection, preset choice, skip decisions, fallback logic, cache hits |
 | DEBUG | Raw data dumps, metrics, internal state (not decisions) |
-| WARN | Degraded behavior (include `event_type`, `error_hint`, `impact`) |
+| WARN  | Degraded behavior (include `event_type`, `error_hint`, `impact`) |
 | ERROR | Operation failed (include `event_type`, `error_hint`, `error`) |
 
-**Decision logging pattern:** All decisions use `decision_type`, `decision_result`, `decision_reason` attributes.
+Decision logging pattern: All decisions use `decision_type`, `decision_result`, `decision_reason` attributes.
 
-**Rationale:** If a decision changes what happens next, it must be visible without enabling DEBUG. Invisible decisions make debugging impossible.
-
-**Progress format**: `"Phase N/M - Action (context)"` (e.g., `"Phase 2/3 - Ripping selected titles (5 of 12)"`)
+Progress format: `"Phase N/M - Action (context)"` (e.g., `"Phase 2/3 - Ripping selected titles (5 of 12)"`)
 
 ## Database Schema
 
