@@ -382,6 +382,16 @@ func newSpindleReporter(item *queue.Item, store *queue.Store, logger *slog.Logge
 	}
 }
 
+func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot)) error {
+	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
+	if err != nil {
+		snap = encodingstate.Snapshot{}
+	}
+	mutate(&snap)
+	r.item.EncodingDetailsJSON = snap.Marshal()
+	return r.store.UpdateProgress(r.item)
+}
+
 func (r *spindleReporter) EncodingProgress(p drapto.ProgressSnapshot) {
 	now := r.now()
 	if now.Sub(r.lastPush) < throttleInterval {
@@ -389,22 +399,16 @@ func (r *spindleReporter) EncodingProgress(p drapto.ProgressSnapshot) {
 	}
 	r.lastPush = now
 
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-
-	snap.Substage = "encoding"
-	snap.Percent = float64(p.Percent)
-	snap.FPS = float64(p.FPS)
-	snap.AverageSpeed = float64(p.Speed)
-	snap.ETASeconds = p.ETA.Seconds()
-	snap.CurrentFrame = int64(p.CurrentFrame)
-	snap.TotalFrames = int64(p.TotalFrames)
-
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	r.item.ProgressPercent = overallEncodePercent(r.completedJobs, r.totalJobs, float64(p.Percent))
-	if err := r.store.UpdateProgress(r.item); err != nil {
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.Substage = "encoding"
+		snap.Percent = float64(p.Percent)
+		snap.FPS = float64(p.FPS)
+		snap.AverageSpeed = float64(p.Speed)
+		snap.ETASeconds = p.ETA.Seconds()
+		snap.CurrentFrame = int64(p.CurrentFrame)
+		snap.TotalFrames = int64(p.TotalFrames)
+		r.item.ProgressPercent = overallEncodePercent(r.completedJobs, r.totalJobs, float64(p.Percent))
+	}); err != nil {
 		r.logger.Warn("failed to persist encoding progress",
 			"event_type", "progress_persist_error",
 			"error_hint", err.Error(),
@@ -414,14 +418,10 @@ func (r *spindleReporter) EncodingProgress(p drapto.ProgressSnapshot) {
 }
 
 func (r *spindleReporter) EncodingStarted(totalFrames uint64) {
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-	snap.Substage = "encoding"
-	snap.TotalFrames = int64(totalFrames)
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	if err := r.store.UpdateProgress(r.item); err != nil {
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.Substage = "encoding"
+		snap.TotalFrames = int64(totalFrames)
+	}); err != nil {
 		r.logger.Warn("failed to persist encoding started",
 			"event_type", "progress_persist_error",
 			"error_hint", err.Error(),
@@ -431,16 +431,12 @@ func (r *spindleReporter) EncodingStarted(totalFrames uint64) {
 }
 
 func (r *spindleReporter) Initialization(s drapto.InitializationSummary) {
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-	snap.InputFile = s.InputFile
-	snap.Resolution = s.Resolution
-	snap.DynamicRange = s.DynamicRange
-	snap.Substage = "initializing"
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	if err := r.store.UpdateProgress(r.item); err != nil {
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.InputFile = s.InputFile
+		snap.Resolution = s.Resolution
+		snap.DynamicRange = s.DynamicRange
+		snap.Substage = "initializing"
+	}); err != nil {
 		r.logger.Warn("progress persistence failed",
 			"event_type", "progress_persist_failed",
 			"error_hint", "initialization state not persisted to queue",
@@ -451,19 +447,15 @@ func (r *spindleReporter) Initialization(s drapto.InitializationSummary) {
 }
 
 func (r *spindleReporter) EncodingConfig(s drapto.EncodingConfigSummary) {
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-	snap.Encoder = s.Encoder
-	snap.Preset = s.Preset
-	snap.Quality = s.Quality
-	snap.Tune = s.Tune
-	snap.AudioCodec = s.AudioCodec
-	snap.DraptoPreset = s.DraptoPreset
-	snap.Substage = "configuring"
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	if err := r.store.UpdateProgress(r.item); err != nil {
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.Encoder = s.Encoder
+		snap.Preset = s.Preset
+		snap.Quality = s.Quality
+		snap.Tune = s.Tune
+		snap.AudioCodec = s.AudioCodec
+		snap.DraptoPreset = s.DraptoPreset
+		snap.Substage = "configuring"
+	}); err != nil {
 		r.logger.Warn("progress persistence failed",
 			"event_type", "progress_persist_failed",
 			"error_hint", "encoding config state not persisted to queue",
@@ -474,21 +466,17 @@ func (r *spindleReporter) EncodingConfig(s drapto.EncodingConfigSummary) {
 }
 
 func (r *spindleReporter) CropResult(s drapto.CropSummary) {
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-	snap.CropFilter = s.Crop
-	snap.CropRequired = s.Required
-	snap.CropMessage = s.Message
-	snap.Substage = "crop_detection"
-	if s.Required {
-		if w, h, parseErr := encodingstate.ParseCropFilter(s.Crop); parseErr == nil {
-			snap.Resolution = fmt.Sprintf("%dx%d", w, h)
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.CropFilter = s.Crop
+		snap.CropRequired = s.Required
+		snap.CropMessage = s.Message
+		snap.Substage = "crop_detection"
+		if s.Required {
+			if w, h, parseErr := encodingstate.ParseCropFilter(s.Crop); parseErr == nil {
+				snap.Resolution = fmt.Sprintf("%dx%d", w, h)
+			}
 		}
-	}
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	if err := r.store.UpdateProgress(r.item); err != nil {
+	}); err != nil {
 		r.logger.Warn("progress persistence failed",
 			"event_type", "progress_persist_failed",
 			"error_hint", "crop result not persisted to queue",
@@ -510,25 +498,21 @@ func (r *spindleReporter) CropResult(s drapto.CropSummary) {
 }
 
 func (r *spindleReporter) ValidationComplete(s drapto.ValidationSummary) {
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-	snap.Substage = "validation"
-	steps := make([]encodingstate.ValidationStep, len(s.Steps))
-	for i, step := range s.Steps {
-		steps[i] = encodingstate.ValidationStep{
-			Name:    step.Name,
-			Passed:  step.Passed,
-			Details: step.Details,
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.Substage = "validation"
+		steps := make([]encodingstate.ValidationStep, len(s.Steps))
+		for i, step := range s.Steps {
+			steps[i] = encodingstate.ValidationStep{
+				Name:    step.Name,
+				Passed:  step.Passed,
+				Details: step.Details,
+			}
 		}
-	}
-	snap.Validation = &encodingstate.Validation{
-		Passed: s.Passed,
-		Steps:  steps,
-	}
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	if err := r.store.UpdateProgress(r.item); err != nil {
+		snap.Validation = &encodingstate.Validation{
+			Passed: s.Passed,
+			Steps:  steps,
+		}
+	}); err != nil {
 		r.logger.Warn("progress persistence failed",
 			"event_type", "progress_persist_failed",
 			"error_hint", "validation result not persisted to queue",
@@ -558,18 +542,14 @@ func (r *spindleReporter) ValidationComplete(s drapto.ValidationSummary) {
 }
 
 func (r *spindleReporter) EncodingComplete(s drapto.EncodingOutcome) {
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-	snap.Substage = "complete"
-	snap.Percent = 100
-	snap.EncodedSize = int64(s.EncodedSize)
-	snap.OriginalSize = int64(s.OriginalSize)
-	snap.AverageSpeed = float64(s.AverageSpeed)
-	snap.EncodeDurationSeconds = s.TotalTime.Seconds()
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	if err := r.store.UpdateProgress(r.item); err != nil {
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.Substage = "complete"
+		snap.Percent = 100
+		snap.EncodedSize = int64(s.EncodedSize)
+		snap.OriginalSize = int64(s.OriginalSize)
+		snap.AverageSpeed = float64(s.AverageSpeed)
+		snap.EncodeDurationSeconds = s.TotalTime.Seconds()
+	}); err != nil {
 		r.logger.Warn("progress persistence failed",
 			"event_type", "progress_persist_failed",
 			"error_hint", "encoding completion not persisted to queue",
@@ -580,13 +560,9 @@ func (r *spindleReporter) EncodingComplete(s drapto.EncodingOutcome) {
 }
 
 func (r *spindleReporter) Warning(message string) {
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-	snap.Warning = message
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	if err := r.store.UpdateProgress(r.item); err != nil {
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.Warning = message
+	}); err != nil {
 		r.logger.Warn("progress persistence failed",
 			"event_type", "progress_persist_failed",
 			"error_hint", "warning state not persisted to queue",
@@ -613,18 +589,14 @@ func (r *spindleReporter) Error(e drapto.ReporterError) {
 		"error", e.Title,
 	)
 
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
-	if err != nil {
-		snap = encodingstate.Snapshot{}
-	}
-	snap.Error = &encodingstate.Issue{
-		Title:      e.Title,
-		Message:    e.Message,
-		Context:    e.Context,
-		Suggestion: e.Suggestion,
-	}
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	if err := r.store.UpdateProgress(r.item); err != nil {
+	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.Error = &encodingstate.Issue{
+			Title:      e.Title,
+			Message:    e.Message,
+			Context:    e.Context,
+			Suggestion: e.Suggestion,
+		}
+	}); err != nil {
 		r.logger.Warn("progress persistence failed",
 			"event_type", "progress_persist_failed",
 			"error_hint", "encoding error state not persisted to queue",
