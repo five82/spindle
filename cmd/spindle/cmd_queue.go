@@ -29,6 +29,26 @@ func newQueueCmd() *cobra.Command {
 	return cmd
 }
 
+func parseQueueID(arg string) (int64, error) {
+	id, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid item ID: %s", arg)
+	}
+	return id, nil
+}
+
+func parseQueueIDs(args []string) ([]int64, error) {
+	ids := make([]int64, 0, len(args))
+	for _, arg := range args {
+		id, err := parseQueueID(arg)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func newQueueListCmd() *cobra.Command {
 	var stages []string
 	cmd := &cobra.Command{
@@ -103,9 +123,9 @@ func newQueueShowCmd() *cobra.Command {
 		Short: "Show detailed information for a queue item",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			id, err := strconv.ParseInt(args[0], 10, 64)
+			id, err := parseQueueID(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid item ID: %s", args[0])
+				return err
 			}
 
 			acc, err := openQueueAccess()
@@ -213,11 +233,11 @@ func newQueueClearCmd() *cobra.Command {
 				return nil
 			}
 
-			for _, arg := range args {
-				id, err := strconv.ParseInt(arg, 10, 64)
-				if err != nil {
-					return fmt.Errorf("invalid item ID: %s", arg)
-				}
+			ids, err := parseQueueIDs(args)
+			if err != nil {
+				return err
+			}
+			for _, id := range ids {
 				if _, err := acc.Remove(id); err != nil {
 					fmt.Fprintf(os.Stderr, "%s could not remove item %d: %v\n", warnStyle("Warning:"), id, err)
 				} else {
@@ -248,9 +268,9 @@ func newQueueRetryCmd() *cobra.Command {
 			}
 
 			if episode != "" {
-				id, err := strconv.ParseInt(args[0], 10, 64)
+				id, err := parseQueueID(args[0])
 				if err != nil {
-					return fmt.Errorf("invalid item ID: %s", args[0])
+					return err
 				}
 				result, err := acc.RetryEpisode(id, episode)
 				if err != nil {
@@ -281,13 +301,9 @@ func newQueueRetryCmd() *cobra.Command {
 				return nil
 			}
 
-			var ids []int64
-			for _, arg := range args {
-				id, err := strconv.ParseInt(arg, 10, 64)
-				if err != nil {
-					return fmt.Errorf("invalid item ID: %s", arg)
-				}
-				ids = append(ids, id)
+			ids, err := parseQueueIDs(args)
+			if err != nil {
+				return err
 			}
 
 			count, err := acc.Retry(ids...)
@@ -316,13 +332,9 @@ func newQueueStopCmd() *cobra.Command {
 				return err
 			}
 
-			var ids []int64
-			for _, arg := range args {
-				id, err := strconv.ParseInt(arg, 10, 64)
-				if err != nil {
-					return fmt.Errorf("invalid item ID: %s", arg)
-				}
-				ids = append(ids, id)
+			ids, err := parseQueueIDs(args)
+			if err != nil {
+				return err
 			}
 
 			if _, err := acc.Stop(ids...); err != nil {

@@ -12,7 +12,6 @@ import (
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/queueaccess"
-	"github.com/five82/spindle/internal/ripcache"
 )
 
 // Global flags.
@@ -128,15 +127,10 @@ func buildLogger() *slog.Logger {
 // first non-metadata file in that cache entry directory.
 func resolveTarget(target string) (string, error) {
 	if num, err := strconv.Atoi(target); err == nil && num >= 1 {
-		rcStore := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
-		entries, listErr := rcStore.List()
-		if listErr != nil {
-			return "", listErr
+		entry, err := cacheEntryByNumber(num)
+		if err != nil {
+			return "", err
 		}
-		if num > len(entries) {
-			return "", fmt.Errorf("entry %d not found (have %d entries)", num, len(entries))
-		}
-		entry := entries[num-1]
 		entryDir := filepath.Join(cfg.RipCacheDir(), entry.Fingerprint)
 		dirEntries, err := os.ReadDir(entryDir)
 		if err != nil {

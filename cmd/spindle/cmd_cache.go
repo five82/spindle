@@ -284,6 +284,26 @@ func newCacheStatsCmd() *cobra.Command {
 	}
 }
 
+func cacheEntryByNumber(num int) (ripcache.EntryMetadata, error) {
+	store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
+	entries, err := store.List()
+	if err != nil {
+		return ripcache.EntryMetadata{}, err
+	}
+	if num > len(entries) {
+		return ripcache.EntryMetadata{}, fmt.Errorf("entry %d not found (have %d entries)", num, len(entries))
+	}
+	return entries[num-1], nil
+}
+
+func parseCacheEntryNumber(arg string) (int, error) {
+	num, err := strconv.Atoi(arg)
+	if err != nil || num < 1 {
+		return 0, fmt.Errorf("invalid entry number: %s", arg)
+	}
+	return num, nil
+}
+
 func newCacheProcessCmd() *cobra.Command {
 	var allowDuplicate bool
 	cmd := &cobra.Command{
@@ -291,21 +311,15 @@ func newCacheProcessCmd() *cobra.Command {
 		Short: "Queue a cached rip for processing",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			num, err := strconv.Atoi(args[0])
-			if err != nil || num < 1 {
-				return fmt.Errorf("invalid entry number: %s", args[0])
-			}
-
-			rcStore := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
-			entries, err := rcStore.List()
+			num, err := parseCacheEntryNumber(args[0])
 			if err != nil {
 				return err
 			}
-			if num > len(entries) {
-				return fmt.Errorf("entry %d not found (have %d entries)", num, len(entries))
-			}
 
-			entry := entries[num-1]
+			entry, err := cacheEntryByNumber(num)
+			if err != nil {
+				return err
+			}
 
 			logger := buildLogger()
 
@@ -355,21 +369,17 @@ func newCacheRemoveCmd() *cobra.Command {
 		Short: "Remove a specific cache entry",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			num, err := strconv.Atoi(args[0])
-			if err != nil || num < 1 {
-				return fmt.Errorf("invalid entry number: %s", args[0])
-			}
-
-			store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
-			entries, err := store.List()
+			num, err := parseCacheEntryNumber(args[0])
 			if err != nil {
 				return err
 			}
-			if num > len(entries) {
-				return fmt.Errorf("entry %d not found (have %d entries)", num, len(entries))
+
+			entry, err := cacheEntryByNumber(num)
+			if err != nil {
+				return err
 			}
 
-			entry := entries[num-1]
+			store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 			if err := store.Remove(entry.Fingerprint); err != nil {
 				return err
 			}
