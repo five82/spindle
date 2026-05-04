@@ -60,6 +60,74 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadMuxIntoMKVDefaultAndOverride(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name: "absent defaults true",
+			content: `
+[tmdb]
+api_key = "from-file"
+`,
+			want: true,
+		},
+		{
+			name: "commented defaults true",
+			content: `
+[tmdb]
+api_key = "from-file"
+
+[subtitles]
+# mux_into_mkv = false
+`,
+			want: true,
+		},
+		{
+			name: "explicit false preserved",
+			content: `
+[tmdb]
+api_key = "from-file"
+
+[subtitles]
+mux_into_mkv = false
+`,
+			want: false,
+		},
+		{
+			name: "explicit true preserved",
+			content: `
+[tmdb]
+api_key = "from-file"
+
+[subtitles]
+mux_into_mkv = true
+`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(dir, tt.name+".toml")
+			if err := os.WriteFile(configPath, []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, err := Load(configPath, nil)
+			if err != nil {
+				t.Fatalf("Load failed: %v", err)
+			}
+			if cfg.Subtitles.MuxIntoMKV != tt.want {
+				t.Fatalf("MuxIntoMKV = %v, want %v", cfg.Subtitles.MuxIntoMKV, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateMissingRequiredFields(t *testing.T) {
 	cfg := &Config{}
 	applyDefaults(cfg)

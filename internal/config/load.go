@@ -24,15 +24,15 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 		return nil, err
 	}
 
-	cfg.SourcePath = resolvedPath
-
+	var raw rawConfig
 	if data != nil {
-		if err := toml.Unmarshal(data, cfg); err != nil {
+		if err := toml.Unmarshal(data, &raw); err != nil {
 			return nil, fmt.Errorf("config: parse TOML: %w", err)
 		}
 	}
+	*cfg = raw.toConfig()
+	cfg.SourcePath = resolvedPath
 
-	applyMuxDefault(data, cfg)
 	applyDefaults(cfg)
 
 	envKeys := collectEnvOverrides(cfg)
@@ -55,6 +55,78 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+type rawConfig struct {
+	Paths         PathsConfig         `toml:"paths"`
+	API           APIConfig           `toml:"api"`
+	TMDB          TMDBConfig          `toml:"tmdb"`
+	Jellyfin      JellyfinConfig      `toml:"jellyfin"`
+	Library       LibraryConfig       `toml:"library"`
+	Notifications NotificationsConfig `toml:"notifications"`
+	Subtitles     rawSubtitlesConfig  `toml:"subtitles"`
+	RipCache      RipCacheConfig      `toml:"rip_cache"`
+	DiscIDCache   DiscIDCacheConfig   `toml:"disc_id_cache"`
+	MakeMKV       MakeMKVConfig       `toml:"makemkv"`
+	Encoding      EncodingConfig      `toml:"encoding"`
+	LLM           LLMConfig           `toml:"llm"`
+	Commentary    CommentaryConfig    `toml:"commentary"`
+	ContentID     ContentIDConfig     `toml:"content_id"`
+	Logging       LoggingConfig       `toml:"logging"`
+}
+
+type rawSubtitlesConfig struct {
+	Enabled                bool     `toml:"enabled"`
+	MuxIntoMKV             *bool    `toml:"mux_into_mkv"`
+	WhisperXModel          string   `toml:"whisperx_model"`
+	WhisperXCUDAEnabled    bool     `toml:"whisperx_cuda_enabled"`
+	WhisperXVADMethod      string   `toml:"whisperx_vad_method"`
+	WhisperXHFToken        string   `toml:"whisperx_hf_token"`
+	OpenSubtitlesEnabled   bool     `toml:"opensubtitles_enabled"`
+	OpenSubtitlesAPIKey    string   `toml:"opensubtitles_api_key"`
+	OpenSubtitlesUserAgent string   `toml:"opensubtitles_user_agent"`
+	OpenSubtitlesUserToken string   `toml:"opensubtitles_user_token"`
+	OpenSubtitlesLanguages []string `toml:"opensubtitles_languages"`
+}
+
+func (r rawConfig) toConfig() Config {
+	return Config{
+		Paths:         r.Paths,
+		API:           r.API,
+		TMDB:          r.TMDB,
+		Jellyfin:      r.Jellyfin,
+		Library:       r.Library,
+		Notifications: r.Notifications,
+		Subtitles:     r.Subtitles.toConfig(),
+		RipCache:      r.RipCache,
+		DiscIDCache:   r.DiscIDCache,
+		MakeMKV:       r.MakeMKV,
+		Encoding:      r.Encoding,
+		LLM:           r.LLM,
+		Commentary:    r.Commentary,
+		ContentID:     r.ContentID,
+		Logging:       r.Logging,
+	}
+}
+
+func (r rawSubtitlesConfig) toConfig() SubtitlesConfig {
+	muxIntoMKV := true
+	if r.MuxIntoMKV != nil {
+		muxIntoMKV = *r.MuxIntoMKV
+	}
+	return SubtitlesConfig{
+		Enabled:                r.Enabled,
+		MuxIntoMKV:             muxIntoMKV,
+		WhisperXModel:          r.WhisperXModel,
+		WhisperXCUDAEnabled:    r.WhisperXCUDAEnabled,
+		WhisperXVADMethod:      r.WhisperXVADMethod,
+		WhisperXHFToken:        r.WhisperXHFToken,
+		OpenSubtitlesEnabled:   r.OpenSubtitlesEnabled,
+		OpenSubtitlesAPIKey:    r.OpenSubtitlesAPIKey,
+		OpenSubtitlesUserAgent: r.OpenSubtitlesUserAgent,
+		OpenSubtitlesUserToken: r.OpenSubtitlesUserToken,
+		OpenSubtitlesLanguages: r.OpenSubtitlesLanguages,
+	}
 }
 
 // findAndRead locates and reads the config file. Returns nil data if no file found.
@@ -156,18 +228,6 @@ func applyDefaults(cfg *Config) {
 	if len(cfg.Subtitles.OpenSubtitlesLanguages) == 0 {
 		cfg.Subtitles.OpenSubtitlesLanguages = []string{"en"}
 	}
-	// mux_into_mkv defaults to true; TOML bool zero value is false,
-	// so we only set the default when the config was not explicitly parsed.
-	// Since go-toml/v2 leaves the field at zero when absent, we handle this
-	// by always defaulting to true when the parsed value is false AND the
-	// field was not explicitly set. However, since we cannot distinguish
-	// "explicitly set to false" from "absent" without a pointer/sentinel,
-	// we accept that MuxIntoMKV defaults to true in applyDefaults only
-	// when the entire subtitles section has default values.
-	// For simplicity, we just note this as a documented behavior: users
-	// must explicitly set mux_into_mkv = false to disable it.
-	// We handle this via a separate mechanism below.
-
 	// [rip_cache]
 	if cfg.RipCache.MaxGiB == 0 {
 		cfg.RipCache.MaxGiB = 150
@@ -263,33 +323,6 @@ func applyDefaults(cfg *Config) {
 	if cfg.Logging.RetentionDays == 0 {
 		cfg.Logging.RetentionDays = 60
 	}
-}
-
-// applyMuxDefault is called after TOML parsing to handle the mux_into_mkv default.
-// This is handled separately in the TOML unmarshaling since the zero value (false)
-// conflicts with the desired default (true).
-func applyMuxDefault(data []byte, cfg *Config) {
-	// Default to true unless the config explicitly sets mux_into_mkv.
-	// We look for an uncommented "mux_into_mkv" line to distinguish
-	// "absent/commented" (apply default true) from "explicitly set to false".
-	if data == nil || !hasUncommentedKey(data, "mux_into_mkv") {
-		cfg.Subtitles.MuxIntoMKV = true
-	}
-}
-
-// hasUncommentedKey returns true if data contains an uncommented TOML
-// assignment for the given key (i.e., a line matching "key = ...").
-func hasUncommentedKey(data []byte, key string) bool {
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if strings.HasPrefix(trimmed, key) && strings.Contains(trimmed, "=") {
-			return true
-		}
-	}
-	return false
 }
 
 // collectEnvOverrides applies environment variable overrides to config fields
