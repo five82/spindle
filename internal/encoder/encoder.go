@@ -75,9 +75,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return err
 	}
 
-	// Project completed asset paths into queue convenience fields, then persist.
-	sess.SyncAssetPaths()
-
 	// Persist envelope.
 	if err := sess.Save(); err != nil {
 		return err

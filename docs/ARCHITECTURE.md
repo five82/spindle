@@ -57,7 +57,6 @@ The queue stores:
 - Progress fields and encoding snapshot JSON.
 - Disc fingerprint and metadata.
 - The RipSpec envelope as opaque JSON text.
-- Convenience paths for ripped, encoded, and final files.
 
 Implementation source: `internal/queue`.
 
@@ -126,9 +125,9 @@ The current package layout is intentionally simple:
 - `internal/config`, `queue`, `ripspec`, `stage`, `mediameta`: core
   configuration, data, and stage abstractions. `mediameta` owns media naming
   and library-path projection. `stage.Session` centralizes per-stage RipSpec
-  persistence, asset-to-queue path projection, progress updates, active episode
-  bookkeeping, and review-state mutation; the stage executor centralizes common
-  in-progress, completion, degraded, cancellation, and failure persistence.
+  persistence, progress updates, active episode bookkeeping, and review-state
+  mutation; the stage executor centralizes common in-progress, completion,
+  degraded, cancellation, and failure persistence.
 - `internal/daemon`, `daemonrun`, `daemonctl`, `workflow`, `stageexec`: runtime
   orchestration and daemon control.
 - `internal/identify`, `ripper`, `contentid`, `encoder`, `audioanalysis`,

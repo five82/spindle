@@ -56,35 +56,6 @@ func TestSessionSaveWithoutStoreEncodesRipSpec(t *testing.T) {
 	}
 }
 
-func TestSessionSyncAssetPaths(t *testing.T) {
-	item := &queue.Item{}
-	s, err := NewSession(context.Background(), nil, item)
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
-	s.SetEnvelope(&ripspec.Envelope{Version: ripspec.CurrentVersion})
-
-	s.RecordAssetSuccess(ripspec.AssetKindRipped, ripspec.Asset{EpisodeKey: "s01e01", Path: "first-rip.mkv"})
-	s.RecordAssetSuccess(ripspec.AssetKindRipped, ripspec.Asset{EpisodeKey: "s01e02", Path: "second-rip.mkv"})
-	s.RecordAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{EpisodeKey: "s01e01", Path: "encoded.mkv"})
-	s.RecordAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: "s01e01", Path: "final.mkv"})
-
-	if item.RippedFile != "second-rip.mkv" {
-		t.Fatalf("RippedFile = %q, want second-rip.mkv", item.RippedFile)
-	}
-	if item.EncodedFile != "encoded.mkv" {
-		t.Fatalf("EncodedFile = %q, want encoded.mkv", item.EncodedFile)
-	}
-	if item.FinalFile != "final.mkv" {
-		t.Fatalf("FinalFile = %q, want final.mkv", item.FinalFile)
-	}
-
-	s.RecordAssetFailure(ripspec.AssetKindFinal, "s01e01", "copy failed")
-	if item.FinalFile != "" {
-		t.Fatalf("FinalFile after failure = %q, want empty", item.FinalFile)
-	}
-}
-
 func TestSessionSaveAssetHelpersPersistEnvelope(t *testing.T) {
 	item := &queue.Item{}
 	s, err := NewSession(context.Background(), nil, item)
@@ -104,9 +75,6 @@ func TestSessionSaveAssetHelpersPersistEnvelope(t *testing.T) {
 	if !ok || !asset.IsCompleted() || asset.Path != "encoded.mkv" {
 		t.Fatalf("encoded asset not persisted: %#v found=%v", asset, ok)
 	}
-	if item.EncodedFile != "encoded.mkv" {
-		t.Fatalf("EncodedFile = %q, want encoded.mkv", item.EncodedFile)
-	}
 
 	if err := s.SaveAssetFailure(ripspec.AssetKindEncoded, "s01e01", "encode failed"); err != nil {
 		t.Fatalf("SaveAssetFailure: %v", err)
@@ -118,9 +86,6 @@ func TestSessionSaveAssetHelpersPersistEnvelope(t *testing.T) {
 	asset, ok = parsed.Assets.FindAsset(ripspec.AssetKindEncoded, "s01e01")
 	if !ok || !asset.IsFailed() || asset.ErrorMsg != "encode failed" {
 		t.Fatalf("failed asset not persisted: %#v found=%v", asset, ok)
-	}
-	if item.EncodedFile != "" {
-		t.Fatalf("EncodedFile after failure = %q, want empty", item.EncodedFile)
 	}
 }
 

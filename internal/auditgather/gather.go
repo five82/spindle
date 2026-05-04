@@ -38,7 +38,6 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 	}
 
 	r := &Report{
-		Item: buildItemSummary(item),
 		Paths: AuditPaths{
 			ReviewDir:  cfg.Paths.ReviewDir,
 			LibraryDir: cfg.Paths.LibraryDir,
@@ -62,6 +61,8 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 			}
 		}
 	}
+
+	r.Item = buildItemSummary(item, &env)
 
 	// Fall back to metadata JSON for media type if envelope unavailable.
 	mediaType := env.Metadata.MediaType
@@ -137,8 +138,8 @@ func (r *Report) addError(format string, args ...any) {
 	r.Errors = append(r.Errors, fmt.Sprintf(format, args...))
 }
 
-func buildItemSummary(item *queue.Item) ItemSummary {
-	return ItemSummary{
+func buildItemSummary(item *queue.Item, env *ripspec.Envelope) ItemSummary {
+	summary := ItemSummary{
 		ID:              item.ID,
 		DiscTitle:       item.DiscTitle,
 		Stage:           string(item.Stage),
@@ -152,10 +153,22 @@ func buildItemSummary(item *queue.Item) ItemSummary {
 		ProgressStage:   item.ProgressStage,
 		ProgressPercent: item.ProgressPercent,
 		ProgressMessage: item.ProgressMessage,
-		RippedFile:      item.RippedFile,
-		EncodedFile:     item.EncodedFile,
-		FinalFile:       item.FinalFile,
 	}
+	if env != nil {
+		summary.RippedFile = lastCompletedAssetPath(env.Assets.Ripped)
+		summary.EncodedFile = lastCompletedAssetPath(env.Assets.Encoded)
+		summary.FinalFile = lastCompletedAssetPath(env.Assets.Final)
+	}
+	return summary
+}
+
+func lastCompletedAssetPath(assets []ripspec.Asset) string {
+	for i := len(assets) - 1; i >= 0; i-- {
+		if assets[i].IsCompleted() {
+			return assets[i].Path
+		}
+	}
+	return ""
 }
 
 func computeStageGate(item *queue.Item, mediaType, mediaHint, discSource string) StageGate {

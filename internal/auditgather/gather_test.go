@@ -4,7 +4,37 @@ import (
 	"testing"
 
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/ripspec"
 )
+
+func TestBuildItemSummaryDerivesArtifactPathsFromRipSpec(t *testing.T) {
+	item := &queue.Item{ID: 24, DiscTitle: "Disc"}
+	env := &ripspec.Envelope{
+		Assets: ripspec.Assets{
+			Ripped: []ripspec.Asset{
+				{EpisodeKey: "s01e01", Path: "first-rip.mkv", Status: ripspec.AssetStatusCompleted},
+				{EpisodeKey: "s01e02", Path: "second-rip.mkv", Status: ripspec.AssetStatusCompleted},
+			},
+			Encoded: []ripspec.Asset{{EpisodeKey: "s01e02", Path: "encoded.mkv", Status: ripspec.AssetStatusCompleted}},
+			Final: []ripspec.Asset{
+				{EpisodeKey: "s01e01", Path: "failed-final.mkv", Status: ripspec.AssetStatusFailed},
+				{EpisodeKey: "s01e02", Path: "final.mkv", Status: ripspec.AssetStatusCompleted},
+			},
+		},
+	}
+
+	summary := buildItemSummary(item, env)
+
+	if summary.RippedFile != "second-rip.mkv" {
+		t.Fatalf("RippedFile = %q, want second-rip.mkv", summary.RippedFile)
+	}
+	if summary.EncodedFile != "encoded.mkv" {
+		t.Fatalf("EncodedFile = %q, want encoded.mkv", summary.EncodedFile)
+	}
+	if summary.FinalFile != "final.mkv" {
+		t.Fatalf("FinalFile = %q, want final.mkv", summary.FinalFile)
+	}
+}
 
 func TestParseLogLine_MatchesDiscIDCacheDecisionByItemID(t *testing.T) {
 	item := &queue.Item{ID: 24, DiscFingerprint: "abc123", DiscTitle: "STAR TREK TNG S1 D1"}

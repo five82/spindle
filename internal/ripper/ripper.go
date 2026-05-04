@@ -548,8 +548,6 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 		}
 	}
 
-	sess.SyncAssetPaths()
-
 	// Validate all ripped artifacts with ffprobe.
 	visited := make(map[string]struct{})
 	var validationErrors int
