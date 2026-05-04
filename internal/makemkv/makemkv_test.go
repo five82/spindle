@@ -244,9 +244,9 @@ func TestNormalizeDevice(t *testing.T) {
 
 func TestHasForcedEnglishSubtitles(t *testing.T) {
 	tests := []struct {
-		name  string
-		info  *DiscInfo
-		want  bool
+		name string
+		info *DiscInfo
+		want bool
 	}{
 		{
 			name: "forced english subtitle",
@@ -386,7 +386,7 @@ func TestParseRobotOutputSINFO(t *testing.T) {
 	}
 }
 
-func TestSplitFields(t *testing.T) {
+func TestSplitRobotFields(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  string
@@ -414,9 +414,9 @@ func TestSplitFields(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := splitFields(tt.input, tt.n)
+			got := splitRobotFields(tt.input, tt.n)
 			if len(got) != tt.wantN {
-				t.Fatalf("splitFields returned %d fields, want %d: %v", len(got), tt.wantN, got)
+				t.Fatalf("splitRobotFields returned %d fields, want %d: %v", len(got), tt.wantN, got)
 			}
 			if got[0] != tt.want0 {
 				t.Errorf("field[0] = %q, want %q", got[0], tt.want0)
@@ -472,14 +472,14 @@ func TestParseMSG(t *testing.T) {
 			},
 		},
 		{
-			name:     "non-MSG prefix ignored",
-			line:     `PRGV:100,200,65536`,
-			wantOK:   false,
+			name:   "non-MSG prefix ignored",
+			line:   `PRGV:100,200,65536`,
+			wantOK: false,
 		},
 		{
-			name:     "malformed",
-			line:     `MSG:not,a,number`,
-			wantOK:   false,
+			name:   "malformed",
+			line:   `MSG:not,a,number`,
+			wantOK: false,
 		},
 	}
 	for _, tt := range tests {
@@ -515,10 +515,10 @@ func TestParseMSG(t *testing.T) {
 	}
 }
 
-func TestSplitAllFieldsQuotedCommas(t *testing.T) {
-	// MSG lines can have many comma-separated params; splitAllFields
+func TestSplitRobotFieldsUnlimitedQuotedCommas(t *testing.T) {
+	// MSG lines can have many comma-separated params; unlimited splitting
 	// must preserve quoted commas as literal characters inside a field.
-	fields := splitAllFields(`5036,0,2,"Copy complete. 1 titles saved, 0 failed.","%1 saved, %2 failed","1","0"`)
+	fields := splitRobotFields(`5036,0,2,"Copy complete. 1 titles saved, 0 failed.","%1 saved, %2 failed","1","0"`, 0)
 	if len(fields) != 7 {
 		t.Fatalf("expected 7 fields, got %d: %v", len(fields), fields)
 	}

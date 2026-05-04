@@ -429,7 +429,7 @@ func splitRobotLine(line string) (string, string, bool) {
 
 // parseCINFO handles CINFO lines: attrID,attrType,value
 func parseCINFO(body string, info *DiscInfo) {
-	fields := splitFields(body, 3)
+	fields := splitRobotFields(body, 3)
 	if len(fields) < 3 {
 		return
 	}
@@ -445,7 +445,7 @@ func parseCINFO(body string, info *DiscInfo) {
 
 // parseTINFO handles TINFO lines: titleID,attrID,attrType,value
 func parseTINFO(body string, titles map[int]*titleAttrs) {
-	fields := splitFields(body, 4)
+	fields := splitRobotFields(body, 4)
 	if len(fields) < 4 {
 		return
 	}
@@ -486,7 +486,7 @@ func parseTINFO(body string, titles map[int]*titleAttrs) {
 // parseSINFO parses SINFO (stream info) lines into Track structures on titleAttrs.
 // Format: titleID,streamID,attrID,reserved,"value"
 func parseSINFO(body string, titles map[int]*titleAttrs) {
-	fields := splitFields(body, 5)
+	fields := splitRobotFields(body, 5)
 	if len(fields) < 5 {
 		return
 	}
@@ -592,11 +592,8 @@ func parseMSG(line string) (ripMessage, bool) {
 	if !ok || prefix != "MSG" {
 		return ripMessage{}, false
 	}
-	// Split aggressively — MSG lines can have many comma-separated
-	// params. splitFields stops at n-1 and puts the remainder into the
-	// last field, which would glue all params together. Do a manual
-	// quote-aware split instead.
-	fields := splitAllFields(body)
+	// Split aggressively; MSG lines can have many comma-separated params.
+	fields := splitRobotFields(body, 0)
 	if len(fields) < 4 {
 		return ripMessage{}, false
 	}
@@ -623,29 +620,6 @@ func parseMSG(line string) (ripMessage, bool) {
 	return msg, true
 }
 
-// splitAllFields splits a comma-separated robot-protocol body into all
-// fields, honoring double-quoted values that may contain commas.
-func splitAllFields(s string) []string {
-	var fields []string
-	var current strings.Builder
-	inQuote := false
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		switch {
-		case ch == '"':
-			inQuote = !inQuote
-			current.WriteByte(ch)
-		case ch == ',' && !inQuote:
-			fields = append(fields, current.String())
-			current.Reset()
-		default:
-			current.WriteByte(ch)
-		}
-	}
-	fields = append(fields, current.String())
-	return fields
-}
-
 // parsePRGV parses a PRGV progress line and returns a RipProgress.
 // Format: PRGV:current,total,max
 func parsePRGV(line string, titleID int) (RipProgress, bool) {
@@ -653,7 +627,7 @@ func parsePRGV(line string, titleID int) (RipProgress, bool) {
 	if !ok || prefix != "PRGV" {
 		return RipProgress{}, false
 	}
-	fields := splitFields(body, 3)
+	fields := splitRobotFields(body, 3)
 	if len(fields) < 3 {
 		return RipProgress{}, false
 	}
@@ -705,9 +679,15 @@ func parseDuration(s string) int {
 	return h*3600 + m*60 + sec
 }
 
-// splitFields splits a comma-separated string into at most n fields.
-// Handles quoted values containing commas.
-func splitFields(s string, n int) []string {
+// splitRobotFields splits a comma-separated robot-protocol body, honoring
+// double-quoted values that may contain commas. A positive limit returns at
+// most that many fields, with the last field receiving the unsplit remainder.
+// A zero or negative limit returns all fields.
+func splitRobotFields(s string, limit int) []string {
+	if limit == 1 {
+		return []string{s}
+	}
+
 	var fields []string
 	var current strings.Builder
 	inQuote := false
@@ -721,8 +701,7 @@ func splitFields(s string, n int) []string {
 		case ch == ',' && !inQuote:
 			fields = append(fields, current.String())
 			current.Reset()
-			if len(fields) == n-1 {
-				// Last field gets the remainder.
+			if limit > 0 && len(fields) == limit-1 {
 				fields = append(fields, s[i+1:])
 				return fields
 			}
