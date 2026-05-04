@@ -407,30 +407,6 @@ func ProbeDisc(ctx context.Context, device string) (*DiscEvent, error) {
 	}, nil
 }
 
-// EjectDisc ejects the disc in the given device.
-func EjectDisc(ctx context.Context, device string) error {
-	//nolint:gosec // device path is validated by caller
-	cmd := exec.CommandContext(ctx, "eject", device)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("eject %s: %w", device, err)
-	}
-	return nil
-}
-
-// ValidateLabel checks that a disc label is non-empty and contains printable
-// characters. Labels that are all whitespace or control characters are rejected.
-func ValidateLabel(label string) bool {
-	if label == "" {
-		return false
-	}
-	for _, r := range label {
-		if r > ' ' && r != 0x7f {
-			return true
-		}
-	}
-	return false
-}
-
 // IsUnusableLabel returns true if the label is semantically useless for
 // identification: empty, a known generic name, a known generic prefix, or
 // all digits.

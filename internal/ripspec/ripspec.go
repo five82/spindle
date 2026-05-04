@@ -259,24 +259,6 @@ func (e *Envelope) AssetCounts() (expected, ripped, encoded, final int) {
 	return
 }
 
-// MissingEpisodes returns episode keys that do not have a completed asset at
-// the given stage. Returns nil for movies. Stage is one of "ripped",
-// "encoded", "subtitled", or "final".
-func (e *Envelope) MissingEpisodes(stage string) []string {
-	if e.Metadata.MediaType == "movie" {
-		return nil
-	}
-
-	var missing []string
-	for _, ep := range e.Episodes {
-		asset, found := e.Assets.FindAsset(stage, ep.Key)
-		if !found || !asset.IsCompleted() {
-			missing = append(missing, ep.Key)
-		}
-	}
-	return missing
-}
-
 // AppendReviewReason marks an episode for review and appends a human-readable
 // reason, separated by "; " when multiple reasons accumulate.
 func (e *Episode) AppendReviewReason(reason string) {
@@ -501,12 +483,6 @@ func HasResolvedEpisodes(episodes []Episode) bool {
 		}
 	}
 	return false
-}
-
-// HasUnresolvedEpisodes returns true if any episode has not been resolved to
-// an episode number.
-func HasUnresolvedEpisodes(episodes []Episode) bool {
-	return countUnresolved(episodes) > 0
 }
 
 // CountUnresolvedEpisodes returns the number of episodes without a resolved

@@ -46,12 +46,12 @@ func New(apiKey, baseURL, language string, logger *slog.Logger) *Client {
 // SearchResult represents a single TMDB search result.
 type SearchResult struct {
 	ID            int     `json:"id"`
-	Title         string  `json:"title"`           // movie
-	Name          string  `json:"name"`            // TV
+	Title         string  `json:"title"` // movie
+	Name          string  `json:"name"`  // TV
 	Overview      string  `json:"overview"`
-	ReleaseDate   string  `json:"release_date"`    // movie
-	FirstAirDate  string  `json:"first_air_date"`  // TV
-	MediaType     string  `json:"media_type"`      // from multi search
+	ReleaseDate   string  `json:"release_date"`   // movie
+	FirstAirDate  string  `json:"first_air_date"` // TV
+	MediaType     string  `json:"media_type"`     // from multi search
 	VoteAverage   float64 `json:"vote_average"`
 	VoteCount     int     `json:"vote_count"`
 	OriginalTitle string  `json:"original_title"`
@@ -76,35 +76,6 @@ func (r SearchResult) Year() string {
 		return date[:4]
 	}
 	return ""
-}
-
-// MovieDetail contains extended movie information.
-type MovieDetail struct {
-	ID          int     `json:"id"`
-	Title       string  `json:"title"`
-	Overview    string  `json:"overview"`
-	ReleaseDate string  `json:"release_date"`
-	IMDBID      string  `json:"imdb_id"`
-	Runtime     int     `json:"runtime"`
-	VoteAverage float64 `json:"vote_average"`
-	VoteCount   int     `json:"vote_count"`
-}
-
-// TVDetail contains extended TV show information.
-type TVDetail struct {
-	ID              int          `json:"id"`
-	Name            string       `json:"name"`
-	Overview        string       `json:"overview"`
-	FirstAirDate    string       `json:"first_air_date"`
-	VoteAverage     float64      `json:"vote_average"`
-	VoteCount       int          `json:"vote_count"`
-	NumberOfSeasons int          `json:"number_of_seasons"`
-	ExternalIDs     *ExternalIDs `json:"external_ids,omitempty"`
-}
-
-// ExternalIDs contains external service IDs.
-type ExternalIDs struct {
-	IMDBID string `json:"imdb_id"`
 }
 
 // Season contains TV season information.
@@ -167,21 +138,6 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, result
 	return nil
 }
 
-// SearchMovie searches for movies by title with an optional year filter.
-func (c *Client) SearchMovie(ctx context.Context, query, year string) ([]SearchResult, error) {
-	params := url.Values{}
-	params.Set("query", query)
-	if year != "" {
-		params.Set("year", year)
-	}
-
-	var resp searchResponse
-	if err := c.get(ctx, "/search/movie", params, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Results, nil
-}
-
 // SearchTV searches for TV shows by name with an optional year filter.
 func (c *Client) SearchTV(ctx context.Context, query, year string) ([]SearchResult, error) {
 	params := url.Values{}
@@ -210,27 +166,6 @@ func (c *Client) SearchMulti(ctx context.Context, query string) ([]SearchResult,
 		return nil, err
 	}
 	return resp.Results, nil
-}
-
-// GetMovie retrieves extended movie information by ID.
-func (c *Client) GetMovie(ctx context.Context, id int) (*MovieDetail, error) {
-	var detail MovieDetail
-	if err := c.get(ctx, fmt.Sprintf("/movie/%d", id), nil, &detail); err != nil {
-		return nil, err
-	}
-	return &detail, nil
-}
-
-// GetTV retrieves extended TV show information by ID, including external IDs.
-func (c *Client) GetTV(ctx context.Context, id int) (*TVDetail, error) {
-	params := url.Values{}
-	params.Set("append_to_response", "external_ids")
-
-	var detail TVDetail
-	if err := c.get(ctx, fmt.Sprintf("/tv/%d", id), params, &detail); err != nil {
-		return nil, err
-	}
-	return &detail, nil
 }
 
 // GetSeason retrieves TV season information including episodes.

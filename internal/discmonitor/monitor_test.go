@@ -83,28 +83,6 @@ func TestClassifyDisc(t *testing.T) {
 	}
 }
 
-func TestValidateLabel(t *testing.T) {
-	tests := []struct {
-		label string
-		want  bool
-	}{
-		{"MY_DISC", true},
-		{"disc 1", true},
-		{"a", true},
-		{"", false},
-		{"   ", false},
-		{"\t\n", false},
-		{"\x00\x01\x02", false},
-		{" hello ", true},
-	}
-	for _, tt := range tests {
-		got := ValidateLabel(tt.label)
-		if got != tt.want {
-			t.Errorf("ValidateLabel(%q) = %v, want %v", tt.label, got, tt.want)
-		}
-	}
-}
-
 func TestIsUnusableLabel(t *testing.T) {
 	tests := []struct {
 		label string

@@ -266,35 +266,6 @@ func TestHasResolvedEpisodes(t *testing.T) {
 	}
 }
 
-func TestHasUnresolvedEpisodes(t *testing.T) {
-	unresolved := []Episode{
-		{Key: "s01_001", Episode: 0},
-	}
-	if !HasUnresolvedEpisodes(unresolved) {
-		t.Error("HasUnresolvedEpisodes = false for placeholder, want true")
-	}
-
-	mixed := []Episode{
-		{Key: "s01e01", Episode: 1},
-		{Key: "s01_002", Episode: 0},
-	}
-	if !HasUnresolvedEpisodes(mixed) {
-		t.Error("HasUnresolvedEpisodes = false for mixed, want true")
-	}
-
-	resolved := []Episode{
-		{Key: "s01e01", Episode: 1},
-		{Key: "s01e02", Episode: 2},
-	}
-	if HasUnresolvedEpisodes(resolved) {
-		t.Error("HasUnresolvedEpisodes = true for resolved, want false")
-	}
-
-	if HasUnresolvedEpisodes(nil) {
-		t.Error("HasUnresolvedEpisodes should be false for nil")
-	}
-}
-
 func TestExpectedCountMovieVsTV(t *testing.T) {
 	movie := Envelope{
 		Metadata: Metadata{MediaType: "movie"},
@@ -348,36 +319,6 @@ func TestAssetCounts(t *testing.T) {
 	}
 	if final != 0 {
 		t.Errorf("final = %d, want 0", final)
-	}
-}
-
-func TestMissingEpisodes(t *testing.T) {
-	env := Envelope{
-		Metadata: Metadata{MediaType: "tv"},
-		Episodes: []Episode{
-			{Key: "s01e01"},
-			{Key: "s01e02"},
-			{Key: "s01e03"},
-		},
-		Assets: Assets{
-			Ripped: []Asset{
-				{EpisodeKey: "s01e01", Path: "/r/1.mkv", Status: "ok"},
-			},
-		},
-	}
-
-	missing := env.MissingEpisodes(AssetKindRipped)
-	if len(missing) != 2 {
-		t.Fatalf("MissingEpisodes len = %d, want 2", len(missing))
-	}
-	if missing[0] != "s01e02" || missing[1] != "s01e03" {
-		t.Errorf("MissingEpisodes = %v, want [s01e02 s01e03]", missing)
-	}
-
-	// Movies always return nil.
-	movieEnv := Envelope{Metadata: Metadata{MediaType: "movie"}}
-	if movieEnv.MissingEpisodes(AssetKindRipped) != nil {
-		t.Error("MissingEpisodes for movie should be nil")
 	}
 }
 

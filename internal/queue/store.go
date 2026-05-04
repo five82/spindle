@@ -74,29 +74,6 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// OpenReadOnly opens a read-only SQLite database with query_only pragma.
-func OpenReadOnly(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?mode=ro")
-	if err != nil {
-		return nil, fmt.Errorf("open queue db read-only: %w", err)
-	}
-
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA query_only=ON",
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("set pragma %q: %w", p, err)
-		}
-	}
-
-	return &Store{db: db}, nil
-}
-
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
@@ -411,11 +388,6 @@ func (s *Store) List(statuses ...Stage) ([]*Item, error) {
 	return collectItems(rows)
 }
 
-// ItemsByStatus returns items matching a single status, ordered by created_at.
-func (s *Store) ItemsByStatus(status Stage) ([]*Item, error) {
-	return s.List(status)
-}
-
 // NextForStatuses returns the oldest item with in_progress=0 matching any status.
 func (s *Store) NextForStatuses(statuses ...Stage) (*Item, error) {
 	if len(statuses) == 0 {
@@ -521,16 +493,6 @@ func (s *Store) ActiveItemCount() (int, error) {
 		return 0, fmt.Errorf("active item count: %w", err)
 	}
 	return count, nil
-}
-
-// HasActiveItems returns true if any item is in a non-terminal stage
-// (not completed or failed).
-func (s *Store) HasActiveItems() (bool, error) {
-	count, err := s.ActiveItemCount()
-	if err != nil {
-		return false, fmt.Errorf("has active items: %w", err)
-	}
-	return count > 0, nil
 }
 
 // CheckHealth performs a full diagnostic check on the queue database.
