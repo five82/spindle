@@ -328,10 +328,10 @@ func (h *Handler) applySubtitleReviewIssues(logger *slog.Logger, sess *stage.Ses
 	for _, issue := range validation.Issues {
 		requiresReview := reviewIssueSet[issue]
 		if !requiresReview {
-			logger.Debug("SRT validation observation",
+			logger.Info("SRT validation observation",
 				"decision_type", logs.DecisionSRTValidation,
 				"decision_result", issue,
-				"decision_reason", "automated quality check below review threshold",
+				"decision_reason", "automated quality check recorded without review routing",
 				"episode_key", key,
 				"requires_review", false,
 			)

@@ -174,6 +174,24 @@ func TestRetimeDisplayCues_ExpandsShortCueIntoGapBudgets(t *testing.T) {
 	}
 }
 
+func TestRetimeDisplayCues_UsesWholeGapWhenNeighborDoesNotNeedIt(t *testing.T) {
+	cues := []srtutil.Cue{
+		{Index: 1, Start: 0.0, End: 1.0, Text: "Intro"},
+		{Index: 2, Start: 4.0, End: 4.5, Text: "This cue needs the whole previous gap."},
+	}
+	changed := retimeDisplayCues(cues, 4.6)
+	if changed != 1 {
+		t.Fatalf("retimeDisplayCues() changed %d cues, want 1", changed)
+	}
+	if cues[1].Start < cues[0].End {
+		t.Fatalf("cue overlaps previous: %.3f < %.3f", cues[1].Start, cues[0].End)
+	}
+	cps := float64(len([]rune(normalizeCueWhitespace(cues[1].Text)))) / (cues[1].End - cues[1].Start)
+	if cps > preferredSubtitleReadingSpeed+0.01 {
+		t.Fatalf("expected repaired cue cps <= %.1f, got %.2f", preferredSubtitleReadingSpeed, cps)
+	}
+}
+
 func TestRetimeDisplayCues_TrimsLowInformationLongCue(t *testing.T) {
 	cues := []srtutil.Cue{{
 		Index: 1,

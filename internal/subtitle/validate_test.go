@@ -308,7 +308,7 @@ func TestValidateCuesDetailed_MinorQCDoesNotRequireReview(t *testing.T) {
 	}
 }
 
-func TestValidateCuesDetailed_SystemicQCRequiresReview(t *testing.T) {
+func TestValidateCuesDetailed_SystemicQCDoesNotRequireReview(t *testing.T) {
 	var cues []srtutil.Cue
 	start := 0.0
 	addCue := func(duration float64, text string) {
@@ -326,8 +326,8 @@ func TestValidateCuesDetailed_SystemicQCRequiresReview(t *testing.T) {
 	if !containsIssue(result.Issues, "high_reading_speed") {
 		t.Fatalf("expected observed high_reading_speed, got %v", result.Issues)
 	}
-	if !containsIssue(result.ReviewIssues, "high_reading_speed") {
-		t.Fatalf("expected systemic high_reading_speed to require review; review issues=%v stats=%+v", result.ReviewIssues, result.Stats)
+	if containsIssue(result.ReviewIssues, "high_reading_speed") {
+		t.Fatalf("did not expect correctable high_reading_speed to require review; review issues=%v stats=%+v", result.ReviewIssues, result.Stats)
 	}
 }
 

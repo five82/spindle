@@ -372,21 +372,6 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 
 	changed := trimLongDisplayCues(cues)
 
-	beforeBudget := make([]float64, len(cues))
-	afterBudget := make([]float64, len(cues))
-	beforeBudget[0] = min(maxDisplayExtensionPerSide, max(0, cues[0].Start-displayCueGapPadding))
-	for i := 1; i < len(cues); i++ {
-		gap := cues[i].Start - cues[i-1].End
-		usable := gap - displayCueGapPadding
-		if usable <= 0 {
-			continue
-		}
-		share := min(maxDisplayExtensionPerSide, usable/2)
-		afterBudget[i-1] = share
-		beforeBudget[i] = share
-	}
-	afterBudget[len(cues)-1] = min(maxDisplayExtensionPerSide, max(0, videoSeconds-cues[len(cues)-1].End-displayCueGapPadding))
-
 	for i := range cues {
 		text := normalizeCueWhitespace(cues[i].Text)
 		if text == "" {
@@ -404,16 +389,27 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 			continue
 		}
 
-		extendBefore := min(beforeBudget[i], need/2)
-		extendAfter := min(afterBudget[i], need-extendBefore)
+		prevEnd := 0.0
+		if i > 0 {
+			prevEnd = cues[i-1].End + displayCueGapPadding
+		}
+		nextStart := videoSeconds
+		if i < len(cues)-1 {
+			nextStart = cues[i+1].Start - displayCueGapPadding
+		}
+		beforeBudget := min(maxDisplayExtensionPerSide, max(0, cues[i].Start-prevEnd))
+		afterBudget := min(maxDisplayExtensionPerSide, max(0, nextStart-cues[i].End))
+
+		extendBefore := min(beforeBudget, need/2)
+		extendAfter := min(afterBudget, need-extendBefore)
 		remaining := need - extendBefore - extendAfter
 		if remaining > 0 {
-			extraBefore := min(beforeBudget[i]-extendBefore, remaining)
+			extraBefore := min(beforeBudget-extendBefore, remaining)
 			extendBefore += extraBefore
 			remaining -= extraBefore
 		}
 		if remaining > 0 {
-			extraAfter := min(afterBudget[i]-extendAfter, remaining)
+			extraAfter := min(afterBudget-extendAfter, remaining)
 			extendAfter += extraAfter
 		}
 		if extendBefore+extendAfter < 0.10 {

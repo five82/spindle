@@ -16,13 +16,6 @@ const (
 	minSubtitleCueDuration  = 5.0 / 6.0
 	maxSubtitleCueDuration  = 7.0
 	unbalancedLineDelta     = 16
-
-	reviewHighReadingSpeedP95Threshold = 24.0
-	reviewHighReadingSpeedCueRatio     = 0.35
-	reviewShortCueDurationRatio        = 0.10
-	reviewLongCueDurationRatio         = 0.05
-	reviewLineFormattingRatio          = 0.05
-	reviewLineFormattingMinCues        = 10
 )
 
 // ValidateSRTContent checks SRT content for quality issues. Returns a list of
@@ -150,37 +143,15 @@ func subtitleReviewIssues(issues, severe []string, stats subtitleQCStats) []stri
 	return review
 }
 
-func subtitleIssueRequiresReview(issue string, stats subtitleQCStats) bool {
+func subtitleIssueRequiresReview(issue string, _ subtitleQCStats) bool {
 	switch issue {
 	case "duration_mismatch", "sparse_subtitles", "late_first_cue":
 		return true
-	case "high_reading_speed":
-		return stats.P95CPS > reviewHighReadingSpeedP95Threshold || cueRatio(stats.HighCPSCues, stats.CueCount) > reviewHighReadingSpeedCueRatio
-	case "short_cue_duration":
-		return cueRatio(stats.ShortDurationCues, stats.CueCount) > reviewShortCueDurationRatio
-	case "long_cue_duration":
-		return cueRatio(stats.LongDurationCues, stats.CueCount) > reviewLongCueDurationRatio
-	case "too_many_lines", "line_too_long", "unbalanced_line_breaks":
-		count := 0
-		switch issue {
-		case "too_many_lines":
-			count = stats.TooManyLineCues
-		case "line_too_long":
-			count = stats.OverlongLineCues
-		case "unbalanced_line_breaks":
-			count = stats.UnbalancedLineBreakCues
-		}
-		return count >= reviewLineFormattingMinCues && cueRatio(count, stats.CueCount) > reviewLineFormattingRatio
+	case "high_reading_speed", "short_cue_duration", "long_cue_duration", "too_many_lines", "line_too_long", "unbalanced_line_breaks":
+		return false
 	default:
 		return false
 	}
-}
-
-func cueRatio(count, total int) float64 {
-	if total <= 0 || count <= 0 {
-		return 0
-	}
-	return float64(count) / float64(total)
 }
 
 func calculateSubtitleQCStats(cues []srtutil.Cue) subtitleQCStats {
