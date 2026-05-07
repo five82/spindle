@@ -1,9 +1,13 @@
 package auditgather
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/five82/spindle/internal/httpapi"
+	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -33,6 +37,32 @@ func TestBuildItemSummaryDerivesArtifactPathsFromRipSpec(t *testing.T) {
 	}
 	if summary.FinalFile != "final.mkv" {
 		t.Fatalf("FinalFile = %q, want final.mkv", summary.FinalFile)
+	}
+}
+
+func TestRedactRipCacheMetadataOmitsSerializedBlobs(t *testing.T) {
+	meta := &ripcache.EntryMetadata{
+		Version:      1,
+		Fingerprint:  "abc123",
+		DiscTitle:    "Disc",
+		CachedAt:     time.Unix(123, 0).UTC(),
+		TitleCount:   2,
+		TotalBytes:   42,
+		RipSpecData:  `{"large":"blob"}`,
+		MetadataJSON: `{"duplicate":"metadata"}`,
+	}
+
+	redacted := redactRipCacheMetadata(meta)
+	data, err := json.Marshal(redacted)
+	if err != nil {
+		t.Fatalf("marshal redacted metadata: %v", err)
+	}
+	jsonText := string(data)
+	if strings.Contains(jsonText, "ripspec_data") || strings.Contains(jsonText, "metadata_json") {
+		t.Fatalf("redacted metadata still contains serialized blobs: %s", jsonText)
+	}
+	if redacted.DiscTitle != "Disc" || redacted.TitleCount != 2 || redacted.TotalBytes != 42 {
+		t.Fatalf("redacted metadata lost summary fields: %+v", redacted)
 	}
 }
 

@@ -1,9 +1,10 @@
 package auditgather
 
 import (
+	"time"
+
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/media/ffprobe"
-	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -108,9 +109,21 @@ type StageEvent struct {
 
 // RipCacheReport holds rip cache lookup results.
 type RipCacheReport struct {
-	Path     string                  `json:"path"`
-	Found    bool                    `json:"found"`
-	Metadata *ripcache.EntryMetadata `json:"metadata,omitempty"`
+	Path     string            `json:"path"`
+	Found    bool              `json:"found"`
+	Metadata *ripCacheMetadata `json:"metadata,omitempty"`
+}
+
+// ripCacheMetadata is cache metadata safe for compact audit output. Large
+// serialized blobs are omitted because the parsed envelope already carries the
+// useful contents.
+type ripCacheMetadata struct {
+	Version     int       `json:"version"`
+	Fingerprint string    `json:"fingerprint"`
+	DiscTitle   string    `json:"disc_title"`
+	CachedAt    time.Time `json:"cached_at"`
+	TitleCount  int       `json:"title_count"`
+	TotalBytes  int64     `json:"total_bytes"`
 }
 
 // EncodingReport holds the encoding state snapshot.

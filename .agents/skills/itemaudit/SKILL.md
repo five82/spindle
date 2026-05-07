@@ -29,10 +29,10 @@ spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 ```
 
 This produces an agent-facing JSON report. The schema may evolve with this skill; treat it as diagnostic input rather than a stable public API. It contains:
-- **`item`**: Queue item summary (status, flags, paths, timestamps)
+- **`item`**: Queue item summary (`stage`, progress, review flags, paths, timestamps)
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply, resolved media type, media hint, disc source)
-- **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), and stage timing events
-- **`rip_cache`**: Cache metadata (disc title, needs_review flag). Serialized rip_spec_data and metadata_json blobs are omitted (already in parsed `envelope`).
+- **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`)
+- **`rip_cache`**: Cache metadata (disc title, cached_at, title_count, total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted (already in parsed `envelope`).
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
 - **`encoding`**: Encoding details snapshot (crop, validation, config, result). Preset settings are omitted; validation results capture pass/fail.
 - **`media`**: ffprobe output for encoded files. For TV, only the representative probe (matching majority profile, marked `representative: true`), deviation probes, and error probes are included. `media_omitted` indicates how many clean probes were dropped.
@@ -157,7 +157,7 @@ Analyze the `rip_cache` section from audit-gather output:
 1. **Verify** `rip_cache.found` is true — if false, cache may have been pruned
 2. **Check metadata**:
    - `disc_title` matches expected content
-   - `needs_review` flag status and reason
+   - `cached_at`, `title_count`, and `total_bytes` look plausible
 3. **Title selection analysis** (movies only, from `envelope.titles`):
    - Identify feature-length titles: titles with `chapters > 1` AND `duration > 3600` seconds
    - The pipeline uses multi-stage selection (`ChoosePrimaryTitle`), not simply the longest title:
@@ -175,7 +175,7 @@ Analyze the `rip_cache` section from audit-gather output:
    - Pre-episodeid, keys are placeholders (`s01_001`, `s01_002`) with `episode=0` — this is expected
    - Check for any ripped assets with `status: "failed"` or missing `path`
    - Verify ripped asset count matches episode count
-4. **Asset mapping strategy** (from `logs.decisions`): Check `decision_type=asset_mapping` — `title_file_map` is the normal path for TV, `directory_scan` is the fallback
+5. **Asset mapping strategy** (from `logs.decisions`): Check `decision_type=asset_mapping` — `title_file_map` is the normal path for TV, `directory_scan` is the fallback
 
 ### Phase 3b: Episode Identification Validation (when `phase_episode_id` is true)
 
@@ -428,7 +428,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 **Do not report as findings (these are normal):**
 - Non-sequential disc title ordering — disc layout varies by manufacturer and is irrelevant once content ID resolves episodes
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
-- Forced subtitle search returning zero candidates (covered in Phase 7)
+- Forced subtitle search returning zero candidates (covered in Phase 6)
 - Audio refinement stripping non-English tracks — that's its job
 - Subtitle `qc_observations` that are below review thresholds and have `validation_result=passed`
 
@@ -441,7 +441,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 ## Audit Report for Item #<id>
 
 **Title:** <item.disc_title>
-**Status:** <item.status> | **NeedsReview:** <item.needs_review> | **ReviewReason:** <item.review_reason>
+**Stage:** <item.stage> | **Progress:** <item.progress_stage>/<item.progress_percent> | **NeedsReview:** <item.needs_review> | **ReviewReason:** <item.review_reason>
 **Media Type:** <stage_gate.media_type> | **Source:** <stage_gate.disc_source>
 **Debug Logs:** <logs.is_debug>
 
@@ -480,8 +480,8 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Anomalies: <any detected>
 
 #### Episode Identification (if phase_episode_id)
-- Content ID method: <envelope.attributes.content_id_method>
-- Episodes synchronized: <envelope.attributes.episodes_synchronized>
+- Content ID method: <envelope.attributes.content_id.method>
+- Episodes synchronized: <envelope.attributes.content_id.episodes_synchronized>
 - Confidence overview: <from analysis.episode_stats: min/max/mean, below thresholds, unresolved count>
 - Episode manifest: <full per-episode table with confidence scores; if `placeholder_only=true` and episodeid has not run yet, label this as a placeholder episode inventory>
 - Sequence continuity: <analysis.episode_stats.sequence_contiguous, episode_range>
@@ -542,7 +542,7 @@ After running `spindle audit-gather`, check only the phases flagged as `true` in
 - [ ] Reviewed episode manifest with MatchConfidence scores
 - [ ] Verified episode sequence continuity
 - [ ] Checked `content_id_matches` attribute completeness
-- [ ] Verified `episodes_synchronized` flag
+- [ ] Verified `envelope.attributes.content_id.episodes_synchronized` flag
 
 ### Post-Encoding (phase_encoded, phase_crop)
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)

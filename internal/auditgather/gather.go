@@ -525,7 +525,21 @@ func gatherRipCache(cfg *config.Config, item *httpapi.ItemResponse) *RipCacheRep
 	return &RipCacheReport{
 		Path:     cachePath,
 		Found:    true,
-		Metadata: meta,
+		Metadata: redactRipCacheMetadata(meta),
+	}
+}
+
+func redactRipCacheMetadata(meta *ripcache.EntryMetadata) *ripCacheMetadata {
+	if meta == nil {
+		return nil
+	}
+	return &ripCacheMetadata{
+		Version:     meta.Version,
+		Fingerprint: meta.Fingerprint,
+		DiscTitle:   meta.DiscTitle,
+		CachedAt:    meta.CachedAt,
+		TitleCount:  meta.TitleCount,
+		TotalBytes:  meta.TotalBytes,
 	}
 }
 
