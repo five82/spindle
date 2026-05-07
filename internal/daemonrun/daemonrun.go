@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/daemon"
 	"github.com/five82/spindle/internal/deps"
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
@@ -180,11 +182,94 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	shutdownCh := make(chan struct{})
 	api := httpapi.New(store, cfg.API.Token, discMon, shutdownCh, logger, httpapi.NewStatusInfo(cfg), logBuffer, statusTracker)
 
-	// Create and start daemon.
-	d := daemon.New(cfg, store, manager, api, discMon, logger)
-	if err := d.Start(ctx); err != nil {
-		return err
+	// Create netlink monitor if optical drive is configured.
+	var netlinkMon *discmonitor.NetlinkMonitor
+	if discMon != nil {
+		netlinkMon = discmonitor.NewNetlinkMonitor(
+			discMon.Device(),
+			func(ctx context.Context, device string) {
+				if err := discmonitor.WaitForReady(ctx, device, logger); err != nil {
+					logger.Warn("drive not ready after netlink event",
+						"event_type", "drive_wait_failed",
+						"error_hint", err.Error(),
+						"impact", "disc detection skipped",
+					)
+					return
+				}
+				result, err := discMon.DetectAndEnqueue(ctx)
+				if err != nil {
+					logger.Error("disc detection after netlink event failed",
+						"event_type", "disc_detection_failed",
+						"error_hint", "detect and enqueue after netlink event failed",
+						"error", err,
+					)
+					return
+				}
+				if result == nil {
+					return // paused, already processing, or no disc
+				}
+			},
+			discMon.IsPaused,
+			logger,
+		)
 	}
+
+	lockPath := cfg.LockPath()
+	lock := flock.New(lockPath)
+	locked, err := lock.TryLock()
+	if err != nil {
+		return fmt.Errorf("lock file: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("another daemon instance is running (lock: %s)", lockPath)
+	}
+
+	// Startup recovery: reset any stale in-progress items.
+	if err := store.ResetInProgress(); err != nil {
+		logger.Error("startup recovery failed",
+			"event_type", "startup_recovery_failed",
+			"error_hint", "failed to reset in_progress flags on startup",
+			"error", err,
+		)
+	}
+
+	// Start HTTP API.
+	socketPath := cfg.SocketPath()
+	if err := api.ListenUnix(socketPath); err != nil {
+		_ = lock.Unlock()
+		return fmt.Errorf("start unix socket: %w", err)
+	}
+	logger.Info("HTTP API listening", "socket", socketPath)
+
+	if cfg.API.Bind != "" {
+		if err := api.ListenTCP(cfg.API.Bind); err != nil {
+			_ = lock.Unlock()
+			return fmt.Errorf("start tcp: %w", err)
+		}
+		logger.Info("HTTP API listening", "addr", cfg.API.Bind)
+	}
+
+	// Start netlink monitor (non-fatal).
+	if netlinkMon != nil {
+		if err := netlinkMon.Start(ctx); err != nil {
+			logger.Warn("netlink monitor not started",
+				"event_type", "netlink_start_failed",
+				"error_hint", err.Error(),
+				"impact", "automatic disc detection unavailable, manual detect via API still works",
+			)
+		}
+	}
+
+	// Start workflow manager.
+	workflowCtx, workflowCancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		manager.Run(workflowCtx)
+	}()
+
+	logger.Info("daemon started")
 
 	// SIGQUIT: dump goroutine stacks to stderr (non-fatal, continues running).
 	quitCh := make(chan os.Signal, 1)
@@ -226,8 +311,44 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	case <-ctx.Done():
 	}
 
-	d.Stop()
-	return d.Close()
+	logger.Info("daemon stopping")
+
+	// Stop netlink monitor.
+	if netlinkMon != nil {
+		netlinkMon.Stop()
+	}
+
+	// Cancel workflow context.
+	workflowCancel()
+
+	// Wait for workflow to finish.
+	wg.Wait()
+
+	// Shutdown recovery: clear in-progress flags.
+	if err := store.ResetInProgress(); err != nil {
+		logger.Error("shutdown recovery failed",
+			"event_type", "shutdown_recovery_failed",
+			"error_hint", "failed to reset in_progress flags on shutdown",
+			"error", err,
+		)
+	}
+
+	// Shutdown HTTP API.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := api.Shutdown(shutdownCtx); err != nil {
+		logger.Error("api shutdown failed",
+			"event_type", "api_shutdown_failed",
+			"error_hint", "HTTP API shutdown returned error",
+			"error", err,
+		)
+	}
+
+	// Clean up socket.
+	_ = os.Remove(cfg.SocketPath())
+
+	logger.Info("daemon stopped")
+	return lock.Unlock()
 }
 
 // cleanOldLogs removes timestamped daemon log files older than retentionDays.
