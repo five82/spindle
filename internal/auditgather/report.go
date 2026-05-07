@@ -9,17 +9,17 @@ import (
 
 // Report is the top-level audit report produced by Gather.
 type Report struct {
-	Item         ItemSummary      `json:"item"`
-	StageGate    StageGate        `json:"stage_gate"`
-	Paths        AuditPaths       `json:"paths"`
-	Logs         *LogAnalysis     `json:"logs,omitempty"`
-	RipCache     *RipCacheReport  `json:"rip_cache,omitempty"`
-	Envelope     *EnvelopeReport  `json:"envelope,omitempty"`
-	Encoding     *EncodingReport  `json:"encoding,omitempty"`
-	Media        []MediaFileProbe `json:"media,omitempty"`
-	MediaOmitted int              `json:"media_omitted,omitempty"`
-	Analysis     *Analysis        `json:"analysis,omitempty"`
-	Errors       []string         `json:"errors,omitempty"`
+	Item         ItemSummary       `json:"item"`
+	StageGate    StageGate         `json:"stage_gate"`
+	Paths        AuditPaths        `json:"paths"`
+	Logs         *LogAnalysis      `json:"logs,omitempty"`
+	RipCache     *RipCacheReport   `json:"rip_cache,omitempty"`
+	Envelope     *ripspec.Envelope `json:"envelope,omitempty"`
+	Encoding     *EncodingReport   `json:"encoding,omitempty"`
+	Media        []MediaFileProbe  `json:"media,omitempty"`
+	MediaOmitted int               `json:"media_omitted,omitempty"`
+	Analysis     *Analysis         `json:"analysis,omitempty"`
+	Errors       []string          `json:"errors,omitempty"`
 }
 
 // AuditPaths exposes configured output roots used by routing validation.
@@ -111,17 +111,6 @@ type RipCacheReport struct {
 	Path     string                  `json:"path"`
 	Found    bool                    `json:"found"`
 	Metadata *ripcache.EntryMetadata `json:"metadata,omitempty"`
-}
-
-// EnvelopeReport holds the parsed RipSpec envelope.
-type EnvelopeReport struct {
-	Fingerprint string                     `json:"fingerprint,omitempty"`
-	ContentKey  string                     `json:"content_key,omitempty"`
-	Metadata    ripspec.Metadata           `json:"metadata,omitempty"`
-	Titles      []ripspec.Title            `json:"titles,omitempty"`
-	Episodes    []ripspec.Episode          `json:"episodes,omitempty"`
-	Assets      ripspec.Assets             `json:"assets"`
-	Attributes  ripspec.EnvelopeAttributes `json:"attributes,omitempty"`
 }
 
 // EncodingReport holds the encoding state snapshot.

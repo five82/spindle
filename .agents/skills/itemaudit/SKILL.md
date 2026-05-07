@@ -28,7 +28,7 @@ Run the `audit-gather` subcommand to collect all artifacts in a single pass, sav
 spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 ```
 
-This produces a JSON report containing:
+This produces an agent-facing JSON report. The schema may evolve with this skill; treat it as diagnostic input rather than a stable public API. It contains:
 - **`item`**: Queue item summary (status, flags, paths, timestamps)
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply, resolved media type, media hint, disc source)
 - **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), and stage timing events
@@ -55,9 +55,9 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 | `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
 | `media_stats` | Valid probes exist | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`. |
 | `asset_health` | Assets exist | Per-stage (ripped/encoded/subtitled/final) `total/ok/failed/muxed` counts. |
-| `anomalies` | Issues detected | Pre-flagged issues with `severity` (critical/warning/info), `category`, `message`. |
+| `anomalies` | Issues/context detected | Pre-flagged signals with `severity` (critical/warning/info), `category`, `message`. |
 
-**Use `analysis.anomalies` as a starting checklist for Issues Found.** Each anomaly is a machine-detected flag -- the LLM's job is to investigate context, assess impact, and add judgment-based findings the code cannot detect.
+**Use critical/warning `analysis.anomalies` as a starting checklist for Issues Found.** Info-level anomalies, if present, are context only unless investigation shows real user impact. Each anomaly is a machine-detected flag -- the LLM's job is to investigate context, assess impact, reject false positives, and add judgment-based findings the code cannot detect.
 
 ### Extraction Strategy
 
@@ -81,7 +81,7 @@ After running `spindle audit-gather`, process the full JSON output through a **s
 The extraction script should:
 
 1. **Summarize metadata**: item fields, stage_gate, gathering errors
-2. **Format pre-computed analysis**: Read `analysis.decision_groups` for deduplicated decisions (groups with `count > 1` and nil `entries` are identical repeats; groups with `entries` have varying messages). Read `analysis.anomalies` for pre-flagged issues. Read `analysis.episode_stats`, `analysis.media_stats`, `analysis.crop_analysis`, `analysis.episode_consistency`, `analysis.asset_health` for pre-computed summaries.
+2. **Format pre-computed analysis**: Read `analysis.decision_groups` for deduplicated decisions (groups with `count > 1` and nil `entries` are identical repeats; groups with `entries` have varying messages). Read `analysis.anomalies` for pre-flagged critical/warning issues and info context. Read `analysis.episode_stats`, `analysis.media_stats`, `analysis.crop_analysis`, `analysis.episode_consistency`, `analysis.asset_health` for pre-computed summaries.
 3. **List all warnings and errors** with full context (these are always few enough to show individually)
 4. **Show stage timing** with computed durations
 5. **Summarize episode manifest** with confidence scores and episode numbers. If `analysis.episode_stats.placeholder_only` is true and `phase_episode_id` is false, label it clearly as a **placeholder episode inventory**, not a resolved episode manifest.

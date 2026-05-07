@@ -241,7 +241,7 @@ func TestDetectAnomalies_CleanItem(t *testing.T) {
 func TestDetectAnomalies_MissingContentIDSummary(t *testing.T) {
 	r := &Report{
 		StageGate: StageGate{PhaseEpisodeID: true},
-		Envelope: &EnvelopeReport{
+		Envelope: &ripspec.Envelope{
 			Metadata: ripspec.Metadata{MediaType: "tv"},
 			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}},
 		},
@@ -262,7 +262,7 @@ func TestDetectAnomalies_MissingContentIDSummary(t *testing.T) {
 func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 	r := &Report{
 		StageGate: StageGate{PhaseEpisodeID: true},
-		Envelope: &EnvelopeReport{
+		Envelope: &ripspec.Envelope{
 			Metadata: ripspec.Metadata{MediaType: "tv"},
 			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}},
 			Attributes: ripspec.EnvelopeAttributes{ContentID: &ripspec.ContentIDSummary{
@@ -291,7 +291,7 @@ func TestDetectFallbackTitleSelectionAnomalies_FlagsBroadTVFallback(t *testing.T
 			},
 			Warnings: []LogEntry{{EventType: "tmdb_no_match"}},
 		},
-		Envelope: &EnvelopeReport{
+		Envelope: &ripspec.Envelope{
 			Titles:   []ripspec.Title{{ID: 0}, {ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}, {ID: 6}, {ID: 7}},
 			Episodes: []ripspec.Episode{{RuntimeSeconds: 140}, {RuntimeSeconds: 150}, {RuntimeSeconds: 2700}},
 		},
@@ -312,7 +312,7 @@ func TestDetectFallbackTitleSelectionAnomalies_FlagsBroadTVFallback(t *testing.T
 func TestDetectTVRoutingAnomalies_FlagsCleanEpisodesInReview(t *testing.T) {
 	r := &Report{
 		Paths: AuditPaths{ReviewDir: "/review"},
-		Envelope: &EnvelopeReport{
+		Envelope: &ripspec.Envelope{
 			Metadata: ripspec.Metadata{MediaType: "tv"},
 			Episodes: []ripspec.Episode{
 				{Key: "s01e01", Episode: 1},
@@ -342,7 +342,7 @@ func TestDetectTVRoutingAnomalies_FlagsCleanEpisodesInReview(t *testing.T) {
 func TestDetectTVRoutingAnomalies_FlagsReviewEpisodesInLibrary(t *testing.T) {
 	r := &Report{
 		Paths: AuditPaths{ReviewDir: "/review"},
-		Envelope: &EnvelopeReport{
+		Envelope: &ripspec.Envelope{
 			Metadata: ripspec.Metadata{MediaType: "tv"},
 			Episodes: []ripspec.Episode{{Key: "s01e02", Episode: 2, NeedsReview: true}},
 			Assets:   ripspec.Assets{Final: []ripspec.Asset{{EpisodeKey: "s01e02", Path: "/library/tv/Show/Season 01/Show - S01E02.mkv", Status: ripspec.AssetStatusCompleted}}},
@@ -464,9 +464,9 @@ func TestCountDecisionConfidenceQualitiesIncludesDecisiveLowSimilarity(t *testin
 		{DecisionType: "tmdb_match", Extras: map[string]any{"confidence_quality": "clear"}},
 	}
 
-	contested, ambiguous, decisive, clear := countDecisionConfidenceQualities(decisions)
-	if contested != 1 || ambiguous != 1 || decisive != 1 || clear != 1 {
-		t.Fatalf("counts = contested:%d ambiguous:%d decisive:%d clear:%d", contested, ambiguous, decisive, clear)
+	contested, ambiguous, decisive := countDecisionConfidenceQualities(decisions)
+	if contested != 1 || ambiguous != 1 || decisive != 1 {
+		t.Fatalf("counts = contested:%d ambiguous:%d decisive:%d", contested, ambiguous, decisive)
 	}
 }
 

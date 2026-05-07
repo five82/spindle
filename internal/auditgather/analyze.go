@@ -293,7 +293,7 @@ func detectFallbackTitleSelectionAnomalies(r *Report) []Anomaly {
 	}}
 }
 
-func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambiguous, decisiveLowSimilarity, clear int) {
+func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambiguous, decisiveLowSimilarity int) {
 	for _, d := range decisions {
 		if d.DecisionType != "episode_match" || d.Extras == nil {
 			continue
@@ -305,11 +305,9 @@ func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambig
 			ambiguous++
 		case contentid.ConfidenceQualityDecisiveLowSimilarity:
 			decisiveLowSimilarity++
-		case contentid.ConfidenceQualityClear:
-			clear++
 		}
 	}
-	return contested, ambiguous, decisiveLowSimilarity, clear
+	return contested, ambiguous, decisiveLowSimilarity
 }
 
 func episodeMatchConfidenceQuality(d LogDecision) string {
@@ -755,7 +753,7 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Message:  fmt.Sprintf("%d warning(s) in item log", n),
 			})
 		}
-		contested, ambiguous, decisiveLowSimilarity, clear := countDecisionConfidenceQualities(r.Logs.Decisions)
+		contested, ambiguous, decisiveLowSimilarity := countDecisionConfidenceQualities(r.Logs.Decisions)
 		if contested > 0 {
 			anomalies = append(anomalies, Anomaly{
 				Severity: "warning",
@@ -775,13 +773,6 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Severity: "info",
 				Category: "episodes",
 				Message:  fmt.Sprintf("%d episode match decision(s) had decisive margins but lower transcript similarity", decisiveLowSimilarity),
-			})
-		}
-		if clear > 0 {
-			anomalies = append(anomalies, Anomaly{
-				Severity: "info",
-				Category: "episodes",
-				Message:  fmt.Sprintf("%d episode match decision(s) marked clear", clear),
 			})
 		}
 	}

@@ -51,15 +51,7 @@ func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse)
 		if err := json.Unmarshal([]byte(ripSpecData), &env); err != nil {
 			r.addError("parse envelope: %v", err)
 		} else {
-			r.Envelope = &EnvelopeReport{
-				Fingerprint: env.Fingerprint,
-				ContentKey:  env.ContentKey,
-				Metadata:    env.Metadata,
-				Titles:      env.Titles,
-				Episodes:    env.Episodes,
-				Assets:      env.Assets,
-				Attributes:  env.Attributes,
-			}
+			r.Envelope = &env
 		}
 	}
 
