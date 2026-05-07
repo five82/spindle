@@ -100,7 +100,7 @@ as SRT.
 
 Keep dependencies flowing from lower-level packages toward orchestration and CLI:
 
-1. Foundation: small utilities and shared types (`logs`, `services`, `textutil`,
+1. Foundation: small utilities and shared types (`logs`, `textutil`,
    `srtutil`, `fileutil`, `language`, `encodingstate`, `deps`, `mediameta`).
 2. Data and boundaries: `config`, `queue`, `ripspec`, `stage`.
 3. Domain services and clients: external clients, media helpers, caches,

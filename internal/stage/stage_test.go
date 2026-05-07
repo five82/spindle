@@ -2,11 +2,10 @@ package stage_test
 
 import (
 	"context"
-	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
-	"github.com/five82/spindle/internal/services"
 	"github.com/five82/spindle/internal/stage"
 )
 
@@ -48,8 +47,7 @@ func TestParseRipSpec_InvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid JSON, got nil")
 	}
-	var valErr *services.ErrValidation
-	if !errors.As(err, &valErr) {
-		t.Fatalf("expected ErrValidation, got %T: %v", err, err)
+	if !strings.Contains(err.Error(), "invalid rip spec") {
+		t.Fatalf("expected invalid rip spec error, got %T: %v", err, err)
 	}
 }

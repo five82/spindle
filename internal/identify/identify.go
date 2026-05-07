@@ -21,7 +21,6 @@ import (
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
-	"github.com/five82/spindle/internal/services"
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/staging"
 	"github.com/five82/spindle/internal/tmdb"
@@ -368,7 +367,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return fmt.Errorf("identification fatal: %s", result.FatalMsg)
 	}
 	if result.Degraded {
-		return &services.ErrDegraded{Msg: result.DegradedMsg}
+		return &stage.ErrDegraded{Msg: result.DegradedMsg}
 	}
 
 	// Cache disc ID.

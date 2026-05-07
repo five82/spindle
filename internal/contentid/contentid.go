@@ -13,7 +13,6 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/ripspec"
-	"github.com/five82/spindle/internal/services"
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/textutil"
 	"github.com/five82/spindle/internal/tmdb"
@@ -87,7 +86,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		if err := sess.Save(); err != nil {
 			return err
 		}
-		return &services.ErrDegraded{Msg: "content matcher unavailable"}
+		return &stage.ErrDegraded{Msg: "content matcher unavailable"}
 	}
 
 	seasonNum := env.Metadata.SeasonNumber
@@ -109,7 +108,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		if err := sess.Save(); err != nil {
 			return err
 		}
-		return &services.ErrDegraded{Msg: "tmdb season contains no episodes"}
+		return &stage.ErrDegraded{Msg: "tmdb season contains no episodes"}
 	}
 
 	_ = sess.Progress(10, "Phase 1/3 - Transcribing episodes", stage.WithActiveEpisode(""))
@@ -129,7 +128,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		if err := sess.Save(); err != nil {
 			return err
 		}
-		return &services.ErrDegraded{Msg: "no valid transcriptions"}
+		return &stage.ErrDegraded{Msg: "no valid transcriptions"}
 	}
 
 	_ = sess.Progress(50, "Phase 2/3 - Fetching reference subtitles", stage.WithActiveEpisode(""))
@@ -146,7 +145,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		if err := sess.Save(); err != nil {
 			return err
 		}
-		return &services.ErrDegraded{Msg: "no reference subtitles found"}
+		return &stage.ErrDegraded{Msg: "no reference subtitles found"}
 	}
 
 	resolution := resolveEpisodeClaims(ripPrints, refs, h.policy)

@@ -10,7 +10,6 @@ import (
 
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
-	"github.com/five82/spindle/internal/services"
 )
 
 type executorStubHandler struct {
@@ -127,7 +126,7 @@ func TestExecuteStartedTreatsDegradedAsSuccessWhenConfigured(t *testing.T) {
 
 	res, err := ExecuteStarted(context.Background(), item, ExecuteOptions{
 		Store:            store,
-		Handler:          executorStubHandler{run: func(context.Context, *Session) error { return &services.ErrDegraded{Msg: "soft"} }},
+		Handler:          executorStubHandler{run: func(context.Context, *Session) error { return &ErrDegraded{Msg: "soft"} }},
 		Stage:            queue.StageIdentification,
 		NextStage:        queue.StageRipping,
 		Advance:          true,

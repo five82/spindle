@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/queue"
-	"github.com/five82/spindle/internal/services"
 )
 
 // ExecuteOptions configures execution of a handler after an item has been
@@ -83,7 +82,7 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 			return res, err
 		}
 
-		var degraded *services.ErrDegraded
+		var degraded *ErrDegraded
 		if errors.As(err, &degraded) && opts.DegradedSucceeds {
 			res.Degraded = true
 			res.DegradedMsg = degraded.Msg
