@@ -159,9 +159,23 @@ func TestRunSkipsNonTVContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	item, err := store.NewDisc("Test", "fp1")
+	if err != nil {
+		t.Fatalf("new disc: %v", err)
+	}
+	item.RipSpecData = string(data)
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatalf("update work state: %v", err)
+	}
+
 	h := &Handler{}
 	ctx := stage.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	sess, err := stage.NewSession(ctx, nil, &queue.Item{RipSpecData: string(data)})
+	sess, err := stage.NewSession(ctx, store, item)
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}

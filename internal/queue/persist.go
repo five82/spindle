@@ -1,6 +1,9 @@
 package queue
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // RipSpecEncoder encodes a rip spec envelope to JSON text.
 // Satisfied by ripspec.Envelope without importing that package.
@@ -10,8 +13,11 @@ type RipSpecEncoder interface {
 
 // PersistRipSpec encodes the rip spec and writes it to the item's rip_spec_data
 // column plus related work-state fields. Lifecycle fields are intentionally not
-// persisted here. When store is nil, it only updates the item in memory.
+// persisted here.
 func PersistRipSpec(ctx context.Context, store *Store, item *Item, encoder RipSpecEncoder) error {
+	if store == nil {
+		return errors.New("persist rip spec: nil queue store")
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -23,8 +29,5 @@ func PersistRipSpec(ctx context.Context, store *Store, item *Item, encoder RipSp
 		return err
 	}
 	item.RipSpecData = data
-	if store == nil {
-		return nil
-	}
 	return store.UpdateWorkState(item)
 }

@@ -112,8 +112,21 @@ func TestExecuteStartedMarksFailureWhenConfigured(t *testing.T) {
 }
 
 func TestExecuteStartedTreatsDegradedAsSuccessWhenConfigured(t *testing.T) {
-	item := &queue.Item{Stage: queue.StageIdentification, RipSpecData: mustEncodeExecutorEnvelope(t)}
+	store := openExecutorTestStore(t)
+	item, err := store.NewDisc("A", "fp1")
+	if err != nil {
+		t.Fatalf("new disc: %v", err)
+	}
+	item.RipSpecData = mustEncodeExecutorEnvelope(t)
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatalf("update work state: %v", err)
+	}
+	if err := store.StartStage(item, queue.StageIdentification); err != nil {
+		t.Fatalf("StartStage: %v", err)
+	}
+
 	res, err := ExecuteStarted(context.Background(), item, ExecuteOptions{
+		Store:            store,
 		Handler:          executorStubHandler{run: func(context.Context, *Session) error { return &services.ErrDegraded{Msg: "soft"} }},
 		Stage:            queue.StageIdentification,
 		NextStage:        queue.StageRipping,

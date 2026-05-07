@@ -25,6 +25,9 @@ func NewSession(ctx context.Context, store *queue.Store, item *queue.Item) (*Ses
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if store == nil {
+		return nil, fmt.Errorf("stage session: nil queue store")
+	}
 	if item == nil {
 		return nil, fmt.Errorf("stage session: nil queue item")
 	}
@@ -54,7 +57,7 @@ func (s *Session) SetEnvelope(env *ripspec.Envelope) {
 // Lifecycle fields such as stage, in_progress, failed_at_stage, and
 // error_message are owned by workflow/stageexec and are not changed here.
 func (s *Session) Save() error {
-	if s == nil || s.Item == nil || s.Env == nil {
+	if s == nil || s.Store == nil || s.Item == nil || s.Env == nil {
 		return fmt.Errorf("stage session: incomplete save state")
 	}
 	ctx := s.Ctx
@@ -93,11 +96,9 @@ func WithEncodingDetails(json string) ProgressOption {
 }
 
 // Progress updates the item progress fields and persists them with UpdateProgress.
-// A nil store leaves the item mutated and returns nil, which supports dry-run
-// and CLI-only uses of stage handlers.
 func (s *Session) Progress(percent float64, message string, opts ...ProgressOption) error {
-	if s == nil || s.Item == nil {
-		return fmt.Errorf("stage session: nil item for progress update")
+	if s == nil || s.Store == nil || s.Item == nil {
+		return fmt.Errorf("stage session: incomplete progress state")
 	}
 	update := progressUpdate{}
 	for _, opt := range opts {
@@ -117,9 +118,6 @@ func (s *Session) Progress(percent float64, message string, opts ...ProgressOpti
 	}
 	if update.encodingJSON != nil {
 		s.Item.EncodingDetailsJSON = *update.encodingJSON
-	}
-	if s.Store == nil {
-		return nil
 	}
 	return s.Store.UpdateProgress(s.Item)
 }

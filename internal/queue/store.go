@@ -168,7 +168,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 }
 
 func (s *Store) refreshItem(item *Item) error {
-	if s == nil || item == nil || item.ID == 0 {
+	if item == nil || item.ID == 0 {
 		return nil
 	}
 	fresh, err := s.GetByID(item.ID)
@@ -250,9 +250,6 @@ func (s *Store) StartStage(item *Item, stage Stage) error {
 	item.ActiveEpisodeKey = ""
 	item.ProgressBytesCopied = 0
 	item.ProgressTotalBytes = 0
-	if s == nil {
-		return nil
-	}
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE queue_items SET
@@ -274,9 +271,6 @@ func (s *Store) StartStage(item *Item, stage Stage) error {
 // stage ownership or work products.
 func (s *Store) ClearInProgress(item *Item) error {
 	item.InProgress = 0
-	if s == nil {
-		return nil
-	}
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`UPDATE queue_items SET in_progress = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, item.ID)
 		if err != nil {
@@ -290,9 +284,6 @@ func (s *Store) ClearInProgress(item *Item) error {
 func (s *Store) MoveToStage(item *Item, stage Stage) error {
 	item.Stage = stage
 	item.InProgress = 0
-	if s == nil {
-		return nil
-	}
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE queue_items SET
@@ -314,23 +305,6 @@ func (s *Store) MoveToStage(item *Item, stage Stage) error {
 // user-stopped item keeps its failed/stopped state even if a handler finishes
 // after the stop request.
 func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
-	if s == nil {
-		item.InProgress = 0
-		if advance {
-			item.Stage = nextStage
-			item.ActiveEpisodeKey = ""
-			if item.Stage == StageCompleted {
-				item.ProgressStage = string(StageCompleted)
-				item.ProgressPercent = 100
-				item.ProgressMessage = "Completed"
-			} else {
-				item.ProgressStage = ""
-				item.ProgressPercent = 0
-				item.ProgressMessage = ""
-			}
-		}
-		return nil
-	}
 	if !advance {
 		return s.ClearInProgress(item)
 	}
@@ -378,13 +352,6 @@ func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
 // FailStage marks an item failed at a specific stage unless the item has
 // already been explicitly stopped by the user.
 func (s *Store) FailStage(item *Item, failedAt Stage, errMsg string) error {
-	if s == nil {
-		item.Stage = StageFailed
-		item.InProgress = 0
-		item.FailedAtStage = string(failedAt)
-		item.ErrorMessage = errMsg
-		return nil
-	}
 	return retryOnBusy(func() error {
 		res, err := s.db.Exec(`
 			UPDATE queue_items SET
@@ -416,9 +383,6 @@ func (s *Store) FailStage(item *Item, failedAt Stage, errMsg string) error {
 // UpdateDiscTitle changes only the queue item's display title.
 func (s *Store) UpdateDiscTitle(item *Item, title string) error {
 	item.DiscTitle = title
-	if s == nil {
-		return nil
-	}
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`UPDATE queue_items SET disc_title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, title, item.ID)
 		if err != nil {

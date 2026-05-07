@@ -2,52 +2,78 @@ package stage
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
-func TestSessionProgressWithoutStoreMutatesItem(t *testing.T) {
-	item := &queue.Item{}
-	s, err := NewSession(context.Background(), nil, item)
+func newTestSession(t *testing.T) (*queue.Store, *queue.Item, *Session) {
+	t.Helper()
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	item, err := store.NewDisc("Test", "fp1")
+	if err != nil {
+		t.Fatalf("new disc: %v", err)
+	}
+	s, err := NewSession(context.Background(), store, item)
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
+	return store, item, s
+}
+
+func TestNewSessionRequiresStore(t *testing.T) {
+	_, err := NewSession(context.Background(), nil, &queue.Item{})
+	if err == nil {
+		t.Fatal("NewSession succeeded with nil store")
+	}
+}
+
+func TestSessionProgressPersistsItem(t *testing.T) {
+	store, item, s := newTestSession(t)
 
 	if err := s.Progress(42, "Phase 1/1 - Testing", WithActiveEpisode("s01e02"), WithProgressBytes(10, 20)); err != nil {
 		t.Fatalf("Progress: %v", err)
 	}
 
-	if item.ProgressPercent != 42 {
-		t.Fatalf("ProgressPercent = %v, want 42", item.ProgressPercent)
+	got, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
 	}
-	if item.ProgressMessage != "Phase 1/1 - Testing" {
-		t.Fatalf("ProgressMessage = %q", item.ProgressMessage)
+	if got.ProgressPercent != 42 {
+		t.Fatalf("ProgressPercent = %v, want 42", got.ProgressPercent)
 	}
-	if item.ActiveEpisodeKey != "s01e02" {
-		t.Fatalf("ActiveEpisodeKey = %q", item.ActiveEpisodeKey)
+	if got.ProgressMessage != "Phase 1/1 - Testing" {
+		t.Fatalf("ProgressMessage = %q", got.ProgressMessage)
 	}
-	if item.ProgressBytesCopied != 10 || item.ProgressTotalBytes != 20 {
-		t.Fatalf("bytes = %d/%d, want 10/20", item.ProgressBytesCopied, item.ProgressTotalBytes)
+	if got.ActiveEpisodeKey != "s01e02" {
+		t.Fatalf("ActiveEpisodeKey = %q", got.ActiveEpisodeKey)
+	}
+	if got.ProgressBytesCopied != 10 || got.ProgressTotalBytes != 20 {
+		t.Fatalf("bytes = %d/%d, want 10/20", got.ProgressBytesCopied, got.ProgressTotalBytes)
 	}
 }
 
-func TestSessionSaveWithoutStoreEncodesRipSpec(t *testing.T) {
-	item := &queue.Item{}
-	s, err := NewSession(context.Background(), nil, item)
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+func TestSessionSavePersistsRipSpec(t *testing.T) {
+	store, item, s := newTestSession(t)
 	s.SetEnvelope(&ripspec.Envelope{Version: ripspec.CurrentVersion, Fingerprint: "abc"})
 
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if item.RipSpecData == "" {
+	got, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
+	}
+	if got.RipSpecData == "" {
 		t.Fatal("RipSpecData was not set")
 	}
-	parsed, err := ripspec.Parse(item.RipSpecData)
+	parsed, err := ripspec.Parse(got.RipSpecData)
 	if err != nil {
 		t.Fatalf("parse saved RipSpec: %v", err)
 	}
@@ -57,17 +83,17 @@ func TestSessionSaveWithoutStoreEncodesRipSpec(t *testing.T) {
 }
 
 func TestSessionSaveAssetHelpersPersistEnvelope(t *testing.T) {
-	item := &queue.Item{}
-	s, err := NewSession(context.Background(), nil, item)
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	store, item, s := newTestSession(t)
 	s.SetEnvelope(&ripspec.Envelope{Version: ripspec.CurrentVersion})
 
 	if err := s.SaveAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{EpisodeKey: "s01e01", Path: "encoded.mkv"}); err != nil {
 		t.Fatalf("SaveAssetSuccess: %v", err)
 	}
-	parsed, err := ripspec.Parse(item.RipSpecData)
+	got, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get item after success: %v", err)
+	}
+	parsed, err := ripspec.Parse(got.RipSpecData)
 	if err != nil {
 		t.Fatalf("parse after success: %v", err)
 	}
@@ -79,7 +105,11 @@ func TestSessionSaveAssetHelpersPersistEnvelope(t *testing.T) {
 	if err := s.SaveAssetFailure(ripspec.AssetKindEncoded, "s01e01", "encode failed"); err != nil {
 		t.Fatalf("SaveAssetFailure: %v", err)
 	}
-	parsed, err = ripspec.Parse(item.RipSpecData)
+	got, err = store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get item after failure: %v", err)
+	}
+	parsed, err = ripspec.Parse(got.RipSpecData)
 	if err != nil {
 		t.Fatalf("parse after failure: %v", err)
 	}
@@ -90,11 +120,7 @@ func TestSessionSaveAssetHelpersPersistEnvelope(t *testing.T) {
 }
 
 func TestSessionReviewHelpers(t *testing.T) {
-	item := &queue.Item{}
-	s, err := NewSession(context.Background(), nil, item)
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	_, item, s := newTestSession(t)
 	s.SetEnvelope(&ripspec.Envelope{
 		Version:  ripspec.CurrentVersion,
 		Episodes: []ripspec.Episode{{Key: "s01e01"}},
