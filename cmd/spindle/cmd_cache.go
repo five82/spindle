@@ -3,9 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -121,6 +119,36 @@ func newCacheRipCmd() *cobra.Command {
 				}
 			}()
 
+			executeOneShotStage := func(handler stage.Handler) error {
+				itemLogger := logger.With("item_id", item.ID)
+				itemLogger.Info("one-shot stage execution started",
+					"decision_type", logs.DecisionStageExecution,
+					"decision_result", "started",
+					"decision_reason", fmt.Sprintf("one-shot execution of %s", item.Stage),
+					"stage", item.Stage,
+					"disc_title", item.DiscTitle,
+				)
+
+				res, err := stage.ExecuteWorkflowStage(ctx, item, stage.WorkflowOptions{
+					Store:   qStore,
+					Handler: handler,
+					Logger:  logger,
+					Stage:   item.Stage,
+					OneShot: true,
+				})
+				if err != nil || res.UserStopped {
+					return err
+				}
+
+				itemLogger.Info("one-shot stage execution completed",
+					"decision_type", logs.DecisionStageExecution,
+					"decision_result", "completed",
+					"decision_reason", string(item.Stage),
+					"stage", item.Stage,
+				)
+				return nil
+			}
+
 			// Set up dependencies for identification.
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
 
@@ -138,7 +166,7 @@ func newCacheRipCmd() *cobra.Command {
 			// Run identification stage.
 			fmt.Printf("Identifying disc on %s...\n", device)
 			identifyHandler := identify.New(cfg, tmdbClient, nil, discIDStore, keydbCat)
-			if err := runCacheStage(ctx, qStore, item, identifyHandler, logger); err != nil {
+			if err := executeOneShotStage(identifyHandler); err != nil {
 				return fmt.Errorf("identification: %w", err)
 			}
 
@@ -213,7 +241,7 @@ func newCacheRipCmd() *cobra.Command {
 			// Run ripping stage.
 			fmt.Printf("Ripping disc...\n")
 			ripperHandler := ripper.New(cfg, nil, ripCacheStore, nil, titleOverride)
-			if err := runCacheStage(ctx, qStore, item, ripperHandler, logger); err != nil {
+			if err := executeOneShotStage(ripperHandler); err != nil {
 				return fmt.Errorf("ripping: %w", err)
 			}
 
@@ -230,66 +258,6 @@ func newCacheRipCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path")
 	cmd.Flags().BoolVar(&selectTitle, "title", false, "Interactively select which title to rip")
 	return cmd
-}
-
-func runCacheStage(ctx context.Context, store *queue.Store, item *queue.Item, handler stage.Handler, logger *slog.Logger) error {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	itemLogger := logger.With("item_id", item.ID)
-
-	itemLogger.Info("one-shot stage execution started",
-		"decision_type", logs.DecisionStageExecution,
-		"decision_result", "started",
-		"decision_reason", fmt.Sprintf("one-shot execution of %s", item.Stage),
-		"stage", item.Stage,
-		"disc_title", item.DiscTitle,
-	)
-
-	if err := store.StartStage(item, item.Stage); err != nil {
-		return fmt.Errorf("set in_progress: %w", err)
-	}
-
-	sess, err := stage.NewSession(ctx, store, item)
-	if err == nil {
-		sess.Logger = itemLogger
-		err = handler.Run(ctx, sess)
-	}
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			if updateErr := store.ClearInProgress(item); updateErr != nil {
-				logCacheStagePersistenceFailure(logger, "clear in_progress after cancellation", updateErr)
-			}
-			return fmt.Errorf("stage %s: %w", item.Stage, err)
-		}
-		if updateErr := store.ClearInProgress(item); updateErr != nil {
-			logCacheStagePersistenceFailure(logger, "clear in_progress after stage error", updateErr)
-		}
-		if item.UserStopped() {
-			return nil
-		}
-		return fmt.Errorf("stage %s: %w", item.Stage, err)
-	}
-
-	if updateErr := store.ClearInProgress(item); updateErr != nil {
-		logCacheStagePersistenceFailure(logger, "persist stage completion", updateErr)
-	}
-
-	itemLogger.Info("one-shot stage execution completed",
-		"decision_type", logs.DecisionStageExecution,
-		"decision_result", "completed",
-		"decision_reason", string(item.Stage),
-		"stage", item.Stage,
-	)
-	return nil
-}
-
-func logCacheStagePersistenceFailure(logger *slog.Logger, op string, err error) {
-	logger.Error("stage persistence failed",
-		"event_type", "stage_persistence_failed",
-		"error_hint", op,
-		"error", err,
-	)
 }
 
 func newCacheStatsCmd() *cobra.Command {

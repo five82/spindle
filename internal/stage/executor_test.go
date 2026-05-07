@@ -157,6 +157,87 @@ func TestExecuteWorkflowStageCancellationClearsInProgress(t *testing.T) {
 	}
 }
 
+func TestExecuteWorkflowStageOneShotClearsWithoutAdvancing(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+
+	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store:     store,
+		Handler:   executorStubHandler{},
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Stage:     queue.StageIdentification,
+		NextStage: queue.StageRipping,
+		OneShot:   true,
+	})
+	if err != nil || res.Failed || res.Degraded || res.Canceled {
+		t.Fatalf("result err=%v failed=%v degraded=%v canceled=%v", err, res.Failed, res.Degraded, res.Canceled)
+	}
+	got, _ := store.GetByID(item.ID)
+	if got.Stage != queue.StageIdentification || got.InProgress != 0 || got.ProgressStage != string(queue.StageIdentification) {
+		t.Fatalf("one-shot state = stage:%q in_progress:%d progress_stage:%q", got.Stage, got.InProgress, got.ProgressStage)
+	}
+}
+
+func TestExecuteWorkflowStageOneShotFailureDoesNotFailItem(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+	stageErr := errors.New("boom")
+
+	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store:   store,
+		Handler: executorStubHandler{run: func(context.Context, *Session) error { return stageErr }},
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Stage:   queue.StageIdentification,
+		OneShot: true,
+	})
+	if !errors.Is(err, stageErr) || !res.Failed {
+		t.Fatalf("result err=%v failed=%v, want wrapped stage error and failed", err, res.Failed)
+	}
+	got, _ := store.GetByID(item.ID)
+	if got.Stage != queue.StageIdentification || got.InProgress != 0 || got.FailedAtStage != "" || got.ErrorMessage != "" {
+		t.Fatalf("one-shot failure state = stage:%q in_progress:%d failed_at:%q err:%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
+	}
+}
+
+func TestExecuteWorkflowStageOneShotTreatsDegradedAsError(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+
+	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store:   store,
+		Handler: executorStubHandler{run: func(context.Context, *Session) error { return &ErrDegraded{Msg: "soft"} }},
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Stage:   queue.StageIdentification,
+		OneShot: true,
+	})
+	var degraded *ErrDegraded
+	if !errors.As(err, &degraded) || !res.Failed || res.Degraded {
+		t.Fatalf("result err=%v failed=%v degraded=%v, want degraded error treated as failure", err, res.Failed, res.Degraded)
+	}
+	got, _ := store.GetByID(item.ID)
+	if got.Stage != queue.StageIdentification || got.InProgress != 0 {
+		t.Fatalf("one-shot degraded state = stage:%q in_progress:%d", got.Stage, got.InProgress)
+	}
+}
+
+func TestExecuteWorkflowStageOneShotIgnoresCompletionPersistenceError(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+
+	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store: store,
+		Handler: executorStubHandler{run: func(context.Context, *Session) error {
+			return store.Close()
+		}},
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Stage:   queue.StageIdentification,
+		OneShot: true,
+	})
+	if err != nil || res.Failed || res.Canceled {
+		t.Fatalf("result err=%v failed=%v canceled=%v, want ignored completion persistence error", err, res.Failed, res.Canceled)
+	}
+}
+
 func TestExecuteWorkflowStageReturnsPersistenceError(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")

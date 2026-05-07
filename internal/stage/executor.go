@@ -10,14 +10,17 @@ import (
 	"github.com/five82/spindle/internal/queue"
 )
 
-// WorkflowOptions configures workflow execution of a handler after an item has
-// been marked in progress.
+// WorkflowOptions configures workflow execution of a handler. Normal workflow
+// callers mark the item in progress before execution and advance on success.
+// OneShot handles standalone CLI execution by starting the stage here and
+// clearing in_progress without advancing or failing the queue item.
 type WorkflowOptions struct {
 	Store     *queue.Store
 	Handler   Handler
 	Logger    *slog.Logger
 	Stage     queue.Stage
 	NextStage queue.Stage
+	OneShot   bool
 }
 
 // ExecuteResult describes the queue-visible outcome of a stage invocation.
@@ -40,10 +43,11 @@ type PersistenceError struct {
 func (e *PersistenceError) Error() string { return fmt.Sprintf("%s: %v", e.Op, e.Err) }
 func (e *PersistenceError) Unwrap() error { return e.Err }
 
-// ExecuteWorkflowStage runs a handler for an item already marked in progress,
-// then persists the workflow lifecycle outcome: success advances, degraded
-// success advances with a warning result, failure marks the item failed,
-// cancellation clears in_progress, and persistence failures are returned.
+// ExecuteWorkflowStage runs a handler and persists the stage lifecycle outcome:
+// success advances, degraded success advances with a warning result, failure
+// marks the item failed, cancellation clears in_progress, and persistence
+// failures are returned. In OneShot mode, success and failure only clear
+// in_progress so the caller can route the temporary item explicitly.
 func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOptions) (res ExecuteResult, err error) {
 	stageName := opts.Stage
 	if stageName == "" {
@@ -59,6 +63,11 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 	if opts.Store == nil {
 		return res, fmt.Errorf("stage execution: nil queue store")
 	}
+	if opts.OneShot {
+		if err := opts.Store.StartStage(item, stageName); err != nil {
+			return res, fmt.Errorf("set in_progress: %w", err)
+		}
+	}
 
 	sess, err := NewSession(ctx, opts.Store, item)
 	if err == nil {
@@ -70,20 +79,38 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 		if errors.Is(err, context.Canceled) {
 			res.Canceled = true
 			if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {
-				return res, &PersistenceError{Op: "clear in_progress after cancellation", Err: updateErr}
+				if opts.OneShot {
+					logOneShotPersistenceFailure(logger, "clear in_progress after cancellation", updateErr)
+				} else {
+					return res, &PersistenceError{Op: "clear in_progress after cancellation", Err: updateErr}
+				}
 			}
 			if item.UserStopped() {
 				res.UserStopped = true
+			}
+			if opts.OneShot {
+				return res, fmt.Errorf("stage %s: %w", stageName, err)
 			}
 			return res, err
 		}
 
 		var degraded *ErrDegraded
-		if errors.As(err, &degraded) {
+		if errors.As(err, &degraded) && !opts.OneShot {
 			res.Degraded = true
 			res.DegradedMsg = degraded.Msg
 		} else {
 			res.Failed = true
+			if opts.OneShot {
+				if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {
+					logOneShotPersistenceFailure(logger, "clear in_progress after stage error", updateErr)
+				}
+				if item.UserStopped() {
+					res.UserStopped = true
+					res.Failed = false
+					return res, nil
+				}
+				return res, fmt.Errorf("stage %s: %w", stageName, err)
+			}
 			if updateErr := opts.Store.FailStage(item, stageName, err.Error()); updateErr != nil {
 				return res, &PersistenceError{Op: "persist stage failure", Err: updateErr}
 			}
@@ -96,11 +123,24 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 		}
 	}
 
-	if updateErr := opts.Store.CompleteStage(item, opts.NextStage, true); updateErr != nil {
+	advance := !opts.OneShot
+	if updateErr := opts.Store.CompleteStage(item, opts.NextStage, advance); updateErr != nil {
+		if opts.OneShot {
+			logOneShotPersistenceFailure(logger, "persist stage completion", updateErr)
+			return res, nil
+		}
 		return res, &PersistenceError{Op: "persist stage completion", Err: updateErr}
 	}
 	if item.UserStopped() {
 		res.UserStopped = true
 	}
 	return res, nil
+}
+
+func logOneShotPersistenceFailure(logger *slog.Logger, op string, err error) {
+	logger.Error("stage persistence failed",
+		"event_type", "stage_persistence_failed",
+		"error_hint", op,
+		"error", err,
+	)
 }
