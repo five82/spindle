@@ -516,13 +516,6 @@ func TestAppendReviewReason(t *testing.T) {
 	}
 }
 
-func TestCheckHealth(t *testing.T) {
-	store := openTestStore(t)
-	if err := store.CheckHealth(); err != nil {
-		t.Fatalf("health check: %v", err)
-	}
-}
-
 func TestClearAndClearCompleted(t *testing.T) {
 	store := openTestStore(t)
 

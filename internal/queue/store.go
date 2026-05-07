@@ -628,73 +628,6 @@ func (s *Store) ActiveItemCount() (int, error) {
 	return count, nil
 }
 
-// CheckHealth performs a full diagnostic check on the queue database.
-func (s *Store) CheckHealth() error {
-	// Check table exists.
-	var name string
-	err := s.db.QueryRow(
-		"SELECT name FROM sqlite_master WHERE type='table' AND name='queue_items'",
-	).Scan(&name)
-	if err != nil {
-		return fmt.Errorf("queue table missing: %w", err)
-	}
-
-	// Check expected columns exist by querying table_info.
-	expectedCols := map[string]bool{
-		"id": false, "disc_title": false, "stage": false, "in_progress": false,
-		"failed_at_stage": false, "error_message": false, "created_at": false,
-		"updated_at": false, "rip_spec_data": false, "disc_fingerprint": false,
-		"metadata_json": false, "needs_review": false, "review_reason": false,
-		"progress_stage": false, "progress_percent": false, "progress_message": false,
-		"active_episode_key": false, "progress_bytes_copied": false,
-		"progress_total_bytes": false, "encoding_details_json": false,
-		"user_stopped": false,
-	}
-
-	rows, err := s.db.Query("PRAGMA table_info(queue_items)")
-	if err != nil {
-		return fmt.Errorf("table info: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var cid int
-		var colName, colType string
-		var notNull, pk int
-		var dfltValue sql.NullString
-		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); err != nil {
-			return fmt.Errorf("scan table info: %w", err)
-		}
-		expectedCols[colName] = true
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate table info: %w", err)
-	}
-
-	for col, found := range expectedCols {
-		if !found {
-			return fmt.Errorf("missing column: %s", col)
-		}
-	}
-
-	// Run integrity check.
-	var integrity string
-	if err := s.db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil {
-		return fmt.Errorf("integrity check: %w", err)
-	}
-	if integrity != "ok" {
-		return fmt.Errorf("integrity check failed: %s", integrity)
-	}
-
-	// Count total items (verify table is readable).
-	var count int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM queue_items").Scan(&count); err != nil {
-		return fmt.Errorf("count items: %w", err)
-	}
-
-	return nil
-}
-
 // ResetInProgress clears in_progress on all items (startup recovery).
 func (s *Store) ResetInProgress() error {
 	return retryOnBusy(func() error {
@@ -704,11 +637,6 @@ func (s *Store) ResetInProgress() error {
 		}
 		return nil
 	})
-}
-
-// ResetInProgressOnShutdown clears in_progress on all items (clean shutdown).
-func (s *Store) ResetInProgressOnShutdown() error {
-	return s.ResetInProgress()
 }
 
 // RetryFailed routes failed items back to their retry point.

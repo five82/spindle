@@ -30,8 +30,8 @@ type Daemon struct {
 	netlinkMon  *discmonitor.NetlinkMonitor
 	lock        *flock.Flock
 	logger      *slog.Logger
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 }
 
 // New creates a new daemon instance. discMon may be nil if no optical drive is configured.
@@ -42,7 +42,7 @@ func New(cfg *config.Config, store *queue.Store, manager *workflow.Manager, api 
 		manager:     manager,
 		api:         api,
 		discMonitor: discMon,
-		logger: logger,
+		logger:      logger,
 	}
 
 	// Create netlink monitor if optical drive is configured.
@@ -159,7 +159,7 @@ func (d *Daemon) Stop() {
 	d.wg.Wait()
 
 	// Shutdown recovery: clear in-progress flags.
-	if err := d.store.ResetInProgressOnShutdown(); err != nil {
+	if err := d.store.ResetInProgress(); err != nil {
 		d.logger.Error("shutdown recovery failed",
 			"event_type", "shutdown_recovery_failed",
 			"error_hint", "failed to reset in_progress flags on shutdown",

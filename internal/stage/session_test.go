@@ -3,6 +3,7 @@ package stage
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/five82/spindle/internal/queue"
@@ -31,6 +32,22 @@ func TestNewSessionRequiresStore(t *testing.T) {
 	_, err := NewSession(context.Background(), nil, &queue.Item{})
 	if err == nil {
 		t.Fatal("NewSession succeeded with nil store")
+	}
+}
+
+func TestNewSessionRejectsInvalidRipSpec(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	_, err = NewSession(context.Background(), store, &queue.Item{RipSpecData: "{bad json"})
+	if err == nil {
+		t.Fatal("NewSession succeeded with invalid RipSpec")
+	}
+	if !strings.Contains(err.Error(), "invalid rip spec") {
+		t.Fatalf("error = %v, want invalid rip spec", err)
 	}
 }
 

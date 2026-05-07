@@ -31,9 +31,9 @@ func NewSession(ctx context.Context, store *queue.Store, item *queue.Item) (*Ses
 	if item == nil {
 		return nil, fmt.Errorf("stage session: nil queue item")
 	}
-	env, err := ParseRipSpec(item.RipSpecData)
+	env, err := ripspec.Parse(item.RipSpecData)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid rip spec: %w", err)
 	}
 	return &Session{
 		Ctx:    ctx,
