@@ -174,7 +174,7 @@ func TestRunSkipsNonTVContent(t *testing.T) {
 	}
 
 	h := &Handler{}
-	ctx := stage.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
 	sess, err := stage.NewSession(ctx, store, item)
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)

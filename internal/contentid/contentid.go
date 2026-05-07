@@ -135,7 +135,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	plan := deriveCandidateEpisodes(env, season, env.Metadata.DiscNumber)
 	refCache := make(map[int]referenceFingerprint)
-	refs, err := h.fetchReferenceFingerprints(ctx, item, seasonNum, env.Metadata.ID, season, plan.InitialEpisodes, refCache)
+	refs, err := h.fetchReferenceFingerprints(ctx, logger, item, seasonNum, env.Metadata.ID, season, plan.InitialEpisodes, refCache)
 	if err != nil {
 		return fmt.Errorf("fetch initial references: %w", err)
 	}
@@ -157,7 +157,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"initial_episode_count", len(plan.InitialEpisodes),
 			"expanded_episode_count", len(plan.ExpandedEpisodes),
 		)
-		expandedRefs, fetchErr := h.fetchReferenceFingerprints(ctx, item, seasonNum, env.Metadata.ID, season, plan.ExpandedEpisodes, refCache)
+		expandedRefs, fetchErr := h.fetchReferenceFingerprints(ctx, logger, item, seasonNum, env.Metadata.ID, season, plan.ExpandedEpisodes, refCache)
 		if fetchErr != nil {
 			return fmt.Errorf("fetch expanded references: %w", fetchErr)
 		}

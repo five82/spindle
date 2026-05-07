@@ -154,7 +154,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
-	h.cleanupStaging(ctx, item)
+	h.cleanupStaging(logger, item)
 
 	logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
 	return nil
@@ -400,7 +400,7 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *
 		return err
 	}
 
-	h.cleanupStaging(ctx, item)
+	h.cleanupStaging(logger, item)
 
 	logger.Info("review routing completed", "event_type", "stage_complete", "stage", "organizing", "review_path", reviewPath)
 	return nil
@@ -409,8 +409,10 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *
 // cleanupStaging removes the staging directory for a completed item.
 // Failures are logged as warnings (non-fatal) — disk space reclamation is
 // best-effort.
-func (h *Handler) cleanupStaging(ctx context.Context, item *queue.Item) {
-	logger := stage.LoggerFromContext(ctx)
+func (h *Handler) cleanupStaging(logger *slog.Logger, item *queue.Item) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	root, err := item.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
 		logger.Warn("cannot resolve staging root for cleanup",

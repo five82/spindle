@@ -16,7 +16,6 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
-	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/textutil"
 	"github.com/five82/spindle/internal/tmdb"
 )
@@ -43,6 +42,7 @@ type candidateDiagnostics struct {
 // OpenSubtitles client rate-limits requests internally.
 func (h *Handler) fetchReferenceFingerprints(
 	ctx context.Context,
+	logger *slog.Logger,
 	item *queue.Item,
 	seasonNum int,
 	tmdbID int,
@@ -56,7 +56,9 @@ func (h *Handler) fetchReferenceFingerprints(
 	if len(episodes) == 0 {
 		return nil, nil
 	}
-	logger := stage.LoggerFromContext(ctx)
+	if logger == nil {
+		logger = slog.Default()
+	}
 	languages := []string{"en"}
 	if h.cfg != nil && len(h.cfg.Subtitles.OpenSubtitlesLanguages) > 0 {
 		languages = append([]string(nil), h.cfg.Subtitles.OpenSubtitlesLanguages...)

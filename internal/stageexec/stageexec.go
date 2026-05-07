@@ -24,7 +24,6 @@ func Run(ctx context.Context, item *queue.Item, opts Options) error {
 	}
 
 	logger := opts.Logger.With("item_id", item.ID)
-	ctx = stage.WithLogger(ctx, logger)
 
 	logger.Info("one-shot stage execution started",
 		"decision_type", logs.DecisionStageExecution,

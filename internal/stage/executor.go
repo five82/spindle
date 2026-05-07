@@ -61,10 +61,10 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 	if opts.Store == nil {
 		return res, fmt.Errorf("stage execution: nil queue store")
 	}
-	ctx = WithLogger(ctx, logger.With("item_id", item.ID))
 
 	sess, err := NewSession(ctx, opts.Store, item)
 	if err == nil {
+		sess.Logger = logger.With("item_id", item.ID)
 		err = opts.Handler.Run(ctx, sess)
 	}
 

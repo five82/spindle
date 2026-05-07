@@ -202,9 +202,7 @@ func (m *Manager) Run(ctx context.Context) {
 func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps PipelineStage) {
 	p := m.pipeline
 
-	// Create child context with per-item logger.
 	itemLogger := p.logger.With("item_id", item.ID)
-	ctx = stage.WithLogger(ctx, itemLogger)
 
 	itemLogger.Info("stage started",
 		"decision_type", logs.DecisionStageExecution,

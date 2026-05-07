@@ -40,7 +40,7 @@ func NewSession(ctx context.Context, store *queue.Store, item *queue.Item) (*Ses
 		Store:  store,
 		Item:   item,
 		Env:    &env,
-		Logger: LoggerFromContext(ctx),
+		Logger: slog.Default(),
 	}, nil
 }
 
