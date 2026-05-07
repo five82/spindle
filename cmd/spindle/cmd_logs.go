@@ -72,13 +72,11 @@ func newLogsCmd() *cobra.Command {
 
 			// No filters: tail the log file directly.
 			logPath := cfg.DaemonLogPath()
-			result, err := logs.Tail(context.Background(), logPath, logs.TailOptions{
-				Limit: lines,
-			})
+			logLines, err := logs.Tail(logPath, lines)
 			if err != nil {
 				return fmt.Errorf("read logs: %w", err)
 			}
-			for _, line := range result.Lines {
+			for _, line := range logLines {
 				fmt.Println(line)
 			}
 			return nil
