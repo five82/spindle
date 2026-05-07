@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/queueops"
 	"github.com/five82/spindle/internal/sockhttp"
@@ -65,11 +66,11 @@ func OpenHTTP(socketPath, token string) (*HTTPAccess, error) {
 }
 
 type queueListResponse struct {
-	Items []queueItemResponse `json:"items"`
+	Items []httpapi.ItemResponse `json:"items"`
 }
 
 type queueGetResponse struct {
-	Item queueItemResponse `json:"item"`
+	Item httpapi.ItemResponse `json:"item"`
 }
 
 type queueRetryResponse struct {
@@ -85,7 +86,7 @@ type queueRetryEpisodeResponse struct {
 }
 
 type queueEnqueueCachedResponse struct {
-	Item queueItemResponse `json:"item"`
+	Item httpapi.ItemResponse `json:"item"`
 }
 
 // EnqueueCachedRequest describes a cached rip queue request.
@@ -116,68 +117,9 @@ type WorkflowStatus struct {
 }
 
 // DependencyStatus reports an external dependency health check.
-type DependencyStatus struct {
-	Name        string
-	Command     string
-	Description string
-	Optional    bool
-	Available   bool
-	Detail      string
-}
+type DependencyStatus = httpapi.DependencyResponse
 
-type statusAPIResponse struct {
-	Running      bool                       `json:"running"`
-	PID          int                        `json:"pid"`
-	QueueDBPath  string                     `json:"queueDbPath"`
-	LockFilePath string                     `json:"lockFilePath"`
-	Workflow     workflowStatusAPIResponse  `json:"workflow"`
-	Dependencies []dependencyStatusResponse `json:"dependencies"`
-}
-
-type workflowStatusAPIResponse struct {
-	Running    bool               `json:"running"`
-	QueueStats map[string]int     `json:"queueStats"`
-	LastError  string             `json:"lastError"`
-	LastItem   *queueItemResponse `json:"lastItem"`
-}
-
-type dependencyStatusResponse struct {
-	Name        string `json:"name"`
-	Command     string `json:"command"`
-	Description string `json:"description"`
-	Optional    bool   `json:"optional"`
-	Available   bool   `json:"available"`
-	Detail      string `json:"detail"`
-}
-
-type queueItemResponse struct {
-	ID               int64            `json:"id"`
-	DiscTitle        string           `json:"discTitle"`
-	Stage            string           `json:"stage"`
-	InProgress       bool             `json:"inProgress"`
-	FailedAtStage    string           `json:"failedAtStage"`
-	ErrorMessage     string           `json:"errorMessage"`
-	CreatedAt        string           `json:"createdAt"`
-	UpdatedAt        string           `json:"updatedAt"`
-	DiscFingerprint  string           `json:"discFingerprint"`
-	NeedsReview      bool             `json:"needsReview"`
-	ReviewReason     string           `json:"reviewReason"`
-	Metadata         json.RawMessage  `json:"metadata"`
-	RipSpec          json.RawMessage  `json:"ripSpec"`
-	ActiveEpisodeKey string           `json:"activeEpisodeKey"`
-	Progress         progressResponse `json:"progress"`
-	Encoding         json.RawMessage  `json:"encoding"`
-}
-
-type progressResponse struct {
-	Stage       string  `json:"stage"`
-	Percent     float64 `json:"percent"`
-	Message     string  `json:"message"`
-	BytesCopied int64   `json:"bytesCopied"`
-	TotalBytes  int64   `json:"totalBytes"`
-}
-
-func (r queueItemResponse) toQueueItem() *queue.Item {
+func toQueueItem(r httpapi.ItemResponse) *queue.Item {
 	item := &queue.Item{
 		ID:                  r.ID,
 		DiscTitle:           r.DiscTitle,
@@ -230,7 +172,7 @@ func (a *HTTPAccess) List(stages ...queue.Stage) ([]*queue.Item, error) {
 	}
 	items := make([]*queue.Item, 0, len(resp.Items))
 	for _, item := range resp.Items {
-		items = append(items, item.toQueueItem())
+		items = append(items, toQueueItem(item))
 	}
 	return items, nil
 }
@@ -241,7 +183,7 @@ func (a *HTTPAccess) GetByID(id int64) (*queue.Item, error) {
 	if err := a.getJSON(fmt.Sprintf("/api/queue/%d", id), &resp); err != nil {
 		return nil, err
 	}
-	return resp.Item.toQueueItem(), nil
+	return toQueueItem(resp.Item), nil
 }
 
 // Stats returns item counts grouped by stage via HTTP.
@@ -255,7 +197,7 @@ func (a *HTTPAccess) Stats() (map[queue.Stage]int, error) {
 
 // Status returns daemon status via HTTP.
 func (a *HTTPAccess) Status() (*Status, error) {
-	var resp statusAPIResponse
+	var resp httpapi.StatusAPIResponse
 	if err := a.getJSON("/api/status", &resp); err != nil {
 		return nil, err
 	}
@@ -267,7 +209,7 @@ func (a *HTTPAccess) Status() (*Status, error) {
 
 	var lastItem *queue.Item
 	if resp.Workflow.LastItem != nil {
-		lastItem = resp.Workflow.LastItem.toQueueItem()
+		lastItem = toQueueItem(*resp.Workflow.LastItem)
 	}
 
 	deps := make([]DependencyStatus, 0, len(resp.Dependencies))
@@ -324,7 +266,7 @@ func (a *HTTPAccess) EnqueueCached(req EnqueueCachedRequest) (*queue.Item, error
 	if err := a.postJSON("/api/queue/enqueue-cached", req, &resp); err != nil {
 		return nil, err
 	}
-	return resp.Item.toQueueItem(), nil
+	return toQueueItem(resp.Item), nil
 }
 
 // Clear clears queue items by scope via HTTP.

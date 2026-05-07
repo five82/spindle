@@ -4,23 +4,21 @@ package ripcache
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/five82/spindle/internal/fileutil"
 )
 
 const metadataFileName = "spindle.cache.json"
 
 // CopyProgress reports progress during a file copy operation.
-type CopyProgress struct {
-	BytesCopied int64
-	TotalBytes  int64
-}
+type CopyProgress = fileutil.CopyProgress
 
 // ProgressFunc is called during file copy operations to report progress.
-type ProgressFunc func(CopyProgress)
+type ProgressFunc = fileutil.ProgressFunc
 
 // EntryMetadata stores metadata about a cached rip.
 type EntryMetadata struct {
@@ -298,47 +296,24 @@ func (s *Store) Clear() error {
 	return nil
 }
 
-// progressWriter wraps an io.Writer and reports bytes written via a callback.
-type progressWriter struct {
-	w       io.Writer
-	copied  int64
-	total   int64
-	onWrite ProgressFunc
-}
-
-func (pw *progressWriter) Write(p []byte) (int, error) {
-	n, err := pw.w.Write(p)
-	pw.copied += int64(n)
-	if pw.onWrite != nil {
-		pw.onWrite(CopyProgress{BytesCopied: pw.copied, TotalBytes: pw.total})
-	}
-	return n, err
-}
-
-// copyFileWithProgress copies src to dst using streaming I/O, reporting progress.
+// copyFileWithProgress copies src to dst using the shared verified-copy helper.
 // baseOffset is the cumulative bytes already copied in a multi-file operation.
 // Returns the number of bytes copied from this file.
 func copyFileWithProgress(src, dst string, baseOffset, totalBytes int64, progress ProgressFunc) (int64, error) {
-	sf, err := os.Open(src)
+	info, err := os.Stat(src)
 	if err != nil {
-		return 0, fmt.Errorf("open source: %w", err)
+		return 0, fmt.Errorf("stat source: %w", err)
 	}
-	defer func() { _ = sf.Close() }()
 
-	df, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return 0, fmt.Errorf("create dest: %w", err)
-	}
-	defer func() { _ = df.Close() }()
-
-	var w io.Writer = df
+	var wrapped fileutil.ProgressFunc
 	if progress != nil {
-		w = &progressWriter{w: df, copied: baseOffset, total: totalBytes, onWrite: progress}
+		wrapped = func(p fileutil.CopyProgress) {
+			progress(CopyProgress{BytesCopied: baseOffset + p.BytesCopied, TotalBytes: totalBytes})
+		}
 	}
 
-	n, err := io.Copy(w, sf)
-	if err != nil {
-		return n, fmt.Errorf("copy: %w", err)
+	if err := fileutil.CopyFileVerifiedWithProgress(src, dst, wrapped); err != nil {
+		return 0, err
 	}
-	return n, df.Close()
+	return info.Size(), nil
 }
