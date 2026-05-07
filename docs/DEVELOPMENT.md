@@ -107,8 +107,8 @@ Keep dependencies flowing from lower-level packages toward orchestration and CLI
    transcription, staging, fingerprinting, disc monitoring.
 4. Stage handlers: identify, ripper, contentid, encoder, audioanalysis,
    subtitle, organizer.
-5. Orchestration and access: workflow, stageexec, httpapi, sockhttp,
-   queueaccess, queueops, auditgather.
+5. Orchestration and access: workflow, httpapi, sockhttp, queueaccess,
+   queueops, auditgather.
 6. Daemon control/runtime.
 7. CLI entry point.
 

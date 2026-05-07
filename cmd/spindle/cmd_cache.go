@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,13 +19,14 @@ import (
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/identify"
 	"github.com/five82/spindle/internal/keydb"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/queueaccess"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripper"
 	"github.com/five82/spindle/internal/ripspec"
-	"github.com/five82/spindle/internal/stageexec"
+	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/tmdb"
 )
 
@@ -135,11 +137,7 @@ func newCacheRipCmd() *cobra.Command {
 			// Run identification stage.
 			fmt.Printf("Identifying disc on %s...\n", device)
 			identifyHandler := identify.New(cfg, tmdbClient, nil, discIDStore, keydbCat)
-			if err := stageexec.Run(ctx, item, stageexec.Options{
-				Store:   qStore,
-				Handler: identifyHandler,
-				Logger:  logger,
-			}); err != nil {
+			if err := runCacheStage(ctx, qStore, item, identifyHandler, logger); err != nil {
 				return fmt.Errorf("identification: %w", err)
 			}
 
@@ -214,11 +212,7 @@ func newCacheRipCmd() *cobra.Command {
 			// Run ripping stage.
 			fmt.Printf("Ripping disc...\n")
 			ripperHandler := ripper.New(cfg, nil, ripCacheStore, nil, titleOverride)
-			if err := stageexec.Run(ctx, item, stageexec.Options{
-				Store:   qStore,
-				Handler: ripperHandler,
-				Logger:  logger,
-			}); err != nil {
+			if err := runCacheStage(ctx, qStore, item, ripperHandler, logger); err != nil {
 				return fmt.Errorf("ripping: %w", err)
 			}
 
@@ -235,6 +229,44 @@ func newCacheRipCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path")
 	cmd.Flags().BoolVar(&selectTitle, "title", false, "Interactively select which title to rip")
 	return cmd
+}
+
+func runCacheStage(ctx context.Context, store *queue.Store, item *queue.Item, handler stage.Handler, logger *slog.Logger) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	itemLogger := logger.With("item_id", item.ID)
+
+	itemLogger.Info("one-shot stage execution started",
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "started",
+		"decision_reason", fmt.Sprintf("one-shot execution of %s", item.Stage),
+		"stage", item.Stage,
+		"disc_title", item.DiscTitle,
+	)
+
+	if err := store.StartStage(item, item.Stage); err != nil {
+		return fmt.Errorf("set in_progress: %w", err)
+	}
+
+	_, err := stage.ExecuteStarted(ctx, item, stage.ExecuteOptions{
+		Store:   store,
+		Handler: handler,
+		Logger:  logger,
+		Stage:   item.Stage,
+		Advance: false,
+	})
+	if err != nil {
+		return fmt.Errorf("stage %s: %w", item.Stage, err)
+	}
+
+	itemLogger.Info("one-shot stage execution completed",
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "completed",
+		"decision_reason", string(item.Stage),
+		"stage", item.Stage,
+	)
+	return nil
 }
 
 func newCacheStatsCmd() *cobra.Command {

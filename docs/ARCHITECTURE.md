@@ -128,7 +128,7 @@ The current package layout is intentionally simple:
   persistence, progress updates, active episode bookkeeping, and review-state
   mutation; the stage executor centralizes common in-progress, completion,
   degraded, cancellation, and failure persistence.
-- `internal/daemon`, `daemonrun`, `daemonctl`, `workflow`, `stageexec`: runtime
+- `internal/daemon`, `daemonrun`, `daemonctl`, `workflow`: runtime
   orchestration and daemon control.
 - `internal/identify`, `ripper`, `contentid`, `encoder`, `audioanalysis`,
   `subtitle`, `organizer`: stage handlers.

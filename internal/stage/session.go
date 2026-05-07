@@ -55,7 +55,7 @@ func (s *Session) SetEnvelope(env *ripspec.Envelope) {
 
 // Save persists the session's RipSpec envelope and queue-visible work state.
 // Lifecycle fields such as stage, in_progress, failed_at_stage, and
-// error_message are owned by workflow/stageexec and are not changed here.
+// error_message are owned by stage execution and are not changed here.
 func (s *Session) Save() error {
 	if s == nil || s.Store == nil || s.Item == nil || s.Env == nil {
 		return fmt.Errorf("stage session: incomplete save state")
