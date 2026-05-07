@@ -78,16 +78,6 @@ type filterStats struct {
 	RemovedBySegmentHeuristics int
 }
 
-// FormatRequest describes how to build a display subtitle from canonical
-// WhisperX artifacts.
-type FormatRequest struct {
-	CanonicalJSONPath string
-	WorkDir           string
-	DisplayPath       string
-	VideoSeconds      float64
-	Language          string
-}
-
 // FormatResult summarizes display-subtitle formatting output.
 type FormatResult struct {
 	DisplayPath      string
@@ -96,23 +86,6 @@ type FormatResult struct {
 	SplitCues        int
 	WrappedCues      int
 	RetimedCues      int
-}
-
-// FormatDisplaySubtitle derives a display subtitle from canonical WhisperX
-// artifacts using subtitle-package filtering and Stable-TS formatting.
-func FormatDisplaySubtitle(ctx context.Context, req FormatRequest) (*FormatResult, error) {
-	result, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: req.CanonicalJSONPath}, req.WorkDir, req.DisplayPath, req.VideoSeconds, req.Language)
-	if err != nil {
-		return nil, err
-	}
-	return &FormatResult{
-		DisplayPath:      result.DisplayPath,
-		OriginalSegments: result.OriginalSegments,
-		FilteredSegments: result.FilteredSegments,
-		SplitCues:        result.SplitCues,
-		WrappedCues:      result.WrappedCues,
-		RetimedCues:      result.RetimedCues,
-	}, nil
 }
 
 // DisplaySubtitlePath returns the standard sidecar subtitle path for a video.

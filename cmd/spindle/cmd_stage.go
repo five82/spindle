@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,7 +18,6 @@ import (
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/identify"
 	"github.com/five82/spindle/internal/keydb"
-	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/subtitle"
@@ -284,62 +284,54 @@ func newGensubtitleCmd() *cobra.Command {
 				fmt.Printf("  %s en\n", labelStyle("Language:"))
 			}
 
-			selectedAudio, err := svc.SelectPrimaryAudioTrack(ctx, file, "en")
-			if err != nil {
-				return fmt.Errorf("select primary audio: %w", err)
-			}
-			if flagVerbose {
-				fmt.Printf("  %s %s (stream 0:a:%d)\n", labelStyle("Audio:   "), selectedAudio.Label, selectedAudio.Index)
-			}
-
-			// Progress callback for phase output. Keep each progress event on its
-			// own line so structured logs emitted by dependencies do not visually
-			// collide with inline CLI status text.
-			progress := func(phase transcription.Phase, elapsed time.Duration) {
-				switch {
-				case phase == transcription.PhaseExtract && elapsed == 0:
-					fmt.Println("  Extracting audio...")
-				case phase == transcription.PhaseExtract && elapsed > 0:
-					fmt.Printf("  Extracting audio %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
-				case phase == transcription.PhaseTranscribe && elapsed == 0:
-					fmt.Println("  Running WhisperX...")
-				case phase == transcription.PhaseTranscribe && elapsed > 0:
-					fmt.Printf("  Running WhisperX %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
-				}
-			}
-
-			result, err := svc.Transcribe(ctx, transcription.TranscribeRequest{
-				InputPath:  file,
-				AudioIndex: selectedAudio.Index,
-				Language:   selectedAudio.Language,
-				OutputDir:  workDir,
-			}, progress)
-			if err != nil {
-				return fmt.Errorf("transcription: %w", err)
-			}
-
-			fmt.Printf("Canonical transcript ready: %d segments", result.Segments)
-			if result.Duration > 0 {
-				fmt.Printf(", %s", formatContentDuration(result.Duration))
-			}
-			fmt.Println()
-
-			displayPath := subtitle.DisplaySubtitlePath(filepath.Join(workDir, filepath.Base(file)), selectedAudio.Language)
-			finalSidecarPath := subtitle.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), selectedAudio.Language)
-			videoSeconds := resolveCLIPrimaryVideoDuration(ctx, file, result.Duration)
-			fmt.Print("  Formatting subtitles...")
-			formatStart := time.Now()
-			formatted, err := subtitle.FormatDisplaySubtitle(ctx, subtitle.FormatRequest{
-				CanonicalJSONPath: result.JSONPath,
-				WorkDir:           workDir,
-				DisplayPath:       displayPath,
-				VideoSeconds:      videoSeconds,
-				Language:          selectedAudio.Language,
+			var formatStart time.Time
+			result, err := subtitle.GenerateDisplaySubtitle(ctx, subtitle.GenerateDisplaySubtitleRequest{
+				VideoPath:       file,
+				DisplayBasePath: filepath.Join(workDir, filepath.Base(file)),
+				WorkDir:         workDir,
+				Language:        "en",
+				Transcriber:     svc,
+				// Progress callback for phase output. Keep each progress event on its
+				// own line so structured logs emitted by dependencies do not visually
+				// collide with inline CLI status text.
+				Progress: func(phase transcription.Phase, elapsed time.Duration) {
+					switch {
+					case phase == transcription.PhaseExtract && elapsed == 0:
+						fmt.Println("  Extracting audio...")
+					case phase == transcription.PhaseExtract && elapsed > 0:
+						fmt.Printf("  Extracting audio %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
+					case phase == transcription.PhaseTranscribe && elapsed == 0:
+						fmt.Println("  Running WhisperX...")
+					case phase == transcription.PhaseTranscribe && elapsed > 0:
+						fmt.Printf("  Running WhisperX %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
+					}
+				},
+				OnAudioSelected: func(selectedAudio transcription.SelectedAudio) {
+					if flagVerbose {
+						fmt.Printf("  %s %s (stream 0:a:%d)\n", labelStyle("Audio:   "), selectedAudio.Label, selectedAudio.Index)
+					}
+				},
+				OnTranscriptionComplete: func(transcript *transcription.TranscribeResult) {
+					fmt.Printf("Canonical transcript ready: %d segments", transcript.Segments)
+					if transcript.Duration > 0 {
+						fmt.Printf(", %s", formatContentDuration(transcript.Duration))
+					}
+					fmt.Println()
+				},
+				OnFormattingStart: func() {
+					fmt.Print("  Formatting subtitles...")
+					formatStart = time.Now()
+				},
+				OnFormattingComplete: func(formatted subtitle.FormatResult) {
+					fmt.Printf("%s (%d -> %d segments, split %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
+				},
 			})
 			if err != nil {
-				return fmt.Errorf("format subtitles: %w", err)
+				return standaloneDisplaySubtitleError(err)
 			}
-			fmt.Printf("%s (%d -> %d segments, split %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
+
+			displayPath := result.Formatting.DisplayPath
+			finalSidecarPath := subtitle.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), result.SelectedAudio.Language)
 
 			forcedPath := ""
 			if fetchForced {
@@ -353,7 +345,7 @@ func newGensubtitleCmd() *cobra.Command {
 					if sidecarMode {
 						forcedVideoPath = filepath.Join(output, filepath.Base(file))
 					}
-					forced, err := fetchStandaloneForcedSubtitle(ctx, cmdLogger, cfg, forcedVideoPath, selectedAudio.Language, forcedMeta)
+					forced, err := fetchStandaloneForcedSubtitle(ctx, cmdLogger, cfg, forcedVideoPath, result.SelectedAudio.Language, forcedMeta)
 					if err != nil {
 						return err
 					}
@@ -393,9 +385,9 @@ func newGensubtitleCmd() *cobra.Command {
 					fmt.Print("Muxing subtitle into MKV...")
 				}
 
-				tracks := []subtitle.MuxTrack{{Path: displayPath, Language: selectedAudio.Language}}
+				tracks := []subtitle.MuxTrack{{Path: displayPath, Language: result.SelectedAudio.Language}}
 				if forcedPath != "" {
-					tracks = append(tracks, subtitle.MuxTrack{Path: forcedPath, Language: selectedAudio.Language, Forced: true})
+					tracks = append(tracks, subtitle.MuxTrack{Path: forcedPath, Language: result.SelectedAudio.Language, Forced: true})
 				}
 				if _, err := subtitle.MuxSubtitleTracks(ctx, subtitle.MuxRequest{VideoPath: file, OutputPath: file, Tracks: tracks, ReplaceExisting: true}); err != nil {
 					return err
@@ -415,6 +407,23 @@ func newGensubtitleCmd() *cobra.Command {
 	cmd.Flags().IntVar(&forcedEpisode, "episode", 0, "TV episode number for standalone forced subtitle lookup")
 	cmd.Flags().BoolVar(&external, "external", false, "Create external SRT sidecar instead of muxing")
 	return cmd
+}
+
+func standaloneDisplaySubtitleError(err error) error {
+	var displayErr *subtitle.DisplaySubtitleError
+	if !errors.As(err, &displayErr) {
+		return err
+	}
+	switch displayErr.Op {
+	case "select audio":
+		return fmt.Errorf("select primary audio: %w", displayErr.Err)
+	case "transcribe":
+		return fmt.Errorf("transcription: %w", displayErr.Err)
+	case "format subtitle":
+		return fmt.Errorf("format subtitles: %w", displayErr.Err)
+	default:
+		return err
+	}
 }
 
 // formatPhaseDuration formats a time.Duration for phase timing display.
@@ -452,15 +461,4 @@ func newTestNotifyCmd() *cobra.Command {
 			return nil
 		},
 	}
-}
-
-func resolveCLIPrimaryVideoDuration(ctx context.Context, path string, fallback float64) float64 {
-	result, err := ffprobe.Inspect(ctx, "", path)
-	if err != nil {
-		return fallback
-	}
-	if seconds := result.DurationSeconds(); seconds > 0 {
-		return seconds
-	}
-	return fallback
 }

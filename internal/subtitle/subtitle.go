@@ -50,6 +50,123 @@ func New(
 	}
 }
 
+// DisplaySubtitleError reports which display-subtitle generation step failed.
+type DisplaySubtitleError struct {
+	Op  string
+	Err error
+}
+
+func (e *DisplaySubtitleError) Error() string { return fmt.Sprintf("%s: %v", e.Op, e.Err) }
+func (e *DisplaySubtitleError) Unwrap() error { return e.Err }
+
+// GenerateDisplaySubtitleRequest describes one display subtitle generation run.
+type GenerateDisplaySubtitleRequest struct {
+	VideoPath       string
+	DisplayBasePath string
+	DisplayPath     string
+	WorkDir         string
+	Language        string
+	Transcriber     interface {
+		SelectPrimaryAudioTrack(context.Context, string, string) (transcription.SelectedAudio, error)
+		Transcribe(context.Context, transcription.TranscribeRequest, ...transcription.ProgressFunc) (*transcription.TranscribeResult, error)
+	}
+	Progress                transcription.ProgressFunc
+	OnAudioSelected         func(transcription.SelectedAudio)
+	OnTranscriptionComplete func(*transcription.TranscribeResult)
+	OnDurationSelected      func(videoSeconds float64, source string, transcriptSeconds float64)
+	OnFormattingStart       func()
+	OnFormattingComplete    func(FormatResult)
+}
+
+// GenerateDisplaySubtitleResult describes the generated primary display SRT.
+type GenerateDisplaySubtitleResult struct {
+	SelectedAudio  transcription.SelectedAudio
+	Formatting     FormatResult
+	VideoSeconds   float64
+	DurationSource string
+
+	formatting formatResult
+}
+
+// GenerateDisplaySubtitle selects primary audio, creates canonical WhisperX
+// artifacts, resolves video duration, and formats the primary display SRT.
+func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleRequest) (*GenerateDisplaySubtitleResult, error) {
+	if req.Transcriber == nil {
+		return nil, fmt.Errorf("generate display subtitle: nil transcriber")
+	}
+	if strings.TrimSpace(req.VideoPath) == "" {
+		return nil, fmt.Errorf("generate display subtitle: missing video path")
+	}
+	if strings.TrimSpace(req.WorkDir) == "" {
+		return nil, fmt.Errorf("generate display subtitle: missing work dir")
+	}
+
+	preferredLanguage := req.Language
+	if preferredLanguage == "" {
+		preferredLanguage = "en"
+	}
+	selectedAudio, err := req.Transcriber.SelectPrimaryAudioTrack(ctx, req.VideoPath, preferredLanguage)
+	if err != nil {
+		return nil, &DisplaySubtitleError{Op: "select audio", Err: err}
+	}
+	if req.OnAudioSelected != nil {
+		req.OnAudioSelected(selectedAudio)
+	}
+
+	transcript, err := req.Transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+		InputPath:  req.VideoPath,
+		AudioIndex: selectedAudio.Index,
+		Language:   selectedAudio.Language,
+		OutputDir:  req.WorkDir,
+	}, req.Progress)
+	if err != nil {
+		return nil, &DisplaySubtitleError{Op: "transcribe", Err: err}
+	}
+	if req.OnTranscriptionComplete != nil {
+		req.OnTranscriptionComplete(transcript)
+	}
+
+	videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, req.VideoPath, transcript.Duration)
+	if req.OnDurationSelected != nil {
+		req.OnDurationSelected(videoSeconds, durationSource, transcript.Duration)
+	}
+
+	displayPath := req.DisplayPath
+	if displayPath == "" {
+		displayBasePath := req.DisplayBasePath
+		if displayBasePath == "" {
+			displayBasePath = req.VideoPath
+		}
+		displayPath = displaySubtitlePath(displayBasePath, selectedAudio.Language)
+	}
+	if req.OnFormattingStart != nil {
+		req.OnFormattingStart()
+	}
+	formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: transcript.JSONPath}, req.WorkDir, displayPath, videoSeconds, selectedAudio.Language)
+	if err != nil {
+		return nil, &DisplaySubtitleError{Op: "format subtitle", Err: err}
+	}
+	publicFormatting := FormatResult{
+		DisplayPath:      formatting.DisplayPath,
+		OriginalSegments: formatting.OriginalSegments,
+		FilteredSegments: formatting.FilteredSegments,
+		SplitCues:        formatting.SplitCues,
+		WrappedCues:      formatting.WrappedCues,
+		RetimedCues:      formatting.RetimedCues,
+	}
+	if req.OnFormattingComplete != nil {
+		req.OnFormattingComplete(publicFormatting)
+	}
+
+	return &GenerateDisplaySubtitleResult{
+		SelectedAudio:  selectedAudio,
+		Formatting:     publicFormatting,
+		VideoSeconds:   videoSeconds,
+		DurationSource: durationSource,
+		formatting:     formatting,
+	}, nil
+}
+
 // Run executes the subtitle generation stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger := sess.Logger
@@ -124,13 +241,13 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 
 	h.startSubtitleJob(sess, job)
 
-	selectedAudio, transcript, workDir, err := h.transcribeSubtitleJob(ctx, sess, job)
+	result, err := h.generateDisplaySubtitle(ctx, sess, job)
 	if err != nil {
 		h.recordSubtitleFailure(logger, sess, key, err.Error())
 		return false, nil
 	}
 
-	record, err := h.createDisplaySubtitle(ctx, sess, job, selectedAudio, transcript, workDir)
+	record, err := h.createDisplaySubtitleRecord(sess, job, result)
 	if err != nil {
 		h.recordSubtitleFailure(logger, sess, key, err.Error())
 		return false, nil
@@ -152,7 +269,7 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 	h.applyForcedSubtitleDecision(ctx, logger, sess.Env, key, asset.Path, &record)
 	upsertSubtitleGenRecord(&sess.Env.Attributes.SubtitleGenerationResults, record)
 
-	subtitledPath, subtitlesMuxed := h.resolveSubtitledOutput(ctx, logger, asset.Path, record.SubtitlePath, key, selectedAudio.Language)
+	subtitledPath, subtitlesMuxed := h.resolveSubtitledOutput(ctx, logger, asset.Path, record.SubtitlePath, key, result.SelectedAudio.Language)
 	if err := h.saveSubtitleJobSuccess(logger, sess, job, subtitledPath, subtitlesMuxed); err != nil {
 		return false, err
 	}
@@ -177,81 +294,57 @@ func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
 	_ = sess.Progress(job.Percent(0), item.ProgressMessage, stage.WithActiveEpisode(key))
 }
 
-func (h *Handler) transcribeSubtitleJob(
-	ctx context.Context,
-	sess *stage.Session,
-	job stage.AssetJob,
-) (transcription.SelectedAudio, *transcription.TranscribeResult, string, error) {
+func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Session, job stage.AssetJob) (*GenerateDisplaySubtitleResult, error) {
 	item := sess.Item
 	asset := job.Input
 	key := job.Key
-
-	selectedAudio, err := h.transcriber.SelectPrimaryAudioTrack(ctx, asset.Path, "en")
-	if err != nil {
-		return transcription.SelectedAudio{}, nil, "", fmt.Errorf("select audio: %w", err)
-	}
-
 	workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
-	result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
-		InputPath:  asset.Path,
-		AudioIndex: selectedAudio.Index,
-		Language:   selectedAudio.Language,
-		OutputDir:  workDir,
-	}, func(phase transcription.Phase, elapsed time.Duration) {
-		message := item.ProgressMessage
-		switch phase {
-		case transcription.PhaseExtract:
-			if elapsed == 0 {
-				message = job.PhaseMessage("Extracting audio (" + key + ")")
+
+	return GenerateDisplaySubtitle(ctx, GenerateDisplaySubtitleRequest{
+		VideoPath:   asset.Path,
+		WorkDir:     workDir,
+		Language:    "en",
+		Transcriber: h.transcriber,
+		Progress: func(phase transcription.Phase, elapsed time.Duration) {
+			message := item.ProgressMessage
+			switch phase {
+			case transcription.PhaseExtract:
+				if elapsed == 0 {
+					message = job.PhaseMessage("Extracting audio (" + key + ")")
+				}
+			case transcription.PhaseTranscribe:
+				if elapsed == 0 {
+					message = job.PhaseMessage("Transcribing audio (" + key + ")")
+				}
 			}
-		case transcription.PhaseTranscribe:
-			if elapsed == 0 {
-				message = job.PhaseMessage("Transcribing audio (" + key + ")")
-			}
-		}
-		_ = sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
+			_ = sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
+		},
+		OnTranscriptionComplete: func(result *transcription.TranscribeResult) {
+			sess.Logger.Info("transcription complete",
+				"event_type", "transcription_complete",
+				"episode_key", key,
+				"segments", result.Segments,
+				"content_duration_s", result.Duration,
+				"extract_time_ms", result.ExtractTime.Milliseconds(),
+				"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
+			)
+		},
+		OnDurationSelected: func(videoSeconds float64, source string, transcriptSeconds float64) {
+			sess.Logger.Info("subtitle duration selected",
+				"decision_type", "subtitle_duration_source",
+				"decision_result", source,
+				"decision_reason", fmt.Sprintf("video_seconds=%.3f transcript_seconds=%.3f", videoSeconds, transcriptSeconds),
+				"episode_key", key,
+			)
+		},
 	})
-	if err != nil {
-		return transcription.SelectedAudio{}, nil, "", fmt.Errorf("transcribe: %w", err)
-	}
-
-	sess.Logger.Info("transcription complete",
-		"event_type", "transcription_complete",
-		"episode_key", key,
-		"segments", result.Segments,
-		"content_duration_s", result.Duration,
-		"extract_time_ms", result.ExtractTime.Milliseconds(),
-		"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
-	)
-
-	return selectedAudio, result, workDir, nil
 }
 
-func (h *Handler) createDisplaySubtitle(
-	ctx context.Context,
-	sess *stage.Session,
-	job stage.AssetJob,
-	selectedAudio transcription.SelectedAudio,
-	transcript *transcription.TranscribeResult,
-	workDir string,
-) (ripspec.SubtitleGenRecord, error) {
+func (h *Handler) createDisplaySubtitleRecord(sess *stage.Session, job stage.AssetJob, result *GenerateDisplaySubtitleResult) (ripspec.SubtitleGenRecord, error) {
 	logger := sess.Logger
 	key := job.Key
-	asset := job.Input
+	formatting := result.formatting
 
-	videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, asset.Path, transcript.Duration)
-	logger.Info("subtitle duration selected",
-		"decision_type", "subtitle_duration_source",
-		"decision_result", durationSource,
-		"decision_reason", fmt.Sprintf("video_seconds=%.3f transcript_seconds=%.3f", videoSeconds, transcript.Duration),
-		"episode_key", key,
-	)
-
-	displayPath := displaySubtitlePath(asset.Path, selectedAudio.Language)
-	formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: transcript.JSONPath}, workDir, displayPath, videoSeconds, selectedAudio.Language)
-	if err != nil {
-		return ripspec.SubtitleGenRecord{}, fmt.Errorf("format subtitle: %w", err)
-	}
 	h.logSubtitleFormatting(logger, key, formatting)
 
 	formattedCues, readErr := srtutil.ParseFile(formatting.DisplayPath)
@@ -262,7 +355,7 @@ func (h *Handler) createDisplaySubtitle(
 		return ripspec.SubtitleGenRecord{}, fmt.Errorf("formatted subtitle produced zero cues")
 	}
 
-	validation := validateCuesDetailed(formattedCues, videoSeconds)
+	validation := validateCuesDetailed(formattedCues, result.VideoSeconds)
 	h.logSubtitleValidation(logger, key, validation, formatting)
 	h.applySubtitleReviewIssues(logger, sess, key, validation)
 
@@ -271,8 +364,8 @@ func (h *Handler) createDisplaySubtitle(
 		Source:           "whisperx",
 		SubtitlePath:     formatting.DisplayPath,
 		Segments:         len(formattedCues),
-		DurationSec:      videoSeconds,
-		Language:         selectedAudio.Language,
+		DurationSec:      result.VideoSeconds,
+		Language:         result.SelectedAudio.Language,
 		ValidationResult: subtitleValidationResult(validation),
 		QCObservations:   validation.Issues,
 		ReviewIssues:     validation.ReviewIssues,
