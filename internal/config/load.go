@@ -17,23 +17,19 @@ import (
 // 3) ./spindle.toml, 4) all defaults (no error).
 func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	logger = logs.Default(logger)
-	cfg := &Config{}
+	cfg := defaultConfig()
 
 	data, source, resolvedPath, err := findAndRead(explicitPath)
 	if err != nil {
 		return nil, err
 	}
 
-	var raw rawConfig
 	if data != nil {
-		if err := toml.Unmarshal(data, &raw); err != nil {
+		if err := toml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("config: parse TOML: %w", err)
 		}
 	}
-	*cfg = raw.toConfig()
 	cfg.SourcePath = resolvedPath
-
-	applyDefaults(cfg)
 
 	envKeys := collectEnvOverrides(cfg)
 
@@ -55,78 +51,6 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-type rawConfig struct {
-	Paths         PathsConfig         `toml:"paths"`
-	API           APIConfig           `toml:"api"`
-	TMDB          TMDBConfig          `toml:"tmdb"`
-	Jellyfin      JellyfinConfig      `toml:"jellyfin"`
-	Library       LibraryConfig       `toml:"library"`
-	Notifications NotificationsConfig `toml:"notifications"`
-	Subtitles     rawSubtitlesConfig  `toml:"subtitles"`
-	RipCache      RipCacheConfig      `toml:"rip_cache"`
-	DiscIDCache   DiscIDCacheConfig   `toml:"disc_id_cache"`
-	MakeMKV       MakeMKVConfig       `toml:"makemkv"`
-	Encoding      EncodingConfig      `toml:"encoding"`
-	LLM           LLMConfig           `toml:"llm"`
-	Commentary    CommentaryConfig    `toml:"commentary"`
-	ContentID     ContentIDConfig     `toml:"content_id"`
-	Logging       LoggingConfig       `toml:"logging"`
-}
-
-type rawSubtitlesConfig struct {
-	Enabled                bool     `toml:"enabled"`
-	MuxIntoMKV             *bool    `toml:"mux_into_mkv"`
-	WhisperXModel          string   `toml:"whisperx_model"`
-	WhisperXCUDAEnabled    bool     `toml:"whisperx_cuda_enabled"`
-	WhisperXVADMethod      string   `toml:"whisperx_vad_method"`
-	WhisperXHFToken        string   `toml:"whisperx_hf_token"`
-	OpenSubtitlesEnabled   bool     `toml:"opensubtitles_enabled"`
-	OpenSubtitlesAPIKey    string   `toml:"opensubtitles_api_key"`
-	OpenSubtitlesUserAgent string   `toml:"opensubtitles_user_agent"`
-	OpenSubtitlesUserToken string   `toml:"opensubtitles_user_token"`
-	OpenSubtitlesLanguages []string `toml:"opensubtitles_languages"`
-}
-
-func (r rawConfig) toConfig() Config {
-	return Config{
-		Paths:         r.Paths,
-		API:           r.API,
-		TMDB:          r.TMDB,
-		Jellyfin:      r.Jellyfin,
-		Library:       r.Library,
-		Notifications: r.Notifications,
-		Subtitles:     r.Subtitles.toConfig(),
-		RipCache:      r.RipCache,
-		DiscIDCache:   r.DiscIDCache,
-		MakeMKV:       r.MakeMKV,
-		Encoding:      r.Encoding,
-		LLM:           r.LLM,
-		Commentary:    r.Commentary,
-		ContentID:     r.ContentID,
-		Logging:       r.Logging,
-	}
-}
-
-func (r rawSubtitlesConfig) toConfig() SubtitlesConfig {
-	muxIntoMKV := true
-	if r.MuxIntoMKV != nil {
-		muxIntoMKV = *r.MuxIntoMKV
-	}
-	return SubtitlesConfig{
-		Enabled:                r.Enabled,
-		MuxIntoMKV:             muxIntoMKV,
-		WhisperXModel:          r.WhisperXModel,
-		WhisperXCUDAEnabled:    r.WhisperXCUDAEnabled,
-		WhisperXVADMethod:      r.WhisperXVADMethod,
-		WhisperXHFToken:        r.WhisperXHFToken,
-		OpenSubtitlesEnabled:   r.OpenSubtitlesEnabled,
-		OpenSubtitlesAPIKey:    r.OpenSubtitlesAPIKey,
-		OpenSubtitlesUserAgent: r.OpenSubtitlesUserAgent,
-		OpenSubtitlesUserToken: r.OpenSubtitlesUserToken,
-		OpenSubtitlesLanguages: r.OpenSubtitlesLanguages,
-	}
 }
 
 // findAndRead locates and reads the config file. Returns nil data if no file found.
@@ -173,155 +97,77 @@ func findAndRead(explicitPath string) ([]byte, string, string, error) {
 	return nil, "defaults_only", "", nil
 }
 
-// applyDefaults sets default values for fields that are empty/zero.
-func applyDefaults(cfg *Config) {
+// defaultConfig returns the complete built-in configuration before file and
+// environment overrides are applied.
+func defaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		home = "/"
 	}
 
-	// [paths]
-	if cfg.Paths.StagingDir == "" {
-		cfg.Paths.StagingDir = filepath.Join(home, ".local", "share", "spindle", "staging")
-	}
-	if cfg.Paths.LibraryDir == "" {
-		cfg.Paths.LibraryDir = filepath.Join(home, "library")
-	}
-	if cfg.Paths.StateDir == "" {
-		cfg.Paths.StateDir = filepath.Join(home, ".local", "state", "spindle")
-	}
-	if cfg.Paths.ReviewDir == "" {
-		cfg.Paths.ReviewDir = filepath.Join(home, "review")
-	}
-
-	// [tmdb]
-	if cfg.TMDB.BaseURL == "" {
-		cfg.TMDB.BaseURL = "https://api.themoviedb.org/3"
-	}
-	if cfg.TMDB.Language == "" {
-		cfg.TMDB.Language = "en-US"
-	}
-
-	// [library]
-	if cfg.Library.MoviesDir == "" {
-		cfg.Library.MoviesDir = "movies"
-	}
-	if cfg.Library.TVDir == "" {
-		cfg.Library.TVDir = "tv"
-	}
-
-	// [notifications]
-	if cfg.Notifications.RequestTimeout == 0 {
-		cfg.Notifications.RequestTimeout = 10
-	}
-
-	// [subtitles]
-	if cfg.Subtitles.WhisperXModel == "" {
-		cfg.Subtitles.WhisperXModel = "large-v3"
-	}
-	if cfg.Subtitles.WhisperXVADMethod == "" {
-		cfg.Subtitles.WhisperXVADMethod = "silero"
-	}
-	if cfg.Subtitles.OpenSubtitlesUserAgent == "" {
-		cfg.Subtitles.OpenSubtitlesUserAgent = "Spindle/dev v0.1.0"
-	}
-	if len(cfg.Subtitles.OpenSubtitlesLanguages) == 0 {
-		cfg.Subtitles.OpenSubtitlesLanguages = []string{"en"}
-	}
-	// [rip_cache]
-	if cfg.RipCache.MaxGiB == 0 {
-		cfg.RipCache.MaxGiB = 150
-	}
-
-	// [makemkv]
-	if cfg.MakeMKV.OpticalDrive == "" {
-		cfg.MakeMKV.OpticalDrive = "/dev/sr0"
-	}
-	if cfg.MakeMKV.RipTimeout == 0 {
-		cfg.MakeMKV.RipTimeout = 14400
-	}
-	if cfg.MakeMKV.InfoTimeout == 0 {
-		cfg.MakeMKV.InfoTimeout = 600
-	}
-	if cfg.MakeMKV.DiscSettleDelay == 0 {
-		cfg.MakeMKV.DiscSettleDelay = 10
-	}
-	if cfg.MakeMKV.MinTitleLength == 0 {
-		cfg.MakeMKV.MinTitleLength = 120
-	}
-	if cfg.MakeMKV.KeyDBPath == "" {
-		cfg.MakeMKV.KeyDBPath = filepath.Join(home, ".config", "spindle", "keydb", "KEYDB.cfg")
-	}
-	if cfg.MakeMKV.KeyDBDownloadURL == "" {
-		cfg.MakeMKV.KeyDBDownloadURL = "http://fvonline-db.bplaced.net/export/keydb_eng.zip"
-	}
-	if cfg.MakeMKV.KeyDBDownloadTimeout == 0 {
-		cfg.MakeMKV.KeyDBDownloadTimeout = 300
-	}
-
-	// [encoding]
-	// svt_av1_preset default is 6; zero value (0) is a valid preset,
-	// so we use -1 as an internal sentinel. However, since the struct
-	// uses int with zero value 0, and preset 0 is valid, we cannot
-	// distinguish "not set" from "set to 0" without a pointer.
-	// Convention: if the value is 0 and came from defaults, it stays 0.
-	// The default of 6 is applied only when the config file did not
-	// specify the field at all. Since go-toml/v2 leaves int at 0 when
-	// absent, we check if it's 0 and no TOML was parsed, but we cannot
-	// know that here. For safety, we apply 6 only when 0 and accept
-	// that users wanting preset 0 must explicitly set it.
-	// Actually, preset 0 is extremely slow and no one would use it
-	// unintentionally, so defaulting 0 -> 6 is acceptable.
-	applyEncodingDefaults(&cfg.Encoding)
-
-	// [llm]
-	if cfg.LLM.BaseURL == "" {
-		cfg.LLM.BaseURL = "https://openrouter.ai/api/v1/chat/completions"
-	}
-	if cfg.LLM.Model == "" {
-		cfg.LLM.Model = "google/gemini-3-flash-preview"
-	}
-	if cfg.LLM.Referer == "" {
-		cfg.LLM.Referer = "https://github.com/five82/spindle"
-	}
-	if cfg.LLM.Title == "" {
-		cfg.LLM.Title = "Spindle"
-	}
-	if cfg.LLM.TimeoutSeconds == 0 {
-		cfg.LLM.TimeoutSeconds = 60
-	}
-
-	// [commentary]
-	if cfg.Commentary.WhisperXModel == "" {
-		cfg.Commentary.WhisperXModel = "large-v3-turbo"
-	}
-	if cfg.Commentary.SimilarityThreshold == 0 {
-		cfg.Commentary.SimilarityThreshold = 0.92
-	}
-	if cfg.Commentary.ConfidenceThreshold == 0 {
-		cfg.Commentary.ConfidenceThreshold = 0.80
-	}
-
-	// [content_id]
-	if cfg.ContentID.MinSimilarityScore == 0 {
-		cfg.ContentID.MinSimilarityScore = 0.58
-	}
-	if cfg.ContentID.ClearMatchMargin == 0 {
-		cfg.ContentID.ClearMatchMargin = 0.05
-	}
-	if cfg.ContentID.LowConfidenceReviewThreshold == 0 {
-		cfg.ContentID.LowConfidenceReviewThreshold = 0.70
-	}
-	if cfg.ContentID.DecisiveAutoAcceptThreshold == 0 {
-		cfg.ContentID.DecisiveAutoAcceptThreshold = 0.80
-	}
-	if cfg.ContentID.ClearConfidenceThreshold == 0 {
-		cfg.ContentID.ClearConfidenceThreshold = 0.85
-	}
-
-	// [logging]
-	if cfg.Logging.RetentionDays == 0 {
-		cfg.Logging.RetentionDays = 60
+	return &Config{
+		Paths: PathsConfig{
+			StagingDir: filepath.Join(home, ".local", "share", "spindle", "staging"),
+			LibraryDir: filepath.Join(home, "library"),
+			StateDir:   filepath.Join(home, ".local", "state", "spindle"),
+			ReviewDir:  filepath.Join(home, "review"),
+		},
+		TMDB: TMDBConfig{
+			BaseURL:  "https://api.themoviedb.org/3",
+			Language: "en-US",
+		},
+		Library: LibraryConfig{
+			MoviesDir: "movies",
+			TVDir:     "tv",
+		},
+		Notifications: NotificationsConfig{
+			RequestTimeout: 10,
+		},
+		Subtitles: SubtitlesConfig{
+			MuxIntoMKV:             true,
+			WhisperXModel:          "large-v3",
+			WhisperXVADMethod:      "silero",
+			OpenSubtitlesUserAgent: "Spindle/dev v0.1.0",
+			OpenSubtitlesLanguages: []string{"en"},
+		},
+		RipCache: RipCacheConfig{
+			MaxGiB: 150,
+		},
+		MakeMKV: MakeMKVConfig{
+			OpticalDrive:         "/dev/sr0",
+			RipTimeout:           14400,
+			InfoTimeout:          600,
+			DiscSettleDelay:      10,
+			MinTitleLength:       120,
+			KeyDBPath:            filepath.Join(home, ".config", "spindle", "keydb", "KEYDB.cfg"),
+			KeyDBDownloadURL:     "http://fvonline-db.bplaced.net/export/keydb_eng.zip",
+			KeyDBDownloadTimeout: 300,
+		},
+		Encoding: EncodingConfig{
+			SVTAV1Preset: 6,
+		},
+		LLM: LLMConfig{
+			BaseURL:        "https://openrouter.ai/api/v1/chat/completions",
+			Model:          "google/gemini-3-flash-preview",
+			Referer:        "https://github.com/five82/spindle",
+			Title:          "Spindle",
+			TimeoutSeconds: 60,
+		},
+		Commentary: CommentaryConfig{
+			WhisperXModel:       "large-v3-turbo",
+			SimilarityThreshold: 0.92,
+			ConfidenceThreshold: 0.80,
+		},
+		ContentID: ContentIDConfig{
+			MinSimilarityScore:           0.58,
+			ClearMatchMargin:             0.05,
+			LowConfidenceReviewThreshold: 0.70,
+			DecisiveAutoAcceptThreshold:  0.80,
+			ClearConfidenceThreshold:     0.85,
+		},
+		Logging: LoggingConfig{
+			RetentionDays: 60,
+		},
 	}
 }
 
@@ -432,14 +278,12 @@ func ReloadEncoding(cfg *Config) (EncodingConfig, error) {
 		return cfg.Encoding, fmt.Errorf("reload encoding config: read %q: %w", cfg.SourcePath, err)
 	}
 
-	var partial struct {
+	partial := struct {
 		Encoding EncodingConfig `toml:"encoding"`
-	}
+	}{Encoding: defaultConfig().Encoding}
 	if err := toml.Unmarshal(data, &partial); err != nil {
 		return cfg.Encoding, fmt.Errorf("reload encoding config: parse: %w", err)
 	}
-
-	applyEncodingDefaults(&partial.Encoding)
 
 	if errs := ValidateEncoding(partial.Encoding); len(errs) > 0 {
 		return cfg.Encoding, fmt.Errorf("reload encoding config: %s", strings.Join(errs, "; "))

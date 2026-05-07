@@ -129,8 +129,7 @@ mux_into_mkv = true
 }
 
 func TestValidateMissingRequiredFields(t *testing.T) {
-	cfg := &Config{}
-	applyDefaults(cfg)
+	cfg := defaultConfig()
 	// Do not set TMDB API key.
 
 	err := cfg.Validate()
@@ -145,8 +144,7 @@ func TestValidateMissingRequiredFields(t *testing.T) {
 }
 
 func TestValidatePassesWithRequiredFields(t *testing.T) {
-	cfg := &Config{}
-	applyDefaults(cfg)
+	cfg := defaultConfig()
 	cfg.TMDB.APIKey = "test-key"
 	cfg.Paths.StagingDir = "/tmp/staging"
 	cfg.Paths.StateDir = "/tmp/state"
@@ -171,8 +169,7 @@ func TestValidateSVTAV1PresetRange(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		cfg := &Config{}
-		applyDefaults(cfg)
+		cfg := defaultConfig()
 		cfg.TMDB.APIKey = "test-key"
 		cfg.Paths.StagingDir = "/tmp/staging"
 		cfg.Paths.StateDir = "/tmp/state"
@@ -190,8 +187,7 @@ func TestValidateSVTAV1PresetRange(t *testing.T) {
 }
 
 func TestValidateJellyfinConditional(t *testing.T) {
-	cfg := &Config{}
-	applyDefaults(cfg)
+	cfg := defaultConfig()
 	cfg.TMDB.APIKey = "test-key"
 	cfg.Paths.StagingDir = "/tmp/staging"
 	cfg.Paths.StateDir = "/tmp/state"
@@ -212,8 +208,7 @@ func TestValidateJellyfinConditional(t *testing.T) {
 }
 
 func TestValidateSubtitlesHFToken(t *testing.T) {
-	cfg := &Config{}
-	applyDefaults(cfg)
+	cfg := defaultConfig()
 	cfg.TMDB.APIKey = "test-key"
 	cfg.Paths.StagingDir = "/tmp/staging"
 	cfg.Paths.StateDir = "/tmp/state"
@@ -238,8 +233,7 @@ func TestValidateSubtitlesHFToken(t *testing.T) {
 }
 
 func TestValidateOpenSubtitlesAPIKey(t *testing.T) {
-	cfg := &Config{}
-	applyDefaults(cfg)
+	cfg := defaultConfig()
 	cfg.TMDB.APIKey = "test-key"
 	cfg.Paths.StagingDir = "/tmp/staging"
 	cfg.Paths.StateDir = "/tmp/state"
@@ -454,6 +448,29 @@ svt_av1_preset = 4
 	}
 }
 
+func TestLoadSVTAV1PresetZeroPreserved(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "test.toml")
+	content := `
+[tmdb]
+api_key = "from-file"
+
+[encoding]
+svt_av1_preset = 0
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath, nil)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Encoding.SVTAV1Preset != 0 {
+		t.Fatalf("SVTAV1Preset = %d, want explicit 0", cfg.Encoding.SVTAV1Preset)
+	}
+}
+
 func TestLoadEnvOverridesFile(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "test.toml")
@@ -478,8 +495,7 @@ api_key = "from-file"
 }
 
 func TestMakeMKVRipTimeoutValidation(t *testing.T) {
-	cfg := &Config{}
-	applyDefaults(cfg)
+	cfg := defaultConfig()
 	cfg.TMDB.APIKey = "test-key"
 	cfg.Paths.StagingDir = "/tmp/staging"
 	cfg.Paths.StateDir = "/tmp/state"
@@ -496,8 +512,7 @@ func TestMakeMKVRipTimeoutValidation(t *testing.T) {
 }
 
 func TestMakeMKVMinTitleLengthValidation(t *testing.T) {
-	cfg := &Config{}
-	applyDefaults(cfg)
+	cfg := defaultConfig()
 	cfg.TMDB.APIKey = "test-key"
 	cfg.Paths.StagingDir = "/tmp/staging"
 	cfg.Paths.StateDir = "/tmp/state"
@@ -531,8 +546,7 @@ func TestValidateCRFRange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
-			applyDefaults(cfg)
+			cfg := defaultConfig()
 			cfg.TMDB.APIKey = "test-key"
 			cfg.Paths.StagingDir = "/tmp/staging"
 			cfg.Paths.StateDir = "/tmp/state"
@@ -731,6 +745,29 @@ crf_uhd = 32
 	}
 	if enc.CRFSD != 0 {
 		t.Errorf("expected crf_sd 0 (unset), got %d", enc.CRFSD)
+	}
+}
+
+func TestReloadEncodingSVTAV1PresetZeroPreserved(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "test.toml")
+	content := `
+[encoding]
+svt_av1_preset = 0
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{SourcePath: configPath}
+	cfg.Encoding.SVTAV1Preset = 6
+
+	enc, err := ReloadEncoding(cfg)
+	if err != nil {
+		t.Fatalf("ReloadEncoding failed: %v", err)
+	}
+	if enc.SVTAV1Preset != 0 {
+		t.Fatalf("SVTAV1Preset = %d, want explicit 0", enc.SVTAV1Preset)
 	}
 }
 

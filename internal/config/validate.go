@@ -83,13 +83,6 @@ func ValidateEncoding(enc EncodingConfig) []string {
 	return errs
 }
 
-// applyEncodingDefaults sets zero-value encoding fields to their defaults.
-func applyEncodingDefaults(enc *EncodingConfig) {
-	if enc.SVTAV1Preset == 0 {
-		enc.SVTAV1Preset = 6
-	}
-}
-
 // ValidateContentID checks episode identification threshold ranges.
 func ValidateContentID(cid ContentIDConfig) []string {
 	var errs []string
