@@ -60,7 +60,7 @@ func TestStartStageInitializesActiveProgress(t *testing.T) {
 	}
 }
 
-func TestExecuteStartedAdvancesAndSetsCompletedProgress(t *testing.T) {
+func TestExecuteWorkflowStageAdvancesAndSetsCompletedProgress(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
 	if err := store.MoveToStage(item, queue.StageOrganizing); err != nil {
@@ -70,16 +70,15 @@ func TestExecuteStartedAdvancesAndSetsCompletedProgress(t *testing.T) {
 		t.Fatalf("StartStage: %v", err)
 	}
 
-	_, err := ExecuteStarted(context.Background(), item, ExecuteOptions{
+	_, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
 		Store:     store,
 		Handler:   executorStubHandler{},
 		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Stage:     queue.StageOrganizing,
 		NextStage: queue.StageCompleted,
-		Advance:   true,
 	})
 	if err != nil {
-		t.Fatalf("ExecuteStarted: %v", err)
+		t.Fatalf("ExecuteWorkflowStage: %v", err)
 	}
 	got, _ := store.GetByID(item.ID)
 	if got.Stage != queue.StageCompleted || got.InProgress != 0 || got.ProgressStage != string(queue.StageCompleted) || got.ProgressPercent != 100 || got.ProgressMessage != "Completed" {
@@ -87,7 +86,7 @@ func TestExecuteStartedAdvancesAndSetsCompletedProgress(t *testing.T) {
 	}
 }
 
-func TestExecuteStartedMarksFailureWhenConfigured(t *testing.T) {
+func TestExecuteWorkflowStageMarksFailure(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
 	if err := store.StartStage(item, queue.StageIdentification); err != nil {
@@ -95,11 +94,10 @@ func TestExecuteStartedMarksFailureWhenConfigured(t *testing.T) {
 	}
 	stageErr := errors.New("boom")
 
-	res, err := ExecuteStarted(context.Background(), item, ExecuteOptions{
-		Store:      store,
-		Handler:    executorStubHandler{run: func(context.Context, *Session) error { return stageErr }},
-		Stage:      queue.StageIdentification,
-		MarkFailed: true,
+	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store:   store,
+		Handler: executorStubHandler{run: func(context.Context, *Session) error { return stageErr }},
+		Stage:   queue.StageIdentification,
 	})
 	if !errors.Is(err, stageErr) || !res.Failed {
 		t.Fatalf("result err=%v failed=%v, want stage error and failed", err, res.Failed)
@@ -110,7 +108,7 @@ func TestExecuteStartedMarksFailureWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestExecuteStartedTreatsDegradedAsSuccessWhenConfigured(t *testing.T) {
+func TestExecuteWorkflowStageTreatsDegradedAsSuccess(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, err := store.NewDisc("A", "fp1")
 	if err != nil {
@@ -124,19 +122,58 @@ func TestExecuteStartedTreatsDegradedAsSuccessWhenConfigured(t *testing.T) {
 		t.Fatalf("StartStage: %v", err)
 	}
 
-	res, err := ExecuteStarted(context.Background(), item, ExecuteOptions{
-		Store:            store,
-		Handler:          executorStubHandler{run: func(context.Context, *Session) error { return &ErrDegraded{Msg: "soft"} }},
-		Stage:            queue.StageIdentification,
-		NextStage:        queue.StageRipping,
-		Advance:          true,
-		DegradedSucceeds: true,
+	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store:     store,
+		Handler:   executorStubHandler{run: func(context.Context, *Session) error { return &ErrDegraded{Msg: "soft"} }},
+		Stage:     queue.StageIdentification,
+		NextStage: queue.StageRipping,
 	})
 	if err != nil || !res.Degraded || res.DegradedMsg != "soft" {
 		t.Fatalf("result err=%v degraded=%v msg=%q", err, res.Degraded, res.DegradedMsg)
 	}
 	if item.Stage != queue.StageRipping || item.InProgress != 0 {
 		t.Fatalf("item state = stage:%q in_progress:%d", item.Stage, item.InProgress)
+	}
+}
+
+func TestExecuteWorkflowStageCancellationClearsInProgress(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+	if err := store.StartStage(item, queue.StageIdentification); err != nil {
+		t.Fatalf("StartStage: %v", err)
+	}
+
+	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store:   store,
+		Handler: executorStubHandler{run: func(context.Context, *Session) error { return context.Canceled }},
+		Stage:   queue.StageIdentification,
+	})
+	if !errors.Is(err, context.Canceled) || !res.Canceled {
+		t.Fatalf("result err=%v canceled=%v, want context cancellation", err, res.Canceled)
+	}
+	got, _ := store.GetByID(item.ID)
+	if got.Stage != queue.StageIdentification || got.InProgress != 0 {
+		t.Fatalf("canceled state = stage:%q in_progress:%d", got.Stage, got.InProgress)
+	}
+}
+
+func TestExecuteWorkflowStageReturnsPersistenceError(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+	if err := store.StartStage(item, queue.StageIdentification); err != nil {
+		t.Fatalf("StartStage: %v", err)
+	}
+	_ = store.Close()
+
+	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store:     store,
+		Handler:   executorStubHandler{},
+		Stage:     queue.StageIdentification,
+		NextStage: queue.StageRipping,
+	})
+	var persistErr *PersistenceError
+	if !errors.As(err, &persistErr) || persistErr.Op != "persist stage completion" || res.Failed {
+		t.Fatalf("result err=%v persist=%v failed=%v, want completion persistence error", err, persistErr, res.Failed)
 	}
 }
 

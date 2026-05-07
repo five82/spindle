@@ -10,18 +10,14 @@ import (
 	"github.com/five82/spindle/internal/queue"
 )
 
-// ExecuteOptions configures execution of a handler after an item has been
-// marked in progress.
-type ExecuteOptions struct {
-	Store              *queue.Store
-	Handler            Handler
-	Logger             *slog.Logger
-	Stage              queue.Stage
-	NextStage          queue.Stage
-	Advance            bool
-	MarkFailed         bool
-	DegradedSucceeds   bool
-	PersistenceIsFatal bool
+// WorkflowOptions configures workflow execution of a handler after an item has
+// been marked in progress.
+type WorkflowOptions struct {
+	Store     *queue.Store
+	Handler   Handler
+	Logger    *slog.Logger
+	Stage     queue.Stage
+	NextStage queue.Stage
 }
 
 // ExecuteResult describes the queue-visible outcome of a stage invocation.
@@ -44,9 +40,11 @@ type PersistenceError struct {
 func (e *PersistenceError) Error() string { return fmt.Sprintf("%s: %v", e.Op, e.Err) }
 func (e *PersistenceError) Unwrap() error { return e.Err }
 
-// ExecuteStarted runs a handler for an item already marked in progress, then
-// persists success, failure, cancellation, or one-shot completion state.
-func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) (res ExecuteResult, err error) {
+// ExecuteWorkflowStage runs a handler for an item already marked in progress,
+// then persists the workflow lifecycle outcome: success advances, degraded
+// success advances with a warning result, failure marks the item failed,
+// cancellation clears in_progress, and persistence failures are returned.
+func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOptions) (res ExecuteResult, err error) {
 	stageName := opts.Stage
 	if stageName == "" {
 		stageName = item.Stage
@@ -72,9 +70,7 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 		if errors.Is(err, context.Canceled) {
 			res.Canceled = true
 			if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {
-				if persistErr := maybePersistenceError(opts, "clear in_progress after cancellation", updateErr); persistErr != nil {
-					return res, persistErr
-				}
+				return res, &PersistenceError{Op: "clear in_progress after cancellation", Err: updateErr}
 			}
 			if item.UserStopped() {
 				res.UserStopped = true
@@ -83,23 +79,13 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 		}
 
 		var degraded *ErrDegraded
-		if errors.As(err, &degraded) && opts.DegradedSucceeds {
+		if errors.As(err, &degraded) {
 			res.Degraded = true
 			res.DegradedMsg = degraded.Msg
 		} else {
-			res.Failed = opts.MarkFailed
-			if opts.MarkFailed {
-				if updateErr := opts.Store.FailStage(item, stageName, err.Error()); updateErr != nil {
-					if persistErr := maybePersistenceError(opts, "persist stage failure", updateErr); persistErr != nil {
-						return res, persistErr
-					}
-				}
-			} else {
-				if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {
-					if persistErr := maybePersistenceError(opts, "clear in_progress after stage error", updateErr); persistErr != nil {
-						return res, persistErr
-					}
-				}
+			res.Failed = true
+			if updateErr := opts.Store.FailStage(item, stageName, err.Error()); updateErr != nil {
+				return res, &PersistenceError{Op: "persist stage failure", Err: updateErr}
 			}
 			if item.UserStopped() {
 				res.UserStopped = true
@@ -110,29 +96,11 @@ func ExecuteStarted(ctx context.Context, item *queue.Item, opts ExecuteOptions) 
 		}
 	}
 
-	if updateErr := opts.Store.CompleteStage(item, opts.NextStage, opts.Advance); updateErr != nil {
-		if persistErr := maybePersistenceError(opts, "persist stage completion", updateErr); persistErr != nil {
-			return res, persistErr
-		}
+	if updateErr := opts.Store.CompleteStage(item, opts.NextStage, true); updateErr != nil {
+		return res, &PersistenceError{Op: "persist stage completion", Err: updateErr}
 	}
 	if item.UserStopped() {
 		res.UserStopped = true
 	}
 	return res, nil
-}
-
-func maybePersistenceError(opts ExecuteOptions, op string, err error) error {
-	if opts.PersistenceIsFatal {
-		return &PersistenceError{Op: op, Err: err}
-	}
-	logger := opts.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-	logger.Error("stage persistence failed",
-		"event_type", "stage_persistence_failed",
-		"error_hint", op,
-		"error", err,
-	)
-	return nil
 }

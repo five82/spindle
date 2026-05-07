@@ -212,16 +212,12 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	)
 	m.maybeStartQueueCycle(ctx, itemLogger)
 
-	res, err := stage.ExecuteStarted(ctx, item, stage.ExecuteOptions{
-		Store:              m.store,
-		Handler:            ps.Handler,
-		Logger:             p.logger,
-		Stage:              ps.Stage,
-		NextStage:          m.nextStage(item.Stage),
-		Advance:            true,
-		MarkFailed:         true,
-		DegradedSucceeds:   true,
-		PersistenceIsFatal: true,
+	res, err := stage.ExecuteWorkflowStage(ctx, item, stage.WorkflowOptions{
+		Store:     m.store,
+		Handler:   ps.Handler,
+		Logger:    p.logger,
+		Stage:     ps.Stage,
+		NextStage: m.nextStage(item.Stage),
 	})
 	if res.Canceled {
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -288,7 +284,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	m.maybeCompleteQueueCycle(ctx, itemLogger)
 }
 
-// recordStageFailure records status/notification state after stage.ExecuteStarted
+// recordStageFailure records status/notification state after stage execution
 // has persisted the failed queue state.
 func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err error, ps PipelineStage, duration time.Duration) {
 	p := m.pipeline

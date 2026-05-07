@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -249,15 +250,29 @@ func runCacheStage(ctx context.Context, store *queue.Store, item *queue.Item, ha
 		return fmt.Errorf("set in_progress: %w", err)
 	}
 
-	_, err := stage.ExecuteStarted(ctx, item, stage.ExecuteOptions{
-		Store:   store,
-		Handler: handler,
-		Logger:  logger,
-		Stage:   item.Stage,
-		Advance: false,
-	})
+	sess, err := stage.NewSession(ctx, store, item)
+	if err == nil {
+		sess.Logger = itemLogger
+		err = handler.Run(ctx, sess)
+	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			if updateErr := store.ClearInProgress(item); updateErr != nil {
+				logCacheStagePersistenceFailure(logger, "clear in_progress after cancellation", updateErr)
+			}
+			return fmt.Errorf("stage %s: %w", item.Stage, err)
+		}
+		if updateErr := store.ClearInProgress(item); updateErr != nil {
+			logCacheStagePersistenceFailure(logger, "clear in_progress after stage error", updateErr)
+		}
+		if item.UserStopped() {
+			return nil
+		}
 		return fmt.Errorf("stage %s: %w", item.Stage, err)
+	}
+
+	if updateErr := store.ClearInProgress(item); updateErr != nil {
+		logCacheStagePersistenceFailure(logger, "persist stage completion", updateErr)
 	}
 
 	itemLogger.Info("one-shot stage execution completed",
@@ -267,6 +282,14 @@ func runCacheStage(ctx context.Context, store *queue.Store, item *queue.Item, ha
 		"stage", item.Stage,
 	)
 	return nil
+}
+
+func logCacheStagePersistenceFailure(logger *slog.Logger, op string, err error) {
+	logger.Error("stage persistence failed",
+		"event_type", "stage_persistence_failed",
+		"error_hint", op,
+		"error", err,
+	)
 }
 
 func newCacheStatsCmd() *cobra.Command {
