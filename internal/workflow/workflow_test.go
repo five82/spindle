@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/stage"
@@ -24,16 +25,6 @@ func (h stubHandler) Run(ctx context.Context, sess *stage.Session) error {
 		return h.run(ctx, sess)
 	}
 	return nil
-}
-
-type stubObserver struct {
-	successes int
-	failures  int
-}
-
-func (o *stubObserver) RecordSuccess(*queue.Item) { o.successes++ }
-func (o *stubObserver) RecordFailure(*queue.Item, string) {
-	o.failures++
 }
 
 func newTestManager(stages []PipelineStage) *Manager {
@@ -219,9 +210,9 @@ func TestUserStoppedItemIsNotRecordedAsStageSuccess(t *testing.T) {
 		t.Fatalf("start stage: %v", err)
 	}
 
-	observer := &stubObserver{}
+	statusTracker := httpapi.NewStatusTracker(nil)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	manager := New(store, nil, observer, logger)
+	manager := New(store, nil, statusTracker, logger)
 	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{
 		run: func(context.Context, *stage.Session) error {
 			_, err := store.StopItems(item.ID)
@@ -231,8 +222,9 @@ func TestUserStoppedItemIsNotRecordedAsStageSuccess(t *testing.T) {
 
 	manager.processItem(context.Background(), item, manager.pipeline.stages[0])
 
-	if observer.successes != 0 || observer.failures != 0 {
-		t.Fatalf("observer successes=%d failures=%d, want no stage outcome", observer.successes, observer.failures)
+	lastErr, lastItem, _ := statusTracker.Snapshot()
+	if lastErr != "" || lastItem != nil {
+		t.Fatalf("status tracker lastErr=%q lastItem=%v, want no stage outcome", lastErr, lastItem)
 	}
 	got, err := store.GetByID(item.ID)
 	if err != nil {

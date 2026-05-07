@@ -134,7 +134,7 @@ func NewStatusInfo(cfg *config.Config) StatusInfo {
 }
 
 // StatusTracker tracks last error, last item, and dependency status.
-// It implements workflow.StatusObserver and is goroutine-safe.
+// It is goroutine-safe.
 type StatusTracker struct {
 	mu           sync.RWMutex
 	lastError    string

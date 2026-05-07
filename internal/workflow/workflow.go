@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
@@ -43,31 +44,24 @@ type pipelineState struct {
 	logger     *slog.Logger
 }
 
-// StatusObserver receives notifications about item processing outcomes.
-// Implementations must be goroutine-safe.
-type StatusObserver interface {
-	RecordSuccess(item *queue.Item)
-	RecordFailure(item *queue.Item, errMsg string)
-}
-
 // Manager runs the pipeline poll loop.
 type Manager struct {
 	store                  *queue.Store
 	notifier               *notify.Notifier
 	pipeline               *pipelineState
-	observer               StatusObserver
+	statusTracker          *httpapi.StatusTracker
 	queueNotifyMu          sync.Mutex
 	queueCycleActive       bool
 	persistenceFailures    chan error
 	persistenceFailureOnce sync.Once
 }
 
-// New creates a workflow manager. observer may be nil.
-func New(store *queue.Store, notifier *notify.Notifier, observer StatusObserver, logger *slog.Logger) *Manager {
+// New creates a workflow manager. statusTracker may be nil.
+func New(store *queue.Store, notifier *notify.Notifier, statusTracker *httpapi.StatusTracker, logger *slog.Logger) *Manager {
 	return &Manager{
 		store:               store,
 		notifier:            notifier,
-		observer:            observer,
+		statusTracker:       statusTracker,
 		persistenceFailures: make(chan error, 1),
 		pipeline: &pipelineState{
 			logger: logs.Default(logger),
@@ -255,8 +249,8 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	if err != nil {
 		var persistenceErr *stage.PersistenceError
 		if errors.As(err, &persistenceErr) {
-			if m.observer != nil {
-				m.observer.RecordFailure(item, "queue persistence failed: "+persistenceErr.Err.Error())
+			if m.statusTracker != nil {
+				m.statusTracker.RecordFailure(item, "queue persistence failed: "+persistenceErr.Err.Error())
 			}
 			eventType := "completion_persist_failed"
 			hint := "failed to persist after stage completion"
@@ -289,14 +283,14 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		"stage_duration", res.Duration,
 	)
 
-	if m.observer != nil {
-		m.observer.RecordSuccess(item)
+	if m.statusTracker != nil {
+		m.statusTracker.RecordSuccess(item)
 	}
 
 	m.maybeCompleteQueueCycle(ctx, itemLogger)
 }
 
-// recordStageFailure records observer/notification state after stage.ExecuteStarted
+// recordStageFailure records status/notification state after stage.ExecuteStarted
 // has persisted the failed queue state.
 func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err error, ps PipelineStage, duration time.Duration) {
 	p := m.pipeline
@@ -310,8 +304,8 @@ func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err 
 		"stage_duration", duration,
 	)
 
-	if m.observer != nil {
-		m.observer.RecordFailure(item, err.Error())
+	if m.statusTracker != nil {
+		m.statusTracker.RecordFailure(item, err.Error())
 	}
 
 	title := fmt.Sprintf("Failed: %s during %s", item.DisplayTitle(), queue.HumanStage(ps.Stage))

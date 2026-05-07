@@ -19,20 +19,6 @@ import (
 // ErrDaemonUnavailable is returned when the daemon HTTP API cannot be reached.
 var ErrDaemonUnavailable = errors.New("daemon is not running; run spindle start")
 
-// Access provides daemon-backed queue access.
-type Access interface {
-	List(stages ...queue.Stage) ([]*queue.Item, error)
-	GetByID(id int64) (*queue.Item, error)
-	Stats() (map[queue.Stage]int, error)
-	Status() (*Status, error)
-	Retry(ids ...int64) (int, error)
-	RetryEpisode(id int64, episodeKey string) (queueops.RetryResult, error)
-	Stop(ids ...int64) (int, error)
-	EnqueueCached(req EnqueueCachedRequest) (*queue.Item, error)
-	Clear(scope string) (int64, error)
-	Remove(id int64) (int64, error)
-}
-
 // HTTPAccess connects to the daemon HTTP API.
 type HTTPAccess struct {
 	token  string

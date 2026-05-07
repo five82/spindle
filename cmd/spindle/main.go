@@ -104,7 +104,7 @@ func lockPath() string {
 }
 
 // openQueueAccess opens daemon HTTP queue access.
-func openQueueAccess() (queueaccess.Access, error) {
+func openQueueAccess() (*queueaccess.HTTPAccess, error) {
 	return queueaccess.OpenHTTP(socketPath(), cfg.API.Token)
 }
 

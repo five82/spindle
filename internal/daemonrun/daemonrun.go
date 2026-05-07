@@ -178,10 +178,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Create HTTP API with shutdown channel.
 	shutdownCh := make(chan struct{})
-	api := httpapi.New(store, cfg.API.Token, discMon, shutdownCh, logger,
-		httpapi.WithStatusInfo(httpapi.NewStatusInfo(cfg)),
-		httpapi.WithLogBuffer(logBuffer),
-		httpapi.WithStatusTracker(statusTracker))
+	api := httpapi.New(store, cfg.API.Token, discMon, shutdownCh, logger, httpapi.NewStatusInfo(cfg), logBuffer, statusTracker)
 
 	// Create and start daemon.
 	d := daemon.New(cfg, store, manager, api, discMon, logger)

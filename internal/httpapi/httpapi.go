@@ -17,30 +17,6 @@ import (
 	"github.com/five82/spindle/internal/queueops"
 )
 
-// ServerOption configures optional Server settings.
-type ServerOption func(*Server)
-
-// WithStatusInfo sets the status info for the /api/status endpoint.
-func WithStatusInfo(info StatusInfo) ServerOption {
-	return func(s *Server) {
-		s.statusInfo = info
-	}
-}
-
-// WithLogBuffer sets the log buffer for the /api/logs endpoint.
-func WithLogBuffer(buf *LogBuffer) ServerOption {
-	return func(s *Server) {
-		s.logBuffer = buf
-	}
-}
-
-// WithStatusTracker sets the status tracker for the /api/status endpoint.
-func WithStatusTracker(tracker *StatusTracker) ServerOption {
-	return func(s *Server) {
-		s.statusTracker = tracker
-	}
-}
-
 // Server is the HTTP API server.
 type Server struct {
 	store         *queue.Store
@@ -55,18 +31,18 @@ type Server struct {
 	statusTracker *StatusTracker
 }
 
-// New creates an HTTP API server. discMon and shutdownCh may be nil.
-func New(store *queue.Store, token string, discMon *discmonitor.Monitor, shutdownCh chan struct{}, logger *slog.Logger, opts ...ServerOption) *Server {
+// New creates an HTTP API server. discMon, shutdownCh, logBuffer, and statusTracker may be nil.
+func New(store *queue.Store, token string, discMon *discmonitor.Monitor, shutdownCh chan struct{}, logger *slog.Logger, statusInfo StatusInfo, logBuffer *LogBuffer, statusTracker *StatusTracker) *Server {
 	s := &Server{
-		store:       store,
-		token:       token,
-		logger:      logger,
-		mux:         http.NewServeMux(),
-		discMonitor: discMon,
-		shutdownCh:  shutdownCh,
-	}
-	for _, opt := range opts {
-		opt(s)
+		store:         store,
+		token:         token,
+		logger:        logger,
+		mux:           http.NewServeMux(),
+		discMonitor:   discMon,
+		shutdownCh:    shutdownCh,
+		statusInfo:    statusInfo,
+		logBuffer:     logBuffer,
+		statusTracker: statusTracker,
 	}
 	s.registerRoutes()
 	s.httpServer = &http.Server{
