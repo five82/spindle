@@ -1,7 +1,6 @@
 package queueops
 
 import (
-	"context"
 	"testing"
 
 	"github.com/five82/spindle/internal/queue"
@@ -30,8 +29,13 @@ func TestRetryEpisodeClearsFailedAssets(t *testing.T) {
 	env.Assets.AddAsset(ripspec.AssetKindEncoded, ripspec.Asset{EpisodeKey: "s01e01", Path: "/bad.mkv", Status: ripspec.AssetStatusFailed, ErrorMsg: "encode failed"})
 
 	item.AppendReviewReason("problem")
-	if err := queue.PersistRipSpec(context.Background(), store, item, &env); err != nil {
-		t.Fatalf("persist ripspec: %v", err)
+	data, err := env.Encode()
+	if err != nil {
+		t.Fatalf("encode ripspec: %v", err)
+	}
+	item.RipSpecData = data
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatalf("persist work state: %v", err)
 	}
 	if err := store.FailStage(item, queue.StageEncoding, "encode failed"); err != nil {
 		t.Fatalf("fail item: %v", err)

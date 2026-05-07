@@ -82,6 +82,38 @@ func TestSessionSavePersistsRipSpec(t *testing.T) {
 	}
 }
 
+func TestSessionSaveDoesNotChangeLifecycleFields(t *testing.T) {
+	store, item, s := newTestSession(t)
+	if err := store.FailStage(item, queue.StageRipping, "existing error"); err != nil {
+		t.Fatalf("initial failure: %v", err)
+	}
+
+	item.Stage = queue.StageCompleted
+	item.InProgress = 0
+	item.FailedAtStage = ""
+	item.ErrorMessage = ""
+	s.SetEnvelope(&ripspec.Envelope{Version: ripspec.CurrentVersion, Fingerprint: "abc"})
+	s.AddReviewReason("needs review")
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
+	}
+	if got.Stage != queue.StageFailed || got.InProgress != 0 || got.FailedAtStage != string(queue.StageRipping) || got.ErrorMessage != "existing error" {
+		t.Fatalf("lifecycle fields changed: stage=%q in_progress=%d failed_at=%q error=%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
+	}
+	parsed, err := ripspec.Parse(got.RipSpecData)
+	if err != nil {
+		t.Fatalf("parse saved RipSpec: %v", err)
+	}
+	if parsed.Fingerprint != "abc" || got.NeedsReview != 1 {
+		t.Fatalf("work state not persisted: fingerprint=%q needs_review=%d", parsed.Fingerprint, got.NeedsReview)
+	}
+}
+
 func TestSessionSaveAssetHelpersPersistEnvelope(t *testing.T) {
 	store, item, s := newTestSession(t)
 	s.SetEnvelope(&ripspec.Envelope{Version: ripspec.CurrentVersion})

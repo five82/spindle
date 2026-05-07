@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 )
@@ -588,57 +587,6 @@ func TestHasDiscDependentItem(t *testing.T) {
 	}
 	if !has {
 		t.Error("expected true with identification in progress")
-	}
-}
-
-// stubEncoder implements RipSpecEncoder for testing.
-type stubEncoder struct {
-	data string
-	err  error
-}
-
-func (s *stubEncoder) Encode() (string, error) {
-	return s.data, s.err
-}
-
-func TestPersistRipSpec(t *testing.T) {
-	store := openTestStore(t)
-	item, _ := store.NewDisc("Test", "fp1")
-
-	enc := &stubEncoder{data: `{"tracks":[1,2]}`}
-	if err := PersistRipSpec(context.Background(), store, item, enc); err != nil {
-		t.Fatalf("persist: %v", err)
-	}
-
-	got, _ := store.GetByID(item.ID)
-	if got.RipSpecData != `{"tracks":[1,2]}` {
-		t.Errorf("rip_spec_data = %q, want %q", got.RipSpecData, `{"tracks":[1,2]}`)
-	}
-}
-
-func TestPersistRipSpecDoesNotChangeLifecycleFields(t *testing.T) {
-	store := openTestStore(t)
-	item, _ := store.NewDisc("Test", "fp1")
-	if err := store.FailStage(item, StageRipping, "existing error"); err != nil {
-		t.Fatalf("initial failure: %v", err)
-	}
-
-	item.Stage = StageCompleted
-	item.InProgress = 0
-	item.FailedAtStage = ""
-	item.ErrorMessage = ""
-	item.AppendReviewReason("needs review")
-	enc := &stubEncoder{data: `{"version":1}`}
-	if err := PersistRipSpec(context.Background(), store, item, enc); err != nil {
-		t.Fatalf("persist: %v", err)
-	}
-
-	got, _ := store.GetByID(item.ID)
-	if got.Stage != StageFailed || got.InProgress != 0 || got.FailedAtStage != string(StageRipping) || got.ErrorMessage != "existing error" {
-		t.Fatalf("lifecycle fields changed: stage=%q in_progress=%d failed_at=%q error=%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
-	}
-	if got.RipSpecData != `{"version":1}` || got.NeedsReview != 1 {
-		t.Fatalf("work state not persisted: rip_spec=%q needs_review=%d", got.RipSpecData, got.NeedsReview)
 	}
 }
 

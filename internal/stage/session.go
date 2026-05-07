@@ -64,7 +64,18 @@ func (s *Session) Save() error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return queue.PersistRipSpec(ctx, s.Store, s.Item, s.Env)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	data, err := s.Env.Encode()
+	if err != nil {
+		return err
+	}
+	s.Item.RipSpecData = data
+	return s.Store.UpdateWorkState(s.Item)
 }
 
 // ProgressOption customizes a progress update.
