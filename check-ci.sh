@@ -49,11 +49,19 @@ GOLANGCI_VERSION=$(golangci-lint version --format short 2>/dev/null || golangci-
 print_success "Go $GO_VERSION, golangci-lint $GOLANGCI_VERSION"
 
 print_step "Verifying go.mod is tidy"
+MOD_DIFF_BEFORE=$(mktemp)
+MOD_DIFF_AFTER=$(mktemp)
+cleanup_mod_diff() { rm -f "$MOD_DIFF_BEFORE" "$MOD_DIFF_AFTER"; }
+trap cleanup_mod_diff EXIT
+git diff -- go.mod go.sum > "$MOD_DIFF_BEFORE"
 GOWORK=off go mod tidy
-if ! git diff --quiet go.mod go.sum 2>/dev/null; then
-    print_error "go.mod or go.sum changed after 'go mod tidy'. Commit the changes."
+git diff -- go.mod go.sum > "$MOD_DIFF_AFTER"
+if ! cmp -s "$MOD_DIFF_BEFORE" "$MOD_DIFF_AFTER"; then
+    print_error "go mod tidy changed go.mod or go.sum. Review and commit the changes."
     exit 1
 fi
+cleanup_mod_diff
+trap - EXIT
 print_success "go.mod is tidy"
 
 print_step "Verifying build without go.work (mirrors CI)"
