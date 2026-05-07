@@ -12,6 +12,7 @@ import (
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/encodingstate"
+	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/queue"
@@ -32,7 +33,7 @@ var stageOrder = map[queue.Stage]int{
 }
 
 // Gather collects all audit artifacts for a queue item.
-func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report, error) {
+func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse) (*Report, error) {
 	if item == nil {
 		return nil, fmt.Errorf("nil queue item")
 	}
@@ -46,8 +47,8 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 
 	// Parse envelope for media type and disc source.
 	var env ripspec.Envelope
-	if item.RipSpecData != "" {
-		if err := json.Unmarshal([]byte(item.RipSpecData), &env); err != nil {
+	if ripSpecData := rawJSONString(item.RipSpec); ripSpecData != "" {
+		if err := json.Unmarshal([]byte(ripSpecData), &env); err != nil {
 			r.addError("parse envelope: %v", err)
 		} else {
 			r.Envelope = &EnvelopeReport{
@@ -67,7 +68,7 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 	// Fall back to metadata JSON for media type if envelope unavailable.
 	mediaType := env.Metadata.MediaType
 	if mediaType == "" {
-		meta := mediameta.FromJSON(item.MetadataJSON, item.DiscTitle)
+		meta := mediameta.FromJSON(rawJSONString(item.Metadata), item.DiscTitle)
 		if meta.Movie {
 			mediaType = "movie"
 		} else {
@@ -106,8 +107,8 @@ func Gather(ctx context.Context, cfg *config.Config, item *queue.Item) (*Report,
 	}
 
 	// Encoding snapshot.
-	if r.StageGate.PhaseEncoded && item.EncodingDetailsJSON != "" {
-		snap, err := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	if encodingDetails := rawJSONString(item.Encoding); r.StageGate.PhaseEncoded && encodingDetails != "" {
+		snap, err := encodingstate.Unmarshal(encodingDetails)
 		if err != nil {
 			r.addError("parse encoding snapshot: %v", err)
 		} else if !snap.IsZero() {
@@ -138,21 +139,28 @@ func (r *Report) addError(format string, args ...any) {
 	r.Errors = append(r.Errors, fmt.Sprintf(format, args...))
 }
 
-func buildItemSummary(item *queue.Item, env *ripspec.Envelope) ItemSummary {
+func rawJSONString(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
+}
+
+func buildItemSummary(item *httpapi.ItemResponse, env *ripspec.Envelope) ItemSummary {
 	summary := ItemSummary{
 		ID:              item.ID,
 		DiscTitle:       item.DiscTitle,
-		Stage:           string(item.Stage),
+		Stage:           item.Stage,
 		FailedAtStage:   item.FailedAtStage,
 		ErrorMessage:    item.ErrorMessage,
-		NeedsReview:     item.NeedsReview != 0,
+		NeedsReview:     item.NeedsReview,
 		ReviewReason:    item.ReviewReason,
 		DiscFingerprint: item.DiscFingerprint,
 		CreatedAt:       item.CreatedAt,
 		UpdatedAt:       item.UpdatedAt,
-		ProgressStage:   item.ProgressStage,
-		ProgressPercent: item.ProgressPercent,
-		ProgressMessage: item.ProgressMessage,
+		ProgressStage:   item.Progress.Stage,
+		ProgressPercent: item.Progress.Percent,
+		ProgressMessage: item.Progress.Message,
 	}
 	if env != nil {
 		summary.RippedFile = lastCompletedAssetPath(env.Assets.Ripped)
@@ -171,9 +179,9 @@ func lastCompletedAssetPath(assets []ripspec.Asset) string {
 	return ""
 }
 
-func computeStageGate(item *queue.Item, mediaType, mediaHint, discSource string) StageGate {
-	furthest := item.Stage
-	if item.Stage == queue.StageFailed && item.FailedAtStage != "" {
+func computeStageGate(item *httpapi.ItemResponse, mediaType, mediaHint, discSource string) StageGate {
+	furthest := queue.Stage(item.Stage)
+	if furthest == queue.StageFailed && item.FailedAtStage != "" {
 		furthest = queue.Stage(item.FailedAtStage)
 	}
 
@@ -197,7 +205,7 @@ func computeStageGate(item *queue.Item, mediaType, mediaHint, discSource string)
 }
 
 // gatherLogs finds the daemon log file and parses structured entries for this item.
-func gatherLogs(cfg *config.Config, item *queue.Item) (*LogAnalysis, error) {
+func gatherLogs(cfg *config.Config, item *httpapi.ItemResponse) (*LogAnalysis, error) {
 	logPath := findLogFile(cfg.DaemonLogDir(), item.CreatedAt)
 	if logPath == "" {
 		return nil, fmt.Errorf("no log file found for item %d", item.ID)
@@ -306,7 +314,7 @@ var knownLogKeys = map[string]bool{
 // parseLogLine extracts structured data from a single JSON log line.
 // Lines are associated with the item by item_id when present, otherwise by
 // stable identifiers such as disc fingerprint or disc title/label fields.
-func parseLogLine(line string, item *queue.Item, report *LogAnalysis) {
+func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis) {
 	line = strings.TrimSpace(line)
 	if line == "" || line[0] != '{' {
 		return
@@ -436,7 +444,7 @@ func getStageDurationSeconds(entry map[string]any) float64 {
 	return 0
 }
 
-func logLineMatchesItem(entry map[string]any, item *queue.Item) bool {
+func logLineMatchesItem(entry map[string]any, item *httpapi.ItemResponse) bool {
 	if item == nil {
 		return false
 	}
@@ -509,7 +517,7 @@ func inferDiscSource(entry map[string]any) string {
 }
 
 // gatherRipCache reads the rip cache metadata for the item.
-func gatherRipCache(cfg *config.Config, item *queue.Item) *RipCacheReport {
+func gatherRipCache(cfg *config.Config, item *httpapi.ItemResponse) *RipCacheReport {
 	if !cfg.RipCache.Enabled {
 		return &RipCacheReport{Found: false}
 	}

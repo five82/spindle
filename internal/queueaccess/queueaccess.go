@@ -51,12 +51,15 @@ func OpenHTTP(socketPath, token string) (*HTTPAccess, error) {
 	return a, nil
 }
 
+// Item is the daemon API representation of a queue item.
+type Item = httpapi.ItemResponse
+
 type queueListResponse struct {
-	Items []httpapi.ItemResponse `json:"items"`
+	Items []Item `json:"items"`
 }
 
 type queueGetResponse struct {
-	Item httpapi.ItemResponse `json:"item"`
+	Item Item `json:"item"`
 }
 
 type queueRetryResponse struct {
@@ -72,7 +75,7 @@ type queueRetryEpisodeResponse struct {
 }
 
 type queueEnqueueCachedResponse struct {
-	Item httpapi.ItemResponse `json:"item"`
+	Item Item `json:"item"`
 }
 
 // EnqueueCachedRequest describes a cached rip queue request.
@@ -99,51 +102,14 @@ type WorkflowStatus struct {
 	Running    bool
 	QueueStats map[queue.Stage]int
 	LastError  string
-	LastItem   *queue.Item
+	LastItem   *Item
 }
 
 // DependencyStatus reports an external dependency health check.
 type DependencyStatus = httpapi.DependencyResponse
 
-func toQueueItem(r httpapi.ItemResponse) *queue.Item {
-	item := &queue.Item{
-		ID:                  r.ID,
-		DiscTitle:           r.DiscTitle,
-		Stage:               queue.Stage(r.Stage),
-		FailedAtStage:       r.FailedAtStage,
-		ErrorMessage:        r.ErrorMessage,
-		CreatedAt:           r.CreatedAt,
-		UpdatedAt:           r.UpdatedAt,
-		DiscFingerprint:     r.DiscFingerprint,
-		ReviewReason:        r.ReviewReason,
-		ActiveEpisodeKey:    r.ActiveEpisodeKey,
-		ProgressStage:       r.Progress.Stage,
-		ProgressPercent:     r.Progress.Percent,
-		ProgressMessage:     r.Progress.Message,
-		ProgressBytesCopied: r.Progress.BytesCopied,
-		ProgressTotalBytes:  r.Progress.TotalBytes,
-	}
-	if r.InProgress {
-		item.InProgress = 1
-	}
-	if r.NeedsReview {
-		item.NeedsReview = 1
-	}
-	item.MetadataJSON = rawJSONToString(r.Metadata)
-	item.RipSpecData = rawJSONToString(r.RipSpec)
-	item.EncodingDetailsJSON = rawJSONToString(r.Encoding)
-	return item
-}
-
-func rawJSONToString(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
-	return string(raw)
-}
-
 // List returns queue items via HTTP, optionally filtered by stages.
-func (a *HTTPAccess) List(stages ...queue.Stage) ([]*queue.Item, error) {
+func (a *HTTPAccess) List(stages ...queue.Stage) ([]Item, error) {
 	path := "/api/queue"
 	if len(stages) > 0 {
 		params := url.Values{}
@@ -156,20 +122,16 @@ func (a *HTTPAccess) List(stages ...queue.Stage) ([]*queue.Item, error) {
 	if err := a.getJSON(path, &resp); err != nil {
 		return nil, err
 	}
-	items := make([]*queue.Item, 0, len(resp.Items))
-	for _, item := range resp.Items {
-		items = append(items, toQueueItem(item))
-	}
-	return items, nil
+	return resp.Items, nil
 }
 
 // GetByID returns a single item by ID via HTTP.
-func (a *HTTPAccess) GetByID(id int64) (*queue.Item, error) {
+func (a *HTTPAccess) GetByID(id int64) (*Item, error) {
 	var resp queueGetResponse
 	if err := a.getJSON(fmt.Sprintf("/api/queue/%d", id), &resp); err != nil {
 		return nil, err
 	}
-	return toQueueItem(resp.Item), nil
+	return &resp.Item, nil
 }
 
 // Stats returns item counts grouped by stage via HTTP.
@@ -193,9 +155,9 @@ func (a *HTTPAccess) Status() (*Status, error) {
 		stats[queue.Stage(k)] = v
 	}
 
-	var lastItem *queue.Item
+	var lastItem *Item
 	if resp.Workflow.LastItem != nil {
-		lastItem = toQueueItem(*resp.Workflow.LastItem)
+		lastItem = resp.Workflow.LastItem
 	}
 
 	deps := make([]DependencyStatus, 0, len(resp.Dependencies))
@@ -247,12 +209,12 @@ func (a *HTTPAccess) Stop(ids ...int64) (int, error) {
 }
 
 // EnqueueCached queues a cached rip for processing via HTTP.
-func (a *HTTPAccess) EnqueueCached(req EnqueueCachedRequest) (*queue.Item, error) {
+func (a *HTTPAccess) EnqueueCached(req EnqueueCachedRequest) (*Item, error) {
 	var resp queueEnqueueCachedResponse
 	if err := a.postJSON("/api/queue/enqueue-cached", req, &resp); err != nil {
 		return nil, err
 	}
-	return toQueueItem(resp.Item), nil
+	return &resp.Item, nil
 }
 
 // Clear clears queue items by scope via HTTP.

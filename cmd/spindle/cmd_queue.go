@@ -86,8 +86,8 @@ func newQueueListCmd() *cobra.Command {
 						item.UpdatedAt,
 						item.DiscFingerprint,
 					)
-					if item.ProgressMessage != "" {
-						fmt.Printf("       %s %s (%.0f%%)\n", labelStyle("Progress:"), item.ProgressMessage, item.ProgressPercent)
+					if item.Progress.Message != "" {
+						fmt.Printf("       %s %s (%.0f%%)\n", labelStyle("Progress:"), item.Progress.Message, item.Progress.Percent)
 					}
 					if item.ErrorMessage != "" {
 						fmt.Printf("       %s %s\n", failStyle("Error:"), item.ErrorMessage)
@@ -158,31 +158,31 @@ func newQueueShowCmd() *cobra.Command {
 			fmt.Printf("%s %s\n", labelStyle("Created:    "), item.CreatedAt)
 			fmt.Printf("%s %s\n", labelStyle("Updated:    "), item.UpdatedAt)
 			fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), item.DiscFingerprint)
-			if item.ProgressMessage != "" {
-				fmt.Printf("%s %s (%.0f%%)\n", labelStyle("Progress:   "), item.ProgressMessage, item.ProgressPercent)
+			if item.Progress.Message != "" {
+				fmt.Printf("%s %s (%.0f%%)\n", labelStyle("Progress:   "), item.Progress.Message, item.Progress.Percent)
 			}
-			if flagVerbose && item.ProgressTotalBytes > 0 {
+			if flagVerbose && item.Progress.TotalBytes > 0 {
 				fmt.Printf("%s %s / %s\n", labelStyle("Bytes:      "),
-					formatBytes(item.ProgressBytesCopied),
-					formatBytes(item.ProgressTotalBytes))
+					formatBytes(item.Progress.BytesCopied),
+					formatBytes(item.Progress.TotalBytes))
 			}
 			if flagVerbose && item.ActiveEpisodeKey != "" {
 				fmt.Printf("%s %s\n", labelStyle("Episode:    "), item.ActiveEpisodeKey)
 			}
-			if item.NeedsReview != 0 {
+			if item.NeedsReview {
 				fmt.Printf("%s %s\n", labelStyle("Review:     "), item.ReviewReason)
 			}
 			if item.ErrorMessage != "" {
 				fmt.Printf("%s %s\n", failStyle("Error:      "), item.ErrorMessage)
 			}
-			if item.MetadataJSON != "" {
-				fmt.Printf("%s %s\n", labelStyle("Metadata:   "), item.MetadataJSON)
+			if len(item.Metadata) != 0 {
+				fmt.Printf("%s %s\n", labelStyle("Metadata:   "), item.Metadata)
 			}
-			if flagVerbose && item.RipSpecData != "" {
-				fmt.Printf("%s %s\n", labelStyle("RipSpec:    "), prettyJSON(item.RipSpecData))
+			if flagVerbose && len(item.RipSpec) != 0 {
+				fmt.Printf("%s %s\n", labelStyle("RipSpec:    "), prettyJSON(string(item.RipSpec)))
 			}
-			if flagVerbose && item.EncodingDetailsJSON != "" {
-				fmt.Printf("%s %s\n", labelStyle("Encoding:   "), prettyJSON(item.EncodingDetailsJSON))
+			if flagVerbose && len(item.Encoding) != 0 {
+				fmt.Printf("%s %s\n", labelStyle("Encoding:   "), prettyJSON(string(item.Encoding)))
 			}
 			return nil
 		},
