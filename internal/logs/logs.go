@@ -15,7 +15,7 @@ func Default(l *slog.Logger) *slog.Logger {
 	return slog.Default()
 }
 
-// Tail reads up to limit lines from a log file.
+// Tail reads the last limit lines from a log file.
 func Tail(path string, limit int) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -27,13 +27,23 @@ func Tail(path string, limit int) ([]string, error) {
 		limit = 1000
 	}
 
-	var lines []string
+	lines := make([]string, limit)
+	count := 0
 	scanner := bufio.NewScanner(f)
-	for scanner.Scan() && len(lines) < limit {
-		lines = append(lines, scanner.Text())
+	for scanner.Scan() {
+		lines[count%limit] = scanner.Text()
+		count++
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan: %w", err)
 	}
-	return lines, nil
+
+	if count < limit {
+		return lines[:count], nil
+	}
+	result := make([]string, limit)
+	start := count % limit
+	copy(result, lines[start:])
+	copy(result[limit-start:], lines[:start])
+	return result, nil
 }
