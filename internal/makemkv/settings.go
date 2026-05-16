@@ -14,10 +14,10 @@ import (
 )
 
 // requiredSettings defines settings that Spindle ensures are configured.
-// app_DefaultSelectionString: Select video, audio, and subtitle tracks.
+// app_DefaultSelectionString: Select video plus English/unknown audio and subtitle tracks.
 // app_LibdriveIO: Enable libdrive mode for direct disc access (required for UHD).
 var requiredSettings = map[string]string{
-	"app_DefaultSelectionString": "-sel:all,+sel:video,+sel:audio,+sel:subtitle",
+	"app_DefaultSelectionString": "-sel:all,+sel:video,+sel:(audio&(eng|nolang|und)),+sel:(subtitle&(eng|nolang|und))",
 	"app_LibdriveIO":             "true",
 }
 

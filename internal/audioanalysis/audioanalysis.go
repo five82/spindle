@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/audio"
@@ -271,6 +272,21 @@ func (h *Handler) detectCommentary(
 		}
 		idx := as.absIndex
 		stream := result.Streams[idx]
+		rawLang, allowed := allowedAudioLanguage(stream.Tags)
+		if !allowed {
+			logger.Info("track excluded by language",
+				"decision_type", "audio_language_filter",
+				"decision_result", "excluded",
+				"decision_reason", fmt.Sprintf("language=%s is not english or unknown", rawLang),
+				"track_index", idx,
+				"audio_index", as.audioIndex,
+			)
+			excluded = append(excluded, ripspec.ExcludedTrackRef{
+				Index:  as.audioIndex,
+				Reason: "non-English audio",
+			})
+			continue
+		}
 
 		// Stereo similarity check: compare transcription fingerprints of
 		// the primary and candidate tracks.
@@ -453,6 +469,15 @@ func (h *Handler) classifyTrack(
 
 // buildCommentaryUserPrompt constructs the user prompt for commentary LLM
 // classification from the stream metadata and transcript text.
+func allowedAudioLanguage(tags map[string]string) (string, bool) {
+	raw := strings.ToLower(strings.TrimSpace(language.ExtractFromTags(tags)))
+	switch raw {
+	case "", "und", "nolang", "unknown":
+		return raw, true
+	}
+	return raw, language.ToISO2(raw) == "en"
+}
+
 func buildCommentaryUserPrompt(stream ffprobe.Stream, transcript string) string {
 	title := strings.TrimSpace(stream.Tags["title"])
 

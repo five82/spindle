@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+func TestDefaultSelectionStringKeepsEnglishAndUnknownTracks(t *testing.T) {
+	got := requiredSettings["app_DefaultSelectionString"]
+	want := "-sel:all,+sel:video,+sel:(audio&(eng|nolang|und)),+sel:(subtitle&(eng|nolang|und))"
+	if got != want {
+		t.Fatalf("app_DefaultSelectionString = %q, want %q", got, want)
+	}
+}
+
 func TestParseDuration(t *testing.T) {
 	tests := []struct {
 		input string

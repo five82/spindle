@@ -70,6 +70,31 @@ func TestTempOutputDir(t *testing.T) {
 	}
 }
 
+func TestAllowedAudioLanguageKeepsEnglishAndUnknown(t *testing.T) {
+	tests := []struct {
+		name string
+		tags map[string]string
+		want bool
+	}{
+		{"english iso3", map[string]string{"language": "eng"}, true},
+		{"english iso2", map[string]string{"language": "en"}, true},
+		{"missing", nil, true},
+		{"undetermined", map[string]string{"language": "und"}, true},
+		{"no language", map[string]string{"language": "nolang"}, true},
+		{"japanese", map[string]string{"language": "jpn"}, false},
+		{"unrecognized explicit language", map[string]string{"language": "tha"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, got := allowedAudioLanguage(tt.tags)
+			if got != tt.want {
+				t.Fatalf("allowedAudioLanguage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildCommentaryUserPrompt_WithTitle(t *testing.T) {
 	stream := ffprobe.Stream{
 		Tags: map[string]string{"title": "Director Commentary"},
