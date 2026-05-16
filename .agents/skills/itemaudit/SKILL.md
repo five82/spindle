@@ -50,6 +50,14 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 | Field | Present When | Contents |
 |-------|-------------|----------|
 | `decision_groups` | Decisions exist | Groups by (type, result, reason) with count. `entries` included when count=1 or messages vary; nil when all identical. |
+| `notable_decisions` | Notable decisions exist | Curated subset of decisions most useful for reporting (TMDB/title/crop/validation/audio/subtitle/routing/episode match), avoiding noisy full decision scans. |
+| `stage_timings` | Stage events exist | One row per stage with start, completion, duration, start count, and completion count. Prefer this over raw `logs.stages` for the timing table. |
+| `source_summary` | Source/output traits known | Disc source, UHD-likely flag, input/output resolution, input codecs, output codec, HDR/dynamic range. |
+| `title_selection` | Movie titles exist | Feature-length candidates, selected title, selection decision/reason, and similar-runtime candidate count. Prefer this over hand-parsing `envelope.titles`. |
+| `output_media` | Valid probes exist | Compact stream summaries (video/audio/subtitle labels and flags) derived from ffprobe. Prefer this for normal stream checks; use raw `media[]` only for missing details. |
+| `audio_summary` | Audio evidence exists | Primary track, output/excluded/commentary counts, commentary decisions, and commentary label status. |
+| `subtitle_summary` | Subtitle evidence exists | Subtitle generation validation counts, forced-subtitle outcome, output subtitle count, and label status. |
+| `routing_summary` | Final assets exist | Final output destination classification and expected-vs-actual route per output. |
 | `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
 | `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
@@ -81,11 +89,11 @@ After running `spindle audit-gather`, process the full JSON output through a **s
 The extraction script should:
 
 1. **Summarize metadata**: item fields, stage_gate, gathering errors
-2. **Format pre-computed analysis**: Read `analysis.decision_groups` for deduplicated decisions (groups with `count > 1` and nil `entries` are identical repeats; groups with `entries` have varying messages). Read `analysis.anomalies` for pre-flagged critical/warning issues and info context. Read `analysis.episode_stats`, `analysis.media_stats`, `analysis.crop_analysis`, `analysis.episode_consistency`, `analysis.asset_health` for pre-computed summaries.
+2. **Format pre-computed analysis**: Read `analysis.decision_groups` for deduplicated decisions (groups with `count > 1` and nil `entries` are identical repeats; groups with `entries` have varying messages). Read `analysis.notable_decisions`, `analysis.stage_timings`, `analysis.source_summary`, `analysis.title_selection`, `analysis.output_media`, `analysis.audio_summary`, `analysis.subtitle_summary`, and `analysis.routing_summary` before falling back to raw logs/probes. Read `analysis.anomalies` for pre-flagged critical/warning issues and info context. Read `analysis.episode_stats`, `analysis.media_stats`, `analysis.crop_analysis`, `analysis.episode_consistency`, `analysis.asset_health` for pre-computed summaries.
 3. **List all warnings and errors** with full context (these are always few enough to show individually)
 4. **Show stage timing** with computed durations
 5. **Summarize episode manifest** with confidence scores and episode numbers. If `analysis.episode_stats.placeholder_only` is true and `phase_episode_id` is false, label it clearly as a **placeholder episode inventory**, not a resolved episode manifest.
-6. **Title selection** (movies): List `envelope.titles` with id, duration, and chapters to identify feature-length candidates and which was ripped
+6. **Title selection** (movies): Prefer `analysis.title_selection` for selected title, feature-length candidates, and similar runtimes. Fall back to `envelope.titles` only if the summary is absent.
 
 Steps 2/5/6/8 from the old extraction strategy are now pre-computed in `analysis` -- the script reads and formats them rather than computing them from raw data. This approach replaces 10+ sequential extraction calls with 1-2, keeping the analysis equally thorough while significantly reducing gathering overhead.
 

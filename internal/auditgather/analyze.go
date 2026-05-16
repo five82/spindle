@@ -8,11 +8,13 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/five82/spindle/internal/contentid"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/language"
+	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -149,7 +151,18 @@ func computeAnalysis(r *Report) *Analysis {
 
 	if r.Logs != nil && len(r.Logs.Decisions) > 0 {
 		a.DecisionGroups = aggregateDecisions(r.Logs.Decisions)
+		a.NotableDecisions = selectNotableDecisions(r.Logs.Decisions)
 	}
+	if r.Logs != nil && len(r.Logs.Stages) > 0 {
+		a.StageTimings = computeStageTimings(r.Logs.Stages)
+	}
+
+	a.SourceSummary = computeSourceSummary(r)
+	a.TitleSelection = computeTitleSelection(r)
+	a.OutputMedia = computeOutputMedia(r.Media)
+	a.AudioSummary = computeAudioSummary(r)
+	a.SubtitleSummary = computeSubtitleSummary(r)
+	a.RoutingSummary = computeRoutingSummary(r)
 
 	if len(r.Media) > 0 {
 		a.EpisodeConsistency = computeEpisodeConsistency(r.Media)
@@ -178,6 +191,14 @@ func computeAnalysis(r *Report) *Analysis {
 
 	// Return nil if everything is empty.
 	if len(a.DecisionGroups) == 0 &&
+		len(a.NotableDecisions) == 0 &&
+		len(a.StageTimings) == 0 &&
+		a.SourceSummary == nil &&
+		a.TitleSelection == nil &&
+		len(a.OutputMedia) == 0 &&
+		a.AudioSummary == nil &&
+		a.SubtitleSummary == nil &&
+		a.RoutingSummary == nil &&
 		a.EpisodeConsistency == nil &&
 		a.CropAnalysis == nil &&
 		a.EpisodeStats == nil &&
@@ -242,6 +263,408 @@ func messagesVary(entries []LogDecision) bool {
 		}
 	}
 	return false
+}
+
+func selectNotableDecisions(decisions []LogDecision) []LogDecision {
+	notable := map[string]bool{
+		"tmdb_match":                true,
+		"title_resolution":          true,
+		"title_selection":           true,
+		"file_probe":                true,
+		"crop_detection":            true,
+		"encoding_validation":       true,
+		"validation_failure_route":  true,
+		"audio_selection":           true,
+		"audio_refinement":          true,
+		"commentary_stereo_filter":  true,
+		"commentary_classification": true,
+		"commentary_remapping":      true,
+		"commentary_disposition":    true,
+		"subtitle_formatting":       true,
+		"srt_validation":            true,
+		"forced_subtitle":           true,
+		"forced_subtitle_download":  true,
+		"forced_subtitle_ranking":   true,
+		"source_stage_selection":    true,
+		"episode_identification":    true,
+		"episode_review":            true,
+		"episode_match":             true,
+		"contentid_matches":         true,
+		"asset_mapping":             true,
+		"audio_remux":               true,
+		"transcription_cache":       true,
+	}
+	out := make([]LogDecision, 0, len(decisions))
+	for _, d := range decisions {
+		if notable[d.DecisionType] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func computeStageTimings(events []StageEvent) []StageTiming {
+	byStage := make(map[string]*StageTiming)
+	var order []string
+	for _, e := range events {
+		if e.Stage == "" {
+			continue
+		}
+		st := byStage[e.Stage]
+		if st == nil {
+			st = &StageTiming{Stage: e.Stage}
+			byStage[e.Stage] = st
+			order = append(order, e.Stage)
+		}
+		switch e.EventType {
+		case "stage_start":
+			st.Starts++
+			if st.StartedAt == "" {
+				st.StartedAt = e.TS
+			}
+		case "stage_complete":
+			st.Completions++
+			st.CompletedAt = e.TS
+			if e.DurationSeconds > 0 {
+				st.DurationSeconds = e.DurationSeconds
+			}
+		}
+	}
+	result := make([]StageTiming, 0, len(order))
+	for _, stage := range order {
+		result = append(result, *byStage[stage])
+	}
+	return result
+}
+
+func computeSourceSummary(r *Report) *SourceSummary {
+	if r == nil {
+		return nil
+	}
+	ss := &SourceSummary{DiscSource: r.StageGate.DiscSource}
+	if r.Encoding != nil {
+		snap := r.Encoding.Snapshot
+		ss.OutputResolution = strings.TrimSpace(snap.Resolution)
+		ss.DynamicRange = strings.TrimSpace(snap.DynamicRange)
+		ss.HDR = strings.EqualFold(ss.DynamicRange, "HDR")
+	}
+	if len(r.Media) > 0 && r.Media[0].Probe != nil {
+		for _, s := range r.Media[0].Probe.Streams {
+			if s.CodecType != "video" {
+				continue
+			}
+			ss.OutputCodec = s.CodecName
+			if ss.OutputResolution == "" && s.Width > 0 && s.Height > 0 {
+				ss.OutputResolution = fmt.Sprintf("%dx%d", s.Width, s.Height)
+			}
+			if mediaStreamHDR(s) {
+				ss.HDR = true
+			}
+			break
+		}
+	}
+	if r.Logs != nil {
+		for _, d := range r.Logs.Decisions {
+			if d.DecisionType != "file_probe" {
+				continue
+			}
+			if ss.InputResolution == "" {
+				if v, ok := d.Extras["resolution"].(string); ok {
+					ss.InputResolution = v
+				} else if v := decisionReasonValue(d.DecisionReason, "resolution"); v != "" {
+					ss.InputResolution = v
+				}
+			}
+			if codecs, ok := d.Extras["codecs"].(string); ok && codecs != "" {
+				ss.InputCodecs = strings.Split(codecs, ",")
+			} else if codecs := decisionReasonValue(d.DecisionReason, "codecs"); codecs != "" {
+				ss.InputCodecs = strings.Split(codecs, ",")
+			}
+		}
+	}
+	ss.UHDLikely = strings.Contains(strings.ToUpper(r.Item.DiscTitle), "UHD") || strings.HasPrefix(ss.InputResolution, "3840x2160") || strings.HasPrefix(ss.OutputResolution, "3840x")
+	if ss.DiscSource == "" && ss.InputResolution == "" && ss.OutputResolution == "" && len(ss.InputCodecs) == 0 && ss.OutputCodec == "" && ss.DynamicRange == "" && !ss.HDR && !ss.UHDLikely {
+		return nil
+	}
+	return ss
+}
+
+func decisionReasonValue(reason, key string) string {
+	prefix := key + "="
+	for _, field := range strings.Fields(reason) {
+		if strings.HasPrefix(field, prefix) {
+			return strings.Trim(strings.TrimPrefix(field, prefix), ",")
+		}
+	}
+	return ""
+}
+
+func computeTitleSelection(r *Report) *TitleSelectionSummary {
+	if r == nil || r.Envelope == nil || r.Envelope.Metadata.MediaType != "movie" || len(r.Envelope.Titles) == 0 {
+		return nil
+	}
+	ts := &TitleSelectionSummary{SelectedID: -1}
+	if r.Logs != nil {
+		for _, d := range r.Logs.Decisions {
+			if d.DecisionType == "title_selection" {
+				ts.DecisionResult = d.DecisionResult
+				ts.DecisionReason = d.DecisionReason
+				if id, ok := parseSelectedTitleID(d.DecisionResult); ok {
+					ts.SelectedID = id
+				}
+				break
+			}
+		}
+	}
+	if ts.SelectedID < 0 {
+		for _, a := range r.Envelope.Assets.Ripped {
+			if a.IsCompleted() {
+				ts.SelectedID = a.TitleID
+				break
+			}
+		}
+	}
+	for _, title := range r.Envelope.Titles {
+		if title.Duration <= 3600 || title.Chapters <= 1 {
+			continue
+		}
+		candidate := TitleCandidate{
+			ID:              title.ID,
+			DurationSeconds: title.Duration,
+			Chapters:        title.Chapters,
+			Playlist:        title.Playlist,
+			SegmentCount:    title.SegmentCount,
+			Selected:        title.ID == ts.SelectedID,
+		}
+		if candidate.Selected {
+			ts.SelectedDurationSeconds = title.Duration
+		}
+		ts.Candidates = append(ts.Candidates, candidate)
+	}
+	ts.FeatureCandidateCount = len(ts.Candidates)
+	if ts.SelectedDurationSeconds > 0 {
+		for _, c := range ts.Candidates {
+			if math.Abs(float64(c.DurationSeconds-ts.SelectedDurationSeconds)) <= 30 {
+				ts.SimilarRuntimeCount++
+			}
+		}
+	}
+	return ts
+}
+
+func parseSelectedTitleID(result string) (int, bool) {
+	fields := strings.Fields(result)
+	for i, f := range fields {
+		if strings.EqualFold(f, "title") && i+1 < len(fields) {
+			idText := strings.Trim(fields[i+1], "():")
+			id, err := strconv.Atoi(idText)
+			return id, err == nil
+		}
+	}
+	return 0, false
+}
+
+func computeOutputMedia(probes []MediaFileProbe) []MediaSummary {
+	out := make([]MediaSummary, 0, len(probes))
+	for _, p := range probes {
+		if p.Probe == nil || p.Error != "" {
+			continue
+		}
+		ms := MediaSummary{
+			Path:            p.Path,
+			Role:            p.Role,
+			EpisodeKey:      p.EpisodeKey,
+			DurationSeconds: p.DurationSeconds,
+			SizeBytes:       p.SizeBytes,
+		}
+		for _, s := range p.Probe.Streams {
+			switch s.CodecType {
+			case "video":
+				if ms.Video == nil {
+					ms.Video = &VideoSummary{Codec: s.CodecName, Width: s.Width, Height: s.Height, HDR: mediaStreamHDR(s), ColorTransfer: s.ColorTransfer, ColorPrimaries: s.ColorPrimaries}
+				}
+			case "audio":
+				commentary := s.Disposition["comment"] == 1 || strings.Contains(strings.ToLower(s.Tags["title"]), "commentary")
+				ms.Audio = append(ms.Audio, AudioStreamSummary{
+					Index:        s.Index,
+					Codec:        s.CodecName,
+					Channels:     s.Channels,
+					Layout:       s.ChannelLayout,
+					Language:     s.Tags["language"],
+					Title:        s.Tags["title"],
+					Default:      s.Disposition["default"] == 1,
+					Commentary:   commentary,
+					LabelCorrect: !commentary || strings.Contains(strings.ToLower(s.Tags["title"]), "commentary"),
+				})
+			case "subtitle":
+				forced := s.Disposition["forced"] == 1
+				ms.Subtitles = append(ms.Subtitles, SubtitleStreamSummary{
+					Index:        s.Index,
+					Codec:        s.CodecName,
+					Language:     s.Tags["language"],
+					Title:        s.Tags["title"],
+					Default:      s.Disposition["default"] == 1,
+					Forced:       forced,
+					LabelCorrect: subtitleLabelCorrect(s.Tags["language"], s.Tags["title"], forced),
+				})
+			}
+		}
+		out = append(out, ms)
+	}
+	return out
+}
+
+func mediaStreamHDR(s ffprobe.Stream) bool {
+	transfer := strings.ToLower(s.ColorTransfer)
+	primaries := strings.ToLower(s.ColorPrimaries)
+	if strings.Contains(transfer, "smpte2084") || strings.Contains(transfer, "arib-std-b67") || strings.Contains(primaries, "bt2020") {
+		return true
+	}
+	for _, sideData := range s.SideDataList {
+		kind := strings.ToLower(sideData.Type)
+		if strings.Contains(kind, "mastering display") || strings.Contains(kind, "content light") {
+			return true
+		}
+	}
+	return false
+}
+
+func subtitleLabelCorrect(lang, title string, forced bool) bool {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return false
+	}
+	if forced && !strings.Contains(strings.ToLower(title), "forced") {
+		return false
+	}
+	if lang == "" {
+		return true
+	}
+	display := strings.ToLower(language.DisplayName(lang))
+	return display == "" || strings.Contains(strings.ToLower(title), display) || strings.Contains(strings.ToLower(title), strings.ToLower(lang))
+}
+
+func computeAudioSummary(r *Report) *AudioSummary {
+	if r == nil || r.Envelope == nil {
+		return nil
+	}
+	summary := &AudioSummary{CommentaryLabelsCorrect: true}
+	if aa := r.Envelope.Attributes.AudioAnalysis; aa != nil {
+		summary.PrimaryDescription = aa.PrimaryDescription
+		summary.PrimaryTrackIndex = aa.PrimaryTrack.Index
+		for _, tr := range aa.ExcludedTracks {
+			summary.ExcludedTracks = append(summary.ExcludedTracks, ExcludedTrack{Index: tr.Index, Reason: tr.Reason, Similarity: tr.Similarity})
+		}
+	}
+	for _, media := range computeOutputMedia(r.Media) {
+		for _, audio := range media.Audio {
+			summary.OutputAudioTracks++
+			if audio.Commentary {
+				summary.OutputCommentaryTracks++
+				if !audio.LabelCorrect {
+					summary.CommentaryLabelsCorrect = false
+				}
+			}
+		}
+	}
+	if r.Logs != nil {
+		for _, d := range r.Logs.Decisions {
+			switch d.DecisionType {
+			case "commentary_classification", "commentary_stereo_filter", "commentary_remapping", "commentary_disposition":
+				summary.CommentaryDecisions = append(summary.CommentaryDecisions, d)
+			}
+		}
+	}
+	if summary.PrimaryDescription == "" && summary.OutputAudioTracks == 0 && len(summary.ExcludedTracks) == 0 && len(summary.CommentaryDecisions) == 0 {
+		return nil
+	}
+	return summary
+}
+
+func computeSubtitleSummary(r *Report) *SubtitleSummary {
+	if r == nil || r.Envelope == nil {
+		return nil
+	}
+	summary := &SubtitleSummary{SubtitleLabelsCorrect: true}
+	for _, rec := range r.Envelope.Attributes.SubtitleGenerationResults {
+		summary.Results = append(summary.Results, SubtitleResultSummary{
+			EpisodeKey:            rec.EpisodeKey,
+			Source:                rec.Source,
+			Language:              rec.Language,
+			Segments:              rec.Segments,
+			ValidationResult:      rec.ValidationResult,
+			OpenSubtitlesDecision: rec.OpenSubtitlesDecision,
+			ReviewIssues:          rec.ReviewIssues,
+			SevereIssues:          rec.SevereIssues,
+			QCObservations:        rec.QCObservations,
+		})
+		switch rec.ValidationResult {
+		case "passed":
+			summary.ValidationPassed++
+		case "needs_review":
+			summary.ValidationNeedsReview++
+		case "failed":
+			summary.ValidationFailed++
+		}
+	}
+	for _, media := range computeOutputMedia(r.Media) {
+		for _, sub := range media.Subtitles {
+			summary.OutputSubtitleTracks++
+			if !sub.LabelCorrect {
+				summary.SubtitleLabelsCorrect = false
+			}
+		}
+	}
+	if r.Logs != nil {
+		for _, d := range r.Logs.Decisions {
+			if d.DecisionType == "forced_subtitle" || d.DecisionType == "forced_subtitle_download" || d.DecisionType == "forced_subtitle_ranking" {
+				summary.ForcedOutcome = d.DecisionResult
+				summary.ForcedReason = d.DecisionReason
+			}
+		}
+	}
+	if len(summary.Results) == 0 && summary.OutputSubtitleTracks == 0 && summary.ForcedOutcome == "" {
+		return nil
+	}
+	return summary
+}
+
+func computeRoutingSummary(r *Report) *RoutingSummary {
+	if r == nil || r.Envelope == nil || len(r.Envelope.Assets.Final) == 0 {
+		return nil
+	}
+	summary := &RoutingSummary{}
+	for _, asset := range r.Envelope.Assets.Final {
+		if !asset.IsCompleted() || asset.Path == "" {
+			continue
+		}
+		destination := "other"
+		if pathWithinRoot(asset.Path, r.Paths.ReviewDir) {
+			destination = "review"
+		} else if pathWithinRoot(asset.Path, r.Paths.LibraryDir) {
+			destination = "library"
+		}
+		expectedReview := false
+		if r.Envelope.Metadata.MediaType == "tv" {
+			if ep := r.Envelope.EpisodeByKey(asset.EpisodeKey); ep != nil {
+				expectedReview = ep.Episode <= 0 || ep.NeedsReview
+			}
+		} else {
+			expectedReview = r.Item.NeedsReview
+		}
+		matches := (expectedReview && destination == "review") || (!expectedReview && destination == "library")
+		summary.Entries = append(summary.Entries, RoutingEntry{
+			EpisodeKey:      asset.EpisodeKey,
+			Path:            asset.Path,
+			Destination:     destination,
+			ExpectedReview:  expectedReview,
+			MatchesExpected: matches,
+		})
+	}
+	if len(summary.Entries) == 0 {
+		return nil
+	}
+	return summary
 }
 
 func detectFallbackTitleSelectionAnomalies(r *Report) []Anomaly {

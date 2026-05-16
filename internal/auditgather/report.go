@@ -145,13 +145,167 @@ type MediaFileProbe struct {
 
 // Analysis holds pre-computed summaries derived from gathered data.
 type Analysis struct {
-	DecisionGroups     []DecisionGroup     `json:"decision_groups,omitempty"`
-	EpisodeConsistency *EpisodeConsistency `json:"episode_consistency,omitempty"`
-	CropAnalysis       *CropAnalysis       `json:"crop_analysis,omitempty"`
-	EpisodeStats       *EpisodeStats       `json:"episode_stats,omitempty"`
-	MediaStats         *MediaStats         `json:"media_stats,omitempty"`
-	AssetHealth        *AssetHealth        `json:"asset_health,omitempty"`
-	Anomalies          []Anomaly           `json:"anomalies,omitempty"`
+	DecisionGroups     []DecisionGroup        `json:"decision_groups,omitempty"`
+	NotableDecisions   []LogDecision          `json:"notable_decisions,omitempty"`
+	StageTimings       []StageTiming          `json:"stage_timings,omitempty"`
+	SourceSummary      *SourceSummary         `json:"source_summary,omitempty"`
+	TitleSelection     *TitleSelectionSummary `json:"title_selection,omitempty"`
+	OutputMedia        []MediaSummary         `json:"output_media,omitempty"`
+	AudioSummary       *AudioSummary          `json:"audio_summary,omitempty"`
+	SubtitleSummary    *SubtitleSummary       `json:"subtitle_summary,omitempty"`
+	RoutingSummary     *RoutingSummary        `json:"routing_summary,omitempty"`
+	EpisodeConsistency *EpisodeConsistency    `json:"episode_consistency,omitempty"`
+	CropAnalysis       *CropAnalysis          `json:"crop_analysis,omitempty"`
+	EpisodeStats       *EpisodeStats          `json:"episode_stats,omitempty"`
+	MediaStats         *MediaStats            `json:"media_stats,omitempty"`
+	AssetHealth        *AssetHealth           `json:"asset_health,omitempty"`
+	Anomalies          []Anomaly              `json:"anomalies,omitempty"`
+}
+
+// StageTiming is a compact per-stage timing summary.
+type StageTiming struct {
+	Stage           string  `json:"stage"`
+	StartedAt       string  `json:"started_at,omitempty"`
+	CompletedAt     string  `json:"completed_at,omitempty"`
+	DurationSeconds float64 `json:"duration_seconds,omitempty"`
+	Starts          int     `json:"starts,omitempty"`
+	Completions     int     `json:"completions,omitempty"`
+}
+
+// SourceSummary captures deterministic source/output traits used for external validation.
+type SourceSummary struct {
+	DiscSource       string   `json:"disc_source,omitempty"`
+	UHDLikely        bool     `json:"uhd_likely,omitempty"`
+	InputResolution  string   `json:"input_resolution,omitempty"`
+	OutputResolution string   `json:"output_resolution,omitempty"`
+	InputCodecs      []string `json:"input_codecs,omitempty"`
+	OutputCodec      string   `json:"output_codec,omitempty"`
+	DynamicRange     string   `json:"dynamic_range,omitempty"`
+	HDR              bool     `json:"hdr,omitempty"`
+}
+
+// TitleSelectionSummary describes feature-length title candidates and selection.
+type TitleSelectionSummary struct {
+	SelectedID              int              `json:"selected_id"`
+	SelectedDurationSeconds int              `json:"selected_duration_seconds,omitempty"`
+	DecisionResult          string           `json:"decision_result,omitempty"`
+	DecisionReason          string           `json:"decision_reason,omitempty"`
+	FeatureCandidateCount   int              `json:"feature_candidate_count"`
+	SimilarRuntimeCount     int              `json:"similar_runtime_count,omitempty"`
+	Candidates              []TitleCandidate `json:"candidates,omitempty"`
+}
+
+// TitleCandidate is a compact MakeMKV title summary.
+type TitleCandidate struct {
+	ID              int    `json:"id"`
+	DurationSeconds int    `json:"duration_seconds"`
+	Chapters        int    `json:"chapters"`
+	Playlist        string `json:"playlist,omitempty"`
+	SegmentCount    int    `json:"segment_count,omitempty"`
+	Selected        bool   `json:"selected,omitempty"`
+}
+
+// MediaSummary is a compact stream summary for an output media file.
+type MediaSummary struct {
+	Path            string                  `json:"path"`
+	Role            string                  `json:"role,omitempty"`
+	EpisodeKey      string                  `json:"episode_key,omitempty"`
+	DurationSeconds float64                 `json:"duration_seconds,omitempty"`
+	SizeBytes       int64                   `json:"size_bytes,omitempty"`
+	Video           *VideoSummary           `json:"video,omitempty"`
+	Audio           []AudioStreamSummary    `json:"audio,omitempty"`
+	Subtitles       []SubtitleStreamSummary `json:"subtitles,omitempty"`
+}
+
+// VideoSummary describes the primary video stream.
+type VideoSummary struct {
+	Codec          string `json:"codec,omitempty"`
+	Width          int    `json:"width,omitempty"`
+	Height         int    `json:"height,omitempty"`
+	HDR            bool   `json:"hdr,omitempty"`
+	ColorTransfer  string `json:"color_transfer,omitempty"`
+	ColorPrimaries string `json:"color_primaries,omitempty"`
+}
+
+// AudioStreamSummary describes a single output audio stream.
+type AudioStreamSummary struct {
+	Index        int    `json:"index"`
+	Codec        string `json:"codec,omitempty"`
+	Channels     int    `json:"channels,omitempty"`
+	Layout       string `json:"layout,omitempty"`
+	Language     string `json:"language,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Default      bool   `json:"default,omitempty"`
+	Commentary   bool   `json:"commentary,omitempty"`
+	LabelCorrect bool   `json:"label_correct"`
+}
+
+// SubtitleStreamSummary describes a single output subtitle stream.
+type SubtitleStreamSummary struct {
+	Index        int    `json:"index"`
+	Codec        string `json:"codec,omitempty"`
+	Language     string `json:"language,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Default      bool   `json:"default,omitempty"`
+	Forced       bool   `json:"forced,omitempty"`
+	LabelCorrect bool   `json:"label_correct"`
+}
+
+// AudioSummary condenses audio selection/refinement and commentary evidence.
+type AudioSummary struct {
+	PrimaryDescription      string          `json:"primary_description,omitempty"`
+	PrimaryTrackIndex       int             `json:"primary_track_index"`
+	OutputAudioTracks       int             `json:"output_audio_tracks,omitempty"`
+	OutputCommentaryTracks  int             `json:"output_commentary_tracks,omitempty"`
+	ExcludedTracks          []ExcludedTrack `json:"excluded_tracks,omitempty"`
+	CommentaryDecisions     []LogDecision   `json:"commentary_decisions,omitempty"`
+	CommentaryLabelsCorrect bool            `json:"commentary_labels_correct"`
+}
+
+// ExcludedTrack summarizes an audio track intentionally removed during refinement.
+type ExcludedTrack struct {
+	Index      int     `json:"index"`
+	Reason     string  `json:"reason,omitempty"`
+	Similarity float64 `json:"similarity,omitempty"`
+}
+
+// SubtitleSummary condenses subtitle generation, muxing, and forced-subtitle outcome.
+type SubtitleSummary struct {
+	Results               []SubtitleResultSummary `json:"results,omitempty"`
+	ValidationPassed      int                     `json:"validation_passed,omitempty"`
+	ValidationNeedsReview int                     `json:"validation_needs_review,omitempty"`
+	ValidationFailed      int                     `json:"validation_failed,omitempty"`
+	OutputSubtitleTracks  int                     `json:"output_subtitle_tracks,omitempty"`
+	SubtitleLabelsCorrect bool                    `json:"subtitle_labels_correct"`
+	ForcedOutcome         string                  `json:"forced_outcome,omitempty"`
+	ForcedReason          string                  `json:"forced_reason,omitempty"`
+}
+
+// SubtitleResultSummary is the actionable part of one subtitle-generation record.
+type SubtitleResultSummary struct {
+	EpisodeKey            string   `json:"episode_key,omitempty"`
+	Source                string   `json:"source,omitempty"`
+	Language              string   `json:"language,omitempty"`
+	Segments              int      `json:"segments,omitempty"`
+	ValidationResult      string   `json:"validation_result,omitempty"`
+	OpenSubtitlesDecision string   `json:"opensubtitles_decision,omitempty"`
+	ReviewIssues          []string `json:"review_issues,omitempty"`
+	SevereIssues          []string `json:"severe_issues,omitempty"`
+	QCObservations        []string `json:"qc_observations,omitempty"`
+}
+
+// RoutingSummary classifies final outputs against configured library/review roots.
+type RoutingSummary struct {
+	Entries []RoutingEntry `json:"entries,omitempty"`
+}
+
+// RoutingEntry describes one final output route.
+type RoutingEntry struct {
+	EpisodeKey      string `json:"episode_key,omitempty"`
+	Path            string `json:"path"`
+	Destination     string `json:"destination"`
+	ExpectedReview  bool   `json:"expected_review,omitempty"`
+	MatchesExpected bool   `json:"matches_expected"`
 }
 
 // DecisionGroup aggregates identical decisions by (type, result, reason).

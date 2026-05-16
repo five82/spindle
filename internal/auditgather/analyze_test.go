@@ -103,6 +103,131 @@ func TestDecisionGroupJSONUsesDecisionFieldNames(t *testing.T) {
 	}
 }
 
+func TestComputeStageTimingsCollapsesDuplicateCompletes(t *testing.T) {
+	timings := computeStageTimings([]StageEvent{
+		{TS: "t1", EventType: "stage_start", Stage: "encoding"},
+		{TS: "t2", EventType: "stage_complete", Stage: "encoding"},
+		{TS: "t3", EventType: "stage_complete", Stage: "encoding", DurationSeconds: 12.5},
+	})
+	if len(timings) != 1 {
+		t.Fatalf("timing count = %d, want 1", len(timings))
+	}
+	if timings[0].Starts != 1 || timings[0].Completions != 2 {
+		t.Fatalf("counts = starts:%d completions:%d, want 1/2", timings[0].Starts, timings[0].Completions)
+	}
+	if timings[0].DurationSeconds != 12.5 {
+		t.Fatalf("duration = %f, want 12.5", timings[0].DurationSeconds)
+	}
+	if timings[0].StartedAt != "t1" || timings[0].CompletedAt != "t3" {
+		t.Fatalf("times = %q/%q, want t1/t3", timings[0].StartedAt, timings[0].CompletedAt)
+	}
+}
+
+func TestComputeTitleSelectionSummarizesFeatureCandidates(t *testing.T) {
+	r := &Report{
+		Logs: &LogAnalysis{Decisions: []LogDecision{{DecisionType: "title_selection", DecisionResult: "title 0 (5750s)", DecisionReason: "primary_title_selector"}}},
+		Envelope: &ripspec.Envelope{
+			Metadata: ripspec.Metadata{MediaType: "movie"},
+			Titles: []ripspec.Title{
+				{ID: 0, Duration: 5750, Chapters: 10, Playlist: "00800.mpls"},
+				{ID: 1, Duration: 5750, Chapters: 10, Playlist: "00801.mpls"},
+				{ID: 2, Duration: 340, Chapters: 34},
+			},
+		},
+	}
+
+	summary := computeTitleSelection(r)
+	if summary == nil {
+		t.Fatal("expected title selection summary")
+	}
+	if summary.SelectedID != 0 || summary.SelectedDurationSeconds != 5750 {
+		t.Fatalf("selected = %d/%d, want 0/5750", summary.SelectedID, summary.SelectedDurationSeconds)
+	}
+	if summary.FeatureCandidateCount != 2 || summary.SimilarRuntimeCount != 2 {
+		t.Fatalf("candidate counts = %d/%d, want 2/2", summary.FeatureCandidateCount, summary.SimilarRuntimeCount)
+	}
+	if len(summary.Candidates) != 2 || !summary.Candidates[0].Selected || summary.Candidates[1].Selected {
+		t.Fatalf("unexpected candidates: %+v", summary.Candidates)
+	}
+}
+
+func TestComputeOutputMediaSummarizesStreamsAndLabels(t *testing.T) {
+	media := []MediaFileProbe{{
+		Path:            "/movie.mkv",
+		Role:            "final",
+		DurationSeconds: 10,
+		SizeBytes:       100,
+		Probe: &ffprobe.Result{Streams: []ffprobe.Stream{
+			{CodecType: "video", CodecName: "av1", Width: 3840, Height: 1600, ColorTransfer: "smpte2084"},
+			{Index: 1, CodecType: "audio", CodecName: "opus", Channels: 2, Tags: map[string]string{"language": "eng", "title": "Director"}, Disposition: map[string]int{"comment": 1}},
+			{Index: 2, CodecType: "subtitle", CodecName: "subrip", Tags: map[string]string{"language": "eng", "title": "English"}},
+		}},
+	}}
+
+	summary := computeOutputMedia(media)
+	if len(summary) != 1 {
+		t.Fatalf("media summaries = %d, want 1", len(summary))
+	}
+	if summary[0].Video == nil || !summary[0].Video.HDR {
+		t.Fatalf("expected HDR video summary: %+v", summary[0].Video)
+	}
+	if len(summary[0].Audio) != 1 || summary[0].Audio[0].LabelCorrect {
+		t.Fatalf("expected unlabeled commentary audio: %+v", summary[0].Audio)
+	}
+	if len(summary[0].Subtitles) != 1 || !summary[0].Subtitles[0].LabelCorrect {
+		t.Fatalf("expected correctly labeled subtitle: %+v", summary[0].Subtitles)
+	}
+}
+
+func TestComputeSubtitleSummarySeparatesValidationResults(t *testing.T) {
+	r := &Report{
+		Logs: &LogAnalysis{Decisions: []LogDecision{{DecisionType: "forced_subtitle", DecisionResult: "none_available", DecisionReason: "no foreign_parts_only results"}}},
+		Envelope: &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{SubtitleGenerationResults: []ripspec.SubtitleGenRecord{
+			{EpisodeKey: "main", Source: "whisperx", Language: "en", Segments: 10, ValidationResult: "passed", QCObservations: []string{"high_reading_speed"}},
+			{EpisodeKey: "s01e02", Source: "whisperx", Language: "en", Segments: 8, ValidationResult: "needs_review", ReviewIssues: []string{"bad timing"}},
+		}}},
+	}
+
+	summary := computeSubtitleSummary(r)
+	if summary == nil {
+		t.Fatal("expected subtitle summary")
+	}
+	if summary.ValidationPassed != 1 || summary.ValidationNeedsReview != 1 || summary.ValidationFailed != 0 {
+		t.Fatalf("validation counts = passed:%d review:%d failed:%d", summary.ValidationPassed, summary.ValidationNeedsReview, summary.ValidationFailed)
+	}
+	if summary.ForcedOutcome != "none_available" || summary.ForcedReason != "no foreign_parts_only results" {
+		t.Fatalf("forced = %q/%q", summary.ForcedOutcome, summary.ForcedReason)
+	}
+	if len(summary.Results) != 2 || len(summary.Results[1].ReviewIssues) != 1 {
+		t.Fatalf("unexpected results: %+v", summary.Results)
+	}
+}
+
+func TestComputeRoutingSummaryClassifiesLibraryAndReview(t *testing.T) {
+	r := &Report{
+		Paths: AuditPaths{ReviewDir: "/review", LibraryDir: "/library"},
+		Envelope: &ripspec.Envelope{
+			Metadata: ripspec.Metadata{MediaType: "tv"},
+			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}, {Key: "s01e02", Episode: 2, NeedsReview: true}},
+			Assets: ripspec.Assets{Final: []ripspec.Asset{
+				{EpisodeKey: "s01e01", Path: "/library/show/s01e01.mkv", Status: ripspec.AssetStatusCompleted},
+				{EpisodeKey: "s01e02", Path: "/review/show/s01e02.mkv", Status: ripspec.AssetStatusCompleted},
+			}},
+		},
+	}
+
+	summary := computeRoutingSummary(r)
+	if summary == nil || len(summary.Entries) != 2 {
+		t.Fatalf("routing summary = %+v, want 2 entries", summary)
+	}
+	if summary.Entries[0].Destination != "library" || !summary.Entries[0].MatchesExpected {
+		t.Fatalf("first route = %+v, want library/match", summary.Entries[0])
+	}
+	if summary.Entries[1].Destination != "review" || !summary.Entries[1].ExpectedReview || !summary.Entries[1].MatchesExpected {
+		t.Fatalf("second route = %+v, want review expected/match", summary.Entries[1])
+	}
+}
+
 func TestComputeEpisodeStats_Thresholds(t *testing.T) {
 	episodes := []ripspec.Episode{
 		{Key: "s01e01", Episode: 1, MatchConfidence: 0.95},
