@@ -8,12 +8,14 @@ subcommand `--help` output.
 
 ## CLI workflows
 
-Common commands:
+Common daemon and queue commands:
 
 ```bash
 spindle config init
 spindle config validate
 spindle start
+spindle stop
+spindle restart
 spindle status
 spindle logs --follow
 spindle queue list
@@ -21,25 +23,64 @@ spindle queue show <id>
 spindle queue retry [id...]
 spindle queue retry --episode s01e05 <id>
 spindle queue stop <id...>
+spindle queue clear <id...>
 spindle queue clear --completed
+spindle queue clear --all
 spindle disc pause
 spindle disc resume
 spindle disc detect
 ```
 
+Utility and recovery commands:
+
+```bash
+spindle identify [device]
+spindle gensubtitle <encoded-file>
+spindle cache rip [--title] [device]
+spindle cache stats
+spindle cache process <number>
+spindle cache remove <number>
+spindle cache clear
+spindle staging list
+spindle staging clean [--all]
+spindle discid list
+spindle discid remove <number>
+spindle discid clear
+spindle audit-gather <item-id>
+spindle test-notify
+spindle debug crop <entry-or-path>
+spindle debug commentary <entry-or-path>
+```
+
 Operational notes:
 
+- Most commands load and validate config first; use `spindle config init` to
+  create the sample config. See [CONFIG.md](CONFIG.md).
 - Queue list/show/retry/clear/stop commands use the daemon HTTP API.
 - Queue commands require a running daemon except `spindle queue clear --all`,
   which may be used while the daemon is stopped to delete the transient queue DB
   files.
+- `spindle audit-gather` also requires the daemon because it fetches the queue
+  item through the API before gathering artifacts.
+- `spindle staging clean` requires the daemon unless `--all` is supplied,
+  because the safe mode asks the daemon for active queue fingerprints. The
+  cleanup helper always preserves `queue-*` fallback staging directories.
 - `spindle logs --follow` and filtered log queries require the daemon because
-  they use the HTTP log API.
+  they use the HTTP log API. Unfiltered `spindle logs` tails the daemon log file
+  directly.
 - `spindle start` launches the daemon if one is not already running.
 - `spindle stop` is successful even when no daemon is running.
 - `spindle status` reports only `Daemon stopped` when the daemon is not running.
   When the daemon is running, it reports daemon state, dependency checks,
   library path status, and queue counts.
+- `spindle cache process` requires the daemon and enqueues the cached rip at the
+  ripping stage; duplicate fingerprints are rejected unless `--allow-duplicate`
+  is supplied.
+- `spindle cache rip` refuses to run while the daemon is running because it uses
+  the optical drive directly; the disc must already be mounted.
+
+Global flags include `--config`/`-c`, `--socket`, `--log-level`,
+`--verbose`/`-v`, and `--json` where supported by a command.
 
 See [user/workflow.md](user/workflow.md) for the operator lifecycle and recovery
 procedures.
@@ -47,7 +88,8 @@ procedures.
 ## HTTP API
 
 The HTTP API is local control/read surface for the CLI and external consumers
-such as Flyer. By default it is exposed through the daemon Unix socket.
+such as Flyer. The daemon exposes it through the Unix socket and, when `api.bind`
+is configured, a TCP listener.
 
 ### Authentication
 
@@ -109,7 +151,27 @@ POST /api/queue/enqueue-cached
 
 An empty `ids` array for retry means retry all failed items. Mutation responses
 return a small result object such as `{"updated":2}`, `{"removed":1}`, or
-`{"result":"..."}`. Cached enqueue returns `{"item":queueItem}`.
+`{"result":"retried"}`. Cached enqueue returns `{"item":queueItem}`. Duplicate
+cached enqueue without `allow_duplicate` returns HTTP 409.
+
+### Disc control responses
+
+Disc pause/resume return JSON such as:
+
+```json
+{"paused":true,"changed":true}
+{"resumed":true,"changed":true}
+```
+
+Manual detection returns:
+
+```json
+{"handled":true,"message":"Disc detected: LABEL (Blu-ray)"}
+```
+
+`handled:false` means detection was skipped, for example because detection is
+paused, the drive is busy, another detection is already running, or no disc is
+present.
 
 ### Logs query
 
@@ -147,7 +209,7 @@ Response:
 {"item":queueItem}
 ```
 
-Important `queueItem` fields:
+Core `queueItem` fields:
 
 | Field | Meaning |
 |-------|---------|
@@ -155,22 +217,14 @@ Important `queueItem` fields:
 | `discTitle` | Display title |
 | `stage` | Current queue stage |
 | `inProgress` | Whether a stage is actively executing |
-| `failedAtStage` | Stage that failed, when failed |
-| `errorMessage` | Human-readable failure message |
-| `createdAt`, `updatedAt` | Queue timestamps |
+| `failedAtStage` | Stage that failed, when a stage failure recorded it |
+| `errorMessage` | Human-readable failure message, when present |
 | `discFingerprint` | Stable disc fingerprint when known |
-| `needsReview`, `reviewReason` | Operator review state |
-| `metadata` | Metadata JSON, when present |
-| `ripSpec` | Raw RipSpec envelope JSON, when present |
-| `activeEpisodeKey` | Episode currently being processed, when relevant |
+| `needsReview`, `reviewReason` | Operator review state; `reviewReason` is a joined string |
 | `progress` | Current progress object |
-| `encoding` | Encoding telemetry snapshot JSON, when present |
-| `episodes` | Derived per-episode status for TV items |
-| `episodeTotals` | Planned/ripped/encoded/final counts |
-| `episodeIdentifiedCount` | Count of resolved TV episodes |
-| `subtitleGeneration` | Subtitle generation summary |
-| `primaryAudioDescription` | Selected primary audio summary |
-| `commentaryCount` | Commentary tracks detected |
+
+The response also includes additional fields for dashboards and diagnostics such
+as timestamps, metadata, RipSpec envelope, episode status, and encoding telemetry.
 
 Queue stages are:
 
@@ -198,7 +252,7 @@ failed
 }
 ```
 
-`bytesCopied` and `totalBytes` are present only when relevant.
+`bytesCopied` and `totalBytes` are omitted when they are zero.
 
 ### Status response
 
@@ -225,4 +279,4 @@ The daemon HTTP API is the normal queue access path for the CLI and external
 consumers. The daemon owns queue database reads and mutations.
 
 The queue DB is transient. If the daemon is stopped and the queue must be reset,
-`spindle queue clear --all` deletes the queue DB files directly.
+`spindle queue clear --all` deletes the queue DB, WAL, and SHM files directly.

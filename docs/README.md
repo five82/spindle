@@ -24,6 +24,7 @@ Use this hierarchy when code and docs appear to disagree:
 |----------|---------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System shape, pipeline stages, storage, dependencies, and package map |
 | [API.md](API.md) | Stable CLI workflows and HTTP API contracts |
+| [CONFIG.md](CONFIG.md) | Config loading, validation, derived paths, and feature gates |
 | [CONTENT_ID.md](CONTENT_ID.md) | TV episode identification intent and review policy |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Development workflow, tests, logging, package boundaries, doc policy |
 | [user/workflow.md](user/workflow.md) | Operator-facing lifecycle and recovery guide |

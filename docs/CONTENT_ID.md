@@ -31,13 +31,17 @@ The stage runs for TV items after ripping. It expects:
 - Completed ripped assets for selected title files.
 - TMDB metadata sufficient to know the target season/episode set.
 - WhisperX transcription support.
-- An OpenSubtitles API key so reference subtitles can be fetched.
+- An OpenSubtitles API key so reference subtitles can be fetched. This stage
+  uses the configured API key directly; `subtitles.opensubtitles_enabled`
+  controls forced-subtitle lookup, not TV episode identification.
 
-Movies skip this stage. TV items without required API clients are marked for
-review with degraded behavior and continue to encoding; they are not treated as
-cleanly identified. Transient OpenSubtitles HTTP/network failures are retried;
-runtime transcription or reference-acquisition errors that remain after retry
-fail the stage so the operator can fix the external dependency and retry.
+Movies and non-TV items skip this stage. TV items without required matcher
+clients complete the stage with a degraded warning, are marked for review, and
+continue to encoding; they are not treated as cleanly identified. Transient
+OpenSubtitles HTTP/network failures are retried by the OpenSubtitles client;
+runtime transcription,
+TMDB-season, or reference-acquisition errors that remain after retry fail the
+stage so the operator can fix the external dependency and retry.
 
 ## Pipeline
 
@@ -50,11 +54,12 @@ At a high level the stage:
 5. Validates and normalizes reference subtitles.
 6. Fingerprints ripped transcripts and references.
 7. Builds a claim matrix of rip-to-reference similarity.
-8. Accepts clear deterministic matches.
+8. Accepts clear deterministic matches and strong-margin decisive lower-similarity matches.
 9. Uses one-to-one constraints to avoid assigning the same rip or target episode
    twice.
 10. Challenges ambiguous pairs with the LLM when configured and appropriate.
-11. Persists episode mapping, confidence, provenance, and review state into the
+11. Applies conservative reconciliation for a single unresolved hole when supported.
+12. Persists episode mapping, confidence, provenance, and review state into the
     RipSpec envelope.
 
 ## Reference acquisition
@@ -145,12 +150,12 @@ thresholds include:
 - `decisive_auto_accept_threshold`
 - `clear_confidence_threshold`
 
-Exact defaults live in `internal/config` and the generated sample config from
-`spindle config init`.
+Exact defaults live in `internal/config`, the generated sample config from
+`spindle config init`, and [CONFIG.md](CONFIG.md).
 
 ## Implementation pointers
 
-- Stage handler and matching: `internal/contentid`.
+- Stage handler, candidate scope, reference selection, matching, reconciliation, and double-episode inference: `internal/contentid`.
 - Shared transcription: `internal/transcription`.
 - OpenSubtitles client: `internal/opensubtitles`.
 - LLM client: `internal/llm`.
