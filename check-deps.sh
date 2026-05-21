@@ -1,6 +1,6 @@
 #!/bin/bash
-# Dependency health check for reel.
-# Reports reachable vulnerabilities immediately, Go module updates after a cooldown,
+# Dependency health check for spindle.
+# Reports reachable vulnerabilities immediately, declared Go module updates after a cooldown,
 # and newer CI action tags without changing files.
 
 set -euo pipefail
@@ -86,7 +86,7 @@ module_version_time_epoch() {
     local version=$2
     local release_time
 
-    if ! release_time=$(go list -m -json "$module@$version" 2>/dev/null | awk -F '"' '/"Time":/ {print $4; exit}'); then
+    if ! release_time=$(GOWORK=off go list -m -json "$module@$version" 2>/dev/null | awk -F '"' '/"Time":/ {print $4; exit}'); then
         return 1
     fi
 
@@ -126,15 +126,24 @@ if ! command -v govulncheck &>/dev/null; then
     go install golang.org/x/vuln/cmd/govulncheck@latest
 fi
 
-if govulncheck ./...; then
+if GOWORK=off govulncheck ./...; then
     print_success "No reachable vulnerabilities found"
 else
     print_error "Reachable vulnerabilities detected"
     exit 1
 fi
 
-print_step "Checking for available Go module updates"
-UPDATE_OUTPUT=$(go list -m -u all)
+print_step "Checking for available declared Go module updates"
+DECLARED_MODULES=$(GOWORK=off go mod edit -json | awk '
+    /"Require": \[/ { in_require = 1; next }
+    in_require && /^[[:space:]]*]/ { in_require = 0 }
+    in_require && /"Path":/ {
+        gsub(/.*"Path": "/, "")
+        gsub(/".*/, "")
+        print
+    }
+')
+UPDATE_OUTPUT=$(GOWORK=off go list -m -u all)
 OUTDATED_OUTPUT=""
 COOLDOWN_OUTPUT=""
 
@@ -147,7 +156,7 @@ while IFS= read -r line; do
     latest_version=${line##*[}
     latest_version=${latest_version%%]*}
 
-    if go mod why -m "$module" 2>/dev/null | grep -q "main module does not need module"; then
+    if ! grep -Fxq "$module" <<< "$DECLARED_MODULES"; then
         continue
     fi
 
@@ -171,9 +180,9 @@ if [ -n "$OUTDATED_OUTPUT" ]; then
     echo "     ./check-ci.sh"
 else
     if [ "$UPDATE_COOLDOWN_DAYS" -eq 0 ]; then
-        print_success "Go modules are up to date"
+        print_success "Declared Go modules are up to date"
     else
-        print_success "No Go module updates older than $UPDATE_COOLDOWN_DAYS days"
+        print_success "No declared Go module updates older than $UPDATE_COOLDOWN_DAYS days"
     fi
 fi
 
