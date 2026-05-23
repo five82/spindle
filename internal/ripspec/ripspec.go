@@ -142,17 +142,23 @@ type AudioAnalysisData struct {
 
 // SubtitleGenRecord captures the result of subtitle generation for one episode.
 type SubtitleGenRecord struct {
-	EpisodeKey            string   `json:"episode_key"`
-	Source                string   `json:"source"`
-	SubtitlePath          string   `json:"subtitle_path"`
-	Segments              int      `json:"segments"`
-	DurationSec           float64  `json:"duration_sec,omitempty"`
-	Language              string   `json:"language"`
-	OpenSubtitlesDecision string   `json:"opensubtitles_decision,omitempty"`
-	ValidationResult      string   `json:"validation_result,omitempty"`
-	QCObservations        []string `json:"qc_observations,omitempty"`
-	ReviewIssues          []string `json:"review_issues,omitempty"`
-	SevereIssues          []string `json:"severe_issues,omitempty"`
+	EpisodeKey             string   `json:"episode_key"`
+	Source                 string   `json:"source"`
+	SubtitlePath           string   `json:"subtitle_path"`
+	Segments               int      `json:"segments"`
+	DurationSec            float64  `json:"duration_sec,omitempty"`
+	Language               string   `json:"language"`
+	RegularSource          string   `json:"regular_source,omitempty"`
+	ForcedSource           string   `json:"forced_source,omitempty"`
+	ForcedSubtitlePath     string   `json:"forced_subtitle_path,omitempty"`
+	ForcedSegments         int      `json:"forced_segments,omitempty"`
+	ForcedLanguages        []string `json:"forced_languages,omitempty"`
+	ForcedSubtitleDecision string   `json:"forced_subtitle_decision,omitempty"`
+	OpenSubtitlesDecision  string   `json:"opensubtitles_decision,omitempty"`
+	ValidationResult       string   `json:"validation_result,omitempty"`
+	QCObservations         []string `json:"qc_observations,omitempty"`
+	ReviewIssues           []string `json:"review_issues,omitempty"`
+	SevereIssues           []string `json:"severe_issues,omitempty"`
 }
 
 // ContentIDSummary captures envelope-level provenance for the episode

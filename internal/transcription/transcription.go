@@ -42,6 +42,14 @@ func New(model string, cudaEnabled bool, vadMethod, hfToken string, logger *slog
 	}
 }
 
+// TranscriptionMode selects the WhisperX transcription profile.
+type TranscriptionMode string
+
+const (
+	TranscriptionModeDefault TranscriptionMode = "transcribe"
+	TranscriptionModeMixed   TranscriptionMode = "mixed"
+)
+
 // TranscribeRequest specifies what to transcribe.
 type TranscribeRequest struct {
 	InputPath  string
@@ -49,6 +57,7 @@ type TranscribeRequest struct {
 	Language   string
 	OutputDir  string
 	Model      string // Override default model
+	Mode       TranscriptionMode
 }
 
 // Phase identifies a transcription progress phase.
@@ -144,14 +153,19 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	if onProgress != nil {
 		onProgress(PhaseTranscribe, 0)
 	}
-	invocation := s.buildWhisperXInvocation(wavPath, req.OutputDir, model, req.Language)
+	mode := req.Mode
+	if mode == "" {
+		mode = TranscriptionModeDefault
+	}
+	invocation := s.buildWhisperXInvocation(wavPath, req.OutputDir, model, req.Language, mode)
 	s.logger.Info("running WhisperX transcription",
 		"event_type", "transcription_whisperx",
 		"decision_type", "transcription_profile",
 		"decision_result", invocation.TranscriptionProfileName,
-		"decision_reason", fmt.Sprintf("vad_method=%s device=%s compute_type=%s speech_regions_only=%t condition_on_previous_text=%t batch_size=%d chunk_size=%d", s.vadMethod, invocation.Device, invocation.ComputeType, invocation.SpeechRegionsOnly, invocation.ConditionOnPreviousText, whisperXBatchSize, whisperXVADChunkSize),
+		"decision_reason", fmt.Sprintf("mode=%s vad_method=%s device=%s compute_type=%s speech_regions_only=%t condition_on_previous_text=%t batch_size=%d chunk_size=%d", mode, s.vadMethod, invocation.Device, invocation.ComputeType, invocation.SpeechRegionsOnly, invocation.ConditionOnPreviousText, whisperXBatchSize, whisperXVADChunkSize),
 		"model", model,
 		"language", req.Language,
+		"mode", string(mode),
 	)
 	transcribeStart := time.Now()
 	whisperCmd := exec.CommandContext(ctx, whisperXCommand, invocation.Args...)
@@ -191,7 +205,10 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	return result, nil
 }
 
-func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language string) whisperXInvocation {
+func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language string, mode TranscriptionMode) whisperXInvocation {
+	if mode == "" {
+		mode = TranscriptionModeDefault
+	}
 	device := "cpu"
 	computeType := "int8"
 	if s.cudaEnabled {
@@ -205,6 +222,7 @@ func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language st
 		"--output-dir", outputDir,
 		"--model", model,
 		"--language", language,
+		"--mode", string(mode),
 		"--vad-method", s.vadMethod,
 		"--device", device,
 		"--compute-type", computeType,

@@ -90,7 +90,8 @@ Important feature switches:
 
 - `subtitles.enabled` enables the subtitle stage. `subtitles.mux_into_mkv`
   controls whether generated SRTs are muxed into MKV output.
-- `subtitles.opensubtitles_enabled` controls forced-subtitle lookup. TV episode
+- `subtitles.opensubtitles_enabled` controls explicit OpenSubtitles lookups from
+  `spindle gensubtitle` for regular or forced subtitles. TV episode
   identification uses the OpenSubtitles API key directly and is not gated by
   this switch.
 - `rip_cache.enabled` enables automatic raw-rip restore/store during normal

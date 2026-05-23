@@ -3,6 +3,7 @@ package subtitle
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +118,71 @@ func TestFilterWhisperXJSON_DoesNotMutateCanonicalSource(t *testing.T) {
 	}
 	if string(srcData) != original {
 		t.Fatalf("canonical source mutated: got %s", string(srcData))
+	}
+}
+
+func TestFormatForcedSubtitleFromCanonical_FiltersForeignSegments(t *testing.T) {
+	origRun := runStableTS
+	t.Cleanup(func() { runStableTS = origRun })
+
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "audio.json")
+	payload := whisperXPayload{
+		Language: "en",
+		Segments: []map[string]any{
+			{"start": 1.0, "end": 2.0, "text": "Hello there", "source_language": "en", "task": "transcribe", "foreign": false},
+			{"start": 3.0, "end": 4.0, "text": "Where is the package?", "source_language": "fr", "target_language": "en", "task": "translate", "foreign": true},
+		},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runStableTS = func(ctx context.Context, args []string) ([]byte, error) {
+		inputData, err := os.ReadFile(args[5])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(inputData), "Hello there") || !strings.Contains(string(inputData), "Where is the package?") {
+			t.Fatalf("forced payload not filtered correctly: %s", string(inputData))
+		}
+		if err := os.WriteFile(args[6], []byte("1\n00:00:03,000 --> 00:00:04,000\nWhere is the package?\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return []byte("ok"), nil
+	}
+
+	result, err := formatForcedSubtitleFromCanonical(context.Background(), transcriptionArtifacts{JSONPath: jsonPath}, filepath.Join(dir, "work"), filepath.Join(dir, "Movie.en.forced.srt"), 120, "en")
+	if err != nil {
+		t.Fatalf("formatForcedSubtitleFromCanonical() error = %v", err)
+	}
+	if result.Path == "" || result.Segments != 1 || fmt.Sprint(result.Languages) != "[fr]" || result.Decision != "generated" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestFormatForcedSubtitleFromCanonical_NoneDetected(t *testing.T) {
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "audio.json")
+	payload := whisperXPayload{Language: "en", Segments: []map[string]any{{"start": 1.0, "end": 2.0, "text": "Hello there"}}}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := formatForcedSubtitleFromCanonical(context.Background(), transcriptionArtifacts{JSONPath: jsonPath}, filepath.Join(dir, "work"), filepath.Join(dir, "Movie.en.forced.srt"), 120, "en")
+	if err != nil {
+		t.Fatalf("formatForcedSubtitleFromCanonical() error = %v", err)
+	}
+	if result.Path != "" || result.Segments != 0 || result.Decision != "none_detected" {
+		t.Fatalf("result = %+v", result)
 	}
 }
 

@@ -308,13 +308,14 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
    - Check `disposition.forced` for forced subtitles
    - **Check labeling**: regular subs have language name in title, forced have "(Forced)"
 
-2. **Forced subtitle search outcome** (from `logs.decisions`):
-   - Find `decision_type=forced_subtitle_download` with `decision_result=not_found`
-   - Zero candidates from OpenSubtitles is **the norm** — do not report this at all (not even as INFO)
-   - Only report as **WARNING** if: (a) candidates were returned but all rejected, OR (b) you know the title has significant foreign language dialogue (e.g., Inglourious Basterds, Kill Bill, Narcos) making the absence a real gap
-   - `decision_type=forced_subtitle_ranking` shows the selected candidate's download count and total candidates considered
-   - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config
-   - `decision_type=transcription_cache` shows whether WhisperX reused a cached transcription
+2. **Forced subtitle outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `logs.decisions`):
+   - Treat forced subtitles as source-aware. `forced_source=whisperx` means audio-derived translated foreign dialogue; `forced_source=opensubtitles` means authored OpenSubtitles output; `forced_source=none` means no forced output was requested or produced.
+   - For WhisperX-derived forced subtitles, check `forced_segments`, `forced_languages`, `forced_subtitle_path`, and media subtitle streams. Regular subtitles should include the translated foreign cues; the forced track should contain only those cues.
+   - `decision_type=forced_subtitle` with `decision_result=none_detected` after a MakeMKV forced candidate is not automatically a defect. MakeMKV forced-only candidates can be empty; only report a problem if external/title knowledge shows significant foreign dialogue should exist.
+   - For explicit OpenSubtitles forced lookup, zero forced candidates is usually normal. Do not report it unless candidates were returned but all rejected, or you know the title has significant foreign-language dialogue (e.g. Inglourious Basterds, Kill Bill, Narcos).
+   - `decision_type=forced_subtitle_ranking` shows the selected OpenSubtitles candidate's download count and total candidates considered.
+   - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
+   - `decision_type=transcription_cache` shows whether WhisperX reused a cached transcription.
 
 3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
    - Check for `status: "failed"` entries with `error_msg`
@@ -362,7 +363,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
 | SRT validation review/failure | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review` or `failed`; `review_issues`/`severe_issues` populated; review routing present | Malformed or low-quality subtitles requiring action |
 | Subtitle duration mismatch | Subtitles | Subtitle stream duration vs video duration delta > 10 minutes | WhisperX timing issue |
-| Forced subtitle not found | Subtitles | `logs.decisions` with `decision_result=not_found`, zero candidates | Do not report — this is the norm |
+| Forced subtitle not found | Subtitles | `logs.decisions` with `decision_result=none_available` or `none_detected`, zero candidates/cues | Do not report by default — this is normal unless the title is known to require forced subtitles |
 | Forced subtitle candidates rejected | Subtitles | Candidates returned but all rejected during ranking | Filtering or scoring problem |
 | Subtitles not muxed | Subtitles | No subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load |
 | Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Jellyfin display issue |

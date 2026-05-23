@@ -194,6 +194,8 @@ func newGensubtitleCmd() *cobra.Command {
 		workDir         string
 		fetchForced     bool
 		external        bool
+		regularSource   string
+		forcedSource    string
 		forcedTMDBID    int
 		forcedMediaType string
 		forcedSeason    int
@@ -203,7 +205,7 @@ func newGensubtitleCmd() *cobra.Command {
 		Use:   "gensubtitle <encoded-file>",
 		Short: "Create subtitles for an encoded media file",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			file := args[0]
 			if _, err := os.Stat(file); err != nil {
 				return fmt.Errorf("file not found: %s", file)
@@ -244,23 +246,41 @@ func newGensubtitleCmd() *cobra.Command {
 				cmdLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 			}
 
-			forcedMeta := standaloneSubtitleMetadata{}
-			if fetchForced && cfg.Subtitles.OpenSubtitlesEnabled {
-				forcedMeta = resolveStandaloneSubtitleMetadata(ctx, cfg, cmdLogger, file, standaloneSubtitleOptions{
+			regularSubtitleSource := normalizeStandaloneSubtitleSource(regularSource, "whisperx")
+			forcedSubtitleSource := normalizeStandaloneSubtitleSource(forcedSource, "none")
+			if fetchForced && !cmd.Flags().Changed("forced-source") {
+				forcedSubtitleSource = "opensubtitles"
+			}
+			if err := validateStandaloneSubtitleSource("regular-source", regularSubtitleSource); err != nil {
+				return err
+			}
+			if err := validateStandaloneSubtitleSource("forced-source", forcedSubtitleSource); err != nil {
+				return err
+			}
+			if regularSubtitleSource == "none" && forcedSubtitleSource == "none" {
+				return fmt.Errorf("nothing to do: regular-source and forced-source are both none")
+			}
+
+			meta := standaloneSubtitleMetadata{}
+			if regularSubtitleSource == "opensubtitles" || forcedSubtitleSource == "opensubtitles" {
+				meta = resolveStandaloneSubtitleMetadata(ctx, cfg, cmdLogger, file, standaloneSubtitleOptions{
 					TMDBID:    forcedTMDBID,
 					MediaType: forcedMediaType,
 					Season:    forcedSeason,
 					Episode:   forcedEpisode,
 				})
 				if flagVerbose {
-					fmt.Printf("  %s %s", labelStyle("Title:   "), forcedMeta.Title)
-					if forcedMeta.Year != "" {
-						fmt.Printf(" (%s)", forcedMeta.Year)
+					fmt.Printf("  %s %s", labelStyle("Title:   "), meta.Title)
+					if meta.Year != "" {
+						fmt.Printf(" (%s)", meta.Year)
 					}
-					if forcedMeta.TMDBID > 0 {
-						fmt.Printf(" [TMDB %d]", forcedMeta.TMDBID)
+					if meta.TMDBID > 0 {
+						fmt.Printf(" [TMDB %d]", meta.TMDBID)
 					}
 					fmt.Println()
+				}
+				if meta.TMDBID == 0 {
+					return fmt.Errorf("OpenSubtitles source requested but no TMDB ID is available; pass --tmdb-id")
 				}
 			}
 
@@ -275,119 +295,167 @@ func newGensubtitleCmd() *cobra.Command {
 
 			fmt.Printf("Preparing subtitles for %s...\n", filepath.Base(file))
 
-			// Verbose: show WhisperX config before transcription.
-			if flagVerbose {
-				model, device, vad := svc.Config()
-				fmt.Printf("  %s %s\n", labelStyle("Model:   "), model)
-				fmt.Printf("  %s %s\n", labelStyle("Device:  "), device)
-				fmt.Printf("  %s %s\n", labelStyle("VAD:     "), vad)
-				fmt.Printf("  %s en\n", labelStyle("Language:"))
+			var result *subtitle.GenerateDisplaySubtitleResult
+			displayPath := ""
+			selectedLanguage := firstStandaloneSubtitleLanguage(cfg.Subtitles.OpenSubtitlesLanguages)
+			if regularSubtitleSource == "whisperx" || forcedSubtitleSource == "whisperx" {
+				// Verbose: show WhisperX config before transcription.
+				if flagVerbose {
+					model, device, vad := svc.Config()
+					fmt.Printf("  %s %s\n", labelStyle("Model:   "), model)
+					fmt.Printf("  %s %s\n", labelStyle("Device:  "), device)
+					fmt.Printf("  %s %s\n", labelStyle("VAD:     "), vad)
+					fmt.Printf("  %s en\n", labelStyle("Language:"))
+				}
+
+				var formatStart time.Time
+				var err error
+				result, err = subtitle.GenerateDisplaySubtitle(ctx, subtitle.GenerateDisplaySubtitleRequest{
+					VideoPath:       file,
+					DisplayBasePath: filepath.Join(workDir, filepath.Base(file)),
+					WorkDir:         workDir,
+					Language:        "en",
+					GenerateForced:  forcedSubtitleSource == "whisperx",
+					Transcriber:     svc,
+					// Progress callback for phase output. Keep each progress event on its
+					// own line so structured logs emitted by dependencies do not visually
+					// collide with inline CLI status text.
+					Progress: func(phase transcription.Phase, elapsed time.Duration) {
+						switch {
+						case phase == transcription.PhaseExtract && elapsed == 0:
+							fmt.Println("  Extracting audio...")
+						case phase == transcription.PhaseExtract && elapsed > 0:
+							fmt.Printf("  Extracting audio %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
+						case phase == transcription.PhaseTranscribe && elapsed == 0:
+							fmt.Println("  Running WhisperX...")
+						case phase == transcription.PhaseTranscribe && elapsed > 0:
+							fmt.Printf("  Running WhisperX %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
+						}
+					},
+					OnAudioSelected: func(selectedAudio transcription.SelectedAudio) {
+						selectedLanguage = selectedAudio.Language
+						if flagVerbose {
+							fmt.Printf("  %s %s (stream 0:a:%d)\n", labelStyle("Audio:   "), selectedAudio.Label, selectedAudio.Index)
+						}
+					},
+					OnTranscriptionComplete: func(transcript *transcription.TranscribeResult) {
+						fmt.Printf("Canonical transcript ready: %d segments", transcript.Segments)
+						if transcript.Duration > 0 {
+							fmt.Printf(", %s", formatContentDuration(transcript.Duration))
+						}
+						fmt.Println()
+					},
+					OnFormattingStart: func() {
+						fmt.Print("  Formatting subtitles...")
+						formatStart = time.Now()
+					},
+					OnFormattingComplete: func(formatted subtitle.FormatResult) {
+						fmt.Printf("%s (%d -> %d segments, split %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
+					},
+				})
+				if err != nil {
+					return standaloneDisplaySubtitleError(err)
+				}
+				if regularSubtitleSource == "whisperx" {
+					displayPath = result.Formatting.DisplayPath
+				}
 			}
 
-			var formatStart time.Time
-			result, err := subtitle.GenerateDisplaySubtitle(ctx, subtitle.GenerateDisplaySubtitleRequest{
-				VideoPath:       file,
-				DisplayBasePath: filepath.Join(workDir, filepath.Base(file)),
-				WorkDir:         workDir,
-				Language:        "en",
-				Transcriber:     svc,
-				// Progress callback for phase output. Keep each progress event on its
-				// own line so structured logs emitted by dependencies do not visually
-				// collide with inline CLI status text.
-				Progress: func(phase transcription.Phase, elapsed time.Duration) {
-					switch {
-					case phase == transcription.PhaseExtract && elapsed == 0:
-						fmt.Println("  Extracting audio...")
-					case phase == transcription.PhaseExtract && elapsed > 0:
-						fmt.Printf("  Extracting audio %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
-					case phase == transcription.PhaseTranscribe && elapsed == 0:
-						fmt.Println("  Running WhisperX...")
-					case phase == transcription.PhaseTranscribe && elapsed > 0:
-						fmt.Printf("  Running WhisperX %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
-					}
-				},
-				OnAudioSelected: func(selectedAudio transcription.SelectedAudio) {
-					if flagVerbose {
-						fmt.Printf("  %s %s (stream 0:a:%d)\n", labelStyle("Audio:   "), selectedAudio.Label, selectedAudio.Index)
-					}
-				},
-				OnTranscriptionComplete: func(transcript *transcription.TranscribeResult) {
-					fmt.Printf("Canonical transcript ready: %d segments", transcript.Segments)
-					if transcript.Duration > 0 {
-						fmt.Printf(", %s", formatContentDuration(transcript.Duration))
-					}
-					fmt.Println()
-				},
-				OnFormattingStart: func() {
-					fmt.Print("  Formatting subtitles...")
-					formatStart = time.Now()
-				},
-				OnFormattingComplete: func(formatted subtitle.FormatResult) {
-					fmt.Printf("%s (%d -> %d segments, split %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
-				},
-			})
-			if err != nil {
-				return standaloneDisplaySubtitleError(err)
-			}
+			finalSidecarPath := subtitle.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), selectedLanguage)
 
-			displayPath := result.Formatting.DisplayPath
-			finalSidecarPath := subtitle.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), result.SelectedAudio.Language)
+			if regularSubtitleSource == "opensubtitles" {
+				regularVideoPath := filepath.Join(workDir, filepath.Base(file))
+				if sidecarMode {
+					regularVideoPath = filepath.Join(output, filepath.Base(file))
+				}
+				regular, err := fetchStandaloneRegularSubtitle(ctx, cmdLogger, cfg, regularVideoPath, selectedLanguage, meta)
+				if err != nil {
+					return err
+				}
+				displayPath = regular.Path
+				if displayPath == "" {
+					return fmt.Errorf("regular OpenSubtitles lookup did not produce subtitles: %s", regular.Decision)
+				}
+				fmt.Printf("Regular subtitle ready: %s\n", displayPath)
+			}
 
 			forcedPath := ""
-			if fetchForced {
-				switch {
-				case !cfg.Subtitles.OpenSubtitlesEnabled:
-					fmt.Println("Forced subtitle search skipped: opensubtitles_enabled is false")
-				case forcedMeta.TMDBID == 0:
-					fmt.Println("Forced subtitle search skipped: no TMDB ID available")
-				default:
-					forcedVideoPath := filepath.Join(workDir, filepath.Base(file))
-					if sidecarMode {
-						forcedVideoPath = filepath.Join(output, filepath.Base(file))
-					}
-					forced, err := fetchStandaloneForcedSubtitle(ctx, cmdLogger, cfg, forcedVideoPath, result.SelectedAudio.Language, forcedMeta)
-					if err != nil {
-						return err
-					}
-					forcedPath = forced.Path
-					if forcedPath != "" {
-						fmt.Printf("Forced subtitle ready: %s\n", forcedPath)
-					} else if forced.Decision == "none_available" {
-						fmt.Println("Forced subtitle search completed: no forced subtitle found")
-					} else if strings.HasPrefix(forced.Decision, "error:") {
-						fmt.Printf("Forced subtitle search failed: %s\n", strings.TrimPrefix(forced.Decision, "error:"))
-					}
+			switch forcedSubtitleSource {
+			case "whisperx":
+				if result != nil {
+					forcedPath = result.ForcedPath
 				}
+				if forcedPath != "" {
+					fmt.Printf("Forced subtitle ready: %s\n", forcedPath)
+				} else {
+					fmt.Println("Forced subtitle generation completed: no foreign dialogue detected")
+				}
+			case "opensubtitles":
+				forcedVideoPath := filepath.Join(workDir, filepath.Base(file))
+				if sidecarMode {
+					forcedVideoPath = filepath.Join(output, filepath.Base(file))
+				}
+				forced, err := fetchStandaloneForcedSubtitle(ctx, cmdLogger, cfg, forcedVideoPath, selectedLanguage, meta)
+				if err != nil {
+					return err
+				}
+				forcedPath = forced.Path
+				if forcedPath != "" {
+					fmt.Printf("Forced subtitle ready: %s\n", forcedPath)
+				} else if forced.Decision == "none_available" {
+					fmt.Println("Forced subtitle search completed: no forced subtitle found")
+				} else if strings.HasPrefix(forced.Decision, "error:") {
+					fmt.Printf("Forced subtitle search failed: %s\n", strings.TrimPrefix(forced.Decision, "error:"))
+				}
+			}
+
+			if displayPath == "" && forcedPath == "" {
+				return fmt.Errorf("no subtitles produced")
 			}
 
 			if sidecarMode {
-				data, err := os.ReadFile(displayPath)
-				if err != nil {
-					return fmt.Errorf("read formatted srt: %w", err)
+				if displayPath != "" && regularSubtitleSource == "whisperx" {
+					data, err := os.ReadFile(displayPath)
+					if err != nil {
+						return fmt.Errorf("read formatted srt: %w", err)
+					}
+					if err := os.WriteFile(finalSidecarPath, data, 0o644); err != nil {
+						return fmt.Errorf("write formatted srt: %w", err)
+					}
+					displayPath = finalSidecarPath
 				}
-				if err := os.WriteFile(finalSidecarPath, data, 0o644); err != nil {
-					return fmt.Errorf("write formatted srt: %w", err)
+				if forcedPath != "" && forcedSubtitleSource == "whisperx" {
+					finalForcedPath := subtitle.ForcedSubtitlePath(filepath.Join(output, filepath.Base(file)), selectedLanguage)
+					data, err := os.ReadFile(forcedPath)
+					if err != nil {
+						return fmt.Errorf("read forced srt: %w", err)
+					}
+					if err := os.WriteFile(finalForcedPath, data, 0o644); err != nil {
+						return fmt.Errorf("write forced srt: %w", err)
+					}
+					forcedPath = finalForcedPath
 				}
-				fmt.Printf("Saved sidecar: %s\n", finalSidecarPath)
+				if displayPath != "" {
+					fmt.Printf("Saved sidecar: %s\n", displayPath)
+				}
 				if forcedPath != "" {
 					fmt.Printf("Saved forced sidecar: %s\n", forcedPath)
 				}
 			} else {
 				if subtitle.MKVHasSubtitleTrack(ctx, file) {
-					if forcedPath != "" {
-						fmt.Print("Replacing existing subtitle tracks...")
-					} else {
-						fmt.Print("Replacing existing subtitle track...")
-					}
-				} else if forcedPath != "" {
+					fmt.Print("Replacing existing subtitle tracks...")
+				} else if displayPath != "" && forcedPath != "" {
 					fmt.Print("Muxing subtitles into MKV...")
 				} else {
 					fmt.Print("Muxing subtitle into MKV...")
 				}
 
-				tracks := []subtitle.MuxTrack{{Path: displayPath, Language: result.SelectedAudio.Language}}
+				tracks := make([]subtitle.MuxTrack, 0, 2)
+				if displayPath != "" {
+					tracks = append(tracks, subtitle.MuxTrack{Path: displayPath, Language: selectedLanguage})
+				}
 				if forcedPath != "" {
-					tracks = append(tracks, subtitle.MuxTrack{Path: forcedPath, Language: result.SelectedAudio.Language, Forced: true})
+					tracks = append(tracks, subtitle.MuxTrack{Path: forcedPath, Language: selectedLanguage, Forced: true})
 				}
 				if _, err := subtitle.MuxSubtitleTracks(ctx, subtitle.MuxRequest{VideoPath: file, OutputPath: file, Tracks: tracks, ReplaceExisting: true}); err != nil {
 					return err
@@ -400,8 +468,10 @@ func newGensubtitleCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output directory")
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory")
-	cmd.Flags().BoolVar(&fetchForced, "fetch-forced", false, "Also fetch forced subs from OpenSubtitles")
-	cmd.Flags().IntVar(&forcedTMDBID, "tmdb-id", 0, "TMDB ID to use for standalone forced subtitle lookup")
+	cmd.Flags().StringVar(&regularSource, "regular-source", "whisperx", "Regular subtitle source: whisperx, opensubtitles, or none")
+	cmd.Flags().StringVar(&forcedSource, "forced-source", "none", "Forced subtitle source: whisperx, opensubtitles, or none")
+	cmd.Flags().BoolVar(&fetchForced, "fetch-forced", false, "Also fetch forced subs from OpenSubtitles (alias for --forced-source opensubtitles)")
+	cmd.Flags().IntVar(&forcedTMDBID, "tmdb-id", 0, "TMDB ID to use for standalone OpenSubtitles lookup")
 	cmd.Flags().StringVar(&forcedMediaType, "media-type", "", "Media type for standalone forced subtitle lookup (movie or tv)")
 	cmd.Flags().IntVar(&forcedSeason, "season", 0, "TV season number for standalone forced subtitle lookup")
 	cmd.Flags().IntVar(&forcedEpisode, "episode", 0, "TV episode number for standalone forced subtitle lookup")
@@ -419,7 +489,7 @@ func standaloneDisplaySubtitleError(err error) error {
 		return fmt.Errorf("select primary audio: %w", displayErr.Err)
 	case "transcribe":
 		return fmt.Errorf("transcription: %w", displayErr.Err)
-	case "format subtitle":
+	case "format subtitle", "format forced subtitle":
 		return fmt.Errorf("format subtitles: %w", displayErr.Err)
 	default:
 		return err

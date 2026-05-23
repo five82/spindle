@@ -283,15 +283,20 @@ type SubtitleSummary struct {
 
 // SubtitleResultSummary is the actionable part of one subtitle-generation record.
 type SubtitleResultSummary struct {
-	EpisodeKey            string   `json:"episode_key,omitempty"`
-	Source                string   `json:"source,omitempty"`
-	Language              string   `json:"language,omitempty"`
-	Segments              int      `json:"segments,omitempty"`
-	ValidationResult      string   `json:"validation_result,omitempty"`
-	OpenSubtitlesDecision string   `json:"opensubtitles_decision,omitempty"`
-	ReviewIssues          []string `json:"review_issues,omitempty"`
-	SevereIssues          []string `json:"severe_issues,omitempty"`
-	QCObservations        []string `json:"qc_observations,omitempty"`
+	EpisodeKey             string   `json:"episode_key,omitempty"`
+	Source                 string   `json:"source,omitempty"`
+	Language               string   `json:"language,omitempty"`
+	Segments               int      `json:"segments,omitempty"`
+	RegularSource          string   `json:"regular_source,omitempty"`
+	ForcedSource           string   `json:"forced_source,omitempty"`
+	ForcedSegments         int      `json:"forced_segments,omitempty"`
+	ForcedLanguages        []string `json:"forced_languages,omitempty"`
+	ForcedSubtitleDecision string   `json:"forced_subtitle_decision,omitempty"`
+	ValidationResult       string   `json:"validation_result,omitempty"`
+	OpenSubtitlesDecision  string   `json:"opensubtitles_decision,omitempty"`
+	ReviewIssues           []string `json:"review_issues,omitempty"`
+	SevereIssues           []string `json:"severe_issues,omitempty"`
+	QCObservations         []string `json:"qc_observations,omitempty"`
 }
 
 // RoutingSummary classifies final outputs against configured library/review roots.

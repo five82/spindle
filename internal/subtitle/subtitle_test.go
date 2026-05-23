@@ -292,6 +292,32 @@ func TestRankForcedSubtitleCandidates(t *testing.T) {
 	})
 }
 
+func TestRankRegularSubtitleCandidates(t *testing.T) {
+	mkResult := func(id, lang string, foreign, hi bool, downloads, fileID int) opensubtitles.SubtitleResult {
+		return opensubtitles.SubtitleResult{
+			ID: id,
+			Attributes: opensubtitles.SubtitleAttributes{
+				Language:         lang,
+				Release:          "BluRay",
+				DownloadCount:    downloads,
+				ForeignPartsOnly: foreign,
+				HearingImpaired:  hi,
+				Files:            []opensubtitles.SubtitleFile{{FileID: fileID}},
+			},
+		}
+	}
+
+	results := []opensubtitles.SubtitleResult{
+		mkResult("forced", "en", true, false, 1000, 1),
+		mkResult("hi", "en", false, true, 900, 2),
+		mkResult("full", "en", false, false, 100, 3),
+	}
+	idx, ok := rankRegularSubtitleCandidates(results, []string{"en"})
+	if !ok || idx != 2 {
+		t.Fatalf("rankRegularSubtitleCandidates() = %d, %v; want 2, true", idx, ok)
+	}
+}
+
 func TestResolveSubtitleVideoDuration(t *testing.T) {
 	origInspect := inspectSubtitleMedia
 	t.Cleanup(func() { inspectSubtitleMedia = origInspect })

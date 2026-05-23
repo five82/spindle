@@ -204,6 +204,62 @@ func atoiDefault(value string) int {
 	return n
 }
 
+func normalizeStandaloneSubtitleSource(source, fallback string) string {
+	source = strings.ToLower(strings.TrimSpace(source))
+	if source == "" {
+		return fallback
+	}
+	return source
+}
+
+func validateStandaloneSubtitleSource(flag, source string) error {
+	switch source {
+	case "whisperx", "opensubtitles", "none":
+		return nil
+	default:
+		return fmt.Errorf("invalid %s %q: expected whisperx, opensubtitles, or none", flag, source)
+	}
+}
+
+func firstStandaloneSubtitleLanguage(languages []string) string {
+	for _, lang := range languages {
+		if strings.TrimSpace(lang) != "" {
+			return lang
+		}
+	}
+	return "en"
+}
+
+func standaloneOpenSubtitlesClient(cfg *config.Config, logger *slog.Logger) *opensubtitles.Client {
+	return opensubtitles.New(
+		cfg.Subtitles.OpenSubtitlesAPIKey,
+		cfg.Subtitles.OpenSubtitlesUserAgent,
+		cfg.Subtitles.OpenSubtitlesUserToken,
+		"",
+		logger,
+	)
+}
+
+func fetchStandaloneRegularSubtitle(ctx context.Context, logger *slog.Logger, cfg *config.Config, videoPath, languageCode string, meta standaloneSubtitleMetadata) (subtitle.OpenSubtitlesLookupResult, error) {
+	if meta.TMDBID == 0 {
+		return subtitle.OpenSubtitlesLookupResult{Decision: "skipped:no_tmdb_id"}, nil
+	}
+	if cfg == nil || !cfg.Subtitles.OpenSubtitlesEnabled {
+		return subtitle.OpenSubtitlesLookupResult{Decision: "skipped:opensubtitles_disabled"}, nil
+	}
+	if strings.TrimSpace(cfg.Subtitles.OpenSubtitlesAPIKey) == "" {
+		return subtitle.OpenSubtitlesLookupResult{}, fmt.Errorf("regular subtitle lookup requires subtitles.opensubtitles_api_key in config.toml or OPENSUBTITLES_API_KEY")
+	}
+	return subtitle.FetchRegularSubtitle(ctx, logger, cfg, standaloneOpenSubtitlesClient(cfg, logger), subtitle.OpenSubtitlesLookupRequest{
+		VideoPath: videoPath,
+		TMDBID:    meta.TMDBID,
+		Season:    meta.Season,
+		Episode:   meta.Episode,
+		Language:  languageCode,
+		Languages: cfg.Subtitles.OpenSubtitlesLanguages,
+	})
+}
+
 func fetchStandaloneForcedSubtitle(ctx context.Context, logger *slog.Logger, cfg *config.Config, videoPath, languageCode string, meta standaloneSubtitleMetadata) (subtitle.ForcedLookupResult, error) {
 	if meta.TMDBID == 0 {
 		return subtitle.ForcedLookupResult{Decision: "skipped:no_tmdb_id"}, nil
@@ -214,14 +270,7 @@ func fetchStandaloneForcedSubtitle(ctx context.Context, logger *slog.Logger, cfg
 	if strings.TrimSpace(cfg.Subtitles.OpenSubtitlesAPIKey) == "" {
 		return subtitle.ForcedLookupResult{}, fmt.Errorf("forced subtitle lookup requires subtitles.opensubtitles_api_key in config.toml or OPENSUBTITLES_API_KEY")
 	}
-	client := opensubtitles.New(
-		cfg.Subtitles.OpenSubtitlesAPIKey,
-		cfg.Subtitles.OpenSubtitlesUserAgent,
-		cfg.Subtitles.OpenSubtitlesUserToken,
-		"",
-		logger,
-	)
-	return subtitle.FetchForcedSubtitle(ctx, logger, cfg, client, subtitle.ForcedLookupRequest{
+	return subtitle.FetchForcedSubtitle(ctx, logger, cfg, standaloneOpenSubtitlesClient(cfg, logger), subtitle.ForcedLookupRequest{
 		VideoPath: videoPath,
 		TMDBID:    meta.TMDBID,
 		Season:    meta.Season,

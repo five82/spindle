@@ -588,15 +588,20 @@ func computeSubtitleSummary(r *Report) *SubtitleSummary {
 	summary := &SubtitleSummary{SubtitleLabelsCorrect: true}
 	for _, rec := range r.Envelope.Attributes.SubtitleGenerationResults {
 		summary.Results = append(summary.Results, SubtitleResultSummary{
-			EpisodeKey:            rec.EpisodeKey,
-			Source:                rec.Source,
-			Language:              rec.Language,
-			Segments:              rec.Segments,
-			ValidationResult:      rec.ValidationResult,
-			OpenSubtitlesDecision: rec.OpenSubtitlesDecision,
-			ReviewIssues:          rec.ReviewIssues,
-			SevereIssues:          rec.SevereIssues,
-			QCObservations:        rec.QCObservations,
+			EpisodeKey:             rec.EpisodeKey,
+			Source:                 rec.Source,
+			Language:               rec.Language,
+			Segments:               rec.Segments,
+			RegularSource:          rec.RegularSource,
+			ForcedSource:           rec.ForcedSource,
+			ForcedSegments:         rec.ForcedSegments,
+			ForcedLanguages:        rec.ForcedLanguages,
+			ForcedSubtitleDecision: rec.ForcedSubtitleDecision,
+			ValidationResult:       rec.ValidationResult,
+			OpenSubtitlesDecision:  rec.OpenSubtitlesDecision,
+			ReviewIssues:           rec.ReviewIssues,
+			SevereIssues:           rec.SevereIssues,
+			QCObservations:         rec.QCObservations,
 		})
 		switch rec.ValidationResult {
 		case "passed":
