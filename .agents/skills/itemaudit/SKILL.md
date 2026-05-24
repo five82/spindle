@@ -95,7 +95,7 @@ The extraction script should:
 5. **Summarize episode manifest** with confidence scores and episode numbers. If `analysis.episode_stats.placeholder_only` is true and `phase_episode_id` is false, label it clearly as a **placeholder episode inventory**, not a resolved episode manifest.
 6. **Title selection** (movies): Prefer `analysis.title_selection` for selected title, feature-length candidates, and similar runtimes. Fall back to `envelope.titles` only if the summary is absent.
 
-Steps 2/5/6/8 from the old extraction strategy are now pre-computed in `analysis` -- the script reads and formats them rather than computing them from raw data. This approach replaces 10+ sequential extraction calls with 1-2, keeping the analysis equally thorough while significantly reducing gathering overhead.
+Prefer pre-computed `analysis` summaries whenever they exist; compute from raw logs/probes only as a fallback. This keeps the analysis equally thorough while avoiding many narrow extraction passes.
 
 ### Stage Gating
 
@@ -130,8 +130,8 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - Low confidence scores on decisions that were accepted anyway
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
-   - Filter by `decision_type` to find specific categories (commentary, tmdb_confidence, etc.)
-   - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=transcription_cache` (transcription reuse)
+   - Filter by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
+   - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips)
    - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at `logs.path`)
 
 2. **Timing anomalies** (from `logs.stages`):
@@ -145,16 +145,18 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - File sizes that seem wrong for the content
 
 4. **LLM decision review** (filter `logs.decisions` by `decision_type`):
-   - `decision_type=commentary` entries
-   - `decision_type=tmdb_match` entries — verify acceptance thresholds are reasonable
+   - `decision_type=commentary_classification` entries
+   - `decision_type=tmdb_match` and `decision_type=tmdb_match_preference` entries — verify acceptance thresholds are reasonable
    - Evaluate if confidence levels and reasons make sense for the content
 
-5. **TV episode pipeline checks** (TV only, from `logs.decisions` and `logs.warnings`):
-   - `decision_type=episode_identification` entries — check if stage was skipped and why (valid reasons include `movie_content`)
-   - `decision_type=episode_review` with `decision_result=needs_review` — episodeid flagged unresolved episodes
-   - `event_type=contentid_no_references` or `contentid_no_matches` in warnings — soft failures
+5. **TV episode pipeline checks** (TV only, from `logs.decisions`, `logs.warnings`, and stage events):
+   - Stage events with `stage=episode_identification` — verify the stage started/completed or identify where it failed
+   - `decision_type=episode_id_skip` entries — explain legitimate skips for non-TV content
+   - `decision_type=episode_placeholders` — confirm placeholders were created before content ID
+   - `event_type=episode_id_no_transcripts` or item review/error messages about missing references — degraded episode-ID failures
    - `event_type=low_confidence_match` — episodes with `MatchConfidence` below 0.70
    - `decision_type=contentid_matches` — final episode-to-reference matching results; compare `ambiguous_rips`, `decisive_low_similarity_rips`, and `contested_rips`
+   - `decision_type=reference_search` — reference subtitle candidate quality and suspect/fallback selections
    - Verify placeholder keys (`s01_001`) were replaced with resolved keys (`s01e03`) after episodeid
    - **Do not stop at episode-ID quality.** If organizer/review routing is implicated, compare per-episode review state against final destinations.
 
@@ -166,8 +168,9 @@ Analyze the `rip_cache` section from audit-gather output:
 2. **Check metadata**:
    - `disc_title` matches expected content
    - `cached_at`, `title_count`, and `total_bytes` look plausible
-3. **Title selection analysis** (movies only, from `envelope.titles`):
-   - Identify feature-length titles: titles with `chapters > 1` AND `duration > 3600` seconds
+3. **Title selection analysis** (movies only):
+   - Prefer `analysis.title_selection` for candidate counts, selected title, similar runtimes, and selection decision; fall back to `envelope.titles` only when the summary is absent
+   - Feature-length titles are titles with `chapters > 1` AND `duration > 3600` seconds
    - The pipeline uses multi-stage selection (`ChoosePrimaryTitle`), not simply the longest title:
      - **Disney multi-language detection**: when 2+ feature-length 800-series playlists (00800-00899) exist with runtimes within 30 seconds, the pipeline prefers the lowest playlist number (00800.mpls = English). The selected title may be *shorter* than alternatives — this is correct behavior for Disney/Pixar/Marvel/Star Wars multi-language discs where language variants differ only in localized title cards and credits.
      - **Different cuts**: when 800-series playlists differ by >30 seconds, treated as different cuts (theatrical vs director's) and longest is preferred.
@@ -311,7 +314,7 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
 2. **Subtitle generation outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `logs.decisions`):
    - Spindle now generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks and does not fetch OpenSubtitles output subtitles.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
-   - `decision_type=transcription_cache` shows whether WhisperX reused a cached transcription.
+   - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. If transcription timing matters, inspect raw `event_type=transcription_complete` lines in `logs.path`.
    - Treat additional generated subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
 
 3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
@@ -328,7 +331,7 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
 
 Analyze commentary decisions from `logs.decisions` and audio streams from `media[]`:
 
-1. **From logs**: Find `decision_type=commentary` entries in `logs.decisions`
+1. **From logs**: Find `decision_type=commentary_classification`, `commentary_stereo_filter`, `commentary_remapping`, and `commentary_disposition` entries in `logs.decisions`
 2. **Expected behavior**:
    - 2-channel English tracks that aren't stereo downmixes should be candidates
    - High similarity to primary audio = stereo downmix (excluded)
@@ -351,8 +354,8 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 
 | Pattern | Stage | Evidence in Audit-Gather Output | Impact |
 |---------|-------|--------------------------------|--------|
-| Duplicate fingerprint | Identification | `logs.decisions` with `decision_type=duplicate_fingerprint` | Item silently rejected |
-| Low TMDB confidence | Identification | `logs.decisions` with `decision_type=tmdb_confidence`, low score | Wrong title match |
+| Duplicate disc detection | Identification/Disc Monitor | `logs.decisions` with `decision_type=duplicate_detection` | Item rejected or enqueue skipped |
+| TMDB match rejected or weakly accepted | Identification | `logs.decisions` with `decision_type=tmdb_match` and score/threshold details in `decision_reason` | No match or wrong title match |
 | Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
@@ -372,7 +375,6 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Per-episode subtitle failure | Subtitles | `envelope.assets.subtitled[]` with `status: "failed"` | Episode missing subtitles |
 | Cross-episode resolution mismatch | Encoding | Different resolutions across `media[]` entries | Inconsistent quality |
 | Cross-episode audio mismatch | Encoding | Different audio stream counts across `media[]` entries | Inconsistent audio tracks |
-| Transcription cache miss on retry | Subtitles/EpisodeID | `decision_type=transcription_cache` with `decision_result=miss` on re-processed item | Re-transcription wasted GPU time |
 | Fingerprint fallback used | Identification | `decision_type=fingerprint_strategy` with `decision_result=fallback` | Disc type detection degraded |
 | TMDB match rejected | Identification | `decision_type=tmdb_match` with `decision_result=rejected` | No content match found |
 | Validation failed but continued | Encoding | `decision_type=validation_failure_route` with `decision_result=flagged_for_review` | Item routed to review |
@@ -382,20 +384,16 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Commentary disposition applied | Audio Analysis | `decision_type=commentary_disposition` with `decision_result=applied` | Commentary tracks marked in output |
 | KeyDB lookup miss | Identification | `decision_type=keydb_lookup` with `decision_result=miss` | Disc ID not in KeyDB, fallback to title parsing |
 
-### DEBUG-Only Patterns
+### DEBUG/Raw Log Context
 
-These appear in `logs.decisions` only when debug logs are available (`logs.is_debug=true`):
+These details are optional context. Some are parsed into `logs.decisions` when debug logs are available; others require opening the raw file at `logs.path`.
 
-| Pattern | Stage | `decision_type` |
-|---------|-------|-----------------|
-| TMDB candidate scoring | Identification | `tmdb_search` (final selection now visible at INFO as `tmdb_match`) |
-| Placeholder episode creation | Identification | (visible in `envelope.episodes` with `episode=0`) |
-| Audio candidate scoring | Audio Analysis | Individual candidate scores visible only at DEBUG (selection result is INFO) |
-| OpenSubtitles request details | Episode ID | reference search query params and result counts |
-| LLM retry details | Various | individual retry attempt timing |
-| Content ID candidate selection | Episode ID | `contentid_candidates` |
-| Content ID match scores | Episode ID | `contentid_matches` |
-| OpenSubtitles reference search | Episode ID | `opensubtitles_reference_search` |
+| Pattern | Stage | Evidence |
+|---------|-------|----------|
+| TMDB candidate scoring | Identification | DEBUG `decision_type=tmdb_search`; final selection is visible at INFO as `tmdb_match` |
+| TV title filtering | Identification | DEBUG `tv title excluded`; placeholders are visible at INFO as `decision_type=episode_placeholders` |
+| Audio candidate scoring | Audio Analysis | Raw DEBUG `audio candidate scored`; final selection is visible at INFO as `audio_selection` |
+| LLM retry details | Various | Raw logs around the failed/slow decision |
 
 ## Audit Report Format
 

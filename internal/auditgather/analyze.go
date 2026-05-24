@@ -14,6 +14,7 @@ import (
 	"github.com/five82/spindle/internal/contentid"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/language"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 )
@@ -267,29 +268,32 @@ func messagesVary(entries []LogDecision) bool {
 
 func selectNotableDecisions(decisions []LogDecision) []LogDecision {
 	notable := map[string]bool{
-		"tmdb_match":                true,
-		"title_resolution":          true,
-		"title_selection":           true,
-		"file_probe":                true,
-		"crop_detection":            true,
-		"encoding_validation":       true,
-		"validation_failure_route":  true,
-		"audio_selection":           true,
-		"audio_refinement":          true,
-		"commentary_stereo_filter":  true,
-		"commentary_classification": true,
-		"commentary_remapping":      true,
-		"commentary_disposition":    true,
-		"subtitle_formatting":       true,
-		"srt_validation":            true,
-		"source_stage_selection":    true,
-		"episode_identification":    true,
-		"episode_review":            true,
-		"episode_match":             true,
-		"contentid_matches":         true,
-		"asset_mapping":             true,
-		"audio_remux":               true,
-		"transcription_cache":       true,
+		logs.DecisionTMDBMatch:                true,
+		logs.DecisionTMDBMatchPreference:      true,
+		logs.DecisionTitleResolution:          true,
+		logs.DecisionTitleSelection:           true,
+		logs.DecisionFileProbe:                true,
+		logs.DecisionCropDetection:            true,
+		logs.DecisionEncodingValidation:       true,
+		logs.DecisionValidationFailureRoute:   true,
+		logs.DecisionAudioSelection:           true,
+		logs.DecisionAudioRefinement:          true,
+		logs.DecisionCommentaryStereoFilter:   true,
+		logs.DecisionCommentaryClassification: true,
+		logs.DecisionCommentaryRemapping:      true,
+		logs.DecisionCommentaryDisposition:    true,
+		logs.DecisionSubtitleFormatting:       true,
+		logs.DecisionSRTValidation:            true,
+		logs.DecisionSourceStageSelection:     true,
+		logs.DecisionEpisodeIDSkip:            true,
+		logs.DecisionEpisodePlaceholders:      true,
+		logs.DecisionEpisodeMatch:             true,
+		logs.DecisionContentIDCandidates:      true,
+		logs.DecisionContentIDMatches:         true,
+		logs.DecisionReferenceSearch:          true,
+		logs.DecisionTranscriptionAsset:       true,
+		logs.DecisionAssetMapping:             true,
+		logs.DecisionAudioRemux:               true,
 	}
 	out := make([]LogDecision, 0, len(decisions))
 	for _, d := range decisions {
