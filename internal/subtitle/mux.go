@@ -14,45 +14,38 @@ import (
 // MuxTrack describes one SRT track to mux into an MKV.
 type MuxTrack struct {
 	Path, Language string
-	Forced         bool
 }
 
 // MuxRequest describes an MKV subtitle mux operation.
 type MuxRequest struct {
 	VideoPath, OutputPath string
-	Tracks                []MuxTrack
+	Track                 MuxTrack
 	ReplaceExisting       bool
 }
 
-// BuildSubtitleMuxArgs builds mkvmerge arguments for adding subtitle tracks.
-func BuildSubtitleMuxArgs(outputPath, videoPath string, tracks []MuxTrack, replaceExisting bool) []string {
+// BuildSubtitleMuxArgs builds mkvmerge arguments for adding one display subtitle track.
+func BuildSubtitleMuxArgs(outputPath, videoPath string, track MuxTrack, replaceExisting bool) []string {
 	args := []string{"-o", outputPath}
 	if replaceExisting {
 		args = append(args, "--no-subtitles")
 	}
 	args = append(args, videoPath)
-	for _, track := range tracks {
-		lang := language.ToISO3(track.Language)
-		if lang == "" || lang == "und" {
-			lang = "eng"
-		}
-		name := language.DisplayName(track.Language)
-		if strings.TrimSpace(name) == "" {
-			name = "English"
-		}
-		defaultFlag, forcedFlag := "0:no", "0:no"
-		if track.Forced {
-			name += " (Forced)"
-			defaultFlag, forcedFlag = "0:yes", "0:yes"
-		}
-		args = append(args, "--language", "0:"+lang, "--track-name", "0:"+name,
-			"--default-track-flag", defaultFlag, "--forced-track", forcedFlag, track.Path)
+
+	lang := language.ToISO3(track.Language)
+	if lang == "" || lang == "und" {
+		lang = "eng"
 	}
+	name := language.DisplayName(track.Language)
+	if strings.TrimSpace(name) == "" {
+		name = "English"
+	}
+	args = append(args, "--language", "0:"+lang, "--track-name", "0:"+name,
+		"--default-track-flag", "0:no", "--forced-track", "0:no", track.Path)
 	return args
 }
 
-// MuxSubtitleTracks runs mkvmerge and atomically replaces OutputPath.
-func MuxSubtitleTracks(ctx context.Context, req MuxRequest) (string, error) {
+// MuxSubtitleTrack runs mkvmerge and atomically replaces OutputPath.
+func MuxSubtitleTrack(ctx context.Context, req MuxRequest) (string, error) {
 	outputPath := req.OutputPath
 	if strings.TrimSpace(outputPath) == "" {
 		outputPath = req.VideoPath
@@ -66,7 +59,7 @@ func MuxSubtitleTracks(ctx context.Context, req MuxRequest) (string, error) {
 
 	ext := filepath.Ext(outputPath)
 	tmpPath := strings.TrimSuffix(outputPath, ext) + ".tmp" + ext
-	cmd := exec.CommandContext(ctx, "mkvmerge", BuildSubtitleMuxArgs(tmpPath, req.VideoPath, req.Tracks, req.ReplaceExisting)...)
+	cmd := exec.CommandContext(ctx, "mkvmerge", BuildSubtitleMuxArgs(tmpPath, req.VideoPath, req.Track, req.ReplaceExisting)...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("mkvmerge: %w: %s", err, output)

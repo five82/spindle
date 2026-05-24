@@ -80,72 +80,6 @@ func formatSubtitleFromCanonical(ctx context.Context, canonical transcriptionArt
 	}, nil
 }
 
-func formatForcedSubtitleFromCanonical(ctx context.Context, canonical transcriptionArtifacts, workDir, forcedPath string, videoSeconds float64, subtitleLanguage string) (forcedFormatResult, error) {
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return forcedFormatResult{}, fmt.Errorf("create subtitle work dir: %w", err)
-	}
-	payload, field, segments, err := loadWhisperXPayload(canonical.JSONPath)
-	if err != nil {
-		return forcedFormatResult{}, err
-	}
-	filtered, _, err := filterWhisperXSegments(segments, videoSeconds)
-	if err != nil {
-		return forcedFormatResult{}, err
-	}
-	forcedSegments := make([]map[string]any, 0)
-	languageSet := make(map[string]bool)
-	for _, segment := range filtered {
-		if !isForeignTranslatedSegment(segment) {
-			continue
-		}
-		forcedSegments = append(forcedSegments, segment)
-		if lang, _ := segment["source_language"].(string); lang != "" {
-			lang = strings.ToLower(strings.TrimSpace(lang))
-			if lang != "" {
-				languageSet[lang] = true
-			}
-		}
-	}
-	if len(forcedSegments) == 0 {
-		return forcedFormatResult{Decision: "none_detected"}, nil
-	}
-	formatterSegments := stableTSSegments(forcedSegments)
-	switch field {
-	case "segments":
-		payload.Segments = formatterSegments
-		payload.SpeechSegments = nil
-	case "speech_segments":
-		payload.SpeechSegments = formatterSegments
-		payload.Segments = nil
-	default:
-		return forcedFormatResult{}, fmt.Errorf("unsupported whisperx segment field %q", field)
-	}
-	forcedJSONPath := filepath.Join(workDir, "audio.forced.json")
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return forcedFormatResult{}, fmt.Errorf("marshal forced whisperx payload: %w", err)
-	}
-	if err := os.WriteFile(forcedJSONPath, data, 0o644); err != nil {
-		return forcedFormatResult{}, fmt.Errorf("write forced whisperx payload: %w", err)
-	}
-	if err := runStableTSFormatter(ctx, forcedJSONPath, forcedPath, subtitleLanguage); err != nil {
-		return forcedFormatResult{}, err
-	}
-	postStats, err := postProcessDisplaySRT(forcedPath, videoSeconds)
-	if err != nil {
-		return forcedFormatResult{}, err
-	}
-	return forcedFormatResult{
-		Path:      forcedPath,
-		Segments:  len(forcedSegments),
-		Languages: sortedStringSet(languageSet),
-		SplitCues: postStats.SplitCues,
-		Wrapped:   postStats.WrappedCues,
-		Retimed:   postStats.RetimedCues,
-		Decision:  "generated",
-	}, nil
-}
-
 type transcriptionArtifacts struct {
 	JSONPath string
 }
@@ -160,16 +94,6 @@ type formatResult struct {
 	WrappedCues                int
 	RetimedCues                int
 	FormatterDecision          string
-}
-
-type forcedFormatResult struct {
-	Path      string
-	Segments  int
-	Languages []string
-	SplitCues int
-	Wrapped   int
-	Retimed   int
-	Decision  string
 }
 
 // filterStats summarizes derived-subtitle filtering decisions.
@@ -193,11 +117,6 @@ type FormatResult struct {
 // DisplaySubtitlePath returns the standard sidecar subtitle path for a video.
 func DisplaySubtitlePath(videoPath, subtitleLanguage string) string {
 	return displaySubtitlePath(videoPath, subtitleLanguage)
-}
-
-// ForcedSubtitlePath returns the standard forced sidecar subtitle path for a video.
-func ForcedSubtitlePath(videoPath, subtitleLanguage string) string {
-	return displayForcedSubtitlePath(videoPath, subtitleLanguage)
 }
 
 func runStableTSFormatter(ctx context.Context, jsonPath, outputPath, subtitleLanguage string) error {
@@ -368,33 +287,6 @@ func stableTSWords(value any) []map[string]any {
 	return cleaned
 }
 
-func isForeignTranslatedSegment(segment map[string]any) bool {
-	foreign, _ := segment["foreign"].(bool)
-	if foreign {
-		return true
-	}
-	task, _ := segment["task"].(string)
-	if !strings.EqualFold(strings.TrimSpace(task), "translate") {
-		return false
-	}
-	sourceLanguage, _ := segment["source_language"].(string)
-	sourceLanguage = strings.ToLower(strings.TrimSpace(strings.SplitN(sourceLanguage, "-", 2)[0]))
-	return sourceLanguage != "" && sourceLanguage != "en"
-}
-
-func sortedStringSet(set map[string]bool) []string {
-	values := make([]string, 0, len(set))
-	for value := range set {
-		values = append(values, value)
-	}
-	for i := 1; i < len(values); i++ {
-		for j := i; j > 0 && values[j] < values[j-1]; j-- {
-			values[j], values[j-1] = values[j-1], values[j]
-		}
-	}
-	return values
-}
-
 func cueFromSegment(index int, segment map[string]any) (indexedTimedCue, error) {
 	start, ok := floatValue(segment["start"])
 	if !ok {
@@ -502,13 +394,4 @@ func displaySubtitlePath(videoPath, subtitleLanguage string) string {
 		lang = "en"
 	}
 	return base + "." + lang + ".srt"
-}
-
-func displayForcedSubtitlePath(videoPath, subtitleLanguage string) string {
-	base := strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
-	lang := language.ToISO2(subtitleLanguage)
-	if lang == "" {
-		lang = "en"
-	}
-	return base + "." + lang + ".forced.srt"
 }

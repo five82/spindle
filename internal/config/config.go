@@ -79,7 +79,6 @@ type SubtitlesConfig struct {
 	WhisperXCUDAEnabled    bool     `toml:"whisperx_cuda_enabled"`
 	WhisperXVADMethod      string   `toml:"whisperx_vad_method"`
 	WhisperXHFToken        string   `toml:"whisperx_hf_token"`
-	OpenSubtitlesEnabled   bool     `toml:"opensubtitles_enabled"`
 	OpenSubtitlesAPIKey    string   `toml:"opensubtitles_api_key"`
 	OpenSubtitlesUserAgent string   `toml:"opensubtitles_user_agent"`
 	OpenSubtitlesUserToken string   `toml:"opensubtitles_user_token"`

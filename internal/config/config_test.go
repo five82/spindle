@@ -232,23 +232,6 @@ func TestValidateSubtitlesHFToken(t *testing.T) {
 	}
 }
 
-func TestValidateOpenSubtitlesAPIKey(t *testing.T) {
-	cfg := defaultConfig()
-	cfg.TMDB.APIKey = "test-key"
-	cfg.Paths.StagingDir = "/tmp/staging"
-	cfg.Paths.StateDir = "/tmp/state"
-	cfg.Paths.ReviewDir = "/tmp/review"
-	cfg.Subtitles.OpenSubtitlesEnabled = true
-
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("Validate should fail when opensubtitles enabled without api_key")
-	}
-	if !strings.Contains(err.Error(), "opensubtitles_api_key") {
-		t.Errorf("expected error about opensubtitles_api_key, got: %s", err.Error())
-	}
-}
-
 func TestEnsureDirectoriesCreates(t *testing.T) {
 	dir := t.TempDir()
 

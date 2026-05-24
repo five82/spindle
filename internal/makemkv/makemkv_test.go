@@ -250,81 +250,6 @@ func TestNormalizeDevice(t *testing.T) {
 	}
 }
 
-func TestHasForcedEnglishSubtitles(t *testing.T) {
-	tests := []struct {
-		name string
-		info *DiscInfo
-		want bool
-	}{
-		{
-			name: "forced english subtitle",
-			info: &DiscInfo{Titles: []TitleInfo{{
-				ID: 0,
-				Tracks: []Track{
-					{StreamID: 0, Type: TrackTypeVideo, Name: "Video"},
-					{StreamID: 1, Type: TrackTypeAudio, Language: "eng", Name: "Audio"},
-					{StreamID: 2, Type: TrackTypeSubtitle, Language: "eng", Name: "PGS English (forced only)"},
-				},
-			}}},
-			want: true,
-		},
-		{
-			name: "forced non-english subtitle",
-			info: &DiscInfo{Titles: []TitleInfo{{
-				ID: 0,
-				Tracks: []Track{
-					{StreamID: 0, Type: TrackTypeSubtitle, Language: "spa", Name: "PGS Spanish (forced only)"},
-				},
-			}}},
-			want: false,
-		},
-		{
-			name: "forced subtitle in second title",
-			info: &DiscInfo{Titles: []TitleInfo{
-				{ID: 0, Tracks: []Track{{StreamID: 0, Type: TrackTypeVideo, Name: "Video"}}},
-				{ID: 1, Tracks: []Track{
-					{StreamID: 0, Type: TrackTypeVideo, Name: "Video"},
-					{StreamID: 1, Type: TrackTypeSubtitle, Language: "eng", Name: "Subtitles (forced only)"},
-				}},
-			}},
-			want: true,
-		},
-		{
-			name: "no forced subtitles",
-			info: &DiscInfo{Titles: []TitleInfo{{
-				ID: 0,
-				Tracks: []Track{
-					{StreamID: 0, Type: TrackTypeVideo, Name: "Video"},
-					{StreamID: 1, Type: TrackTypeSubtitle, Language: "eng", Name: "PGS English"},
-				},
-			}}},
-			want: false,
-		},
-		{
-			name: "no subtitle tracks",
-			info: &DiscInfo{Titles: []TitleInfo{{
-				ID:     0,
-				Tracks: []Track{{StreamID: 0, Type: TrackTypeVideo, Name: "Video"}},
-			}}},
-			want: false,
-		},
-		{
-			name: "nil disc info",
-			info: nil,
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.info.HasForcedEnglishSubtitles()
-			if got != tt.want {
-				t.Errorf("HasForcedEnglishSubtitles() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestParseRobotOutputSINFO(t *testing.T) {
 	lines := []string{
 		`TINFO:0,2,0,"Main Feature"`,
@@ -382,15 +307,8 @@ func TestParseRobotOutputSINFO(t *testing.T) {
 	if sub.Type != TrackTypeSubtitle {
 		t.Errorf("track 2 Type = %q, want %q", sub.Type, TrackTypeSubtitle)
 	}
-	if !sub.IsForced() {
-		t.Error("track 2 IsForced() = false, want true")
-	}
 	if sub.Name != "PGS English (forced only)" {
 		t.Errorf("track 2 Name = %q, want %q", sub.Name, "PGS English (forced only)")
-	}
-
-	if !info.HasForcedEnglishSubtitles() {
-		t.Error("HasForcedEnglishSubtitles() = false, want true")
 	}
 }
 

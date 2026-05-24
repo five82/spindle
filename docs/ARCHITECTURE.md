@@ -35,7 +35,7 @@ Queue items move through these stages in order:
 | `episode_identification` | Map TV ripped titles to canonical episodes | Skipped for movies and non-TV items |
 | `encoding` | Encode ripped media to AV1 through Drapto | Reloads `[encoding]` config before each encode and persists telemetry snapshots |
 | `audio_analysis` | Refine audio and optionally detect commentary | Commentary detection is controlled by config and uses WhisperX/LLM when available |
-| `subtitling` | Optionally generate display SRTs and forced SRTs | Final Jellyfin-facing subtitles are SRT; muxing into MKV is configurable |
+| `subtitling` | Optionally generate display SRTs | Final Jellyfin-facing subtitles are SRT; muxing into MKV is configurable |
 | `organizing` | Copy/move outputs to library or review and refresh Jellyfin | Cleans staging after successful routing |
 | `completed` | Terminal success state | Queue item can be cleared |
 | `failed` | Terminal failure state until retry/clear | Retains failed stage and error message when the failure came from a stage |
@@ -146,7 +146,7 @@ features:
   conservative: suspect tracks are preserved as commentary rather than stripped.
 
 Spindle does not use LLMs for TMDB search, disc title resolution, encoding,
-subtitle formatting, forced subtitle lookup, Jellyfin refresh, or queue control.
+subtitle formatting, Jellyfin refresh, or queue control.
 The proposal in `docs/proposals/LLM_EPISODE_CANDIDATE_PICKER.md` is not active
 behavior.
 

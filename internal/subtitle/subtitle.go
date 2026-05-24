@@ -1,8 +1,8 @@
 // Package subtitle implements the subtitle generation stage (Layer 4).
 //
 // Subtitle generation: canonical WhisperX transcription reuse, hallucination
-// filtering, Stable-TS display formatting, SRT validation, forced subtitle
-// ranking from OpenSubtitles, MKV muxing, and resume support.
+// filtering, Stable-TS display formatting, SRT validation, MKV muxing, and
+// resume support.
 package subtitle
 
 import (
@@ -11,15 +11,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
-	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/stage"
@@ -28,24 +25,16 @@ import (
 
 var inspectSubtitleMedia = ffprobe.Inspect
 
-var forcedSubtitleGarbageReleasePattern = regexp.MustCompile(`(?i)(^|[^a-z0-9])(cam|camrip|hdcam|telesync|ts|hdts|telecine|tc|hdtc|screener|scr|dvdscr)([^a-z0-9]|$)`)
-
 // Handler implements stage.Handler for subtitle generation.
 type Handler struct {
 	cfg         *config.Config
-	osClient    *opensubtitles.Client
 	transcriber *transcription.Service
 }
 
 // New creates a subtitle handler.
-func New(
-	cfg *config.Config,
-	osClient *opensubtitles.Client,
-	transcriber *transcription.Service,
-) *Handler {
+func New(cfg *config.Config, transcriber *transcription.Service) *Handler {
 	return &Handler{
 		cfg:         cfg,
-		osClient:    osClient,
 		transcriber: transcriber,
 	}
 }
@@ -70,7 +59,6 @@ type GenerateDisplaySubtitleRequest struct {
 		SelectPrimaryAudioTrack(context.Context, string, string) (transcription.SelectedAudio, error)
 		Transcribe(context.Context, transcription.TranscribeRequest, ...transcription.ProgressFunc) (*transcription.TranscribeResult, error)
 	}
-	GenerateForced          bool
 	Progress                transcription.ProgressFunc
 	OnAudioSelected         func(transcription.SelectedAudio)
 	OnTranscriptionComplete func(*transcription.TranscribeResult)
@@ -81,15 +69,10 @@ type GenerateDisplaySubtitleRequest struct {
 
 // GenerateDisplaySubtitleResult describes the generated primary display SRT.
 type GenerateDisplaySubtitleResult struct {
-	SelectedAudio     transcription.SelectedAudio
-	Formatting        FormatResult
-	VideoSeconds      float64
-	DurationSource    string
-	ForcedPath        string
-	ForcedSegments    int
-	ForcedLanguages   []string
-	ForcedDecision    string
-	TranscriptionMode transcription.TranscriptionMode
+	SelectedAudio  transcription.SelectedAudio
+	Formatting     FormatResult
+	VideoSeconds   float64
+	DurationSource string
 
 	formatting formatResult
 }
@@ -119,16 +102,11 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 		req.OnAudioSelected(selectedAudio)
 	}
 
-	mode := transcription.TranscriptionModeDefault
-	if req.GenerateForced {
-		mode = transcription.TranscriptionModeMixed
-	}
 	transcript, err := req.Transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 		InputPath:  req.VideoPath,
 		AudioIndex: selectedAudio.Index,
 		Language:   selectedAudio.Language,
 		OutputDir:  req.WorkDir,
-		Mode:       mode,
 	}, req.Progress)
 	if err != nil {
 		return nil, &DisplaySubtitleError{Op: "transcribe", Err: err}
@@ -169,30 +147,12 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 		req.OnFormattingComplete(publicFormatting)
 	}
 
-	forced := forcedFormatResult{Decision: "skipped"}
-	if req.GenerateForced {
-		forcedBasePath := req.DisplayBasePath
-		if forcedBasePath == "" {
-			forcedBasePath = req.VideoPath
-		}
-		forcedPath := displayForcedSubtitlePath(forcedBasePath, selectedAudio.Language)
-		forced, err = formatForcedSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: transcript.JSONPath}, req.WorkDir, forcedPath, videoSeconds, selectedAudio.Language)
-		if err != nil {
-			return nil, &DisplaySubtitleError{Op: "format forced subtitle", Err: err}
-		}
-	}
-
 	return &GenerateDisplaySubtitleResult{
-		SelectedAudio:     selectedAudio,
-		Formatting:        publicFormatting,
-		VideoSeconds:      videoSeconds,
-		DurationSource:    durationSource,
-		ForcedPath:        forced.Path,
-		ForcedSegments:    forced.Segments,
-		ForcedLanguages:   forced.Languages,
-		ForcedDecision:    forced.Decision,
-		TranscriptionMode: mode,
-		formatting:        formatting,
+		SelectedAudio:  selectedAudio,
+		Formatting:     publicFormatting,
+		VideoSeconds:   videoSeconds,
+		DurationSource: durationSource,
+		formatting:     formatting,
 	}, nil
 }
 
@@ -270,8 +230,7 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 
 	h.startSubtitleJob(sess, job)
 
-	generateForced := sess.Env.Attributes.HasForcedSubtitleTrack
-	result, err := h.generateDisplaySubtitle(ctx, sess, job, generateForced)
+	result, err := h.generateDisplaySubtitle(ctx, sess, job)
 	if err != nil {
 		h.recordSubtitleFailure(logger, sess, key, err.Error())
 		return false, nil
@@ -296,10 +255,9 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 		return false, nil
 	}
 
-	h.logForcedSubtitleResult(logger, key, generateForced, result, &record)
 	upsertSubtitleGenRecord(&sess.Env.Attributes.SubtitleGenerationResults, record)
 
-	subtitledPath, subtitlesMuxed := h.resolveSubtitledOutput(ctx, logger, asset.Path, record.SubtitlePath, record.ForcedSubtitlePath, key, result.SelectedAudio.Language)
+	subtitledPath, subtitlesMuxed := h.resolveSubtitledOutput(ctx, logger, asset.Path, record.SubtitlePath, key, result.SelectedAudio.Language)
 	if err := h.saveSubtitleJobSuccess(logger, sess, job, subtitledPath, subtitlesMuxed); err != nil {
 		return false, err
 	}
@@ -324,27 +282,17 @@ func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
 	_ = sess.Progress(job.Percent(0), item.ProgressMessage, stage.WithActiveEpisode(key))
 }
 
-func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Session, job stage.AssetJob, generateForced bool) (*GenerateDisplaySubtitleResult, error) {
+func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Session, job stage.AssetJob) (*GenerateDisplaySubtitleResult, error) {
 	item := sess.Item
 	asset := job.Input
 	key := job.Key
 	workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
 
-	if generateForced {
-		sess.Logger.Info("mixed subtitle mode selected",
-			"decision_type", logs.DecisionForcedSubtitle,
-			"decision_result", "mixed_whisperx_selected",
-			"decision_reason", "forced subtitle candidate observed during identification",
-			"episode_key", key,
-		)
-	}
-
 	return GenerateDisplaySubtitle(ctx, GenerateDisplaySubtitleRequest{
-		VideoPath:      asset.Path,
-		WorkDir:        workDir,
-		Language:       "en",
-		GenerateForced: generateForced,
-		Transcriber:    h.transcriber,
+		VideoPath:   asset.Path,
+		WorkDir:     workDir,
+		Language:    "en",
+		Transcriber: h.transcriber,
 		Progress: func(phase transcription.Phase, elapsed time.Duration) {
 			message := item.ProgressMessage
 			switch phase {
@@ -400,22 +348,16 @@ func (h *Handler) createDisplaySubtitleRecord(sess *stage.Session, job stage.Ass
 	h.applySubtitleReviewIssues(logger, sess, key, validation)
 
 	record := ripspec.SubtitleGenRecord{
-		EpisodeKey:             key,
-		Source:                 "whisperx",
-		SubtitlePath:           formatting.DisplayPath,
-		Segments:               len(formattedCues),
-		DurationSec:            result.VideoSeconds,
-		Language:               result.SelectedAudio.Language,
-		RegularSource:          "whisperx",
-		ForcedSource:           forcedSourceFromResult(result),
-		ForcedSubtitlePath:     result.ForcedPath,
-		ForcedSegments:         result.ForcedSegments,
-		ForcedLanguages:        result.ForcedLanguages,
-		ForcedSubtitleDecision: result.ForcedDecision,
-		ValidationResult:       subtitleValidationResult(validation),
-		QCObservations:         validation.Issues,
-		ReviewIssues:           validation.ReviewIssues,
-		SevereIssues:           validation.SevereIssues,
+		EpisodeKey:       key,
+		Source:           "whisperx",
+		SubtitlePath:     formatting.DisplayPath,
+		Segments:         len(formattedCues),
+		DurationSec:      result.VideoSeconds,
+		Language:         result.SelectedAudio.Language,
+		ValidationResult: subtitleValidationResult(validation),
+		QCObservations:   validation.Issues,
+		ReviewIssues:     validation.ReviewIssues,
+		SevereIssues:     validation.SevereIssues,
 	}
 
 	return record, nil
@@ -488,48 +430,7 @@ func (h *Handler) applySubtitleReviewIssues(logger *slog.Logger, sess *stage.Ses
 	}
 }
 
-func (h *Handler) logForcedSubtitleResult(logger *slog.Logger, key string, attempted bool, result *GenerateDisplaySubtitleResult, record *ripspec.SubtitleGenRecord) {
-	if !attempted {
-		logger.Info("forced subtitle generation skipped",
-			"decision_type", logs.DecisionForcedSubtitle,
-			"decision_result", "skipped",
-			"decision_reason", "no forced subtitle candidate on disc",
-			"episode_key", key,
-		)
-		return
-	}
-	if result.ForcedPath == "" {
-		logger.Info("no WhisperX-derived forced subtitles generated",
-			"decision_type", logs.DecisionForcedSubtitle,
-			"decision_result", "none_detected",
-			"decision_reason", "forced subtitle candidate observed but WhisperX detected no translated foreign dialogue",
-			"episode_key", key,
-			"forced_segments", 0,
-		)
-		return
-	}
-	logger.Info("WhisperX-derived forced subtitles generated",
-		"decision_type", logs.DecisionForcedSubtitle,
-		"decision_result", "generated",
-		"decision_reason", fmt.Sprintf("foreign_segments=%d languages=%s", result.ForcedSegments, strings.Join(result.ForcedLanguages, ",")),
-		"episode_key", key,
-		"forced_segments", result.ForcedSegments,
-		"forced_languages", strings.Join(result.ForcedLanguages, ","),
-		"subtitle_file", result.ForcedPath,
-	)
-	if record != nil {
-		record.ForcedSubtitleDecision = "generated"
-	}
-}
-
-func forcedSourceFromResult(result *GenerateDisplaySubtitleResult) string {
-	if result == nil || result.ForcedDecision == "" || result.ForcedDecision == "skipped" {
-		return "none"
-	}
-	return "whisperx"
-}
-
-func (h *Handler) resolveSubtitledOutput(ctx context.Context, logger *slog.Logger, assetPath, srtPath, forcedPath, key, language string) (string, bool) {
+func (h *Handler) resolveSubtitledOutput(ctx context.Context, logger *slog.Logger, assetPath, srtPath, key, language string) (string, bool) {
 	subtitledPath := assetPath
 	subtitlesMuxed := false
 	if !h.cfg.Subtitles.MuxIntoMKV {
@@ -541,7 +442,7 @@ func (h *Handler) resolveSubtitledOutput(ctx context.Context, logger *slog.Logge
 		return subtitledPath, subtitlesMuxed
 	}
 
-	muxedPath, err := h.muxSubtitles(ctx, logger, assetPath, srtPath, forcedPath, key, language)
+	muxedPath, err := h.muxSubtitles(ctx, logger, assetPath, srtPath, key, language)
 	if err != nil {
 		logger.Warn("subtitle mux failed",
 			"event_type", "mux_error",
@@ -656,60 +557,6 @@ func subtitleValidationResult(validation validationResult) string {
 	}
 }
 
-func rankForcedSubtitleCandidates(results []opensubtitles.SubtitleResult, preferredLanguages []string) (int, bool) {
-	preferredLanguages = language.NormalizeList(preferredLanguages)
-	if len(preferredLanguages) == 0 {
-		preferredLanguages = []string{"en"}
-	}
-
-	bestIndex := -1
-	for i, result := range results {
-		if !result.Attributes.ForeignPartsOnly || forcedSubtitleGarbageSource(result) {
-			continue
-		}
-		if bestIndex < 0 || forcedSubtitleCandidateBetter(result, results[bestIndex], preferredLanguages) {
-			bestIndex = i
-		}
-	}
-	return bestIndex, bestIndex >= 0
-}
-
-func forcedSubtitleCandidateBetter(candidate, incumbent opensubtitles.SubtitleResult, preferredLanguages []string) bool {
-	candidateRank := forcedSubtitleLanguageRank(candidate.Attributes.Language, preferredLanguages)
-	incumbentRank := forcedSubtitleLanguageRank(incumbent.Attributes.Language, preferredLanguages)
-	if candidateRank != incumbentRank {
-		return candidateRank < incumbentRank
-	}
-	if candidate.Attributes.DownloadCount != incumbent.Attributes.DownloadCount {
-		return candidate.Attributes.DownloadCount > incumbent.Attributes.DownloadCount
-	}
-	return firstForcedSubtitleFileID(candidate) < firstForcedSubtitleFileID(incumbent)
-}
-
-func forcedSubtitleLanguageRank(subtitleLanguage string, preferredLanguages []string) int {
-	code := language.ToISO2(subtitleLanguage)
-	if code == "" {
-		code = strings.ToLower(strings.TrimSpace(subtitleLanguage))
-	}
-	for i, preferred := range preferredLanguages {
-		if code == preferred {
-			return i
-		}
-	}
-	return len(preferredLanguages)
-}
-
-func firstForcedSubtitleFileID(result opensubtitles.SubtitleResult) int {
-	if len(result.Attributes.Files) == 0 {
-		return int(^uint(0) >> 1)
-	}
-	return result.Attributes.Files[0].FileID
-}
-
-func forcedSubtitleGarbageSource(result opensubtitles.SubtitleResult) bool {
-	return forcedSubtitleGarbageReleasePattern.MatchString(result.Attributes.Release)
-}
-
 // muxSubtitles runs mkvmerge to add an SRT subtitle track to the MKV file.
 // It writes to a temp file and renames on success.
 func (h *Handler) muxSubtitles(
@@ -717,7 +564,6 @@ func (h *Handler) muxSubtitles(
 	logger *slog.Logger,
 	videoPath string,
 	srtPath string,
-	forcedPath string,
 	key string,
 	subtitleLanguage string,
 ) (string, error) {
@@ -726,17 +572,10 @@ func (h *Handler) muxSubtitles(
 	base := strings.TrimSuffix(filepath.Base(videoPath), ext)
 	outPath := filepath.Join(dir, base+".subtitled"+ext)
 
-	tracks := []MuxTrack{{
-		Path:     srtPath,
-		Language: subtitleLanguage,
-	}}
-	if strings.TrimSpace(forcedPath) != "" {
-		tracks = append(tracks, MuxTrack{Path: forcedPath, Language: subtitleLanguage, Forced: true})
-	}
-	muxedPath, err := MuxSubtitleTracks(ctx, MuxRequest{
+	muxedPath, err := MuxSubtitleTrack(ctx, MuxRequest{
 		VideoPath:  videoPath,
 		OutputPath: outPath,
-		Tracks:     tracks,
+		Track:      MuxTrack{Path: srtPath, Language: subtitleLanguage},
 	})
 	if err != nil {
 		return "", fmt.Errorf("mux subtitles %s: %w", key, err)

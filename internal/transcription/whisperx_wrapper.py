@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 
 SAMPLE_RATE = 16000
-FOREIGN_LANGUAGE_CONFIDENCE = 0.75
 
 
 def _bool_arg(value: str) -> bool:
@@ -36,14 +35,6 @@ def _language_code(value, default=""):
         return default
     value = value.strip().lower().split("-", 1)[0]
     return value or default
-
-
-def _language_probability(result):
-    for key in ("language_probability", "language_prob", "language_confidence"):
-        value = result.get(key) if isinstance(result, dict) else None
-        if isinstance(value, (int, float)):
-            return float(value)
-    return None
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -140,94 +131,7 @@ def _transcribe_default(whisperx, args, audio):
         "detected_language": raw_result.get("language") or detected_language,
         "segments": _clean_json(aligned_segments),
         "speech_segments": _clean_json(raw_segments),
-        "mixed_language": False,
     }
-
-
-def _chunk_audio(audio, start, end):
-    start_index = max(0, int(float(start) * SAMPLE_RATE))
-    end_index = max(start_index, int(float(end) * SAMPLE_RATE))
-    return audio[start_index:end_index]
-
-
-def _translated_chunk(auto_model, audio, segment, args):
-    start = segment.get("start")
-    end = segment.get("end")
-    if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
-        return None
-    if float(end) <= float(start):
-        return None
-    chunk = _chunk_audio(audio, start, end)
-    try:
-        result = auto_model.transcribe(chunk, batch_size=args.batch_size, chunk_size=max(1, int(float(end) - float(start)) + 1))
-    except Exception:
-        return None
-    source_language = _language_code(result.get("language"), "")
-    if not source_language or source_language == "en":
-        return None
-    probability = _language_probability(result)
-    if probability is not None and probability < FOREIGN_LANGUAGE_CONFIDENCE:
-        return None
-    parts = []
-    for translated in result.get("segments") or []:
-        if isinstance(translated, dict) and isinstance(translated.get("text"), str):
-            text = translated.get("text", "").strip()
-            if text:
-                parts.append(text)
-    if not parts:
-        return None
-    enriched = dict(segment)
-    enriched["text"] = " ".join(parts).strip()
-    enriched["source_language"] = source_language
-    enriched["target_language"] = "en"
-    enriched["task"] = "translate"
-    enriched["foreign"] = True
-    if probability is not None:
-        enriched["language_probability"] = probability
-    # Word timing from source-language audio is not meaningful for translated
-    # English text. Keep segment-level timing only for forced-cue rendering.
-    enriched.pop("words", None)
-    enriched.pop("chars", None)
-    return enriched
-
-
-def _transcribe_mixed(whisperx, args, audio):
-    payload = _transcribe_default(whisperx, args, audio)
-    segments = payload.get("segments") or []
-    normalized = []
-    for segment in segments:
-        if isinstance(segment, dict):
-            enriched = dict(segment)
-            enriched.setdefault("source_language", _language_code(args.language, "en"))
-            enriched.setdefault("target_language", _language_code(args.language, "en"))
-            enriched.setdefault("task", "transcribe")
-            enriched.setdefault("foreign", False)
-            normalized.append(enriched)
-    payload["segments"] = normalized
-    payload["mixed_language"] = True
-
-    try:
-        auto_model = _load_model(whisperx, args, language=None, task="translate")
-    except Exception:
-        payload["foreign_detection_error"] = "load_translate_model_failed"
-        return payload
-
-    foreign_count = 0
-    foreign_languages = []
-    for idx, segment in enumerate(normalized):
-        translated = _translated_chunk(auto_model, audio, segment, args)
-        if translated is None:
-            continue
-        normalized[idx] = translated
-        foreign_count += 1
-        language = translated.get("source_language")
-        if isinstance(language, str) and language not in foreign_languages:
-            foreign_languages.append(language)
-
-    payload["segments"] = _clean_json(normalized)
-    payload["foreign_segments"] = foreign_count
-    payload["foreign_languages"] = foreign_languages
-    return payload
 
 
 def main() -> None:
@@ -236,7 +140,6 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--language", required=True)
-    parser.add_argument("--mode", choices=("transcribe", "mixed"), default="transcribe")
     parser.add_argument("--vad-method", required=True)
     parser.add_argument("--device", required=True)
     parser.add_argument("--compute-type", required=True)
@@ -263,16 +166,12 @@ def main() -> None:
         raise SystemExit(f"load_audio_error:{exc}") from exc
 
     try:
-        if args.mode == "mixed":
-            payload = _transcribe_mixed(whisperx, args, audio)
-        else:
-            payload = _transcribe_default(whisperx, args, audio)
+        payload = _transcribe_default(whisperx, args, audio)
     except Exception as exc:  # pragma: no cover
         raise SystemExit(f"transcribe_error:{exc}") from exc
 
     profile = {
         "name": args.transcription_profile_name,
-        "mode": args.mode,
         "vad_method": args.vad_method,
         "device": args.device,
         "compute_type": args.compute_type,

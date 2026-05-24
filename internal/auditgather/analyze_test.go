@@ -181,7 +181,6 @@ func TestComputeOutputMediaSummarizesStreamsAndLabels(t *testing.T) {
 
 func TestComputeSubtitleSummarySeparatesValidationResults(t *testing.T) {
 	r := &Report{
-		Logs: &LogAnalysis{Decisions: []LogDecision{{DecisionType: "forced_subtitle", DecisionResult: "none_available", DecisionReason: "no foreign_parts_only results"}}},
 		Envelope: &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{SubtitleGenerationResults: []ripspec.SubtitleGenRecord{
 			{EpisodeKey: "main", Source: "whisperx", Language: "en", Segments: 10, ValidationResult: "passed", QCObservations: []string{"high_reading_speed"}},
 			{EpisodeKey: "s01e02", Source: "whisperx", Language: "en", Segments: 8, ValidationResult: "needs_review", ReviewIssues: []string{"bad timing"}},
@@ -194,9 +193,6 @@ func TestComputeSubtitleSummarySeparatesValidationResults(t *testing.T) {
 	}
 	if summary.ValidationPassed != 1 || summary.ValidationNeedsReview != 1 || summary.ValidationFailed != 0 {
 		t.Fatalf("validation counts = passed:%d review:%d failed:%d", summary.ValidationPassed, summary.ValidationNeedsReview, summary.ValidationFailed)
-	}
-	if summary.ForcedOutcome != "none_available" || summary.ForcedReason != "no foreign_parts_only results" {
-		t.Fatalf("forced = %q/%q", summary.ForcedOutcome, summary.ForcedReason)
 	}
 	if len(summary.Results) != 2 || len(summary.Results[1].ReviewIssues) != 1 {
 		t.Fatalf("unexpected results: %+v", summary.Results)

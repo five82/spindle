@@ -37,23 +37,3 @@ func TestTrackIsAudio(t *testing.T) {
 		t.Error("video track: IsAudio() = true")
 	}
 }
-
-func TestTrackIsForced(t *testing.T) {
-	tests := []struct {
-		name string
-		tr   Track
-		want bool
-	}{
-		{"forced subtitle", Track{Type: TrackTypeSubtitle, Name: "PGS English (forced only)"}, true},
-		{"non-forced subtitle", Track{Type: TrackTypeSubtitle, Name: "PGS English"}, false},
-		{"forced audio (not subtitle)", Track{Type: TrackTypeAudio, Name: "Audio (forced only)"}, false},
-		{"forced case insensitive", Track{Type: TrackTypeSubtitle, Name: "PGS English (Forced Only)"}, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.tr.IsForced(); got != tt.want {
-				t.Errorf("IsForced() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}

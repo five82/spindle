@@ -269,7 +269,7 @@ type ExcludedTrack struct {
 	Similarity float64 `json:"similarity,omitempty"`
 }
 
-// SubtitleSummary condenses subtitle generation, muxing, and forced-subtitle outcome.
+// SubtitleSummary condenses subtitle generation and muxing outcome.
 type SubtitleSummary struct {
 	Results               []SubtitleResultSummary `json:"results,omitempty"`
 	ValidationPassed      int                     `json:"validation_passed,omitempty"`
@@ -277,26 +277,18 @@ type SubtitleSummary struct {
 	ValidationFailed      int                     `json:"validation_failed,omitempty"`
 	OutputSubtitleTracks  int                     `json:"output_subtitle_tracks,omitempty"`
 	SubtitleLabelsCorrect bool                    `json:"subtitle_labels_correct"`
-	ForcedOutcome         string                  `json:"forced_outcome,omitempty"`
-	ForcedReason          string                  `json:"forced_reason,omitempty"`
 }
 
 // SubtitleResultSummary is the actionable part of one subtitle-generation record.
 type SubtitleResultSummary struct {
-	EpisodeKey             string   `json:"episode_key,omitempty"`
-	Source                 string   `json:"source,omitempty"`
-	Language               string   `json:"language,omitempty"`
-	Segments               int      `json:"segments,omitempty"`
-	RegularSource          string   `json:"regular_source,omitempty"`
-	ForcedSource           string   `json:"forced_source,omitempty"`
-	ForcedSegments         int      `json:"forced_segments,omitempty"`
-	ForcedLanguages        []string `json:"forced_languages,omitempty"`
-	ForcedSubtitleDecision string   `json:"forced_subtitle_decision,omitempty"`
-	ValidationResult       string   `json:"validation_result,omitempty"`
-	OpenSubtitlesDecision  string   `json:"opensubtitles_decision,omitempty"`
-	ReviewIssues           []string `json:"review_issues,omitempty"`
-	SevereIssues           []string `json:"severe_issues,omitempty"`
-	QCObservations         []string `json:"qc_observations,omitempty"`
+	EpisodeKey       string   `json:"episode_key,omitempty"`
+	Source           string   `json:"source,omitempty"`
+	Language         string   `json:"language,omitempty"`
+	Segments         int      `json:"segments,omitempty"`
+	ValidationResult string   `json:"validation_result,omitempty"`
+	ReviewIssues     []string `json:"review_issues,omitempty"`
+	SevereIssues     []string `json:"severe_issues,omitempty"`
+	QCObservations   []string `json:"qc_observations,omitempty"`
 }
 
 // RoutingSummary classifies final outputs against configured library/review roots.

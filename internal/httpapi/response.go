@@ -360,10 +360,6 @@ func buildEpisodes(env *ripspec.Envelope, item *queue.Item) []EpisodeResponse {
 			resp.SubtitleLanguage = rec.Language
 			resp.GeneratedSubtitleSource = rec.Source
 			resp.GeneratedSubtitleLanguage = rec.Language
-			resp.GeneratedSubtitleDecision = rec.ForcedSubtitleDecision
-			if resp.GeneratedSubtitleDecision == "" {
-				resp.GeneratedSubtitleDecision = rec.OpenSubtitlesDecision
-			}
 		}
 
 		episodes = append(episodes, resp)

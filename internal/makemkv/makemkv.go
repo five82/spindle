@@ -720,19 +720,3 @@ func unquote(s string) string {
 	}
 	return s
 }
-
-// HasForcedEnglishSubtitles returns true if any title has a forced English
-// subtitle track. Uses structured Track data populated during scan.
-func (d *DiscInfo) HasForcedEnglishSubtitles() bool {
-	if d == nil {
-		return false
-	}
-	for _, title := range d.Titles {
-		for _, track := range title.Tracks {
-			if track.IsForced() && strings.HasPrefix(strings.ToLower(track.Language), "eng") {
-				return true
-			}
-		}
-	}
-	return false
-}

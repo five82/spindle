@@ -282,9 +282,6 @@ func selectNotableDecisions(decisions []LogDecision) []LogDecision {
 		"commentary_disposition":    true,
 		"subtitle_formatting":       true,
 		"srt_validation":            true,
-		"forced_subtitle":           true,
-		"forced_subtitle_download":  true,
-		"forced_subtitle_ranking":   true,
 		"source_stage_selection":    true,
 		"episode_identification":    true,
 		"episode_review":            true,
@@ -588,20 +585,14 @@ func computeSubtitleSummary(r *Report) *SubtitleSummary {
 	summary := &SubtitleSummary{SubtitleLabelsCorrect: true}
 	for _, rec := range r.Envelope.Attributes.SubtitleGenerationResults {
 		summary.Results = append(summary.Results, SubtitleResultSummary{
-			EpisodeKey:             rec.EpisodeKey,
-			Source:                 rec.Source,
-			Language:               rec.Language,
-			Segments:               rec.Segments,
-			RegularSource:          rec.RegularSource,
-			ForcedSource:           rec.ForcedSource,
-			ForcedSegments:         rec.ForcedSegments,
-			ForcedLanguages:        rec.ForcedLanguages,
-			ForcedSubtitleDecision: rec.ForcedSubtitleDecision,
-			ValidationResult:       rec.ValidationResult,
-			OpenSubtitlesDecision:  rec.OpenSubtitlesDecision,
-			ReviewIssues:           rec.ReviewIssues,
-			SevereIssues:           rec.SevereIssues,
-			QCObservations:         rec.QCObservations,
+			EpisodeKey:       rec.EpisodeKey,
+			Source:           rec.Source,
+			Language:         rec.Language,
+			Segments:         rec.Segments,
+			ValidationResult: rec.ValidationResult,
+			ReviewIssues:     rec.ReviewIssues,
+			SevereIssues:     rec.SevereIssues,
+			QCObservations:   rec.QCObservations,
 		})
 		switch rec.ValidationResult {
 		case "passed":
@@ -620,15 +611,7 @@ func computeSubtitleSummary(r *Report) *SubtitleSummary {
 			}
 		}
 	}
-	if r.Logs != nil {
-		for _, d := range r.Logs.Decisions {
-			if d.DecisionType == "forced_subtitle" || d.DecisionType == "forced_subtitle_download" || d.DecisionType == "forced_subtitle_ranking" {
-				summary.ForcedOutcome = d.DecisionResult
-				summary.ForcedReason = d.DecisionReason
-			}
-		}
-	}
-	if len(summary.Results) == 0 && summary.OutputSubtitleTracks == 0 && summary.ForcedOutcome == "" {
+	if len(summary.Results) == 0 && summary.OutputSubtitleTracks == 0 {
 		return nil
 	}
 	return summary
@@ -1336,6 +1319,37 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		checkStage("encoded", a.AssetHealth.Encoded)
 		checkStage("subtitled", a.AssetHealth.Subtitled)
 		checkStage("final", a.AssetHealth.Final)
+	}
+
+	// Subtitle output layout anomalies.
+	if r.StageGate.PhaseSubtitles {
+		extraSubtitleFiles := 0
+		forcedSubtitleFiles := 0
+		for _, media := range a.OutputMedia {
+			if len(media.Subtitles) > 1 {
+				extraSubtitleFiles++
+			}
+			for _, sub := range media.Subtitles {
+				if sub.Forced {
+					forcedSubtitleFiles++
+					break
+				}
+			}
+		}
+		if extraSubtitleFiles > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "warning",
+				Category: "subtitles",
+				Message:  fmt.Sprintf("%d output file(s) have more than one subtitle stream", extraSubtitleFiles),
+			})
+		}
+		if forcedSubtitleFiles > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "warning",
+				Category: "subtitles",
+				Message:  fmt.Sprintf("%d output file(s) have a forced subtitle stream", forcedSubtitleFiles),
+			})
+		}
 	}
 
 	// Cross-episode deviations.

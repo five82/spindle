@@ -16,7 +16,7 @@ Every item moves through the queue in order. Each item has a **stage** and an
 - `episode_identification` *(TV only)* - WhisperX plus OpenSubtitles correlate ripped files to definitive episode numbers
 - `encoding` - Drapto transcodes the rip in the background
 - `audio_analysis` - refines encoded audio; optionally detects commentary when `commentary.enabled = true`
-- `subtitling` *(optional)* - WhisperX transcription generates display SRTs; forced subtitles can be fetched from OpenSubtitles
+- `subtitling` *(optional)* - WhisperX transcription generates one English display SRT per output
 - `organizing` - files are copied/moved into your library or review area; Jellyfin refresh is triggered when configured
 - `completed` - all done
 - `failed` - an error or user stop halted progress; fix the root cause and retry or clear
@@ -111,14 +111,13 @@ When enabled, Spindle generates subtitles per encoded asset:
 2. Generates canonical WhisperX transcript artifacts through the shared transcription wrapper.
 3. Formats display subtitles with hallucination filtering, Stable-TS formatting, line wrapping, retiming, and SRT validation.
 4. Uses the encoded media duration for validation when available; transcript duration is only a fallback.
-5. Writes primary display subtitles as `<basename>.<lang>.srt` beside the encoded media.
-6. When identification saw a forced-subtitle candidate, runs mixed WhisperX subtitle generation: regular subtitles include detected natural foreign dialogue translated to English, and forced subtitles are written as `<basename>.<lang>.forced.srt` only when foreign dialogue is detected.
-7. If `subtitles.mux_into_mkv = true` (the default), generated subtitles are muxed into the MKV and existing subtitle tracks are replaced. If muxing fails or muxing is disabled, SRT sidecars remain available.
-8. Subtitle failures are recorded per asset and processing continues with other assets when possible. If every attempted subtitle job fails, the stage fails.
+5. Writes one primary English display subtitle as `<basename>.<lang>.srt` beside the encoded media.
+6. If `subtitles.mux_into_mkv = true` (the default), the generated subtitle is muxed into the MKV and existing subtitle tracks are replaced. If muxing fails or muxing is disabled, the SRT sidecar remains available.
+7. Subtitle failures are recorded per asset and processing continues with other assets when possible. If every attempted subtitle job fails, the stage fails.
 
 Spindle intentionally does not use PGS subtitles as final library output. Final primary display subtitles are SRT because SRT works better with Jellyfin and downstream tooling.
 
-`spindle gensubtitle /path/to/video.mkv` generates subtitles for an existing encode. Use `--regular-source whisperx|opensubtitles|none` and `--forced-source whisperx|opensubtitles|none` to choose sources manually; `--fetch-forced` is shorthand for `--forced-source opensubtitles`. OpenSubtitles modes derive title/year or TV season/episode context from the filename, use TMDB metadata when configured, and can be guided with `--tmdb-id`, `--media-type`, `--season`, and `--episode`. By default, generated regular and forced subtitles are muxed into MKV output when subtitle muxing is enabled; `--external` writes sidecar SRT files instead.
+`spindle gensubtitle /path/to/video.mkv` generates a WhisperX English SRT for an existing encode. By default, the generated subtitle is muxed into MKV output when subtitle muxing is enabled; `--external` writes a sidecar SRT instead.
 
 ## Stage 8: Organizing and Jellyfin Refresh (`organizing` -> `completed`)
 

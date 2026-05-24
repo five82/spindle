@@ -15,12 +15,11 @@ import (
 
 // Entry maps a disc ID to TMDB identification data.
 type Entry struct {
-	TMDBID                 int    `json:"tmdb_id"`
-	MediaType              string `json:"media_type"`
-	Title                  string `json:"title"`
-	Year                   string `json:"year,omitempty"`
-	Season                 int    `json:"season,omitempty"`
-	HasForcedSubtitleTrack bool   `json:"has_forced_subtitle_track,omitempty"`
+	TMDBID    int    `json:"tmdb_id"`
+	MediaType string `json:"media_type"`
+	Title     string `json:"title"`
+	Year      string `json:"year,omitempty"`
+	Season    int    `json:"season,omitempty"`
 }
 
 // Store is a JSON file-backed disc ID cache.

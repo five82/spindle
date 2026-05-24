@@ -56,7 +56,7 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 | `title_selection` | Movie titles exist | Feature-length candidates, selected title, selection decision/reason, and similar-runtime candidate count. Prefer this over hand-parsing `envelope.titles`. |
 | `output_media` | Valid probes exist | Compact stream summaries (video/audio/subtitle labels and flags) derived from ffprobe. Prefer this for normal stream checks; use raw `media[]` only for missing details. |
 | `audio_summary` | Audio evidence exists | Primary track, output/excluded/commentary counts, commentary decisions, and commentary label status. |
-| `subtitle_summary` | Subtitle evidence exists | Subtitle generation validation counts, forced-subtitle outcome, output subtitle count, and label status. |
+| `subtitle_summary` | Subtitle evidence exists | Subtitle generation validation counts, output subtitle count, and label status. |
 | `routing_summary` | Final assets exist | Final output destination classification and expected-vs-actual route per output. |
 | `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
@@ -150,7 +150,7 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - Evaluate if confidence levels and reasons make sense for the content
 
 5. **TV episode pipeline checks** (TV only, from `logs.decisions` and `logs.warnings`):
-   - `decision_type=episode_identification` entries — check if stage was skipped and why (valid reasons: `movie_content`, `opensubtitles_disabled`, `content_matcher_unavailable`)
+   - `decision_type=episode_identification` entries — check if stage was skipped and why (valid reasons include `movie_content`)
    - `decision_type=episode_review` with `decision_result=needs_review` — episodeid flagged unresolved episodes
    - `event_type=contentid_no_references` or `contentid_no_matches` in warnings — soft failures
    - `event_type=low_confidence_match` — episodes with `MatchConfidence` below 0.70
@@ -253,9 +253,9 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
    - Cross-reference with commentary decisions in `logs.decisions`
 
 4. **Check subtitle streams** (from `media[].probe.streams` where `codec_type=subtitle`):
-   - Verify subtitle track exists with correct language
-   - Regular subtitles should have title containing language name (e.g., "English")
-   - Forced subtitles should have `disposition.forced=1` and title containing "(Forced)"
+   - Verify exactly one generated display subtitle track exists with correct language
+   - Subtitle title should contain the language name (e.g., "English")
+   - Generated subtitle tracks should not have `disposition.forced=1`
 
 5. **Parse encoding details** from `encoding.snapshot`:
    - Check `validation.passed` and individual step results
@@ -303,19 +303,16 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
 **For movies** or **per-episode for TV**:
 
 1. **Verify embedded subtitles** from the ffprobe data in `media[]`:
-   - Subtitle track exists with correct language
-   - Check `disposition.default` for main subtitle
-   - Check `disposition.forced` for forced subtitles
-   - **Check labeling**: regular subs have language name in title, forced have "(Forced)"
+   - Exactly one generated display subtitle track should exist per output when subtitles are enabled and muxing succeeded
+   - Check `disposition.default` is not unexpectedly enabled for the generated subtitle
+   - Check `disposition.forced` is not enabled for the generated subtitle
+   - **Check labeling**: subtitle title should contain the language name (e.g., "English")
 
-2. **Forced subtitle outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `logs.decisions`):
-   - Treat forced subtitles as source-aware. `forced_source=whisperx` means audio-derived translated foreign dialogue; `forced_source=opensubtitles` means authored OpenSubtitles output; `forced_source=none` means no forced output was requested or produced.
-   - For WhisperX-derived forced subtitles, check `forced_segments`, `forced_languages`, `forced_subtitle_path`, and media subtitle streams. Regular subtitles should include the translated foreign cues; the forced track should contain only those cues.
-   - `decision_type=forced_subtitle` with `decision_result=none_detected` after a MakeMKV forced candidate is not automatically a defect. MakeMKV forced-only candidates can be empty; only report a problem if external/title knowledge shows significant foreign dialogue should exist.
-   - For explicit OpenSubtitles forced lookup, zero forced candidates is usually normal. Do not report it unless candidates were returned but all rejected, or you know the title has significant foreign-language dialogue (e.g. Inglourious Basterds, Kill Bill, Narcos).
-   - `decision_type=forced_subtitle_ranking` shows the selected OpenSubtitles candidate's download count and total candidates considered.
+2. **Subtitle generation outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `logs.decisions`):
+   - Spindle now generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks and does not fetch OpenSubtitles output subtitles.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
    - `decision_type=transcription_cache` shows whether WhisperX reused a cached transcription.
+   - Treat additional generated subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
 
 3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
    - Check for `status: "failed"` entries with `error_msg`
@@ -325,7 +322,7 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
    - Treat `qc_observations` as telemetry only. Do not list below-threshold observations (for example `high_reading_speed`, `short_cue_duration`, `long_cue_duration`) as Issues Found unless they also appear in `review_issues`/`severe_issues`, caused review routing, or created a visible subtitle problem.
 
 4. **Cross-episode subtitle consistency** (TV only):
-   - All episodes should have same subtitle language and consistent forced subtitle presence
+   - All episodes should have the same subtitle language and the same single-display-subtitle layout
 
 ### Phase 7: Commentary Track Validation (when `phase_commentary` is true)
 
@@ -363,8 +360,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
 | SRT validation review/failure | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review` or `failed`; `review_issues`/`severe_issues` populated; review routing present | Malformed or low-quality subtitles requiring action |
 | Subtitle duration mismatch | Subtitles | Subtitle stream duration vs video duration delta > 10 minutes | WhisperX timing issue |
-| Forced subtitle not found | Subtitles | `logs.decisions` with `decision_result=none_available` or `none_detected`, zero candidates/cues | Do not report by default — this is normal unless the title is known to require forced subtitles |
-| Forced subtitle candidates rejected | Subtitles | Candidates returned but all rejected during ranking | Filtering or scoring problem |
+| Extra/forced subtitle generated | Subtitles | More than one generated subtitle stream, `disposition.forced=1`, or "Forced" subtitle labels in current outputs | Stale or incorrect subtitle output; current pipeline should produce one non-forced display SRT |
 | Subtitles not muxed | Subtitles | No subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load |
 | Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Jellyfin display issue |
 | Low episode match confidence | Episode ID | `envelope.episodes[].match_confidence` < 0.70 | Episodes may be mislabeled |
@@ -395,7 +391,7 @@ These appear in `logs.decisions` only when debug logs are available (`logs.is_de
 | TMDB candidate scoring | Identification | `tmdb_search` (final selection now visible at INFO as `tmdb_match`) |
 | Placeholder episode creation | Identification | (visible in `envelope.episodes` with `episode=0`) |
 | Audio candidate scoring | Audio Analysis | Individual candidate scores visible only at DEBUG (selection result is INFO) |
-| OpenSubtitles request details | Subtitles | search query params and result counts |
+| OpenSubtitles request details | Episode ID | reference search query params and result counts |
 | LLM retry details | Various | individual retry attempt timing |
 | Content ID candidate selection | Episode ID | `contentid_candidates` |
 | Content ID match scores | Episode ID | `contentid_matches` |
@@ -437,7 +433,6 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 **Do not report as findings (these are normal):**
 - Non-sequential disc title ordering — disc layout varies by manufacturer and is irrelevant once content ID resolves episodes
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
-- Forced subtitle search returning zero candidates (covered in Phase 6)
 - Audio refinement stripping non-English tracks — that's its job
 - Subtitle `qc_observations` that are below review thresholds and have `validation_result=passed`
 
@@ -516,7 +511,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Labels correct: <yes/no>
 - Validation result: <from subtitle_generation_results.validation_result; list review_issues/severe_issues only when populated>
 - QC observations: <optional neutral summary; omit if uninteresting and below thresholds>
-- Forced subtitle outcome: <from logs.decisions>
+- Subtitle mux/output: <mux status and single-display-subtitle checks>
 
 #### Commentary (if phase_commentary)
 - Decisions: <from logs.decisions>

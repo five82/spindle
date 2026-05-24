@@ -54,8 +54,6 @@ runtime directories. Required fields are:
 Conditional requirements:
 
 - `jellyfin.url` and `jellyfin.api_key` are required when `jellyfin.enabled = true`.
-- `subtitles.opensubtitles_api_key` is required when
-  `subtitles.opensubtitles_enabled = true`.
 - `subtitles.whisperx_hf_token` is required when subtitle generation is enabled
   with a non-`silero` VAD method.
 
@@ -90,10 +88,8 @@ Important feature switches:
 
 - `subtitles.enabled` enables the subtitle stage. `subtitles.mux_into_mkv`
   controls whether generated SRTs are muxed into MKV output.
-- `subtitles.opensubtitles_enabled` controls explicit OpenSubtitles lookups from
-  `spindle gensubtitle` for regular or forced subtitles. TV episode
-  identification uses the OpenSubtitles API key directly and is not gated by
-  this switch.
+- TV episode identification uses the OpenSubtitles API key directly; subtitle
+  generation itself does not fetch OpenSubtitles output tracks.
 - `rip_cache.enabled` enables automatic raw-rip restore/store during normal
   ripping.
 - `disc_id_cache.enabled` enables daemon use of the Blu-ray disc ID cache during

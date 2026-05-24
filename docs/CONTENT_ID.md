@@ -32,8 +32,8 @@ The stage runs for TV items after ripping. It expects:
 - TMDB metadata sufficient to know the target season/episode set.
 - WhisperX transcription support.
 - An OpenSubtitles API key so reference subtitles can be fetched. This stage
-  uses the configured API key directly; `subtitles.opensubtitles_enabled`
-  controls forced-subtitle lookup, not TV episode identification.
+  uses the configured API key directly; subtitle generation does not fetch
+  OpenSubtitles output tracks.
 
 Movies and non-TV items skip this stage. TV items without required matcher
 clients complete the stage with a degraded warning, are marked for review, and

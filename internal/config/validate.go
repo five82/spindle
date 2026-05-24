@@ -49,12 +49,6 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Subtitles.OpenSubtitlesEnabled {
-		if c.Subtitles.OpenSubtitlesAPIKey == "" {
-			errs = append(errs, "subtitles.opensubtitles_api_key is required when opensubtitles enabled")
-		}
-	}
-
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation: %s", strings.Join(errs, "; "))
 	}

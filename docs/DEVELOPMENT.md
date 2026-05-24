@@ -92,9 +92,7 @@ packages. Do not keep a separate exhaustive prose catalog.
 ## Subtitle policy
 
 Spindle's Jellyfin-facing subtitle output is SRT. Do not use PGS subtitles as
-final library output. Source subtitle tracks may be inspected for metadata or
-forced-subtitle signals, but primary display subtitles are generated or handled
-as SRT.
+final library output. Generated subtitles are primary English display SRTs.
 
 ## Package dependency rules
 

@@ -86,9 +86,6 @@ api_key = ""
 # (or set HUGGING_FACE_HUB_TOKEN / HF_TOKEN env var)
 # whisperx_hf_token = ""
 
-# Enable OpenSubtitles integration
-# opensubtitles_enabled = false
-
 # OpenSubtitles API key (or set OPENSUBTITLES_API_KEY env var)
 # opensubtitles_api_key = ""
 

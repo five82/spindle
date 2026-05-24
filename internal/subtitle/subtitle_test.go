@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/media/ffprobe"
-	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/transcription"
 )
@@ -241,80 +240,6 @@ func TestUpsertSubtitleGenRecordReplacesExisting(t *testing.T) {
 	}
 	if records[1].SubtitlePath != "keep.srt" {
 		t.Fatalf("unrelated record changed: %+v", records[1])
-	}
-}
-
-func TestRankForcedSubtitleCandidates(t *testing.T) {
-	mkResult := func(id, lang, release string, downloads, fileID int) opensubtitles.SubtitleResult {
-		return opensubtitles.SubtitleResult{
-			ID: id,
-			Attributes: opensubtitles.SubtitleAttributes{
-				Language:         lang,
-				Release:          release,
-				DownloadCount:    downloads,
-				ForeignPartsOnly: true,
-				Files:            []opensubtitles.SubtitleFile{{FileID: fileID}},
-			},
-		}
-	}
-
-	t.Run("prefers configured language before downloads", func(t *testing.T) {
-		results := []opensubtitles.SubtitleResult{
-			mkResult("spanish", "es", "BluRay", 500, 20),
-			mkResult("english", "en", "BluRay", 50, 30),
-		}
-		idx, ok := rankForcedSubtitleCandidates(results, []string{"en", "es"})
-		if !ok || idx != 1 {
-			t.Fatalf("rankForcedSubtitleCandidates() = %d, %v; want 1, true", idx, ok)
-		}
-	})
-
-	t.Run("filters garbage release", func(t *testing.T) {
-		results := []opensubtitles.SubtitleResult{
-			mkResult("cam", "en", "CAM", 500, 20),
-			mkResult("bluray", "en", "BluRay", 50, 30),
-		}
-		idx, ok := rankForcedSubtitleCandidates(results, []string{"en"})
-		if !ok || idx != 1 {
-			t.Fatalf("rankForcedSubtitleCandidates() = %d, %v; want 1, true", idx, ok)
-		}
-	})
-
-	t.Run("uses file id tiebreaker", func(t *testing.T) {
-		results := []opensubtitles.SubtitleResult{
-			mkResult("later", "en", "BluRay", 50, 30),
-			mkResult("earlier", "en", "BluRay", 50, 20),
-		}
-		idx, ok := rankForcedSubtitleCandidates(results, []string{"en"})
-		if !ok || idx != 1 {
-			t.Fatalf("rankForcedSubtitleCandidates() = %d, %v; want 1, true", idx, ok)
-		}
-	})
-}
-
-func TestRankRegularSubtitleCandidates(t *testing.T) {
-	mkResult := func(id, lang string, foreign, hi bool, downloads, fileID int) opensubtitles.SubtitleResult {
-		return opensubtitles.SubtitleResult{
-			ID: id,
-			Attributes: opensubtitles.SubtitleAttributes{
-				Language:         lang,
-				Release:          "BluRay",
-				DownloadCount:    downloads,
-				ForeignPartsOnly: foreign,
-				HearingImpaired:  hi,
-				Files:            []opensubtitles.SubtitleFile{{FileID: fileID}},
-			},
-		}
-	}
-
-	results := []opensubtitles.SubtitleResult{
-		mkResult("forced", "en", true, false, 1000, 1),
-		mkResult("hi", "en", false, true, 900, 2),
-		mkResult("full", "en", false, false, 100, 3),
-	}
-	idx, ok := rankRegularSubtitleCandidates(results, []string{"en"})
-	if !ok || idx != 2 {
-		t.Fatalf("rankRegularSubtitleCandidates() = %d, %v; want 2, true", idx, ok)
 	}
 }
 
