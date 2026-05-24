@@ -8,7 +8,17 @@ import (
 	"github.com/five82/spindle/internal/textutil"
 )
 
-const maxVerificationCandidatesPerRip = 2
+const (
+	maxVerificationCandidatesPerRip = 2
+	rawLiftMinRawSimilarity         = 0.90
+	rawLiftMinWeightedSimilarity    = 0.50
+)
+
+type scoreMatrices struct {
+	Final    [][]float64
+	Weighted [][]float64
+	Raw      [][]float64
+}
 
 type provisionalClaim struct {
 	RipIndex   int
@@ -37,7 +47,7 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	weightedRips := cloneRipFingerprints(rips)
 	weightedRefs := cloneReferenceFingerprints(sortedReferences(refs))
 	applyIDFWeighting(weightedRips, weightedRefs)
-	scores := buildScoreMatrix(weightedRips, weightedRefs)
+	scores := buildScoreMatrices(weightedRips, weightedRefs)
 	claims := buildClaims(rips, weightedRefs, scores, policy)
 	if len(claims) == 0 {
 		return matchResolution{UnresolvedKeys: unresolvedKeysFromRips(rips)}
@@ -110,7 +120,6 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 		}
 		unresolved = append(unresolved, rip.EpisodeKey)
 	}
-
 	suspectRefCount := 0
 	for _, ref := range weightedRefs {
 		if ref.Suspect {
@@ -130,17 +139,17 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	}
 }
 
-func buildClaims(rips []ripFingerprint, refs []referenceFingerprint, scores [][]float64, policy Policy) []provisionalClaim {
+func buildClaims(rips []ripFingerprint, refs []referenceFingerprint, scores scoreMatrices, policy Policy) []provisionalClaim {
 	claims := make([]provisionalClaim, 0, len(rips)*len(refs))
 	for i, rip := range rips {
 		for j, ref := range refs {
-			score := scores[i][j]
+			score := scores.Final[i][j]
 			if score < policy.MinSimilarityScore {
 				continue
 			}
-			runnerUpEpisode, runnerUpScore := bestAlternateReference(scores, refs, i, j)
-			episodeRunnerUpKey, episodeRunnerUpScore := bestAlternateRip(scores, rips, i, j)
-			neighborEpisode, neighborScore := bestNeighborReference(scores, refs, i, ref.EpisodeNumber)
+			runnerUpEpisode, runnerUpScore := bestAlternateReference(scores.Final, refs, i, j)
+			episodeRunnerUpKey, episodeRunnerUpScore := bestAlternateRip(scores.Final, rips, i, j)
+			neighborEpisode, neighborScore := bestNeighborReference(scores.Final, refs, i, ref.EpisodeNumber)
 			ripMargin := score - runnerUpScore
 			episodeMargin := score - episodeRunnerUpScore
 			neighborMargin := score - neighborScore
@@ -150,6 +159,8 @@ func buildClaims(rips []ripFingerprint, refs []referenceFingerprint, scores [][]
 				TitleID:                 rip.TitleID,
 				TargetEpisode:           ref.EpisodeNumber,
 				Score:                   score,
+				WeightedScore:           scores.Weighted[i][j],
+				RawScore:                scores.Raw[i][j],
 				Confidence:              confidence,
 				ConfidenceQuality:       quality,
 				RunnerUpEpisode:         runnerUpEpisode,
@@ -387,15 +398,32 @@ func bestNeighborReference(scores [][]float64, refs []referenceFingerprint, ripI
 	return neighborEpisode, neighborScore
 }
 
-func buildScoreMatrix(rips []ripFingerprint, refs []referenceFingerprint) [][]float64 {
-	matrix := make([][]float64, len(rips))
+func buildScoreMatrices(rips []ripFingerprint, refs []referenceFingerprint) scoreMatrices {
+	matrices := scoreMatrices{
+		Final:    make([][]float64, len(rips)),
+		Weighted: make([][]float64, len(rips)),
+		Raw:      make([][]float64, len(rips)),
+	}
 	for i := range rips {
-		matrix[i] = make([]float64, len(refs))
+		matrices.Final[i] = make([]float64, len(refs))
+		matrices.Weighted[i] = make([]float64, len(refs))
+		matrices.Raw[i] = make([]float64, len(refs))
 		for j := range refs {
-			matrix[i][j] = textSimilarity(rips[i].Vector, refs[j].Vector)
+			weighted := textSimilarity(rips[i].Vector, refs[j].Vector)
+			raw := textSimilarity(rips[i].RawVector, refs[j].RawVector)
+			matrices.Weighted[i][j] = weighted
+			matrices.Raw[i][j] = raw
+			matrices.Final[i][j] = combinedContentSimilarity(weighted, raw)
 		}
 	}
-	return matrix
+	return matrices
+}
+
+func combinedContentSimilarity(weighted, raw float64) float64 {
+	if raw >= rawLiftMinRawSimilarity && weighted >= rawLiftMinWeightedSimilarity {
+		return math.Max(weighted, raw)
+	}
+	return weighted
 }
 
 func deriveMatchConfidence(score, ripMargin, episodeMargin, neighborMargin float64, referenceSuspect bool, policy Policy) (float64, string, bool, string) {

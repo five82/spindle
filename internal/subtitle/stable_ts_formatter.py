@@ -3,6 +3,32 @@ import json
 from pathlib import Path
 
 
+SEGMENT_FIELDS = {
+    "avg_logprob",
+    "compression_ratio",
+    "end",
+    "id",
+    "no_speech_prob",
+    "seek",
+    "start",
+    "temperature",
+    "text",
+    "tokens",
+    "words",
+}
+WORD_FIELDS = {
+    "end",
+    "id",
+    "left_locked",
+    "probability",
+    "right_locked",
+    "segment_id",
+    "start",
+    "tokens",
+    "word",
+}
+
+
 def _load_segments(path: str):
     with open(path, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -39,8 +65,7 @@ def _sanitize_segments(raw_segments):
     for entry in raw_segments:
         if not isinstance(entry, dict):
             continue
-        segment = dict(entry)
-        segment.pop("chars", None)
+        segment = {key: value for key, value in entry.items() if key in SEGMENT_FIELDS}
         words = segment.get("words")
         if isinstance(words, list):
             normalized_words = []
@@ -48,14 +73,9 @@ def _sanitize_segments(raw_segments):
             for idx, word_entry in enumerate(words):
                 if not isinstance(word_entry, dict):
                     continue
-                word = dict(word_entry)
-                if "score" in word and "probability" not in word:
-                    word["probability"] = word.pop("score")
-                else:
-                    word.pop("score", None)
-                word.pop("speaker", None)
-                word.pop("case", None)
-                word.pop("chars", None)
+                word = {key: value for key, value in word_entry.items() if key in WORD_FIELDS}
+                if "score" in word_entry and "probability" not in word:
+                    word["probability"] = word_entry["score"]
                 token = word.get("word")
                 if isinstance(token, str):
                     trimmed = token.strip()

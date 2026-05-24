@@ -18,6 +18,32 @@ var runStableTS = func(ctx context.Context, args []string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
+var stableTSSegmentFields = map[string]bool{
+	"avg_logprob":       true,
+	"compression_ratio": true,
+	"end":               true,
+	"id":                true,
+	"no_speech_prob":    true,
+	"seek":              true,
+	"start":             true,
+	"temperature":       true,
+	"text":              true,
+	"tokens":            true,
+	"words":             true,
+}
+
+var stableTSWordFields = map[string]bool{
+	"end":          true,
+	"id":           true,
+	"left_locked":  true,
+	"probability":  true,
+	"right_locked": true,
+	"segment_id":   true,
+	"start":        true,
+	"tokens":       true,
+	"word":         true,
+}
+
 type whisperXPayload struct {
 	Language         string           `json:"language,omitempty"`
 	DetectedLanguage string           `json:"detected_language,omitempty"`
@@ -83,12 +109,13 @@ func formatForcedSubtitleFromCanonical(ctx context.Context, canonical transcript
 	if len(forcedSegments) == 0 {
 		return forcedFormatResult{Decision: "none_detected"}, nil
 	}
+	formatterSegments := stableTSSegments(forcedSegments)
 	switch field {
 	case "segments":
-		payload.Segments = forcedSegments
+		payload.Segments = formatterSegments
 		payload.SpeechSegments = nil
 	case "speech_segments":
-		payload.SpeechSegments = forcedSegments
+		payload.SpeechSegments = formatterSegments
 		payload.Segments = nil
 	default:
 		return forcedFormatResult{}, fmt.Errorf("unsupported whisperx segment field %q", field)
@@ -216,11 +243,12 @@ func filterWhisperXJSON(srcPath, destPath string, videoSeconds float64) (filterS
 	if err != nil {
 		return filterStats{}, err
 	}
+	formatterSegments := stableTSSegments(filtered)
 	switch field {
 	case "segments":
-		payload.Segments = filtered
+		payload.Segments = formatterSegments
 	case "speech_segments":
-		payload.SpeechSegments = filtered
+		payload.SpeechSegments = formatterSegments
 	default:
 		return filterStats{}, fmt.Errorf("unsupported whisperx segment field %q", field)
 	}
@@ -283,6 +311,61 @@ func filterWhisperXSegments(segments []map[string]any, videoSeconds float64) ([]
 	}
 	stats.FilteredSegments = len(result)
 	return result, stats, nil
+}
+
+func stableTSSegments(segments []map[string]any) []map[string]any {
+	cleaned := make([]map[string]any, 0, len(segments))
+	for _, segment := range segments {
+		cleanSegment := make(map[string]any, len(segment))
+		for key, value := range segment {
+			if !stableTSSegmentFields[key] {
+				continue
+			}
+			if key == "words" {
+				cleanSegment[key] = stableTSWords(value)
+				continue
+			}
+			cleanSegment[key] = value
+		}
+		cleaned = append(cleaned, cleanSegment)
+	}
+	return cleaned
+}
+
+func stableTSWords(value any) []map[string]any {
+	var words []any
+	switch typed := value.(type) {
+	case []any:
+		words = typed
+	case []map[string]any:
+		words = make([]any, 0, len(typed))
+		for _, word := range typed {
+			words = append(words, word)
+		}
+	default:
+		return nil
+	}
+	cleaned := make([]map[string]any, 0, len(words))
+	for _, entry := range words {
+		word, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		cleanWord := make(map[string]any, len(word))
+		for key, value := range word {
+			if key == "score" {
+				if _, hasProbability := word["probability"]; !hasProbability {
+					cleanWord["probability"] = value
+				}
+				continue
+			}
+			if stableTSWordFields[key] {
+				cleanWord[key] = value
+			}
+		}
+		cleaned = append(cleaned, cleanWord)
+	}
+	return cleaned
 }
 
 func isForeignTranslatedSegment(segment map[string]any) bool {

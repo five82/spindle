@@ -37,6 +37,8 @@ type matchResult struct {
 	TitleID                 int
 	TargetEpisode           int
 	Score                   float64
+	WeightedScore           float64
+	RawScore                float64
 	Confidence              float64
 	ConfidenceQuality       string
 	Strength                float64

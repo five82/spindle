@@ -147,8 +147,14 @@ func TestFormatForcedSubtitleFromCanonical_FiltersForeignSegments(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(inputData), "Hello there") || !strings.Contains(string(inputData), "Where is the package?") {
-			t.Fatalf("forced payload not filtered correctly: %s", string(inputData))
+		input := string(inputData)
+		if strings.Contains(input, "Hello there") || !strings.Contains(input, "Where is the package?") {
+			t.Fatalf("forced payload not filtered correctly: %s", input)
+		}
+		for _, unsupported := range []string{"foreign", "source_language", "target_language", "task"} {
+			if strings.Contains(input, unsupported) {
+				t.Fatalf("forced formatter payload contains unsupported %q field: %s", unsupported, input)
+			}
 		}
 		if err := os.WriteFile(args[6], []byte("1\n00:00:03,000 --> 00:00:04,000\nWhere is the package?\n"), 0o644); err != nil {
 			t.Fatal(err)
@@ -195,10 +201,17 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 	payload := whisperXPayload{
 		Language: "en",
 		Segments: []map[string]any{{
-			"start": 1.0,
-			"end":   3.0,
-			"text":  "General Kenobi",
-			"words": []map[string]any{{"word": "General", "start": 1.0, "end": 1.5}, {"word": " Kenobi", "start": 1.5, "end": 3.0}},
+			"start":           1.0,
+			"end":             3.0,
+			"text":            "General Kenobi",
+			"foreign":         true,
+			"source_language": "fr",
+			"target_language": "en",
+			"task":            "translate",
+			"words": []map[string]any{
+				{"word": "General", "start": 1.0, "end": 1.5, "score": 0.9, "speaker": "SPEAKER_00"},
+				{"word": " Kenobi", "start": 1.5, "end": 3.0, "probability": 0.8},
+			},
 		}},
 	}
 	data, err := json.Marshal(payload)
@@ -212,6 +225,19 @@ func TestFormatSubtitleFromCanonical_UsesStableTSOutput(t *testing.T) {
 	runStableTS = func(ctx context.Context, args []string) ([]byte, error) {
 		if len(args) < 9 {
 			t.Fatalf("unexpected args: %v", args)
+		}
+		inputData, err := os.ReadFile(args[5])
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := string(inputData)
+		for _, unsupported := range []string{"foreign", "source_language", "target_language", "task", "speaker", "score"} {
+			if strings.Contains(input, unsupported) {
+				t.Fatalf("display formatter payload contains unsupported %q field: %s", unsupported, input)
+			}
+		}
+		if !strings.Contains(input, "probability") {
+			t.Fatalf("display formatter payload did not translate word score to probability: %s", input)
 		}
 		outputPath := args[6]
 		if err := os.WriteFile(outputPath, []byte("1\n00:00:01,000 --> 00:00:03,000\nGeneral Kenobi\n"), 0o644); err != nil {

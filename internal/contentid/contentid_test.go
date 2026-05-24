@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/five82/spindle/internal/llm"
@@ -294,6 +295,61 @@ func TestIsAutoAcceptedClaimAllowsDecisiveLowSimilarity(t *testing.T) {
 	match.Confidence = 0.79
 	if isAutoAcceptedClaim(match, policy) {
 		t.Fatal("did not expect below-threshold match to be auto-accepted")
+	}
+}
+
+func TestCombinedContentSimilarityLiftsOnlyPlausibleRawMatches(t *testing.T) {
+	tests := []struct {
+		name     string
+		weighted float64
+		raw      float64
+		want     float64
+	}{
+		{name: "proper noun ASR mismatch", weighted: 0.55, raw: 0.965, want: 0.965},
+		{name: "same-series raw false positive", weighted: 0.085, raw: 0.91, want: 0.085},
+		{name: "strong weighted match", weighted: 0.934, raw: 0.988, want: 0.988},
+		{name: "raw below guard", weighted: 0.70, raw: 0.89, want: 0.70},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := combinedContentSimilarity(tt.weighted, tt.raw)
+			if got != tt.want {
+				t.Fatalf("combinedContentSimilarity(%v, %v) = %v, want %v", tt.weighted, tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildScoreMatricesGuardsRawSameSeriesFalsePositives(t *testing.T) {
+	rawDialogue := strings.Repeat("enterprise captain bridge alien planet dialogue ", 20)
+	rips := []ripFingerprint{{
+		EpisodeKey: "s02_002",
+		Vector:     textutil.NewFingerprint("funny joke audience laugh jewel connor deben devin"),
+		RawVector:  textutil.NewFingerprint(rawDialogue + strings.Repeat("connor ", 10)),
+	}}
+	refs := []referenceFingerprint{
+		{
+			EpisodeNumber: 4,
+			Vector:        textutil.NewFingerprint("funny joke audience laugh jewel okona debin benzan"),
+			RawVector:     textutil.NewFingerprint(rawDialogue + strings.Repeat("okona ", 10)),
+		},
+		{
+			EpisodeNumber: 14,
+			Vector:        textutil.NewFingerprint("android positronic comedy holodeck lal daughter"),
+			RawVector:     textutil.NewFingerprint(rawDialogue + strings.Repeat("captain ", 10)),
+		},
+	}
+	scores := buildScoreMatrices(rips, refs)
+	correct := scores.Final[0][0]
+	incorrect := scores.Final[0][1]
+	if correct < 0.90 {
+		t.Fatalf("correct score = %.3f, want raw-lifted high confidence", correct)
+	}
+	if incorrect >= DefaultPolicy().MinSimilarityScore {
+		t.Fatalf("incorrect score = %.3f, want below candidate floor", incorrect)
+	}
+	if scores.Raw[0][1] < rawLiftMinRawSimilarity {
+		t.Fatalf("test setup error: incorrect raw score = %.3f, want >= %.2f", scores.Raw[0][1], rawLiftMinRawSimilarity)
 	}
 }
 
