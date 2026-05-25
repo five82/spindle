@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/fatih/color v1.19.0
-	github.com/five82/drapto v0.5.1-0.20260507000446-fc92240ffc99
+	github.com/five82/drapto v0.5.1-0.20260525175141-74cefd856eb9
 	github.com/gofrs/flock v0.13.0
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/pilebones/go-udev v0.9.1
