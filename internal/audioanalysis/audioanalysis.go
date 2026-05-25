@@ -197,6 +197,21 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		}
 	}
 
+	if err := validateAudioTargetDurations(ctx, encodedPaths); err != nil {
+		reason := "audio_validation: " + err.Error()
+		sess.AddReviewReason(reason)
+		logger.Warn("audio validation failed",
+			"event_type", "audio_validation_failed",
+			"error_hint", err.Error(),
+			"impact", "item routed to review",
+		)
+		logger.Info("validation failure flagged for review",
+			"decision_type", logs.DecisionValidationFailureRoute,
+			"decision_result", "flagged_for_review",
+			"decision_reason", "audio duration validation did not pass",
+		)
+	}
+
 	// Store analysis in envelope attributes.
 	env.Attributes.AudioAnalysis = analysisData
 
