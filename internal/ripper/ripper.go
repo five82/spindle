@@ -22,6 +22,8 @@ import (
 
 const driveAvailableMsg = "Drive is available for next disc."
 
+const ripProgressLogInterval = 3 * time.Minute
+
 // NoTitleOverride means automatic title selection based on media type.
 const NoTitleOverride = -1
 
@@ -50,6 +52,13 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	if restored, err := h.restoreFromRipCache(ctx, sess, rippedDir); restored || err != nil {
+		if err == nil {
+			logger.Info("ripping stage completed",
+				"event_type", "stage_complete",
+				"stage", "ripping",
+				"rip_cache_restored", true,
+			)
+		}
 		return err
 	}
 
@@ -63,6 +72,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if err != nil {
 		return err
 	}
+	logger.Info("ripping plan",
+		"event_type", "ripping_plan",
+		"titles", len(targets),
+		"media_type", sess.Env.Metadata.MediaType,
+	)
 
 	if err := h.ripTitles(ctx, sess, rippedDir, targets); err != nil {
 		return err
@@ -79,7 +93,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	h.cacheFreshRip(logger, sess, rippedDir, len(targets))
 	h.notifyRipComplete(ctx, logger, sess, len(targets))
 
-	logger.Info("ripping stage completed", "event_type", "stage_complete", "stage", "ripping")
+	logger.Info("ripping stage completed",
+		"event_type", "stage_complete",
+		"stage", "ripping",
+		"titles_ripped", len(targets),
+	)
 	return nil
 }
 
@@ -266,6 +284,7 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 	}
 
 	before := listMKVFiles(rippedDir)
+	var lastRipLog time.Time
 	err := makemkv.Rip(ctx, h.cfg.MakeMKV.OpticalDrive, title.ID, rippedDir,
 		time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
 		h.cfg.MakeMKV.MinTitleLength,
@@ -275,6 +294,20 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 				message = p.Message
 			}
 			_ = sess.Progress(overallRipPercent(index, total, p.Percent), message)
+
+			now := time.Now()
+			if lastRipLog.IsZero() || now.Sub(lastRipLog) >= ripProgressLogInterval || p.Percent >= 100 {
+				lastRipLog = now
+				logger.Info("rip progress",
+					"event_type", "rip_progress",
+					"title_id", title.ID,
+					"episode_key", episodeKey,
+					"percent", p.Percent,
+					"current", p.Current,
+					"total", p.Total,
+					"message", message,
+				)
+			}
 		}, logger,
 	)
 	if err != nil {

@@ -79,6 +79,12 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	logger.Info("episode identification stage started", "event_type", "stage_start", "stage", "episode_identification")
+	logger.Info("episode identification plan",
+		"event_type", "episode_identification_plan",
+		"episodes", len(env.Episodes),
+		"season", env.Metadata.SeasonNumber,
+		"disc_number", env.Metadata.DiscNumber,
+	)
 
 	if h.transcriber == nil || h.osClient == nil || h.tmdbClient == nil {
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
@@ -212,7 +218,14 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	_ = sess.Progress(95, "Phase 3/3 - Episode identification complete", stage.WithActiveEpisode(""))
 
-	logger.Info("episode identification stage completed", "event_type", "stage_complete", "stage", "episode_identification")
+	logger.Info("episode identification stage completed",
+		"event_type", "stage_complete",
+		"stage", "episode_identification",
+		"transcribed_episodes", len(ripPrints),
+		"reference_episodes", len(refs),
+		"matched_episodes", len(matches),
+		"needs_review", item.NeedsReview == 1,
+	)
 	return nil
 }
 
@@ -254,6 +267,9 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 			AudioIndex: selectedAudio.Index,
 			Language:   selectedAudio.Language,
 			OutputDir:  workDir,
+			ItemID:     item.ID,
+			EpisodeKey: ep.Key,
+			Purpose:    "episode_identification",
 		})
 		if err != nil {
 			return nil, fmt.Errorf("transcribe %s: %w", ep.Key, err)
@@ -270,10 +286,13 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 			Vector:     fp,
 			RawVector:  fp,
 		})
-		logger.Debug("content ID WhisperX transcript ready",
+		logger.Info("content ID WhisperX transcript ready",
+			"event_type", "contentid_transcript_ready",
 			"episode_key", ep.Key,
 			"subtitle_file", result.SRTPath,
 			"token_count", len(fp.Terms),
+			"segments", result.Segments,
+			"duration_ms", result.TranscribeTime.Milliseconds(),
 		)
 	}
 	return prints, nil

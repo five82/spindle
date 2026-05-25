@@ -91,6 +91,27 @@ func TestParseLogLine_InferDiscSourceFromDiscDetectedLabel(t *testing.T) {
 	if report.InferredDiscSource != "bluray" {
 		t.Fatalf("inferred_disc_source = %q, want bluray", report.InferredDiscSource)
 	}
+	if len(report.Events) != 1 || report.Events[0].EventType != "disc_detected" {
+		t.Fatalf("expected disc_detected info event, got %+v", report.Events)
+	}
+}
+
+func TestParseLogLine_CapturesInfoEventWithoutDecision(t *testing.T) {
+	item := &httpapi.ItemResponse{ID: 24}
+	report := &LogAnalysis{}
+
+	parseLogLine(`{"time":"2026-04-04T21:41:09Z","level":"INFO","msg":"encoding progress","item_id":24,"event_type":"encoding_progress","percent":42.5,"eta_seconds":3600}`,
+		item, report)
+
+	if len(report.Events) != 1 {
+		t.Fatalf("expected 1 info event, got %d", len(report.Events))
+	}
+	if report.Events[0].EventType != "encoding_progress" {
+		t.Fatalf("event_type = %q, want encoding_progress", report.Events[0].EventType)
+	}
+	if report.Events[0].Extras["percent"] != 42.5 {
+		t.Fatalf("percent extra = %v, want 42.5", report.Events[0].Extras["percent"])
+	}
 }
 
 func TestParseLogLine_InferMediaHintFromTMDBSearchDecision(t *testing.T) {

@@ -75,6 +75,7 @@ type LogAnalysis struct {
 	Decisions          []LogDecision `json:"decisions,omitempty"`
 	Warnings           []LogEntry    `json:"warnings,omitempty"`
 	Errors             []LogEntry    `json:"errors,omitempty"`
+	Events             []LogEntry    `json:"events,omitempty"`
 	Stages             []StageEvent  `json:"stages,omitempty"`
 }
 
@@ -88,7 +89,7 @@ type LogDecision struct {
 	Extras         map[string]any `json:"extras,omitempty"`
 }
 
-// LogEntry captures a warning or error log entry.
+// LogEntry captures a warning, error, or item-specific informational event.
 type LogEntry struct {
 	TS        string         `json:"ts"`
 	Level     string         `json:"level"`

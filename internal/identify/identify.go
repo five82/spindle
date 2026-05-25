@@ -337,6 +337,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"stage", "identification",
 		"disc_title", item.DiscTitle,
 	)
+	logger.Info("identification plan",
+		"event_type", "identification_plan",
+		"disc_title", item.DiscTitle,
+		"optical_drive", h.cfg.MakeMKV.OpticalDrive,
+	)
 
 	_ = sess.Progress(5, "Phase 1/3 - Cleaning stale staging")
 
@@ -400,6 +405,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger.Info("identification stage completed",
 		"event_type", "stage_complete",
 		"stage", "identification",
+		"media_type", result.MediaType,
+		"tmdb_id", result.Envelope.Metadata.ID,
+		"title", result.Envelope.Metadata.Title,
 	)
 	return nil
 }

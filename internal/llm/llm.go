@@ -108,14 +108,28 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 	const maxAttempts = 5
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second}
 
+	start := time.Now()
+	c.logger.Info("LLM request started",
+		"event_type", "llm_request_start",
+		"model", c.model,
+	)
+
 	var lastErr error
 	for attempt := range maxAttempts {
+		attemptStart := time.Now()
 		content, err := c.doRequest(ctx, bodyBytes)
 		if err == nil {
 			sanitized := sanitizeJSON(content)
 			if unmarshalErr := json.Unmarshal([]byte(sanitized), result); unmarshalErr != nil {
 				return fmt.Errorf("unmarshal response: %w", unmarshalErr)
 			}
+			c.logger.Info("LLM request completed",
+				"event_type", "llm_request_complete",
+				"model", c.model,
+				"attempt", attempt+1,
+				"attempt_duration_ms", time.Since(attemptStart).Milliseconds(),
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
 			return nil
 		}
 

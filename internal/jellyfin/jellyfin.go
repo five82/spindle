@@ -38,6 +38,8 @@ func (c *Client) Refresh(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
+	start := time.Now()
+	c.logger.Info("Jellyfin library refresh started", "event_type", "jellyfin_refresh_start")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/Library/Refresh", nil)
 	if err != nil {
 		return fmt.Errorf("jellyfin refresh: create request: %w", err)
@@ -53,7 +55,11 @@ func (c *Client) Refresh(ctx context.Context) error {
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("jellyfin refresh: status %d", resp.StatusCode)
 	}
-	c.logger.Info("Jellyfin library refresh triggered", "event_type", "jellyfin_refresh")
+	c.logger.Info("Jellyfin library refresh triggered",
+		"event_type", "jellyfin_refresh",
+		"status", resp.StatusCode,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
 	return nil
 }
 

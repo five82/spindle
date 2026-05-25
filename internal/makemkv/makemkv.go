@@ -59,6 +59,7 @@ func Scan(ctx context.Context, device string, timeout time.Duration, minLength i
 		"event_type", "makemkv_scan_start",
 		"device", src,
 	)
+	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, "makemkvcon", "--robot", "--progress=-same", "info", src, minLenFlag)
 
@@ -110,6 +111,7 @@ func Scan(ctx context.Context, device string, timeout time.Duration, minLength i
 		"device", src,
 		"titles_found", len(info.Titles),
 		"disc_name", info.Name,
+		"duration_ms", time.Since(start).Milliseconds(),
 	)
 	return info, nil
 }
@@ -161,6 +163,7 @@ func Rip(ctx context.Context, device string, titleID int, outputDir string, time
 		"title_id", titleID,
 		"output_dir", outputDir,
 	)
+	start := time.Now()
 
 	// Snapshot existing .mkv files so we can identify the new one
 	// produced by this rip (independent of file name heuristics).
@@ -300,6 +303,7 @@ func Rip(ctx context.Context, device string, titleID int, outputDir string, time
 		"failed_count", failedCount,
 		"new_files", len(newFiles),
 		"warning_msg_count", len(warningMsgs),
+		"duration_ms", time.Since(start).Milliseconds(),
 	)
 	return nil
 }

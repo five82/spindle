@@ -102,7 +102,13 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"item_id", item.ID,
 	)
 
-	logger.Info("encoding stage completed", "event_type", "stage_complete", "stage", "encoding")
+	logger.Info("encoding stage completed",
+		"event_type", "stage_complete",
+		"stage", "encoding",
+		"jobs", len(jobs),
+		"encoded_size_bytes", summary.encodedSize,
+		"original_size_bytes", summary.originalSize,
+	)
 	return nil
 }
 
@@ -352,6 +358,9 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 // throttleInterval is the minimum interval between progress persists.
 const throttleInterval = 2 * time.Second
 
+// encodingProgressLogInterval is the minimum interval between INFO progress logs.
+const encodingProgressLogInterval = 3 * time.Minute
+
 // spindleReporter implements drapto.Reporter, adapting Drapto progress events
 // into encodingstate.Snapshot updates on the queue item. Progress persistence
 // is throttled to every 2 seconds.
@@ -363,6 +372,7 @@ type spindleReporter struct {
 	completedJobs int
 	totalJobs     int
 	lastPush      time.Time
+	lastLog       time.Time
 	now           func() time.Time // injectable clock for testing
 }
 
@@ -409,6 +419,20 @@ func (r *spindleReporter) EncodingProgress(p drapto.ProgressSnapshot) {
 			"event_type", "progress_persist_error",
 			"error_hint", err.Error(),
 			"impact", "progress display may be stale",
+		)
+	}
+
+	if r.lastLog.IsZero() || now.Sub(r.lastLog) >= encodingProgressLogInterval || p.Percent >= 100 {
+		r.lastLog = now
+		r.logger.Info("encoding progress",
+			"event_type", "encoding_progress",
+			"episode_key", r.episodeKey,
+			"percent", p.Percent,
+			"fps", p.FPS,
+			"speed", p.Speed,
+			"eta_seconds", p.ETA.Seconds(),
+			"current_frame", p.CurrentFrame,
+			"total_frames", p.TotalFrames,
 		)
 	}
 }

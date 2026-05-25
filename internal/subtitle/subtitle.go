@@ -55,6 +55,9 @@ type GenerateDisplaySubtitleRequest struct {
 	DisplayPath     string
 	WorkDir         string
 	Language        string
+	ItemID          int64
+	EpisodeKey      string
+	Purpose         string
 	Transcriber     interface {
 		SelectPrimaryAudioTrack(context.Context, string, string) (transcription.SelectedAudio, error)
 		Transcribe(context.Context, transcription.TranscribeRequest, ...transcription.ProgressFunc) (*transcription.TranscribeResult, error)
@@ -107,6 +110,9 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 		AudioIndex: selectedAudio.Index,
 		Language:   selectedAudio.Language,
 		OutputDir:  req.WorkDir,
+		ItemID:     req.ItemID,
+		EpisodeKey: req.EpisodeKey,
+		Purpose:    req.Purpose,
 	}, req.Progress)
 	if err != nil {
 		return nil, &DisplaySubtitleError{Op: "transcribe", Err: err}
@@ -171,6 +177,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	jobs, skippedCompleted := h.planSubtitleJobs(sess)
+	logger.Info("subtitle plan",
+		"event_type", "subtitle_plan",
+		"jobs", len(jobs),
+		"skipped_completed", len(skippedCompleted),
+	)
 	h.logSkippedSubtitleJobs(logger, skippedCompleted)
 
 	summary, err := h.processSubtitleJobs(ctx, sess, jobs)
@@ -292,6 +303,9 @@ func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Sessi
 		VideoPath:   asset.Path,
 		WorkDir:     workDir,
 		Language:    "en",
+		ItemID:      item.ID,
+		EpisodeKey:  key,
+		Purpose:     "subtitle_generation",
 		Transcriber: h.transcriber,
 		Progress: func(phase transcription.Phase, elapsed time.Duration) {
 			message := item.ProgressMessage
@@ -479,7 +493,13 @@ func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSu
 		return fmt.Errorf("all %d subtitle job(s) failed", summary.attempted)
 	}
 
-	sess.Logger.Info("subtitle stage completed", "event_type", "stage_complete", "stage", "subtitling")
+	sess.Logger.Info("subtitle stage completed",
+		"event_type", "stage_complete",
+		"stage", "subtitling",
+		"attempted", summary.attempted,
+		"succeeded", summary.succeeded,
+		"failed", summary.failed,
+	)
 	return nil
 }
 
@@ -572,6 +592,14 @@ func (h *Handler) muxSubtitles(
 	base := strings.TrimSuffix(filepath.Base(videoPath), ext)
 	outPath := filepath.Join(dir, base+".subtitled"+ext)
 
+	logger.Info("subtitle mux started",
+		"event_type", "mux_start",
+		"episode_key", key,
+		"video_path", videoPath,
+		"subtitle_path", srtPath,
+		"output_path", outPath,
+	)
+	muxStart := time.Now()
 	muxedPath, err := MuxSubtitleTrack(ctx, MuxRequest{
 		VideoPath:  videoPath,
 		OutputPath: outPath,
@@ -585,6 +613,7 @@ func (h *Handler) muxSubtitles(
 		"event_type", "mux_complete",
 		"episode_key", key,
 		"output_path", muxedPath,
+		"duration_ms", time.Since(muxStart).Milliseconds(),
 	)
 
 	return muxedPath, nil

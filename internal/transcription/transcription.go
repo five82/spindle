@@ -49,6 +49,9 @@ type TranscribeRequest struct {
 	Language   string
 	OutputDir  string
 	Model      string // Override default model
+	ItemID     int64
+	EpisodeKey string
+	Purpose    string
 }
 
 // Phase identifies a transcription progress phase.
@@ -125,9 +128,11 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	}
 
 	s.logger.Info("extracting audio for transcription",
-		"event_type", "transcription_extract",
-		"input", req.InputPath,
-		"audio_index", req.AudioIndex,
+		transcriptionLogFields(req,
+			"event_type", "transcription_extract",
+			"input", req.InputPath,
+			"output_dir", req.OutputDir,
+		)...,
 	)
 	extractStart := time.Now()
 	ffmpegCmd := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...)
@@ -135,6 +140,13 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		return nil, fmt.Errorf("ffmpeg audio extraction: %w: %s", err, output)
 	}
 	extractTime := time.Since(extractStart)
+	s.logger.Info("audio extraction completed",
+		transcriptionLogFields(req,
+			"event_type", "transcription_extract_complete",
+			"output", wavPath,
+			"duration_ms", extractTime.Milliseconds(),
+		)...,
+	)
 	if onProgress != nil {
 		onProgress(PhaseExtract, extractTime)
 	}
@@ -145,12 +157,14 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 	}
 	invocation := s.buildWhisperXInvocation(wavPath, req.OutputDir, model, req.Language)
 	s.logger.Info("running WhisperX transcription",
-		"event_type", "transcription_whisperx",
-		"decision_type", "transcription_profile",
-		"decision_result", invocation.TranscriptionProfileName,
-		"decision_reason", fmt.Sprintf("vad_method=%s device=%s compute_type=%s condition_on_previous_text=%t batch_size=%d chunk_size=%d", s.vadMethod, invocation.Device, invocation.ComputeType, invocation.ConditionOnPreviousText, whisperXBatchSize, whisperXVADChunkSize),
-		"model", model,
-		"language", req.Language,
+		transcriptionLogFields(req,
+			"event_type", "transcription_whisperx",
+			"decision_type", "transcription_profile",
+			"decision_result", invocation.TranscriptionProfileName,
+			"decision_reason", fmt.Sprintf("vad_method=%s device=%s compute_type=%s condition_on_previous_text=%t batch_size=%d chunk_size=%d", s.vadMethod, invocation.Device, invocation.ComputeType, invocation.ConditionOnPreviousText, whisperXBatchSize, whisperXVADChunkSize),
+			"model", model,
+			"language", req.Language,
+		)...,
 	)
 	transcribeStart := time.Now()
 	whisperCmd := exec.CommandContext(ctx, whisperXCommand, invocation.Args...)
@@ -187,7 +201,33 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		TranscribeTime: transcribeTime,
 	}
 
+	s.logger.Info("WhisperX transcription completed",
+		transcriptionLogFields(req,
+			"event_type", "transcription_whisperx_complete",
+			"segments", segments,
+			"content_duration_s", duration,
+			"duration_ms", transcribeTime.Milliseconds(),
+			"srt_path", srtPath,
+			"json_path", jsonPath,
+		)...,
+	)
+
 	return result, nil
+}
+
+func transcriptionLogFields(req TranscribeRequest, fields ...any) []any {
+	out := make([]any, 0, len(fields)+8)
+	if req.ItemID != 0 {
+		out = append(out, "item_id", req.ItemID)
+	}
+	if req.EpisodeKey != "" {
+		out = append(out, "episode_key", req.EpisodeKey)
+	}
+	if req.Purpose != "" {
+		out = append(out, "purpose", req.Purpose)
+	}
+	out = append(out, "audio_index", req.AudioIndex)
+	return append(out, fields...)
 }
 
 func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language string) whisperXInvocation {

@@ -344,7 +344,8 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis) 
 	}
 
 	// Decisions.
-	if decType := getString(entry, "decision_type"); decType != "" {
+	decType := getString(entry, "decision_type")
+	if decType != "" {
 		report.Decisions = append(report.Decisions, LogDecision{
 			TS:             ts,
 			DecisionType:   decType,
@@ -380,13 +381,27 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis) 
 	}
 
 	// Stage events.
-	if strings.HasPrefix(eventType, "stage_") {
+	isStageEvent := strings.HasPrefix(eventType, "stage_")
+	if isStageEvent {
 		report.Stages = append(report.Stages, StageEvent{
 			TS:              ts,
 			EventType:       eventType,
 			Stage:           getString(entry, "stage"),
 			Message:         msg,
 			DurationSeconds: getStageDurationSeconds(entry),
+		})
+	}
+
+	// Item-specific INFO events that are not decisions or stage transitions.
+	// These carry progress/operation visibility such as encoding_progress,
+	// transcription completions, mux/copy progress, and plan summaries.
+	if strings.EqualFold(level, "INFO") && eventType != "" && decType == "" && !isStageEvent {
+		report.Events = append(report.Events, LogEntry{
+			TS:        ts,
+			Level:     level,
+			Message:   msg,
+			EventType: eventType,
+			Extras:    buildExtras(entry),
 		})
 	}
 }

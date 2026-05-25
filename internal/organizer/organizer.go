@@ -26,6 +26,8 @@ import (
 
 const reviewReasonDirMaxBytes = 96
 
+const copyProgressLogInterval = 3 * time.Minute
+
 // Handler implements stage.Handler for organization.
 type Handler struct {
 	cfg      *config.Config
@@ -54,6 +56,13 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
 	)
 
+	logger.Info("organization plan",
+		"event_type", "organization_plan",
+		"asset_keys", len(keys),
+		"media_type", env.Metadata.MediaType,
+		"needs_review", item.NeedsReview == 1,
+	)
+
 	libraryCount := 0
 	reviewCount := 0
 
@@ -69,7 +78,12 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			}
 			reviewCount = len(keys)
 			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
-			logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
+			logger.Info("organization stage completed",
+				"event_type", "stage_complete",
+				"stage", "organizing",
+				"library_count", libraryCount,
+				"review_count", reviewCount,
+			)
 			return nil
 		}
 
@@ -85,7 +99,12 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			}
 			reviewCount = len(reviewKeys)
 			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
-			logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
+			logger.Info("organization stage completed",
+				"event_type", "stage_complete",
+				"stage", "organizing",
+				"library_count", libraryCount,
+				"review_count", reviewCount,
+			)
 			return nil
 		}
 		logger.Info("item partially organized",
@@ -156,7 +175,12 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
 	h.cleanupStaging(logger, item)
 
-	logger.Info("organization stage completed", "event_type", "stage_complete", "stage", "organizing")
+	logger.Info("organization stage completed",
+		"event_type", "stage_complete",
+		"stage", "organizing",
+		"library_count", libraryCount,
+		"review_count", reviewCount,
+	)
 	return nil
 }
 
@@ -342,6 +366,9 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 		}
 		logger.Info(fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key),
 			"event_type", eventType,
+			"episode_key", key,
+			"source_path", asset.Path,
+			"dest_path", destPath,
 		)
 		_ = sess.Progress(overallBytePercent(completedBytes, totalBytes), fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key), stage.WithProgressBytes(completedBytes, totalBytes))
 
@@ -349,11 +376,28 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 		if target == "review" {
 			transfer = moveOrCopyWithProgress
 		}
+		copyStart := time.Now()
+		var lastCopyLog time.Time
 		if err := transfer(asset.Path, destPath, func(p fileutil.CopyProgress) {
 			item.ProgressBytesCopied = completedBytes + p.BytesCopied
 			item.ProgressTotalBytes = totalBytes
 			item.ProgressPercent = overallBytePercent(item.ProgressBytesCopied, totalBytes)
 			pushProgress()
+
+			now := time.Now()
+			if lastCopyLog.IsZero() || now.Sub(lastCopyLog) >= copyProgressLogInterval || p.BytesCopied >= p.TotalBytes {
+				lastCopyLog = now
+				logger.Info("copy progress",
+					"event_type", "copy_progress",
+					"episode_key", key,
+					"organize_target", target,
+					"bytes_copied", p.BytesCopied,
+					"total_bytes", p.TotalBytes,
+					"overall_bytes_copied", item.ProgressBytesCopied,
+					"overall_total_bytes", totalBytes,
+					"overall_percent", item.ProgressPercent,
+				)
+			}
 		}); err != nil {
 			if ctx.Err() != nil {
 				_ = os.Remove(destPath)
@@ -367,6 +411,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 			"episode_key", key,
 			"dest_path", destPath,
 			"organize_target", target,
+			"duration_ms", time.Since(copyStart).Milliseconds(),
 		)
 		copySidecarSubtitle(logger, asset.Path, destPath)
 		if err := sess.SaveAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath}); err != nil {

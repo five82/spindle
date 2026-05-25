@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/language"
@@ -96,7 +97,13 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if len(encodedPaths) == 0 {
 		return fmt.Errorf("no encoded assets available for audio analysis")
 	}
-	logger.Debug("collected encoded assets for analysis", "count", len(encodedPaths))
+	logger.Info("audio analysis plan",
+		"event_type", "audio_analysis_plan",
+		"encoded_assets", len(encodedPaths),
+		"asset_keys", len(keys),
+		"commentary_enabled", h.cfg.Commentary.Enabled,
+		"llm_configured", h.llmClient != nil,
+	)
 
 	analysisData := &ripspec.AudioAnalysisData{}
 	_ = sess.Progress(5, "Phase 1/3 - Commentary detection", stage.WithActiveEpisode(keys[0]))
@@ -113,13 +120,23 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			return fmt.Errorf("ffprobe %s: %w", path, err)
 		}
 
-		comms, excluded := h.detectCommentary(ctx, logger, result, path, item.DiscFingerprint, keys[0])
+		comms, excluded := h.detectCommentary(ctx, sess, result, path, item.DiscFingerprint, keys[0])
 		analysisData.CommentaryTracks = comms
 		analysisData.ExcludedTracks = excluded
 
 		for _, c := range comms {
 			commentaryIndices = append(commentaryIndices, c.Index)
 		}
+	} else {
+		reason := "commentary disabled"
+		if h.cfg.Commentary.Enabled {
+			reason = "LLM client not configured"
+		}
+		logger.Info("commentary detection skipped",
+			"decision_type", logs.DecisionCommentaryClassification,
+			"decision_result", "skipped",
+			"decision_reason", reason,
+		)
 	}
 
 	// Phase 2: Audio refinement on encoded files.
@@ -222,7 +239,15 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return err
 	}
 
-	logger.Info("audio analysis stage completed", "event_type", "stage_complete", "stage", "audio_analysis")
+	logger.Info("audio analysis stage completed",
+		"event_type", "stage_complete",
+		"stage", "audio_analysis",
+		"primary_audio_index", analysisData.PrimaryTrack.Index,
+		"primary_audio", analysisData.PrimaryDescription,
+		"commentary_tracks", len(analysisData.CommentaryTracks),
+		"excluded_tracks", len(analysisData.ExcludedTracks),
+		"encoded_assets", len(encodedPaths),
+	)
 	return nil
 }
 
@@ -235,12 +260,14 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 // conservatively preserved as commentary.
 func (h *Handler) detectCommentary(
 	ctx context.Context,
-	logger *slog.Logger,
+	sess *stage.Session,
 	result *ffprobe.Result,
 	path string,
 	fingerprint string,
 	epKey string,
 ) ([]ripspec.CommentaryTrackRef, []ripspec.ExcludedTrackRef) {
+	logger := sess.Logger
+	itemID := sess.Item.ID
 	var (
 		comms    []ripspec.CommentaryTrackRef
 		excluded []ripspec.ExcludedTrackRef
@@ -280,12 +307,34 @@ func (h *Handler) detectCommentary(
 		return nil, nil
 	}
 
+	candidateCount := len(audioStreams) - 1
+	logger.Info("commentary detection plan",
+		"decision_type", logs.DecisionCommentaryClassification,
+		"decision_result", "analyzing",
+		"decision_reason", fmt.Sprintf("primary_audio_index=%d candidates=%d", primaryAudioIdx, candidateCount),
+		"episode_key", epKey,
+		"audio_streams", len(audioStreams),
+		"candidate_tracks", candidateCount,
+	)
+
 	// Examine each non-primary audio track.
+	candidateNumber := 0
 	for _, as := range audioStreams {
 		if as.audioIndex == primaryAudioIdx {
 			continue
 		}
+		candidateNumber++
 		idx := as.absIndex
+		message := fmt.Sprintf("Phase 1/3 - Commentary detection (candidate %d/%d: similarity check)", candidateNumber, candidateCount)
+		_ = sess.Progress(commentaryCandidatePercent(candidateNumber, candidateCount, 0), message, stage.WithActiveEpisode(epKey))
+		logger.Info("commentary candidate analysis started",
+			"event_type", "commentary_candidate_start",
+			"episode_key", epKey,
+			"candidate_number", candidateNumber,
+			"candidate_count", candidateCount,
+			"audio_index", as.audioIndex,
+			"stream_index", idx,
+		)
 		stream := result.Streams[idx]
 		rawLang, allowed := allowedAudioLanguage(stream.Tags)
 		if !allowed {
@@ -306,7 +355,7 @@ func (h *Handler) detectCommentary(
 		// Stereo similarity check: compare transcription fingerprints of
 		// the primary and candidate tracks.
 		if h.transcriber != nil {
-			sim, simErr := h.stereoSimilarity(ctx, path, primaryAudioIdx, as.audioIndex, fingerprint, epKey)
+			sim, simErr := h.stereoSimilarity(ctx, logger, path, itemID, primaryAudioIdx, as.audioIndex, fingerprint, epKey)
 			if simErr != nil {
 				logger.Warn("stereo similarity check failed",
 					"event_type", "commentary_detection_failed",
@@ -332,13 +381,24 @@ func (h *Handler) detectCommentary(
 		}
 
 		// LLM classification via transcription.
-		ref := h.classifyTrack(ctx, logger, path, as.audioIndex, stream, fingerprint, epKey)
+		message = fmt.Sprintf("Phase 1/3 - Commentary detection (candidate %d/%d: LLM classification)", candidateNumber, candidateCount)
+		_ = sess.Progress(commentaryCandidatePercent(candidateNumber, candidateCount, 0.6), message, stage.WithActiveEpisode(epKey))
+		ref := h.classifyTrack(ctx, logger, path, itemID, as.audioIndex, stream, fingerprint, epKey)
 		if ref != nil {
 			comms = append(comms, *ref)
 		}
 	}
 
+	_ = sess.Progress(40, fmt.Sprintf("Phase 1/3 - Commentary detection complete (%d commentary, %d excluded)", len(comms), len(excluded)), stage.WithActiveEpisode(epKey))
 	return comms, excluded
+}
+
+func commentaryCandidatePercent(candidateNumber, candidateCount int, fraction float64) float64 {
+	if candidateCount <= 0 {
+		return 5
+	}
+	completed := float64(candidateNumber - 1)
+	return 5 + (35 * (completed + fraction) / float64(candidateCount))
 }
 
 // stereoSimilarity computes the cosine similarity between transcription
@@ -346,15 +406,29 @@ func (h *Handler) detectCommentary(
 // primary audio.
 func (h *Handler) stereoSimilarity(
 	ctx context.Context,
+	logger *slog.Logger,
 	path string,
+	itemID int64,
 	primaryIdx, candidateIdx int,
 	fingerprint, epKey string,
 ) (float64, error) {
+	logger.Info("stereo similarity check started",
+		"event_type", "commentary_stereo_check_start",
+		"decision_type", logs.DecisionCommentaryStereoFilter,
+		"decision_result", "started",
+		"decision_reason", fmt.Sprintf("primary_audio_index=%d candidate_audio_index=%d", primaryIdx, candidateIdx),
+		"episode_key", epKey,
+		"primary_audio_index", primaryIdx,
+		"candidate_audio_index", candidateIdx,
+	)
 	primaryResult, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 		InputPath:  path,
 		AudioIndex: primaryIdx,
 		Language:   "en",
 		OutputDir:  tempOutputDir(fingerprint, epKey, primaryIdx),
+		ItemID:     itemID,
+		EpisodeKey: epKey,
+		Purpose:    "commentary_similarity_primary",
 	})
 	if err != nil {
 		return 0, fmt.Errorf("transcribe primary: %w", err)
@@ -365,6 +439,9 @@ func (h *Handler) stereoSimilarity(
 		AudioIndex: candidateIdx,
 		Language:   "en",
 		OutputDir:  tempOutputDir(fingerprint, epKey, candidateIdx),
+		ItemID:     itemID,
+		EpisodeKey: epKey,
+		Purpose:    "commentary_similarity_candidate",
 	})
 	if err != nil {
 		return 0, fmt.Errorf("transcribe candidate: %w", err)
@@ -382,7 +459,17 @@ func (h *Handler) stereoSimilarity(
 	fpA := textutil.NewFingerprint(string(primaryText))
 	fpB := textutil.NewFingerprint(string(candidateText))
 
-	return textutil.CosineSimilarity(fpA, fpB), nil
+	similarity := textutil.CosineSimilarity(fpA, fpB)
+	logger.Info("stereo similarity check completed",
+		"decision_type", logs.DecisionCommentaryStereoFilter,
+		"decision_result", "measured",
+		"decision_reason", fmt.Sprintf("similarity %.3f", similarity),
+		"episode_key", epKey,
+		"primary_audio_index", primaryIdx,
+		"candidate_audio_index", candidateIdx,
+		"similarity", similarity,
+	)
+	return similarity, nil
 }
 
 // classifyTrack transcribes a candidate audio track and sends the transcript
@@ -392,6 +479,7 @@ func (h *Handler) classifyTrack(
 	ctx context.Context,
 	logger *slog.Logger,
 	path string,
+	itemID int64,
 	idx int,
 	stream ffprobe.Stream,
 	fingerprint, epKey string,
@@ -400,12 +488,21 @@ func (h *Handler) classifyTrack(
 		return nil
 	}
 
+	logger.Info("commentary classification transcription started",
+		"event_type", "commentary_classification_transcription_start",
+		"episode_key", epKey,
+		"audio_index", idx,
+		"stream_index", stream.Index,
+	)
 	result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 		InputPath:  path,
 		AudioIndex: idx,
 		Language:   "en",
 		OutputDir:  tempOutputDir(fingerprint, epKey, idx),
 		Model:      h.cfg.Commentary.WhisperXModel,
+		ItemID:     itemID,
+		EpisodeKey: epKey,
+		Purpose:    "commentary_classification",
 	})
 	if err != nil {
 		logger.Warn("commentary transcription failed, conservatively marking as commentary",
@@ -441,6 +538,13 @@ func (h *Handler) classifyTrack(
 	// Build user prompt.
 	userPrompt := buildCommentaryUserPrompt(stream, string(transcript))
 
+	logger.Info("LLM commentary classification started",
+		"event_type", "commentary_llm_start",
+		"episode_key", epKey,
+		"audio_index", idx,
+		"stream_index", stream.Index,
+	)
+	llmStart := time.Now()
 	var resp commentaryLLMResponse
 	if err := h.llmClient.CompleteJSON(ctx, commentarySystemPrompt, userPrompt, &resp); err != nil {
 		logger.Warn("LLM commentary classification failed, conservatively marking as commentary",
@@ -456,6 +560,14 @@ func (h *Handler) classifyTrack(
 			Reason:     fmt.Sprintf("llm classification failed: %v", err),
 		}
 	}
+
+	logger.Info("LLM commentary classification completed",
+		"event_type", "commentary_llm_complete",
+		"episode_key", epKey,
+		"audio_index", idx,
+		"stream_index", stream.Index,
+		"duration_ms", time.Since(llmStart).Milliseconds(),
+	)
 
 	if resp.Decision == "commentary" && resp.Confidence >= h.cfg.Commentary.ConfidenceThreshold {
 		logger.Info("track classified as commentary",

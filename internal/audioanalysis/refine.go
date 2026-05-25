@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/audio"
@@ -194,6 +195,7 @@ func remuxAudioTracks(ctx context.Context, logger *slog.Logger, path string, kep
 	args = append(args, "-c", "copy", "-disposition:a", "0", "-disposition:a:0", "default")
 	args = append(args, tmpPath)
 
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -213,6 +215,7 @@ func remuxAudioTracks(ctx context.Context, logger *slog.Logger, path string, kep
 		"decision_result", "completed",
 		"decision_reason", fmt.Sprintf("kept %d audio tracks", len(keptAudioIndices)),
 		"path", path,
+		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
 	return nil

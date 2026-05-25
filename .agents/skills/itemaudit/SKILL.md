@@ -31,7 +31,7 @@ spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 This produces an agent-facing JSON report. The schema may evolve with this skill; treat it as diagnostic input rather than a stable public API. It contains:
 - **`item`**: Queue item summary (`stage`, progress, review flags, paths, timestamps)
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply, resolved media type, media hint, disc source)
-- **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`)
+- **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), item-specific INFO events/progress (`logs.events` with `event_type` and extras), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`)
 - **`rip_cache`**: Cache metadata (disc title, cached_at, title_count, total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted (already in parsed `envelope`).
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
 - **`encoding`**: Encoding details snapshot (crop, validation, config, result). Preset settings are omitted; validation results capture pass/fail.
@@ -124,7 +124,7 @@ The `stage_gate` object in the audit-gather output contains:
 
 ### Phase 2: Log Analysis (when `phase_logs` is true)
 
-Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from the audit-gather output. **Go beyond simple error counts.**
+Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `logs.stages` from the audit-gather output. **Go beyond simple error counts.**
 
 1. **Decision anomalies** (from `logs.decisions`):
    - Low confidence scores on decisions that were accepted anyway
@@ -134,10 +134,11 @@ Analyze `logs.decisions`, `logs.warnings`, `logs.errors`, and `logs.stages` from
    - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips)
    - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at `logs.path`)
 
-2. **Timing anomalies** (from `logs.stages`):
+2. **Timing/progress anomalies** (from `logs.stages` and `logs.events`):
    - Stages taking unusually long or short (use `duration_seconds` when available)
    - Large gaps between stage events suggesting hangs
    - Repeated retry attempts
+   - Use `logs.events` for long-running work visibility: `encoding_progress`, `rip_progress`, `copy_progress`, `transcription_extract[_complete]`, `transcription_whisperx[_complete]`, `commentary_candidate_start`, `commentary_stereo_check_start`, `commentary_classification_transcription_start`, `commentary_llm_start/_complete`, `mux_start/_complete`, `jellyfin_refresh_start`, and plan events such as `*_plan`
 
 3. **Data flow anomalies**:
    - Track counts changing unexpectedly between stages
@@ -314,7 +315,7 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
 2. **Subtitle generation outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `logs.decisions`):
    - Spindle now generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks and does not fetch OpenSubtitles output subtitles.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
-   - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. If transcription timing matters, inspect raw `event_type=transcription_complete` lines in `logs.path`.
+   - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to raw `logs.path`.
    - Treat additional generated subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
 
 3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
@@ -470,6 +471,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 #### Log Analysis
 - Log path: <logs.path>
 - Total log entries: <logs.total_lines>
+- INFO events/progress: <summarize notable logs.events; expand long-running progress/timing anomalies only>
 - WARN events: <count> (list if > 0)
 - ERROR events: <count> (list if > 0)
 - Key decisions: <from analysis.decision_groups — expand only anomalous decisions>
