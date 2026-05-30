@@ -188,7 +188,8 @@ fi
 
 if [ -n "$COOLDOWN_OUTPUT" ]; then
     cooldown_count=$(printf '%s\n' "$COOLDOWN_OUTPUT" | grep -c .)
-    print_success "$cooldown_count recent Go module update(s) are in the ${UPDATE_COOLDOWN_DAYS}-day cooldown"
+    print_success "$cooldown_count recent Go module update(s) are in the ${UPDATE_COOLDOWN_DAYS}-day cooldown:"
+    printf '%s\n' "$COOLDOWN_OUTPUT" | sed 's/^/   /'
 fi
 
 if [ -d .forgejo/workflows ]; then
