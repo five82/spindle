@@ -31,6 +31,7 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 
 Architectural churn is embraced. Optimize for clarity, not backwards compatibility.
 
+- Apply YAGNI ("You Aren't Gonna Need It") and KISS ("Keep It Simple, Stupid"). Build only what the current task requires -- do not add abstractions, generality, or "future-proofing" for needs that do not yet exist. When two approaches work, take the simpler one. (Configuration/knobs are covered by the next bullet.)
 - Find the smallest maintainable change. Prefer stronger invariants, deletion, and consolidation over new code.
 - Break things forward. Remove deprecated paths; no compatibility shims.
 - Simplify by reducing concepts, branches, states, and files. Do not simplify by adding abstraction layers.
