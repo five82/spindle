@@ -29,19 +29,14 @@ GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.co
 
 ## Critical Expectations
 
-Architectural churn is embraced. Optimize for clarity, not backwards compatibility.
+Architectural churn is embraced: break things forward, remove deprecated paths, and optimize for clarity rather than backwards compatibility.
 
-- Apply YAGNI ("You Aren't Gonna Need It") and KISS ("Keep It Simple, Stupid"). Build only what the current task requires -- do not add abstractions, generality, or "future-proofing" for needs that do not yet exist. When two approaches work, take the simpler one. (Configuration/knobs are covered by the next bullet.)
-- Find the smallest maintainable change. Prefer stronger invariants, deletion, and consolidation over new code.
-- Break things forward. Remove deprecated paths; no compatibility shims.
-- Simplify by reducing concepts, branches, states, and files. Do not simplify by adding abstraction layers.
-- Prefer maintainable architecture and explicit logging over clever tricks.
-- Identify and close real gaps. Avoid over-engineering and unlikely edge cases.
+- Apply YAGNI ("You Aren't Gonna Need It") and KISS ("Keep It Simple, Stupid"): build only what the current task requires; when two approaches work, take the simpler one.
+- Preserve user-visible behavior unless intentionally changing it. Removing distinct output (log messages, CLI feedback, status indicators) is a behavior change, not a simplification.
+- Keep decisions observable without DEBUG; if a decision changes what happens next, log it.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
-- Keep edits ASCII unless the file already uses extended characters.
 - When troubleshooting, gather evidence and test. Do not blindly guess.
-- Observability is key. If a decision changes what happens next, it must be visible without enabling DEBUG.
-- Simplification must not remove user-visible functionality. Eliminating a code path that produces distinct output (log messages, CLI feedback, status indicators) is a behavior change, not a simplification.
+- Keep edits ASCII unless the file already uses extended characters.
 - When examining reference code, understand why it works before adapting it. Do not copy-paste.
 
 ## Complexity Budget
