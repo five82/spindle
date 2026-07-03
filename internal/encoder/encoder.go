@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/five82/drapto"
+	"codeberg.org/five82/reel"
+
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/logs"
@@ -112,47 +113,16 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	return nil
 }
 
-func (h *Handler) newEncoder(logger *slog.Logger) (*drapto.Encoder, error) {
-	// Reload encoding config from disk (changes take effect without restart).
-	encCfg, reloadErr := config.ReloadEncoding(h.cfg)
-	if reloadErr != nil {
-		logger.Warn("encoding config reload failed, using existing config",
-			"event_type", "config_reload_error",
-			"error_hint", reloadErr.Error(),
-			"impact", "encoding will use config from daemon startup",
-		)
-	}
-
-	var opts []drapto.Option
-	opts = append(opts, drapto.WithSVTAV1Preset(uint8(encCfg.SVTAV1Preset)))
-	logger.Info("SVT-AV1 preset applied",
+func (h *Handler) newEncoder(logger *slog.Logger) (*reel.Encoder, error) {
+	logger.Info("Reel target-quality mode selected",
 		"decision_type", logs.DecisionEncodingConfig,
-		"decision_result", fmt.Sprintf("preset %d", encCfg.SVTAV1Preset),
-		"decision_reason", "config svt_av1_preset",
+		"decision_result", "target",
+		"decision_reason", "spindle always uses Reel target-quality mode",
 	)
-	for _, crf := range []struct {
-		name string
-		val  int
-		opt  func(uint8) drapto.Option
-	}{
-		{"crf_sd", encCfg.CRFSD, drapto.WithCRFSD},
-		{"crf_hd", encCfg.CRFHD, drapto.WithCRFHD},
-		{"crf_uhd", encCfg.CRFUHD, drapto.WithCRFUHD},
-	} {
-		if crf.val <= 0 {
-			continue
-		}
-		opts = append(opts, crf.opt(uint8(crf.val)))
-		logger.Info("CRF override applied",
-			"decision_type", logs.DecisionEncodingConfig,
-			"decision_result", fmt.Sprintf("%s %d", crf.name, crf.val),
-			"decision_reason", fmt.Sprintf("config %s", crf.name),
-		)
-	}
 
-	encoder, err := drapto.New(opts...)
+	encoder, err := reel.New(reel.WithQualityMode("target"))
 	if err != nil {
-		return nil, fmt.Errorf("create drapto encoder: %w", err)
+		return nil, fmt.Errorf("create reel encoder: %w", err)
 	}
 	return encoder, nil
 }
@@ -169,7 +139,7 @@ type encodeJobResult struct {
 	encodedSize  int64
 }
 
-func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encoder *drapto.Encoder, encodedDir string, jobs []stage.AssetJob) (encodeSummary, error) {
+func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encoder *reel.Encoder, encodedDir string, jobs []stage.AssetJob) (encodeSummary, error) {
 	logger := sess.Logger
 	env := sess.Env
 	var summary encodeSummary
@@ -203,13 +173,13 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encoder *
 	return summary, nil
 }
 
-func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encoder *drapto.Encoder, encodedDir string, job stage.AssetJob) (encodeJobResult, error) {
+func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encoder *reel.Encoder, encodedDir string, job stage.AssetJob) (encodeJobResult, error) {
 	item := sess.Item
 	logger := sess.Logger
 
 	// Remove stale output from a previous run. The staging directory is
 	// keyed by disc fingerprint, so a re-inserted disc reuses the same
-	// encoded/ directory. Drapto refuses to overwrite existing files.
+	// encoded/ directory. Reel skips outputs that already exist.
 	expectedOutput := filepath.Join(encodedDir, filepath.Base(job.Input.Path))
 	if err := os.Remove(expectedOutput); err == nil {
 		logger.Info("removed stale encoded file",
@@ -305,7 +275,7 @@ func (h *Handler) handleEncodeFailure(logger *slog.Logger, sess *stage.Session, 
 	return sess.SaveAssetFailure(ripspec.AssetKindEncoded, job.Key, encErr.Error())
 }
 
-func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, job stage.AssetJob, result *drapto.Result) (encodeJobResult, error) {
+func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, job stage.AssetJob, result *reel.Result) (encodeJobResult, error) {
 	item := sess.Item
 	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
 	snap.Substage = "complete"
@@ -361,10 +331,11 @@ const throttleInterval = 2 * time.Second
 // encodingProgressLogInterval is the minimum interval between INFO progress logs.
 const encodingProgressLogInterval = 3 * time.Minute
 
-// spindleReporter implements drapto.Reporter, adapting Drapto progress events
-// into encodingstate.Snapshot updates on the queue item. Progress persistence
-// is throttled to every 2 seconds.
+// spindleReporter implements reel.Reporter, adapting Reel progress events into
+// encodingstate.Snapshot updates on the queue item. Progress persistence is
+// throttled to every 2 seconds.
 type spindleReporter struct {
+	reel.NullReporter
 	sess          *stage.Session
 	item          *queue.Item
 	logger        *slog.Logger
@@ -398,7 +369,7 @@ func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot)) e
 	return r.sess.Progress(r.item.ProgressPercent, r.item.ProgressMessage, stage.WithEncodingDetails(r.item.EncodingDetailsJSON))
 }
 
-func (r *spindleReporter) EncodingProgress(p drapto.ProgressSnapshot) {
+func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
 	now := r.now()
 	if now.Sub(r.lastPush) < throttleInterval {
 		return
@@ -413,7 +384,7 @@ func (r *spindleReporter) EncodingProgress(p drapto.ProgressSnapshot) {
 		snap.ETASeconds = p.ETA.Seconds()
 		snap.CurrentFrame = int64(p.CurrentFrame)
 		snap.TotalFrames = int64(p.TotalFrames)
-		r.item.ProgressPercent = overallEncodePercent(r.completedJobs, r.totalJobs, float64(p.Percent))
+		r.item.ProgressPercent = stage.OverallPercent(r.completedJobs, r.totalJobs, float64(p.Percent))
 	}); err != nil {
 		r.logger.Warn("failed to persist encoding progress",
 			"event_type", "progress_persist_error",
@@ -450,7 +421,7 @@ func (r *spindleReporter) EncodingStarted(totalFrames uint64) {
 	}
 }
 
-func (r *spindleReporter) Initialization(s drapto.InitializationSummary) {
+func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
 	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.InputFile = s.InputFile
 		snap.Resolution = s.Resolution
@@ -466,14 +437,13 @@ func (r *spindleReporter) Initialization(s drapto.InitializationSummary) {
 	}
 }
 
-func (r *spindleReporter) EncodingConfig(s drapto.EncodingConfigSummary) {
+func (r *spindleReporter) EncodingConfig(s reel.EncodingConfigSummary) {
 	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.Encoder = s.Encoder
 		snap.Preset = s.Preset
 		snap.Quality = s.Quality
 		snap.Tune = s.Tune
 		snap.AudioCodec = s.AudioCodec
-		snap.DraptoPreset = s.DraptoPreset
 		snap.Substage = "configuring"
 	}); err != nil {
 		r.logger.Warn("progress persistence failed",
@@ -485,7 +455,7 @@ func (r *spindleReporter) EncodingConfig(s drapto.EncodingConfigSummary) {
 	}
 }
 
-func (r *spindleReporter) CropResult(s drapto.CropSummary) {
+func (r *spindleReporter) CropResult(s reel.CropSummary) {
 	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.CropFilter = s.Crop
 		snap.CropRequired = s.Required
@@ -517,7 +487,7 @@ func (r *spindleReporter) CropResult(s drapto.CropSummary) {
 	)
 }
 
-func (r *spindleReporter) ValidationComplete(s drapto.ValidationSummary) {
+func (r *spindleReporter) ValidationComplete(s reel.ValidationSummary) {
 	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.Substage = "validation"
 		steps := make([]encodingstate.ValidationStep, len(s.Steps))
@@ -561,7 +531,7 @@ func (r *spindleReporter) ValidationComplete(s drapto.ValidationSummary) {
 	)
 }
 
-func (r *spindleReporter) EncodingComplete(s drapto.EncodingOutcome) {
+func (r *spindleReporter) EncodingComplete(s reel.EncodingOutcome) {
 	if err := r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.Substage = "complete"
 		snap.Percent = 100
@@ -591,20 +561,16 @@ func (r *spindleReporter) Warning(message string) {
 		)
 	}
 
-	r.logger.Warn("drapto warning",
-		"event_type", "drapto_warning",
+	r.logger.Warn("reel warning",
+		"event_type", "reel_warning",
 		"error_hint", message,
 		"impact", "encoding may produce suboptimal results",
 	)
 }
 
-func overallEncodePercent(completedJobs, totalJobs int, currentJobPercent float64) float64 {
-	return stage.OverallPercent(completedJobs, totalJobs, currentJobPercent)
-}
-
-func (r *spindleReporter) Error(e drapto.ReporterError) {
-	r.logger.Error("drapto encoding error",
-		"event_type", "drapto_error",
+func (r *spindleReporter) Error(e reel.ReporterError) {
+	r.logger.Error("reel encoding error",
+		"event_type", "reel_error",
 		"error_hint", e.Message,
 		"error", e.Title,
 	)
@@ -625,11 +591,3 @@ func (r *spindleReporter) Error(e drapto.ReporterError) {
 		)
 	}
 }
-
-// No-op methods for Reporter interface methods we don't need.
-func (r *spindleReporter) Hardware(drapto.HardwareSummary)         {}
-func (r *spindleReporter) StageProgress(drapto.StageProgress)      {}
-func (r *spindleReporter) OperationComplete(string)                {}
-func (r *spindleReporter) BatchStarted(drapto.BatchStartInfo)      {}
-func (r *spindleReporter) FileProgress(drapto.FileProgressContext) {}
-func (r *spindleReporter) BatchComplete(drapto.BatchSummary)       {}

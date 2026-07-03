@@ -14,7 +14,7 @@ Every item moves through the queue in order. Each item has a **stage** and an
 - `identification` - disc queued; MakeMKV scan plus TMDB/disc metadata resolution
 - `ripping` - video copied to staging or restored from rip cache; you'll get a notification when the drive is available
 - `episode_identification` *(TV only)* - WhisperX plus OpenSubtitles correlate ripped files to definitive episode numbers
-- `encoding` - Drapto transcodes the rip in the background
+- `encoding` - Reel target-quality mode transcodes the rip in the background
 - `audio_analysis` - refines encoded audio; optionally detects commentary when `commentary.enabled = true`
 - `subtitling` *(optional)* - WhisperX transcription generates one English display SRT per output
 - `organizing` - files are copied/moved into your library or review area; Jellyfin refresh is triggered when configured
@@ -33,7 +33,7 @@ Use `spindle queue list` to inspect items and `spindle status` for lifecycle tot
 
 Spindle can process multiple items at different stages at the same time. Shared
 resources are protected by one-at-a-time semaphores: the optical drive for
-identification/ripping, the encoder for Drapto, and WhisperX for transcription
+identification/ripping, the encoder for Reel, and WhisperX for transcription
 work.
 
 ## Stage 1: Disc Detection and Queueing
@@ -85,11 +85,11 @@ For discs with multiple feature-length titles, use `spindle cache rip --title` w
 ## Stage 5: Encoding (`encoding`)
 
 1. The encoder builds jobs from completed ripped assets: one job for a movie or one job per TV asset.
-2. `[encoding]` config is re-read from disk before each encode, so preset/CRF changes can take effect without restarting the daemon.
+2. Reel runs in target-quality mode with Reel defaults.
 3. For multi-file encodes, displayed percent is cumulative across the whole encoding stage.
 4. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`.
 5. The RipSpec and encoding telemetry snapshot are updated as jobs progress so progress is recoverable and encoded counts can advance live.
-6. If Drapto validation fails, the affected asset is flagged for review. If any encode job fails, the stage fails after recording per-asset failure state.
+6. If Reel validation fails, the affected asset is flagged for review. If any encode job fails, the stage fails after recording per-asset failure state.
 
 ## Stage 6: Audio Analysis (`audio_analysis`)
 
@@ -190,7 +190,7 @@ If items appear stuck (in-progress but not advancing):
 
 ## Where Files Live
 
-- **Staging**: `<staging_dir>/<fingerprint-or-queue-id>/ripped/` for MakeMKV output, `<staging_dir>/<fingerprint-or-queue-id>/encoded/` for Drapto output while waiting on organization. Subtitle sidecars land beside encoded media.
+- **Staging**: `<staging_dir>/<fingerprint-or-queue-id>/ripped/` for MakeMKV output, `<staging_dir>/<fingerprint-or-queue-id>/encoded/` for Reel output while waiting on organization. Subtitle sidecars land beside encoded media.
 - **Library**: Under `library_dir`, using `movies/` and `tv/` subfolders unless customized in config. Movie outputs include a per-movie folder; TV outputs use show and season folders.
 - **Review**: `<review_dir>/<sanitized-primary-reason>_<fingerprint-prefix>/` holds outputs that require manual attention. The fingerprint prefix is the first 8 characters when available, otherwise `id<queue-id>`. Items routed here still complete so the pipeline stays unblocked.
 - **State**: `<state_dir>/` stores `spindle-*.log` (one per daemon start, DEBUG-level JSON), `daemon.log` symlink/hardlink to the latest run when available, and the queue database (`queue.db`). Log retention is controlled by `[logging].retention_days` in `config.toml` (default 60; values less than or equal to 0 currently fall back to 30 days).

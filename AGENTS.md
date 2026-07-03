@@ -12,7 +12,7 @@ This file provides guidance when working with code in this repository.
 
 ## Project Snapshot
 
-Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Drapto AV1), metadata (TMDB), subtitles (WhisperX, forced subs via OpenSubtitles), Jellyfin refresh, and ntfy notifications.
+Spindle is a **personal project** that automates optical disc to Jellyfin library: disc detection, ripping (MakeMKV), encoding (Reel AV1 target-quality mode), metadata (TMDB), subtitles (WhisperX, forced subs via OpenSubtitles), Jellyfin refresh, and ntfy notifications.
 
 - **Scope**: Single-developer project — avoid over-engineering.
 - **Operation**: Daemon-owned queue access through the HTTP API. Queue commands require the daemon except stopped-daemon `queue clear --all`, which deletes the transient queue DB files.
@@ -21,11 +21,11 @@ Spindle is a **personal project** that automates optical disc to Jellyfin librar
 
 | Repo | Path | Role |
 |------|------|------|
-| drapto | `~/projects/drapto/` | FFmpeg encoding wrapper |
-| spindle | `~/projects/spindle/` | Orchestrator that uses Drapto as a library (this repo) |
+| reel | `~/projects/reel/` | AV1 encoding tool/library |
+| spindle | `~/projects/spindle/` | Orchestrator that uses Reel as a library (this repo) |
 | flyer | `~/projects/flyer/` | Read-only TUI for Spindle |
 
-GitHub: [drapto](https://github.com/five82/drapto) | [spindle](https://github.com/five82/spindle) | [flyer](https://github.com/five82/flyer)
+GitHub/Codeberg: [reel](https://codeberg.org/five82/reel) | [spindle](https://github.com/five82/spindle) | [flyer](https://github.com/five82/flyer)
 
 ## Critical Expectations
 
@@ -86,12 +86,12 @@ Suspicious refactors:
 - Do not use PGS subtitles as final library output. Spindle's Jellyfin-facing subtitle output is SRT.
 - Source subtitle tracks may be detected for metadata/forced-subtitle signals, but primary display subtitles are generated/handled as SRT.
 
-## Drapto Dependency Workflow
+## Reel Dependency Workflow
 
-- Local dev uses `go.work` (gitignored) to reference `../drapto` directly.
-- CI uses the version in `go.mod`. After pushing drapto changes, update spindle:
+- Local dev uses `go.work` (gitignored) to reference `../reel` directly.
+- CI uses the version in `go.mod`. After pushing Reel changes, update spindle:
   ```bash
-  go get github.com/five82/drapto@main && go mod tidy
+  go get codeberg.org/five82/reel@latest && go mod tidy
   ```
 
 ## Logging Guidance

@@ -151,8 +151,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		{Name: "ffmpeg", Command: "ffmpeg", Description: "FFmpeg media processor", Optional: false},
 		{Name: "ffprobe", Command: "ffprobe", Description: "FFprobe media analyzer", Optional: false},
 		{Name: "mkvmerge", Command: "mkvmerge", Description: "MKVToolNix merge tool", Optional: false},
+		{Name: "libSvtAv1Enc", Command: "libSvtAv1Enc.so", Description: "Reel SVT-AV1 encoder library", Optional: false, Library: true},
+		{Name: "libavformat", Command: "libavformat.so", Description: "Reel FFmpeg format library", Optional: false, Library: true},
+		{Name: "libavcodec", Command: "libavcodec.so", Description: "Reel FFmpeg codec library", Optional: false, Library: true},
+		{Name: "libavutil", Command: "libavutil.so", Description: "Reel FFmpeg utility library", Optional: false, Library: true},
+		{Name: "libswscale", Command: "libswscale.so", Description: "Reel FFmpeg scaling library", Optional: false, Library: true},
+		{Name: "libswresample", Command: "libswresample.so", Description: "Reel FFmpeg resampling library", Optional: false, Library: true},
+		{Name: "libopusenc", Command: "libopusenc.so", Description: "Reel Opus encoder library", Optional: false, Library: true},
+		{Name: "libvship", Command: "libvship.so", Description: "Reel target-quality VSHIP/CVVDP library", Optional: false, Library: true},
 	}
-	depStatuses := deps.CheckBinaries(depReqs)
+	depStatuses := deps.CheckRequirements(depReqs)
 	depResponses := make([]httpapi.DependencyResponse, len(depStatuses))
 	for i, s := range depStatuses {
 		depResponses[i] = httpapi.DependencyResponse{

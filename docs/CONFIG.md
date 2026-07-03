@@ -57,9 +57,9 @@ Conditional requirements:
 - `subtitles.whisperx_hf_token` is required when subtitle generation is enabled
   with a non-`silero` VAD method.
 
-Encoding CRF, SVT-AV1 preset, and MakeMKV timeouts must be within valid ranges.
-Content-ID thresholds must be between 0 and 1 with
-`decisive_auto_accept_threshold` above `low_confidence_review_threshold` and at
+MakeMKV timeouts must be within valid ranges. Content-ID thresholds must be
+between 0 and 1 with `decisive_auto_accept_threshold` above
+`low_confidence_review_threshold` and at
 or below `clear_confidence_threshold`. Exact ranges and defaults are in the
 generated sample config.
 
@@ -100,7 +100,5 @@ Important feature switches:
 - `llm.api_key` enables the OpenRouter-compatible LLM client used only for TV
   episode-pair verification and commentary classification.
 
-Only the `[encoding]` section is re-read automatically: it is reloaded from disk
-before each encode so preset/CRF changes can take effect without restarting the
-daemon. Other config changes require restarting the daemon or retrying affected
-items as appropriate.
+Encoding uses Reel target-quality mode with Reel defaults. Config changes require
+restarting the daemon or retrying affected items as appropriate.

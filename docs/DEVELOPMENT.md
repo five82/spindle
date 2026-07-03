@@ -43,9 +43,9 @@ go test ./...
 ./check-ci.sh
 ```
 
-`./check-ci.sh` verifies the Go toolchain, tidy module state, CI-equivalent
-build without `go.work`, normal tests, race tests, CGO build, lint, and
-`govulncheck`.
+`./check-ci.sh` verifies the Go toolchain, tidy module state, pinned-dependency
+build without `go.work`, normal target-quality-capable tests, race tests, CGO
+build, lint, and `govulncheck`.
 
 Testing priorities:
 
@@ -118,14 +118,16 @@ Prohibited dependencies:
 - `config` must not import client packages.
 - No package may import `cmd/spindle`.
 
-## Drapto local development
+## Reel local development
 
-Local development uses a gitignored `go.work` to reference `../drapto` directly.
-CI uses the version pinned in `go.mod`. After pushing Drapto changes, update
-Spindle with:
+Local development uses a gitignored `go.work` to reference `../reel` directly.
+CI uses the version pinned in `go.mod`. Hosted CI builds Reel with
+`-tags no_vship` because libvship is not available on the runner; local
+`./check-ci.sh` runs against the normal target-quality-capable build. After
+pushing Reel changes, update Spindle with:
 
 ```bash
-go get github.com/five82/drapto@main
+go get codeberg.org/five82/reel@latest
 go mod tidy
 ```
 

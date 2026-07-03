@@ -2,7 +2,7 @@ package deps
 
 import "testing"
 
-func TestCheckBinaries(t *testing.T) {
+func TestCheckRequirements(t *testing.T) {
 	tests := []struct {
 		name      string
 		req       Requirement
@@ -36,11 +36,21 @@ func TestCheckBinaries(t *testing.T) {
 			},
 			wantAvail: false,
 		},
+		{
+			name: "unknown library is not available",
+			req: Requirement{
+				Name:        "missing-lib",
+				Command:     "libspindle-nonexistent-xyz.so",
+				Description: "missing library",
+				Library:     true,
+			},
+			wantAvail: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results := CheckBinaries([]Requirement{tt.req})
+			results := CheckRequirements([]Requirement{tt.req})
 			if len(results) != 1 {
 				t.Fatalf("expected 1 result, got %d", len(results))
 			}
@@ -61,12 +71,28 @@ func TestCheckBinaries(t *testing.T) {
 	}
 }
 
-func TestCheckBinaries_preservesOrder(t *testing.T) {
+func TestParseLDConfig(t *testing.T) {
+	output := `
+	libavformat.so.61 (libc6,x86-64) => /lib/x86_64-linux-gnu/libavformat.so.61
+	libopusenc.so.0 (libc6,x86-64) => /lib/x86_64-linux-gnu/libopusenc.so.0
+`
+	if got := parseLDConfig("libavformat.so", output); got != "/lib/x86_64-linux-gnu/libavformat.so.61" {
+		t.Fatalf("parseLDConfig libavformat.so = %q", got)
+	}
+	if got := parseLDConfig("libopusenc.so", output); got != "/lib/x86_64-linux-gnu/libopusenc.so.0" {
+		t.Fatalf("parseLDConfig libopusenc.so = %q", got)
+	}
+	if got := parseLDConfig("libmissing.so", output); got != "" {
+		t.Fatalf("parseLDConfig libmissing.so = %q", got)
+	}
+}
+
+func TestCheckRequirements_preservesOrder(t *testing.T) {
 	reqs := []Requirement{
 		{Name: "first", Command: "go", Description: "Go"},
 		{Name: "second", Command: "spindle-nonexistent-xyz", Description: "missing"},
 	}
-	results := CheckBinaries(reqs)
+	results := CheckRequirements(reqs)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}

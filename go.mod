@@ -3,8 +3,8 @@ module github.com/five82/spindle
 go 1.26.0
 
 require (
+	codeberg.org/five82/reel v0.0.0-20260702175725-64911b61a3db
 	github.com/fatih/color v1.19.0
-	github.com/five82/drapto v0.5.1-0.20260525175141-74cefd856eb9
 	github.com/gofrs/flock v0.13.0
 	github.com/pelletier/go-toml/v2 v2.4.2
 	github.com/pilebones/go-udev v0.9.1

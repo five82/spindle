@@ -1,6 +1,6 @@
 #!/bin/bash
-# Local CI check for spindle.
-# Mirrors the GitHub Actions workflow.
+# Local full check for spindle.
+# Hosted CI uses no_vship because libvship is unavailable on GitHub runners.
 
 set -euo pipefail
 
@@ -64,16 +64,16 @@ cleanup_mod_diff
 trap - EXIT
 print_success "go.mod is tidy"
 
-print_step "Verifying build without go.work (mirrors CI)"
+print_step "Verifying build without go.work (pinned Reel dependency)"
 if GOWORK=off go build ./...; then
-    print_success "CI-equivalent build passed"
+    print_success "Pinned-dependency build passed"
 else
-    print_error "Build fails without go.work — update go.mod deps (e.g. go get github.com/five82/drapto@main)"
+    print_error "Build fails without go.work — update go.mod deps (e.g. go get codeberg.org/five82/reel@latest)"
     exit 1
 fi
 
 print_step "Running go test ./..."
-if go test ./...; then
+if GOWORK=off go test ./...; then
     print_success "Tests passed"
 else
     print_error "Tests failed"
@@ -81,7 +81,7 @@ else
 fi
 
 print_step "Running go test -race ./..."
-if go test -race ./...; then
+if GOWORK=off go test -race ./...; then
     print_success "Race detection passed"
 else
     print_error "Race condition detected"
@@ -93,7 +93,7 @@ if ! command -v gcc &>/dev/null; then
     print_error "CGO build requires gcc; install build-essential and rerun"
     exit 1
 fi
-if CGO_ENABLED=1 go build ./...; then
+if GOWORK=off CGO_ENABLED=1 go build ./...; then
     print_success "CGO build passed"
 else
     print_error "CGO build failed"
@@ -101,7 +101,7 @@ else
 fi
 
 print_step "Running golangci-lint"
-if golangci-lint run; then
+if GOWORK=off golangci-lint run; then
     print_success "Lint passed"
 else
     print_error "Lint issues found"
@@ -113,7 +113,7 @@ if ! command -v govulncheck &>/dev/null; then
     echo "   Installing govulncheck..."
     go install golang.org/x/vuln/cmd/govulncheck@latest
 fi
-if govulncheck ./...; then
+if GOWORK=off govulncheck ./...; then
     print_success "No vulnerabilities found"
 else
     print_error "Vulnerabilities detected"

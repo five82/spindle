@@ -22,19 +22,24 @@ jobs:
           go-version: '1.26.x'
           cache: true
 
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
+
       - name: Verify go.mod is tidy
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
 
       - name: Run unit tests
-        run: go test ./...
+        run: go test -tags no_vship ./...
 
       - name: Run race detection
-        run: go test -race ./...
+        run: go test -race -tags no_vship ./...
 
       - name: CGO build
-        run: CGO_ENABLED=1 go build ./...
+        run: CGO_ENABLED=1 go build -tags no_vship ./...
 
   lint:
     name: Lint
@@ -50,11 +55,16 @@ jobs:
           go-version: '1.26.x'
           cache: true
 
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-          args: --timeout=5m
+          args: --timeout=5m --build-tags=no_vship
 
   security:
     name: Security
@@ -70,7 +80,12 @@ jobs:
           go-version: '1.26.x'
           cache: true
 
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
+
       - name: Check for vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          govulncheck -tags no_vship ./...

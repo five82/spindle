@@ -265,7 +265,7 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
    - Check `validation.passed` and individual step results
    - Review crop detection from `crop` fields
    - Check for `warning` or `error` in snapshot
-   - Check encoding config: `encoder`, `quality` (CRF value), `preset` (SVT-AV1 speed preset), `tune`, `audio_codec`
+   - Check encoding config: `encoder`, `quality` (Reel target-quality summary), `preset`, `tune`, `audio_codec`
    - Check `decision_type=file_probe` in `logs.decisions` for pre-encoding resolution and codec detection
    - Check `decision_type=crop_detection` for crop decision visibility
    - Check `decision_type=encoding_validation` for per-episode validation results

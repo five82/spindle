@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/five82/drapto"
+	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/textutil"
@@ -28,7 +31,7 @@ func newDebugCmd() *cobra.Command {
 func newDebugCropCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "crop <entry|path>",
-		Short: "Run crop detection on a video file",
+		Short: "Run an ffmpeg cropdetect diagnostic on a video file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			path, err := resolveTarget(args[0])
@@ -37,8 +40,8 @@ func newDebugCropCmd() *cobra.Command {
 			}
 			ctx := context.Background()
 
-			fmt.Printf("Running crop detection on %s...\n", filepath.Base(path))
-			result, err := drapto.DetectCrop(ctx, path)
+			fmt.Printf("Running ffmpeg cropdetect on %s...\n", filepath.Base(path))
+			result, err := detectDebugCrop(ctx, path)
 			if err != nil {
 				return fmt.Errorf("crop detection: %w", err)
 			}
@@ -51,7 +54,7 @@ func newDebugCropCmd() *cobra.Command {
 				fmt.Printf("%s %s\n", labelStyle("Crop filter:   "), result.CropFilter)
 			}
 			if result.MultipleRatios {
-				fmt.Printf("%s yes (no dominant crop value)\n", labelStyle("Multiple ratios:"))
+				fmt.Printf("%s yes\n", labelStyle("Multiple ratios:"))
 			}
 			fmt.Printf("%s %s\n", labelStyle("Message:       "), result.Message)
 			fmt.Printf("%s %d\n", labelStyle("Total samples: "), result.TotalSamples)
@@ -66,6 +69,129 @@ func newDebugCropCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+type debugCropCandidate struct {
+	Crop    string
+	Count   int
+	Percent float64
+}
+
+type debugCropResult struct {
+	CropFilter     string
+	Required       bool
+	MultipleRatios bool
+	Message        string
+	Candidates     []debugCropCandidate
+	TotalSamples   int
+	VideoWidth     int
+	VideoHeight    int
+	IsHDR          bool
+}
+
+var debugCropRegex = regexp.MustCompile(`crop=(\d+:\d+:\d+:\d+)`)
+
+func detectDebugCrop(ctx context.Context, path string) (*debugCropResult, error) {
+	probeResult, err := ffprobe.Inspect(ctx, "", path)
+	if err != nil {
+		return nil, fmt.Errorf("ffprobe: %w", err)
+	}
+
+	var video ffprobe.Stream
+	for _, stream := range probeResult.Streams {
+		if stream.CodecType == "video" {
+			video = stream
+			break
+		}
+	}
+	if video.Width == 0 || video.Height == 0 {
+		return nil, fmt.Errorf("no video stream found")
+	}
+
+	isHDR := debugStreamIsHDR(video)
+	threshold := 16
+	if isHDR {
+		threshold = 100
+	}
+
+	start := probeResult.DurationSeconds() * 0.5
+	counts, err := sampleDebugCrop(ctx, path, start, threshold)
+	if err != nil {
+		return nil, err
+	}
+
+	result := analyzeDebugCropCounts(counts, video.Width, video.Height)
+	result.VideoWidth = video.Width
+	result.VideoHeight = video.Height
+	result.IsHDR = isHDR
+	return result, nil
+}
+
+func sampleDebugCrop(ctx context.Context, path string, start float64, threshold int) (map[string]int, error) {
+	output, err := exec.CommandContext(ctx, "ffmpeg",
+		"-hide_banner",
+		"-ss", fmt.Sprintf("%.2f", start),
+		"-i", path,
+		"-vframes", "10",
+		"-vf", fmt.Sprintf("cropdetect=limit=%d:round=2:reset=1", threshold),
+		"-f", "null",
+		"-",
+	).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg cropdetect: %w: %s", err, output)
+	}
+
+	counts := make(map[string]int)
+	for _, matches := range debugCropRegex.FindAllStringSubmatch(string(output), -1) {
+		counts[matches[1]]++
+	}
+	return counts, nil
+}
+
+func analyzeDebugCropCounts(counts map[string]int, width, height int) *debugCropResult {
+	result := &debugCropResult{Message: "Analyzed 10 frames near midpoint"}
+	if len(counts) == 0 {
+		return result
+	}
+
+	candidates := make([]debugCropCandidate, 0, len(counts))
+	for crop, count := range counts {
+		result.TotalSamples += count
+		candidates = append(candidates, debugCropCandidate{Crop: crop, Count: count})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Count == candidates[j].Count {
+			return candidates[i].Crop < candidates[j].Crop
+		}
+		return candidates[i].Count > candidates[j].Count
+	})
+	for i := range candidates {
+		candidates[i].Percent = float64(candidates[i].Count) / float64(result.TotalSamples) * 100
+	}
+
+	result.Candidates = candidates
+	result.MultipleRatios = len(candidates) > 1
+	result.CropFilter = "crop=" + candidates[0].Crop
+	result.Required = debugCropRequired(candidates[0].Crop, width, height)
+	if result.Required {
+		result.Message = "Black bars detected"
+	}
+	return result
+}
+
+func debugCropRequired(crop string, sourceWidth, sourceHeight int) bool {
+	cropWidth, cropHeight, err := encodingstate.ParseCropFilter(crop)
+	if err != nil {
+		return false
+	}
+	return cropWidth != sourceWidth || cropHeight != sourceHeight
+}
+
+func debugStreamIsHDR(stream ffprobe.Stream) bool {
+	return strings.Contains(stream.ColorPrimaries, "2020") ||
+		strings.Contains(stream.ColorSpace, "2020") ||
+		stream.ColorTransfer == "smpte2084" ||
+		stream.ColorTransfer == "arib-std-b67"
 }
 
 func newDebugCommentaryCmd() *cobra.Command {

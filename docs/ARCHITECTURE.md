@@ -33,7 +33,7 @@ Queue items move through these stages in order:
 | `identification` | Scan the disc, infer movie/TV, resolve metadata, build RipSpec | Uses MakeMKV, TMDB, optional BDInfo, KeyDB, and disc ID cache |
 | `ripping` | Copy selected disc titles into staging | Uses MakeMKV or restores from rip cache; pauses disc detection while the drive is in use |
 | `episode_identification` | Map TV ripped titles to canonical episodes | Skipped for movies and non-TV items |
-| `encoding` | Encode ripped media to AV1 through Drapto | Reloads `[encoding]` config before each encode and persists telemetry snapshots |
+| `encoding` | Encode ripped media to AV1 through Reel target-quality mode | Persists telemetry snapshots |
 | `audio_analysis` | Refine audio and optionally detect commentary | Commentary detection is controlled by config and uses WhisperX/LLM when available |
 | `subtitling` | Optionally generate display SRTs | Final Jellyfin-facing subtitles are SRT; muxing into MKV is configurable |
 | `organizing` | Copy/move outputs to library or review and refresh Jellyfin | Cleans staging after successful routing |
@@ -79,7 +79,7 @@ The workflow manager polls the queue and starts stage workers. Semaphore capacit
 is one per scarce resource:
 
 - disc: identification and ripping
-- encoder: Drapto encoding
+- encoder: Reel target-quality encoding
 - WhisperX: episode ID, audio analysis, and subtitle generation
 
 This means multiple items can be in flight at different stages, but only one
@@ -117,11 +117,13 @@ produced by `spindle config init`, and [CONFIG.md](CONFIG.md).
 
 ## External dependencies
 
-Daemon status checks currently probe these command-line tools:
+Daemon status checks currently probe these command-line tools and native libraries:
 
 - `makemkvcon` for disc scan/rip.
-- `ffmpeg` and `ffprobe` for media inspection and transformation.
+- `ffprobe` for Spindle-side media inspection, validation, stream selection, and audit data.
+- `ffmpeg` for Spindle-side audio extraction, metadata/disposition remuxes, and debug diagnostics.
 - `mkvmerge` for subtitle muxing and subtitle-track inspection.
+- Reel native encoding libraries: SVT-AV1, FFmpeg libraries, libopusenc, and libvship.
 
 Feature-specific tools and services are used when configured:
 

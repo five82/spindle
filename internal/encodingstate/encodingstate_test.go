@@ -85,7 +85,6 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 		Quality:               "30",
 		Tune:                  "0",
 		AudioCodec:            "opus",
-		DraptoPreset:          "film",
 		CropFilter:            "crop=1920:800:0:140",
 		CropRequired:          true,
 		CropMessage:           "letterbox detected",
@@ -145,11 +144,11 @@ func TestUnmarshalInvalid(t *testing.T) {
 
 func TestParseCropFilter(t *testing.T) {
 	tests := []struct {
-		name       string
-		filter     string
-		wantW      int
-		wantH      int
-		wantErr    bool
+		name    string
+		filter  string
+		wantW   int
+		wantH   int
+		wantErr bool
 	}{
 		{
 			name:   "crop= prefix format",

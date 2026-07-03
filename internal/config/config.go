@@ -10,7 +10,6 @@ import (
 type Config struct {
 	// SourcePath is the resolved filesystem path of the config file that was loaded.
 	// Empty when using defaults only (no config file found).
-	// Used by ReloadEncoding to re-read encoding parameters from disk.
 	SourcePath string `toml:"-"`
 
 	Paths         PathsConfig         `toml:"paths"`
@@ -23,7 +22,6 @@ type Config struct {
 	RipCache      RipCacheConfig      `toml:"rip_cache"`
 	DiscIDCache   DiscIDCacheConfig   `toml:"disc_id_cache"`
 	MakeMKV       MakeMKVConfig       `toml:"makemkv"`
-	Encoding      EncodingConfig      `toml:"encoding"`
 	LLM           LLMConfig           `toml:"llm"`
 	Commentary    CommentaryConfig    `toml:"commentary"`
 	ContentID     ContentIDConfig     `toml:"content_id"`
@@ -111,14 +109,6 @@ type MakeMKVConfig struct {
 // KeyDBTimeout returns the KeyDB download timeout as a time.Duration.
 func (m MakeMKVConfig) KeyDBTimeout() time.Duration {
 	return time.Duration(m.KeyDBDownloadTimeout) * time.Second
-}
-
-// EncodingConfig defines SVT-AV1 encoding settings.
-type EncodingConfig struct {
-	SVTAV1Preset int `toml:"svt_av1_preset"`
-	CRFSD        int `toml:"crf_sd"`
-	CRFHD        int `toml:"crf_hd"`
-	CRFUHD       int `toml:"crf_uhd"`
 }
 
 // LLMConfig defines LLM API settings for OpenRouter.

@@ -1,6 +1,6 @@
 # spindle
 
-Workflow for turning optical discs into a Jellyfin ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Drapto), optional subtitles (WhisperX transcription), organization, Jellyfin refreshes, and notifications.
+Workflow for turning optical discs into a Jellyfin ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Reel target-quality mode), optional subtitles (WhisperX transcription), organization, Jellyfin refreshes, and notifications.
 
 Single Go binary drives both the CLI and daemon.
 
@@ -19,7 +19,7 @@ This repository is shared as is. Spindle is a personal tool I built for my own e
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.26+, MakeMKV, ffmpeg, ffprobe. `spindle status` also checks for mkvmerge, which is needed for default subtitle muxing. Optional feature tools include uvx (for WhisperX subtitles/commentary/episode ID) and bd_info (for improved Blu-ray identification).
+Prerequisites: Go 1.26+, MakeMKV, ffmpeg, ffprobe, and Reel's native encoding libraries (SVT-AV1, FFmpeg libraries, libopusenc, and libvship for target-quality mode). Spindle still uses the ffmpeg/ffprobe binaries for inspection, transcription prep, remuxes, and diagnostics; Reel uses the native libraries for encoding. `spindle status` checks those plus mkvmerge, which is needed for default subtitle muxing. Optional feature tools include uvx (for WhisperX subtitles/commentary/episode ID) and bd_info (for improved Blu-ray identification).
 
 ## Configure
 

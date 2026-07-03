@@ -143,9 +143,6 @@ func defaultConfig() *Config {
 			KeyDBDownloadURL:     "http://fvonline-db.bplaced.net/export/keydb_eng.zip",
 			KeyDBDownloadTimeout: 300,
 		},
-		Encoding: EncodingConfig{
-			SVTAV1Preset: 6,
-		},
 		LLM: LLMConfig{
 			BaseURL:        "https://openrouter.ai/api/v1/chat/completions",
 			Model:          "google/gemini-3-flash-preview",
@@ -262,32 +259,4 @@ func normalizePaths(cfg *Config) error {
 	}
 
 	return nil
-}
-
-// ReloadEncoding re-reads the config file at cfg.SourcePath and returns
-// a fresh EncodingConfig. Only the [encoding] section is parsed, avoiding
-// validation of unrelated fields. If SourcePath is empty (defaults-only)
-// or the reload fails, it returns the existing encoding config and any error.
-func ReloadEncoding(cfg *Config) (EncodingConfig, error) {
-	if cfg.SourcePath == "" {
-		return cfg.Encoding, nil
-	}
-
-	data, err := os.ReadFile(cfg.SourcePath)
-	if err != nil {
-		return cfg.Encoding, fmt.Errorf("reload encoding config: read %q: %w", cfg.SourcePath, err)
-	}
-
-	partial := struct {
-		Encoding EncodingConfig `toml:"encoding"`
-	}{Encoding: defaultConfig().Encoding}
-	if err := toml.Unmarshal(data, &partial); err != nil {
-		return cfg.Encoding, fmt.Errorf("reload encoding config: parse: %w", err)
-	}
-
-	if errs := ValidateEncoding(partial.Encoding); len(errs) > 0 {
-		return cfg.Encoding, fmt.Errorf("reload encoding config: %s", strings.Join(errs, "; "))
-	}
-
-	return partial.Encoding, nil
 }

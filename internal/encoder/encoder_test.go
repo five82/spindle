@@ -1,11 +1,11 @@
 package encoder
 
 import (
-	"math"
 	"testing"
 	"time"
 
-	"github.com/five82/drapto"
+	"codeberg.org/five82/reel"
+
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
@@ -165,31 +165,7 @@ func TestProgressThrottle_FirstCallAlwaysProceeds(t *testing.T) {
 	}
 }
 
-func TestOverallEncodePercent(t *testing.T) {
-	tests := []struct {
-		name       string
-		completed  int
-		total      int
-		currentPct float64
-		want       float64
-	}{
-		{name: "first job half done", completed: 0, total: 12, currentPct: 50, want: 4.166666666666667},
-		{name: "ninth job one third done", completed: 9, total: 12, currentPct: 33.333333333333336, want: 77.77777777777779},
-		{name: "all jobs complete", completed: 12, total: 12, currentPct: 0, want: 100},
-		{name: "invalid total", completed: 1, total: 0, currentPct: 50, want: 0},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := overallEncodePercent(tt.completed, tt.total, tt.currentPct)
-			if math.Abs(got-tt.want) > 1e-9 {
-				t.Fatalf("overallEncodePercent(%d, %d, %f) = %f, want %f", tt.completed, tt.total, tt.currentPct, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestReporterImplementsInterface(t *testing.T) {
-	// Compile-time check that spindleReporter implements drapto.Reporter.
-	var _ drapto.Reporter = (*spindleReporter)(nil)
+	// Compile-time check that spindleReporter implements reel.Reporter.
+	var _ reel.Reporter = (*spindleReporter)(nil)
 }
