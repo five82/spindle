@@ -1101,16 +1101,18 @@ func computeAssetHealth(assets *ripspec.Assets) *AssetHealth {
 	encoded := countAssets(assets.Encoded, false)
 	subtitled := countAssets(assets.Subtitled, true)
 	final := countAssets(assets.Final, false)
+	transcript := countAssets(assets.Transcript, false)
 
-	if ripped == nil && encoded == nil && subtitled == nil && final == nil {
+	if ripped == nil && encoded == nil && subtitled == nil && final == nil && transcript == nil {
 		return nil
 	}
 
 	return &AssetHealth{
-		Ripped:    ripped,
-		Encoded:   encoded,
-		Subtitled: subtitled,
-		Final:     final,
+		Ripped:     ripped,
+		Encoded:    encoded,
+		Subtitled:  subtitled,
+		Final:      final,
+		Transcript: transcript,
 	}
 }
 
@@ -1323,6 +1325,7 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		checkStage("encoded", a.AssetHealth.Encoded)
 		checkStage("subtitled", a.AssetHealth.Subtitled)
 		checkStage("final", a.AssetHealth.Final)
+		checkStage("transcript", a.AssetHealth.Transcript)
 	}
 
 	// Subtitle output layout anomalies.

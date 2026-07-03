@@ -392,10 +392,11 @@ type MediaStats struct {
 
 // AssetHealth holds per-stage asset counts.
 type AssetHealth struct {
-	Ripped    *AssetCounts `json:"ripped,omitempty"`
-	Encoded   *AssetCounts `json:"encoded,omitempty"`
-	Subtitled *AssetCounts `json:"subtitled,omitempty"`
-	Final     *AssetCounts `json:"final,omitempty"`
+	Ripped     *AssetCounts `json:"ripped,omitempty"`
+	Encoded    *AssetCounts `json:"encoded,omitempty"`
+	Subtitled  *AssetCounts `json:"subtitled,omitempty"`
+	Final      *AssetCounts `json:"final,omitempty"`
+	Transcript *AssetCounts `json:"transcript,omitempty"`
 }
 
 // AssetCounts holds counts for a single asset stage.

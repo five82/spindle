@@ -62,7 +62,7 @@ The `analysis` object (nil if no data) contains pre-computed summaries:
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
 | `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
 | `media_stats` | Valid probes exist | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`. |
-| `asset_health` | Assets exist | Per-stage (ripped/encoded/subtitled/final) `total/ok/failed/muxed` counts. |
+| `asset_health` | Assets exist | Per-stage (ripped/encoded/subtitled/final/transcript) `total/ok/failed/muxed` counts. `transcript` counts the shared per-episode WhisperX transcript artifacts reused across episode-ID, commentary, and subtitle generation. |
 | `anomalies` | Issues/context detected | Pre-flagged signals with `severity` (critical/warning/info), `category`, `message`. |
 
 **Use critical/warning `analysis.anomalies` as a starting checklist for Issues Found.** Info-level anomalies, if present, are context only unless investigation shows real user impact. Each anomaly is a machine-detected flag -- the LLM's job is to investigate context, assess impact, reject false positives, and add judgment-based findings the code cannot detect.
@@ -138,7 +138,10 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - Stages taking unusually long or short (use `duration_seconds` when available)
    - Large gaps between stage events suggesting hangs
    - Repeated retry attempts
-   - Use `logs.events` for long-running work visibility: `encoding_progress`, `rip_progress`, `copy_progress`, `transcription_extract[_complete]`, `transcription_whisperx[_complete]`, `commentary_candidate_start`, `commentary_stereo_check_start`, `commentary_classification_transcription_start`, `commentary_llm_start/_complete`, `mux_start/_complete`, `jellyfin_refresh_start`, and plan events such as `*_plan`
+   - Use `logs.events` for long-running work visibility: `encoding_progress`, `rip_progress`, `copy_progress`, `transcription_extract[_complete]`, `transcription_whisperx[_complete]`, `commentary_llm_start/_complete`, `mux_start/_complete`, `jellyfin_refresh_start`, and plan events such as `*_plan`
+   - Transcription is BATCHED: expect one `transcription_whisperx[_complete]` pair per batch (with a `batch_files` extra), not one per episode; `transcription_extract` still fires per file. A missing per-episode WhisperX event is not an anomaly.
+   - Episode-ID reference fetching runs CONCURRENTLY with transcription (`decision_result=fetch_overlapped`), so OpenSubtitles and WhisperX log lines legitimately interleave — do not flag the interleaving as disorder.
+   - Rip-cache restores and stores hardlink when cache and staging share a filesystem: near-instant `copy_progress` (a single jump to 100%) is expected, not a truncated copy.
 
 3. **Data flow anomalies**:
    - Track counts changing unexpectedly between stages
@@ -317,6 +320,7 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
    - Spindle now generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks and does not fetch OpenSubtitles output subtitles.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
    - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to raw `logs.path`.
+   - `decision_type=subtitle_transcript_source` with `decision_result=artifact_reused` means subtitle generation reused the shared per-episode transcript artifact (`envelope.assets.transcript`) and ran no WhisperX of its own — absent transcription events in the subtitling stage are then expected, not a defect. For TV, verify transcript asset count matches episode count in `analysis.asset_health`.
    - Treat additional generated subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
 
 3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
@@ -338,6 +342,9 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
    - 2-channel English tracks that aren't stereo downmixes should be candidates
    - High similarity to primary audio = stereo downmix (excluded)
    - LLM should classify based on content
+   - Each candidate is transcribed ONCE (batched WhisperX invocation); the same transcript feeds both the similarity filter and LLM classification — there is no separate classification transcription or separate commentary model
+   - The primary track fingerprint comes from the shared transcript artifact when one exists (`commentary_stereo_filter` with `decision_result=artifact_reused`); otherwise the primary is transcribed once and recorded as the artifact (`envelope.assets.transcript`)
+   - If the whole candidate batch transcription fails, ALL candidates are conservatively marked commentary (`reason: "transcription failed"`) — report the batch failure as the root cause, not per-track defects
 
 3. **Refinement impact** (from `logs.decisions`): Check `decision_type=commentary_remapping` — shows how many commentary tracks survived audio refinement. `remapped_count=0` means all commentary tracks were lost during refinement.
 
