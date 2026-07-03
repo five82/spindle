@@ -304,6 +304,25 @@ Analyze crop data from the audit-gather output:
    - All episodes from the same disc should have identical or very similar crop
    - Spot-check one or two episodes rather than performing full validation on every episode
 
+**Pipeline structure note (task-graph Phase 4b, 2026-07-04):** the item
+template is a DAG. After `episode_identification`, the ANALYSIS branch
+(`analysis` stage: per-episode commentary detection from RIPPED sources;
+then `subtitling`: SRT GENERATION ONLY, from ripped sources/transcript
+artifacts into staging) runs CONCURRENTLY with `encoding`. The `apply`
+stage joins both branches and performs every write to the encoded files:
+audio refinement, commentary disposition, duration validation, sidecar
+placement, and subtitle muxing. Consequences for audits:
+- Log timelines legitimately interleave encoding events with analysis and
+  subtitling events for the SAME item — not disorder.
+- The analysis branch is progress-silent (encoding owns the item progress
+  columns during overlap); its visibility is logs and task states.
+- `audio_analysis` no longer exists as a stage name; commentary detection
+  decisions appear under stage `analysis`, remuxes/muxing under `apply`.
+- Commentary detection is PER-EPISODE (`envelope.attributes.audio_analysis
+  .per_episode`), measured on ripped files; indices are remapped in apply.
+- `mux_start/_complete` and subtitled assets are produced by `apply`, not
+  `subtitling`.
+
 ### Phase 6: Subtitle Analysis (when `phase_subtitles` is true)
 
 Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and subtitle assets from `envelope.assets.subtitled`.

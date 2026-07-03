@@ -538,3 +538,25 @@ dependent failure, per-asset outcomes and review state).
   stage constants, DAG template in daemonrun, per-episode commentary data
   in ripspec, dispatch guard relaxation for parallel branches, audit skill
   update, then combined 4a+4b disc validation (clear queue.db first).
+- 2026-07-04: 4b-ii implemented (check-ci.sh green; operator cleared
+  queue.db). The template is now a DAG: episode_identification ->
+  (encoding || analysis -> subtitling) -> apply -> organizing.
+  Stage changes: audio_analysis renamed to `analysis` (per-episode
+  commentary detection from RIPPED sources, progress-silent,
+  merge-persisted); `subtitling` is generation-only (ripped/transcript
+  inputs, SRTs into staging/subtitles, records merge-persisted,
+  progress-silent); new `apply` stage joins both branches and owns every
+  encoded-file write (per-episode refine with that episode's commentary
+  indices, disposition, duration validation, sidecar placement, muxing,
+  subtitled assets). ripspec.AudioAnalysisData gains PerEpisode (aggregate
+  lists remain for API/audit displays). The encoder's whole-envelope Save
+  is deleted and its review flags are merge-based (it overlaps the
+  analysis branch now). Dispatch allows parallel branches per item,
+  guarded against STALE workers (live worker whose task row was deleted by
+  a retry). Same-item branch overlap is proven by a scheduler test
+  (both branch handlers block until both have started). itemaudit skill
+  updated for the DAG structure. VALIDATION PENDING: combined 4a+4b real
+  disc run -- expect interleaved encode/analysis logs, encoding-owned
+  progress, commentary indices remapped in apply, subtitles muxed in
+  apply. GPU claims still capacity 1: analysis/subtitling serialize with
+  episode-ID cross-item; overlap is only gpu-vs-encode.

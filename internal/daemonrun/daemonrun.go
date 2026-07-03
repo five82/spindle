@@ -141,8 +141,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	ripperHandler := ripper.New(cfg, notifier, ripCacheStore, discMon, ripper.NoTitleOverride)
 	contentidHandler := contentid.New(cfg, llmClient, osClient, tmdbClient, transcriber)
 	encoderHandler := encoder.New(cfg, notifier)
-	audioHandler := audioanalysis.New(cfg, llmClient, transcriber)
+	analysisHandler := audioanalysis.New(cfg, llmClient, transcriber)
 	subtitleHandler := subtitle.New(cfg, transcriber)
+	applyHandler := audioanalysis.NewApply(cfg)
 	organizerHandler := organizer.New(cfg, jfClient, notifier)
 
 	// Check dependencies and create status tracker.
@@ -176,17 +177,24 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Create workflow manager and configure stages.
 	manager := workflow.New(store, notifier, statusTracker, logger)
-	// Claims replicate the pre-scheduler exclusivity: drive, gpu, and encode
-	// each have capacity 1 (Phase 3 conservative budgets; see the task-graph
-	// plan before raising any of these).
+	// The per-item template is a DAG (task-graph plan, Phase 4b): after
+	// episode identification, the analysis branch (commentary detection,
+	// subtitle generation -- both from RIPPED sources) runs concurrently
+	// with encoding; apply joins both branches and performs every write to
+	// the encoded files. Budgets stay at capacity 1 per resource (drive,
+	// gpu, encode) -- the same exclusivity as before; the overlap is
+	// between the gpu and encode lanes, which were already concurrent
+	// across items. Registration order is the display priority: during
+	// overlap the item shows the encoding stage (encoding owns progress).
 	manager.ConfigureStages([]workflow.PipelineStage{
 		{Stage: queue.StageIdentification, Handler: identifyHandler, Claims: map[string]int{"drive": 1}},
-		{Stage: queue.StageRipping, Handler: ripperHandler, Claims: map[string]int{"drive": 1}},
-		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Claims: map[string]int{"gpu": 1}},
-		{Stage: queue.StageEncoding, Handler: encoderHandler, Claims: map[string]int{"encode": 1}},
-		{Stage: queue.StageAudioAnalysis, Handler: audioHandler, Claims: map[string]int{"gpu": 1}},
-		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Claims: map[string]int{"gpu": 1}},
-		{Stage: queue.StageOrganizing, Handler: organizerHandler},
+		{Stage: queue.StageRipping, Handler: ripperHandler, Claims: map[string]int{"drive": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},
+		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageRipping}},
+		{Stage: queue.StageEncoding, Handler: encoderHandler, Claims: map[string]int{"encode": 1}, DependsOn: []queue.Stage{queue.StageEpisodeIdentification}},
+		{Stage: queue.StageAnalysis, Handler: analysisHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageEpisodeIdentification}},
+		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageAnalysis}},
+		{Stage: queue.StageApply, Handler: applyHandler, DependsOn: []queue.Stage{queue.StageSubtitling, queue.StageEncoding}},
+		{Stage: queue.StageOrganizing, Handler: organizerHandler, DependsOn: []queue.Stage{queue.StageApply}},
 	})
 
 	// Create HTTP API with shutdown channel.

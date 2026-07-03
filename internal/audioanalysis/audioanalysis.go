@@ -79,54 +79,56 @@ func New(
 	}
 }
 
-// Run executes the audio analysis stage.
+// Run executes the analysis stage: per-episode commentary detection from
+// the RIPPED sources. This stage runs concurrently with encoding, so it is
+// progress-silent (encoding owns the item progress columns) and persists
+// envelope changes only through merge operations.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
 	logger := sess.Logger
-	logger.Info("audio analysis stage started", "event_type", "stage_start", "stage", "audio_analysis")
+	logger.Info("analysis stage started", "event_type", "stage_start", "stage", "analysis")
 	env := sess.Env
 
-	// Collect encoded asset paths for audio analysis.
 	keys := env.AssetKeys()
-	var encodedPaths []string
+	type rippedInput struct {
+		key  string
+		path string
+	}
+	var inputs []rippedInput
 	for _, key := range keys {
-		asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, key)
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, key)
 		if ok && asset.IsCompleted() {
-			encodedPaths = append(encodedPaths, asset.Path)
+			inputs = append(inputs, rippedInput{key: key, path: asset.Path})
 		}
 	}
-	if len(encodedPaths) == 0 {
-		return fmt.Errorf("no encoded assets available for audio analysis")
+	if len(inputs) == 0 {
+		return fmt.Errorf("no ripped assets available for analysis")
 	}
-	logger.Info("audio analysis plan",
-		"event_type", "audio_analysis_plan",
-		"encoded_assets", len(encodedPaths),
-		"asset_keys", len(keys),
+	logger.Info("analysis plan",
+		"event_type", "analysis_plan",
+		"ripped_assets", len(inputs),
 		"commentary_enabled", h.cfg.Commentary.Enabled,
 		"llm_configured", h.llmClient != nil,
 	)
 
 	analysisData := &ripspec.AudioAnalysisData{}
-	_ = sess.Progress(5, "Phase 1/3 - Commentary detection", stage.WithActiveEpisode(keys[0]))
-
-	// Phase 1: Commentary detection on encoded files.
-	// Must run BEFORE audio refinement so commentary track indices can be
-	// preserved when refinement strips unwanted tracks.
-	logger.Info("Phase 1/3 - Commentary detection")
-	var commentaryIndices []int
 	if h.cfg.Commentary.Enabled && h.llmClient != nil {
-		path := encodedPaths[0]
-		result, err := ffprobe.Inspect(ctx, "", path)
-		if err != nil {
-			return fmt.Errorf("ffprobe %s: %w", path, err)
-		}
-
-		comms, excluded := h.detectCommentary(ctx, sess, result, path, item.DiscFingerprint, keys[0])
-		analysisData.CommentaryTracks = comms
-		analysisData.ExcludedTracks = excluded
-
-		for _, c := range comms {
-			commentaryIndices = append(commentaryIndices, c.Index)
+		for _, in := range inputs {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			result, err := ffprobe.Inspect(ctx, "", in.path)
+			if err != nil {
+				return fmt.Errorf("ffprobe %s: %w", in.path, err)
+			}
+			comms, excluded := h.detectCommentary(ctx, sess, result, in.path, item.DiscFingerprint, in.key)
+			analysisData.PerEpisode = append(analysisData.PerEpisode, ripspec.EpisodeAudioAnalysis{
+				EpisodeKey:       in.key,
+				CommentaryTracks: comms,
+				ExcludedTracks:   excluded,
+			})
+			analysisData.CommentaryTracks = append(analysisData.CommentaryTracks, comms...)
+			analysisData.ExcludedTracks = append(analysisData.ExcludedTracks, excluded...)
 		}
 	} else {
 		reason := "commentary disabled"
@@ -140,88 +142,44 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		)
 	}
 
-	// Phase 2: Audio refinement on encoded files.
-	// Strips non-English and redundant audio tracks, preserving primary +
-	// commentary tracks via additionalKeep.
-	_ = sess.Progress(40, "Phase 2/3 - Audio refinement")
-	logger.Info("Phase 2/3 - Audio refinement")
-	refinement, refErr := RefineAudioTargets(ctx, logger, encodedPaths, commentaryIndices)
-	if refErr != nil {
-		logger.Warn("audio refinement failed",
-			"event_type", "audio_refinement_error",
-			"error_hint", refErr.Error(),
-			"impact", "audio refinement skipped, proceeding with all tracks",
-		)
-	} else if refinement != nil && refinement.PrimaryAudioDescription != "" {
-		analysisData.PrimaryDescription = refinement.PrimaryAudioDescription
-	}
-
-	// Phase 3: Post-refinement primary audio selection and commentary disposition.
-	_ = sess.Progress(75, "Phase 3/3 - Post-refinement audio analysis")
-	logger.Info("Phase 3/3 - Post-refinement audio analysis")
-	if err := applyPostRefinementAudio(ctx, logger, encodedPaths[0], refinement, analysisData); err != nil {
+	if err := sess.MergeSave(func(env *ripspec.Envelope) error {
+		env.Attributes.AudioAnalysis = analysisData
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	if err := validateAudioTargetDurations(ctx, encodedPaths); err != nil {
-		reason := "audio_validation: " + err.Error()
-		sess.AddReviewReason(reason)
-		logger.Warn("audio validation failed",
-			"event_type", "audio_validation_failed",
-			"error_hint", err.Error(),
-			"impact", "item routed to review",
-		)
-		logger.Info("validation failure flagged for review",
-			"decision_type", logs.DecisionValidationFailureRoute,
-			"decision_result", "flagged_for_review",
-			"decision_reason", "audio duration validation did not pass",
-		)
-	}
-
-	// Store analysis in envelope attributes.
-	env.Attributes.AudioAnalysis = analysisData
-
-	_ = sess.Progress(95, "Phase 3/3 - Persisting audio analysis")
-
-	// Persist.
-	if err := sess.Save(); err != nil {
-		return err
-	}
-
-	logger.Info("audio analysis stage completed",
+	logger.Info("analysis stage completed",
 		"event_type", "stage_complete",
-		"stage", "audio_analysis",
-		"primary_audio_index", analysisData.PrimaryTrack.Index,
-		"primary_audio", analysisData.PrimaryDescription,
+		"stage", "analysis",
 		"commentary_tracks", len(analysisData.CommentaryTracks),
 		"excluded_tracks", len(analysisData.ExcludedTracks),
-		"encoded_assets", len(encodedPaths),
+		"ripped_assets", len(inputs),
 	)
 	return nil
 }
 
-// applyPostRefinementAudio selects the post-refinement primary audio track,
-// remaps commentary indices to their post-refinement positions, and applies
-// and validates the commentary disposition remux (the disposition half of
-// task apply_audio). It mutates analysisData in place. Disposition and
-// validation failures are degraded (logged, tracks unlabeled), not fatal.
+// applyPostRefinementAudio selects the post-refinement primary audio track
+// for one file, remaps that episode's commentary indices to their
+// post-refinement positions, and applies and validates the commentary
+// disposition remux (the disposition half of task apply_audio). Disposition
+// and validation failures are degraded (logged, tracks unlabeled), not
+// fatal. Returns the selected primary track, its label, and the remapped
+// commentary refs for the episode.
 func applyPostRefinementAudio(
 	ctx context.Context,
 	logger *slog.Logger,
 	path string,
 	refinement *AudioRefinementResult,
-	analysisData *ripspec.AudioAnalysisData,
-) error {
+	comms []ripspec.CommentaryTrackRef,
+) (ripspec.AudioTrackRef, string, []ripspec.CommentaryTrackRef, error) {
 	result, err := ffprobe.Inspect(ctx, "", path)
 	if err != nil {
-		return fmt.Errorf("ffprobe post-refinement %s: %w", path, err)
+		return ripspec.AudioTrackRef{}, "", nil, fmt.Errorf("ffprobe post-refinement %s: %w", path, err)
 	}
 
 	selection := audio.Select(result.Streams, logger)
-	analysisData.PrimaryTrack = ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
-	if analysisData.PrimaryDescription == "" {
-		analysisData.PrimaryDescription = selection.PrimaryLabel()
-	}
+	primary := ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
 
 	logger.Info("primary audio selected",
 		"decision_type", logs.DecisionAudioSelection,
@@ -230,10 +188,10 @@ func applyPostRefinementAudio(
 	)
 
 	// Remap commentary indices to post-refinement positions and apply disposition.
-	if len(analysisData.CommentaryTracks) > 0 && refinement != nil {
-		remapped := RemapCommentaryIndices(logger, analysisData.CommentaryTracks, refinement.KeptIndices)
+	remapped := comms
+	if len(comms) > 0 && refinement != nil {
+		remapped = RemapCommentaryIndices(logger, comms, refinement.KeptIndices)
 		if len(remapped) > 0 {
-			analysisData.CommentaryTracks = remapped
 			audioStreams := result.AudioStreams()
 			var targets []CommentaryTarget
 			for _, r := range remapped {
@@ -264,7 +222,7 @@ func applyPostRefinementAudio(
 			}
 		}
 	}
-	return nil
+	return primary, selection.PrimaryLabel(), remapped, nil
 }
 
 // detectCommentary examines non-primary audio tracks for commentary content.
@@ -363,7 +321,6 @@ func (h *Handler) detectCommentary(
 		candidates = append(candidates, candidateTrack{audioIndex: as.audioIndex, stream: stream})
 	}
 	if len(candidates) == 0 {
-		_ = sess.Progress(40, "Phase 1/3 - Commentary detection complete (no candidates)", stage.WithActiveEpisode(epKey))
 		return comms, excluded
 	}
 
@@ -375,7 +332,11 @@ func (h *Handler) detectCommentary(
 	// Transcribe ALL candidates in one WhisperX invocation. Each candidate is
 	// transcribed exactly once; the same transcript feeds both the stereo
 	// similarity filter and LLM classification.
-	_ = sess.Progress(10, fmt.Sprintf("Phase 1/3 - Commentary detection (transcribing %d candidates, batched)", len(candidates)), stage.WithActiveEpisode(epKey))
+	logger.Info("commentary candidate transcription started",
+		"event_type", "commentary_candidates_transcribe",
+		"episode_key", epKey,
+		"candidate_count", len(candidates),
+	)
 	candidateText := make(map[int]string, len(candidates))
 	if h.transcriber != nil {
 		reqs := make([]transcription.TranscribeRequest, len(candidates))
@@ -452,25 +413,27 @@ func (h *Handler) detectCommentary(
 			}
 		}
 
-		message := fmt.Sprintf("Phase 1/3 - Commentary detection (candidate %d/%d: LLM classification)", candidateNumber, candidateCount)
-		_ = sess.Progress(commentaryCandidatePercent(candidateNumber, candidateCount, 0.6), message, stage.WithActiveEpisode(epKey))
+		logger.Info("commentary candidate classification",
+			"event_type", "commentary_candidate_classify",
+			"episode_key", epKey,
+			"candidate_number", candidateNumber,
+			"candidate_count", candidateCount,
+		)
 		ref := h.classifyTrack(ctx, logger, c.audioIndex, c.stream, epKey, text, transcribed)
 		if ref != nil {
 			comms = append(comms, *ref)
 		}
 	}
 
-	_ = sess.Progress(40, fmt.Sprintf("Phase 1/3 - Commentary detection complete (%d commentary, %d excluded)", len(comms), len(excluded)), stage.WithActiveEpisode(epKey))
+	logger.Info("commentary detection complete",
+		"event_type", "commentary_detection_complete",
+		"episode_key", epKey,
+		"commentary_tracks", len(comms),
+		"excluded_tracks", len(excluded),
+	)
 	return comms, excluded
 }
 
-func commentaryCandidatePercent(candidateNumber, candidateCount int, fraction float64) float64 {
-	if candidateCount <= 0 {
-		return 5
-	}
-	completed := float64(candidateNumber - 1)
-	return 5 + (35 * (completed + fraction) / float64(candidateCount))
-}
 
 // primaryFingerprint returns the transcript fingerprint of the primary audio
 // track. It reuses the shared per-episode transcript artifact when one exists

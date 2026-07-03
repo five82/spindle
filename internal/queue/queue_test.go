@@ -624,8 +624,8 @@ func TestFormatAlsoProcessingHumanizesAndCaps(t *testing.T) {
 	_ = store.StartStage(item2, StageEncoding)
 	_ = store.MoveToStage(item3, StageSubtitling)
 	_ = store.StartStage(item3, StageSubtitling)
-	_ = store.MoveToStage(item4, StageAudioAnalysis)
-	_ = store.StartStage(item4, StageAudioAnalysis)
+	_ = store.MoveToStage(item4, StageAnalysis)
+	_ = store.StartStage(item4, StageAnalysis)
 
 	got := FormatAlsoProcessing(store, item1.ID)
 	want := "\nAlso processing: Breaking Bad Season 01 (encoding), Fringe Season 01 (subtitles), +1 more"

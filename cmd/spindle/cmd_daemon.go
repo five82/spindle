@@ -161,7 +161,7 @@ func newStatusCmd() *cobra.Command {
 			for _, stage := range []queue.Stage{
 				queue.StageIdentification, queue.StageRipping,
 				queue.StageEpisodeIdentification, queue.StageEncoding,
-				queue.StageAudioAnalysis, queue.StageSubtitling,
+				queue.StageAnalysis, queue.StageSubtitling, queue.StageApply,
 				queue.StageOrganizing, queue.StageCompleted, queue.StageFailed,
 			} {
 				count := stats[stage]

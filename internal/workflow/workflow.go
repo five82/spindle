@@ -25,6 +25,10 @@ type PipelineStage struct {
 	Handler stage.Handler
 	Stage   queue.Stage
 	Claims  map[string]int
+	// DependsOn names the stages whose tasks must complete before this
+	// stage's task is ready. Empty means: depend on the previously
+	// registered stage (linear default); the first stage is a root.
+	DependsOn []queue.Stage
 }
 
 // pipelineState holds runtime state for the pipeline.
@@ -92,13 +96,13 @@ func (m *Manager) ConfigureStages(stages []PipelineStage) {
 		p.stageOrder[i] = s.Stage
 	}
 
-	// Task specs mirror registration order; the compiled per-item template
-	// is one task per stage, each depending on the previous (linear at the
-	// current granularity -- Phase 4b introduces DAG templates).
+	// Task specs mirror registration order. Stages with explicit DependsOn
+	// keep their declared edges (DAG); stages without default to depending
+	// on the previously registered stage.
 	p.specs = make([]queue.TaskSpec, len(stages))
 	for i, s := range stages {
-		spec := queue.TaskSpec{Type: s.Stage}
-		if i > 0 {
+		spec := queue.TaskSpec{Type: s.Stage, DependsOn: s.DependsOn}
+		if len(spec.DependsOn) == 0 && i > 0 {
 			spec.DependsOn = []queue.Stage{stages[i-1].Stage}
 		}
 		p.specs[i] = spec
@@ -149,16 +153,15 @@ func (m *Manager) signalWake() {
 }
 
 // trackWorker registers a task worker's cancel function under its item.
-// Returns false when the item already has a live worker (one worker per
-// item until Phase 4b relaxes dispatch for parallel branches).
+// Returns false only when that task already has a live worker.
 func (m *Manager) trackWorker(itemID, taskID int64, cancel context.CancelFunc) bool {
 	m.runningMu.Lock()
 	defer m.runningMu.Unlock()
-	if len(m.running[itemID]) > 0 {
-		return false
-	}
 	if m.running[itemID] == nil {
 		m.running[itemID] = make(map[int64]context.CancelFunc)
+	}
+	if _, live := m.running[itemID][taskID]; live {
+		return false
 	}
 	m.running[itemID][taskID] = cancel
 	return true
@@ -179,6 +182,35 @@ func (m *Manager) hasLiveWorker(itemID int64) bool {
 	m.runningMu.Lock()
 	defer m.runningMu.Unlock()
 	return len(m.running[itemID]) > 0
+}
+
+// hasStaleWorker reports whether the item has a live worker whose task no
+// longer exists in the item's current task rows (a cancelled worker still
+// exiting after a retry recompiled the tasks).
+func (m *Manager) hasStaleWorker(itemID int64) bool {
+	m.runningMu.Lock()
+	taskIDs := make([]int64, 0, len(m.running[itemID]))
+	for id := range m.running[itemID] {
+		taskIDs = append(taskIDs, id)
+	}
+	m.runningMu.Unlock()
+	if len(taskIDs) == 0 {
+		return false
+	}
+	tasks, err := m.store.TasksForItem(itemID)
+	if err != nil {
+		return true // fail safe: do not dispatch on unknown state
+	}
+	current := make(map[int64]bool, len(tasks))
+	for _, t := range tasks {
+		current[t.ID] = true
+	}
+	for _, id := range taskIDs {
+		if !current[id] {
+			return true
+		}
+	}
+	return false
 }
 
 // cancelStoppedWorkers cancels the workers of items the user has stopped.
@@ -308,10 +340,12 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		if !ok {
 			continue
 		}
-		// Never run two workers for one item, even when queue state says the
-		// item is free: StopItems clears in_progress while the stopped
-		// worker is still exiting.
-		if m.hasLiveWorker(item.ID) {
+		// Parallel branches of one item may run concurrently, but never
+		// alongside a STALE worker: after a stop+retry recompiled the task
+		// rows, an exiting cancelled worker still references a deleted task
+		// and may share files with the new one. Skip the item until it
+		// drains.
+		if m.hasStaleWorker(item.ID) {
 			continue
 		}
 		idx, ok := p.stageMap[task.Type]

@@ -26,10 +26,11 @@ var stageOrder = map[queue.Stage]int{
 	queue.StageRipping:               1,
 	queue.StageEpisodeIdentification: 2,
 	queue.StageEncoding:              3,
-	queue.StageAudioAnalysis:         4,
+	queue.StageAnalysis:              4,
 	queue.StageSubtitling:            5,
-	queue.StageOrganizing:            6,
-	queue.StageCompleted:             7,
+	queue.StageApply:                 6,
+	queue.StageOrganizing:            7,
+	queue.StageCompleted:             8,
 }
 
 // Gather collects all audit artifacts for a queue item.
@@ -191,7 +192,7 @@ func computeStageGate(item *httpapi.ItemResponse, mediaType, mediaHint, discSour
 		PhaseEncoded:    order >= stageOrder[queue.StageEncoding],
 		PhaseCrop:       order >= stageOrder[queue.StageEncoding],
 		PhaseSubtitles:  order >= stageOrder[queue.StageSubtitling],
-		PhaseCommentary: order >= stageOrder[queue.StageAudioAnalysis],
+		PhaseCommentary: order >= stageOrder[queue.StageAnalysis],
 		PhaseExtVal:     order >= stageOrder[queue.StageEncoding] && discSource != "dvd",
 	}
 }

@@ -8,8 +8,9 @@ const (
 	StageRipping               Stage = "ripping"
 	StageEpisodeIdentification Stage = "episode_identification"
 	StageEncoding              Stage = "encoding"
-	StageAudioAnalysis         Stage = "audio_analysis"
+	StageAnalysis              Stage = "analysis"
 	StageSubtitling            Stage = "subtitling"
+	StageApply                 Stage = "apply"
 	StageOrganizing            Stage = "organizing"
 	StageCompleted             Stage = "completed"
 	StageFailed                Stage = "failed"
@@ -30,10 +31,12 @@ func HumanStage(stage Stage) string {
 		return "episode ID"
 	case StageEncoding:
 		return "encoding"
-	case StageAudioAnalysis:
+	case StageAnalysis:
 		return "audio analysis"
 	case StageSubtitling:
 		return "subtitles"
+	case StageApply:
+		return "post-processing"
 	case StageOrganizing:
 		return "library import"
 	case StageCompleted:

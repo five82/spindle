@@ -140,12 +140,40 @@ type ExcludedTrackRef struct {
 	Similarity float64 `json:"similarity,omitempty"`
 }
 
-// AudioAnalysisData holds the results of audio track analysis.
+// EpisodeAudioAnalysis holds commentary detection results for one episode,
+// measured on the RIPPED source (track order and count are preserved by
+// encoding, so the indices remain valid on the encoded file until the apply
+// stage's refinement strips tracks).
+type EpisodeAudioAnalysis struct {
+	EpisodeKey       string               `json:"episode_key"`
+	CommentaryTracks []CommentaryTrackRef `json:"commentary_tracks,omitempty"`
+	ExcludedTracks   []ExcludedTrackRef   `json:"excluded_tracks,omitempty"`
+}
+
+// AudioAnalysisData holds the results of audio track analysis. The
+// aggregate CommentaryTracks/ExcludedTracks lists are the union across
+// episodes (single entry for movies) and back the API/audit displays;
+// PerEpisode carries the per-key detail the apply stage uses.
 type AudioAnalysisData struct {
-	PrimaryTrack       AudioTrackRef        `json:"primary_track"`
-	PrimaryDescription string               `json:"primary_description,omitempty"`
-	CommentaryTracks   []CommentaryTrackRef `json:"commentary_tracks,omitempty"`
-	ExcludedTracks     []ExcludedTrackRef   `json:"excluded_tracks,omitempty"`
+	PrimaryTrack       AudioTrackRef          `json:"primary_track"`
+	PrimaryDescription string                 `json:"primary_description,omitempty"`
+	CommentaryTracks   []CommentaryTrackRef   `json:"commentary_tracks,omitempty"`
+	ExcludedTracks     []ExcludedTrackRef     `json:"excluded_tracks,omitempty"`
+	PerEpisode         []EpisodeAudioAnalysis `json:"per_episode,omitempty"`
+}
+
+// EpisodeAnalysis returns the per-episode analysis entry for key, or nil.
+func (d *AudioAnalysisData) EpisodeAnalysis(key string) *EpisodeAudioAnalysis {
+	if d == nil {
+		return nil
+	}
+	lower := strings.ToLower(key)
+	for i := range d.PerEpisode {
+		if strings.ToLower(d.PerEpisode[i].EpisodeKey) == lower {
+			return &d.PerEpisode[i]
+		}
+	}
+	return nil
 }
 
 // SubtitleGenRecord captures the result of subtitle generation for one episode.

@@ -76,10 +76,10 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return err
 	}
 
-	// Persist envelope.
-	if err := sess.Save(); err != nil {
-		return err
-	}
+	// No whole-envelope Save here: encoding runs concurrently with the
+	// analysis branch, and every envelope write in this stage already
+	// persisted through the merge-based SaveAsset helpers. A plain Save
+	// would clobber the sibling branch's merged state.
 
 	if summary.errors > 0 {
 		return fmt.Errorf("encoding failed for %d of %d jobs", summary.errors, len(jobs))
@@ -309,8 +309,19 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 	)
 
 	if !result.ValidationPassed {
-		sess.AddEpisodeReviewReason(job.Key, "Encoding validation failed")
-		sess.AddReviewReason(fmt.Sprintf("validation failed for %s", job.Key))
+		// Merge-based review flags: this stage runs concurrently with the
+		// analysis branch and no longer performs a whole-envelope Save.
+		if mergeErr := sess.MergeSave(func(env *ripspec.Envelope) error {
+			if ep := env.EpisodeByKey(job.Key); ep != nil {
+				ep.AppendReviewReason("Encoding validation failed")
+			}
+			return nil
+		}); mergeErr != nil {
+			return encodeJobResult{}, mergeErr
+		}
+		if mergeErr := sess.MergeAddReviewReason(fmt.Sprintf("validation failed for %s", job.Key)); mergeErr != nil {
+			return encodeJobResult{}, mergeErr
+		}
 		logger.Info("validation failure flagged for review",
 			"decision_type", logs.DecisionValidationFailureRoute,
 			"decision_result", "flagged_for_review",

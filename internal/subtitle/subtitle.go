@@ -206,7 +206,28 @@ type subtitleRunSummary struct {
 }
 
 func (h *Handler) planSubtitleJobs(sess *stage.Session) ([]stage.AssetJob, []string) {
-	return sess.PendingKeyedAssetJobs(ripspec.AssetKindEncoded, ripspec.AssetKindSubtitled)
+	jobs, skipped := sess.PendingKeyedAssetJobs(ripspec.AssetKindRipped, ripspec.AssetKindSubtitled)
+	// Also skip keys that already have a clean generation record (resume
+	// after a retry that recompiled the analysis branch).
+	var pending []stage.AssetJob
+	for _, job := range jobs {
+		if rec := findGenRecord(sess.Env, job.Key); rec != nil && len(rec.SevereIssues) == 0 {
+			skipped = append(skipped, job.Key)
+			continue
+		}
+		pending = append(pending, job)
+	}
+	return pending, skipped
+}
+
+func findGenRecord(env *ripspec.Envelope, key string) *ripspec.SubtitleGenRecord {
+	records := env.Attributes.SubtitleGenerationResults
+	for i := range records {
+		if strings.EqualFold(records[i].EpisodeKey, key) {
+			return &records[i]
+		}
+	}
+	return nil
 }
 
 func (h *Handler) logSkippedSubtitleJobs(logger *slog.Logger, skippedCompleted []string) {
@@ -244,7 +265,6 @@ func (h *Handler) processSubtitleJobs(ctx context.Context, sess *stage.Session, 
 func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, job stage.AssetJob) (bool, error) {
 	logger := sess.Logger
 	key := job.Key
-	asset := job.Input
 
 	h.startSubtitleJob(sess, job)
 
@@ -261,7 +281,12 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 	}
 	if len(record.SevereIssues) > 0 {
 		severeReason := strings.Join(record.SevereIssues, ", ")
-		upsertSubtitleGenRecord(&sess.Env.Attributes.SubtitleGenerationResults, record)
+		if mergeErr := sess.MergeSave(func(env *ripspec.Envelope) error {
+			upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
+			return nil
+		}); mergeErr != nil {
+			return false, mergeErr
+		}
 		logger.Warn("subtitle validation failed",
 			"decision_type", logs.DecisionSRTValidation,
 			"decision_result", "failed",
@@ -273,18 +298,23 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 		return false, nil
 	}
 
-	upsertSubtitleGenRecord(&sess.Env.Attributes.SubtitleGenerationResults, record)
-
-	subtitledPath, subtitlesMuxed := h.resolveSubtitledOutput(ctx, logger, asset.Path, record.SubtitlePath, key, result.SelectedAudio.Language)
-	if err := h.saveSubtitleJobSuccess(logger, sess, job, subtitledPath, subtitlesMuxed); err != nil {
+	if err := sess.MergeSave(func(env *ripspec.Envelope) error {
+		upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
+		return nil
+	}); err != nil {
 		return false, err
 	}
+	logger.Info("subtitle generated",
+		"event_type", "subtitle_generated",
+		"episode_key", key,
+		"subtitle_path", record.SubtitlePath,
+		"segments", record.Segments,
+	)
 	return true, nil
 }
 
 func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
 	logger := sess.Logger
-	item := sess.Item
 	key := job.Key
 
 	logger.Info("encoded asset selected for transcription",
@@ -293,11 +323,9 @@ func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
 		"decision_reason", fmt.Sprintf("episode_key=%s", key),
 	)
 
-	item.ProgressMessage = job.PhaseMessage("Generating subtitles (" + key + ")")
-	logger.Info(item.ProgressMessage,
+	logger.Info(job.PhaseMessage("Generating subtitles ("+key+")"),
 		"event_type", "subtitle_start",
 	)
-	_ = sess.Progress(job.Percent(0), item.ProgressMessage, stage.WithActiveEpisode(key))
 }
 
 func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Session, job stage.AssetJob) (*GenerateDisplaySubtitleResult, error) {
@@ -306,10 +334,22 @@ func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Sessi
 	key := job.Key
 	workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
 
+	// Generated SRTs land in staging; the apply stage places them next to
+	// the encoded output and muxes them after the encoding branch joins.
+	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
+	if err != nil {
+		return nil, err
+	}
+	subtitleDir := filepath.Join(stagingRoot, "subtitles")
+	if err := os.MkdirAll(subtitleDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create subtitles dir: %w", err)
+	}
+
 	return GenerateDisplaySubtitle(ctx, GenerateDisplaySubtitleRequest{
-		VideoPath:   asset.Path,
-		WorkDir:     workDir,
-		Language:    "en",
+		VideoPath:       asset.Path,
+		DisplayBasePath: filepath.Join(subtitleDir, key+".mkv"),
+		WorkDir:         workDir,
+		Language:        "en",
 		ItemID:      item.ID,
 		EpisodeKey:  key,
 		Purpose:     "subtitle_generation",
@@ -487,56 +527,27 @@ func (h *Handler) applySubtitleReviewIssues(logger *slog.Logger, sess *stage.Ses
 			"episode_key", key,
 			"requires_review", true,
 		)
-		sess.AddEpisodeReviewReason(key, "Subtitle validation: "+issue)
-		sess.AddReviewReason("srt_validation: " + issue + " (" + key + ")")
+		if mergeErr := sess.MergeSave(func(env *ripspec.Envelope) error {
+			if ep := env.EpisodeByKey(key); ep != nil {
+				ep.AppendReviewReason("Subtitle validation: " + issue)
+			}
+			return nil
+		}); mergeErr != nil {
+			logger.Error("subtitle review persistence failed",
+				"event_type", "subtitle_failure_persist_failed",
+				"error", mergeErr,
+			)
+		}
+		if mergeErr := sess.MergeAddReviewReason("srt_validation: " + issue + " (" + key + ")"); mergeErr != nil {
+			logger.Error("subtitle review persistence failed",
+				"event_type", "subtitle_failure_persist_failed",
+				"error", mergeErr,
+			)
+		}
 	}
-}
-
-func (h *Handler) resolveSubtitledOutput(ctx context.Context, logger *slog.Logger, assetPath, srtPath, key, language string) (string, bool) {
-	subtitledPath := assetPath
-	subtitlesMuxed := false
-	if !h.cfg.Subtitles.MuxIntoMKV {
-		logger.Info("subtitle mux skipped",
-			"decision_type", logs.DecisionSubtitleMux,
-			"decision_result", "skipped",
-			"decision_reason", "mux_into_mkv is disabled",
-		)
-		return subtitledPath, subtitlesMuxed
-	}
-
-	muxedPath, err := h.muxSubtitles(ctx, logger, assetPath, srtPath, key, language)
-	if err != nil {
-		logger.Warn("subtitle mux failed",
-			"event_type", "mux_error",
-			"error_hint", err.Error(),
-			"impact", "subtitle remains as sidecar",
-		)
-		return subtitledPath, subtitlesMuxed
-	}
-	return muxedPath, true
-}
-
-func (h *Handler) saveSubtitleJobSuccess(logger *slog.Logger, sess *stage.Session, job stage.AssetJob, subtitledPath string, subtitlesMuxed bool) error {
-	key := job.Key
-	if err := sess.Progress(job.CompletionPercent(), job.PhaseMessage("Generated subtitles ("+key+")")); err != nil {
-		logger.Warn("progress persistence failed",
-			"event_type", "progress_persist_failed",
-			"error_hint", "subtitle completion progress not persisted",
-			"impact", "subtitle progress not reflected in queue",
-			"error", err,
-		)
-	}
-	return sess.SaveAssetSuccess(ripspec.AssetKindSubtitled, ripspec.Asset{
-		EpisodeKey:     key,
-		Path:           subtitledPath,
-		SubtitlesMuxed: subtitlesMuxed,
-	})
 }
 
 func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSummary) error {
-	if err := sess.Save(); err != nil {
-		return err
-	}
 	if summary.attempted > 0 && summary.succeeded == 0 && summary.failed > 0 {
 		return fmt.Errorf("all %d subtitle job(s) failed", summary.attempted)
 	}
@@ -598,10 +609,28 @@ func (h *Handler) recordSubtitleFailure(
 		"error", errMsg,
 		"impact", "subtitle missing for this episode; continuing with others",
 	)
-	sess.RecordAssetFailure(ripspec.AssetKindSubtitled, key, errMsg)
-	sess.AddEpisodeReviewReason(key, "Subtitle generation failed: "+errMsg)
-	sess.AddReviewReason("subtitle_failure: " + errMsg + " (" + key + ")")
-	_ = sess.Save()
+	if mergeErr := sess.MergeSave(func(env *ripspec.Envelope) error {
+		env.Assets.AddAsset(ripspec.AssetKindSubtitled, ripspec.Asset{
+			EpisodeKey: key,
+			Status:     ripspec.AssetStatusFailed,
+			ErrorMsg:   errMsg,
+		})
+		if ep := env.EpisodeByKey(key); ep != nil {
+			ep.AppendReviewReason("Subtitle generation failed: " + errMsg)
+		}
+		return nil
+	}); mergeErr != nil {
+		logger.Error("subtitle failure persistence failed",
+			"event_type", "subtitle_failure_persist_failed",
+			"error", mergeErr,
+		)
+	}
+	if mergeErr := sess.MergeAddReviewReason("subtitle_failure: " + errMsg + " (" + key + ")"); mergeErr != nil {
+		logger.Error("subtitle review reason persistence failed",
+			"event_type", "subtitle_failure_persist_failed",
+			"error", mergeErr,
+		)
+	}
 }
 
 func upsertSubtitleGenRecord(records *[]ripspec.SubtitleGenRecord, record ripspec.SubtitleGenRecord) {
@@ -625,9 +654,9 @@ func subtitleValidationResult(validation validationResult) string {
 	}
 }
 
-// muxSubtitles runs mkvmerge to add an SRT subtitle track to the MKV file.
-// It writes to a temp file and renames on success.
-func (h *Handler) muxSubtitles(
+// MuxDisplaySubtitle runs mkvmerge to add an SRT subtitle track to the MKV
+// file. It writes to a temp file and renames on success.
+func MuxDisplaySubtitle(
 	ctx context.Context,
 	logger *slog.Logger,
 	videoPath string,

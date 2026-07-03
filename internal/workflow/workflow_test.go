@@ -571,3 +571,85 @@ func TestSchedulerCancelsWorkerOnUserStop(t *testing.T) {
 	}
 	t.Fatal("stopped item did not settle into failed state with pending task")
 }
+
+func TestSchedulerRunsParallelBranchesOfOneItemConcurrently(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	item, _ := store.NewDisc("A", "fp1")
+
+	// ripping -> (encoding || subtitling) -> organizing, mirroring the 4b
+	// template shape. Both branch handlers block until BOTH have started,
+	// proving same-item concurrency.
+	bothStarted := make(chan struct{})
+	var startedMu sync.Mutex
+	started := 0
+	branchHandler := stubHandler{run: func(ctx context.Context, _ *stage.Session) error {
+		startedMu.Lock()
+		started++
+		if started == 2 {
+			close(bothStarted)
+		}
+		startedMu.Unlock()
+		select {
+		case <-bothStarted:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+			return errTestBoom // deadlock: branches did not overlap
+		}
+	}}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{
+		{Stage: queue.StageRipping, Handler: stubHandler{}, Claims: map[string]int{"drive": 1}},
+		{Stage: queue.StageEncoding, Handler: branchHandler, Claims: map[string]int{"encode": 1}, DependsOn: []queue.Stage{queue.StageRipping}},
+		{Stage: queue.StageSubtitling, Handler: branchHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageRipping}},
+		{Stage: queue.StageOrganizing, Handler: stubHandler{}, DependsOn: []queue.Stage{queue.StageSubtitling, queue.StageEncoding}},
+	})
+	// Item starts at identification; move to the template's first stage.
+	if err := store.MoveToStage(item, queue.StageRipping); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := store.GetByID(item.ID)
+		if err != nil {
+			t.Fatalf("get item: %v", err)
+		}
+		if got.Stage == queue.StageFailed {
+			t.Fatal("branches deadlocked instead of overlapping")
+		}
+		if got.Stage == queue.StageCompleted {
+			tasks, err := store.TasksForItem(item.ID)
+			if err != nil {
+				t.Fatalf("tasks: %v", err)
+			}
+			for _, task := range tasks {
+				if task.State != queue.TaskDone {
+					t.Fatalf("task %s state = %q, want done", task.Type, task.State)
+				}
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("item did not complete")
+}
