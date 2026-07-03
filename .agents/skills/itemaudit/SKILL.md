@@ -34,7 +34,7 @@ This produces an agent-facing JSON report. The schema may evolve with this skill
 - **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), item-specific INFO events/progress (`logs.events` with `event_type` and extras), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`)
 - **`rip_cache`**: Cache metadata (disc title, cached_at, title_count, total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted (already in parsed `envelope`).
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
-- **`encoding`**: Encoding details snapshot (crop, validation, config, result). Preset settings are omitted; validation results capture pass/fail.
+- **`encoding`**: Encoding details snapshot (crop, validation, config, result). Spindle always uses Reel target-quality mode, so the snapshot carries the full Reel-reported config summary (`encoder`, `quality`, `preset`, `tune`, `audio_codec`) plus crop and validation (pass/fail) — nothing is omitted
 - **`media`**: ffprobe output for encoded files. For TV, only the representative probe (matching majority profile, marked `representative: true`), deviation probes, and error probes are included. `media_omitted` indicates how many clean probes were dropped.
 - **`errors`**: Any gathering errors (missing logs, parse failures, etc.)
 - **`analysis`**: Pre-computed summaries — decision groups, episode consistency, crop analysis, episode stats, media stats, asset health, anomaly flags (see Analysis Reference below)
@@ -239,7 +239,7 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
 
 1. **Verify video stream** (from `media[].probe.streams` where `codec_type=video`):
    - Resolution matches expected (SD/HD/4K)
-   - Codec is AV1 (av1/libaom-av1/libsvtav1)
+   - Codec is AV1 (`av1`) from Reel's SVT-AV1 (libsvtav1) encoder; libaom-av1 cannot occur
    - Duration matches source within tolerance (~1-2 seconds)
    - HDR metadata present if expected (color_primaries, transfer_characteristics in tags)
 
@@ -265,7 +265,8 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
    - Check `validation.passed` and individual step results
    - Review crop detection from `crop` fields
    - Check for `warning` or `error` in snapshot
-   - Check encoding config: `encoder`, `quality` (Reel target-quality summary), `preset`, `tune`, `audio_codec`
+   - Check encoding config: `encoder`, `quality` (Reel target-quality summary), `preset`, `tune`, `audio_codec`. These come from Reel's target-quality mode, not Spindle config (the `[encoding]` config block was removed); `preset`/`quality` reflect what Reel chose internally, so there is no per-resolution CRF to verify
+   - Encoder-library warnings/errors surface as `event_type=reel_warning` in `logs.warnings` and `event_type=reel_error` in `logs.errors`; the persisted copy is in `encoding.snapshot.warning`/`error`
    - Check `decision_type=file_probe` in `logs.decisions` for pre-encoding resolution and codec detection
    - Check `decision_type=crop_detection` for crop decision visibility
    - Check `decision_type=encoding_validation` for per-episode validation results
