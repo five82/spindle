@@ -159,60 +159,8 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	// Phase 3: Post-refinement primary audio selection and commentary disposition.
 	_ = sess.Progress(75, "Phase 3/3 - Post-refinement audio analysis")
 	logger.Info("Phase 3/3 - Post-refinement audio analysis")
-	{
-		path := encodedPaths[0]
-		result, err := ffprobe.Inspect(ctx, "", path)
-		if err != nil {
-			return fmt.Errorf("ffprobe post-refinement %s: %w", path, err)
-		}
-
-		selection := audio.Select(result.Streams, logger)
-		analysisData.PrimaryTrack = ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
-		if analysisData.PrimaryDescription == "" {
-			analysisData.PrimaryDescription = selection.PrimaryLabel()
-		}
-
-		logger.Info("primary audio selected",
-			"decision_type", logs.DecisionAudioSelection,
-			"decision_result", selection.PrimaryLabel(),
-			"decision_reason", fmt.Sprintf("score-based selection from %d tracks", result.AudioStreamCount()),
-		)
-
-		// Remap commentary indices to post-refinement positions and apply disposition.
-		if len(analysisData.CommentaryTracks) > 0 && refinement != nil {
-			remapped := RemapCommentaryIndices(logger, analysisData.CommentaryTracks, refinement.KeptIndices)
-			if len(remapped) > 0 {
-				analysisData.CommentaryTracks = remapped
-				audioStreams := result.AudioStreams()
-				var targets []CommentaryTarget
-				for _, r := range remapped {
-					var title string
-					if r.Index < len(audioStreams) {
-						title = audioStreams[r.Index].Tags["title"]
-					}
-					targets = append(targets, CommentaryTarget{Index: r.Index, Title: title})
-				}
-				if err := ApplyCommentaryDisposition(ctx, logger, path, targets); err != nil {
-					logger.Warn("commentary disposition failed",
-						"event_type", "commentary_disposition_error",
-						"error_hint", err.Error(),
-						"impact", "commentary tracks not labeled",
-					)
-				} else {
-					var remappedIndices []int
-					for _, t := range targets {
-						remappedIndices = append(remappedIndices, t.Index)
-					}
-					if err := ValidateCommentaryLabeling(ctx, logger, path, remappedIndices); err != nil {
-						logger.Warn("commentary labeling validation failed",
-							"event_type", "commentary_validation_error",
-							"error_hint", err.Error(),
-							"impact", "commentary labels may be incorrect",
-						)
-					}
-				}
-			}
-		}
+	if err := applyPostRefinementAudio(ctx, logger, encodedPaths[0], refinement, analysisData); err != nil {
+		return err
 	}
 
 	if err := validateAudioTargetDurations(ctx, encodedPaths); err != nil {
@@ -249,6 +197,73 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"excluded_tracks", len(analysisData.ExcludedTracks),
 		"encoded_assets", len(encodedPaths),
 	)
+	return nil
+}
+
+// applyPostRefinementAudio selects the post-refinement primary audio track,
+// remaps commentary indices to their post-refinement positions, and applies
+// and validates the commentary disposition remux (the disposition half of
+// task apply_audio). It mutates analysisData in place. Disposition and
+// validation failures are degraded (logged, tracks unlabeled), not fatal.
+func applyPostRefinementAudio(
+	ctx context.Context,
+	logger *slog.Logger,
+	path string,
+	refinement *AudioRefinementResult,
+	analysisData *ripspec.AudioAnalysisData,
+) error {
+	result, err := ffprobe.Inspect(ctx, "", path)
+	if err != nil {
+		return fmt.Errorf("ffprobe post-refinement %s: %w", path, err)
+	}
+
+	selection := audio.Select(result.Streams, logger)
+	analysisData.PrimaryTrack = ripspec.AudioTrackRef{Index: selection.PrimaryIndex}
+	if analysisData.PrimaryDescription == "" {
+		analysisData.PrimaryDescription = selection.PrimaryLabel()
+	}
+
+	logger.Info("primary audio selected",
+		"decision_type", logs.DecisionAudioSelection,
+		"decision_result", selection.PrimaryLabel(),
+		"decision_reason", fmt.Sprintf("score-based selection from %d tracks", result.AudioStreamCount()),
+	)
+
+	// Remap commentary indices to post-refinement positions and apply disposition.
+	if len(analysisData.CommentaryTracks) > 0 && refinement != nil {
+		remapped := RemapCommentaryIndices(logger, analysisData.CommentaryTracks, refinement.KeptIndices)
+		if len(remapped) > 0 {
+			analysisData.CommentaryTracks = remapped
+			audioStreams := result.AudioStreams()
+			var targets []CommentaryTarget
+			for _, r := range remapped {
+				var title string
+				if r.Index < len(audioStreams) {
+					title = audioStreams[r.Index].Tags["title"]
+				}
+				targets = append(targets, CommentaryTarget{Index: r.Index, Title: title})
+			}
+			if err := ApplyCommentaryDisposition(ctx, logger, path, targets); err != nil {
+				logger.Warn("commentary disposition failed",
+					"event_type", "commentary_disposition_error",
+					"error_hint", err.Error(),
+					"impact", "commentary tracks not labeled",
+				)
+			} else {
+				var remappedIndices []int
+				for _, t := range targets {
+					remappedIndices = append(remappedIndices, t.Index)
+				}
+				if err := ValidateCommentaryLabeling(ctx, logger, path, remappedIndices); err != nil {
+					logger.Warn("commentary labeling validation failed",
+						"event_type", "commentary_validation_error",
+						"error_hint", err.Error(),
+						"impact", "commentary labels may be incorrect",
+					)
+				}
+			}
+		}
+	}
 	return nil
 }
 

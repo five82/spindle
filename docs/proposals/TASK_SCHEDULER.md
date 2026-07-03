@@ -90,7 +90,7 @@ DEFERRED future work: expose a "drive free" signal via the HTTP API once the
 drive claim releases after the last rip, so Flyer can show an indicator that
 another disc can be inserted. Not part of any phase yet.)
 | `cache_store[k]` | io | `rip_title[k]` | `ripper.cacheFreshRip`, off the critical path; nothing depends on it |
-| `transcribe_primary[k]` | gpu | `rip_title[k]` | `transcription.Service`; output is a persisted artifact (see Phase 1). Verified 2026-07-03: episode-ID, subtitle generation, and commentary similarity ALL already use the same model (`Subtitles.WhisperXModel`, default large-v3 -- none of those call sites set `TranscribeRequest.Model`), so one artifact serves all three. Artifact format: keep WhisperX's existing SRT + JSON (word timings) outputs in staging, recorded in RipSpec |
+| `transcribe_primary[k]` | gpu | `rip_title[k]` | `transcription.Service`; output is a persisted artifact (see Phase 1). Verified 2026-07-03: episode-ID, subtitle generation, and commentary similarity ALL already use the same model (`Subtitles.WhisperXModel`, default large-v3 -- none of those call sites set `TranscribeRequest.Model`), so one artifact serves all three. Artifact format: keep WhisperX's existing SRT + JSON (word timings) outputs in staging, recorded in RipSpec. PHASE 2 FINDING (2026-07-03): per-episode transcribe tasks would forfeit Phase 1's batching -- N tasks under a capacity-1 GPU budget run serially, each paying the uvx/torch/model cold start batching exists to amortize. Phase 3 must model this as ONE item-level `transcribe_primaries` task depending on all `rip_title[k]` (one batch, all episodes). Transcription is off the encode critical path once analyze/apply splits, so waiting for the last rip costs nothing that matters |
 | `fetch_references[k]` | network | `resolve_metadata` | `contentid.fetchReferenceFingerprints` (TV only; keep serial internally for OpenSubtitles rate limits) |
 | `episode_match` | network, cpu | all `transcribe_primary`, all `fetch_references` | `contentid` matching + LLM verify (TV only; cross-episode, so it joins all transcripts) |
 | `classify_commentary[k]` | gpu, network | `transcribe_primary[k]` | `audioanalysis` phase 1 on RIPPED audio, PER EPISODE (decided 2026-07-03; today it reads encoded output, inspects only `encodedPaths[0]`, and propagates track indices to all episodes -- mislabels discs whose layouts vary). Classification reuses the large-v3 similarity transcript; the separate large-v3-turbo pass and the `Commentary.WhisperXModel` knob get deleted (Phase 1) |
@@ -209,7 +209,7 @@ provisional: the whisperx VRAM claim (measure at the Phase 4 gate).
 Explicitly deferred: any semaphore-scope restructuring of identify/rip. That
 decomposition IS Phase 2/3 work; doing it inside the lane model is throwaway.
 
-### Phase 2 -- task-shaped refactor (zero behavior change)
+### Phase 2 -- task-shaped refactor (zero behavior change) -- DONE 2026-07-03 (replay validated)
 
 Extract each stage's sub-steps into idempotent functions matching the task
 table rows: explicit inputs, outputs recorded in RipSpec, no reliance on
@@ -371,3 +371,25 @@ dependent failure, per-asset outcomes and review state).
   a hang on long TV discs), and the active-episode marker is inferred
   rather than explicit during that window. Both are spindle reporting
   limits of batching, not flyer defects.
+- 2026-07-03: Phase 1 validated on a real disc (Air 2023 Blu-ray, movie,
+  item #1): clean audit, correct routing, encoding/subtitle validation
+  passed, stereo downmixes excluded rather than kept as commentary.
+  Operator approved starting Phase 2.
+- 2026-07-03: Phase 2 code complete (check-ci.sh green). Extractions, all
+  zero-behavior-change: identify.Identify = scanDisc (task disc_scan, the
+  only drive-touching part) + resolveMetadata (task resolve_metadata,
+  drive-free); organizer gains placeInLibrary (task organize, dedupes the
+  two library branches) and finalize (task finalize: Jellyfin refresh,
+  notification, staging cleanup); contentid gains matchEpisodes (task
+  episode_match: claim resolution, scope expansion, LLM verify, apply);
+  audioanalysis gains applyPostRefinementAudio (disposition half of task
+  apply_audio). Audited as already task-shaped, no extraction needed:
+  ripper (ripTitle, restoreFromRipCache, cacheFreshRip), encoder
+  (encodeJob), subtitle (GenerateDisplaySubtitle, muxSubtitles). Design
+  finding recorded in the task table: Phase 3 must model transcription as
+  one item-level transcribe_primaries task, not per-episode tasks, to keep
+  Phase 1's batching. Remaining acceptance: rip-cache replay of a cached
+  disc comparing structural outputs (operator runs this; Air is cached).
+- 2026-07-03: Phase 2 replay validated (Air rip-cache replay, item #1:
+  clean audit, no WARN/ERROR, validation passed, correct library routing).
+  Operator approved starting Phase 3.

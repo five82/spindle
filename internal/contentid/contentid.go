@@ -178,6 +178,43 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return &stage.ErrDegraded{Msg: "no reference subtitles found"}
 	}
 
+	matches, refs, err := h.matchEpisodes(ctx, sess, env, season, seasonNum, plan, ripPrints, refs, refCache)
+	if err != nil {
+		return err
+	}
+
+	_ = sess.Progress(95, "Phase 3/3 - Episode identification complete", stage.WithActiveEpisode(""))
+
+	logger.Info("episode identification stage completed",
+		"event_type", "stage_complete",
+		"stage", "episode_identification",
+		"transcribed_episodes", len(ripPrints),
+		"reference_episodes", len(refs),
+		"matched_episodes", len(matches),
+		"needs_review", item.NeedsReview == 1,
+	)
+	return nil
+}
+
+// matchEpisodes resolves rip-to-episode claims against the reference
+// fingerprints, expanding the reference scope and re-fetching when the
+// initial candidates are insufficient, verifying ambiguous pairs via LLM,
+// and applying the accepted matches to the envelope (task: episode_match).
+// It returns the accepted matches and the (possibly expanded) reference set.
+func (h *Handler) matchEpisodes(
+	ctx context.Context,
+	sess *stage.Session,
+	env *ripspec.Envelope,
+	season *tmdb.Season,
+	seasonNum int,
+	plan candidateEpisodePlan,
+	ripPrints []ripFingerprint,
+	refs []referenceFingerprint,
+	refCache map[int]referenceFingerprint,
+) ([]matchResult, []referenceFingerprint, error) {
+	logger := sess.Logger
+	item := sess.Item
+
 	resolution := resolveEpisodeClaims(ripPrints, refs, h.policy)
 	if expand, reason := shouldExpandCandidateScope(plan, resolution, len(ripPrints)); expand {
 		logger.Info("content ID reference scope expanded",
@@ -189,7 +226,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		)
 		expandedRefs, fetchErr := h.fetchReferenceFingerprints(ctx, logger, item, seasonNum, env.Metadata.ID, season, plan.ExpandedEpisodes, refCache)
 		if fetchErr != nil {
-			return fmt.Errorf("fetch expanded references: %w", fetchErr)
+			return nil, nil, fmt.Errorf("fetch expanded references: %w", fetchErr)
 		}
 		if len(expandedRefs) > 0 {
 			refs = expandedRefs
@@ -237,20 +274,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	env.Attributes.ContentID = buildContentIDSummary(env, matches, len(ripPrints), len(refs), h.policy.LowConfidenceReviewThreshold)
 
 	if err := sess.Save(); err != nil {
-		return err
+		return nil, nil, err
 	}
-
-	_ = sess.Progress(95, "Phase 3/3 - Episode identification complete", stage.WithActiveEpisode(""))
-
-	logger.Info("episode identification stage completed",
-		"event_type", "stage_complete",
-		"stage", "episode_identification",
-		"transcribed_episodes", len(ripPrints),
-		"reference_episodes", len(refs),
-		"matched_episodes", len(matches),
-		"needs_review", item.NeedsReview == 1,
-	)
-	return nil
+	return matches, refs, nil
 }
 
 func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.Session, env *ripspec.Envelope) ([]ripFingerprint, error) {

@@ -113,18 +113,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"decision_reason", fmt.Sprintf("clean_episodes=%d review_episodes=%d", len(libraryKeys), len(reviewKeys)),
 		)
 
-		libraryPath, err := meta.LibraryPath(
-			h.cfg.Paths.LibraryDir,
-			h.cfg.Library.MoviesDir,
-			h.cfg.Library.TVDir,
-		)
-		if err != nil {
-			return fmt.Errorf("resolve library path: %w", err)
-		}
-		if err := os.MkdirAll(libraryPath, 0o755); err != nil {
-			return fmt.Errorf("create library dir: %w", err)
-		}
-		if _, _, err := h.copyAssetsToDir(ctx, logger, sess, &meta, sourceStage, libraryPath, libraryKeys, "library"); err != nil {
+		if _, err := h.placeInLibrary(ctx, logger, sess, &meta, sourceStage, libraryKeys); err != nil {
 			return err
 		}
 		if len(reviewKeys) > 0 {
@@ -139,28 +128,52 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		reviewCount = len(reviewKeys)
 		_ = sess.Progress(100, fmt.Sprintf("Available in library (%d episodes, %d to review)", libraryCount, reviewCount))
 	} else {
-		libraryPath, err := meta.LibraryPath(
-			h.cfg.Paths.LibraryDir,
-			h.cfg.Library.MoviesDir,
-			h.cfg.Library.TVDir,
-		)
+		copied, err := h.placeInLibrary(ctx, logger, sess, &meta, sourceStage, keys)
 		if err != nil {
-			return fmt.Errorf("resolve library path: %w", err)
-		}
-		if err := os.MkdirAll(libraryPath, 0o755); err != nil {
-			return fmt.Errorf("create library dir: %w", err)
-		}
-		if _, copied, err := h.copyAssetsToDir(ctx, logger, sess, &meta, sourceStage, libraryPath, keys, "library"); err != nil {
 			return err
-		} else {
-			libraryCount = copied
 		}
+		libraryCount = copied
 		if err := sess.Save(); err != nil {
 			return err
 		}
 	}
 
-	// Trigger Jellyfin refresh.
+	return h.finalize(ctx, logger, sess, libraryCount, reviewCount)
+}
+
+// placeInLibrary copies the given asset keys into the resolved library
+// destination (task: organize). It resolves the library path from metadata,
+// ensures the directory exists, and runs the per-asset verified copy loop.
+func (h *Handler) placeInLibrary(
+	ctx context.Context,
+	logger *slog.Logger,
+	sess *stage.Session,
+	meta *mediameta.Metadata,
+	sourceStage string,
+	keys []string,
+) (int, error) {
+	libraryPath, err := meta.LibraryPath(
+		h.cfg.Paths.LibraryDir,
+		h.cfg.Library.MoviesDir,
+		h.cfg.Library.TVDir,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("resolve library path: %w", err)
+	}
+	if err := os.MkdirAll(libraryPath, 0o755); err != nil {
+		return 0, fmt.Errorf("create library dir: %w", err)
+	}
+	_, copied, err := h.copyAssetsToDir(ctx, logger, sess, meta, sourceStage, libraryPath, keys, "library")
+	if err != nil {
+		return 0, err
+	}
+	return copied, nil
+}
+
+// finalize performs the item-level completion work after all assets are
+// placed (task: finalize): Jellyfin refresh, terminal notification, staging
+// cleanup, and the stage completion log.
+func (h *Handler) finalize(ctx context.Context, logger *slog.Logger, sess *stage.Session, libraryCount, reviewCount int) error {
 	if h.jfClient != nil {
 		if err := h.jfClient.Refresh(ctx); err != nil {
 			logger.Warn("jellyfin refresh failed",
@@ -173,7 +186,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
-	h.cleanupStaging(logger, item)
+	h.cleanupStaging(logger, sess.Item)
 
 	logger.Info("organization stage completed",
 		"event_type", "stage_complete",

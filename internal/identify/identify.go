@@ -108,7 +108,27 @@ type IdentifyResult struct {
 // Identify runs the full identification pipeline and returns results
 // without persisting to the queue or sending notifications.
 // Used by both the daemon (via Run) and the CLI identify command.
+//
+// It is the composition of the two task functions from
+// docs/proposals/TASK_SCHEDULER.md: scanDisc (task disc_scan, needs the
+// optical drive) followed by resolveMetadata (task resolve_metadata,
+// network/local only).
 func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.Logger) (*IdentifyResult, error) {
+	result, err := h.scanDisc(ctx, item, logger)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.resolveMetadata(ctx, item, result, logger); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// scanDisc is the drive-dependent identification phase (task: disc_scan).
+// It probes the disc source, runs bd_info for Blu-rays, and scans titles
+// with MakeMKV. It is the only part of identification that needs the
+// optical drive.
+func (h *Handler) scanDisc(ctx context.Context, item *queue.Item, logger *slog.Logger) (*IdentifyResult, error) {
 	result := &IdentifyResult{}
 
 	// Step 1: Probe disc source type (lightweight lsblk, always needed).
@@ -163,6 +183,14 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		return nil, fmt.Errorf("makemkv scan: %w", err)
 	}
 
+	return result, nil
+}
+
+// resolveMetadata is the drive-free identification phase (task:
+// resolve_metadata). It resolves the search title, consults the disc ID
+// cache, searches TMDB, and builds the RipSpec envelope onto the scan
+// result. It must not touch the optical drive.
+func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result *IdentifyResult, logger *slog.Logger) error {
 	// Step 4: Resolve title (needed before cache check for validation).
 	result.RawTitle, result.TitleSource = h.resolveTitle(item, result.DiscInfo, result.BDInfo)
 	result.QueryTitle = CleanQueryTitle(result.RawTitle)
@@ -209,7 +237,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 					"disc_id", discID,
 				)
 				result.Envelope = h.buildEnvelopeFromCache(logger, item, entry, result.DiscInfo, result.DiscSource)
-				return result, nil
+				return nil
 			}
 		}
 	}
@@ -247,6 +275,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		)
 	}
 
+	var err error
 	switch mediaHint {
 	case "tv":
 		logger.Info("media type hint detected",
@@ -260,7 +289,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		}
 		result.AllResults, err = h.tmdbClient.SearchTV(ctx, result.QueryTitle, yearStr)
 		if err != nil {
-			return nil, fmt.Errorf("tmdb search (tv): %w", err)
+			return fmt.Errorf("tmdb search (tv): %w", err)
 		}
 		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
 		if result.Best == nil {
@@ -271,14 +300,14 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 			)
 			result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
 			if err != nil {
-				return nil, fmt.Errorf("tmdb search (multi fallback): %w", err)
+				return fmt.Errorf("tmdb search (multi fallback): %w", err)
 			}
 			result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
 		}
 	default:
 		result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
 		if err != nil {
-			return nil, fmt.Errorf("tmdb search: %w", err)
+			return fmt.Errorf("tmdb search: %w", err)
 		}
 		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
 	}
@@ -297,11 +326,11 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 		if noTMDBMatchIsFatal(mediaHint) {
 			result.Fatal = true
 			result.FatalMsg = "no TMDB match found for TV disc: " + result.QueryTitle
-			return result, nil
+			return nil
 		}
 		result.Degraded = true
 		result.DegradedMsg = "no TMDB match found for: " + result.QueryTitle
-		return result, nil
+		return nil
 	}
 
 	logger.Info("TMDB match found",
@@ -325,7 +354,7 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 	// Step 6: Build RipSpec envelope.
 	result.Envelope = h.buildEnvelope(logger, item, result.DiscInfo, result.Best, result.MediaType, result.DiscSource)
 
-	return result, nil
+	return nil
 }
 
 // Run executes the identification stage.
